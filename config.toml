@@ -1,0 +1,48 @@
+# All user‑editable settings live here.
+
+[analysis]
+frame_count_dark = 20
+frame_count_bright = 10
+frame_count_motion = 15
+user_frames = []
+random_frames = 15
+save_frames_data = true
+downscale_height = 480
+step = 2
+analyze_in_sdr = true
+use_quantiles = true
+dark_quantile = 0.20
+bright_quantile = 0.80
+motion_use_absdiff = false
+motion_scenecut_quantile = 0.0
+screen_separation_sec = 6
+motion_diff_radius = 4
+
+[screenshots]
+directory_name = "screens"
+add_frame_info = true
+use_ffmpeg = false
+compression_level = 1
+upscale = true
+single_res = 0
+mod_crop = 2
+letterbox_pillarbox_aware = true
+
+[slowpics]
+auto_upload = false
+collection_name = ""
+is_hentai = false
+is_public = true
+tmdb_id = ""
+remove_after_days = 0
+webhook_url = ""
+open_in_browser = true
+create_url_shortcut = true
+delete_screen_dir_after_upload = true
+
+[naming]
+always_full_filename = true
+prefer_guessit = true
+
+[paths]
+input_dir = "."
