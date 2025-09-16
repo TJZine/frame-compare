@@ -1,5 +1,5 @@
-from dataclasses import dataclass, field
-from typing import List
+﻿from dataclasses import dataclass, field
+from typing import Dict, List, Union
 
 @dataclass
 class AnalysisConfig:
@@ -19,6 +19,9 @@ class AnalysisConfig:
     motion_scenecut_quantile: float = 0.0
     screen_separation_sec: int = 6
     motion_diff_radius: int = 4
+    analyze_clip: str = ""
+    random_seed: int = 20202020
+    frame_data_filename: str = "generated.compframes"
 
 @dataclass
 class ScreenshotConfig:
@@ -54,9 +57,21 @@ class PathsConfig:
     input_dir: str = "."
 
 @dataclass
+class RuntimeConfig:
+    ram_limit_mb: int = 8000
+
+@dataclass
+class OverridesConfig:
+    trim: Dict[str, int] = field(default_factory=dict)
+    trim_end: Dict[str, int] = field(default_factory=dict)
+    change_fps: Dict[str, Union[List[int], str]] = field(default_factory=dict)
+
+@dataclass
 class AppConfig:
     analysis: AnalysisConfig
     screenshots: ScreenshotConfig
     slowpics: SlowpicsConfig
     naming: NamingConfig
     paths: PathsConfig
+    runtime: RuntimeConfig
+    overrides: OverridesConfig

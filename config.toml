@@ -1,4 +1,4 @@
-# All user‑editable settings live here.
+﻿# All user-editable settings live here.
 
 [analysis]
 frame_count_dark = 20
@@ -17,6 +17,9 @@ motion_use_absdiff = false
 motion_scenecut_quantile = 0.0
 screen_separation_sec = 6
 motion_diff_radius = 4
+analyze_clip = ""
+random_seed = 20202020
+frame_data_filename = "generated.compframes"
 
 [screenshots]
 directory_name = "screens"
@@ -46,3 +49,12 @@ prefer_guessit = true
 
 [paths]
 input_dir = "."
+
+[runtime]
+ram_limit_mb = 8000
+
+[overrides]
+trim = {}
+trim_end = {}
+change_fps = {}
+
