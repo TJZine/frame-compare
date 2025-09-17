@@ -25,7 +25,7 @@ jobs:
       - name: Set up project
         run: |
           uv venv --python 3.11
-          uv pip sync requirements.txt
+          uv pip sync requirements-dev.txt
 
       - name: Run tests
         run: uv run python -m pytest -q
