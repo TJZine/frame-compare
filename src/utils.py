@@ -1,85 +1,167 @@
 ﻿from __future__ import annotations
+
 import re
-from typing import Dict, Optional
+from importlib import import_module
+from typing import Any, Dict, Mapping, Optional
 
-from .datatypes import NamingConfig
-
-try:
-    from guessit import guessit as _guessit
-    GUESSIT_AVAILABLE = True
-except Exception:
-    GUESSIT_AVAILABLE = False
-    _guessit = None
-
-try:
-    import anitopy as ani
-except Exception:  # fallback stub if anitopy not installed yet
-    class _Stub:
-        def parse(self, s):
-            return {}
-    ani = _Stub()
 
 def _extract_release_group_brackets(file_name: str) -> Optional[str]:
-    m = re.match(r"^\[(?P<grp>[^\]]+)\]", file_name)
-    return m.group("grp") if m else None
+    """Return the leading release-group tag (e.g. "[Group]") without brackets."""
 
-def _normalize_episode_number(val) -> str:
+    match = re.match(r"^\[(?P<group>[^\]]+)\]", file_name)
+    return match.group("group") if match else None
+
+
+def _normalize_episode_number(val: Any) -> str:
+    """Convert episode identifiers into a stable string representation."""
+
     if val is None:
         return ""
     if isinstance(val, (list, tuple)):
-        return "-".join(str(x) for x in val)
+        if not val:
+            return ""
+        return "-".join(str(item) for item in val)
     return str(val)
 
-def _build_common_metadata(file_name: str, title: str, episode_number, episode_title: str, release_group: Optional[str]) -> Dict[str, str]:
-    return {
-        "anime_title": title or "",
-        "episode_number": _normalize_episode_number(episode_number),
-        "episode_title": episode_title or "",
-        "release_group": release_group or _extract_release_group_brackets(file_name) or "",
-        "file_name": file_name,
-    }
+
+def _first_sequence_value(val: Any) -> Any:
+    if isinstance(val, (list, tuple)):
+        return val[0] if val else None
+    return val
+
+
+def _coerce_mapping(value: Any) -> Mapping[str, Any] | None:
+    if isinstance(value, Mapping):
+        return value
+    if isinstance(value, dict):
+        return value
+    return None
+
+
+def _call_guessit(file_name: str) -> Mapping[str, Any] | None:
+    try:
+        module = import_module("guessit")
+    except Exception:
+        return None
+    parser = getattr(module, "guessit", None)
+    if not callable(parser):
+        return None
+    try:
+        result = parser(file_name)
+    except Exception:
+        return None
+    return _coerce_mapping(result)
+
+
+def _call_anitopy(file_name: str) -> Mapping[str, Any]:
+    try:
+        module = import_module("anitopy")
+    except Exception:
+        return {}
+    parser = getattr(module, "parse", None)
+    if not callable(parser):
+        return {}
+    try:
+        result = parser(file_name)
+    except Exception:
+        return {}
+    mapped = _coerce_mapping(result)
+    return dict(mapped) if mapped else {}
+
+
+def _episode_designator_for_label(episode_value: Any, season_value: Any, normalized_episode: str) -> str:
+    """Build a compact episode marker for labels (e.g. S01E03)."""
+
+    season = _first_sequence_value(season_value)
+    episode = _first_sequence_value(episode_value)
+    try:
+        season_int = int(season)
+    except (TypeError, ValueError):
+        season_int = None
+    try:
+        episode_int = int(episode)
+    except (TypeError, ValueError):
+        episode_int = None
+
+    if season_int is not None and episode_int is not None:
+        return f"S{season_int:02d}E{episode_int:02d}"
+    return normalized_episode
+
+
+def _build_label(
+    file_name: str,
+    release_group: str,
+    anime_title: str,
+    episode_marker: str,
+    episode_title: str,
+) -> str:
+    parts = []
+    if release_group:
+        parts.append(f"[{release_group}]")
+    if anime_title:
+        parts.append(anime_title)
+    if episode_marker:
+        parts.append(episode_marker)
+
+    label = " ".join(parts).strip()
+    if episode_title:
+        label = f"{label} – {episode_title}" if label else episode_title
+    return label or file_name
+
 
 def parse_filename_metadata(
     file_name: str,
-    naming: Optional[NamingConfig] = None,
-    prefer_guessit: Optional[bool] = None,
+    *,
+    prefer_guessit: bool | None = None,
+    always_full_filename: bool | None = None,
 ) -> Dict[str, str]:
-    """GuessIt-first filename parser with Anitopy fallback and naming controls."""
+    """Parse *file_name* metadata using GuessIt and Anitopy heuristics."""
 
-    prefer_guess = prefer_guessit
-    if prefer_guess is None:
-        prefer_guess = naming.prefer_guessit if naming else True
+    prefer_guess = True if prefer_guessit is None else bool(prefer_guessit)
+    guessit_data = _call_guessit(file_name) if prefer_guess else None
 
-    data: Dict[str, str] | None = None
+    title = ""
+    episode_val: Any = None
+    episode_title = ""
+    release_group = ""
+    label_episode_marker = ""
 
-    if prefer_guess and GUESSIT_AVAILABLE and _guessit is not None:
-        try:
-            g = _guessit(file_name)
-        except Exception:
-            g = None
-        if isinstance(g, dict):
-            data = _build_common_metadata(
-                file_name,
-                title=g.get("title") or "",
-                episode_number=g.get("episode"),
-                episode_title=g.get("episode_title") or "",
-                release_group=g.get("release_group"),
-            )
-
-    if data is None:
-        try:
-            parsed = ani.parse(file_name) or {}
-        except Exception:
-            parsed = {}
-        data = _build_common_metadata(
-            file_name,
-            title=parsed.get("anime_title") or parsed.get("title") or "",
-            episode_number=parsed.get("episode_number"),
-            episode_title=parsed.get("episode_title") or "",
-            release_group=parsed.get("release_group"),
+    if guessit_data:
+        title = str(guessit_data.get("title") or "")
+        episode_val = guessit_data.get("episode")
+        episode_title = str(guessit_data.get("episode_title") or "")
+        release_group = str(guessit_data.get("release_group") or "")
+        normalized_episode = _normalize_episode_number(episode_val)
+        label_episode_marker = _episode_designator_for_label(
+            episode_val, guessit_data.get("season"), normalized_episode
         )
+    else:
+        ani_data = _call_anitopy(file_name)
+        title = str(ani_data.get("anime_title") or ani_data.get("title") or "")
+        episode_val = ani_data.get("episode_number")
+        episode_title = str(ani_data.get("episode_title") or "")
+        release_group = str(ani_data.get("release_group") or "")
+        normalized_episode = _normalize_episode_number(episode_val)
+        label_episode_marker = normalized_episode
 
-    always_full = naming.always_full_filename if naming else True
-    display_name = data["file_name"] if always_full else data.get("release_group") or data["file_name"]
-    data["display_name"] = display_name
-    return data
+    normalized_episode = _normalize_episode_number(episode_val)
+    resolved_release_group = release_group or _extract_release_group_brackets(file_name) or ""
+
+    metadata = {
+        "anime_title": title,
+        "episode_number": normalized_episode,
+        "episode_title": episode_title,
+        "release_group": resolved_release_group,
+        "file_name": file_name,
+    }
+
+    use_full_name = True if always_full_filename is None else bool(always_full_filename)
+    label = file_name if use_full_name else _build_label(
+        file_name,
+        resolved_release_group,
+        title,
+        label_episode_marker,
+        episode_title,
+    )
+    metadata["label"] = label
+    return metadata
