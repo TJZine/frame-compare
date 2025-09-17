@@ -2,7 +2,25 @@
 name = "frame-compare"
 version = "0.0.1"
 requires-python = ">=3.11"
-dependencies = []  # keep empty; we sync from requirements.txt
+dependencies = [
+    "rich",
+    "colorama",
+    "requests",
+    "requests-toolbelt",
+    "natsort",
+    "anitopy",
+    "guessit",
+    "click>=8.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-mock",
+    "requests-mock",
+    "ruff",
+    "black",
+]
 
 [tool.black]
 line-length = 100
@@ -10,4 +28,4 @@ target-version = ["py311"]
 
 [tool.ruff]
 line-length = 100
-select = ["E","F","I","W"]
+select = ["E", "F", "I", "W"]
