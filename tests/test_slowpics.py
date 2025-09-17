@@ -28,7 +28,7 @@ class FakeSession:
     def __init__(self, responses: List[FakeResponse], cookies: dict[str, str] | None = None) -> None:
         self._responses = responses
         self.headers: dict[str, str] = {}
-        self.cookies = cookies or {"XSRF-TOKEN": "token"}
+        self.cookies = {"XSRF-TOKEN": "token"} if cookies is None else cookies
         self.calls: list[dict[str, Any]] = []
 
     def _next(self) -> FakeResponse:
@@ -61,6 +61,7 @@ def test_happy_path_returns_url(tmp_path, monkeypatch: pytest.MonkeyPatch) -> No
         FakeResponse(200, {"uuid": "abc", "key": "def"}),
         FakeResponse(200),
         FakeResponse(200),
+        FakeResponse(200),
     ]
     session = _install_session(monkeypatch, responses)
 
@@ -69,7 +70,8 @@ def test_happy_path_returns_url(tmp_path, monkeypatch: pytest.MonkeyPatch) -> No
     assert url == "https://slow.pics/c/abc/def"
     shortcut = tmp_path / "slowpics_abc.url"
     assert shortcut.exists()
-    assert [call["method"] for call in session.calls] == ["GET", "POST", "POST", "POST"]
+    assert [call["method"] for call in session.calls] == ["GET", "POST", "POST", "POST", "POST"]
+    assert session.calls[-1]["url"] == "https://example.com/hook"
 
 
 def test_create_collection_4xx_raises(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -98,6 +100,43 @@ def test_upload_failure_raises(tmp_path, monkeypatch: pytest.MonkeyPatch) -> Non
         FakeResponse(500, text="server error"),
     ]
     _install_session(monkeypatch, responses)
+
+    with pytest.raises(slowpics.SlowpicsAPIError):
+        slowpics.upload_comparison([str(image)], tmp_path, cfg)
+
+
+def test_webhook_direct_post_failures_logged(tmp_path, monkeypatch: pytest.MonkeyPatch, caplog) -> None:
+    cfg = SlowpicsConfig(collection_name="Test", webhook_url="https://example.com/hook")
+    image = tmp_path / "frame.png"
+    image.write_bytes(b"data")
+
+    responses = [
+        FakeResponse(200),
+        FakeResponse(200, {"uuid": "abc", "key": "def"}),
+        FakeResponse(200),
+        FakeResponse(200),
+        FakeResponse(500, text="fail"),
+        FakeResponse(500, text="fail"),
+        FakeResponse(500, text="fail"),
+    ]
+    session = _install_session(monkeypatch, responses)
+    monkeypatch.setattr(slowpics.time, "sleep", lambda _: None)
+
+    with caplog.at_level("WARNING"):
+        url = slowpics.upload_comparison([str(image)], tmp_path, cfg)
+
+    assert url == "https://slow.pics/c/abc/def"
+    assert any("Webhook post attempt" in record.message for record in caplog.records)
+    assert session.calls[-1]["method"] == "POST"
+
+
+def test_missing_xsrf_token_raises(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = SlowpicsConfig()
+    image = tmp_path / "frame.png"
+    image.write_bytes(b"data")
+
+    responses = [FakeResponse(200)]
+    _install_session(monkeypatch, responses, cookies={})
 
     with pytest.raises(slowpics.SlowpicsAPIError):
         slowpics.upload_comparison([str(image)], tmp_path, cfg)

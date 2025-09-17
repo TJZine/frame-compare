@@ -2,7 +2,13 @@
 
 import pytest
 
-from src.vs_core import ClipInitError, ClipProcessError, init_clip, process_clip_for_screenshot
+from src.vs_core import (
+    ClipInitError,
+    ClipProcessError,
+    init_clip,
+    process_clip_for_screenshot,
+    set_ram_limit,
+)
 
 
 class _FakeStd:
@@ -39,9 +45,15 @@ class _FakeClip:
         self.frame_props = props or {}
         self.std = _FakeStd(self)
         self.core = types.SimpleNamespace(libplacebo=_FakeLibplacebo())
+        self.slice_history = []
+        self.blank_frames = None
 
     def get_frame_props(self):
         return self.frame_props
+
+    def __getitem__(self, key):
+        self.slice_history.append(key)
+        return self
 
 
 class _FailingLWLib:
@@ -53,6 +65,17 @@ class _FailingLWLib:
 class _FakeCore:
     def __init__(self, source):
         self.lsmas = source
+        self.std = types.SimpleNamespace(BlankClip=_BlankClip)
+
+
+class _BlankClip:
+    def __init__(self, clip, length: int):
+        self.clip = clip
+        self.length = length
+
+    def __add__(self, other):
+        other.blank_frames = self.length
+        return other
 
 
 def test_sdr_pass_through():
@@ -101,10 +124,37 @@ def test_init_clip_applies_trim_and_fps(monkeypatch):
     fake_core = _FakeCore(source=_Source())
     clip = init_clip(
         "video.mkv",
-        trims=(10, 100),
+        trim_start=10,
+        trim_end=100,
         fps_map=(24000, 1001),
         core=fake_core,
     )
     assert clip.opened_path == "video.mkv"
-    assert clip.std.trim_args == (10, 100)
+    assert clip.slice_history == [slice(10, None, None), slice(None, 100, None)]
     assert clip.std.fps_args == (24000, 1001)
+
+
+def test_init_clip_handles_negative_trims():
+    class _Source:
+        @staticmethod
+        def LWLibavSource(path: str):
+            clip = _FakeClip()
+            clip.opened_path = path
+            return clip
+
+    fake_core = _FakeCore(source=_Source())
+    clip = init_clip(
+        "video.mkv",
+        trim_start=-5,
+        trim_end=-2,
+        core=fake_core,
+    )
+    assert clip.opened_path == "video.mkv"
+    assert clip.blank_frames == 5
+    assert clip.slice_history == [slice(None, -2, None)]
+
+
+def test_set_ram_limit_applies_value():
+    fake_core = types.SimpleNamespace(max_cache_size=0)
+    set_ram_limit(16, core=fake_core)
+    assert fake_core.max_cache_size == 16 * 1024 * 1024

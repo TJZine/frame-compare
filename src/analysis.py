@@ -4,10 +4,28 @@
 
 import math
 import random
-from typing import List, Sequence, Tuple
+import hashlib
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from typing import List, Optional, Sequence, Tuple
 
 from .datatypes import AnalysisConfig
 from . import vs_core
+
+
+@dataclass(frozen=True)
+class FrameMetricsCacheInfo:
+    """Context needed to load/save cached frame metrics for analysis."""
+
+    path: Path
+    files: Sequence[str]
+    analyzed_file: str
+    release_group: str
+    trim_start: int
+    trim_end: Optional[int]
+    fps_num: int
+    fps_den: int
 
 
 def _quantile(sequence: Sequence[float], q: float) -> float:
@@ -31,6 +49,106 @@ def _quantile(sequence: Sequence[float], q: float) -> float:
     fraction = position - lower_index
     return sorted_vals[lower_index] * (1 - fraction) + sorted_vals[upper_index] * fraction
 
+
+def _config_fingerprint(cfg: AnalysisConfig) -> str:
+    """Return a stable hash for config fields that influence metrics generation."""
+
+    relevant = {
+        "frame_count_dark": cfg.frame_count_dark,
+        "frame_count_bright": cfg.frame_count_bright,
+        "frame_count_motion": cfg.frame_count_motion,
+        "downscale_height": cfg.downscale_height,
+        "step": cfg.step,
+        "analyze_in_sdr": cfg.analyze_in_sdr,
+        "use_quantiles": cfg.use_quantiles,
+        "dark_quantile": cfg.dark_quantile,
+        "bright_quantile": cfg.bright_quantile,
+        "motion_use_absdiff": cfg.motion_use_absdiff,
+        "motion_scenecut_quantile": cfg.motion_scenecut_quantile,
+        "screen_separation_sec": cfg.screen_separation_sec,
+        "motion_diff_radius": cfg.motion_diff_radius,
+        "random_seed": cfg.random_seed,
+    }
+    payload = json.dumps(relevant, sort_keys=True).encode("utf-8")
+    return hashlib.sha1(payload).hexdigest()
+
+
+def _load_cached_metrics(
+    info: FrameMetricsCacheInfo, cfg: AnalysisConfig
+) -> Optional[tuple[List[tuple[int, float]], List[tuple[int, float]]]]:
+    path = info.path
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return None
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+
+    if data.get("version") != 1:
+        return None
+    if data.get("config_hash") != _config_fingerprint(cfg):
+        return None
+    if data.get("files") != list(info.files):
+        return None
+    if data.get("analyzed_file") != info.analyzed_file:
+        return None
+
+    cached_group = str(data.get("release_group") or "").lower()
+    if cached_group != (info.release_group or "").lower():
+        return None
+
+    if data.get("trim_start") != info.trim_start:
+        return None
+    if data.get("trim_end") != info.trim_end:
+        return None
+
+    fps = data.get("fps") or []
+    if list(fps) != [info.fps_num, info.fps_den]:
+        return None
+
+    try:
+        brightness = [(int(idx), float(val)) for idx, val in data.get("brightness", [])]
+        motion = [(int(idx), float(val)) for idx, val in data.get("motion", [])]
+    except (TypeError, ValueError):
+        return None
+
+    if not brightness:
+        return None
+
+    return brightness, motion
+
+
+def _save_cached_metrics(
+    info: FrameMetricsCacheInfo,
+    cfg: AnalysisConfig,
+    brightness: Sequence[tuple[int, float]],
+    motion: Sequence[tuple[int, float]],
+) -> None:
+    path = info.path
+    payload = {
+        "version": 1,
+        "config_hash": _config_fingerprint(cfg),
+        "files": list(info.files),
+        "analyzed_file": info.analyzed_file,
+        "release_group": info.release_group,
+        "trim_start": info.trim_start,
+        "trim_end": info.trim_end,
+        "fps": [info.fps_num, info.fps_den],
+        "brightness": [(int(idx), float(val)) for idx, val in brightness],
+        "motion": [(int(idx), float(val)) for idx, val in motion],
+    }
+
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    except OSError:
+        # Failing to persist cache data should not abort the pipeline.
+        return
 
 def dedupe(frames: Sequence[int], min_separation_sec: float, fps: float) -> List[int]:
     """Remove frames closer than *min_separation_sec* seconds apart (in order)."""
@@ -160,7 +278,13 @@ def _smooth_motion(values: List[tuple[int, float]], radius: int) -> List[tuple[i
     return smoothed
 
 
-def select_frames(clip, cfg: AnalysisConfig, files: List[str], file_under_analysis: str) -> List[int]:
+def select_frames(
+    clip,
+    cfg: AnalysisConfig,
+    files: List[str],
+    file_under_analysis: str,
+    cache_info: Optional[FrameMetricsCacheInfo] = None,
+) -> List[int]:
     """Select frame indices for comparison using quantiles and motion heuristics."""
 
     num_frames = int(getattr(clip, "num_frames", 0))
@@ -178,23 +302,31 @@ def select_frames(clip, cfg: AnalysisConfig, files: List[str], file_under_analys
     step = max(1, int(cfg.step))
     indices = list(range(0, num_frames, step))
 
-    try:
-        brightness, motion = _collect_metrics_vapoursynth(analysis_clip, cfg, indices)
-    except Exception:
-        brightness, motion = _generate_metrics_fallback(indices, cfg)
+    cached_metrics = _load_cached_metrics(cache_info, cfg) if cache_info is not None else None
+
+    if cached_metrics is not None:
+        brightness, motion = cached_metrics
+    else:
+        try:
+            brightness, motion = _collect_metrics_vapoursynth(analysis_clip, cfg, indices)
+        except Exception:
+            brightness, motion = _generate_metrics_fallback(indices, cfg)
+        if cache_info is not None:
+            _save_cached_metrics(cache_info, cfg, brightness, motion)
 
     brightness_values = [val for _, val in brightness]
 
     selected: List[int] = []
     selected_set = set()
 
-    def try_add(frame: int, enforce_gap: bool = True) -> bool:
+    def try_add(frame: int, enforce_gap: bool = True, gap_frames: Optional[int] = None) -> bool:
         frame_idx = _clamp_frame(frame, num_frames)
         if frame_idx in selected_set:
             return False
-        if enforce_gap and min_sep_frames > 0:
+        effective_gap = min_sep_frames if gap_frames is None else max(0, int(gap_frames))
+        if enforce_gap and effective_gap > 0:
             for existing in selected:
-                if abs(existing - frame_idx) < min_sep_frames:
+                if abs(existing - frame_idx) < effective_gap:
                     return False
         selected.append(frame_idx)
         selected_set.add(frame_idx)
@@ -203,7 +335,12 @@ def select_frames(clip, cfg: AnalysisConfig, files: List[str], file_under_analys
     for frame in cfg.user_frames:
         try_add(frame, enforce_gap=False)
 
-    def pick_from_candidates(candidates: List[tuple[int, float]], count: int, reverse: bool = False) -> None:
+    def pick_from_candidates(
+        candidates: List[tuple[int, float]],
+        count: int,
+        reverse: bool = False,
+        gap_seconds_override: Optional[float] = None,
+    ) -> None:
         if count <= 0 or not candidates:
             return
         ordered = sorted(candidates, key=lambda item: item[1], reverse=reverse)
@@ -214,10 +351,18 @@ def select_frames(clip, cfg: AnalysisConfig, files: List[str], file_under_analys
                 continue
             seen_local.add(idx)
             unique_indices.append(idx)
-        filtered_indices = dedupe(unique_indices, cfg.screen_separation_sec, fps)
+        separation = cfg.screen_separation_sec
+        if gap_seconds_override is not None:
+            separation = gap_seconds_override
+        filtered_indices = dedupe(unique_indices, separation, fps)
+        gap_frames = (
+            None
+            if gap_seconds_override is None
+            else int(round(max(0.0, gap_seconds_override) * fps))
+        )
         added = 0
         for frame_idx in filtered_indices:
-            if try_add(frame_idx, enforce_gap=True):
+            if try_add(frame_idx, enforce_gap=True, gap_frames=gap_frames):
                 added += 1
             if added >= count:
                 break
@@ -248,7 +393,13 @@ def select_frames(clip, cfg: AnalysisConfig, files: List[str], file_under_analys
             threshold = _quantile([val for _, val in smoothed_motion], cfg.motion_scenecut_quantile)
             filtered = [(idx, val) for idx, val in smoothed_motion if val <= threshold]
         motion_candidates = filtered
-    pick_from_candidates(motion_candidates, cfg.frame_count_motion, reverse=True)
+    motion_gap = cfg.screen_separation_sec / 4 if cfg.screen_separation_sec > 0 else 0
+    pick_from_candidates(
+        motion_candidates,
+        cfg.frame_count_motion,
+        reverse=True,
+        gap_seconds_override=motion_gap,
+    )
 
     random_count = max(0, int(cfg.random_frames))
     attempts = 0
@@ -258,7 +409,4 @@ def select_frames(clip, cfg: AnalysisConfig, files: List[str], file_under_analys
             random_count -= 1
         attempts += 1
 
-    ordered = sorted(selected)
-    if min_sep_frames > 0:
-        ordered = dedupe(ordered, cfg.screen_separation_sec, fps)
-    return ordered
+    return sorted(selected)

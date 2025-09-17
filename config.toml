@@ -1,6 +1,14 @@
-﻿# All user-editable settings live here.
+# All user-editable settings live here.
+#
+# Quick start:
+# 1. Point `[paths].input_dir` at the folder containing your encodes (or pass `--input`).
+# 2. Decide whether one encode should guide selection via `analysis.analyze_clip`.
+# 3. Pick your screenshot plan — keep VapourSynth, or toggle `screenshots.use_ffmpeg = true` when VS is unavailable.
+# 4. Enable `[slowpics].auto_upload` and fill in collection/webhook fields when you want automatic publishing.
+# 5. Populate `[overrides]` maps if you need trims or FPS tweaks to stay in lockstep with the legacy workflow.
 
 [analysis]
+# Frame selection knobs. The legacy quantile, motion, and random heuristics are all exposed here.
 frame_count_dark = 20
 frame_count_bright = 10
 frame_count_motion = 15
@@ -22,6 +30,7 @@ random_seed = 20202020
 frame_data_filename = "generated.compframes"
 
 [screenshots]
+# Output planning and rendering behaviour for both VapourSynth and FFmpeg writers.
 directory_name = "screens"
 add_frame_info = true
 use_ffmpeg = false
@@ -32,6 +41,7 @@ mod_crop = 2
 letterbox_pillarbox_aware = true
 
 [slowpics]
+# Auto-upload settings. Leave `auto_upload` off for local runs.
 auto_upload = false
 collection_name = ""
 is_hentai = false
@@ -44,17 +54,24 @@ create_url_shortcut = true
 delete_screen_dir_after_upload = true
 
 [naming]
+# Controls how GuessIt/Anitopy metadata is turned into labels.
 always_full_filename = true
 prefer_guessit = true
 
 [paths]
+# Default input folder; override via CLI when needed.
 input_dir = "comparison_videos"
 
 [runtime]
+# Memory guard for VapourSynth initialisation (mirrors the legacy script behaviour).
 ram_limit_mb = 8000
 
 [overrides]
+# Per-source trim/FPS overrides. Keys may be an index, filename, or parsed label (case-insensitive).
+# Example:
+# trim = { "0" = 120, "my_encode" = 48 }
+# trim_end = { "my_encode" = -24 }
+# change_fps = { "1" = "60000/1001" }
 trim = {}
 trim_end = {}
 change_fps = {}
-

@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.analysis import _quantile, dedupe, select_frames
+from src.analysis import FrameMetricsCacheInfo, _quantile, dedupe, select_frames
 from src.datatypes import AnalysisConfig
 
 
@@ -99,3 +99,92 @@ def test_user_and_random_frames(monkeypatch):
         assert user_frame in frames
     extras = [f for f in frames if f not in set(cfg.user_frames)]
     assert len(extras) == cfg.random_frames
+
+
+def test_select_frames_uses_cache(monkeypatch, tmp_path):
+    clip = FakeClip(
+        num_frames=120,
+        brightness=[i / 120 for i in range(120)],
+        motion=[(120 - i) / 120 for i in range(120)],
+    )
+
+    monkeypatch.setattr(
+        "src.analysis.vs_core.process_clip_for_screenshot",
+        lambda clip, file_name, cfg: clip,
+    )
+
+    calls = {"count": 0}
+
+    def fake_collect(analysis_clip, cfg, indices):
+        calls["count"] += 1
+        return ([(idx, float(idx)) for idx in indices], [(idx, float(idx)) for idx in indices])
+
+    monkeypatch.setattr("src.analysis._collect_metrics_vapoursynth", fake_collect)
+
+    cfg = AnalysisConfig(
+        frame_count_dark=1,
+        frame_count_bright=1,
+        frame_count_motion=1,
+        random_frames=0,
+        user_frames=[],
+        downscale_height=0,
+        analyze_in_sdr=False,
+        use_quantiles=True,
+    )
+
+    cache_info = FrameMetricsCacheInfo(
+        path=tmp_path / "metrics.json",
+        files=["a.mkv"],
+        analyzed_file="a.mkv",
+        release_group="",
+        trim_start=0,
+        trim_end=None,
+        fps_num=24,
+        fps_den=1,
+    )
+
+    frames_first = select_frames(clip, cfg, ["a.mkv"], "a.mkv", cache_info=cache_info)
+    assert cache_info.path.exists()
+    assert calls["count"] == 1
+
+    calls["count"] = 0
+    frames_second = select_frames(clip, cfg, ["a.mkv"], "a.mkv", cache_info=cache_info)
+    assert calls["count"] == 0
+    assert frames_first == frames_second
+
+
+def test_motion_quarter_gap(monkeypatch):
+    clip = FakeClip(
+        num_frames=240,
+        brightness=[0.5 for _ in range(240)],
+        motion=[0.0 for _ in range(240)],
+    )
+
+    def fake_collect(analysis_clip, cfg, indices):
+        brightness = [(idx, 0.0) for idx in indices]
+        motion = [(idx, float(idx)) for idx in indices]
+        return brightness, motion
+
+    monkeypatch.setattr("src.analysis._collect_metrics_vapoursynth", fake_collect)
+    monkeypatch.setattr(
+        "src.analysis.vs_core.process_clip_for_screenshot",
+        lambda clip, file_name, cfg: clip,
+    )
+
+    cfg = AnalysisConfig(
+        frame_count_dark=0,
+        frame_count_bright=0,
+        frame_count_motion=4,
+        random_frames=0,
+        user_frames=[],
+        screen_separation_sec=8,
+        motion_diff_radius=0,
+        analyze_in_sdr=False,
+        step=1,
+    )
+
+    frames = select_frames(clip, cfg, files=["file.mkv"], file_under_analysis="file.mkv")
+    assert len(frames) == 4
+    diffs = [b - a for a, b in zip(frames, frames[1:])]
+    assert all(diff >= 48 for diff in diffs)
+    assert any(diff < 192 for diff in diffs)
