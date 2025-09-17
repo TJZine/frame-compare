@@ -1,56 +1,61 @@
 # Summary (TL;DR)
-- FFmpeg exports now honour trim offsets and fall back with clear logging, keeping the VapourSynth and FFmpeg pipelines in sync even when per-clip overrides are active.【F:frame_compare.py†L377-L390】【F:src/screenshot.py†L306-L384】
-- Global scaling parity, motion-frame quarter gaps, and label deduplication all mirror the legacy heuristics, so mixed-resolution sets produce matched heights and abbreviated labels without manual intervention.【F:src/screenshot.py†L67-L384】【F:src/analysis.py†L281-L412】【F:frame_compare.py†L74-L136】
-- slow.pics uploads now replay the legacy webhook POST with retries, and the expanded regression suite exercises FFmpeg trims, upscale coordination, CLI caching, and slow.pics failure paths for real parity coverage.【F:src/slowpics.py†L3-L158】【F:tests/test_screenshot.py†L24-L156】【F:tests/test_frame_compare.py†L47-L270】【F:tests/test_slowpics.py†L54-L142】
+- Validated that `frame_compare.py`, `src/screenshot.py`, and the regression tests still execute cleanly after the merge, with FFmpeg trims, upscale coordination, and cache reuse behaving exactly like the legacy runner.【F:frame_compare.py†L17-L401】【F:src/screenshot.py†L1-L381】【F:tests/test_frame_compare.py†L1-L229】
+- Completed a feature-by-feature parity audit against `legacy/compv4_improved.py`; every legacy knob now has a 1:1 implementation in the modular pipeline and is catalogued in the refreshed parity matrix.【F:legacy/compv4_improved.py†L1-L200】【F:docs/PARITY_MATRIX.csv†L1-L50】
+- Regression suite (39 tests) passes, covering CLI overrides, analysis heuristics, geometry planning, slow.pics uploads, and FFmpeg fallbacks so nightly parity checks stay reliable.【e40847†L1-L3】
 
 # Repo Overview
-`frame_compare.py` remains the orchestration entry point, loading TOML config, parsing metadata, applying overrides, selecting frames, rendering screenshots, and optionally uploading to slow.pics.【F:frame_compare.py†L73-L420】 Supporting modules include `src/config_loader.py` for validation, `src/datatypes.py` for structured config, `src/utils.py` for GuessIt/Anitopy parsing, `src/analysis.py` for metrics and caching, `src/screenshot.py` for crop/scale planning and writers, `src/slowpics.py` for API automation, and `src/vs_core.py` for VapourSynth initialisation and tonemapping.【F:src/config_loader.py†L10-L123】【F:src/datatypes.py†L6-L102】【F:src/utils.py†L1-L167】【F:src/analysis.py†L13-L412】【F:src/screenshot.py†L1-L384】【F:src/slowpics.py†L1-L158】【F:src/vs_core.py†L1-L204】 Defaults in `config.toml` still mirror the dataclasses.【F:config.toml†L1-L59】
+The project modernises the legacy comparison script while keeping the CLI entry point at `frame_compare.py`. The workflow is:
+1. Load and validate `config.toml` into typed dataclasses (`src/config_loader.py`, `src/datatypes.py`).【F:config.toml†L1-L59】【F:src/config_loader.py†L26-L123】
+2. Discover media, parse naming metadata (`src/utils.py`), and build per-clip plans that honour trim/FPS overrides.【F:frame_compare.py†L74-L212】【F:src/utils.py†L1-L167】
+3. Initialise VapourSynth clips with RAM limits, trims, and optional FPS remapping (`src/vs_core.py`).【F:src/vs_core.py†L57-L167】
+4. Select frames via brightness/motion analysis with caching support (`src/analysis.py`).【F:src/analysis.py†L40-L404】
+5. Render screenshots through VapourSynth or FFmpeg, with global scaling and fallback placeholders (`src/screenshot.py`).【F:src/screenshot.py†L67-L381】
+6. Optionally upload to slow.pics (`src/slowpics.py`) and report the run summary via the CLI.【F:src/slowpics.py†L60-L166】【F:frame_compare.py†L320-L401】
 
 # Architecture Review
-- **`src/config_loader`** — Continues to enforce numeric bounds and boolean coercion, raising `ConfigError` early for invalid sections; no changes required.【F:src/config_loader.py†L26-L123】
-- **`src/datatypes`** — Dataclasses cover legacy options; the existing structure now feeds the global-scaling planner directly without additional globals.【F:src/datatypes.py†L6-L102】
-- **`src/utils`** — GuessIt/Anitopy wrappers remain defensive, and metadata labels feed the improved CLI deduplication logic.【F:src/utils.py†L1-L167】【F:frame_compare.py†L74-L136】
-- **`src/analysis`** — Motion candidates now observe a quarter-gap override before final selection, matching legacy diversity while preserving caching and quantile logic.【F:src/analysis.py†L281-L412】 The pure functions stay deterministic and free of side effects.
-- **`src/screenshot`** — Geometry planning now computes a global target height, resolves trim-aware frame indices for FFmpeg, and logs unexpected writer failures before producing placeholders, improving parity and diagnosability.【F:src/screenshot.py†L67-L384】
-- **`src/slowpics`** — Adds host-redacted logging, limited retries, and the legacy-style direct webhook POST alongside the existing REST workflow, keeping uploads resilient without leaking secrets.【F:src/slowpics.py†L3-L158】
-- **`src/vs_core`** — RAM limits, trim slicing, and tonemapping remain unchanged; the module cleanly supports the additional CLI wiring with no regressions.【F:src/vs_core.py†L48-L177】
-- **`frame_compare`** — CLI orchestration now passes trim offsets to the writer and generates stable short labels for duplicates while preserving cache fingerprints and error messaging.【F:frame_compare.py†L74-L390】
+- **`frame_compare.py`**: Clean orchestration, no lingering merge artefacts; override maps, metadata dedupe, cache wiring, and summary logging match the legacy control flow while keeping the module import-safe.【F:frame_compare.py†L74-L401】
+- **`src/utils.py`**: GuessIt-first parsing with Anitopy fallback and release-group extraction mirrors the legacy filename heuristics, supplying the CLI dedupe logic without global state.【F:src/utils.py†L1-L167】
+- **`src/analysis.py`**: Metric collection separates VapourSynth and fallback paths, caches include full fingerprints, and the quarter-gap motion heuristic plus smoothing radius map straight to the legacy algorithm.【F:src/analysis.py†L200-L404】
+- **`src/screenshot.py`**: Geometry planner coordinates upscale/single-res, FFmpeg writer is trim-aware (including negative padding) and gracefully falls back to placeholders; compression mapping stays compatible with fpng/FFmpeg expectations.【F:src/screenshot.py†L67-L381】
+- **`src/vs_core.py`**: Handles RAM limits, trims, FPS mapping, HDR tonemapping, and blank-frame extension; no `sys.exit` usage and errors surface via typed exceptions.【F:src/vs_core.py†L57-L204】
+- **`src/slowpics.py`**: Upload workflow encapsulates retries, webhook registration, direct POST, and shortcut cleanup with sanitized logging—feature-for-feature with the legacy script.【F:src/slowpics.py†L60-L166】
+- **Tests (`tests/*`)**: Cover CLI orchestration, analysis determinism, screenshot geometry, FFmpeg trim offsets, and slow.pics retries; no merge regressions observed.【F:tests/test_analysis.py†L1-L189】【F:tests/test_screenshot.py†L1-L170】【F:tests/test_frame_compare.py†L1-L229】【F:tests/test_slowpics.py†L1-L142】
 
 # Quality Findings
 - **Strengths**
-  - Trim-aware FFmpeg calls and placeholder logging expose failure details without crashing the run, improving observability.【F:src/screenshot.py†L306-L384】
-  - Global scaling is coordinated in one pass, eliminating per-clip drift and keeping the code free of mutable globals.【F:src/screenshot.py†L85-L135】【F:src/screenshot.py†L306-L384】
-  - Direct webhook retries respect privacy by redacting hosts in logs, and retry backoff prevents tight loops.【F:src/slowpics.py†L60-L82】
+  - Deterministic caches and seeded randomness make parity reruns reproducible, and cache fingerprints guard against stale metrics.【F:src/analysis.py†L40-L133】
+  - FFmpeg and VapourSynth writers share a unified geometry plan, ensuring consistent filenames and dimensions even with trims and upscale toggles.【F:src/screenshot.py†L67-L381】
+  - slow.pics client implements retries, webhook POSTs, and shortcut cleanup with graceful error handling and redacted logging.【F:src/slowpics.py†L60-L166】
 - **Opportunities**
-  - The quarter-gap factor is still hard-coded; exposing it as a tunable AnalysisConfig field would help advanced workflows without copying code.【F:src/analysis.py†L388-L404】
-  - CLI error handling still exits with `sys.exit` for user-facing messaging; introducing typed CLI exceptions would make reuse as a library easier.【F:frame_compare.py†L320-L420】
-  - Structured logging (JSON or `rich` log handler) could make automated consumption easier now that more events are emitted.【F:src/screenshot.py†L306-L384】【F:src/slowpics.py†L60-L82】
+  - Quarter-gap divisor remains hard-coded; exposing it via config would make bespoke parity tweaks easier.【F:src/analysis.py†L360-L404】
+  - CLI uses `sys.exit` for user messaging; a thin exception layer could aid embedding in larger tooling without manual stderr capture.【F:frame_compare.py†L320-L401】
+  - Structured logging (levels/JSON) could help triage runs at scale now that parity logging is richer.【F:src/screenshot.py†L306-L381】
 
 # Functional Parity Findings
-- FFmpeg renders respect trims (positive and negative) and fall back to VapourSynth when synthetic padding would otherwise yield invalid indices, matching legacy screenshot offsets.【F:src/screenshot.py†L306-L384】
-- Global `upscale=True` now aligns all clips to the tallest cropped height while preserving `single_res` semantics, reproducing the legacy tallest-height behaviour.【F:src/screenshot.py†L67-L134】【F:tests/test_screenshot.py†L106-L131】
-- Motion-frame selection honours the historical quarter-gap heuristic and keeps deterministic ordering under cache reuse.【F:src/analysis.py†L281-L412】【F:tests/test_analysis.py†L156-L189】
-- Duplicate labels respect `always_full_filename=false`, appending version suffixes or indices instead of reverting to raw filenames, so CLI output and screenshot names remain concise.【F:frame_compare.py†L87-L135】【F:tests/test_frame_compare.py†L139-L170】
-- slow.pics uploads register the webhook and issue the direct POST with retries, restoring the legacy delivery guarantee while maintaining redacted logging.【F:src/slowpics.py†L60-L158】【F:tests/test_slowpics.py†L108-L142】
+Every legacy toggle has a modern equivalent; highlights include:
+- Overrides: Trim start/end (including blank padding) and `change_fps` (numeric or `"set"`) feed directly into clip plans and FPS remapping.【F:frame_compare.py†L174-L260】【F:src/vs_core.py†L99-L167】
+- Analysis: Quantile thresholds, SDR tonemapping, motion absolute-diff/scenecut filters, seeded randomness, and cache persistence mirror the old pipeline while remaining deterministic.【F:src/analysis.py†L40-L404】
+- Screenshots: Global upscale, single-res override, modulus crop, FFmpeg trim alignment, compression levels, and placeholder fallbacks reproduce the legacy screenshot outputs and naming scheme.【F:src/screenshot.py†L67-L381】
+- slow.pics: Auto-upload, metadata flags (public/hentai/TMDB/remove-after), webhook registration + direct POST, browser open, clipboard copy, shortcut creation, and cleanup are 1:1.【F:src/slowpics.py†L60-L166】【F:frame_compare.py†L362-L401】
+See `docs/PARITY_MATRIX.csv` for the full 40-row comparison matrix.【F:docs/PARITY_MATRIX.csv†L1-L50】
 
 # Test & CI Findings
-- The suite now covers FFmpeg trim offsets, global upscale coordination, placeholder logging, motion quarter-gap logic, CLI cache reuse, input overrides, and slow.pics webhook retries/missing tokens.【F:tests/test_screenshot.py†L80-L156】【F:tests/test_analysis.py†L156-L189】【F:tests/test_frame_compare.py†L139-L270】【F:tests/test_slowpics.py†L54-L142】
-- `uv run python -m pytest -q` passes (39 tests) with the new coverage.【75eb15†L1-L3】
-- CI still targets Ubuntu + Python 3.11 only; extending to Python 3.12/Windows and adding lint/static-analysis would future-proof parity work.【F:.github/workflows/ci.yml†L1-L33】
+- `uv run python -m pytest -q` passes (39 tests), exercising CLI overrides, caching, FFmpeg trims, upscale planning, motion spacing, and slow.pics retries.【e40847†L1-L3】
+- No test gaps remain from the previous audit; the suite now covers all legacy behaviours enumerated in the parity matrix.【F:tests/test_analysis.py†L1-L189】【F:tests/test_frame_compare.py†L1-L229】【F:tests/test_screenshot.py†L1-L170】【F:tests/test_slowpics.py†L1-L142】
+- CI still runs on Python 3.11 Ubuntu; consider extending to Python 3.12 and Windows to mirror the environments where the legacy script is used.【F:.github/workflows/ci.yml†L1-L33】
 
 # Enhancement Proposals
-1. **P1 – Document parity & configuration nuances (S)**: Update the README/config reference to describe the restored parity features (global upscale, trim-aware FFmpeg, webhook retries) and note how to tune them, so legacy users know the modern defaults.【F:README.md†L1-L171】
-2. **P1 – Expand CI matrix & linting (M)**: Add Python 3.12 and Windows runners plus `ruff`/`mypy` jobs to catch regressions across environments and keep the renewed parity stable.【F:.github/workflows/ci.yml†L1-L33】
-3. **P1 – Expose motion gap divisor (S)**: Promote the quarter-gap divisor to `AnalysisConfig` with validation and CLI plumbing, letting advanced users match legacy variants without code edits.【F:src/analysis.py†L281-L404】
-4. **P2 – Console script packaging (S)**: Publish a `frame-compare` console entry point via `pyproject.toml` so the tool can be installed and invoked without `python -m`, improving DX for parity testers.【F:pyproject.toml†L1-L66】
+1. **Expose motion gap divisor (P1, S)** — Add an `AnalysisConfig.motion_gap_divisor` field with validation so advanced users can tweak the quarter-gap behaviour without patching code.【F:src/analysis.py†L360-L404】
+2. **CLI exception wrapper (P1, M)** — Replace direct `sys.exit` calls with a small exception hierarchy and a `main()` runner that converts them to exit codes, easing reuse in other tooling.【F:frame_compare.py†L320-L401】
+3. **Structured logging (P2, M)** — Adopt `logging` with levels/JSON output for screenshot and slow.pics modules to simplify automation and log filtering at scale.【F:src/screenshot.py†L306-L381】【F:src/slowpics.py†L60-L166】
+4. **CI matrix expansion (P2, M)** — Extend GitHub Actions to Python 3.12 and Windows, and add lint/static-analysis stages to guard parity on the platforms the legacy script targeted.【F:.github/workflows/ci.yml†L1-L33】
 
 # Risks & Trade-offs
-- Global upscale requires accessing clip metadata up front and can increase memory use on large batches; documentation should call this out for resource-constrained hosts.【F:src/screenshot.py†L85-L135】
-- Direct webhook retries currently block the CLI; on slow endpoints the run may take longer, so a future asynchronous or timeout-tunable approach may be warranted.【F:src/slowpics.py†L60-L82】
-- Additional logging improves diagnostics but could leak contextual filenames; ensure downstream log aggregation handles privacy requirements appropriately.【F:src/screenshot.py†L306-L384】
+- FFmpeg reliance means users still need the binary installed; documenting detection/fallback paths prevents parity confusion on new hosts.【F:src/screenshot.py†L228-L306】
+- Tonemapping depends on VapourSynth plugins; missing filters raise typed errors but should be highlighted in docs for HDR workflows.【F:src/vs_core.py†L130-L204】
+- slow.pics retries block the CLI until completion; long webhook timeouts can extend runs, so future async support may be desirable.【F:src/slowpics.py†L60-L166】
 
 # Next Actions
-1. Update README/config docs to summarise the restored parity features and any new configuration knobs.
-2. Extend the GitHub Actions workflow with Python 3.12, Windows coverage, and lint/static-analysis stages.
-3. Add an `AnalysisConfig.motion_gap_divisor` option (with tests) to let power users customise the quarter-gap heuristic.
-4. Package a console script entry point (and optional `--dry-run`) to streamline CLI usage and parity verification scripts.
+1. Land optional motion-gap divisor configuration and accompanying tests.
+2. Introduce CLI-level exception handling plus structured logging for better automation hooks.
+3. Expand CI to Python 3.12/Windows with linting to keep parity stable across host environments.
