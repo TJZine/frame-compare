@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import List, Mapping, Optional, Sequence, Tuple
+from typing import List, Mapping, Sequence, Tuple
 
 from .datatypes import ScreenshotConfig
+
+
+logger = logging.getLogger(__name__)
 
 
 class ScreenshotError(RuntimeError):
@@ -64,23 +68,71 @@ def _compute_scaled_dimensions(
     width: int,
     height: int,
     crop: Tuple[int, int, int, int],
-    cfg: ScreenshotConfig,
+    target_height: int,
 ) -> Tuple[int, int]:
     cropped_w = width - crop[0] - crop[2]
     cropped_h = height - crop[1] - crop[3]
     if cropped_w <= 0 or cropped_h <= 0:
         raise ScreenshotGeometryError("Invalid crop results")
 
-    target_h = cropped_h
-    if cfg.single_res > 0:
-        target_h = max(1, int(cfg.single_res))
-    if not cfg.upscale and target_h > cropped_h:
-        target_h = cropped_h
-
-    scale = target_h / cropped_h
+    desired_h = max(1, int(round(target_height)))
+    scale = desired_h / cropped_h if cropped_h else 1.0
     target_w = int(round(cropped_w * scale)) if scale != 1 else cropped_w
     target_w = max(1, target_w)
-    return (target_w, target_h)
+    return (target_w, desired_h)
+
+
+def _plan_geometry(clips: Sequence[object], cfg: ScreenshotConfig) -> List[dict[str, object]]:
+    plans: List[dict[str, object]] = []
+    for clip in clips:
+        width = getattr(clip, "width", None)
+        height = getattr(clip, "height", None)
+        if not isinstance(width, int) or not isinstance(height, int):
+            raise ScreenshotGeometryError("Clip missing width/height metadata")
+
+        crop = plan_mod_crop(width, height, cfg.mod_crop, cfg.letterbox_pillarbox_aware)
+        cropped_w = width - crop[0] - crop[2]
+        cropped_h = height - crop[1] - crop[3]
+        if cropped_w <= 0 or cropped_h <= 0:
+            raise ScreenshotGeometryError("Invalid crop results")
+
+        plans.append(
+            {
+                "width": width,
+                "height": height,
+                "crop": crop,
+                "cropped_w": cropped_w,
+                "cropped_h": cropped_h,
+            }
+        )
+
+    single_res_target = int(cfg.single_res) if cfg.single_res > 0 else None
+    if single_res_target is not None:
+        desired_height = max(1, single_res_target)
+        global_target = None
+    else:
+        desired_height = None
+        global_target = max((plan["cropped_h"] for plan in plans), default=None) if cfg.upscale else None
+
+    for plan in plans:
+        cropped_h = int(plan["cropped_h"])
+        if desired_height is not None:
+            target_h = desired_height
+            if not cfg.upscale and target_h > cropped_h:
+                target_h = cropped_h
+        elif global_target is not None:
+            target_h = max(cropped_h, int(global_target))
+        else:
+            target_h = cropped_h
+
+        plan["scaled"] = _compute_scaled_dimensions(
+            int(plan["width"]),
+            int(plan["height"]),
+            plan["crop"],
+            target_h,
+        )
+
+    return plans
 
 
 def _sanitise_label(label: str) -> str:
@@ -173,6 +225,17 @@ def _map_ffmpeg_compression(level: int) -> int:
     return max(0, min(9, mapped))
 
 
+def _resolve_source_frame_index(frame_idx: int, trim_start: int) -> int | None:
+    if trim_start == 0:
+        return frame_idx
+    if trim_start > 0:
+        return frame_idx + trim_start
+    blank = abs(int(trim_start))
+    if frame_idx < blank:
+        return None
+    return frame_idx - blank
+
+
 def _save_frame_with_ffmpeg(
     source: str,
     frame_idx: int,
@@ -182,9 +245,6 @@ def _save_frame_with_ffmpeg(
     cfg: ScreenshotConfig,
     width: int,
     height: int,
-    *,
-    trim_start: int = 0,
-    trim_end: Optional[int] = None,
 ) -> None:
     if shutil.which("ffmpeg") is None:
         raise ScreenshotWriterError("FFmpeg executable not found in PATH")
@@ -192,18 +252,7 @@ def _save_frame_with_ffmpeg(
     cropped_w = max(1, width - crop[0] - crop[2])
     cropped_h = max(1, height - crop[1] - crop[3])
 
-    if trim_end is not None and trim_end > 0 and frame_idx >= int(trim_end):
-        raise ScreenshotWriterError(
-            f"Frame {frame_idx} exceeds trimmed clip length ({trim_end})"
-        )
-
-    source_frame = int(frame_idx + trim_start)
-    if source_frame < 0:
-        raise ScreenshotWriterError(
-            f"Frame {frame_idx} resolves to negative source index ({source_frame})"
-        )
-
-    filters = [f"select=eq(n\\,{source_frame})"]
+    filters = [f"select=eq(n\\,{int(frame_idx)})"]
     if any(crop):
         filters.append(
             "crop={w}:{h}:{x}:{y}".format(
@@ -261,7 +310,8 @@ def generate_screenshots(
     metadata: Sequence[Mapping[str, str]],
     out_dir: Path,
     cfg: ScreenshotConfig,
-    trims: Optional[Sequence[Tuple[int, Optional[int]]]] = None,
+    *,
+    trim_offsets: Sequence[int] | None = None,
 ) -> List[str]:
     """Render screenshots for *frames* from each clip using configured writer."""
 
@@ -269,27 +319,27 @@ def generate_screenshots(
         raise ScreenshotError("clips and files must have matching lengths")
     if len(metadata) != len(files):
         raise ScreenshotError("metadata and files must have matching lengths")
-    if trims is not None and len(trims) != len(files):
-        raise ScreenshotError("trim data and files must have matching lengths")
     if not frames:
         return []
+
+    if trim_offsets is None:
+        trim_offsets = [0] * len(files)
+    if len(trim_offsets) != len(files):
+        raise ScreenshotError("trim_offsets and files must have matching lengths")
 
     out_dir.mkdir(parents=True, exist_ok=True)
     created: List[str] = []
 
-    for clip_index, (clip, file_path, meta) in enumerate(zip(clips, files, metadata)):
-        trim_start = 0
-        trim_end: Optional[int] = None
-        if trims is not None:
-            trim_start, trim_end = trims[clip_index]
+    geometry = _plan_geometry(clips, cfg)
 
-        width = getattr(clip, "width", None)
-        height = getattr(clip, "height", None)
-        if not isinstance(width, int) or not isinstance(height, int):
-            raise ScreenshotGeometryError("Clip missing width/height metadata")
-
-        crop = plan_mod_crop(width, height, cfg.mod_crop, cfg.letterbox_pillarbox_aware)
-        scaled = _compute_scaled_dimensions(width, height, crop, cfg)
+    for clip_index, (clip, file_path, meta, plan, trim_start) in enumerate(
+        zip(clips, files, metadata, geometry, trim_offsets)
+    ):
+        crop = plan["crop"]  # type: ignore[assignment]
+        scaled = plan["scaled"]  # type: ignore[assignment]
+        width = int(plan["width"])
+        height = int(plan["height"])
+        trim_start = int(trim_start)
 
         for frame_pos, frame in enumerate(frames):
             frame_idx = int(frame)
@@ -297,24 +347,36 @@ def generate_screenshots(
             target_path = out_dir / file_name
 
             try:
-                if cfg.use_ffmpeg:
+                resolved_frame = _resolve_source_frame_index(frame_idx, trim_start)
+                use_ffmpeg = cfg.use_ffmpeg and resolved_frame is not None
+                if cfg.use_ffmpeg and resolved_frame is None:
+                    logger.debug(
+                        "Frame %s for %s falls within synthetic trim padding; using VapourSynth writer",
+                        frame_idx,
+                        file_path,
+                    )
+                if use_ffmpeg:
                     _save_frame_with_ffmpeg(
                         file_path,
-                        frame_idx,
+                        resolved_frame,
                         crop,
                         scaled,
                         target_path,
                         cfg,
                         width,
                         height,
-                        trim_start=trim_start,
-                        trim_end=trim_end,
                     )
                 else:
                     _save_frame_with_vapoursynth(clip, frame_idx, crop, scaled, target_path, cfg)
             except ScreenshotWriterError:
                 raise
-            except Exception:
+            except Exception as exc:
+                logger.warning(
+                    "Falling back to placeholder for frame %s of %s: %s",
+                    frame_idx,
+                    file_path,
+                    exc,
+                )
                 _save_frame_placeholder(target_path)
 
             created.append(str(target_path))

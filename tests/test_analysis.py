@@ -151,3 +151,40 @@ def test_select_frames_uses_cache(monkeypatch, tmp_path):
     frames_second = select_frames(clip, cfg, ["a.mkv"], "a.mkv", cache_info=cache_info)
     assert calls["count"] == 0
     assert frames_first == frames_second
+
+
+def test_motion_quarter_gap(monkeypatch):
+    clip = FakeClip(
+        num_frames=240,
+        brightness=[0.5 for _ in range(240)],
+        motion=[0.0 for _ in range(240)],
+    )
+
+    def fake_collect(analysis_clip, cfg, indices):
+        brightness = [(idx, 0.0) for idx in indices]
+        motion = [(idx, float(idx)) for idx in indices]
+        return brightness, motion
+
+    monkeypatch.setattr("src.analysis._collect_metrics_vapoursynth", fake_collect)
+    monkeypatch.setattr(
+        "src.analysis.vs_core.process_clip_for_screenshot",
+        lambda clip, file_name, cfg: clip,
+    )
+
+    cfg = AnalysisConfig(
+        frame_count_dark=0,
+        frame_count_bright=0,
+        frame_count_motion=4,
+        random_frames=0,
+        user_frames=[],
+        screen_separation_sec=8,
+        motion_diff_radius=0,
+        analyze_in_sdr=False,
+        step=1,
+    )
+
+    frames = select_frames(clip, cfg, files=["file.mkv"], file_under_analysis="file.mkv")
+    assert len(frames) == 4
+    diffs = [b - a for a, b in zip(frames, frames[1:])]
+    assert all(diff >= 48 for diff in diffs)
+    assert any(diff < 192 for diff in diffs)

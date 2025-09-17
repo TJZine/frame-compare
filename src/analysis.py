@@ -319,13 +319,14 @@ def select_frames(
     selected: List[int] = []
     selected_set = set()
 
-    def try_add(frame: int, enforce_gap: bool = True) -> bool:
+    def try_add(frame: int, enforce_gap: bool = True, gap_frames: Optional[int] = None) -> bool:
         frame_idx = _clamp_frame(frame, num_frames)
         if frame_idx in selected_set:
             return False
-        if enforce_gap and min_sep_frames > 0:
+        effective_gap = min_sep_frames if gap_frames is None else max(0, int(gap_frames))
+        if enforce_gap and effective_gap > 0:
             for existing in selected:
-                if abs(existing - frame_idx) < min_sep_frames:
+                if abs(existing - frame_idx) < effective_gap:
                     return False
         selected.append(frame_idx)
         selected_set.add(frame_idx)
@@ -334,7 +335,12 @@ def select_frames(
     for frame in cfg.user_frames:
         try_add(frame, enforce_gap=False)
 
-    def pick_from_candidates(candidates: List[tuple[int, float]], count: int, reverse: bool = False) -> None:
+    def pick_from_candidates(
+        candidates: List[tuple[int, float]],
+        count: int,
+        reverse: bool = False,
+        gap_seconds_override: Optional[float] = None,
+    ) -> None:
         if count <= 0 or not candidates:
             return
         ordered = sorted(candidates, key=lambda item: item[1], reverse=reverse)
@@ -345,10 +351,18 @@ def select_frames(
                 continue
             seen_local.add(idx)
             unique_indices.append(idx)
-        filtered_indices = dedupe(unique_indices, cfg.screen_separation_sec, fps)
+        separation = cfg.screen_separation_sec
+        if gap_seconds_override is not None:
+            separation = gap_seconds_override
+        filtered_indices = dedupe(unique_indices, separation, fps)
+        gap_frames = (
+            None
+            if gap_seconds_override is None
+            else int(round(max(0.0, gap_seconds_override) * fps))
+        )
         added = 0
         for frame_idx in filtered_indices:
-            if try_add(frame_idx, enforce_gap=True):
+            if try_add(frame_idx, enforce_gap=True, gap_frames=gap_frames):
                 added += 1
             if added >= count:
                 break
@@ -379,7 +393,13 @@ def select_frames(
             threshold = _quantile([val for _, val in smoothed_motion], cfg.motion_scenecut_quantile)
             filtered = [(idx, val) for idx, val in smoothed_motion if val <= threshold]
         motion_candidates = filtered
-    pick_from_candidates(motion_candidates, cfg.frame_count_motion, reverse=True)
+    motion_gap = cfg.screen_separation_sec / 4 if cfg.screen_separation_sec > 0 else 0
+    pick_from_candidates(
+        motion_candidates,
+        cfg.frame_count_motion,
+        reverse=True,
+        gap_seconds_override=motion_gap,
+    )
 
     random_count = max(0, int(cfg.random_frames))
     attempts = 0
@@ -389,7 +409,4 @@ def select_frames(
             random_count -= 1
         attempts += 1
 
-    ordered = sorted(selected)
-    if min_sep_frames > 0:
-        ordered = dedupe(ordered, cfg.screen_separation_sec, fps)
-    return ordered
+    return sorted(selected)

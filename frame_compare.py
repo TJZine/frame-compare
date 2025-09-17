@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import re
 import sys
 import shutil
 import webbrowser
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
@@ -83,15 +84,55 @@ def _parse_metadata(files: Sequence[Path], naming_cfg) -> List[Dict[str, str]]:
     return metadata
 
 
-def _dedupe_labels(metadata: Sequence[Dict[str, str]], files: Sequence[Path], prefer_full_name: bool) -> None:
+_VERSION_PATTERN = re.compile(r"(?:^|[^0-9A-Za-z])(?P<tag>v\d{1,3})(?!\d)", re.IGNORECASE)
+
+
+def _extract_version_suffix(file_path: Path) -> str | None:
+    match = _VERSION_PATTERN.search(file_path.stem)
+    if not match:
+        return None
+    tag = match.group("tag")
+    return tag.upper() if tag else None
+
+
+def _dedupe_labels(
+    metadata: Sequence[Dict[str, str]],
+    files: Sequence[Path],
+    prefer_full_name: bool,
+) -> None:
     counts = Counter((meta.get("label") or "") for meta in metadata)
+    duplicate_groups: dict[str, list[int]] = defaultdict(list)
     for idx, meta in enumerate(metadata):
         label = meta.get("label") or ""
         if not label:
             meta["label"] = files[idx].name
             continue
         if counts[label] > 1:
-            meta["label"] = files[idx].name if prefer_full_name else files[idx].name
+            duplicate_groups[label].append(idx)
+
+    if prefer_full_name:
+        for indices in duplicate_groups.values():
+            for idx in indices:
+                metadata[idx]["label"] = files[idx].name
+        return
+
+    for label, indices in duplicate_groups.items():
+        for idx in indices:
+            version = _extract_version_suffix(files[idx])
+            if version:
+                metadata[idx]["label"] = f"{label} {version}".strip()
+
+        temp_counts = Counter(metadata[idx].get("label") or "" for idx in indices)
+        for idx in indices:
+            resolved = metadata[idx].get("label") or label
+            if temp_counts[resolved] <= 1:
+                continue
+            order = indices.index(idx) + 1
+            metadata[idx]["label"] = f"{resolved} #{order}"
+
+    for idx, meta in enumerate(metadata):
+        if not (meta.get("label") or "").strip():
+            meta["label"] = files[idx].name
 
 
 def _pick_analyze_file(files: Sequence[Path], metadata: Sequence[Mapping[str, str]], target: str | None) -> Path:
@@ -342,7 +383,7 @@ def main(config_path: str, input_dir: str | None) -> None:
             [plan.metadata for plan in plans],
             out_dir,
             cfg.screenshots,
-            [(plan.trim_start, plan.trim_end) for plan in plans],
+            trim_offsets=[plan.trim_start for plan in plans],
         )
     except ScreenshotError as exc:
         print(f"[red]Screenshot generation failed:[/red] {exc}")
