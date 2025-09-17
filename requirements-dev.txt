@@ -1,4 +1,5 @@
 pytest
+pluggy
 pytest-mock
 requests-mock
 pygments
