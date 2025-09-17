@@ -20,6 +20,7 @@ def test_load_defaults(tmp_path: Path) -> None:
     assert app.screenshots.directory_name == "screens"
     assert app.naming.always_full_filename is True
     assert app.runtime.ram_limit_mb == 8000
+    assert isinstance(app.runtime.vapoursynth_python_paths, list)
 
 
 @pytest.mark.parametrize(

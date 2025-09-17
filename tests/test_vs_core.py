@@ -1,10 +1,13 @@
-﻿import types
+import sys
+import types
 
 import pytest
+import src.vs_core as vs_core
 
 from src.vs_core import (
     ClipInitError,
     ClipProcessError,
+    configure,
     init_clip,
     process_clip_for_screenshot,
     set_ram_limit,
@@ -58,7 +61,7 @@ class _FakeClip:
 
 class _FailingLWLib:
     @staticmethod
-    def LWLibavSource(path: str):
+    def LWLibavSource(path: str, **kwargs):
         raise RuntimeError("boom")
 
 
@@ -116,9 +119,10 @@ def test_init_clip_errors_raise():
 def test_init_clip_applies_trim_and_fps(monkeypatch):
     class _Source:
         @staticmethod
-        def LWLibavSource(path: str):
+        def LWLibavSource(path: str, **kwargs):
             clip = _FakeClip()
             clip.opened_path = path
+            clip.cachefile = kwargs.get("cachefile")
             return clip
 
     fake_core = _FakeCore(source=_Source())
@@ -132,14 +136,16 @@ def test_init_clip_applies_trim_and_fps(monkeypatch):
     assert clip.opened_path == "video.mkv"
     assert clip.slice_history == [slice(10, None, None), slice(None, 100, None)]
     assert clip.std.fps_args == (24000, 1001)
+    assert clip.cachefile.endswith("video.mkv.lwi")
 
 
 def test_init_clip_handles_negative_trims():
     class _Source:
         @staticmethod
-        def LWLibavSource(path: str):
+        def LWLibavSource(path: str, **kwargs):
             clip = _FakeClip()
             clip.opened_path = path
+            clip.cachefile = kwargs.get("cachefile")
             return clip
 
     fake_core = _FakeCore(source=_Source())
@@ -157,4 +163,16 @@ def test_init_clip_handles_negative_trims():
 def test_set_ram_limit_applies_value():
     fake_core = types.SimpleNamespace(max_cache_size=0)
     set_ram_limit(16, core=fake_core)
-    assert fake_core.max_cache_size == 16 * 1024 * 1024
+    assert fake_core.max_cache_size == 16
+
+
+def test_configure_registers_search_paths(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    monkeypatch.setattr(vs_core, "_EXTRA_SEARCH_PATHS", [])
+    monkeypatch.setattr(vs_core, "_vs_module", None)
+    site_dir = tmp_path / "site-packages"
+    site_dir.mkdir()
+    configure(search_paths=[str(site_dir)])
+    expected = str(site_dir.expanduser().resolve())
+    assert expected in sys.path
+    assert expected in vs_core._EXTRA_SEARCH_PATHS

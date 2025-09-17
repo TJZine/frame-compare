@@ -6,13 +6,113 @@ import logging
 import os
 import shutil
 import subprocess
+from functools import partial
 from pathlib import Path
-from typing import List, Mapping, Sequence, Tuple
+from typing import Callable, List, Mapping, Sequence, Tuple
 
 from .datatypes import ScreenshotConfig
 
 
 logger = logging.getLogger(__name__)
+
+
+def _ensure_rgb24(core, clip, frame_idx):
+    try:
+        import vapoursynth as vs  # type: ignore
+    except Exception as exc:  # pragma: no cover - requires runtime deps
+        raise ScreenshotWriterError("VapourSynth is required for screenshot export") from exc
+
+    fmt = getattr(clip, "format", None)
+    color_family = getattr(fmt, "color_family", None) if fmt is not None else None
+    bits = getattr(fmt, "bits_per_sample", None) if fmt is not None else None
+    if color_family == getattr(vs, "RGB", object()) and bits == 8:
+        return clip
+
+    resize_ns = getattr(core, "resize", None)
+    if resize_ns is None:
+        raise ScreenshotWriterError("VapourSynth core is missing resize namespace")
+    point = getattr(resize_ns, "Point", None)
+    if not callable(point):
+        raise ScreenshotWriterError("VapourSynth resize.Point is unavailable")
+
+    dither = "error_diffusion" if isinstance(bits, int) and bits > 8 else "none"
+    try:
+        converted = point(clip, format=vs.RGB24, range=vs.RANGE_FULL, dither_type=dither)
+    except Exception as exc:  # pragma: no cover - defensive
+        raise ScreenshotWriterError(f"Failed to convert frame {frame_idx} to RGB24: {exc}") from exc
+
+    try:
+        converted = converted.std.SetFrameProps(
+            _Matrix="bt709",
+            _Primaries="bt709",
+            _Transfer="bt1886",
+            _ColorRange="limited",
+        )
+    except Exception:  # pragma: no cover - best effort
+        pass
+    return converted
+
+
+def _clamp_frame_index(clip, frame_idx: int) -> tuple[int, bool]:
+    total_frames = getattr(clip, "num_frames", None)
+    if not isinstance(total_frames, int) or total_frames <= 0:
+        return max(0, int(frame_idx)), False
+    max_index = max(0, total_frames - 1)
+    clamped = max(0, min(int(frame_idx), max_index))
+    return clamped, clamped != frame_idx
+
+
+FRAME_INFO_STYLE = 'sans-serif,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,"0,0,0,0,100,100,0,0,1,2,0,7,10,10,10,1"'
+
+
+def _apply_frame_info_overlay(core, clip, title: str, requested_frame: int | None, selection_label: str | None) -> object:
+    try:
+        import vapoursynth as vs  # type: ignore
+    except Exception:  # pragma: no cover - requires runtime deps
+        return clip
+
+    std_ns = getattr(core, "std", None)
+    sub_ns = getattr(core, "sub", None)
+    if std_ns is None or sub_ns is None:
+        logger.debug('VapourSynth core missing std/sub namespaces; skipping frame overlay')
+        return clip
+
+    frame_eval = getattr(std_ns, 'FrameEval', None)
+    subtitle = getattr(sub_ns, 'Subtitle', None)
+    if not callable(frame_eval) or not callable(subtitle):
+        logger.debug('Required VapourSynth overlay functions unavailable; skipping frame overlay')
+        return clip
+
+    label = title.strip() if isinstance(title, str) else ''
+    if not label:
+        label = 'Clip'
+
+    padding_title = " " + ("\n" * 3)
+
+    def _draw_info(n: int, f, clip_ref):
+        pict = f.props.get('_PictType')
+        if isinstance(pict, bytes):
+            pict_text = pict.decode('utf-8', 'ignore')
+        elif isinstance(pict, str):
+            pict_text = pict
+        else:
+            pict_text = 'N/A'
+        display_idx = requested_frame if requested_frame is not None else n
+        lines = [
+            f"Frame {display_idx} of {clip_ref.num_frames}",
+            f"Picture type: {pict_text}",
+        ]
+        if selection_label:
+            lines.append(f"Content Type: {selection_label}")
+        info = "\n".join(lines)
+        return subtitle(clip_ref, text=[info], style=FRAME_INFO_STYLE)
+
+    try:
+        info_clip = frame_eval(clip, partial(_draw_info, clip_ref=clip), prop_src=clip)
+        return subtitle(info_clip, text=[padding_title + label], style=FRAME_INFO_STYLE)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug('Applying frame overlay failed: %s', exc)
+        return clip
 
 
 class ScreenshotError(RuntimeError):
@@ -140,17 +240,14 @@ def _sanitise_label(label: str) -> str:
     return cleaned.strip() or "comparison"
 
 
-def _prepare_filename(
-    source: str,
-    metadata: Mapping[str, str],
-    frame: int,
-    frame_index: int,
-    cfg: ScreenshotConfig,
-) -> str:
-    base = metadata.get("label") or Path(source).stem
-    base = _sanitise_label(base)
-    suffix = f"_frame{frame:06d}" if cfg.add_frame_info else f"_{frame_index:02d}"
-    return f"{base}{suffix}.png"
+def _derive_labels(source: str, metadata: Mapping[str, str]) -> tuple[str, str]:
+    raw = metadata.get("label") or Path(source).stem
+    cleaned = _sanitise_label(raw)
+    return raw.strip() or cleaned, cleaned
+
+
+def _prepare_filename(frame: int, label: str) -> str:
+    return f"{frame} - {label}.png"
 
 
 def _normalise_compression_level(level: int) -> int:
@@ -181,6 +278,9 @@ def _save_frame_with_fpng(
     scaled: Tuple[int, int],
     path: Path,
     cfg: ScreenshotConfig,
+    label: str,
+    requested_frame: int,
+    selection_label: str | None = None,
 ) -> None:
     try:
         import vapoursynth as vs  # type: ignore
@@ -215,14 +315,9 @@ def _save_frame_with_fpng(
 
     render_clip = work
     if cfg.add_frame_info:
-        text_ns = getattr(core, "text", None)
-        text_filter = getattr(text_ns, "Text", None) if text_ns is not None else None
-        if callable(text_filter):
-            render_clip = text_filter(work, text=f"Frame {frame_idx}")
-        else:
-            logger.debug(
-                "add_frame_info requested but VapourSynth text.Text is unavailable; skipping overlay"
-            )
+        render_clip = _apply_frame_info_overlay(core, render_clip, label, requested_frame, selection_label)
+
+    render_clip = _ensure_rgb24(core, render_clip, frame_idx)
 
     compression = _map_fpng_compression(cfg.compression_level)
     try:
@@ -258,6 +353,7 @@ def _save_frame_with_ffmpeg(
     cfg: ScreenshotConfig,
     width: int,
     height: int,
+    selection_label: str | None,
 ) -> None:
     if shutil.which("ffmpeg") is None:
         raise ScreenshotWriterError("FFmpeg executable not found in PATH")
@@ -278,7 +374,10 @@ def _save_frame_with_ffmpeg(
     if scaled != (cropped_w, cropped_h):
         filters.append(f"scale={max(1, scaled[0])}:{max(1, scaled[1])}:flags=lanczos")
     if cfg.add_frame_info:
-        text = f"Frame\\ {int(frame_idx)}"
+        text_lines = [f"Frame\\ {int(frame_idx)}"]
+        if selection_label:
+            text_lines.append(f"Content Type\\: {selection_label}")
+        text = "\\\\n".join(text_lines)
         drawtext = (
             "drawtext=text={text}:fontcolor=white:box=1:boxcolor=black@0.6:"
             "boxborderw=6:x=10:y=10"
@@ -324,6 +423,8 @@ def generate_screenshots(
     cfg: ScreenshotConfig,
     *,
     trim_offsets: Sequence[int] | None = None,
+    progress_callback: Callable[[int], None] | None = None,
+    frame_labels: Mapping[int, str] | None = None,
 ) -> List[str]:
     """Render screenshots for *frames* from each clip using configured writer."""
 
@@ -347,19 +448,34 @@ def generate_screenshots(
     for clip_index, (clip, file_path, meta, plan, trim_start) in enumerate(
         zip(clips, files, metadata, geometry, trim_offsets)
     ):
+        if frame_labels:
+            logger.debug('frame_labels keys: %s', list(frame_labels.keys()))
         crop = plan["crop"]  # type: ignore[assignment]
         scaled = plan["scaled"]  # type: ignore[assignment]
         width = int(plan["width"])
         height = int(plan["height"])
         trim_start = int(trim_start)
+        raw_label, safe_label = _derive_labels(file_path, meta)
 
-        for frame_pos, frame in enumerate(frames):
+        for frame in frames:
             frame_idx = int(frame)
-            file_name = _prepare_filename(file_path, meta, frame_idx, frame_pos, cfg)
+            selection_label = frame_labels.get(frame_idx) if frame_labels else None
+            if selection_label is not None:
+                logger.debug('Selection label for frame %s: %s', frame_idx, selection_label)
+            actual_idx, was_clamped = _clamp_frame_index(clip, frame_idx)
+            if was_clamped:
+                logger.debug(
+                    "Frame %s exceeds available frames (%s) in %s; using %s",
+                    frame_idx,
+                    getattr(clip, 'num_frames', 'unknown'),
+                    file_path,
+                    actual_idx,
+                )
+            file_name = _prepare_filename(frame_idx, safe_label)
             target_path = out_dir / file_name
 
             try:
-                resolved_frame = _resolve_source_frame_index(frame_idx, trim_start)
+                resolved_frame = _resolve_source_frame_index(actual_idx, trim_start)
                 use_ffmpeg = cfg.use_ffmpeg and resolved_frame is not None
                 if cfg.use_ffmpeg and resolved_frame is None:
                     logger.debug(
@@ -377,9 +493,10 @@ def generate_screenshots(
                         cfg,
                         width,
                         height,
+                        selection_label,
                     )
                 else:
-                    _save_frame_with_fpng(clip, frame_idx, crop, scaled, target_path, cfg)
+                    _save_frame_with_fpng(clip, actual_idx, crop, scaled, target_path, cfg, raw_label, frame_idx, selection_label)
             except ScreenshotWriterError:
                 raise
             except Exception as exc:
@@ -392,5 +509,7 @@ def generate_screenshots(
                 _save_frame_placeholder(target_path)
 
             created.append(str(target_path))
+            if progress_callback is not None:
+                progress_callback(1)
 
     return created

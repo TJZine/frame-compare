@@ -26,6 +26,8 @@ class AnalysisConfig:
     analyze_clip: str = ""
     random_seed: int = 20202020
     frame_data_filename: str = "generated.compframes"
+    skip_head_seconds: float = 0.0
+    skip_tail_seconds: float = 0.0
 
 
 @dataclass
@@ -78,6 +80,7 @@ class RuntimeConfig:
     """Runtime safeguards such as memory limits."""
 
     ram_limit_mb: int = 8000
+    vapoursynth_python_paths: List[str] = field(default_factory=list)
 
 
 @dataclass

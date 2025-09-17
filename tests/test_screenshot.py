@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 
 import pytest
 
@@ -27,8 +27,8 @@ def test_generate_screenshots_filenames(tmp_path, monkeypatch):
 
     calls = []
 
-    def fake_writer(clip, frame_idx, crop, scaled, path, cfg):
-        calls.append({"frame": frame_idx, "crop": crop, "scaled": scaled})
+    def fake_writer(clip, frame_idx, crop, scaled, path, cfg, label, requested_frame, selection_label=None):
+        calls.append({"frame": frame_idx, "crop": crop, "scaled": scaled, "label": label, "requested": requested_frame})
         path.write_text("data", encoding="utf-8")
 
     monkeypatch.setattr(screenshot, "_save_frame_with_fpng", fake_writer)
@@ -46,9 +46,11 @@ def test_generate_screenshots_filenames(tmp_path, monkeypatch):
         trim_offsets=[0],
     )
     assert len(created) == len(frames)
-    for path in created:
-        assert Path(path).exists()
-        assert Path(path).name.startswith("Example Release")
+    expected_names = {f"{frame} - Example Release.png" for frame in frames}
+    assert {Path(path).name for path in created} == expected_names
+    for entry in calls:
+        assert entry["label"] == "Example Release"
+        assert entry["requested"] == entry["frame"]
 
     assert len(calls) == len(frames)
 
@@ -59,7 +61,7 @@ def test_compression_flag_passed(tmp_path, monkeypatch):
 
     captured = {}
 
-    def fake_writer(source, frame_idx, crop, scaled, path, cfg, width, height):
+    def fake_writer(source, frame_idx, crop, scaled, path, cfg, width, height, selection_label):
         captured[frame_idx] = screenshot._map_ffmpeg_compression(cfg.compression_level)
         path.write_text("ffmpeg", encoding="utf-8")
 
@@ -83,7 +85,7 @@ def test_ffmpeg_respects_trim_offsets(tmp_path, monkeypatch):
 
     calls: list[int] = []
 
-    def fake_ffmpeg(source, frame_idx, crop, scaled, path, cfg, width, height):
+    def fake_ffmpeg(source, frame_idx, crop, scaled, path, cfg, width, height, selection_label):
         calls.append(frame_idx)
         path.write_text("ff", encoding="utf-8")
 
@@ -109,7 +111,7 @@ def test_global_upscale_coordination(tmp_path, monkeypatch):
 
     scaled: list[tuple[int, int]] = []
 
-    def fake_vs_writer(clip, frame_idx, crop, scaled_dims, path, cfg):
+    def fake_vs_writer(clip, frame_idx, crop, scaled_dims, path, cfg, label, requested_frame, selection_label=None):
         scaled.append(scaled_dims)
         path.write_text("vs", encoding="utf-8")
 

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 """Frame analysis and selection utilities."""
 
@@ -8,7 +8,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from .datatypes import AnalysisConfig
 from . import vs_core
@@ -26,6 +26,15 @@ class FrameMetricsCacheInfo:
     trim_end: Optional[int]
     fps_num: int
     fps_den: int
+
+
+@dataclass
+class CachedMetrics:
+    brightness: List[tuple[int, float]]
+    motion: List[tuple[int, float]]
+    selection_frames: Optional[List[int]]
+    selection_hash: Optional[str]
+    selection_categories: Optional[Dict[int, str]]
 
 
 def _quantile(sequence: Sequence[float], q: float) -> float:
@@ -68,6 +77,30 @@ def _config_fingerprint(cfg: AnalysisConfig) -> str:
         "screen_separation_sec": cfg.screen_separation_sec,
         "motion_diff_radius": cfg.motion_diff_radius,
         "random_seed": cfg.random_seed,
+        "skip_head_seconds": cfg.skip_head_seconds,
+        "skip_tail_seconds": cfg.skip_tail_seconds,
+    }
+    payload = json.dumps(relevant, sort_keys=True).encode("utf-8")
+    return hashlib.sha1(payload).hexdigest()
+
+
+def _selection_fingerprint(cfg: AnalysisConfig) -> str:
+    relevant = {
+        "frame_count_dark": cfg.frame_count_dark,
+        "frame_count_bright": cfg.frame_count_bright,
+        "frame_count_motion": cfg.frame_count_motion,
+        "random_frames": cfg.random_frames,
+        "random_seed": cfg.random_seed,
+        "user_frames": [int(frame) for frame in cfg.user_frames],
+        "use_quantiles": cfg.use_quantiles,
+        "dark_quantile": cfg.dark_quantile,
+        "bright_quantile": cfg.bright_quantile,
+        "motion_use_absdiff": cfg.motion_use_absdiff,
+        "motion_scenecut_quantile": cfg.motion_scenecut_quantile,
+        "screen_separation_sec": cfg.screen_separation_sec,
+        "motion_diff_radius": cfg.motion_diff_radius,
+        "skip_head_seconds": cfg.skip_head_seconds,
+        "skip_tail_seconds": cfg.skip_tail_seconds,
     }
     payload = json.dumps(relevant, sort_keys=True).encode("utf-8")
     return hashlib.sha1(payload).hexdigest()
@@ -75,7 +108,7 @@ def _config_fingerprint(cfg: AnalysisConfig) -> str:
 
 def _load_cached_metrics(
     info: FrameMetricsCacheInfo, cfg: AnalysisConfig
-) -> Optional[tuple[List[tuple[int, float]], List[tuple[int, float]]]]:
+) -> Optional[CachedMetrics]:
     path = info.path
     try:
         raw = path.read_text(encoding="utf-8")
@@ -120,7 +153,33 @@ def _load_cached_metrics(
     if not brightness:
         return None
 
-    return brightness, motion
+    selection = data.get("selection") or {}
+    selection_frames: Optional[List[int]] = None
+    selection_hash: Optional[str] = None
+    selection_categories: Optional[Dict[int, str]] = None
+    if isinstance(selection, dict):
+        frames_val = selection.get("frames")
+        hash_val = selection.get("hash")
+        cat_val = selection.get("categories")
+        try:
+            if isinstance(frames_val, list):
+                selection_frames = [int(x) for x in frames_val]
+            if isinstance(hash_val, str):
+                selection_hash = hash_val
+            if isinstance(cat_val, list):
+                parsed: Dict[int, str] = {}
+                for item in cat_val:
+                    if not isinstance(item, list) or len(item) != 2:
+                        continue
+                    frame_raw, label_raw = item
+                    parsed[int(frame_raw)] = str(label_raw)
+                selection_categories = parsed or None
+        except (TypeError, ValueError):
+            selection_frames = None
+            selection_hash = None
+            selection_categories = None
+
+    return CachedMetrics(brightness, motion, selection_frames, selection_hash, selection_categories)
 
 
 def _save_cached_metrics(
@@ -128,6 +187,10 @@ def _save_cached_metrics(
     cfg: AnalysisConfig,
     brightness: Sequence[tuple[int, float]],
     motion: Sequence[tuple[int, float]],
+    *,
+    selection_hash: Optional[str] = None,
+    selection_frames: Optional[Sequence[int]] = None,
+    selection_categories: Optional[Dict[int, str]] = None,
 ) -> None:
     path = info.path
     payload = {
@@ -142,6 +205,16 @@ def _save_cached_metrics(
         "brightness": [(int(idx), float(val)) for idx, val in brightness],
         "motion": [(int(idx), float(val)) for idx, val in motion],
     }
+    if selection_hash is not None and selection_frames is not None:
+        payload["selection"] = {
+            "hash": selection_hash,
+            "frames": [int(frame) for frame in selection_frames],
+        }
+        if selection_categories:
+            payload["selection"]["categories"] = [
+                [int(frame), str(selection_categories.get(int(frame), ""))]
+                for frame in selection_frames
+            ]
 
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -190,7 +263,12 @@ def _ensure_even(value: int) -> int:
     return value if value % 2 == 0 else value - 1
 
 
-def _collect_metrics_vapoursynth(clip, cfg: AnalysisConfig, indices: Sequence[int]) -> tuple[List[tuple[int, float]], List[tuple[int, float]]]:
+def _collect_metrics_vapoursynth(
+    clip,
+    cfg: AnalysisConfig,
+    indices: Sequence[int],
+    progress: Callable[[int], None] | None = None,
+) -> tuple[List[tuple[int, float]], List[tuple[int, float]]]:
     try:
         import vapoursynth as vs  # type: ignore
     except Exception as exc:  # pragma: no cover - handled by fallback
@@ -249,16 +327,25 @@ def _collect_metrics_vapoursynth(clip, cfg: AnalysisConfig, indices: Sequence[in
                 del diff_frame
         motion.append((idx, motion_value))
 
+        if progress is not None:
+            progress(1)
+
     return brightness, motion
 
 
-def _generate_metrics_fallback(indices: Sequence[int], cfg: AnalysisConfig) -> tuple[List[tuple[int, float]], List[tuple[int, float]]]:
+def _generate_metrics_fallback(
+    indices: Sequence[int],
+    cfg: AnalysisConfig,
+    progress: Callable[[int], None] | None = None,
+) -> tuple[List[tuple[int, float]], List[tuple[int, float]]]:
     brightness: List[tuple[int, float]] = []
     motion: List[tuple[int, float]] = []
     for idx in indices:
         brightness.append((idx, (math.sin(idx * 0.137) + 1.0) / 2.0))
         phase = 0.21 if cfg.motion_use_absdiff else 0.17
         motion.append((idx, (math.cos(idx * phase) + 1.0) / 2.0))
+        if progress is not None:
+            progress(1)
     return brightness, motion
 
 
@@ -284,7 +371,10 @@ def select_frames(
     files: List[str],
     file_under_analysis: str,
     cache_info: Optional[FrameMetricsCacheInfo] = None,
-) -> List[int]:
+    progress: Callable[[int], None] | None = None,
+    *,
+    return_metadata: bool = False,
+) -> List[int] | Tuple[List[int], Dict[int, str]]:
     """Select frame indices for comparison using quantiles and motion heuristics."""
 
     num_frames = int(getattr(clip, "num_frames", 0))
@@ -294,6 +384,15 @@ def select_frames(
     fps = _frame_rate(clip)
     rng = random.Random(cfg.random_seed)
     min_sep_frames = 0 if cfg.screen_separation_sec <= 0 else int(round(cfg.screen_separation_sec * fps))
+    skip_head_frames = 0
+    skip_tail_frames = 0
+    if cfg.skip_head_seconds > 0 and fps > 0:
+        skip_head_frames = max(0, int(round(cfg.skip_head_seconds * fps)))
+    if cfg.skip_tail_seconds > 0 and fps > 0:
+        skip_tail_frames = max(0, int(round(cfg.skip_tail_seconds * fps)))
+    tail_cutoff = None
+    if skip_tail_frames > 0 and num_frames > 0:
+        tail_cutoff = max(-1, num_frames - 1 - skip_tail_frames)
 
     analysis_clip = clip
     if cfg.analyze_in_sdr:
@@ -304,25 +403,52 @@ def select_frames(
 
     cached_metrics = _load_cached_metrics(cache_info, cfg) if cache_info is not None else None
 
+    selection_hash = _selection_fingerprint(cfg)
+    cached_selection: Optional[List[int]] = None
+    cached_categories: Optional[Dict[int, str]] = None
+
     if cached_metrics is not None:
-        brightness, motion = cached_metrics
+        brightness = cached_metrics.brightness
+        motion = cached_metrics.motion
+        if cached_metrics.selection_hash == selection_hash:
+            cached_selection = cached_metrics.selection_frames
+            cached_categories = cached_metrics.selection_categories
+        if progress is not None:
+            progress(len(brightness))
     else:
         try:
-            brightness, motion = _collect_metrics_vapoursynth(analysis_clip, cfg, indices)
+            brightness, motion = _collect_metrics_vapoursynth(analysis_clip, cfg, indices, progress)
         except Exception:
-            brightness, motion = _generate_metrics_fallback(indices, cfg)
-        if cache_info is not None:
-            _save_cached_metrics(cache_info, cfg, brightness, motion)
+            brightness, motion = _generate_metrics_fallback(indices, cfg, progress)
+
+    if cached_selection is not None:
+        frames_sorted = sorted(dict.fromkeys(int(frame) for frame in cached_selection))
+        if return_metadata:
+            categories = cached_categories or {}
+            return frames_sorted, {frame: categories.get(frame, "Cached") for frame in frames_sorted}
+        return frames_sorted
 
     brightness_values = [val for _, val in brightness]
 
     selected: List[int] = []
     selected_set = set()
+    frame_categories: Dict[int, str] = {}
 
-    def try_add(frame: int, enforce_gap: bool = True, gap_frames: Optional[int] = None) -> bool:
+    def try_add(
+        frame: int,
+        enforce_gap: bool = True,
+        gap_frames: Optional[int] = None,
+        allow_edges: bool = False,
+        category: Optional[str] = None,
+    ) -> bool:
         frame_idx = _clamp_frame(frame, num_frames)
         if frame_idx in selected_set:
             return False
+        if not allow_edges:
+            if skip_head_frames > 0 and frame_idx < skip_head_frames:
+                return False
+            if tail_cutoff is not None and frame_idx > tail_cutoff:
+                return False
         effective_gap = min_sep_frames if gap_frames is None else max(0, int(gap_frames))
         if enforce_gap and effective_gap > 0:
             for existing in selected:
@@ -330,27 +456,39 @@ def select_frames(
                     return False
         selected.append(frame_idx)
         selected_set.add(frame_idx)
+        if category and frame_idx not in frame_categories:
+            frame_categories[frame_idx] = category
         return True
 
     for frame in cfg.user_frames:
-        try_add(frame, enforce_gap=False)
+        try_add(frame, enforce_gap=False, allow_edges=True, category="User")
 
     def pick_from_candidates(
         candidates: List[tuple[int, float]],
         count: int,
-        reverse: bool = False,
+        mode: str,
         gap_seconds_override: Optional[float] = None,
     ) -> None:
         if count <= 0 or not candidates:
             return
-        ordered = sorted(candidates, key=lambda item: item[1], reverse=reverse)
-        unique_indices = []
-        seen_local = set()
-        for idx, _ in ordered:
-            if idx in seen_local:
-                continue
-            seen_local.add(idx)
-            unique_indices.append(idx)
+        unique_indices: List[int] = []
+        seen_local: set[int] = set()
+        if mode == "motion":
+            ordered = sorted(candidates, key=lambda item: item[1], reverse=True)
+            for idx, _ in ordered:
+                if idx in seen_local:
+                    continue
+                seen_local.add(idx)
+                unique_indices.append(idx)
+        elif mode in {"dark", "bright"}:
+            for idx, _ in candidates:
+                if idx in seen_local:
+                    continue
+                seen_local.add(idx)
+                unique_indices.append(idx)
+            rng.shuffle(unique_indices)
+        else:
+            raise ValueError(f"Unknown candidate mode: {mode}")
         separation = cfg.screen_separation_sec
         if gap_seconds_override is not None:
             separation = gap_seconds_override
@@ -361,8 +499,9 @@ def select_frames(
             else int(round(max(0.0, gap_seconds_override) * fps))
         )
         added = 0
+        category_label = "Motion" if mode == "motion" else mode.capitalize()
         for frame_idx in filtered_indices:
-            if try_add(frame_idx, enforce_gap=True, gap_frames=gap_frames):
+            if try_add(frame_idx, enforce_gap=True, gap_frames=gap_frames, category=category_label):
                 added += 1
             if added >= count:
                 break
@@ -374,7 +513,7 @@ def select_frames(
             dark_candidates = [(idx, val) for idx, val in brightness if val <= threshold]
         else:
             dark_candidates = [(idx, val) for idx, val in brightness if 0.062746 <= val <= 0.38]
-    pick_from_candidates(dark_candidates, cfg.frame_count_dark, reverse=False)
+    pick_from_candidates(dark_candidates, cfg.frame_count_dark, mode="dark")
 
     bright_candidates: List[tuple[int, float]] = []
     if cfg.frame_count_bright > 0:
@@ -383,7 +522,7 @@ def select_frames(
             bright_candidates = [(idx, val) for idx, val in brightness if val >= threshold]
         else:
             bright_candidates = [(idx, val) for idx, val in brightness if 0.45 <= val <= 0.8]
-    pick_from_candidates(bright_candidates, cfg.frame_count_bright, reverse=True)
+    pick_from_candidates(bright_candidates, cfg.frame_count_bright, mode="bright")
 
     motion_candidates: List[tuple[int, float]] = []
     if cfg.frame_count_motion > 0:
@@ -397,7 +536,7 @@ def select_frames(
     pick_from_candidates(
         motion_candidates,
         cfg.frame_count_motion,
-        reverse=True,
+        mode="motion",
         gap_seconds_override=motion_gap,
     )
 
@@ -405,8 +544,26 @@ def select_frames(
     attempts = 0
     while random_count > 0 and attempts < random_count * 10 and num_frames > 0:
         candidate = rng.randrange(num_frames)
-        if try_add(candidate, enforce_gap=True):
+        if try_add(candidate, enforce_gap=True, category="Random"):
             random_count -= 1
         attempts += 1
 
-    return sorted(selected)
+    final_frames = sorted(selected)
+
+    if cache_info is not None:
+        try:
+            _save_cached_metrics(
+                cache_info,
+                cfg,
+                brightness,
+                motion,
+                selection_hash=selection_hash,
+                selection_frames=final_frames,
+                selection_categories=frame_categories,
+            )
+        except Exception:
+            pass
+
+    if return_metadata:
+        return final_frames, {frame: frame_categories.get(frame, "Auto") for frame in final_frames}
+    return final_frames

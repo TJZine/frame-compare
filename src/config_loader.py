@@ -105,6 +105,10 @@ def load_config(path: str) -> AppConfig:
         raise ConfigError("analysis.random_seed must be >= 0")
     if not app.analysis.frame_data_filename:
         raise ConfigError("analysis.frame_data_filename must be set")
+    if app.analysis.skip_head_seconds < 0:
+        raise ConfigError("analysis.skip_head_seconds must be >= 0")
+    if app.analysis.skip_tail_seconds < 0:
+        raise ConfigError("analysis.skip_tail_seconds must be >= 0")
 
     if app.screenshots.compression_level not in (0, 1, 2):
         raise ConfigError("screenshots.compression_level must be 0, 1, or 2")

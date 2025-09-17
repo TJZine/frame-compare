@@ -2,22 +2,29 @@
 
 """Slow.pics upload orchestration."""
 
+from collections import defaultdict
 from pathlib import Path
-from typing import List
-from urllib.parse import urlsplit
+from typing import Callable, Dict, List, Optional, TYPE_CHECKING
+from urllib.parse import urlsplit, unquote
 import logging
 import time
+import uuid
 
 import requests
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from requests_toolbelt.multipart.encoder import MultipartEncoder
+else:  # pragma: no cover - optional dependency in tests
+    try:
+        from requests_toolbelt import MultipartEncoder  # type: ignore
+    except Exception:
+        MultipartEncoder = None  # type: ignore
 
 from .datatypes import SlowpicsConfig
 
 
 class SlowpicsAPIError(RuntimeError):
     """Raised when slow.pics API interactions fail."""
-
-
-_SLOWPICS_BASE = "https://slow.pics/api"
 
 
 logger = logging.getLogger(__name__)
@@ -29,22 +36,9 @@ def _raise_for_status(response: requests.Response, context: str) -> None:
             detail = response.json()
         except Exception:
             detail = response.text
-        raise SlowpicsAPIError(f"{context} failed ({response.status_code}): {detail}")
-
-
-def _post_json(session: requests.Session, url: str, payload: dict, context: str) -> requests.Response:
-    resp = session.post(url, json=payload, timeout=30)
-    _raise_for_status(resp, context)
-    return resp
-
-
-def _upload_file(session: requests.Session, url: str, file_path: Path, payload: dict, context: str) -> requests.Response:
-    with file_path.open("rb") as handle:
-        files = {"image": (file_path.name, handle, "image/png")}
-        data = {key: str(value) for key, value in payload.items() if value is not None}
-        resp = session.post(url, files=files, data=data, timeout=60)
-    _raise_for_status(resp, context)
-    return resp
+        error = SlowpicsAPIError(f"{context} failed ({response.status_code}): {detail}")
+        setattr(error, "status_code", response.status_code)
+        raise error
 
 
 def _redact_webhook(url: str) -> str:
@@ -82,20 +76,175 @@ def _post_direct_webhook(session: requests.Session, webhook_url: str, canonical_
     logger.error("Giving up on webhook delivery to %s after %s attempts", redacted, 3)
 
 
-def upload_comparison(image_files: List[str], screen_dir: Path, cfg: SlowpicsConfig) -> str:
+def _build_legacy_headers(session: requests.Session, encoder: "MultipartEncoder") -> Dict[str, str]:
+    xsrf = session.cookies.get_dict().get("XSRF-TOKEN")
+    if not xsrf:
+        raise SlowpicsAPIError("Missing XSRF token; cannot complete slow.pics upload")
+    return {
+        "Accept": "*/*",
+        "Accept-Encoding": "gzip, deflate",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Access-Control-Allow-Origin": "*",
+        "Content-Length": str(getattr(encoder, "len", 0)),
+        "Content-Type": encoder.content_type,
+        "Origin": "https://slow.pics/",
+        "Referer": "https://slow.pics/comparison",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36",
+        "X-XSRF-TOKEN": unquote(xsrf),
+    }
+
+
+def _prepare_legacy_plan(image_files: List[str]) -> tuple[List[int], List[List[tuple[str, Path]]]]:
+    groups: dict[int, List[tuple[str, Path]]] = defaultdict(list)
+    for file_path in image_files:
+        path = Path(file_path)
+        if not path.is_file():
+            raise SlowpicsAPIError(f"Image file not found: {file_path}")
+        name = path.name
+        if " - " not in name or not name.lower().endswith(".png"):
+            raise SlowpicsAPIError(
+                f"Screenshot '{name}' does not follow '<frame> - <label>.png' naming"
+            )
+        frame_part, label_part = name[:-4].split(" - ", 1)
+        try:
+            frame_idx = int(frame_part.strip())
+        except ValueError as exc:
+            raise SlowpicsAPIError(f"Unable to parse frame index from '{name}'") from exc
+        label = label_part.strip() or "comparison"
+        groups.setdefault(frame_idx, []).append((label, path))
+
+    if not groups:
+        raise SlowpicsAPIError("No screenshots available for slow.pics upload")
+
+    frame_order = sorted(groups.keys())
+    expected = len(groups[frame_order[0]])
+    for frame, entries in groups.items():
+        if len(entries) != expected:
+            raise SlowpicsAPIError(
+                f"Inconsistent screenshot count for frame {frame}; expected {expected}, found {len(entries)}"
+            )
+    ordered_groups = [groups[frame] for frame in frame_order]
+    return frame_order, ordered_groups
+
+
+def _upload_comparison_legacy(
+    session: requests.Session,
+    image_files: List[str],
+    screen_dir: Path,
+    cfg: SlowpicsConfig,
+    *,
+    progress_callback: Optional[Callable[[int], None]] = None,
+) -> str:
+    if MultipartEncoder is None:
+        raise SlowpicsAPIError(
+            "requests-toolbelt is required for slow.pics uploads. Install it to enable auto-upload."
+        )
+
+    frame_order, grouped = _prepare_legacy_plan(image_files)
+    browser_id = str(uuid.uuid4())
+
+    fields: dict[str, str] = {
+        "collectionName": cfg.collection_name or "Frame Comparison",
+        "hentai": str(bool(cfg.is_hentai)).lower(),
+        "optimize-images": "true",
+        "browserId": browser_id,
+        "public": str(bool(cfg.is_public)).lower(),
+    }
+    if cfg.tmdb_id:
+        fields["tmdbId"] = str(cfg.tmdb_id)
+    if cfg.remove_after_days:
+        fields["removeAfter"] = str(int(cfg.remove_after_days))
+
+    upload_plan: List[List[Path]] = []
+    for comp_index, frame in enumerate(frame_order):
+        entries = grouped[comp_index]
+        fields[f"comparisons[{comp_index}].name"] = str(frame)
+        per_frame_paths: List[Path] = []
+        for image_index, (label, path) in enumerate(entries):
+            fields[f"comparisons[{comp_index}].imageNames[{image_index}]"] = label
+            per_frame_paths.append(path)
+        upload_plan.append(per_frame_paths)
+
+    encoder = MultipartEncoder(fields, str(uuid.uuid4()))
+    headers = _build_legacy_headers(session, encoder)
+    response = session.post(
+        "https://slow.pics/upload/comparison",
+        data=encoder.to_string(),
+        headers=headers,
+        timeout=30,
+    )
+    _raise_for_status(response, "Legacy collection creation")
+    try:
+        comp_json = response.json()
+    except ValueError as exc:
+        raise SlowpicsAPIError("Invalid JSON response returned by slow.pics") from exc
+
+    collection_uuid = comp_json.get("collectionUuid")
+    key = comp_json.get("key")
+    images = comp_json.get("images")
+    if not isinstance(images, list):
+        raise SlowpicsAPIError("Slow.pics response missing image identifiers")
+    if len(images) != len(upload_plan):
+        raise SlowpicsAPIError("Unexpected slow.pics response structure for comparisons")
+
+    for per_frame_paths, image_ids in zip(upload_plan, images):
+        if not isinstance(image_ids, list) or len(image_ids) != len(per_frame_paths):
+            raise SlowpicsAPIError("Slow.pics returned mismatched image identifiers")
+        for path, image_uuid in zip(per_frame_paths, image_ids):
+            upload_fields = {
+                "collectionUuid": collection_uuid,
+                "imageUuid": image_uuid,
+                "file": (path.name, path.read_bytes(), "image/png"),
+                "browserId": browser_id,
+            }
+            upload_encoder = MultipartEncoder(upload_fields, str(uuid.uuid4()))
+            upload_headers = _build_legacy_headers(session, upload_encoder)
+            upload_resp = session.post(
+                "https://slow.pics/upload/image",
+                data=upload_encoder.to_string(),
+                headers=upload_headers,
+                timeout=60,
+            )
+            _raise_for_status(upload_resp, f"Upload frame {path.name}")
+            if getattr(upload_resp, "content", b""):
+                text = upload_resp.content.decode("utf-8", "ignore").strip()
+                if text and text.upper() != "OK":
+                    raise SlowpicsAPIError(f"Unexpected slow.pics response: {text}")
+            if progress_callback is not None:
+                progress_callback(1)
+
+    if collection_uuid and key:
+        canonical_url = f"https://slow.pics/c/{collection_uuid}/{key}"
+        shortcut_id = collection_uuid
+    elif key:
+        canonical_url = f"https://slow.pics/c/{key}"
+        shortcut_id = key
+    else:
+        raise SlowpicsAPIError("Missing collection identifiers in slow.pics response")
+
+    if cfg.webhook_url:
+        _post_direct_webhook(session, cfg.webhook_url, canonical_url)
+    if cfg.create_url_shortcut:
+        shortcut_path = screen_dir / f"slowpics_{shortcut_id}.url"
+        shortcut_path.write_text(f"[InternetShortcut]\nURL={canonical_url}\n", encoding="utf-8")
+    return canonical_url
+
+
+def upload_comparison(
+    image_files: List[str],
+    screen_dir: Path,
+    cfg: SlowpicsConfig,
+    *,
+    progress_callback: Optional[Callable[[int], None]] = None,
+) -> str:
     """Upload screenshots to slow.pics and return the collection URL."""
 
     if not image_files:
         raise SlowpicsAPIError("No image files provided for upload")
 
     session = requests.Session()
-    session.headers.update({
-        "User-Agent": "frame-compare/1.0",
-    })
-
     try:
-        landing = session.get("https://slow.pics/comparison", timeout=15)
-        landing.raise_for_status()
+        session.get("https://slow.pics/comparison", timeout=10)
     except requests.RequestException as exc:
         raise SlowpicsAPIError(f"Failed to establish slow.pics session: {exc}") from exc
 
@@ -103,56 +252,11 @@ def upload_comparison(image_files: List[str], screen_dir: Path, cfg: SlowpicsCon
     if not xsrf_token:
         raise SlowpicsAPIError("Missing XSRF token from slow.pics response")
 
-    session.headers.update({
-        "Origin": "https://slow.pics",
-        "Referer": "https://slow.pics/comparison",
-        "X-Xsrf-Token": xsrf_token,
-    })
-
-    create_payload = {
-        "title": cfg.collection_name or "Frame Comparison",
-        "public": bool(cfg.is_public),
-        "hentai": bool(cfg.is_hentai),
-        "tmdbId": cfg.tmdb_id or None,
-        "removeAfterDays": int(cfg.remove_after_days or 0) or None,
-    }
-    create_resp = _post_json(session, f"{_SLOWPICS_BASE}/collections", create_payload, "Collection creation")
-    try:
-        create_json = create_resp.json()
-    except ValueError as exc:
-        raise SlowpicsAPIError("Invalid JSON response when creating collection") from exc
-
-    collection_id = create_json.get("uuid") or create_json.get("collectionUuid")
-    collection_key = create_json.get("key")
-    if not collection_id or not collection_key:
-        raise SlowpicsAPIError("Missing collection identifiers in slow.pics response")
-
-    upload_url = f"{_SLOWPICS_BASE}/collections/{collection_id}/items"
-
-    for order, file_path in enumerate(image_files):
-        path = Path(file_path)
-        if not path.is_file():
-            raise SlowpicsAPIError(f"Image file not found: {file_path}")
-
-        payload = {
-            "collectionUuid": collection_id,
-            "collectionKey": collection_key,
-            "order": order,
-        }
-        _upload_file(session, upload_url, path, payload, context=f"Upload frame {order}")
-
-    if cfg.webhook_url:
-        webhook_payload = {
-            "collectionUuid": collection_id,
-            "collectionKey": collection_key,
-            "webhookUrl": cfg.webhook_url,
-        }
-        _post_json(session, f"{_SLOWPICS_BASE}/collections/{collection_id}/webhook", webhook_payload, "Webhook notification")
-
-    canonical_url = f"https://slow.pics/c/{collection_id}/{collection_key}"
-    if cfg.webhook_url:
-        _post_direct_webhook(session, cfg.webhook_url, canonical_url)
-    if cfg.create_url_shortcut:
-        shortcut_path = screen_dir / f"slowpics_{collection_id}.url"
-        shortcut_path.write_text(f"[InternetShortcut]\nURL={canonical_url}\n", encoding="utf-8")
-    return canonical_url
+    logger.info("Using slow.pics legacy upload endpoints")
+    return _upload_comparison_legacy(
+        session,
+        image_files,
+        screen_dir,
+        cfg,
+        progress_callback=progress_callback,
+    )

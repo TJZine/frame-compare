@@ -1,4 +1,4 @@
-﻿import types
+import types
 
 import pytest
 
@@ -115,7 +115,7 @@ def test_select_frames_uses_cache(monkeypatch, tmp_path):
 
     calls = {"count": 0}
 
-    def fake_collect(analysis_clip, cfg, indices):
+    def fake_collect(analysis_clip, cfg, indices, progress=None):
         calls["count"] += 1
         return ([(idx, float(idx)) for idx in indices], [(idx, float(idx)) for idx in indices])
 
@@ -160,7 +160,7 @@ def test_motion_quarter_gap(monkeypatch):
         motion=[0.0 for _ in range(240)],
     )
 
-    def fake_collect(analysis_clip, cfg, indices):
+    def fake_collect(analysis_clip, cfg, indices, progress=None):
         brightness = [(idx, 0.0) for idx in indices]
         motion = [(idx, float(idx)) for idx in indices]
         return brightness, motion

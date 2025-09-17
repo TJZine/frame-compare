@@ -69,7 +69,7 @@ def test_cli_applies_overrides_and_naming(tmp_path, monkeypatch, runner):
 
     init_calls = []
 
-    def fake_init_clip(path, *, trim_start=0, trim_end=None, fps_map=None):
+    def fake_init_clip(path, *, trim_start=0, trim_end=None, fps_map=None, cache_dir=None):
         clip = types.SimpleNamespace(
             path=path,
             width=1920,
@@ -77,14 +77,14 @@ def test_cli_applies_overrides_and_naming(tmp_path, monkeypatch, runner):
             fps_num=24000,
             fps_den=1001,
         )
-        init_calls.append((path, trim_start, trim_end, fps_map))
+        init_calls.append((path, trim_start, trim_end, fps_map, cache_dir))
         return clip
 
     monkeypatch.setattr(frame_compare.vs_core, "init_clip", fake_init_clip)
 
     cache_infos = []
 
-    def fake_select(clip, analysis_cfg, files, file_under_analysis, cache_info=None):
+    def fake_select(clip, analysis_cfg, files, file_under_analysis, cache_info=None, progress=None):
         cache_infos.append(cache_info)
         return [10, 20]
 
@@ -107,11 +107,12 @@ def test_cli_applies_overrides_and_naming(tmp_path, monkeypatch, runner):
 
     assert ram_limits == [cfg.runtime.ram_limit_mb]
 
-    assert len(init_calls) == 2
+    expected_cache_dir = str(tmp_path.resolve())
+    assert len(init_calls) >= 2
     # Reference clip (BBB) initialised without fps override but with trim_end applied
-    assert init_calls[0] == (str(second), 0, -12, None)
+    assert (str(second), 0, -12, None, expected_cache_dir) in init_calls
     # First clip adopts reference fps and trim override
-    assert init_calls[1] == (str(first), 5, None, (24000, 1001))
+    assert (str(first), 5, None, (24000, 1001), expected_cache_dir) in init_calls
 
     assert generated_metadata and generated_metadata[0][0]["label"].startswith("AAA")
     assert generated_metadata[0][1]["label"].startswith("BBB")
@@ -145,11 +146,11 @@ def test_label_dedupe_preserves_short_labels(tmp_path, monkeypatch, runner):
     monkeypatch.setattr(frame_compare, "parse_filename_metadata", fake_parse)
     monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit: None)
 
-    def fake_init_clip(path, *, trim_start=0, trim_end=None, fps_map=None):
+    def fake_init_clip(path, *, trim_start=0, trim_end=None, fps_map=None, cache_dir=None):
         return types.SimpleNamespace(width=1920, height=1080, fps_num=24000, fps_den=1001)
 
     monkeypatch.setattr(frame_compare.vs_core, "init_clip", fake_init_clip)
-    monkeypatch.setattr(frame_compare, "select_frames", lambda clip, cfg, files, file_under_analysis, cache_info=None: [42])
+    monkeypatch.setattr(frame_compare, "select_frames", lambda clip, cfg, files, file_under_analysis, cache_info=None, progress=None: [42])
 
     captured = []
 
@@ -180,14 +181,14 @@ def test_cli_reuses_frame_cache(tmp_path, monkeypatch, runner):
     monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
     monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit: None)
 
-    def fake_init(path, *, trim_start=0, trim_end=None, fps_map=None):
+    def fake_init(path, *, trim_start=0, trim_end=None, fps_map=None, cache_dir=None):
         return types.SimpleNamespace(width=1280, height=720, fps_num=24000, fps_den=1001)
 
     monkeypatch.setattr(frame_compare.vs_core, "init_clip", fake_init)
 
     call_state = {"calls": 0, "cache_hits": 0}
 
-    def fake_select(clip, analysis_cfg, files, file_under_analysis, cache_info=None):
+    def fake_select(clip, analysis_cfg, files, file_under_analysis, cache_info=None, progress=None):
         call_state["calls"] += 1
         assert cache_info is not None
         if cache_info.path.exists():
@@ -235,11 +236,11 @@ def test_cli_input_override_and_cleanup(tmp_path, monkeypatch, runner):
     monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
     monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit: None)
 
-    def fake_init(path, *, trim_start=0, trim_end=None, fps_map=None):
+    def fake_init(path, *, trim_start=0, trim_end=None, fps_map=None, cache_dir=None):
         return types.SimpleNamespace(width=1280, height=720, fps_num=24000, fps_den=1001)
 
     monkeypatch.setattr(frame_compare.vs_core, "init_clip", fake_init)
-    monkeypatch.setattr(frame_compare, "select_frames", lambda clip, cfg, files, file_under_analysis, cache_info=None: [7])
+    monkeypatch.setattr(frame_compare, "select_frames", lambda clip, cfg, files, file_under_analysis, cache_info=None, progress=None: [7])
 
     def fake_generate(clips, frames, files, metadata, out_dir, cfg_screens, **kwargs):
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -251,7 +252,7 @@ def test_cli_input_override_and_cleanup(tmp_path, monkeypatch, runner):
 
     uploads = []
 
-    def fake_upload(image_paths, screen_dir, cfg_slow):
+    def fake_upload(image_paths, screen_dir, cfg_slow, **kwargs):
         uploads.append((image_paths, screen_dir))
         return "https://slow.pics/c/abc/def"
 

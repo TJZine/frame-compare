@@ -1,11 +1,4 @@
-# All user-editable settings live here.
-#
-# Quick start:
-# 1. Point `[paths].input_dir` at the folder containing your encodes (or pass `--input`).
-# 2. Decide whether one encode should guide selection via `analysis.analyze_clip`.
-# 3. Pick your screenshot plan — keep VapourSynth, or toggle `screenshots.use_ffmpeg = true` when VS is unavailable.
-# 4. Enable `[slowpics].auto_upload` and fill in collection/webhook fields when you want automatic publishing.
-# 5. Populate `[overrides]` maps if you need trims or FPS tweaks to stay in lockstep with the legacy workflow.
+﻿# All user-editable settings live here.
 
 [analysis]
 # Frame selection knobs. The legacy quantile, motion, and random heuristics are all exposed here.
@@ -63,8 +56,11 @@ prefer_guessit = true
 input_dir = "comparison_videos"
 
 [runtime]
-# Memory guard for VapourSynth initialisation (mirrors the legacy script behaviour).
 ram_limit_mb = 8000
+vapoursynth_python_paths = [
+  "C:/Users/zinez/AppData/Local/Programs/Python/Python311/Lib/site-packages"
+]
+
 
 [overrides]
 # Per-source trim/FPS overrides. Keys may be an index, filename, or parsed label (case-insensitive).

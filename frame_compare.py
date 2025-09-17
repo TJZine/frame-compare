@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import re
 import sys
 import shutil
@@ -7,10 +8,13 @@ import webbrowser
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
+import time
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 import click
 from rich import print
+from rich.markup import escape
+from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 from natsort import os_sorted
 
 from src.config_loader import ConfigError, load_config
@@ -154,12 +158,61 @@ def _dedupe_labels(
             meta["label"] = files[idx].name
 
 
-def _pick_analyze_file(files: Sequence[Path], metadata: Sequence[Mapping[str, str]], target: str | None) -> Path:
+def _estimate_analysis_time(file: Path, cache_dir: Path | None) -> float:
+    """Estimate time to read two small windows of frames via VapourSynth.
+
+    Mirrors the legacy heuristic: read ~15 frames around 1/3 and 2/3 into the clip,
+    average the elapsed time. Returns +inf on failure so slower/unreadable clips are avoided.
+    """
+    try:
+        clip = vs_core.init_clip(str(file), cache_dir=str(cache_dir) if cache_dir else None)
+    except Exception:
+        return float("inf")
+
+    try:
+        total = getattr(clip, "num_frames", 0)
+        if not isinstance(total, int) or total <= 1:
+            return float("inf")
+        read_len = 15
+        # safeguard when the clip is very short
+        while (total // 3) + 1 < read_len and read_len > 1:
+            read_len -= 1
+
+        stats = clip.std.PlaneStats()
+
+        def _read_window(base: int) -> float:
+            start = max(0, min(base, max(0, total - 1)))
+            t0 = time.perf_counter()
+            for j in range(read_len):
+                idx = min(start + j, max(0, total - 1))
+                frame = stats.get_frame(idx)
+                del frame
+            return time.perf_counter() - t0
+
+        t1 = _read_window(total // 3)
+        t2 = _read_window((2 * total) // 3)
+        return (t1 + t2) / 2.0
+    except Exception:
+        return float("inf")
+
+
+def _pick_analyze_file(
+    files: Sequence[Path],
+    metadata: Sequence[Mapping[str, str]],
+    target: str | None,
+    *,
+    cache_dir: Path | None = None,
+) -> Path:
     if not files:
         raise ValueError("No files to analyze")
     target = (target or "").strip()
     if not target:
-        return files[0]
+        # Legacy parity: default to the file with the smallest estimated read time.
+        print("[cyan]Determining which file to analyze...[/cyan]")
+        times = [(_estimate_analysis_time(file, cache_dir), idx) for idx, file in enumerate(files)]
+        times.sort(key=lambda x: x[0])
+        fastest_idx = times[0][1] if times else 0
+        return files[fastest_idx]
 
     target_lower = target.lower()
 
@@ -255,8 +308,10 @@ def _extract_clip_fps(clip: object) -> Tuple[int, int]:
     return (24000, 1001)
 
 
-def _init_clips(plans: Sequence[_ClipPlan], runtime_cfg) -> None:
+def _init_clips(plans: Sequence[_ClipPlan], runtime_cfg, cache_dir: Path | None) -> None:
     vs_core.set_ram_limit(runtime_cfg.ram_limit_mb)
+
+    cache_dir_str = str(cache_dir) if cache_dir is not None else None
 
     reference_index = next((idx for idx, plan in enumerate(plans) if plan.use_as_reference), None)
     reference_fps: Optional[Tuple[int, int]] = None
@@ -267,6 +322,7 @@ def _init_clips(plans: Sequence[_ClipPlan], runtime_cfg) -> None:
             str(plan.path),
             trim_start=plan.trim_start,
             trim_end=plan.trim_end,
+            cache_dir=cache_dir_str,
         )
         plan.clip = clip
         plan.effective_fps = _extract_clip_fps(clip)
@@ -284,6 +340,7 @@ def _init_clips(plans: Sequence[_ClipPlan], runtime_cfg) -> None:
             trim_start=plan.trim_start,
             trim_end=plan.trim_end,
             fps_map=fps_override,
+            cache_dir=cache_dir_str,
         )
         plan.clip = clip
         plan.applied_fps = fps_override
@@ -316,7 +373,7 @@ def _print_summary(files: Sequence[Path], frames: Sequence[int], out_dir: Path, 
     print("[green]Comparison ready[/green]")
     print(f"  Files     : {len(files)}")
     print(f"  Frames    : {len(frames)} -> {frames}")
-    print(f"  Output dir: {out_dir}")
+    builtins.print(f"  Output dir: {out_dir}")
     if url:
         print(f"  Slow.pics : {url}")
 
@@ -339,6 +396,8 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
             rich_message=f"[red]Input directory not found:[/red] {root}",
         )
 
+    vs_core.configure(search_paths=cfg.runtime.vapoursynth_python_paths)
+
     try:
         files = _discover_media(root)
     except OSError as exc:
@@ -360,10 +419,10 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
         print(f"  - {label} ({file.name})")
 
     plans = _build_plans(files, metadata, cfg)
-    analyze_path = _pick_analyze_file(files, metadata, cfg.analysis.analyze_clip)
+    analyze_path = _pick_analyze_file(files, metadata, cfg.analysis.analyze_clip, cache_dir=root)
 
     try:
-        _init_clips(plans, cfg.runtime)
+        _init_clips(plans, cfg.runtime, root)
     except vs_core.ClipInitError as exc:
         raise CLIAppError(
             f"Failed to open clip: {exc}", rich_message=f"[red]Failed to open clip:[/red] {exc}"
@@ -380,14 +439,99 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
 
     cache_info = _build_cache_info(root, plans, cfg, analyze_index)
 
+    step_size = max(1, int(cfg.analysis.step))
+    total_frames = getattr(analyze_clip, 'num_frames', 0)
+    sample_count = 0
+    if isinstance(total_frames, int) and total_frames > 0:
+        sample_count = (total_frames + step_size - 1) // step_size
+
+    analyze_label_raw = plans[analyze_index].metadata.get('label') or analyze_path.name
+    analyze_label = escape(analyze_label_raw.strip())
+    analyze_label_colored = f"Analyzing video: [bright_cyan]{analyze_label}[/]"
+
+    cache_exists = cache_info is not None and cache_info.path.exists()
+    if cache_exists:
+        print(f"[cyan]Using cached frame metrics:[/cyan] {cache_info.path.name}")
+        print("[cyan]Selecting frames from cached data...[/cyan]")
+
+    using_frame_total = isinstance(total_frames, int) and total_frames > 0
+    progress_total = int(total_frames) if using_frame_total else int(sample_count)
+
+    def _run_selection(progress_callback=None):
+        try:
+            result = select_frames(
+                analyze_clip,
+                cfg.analysis,
+                [plan.path.name for plan in plans],
+                analyze_path.name,
+                cache_info=cache_info,
+                progress=progress_callback,
+                return_metadata=True,
+            )
+        except TypeError as exc:
+            if "return_metadata" not in str(exc):
+                raise
+            result = select_frames(
+                analyze_clip,
+                cfg.analysis,
+                [plan.path.name for plan in plans],
+                analyze_path.name,
+                cache_info=cache_info,
+                progress=progress_callback,
+            )
+        if isinstance(result, tuple):
+            return result
+        frames_only = list(result)
+        return frames_only, {frame: "Auto" for frame in frames_only}
+
     try:
-        frames = select_frames(
-            analyze_clip,
-            cfg.analysis,
-            [plan.path.name for plan in plans],
-            analyze_path.name,
-            cache_info=cache_info,
-        )
+        if sample_count > 0 and not cache_exists:
+            start_time = time.perf_counter()
+            samples_done = 0
+
+            with Progress(
+                TextColumn('{task.description}'),
+                BarColumn(),
+                TextColumn('{task.completed}/{task.total}'),
+                TextColumn('{task.percentage:>6.02f}%'),
+                TextColumn('{task.fields[fps]}'),
+                TimeRemainingColumn(),
+                transient=False,
+            ) as analysis_progress:
+                task_id = analysis_progress.add_task(
+                    analyze_label_colored,
+                    total=max(1, progress_total),
+                    fps="   0.00 fps",
+                )
+
+                def _advance_samples(count: int) -> None:
+                    nonlocal samples_done
+                    samples_done += count
+                    if progress_total <= 0:
+                        return
+                    elapsed = time.perf_counter() - start_time
+                    frames_processed = samples_done * step_size
+                    completed = (
+                        min(progress_total, frames_processed)
+                        if using_frame_total
+                        else min(progress_total, samples_done)
+                    )
+                    fps_val = 0.0
+                    if elapsed > 0:
+                        fps_val = frames_processed / elapsed
+                    analysis_progress.update(
+                        task_id,
+                        completed=completed,
+                        fps=f"{fps_val:7.2f} fps",
+                    )
+
+                frames, frame_categories = _run_selection(_advance_samples)
+                # Ensure progress completes even if sampling stopped early
+                final_completed = progress_total if progress_total > 0 else analysis_progress.tasks[task_id].completed
+                analysis_progress.update(task_id, completed=final_completed)
+        else:
+            frames, frame_categories = _run_selection()
+
     except Exception as exc:
         raise CLIAppError(
             f"Frame selection failed: {exc}",
@@ -401,16 +545,67 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
         )
 
     out_dir = (root / cfg.screenshots.directory_name).resolve()
+    total_screens = len(frames) * len(plans)
+    print("[cyan]Preparing screenshot rendering...[/cyan]")
     try:
-        image_paths = generate_screenshots(
-            clips,
-            frames,
-            [str(plan.path) for plan in plans],
-            [plan.metadata for plan in plans],
-            out_dir,
-            cfg.screenshots,
-            trim_offsets=[plan.trim_start for plan in plans],
-        )
+        if total_screens > 0:
+            start_time = time.perf_counter()
+            processed = 0
+
+            with Progress(
+                TextColumn('{task.description}'),
+                BarColumn(),
+                TextColumn('{task.completed}/{task.total}'),
+                TextColumn('{task.percentage:>6.02f}%'),
+                TextColumn('{task.fields[rate]}'),
+                TimeRemainingColumn(),
+                transient=False,
+            ) as render_progress:
+                task_id = render_progress.add_task(
+                    'Generating screenshots',
+                    total=total_screens,
+                    rate="   0.00 fps",
+                )
+
+                def advance_render(count: int) -> None:
+                    nonlocal processed
+                    processed += count
+                    elapsed = time.perf_counter() - start_time
+                    rate = processed / elapsed if elapsed > 0 else 0.0
+                    render_progress.update(
+                        task_id,
+                        completed=min(total_screens, processed),
+                        rate=f"{rate:7.2f} fps",
+                    )
+
+                image_paths = generate_screenshots(
+                    clips,
+                    frames,
+                    [str(plan.path) for plan in plans],
+                    [plan.metadata for plan in plans],
+                    out_dir,
+                    cfg.screenshots,
+                    trim_offsets=[plan.trim_start for plan in plans],
+                    progress_callback=advance_render,
+                )
+
+                if processed < total_screens:
+                    render_progress.update(
+                        task_id,
+                        completed=total_screens,
+                        rate=f"{(processed / max(1e-6, time.perf_counter() - start_time)):7.2f} fps",
+                    )
+        else:
+            image_paths = generate_screenshots(
+                clips,
+                frames,
+                [str(plan.path) for plan in plans],
+                [plan.metadata for plan in plans],
+                out_dir,
+                cfg.screenshots,
+                trim_offsets=[plan.trim_start for plan in plans],
+                frame_labels=frame_categories,
+            )
     except ScreenshotError as exc:
         raise CLIAppError(
             f"Screenshot generation failed: {exc}",
@@ -419,8 +614,58 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
 
     slowpics_url: Optional[str] = None
     if cfg.slowpics.auto_upload:
+        print("[cyan]Preparing slow.pics upload...[/cyan]")
+        upload_total = len(image_paths)
         try:
-            slowpics_url = upload_comparison(image_paths, out_dir, cfg.slowpics)
+            if upload_total > 0:
+                start_time = time.perf_counter()
+                uploaded = 0
+
+                with Progress(
+                    TextColumn('{task.description}'),
+                    BarColumn(),
+                    TextColumn('{task.completed}/{task.total}'),
+                    TextColumn('{task.percentage:>6.02f}%'),
+                    TextColumn('{task.fields[rate]}'),
+                    TimeRemainingColumn(),
+                    transient=False,
+                ) as upload_progress:
+                    task_id = upload_progress.add_task(
+                        'Uploading to slow.pics',
+                        total=upload_total,
+                        rate="   0.00 fps",
+                    )
+
+                    def advance_upload(count: int) -> None:
+                        nonlocal uploaded
+                        uploaded += count
+                        elapsed = time.perf_counter() - start_time
+                        rate = uploaded / elapsed if elapsed > 0 else 0.0
+                        upload_progress.update(
+                            task_id,
+                            completed=min(upload_total, uploaded),
+                            rate=f"{rate:7.2f} fps",
+                        )
+
+                    slowpics_url = upload_comparison(
+                        image_paths,
+                        out_dir,
+                        cfg.slowpics,
+                        progress_callback=advance_upload,
+                    )
+
+                    if uploaded < upload_total:
+                        upload_progress.update(
+                            task_id,
+                            completed=upload_total,
+                            rate=f"{(uploaded / max(1e-6, time.perf_counter() - start_time)):7.2f} fps",
+                        )
+            else:
+                slowpics_url = upload_comparison(
+                    image_paths,
+                    out_dir,
+                    cfg.slowpics,
+                )
         except SlowpicsAPIError as exc:
             raise CLIAppError(
                 f"slow.pics upload failed: {exc}",
@@ -468,7 +713,8 @@ def main(config_path: str, input_dir: str | None) -> None:
         if cfg.slowpics.delete_screen_dir_after_upload:
             try:
                 shutil.rmtree(out_dir)
-                print(f"[yellow]Screenshot directory removed:[/yellow] {out_dir}")
+                print("[yellow]Screenshot directory removed:[/yellow]")
+                builtins.print(f"  {out_dir}")
             except OSError as exc:
                 print(f"[yellow]Warning:[/yellow] Failed to delete screenshot directory: {exc}")
 

@@ -2,13 +2,17 @@
 
 """VapourSynth integration helpers used by the frame comparison tool."""
 
+import importlib
+import os
+import sys
+from pathlib import Path
 from dataclasses import dataclass
-from typing import Any, Mapping, Optional, Tuple
+from typing import Any, Iterable, Mapping, Optional, Sequence, Tuple
 
-try:  # Optional dependency during testing.
-    import vapoursynth as vs  # type: ignore
-except Exception:  # pragma: no cover - tested via injected cores.
-    vs = None  # type: ignore
+_VS_MODULE_NAME = "vapoursynth"
+_ENV_VAR = "VAPOURSYNTH_PYTHONPATH"
+_EXTRA_SEARCH_PATHS: list[str] = []
+_vs_module: Any | None = None
 
 
 class ClipInitError(RuntimeError):
@@ -42,15 +46,75 @@ class _TonemapDefaults:
     dest_range: str = "limited"
 
 
+
 _TONEMAP_DEFAULTS = _TonemapDefaults()
+
+
+def _normalise_search_path(path: str) -> str:
+    expanded = Path(path).expanduser()
+    try:
+        return str(expanded.resolve())
+    except (OSError, RuntimeError):
+        return str(expanded)
+
+
+def _add_search_paths(paths: Iterable[str]) -> None:
+    added = False
+    for raw in paths:
+        if not raw:
+            continue
+        resolved = _normalise_search_path(raw)
+        if resolved in _EXTRA_SEARCH_PATHS:
+            continue
+        _EXTRA_SEARCH_PATHS.append(resolved)
+        if resolved not in sys.path:
+            sys.path.insert(0, resolved)
+        added = True
+
+
+def _load_env_paths_from_env() -> None:
+    raw = os.environ.get(_ENV_VAR)
+    if not raw:
+        return
+    entries = [entry.strip() for entry in raw.split(os.pathsep)]
+    _add_search_paths(entry for entry in entries if entry)
+
+
+def configure(*, search_paths: Sequence[str] | None = None) -> None:
+    if search_paths:
+        _add_search_paths(search_paths)
+
+
+def _build_missing_vs_message() -> str:
+    details = []
+    if _EXTRA_SEARCH_PATHS:
+        details.append("Tried extra search paths: " + ", ".join(_EXTRA_SEARCH_PATHS))
+    details.append(
+        "Install VapourSynth for this interpreter or expose it via runtime.vapoursynth_python_paths in config.toml."
+    )
+    return " ".join(["VapourSynth is not available in this environment."] + details)
+
+
+def _get_vapoursynth_module() -> Any:
+    global _vs_module
+    if _vs_module is not None:
+        return _vs_module
+    try:
+        module = importlib.import_module(_VS_MODULE_NAME)
+    except Exception as exc:  # pragma: no cover - import failure depends on env
+        raise ClipInitError(_build_missing_vs_message()) from exc
+    _vs_module = module
+    return module
+
+
+_load_env_paths_from_env()
 
 
 def _resolve_core(core: Optional[Any]) -> Any:
     if core is not None:
         return core
-    if vs is None:
-        raise ClipInitError("VapourSynth is not available in this environment")
-    return vs.core
+    vs_module = _get_vapoursynth_module()
+    return vs_module.core
 
 
 def _resolve_source(core: Any) -> Any:
@@ -114,14 +178,25 @@ def init_clip(
     trim_start: int = 0,
     trim_end: Optional[int] = None,
     fps_map: Tuple[int, int] | None = None,
+    cache_dir: Optional[str | Path] = None,
     core: Optional[Any] = None,
 ) -> Any:
     """Initialise a VapourSynth clip for subsequent processing."""
 
     resolved_core = _resolve_core(core)
     source = _resolve_source(resolved_core)
+
+    path_obj = Path(path)
+    cache_root = Path(cache_dir) if cache_dir is not None else path_obj.parent
     try:
-        clip = source(path)
+        cache_root.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:  # pragma: no cover - defensive
+        raise ClipInitError(f"Failed to prepare cache directory '{cache_root}': {exc}") from exc
+
+    cache_file = cache_root / f"{path_obj.name}.lwi"
+
+    try:
+        clip = source(str(path_obj), cachefile=str(cache_file))
     except Exception as exc:  # pragma: no cover - exercised via mocks
         raise ClipInitError(f"Failed to open clip '{path}': {exc}") from exc
 
@@ -144,9 +219,8 @@ def set_ram_limit(limit_mb: int, *, core: Optional[Any] = None) -> None:
         raise ClipInitError("ram_limit_mb must be positive")
 
     resolved_core = _resolve_core(core)
-    bytes_limit = int(limit_mb) * 1024 * 1024
     try:
-        setattr(resolved_core, "max_cache_size", bytes_limit)
+        setattr(resolved_core, "max_cache_size", int(limit_mb))
     except Exception as exc:  # pragma: no cover - defensive
         raise ClipInitError("Failed to apply VapourSynth RAM limit") from exc
 

@@ -10,8 +10,3 @@
 - No hidden globals; functions pure unless explicitly I/O.
 - Type hints + docstrings; `logging` module for library logs.
 
-## Testing Policy
-- Unit: `utils`, `analysis`, mocked slow.pics.
-- Integration (local): small sample media for `vs_core` + writers.
-- Golden/parity: HDR & SDR sample pairs; frame lists + filenames.
-
