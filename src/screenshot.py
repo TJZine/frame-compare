@@ -1,12 +1,14 @@
-﻿from __future__ import annotations
-
 """Screenshot planning and export utilities."""
 
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
 from pathlib import Path
-from typing import List, Sequence, Tuple
+from typing import List, Mapping, Sequence, Tuple
 
 from .datatypes import ScreenshotConfig
-from .utils import parse_filename_metadata
 
 
 class ScreenshotError(RuntimeError):
@@ -81,9 +83,20 @@ def _compute_scaled_dimensions(
     return (target_w, target_h)
 
 
-def _prepare_filename(source: str, frame: int, frame_index: int, cfg: ScreenshotConfig) -> str:
-    metadata = parse_filename_metadata(Path(source).name)
+def _sanitise_label(label: str) -> str:
+    cleaned = label.replace(os.sep, "_").replace("/", "_")
+    return cleaned.strip() or "comparison"
+
+
+def _prepare_filename(
+    source: str,
+    metadata: Mapping[str, str],
+    frame: int,
+    frame_index: int,
+    cfg: ScreenshotConfig,
+) -> str:
     base = metadata.get("label") or Path(source).stem
+    base = _sanitise_label(base)
     suffix = f"_frame{frame:06d}" if cfg.add_frame_info else f"_{frame_index:02d}"
     return f"{base}{suffix}.png"
 
@@ -92,10 +105,41 @@ def _map_compression_level(level: int) -> int:
     return {0: 0, 1: 6, 2: 9}.get(level, 6)
 
 
-def _save_frame_with_vapoursynth(clip, frame_idx: int, crop: Tuple[int, int, int, int], scaled: Tuple[int, int], path: Path, cfg: ScreenshotConfig) -> None:
+def _annotate_frame(image, frame_idx: int):
+    try:
+        from PIL import Image, ImageDraw  # type: ignore
+    except Exception as exc:  # pragma: no cover - requires runtime deps
+        raise ScreenshotWriterError("Pillow is required to annotate screenshots") from exc
+
+    if image.mode != "RGBA":
+        image = image.convert("RGBA")
+    draw = ImageDraw.Draw(image)
+    text = f"Frame {frame_idx}"
+    padding = 8
+    text_box = draw.textbbox((0, 0), text)
+    box_width = text_box[2] - text_box[0] + 2 * padding
+    box_height = text_box[3] - text_box[1] + 2 * padding
+    draw.rectangle(
+        [
+            (0, image.height - box_height),
+            (box_width, image.height),
+        ],
+        fill=(0, 0, 0, 160),
+    )
+    draw.text((padding, image.height - box_height + padding), text, fill=(255, 255, 255, 255))
+    return image.convert("RGB")
+
+
+def _save_frame_with_vapoursynth(
+    clip,
+    frame_idx: int,
+    crop: Tuple[int, int, int, int],
+    scaled: Tuple[int, int],
+    path: Path,
+    cfg: ScreenshotConfig,
+) -> None:
     try:
         import vapoursynth as vs  # type: ignore
-        from PIL import Image, ImageDraw  # type: ignore
     except Exception as exc:  # pragma: no cover - requires runtime deps
         raise ScreenshotWriterError("VapourSynth with Pillow support is required for screenshot export") from exc
 
@@ -116,27 +160,80 @@ def _save_frame_with_vapoursynth(clip, frame_idx: int, crop: Tuple[int, int, int
         raise ScreenshotWriterError(f"Failed to render frame {frame_idx}: {exc}") from exc
 
     if cfg.add_frame_info:
-        image = image.convert("RGBA")
-        draw = ImageDraw.Draw(image)
-        text = f"Frame {frame_idx}"
-        padding = 8
-        text_box = draw.textbbox((0, 0), text)
-        box_width = text_box[2] - text_box[0] + 2 * padding
-        box_height = text_box[3] - text_box[1] + 2 * padding
-        draw.rectangle(
-            [
-                (0, image.height - box_height),
-                (box_width, image.height),
-            ],
-            fill=(0, 0, 0, 160),
-        )
-        draw.text((padding, image.height - box_height + padding), text, fill=(255, 255, 255, 255))
-        image = image.convert("RGB")
+        image = _annotate_frame(image, frame_idx)
 
     try:
         image.save(path, format="PNG", compress_level=_map_compression_level(cfg.compression_level))
     except OSError as exc:
         raise ScreenshotWriterError(f"Failed to save screenshot: {exc}") from exc
+
+
+def _map_ffmpeg_compression(level: int) -> int:
+    mapped = _map_compression_level(level)
+    return max(0, min(9, mapped))
+
+
+def _save_frame_with_ffmpeg(
+    source: str,
+    frame_idx: int,
+    crop: Tuple[int, int, int, int],
+    scaled: Tuple[int, int],
+    path: Path,
+    cfg: ScreenshotConfig,
+    width: int,
+    height: int,
+) -> None:
+    if shutil.which("ffmpeg") is None:
+        raise ScreenshotWriterError("FFmpeg executable not found in PATH")
+
+    cropped_w = max(1, width - crop[0] - crop[2])
+    cropped_h = max(1, height - crop[1] - crop[3])
+
+    filters = [f"select=eq(n\\,{int(frame_idx)})"]
+    if any(crop):
+        filters.append(
+            "crop={w}:{h}:{x}:{y}".format(
+                w=max(1, cropped_w),
+                h=max(1, cropped_h),
+                x=max(0, crop[0]),
+                y=max(0, crop[1]),
+            )
+        )
+    if scaled != (cropped_w, cropped_h):
+        filters.append(f"scale={max(1, scaled[0])}:{max(1, scaled[1])}:flags=lanczos")
+
+    filter_chain = ",".join(filters)
+    cmd = [
+        "ffmpeg",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        source,
+        "-vf",
+        filter_chain,
+        "-frames:v",
+        "1",
+        "-vsync",
+        "0",
+        "-compression_level",
+        str(_map_ffmpeg_compression(cfg.compression_level)),
+        str(path),
+    ]
+
+    process = subprocess.run(cmd, capture_output=True)
+    if process.returncode != 0:
+        stderr = process.stderr.decode("utf-8", "ignore").strip()
+        raise ScreenshotWriterError(f"FFmpeg failed for frame {frame_idx}: {stderr or 'unknown error'}")
+
+    if cfg.add_frame_info:
+        try:
+            from PIL import Image  # type: ignore
+        except Exception as exc:  # pragma: no cover - requires runtime deps
+            raise ScreenshotWriterError("Pillow is required to annotate screenshots") from exc
+        with Image.open(path) as image:
+            annotated = _annotate_frame(image, frame_idx)
+            annotated.save(path, format="PNG", compress_level=_map_compression_level(cfg.compression_level))
 
 
 def _save_frame_placeholder(path: Path) -> None:
@@ -147,6 +244,7 @@ def generate_screenshots(
     clips: Sequence[object],
     frames: Sequence[int],
     files: Sequence[str],
+    metadata: Sequence[Mapping[str, str]],
     out_dir: Path,
     cfg: ScreenshotConfig,
 ) -> List[str]:
@@ -154,13 +252,15 @@ def generate_screenshots(
 
     if len(clips) != len(files):
         raise ScreenshotError("clips and files must have matching lengths")
+    if len(metadata) != len(files):
+        raise ScreenshotError("metadata and files must have matching lengths")
     if not frames:
         return []
 
     out_dir.mkdir(parents=True, exist_ok=True)
     created: List[str] = []
 
-    for clip_index, (clip, file_path) in enumerate(zip(clips, files)):
+    for clip_index, (clip, file_path, meta) in enumerate(zip(clips, files, metadata)):
         width = getattr(clip, "width", None)
         height = getattr(clip, "height", None)
         if not isinstance(width, int) or not isinstance(height, int):
@@ -171,11 +271,23 @@ def generate_screenshots(
 
         for frame_pos, frame in enumerate(frames):
             frame_idx = int(frame)
-            file_name = _prepare_filename(file_path, frame_idx, frame_pos, cfg)
+            file_name = _prepare_filename(file_path, meta, frame_idx, frame_pos, cfg)
             target_path = out_dir / file_name
 
             try:
-                _save_frame_with_vapoursynth(clip, frame_idx, crop, scaled, target_path, cfg)
+                if cfg.use_ffmpeg:
+                    _save_frame_with_ffmpeg(
+                        file_path,
+                        frame_idx,
+                        crop,
+                        scaled,
+                        target_path,
+                        cfg,
+                        width,
+                        height,
+                    )
+                else:
+                    _save_frame_with_vapoursynth(clip, frame_idx, crop, scaled, target_path, cfg)
             except ScreenshotWriterError:
                 raise
             except Exception:

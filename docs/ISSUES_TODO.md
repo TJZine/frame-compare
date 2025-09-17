@@ -1,0 +1,24 @@
+- [ ] Restore trim/change_fps overrides in CLI and vs_core
+  - Context: `OverridesConfig` is validated but `_init_clips` never applies trims or FPS maps, unlike legacy `trim_dict`/`change_fps` behaviour.
+  - Repro: Add overrides to `config.toml`; run CLI; clips open without adjustments.【F:frame_compare.py†L87-L145】【F:src/vs_core.py†L93-L113】【F:legacy/compv4_improved.py†L94-L134】
+  - Acceptance criteria: Per-file trims and fps overrides applied deterministically (including "set" semantics) with unit tests.
+  - Labels: enhancement, parity, core
+  - Size: M
+- [ ] Respect naming preferences for labels and filenames
+  - Context: `NamingConfig.always_full_filename` and `prefer_guessit` are ignored when listing clips or generating screenshot names.
+  - Repro: Set `always_full_filename=false` in config; CLI still prints full filenames and screenshots use raw names.【F:frame_compare.py†L132-L135】【F:src/screenshot.py†L84-L88】【F:legacy/compv4_improved.py†L48-L53】
+  - Acceptance criteria: CLI and screenshot outputs honour naming toggles with regression tests.
+  - Labels: enhancement, parity, ux
+  - Size: S
+- [ ] Implement frame metrics caching per `save_frames_data`
+  - Context: `save_frames_data`/`frame_data_filename` survive validation but no metrics file is written or read on subsequent runs.
+  - Repro: Enable `save_frames_data`; rerun CLI; analysis recomputes metrics every time.【F:src/analysis.py†L171-L264】【F:legacy/compv4_improved.py†L34-L37】【F:legacy/compv4_improved.py†L144-L149】
+  - Acceptance criteria: Metrics cached alongside comparisons with invalidation when inputs change; tests cover cold/hot paths.
+  - Labels: enhancement, performance
+  - Size: M
+- [ ] Honour `use_ffmpeg` toggle or fail fast
+  - Context: Config exposes `use_ffmpeg` but screenshot module ignores it, leaving users without ffmpeg fallback.
+  - Repro: Set `use_ffmpeg=true`; run CLI on system without VapourSynth; placeholders generated instead of ffmpeg renders.【F:src/datatypes.py†L35-L42】【F:src/screenshot.py†L84-L185】【F:legacy/compv4_improved.py†L44-L47】
+  - Acceptance criteria: Either implement ffmpeg-based writer parity or raise a clear error when requested dependency missing.
+  - Labels: enhancement, parity
+  - Size: M

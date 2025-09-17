@@ -1,0 +1,39 @@
+Feature,Legacy Location/Ref,Modern Module,Parity (Yes/Partial/No),Notes / Gaps,Suggested Fix/Owner/Size(S/M/L)
+RAM limit enforcement,legacy/compv4_improved.py:L22-L369,src/vs_core.py,No,"RuntimeConfig.ram_limit_mb never applied to VapourSynth core; legacy set vs.core.max_cache_size.",Core team: apply limit during clip init (S)
+Frame count (dark/bright/motion),legacy/compv4_improved.py:L25-L29,src/analysis.py,Yes,"Counts map directly to AnalysisConfig frame selection parameters.",Maintain
+User-defined frames,user_frames= legacy/compv4_improved.py:L29-L31,src/analysis.py,Yes,"User frames appended before heuristics via AnalysisConfig.user_frames.",Maintain
+Random frame sampling,legacy/compv4_improved.py:L31-L33,src/analysis.py,Yes,"Random RNG seeded from config replicates legacy randomness knobs.",Maintain
+Save frame metrics cache,legacy/compv4_improved.py:L34-L37,src/analysis.py,No,"save_frames/frame_filename options exist but data is never persisted or reused.",Core team: implement caching around frame_data_filename (M)
+Screenshot frame info overlay,legacy/compv4_improved.py:L38-L41,src/screenshot.py,Yes,"add_frame_info toggles overlay similar to legacy frame_info flag.",Maintain
+Screenshot upscale alignment,legacy/compv4_improved.py:L40-L47,src/screenshot.py,Yes,"upscale/single_res/mod_crop mirror legacy options for scaling.",Maintain
+Screenshot FFmpeg toggle,legacy/compv4_improved.py:L44-L47,src/screenshot.py,No,"use_ffmpeg flag unused; no ffmpeg writer implemented.",Media pipeline: add ffmpeg writer or validation (M)
+PNG compression semantics,legacy/compv4_improved.py:L46-L47,src/screenshot.py,Partial,"Only three presets (0/1/2) supported; legacy allowed 0-2 for fpng and 0-100 for ffmpeg.",Clarify docs or expand mapping (S)
+Always use full filename,legacy/compv4_improved.py:L48-L51,frame_compare.py / src/screenshot.py,No,"NamingConfig.always_full_filename ignored when listing files or naming screenshots.",Core team: thread naming config through CLI and screenshot naming (S)
+Prefer GuessIt toggle,legacy/compv4_improved.py:L52-L53,frame_compare.py / src/utils.py,No,"CLI/screenshot paths call parse_filename_metadata without passing prefer_guessit override.",Core team: pass config flag to parse_filename_metadata (S)
+Analysis downscale height,legacy/compv4_improved.py:L55-L56,src/analysis.py,Yes,"downscale_height enforced before stats collection.",Maintain
+Analysis sampling step,legacy/compv4_improved.py:L57-L58,src/analysis.py,Yes,"step applied to index stride identical to legacy.",Maintain
+HDR to SDR analysis toggle,legacy/compv4_improved.py:L59-L60,src/analysis.py / src/vs_core.py,Yes,"analyze_in_sdr passes clip through tonemapping when enabled.",Maintain
+Quantile vs bands toggle,legacy/compv4_improved.py:L61-L69,src/analysis.py,Yes,"use_quantiles selects quantiles vs fixed brightness bands.",Maintain
+Dark/bright quantile thresholds,legacy/compv4_improved.py:L63-L65,src/analysis.py,Yes,"Quantile thresholds applied when enabled.",Maintain
+Motion absolute diff option,legacy/compv4_improved.py:L66-L67,src/analysis.py,Yes,"motion_use_absdiff changes diff expression path.",Maintain
+Motion scenecut quantile,legacy/compv4_improved.py:L68-L69,src/analysis.py,Yes,"motion_scenecut_quantile filters high motion frames as configured.",Maintain
+Modulus-aware crop,legacy/compv4_improved.py:L70-L73,src/screenshot.py,Yes,"plan_mod_crop mirrors modulus and letterbox handling.",Maintain
+Letterbox/pillarbox awareness,legacy/compv4_improved.py:L70-L73,src/screenshot.py,Yes,"letterbox_pillarbox_aware handled in crop planning.",Maintain
+Automatic slow.pics upload,legacy/compv4_improved.py:L76-L92,frame_compare.py / src/slowpics.py,Yes,"auto_upload triggers upload_comparison with public/private flags.",Maintain
+Slow.pics NSFW/public flags,legacy/compv4_improved.py:L78-L90,src/slowpics.py,Yes,"is_hentai/is_public map to payload flags.",Maintain
+TMDB ID metadata,legacy/compv4_improved.py:L81-L82,src/slowpics.py,Yes,"tmdbId forwarded in create_payload.",Maintain
+Remove-after days,legacy/compv4_improved.py:L83-L84,src/slowpics.py,Yes,"removeAfterDays payload mirrors legacy behaviour.",Maintain
+Webhook notifications,legacy/compv4_improved.py:L85-L86,src/slowpics.py,Yes,"webhook_url triggers webhook API call.",Maintain
+Open browser toggle,legacy/compv4_improved.py:L87-L88,frame_compare.py,Yes,"open_in_browser toggles webbrowser.open.",Maintain
+Create URL shortcut,legacy/compv4_improved.py:L89-L90,src/slowpics.py,Yes,"create_url_shortcut writes .url file.",Maintain
+Delete screenshots after upload,legacy/compv4_improved.py:L91-L92,frame_compare.py,Yes,"delete_screen_dir_after_upload removes directory on success.",Maintain
+Trim start overrides,legacy/compv4_improved.py:L94-L112,frame_compare.py / src/vs_core.py,No,"OverridesConfig.trim validated but never applied to clips.",Core team: map overrides to init_clip arguments (M)
+Trim end overrides,legacy/compv4_improved.py:L94-L112,frame_compare.py / src/vs_core.py,No,"trim_end entries unused; no support for end-frame adjustments.",Core team: translate trim_end to Clip Trim last args (M)
+Change FPS overrides,legacy/compv4_improved.py:L114-L134,frame_compare.py / src/vs_core.py,No,"change_fps map ignored; clips opened without fps adjustments or follow-the-set behaviour.",Core team: compute per-clip fps_map and apply (M)
+Analyze clip selection override,legacy/compv4_improved.py:L136-L140,frame_compare.py,Yes,"analyze_clip hint passed into _pick_analyze_file.",Maintain
+Random seed stability,legacy/compv4_improved.py:L144-L145,src/analysis.py,Yes,"random_seed seeds RNG for deterministic selection.",Maintain
+Frame data filename,legacy/compv4_improved.py:L146-L149,src/datatypes.py / src/analysis.py,No,"frame_data_filename required by validation but never read or written.",Core team: use path when persisting metrics (M)
+Screenshot directory name,legacy/compv4_improved.py:L148-L149,frame_compare.py / src/screenshot.py,Yes,"directory_name controls output path identical to screen_dirname.",Maintain
+Minimum frame separation,legacy/compv4_improved.py:L150-L151,src/analysis.py,Yes,"screen_separation_sec enforces spacing via dedupe.",Maintain
+Motion diff radius,legacy/compv4_improved.py:L152-L154,src/analysis.py,Yes,"motion_diff_radius used in smoothing window.",Maintain
+Tonemap parameter presets,legacy/compv4_improved.py:L187-L199,src/vs_core.py,Partial,"Modern code hardcodes bt2390 defaults with no config hook for TM presets or overlay flags.",Config: expose tonemap settings in AnalysisConfig or dedicated struct (M)

@@ -35,11 +35,12 @@ def test_generate_screenshots_filenames(tmp_path, monkeypatch):
 
     frames = [5, 25]
     files = ["example_video.mkv"]
-    created = screenshot.generate_screenshots([clip], frames, files, tmp_path, cfg)
+    metadata = [{"label": "Example Release"}]
+    created = screenshot.generate_screenshots([clip], frames, files, metadata, tmp_path, cfg)
     assert len(created) == len(frames)
     for path in created:
         assert Path(path).exists()
-        assert Path(path).name.startswith("example_video")
+        assert Path(path).name.startswith("Example Release")
 
     assert len(calls) == len(frames)
 
@@ -50,11 +51,11 @@ def test_compression_flag_passed(tmp_path, monkeypatch):
 
     captured = {}
 
-    def fake_writer(clip, frame_idx, crop, scaled, path, cfg):
-        captured[frame_idx] = screenshot._map_compression_level(cfg.compression_level)
+    def fake_writer(source, frame_idx, crop, scaled, path, cfg, width, height):
+        captured[frame_idx] = screenshot._map_ffmpeg_compression(cfg.compression_level)
         path.write_text("ffmpeg", encoding="utf-8")
 
-    monkeypatch.setattr(screenshot, "_save_frame_with_vapoursynth", fake_writer)
+    monkeypatch.setattr(screenshot, "_save_frame_with_ffmpeg", fake_writer)
 
-    screenshot.generate_screenshots([clip], [10], ["video.mkv"], tmp_path, cfg)
+    screenshot.generate_screenshots([clip], [10], ["video.mkv"], [{"label": "video"}], tmp_path, cfg)
     assert captured[10] == 9
