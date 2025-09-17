@@ -17,6 +17,13 @@ Automated video frame selection, screenshots, and optional slow.pics upload.
 - Continuous integration via GitHub Actions running `uv sync --group dev --frozen` and `pytest`.
 - Documented VS Code task flow so you can wire common commands into your IDE quickly.
 
+### Restored parity highlights
+- **Trim-aware screenshots** – both VapourSynth and FFmpeg writers now respect `[overrides.trim]`, `[overrides.trim_end]`, and `[overrides.change_fps]` so every frame index matches the legacy script.
+- **Global upscale planning** – `single_res` and `upscale=true` mirror the legacy tallest-height behaviour, keeping mixed-resolution comparisons aligned.
+- **Quarter-gap motion heuristic** – motion picks are spaced with the classic quarter-gap window to maximise variety just like `legacy/compv4_improved.py`.
+- **Label deduplication** – GuessIt/Anitopy fallbacks and short-label suffixing reproduce the original naming policy so uploads stay readable.
+- **Frame metric caching** – `save_frames_data` and `frame_data_filename` persist selection data, letting repeat runs skip expensive recomputation.
+
 ## Project structure
 ```
 .
@@ -42,6 +49,7 @@ Run the project with Python 3.11+ and [uv](https://github.com/astral-sh/uv). The
 uv lock
 uv sync --group dev
 uv run python -m pytest -q
+# Run against the sample clips bundled in comparison_videos/
 uv run python frame_compare.py --config config.toml --input .
 ```
 
@@ -49,10 +57,22 @@ uv run python frame_compare.py --config config.toml --input .
 uv lock
 uv sync --group dev
 uv run python -m pytest -q
+# Point to any folder containing your sources
 uv run python frame_compare.py --config config.toml --input .
 ```
 
 > ℹ️ VapourSynth, libplacebo, and ffmpeg deliver full-fidelity screenshots; without them the tool still runs, saving placeholder files through the built-in fallbacks.
+
+### Common run patterns
+| Scenario | Command | Notes |
+| --- | --- | --- |
+| Default (analysis + screenshots) | `uv run python frame_compare.py --config config.toml --input PATH` | Reads config, renders screenshots, honours slow.pics flags. |
+| Alternate config profile | `uv run python frame_compare.py --config profiles/hdr.toml --input PATH` | Keep multiple TOML profiles for HDR/anime/live-action tuned defaults. |
+| Temporary input override | `uv run python frame_compare.py --config config.toml --input "D:/captures"` | Leaves `config.toml` unchanged while targeting another folder. |
+| Re-using cached metrics | Run twice with `analysis.save_frames_data=true` | The second run loads `analysis.frame_data_filename` and skips recompute. |
+| Upload-only rerun | Disable screenshot stages once PNGs exist | Set `analysis.frame_count_* = 0`, keep `save_frames_data=false`, and rely on existing renders. |
+
+Pair these commands with per-run overrides by editing `config.toml` or by storing alternate configs under `profiles/`.
 
 ## Usage
 ```
@@ -68,6 +88,7 @@ Examples:
 - Scan the default sample folder: `uv run python frame_compare.py --config config.toml --input comparison_videos`
 - Point to an absolute path on Windows: `uv run python frame_compare.py --config config.toml --input "D:/captures"`
 - Enable auto-upload in your config, then run: `uv run python frame_compare.py --config profiles/slowpics.toml --input ./captures`
+- Force one encode to drive analysis: set `analysis.analyze_clip = "1"` (or use a label) before running the standard command.
 
 Output files land in `<input>/<screenshots.directory_name>/` (default `screens/`). Filenames are derived from parsed labels plus `_frameNNNNNN.png` (or an index when `add_frame_info = false`). The CLI prints a summary and, when uploads are enabled, the slow.pics URL.
 
@@ -82,7 +103,7 @@ Configuration lives in `config.toml` and is loaded through `src/config_loader.py
 | `frame_count_motion` | int | 15 | Frames with highest motion scores after smoothing. |
 | `user_frames` | list[int] | `[]` | Explicit frame numbers to force into the selection. |
 | `random_frames` | int | 15 | Additional random frames seeded by `random_seed`. |
-| `save_frames_data` | bool | true | Persist raw metric data alongside selections (future use). |
+| `save_frames_data` | bool | true | Persist raw metric data alongside selections (enables cache reuse on reruns). |
 | `downscale_height` | int | 480 | Downscale height for metrics to speed up analysis. |
 | `step` | int | 2 | Sampling stride; must stay ≥1. |
 | `analyze_in_sdr` | bool | true | Tonemap HDR clips before analysis using `vs_core`. |
@@ -91,7 +112,7 @@ Configuration lives in `config.toml` and is loaded through `src/config_loader.py
 | `bright_quantile` | float | 0.80 | Quantile cutoff for bright frame selection. |
 | `motion_use_absdiff` | bool | false | Use absolute differences instead of edge-emphasised diffs. |
 | `motion_scenecut_quantile` | float | 0.0 | Optional cap to drop extreme motion/scene-cut frames. |
-| `screen_separation_sec` | int | 6 | Minimum separation between chosen frames in seconds. |
+| `screen_separation_sec` | int | 6 | Minimum separation between chosen frames in seconds (quarter-gap heuristic restored). |
 | `motion_diff_radius` | int | 4 | Radius for motion smoothing window. |
 | `analyze_clip` | str | `""` | Name/index/label hint to pick the driving clip. |
 | `random_seed` | int | 20202020 | Seed controlling deterministic randomness. |
@@ -102,7 +123,7 @@ Configuration lives in `config.toml` and is loaded through `src/config_loader.py
 | --- | --- | --- | --- |
 | `directory_name` | str | `"screens"` | Subdirectory inside the input root for output images. |
 | `add_frame_info` | bool | true | Overlay frame numbers in the PNG footer bar. |
-| `use_ffmpeg` | bool | false | Reserved toggle for ffmpeg-based writers (currently VapourSynth). |
+| `use_ffmpeg` | bool | false | Flip to `true` to render via FFmpeg instead of VapourSynth (respects trims/FPS overrides). |
 | `compression_level` | int | 1 | PNG compression preset: 0 (fast) / 1 (balanced) / 2 (small). |
 | `upscale` | bool | true | Allow scaling above source resolution when `single_res` > native. |
 | `single_res` | int | 0 | Force output height (0 keeps native). |
@@ -127,7 +148,7 @@ Configuration lives in `config.toml` and is loaded through `src/config_loader.py
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `always_full_filename` | bool | true | Use the original filename as the screenshot label. |
-| `prefer_guessit` | bool | true | Prefer GuessIt over Anitopy when parsing metadata. |
+| `prefer_guessit` | bool | true | Prefer GuessIt over Anitopy when parsing metadata (falls back automatically). |
 
 ### [paths]
 | Key | Type | Default | Description |
@@ -135,8 +156,17 @@ Configuration lives in `config.toml` and is loaded through `src/config_loader.py
 | `input_dir` | str | `"."` | Base directory for input videos (sample config sets this to `comparison_videos`). |
 
 Additional helpers:
-- `[runtime]` exposes `ram_limit_mb` (default 8000) for future guardrails.
-- `[overrides]` supplies optional per-file `trim`, `trim_end`, and `change_fps` mappings validated by `config_loader`.
+- `[runtime]` exposes `ram_limit_mb` (default 8000) to guard VapourSynth initialisation just like the legacy script.
+- `[overrides]` supplies optional per-file `trim`, `trim_end`, and `change_fps` mappings applied consistently across analysis and screenshot writers.
+
+### Essential configuration checklist (new users)
+1. **Set your input folder** – update `[paths].input_dir` or pass `--input` to the CLI.
+2. **Name your sources** – tweak `[naming]` to balance GuessIt parsing vs original filenames for clearer labels.
+3. **Choose your driver clip** – set `analysis.analyze_clip` to a label, filename, or index when one encode should steer frame selection.
+4. **Plan screenshot sizes** – adjust `[screenshots].single_res`/`upscale` for uniform heights, and toggle `use_ffmpeg` when VapourSynth is unavailable.
+5. **Control uploads** – enable `[slowpics].auto_upload` and fill out webhook/collection fields to automate publishing.
+6. **Apply trims/FPS overrides** – populate `[overrides.trim]`, `[overrides.trim_end]`, or `[overrides.change_fps]` to keep parity with edited project timelines.
+7. **Keep runs reproducible** – leave `analysis.random_seed` as-is and keep `save_frames_data=true` when you want to reuse cached metrics.
 
 ## Development
 - Sync tooling: `uv lock` (after dependency edits) and `uv sync --group dev`.
