@@ -7,14 +7,25 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: .  # repo root, matches your layout
+
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
+
+      # (Optional) quick tree to sanity-check paths if something fails again
+      - name: Debug tree
+        run: |
+          pwd
+          ls -la
+
       - name: Set up project
-        working-directory: frame_compare
         run: |
           uv venv --python 3.11
           uv pip sync requirements.txt
+
       - name: Run tests
-        working-directory: frame_compare
-        run: uv run -m pytest -q
+        run: uv run python -m pytest -q
