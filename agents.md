@@ -1,4 +1,4 @@
-# agents.md — Working with Codex (GPT‑5‑Codex) on `comparison_tool/`
+# agents.md — Working with Codex (GPT‑5‑Codex)
 
 ## Autonomy & Boundaries
 - Ask first: external services, public API/CLI changes, network beyond slow.pics.
