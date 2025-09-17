@@ -4,6 +4,9 @@
 
 from pathlib import Path
 from typing import List
+from urllib.parse import urlsplit
+import logging
+import time
 
 import requests
 
@@ -15,6 +18,9 @@ class SlowpicsAPIError(RuntimeError):
 
 
 _SLOWPICS_BASE = "https://slow.pics/api"
+
+
+logger = logging.getLogger(__name__)
 
 
 def _raise_for_status(response: requests.Response, context: str) -> None:
@@ -39,6 +45,41 @@ def _upload_file(session: requests.Session, url: str, file_path: Path, payload: 
         resp = session.post(url, files=files, data=data, timeout=60)
     _raise_for_status(resp, context)
     return resp
+
+
+def _redact_webhook(url: str) -> str:
+    try:
+        parsed = urlsplit(url)
+    except Exception:
+        return "webhook"
+    if parsed.netloc:
+        return parsed.netloc
+    return parsed.path or "webhook"
+
+
+def _post_direct_webhook(session: requests.Session, webhook_url: str, canonical_url: str) -> None:
+    redacted = _redact_webhook(webhook_url)
+    payload = {"content": canonical_url}
+    backoff = 1.0
+    for attempt in range(1, 4):
+        try:
+            resp = session.post(webhook_url, json=payload, timeout=10)
+            if resp.status_code < 300:
+                logger.info("Posted slow.pics URL to webhook host %s", redacted)
+                return
+            message = f"HTTP {resp.status_code}"
+        except requests.RequestException as exc:
+            message = exc.__class__.__name__
+        logger.warning(
+            "Webhook post attempt %s to %s failed: %s",
+            attempt,
+            redacted,
+            message,
+        )
+        if attempt < 3:
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 4.0)
+    logger.error("Giving up on webhook delivery to %s after %s attempts", redacted, 3)
 
 
 def upload_comparison(image_files: List[str], screen_dir: Path, cfg: SlowpicsConfig) -> str:
@@ -109,6 +150,8 @@ def upload_comparison(image_files: List[str], screen_dir: Path, cfg: SlowpicsCon
         _post_json(session, f"{_SLOWPICS_BASE}/collections/{collection_id}/webhook", webhook_payload, "Webhook notification")
 
     canonical_url = f"https://slow.pics/c/{collection_id}/{collection_key}"
+    if cfg.webhook_url:
+        _post_direct_webhook(session, cfg.webhook_url, canonical_url)
     if cfg.create_url_shortcut:
         shortcut_path = screen_dir / f"slowpics_{collection_id}.url"
         shortcut_path.write_text(f"[InternetShortcut]\nURL={canonical_url}\n", encoding="utf-8")
