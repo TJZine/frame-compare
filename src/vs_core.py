@@ -70,13 +70,31 @@ def _ensure_std_namespace(clip: Any, error: RuntimeError) -> Any:
     return std
 
 
-def _apply_trim(clip: Any, trims: Tuple[int, int]) -> Any:
-    std = _ensure_std_namespace(clip, ClipInitError("Clip is missing std namespace for Trim"))
-    first, last = trims
+def _slice_clip(clip: Any, *, start: Optional[int] = None, end: Optional[int] = None) -> Any:
     try:
-        return std.Trim(first=first, last=last)
+        if start is not None and end is not None:
+            return clip[start:end]
+        if start is not None:
+            return clip[start:]
+        if end is not None:
+            return clip[:end]
     except Exception as exc:  # pragma: no cover - defensive
         raise ClipInitError("Failed to apply trim to clip") from exc
+    return clip
+
+
+def _extend_with_blank(clip: Any, core: Any, length: int) -> Any:
+    std_ns = getattr(core, "std", None)
+    if std_ns is None:
+        raise ClipInitError("VapourSynth core missing std namespace for BlankClip")
+    blank_clip = getattr(std_ns, "BlankClip", None)
+    if not callable(blank_clip):
+        raise ClipInitError("std.BlankClip is unavailable on the VapourSynth core")
+    try:
+        extension = blank_clip(clip, length=length)
+        return extension + clip
+    except Exception as exc:  # pragma: no cover - defensive
+        raise ClipInitError("Failed to prepend blank frames to clip") from exc
 
 
 def _apply_fps_map(clip: Any, fps_map: Tuple[int, int]) -> Any:
@@ -93,7 +111,8 @@ def _apply_fps_map(clip: Any, fps_map: Tuple[int, int]) -> Any:
 def init_clip(
     path: str,
     *,
-    trims: Tuple[int, int] | None = None,
+    trim_start: int = 0,
+    trim_end: Optional[int] = None,
     fps_map: Tuple[int, int] | None = None,
     core: Optional[Any] = None,
 ) -> Any:
@@ -106,11 +125,30 @@ def init_clip(
     except Exception as exc:  # pragma: no cover - exercised via mocks
         raise ClipInitError(f"Failed to open clip '{path}': {exc}") from exc
 
-    if trims is not None:
-        clip = _apply_trim(clip, trims)
+    if trim_start < 0:
+        clip = _extend_with_blank(clip, resolved_core, abs(int(trim_start)))
+    elif trim_start > 0:
+        clip = _slice_clip(clip, start=int(trim_start))
+
+    if trim_end is not None and trim_end != 0:
+        clip = _slice_clip(clip, end=int(trim_end))
     if fps_map is not None:
         clip = _apply_fps_map(clip, fps_map)
     return clip
+
+
+def set_ram_limit(limit_mb: int, *, core: Optional[Any] = None) -> None:
+    """Apply a global VapourSynth cache limit based on *limit_mb*."""
+
+    if limit_mb <= 0:
+        raise ClipInitError("ram_limit_mb must be positive")
+
+    resolved_core = _resolve_core(core)
+    bytes_limit = int(limit_mb) * 1024 * 1024
+    try:
+        setattr(resolved_core, "max_cache_size", bytes_limit)
+    except Exception as exc:  # pragma: no cover - defensive
+        raise ClipInitError("Failed to apply VapourSynth RAM limit") from exc
 
 
 def _normalise_property_value(value: Any) -> Any:
