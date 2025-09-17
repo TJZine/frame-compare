@@ -1,6 +1,7 @@
 pytest
 pluggy
 pytest-mock
+requests
 requests-mock
 pygments
 ruff
