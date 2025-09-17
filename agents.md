@@ -1,12 +1,6 @@
-# agents.md — Working with Codex (GPT‑5‑Codex) on `comparison_tool/`
-
-## Modes, Models, Reasoning
-- **Local** for VS/ffmpeg/media; **Cloud** for long tests & PRs.
-- **Model**: default `gpt-5-codex` for coding; base `gpt-5` for explanations.
-- **Reasoning**: Medium by default; High for interface design and tests.
+# agents.md — Working with Codex (GPT‑5‑Codex)
 
 ## Autonomy & Boundaries
-- Allowed: edit under `comparison_tool/`, run tests, open PRs.
 - Ask first: external services, public API/CLI changes, network beyond slow.pics.
 - Never: commit secrets or run destructive commands.
 
