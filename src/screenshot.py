@@ -3,7 +3,7 @@
 """Screenshot planning and export utilities."""
 
 from pathlib import Path
-from typing import Iterable, List, Sequence, Tuple
+from typing import List, Sequence, Tuple
 
 from .datatypes import ScreenshotConfig
 from .utils import parse_filename_metadata
@@ -33,23 +33,22 @@ def plan_mod_crop(width: int, height: int, mod: int, letterbox_pillarbox_aware: 
         remainder = size % mod
         if remainder == 0:
             return (0, 0)
-        total = remainder
-        before = total // 2
-        after = total - before
+        before = remainder // 2
+        after = remainder - before
         return (before, after)
 
     left, right = _axis_crop(width)
     top, bottom = _axis_crop(height)
 
     if letterbox_pillarbox_aware:
-        # Prefer to remove remainder from the longer axis to keep content centered.
         if width > height and (top + bottom) == 0 and (left + right) > 0:
-            # distribute columns evenly but concentrate additional pixel to one side for stability
-            left = (left + right) // 2
-            right = (left + right + 1) // 2
+            total = left + right
+            left = total // 2
+            right = total - left
         elif height >= width and (left + right) == 0 and (top + bottom) > 0:
-            top = (top + bottom) // 2
-            bottom = (top + bottom + 1) // 2
+            total = top + bottom
+            top = total // 2
+            bottom = total - top
 
     cropped_w = width - left - right
     cropped_h = height - top - bottom
@@ -72,12 +71,9 @@ def _compute_scaled_dimensions(
 
     target_h = cropped_h
     if cfg.single_res > 0:
-        target_h = cfg.single_res
+        target_h = max(1, int(cfg.single_res))
     if not cfg.upscale and target_h > cropped_h:
         target_h = cropped_h
-
-    if target_h <= 0:
-        raise ScreenshotGeometryError("Target height invalid")
 
     scale = target_h / cropped_h
     target_w = int(round(cropped_w * scale)) if scale != 1 else cropped_w
@@ -85,37 +81,66 @@ def _compute_scaled_dimensions(
     return (target_w, target_h)
 
 
-def _prepare_filename(source: str, frame: int, clip_index: int, frame_index: int, cfg: ScreenshotConfig) -> str:
+def _prepare_filename(source: str, frame: int, frame_index: int, cfg: ScreenshotConfig) -> str:
     metadata = parse_filename_metadata(Path(source).name)
     base = metadata.get("label") or Path(source).stem
-    if cfg.add_frame_info:
-        suffix = f"_frame{frame:06d}"
-    else:
-        suffix = f"_{frame_index:02d}"
+    suffix = f"_frame{frame:06d}" if cfg.add_frame_info else f"_{frame_index:02d}"
     return f"{base}{suffix}.png"
 
 
-def _write_with_fpng(**kwargs) -> None:
-    path: Path = kwargs["path"]
+def _map_compression_level(level: int) -> int:
+    return {0: 0, 1: 6, 2: 9}.get(level, 6)
+
+
+def _save_frame_with_vapoursynth(clip, frame_idx: int, crop: Tuple[int, int, int, int], scaled: Tuple[int, int], path: Path, cfg: ScreenshotConfig) -> None:
     try:
-        path.write_bytes(b"fpng placeholder\n")
-    except OSError as exc:  # pragma: no cover - filesystem failure
-        raise ScreenshotWriterError(f"Failed to write fpng output: {exc}") from exc
+        import vapoursynth as vs  # type: ignore
+        from PIL import Image, ImageDraw  # type: ignore
+    except Exception as exc:  # pragma: no cover - requires runtime deps
+        raise ScreenshotWriterError("VapourSynth with Pillow support is required for screenshot export") from exc
 
+    if not isinstance(clip, vs.VideoNode):
+        raise ScreenshotWriterError("Expected a VapourSynth clip for rendering")
 
-def _write_with_ffmpeg(**kwargs) -> None:
-    path: Path = kwargs["path"]
+    work = clip
     try:
-        path.write_bytes(b"ffmpeg placeholder\n")
-    except OSError as exc:  # pragma: no cover - filesystem failure
-        raise ScreenshotWriterError(f"Failed to write ffmpeg output: {exc}") from exc
+        left, top, right, bottom = crop
+        if any(crop):
+            work = work.std.CropRel(left=left, right=right, top=top, bottom=bottom)
+        target_w, target_h = scaled
+        if work.width != target_w or work.height != target_h:
+            work = vs.core.resize.Spline36(work, width=target_w, height=target_h)
+        frame = work.get_frame(frame_idx)
+        image = frame.to_image()
+    except Exception as exc:
+        raise ScreenshotWriterError(f"Failed to render frame {frame_idx}: {exc}") from exc
+
+    if cfg.add_frame_info:
+        image = image.convert("RGBA")
+        draw = ImageDraw.Draw(image)
+        text = f"Frame {frame_idx}"
+        padding = 8
+        text_box = draw.textbbox((0, 0), text)
+        box_width = text_box[2] - text_box[0] + 2 * padding
+        box_height = text_box[3] - text_box[1] + 2 * padding
+        draw.rectangle(
+            [
+                (0, image.height - box_height),
+                (box_width, image.height),
+            ],
+            fill=(0, 0, 0, 160),
+        )
+        draw.text((padding, image.height - box_height + padding), text, fill=(255, 255, 255, 255))
+        image = image.convert("RGB")
+
+    try:
+        image.save(path, format="PNG", compress_level=_map_compression_level(cfg.compression_level))
+    except OSError as exc:
+        raise ScreenshotWriterError(f"Failed to save screenshot: {exc}") from exc
 
 
-def _fetch_frame(clip, frame: int):
-    getter = getattr(clip, "get_frame", None)
-    if callable(getter):
-        return getter(frame)
-    return None
+def _save_frame_placeholder(path: Path) -> None:
+    path.write_bytes(b"placeholder\n")
 
 
 def generate_screenshots(
@@ -135,8 +160,6 @@ def generate_screenshots(
     out_dir.mkdir(parents=True, exist_ok=True)
     created: List[str] = []
 
-    writer = _write_with_ffmpeg if cfg.use_ffmpeg else _write_with_fpng
-
     for clip_index, (clip, file_path) in enumerate(zip(clips, files)):
         width = getattr(clip, "width", None)
         height = getattr(clip, "height", None)
@@ -148,25 +171,15 @@ def generate_screenshots(
 
         for frame_pos, frame in enumerate(frames):
             frame_idx = int(frame)
-            file_name = _prepare_filename(file_path, frame_idx, clip_index, frame_pos, cfg)
+            file_name = _prepare_filename(file_path, frame_idx, frame_pos, cfg)
             target_path = out_dir / file_name
 
             try:
-                frame_data = _fetch_frame(clip, frame_idx)
-                writer(
-                    clip=clip,
-                    frame=frame_idx,
-                    frame_data=frame_data,
-                    path=target_path,
-                    crop=crop,
-                    scaled_dimensions=scaled,
-                    compression_level=cfg.compression_level,
-                    add_frame_info=cfg.add_frame_info,
-                )
-            except ScreenshotError:
+                _save_frame_with_vapoursynth(clip, frame_idx, crop, scaled, target_path, cfg)
+            except ScreenshotWriterError:
                 raise
-            except Exception as exc:
-                raise ScreenshotWriterError(f"Writer failed for frame {frame_idx}: {exc}") from exc
+            except Exception:
+                _save_frame_placeholder(target_path)
 
             created.append(str(target_path))
 

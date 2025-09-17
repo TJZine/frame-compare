@@ -15,43 +15,36 @@ Frame Compare is a CLI workflow for selecting comparison frames from multiple vi
 - Python 3.11 or newer *(handled automatically by [uv](https://github.com/astral-sh/uv))*
 - VapourSynth runtime and plugins if you plan to generate real screenshots.
 
-## Setup & Installation
+## Quick Start (runtime use)
+
+Install the locked runtime dependencies and run the CLI against a directory containing at least two video files:
 
 ```bash
-uv lock
-uv sync --group dev
-```
-
-## Running Tests
-
-```bash
-uv run python -m pytest -q
-```
-
-## Running the CLI
-
-Run the tool against a directory containing at least two video files:
-
-```bash
+uv sync
 uv run python main.py --config config.toml --input .
 ```
 
-Use the `[analysis.analyze_clip]` config field to select which clip drives frame discovery, and enable `[slowpics].auto_upload` to publish the results to slow.pics automatically.
+Use the `[analysis.analyze_clip]` config field to choose which clip drives frame discovery, and enable `[slowpics].auto_upload` to publish the results to slow.pics automatically.
 
-## Additional Commands
+## For Contributors
 
-- Sync dependencies again after modifying `pyproject.toml`:
-  ```bash
-  uv sync --group dev
-  ```
-- Fix formatting and linting:
-  ```bash
-  uv run ruff check . --fix
-  uv run black .
-  ```
+Development tasks require the additional tooling declared in the `dev` dependency group:
 
-## Contributing
+```bash
+uv lock              # regenerate the lockfile after dependency changes
+uv sync --group dev  # install runtime + dev/test tooling
+uv run python -m pytest -q
+```
 
-1. Keep the lock file (`uv.lock`) up to date via `uv lock` after dependency changes.
+Useful helper commands:
+
+```bash
+uv run ruff check . --fix
+uv run black .
+```
+
+## Contributing Guidelines
+
+1. Keep the lock file (`uv.lock`) up to date via `uv lock` whenever dependencies change.
 2. Run `uv run python -m pytest -q` before submitting a pull request.
 3. Ensure new features include tests and documentation updates where appropriate.

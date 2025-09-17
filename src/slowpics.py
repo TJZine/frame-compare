@@ -3,7 +3,7 @@
 """Slow.pics upload orchestration."""
 
 from pathlib import Path
-from typing import Iterable, List
+from typing import List
 
 import requests
 
@@ -34,7 +34,7 @@ def _post_json(session: requests.Session, url: str, payload: dict, context: str)
 
 def _upload_file(session: requests.Session, url: str, file_path: Path, payload: dict, context: str) -> requests.Response:
     with file_path.open("rb") as handle:
-        files = {"image": (file_path.name, handle)}
+        files = {"image": (file_path.name, handle, "image/png")}
         data = {key: str(value) for key, value in payload.items() if value is not None}
         resp = session.post(url, files=files, data=data, timeout=60)
     _raise_for_status(resp, context)
@@ -48,14 +48,32 @@ def upload_comparison(image_files: List[str], screen_dir: Path, cfg: SlowpicsCon
         raise SlowpicsAPIError("No image files provided for upload")
 
     session = requests.Session()
-    session.headers.update({"User-Agent": "frame-compare/1.0"})
+    session.headers.update({
+        "User-Agent": "frame-compare/1.0",
+    })
+
+    try:
+        landing = session.get("https://slow.pics/comparison", timeout=15)
+        landing.raise_for_status()
+    except requests.RequestException as exc:
+        raise SlowpicsAPIError(f"Failed to establish slow.pics session: {exc}") from exc
+
+    xsrf_token = session.cookies.get("XSRF-TOKEN")
+    if not xsrf_token:
+        raise SlowpicsAPIError("Missing XSRF token from slow.pics response")
+
+    session.headers.update({
+        "Origin": "https://slow.pics",
+        "Referer": "https://slow.pics/comparison",
+        "X-Xsrf-Token": xsrf_token,
+    })
 
     create_payload = {
         "title": cfg.collection_name or "Frame Comparison",
         "public": bool(cfg.is_public),
         "hentai": bool(cfg.is_hentai),
         "tmdbId": cfg.tmdb_id or None,
-        "removeAfterDays": int(cfg.remove_after_days or 0),
+        "removeAfterDays": int(cfg.remove_after_days or 0) or None,
     }
     create_resp = _post_json(session, f"{_SLOWPICS_BASE}/collections", create_payload, "Collection creation")
     try:

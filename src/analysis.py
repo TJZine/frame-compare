@@ -4,7 +4,7 @@
 
 import math
 import random
-from typing import List, Sequence
+from typing import List, Sequence, Tuple
 
 from .datatypes import AnalysisConfig
 from . import vs_core
@@ -68,51 +68,79 @@ def _clamp_frame(frame: int, total: int) -> int:
     return max(0, min(total - 1, int(frame)))
 
 
-def _extract_metric(series, index: int) -> float | None:
-    if series is None:
-        return None
-    if isinstance(series, dict):
-        value = series.get(index)
-    elif isinstance(series, (list, tuple)):
-        if 0 <= index < len(series):
-            value = series[index]
-        else:
-            value = None
-    else:
-        getter = getattr(series, "get", None)
-        if callable(getter):
-            value = getter(index)
-        else:
-            value = None
-    if value is None:
-        return None
+def _ensure_even(value: int) -> int:
+    return value if value % 2 == 0 else value - 1
+
+
+def _collect_metrics_vapoursynth(clip, cfg: AnalysisConfig, indices: Sequence[int]) -> tuple[List[tuple[int, float]], List[tuple[int, float]]]:
     try:
-        return float(value)
-    except (TypeError, ValueError):  # pragma: no cover - defensive
-        return None
+        import vapoursynth as vs  # type: ignore
+    except Exception as exc:  # pragma: no cover - handled by fallback
+        raise RuntimeError("VapourSynth is unavailable") from exc
 
+    if not isinstance(clip, vs.VideoNode):
+        raise TypeError("Expected a VapourSynth clip")
 
-def _generate_metrics(clip, cfg: AnalysisConfig, num_frames: int, indices: List[int]) -> tuple[List[tuple[int, float]], List[tuple[int, float]]]:
-    brightness_series = getattr(clip, "analysis_brightness", None)
-    motion_series = getattr(clip, "analysis_motion", None)
+    work = clip
+    try:
+        if cfg.downscale_height > 0 and work.height > cfg.downscale_height:
+            target_h = _ensure_even(max(2, int(cfg.downscale_height)))
+            aspect = work.width / work.height
+            target_w = _ensure_even(max(2, int(round(target_h * aspect))))
+            work = vs.core.resize.Spline36(work, width=target_w, height=target_h)
+
+        # Convert to grayscale for consistent metrics
+        target_format = vs.GRAY16
+        work = vs.core.resize.Spline36(work, format=target_format)
+    except Exception as exc:  # pragma: no cover - defensive
+        raise RuntimeError(f"Failed to prepare analysis clip: {exc}") from exc
+
+    stats_clip = work.std.PlaneStats()
+
+    motion_stats = None
+    if cfg.frame_count_motion > 0 and work.num_frames > 1:
+        try:
+            previous = work[:-1]
+            current = work[1:]
+            if cfg.motion_use_absdiff:
+                diff_clip = vs.core.std.Expr([previous, current], "x y - abs")
+            else:
+                diff_clip = vs.core.std.MakeDiff(previous, current)
+                diff_clip = vs.core.std.Prewitt(diff_clip)
+            motion_stats = diff_clip.std.PlaneStats()
+        except Exception as exc:  # pragma: no cover - defensive
+            raise RuntimeError(f"Failed to build motion metrics: {exc}") from exc
 
     brightness: List[tuple[int, float]] = []
     motion: List[tuple[int, float]] = []
 
     for idx in indices:
-        bright = _extract_metric(brightness_series, idx)
-        if bright is None:
-            bright = (math.sin(idx * 0.137) + 1.0) / 2.0
-        brightness.append((idx, bright))
+        if idx >= stats_clip.num_frames:
+            break
+        frame = stats_clip.get_frame(idx)
+        luma = float(frame.props.get("PlaneStatsAverage", 0.0))
+        brightness.append((idx, luma))
+        del frame
 
-        mot_val = None
-        if motion_series is not None:
-            mot_val = _extract_metric(motion_series, idx)
-        if mot_val is None:
-            phase = 0.21 if cfg.motion_use_absdiff else 0.17
-            mot_val = (math.cos(idx * phase) + 1.0) / 2.0
-        motion.append((idx, mot_val))
+        motion_value = 0.0
+        if motion_stats is not None and idx > 0:
+            diff_index = min(idx - 1, motion_stats.num_frames - 1)
+            if diff_index >= 0:
+                diff_frame = motion_stats.get_frame(diff_index)
+                motion_value = float(diff_frame.props.get("PlaneStatsAverage", 0.0))
+                del diff_frame
+        motion.append((idx, motion_value))
 
+    return brightness, motion
+
+
+def _generate_metrics_fallback(indices: Sequence[int], cfg: AnalysisConfig) -> tuple[List[tuple[int, float]], List[tuple[int, float]]]:
+    brightness: List[tuple[int, float]] = []
+    motion: List[tuple[int, float]] = []
+    for idx in indices:
+        brightness.append((idx, (math.sin(idx * 0.137) + 1.0) / 2.0))
+        phase = 0.21 if cfg.motion_use_absdiff else 0.17
+        motion.append((idx, (math.cos(idx * phase) + 1.0) / 2.0))
     return brightness, motion
 
 
@@ -149,7 +177,11 @@ def select_frames(clip, cfg: AnalysisConfig, files: List[str], file_under_analys
 
     step = max(1, int(cfg.step))
     indices = list(range(0, num_frames, step))
-    brightness, motion = _generate_metrics(analysis_clip, cfg, num_frames, indices)
+
+    try:
+        brightness, motion = _collect_metrics_vapoursynth(analysis_clip, cfg, indices)
+    except Exception:
+        brightness, motion = _generate_metrics_fallback(indices, cfg)
 
     brightness_values = [val for _, val in brightness]
 
@@ -168,7 +200,6 @@ def select_frames(clip, cfg: AnalysisConfig, files: List[str], file_under_analys
         selected_set.add(frame_idx)
         return True
 
-    # Always include user frames first, ignoring spacing rules but ensuring uniqueness.
     for frame in cfg.user_frames:
         try_add(frame, enforce_gap=False)
 
@@ -191,7 +222,6 @@ def select_frames(clip, cfg: AnalysisConfig, files: List[str], file_under_analys
             if added >= count:
                 break
 
-    # Dark frames
     dark_candidates: List[tuple[int, float]] = []
     if cfg.frame_count_dark > 0:
         if cfg.use_quantiles:
@@ -201,7 +231,6 @@ def select_frames(clip, cfg: AnalysisConfig, files: List[str], file_under_analys
             dark_candidates = [(idx, val) for idx, val in brightness if 0.062746 <= val <= 0.38]
     pick_from_candidates(dark_candidates, cfg.frame_count_dark, reverse=False)
 
-    # Bright frames
     bright_candidates: List[tuple[int, float]] = []
     if cfg.frame_count_bright > 0:
         if cfg.use_quantiles:
@@ -211,7 +240,6 @@ def select_frames(clip, cfg: AnalysisConfig, files: List[str], file_under_analys
             bright_candidates = [(idx, val) for idx, val in brightness if 0.45 <= val <= 0.8]
     pick_from_candidates(bright_candidates, cfg.frame_count_bright, reverse=True)
 
-    # Motion frames
     motion_candidates: List[tuple[int, float]] = []
     if cfg.frame_count_motion > 0:
         smoothed_motion = _smooth_motion(motion, max(0, int(cfg.motion_diff_radius)))
@@ -222,7 +250,6 @@ def select_frames(clip, cfg: AnalysisConfig, files: List[str], file_under_analys
         motion_candidates = filtered
     pick_from_candidates(motion_candidates, cfg.frame_count_motion, reverse=True)
 
-    # Random frames (respect spacing rules)
     random_count = max(0, int(cfg.random_frames))
     attempts = 0
     while random_count > 0 and attempts < random_count * 10 and num_frames > 0:
@@ -231,7 +258,6 @@ def select_frames(clip, cfg: AnalysisConfig, files: List[str], file_under_analys
             random_count -= 1
         attempts += 1
 
-    # Final ordering and spacing validation
     ordered = sorted(selected)
     if min_sep_frames > 0:
         ordered = dedupe(ordered, cfg.screen_separation_sec, fps)

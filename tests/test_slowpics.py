@@ -2,6 +2,7 @@
 from typing import Any, List
 
 import pytest
+import requests
 
 from src.datatypes import SlowpicsConfig
 from src import slowpics
@@ -18,22 +19,34 @@ class FakeResponse:
             raise ValueError("No JSON content")
         return self._json_data
 
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"status {self.status_code}", response=self)
+
 
 class FakeSession:
-    def __init__(self, responses: List[FakeResponse]) -> None:
+    def __init__(self, responses: List[FakeResponse], cookies: dict[str, str] | None = None) -> None:
         self._responses = responses
-        self.headers = {}
+        self.headers: dict[str, str] = {}
+        self.cookies = cookies or {"XSRF-TOKEN": "token"}
         self.calls: list[dict[str, Any]] = []
 
-    def post(self, url: str, *, json: Any | None = None, files: Any | None = None, data: Any | None = None, timeout: float | None = None):
+    def _next(self) -> FakeResponse:
         if not self._responses:
             raise AssertionError("Unexpected request: no prepared response")
-        self.calls.append({"url": url, "json": json, "files": files, "data": data})
         return self._responses.pop(0)
 
+    def get(self, url: str, timeout: float | None = None):
+        self.calls.append({"method": "GET", "url": url})
+        return self._next()
 
-def _install_session(monkeypatch: pytest.MonkeyPatch, responses: List[FakeResponse]) -> FakeSession:
-    session = FakeSession(responses)
+    def post(self, url: str, *, json: Any | None = None, files: Any | None = None, data: Any | None = None, timeout: float | None = None):
+        self.calls.append({"method": "POST", "url": url, "json": json, "files": files, "data": data})
+        return self._next()
+
+
+def _install_session(monkeypatch: pytest.MonkeyPatch, responses: List[FakeResponse], cookies: dict[str, str] | None = None) -> FakeSession:
+    session = FakeSession(responses, cookies)
     monkeypatch.setattr(slowpics.requests, "Session", lambda: session)
     return session
 
@@ -44,6 +57,7 @@ def test_happy_path_returns_url(tmp_path, monkeypatch: pytest.MonkeyPatch) -> No
     image.write_bytes(b"data")
 
     responses = [
+        FakeResponse(200, text=""),
         FakeResponse(200, {"uuid": "abc", "key": "def"}),
         FakeResponse(200),
         FakeResponse(200),
@@ -55,7 +69,7 @@ def test_happy_path_returns_url(tmp_path, monkeypatch: pytest.MonkeyPatch) -> No
     assert url == "https://slow.pics/c/abc/def"
     shortcut = tmp_path / "slowpics_abc.url"
     assert shortcut.exists()
-    assert len(session.calls) == 3
+    assert [call["method"] for call in session.calls] == ["GET", "POST", "POST", "POST"]
 
 
 def test_create_collection_4xx_raises(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -63,7 +77,10 @@ def test_create_collection_4xx_raises(tmp_path, monkeypatch: pytest.MonkeyPatch)
     image = tmp_path / "frame.png"
     image.write_bytes(b"data")
 
-    responses = [FakeResponse(400, text="bad request")]
+    responses = [
+        FakeResponse(200),
+        FakeResponse(400, text="bad request"),
+    ]
     _install_session(monkeypatch, responses)
 
     with pytest.raises(slowpics.SlowpicsAPIError):
@@ -76,6 +93,7 @@ def test_upload_failure_raises(tmp_path, monkeypatch: pytest.MonkeyPatch) -> Non
     image.write_bytes(b"data")
 
     responses = [
+        FakeResponse(200),
         FakeResponse(200, {"uuid": "abc", "key": "def"}),
         FakeResponse(500, text="server error"),
     ]
