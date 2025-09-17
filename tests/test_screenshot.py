@@ -35,11 +35,20 @@ def test_generate_screenshots_filenames(tmp_path, monkeypatch):
 
     frames = [5, 25]
     files = ["example_video.mkv"]
-    created = screenshot.generate_screenshots([clip], frames, files, tmp_path, cfg)
+    metadata = [{"label": "Example Release"}]
+    created = screenshot.generate_screenshots(
+        [clip],
+        frames,
+        files,
+        metadata,
+        tmp_path,
+        cfg,
+        trim_offsets=[0],
+    )
     assert len(created) == len(frames)
     for path in created:
         assert Path(path).exists()
-        assert Path(path).name.startswith("example_video")
+        assert Path(path).name.startswith("Example Release")
 
     assert len(calls) == len(frames)
 
@@ -50,11 +59,98 @@ def test_compression_flag_passed(tmp_path, monkeypatch):
 
     captured = {}
 
-    def fake_writer(clip, frame_idx, crop, scaled, path, cfg):
-        captured[frame_idx] = screenshot._map_compression_level(cfg.compression_level)
+    def fake_writer(source, frame_idx, crop, scaled, path, cfg, width, height):
+        captured[frame_idx] = screenshot._map_ffmpeg_compression(cfg.compression_level)
         path.write_text("ffmpeg", encoding="utf-8")
 
-    monkeypatch.setattr(screenshot, "_save_frame_with_vapoursynth", fake_writer)
+    monkeypatch.setattr(screenshot, "_save_frame_with_ffmpeg", fake_writer)
 
-    screenshot.generate_screenshots([clip], [10], ["video.mkv"], tmp_path, cfg)
+    screenshot.generate_screenshots(
+        [clip],
+        [10],
+        ["video.mkv"],
+        [{"label": "video"}],
+        tmp_path,
+        cfg,
+        trim_offsets=[0],
+    )
     assert captured[10] == 9
+
+
+def test_ffmpeg_respects_trim_offsets(tmp_path, monkeypatch):
+    clip = FakeClip(1920, 1080)
+    cfg = ScreenshotConfig(use_ffmpeg=True)
+
+    calls: list[int] = []
+
+    def fake_ffmpeg(source, frame_idx, crop, scaled, path, cfg, width, height):
+        calls.append(frame_idx)
+        path.write_text("ff", encoding="utf-8")
+
+    monkeypatch.setattr(screenshot, "_save_frame_with_ffmpeg", fake_ffmpeg)
+    monkeypatch.setattr(screenshot, "_save_frame_with_vapoursynth", lambda *args, **kwargs: None)
+
+    screenshot.generate_screenshots(
+        [clip],
+        [0, 5],
+        ["video.mkv"],
+        [{"label": "video"}],
+        tmp_path,
+        cfg,
+        trim_offsets=[3],
+    )
+
+    assert calls == [3, 8]
+
+
+def test_global_upscale_coordination(tmp_path, monkeypatch):
+    clips = [FakeClip(1280, 720), FakeClip(1920, 1080), FakeClip(640, 480)]
+    cfg = ScreenshotConfig(upscale=True, use_ffmpeg=False, add_frame_info=False)
+
+    scaled: list[tuple[int, int]] = []
+
+    def fake_vs_writer(clip, frame_idx, crop, scaled_dims, path, cfg):
+        scaled.append(scaled_dims)
+        path.write_text("vs", encoding="utf-8")
+
+    monkeypatch.setattr(screenshot, "_save_frame_with_vapoursynth", fake_vs_writer)
+    monkeypatch.setattr(screenshot, "_save_frame_with_ffmpeg", lambda *args, **kwargs: None)
+
+    metadata = [{"label": f"clip{i}"} for i in range(len(clips))]
+    screenshot.generate_screenshots(
+        clips,
+        [0],
+        [f"clip{i}.mkv" for i in range(len(clips))],
+        metadata,
+        tmp_path,
+        cfg,
+        trim_offsets=[0, 0, 0],
+    )
+
+    assert scaled == [(1920, 1080), (1920, 1080), (1440, 1080)]
+
+
+def test_placeholder_logging(tmp_path, caplog, monkeypatch):
+    clip = FakeClip(1280, 720)
+    cfg = ScreenshotConfig(use_ffmpeg=False)
+
+    def failing_writer(*args, **kwargs):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(screenshot, "_save_frame_with_vapoursynth", failing_writer)
+    monkeypatch.setattr(screenshot, "_save_frame_with_ffmpeg", lambda *args, **kwargs: None)
+
+    with caplog.at_level("WARNING"):
+        created = screenshot.generate_screenshots(
+            [clip],
+            [0],
+            ["clip.mkv"],
+            [{"label": "clip"}],
+            tmp_path,
+            cfg,
+            trim_offsets=[0],
+        )
+
+    assert "Falling back to placeholder" in caplog.text
+    placeholder = Path(created[0])
+    assert placeholder.read_bytes() == b"placeholder\n"
