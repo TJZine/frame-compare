@@ -166,6 +166,14 @@ def _map_fpng_compression(level: int) -> int:
     return {0: 0, 1: 1, 2: 2}.get(normalised, 1)
 
 
+def _map_png_compression_level(level: int) -> int:
+    """Translate the user configured level into a PNG compress level."""
+
+    normalised = _normalise_compression_level(level)
+    mapping = {0: 0, 1: 6, 2: 9}
+    return mapping.get(normalised, 6)
+
+
 def _save_frame_with_fpng(
     clip,
     frame_idx: int,
@@ -225,9 +233,9 @@ def _save_frame_with_fpng(
 
 
 def _map_ffmpeg_compression(level: int) -> int:
-    mapping = {0: 0, 1: 6, 2: 9}
-    normalised = _normalise_compression_level(level)
-    return mapping.get(normalised, 6)
+    """Map config compression level to ffmpeg's PNG compression scale."""
+
+    return _map_png_compression_level(level)
 
 
 def _resolve_source_frame_index(frame_idx: int, trim_start: int) -> int | None:
@@ -269,6 +277,13 @@ def _save_frame_with_ffmpeg(
         )
     if scaled != (cropped_w, cropped_h):
         filters.append(f"scale={max(1, scaled[0])}:{max(1, scaled[1])}:flags=lanczos")
+    if cfg.add_frame_info:
+        text = f"Frame\\ {int(frame_idx)}"
+        drawtext = (
+            "drawtext=text={text}:fontcolor=white:box=1:boxcolor=black@0.6:"
+            "boxborderw=6:x=10:y=10"
+        ).format(text=text)
+        filters.append(drawtext)
 
     filter_chain = ",".join(filters)
     cmd = [
@@ -294,89 +309,6 @@ def _save_frame_with_ffmpeg(
         stderr = process.stderr.decode("utf-8", "ignore").strip()
         raise ScreenshotWriterError(f"FFmpeg failed for frame {frame_idx}: {stderr or 'unknown error'}")
 
-    if cfg.add_frame_info:
-        logger.debug(
-            "add_frame_info is enabled but overlays are not supported in the ffmpeg writer; filenames include frame numbers"
-        )
-
-
-def _map_ffmpeg_compression(level: int) -> int:
-    mapped = _map_compression_level(level)
-    return max(0, min(9, mapped))
-
-
-def _resolve_source_frame_index(frame_idx: int, trim_start: int) -> int | None:
-    if trim_start == 0:
-        return frame_idx
-    if trim_start > 0:
-        return frame_idx + trim_start
-    blank = abs(int(trim_start))
-    if frame_idx < blank:
-        return None
-    return frame_idx - blank
-
-
-def _save_frame_with_ffmpeg(
-    source: str,
-    frame_idx: int,
-    crop: Tuple[int, int, int, int],
-    scaled: Tuple[int, int],
-    path: Path,
-    cfg: ScreenshotConfig,
-    width: int,
-    height: int,
-) -> None:
-    if shutil.which("ffmpeg") is None:
-        raise ScreenshotWriterError("FFmpeg executable not found in PATH")
-
-    cropped_w = max(1, width - crop[0] - crop[2])
-    cropped_h = max(1, height - crop[1] - crop[3])
-
-    filters = [f"select=eq(n\\,{int(frame_idx)})"]
-    if any(crop):
-        filters.append(
-            "crop={w}:{h}:{x}:{y}".format(
-                w=max(1, cropped_w),
-                h=max(1, cropped_h),
-                x=max(0, crop[0]),
-                y=max(0, crop[1]),
-            )
-        )
-    if scaled != (cropped_w, cropped_h):
-        filters.append(f"scale={max(1, scaled[0])}:{max(1, scaled[1])}:flags=lanczos")
-
-    filter_chain = ",".join(filters)
-    cmd = [
-        "ffmpeg",
-        "-loglevel",
-        "error",
-        "-y",
-        "-i",
-        source,
-        "-vf",
-        filter_chain,
-        "-frames:v",
-        "1",
-        "-vsync",
-        "0",
-        "-compression_level",
-        str(_map_ffmpeg_compression(cfg.compression_level)),
-        str(path),
-    ]
-
-    process = subprocess.run(cmd, capture_output=True)
-    if process.returncode != 0:
-        stderr = process.stderr.decode("utf-8", "ignore").strip()
-        raise ScreenshotWriterError(f"FFmpeg failed for frame {frame_idx}: {stderr or 'unknown error'}")
-
-    if cfg.add_frame_info:
-        try:
-            from PIL import Image  # type: ignore
-        except Exception as exc:  # pragma: no cover - requires runtime deps
-            raise ScreenshotWriterError("Pillow is required to annotate screenshots") from exc
-        with Image.open(path) as image:
-            annotated = _annotate_frame(image, frame_idx)
-            annotated.save(path, format="PNG", compress_level=_map_compression_level(cfg.compression_level))
 
 
 def _save_frame_placeholder(path: Path) -> None:
