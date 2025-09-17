@@ -1,8 +1,12 @@
-﻿from dataclasses import dataclass, field
+"""Configuration dataclasses for frame comparison tool."""
+from dataclasses import dataclass, field
 from typing import Dict, List, Union
+
 
 @dataclass
 class AnalysisConfig:
+    """Options controlling frame analysis, selection, and data caching."""
+
     frame_count_dark: int = 20
     frame_count_bright: int = 10
     frame_count_motion: int = 15
@@ -23,8 +27,11 @@ class AnalysisConfig:
     random_seed: int = 20202020
     frame_data_filename: str = "generated.compframes"
 
+
 @dataclass
 class ScreenshotConfig:
+    """Screenshot export behavior, renderer selection, and geometry tweaks."""
+
     directory_name: str = "screens"
     add_frame_info: bool = True
     use_ffmpeg: bool = False
@@ -34,8 +41,11 @@ class ScreenshotConfig:
     mod_crop: int = 2
     letterbox_pillarbox_aware: bool = True
 
+
 @dataclass
 class SlowpicsConfig:
+    """slow.pics upload automation flags and metadata."""
+
     auto_upload: bool = False
     collection_name: str = ""
     is_hentai: bool = False
@@ -47,27 +57,42 @@ class SlowpicsConfig:
     create_url_shortcut: bool = True
     delete_screen_dir_after_upload: bool = True
 
+
 @dataclass
 class NamingConfig:
+    """Filename parsing and display preferences."""
+
     always_full_filename: bool = True
     prefer_guessit: bool = True
 
+
 @dataclass
 class PathsConfig:
+    """Filesystem paths configured by the user."""
+
     input_dir: str = "."
+
 
 @dataclass
 class RuntimeConfig:
+    """Runtime safeguards such as memory limits."""
+
     ram_limit_mb: int = 8000
+
 
 @dataclass
 class OverridesConfig:
+    """Clip-specific overrides for trimming and frame rate adjustments."""
+
     trim: Dict[str, int] = field(default_factory=dict)
     trim_end: Dict[str, int] = field(default_factory=dict)
     change_fps: Dict[str, Union[List[int], str]] = field(default_factory=dict)
 
+
 @dataclass
 class AppConfig:
+    """Aggregated configuration loaded from the user-provided TOML file."""
+
     analysis: AnalysisConfig
     screenshots: ScreenshotConfig
     slowpics: SlowpicsConfig
