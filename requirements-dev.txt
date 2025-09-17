@@ -8,3 +8,4 @@ ruff
 black
 iniconfig
 urllib3
+idna

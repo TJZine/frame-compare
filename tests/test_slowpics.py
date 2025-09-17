@@ -1,0 +1,85 @@
+﻿from pathlib import Path
+from typing import Any, List
+
+import pytest
+
+from src.datatypes import SlowpicsConfig
+from src import slowpics
+
+
+class FakeResponse:
+    def __init__(self, status_code: int = 200, json_data: Any | None = None, text: str = "") -> None:
+        self.status_code = status_code
+        self._json_data = json_data
+        self.text = text
+
+    def json(self) -> Any:
+        if self._json_data is None:
+            raise ValueError("No JSON content")
+        return self._json_data
+
+
+class FakeSession:
+    def __init__(self, responses: List[FakeResponse]) -> None:
+        self._responses = responses
+        self.headers = {}
+        self.calls: list[dict[str, Any]] = []
+
+    def post(self, url: str, *, json: Any | None = None, files: Any | None = None, data: Any | None = None, timeout: float | None = None):
+        if not self._responses:
+            raise AssertionError("Unexpected request: no prepared response")
+        self.calls.append({"url": url, "json": json, "files": files, "data": data})
+        return self._responses.pop(0)
+
+
+def _install_session(monkeypatch: pytest.MonkeyPatch, responses: List[FakeResponse]) -> FakeSession:
+    session = FakeSession(responses)
+    monkeypatch.setattr(slowpics.requests, "Session", lambda: session)
+    return session
+
+
+def test_happy_path_returns_url(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = SlowpicsConfig(collection_name="Test", webhook_url="https://example.com/hook")
+    image = tmp_path / "frame.png"
+    image.write_bytes(b"data")
+
+    responses = [
+        FakeResponse(200, {"uuid": "abc", "key": "def"}),
+        FakeResponse(200),
+        FakeResponse(200),
+    ]
+    session = _install_session(monkeypatch, responses)
+
+    url = slowpics.upload_comparison([str(image)], tmp_path, cfg)
+
+    assert url == "https://slow.pics/c/abc/def"
+    shortcut = tmp_path / "slowpics_abc.url"
+    assert shortcut.exists()
+    assert len(session.calls) == 3
+
+
+def test_create_collection_4xx_raises(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = SlowpicsConfig()
+    image = tmp_path / "frame.png"
+    image.write_bytes(b"data")
+
+    responses = [FakeResponse(400, text="bad request")]
+    _install_session(monkeypatch, responses)
+
+    with pytest.raises(slowpics.SlowpicsAPIError):
+        slowpics.upload_comparison([str(image)], tmp_path, cfg)
+
+
+def test_upload_failure_raises(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = SlowpicsConfig()
+    image = tmp_path / "frame.png"
+    image.write_bytes(b"data")
+
+    responses = [
+        FakeResponse(200, {"uuid": "abc", "key": "def"}),
+        FakeResponse(500, text="server error"),
+    ]
+    _install_session(monkeypatch, responses)
+
+    with pytest.raises(slowpics.SlowpicsAPIError):
+        slowpics.upload_comparison([str(image)], tmp_path, cfg)
