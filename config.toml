@@ -48,7 +48,7 @@ always_full_filename = true
 prefer_guessit = true
 
 [paths]
-input_dir = "."
+input_dir = "comparison_videos"
 
 [runtime]
 ram_limit_mb = 8000
