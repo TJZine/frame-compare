@@ -91,9 +91,11 @@ def test_cli_applies_overrides_and_naming(tmp_path, monkeypatch, runner):
     monkeypatch.setattr(frame_compare, "select_frames", fake_select)
 
     generated_metadata = []
+    generated_trims = []
 
-    def fake_generate(clips, frames, files, metadata, out_dir, cfg_screens):
+    def fake_generate(clips, frames, files, metadata, out_dir, cfg_screens, trims=None):
         generated_metadata.append(metadata)
+        generated_trims.append(trims)
         out_dir.mkdir(parents=True, exist_ok=True)
         return [str(out_dir / f"shot_{idx}.png") for idx in range(len(frames) * len(files))]
 
@@ -114,6 +116,7 @@ def test_cli_applies_overrides_and_naming(tmp_path, monkeypatch, runner):
 
     assert generated_metadata and generated_metadata[0][0]["label"].startswith("AAA")
     assert generated_metadata[0][1]["label"].startswith("BBB")
+    assert generated_trims == [[(5, None), (0, -12)]]
 
     assert cache_infos and cache_infos[0].path == (tmp_path / cfg.analysis.frame_data_filename).resolve()
     assert cache_infos[0].files == ["AAA - 01.mkv", "BBB - 01.mkv"]

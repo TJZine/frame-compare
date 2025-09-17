@@ -342,6 +342,7 @@ def main(config_path: str, input_dir: str | None) -> None:
             [plan.metadata for plan in plans],
             out_dir,
             cfg.screenshots,
+            [(plan.trim_start, plan.trim_end) for plan in plans],
         )
     except ScreenshotError as exc:
         print(f"[red]Screenshot generation failed:[/red] {exc}")
