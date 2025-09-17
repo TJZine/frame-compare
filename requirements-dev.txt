@@ -7,4 +7,4 @@ pygments
 ruff
 black
 iniconfig
-
+urllib3

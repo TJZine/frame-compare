@@ -10,17 +10,11 @@ jobs:
     defaults:
       run:
         shell: bash
-        working-directory: .  # repo root, matches your layout
+        working-directory: .  # repo root
 
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
-
-      # (Optional) quick tree to sanity-check paths if something fails again
-      - name: Debug tree
-        run: |
-          pwd
-          ls -la
 
       - name: Set up project
         run: |
