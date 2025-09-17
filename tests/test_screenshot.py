@@ -31,7 +31,7 @@ def test_generate_screenshots_filenames(tmp_path, monkeypatch):
         calls.append({"frame": frame_idx, "crop": crop, "scaled": scaled})
         path.write_text("data", encoding="utf-8")
 
-    monkeypatch.setattr(screenshot, "_save_frame_with_vapoursynth", fake_writer)
+    monkeypatch.setattr(screenshot, "_save_frame_with_fpng", fake_writer)
 
     frames = [5, 25]
     files = ["example_video.mkv"]
@@ -88,7 +88,7 @@ def test_ffmpeg_respects_trim_offsets(tmp_path, monkeypatch):
         path.write_text("ff", encoding="utf-8")
 
     monkeypatch.setattr(screenshot, "_save_frame_with_ffmpeg", fake_ffmpeg)
-    monkeypatch.setattr(screenshot, "_save_frame_with_vapoursynth", lambda *args, **kwargs: None)
+    monkeypatch.setattr(screenshot, "_save_frame_with_fpng", lambda *args, **kwargs: None)
 
     screenshot.generate_screenshots(
         [clip],
@@ -113,7 +113,7 @@ def test_global_upscale_coordination(tmp_path, monkeypatch):
         scaled.append(scaled_dims)
         path.write_text("vs", encoding="utf-8")
 
-    monkeypatch.setattr(screenshot, "_save_frame_with_vapoursynth", fake_vs_writer)
+    monkeypatch.setattr(screenshot, "_save_frame_with_fpng", fake_vs_writer)
     monkeypatch.setattr(screenshot, "_save_frame_with_ffmpeg", lambda *args, **kwargs: None)
 
     metadata = [{"label": f"clip{i}"} for i in range(len(clips))]
@@ -137,7 +137,7 @@ def test_placeholder_logging(tmp_path, caplog, monkeypatch):
     def failing_writer(*args, **kwargs):
         raise RuntimeError("kaboom")
 
-    monkeypatch.setattr(screenshot, "_save_frame_with_vapoursynth", failing_writer)
+    monkeypatch.setattr(screenshot, "_save_frame_with_fpng", failing_writer)
     monkeypatch.setattr(screenshot, "_save_frame_with_ffmpeg", lambda *args, **kwargs: None)
 
     with caplog.at_level("WARNING"):

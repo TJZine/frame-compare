@@ -153,36 +153,20 @@ def _prepare_filename(
     return f"{base}{suffix}.png"
 
 
-def _map_compression_level(level: int) -> int:
-    return {0: 0, 1: 6, 2: 9}.get(level, 6)
-
-
-def _annotate_frame(image, frame_idx: int):
+def _normalise_compression_level(level: int) -> int:
     try:
-        from PIL import Image, ImageDraw  # type: ignore
-    except Exception as exc:  # pragma: no cover - requires runtime deps
-        raise ScreenshotWriterError("Pillow is required to annotate screenshots") from exc
-
-    if image.mode != "RGBA":
-        image = image.convert("RGBA")
-    draw = ImageDraw.Draw(image)
-    text = f"Frame {frame_idx}"
-    padding = 8
-    text_box = draw.textbbox((0, 0), text)
-    box_width = text_box[2] - text_box[0] + 2 * padding
-    box_height = text_box[3] - text_box[1] + 2 * padding
-    draw.rectangle(
-        [
-            (0, image.height - box_height),
-            (box_width, image.height),
-        ],
-        fill=(0, 0, 0, 160),
-    )
-    draw.text((padding, image.height - box_height + padding), text, fill=(255, 255, 255, 255))
-    return image.convert("RGB")
+        value = int(level)
+    except Exception:
+        return 1
+    return max(0, min(2, value))
 
 
-def _save_frame_with_vapoursynth(
+def _map_fpng_compression(level: int) -> int:
+    normalised = _normalise_compression_level(level)
+    return {0: 0, 1: 1, 2: 2}.get(normalised, 1)
+
+
+def _save_frame_with_fpng(
     clip,
     frame_idx: int,
     crop: Tuple[int, int, int, int],
@@ -193,10 +177,16 @@ def _save_frame_with_vapoursynth(
     try:
         import vapoursynth as vs  # type: ignore
     except Exception as exc:  # pragma: no cover - requires runtime deps
-        raise ScreenshotWriterError("VapourSynth with Pillow support is required for screenshot export") from exc
+        raise ScreenshotWriterError("VapourSynth is required for screenshot export") from exc
 
     if not isinstance(clip, vs.VideoNode):
         raise ScreenshotWriterError("Expected a VapourSynth clip for rendering")
+
+    core = getattr(clip, "core", None) or getattr(vs, "core", None)
+    fpng_ns = getattr(core, "fpng", None) if core is not None else None
+    writer = getattr(fpng_ns, "Write", None) if fpng_ns is not None else None
+    if not callable(writer):
+        raise ScreenshotWriterError("VapourSynth fpng.Write plugin is unavailable")
 
     work = clip
     try:
@@ -205,19 +195,109 @@ def _save_frame_with_vapoursynth(
             work = work.std.CropRel(left=left, right=right, top=top, bottom=bottom)
         target_w, target_h = scaled
         if work.width != target_w or work.height != target_h:
-            work = vs.core.resize.Spline36(work, width=target_w, height=target_h)
-        frame = work.get_frame(frame_idx)
-        image = frame.to_image()
+            resize_ns = getattr(core, "resize", None)
+            if resize_ns is None:
+                raise ScreenshotWriterError("VapourSynth core is missing resize namespace")
+            resampler = getattr(resize_ns, "Spline36", None)
+            if not callable(resampler):
+                raise ScreenshotWriterError("VapourSynth resize.Spline36 is unavailable")
+            work = resampler(work, width=target_w, height=target_h)
     except Exception as exc:
-        raise ScreenshotWriterError(f"Failed to render frame {frame_idx}: {exc}") from exc
+        raise ScreenshotWriterError(f"Failed to prepare frame {frame_idx}: {exc}") from exc
+
+    render_clip = work
+    if cfg.add_frame_info:
+        text_ns = getattr(core, "text", None)
+        text_filter = getattr(text_ns, "Text", None) if text_ns is not None else None
+        if callable(text_filter):
+            render_clip = text_filter(work, text=f"Frame {frame_idx}")
+        else:
+            logger.debug(
+                "add_frame_info requested but VapourSynth text.Text is unavailable; skipping overlay"
+            )
+
+    compression = _map_fpng_compression(cfg.compression_level)
+    try:
+        job = writer(render_clip, str(path), compression=compression, overwrite=True)
+        job.get_frame(frame_idx)
+    except Exception as exc:
+        raise ScreenshotWriterError(f"fpng failed for frame {frame_idx}: {exc}") from exc
+
+
+def _map_ffmpeg_compression(level: int) -> int:
+    mapping = {0: 0, 1: 6, 2: 9}
+    normalised = _normalise_compression_level(level)
+    return mapping.get(normalised, 6)
+
+
+def _resolve_source_frame_index(frame_idx: int, trim_start: int) -> int | None:
+    if trim_start == 0:
+        return frame_idx
+    if trim_start > 0:
+        return frame_idx + trim_start
+    blank = abs(int(trim_start))
+    if frame_idx < blank:
+        return None
+    return frame_idx - blank
+
+
+def _save_frame_with_ffmpeg(
+    source: str,
+    frame_idx: int,
+    crop: Tuple[int, int, int, int],
+    scaled: Tuple[int, int],
+    path: Path,
+    cfg: ScreenshotConfig,
+    width: int,
+    height: int,
+) -> None:
+    if shutil.which("ffmpeg") is None:
+        raise ScreenshotWriterError("FFmpeg executable not found in PATH")
+
+    cropped_w = max(1, width - crop[0] - crop[2])
+    cropped_h = max(1, height - crop[1] - crop[3])
+
+    filters = [f"select=eq(n\\,{int(frame_idx)})"]
+    if any(crop):
+        filters.append(
+            "crop={w}:{h}:{x}:{y}".format(
+                w=max(1, cropped_w),
+                h=max(1, cropped_h),
+                x=max(0, crop[0]),
+                y=max(0, crop[1]),
+            )
+        )
+    if scaled != (cropped_w, cropped_h):
+        filters.append(f"scale={max(1, scaled[0])}:{max(1, scaled[1])}:flags=lanczos")
+
+    filter_chain = ",".join(filters)
+    cmd = [
+        "ffmpeg",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        source,
+        "-vf",
+        filter_chain,
+        "-frames:v",
+        "1",
+        "-vsync",
+        "0",
+        "-compression_level",
+        str(_map_ffmpeg_compression(cfg.compression_level)),
+        str(path),
+    ]
+
+    process = subprocess.run(cmd, capture_output=True)
+    if process.returncode != 0:
+        stderr = process.stderr.decode("utf-8", "ignore").strip()
+        raise ScreenshotWriterError(f"FFmpeg failed for frame {frame_idx}: {stderr or 'unknown error'}")
 
     if cfg.add_frame_info:
-        image = _annotate_frame(image, frame_idx)
-
-    try:
-        image.save(path, format="PNG", compress_level=_map_compression_level(cfg.compression_level))
-    except OSError as exc:
-        raise ScreenshotWriterError(f"Failed to save screenshot: {exc}") from exc
+        logger.debug(
+            "add_frame_info is enabled but overlays are not supported in the ffmpeg writer; filenames include frame numbers"
+        )
 
 
 def _map_ffmpeg_compression(level: int) -> int:
@@ -367,7 +447,7 @@ def generate_screenshots(
                         height,
                     )
                 else:
-                    _save_frame_with_vapoursynth(clip, frame_idx, crop, scaled, target_path, cfg)
+                    _save_frame_with_fpng(clip, frame_idx, crop, scaled, target_path, cfg)
             except ScreenshotWriterError:
                 raise
             except Exception as exc:

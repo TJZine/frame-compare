@@ -7,7 +7,7 @@ import webbrowser
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 import click
 from rich import print
@@ -65,6 +65,25 @@ class _ClipPlan:
     clip: Optional[object] = None
     effective_fps: Optional[Tuple[int, int]] = None
     applied_fps: Optional[Tuple[int, int]] = None
+
+
+@dataclass
+class RunResult:
+    files: List[Path]
+    frames: List[int]
+    out_dir: Path
+    config: AppConfig
+    image_paths: List[str]
+    slowpics_url: Optional[str] = None
+
+
+class CLIAppError(RuntimeError):
+    """Raised when the CLI cannot complete its work."""
+
+    def __init__(self, message: str, *, code: int = 1, rich_message: Optional[str] = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.rich_message = rich_message or message
 
 
 def _discover_media(root: Path) -> List[Path]:
@@ -302,33 +321,37 @@ def _print_summary(files: Sequence[Path], frames: Sequence[int], out_dir: Path, 
         print(f"  Slow.pics : {url}")
 
 
-@click.command()
-@click.option("--config", "config_path", default="config.toml", show_default=True, help="Path to config.toml")
-@click.option("--input", "input_dir", default=None, help="Override [paths.input_dir] from config.toml")
-def main(config_path: str, input_dir: str | None) -> None:
+def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
     try:
         cfg: AppConfig = load_config(config_path)
     except ConfigError as exc:
-        print(f"[red]Config error:[/red] {exc}")
-        sys.exit(2)
+        raise CLIAppError(
+            f"Config error: {exc}", code=2, rich_message=f"[red]Config error:[/red] {exc}"
+        ) from exc
 
     if input_dir:
         cfg.paths.input_dir = input_dir
 
     root = Path(cfg.paths.input_dir).expanduser().resolve()
     if not root.exists():
-        print(f"[red]Input directory not found:[/red] {root}")
-        sys.exit(1)
+        raise CLIAppError(
+            f"Input directory not found: {root}",
+            rich_message=f"[red]Input directory not found:[/red] {root}",
+        )
 
     try:
         files = _discover_media(root)
     except OSError as exc:
-        print(f"[red]Failed to list input directory:[/red] {exc}")
-        sys.exit(1)
+        raise CLIAppError(
+            f"Failed to list input directory: {exc}",
+            rich_message=f"[red]Failed to list input directory:[/red] {exc}",
+        ) from exc
 
     if len(files) < 2:
-        print("[red]Need at least two video files to compare.[/red]")
-        sys.exit(1)
+        raise CLIAppError(
+            "Need at least two video files to compare.",
+            rich_message="[red]Need at least two video files to compare.[/red]",
+        )
 
     metadata = _parse_metadata(files, cfg.naming)
     labels = [meta.get("label") or file.name for meta, file in zip(metadata, files)]
@@ -342,19 +365,18 @@ def main(config_path: str, input_dir: str | None) -> None:
     try:
         _init_clips(plans, cfg.runtime)
     except vs_core.ClipInitError as exc:
-        print(f"[red]Failed to open clip:[/red] {exc}")
-        sys.exit(1)
+        raise CLIAppError(
+            f"Failed to open clip: {exc}", rich_message=f"[red]Failed to open clip:[/red] {exc}"
+        ) from exc
 
     clips = [plan.clip for plan in plans]
     if any(clip is None for clip in clips):
-        print("[red]Internal error:[/red] Clip initialisation failed")
-        sys.exit(1)
+        raise CLIAppError("Clip initialisation failed")
 
     analyze_index = [plan.path for plan in plans].index(analyze_path)
     analyze_clip = plans[analyze_index].clip
     if analyze_clip is None:
-        print("[red]Internal error:[/red] Missing clip for analysis")
-        sys.exit(1)
+        raise CLIAppError("Missing clip for analysis")
 
     cache_info = _build_cache_info(root, plans, cfg, analyze_index)
 
@@ -367,12 +389,16 @@ def main(config_path: str, input_dir: str | None) -> None:
             cache_info=cache_info,
         )
     except Exception as exc:
-        print(f"[red]Frame selection failed:[/red] {exc}")
-        sys.exit(1)
+        raise CLIAppError(
+            f"Frame selection failed: {exc}",
+            rich_message=f"[red]Frame selection failed:[/red] {exc}",
+        ) from exc
 
     if not frames:
-        print("[red]No frames were selected; cannot continue.[/red]")
-        sys.exit(1)
+        raise CLIAppError(
+            "No frames were selected; cannot continue.",
+            rich_message="[red]No frames were selected; cannot continue.[/red]",
+        )
 
     out_dir = (root / cfg.screenshots.directory_name).resolve()
     try:
@@ -386,18 +412,46 @@ def main(config_path: str, input_dir: str | None) -> None:
             trim_offsets=[plan.trim_start for plan in plans],
         )
     except ScreenshotError as exc:
-        print(f"[red]Screenshot generation failed:[/red] {exc}")
-        sys.exit(1)
+        raise CLIAppError(
+            f"Screenshot generation failed: {exc}",
+            rich_message=f"[red]Screenshot generation failed:[/red] {exc}",
+        ) from exc
 
-    slowpics_url: str | None = None
+    slowpics_url: Optional[str] = None
     if cfg.slowpics.auto_upload:
         try:
             slowpics_url = upload_comparison(image_paths, out_dir, cfg.slowpics)
         except SlowpicsAPIError as exc:
-            print(f"[red]slow.pics upload failed:[/red] {exc}")
-            sys.exit(1)
+            raise CLIAppError(
+                f"slow.pics upload failed: {exc}",
+                rich_message=f"[red]slow.pics upload failed:[/red] {exc}",
+            ) from exc
 
-    _print_summary([plan.path for plan in plans], frames, out_dir, slowpics_url)
+    result = RunResult(
+        files=[plan.path for plan in plans],
+        frames=list(frames),
+        out_dir=out_dir,
+        config=cfg,
+        image_paths=list(image_paths),
+        slowpics_url=slowpics_url,
+    )
+    _print_summary(result.files, result.frames, result.out_dir, result.slowpics_url)
+    return result
+
+
+@click.command()
+@click.option("--config", "config_path", default="config.toml", show_default=True, help="Path to config.toml")
+@click.option("--input", "input_dir", default=None, help="Override [paths.input_dir] from config.toml")
+def main(config_path: str, input_dir: str | None) -> None:
+    try:
+        result = run_cli(config_path, input_dir)
+    except CLIAppError as exc:
+        print(exc.rich_message)
+        raise click.exceptions.Exit(exc.code) from exc
+
+    slowpics_url = result.slowpics_url
+    cfg = result.config
+    out_dir = result.out_dir
 
     if slowpics_url:
         if cfg.slowpics.open_in_browser:
