@@ -6,7 +6,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import List, Mapping, Sequence, Tuple
+from typing import List, Mapping, Optional, Sequence, Tuple
 
 from .datatypes import ScreenshotConfig
 
@@ -182,6 +182,9 @@ def _save_frame_with_ffmpeg(
     cfg: ScreenshotConfig,
     width: int,
     height: int,
+    *,
+    trim_start: int = 0,
+    trim_end: Optional[int] = None,
 ) -> None:
     if shutil.which("ffmpeg") is None:
         raise ScreenshotWriterError("FFmpeg executable not found in PATH")
@@ -189,7 +192,18 @@ def _save_frame_with_ffmpeg(
     cropped_w = max(1, width - crop[0] - crop[2])
     cropped_h = max(1, height - crop[1] - crop[3])
 
-    filters = [f"select=eq(n\\,{int(frame_idx)})"]
+    if trim_end is not None and trim_end > 0 and frame_idx >= int(trim_end):
+        raise ScreenshotWriterError(
+            f"Frame {frame_idx} exceeds trimmed clip length ({trim_end})"
+        )
+
+    source_frame = int(frame_idx + trim_start)
+    if source_frame < 0:
+        raise ScreenshotWriterError(
+            f"Frame {frame_idx} resolves to negative source index ({source_frame})"
+        )
+
+    filters = [f"select=eq(n\\,{source_frame})"]
     if any(crop):
         filters.append(
             "crop={w}:{h}:{x}:{y}".format(
@@ -247,6 +261,7 @@ def generate_screenshots(
     metadata: Sequence[Mapping[str, str]],
     out_dir: Path,
     cfg: ScreenshotConfig,
+    trims: Optional[Sequence[Tuple[int, Optional[int]]]] = None,
 ) -> List[str]:
     """Render screenshots for *frames* from each clip using configured writer."""
 
@@ -254,6 +269,8 @@ def generate_screenshots(
         raise ScreenshotError("clips and files must have matching lengths")
     if len(metadata) != len(files):
         raise ScreenshotError("metadata and files must have matching lengths")
+    if trims is not None and len(trims) != len(files):
+        raise ScreenshotError("trim data and files must have matching lengths")
     if not frames:
         return []
 
@@ -261,6 +278,11 @@ def generate_screenshots(
     created: List[str] = []
 
     for clip_index, (clip, file_path, meta) in enumerate(zip(clips, files, metadata)):
+        trim_start = 0
+        trim_end: Optional[int] = None
+        if trims is not None:
+            trim_start, trim_end = trims[clip_index]
+
         width = getattr(clip, "width", None)
         height = getattr(clip, "height", None)
         if not isinstance(width, int) or not isinstance(height, int):
@@ -285,6 +307,8 @@ def generate_screenshots(
                         cfg,
                         width,
                         height,
+                        trim_start=trim_start,
+                        trim_end=trim_end,
                     )
                 else:
                     _save_frame_with_vapoursynth(clip, frame_idx, crop, scaled, target_path, cfg)

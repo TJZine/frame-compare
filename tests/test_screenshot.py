@@ -51,7 +51,19 @@ def test_compression_flag_passed(tmp_path, monkeypatch):
 
     captured = {}
 
-    def fake_writer(source, frame_idx, crop, scaled, path, cfg, width, height):
+    def fake_writer(
+        source,
+        frame_idx,
+        crop,
+        scaled,
+        path,
+        cfg,
+        width,
+        height,
+        *,
+        trim_start=0,
+        trim_end=None,
+    ):
         captured[frame_idx] = screenshot._map_ffmpeg_compression(cfg.compression_level)
         path.write_text("ffmpeg", encoding="utf-8")
 
@@ -59,3 +71,95 @@ def test_compression_flag_passed(tmp_path, monkeypatch):
 
     screenshot.generate_screenshots([clip], [10], ["video.mkv"], [{"label": "video"}], tmp_path, cfg)
     assert captured[10] == 9
+
+
+def test_generate_screenshots_passes_trim_offsets(tmp_path, monkeypatch):
+    clip = FakeClip(1920, 1080)
+    cfg = ScreenshotConfig(use_ffmpeg=True)
+
+    observed = []
+
+    def fake_writer(
+        source,
+        frame_idx,
+        crop,
+        scaled,
+        path,
+        cfg,
+        width,
+        height,
+        *,
+        trim_start=0,
+        trim_end=None,
+    ):
+        observed.append((trim_start, trim_end))
+        path.write_text("ffmpeg", encoding="utf-8")
+
+    monkeypatch.setattr(screenshot, "_save_frame_with_ffmpeg", fake_writer)
+
+    trims = [(5, 42)]
+    screenshot.generate_screenshots(
+        [clip],
+        [0, 1],
+        ["video.mkv"],
+        [{"label": "video"}],
+        tmp_path,
+        cfg,
+        trims=trims,
+    )
+
+    assert observed == [(5, 42), (5, 42)]
+
+
+def test_save_frame_with_ffmpeg_applies_trim_offset(monkeypatch, tmp_path):
+    cfg = ScreenshotConfig(add_frame_info=False)
+
+    monkeypatch.setattr(screenshot.shutil, "which", lambda _: "/usr/bin/ffmpeg")
+
+    captured = {}
+
+    class _Result:
+        returncode = 0
+        stderr = b""
+
+    def fake_run(cmd, capture_output):
+        captured["cmd"] = cmd
+        return _Result()
+
+    monkeypatch.setattr(screenshot.subprocess, "run", fake_run)
+
+    output = tmp_path / "frame.png"
+    screenshot._save_frame_with_ffmpeg(
+        "source.mkv",
+        frame_idx=3,
+        crop=(0, 0, 0, 0),
+        scaled=(1920, 1080),
+        path=output,
+        cfg=cfg,
+        width=1920,
+        height=1080,
+        trim_start=5,
+    )
+
+    filters = captured["cmd"][captured["cmd"].index("-vf") + 1]
+    assert "select=eq(n\\,8)" in filters
+
+
+def test_save_frame_with_ffmpeg_enforces_trim_end(monkeypatch, tmp_path):
+    cfg = ScreenshotConfig(add_frame_info=False)
+
+    monkeypatch.setattr(screenshot.shutil, "which", lambda _: "/usr/bin/ffmpeg")
+
+    with pytest.raises(screenshot.ScreenshotWriterError):
+        screenshot._save_frame_with_ffmpeg(
+            "source.mkv",
+            frame_idx=5,
+            crop=(0, 0, 0, 0),
+            scaled=(1920, 1080),
+            path=tmp_path / "frame.png",
+            cfg=cfg,
+            width=1920,
+            height=1080,
+            trim_start=2,
+            trim_end=5,
+        )
