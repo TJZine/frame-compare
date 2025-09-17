@@ -169,7 +169,27 @@ def main(config_path: str, input_dir: str | None) -> None:
             print(f"[red]slow.pics upload failed:[/red] {exc}")
             sys.exit(1)
 
-    _print_summary(files, frames, out_dir, slowpics_url)\r\n\r\n    if slowpics_url:\r\n        if cfg.slowpics.open_in_browser:\r\n            try:\r\n                webbrowser.open(slowpics_url)\r\n            except Exception:\r\n                print("[yellow]Warning:[/yellow] Unable to open browser for slow.pics URL")\r\n        try:\r\n            import pyperclip  # type: ignore\r\n\r\n            pyperclip.copy(slowpics_url)\r\n        except Exception:\r\n            pass\r\n        if cfg.slowpics.delete_screen_dir_after_upload:\r\n            try:\r\n                shutil.rmtree(out_dir)\r\n                print(f"[yellow]Screenshot directory removed:[/yellow] {out_dir}")\r\n            except OSError as exc:\r\n                print(f"[yellow]Warning:[/yellow] Failed to delete screenshot directory: {exc}")\r\n
+    _print_summary(files, frames, out_dir, slowpics_url)
+
+    if slowpics_url:
+        if cfg.slowpics.open_in_browser:
+            try:
+                webbrowser.open(slowpics_url)
+            except Exception:
+                print("[yellow]Warning:[/yellow] Unable to open browser for slow.pics URL")
+        try:
+            import pyperclip  # type: ignore
+
+            pyperclip.copy(slowpics_url)
+        except Exception:
+            pass
+        if cfg.slowpics.delete_screen_dir_after_upload:
+            try:
+                shutil.rmtree(out_dir)
+                print(f"[yellow]Screenshot directory removed:[/yellow] {out_dir}")
+            except OSError as exc:
+                print(f"[yellow]Warning:[/yellow] Failed to delete screenshot directory: {exc}")
+
 
 if __name__ == "__main__":
     main()
