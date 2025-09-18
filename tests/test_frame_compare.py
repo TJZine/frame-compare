@@ -120,6 +120,8 @@ def test_cli_applies_overrides_and_naming(tmp_path, monkeypatch, runner):
     assert result.exit_code == 0
     assert "AAA Short" in result.output
     assert "BBB Short" in result.output
+    assert "Trimmed to start at frame 5" in result.output
+    assert "Trimmed to end 12 frame(s) early" in result.output
 
     assert ram_limits == [cfg.runtime.ram_limit_mb]
 
