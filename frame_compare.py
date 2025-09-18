@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import builtins
+import math
 import re
 import sys
 import shutil
@@ -377,16 +378,15 @@ def _build_cache_info(root: Path, plans: Sequence[_ClipPlan], cfg: AppConfig, an
 def _resolve_selection_windows(
     plans: Sequence[_ClipPlan],
     analysis_cfg,
+    analyze_index: int,
 ) -> tuple[List[SelectionWindowSpec], tuple[int, int], bool]:
     specs: List[SelectionWindowSpec] = []
-    min_total_frames: Optional[int] = None
+    min_total_seconds: Optional[float] = None
     for plan in plans:
         clip = plan.clip
         if clip is None:
             raise CLIAppError("Clip initialisation failed")
         total_frames = int(getattr(clip, "num_frames", 0))
-        if min_total_frames is None or total_frames < min_total_frames:
-            min_total_frames = total_frames
         fps_num, fps_den = plan.effective_fps or _extract_clip_fps(clip)
         fps_val = fps_num / fps_den if fps_den else 0.0
         spec = compute_selection_window(
@@ -397,23 +397,57 @@ def _resolve_selection_windows(
             analysis_cfg.min_window_seconds,
         )
         specs.append(spec)
+        duration = float(spec.duration_seconds)
+        if min_total_seconds is None or duration < min_total_seconds:
+            min_total_seconds = duration
 
     if not specs:
         return [], (0, 0), False
 
-    start = max(spec.start_frame for spec in specs)
-    end = min(spec.end_frame for spec in specs)
-    collapsed = False
-    if end <= start:
-        collapsed = True
-        fallback_end = min_total_frames or 0
-        start = 0
-        end = fallback_end
+    if analyze_index < 0 or analyze_index >= len(specs):
+        raise CLIAppError("Analysis clip index out of range")
 
-    if end <= start:
+    start_seconds = max(spec.start_seconds for spec in specs)
+    end_seconds = min(spec.end_seconds for spec in specs)
+    collapsed = False
+    if end_seconds <= start_seconds:
+        collapsed = True
+        fallback_end_seconds = max(0.0, min_total_seconds or 0.0)
+        start_seconds = 0.0
+        end_seconds = fallback_end_seconds
+
+    if end_seconds <= start_seconds:
         raise CLIAppError("No frames remain after applying ignore window")
 
-    return specs, (start, end), collapsed
+    analyze_plan = plans[analyze_index]
+    analyze_clip = analyze_plan.clip
+    if analyze_clip is None:
+        raise CLIAppError("Clip initialisation failed")
+
+    analyze_total_frames = int(getattr(analyze_clip, "num_frames", 0))
+    fps_num, fps_den = analyze_plan.effective_fps or _extract_clip_fps(analyze_clip)
+    fps_val = fps_num / fps_den if fps_den else 0.0
+    if fps_val <= 0:
+        fps_val = 24000 / 1001
+
+    epsilon = 1e-9
+    start_frame = int(math.ceil(start_seconds * fps_val - epsilon))
+    end_frame = int(math.ceil(end_seconds * fps_val - epsilon))
+
+    if analyze_total_frames > 0:
+        start_frame = max(0, min(start_frame, analyze_total_frames))
+        end_frame = max(start_frame, min(end_frame, analyze_total_frames))
+    else:
+        start_frame = max(0, start_frame)
+        end_frame = max(start_frame, end_frame)
+
+    if end_frame == start_frame:
+        if analyze_total_frames > 0 and start_frame < analyze_total_frames:
+            end_frame = min(analyze_total_frames, start_frame + 1)
+        elif analyze_total_frames <= 0:
+            end_frame = start_frame + 1
+
+    return specs, (start_frame, end_frame), collapsed
 
 
 def _log_selection_windows(
@@ -523,7 +557,7 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
         raise CLIAppError("Missing clip for analysis")
 
     selection_specs, frame_window, windows_collapsed = _resolve_selection_windows(
-        plans, cfg.analysis
+        plans, cfg.analysis, analyze_index
     )
     analyze_fps_num, analyze_fps_den = plans[analyze_index].effective_fps or _extract_clip_fps(
         analyze_clip
