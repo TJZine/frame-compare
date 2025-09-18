@@ -739,6 +739,17 @@ def run_cli(
     if any(clip is None for clip in clips):
         raise CLIAppError("Clip initialisation failed")
 
+    try:
+        render_clips = [
+            vs_core.process_clip_for_screenshot(clip, plan.path.name, cfg.tonemap)
+            for plan, clip in zip(plans, clips)
+        ]
+    except vs_core.ClipProcessError as exc:
+        raise CLIAppError(
+            f"Failed to prepare clip for screenshots: {exc}",
+            rich_message=f"[red]Failed to prepare clip for screenshots:[/red] {exc}",
+        ) from exc
+
     analyze_index = [plan.path for plan in plans].index(analyze_path)
     analyze_clip = plans[analyze_index].clip
     if analyze_clip is None:
@@ -905,7 +916,7 @@ def run_cli(
                     )
 
                 image_paths = generate_screenshots(
-                    clips,
+                    render_clips,
                     frames,
                     [str(plan.path) for plan in plans],
                     [plan.metadata for plan in plans],
@@ -923,7 +934,7 @@ def run_cli(
                     )
         else:
             image_paths = generate_screenshots(
-                clips,
+                render_clips,
                 frames,
                 [str(plan.path) for plan in plans],
                 [plan.metadata for plan in plans],
