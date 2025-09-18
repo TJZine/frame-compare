@@ -21,6 +21,9 @@ def test_load_defaults(tmp_path: Path) -> None:
     assert app.naming.always_full_filename is True
     assert app.runtime.ram_limit_mb == 4000
     assert isinstance(app.runtime.vapoursynth_python_paths, list)
+    assert app.analysis.ignore_lead_seconds == 0.0
+    assert app.analysis.ignore_trail_seconds == 0.0
+    assert app.analysis.min_window_seconds == 5.0
 
 
 @pytest.mark.parametrize(
@@ -28,6 +31,9 @@ def test_load_defaults(tmp_path: Path) -> None:
     [
         ("[analysis]\nstep = 0\n", "analysis.step"),
         ("[screenshots]\ncompression_level = 5\n", "screenshots.compression_level"),
+        ("[analysis]\nignore_lead_seconds = -1\n", "analysis.ignore_lead_seconds"),
+        ("[analysis]\nignore_trail_seconds = -2\n", "analysis.ignore_trail_seconds"),
+        ("[analysis]\nmin_window_seconds = -0.5\n", "analysis.min_window_seconds"),
     ],
 )
 def test_validation_errors(tmp_path: Path, toml_snippet: str, message: str) -> None:
@@ -45,6 +51,9 @@ def test_override_values(tmp_path: Path) -> None:
 [analysis]
 frame_count_dark = 12
 step = 3
+ignore_lead_seconds = 4.5
+ignore_trail_seconds = 1.25
+min_window_seconds = 2.5
 
 [screenshots]
 compression_level = 2
@@ -64,6 +73,9 @@ input_dir = "D:/comparisons"
     app = load_config(str(cfg_path))
     assert app.analysis.frame_count_dark == 12
     assert app.analysis.step == 3
+    assert app.analysis.ignore_lead_seconds == 4.5
+    assert app.analysis.ignore_trail_seconds == 1.25
+    assert app.analysis.min_window_seconds == 2.5
     assert app.screenshots.compression_level == 2
     assert app.slowpics.auto_upload is True
     assert app.slowpics.remove_after_days == 14

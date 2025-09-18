@@ -2,7 +2,13 @@ import types
 
 import pytest
 
-from src.analysis import FrameMetricsCacheInfo, _quantile, dedupe, select_frames
+from src.analysis import (
+    FrameMetricsCacheInfo,
+    _quantile,
+    compute_selection_window,
+    dedupe,
+    select_frames,
+)
 from src.datatypes import AnalysisConfig
 
 
@@ -29,6 +35,28 @@ def test_dedupe_separation():
     frames = [0, 10, 20, 30, 100]
     deduped = dedupe(frames, min_separation_sec=1.0, fps=24.0)
     assert deduped == [0, 30, 100]
+
+
+def test_compute_selection_window_basic():
+    spec = compute_selection_window(2400, 24.0, ignore_lead_seconds=10.0, ignore_trail_seconds=5.0, min_window_seconds=1.0)
+    assert spec.start_frame == 240
+    assert spec.end_frame == 2280
+    assert pytest.approx(spec.start_seconds, rel=1e-6) == 10.0
+    assert pytest.approx(spec.end_seconds, rel=1e-6) == 95.0
+    assert pytest.approx(spec.applied_lead_seconds, rel=1e-6) == 10.0
+    assert pytest.approx(spec.applied_trail_seconds, rel=1e-6) == 5.0
+    assert not spec.warnings
+
+
+def test_compute_selection_window_clamps_to_clip():
+    spec = compute_selection_window(60, 30.0, ignore_lead_seconds=2.0, ignore_trail_seconds=2.0, min_window_seconds=5.0)
+    assert spec.start_frame == 0
+    assert spec.end_frame == 60
+    assert pytest.approx(spec.start_seconds, rel=1e-6) == 0.0
+    assert pytest.approx(spec.end_seconds, rel=1e-6) == 2.0
+    assert pytest.approx(spec.applied_lead_seconds, rel=1e-6) == 0.0
+    assert pytest.approx(spec.applied_trail_seconds, rel=1e-6) == 0.0
+    assert spec.warnings
 
 
 def test_select_frames_deterministic(monkeypatch):
@@ -99,6 +127,45 @@ def test_user_and_random_frames(monkeypatch):
         assert user_frame in frames
     extras = [f for f in frames if f not in set(cfg.user_frames)]
     assert len(extras) == cfg.random_frames
+
+
+def test_select_frames_respects_window(monkeypatch, caplog):
+    clip = FakeClip(
+        num_frames=220,
+        brightness=[i / 220 for i in range(220)],
+        motion=[(220 - i) / 220 for i in range(220)],
+    )
+
+    monkeypatch.setattr(
+        "src.analysis.vs_core.process_clip_for_screenshot",
+        lambda clip, file_name, cfg: clip,
+    )
+
+    cfg = AnalysisConfig(
+        frame_count_dark=2,
+        frame_count_bright=0,
+        frame_count_motion=0,
+        random_frames=0,
+        user_frames=[10, 75, 180],
+        screen_separation_sec=0,
+        step=1,
+    )
+
+    caplog.set_level("WARNING")
+    frames = select_frames(
+        clip,
+        cfg,
+        files=["clip.mkv"],
+        file_under_analysis="clip.mkv",
+        frame_window=(50, 150),
+    )
+
+    assert frames
+    assert all(50 <= frame < 150 for frame in frames)
+    assert 75 in frames
+    assert 10 not in frames
+    assert 180 not in frames
+    assert any("Dropped" in record.message for record in caplog.records)
 
 
 def test_select_frames_uses_cache(monkeypatch, tmp_path):

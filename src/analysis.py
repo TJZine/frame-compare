@@ -6,12 +6,16 @@ import math
 import random
 import hashlib
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from .datatypes import AnalysisConfig
 from . import vs_core
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -35,6 +39,20 @@ class CachedMetrics:
     selection_frames: Optional[List[int]]
     selection_hash: Optional[str]
     selection_categories: Optional[Dict[int, str]]
+
+
+@dataclass(frozen=True)
+class SelectionWindowSpec:
+    """Resolved selection window boundaries for a clip."""
+
+    start_frame: int
+    end_frame: int
+    start_seconds: float
+    end_seconds: float
+    applied_lead_seconds: float
+    applied_trail_seconds: float
+    duration_seconds: float
+    warnings: Tuple[str, ...] = ()
 
 
 def _quantile(sequence: Sequence[float], q: float) -> float:
@@ -79,9 +97,104 @@ def _config_fingerprint(cfg: AnalysisConfig) -> str:
         "random_seed": cfg.random_seed,
         "skip_head_seconds": cfg.skip_head_seconds,
         "skip_tail_seconds": cfg.skip_tail_seconds,
+        "ignore_lead_seconds": cfg.ignore_lead_seconds,
+        "ignore_trail_seconds": cfg.ignore_trail_seconds,
+        "min_window_seconds": cfg.min_window_seconds,
     }
     payload = json.dumps(relevant, sort_keys=True).encode("utf-8")
     return hashlib.sha1(payload).hexdigest()
+
+
+def compute_selection_window(
+    num_frames: int,
+    fps: float,
+    ignore_lead_seconds: float,
+    ignore_trail_seconds: float,
+    min_window_seconds: float,
+) -> SelectionWindowSpec:
+    """Resolve a trimmed time/frame window respecting configured ignores."""
+
+    if num_frames <= 0:
+        return SelectionWindowSpec(
+            start_frame=0,
+            end_frame=0,
+            start_seconds=0.0,
+            end_seconds=0.0,
+            applied_lead_seconds=0.0,
+            applied_trail_seconds=0.0,
+            duration_seconds=0.0,
+            warnings=(),
+        )
+
+    fps_val = float(fps) if isinstance(fps, (int, float)) else 0.0
+    if not math.isfinite(fps_val) or fps_val <= 0:
+        fps_val = 24000 / 1001
+
+    duration = num_frames / fps_val if fps_val > 0 else 0.0
+    lead = max(0.0, float(ignore_lead_seconds))
+    trail = max(0.0, float(ignore_trail_seconds))
+    min_window = max(0.0, float(min_window_seconds))
+
+    start_sec = min(lead, max(0.0, duration))
+    end_sec = max(start_sec, max(0.0, duration - trail))
+    warnings: List[str] = []
+
+    span = end_sec - start_sec
+    if min_window > 0 and duration > 0 and span < min_window:
+        if min_window >= duration:
+            start_sec = 0.0
+            end_sec = duration
+        else:
+            needed = min_window - span
+            available_end = max(0.0, duration - end_sec)
+            extend_end = min(needed, available_end)
+            end_sec += extend_end
+            needed -= extend_end
+            if needed > 0:
+                available_start = start_sec
+                shift_start = min(needed, available_start)
+                start_sec -= shift_start
+                needed -= shift_start
+            # final clamp inside clip bounds
+            start_sec = max(0.0, start_sec)
+            end_sec = min(duration, end_sec)
+            if end_sec - start_sec < min_window:
+                # anchor to trailing edge if needed
+                if duration >= min_window:
+                    start_sec = max(0.0, duration - min_window)
+                    end_sec = duration
+                else:
+                    start_sec = 0.0
+                    end_sec = duration
+        warnings.append(
+            "Selection window shorter than minimum; expanded within clip bounds."
+        )
+
+    start_sec = max(0.0, min(start_sec, duration))
+    end_sec = max(start_sec, min(end_sec, duration))
+
+    applied_lead = start_sec
+    applied_trail = max(0.0, duration - end_sec)
+
+    epsilon = 1e-9
+    start_frame = int(math.ceil(start_sec * fps_val - epsilon))
+    end_frame = int(math.ceil(end_sec * fps_val - epsilon))
+
+    start_frame = max(0, min(start_frame, num_frames))
+    end_frame = max(start_frame, min(end_frame, num_frames))
+    if end_frame == start_frame and start_frame < num_frames:
+        end_frame = min(num_frames, start_frame + 1)
+
+    return SelectionWindowSpec(
+        start_frame=start_frame,
+        end_frame=end_frame,
+        start_seconds=start_sec,
+        end_seconds=end_sec,
+        applied_lead_seconds=applied_lead,
+        applied_trail_seconds=applied_trail,
+        duration_seconds=duration,
+        warnings=tuple(warnings),
+    )
 
 
 def _selection_fingerprint(cfg: AnalysisConfig) -> str:
@@ -101,6 +214,9 @@ def _selection_fingerprint(cfg: AnalysisConfig) -> str:
         "motion_diff_radius": cfg.motion_diff_radius,
         "skip_head_seconds": cfg.skip_head_seconds,
         "skip_tail_seconds": cfg.skip_tail_seconds,
+        "ignore_lead_seconds": cfg.ignore_lead_seconds,
+        "ignore_trail_seconds": cfg.ignore_trail_seconds,
+        "min_window_seconds": cfg.min_window_seconds,
     }
     payload = json.dumps(relevant, sort_keys=True).encode("utf-8")
     return hashlib.sha1(payload).hexdigest()
@@ -373,6 +489,7 @@ def select_frames(
     cache_info: Optional[FrameMetricsCacheInfo] = None,
     progress: Callable[[int], None] | None = None,
     *,
+    frame_window: tuple[int, int] | None = None,
     return_metadata: bool = False,
 ) -> List[int] | Tuple[List[int], Dict[int, str]]:
     """Select frame indices for comparison using quantiles and motion heuristics."""
@@ -381,25 +498,61 @@ def select_frames(
     if num_frames <= 0:
         return []
 
+    window_start = 0
+    window_end = num_frames
+    if frame_window is not None:
+        try:
+            candidate_start, candidate_end = frame_window
+        except Exception:
+            candidate_start, candidate_end = (0, num_frames)
+        else:
+            try:
+                candidate_start = int(candidate_start)
+            except (TypeError, ValueError):
+                candidate_start = 0
+            try:
+                candidate_end = int(candidate_end)
+            except (TypeError, ValueError):
+                candidate_end = num_frames
+        candidate_start = max(0, candidate_start)
+        candidate_end = max(candidate_start, candidate_end)
+        window_start = min(candidate_start, num_frames)
+        window_end = min(candidate_end, num_frames)
+        if window_end <= window_start:
+            if num_frames > 0:
+                logger.warning(
+                    "Frame window collapsed for %s; falling back to full clip", file_under_analysis
+                )
+                window_start = 0
+                window_end = num_frames
+
+    if window_end <= window_start:
+        return []
+
+    window_span = window_end - window_start
+
     fps = _frame_rate(clip)
     rng = random.Random(cfg.random_seed)
     min_sep_frames = 0 if cfg.screen_separation_sec <= 0 else int(round(cfg.screen_separation_sec * fps))
-    skip_head_frames = 0
-    skip_tail_frames = 0
+    skip_head_cutoff = window_start
     if cfg.skip_head_seconds > 0 and fps > 0:
-        skip_head_frames = max(0, int(round(cfg.skip_head_seconds * fps)))
+        skip_head_cutoff = min(
+            window_end,
+            window_start + max(0, int(round(cfg.skip_head_seconds * fps))),
+        )
+    skip_tail_limit = window_end
     if cfg.skip_tail_seconds > 0 and fps > 0:
-        skip_tail_frames = max(0, int(round(cfg.skip_tail_seconds * fps)))
-    tail_cutoff = None
-    if skip_tail_frames > 0 and num_frames > 0:
-        tail_cutoff = max(-1, num_frames - 1 - skip_tail_frames)
+        skip_tail_limit = max(
+            window_start,
+            window_end - max(0, int(round(cfg.skip_tail_seconds * fps))),
+        )
 
     analysis_clip = clip
     if cfg.analyze_in_sdr:
         analysis_clip = vs_core.process_clip_for_screenshot(clip, file_under_analysis, cfg)
 
     step = max(1, int(cfg.step))
-    indices = list(range(0, num_frames, step))
+    indices = list(range(window_start, window_end, step))
 
     cached_metrics = _load_cached_metrics(cache_info, cfg) if cache_info is not None else None
 
@@ -408,10 +561,25 @@ def select_frames(
     cached_categories: Optional[Dict[int, str]] = None
 
     if cached_metrics is not None:
-        brightness = cached_metrics.brightness
-        motion = cached_metrics.motion
+        brightness = [
+            (idx, val)
+            for idx, val in cached_metrics.brightness
+            if window_start <= idx < window_end
+        ]
+        motion = [
+            (idx, val)
+            for idx, val in cached_metrics.motion
+            if window_start <= idx < window_end
+        ]
         if cached_metrics.selection_hash == selection_hash:
-            cached_selection = cached_metrics.selection_frames
+            if cached_metrics.selection_frames is not None:
+                cached_selection = [
+                    frame
+                    for frame in cached_metrics.selection_frames
+                    if window_start <= int(frame) < window_end
+                ]
+            else:
+                cached_selection = None
             cached_categories = cached_metrics.selection_categories
         if progress is not None:
             progress(len(brightness))
@@ -444,10 +612,12 @@ def select_frames(
         frame_idx = _clamp_frame(frame, num_frames)
         if frame_idx in selected_set:
             return False
+        if frame_idx < window_start or frame_idx >= window_end:
+            return False
         if not allow_edges:
-            if skip_head_frames > 0 and frame_idx < skip_head_frames:
+            if frame_idx < skip_head_cutoff:
                 return False
-            if tail_cutoff is not None and frame_idx > tail_cutoff:
+            if frame_idx >= skip_tail_limit:
                 return False
         effective_gap = min_sep_frames if gap_frames is None else max(0, int(gap_frames))
         if enforce_gap and effective_gap > 0:
@@ -460,8 +630,27 @@ def select_frames(
             frame_categories[frame_idx] = category
         return True
 
+    dropped_user_frames: List[int] = []
     for frame in cfg.user_frames:
-        try_add(frame, enforce_gap=False, allow_edges=True, category="User")
+        try:
+            frame_int = int(frame)
+        except (TypeError, ValueError):
+            continue
+        if window_start <= frame_int < window_end:
+            try_add(frame_int, enforce_gap=False, allow_edges=True, category="User")
+        else:
+            dropped_user_frames.append(frame_int)
+
+    if dropped_user_frames:
+        preview = ", ".join(str(val) for val in dropped_user_frames[:5])
+        if len(dropped_user_frames) > 5:
+            preview += ", …"
+        logger.warning(
+            "Dropped %d pinned frame(s) outside trimmed window for %s: %s",
+            len(dropped_user_frames),
+            file_under_analysis,
+            preview,
+        )
 
     def pick_from_candidates(
         candidates: List[tuple[int, float]],
@@ -507,7 +696,7 @@ def select_frames(
                 break
 
     dark_candidates: List[tuple[int, float]] = []
-    if cfg.frame_count_dark > 0:
+    if cfg.frame_count_dark > 0 and brightness_values:
         if cfg.use_quantiles:
             threshold = _quantile(brightness_values, cfg.dark_quantile)
             dark_candidates = [(idx, val) for idx, val in brightness if val <= threshold]
@@ -516,7 +705,7 @@ def select_frames(
     pick_from_candidates(dark_candidates, cfg.frame_count_dark, mode="dark")
 
     bright_candidates: List[tuple[int, float]] = []
-    if cfg.frame_count_bright > 0:
+    if cfg.frame_count_bright > 0 and brightness_values:
         if cfg.use_quantiles:
             threshold = _quantile(brightness_values, cfg.bright_quantile)
             bright_candidates = [(idx, val) for idx, val in brightness if val >= threshold]
@@ -525,7 +714,7 @@ def select_frames(
     pick_from_candidates(bright_candidates, cfg.frame_count_bright, mode="bright")
 
     motion_candidates: List[tuple[int, float]] = []
-    if cfg.frame_count_motion > 0:
+    if cfg.frame_count_motion > 0 and motion:
         smoothed_motion = _smooth_motion(motion, max(0, int(cfg.motion_diff_radius)))
         filtered = smoothed_motion
         if cfg.motion_scenecut_quantile > 0:
@@ -542,8 +731,8 @@ def select_frames(
 
     random_count = max(0, int(cfg.random_frames))
     attempts = 0
-    while random_count > 0 and attempts < random_count * 10 and num_frames > 0:
-        candidate = rng.randrange(num_frames)
+    while random_count > 0 and attempts < random_count * 10 and window_span > 0:
+        candidate = window_start + rng.randrange(window_span)
         if try_add(candidate, enforce_gap=True, category="Random"):
             random_count -= 1
         attempts += 1
