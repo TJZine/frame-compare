@@ -40,6 +40,8 @@ letterbox_pillarbox_aware = true
 
 [slowpics]
 # Auto-upload settings. Leave `auto_upload` off for local runs.
+# When `collection_name` is blank, the CLI auto-names collections with
+# resolved TMDB metadata (Title/Year) or the first filename as a fallback.
 auto_upload = true
 collection_name = ""
 is_hentai = false
