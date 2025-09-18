@@ -73,6 +73,16 @@ class _DummyStd:
         return self.owner
 
 
+class _RecordingStd(_DummyStd):
+    def __init__(self, owner):
+        super().__init__(owner)
+        self.calls: list[dict[str, object]] = []
+
+    def SetFrameProps(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        return super().SetFrameProps(**kwargs)
+
+
 class _DummyResize:
     def __init__(self, owner):
         self.owner = owner
@@ -93,6 +103,12 @@ class _DummyClip:
 
     def get_frame_props(self):
         return self.frame_props
+
+
+class _RecordingClip(_DummyClip):
+    def __init__(self, props: dict[str, object]):
+        super().__init__(props)
+        self.std = _RecordingStd(self)
 
 
 def test_apply_tonemap_retries_with_hints() -> None:
@@ -128,3 +144,16 @@ def test_apply_tonemap_uses_fallback_when_placebo_missing() -> None:
     assert isinstance(result, TonemapResult)
     assert result.used_libplacebo is False
     assert clip.std.last_props["_Transfer"] == 1
+
+
+def test_apply_tonemap_stamps_metadata_props() -> None:
+    clip = _RecordingClip({"_Transfer": "st2084", "_Primaries": "bt2020"})
+    cfg = TMConfig()
+    result = apply_tonemap(clip, cfg)
+    assert isinstance(result, TonemapResult)
+    metadata_call = next((call for call in clip.std.calls if "_Tonemapped" in call), None)
+    assert metadata_call is not None
+    assert str(metadata_call["_Tonemapped"]).startswith("placebo:")
+    overlay_text = metadata_call.get("_TonemapOverlay")
+    assert overlay_text
+    assert "TM" in str(overlay_text)
