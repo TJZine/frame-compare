@@ -19,6 +19,32 @@ _INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 logger = logging.getLogger(__name__)
 
 
+
+def _debug_dump_range(label: str, clip, frame_idx: int) -> None:
+    if not logger.isEnabledFor(logging.DEBUG):
+        return
+    try:
+        frame = clip.get_frame(frame_idx)
+    except Exception as exc:  # pragma: no cover - diagnostic helper
+        logger.debug('[debug] Failed to read frame %s for %s: %s', frame_idx, label, exc)
+        return
+    props = getattr(frame, 'props', {})
+    fmt = getattr(frame, 'format', None)
+    fmt_name = getattr(fmt, 'name', 'unknown')
+    width = getattr(frame, 'width', 'unknown')
+    height = getattr(frame, 'height', 'unknown')
+    logger.debug(
+        '[debug] %s frame %s\n  _ColorRange=%s\n  format=%s\n  size=%sx%s',
+        label,
+        frame_idx,
+        props.get('_ColorRange'),
+        fmt_name,
+        width,
+        height,
+    )
+
+
+
 def _ensure_rgb24(core, clip, frame_idx):
     try:
         import vapoursynth as vs  # type: ignore
@@ -29,7 +55,15 @@ def _ensure_rgb24(core, clip, frame_idx):
     color_family = getattr(fmt, "color_family", None) if fmt is not None else None
     bits = getattr(fmt, "bits_per_sample", None) if fmt is not None else None
     if color_family == getattr(vs, "RGB", object()) and bits == 8:
-        return clip
+        try:
+            return clip.std.SetFrameProps(
+                _Matrix=1,
+                _Primaries=1,
+                _Transfer=1,
+                _ColorRange=0,
+            )
+        except Exception:
+            return clip
 
     resize_ns = getattr(core, "resize", None)
     if resize_ns is None:
@@ -96,18 +130,11 @@ def _apply_frame_info_overlay(core, clip, title: str, requested_frame: int | Non
         logger.debug('Required VapourSynth overlay functions unavailable; skipping frame overlay')
         return clip
 
-    resize_ns = getattr(core, "resize", None)
-    point = getattr(resize_ns, "Point", None) if resize_ns is not None else None
-    limited_clip = clip
+    try:
+        limited_clip = clip.std.SetFrameProps(_ColorRange=0)
+    except Exception:  # pragma: no cover - best effort
+        limited_clip = clip
     convert_back = None
-    if callable(point):
-        try:
-            limited_clip = point(clip, range=vs.RANGE_LIMITED, dither_type="none")
-            convert_back = partial(point, range=vs.RANGE_FULL, dither_type="none")
-        except Exception:  # pragma: no cover - best effort
-            logger.debug('Failed to convert clip to limited range for frame overlay', exc_info=True)
-            limited_clip = clip
-            convert_back = None
 
     label = title.strip() if isinstance(title, str) else ''
     if not label:
@@ -362,16 +389,22 @@ def _save_frame_with_fpng(
         raise ScreenshotWriterError(f"Failed to prepare frame {frame_idx}: {exc}") from exc
 
     render_clip = work
+    _debug_dump_range('pre_overlay', render_clip, frame_idx)
     if cfg.add_frame_info:
         render_clip = _apply_frame_info_overlay(core, render_clip, label, requested_frame, selection_label)
+        _debug_dump_range('post_overlay', render_clip, frame_idx)
 
     render_clip = _ensure_rgb24(core, render_clip, frame_idx)
+    _debug_dump_range('render_clip', render_clip, frame_idx)
 
     compression = _map_fpng_compression(cfg.compression_level)
     try:
         job = writer(render_clip, str(path), compression=compression, overwrite=True)
         job.get_frame(frame_idx)
     except Exception as exc:
+        _debug_dump_range('fpng_source', clip, frame_idx)
+        _debug_dump_range('fpng_work', work, frame_idx)
+        _debug_dump_range('fpng_render', render_clip, frame_idx)
         raise ScreenshotWriterError(f"fpng failed for frame {frame_idx}: {exc}") from exc
 
 
