@@ -9,9 +9,9 @@ import subprocess
 import re
 from functools import partial
 from pathlib import Path
-from typing import Callable, List, Mapping, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, TypedDict
 
-from .datatypes import ScreenshotConfig
+from src.datatypes import ScreenshotConfig
 
 _INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -19,7 +19,111 @@ _INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 logger = logging.getLogger(__name__)
 
 
-def _ensure_rgb24(core, clip, frame_idx):
+_DEBUG_PROP_KEYS = ("_Matrix", "_Transfer", "_Primaries", "_ColorRange")
+_COLOR_RANGE_LABELS = {
+    0: "Full (0)",
+    1: "Limited (1)",
+    2: "Undefined (2)",
+    3: "Variable (3)",
+}
+
+
+class _GeometryPlan(TypedDict, total=False):
+    width: int
+    height: int
+    crop: tuple[int, int, int, int]
+    cropped_w: int
+    cropped_h: int
+    scaled: tuple[int, int]
+
+
+def _normalize_prop_value(value: Any) -> Any:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", "ignore")
+    return value
+
+
+def _describe_vs_format(fmt: Any) -> str:
+    if fmt is None:
+        return "unknown"
+    name = getattr(fmt, "name", None)
+    if isinstance(name, str) and name:
+        return name
+    identifier = getattr(fmt, "id", None)
+    if identifier is not None:
+        return f"id={identifier}"
+    return str(fmt)
+
+
+def _describe_color_range(value: Any) -> str:
+    normalized = _normalize_prop_value(value)
+    if isinstance(normalized, int):
+        label = _COLOR_RANGE_LABELS.get(normalized)
+        return label or f"{normalized}"
+    if isinstance(normalized, str):
+        return normalized
+    return str(normalized)
+
+
+def _pick_debug_frame_index(clip: Any, frame_idx: int) -> int:
+    total = getattr(clip, "num_frames", None)
+    if isinstance(total, int) and total > 0:
+        return max(0, min(int(frame_idx), total - 1))
+    return max(0, int(frame_idx))
+
+
+def _collect_clip_debug_info(clip: Any, frame_idx: int) -> Dict[str, Any]:
+    info: Dict[str, Any] = {}
+    width = getattr(clip, "width", None)
+    height = getattr(clip, "height", None)
+    if isinstance(width, int) and isinstance(height, int):
+        info["dimensions"] = f"{width}x{height}"
+    info["format"] = _describe_vs_format(getattr(clip, "format", None))
+
+    sample_idx = _pick_debug_frame_index(clip, frame_idx)
+    try:
+        frame = clip.get_frame(sample_idx)
+    except Exception as exc:  # pragma: no cover - best effort diagnostics
+        info["frame_error"] = f"{type(exc).__name__}: {exc}"
+        return info
+
+    props: Dict[str, Any] = {}
+    for key in _DEBUG_PROP_KEYS:
+        if key in frame.props:
+            props[key] = _normalize_prop_value(frame.props.get(key))
+    if props:
+        info["props"] = props
+        if "_ColorRange" in props:
+            info["color_range"] = _describe_color_range(props["_ColorRange"])
+    return info
+
+
+def _summarize_debug_info(info: Dict[str, Any]) -> str:
+    parts: List[str] = []
+    dimensions = info.get("dimensions")
+    if dimensions:
+        parts.append(f"dims={dimensions}")
+    fmt = info.get("format")
+    if fmt:
+        parts.append(f"fmt={fmt}")
+    color_range = info.get("color_range")
+    if color_range:
+        parts.append(f"range={color_range}")
+    props = info.get("props")
+    if isinstance(props, dict) and props:
+        prop_parts = []
+        for key in _DEBUG_PROP_KEYS:
+            if key in props:
+                prop_parts.append(f"{key}={props[key]}")
+        if prop_parts:
+            parts.append("props[" + ", ".join(prop_parts) + "]")
+    frame_error = info.get("frame_error")
+    if frame_error:
+        parts.append(f"frame_error={frame_error}")
+    return ", ".join(parts) if parts else "no data"
+
+
+def _ensure_rgb24(core: Any, clip: Any, frame_idx: int) -> Any:
     try:
         import vapoursynth as vs  # type: ignore
     except Exception as exc:  # pragma: no cover - requires runtime deps
@@ -56,7 +160,7 @@ def _ensure_rgb24(core, clip, frame_idx):
     return converted
 
 
-def _clamp_frame_index(clip, frame_idx: int) -> tuple[int, bool]:
+def _clamp_frame_index(clip: Any, frame_idx: int) -> tuple[int, bool]:
     total_frames = getattr(clip, "num_frames", None)
     if not isinstance(total_frames, int) or total_frames <= 0:
         return max(0, int(frame_idx)), False
@@ -77,7 +181,13 @@ def _decode_prop_text(value: object) -> str:
     return ""
 
 
-def _apply_frame_info_overlay(core, clip, title: str, requested_frame: int | None, selection_label: str | None) -> object:
+def _apply_frame_info_overlay(
+    core: Any,
+    clip: Any,
+    title: str,
+    requested_frame: int | None,
+    selection_label: str | None,
+) -> Any:
     try:
         import vapoursynth as vs  # type: ignore
     except Exception:  # pragma: no cover - requires runtime deps
@@ -101,10 +211,27 @@ def _apply_frame_info_overlay(core, clip, title: str, requested_frame: int | Non
     point = getattr(resize_ns, "Point", None) if resize_ns is not None else None
     limited_clip = clip
     convert_back = None
+    set_frame_props = getattr(std_ns, "SetFrameProps", None)
+
     if callable(point):
         try:
             limited_clip = point(clip, range=vs.RANGE_LIMITED, dither_type="none")
-            convert_back = partial(point, range=vs.RANGE_FULL, dither_type="none")
+            if callable(set_frame_props):
+                try:
+                    limited_clip = set_frame_props(limited_clip, _ColorRange=1)
+                except Exception:  # pragma: no cover - best effort
+                    logger.debug('Failed to tag limited range frame props for frame overlay', exc_info=True)
+
+            def _restore_full_range(node):
+                restored = point(node, range=vs.RANGE_FULL, dither_type="none")
+                if callable(set_frame_props):
+                    try:
+                        restored = set_frame_props(restored, _ColorRange=0)
+                    except Exception:  # pragma: no cover - best effort
+                        logger.debug('Failed to tag full range frame props after frame overlay', exc_info=True)
+                return restored
+
+            convert_back = _restore_full_range
         except Exception:  # pragma: no cover - best effort
             logger.debug('Failed to convert clip to limited range for frame overlay', exc_info=True)
             limited_clip = clip
@@ -116,7 +243,13 @@ def _apply_frame_info_overlay(core, clip, title: str, requested_frame: int | Non
 
     padding_title = " " + ("\n" * 3)
 
-    def _draw_info(n: int, f, clip_ref, *, draw_text_fn=None):
+    def _draw_info(
+        n: int,
+        f: Any,
+        clip_ref: Any,
+        *,
+        draw_text_fn: Callable[[Any, str], Any] | None = None,
+    ) -> Any:
         pict = f.props.get('_PictType')
         if isinstance(pict, bytes):
             pict_text = pict.decode('utf-8', 'ignore')
@@ -267,9 +400,9 @@ def plan_mod_crop(
 def _compute_scaled_dimensions(
     width: int,
     height: int,
-    crop: Tuple[int, int, int, int],
+    crop: tuple[int, int, int, int],
     target_height: int,
-) -> Tuple[int, int]:
+) -> tuple[int, int]:
     cropped_w = width - crop[0] - crop[2]
     cropped_h = height - crop[1] - crop[3]
     if cropped_w <= 0 or cropped_h <= 0:
@@ -282,7 +415,7 @@ def _compute_scaled_dimensions(
     return (target_w, desired_h)
 
 
-def _plan_geometry(clips: Sequence[object], cfg: ScreenshotConfig) -> List[dict[str, object]]:
+def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> list[_GeometryPlan]:
     dimensions: list[tuple[int, int]] = []
     for clip in clips:
         width = getattr(clip, "width", None)
@@ -296,7 +429,7 @@ def _plan_geometry(clips: Sequence[object], cfg: ScreenshotConfig) -> List[dict[
 
     crops = plan_mod_crop(dimensions, cfg.mod_crop, cfg.letterbox_pillarbox_aware)
 
-    plans: List[dict[str, object]] = []
+    plans: list[_GeometryPlan] = []
     for (width, height), crop in zip(dimensions, crops):
         cropped_w = width - crop[0] - crop[2]
         cropped_h = height - crop[1] - crop[3]
@@ -305,26 +438,30 @@ def _plan_geometry(clips: Sequence[object], cfg: ScreenshotConfig) -> List[dict[
 
         plans.append(
             {
-                "width": width,
-                "height": height,
+                "width": int(width),
+                "height": int(height),
                 "crop": crop,
-                "cropped_w": cropped_w,
-                "cropped_h": cropped_h,
+                "cropped_w": int(cropped_w),
+                "cropped_h": int(cropped_h),
             }
         )
 
-    single_res_target = int(cfg.single_res) if cfg.single_res > 0 else None
+    single_res_target: Optional[int] = int(cfg.single_res) if cfg.single_res > 0 else None
     if single_res_target is not None:
-        desired_height = max(1, single_res_target)
-        global_target = None
+        desired_height: Optional[int] = max(1, single_res_target)
+        global_target: Optional[int] = None
     else:
         desired_height = None
-        global_target = max((plan["cropped_h"] for plan in plans), default=None) if cfg.upscale else None
+        if cfg.upscale:
+            cropped_values = [plan["cropped_h"] for plan in plans]
+            global_target = max(cropped_values) if cropped_values else None
+        else:
+            global_target = None
 
     for plan in plans:
         cropped_h = int(plan["cropped_h"])
         if desired_height is not None:
-            target_h = desired_height
+            target_h = int(desired_height)
             if not cfg.upscale and target_h > cropped_h:
                 target_h = cropped_h
         elif global_target is not None:
@@ -335,7 +472,7 @@ def _plan_geometry(clips: Sequence[object], cfg: ScreenshotConfig) -> List[dict[
         plan["scaled"] = _compute_scaled_dimensions(
             int(plan["width"]),
             int(plan["height"]),
-            plan["crop"],
+            tuple(plan["crop"]),
             target_h,
         )
 
@@ -382,10 +519,10 @@ def _map_png_compression_level(level: int) -> int:
 
 
 def _save_frame_with_fpng(
-    clip,
+    clip: Any,
     frame_idx: int,
-    crop: Tuple[int, int, int, int],
-    scaled: Tuple[int, int],
+    crop: tuple[int, int, int, int],
+    scaled: tuple[int, int],
     path: Path,
     cfg: ScreenshotConfig,
     label: str,
@@ -407,6 +544,19 @@ def _save_frame_with_fpng(
         raise ScreenshotWriterError("VapourSynth fpng.Write plugin is unavailable")
 
     work = clip
+    debug_enabled = bool(getattr(cfg, "debug_log_color_ranges", False))
+    debug_records: List[tuple[str, Dict[str, Any]]] = []
+
+    def _record(stage: str, node: Any) -> None:
+        if not debug_enabled:
+            return
+        try:
+            info = _collect_clip_debug_info(node, frame_idx)
+        except Exception as exc:  # pragma: no cover - diagnostics only
+            logger.debug("Failed to collect debug info for stage %s: %s", stage, exc)
+            info = {"frame_error": f"{type(exc).__name__}: {exc}"}
+        debug_records.append((stage, info))
+
     try:
         left, top, right, bottom = crop
         if any(crop):
@@ -420,21 +570,41 @@ def _save_frame_with_fpng(
             if not callable(resampler):
                 raise ScreenshotWriterError("VapourSynth resize.Spline36 is unavailable")
             work = resampler(work, width=target_w, height=target_h)
+        _record("post_geometry", work)
     except Exception as exc:
         raise ScreenshotWriterError(f"Failed to prepare frame {frame_idx}: {exc}") from exc
 
     render_clip = work
     if cfg.add_frame_info:
         render_clip = _apply_frame_info_overlay(core, render_clip, label, requested_frame, selection_label)
+        _record("post_frame_info", render_clip)
 
     render_clip = _ensure_rgb24(core, render_clip, frame_idx)
+    _record("post_rgb24", render_clip)
 
     compression = _map_fpng_compression(cfg.compression_level)
     try:
         job = writer(render_clip, str(path), compression=compression, overwrite=True)
         job.get_frame(frame_idx)
     except Exception as exc:
-        raise ScreenshotWriterError(f"fpng failed for frame {frame_idx}: {exc}") from exc
+        summary = ""
+        if debug_enabled and debug_records:
+            summary_parts = []
+            for stage, info in debug_records:
+                summary_str = _summarize_debug_info(info)
+                summary_parts.append(f"{stage} -> {summary_str}")
+                logger.warning(
+                    "VapourSynth debug for '%s' frame %d [%s]: %s",
+                    label,
+                    frame_idx,
+                    stage,
+                    summary_str,
+                )
+            summary = "; ".join(summary_parts)
+        message = f"fpng failed for frame {frame_idx} ({label}): {exc}"
+        if summary:
+            message = f"{message} [debug: {summary}]"
+        raise ScreenshotWriterError(message) from exc
 
 
 def _map_ffmpeg_compression(level: int) -> int:
@@ -457,8 +627,8 @@ def _resolve_source_frame_index(frame_idx: int, trim_start: int) -> int | None:
 def _save_frame_with_ffmpeg(
     source: str,
     frame_idx: int,
-    crop: Tuple[int, int, int, int],
-    scaled: Tuple[int, int],
+    crop: tuple[int, int, int, int],
+    scaled: tuple[int, int],
     path: Path,
     cfg: ScreenshotConfig,
     width: int,
@@ -525,7 +695,7 @@ def _save_frame_placeholder(path: Path) -> None:
 
 
 def generate_screenshots(
-    clips: Sequence[object],
+    clips: Sequence[Any],
     frames: Sequence[int],
     files: Sequence[str],
     metadata: Sequence[Mapping[str, str]],

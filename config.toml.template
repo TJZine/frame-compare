@@ -37,6 +37,7 @@ upscale = true
 single_res = 0
 mod_crop = 2
 letterbox_pillarbox_aware = true
+debug_log_color_ranges = false
 
 [tonemap]
 # HDR to SDR conversion defaults applied when analysis.analyze_in_sdr is true.

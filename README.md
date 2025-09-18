@@ -89,6 +89,7 @@ upscale = true
 single_res = 0
 mod_crop = 2
 letterbox_pillarbox_aware = true
+debug_log_color_ranges = false
 
 [tonemap]
 preset = "reference"
@@ -192,6 +193,7 @@ change_fps = {}
 | `single_res` | int | 0 | No | Force a specific output height (`0` keeps clip-relative planning).|
 | `mod_crop` | int | 2 | No | Align every clip to the smallest width/height while keeping dimensions divisible by this modulus; must be ≥0.|
 | `letterbox_pillarbox_aware` | bool | true | No | When widths or heights already match, only crop the mismatched axis (preserves letterbox/pillarbox bars).|
+| `debug_log_color_ranges` | bool | false | No | When `true`, logs format/prop diagnostics if VapourSynth screenshot rendering fails (useful for MaskedMerge range mismatches).|
 
 #### `[tonemap]`
 

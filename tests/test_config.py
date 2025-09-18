@@ -21,6 +21,7 @@ def test_load_defaults(tmp_path: Path) -> None:
     assert app.analysis.frame_count_dark == 20
     assert app.analysis.downscale_height == 720
     assert app.screenshots.directory_name == "screens"
+    assert app.screenshots.debug_log_color_ranges is False
     assert app.naming.always_full_filename is True
     assert app.runtime.ram_limit_mb == 4000
     assert isinstance(app.runtime.vapoursynth_python_paths, list)
