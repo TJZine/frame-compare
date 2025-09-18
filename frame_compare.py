@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import builtins
+import logging
 import re
 import sys
 import shutil
@@ -8,6 +10,7 @@ import webbrowser
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
+from string import Template
 import time
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -29,6 +32,16 @@ from src.analysis import (
 )
 from src.screenshot import generate_screenshots, ScreenshotError
 from src.slowpics import SlowpicsAPIError, upload_comparison
+from src.tmdb import (
+    TMDBAmbiguityError,
+    TMDBCandidate,
+    TMDBResolution,
+    TMDBResolutionError,
+    parse_manual_id,
+    resolve_tmdb,
+)
+
+logger = logging.getLogger(__name__)
 
 SUPPORTED_EXTS = (
     ".mkv",
@@ -161,6 +174,56 @@ def _dedupe_labels(
     for idx, meta in enumerate(metadata):
         if not (meta.get("label") or "").strip():
             meta["label"] = files[idx].name
+
+
+def _first_non_empty(metadata: Sequence[Dict[str, str]], key: str) -> str:
+    for meta in metadata:
+        value = meta.get(key)
+        if value:
+            return str(value)
+    return ""
+
+
+def _parse_year_hint(value: str) -> Optional[int]:
+    try:
+        year = int(value)
+    except (TypeError, ValueError):
+        return None
+    if 1900 <= year <= 2100:
+        return year
+    return None
+
+
+def _prompt_manual_tmdb(candidates: Sequence[TMDBCandidate]) -> tuple[str, str] | None:
+    print("[yellow]TMDB search returned multiple plausible matches:[/yellow]")
+    for cand in candidates:
+        year = cand.year or "????"
+        print(
+            f"  • [cyan]{cand.category.lower()}/{cand.tmdb_id}[/cyan] "
+            f"{cand.title or '(unknown title)'} ({year}) score={cand.score:0.3f}"
+        )
+    while True:
+        response = click.prompt(
+            "Enter TMDB id (movie/##### or tv/#####) or leave blank to skip",
+            default="",
+            show_default=False,
+        ).strip()
+        if not response:
+            return None
+        try:
+            return parse_manual_id(response)
+        except TMDBResolutionError as exc:
+            print(f"[red]Invalid TMDB identifier:[/red] {exc}")
+
+
+def _render_collection_name(template_text: str, context: Mapping[str, str]) -> str:
+    if "${" not in template_text:
+        return template_text
+    try:
+        template = Template(template_text)
+        return template.safe_substitute(context)
+    except Exception:
+        return template_text
 
 
 def _estimate_analysis_time(file: Path, cache_dir: Path | None) -> float:
@@ -498,6 +561,127 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
         )
 
     metadata = _parse_metadata(files, cfg.naming)
+    year_hint_raw = _first_non_empty(metadata, "year")
+    metadata_title = _first_non_empty(metadata, "title") or _first_non_empty(metadata, "anime_title")
+    tmdb_resolution: TMDBResolution | None = None
+    manual_tmdb: tuple[str, str] | None = None
+    tmdb_category: Optional[str] = None
+    tmdb_id_value: Optional[str] = None
+    tmdb_language: Optional[str] = None
+    tmdb_error_message: Optional[str] = None
+    tmdb_ambiguous: bool = False
+    tmdb_api_key_present = bool(cfg.tmdb.api_key.strip())
+
+    if tmdb_api_key_present:
+        base_file = files[0]
+        imdb_hint = _first_non_empty(metadata, "imdb_id").lower()
+        tvdb_hint = _first_non_empty(metadata, "tvdb_id")
+        year_hint = _parse_year_hint(year_hint_raw)
+        try:
+            tmdb_resolution = asyncio.run(
+                resolve_tmdb(
+                    base_file.name,
+                    config=cfg.tmdb,
+                    year=year_hint,
+                    imdb_id=imdb_hint or None,
+                    tvdb_id=tvdb_hint or None,
+                    unattended=cfg.tmdb.unattended,
+                    category_preference=cfg.tmdb.category_preference,
+                )
+            )
+        except TMDBAmbiguityError as exc:
+            tmdb_ambiguous = True
+            manual_tmdb = _prompt_manual_tmdb(exc.candidates)
+        except TMDBResolutionError as exc:
+            logger.warning("TMDB lookup failed for %s: %s", base_file.name, exc)
+            tmdb_error_message = str(exc)
+        else:
+            if tmdb_resolution is not None:
+                tmdb_category = tmdb_resolution.category
+                tmdb_id_value = tmdb_resolution.tmdb_id
+                tmdb_language = tmdb_resolution.original_language
+
+    if manual_tmdb:
+        tmdb_category, tmdb_id_value = manual_tmdb
+        tmdb_language = None
+        tmdb_resolution = None
+        logger.info("TMDB manual override selected: %s/%s", tmdb_category, tmdb_id_value)
+
+    tmdb_context: Dict[str, str] = {
+        "Title": metadata_title or (metadata[0].get("label") if metadata else ""),
+        "OriginalTitle": "",
+        "Year": year_hint_raw or "",
+        "TMDBId": tmdb_id_value or "",
+        "TMDBCategory": tmdb_category or "",
+        "OriginalLanguage": tmdb_language or "",
+        "Filename": files[0].stem,
+        "FileName": files[0].name,
+        "Label": metadata[0].get("label") if metadata else files[0].name,
+    }
+
+    if tmdb_resolution is not None:
+        if tmdb_resolution.title:
+            tmdb_context["Title"] = tmdb_resolution.title
+        if tmdb_resolution.original_title:
+            tmdb_context["OriginalTitle"] = tmdb_resolution.original_title
+        if tmdb_resolution.year is not None:
+            tmdb_context["Year"] = str(tmdb_resolution.year)
+        if tmdb_resolution.original_language:
+            tmdb_context["OriginalLanguage"] = tmdb_resolution.original_language
+        tmdb_category = tmdb_category or tmdb_resolution.category
+        tmdb_id_value = tmdb_id_value or tmdb_resolution.tmdb_id
+
+    if tmdb_id_value and not (cfg.slowpics.tmdb_id or "").strip():
+        cfg.slowpics.tmdb_id = str(tmdb_id_value)
+
+    collection_template = (cfg.slowpics.collection_name or "").strip()
+    if collection_template:
+        rendered_collection = _render_collection_name(collection_template, tmdb_context).strip()
+        cfg.slowpics.collection_name = rendered_collection or "Frame Comparison"
+    else:
+        derived_title = (tmdb_context.get("Title") or "").strip() or files[0].stem
+        derived_year = (tmdb_context.get("Year") or "").strip()
+        collection_name = derived_title
+        if derived_title and derived_year:
+            collection_name = f"{derived_title} ({derived_year})"
+        cfg.slowpics.collection_name = collection_name or "Frame Comparison"
+
+    if tmdb_resolution is not None:
+        match_title = tmdb_resolution.title or tmdb_context.get("Title") or files[0].stem
+        year_text = f" ({tmdb_resolution.year})" if tmdb_resolution.year else ""
+        lang_text = tmdb_resolution.original_language or "unknown"
+        heuristic = (tmdb_resolution.candidate.reason or "match").replace("_", " ").replace("-", " ")
+        source = "filename" if tmdb_resolution.candidate.used_filename_search else "external id"
+        print(
+            "[cyan]TMDB match:[/cyan] "
+            f"{match_title}{year_text} "
+            f"[{tmdb_resolution.category}] -> {tmdb_resolution.tmdb_id} "
+            f"({source}, {heuristic.strip()}) lang={lang_text}"
+        )
+    elif manual_tmdb:
+        display_title = tmdb_context.get("Title") or files[0].stem
+        print(
+            "[cyan]TMDB manual override:[/cyan] "
+            f"{tmdb_category}/{tmdb_id_value} for {display_title}"
+        )
+    elif tmdb_api_key_present:
+        if tmdb_error_message:
+            print(f"[yellow]TMDB lookup failed:[/yellow] {tmdb_error_message}")
+        elif tmdb_ambiguous:
+            print(
+                "[yellow]TMDB: ambiguous results for[/yellow] "
+                f"{files[0].name}; continuing without metadata."
+            )
+        else:
+            print(
+                "[yellow]TMDB: no confident match for[/yellow] "
+                f"{files[0].name}; continuing without metadata."
+            )
+    elif not (cfg.slowpics.tmdb_id or "").strip():
+        print(
+            "[yellow]TMDB disabled:[/yellow] set [tmdb].api_key in config.toml to enable automatic matching."
+        )
+
     labels = [meta.get("label") or file.name for meta, file in zip(metadata, files)]
     print("[green]Files detected:[/green]")
     for label, file in zip(labels, files):

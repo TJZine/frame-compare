@@ -2,6 +2,9 @@ from pathlib import Path
 
 import pytest
 
+import pytest
+from pathlib import Path
+
 from src.config_loader import ConfigError, load_config
 
 
@@ -24,6 +27,12 @@ def test_load_defaults(tmp_path: Path) -> None:
     assert app.analysis.ignore_lead_seconds == 0.0
     assert app.analysis.ignore_trail_seconds == 0.0
     assert app.analysis.min_window_seconds == 5.0
+    assert app.tmdb.api_key == ""
+    assert app.tmdb.unattended is True
+    assert app.tmdb.year_tolerance == 2
+    assert app.tmdb.enable_anime_parsing is True
+    assert app.tmdb.cache_ttl_seconds == 86400
+    assert app.tmdb.category_preference is None
 
 
 @pytest.mark.parametrize(
@@ -34,6 +43,9 @@ def test_load_defaults(tmp_path: Path) -> None:
         ("[analysis]\nignore_lead_seconds = -1\n", "analysis.ignore_lead_seconds"),
         ("[analysis]\nignore_trail_seconds = -2\n", "analysis.ignore_trail_seconds"),
         ("[analysis]\nmin_window_seconds = -0.5\n", "analysis.min_window_seconds"),
+        ("[tmdb]\nyear_tolerance = -1\n", "tmdb.year_tolerance"),
+        ("[tmdb]\ncache_ttl_seconds = -5\n", "tmdb.cache_ttl_seconds"),
+        ("[tmdb]\ncategory_preference = \"documentary\"\n", "tmdb.category_preference"),
     ],
 )
 def test_validation_errors(tmp_path: Path, toml_snippet: str, message: str) -> None:
@@ -65,6 +77,12 @@ remove_after_days = 14
 [naming]
 always_full_filename = false
 
+[tmdb]
+unattended = false
+year_tolerance = 1
+cache_ttl_seconds = 120
+category_preference = "tv"
+
 [paths]
 input_dir = "D:/comparisons"
         """.strip(),
@@ -81,3 +99,7 @@ input_dir = "D:/comparisons"
     assert app.slowpics.remove_after_days == 14
     assert app.naming.always_full_filename is False
     assert app.paths.input_dir == "D:/comparisons"
+    assert app.tmdb.unattended is False
+    assert app.tmdb.year_tolerance == 1
+    assert app.tmdb.cache_ttl_seconds == 120
+    assert app.tmdb.category_preference == "TV"

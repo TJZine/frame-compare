@@ -2,6 +2,10 @@
 from typing import Any, Dict
 
 import pytest
+import types
+from typing import Any, Dict
+
+import pytest
 
 import src.utils as utils
 
@@ -105,3 +109,26 @@ def test_guessit_error_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     assert meta["release_group"] == "FB"
     assert meta["label"] != "[FB] Title - 04.mkv"
     assert meta["label"].startswith("[FB] Fallback Show")
+
+
+def test_metadata_includes_year_and_ids(monkeypatch: pytest.MonkeyPatch) -> None:
+    original_import = utils.import_module
+
+    def fake_import(name: str):
+        if name == "anitopy":
+            return types.SimpleNamespace(
+                parse=lambda _: {"anime_title": "Sample", "anime_season": 2020}
+            )
+        return original_import(name)
+
+    monkeypatch.setattr(utils, "import_module", fake_import)
+
+    meta = utils.parse_filename_metadata(
+        "Sample.2020.tt7654321.mkv",
+        prefer_guessit=False,
+        always_full_filename=True,
+    )
+    assert meta["year"] == "2020"
+    assert meta["imdb_id"] == "tt7654321"
+    assert meta["tvdb_id"] == ""
+    assert meta["title"] == "Sample"
