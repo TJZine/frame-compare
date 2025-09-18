@@ -21,6 +21,11 @@ motion_diff_radius = 4
 analyze_clip = ""
 random_seed = 20202020
 frame_data_filename = "generated.compframes"
+# Ignore head/tail segments when sampling frames (seconds).
+ignore_lead_seconds = 0.0
+ignore_trail_seconds = 0.0
+# Guarantee at least this much selectable footage after trimming.
+min_window_seconds = 5.0
 
 [screenshots]
 # Output planning and rendering behaviour for both VapourSynth and FFmpeg writers.
