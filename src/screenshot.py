@@ -133,7 +133,15 @@ def _ensure_rgb24(core: Any, clip: Any, frame_idx: int) -> Any:
     color_family = getattr(fmt, "color_family", None) if fmt is not None else None
     bits = getattr(fmt, "bits_per_sample", None) if fmt is not None else None
     if color_family == getattr(vs, "RGB", object()) and bits == 8:
-        return clip
+        try:
+            return clip.std.SetFrameProps(
+                _Matrix=1,
+                _Primaries=1,
+                _Transfer=1,
+                _ColorRange=0,
+            )
+        except Exception:
+            return clip
 
     resize_ns = getattr(core, "resize", None)
     if resize_ns is None:
@@ -207,9 +215,10 @@ def _apply_frame_info_overlay(
         logger.debug('Required VapourSynth overlay functions unavailable; skipping frame overlay')
         return clip
 
-    resize_ns = getattr(core, "resize", None)
-    point = getattr(resize_ns, "Point", None) if resize_ns is not None else None
-    limited_clip = clip
+    try:
+        limited_clip = clip.std.SetFrameProps(_ColorRange=0)
+    except Exception:  # pragma: no cover - best effort
+        limited_clip = clip
     convert_back = None
     set_frame_props = getattr(std_ns, "SetFrameProps", None)
 
@@ -575,6 +584,7 @@ def _save_frame_with_fpng(
         raise ScreenshotWriterError(f"Failed to prepare frame {frame_idx}: {exc}") from exc
 
     render_clip = work
+    _debug_dump_range('pre_overlay', render_clip, frame_idx)
     if cfg.add_frame_info:
         render_clip = _apply_frame_info_overlay(core, render_clip, label, requested_frame, selection_label)
         _record("post_frame_info", render_clip)

@@ -17,6 +17,7 @@ _SDR_PROPS = {
     "_Matrix": 1,
     "_Primaries": 1,
     "_Transfer": 1,
+    "_ColorRange": 0,
 }
 
 _RANGE_NAME_TO_VALUE = {
@@ -24,6 +25,45 @@ _RANGE_NAME_TO_VALUE = {
     "range_full": 0,
     "limited": 1,
     "range_limited": 1,
+}
+
+_RANGE_VALUE_TO_NAME = {
+    0: "full",
+    1: "limited",
+}
+
+_MATRIX_CODE_TO_NAME = {
+    0: "rgb",
+    1: "bt709",
+    6: "smpte240m",
+    8: "bt2020ncl",
+    9: "bt2020cl",
+}
+
+_PRIMARIES_CODE_TO_NAME = {
+    1: "bt709",
+    4: "bt470bg",
+    5: "smpte170m",
+    6: "smpte240m",
+    9: "bt2020",
+}
+
+_TRANSFER_CODE_TO_NAME = {
+    1: "bt709",
+    4: "gamma22",
+    5: "gamma28",
+    6: "smpte170m",
+    7: "smpte240m",
+    8: "linear",
+    9: "log100",
+    10: "log316",
+    11: "iec61966-2-4",
+    13: "iec61966-2-1",
+    14: "bt1361",
+    15: "bt2020-10",
+    16: "st2084",
+    17: "bt2020-12",
+    18: "arib-std-b67",
 }
 
 
@@ -79,6 +119,27 @@ def _normalise_color_range(value: Any) -> Optional[int]:
     return None
 
 
+def _normalise_range_name(value: Any) -> Optional[str]:
+    numeric = _normalise_color_range(value)
+    if numeric is not None:
+        return _RANGE_VALUE_TO_NAME.get(numeric)
+    normalised = _normalise(value)
+    if isinstance(normalised, str) and normalised:
+        return normalised
+    return None
+
+
+def _coerce_csp_value(value: Any, mapping: Mapping[int, str]) -> Optional[str]:
+    if value is None:
+        return None
+    normalised = _normalise(value)
+    if isinstance(normalised, int):
+        return mapping.get(normalised)
+    if isinstance(normalised, str) and normalised:
+        return normalised
+    return None
+
+
 def _set_sdr_props(clip: Any, *, color_range: Any = None) -> Any:
     std = getattr(clip, "std", None)
     setter = getattr(std, "SetFrameProps", None) if std is not None else None
@@ -115,12 +176,19 @@ def _convert_to_rgb(clip: Any, props: Mapping[str, Any]) -> Any:
         import vapoursynth as vs  # noqa: WPS433 - optional runtime dep
     except Exception:  # pragma: no cover - VS absent in tests
         vs = None
-    kwargs: Dict[str, Any] = {
-        "matrix_in_s": props.get("_Matrix") or props.get("Matrix") or "auto",
-        "primaries_in_s": props.get("_Primaries") or props.get("Primaries") or "auto",
-        "transfer_in_s": props.get("_Transfer") or props.get("Transfer") or "auto",
-        "range_in_s": props.get("_ColorRange") or props.get("ColorRange") or "auto",
-    }
+    kwargs: Dict[str, Any] = {}
+    matrix_in = _coerce_csp_value(props.get("_Matrix") or props.get("Matrix"), _MATRIX_CODE_TO_NAME)
+    primaries_in = _coerce_csp_value(props.get("_Primaries") or props.get("Primaries"), _PRIMARIES_CODE_TO_NAME)
+    transfer_in = _coerce_csp_value(props.get("_Transfer") or props.get("Transfer"), _TRANSFER_CODE_TO_NAME)
+    range_in = _normalise_range_name(props.get("_ColorRange") or props.get("ColorRange"))
+    if matrix_in:
+        kwargs["matrix_in_s"] = matrix_in
+    if primaries_in:
+        kwargs["primaries_in_s"] = primaries_in
+    if transfer_in:
+        kwargs["transfer_in_s"] = transfer_in
+    if range_in:
+        kwargs["range_in_s"] = range_in
     if vs is not None:
         kwargs["format"] = getattr(vs, "RGB48", None)
     try:
@@ -132,7 +200,7 @@ def _convert_to_rgb(clip: Any, props: Mapping[str, Any]) -> Any:
         return clip
 
 
-def _dither_to_rgb24(clip: Any, cfg: TMConfig) -> Any:
+def _dither_to_rgb24(clip: Any, cfg: TMConfig, *, target_range: str) -> Any:
     core = getattr(clip, "core", None)
     if core is None:
         return clip
@@ -147,7 +215,7 @@ def _dither_to_rgb24(clip: Any, cfg: TMConfig) -> Any:
         "primaries_s": cfg.dst_primaries,
         "transfer_s": cfg.dst_transfer,
         "matrix_s": cfg.dst_matrix,
-        "range_s": cfg.dst_range,
+        "range_s": target_range,
         "range_in_s": "full",
     }
     if vs is not None:
@@ -220,7 +288,7 @@ def _call_libplacebo(clip: Any, cfg: TMConfig, props: Mapping[str, Any]) -> Any:
     raise TonemapError("libplacebo tonemap failed with no successful attempts")
 
 
-def _linear_sdr_fallback(clip: Any, props: Mapping[str, Any]) -> Any:
+def _linear_sdr_fallback(clip: Any, props: Mapping[str, Any], cfg: TMConfig, *, target_range: str) -> Any:
     core = getattr(clip, "core", None)
     if core is None:
         raise TonemapError("VapourSynth core unavailable for fallback path")
@@ -231,16 +299,27 @@ def _linear_sdr_fallback(clip: Any, props: Mapping[str, Any]) -> Any:
         import vapoursynth as vs  # noqa: WPS433
     except Exception:
         vs = None
-    kwargs: Dict[str, Any] = {
-        "matrix_in_s": props.get("_Matrix") or props.get("Matrix") or "auto",
-        "primaries_in_s": props.get("_Primaries") or props.get("Primaries") or "auto",
-        "transfer_in_s": props.get("_Transfer") or props.get("Transfer") or "auto",
-        "range_in_s": props.get("_ColorRange") or props.get("ColorRange") or "auto",
-        "matrix_s": "bt709",
-        "primaries_s": "bt709",
-        "transfer_s": "bt1886",
-        "range_s": "limited",
-    }
+    kwargs: Dict[str, Any] = {}
+    matrix_in = _coerce_csp_value(props.get("_Matrix") or props.get("Matrix"), _MATRIX_CODE_TO_NAME)
+    primaries_in = _coerce_csp_value(props.get("_Primaries") or props.get("Primaries"), _PRIMARIES_CODE_TO_NAME)
+    transfer_in = _coerce_csp_value(props.get("_Transfer") or props.get("Transfer"), _TRANSFER_CODE_TO_NAME)
+    range_in = _normalise_range_name(props.get("_ColorRange") or props.get("ColorRange"))
+    if matrix_in:
+        kwargs["matrix_in_s"] = matrix_in
+    if primaries_in:
+        kwargs["primaries_in_s"] = primaries_in
+    if transfer_in:
+        kwargs["transfer_in_s"] = transfer_in
+    if range_in:
+        kwargs["range_in_s"] = range_in
+    kwargs.update(
+        {
+            "matrix_s": cfg.dst_matrix,
+            "primaries_s": cfg.dst_primaries,
+            "transfer_s": cfg.dst_transfer,
+            "range_s": target_range,
+        }
+    )
     if vs is not None:
         kwargs["format"] = getattr(vs, "RGB24", None)
     logger.debug("tonemap.fallback kwargs=%s", kwargs)
@@ -256,7 +335,8 @@ def apply_tonemap(clip: Any, cfg: TMConfig, *, force: bool = False) -> TonemapRe
     if source_range_value is None:
         source_range_value = props.get("ColorRange")
     source_range = _normalise_color_range(source_range_value)
-    target_range = _normalise_color_range(resolved_cfg.dst_range)
+    target_range_name = _normalise_range_name(resolved_cfg.dst_range) or "full"
+    target_range_value = _RANGE_NAME_TO_VALUE.get(target_range_name, 0)
 
     try:
         hdr_detected = is_hdr(props)
@@ -279,11 +359,11 @@ def apply_tonemap(clip: Any, cfg: TMConfig, *, force: bool = False) -> TonemapRe
     rgb_clip = _convert_to_rgb(clip, props)
 
     try:
-        fallback_clip = _linear_sdr_fallback(rgb_clip, props)
-        fallback_clip = _set_sdr_props(fallback_clip, color_range=target_range)
+        fallback_clip = _linear_sdr_fallback(rgb_clip, props, resolved_cfg, target_range=target_range_name)
+        fallback_clip = _set_sdr_props(fallback_clip, color_range=target_range_value)
     except TonemapError as exc:
         logger.debug("Fallback path unavailable: %s", exc)
-        fallback_clip = _set_sdr_props(rgb_clip, color_range=target_range)
+        fallback_clip = _set_sdr_props(rgb_clip, color_range=target_range_value)
 
     used_libplacebo = True
     try:
@@ -309,7 +389,7 @@ def apply_tonemap(clip: Any, cfg: TMConfig, *, force: bool = False) -> TonemapRe
         tonemapped = fallback_clip
         used_libplacebo = False
 
-    output = _dither_to_rgb24(tonemapped, resolved_cfg)
+    output = _dither_to_rgb24(tonemapped, resolved_cfg, target_range=target_range_name)
     backend = "placebo" if used_libplacebo else "fallback"
     output = _stamp_tonemap_metadata(output, resolved_cfg, backend=backend)
     if resolved_cfg.overlay:

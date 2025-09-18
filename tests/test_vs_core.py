@@ -93,6 +93,7 @@ def test_sdr_pass_through():
         '_Matrix': 1,
         '_Primaries': 1,
         '_Transfer': 1,
+        '_ColorRange': 0,
     }
 
 
