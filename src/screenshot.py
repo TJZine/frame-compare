@@ -9,7 +9,7 @@ import subprocess
 import re
 from functools import partial
 from pathlib import Path
-from typing import Callable, List, Mapping, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Sequence, Tuple
 
 from .datatypes import ScreenshotConfig
 
@@ -17,6 +17,101 @@ _INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
 logger = logging.getLogger(__name__)
+
+
+_DEBUG_PROP_KEYS = ("_Matrix", "_Transfer", "_Primaries", "_ColorRange")
+_COLOR_RANGE_LABELS = {
+    0: "Full (0)",
+    1: "Limited (1)",
+    2: "Undefined (2)",
+    3: "Variable (3)",
+}
+
+
+def _normalize_prop_value(value: Any) -> Any:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", "ignore")
+    return value
+
+
+def _describe_vs_format(fmt: Any) -> str:
+    if fmt is None:
+        return "unknown"
+    name = getattr(fmt, "name", None)
+    if isinstance(name, str) and name:
+        return name
+    identifier = getattr(fmt, "id", None)
+    if identifier is not None:
+        return f"id={identifier}"
+    return str(fmt)
+
+
+def _describe_color_range(value: Any) -> str:
+    normalized = _normalize_prop_value(value)
+    if isinstance(normalized, int):
+        label = _COLOR_RANGE_LABELS.get(normalized)
+        return label or f"{normalized}"
+    if isinstance(normalized, str):
+        return normalized
+    return str(normalized)
+
+
+def _pick_debug_frame_index(clip: Any, frame_idx: int) -> int:
+    total = getattr(clip, "num_frames", None)
+    if isinstance(total, int) and total > 0:
+        return max(0, min(int(frame_idx), total - 1))
+    return max(0, int(frame_idx))
+
+
+def _collect_clip_debug_info(clip: Any, frame_idx: int) -> Dict[str, Any]:
+    info: Dict[str, Any] = {}
+    width = getattr(clip, "width", None)
+    height = getattr(clip, "height", None)
+    if isinstance(width, int) and isinstance(height, int):
+        info["dimensions"] = f"{width}x{height}"
+    info["format"] = _describe_vs_format(getattr(clip, "format", None))
+
+    sample_idx = _pick_debug_frame_index(clip, frame_idx)
+    try:
+        frame = clip.get_frame(sample_idx)
+    except Exception as exc:  # pragma: no cover - best effort diagnostics
+        info["frame_error"] = f"{type(exc).__name__}: {exc}"
+        return info
+
+    props: Dict[str, Any] = {}
+    for key in _DEBUG_PROP_KEYS:
+        if key in frame.props:
+            props[key] = _normalize_prop_value(frame.props.get(key))
+    if props:
+        info["props"] = props
+        if "_ColorRange" in props:
+            info["color_range"] = _describe_color_range(props["_ColorRange"])
+    return info
+
+
+def _summarize_debug_info(info: Dict[str, Any]) -> str:
+    parts: List[str] = []
+    dimensions = info.get("dimensions")
+    if dimensions:
+        parts.append(f"dims={dimensions}")
+    fmt = info.get("format")
+    if fmt:
+        parts.append(f"fmt={fmt}")
+    color_range = info.get("color_range")
+    if color_range:
+        parts.append(f"range={color_range}")
+    props = info.get("props")
+    if isinstance(props, dict) and props:
+        prop_parts = []
+        for key in _DEBUG_PROP_KEYS:
+            if key in props:
+                prop_parts.append(f"{key}={props[key]}")
+        if prop_parts:
+            parts.append("props[" + ", ".join(prop_parts) + "]")
+    frame_error = info.get("frame_error")
+    if frame_error:
+        parts.append(f"frame_error={frame_error}")
+    return ", ".join(parts) if parts else "no data"
 
 
 def _ensure_rgb24(core, clip, frame_idx):
@@ -407,6 +502,19 @@ def _save_frame_with_fpng(
         raise ScreenshotWriterError("VapourSynth fpng.Write plugin is unavailable")
 
     work = clip
+    debug_enabled = bool(getattr(cfg, "debug_log_color_ranges", False))
+    debug_records: List[tuple[str, Dict[str, Any]]] = []
+
+    def _record(stage: str, node: Any) -> None:
+        if not debug_enabled:
+            return
+        try:
+            info = _collect_clip_debug_info(node, frame_idx)
+        except Exception as exc:  # pragma: no cover - diagnostics only
+            logger.debug("Failed to collect debug info for stage %s: %s", stage, exc)
+            info = {"frame_error": f"{type(exc).__name__}: {exc}"}
+        debug_records.append((stage, info))
+
     try:
         left, top, right, bottom = crop
         if any(crop):
@@ -420,21 +528,41 @@ def _save_frame_with_fpng(
             if not callable(resampler):
                 raise ScreenshotWriterError("VapourSynth resize.Spline36 is unavailable")
             work = resampler(work, width=target_w, height=target_h)
+        _record("post_geometry", work)
     except Exception as exc:
         raise ScreenshotWriterError(f"Failed to prepare frame {frame_idx}: {exc}") from exc
 
     render_clip = work
     if cfg.add_frame_info:
         render_clip = _apply_frame_info_overlay(core, render_clip, label, requested_frame, selection_label)
+        _record("post_frame_info", render_clip)
 
     render_clip = _ensure_rgb24(core, render_clip, frame_idx)
+    _record("post_rgb24", render_clip)
 
     compression = _map_fpng_compression(cfg.compression_level)
     try:
         job = writer(render_clip, str(path), compression=compression, overwrite=True)
         job.get_frame(frame_idx)
     except Exception as exc:
-        raise ScreenshotWriterError(f"fpng failed for frame {frame_idx}: {exc}") from exc
+        summary = ""
+        if debug_enabled and debug_records:
+            summary_parts = []
+            for stage, info in debug_records:
+                summary_str = _summarize_debug_info(info)
+                summary_parts.append(f"{stage} -> {summary_str}")
+                logger.warning(
+                    "VapourSynth debug for '%s' frame %d [%s]: %s",
+                    label,
+                    frame_idx,
+                    stage,
+                    summary_str,
+                )
+            summary = "; ".join(summary_parts)
+        message = f"fpng failed for frame {frame_idx} ({label}): {exc}"
+        if summary:
+            message = f"{message} [debug: {summary}]"
+        raise ScreenshotWriterError(message) from exc
 
 
 def _map_ffmpeg_compression(level: int) -> int:
