@@ -12,6 +12,21 @@ class FakeClip:
         self.height = height
 
 
+def test_sanitise_label_replaces_forbidden_characters(monkeypatch):
+    monkeypatch.setattr(screenshot.os, "name", "nt")
+    raw = 'Group: Episode? 01*<>"| '
+    cleaned = screenshot._sanitise_label(raw)
+    assert cleaned
+    for forbidden in ':?*<>"|':
+        assert forbidden not in cleaned
+    assert not cleaned.endswith((" ", "."))
+
+
+def test_sanitise_label_falls_back_when_blank():
+    cleaned = screenshot._sanitise_label("   ")
+    assert cleaned == "comparison"
+
+
 def test_plan_mod_crop_modulus():
     left, top, right, bottom = screenshot.plan_mod_crop(1919, 1079, mod=4, letterbox_pillarbox_aware=True)
     new_w = 1919 - left - right

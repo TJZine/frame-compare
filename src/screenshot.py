@@ -6,11 +6,14 @@ import logging
 import os
 import shutil
 import subprocess
+import re
 from functools import partial
 from pathlib import Path
 from typing import Callable, List, Mapping, Sequence, Tuple
 
 from .datatypes import ScreenshotConfig
+
+_INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
 logger = logging.getLogger(__name__)
@@ -236,8 +239,11 @@ def _plan_geometry(clips: Sequence[object], cfg: ScreenshotConfig) -> List[dict[
 
 
 def _sanitise_label(label: str) -> str:
-    cleaned = label.replace(os.sep, "_").replace("/", "_")
-    return cleaned.strip() or "comparison"
+    cleaned = _INVALID_LABEL_PATTERN.sub("_", label)
+    if os.name == "nt":
+        cleaned = cleaned.rstrip(" .")
+    cleaned = cleaned.strip()
+    return cleaned or "comparison"
 
 
 def _derive_labels(source: str, metadata: Mapping[str, str]) -> tuple[str, str]:
