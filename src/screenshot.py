@@ -100,6 +100,7 @@ def _clamp_frame_index(clip, frame_idx: int) -> tuple[int, bool]:
 
 
 FRAME_INFO_STYLE = 'sans-serif,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,"0,0,0,0,100,100,0,0,1,2,0,7,10,10,10,1"'
+FRAME_INFO_BOTTOM_LEFT_STYLE = 'sans-serif,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,"0,0,0,0,100,100,0,0,1,2,0,1,10,10,10,1"'
 
 
 def _decode_prop_text(value: object) -> str:
@@ -155,10 +156,11 @@ def _apply_frame_info_overlay(core, clip, title: str, requested_frame: int | Non
             f"Frame {display_idx} of {clip_ref.num_frames}",
             f"Picture type: {pict_text}",
         ]
-        if selection_label:
-            lines.append(f"Content Type: {selection_label}")
         info = "\n".join(lines)
         result = subtitle(clip_ref, text=[info], style=FRAME_INFO_STYLE)
+        if selection_label:
+            content_info = f"Content Type: {selection_label}"
+            result = subtitle(result, text=[content_info], style=FRAME_INFO_BOTTOM_LEFT_STYLE)
         tonemap_text = _decode_prop_text(
             f.props.get('_TonemapOverlay') or f.props.get('_Tonemapped')
         )
@@ -199,41 +201,94 @@ class ScreenshotWriterError(ScreenshotError):
     """Raised when the underlying writer fails."""
 
 
-def plan_mod_crop(width: int, height: int, mod: int, letterbox_pillarbox_aware: bool) -> Tuple[int, int, int, int]:
-    """Plan left/top/right/bottom croppings so dimensions align to *mod*."""
+def _snap_pair_to_mod(first: int, second: int, total: int, mod: int) -> tuple[int, int]:
+    """Snap a crop pair to *mod* multiples without exceeding *total*."""
 
-    if width <= 0 or height <= 0:
-        raise ScreenshotGeometryError("Clip dimensions must be positive")
+    if total <= 0:
+        return (0, 0)
+
+    first = max(0, min(first, total))
     if mod <= 1:
-        return (0, 0, 0, 0)
+        return (first, max(0, total - first))
 
-    def _axis_crop(size: int) -> Tuple[int, int]:
-        remainder = size % mod
-        if remainder == 0:
-            return (0, 0)
-        before = remainder // 2
-        after = remainder - before
-        return (before, after)
+    if first % mod != 0:
+        first += mod - (first % mod)
+    first = min(first, total)
+    second = total - first
 
-    left, right = _axis_crop(width)
-    top, bottom = _axis_crop(height)
+    remainder = second % mod
+    if remainder != 0:
+        shift = remainder
+        if first - shift >= 0:
+            first -= shift
+            second += shift
+        else:
+            second += mod - remainder
 
-    if letterbox_pillarbox_aware:
-        if width > height and (top + bottom) == 0 and (left + right) > 0:
-            total = left + right
-            left = total // 2
-            right = total - left
-        elif height >= width and (left + right) == 0 and (top + bottom) > 0:
-            total = top + bottom
-            top = total // 2
-            bottom = total - top
+    first = max(0, first - (first % mod))
+    second = max(0, second - (second % mod))
 
-    cropped_w = width - left - right
-    cropped_h = height - top - bottom
-    if cropped_w <= 0 or cropped_h <= 0:
-        raise ScreenshotGeometryError("Cropping removed all pixels")
+    while first + second > total:
+        if first >= mod:
+            first -= mod
+        elif second >= mod:
+            second -= mod
+        else:
+            break
 
-    return (left, top, right, bottom)
+    first = max(0, min(first, total))
+    second = max(0, min(second, total - first))
+    return (first, second)
+
+
+def plan_mod_crop(
+    dimensions: Sequence[tuple[int, int]],
+    mod: int,
+    letterbox_pillarbox_aware: bool,
+) -> list[tuple[int, int, int, int]]:
+    """Plan per-clip crops mirroring the legacy heuristics."""
+
+    if not dimensions:
+        return []
+
+    valid = [(w, h) for w, h in dimensions if w > 0 and h > 0]
+    if not valid:
+        raise ScreenshotGeometryError("Clip dimensions must be positive")
+
+    target_w = min(w for w, _ in valid)
+    target_h = min(h for _, h in valid)
+    same_w = all(w == valid[0][0] for w, _ in valid)
+    same_h = all(h == valid[0][1] for _, h in valid)
+
+    plans: list[tuple[int, int, int, int]] = []
+    for width, height in dimensions:
+        if width <= 0 or height <= 0:
+            raise ScreenshotGeometryError("Clip dimensions must be positive")
+
+        wdiff = max(0, width - target_w)
+        hdiff = max(0, height - target_h)
+
+        if letterbox_pillarbox_aware and same_w and not same_h:
+            left = right = 0
+            top = hdiff // 2
+            bottom = hdiff - top
+            top, bottom = _snap_pair_to_mod(top, bottom, hdiff, mod)
+        elif letterbox_pillarbox_aware and same_h and not same_w:
+            top = bottom = 0
+            left = wdiff // 2
+            right = wdiff - left
+            left, right = _snap_pair_to_mod(left, right, wdiff, mod)
+        else:
+            left = wdiff // 2
+            right = wdiff - left
+            top = hdiff // 2
+            bottom = hdiff - top
+            left, right = _snap_pair_to_mod(left, right, wdiff, mod)
+            top, bottom = _snap_pair_to_mod(top, bottom, hdiff, mod)
+
+        plans.append((left, top, right, bottom))
+
+    return plans
 
 
 def _compute_scaled_dimensions(
@@ -255,14 +310,21 @@ def _compute_scaled_dimensions(
 
 
 def _plan_geometry(clips: Sequence[object], cfg: ScreenshotConfig) -> List[dict[str, object]]:
-    plans: List[dict[str, object]] = []
+    dimensions: list[tuple[int, int]] = []
     for clip in clips:
         width = getattr(clip, "width", None)
         height = getattr(clip, "height", None)
         if not isinstance(width, int) or not isinstance(height, int):
             raise ScreenshotGeometryError("Clip missing width/height metadata")
+        if width <= 0 or height <= 0:
+            raise ScreenshotGeometryError("Clip dimensions must be positive")
 
-        crop = plan_mod_crop(width, height, cfg.mod_crop, cfg.letterbox_pillarbox_aware)
+        dimensions.append((width, height))
+
+    crops = plan_mod_crop(dimensions, cfg.mod_crop, cfg.letterbox_pillarbox_aware)
+
+    plans: List[dict[str, object]] = []
+    for (width, height), crop in zip(dimensions, crops):
         cropped_w = width - crop[0] - crop[2]
         cropped_h = height - crop[1] - crop[3]
         if cropped_w <= 0 or cropped_h <= 0:
