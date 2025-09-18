@@ -157,3 +157,21 @@ def test_apply_tonemap_stamps_metadata_props() -> None:
     overlay_text = metadata_call.get("_TonemapOverlay")
     assert overlay_text
     assert "TM" in str(overlay_text)
+
+
+def test_apply_tonemap_sets_color_range_from_config() -> None:
+    clip = _RecordingClip({"_Transfer": 16, "_Primaries": 9})
+    cfg = TMConfig(dst_range="limited")
+    result = apply_tonemap(clip, cfg)
+    assert isinstance(result, TonemapResult)
+    final_props = clip.std.calls[-1]
+    assert final_props.get("_ColorRange") == 1
+
+
+def test_apply_tonemap_sets_color_range_full() -> None:
+    clip = _RecordingClip({"_Transfer": 16, "_Primaries": 9})
+    cfg = TMConfig(dst_range="full")
+    result = apply_tonemap(clip, cfg)
+    assert isinstance(result, TonemapResult)
+    final_props = clip.std.calls[-1]
+    assert final_props.get("_ColorRange") == 0
