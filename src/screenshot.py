@@ -96,6 +96,19 @@ def _apply_frame_info_overlay(core, clip, title: str, requested_frame: int | Non
         logger.debug('Required VapourSynth overlay functions unavailable; skipping frame overlay')
         return clip
 
+    resize_ns = getattr(core, "resize", None)
+    point = getattr(resize_ns, "Point", None) if resize_ns is not None else None
+    limited_clip = clip
+    convert_back = None
+    if callable(point):
+        try:
+            limited_clip = point(clip, range=vs.RANGE_LIMITED, dither_type="none")
+            convert_back = partial(point, range=vs.RANGE_FULL, dither_type="none")
+        except Exception:  # pragma: no cover - best effort
+            logger.debug('Failed to convert clip to limited range for frame overlay', exc_info=True)
+            limited_clip = clip
+            convert_back = None
+
     label = title.strip() if isinstance(title, str) else ''
     if not label:
         label = 'Clip'
@@ -131,11 +144,17 @@ def _apply_frame_info_overlay(core, clip, title: str, requested_frame: int | Non
 
     try:
         info_clip = frame_eval(
-            clip,
-            partial(_draw_info, clip_ref=clip, draw_text_fn=draw_text),
-            prop_src=clip,
+            limited_clip,
+            partial(_draw_info, clip_ref=limited_clip, draw_text_fn=draw_text),
+            prop_src=limited_clip,
         )
-        return subtitle(info_clip, text=[padding_title + label], style=FRAME_INFO_STYLE)
+        result = subtitle(info_clip, text=[padding_title + label], style=FRAME_INFO_STYLE)
+        if callable(convert_back):
+            try:
+                result = convert_back(result)
+            except Exception:  # pragma: no cover - best effort
+                logger.debug('Failed to restore full range after frame overlay', exc_info=True)
+        return result
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug('Applying frame overlay failed: %s', exc)
         return clip
