@@ -66,6 +66,7 @@ def _clamp_frame_index(clip, frame_idx: int) -> tuple[int, bool]:
 
 
 FRAME_INFO_STYLE = 'sans-serif,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,"0,0,0,0,100,100,0,0,1,2,0,7,10,10,10,1"'
+FRAME_INFO_BOTTOM_LEFT_STYLE = 'sans-serif,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,"0,0,0,0,100,100,0,0,1,2,0,1,10,10,10,1"'
 
 
 def _decode_prop_text(value: object) -> str:
@@ -128,10 +129,11 @@ def _apply_frame_info_overlay(core, clip, title: str, requested_frame: int | Non
             f"Frame {display_idx} of {clip_ref.num_frames}",
             f"Picture type: {pict_text}",
         ]
-        if selection_label:
-            lines.append(f"Content Type: {selection_label}")
         info = "\n".join(lines)
         result = subtitle(clip_ref, text=[info], style=FRAME_INFO_STYLE)
+        if selection_label:
+            content_info = f"Content Type: {selection_label}"
+            result = subtitle(result, text=[content_info], style=FRAME_INFO_BOTTOM_LEFT_STYLE)
         tonemap_text = _decode_prop_text(
             f.props.get('_TonemapOverlay') or f.props.get('_Tonemapped')
         )
