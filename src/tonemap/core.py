@@ -252,7 +252,10 @@ def apply_tonemap(clip: Any, cfg: TMConfig, *, force: bool = False) -> TonemapRe
 
     props = _extract_frame_props(clip)
     resolved_cfg = cfg.resolved()
-    source_range = _normalise_color_range(props.get("_ColorRange") or props.get("ColorRange"))
+    source_range_value = props.get("_ColorRange")
+    if source_range_value is None:
+        source_range_value = props.get("ColorRange")
+    source_range = _normalise_color_range(source_range_value)
     target_range = _normalise_color_range(resolved_cfg.dst_range)
 
     try:
@@ -309,7 +312,7 @@ def apply_tonemap(clip: Any, cfg: TMConfig, *, force: bool = False) -> TonemapRe
     output = _dither_to_rgb24(tonemapped, resolved_cfg)
     backend = "placebo" if used_libplacebo else "fallback"
     output = _stamp_tonemap_metadata(output, resolved_cfg, backend=backend)
-    output = _set_sdr_props(output, color_range=target_range)
     if resolved_cfg.overlay:
         output = apply_overlay(output, resolved_cfg)
+    output = _set_sdr_props(output, color_range=target_range)
     return TonemapResult(output, fallback_clip, used_libplacebo, hdr_detected)
