@@ -15,6 +15,7 @@ from src.datatypes import (
     ScreenshotConfig,
     SlowpicsConfig,
     TMDBConfig,
+    TonemapConfig,
 )
 from src.tmdb import TMDBAmbiguityError, TMDBCandidate, TMDBResolution
 
@@ -34,6 +35,7 @@ def _make_config(input_dir: Path) -> AppConfig:
             user_frames=[],
         ),
         screenshots=ScreenshotConfig(directory_name="screens", add_frame_info=False),
+        tonemap=TonemapConfig(),
         slowpics=SlowpicsConfig(auto_upload=False),
         tmdb=TMDBConfig(),
         naming=NamingConfig(always_full_filename=False, prefer_guessit=False),
@@ -96,6 +98,7 @@ def test_cli_applies_overrides_and_naming(tmp_path, monkeypatch, runner):
         cache_info=None,
         progress=None,
         *,
+        tonemap_cfg=None,
         frame_window=None,
         return_metadata=False,
     ):
@@ -149,6 +152,7 @@ def test_label_dedupe_preserves_short_labels(tmp_path, monkeypatch, runner):
     cfg = AppConfig(
         analysis=AnalysisConfig(frame_count_dark=0, frame_count_bright=0, frame_count_motion=0, random_frames=0),
         screenshots=ScreenshotConfig(directory_name="screens", add_frame_info=False),
+        tonemap=TonemapConfig(),
         slowpics=SlowpicsConfig(auto_upload=False),
         tmdb=TMDBConfig(),
         naming=NamingConfig(always_full_filename=False, prefer_guessit=False),
@@ -172,7 +176,7 @@ def test_label_dedupe_preserves_short_labels(tmp_path, monkeypatch, runner):
     monkeypatch.setattr(
         frame_compare,
         "select_frames",
-        lambda clip, cfg, files, file_under_analysis, cache_info=None, progress=None, *, frame_window=None, return_metadata=False: [42],
+        lambda clip, cfg, files, file_under_analysis, cache_info=None, progress=None, *, tonemap_cfg=None, frame_window=None, return_metadata=False: [42],
     )
 
     captured = []
@@ -219,6 +223,7 @@ def test_cli_reuses_frame_cache(tmp_path, monkeypatch, runner):
         cache_info=None,
         progress=None,
         *,
+        tonemap_cfg=None,
         frame_window=None,
         return_metadata=False,
     ):
@@ -260,6 +265,7 @@ def test_cli_input_override_and_cleanup(tmp_path, monkeypatch, runner):
     cfg = AppConfig(
         analysis=AnalysisConfig(frame_count_dark=0, frame_count_bright=0, frame_count_motion=0, random_frames=0),
         screenshots=ScreenshotConfig(directory_name="screens", add_frame_info=False),
+        tonemap=TonemapConfig(),
         slowpics=SlowpicsConfig(auto_upload=True, delete_screen_dir_after_upload=True, open_in_browser=False, create_url_shortcut=False),
         tmdb=TMDBConfig(),
         naming=NamingConfig(always_full_filename=True, prefer_guessit=False),
@@ -278,7 +284,7 @@ def test_cli_input_override_and_cleanup(tmp_path, monkeypatch, runner):
     monkeypatch.setattr(
         frame_compare,
         "select_frames",
-        lambda clip, cfg, files, file_under_analysis, cache_info=None, progress=None, *, frame_window=None, return_metadata=False: [7],
+        lambda clip, cfg, files, file_under_analysis, cache_info=None, progress=None, *, tonemap_cfg=None, frame_window=None, return_metadata=False: [7],
     )
 
     def fake_generate(clips, frames, files, metadata, out_dir, cfg_screens, **kwargs):
@@ -377,6 +383,7 @@ def test_cli_tmdb_resolution_populates_slowpics(tmp_path, monkeypatch):
         cache_info=None,
         progress=None,
         *,
+        tonemap_cfg=None,
         frame_window=None,
         return_metadata=False,
     ):
@@ -495,6 +502,7 @@ def test_cli_tmdb_resolution_sets_default_collection_name(tmp_path, monkeypatch)
         cache_info=None,
         progress=None,
         *,
+        tonemap_cfg=None,
         frame_window=None,
         return_metadata=False,
     ):
@@ -606,7 +614,7 @@ def test_cli_tmdb_manual_override(tmp_path, monkeypatch):
     monkeypatch.setattr(
         frame_compare,
         "select_frames",
-        lambda clip, cfg, files, file_under_analysis, cache_info=None, progress=None, *, frame_window=None, return_metadata=False: [3, 6],
+        lambda clip, cfg, files, file_under_analysis, cache_info=None, progress=None, *, tonemap_cfg=None, frame_window=None, return_metadata=False: [3, 6],
     )
 
     def fake_generate(clips, frames, files, metadata, out_dir, cfg_screens, **kwargs):

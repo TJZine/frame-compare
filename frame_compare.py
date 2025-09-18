@@ -771,6 +771,7 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
                 analyze_path.name,
                 cache_info=cache_info,
                 progress=progress_callback,
+                tonemap_cfg=cfg.tonemap,
                 frame_window=frame_window,
                 return_metadata=True,
             )
@@ -784,6 +785,7 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
                 analyze_path.name,
                 cache_info=cache_info,
                 progress=progress_callback,
+                tonemap_cfg=cfg.tonemap,
                 frame_window=frame_window,
             )
         if isinstance(result, tuple):

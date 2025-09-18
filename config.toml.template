@@ -38,6 +38,16 @@ single_res = 0
 mod_crop = 2
 letterbox_pillarbox_aware = true
 
+[tonemap]
+# HDR → SDR conversion defaults applied when analysis.analyze_in_sdr is true.
+# These values map directly to libplacebo.Tonemap parameters.
+tone_mapping = "bt2390"
+target_nits = 100.0
+dest_primaries = "bt709"
+dest_transfer = "bt1886"
+dest_matrix = "bt709"
+dest_range = "limited"
+
 [slowpics]
 # Auto-upload settings. Leave `auto_upload` off for local runs.
 # When `collection_name` is blank, the CLI auto-names collections with

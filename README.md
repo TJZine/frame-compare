@@ -90,6 +90,14 @@ single_res = 0
 mod_crop = 2
 letterbox_pillarbox_aware = true
 
+[tonemap]
+tone_mapping = "bt2390"
+target_nits = 100.0
+dest_primaries = "bt709"
+dest_transfer = "bt1886"
+dest_matrix = "bt709"
+dest_range = "limited"
+
 [slowpics]
 auto_upload = false
 collection_name = ""
@@ -167,6 +175,16 @@ change_fps = {}
 | `single_res` | int | 0 | No | Force a specific output height (`0` keeps clip-relative planning).|
 | `mod_crop` | int | 2 | No | Crop to maintain dimensions divisible by this modulus; must be ≥0.|
 | `letterbox_pillarbox_aware` | bool | true | No | Bias cropping toward letterbox/pillarbox bars when trimming.|
+
+#### `[tonemap]`
+| Name | Type | Default | Required? | Description |
+| --- | --- | --- | --- | --- |
+| `tone_mapping` | str | `"bt2390"` | No | Curve passed to `libplacebo.Tonemap` when `analysis.analyze_in_sdr=true`.|
+| `target_nits` | float | 100.0 | No | SDR target peak in nits; must be >0.|
+| `dest_primaries` | str | `"bt709"` | No | Destination primaries string fed to libplacebo.|
+| `dest_transfer` | str | `"bt1886"` | No | Destination transfer characteristic (gamma).|
+| `dest_matrix` | str | `"bt709"` | No | Destination matrix coefficients.|
+| `dest_range` | str | `"limited"` | No | Output range hint (`limited` or `full`).|
 
 #### `[slowpics]`
 | Name | Type | Default | Required? | Description |
