@@ -190,8 +190,8 @@ change_fps = {}
 | `compression_level` | int | 1 | No | Compression preset: 0 (fast), 1 (balanced), 2 (small). Other values raise `ConfigError`.|
 | `upscale` | bool | true | No | Allow scaling above source height (global tallest clip by default).|
 | `single_res` | int | 0 | No | Force a specific output height (`0` keeps clip-relative planning).|
-| `mod_crop` | int | 2 | No | Crop to maintain dimensions divisible by this modulus; must be ≥0.|
-| `letterbox_pillarbox_aware` | bool | true | No | Bias cropping toward letterbox/pillarbox bars when trimming.|
+| `mod_crop` | int | 2 | No | Align every clip to the smallest width/height while keeping dimensions divisible by this modulus; must be ≥0.|
+| `letterbox_pillarbox_aware` | bool | true | No | When widths or heights already match, only crop the mismatched axis (preserves letterbox/pillarbox bars).|
 
 #### `[tonemap]`
 

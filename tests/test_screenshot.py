@@ -28,12 +28,46 @@ def test_sanitise_label_falls_back_when_blank():
 
 
 def test_plan_mod_crop_modulus():
-    left, top, right, bottom = screenshot.plan_mod_crop(1919, 1079, mod=4, letterbox_pillarbox_aware=True)
-    new_w = 1919 - left - right
-    new_h = 1079 - top - bottom
+    crops = screenshot.plan_mod_crop(
+        [(1924, 1080), (1920, 1080)],
+        mod=4,
+        letterbox_pillarbox_aware=True,
+    )
+    left, top, right, bottom = crops[0]
+    new_w = 1924 - left - right
+    new_h = 1080 - top - bottom
     assert new_w % 4 == 0
     assert new_h % 4 == 0
-    assert new_w > 0 and new_h > 0
+    assert new_w == 1920
+    assert crops[1] == (0, 0, 0, 0)
+
+
+def test_plan_mod_crop_letterbox_bias():
+    crops = screenshot.plan_mod_crop(
+        [(1920, 1080), (1920, 800)],
+        mod=2,
+        letterbox_pillarbox_aware=True,
+    )
+    assert crops[0] == (0, 140, 0, 140)
+    assert crops[1] == (0, 0, 0, 0)
+
+
+def test_plan_mod_crop_pillarbox_bias():
+    crops = screenshot.plan_mod_crop(
+        [(1280, 720), (1920, 720)],
+        mod=2,
+        letterbox_pillarbox_aware=True,
+    )
+    assert crops[0] == (0, 0, 0, 0)
+    assert crops[1] == (320, 0, 320, 0)
+
+
+def test_plan_mod_crop_aligns_to_smallest_dimensions():
+    dims = [(1920, 1080), (1280, 720)]
+    crops = screenshot.plan_mod_crop(dims, mod=2, letterbox_pillarbox_aware=False)
+    left, top, right, bottom = crops[0]
+    assert (1920 - left - right, 1080 - top - bottom) == (1280, 720)
+    assert crops[1] == (0, 0, 0, 0)
 
 
 def test_generate_screenshots_filenames(tmp_path, monkeypatch):
@@ -144,7 +178,7 @@ def test_global_upscale_coordination(tmp_path, monkeypatch):
         trim_offsets=[0, 0, 0],
     )
 
-    assert scaled == [(1920, 1080), (1920, 1080), (1440, 1080)]
+    assert scaled == [(640, 480), (640, 480), (640, 480)]
 
 
 def test_placeholder_logging(tmp_path, caplog, monkeypatch):
