@@ -10,12 +10,13 @@ import tomllib
 from .datatypes import (
     AppConfig,
     AnalysisConfig,
-    ScreenshotConfig,
-    SlowpicsConfig,
     NamingConfig,
+    OverridesConfig,
     PathsConfig,
     RuntimeConfig,
-    OverridesConfig,
+    ScreenshotConfig,
+    SlowpicsConfig,
+    TMDBConfig,
 )
 
 
@@ -91,6 +92,7 @@ def load_config(path: str) -> AppConfig:
         analysis=_sanitize_section(raw.get("analysis", {}), "analysis", AnalysisConfig),
         screenshots=_sanitize_section(raw.get("screenshots", {}), "screenshots", ScreenshotConfig),
         slowpics=_sanitize_section(raw.get("slowpics", {}), "slowpics", SlowpicsConfig),
+        tmdb=_sanitize_section(raw.get("tmdb", {}), "tmdb", TMDBConfig),
         naming=_sanitize_section(raw.get("naming", {}), "naming", NamingConfig),
         paths=_sanitize_section(raw.get("paths", {}), "paths", PathsConfig),
         runtime=_sanitize_section(raw.get("runtime", {}), "runtime", RuntimeConfig),
@@ -123,6 +125,16 @@ def load_config(path: str) -> AppConfig:
 
     if app.slowpics.remove_after_days < 0:
         raise ConfigError("slowpics.remove_after_days must be >= 0")
+
+    if app.tmdb.year_tolerance < 0:
+        raise ConfigError("tmdb.year_tolerance must be >= 0")
+    if app.tmdb.cache_ttl_seconds < 0:
+        raise ConfigError("tmdb.cache_ttl_seconds must be >= 0")
+    if app.tmdb.category_preference is not None:
+        pref = app.tmdb.category_preference.upper()
+        if pref not in {"", "MOVIE", "TV"}:
+            raise ConfigError("tmdb.category_preference must be MOVIE, TV, or omitted")
+        app.tmdb.category_preference = pref or None
 
     if app.runtime.ram_limit_mb <= 0:
         raise ConfigError("runtime.ram_limit_mb must be > 0")

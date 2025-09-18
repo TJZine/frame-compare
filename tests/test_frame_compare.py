@@ -1,5 +1,5 @@
-from pathlib import Path
 import types
+from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
@@ -14,7 +14,9 @@ from src.datatypes import (
     RuntimeConfig,
     ScreenshotConfig,
     SlowpicsConfig,
+    TMDBConfig,
 )
+from src.tmdb import TMDBAmbiguityError, TMDBCandidate, TMDBResolution
 
 
 @pytest.fixture
@@ -33,6 +35,7 @@ def _make_config(input_dir: Path) -> AppConfig:
         ),
         screenshots=ScreenshotConfig(directory_name="screens", add_frame_info=False),
         slowpics=SlowpicsConfig(auto_upload=False),
+        tmdb=TMDBConfig(),
         naming=NamingConfig(always_full_filename=False, prefer_guessit=False),
         paths=PathsConfig(input_dir=str(input_dir)),
         runtime=RuntimeConfig(ram_limit_mb=4096),
@@ -145,6 +148,7 @@ def test_label_dedupe_preserves_short_labels(tmp_path, monkeypatch, runner):
         analysis=AnalysisConfig(frame_count_dark=0, frame_count_bright=0, frame_count_motion=0, random_frames=0),
         screenshots=ScreenshotConfig(directory_name="screens", add_frame_info=False),
         slowpics=SlowpicsConfig(auto_upload=False),
+        tmdb=TMDBConfig(),
         naming=NamingConfig(always_full_filename=False, prefer_guessit=False),
         paths=PathsConfig(input_dir=str(tmp_path)),
         runtime=RuntimeConfig(ram_limit_mb=1024),
@@ -255,6 +259,7 @@ def test_cli_input_override_and_cleanup(tmp_path, monkeypatch, runner):
         analysis=AnalysisConfig(frame_count_dark=0, frame_count_bright=0, frame_count_motion=0, random_frames=0),
         screenshots=ScreenshotConfig(directory_name="screens", add_frame_info=False),
         slowpics=SlowpicsConfig(auto_upload=True, delete_screen_dir_after_upload=True, open_in_browser=False, create_url_shortcut=False),
+        tmdb=TMDBConfig(),
         naming=NamingConfig(always_full_filename=True, prefer_guessit=False),
         paths=PathsConfig(input_dir=str(default_dir)),
         runtime=RuntimeConfig(ram_limit_mb=1024),
@@ -301,3 +306,197 @@ def test_cli_input_override_and_cleanup(tmp_path, monkeypatch, runner):
     screen_dir = Path(override_dir / cfg.screenshots.directory_name).resolve()
     assert not screen_dir.exists()
     assert str(override_dir) in result.output
+
+
+def test_cli_tmdb_resolution_populates_slowpics(tmp_path, monkeypatch):
+    first = tmp_path / "SourceA.mkv"
+    second = tmp_path / "SourceB.mkv"
+    for file in (first, second):
+        file.write_bytes(b"data")
+
+    cfg = _make_config(tmp_path)
+    cfg.tmdb.api_key = "token"
+    cfg.slowpics.auto_upload = True
+    cfg.slowpics.collection_name = "${Title} (${Year}) [${TMDBCategory}]"
+    cfg.slowpics.delete_screen_dir_after_upload = False
+
+    monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
+
+    def fake_parse(name: str, **_: object) -> dict[str, str]:
+        return {
+            "label": name,
+            "release_group": "",
+            "file_name": name,
+            "title": "Metadata Title",
+            "year": "2020",
+            "anime_title": "",
+            "imdb_id": "",
+            "tvdb_id": "",
+        }
+
+    monkeypatch.setattr(frame_compare, "parse_filename_metadata", fake_parse)
+
+    candidate = TMDBCandidate(
+        category="MOVIE",
+        tmdb_id="12345",
+        title="Resolved Title",
+        original_title="Original Title",
+        year=2023,
+        score=0.95,
+        original_language="en",
+        reason="primary-title",
+        used_filename_search=True,
+        payload={"id": 12345},
+    )
+    resolution = TMDBResolution(candidate=candidate, margin=0.4, source_query="Resolved")
+
+    async def fake_resolve(*args, **kwargs):  # pragma: no cover - simple stub
+        return resolution
+
+    monkeypatch.setattr(frame_compare, "resolve_tmdb", fake_resolve)
+    monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit: None)
+
+    def fake_init(path, *, trim_start=0, trim_end=None, fps_map=None, cache_dir=None):
+        return types.SimpleNamespace(
+            width=1280,
+            height=720,
+            fps_num=24000,
+            fps_den=1001,
+            num_frames=1800,
+        )
+
+    monkeypatch.setattr(frame_compare.vs_core, "init_clip", fake_init)
+
+    def fake_select(
+        clip,
+        analysis_cfg,
+        files,
+        file_under_analysis,
+        cache_info=None,
+        progress=None,
+        *,
+        frame_window=None,
+        return_metadata=False,
+    ):
+        assert frame_window is not None
+        return [12, 24]
+
+    monkeypatch.setattr(frame_compare, "select_frames", fake_select)
+
+    def fake_generate(clips, frames, files, metadata, out_dir, cfg_screens, **kwargs):
+        out_dir.mkdir(parents=True, exist_ok=True)
+        return [str(out_dir / f"shot_{idx}.png") for idx in range(len(frames) * len(files))]
+
+    monkeypatch.setattr(frame_compare, "generate_screenshots", fake_generate)
+
+    uploads = []
+
+    def fake_upload(image_paths, screen_dir, cfg_slow, **kwargs):
+        uploads.append((list(image_paths), screen_dir, cfg_slow.tmdb_id, cfg_slow.collection_name))
+        return "https://slow.pics/c/example"
+
+    monkeypatch.setattr(frame_compare, "upload_comparison", fake_upload)
+
+    class DummyProgress:
+        def __init__(self, *_, **__):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def add_task(self, *_, **__):
+            return 1
+
+        def update(self, *_, **__):
+            return None
+
+    monkeypatch.setattr(frame_compare, "Progress", DummyProgress)
+
+    result = frame_compare.run_cli("dummy", None)
+
+    assert uploads
+    _, _, upload_tmdb_id, upload_collection = uploads[0]
+    assert upload_tmdb_id == "12345"
+    assert "Resolved Title (2023)" in upload_collection
+    assert result.config.slowpics.tmdb_id == "12345"
+    assert result.config.slowpics.collection_name == "Resolved Title (2023) [MOVIE]"
+    assert result.slowpics_url == "https://slow.pics/c/example"
+
+
+def test_cli_tmdb_manual_override(tmp_path, monkeypatch):
+    first = tmp_path / "Alpha.mkv"
+    second = tmp_path / "Beta.mkv"
+    for file in (first, second):
+        file.write_bytes(b"data")
+
+    cfg = _make_config(tmp_path)
+    cfg.tmdb.api_key = "token"
+    cfg.tmdb.unattended = False
+    cfg.slowpics.collection_name = "${Label}"
+
+    monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
+
+    def fake_parse(name: str, **_: object) -> dict[str, str]:
+        return {
+            "label": f"Label for {name}",
+            "release_group": "",
+            "file_name": name,
+            "title": "",
+            "year": "",
+            "anime_title": "",
+            "imdb_id": "",
+            "tvdb_id": "",
+        }
+
+    monkeypatch.setattr(frame_compare, "parse_filename_metadata", fake_parse)
+
+    candidate = TMDBCandidate(
+        category="TV",
+        tmdb_id="777",
+        title="Option A",
+        original_title=None,
+        year=2001,
+        score=0.5,
+        original_language="ja",
+        reason="primary",
+        used_filename_search=True,
+        payload={"id": 777},
+    )
+
+    def fake_resolve(*args, **kwargs):
+        raise TMDBAmbiguityError([candidate])
+
+    monkeypatch.setattr(frame_compare, "resolve_tmdb", fake_resolve)
+    monkeypatch.setattr(frame_compare, "_prompt_manual_tmdb", lambda candidates: ("TV", "9999"))
+    monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit: None)
+
+    def fake_init(path, *, trim_start=0, trim_end=None, fps_map=None, cache_dir=None):
+        return types.SimpleNamespace(
+            width=1920,
+            height=1080,
+            fps_num=24000,
+            fps_den=1001,
+            num_frames=2400,
+        )
+
+    monkeypatch.setattr(frame_compare.vs_core, "init_clip", fake_init)
+
+    monkeypatch.setattr(
+        frame_compare,
+        "select_frames",
+        lambda clip, cfg, files, file_under_analysis, cache_info=None, progress=None, *, frame_window=None, return_metadata=False: [3, 6],
+    )
+
+    def fake_generate(clips, frames, files, metadata, out_dir, cfg_screens, **kwargs):
+        out_dir.mkdir(parents=True, exist_ok=True)
+        return [str(out_dir / "img.png")]
+
+    monkeypatch.setattr(frame_compare, "generate_screenshots", fake_generate)
+
+    result = frame_compare.run_cli("dummy", None)
+
+    assert result.config.slowpics.tmdb_id == "9999"
+    assert result.config.slowpics.collection_name == "Label for Alpha.mkv"
