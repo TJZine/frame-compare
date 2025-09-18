@@ -21,7 +21,12 @@ from src.config_loader import ConfigError, load_config
 from src.datatypes import AppConfig
 from src.utils import parse_filename_metadata
 from src import vs_core
-from src.analysis import FrameMetricsCacheInfo, select_frames
+from src.analysis import (
+    FrameMetricsCacheInfo,
+    SelectionWindowSpec,
+    compute_selection_window,
+    select_frames,
+)
 from src.screenshot import generate_screenshots, ScreenshotError
 from src.slowpics import SlowpicsAPIError, upload_comparison
 
@@ -369,6 +374,86 @@ def _build_cache_info(root: Path, plans: Sequence[_ClipPlan], cfg: AppConfig, an
     )
 
 
+def _resolve_selection_windows(
+    plans: Sequence[_ClipPlan],
+    analysis_cfg,
+) -> tuple[List[SelectionWindowSpec], tuple[int, int], bool]:
+    specs: List[SelectionWindowSpec] = []
+    min_total_frames: Optional[int] = None
+    for plan in plans:
+        clip = plan.clip
+        if clip is None:
+            raise CLIAppError("Clip initialisation failed")
+        total_frames = int(getattr(clip, "num_frames", 0))
+        if min_total_frames is None or total_frames < min_total_frames:
+            min_total_frames = total_frames
+        fps_num, fps_den = plan.effective_fps or _extract_clip_fps(clip)
+        fps_val = fps_num / fps_den if fps_den else 0.0
+        spec = compute_selection_window(
+            total_frames,
+            fps_val,
+            analysis_cfg.ignore_lead_seconds,
+            analysis_cfg.ignore_trail_seconds,
+            analysis_cfg.min_window_seconds,
+        )
+        specs.append(spec)
+
+    if not specs:
+        return [], (0, 0), False
+
+    start = max(spec.start_frame for spec in specs)
+    end = min(spec.end_frame for spec in specs)
+    collapsed = False
+    if end <= start:
+        collapsed = True
+        fallback_end = min_total_frames or 0
+        start = 0
+        end = fallback_end
+
+    if end <= start:
+        raise CLIAppError("No frames remain after applying ignore window")
+
+    return specs, (start, end), collapsed
+
+
+def _log_selection_windows(
+    plans: Sequence[_ClipPlan],
+    specs: Sequence[SelectionWindowSpec],
+    intersection: tuple[int, int],
+    *,
+    collapsed: bool,
+    analyze_fps: float,
+) -> None:
+    for plan, spec in zip(plans, specs):
+        raw_label = plan.metadata.get("label") or plan.path.name
+        label = escape((raw_label or plan.path.name).strip())
+        print(
+            f"[cyan]{label}[/]: Selecting frames within [start={spec.start_seconds:.2f}s, "
+            f"end={spec.end_seconds:.2f}s] (frames [{spec.start_frame}, {spec.end_frame})) — "
+            f"lead={spec.applied_lead_seconds:.2f}s, trail={spec.applied_trail_seconds:.2f}s"
+        )
+        for warning in spec.warnings:
+            print(f"[yellow]{label}[/]: {warning}")
+
+    start_frame, end_frame = intersection
+    if analyze_fps > 0 and end_frame > start_frame:
+        start_seconds = start_frame / analyze_fps
+        end_seconds = end_frame / analyze_fps
+    else:
+        start_seconds = float(start_frame)
+        end_seconds = float(end_frame)
+
+    print(
+        f"[cyan]Common selection window[/]: frames [{start_frame}, {end_frame}) — "
+        f"seconds [{start_seconds:.2f}s, {end_seconds:.2f}s)"
+    )
+
+    if collapsed:
+        print(
+            "[yellow]Ignore lead/trail settings did not overlap across all sources; using fallback range.[/yellow]"
+        )
+
+
 def _print_summary(files: Sequence[Path], frames: Sequence[int], out_dir: Path, url: str | None) -> None:
     print("[green]Comparison ready[/green]")
     print(f"  Files     : {len(files)}")
@@ -437,6 +522,21 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
     if analyze_clip is None:
         raise CLIAppError("Missing clip for analysis")
 
+    selection_specs, frame_window, windows_collapsed = _resolve_selection_windows(
+        plans, cfg.analysis
+    )
+    analyze_fps_num, analyze_fps_den = plans[analyze_index].effective_fps or _extract_clip_fps(
+        analyze_clip
+    )
+    analyze_fps = analyze_fps_num / analyze_fps_den if analyze_fps_den else 0.0
+    _log_selection_windows(
+        plans,
+        selection_specs,
+        frame_window,
+        collapsed=windows_collapsed,
+        analyze_fps=analyze_fps,
+    )
+
     cache_info = _build_cache_info(root, plans, cfg, analyze_index)
 
     step_size = max(1, int(cfg.analysis.step))
@@ -466,6 +566,7 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
                 analyze_path.name,
                 cache_info=cache_info,
                 progress=progress_callback,
+                frame_window=frame_window,
                 return_metadata=True,
             )
         except TypeError as exc:
@@ -478,6 +579,7 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
                 analyze_path.name,
                 cache_info=cache_info,
                 progress=progress_callback,
+                frame_window=frame_window,
             )
         if isinstance(result, tuple):
             return result

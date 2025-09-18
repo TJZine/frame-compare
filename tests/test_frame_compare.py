@@ -76,6 +76,7 @@ def test_cli_applies_overrides_and_naming(tmp_path, monkeypatch, runner):
             height=1080,
             fps_num=24000,
             fps_den=1001,
+            num_frames=24000,
         )
         init_calls.append((path, trim_start, trim_end, fps_map, cache_dir))
         return clip
@@ -84,8 +85,20 @@ def test_cli_applies_overrides_and_naming(tmp_path, monkeypatch, runner):
 
     cache_infos = []
 
-    def fake_select(clip, analysis_cfg, files, file_under_analysis, cache_info=None, progress=None):
+    def fake_select(
+        clip,
+        analysis_cfg,
+        files,
+        file_under_analysis,
+        cache_info=None,
+        progress=None,
+        *,
+        frame_window=None,
+        return_metadata=False,
+    ):
         cache_infos.append(cache_info)
+        assert frame_window is not None
+        assert isinstance(frame_window, tuple)
         return [10, 20]
 
     monkeypatch.setattr(frame_compare, "select_frames", fake_select)
@@ -147,10 +160,14 @@ def test_label_dedupe_preserves_short_labels(tmp_path, monkeypatch, runner):
     monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit: None)
 
     def fake_init_clip(path, *, trim_start=0, trim_end=None, fps_map=None, cache_dir=None):
-        return types.SimpleNamespace(width=1920, height=1080, fps_num=24000, fps_den=1001)
+        return types.SimpleNamespace(width=1920, height=1080, fps_num=24000, fps_den=1001, num_frames=2400)
 
     monkeypatch.setattr(frame_compare.vs_core, "init_clip", fake_init_clip)
-    monkeypatch.setattr(frame_compare, "select_frames", lambda clip, cfg, files, file_under_analysis, cache_info=None, progress=None: [42])
+    monkeypatch.setattr(
+        frame_compare,
+        "select_frames",
+        lambda clip, cfg, files, file_under_analysis, cache_info=None, progress=None, *, frame_window=None, return_metadata=False: [42],
+    )
 
     captured = []
 
@@ -182,15 +199,26 @@ def test_cli_reuses_frame_cache(tmp_path, monkeypatch, runner):
     monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit: None)
 
     def fake_init(path, *, trim_start=0, trim_end=None, fps_map=None, cache_dir=None):
-        return types.SimpleNamespace(width=1280, height=720, fps_num=24000, fps_den=1001)
+        return types.SimpleNamespace(width=1280, height=720, fps_num=24000, fps_den=1001, num_frames=1800)
 
     monkeypatch.setattr(frame_compare.vs_core, "init_clip", fake_init)
 
     call_state = {"calls": 0, "cache_hits": 0}
 
-    def fake_select(clip, analysis_cfg, files, file_under_analysis, cache_info=None, progress=None):
+    def fake_select(
+        clip,
+        analysis_cfg,
+        files,
+        file_under_analysis,
+        cache_info=None,
+        progress=None,
+        *,
+        frame_window=None,
+        return_metadata=False,
+    ):
         call_state["calls"] += 1
         assert cache_info is not None
+        assert frame_window is not None
         if cache_info.path.exists():
             call_state["cache_hits"] += 1
         else:
@@ -237,10 +265,14 @@ def test_cli_input_override_and_cleanup(tmp_path, monkeypatch, runner):
     monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit: None)
 
     def fake_init(path, *, trim_start=0, trim_end=None, fps_map=None, cache_dir=None):
-        return types.SimpleNamespace(width=1280, height=720, fps_num=24000, fps_den=1001)
+        return types.SimpleNamespace(width=1280, height=720, fps_num=24000, fps_den=1001, num_frames=1800)
 
     monkeypatch.setattr(frame_compare.vs_core, "init_clip", fake_init)
-    monkeypatch.setattr(frame_compare, "select_frames", lambda clip, cfg, files, file_under_analysis, cache_info=None, progress=None: [7])
+    monkeypatch.setattr(
+        frame_compare,
+        "select_frames",
+        lambda clip, cfg, files, file_under_analysis, cache_info=None, progress=None, *, frame_window=None, return_metadata=False: [7],
+    )
 
     def fake_generate(clips, frames, files, metadata, out_dir, cfg_screens, **kwargs):
         out_dir.mkdir(parents=True, exist_ok=True)

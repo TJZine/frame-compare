@@ -28,6 +28,9 @@ class AnalysisConfig:
     frame_data_filename: str = "generated.compframes"
     skip_head_seconds: float = 0.0
     skip_tail_seconds: float = 0.0
+    ignore_lead_seconds: float = 0.0
+    ignore_trail_seconds: float = 0.0
+    min_window_seconds: float = 5.0
 
 
 @dataclass
