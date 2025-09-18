@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, List
 
@@ -122,7 +123,7 @@ def test_session_bootstrap_single_shot(tmp_path, monkeypatch: pytest.MonkeyPatch
 
     url = slowpics.upload_comparison([str(image)], tmp_path, cfg)
 
-    assert url == "https://slow.pics/c/abc/def"
+    assert url == "https://slow.pics/c/def"
     assert len(session.calls) == 3
     landing = session.calls[0]
     assert landing["method"] == "GET"
@@ -170,7 +171,7 @@ def test_legacy_collection_creation_fields(tmp_path, monkeypatch: pytest.MonkeyP
     _install_session(monkeypatch, responses)
 
     url = slowpics.upload_comparison([str(path) for path in files], tmp_path, cfg)
-    assert url == "https://slow.pics/c/abc/def"
+    assert url == "https://slow.pics/c/def"
 
     comparison_fields = DummyEncoder.instances[0].fields
     assert comparison_fields["collectionName"] == "My Collection"
@@ -238,3 +239,72 @@ def test_no_json_api_calls(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     slowpics.upload_comparison([str(image)], tmp_path, cfg)
 
     assert all("/api/" not in call["url"] for call in session.calls if call["method"] == "POST")
+
+
+def test_url_short_form_always(tmp_path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    cfg = SlowpicsConfig()
+    image = _write_image(tmp_path, "123 - ClipA.png")
+
+    responses = [
+        FakeResponse(200),
+        FakeResponse(
+            200,
+            {
+                "collectionUuid": "collection-uuid",
+                "key": "Dq2Nb5Mx",
+                "images": [["img1"]],
+            },
+        ),
+        FakeResponse(200, text="OK"),
+    ]
+    _install_session(monkeypatch, responses)
+
+    with caplog.at_level(logging.INFO):
+        url = slowpics.upload_comparison([str(image)], tmp_path, cfg)
+
+    assert url == "https://slow.pics/c/Dq2Nb5Mx"
+    assert f"Slow.pics: {url}" in caplog.messages
+    assert all("/c/collection-uuid/" not in message for message in caplog.messages)
+
+
+def test_url_matches_creation_key(tmp_path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    cfg = SlowpicsConfig()
+    image = _write_image(tmp_path, "123 - ClipA.png")
+
+    responses = [
+        FakeResponse(200),
+        FakeResponse(
+            200,
+            {
+                "collectionUuid": "legacy-uuid",
+                "key": "c74BM7mj",
+                "images": [["img-from-response"]],
+            },
+        ),
+        FakeResponse(200, text="OK"),
+    ]
+    _install_session(monkeypatch, responses)
+
+    with caplog.at_level(logging.INFO):
+        url = slowpics.upload_comparison([str(image)], tmp_path, cfg)
+
+    assert url == "https://slow.pics/c/c74BM7mj"
+    assert f"Slow.pics: {url}" in caplog.messages
+    assert len(DummyEncoder.instances) >= 2
+    upload_fields = DummyEncoder.instances[1].fields
+    assert upload_fields["collectionUuid"] == "legacy-uuid"
+    assert upload_fields["imageUuid"] == "img-from-response"
+
+
+def test_missing_key_raises(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = SlowpicsConfig()
+    image = _write_image(tmp_path, "123 - ClipA.png")
+
+    responses = [
+        FakeResponse(200),
+        FakeResponse(200, {"collectionUuid": "abc", "images": [["img1"]]}),
+    ]
+    _install_session(monkeypatch, responses)
+
+    with pytest.raises(slowpics.SlowpicsAPIError, match="Missing collection key in slow.pics response"):
+        slowpics.upload_comparison([str(image)], tmp_path, cfg)
