@@ -9,7 +9,7 @@ from typing import Any, Dict, Mapping, Optional
 from .config import TMConfig
 from .detect import is_hdr
 from .exceptions import TonemapError
-from .overlay import apply_overlay
+from .overlay import apply_overlay, build_overlay_lines
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +127,30 @@ def _dither_to_rgb24(clip: Any, cfg: TMConfig) -> Any:
         return to_8bit(clip, **kwargs)
     except Exception:  # pragma: no cover
         logger.debug("RGB24 dither failed; returning high bit-depth clip", exc_info=True)
+        return clip
+
+
+def _stamp_tonemap_metadata(clip: Any, cfg: TMConfig, *, backend: str) -> Any:
+    std = getattr(clip, "std", None)
+    set_props = getattr(std, "SetFrameProps", None) if std is not None else None
+    if not callable(set_props):
+        logger.debug("tonemap.metadata skip: SetFrameProps unavailable")
+        return clip
+
+    summary = (
+        f"{backend}:{cfg.func},dpd={int(bool(cfg.dpd))},dst_max={cfg.dst_max:.2f},"
+        f"dst_min={cfg.dst_min:.4f},gamut={cfg.gamut_mapping},smooth={cfg.smoothing_period},"
+        f"scene={cfg.scene_threshold_low:.2f}/{cfg.scene_threshold_high:.2f},dovi={int(bool(cfg.use_dovi))}"
+    )
+    overlay_lines = build_overlay_lines(cfg)
+    props: Dict[str, Any] = {"_Tonemapped": summary}
+    if overlay_lines:
+        props["_TonemapOverlay"] = "\n".join(overlay_lines)
+
+    try:
+        return set_props(**props)
+    except Exception:  # pragma: no cover - defensive
+        logger.debug("tonemap.metadata stamp failed", exc_info=True)
         return clip
 
 
@@ -251,6 +275,8 @@ def apply_tonemap(clip: Any, cfg: TMConfig, *, force: bool = False) -> TonemapRe
         used_libplacebo = False
 
     output = _dither_to_rgb24(tonemapped, resolved_cfg)
+    backend = "placebo" if used_libplacebo else "fallback"
+    output = _stamp_tonemap_metadata(output, resolved_cfg, backend=backend)
     output = _set_sdr_props(output)
     if resolved_cfg.overlay:
         output = apply_overlay(output, resolved_cfg)

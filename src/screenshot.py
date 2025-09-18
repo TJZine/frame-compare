@@ -68,6 +68,14 @@ def _clamp_frame_index(clip, frame_idx: int) -> tuple[int, bool]:
 FRAME_INFO_STYLE = 'sans-serif,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,"0,0,0,0,100,100,0,0,1,2,0,7,10,10,10,1"'
 
 
+def _decode_prop_text(value: object) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", "ignore")
+    if isinstance(value, str):
+        return value
+    return ""
+
+
 def _apply_frame_info_overlay(core, clip, title: str, requested_frame: int | None, selection_label: str | None) -> object:
     try:
         import vapoursynth as vs  # type: ignore
@@ -82,9 +90,24 @@ def _apply_frame_info_overlay(core, clip, title: str, requested_frame: int | Non
 
     frame_eval = getattr(std_ns, 'FrameEval', None)
     subtitle = getattr(sub_ns, 'Subtitle', None)
+    text_ns = getattr(core, 'text', None)
+    draw_text = getattr(text_ns, 'Text', None) if text_ns is not None else None
     if not callable(frame_eval) or not callable(subtitle):
         logger.debug('Required VapourSynth overlay functions unavailable; skipping frame overlay')
         return clip
+
+    resize_ns = getattr(core, "resize", None)
+    point = getattr(resize_ns, "Point", None) if resize_ns is not None else None
+    limited_clip = clip
+    convert_back = None
+    if callable(point):
+        try:
+            limited_clip = point(clip, range=vs.RANGE_LIMITED, dither_type="none")
+            convert_back = partial(point, range=vs.RANGE_FULL, dither_type="none")
+        except Exception:  # pragma: no cover - best effort
+            logger.debug('Failed to convert clip to limited range for frame overlay', exc_info=True)
+            limited_clip = clip
+            convert_back = None
 
     label = title.strip() if isinstance(title, str) else ''
     if not label:
@@ -92,7 +115,7 @@ def _apply_frame_info_overlay(core, clip, title: str, requested_frame: int | Non
 
     padding_title = " " + ("\n" * 3)
 
-    def _draw_info(n: int, f, clip_ref):
+    def _draw_info(n: int, f, clip_ref, *, draw_text_fn=None):
         pict = f.props.get('_PictType')
         if isinstance(pict, bytes):
             pict_text = pict.decode('utf-8', 'ignore')
@@ -108,11 +131,30 @@ def _apply_frame_info_overlay(core, clip, title: str, requested_frame: int | Non
         if selection_label:
             lines.append(f"Content Type: {selection_label}")
         info = "\n".join(lines)
-        return subtitle(clip_ref, text=[info], style=FRAME_INFO_STYLE)
+        result = subtitle(clip_ref, text=[info], style=FRAME_INFO_STYLE)
+        tonemap_text = _decode_prop_text(
+            f.props.get('_TonemapOverlay') or f.props.get('_Tonemapped')
+        )
+        if tonemap_text and callable(draw_text_fn):
+            try:
+                result = draw_text_fn(result, tonemap_text, alignment=9, scale=1)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug('Tonemap overlay draw failed: %s', exc)
+        return result
 
     try:
-        info_clip = frame_eval(clip, partial(_draw_info, clip_ref=clip), prop_src=clip)
-        return subtitle(info_clip, text=[padding_title + label], style=FRAME_INFO_STYLE)
+        info_clip = frame_eval(
+            limited_clip,
+            partial(_draw_info, clip_ref=limited_clip, draw_text_fn=draw_text),
+            prop_src=limited_clip,
+        )
+        result = subtitle(info_clip, text=[padding_title + label], style=FRAME_INFO_STYLE)
+        if callable(convert_back):
+            try:
+                result = convert_back(result)
+            except Exception:  # pragma: no cover - best effort
+                logger.debug('Failed to restore full range after frame overlay', exc_info=True)
+        return result
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug('Applying frame overlay failed: %s', exc)
         return clip
