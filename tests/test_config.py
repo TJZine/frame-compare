@@ -6,8 +6,8 @@ from src.config_loader import ConfigError, load_config
 
 
 def _copy_default_config(tmp_path: Path) -> Path:
-    cfg_src = Path(__file__).resolve().parents[1] / "config.toml"
-    cfg_dst = tmp_path / "config.toml"
+    cfg_src = Path(__file__).resolve().parents[1] / "config.toml.template"
+    cfg_dst = tmp_path / "config.toml.template"
     cfg_dst.write_text(cfg_src.read_text(encoding="utf-8"), encoding="utf-8")
     return cfg_dst
 
@@ -31,7 +31,7 @@ def test_load_defaults(tmp_path: Path) -> None:
     ],
 )
 def test_validation_errors(tmp_path: Path, toml_snippet: str, message: str) -> None:
-    cfg_path = tmp_path / "config.toml"
+    cfg_path = tmp_path / "config.toml.template"
     cfg_path.write_text(toml_snippet, encoding="utf-8")
     with pytest.raises(ConfigError) as exc_info:
         load_config(str(cfg_path))
@@ -39,7 +39,7 @@ def test_validation_errors(tmp_path: Path, toml_snippet: str, message: str) -> N
 
 
 def test_override_values(tmp_path: Path) -> None:
-    cfg_path = tmp_path / "config.toml"
+    cfg_path = tmp_path / "config.toml.template"
     cfg_path.write_text(
         """
 [analysis]

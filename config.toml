@@ -2,7 +2,7 @@
 
 [analysis]
 # Frame selection knobs. The legacy quantile, motion, and random heuristics are all exposed here.
-frame_count_dark = 15
+frame_count_dark = 20
 frame_count_bright = 10
 frame_count_motion = 10
 user_frames = []
@@ -56,7 +56,7 @@ prefer_guessit = true
 input_dir = "comparison_videos"
 
 [runtime]
-ram_limit_mb = 8000
+ram_limit_mb = 4000
 vapoursynth_python_paths = []
 
 
