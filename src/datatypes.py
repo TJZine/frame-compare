@@ -50,6 +50,7 @@ class ScreenshotConfig:
     single_res: int = 0
     mod_crop: int = 2
     letterbox_pillarbox_aware: bool = True
+    debug_log_color_ranges: bool = False
 
 
 TonemapConfig = TMConfig
