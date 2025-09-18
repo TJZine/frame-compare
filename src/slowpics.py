@@ -181,6 +181,9 @@ def _upload_comparison_legacy(
 
     collection_uuid = comp_json.get("collectionUuid")
     key = comp_json.get("key")
+    if not key:
+        raise SlowpicsAPIError("Missing collection key in slow.pics response")
+    canonical_url = f"https://slow.pics/c/{key}"
     images = comp_json.get("images")
     if not isinstance(images, list):
         raise SlowpicsAPIError("Slow.pics response missing image identifiers")
@@ -213,19 +216,10 @@ def _upload_comparison_legacy(
             if progress_callback is not None:
                 progress_callback(1)
 
-    if collection_uuid and key:
-        canonical_url = f"https://slow.pics/c/{collection_uuid}/{key}"
-        shortcut_id = collection_uuid
-    elif key:
-        canonical_url = f"https://slow.pics/c/{key}"
-        shortcut_id = key
-    else:
-        raise SlowpicsAPIError("Missing collection identifiers in slow.pics response")
-
     if cfg.webhook_url:
         _post_direct_webhook(session, cfg.webhook_url, canonical_url)
     if cfg.create_url_shortcut:
-        shortcut_path = screen_dir / f"slowpics_{shortcut_id}.url"
+        shortcut_path = screen_dir / f"slowpics_{key}.url"
         shortcut_path.write_text(f"[InternetShortcut]\nURL={canonical_url}\n", encoding="utf-8")
     return canonical_url
 
@@ -253,10 +247,12 @@ def upload_comparison(
         raise SlowpicsAPIError("Missing XSRF token from slow.pics response")
 
     logger.info("Using slow.pics legacy upload endpoints")
-    return _upload_comparison_legacy(
+    url = _upload_comparison_legacy(
         session,
         image_files,
         screen_dir,
         cfg,
         progress_callback=progress_callback,
     )
+    logger.info("Slow.pics: %s", url)
+    return url
