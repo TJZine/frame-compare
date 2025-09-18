@@ -16,10 +16,10 @@ def test_load_defaults(tmp_path: Path) -> None:
     cfg_path = _copy_default_config(tmp_path)
     app = load_config(str(cfg_path))
     assert app.analysis.frame_count_dark == 20
-    assert app.analysis.downscale_height == 480
+    assert app.analysis.downscale_height == 720
     assert app.screenshots.directory_name == "screens"
     assert app.naming.always_full_filename is True
-    assert app.runtime.ram_limit_mb == 8000
+    assert app.runtime.ram_limit_mb == 4000
     assert isinstance(app.runtime.vapoursynth_python_paths, list)
 
 
