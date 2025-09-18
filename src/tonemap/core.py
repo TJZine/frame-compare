@@ -17,7 +17,13 @@ _SDR_PROPS = {
     "_Matrix": 1,
     "_Primaries": 1,
     "_Transfer": 1,
-    "_ColorRange": 0,
+}
+
+_RANGE_NAME_TO_VALUE = {
+    "full": 0,
+    "range_full": 0,
+    "limited": 1,
+    "range_limited": 1,
 }
 
 
@@ -54,14 +60,37 @@ def _extract_frame_props(clip: Any) -> Mapping[str, Any]:
     return {}
 
 
-def _set_sdr_props(clip: Any) -> Any:
+def _normalise_color_range(value: Any) -> Optional[int]:
+    if isinstance(value, int):
+        return value if value in (0, 1) else None
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", "ignore")
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered.isdigit():
+            try:
+                numeric = int(lowered)
+            except ValueError:
+                numeric = None
+            else:
+                if numeric in (0, 1):
+                    return numeric
+        return _RANGE_NAME_TO_VALUE.get(lowered)
+    return None
+
+
+def _set_sdr_props(clip: Any, *, color_range: Any = None) -> Any:
     std = getattr(clip, "std", None)
     setter = getattr(std, "SetFrameProps", None) if std is not None else None
     if not callable(setter):
         logger.debug("tonemap.set_props skip: std.SetFrameProps unavailable")
         return clip
     try:
-        return setter(**_SDR_PROPS)
+        props = dict(_SDR_PROPS)
+        resolved_range = _normalise_color_range(color_range)
+        if resolved_range is not None:
+            props["_ColorRange"] = resolved_range
+        return setter(**props)
     except Exception:  # pragma: no cover - defensive
         logger.debug("tonemap.set_props failure; leaving props untouched", exc_info=True)
         return clip
@@ -223,6 +252,8 @@ def apply_tonemap(clip: Any, cfg: TMConfig, *, force: bool = False) -> TonemapRe
 
     props = _extract_frame_props(clip)
     resolved_cfg = cfg.resolved()
+    source_range = _normalise_color_range(props.get("_ColorRange") or props.get("ColorRange"))
+    target_range = _normalise_color_range(resolved_cfg.dst_range)
 
     try:
         hdr_detected = is_hdr(props)
@@ -237,7 +268,7 @@ def apply_tonemap(clip: Any, cfg: TMConfig, *, force: bool = False) -> TonemapRe
             force,
             resolved_cfg.always_try_placebo,
         )
-        clean_clip = _set_sdr_props(clip)
+        clean_clip = _set_sdr_props(clip, color_range=source_range)
         if resolved_cfg.overlay:
             clean_clip = apply_overlay(clean_clip, resolved_cfg)
         return TonemapResult(clean_clip, clean_clip, False, hdr_detected)
@@ -246,9 +277,10 @@ def apply_tonemap(clip: Any, cfg: TMConfig, *, force: bool = False) -> TonemapRe
 
     try:
         fallback_clip = _linear_sdr_fallback(rgb_clip, props)
+        fallback_clip = _set_sdr_props(fallback_clip, color_range=target_range)
     except TonemapError as exc:
         logger.debug("Fallback path unavailable: %s", exc)
-        fallback_clip = _set_sdr_props(rgb_clip)
+        fallback_clip = _set_sdr_props(rgb_clip, color_range=target_range)
 
     used_libplacebo = True
     try:
@@ -277,7 +309,7 @@ def apply_tonemap(clip: Any, cfg: TMConfig, *, force: bool = False) -> TonemapRe
     output = _dither_to_rgb24(tonemapped, resolved_cfg)
     backend = "placebo" if used_libplacebo else "fallback"
     output = _stamp_tonemap_metadata(output, resolved_cfg, backend=backend)
-    output = _set_sdr_props(output)
     if resolved_cfg.overlay:
         output = apply_overlay(output, resolved_cfg)
+    output = _set_sdr_props(output, color_range=target_range)
     return TonemapResult(output, fallback_clip, used_libplacebo, hdr_detected)

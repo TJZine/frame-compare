@@ -91,6 +91,24 @@ class _DummyResize:
         self.owner.last_resize_kwargs = kwargs
         return clip
 
+    def Point(self, clip, **kwargs):  # noqa: N802
+        if hasattr(self.owner, "point_calls"):
+            self.owner.point_calls.append(dict(kwargs))
+        self.owner.last_resize_kwargs = kwargs
+        return clip
+
+
+class _DummyText:
+    def __init__(self, owner):
+        self.owner = owner
+        self.calls: list[dict[str, object]] = []
+
+    def Text(self, clip, text, **kwargs):  # noqa: N802 - VapourSynth style
+        call = {"clip": clip, "text": text}
+        call.update(kwargs)
+        self.calls.append(call)
+        return clip
+
 
 class _DummyClip:
     def __init__(self, props: dict[str, object]):
@@ -100,6 +118,7 @@ class _DummyClip:
         self.core.libplacebo = _CountingTonemap()
         self.core.resize = _DummyResize(self)
         self.last_resize_kwargs = None
+        self.point_calls: list[dict[str, object]] = []
 
     def get_frame_props(self):
         return self.frame_props
@@ -157,3 +176,34 @@ def test_apply_tonemap_stamps_metadata_props() -> None:
     overlay_text = metadata_call.get("_TonemapOverlay")
     assert overlay_text
     assert "TM" in str(overlay_text)
+
+
+def test_apply_tonemap_sets_color_range_from_config() -> None:
+    clip = _RecordingClip({"_Transfer": 16, "_Primaries": 9})
+    cfg = TMConfig(dst_range="limited")
+    result = apply_tonemap(clip, cfg)
+    assert isinstance(result, TonemapResult)
+    final_props = clip.std.calls[-1]
+    assert final_props.get("_ColorRange") == 1
+
+
+def test_apply_tonemap_sets_color_range_full() -> None:
+    clip = _RecordingClip({"_Transfer": 16, "_Primaries": 9})
+    cfg = TMConfig(dst_range="full")
+    result = apply_tonemap(clip, cfg)
+    assert isinstance(result, TonemapResult)
+    final_props = clip.std.calls[-1]
+    assert final_props.get("_ColorRange") == 0
+
+
+def test_apply_tonemap_overlay_shims_range_for_text() -> None:
+    clip = _RecordingClip({"_Transfer": 16, "_Primaries": 9})
+    clip.core.text = _DummyText(clip)
+    cfg = TMConfig(dst_range="full", overlay=True)
+    result = apply_tonemap(clip, cfg)
+    assert isinstance(result, TonemapResult)
+    overlay_calls = [call for call in clip.point_calls if "range" in call]
+    assert overlay_calls == [{"range": 1, "dither_type": "none"}, {"range": 0, "dither_type": "none"}]
+    assert clip.core.text.calls
+    final_props = clip.std.calls[-1]
+    assert final_props.get("_ColorRange") == 0
