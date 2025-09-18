@@ -48,6 +48,18 @@ class ScreenshotConfig:
 
 
 @dataclass
+class TonemapConfig:
+    """HDR → SDR tone mapping parameters passed to libplacebo."""
+
+    tone_mapping: str = "bt2390"
+    target_nits: float = 100.0
+    dest_primaries: str = "bt709"
+    dest_transfer: str = "bt1886"
+    dest_matrix: str = "bt709"
+    dest_range: str = "limited"
+
+
+@dataclass
 class SlowpicsConfig:
     """slow.pics upload automation flags and metadata."""
 
@@ -113,6 +125,7 @@ class AppConfig:
 
     analysis: AnalysisConfig
     screenshots: ScreenshotConfig
+    tonemap: TonemapConfig
     slowpics: SlowpicsConfig
     tmdb: TMDBConfig
     naming: NamingConfig

@@ -4,6 +4,7 @@ import types
 import pytest
 import src.vs_core as vs_core
 
+from src.datatypes import TonemapConfig
 from src.vs_core import (
     ClipInitError,
     ClipProcessError,
@@ -95,7 +96,7 @@ def test_hdr_triggers_tonemap():
     clip = _FakeClip(
         props={"_Primaries": "bt2020", "_Transfer": "st2084"}
     )
-    cfg = types.SimpleNamespace(target_nits=120)
+    cfg = TonemapConfig(target_nits=120.0)
     result = process_clip_for_screenshot(clip, "file.mkv", cfg)
     assert clip.core.libplacebo.called_with is not None
     tonemap_clip, kwargs = clip.core.libplacebo.called_with

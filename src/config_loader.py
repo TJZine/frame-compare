@@ -17,6 +17,7 @@ from .datatypes import (
     ScreenshotConfig,
     SlowpicsConfig,
     TMDBConfig,
+    TonemapConfig,
 )
 
 
@@ -91,6 +92,7 @@ def load_config(path: str) -> AppConfig:
     app = AppConfig(
         analysis=_sanitize_section(raw.get("analysis", {}), "analysis", AnalysisConfig),
         screenshots=_sanitize_section(raw.get("screenshots", {}), "screenshots", ScreenshotConfig),
+        tonemap=_sanitize_section(raw.get("tonemap", {}), "tonemap", TonemapConfig),
         slowpics=_sanitize_section(raw.get("slowpics", {}), "slowpics", SlowpicsConfig),
         tmdb=_sanitize_section(raw.get("tmdb", {}), "tmdb", TMDBConfig),
         naming=_sanitize_section(raw.get("naming", {}), "naming", NamingConfig),
@@ -138,6 +140,9 @@ def load_config(path: str) -> AppConfig:
 
     if app.runtime.ram_limit_mb <= 0:
         raise ConfigError("runtime.ram_limit_mb must be > 0")
+
+    if app.tonemap.target_nits <= 0:
+        raise ConfigError("tonemap.target_nits must be > 0")
 
     _validate_trim(app.overrides.trim, "overrides.trim")
     _validate_trim(app.overrides.trim_end, "overrides.trim_end")

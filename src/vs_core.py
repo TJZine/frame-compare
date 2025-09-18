@@ -39,7 +39,7 @@ _SDR_PROPS = {
 @dataclass(frozen=True)
 class _TonemapDefaults:
     tone_mapping: str = "bt2390"
-    target_nits: int = 100
+    target_nits: float = 100.0
     dest_primaries: str = "bt709"
     dest_transfer: str = "bt1886"
     dest_matrix: str = "bt709"

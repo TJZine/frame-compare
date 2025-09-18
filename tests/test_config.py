@@ -33,6 +33,12 @@ def test_load_defaults(tmp_path: Path) -> None:
     assert app.tmdb.enable_anime_parsing is True
     assert app.tmdb.cache_ttl_seconds == 86400
     assert app.tmdb.category_preference is None
+    assert app.tonemap.tone_mapping == "bt2390"
+    assert app.tonemap.target_nits == 100.0
+    assert app.tonemap.dest_primaries == "bt709"
+    assert app.tonemap.dest_transfer == "bt1886"
+    assert app.tonemap.dest_matrix == "bt709"
+    assert app.tonemap.dest_range == "limited"
 
 
 @pytest.mark.parametrize(
@@ -46,6 +52,7 @@ def test_load_defaults(tmp_path: Path) -> None:
         ("[tmdb]\nyear_tolerance = -1\n", "tmdb.year_tolerance"),
         ("[tmdb]\ncache_ttl_seconds = -5\n", "tmdb.cache_ttl_seconds"),
         ("[tmdb]\ncategory_preference = \"documentary\"\n", "tmdb.category_preference"),
+        ("[tonemap]\ntarget_nits = 0\n", "tonemap.target_nits"),
     ],
 )
 def test_validation_errors(tmp_path: Path, toml_snippet: str, message: str) -> None:
@@ -69,6 +76,14 @@ min_window_seconds = 2.5
 
 [screenshots]
 compression_level = 2
+
+[tonemap]
+tone_mapping = "mobius"
+target_nits = 140.5
+dest_primaries = "dci-p3"
+dest_transfer = "srgb"
+dest_matrix = "dci-p3"
+dest_range = "full"
 
 [slowpics]
 auto_upload = "1"
@@ -103,3 +118,9 @@ input_dir = "D:/comparisons"
     assert app.tmdb.year_tolerance == 1
     assert app.tmdb.cache_ttl_seconds == 120
     assert app.tmdb.category_preference == "TV"
+    assert app.tonemap.tone_mapping == "mobius"
+    assert app.tonemap.target_nits == 140.5
+    assert app.tonemap.dest_primaries == "dci-p3"
+    assert app.tonemap.dest_transfer == "srgb"
+    assert app.tonemap.dest_matrix == "dci-p3"
+    assert app.tonemap.dest_range == "full"
