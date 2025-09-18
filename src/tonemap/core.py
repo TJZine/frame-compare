@@ -252,7 +252,10 @@ def apply_tonemap(clip: Any, cfg: TMConfig, *, force: bool = False) -> TonemapRe
 
     props = _extract_frame_props(clip)
     resolved_cfg = cfg.resolved()
-    source_range = _normalise_color_range(props.get("_ColorRange") or props.get("ColorRange"))
+    source_range_value = props.get("_ColorRange")
+    if source_range_value is None:
+        source_range_value = props.get("ColorRange")
+    source_range = _normalise_color_range(source_range_value)
     target_range = _normalise_color_range(resolved_cfg.dst_range)
 
     try:

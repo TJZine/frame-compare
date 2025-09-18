@@ -207,3 +207,16 @@ def test_apply_tonemap_overlay_shims_range_for_text() -> None:
     assert clip.core.text.calls
     final_props = clip.std.calls[-1]
     assert final_props.get("_ColorRange") == 0
+
+
+def test_apply_tonemap_overlay_preserves_source_range_when_skipped() -> None:
+    clip = _RecordingClip({"_Transfer": 1, "_Primaries": 1, "_ColorRange": 0})
+    clip.core.text = _DummyText(clip)
+    cfg = TMConfig(overlay=True)
+    result = apply_tonemap(clip, cfg)
+    assert isinstance(result, TonemapResult)
+    overlay_calls = [call for call in clip.point_calls if "range" in call]
+    assert overlay_calls == [{"range": 1, "dither_type": "none"}, {"range": 0, "dither_type": "none"}]
+    assert clip.core.text.calls
+    assert clip.std.calls[-1].get("_ColorRange") == 0
+
