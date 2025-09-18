@@ -19,7 +19,7 @@ dist/
 build/
 
 # Ignore User Config
-config.toml.user
+config.toml
 # Ignore everything inside the folder
 comparison_videos/**
 # But keep a placeholder so the folder exists in git
