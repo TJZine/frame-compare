@@ -93,7 +93,7 @@ def test_sdr_pass_through():
         '_Matrix': 'bt709',
         '_Primaries': 'bt709',
         '_Transfer': 'bt1886',
-        '_ColorRange': 'limited',
+        '_ColorRange': 0,
     }
 
 
@@ -120,7 +120,7 @@ def test_hdr_triggers_tonemap():
         "_Matrix": "bt709",
         "_Primaries": "bt709",
         "_Transfer": "bt1886",
-        "_ColorRange": "limited",
+        "_ColorRange": 0,
     }
     assert result is clip
 

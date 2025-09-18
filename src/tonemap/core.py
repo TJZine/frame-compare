@@ -17,7 +17,7 @@ _SDR_PROPS = {
     "_Matrix": "bt709",
     "_Primaries": "bt709",
     "_Transfer": "bt1886",
-    "_ColorRange": "limited",
+    "_ColorRange": 0,
 }
 
 
