@@ -19,32 +19,6 @@ _INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 logger = logging.getLogger(__name__)
 
 
-
-def _debug_dump_range(label: str, clip, frame_idx: int) -> None:
-    if not logger.isEnabledFor(logging.DEBUG):
-        return
-    try:
-        frame = clip.get_frame(frame_idx)
-    except Exception as exc:  # pragma: no cover - diagnostic helper
-        logger.debug('[debug] Failed to read frame %s for %s: %s', frame_idx, label, exc)
-        return
-    props = getattr(frame, 'props', {})
-    fmt = getattr(frame, 'format', None)
-    fmt_name = getattr(fmt, 'name', 'unknown')
-    width = getattr(frame, 'width', 'unknown')
-    height = getattr(frame, 'height', 'unknown')
-    logger.debug(
-        '[debug] %s frame %s\n  _ColorRange=%s\n  format=%s\n  size=%sx%s',
-        label,
-        frame_idx,
-        props.get('_ColorRange'),
-        fmt_name,
-        width,
-        height,
-    )
-
-
-
 _DEBUG_PROP_KEYS = ("_Matrix", "_Transfer", "_Primaries", "_ColorRange")
 _COLOR_RANGE_LABELS = {
     0: "Full (0)",
@@ -231,6 +205,31 @@ def _apply_frame_info_overlay(core, clip, title: str, requested_frame: int | Non
     except Exception:  # pragma: no cover - best effort
         limited_clip = clip
     convert_back = None
+    set_frame_props = getattr(std_ns, "SetFrameProps", None)
+
+    if callable(point):
+        try:
+            limited_clip = point(clip, range=vs.RANGE_LIMITED, dither_type="none")
+            if callable(set_frame_props):
+                try:
+                    limited_clip = set_frame_props(limited_clip, _ColorRange=1)
+                except Exception:  # pragma: no cover - best effort
+                    logger.debug('Failed to tag limited range frame props for frame overlay', exc_info=True)
+
+            def _restore_full_range(node):
+                restored = point(node, range=vs.RANGE_FULL, dither_type="none")
+                if callable(set_frame_props):
+                    try:
+                        restored = set_frame_props(restored, _ColorRange=0)
+                    except Exception:  # pragma: no cover - best effort
+                        logger.debug('Failed to tag full range frame props after frame overlay', exc_info=True)
+                return restored
+
+            convert_back = _restore_full_range
+        except Exception:  # pragma: no cover - best effort
+            logger.debug('Failed to convert clip to limited range for frame overlay', exc_info=True)
+            limited_clip = clip
+            convert_back = None
 
     label = title.strip() if isinstance(title, str) else ''
     if not label:
@@ -563,11 +562,9 @@ def _save_frame_with_fpng(
     _debug_dump_range('pre_overlay', render_clip, frame_idx)
     if cfg.add_frame_info:
         render_clip = _apply_frame_info_overlay(core, render_clip, label, requested_frame, selection_label)
-        _debug_dump_range('post_overlay', render_clip, frame_idx)
         _record("post_frame_info", render_clip)
 
     render_clip = _ensure_rgb24(core, render_clip, frame_idx)
-    _debug_dump_range('render_clip', render_clip, frame_idx)
     _record("post_rgb24", render_clip)
 
     compression = _map_fpng_compression(cfg.compression_level)
@@ -575,9 +572,6 @@ def _save_frame_with_fpng(
         job = writer(render_clip, str(path), compression=compression, overwrite=True)
         job.get_frame(frame_idx)
     except Exception as exc:
-        _debug_dump_range('fpng_source', clip, frame_idx)
-        _debug_dump_range('fpng_work', work, frame_idx)
-        _debug_dump_range('fpng_render', render_clip, frame_idx)
         summary = ""
         if debug_enabled and debug_records:
             summary_parts = []
