@@ -2,11 +2,11 @@
 
 [analysis]
 # Frame selection knobs. The legacy quantile, motion, and random heuristics are all exposed here.
-frame_count_dark = 20
+frame_count_dark = 15
 frame_count_bright = 10
-frame_count_motion = 15
+frame_count_motion = 10
 user_frames = []
-random_frames = 15
+random_frames = 10
 save_frames_data = true
 downscale_height = 480
 step = 2
@@ -35,7 +35,7 @@ letterbox_pillarbox_aware = true
 
 [slowpics]
 # Auto-upload settings. Leave `auto_upload` off for local runs.
-auto_upload = false
+auto_upload = true
 collection_name = ""
 is_hentai = false
 is_public = true
@@ -57,9 +57,7 @@ input_dir = "comparison_videos"
 
 [runtime]
 ram_limit_mb = 8000
-vapoursynth_python_paths = [
-  "C:/Users/zinez/AppData/Local/Programs/Python/Python311/Lib/site-packages"
-]
+vapoursynth_python_paths = []
 
 
 [overrides]
