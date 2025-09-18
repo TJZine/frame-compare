@@ -376,6 +376,25 @@ def _extract_clip_fps(clip: object) -> Tuple[int, int]:
     return (24000, 1001)
 
 
+def _log_plan_trim(plan: _ClipPlan) -> None:
+    raw_label = plan.metadata.get("label") or plan.path.name
+    label = escape((raw_label or plan.path.name).strip())
+
+    if plan.trim_start:
+        if plan.trim_start > 0:
+            print(f"[cyan]{label}[/]: Trimmed to start at frame {plan.trim_start}")
+        else:
+            count = abs(int(plan.trim_start))
+            print(f"[cyan]{label}[/]: {count} frame(s) appended at start")
+
+    if plan.trim_end:
+        if plan.trim_end > 0:
+            print(f"[cyan]{label}[/]: Trimmed to end at frame {plan.trim_end}")
+        else:
+            count = abs(int(plan.trim_end))
+            print(f"[cyan]{label}[/]: Trimmed to end {count} frame(s) early")
+
+
 def _init_clips(plans: Sequence[_ClipPlan], runtime_cfg, cache_dir: Path | None) -> None:
     vs_core.set_ram_limit(runtime_cfg.ram_limit_mb)
 
@@ -386,6 +405,7 @@ def _init_clips(plans: Sequence[_ClipPlan], runtime_cfg, cache_dir: Path | None)
 
     if reference_index is not None:
         plan = plans[reference_index]
+        _log_plan_trim(plan)
         clip = vs_core.init_clip(
             str(plan.path),
             trim_start=plan.trim_start,
@@ -403,6 +423,7 @@ def _init_clips(plans: Sequence[_ClipPlan], runtime_cfg, cache_dir: Path | None)
         if fps_override is None and reference_fps is not None and idx != reference_index:
             fps_override = reference_fps
 
+        _log_plan_trim(plan)
         clip = vs_core.init_clip(
             str(plan.path),
             trim_start=plan.trim_start,
