@@ -1,6 +1,11 @@
-"""Configuration dataclasses for frame comparison tool."""
+"""Configuration dataclasses for the frame comparison tool."""
+
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Union
+
+from .tonemap.config import TMConfig
 
 
 @dataclass
@@ -47,16 +52,7 @@ class ScreenshotConfig:
     letterbox_pillarbox_aware: bool = True
 
 
-@dataclass
-class TonemapConfig:
-    """HDR → SDR tone mapping parameters passed to libplacebo."""
-
-    tone_mapping: str = "bt2390"
-    target_nits: float = 100.0
-    dest_primaries: str = "bt709"
-    dest_transfer: str = "bt1886"
-    dest_matrix: str = "bt709"
-    dest_range: str = "limited"
+TonemapConfig = TMConfig
 
 
 @dataclass
@@ -125,7 +121,7 @@ class AppConfig:
 
     analysis: AnalysisConfig
     screenshots: ScreenshotConfig
-    tonemap: TonemapConfig
+    tonemap: TMConfig
     slowpics: SlowpicsConfig
     tmdb: TMDBConfig
     naming: NamingConfig

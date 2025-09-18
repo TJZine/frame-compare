@@ -91,12 +91,29 @@ mod_crop = 2
 letterbox_pillarbox_aware = true
 
 [tonemap]
-tone_mapping = "bt2390"
-target_nits = 100.0
-dest_primaries = "bt709"
-dest_transfer = "bt1886"
-dest_matrix = "bt709"
-dest_range = "limited"
+preset = "reference"
+func = "bt2390"
+dpd = false
+dst_max = 100.0
+dst_min = 0.0
+gamut_mapping = "clip"
+smoothing_period = 3
+scene_threshold_low = 0.12
+scene_threshold_high = 0.32
+overlay = false
+verify = false
+verify_metric = "abs"
+verify_auto_search = true
+verify_search_max = 180
+verify_search_step = 12
+verify_start_frame = 0
+verify_luma_thresh = 0.45
+use_dovi = true
+always_try_placebo = false
+dst_primaries = "bt709"
+dst_transfer = "bt1886"
+dst_matrix = "bt709"
+dst_range = "limited"
 
 [slowpics]
 auto_upload = false
@@ -177,14 +194,34 @@ change_fps = {}
 | `letterbox_pillarbox_aware` | bool | true | No | Bias cropping toward letterbox/pillarbox bars when trimming.|
 
 #### `[tonemap]`
-| Name | Type | Default | Required? | Description |
-| --- | --- | --- | --- | --- |
-| `tone_mapping` | str | `"bt2390"` | No | Curve passed to `libplacebo.Tonemap` when `analysis.analyze_in_sdr=true`.|
-| `target_nits` | float | 100.0 | No | SDR target peak in nits; must be >0.|
-| `dest_primaries` | str | `"bt709"` | No | Destination primaries string fed to libplacebo.|
-| `dest_transfer` | str | `"bt1886"` | No | Destination transfer characteristic (gamma).|
-| `dest_matrix` | str | `"bt709"` | No | Destination matrix coefficients.|
-| `dest_range` | str | `"limited"` | No | Output range hint (`limited` or `full`).|
+
+Key options are summarised below (see `docs/tonemap.md` for the complete table):
+
+| Name | Type | Default | Description |
+| --- | --- | --- | --- |
+| `preset` | str | `"reference"` | Preset bundle controlling the curve and heuristics. |
+| `func` | str | `"bt2390"` | Tonemap curve passed to libplacebo. |
+| `dpd` | bool | `false` | Enable libplacebo dynamic peak detection. |
+| `dst_max` | float | `100.0` | SDR target peak in nits. |
+| `dst_min` | float | `0.0` | SDR floor in nits. |
+| `gamut_mapping` | str | `"clip"` | libplacebo gamut mapping mode. |
+| `overlay` | bool | `false` | Draw the diagnostic overlay with active parameters. |
+| `verify` | bool | `false` | Enable verification metrics (`abs`, `psnr`, `ssim`, `deltae`). |
+| `use_dovi` | bool | `true` | Forward Dolby Vision metadata when the source provides it. |
+| `always_try_placebo` | bool | `false` | Attempt libplacebo even if HDR heuristics are inconclusive. |
+
+```toml
+[tonemap]
+# Example: brighten SDR target and enable verification with SSIM
+preset = "custom"
+func = "hable"
+dst_max = 120.0
+verify = true
+verify_metric = "ssim"
+overlay = true
+```
+
+The CLI mirrors every field with `--tm-*` flags; for example `--tm-preset filmic --tm-overlay` overrides TOML settings for a single run.
 
 #### `[slowpics]`
 | Name | Type | Default | Required? | Description |

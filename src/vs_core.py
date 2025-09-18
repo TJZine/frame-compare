@@ -5,14 +5,21 @@
 import importlib
 import os
 import sys
+import logging
 from pathlib import Path
-from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Optional, Sequence, Tuple
+from .tonemap.config import TMConfig
+from .tonemap.core import apply_tonemap
+from .tonemap.verify import run_verification
+from .tonemap.exceptions import TonemapError
 
 _VS_MODULE_NAME = "vapoursynth"
 _ENV_VAR = "VAPOURSYNTH_PYTHONPATH"
 _EXTRA_SEARCH_PATHS: list[str] = []
 _vs_module: Any | None = None
+
+
+logger = logging.getLogger(__name__)
 
 
 class ClipInitError(RuntimeError):
@@ -23,31 +30,6 @@ class ClipProcessError(RuntimeError):
     """Raised when screenshot preparation fails."""
 
 
-_HDR_PRIMARIES_NAMES = {"bt2020", "bt.2020", "2020"}
-_HDR_PRIMARIES_CODES = {9}
-_HDR_TRANSFER_NAMES = {"st2084", "pq", "smpte2084", "hlg", "arib-b67"}
-_HDR_TRANSFER_CODES = {16, 18}
-
-_SDR_PROPS = {
-    "_Matrix": "bt709",
-    "_Primaries": "bt709",
-    "_Transfer": "bt1886",
-    "_ColorRange": "limited",
-}
-
-
-@dataclass(frozen=True)
-class _TonemapDefaults:
-    tone_mapping: str = "bt2390"
-    target_nits: float = 100.0
-    dest_primaries: str = "bt709"
-    dest_transfer: str = "bt1886"
-    dest_matrix: str = "bt709"
-    dest_range: str = "limited"
-
-
-
-_TONEMAP_DEFAULTS = _TonemapDefaults()
 
 
 def _normalise_search_path(path: str) -> str:
@@ -225,91 +207,72 @@ def set_ram_limit(limit_mb: int, *, core: Optional[Any] = None) -> None:
         raise ClipInitError("Failed to apply VapourSynth RAM limit") from exc
 
 
-def _normalise_property_value(value: Any) -> Any:
-    if isinstance(value, bytes):
-        value = value.decode("utf-8", "ignore")
-    if isinstance(value, str):
-        return value.strip().lower()
-    return value
+def _coerce_tonemap_config(cfg: Any) -> TMConfig:
+    if isinstance(cfg, TMConfig):
+        return cfg.resolved()
+    if cfg is None:
+        return TMConfig().resolved()
+    if isinstance(cfg, Mapping):
+        return TMConfig.from_mapping(cfg).resolved()
 
-
-def _value_matches(value: Any, names: set[str], codes: set[int]) -> bool:
-    if isinstance(value, int):
-        return value in codes
-    value = _normalise_property_value(value)
-    if isinstance(value, str):
-        return value in names
-    return False
-
-
-def _extract_frame_props(clip: Any) -> Mapping[str, Any]:
-    getter = getattr(clip, "get_frame_props", None)
-    if callable(getter):
-        props = getter()
-        if isinstance(props, Mapping):
-            return props
-    frame_props = getattr(clip, "frame_props", None)
-    if isinstance(frame_props, Mapping):
-        return frame_props
-    return {}
-
-
-def _props_signal_hdr(props: Mapping[str, Any]) -> bool:
-    primaries = props.get("_Primaries") or props.get("Primaries")
-    transfer = props.get("_Transfer") or props.get("Transfer")
-    if not _value_matches(primaries, _HDR_PRIMARIES_NAMES, _HDR_PRIMARIES_CODES):
-        return False
-    return _value_matches(transfer, _HDR_TRANSFER_NAMES, _HDR_TRANSFER_CODES)
-
-
-def _tonemap_defaults(cfg: Any) -> _TonemapDefaults:
-    base = _TONEMAP_DEFAULTS
-    return _TonemapDefaults(
-        tone_mapping=getattr(cfg, "tone_mapping", base.tone_mapping),
-        target_nits=getattr(cfg, "target_nits", base.target_nits),
-        dest_primaries=getattr(cfg, "dest_primaries", base.dest_primaries),
-        dest_transfer=getattr(cfg, "dest_transfer", base.dest_transfer),
-        dest_matrix=getattr(cfg, "dest_matrix", base.dest_matrix),
-        dest_range=getattr(cfg, "dest_range", base.dest_range),
-    )
-
-
-def _set_sdr_props(clip: Any) -> Any:
-    std = _ensure_std_namespace(clip, ClipProcessError("clip.std.SetFrameProps is unavailable"))
-    setter = getattr(std, "SetFrameProps", None)
-    if not callable(setter):  # pragma: no cover - defensive
-        raise ClipProcessError("clip.std.SetFrameProps is unavailable")
-    return setter(**_SDR_PROPS)
+    base = TMConfig()
+    overrides: dict[str, Any] = {}
+    attr_map = {
+        'func': 'func',
+        'tone_mapping': 'func',
+        'preset': 'preset',
+        'dpd': 'dpd',
+        'dst_max': 'dst_max',
+        'target_nits': 'dst_max',
+        'dst_min': 'dst_min',
+        'gamut_mapping': 'gamut_mapping',
+        'smoothing_period': 'smoothing_period',
+        'scene_threshold_low': 'scene_threshold_low',
+        'scene_threshold_high': 'scene_threshold_high',
+        'overlay': 'overlay',
+        'verify': 'verify',
+        'verify_metric': 'verify_metric',
+        'verify_frame': 'verify_frame',
+        'verify_auto_search': 'verify_auto_search',
+        'verify_search_max': 'verify_search_max',
+        'verify_search_step': 'verify_search_step',
+        'verify_start_frame': 'verify_start_frame',
+        'verify_luma_thresh': 'verify_luma_thresh',
+        'use_dovi': 'use_dovi',
+        'always_try_placebo': 'always_try_placebo',
+        'dest_primaries': 'dst_primaries',
+        'dst_primaries': 'dst_primaries',
+        'dest_transfer': 'dst_transfer',
+        'dst_transfer': 'dst_transfer',
+        'dest_matrix': 'dst_matrix',
+        'dst_matrix': 'dst_matrix',
+        'dest_range': 'dst_range',
+        'dst_range': 'dst_range',
+    }
+    for attr, canonical in attr_map.items():
+        if hasattr(cfg, attr):
+            overrides[canonical] = getattr(cfg, attr)
+    if not overrides:
+        return base.resolved()
+    return base.merged(**overrides).resolved()
 
 
 def process_clip_for_screenshot(clip: Any, file_name: str, cfg: Any) -> Any:
-    """Apply HDR→SDR processing to *clip* when necessary."""
+    """Apply tonemapping with the modern subsystem when required."""
 
-    props = _extract_frame_props(clip)
-    if not _props_signal_hdr(props):
-        return clip
-
-    core = getattr(clip, "core", None)
-    if core is None:
-        raise ClipProcessError("Clip has no associated VapourSynth core")
-
-    libplacebo = getattr(core, "libplacebo", None)
-    tonemap = getattr(libplacebo, "Tonemap", None) if libplacebo is not None else None
-    if not callable(tonemap):
-        raise ClipProcessError("libplacebo.Tonemap is unavailable")
-
-    defaults = _tonemap_defaults(cfg)
     try:
-        tonemapped = tonemap(
-            clip,
-            tone_mapping=defaults.tone_mapping,
-            target_nits=defaults.target_nits,
-            dest_primaries=defaults.dest_primaries,
-            dest_transfer=defaults.dest_transfer,
-            dest_matrix=defaults.dest_matrix,
-            dest_range=defaults.dest_range,
-        )
-    except Exception as exc:  # pragma: no cover - defensive
-        raise ClipProcessError(f"libplacebo tonemapping failed: {exc}") from exc
+        tm_cfg = _coerce_tonemap_config(cfg)
+    except Exception as exc:
+        raise ClipProcessError(f"Invalid tonemap configuration for {file_name}: {exc}") from exc
 
-    return _set_sdr_props(tonemapped)
+    try:
+        result = apply_tonemap(clip, tm_cfg)
+    except TonemapError as exc:
+        raise ClipProcessError(f"Tonemap application failed for {file_name}: {exc}") from exc
+
+    if tm_cfg.verify:
+        try:
+            run_verification(clip, result.clip, result.fallback_clip, tm_cfg)
+        except Exception as exc:
+            logger.debug("tonemap verification failed for %s: %s", file_name, exc)
+    return result.clip

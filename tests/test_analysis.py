@@ -261,8 +261,8 @@ def test_tonemap_config_invalidates_cache(monkeypatch, tmp_path):
         fps_den=1,
     )
 
-    tonemap_one = TonemapConfig(target_nits=120.0)
-    tonemap_two = TonemapConfig(target_nits=160.0)
+    tonemap_one = TonemapConfig(dst_max=120.0)
+    tonemap_two = TonemapConfig(dst_max=160.0)
 
     first = select_frames(
         clip,

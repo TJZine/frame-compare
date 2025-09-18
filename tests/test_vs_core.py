@@ -89,19 +89,33 @@ def test_sdr_pass_through():
     result = process_clip_for_screenshot(clip, "file.mkv", cfg=types.SimpleNamespace())
     assert result is clip
     assert clip.core.libplacebo.called_with is None
-    assert clip.std.set_props_kwargs is None
+    assert clip.std.set_props_kwargs == {
+        '_Matrix': 'bt709',
+        '_Primaries': 'bt709',
+        '_Transfer': 'bt1886',
+        '_ColorRange': 'limited',
+    }
 
 
 def test_hdr_triggers_tonemap():
     clip = _FakeClip(
         props={"_Primaries": "bt2020", "_Transfer": "st2084"}
     )
-    cfg = TonemapConfig(target_nits=120.0)
+    cfg = TonemapConfig(dst_max=120.0)
     result = process_clip_for_screenshot(clip, "file.mkv", cfg)
     assert clip.core.libplacebo.called_with is not None
     tonemap_clip, kwargs = clip.core.libplacebo.called_with
     assert tonemap_clip is clip
-    assert kwargs["target_nits"] == 120
+    assert kwargs["dst_max"] == 120.0
+    assert kwargs["tone_mapping"] == "bt2390"
+    assert kwargs["dynamic_peak_detection"] == 0
+    assert kwargs["gamut_mapping"] == "clip"
+    assert kwargs["scene_threshold_low"] == pytest.approx(0.12)
+    assert kwargs["scene_threshold_high"] == pytest.approx(0.32)
+    assert kwargs["dst_csp"] == "bt709"
+    assert kwargs["dst_prim"] == "bt709"
+    assert kwargs["dst_tf"] == "bt1886"
+    assert kwargs["use_dovi"] is True
     assert clip.std.set_props_kwargs == {
         "_Matrix": "bt709",
         "_Primaries": "bt709",

@@ -39,14 +39,33 @@ mod_crop = 2
 letterbox_pillarbox_aware = true
 
 [tonemap]
-# HDR → SDR conversion defaults applied when analysis.analyze_in_sdr is true.
-# These values map directly to libplacebo.Tonemap parameters.
-tone_mapping = "bt2390"
-target_nits = 100.0
-dest_primaries = "bt709"
-dest_transfer = "bt1886"
-dest_matrix = "bt709"
-dest_range = "limited"
+# HDR to SDR conversion defaults applied when analysis.analyze_in_sdr is true.
+# These values map directly to the TMConfig dataclass and libplacebo.Tonemap parameters.
+preset = "reference"
+func = "bt2390"
+dpd = false
+dst_max = 100.0
+dst_min = 0.0
+gamut_mapping = "clip"
+smoothing_period = 3
+scene_threshold_low = 0.12
+scene_threshold_high = 0.32
+overlay = false
+verify = false
+verify_metric = "abs"
+verify_frame = 0
+verify_auto_search = true
+verify_search_max = 180
+verify_search_step = 12
+verify_start_frame = 0
+verify_luma_thresh = 0.45
+use_dovi = true
+always_try_placebo = false
+dst_primaries = "bt709"
+dst_transfer = "bt1886"
+dst_matrix = "bt709"
+dst_range = "limited"
+
 
 [slowpics]
 # Auto-upload settings. Leave `auto_upload` off for local runs.

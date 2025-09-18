@@ -19,7 +19,21 @@ from .datatypes import (
     TMDBConfig,
     TonemapConfig,
 )
+from .tonemap.config import ALIAS_KEYS
+from .tonemap.exceptions import TonemapConfigError
 
+
+def _field_is_bool(field) -> bool:
+    field_type = field.type
+    if field_type is bool:
+        return True
+    if isinstance(field_type, str):
+        return field_type.lower() == 'bool'
+    origin = getattr(field_type, '__origin__', None)
+    if origin is bool:
+        return True
+    args = getattr(field_type, '__args__', ())
+    return args and all(arg in {bool, type(None)} for arg in args)
 
 class ConfigError(ValueError):
     """Raised when the configuration file is malformed or fails validation."""
@@ -44,8 +58,11 @@ def _coerce_bool(value: Any, dotted_key: str) -> bool:
 def _sanitize_section(raw: dict[str, Any], name: str, cls):
     if not isinstance(raw, dict):
         raise ConfigError(f"[{name}] must be a table")
+    if cls is TonemapConfig:
+        return _sanitize_tonemap_section(raw)
+
     cleaned: Dict[str, Any] = {}
-    bool_fields = {field.name for field in fields(cls) if field.type is bool}
+    bool_fields = {field.name for field in fields(cls) if _field_is_bool(field)}
     for key, value in raw.items():
         if key in bool_fields:
             cleaned[key] = _coerce_bool(value, f"{name}.{key}")
@@ -55,6 +72,23 @@ def _sanitize_section(raw: dict[str, Any], name: str, cls):
         return cls(**cleaned)
     except TypeError as exc:
         raise ConfigError(f"Invalid keys in [{name}]: {exc}") from exc
+
+
+def _sanitize_tonemap_section(raw: dict[str, Any]) -> TonemapConfig:
+    bool_fields = {"dpd", "overlay", "verify", "verify_auto_search", "use_dovi", "always_try_placebo"}
+    prepared: Dict[str, Any] = {}
+    for key, value in raw.items():
+        alias = ALIAS_KEYS.get(key.strip().lower().replace("-", "_"), key)
+        dotted = f"tonemap.{alias}"
+        if alias in bool_fields:
+            prepared[key] = _coerce_bool(value, dotted)
+        else:
+            prepared[key] = value
+    try:
+        cfg = TonemapConfig.from_mapping(prepared)
+    except TonemapConfigError as exc:
+        raise ConfigError(f"tonemap.{exc.field} {exc.problem}") from exc
+    return cfg
 
 
 def _validate_trim(mapping: Dict[str, Any], label: str) -> None:
@@ -101,6 +135,11 @@ def load_config(path: str) -> AppConfig:
         overrides=_sanitize_section(raw.get("overrides", {}), "overrides", OverridesConfig),
     )
 
+    try:
+        app.tonemap = app.tonemap.resolved()
+    except TonemapConfigError as exc:
+        raise ConfigError(f"tonemap.{exc.field} {exc.problem}") from exc
+
     if app.analysis.step < 1:
         raise ConfigError("analysis.step must be >= 1")
     if app.analysis.downscale_height < 64:
@@ -141,8 +180,8 @@ def load_config(path: str) -> AppConfig:
     if app.runtime.ram_limit_mb <= 0:
         raise ConfigError("runtime.ram_limit_mb must be > 0")
 
-    if app.tonemap.target_nits <= 0:
-        raise ConfigError("tonemap.target_nits must be > 0")
+    if app.tonemap.dst_max <= 0:
+        raise ConfigError("tonemap.dst_max must be > 0")
 
     _validate_trim(app.overrides.trim, "overrides.trim")
     _validate_trim(app.overrides.trim_end, "overrides.trim_end")

@@ -104,12 +104,20 @@ def _config_fingerprint(cfg: AnalysisConfig, tonemap_cfg: TonemapConfig | None =
     if cfg.analyze_in_sdr:
         tonemap = tonemap_cfg or TonemapConfig()
         relevant["tonemap"] = {
-            "tone_mapping": tonemap.tone_mapping,
-            "target_nits": tonemap.target_nits,
-            "dest_primaries": tonemap.dest_primaries,
-            "dest_transfer": tonemap.dest_transfer,
-            "dest_matrix": tonemap.dest_matrix,
-            "dest_range": tonemap.dest_range,
+            "func": tonemap.func,
+            "dpd": tonemap.dpd,
+            "dst_max": tonemap.dst_max,
+            "dst_min": tonemap.dst_min,
+            "gamut_mapping": tonemap.gamut_mapping,
+            "smoothing_period": tonemap.smoothing_period,
+            "scene_threshold_low": tonemap.scene_threshold_low,
+            "scene_threshold_high": tonemap.scene_threshold_high,
+            "dst_primaries": tonemap.dst_primaries,
+            "dst_transfer": tonemap.dst_transfer,
+            "dst_matrix": tonemap.dst_matrix,
+            "dst_range": tonemap.dst_range,
+            "use_dovi": tonemap.use_dovi,
+            "always_try_placebo": tonemap.always_try_placebo,
         }
     payload = json.dumps(relevant, sort_keys=True).encode("utf-8")
     return hashlib.sha1(payload).hexdigest()
@@ -231,12 +239,20 @@ def _selection_fingerprint(cfg: AnalysisConfig, tonemap_cfg: TonemapConfig | Non
     if cfg.analyze_in_sdr:
         tonemap = tonemap_cfg or TonemapConfig()
         relevant["tonemap"] = {
-            "tone_mapping": tonemap.tone_mapping,
-            "target_nits": tonemap.target_nits,
-            "dest_primaries": tonemap.dest_primaries,
-            "dest_transfer": tonemap.dest_transfer,
-            "dest_matrix": tonemap.dest_matrix,
-            "dest_range": tonemap.dest_range,
+            "func": tonemap.func,
+            "dpd": tonemap.dpd,
+            "dst_max": tonemap.dst_max,
+            "dst_min": tonemap.dst_min,
+            "gamut_mapping": tonemap.gamut_mapping,
+            "smoothing_period": tonemap.smoothing_period,
+            "scene_threshold_low": tonemap.scene_threshold_low,
+            "scene_threshold_high": tonemap.scene_threshold_high,
+            "dst_primaries": tonemap.dst_primaries,
+            "dst_transfer": tonemap.dst_transfer,
+            "dst_matrix": tonemap.dst_matrix,
+            "dst_range": tonemap.dst_range,
+            "use_dovi": tonemap.use_dovi,
+            "always_try_placebo": tonemap.always_try_placebo,
         }
     payload = json.dumps(relevant, sort_keys=True).encode("utf-8")
     return hashlib.sha1(payload).hexdigest()

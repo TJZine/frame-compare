@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from string import Template
 import time
-from typing import Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import click
 from rich import print
@@ -20,8 +20,10 @@ from rich.markup import escape
 from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 from natsort import os_sorted
 
+from src.cli.args import parse_tonemap_args
 from src.config_loader import ConfigError, load_config
 from src.datatypes import AppConfig
+from src.tonemap.exceptions import TonemapConfigError
 from src.utils import parse_filename_metadata
 from src import vs_core
 from src.analysis import (
@@ -547,13 +549,28 @@ def _print_summary(files: Sequence[Path], frames: Sequence[int], out_dir: Path, 
         print(f"  Slow.pics : {url}")
 
 
-def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
+def run_cli(
+    config_path: str,
+    input_dir: str | None = None,
+    *,
+    tonemap_overrides: dict[str, Any] | None = None,
+) -> RunResult:
     try:
         cfg: AppConfig = load_config(config_path)
     except ConfigError as exc:
         raise CLIAppError(
             f"Config error: {exc}", code=2, rich_message=f"[red]Config error:[/red] {exc}"
         ) from exc
+
+    if tonemap_overrides:
+        try:
+            cfg.tonemap = cfg.tonemap.merged(**tonemap_overrides).resolved()
+        except TonemapConfigError as exc:
+            raise CLIAppError(
+                f"Invalid tonemap override: {exc}",
+                code=2,
+                rich_message=f"[red]Tonemap override error:[/red] {exc}",
+            ) from exc
 
     if input_dir:
         cfg.paths.input_dir = input_dir
@@ -993,12 +1010,17 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
     return result
 
 
-@click.command()
+@click.command(context_settings={"ignore_unknown_options": True})
 @click.option("--config", "config_path", default="config.toml", show_default=True, help="Path to config.toml")
 @click.option("--input", "input_dir", default=None, help="Override [paths.input_dir] from config.toml")
-def main(config_path: str, input_dir: str | None) -> None:
+@click.argument("extra_args", nargs=-1, type=click.UNPROCESSED)
+def main(config_path: str, input_dir: str | None, extra_args: tuple[str, ...]) -> None:
+    overrides, leftovers = parse_tonemap_args(list(extra_args))
+    if leftovers:
+        raise click.UsageError(f"Unrecognized arguments: {' '.join(leftovers)}")
+
     try:
-        result = run_cli(config_path, input_dir)
+        result = run_cli(config_path, input_dir, tonemap_overrides=overrides or None)
     except CLIAppError as exc:
         print(exc.rich_message)
         raise click.exceptions.Exit(exc.code) from exc
