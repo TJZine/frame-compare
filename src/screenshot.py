@@ -46,10 +46,10 @@ def _ensure_rgb24(core, clip, frame_idx):
 
     try:
         converted = converted.std.SetFrameProps(
-            _Matrix="bt709",
-            _Primaries="bt709",
-            _Transfer="bt1886",
-            _ColorRange="limited",
+            _Matrix=1,
+            _Primaries=1,
+            _Transfer=1,
+            _ColorRange=0,
         )
     except Exception:  # pragma: no cover - best effort
         pass

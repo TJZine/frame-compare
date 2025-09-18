@@ -22,7 +22,7 @@ def test_is_hdr_detects_metadata_when_transfer_missing() -> None:
 
 
 def test_is_hdr_false_for_sdr() -> None:
-    props = {"_Primaries": "bt709", "_Transfer": "bt1886"}
+    props = {"_Primaries": 1, "_Transfer": 1}
     assert is_hdr(props) is False
 
 
@@ -105,7 +105,7 @@ def test_apply_tonemap_retries_with_hints() -> None:
     assert clip.core.libplacebo.calls[-1]["src_matrix"] == "bt2020nc"
     assert clip.core.libplacebo.calls[-1]["src_prim"] == "bt2020"
     assert clip.core.libplacebo.calls[-1]["src_tf"] == "st2084"
-    assert clip.std.last_props["_Primaries"] == "bt709"
+    assert clip.std.last_props["_Primaries"] == 1
 
 
 class _FallbackClip:
@@ -127,4 +127,4 @@ def test_apply_tonemap_uses_fallback_when_placebo_missing() -> None:
     result = apply_tonemap(clip, cfg, force=True)
     assert isinstance(result, TonemapResult)
     assert result.used_libplacebo is False
-    assert clip.std.last_props["_Transfer"] == "bt1886"
+    assert clip.std.last_props["_Transfer"] == 1

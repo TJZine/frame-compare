@@ -14,9 +14,9 @@ from .overlay import apply_overlay
 logger = logging.getLogger(__name__)
 
 _SDR_PROPS = {
-    "_Matrix": "bt709",
-    "_Primaries": "bt709",
-    "_Transfer": "bt1886",
+    "_Matrix": 1,
+    "_Primaries": 1,
+    "_Transfer": 1,
     "_ColorRange": 0,
 }
 

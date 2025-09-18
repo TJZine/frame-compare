@@ -84,15 +84,15 @@ class _BlankClip:
 
 def test_sdr_pass_through():
     clip = _FakeClip(
-        props={"_Primaries": "bt709", "_Transfer": "bt1886"}
+        props={"_Primaries": 1, "_Transfer": 1}
     )
     result = process_clip_for_screenshot(clip, "file.mkv", cfg=types.SimpleNamespace())
     assert result is clip
     assert clip.core.libplacebo.called_with is None
     assert clip.std.set_props_kwargs == {
-        '_Matrix': 'bt709',
-        '_Primaries': 'bt709',
-        '_Transfer': 'bt1886',
+        '_Matrix': 1,
+        '_Primaries': 1,
+        '_Transfer': 1,
         '_ColorRange': 0,
     }
 
@@ -117,9 +117,9 @@ def test_hdr_triggers_tonemap():
     assert kwargs["dst_tf"] == "bt1886"
     assert kwargs["use_dovi"] is True
     assert clip.std.set_props_kwargs == {
-        "_Matrix": "bt709",
-        "_Primaries": "bt709",
-        "_Transfer": "bt1886",
+        "_Matrix": 1,
+        "_Primaries": 1,
+        "_Transfer": 1,
         "_ColorRange": 0,
     }
     assert result is clip
