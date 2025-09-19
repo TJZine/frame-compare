@@ -123,6 +123,32 @@ def _summarize_debug_info(info: Dict[str, Any]) -> str:
     return ", ".join(parts) if parts else "no data"
 
 
+def _debug_dump_range(stage: str, clip: Any, frame_idx: int) -> None:
+    """Emit debug diagnostics for *clip* at *stage* when debug logging is enabled."""
+
+    if not logger.isEnabledFor(logging.DEBUG):
+        return
+
+    try:
+        info = _collect_clip_debug_info(clip, frame_idx)
+    except Exception as exc:  # pragma: no cover - diagnostics best effort
+        logger.debug(
+            "Failed to gather debug info for '%s' frame %d: %s",
+            stage,
+            frame_idx,
+            exc,
+        )
+        return
+
+    summary = _summarize_debug_info(info)
+    logger.debug(
+        "Clip debug for '%s' frame %d: %s",
+        stage,
+        frame_idx,
+        summary,
+    )
+
+
 def _ensure_rgb24(core: Any, clip: Any, frame_idx: int) -> Any:
     try:
         import vapoursynth as vs  # type: ignore
@@ -221,6 +247,12 @@ def _apply_frame_info_overlay(
         limited_clip = clip
     convert_back = None
     set_frame_props = getattr(std_ns, "SetFrameProps", None)
+    resize_ns = getattr(core, "resize", None)
+    point: Callable[..., Any] | None = None
+    if resize_ns is not None:
+        candidate = getattr(resize_ns, "Point", None)
+        if callable(candidate):
+            point = candidate
 
     if callable(point):
         try:

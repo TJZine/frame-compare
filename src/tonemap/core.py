@@ -394,5 +394,5 @@ def apply_tonemap(clip: Any, cfg: TMConfig, *, force: bool = False) -> TonemapRe
     output = _stamp_tonemap_metadata(output, resolved_cfg, backend=backend)
     if resolved_cfg.overlay:
         output = apply_overlay(output, resolved_cfg)
-    output = _set_sdr_props(output, color_range=target_range)
+    output = _set_sdr_props(output, color_range=target_range_value)
     return TonemapResult(output, fallback_clip, used_libplacebo, hdr_detected)
