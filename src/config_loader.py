@@ -10,13 +10,14 @@ import tomllib
 from .datatypes import (
     AppConfig,
     AnalysisConfig,
+    ColorConfig,
+    NamingConfig,
     ScreenshotConfig,
     SlowpicsConfig,
-    NamingConfig,
     PathsConfig,
     RuntimeConfig,
     OverridesConfig,
-    ColorConfig,
+    SourceConfig,
 )
 
 
@@ -97,6 +98,7 @@ def load_config(path: str) -> AppConfig:
         runtime=_sanitize_section(raw.get("runtime", {}), "runtime", RuntimeConfig),
         overrides=_sanitize_section(raw.get("overrides", {}), "overrides", OverridesConfig),
         color=_sanitize_section(raw.get("color", {}), "color", ColorConfig),
+        source=_sanitize_section(raw.get("source", {}), "source", SourceConfig),
     )
 
     if app.analysis.step < 1:
@@ -142,7 +144,13 @@ def load_config(path: str) -> AppConfig:
     if app.color.verify_max_seconds < 0:
         raise ConfigError("color.verify_max_seconds must be >= 0")
 
+    preferred = app.source.preferred.strip().lower()
+    if preferred not in {"lsmas", "ffms2"}:
+        raise ConfigError("source.preferred must be either 'lsmas' or 'ffms2'")
+    app.source.preferred = preferred
+
     _validate_trim(app.overrides.trim, "overrides.trim")
     _validate_trim(app.overrides.trim_end, "overrides.trim_end")
     _validate_change_fps(app.overrides.change_fps)
     return app
+
