@@ -92,6 +92,7 @@ class TMDBConfig:
 
     api_key: str = ""
     unattended: bool = True
+    confirm_matches: bool = False
     year_tolerance: int = 2
     enable_anime_parsing: bool = True
     cache_ttl_seconds: int = 86400

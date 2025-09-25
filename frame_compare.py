@@ -219,6 +219,35 @@ def _prompt_manual_tmdb(candidates: Sequence[TMDBCandidate]) -> tuple[str, str] 
             print(f"[red]Invalid TMDB identifier:[/red] {exc}")
 
 
+def _prompt_tmdb_confirmation(
+    resolution: TMDBResolution,
+) -> tuple[bool, tuple[str, str] | None]:
+    title = resolution.title or resolution.original_title or "(unknown title)"
+    year = resolution.year or "????"
+    category = resolution.category.lower()
+    link = f"https://www.themoviedb.org/{category}/{resolution.tmdb_id}"
+    print(
+        "[cyan]TMDB match found:[/cyan] "
+        f"{title} ({year}) -> [underline]{link}[/underline]"
+    )
+    while True:
+        response = click.prompt(
+            "Confirm TMDB match? [Y/n or enter movie/#####]",
+            default="y",
+            show_default=False,
+        ).strip()
+        if not response or response.lower() in {"y", "yes"}:
+            return True, None
+        if response.lower() in {"n", "no"}:
+            return False, None
+        try:
+            manual = parse_manual_id(response)
+        except TMDBResolutionError as exc:
+            print(f"[red]Invalid TMDB identifier:[/red] {exc}")
+        else:
+            return True, manual
+
+
 def _render_collection_name(template_text: str, context: Mapping[str, str]) -> str:
     if "${" not in template_text:
         return template_text
@@ -666,9 +695,21 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
             tmdb_error_message = str(exc)
         else:
             if tmdb_resolution is not None:
-                tmdb_category = tmdb_resolution.category
-                tmdb_id_value = tmdb_resolution.tmdb_id
-                tmdb_language = tmdb_resolution.original_language
+                if cfg.tmdb.confirm_matches and not cfg.tmdb.unattended:
+                    accepted, override = _prompt_tmdb_confirmation(tmdb_resolution)
+                    if override:
+                        manual_tmdb = override
+                        tmdb_resolution = None
+                    elif not accepted:
+                        tmdb_resolution = None
+                    else:
+                        tmdb_category = tmdb_resolution.category
+                        tmdb_id_value = tmdb_resolution.tmdb_id
+                        tmdb_language = tmdb_resolution.original_language
+                else:
+                    tmdb_category = tmdb_resolution.category
+                    tmdb_id_value = tmdb_resolution.tmdb_id
+                    tmdb_language = tmdb_resolution.original_language
 
     if manual_tmdb:
         tmdb_category, tmdb_id_value = manual_tmdb
