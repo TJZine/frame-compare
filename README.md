@@ -10,6 +10,8 @@ uv run python frame_compare.py --config config.toml --input comparison_videos
 ```
 You should see `Comparison ready` followed by the selected frames, output directory, and slow.pics URL (when enabled).
 
+> 💡 Planning to use VapourSynth locally? Install the optional extra with `uv sync --extra vapoursynth` before running the CLI.
+
 ## Features
 - Deterministic frame selection that combines quantile-based brightness picks, smoothed motion scoring, user pins, and seeded randomness, while caching metrics for reruns.
 - Configurable selection windows that respect per-clip trims, ignore/skip timing, and collapse to a safe fallback when sources disagree.
@@ -21,8 +23,8 @@ You should see `Comparison ready` followed by the selected frames, output direct
 ### Requirements
 - Python 3.13 (>=3.13,<3.14).
 - Runtime tools depending on your workflow:
-  - VapourSynth with the `lsmas` plugin and (optionally) `libplacebo` for HDR tonemapping.
-  - FFmpeg when `screenshots.use_ffmpeg=true` (the CLI checks for the executable).
+  - VapourSynth with the `lsmas` plugin and (optionally) `libplacebo` for HDR tonemapping. Install it via the optional extra (`uv sync --extra vapoursynth`) or follow the manual instructions below. When VapourSynth is unavailable the tool gracefully reports the missing dependency and you can enable the FFmpeg screenshot path instead.
+  - FFmpeg when `screenshots.use_ffmpeg=true` (the CLI checks for the executable). This is the supported fallback in cloud environments where VapourSynth is impractical.
   - `requests-toolbelt` is installed via `pyproject.toml` for slow.pics uploads; the code warns if it is missing.
   - Optional: `pyperclip` to copy the slow.pics URL to your clipboard.
 
@@ -32,8 +34,14 @@ uv sync
 ```
 This resolves the application dependencies listed in `pyproject.toml`. Add `--group dev` when you also want linting and test tools.
 
+Install VapourSynth support only when you need it:
+
+```bash
+uv sync --extra vapoursynth
+```
+
 ### Provision VapourSynth
-- **Inside the virtual environment**: install a wheel that matches your interpreter, e.g. `uv pip install VapourSynth`.
+- **Inside the virtual environment**: install the optional extra (`uv sync --extra vapoursynth`) or add the wheel manually, e.g. `uv pip install VapourSynth`.
 - **Using a system install**: install VapourSynth through your platform’s packages, then expose its Python modules by either
   - setting the `VAPOURSYNTH_PYTHONPATH` environment variable, or
   - listing search folders in `[runtime.vapoursynth_python_paths]` (they are prepended to `sys.path`).
