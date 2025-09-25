@@ -88,6 +88,8 @@ class _ClipPlan:
     clip: Optional[object] = None
     effective_fps: Optional[Tuple[int, int]] = None
     applied_fps: Optional[Tuple[int, int]] = None
+    has_trim_start_override: bool = False
+    has_trim_end_override: bool = False
 
 
 @dataclass
@@ -349,10 +351,12 @@ def _build_plans(files: Sequence[Path], metadata: Sequence[Dict[str, str]], cfg:
         trim_val = _match_override(idx, file, meta, trim_map)
         if trim_val is not None:
             plan.trim_start = int(trim_val)
+            plan.has_trim_start_override = True
 
         trim_end_val = _match_override(idx, file, meta, trim_end_map)
         if trim_end_val is not None:
             plan.trim_end = int(trim_end_val)
+            plan.has_trim_end_override = True
 
         fps_val = _match_override(idx, file, meta, fps_map)
         if isinstance(fps_val, str):
@@ -530,6 +534,32 @@ def _log_selection_windows(
         )
 
 
+def _print_trim_overrides(plans: Sequence[_ClipPlan]) -> None:
+    """Print the trim overrides sourced from the configuration."""
+
+    trimmed = [
+        plan
+        for plan in plans
+        if plan.has_trim_start_override or plan.has_trim_end_override
+    ]
+    if not trimmed:
+        return
+
+    print("[cyan]Trim overrides set in config:[/cyan]")
+    for plan in trimmed:
+        label = (plan.metadata.get("label") or plan.path.name).strip()
+        label_markup = escape(label)
+        filename_markup = escape(plan.path.name)
+        start_display = str(plan.trim_start) if plan.has_trim_start_override else "unchanged"
+        if plan.has_trim_end_override:
+            end_display = "None" if plan.trim_end is None else str(plan.trim_end)
+        else:
+            end_display = "unchanged"
+        print(
+            f"  - {label_markup} ({filename_markup}): start={start_display}, end={end_display}"
+        )
+
+
 def _print_summary(files: Sequence[Path], frames: Sequence[int], out_dir: Path, url: str | None) -> None:
     print("[green]Comparison ready[/green]")
     print(f"  Files     : {len(files)}")
@@ -704,6 +734,7 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
         print(f"  - {label} ({file.name})")
 
     plans = _build_plans(files, metadata, cfg)
+    _print_trim_overrides(plans)
     analyze_path = _pick_analyze_file(files, metadata, cfg.analysis.analyze_clip, cache_dir=root)
 
     try:

@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.11"
 
 [[package]]
@@ -156,6 +156,7 @@ dependencies = [
     { name = "requests" },
     { name = "requests-toolbelt" },
     { name = "rich" },
+    { name = "vapoursynth" },
 ]
 
 [package.dev-dependencies]
@@ -178,6 +179,7 @@ requires-dist = [
     { name = "requests" },
     { name = "requests-toolbelt" },
     { name = "rich" },
+    { name = "vapoursynth", specifier = ">=72" },
 ]
 
 [package.metadata.requires-dev]
@@ -503,4 +505,13 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/15/22/9ee70a2574a4f4599c47dd506532914ce044817c7752a79b6a51286319bc/urllib3-2.5.0.tar.gz", hash = "sha256:3fc47733c7e419d4bc3f6b3dc2b4f890bb743906a30d56ba4a5bfa4bbff92760", size = 393185, upload-time = "2025-06-18T14:07:41.644Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a7/c2/fe1e52489ae3122415c51f387e221dd0773709bad6c6cdaa599e8a2c5185/urllib3-2.5.0-py3-none-any.whl", hash = "sha256:e6b01673c0fa6a13e374b50871808eb3bf7046c4b125b216f6bf1cc604cff0dc", size = 129795, upload-time = "2025-06-18T14:07:40.39Z" },
+]
+
+[[package]]
+name = "vapoursynth"
+version = "72"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/79/a3/97c5c2e31d3177621d9276394d139a027453747e0d3559f289d0adf8273e/vapoursynth-72.zip", hash = "sha256:a4eeaf6464f9bb1b6e58b2f026757c8f1ca7c70697981c89f4dc82d8a62bfb54", size = 664309, upload-time = "2025-06-02T14:59:54.785Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/21/d0/c4e186a9de6bad57c68dc668de6b6949ec44f893e9271077778651c3dfc5/vapoursynth-72-cp312-abi3-win_amd64.whl", hash = "sha256:40fce5ffb48752af50658233787056ca04cd4de4b875ae65d2ea7d83b5d902a6", size = 1058613, upload-time = "2025-06-02T14:59:50.599Z" },
 ]

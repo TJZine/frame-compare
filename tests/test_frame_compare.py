@@ -143,6 +143,10 @@ def test_cli_applies_overrides_and_naming(tmp_path, monkeypatch, runner):
     assert "AAA Short" in result.output
     assert "BBB Short" in result.output
 
+    assert "Trim overrides set in config" in result.output
+    assert "AAA Short (AAA - 01.mkv): start=5, end=unchanged" in result.output
+    assert "BBB Short (BBB - 01.mkv): start=unchanged, end=-12" in result.output
+
     assert ram_limits == [cfg.runtime.ram_limit_mb]
 
     expected_cache_dir = str(tmp_path.resolve())

@@ -12,6 +12,7 @@ dependencies = [
     "anitopy",
     "guessit",
     "click>=8.1",
+    "vapoursynth>=72",
 ]
 
 [dependency-groups]
