@@ -829,17 +829,27 @@ async def resolve_tmdb(
 
         viable_candidates = [cand for cand in all_candidates if cand.score >= _SIMILARITY_THRESHOLD]
 
-        if not viable_candidates:
-            top = all_candidates[:3]
-            summary = ", ".join(
-                f"{cand.category.lower()}/{cand.tmdb_id} {cand.title} ({cand.year or '????'}) score={cand.score:0.3f}"
-                for cand in top
-            )
-            logger.warning("TMDB search failed for %s. Top candidates: %s", filename, summary)
-            return None
-
-        alias_targets = viable_candidates[:5]
         alias_scores: Dict[str, float] = {}
+
+        # Consider up to five of the strongest unique candidates for alias lookups. If no
+        # candidate cleared the similarity threshold we still want to probe the top results,
+        # otherwise entries like "The VVitch" never receive their alternative-title boost.
+        alias_targets: List[TMDBCandidate] = []
+        seen_ids: set[str] = set()
+
+        def _append_targets(pool: Iterable[TMDBCandidate]) -> None:
+            for candidate in pool:
+                if candidate.tmdb_id in seen_ids:
+                    continue
+                alias_targets.append(candidate)
+                seen_ids.add(candidate.tmdb_id)
+                if len(alias_targets) >= 5:
+                    break
+
+        _append_targets(viable_candidates)
+        if len(alias_targets) < 5:
+            _append_targets(all_candidates)
+
         needs_alias_lookup = len(alias_targets) > 1 or (
             alias_targets and alias_targets[0].score < _STRONG_MATCH_THRESHOLD
         )
@@ -869,6 +879,15 @@ async def resolve_tmdb(
 
             all_candidates.sort(key=lambda cand: cand.score, reverse=True)
             viable_candidates = [cand for cand in all_candidates if cand.score >= _SIMILARITY_THRESHOLD]
+
+        if not viable_candidates:
+            top = all_candidates[:3]
+            summary = ", ".join(
+                f"{cand.category.lower()}/{cand.tmdb_id} {cand.title} ({cand.year or '????'}) score={cand.score:0.3f}"
+                for cand in top
+            )
+            logger.warning("TMDB search failed for %s. Top candidates: %s", filename, summary)
+            return None
 
         best_candidate = viable_candidates[0]
         runner_up = viable_candidates[1] if len(viable_candidates) > 1 else None
