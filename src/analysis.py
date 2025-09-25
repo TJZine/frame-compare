@@ -8,6 +8,7 @@ import hashlib
 import json
 import logging
 import numbers
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
@@ -606,11 +607,36 @@ def select_frames(
             cached_categories = cached_metrics.selection_categories
         if progress is not None:
             progress(len(brightness))
+        logger.info(
+            "[ANALYSIS] using cached metrics (brightness=%d, motion=%d)",
+            len(brightness),
+            len(motion),
+        )
     else:
+        logger.info(
+            "[ANALYSIS] collecting metrics (indices=%d, step=%d, analyze_in_sdr=%s)",
+            len(indices),
+            step,
+            cfg.analyze_in_sdr,
+        )
+        start_metrics = time.perf_counter()
         try:
             brightness, motion = _collect_metrics_vapoursynth(analysis_clip, cfg, indices, progress)
-        except Exception:
+            logger.info(
+                "[ANALYSIS] metrics collected via VapourSynth in %.2fs (brightness=%d, motion=%d)",
+                time.perf_counter() - start_metrics,
+                len(brightness),
+                len(motion),
+            )
+        except Exception as exc:
+            logger.warning(
+                "[ANALYSIS] VapourSynth metrics collection failed (%s); falling back to synthetic metrics",
+                exc,
+            )
             brightness, motion = _generate_metrics_fallback(indices, cfg, progress)
+            logger.info(
+                "[ANALYSIS] synthetic metrics generated in %.2fs", time.perf_counter() - start_metrics
+            )
 
     if cached_selection is not None:
         frames_sorted = sorted(dict.fromkeys(int(frame) for frame in cached_selection))
