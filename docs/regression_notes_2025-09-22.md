@@ -44,3 +44,5 @@ Date: 2025-09-28
 - Core resolution now checks `vapoursynth.get_core()` as well as `vapoursynth.core`, so environments where the singleton is
   exposed only via the helper (observed with VapourSynth R72 + Python 3.13 + uv) no longer trip the "Clip has no
   associated VapourSynth core" error.
+- libplacebo detection now honours both `core.libplacebo` and `core.placebo`, matching the legacy script and fixing
+  VapourSynth R72 installs that expose the namespace without the `lib` prefix.

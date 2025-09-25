@@ -411,6 +411,9 @@ def _tonemap_with_retries(core: Any, rgb_clip: Any, *, tone_curve: str, target_n
     libplacebo = getattr(core, "libplacebo", None)
     tonemap = getattr(libplacebo, "Tonemap", None) if libplacebo is not None else None
     if not callable(tonemap):
+        libplacebo = getattr(core, "placebo", None)
+        tonemap = getattr(libplacebo, "Tonemap", None) if libplacebo is not None else None
+    if not callable(tonemap):
         raise ClipProcessError("libplacebo.Tonemap is unavailable")
 
     kwargs = dict(

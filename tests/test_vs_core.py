@@ -55,6 +55,7 @@ class _FakeClip:
         self.std = _FakeStd(self)
         self.core = types.SimpleNamespace()
         self.core.libplacebo = _FakeLibplacebo()
+        self.core.placebo = self.core.libplacebo
         resize_ns = types.SimpleNamespace()
 
         def _spline36(target_clip, **kwargs):
@@ -259,6 +260,41 @@ def test_resolve_core_uses_get_core(monkeypatch):
     resolved = vs_core._resolve_core(None)
 
     assert resolved is module_core
+
+
+def test_tonemap_uses_placebo_namespace(monkeypatch):
+    clip = _FakeClip(props={"_Primaries": 9, "_Transfer": 16})
+    tonemapped = _FakeClip()
+
+    # Remove libplacebo namespace to force placebo fallback
+    clip.core.libplacebo = None
+
+    capture = {}
+
+    def fake_tonemap(rgb_clip, **kwargs):
+        capture["rgb_clip"] = rgb_clip
+        return tonemapped
+
+    # monkeypatch placebo namespace to use fake tonemap
+    clip.core.placebo = types.SimpleNamespace(Tonemap=fake_tonemap)
+
+    color_cfg = ColorConfig(
+        enable_tonemap=True,
+        overlay_enabled=False,
+        verify_enabled=False,
+        preset="custom",
+    )
+
+    result = process_clip_for_screenshot(
+        clip,
+        "file.mkv",
+        color_cfg,
+        enable_overlay=False,
+        enable_verification=False,
+    )
+
+    assert result.clip is tonemapped
+    assert capture["rgb_clip"] is clip
 
 
 def test_init_clip_errors_raise():
