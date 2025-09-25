@@ -45,6 +45,42 @@ def test_plan_mod_crop_modulus():
     assert new_w > 0 and new_h > 0
 
 
+def test_plan_geometry_letterbox_alignment(tmp_path, monkeypatch):
+    clips = [FakeClip(3840, 2160), FakeClip(3840, 1800)]
+    cfg = ScreenshotConfig(directory_name="screens", add_frame_info=False)
+    color_cfg = ColorConfig()
+
+    captured: list[dict[str, object]] = []
+
+    def fake_writer(clip, frame_idx, crop, scaled, path, cfg, label, requested_frame, selection_label=None, **kwargs):
+        captured.append({"crop": crop, "scaled": scaled, "label": label})
+        path.write_text("data", encoding="utf-8")
+
+    monkeypatch.setattr(screenshot, "_save_frame_with_fpng", fake_writer)
+    monkeypatch.setattr(screenshot, "_save_frame_with_ffmpeg", lambda *args, **kwargs: None)
+
+    frames = [0]
+    files = ["clip_a.mkv", "clip_b.mkv"]
+    metadata = [{"label": "Clip A"}, {"label": "Clip B"}]
+
+    screenshot.generate_screenshots(
+        clips,
+        frames,
+        files,
+        metadata,
+        tmp_path,
+        cfg,
+        color_cfg,
+        trim_offsets=[0, 0],
+    )
+
+    assert len(captured) == 2
+    assert captured[0]["crop"] == (0, 180, 0, 180)
+    assert captured[0]["scaled"] == (3840, 1800)
+    assert captured[1]["crop"] == (0, 0, 0, 0)
+    assert captured[1]["scaled"] == (3840, 1800)
+
+
 def test_generate_screenshots_filenames(tmp_path, monkeypatch):
     clip = FakeClip(1280, 720)
     cfg = ScreenshotConfig(directory_name="screens")

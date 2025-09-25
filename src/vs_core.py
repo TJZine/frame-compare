@@ -672,18 +672,30 @@ _TONEMAP_PRESETS = {
 
 
 def _resolve_tonemap_settings(cfg: Any) -> tuple[str, str, float, int, float]:
-    preset = str(getattr(cfg, "preset", "") or "").lower()
-    base_curve = str(getattr(cfg, "tone_curve", "bt.2390") or "bt.2390")
-    base_nits = float(getattr(cfg, "target_nits", 100.0))
-    base_dpd = int(bool(getattr(cfg, "dynamic_peak_detection", True)))
+    preset = str(getattr(cfg, "preset", "") or "").strip().lower()
+    tone_curve = str(getattr(cfg, "tone_curve", "bt.2390") or "bt.2390")
+    target_nits = float(getattr(cfg, "target_nits", 100.0))
+    dpd_flag = bool(getattr(cfg, "dynamic_peak_detection", True))
     dst_min = float(getattr(cfg, "dst_min_nits", 0.1))
+
+    provided = getattr(cfg, "_provided_keys", None)
+
+    def _was_provided(field: str) -> bool:
+        if provided is None:
+            return True
+        return field in provided
+
     if preset and preset != "custom":
         preset_vals = _TONEMAP_PRESETS.get(preset)
         if preset_vals:
-            base_curve = preset_vals["tone_curve"]
-            base_nits = preset_vals["target_nits"]
-            base_dpd = int(bool(preset_vals["dynamic_peak_detection"]))
-    return preset or "custom", base_curve, base_nits, base_dpd, dst_min
+            if not _was_provided("tone_curve"):
+                tone_curve = str(preset_vals["tone_curve"])
+            if not _was_provided("target_nits"):
+                target_nits = float(preset_vals["target_nits"])
+            if not _was_provided("dynamic_peak_detection"):
+                dpd_flag = bool(preset_vals["dynamic_peak_detection"])
+
+    return preset or "custom", tone_curve, target_nits, int(dpd_flag), dst_min
 
 
 def _format_overlay_text(
@@ -700,7 +712,10 @@ def _format_overlay_text(
         "curve": tone_curve,
         "dynamic_peak_detection": dpd,
         "dpd": dpd,
+        "dynamic_peak_detection_bool": bool(dpd),
+        "dpd_bool": bool(dpd),
         "target_nits": int(target_nits) if abs(target_nits - round(target_nits)) < 1e-6 else target_nits,
+        "target_nits_float": target_nits,
         "preset": preset,
         "reason": reason or "",
     }

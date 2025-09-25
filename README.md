@@ -102,6 +102,14 @@ open_in_browser = true
 create_url_shortcut = true
 delete_screen_dir_after_upload = true
 
+[tmdb]
+api_key = ""
+unattended = true
+year_tolerance = 2
+enable_anime_parsing = true
+cache_ttl_seconds = 86400
+category_preference = ""
+
 [naming]
 always_full_filename = true
 prefer_guessit = true
@@ -196,6 +204,16 @@ See `docs/hdr_tonemap_overview.md` for a walkthrough of the log messages, preset
 | `create_url_shortcut` | bool | true | No | Save a `.url` shortcut next to screenshots.|
 | `delete_screen_dir_after_upload` | bool | true | No | Delete rendered screenshots after a successful upload.|
 
+#### `[tmdb]`
+| Name | Type | Default | Required? | Description |
+| --- | --- | --- | --- | --- |
+| `api_key` | str | `""` | No | Enable TMDB matching by providing your API key.|
+| `unattended` | bool | true | No | Automatically select the best TMDB match; disable to allow manual overrides when ambiguous.|
+| `year_tolerance` | int | 2 | No | Acceptable difference between parsed year and TMDB results; must be ≥0.|
+| `enable_anime_parsing` | bool | true | No | Use Anitopy-derived titles when searching for anime releases.|
+| `cache_ttl_seconds` | int | 86400 | No | Cache TMDB responses in-memory for this many seconds; must be ≥0.|
+| `category_preference` | str | `""` | No | Optional default category when external IDs resolve to both movie and TV (set `MOVIE` or `TV`).|
+
 #### `[naming]`
 | Name | Type | Default | Required? | Description |
 | --- | --- | --- | --- | --- |
@@ -219,6 +237,20 @@ See `docs/hdr_tonemap_overview.md` for a walkthrough of the log messages, preset
 | `trim` | dict[str,int] | `{}` | No | Trim leading frames per clip; negative values prepend blanks to preserve indexing.|
 | `trim_end` | dict[str,int] | `{}` | No | Trim trailing frames; accepts negative indexes as Python slicing does.|
 | `change_fps` | dict[str, list[int] or "set"] | `{}` | No | Either `[num, den]` to apply `AssumeFPS`, or `"set"` to mark the clip as the reference FPS for others.|
+
+## TMDB auto-discovery
+Enabling `[tmdb].api_key` activates an asynchronous resolver that translates filenames into TMDB metadata before screenshots are rendered. The CLI analyses the first detected source to gather title/year hints (via GuessIt/Anitopy), then resolves `(category, tmdbId, original language)` once per run. Successful matches populate:
+
+- `cfg.slowpics.tmdb_id` when it is empty so the slow.pics upload automatically links to TMDB, and
+- the templating context for `[slowpics].collection_name`, exposing `${Title}`, `${OriginalTitle}`, `${Year}`, `${TMDBId}`, `${TMDBCategory}`, `${OriginalLanguage}`, `${Filename}`, `${FileName}`, and `${Label}`.
+
+Resolution follows a deterministic pipeline:
+
+1. If the filename or metadata exposes external IDs, `find/{imdb|tvdb}_id` is queried first, honouring `[tmdb].category_preference` when both movie and TV hits are returned.
+2. Otherwise, the resolver issues `search/movie` or `search/tv` calls with progressively broader queries derived from the cleaned title. Heuristics include year windows within `[tmdb].year_tolerance`, roman-numeral conversion, subtitle/colon trimming, reduced word sets, automatic movie↔TV switching, and, when `[tmdb].enable_anime_parsing=true`, romaji titles via Anitopy.
+3. Every response is scored by similarity, release year proximity, and light popularity boosts. Strong matches are selected immediately; otherwise the highest scoring candidate wins with logging that notes the heuristic (e.g. “roman-numeral”). Ambiguity only surfaces when `[tmdb].unattended=false`, in which case the CLI prompts for a manual identifier such as `movie/603`.
+
+All HTTP requests share an in-memory cache governed by `[tmdb].cache_ttl_seconds` and automatically apply exponential backoff on rate limits or transient failures. Setting `[tmdb].api_key` is mandatory; when omitted the resolver is skipped and slow.pics falls back to whatever `tmdb_id` you manually provided in the config.
 
 ## CLI usage
 ```
