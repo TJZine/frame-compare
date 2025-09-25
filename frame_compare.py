@@ -568,6 +568,7 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
                 progress=progress_callback,
                 frame_window=frame_window,
                 return_metadata=True,
+                color_cfg=cfg.color,
             )
         except TypeError as exc:
             if "return_metadata" not in str(exc):
@@ -580,6 +581,7 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
                 cache_info=cache_info,
                 progress=progress_callback,
                 frame_window=frame_window,
+                color_cfg=cfg.color,
             )
         if isinstance(result, tuple):
             return result
@@ -687,6 +689,7 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
                     [plan.metadata for plan in plans],
                     out_dir,
                     cfg.screenshots,
+                    cfg.color,
                     trim_offsets=[plan.trim_start for plan in plans],
                     progress_callback=advance_render,
                 )
@@ -705,6 +708,7 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
                 [plan.metadata for plan in plans],
                 out_dir,
                 cfg.screenshots,
+                cfg.color,
                 trim_offsets=[plan.trim_start for plan in plans],
                 frame_labels=frame_categories,
             )
@@ -823,7 +827,5 @@ def main(config_path: str, input_dir: str | None) -> None:
 
 if __name__ == "__main__":
     main()
-
-
 
 

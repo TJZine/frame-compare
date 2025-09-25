@@ -9,7 +9,7 @@ from src.analysis import (
     dedupe,
     select_frames,
 )
-from src.datatypes import AnalysisConfig
+from src.datatypes import AnalysisConfig, ColorConfig
 
 
 class FakeClip:
@@ -68,9 +68,9 @@ def test_select_frames_deterministic(monkeypatch):
 
     calls = []
 
-    def fake_process(target_clip, file_name, cfg):
+    def fake_process(target_clip, file_name, color_cfg, **kwargs):
         calls.append(file_name)
-        return target_clip
+        return types.SimpleNamespace(clip=target_clip, overlay_text=None, verification=None)
 
     monkeypatch.setattr(
         "src.analysis.vs_core.process_clip_for_screenshot",
@@ -90,8 +90,9 @@ def test_select_frames_deterministic(monkeypatch):
     )
 
     files = ["a.mkv", "b.mkv"]
-    first = select_frames(clip, cfg, files, file_under_analysis="a.mkv")
-    second = select_frames(clip, cfg, files, file_under_analysis="a.mkv")
+    color_cfg = ColorConfig()
+    first = select_frames(clip, cfg, files, file_under_analysis="a.mkv", color_cfg=color_cfg)
+    second = select_frames(clip, cfg, files, file_under_analysis="a.mkv", color_cfg=color_cfg)
 
     assert first == second
     assert sorted(first) == first
@@ -107,7 +108,7 @@ def test_user_and_random_frames(monkeypatch):
 
     monkeypatch.setattr(
         "src.analysis.vs_core.process_clip_for_screenshot",
-        lambda clip, file_name, cfg: clip,
+        lambda clip, file_name, color_cfg, **kwargs: types.SimpleNamespace(clip=clip, overlay_text=None, verification=None),
     )
 
     cfg = AnalysisConfig(
@@ -121,7 +122,8 @@ def test_user_and_random_frames(monkeypatch):
         analyze_in_sdr=False,
     )
 
-    frames = select_frames(clip, cfg, files=["x.mkv"], file_under_analysis="x.mkv")
+    color_cfg = ColorConfig()
+    frames = select_frames(clip, cfg, files=["x.mkv"], file_under_analysis="x.mkv", color_cfg=color_cfg)
     assert frames == sorted(frames)
     for user_frame in cfg.user_frames:
         assert user_frame in frames
@@ -138,7 +140,7 @@ def test_select_frames_respects_window(monkeypatch, caplog):
 
     monkeypatch.setattr(
         "src.analysis.vs_core.process_clip_for_screenshot",
-        lambda clip, file_name, cfg: clip,
+        lambda clip, file_name, color_cfg, **kwargs: types.SimpleNamespace(clip=clip, overlay_text=None, verification=None),
     )
 
     cfg = AnalysisConfig(
@@ -152,12 +154,14 @@ def test_select_frames_respects_window(monkeypatch, caplog):
     )
 
     caplog.set_level("WARNING")
+    color_cfg = ColorConfig()
     frames = select_frames(
         clip,
         cfg,
         files=["clip.mkv"],
         file_under_analysis="clip.mkv",
         frame_window=(50, 150),
+        color_cfg=color_cfg,
     )
 
     assert frames
@@ -177,7 +181,7 @@ def test_select_frames_uses_cache(monkeypatch, tmp_path):
 
     monkeypatch.setattr(
         "src.analysis.vs_core.process_clip_for_screenshot",
-        lambda clip, file_name, cfg: clip,
+        lambda clip, file_name, color_cfg, **kwargs: types.SimpleNamespace(clip=clip, overlay_text=None, verification=None),
     )
 
     calls = {"count": 0}
@@ -210,12 +214,13 @@ def test_select_frames_uses_cache(monkeypatch, tmp_path):
         fps_den=1,
     )
 
-    frames_first = select_frames(clip, cfg, ["a.mkv"], "a.mkv", cache_info=cache_info)
+    color_cfg = ColorConfig()
+    frames_first = select_frames(clip, cfg, ["a.mkv"], "a.mkv", cache_info=cache_info, color_cfg=color_cfg)
     assert cache_info.path.exists()
     assert calls["count"] == 1
 
     calls["count"] = 0
-    frames_second = select_frames(clip, cfg, ["a.mkv"], "a.mkv", cache_info=cache_info)
+    frames_second = select_frames(clip, cfg, ["a.mkv"], "a.mkv", cache_info=cache_info, color_cfg=color_cfg)
     assert calls["count"] == 0
     assert frames_first == frames_second
 
@@ -235,7 +240,7 @@ def test_motion_quarter_gap(monkeypatch):
     monkeypatch.setattr("src.analysis._collect_metrics_vapoursynth", fake_collect)
     monkeypatch.setattr(
         "src.analysis.vs_core.process_clip_for_screenshot",
-        lambda clip, file_name, cfg: clip,
+        lambda clip, file_name, color_cfg, **kwargs: types.SimpleNamespace(clip=clip, overlay_text=None, verification=None),
     )
 
     cfg = AnalysisConfig(
@@ -250,7 +255,8 @@ def test_motion_quarter_gap(monkeypatch):
         step=1,
     )
 
-    frames = select_frames(clip, cfg, files=["file.mkv"], file_under_analysis="file.mkv")
+    color_cfg = ColorConfig()
+    frames = select_frames(clip, cfg, files=["file.mkv"], file_under_analysis="file.mkv", color_cfg=color_cfg)
     assert len(frames) == 4
     diffs = [b - a for a, b in zip(frames, frames[1:])]
     assert all(diff >= 48 for diff in diffs)

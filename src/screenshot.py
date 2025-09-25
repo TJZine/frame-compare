@@ -9,9 +9,12 @@ import subprocess
 import re
 from functools import partial
 from pathlib import Path
-from typing import Callable, List, Mapping, Sequence, Tuple
+from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
-from .datatypes import ScreenshotConfig
+from .datatypes import ColorConfig, ScreenshotConfig
+from . import vs_core
+
+_INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 _INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -116,6 +119,44 @@ def _apply_frame_info_overlay(core, clip, title: str, requested_frame: int | Non
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug('Applying frame overlay failed: %s', exc)
         return clip
+
+
+def _apply_overlay_text(
+    core,
+    clip,
+    text: Optional[str],
+    *,
+    strict: bool,
+    state: Dict[str, str],
+    file_label: str,
+) -> object:
+    if not text:
+        return clip
+    status = state.get("overlay_status")
+    if status == "error":
+        return clip
+    text_ns = getattr(core, "text", None)
+    draw = getattr(text_ns, "Text", None) if text_ns is not None else None
+    if not callable(draw):
+        message = f"Overlay filter unavailable for {file_label}"
+        logger.error('[OVERLAY] %s', message)
+        state["overlay_status"] = "error"
+        if strict:
+            raise ScreenshotWriterError(message)
+        return clip
+    try:
+        result = draw(clip, text, alignment=9)
+    except Exception as exc:  # pragma: no cover - defensive
+        message = f"Overlay failed for {file_label}: {exc}"
+        logger.error('[OVERLAY] %s', message)
+        state["overlay_status"] = "error"
+        if strict:
+            raise ScreenshotWriterError(message) from exc
+        return clip
+    if status != "ok":
+        logger.info('[OVERLAY] %s applied', file_label)
+        state["overlay_status"] = "ok"
+    return result
 
 
 class ScreenshotError(RuntimeError):
@@ -287,6 +328,10 @@ def _save_frame_with_fpng(
     label: str,
     requested_frame: int,
     selection_label: str | None = None,
+    *,
+    overlay_text: Optional[str] = None,
+    overlay_state: Optional[Dict[str, str]] = None,
+    strict_overlay: bool = False,
 ) -> None:
     try:
         import vapoursynth as vs  # type: ignore
@@ -323,6 +368,16 @@ def _save_frame_with_fpng(
     if cfg.add_frame_info:
         render_clip = _apply_frame_info_overlay(core, render_clip, label, requested_frame, selection_label)
 
+    overlay_state = overlay_state or {}
+    render_clip = _apply_overlay_text(
+        core,
+        render_clip,
+        overlay_text,
+        strict=strict_overlay,
+        state=overlay_state,
+        file_label=label,
+    )
+
     render_clip = _ensure_rgb24(core, render_clip, frame_idx)
 
     compression = _map_fpng_compression(cfg.compression_level)
@@ -337,6 +392,19 @@ def _map_ffmpeg_compression(level: int) -> int:
     """Map config compression level to ffmpeg's PNG compression scale."""
 
     return _map_png_compression_level(level)
+
+
+def _escape_drawtext(text: str) -> str:
+    return (
+        text.replace("\\", "\\\\")
+        .replace(":", "\\:")
+        .replace("=", "\\=")
+        .replace(",", "\\,")
+        .replace("[", "\\[")
+        .replace("]", "\\]")
+        .replace("'", "\\'")
+        .replace("\n", "\\\n")
+    )
 
 
 def _resolve_source_frame_index(frame_idx: int, trim_start: int) -> int | None:
@@ -360,6 +428,8 @@ def _save_frame_with_ffmpeg(
     width: int,
     height: int,
     selection_label: str | None,
+    *,
+    overlay_text: Optional[str] = None,
 ) -> None:
     if shutil.which("ffmpeg") is None:
         raise ScreenshotWriterError("FFmpeg executable not found in PATH")
@@ -389,6 +459,12 @@ def _save_frame_with_ffmpeg(
             "boxborderw=6:x=10:y=10"
         ).format(text=text)
         filters.append(drawtext)
+    if overlay_text:
+        overlay_cmd = (
+            "drawtext=text={text}:fontcolor=white:box=1:boxcolor=black@0.6:"
+            "boxborderw=6:x=w-tw-10:y=10"
+        ).format(text=_escape_drawtext(overlay_text))
+        filters.append(overlay_cmd)
 
     filter_chain = ",".join(filters)
     cmd = [
@@ -427,6 +503,7 @@ def generate_screenshots(
     metadata: Sequence[Mapping[str, str]],
     out_dir: Path,
     cfg: ScreenshotConfig,
+    color_cfg: ColorConfig,
     *,
     trim_offsets: Sequence[int] | None = None,
     progress_callback: Callable[[int], None] | None = None,
@@ -449,10 +526,33 @@ def generate_screenshots(
     out_dir.mkdir(parents=True, exist_ok=True)
     created: List[str] = []
 
-    geometry = _plan_geometry(clips, cfg)
+    processed_results: List[vs_core.ClipProcessResult] = []
+    overlay_states: List[Dict[str, str]] = []
 
-    for clip_index, (clip, file_path, meta, plan, trim_start) in enumerate(
-        zip(clips, files, metadata, geometry, trim_offsets)
+    for clip, file_path in zip(clips, files):
+        result = vs_core.process_clip_for_screenshot(
+            clip,
+            file_path,
+            color_cfg,
+            enable_overlay=True,
+            enable_verification=True,
+            logger_override=logger,
+        )
+        processed_results.append(result)
+        overlay_states.append({})
+        if result.verification is not None:
+            logger.info(
+                "[VERIFY] %s frame=%d avg=%.4f max=%.4f",
+                file_path,
+                result.verification.frame,
+                result.verification.average,
+                result.verification.maximum,
+            )
+
+    geometry = _plan_geometry([result.clip for result in processed_results], cfg)
+
+    for clip_index, (result, file_path, meta, plan, trim_start) in enumerate(
+        zip(processed_results, files, metadata, geometry, trim_offsets)
     ):
         if frame_labels:
             logger.debug('frame_labels keys: %s', list(frame_labels.keys()))
@@ -463,17 +563,20 @@ def generate_screenshots(
         trim_start = int(trim_start)
         raw_label, safe_label = _derive_labels(file_path, meta)
 
+        overlay_state = overlay_states[clip_index]
+        overlay_text = result.overlay_text
+
         for frame in frames:
             frame_idx = int(frame)
             selection_label = frame_labels.get(frame_idx) if frame_labels else None
             if selection_label is not None:
                 logger.debug('Selection label for frame %s: %s', frame_idx, selection_label)
-            actual_idx, was_clamped = _clamp_frame_index(clip, frame_idx)
+            actual_idx, was_clamped = _clamp_frame_index(result.clip, frame_idx)
             if was_clamped:
                 logger.debug(
                     "Frame %s exceeds available frames (%s) in %s; using %s",
                     frame_idx,
-                    getattr(clip, 'num_frames', 'unknown'),
+                    getattr(result.clip, 'num_frames', 'unknown'),
                     file_path,
                     actual_idx,
                 )
@@ -490,6 +593,9 @@ def generate_screenshots(
                         file_path,
                     )
                 if use_ffmpeg:
+                    if overlay_text and overlay_state.get("overlay_status") != "ok":
+                        logger.info("[OVERLAY] %s applied (ffmpeg)", file_path)
+                        overlay_state["overlay_status"] = "ok"
                     _save_frame_with_ffmpeg(
                         file_path,
                         resolved_frame,
@@ -500,9 +606,23 @@ def generate_screenshots(
                         width,
                         height,
                         selection_label,
+                        overlay_text=overlay_text,
                     )
                 else:
-                    _save_frame_with_fpng(clip, actual_idx, crop, scaled, target_path, cfg, raw_label, frame_idx, selection_label)
+                    _save_frame_with_fpng(
+                        result.clip,
+                        actual_idx,
+                        crop,
+                        scaled,
+                        target_path,
+                        cfg,
+                        raw_label,
+                        frame_idx,
+                        selection_label,
+                        overlay_text=overlay_text,
+                        overlay_state=overlay_state,
+                        strict_overlay=bool(getattr(color_cfg, "strict", False)),
+                    )
             except ScreenshotWriterError:
                 raise
             except Exception as exc:

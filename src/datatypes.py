@@ -1,6 +1,6 @@
 """Configuration dataclasses for frame comparison tool."""
 from dataclasses import dataclass, field
-from typing import Dict, List, Union
+from typing import Dict, List, Optional, Union
 
 
 @dataclass
@@ -45,6 +45,28 @@ class ScreenshotConfig:
     single_res: int = 0
     mod_crop: int = 2
     letterbox_pillarbox_aware: bool = True
+
+
+@dataclass
+class ColorConfig:
+    """HDR tonemapping, overlay, and verification controls."""
+
+    enable_tonemap: bool = True
+    preset: str = "reference"
+    tone_curve: str = "bt.2390"
+    dynamic_peak_detection: bool = True
+    target_nits: float = 100.0
+    dst_min_nits: float = 0.1
+    overlay_enabled: bool = True
+    overlay_text_template: str = "TM:{tone_curve} dpd={dynamic_peak_detection} dst={target_nits}nits"
+    verify_enabled: bool = True
+    verify_frame: Optional[int] = None
+    verify_auto: bool = True
+    verify_start_seconds: float = 10.0
+    verify_step_seconds: float = 10.0
+    verify_max_seconds: float = 90.0
+    verify_luma_threshold: float = 0.10
+    strict: bool = False
 
 
 @dataclass
@@ -106,3 +128,4 @@ class AppConfig:
     paths: PathsConfig
     runtime: RuntimeConfig
     overrides: OverridesConfig
+    color: ColorConfig

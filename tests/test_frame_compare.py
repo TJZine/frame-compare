@@ -8,6 +8,7 @@ import frame_compare
 from src.datatypes import (
     AnalysisConfig,
     AppConfig,
+    ColorConfig,
     NamingConfig,
     OverridesConfig,
     PathsConfig,
@@ -32,6 +33,7 @@ def _make_config(input_dir: Path) -> AppConfig:
             user_frames=[],
         ),
         screenshots=ScreenshotConfig(directory_name="screens", add_frame_info=False),
+        color=ColorConfig(),
         slowpics=SlowpicsConfig(auto_upload=False),
         naming=NamingConfig(always_full_filename=False, prefer_guessit=False),
         paths=PathsConfig(input_dir=str(input_dir)),
@@ -95,6 +97,7 @@ def test_cli_applies_overrides_and_naming(tmp_path, monkeypatch, runner):
         *,
         frame_window=None,
         return_metadata=False,
+        color_cfg=None,
     ):
         cache_infos.append(cache_info)
         assert frame_window is not None
@@ -105,7 +108,7 @@ def test_cli_applies_overrides_and_naming(tmp_path, monkeypatch, runner):
 
     generated_metadata = []
 
-    def fake_generate(clips, frames, files, metadata, out_dir, cfg_screens, **kwargs):
+    def fake_generate(clips, frames, files, metadata, out_dir, cfg_screens, color_cfg, **kwargs):
         generated_metadata.append(metadata)
         assert kwargs.get("trim_offsets") == [5, 0]
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -144,6 +147,7 @@ def test_label_dedupe_preserves_short_labels(tmp_path, monkeypatch, runner):
     cfg = AppConfig(
         analysis=AnalysisConfig(frame_count_dark=0, frame_count_bright=0, frame_count_motion=0, random_frames=0),
         screenshots=ScreenshotConfig(directory_name="screens", add_frame_info=False),
+        color=ColorConfig(),
         slowpics=SlowpicsConfig(auto_upload=False),
         naming=NamingConfig(always_full_filename=False, prefer_guessit=False),
         paths=PathsConfig(input_dir=str(tmp_path)),
@@ -166,12 +170,12 @@ def test_label_dedupe_preserves_short_labels(tmp_path, monkeypatch, runner):
     monkeypatch.setattr(
         frame_compare,
         "select_frames",
-        lambda clip, cfg, files, file_under_analysis, cache_info=None, progress=None, *, frame_window=None, return_metadata=False: [42],
+        lambda clip, cfg, files, file_under_analysis, cache_info=None, progress=None, *, frame_window=None, return_metadata=False, color_cfg=None: [42],
     )
 
     captured = []
 
-    def fake_generate(clips, frames, files, metadata, out_dir, cfg_screens, **kwargs):
+    def fake_generate(clips, frames, files, metadata, out_dir, cfg_screens, color_cfg, **kwargs):
         captured.append([meta["label"] for meta in metadata])
         out_dir.mkdir(parents=True, exist_ok=True)
         return [str(out_dir / "shot.png")]
@@ -215,6 +219,7 @@ def test_cli_reuses_frame_cache(tmp_path, monkeypatch, runner):
         *,
         frame_window=None,
         return_metadata=False,
+        color_cfg=None,
     ):
         call_state["calls"] += 1
         assert cache_info is not None
@@ -227,7 +232,7 @@ def test_cli_reuses_frame_cache(tmp_path, monkeypatch, runner):
 
     monkeypatch.setattr(frame_compare, "select_frames", fake_select)
 
-    def fake_generate(clips, frames, files, metadata, out_dir, cfg_screens, **kwargs):
+    def fake_generate(clips, frames, files, metadata, out_dir, cfg_screens, color_cfg, **kwargs):
         out_dir.mkdir(parents=True, exist_ok=True)
         for index in range(len(clips)):
             (out_dir / f"shot_{index}.png").write_text("data", encoding="utf-8")
@@ -254,6 +259,7 @@ def test_cli_input_override_and_cleanup(tmp_path, monkeypatch, runner):
     cfg = AppConfig(
         analysis=AnalysisConfig(frame_count_dark=0, frame_count_bright=0, frame_count_motion=0, random_frames=0),
         screenshots=ScreenshotConfig(directory_name="screens", add_frame_info=False),
+        color=ColorConfig(),
         slowpics=SlowpicsConfig(auto_upload=True, delete_screen_dir_after_upload=True, open_in_browser=False, create_url_shortcut=False),
         naming=NamingConfig(always_full_filename=True, prefer_guessit=False),
         paths=PathsConfig(input_dir=str(default_dir)),
@@ -271,10 +277,10 @@ def test_cli_input_override_and_cleanup(tmp_path, monkeypatch, runner):
     monkeypatch.setattr(
         frame_compare,
         "select_frames",
-        lambda clip, cfg, files, file_under_analysis, cache_info=None, progress=None, *, frame_window=None, return_metadata=False: [7],
+        lambda clip, cfg, files, file_under_analysis, cache_info=None, progress=None, *, frame_window=None, return_metadata=False, color_cfg=None: [7],
     )
 
-    def fake_generate(clips, frames, files, metadata, out_dir, cfg_screens, **kwargs):
+    def fake_generate(clips, frames, files, metadata, out_dir, cfg_screens, color_cfg, **kwargs):
         out_dir.mkdir(parents=True, exist_ok=True)
         path = out_dir / "image.png"
         path.write_text("img", encoding="utf-8")

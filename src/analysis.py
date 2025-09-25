@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
-from .datatypes import AnalysisConfig
+from .datatypes import AnalysisConfig, ColorConfig
 from . import vs_core
 
 
@@ -491,6 +491,7 @@ def select_frames(
     *,
     frame_window: tuple[int, int] | None = None,
     return_metadata: bool = False,
+    color_cfg: Optional[ColorConfig] = None,
 ) -> List[int] | Tuple[List[int], Dict[int, str]]:
     """Select frame indices for comparison using quantiles and motion heuristics."""
 
@@ -549,7 +550,17 @@ def select_frames(
 
     analysis_clip = clip
     if cfg.analyze_in_sdr:
-        analysis_clip = vs_core.process_clip_for_screenshot(clip, file_under_analysis, cfg)
+        if color_cfg is None:
+            raise ValueError("color_cfg must be provided when analyze_in_sdr is enabled")
+        result = vs_core.process_clip_for_screenshot(
+            clip,
+            file_under_analysis,
+            color_cfg,
+            enable_overlay=False,
+            enable_verification=False,
+            logger_override=logger,
+        )
+        analysis_clip = result.clip
 
     step = max(1, int(cfg.step))
     indices = list(range(window_start, window_end, step))

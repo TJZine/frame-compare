@@ -24,6 +24,11 @@ def test_load_defaults(tmp_path: Path) -> None:
     assert app.analysis.ignore_lead_seconds == 0.0
     assert app.analysis.ignore_trail_seconds == 0.0
     assert app.analysis.min_window_seconds == 5.0
+    assert app.color.enable_tonemap is True
+    assert app.color.preset == "reference"
+    assert app.color.target_nits == 100.0
+    assert app.color.overlay_enabled is True
+    assert app.color.verify_enabled is True
 
 
 @pytest.mark.parametrize(
@@ -34,6 +39,9 @@ def test_load_defaults(tmp_path: Path) -> None:
         ("[analysis]\nignore_lead_seconds = -1\n", "analysis.ignore_lead_seconds"),
         ("[analysis]\nignore_trail_seconds = -2\n", "analysis.ignore_trail_seconds"),
         ("[analysis]\nmin_window_seconds = -0.5\n", "analysis.min_window_seconds"),
+        ("[color]\nverify_luma_threshold = 1.5\n", "color.verify_luma_threshold"),
+        ("[color]\nverify_step_seconds = 0\n", "color.verify_step_seconds"),
+        ("[color]\ntarget_nits = -10\n", "color.target_nits"),
     ],
 )
 def test_validation_errors(tmp_path: Path, toml_snippet: str, message: str) -> None:
@@ -67,6 +75,12 @@ always_full_filename = false
 
 [paths]
 input_dir = "D:/comparisons"
+
+[color]
+target_nits = 120.0
+tone_curve = "mobius"
+verify_enabled = false
+overlay_enabled = false
         """.strip(),
         encoding="utf-8",
     )
@@ -81,3 +95,7 @@ input_dir = "D:/comparisons"
     assert app.slowpics.remove_after_days == 14
     assert app.naming.always_full_filename is False
     assert app.paths.input_dir == "D:/comparisons"
+    assert app.color.target_nits == 120.0
+    assert app.color.tone_curve == "mobius"
+    assert app.color.verify_enabled is False
+    assert app.color.overlay_enabled is False

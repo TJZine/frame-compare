@@ -16,6 +16,7 @@ from .datatypes import (
     PathsConfig,
     RuntimeConfig,
     OverridesConfig,
+    ColorConfig,
 )
 
 
@@ -95,6 +96,7 @@ def load_config(path: str) -> AppConfig:
         paths=_sanitize_section(raw.get("paths", {}), "paths", PathsConfig),
         runtime=_sanitize_section(raw.get("runtime", {}), "runtime", RuntimeConfig),
         overrides=_sanitize_section(raw.get("overrides", {}), "overrides", OverridesConfig),
+        color=_sanitize_section(raw.get("color", {}), "color", ColorConfig),
     )
 
     if app.analysis.step < 1:
@@ -126,6 +128,19 @@ def load_config(path: str) -> AppConfig:
 
     if app.runtime.ram_limit_mb <= 0:
         raise ConfigError("runtime.ram_limit_mb must be > 0")
+
+    if app.color.target_nits <= 0:
+        raise ConfigError("color.target_nits must be > 0")
+    if app.color.dst_min_nits < 0:
+        raise ConfigError("color.dst_min_nits must be >= 0")
+    if app.color.verify_luma_threshold < 0 or app.color.verify_luma_threshold > 1:
+        raise ConfigError("color.verify_luma_threshold must be between 0 and 1")
+    if app.color.verify_start_seconds < 0:
+        raise ConfigError("color.verify_start_seconds must be >= 0")
+    if app.color.verify_step_seconds <= 0:
+        raise ConfigError("color.verify_step_seconds must be > 0")
+    if app.color.verify_max_seconds < 0:
+        raise ConfigError("color.verify_max_seconds must be >= 0")
 
     _validate_trim(app.overrides.trim, "overrides.trim")
     _validate_trim(app.overrides.trim_end, "overrides.trim_end")

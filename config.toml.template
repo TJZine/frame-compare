@@ -38,6 +38,26 @@ single_res = 0
 mod_crop = 2
 letterbox_pillarbox_aware = true
 
+[color]
+# HDR → SDR pipeline controls. Presets: reference (bt.2390/100nits/dpd=1),
+# contrast (mobius/120nits/dpd=0), filmic (hable/100nits/dpd=1), or custom values below.
+enable_tonemap = true
+preset = "reference"
+tone_curve = "bt.2390"
+dynamic_peak_detection = true
+target_nits = 100.0
+dst_min_nits = 0.1
+overlay_enabled = true
+overlay_text_template = "TM:{tone_curve} dpd={dynamic_peak_detection} dst={target_nits}nits"
+verify_enabled = true
+# verify_frame = 4123  # Uncomment to force a specific frame index for verification
+verify_auto = true
+verify_start_seconds = 10.0
+verify_step_seconds = 10.0
+verify_max_seconds = 90.0
+verify_luma_threshold = 0.10
+strict = false
+
 [slowpics]
 # Auto-upload settings. Leave `auto_upload` off for local runs.
 auto_upload = true

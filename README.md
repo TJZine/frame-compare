@@ -160,6 +160,28 @@ change_fps = {}
 | `mod_crop` | int | 2 | No | Crop to maintain dimensions divisible by this modulus; must be ≥0.|
 | `letterbox_pillarbox_aware` | bool | true | No | Bias cropping toward letterbox/pillarbox bars when trimming.|
 
+#### `[color]`
+| Name | Type | Default | Required? | Description |
+| --- | --- | --- | --- | --- |
+| `enable_tonemap` | bool | true | No | Toggle HDR→SDR processing. When false the SDR pipeline runs and logs a `[TM BYPASS]` reason.|
+| `preset` | str | `"reference"` | No | High-level preset for tone mapping: `reference`, `contrast`, `filmic`, or `custom`. Presets set `tone_curve`, `target_nits`, and `dynamic_peak_detection`.|
+| `tone_curve` | str | `"bt.2390"` | No | Tone-curve passed to `libplacebo.Tonemap` when `preset="custom"`. Accepts `bt.2390`, `mobius`, or `hable`.|
+| `dynamic_peak_detection` | bool | true | No | Toggles libplacebo's DPD smoothing (1 = on).|
+| `target_nits` | float | 100.0 | No | SDR peak nits (`dst_max`). Must be >0.|
+| `dst_min_nits` | float | 0.1 | No | Minimum nits for libplacebo (`dst_min`). Must be ≥0.|
+| `overlay_enabled` | bool | true | No | Draw an SDR metadata overlay (top-right). If true, failures log `[OVERLAY]` and obey `strict`.|
+| `overlay_text_template` | str | `"TM:{tone_curve} dpd={dynamic_peak_detection} dst={target_nits}nits"` | No | Template for the overlay text. Placeholders: `{tone_curve}`, `{dpd}`, `{dynamic_peak_detection}`, `{target_nits}`, `{preset}`, `{reason}`.|
+| `verify_enabled` | bool | true | No | Compute Δ vs naive SDR and log `[VERIFY] frame=… avg=… max=…`.|
+| `verify_frame` | int? | null | No | Force a specific verification frame index.|
+| `verify_auto` | bool | true | No | Enable the auto-search described in `docs/hdr_tonemap_overview.md`.|
+| `verify_start_seconds` | float | 10.0 | No | Skip the first N seconds before sampling frames.|
+| `verify_step_seconds` | float | 10.0 | No | Sampling stride (seconds) when auto-picking verification frames. Must be >0.|
+| `verify_max_seconds` | float | 90.0 | No | Stop searching after this many seconds (clamped by clip length).|
+| `verify_luma_threshold` | float | 0.10 | No | Minimum average luma (0–1) for verification frame candidates.|
+| `strict` | bool | false | No | Escalate overlay/verification failures to hard errors instead of logging them.|
+
+See `docs/hdr_tonemap_overview.md` for a walkthrough of the log messages, presets, and verification heuristics.
+
 #### `[slowpics]`
 | Name | Type | Default | Required? | Description |
 | --- | --- | --- | --- | --- |
