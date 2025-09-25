@@ -438,6 +438,7 @@ def test_cli_tmdb_resolution_populates_slowpics(tmp_path, monkeypatch):
     assert upload_tmdb_id == "12345"
     assert "Resolved Title (2023)" in upload_collection
     assert result.config.slowpics.tmdb_id == "12345"
+    assert result.config.slowpics.tmdb_category == "MOVIE"
     assert result.config.slowpics.collection_name == "Resolved Title (2023) [MOVIE]"
 
 
@@ -498,6 +499,7 @@ def test_cli_tmdb_resolution_sets_default_collection_name(tmp_path, monkeypatch)
 
     assert result.config.slowpics.collection_name.startswith("Resolved Title (2023)")
     assert result.config.slowpics.tmdb_id == "12345"
+    assert result.config.slowpics.tmdb_category == "MOVIE"
 
 
 def test_cli_tmdb_manual_override(tmp_path, monkeypatch):
@@ -554,4 +556,5 @@ def test_cli_tmdb_manual_override(tmp_path, monkeypatch):
     result = frame_compare.run_cli("dummy", None)
 
     assert result.config.slowpics.tmdb_id == "9999"
+    assert result.config.slowpics.tmdb_category == "TV"
     assert result.config.slowpics.collection_name == "Label for Alpha.mkv"

@@ -94,6 +94,24 @@ def _build_legacy_headers(session: requests.Session, encoder: "MultipartEncoder"
     }
 
 
+def _format_tmdb_identifier(tmdb_id: str, category: str | None) -> str:
+    """Normalize TMDB identifiers for slow.pics legacy form fields."""
+
+    text = (tmdb_id or "").strip()
+    if not text:
+        return ""
+
+    lowered = text.lower()
+    if lowered.startswith(("movie/", "tv/", "movie_", "tv_")):
+        return text
+
+    normalized_category = (category or "").strip().lower()
+    if normalized_category in {"movie", "tv"}:
+        return f"{normalized_category}/{text}"
+
+    return text
+
+
 def _prepare_legacy_plan(image_files: List[str]) -> tuple[List[int], List[List[tuple[str, Path]]]]:
     groups: dict[int, List[tuple[str, Path]]] = defaultdict(list)
     for file_path in image_files:
@@ -151,7 +169,7 @@ def _upload_comparison_legacy(
         "public": str(bool(cfg.is_public)).lower(),
     }
     if cfg.tmdb_id:
-        fields["tmdbId"] = str(cfg.tmdb_id)
+        fields["tmdbId"] = _format_tmdb_identifier(cfg.tmdb_id, getattr(cfg, "tmdb_category", ""))
     if cfg.remove_after_days:
         fields["removeAfter"] = str(int(cfg.remove_after_days))
 
