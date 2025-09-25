@@ -19,7 +19,7 @@ You should see `Comparison ready` followed by the selected frames, output direct
 
 ## Installation
 ### Requirements
-- Python 3.11 (>=3.11,<3.12).
+- Python 3.13 (>=3.13,<3.14).
 - Runtime tools depending on your workflow:
   - VapourSynth with the `lsmas` plugin and (optionally) `libplacebo` for HDR tonemapping.
   - FFmpeg when `screenshots.use_ffmpeg=true` (the CLI checks for the executable).
