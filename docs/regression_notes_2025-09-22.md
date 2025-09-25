@@ -25,3 +25,15 @@ Date: 2025-09-22
   mismatches.
 
 Use this note when validating regressions against upstream pipelines.
+
+---
+
+Date: 2025-09-28
+
+## Additional parity fixes
+- `_ensure_rgb24` now stamps RGB targets with integer props (`_Matrix=0`, `_Primaries=1`, `_Transfer=1`, `_ColorRange=0`) so
+  exported PNGs advertise full-range BT.709/BT.1886, matching the legacy writer and avoiding MaskedMerge range clashes.
+- Overlay rendering uses `std.CopyFrameProps` after `text.Text` to preserve `_Tonemapped` and other metadata, ensuring any
+  downstream merge/analysis sees the same per-frame flags the tonemap stage emitted.
+- Tonemap processing now falls back to the global `vs.core` object when a clip lacks a `.core` attribute (common on
+  Windows community builds and Python 3.13), preventing "Clip has no associated VapourSynth core" during frame selection.

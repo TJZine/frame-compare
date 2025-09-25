@@ -549,7 +549,10 @@ def process_clip_for_screenshot(
 
     log = logger_override or logger
     source_props = _snapshot_frame_props(clip)
+    vs_module = _get_vapoursynth_module()
     core = getattr(clip, "core", None)
+    if core is None:
+        core = getattr(vs_module, "core", None)
     if core is None:
         raise ClipProcessError("Clip has no associated VapourSynth core")
 
@@ -563,7 +566,6 @@ def process_clip_for_screenshot(
     is_hdr_source = _props_signal_hdr(source_props)
     is_hdr = tonemap_enabled and is_hdr_source
 
-    vs_module = _get_vapoursynth_module()
     range_limited = getattr(vs_module, "RANGE_LIMITED", 1)
     range_full = getattr(vs_module, "RANGE_FULL", 0)
 

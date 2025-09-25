@@ -15,6 +15,7 @@ reference.
   representative frame picked after the opening 10 seconds. Logs surface the selected frame and Δ statistics before any
   screenshots are emitted.
 - The overlay (top-right) reports the effective curve/DPD/target nits and propagates to FFmpeg renders via `drawtext`.
+  Frame props are copied back after the text pass so `_Tonemapped` (and other metadata) survive downstream.
   When `color.strict=true`, overlay or verification failures abort with `ScreenshotWriterError` / `ClipProcessError`.
 
 ## Presets & configuration

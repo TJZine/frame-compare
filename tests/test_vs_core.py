@@ -110,7 +110,26 @@ class _BlankClip:
 
 @pytest.fixture(autouse=True)
 def _stub_vs_module(monkeypatch):
-    fake_vs = types.SimpleNamespace(RGB48=object(), RGB24=object(), RANGE_LIMITED=1, RANGE_FULL=0)
+    module_core = types.SimpleNamespace()
+
+    def _spline36(target_clip, **kwargs):
+        target_clip.last_resize_kwargs = kwargs
+        return target_clip
+
+    def _point(target_clip, **kwargs):
+        target_clip.last_point_kwargs = kwargs
+        return target_clip
+
+    module_core.resize = types.SimpleNamespace(Spline36=_spline36, Point=_point)
+    module_core.libplacebo = _FakeLibplacebo()
+
+    fake_vs = types.SimpleNamespace(
+        RGB48=object(),
+        RGB24=object(),
+        RANGE_LIMITED=1,
+        RANGE_FULL=0,
+        core=module_core,
+    )
     monkeypatch.setattr(vs_core, "_get_vapoursynth_module", lambda: fake_vs)
 
 
@@ -171,6 +190,32 @@ def test_hdr_triggers_tonemap(monkeypatch):
     assert result.clip is tonemapped
     assert result.tonemap.applied is True
     assert result.tonemap.tone_curve == "mobius"
+
+
+def test_process_clip_uses_global_core_when_clip_missing_core(monkeypatch):
+    clip = _FakeClip(props={"_Primaries": 9, "_Transfer": 16})
+    clip.core = None
+
+    tonemapped = _FakeClip()
+
+    monkeypatch.setattr(vs_core, "_tonemap_with_retries", lambda *args, **kwargs: tonemapped)
+
+    color_cfg = ColorConfig(
+        enable_tonemap=True,
+        overlay_enabled=False,
+        verify_enabled=False,
+        preset="custom",
+    )
+
+    result = process_clip_for_screenshot(
+        clip,
+        "file.mkv",
+        color_cfg,
+        enable_overlay=False,
+        enable_verification=False,
+    )
+
+    assert result.clip is tonemapped
 
 
 def test_init_clip_errors_raise():
