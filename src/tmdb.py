@@ -305,6 +305,49 @@ class _QueryPlan:
     reason: str
 
 
+def _expand_title_variants(title: str) -> List[str]:
+    """Return additional search titles derived from *title*."""
+
+    variants: List[str] = []
+    seen: set[str] = set()
+
+    def add(text: str) -> None:
+        normalized = text.strip()
+        if not normalized:
+            return
+        key = normalized.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        variants.append(normalized)
+
+    add(title)
+
+    simplified = _WHITESPACE_RE.sub(" ", title).strip()
+    if simplified and simplified != title:
+        add(simplified)
+
+    no_paren = re.sub(r"\([^)]*\)", "", simplified).strip()
+    if no_paren and no_paren != simplified:
+        add(no_paren)
+
+    for delimiter in (":", " - ", " – ", " — "):
+        if delimiter in simplified:
+            head, tail = simplified.split(delimiter, 1)
+            add(head)
+            add(tail)
+
+    if re.search(r"(?i)\baka\b", simplified):
+        parts = re.split(r"(?i)\baka\b", simplified)
+        for part in parts:
+            add(part)
+
+    if re.search(r"(?i)vvitch", simplified):
+        add(re.sub(r"(?i)vvitch", "witch", simplified))
+
+    return variants
+
+
 def _build_query_plans(
     base_title: str,
     *,
@@ -331,10 +374,11 @@ def _build_query_plans(
         if preferred and preferred not in categories:
             categories.append(preferred)
 
-    all_titles = [base_title]
-    for alt in anime_titles:
-        if alt and alt not in all_titles:
-            all_titles.append(alt)
+    all_titles: List[str] = []
+    for raw in [base_title, *anime_titles]:
+        for expanded in _expand_title_variants(raw):
+            if expanded not in all_titles:
+                all_titles.append(expanded)
 
     for category in categories:
         for title in all_titles:

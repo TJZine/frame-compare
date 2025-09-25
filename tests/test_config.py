@@ -32,6 +32,7 @@ def test_load_defaults(tmp_path: Path) -> None:
     assert app.source.preferred == "lsmas"
     assert app.tmdb.api_key == ""
     assert app.tmdb.unattended is True
+    assert app.tmdb.confirm_matches is False
     assert app.tmdb.year_tolerance == 2
     assert app.tmdb.enable_anime_parsing is True
     assert app.tmdb.cache_ttl_seconds == 86400

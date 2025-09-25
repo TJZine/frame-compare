@@ -194,6 +194,58 @@ def test_anime_parsing_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "Chainsaw Man" in queries
 
 
+def test_vvitch_alternative_title(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        tmdb_module,
+        "_call_guessit",
+        lambda filename: {"title": "The VVitch: A New-England Folktale", "year": 2015},
+    )
+
+    queries: List[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        query = request.url.params.get("query", "")
+        if query:
+            queries.append(query)
+        if request.url.path.endswith("/search/movie"):
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "id": 526667,
+                            "title": "The Witch",
+                            "original_title": "The Witch",
+                            "release_date": "2015-01-23",
+                            "popularity": 35.0,
+                        },
+                        {
+                            "id": 310131,
+                            "title": "The Witch",
+                            "original_title": "The VVitch: A New-England Folktale",
+                            "release_date": "2016-02-19",
+                            "popularity": 30.0,
+                        },
+                    ]
+                },
+            )
+        return httpx.Response(200, json={"results": []})
+
+    transport = httpx.MockTransport(handler)
+    cfg = TMDBConfig(api_key="token")
+    result = asyncio.run(
+        resolve_tmdb(
+            "The.VVitch.A.New-England.Folktale.2015.2160p.mkv",
+            config=cfg,
+            http_transport=transport,
+        )
+    )
+
+    assert result is not None
+    assert result.tmdb_id == "310131"
+    assert any("vvitch" in query.lower() for query in queries)
+
+
 def test_tmdb_backoff_and_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     sleep_calls: List[float] = []
 

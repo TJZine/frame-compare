@@ -231,6 +231,7 @@ See `docs/hdr_tonemap_overview.md` for a walkthrough of the log messages, preset
 | --- | --- | --- | --- | --- |
 | `api_key` | str | `""` | No | Enable TMDB matching by providing your API key.|
 | `unattended` | bool | true | No | Automatically select the best TMDB match; disable to allow manual overrides when ambiguous.|
+| `confirm_matches` | bool | false | No | When enabled (and `unattended=false`), show the matched TMDB link and require confirmation or a manual id before continuing.|
 | `year_tolerance` | int | 2 | No | Acceptable difference between parsed year and TMDB results; must be ≥0.|
 | `enable_anime_parsing` | bool | true | No | Use Anitopy-derived titles when searching for anime releases.|
 | `cache_ttl_seconds` | int | 86400 | No | Cache TMDB responses in-memory for this many seconds; must be ≥0.|
@@ -274,7 +275,7 @@ Enabling `[tmdb].api_key` activates an asynchronous resolver that translates fil
 Resolution follows a deterministic pipeline:
 
 1. If the filename or metadata exposes external IDs, `find/{imdb|tvdb}_id` is queried first, honouring `[tmdb].category_preference` when both movie and TV hits are returned.
-2. Otherwise, the resolver issues `search/movie` or `search/tv` calls with progressively broader queries derived from the cleaned title. Heuristics include year windows within `[tmdb].year_tolerance`, roman-numeral conversion, subtitle/colon trimming, reduced word sets, automatic movie↔TV switching, and, when `[tmdb].enable_anime_parsing=true`, romaji titles via Anitopy.
+2. Otherwise, the resolver issues `search/movie` or `search/tv` calls with progressively broader queries derived from the cleaned title. Heuristics include year windows within `[tmdb].year_tolerance`, roman-numeral conversion, subtitle/colon trimming, alternative/AKA extraction (including “VVitch”→“Witch”), reduced word sets, automatic movie↔TV switching, and, when `[tmdb].enable_anime_parsing=true`, romaji titles via Anitopy.
 3. Every response is scored by similarity, release year proximity, and light popularity boosts. Strong matches are selected immediately; otherwise the highest scoring candidate wins with logging that notes the heuristic (e.g. “roman-numeral”). Ambiguity only surfaces when `[tmdb].unattended=false`, in which case the CLI prompts for a manual identifier such as `movie/603` (the upload will normalize this to `MOVIE_603`).
 
 All HTTP requests share an in-memory cache governed by `[tmdb].cache_ttl_seconds` and automatically apply exponential backoff on rate limits or transient failures. Setting `[tmdb].api_key` is mandatory; when omitted the resolver is skipped and slow.pics falls back to whatever `tmdb_id` you manually provided in the config.
