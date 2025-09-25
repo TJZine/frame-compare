@@ -170,7 +170,27 @@ def _resolve_core(core: Optional[Any]) -> Any:
     if core is not None:
         return core
     vs_module = _get_vapoursynth_module()
-    return vs_module.core
+    module_core = getattr(vs_module, "core", None)
+    if callable(module_core):
+        try:
+            resolved = module_core()
+            if resolved is not None:
+                return resolved
+        except TypeError:
+            resolved = module_core
+            if resolved is not None:
+                return resolved
+    if module_core is not None and not callable(module_core):
+        return module_core
+    get_core = getattr(vs_module, "get_core", None)
+    if callable(get_core):
+        resolved = get_core()
+        if resolved is not None:
+            return resolved
+    fallback_core = getattr(vs_module, "core", None)
+    if fallback_core is None:
+        raise ClipInitError("VapourSynth core is not available on this interpreter")
+    return fallback_core
 
 
 def _resolve_source(core: Any) -> Any:
@@ -188,6 +208,24 @@ def _ensure_std_namespace(clip: Any, error: RuntimeError) -> Any:
     if std is None:
         raise error
     return std
+
+
+def _call_set_frame_prop(set_prop: Any, clip: Any, **kwargs) -> Any:
+    try:
+        return set_prop(clip, **kwargs)
+    except TypeError as exc_first:
+        try:
+            return set_prop(**kwargs)
+        except TypeError:
+            raise exc_first
+
+
+def _apply_set_frame_prop(clip: Any, **kwargs) -> Any:
+    std_ns = _ensure_std_namespace(clip, ClipProcessError("clip.std namespace missing for SetFrameProp"))
+    set_prop = getattr(std_ns, "SetFrameProp", None)
+    if not callable(set_prop):  # pragma: no cover - defensive
+        raise ClipProcessError("clip.std.SetFrameProp is unavailable")
+    return _call_set_frame_prop(set_prop, clip, **kwargs)
 
 
 def _slice_clip(clip: Any, *, start: Optional[int] = None, end: Optional[int] = None) -> Any:
@@ -352,16 +390,12 @@ def _resolve_color_metadata(props: Mapping[str, Any]) -> tuple[Optional[int], Op
 
 
 def _normalize_rgb_props(clip: Any, transfer: Optional[int], primaries: Optional[int]) -> Any:
-    std_ns = _ensure_std_namespace(clip, ClipProcessError("clip.std namespace missing for SetFrameProp"))
-    set_prop = getattr(std_ns, "SetFrameProp", None)
-    if not callable(set_prop):  # pragma: no cover - defensive
-        raise ClipProcessError("clip.std.SetFrameProp is unavailable")
-    work = set_prop(clip, prop="_Matrix", intval=0)
-    work = set_prop(work, prop="_ColorRange", intval=0)
+    work = _apply_set_frame_prop(clip, prop="_Matrix", intval=0)
+    work = _apply_set_frame_prop(work, prop="_ColorRange", intval=0)
     if transfer is not None:
-        work = set_prop(work, prop="_Transfer", intval=int(transfer))
+        work = _apply_set_frame_prop(work, prop="_Transfer", intval=int(transfer))
     if primaries is not None:
-        work = set_prop(work, prop="_Primaries", intval=int(primaries))
+        work = _apply_set_frame_prop(work, prop="_Primaries", intval=int(primaries))
     return work
 
 
@@ -376,6 +410,9 @@ def _deduce_src_csp_hint(transfer: Optional[int], primaries: Optional[int]) -> O
 def _tonemap_with_retries(core: Any, rgb_clip: Any, *, tone_curve: str, target_nits: float, dst_min: float, dpd: int, src_hint: Optional[int], file_name: str) -> Any:
     libplacebo = getattr(core, "libplacebo", None)
     tonemap = getattr(libplacebo, "Tonemap", None) if libplacebo is not None else None
+    if not callable(tonemap):
+        libplacebo = getattr(core, "placebo", None)
+        tonemap = getattr(libplacebo, "Tonemap", None) if libplacebo is not None else None
     if not callable(tonemap):
         raise ClipProcessError("libplacebo.Tonemap is unavailable")
 
@@ -549,7 +586,10 @@ def process_clip_for_screenshot(
 
     log = logger_override or logger
     source_props = _snapshot_frame_props(clip)
+    vs_module = _get_vapoursynth_module()
     core = getattr(clip, "core", None)
+    if core is None:
+        core = getattr(vs_module, "core", None)
     if core is None:
         raise ClipProcessError("Clip has no associated VapourSynth core")
 
@@ -563,7 +603,6 @@ def process_clip_for_screenshot(
     is_hdr_source = _props_signal_hdr(source_props)
     is_hdr = tonemap_enabled and is_hdr_source
 
-    vs_module = _get_vapoursynth_module()
     range_limited = getattr(vs_module, "RANGE_LIMITED", 1)
     range_full = getattr(vs_module, "RANGE_FULL", 0)
 
@@ -649,16 +688,12 @@ def process_clip_for_screenshot(
         file_name=file_name,
     )
 
-    std_ns = _ensure_std_namespace(tonemapped, ClipProcessError("clip.std namespace missing"))
-    set_prop = getattr(std_ns, "SetFrameProp", None)
-    if not callable(set_prop):  # pragma: no cover - defensive
-        raise ClipProcessError("clip.std.SetFrameProp is unavailable")
-    tonemapped = set_prop(
+    tonemapped = _apply_set_frame_prop(
         tonemapped,
         prop="_Tonemapped",
         data=f"placebo:{tone_curve},dpd={dpd},dst_max={target_nits}",
     )
-    tonemapped = set_prop(tonemapped, prop="_ColorRange", intval=0)
+    tonemapped = _apply_set_frame_prop(tonemapped, prop="_ColorRange", intval=0)
     tonemapped = _normalize_rgb_props(tonemapped, transfer=1, primaries=1)
 
     tonemap_info = TonemapInfo(

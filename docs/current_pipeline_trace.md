@@ -1,35 +1,29 @@
-# Current Screenshot Pipeline Trace (2025-09-22)
+# Current Screenshot Pipeline Trace (2025-09-28)
 
-Scope: `frame_compare.py` + `src/screenshot.py` + `src/vs_core.py` as of this commit.
+Scope: `frame_compare.py` + `src/screenshot.py` + `src/vs_core.py`.
 
-## Clip lifecycle
-- `_init_clips` (frame_compare.py) loads each video via `vs_core.init_clip`. Output: VapourSynth node (`plan.clip`) still in the source colorspace (usually YUV420/limited). Frame props mirror source (`_Matrix`, `_Transfer`, `_Primaries`, `_ColorRange`) because no adjustments occur post-load.
-- No further transforms are applied to `plan.clip` before rendering; the same node is passed straight into `generate_screenshots`.
+## Stage summary (HDR path)
+| Stage | Variable | Callsite | Format | _Matrix | _Transfer | _Primaries | _ColorRange | _Tonemapped | Notes |
+| ----- | -------- | -------- | ------ | ------- | --------- | ---------- | ----------- | ----------- | ----- |
+| 0 | `clip` | `frame_compare._init_clips → vs_core.init_clip` | Source native (usually YUV420) | Source prop (e.g. 9) | 16 or 18 | 9 | 1 (limited) | — | Raw decode straight from LWLibavSource. |
+| 1 | `rgb16` | `vs_core.process_clip_for_screenshot` (`resize.Spline36`) | `RGB48` | 0 (forced) | From stage 0 | From stage 0 | 0 (forced full) | — | `_normalize_rgb_props` stamps RGB props so libplacebo can infer linearisation. |
+| 2 | `tonemapped` | `_tonemap_with_retries` | `RGB48`/`RGBS` | 0 | 1 (BT.1886) | 1 (BT.709) | 0 | `placebo:{curve},dpd={dpd},dst_max={nits}` | Retries hinted → inferred → PQ fallback, logging `[TM INPUT]` / `[TM APPLIED]` / failures. |
+| 3 | `tm_rgb24` | Verification path (`resize.Point`) | `RGB24` | 0 | 1 | 1 | 0 | Same as stage 2 | Used only for diff vs naive SDR, never written to disk. |
+| 4a | `render_clip` (VapourSynth writer) | `_save_frame_with_fpng` | `RGB24` | 0 | 1 | 1 | 0 | Preserved | Crop/resize, optional frame-info overlay, `_apply_overlay_text` (alignment=9). `_ensure_rgb24` stamps BT.709/BT.1886 full-range props for downstream sanity. |
+| 4b | FFmpeg render | `_save_frame_with_ffmpeg` | File stream | N/A | N/A | N/A | N/A | N/A | FFmpeg redoes crop/scale and injects top-right `drawtext` overlay; tonemapped pixels come from stage 2 clip via `result.clip` when available. |
 
-## Geometry & overlay path (generate_screenshots)
-- `_plan_geometry` determines per-clip crop + scale targets but does not touch frame data.
-- `_save_frame_with_fpng` receives `clip` (original node). Processing order:
-  1. `work = clip` — still original props (HDR clips retain `_Matrix=9?`, `_Transfer=16/18`, `_ColorRange=1`, etc.).
-  2. Optional `std.CropRel` and `resize.Spline36` to enforce geometry; these operations inherit/propagate props unchanged.
-  3. If `cfg.add_frame_info` (default true) → `_apply_frame_info_overlay` uses `std.FrameEval` + `sub.Subtitle`. Overlay lands top-left-ish (style `FRAME_INFO_STYLE`); no tonemap metadata, and overlay can be skipped silently if dependencies missing (only debug log).
-  4. `_ensure_rgb24` converts to RGB24 only if clip is not already RGB8. Conversion uses `resize.Point` with *no* explicit `matrix_in`/`transfer_in` hints, so VapourSynth relies on props (problematic if earlier steps stripped them). After conversion it calls `SetFrameProps` with `_Matrix/_Primaries/_Transfer/_ColorRange` hard-coded to strings (`"bt709"`, etc.). No `_Tonemapped` flag is set.
-  5. Resulting node is written via `fpng.Write`. For FFmpeg path the raw file is used; no tonemap happens either way.
+## SDR bypass path
+- When `_props_signal_hdr` is false or `color.enable_tonemap=false`, the function returns the original clip (stage 0) untouched.
+- Overlay text still resolves (reason “SDR source” or “Tonemap disabled”) so every screenshot receives a stamp.
+- Verification is skipped, logging `[TM BYPASS] …` before returning.
+- `_save_frame_with_fpng` / FFmpeg perform the same geometry + overlay steps on the SDR clip, then `_ensure_rgb24` converts to RGB24 for writing.
 
-## Color / tonemap handling (src/vs_core)
-- `process_clip_for_screenshot` exists but **is never invoked** during screenshot rendering. It only runs when `analysis.analyze_in_sdr` is enabled, and even then operates on the analysis-only clip.
-- When invoked, it calls `libplacebo.Tonemap` on the *original clip* (no RGB16 conversion, no prop normalisation). Failures raise `ClipProcessError`. After success it calls `_set_sdr_props` to stamp SDR props (function is bugged: returns `std.SetFrameProps(**props)` without passing the clip, so would throw at runtime).
-- There is no retry logic, no src_csp hint inference, and no fallback other than raising an exception.
+## Overlay & verification guarantees
+- `process_clip_for_screenshot` runs **before** geometry planning; the resulting node is the one fed into `_plan_geometry` and ultimately into the writers.
+- Verification (`verify_enabled`) occurs on the tonemapped node, selecting a non-trivial frame via `_pick_verify_frame` (skip ≥10s, sample every 10s up to 90s, fall back to brightest or midpoint). Logs `[VERIFY]` with frame/Δ before any screenshots emit.
+- Overlay text is applied once per clip: VapourSynth path uses `core.text.Text(..., alignment=9)`, FFmpeg path mirrors via `drawtext` anchored top-right. Failures honour `color.strict` and raise.
 
-## Frame props snapshot (expected real-world values)
-- After `_init_clips`: `_Matrix =` source matrix (e.g. 9), `_Transfer = 16/18`, `_Primaries = 9`, `_ColorRange = 1` for HDR BT.2020 PQ/HLG.
-- After geometry but before `_ensure_rgb24`: unchanged.
-- After `_ensure_rgb24`: props forcibly set to strings, `_Tonemapped` absent. Because tonemap never ran, HDR footage remains in original transfer/gamut despite props claiming BT.709/BT.1886.
-- Writer receives the same clip that the (optional) overlay modified (`render_clip`), so overlay does survive — but content is SDR-tagged regardless of true pixel values.
+## Open issues observed
+- Maintain coverage to ensure `_Tonemapped` flag survives future overlay/crop rewrites (current `std.CopyFrameProps` guard keeps it intact).
 
-## Gaps vs legacy expectations
-- No YUV→RGB16 staging, no prop normalisation, no Tonemap retries (`libplacebo.Tonemap` called directly on source node), no fallback logging.
-- No verification path (Δ vs naive SDR) and no selection of non-trivial frames.
-- Overlay lacks tonemap metadata, is not enforced, and sits top-left.
-- Frame props lie post-conversion, creating silent mismatch.
-
-This trace will guide the fix-up work to align with the legacy pipeline.
+This trace is the baseline for verifying ongoing changes against the legacy `legacy/compv4_improved.py` behaviour.

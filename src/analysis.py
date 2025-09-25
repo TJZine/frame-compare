@@ -7,6 +7,8 @@ import random
 import hashlib
 import json
 import logging
+import numbers
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
@@ -105,6 +107,17 @@ def _config_fingerprint(cfg: AnalysisConfig) -> str:
     return hashlib.sha1(payload).hexdigest()
 
 
+def _coerce_seconds(value: object, label: str) -> float:
+    if isinstance(value, numbers.Real):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except (TypeError, ValueError):
+            pass
+    raise TypeError(f"{label} must be numeric (got {type(value).__name__})")
+
+
 def compute_selection_window(
     num_frames: int,
     fps: float,
@@ -131,9 +144,9 @@ def compute_selection_window(
         fps_val = 24000 / 1001
 
     duration = num_frames / fps_val if fps_val > 0 else 0.0
-    lead = max(0.0, float(ignore_lead_seconds))
-    trail = max(0.0, float(ignore_trail_seconds))
-    min_window = max(0.0, float(min_window_seconds))
+    lead = max(0.0, _coerce_seconds(ignore_lead_seconds, "analysis.ignore_lead_seconds"))
+    trail = max(0.0, _coerce_seconds(ignore_trail_seconds, "analysis.ignore_trail_seconds"))
+    min_window = max(0.0, _coerce_seconds(min_window_seconds, "analysis.min_window_seconds"))
 
     start_sec = min(lead, max(0.0, duration))
     end_sec = max(start_sec, max(0.0, duration - trail))
@@ -394,16 +407,66 @@ def _collect_metrics_vapoursynth(
         raise TypeError("Expected a VapourSynth clip")
 
     work = clip
+    props = vs_core._snapshot_frame_props(work)
+    matrix_in, transfer_in, primaries_in, color_range_in = vs_core._resolve_color_metadata(props)
+
+    def _resize_kwargs_for_source() -> dict:
+        kwargs = {}
+        if matrix_in is not None:
+            kwargs["matrix_in"] = int(matrix_in)
+        else:
+            try:
+                if work.format is not None and work.format.color_family == vs.RGB:
+                    kwargs["matrix_in"] = getattr(vs, "MATRIX_RGB", 0)
+            except AttributeError:
+                pass
+        if transfer_in is not None:
+            kwargs["transfer_in"] = int(transfer_in)
+        if primaries_in is not None:
+            kwargs["primaries_in"] = int(primaries_in)
+        if color_range_in is not None:
+            kwargs["range_in"] = int(color_range_in)
+        return kwargs
+
+    resize_kwargs = _resize_kwargs_for_source()
     try:
         if cfg.downscale_height > 0 and work.height > cfg.downscale_height:
             target_h = _ensure_even(max(2, int(cfg.downscale_height)))
             aspect = work.width / work.height
             target_w = _ensure_even(max(2, int(round(target_h * aspect))))
-            work = vs.core.resize.Spline36(work, width=target_w, height=target_h)
+            work = vs.core.resize.Spline36(work, width=target_w, height=target_h, **resize_kwargs)
 
         # Convert to grayscale for consistent metrics
         target_format = vs.GRAY16
-        work = vs.core.resize.Spline36(work, format=target_format)
+        gray_kwargs = dict(resize_kwargs)
+        gray_formats = {getattr(vs, "GRAY8", None), getattr(vs, "GRAY16", None), getattr(vs, "GRAY32", None)}
+        if work.format is not None and work.format.color_family == vs.RGB:
+            matrix_in_val = gray_kwargs.get("matrix_in")
+            if matrix_in_val is None:
+                matrix_in_val = getattr(vs, "MATRIX_RGB", 0)
+            convert_kwargs = dict(gray_kwargs)
+            convert_kwargs.pop("matrix", None)
+            convert_kwargs["matrix_in"] = int(matrix_in_val)
+            if "matrix" not in convert_kwargs:
+                convert_kwargs["matrix"] = getattr(vs, "MATRIX_BT709", 1)
+            yuv = vs.core.resize.Spline36(
+                work,
+                format=getattr(vs, "YUV444P16"),
+                **convert_kwargs,
+            )
+            work = vs.core.std.ShufflePlanes(yuv, planes=0, colorfamily=vs.GRAY)
+            if target_format != getattr(vs, "GRAY16"):
+                work = vs.core.resize.Spline36(work, format=target_format)
+        else:
+            if target_format not in gray_formats:
+                if "matrix" not in gray_kwargs:
+                    if "matrix_in" in gray_kwargs:
+                        gray_kwargs["matrix"] = gray_kwargs["matrix_in"]
+                    else:
+                        gray_kwargs["matrix"] = getattr(vs, "MATRIX_BT709", 1)
+            else:
+                gray_kwargs.pop("matrix", None)
+            work = vs.core.resize.Spline36(work, format=target_format, **gray_kwargs)
     except Exception as exc:  # pragma: no cover - defensive
         raise RuntimeError(f"Failed to prepare analysis clip: {exc}") from exc
 
@@ -594,11 +657,36 @@ def select_frames(
             cached_categories = cached_metrics.selection_categories
         if progress is not None:
             progress(len(brightness))
+        logger.info(
+            "[ANALYSIS] using cached metrics (brightness=%d, motion=%d)",
+            len(brightness),
+            len(motion),
+        )
     else:
+        logger.info(
+            "[ANALYSIS] collecting metrics (indices=%d, step=%d, analyze_in_sdr=%s)",
+            len(indices),
+            step,
+            cfg.analyze_in_sdr,
+        )
+        start_metrics = time.perf_counter()
         try:
             brightness, motion = _collect_metrics_vapoursynth(analysis_clip, cfg, indices, progress)
-        except Exception:
+            logger.info(
+                "[ANALYSIS] metrics collected via VapourSynth in %.2fs (brightness=%d, motion=%d)",
+                time.perf_counter() - start_metrics,
+                len(brightness),
+                len(motion),
+            )
+        except Exception as exc:
+            logger.warning(
+                "[ANALYSIS] VapourSynth metrics collection failed (%s); falling back to synthetic metrics",
+                exc,
+            )
             brightness, motion = _generate_metrics_fallback(indices, cfg, progress)
+            logger.info(
+                "[ANALYSIS] synthetic metrics generated in %.2fs", time.perf_counter() - start_metrics
+            )
 
     if cached_selection is not None:
         frames_sorted = sorted(dict.fromkeys(int(frame) for frame in cached_selection))

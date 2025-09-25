@@ -25,3 +25,26 @@ Date: 2025-09-22
   mismatches.
 
 Use this note when validating regressions against upstream pipelines.
+
+---
+
+Date: 2025-09-28
+
+## Additional parity fixes
+- `_ensure_rgb24` now stamps RGB targets with integer props (`_Matrix=0`, `_Primaries=1`, `_Transfer=1`, `_ColorRange=0`) so
+  exported PNGs advertise full-range BT.709/BT.1886, matching the legacy writer and avoiding MaskedMerge range clashes.
+- Overlay rendering uses `std.CopyFrameProps` after `text.Text` to preserve `_Tonemapped` and other metadata, ensuring any
+  downstream merge/analysis sees the same per-frame flags the tonemap stage emitted.
+- Tonemap processing now falls back to the global `vs.core` object when a clip lacks a `.core` attribute (common on
+  Windows community builds and Python 3.13), preventing "Clip has no associated VapourSynth core" during frame selection.
+- Frame-window logic now validates `analysis.ignore_lead_seconds`, `ignore_trail_seconds`, and `min_window_seconds`,
+  surfacing a clear error if these values are not numeric instead of failing with a Python type error mid-run.
+- VapourSynth frame-prop stamping detects bound methods (e.g. `clip.std.SetFrameProp`) and avoids passing the clip twice,
+  eliminating the `float(... VideoNode)` crash encountered on Windows/Python 3.13 during analysis tonemapping.
+- Core resolution now checks `vapoursynth.get_core()` as well as `vapoursynth.core`, so environments where the singleton is
+  exposed only via the helper (observed with VapourSynth R72 + Python 3.13 + uv) no longer trip the "Clip has no
+  associated VapourSynth core" error.
+- libplacebo detection now honours both `core.libplacebo` and `core.placebo`, matching the legacy script and fixing
+  VapourSynth R72 installs that expose the namespace without the `lib` prefix.
+- Analysis metrics collection now mirrors the legacy flow by converting RGB sources through YUV444 before extracting the
+  luminance plane, keeping matrix hints intact so VapourSynth accepts the grayscale resize and the real metrics path runs.

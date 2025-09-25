@@ -49,10 +49,10 @@ def _ensure_rgb24(core, clip, frame_idx):
 
     try:
         converted = converted.std.SetFrameProps(
-            _Matrix="bt709",
-            _Primaries="bt709",
-            _Transfer="bt1886",
-            _ColorRange="limited",
+            _Matrix=0,
+            _Primaries=1,
+            _Transfer=1,
+            _ColorRange=0,
         )
     except Exception:  # pragma: no cover - best effort
         pass
@@ -153,6 +153,13 @@ def _apply_overlay_text(
         if strict:
             raise ScreenshotWriterError(message) from exc
         return clip
+    std_ns = getattr(core, "std", None)
+    copy_props = getattr(std_ns, "CopyFrameProps", None) if std_ns is not None else None
+    if callable(copy_props):
+        try:
+            result = copy_props(result, clip)
+        except Exception as exc:  # pragma: no cover - best effort
+            logger.debug('CopyFrameProps failed during overlay preservation: %s', exc)
     if status != "ok":
         logger.info('[OVERLAY] %s applied', file_label)
         state["overlay_status"] = "ok"

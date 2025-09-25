@@ -5,6 +5,7 @@ import re
 import sys
 import shutil
 import webbrowser
+import traceback
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -389,13 +390,25 @@ def _resolve_selection_windows(
             min_total_frames = total_frames
         fps_num, fps_den = plan.effective_fps or _extract_clip_fps(clip)
         fps_val = fps_num / fps_den if fps_den else 0.0
-        spec = compute_selection_window(
-            total_frames,
-            fps_val,
-            analysis_cfg.ignore_lead_seconds,
-            analysis_cfg.ignore_trail_seconds,
-            analysis_cfg.min_window_seconds,
-        )
+        try:
+            spec = compute_selection_window(
+                total_frames,
+                fps_val,
+                analysis_cfg.ignore_lead_seconds,
+                analysis_cfg.ignore_trail_seconds,
+                analysis_cfg.min_window_seconds,
+            )
+        except TypeError as exc:
+            detail = (
+                f"Invalid analysis window values for {plan.path.name}: "
+                f"lead={analysis_cfg.ignore_lead_seconds!r} "
+                f"trail={analysis_cfg.ignore_trail_seconds!r} "
+                f"min={analysis_cfg.min_window_seconds!r}"
+            )
+            raise CLIAppError(
+                detail,
+                rich_message=f"[red]{escape(detail)}[/red]",
+            ) from exc
         specs.append(spec)
 
     if not specs:
@@ -637,6 +650,9 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
             frames, frame_categories = _run_selection()
 
     except Exception as exc:
+        tb = traceback.format_exc()
+        print("[red]Frame selection trace:[/red]")
+        print(tb)
         raise CLIAppError(
             f"Frame selection failed: {exc}",
             rich_message=f"[red]Frame selection failed:[/red] {exc}",
@@ -827,5 +843,3 @@ def main(config_path: str, input_dir: str | None) -> None:
 
 if __name__ == "__main__":
     main()
-
-
