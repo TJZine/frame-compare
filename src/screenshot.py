@@ -16,8 +16,6 @@ from . import vs_core
 
 _INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
-_INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
-
 
 logger = logging.getLogger(__name__)
 

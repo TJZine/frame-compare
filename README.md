@@ -57,11 +57,11 @@ input_dir = "comparison_videos"
 [analysis]
 frame_count_dark = 20
 frame_count_bright = 10
-frame_count_motion = 15
+frame_count_motion = 10
 user_frames = []
-random_frames = 15
+random_frames = 10
 save_frames_data = true
-downscale_height = 480
+downscale_height = 720
 step = 2
 analyze_in_sdr = true
 use_quantiles = true
@@ -90,8 +90,25 @@ single_res = 0
 mod_crop = 2
 letterbox_pillarbox_aware = true
 
+[color]
+enable_tonemap = true
+preset = "reference"
+tone_curve = "bt.2390"
+dynamic_peak_detection = true
+target_nits = 100.0
+dst_min_nits = 0.1
+overlay_enabled = true
+overlay_text_template = "TM:{tone_curve} dpd={dynamic_peak_detection} dst={target_nits}nits"
+verify_enabled = true
+verify_auto = true
+verify_start_seconds = 10.0
+verify_step_seconds = 10.0
+verify_max_seconds = 90.0
+verify_luma_threshold = 0.10
+strict = false
+
 [slowpics]
-auto_upload = false
+auto_upload = true
 collection_name = ""
 is_hentai = false
 is_public = true
@@ -119,8 +136,11 @@ prefer_guessit = true
 input_dir = "comparison_videos"
 
 [runtime]
-ram_limit_mb = 8000
+ram_limit_mb = 4000
 vapoursynth_python_paths = []
+
+[source]
+preferred = "lsmas"
 
 [overrides]
 trim = {}
@@ -134,11 +154,11 @@ change_fps = {}
 | --- | --- | --- | --- | --- |
 | `frame_count_dark` | int | 20 | No | Number of darkest frames to keep; uses quantiles or fallback ranges. Must be ≥0.|
 | `frame_count_bright` | int | 10 | No | Number of brightest frames to keep using the same logic as dark picks.|
-| `frame_count_motion` | int | 15 | No | Motion peaks after smoothing; quarter-gap spacing is applied via `screen_separation_sec/4`.|
+| `frame_count_motion` | int | 10 | No | Motion peaks after smoothing; quarter-gap spacing is applied via `screen_separation_sec/4`.|
 | `user_frames` | list[int] | `[]` | No | Pinned frames that bypass scoring; out-of-window frames are dropped with a warning.|
-| `random_frames` | int | 15 | No | Additional random picks seeded by `random_seed` and filtered by separation rules.|
+| `random_frames` | int | 10 | No | Additional random picks seeded by `random_seed` and filtered by separation rules.|
 | `save_frames_data` | bool | true | No | Persist metrics and selections to `frame_data_filename` for cache reuse.|
-| `downscale_height` | int | 480 | No | Resizes clips before analysis; must be ≥64 if non-zero.|
+| `downscale_height` | int | 720 | No | Resizes clips before analysis; values below 64 raise a validation error.|
 | `step` | int | 2 | No | Sampling stride used when iterating frames; must be ≥1.|
 | `analyze_in_sdr` | bool | true | No | Tonemap HDR sources through `vs_core.process_clip_for_screenshot`.|
 | `use_quantiles` | bool | true | No | Toggle quantile thresholds; `false` enables fixed brightness bands.|
@@ -194,7 +214,7 @@ See `docs/hdr_tonemap_overview.md` for a walkthrough of the log messages, preset
 #### `[slowpics]`
 | Name | Type | Default | Required? | Description |
 | --- | --- | --- | --- | --- |
-| `auto_upload` | bool | false | No | Upload automatically after screenshots finish.|
+| `auto_upload` | bool | true | No | Upload automatically after screenshots finish.|
 | `collection_name` | str | `""` | No | Custom collection title sent to slow.pics.|
 | `is_hentai` | bool | false | No | Marks the collection as hentai for filtering.|
 | `is_public` | bool | true | No | Controls slow.pics visibility.|
@@ -214,7 +234,7 @@ See `docs/hdr_tonemap_overview.md` for a walkthrough of the log messages, preset
 | `year_tolerance` | int | 2 | No | Acceptable difference between parsed year and TMDB results; must be ≥0.|
 | `enable_anime_parsing` | bool | true | No | Use Anitopy-derived titles when searching for anime releases.|
 | `cache_ttl_seconds` | int | 86400 | No | Cache TMDB responses in-memory for this many seconds; must be ≥0.|
-| `category_preference` | str | `""` | No | Optional default category when external IDs resolve to both movie and TV (set `MOVIE` or `TV`).|
+| `category_preference` | str? | null | No | Optional default category when external IDs resolve to both movie and TV (set `MOVIE` or `TV`).|
 
 #### `[naming]`
 | Name | Type | Default | Required? | Description |
@@ -225,13 +245,18 @@ See `docs/hdr_tonemap_overview.md` for a walkthrough of the log messages, preset
 #### `[paths]`
 | Name | Type | Default | Required? | Description |
 | --- | --- | --- | --- | --- |
-| `input_dir` | str | `"."` | No | Root directory containing the comparison clips. Update this or use `--input` per run.|
+| `input_dir` | str | `"comparison_videos"` | No | Root directory containing the comparison clips. Update this or use `--input` per run.|
 
 #### `[runtime]`
 | Name | Type | Default | Required? | Description |
 | --- | --- | --- | --- | --- |
-| `ram_limit_mb` | int | 8000 | No | Applies `core.max_cache_size` on VapourSynth; must be >0.|
+| `ram_limit_mb` | int | 4000 | No | Applies `core.max_cache_size` on VapourSynth; must be >0.|
 | `vapoursynth_python_paths` | list[str] | `[]` | No | Additional search paths appended to `sys.path` before importing VapourSynth.|
+
+#### `[source]`
+| Name | Type | Default | Required? | Description |
+| --- | --- | --- | --- | --- |
+| `preferred` | str | `"lsmas"` | No | Preferred VapourSynth source plugin. Set to `ffms2` to flip the loader priority.|
 
 #### `[overrides]`
 | Name | Type | Default | Required? | Description |
@@ -280,6 +305,7 @@ Options:
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
 | `Config error: analysis.step must be >= 1` (or similar) | TOML value out of range. | Update the value to satisfy the validation listed in the config table.|
+| `Config error: source.preferred must be either 'lsmas' or 'ffms2'` | Unsupported VapourSynth source preference. | Change `[source].preferred` to `lsmas` (default) or `ffms2`.|
 | `VapourSynth is not available in this environment.` | `vapoursynth` module not importable from the current interpreter. | Install a matching VapourSynth build or add its site-packages directory to `runtime.vapoursynth_python_paths`/`VAPOURSYNTH_PYTHONPATH`.|
 | `VapourSynth core is missing the lsmas plugin` | `lsmas.LWLibavSource` unavailable, so clips cannot be opened. | Install the `lsmas` plugin in the active VapourSynth environment.|
 | `FFmpeg executable not found in PATH` | `[screenshots].use_ffmpeg` enabled without FFmpeg installed. | Install FFmpeg and ensure the binary is discoverable, or disable the flag.|
@@ -307,6 +333,7 @@ src/
   config_loader.py      # TOML loader & validation
   datatypes.py          # Configuration schema
   screenshot.py         # Screenshot planning & writers
+  tmdb.py               # TMDB resolution client
   slowpics.py           # slow.pics client
   utils.py              # Filename metadata helpers
   vs_core.py            # VapourSynth helpers

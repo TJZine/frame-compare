@@ -111,8 +111,10 @@ def load_config(path: str) -> AppConfig:
 
     if app.analysis.step < 1:
         raise ConfigError("analysis.step must be >= 1")
-    if app.analysis.downscale_height < 64:
-        raise ConfigError("analysis.downscale_height must be >= 64")
+    if app.analysis.downscale_height < 0:
+        raise ConfigError("analysis.downscale_height must be >= 0")
+    if 0 < app.analysis.downscale_height < 64:
+        raise ConfigError("analysis.downscale_height must be 0 or >= 64")
     if app.analysis.random_seed < 0:
         raise ConfigError("analysis.random_seed must be >= 0")
     if not app.analysis.frame_data_filename:
