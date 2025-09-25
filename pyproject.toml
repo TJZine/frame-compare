@@ -12,6 +12,10 @@ dependencies = [
     "anitopy",
     "guessit",
     "click>=8.1",
+]
+
+[project.optional-dependencies]
+vapoursynth = [
     "vapoursynth>=72",
 ]
 
