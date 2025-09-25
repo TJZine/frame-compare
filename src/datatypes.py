@@ -86,6 +86,18 @@ class SlowpicsConfig:
 
 
 @dataclass
+class TMDBConfig:
+    """Configuration controlling TMDB lookup and caching behaviour."""
+
+    api_key: str = ""
+    unattended: bool = True
+    year_tolerance: int = 2
+    enable_anime_parsing: bool = True
+    cache_ttl_seconds: int = 86400
+    category_preference: Optional[str] = None
+
+
+@dataclass
 class NamingConfig:
     """Filename parsing and display preferences."""
 
@@ -131,6 +143,7 @@ class AppConfig:
     analysis: AnalysisConfig
     screenshots: ScreenshotConfig
     slowpics: SlowpicsConfig
+    tmdb: TMDBConfig
     naming: NamingConfig
     paths: PathsConfig
     runtime: RuntimeConfig

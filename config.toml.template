@@ -71,6 +71,15 @@ open_in_browser = true
 create_url_shortcut = true
 delete_screen_dir_after_upload = true
 
+[tmdb]
+# TMDB lookup automation. Provide an API key to enable matching.
+api_key = ""
+unattended = true
+year_tolerance = 2
+enable_anime_parsing = true
+cache_ttl_seconds = 86400
+category_preference = ""
+
 [naming]
 # Controls how GuessIt/Anitopy metadata is turned into labels.
 always_full_filename = true
