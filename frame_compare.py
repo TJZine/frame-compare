@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import asyncio
 import builtins
-import logging
 import re
 import sys
 import shutil
@@ -10,9 +8,8 @@ import webbrowser
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from string import Template
 import time
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 import click
 from rich import print
@@ -20,10 +17,8 @@ from rich.markup import escape
 from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 from natsort import os_sorted
 
-from src.cli.args import parse_tonemap_args
 from src.config_loader import ConfigError, load_config
 from src.datatypes import AppConfig
-from src.tonemap.exceptions import TonemapConfigError
 from src.utils import parse_filename_metadata
 from src import vs_core
 from src.analysis import (
@@ -34,16 +29,6 @@ from src.analysis import (
 )
 from src.screenshot import generate_screenshots, ScreenshotError
 from src.slowpics import SlowpicsAPIError, upload_comparison
-from src.tmdb import (
-    TMDBAmbiguityError,
-    TMDBCandidate,
-    TMDBResolution,
-    TMDBResolutionError,
-    parse_manual_id,
-    resolve_tmdb,
-)
-
-logger = logging.getLogger(__name__)
 
 SUPPORTED_EXTS = (
     ".mkv",
@@ -176,56 +161,6 @@ def _dedupe_labels(
     for idx, meta in enumerate(metadata):
         if not (meta.get("label") or "").strip():
             meta["label"] = files[idx].name
-
-
-def _first_non_empty(metadata: Sequence[Dict[str, str]], key: str) -> str:
-    for meta in metadata:
-        value = meta.get(key)
-        if value:
-            return str(value)
-    return ""
-
-
-def _parse_year_hint(value: str) -> Optional[int]:
-    try:
-        year = int(value)
-    except (TypeError, ValueError):
-        return None
-    if 1900 <= year <= 2100:
-        return year
-    return None
-
-
-def _prompt_manual_tmdb(candidates: Sequence[TMDBCandidate]) -> tuple[str, str] | None:
-    print("[yellow]TMDB search returned multiple plausible matches:[/yellow]")
-    for cand in candidates:
-        year = cand.year or "????"
-        print(
-            f"  • [cyan]{cand.category.lower()}/{cand.tmdb_id}[/cyan] "
-            f"{cand.title or '(unknown title)'} ({year}) score={cand.score:0.3f}"
-        )
-    while True:
-        response = click.prompt(
-            "Enter TMDB id (movie/##### or tv/#####) or leave blank to skip",
-            default="",
-            show_default=False,
-        ).strip()
-        if not response:
-            return None
-        try:
-            return parse_manual_id(response)
-        except TMDBResolutionError as exc:
-            print(f"[red]Invalid TMDB identifier:[/red] {exc}")
-
-
-def _render_collection_name(template_text: str, context: Mapping[str, str]) -> str:
-    if "${" not in template_text:
-        return template_text
-    try:
-        template = Template(template_text)
-        return template.safe_substitute(context)
-    except Exception:
-        return template_text
 
 
 def _estimate_analysis_time(file: Path, cache_dir: Path | None) -> float:
@@ -378,25 +313,6 @@ def _extract_clip_fps(clip: object) -> Tuple[int, int]:
     return (24000, 1001)
 
 
-def _log_plan_trim(plan: _ClipPlan) -> None:
-    raw_label = plan.metadata.get("label") or plan.path.name
-    label = escape((raw_label or plan.path.name).strip())
-
-    if plan.trim_start:
-        if plan.trim_start > 0:
-            print(f"[cyan]{label}[/]: Trimmed to start at frame {plan.trim_start}")
-        else:
-            count = abs(int(plan.trim_start))
-            print(f"[cyan]{label}[/]: {count} frame(s) appended at start")
-
-    if plan.trim_end:
-        if plan.trim_end > 0:
-            print(f"[cyan]{label}[/]: Trimmed to end at frame {plan.trim_end}")
-        else:
-            count = abs(int(plan.trim_end))
-            print(f"[cyan]{label}[/]: Trimmed to end {count} frame(s) early")
-
-
 def _init_clips(plans: Sequence[_ClipPlan], runtime_cfg, cache_dir: Path | None) -> None:
     vs_core.set_ram_limit(runtime_cfg.ram_limit_mb)
 
@@ -407,7 +323,6 @@ def _init_clips(plans: Sequence[_ClipPlan], runtime_cfg, cache_dir: Path | None)
 
     if reference_index is not None:
         plan = plans[reference_index]
-        _log_plan_trim(plan)
         clip = vs_core.init_clip(
             str(plan.path),
             trim_start=plan.trim_start,
@@ -425,7 +340,6 @@ def _init_clips(plans: Sequence[_ClipPlan], runtime_cfg, cache_dir: Path | None)
         if fps_override is None and reference_fps is not None and idx != reference_index:
             fps_override = reference_fps
 
-        _log_plan_trim(plan)
         clip = vs_core.init_clip(
             str(plan.path),
             trim_start=plan.trim_start,
@@ -549,28 +463,13 @@ def _print_summary(files: Sequence[Path], frames: Sequence[int], out_dir: Path, 
         print(f"  Slow.pics : {url}")
 
 
-def run_cli(
-    config_path: str,
-    input_dir: str | None = None,
-    *,
-    tonemap_overrides: dict[str, Any] | None = None,
-) -> RunResult:
+def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
     try:
         cfg: AppConfig = load_config(config_path)
     except ConfigError as exc:
         raise CLIAppError(
             f"Config error: {exc}", code=2, rich_message=f"[red]Config error:[/red] {exc}"
         ) from exc
-
-    if tonemap_overrides:
-        try:
-            cfg.tonemap = cfg.tonemap.merged(**tonemap_overrides).resolved()
-        except TonemapConfigError as exc:
-            raise CLIAppError(
-                f"Invalid tonemap override: {exc}",
-                code=2,
-                rich_message=f"[red]Tonemap override error:[/red] {exc}",
-            ) from exc
 
     if input_dir:
         cfg.paths.input_dir = input_dir
@@ -599,127 +498,6 @@ def run_cli(
         )
 
     metadata = _parse_metadata(files, cfg.naming)
-    year_hint_raw = _first_non_empty(metadata, "year")
-    metadata_title = _first_non_empty(metadata, "title") or _first_non_empty(metadata, "anime_title")
-    tmdb_resolution: TMDBResolution | None = None
-    manual_tmdb: tuple[str, str] | None = None
-    tmdb_category: Optional[str] = None
-    tmdb_id_value: Optional[str] = None
-    tmdb_language: Optional[str] = None
-    tmdb_error_message: Optional[str] = None
-    tmdb_ambiguous: bool = False
-    tmdb_api_key_present = bool(cfg.tmdb.api_key.strip())
-
-    if tmdb_api_key_present:
-        base_file = files[0]
-        imdb_hint = _first_non_empty(metadata, "imdb_id").lower()
-        tvdb_hint = _first_non_empty(metadata, "tvdb_id")
-        year_hint = _parse_year_hint(year_hint_raw)
-        try:
-            tmdb_resolution = asyncio.run(
-                resolve_tmdb(
-                    base_file.name,
-                    config=cfg.tmdb,
-                    year=year_hint,
-                    imdb_id=imdb_hint or None,
-                    tvdb_id=tvdb_hint or None,
-                    unattended=cfg.tmdb.unattended,
-                    category_preference=cfg.tmdb.category_preference,
-                )
-            )
-        except TMDBAmbiguityError as exc:
-            tmdb_ambiguous = True
-            manual_tmdb = _prompt_manual_tmdb(exc.candidates)
-        except TMDBResolutionError as exc:
-            logger.warning("TMDB lookup failed for %s: %s", base_file.name, exc)
-            tmdb_error_message = str(exc)
-        else:
-            if tmdb_resolution is not None:
-                tmdb_category = tmdb_resolution.category
-                tmdb_id_value = tmdb_resolution.tmdb_id
-                tmdb_language = tmdb_resolution.original_language
-
-    if manual_tmdb:
-        tmdb_category, tmdb_id_value = manual_tmdb
-        tmdb_language = None
-        tmdb_resolution = None
-        logger.info("TMDB manual override selected: %s/%s", tmdb_category, tmdb_id_value)
-
-    tmdb_context: Dict[str, str] = {
-        "Title": metadata_title or (metadata[0].get("label") if metadata else ""),
-        "OriginalTitle": "",
-        "Year": year_hint_raw or "",
-        "TMDBId": tmdb_id_value or "",
-        "TMDBCategory": tmdb_category or "",
-        "OriginalLanguage": tmdb_language or "",
-        "Filename": files[0].stem,
-        "FileName": files[0].name,
-        "Label": metadata[0].get("label") if metadata else files[0].name,
-    }
-
-    if tmdb_resolution is not None:
-        if tmdb_resolution.title:
-            tmdb_context["Title"] = tmdb_resolution.title
-        if tmdb_resolution.original_title:
-            tmdb_context["OriginalTitle"] = tmdb_resolution.original_title
-        if tmdb_resolution.year is not None:
-            tmdb_context["Year"] = str(tmdb_resolution.year)
-        if tmdb_resolution.original_language:
-            tmdb_context["OriginalLanguage"] = tmdb_resolution.original_language
-        tmdb_category = tmdb_category or tmdb_resolution.category
-        tmdb_id_value = tmdb_id_value or tmdb_resolution.tmdb_id
-
-    if tmdb_id_value and not (cfg.slowpics.tmdb_id or "").strip():
-        cfg.slowpics.tmdb_id = str(tmdb_id_value)
-
-    collection_template = (cfg.slowpics.collection_name or "").strip()
-    if collection_template:
-        rendered_collection = _render_collection_name(collection_template, tmdb_context).strip()
-        cfg.slowpics.collection_name = rendered_collection or "Frame Comparison"
-    else:
-        derived_title = (tmdb_context.get("Title") or "").strip() or files[0].stem
-        derived_year = (tmdb_context.get("Year") or "").strip()
-        collection_name = derived_title
-        if derived_title and derived_year:
-            collection_name = f"{derived_title} ({derived_year})"
-        cfg.slowpics.collection_name = collection_name or "Frame Comparison"
-
-    if tmdb_resolution is not None:
-        match_title = tmdb_resolution.title or tmdb_context.get("Title") or files[0].stem
-        year_text = f" ({tmdb_resolution.year})" if tmdb_resolution.year else ""
-        lang_text = tmdb_resolution.original_language or "unknown"
-        heuristic = (tmdb_resolution.candidate.reason or "match").replace("_", " ").replace("-", " ")
-        source = "filename" if tmdb_resolution.candidate.used_filename_search else "external id"
-        print(
-            "[cyan]TMDB match:[/cyan] "
-            f"{match_title}{year_text} "
-            f"[{tmdb_resolution.category}] -> {tmdb_resolution.tmdb_id} "
-            f"({source}, {heuristic.strip()}) lang={lang_text}"
-        )
-    elif manual_tmdb:
-        display_title = tmdb_context.get("Title") or files[0].stem
-        print(
-            "[cyan]TMDB manual override:[/cyan] "
-            f"{tmdb_category}/{tmdb_id_value} for {display_title}"
-        )
-    elif tmdb_api_key_present:
-        if tmdb_error_message:
-            print(f"[yellow]TMDB lookup failed:[/yellow] {tmdb_error_message}")
-        elif tmdb_ambiguous:
-            print(
-                "[yellow]TMDB: ambiguous results for[/yellow] "
-                f"{files[0].name}; continuing without metadata."
-            )
-        else:
-            print(
-                "[yellow]TMDB: no confident match for[/yellow] "
-                f"{files[0].name}; continuing without metadata."
-            )
-    elif not (cfg.slowpics.tmdb_id or "").strip():
-        print(
-            "[yellow]TMDB disabled:[/yellow] set [tmdb].api_key in config.toml to enable automatic matching."
-        )
-
     labels = [meta.get("label") or file.name for meta, file in zip(metadata, files)]
     print("[green]Files detected:[/green]")
     for label, file in zip(labels, files):
@@ -738,17 +516,6 @@ def run_cli(
     clips = [plan.clip for plan in plans]
     if any(clip is None for clip in clips):
         raise CLIAppError("Clip initialisation failed")
-
-    try:
-        render_clips = [
-            vs_core.process_clip_for_screenshot(clip, plan.path.name, cfg.tonemap)
-            for plan, clip in zip(plans, clips)
-        ]
-    except vs_core.ClipProcessError as exc:
-        raise CLIAppError(
-            f"Failed to prepare clip for screenshots: {exc}",
-            rich_message=f"[red]Failed to prepare clip for screenshots:[/red] {exc}",
-        ) from exc
 
     analyze_index = [plan.path for plan in plans].index(analyze_path)
     analyze_clip = plans[analyze_index].clip
@@ -799,9 +566,9 @@ def run_cli(
                 analyze_path.name,
                 cache_info=cache_info,
                 progress=progress_callback,
-                tonemap_cfg=cfg.tonemap,
                 frame_window=frame_window,
                 return_metadata=True,
+                color_cfg=cfg.color,
             )
         except TypeError as exc:
             if "return_metadata" not in str(exc):
@@ -813,8 +580,8 @@ def run_cli(
                 analyze_path.name,
                 cache_info=cache_info,
                 progress=progress_callback,
-                tonemap_cfg=cfg.tonemap,
                 frame_window=frame_window,
+                color_cfg=cfg.color,
             )
         if isinstance(result, tuple):
             return result
@@ -916,12 +683,13 @@ def run_cli(
                     )
 
                 image_paths = generate_screenshots(
-                    render_clips,
+                    clips,
                     frames,
                     [str(plan.path) for plan in plans],
                     [plan.metadata for plan in plans],
                     out_dir,
                     cfg.screenshots,
+                    cfg.color,
                     trim_offsets=[plan.trim_start for plan in plans],
                     progress_callback=advance_render,
                 )
@@ -934,12 +702,13 @@ def run_cli(
                     )
         else:
             image_paths = generate_screenshots(
-                render_clips,
+                clips,
                 frames,
                 [str(plan.path) for plan in plans],
                 [plan.metadata for plan in plans],
                 out_dir,
                 cfg.screenshots,
+                cfg.color,
                 trim_offsets=[plan.trim_start for plan in plans],
                 frame_labels=frame_categories,
             )
@@ -1021,17 +790,12 @@ def run_cli(
     return result
 
 
-@click.command(context_settings={"ignore_unknown_options": True})
+@click.command()
 @click.option("--config", "config_path", default="config.toml", show_default=True, help="Path to config.toml")
 @click.option("--input", "input_dir", default=None, help="Override [paths.input_dir] from config.toml")
-@click.argument("extra_args", nargs=-1, type=click.UNPROCESSED)
-def main(config_path: str, input_dir: str | None, extra_args: tuple[str, ...]) -> None:
-    overrides, leftovers = parse_tonemap_args(list(extra_args))
-    if leftovers:
-        raise click.UsageError(f"Unrecognized arguments: {' '.join(leftovers)}")
-
+def main(config_path: str, input_dir: str | None) -> None:
     try:
-        result = run_cli(config_path, input_dir, tonemap_overrides=overrides or None)
+        result = run_cli(config_path, input_dir)
     except CLIAppError as exc:
         print(exc.rich_message)
         raise click.exceptions.Exit(exc.code) from exc
@@ -1063,7 +827,5 @@ def main(config_path: str, input_dir: str | None, extra_args: tuple[str, ...]) -
 
 if __name__ == "__main__":
     main()
-
-
 
 

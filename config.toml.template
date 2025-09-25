@@ -37,41 +37,29 @@ upscale = true
 single_res = 0
 mod_crop = 2
 letterbox_pillarbox_aware = true
-debug_log_color_ranges = false
 
-[tonemap]
-# HDR to SDR conversion defaults applied when analysis.analyze_in_sdr is true.
-# These values map directly to the TMConfig dataclass and libplacebo.Tonemap parameters.
+[color]
+# HDR → SDR pipeline controls. Presets: reference (bt.2390/100nits/dpd=1),
+# contrast (mobius/120nits/dpd=0), filmic (hable/100nits/dpd=1), or custom values below.
+enable_tonemap = true
 preset = "reference"
-func = "bt2390"
-dpd = false
-dst_max = 100.0
-dst_min = 0.0
-gamut_mapping = "clip"
-smoothing_period = 3
-scene_threshold_low = 0.12
-scene_threshold_high = 0.32
-overlay = false
-verify = false
-verify_metric = "abs"
-verify_frame = 0
-verify_auto_search = true
-verify_search_max = 180
-verify_search_step = 12
-verify_start_frame = 0
-verify_luma_thresh = 0.45
-use_dovi = true
-always_try_placebo = false
-dst_primaries = "bt709"
-dst_transfer = "bt1886"
-dst_matrix = "bt709"
-dst_range = "limited"
-
+tone_curve = "bt.2390"
+dynamic_peak_detection = true
+target_nits = 100.0
+dst_min_nits = 0.1
+overlay_enabled = true
+overlay_text_template = "TM:{tone_curve} dpd={dynamic_peak_detection} dst={target_nits}nits"
+verify_enabled = true
+# verify_frame = 4123  # Uncomment to force a specific frame index for verification
+verify_auto = true
+verify_start_seconds = 10.0
+verify_step_seconds = 10.0
+verify_max_seconds = 90.0
+verify_luma_threshold = 0.10
+strict = false
 
 [slowpics]
 # Auto-upload settings. Leave `auto_upload` off for local runs.
-# When `collection_name` is blank, the CLI auto-names collections with
-# resolved TMDB metadata (Title/Year) or the first filename as a fallback.
 auto_upload = true
 collection_name = ""
 is_hentai = false
@@ -82,15 +70,6 @@ webhook_url = ""
 open_in_browser = true
 create_url_shortcut = true
 delete_screen_dir_after_upload = true
-
-[tmdb]
-# TMDB lookup automation. Provide an API key to enable matching.
-api_key = ""
-unattended = true
-year_tolerance = 2
-enable_anime_parsing = true
-cache_ttl_seconds = 86400
-category_preference = ""
 
 [naming]
 # Controls how GuessIt/Anitopy metadata is turned into labels.

@@ -10,30 +10,15 @@ import tomllib
 from .datatypes import (
     AppConfig,
     AnalysisConfig,
-    NamingConfig,
-    OverridesConfig,
-    PathsConfig,
-    RuntimeConfig,
     ScreenshotConfig,
     SlowpicsConfig,
-    TMDBConfig,
-    TonemapConfig,
+    NamingConfig,
+    PathsConfig,
+    RuntimeConfig,
+    OverridesConfig,
+    ColorConfig,
 )
-from .tonemap.config import ALIAS_KEYS
-from .tonemap.exceptions import TonemapConfigError
 
-
-def _field_is_bool(field) -> bool:
-    field_type = field.type
-    if field_type is bool:
-        return True
-    if isinstance(field_type, str):
-        return field_type.lower() == 'bool'
-    origin = getattr(field_type, '__origin__', None)
-    if origin is bool:
-        return True
-    args = getattr(field_type, '__args__', ())
-    return args and all(arg in {bool, type(None)} for arg in args)
 
 class ConfigError(ValueError):
     """Raised when the configuration file is malformed or fails validation."""
@@ -58,11 +43,8 @@ def _coerce_bool(value: Any, dotted_key: str) -> bool:
 def _sanitize_section(raw: dict[str, Any], name: str, cls):
     if not isinstance(raw, dict):
         raise ConfigError(f"[{name}] must be a table")
-    if cls is TonemapConfig:
-        return _sanitize_tonemap_section(raw)
-
     cleaned: Dict[str, Any] = {}
-    bool_fields = {field.name for field in fields(cls) if _field_is_bool(field)}
+    bool_fields = {field.name for field in fields(cls) if field.type is bool}
     for key, value in raw.items():
         if key in bool_fields:
             cleaned[key] = _coerce_bool(value, f"{name}.{key}")
@@ -72,23 +54,6 @@ def _sanitize_section(raw: dict[str, Any], name: str, cls):
         return cls(**cleaned)
     except TypeError as exc:
         raise ConfigError(f"Invalid keys in [{name}]: {exc}") from exc
-
-
-def _sanitize_tonemap_section(raw: dict[str, Any]) -> TonemapConfig:
-    bool_fields = {"dpd", "overlay", "verify", "verify_auto_search", "use_dovi", "always_try_placebo"}
-    prepared: Dict[str, Any] = {}
-    for key, value in raw.items():
-        alias = ALIAS_KEYS.get(key.strip().lower().replace("-", "_"), key)
-        dotted = f"tonemap.{alias}"
-        if alias in bool_fields:
-            prepared[key] = _coerce_bool(value, dotted)
-        else:
-            prepared[key] = value
-    try:
-        cfg = TonemapConfig.from_mapping(prepared)
-    except TonemapConfigError as exc:
-        raise ConfigError(f"tonemap.{exc.field} {exc.problem}") from exc
-    return cfg
 
 
 def _validate_trim(mapping: Dict[str, Any], label: str) -> None:
@@ -126,19 +91,13 @@ def load_config(path: str) -> AppConfig:
     app = AppConfig(
         analysis=_sanitize_section(raw.get("analysis", {}), "analysis", AnalysisConfig),
         screenshots=_sanitize_section(raw.get("screenshots", {}), "screenshots", ScreenshotConfig),
-        tonemap=_sanitize_section(raw.get("tonemap", {}), "tonemap", TonemapConfig),
         slowpics=_sanitize_section(raw.get("slowpics", {}), "slowpics", SlowpicsConfig),
-        tmdb=_sanitize_section(raw.get("tmdb", {}), "tmdb", TMDBConfig),
         naming=_sanitize_section(raw.get("naming", {}), "naming", NamingConfig),
         paths=_sanitize_section(raw.get("paths", {}), "paths", PathsConfig),
         runtime=_sanitize_section(raw.get("runtime", {}), "runtime", RuntimeConfig),
         overrides=_sanitize_section(raw.get("overrides", {}), "overrides", OverridesConfig),
+        color=_sanitize_section(raw.get("color", {}), "color", ColorConfig),
     )
-
-    try:
-        app.tonemap = app.tonemap.resolved()
-    except TonemapConfigError as exc:
-        raise ConfigError(f"tonemap.{exc.field} {exc.problem}") from exc
 
     if app.analysis.step < 1:
         raise ConfigError("analysis.step must be >= 1")
@@ -167,21 +126,21 @@ def load_config(path: str) -> AppConfig:
     if app.slowpics.remove_after_days < 0:
         raise ConfigError("slowpics.remove_after_days must be >= 0")
 
-    if app.tmdb.year_tolerance < 0:
-        raise ConfigError("tmdb.year_tolerance must be >= 0")
-    if app.tmdb.cache_ttl_seconds < 0:
-        raise ConfigError("tmdb.cache_ttl_seconds must be >= 0")
-    if app.tmdb.category_preference is not None:
-        pref = app.tmdb.category_preference.upper()
-        if pref not in {"", "MOVIE", "TV"}:
-            raise ConfigError("tmdb.category_preference must be MOVIE, TV, or omitted")
-        app.tmdb.category_preference = pref or None
-
     if app.runtime.ram_limit_mb <= 0:
         raise ConfigError("runtime.ram_limit_mb must be > 0")
 
-    if app.tonemap.dst_max <= 0:
-        raise ConfigError("tonemap.dst_max must be > 0")
+    if app.color.target_nits <= 0:
+        raise ConfigError("color.target_nits must be > 0")
+    if app.color.dst_min_nits < 0:
+        raise ConfigError("color.dst_min_nits must be >= 0")
+    if app.color.verify_luma_threshold < 0 or app.color.verify_luma_threshold > 1:
+        raise ConfigError("color.verify_luma_threshold must be between 0 and 1")
+    if app.color.verify_start_seconds < 0:
+        raise ConfigError("color.verify_start_seconds must be >= 0")
+    if app.color.verify_step_seconds <= 0:
+        raise ConfigError("color.verify_step_seconds must be > 0")
+    if app.color.verify_max_seconds < 0:
+        raise ConfigError("color.verify_max_seconds must be >= 0")
 
     _validate_trim(app.overrides.trim, "overrides.trim")
     _validate_trim(app.overrides.trim_end, "overrides.trim_end")

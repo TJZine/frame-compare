@@ -9,11 +9,10 @@ import subprocess
 import re
 from functools import partial
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, TypedDict
+from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
-from src.datatypes import ScreenshotConfig
-
-_INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+from .datatypes import ColorConfig, ScreenshotConfig
+from . import vs_core
 
 _INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -21,137 +20,7 @@ _INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 logger = logging.getLogger(__name__)
 
 
-_DEBUG_PROP_KEYS = ("_Matrix", "_Transfer", "_Primaries", "_ColorRange")
-_COLOR_RANGE_LABELS = {
-    0: "Full (0)",
-    1: "Limited (1)",
-    2: "Undefined (2)",
-    3: "Variable (3)",
-}
-
-
-class _GeometryPlan(TypedDict, total=False):
-    width: int
-    height: int
-    crop: tuple[int, int, int, int]
-    cropped_w: int
-    cropped_h: int
-    scaled: tuple[int, int]
-
-
-def _normalize_prop_value(value: Any) -> Any:
-    if isinstance(value, bytes):
-        return value.decode("utf-8", "ignore")
-    return value
-
-
-def _describe_vs_format(fmt: Any) -> str:
-    if fmt is None:
-        return "unknown"
-    name = getattr(fmt, "name", None)
-    if isinstance(name, str) and name:
-        return name
-    identifier = getattr(fmt, "id", None)
-    if identifier is not None:
-        return f"id={identifier}"
-    return str(fmt)
-
-
-def _describe_color_range(value: Any) -> str:
-    normalized = _normalize_prop_value(value)
-    if isinstance(normalized, int):
-        label = _COLOR_RANGE_LABELS.get(normalized)
-        return label or f"{normalized}"
-    if isinstance(normalized, str):
-        return normalized
-    return str(normalized)
-
-
-def _pick_debug_frame_index(clip: Any, frame_idx: int) -> int:
-    total = getattr(clip, "num_frames", None)
-    if isinstance(total, int) and total > 0:
-        return max(0, min(int(frame_idx), total - 1))
-    return max(0, int(frame_idx))
-
-
-def _collect_clip_debug_info(clip: Any, frame_idx: int) -> Dict[str, Any]:
-    info: Dict[str, Any] = {}
-    width = getattr(clip, "width", None)
-    height = getattr(clip, "height", None)
-    if isinstance(width, int) and isinstance(height, int):
-        info["dimensions"] = f"{width}x{height}"
-    info["format"] = _describe_vs_format(getattr(clip, "format", None))
-
-    sample_idx = _pick_debug_frame_index(clip, frame_idx)
-    try:
-        frame = clip.get_frame(sample_idx)
-    except Exception as exc:  # pragma: no cover - best effort diagnostics
-        info["frame_error"] = f"{type(exc).__name__}: {exc}"
-        return info
-
-    props: Dict[str, Any] = {}
-    for key in _DEBUG_PROP_KEYS:
-        if key in frame.props:
-            props[key] = _normalize_prop_value(frame.props.get(key))
-    if props:
-        info["props"] = props
-        if "_ColorRange" in props:
-            info["color_range"] = _describe_color_range(props["_ColorRange"])
-    return info
-
-
-def _summarize_debug_info(info: Dict[str, Any]) -> str:
-    parts: List[str] = []
-    dimensions = info.get("dimensions")
-    if dimensions:
-        parts.append(f"dims={dimensions}")
-    fmt = info.get("format")
-    if fmt:
-        parts.append(f"fmt={fmt}")
-    color_range = info.get("color_range")
-    if color_range:
-        parts.append(f"range={color_range}")
-    props = info.get("props")
-    if isinstance(props, dict) and props:
-        prop_parts = []
-        for key in _DEBUG_PROP_KEYS:
-            if key in props:
-                prop_parts.append(f"{key}={props[key]}")
-        if prop_parts:
-            parts.append("props[" + ", ".join(prop_parts) + "]")
-    frame_error = info.get("frame_error")
-    if frame_error:
-        parts.append(f"frame_error={frame_error}")
-    return ", ".join(parts) if parts else "no data"
-
-
-def _debug_dump_range(stage: str, clip: Any, frame_idx: int) -> None:
-    """Emit debug diagnostics for *clip* at *stage* when debug logging is enabled."""
-
-    if not logger.isEnabledFor(logging.DEBUG):
-        return
-
-    try:
-        info = _collect_clip_debug_info(clip, frame_idx)
-    except Exception as exc:  # pragma: no cover - diagnostics best effort
-        logger.debug(
-            "Failed to gather debug info for '%s' frame %d: %s",
-            stage,
-            frame_idx,
-            exc,
-        )
-        return
-
-    summary = _summarize_debug_info(info)
-    logger.debug(
-        "Clip debug for '%s' frame %d: %s",
-        stage,
-        frame_idx,
-        summary,
-    )
-
-
-def _ensure_rgb24(core: Any, clip: Any, frame_idx: int) -> Any:
+def _ensure_rgb24(core, clip, frame_idx):
     try:
         import vapoursynth as vs  # type: ignore
     except Exception as exc:  # pragma: no cover - requires runtime deps
@@ -161,15 +30,7 @@ def _ensure_rgb24(core: Any, clip: Any, frame_idx: int) -> Any:
     color_family = getattr(fmt, "color_family", None) if fmt is not None else None
     bits = getattr(fmt, "bits_per_sample", None) if fmt is not None else None
     if color_family == getattr(vs, "RGB", object()) and bits == 8:
-        try:
-            return clip.std.SetFrameProps(
-                _Matrix=1,
-                _Primaries=1,
-                _Transfer=1,
-                _ColorRange=0,
-            )
-        except Exception:
-            return clip
+        return clip
 
     resize_ns = getattr(core, "resize", None)
     if resize_ns is None:
@@ -186,17 +47,17 @@ def _ensure_rgb24(core: Any, clip: Any, frame_idx: int) -> Any:
 
     try:
         converted = converted.std.SetFrameProps(
-            _Matrix=1,
-            _Primaries=1,
-            _Transfer=1,
-            _ColorRange=0,
+            _Matrix="bt709",
+            _Primaries="bt709",
+            _Transfer="bt1886",
+            _ColorRange="limited",
         )
     except Exception:  # pragma: no cover - best effort
         pass
     return converted
 
 
-def _clamp_frame_index(clip: Any, frame_idx: int) -> tuple[int, bool]:
+def _clamp_frame_index(clip, frame_idx: int) -> tuple[int, bool]:
     total_frames = getattr(clip, "num_frames", None)
     if not isinstance(total_frames, int) or total_frames <= 0:
         return max(0, int(frame_idx)), False
@@ -206,24 +67,9 @@ def _clamp_frame_index(clip: Any, frame_idx: int) -> tuple[int, bool]:
 
 
 FRAME_INFO_STYLE = 'sans-serif,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,"0,0,0,0,100,100,0,0,1,2,0,7,10,10,10,1"'
-FRAME_INFO_BOTTOM_LEFT_STYLE = 'sans-serif,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,"0,0,0,0,100,100,0,0,1,2,0,1,10,10,10,1"'
 
 
-def _decode_prop_text(value: object) -> str:
-    if isinstance(value, bytes):
-        return value.decode("utf-8", "ignore")
-    if isinstance(value, str):
-        return value
-    return ""
-
-
-def _apply_frame_info_overlay(
-    core: Any,
-    clip: Any,
-    title: str,
-    requested_frame: int | None,
-    selection_label: str | None,
-) -> Any:
+def _apply_frame_info_overlay(core, clip, title: str, requested_frame: int | None, selection_label: str | None) -> object:
     try:
         import vapoursynth as vs  # type: ignore
     except Exception:  # pragma: no cover - requires runtime deps
@@ -237,48 +83,9 @@ def _apply_frame_info_overlay(
 
     frame_eval = getattr(std_ns, 'FrameEval', None)
     subtitle = getattr(sub_ns, 'Subtitle', None)
-    text_ns = getattr(core, 'text', None)
-    draw_text = getattr(text_ns, 'Text', None) if text_ns is not None else None
     if not callable(frame_eval) or not callable(subtitle):
         logger.debug('Required VapourSynth overlay functions unavailable; skipping frame overlay')
         return clip
-
-    try:
-        limited_clip = clip.std.SetFrameProps(_ColorRange=0)
-    except Exception:  # pragma: no cover - best effort
-        limited_clip = clip
-    convert_back = None
-    set_frame_props = getattr(std_ns, "SetFrameProps", None)
-    resize_ns = getattr(core, "resize", None)
-    point: Callable[..., Any] | None = None
-    if resize_ns is not None:
-        candidate = getattr(resize_ns, "Point", None)
-        if callable(candidate):
-            point = candidate
-
-    if callable(point):
-        try:
-            limited_clip = point(clip, range=vs.RANGE_LIMITED, dither_type="none")
-            if callable(set_frame_props):
-                try:
-                    limited_clip = set_frame_props(limited_clip, _ColorRange=1)
-                except Exception:  # pragma: no cover - best effort
-                    logger.debug('Failed to tag limited range frame props for frame overlay', exc_info=True)
-
-            def _restore_full_range(node):
-                restored = point(node, range=vs.RANGE_FULL, dither_type="none")
-                if callable(set_frame_props):
-                    try:
-                        restored = set_frame_props(restored, _ColorRange=0)
-                    except Exception:  # pragma: no cover - best effort
-                        logger.debug('Failed to tag full range frame props after frame overlay', exc_info=True)
-                return restored
-
-            convert_back = _restore_full_range
-        except Exception:  # pragma: no cover - best effort
-            logger.debug('Failed to convert clip to limited range for frame overlay', exc_info=True)
-            limited_clip = clip
-            convert_back = None
 
     label = title.strip() if isinstance(title, str) else ''
     if not label:
@@ -286,13 +93,7 @@ def _apply_frame_info_overlay(
 
     padding_title = " " + ("\n" * 3)
 
-    def _draw_info(
-        n: int,
-        f: Any,
-        clip_ref: Any,
-        *,
-        draw_text_fn: Callable[[Any, str], Any] | None = None,
-    ) -> Any:
+    def _draw_info(n: int, f, clip_ref):
         pict = f.props.get('_PictType')
         if isinstance(pict, bytes):
             pict_text = pict.decode('utf-8', 'ignore')
@@ -305,37 +106,55 @@ def _apply_frame_info_overlay(
             f"Frame {display_idx} of {clip_ref.num_frames}",
             f"Picture type: {pict_text}",
         ]
-        info = "\n".join(lines)
-        result = subtitle(clip_ref, text=[info], style=FRAME_INFO_STYLE)
         if selection_label:
-            content_info = f"Content Type: {selection_label}"
-            result = subtitle(result, text=[content_info], style=FRAME_INFO_BOTTOM_LEFT_STYLE)
-        tonemap_text = _decode_prop_text(
-            f.props.get('_TonemapOverlay') or f.props.get('_Tonemapped')
-        )
-        if tonemap_text and callable(draw_text_fn):
-            try:
-                result = draw_text_fn(result, tonemap_text, alignment=9, scale=1)
-            except Exception as exc:  # pragma: no cover - defensive
-                logger.debug('Tonemap overlay draw failed: %s', exc)
-        return result
+            lines.append(f"Content Type: {selection_label}")
+        info = "\n".join(lines)
+        return subtitle(clip_ref, text=[info], style=FRAME_INFO_STYLE)
 
     try:
-        info_clip = frame_eval(
-            limited_clip,
-            partial(_draw_info, clip_ref=limited_clip, draw_text_fn=draw_text),
-            prop_src=limited_clip,
-        )
-        result = subtitle(info_clip, text=[padding_title + label], style=FRAME_INFO_STYLE)
-        if callable(convert_back):
-            try:
-                result = convert_back(result)
-            except Exception:  # pragma: no cover - best effort
-                logger.debug('Failed to restore full range after frame overlay', exc_info=True)
-        return result
+        info_clip = frame_eval(clip, partial(_draw_info, clip_ref=clip), prop_src=clip)
+        return subtitle(info_clip, text=[padding_title + label], style=FRAME_INFO_STYLE)
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug('Applying frame overlay failed: %s', exc)
         return clip
+
+
+def _apply_overlay_text(
+    core,
+    clip,
+    text: Optional[str],
+    *,
+    strict: bool,
+    state: Dict[str, str],
+    file_label: str,
+) -> object:
+    if not text:
+        return clip
+    status = state.get("overlay_status")
+    if status == "error":
+        return clip
+    text_ns = getattr(core, "text", None)
+    draw = getattr(text_ns, "Text", None) if text_ns is not None else None
+    if not callable(draw):
+        message = f"Overlay filter unavailable for {file_label}"
+        logger.error('[OVERLAY] %s', message)
+        state["overlay_status"] = "error"
+        if strict:
+            raise ScreenshotWriterError(message)
+        return clip
+    try:
+        result = draw(clip, text, alignment=9)
+    except Exception as exc:  # pragma: no cover - defensive
+        message = f"Overlay failed for {file_label}: {exc}"
+        logger.error('[OVERLAY] %s', message)
+        state["overlay_status"] = "error"
+        if strict:
+            raise ScreenshotWriterError(message) from exc
+        return clip
+    if status != "ok":
+        logger.info('[OVERLAY] %s applied', file_label)
+        state["overlay_status"] = "ok"
+    return result
 
 
 class ScreenshotError(RuntimeError):
@@ -350,102 +169,49 @@ class ScreenshotWriterError(ScreenshotError):
     """Raised when the underlying writer fails."""
 
 
-def _snap_pair_to_mod(first: int, second: int, total: int, mod: int) -> tuple[int, int]:
-    """Snap a crop pair to *mod* multiples without exceeding *total*."""
+def plan_mod_crop(width: int, height: int, mod: int, letterbox_pillarbox_aware: bool) -> Tuple[int, int, int, int]:
+    """Plan left/top/right/bottom croppings so dimensions align to *mod*."""
 
-    if total <= 0:
-        return (0, 0)
-
-    first = max(0, min(first, total))
-    if mod <= 1:
-        return (first, max(0, total - first))
-
-    if first % mod != 0:
-        first += mod - (first % mod)
-    first = min(first, total)
-    second = total - first
-
-    remainder = second % mod
-    if remainder != 0:
-        shift = remainder
-        if first - shift >= 0:
-            first -= shift
-            second += shift
-        else:
-            second += mod - remainder
-
-    first = max(0, first - (first % mod))
-    second = max(0, second - (second % mod))
-
-    while first + second > total:
-        if first >= mod:
-            first -= mod
-        elif second >= mod:
-            second -= mod
-        else:
-            break
-
-    first = max(0, min(first, total))
-    second = max(0, min(second, total - first))
-    return (first, second)
-
-
-def plan_mod_crop(
-    dimensions: Sequence[tuple[int, int]],
-    mod: int,
-    letterbox_pillarbox_aware: bool,
-) -> list[tuple[int, int, int, int]]:
-    """Plan per-clip crops mirroring the legacy heuristics."""
-
-    if not dimensions:
-        return []
-
-    valid = [(w, h) for w, h in dimensions if w > 0 and h > 0]
-    if not valid:
+    if width <= 0 or height <= 0:
         raise ScreenshotGeometryError("Clip dimensions must be positive")
+    if mod <= 1:
+        return (0, 0, 0, 0)
 
-    target_w = min(w for w, _ in valid)
-    target_h = min(h for _, h in valid)
-    same_w = all(w == valid[0][0] for w, _ in valid)
-    same_h = all(h == valid[0][1] for _, h in valid)
+    def _axis_crop(size: int) -> Tuple[int, int]:
+        remainder = size % mod
+        if remainder == 0:
+            return (0, 0)
+        before = remainder // 2
+        after = remainder - before
+        return (before, after)
 
-    plans: list[tuple[int, int, int, int]] = []
-    for width, height in dimensions:
-        if width <= 0 or height <= 0:
-            raise ScreenshotGeometryError("Clip dimensions must be positive")
+    left, right = _axis_crop(width)
+    top, bottom = _axis_crop(height)
 
-        wdiff = max(0, width - target_w)
-        hdiff = max(0, height - target_h)
+    if letterbox_pillarbox_aware:
+        if width > height and (top + bottom) == 0 and (left + right) > 0:
+            total = left + right
+            left = total // 2
+            right = total - left
+        elif height >= width and (left + right) == 0 and (top + bottom) > 0:
+            total = top + bottom
+            top = total // 2
+            bottom = total - top
 
-        if letterbox_pillarbox_aware and same_w and not same_h:
-            left = right = 0
-            top = hdiff // 2
-            bottom = hdiff - top
-            top, bottom = _snap_pair_to_mod(top, bottom, hdiff, mod)
-        elif letterbox_pillarbox_aware and same_h and not same_w:
-            top = bottom = 0
-            left = wdiff // 2
-            right = wdiff - left
-            left, right = _snap_pair_to_mod(left, right, wdiff, mod)
-        else:
-            left = wdiff // 2
-            right = wdiff - left
-            top = hdiff // 2
-            bottom = hdiff - top
-            left, right = _snap_pair_to_mod(left, right, wdiff, mod)
-            top, bottom = _snap_pair_to_mod(top, bottom, hdiff, mod)
+    cropped_w = width - left - right
+    cropped_h = height - top - bottom
+    if cropped_w <= 0 or cropped_h <= 0:
+        raise ScreenshotGeometryError("Cropping removed all pixels")
 
-        plans.append((left, top, right, bottom))
-
-    return plans
+    return (left, top, right, bottom)
 
 
 def _compute_scaled_dimensions(
     width: int,
     height: int,
-    crop: tuple[int, int, int, int],
+    crop: Tuple[int, int, int, int],
     target_height: int,
-) -> tuple[int, int]:
+) -> Tuple[int, int]:
     cropped_w = width - crop[0] - crop[2]
     cropped_h = height - crop[1] - crop[3]
     if cropped_w <= 0 or cropped_h <= 0:
@@ -458,22 +224,15 @@ def _compute_scaled_dimensions(
     return (target_w, desired_h)
 
 
-def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> list[_GeometryPlan]:
-    dimensions: list[tuple[int, int]] = []
+def _plan_geometry(clips: Sequence[object], cfg: ScreenshotConfig) -> List[dict[str, object]]:
+    plans: List[dict[str, object]] = []
     for clip in clips:
         width = getattr(clip, "width", None)
         height = getattr(clip, "height", None)
         if not isinstance(width, int) or not isinstance(height, int):
             raise ScreenshotGeometryError("Clip missing width/height metadata")
-        if width <= 0 or height <= 0:
-            raise ScreenshotGeometryError("Clip dimensions must be positive")
 
-        dimensions.append((width, height))
-
-    crops = plan_mod_crop(dimensions, cfg.mod_crop, cfg.letterbox_pillarbox_aware)
-
-    plans: list[_GeometryPlan] = []
-    for (width, height), crop in zip(dimensions, crops):
+        crop = plan_mod_crop(width, height, cfg.mod_crop, cfg.letterbox_pillarbox_aware)
         cropped_w = width - crop[0] - crop[2]
         cropped_h = height - crop[1] - crop[3]
         if cropped_w <= 0 or cropped_h <= 0:
@@ -481,30 +240,26 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> list[_Geometr
 
         plans.append(
             {
-                "width": int(width),
-                "height": int(height),
+                "width": width,
+                "height": height,
                 "crop": crop,
-                "cropped_w": int(cropped_w),
-                "cropped_h": int(cropped_h),
+                "cropped_w": cropped_w,
+                "cropped_h": cropped_h,
             }
         )
 
-    single_res_target: Optional[int] = int(cfg.single_res) if cfg.single_res > 0 else None
+    single_res_target = int(cfg.single_res) if cfg.single_res > 0 else None
     if single_res_target is not None:
-        desired_height: Optional[int] = max(1, single_res_target)
-        global_target: Optional[int] = None
+        desired_height = max(1, single_res_target)
+        global_target = None
     else:
         desired_height = None
-        if cfg.upscale:
-            cropped_values = [plan["cropped_h"] for plan in plans]
-            global_target = max(cropped_values) if cropped_values else None
-        else:
-            global_target = None
+        global_target = max((plan["cropped_h"] for plan in plans), default=None) if cfg.upscale else None
 
     for plan in plans:
         cropped_h = int(plan["cropped_h"])
         if desired_height is not None:
-            target_h = int(desired_height)
+            target_h = desired_height
             if not cfg.upscale and target_h > cropped_h:
                 target_h = cropped_h
         elif global_target is not None:
@@ -515,7 +270,7 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> list[_Geometr
         plan["scaled"] = _compute_scaled_dimensions(
             int(plan["width"]),
             int(plan["height"]),
-            tuple(plan["crop"]),
+            plan["crop"],
             target_h,
         )
 
@@ -562,15 +317,19 @@ def _map_png_compression_level(level: int) -> int:
 
 
 def _save_frame_with_fpng(
-    clip: Any,
+    clip,
     frame_idx: int,
-    crop: tuple[int, int, int, int],
-    scaled: tuple[int, int],
+    crop: Tuple[int, int, int, int],
+    scaled: Tuple[int, int],
     path: Path,
     cfg: ScreenshotConfig,
     label: str,
     requested_frame: int,
     selection_label: str | None = None,
+    *,
+    overlay_text: Optional[str] = None,
+    overlay_state: Optional[Dict[str, str]] = None,
+    strict_overlay: bool = False,
 ) -> None:
     try:
         import vapoursynth as vs  # type: ignore
@@ -587,19 +346,6 @@ def _save_frame_with_fpng(
         raise ScreenshotWriterError("VapourSynth fpng.Write plugin is unavailable")
 
     work = clip
-    debug_enabled = bool(getattr(cfg, "debug_log_color_ranges", False))
-    debug_records: List[tuple[str, Dict[str, Any]]] = []
-
-    def _record(stage: str, node: Any) -> None:
-        if not debug_enabled:
-            return
-        try:
-            info = _collect_clip_debug_info(node, frame_idx)
-        except Exception as exc:  # pragma: no cover - diagnostics only
-            logger.debug("Failed to collect debug info for stage %s: %s", stage, exc)
-            info = {"frame_error": f"{type(exc).__name__}: {exc}"}
-        debug_records.append((stage, info))
-
     try:
         left, top, right, bottom = crop
         if any(crop):
@@ -613,48 +359,50 @@ def _save_frame_with_fpng(
             if not callable(resampler):
                 raise ScreenshotWriterError("VapourSynth resize.Spline36 is unavailable")
             work = resampler(work, width=target_w, height=target_h)
-        _record("post_geometry", work)
     except Exception as exc:
         raise ScreenshotWriterError(f"Failed to prepare frame {frame_idx}: {exc}") from exc
 
     render_clip = work
-    _debug_dump_range('pre_overlay', render_clip, frame_idx)
     if cfg.add_frame_info:
         render_clip = _apply_frame_info_overlay(core, render_clip, label, requested_frame, selection_label)
-        _record("post_frame_info", render_clip)
+
+    overlay_state = overlay_state or {}
+    render_clip = _apply_overlay_text(
+        core,
+        render_clip,
+        overlay_text,
+        strict=strict_overlay,
+        state=overlay_state,
+        file_label=label,
+    )
 
     render_clip = _ensure_rgb24(core, render_clip, frame_idx)
-    _record("post_rgb24", render_clip)
 
     compression = _map_fpng_compression(cfg.compression_level)
     try:
         job = writer(render_clip, str(path), compression=compression, overwrite=True)
         job.get_frame(frame_idx)
     except Exception as exc:
-        summary = ""
-        if debug_enabled and debug_records:
-            summary_parts = []
-            for stage, info in debug_records:
-                summary_str = _summarize_debug_info(info)
-                summary_parts.append(f"{stage} -> {summary_str}")
-                logger.warning(
-                    "VapourSynth debug for '%s' frame %d [%s]: %s",
-                    label,
-                    frame_idx,
-                    stage,
-                    summary_str,
-                )
-            summary = "; ".join(summary_parts)
-        message = f"fpng failed for frame {frame_idx} ({label}): {exc}"
-        if summary:
-            message = f"{message} [debug: {summary}]"
-        raise ScreenshotWriterError(message) from exc
+        raise ScreenshotWriterError(f"fpng failed for frame {frame_idx}: {exc}") from exc
 
 
 def _map_ffmpeg_compression(level: int) -> int:
     """Map config compression level to ffmpeg's PNG compression scale."""
 
     return _map_png_compression_level(level)
+
+
+def _escape_drawtext(text: str) -> str:
+    return (
+        text.replace("\\", "\\\\")
+        .replace(":", "\\:")
+        .replace("=", "\\=")
+        .replace(",", "\\,")
+        .replace("[", "\\[")
+        .replace("]", "\\]")
+        .replace("'", "\\'")
+        .replace("\n", "\\\n")
+    )
 
 
 def _resolve_source_frame_index(frame_idx: int, trim_start: int) -> int | None:
@@ -671,13 +419,15 @@ def _resolve_source_frame_index(frame_idx: int, trim_start: int) -> int | None:
 def _save_frame_with_ffmpeg(
     source: str,
     frame_idx: int,
-    crop: tuple[int, int, int, int],
-    scaled: tuple[int, int],
+    crop: Tuple[int, int, int, int],
+    scaled: Tuple[int, int],
     path: Path,
     cfg: ScreenshotConfig,
     width: int,
     height: int,
     selection_label: str | None,
+    *,
+    overlay_text: Optional[str] = None,
 ) -> None:
     if shutil.which("ffmpeg") is None:
         raise ScreenshotWriterError("FFmpeg executable not found in PATH")
@@ -707,6 +457,12 @@ def _save_frame_with_ffmpeg(
             "boxborderw=6:x=10:y=10"
         ).format(text=text)
         filters.append(drawtext)
+    if overlay_text:
+        overlay_cmd = (
+            "drawtext=text={text}:fontcolor=white:box=1:boxcolor=black@0.6:"
+            "boxborderw=6:x=w-tw-10:y=10"
+        ).format(text=_escape_drawtext(overlay_text))
+        filters.append(overlay_cmd)
 
     filter_chain = ",".join(filters)
     cmd = [
@@ -739,12 +495,13 @@ def _save_frame_placeholder(path: Path) -> None:
 
 
 def generate_screenshots(
-    clips: Sequence[Any],
+    clips: Sequence[object],
     frames: Sequence[int],
     files: Sequence[str],
     metadata: Sequence[Mapping[str, str]],
     out_dir: Path,
     cfg: ScreenshotConfig,
+    color_cfg: ColorConfig,
     *,
     trim_offsets: Sequence[int] | None = None,
     progress_callback: Callable[[int], None] | None = None,
@@ -767,10 +524,33 @@ def generate_screenshots(
     out_dir.mkdir(parents=True, exist_ok=True)
     created: List[str] = []
 
-    geometry = _plan_geometry(clips, cfg)
+    processed_results: List[vs_core.ClipProcessResult] = []
+    overlay_states: List[Dict[str, str]] = []
 
-    for clip_index, (clip, file_path, meta, plan, trim_start) in enumerate(
-        zip(clips, files, metadata, geometry, trim_offsets)
+    for clip, file_path in zip(clips, files):
+        result = vs_core.process_clip_for_screenshot(
+            clip,
+            file_path,
+            color_cfg,
+            enable_overlay=True,
+            enable_verification=True,
+            logger_override=logger,
+        )
+        processed_results.append(result)
+        overlay_states.append({})
+        if result.verification is not None:
+            logger.info(
+                "[VERIFY] %s frame=%d avg=%.4f max=%.4f",
+                file_path,
+                result.verification.frame,
+                result.verification.average,
+                result.verification.maximum,
+            )
+
+    geometry = _plan_geometry([result.clip for result in processed_results], cfg)
+
+    for clip_index, (result, file_path, meta, plan, trim_start) in enumerate(
+        zip(processed_results, files, metadata, geometry, trim_offsets)
     ):
         if frame_labels:
             logger.debug('frame_labels keys: %s', list(frame_labels.keys()))
@@ -781,17 +561,20 @@ def generate_screenshots(
         trim_start = int(trim_start)
         raw_label, safe_label = _derive_labels(file_path, meta)
 
+        overlay_state = overlay_states[clip_index]
+        overlay_text = result.overlay_text
+
         for frame in frames:
             frame_idx = int(frame)
             selection_label = frame_labels.get(frame_idx) if frame_labels else None
             if selection_label is not None:
                 logger.debug('Selection label for frame %s: %s', frame_idx, selection_label)
-            actual_idx, was_clamped = _clamp_frame_index(clip, frame_idx)
+            actual_idx, was_clamped = _clamp_frame_index(result.clip, frame_idx)
             if was_clamped:
                 logger.debug(
                     "Frame %s exceeds available frames (%s) in %s; using %s",
                     frame_idx,
-                    getattr(clip, 'num_frames', 'unknown'),
+                    getattr(result.clip, 'num_frames', 'unknown'),
                     file_path,
                     actual_idx,
                 )
@@ -808,6 +591,9 @@ def generate_screenshots(
                         file_path,
                     )
                 if use_ffmpeg:
+                    if overlay_text and overlay_state.get("overlay_status") != "ok":
+                        logger.info("[OVERLAY] %s applied (ffmpeg)", file_path)
+                        overlay_state["overlay_status"] = "ok"
                     _save_frame_with_ffmpeg(
                         file_path,
                         resolved_frame,
@@ -818,9 +604,23 @@ def generate_screenshots(
                         width,
                         height,
                         selection_label,
+                        overlay_text=overlay_text,
                     )
                 else:
-                    _save_frame_with_fpng(clip, actual_idx, crop, scaled, target_path, cfg, raw_label, frame_idx, selection_label)
+                    _save_frame_with_fpng(
+                        result.clip,
+                        actual_idx,
+                        crop,
+                        scaled,
+                        target_path,
+                        cfg,
+                        raw_label,
+                        frame_idx,
+                        selection_label,
+                        overlay_text=overlay_text,
+                        overlay_state=overlay_state,
+                        strict_overlay=bool(getattr(color_cfg, "strict", False)),
+                    )
             except ScreenshotWriterError:
                 raise
             except Exception as exc:

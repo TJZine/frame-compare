@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
-from .datatypes import AnalysisConfig, TonemapConfig
+from .datatypes import AnalysisConfig, ColorConfig
 from . import vs_core
 
 
@@ -77,7 +77,7 @@ def _quantile(sequence: Sequence[float], q: float) -> float:
     return sorted_vals[lower_index] * (1 - fraction) + sorted_vals[upper_index] * fraction
 
 
-def _config_fingerprint(cfg: AnalysisConfig, tonemap_cfg: TonemapConfig | None = None) -> str:
+def _config_fingerprint(cfg: AnalysisConfig) -> str:
     """Return a stable hash for config fields that influence metrics generation."""
 
     relevant = {
@@ -101,24 +101,6 @@ def _config_fingerprint(cfg: AnalysisConfig, tonemap_cfg: TonemapConfig | None =
         "ignore_trail_seconds": cfg.ignore_trail_seconds,
         "min_window_seconds": cfg.min_window_seconds,
     }
-    if cfg.analyze_in_sdr:
-        tonemap = tonemap_cfg or TonemapConfig()
-        relevant["tonemap"] = {
-            "func": tonemap.func,
-            "dpd": tonemap.dpd,
-            "dst_max": tonemap.dst_max,
-            "dst_min": tonemap.dst_min,
-            "gamut_mapping": tonemap.gamut_mapping,
-            "smoothing_period": tonemap.smoothing_period,
-            "scene_threshold_low": tonemap.scene_threshold_low,
-            "scene_threshold_high": tonemap.scene_threshold_high,
-            "dst_primaries": tonemap.dst_primaries,
-            "dst_transfer": tonemap.dst_transfer,
-            "dst_matrix": tonemap.dst_matrix,
-            "dst_range": tonemap.dst_range,
-            "use_dovi": tonemap.use_dovi,
-            "always_try_placebo": tonemap.always_try_placebo,
-        }
     payload = json.dumps(relevant, sort_keys=True).encode("utf-8")
     return hashlib.sha1(payload).hexdigest()
 
@@ -215,7 +197,7 @@ def compute_selection_window(
     )
 
 
-def _selection_fingerprint(cfg: AnalysisConfig, tonemap_cfg: TonemapConfig | None = None) -> str:
+def _selection_fingerprint(cfg: AnalysisConfig) -> str:
     relevant = {
         "frame_count_dark": cfg.frame_count_dark,
         "frame_count_bright": cfg.frame_count_bright,
@@ -236,30 +218,12 @@ def _selection_fingerprint(cfg: AnalysisConfig, tonemap_cfg: TonemapConfig | Non
         "ignore_trail_seconds": cfg.ignore_trail_seconds,
         "min_window_seconds": cfg.min_window_seconds,
     }
-    if cfg.analyze_in_sdr:
-        tonemap = tonemap_cfg or TonemapConfig()
-        relevant["tonemap"] = {
-            "func": tonemap.func,
-            "dpd": tonemap.dpd,
-            "dst_max": tonemap.dst_max,
-            "dst_min": tonemap.dst_min,
-            "gamut_mapping": tonemap.gamut_mapping,
-            "smoothing_period": tonemap.smoothing_period,
-            "scene_threshold_low": tonemap.scene_threshold_low,
-            "scene_threshold_high": tonemap.scene_threshold_high,
-            "dst_primaries": tonemap.dst_primaries,
-            "dst_transfer": tonemap.dst_transfer,
-            "dst_matrix": tonemap.dst_matrix,
-            "dst_range": tonemap.dst_range,
-            "use_dovi": tonemap.use_dovi,
-            "always_try_placebo": tonemap.always_try_placebo,
-        }
     payload = json.dumps(relevant, sort_keys=True).encode("utf-8")
     return hashlib.sha1(payload).hexdigest()
 
 
 def _load_cached_metrics(
-    info: FrameMetricsCacheInfo, cfg: AnalysisConfig, tonemap_cfg: TonemapConfig | None = None
+    info: FrameMetricsCacheInfo, cfg: AnalysisConfig
 ) -> Optional[CachedMetrics]:
     path = info.path
     try:
@@ -276,7 +240,7 @@ def _load_cached_metrics(
 
     if data.get("version") != 1:
         return None
-    if data.get("config_hash") != _config_fingerprint(cfg, tonemap_cfg):
+    if data.get("config_hash") != _config_fingerprint(cfg):
         return None
     if data.get("files") != list(info.files):
         return None
@@ -340,7 +304,6 @@ def _save_cached_metrics(
     brightness: Sequence[tuple[int, float]],
     motion: Sequence[tuple[int, float]],
     *,
-    tonemap_cfg: TonemapConfig | None = None,
     selection_hash: Optional[str] = None,
     selection_frames: Optional[Sequence[int]] = None,
     selection_categories: Optional[Dict[int, str]] = None,
@@ -348,7 +311,7 @@ def _save_cached_metrics(
     path = info.path
     payload = {
         "version": 1,
-        "config_hash": _config_fingerprint(cfg, tonemap_cfg),
+        "config_hash": _config_fingerprint(cfg),
         "files": list(info.files),
         "analyzed_file": info.analyzed_file,
         "release_group": info.release_group,
@@ -526,17 +489,15 @@ def select_frames(
     cache_info: Optional[FrameMetricsCacheInfo] = None,
     progress: Callable[[int], None] | None = None,
     *,
-    tonemap_cfg: TonemapConfig | None = None,
     frame_window: tuple[int, int] | None = None,
     return_metadata: bool = False,
+    color_cfg: Optional[ColorConfig] = None,
 ) -> List[int] | Tuple[List[int], Dict[int, str]]:
     """Select frame indices for comparison using quantiles and motion heuristics."""
 
     num_frames = int(getattr(clip, "num_frames", 0))
     if num_frames <= 0:
         return []
-
-    tonemap = tonemap_cfg or TonemapConfig()
 
     window_start = 0
     window_end = num_frames
@@ -589,16 +550,24 @@ def select_frames(
 
     analysis_clip = clip
     if cfg.analyze_in_sdr:
-        analysis_clip = vs_core.process_clip_for_screenshot(clip, file_under_analysis, tonemap)
+        if color_cfg is None:
+            raise ValueError("color_cfg must be provided when analyze_in_sdr is enabled")
+        result = vs_core.process_clip_for_screenshot(
+            clip,
+            file_under_analysis,
+            color_cfg,
+            enable_overlay=False,
+            enable_verification=False,
+            logger_override=logger,
+        )
+        analysis_clip = result.clip
 
     step = max(1, int(cfg.step))
     indices = list(range(window_start, window_end, step))
 
-    cached_metrics = (
-        _load_cached_metrics(cache_info, cfg, tonemap) if cache_info is not None else None
-    )
+    cached_metrics = _load_cached_metrics(cache_info, cfg) if cache_info is not None else None
 
-    selection_hash = _selection_fingerprint(cfg, tonemap)
+    selection_hash = _selection_fingerprint(cfg)
     cached_selection: Optional[List[int]] = None
     cached_categories: Optional[Dict[int, str]] = None
 
@@ -788,7 +757,6 @@ def select_frames(
                 cfg,
                 brightness,
                 motion,
-                tonemap_cfg=tonemap,
                 selection_hash=selection_hash,
                 selection_frames=final_frames,
                 selection_categories=frame_categories,

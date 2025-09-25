@@ -1,8 +1,9 @@
 from pathlib import Path
+import types
 
 import pytest
 
-from src.datatypes import ScreenshotConfig
+from src.datatypes import ColorConfig, ScreenshotConfig
 from src import screenshot
 
 
@@ -10,6 +11,14 @@ class FakeClip:
     def __init__(self, width: int, height: int):
         self.width = width
         self.height = height
+
+
+@pytest.fixture(autouse=True)
+def _stub_process_clip(monkeypatch):
+    def _stub(clip, file_name, color_cfg, **kwargs):
+        return types.SimpleNamespace(clip=clip, overlay_text=None, verification=None)
+
+    monkeypatch.setattr(screenshot.vs_core, "process_clip_for_screenshot", _stub)
 
 
 def test_sanitise_label_replaces_forbidden_characters(monkeypatch):
@@ -28,55 +37,22 @@ def test_sanitise_label_falls_back_when_blank():
 
 
 def test_plan_mod_crop_modulus():
-    crops = screenshot.plan_mod_crop(
-        [(1924, 1080), (1920, 1080)],
-        mod=4,
-        letterbox_pillarbox_aware=True,
-    )
-    left, top, right, bottom = crops[0]
-    new_w = 1924 - left - right
-    new_h = 1080 - top - bottom
+    left, top, right, bottom = screenshot.plan_mod_crop(1919, 1079, mod=4, letterbox_pillarbox_aware=True)
+    new_w = 1919 - left - right
+    new_h = 1079 - top - bottom
     assert new_w % 4 == 0
     assert new_h % 4 == 0
-    assert new_w == 1920
-    assert crops[1] == (0, 0, 0, 0)
-
-
-def test_plan_mod_crop_letterbox_bias():
-    crops = screenshot.plan_mod_crop(
-        [(1920, 1080), (1920, 800)],
-        mod=2,
-        letterbox_pillarbox_aware=True,
-    )
-    assert crops[0] == (0, 140, 0, 140)
-    assert crops[1] == (0, 0, 0, 0)
-
-
-def test_plan_mod_crop_pillarbox_bias():
-    crops = screenshot.plan_mod_crop(
-        [(1280, 720), (1920, 720)],
-        mod=2,
-        letterbox_pillarbox_aware=True,
-    )
-    assert crops[0] == (0, 0, 0, 0)
-    assert crops[1] == (320, 0, 320, 0)
-
-
-def test_plan_mod_crop_aligns_to_smallest_dimensions():
-    dims = [(1920, 1080), (1280, 720)]
-    crops = screenshot.plan_mod_crop(dims, mod=2, letterbox_pillarbox_aware=False)
-    left, top, right, bottom = crops[0]
-    assert (1920 - left - right, 1080 - top - bottom) == (1280, 720)
-    assert crops[1] == (0, 0, 0, 0)
+    assert new_w > 0 and new_h > 0
 
 
 def test_generate_screenshots_filenames(tmp_path, monkeypatch):
     clip = FakeClip(1280, 720)
     cfg = ScreenshotConfig(directory_name="screens")
+    color_cfg = ColorConfig()
 
     calls = []
 
-    def fake_writer(clip, frame_idx, crop, scaled, path, cfg, label, requested_frame, selection_label=None):
+    def fake_writer(clip, frame_idx, crop, scaled, path, cfg, label, requested_frame, selection_label=None, **kwargs):
         calls.append({"frame": frame_idx, "crop": crop, "scaled": scaled, "label": label, "requested": requested_frame})
         path.write_text("data", encoding="utf-8")
 
@@ -92,6 +68,7 @@ def test_generate_screenshots_filenames(tmp_path, monkeypatch):
         metadata,
         tmp_path,
         cfg,
+        color_cfg,
         trim_offsets=[0],
     )
     assert len(created) == len(frames)
@@ -107,10 +84,11 @@ def test_generate_screenshots_filenames(tmp_path, monkeypatch):
 def test_compression_flag_passed(tmp_path, monkeypatch):
     clip = FakeClip(1920, 1080)
     cfg = ScreenshotConfig(use_ffmpeg=True, compression_level=2)
+    color_cfg = ColorConfig()
 
     captured = {}
 
-    def fake_writer(source, frame_idx, crop, scaled, path, cfg, width, height, selection_label):
+    def fake_writer(source, frame_idx, crop, scaled, path, cfg, width, height, selection_label, *, overlay_text=None):
         captured[frame_idx] = screenshot._map_ffmpeg_compression(cfg.compression_level)
         path.write_text("ffmpeg", encoding="utf-8")
 
@@ -123,6 +101,7 @@ def test_compression_flag_passed(tmp_path, monkeypatch):
         [{"label": "video"}],
         tmp_path,
         cfg,
+        color_cfg,
         trim_offsets=[0],
     )
     assert captured[10] == 9
@@ -131,10 +110,11 @@ def test_compression_flag_passed(tmp_path, monkeypatch):
 def test_ffmpeg_respects_trim_offsets(tmp_path, monkeypatch):
     clip = FakeClip(1920, 1080)
     cfg = ScreenshotConfig(use_ffmpeg=True)
+    color_cfg = ColorConfig()
 
     calls: list[int] = []
 
-    def fake_ffmpeg(source, frame_idx, crop, scaled, path, cfg, width, height, selection_label):
+    def fake_ffmpeg(source, frame_idx, crop, scaled, path, cfg, width, height, selection_label, *, overlay_text=None):
         calls.append(frame_idx)
         path.write_text("ff", encoding="utf-8")
 
@@ -148,6 +128,7 @@ def test_ffmpeg_respects_trim_offsets(tmp_path, monkeypatch):
         [{"label": "video"}],
         tmp_path,
         cfg,
+        color_cfg,
         trim_offsets=[3],
     )
 
@@ -157,10 +138,11 @@ def test_ffmpeg_respects_trim_offsets(tmp_path, monkeypatch):
 def test_global_upscale_coordination(tmp_path, monkeypatch):
     clips = [FakeClip(1280, 720), FakeClip(1920, 1080), FakeClip(640, 480)]
     cfg = ScreenshotConfig(upscale=True, use_ffmpeg=False, add_frame_info=False)
+    color_cfg = ColorConfig()
 
     scaled: list[tuple[int, int]] = []
 
-    def fake_vs_writer(clip, frame_idx, crop, scaled_dims, path, cfg, label, requested_frame, selection_label=None):
+    def fake_vs_writer(clip, frame_idx, crop, scaled_dims, path, cfg, label, requested_frame, selection_label=None, **kwargs):
         scaled.append(scaled_dims)
         path.write_text("vs", encoding="utf-8")
 
@@ -175,15 +157,17 @@ def test_global_upscale_coordination(tmp_path, monkeypatch):
         metadata,
         tmp_path,
         cfg,
+        color_cfg,
         trim_offsets=[0, 0, 0],
     )
 
-    assert scaled == [(640, 480), (640, 480), (640, 480)]
+    assert scaled == [(1920, 1080), (1920, 1080), (1440, 1080)]
 
 
 def test_placeholder_logging(tmp_path, caplog, monkeypatch):
     clip = FakeClip(1280, 720)
     cfg = ScreenshotConfig(use_ffmpeg=False)
+    color_cfg = ColorConfig()
 
     def failing_writer(*args, **kwargs):
         raise RuntimeError("kaboom")
@@ -199,6 +183,7 @@ def test_placeholder_logging(tmp_path, caplog, monkeypatch):
             [{"label": "clip"}],
             tmp_path,
             cfg,
+            color_cfg,
             trim_offsets=[0],
         )
 

@@ -89,32 +89,6 @@ upscale = true
 single_res = 0
 mod_crop = 2
 letterbox_pillarbox_aware = true
-debug_log_color_ranges = false
-
-[tonemap]
-preset = "reference"
-func = "bt2390"
-dpd = false
-dst_max = 100.0
-dst_min = 0.0
-gamut_mapping = "clip"
-smoothing_period = 3
-scene_threshold_low = 0.12
-scene_threshold_high = 0.32
-overlay = false
-verify = false
-verify_metric = "abs"
-verify_auto_search = true
-verify_search_max = 180
-verify_search_step = 12
-verify_start_frame = 0
-verify_luma_thresh = 0.45
-use_dovi = true
-always_try_placebo = false
-dst_primaries = "bt709"
-dst_transfer = "bt1886"
-dst_matrix = "bt709"
-dst_range = "limited"
 
 [slowpics]
 auto_upload = false
@@ -127,14 +101,6 @@ webhook_url = ""
 open_in_browser = true
 create_url_shortcut = true
 delete_screen_dir_after_upload = true
-
-[tmdb]
-api_key = ""
-unattended = true
-year_tolerance = 2
-enable_anime_parsing = true
-cache_ttl_seconds = 86400
-category_preference = ""
 
 [naming]
 always_full_filename = true
@@ -191,39 +157,30 @@ change_fps = {}
 | `compression_level` | int | 1 | No | Compression preset: 0 (fast), 1 (balanced), 2 (small). Other values raise `ConfigError`.|
 | `upscale` | bool | true | No | Allow scaling above source height (global tallest clip by default).|
 | `single_res` | int | 0 | No | Force a specific output height (`0` keeps clip-relative planning).|
-| `mod_crop` | int | 2 | No | Align every clip to the smallest width/height while keeping dimensions divisible by this modulus; must be ≥0.|
-| `letterbox_pillarbox_aware` | bool | true | No | When widths or heights already match, only crop the mismatched axis (preserves letterbox/pillarbox bars).|
-| `debug_log_color_ranges` | bool | false | No | When `true`, logs format/prop diagnostics if VapourSynth screenshot rendering fails (useful for MaskedMerge range mismatches).|
+| `mod_crop` | int | 2 | No | Crop to maintain dimensions divisible by this modulus; must be ≥0.|
+| `letterbox_pillarbox_aware` | bool | true | No | Bias cropping toward letterbox/pillarbox bars when trimming.|
 
-#### `[tonemap]`
+#### `[color]`
+| Name | Type | Default | Required? | Description |
+| --- | --- | --- | --- | --- |
+| `enable_tonemap` | bool | true | No | Toggle HDR→SDR processing. When false the SDR pipeline runs and logs a `[TM BYPASS]` reason.|
+| `preset` | str | `"reference"` | No | High-level preset for tone mapping: `reference`, `contrast`, `filmic`, or `custom`. Presets set `tone_curve`, `target_nits`, and `dynamic_peak_detection`.|
+| `tone_curve` | str | `"bt.2390"` | No | Tone-curve passed to `libplacebo.Tonemap` when `preset="custom"`. Accepts `bt.2390`, `mobius`, or `hable`.|
+| `dynamic_peak_detection` | bool | true | No | Toggles libplacebo's DPD smoothing (1 = on).|
+| `target_nits` | float | 100.0 | No | SDR peak nits (`dst_max`). Must be >0.|
+| `dst_min_nits` | float | 0.1 | No | Minimum nits for libplacebo (`dst_min`). Must be ≥0.|
+| `overlay_enabled` | bool | true | No | Draw an SDR metadata overlay (top-right). If true, failures log `[OVERLAY]` and obey `strict`.|
+| `overlay_text_template` | str | `"TM:{tone_curve} dpd={dynamic_peak_detection} dst={target_nits}nits"` | No | Template for the overlay text. Placeholders: `{tone_curve}`, `{dpd}`, `{dynamic_peak_detection}`, `{target_nits}`, `{preset}`, `{reason}`.|
+| `verify_enabled` | bool | true | No | Compute Δ vs naive SDR and log `[VERIFY] frame=… avg=… max=…`.|
+| `verify_frame` | int? | null | No | Force a specific verification frame index.|
+| `verify_auto` | bool | true | No | Enable the auto-search described in `docs/hdr_tonemap_overview.md`.|
+| `verify_start_seconds` | float | 10.0 | No | Skip the first N seconds before sampling frames.|
+| `verify_step_seconds` | float | 10.0 | No | Sampling stride (seconds) when auto-picking verification frames. Must be >0.|
+| `verify_max_seconds` | float | 90.0 | No | Stop searching after this many seconds (clamped by clip length).|
+| `verify_luma_threshold` | float | 0.10 | No | Minimum average luma (0–1) for verification frame candidates.|
+| `strict` | bool | false | No | Escalate overlay/verification failures to hard errors instead of logging them.|
 
-Key options are summarised below (see `docs/tonemap.md` for the complete table):
-
-| Name | Type | Default | Description |
-| --- | --- | --- | --- |
-| `preset` | str | `"reference"` | Preset bundle controlling the curve and heuristics. |
-| `func` | str | `"bt2390"` | Tonemap curve passed to libplacebo. |
-| `dpd` | bool | `false` | Enable libplacebo dynamic peak detection. |
-| `dst_max` | float | `100.0` | SDR target peak in nits. |
-| `dst_min` | float | `0.0` | SDR floor in nits. |
-| `gamut_mapping` | str | `"clip"` | libplacebo gamut mapping mode. |
-| `overlay` | bool | `false` | Draw the diagnostic overlay with active parameters. |
-| `verify` | bool | `false` | Enable verification metrics (`abs`, `psnr`, `ssim`, `deltae`). |
-| `use_dovi` | bool | `true` | Forward Dolby Vision metadata when the source provides it. |
-| `always_try_placebo` | bool | `false` | Attempt libplacebo even if HDR heuristics are inconclusive. |
-
-```toml
-[tonemap]
-# Example: brighten SDR target and enable verification with SSIM
-preset = "custom"
-func = "hable"
-dst_max = 120.0
-verify = true
-verify_metric = "ssim"
-overlay = true
-```
-
-The CLI mirrors every field with `--tm-*` flags; for example `--tm-preset filmic --tm-overlay` overrides TOML settings for a single run.
+See `docs/hdr_tonemap_overview.md` for a walkthrough of the log messages, presets, and verification heuristics.
 
 #### `[slowpics]`
 | Name | Type | Default | Required? | Description |
@@ -238,16 +195,6 @@ The CLI mirrors every field with `--tm-*` flags; for example `--tm-preset filmic
 | `open_in_browser` | bool | true | No | Launch slow.pics URL with `webbrowser.open` on success.|
 | `create_url_shortcut` | bool | true | No | Save a `.url` shortcut next to screenshots.|
 | `delete_screen_dir_after_upload` | bool | true | No | Delete rendered screenshots after a successful upload.|
-
-#### `[tmdb]`
-| Name | Type | Default | Required? | Description |
-| --- | --- | --- | --- | --- |
-| `api_key` | str | `""` | No | Enable TMDB matching by providing your API key.| 
-| `unattended` | bool | true | No | Automatically select the best TMDB match; disable to allow manual overrides when ambiguous.|
-| `year_tolerance` | int | 2 | No | Acceptable difference between parsed year and TMDB results; must be ≥0.|
-| `enable_anime_parsing` | bool | true | No | Use Anitopy-derived titles when searching for anime releases.|
-| `cache_ttl_seconds` | int | 86400 | No | Cache TMDB responses in-memory for this many seconds; must be ≥0.|
-| `category_preference` | str | `""` | No | Optional default category when external IDs resolve to both movie and TV (set `MOVIE` or `TV`).|
 
 #### `[naming]`
 | Name | Type | Default | Required? | Description |
@@ -272,22 +219,6 @@ The CLI mirrors every field with `--tm-*` flags; for example `--tm-preset filmic
 | `trim` | dict[str,int] | `{}` | No | Trim leading frames per clip; negative values prepend blanks to preserve indexing.|
 | `trim_end` | dict[str,int] | `{}` | No | Trim trailing frames; accepts negative indexes as Python slicing does.|
 | `change_fps` | dict[str, list[int] or "set"] | `{}` | No | Either `[num, den]` to apply `AssumeFPS`, or `"set"` to mark the clip as the reference FPS for others.|
-
-## TMDB auto-discovery
-Enabling `[tmdb].api_key` activates an asynchronous resolver that translates filenames into TMDB metadata before screenshots are rendered. The CLI analyses the first detected source to gather title/year hints (via GuessIt/Anitopy), then resolves `(category, tmdbId, original language)` once per run. Successful matches populate:
-
-- `cfg.slowpics.tmdb_id` when it is empty so the slow.pics upload automatically links to TMDB,
-- the templating context for `[slowpics].collection_name`, exposing `${Title}`, `${OriginalTitle}`, `${Year}`, `${TMDBId}`, `${TMDBCategory}`, `${OriginalLanguage}`, `${Filename}`, `${FileName}`, and `${Label}`, and
-- the default slow.pics collection title when `[slowpics].collection_name` is blank, using `${Title}`/`${Year}` when present or the first filename as a fallback.
-
-Resolution follows a deterministic pipeline:
-
-1. If the filename or metadata exposes external IDs, `find/{imdb|tvdb}_id` is queried first, honouring `[tmdb].category_preference` when both movie and TV hits are returned.
-2. Otherwise, the resolver issues `search/movie` or `search/tv` calls with progressively broader queries derived from the cleaned title. Heuristics include year windows within `[tmdb].year_tolerance`, roman-numeral conversion, subtitle/colon trimming, reduced word sets, automatic movie↔TV switching, and, when `[tmdb].enable_anime_parsing=true`, romaji titles via Anitopy.
-3. Every response is scored by similarity, release year proximity, and light popularity boosts. Strong matches are selected immediately; otherwise the highest scoring candidate wins with logging that notes the heuristic (e.g. “roman-numeral”). Ambiguity only surfaces when `[tmdb].unattended=false`, in which case the CLI prompts for a manual identifier such as `movie/603`.
-
-All HTTP requests share an in-memory cache governed by `[tmdb].cache_ttl_seconds` and automatically apply exponential backoff on rate limits or transient failures. Setting `[tmdb].api_key` is mandatory; when omitted the resolver is skipped.
-The CLI prints a reminder and slow.pics falls back to whatever `tmdb_id` you manually provided in the config.
 
 ## CLI usage
 ```

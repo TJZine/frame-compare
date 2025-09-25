@@ -1,13 +1,12 @@
 [project]
 name = "frame-compare"
 version = "0.0.1"
-requires-python = ">=3.11,<3.12"
+requires-python = ">=3.11"
 dependencies = [
     "rich",
     "colorama",
     "requests",
     "requests-toolbelt",
-    "httpx",
     "natsort",
     "anitopy",
     "guessit",

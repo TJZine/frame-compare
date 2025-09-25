@@ -4,7 +4,7 @@ import types
 import pytest
 import src.vs_core as vs_core
 
-from src.datatypes import TonemapConfig
+from src.datatypes import ColorConfig
 from src.vs_core import (
     ClipInitError,
     ClipProcessError,
@@ -34,6 +34,10 @@ class _FakeStd:
         self.set_props_kwargs = kwargs
         return self._owner
 
+    def SetFrameProp(self, clip=None, **kwargs):
+        self.set_props_kwargs = kwargs
+        return self._owner if clip is None else clip
+
 
 class _FakeLibplacebo:
     def __init__(self):
@@ -48,12 +52,34 @@ class _FakeClip:
     def __init__(self, props=None):
         self.frame_props = props or {}
         self.std = _FakeStd(self)
-        self.core = types.SimpleNamespace(libplacebo=_FakeLibplacebo())
+        self.core = types.SimpleNamespace()
+        self.core.libplacebo = _FakeLibplacebo()
+        resize_ns = types.SimpleNamespace()
+
+        def _spline36(target_clip, **kwargs):
+            target_clip.last_resize_kwargs = kwargs
+            return target_clip
+
+        def _point(target_clip, **kwargs):
+            target_clip.last_point_kwargs = kwargs
+            return target_clip
+
+        resize_ns.Spline36 = _spline36
+        resize_ns.Point = _point
+        self.core.resize = resize_ns
         self.slice_history = []
         self.blank_frames = None
+        self.num_frames = 10
+        self.fps_num = 24
+        self.fps_den = 1
+        self.width = 1920
+        self.height = 1080
 
     def get_frame_props(self):
         return self.frame_props
+
+    def get_frame(self, idx):
+        return types.SimpleNamespace(props=self.frame_props)
 
     def __getitem__(self, key):
         self.slice_history.append(key)
@@ -82,47 +108,69 @@ class _BlankClip:
         return other
 
 
+@pytest.fixture(autouse=True)
+def _stub_vs_module(monkeypatch):
+    fake_vs = types.SimpleNamespace(RGB48=object(), RGB24=object(), RANGE_LIMITED=1, RANGE_FULL=0)
+    monkeypatch.setattr(vs_core, "_get_vapoursynth_module", lambda: fake_vs)
+
+
 def test_sdr_pass_through():
     clip = _FakeClip(
-        props={"_Primaries": 1, "_Transfer": 1}
+        props={"_Primaries": "bt709", "_Transfer": "bt1886"}
     )
-    result = process_clip_for_screenshot(clip, "file.mkv", cfg=types.SimpleNamespace())
-    assert result is clip
-    assert clip.core.libplacebo.called_with is None
-    assert clip.std.set_props_kwargs == {
-        '_Matrix': 1,
-        '_Primaries': 1,
-        '_Transfer': 1,
-        '_ColorRange': 0,
-    }
+    color_cfg = ColorConfig(enable_tonemap=True, overlay_enabled=False, verify_enabled=False)
+    result = process_clip_for_screenshot(
+        clip,
+        "file.mkv",
+        color_cfg,
+        enable_overlay=False,
+        enable_verification=False,
+    )
+    assert result.clip is clip
+    assert result.tonemap.applied is False
+    assert result.overlay_text is None
+    assert result.tonemap.reason in {"SDR source", "Tonemap disabled", "Tonemap bypass"}
 
 
-def test_hdr_triggers_tonemap():
+def test_hdr_triggers_tonemap(monkeypatch):
     clip = _FakeClip(
-        props={"_Primaries": "bt2020", "_Transfer": "st2084"}
+        props={"_Primaries": 9, "_Transfer": 16}
     )
-    cfg = TonemapConfig(dst_max=120.0)
-    result = process_clip_for_screenshot(clip, "file.mkv", cfg)
-    assert clip.core.libplacebo.called_with is not None
-    tonemap_clip, kwargs = clip.core.libplacebo.called_with
-    assert tonemap_clip is clip
-    assert kwargs["dst_max"] == 120.0
-    assert kwargs["tone_mapping"] == "bt2390"
-    assert kwargs["dynamic_peak_detection"] == 0
-    assert kwargs["gamut_mapping"] == "clip"
-    assert kwargs["scene_threshold_low"] == pytest.approx(0.12)
-    assert kwargs["scene_threshold_high"] == pytest.approx(0.32)
-    assert kwargs["dst_csp"] == "bt709"
-    assert kwargs["dst_prim"] == "bt709"
-    assert kwargs["dst_tf"] == "bt1886"
-    assert kwargs["use_dovi"] is True
-    assert clip.std.set_props_kwargs == {
-        "_Matrix": 1,
-        "_Primaries": 1,
-        "_Transfer": 1,
-        "_ColorRange": 1,
-    }
-    assert result is clip
+    tonemapped = _FakeClip()
+    recorded = {}
+
+    def fake_tonemap(core, rgb_clip, **kwargs):
+        recorded["clip"] = rgb_clip
+        recorded["kwargs"] = kwargs
+        return tonemapped
+
+    monkeypatch.setattr(vs_core, "_tonemap_with_retries", fake_tonemap)
+
+    color_cfg = ColorConfig(
+        enable_tonemap=True,
+        overlay_enabled=False,
+        verify_enabled=False,
+        preset="custom",
+        tone_curve="mobius",
+        target_nits=120.0,
+        dynamic_peak_detection=False,
+    )
+
+    result = process_clip_for_screenshot(
+        clip,
+        "file.mkv",
+        color_cfg,
+        enable_overlay=False,
+        enable_verification=False,
+    )
+
+    assert recorded["clip"] is clip
+    assert pytest.approx(recorded["kwargs"]["target_nits"], rel=1e-6) == 120.0
+    assert recorded["kwargs"]["dpd"] == 0
+    assert recorded["kwargs"]["tone_curve"] == "mobius"
+    assert result.clip is tonemapped
+    assert result.tonemap.applied is True
+    assert result.tonemap.tone_curve == "mobius"
 
 
 def test_init_clip_errors_raise():
