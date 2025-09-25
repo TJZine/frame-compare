@@ -5,15 +5,20 @@
 import importlib
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Any, Iterable, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Iterable, Mapping, Optional, Sequence, Tuple
 
 _VS_MODULE_NAME = "vapoursynth"
 _ENV_VAR = "VAPOURSYNTH_PYTHONPATH"
 _EXTRA_SEARCH_PATHS: list[str] = []
 _vs_module: Any | None = None
+_SOURCE_PREFERENCE = "lsmas"
+_VALID_SOURCE_PLUGINS = {"lsmas", "ffms2"}
+_SOURCE_PLUGIN_FUNCS = {"lsmas": "LWLibavSource", "ffms2": "Source"}
+_CACHE_SUFFIX = {"lsmas": ".lwi", "ffms2": ".ffindex"}
 
 
 class ClipInitError(RuntimeError):
@@ -22,6 +27,42 @@ class ClipInitError(RuntimeError):
 
 class ClipProcessError(RuntimeError):
     """Raised when screenshot preparation fails."""
+
+
+class VSPluginError(ClipInitError):
+    """Base class for VapourSynth plugin discovery failures."""
+
+    def __init__(self, plugin: str, message: str) -> None:
+        super().__init__(message)
+        self.plugin = plugin
+
+
+class VSPluginMissingError(VSPluginError):
+    """Raised when a required VapourSynth plugin is absent."""
+
+
+class VSPluginWrongArchError(VSPluginError):
+    """Raised when a plugin binary targets the wrong CPU architecture."""
+
+
+class VSPluginDepMissingError(VSPluginError):
+    """Raised when a plugin has unresolved shared library dependencies."""
+
+    def __init__(self, plugin: str, dependency: str | None, message: str) -> None:
+        super().__init__(plugin, message)
+        self.dependency = dependency
+
+
+class VSPluginBadBinaryError(VSPluginError):
+    """Raised when a plugin binary is malformed or lacks an entry point."""
+
+
+class VSSourceUnavailableError(ClipInitError):
+    """Raised when no usable source plugin is available."""
+
+    def __init__(self, message: str, *, errors: Mapping[str, VSPluginError] | None = None) -> None:
+        super().__init__(message)
+        self.errors: Mapping[str, VSPluginError] = dict(errors or {})
 
 
 _HDR_PRIMARIES_NAMES = {"bt2020", "bt.2020", "2020"}
@@ -128,6 +169,19 @@ def _add_search_paths(paths: Iterable[str]) -> None:
         added = True
 
 
+def _set_source_preference(preference: str) -> None:
+    """Record the preferred VapourSynth source plugin."""
+
+    global _SOURCE_PREFERENCE
+    normalized = preference.strip().lower()
+    if normalized not in _VALID_SOURCE_PLUGINS:
+        raise ValueError(
+            f"Unsupported VapourSynth source preference '{preference}'."
+            " Valid options are: " + ", ".join(sorted(_VALID_SOURCE_PLUGINS))
+        )
+    _SOURCE_PREFERENCE = normalized
+
+
 def _load_env_paths_from_env() -> None:
     raw = os.environ.get(_ENV_VAR)
     if not raw:
@@ -136,9 +190,13 @@ def _load_env_paths_from_env() -> None:
     _add_search_paths(entry for entry in entries if entry)
 
 
-def configure(*, search_paths: Sequence[str] | None = None) -> None:
+def configure(
+    *, search_paths: Sequence[str] | None = None, source_preference: str | None = None
+) -> None:
     if search_paths:
         _add_search_paths(search_paths)
+    if source_preference is not None:
+        _set_source_preference(source_preference)
 
 
 def _build_missing_vs_message() -> str:
@@ -193,14 +251,175 @@ def _resolve_core(core: Optional[Any]) -> Any:
     return fallback_core
 
 
-def _resolve_source(core: Any) -> Any:
-    lsmas = getattr(core, "lsmas", None)
-    if lsmas is None:
-        raise ClipInitError("VapourSynth core is missing the lsmas plugin")
-    source = getattr(lsmas, "LWLibavSource", None)
+def _build_source_order() -> list[str]:
+    """Return the ordered list of source plugins to try."""
+
+    if _SOURCE_PREFERENCE == "ffms2":
+        return ["ffms2", "lsmas"]
+    return ["lsmas", "ffms2"]
+
+
+def _build_plugin_missing_message(plugin: str) -> str:
+    base = f"VapourSynth plugin '{plugin}' is not available on the current core."
+    if plugin == "lsmas":
+        return (
+            base
+            + " Install L-SMASH-Works (LWLibavSource) built for this architecture and place"
+            " it in ~/Library/VapourSynth/plugins or /opt/homebrew/lib/vapoursynth."
+        )
+    if plugin == "ffms2":
+        return (
+            base
+            + " Install FFMS2 and ensure the plugin dylib resides in a VapourSynth plugin"
+            " directory (e.g. via 'brew install vapoursynth-ffms2')."
+        )
+    return base
+
+
+def _resolve_source_callable(core: Any, plugin: str) -> Callable[..., Any]:
+    namespace = getattr(core, plugin, None)
+    if namespace is None:
+        raise VSPluginMissingError(plugin, _build_plugin_missing_message(plugin))
+    func_name = _SOURCE_PLUGIN_FUNCS.get(plugin)
+    if not func_name:
+        raise VSPluginBadBinaryError(plugin, f"No loader defined for plugin '{plugin}'")
+    source = getattr(namespace, func_name, None)
     if not callable(source):
-        raise ClipInitError("lsmas.LWLibavSource is not callable")
+        raise VSPluginBadBinaryError(
+            plugin,
+            f"{plugin}.{func_name} is not callable. The plugin may have failed to load or"
+            " is not a VapourSynth binary compatible with this release.",
+        )
     return source
+
+
+def _cache_path_for(cache_root: Path, base_name: str, plugin: str) -> Path:
+    suffix = _CACHE_SUFFIX.get(plugin, ".lwi")
+    return cache_root / f"{base_name}{suffix}"
+
+
+_DEPENDENCY_PATTERN = re.compile(r"Library not loaded: (?P<path>\S+)")
+_ENTRY_POINT_PATTERN = re.compile(r"(vapoursynthplugininit|entry point)", re.IGNORECASE)
+_WRONG_ARCH_PATTERN = re.compile(r"wrong architecture", re.IGNORECASE)
+
+
+def _extract_major_version(library_name: str) -> str | None:
+    match = re.search(r"\.(\d+)(?:\.dylib)?$", library_name)
+    if match:
+        return match.group(1)
+    return None
+
+
+def _build_dependency_hint(plugin: str, dependency: str | None, details: str) -> str:
+    parts = [
+        f"{plugin} plugin could not be initialised because a dependency was missing.",
+        details,
+    ]
+    if dependency:
+        dep_name = Path(dependency).name
+        parts.append(f"Missing library: {dep_name} ({dependency}).")
+        lowered = dep_name.lower()
+        major = _extract_major_version(dep_name)
+        if "libav" in lowered:
+            if major:
+                parts.append(
+                    f"Install an FFmpeg build that provides {dep_name} (major {major})"
+                    " or adjust the plugin's install_name to point at /opt/homebrew/lib."
+                )
+            else:
+                parts.append(
+                    "Install a matching FFmpeg build (e.g. via Homebrew) and ensure the"
+                    " dylibs are discoverable."
+                )
+        if "liblsmash" in lowered:
+            parts.append(
+                "Install liblsmash (brew install l-smash) or ensure DYLD_LIBRARY_PATH"
+                " includes the directory that provides it."
+            )
+    else:
+        parts.append(
+            "Check that the plugin binary and its dependencies are located in a"
+            " VapourSynth plugin directory."
+        )
+    return " ".join(parts)
+
+
+def _build_wrong_arch_message(plugin: str, details: str) -> str:
+    return (
+        f"{plugin} plugin failed to load because the binary targets a different CPU"
+        f" architecture. {details} Install an arm64-compatible build or run under"
+        " Rosetta with matching x86_64 dependencies."
+    )
+
+
+def _classify_plugin_exception(plugin: str, exc: Exception) -> VSPluginError | None:
+    message = str(exc)
+    lower = message.lower()
+    if _WRONG_ARCH_PATTERN.search(lower):
+        return VSPluginWrongArchError(plugin, _build_wrong_arch_message(plugin, message))
+    match = _DEPENDENCY_PATTERN.search(message)
+    if match:
+        dependency = match.group("path")
+        return VSPluginDepMissingError(
+            plugin,
+            dependency,
+            _build_dependency_hint(plugin, dependency, message),
+        )
+    if "image not found" in lower and "dlopen" in lower:
+        return VSPluginDepMissingError(
+            plugin,
+            None,
+            _build_dependency_hint(plugin, None, message),
+        )
+    if _ENTRY_POINT_PATTERN.search(lower) or "no entry point" in lower:
+        return VSPluginBadBinaryError(
+            plugin,
+            f"{plugin} plugin appears to be an incompatible binary. {message} Ensure"
+            " it exports VapourSynthPluginInit2 and matches this VapourSynth release.",
+        )
+    return None
+
+
+def _open_clip_with_sources(core: Any, path: str, cache_root: Path) -> Any:
+    order = _build_source_order()
+    errors: dict[str, VSPluginError] = {}
+    base_name = Path(path).name
+    for plugin in order:
+        try:
+            source = _resolve_source_callable(core, plugin)
+        except VSPluginError as plugin_error:
+            logger.warning(
+                "VapourSynth plugin '%s' unavailable: %s", plugin, plugin_error
+            )
+            errors[plugin] = plugin_error
+            continue
+
+        cache_path = _cache_path_for(cache_root, base_name, plugin)
+        try:
+            return source(path, cachefile=str(cache_path))
+        except Exception as exc:
+            classified = _classify_plugin_exception(plugin, exc)
+            if isinstance(classified, VSPluginError):
+                logger.warning(
+                    "VapourSynth plugin '%s' unavailable: %s", plugin, classified
+                )
+                errors[plugin] = classified
+                continue
+            raise ClipInitError(f"Failed to open clip '{path}' via {plugin}: {exc}") from exc
+
+    if errors:
+        detail = "; ".join(f"{name}: {err}" for name, err in errors.items())
+        raise VSSourceUnavailableError(
+            (
+                f"No usable VapourSynth source plugin was able to open '{path}'. Tried"
+                f" {', '.join(order)}. Details: {detail}"
+            ),
+            errors=errors,
+        )
+    raise VSSourceUnavailableError(
+        f"No VapourSynth source plugins were available to open '{path}'.",
+        errors=errors,
+    )
 
 
 def _ensure_std_namespace(clip: Any, error: RuntimeError) -> Any:
@@ -278,7 +497,6 @@ def init_clip(
     """Initialise a VapourSynth clip for subsequent processing."""
 
     resolved_core = _resolve_core(core)
-    source = _resolve_source(resolved_core)
 
     path_obj = Path(path)
     cache_root = Path(cache_dir) if cache_dir is not None else path_obj.parent
@@ -287,11 +505,11 @@ def init_clip(
     except Exception as exc:  # pragma: no cover - defensive
         raise ClipInitError(f"Failed to prepare cache directory '{cache_root}': {exc}") from exc
 
-    cache_file = cache_root / f"{path_obj.name}.lwi"
-
     try:
-        clip = source(str(path_obj), cachefile=str(cache_file))
-    except Exception as exc:  # pragma: no cover - exercised via mocks
+        clip = _open_clip_with_sources(resolved_core, str(path_obj), cache_root)
+    except ClipInitError:
+        raise
+    except Exception as exc:  # pragma: no cover - defensive
         raise ClipInitError(f"Failed to open clip '{path}': {exc}") from exc
 
     if trim_start < 0:

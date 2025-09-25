@@ -29,6 +29,7 @@ def test_load_defaults(tmp_path: Path) -> None:
     assert app.color.target_nits == 100.0
     assert app.color.overlay_enabled is True
     assert app.color.verify_enabled is True
+    assert app.source.preferred == "lsmas"
 
 
 @pytest.mark.parametrize(
@@ -42,6 +43,7 @@ def test_load_defaults(tmp_path: Path) -> None:
         ("[color]\nverify_luma_threshold = 1.5\n", "color.verify_luma_threshold"),
         ("[color]\nverify_step_seconds = 0\n", "color.verify_step_seconds"),
         ("[color]\ntarget_nits = -10\n", "color.target_nits"),
+        ("[source]\npreferred = \"bogus\"\n", "source.preferred"),
     ],
 )
 def test_validation_errors(tmp_path: Path, toml_snippet: str, message: str) -> None:
@@ -81,6 +83,9 @@ target_nits = 120.0
 tone_curve = "mobius"
 verify_enabled = false
 overlay_enabled = false
+
+[source]
+preferred = "ffms2"
         """.strip(),
         encoding="utf-8",
     )
@@ -99,3 +104,4 @@ overlay_enabled = false
     assert app.color.tone_curve == "mobius"
     assert app.color.verify_enabled is False
     assert app.color.overlay_enabled is False
+    assert app.source.preferred == "ffms2"

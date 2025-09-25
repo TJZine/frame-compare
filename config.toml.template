@@ -84,6 +84,10 @@ input_dir = "comparison_videos"
 ram_limit_mb = 4000
 vapoursynth_python_paths = []
 
+[source]
+# VapourSynth source filter preference. Valid options: "lsmas" or "ffms2".
+preferred = "lsmas"
+
 
 [overrides]
 # Per-source trim/FPS overrides. Keys may be an index, filename, or parsed label (case-insensitive).

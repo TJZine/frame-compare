@@ -109,6 +109,13 @@ class RuntimeConfig:
 
 
 @dataclass
+class SourceConfig:
+    """Preferred VapourSynth source plugin selection."""
+
+    preferred: str = "lsmas"
+
+
+@dataclass
 class OverridesConfig:
     """Clip-specific overrides for trimming and frame rate adjustments."""
 
@@ -129,3 +136,4 @@ class AppConfig:
     runtime: RuntimeConfig
     overrides: OverridesConfig
     color: ColorConfig
+    source: SourceConfig

@@ -12,6 +12,8 @@ from src.vs_core import (
     init_clip,
     process_clip_for_screenshot,
     set_ram_limit,
+    VSSourceUnavailableError,
+    VSPluginDepMissingError,
     _normalize_rgb_props,
 )
 
@@ -94,9 +96,29 @@ class _FailingLWLib:
         raise RuntimeError("boom")
 
 
+class _BrokenDependencyLWLib:
+    @staticmethod
+    def LWLibavSource(path: str, **kwargs):
+        raise RuntimeError(
+            "dlopen(/path/to/lsmas.dylib, 0x0001): Library not loaded: "
+            "/usr/local/lib/libavcodec.61.dylib"
+        )
+
+
+class _WorkingFFMS:
+    @staticmethod
+    def Source(path: str, **kwargs):
+        clip = _FakeClip()
+        clip.opened_path = path
+        clip.cachefile = kwargs.get("cachefile")
+        return clip
+
+
 class _FakeCore:
-    def __init__(self, source):
+    def __init__(self, source, ffms_source=None):
         self.lsmas = source
+        if ffms_source is not None:
+            self.ffms2 = ffms_source
         self.std = types.SimpleNamespace(BlankClip=_BlankClip)
 
 
@@ -301,6 +323,30 @@ def test_init_clip_errors_raise():
     fake_core = _FakeCore(source=_FailingLWLib())
     with pytest.raises(ClipInitError):
         init_clip("video.mkv", core=fake_core)
+
+
+def test_init_clip_falls_back_to_ffms():
+    fake_core = _FakeCore(source=_BrokenDependencyLWLib(), ffms_source=_WorkingFFMS())
+
+    clip = init_clip("video.mkv", core=fake_core)
+
+    assert getattr(clip, "opened_path", None) == "video.mkv"
+    assert isinstance(clip.cachefile, str) and clip.cachefile.endswith(".ffindex")
+
+
+def test_init_clip_reports_plugin_errors_when_all_fail():
+    fake_core = types.SimpleNamespace(
+        lsmas=_BrokenDependencyLWLib(),
+        std=types.SimpleNamespace(BlankClip=_BlankClip),
+    )
+
+    with pytest.raises(VSSourceUnavailableError) as exc_info:
+        init_clip("video.mkv", core=fake_core)
+
+    assert "lsmas" in exc_info.value.errors
+    lsmas_error = exc_info.value.errors["lsmas"]
+    assert isinstance(lsmas_error, VSPluginDepMissingError)
+    assert "libavcodec.61" in str(lsmas_error)
 
 
 def test_init_clip_applies_trim_and_fps(monkeypatch):

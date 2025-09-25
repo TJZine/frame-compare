@@ -494,7 +494,10 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
             rich_message=f"[red]Input directory not found:[/red] {root}",
         )
 
-    vs_core.configure(search_paths=cfg.runtime.vapoursynth_python_paths)
+    vs_core.configure(
+        search_paths=cfg.runtime.vapoursynth_python_paths,
+        source_preference=cfg.source.preferred,
+    )
 
     try:
         files = _discover_media(root)
