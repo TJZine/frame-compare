@@ -217,6 +217,42 @@ def test_hdr_triggers_tonemap(monkeypatch):
     assert result.tonemap.tone_curve == "mobius"
 
 
+def test_overlay_template_respects_overrides(monkeypatch):
+    clip = _FakeClip(props={"_Primaries": 9, "_Transfer": 16})
+    tonemapped = _FakeClip()
+
+    monkeypatch.setattr(vs_core, "_tonemap_with_retries", lambda *args, **kwargs: tonemapped)
+
+    color_cfg = ColorConfig(
+        enable_tonemap=True,
+        overlay_enabled=True,
+        preset="reference",
+        tone_curve="mobius",
+        target_nits=203.0,
+        dynamic_peak_detection=False,
+        overlay_text_template="curve={tone_curve} dpd={dynamic_peak_detection_bool} nits={target_nits}",
+        verify_enabled=False,
+    )
+    setattr(
+        color_cfg,
+        "_provided_keys",
+        {"preset", "tone_curve", "target_nits", "dynamic_peak_detection", "overlay_text_template"},
+    )
+
+    result = process_clip_for_screenshot(
+        clip,
+        "file.mkv",
+        color_cfg,
+        enable_overlay=True,
+        enable_verification=False,
+    )
+
+    assert result.overlay_text == "curve=mobius dpd=False nits=203"
+    assert result.tonemap.tone_curve == "mobius"
+    assert result.tonemap.target_nits == 203.0
+    assert result.tonemap.dpd == 0
+
+
 def test_normalize_rgb_props_handles_bound_method():
     clip = _FakeClip(props={"_Primaries": 9, "_Transfer": 16})
 

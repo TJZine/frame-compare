@@ -215,6 +215,45 @@ def plan_mod_crop(width: int, height: int, mod: int, letterbox_pillarbox_aware: 
     return (left, top, right, bottom)
 
 
+def _align_letterbox_pillarbox(plans: List[dict[str, object]]) -> None:
+    if not plans:
+        return
+
+    widths = [int(plan["width"]) for plan in plans]
+    heights = [int(plan["height"]) for plan in plans]
+    same_w = len({w for w in widths if w > 0}) == 1
+    same_h = len({h for h in heights if h > 0}) == 1
+
+    if same_w:
+        target_h = min(int(plan["cropped_h"]) for plan in plans)
+        for plan in plans:
+            current_h = int(plan["cropped_h"])
+            diff = current_h - target_h
+            if diff <= 0:
+                continue
+            add_top = diff // 2
+            add_bottom = diff - add_top
+            left, top, right, bottom = plan["crop"]  # type: ignore[misc]
+            top += add_top
+            bottom += add_bottom
+            plan["crop"] = (left, top, right, bottom)
+            plan["cropped_h"] = plan["height"] - top - bottom
+    elif same_h:
+        target_w = min(int(plan["cropped_w"]) for plan in plans)
+        for plan in plans:
+            current_w = int(plan["cropped_w"])
+            diff = current_w - target_w
+            if diff <= 0:
+                continue
+            add_left = diff // 2
+            add_right = diff - add_left
+            left, top, right, bottom = plan["crop"]  # type: ignore[misc]
+            left += add_left
+            right += add_right
+            plan["crop"] = (left, top, right, bottom)
+            plan["cropped_w"] = plan["width"] - left - right
+
+
 def _compute_scaled_dimensions(
     width: int,
     height: int,
@@ -256,6 +295,9 @@ def _plan_geometry(clips: Sequence[object], cfg: ScreenshotConfig) -> List[dict[
                 "cropped_h": cropped_h,
             }
         )
+
+    if cfg.letterbox_pillarbox_aware:
+        _align_letterbox_pillarbox(plans)
 
     single_res_target = int(cfg.single_res) if cfg.single_res > 0 else None
     if single_res_target is not None:

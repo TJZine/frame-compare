@@ -47,15 +47,21 @@ def _sanitize_section(raw: dict[str, Any], name: str, cls):
         raise ConfigError(f"[{name}] must be a table")
     cleaned: Dict[str, Any] = {}
     bool_fields = {field.name for field in fields(cls) if field.type is bool}
+    provided_keys = set(raw.keys())
     for key, value in raw.items():
         if key in bool_fields:
             cleaned[key] = _coerce_bool(value, f"{name}.{key}")
         else:
             cleaned[key] = value
     try:
-        return cls(**cleaned)
+        instance = cls(**cleaned)
     except TypeError as exc:
         raise ConfigError(f"Invalid keys in [{name}]: {exc}") from exc
+    try:
+        setattr(instance, "_provided_keys", provided_keys)
+    except Exception:
+        pass
+    return instance
 
 
 def _validate_trim(mapping: Dict[str, Any], label: str) -> None:
