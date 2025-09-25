@@ -3,6 +3,7 @@
 """Slow.pics upload orchestration."""
 
 from collections import defaultdict
+import re
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, TYPE_CHECKING
 from urllib.parse import urlsplit, unquote
@@ -94,6 +95,28 @@ def _build_legacy_headers(session: requests.Session, encoder: "MultipartEncoder"
     }
 
 
+_TMDB_MANUAL_RE = re.compile(r"^(movie|tv)[/_:-]?(\d+)$", re.IGNORECASE)
+
+
+def _format_tmdb_identifier(tmdb_id: str, category: str | None) -> str:
+    """Normalize TMDB identifiers for slow.pics legacy form fields."""
+
+    text = (tmdb_id or "").strip()
+    if not text:
+        return ""
+
+    match = _TMDB_MANUAL_RE.match(text)
+    if match:
+        prefix, digits = match.groups()
+        return f"{prefix.upper()}_{digits}"
+
+    normalized_category = (category or "").strip().lower()
+    if text.isdigit() and normalized_category in {"movie", "tv"}:
+        return f"{normalized_category.upper()}_{text}"
+
+    return text
+
+
 def _prepare_legacy_plan(image_files: List[str]) -> tuple[List[int], List[List[tuple[str, Path]]]]:
     groups: dict[int, List[tuple[str, Path]]] = defaultdict(list)
     for file_path in image_files:
@@ -151,7 +174,7 @@ def _upload_comparison_legacy(
         "public": str(bool(cfg.is_public)).lower(),
     }
     if cfg.tmdb_id:
-        fields["tmdbId"] = str(cfg.tmdb_id)
+        fields["tmdbId"] = _format_tmdb_identifier(cfg.tmdb_id, getattr(cfg, "tmdb_category", ""))
     if cfg.remove_after_days:
         fields["removeAfter"] = str(int(cfg.remove_after_days))
 

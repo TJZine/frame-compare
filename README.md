@@ -96,6 +96,7 @@ collection_name = ""
 is_hentai = false
 is_public = true
 tmdb_id = ""
+tmdb_category = ""
 remove_after_days = 0
 webhook_url = ""
 open_in_browser = true
@@ -197,7 +198,8 @@ See `docs/hdr_tonemap_overview.md` for a walkthrough of the log messages, preset
 | `collection_name` | str | `""` | No | Custom collection title sent to slow.pics.|
 | `is_hentai` | bool | false | No | Marks the collection as hentai for filtering.|
 | `is_public` | bool | true | No | Controls slow.pics visibility.|
-| `tmdb_id` | str | `""` | No | Optional TMDB identifier.|
+| `tmdb_id` | str | `""` | No | Optional TMDB identifier (digits or preformatted `movie/#####` / `MOVIE_#####`).|
+| `tmdb_category` | str | `""` | No | Optional TMDB category hint (`MOVIE` or `TV`).|
 | `remove_after_days` | int | 0 | No | Schedule deletion after N days; must be ≥0.|
 | `webhook_url` | str | `""` | No | Webhook notified after upload; retries with backoff.|
 | `open_in_browser` | bool | true | No | Launch slow.pics URL with `webbrowser.open` on success.|
@@ -241,14 +243,14 @@ See `docs/hdr_tonemap_overview.md` for a walkthrough of the log messages, preset
 ## TMDB auto-discovery
 Enabling `[tmdb].api_key` activates an asynchronous resolver that translates filenames into TMDB metadata before screenshots are rendered. The CLI analyses the first detected source to gather title/year hints (via GuessIt/Anitopy), then resolves `(category, tmdbId, original language)` once per run. Successful matches populate:
 
-- `cfg.slowpics.tmdb_id` when it is empty so the slow.pics upload automatically links to TMDB, and
+- `cfg.slowpics.tmdb_id` and `cfg.slowpics.tmdb_category` when empty so the slow.pics upload automatically links to TMDB (normalizing to the legacy `MOVIE_#####` / `TV_#####` format), and
 - the templating context for `[slowpics].collection_name`, exposing `${Title}`, `${OriginalTitle}`, `${Year}`, `${TMDBId}`, `${TMDBCategory}`, `${OriginalLanguage}`, `${Filename}`, `${FileName}`, and `${Label}`.
 
 Resolution follows a deterministic pipeline:
 
 1. If the filename or metadata exposes external IDs, `find/{imdb|tvdb}_id` is queried first, honouring `[tmdb].category_preference` when both movie and TV hits are returned.
 2. Otherwise, the resolver issues `search/movie` or `search/tv` calls with progressively broader queries derived from the cleaned title. Heuristics include year windows within `[tmdb].year_tolerance`, roman-numeral conversion, subtitle/colon trimming, reduced word sets, automatic movie↔TV switching, and, when `[tmdb].enable_anime_parsing=true`, romaji titles via Anitopy.
-3. Every response is scored by similarity, release year proximity, and light popularity boosts. Strong matches are selected immediately; otherwise the highest scoring candidate wins with logging that notes the heuristic (e.g. “roman-numeral”). Ambiguity only surfaces when `[tmdb].unattended=false`, in which case the CLI prompts for a manual identifier such as `movie/603`.
+3. Every response is scored by similarity, release year proximity, and light popularity boosts. Strong matches are selected immediately; otherwise the highest scoring candidate wins with logging that notes the heuristic (e.g. “roman-numeral”). Ambiguity only surfaces when `[tmdb].unattended=false`, in which case the CLI prompts for a manual identifier such as `movie/603` (the upload will normalize this to `MOVIE_603`).
 
 All HTTP requests share an in-memory cache governed by `[tmdb].cache_ttl_seconds` and automatically apply exponential backoff on rate limits or transient failures. Setting `[tmdb].api_key` is mandatory; when omitted the resolver is skipped and slow.pics falls back to whatever `tmdb_id` you manually provided in the config.
 

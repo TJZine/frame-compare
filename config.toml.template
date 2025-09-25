@@ -65,6 +65,8 @@ collection_name = ""
 is_hentai = false
 is_public = true
 tmdb_id = ""
+tmdb_category = ""
+# slow.pics expects identifiers like MOVIE_603; digits are auto-normalized when the TMDB category is known.
 remove_after_days = 0
 webhook_url = ""
 open_in_browser = true
