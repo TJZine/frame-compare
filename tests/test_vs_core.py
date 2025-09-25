@@ -130,6 +130,7 @@ def _stub_vs_module(monkeypatch):
         RANGE_LIMITED=1,
         RANGE_FULL=0,
         core=module_core,
+        get_core=lambda: module_core,
     )
     monkeypatch.setattr(vs_core, "_get_vapoursynth_module", lambda: fake_vs)
 
@@ -240,6 +241,24 @@ def test_process_clip_uses_global_core_when_clip_missing_core(monkeypatch):
     )
 
     assert result.clip is tonemapped
+
+
+def test_resolve_core_uses_get_core(monkeypatch):
+    module_core = types.SimpleNamespace()
+
+    fake_vs = types.SimpleNamespace(
+        RGB48=object(),
+        RGB24=object(),
+        RANGE_LIMITED=1,
+        RANGE_FULL=0,
+        get_core=lambda: module_core,
+    )
+
+    monkeypatch.setattr(vs_core, "_get_vapoursynth_module", lambda: fake_vs)
+
+    resolved = vs_core._resolve_core(None)
+
+    assert resolved is module_core
 
 
 def test_init_clip_errors_raise():

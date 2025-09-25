@@ -170,7 +170,27 @@ def _resolve_core(core: Optional[Any]) -> Any:
     if core is not None:
         return core
     vs_module = _get_vapoursynth_module()
-    return vs_module.core
+    module_core = getattr(vs_module, "core", None)
+    if callable(module_core):
+        try:
+            resolved = module_core()
+            if resolved is not None:
+                return resolved
+        except TypeError:
+            resolved = module_core
+            if resolved is not None:
+                return resolved
+    if module_core is not None and not callable(module_core):
+        return module_core
+    get_core = getattr(vs_module, "get_core", None)
+    if callable(get_core):
+        resolved = get_core()
+        if resolved is not None:
+            return resolved
+    fallback_core = getattr(vs_module, "core", None)
+    if fallback_core is None:
+        raise ClipInitError("VapourSynth core is not available on this interpreter")
+    return fallback_core
 
 
 def _resolve_source(core: Any) -> Any:

@@ -41,3 +41,6 @@ Date: 2025-09-28
   surfacing a clear error if these values are not numeric instead of failing with a Python type error mid-run.
 - VapourSynth frame-prop stamping detects bound methods (e.g. `clip.std.SetFrameProp`) and avoids passing the clip twice,
   eliminating the `float(... VideoNode)` crash encountered on Windows/Python 3.13 during analysis tonemapping.
+- Core resolution now checks `vapoursynth.get_core()` as well as `vapoursynth.core`, so environments where the singleton is
+  exposed only via the helper (observed with VapourSynth R72 + Python 3.13 + uv) no longer trip the "Clip has no
+  associated VapourSynth core" error.
