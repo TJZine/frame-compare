@@ -7,6 +7,7 @@ dependencies = [
     "colorama",
     "requests",
     "requests-toolbelt",
+    "httpx",
     "natsort",
     "anitopy",
     "guessit",
