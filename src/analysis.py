@@ -438,7 +438,13 @@ def _collect_metrics_vapoursynth(
 
         # Convert to grayscale for consistent metrics
         target_format = vs.GRAY16
-        work = vs.core.resize.Spline36(work, format=target_format, **resize_kwargs)
+        gray_kwargs = dict(resize_kwargs)
+        if "matrix" not in gray_kwargs:
+            if "matrix_in" in gray_kwargs:
+                gray_kwargs["matrix"] = gray_kwargs["matrix_in"]
+            else:
+                gray_kwargs["matrix"] = getattr(vs, "MATRIX_BT709", 1)
+        work = vs.core.resize.Spline36(work, format=target_format, **gray_kwargs)
     except Exception as exc:  # pragma: no cover - defensive
         raise RuntimeError(f"Failed to prepare analysis clip: {exc}") from exc
 
