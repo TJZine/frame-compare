@@ -764,17 +764,25 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
         lang_text = tmdb_resolution.original_language or "unknown"
         heuristic = (tmdb_resolution.candidate.reason or "match").replace("_", " ").replace("-", " ")
         source = "filename" if tmdb_resolution.candidate.used_filename_search else "external id"
+        category_slug = tmdb_resolution.category.lower()
+        link = f"https://www.themoviedb.org/{category_slug}/{tmdb_resolution.tmdb_id}"
         print(
             "[cyan]TMDB match:[/cyan] "
             f"{match_title}{year_text} "
-            f"[{tmdb_resolution.category}] -> {tmdb_resolution.tmdb_id} "
+            f"[{tmdb_resolution.category}] -> {link} "
             f"({source}, {heuristic.strip()}) lang={lang_text}"
         )
     elif manual_tmdb:
         display_title = tmdb_context.get("Title") or files[0].stem
+        category_slug = (tmdb_category or "").lower()
+        link = (
+            f"https://www.themoviedb.org/{category_slug}/{tmdb_id_value}"
+            if tmdb_id_value and category_slug
+            else tmdb_id_value
+        )
         print(
             "[cyan]TMDB manual override:[/cyan] "
-            f"{tmdb_category}/{tmdb_id_value} for {display_title}"
+            f"{tmdb_category}/{tmdb_id_value} ({link}) for {display_title}"
         )
     elif tmdb_api_key_present:
         if tmdb_error_message:
