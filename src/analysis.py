@@ -439,14 +439,34 @@ def _collect_metrics_vapoursynth(
         # Convert to grayscale for consistent metrics
         target_format = vs.GRAY16
         gray_kwargs = dict(resize_kwargs)
-        if "matrix" not in gray_kwargs and target_format not in {getattr(vs, "GRAY8", None), getattr(vs, "GRAY16", None), getattr(vs, "GRAY32", None)}:
-            if "matrix_in" in gray_kwargs:
-                gray_kwargs["matrix"] = gray_kwargs["matrix_in"]
+        gray_formats = {getattr(vs, "GRAY8", None), getattr(vs, "GRAY16", None), getattr(vs, "GRAY32", None)}
+        if work.format is not None and work.format.color_family == vs.RGB:
+            matrix_in_val = gray_kwargs.get("matrix_in")
+            if matrix_in_val is None:
+                matrix_in_val = getattr(vs, "MATRIX_RGB", 0)
+            convert_kwargs = dict(gray_kwargs)
+            convert_kwargs.pop("matrix", None)
+            convert_kwargs["matrix_in"] = int(matrix_in_val)
+            if "matrix" not in convert_kwargs:
+                convert_kwargs["matrix"] = getattr(vs, "MATRIX_BT709", 1)
+            yuv = vs.core.resize.Spline36(
+                work,
+                format=getattr(vs, "YUV444P16"),
+                **convert_kwargs,
+            )
+            work = vs.core.std.ShufflePlanes(yuv, planes=0, colorfamily=vs.GRAY)
+            if target_format != getattr(vs, "GRAY16"):
+                work = vs.core.resize.Spline36(work, format=target_format)
+        else:
+            if target_format not in gray_formats:
+                if "matrix" not in gray_kwargs:
+                    if "matrix_in" in gray_kwargs:
+                        gray_kwargs["matrix"] = gray_kwargs["matrix_in"]
+                    else:
+                        gray_kwargs["matrix"] = getattr(vs, "MATRIX_BT709", 1)
             else:
-                gray_kwargs["matrix"] = getattr(vs, "MATRIX_BT709", 1)
-        if target_format in {getattr(vs, "GRAY8", None), getattr(vs, "GRAY16", None), getattr(vs, "GRAY32", None)}:
-            gray_kwargs.pop("matrix", None)
-        work = vs.core.resize.Spline36(work, format=target_format, **gray_kwargs)
+                gray_kwargs.pop("matrix", None)
+            work = vs.core.resize.Spline36(work, format=target_format, **gray_kwargs)
     except Exception as exc:  # pragma: no cover - defensive
         raise RuntimeError(f"Failed to prepare analysis clip: {exc}") from exc
 
