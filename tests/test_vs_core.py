@@ -2,6 +2,7 @@ import sys
 import types
 
 import pytest
+
 import src.vs_core as vs_core
 
 from src.datatypes import ColorConfig
