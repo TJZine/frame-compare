@@ -59,6 +59,12 @@ def test_compute_selection_window_clamps_to_clip():
     assert spec.warnings
 
 
+def test_compute_selection_window_invalid_type():
+    with pytest.raises(TypeError) as excinfo:
+        compute_selection_window(100, 24.0, ignore_lead_seconds=object(), ignore_trail_seconds=0.0, min_window_seconds=0.0)
+    assert "analysis.ignore_lead_seconds" in str(excinfo.value)
+
+
 def test_select_frames_deterministic(monkeypatch):
     clip = FakeClip(
         num_frames=300,

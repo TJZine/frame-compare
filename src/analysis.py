@@ -7,6 +7,7 @@ import random
 import hashlib
 import json
 import logging
+import numbers
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
@@ -105,6 +106,17 @@ def _config_fingerprint(cfg: AnalysisConfig) -> str:
     return hashlib.sha1(payload).hexdigest()
 
 
+def _coerce_seconds(value: object, label: str) -> float:
+    if isinstance(value, numbers.Real):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except (TypeError, ValueError):
+            pass
+    raise TypeError(f"{label} must be numeric (got {type(value).__name__})")
+
+
 def compute_selection_window(
     num_frames: int,
     fps: float,
@@ -131,9 +143,9 @@ def compute_selection_window(
         fps_val = 24000 / 1001
 
     duration = num_frames / fps_val if fps_val > 0 else 0.0
-    lead = max(0.0, float(ignore_lead_seconds))
-    trail = max(0.0, float(ignore_trail_seconds))
-    min_window = max(0.0, float(min_window_seconds))
+    lead = max(0.0, _coerce_seconds(ignore_lead_seconds, "analysis.ignore_lead_seconds"))
+    trail = max(0.0, _coerce_seconds(ignore_trail_seconds, "analysis.ignore_trail_seconds"))
+    min_window = max(0.0, _coerce_seconds(min_window_seconds, "analysis.min_window_seconds"))
 
     start_sec = min(lead, max(0.0, duration))
     end_sec = max(start_sec, max(0.0, duration - trail))

@@ -37,3 +37,5 @@ Date: 2025-09-28
   downstream merge/analysis sees the same per-frame flags the tonemap stage emitted.
 - Tonemap processing now falls back to the global `vs.core` object when a clip lacks a `.core` attribute (common on
   Windows community builds and Python 3.13), preventing "Clip has no associated VapourSynth core" during frame selection.
+- Frame-window logic now validates `analysis.ignore_lead_seconds`, `ignore_trail_seconds`, and `min_window_seconds`,
+  surfacing a clear error if these values are not numeric instead of failing with a Python type error mid-run.
