@@ -12,6 +12,7 @@ from src.vs_core import (
     init_clip,
     process_clip_for_screenshot,
     set_ram_limit,
+    _normalize_rgb_props,
 )
 
 
@@ -190,6 +191,29 @@ def test_hdr_triggers_tonemap(monkeypatch):
     assert result.clip is tonemapped
     assert result.tonemap.applied is True
     assert result.tonemap.tone_curve == "mobius"
+
+
+def test_normalize_rgb_props_handles_bound_method():
+    clip = _FakeClip(props={"_Primaries": 9, "_Transfer": 16})
+
+    class _BoundStd:
+        def __init__(self, owner):
+            self.owner = owner
+            self.calls = []
+
+        def SetFrameProp(self, *args, **kwargs):
+            if args:
+                raise TypeError("clip argument not expected")
+            self.calls.append(kwargs)
+            return self.owner
+
+    clip.std = _BoundStd(clip)
+
+    result = _normalize_rgb_props(clip, transfer=16, primaries=9)
+
+    assert result is clip
+    assert clip.std.calls[0]["prop"] == "_Matrix"
+    assert clip.std.calls[-1]["prop"] == "_Primaries"
 
 
 def test_process_clip_uses_global_core_when_clip_missing_core(monkeypatch):

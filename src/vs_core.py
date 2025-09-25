@@ -190,6 +190,24 @@ def _ensure_std_namespace(clip: Any, error: RuntimeError) -> Any:
     return std
 
 
+def _call_set_frame_prop(set_prop: Any, clip: Any, **kwargs) -> Any:
+    try:
+        return set_prop(clip, **kwargs)
+    except TypeError as exc_first:
+        try:
+            return set_prop(**kwargs)
+        except TypeError:
+            raise exc_first
+
+
+def _apply_set_frame_prop(clip: Any, **kwargs) -> Any:
+    std_ns = _ensure_std_namespace(clip, ClipProcessError("clip.std namespace missing for SetFrameProp"))
+    set_prop = getattr(std_ns, "SetFrameProp", None)
+    if not callable(set_prop):  # pragma: no cover - defensive
+        raise ClipProcessError("clip.std.SetFrameProp is unavailable")
+    return _call_set_frame_prop(set_prop, clip, **kwargs)
+
+
 def _slice_clip(clip: Any, *, start: Optional[int] = None, end: Optional[int] = None) -> Any:
     try:
         if start is not None and end is not None:
@@ -352,16 +370,12 @@ def _resolve_color_metadata(props: Mapping[str, Any]) -> tuple[Optional[int], Op
 
 
 def _normalize_rgb_props(clip: Any, transfer: Optional[int], primaries: Optional[int]) -> Any:
-    std_ns = _ensure_std_namespace(clip, ClipProcessError("clip.std namespace missing for SetFrameProp"))
-    set_prop = getattr(std_ns, "SetFrameProp", None)
-    if not callable(set_prop):  # pragma: no cover - defensive
-        raise ClipProcessError("clip.std.SetFrameProp is unavailable")
-    work = set_prop(clip, prop="_Matrix", intval=0)
-    work = set_prop(work, prop="_ColorRange", intval=0)
+    work = _apply_set_frame_prop(clip, prop="_Matrix", intval=0)
+    work = _apply_set_frame_prop(work, prop="_ColorRange", intval=0)
     if transfer is not None:
-        work = set_prop(work, prop="_Transfer", intval=int(transfer))
+        work = _apply_set_frame_prop(work, prop="_Transfer", intval=int(transfer))
     if primaries is not None:
-        work = set_prop(work, prop="_Primaries", intval=int(primaries))
+        work = _apply_set_frame_prop(work, prop="_Primaries", intval=int(primaries))
     return work
 
 
@@ -651,16 +665,12 @@ def process_clip_for_screenshot(
         file_name=file_name,
     )
 
-    std_ns = _ensure_std_namespace(tonemapped, ClipProcessError("clip.std namespace missing"))
-    set_prop = getattr(std_ns, "SetFrameProp", None)
-    if not callable(set_prop):  # pragma: no cover - defensive
-        raise ClipProcessError("clip.std.SetFrameProp is unavailable")
-    tonemapped = set_prop(
+    tonemapped = _apply_set_frame_prop(
         tonemapped,
         prop="_Tonemapped",
         data=f"placebo:{tone_curve},dpd={dpd},dst_max={target_nits}",
     )
-    tonemapped = set_prop(tonemapped, prop="_ColorRange", intval=0)
+    tonemapped = _apply_set_frame_prop(tonemapped, prop="_ColorRange", intval=0)
     tonemapped = _normalize_rgb_props(tonemapped, transfer=1, primaries=1)
 
     tonemap_info = TonemapInfo(

@@ -39,3 +39,5 @@ Date: 2025-09-28
   Windows community builds and Python 3.13), preventing "Clip has no associated VapourSynth core" during frame selection.
 - Frame-window logic now validates `analysis.ignore_lead_seconds`, `ignore_trail_seconds`, and `min_window_seconds`,
   surfacing a clear error if these values are not numeric instead of failing with a Python type error mid-run.
+- VapourSynth frame-prop stamping detects bound methods (e.g. `clip.std.SetFrameProp`) and avoids passing the clip twice,
+  eliminating the `float(... VideoNode)` crash encountered on Windows/Python 3.13 during analysis tonemapping.
