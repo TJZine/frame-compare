@@ -570,8 +570,31 @@ def _print_summary(files: Sequence[Path], frames: Sequence[int], out_dir: Path, 
 
 
 def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
+    config_location = Path(config_path).expanduser()
+
     try:
-        cfg: AppConfig = load_config(config_path)
+        cfg: AppConfig = load_config(str(config_location))
+    except FileNotFoundError as exc:
+        message = f"Config file not found: {config_location}"
+        raise CLIAppError(
+            message,
+            code=2,
+            rich_message=f"[red]Config file not found:[/red] {config_location}",
+        ) from exc
+    except PermissionError as exc:
+        message = f"Config file is not readable: {config_location}"
+        raise CLIAppError(
+            message,
+            code=2,
+            rich_message=f"[red]Config file is not readable:[/red] {config_location}",
+        ) from exc
+    except OSError as exc:
+        message = f"Failed to read config file: {exc}"
+        raise CLIAppError(
+            message,
+            code=2,
+            rich_message=f"[red]Failed to read config file:[/red] {exc}",
+        ) from exc
     except ConfigError as exc:
         raise CLIAppError(
             f"Config error: {exc}", code=2, rich_message=f"[red]Config error:[/red] {exc}"
