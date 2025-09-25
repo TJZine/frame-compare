@@ -2,6 +2,9 @@ import sys
 import types
 
 import pytest
+
+pytest.importorskip("vapoursynth", reason="VapourSynth-dependent behaviour is optional")
+
 import src.vs_core as vs_core
 
 from src.datatypes import ColorConfig
