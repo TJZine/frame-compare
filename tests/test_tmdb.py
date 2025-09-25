@@ -202,6 +202,7 @@ def test_vvitch_alternative_title(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     queries: List[str] = []
+    alias_calls: List[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         query = request.url.params.get("query", "")
@@ -222,13 +223,21 @@ def test_vvitch_alternative_title(monkeypatch: pytest.MonkeyPatch) -> None:
                         {
                             "id": 310131,
                             "title": "The Witch",
-                            "original_title": "The VVitch: A New-England Folktale",
+                            "original_title": "The Witch",
                             "release_date": "2016-02-19",
                             "popularity": 30.0,
                         },
                     ]
                 },
             )
+        if "alternative_titles" in request.url.path:
+            alias_calls.append(request.url.path)
+            if request.url.path.endswith("/movie/310131/alternative_titles"):
+                return httpx.Response(
+                    200,
+                    json={"titles": [{"title": "The VVitch: A New-England Folktale"}]},
+                )
+            return httpx.Response(200, json={"titles": [{"title": "The Witch"}]})
         return httpx.Response(200, json={"results": []})
 
     transport = httpx.MockTransport(handler)
@@ -244,6 +253,7 @@ def test_vvitch_alternative_title(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result is not None
     assert result.tmdb_id == "310131"
     assert any("vvitch" in query.lower() for query in queries)
+    assert any(path.endswith("/movie/310131/alternative_titles") for path in alias_calls)
 
 
 def test_tmdb_backoff_and_cache(monkeypatch: pytest.MonkeyPatch) -> None:
