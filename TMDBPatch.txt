@@ -2009,6 +2009,272 @@ index aefc449..103ee78 100644
 +[[package]]
 +name = "typing-extensions"
 +version = "4.15.0"
+
+From 6588fa2a8c1c46c92445a853420be2a936326e2f Mon Sep 17 00:00:00 2001
+From: Tristan Zine <72631199+TJZine@users.noreply.github.com>
+Date: Thu, 18 Sep 2025 01:13:54 -0400
+Subject: [PATCH] Improve TMDB feedback and default slow.pics naming (#18)
+
+---
+ README.md                   |   8 ++-
+ config.toml.template        |   2 +
+ frame_compare.py            |  57 ++++++++++++++++--
+ tests/test_frame_compare.py | 117 ++++++++++++++++++++++++++++++++++++
+ 4 files changed, 176 insertions(+), 8 deletions(-)
+
+diff --git a/README.md b/README.md
+index 0cee918..9b0c29a 100644
+--- a/README.md
++++ b/README.md
+@@ -219,8 +219,9 @@ change_fps = {}
+ ## TMDB auto-discovery
+ Enabling `[tmdb].api_key` activates an asynchronous resolver that translates filenames into TMDB metadata before screenshots are rendered. The CLI analyses the first detected source to gather title/year hints (via GuessIt/Anitopy), then resolves `(category, tmdbId, original language)` once per run. Successful matches populate:
+ 
+-- `cfg.slowpics.tmdb_id` when it is empty so the slow.pics upload automatically links to TMDB, and
+-- the templating context for `[slowpics].collection_name`, exposing `${Title}`, `${OriginalTitle}`, `${Year}`, `${TMDBId}`, `${TMDBCategory}`, `${OriginalLanguage}`, `${Filename}`, `${FileName}`, and `${Label}`.
++- `cfg.slowpics.tmdb_id` when it is empty so the slow.pics upload automatically links to TMDB,
++- the templating context for `[slowpics].collection_name`, exposing `${Title}`, `${OriginalTitle}`, `${Year}`, `${TMDBId}`, `${TMDBCategory}`, `${OriginalLanguage}`, `${Filename}`, `${FileName}`, and `${Label}`, and
++- the default slow.pics collection title when `[slowpics].collection_name` is blank, using `${Title}`/`${Year}` when present or the first filename as a fallback.
+ 
+ Resolution follows a deterministic pipeline:
+ 
+@@ -228,7 +229,8 @@ Resolution follows a deterministic pipeline:
+ 2. Otherwise, the resolver issues `search/movie` or `search/tv` calls with progressively broader queries derived from the cleaned title. Heuristics include year windows within `[tmdb].year_tolerance`, roman-numeral conversion, subtitle/colon trimming, reduced word sets, automatic movie↔TV switching, and, when `[tmdb].enable_anime_parsing=true`, romaji titles via Anitopy.
+ 3. Every response is scored by similarity, release year proximity, and light popularity boosts. Strong matches are selected immediately; otherwise the highest scoring candidate wins with logging that notes the heuristic (e.g. “roman-numeral”). Ambiguity only surfaces when `[tmdb].unattended=false`, in which case the CLI prompts for a manual identifier such as `movie/603`.
+ 
+-All HTTP requests share an in-memory cache governed by `[tmdb].cache_ttl_seconds` and automatically apply exponential backoff on rate limits or transient failures. Setting `[tmdb].api_key` is mandatory; when omitted the resolver is skipped and slow.pics falls back to whatever `tmdb_id` you manually provided in the config.
++All HTTP requests share an in-memory cache governed by `[tmdb].cache_ttl_seconds` and automatically apply exponential backoff on rate limits or transient failures. Setting `[tmdb].api_key` is mandatory; when omitted the resolver is skipped.
++The CLI prints a reminder and slow.pics falls back to whatever `tmdb_id` you manually provided in the config.
+ 
+ ## CLI usage
+ ```
+diff --git a/config.toml.template b/config.toml.template
+index 967ef15..72b12d5 100644
+--- a/config.toml.template
++++ b/config.toml.template
+@@ -40,6 +40,8 @@ letterbox_pillarbox_aware = true
+ 
+ [slowpics]
+ # Auto-upload settings. Leave `auto_upload` off for local runs.
++# When `collection_name` is blank, the CLI auto-names collections with
++# resolved TMDB metadata (Title/Year) or the first filename as a fallback.
+ auto_upload = true
+ collection_name = ""
+ is_hentai = false
+diff --git a/frame_compare.py b/frame_compare.py
+index 7d4bf2b..60fec6c 100644
+--- a/frame_compare.py
++++ b/frame_compare.py
+@@ -568,8 +568,11 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
+     tmdb_category: Optional[str] = None
+     tmdb_id_value: Optional[str] = None
+     tmdb_language: Optional[str] = None
++    tmdb_error_message: Optional[str] = None
++    tmdb_ambiguous: bool = False
++    tmdb_api_key_present = bool(cfg.tmdb.api_key.strip())
+ 
+-    if cfg.tmdb.api_key.strip():
++    if tmdb_api_key_present:
+         base_file = files[0]
+         imdb_hint = _first_non_empty(metadata, "imdb_id").lower()
+         tvdb_hint = _first_non_empty(metadata, "tvdb_id")
+@@ -587,9 +590,11 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
+                 )
+             )
+         except TMDBAmbiguityError as exc:
++            tmdb_ambiguous = True
+             manual_tmdb = _prompt_manual_tmdb(exc.candidates)
+         except TMDBResolutionError as exc:
+             logger.warning("TMDB lookup failed for %s: %s", base_file.name, exc)
++            tmdb_error_message = str(exc)
+         else:
+             if tmdb_resolution is not None:
+                 tmdb_category = tmdb_resolution.category
+@@ -629,10 +634,52 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
+     if tmdb_id_value and not (cfg.slowpics.tmdb_id or "").strip():
+         cfg.slowpics.tmdb_id = str(tmdb_id_value)
+ 
+-    if cfg.slowpics.collection_name:
+-        cfg.slowpics.collection_name = _render_collection_name(
+-            cfg.slowpics.collection_name,
+-            tmdb_context,
++    collection_template = (cfg.slowpics.collection_name or "").strip()
++    if collection_template:
++        rendered_collection = _render_collection_name(collection_template, tmdb_context).strip()
++        cfg.slowpics.collection_name = rendered_collection or "Frame Comparison"
++    else:
++        derived_title = (tmdb_context.get("Title") or "").strip() or files[0].stem
++        derived_year = (tmdb_context.get("Year") or "").strip()
++        collection_name = derived_title
++        if derived_title and derived_year:
++            collection_name = f"{derived_title} ({derived_year})"
++        cfg.slowpics.collection_name = collection_name or "Frame Comparison"
++
++    if tmdb_resolution is not None:
++        match_title = tmdb_resolution.title or tmdb_context.get("Title") or files[0].stem
++        year_text = f" ({tmdb_resolution.year})" if tmdb_resolution.year else ""
++        lang_text = tmdb_resolution.original_language or "unknown"
++        heuristic = (tmdb_resolution.candidate.reason or "match").replace("_", " ").replace("-", " ")
++        source = "filename" if tmdb_resolution.candidate.used_filename_search else "external id"
++        print(
++            "[cyan]TMDB match:[/cyan] "
++            f"{match_title}{year_text} "
++            f"[{tmdb_resolution.category}] -> {tmdb_resolution.tmdb_id} "
++            f"({source}, {heuristic.strip()}) lang={lang_text}"
++        )
++    elif manual_tmdb:
++        display_title = tmdb_context.get("Title") or files[0].stem
++        print(
++            "[cyan]TMDB manual override:[/cyan] "
++            f"{tmdb_category}/{tmdb_id_value} for {display_title}"
++        )
++    elif tmdb_api_key_present:
++        if tmdb_error_message:
++            print(f"[yellow]TMDB lookup failed:[/yellow] {tmdb_error_message}")
++        elif tmdb_ambiguous:
++            print(
++                "[yellow]TMDB: ambiguous results for[/yellow] "
++                f"{files[0].name}; continuing without metadata."
++            )
++        else:
++            print(
++                "[yellow]TMDB: no confident match for[/yellow] "
++                f"{files[0].name}; continuing without metadata."
++            )
++    elif not (cfg.slowpics.tmdb_id or "").strip():
++        print(
++            "[yellow]TMDB disabled:[/yellow] set [tmdb].api_key in config.toml to enable automatic matching."
+         )
+ 
+     labels = [meta.get("label") or file.name for meta, file in zip(metadata, files)]
+diff --git a/tests/test_frame_compare.py b/tests/test_frame_compare.py
+index f066f23..c1158fe 100644
+--- a/tests/test_frame_compare.py
++++ b/tests/test_frame_compare.py
+@@ -426,6 +426,123 @@ def update(self, *_, **__):
+     assert result.slowpics_url == "https://slow.pics/c/example"
+ 
+ 
++def test_cli_tmdb_resolution_sets_default_collection_name(tmp_path, monkeypatch):
++    first = tmp_path / "SourceA.mkv"
++    second = tmp_path / "SourceB.mkv"
++    for file in (first, second):
++        file.write_bytes(b"data")
++
++    cfg = _make_config(tmp_path)
++    cfg.tmdb.api_key = "token"
++    cfg.slowpics.auto_upload = True
++    cfg.slowpics.collection_name = ""
++    cfg.slowpics.delete_screen_dir_after_upload = False
++
++    monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
++
++    def fake_parse(name: str, **_: object) -> dict[str, str]:
++        return {
++            "label": name,
++            "release_group": "",
++            "file_name": name,
++            "title": "Metadata Title",
++            "year": "2020",
++            "anime_title": "",
++            "imdb_id": "",
++            "tvdb_id": "",
++        }
++
++    monkeypatch.setattr(frame_compare, "parse_filename_metadata", fake_parse)
++
++    candidate = TMDBCandidate(
++        category="MOVIE",
++        tmdb_id="12345",
++        title="Resolved Title",
++        original_title="Original Title",
++        year=2023,
++        score=0.95,
++        original_language="en",
++        reason="primary-title",
++        used_filename_search=True,
++        payload={"id": 12345},
++    )
++    resolution = TMDBResolution(candidate=candidate, margin=0.4, source_query="Resolved")
++
++    async def fake_resolve(*args, **kwargs):  # pragma: no cover - simple stub
++        return resolution
++
++    monkeypatch.setattr(frame_compare, "resolve_tmdb", fake_resolve)
++    monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit: None)
++
++    def fake_init(path, *, trim_start=0, trim_end=None, fps_map=None, cache_dir=None):
++        return types.SimpleNamespace(
++            width=1280,
++            height=720,
++            fps_num=24000,
++            fps_den=1001,
++            num_frames=1800,
++        )
++
++    monkeypatch.setattr(frame_compare.vs_core, "init_clip", fake_init)
++
++    def fake_select(
++        clip,
++        analysis_cfg,
++        files,
++        file_under_analysis,
++        cache_info=None,
++        progress=None,
++        *,
++        frame_window=None,
++        return_metadata=False,
++    ):
++        assert frame_window is not None
++        return [12, 24]
++
++    monkeypatch.setattr(frame_compare, "select_frames", fake_select)
++
++    def fake_generate(clips, frames, files, metadata, out_dir, cfg_screens, **kwargs):
++        out_dir.mkdir(parents=True, exist_ok=True)
++        return [str(out_dir / f"shot_{idx}.png") for idx in range(len(frames) * len(files))]
++
++    monkeypatch.setattr(frame_compare, "generate_screenshots", fake_generate)
++
++    uploads = []
++
++    def fake_upload(image_paths, screen_dir, cfg_slow, **kwargs):
++        uploads.append((list(image_paths), screen_dir, cfg_slow.tmdb_id, cfg_slow.collection_name))
++        return "https://slow.pics/c/example"
++
++    monkeypatch.setattr(frame_compare, "upload_comparison", fake_upload)
++
++    class DummyProgress:
++        def __init__(self, *_, **__):
++            pass
++
++        def __enter__(self):
++            return self
++
++        def __exit__(self, exc_type, exc, tb):
++            return False
++
++        def add_task(self, *_, **__):
++            return 1
++
++        def update(self, *_, **__):
++            return None
++
++    monkeypatch.setattr(frame_compare, "Progress", DummyProgress)
++
++    result = frame_compare.run_cli("dummy", None)
++
++    assert uploads
++    _, _, upload_tmdb_id, upload_collection = uploads[0]
++    assert upload_tmdb_id == "12345"
++    assert upload_collection == "Resolved Title (2023)"
++    assert result.config.slowpics.tmdb_id == "12345"
++    assert result.config.slowpics.collection_name == "Resolved Title (2023)"
++
++
+ def test_cli_tmdb_manual_override(tmp_path, monkeypatch):
+     first = tmp_path / "Alpha.mkv"
+     second = tmp_path / "Beta.mkv"
 +source = { registry = "https://pypi.org/simple" }
 +sdist = { url = "https://files.pythonhosted.org/packages/72/94/1a15dd82efb362ac84269196e94cf00f187f7ed21c242792a923cdb1c61f/typing_extensions-4.15.0.tar.gz", hash = "sha256:0cea48d173cc12fa28ecabc3b837ea3cf6f38c6d1136f85cbaaf598984861466", size = 109391, upload-time = "2025-08-25T13:49:26.313Z" }
 +wheels = [
