@@ -679,6 +679,8 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
 
     if tmdb_id_value and not (cfg.slowpics.tmdb_id or "").strip():
         cfg.slowpics.tmdb_id = str(tmdb_id_value)
+    if tmdb_category and not (getattr(cfg.slowpics, "tmdb_category", "") or "").strip():
+        cfg.slowpics.tmdb_category = tmdb_category
 
     collection_template = (cfg.slowpics.collection_name or "").strip()
     if collection_template:

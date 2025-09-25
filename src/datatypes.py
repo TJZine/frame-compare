@@ -78,6 +78,7 @@ class SlowpicsConfig:
     is_hentai: bool = False
     is_public: bool = True
     tmdb_id: str = ""
+    tmdb_category: str = ""
     remove_after_days: int = 0
     webhook_url: str = ""
     open_in_browser: bool = True

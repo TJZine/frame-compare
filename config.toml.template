@@ -65,6 +65,7 @@ collection_name = ""
 is_hentai = false
 is_public = true
 tmdb_id = ""
+tmdb_category = ""
 remove_after_days = 0
 webhook_url = ""
 open_in_browser = true
