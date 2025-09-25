@@ -46,3 +46,6 @@ Date: 2025-09-28
   associated VapourSynth core" error.
 - libplacebo detection now honours both `core.libplacebo` and `core.placebo`, matching the legacy script and fixing
   VapourSynth R72 installs that expose the namespace without the `lib` prefix.
+- Analysis metrics conversion now passes the correct `matrix_in`/color metadata when converting RGB tonemapped clips to
+  grayscale, preventing VapourSynth's "Matrix must be specified" error and ensuring metrics are gathered instead of
+  falling back to synthetic data.

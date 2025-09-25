@@ -407,16 +407,38 @@ def _collect_metrics_vapoursynth(
         raise TypeError("Expected a VapourSynth clip")
 
     work = clip
+    props = vs_core._snapshot_frame_props(work)
+    matrix_in, transfer_in, primaries_in, color_range_in = vs_core._resolve_color_metadata(props)
+
+    def _resize_kwargs_for_source() -> dict:
+        kwargs = {}
+        if matrix_in is not None:
+            kwargs["matrix_in"] = int(matrix_in)
+        else:
+            try:
+                if work.format is not None and work.format.color_family == vs.RGB:
+                    kwargs["matrix_in"] = getattr(vs, "MATRIX_RGB", 0)
+            except AttributeError:
+                pass
+        if transfer_in is not None:
+            kwargs["transfer_in"] = int(transfer_in)
+        if primaries_in is not None:
+            kwargs["primaries_in"] = int(primaries_in)
+        if color_range_in is not None:
+            kwargs["range_in"] = int(color_range_in)
+        return kwargs
+
+    resize_kwargs = _resize_kwargs_for_source()
     try:
         if cfg.downscale_height > 0 and work.height > cfg.downscale_height:
             target_h = _ensure_even(max(2, int(cfg.downscale_height)))
             aspect = work.width / work.height
             target_w = _ensure_even(max(2, int(round(target_h * aspect))))
-            work = vs.core.resize.Spline36(work, width=target_w, height=target_h)
+            work = vs.core.resize.Spline36(work, width=target_w, height=target_h, **resize_kwargs)
 
         # Convert to grayscale for consistent metrics
         target_format = vs.GRAY16
-        work = vs.core.resize.Spline36(work, format=target_format)
+        work = vs.core.resize.Spline36(work, format=target_format, **resize_kwargs)
     except Exception as exc:  # pragma: no cover - defensive
         raise RuntimeError(f"Failed to prepare analysis clip: {exc}") from exc
 
