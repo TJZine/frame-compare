@@ -12,6 +12,8 @@ from src.vs_core import (
     init_clip,
     process_clip_for_screenshot,
     set_ram_limit,
+    VSSourceUnavailableError,
+    VSPluginDepMissingError,
     _normalize_rgb_props,
 )
 
@@ -94,9 +96,29 @@ class _FailingLWLib:
         raise RuntimeError("boom")
 
 
+class _BrokenDependencyLWLib:
+    @staticmethod
+    def LWLibavSource(path: str, **kwargs):
+        raise RuntimeError(
+            "dlopen(/path/to/lsmas.dylib, 0x0001): Library not loaded: "
+            "/usr/local/lib/libavcodec.61.dylib"
+        )
+
+
+class _WorkingFFMS:
+    @staticmethod
+    def Source(path: str, **kwargs):
+        clip = _FakeClip()
+        clip.opened_path = path
+        clip.cachefile = kwargs.get("cachefile")
+        return clip
+
+
 class _FakeCore:
-    def __init__(self, source):
+    def __init__(self, source, ffms_source=None):
         self.lsmas = source
+        if ffms_source is not None:
+            self.ffms2 = ffms_source
         self.std = types.SimpleNamespace(BlankClip=_BlankClip)
 
 
@@ -193,6 +215,42 @@ def test_hdr_triggers_tonemap(monkeypatch):
     assert result.clip is tonemapped
     assert result.tonemap.applied is True
     assert result.tonemap.tone_curve == "mobius"
+
+
+def test_overlay_template_respects_overrides(monkeypatch):
+    clip = _FakeClip(props={"_Primaries": 9, "_Transfer": 16})
+    tonemapped = _FakeClip()
+
+    monkeypatch.setattr(vs_core, "_tonemap_with_retries", lambda *args, **kwargs: tonemapped)
+
+    color_cfg = ColorConfig(
+        enable_tonemap=True,
+        overlay_enabled=True,
+        preset="reference",
+        tone_curve="mobius",
+        target_nits=203.0,
+        dynamic_peak_detection=False,
+        overlay_text_template="curve={tone_curve} dpd={dynamic_peak_detection_bool} nits={target_nits}",
+        verify_enabled=False,
+    )
+    setattr(
+        color_cfg,
+        "_provided_keys",
+        {"preset", "tone_curve", "target_nits", "dynamic_peak_detection", "overlay_text_template"},
+    )
+
+    result = process_clip_for_screenshot(
+        clip,
+        "file.mkv",
+        color_cfg,
+        enable_overlay=True,
+        enable_verification=False,
+    )
+
+    assert result.overlay_text == "curve=mobius dpd=False nits=203"
+    assert result.tonemap.tone_curve == "mobius"
+    assert result.tonemap.target_nits == 203.0
+    assert result.tonemap.dpd == 0
 
 
 def test_normalize_rgb_props_handles_bound_method():
@@ -301,6 +359,30 @@ def test_init_clip_errors_raise():
     fake_core = _FakeCore(source=_FailingLWLib())
     with pytest.raises(ClipInitError):
         init_clip("video.mkv", core=fake_core)
+
+
+def test_init_clip_falls_back_to_ffms():
+    fake_core = _FakeCore(source=_BrokenDependencyLWLib(), ffms_source=_WorkingFFMS())
+
+    clip = init_clip("video.mkv", core=fake_core)
+
+    assert getattr(clip, "opened_path", None) == "video.mkv"
+    assert isinstance(clip.cachefile, str) and clip.cachefile.endswith(".ffindex")
+
+
+def test_init_clip_reports_plugin_errors_when_all_fail():
+    fake_core = types.SimpleNamespace(
+        lsmas=_BrokenDependencyLWLib(),
+        std=types.SimpleNamespace(BlankClip=_BlankClip),
+    )
+
+    with pytest.raises(VSSourceUnavailableError) as exc_info:
+        init_clip("video.mkv", core=fake_core)
+
+    assert "lsmas" in exc_info.value.errors
+    lsmas_error = exc_info.value.errors["lsmas"]
+    assert isinstance(lsmas_error, VSPluginDepMissingError)
+    assert "libavcodec.61" in str(lsmas_error)
 
 
 def test_init_clip_applies_trim_and_fps(monkeypatch):

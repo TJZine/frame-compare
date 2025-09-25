@@ -29,6 +29,13 @@ def test_load_defaults(tmp_path: Path) -> None:
     assert app.color.target_nits == 100.0
     assert app.color.overlay_enabled is True
     assert app.color.verify_enabled is True
+    assert app.source.preferred == "lsmas"
+    assert app.tmdb.api_key == ""
+    assert app.tmdb.unattended is True
+    assert app.tmdb.year_tolerance == 2
+    assert app.tmdb.enable_anime_parsing is True
+    assert app.tmdb.cache_ttl_seconds == 86400
+    assert app.tmdb.category_preference is None
 
 
 @pytest.mark.parametrize(
@@ -42,6 +49,10 @@ def test_load_defaults(tmp_path: Path) -> None:
         ("[color]\nverify_luma_threshold = 1.5\n", "color.verify_luma_threshold"),
         ("[color]\nverify_step_seconds = 0\n", "color.verify_step_seconds"),
         ("[color]\ntarget_nits = -10\n", "color.target_nits"),
+        ("[source]\npreferred = \"bogus\"\n", "source.preferred"),
+        ("[tmdb]\nyear_tolerance = -1\n", "tmdb.year_tolerance"),
+        ("[tmdb]\ncache_ttl_seconds = -5\n", "tmdb.cache_ttl_seconds"),
+        ("[tmdb]\ncategory_preference = \"documentary\"\n", "tmdb.category_preference"),
     ],
 )
 def test_validation_errors(tmp_path: Path, toml_snippet: str, message: str) -> None:
@@ -73,6 +84,12 @@ remove_after_days = 14
 [naming]
 always_full_filename = false
 
+[tmdb]
+unattended = false
+year_tolerance = 1
+cache_ttl_seconds = 120
+category_preference = "tv"
+
 [paths]
 input_dir = "D:/comparisons"
 
@@ -81,6 +98,9 @@ target_nits = 120.0
 tone_curve = "mobius"
 verify_enabled = false
 overlay_enabled = false
+
+[source]
+preferred = "ffms2"
         """.strip(),
         encoding="utf-8",
     )
@@ -99,3 +119,8 @@ overlay_enabled = false
     assert app.color.tone_curve == "mobius"
     assert app.color.verify_enabled is False
     assert app.color.overlay_enabled is False
+    assert app.source.preferred == "ffms2"
+    assert app.tmdb.unattended is False
+    assert app.tmdb.year_tolerance == 1
+    assert app.tmdb.cache_ttl_seconds == 120
+    assert app.tmdb.category_preference == "TV"

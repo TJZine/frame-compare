@@ -5,6 +5,11 @@ from importlib import import_module
 from typing import Any, Dict, Mapping, Optional
 
 
+_YEAR_RE = re.compile(r"(19|20)\d{2}")
+_IMDB_ID_RE = re.compile(r"(tt\d{7,9})", re.IGNORECASE)
+_TVDB_ID_RE = re.compile(r"tvdb\s*(\d+)", re.IGNORECASE)
+
+
 def _extract_release_group_brackets(file_name: str) -> Optional[str]:
     """Return the leading release-group tag (e.g. "[Group]") without brackets."""
 
@@ -126,11 +131,14 @@ def parse_filename_metadata(
     release_group = ""
     label_episode_marker = ""
 
+    year_value: Any = None
+
     if guessit_data:
         title = str(guessit_data.get("title") or "")
         episode_val = guessit_data.get("episode")
         episode_title = str(guessit_data.get("episode_title") or "")
         release_group = str(guessit_data.get("release_group") or "")
+        year_value = guessit_data.get("year")
         normalized_episode = _normalize_episode_number(episode_val)
         label_episode_marker = _episode_designator_for_label(
             episode_val, guessit_data.get("season"), normalized_episode
@@ -143,9 +151,24 @@ def parse_filename_metadata(
         release_group = str(ani_data.get("release_group") or "")
         normalized_episode = _normalize_episode_number(episode_val)
         label_episode_marker = normalized_episode
+        year_value = ani_data.get("anime_season") or ani_data.get("year")
 
     normalized_episode = _normalize_episode_number(episode_val)
     resolved_release_group = release_group or _extract_release_group_brackets(file_name) or ""
+
+    if isinstance(year_value, (list, tuple)):
+        year_value = year_value[0] if year_value else None
+    year_str = ""
+    if isinstance(year_value, (int, float)):
+        year_int = int(year_value)
+        if 1900 <= year_int <= 2100:
+            year_str = str(year_int)
+    elif isinstance(year_value, str) and year_value.isdigit():
+        year_str = year_value
+    if not year_str:
+        match = _YEAR_RE.search(file_name)
+        if match:
+            year_str = match.group(0)
 
     metadata = {
         "anime_title": title,
@@ -153,6 +176,8 @@ def parse_filename_metadata(
         "episode_title": episode_title,
         "release_group": resolved_release_group,
         "file_name": file_name,
+        "title": title,
+        "year": year_str,
     }
 
     use_full_name = True if always_full_filename is None else bool(always_full_filename)
@@ -164,4 +189,9 @@ def parse_filename_metadata(
         episode_title,
     )
     metadata["label"] = label
+
+    imdb_match = _IMDB_ID_RE.search(file_name)
+    metadata["imdb_id"] = imdb_match.group(1).lower() if imdb_match else ""
+    tvdb_match = _TVDB_ID_RE.search(file_name)
+    metadata["tvdb_id"] = tvdb_match.group(1) if tvdb_match else ""
     return metadata

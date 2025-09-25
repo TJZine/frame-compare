@@ -1,16 +1,18 @@
 [project]
 name = "frame-compare"
 version = "0.0.1"
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 dependencies = [
     "rich",
     "colorama",
     "requests",
     "requests-toolbelt",
+    "httpx",
     "natsort",
     "anitopy",
     "guessit",
     "click>=8.1",
+    "vapoursynth>=72",
 ]
 
 [dependency-groups]
@@ -24,7 +26,7 @@ dev = [
 
 [tool.black]
 line-length = 100
-target-version = ["py311"]
+target-version = ["py313"]
 
 [tool.ruff]
 line-length = 100

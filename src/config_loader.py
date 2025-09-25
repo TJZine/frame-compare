@@ -10,13 +10,15 @@ import tomllib
 from .datatypes import (
     AppConfig,
     AnalysisConfig,
-    ScreenshotConfig,
-    SlowpicsConfig,
+    ColorConfig,
     NamingConfig,
+    OverridesConfig,
     PathsConfig,
     RuntimeConfig,
-    OverridesConfig,
-    ColorConfig,
+    ScreenshotConfig,
+    SlowpicsConfig,
+    SourceConfig,
+    TMDBConfig,
 )
 
 
@@ -45,15 +47,21 @@ def _sanitize_section(raw: dict[str, Any], name: str, cls):
         raise ConfigError(f"[{name}] must be a table")
     cleaned: Dict[str, Any] = {}
     bool_fields = {field.name for field in fields(cls) if field.type is bool}
+    provided_keys = set(raw.keys())
     for key, value in raw.items():
         if key in bool_fields:
             cleaned[key] = _coerce_bool(value, f"{name}.{key}")
         else:
             cleaned[key] = value
     try:
-        return cls(**cleaned)
+        instance = cls(**cleaned)
     except TypeError as exc:
         raise ConfigError(f"Invalid keys in [{name}]: {exc}") from exc
+    try:
+        setattr(instance, "_provided_keys", provided_keys)
+    except Exception:
+        pass
+    return instance
 
 
 def _validate_trim(mapping: Dict[str, Any], label: str) -> None:
@@ -92,11 +100,13 @@ def load_config(path: str) -> AppConfig:
         analysis=_sanitize_section(raw.get("analysis", {}), "analysis", AnalysisConfig),
         screenshots=_sanitize_section(raw.get("screenshots", {}), "screenshots", ScreenshotConfig),
         slowpics=_sanitize_section(raw.get("slowpics", {}), "slowpics", SlowpicsConfig),
+        tmdb=_sanitize_section(raw.get("tmdb", {}), "tmdb", TMDBConfig),
         naming=_sanitize_section(raw.get("naming", {}), "naming", NamingConfig),
         paths=_sanitize_section(raw.get("paths", {}), "paths", PathsConfig),
         runtime=_sanitize_section(raw.get("runtime", {}), "runtime", RuntimeConfig),
         overrides=_sanitize_section(raw.get("overrides", {}), "overrides", OverridesConfig),
         color=_sanitize_section(raw.get("color", {}), "color", ColorConfig),
+        source=_sanitize_section(raw.get("source", {}), "source", SourceConfig),
     )
 
     if app.analysis.step < 1:
@@ -126,6 +136,16 @@ def load_config(path: str) -> AppConfig:
     if app.slowpics.remove_after_days < 0:
         raise ConfigError("slowpics.remove_after_days must be >= 0")
 
+    if app.tmdb.year_tolerance < 0:
+        raise ConfigError("tmdb.year_tolerance must be >= 0")
+    if app.tmdb.cache_ttl_seconds < 0:
+        raise ConfigError("tmdb.cache_ttl_seconds must be >= 0")
+    if app.tmdb.category_preference is not None:
+        preference = app.tmdb.category_preference.strip().upper()
+        if preference not in {"", "MOVIE", "TV"}:
+            raise ConfigError("tmdb.category_preference must be MOVIE, TV, or omitted")
+        app.tmdb.category_preference = preference or None
+
     if app.runtime.ram_limit_mb <= 0:
         raise ConfigError("runtime.ram_limit_mb must be > 0")
 
@@ -142,7 +162,13 @@ def load_config(path: str) -> AppConfig:
     if app.color.verify_max_seconds < 0:
         raise ConfigError("color.verify_max_seconds must be >= 0")
 
+    preferred = app.source.preferred.strip().lower()
+    if preferred not in {"lsmas", "ffms2"}:
+        raise ConfigError("source.preferred must be either 'lsmas' or 'ffms2'")
+    app.source.preferred = preferred
+
     _validate_trim(app.overrides.trim, "overrides.trim")
     _validate_trim(app.overrides.trim_end, "overrides.trim_end")
     _validate_change_fps(app.overrides.change_fps)
     return app
+
