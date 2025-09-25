@@ -210,7 +210,32 @@ def test_legacy_collection_tmdb_identifier_normalization(tmp_path, monkeypatch: 
     slowpics.upload_comparison([str(path) for path in files], tmp_path, cfg)
 
     comparison_fields = DummyEncoder.instances[0].fields
-    assert comparison_fields["tmdbId"] == "movie/98765"
+    assert comparison_fields["tmdbId"] == "MOVIE_98765"
+
+
+def test_tmdb_identifier_accepts_prefixed_values(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = SlowpicsConfig(
+        collection_name="Example",
+        tmdb_id="tv/76543",
+    )
+
+    files = [
+        _write_image(tmp_path, "10 - ClipA.png"),
+        _write_image(tmp_path, "10 - ClipB.png"),
+    ]
+
+    responses = [
+        FakeResponse(200),
+        FakeResponse(200, {"collectionUuid": "abc", "key": "def", "images": [["img1", "img2"]]}),
+        FakeResponse(200, text="OK"),
+        FakeResponse(200, text="OK"),
+    ]
+    _install_session(monkeypatch, responses)
+
+    slowpics.upload_comparison([str(path) for path in files], tmp_path, cfg)
+
+    comparison_fields = DummyEncoder.instances[0].fields
+    assert comparison_fields["tmdbId"] == "TV_76543"
 
 
 def test_legacy_image_upload_loop(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:

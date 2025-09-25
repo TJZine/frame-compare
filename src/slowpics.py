@@ -3,6 +3,7 @@
 """Slow.pics upload orchestration."""
 
 from collections import defaultdict
+import re
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, TYPE_CHECKING
 from urllib.parse import urlsplit, unquote
@@ -94,6 +95,9 @@ def _build_legacy_headers(session: requests.Session, encoder: "MultipartEncoder"
     }
 
 
+_TMDB_MANUAL_RE = re.compile(r"^(movie|tv)[/_:-]?(\d+)$", re.IGNORECASE)
+
+
 def _format_tmdb_identifier(tmdb_id: str, category: str | None) -> str:
     """Normalize TMDB identifiers for slow.pics legacy form fields."""
 
@@ -101,13 +105,14 @@ def _format_tmdb_identifier(tmdb_id: str, category: str | None) -> str:
     if not text:
         return ""
 
-    lowered = text.lower()
-    if lowered.startswith(("movie/", "tv/", "movie_", "tv_")):
-        return text
+    match = _TMDB_MANUAL_RE.match(text)
+    if match:
+        prefix, digits = match.groups()
+        return f"{prefix.upper()}_{digits}"
 
     normalized_category = (category or "").strip().lower()
-    if normalized_category in {"movie", "tv"}:
-        return f"{normalized_category}/{text}"
+    if text.isdigit() and normalized_category in {"movie", "tv"}:
+        return f"{normalized_category.upper()}_{text}"
 
     return text
 
