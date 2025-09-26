@@ -857,6 +857,8 @@ async def resolve_tmdb(
 
         all_candidates.sort(key=lambda cand: cand.score, reverse=True)
 
+        baseline_top_score = all_candidates[0].score if all_candidates else 0.0
+
         viable_candidates = [cand for cand in all_candidates if cand.score >= _SIMILARITY_THRESHOLD]
 
         alias_scores: Dict[str, float] = {}
@@ -909,7 +911,8 @@ async def resolve_tmdb(
                     # the boost with both the alias strength and the current score.
                     incremental = max(0.1, alias_score * 0.25)
                     adjusted = max(candidate.score + incremental, alias_score + 0.05)
-                    alias_scores[candidate.tmdb_id] = min(adjusted, 1.2)
+                    adjusted = max(adjusted, baseline_top_score + 0.01)
+                    alias_scores[candidate.tmdb_id] = adjusted
 
         if alias_scores:
             for candidate in all_candidates:
