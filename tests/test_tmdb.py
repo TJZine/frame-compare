@@ -256,6 +256,69 @@ def test_vvitch_alternative_title(monkeypatch: pytest.MonkeyPatch) -> None:
     assert any(path.endswith("/movie/310131/alternative_titles") for path in alias_calls)
 
 
+def test_vvitch_plain_title_prefers_alias(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        tmdb_module,
+        "_call_guessit",
+        lambda filename: {"title": "The Witch", "year": 2015},
+    )
+
+    queries: List[str] = []
+    alias_calls: List[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        query = request.url.params.get("query", "")
+        if query:
+            queries.append(query)
+        if request.url.path.endswith("/search/movie"):
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "id": 526667,
+                            "title": "The Witch",
+                            "original_title": "The Witch",
+                            "release_date": "2015-01-23",
+                            "popularity": 35.0,
+                        },
+                        {
+                            "id": 310131,
+                            "title": "The Witch",
+                            "original_title": "The Witch",
+                            "release_date": "2016-02-19",
+                            "popularity": 30.0,
+                        },
+                    ]
+                },
+            )
+        if "alternative_titles" in request.url.path:
+            alias_calls.append(request.url.path)
+            if request.url.path.endswith("/movie/310131/alternative_titles"):
+                return httpx.Response(
+                    200,
+                    json={"titles": [{"title": "The VVitch: A New-England Folktale"}]},
+                )
+            return httpx.Response(200, json={"titles": [{"title": "The Witch"}]})
+        return httpx.Response(200, json={"results": []})
+
+    transport = httpx.MockTransport(handler)
+    cfg = TMDBConfig(api_key="token")
+    result = asyncio.run(
+        resolve_tmdb(
+            "The.Witch.2015.2160p.UHD.BDRip.DV.HDR10.x265.DTS-HD.MA.5.1-Kira.Clip.mkv",
+            config=cfg,
+            http_transport=transport,
+        )
+    )
+
+    assert result is not None
+    assert result.tmdb_id == "310131"
+    assert any(path.endswith("/movie/310131/alternative_titles") for path in alias_calls)
+    # Ensure the fallback title without the alias text was used for the search
+    assert any(query.lower().startswith("the witch") for query in queries)
+
+
 def test_tmdb_backoff_and_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     sleep_calls: List[float] = []
 

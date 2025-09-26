@@ -160,6 +160,15 @@ def _normalized_variants(title: str) -> List[str]:
     variants = {base}
     if base.startswith("the "):
         variants.add(base[4:])
+
+    # Handle stylistic spelling variations where "vv" is used in place of "w" (e.g.
+    # "The VVitch" -> "The Witch") and vice-versa. This helps align aliases with
+    # filenames even when the main TMDB title omits the variant.
+    if "vv" in base:
+        variants.add(base.replace("vv", "w"))
+    if "w" in base:
+        variants.add(base.replace("w", "vv"))
+
     return [variant for variant in variants if variant]
 
 
@@ -543,13 +552,34 @@ async def _fetch_alias_titles(
     return titles
 
 
-def _alias_similarity(query_norms: Sequence[str], aliases: Iterable[str]) -> float:
+def _alias_similarity(
+    query_norms: Sequence[str],
+    aliases: Iterable[str],
+    existing_norms: Iterable[str] | None = None,
+) -> float:
     alias_norms: List[str] = []
+    seen: set[str] = set()
+    excluded = {norm for norm in (existing_norms or []) if norm}
     for alias in aliases:
-        alias_norms.extend(_normalized_variants(alias))
+        for alias_norm in _normalized_variants(alias):
+            if not alias_norm or alias_norm in seen or alias_norm in excluded:
+                continue
+            seen.add(alias_norm)
+            alias_norms.append(alias_norm)
+
     best = 0.0
     for query_norm in query_norms:
+        if not query_norm:
+            continue
+        query_tokens = query_norm.split()
         for alias_norm in alias_norms:
+            alias_tokens = alias_norm.split()
+            if len(query_tokens) >= 2 and set(query_tokens).issubset(alias_tokens) and len(alias_tokens) > len(query_tokens):
+                best = max(best, 0.9)
+            if alias_norm.startswith(query_norm) and len(query_norm) >= 4:
+                best = max(best, 0.9)
+            if query_norm.startswith(alias_norm) and len(alias_norm) >= 4:
+                best = max(best, 0.9)
             best = max(best, _similarity(query_norm, alias_norm))
     return best
 
@@ -864,7 +894,15 @@ async def resolve_tmdb(
                     )
                 except TMDBResolutionError:
                     continue
-                alias_score = _alias_similarity(query_norms, aliases)
+                candidate_norms: set[str] = set()
+                candidate_norms.update(_normalized_variants(candidate.title))
+                if candidate.original_title:
+                    candidate_norms.update(_normalized_variants(candidate.original_title))
+                alias_score = _alias_similarity(
+                    query_norms,
+                    aliases,
+                    existing_norms=candidate_norms,
+                )
                 if alias_score >= 0.7:
                     adjusted = max(candidate.score, alias_score + 0.05)
                     alias_scores[candidate.tmdb_id] = min(adjusted, 1.2)
