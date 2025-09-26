@@ -125,6 +125,10 @@ dependencies = [
     { name = "requests" },
     { name = "requests-toolbelt" },
     { name = "rich" },
+]
+
+[package.optional-dependencies]
+vapoursynth = [
     { name = "vapoursynth" },
 ]
 
@@ -148,8 +152,9 @@ requires-dist = [
     { name = "requests" },
     { name = "requests-toolbelt" },
     { name = "rich" },
-    { name = "vapoursynth", specifier = ">=72" },
+    { name = "vapoursynth", marker = "extra == 'vapoursynth'", specifier = ">=72" },
 ]
+provides-extras = ["vapoursynth"]
 
 [package.metadata.requires-dev]
 dev = [
