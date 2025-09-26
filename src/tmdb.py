@@ -904,7 +904,11 @@ async def resolve_tmdb(
                     existing_norms=candidate_norms,
                 )
                 if alias_score >= 0.7:
-                    adjusted = max(candidate.score, alias_score + 0.05)
+                    # Alias matches should be able to overtake otherwise stronger
+                    # candidates (e.g. the ambiguous "The Witch" releases) so scale
+                    # the boost with both the alias strength and the current score.
+                    incremental = max(0.1, alias_score * 0.25)
+                    adjusted = max(candidate.score + incremental, alias_score + 0.05)
                     alias_scores[candidate.tmdb_id] = min(adjusted, 1.2)
 
         if alias_scores:
