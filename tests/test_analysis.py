@@ -1,4 +1,5 @@
 import types
+from typing import Any, cast
 
 import pytest
 
@@ -19,6 +20,11 @@ class FakeClip:
         self.fps_den = 1
         self.analysis_brightness = brightness
         self.analysis_motion = motion
+        self.frame_props: dict[str, int] | None = None
+
+
+def _select_frames_list(*args, **kwargs) -> list[int]:
+    return cast(list[int], select_frames(*args, **kwargs))
 
 
 def test_quantile_basic():
@@ -61,7 +67,8 @@ def test_compute_selection_window_clamps_to_clip():
 
 def test_compute_selection_window_invalid_type():
     with pytest.raises(TypeError) as excinfo:
-        compute_selection_window(100, 24.0, ignore_lead_seconds=object(), ignore_trail_seconds=0.0, min_window_seconds=0.0)
+        bad_value = cast(Any, object())
+        compute_selection_window(100, 24.0, ignore_lead_seconds=bad_value, ignore_trail_seconds=0.0, min_window_seconds=0.0)
     assert "analysis.ignore_lead_seconds" in str(excinfo.value)
 
 
@@ -97,8 +104,49 @@ def test_select_frames_deterministic(monkeypatch):
 
     files = ["a.mkv", "b.mkv"]
     color_cfg = ColorConfig()
-    first = select_frames(clip, cfg, files, file_under_analysis="a.mkv", color_cfg=color_cfg)
-    second = select_frames(clip, cfg, files, file_under_analysis="a.mkv", color_cfg=color_cfg)
+    first = _select_frames_list(clip, cfg, files, file_under_analysis="a.mkv", color_cfg=color_cfg)
+    second = _select_frames_list(clip, cfg, files, file_under_analysis="a.mkv", color_cfg=color_cfg)
+
+    assert first == second
+    assert sorted(first) == first
+    assert len(calls) == 0
+
+
+def test_select_frames_hdr_tonemap(monkeypatch):
+    clip = FakeClip(
+        num_frames=300,
+        brightness=[i / 300 for i in range(300)],
+        motion=[(300 - i) / 300 for i in range(300)],
+    )
+    clip.frame_props = {"_Transfer": 16, "_Primaries": 9}
+
+    calls = []
+
+    def fake_process(target_clip, file_name, color_cfg, **kwargs):
+        calls.append(file_name)
+        return types.SimpleNamespace(clip=target_clip, overlay_text=None, verification=None)
+
+    monkeypatch.setattr(
+        "src.analysis.vs_core.process_clip_for_screenshot",
+        fake_process,
+    )
+
+    cfg = AnalysisConfig(
+        frame_count_dark=3,
+        frame_count_bright=3,
+        frame_count_motion=2,
+        random_frames=0,
+        user_frames=[],
+        downscale_height=0,
+        step=10,
+        analyze_in_sdr=True,
+        use_quantiles=True,
+    )
+
+    files = ["a.mkv", "b.mkv"]
+    color_cfg = ColorConfig()
+    first = _select_frames_list(clip, cfg, files, file_under_analysis="a.mkv", color_cfg=color_cfg)
+    second = _select_frames_list(clip, cfg, files, file_under_analysis="a.mkv", color_cfg=color_cfg)
 
     assert first == second
     assert sorted(first) == first
@@ -129,7 +177,7 @@ def test_user_and_random_frames(monkeypatch):
     )
 
     color_cfg = ColorConfig()
-    frames = select_frames(clip, cfg, files=["x.mkv"], file_under_analysis="x.mkv", color_cfg=color_cfg)
+    frames = _select_frames_list(clip, cfg, files=["x.mkv"], file_under_analysis="x.mkv", color_cfg=color_cfg)
     assert frames == sorted(frames)
     for user_frame in cfg.user_frames:
         assert user_frame in frames
@@ -161,7 +209,7 @@ def test_select_frames_respects_window(monkeypatch, caplog):
 
     caplog.set_level("WARNING")
     color_cfg = ColorConfig()
-    frames = select_frames(
+    frames = _select_frames_list(
         clip,
         cfg,
         files=["clip.mkv"],
@@ -221,12 +269,12 @@ def test_select_frames_uses_cache(monkeypatch, tmp_path):
     )
 
     color_cfg = ColorConfig()
-    frames_first = select_frames(clip, cfg, ["a.mkv"], "a.mkv", cache_info=cache_info, color_cfg=color_cfg)
+    frames_first = _select_frames_list(clip, cfg, ["a.mkv"], "a.mkv", cache_info=cache_info, color_cfg=color_cfg)
     assert cache_info.path.exists()
     assert calls["count"] == 1
 
     calls["count"] = 0
-    frames_second = select_frames(clip, cfg, ["a.mkv"], "a.mkv", cache_info=cache_info, color_cfg=color_cfg)
+    frames_second = _select_frames_list(clip, cfg, ["a.mkv"], "a.mkv", cache_info=cache_info, color_cfg=color_cfg)
     assert calls["count"] == 0
     assert frames_first == frames_second
 
@@ -262,7 +310,7 @@ def test_motion_quarter_gap(monkeypatch):
     )
 
     color_cfg = ColorConfig()
-    frames = select_frames(clip, cfg, files=["file.mkv"], file_under_analysis="file.mkv", color_cfg=color_cfg)
+    frames = _select_frames_list(clip, cfg, files=["file.mkv"], file_under_analysis="file.mkv", color_cfg=color_cfg)
     assert len(frames) == 4
     diffs = [b - a for a, b in zip(frames, frames[1:])]
     assert all(diff >= 48 for diff in diffs)

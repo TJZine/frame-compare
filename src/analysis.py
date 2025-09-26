@@ -311,6 +311,101 @@ def _load_cached_metrics(
     return CachedMetrics(brightness, motion, selection_frames, selection_hash, selection_categories)
 
 
+def _selection_sidecar_path(info: FrameMetricsCacheInfo) -> Path:
+    """Return the filesystem location for the lightweight selection sidecar."""
+
+    return info.path.parent / "generated.selection.v1.json"
+
+
+def _save_selection_sidecar(
+    info: FrameMetricsCacheInfo,
+    selection_hash: Optional[str],
+    selection_frames: Optional[Sequence[int]],
+) -> None:
+    """Persist the lightweight selection metadata for fast reloads."""
+
+    if selection_hash is None or selection_frames is None:
+        return
+
+    payload = {
+        "version": 1,
+        "files": list(info.files),
+        "analyzed_file": info.analyzed_file,
+        "release_group": info.release_group,
+        "trim_start": info.trim_start,
+        "trim_end": info.trim_end,
+        "fps": [info.fps_num, info.fps_den],
+        "selection_hash": selection_hash,
+        "frames": [int(frame) for frame in selection_frames],
+    }
+
+    target = _selection_sidecar_path(info)
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+    except OSError:
+        # Sidecar writes are opportunistic; ignore persistence failures.
+        return
+
+
+def _load_selection_sidecar(
+    info: Optional[FrameMetricsCacheInfo], selection_hash: Optional[str]
+) -> Optional[List[int]]:
+    """Load previously stored selection frames if the sidecar matches current state."""
+
+    if info is None or not selection_hash:
+        return None
+
+    path = _selection_sidecar_path(info)
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return None
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+
+    if data.get("version") != 1:
+        return None
+    if list(data.get("files") or []) != list(info.files):
+        return None
+    if data.get("analyzed_file") != info.analyzed_file:
+        return None
+
+    cached_group = str(data.get("release_group") or "").lower()
+    if cached_group != (info.release_group or "").lower():
+        return None
+
+    if data.get("trim_start") != info.trim_start:
+        return None
+    if data.get("trim_end") != info.trim_end:
+        return None
+
+    fps = data.get("fps") or []
+    if list(fps) != [info.fps_num, info.fps_den]:
+        return None
+
+    if data.get("selection_hash") != selection_hash:
+        return None
+
+    frames_raw = data.get("frames")
+    if not isinstance(frames_raw, list):
+        return None
+
+    frames: List[int] = []
+    try:
+        for value in frames_raw:
+            frames.append(int(value))
+    except (TypeError, ValueError):
+        return None
+
+    return frames
+
+
 def _save_cached_metrics(
     info: FrameMetricsCacheInfo,
     cfg: AnalysisConfig,
@@ -352,6 +447,8 @@ def _save_cached_metrics(
         # Failing to persist cache data should not abort the pipeline.
         return
 
+    _save_selection_sidecar(info, selection_hash, selection_frames)
+
 def dedupe(frames: Sequence[int], min_separation_sec: float, fps: float) -> List[int]:
     """Remove frames closer than *min_separation_sec* seconds apart (in order)."""
 
@@ -390,6 +487,30 @@ def _clamp_frame(frame: int, total: int) -> int:
 
 def _ensure_even(value: int) -> int:
     return value if value % 2 == 0 else value - 1
+
+
+def _is_hdr_source(clip) -> bool:
+    """Return True when the clip's transfer characteristics indicate HDR."""
+
+    try:
+        props = vs_core._snapshot_frame_props(clip)
+        _, transfer, _, _ = vs_core._resolve_color_metadata(props)
+    except Exception:
+        return False
+
+    if transfer is None:
+        return False
+
+    try:
+        code = int(transfer)
+    except (TypeError, ValueError):
+        code = None
+
+    if code in {16, 18}:
+        return True
+
+    name = str(transfer).strip().upper()
+    return name in {"ST2084", "SMPTE2084", "PQ", "HLG", "ARIB-B67"}
 
 
 def _collect_metrics_vapoursynth(
@@ -470,9 +591,47 @@ def _collect_metrics_vapoursynth(
     except Exception as exc:  # pragma: no cover - defensive
         raise RuntimeError(f"Failed to prepare analysis clip: {exc}") from exc
 
-    stats_clip = work.std.PlaneStats()
+    processed_indices = [
+        int(idx)
+        for idx in indices
+        if isinstance(idx, numbers.Integral) and 0 <= int(idx) < work.num_frames
+    ]
+
+    if not processed_indices:
+        return [], []
+
+    def _detect_uniform_step(values: Sequence[int]) -> Optional[int]:
+        if len(values) <= 1:
+            return 1
+        step_value = values[1] - values[0]
+        if step_value <= 0:
+            return None
+        for prev, curr in zip(values, values[1:]):
+            if curr - prev != step_value:
+                return None
+        return step_value
+
+    step_value = _detect_uniform_step(processed_indices)
+
+    sequential = step_value is not None
+
+    try:
+        if sequential:
+            first_idx = processed_indices[0]
+            last_idx = processed_indices[-1]
+            trimmed = vs.core.std.Trim(work, first=first_idx, last=last_idx)
+            if len(processed_indices) > 1 and step_value and step_value > 1:
+                sampled = vs.core.std.SelectEvery(trimmed, cycle=step_value, offsets=[0])
+            else:
+                sampled = trimmed
+            stats_clip = sampled.std.PlaneStats()
+        else:
+            stats_clip = work.std.PlaneStats()
+    except Exception as exc:  # pragma: no cover - defensive
+        raise RuntimeError(f"Failed to prepare metrics pipeline: {exc}") from exc
 
     motion_stats = None
+    diff_indices: List[int] = []
     if cfg.frame_count_motion > 0 and work.num_frames > 1:
         try:
             previous = work[:-1]
@@ -482,28 +641,53 @@ def _collect_metrics_vapoursynth(
             else:
                 diff_clip = vs.core.std.MakeDiff(previous, current)
                 diff_clip = vs.core.std.Prewitt(diff_clip)
-            motion_stats = diff_clip.std.PlaneStats()
+
+            if sequential:
+                diff_indices = [idx - 1 for idx in processed_indices if idx > 0]
+                if diff_indices:
+                    diff_first = diff_indices[0]
+                    diff_last = diff_indices[-1]
+                    diff_trimmed = vs.core.std.Trim(diff_clip, first=diff_first, last=diff_last)
+                    if len(diff_indices) > 1 and step_value and step_value > 1:
+                        diff_sampled = vs.core.std.SelectEvery(
+                            diff_trimmed, cycle=step_value, offsets=[0]
+                        )
+                    else:
+                        diff_sampled = diff_trimmed
+                    motion_stats = diff_sampled.std.PlaneStats()
+            else:
+                motion_stats = diff_clip.std.PlaneStats()
         except Exception as exc:  # pragma: no cover - defensive
             raise RuntimeError(f"Failed to build motion metrics: {exc}") from exc
 
     brightness: List[tuple[int, float]] = []
     motion: List[tuple[int, float]] = []
 
-    for idx in indices:
-        if idx >= stats_clip.num_frames:
+    motion_cursor = 0
+
+    for position, idx in enumerate(processed_indices):
+        frame_index = position if sequential else idx
+        if frame_index >= stats_clip.num_frames:
             break
-        frame = stats_clip.get_frame(idx)
+        frame = stats_clip.get_frame(frame_index)
         luma = float(frame.props.get("PlaneStatsAverage", 0.0))
         brightness.append((idx, luma))
         del frame
 
         motion_value = 0.0
         if motion_stats is not None and idx > 0:
-            diff_index = min(idx - 1, motion_stats.num_frames - 1)
-            if diff_index >= 0:
-                diff_frame = motion_stats.get_frame(diff_index)
-                motion_value = float(diff_frame.props.get("PlaneStatsAverage", 0.0))
-                del diff_frame
+            if sequential:
+                if motion_cursor < motion_stats.num_frames:
+                    diff_frame = motion_stats.get_frame(motion_cursor)
+                    motion_value = float(diff_frame.props.get("PlaneStatsAverage", 0.0))
+                    del diff_frame
+                motion_cursor += 1
+            else:
+                diff_index = min(idx - 1, motion_stats.num_frames - 1)
+                if diff_index >= 0:
+                    diff_frame = motion_stats.get_frame(diff_index)
+                    motion_value = float(diff_frame.props.get("PlaneStatsAverage", 0.0))
+                    del diff_frame
         motion.append((idx, motion_value))
 
         if progress is not None:
@@ -613,24 +797,42 @@ def select_frames(
 
     analysis_clip = clip
     if cfg.analyze_in_sdr:
-        if color_cfg is None:
-            raise ValueError("color_cfg must be provided when analyze_in_sdr is enabled")
-        result = vs_core.process_clip_for_screenshot(
-            clip,
-            file_under_analysis,
-            color_cfg,
-            enable_overlay=False,
-            enable_verification=False,
-            logger_override=logger,
-        )
-        analysis_clip = result.clip
+        if _is_hdr_source(clip):
+            if color_cfg is None:
+                raise ValueError("color_cfg must be provided when analyze_in_sdr is enabled")
+            result = vs_core.process_clip_for_screenshot(
+                clip,
+                file_under_analysis,
+                color_cfg,
+                enable_overlay=False,
+                enable_verification=False,
+                logger_override=logger,
+            )
+            analysis_clip = result.clip
+        else:
+            logger.info("[ANALYSIS] Source detected as SDR; skipping SDR tonemap path")
 
     step = max(1, int(cfg.step))
     indices = list(range(window_start, window_end, step))
 
+    selection_hash = _selection_fingerprint(cfg)
+
+    if cache_info is not None:
+        sidecar_frames = _load_selection_sidecar(cache_info, selection_hash)
+        if sidecar_frames is not None:
+            frames_sorted = sorted(
+                dict.fromkeys(
+                    int(frame)
+                    for frame in sidecar_frames
+                    if window_start <= int(frame) < window_end
+                )
+            )
+            if return_metadata:
+                return frames_sorted, {frame: "Cached" for frame in frames_sorted}
+            return frames_sorted
+
     cached_metrics = _load_cached_metrics(cache_info, cfg) if cache_info is not None else None
 
-    selection_hash = _selection_fingerprint(cfg)
     cached_selection: Optional[List[int]] = None
     cached_categories: Optional[Dict[int, str]] = None
 
