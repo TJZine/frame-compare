@@ -197,6 +197,9 @@ change_fps = {}
 | `mod_crop` | int | 2 | No | Crop to maintain dimensions divisible by this modulus; must be ≥0.|
 | `letterbox_pillarbox_aware` | bool | true | No | Bias cropping toward letterbox/pillarbox bars when trimming.|
 | `auto_letterbox_crop` | bool | false | No | Estimate scope letterbox bars across sources via aspect ratios and crop them before planning.|
+| `pad_to_canvas` | str | `"off"` | No | When `single_res` is set, pad instead of scaling to hit the target canvas. Values: `off`, `on`, `auto`.|
+| `letterbox_px_tolerance` | int | 8 | No | Maximum total pixels (per axis) treated as a “micro” bar when `pad_to_canvas="auto"`.|
+| `center_pad` | bool | true | No | Split padding evenly across both sides when padding is applied.|
 
 #### `[color]`
 | Name | Type | Default | Required? | Description |

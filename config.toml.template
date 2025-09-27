@@ -41,6 +41,9 @@ mod_crop = 2
 letterbox_pillarbox_aware = true
 # Estimate and crop out scope letterbox bars using aspect ratio heuristics.
 auto_letterbox_crop = false
+pad_to_canvas = "off"
+letterbox_px_tolerance = 8
+center_pad = true
 
 [color]
 # HDR → SDR pipeline controls. Presets: reference (bt.2390/100nits/dpd=1),

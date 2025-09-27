@@ -134,6 +134,14 @@ def load_config(path: str) -> AppConfig:
         raise ConfigError("screenshots.compression_level must be 0, 1, or 2")
     if app.screenshots.mod_crop < 0:
         raise ConfigError("screenshots.mod_crop must be >= 0")
+    if not isinstance(app.screenshots.letterbox_px_tolerance, int):
+        raise ConfigError("screenshots.letterbox_px_tolerance must be an integer")
+    if app.screenshots.letterbox_px_tolerance < 0:
+        raise ConfigError("screenshots.letterbox_px_tolerance must be >= 0")
+    pad_mode = str(app.screenshots.pad_to_canvas).strip().lower()
+    if pad_mode not in {"off", "on", "auto"}:
+        raise ConfigError("screenshots.pad_to_canvas must be 'off', 'on', or 'auto'")
+    app.screenshots.pad_to_canvas = pad_mode
 
     if app.slowpics.remove_after_days < 0:
         raise ConfigError("slowpics.remove_after_days must be >= 0")

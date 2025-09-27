@@ -322,6 +322,55 @@ def _plan_letterbox_offsets(
     return offsets
 
 
+def _split_padding(total: int, center: bool) -> tuple[int, int]:
+    amount = max(0, int(total))
+    if amount <= 0:
+        return (0, 0)
+    if center:
+        first = amount // 2
+        second = amount - first
+        return (first, second)
+    return (0, amount)
+
+
+def _align_padding_mod(
+    width: int,
+    height: int,
+    pad_left: int,
+    pad_top: int,
+    pad_right: int,
+    pad_bottom: int,
+    mod: int,
+    center: bool,
+) -> tuple[int, int, int, int]:
+    if mod <= 1:
+        return (pad_left, pad_top, pad_right, pad_bottom)
+
+    total_pad = pad_left + pad_top + pad_right + pad_bottom
+    if total_pad <= 0:
+        return (pad_left, pad_top, pad_right, pad_bottom)
+
+    final_w = width + pad_left + pad_right
+    final_h = height + pad_top + pad_bottom
+
+    remainder_w = final_w % mod
+    if remainder_w:
+        extra = mod - remainder_w
+        add_left, add_right = _split_padding(extra, center)
+        pad_left += add_left
+        pad_right += add_right
+        final_w += extra
+
+    remainder_h = final_h % mod
+    if remainder_h:
+        extra = mod - remainder_h
+        add_top, add_bottom = _split_padding(extra, center)
+        pad_top += add_top
+        pad_bottom += add_bottom
+
+    return (pad_left, pad_top, pad_right, pad_bottom)
+
+
 def _compute_scaled_dimensions(
     width: int,
     height: int,
@@ -406,7 +455,16 @@ def _plan_geometry(clips: Sequence[object], cfg: ScreenshotConfig) -> List[dict[
 
     max_source_width = max((int(plan["width"]) for plan in plans), default=0)
 
+    pad_mode = str(getattr(cfg, "pad_to_canvas", "off")).strip().lower()
+    pad_enabled = pad_mode in {"on", "auto"}
+    pad_force = pad_mode == "on"
+    pad_tolerance = max(0, int(getattr(cfg, "letterbox_px_tolerance", 0)))
+    center_pad = bool(getattr(cfg, "center_pad", True))
+
+    target_heights: List[int] = []
+
     for plan in plans:
+        cropped_w = int(plan["cropped_w"])
         cropped_h = int(plan["cropped_h"])
         if desired_height is not None:
             target_h = desired_height
@@ -417,12 +475,33 @@ def _plan_geometry(clips: Sequence[object], cfg: ScreenshotConfig) -> List[dict[
         else:
             target_h = cropped_h
 
-        scaled_w, scaled_h = _compute_scaled_dimensions(
-            int(plan["width"]),
-            int(plan["height"]),
-            plan["crop"],
-            target_h,
-        )
+        target_heights.append(target_h)
+
+        pad_left = pad_top = pad_right = pad_bottom = 0
+        scaled_w = cropped_w
+        scaled_h = cropped_h
+
+        if target_h != cropped_h:
+            if target_h > cropped_h and pad_enabled:
+                diff = target_h - cropped_h
+                if pad_force or diff <= pad_tolerance:
+                    add_top, add_bottom = _split_padding(diff, center_pad)
+                    pad_top += add_top
+                    pad_bottom += add_bottom
+                else:
+                    scaled_w, scaled_h = _compute_scaled_dimensions(
+                        int(plan["width"]),
+                        int(plan["height"]),
+                        plan["crop"],
+                        target_h,
+                    )
+            else:
+                scaled_w, scaled_h = _compute_scaled_dimensions(
+                    int(plan["width"]),
+                    int(plan["height"]),
+                    plan["crop"],
+                    target_h,
+                )
 
         if (
             cfg.upscale
@@ -430,14 +509,83 @@ def _plan_geometry(clips: Sequence[object], cfg: ScreenshotConfig) -> List[dict[
             and max_source_width > 0
             and scaled_w > max_source_width
         ):
-            cropped_w = int(plan["cropped_w"])
-            if cropped_w > 0:
-                scale = max_source_width / float(cropped_w)
+            base_w = int(plan["cropped_w"])
+            if base_w > 0:
+                scale = max_source_width / float(base_w)
                 adjusted_h = int(round(int(plan["cropped_h"]) * scale))
                 scaled_w = max_source_width
                 scaled_h = max(1, adjusted_h)
 
         plan["scaled"] = (scaled_w, scaled_h)
+        plan["pad"] = (pad_left, pad_top, pad_right, pad_bottom)
+
+    canvas_height = None
+    if desired_height is not None:
+        canvas_height = desired_height
+    elif global_target is not None:
+        try:
+            canvas_height = max(int(value) for value in target_heights)
+        except ValueError:
+            canvas_height = None
+
+    canvas_width = None
+    if pad_enabled:
+        try:
+            canvas_width = max(int(plan["scaled"][0]) for plan in plans)
+        except ValueError:
+            canvas_width = None
+
+    for plan in plans:
+        scaled_w, scaled_h = plan["scaled"]
+        pad_left, pad_top, pad_right, pad_bottom = plan.get("pad", (0, 0, 0, 0))
+
+        if canvas_height is not None and pad_enabled:
+            target_h = canvas_height
+            current_h = scaled_h + pad_top + pad_bottom
+            diff_h = target_h - current_h
+            if diff_h > 0:
+                if pad_force or diff_h <= pad_tolerance:
+                    add_top, add_bottom = _split_padding(diff_h, center_pad)
+                    pad_top += add_top
+                    pad_bottom += add_bottom
+                else:
+                    logger.debug(
+                        "Skipping vertical padding (%s px) for width=%s due to tolerance",
+                        diff_h,
+                        plan.get("width"),
+                    )
+
+        if canvas_width is not None and pad_enabled:
+            current_w = scaled_w + pad_left + pad_right
+            diff_w = canvas_width - current_w
+            if diff_w > 0:
+                if pad_force or diff_w <= pad_tolerance:
+                    add_left, add_right = _split_padding(diff_w, center_pad)
+                    pad_left += add_left
+                    pad_right += add_right
+                else:
+                    logger.debug(
+                        "Skipping horizontal padding (%s px) for width=%s due to tolerance",
+                        diff_w,
+                        plan.get("width"),
+                    )
+
+        pad_left, pad_top, pad_right, pad_bottom = _align_padding_mod(
+            scaled_w,
+            scaled_h,
+            pad_left,
+            pad_top,
+            pad_right,
+            pad_bottom,
+            cfg.mod_crop,
+            center_pad,
+        )
+
+        plan["pad"] = (pad_left, pad_top, pad_right, pad_bottom)
+        plan["final"] = (
+            scaled_w + pad_left + pad_right,
+            scaled_h + pad_top + pad_bottom,
+        )
 
     return plans
 
@@ -486,6 +634,7 @@ def _save_frame_with_fpng(
     frame_idx: int,
     crop: Tuple[int, int, int, int],
     scaled: Tuple[int, int],
+    pad: Tuple[int, int, int, int],
     path: Path,
     cfg: ScreenshotConfig,
     label: str,
@@ -524,6 +673,20 @@ def _save_frame_with_fpng(
             if not callable(resampler):
                 raise ScreenshotWriterError("VapourSynth resize.Spline36 is unavailable")
             work = resampler(work, width=target_w, height=target_h)
+
+        pad_left, pad_top, pad_right, pad_bottom = pad
+        if pad_left or pad_top or pad_right or pad_bottom:
+            std_ns = getattr(core, "std", None)
+            add_borders = getattr(std_ns, "AddBorders", None) if std_ns is not None else None
+            if not callable(add_borders):
+                raise ScreenshotWriterError("VapourSynth std.AddBorders is unavailable")
+            work = add_borders(
+                work,
+                left=max(0, pad_left),
+                right=max(0, pad_right),
+                top=max(0, pad_top),
+                bottom=max(0, pad_bottom),
+            )
     except Exception as exc:
         raise ScreenshotWriterError(f"Failed to prepare frame {frame_idx}: {exc}") from exc
 
@@ -586,6 +749,7 @@ def _save_frame_with_ffmpeg(
     frame_idx: int,
     crop: Tuple[int, int, int, int],
     scaled: Tuple[int, int],
+    pad: Tuple[int, int, int, int],
     path: Path,
     cfg: ScreenshotConfig,
     width: int,
@@ -612,6 +776,18 @@ def _save_frame_with_ffmpeg(
         )
     if scaled != (cropped_w, cropped_h):
         filters.append(f"scale={max(1, scaled[0])}:{max(1, scaled[1])}:flags=lanczos")
+    pad_left, pad_top, pad_right, pad_bottom = pad
+    final_w = max(1, scaled[0] + pad_left + pad_right)
+    final_h = max(1, scaled[1] + pad_top + pad_bottom)
+    if pad_left or pad_top or pad_right or pad_bottom:
+        filters.append(
+            "pad={w}:{h}:{x}:{y}".format(
+                w=final_w,
+                h=final_h,
+                x=max(0, pad_left),
+                y=max(0, pad_top),
+            )
+        )
     if cfg.add_frame_info:
         text_lines = [f"Frame\\ {int(frame_idx)}"]
         if selection_label:
@@ -721,6 +897,7 @@ def generate_screenshots(
             logger.debug('frame_labels keys: %s', list(frame_labels.keys()))
         crop = plan["crop"]  # type: ignore[assignment]
         scaled = plan["scaled"]  # type: ignore[assignment]
+        pad = plan.get("pad", (0, 0, 0, 0))
         width = int(plan["width"])
         height = int(plan["height"])
         trim_start = int(trim_start)
@@ -764,6 +941,7 @@ def generate_screenshots(
                         resolved_frame,
                         crop,
                         scaled,
+                        pad,
                         target_path,
                         cfg,
                         width,
@@ -777,6 +955,7 @@ def generate_screenshots(
                         actual_idx,
                         crop,
                         scaled,
+                        pad,
                         target_path,
                         cfg,
                         raw_label,

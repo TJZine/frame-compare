@@ -46,6 +46,9 @@ class ScreenshotConfig:
     mod_crop: int = 2
     letterbox_pillarbox_aware: bool = True
     auto_letterbox_crop: bool = False
+    pad_to_canvas: str = "off"
+    letterbox_px_tolerance: int = 8
+    center_pad: bool = True
 
 
 @dataclass
