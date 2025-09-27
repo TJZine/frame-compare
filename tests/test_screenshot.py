@@ -241,6 +241,54 @@ def test_upscale_clamps_letterbox_width(tmp_path, monkeypatch):
     assert recorded[1] == (3840, expected_height)
 
 
+def test_auto_letterbox_crop(tmp_path, monkeypatch):
+    clips = [FakeClip(3840, 2160), FakeClip(3832, 1384)]
+    cfg = ScreenshotConfig(
+        upscale=False,
+        use_ffmpeg=False,
+        add_frame_info=False,
+        auto_letterbox_crop=True,
+    )
+    color_cfg = ColorConfig()
+
+    captured: list[dict[str, object]] = []
+
+    def fake_vs_writer(
+        clip,
+        frame_idx,
+        crop,
+        scaled_dims,
+        path,
+        cfg,
+        label,
+        requested_frame,
+        selection_label=None,
+        **kwargs,
+    ):
+        captured.append({"crop": crop, "scaled": scaled_dims})
+        path.write_text("vs", encoding="utf-8")
+
+    monkeypatch.setattr(screenshot, "_save_frame_with_fpng", fake_vs_writer)
+
+    screenshot.generate_screenshots(
+        clips,
+        [0],
+        ["bars.mkv", "scope.mkv"],
+        [{"label": "bars"}, {"label": "scope"}],
+        tmp_path,
+        cfg,
+        color_cfg,
+        trim_offsets=[0, 0],
+    )
+
+    assert len(captured) == 2
+    first_crop = captured[0]["crop"]
+    assert isinstance(first_crop, tuple)
+    assert first_crop[1] > 0 and first_crop[3] > 0
+    assert captured[0]["scaled"] == (3840, 1384)
+    assert captured[1]["scaled"] == (3832, 1384)
+
+
 def test_placeholder_logging(tmp_path, caplog, monkeypatch):
     clip = FakeClip(1280, 720)
     cfg = ScreenshotConfig(use_ffmpeg=False)

@@ -196,6 +196,7 @@ change_fps = {}
 | `single_res` | int | 0 | No | Force a specific output height (`0` keeps clip-relative planning).|
 | `mod_crop` | int | 2 | No | Crop to maintain dimensions divisible by this modulus; must be ≥0.|
 | `letterbox_pillarbox_aware` | bool | true | No | Bias cropping toward letterbox/pillarbox bars when trimming.|
+| `auto_letterbox_crop` | bool | false | No | Estimate scope letterbox bars across sources via aspect ratios and crop them before planning.|
 
 #### `[color]`
 | Name | Type | Default | Required? | Description |

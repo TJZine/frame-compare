@@ -45,6 +45,7 @@ class ScreenshotConfig:
     single_res: int = 0
     mod_crop: int = 2
     letterbox_pillarbox_aware: bool = True
+    auto_letterbox_crop: bool = False
 
 
 @dataclass

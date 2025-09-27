@@ -68,6 +68,8 @@ def _clamp_frame_index(clip, frame_idx: int) -> tuple[int, bool]:
 
 FRAME_INFO_STYLE = 'sans-serif,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,"0,0,0,0,100,100,0,0,1,2,0,7,10,10,10,1"'
 
+_LETTERBOX_RATIO_TOLERANCE = 0.04
+
 
 def _apply_frame_info_overlay(core, clip, title: str, requested_frame: int | None, selection_label: str | None) -> object:
     try:
@@ -252,6 +254,74 @@ def _align_letterbox_pillarbox(plans: List[dict[str, object]]) -> None:
             plan["cropped_w"] = plan["width"] - left - right
 
 
+def _plan_letterbox_offsets(
+    plans: Sequence[dict[str, object]],
+    *,
+    mod: int,
+    tolerance: float = _LETTERBOX_RATIO_TOLERANCE,
+    max_target_height: int | None = None,
+) -> List[tuple[int, int]]:
+    ratios: List[float] = []
+    for plan in plans:
+        try:
+            width = float(plan["width"])
+            height = float(plan["height"])
+        except Exception:
+            continue
+        if width > 0 and height > 0:
+            ratios.append(width / height)
+
+    if not ratios:
+        return [(0, 0) for _ in plans]
+
+    target_ratio = max(ratios)
+    if target_ratio <= 0:
+        return [(0, 0) for _ in plans]
+
+    tolerance = max(0.0, tolerance)
+    min_ratio_allowed = target_ratio * (1.0 - tolerance)
+
+    offsets: List[tuple[int, int]] = []
+    for plan in plans:
+        try:
+            width = int(plan["width"])
+            height = int(plan["height"])
+        except Exception:
+            offsets.append((0, 0))
+            continue
+        if width <= 0 or height <= 0:
+            offsets.append((0, 0))
+            continue
+
+        ratio = width / height
+        if ratio >= min_ratio_allowed:
+            offsets.append((0, 0))
+            continue
+
+        desired_height = width / target_ratio
+        target_height = int(round(desired_height))
+        if max_target_height is not None:
+            target_height = min(target_height, max_target_height)
+
+        if mod > 1:
+            target_height -= target_height % mod
+        target_height = max(mod if mod > 0 else 1, target_height)
+        if target_height >= height:
+            offsets.append((0, 0))
+            continue
+
+        crop_total = height - target_height
+        if crop_total <= 0:
+            offsets.append((0, 0))
+            continue
+
+        top_extra = crop_total // 2
+        bottom_extra = crop_total - top_extra
+        offsets.append((top_extra, bottom_extra))
+
+    return offsets
+
+
 def _compute_scaled_dimensions(
     width: int,
     height: int,
@@ -293,6 +363,35 @@ def _plan_geometry(clips: Sequence[object], cfg: ScreenshotConfig) -> List[dict[
                 "cropped_h": cropped_h,
             }
         )
+
+    if cfg.auto_letterbox_crop:
+        try:
+            max_target_height = min(int(plan["cropped_h"]) for plan in plans)
+        except ValueError:
+            max_target_height = None
+        offsets = _plan_letterbox_offsets(
+            plans,
+            mod=cfg.mod_crop,
+            max_target_height=max_target_height,
+        )
+        for plan, (extra_top, extra_bottom) in zip(plans, offsets):
+            if not (extra_top or extra_bottom):
+                continue
+            left, top, right, bottom = plan["crop"]  # type: ignore[misc]
+            top += int(extra_top)
+            bottom += int(extra_bottom)
+            new_height = int(plan["height"]) - top - bottom
+            if new_height <= 0:
+                raise ScreenshotGeometryError("Letterbox detection removed all pixels")
+            plan["crop"] = (left, top, right, bottom)
+            plan["cropped_h"] = new_height
+            logger.info(
+                "[LETTERBOX] Cropping %s px top / %s px bottom for width=%s height=%s",
+                extra_top,
+                extra_bottom,
+                plan["width"],
+                plan["height"],
+            )
 
     if cfg.letterbox_pillarbox_aware:
         _align_letterbox_pillarbox(plans)
