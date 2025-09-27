@@ -489,6 +489,40 @@ def _ensure_even(value: int) -> int:
     return value if value % 2 == 0 else value - 1
 
 
+class _ProgressCoalescer:
+    """Batch frequent progress callbacks to reduce Python overhead."""
+
+    __slots__ = ("_cb", "_pending", "_last_flush", "_min_batch", "_min_interval")
+
+    def __init__(
+        self,
+        callback: Callable[[int], None],
+        *,
+        min_batch: int = 8,
+        min_ms: float = 100.0,
+    ) -> None:
+        self._cb = callback
+        self._pending = 0
+        self._last_flush = time.perf_counter()
+        self._min_batch = max(1, int(min_batch))
+        self._min_interval = max(0.0, float(min_ms)) / 1000.0
+
+    def add(self, count: int = 1) -> None:
+        self._pending += int(count)
+        now = time.perf_counter()
+        if self._pending >= self._min_batch or (now - self._last_flush) >= self._min_interval:
+            self.flush(now)
+
+    def flush(self, now: Optional[float] = None) -> None:
+        if self._pending <= 0:
+            return
+        try:
+            self._cb(self._pending)
+        finally:
+            self._pending = 0
+            self._last_flush = time.perf_counter() if now is None else now
+
+
 def _is_hdr_source(clip) -> bool:
     """Return True when the clip's transfer characteristics indicate HDR."""
 
@@ -527,8 +561,7 @@ def _collect_metrics_vapoursynth(
     if not isinstance(clip, vs.VideoNode):
         raise TypeError("Expected a VapourSynth clip")
 
-    work = clip
-    props = vs_core._snapshot_frame_props(work)
+    props = vs_core._snapshot_frame_props(clip)
     matrix_in, transfer_in, primaries_in, color_range_in = vs_core._resolve_color_metadata(props)
 
     def _resize_kwargs_for_source() -> dict:
@@ -537,7 +570,7 @@ def _collect_metrics_vapoursynth(
             kwargs["matrix_in"] = int(matrix_in)
         else:
             try:
-                if work.format is not None and work.format.color_family == vs.RGB:
+                if clip.format is not None and clip.format.color_family == vs.RGB:
                     kwargs["matrix_in"] = getattr(vs, "MATRIX_RGB", 0)
             except AttributeError:
                 pass
@@ -549,52 +582,10 @@ def _collect_metrics_vapoursynth(
             kwargs["range_in"] = int(color_range_in)
         return kwargs
 
-    resize_kwargs = _resize_kwargs_for_source()
-    try:
-        if cfg.downscale_height > 0 and work.height > cfg.downscale_height:
-            target_h = _ensure_even(max(2, int(cfg.downscale_height)))
-            aspect = work.width / work.height
-            target_w = _ensure_even(max(2, int(round(target_h * aspect))))
-            work = vs.core.resize.Spline36(work, width=target_w, height=target_h, **resize_kwargs)
-
-        # Convert to grayscale for consistent metrics
-        target_format = vs.GRAY16
-        gray_kwargs = dict(resize_kwargs)
-        gray_formats = {getattr(vs, "GRAY8", None), getattr(vs, "GRAY16", None), getattr(vs, "GRAY32", None)}
-        if work.format is not None and work.format.color_family == vs.RGB:
-            matrix_in_val = gray_kwargs.get("matrix_in")
-            if matrix_in_val is None:
-                matrix_in_val = getattr(vs, "MATRIX_RGB", 0)
-            convert_kwargs = dict(gray_kwargs)
-            convert_kwargs.pop("matrix", None)
-            convert_kwargs["matrix_in"] = int(matrix_in_val)
-            if "matrix" not in convert_kwargs:
-                convert_kwargs["matrix"] = getattr(vs, "MATRIX_BT709", 1)
-            yuv = vs.core.resize.Spline36(
-                work,
-                format=getattr(vs, "YUV444P16"),
-                **convert_kwargs,
-            )
-            work = vs.core.std.ShufflePlanes(yuv, planes=0, colorfamily=vs.GRAY)
-            if target_format != getattr(vs, "GRAY16"):
-                work = vs.core.resize.Spline36(work, format=target_format)
-        else:
-            if target_format not in gray_formats:
-                if "matrix" not in gray_kwargs:
-                    if "matrix_in" in gray_kwargs:
-                        gray_kwargs["matrix"] = gray_kwargs["matrix_in"]
-                    else:
-                        gray_kwargs["matrix"] = getattr(vs, "MATRIX_BT709", 1)
-            else:
-                gray_kwargs.pop("matrix", None)
-            work = vs.core.resize.Spline36(work, format=target_format, **gray_kwargs)
-    except Exception as exc:  # pragma: no cover - defensive
-        raise RuntimeError(f"Failed to prepare analysis clip: {exc}") from exc
-
     processed_indices = [
         int(idx)
         for idx in indices
-        if isinstance(idx, numbers.Integral) and 0 <= int(idx) < work.num_frames
+        if isinstance(idx, numbers.Integral) and 0 <= int(idx) < clip.num_frames
     ]
 
     if not processed_indices:
@@ -615,83 +606,130 @@ def _collect_metrics_vapoursynth(
 
     sequential = step_value is not None
 
+    resize_kwargs = _resize_kwargs_for_source()
+
     try:
         if sequential:
             first_idx = processed_indices[0]
             last_idx = processed_indices[-1]
-            trimmed = vs.core.std.Trim(work, first=first_idx, last=last_idx)
+            trimmed = vs.core.std.Trim(clip, first=first_idx, last=last_idx)
             if len(processed_indices) > 1 and step_value and step_value > 1:
                 sampled = vs.core.std.SelectEvery(trimmed, cycle=step_value, offsets=[0])
             else:
                 sampled = trimmed
-            stats_clip = sampled.std.PlaneStats()
         else:
-            stats_clip = work.std.PlaneStats()
+            sampled = clip
+    except Exception as exc:  # pragma: no cover - defensive
+        raise RuntimeError(f"Failed to trim analysis clip: {exc}") from exc
+
+    def _prepare_analysis_clip(node):
+        work = node
+        try:
+            if cfg.downscale_height > 0 and work.height > cfg.downscale_height:
+                target_h = _ensure_even(max(2, int(cfg.downscale_height)))
+                aspect = work.width / work.height
+                target_w = _ensure_even(max(2, int(round(target_h * aspect))))
+                work = vs.core.resize.Bilinear(work, width=target_w, height=target_h, **resize_kwargs)
+
+            target_format = getattr(vs, "GRAY8", None) or getattr(vs, "GRAY16")
+            gray_kwargs = dict(resize_kwargs)
+            gray_formats = {getattr(vs, "GRAY8", None), getattr(vs, "GRAY16", None), getattr(vs, "GRAY32", None)}
+            if work.format is not None and work.format.color_family == vs.RGB:
+                matrix_in_val = gray_kwargs.get("matrix_in")
+                if matrix_in_val is None:
+                    matrix_in_val = getattr(vs, "MATRIX_RGB", 0)
+                convert_kwargs = dict(gray_kwargs)
+                convert_kwargs.pop("matrix", None)
+                convert_kwargs["matrix_in"] = int(matrix_in_val)
+                if "matrix" not in convert_kwargs:
+                    convert_kwargs["matrix"] = getattr(vs, "MATRIX_BT709", 1)
+                yuv = vs.core.resize.Bilinear(
+                    work,
+                    format=getattr(vs, "YUV444P16"),
+                    **convert_kwargs,
+                )
+                work = vs.core.std.ShufflePlanes(yuv, planes=0, colorfamily=vs.GRAY)
+            if target_format not in gray_formats:
+                if "matrix" not in gray_kwargs:
+                    if "matrix_in" in gray_kwargs:
+                        gray_kwargs["matrix"] = gray_kwargs["matrix_in"]
+                    else:
+                        gray_kwargs["matrix"] = getattr(vs, "MATRIX_BT709", 1)
+            else:
+                gray_kwargs.pop("matrix", None)
+            work = vs.core.resize.Bilinear(work, format=target_format, **gray_kwargs)
+        except Exception as exc:  # pragma: no cover - defensive
+            raise RuntimeError(f"Failed to prepare analysis clip: {exc}") from exc
+        return work
+
+    prepared = _prepare_analysis_clip(sampled)
+
+    try:
+        stats_clip = prepared.std.PlaneStats()
     except Exception as exc:  # pragma: no cover - defensive
         raise RuntimeError(f"Failed to prepare metrics pipeline: {exc}") from exc
 
     motion_stats = None
-    diff_indices: List[int] = []
-    if cfg.frame_count_motion > 0 and work.num_frames > 1:
+    if cfg.frame_count_motion > 0 and prepared.num_frames > 1:
         try:
-            previous = work[:-1]
-            current = work[1:]
+            previous = prepared[:-1]
+            current = prepared[1:]
             if cfg.motion_use_absdiff:
                 diff_clip = vs.core.std.Expr([previous, current], "x y - abs")
             else:
                 diff_clip = vs.core.std.MakeDiff(previous, current)
                 diff_clip = vs.core.std.Prewitt(diff_clip)
-
-            if sequential:
-                diff_indices = [idx - 1 for idx in processed_indices if idx > 0]
-                if diff_indices:
-                    diff_first = diff_indices[0]
-                    diff_last = diff_indices[-1]
-                    diff_trimmed = vs.core.std.Trim(diff_clip, first=diff_first, last=diff_last)
-                    if len(diff_indices) > 1 and step_value and step_value > 1:
-                        diff_sampled = vs.core.std.SelectEvery(
-                            diff_trimmed, cycle=step_value, offsets=[0]
-                        )
-                    else:
-                        diff_sampled = diff_trimmed
-                    motion_stats = diff_sampled.std.PlaneStats()
-            else:
-                motion_stats = diff_clip.std.PlaneStats()
+            motion_stats = diff_clip.std.PlaneStats()
         except Exception as exc:  # pragma: no cover - defensive
             raise RuntimeError(f"Failed to build motion metrics: {exc}") from exc
 
     brightness: List[tuple[int, float]] = []
     motion: List[tuple[int, float]] = []
 
-    motion_cursor = 0
+    coalescer = _ProgressCoalescer(progress) if progress is not None else None
 
-    for position, idx in enumerate(processed_indices):
-        frame_index = position if sequential else idx
-        if frame_index >= stats_clip.num_frames:
-            break
-        frame = stats_clip.get_frame(frame_index)
-        luma = float(frame.props.get("PlaneStatsAverage", 0.0))
-        brightness.append((idx, luma))
-        del frame
+    try:
+        if sequential:
+            for position, idx in enumerate(processed_indices):
+                if position >= stats_clip.num_frames:
+                    break
+                frame = stats_clip.get_frame(position)
+                luma = float(frame.props.get("PlaneStatsAverage", 0.0))
+                brightness.append((idx, luma))
+                del frame
 
-        motion_value = 0.0
-        if motion_stats is not None and idx > 0:
-            if sequential:
-                if motion_cursor < motion_stats.num_frames:
-                    diff_frame = motion_stats.get_frame(motion_cursor)
+                motion_value = 0.0
+                if motion_stats is not None and position > 0:
+                    diff_frame = motion_stats.get_frame(position - 1)
                     motion_value = float(diff_frame.props.get("PlaneStatsAverage", 0.0))
                     del diff_frame
-                motion_cursor += 1
-            else:
-                diff_index = min(idx - 1, motion_stats.num_frames - 1)
-                if diff_index >= 0:
-                    diff_frame = motion_stats.get_frame(diff_index)
-                    motion_value = float(diff_frame.props.get("PlaneStatsAverage", 0.0))
-                    del diff_frame
-        motion.append((idx, motion_value))
+                motion.append((idx, motion_value))
 
-        if progress is not None:
-            progress(1)
+                if coalescer is not None:
+                    coalescer.add(1)
+        else:
+            for idx in processed_indices:
+                if idx >= stats_clip.num_frames:
+                    break
+                frame = stats_clip.get_frame(idx)
+                luma = float(frame.props.get("PlaneStatsAverage", 0.0))
+                brightness.append((idx, luma))
+                del frame
+
+                motion_value = 0.0
+                if motion_stats is not None and idx > 0:
+                    diff_index = min(idx - 1, motion_stats.num_frames - 1)
+                    if diff_index >= 0:
+                        diff_frame = motion_stats.get_frame(diff_index)
+                        motion_value = float(diff_frame.props.get("PlaneStatsAverage", 0.0))
+                        del diff_frame
+                motion.append((idx, motion_value))
+
+                if coalescer is not None:
+                    coalescer.add(1)
+    finally:
+        if coalescer is not None:
+            coalescer.flush()
 
     return brightness, motion
 
