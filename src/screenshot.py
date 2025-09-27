@@ -482,33 +482,28 @@ def _plan_geometry(clips: Sequence[object], cfg: ScreenshotConfig) -> List[dict[
         scaled_h = cropped_h
 
         if target_h != cropped_h:
-            if target_h > cropped_h and pad_enabled:
-                diff = target_h - cropped_h
-                if pad_force or diff <= pad_tolerance:
-                    add_top, add_bottom = _split_padding(diff, center_pad)
-                    pad_top += add_top
-                    pad_bottom += add_bottom
-                else:
-                    scaled_w, scaled_h = _compute_scaled_dimensions(
-                        int(plan["width"]),
-                        int(plan["height"]),
-                        plan["crop"],
-                        target_h,
-                    )
-            else:
+            if target_h > cropped_h and cfg.upscale:
                 scaled_w, scaled_h = _compute_scaled_dimensions(
                     int(plan["width"]),
                     int(plan["height"]),
                     plan["crop"],
                     target_h,
                 )
+            elif target_h < cropped_h:
+                scaled_w, scaled_h = _compute_scaled_dimensions(
+                    int(plan["width"]),
+                    int(plan["height"]),
+                    plan["crop"],
+                    target_h,
+                )
+            elif pad_enabled and target_h > cropped_h:
+                diff = target_h - cropped_h
+                if pad_force or diff <= pad_tolerance:
+                    add_top, add_bottom = _split_padding(diff, center_pad)
+                    pad_top += add_top
+                    pad_bottom += add_bottom
 
-        if (
-            cfg.upscale
-            and single_res_target is None
-            and max_source_width > 0
-            and scaled_w > max_source_width
-        ):
+        if cfg.upscale and max_source_width > 0 and scaled_w > max_source_width:
             base_w = int(plan["cropped_w"])
             if base_w > 0:
                 scale = max_source_width / float(base_w)
@@ -530,10 +525,13 @@ def _plan_geometry(clips: Sequence[object], cfg: ScreenshotConfig) -> List[dict[
 
     canvas_width = None
     if pad_enabled:
-        try:
-            canvas_width = max(int(plan["scaled"][0]) for plan in plans)
-        except ValueError:
-            canvas_width = None
+        if single_res_target is not None and max_source_width > 0:
+            canvas_width = max_source_width
+        else:
+            try:
+                canvas_width = max(int(plan["scaled"][0]) for plan in plans)
+            except ValueError:
+                canvas_width = None
 
     for plan in plans:
         scaled_w, scaled_h = plan["scaled"]

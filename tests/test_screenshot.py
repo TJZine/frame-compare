@@ -462,7 +462,7 @@ def test_pad_to_canvas_auto_respects_tolerance(tmp_path, monkeypatch):
 
     by_label = {entry["label"]: entry for entry in captured}
     assert by_label["scope"]["pad"] == (0, 0, 0, 0)
-    assert by_label["scope"]["scaled"][1] == 2160
+    assert by_label["scope"]["scaled"][1] == 2048
     assert by_label["hd"]["pad"] == (0, 0, 0, 0)
 
 
@@ -516,6 +516,158 @@ def test_pad_to_canvas_on_pillarboxes_narrow_sources(tmp_path, monkeypatch):
     assert by_label["academy"]["pad"] == (240, 0, 240, 0)
 
 
+def test_pad_to_canvas_on_without_single_res(tmp_path, monkeypatch):
+    clips = [FakeClip(1920, 1080), FakeClip(1440, 1080)]
+    cfg = ScreenshotConfig(
+        upscale=False,
+        use_ffmpeg=False,
+        add_frame_info=False,
+        single_res=0,
+        pad_to_canvas="on",
+        letterbox_pillarbox_aware=False,
+    )
+    color_cfg = ColorConfig()
+
+    captured: list[dict[str, object]] = []
+
+    def fake_vs_writer(
+        clip,
+        frame_idx,
+        crop,
+        scaled_dims,
+        pad,
+        path,
+        cfg,
+        label,
+        requested_frame,
+        selection_label=None,
+        **kwargs,
+    ):
+        captured.append({"scaled": scaled_dims, "pad": pad, "label": label})
+        path.write_text("vs", encoding="utf-8")
+
+    monkeypatch.setattr(screenshot, "_save_frame_with_fpng", fake_vs_writer)
+
+    screenshot.generate_screenshots(
+        clips,
+        [0],
+        ["wide.mkv", "narrow.mkv"],
+        [{"label": "wide"}, {"label": "narrow"}],
+        tmp_path,
+        cfg,
+        color_cfg,
+        trim_offsets=[0, 0],
+    )
+
+    by_label = {entry["label"]: entry for entry in captured}
+    assert by_label["wide"]["scaled"] == (1920, 1080)
+    assert by_label["wide"]["pad"] == (0, 0, 0, 0)
+    assert by_label["narrow"]["scaled"] == (1440, 1080)
+    assert by_label["narrow"]["pad"] == (240, 0, 240, 0)
+
+
+def test_pad_to_canvas_auto_zero_tolerance(tmp_path, monkeypatch):
+    clips = [FakeClip(3840, 2152), FakeClip(1920, 1080)]
+    cfg = ScreenshotConfig(
+        upscale=True,
+        use_ffmpeg=False,
+        add_frame_info=False,
+        single_res=2160,
+        pad_to_canvas="auto",
+        letterbox_px_tolerance=0,
+    )
+    color_cfg = ColorConfig()
+
+    captured: list[dict[str, object]] = []
+
+    def fake_vs_writer(
+        clip,
+        frame_idx,
+        crop,
+        scaled_dims,
+        pad,
+        path,
+        cfg,
+        label,
+        requested_frame,
+        selection_label=None,
+        **kwargs,
+    ):
+        captured.append({"scaled": scaled_dims, "pad": pad, "label": label})
+        path.write_text("vs", encoding="utf-8")
+
+    monkeypatch.setattr(screenshot, "_save_frame_with_fpng", fake_vs_writer)
+
+    screenshot.generate_screenshots(
+        clips,
+        [0],
+        ["uhd.mkv", "hd.mkv"],
+        [{"label": "UHD"}, {"label": "HD"}],
+        tmp_path,
+        cfg,
+        color_cfg,
+        trim_offsets=[0, 0],
+    )
+
+    by_label = {entry["label"]: entry for entry in captured}
+    assert by_label["UHD"]["scaled"] == (3840, 2152)
+    assert by_label["UHD"]["pad"] == (0, 0, 0, 0)
+    assert by_label["HD"]["scaled"] == (3840, 2160)
+    assert by_label["HD"]["pad"] == (0, 0, 0, 0)
+
+
+def test_ffmpeg_writer_receives_padding(tmp_path, monkeypatch):
+    clips = [FakeClip(1920, 1080), FakeClip(1440, 1080)]
+    cfg = ScreenshotConfig(
+        use_ffmpeg=True,
+        add_frame_info=False,
+        single_res=1080,
+        pad_to_canvas="on",
+        letterbox_pillarbox_aware=False,
+        mod_crop=2,
+    )
+    color_cfg = ColorConfig()
+
+    calls: list[dict[str, object]] = []
+
+    def fake_ffmpeg(
+        source,
+        frame_idx,
+        crop,
+        scaled,
+        pad,
+        path,
+        cfg,
+        width,
+        height,
+        selection_label,
+        *,
+        overlay_text=None,
+    ):
+        calls.append({"scaled": scaled, "pad": pad, "source": source})
+        path.write_text("ff", encoding="utf-8")
+
+    monkeypatch.setattr(screenshot, "_save_frame_with_ffmpeg", fake_ffmpeg)
+    monkeypatch.setattr(screenshot, "_save_frame_with_fpng", lambda *args, **kwargs: None)
+
+    screenshot.generate_screenshots(
+        clips,
+        [0],
+        ["wide.mkv", "narrow.mkv"],
+        [{"label": "wide"}, {"label": "narrow"}],
+        tmp_path,
+        cfg,
+        color_cfg,
+        trim_offsets=[0, 0],
+    )
+
+    assert len(calls) == 2
+    wide_call = next(call for call in calls if call["source"].endswith("wide.mkv"))
+    narrow_call = next(call for call in calls if call["source"].endswith("narrow.mkv"))
+    assert wide_call["scaled"] == (1920, 1080)
+    assert wide_call["pad"] == (0, 0, 0, 0)
+    assert narrow_call["scaled"] == (1440, 1080)
+    assert narrow_call["pad"] == (240, 0, 240, 0)
 def test_placeholder_logging(tmp_path, caplog, monkeypatch):
     clip = FakeClip(1280, 720)
     cfg = ScreenshotConfig(use_ffmpeg=False)
