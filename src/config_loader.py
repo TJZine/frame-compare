@@ -137,6 +137,8 @@ def load_config(path: str) -> AppConfig:
 
     if app.slowpics.remove_after_days < 0:
         raise ConfigError("slowpics.remove_after_days must be >= 0")
+    if app.slowpics.image_upload_timeout_seconds <= 0:
+        raise ConfigError("slowpics.image_upload_timeout_seconds must be > 0")
 
     if app.tmdb.year_tolerance < 0:
         raise ConfigError("tmdb.year_tolerance must be >= 0")
@@ -173,4 +175,3 @@ def load_config(path: str) -> AppConfig:
     _validate_trim(app.overrides.trim_end, "overrides.trim_end")
     _validate_change_fps(app.overrides.change_fps)
     return app
-
