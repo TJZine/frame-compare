@@ -861,15 +861,6 @@ def process_clip_for_screenshot(
     verification: Optional[VerificationResult] = None
 
     if not is_hdr:
-        if overlay_enabled:
-            overlay_text = _format_overlay_text(
-                str(getattr(cfg, "overlay_text_template", "SDR passthrough")),
-                tone_curve="sdr",
-                dpd=dpd,
-                target_nits=target_nits,
-                preset=preset,
-                reason=tonemap_reason,
-            )
         log.info(
             "[TM BYPASS] %s reason=%s Matrix=%s Transfer=%s Primaries=%s Range=%s",
             file_name,

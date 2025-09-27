@@ -219,6 +219,35 @@ def _prompt_manual_tmdb(candidates: Sequence[TMDBCandidate]) -> tuple[str, str] 
             print(f"[red]Invalid TMDB identifier:[/red] {exc}")
 
 
+def _prompt_tmdb_confirmation(
+    resolution: TMDBResolution,
+) -> tuple[bool, tuple[str, str] | None]:
+    title = resolution.title or resolution.original_title or "(unknown title)"
+    year = resolution.year or "????"
+    category = resolution.category.lower()
+    link = f"https://www.themoviedb.org/{category}/{resolution.tmdb_id}"
+    print(
+        "[cyan]TMDB match found:[/cyan] "
+        f"{title} ({year}) -> [underline]{link}[/underline]"
+    )
+    while True:
+        response = click.prompt(
+            "Confirm TMDB match? [Y/n or enter movie/#####]",
+            default="y",
+            show_default=False,
+        ).strip()
+        if not response or response.lower() in {"y", "yes"}:
+            return True, None
+        if response.lower() in {"n", "no"}:
+            return False, None
+        try:
+            manual = parse_manual_id(response)
+        except TMDBResolutionError as exc:
+            print(f"[red]Invalid TMDB identifier:[/red] {exc}")
+        else:
+            return True, manual
+
+
 def _render_collection_name(template_text: str, context: Mapping[str, str]) -> str:
     if "${" not in template_text:
         return template_text
@@ -570,8 +599,31 @@ def _print_summary(files: Sequence[Path], frames: Sequence[int], out_dir: Path, 
 
 
 def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
+    config_location = Path(config_path).expanduser()
+
     try:
-        cfg: AppConfig = load_config(config_path)
+        cfg: AppConfig = load_config(str(config_location))
+    except FileNotFoundError as exc:
+        message = f"Config file not found: {config_location}"
+        raise CLIAppError(
+            message,
+            code=2,
+            rich_message=f"[red]Config file not found:[/red] {config_location}",
+        ) from exc
+    except PermissionError as exc:
+        message = f"Config file is not readable: {config_location}"
+        raise CLIAppError(
+            message,
+            code=2,
+            rich_message=f"[red]Config file is not readable:[/red] {config_location}",
+        ) from exc
+    except OSError as exc:
+        message = f"Failed to read config file: {exc}"
+        raise CLIAppError(
+            message,
+            code=2,
+            rich_message=f"[red]Failed to read config file:[/red] {exc}",
+        ) from exc
     except ConfigError as exc:
         raise CLIAppError(
             f"Config error: {exc}", code=2, rich_message=f"[red]Config error:[/red] {exc}"
@@ -643,9 +695,21 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
             tmdb_error_message = str(exc)
         else:
             if tmdb_resolution is not None:
-                tmdb_category = tmdb_resolution.category
-                tmdb_id_value = tmdb_resolution.tmdb_id
-                tmdb_language = tmdb_resolution.original_language
+                if cfg.tmdb.confirm_matches and not cfg.tmdb.unattended:
+                    accepted, override = _prompt_tmdb_confirmation(tmdb_resolution)
+                    if override:
+                        manual_tmdb = override
+                        tmdb_resolution = None
+                    elif not accepted:
+                        tmdb_resolution = None
+                    else:
+                        tmdb_category = tmdb_resolution.category
+                        tmdb_id_value = tmdb_resolution.tmdb_id
+                        tmdb_language = tmdb_resolution.original_language
+                else:
+                    tmdb_category = tmdb_resolution.category
+                    tmdb_id_value = tmdb_resolution.tmdb_id
+                    tmdb_language = tmdb_resolution.original_language
 
     if manual_tmdb:
         tmdb_category, tmdb_id_value = manual_tmdb
@@ -679,6 +743,8 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
 
     if tmdb_id_value and not (cfg.slowpics.tmdb_id or "").strip():
         cfg.slowpics.tmdb_id = str(tmdb_id_value)
+    if tmdb_category and not (getattr(cfg.slowpics, "tmdb_category", "") or "").strip():
+        cfg.slowpics.tmdb_category = tmdb_category
 
     collection_template = (cfg.slowpics.collection_name or "").strip()
     if collection_template:
@@ -692,23 +758,36 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
             collection_name = f"{derived_title} ({derived_year})"
         cfg.slowpics.collection_name = collection_name or "Frame Comparison"
 
+    suffix = (getattr(cfg.slowpics, "collection_suffix", "") or "").strip()
+    if suffix:
+        base_name = (cfg.slowpics.collection_name or "").strip()
+        cfg.slowpics.collection_name = f"{base_name} {suffix}" if base_name else suffix
+
     if tmdb_resolution is not None:
         match_title = tmdb_resolution.title or tmdb_context.get("Title") or files[0].stem
         year_text = f" ({tmdb_resolution.year})" if tmdb_resolution.year else ""
         lang_text = tmdb_resolution.original_language or "unknown"
         heuristic = (tmdb_resolution.candidate.reason or "match").replace("_", " ").replace("-", " ")
         source = "filename" if tmdb_resolution.candidate.used_filename_search else "external id"
+        category_slug = tmdb_resolution.category.lower()
+        link = f"https://www.themoviedb.org/{category_slug}/{tmdb_resolution.tmdb_id}"
         print(
             "[cyan]TMDB match:[/cyan] "
             f"{match_title}{year_text} "
-            f"[{tmdb_resolution.category}] -> {tmdb_resolution.tmdb_id} "
+            f"[{tmdb_resolution.category}] -> {link} "
             f"({source}, {heuristic.strip()}) lang={lang_text}"
         )
     elif manual_tmdb:
         display_title = tmdb_context.get("Title") or files[0].stem
+        category_slug = (tmdb_category or "").lower()
+        link = (
+            f"https://www.themoviedb.org/{category_slug}/{tmdb_id_value}"
+            if tmdb_id_value and category_slug
+            else tmdb_id_value
+        )
         print(
             "[cyan]TMDB manual override:[/cyan] "
-            f"{tmdb_category}/{tmdb_id_value} for {display_title}"
+            f"{tmdb_category}/{tmdb_id_value} ({link}) for {display_title}"
         )
     elif tmdb_api_key_present:
         if tmdb_error_message:

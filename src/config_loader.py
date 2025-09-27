@@ -111,8 +111,10 @@ def load_config(path: str) -> AppConfig:
 
     if app.analysis.step < 1:
         raise ConfigError("analysis.step must be >= 1")
-    if app.analysis.downscale_height < 64:
-        raise ConfigError("analysis.downscale_height must be >= 64")
+    if app.analysis.downscale_height < 0:
+        raise ConfigError("analysis.downscale_height must be >= 0")
+    if 0 < app.analysis.downscale_height < 64:
+        raise ConfigError("analysis.downscale_height must be 0 or >= 64")
     if app.analysis.random_seed < 0:
         raise ConfigError("analysis.random_seed must be >= 0")
     if not app.analysis.frame_data_filename:
@@ -132,9 +134,19 @@ def load_config(path: str) -> AppConfig:
         raise ConfigError("screenshots.compression_level must be 0, 1, or 2")
     if app.screenshots.mod_crop < 0:
         raise ConfigError("screenshots.mod_crop must be >= 0")
+    if not isinstance(app.screenshots.letterbox_px_tolerance, int):
+        raise ConfigError("screenshots.letterbox_px_tolerance must be an integer")
+    if app.screenshots.letterbox_px_tolerance < 0:
+        raise ConfigError("screenshots.letterbox_px_tolerance must be >= 0")
+    pad_mode = str(app.screenshots.pad_to_canvas).strip().lower()
+    if pad_mode not in {"off", "on", "auto"}:
+        raise ConfigError("screenshots.pad_to_canvas must be 'off', 'on', or 'auto'")
+    app.screenshots.pad_to_canvas = pad_mode
 
     if app.slowpics.remove_after_days < 0:
         raise ConfigError("slowpics.remove_after_days must be >= 0")
+    if app.slowpics.image_upload_timeout_seconds <= 0:
+        raise ConfigError("slowpics.image_upload_timeout_seconds must be > 0")
 
     if app.tmdb.year_tolerance < 0:
         raise ConfigError("tmdb.year_tolerance must be >= 0")
@@ -171,4 +183,3 @@ def load_config(path: str) -> AppConfig:
     _validate_trim(app.overrides.trim_end, "overrides.trim_end")
     _validate_change_fps(app.overrides.change_fps)
     return app
-

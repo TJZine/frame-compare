@@ -3,6 +3,8 @@
 """Slow.pics upload orchestration."""
 
 from collections import defaultdict
+from contextlib import ExitStack
+import re
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, TYPE_CHECKING
 from urllib.parse import urlsplit, unquote
@@ -28,6 +30,11 @@ class SlowpicsAPIError(RuntimeError):
 
 
 logger = logging.getLogger(__name__)
+
+
+_CONNECT_TIMEOUT_SECONDS = 10.0
+_MIN_UPLOAD_THROUGHPUT_BYTES_PER_SEC = 256 * 1024  # 256 KiB/s baseline assumption
+_UPLOAD_TIMEOUT_MARGIN_SECONDS = 15.0
 
 
 def _raise_for_status(response: requests.Response, context: str) -> None:
@@ -94,6 +101,28 @@ def _build_legacy_headers(session: requests.Session, encoder: "MultipartEncoder"
     }
 
 
+_TMDB_MANUAL_RE = re.compile(r"^(movie|tv)[/_:-]?(\d+)$", re.IGNORECASE)
+
+
+def _format_tmdb_identifier(tmdb_id: str, category: str | None) -> str:
+    """Normalize TMDB identifiers for slow.pics legacy form fields."""
+
+    text = (tmdb_id or "").strip()
+    if not text:
+        return ""
+
+    match = _TMDB_MANUAL_RE.match(text)
+    if match:
+        prefix, digits = match.groups()
+        return f"{prefix.upper()}_{digits}"
+
+    normalized_category = (category or "").strip().lower()
+    if text.isdigit() and normalized_category in {"movie", "tv"}:
+        return f"{normalized_category.upper()}_{text}"
+
+    return text
+
+
 def _prepare_legacy_plan(image_files: List[str]) -> tuple[List[int], List[List[tuple[str, Path]]]]:
     groups: dict[int, List[tuple[str, Path]]] = defaultdict(list)
     for file_path in image_files:
@@ -127,6 +156,16 @@ def _prepare_legacy_plan(image_files: List[str]) -> tuple[List[int], List[List[t
     return frame_order, ordered_groups
 
 
+def _compute_image_upload_timeout(cfg: SlowpicsConfig, size_bytes: int) -> tuple[float, float]:
+    """Return (connect, read) timeout tuple for a screenshot upload."""
+
+    base = max(float(cfg.image_upload_timeout_seconds), 1.0)
+    if size_bytes <= 0:
+        return (_CONNECT_TIMEOUT_SECONDS, base)
+    estimated = size_bytes / _MIN_UPLOAD_THROUGHPUT_BYTES_PER_SEC + _UPLOAD_TIMEOUT_MARGIN_SECONDS
+    return (_CONNECT_TIMEOUT_SECONDS, max(base, estimated))
+
+
 def _upload_comparison_legacy(
     session: requests.Session,
     image_files: List[str],
@@ -151,7 +190,7 @@ def _upload_comparison_legacy(
         "public": str(bool(cfg.is_public)).lower(),
     }
     if cfg.tmdb_id:
-        fields["tmdbId"] = str(cfg.tmdb_id)
+        fields["tmdbId"] = _format_tmdb_identifier(cfg.tmdb_id, getattr(cfg, "tmdb_category", ""))
     if cfg.remove_after_days:
         fields["removeAfter"] = str(int(cfg.remove_after_days))
 
@@ -169,9 +208,9 @@ def _upload_comparison_legacy(
     headers = _build_legacy_headers(session, encoder)
     response = session.post(
         "https://slow.pics/upload/comparison",
-        data=encoder.to_string(),
+        data=encoder,
         headers=headers,
-        timeout=30,
+        timeout=(_CONNECT_TIMEOUT_SECONDS, 30.0),
     )
     _raise_for_status(response, "Legacy collection creation")
     try:
@@ -194,20 +233,24 @@ def _upload_comparison_legacy(
         if not isinstance(image_ids, list) or len(image_ids) != len(per_frame_paths):
             raise SlowpicsAPIError("Slow.pics returned mismatched image identifiers")
         for path, image_uuid in zip(per_frame_paths, image_ids):
-            upload_fields = {
-                "collectionUuid": collection_uuid,
-                "imageUuid": image_uuid,
-                "file": (path.name, path.read_bytes(), "image/png"),
-                "browserId": browser_id,
-            }
-            upload_encoder = MultipartEncoder(upload_fields, str(uuid.uuid4()))
-            upload_headers = _build_legacy_headers(session, upload_encoder)
-            upload_resp = session.post(
-                "https://slow.pics/upload/image",
-                data=upload_encoder.to_string(),
-                headers=upload_headers,
-                timeout=60,
-            )
+            file_size = path.stat().st_size
+            timeout = _compute_image_upload_timeout(cfg, file_size)
+            with ExitStack() as stack:
+                file_handle = stack.enter_context(path.open("rb"))
+                upload_fields = {
+                    "collectionUuid": collection_uuid,
+                    "imageUuid": image_uuid,
+                    "file": (path.name, file_handle, "image/png"),
+                    "browserId": browser_id,
+                }
+                upload_encoder = MultipartEncoder(upload_fields, str(uuid.uuid4()))
+                upload_headers = _build_legacy_headers(session, upload_encoder)
+                upload_resp = session.post(
+                    "https://slow.pics/upload/image",
+                    data=upload_encoder,
+                    headers=upload_headers,
+                    timeout=timeout,
+                )
             _raise_for_status(upload_resp, f"Upload frame {path.name}")
             if getattr(upload_resp, "content", b""):
                 text = upload_resp.content.decode("utf-8", "ignore").strip()
@@ -238,7 +281,7 @@ def upload_comparison(
 
     session = requests.Session()
     try:
-        session.get("https://slow.pics/comparison", timeout=10)
+        session.get("https://slow.pics/comparison", timeout=_CONNECT_TIMEOUT_SECONDS)
     except requests.RequestException as exc:
         raise SlowpicsAPIError(f"Failed to establish slow.pics session: {exc}") from exc
 

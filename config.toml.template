@@ -33,10 +33,17 @@ directory_name = "screens"
 add_frame_info = true
 use_ffmpeg = false
 compression_level = 1
+# Allow global upscaling of shorter clips; width stays within the widest input
+# unless `single_res` requests a fixed height.
 upscale = true
 single_res = 0
 mod_crop = 2
 letterbox_pillarbox_aware = true
+# Estimate and crop out scope letterbox bars using aspect ratio heuristics.
+auto_letterbox_crop = false
+pad_to_canvas = "off"
+letterbox_px_tolerance = 8
+center_pad = true
 
 [color]
 # HDR → SDR pipeline controls. Presets: reference (bt.2390/100nits/dpd=1),
@@ -62,9 +69,12 @@ strict = false
 # Auto-upload settings. Leave `auto_upload` off for local runs.
 auto_upload = true
 collection_name = ""
+collection_suffix = ""
 is_hentai = false
 is_public = true
 tmdb_id = ""
+tmdb_category = ""
+# slow.pics expects identifiers like MOVIE_603; digits are auto-normalized when the TMDB category is known.
 remove_after_days = 0
 webhook_url = ""
 open_in_browser = true
@@ -75,6 +85,7 @@ delete_screen_dir_after_upload = true
 # TMDB lookup automation. Provide an API key to enable matching.
 api_key = ""
 unattended = true
+confirm_matches = false
 year_tolerance = 2
 enable_anime_parsing = true
 cache_ttl_seconds = 86400

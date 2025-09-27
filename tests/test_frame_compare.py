@@ -438,6 +438,7 @@ def test_cli_tmdb_resolution_populates_slowpics(tmp_path, monkeypatch):
     assert upload_tmdb_id == "12345"
     assert "Resolved Title (2023)" in upload_collection
     assert result.config.slowpics.tmdb_id == "12345"
+    assert result.config.slowpics.tmdb_category == "MOVIE"
     assert result.config.slowpics.collection_name == "Resolved Title (2023) [MOVIE]"
 
 
@@ -498,7 +499,64 @@ def test_cli_tmdb_resolution_sets_default_collection_name(tmp_path, monkeypatch)
 
     assert result.config.slowpics.collection_name.startswith("Resolved Title (2023)")
     assert result.config.slowpics.tmdb_id == "12345"
+    assert result.config.slowpics.tmdb_category == "MOVIE"
 
+
+def test_collection_suffix_appended(tmp_path, monkeypatch):
+    first = tmp_path / "Movie.mkv"
+    second = tmp_path / "Movie2.mkv"
+    for file_path in (first, second):
+        file_path.write_bytes(b"data")
+
+    cfg = _make_config(tmp_path)
+    cfg.tmdb.api_key = "token"
+    cfg.slowpics.auto_upload = False
+    cfg.slowpics.collection_name = ""
+    cfg.slowpics.collection_suffix = "[Hybrid]"
+
+    monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
+
+    def fake_parse(name: str, **_: object) -> dict[str, str]:
+        return {
+            "label": name,
+            "release_group": "",
+            "file_name": name,
+            "title": "Sample Movie",
+            "year": "2021",
+            "anime_title": "",
+            "imdb_id": "",
+            "tvdb_id": "",
+        }
+
+    monkeypatch.setattr(frame_compare, "parse_filename_metadata", fake_parse)
+
+    candidate = TMDBCandidate(
+        category="MOVIE",
+        tmdb_id="42",
+        title="Sample Movie",
+        original_title="Sample Movie",
+        year=2021,
+        score=0.9,
+        original_language="en",
+        reason="primary-title",
+        used_filename_search=True,
+        payload={"id": 42},
+    )
+    resolution = TMDBResolution(candidate=candidate, margin=0.3, source_query="Sample")
+
+    async def fake_resolve(*_, **__):
+        return resolution
+
+    monkeypatch.setattr(frame_compare, "resolve_tmdb", fake_resolve)
+    monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit: None)
+    monkeypatch.setattr(frame_compare.vs_core, "init_clip", lambda *_, **__: types.SimpleNamespace(width=1280, height=720, fps_num=24000, fps_den=1001, num_frames=1200))
+    monkeypatch.setattr(frame_compare, "select_frames", lambda *_, **__: [5, 15])
+    monkeypatch.setattr(frame_compare, "generate_screenshots", lambda *args, **kwargs: [str(tmp_path / "shot.png")])
+    monkeypatch.setattr(frame_compare, "Progress", DummyProgress)
+
+    result = frame_compare.run_cli("dummy", None)
+
+    assert result.config.slowpics.collection_name == "Sample Movie (2021) [Hybrid]"
 
 def test_cli_tmdb_manual_override(tmp_path, monkeypatch):
     first = tmp_path / "Alpha.mkv"
@@ -554,4 +612,121 @@ def test_cli_tmdb_manual_override(tmp_path, monkeypatch):
     result = frame_compare.run_cli("dummy", None)
 
     assert result.config.slowpics.tmdb_id == "9999"
+    assert result.config.slowpics.tmdb_category == "TV"
     assert result.config.slowpics.collection_name == "Label for Alpha.mkv"
+
+
+def test_cli_tmdb_confirmation_manual_id(tmp_path, monkeypatch):
+    first = tmp_path / "Alpha.mkv"
+    second = tmp_path / "Beta.mkv"
+    for file in (first, second):
+        file.write_bytes(b"data")
+
+    cfg = _make_config(tmp_path)
+    cfg.tmdb.api_key = "token"
+    cfg.tmdb.unattended = False
+    cfg.tmdb.confirm_matches = True
+
+    monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
+
+    def fake_parse(name: str, **_: object) -> dict[str, str]:
+        return {
+            "label": f"Label {name}",
+            "release_group": "",
+            "file_name": name,
+            "title": "",
+            "year": "",
+            "anime_title": "",
+            "imdb_id": "",
+            "tvdb_id": "",
+        }
+
+    monkeypatch.setattr(frame_compare, "parse_filename_metadata", fake_parse)
+
+    candidate = TMDBCandidate(
+        category="MOVIE",
+        tmdb_id="123",
+        title="Option",
+        original_title=None,
+        year=2015,
+        score=0.9,
+        original_language="en",
+        reason="primary",
+        used_filename_search=True,
+        payload={"id": 123},
+    )
+    resolution = TMDBResolution(candidate=candidate, margin=0.3, source_query="Option")
+
+    async def fake_resolve(*_, **__):
+        return resolution
+
+    monkeypatch.setattr(frame_compare, "resolve_tmdb", fake_resolve)
+    monkeypatch.setattr(frame_compare, "_prompt_tmdb_confirmation", lambda res: (True, ("MOVIE", "999")))
+    monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit: None)
+    monkeypatch.setattr(frame_compare.vs_core, "init_clip", lambda *_, **__: types.SimpleNamespace(width=1920, height=1080, fps_num=24000, fps_den=1001, num_frames=2400))
+    monkeypatch.setattr(frame_compare, "select_frames", lambda *_, **__: [1, 2])
+    monkeypatch.setattr(frame_compare, "generate_screenshots", lambda *args, **kwargs: [str(tmp_path / "img.png")])
+    monkeypatch.setattr(frame_compare, "Progress", DummyProgress)
+
+    result = frame_compare.run_cli("dummy", None)
+
+    assert result.config.slowpics.tmdb_id == "999"
+    assert result.config.slowpics.tmdb_category == "MOVIE"
+
+
+def test_cli_tmdb_confirmation_rejects(tmp_path, monkeypatch):
+    first = tmp_path / "Alpha.mkv"
+    second = tmp_path / "Beta.mkv"
+    for file in (first, second):
+        file.write_bytes(b"data")
+
+    cfg = _make_config(tmp_path)
+    cfg.tmdb.api_key = "token"
+    cfg.tmdb.unattended = False
+    cfg.tmdb.confirm_matches = True
+
+    monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
+
+    def fake_parse(name: str, **_: object) -> dict[str, str]:
+        return {
+            "label": f"Label {name}",
+            "release_group": "",
+            "file_name": name,
+            "title": "",
+            "year": "",
+            "anime_title": "",
+            "imdb_id": "",
+            "tvdb_id": "",
+        }
+
+    monkeypatch.setattr(frame_compare, "parse_filename_metadata", fake_parse)
+
+    candidate = TMDBCandidate(
+        category="MOVIE",
+        tmdb_id="123",
+        title="Option",
+        original_title=None,
+        year=2015,
+        score=0.9,
+        original_language="en",
+        reason="primary",
+        used_filename_search=True,
+        payload={"id": 123},
+    )
+    resolution = TMDBResolution(candidate=candidate, margin=0.3, source_query="Option")
+
+    async def fake_resolve(*_, **__):
+        return resolution
+
+    monkeypatch.setattr(frame_compare, "resolve_tmdb", fake_resolve)
+    monkeypatch.setattr(frame_compare, "_prompt_tmdb_confirmation", lambda res: (False, None))
+    monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit: None)
+    monkeypatch.setattr(frame_compare.vs_core, "init_clip", lambda *_, **__: types.SimpleNamespace(width=1280, height=720, fps_num=24000, fps_den=1001, num_frames=1800))
+    monkeypatch.setattr(frame_compare, "select_frames", lambda *_, **__: [1, 2])
+    monkeypatch.setattr(frame_compare, "generate_screenshots", lambda *args, **kwargs: [str(tmp_path / "img.png")])
+    monkeypatch.setattr(frame_compare, "Progress", DummyProgress)
+
+    result = frame_compare.run_cli("dummy", None)
+
+    assert result.config.slowpics.tmdb_id == ""
+    assert result.config.slowpics.tmdb_category == ""

@@ -9,7 +9,7 @@ import time
 import unicodedata
 from dataclasses import dataclass
 from importlib import import_module
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import httpx
 
@@ -160,6 +160,15 @@ def _normalized_variants(title: str) -> List[str]:
     variants = {base}
     if base.startswith("the "):
         variants.add(base[4:])
+
+    # Handle stylistic spelling variations where "vv" is used in place of "w" (e.g.
+    # "The VVitch" -> "The Witch") and vice-versa. This helps align aliases with
+    # filenames even when the main TMDB title omits the variant.
+    if "vv" in base:
+        variants.add(base.replace("vv", "w"))
+    if "w" in base:
+        variants.add(base.replace("w", "vv"))
+
     return [variant for variant in variants if variant]
 
 
@@ -231,6 +240,7 @@ def _strip_filename_noise(filename: str) -> str:
     stem = re.sub(r"^\[[^]]+\]", "", stem)
     stem = re.sub(r"[\[\]{}()]", " ", stem)
     stem = stem.replace("_", " ")
+    stem = stem.replace(".", " ")
     stem = re.sub(
         r"\b(480p|576p|720p|1080p|2160p|4320p|x264|h264|hevc|x265|av1|hdr|sdr|remux|webrip|web-dl|bluray|blu-ray|dvdrip|multi|10bit|proper|repack|extended|uhd|nf|amzn)\b",
         "",
@@ -305,6 +315,54 @@ class _QueryPlan:
     reason: str
 
 
+def _expand_title_variants(title: str) -> List[str]:
+    """Return additional search titles derived from *title*."""
+
+    variants: List[str] = []
+    seen: set[str] = set()
+
+    def add(text: str) -> None:
+        normalized = text.strip()
+        if not normalized:
+            return
+        key = normalized.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        variants.append(normalized)
+
+    add(title)
+
+    simplified = _WHITESPACE_RE.sub(" ", title).strip()
+    if simplified and simplified != title:
+        add(simplified)
+
+    # Allow queries that drop a trailing year segment when filenames embed it.
+    without_year = re.sub(r"\b(19|20)\d{2}\b", "", simplified).strip()
+    if without_year and without_year != simplified:
+        add(_WHITESPACE_RE.sub(" ", without_year).strip())
+
+    no_paren = re.sub(r"\([^)]*\)", "", simplified).strip()
+    if no_paren and no_paren != simplified:
+        add(no_paren)
+
+    for delimiter in (":", " - ", " – ", " — "):
+        if delimiter in simplified:
+            head, tail = simplified.split(delimiter, 1)
+            add(head)
+            add(tail)
+
+    if re.search(r"(?i)\baka\b", simplified):
+        parts = re.split(r"(?i)\baka\b", simplified)
+        for part in parts:
+            add(part)
+
+    if re.search(r"(?i)vvitch", simplified):
+        add(re.sub(r"(?i)vvitch", "witch", simplified))
+
+    return variants
+
+
 def _build_query_plans(
     base_title: str,
     *,
@@ -331,10 +389,11 @@ def _build_query_plans(
         if preferred and preferred not in categories:
             categories.append(preferred)
 
-    all_titles = [base_title]
-    for alt in anime_titles:
-        if alt and alt not in all_titles:
-            all_titles.append(alt)
+    all_titles: List[str] = []
+    for raw in [base_title, *anime_titles]:
+        for expanded in _expand_title_variants(raw):
+            if expanded not in all_titles:
+                all_titles.append(expanded)
 
     for category in categories:
         for title in all_titles:
@@ -465,6 +524,69 @@ def _score_payload(
     if popularity_value > 0:
         best += min(popularity_value / 200.0, 0.05)
 
+    return best
+
+
+async def _fetch_alias_titles(
+    client: httpx.AsyncClient,
+    *,
+    category: str,
+    tmdb_id: str,
+    cache_ttl: int,
+) -> List[str]:
+    """Return alternative titles for a TMDB movie or TV entry."""
+
+    if not tmdb_id:
+        return []
+
+    if category == MOVIE:
+        path = f"movie/{tmdb_id}/alternative_titles"
+        key = "titles"
+    else:
+        path = f"tv/{tmdb_id}/alternative_titles"
+        key = "results"
+
+    payload = await _http_request(client, cache_ttl=cache_ttl, path=path, params={})
+    entries = payload.get(key) or []
+    titles: List[str] = []
+    for entry in entries:
+        title = entry.get("title") if isinstance(entry, dict) else None
+        if isinstance(title, str):
+            stripped = title.strip()
+            if stripped:
+                titles.append(stripped)
+    return titles
+
+
+def _alias_similarity(
+    query_norms: Sequence[str],
+    aliases: Iterable[str],
+    existing_norms: Iterable[str] | None = None,
+) -> float:
+    alias_norms: List[str] = []
+    seen: set[str] = set()
+    excluded = {norm for norm in (existing_norms or []) if norm}
+    for alias in aliases:
+        for alias_norm in _normalized_variants(alias):
+            if not alias_norm or alias_norm in seen or alias_norm in excluded:
+                continue
+            seen.add(alias_norm)
+            alias_norms.append(alias_norm)
+
+    best = 0.0
+    for query_norm in query_norms:
+        if not query_norm:
+            continue
+        query_tokens = query_norm.split()
+        for alias_norm in alias_norms:
+            alias_tokens = alias_norm.split()
+            if len(query_tokens) >= 2 and set(query_tokens).issubset(alias_tokens) and len(alias_tokens) > len(query_tokens):
+                best = max(best, 0.9)
+            if alias_norm.startswith(query_norm) and len(query_norm) >= 4:
+                best = max(best, 0.9)
+            if query_norm.startswith(alias_norm) and len(alias_norm) >= 4:
+                best = max(best, 0.9)
+            best = max(best, _similarity(query_norm, alias_norm))
     return best
 
 
@@ -713,8 +835,6 @@ async def resolve_tmdb(
         )
 
         all_candidates: List[TMDBCandidate] = []
-        best_candidate: Optional[TMDBCandidate] = None
-        runner_up: Optional[TMDBCandidate] = None
 
         for plan in plans:
             results = await _perform_search(
@@ -731,30 +851,97 @@ async def resolve_tmdb(
             )
             if not candidates:
                 continue
-            all_candidates.extend(candidates)
-            candidates.sort(key=lambda cand: cand.score, reverse=True)
-            candidate = candidates[0]
-            if candidate.score >= _SIMILARITY_THRESHOLD:
-                if best_candidate is None or candidate.score > best_candidate.score:
-                    runner_up = best_candidate
-                    candidate.reason = plan.reason
-                    best_candidate = candidate
-                elif runner_up is None or candidate.score > runner_up.score:
-                    runner_up = candidate
-            if best_candidate and best_candidate.score >= _STRONG_MATCH_THRESHOLD:
+            for candidate in candidates:
+                candidate.reason = plan.reason
+                all_candidates.append(candidate)
+            if any(cand.score >= _STRONG_MATCH_THRESHOLD for cand in candidates):
                 break
 
-        if not best_candidate:
-            if all_candidates:
-                top = sorted(all_candidates, key=lambda cand: cand.score, reverse=True)[:3]
-                summary = ", ".join(
-                    f"{cand.category.lower()}/{cand.tmdb_id} {cand.title} ({cand.year or '????'}) score={cand.score:0.3f}"
-                    for cand in top
-                )
-                logger.warning("TMDB search failed for %s. Top candidates: %s", filename, summary)
-            else:
-                logger.warning("TMDB search returned no viable candidates for %s", filename)
+        if not all_candidates:
+            logger.warning("TMDB search returned no viable candidates for %s", filename)
             return None
+
+        all_candidates.sort(key=lambda cand: cand.score, reverse=True)
+
+        baseline_top_score = all_candidates[0].score if all_candidates else 0.0
+
+        viable_candidates = [cand for cand in all_candidates if cand.score >= _SIMILARITY_THRESHOLD]
+
+        alias_scores: Dict[str, float] = {}
+
+        # Consider up to five of the strongest unique candidates for alias lookups. If no
+        # candidate cleared the similarity threshold we still want to probe the top results,
+        # otherwise entries like "The VVitch" never receive their alternative-title boost.
+        alias_targets: List[TMDBCandidate] = []
+        seen_ids: set[str] = set()
+
+        def _append_targets(pool: Iterable[TMDBCandidate]) -> None:
+            for candidate in pool:
+                if candidate.tmdb_id in seen_ids:
+                    continue
+                alias_targets.append(candidate)
+                seen_ids.add(candidate.tmdb_id)
+                if len(alias_targets) >= 5:
+                    break
+
+        _append_targets(viable_candidates)
+        if len(alias_targets) < 5:
+            _append_targets(all_candidates)
+
+        needs_alias_lookup = len(alias_targets) > 1 or (
+            alias_targets and alias_targets[0].score < _STRONG_MATCH_THRESHOLD
+        )
+        if needs_alias_lookup:
+            for candidate in alias_targets:
+                try:
+                    aliases = await _fetch_alias_titles(
+                        client,
+                        category=candidate.category,
+                        tmdb_id=candidate.tmdb_id,
+                        cache_ttl=config.cache_ttl_seconds,
+                    )
+                except TMDBResolutionError:
+                    continue
+                candidate_norms: set[str] = set()
+                candidate_norms.update(_normalized_variants(candidate.title))
+                if candidate.original_title:
+                    candidate_norms.update(_normalized_variants(candidate.original_title))
+                alias_score = _alias_similarity(
+                    query_norms,
+                    aliases,
+                    existing_norms=candidate_norms,
+                )
+                if alias_score >= 0.7:
+                    # Alias matches should be able to overtake otherwise stronger
+                    # candidates (e.g. the ambiguous "The Witch" releases) so scale
+                    # the boost with both the alias strength and the current score.
+                    incremental = max(0.1, alias_score * 0.25)
+                    adjusted = max(candidate.score + incremental, alias_score + 0.05)
+                    adjusted = max(adjusted, baseline_top_score + 0.01)
+                    alias_scores[candidate.tmdb_id] = adjusted
+
+        if alias_scores:
+            for candidate in all_candidates:
+                new_score = alias_scores.get(candidate.tmdb_id)
+                if new_score and new_score > candidate.score:
+                    candidate.score = new_score
+                    if "alias" not in candidate.reason:
+                        candidate.reason = f"{candidate.reason}+alias"
+
+            all_candidates.sort(key=lambda cand: cand.score, reverse=True)
+            viable_candidates = [cand for cand in all_candidates if cand.score >= _SIMILARITY_THRESHOLD]
+
+        if not viable_candidates:
+            top = all_candidates[:3]
+            summary = ", ".join(
+                f"{cand.category.lower()}/{cand.tmdb_id} {cand.title} ({cand.year or '????'}) score={cand.score:0.3f}"
+                for cand in top
+            )
+            logger.warning("TMDB search failed for %s. Top candidates: %s", filename, summary)
+            return None
+
+        best_candidate = viable_candidates[0]
+        runner_up = viable_candidates[1] if len(viable_candidates) > 1 else None
 
         margin = best_candidate.score - (runner_up.score if runner_up else 0.0)
         resolution = TMDBResolution(candidate=best_candidate, margin=margin, source_query=cleaned_title)

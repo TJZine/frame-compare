@@ -10,6 +10,8 @@ uv run python frame_compare.py --config config.toml --input comparison_videos
 ```
 You should see `Comparison ready` followed by the selected frames, output directory, and slow.pics URL (when enabled).
 
+> 💡 Planning to use VapourSynth locally? Install the optional extra with `uv sync --extra vapoursynth` before running the CLI.
+
 ## Features
 - Deterministic frame selection that combines quantile-based brightness picks, smoothed motion scoring, user pins, and seeded randomness, while caching metrics for reruns.
 - Configurable selection windows that respect per-clip trims, ignore/skip timing, and collapse to a safe fallback when sources disagree.
@@ -21,8 +23,8 @@ You should see `Comparison ready` followed by the selected frames, output direct
 ### Requirements
 - Python 3.13 (>=3.13,<3.14).
 - Runtime tools depending on your workflow:
-  - VapourSynth with the `lsmas` plugin and (optionally) `libplacebo` for HDR tonemapping.
-  - FFmpeg when `screenshots.use_ffmpeg=true` (the CLI checks for the executable).
+  - VapourSynth with the `lsmas` plugin and (optionally) `libplacebo` for HDR tonemapping. Install it via the optional extra (`uv sync --extra vapoursynth`) or follow the manual instructions below. When VapourSynth is unavailable the tool gracefully reports the missing dependency and you can enable the FFmpeg screenshot path instead.
+  - FFmpeg when `screenshots.use_ffmpeg=true` (the CLI checks for the executable). This is the supported fallback in cloud environments where VapourSynth is impractical.
   - `requests-toolbelt` is installed via `pyproject.toml` for slow.pics uploads; the code warns if it is missing.
   - Optional: `pyperclip` to copy the slow.pics URL to your clipboard.
 
@@ -32,8 +34,14 @@ uv sync
 ```
 This resolves the application dependencies listed in `pyproject.toml`. Add `--group dev` when you also want linting and test tools.
 
+Install VapourSynth support only when you need it:
+
+```bash
+uv sync --extra vapoursynth
+```
+
 ### Provision VapourSynth
-- **Inside the virtual environment**: install a wheel that matches your interpreter, e.g. `uv pip install VapourSynth`.
+- **Inside the virtual environment**: install the optional extra (`uv sync --extra vapoursynth`) or add the wheel manually, e.g. `uv pip install VapourSynth`.
 - **Using a system install**: install VapourSynth through your platform’s packages, then expose its Python modules by either
   - setting the `VAPOURSYNTH_PYTHONPATH` environment variable, or
   - listing search folders in `[runtime.vapoursynth_python_paths]` (they are prepended to `sys.path`).
@@ -57,11 +65,11 @@ input_dir = "comparison_videos"
 [analysis]
 frame_count_dark = 20
 frame_count_bright = 10
-frame_count_motion = 15
+frame_count_motion = 10
 user_frames = []
-random_frames = 15
+random_frames = 10
 save_frames_data = true
-downscale_height = 480
+downscale_height = 720
 step = 2
 analyze_in_sdr = true
 use_quantiles = true
@@ -90,12 +98,30 @@ single_res = 0
 mod_crop = 2
 letterbox_pillarbox_aware = true
 
+[color]
+enable_tonemap = true
+preset = "reference"
+tone_curve = "bt.2390"
+dynamic_peak_detection = true
+target_nits = 100.0
+dst_min_nits = 0.1
+overlay_enabled = true
+overlay_text_template = "TM:{tone_curve} dpd={dynamic_peak_detection} dst={target_nits}nits"
+verify_enabled = true
+verify_auto = true
+verify_start_seconds = 10.0
+verify_step_seconds = 10.0
+verify_max_seconds = 90.0
+verify_luma_threshold = 0.10
+strict = false
+
 [slowpics]
-auto_upload = false
+auto_upload = true
 collection_name = ""
 is_hentai = false
 is_public = true
 tmdb_id = ""
+tmdb_category = ""
 remove_after_days = 0
 webhook_url = ""
 open_in_browser = true
@@ -118,8 +144,11 @@ prefer_guessit = true
 input_dir = "comparison_videos"
 
 [runtime]
-ram_limit_mb = 8000
+ram_limit_mb = 4000
 vapoursynth_python_paths = []
+
+[source]
+preferred = "lsmas"
 
 [overrides]
 trim = {}
@@ -133,11 +162,11 @@ change_fps = {}
 | --- | --- | --- | --- | --- |
 | `frame_count_dark` | int | 20 | No | Number of darkest frames to keep; uses quantiles or fallback ranges. Must be ≥0.|
 | `frame_count_bright` | int | 10 | No | Number of brightest frames to keep using the same logic as dark picks.|
-| `frame_count_motion` | int | 15 | No | Motion peaks after smoothing; quarter-gap spacing is applied via `screen_separation_sec/4`.|
+| `frame_count_motion` | int | 10 | No | Motion peaks after smoothing; quarter-gap spacing is applied via `screen_separation_sec/4`.|
 | `user_frames` | list[int] | `[]` | No | Pinned frames that bypass scoring; out-of-window frames are dropped with a warning.|
-| `random_frames` | int | 15 | No | Additional random picks seeded by `random_seed` and filtered by separation rules.|
+| `random_frames` | int | 10 | No | Additional random picks seeded by `random_seed` and filtered by separation rules.|
 | `save_frames_data` | bool | true | No | Persist metrics and selections to `frame_data_filename` for cache reuse.|
-| `downscale_height` | int | 480 | No | Resizes clips before analysis; must be ≥64 if non-zero.|
+| `downscale_height` | int | 720 | No | Resizes clips before analysis; values below 64 raise a validation error.|
 | `step` | int | 2 | No | Sampling stride used when iterating frames; must be ≥1.|
 | `analyze_in_sdr` | bool | true | No | Tonemap HDR sources through `vs_core.process_clip_for_screenshot`.|
 | `use_quantiles` | bool | true | No | Toggle quantile thresholds; `false` enables fixed brightness bands.|
@@ -163,10 +192,14 @@ change_fps = {}
 | `add_frame_info` | bool | true | No | Overlay frame index/picture type (VapourSynth) or drawtext (FFmpeg).|
 | `use_ffmpeg` | bool | false | No | Use FFmpeg for rendering when VapourSynth is unavailable or trimmed frames require source indexes.|
 | `compression_level` | int | 1 | No | Compression preset: 0 (fast), 1 (balanced), 2 (small). Other values raise `ConfigError`.|
-| `upscale` | bool | true | No | Allow scaling above source height (global tallest clip by default).|
+| `upscale` | bool | true | No | Allow scaling above source height (global tallest clip by default). Width never exceeds the widest source unless `single_res` is set.|
 | `single_res` | int | 0 | No | Force a specific output height (`0` keeps clip-relative planning).|
 | `mod_crop` | int | 2 | No | Crop to maintain dimensions divisible by this modulus; must be ≥0.|
 | `letterbox_pillarbox_aware` | bool | true | No | Bias cropping toward letterbox/pillarbox bars when trimming.|
+| `auto_letterbox_crop` | bool | false | No | Estimate scope letterbox bars across sources via aspect ratios and crop them before planning.|
+| `pad_to_canvas` | str | `"off"` | No | When `single_res` is set, pad instead of scaling to hit the target canvas. Values: `off`, `on`, `auto`.|
+| `letterbox_px_tolerance` | int | 8 | No | Maximum total pixels (per axis) treated as a “micro” bar when `pad_to_canvas="auto"`.|
+| `center_pad` | bool | true | No | Split padding evenly across both sides when padding is applied.|
 
 #### `[color]`
 | Name | Type | Default | Required? | Description |
@@ -193,11 +226,13 @@ See `docs/hdr_tonemap_overview.md` for a walkthrough of the log messages, preset
 #### `[slowpics]`
 | Name | Type | Default | Required? | Description |
 | --- | --- | --- | --- | --- |
-| `auto_upload` | bool | false | No | Upload automatically after screenshots finish.|
+| `auto_upload` | bool | true | No | Upload automatically after screenshots finish.|
 | `collection_name` | str | `""` | No | Custom collection title sent to slow.pics.|
+| `collection_suffix` | str | `""` | No | Text appended after the resolved title/year when building the slow.pics collection name.|
 | `is_hentai` | bool | false | No | Marks the collection as hentai for filtering.|
 | `is_public` | bool | true | No | Controls slow.pics visibility.|
-| `tmdb_id` | str | `""` | No | Optional TMDB identifier.|
+| `tmdb_id` | str | `""` | No | Optional TMDB identifier (digits or preformatted `movie/#####` / `MOVIE_#####`).|
+| `tmdb_category` | str | `""` | No | Optional TMDB category hint (`MOVIE` or `TV`).|
 | `remove_after_days` | int | 0 | No | Schedule deletion after N days; must be ≥0.|
 | `webhook_url` | str | `""` | No | Webhook notified after upload; retries with backoff.|
 | `open_in_browser` | bool | true | No | Launch slow.pics URL with `webbrowser.open` on success.|
@@ -209,10 +244,11 @@ See `docs/hdr_tonemap_overview.md` for a walkthrough of the log messages, preset
 | --- | --- | --- | --- | --- |
 | `api_key` | str | `""` | No | Enable TMDB matching by providing your API key.|
 | `unattended` | bool | true | No | Automatically select the best TMDB match; disable to allow manual overrides when ambiguous.|
+| `confirm_matches` | bool | false | No | When enabled (and `unattended=false`), show the matched TMDB link and require confirmation or a manual id before continuing.|
 | `year_tolerance` | int | 2 | No | Acceptable difference between parsed year and TMDB results; must be ≥0.|
 | `enable_anime_parsing` | bool | true | No | Use Anitopy-derived titles when searching for anime releases.|
 | `cache_ttl_seconds` | int | 86400 | No | Cache TMDB responses in-memory for this many seconds; must be ≥0.|
-| `category_preference` | str | `""` | No | Optional default category when external IDs resolve to both movie and TV (set `MOVIE` or `TV`).|
+| `category_preference` | str? | null | No | Optional default category when external IDs resolve to both movie and TV (set `MOVIE` or `TV`).|
 
 #### `[naming]`
 | Name | Type | Default | Required? | Description |
@@ -223,13 +259,18 @@ See `docs/hdr_tonemap_overview.md` for a walkthrough of the log messages, preset
 #### `[paths]`
 | Name | Type | Default | Required? | Description |
 | --- | --- | --- | --- | --- |
-| `input_dir` | str | `"."` | No | Root directory containing the comparison clips. Update this or use `--input` per run.|
+| `input_dir` | str | `"comparison_videos"` | No | Root directory containing the comparison clips. Update this or use `--input` per run.|
 
 #### `[runtime]`
 | Name | Type | Default | Required? | Description |
 | --- | --- | --- | --- | --- |
-| `ram_limit_mb` | int | 8000 | No | Applies `core.max_cache_size` on VapourSynth; must be >0.|
+| `ram_limit_mb` | int | 4000 | No | Applies `core.max_cache_size` on VapourSynth; must be >0.|
 | `vapoursynth_python_paths` | list[str] | `[]` | No | Additional search paths appended to `sys.path` before importing VapourSynth.|
+
+#### `[source]`
+| Name | Type | Default | Required? | Description |
+| --- | --- | --- | --- | --- |
+| `preferred` | str | `"lsmas"` | No | Preferred VapourSynth source plugin. Set to `ffms2` to flip the loader priority.|
 
 #### `[overrides]`
 | Name | Type | Default | Required? | Description |
@@ -241,14 +282,14 @@ See `docs/hdr_tonemap_overview.md` for a walkthrough of the log messages, preset
 ## TMDB auto-discovery
 Enabling `[tmdb].api_key` activates an asynchronous resolver that translates filenames into TMDB metadata before screenshots are rendered. The CLI analyses the first detected source to gather title/year hints (via GuessIt/Anitopy), then resolves `(category, tmdbId, original language)` once per run. Successful matches populate:
 
-- `cfg.slowpics.tmdb_id` when it is empty so the slow.pics upload automatically links to TMDB, and
+- `cfg.slowpics.tmdb_id` and `cfg.slowpics.tmdb_category` when empty so the slow.pics upload automatically links to TMDB (normalizing to the legacy `MOVIE_#####` / `TV_#####` format), and
 - the templating context for `[slowpics].collection_name`, exposing `${Title}`, `${OriginalTitle}`, `${Year}`, `${TMDBId}`, `${TMDBCategory}`, `${OriginalLanguage}`, `${Filename}`, `${FileName}`, and `${Label}`.
 
 Resolution follows a deterministic pipeline:
 
 1. If the filename or metadata exposes external IDs, `find/{imdb|tvdb}_id` is queried first, honouring `[tmdb].category_preference` when both movie and TV hits are returned.
-2. Otherwise, the resolver issues `search/movie` or `search/tv` calls with progressively broader queries derived from the cleaned title. Heuristics include year windows within `[tmdb].year_tolerance`, roman-numeral conversion, subtitle/colon trimming, reduced word sets, automatic movie↔TV switching, and, when `[tmdb].enable_anime_parsing=true`, romaji titles via Anitopy.
-3. Every response is scored by similarity, release year proximity, and light popularity boosts. Strong matches are selected immediately; otherwise the highest scoring candidate wins with logging that notes the heuristic (e.g. “roman-numeral”). Ambiguity only surfaces when `[tmdb].unattended=false`, in which case the CLI prompts for a manual identifier such as `movie/603`.
+2. Otherwise, the resolver issues `search/movie` or `search/tv` calls with progressively broader queries derived from the cleaned title. Heuristics include year windows within `[tmdb].year_tolerance`, roman-numeral conversion, subtitle/colon trimming, alternative/AKA extraction (including “VVitch”→“Witch”), reduced word sets, automatic movie↔TV switching, and, when `[tmdb].enable_anime_parsing=true`, romaji titles via Anitopy.
+3. Every response is scored by similarity, release year proximity, and light popularity boosts. Strong matches are selected immediately; otherwise the highest scoring candidate wins with logging that notes the heuristic (e.g. “roman-numeral”). Ambiguity only surfaces when `[tmdb].unattended=false`, in which case the CLI prompts for a manual identifier such as `movie/603` (the upload will normalize this to `MOVIE_603`).
 
 All HTTP requests share an in-memory cache governed by `[tmdb].cache_ttl_seconds` and automatically apply exponential backoff on rate limits or transient failures. Setting `[tmdb].api_key` is mandatory; when omitted the resolver is skipped and slow.pics falls back to whatever `tmdb_id` you manually provided in the config.
 
@@ -278,6 +319,7 @@ Options:
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
 | `Config error: analysis.step must be >= 1` (or similar) | TOML value out of range. | Update the value to satisfy the validation listed in the config table.|
+| `Config error: source.preferred must be either 'lsmas' or 'ffms2'` | Unsupported VapourSynth source preference. | Change `[source].preferred` to `lsmas` (default) or `ffms2`.|
 | `VapourSynth is not available in this environment.` | `vapoursynth` module not importable from the current interpreter. | Install a matching VapourSynth build or add its site-packages directory to `runtime.vapoursynth_python_paths`/`VAPOURSYNTH_PYTHONPATH`.|
 | `VapourSynth core is missing the lsmas plugin` | `lsmas.LWLibavSource` unavailable, so clips cannot be opened. | Install the `lsmas` plugin in the active VapourSynth environment.|
 | `FFmpeg executable not found in PATH` | `[screenshots].use_ffmpeg` enabled without FFmpeg installed. | Install FFmpeg and ensure the binary is discoverable, or disable the flag.|
@@ -305,6 +347,7 @@ src/
   config_loader.py      # TOML loader & validation
   datatypes.py          # Configuration schema
   screenshot.py         # Screenshot planning & writers
+  tmdb.py               # TMDB resolution client
   slowpics.py           # slow.pics client
   utils.py              # Filename metadata helpers
   vs_core.py            # VapourSynth helpers

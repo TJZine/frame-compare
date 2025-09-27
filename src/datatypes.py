@@ -45,6 +45,10 @@ class ScreenshotConfig:
     single_res: int = 0
     mod_crop: int = 2
     letterbox_pillarbox_aware: bool = True
+    auto_letterbox_crop: bool = False
+    pad_to_canvas: str = "off"
+    letterbox_px_tolerance: int = 8
+    center_pad: bool = True
 
 
 @dataclass
@@ -75,14 +79,17 @@ class SlowpicsConfig:
 
     auto_upload: bool = False
     collection_name: str = ""
+    collection_suffix: str = ""
     is_hentai: bool = False
     is_public: bool = True
     tmdb_id: str = ""
+    tmdb_category: str = ""
     remove_after_days: int = 0
     webhook_url: str = ""
     open_in_browser: bool = True
     create_url_shortcut: bool = True
     delete_screen_dir_after_upload: bool = True
+    image_upload_timeout_seconds: float = 180.0
 
 
 @dataclass
@@ -91,6 +98,7 @@ class TMDBConfig:
 
     api_key: str = ""
     unattended: bool = True
+    confirm_matches: bool = False
     year_tolerance: int = 2
     enable_anime_parsing: bool = True
     cache_ttl_seconds: int = 86400
