@@ -69,6 +69,7 @@ strict = false
 # Auto-upload settings. Leave `auto_upload` off for local runs.
 auto_upload = true
 collection_name = ""
+collection_suffix = ""
 is_hentai = false
 is_public = true
 tmdb_id = ""

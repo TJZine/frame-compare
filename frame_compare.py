@@ -758,6 +758,11 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
             collection_name = f"{derived_title} ({derived_year})"
         cfg.slowpics.collection_name = collection_name or "Frame Comparison"
 
+    suffix = (getattr(cfg.slowpics, "collection_suffix", "") or "").strip()
+    if suffix:
+        base_name = (cfg.slowpics.collection_name or "").strip()
+        cfg.slowpics.collection_name = f"{base_name} {suffix}" if base_name else suffix
+
     if tmdb_resolution is not None:
         match_title = tmdb_resolution.title or tmdb_context.get("Title") or files[0].stem
         year_text = f" ({tmdb_resolution.year})" if tmdb_resolution.year else ""

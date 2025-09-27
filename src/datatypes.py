@@ -79,6 +79,7 @@ class SlowpicsConfig:
 
     auto_upload: bool = False
     collection_name: str = ""
+    collection_suffix: str = ""
     is_hentai: bool = False
     is_public: bool = True
     tmdb_id: str = ""

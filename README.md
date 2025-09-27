@@ -228,6 +228,7 @@ See `docs/hdr_tonemap_overview.md` for a walkthrough of the log messages, preset
 | --- | --- | --- | --- | --- |
 | `auto_upload` | bool | true | No | Upload automatically after screenshots finish.|
 | `collection_name` | str | `""` | No | Custom collection title sent to slow.pics.|
+| `collection_suffix` | str | `""` | No | Text appended after the resolved title/year when building the slow.pics collection name.|
 | `is_hentai` | bool | false | No | Marks the collection as hentai for filtering.|
 | `is_public` | bool | true | No | Controls slow.pics visibility.|
 | `tmdb_id` | str | `""` | No | Optional TMDB identifier (digits or preformatted `movie/#####` / `MOVIE_#####`).|
