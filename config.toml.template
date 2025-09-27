@@ -33,6 +33,8 @@ directory_name = "screens"
 add_frame_info = true
 use_ffmpeg = false
 compression_level = 1
+# Allow global upscaling of shorter clips; width stays within the widest input
+# unless `single_res` requests a fixed height.
 upscale = true
 single_res = 0
 mod_crop = 2

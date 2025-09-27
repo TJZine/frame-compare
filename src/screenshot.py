@@ -305,6 +305,8 @@ def _plan_geometry(clips: Sequence[object], cfg: ScreenshotConfig) -> List[dict[
         desired_height = None
         global_target = max((plan["cropped_h"] for plan in plans), default=None) if cfg.upscale else None
 
+    max_source_width = max((int(plan["width"]) for plan in plans), default=0)
+
     for plan in plans:
         cropped_h = int(plan["cropped_h"])
         if desired_height is not None:
@@ -316,12 +318,27 @@ def _plan_geometry(clips: Sequence[object], cfg: ScreenshotConfig) -> List[dict[
         else:
             target_h = cropped_h
 
-        plan["scaled"] = _compute_scaled_dimensions(
+        scaled_w, scaled_h = _compute_scaled_dimensions(
             int(plan["width"]),
             int(plan["height"]),
             plan["crop"],
             target_h,
         )
+
+        if (
+            cfg.upscale
+            and single_res_target is None
+            and max_source_width > 0
+            and scaled_w > max_source_width
+        ):
+            cropped_w = int(plan["cropped_w"])
+            if cropped_w > 0:
+                scale = max_source_width / float(cropped_w)
+                adjusted_h = int(round(int(plan["cropped_h"]) * scale))
+                scaled_w = max_source_width
+                scaled_h = max(1, adjusted_h)
+
+        plan["scaled"] = (scaled_w, scaled_h)
 
     return plans
 

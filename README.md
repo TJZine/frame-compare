@@ -192,7 +192,7 @@ change_fps = {}
 | `add_frame_info` | bool | true | No | Overlay frame index/picture type (VapourSynth) or drawtext (FFmpeg).|
 | `use_ffmpeg` | bool | false | No | Use FFmpeg for rendering when VapourSynth is unavailable or trimmed frames require source indexes.|
 | `compression_level` | int | 1 | No | Compression preset: 0 (fast), 1 (balanced), 2 (small). Other values raise `ConfigError`.|
-| `upscale` | bool | true | No | Allow scaling above source height (global tallest clip by default).|
+| `upscale` | bool | true | No | Allow scaling above source height (global tallest clip by default). Width never exceeds the widest source unless `single_res` is set.|
 | `single_res` | int | 0 | No | Force a specific output height (`0` keeps clip-relative planning).|
 | `mod_crop` | int | 2 | No | Crop to maintain dimensions divisible by this modulus; must be ≥0.|
 | `letterbox_pillarbox_aware` | bool | true | No | Bias cropping toward letterbox/pillarbox bars when trimming.|

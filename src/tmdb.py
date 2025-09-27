@@ -240,6 +240,7 @@ def _strip_filename_noise(filename: str) -> str:
     stem = re.sub(r"^\[[^]]+\]", "", stem)
     stem = re.sub(r"[\[\]{}()]", " ", stem)
     stem = stem.replace("_", " ")
+    stem = stem.replace(".", " ")
     stem = re.sub(
         r"\b(480p|576p|720p|1080p|2160p|4320p|x264|h264|hevc|x265|av1|hdr|sdr|remux|webrip|web-dl|bluray|blu-ray|dvdrip|multi|10bit|proper|repack|extended|uhd|nf|amzn)\b",
         "",
@@ -335,6 +336,11 @@ def _expand_title_variants(title: str) -> List[str]:
     simplified = _WHITESPACE_RE.sub(" ", title).strip()
     if simplified and simplified != title:
         add(simplified)
+
+    # Allow queries that drop a trailing year segment when filenames embed it.
+    without_year = re.sub(r"\b(19|20)\d{2}\b", "", simplified).strip()
+    if without_year and without_year != simplified:
+        add(_WHITESPACE_RE.sub(" ", without_year).strip())
 
     no_paren = re.sub(r"\([^)]*\)", "", simplified).strip()
     if no_paren and no_paren != simplified:
