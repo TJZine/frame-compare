@@ -132,6 +132,9 @@ def test_session_bootstrap_single_shot(tmp_path, monkeypatch: pytest.MonkeyPatch
     post_urls = [call["url"] for call in session.calls[1:]]
     assert post_urls == ["https://slow.pics/upload/comparison", "https://slow.pics/upload/image"]
     assert len(DummyEncoder.instances) == 2  # comparison + image
+    image_call = session.calls[2]
+    assert image_call["timeout"][0] == pytest.approx(10.0)
+    assert image_call["timeout"][1] >= cfg.image_upload_timeout_seconds
 
 
 def test_missing_xsrf_token_raises(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -259,6 +262,25 @@ def test_legacy_image_upload_loop(tmp_path, monkeypatch: pytest.MonkeyPatch) -> 
     file_tuple = upload_fields["file"]
     assert file_tuple[0] == "123 - ClipA.png"
     assert file_tuple[2] == "image/png"
+
+
+def test_large_image_upload_scales_timeout(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = SlowpicsConfig(image_upload_timeout_seconds=30)
+    image = tmp_path / "123 - ClipA.png"
+    image.write_bytes(b"x" * 8 * 1024 * 1024)  # 8 MiB file
+
+    responses = [
+        FakeResponse(200),
+        FakeResponse(200, {"collectionUuid": "abc", "key": "def", "images": [["img1"]]}),
+        FakeResponse(200, text="OK"),
+    ]
+    session = _install_session(monkeypatch, responses)
+
+    slowpics.upload_comparison([str(image)], tmp_path, cfg)
+
+    image_call = session.calls[-1]
+    assert image_call["timeout"][0] == pytest.approx(10.0)
+    assert image_call["timeout"][1] > cfg.image_upload_timeout_seconds
 
 
 def test_image_upload_non_ok_raises(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:

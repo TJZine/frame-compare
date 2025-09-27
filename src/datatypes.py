@@ -84,6 +84,7 @@ class SlowpicsConfig:
     open_in_browser: bool = True
     create_url_shortcut: bool = True
     delete_screen_dir_after_upload: bool = True
+    image_upload_timeout_seconds: float = 180.0
 
 
 @dataclass
