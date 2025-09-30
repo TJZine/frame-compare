@@ -507,6 +507,9 @@ uv run python frame_compare.py --config mixed.toml --input comparison_videos
 - **Must:**
   - Expose dedicated CLI flags for random/user frame selection so documentation and options remain aligned.
   - Add first-class output-format toggles (CSV/JSON grids) to match the documented workflow expectations.
+  - add upscaling information to the overlay when performed
+  - ensure tonemapping is still applied with a negative trim on an HDR clip
+  - implement alignment helper to automate frame offset calculation
 - **Should:**
   - Provide an opt-in GPU/Vulkan path for tone mapping to reduce HDR processing time.
   - Extend motion scoring with optional optical-flow backends for smoother clips.
