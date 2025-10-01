@@ -12,18 +12,18 @@ dependencies = [
     "anitopy",
     "guessit",
     "click>=8.1",
+    "numpy",
+    "librosa",
+    "soundfile",
+    "tqdm",
+    "vapoursynth",
 ]
 
 [project.optional-dependencies]
 vapoursynth = [
     "vapoursynth>=72",
 ]
-audio = [
-    "numpy",
-    "librosa",
-    "soundfile",
-    "tqdm",
-]
+audio = []  # backwards compatibility: audio extras are now core
 
 [dependency-groups]
 dev = [

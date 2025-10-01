@@ -80,8 +80,6 @@ brew install python@3.13 ffmpeg
 brew install vapoursynth          # optional: primary renderer
 brew install uv
 uv sync
-# Optional: pull audio-alignment extras
-# uv sync --extra audio
 ```
 Optional: manage `uv` with pipx instead (`pipx install uv`). Set `VAPOURSYNTH_PYTHONPATH` or `[runtime.vapoursynth_python_paths]` when relying on a system VapourSynth install.
 
@@ -89,10 +87,10 @@ Optional: manage `uv` with pipx instead (`pipx install uv`). Set `VAPOURSYNTH_PY
 ```bash
 pipx install uv
 uv sync
-# Optional: pull audio-alignment extras
-# uv sync --extra audio
 ```
 If `pipx` is unavailable, install uv once with `pip install --user uv` (or your platform's package manager) and then run `uv sync`. `uv sync` writes the environment into `.venv/` automatically; no manual `python -m venv` step is required.
+
+Optional: install `pyperclip` (for example, `uv pip install pyperclip`) if you want the generated slow.pics URL copied to your clipboard automatically after uploads.
 
 Fallback when uv is unavailable:
 ```bash
@@ -100,7 +98,6 @@ python3.13 -m venv .venv
 source .venv/bin/activate
 pip install -U pip wheel
 pip install -e .
-pip install numpy librosa soundfile tqdm  # optional: audio alignment
 ```
 Add VapourSynth support later with `uv sync --extra vapoursynth` or `pip install 'vapoursynth>=72'` inside whichever environment you are using, and keep FFmpeg on `PATH` for the fallback renderer.
 
@@ -134,7 +131,7 @@ Add VapourSynth support later with `uv sync --extra vapoursynth` or `pip install
 | `[analysis].user_frames` | Pinned frame list | Guarantee exact timestamps | list[int] | `[]` | `user_frames = [10, 200, 501]` | Each pin adds a render regardless of scoring |  | original, readme, new |
 | `[analysis].random_seed` | RNG seed | Match runs across machines and time | int | `20202020` | `random_seed = 1337` | Changing the seed shuffles random picks |  | original, readme, new |
 | `[analysis].downscale_height` | Analysis resolution cap | Drop it when metrics feel slow | int | `480` | `downscale_height = 720` | Lower values run faster but risk missing detail |  | original, readme, new |
-| `[audio_alignment].enable` | Audio offset detection toggle | Turn on when encodes drift before frame sampling | bool | `false` | `enable = true` | Requires ffmpeg/librosa extras and prompts for preview confirmation | Writes `generated.audio_offsets.toml` | config.toml |
+| `[audio_alignment].enable` | Audio offset detection toggle | Turn on when encodes drift before frame sampling | bool | `false` | `enable = true` | Requires FFmpeg and the built-in audio stack; prompts for preview confirmation | Writes `generated.audio_offsets.toml` | config.toml |
 | `[audio_alignment].correlation_threshold` | Minimum onset correlation | Raise for noisier sources that need manual review | float | `0.55` | `correlation_threshold = 0.65` | Higher values skip low-confidence matches | Skipped clips still land in the offsets file | config.toml |
 | `[audio_alignment].max_offset_seconds` | Largest offset to auto-apply | Keep search windows realistic | float | `12.0` | `max_offset_seconds = 4.0` | Huge offsets take longer to vet | Exceeding the limit marks the clip for manual edits | config.toml |
 | `[audio_alignment].offsets_filename` | Offset cache path | Store adjustments alongside other generated data | str | `"generated.audio_offsets.toml"` | `offsets_filename = "cache/audio_offsets.toml"` | Custom paths help track multiple scenarios | File retains both suggested and manual frame counts | config.toml |

@@ -241,18 +241,18 @@ dependencies = [
     { name = "guessit" },
     { name = "httpx" },
     { name = "natsort" },
+    { name = "librosa" },
+    { name = "numpy" },
     { name = "requests" },
     { name = "requests-toolbelt" },
     { name = "rich" },
+    { name = "soundfile" },
+    { name = "tqdm" },
+    { name = "vapoursynth" },
 ]
 
 [package.optional-dependencies]
-audio = [
-    { name = "librosa" },
-    { name = "numpy" },
-    { name = "soundfile" },
-    { name = "tqdm" },
-]
+audio = []
 vapoursynth = [
     { name = "vapoursynth" },
 ]
@@ -273,14 +273,15 @@ requires-dist = [
     { name = "colorama" },
     { name = "guessit" },
     { name = "httpx" },
-    { name = "librosa", marker = "extra == 'audio'" },
+    { name = "librosa" },
     { name = "natsort" },
-    { name = "numpy", marker = "extra == 'audio'" },
+    { name = "numpy" },
     { name = "requests" },
     { name = "requests-toolbelt" },
     { name = "rich" },
-    { name = "soundfile", marker = "extra == 'audio'" },
-    { name = "tqdm", marker = "extra == 'audio'" },
+    { name = "soundfile" },
+    { name = "tqdm" },
+    { name = "vapoursynth" },
     { name = "vapoursynth", marker = "extra == 'vapoursynth'", specifier = ">=72" },
 ]
 provides-extras = ["vapoursynth", "audio"]

@@ -409,123 +409,160 @@ def _prepare_video_alignment(
 
     allow_scene_fallback = options.mode == "keyframes+scenes"
 
-    for target in targets:
-        cache_key = _alignment_cache_key(reference_plan.path, target.path, options, tool_signature)
-        cache_path = options.cache_directory / f"{cache_key}.json"
+    work_targets = list(targets)
+    if not work_targets:
+        return
 
-        fps_hint = options.fps
-        if fps_hint is None:
-            if reference_plan.effective_fps and reference_plan.effective_fps[1]:
-                fps_hint = reference_plan.effective_fps[0] / reference_plan.effective_fps[1]
-            elif target.effective_fps and target.effective_fps[1]:
-                fps_hint = target.effective_fps[0] / target.effective_fps[1]
-
-        command = [
-            sys.executable,
-            str(options.tool_path),
-            str(reference_plan.path),
-            str(target.path),
-            "--out",
-            str(cache_path),
-            "--use-keyframes",
-            "--offset-tol",
-            f"{options.offset_tolerance}",
-        ]
-
-        if fps_hint is not None and fps_hint > 0:
-            command.extend(["--fps", f"{fps_hint}"])
-        if options.start_seconds is not None:
-            command.extend(["--start", f"{options.start_seconds}"])
-        if options.duration_seconds is not None and options.duration_seconds > 0:
-            command.extend(["--dur", f"{options.duration_seconds}"])
-        if options.mode == "keyframes+scenes":
-            command.append("--vs-scenecuts")
-
-        status = "miss"
-        segments: List[_AlignmentSegment] = []
-
-        if cache_path.exists() and _is_cache_fresh(cache_path, reference_plan.path, target.path):
-            segments = _load_alignment_segments(cache_path)
-            if segments:
-                status = "cache"
-        if not segments:
-            ok, attempts = _run_alignment_tool(
-                command,
-                allow_scene_fallback=allow_scene_fallback,
-                cache_path=cache_path,
-                reference_name=reference_plan.path.name,
-                target_name=target.path.name,
-            )
-            used_cmd = attempts[-1] if attempts else _format_command(command)
-            if not ok:
-                print(
-                    f"[yellow]Alignment skipped:[/yellow] {escape(reference_plan.path.name)} → "
-                    f"{escape(target.path.name)} (tool failed)"
-                )
-                logger.debug("Alignment attempts for %s -> %s: %s", reference_plan.path, target.path, attempts)
-                continue
-            segments = _load_alignment_segments(cache_path)
-            if not segments:
-                print(
-                    f"[yellow]Alignment skipped:[/yellow] {escape(reference_plan.path.name)} → "
-                    f"{escape(target.path.name)} (no segments)"
-                )
-                continue
-            status = "generated" if len(attempts) <= 1 else "generated-fallback"
-            command_repr = used_cmd
-        else:
-            command_repr = _format_command(command)
-
-        target.alignment_segments = tuple(segments)
-        target.alignment_cache_path = cache_path
-        target.alignment_source = status
-        ref_fps = _plan_fps(reference_plan)
-        tgt_fps = _plan_fps(target)
-        target.alignment_mapper = _FrameMapper(
-            reference_fps=ref_fps,
-            reference_trim=reference_plan.trim_start,
-            target_fps=tgt_fps,
-            target_trim=target.trim_start,
-            segments=target.alignment_segments,
+    with Progress(
+        TextColumn('{task.description}'),
+        BarColumn(),
+        TextColumn('{task.completed}/{task.total}'),
+        TextColumn('{task.percentage:>6.02f}%'),
+        TextColumn('{task.fields[rate]}'),
+        TimeRemainingColumn(),
+        transient=False,
+    ) as alignment_progress:
+        task_id = alignment_progress.add_task(
+            'Generating video alignment',
+            total=len(work_targets),
+            rate='   0.00 jobs/s',
         )
+        processed = 0
+        start_time = time.perf_counter()
 
-        warn_slope = False
-        for seg in target.alignment_segments:
-            if abs(seg.slope - 1.0) > 0.001:
-                warn_slope = True
-                break
-        if warn_slope:
-            print(
-                f"[yellow]Alignment warning:[/yellow] slope deviation detected for "
-                f"{escape(target.path.name)}"
+        def _update_alignment_progress() -> None:
+            elapsed = time.perf_counter() - start_time
+            rate_val = processed / elapsed if elapsed > 0 else 0.0
+            alignment_progress.update(
+                task_id,
+                completed=min(processed, len(work_targets)),
+                rate=f"{rate_val:7.2f} jobs/s",
             )
 
-        print(
-            f"[cyan]Alignment ready:[/cyan] {escape(reference_plan.path.name)} → "
-            f"{escape(target.path.name)}"
-        )
-        print(f"  Command: {command_repr}")
-        print(f"  Cache: {cache_path} ({status})")
-        if target.alignment_segments:
-            first_seg = target.alignment_segments[0]
-            last_seg = target.alignment_segments[-1]
-            last_b_time = last_seg.slope * last_seg.a_end + last_seg.offset
-            print(
-                f"  Segments: {len(target.alignment_segments)} "
-                f"(first A={first_seg.a_start:.3f}s→B={first_seg.b_start:.3f}s, "
-                f"last A={last_seg.a_end:.3f}s→B={last_b_time:.3f}s)"
-            )
+        for target in work_targets:
+            try:
+                cache_key = _alignment_cache_key(reference_plan.path, target.path, options, tool_signature)
+                cache_path = options.cache_directory / f"{cache_key}.json"
 
-        mapper = target.alignment_mapper
-        if mapper is not None and target.alignment_segments:
-            sample_segments = list(target.alignment_segments)[:5]
-            print("  Samples:")
-            for seg in sample_segments:
-                b_time, _ = mapper.map_time(seg.a_start)
-                print(
-                    "   "
-                    f"A={seg.a_start:.3f}s → B={b_time:.3f}s slope={seg.slope:.6f}"
+                fps_hint = options.fps
+                if fps_hint is None:
+                    if reference_plan.effective_fps and reference_plan.effective_fps[1]:
+                        fps_hint = reference_plan.effective_fps[0] / reference_plan.effective_fps[1]
+                    elif target.effective_fps and target.effective_fps[1]:
+                        fps_hint = target.effective_fps[0] / target.effective_fps[1]
+
+                command = [
+                    sys.executable,
+                    str(options.tool_path),
+                    str(reference_plan.path),
+                    str(target.path),
+                    "--out",
+                    str(cache_path),
+                    "--use-keyframes",
+                    "--offset-tol",
+                    f"{options.offset_tolerance}",
+                ]
+
+                if fps_hint is not None and fps_hint > 0:
+                    command.extend(["--fps", f"{fps_hint}"])
+                if options.start_seconds is not None:
+                    command.extend(["--start", f"{options.start_seconds}"])
+                if options.duration_seconds is not None and options.duration_seconds > 0:
+                    command.extend(["--dur", f"{options.duration_seconds}"])
+                if options.mode == "keyframes+scenes":
+                    command.append("--vs-scenecuts")
+
+                status = "miss"
+                segments: List[_AlignmentSegment] = []
+
+                if cache_path.exists() and _is_cache_fresh(cache_path, reference_plan.path, target.path):
+                    segments = _load_alignment_segments(cache_path)
+                    if segments:
+                        status = "cache"
+                if not segments:
+                    ok, attempts = _run_alignment_tool(
+                        command,
+                        allow_scene_fallback=allow_scene_fallback,
+                        cache_path=cache_path,
+                        reference_name=reference_plan.path.name,
+                        target_name=target.path.name,
+                    )
+                    used_cmd = attempts[-1] if attempts else _format_command(command)
+                    if not ok:
+                        print(
+                            f"[yellow]Alignment skipped:[/yellow] {escape(reference_plan.path.name)} → "
+                            f"{escape(target.path.name)} (tool failed)"
+                        )
+                        logger.debug("Alignment attempts for %s -> %s: %s", reference_plan.path, target.path, attempts)
+                        continue
+                    segments = _load_alignment_segments(cache_path)
+                    if not segments:
+                        print(
+                            f"[yellow]Alignment skipped:[/yellow] {escape(reference_plan.path.name)} → "
+                            f"{escape(target.path.name)} (no segments)"
+                        )
+                        continue
+                    status = "generated" if len(attempts) <= 1 else "generated-fallback"
+                    command_repr = used_cmd
+                else:
+                    command_repr = _format_command(command)
+
+                target.alignment_segments = tuple(segments)
+                target.alignment_cache_path = cache_path
+                target.alignment_source = status
+                ref_fps = _plan_fps(reference_plan)
+                tgt_fps = _plan_fps(target)
+                target.alignment_mapper = _FrameMapper(
+                    reference_fps=ref_fps,
+                    reference_trim=reference_plan.trim_start,
+                    target_fps=tgt_fps,
+                    target_trim=target.trim_start,
+                    segments=target.alignment_segments,
                 )
+
+                warn_slope = False
+                for seg in target.alignment_segments:
+                    if abs(seg.slope - 1.0) > 0.001:
+                        warn_slope = True
+                        break
+                if warn_slope:
+                    print(
+                        f"[yellow]Alignment warning:[/yellow] slope deviation detected for "
+                        f"{escape(target.path.name)}"
+                    )
+
+                print(
+                    f"[cyan]Alignment ready:[/cyan] {escape(reference_plan.path.name)} → "
+                    f"{escape(target.path.name)}"
+                )
+                print(f"  Command: {command_repr}")
+                print(f"  Cache: {cache_path} ({status})")
+                if target.alignment_segments:
+                    first_seg = target.alignment_segments[0]
+                    last_seg = target.alignment_segments[-1]
+                    last_b_time = last_seg.slope * last_seg.a_end + last_seg.offset
+                    print(
+                        f"  Segments: {len(target.alignment_segments)} "
+                        f"(first A={first_seg.a_start:.3f}s→B={first_seg.b_start:.3f}s, "
+                        f"last A={last_seg.a_end:.3f}s→B={last_b_time:.3f}s)"
+                    )
+
+                mapper = target.alignment_mapper
+                if mapper is not None and target.alignment_segments:
+                    sample_segments = list(target.alignment_segments)[:5]
+                    print("  Samples:")
+                    for seg in sample_segments:
+                        b_time, _ = mapper.map_time(seg.a_start)
+                        print(
+                            "   "
+                            f"A={seg.a_start:.3f}s → B={b_time:.3f}s slope={seg.slope:.6f}"
+                        )
+            finally:
+                processed += 1
+                _update_alignment_progress()
+
+        if processed < len(work_targets):
+            _update_alignment_progress()
 
 
 @dataclass
@@ -1229,17 +1266,78 @@ def _maybe_apply_audio_alignment(
                     window_start = segment.a_start + max(0.0, (segment_length - desired_duration) / 2)
                     window_overrides[target.path] = (window_start, desired_duration)
 
-        measurements = audio_alignment.measure_offsets(
-            reference_plan.path,
-            [plan.path for plan in targets],
-            sample_rate=audio_cfg.sample_rate,
-            hop_length=hop_length,
-            start_seconds=base_start,
-            duration_seconds=base_duration,
-            reference_stream=reference_stream_index,
-            target_streams=target_stream_indices,
-            window_overrides=window_overrides,
-        )
+        measurements: List[audio_alignment.AlignmentMeasurement]
+        negative_offsets: Dict[str, bool] = {}
+
+        if targets:
+            with Progress(
+                TextColumn('{task.description}'),
+                BarColumn(),
+                TextColumn('{task.completed}/{task.total}'),
+                TextColumn('{task.percentage:>6.02f}%'),
+                TextColumn('{task.fields[rate]}'),
+                TimeRemainingColumn(),
+                transient=False,
+            ) as audio_progress:
+                task_id = audio_progress.add_task(
+                    'Estimating audio offsets',
+                    total=len(targets),
+                    rate='   0.00 pairs/s',
+                )
+                processed = 0
+                start_time = time.perf_counter()
+
+                def _advance_audio(count: int) -> None:
+                    nonlocal processed
+                    processed += count
+                    elapsed = time.perf_counter() - start_time
+                    rate_val = processed / elapsed if elapsed > 0 else 0.0
+                    audio_progress.update(
+                        task_id,
+                        completed=min(processed, len(targets)),
+                        rate=f"{rate_val:7.2f} pairs/s",
+                    )
+
+                measurements = audio_alignment.measure_offsets(
+                    reference_plan.path,
+                    [plan.path for plan in targets],
+                    sample_rate=audio_cfg.sample_rate,
+                    hop_length=hop_length,
+                    start_seconds=base_start,
+                    duration_seconds=base_duration,
+                    reference_stream=reference_stream_index,
+                    target_streams=target_stream_indices,
+                    window_overrides=window_overrides,
+                    progress_callback=_advance_audio,
+                )
+
+                if processed < len(targets):
+                    audio_progress.update(
+                        task_id,
+                        completed=len(targets),
+                        rate=f"{0.0:7.2f} pairs/s",
+                    )
+        else:
+            measurements = audio_alignment.measure_offsets(
+                reference_plan.path,
+                [plan.path for plan in targets],
+                sample_rate=audio_cfg.sample_rate,
+                hop_length=hop_length,
+                start_seconds=base_start,
+                duration_seconds=base_duration,
+                reference_stream=reference_stream_index,
+                target_streams=target_stream_indices,
+                window_overrides=window_overrides,
+            )
+
+        negative_override_notes: Dict[str, str] = {}
+
+        for measurement in measurements:
+            if measurement.frames is not None and measurement.frames < 0:
+                measurement.frames = abs(int(measurement.frames))
+                negative_offsets[measurement.file.name] = True
+                negative_override_notes[measurement.key] = \
+                    "Suggested negative offset applied to the opposite clip for trim-first behaviour."
 
         if measurements:
             print("[cyan]Audio offsets:[/cyan]")
@@ -1249,6 +1347,9 @@ def _maybe_apply_audio_alignment(
                     if measurement.frames is not None
                     else "n/a"
                 )
+                suffix = ""
+                if measurement.file.name in negative_offsets:
+                    suffix = " (reference advanced; trimming target)"
                 if measurement.error:
                     print(
                         f"  {escape(measurement.file.name)}: error {escape(measurement.error)}"
@@ -1257,7 +1358,7 @@ def _maybe_apply_audio_alignment(
                     print(
                         f"  {escape(measurement.file.name)}: "
                         f"{measurement.offset_seconds:.3f}s ({frames_text}) "
-                        f"corr={measurement.correlation:.2f}"
+                        f"corr={measurement.correlation:.2f}{suffix}"
                     )
     except audio_alignment.AudioAlignmentError as exc:
         raise CLIAppError(
@@ -1284,6 +1385,7 @@ def _maybe_apply_audio_alignment(
         if reasons:
             measurement.frames = None
             measurement.error = "; ".join(reasons)
+            negative_offsets.pop(measurement.file.name, None)
             warnings.append(f"{measurement.file.name}: {measurement.error}")
     if warnings:
         print("[yellow]Audio alignment warnings:[/yellow]")
@@ -1295,6 +1397,7 @@ def _maybe_apply_audio_alignment(
         reference_plan.path.name,
         measurements,
         existing_entries,
+        negative_override_notes,
     )
 
     final_map: Dict[str, int] = {reference_plan.path.name: 0}
@@ -1451,6 +1554,12 @@ def _confirm_alignment_with_screenshots(
         print("[cyan]Preview frames saved:[/cyan]")
         for path in generated:
             print(f"  - {path}")
+
+    if not sys.stdin.isatty():  # pragma: no cover - runtime-dependent
+        print("[yellow]Audio alignment confirmation skipped (non-interactive session).[/yellow]")
+        return
+
+    print("[cyan]Awaiting audio alignment confirmation... (press Y/n)[/cyan]")
 
     if click.confirm(
         "Do the preview frames look aligned?",

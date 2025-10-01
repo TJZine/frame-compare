@@ -10,10 +10,11 @@ import os
 import subprocess
 import tempfile
 import tomllib
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from shutil import which
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +67,16 @@ def ensure_external_tools() -> None:
 
 def _load_optional_modules() -> Tuple[Any, Any, Any]:
     try:
-        import librosa  # type: ignore
-        import numpy as np  # type: ignore
-        import soundfile as sf  # type: ignore
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="The value of the smallest subnormal",
+                category=UserWarning,
+                module="numpy._core.getlimits",
+            )
+            import librosa  # type: ignore
+            import numpy as np  # type: ignore
+            import soundfile as sf  # type: ignore
     except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
         raise AudioAlignmentError(
             "Audio alignment requires optional dependencies: numpy, librosa, soundfile."
@@ -274,6 +282,7 @@ def measure_offsets(
     reference_stream: int = 0,
     target_streams: Mapping[Path, int] | None = None,
     window_overrides: Mapping[Path, Tuple[Optional[float], Optional[float]]] | None = None,
+    progress_callback: Callable[[int], None] | None = None,
 ) -> List[AlignmentMeasurement]:
     ensure_external_tools()
 
@@ -363,6 +372,11 @@ def measure_offsets(
                     os.unlink(target_audio)
                 except OSError:
                     pass
+        if progress_callback is not None:
+            try:
+                progress_callback(1)
+            except Exception:  # pragma: no cover - defensive
+                pass
 
     return results
 
@@ -461,6 +475,8 @@ def update_offsets_file(
         block.append(f"status = \"{status}\"")
         if measurement.error:
             block.append(f'error = "{_toml_quote(measurement.error)}"')
+        elif key in negative_override_notes:
+            block.append(f'note = "{_toml_quote(negative_override_notes[key])}"')
         block.append("")
         lines.extend(block)
 
