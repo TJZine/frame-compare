@@ -418,10 +418,12 @@ def update_offsets_file(
     reference_name: str,
     measurements: Sequence[AlignmentMeasurement],
     existing: Mapping[str, Dict[str, Any]] | None = None,
+    negative_override_notes: Mapping[str, str] | None = None,
 ) -> Tuple[Dict[str, int], Dict[str, str]]:
     applied: Dict[str, int] = {}
     statuses: Dict[str, str] = {}
     existing = existing or {}
+    negative_override_notes = negative_override_notes or {}
 
     lines: List[str] = []
     timestamp = _dt.datetime.now(tz=_dt.timezone.utc).astimezone().isoformat(timespec="seconds")
