@@ -178,7 +178,7 @@ def _extract_audio(
         cmd += ["-t", f"{duration_seconds}"]
     cmd += [
         "-map",
-        f"a:{stream_index}",
+        f"0:{stream_index}",
         "-ac",
         "1",
         "-ar",
@@ -188,14 +188,23 @@ def _extract_audio(
         handle.name,
     ]
     try:
-        subprocess.run(
+        completed = subprocess.run(
             cmd,
             check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
         )
     except subprocess.CalledProcessError as exc:  # pragma: no cover - data dependent
-        raise AudioAlignmentError(f"ffmpeg failed to extract audio from {infile.name}") from exc
+        stderr = exc.stderr.strip() if isinstance(exc.stderr, str) else ""
+        detail = f": {stderr}" if stderr else ""
+        raise AudioAlignmentError(
+            f"ffmpeg failed to extract audio from {infile.name}{detail}"
+        ) from exc
+    finally:
+        # Ensure ffmpeg output doesn't spam stdout when successful
+        if 'completed' in locals() and completed.stdout:
+            logger.debug("ffmpeg audio extract stdout: %s", completed.stdout.strip())
     return Path(handle.name)
 
 
