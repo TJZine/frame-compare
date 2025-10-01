@@ -18,6 +18,14 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 logger = logging.getLogger(__name__)
 
+# NumPy warns when the CPU is in flush-to-zero mode; ignore the harmless subnormal notice.
+warnings.filterwarnings(
+    "ignore",
+    message="The value of the smallest subnormal.*",
+    category=UserWarning,
+    module="numpy._core.getlimits",
+)
+
 
 class AudioAlignmentError(RuntimeError):
     """Raised when audio alignment cannot be completed."""

@@ -20,12 +20,12 @@ from pathlib import Path
 from string import Template
 import time
 import random
-from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import click
 from rich import print
 from rich.markup import escape
-from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeRemainingColumn
 from natsort import os_sorted
 
 from src.config_loader import ConfigError, load_config
@@ -293,10 +293,33 @@ def _run_alignment_tool(
     reference_name: str,
     target_name: str,
 ) -> tuple[bool, List[str]]:
+    return _run_alignment_tool_with_progress(
+        command,
+        allow_scene_fallback=allow_scene_fallback,
+        cache_path=cache_path,
+        reference_name=reference_name,
+        target_name=target_name,
+    )
+
+
+def _run_alignment_tool_with_progress(
+    command: List[str],
+    *,
+    allow_scene_fallback: bool,
+    cache_path: Path,
+    reference_name: str,
+    target_name: str,
+    progress_callback: Callable[[float, bool], None] | None = None,
+    poll_interval: float = 0.25,
+) -> tuple[bool, List[str]]:
     attempts: List[str] = []
     cmd = list(command)
     attempts.append(_format_command(cmd))
-    completed = subprocess.run(cmd, capture_output=True, text=True)
+    completed = _execute_with_progress(
+        cmd,
+        progress_callback=progress_callback,
+        poll_interval=poll_interval,
+    )
     if completed.returncode == 0:
         return True, attempts
 
@@ -308,7 +331,13 @@ def _run_alignment_tool(
             reference_name,
             target_name,
         )
-        completed = subprocess.run(filtered, capture_output=True, text=True)
+        if progress_callback is not None:
+            progress_callback(0.0, True)
+        completed = _execute_with_progress(
+            filtered,
+            progress_callback=progress_callback,
+            poll_interval=poll_interval,
+        )
         if completed.returncode == 0:
             return True, attempts
 
@@ -318,6 +347,42 @@ def _run_alignment_tool(
     if message_lines:
         logger.warning("Alignment tool failed for %s vs %s: %s", reference_name, target_name, " | ".join(message_lines))
     return False, attempts
+
+
+def _execute_with_progress(
+    cmd: List[str],
+    *,
+    progress_callback: Callable[[float, bool], None] | None,
+    poll_interval: float,
+) -> subprocess.CompletedProcess:
+    start = time.perf_counter()
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    stdout_data = ""
+    stderr_data = ""
+    try:
+        while True:
+            ret = process.poll()
+            if ret is not None:
+                break
+            if progress_callback is not None:
+                progress_callback(time.perf_counter() - start, False)
+            time.sleep(poll_interval)
+        stdout_data, stderr_data = process.communicate()
+    except Exception:
+        process.kill()
+        stdout_data, stderr_data = process.communicate()
+        raise
+    finally:
+        if progress_callback is not None:
+            progress_callback(time.perf_counter() - start, False)
+
+    returncode = process.returncode if process.returncode is not None else 0
+    return subprocess.CompletedProcess(cmd, returncode, stdout_data, stderr_data)
 
 
 def _prepare_video_alignment(
@@ -414,11 +479,13 @@ def _prepare_video_alignment(
         return
 
     with Progress(
+        SpinnerColumn(),
         TextColumn('{task.description}'),
         BarColumn(),
         TextColumn('{task.completed}/{task.total}'),
         TextColumn('{task.percentage:>6.02f}%'),
         TextColumn('{task.fields[rate]}'),
+        TextColumn('{task.fields[elapsed]}'),
         TimeRemainingColumn(),
         transient=False,
     ) as alignment_progress:
@@ -426,21 +493,43 @@ def _prepare_video_alignment(
             'Generating video alignment',
             total=len(work_targets),
             rate='   0.00 jobs/s',
+            elapsed='   0.0s',
         )
         processed = 0
         start_time = time.perf_counter()
+        job_start = start_time
 
-        def _update_alignment_progress() -> None:
-            elapsed = time.perf_counter() - start_time
-            rate_val = processed / elapsed if elapsed > 0 else 0.0
+        def _update_alignment_progress(*, job_elapsed: Optional[float] = None) -> None:
+            elapsed_total = time.perf_counter() - start_time
+            rate_val = processed / elapsed_total if elapsed_total > 0 else 0.0
+            elapsed_for_job = job_elapsed if job_elapsed is not None else time.perf_counter() - job_start
             alignment_progress.update(
                 task_id,
                 completed=min(processed, len(work_targets)),
                 rate=f"{rate_val:7.2f} jobs/s",
+                elapsed=f"{elapsed_for_job:7.1f}s",
             )
 
         for target in work_targets:
             try:
+                job_start = time.perf_counter()
+                alignment_progress.update(
+                    task_id,
+                    description=f"Aligning {target.path.name}",
+                    elapsed='   0.0s',
+                )
+
+                def _alignment_pulse(elapsed: float, reset: bool) -> None:
+                    nonlocal job_start
+                    if reset:
+                        job_start = time.perf_counter()
+                        elapsed = 0.0
+                    alignment_progress.update(
+                        task_id,
+                        description=f"Aligning {target.path.name}",
+                        elapsed=f"{elapsed:7.1f}s",
+                    )
+
                 cache_key = _alignment_cache_key(reference_plan.path, target.path, options, tool_signature)
                 cache_path = options.cache_directory / f"{cache_key}.json"
 
@@ -480,12 +569,13 @@ def _prepare_video_alignment(
                     if segments:
                         status = "cache"
                 if not segments:
-                    ok, attempts = _run_alignment_tool(
+                    ok, attempts = _run_alignment_tool_with_progress(
                         command,
                         allow_scene_fallback=allow_scene_fallback,
                         cache_path=cache_path,
                         reference_name=reference_plan.path.name,
                         target_name=target.path.name,
+                        progress_callback=_alignment_pulse,
                     )
                     used_cmd = attempts[-1] if attempts else _format_command(command)
                     if not ok:
@@ -559,7 +649,11 @@ def _prepare_video_alignment(
                         )
             finally:
                 processed += 1
-                _update_alignment_progress()
+                _update_alignment_progress(job_elapsed=time.perf_counter() - job_start)
+                alignment_progress.update(
+                    task_id,
+                    description='Generating video alignment',
+                )
 
         if processed < len(work_targets):
             _update_alignment_progress()
@@ -585,6 +679,7 @@ class _AudioAlignmentSummary:
     statuses: Dict[str, str]
     reference_plan: _ClipPlan
     final_adjustments: Dict[str, int]
+    swap_details: Dict[str, str]
 
 
 class CLIAppError(RuntimeError):
@@ -1331,13 +1426,74 @@ def _maybe_apply_audio_alignment(
             )
 
         negative_override_notes: Dict[str, str] = {}
+        swap_details: Dict[str, str] = {}
+        swap_candidates: List[audio_alignment.AlignmentMeasurement] = []
+        swap_enabled = len(targets) == 1
 
         for measurement in measurements:
             if measurement.frames is not None and measurement.frames < 0:
+                if swap_enabled:
+                    swap_candidates.append(measurement)
+                    continue
                 measurement.frames = abs(int(measurement.frames))
                 negative_offsets[measurement.file.name] = True
                 negative_override_notes[measurement.key] = \
                     "Suggested negative offset applied to the opposite clip for trim-first behaviour."
+
+        if swap_enabled and swap_candidates:
+            additional_measurements: List[audio_alignment.AlignmentMeasurement] = []
+            reference_name = reference_plan.path.name
+            existing_keys = {m.file.name for m in measurements}
+
+            for measurement in swap_candidates:
+                seconds = float(measurement.offset_seconds)
+                seconds_abs = abs(seconds)
+                target_name = measurement.file.name
+
+                original_frames = None
+                if measurement.frames is not None:
+                    original_frames = abs(int(measurement.frames))
+
+                reference_frames = None
+                if measurement.reference_fps and measurement.reference_fps > 0:
+                    reference_frames = int(round(seconds_abs * measurement.reference_fps))
+
+                measurement.frames = 0
+                measurement.offset_seconds = 0.0
+
+                def _describe(frames: Optional[int], seconds_val: float) -> str:
+                    parts: List[str] = []
+                    if frames is not None:
+                        parts.append(f"{frames} frame(s)")
+                    if not math.isnan(seconds_val):
+                        parts.append(f"{seconds_val:.3f}s")
+                    return " / ".join(parts) if parts else "0.000s"
+
+                measured_desc = _describe(original_frames, seconds_abs)
+                applied_desc = _describe(reference_frames, seconds_abs)
+                note = (
+                    f"Measured negative offset on {target_name}: {measured_desc}; "
+                    f"applied to {reference_name} as +{applied_desc}."
+                )
+                negative_override_notes[target_name] = note
+                negative_override_notes[reference_name] = note
+                swap_details[target_name] = note
+                swap_details[reference_name] = note
+
+                if reference_name not in existing_keys:
+                    additional_measurements.append(
+                        audio_alignment.AlignmentMeasurement(
+                            file=reference_plan.path,
+                            offset_seconds=seconds_abs,
+                            frames=reference_frames,
+                            correlation=measurement.correlation,
+                            reference_fps=measurement.reference_fps,
+                            target_fps=measurement.reference_fps,
+                        )
+                    )
+                    existing_keys.add(reference_name)
+
+            measurements.extend(additional_measurements)
 
         if measurements:
             print("[cyan]Audio offsets:[/cyan]")
@@ -1360,6 +1516,9 @@ def _maybe_apply_audio_alignment(
                         f"{measurement.offset_seconds:.3f}s ({frames_text}) "
                         f"corr={measurement.correlation:.2f}{suffix}"
                     )
+                    detail = swap_details.get(measurement.file.name)
+                    if detail:
+                        print(f"    note: {escape(detail)}")
     except audio_alignment.AudioAlignmentError as exc:
         raise CLIAppError(
             f"Audio alignment failed: {exc}",
@@ -1438,6 +1597,7 @@ def _maybe_apply_audio_alignment(
         statuses=statuses,
         reference_plan=reference_plan,
         final_adjustments=final_adjustments,
+        swap_details=swap_details,
     )
 
 
@@ -1471,6 +1631,9 @@ def _print_alignment_summary(summary: _AudioAlignmentSummary, plans: Sequence[_C
         print(
             f"  - {escape(name)}: {status} trim +{adjustment} frame(s) [correlation={corr}]{seconds_text}"
         )
+        detail = summary.swap_details.get(name)
+        if detail:
+            print(f"      note: {escape(detail)}")
 
     print(
         f"  Offsets file: {summary.offsets_path}"
