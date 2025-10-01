@@ -152,6 +152,7 @@ class AudioAlignmentConfig:
     offsets_filename: str = "generated.audio_offsets.toml"
     confirm_with_screenshots: bool = True
     random_seed: int = 2025
+    frame_offset_bias: int = 1
 
 
 @dataclass

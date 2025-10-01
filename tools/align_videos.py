@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
-align_videos.py — Coarse video alignment via keyframes (ffprobe) + scene cuts (VapourSynth).
+align_videos.py — Coarse video alignment via keyframes (ffprobe).
 Builds a piecewise linear mapping (EDL JSON) from video A's timeline to video B's,
 handling extra/missing frames and small editorial differences.
 
 FEATURES
 - Keyframe lists via ffprobe (I-frame timestamps)
-- Scene-cut lists via VapourSynth (tries scxvid or wwxd; falls back to core.misc.SCDetect)
 - DTW-based matching of event sequences (robust to insertions/deletions)
 - Segmenter that produces a piecewise linear time-map (A_time -> B_time) with near-1.0 slope
 - Optional CSV dump of matches and offsets for inspection
@@ -14,16 +13,13 @@ FEATURES
 REQUIREMENTS
 - Python 3.9+
 - ffprobe/ffmpeg accessible in PATH
-- VapourSynth R51+ (for SCDetect fallback) and a source plugin (e.g., ffms2) if using --vs-scenecuts
-  (If scxvid/wwxd plugins exist, they will be used; otherwise SCDetect is used automatically)
 - numpy
 
 USAGE (one line):
-  python align_videos.py "A.mkv" "B.mkv" --fps 23.976 --use-keyframes --vs-scenecuts --out alignment.json
+  python align_videos.py "A.mkv" "B.mkv" --fps 23.976 --use-keyframes --out alignment.json
 
 TIP:
-  Start with --use-keyframes for fast coarse alignment. If results look good, add --vs-scenecuts
-  for content-true cuts. You can limit analysis to a window with --start/--dur (seconds).
+  Keyframes provide a fast coarse alignment. You can limit analysis to a window with --start/--dur (seconds).
 
 OUTPUT
 - JSON file (default: alignment.json) with a list of segments like:
@@ -35,8 +31,8 @@ OUTPUT
 
 LIMITATIONS
 - DTW is O(N*M) in event counts; for very long lists, consider --max-events to sample events.
-- VapourSynth plugins' exact props vary; this script tries scxvid/wwxd, else falls back to SCDetect.
-  SCDetect is generally reliable for scene cuts.
+- Streams with sparse I-frames may require longer ffprobe scans; the tool now falls back to start/end markers when no keyframes exist.
+  Keyframes alone are usually sufficient for coarse alignment.
 """
 
 from __future__ import annotations
@@ -112,96 +108,28 @@ def ffprobe_keyframes(path: str, stream_index: int = 0,
     return kf
 
 
-# -------------------------- VapourSynth scene-cut detection --------------------------
+# -------------------------- Duration helper --------------------------
 
-def vs_scene_cuts(path: str, width: int = 640, method: str = "auto",
-                  start: Optional[float] = None, dur: Optional[float] = None,
-                  max_events: Optional[int] = None) -> List[float]:
-    """
-    Return scene cut timestamps (seconds) using VapourSynth.
-    Tries scxvid or wwxd if available; falls back to core.misc.SCDetect.
-    """
+def ffprobe_duration(path: str) -> Optional[float]:
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "json",
+        path,
+    ]
     try:
-        import vapoursynth as vs
-    except Exception as e:
-        raise RuntimeError("VapourSynth is required for --vs-scenecuts but could not be imported") from e
-
-    core = vs.core
-
-    # Source via ffms2 if available; otherwise try other common loaders.
-    if hasattr(core, "ffms2"):
-        clip = core.ffms2.Source(path)
-    elif hasattr(core, "lsmas"):
-        clip = core.lsmas.LWLibavSource(path)
-    else:
-        raise RuntimeError("No suitable VapourSynth source plugin found (ffms2 or lsmas)")
-
-    # Trim to window if requested
-    if start is not None or dur is not None:
-        # Use frame math (assume constant fps). If unknown, approximate via clip.fps_num/den.
-        fps = clip.fps_num / clip.fps_den if clip.fps_den else 24000/1001
-        s = start or 0.0
-        n0 = int(round(s * fps))
-        n1 = int(round((s + (dur or (clip.num_frames / fps))) * fps))
-        n1 = clamp(n1, 0, clip.num_frames) if isinstance(n1, (int, float)) else clip.num_frames
-        clip = core.std.Trim(clip, first=n0, last=n1 - 1)
-
-    # Downscale to speed up detection
-    try:
-        clip = core.resize.Bicubic(clip, width=width, height=int(round(width * clip.height / clip.width)))
+        out = run(cmd)
+        data = json.loads(out)
+        duration = data.get("format", {}).get("duration")
+        if duration is None:
+            return None
+        return float(duration)
     except Exception:
-        pass  # If resize fails, proceed with original
-
-    plugins = core.get_plugins()
-    have_scxvid = any("scxvid" in k.lower() for k in plugins.keys()) and hasattr(core, "scxvid")
-    have_wwxd = any("wwxd" in k.lower() for k in plugins.keys()) and hasattr(core, "wwxd")
-
-    used = None
-    if method in ("auto", "scxvid") and have_scxvid:
-        try:
-            # Many builds expose core.scxvid.Scxvid; collect scene-change flags from props if present.
-            sc = core.scxvid.Scxvid(clip)
-            used = "scxvid"
-            det = sc
-        except Exception:
-            det = None
-            used = None
-    if used is None and (method in ("auto", "wwxd")) and have_wwxd:
-        try:
-            det = core.wwxd.WWXD(clip)
-            used = "wwxd"
-        except Exception:
-            det = None
-            used = None
-    if used is None:
-        # Reliable fallback present in core: SCDetect writes _SceneChangePrev flags.
-        det = core.misc.SCDetect(clip, threshold=0.20)  # threshold tweakable
-        used = "SCDetect"
-
-    cuts = []
-    # Pull timestamps for frames flagged as scene changes.
-    fps = clip.fps_num / clip.fps_den if clip.fps_den else 24000/1001
-    for i in range(det.num_frames):
-        try:
-            f = det.get_frame(i)  # forces evaluation; OK for downscaled short windows
-        except Exception:
-            break
-        # Try several prop names; different detectors set different props; SCDetect uses _SceneChangePrev
-        props = f.props
-        flag = 0
-        for pname in ("_SceneChangePrev", "SceneChange", "Scenechange", "SCDetect"):
-            v = props.get(pname)
-            if isinstance(v, (int, np.integer)) and int(v) == 1:
-                flag = 1
-                break
-        if flag:
-            cuts.append(i / fps)
-
-    if max_events and len(cuts) > max_events:
-        idx = np.linspace(0, len(cuts) - 1, max_events).round().astype(int)
-        cuts = [cuts[i] for i in idx]
-
-    return cuts
+        return None
 
 
 # -------------------------- DTW alignment --------------------------
@@ -351,15 +279,18 @@ def dump_matches_csv(pairs: List[Tuple[float, float]], path: str, fps: float) ->
 # -------------------------- Main --------------------------
 
 def main():
-    p = argparse.ArgumentParser(description="Align two videos via keyframes and/or VapourSynth scene cuts.")
+    p = argparse.ArgumentParser(description="Align two videos via keyframes extracted with ffprobe.")
     p.add_argument("video_a")
     p.add_argument("video_b")
     p.add_argument("--fps", type=float, default=23.976, help="Assumed FPS for reporting (does not change decode)")
     p.add_argument("--start", type=float, default=None, help="Start time (sec) for analysis window")
     p.add_argument("--dur", type=float, default=None, help="Duration (sec) for analysis window")
-    p.add_argument("--use-keyframes", action="store_true", help="Use ffprobe I-frames as events")
-    p.add_argument("--vs-scenecuts", action="store_true", help="Use VapourSynth scene cuts as events")
-    p.add_argument("--vs-method", choices=["auto","scxvid","wwxd","scdetect"], default="auto")
+    p.add_argument(
+        "--use-keyframes",
+        action="store_true",
+        default=True,
+        help="Use ffprobe I-frames as events (default).",
+    )
     p.add_argument("--max-events", type=int, default=4000, help="Max events per source (down-sampled if exceeded)")
     p.add_argument("--gap-penalty", type=float, default=0.4, help="DTW insertion/deletion penalty (seconds^2 units)")
     p.add_argument("--offset-tol", type=float, default=0.25, help="Offset jump (sec) to split segments")
@@ -368,8 +299,8 @@ def main():
     p.add_argument("--pairs-csv", default=None, help="Optional CSV path to dump matched event pairs")
     args = p.parse_args()
 
-    if not args.use_keyframes and not args.vs_scenecuts:
-        print("No detector selected. Use --use-keyframes and/or --vs-scenecuts", file=sys.stderr)
+    if not args.use_keyframes:
+        print("No detector selected. Enable --use-keyframes to generate events.", file=sys.stderr)
         sys.exit(2)
 
     # Collect events for A and B
@@ -384,19 +315,6 @@ def main():
         events_a.extend(events_a_kf)
         events_b.extend(events_b_kf)
 
-    if args.vs_scenecuts:
-        print("Detecting scene cuts (VapourSynth)...")
-        try:
-            events_a_sc = vs_scene_cuts(args.video_a, method=args.vs_method, start=args.start, dur=args.dur,
-                                        max_events=args.max_events)
-            events_b_sc = vs_scene_cuts(args.video_b, method=args.vs_method, start=args.start, dur=args.dur,
-                                        max_events=args.max_events)
-            print(f" A scenecuts: {len(events_a_sc)}   B scenecuts: {len(events_b_sc)}")
-            events_a.extend(events_a_sc)
-            events_b.extend(events_b_sc)
-        except Exception as e:
-            print(f"[WARN] VapourSynth scene cuts failed: {e}", file=sys.stderr)
-
     # Deduplicate and sort
     def uniq_sorted(seq: List[float]) -> List[float]:
         seq = sorted(seq)
@@ -409,6 +327,22 @@ def main():
 
     events_a = uniq_sorted(events_a)
     events_b = uniq_sorted(events_b)
+
+    if not events_a:
+        fallback_a = [0.0]
+        duration_a = ffprobe_duration(args.video_a)
+        if duration_a and duration_a > 0:
+            fallback_a.append(duration_a)
+        events_a = uniq_sorted(fallback_a)
+        print("[WARN] No keyframes found for A; fell back to start/end markers.", file=sys.stderr)
+
+    if not events_b:
+        fallback_b = [0.0]
+        duration_b = ffprobe_duration(args.video_b)
+        if duration_b and duration_b > 0:
+            fallback_b.append(duration_b)
+        events_b = uniq_sorted(fallback_b)
+        print("[WARN] No keyframes found for B; fell back to start/end markers.", file=sys.stderr)
 
     if not events_a or not events_b:
         print("No events extracted; nothing to align.", file=sys.stderr)

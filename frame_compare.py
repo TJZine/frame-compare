@@ -14,7 +14,7 @@ import shutil
 import webbrowser
 import traceback
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import datetime as _dt
 from pathlib import Path
 from string import Template
@@ -288,14 +288,12 @@ def _is_cache_fresh(cache_path: Path, reference_path: Path, target_path: Path) -
 def _run_alignment_tool(
     command: List[str],
     *,
-    allow_scene_fallback: bool,
     cache_path: Path,
     reference_name: str,
     target_name: str,
 ) -> tuple[bool, List[str]]:
     return _run_alignment_tool_with_progress(
         command,
-        allow_scene_fallback=allow_scene_fallback,
         cache_path=cache_path,
         reference_name=reference_name,
         target_name=target_name,
@@ -305,7 +303,6 @@ def _run_alignment_tool(
 def _run_alignment_tool_with_progress(
     command: List[str],
     *,
-    allow_scene_fallback: bool,
     cache_path: Path,
     reference_name: str,
     target_name: str,
@@ -322,24 +319,6 @@ def _run_alignment_tool_with_progress(
     )
     if completed.returncode == 0:
         return True, attempts
-
-    if allow_scene_fallback:
-        filtered = [token for token in cmd if token != "--vs-scenecuts"]
-        attempts.append(_format_command(filtered))
-        logger.warning(
-            "VapourSynth scene cuts unavailable for %s vs %s; retrying without --vs-scenecuts",
-            reference_name,
-            target_name,
-        )
-        if progress_callback is not None:
-            progress_callback(0.0, True)
-        completed = _execute_with_progress(
-            filtered,
-            progress_callback=progress_callback,
-            poll_interval=poll_interval,
-        )
-        if completed.returncode == 0:
-            return True, attempts
 
     stderr = completed.stderr.strip()
     stdout = completed.stdout.strip()
@@ -457,6 +436,10 @@ def _prepare_video_alignment(
         if not targets or options.mode == "off":
             return
 
+    if options.mode not in {"off", "keyframes"}:
+        logger.warning("Unknown video alignment mode '%s'; defaulting to keyframes", options.mode)
+        options = replace(options, mode="keyframes")
+
     if options.mode == "off":
         return
 
@@ -471,8 +454,6 @@ def _prepare_video_alignment(
         return
 
     tool_signature = _alignment_tool_signature(options.tool_path)
-
-    allow_scene_fallback = options.mode == "keyframes+scenes"
 
     work_targets = list(targets)
     if not work_targets:
@@ -558,9 +539,6 @@ def _prepare_video_alignment(
                     command.extend(["--start", f"{options.start_seconds}"])
                 if options.duration_seconds is not None and options.duration_seconds > 0:
                     command.extend(["--dur", f"{options.duration_seconds}"])
-                if options.mode == "keyframes+scenes":
-                    command.append("--vs-scenecuts")
-
                 status = "miss"
                 segments: List[_AlignmentSegment] = []
 
@@ -571,7 +549,6 @@ def _prepare_video_alignment(
                 if not segments:
                     ok, attempts = _run_alignment_tool_with_progress(
                         command,
-                        allow_scene_fallback=allow_scene_fallback,
                         cache_path=cache_path,
                         reference_name=reference_plan.path.name,
                         target_name=target.path.name,
@@ -1425,6 +1402,36 @@ def _maybe_apply_audio_alignment(
                 window_overrides=window_overrides,
             )
 
+        frame_bias = int(audio_cfg.frame_offset_bias or 0)
+        if frame_bias != 0:
+            adjust_toward_zero = frame_bias > 0
+            bias_magnitude = abs(frame_bias)
+
+            for measurement in measurements:
+                frames_val = measurement.frames
+                if frames_val is None or frames_val == 0:
+                    continue
+
+                sign = 1 if frames_val > 0 else -1
+                magnitude = abs(frames_val)
+
+                if adjust_toward_zero:
+                    shift = min(bias_magnitude, magnitude)
+                    adjusted_magnitude = max(0, magnitude - shift)
+                else:
+                    adjusted_magnitude = magnitude + bias_magnitude
+
+                if adjusted_magnitude == magnitude:
+                    continue
+
+                new_frames = sign * adjusted_magnitude
+                measurement.frames = new_frames
+
+                if measurement.target_fps and measurement.target_fps > 0:
+                    measurement.offset_seconds = new_frames / measurement.target_fps
+                elif measurement.reference_fps and measurement.reference_fps > 0:
+                    measurement.offset_seconds = new_frames / measurement.reference_fps
+
         negative_override_notes: Dict[str, str] = {}
         swap_details: Dict[str, str] = {}
         swap_candidates: List[audio_alignment.AlignmentMeasurement] = []
@@ -1842,7 +1849,12 @@ def run_cli(
     project_root = Path(__file__).resolve().parent
     alignment_cfg = cfg.alignment
     resolved_mode = (align_mode or alignment_cfg.mode or "off").strip().lower()
-    if resolved_mode not in {"off", "keyframes", "keyframes+scenes"}:
+    if resolved_mode == "keyframes+scenes":
+        logger.warning(
+            "Alignment mode 'keyframes+scenes' is deprecated; falling back to 'keyframes'."
+        )
+        resolved_mode = "keyframes"
+    if resolved_mode not in {"off", "keyframes"}:
         logger.warning("Unknown alignment mode '%s'; defaulting to off", resolved_mode)
         resolved_mode = "off"
 
@@ -2373,9 +2385,9 @@ def run_cli(
 @click.option(
     "--align-mode",
     "align_mode_option",
-    type=click.Choice(["off", "keyframes", "keyframes+scenes"], case_sensitive=False),
+    type=click.Choice(["off", "keyframes"], case_sensitive=False),
     default=None,
-    help="Override alignment mode (off/keyframes/keyframes+scenes).",
+    help="Override alignment mode (off/keyframes).",
 )
 @click.option(
     "--align-edl",
