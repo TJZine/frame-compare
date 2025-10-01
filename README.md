@@ -3,14 +3,14 @@
 Automated frame comparison pipeline that samples representative scenes, renders aligned screenshots, and optionally publishes a slow.pics collection.
 
 ## Quickstart
-1. `uv sync` to install the core dependencies defined in `pyproject.toml`.
+1. `uv sync` to install the core dependencies defined in `pyproject.toml`; uv will spin up `.venv/` automatically if it doesn't exist yet.
 2. Copy `config.toml.template` to `config.toml` and point `[paths].input_dir` at a folder that holds at least two source videos (for example `comparison_videos/`).
 3. Drop your reference and comparison clips into that folder; filenames drive the automatic labelling step.
 4. Run the CLI:
    ```bash
    uv run python frame_compare.py --config config.toml --input comparison_videos
    ```
-5. Watch for the `Comparison ready` banner. PNG screenshots land in `screens/` (or your `[screenshots].directory_name`), and the metrics cache saves to `generated.compframes` when `analysis.save_frames_data = true`.
+5. Watch for the `Comparison ready` banner. PNG screenshots land in `screens/` (or your `[screenshots].directory_name`), the metrics cache saves to `generated.compframes` when `analysis.save_frames_data = true`, and audio alignment (when enabled) records offsets in `generated.audio_offsets.toml`.
 
 ## Common tasks
 ### Compare two videos
@@ -62,6 +62,17 @@ Automated frame comparison pipeline that samples representative scenes, renders 
 - **Run:** `uv run python frame_compare.py --config config.toml --input comparison_videos`
 - **Outputs:** Combined `User_*.png`, `Random_*.png`, and auto-selected categories in `screens/`, plus the deterministic cache artefacts.
 
+### Auto-align mismatched sources
+- **Goal:** Suggest trim offsets when encodes drift out of sync.
+- **Prepare:**
+  ```toml
+  [audio_alignment]
+  enable = true
+  correlation_threshold = 0.6
+  ```
+- **Run:** `uv run python frame_compare.py --config config.toml --input comparison_videos`
+- **Workflow:** The CLI estimates per-source offsets, writes `generated.audio_offsets.toml`, auto-selects matching streams (language → codec → layout), and saves two preview frames under `screens/audio_alignment/`. Confirm the side-by-side results in the prompt to continue; declining captures five more random frames for inspection, opens the offsets file for manual tweaks, or honour explicit stream picks from `--audio-align-track label=index`.
+
 ## Install
 ### macOS quick path
 ```bash
@@ -69,25 +80,44 @@ brew install python@3.13 ffmpeg
 brew install vapoursynth          # optional: primary renderer
 brew install uv
 uv sync
+# Optional: pull audio-alignment extras
+# uv sync --extra audio
 ```
 Optional: manage `uv` with pipx instead (`pipx install uv`). Set `VAPOURSYNTH_PYTHONPATH` or `[runtime.vapoursynth_python_paths]` when relying on a system VapourSynth install.
 
 ### Generic Python environment
 ```bash
+pipx install uv
+uv sync
+# Optional: pull audio-alignment extras
+# uv sync --extra audio
+```
+If `pipx` is unavailable, install uv once with `pip install --user uv` (or your platform's package manager) and then run `uv sync`. `uv sync` writes the environment into `.venv/` automatically; no manual `python -m venv` step is required.
+
+Fallback when uv is unavailable:
+```bash
 python3.13 -m venv .venv
 source .venv/bin/activate
-pip install uv
-uv sync
-# Fallback when uv is unavailable
 pip install -U pip wheel
 pip install -e .
+pip install numpy librosa soundfile tqdm  # optional: audio alignment
 ```
-Add VapourSynth support later with `uv sync --extra vapoursynth` or `pip install 'vapoursynth>=72'` inside the environment, and keep FFmpeg on `PATH` for the fallback renderer.
+Add VapourSynth support later with `uv sync --extra vapoursynth` or `pip install 'vapoursynth>=72'` inside whichever environment you are using, and keep FFmpeg on `PATH` for the fallback renderer.
+
+## Optional: video alignment via align_videos.py
+- Enable `--align-mode keyframes` to call `tools/align_videos.py` for every non-reference clip and cache the resulting JSON under `.cache/align/<hash>.json`.
+- `--align-mode keyframes+scenes` adds VapourSynth scene cuts; when VapourSynth or plugins are missing the CLI downgrades to keyframes and warns once.
+- `--align-edl alignment.json` consumes a pre-generated mapping instead of launching the helper, while `[alignment].cache_directory` controls where newly generated JSON lands.
+- The reference clip defaults to the fastest source; set `[alignment].reference_clip` or pass `--align-reference` to lock it by label/index.
+- When an EDL is active the CLI logs segment counts and representative A→B samples, then maps every requested frame through the piecewise timeline before fetching pixels.
+- Audio offsets respect the same alignment: streams are auto-matched by language/codec/layout, the DTW hop length drops to ≈10 ms, the middle EDL segment defines the window, and you can still force a stream with `--audio-align-track label=index`.
 
 ## Features
 - Deterministic frame selection that combines quantile-based brightness picks, smoothed motion scoring, user pins, and seeded randomness, while caching metrics for reruns.
 - Configurable selection windows that respect per-clip trims, ignore/skip timing, and collapse to a safe fallback when sources disagree.
 - VapourSynth integration with optional HDR→SDR tonemapping, FFmpeg screenshot fallback, modulus-aware cropping, and placeholder creation when writers fail.
+- Audio-guided trim suggestions that write `generated.audio_offsets.toml`, auto-select matching streams, use finer DTW hops, prompt for quick visual confirmation, and accelerate alignment for mismatched transfers.
+- Piecewise video timeline alignment that caches `tools/align_videos.py` EDLs under `.cache/align/`, with optional VapourSynth scene-cut assistance and graceful downgrades when plugins are missing.
 - Automatic slow.pics uploads with webhook retries, `.url` shortcut generation, and strict naming validation so every frame lands in the right slot.
 - Rich CLI that discovers clips, deduplicates labels, applies trims/FPS overrides consistently, and cleans up rendered images after upload when requested.
 
@@ -104,6 +134,17 @@ Add VapourSynth support later with `uv sync --extra vapoursynth` or `pip install
 | `[analysis].user_frames` | Pinned frame list | Guarantee exact timestamps | list[int] | `[]` | `user_frames = [10, 200, 501]` | Each pin adds a render regardless of scoring |  | original, readme, new |
 | `[analysis].random_seed` | RNG seed | Match runs across machines and time | int | `20202020` | `random_seed = 1337` | Changing the seed shuffles random picks |  | original, readme, new |
 | `[analysis].downscale_height` | Analysis resolution cap | Drop it when metrics feel slow | int | `480` | `downscale_height = 720` | Lower values run faster but risk missing detail |  | original, readme, new |
+| `[audio_alignment].enable` | Audio offset detection toggle | Turn on when encodes drift before frame sampling | bool | `false` | `enable = true` | Requires ffmpeg/librosa extras and prompts for preview confirmation | Writes `generated.audio_offsets.toml` | config.toml |
+| `[audio_alignment].correlation_threshold` | Minimum onset correlation | Raise for noisier sources that need manual review | float | `0.55` | `correlation_threshold = 0.65` | Higher values skip low-confidence matches | Skipped clips still land in the offsets file | config.toml |
+| `[audio_alignment].max_offset_seconds` | Largest offset to auto-apply | Keep search windows realistic | float | `12.0` | `max_offset_seconds = 4.0` | Huge offsets take longer to vet | Exceeding the limit marks the clip for manual edits | config.toml |
+| `[audio_alignment].offsets_filename` | Offset cache path | Store adjustments alongside other generated data | str | `"generated.audio_offsets.toml"` | `offsets_filename = "cache/audio_offsets.toml"` | Custom paths help track multiple scenarios | File retains both suggested and manual frame counts | config.toml |
+| `[audio_alignment].confirm_with_screenshots` | Preview confirmation prompt | Disable for unattended batch runs | bool | `true` | `confirm_with_screenshots = false` | Skipping previews removes guard rails | When false, trims apply without manual inspection | config.toml |
+| `[alignment].mode` | Video alignment strategy | Turn on when clips contain inserts/deletions | str | `"off"` | `mode = "keyframes+scenes"` | Extra processing runs `tools/align_videos.py` before screenshots | Requires FFmpeg; `keyframes+scenes` adds optional VapourSynth scene cuts | config.toml |
+| `[alignment].reference_clip` | Fixed alignment reference | Stick to a specific label/index instead of the fastest clip | str | `""` | `reference_clip = "BBB"` | Keeps baseline stable across reruns | Defaults to the fastest clip when blank | config.toml |
+| `[alignment].offset_tolerance` | Segment split threshold | Lower to detect more timeline jumps | float | `0.25` | `offset_tolerance = 0.12` | Smaller values create more segments | Applies to cached EDL key when building cache | config.toml |
+| `[alignment].cache_directory` | EDL cache location | Move cached JSON alongside footage | str | `.cache/align` | `cache_directory = "cache/edl"` | Relocating caches can help with network shares | Relative paths resolve under the input directory | config.toml |
+| `--align-mode / --align-edl / --align-reference / --align-start / --align-dur / --align-fps / --align-offset-tol` | CLI overrides for alignment | Ad-hoc runs without editing config | CLI | `off` | `--align-mode keyframes --align-reference BBB` | Enables on-demand EDL generation and reuse | `--align-edl` consumes an existing JSON instead of regenerating | new |
+| `--audio-align-track label=index` | Manual audio stream override | Force a stream when auto-selection disagrees | CLI (repeatable) | `None` | `--audio-align-track BBB=2` | Useful for commentary/dub heavy releases | Overrides both reference and target indices | new |
 | `[screenshots].use_ffmpeg` | Renderer selection | Enable when VapourSynth is unavailable | bool | `False` | `use_ffmpeg = true` | Faster on plain installs, no advanced overlays |  | original, readme, new |
 | `[color].enable_tonemap` | HDR→SDR pipeline toggle | Disable when inputs are SDR | bool | `True` | `enable_tonemap = false` | Skipping tonemap speeds renders but loses HDR cues |  | original, readme, new |
 | `[runtime].ram_limit_mb` | VapourSynth RAM guard | Tune on constrained systems | int | `8000` | `ram_limit_mb = 4096` | Lower limits prevent spikes yet may trigger reloads |  | original, readme, new |
@@ -125,6 +166,7 @@ Motion metrics compare each frame with its predecessor. If `analysis.motion_use_
 | Placeholder images | Text | Same as above | Written when a writer fails; see `_save_frame_placeholder` | Helpful for spotting missing renders | new, ripgrep |
 | Metrics cache | JSON | `[analysis].frame_data_filename` (`generated.compframes` by default) | Keep `analysis.save_frames_data = true` | Stores brightness, motion, and selection data | original, readme, new, ripgrep |
 | Selection sidecar | JSON | `generated.selection.v1.json` beside the cache | Saved with `_save_selection_sidecar` | Speeds up reloads when files match | original, new, ripgrep |
+| Audio offset cache | TOML | `[audio_alignment].offsets_filename` (`generated.audio_offsets.toml` by default) | Enable `[audio_alignment].enable = true` | Captures suggested and manual trim offsets per clip | new |
 
 ## Advanced (deep technical)
 
@@ -150,6 +192,11 @@ The CLI reads a UTF-8 TOML file and instantiates the dataclasses in `src/datatyp
 | `analysis.motion_diff_radius` | Radius for motion smoothing window | `int` | `4` | `motion_diff_radius = 6` | Detailed Features (Motion) |
 | `analysis.analyze_clip` | Reference clip label for scoring | `str` | `""` | `analyze_clip = "baseline"` | Usage Modes (Mixed) |
 | `analysis.frame_data_filename` | Cache filename for saved metrics | `str` | `"generated.compframes"` | `frame_data_filename = "cached_metrics.compframes"` | Outputs |
+| `audio_alignment.enable` | Toggle audio-based offset estimation | `bool` | `False` | `enable = true` | Usage Modes (Auto-align) |
+| `audio_alignment.correlation_threshold` | Minimum correlation needed before applying | `float` | `0.55` | `correlation_threshold = 0.65` | Usage Modes (Auto-align) |
+| `audio_alignment.max_offset_seconds` | Reject offsets beyond this magnitude | `float` | `12.0` | `max_offset_seconds = 6.0` | Usage Modes (Auto-align) |
+| `audio_alignment.offsets_filename` | TOML file storing per-clip trims | `str` | `"generated.audio_offsets.toml"` | `offsets_filename = "cache/audio_offsets.toml"` | Outputs |
+| `audio_alignment.confirm_with_screenshots` | Ask for preview confirmation after detection | `bool` | `True` | `confirm_with_screenshots = false` | Usage Modes (Auto-align) |
 | `screenshots.use_ffmpeg` | Use FFmpeg instead of VapourSynth writer | `bool` | `False` | `use_ffmpeg = true` | Installation, Outputs |
 | `screenshots.directory_name` | Output folder for rendered images | `str` | `"screens"` | `directory_name = "frames"` | Outputs |
 | `screenshots.compression_level` | Compression preset (0–2) | `int` | `1` | `compression_level = 2` | Outputs |
@@ -420,6 +467,22 @@ Usage: frame_compare.py [OPTIONS]
 Options:
   --config TEXT  Path to config.toml  [default: config.toml]
   --input TEXT   Override [paths.input_dir] from config.toml
+  --align-mode [off|keyframes|keyframes+scenes]
+                 Enable video EDL generation strategy (default: off)
+  --align-edl PATH
+                 Reuse an existing alignment JSON instead of generating one
+  --align-start FLOAT
+                 Window start (seconds) forwarded to align_videos.py
+  --align-dur FLOAT
+                 Window duration (seconds) forwarded to align_videos.py
+  --align-fps FLOAT
+                 FPS hint passed to align_videos.py
+  --align-offset-tol FLOAT
+                 Offset jump (seconds) that splits alignment segments
+  --align-reference TEXT
+                 Label/index that should act as the alignment reference
+  --audio-align-track TEXT
+                 Manual audio stream override (label=index). Repeatable.
   --help         Show this message and exit.
 ```
 
@@ -432,6 +495,7 @@ uv run python frame_compare.py --config config.toml --input comparison_videos
 **Outputs:**
 - Images in `screens/` (or the value of `[screenshots].directory_name`).
 - Cached metrics stored alongside the config file.
+- Alignment EDLs cached in `[alignment].cache_directory` (default `.cache/align/`) when `--align-mode` or `--align-edl` is supplied.
 
 ### Multi-file batch (N files)
 ```bash
@@ -441,6 +505,7 @@ uv run python frame_compare.py --config config.toml --input /data/video_batches
 
 **Outputs:**
 - Per-source screenshots within `screens/<clip>/`.
+- Cached EDL JSON files under `[alignment].cache_directory` whenever timeline alignment is enabled.
 - Shared cache file `generated.compframes`.
 
 ### Random frame selection with seed

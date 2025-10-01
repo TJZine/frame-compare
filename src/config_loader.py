@@ -1,15 +1,16 @@
-from __future__ import annotations
-
 """Configuration loader that parses and validates user-provided TOML."""
 
+from __future__ import annotations
+
+import tomllib
 from dataclasses import fields
 from typing import Any, Dict
 
-import tomllib
-
 from .datatypes import (
-    AppConfig,
+    AlignmentConfig,
     AnalysisConfig,
+    AppConfig,
+    AudioAlignmentConfig,
     ColorConfig,
     NamingConfig,
     OverridesConfig,
@@ -107,6 +108,10 @@ def load_config(path: str) -> AppConfig:
         overrides=_sanitize_section(raw.get("overrides", {}), "overrides", OverridesConfig),
         color=_sanitize_section(raw.get("color", {}), "color", ColorConfig),
         source=_sanitize_section(raw.get("source", {}), "source", SourceConfig),
+        audio_alignment=_sanitize_section(
+            raw.get("audio_alignment", {}), "audio_alignment", AudioAlignmentConfig
+        ),
+        alignment=_sanitize_section(raw.get("alignment", {}), "alignment", AlignmentConfig),
     )
 
     if app.analysis.step < 1:
@@ -179,7 +184,45 @@ def load_config(path: str) -> AppConfig:
         raise ConfigError("source.preferred must be either 'lsmas' or 'ffms2'")
     app.source.preferred = preferred
 
+    audio_cfg = app.audio_alignment
+    if audio_cfg.sample_rate <= 0:
+        raise ConfigError("audio_alignment.sample_rate must be > 0")
+    if audio_cfg.hop_length <= 0:
+        raise ConfigError("audio_alignment.hop_length must be > 0")
+    if audio_cfg.start_seconds is not None and audio_cfg.start_seconds < 0:
+        raise ConfigError("audio_alignment.start_seconds must be >= 0")
+    if audio_cfg.duration_seconds is not None and audio_cfg.duration_seconds <= 0:
+        raise ConfigError("audio_alignment.duration_seconds must be > 0")
+    if audio_cfg.correlation_threshold < 0 or audio_cfg.correlation_threshold > 1:
+        raise ConfigError("audio_alignment.correlation_threshold must be between 0 and 1")
+    if audio_cfg.max_offset_seconds <= 0:
+        raise ConfigError("audio_alignment.max_offset_seconds must be > 0")
+    if not audio_cfg.offsets_filename.strip():
+        raise ConfigError("audio_alignment.offsets_filename must be set")
+    if audio_cfg.random_seed < 0:
+        raise ConfigError("audio_alignment.random_seed must be >= 0")
+
     _validate_trim(app.overrides.trim, "overrides.trim")
     _validate_trim(app.overrides.trim_end, "overrides.trim_end")
     _validate_change_fps(app.overrides.change_fps)
+
+    alignment_cfg = app.alignment
+    allowed_modes = {"off", "keyframes", "keyframes+scenes"}
+    mode_normalized = alignment_cfg.mode.strip().lower()
+    if mode_normalized not in allowed_modes:
+        raise ConfigError("alignment.mode must be 'off', 'keyframes', or 'keyframes+scenes'")
+    alignment_cfg.mode = mode_normalized
+    if alignment_cfg.offset_tolerance <= 0:
+        raise ConfigError("alignment.offset_tolerance must be > 0")
+    if alignment_cfg.start_seconds is not None and alignment_cfg.start_seconds < 0:
+        raise ConfigError("alignment.start_seconds must be >= 0")
+    if alignment_cfg.duration_seconds is not None and alignment_cfg.duration_seconds <= 0:
+        raise ConfigError("alignment.duration_seconds must be > 0")
+    if alignment_cfg.fps is not None and alignment_cfg.fps <= 0:
+        raise ConfigError("alignment.fps must be > 0")
+    if not alignment_cfg.cache_directory.strip():
+        raise ConfigError("alignment.cache_directory must be set")
+    if not alignment_cfg.tool_path.strip():
+        raise ConfigError("alignment.tool_path must be set")
+
     return app

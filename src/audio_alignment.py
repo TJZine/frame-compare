@@ -1,0 +1,469 @@
+"""Audio-based alignment helpers for pre-analysis trim adjustments."""
+
+from __future__ import annotations
+
+import datetime as _dt
+import json
+import logging
+import math
+import os
+import subprocess
+import tempfile
+import tomllib
+from dataclasses import dataclass
+from pathlib import Path
+from shutil import which
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+
+logger = logging.getLogger(__name__)
+
+
+class AudioAlignmentError(RuntimeError):
+    """Raised when audio alignment cannot be completed."""
+
+
+@dataclass
+class AlignmentMeasurement:
+    """Measurement details for a clip relative to the chosen reference."""
+
+    file: Path
+    offset_seconds: float
+    frames: Optional[int]
+    correlation: float
+    reference_fps: Optional[float]
+    target_fps: Optional[float]
+    error: Optional[str] = None
+
+    @property
+    def key(self) -> str:
+        return self.file.name
+
+
+@dataclass
+class AudioStreamInfo:
+    """Metadata describing a single audio stream from ffprobe."""
+
+    index: int
+    language: str
+    codec_name: str
+    channels: int
+    channel_layout: str
+    sample_rate: int
+    bitrate: int
+    is_default: bool
+    is_forced: bool
+
+
+def ensure_external_tools() -> None:
+    """Make sure ffmpeg/ffprobe are discoverable."""
+
+    missing = [tool for tool in ("ffmpeg", "ffprobe") if which(tool) is None]
+    if missing:
+        raise AudioAlignmentError(
+            f"Required tool(s) missing from PATH: {', '.join(missing)}"
+        )
+
+
+def _load_optional_modules() -> Tuple[Any, Any, Any]:
+    try:
+        import librosa  # type: ignore
+        import numpy as np  # type: ignore
+        import soundfile as sf  # type: ignore
+    except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
+        raise AudioAlignmentError(
+            "Audio alignment requires optional dependencies: numpy, librosa, soundfile."
+        ) from exc
+    return np, librosa, sf
+
+
+def probe_audio_streams(path: Path) -> List[AudioStreamInfo]:
+    """Return metadata for all audio streams in *path*."""
+
+    if which("ffprobe") is None:
+        raise AudioAlignmentError("ffprobe not found in PATH")
+
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-select_streams",
+        "a",
+        "-show_entries",
+        "stream=index,codec_name,channels,channel_layout,sample_rate,bit_rate,disposition:stream_tags=language",
+        "-of",
+        "json",
+        str(path),
+    ]
+
+    try:
+        output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL)
+    except subprocess.CalledProcessError as exc:
+        raise AudioAlignmentError(f"ffprobe failed for {path.name}") from exc
+
+    try:
+        payload = json.loads(output.decode("utf-8", "ignore") or "{}")
+    except json.JSONDecodeError as exc:
+        raise AudioAlignmentError(f"Unable to parse ffprobe output for {path.name}") from exc
+
+    streams: List[AudioStreamInfo] = []
+    for entry in payload.get("streams", []) or []:
+        try:
+            index = int(entry.get("index", 0))
+        except (TypeError, ValueError):
+            continue
+        tags = entry.get("tags", {}) or {}
+        disposition = entry.get("disposition", {}) or {}
+        language = str(tags.get("language") or "").strip()
+        codec_name = str(entry.get("codec_name") or "").strip()
+        channels = int(entry.get("channels") or 0)
+        channel_layout = str(entry.get("channel_layout") or "").strip()
+        try:
+            sample_rate = int(entry.get("sample_rate") or 0)
+        except (TypeError, ValueError):
+            sample_rate = 0
+        try:
+            bitrate = int(entry.get("bit_rate") or 0)
+        except (TypeError, ValueError):
+            bitrate = 0
+        is_default = bool(disposition.get("default", 0))
+        is_forced = bool(disposition.get("forced", 0))
+        streams.append(
+            AudioStreamInfo(
+                index=index,
+                language=language.lower(),
+                codec_name=codec_name.lower(),
+                channels=channels,
+                channel_layout=channel_layout.lower(),
+                sample_rate=sample_rate,
+                bitrate=bitrate,
+                is_default=is_default,
+                is_forced=is_forced,
+            )
+        )
+    streams.sort(key=lambda info: info.index)
+    return streams
+
+
+def _extract_audio(
+    infile: Path,
+    *,
+    sample_rate: int,
+    start_seconds: Optional[float],
+    duration_seconds: Optional[float],
+    stream_index: int,
+) -> Path:
+    handle = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+    handle.close()
+    cmd: List[str] = ["ffmpeg", "-hide_banner", "-loglevel", "error"]
+    if start_seconds is not None:
+        cmd += ["-ss", f"{start_seconds}"]
+    cmd += ["-i", str(infile)]
+    if duration_seconds is not None:
+        cmd += ["-t", f"{duration_seconds}"]
+    cmd += [
+        "-map",
+        f"a:{stream_index}",
+        "-ac",
+        "1",
+        "-ar",
+        str(sample_rate),
+        "-vn",
+        "-y",
+        handle.name,
+    ]
+    try:
+        subprocess.run(
+            cmd,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except subprocess.CalledProcessError as exc:  # pragma: no cover - data dependent
+        raise AudioAlignmentError(f"ffmpeg failed to extract audio from {infile.name}") from exc
+    return Path(handle.name)
+
+
+def _onset_envelope(
+    wav_path: Path,
+    *,
+    sample_rate: int,
+    hop_length: int,
+) -> Tuple[Any, int]:
+    np, librosa, sf = _load_optional_modules()
+
+    data, native_sr = sf.read(str(wav_path))
+    if data.size == 0:
+        raise AudioAlignmentError(f"No audio samples extracted from {wav_path}")
+    if data.ndim > 1:
+        data = np.mean(data, axis=1)
+    if native_sr != sample_rate:
+        data = librosa.resample(data, orig_sr=native_sr, target_sr=sample_rate)
+
+    peak = float(np.max(np.abs(data))) if data.size else 0.0
+    if peak > 0:
+        data = data / peak
+
+    onset_env = librosa.onset.onset_strength(
+        y=data,
+        sr=sample_rate,
+        hop_length=hop_length,
+        center=True,
+    )
+    return onset_env.astype(np.float32), hop_length
+
+
+def _cross_correlation(a, b) -> Tuple[int, float]:
+    np, _, _ = _load_optional_modules()
+    a = np.asarray(a, dtype=np.float32)
+    b = np.asarray(b, dtype=np.float32)
+    if a.size == 0 or b.size == 0:
+        raise AudioAlignmentError("Empty onset envelope encountered during correlation")
+    a = (a - np.mean(a)) / (np.std(a) + 1e-8)
+    b = (b - np.mean(b)) / (np.std(b) + 1e-8)
+    corr = np.correlate(b, a, mode="full")
+    idx = int(np.argmax(corr)) - (len(a) - 1)
+    return idx, float(np.max(corr))
+
+
+def _probe_fps(infile: Path) -> Optional[float]:
+    try:
+        output = subprocess.check_output(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=r_frame_rate",
+                "-of",
+                "default=nokey=1:noprint_wrappers=1",
+                str(infile),
+            ],
+            stderr=subprocess.DEVNULL,
+        )
+    except subprocess.CalledProcessError:
+        return None
+    text = output.decode("utf-8", "ignore").strip()
+    if not text:
+        return None
+    if "/" in text:
+        num_str, den_str = text.split("/", 1)
+        try:
+            num = float(num_str)
+            den = float(den_str)
+            if den == 0:
+                return None
+            return num / den
+        except ValueError:
+            return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def measure_offsets(
+    reference: Path,
+    targets: Sequence[Path],
+    *,
+    sample_rate: int,
+    hop_length: int,
+    start_seconds: Optional[float],
+    duration_seconds: Optional[float],
+    reference_stream: int = 0,
+    target_streams: Mapping[Path, int] | None = None,
+    window_overrides: Mapping[Path, Tuple[Optional[float], Optional[float]]] | None = None,
+) -> List[AlignmentMeasurement]:
+    ensure_external_tools()
+
+    ref_audio = _extract_audio(
+        reference,
+        sample_rate=sample_rate,
+        start_seconds=start_seconds,
+        duration_seconds=duration_seconds,
+        stream_index=reference_stream,
+    )
+    ref_env: Optional[Any] = None
+    try:
+        ref_env, hop = _onset_envelope(ref_audio, sample_rate=sample_rate, hop_length=hop_length)
+    finally:
+        try:
+            os.unlink(ref_audio)
+        except OSError:
+            pass
+
+    if ref_env is None:
+        raise AudioAlignmentError(f"Failed to compute onset envelope for {reference.name}")
+
+    results: List[AlignmentMeasurement] = []
+    reference_fps = _probe_fps(reference)
+
+    for target in targets:
+        target_fps = _probe_fps(target)
+        target_audio = None
+        try:
+            stream_idx = 0
+            if target_streams is not None:
+                stream_idx = int(target_streams.get(target, 0))
+            win_start = start_seconds
+            win_dur = duration_seconds
+            if window_overrides is not None and target in window_overrides:
+                override_start, override_dur = window_overrides[target]
+                if override_start is not None:
+                    win_start = override_start
+                if override_dur is not None:
+                    win_dur = override_dur
+            target_audio = _extract_audio(
+                target,
+                sample_rate=sample_rate,
+                start_seconds=win_start,
+                duration_seconds=win_dur,
+                stream_index=stream_idx,
+            )
+            target_env, _ = _onset_envelope(
+                target_audio,
+                sample_rate=sample_rate,
+                hop_length=hop_length,
+            )
+            lag_frames, strength = _cross_correlation(ref_env, target_env)
+            seconds_per_onset = hop_length / float(sample_rate)
+            offset_seconds = lag_frames * seconds_per_onset
+
+            frames = None
+            if target_fps and target_fps > 0:
+                frames = int(round(offset_seconds * target_fps))
+
+            results.append(
+                AlignmentMeasurement(
+                    file=target,
+                    offset_seconds=offset_seconds,
+                    frames=frames,
+                    correlation=strength,
+                    reference_fps=reference_fps,
+                    target_fps=target_fps,
+                )
+            )
+        except AudioAlignmentError as exc:
+            logger.warning("Audio alignment failed for %s: %s", target.name, exc)
+            results.append(
+                AlignmentMeasurement(
+                    file=target,
+                    offset_seconds=0.0,
+                    frames=None,
+                    correlation=0.0,
+                    reference_fps=reference_fps,
+                    target_fps=target_fps,
+                    error=str(exc),
+                )
+            )
+        finally:
+            if target_audio:
+                try:
+                    os.unlink(target_audio)
+                except OSError:
+                    pass
+
+    return results
+
+
+def load_offsets(path: Path) -> Tuple[Optional[str], Dict[str, Dict[str, Any]]]:
+    if not path.exists():
+        return None, {}
+    try:
+        data = tomllib.loads(path.read_text("utf-8"))
+    except (tomllib.TOMLDecodeError, OSError) as exc:
+        raise AudioAlignmentError(f"Failed to read {path}: {exc}") from exc
+    meta = data.get("meta", {}) if isinstance(data, dict) else {}
+    offsets = data.get("offsets", {}) if isinstance(data, dict) else {}
+    cleaned: Dict[str, Dict[str, Any]] = {}
+    if isinstance(offsets, dict):
+        for key, value in offsets.items():
+            if isinstance(value, dict):
+                cleaned[key] = dict(value)
+    reference_name = None
+    if isinstance(meta, dict):
+        ref = meta.get("reference")
+        if isinstance(ref, str):
+            reference_name = ref
+    return reference_name, cleaned
+
+
+def _toml_quote(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _format_float(value: Optional[float]) -> str:
+    if value is None or math.isnan(value):
+        return "nan"
+    return f"{value:.6f}"
+
+
+def update_offsets_file(
+    path: Path,
+    reference_name: str,
+    measurements: Sequence[AlignmentMeasurement],
+    existing: Mapping[str, Dict[str, Any]] | None = None,
+) -> Tuple[Dict[str, int], Dict[str, str]]:
+    applied: Dict[str, int] = {}
+    statuses: Dict[str, str] = {}
+    existing = existing or {}
+
+    lines: List[str] = []
+    timestamp = _dt.datetime.now(tz=_dt.timezone.utc).astimezone().isoformat(timespec="seconds")
+    lines.append("[meta]")
+    lines.append(f'reference = "{_toml_quote(reference_name)}"')
+    lines.append(f'generated_at = "{_toml_quote(timestamp)}"')
+    lines.append("")
+
+    lines.append("[offsets]")
+
+    for measurement in sorted(measurements, key=lambda m: m.file.name.lower()):
+        key = measurement.key
+        prior = existing.get(key, {})
+        prior_frames = prior.get("frames") if isinstance(prior, dict) else None
+        prior_status = str(prior.get("status") or "").lower() if isinstance(prior, dict) else ""
+        manual = prior_status == "manual"
+        if not manual and isinstance(prior_frames, (int, float)) and isinstance(prior, dict):
+            suggested = prior.get("suggested_frames")
+            if isinstance(suggested, (int, float)):
+                if int(prior_frames) != int(suggested):
+                    manual = True
+        frames = prior_frames if manual else measurement.frames
+
+        if frames is not None:
+            applied[key] = int(frames)
+        status = "manual" if manual else "auto"
+        statuses[key] = status
+
+        frames_line = "nan"
+        if frames is not None:
+            frames_line = str(int(frames))
+
+        suggested_frames = measurement.frames
+        suggested_seconds = measurement.offset_seconds
+        seconds = None
+        if frames is not None and measurement.target_fps and measurement.target_fps > 0:
+            seconds = frames / measurement.target_fps
+
+        block: List[str] = [f'[offsets."{_toml_quote(key)}"]']
+        block.append(f"frames = {frames_line}")
+        block.append(f"seconds = {_format_float(seconds)}")
+        if suggested_frames is None:
+            block.append("suggested_frames = nan")
+        else:
+            block.append(f"suggested_frames = {int(suggested_frames)}")
+        block.append(f"suggested_seconds = {_format_float(suggested_seconds)}")
+        block.append(f"correlation = {_format_float(measurement.correlation)}")
+        block.append(
+            f"target_fps = {_format_float(measurement.target_fps)}"
+        )
+        block.append(f"status = \"{status}\"")
+        if measurement.error:
+            block.append(f'error = "{_toml_quote(measurement.error)}"')
+        block.append("")
+        lines.extend(block)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return applied, statuses

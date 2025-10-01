@@ -18,6 +18,12 @@ dependencies = [
 vapoursynth = [
     "vapoursynth>=72",
 ]
+audio = [
+    "numpy",
+    "librosa",
+    "soundfile",
+    "tqdm",
+]
 
 [dependency-groups]
 dev = [
@@ -35,4 +41,3 @@ target-version = ["py313"]
 [tool.ruff]
 line-length = 100
 select = ["E", "F", "I", "W"]
-

@@ -27,6 +27,31 @@ ignore_trail_seconds = 0.0
 # Guarantee at least this much selectable footage after trimming.
 min_window_seconds = 5.0
 
+[audio_alignment]
+# Estimate offsets via audio cross-correlation before frame analysis.
+enable = false
+# reference = ""          # Optional: pick specific reference label/filename; defaults to analyze clip
+sample_rate = 16000        # Audio extraction rate (Hz)
+hop_length = 512           # Onset envelope hop length
+# start_seconds = 0.0      # Optional: analysis window start (seconds)
+# duration_seconds = 600.0 # Optional: analysis window length (seconds)
+correlation_threshold = 0.55
+max_offset_seconds = 12.0
+offsets_filename = "generated.audio_offsets.toml"
+confirm_with_screenshots = true
+random_seed = 2025
+
+[alignment]
+# Generate and reuse edit decision lists (EDLs) for clip alignment.
+mode = "off"                # Choices: off, keyframes, keyframes+scenes
+reference_clip = ""         # Label/filename/index to force as alignment reference
+# start_seconds = 0.0        # Optional window start (seconds) for align_videos.py
+# duration_seconds = 0.0     # Optional window duration (seconds)
+# fps = 23.976               # Optional FPS hint for align_videos.py
+offset_tolerance = 0.25      # Offset jump (sec) that splits segments
+cache_directory = ".cache/align"
+tool_path = "tools/align_videos.py"
+
 [screenshots]
 # Output planning and rendering behaviour for both VapourSynth and FFmpeg writers.
 directory_name = "screens"
