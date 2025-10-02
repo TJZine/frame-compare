@@ -451,6 +451,12 @@ def test_cli_tmdb_resolution_populates_slowpics(tmp_path, monkeypatch):
     assert result.config.slowpics.tmdb_id == "12345"
     assert result.config.slowpics.tmdb_category == "MOVIE"
     assert result.config.slowpics.collection_name == "Resolved Title (2023) [MOVIE]"
+    slowpics_json = result.json_tail["slowpics"]
+    assert slowpics_json["title"]["final"] == "Resolved Title (2023) [MOVIE]"
+    assert slowpics_json["title"]["inputs"]["resolved_base"] == "Resolved Title (2023)"
+    assert slowpics_json["url"] == "https://slow.pics/c/example"
+    assert slowpics_json["shortcut_path"].endswith("slowpics_example.url")
+    assert slowpics_json["deleted_screens_dir"] is False
 
 
 def test_cli_tmdb_resolution_sets_default_collection_name(tmp_path, monkeypatch):
@@ -511,6 +517,10 @@ def test_cli_tmdb_resolution_sets_default_collection_name(tmp_path, monkeypatch)
     assert result.config.slowpics.collection_name.startswith("Resolved Title (2023)")
     assert result.config.slowpics.tmdb_id == "12345"
     assert result.config.slowpics.tmdb_category == "MOVIE"
+    slowpics_json = result.json_tail["slowpics"]
+    assert slowpics_json["title"]["final"].startswith("Resolved Title (2023)")
+    assert slowpics_json["title"]["inputs"]["collection_suffix"] == ""
+    assert slowpics_json["deleted_screens_dir"] is False
 
 
 def test_collection_suffix_appended(tmp_path, monkeypatch):
@@ -568,6 +578,10 @@ def test_collection_suffix_appended(tmp_path, monkeypatch):
     result = frame_compare.run_cli("dummy", None)
 
     assert result.config.slowpics.collection_name == "Sample Movie (2021) [Hybrid]"
+    slowpics_json = result.json_tail["slowpics"]
+    assert slowpics_json["title"]["final"] == "Sample Movie (2021) [Hybrid]"
+    assert slowpics_json["title"]["inputs"]["collection_suffix"] == "[Hybrid]"
+    assert slowpics_json["title"]["inputs"]["collection_name"] == "Sample Movie (2021) [Hybrid]"
 
 def test_cli_tmdb_manual_override(tmp_path, monkeypatch):
     first = tmp_path / "Alpha.mkv"

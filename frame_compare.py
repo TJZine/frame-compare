@@ -112,6 +112,7 @@ class RunResult:
     config: AppConfig
     image_paths: List[str]
     slowpics_url: Optional[str] = None
+    json_tail: Dict[str, object] | None = None
 
 
 @dataclass
@@ -1496,6 +1497,23 @@ def run_cli(
         "render": {},
         "tonemap": {},
         "cache": {},
+        "slowpics": {
+            "enabled": bool(cfg.slowpics.auto_upload),
+            "title": {
+                "inputs": {
+                    "resolved_base": None,
+                    "collection_name": None,
+                    "collection_suffix": getattr(cfg.slowpics, "collection_suffix", ""),
+                },
+                "final": None,
+            },
+            "url": None,
+            "shortcut_path": None,
+            "deleted_screens_dir": False,
+            "is_public": bool(cfg.slowpics.is_public),
+            "is_hentai": bool(cfg.slowpics.is_hentai),
+            "remove_after_days": int(cfg.slowpics.remove_after_days),
+        },
         "warnings": [],
     }
 
@@ -1533,6 +1551,8 @@ def run_cli(
     tmdb_api_key_present = bool(cfg.tmdb.api_key.strip())
     tmdb_line: Optional[str] = None
     tmdb_notes: List[str] = []
+    slowpics_tmdb_disclosure_line: Optional[str] = None
+    slowpics_verbose_tmdb_tag: Optional[str] = None
 
     if tmdb_api_key_present:
         base_file = files[0]
@@ -1610,22 +1630,48 @@ def run_cli(
     if tmdb_category and not (getattr(cfg.slowpics, "tmdb_category", "") or "").strip():
         cfg.slowpics.tmdb_category = tmdb_category
 
-    collection_template = (cfg.slowpics.collection_name or "").strip()
+    suffix_literal = getattr(cfg.slowpics, "collection_suffix", "") or ""
+    suffix = suffix_literal.strip()
+    template_raw = cfg.slowpics.collection_name or ""
+    collection_template = template_raw.strip()
+
+    resolved_title_value = (tmdb_context.get("Title") or "").strip()
+    resolved_year_value = (tmdb_context.get("Year") or "").strip()
+    resolved_base_title: Optional[str] = None
+    if resolved_title_value:
+        resolved_base_title = resolved_title_value
+        if resolved_year_value:
+            resolved_base_title = f"{resolved_title_value} ({resolved_year_value})"
+
+    # slow.pics title policy: an explicit collection_name template is treated as the exact
+    # destination title, while the suffix is only appended when we fall back to the resolved
+    # base title (ResolvedTitle + optional Year). This mirrors the README contract.
     if collection_template:
         rendered_collection = _render_collection_name(collection_template, tmdb_context).strip()
-        cfg.slowpics.collection_name = rendered_collection or "Frame Comparison"
+        final_collection_name = rendered_collection or "Frame Comparison"
     else:
-        derived_title = (tmdb_context.get("Title") or "").strip() or files[0].stem
-        derived_year = (tmdb_context.get("Year") or "").strip()
-        collection_name = derived_title
-        if derived_title and derived_year:
-            collection_name = f"{derived_title} ({derived_year})"
-        cfg.slowpics.collection_name = collection_name or "Frame Comparison"
+        derived_title = resolved_title_value or metadata_title or files[0].stem
+        derived_year = resolved_year_value
+        base_collection = (derived_title or "").strip()
+        if base_collection and derived_year:
+            base_collection = f"{base_collection} ({derived_year})"
+        final_collection_name = base_collection or "Frame Comparison"
+        if suffix:
+            final_collection_name = f"{final_collection_name} {suffix}" if final_collection_name else suffix
 
-    suffix = (getattr(cfg.slowpics, "collection_suffix", "") or "").strip()
-    if suffix:
-        base_name = (cfg.slowpics.collection_name or "").strip()
-        cfg.slowpics.collection_name = f"{base_name} {suffix}" if base_name else suffix
+    cfg.slowpics.collection_name = final_collection_name
+    slowpics_final_title = final_collection_name
+    slowpics_resolved_base = resolved_base_title
+    slowpics_title_inputs = {
+        "resolved_base": slowpics_resolved_base,
+        "collection_name": cfg.slowpics.collection_name,
+        "collection_suffix": suffix_literal,
+    }
+    slowpics_inputs_json = json_tail["slowpics"]["title"]["inputs"]
+    slowpics_inputs_json["resolved_base"] = slowpics_title_inputs["resolved_base"]
+    slowpics_inputs_json["collection_name"] = slowpics_title_inputs["collection_name"]
+    slowpics_inputs_json["collection_suffix"] = slowpics_title_inputs["collection_suffix"]
+    json_tail["slowpics"]["title"]["final"] = slowpics_final_title
 
     if tmdb_resolution is not None:
         match_title = tmdb_resolution.title or tmdb_context.get("Title") or files[0].stem
@@ -1640,6 +1686,18 @@ def run_cli(
         reporter.verbose_line(
             f"TMDB match heuristics: source={source} heuristic={heuristic.strip()}"
         )
+        if slowpics_resolved_base:
+            base_display = slowpics_resolved_base
+        elif match_title and year_display:
+            base_display = f"{match_title} ({year_display})"
+        else:
+            base_display = match_title or "(n/a)"
+        slowpics_tmdb_disclosure_line = (
+            f'slow.pics title inputs: base="{escape(str(base_display))}"  '
+            f'collection_suffix="{escape(str(suffix_literal))}"'
+        )
+        if tmdb_category and tmdb_id_value:
+            slowpics_verbose_tmdb_tag = f"TMDB={tmdb_category}_{tmdb_id_value}"
     elif manual_tmdb:
         display_title = tmdb_context.get("Title") or files[0].stem
         category_display = tmdb_category or cfg.slowpics.tmdb_category or ""
@@ -1649,6 +1707,20 @@ def run_cli(
             f"TMDB: {category_display}/{id_display}  "
             f"\"{display_title} ({tmdb_context.get('Year') or ''})\"  lang={lang_text}"
         )
+        if slowpics_resolved_base:
+            base_display = slowpics_resolved_base
+        else:
+            year_component = tmdb_context.get("Year") or ""
+            if display_title and year_component:
+                base_display = f"{display_title} ({year_component})"
+            else:
+                base_display = display_title or "(n/a)"
+        slowpics_tmdb_disclosure_line = (
+            f'slow.pics title inputs: base="{escape(str(base_display))}"  '
+            f'collection_suffix="{escape(str(suffix_literal))}"'
+        )
+        if category_display and id_display:
+            slowpics_verbose_tmdb_tag = f"TMDB={category_display}_{id_display}"
     elif tmdb_api_key_present:
         if tmdb_error_message:
             message = f"TMDB lookup failed: {tmdb_error_message}"
@@ -1919,9 +1991,13 @@ def run_cli(
         reporter.line(line)
     if tmdb_line:
         reporter.line(tmdb_line)
+        if slowpics_tmdb_disclosure_line:
+            reporter.line(slowpics_tmdb_disclosure_line)
     elif tmdb_notes:
         for note in tmdb_notes:
             reporter.verbose_line(note)
+    elif slowpics_tmdb_disclosure_line:
+        reporter.line(slowpics_tmdb_disclosure_line)
 
     reporter.section("Prepare")
     for line in prepare_trim_lines:
@@ -2198,38 +2274,89 @@ def run_cli(
 
     slowpics_url: Optional[str] = None
     reporter.section("Publish")
+    escaped_collection_name = escape(str(slowpics_title_inputs["collection_name"]))
+    escaped_suffix_literal = escape(str(slowpics_title_inputs["collection_suffix"]))
+    reporter.line("slow.pics collection (preview):")
+    reporter.line(
+        f"  inputs: collection_name=\"{escaped_collection_name}\"  "
+        f"collection_suffix=\"{escaped_suffix_literal}\""
+    )
+    if slowpics_resolved_base:
+        reporter.line(f'  resolved_base="{escape(str(slowpics_resolved_base))}"')
+    else:
+        reporter.line("  resolved_base=(n/a)")
+    reporter.line(f'  final="{escape(str(slowpics_final_title))}"')
+    if slowpics_verbose_tmdb_tag:
+        reporter.verbose_line(f"  {escape(slowpics_verbose_tmdb_tag)}")
     if cfg.slowpics.auto_upload:
         print("[cyan]Preparing slow.pics upload...[/cyan]")
         upload_total = len(image_paths)
+        def _safe_size(path_str: str) -> int:
+            try:
+                return Path(path_str).stat().st_size
+            except OSError:
+                return 0
+
+        file_sizes = [_safe_size(path) for path in image_paths] if upload_total else []
+        total_bytes = sum(file_sizes)
+
+        console_width = getattr(reporter.console.size, "width", 80) or 80
+        stats_width_limit = max(24, console_width - 32)
+
+        def _format_duration(seconds: Optional[float]) -> str:
+            if seconds is None or not math.isfinite(seconds):
+                return "--:--"
+            total = max(0, int(seconds + 0.5))
+            hours, remainder = divmod(total, 3600)
+            minutes, secs = divmod(remainder, 60)
+            if hours:
+                return f"{hours:d}:{minutes:02d}:{secs:02d}"
+            return f"{minutes:02d}:{secs:02d}"
+
+        def _format_stats(files_done: int, bytes_done: int, elapsed: float) -> str:
+            speed_bps = bytes_done / elapsed if elapsed > 0 else 0.0
+            speed_mb = speed_bps / (1024 * 1024)
+            remaining_bytes = max(total_bytes - bytes_done, 0)
+            eta_seconds = (remaining_bytes / speed_bps) if speed_bps > 0 else None
+            eta_text = _format_duration(eta_seconds)
+            elapsed_text = _format_duration(elapsed)
+            stats = f"{speed_mb:5.2f} MB/s | {eta_text} | {elapsed_text}"
+            if len(stats) > stats_width_limit:
+                stats = stats[: max(0, stats_width_limit - 1)] + "…"
+            return stats
+
         try:
+            reporter.line("[✓] slow.pics: establishing session")
             if upload_total > 0:
                 start_time = time.perf_counter()
-                uploaded = 0
+                uploaded_files = 0
+                uploaded_bytes = 0
+                file_index = 0
 
-                with Progress(
-                    TextColumn('{task.description}'),
+                columns = [
+                    TextColumn('{task.percentage:>6.02f}% {task.completed}/{task.total}', justify='left'),
                     BarColumn(),
-                    TextColumn('{task.completed}/{task.total}'),
-                    TextColumn('{task.percentage:>6.02f}%'),
-                    TextColumn('{task.fields[rate]}'),
-                    TimeRemainingColumn(),
-                    transient=False,
-                ) as upload_progress:
+                    TextColumn('{task.fields[stats]}', justify='right'),
+                ]
+                with reporter.progress(*columns, transient=False) as upload_progress:
                     task_id = upload_progress.add_task(
-                        'Uploading to slow.pics',
+                        '',
                         total=upload_total,
-                        rate="   0.00 fps",
+                        stats=_format_stats(0, 0, 0.0),
                     )
 
                     def advance_upload(count: int) -> None:
-                        nonlocal uploaded
-                        uploaded += count
+                        nonlocal uploaded_files, uploaded_bytes, file_index
+                        uploaded_files += count
+                        for _ in range(count):
+                            if file_index < len(file_sizes):
+                                uploaded_bytes += file_sizes[file_index]
+                                file_index += 1
                         elapsed = time.perf_counter() - start_time
-                        rate = uploaded / elapsed if elapsed > 0 else 0.0
                         upload_progress.update(
                             task_id,
-                            completed=min(upload_total, uploaded),
-                            rate=f"{rate:7.2f} fps",
+                            completed=min(upload_total, uploaded_files),
+                            stats=_format_stats(uploaded_files, uploaded_bytes, elapsed),
                         )
 
                     slowpics_url = upload_comparison(
@@ -2239,23 +2366,38 @@ def run_cli(
                         progress_callback=advance_upload,
                     )
 
-                    if uploaded < upload_total:
-                        upload_progress.update(
-                            task_id,
-                            completed=upload_total,
-                            rate=f"{(uploaded / max(1e-6, time.perf_counter() - start_time)):7.2f} fps",
-                        )
+                    elapsed = time.perf_counter() - start_time
+                    upload_progress.update(
+                        task_id,
+                        completed=upload_total,
+                        stats=_format_stats(uploaded_files, uploaded_bytes, elapsed),
+                    )
             else:
                 slowpics_url = upload_comparison(
                     image_paths,
                     out_dir,
                     cfg.slowpics,
                 )
+            reporter.line(f"[✓] slow.pics: uploading {upload_total} images")
+            reporter.line("[✓] slow.pics: assembling collection")
         except SlowpicsAPIError as exc:
             raise CLIAppError(
                 f"slow.pics upload failed: {exc}",
                 rich_message=f"[red]slow.pics upload failed:[/red] {exc}",
             ) from exc
+
+    if slowpics_url:
+        slowpics_block = json_tail.get("slowpics")
+        if slowpics_block is not None:
+            slowpics_block["url"] = slowpics_url
+            if cfg.slowpics.create_url_shortcut:
+                key = slowpics_url.rstrip("/").rsplit("/", 1)[-1]
+                if key:
+                    slowpics_block["shortcut_path"] = str(out_dir / f"slowpics_{key}.url")
+                else:
+                    slowpics_block.setdefault("shortcut_path", None)
+            else:
+                slowpics_block["shortcut_path"] = None
 
     result = RunResult(
         files=[plan.path for plan in plans],
@@ -2264,6 +2406,7 @@ def run_cli(
         config=cfg,
         image_paths=list(image_paths),
         slowpics_url=slowpics_url,
+        json_tail=json_tail,
     )
     for warning in collected_warnings:
         reporter.warn(warning)
@@ -2319,7 +2462,6 @@ def run_cli(
         for line in summary_lines:
             reporter.line(line)
 
-    reporter.console.print(json.dumps(json_tail, separators=(",", ":")))
     return result
 
 
@@ -2361,6 +2503,12 @@ def main(
     slowpics_url = result.slowpics_url
     cfg = result.config
     out_dir = result.out_dir
+    json_tail = result.json_tail or {}
+
+    slowpics_block = json_tail.get("slowpics")
+    shortcut_path_str: Optional[str] = None
+    deleted_dir = False
+    clipboard_hint = ""
 
     if slowpics_url:
         if cfg.slowpics.open_in_browser:
@@ -2373,14 +2521,49 @@ def main(
 
             pyperclip.copy(slowpics_url)
         except Exception:
-            pass
+            clipboard_hint = ""
+        else:
+            clipboard_hint = " (copied to clipboard)"
+
+        if cfg.slowpics.create_url_shortcut:
+            key = slowpics_url.rstrip("/").rsplit("/", 1)[-1]
+            if key:
+                shortcut_path_str = str(out_dir / f"slowpics_{key}.url")
+
+        print("[✓] slow.pics: verifying & saving shortcut")
+        url_line = f"slow.pics URL: {slowpics_url}{clipboard_hint}"
+        print(url_line)
+        if shortcut_path_str:
+            print(f"Shortcut: {shortcut_path_str}")
+        else:
+            print("Shortcut: (disabled)")
+
         if cfg.slowpics.delete_screen_dir_after_upload:
             try:
                 shutil.rmtree(out_dir)
-                print("[yellow]Screenshot directory removed:[/yellow]")
+                deleted_dir = True
+                print("Cleaned up screenshots after upload")
                 builtins.print(f"  {out_dir}")
             except OSError as exc:
                 print(f"[yellow]Warning:[/yellow] Failed to delete screenshot directory: {exc}")
+        if slowpics_block is not None:
+            slowpics_block["url"] = slowpics_url
+            slowpics_block["shortcut_path"] = shortcut_path_str
+            slowpics_block["deleted_screens_dir"] = deleted_dir
+        else:
+            json_tail.setdefault("slowpics", {}).update(
+                {
+                    "url": slowpics_url,
+                    "shortcut_path": shortcut_path_str,
+                    "deleted_screens_dir": deleted_dir,
+                }
+            )
+    elif slowpics_block is not None:
+        slowpics_block.setdefault("deleted_screens_dir", False)
+        slowpics_block.setdefault("shortcut_path", None)
+        slowpics_block.setdefault("url", None)
+
+    print(json.dumps(json_tail, separators=(",", ":")))
 
 
 if __name__ == "__main__":
