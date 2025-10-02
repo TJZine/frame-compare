@@ -63,7 +63,7 @@ class ColorConfig:
     dst_min_nits: float = 0.1
     overlay_enabled: bool = True
     overlay_text_template: str = (
-        "TM:{tone_curve} dpd={dynamic_peak_detection} dst={target_nits}nits"
+        "Tonemapping Algorithm: {tone_curve} dpd = {dynamic_peak_detection} dst = {target_nits} nits"
     )
     verify_enabled: bool = True
     verify_frame: Optional[int] = None

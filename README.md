@@ -258,7 +258,7 @@ dynamic_peak_detection = true
 target_nits = 100.0
 dst_min_nits = 0.1
 overlay_enabled = true
-overlay_text_template = "TM:{tone_curve} dpd={dynamic_peak_detection} dst={target_nits}nits"
+overlay_text_template = "Tonemapping Algorithm: {tone_curve} dpd = {dynamic_peak_detection} dst = {target_nits} nits"
 verify_enabled = true
 verify_auto = true
 verify_start_seconds = 10.0
@@ -363,7 +363,7 @@ change_fps = {}
 | `target_nits` | float | 100.0 | No | SDR peak nits (`dst_max`). Must be >0.|
 | `dst_min_nits` | float | 0.1 | No | Minimum nits for libplacebo (`dst_min`). Must be ≥0.|
 | `overlay_enabled` | bool | true | No | Draw an SDR metadata overlay (top-right). If true, failures log `[OVERLAY]` and obey `strict`.|
-| `overlay_text_template` | str | `"TM:{tone_curve} dpd={dynamic_peak_detection} dst={target_nits}nits"` | No | Template for the overlay text. Placeholders: `{tone_curve}`, `{dpd}`, `{dynamic_peak_detection}`, `{target_nits}`, `{preset}`, `{reason}`.|
+| `overlay_text_template` | str | `"Tonemapping Algorithm: {tone_curve} dpd = {dynamic_peak_detection} dst = {target_nits} nits"` | No | Template for the overlay text. Placeholders: `{tone_curve}`, `{dpd}`, `{dynamic_peak_detection}`, `{target_nits}`, `{preset}`, `{reason}`.|
 | `verify_enabled` | bool | true | No | Compute Δ vs naive SDR and log `[VERIFY] frame=… avg=… max=…`.|
 | `verify_frame` | int? | null | No | Force a specific verification frame index.|
 | `verify_auto` | bool | true | No | Enable the auto-search described in `docs/hdr_tonemap_overview.md`.|

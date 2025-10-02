@@ -990,7 +990,7 @@ def process_clip_for_screenshot(
         getattr(
             cfg,
             "overlay_text_template",
-            "TM:{tone_curve} dpd={dpd} dst={target_nits}nits",
+            "Tonemapping Algorithm: {tone_curve} dpd = {dynamic_peak_detection} dst = {target_nits} nits",
         )
     )
     if overlay_enabled:

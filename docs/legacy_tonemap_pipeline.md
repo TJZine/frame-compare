@@ -1,6 +1,6 @@
-# Legacy Tonemap & Overlay Sequence (legacy/compv4_improved.py)
+# Legacy Tonemap & Overlay Sequence (historical baseline)
 
-Reference: `legacy/compv4_improved.py` — confirmed behavior on 2025-09-22.
+Reference: Archived placebo-based pipeline confirmed on 2025-09-22.
 
 ## Clip flow
 - Crop/resize decisions happen upstream; `process_clip_for_screenshot` receives the geometry-ready node plus the original frame props.
