@@ -156,21 +156,6 @@ class AudioAlignmentConfig:
 
 
 @dataclass
-class AlignmentConfig:
-    """Video alignment settings controlling EDL generation and reuse."""
-
-    mode: str = "off"
-    edl_path: str = ""
-    reference_clip: str = ""
-    start_seconds: Optional[float] = None
-    duration_seconds: Optional[float] = None
-    fps: Optional[float] = None
-    offset_tolerance: float = 0.25
-    cache_directory: str = ".cache/align"
-    tool_path: str = "tools/align_videos.py"
-
-
-@dataclass
 class OverridesConfig:
     """Clip-specific overrides for trimming and frame rate adjustments."""
 
@@ -194,4 +179,3 @@ class AppConfig:
     color: ColorConfig
     source: SourceConfig
     audio_alignment: AudioAlignmentConfig
-    alignment: AlignmentConfig

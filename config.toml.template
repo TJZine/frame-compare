@@ -42,17 +42,6 @@ confirm_with_screenshots = true
 random_seed = 2025
 frame_offset_bias = 1        # Frames to move toward zero (negative values push further away)
 
-[alignment]
-# Generate and reuse edit decision lists (EDLs) for clip alignment.
-mode = "off"                # Choices: off, keyframes
-reference_clip = ""         # Label/filename/index to force as alignment reference
-# start_seconds = 0.0        # Optional window start (seconds) for align_videos.py
-# duration_seconds = 0.0     # Optional window duration (seconds)
-# fps = 23.976               # Optional FPS hint for align_videos.py
-offset_tolerance = 0.25      # Offset jump (sec) that splits segments
-cache_directory = ".cache/align"
-tool_path = "tools/align_videos.py"
-
 [screenshots]
 # Output planning and rendering behaviour for both VapourSynth and FFmpeg writers.
 directory_name = "screens"

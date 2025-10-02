@@ -101,19 +101,12 @@ pip install -e .
 ```
 Add VapourSynth support later with `uv sync --extra vapoursynth` or `pip install 'vapoursynth>=72'` inside whichever environment you are using, and keep FFmpeg on `PATH` for the fallback renderer.
 
-## Optional: video alignment via align_videos.py
-- Enable `--align-mode keyframes` to call `tools/align_videos.py` for every non-reference clip and cache the resulting JSON under `.cache/align/<hash>.json`.
-- `--align-edl alignment.json` consumes a pre-generated mapping instead of launching the helper, while `[alignment].cache_directory` controls where newly generated JSON lands.
-- The reference clip defaults to the fastest source; set `[alignment].reference_clip` or pass `--align-reference` to lock it by label/index.
-- When an EDL is active the CLI logs segment counts and representative A→B samples, then maps every requested frame through the piecewise timeline before fetching pixels.
-- Audio offsets respect the same alignment: streams are auto-matched by language/codec/layout, the DTW hop length drops to ≈10 ms, the middle EDL segment defines the window, and you can still force a stream with `--audio-align-track label=index`.
 
 ## Features
 - Deterministic frame selection that combines quantile-based brightness picks, smoothed motion scoring, user pins, and seeded randomness, while caching metrics for reruns.
 - Configurable selection windows that respect per-clip trims, ignore/skip timing, and collapse to a safe fallback when sources disagree.
 - VapourSynth integration with optional HDR→SDR tonemapping, FFmpeg screenshot fallback, modulus-aware cropping, and placeholder creation when writers fail.
-- Audio-guided trim suggestions that write `generated.audio_offsets.toml`, auto-select matching streams, use finer DTW hops, prompt for quick visual confirmation, and accelerate alignment for mismatched transfers.
-- Piecewise video timeline alignment that caches `tools/align_videos.py` EDLs under `.cache/align/`, relying on ffprobe keyframes for robust, dependency-light matching.
+- Audio-guided trim suggestions—the only automated offset step—that write `generated.audio_offsets.toml`, auto-select matching streams, use finer DTW hops, prompt for quick visual confirmation, and accelerate alignment for mismatched transfers.
 - Automatic slow.pics uploads with webhook retries, `.url` shortcut generation, and strict naming validation so every frame lands in the right slot.
 - Rich CLI that discovers clips, deduplicates labels, applies trims/FPS overrides consistently, and cleans up rendered images after upload when requested.
 
@@ -136,11 +129,6 @@ Add VapourSynth support later with `uv sync --extra vapoursynth` or `pip install
 | `[audio_alignment].offsets_filename` | Offset cache path | Store adjustments alongside other generated data | str | `"generated.audio_offsets.toml"` | `offsets_filename = "cache/audio_offsets.toml"` | Custom paths help track multiple scenarios | File retains both suggested and manual frame counts | config.toml |
 | `[audio_alignment].frame_offset_bias` | Frame adjustment toward/away from zero | Nudge applied offsets to match trim heuristics | int | `1` | `frame_offset_bias = 0` | Positive values pull offsets toward zero; negative push them outward | Frames clamp at zero when the adjustment exceeds the measured magnitude | config.toml |
 | `[audio_alignment].confirm_with_screenshots` | Preview confirmation prompt | Disable for unattended batch runs | bool | `true` | `confirm_with_screenshots = false` | Skipping previews removes guard rails | When false, trims apply without manual inspection | config.toml |
-| `[alignment].mode` | Video alignment strategy | Turn on when clips contain inserts/deletions | str | `"off"` | `mode = "keyframes"` | Extra processing runs `tools/align_videos.py` before screenshots | Requires FFmpeg | config.toml |
-| `[alignment].reference_clip` | Fixed alignment reference | Stick to a specific label/index instead of the fastest clip | str | `""` | `reference_clip = "BBB"` | Keeps baseline stable across reruns | Defaults to the fastest clip when blank | config.toml |
-| `[alignment].offset_tolerance` | Segment split threshold | Lower to detect more timeline jumps | float | `0.25` | `offset_tolerance = 0.12` | Smaller values create more segments | Applies to cached EDL key when building cache | config.toml |
-| `[alignment].cache_directory` | EDL cache location | Move cached JSON alongside footage | str | `.cache/align` | `cache_directory = "cache/edl"` | Relocating caches can help with network shares | Relative paths resolve under the input directory | config.toml |
-| `--align-mode / --align-edl / --align-reference / --align-start / --align-dur / --align-fps / --align-offset-tol` | CLI overrides for alignment | Ad-hoc runs without editing config | CLI | `off` | `--align-mode keyframes --align-reference BBB` | Enables on-demand EDL generation and reuse | `--align-edl` consumes an existing JSON instead of regenerating | new |
 | `--audio-align-track label=index` | Manual audio stream override | Force a stream when auto-selection disagrees | CLI (repeatable) | `None` | `--audio-align-track BBB=2` | Useful for commentary/dub heavy releases | Overrides both reference and target indices | new |
 | `[screenshots].use_ffmpeg` | Renderer selection | Enable when VapourSynth is unavailable | bool | `False` | `use_ffmpeg = true` | Faster on plain installs, no advanced overlays |  | original, readme, new |
 | `[color].enable_tonemap` | HDR→SDR pipeline toggle | Disable when inputs are SDR | bool | `True` | `enable_tonemap = false` | Skipping tonemap speeds renders but loses HDR cues |  | original, readme, new |
@@ -464,20 +452,6 @@ Usage: frame_compare.py [OPTIONS]
 Options:
   --config TEXT  Path to config.toml  [default: config.toml]
   --input TEXT   Override [paths.input_dir] from config.toml
-  --align-mode [off|keyframes]
-                 Enable video EDL generation strategy (default: off)
-  --align-edl PATH
-                 Reuse an existing alignment JSON instead of generating one
-  --align-start FLOAT
-                 Window start (seconds) forwarded to align_videos.py
-  --align-dur FLOAT
-                 Window duration (seconds) forwarded to align_videos.py
-  --align-fps FLOAT
-                 FPS hint passed to align_videos.py
-  --align-offset-tol FLOAT
-                 Offset jump (seconds) that splits alignment segments
-  --align-reference TEXT
-                 Label/index that should act as the alignment reference
   --audio-align-track TEXT
                  Manual audio stream override (label=index). Repeatable.
   --help         Show this message and exit.
@@ -492,7 +466,7 @@ uv run python frame_compare.py --config config.toml --input comparison_videos
 **Outputs:**
 - Images in `screens/` (or the value of `[screenshots].directory_name`).
 - Cached metrics stored alongside the config file.
-- Alignment EDLs cached in `[alignment].cache_directory` (default `.cache/align/`) when `--align-mode` or `--align-edl` is supplied.
+- `generated.audio_offsets.toml` when `[audio_alignment].enable = true`.
 
 ### Multi-file batch (N files)
 ```bash
@@ -502,8 +476,7 @@ uv run python frame_compare.py --config config.toml --input /data/video_batches
 
 **Outputs:**
 - Per-source screenshots within `screens/<clip>/`.
-- Cached EDL JSON files under `[alignment].cache_directory` whenever timeline alignment is enabled.
-- Shared cache file `generated.compframes`.
+- Shared cache files (`generated.compframes`, `generated.audio_offsets.toml` when audio alignment runs).
 
 ### Random frame selection with seed
 ```toml
@@ -571,7 +544,7 @@ uv run python frame_compare.py --config mixed.toml --input comparison_videos
   - Add first-class output-format toggles (CSV/JSON grids) to match the documented workflow expectations.
   - add upscaling information to the overlay when performed
   - ensure tonemapping is still applied with a negative trim on an HDR clip
-  - implement alignment helper to automate frame offset calculation
+  - refine audio alignment heuristics to better handle per-scene drift
 - **Should:**
   - Provide an opt-in GPU/Vulkan path for tone mapping to reduce HDR processing time.
   - Extend motion scoring with optional optical-flow backends for smoother clips.

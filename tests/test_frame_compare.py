@@ -6,7 +6,6 @@ from click.testing import CliRunner
 
 import frame_compare
 from src.datatypes import (
-    AlignmentConfig,
     AnalysisConfig,
     AppConfig,
     AudioAlignmentConfig,
@@ -68,7 +67,6 @@ def _make_config(input_dir: Path) -> AppConfig:
         ),
         source=SourceConfig(preferred="lsmas"),
         audio_alignment=AudioAlignmentConfig(enable=False),
-        alignment=AlignmentConfig(mode="off"),
     )
 
 
@@ -186,7 +184,6 @@ def test_label_dedupe_preserves_short_labels(tmp_path, monkeypatch, runner):
         overrides=OverridesConfig(),
         source=SourceConfig(),
         audio_alignment=AudioAlignmentConfig(enable=False),
-        alignment=AlignmentConfig(mode="off"),
     )
 
     monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
@@ -302,7 +299,6 @@ def test_cli_input_override_and_cleanup(tmp_path, monkeypatch, runner):
         overrides=OverridesConfig(),
         source=SourceConfig(),
         audio_alignment=AudioAlignmentConfig(enable=False),
-        alignment=AlignmentConfig(mode="off"),
     )
 
     monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)

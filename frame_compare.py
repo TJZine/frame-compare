@@ -2,19 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import builtins
-import hashlib
-import json
 import logging
 import math
 import re
-import shlex
-import subprocess
 import sys
 import shutil
 import webbrowser
 import traceback
 from collections import Counter, defaultdict
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 import datetime as _dt
 from pathlib import Path
 from string import Template
@@ -100,540 +96,6 @@ class _ClipPlan:
     has_trim_end_override: bool = False
     alignment_frames: int = 0
     alignment_status: str = ""
-    is_alignment_reference: bool = False
-    alignment_segments: Optional[Sequence["_AlignmentSegment"]] = None
-    alignment_cache_path: Optional[Path] = None
-    alignment_source: str = ""
-    alignment_mapper: Optional["_FrameMapper"] = None
-
-
-@dataclass
-class _AlignmentSegment:
-    """Piecewise segment mapping from reference timeline to target timeline."""
-
-    a_start: float
-    a_end: float
-    b_start: float
-    slope: float
-    offset: float
-
-
-@dataclass
-class _AlignmentOptions:
-    mode: str
-    reference_hint: str
-    edl_path: Optional[Path]
-    start_seconds: Optional[float]
-    duration_seconds: Optional[float]
-    fps: Optional[float]
-    offset_tolerance: float
-    cache_directory: Path
-    tool_path: Path
-
-
-@dataclass
-class _FrameMapper:
-    reference_fps: float
-    reference_trim: int
-    target_fps: float
-    target_trim: int
-    segments: Sequence[_AlignmentSegment]
-
-    def map_time(self, a_time: float) -> tuple[float, bool]:
-        if not self.segments:
-            return a_time, False
-        segment = None
-        for seg in self.segments:
-            if seg.a_start <= a_time <= seg.a_end:
-                segment = seg
-                break
-        clamped = False
-        if segment is None:
-            if a_time < self.segments[0].a_start:
-                segment = self.segments[0]
-                a_time = segment.a_start
-                clamped = True
-            else:
-                segment = self.segments[-1]
-                a_time = segment.a_end
-                clamped = True
-        b_time = segment.slope * a_time + segment.offset
-        return b_time, clamped
-
-    def map_frame(self, frame_idx: int) -> tuple[int, float, bool]:
-        if self.reference_fps <= 0 or self.target_fps <= 0:
-            return frame_idx, frame_idx / max(self.reference_fps, 1.0), True
-        a_time = (frame_idx + self.reference_trim) / self.reference_fps
-        b_time, clamped = self.map_time(a_time)
-        target_frame = b_time * self.target_fps - self.target_trim
-        mapped = int(round(target_frame))
-        if mapped < 0:
-            mapped = 0
-            clamped = True
-        return mapped, b_time, clamped
-
-
-def _alignment_tool_signature(tool_path: Path) -> str:
-    try:
-        data = tool_path.read_bytes()
-    except OSError:
-        return "missing"
-    return hashlib.sha1(data).hexdigest()
-
-
-def _fingerprint_path(path: Path) -> str:
-    try:
-        stat = path.stat()
-    except OSError:
-        return f"{path.resolve()}|missing"
-    return f"{path.resolve()}|{stat.st_size}|{stat.st_mtime_ns}"
-
-
-def _alignment_cache_key(
-    reference_path: Path,
-    target_path: Path,
-    options: _AlignmentOptions,
-    tool_signature: str,
-) -> str:
-    seed = "::".join(
-        [
-            _fingerprint_path(reference_path),
-            _fingerprint_path(target_path),
-            options.mode,
-            str(options.start_seconds) if options.start_seconds is not None else "",
-            str(options.duration_seconds) if options.duration_seconds is not None else "",
-            str(options.fps) if options.fps is not None else "",
-            f"offset_tol={options.offset_tolerance}",
-            f"tool={tool_signature}",
-        ]
-    )
-    return hashlib.sha1(seed.encode("utf-8")).hexdigest()
-
-
-def _load_alignment_segments(path: Path) -> List[_AlignmentSegment]:
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return []
-    except json.JSONDecodeError as exc:
-        logger.warning("Failed to parse alignment JSON %s: %s", path, exc)
-        return []
-    segments: List[_AlignmentSegment] = []
-    if isinstance(payload, list):
-        for item in payload:
-            if not isinstance(item, dict):
-                continue
-            try:
-                a_start = float(item["a_start"])
-                a_end = float(item["a_end"])
-                b_start = float(item["b_start"])
-                slope = float(item["slope"])
-            except (KeyError, TypeError, ValueError):
-                continue
-            offset = b_start - slope * a_start
-            segments.append(
-                _AlignmentSegment(
-                    a_start=a_start,
-                    a_end=a_end,
-                    b_start=b_start,
-                    slope=slope,
-                    offset=offset,
-                )
-            )
-    return segments
-
-
-def _format_command(cmd: Sequence[str]) -> str:
-    try:
-        return shlex.join(list(cmd))
-    except AttributeError:  # pragma: no cover - Python <3.8 fallback
-        return " ".join(cmd)
-
-
-def _plan_fps(plan: _ClipPlan) -> float:
-    if plan.effective_fps and plan.effective_fps[1]:
-        return plan.effective_fps[0] / plan.effective_fps[1]
-    return 0.0
-
-
-def _parse_audio_track_overrides(entries: Iterable[str]) -> Dict[str, int]:
-    mapping: Dict[str, int] = {}
-    for entry in entries:
-        if "=" not in entry:
-            continue
-        key, value = entry.split("=", 1)
-        key = key.strip().lower()
-        if not key:
-            continue
-        try:
-            mapping[key] = int(value.strip())
-        except ValueError:
-            continue
-    return mapping
-
-
-def _is_cache_fresh(cache_path: Path, reference_path: Path, target_path: Path) -> bool:
-    try:
-        cache_mtime = cache_path.stat().st_mtime
-    except OSError:
-        return False
-    try:
-        ref_mtime = reference_path.stat().st_mtime
-        tgt_mtime = target_path.stat().st_mtime
-    except OSError:
-        return False
-    return cache_mtime >= ref_mtime and cache_mtime >= tgt_mtime
-
-
-def _run_alignment_tool(
-    command: List[str],
-    *,
-    cache_path: Path,
-    reference_name: str,
-    target_name: str,
-) -> tuple[bool, List[str]]:
-    return _run_alignment_tool_with_progress(
-        command,
-        cache_path=cache_path,
-        reference_name=reference_name,
-        target_name=target_name,
-    )
-
-
-def _run_alignment_tool_with_progress(
-    command: List[str],
-    *,
-    cache_path: Path,
-    reference_name: str,
-    target_name: str,
-    progress_callback: Callable[[float, bool], None] | None = None,
-    poll_interval: float = 0.25,
-) -> tuple[bool, List[str]]:
-    attempts: List[str] = []
-    cmd = list(command)
-    attempts.append(_format_command(cmd))
-    completed = _execute_with_progress(
-        cmd,
-        progress_callback=progress_callback,
-        poll_interval=poll_interval,
-    )
-    if completed.returncode == 0:
-        return True, attempts
-
-    stderr = completed.stderr.strip()
-    stdout = completed.stdout.strip()
-    message_lines = [line for line in (stderr, stdout) if line]
-    if message_lines:
-        logger.warning("Alignment tool failed for %s vs %s: %s", reference_name, target_name, " | ".join(message_lines))
-    return False, attempts
-
-
-def _execute_with_progress(
-    cmd: List[str],
-    *,
-    progress_callback: Callable[[float, bool], None] | None,
-    poll_interval: float,
-) -> subprocess.CompletedProcess:
-    start = time.perf_counter()
-    process = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    stdout_data = ""
-    stderr_data = ""
-    try:
-        while True:
-            ret = process.poll()
-            if ret is not None:
-                break
-            if progress_callback is not None:
-                progress_callback(time.perf_counter() - start, False)
-            time.sleep(poll_interval)
-        stdout_data, stderr_data = process.communicate()
-    except Exception:
-        process.kill()
-        stdout_data, stderr_data = process.communicate()
-        raise
-    finally:
-        if progress_callback is not None:
-            progress_callback(time.perf_counter() - start, False)
-
-    returncode = process.returncode if process.returncode is not None else 0
-    return subprocess.CompletedProcess(cmd, returncode, stdout_data, stderr_data)
-
-
-def _prepare_video_alignment(
-    plans: Sequence[_ClipPlan],
-    analyze_path: Path,
-    options: _AlignmentOptions,
-) -> None:
-    for plan in plans:
-        plan.is_alignment_reference = False
-        plan.alignment_segments = None
-        plan.alignment_cache_path = None
-        plan.alignment_source = ""
-
-    if len(plans) < 2:
-        return
-
-    reference_plan = _resolve_alignment_reference(plans, analyze_path, options.reference_hint)
-    reference_plan.is_alignment_reference = True
-    for plan in plans:
-        if plan is not reference_plan:
-            plan.is_alignment_reference = False
-
-    targets = [plan for plan in plans if plan is not reference_plan]
-    if not targets:
-        return
-
-    if options.edl_path is not None:
-        segments = _load_alignment_segments(options.edl_path)
-        if segments:
-            target = targets.pop(0)
-            target.alignment_segments = tuple(segments)
-            target.alignment_cache_path = options.edl_path
-            target.alignment_source = "external"
-            ref_fps = _plan_fps(reference_plan)
-            tgt_fps = _plan_fps(target)
-            target.alignment_mapper = _FrameMapper(
-                reference_fps=ref_fps,
-                reference_trim=reference_plan.trim_start,
-                target_fps=tgt_fps,
-                target_trim=target.trim_start,
-                segments=target.alignment_segments,
-            )
-            if any(abs(seg.slope - 1.0) > 0.001 for seg in target.alignment_segments):
-                print(
-                    f"[yellow]Alignment warning:[/yellow] slope deviation detected for "
-                    f"{escape(target.path.name)}"
-                )
-            print(
-                f"[cyan]Alignment EDL:[/cyan] {escape(reference_plan.path.name)} → "
-                f"{escape(target.path.name)} (external {options.edl_path})"
-            )
-            if target.alignment_segments:
-                first_seg = target.alignment_segments[0]
-                last_seg = target.alignment_segments[-1]
-                last_b_time = last_seg.slope * last_seg.a_end + last_seg.offset
-                print(
-                    f"  Segments: {len(target.alignment_segments)} "
-                    f"(first A={first_seg.a_start:.3f}s→B={first_seg.b_start:.3f}s, "
-                    f"last A={last_seg.a_end:.3f}s→B={last_b_time:.3f}s)"
-                )
-            mapper = target.alignment_mapper
-            if mapper is not None and target.alignment_segments:
-                print("  Samples:")
-                for seg in list(target.alignment_segments)[:5]:
-                    b_time, _ = mapper.map_time(seg.a_start)
-                    print(
-                        "   "
-                        f"A={seg.a_start:.3f}s → B={b_time:.3f}s slope={seg.slope:.6f}"
-                    )
-        else:
-            logger.warning("Provided alignment EDL %s was empty", options.edl_path)
-        if not targets or options.mode == "off":
-            return
-
-    if options.mode not in {"off", "keyframes"}:
-        logger.warning("Unknown video alignment mode '%s'; defaulting to keyframes", options.mode)
-        options = replace(options, mode="keyframes")
-
-    if options.mode == "off":
-        return
-
-    if not options.tool_path.exists():
-        logger.warning("Alignment tool not found at %s; skipping video alignment", options.tool_path)
-        return
-
-    try:
-        options.cache_directory.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        logger.warning("Failed to create alignment cache directory %s: %s", options.cache_directory, exc)
-        return
-
-    tool_signature = _alignment_tool_signature(options.tool_path)
-
-    work_targets = list(targets)
-    if not work_targets:
-        return
-
-    with Progress(
-        SpinnerColumn(),
-        TextColumn('{task.description}'),
-        BarColumn(),
-        TextColumn('{task.completed}/{task.total}'),
-        TextColumn('{task.percentage:>6.02f}%'),
-        TextColumn('{task.fields[rate]}'),
-        TextColumn('{task.fields[elapsed]}'),
-        TimeRemainingColumn(),
-        transient=False,
-    ) as alignment_progress:
-        task_id = alignment_progress.add_task(
-            'Generating video alignment',
-            total=len(work_targets),
-            rate='   0.00 jobs/s',
-            elapsed='   0.0s',
-        )
-        processed = 0
-        start_time = time.perf_counter()
-        job_start = start_time
-
-        def _update_alignment_progress(*, job_elapsed: Optional[float] = None) -> None:
-            elapsed_total = time.perf_counter() - start_time
-            rate_val = processed / elapsed_total if elapsed_total > 0 else 0.0
-            elapsed_for_job = job_elapsed if job_elapsed is not None else time.perf_counter() - job_start
-            alignment_progress.update(
-                task_id,
-                completed=min(processed, len(work_targets)),
-                rate=f"{rate_val:7.2f} jobs/s",
-                elapsed=f"{elapsed_for_job:7.1f}s",
-            )
-
-        for target in work_targets:
-            try:
-                job_start = time.perf_counter()
-                alignment_progress.update(
-                    task_id,
-                    description=f"Aligning {target.path.name}",
-                    elapsed='   0.0s',
-                )
-
-                def _alignment_pulse(elapsed: float, reset: bool) -> None:
-                    nonlocal job_start
-                    if reset:
-                        job_start = time.perf_counter()
-                        elapsed = 0.0
-                    alignment_progress.update(
-                        task_id,
-                        description=f"Aligning {target.path.name}",
-                        elapsed=f"{elapsed:7.1f}s",
-                    )
-
-                cache_key = _alignment_cache_key(reference_plan.path, target.path, options, tool_signature)
-                cache_path = options.cache_directory / f"{cache_key}.json"
-
-                fps_hint = options.fps
-                if fps_hint is None:
-                    if reference_plan.effective_fps and reference_plan.effective_fps[1]:
-                        fps_hint = reference_plan.effective_fps[0] / reference_plan.effective_fps[1]
-                    elif target.effective_fps and target.effective_fps[1]:
-                        fps_hint = target.effective_fps[0] / target.effective_fps[1]
-
-                command = [
-                    sys.executable,
-                    str(options.tool_path),
-                    str(reference_plan.path),
-                    str(target.path),
-                    "--out",
-                    str(cache_path),
-                    "--use-keyframes",
-                    "--offset-tol",
-                    f"{options.offset_tolerance}",
-                ]
-
-                if fps_hint is not None and fps_hint > 0:
-                    command.extend(["--fps", f"{fps_hint}"])
-                if options.start_seconds is not None:
-                    command.extend(["--start", f"{options.start_seconds}"])
-                if options.duration_seconds is not None and options.duration_seconds > 0:
-                    command.extend(["--dur", f"{options.duration_seconds}"])
-                status = "miss"
-                segments: List[_AlignmentSegment] = []
-
-                if cache_path.exists() and _is_cache_fresh(cache_path, reference_plan.path, target.path):
-                    segments = _load_alignment_segments(cache_path)
-                    if segments:
-                        status = "cache"
-                if not segments:
-                    ok, attempts = _run_alignment_tool_with_progress(
-                        command,
-                        cache_path=cache_path,
-                        reference_name=reference_plan.path.name,
-                        target_name=target.path.name,
-                        progress_callback=_alignment_pulse,
-                    )
-                    used_cmd = attempts[-1] if attempts else _format_command(command)
-                    if not ok:
-                        print(
-                            f"[yellow]Alignment skipped:[/yellow] {escape(reference_plan.path.name)} → "
-                            f"{escape(target.path.name)} (tool failed)"
-                        )
-                        logger.debug("Alignment attempts for %s -> %s: %s", reference_plan.path, target.path, attempts)
-                        continue
-                    segments = _load_alignment_segments(cache_path)
-                    if not segments:
-                        print(
-                            f"[yellow]Alignment skipped:[/yellow] {escape(reference_plan.path.name)} → "
-                            f"{escape(target.path.name)} (no segments)"
-                        )
-                        continue
-                    status = "generated" if len(attempts) <= 1 else "generated-fallback"
-                    command_repr = used_cmd
-                else:
-                    command_repr = _format_command(command)
-
-                target.alignment_segments = tuple(segments)
-                target.alignment_cache_path = cache_path
-                target.alignment_source = status
-                ref_fps = _plan_fps(reference_plan)
-                tgt_fps = _plan_fps(target)
-                target.alignment_mapper = _FrameMapper(
-                    reference_fps=ref_fps,
-                    reference_trim=reference_plan.trim_start,
-                    target_fps=tgt_fps,
-                    target_trim=target.trim_start,
-                    segments=target.alignment_segments,
-                )
-
-                warn_slope = False
-                for seg in target.alignment_segments:
-                    if abs(seg.slope - 1.0) > 0.001:
-                        warn_slope = True
-                        break
-                if warn_slope:
-                    print(
-                        f"[yellow]Alignment warning:[/yellow] slope deviation detected for "
-                        f"{escape(target.path.name)}"
-                    )
-
-                print(
-                    f"[cyan]Alignment ready:[/cyan] {escape(reference_plan.path.name)} → "
-                    f"{escape(target.path.name)}"
-                )
-                print(f"  Command: {command_repr}")
-                print(f"  Cache: {cache_path} ({status})")
-                if target.alignment_segments:
-                    first_seg = target.alignment_segments[0]
-                    last_seg = target.alignment_segments[-1]
-                    last_b_time = last_seg.slope * last_seg.a_end + last_seg.offset
-                    print(
-                        f"  Segments: {len(target.alignment_segments)} "
-                        f"(first A={first_seg.a_start:.3f}s→B={first_seg.b_start:.3f}s, "
-                        f"last A={last_seg.a_end:.3f}s→B={last_b_time:.3f}s)"
-                    )
-
-                mapper = target.alignment_mapper
-                if mapper is not None and target.alignment_segments:
-                    sample_segments = list(target.alignment_segments)[:5]
-                    print("  Samples:")
-                    for seg in sample_segments:
-                        b_time, _ = mapper.map_time(seg.a_start)
-                        print(
-                            "   "
-                            f"A={seg.a_start:.3f}s → B={b_time:.3f}s slope={seg.slope:.6f}"
-                        )
-            finally:
-                processed += 1
-                _update_alignment_progress(job_elapsed=time.perf_counter() - job_start)
-                alignment_progress.update(
-                    task_id,
-                    description='Generating video alignment',
-                )
-
-        if processed < len(work_targets):
-            _update_alignment_progress()
 
 
 @dataclass
@@ -734,6 +196,22 @@ def _dedupe_labels(
     for idx, meta in enumerate(metadata):
         if not (meta.get("label") or "").strip():
             meta["label"] = files[idx].name
+
+
+def _parse_audio_track_overrides(entries: Iterable[str]) -> Dict[str, int]:
+    mapping: Dict[str, int] = {}
+    for entry in entries:
+        if "=" not in entry:
+            continue
+        key, value = entry.split("=", 1)
+        key = key.strip().lower()
+        if not key:
+            continue
+        try:
+            mapping[key] = int(value.strip())
+        except ValueError:
+            continue
+    return mapping
 
 
 def _first_non_empty(metadata: Sequence[Dict[str, str]], key: str) -> str:
@@ -1180,7 +658,6 @@ def _maybe_apply_audio_alignment(
     cfg: AppConfig,
     analyze_path: Path,
     root: Path,
-    alignment_options: _AlignmentOptions,
     audio_track_overrides: Mapping[str, int],
 ) -> _AudioAlignmentSummary | None:
     audio_cfg = cfg.audio_alignment
@@ -1317,26 +794,10 @@ def _maybe_apply_audio_alignment(
     try:
         base_start = audio_cfg.start_seconds
         base_duration = audio_cfg.duration_seconds
-        if alignment_options.start_seconds is not None:
-            base_start = alignment_options.start_seconds
-        if alignment_options.duration_seconds is not None:
-            base_duration = alignment_options.duration_seconds
 
         hop_length = max(1, min(audio_cfg.hop_length, max(1, audio_cfg.sample_rate // 100)))
 
         window_overrides: Dict[Path, Tuple[Optional[float], Optional[float]]] = {}
-        for target in targets:
-            segments = target.alignment_segments
-            if segments:
-                segment = segments[len(segments) // 2]
-                segment_length = max(0.0, segment.a_end - segment.a_start)
-                if segment_length > 0:
-                    desired_duration = alignment_options.duration_seconds
-                    if desired_duration is None or desired_duration <= 0:
-                        desired_duration = base_duration if (base_duration or 0) > 0 else segment_length
-                    desired_duration = min(segment_length, desired_duration)
-                    window_start = segment.a_start + max(0.0, (segment_length - desired_duration) / 2)
-                    window_overrides[target.path] = (window_start, desired_duration)
 
         measurements: List[audio_alignment.AlignmentMeasurement]
         negative_offsets: Dict[str, bool] = {}
@@ -1703,17 +1164,16 @@ def _confirm_alignment_with_screenshots(
     initial_frames = _pick_preview_frames(reference_clip, 2, cfg.audio_alignment.random_seed)
 
     try:
-        generated = generate_screenshots(
-            clips,
-            initial_frames,
-            [str(plan.path) for plan in plans],
-            [plan.metadata for plan in plans],
-            preview_dir,
-            cfg.screenshots,
-            cfg.color,
-            trim_offsets=[plan.trim_start for plan in plans],
-            alignment_maps=[plan.alignment_mapper for plan in plans],
-        )
+            generated = generate_screenshots(
+                clips,
+                initial_frames,
+                [str(plan.path) for plan in plans],
+                [plan.metadata for plan in plans],
+                preview_dir,
+                cfg.screenshots,
+                cfg.color,
+                trim_offsets=[plan.trim_start for plan in plans],
+            )
     except ScreenshotError as exc:
         raise CLIAppError(
             f"Alignment preview failed: {exc}",
@@ -1755,7 +1215,6 @@ def _confirm_alignment_with_screenshots(
             cfg.screenshots,
             cfg.color,
             trim_offsets=[plan.trim_start for plan in plans],
-            alignment_maps=[plan.alignment_mapper for plan in plans],
         )
     except ScreenshotError as exc:
         raise CLIAppError(
@@ -1797,13 +1256,6 @@ def run_cli(
     config_path: str,
     input_dir: str | None = None,
     *,
-    align_mode: str | None = None,
-    align_edl: Path | None = None,
-    align_start: float | None = None,
-    align_duration: float | None = None,
-    align_fps: float | None = None,
-    align_offset_tol: float | None = None,
-    align_reference: str | None = None,
     audio_track_overrides: Iterable[str] | None = None,
 ) -> RunResult:
     config_location = Path(config_path).expanduser()
@@ -1845,56 +1297,6 @@ def run_cli(
             f"Input directory not found: {root}",
             rich_message=f"[red]Input directory not found:[/red] {root}",
         )
-
-    project_root = Path(__file__).resolve().parent
-    alignment_cfg = cfg.alignment
-    resolved_mode = (align_mode or alignment_cfg.mode or "off").strip().lower()
-    if resolved_mode == "keyframes+scenes":
-        logger.warning(
-            "Alignment mode 'keyframes+scenes' is deprecated; falling back to 'keyframes'."
-        )
-        resolved_mode = "keyframes"
-    if resolved_mode not in {"off", "keyframes"}:
-        logger.warning("Unknown alignment mode '%s'; defaulting to off", resolved_mode)
-        resolved_mode = "off"
-
-    if align_edl is not None:
-        edl_path = align_edl.resolve()
-    elif alignment_cfg.edl_path.strip():
-        candidate = Path(alignment_cfg.edl_path.strip()).expanduser()
-        if not candidate.is_absolute():
-            candidate = (root / candidate).resolve()
-        else:
-            candidate = candidate.resolve()
-        edl_path = candidate
-    else:
-        edl_path = None
-
-    start_seconds = align_start if align_start is not None else alignment_cfg.start_seconds
-    duration_seconds = align_duration if align_duration is not None else alignment_cfg.duration_seconds
-    fps_hint = align_fps if align_fps is not None else alignment_cfg.fps
-    offset_tol = align_offset_tol if align_offset_tol is not None else alignment_cfg.offset_tolerance
-    reference_hint = align_reference if align_reference is not None else alignment_cfg.reference_clip
-
-    cache_dir = Path(alignment_cfg.cache_directory).expanduser()
-    if not cache_dir.is_absolute():
-        cache_dir = (root / cache_dir).resolve()
-
-    tool_path = Path(alignment_cfg.tool_path).expanduser()
-    if not tool_path.is_absolute():
-        tool_path = (project_root / alignment_cfg.tool_path).resolve()
-
-    alignment_options = _AlignmentOptions(
-        mode=resolved_mode,
-        reference_hint=reference_hint,
-        edl_path=edl_path,
-        start_seconds=start_seconds,
-        duration_seconds=duration_seconds,
-        fps=fps_hint,
-        offset_tolerance=offset_tol,
-        cache_directory=cache_dir,
-        tool_path=tool_path,
-    )
 
     audio_track_override_map = _parse_audio_track_overrides(audio_track_overrides or [])
 
@@ -2080,7 +1482,6 @@ def run_cli(
         cfg,
         analyze_path,
         root,
-        alignment_options,
         audio_track_override_map,
     )
     if alignment_summary is not None:
@@ -2096,8 +1497,6 @@ def run_cli(
     clips = [plan.clip for plan in plans]
     if any(clip is None for clip in clips):
         raise CLIAppError("Clip initialisation failed")
-
-    _prepare_video_alignment(plans, analyze_path, alignment_options)
 
     _confirm_alignment_with_screenshots(plans, alignment_summary, cfg, root)
 
@@ -2279,7 +1678,6 @@ def run_cli(
                     cfg.color,
                     trim_offsets=[plan.trim_start for plan in plans],
                     progress_callback=advance_render,
-                    alignment_maps=[plan.alignment_mapper for plan in plans],
                 )
 
                 if processed < total_screens:
@@ -2299,7 +1697,6 @@ def run_cli(
                 cfg.color,
                 trim_offsets=[plan.trim_start for plan in plans],
                 frame_labels=frame_categories,
-                alignment_maps=[plan.alignment_mapper for plan in plans],
             )
     except ScreenshotError as exc:
         raise CLIAppError(
@@ -2383,55 +1780,6 @@ def run_cli(
 @click.option("--config", "config_path", default="config.toml", show_default=True, help="Path to config.toml")
 @click.option("--input", "input_dir", default=None, help="Override [paths.input_dir] from config.toml")
 @click.option(
-    "--align-mode",
-    "align_mode_option",
-    type=click.Choice(["off", "keyframes"], case_sensitive=False),
-    default=None,
-    help="Override alignment mode (off/keyframes).",
-)
-@click.option(
-    "--align-edl",
-    "align_edl_option",
-    type=click.Path(path_type=Path, exists=True, dir_okay=False),
-    default=None,
-    help="Use an existing alignment EDL JSON instead of running align_videos.py.",
-)
-@click.option(
-    "--align-start",
-    "align_start_option",
-    type=float,
-    default=None,
-    help="Window start (seconds) passed to align_videos.py.",
-)
-@click.option(
-    "--align-dur",
-    "align_duration_option",
-    type=float,
-    default=None,
-    help="Window duration (seconds) passed to align_videos.py.",
-)
-@click.option(
-    "--align-fps",
-    "align_fps_option",
-    type=float,
-    default=None,
-    help="Override FPS hint passed to align_videos.py.",
-)
-@click.option(
-    "--align-offset-tol",
-    "align_offset_tol_option",
-    type=float,
-    default=None,
-    help="Offset tolerance (seconds) for segment splitting in align_videos.py.",
-)
-@click.option(
-    "--align-reference",
-    "align_reference_option",
-    type=str,
-    default=None,
-    help="Reference clip for video alignment (matches labels, filenames, or index).",
-)
-@click.option(
     "--audio-align-track",
     "audio_align_track_option",
     type=str,
@@ -2442,26 +1790,12 @@ def main(
     config_path: str,
     input_dir: str | None,
     *,
-    align_mode_option: str | None,
-    align_edl_option: Path | None,
-    align_start_option: float | None,
-    align_duration_option: float | None,
-    align_fps_option: float | None,
-    align_offset_tol_option: float | None,
-    align_reference_option: str | None,
     audio_align_track_option: tuple[str, ...],
 ) -> None:
     try:
         result = run_cli(
             config_path,
             input_dir,
-            align_mode=align_mode_option,
-            align_edl=align_edl_option,
-            align_start=align_start_option,
-            align_duration=align_duration_option,
-            align_fps=align_fps_option,
-            align_offset_tol=align_offset_tol_option,
-            align_reference=align_reference_option,
             audio_track_overrides=audio_align_track_option,
         )
     except CLIAppError as exc:

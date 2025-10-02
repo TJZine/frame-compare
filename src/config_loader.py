@@ -7,7 +7,6 @@ from dataclasses import fields
 from typing import Any, Dict
 
 from .datatypes import (
-    AlignmentConfig,
     AnalysisConfig,
     AppConfig,
     AudioAlignmentConfig,
@@ -111,7 +110,6 @@ def load_config(path: str) -> AppConfig:
         audio_alignment=_sanitize_section(
             raw.get("audio_alignment", {}), "audio_alignment", AudioAlignmentConfig
         ),
-        alignment=_sanitize_section(raw.get("alignment", {}), "alignment", AlignmentConfig),
     )
 
     if app.analysis.step < 1:
@@ -205,24 +203,5 @@ def load_config(path: str) -> AppConfig:
     _validate_trim(app.overrides.trim, "overrides.trim")
     _validate_trim(app.overrides.trim_end, "overrides.trim_end")
     _validate_change_fps(app.overrides.change_fps)
-
-    alignment_cfg = app.alignment
-    allowed_modes = {"off", "keyframes", "keyframes+scenes"}
-    mode_normalized = alignment_cfg.mode.strip().lower()
-    if mode_normalized not in allowed_modes:
-        raise ConfigError("alignment.mode must be 'off', 'keyframes', or 'keyframes+scenes'")
-    alignment_cfg.mode = mode_normalized
-    if alignment_cfg.offset_tolerance <= 0:
-        raise ConfigError("alignment.offset_tolerance must be > 0")
-    if alignment_cfg.start_seconds is not None and alignment_cfg.start_seconds < 0:
-        raise ConfigError("alignment.start_seconds must be >= 0")
-    if alignment_cfg.duration_seconds is not None and alignment_cfg.duration_seconds <= 0:
-        raise ConfigError("alignment.duration_seconds must be > 0")
-    if alignment_cfg.fps is not None and alignment_cfg.fps <= 0:
-        raise ConfigError("alignment.fps must be > 0")
-    if not alignment_cfg.cache_directory.strip():
-        raise ConfigError("alignment.cache_directory must be set")
-    if not alignment_cfg.tool_path.strip():
-        raise ConfigError("alignment.tool_path must be set")
 
     return app
