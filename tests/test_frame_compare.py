@@ -893,3 +893,109 @@ def test_audio_alignment_block_and_json(tmp_path, monkeypatch, runner):
     assert audio_json["confirmed"] == "auto"
     tonemap_json = payload["tonemap"]
     assert tonemap_json["overlay_mode"] == "diagnostic"
+
+
+def test_audio_alignment_default_duration_avoids_zero_window(tmp_path, monkeypatch, runner):
+    reference_path = tmp_path / "ClipA.mkv"
+    target_path = tmp_path / "ClipB.mkv"
+    for file in (reference_path, target_path):
+        file.write_bytes(b"data")
+
+    cfg = _make_config(tmp_path)
+    cfg.audio_alignment.enable = True
+    cfg.audio_alignment.confirm_with_screenshots = False
+    cfg.audio_alignment.max_offset_seconds = 5.0
+    cfg.audio_alignment.start_seconds = None
+    cfg.audio_alignment.duration_seconds = None
+
+    monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
+
+    def fake_parse(name: str, **_kwargs):
+        if name.startswith("ClipA"):
+            return {"label": "Clip A", "file_name": name}
+        return {"label": "Clip B", "file_name": name}
+
+    monkeypatch.setattr(frame_compare, "parse_filename_metadata", fake_parse)
+    monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit: None)
+
+    def fake_init_clip(path, *, trim_start=0, trim_end=None, fps_map=None, cache_dir=None):
+        return types.SimpleNamespace(
+            path=Path(path),
+            width=1920,
+            height=1080,
+            fps_num=24000,
+            fps_den=1001,
+            num_frames=24000,
+        )
+
+    monkeypatch.setattr(frame_compare.vs_core, "init_clip", fake_init_clip)
+
+    monkeypatch.setattr(
+        frame_compare,
+        "select_frames",
+        lambda *args, **kwargs: [42],
+    )
+
+    def fake_generate(clips, frames, files, metadata, out_dir, cfg_screens, color_cfg, **kwargs):
+        out_dir.mkdir(parents=True, exist_ok=True)
+        return [str(out_dir / "shot.png")]
+
+    monkeypatch.setattr(frame_compare, "generate_screenshots", fake_generate)
+
+    def fake_probe(path: Path):
+        if Path(path) == reference_path:
+            return [
+                AudioStreamInfo(
+                    index=0,
+                    language="eng",
+                    codec_name="aac",
+                    channels=2,
+                    channel_layout="stereo",
+                    sample_rate=48000,
+                    bitrate=192000,
+                    is_default=True,
+                    is_forced=False,
+                )
+            ]
+        return [
+            AudioStreamInfo(
+                index=1,
+                language="jpn",
+                codec_name="aac",
+                channels=2,
+                channel_layout="stereo",
+                sample_rate=48000,
+                bitrate=192000,
+                is_default=False,
+                is_forced=False,
+            )
+        ]
+
+    monkeypatch.setattr(frame_compare.audio_alignment, "probe_audio_streams", fake_probe)
+
+    measurement = AlignmentMeasurement(
+        file=target_path,
+        offset_seconds=0.1,
+        frames=3,
+        correlation=0.9,
+        reference_fps=24.0,
+        target_fps=24.0,
+    )
+
+    captured_kwargs: dict[str, object] = {}
+
+    def fake_measure(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return [measurement]
+
+    monkeypatch.setattr(frame_compare.audio_alignment, "measure_offsets", fake_measure)
+    monkeypatch.setattr(frame_compare.audio_alignment, "load_offsets", lambda *_args, **_kwargs: ({}, {}))
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "update_offsets_file",
+        lambda *_args, **_kwargs: ({target_path.name: 3}, {target_path.name: "auto"}),
+    )
+
+    result = runner.invoke(frame_compare.main, ["--config", "dummy", "--no-color"], catch_exceptions=False)
+    assert result.exit_code == 0
+    assert captured_kwargs.get("duration_seconds") is None

@@ -908,10 +908,11 @@ def _maybe_apply_audio_alignment(
     reference_fps_tuple = reference_plan.effective_fps or reference_plan.source_fps
     reference_fps = _fps_to_float(reference_fps_tuple)
     max_offset = float(audio_cfg.max_offset_seconds)
-    duration_seconds = float(audio_cfg.duration_seconds or 0.0)
+    raw_duration = audio_cfg.duration_seconds if audio_cfg.duration_seconds is not None else None
+    duration_seconds = float(raw_duration) if raw_duration is not None else None
     start_seconds = float(audio_cfg.start_seconds or 0.0)
     search_text = f"±{max_offset:.2f}s"
-    window_text = f"{duration_seconds:.2f}s" if duration_seconds > 0 else "auto"
+    window_text = f"{duration_seconds:.2f}s" if duration_seconds is not None else "auto"
     start_text = f"{start_seconds:.2f}s"
     display_data.estimation_line = (
         f"Estimating audio offsets … fps={reference_fps:.3f} "
@@ -928,7 +929,11 @@ def _maybe_apply_audio_alignment(
 
     try:
         base_start = float(audio_cfg.start_seconds or 0.0)
-        base_duration = float(audio_cfg.duration_seconds or 0.0)
+        base_duration_param: Optional[float]
+        if audio_cfg.duration_seconds is None:
+            base_duration_param = None
+        else:
+            base_duration_param = float(audio_cfg.duration_seconds)
         hop_length = max(1, min(audio_cfg.hop_length, max(1, audio_cfg.sample_rate // 100)))
 
         measurements: List[audio_alignment.AlignmentMeasurement]
@@ -973,7 +978,7 @@ def _maybe_apply_audio_alignment(
                 sample_rate=audio_cfg.sample_rate,
                 hop_length=hop_length,
                 start_seconds=base_start,
-                duration_seconds=base_duration,
+                duration_seconds=base_duration_param,
                 reference_stream=reference_stream_index,
                 target_streams=target_stream_indices,
                 progress_callback=_advance_audio,
