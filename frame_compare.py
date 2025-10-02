@@ -797,8 +797,6 @@ def _maybe_apply_audio_alignment(
 
         hop_length = max(1, min(audio_cfg.hop_length, max(1, audio_cfg.sample_rate // 100)))
 
-        window_overrides: Dict[Path, Tuple[Optional[float], Optional[float]]] = {}
-
         measurements: List[audio_alignment.AlignmentMeasurement]
         negative_offsets: Dict[str, bool] = {}
 
@@ -840,7 +838,6 @@ def _maybe_apply_audio_alignment(
                     duration_seconds=base_duration,
                     reference_stream=reference_stream_index,
                     target_streams=target_stream_indices,
-                    window_overrides=window_overrides,
                     progress_callback=_advance_audio,
                 )
 
@@ -860,7 +857,6 @@ def _maybe_apply_audio_alignment(
                 duration_seconds=base_duration,
                 reference_stream=reference_stream_index,
                 target_streams=target_stream_indices,
-                window_overrides=window_overrides,
             )
 
         frame_bias = int(audio_cfg.frame_offset_bias or 0)
@@ -1159,7 +1155,21 @@ def _confirm_alignment_with_screenshots(
 
     timestamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     base_dir = Path(cfg.screenshots.directory_name)
-    preview_dir = (root / base_dir / "audio_alignment" / f"preview-{timestamp}").resolve()
+    metadata = summary.reference_plan.metadata
+    name_candidates = [
+        metadata.get("label"),
+        metadata.get("title"),
+        metadata.get("anime_title"),
+        metadata.get("file_name"),
+        summary.reference_name,
+        summary.reference_plan.path.stem,
+    ]
+    base_name = next((str(value).strip() for value in name_candidates if value and str(value).strip()), "clip")
+    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", base_name).strip("._-")
+    if not safe_name:
+        safe_name = "clip"
+    preview_folder = f"{safe_name}-{timestamp}"
+    preview_dir = (root / base_dir / "audio_alignment" / preview_folder).resolve()
 
     initial_frames = _pick_preview_frames(reference_clip, 2, cfg.audio_alignment.random_seed)
 
