@@ -89,6 +89,33 @@ def _color_text(text: str, style: Optional[str]) -> str:
     return text
 
 
+def _format_kv(
+    label: str,
+    value: object,
+    *,
+    label_style: Optional[str] = "dim",
+    value_style: Optional[str] = "bright_white",
+    sep: str = "=",
+) -> str:
+    label_text = escape(str(label))
+    value_text = escape(str(value))
+    return f"{_color_text(label_text, label_style)}{sep}{_color_text(value_text, value_style)}"
+
+
+def _format_bool(
+    label: str,
+    flag: bool,
+    *,
+    label_style: Optional[str] = "dim",
+    true_style: Optional[str] = "green",
+    false_style: Optional[str] = "red",
+    sep: str = "=",
+) -> str:
+    value_style = true_style if flag else false_style
+    value_text = "true" if flag else "false"
+    return _format_kv(label, value_text, label_style=label_style, value_style=value_style, sep=sep)
+
+
 @dataclass
 class _ClipPlan:
     path: Path
@@ -1577,6 +1604,7 @@ def run_cli(
     tmdb_ambiguous = False
     tmdb_api_key_present = bool(cfg.tmdb.api_key.strip())
     tmdb_line: Optional[str] = None
+    tmdb_colored_line: Optional[str] = None
     tmdb_notes: List[str] = []
     slowpics_tmdb_disclosure_line: Optional[str] = None
     slowpics_verbose_tmdb_tag: Optional[str] = None
@@ -1704,9 +1732,19 @@ def run_cli(
         match_title = tmdb_resolution.title or tmdb_context.get("Title") or files[0].stem
         year_display = tmdb_context.get("Year") or ""
         lang_text = tmdb_resolution.original_language or "und"
+        tmdb_identifier = f"{tmdb_resolution.category}/{tmdb_resolution.tmdb_id}"
         tmdb_line = (
-            f"TMDB: {tmdb_resolution.category}/{tmdb_resolution.tmdb_id}  "
+            f"TMDB: {tmdb_identifier}  "
             f"\"{match_title} ({year_display})\"  lang={lang_text}"
+        )
+        title_segment = _color_text(escape(f'"{match_title} ({year_display})"'), "bright_white")
+        lang_segment = _format_kv("lang", lang_text, label_style="dim cyan", value_style="blue")
+        tmdb_colored_line = "  ".join(
+            [
+                _format_kv("TMDB", tmdb_identifier, label_style="cyan", value_style="bright_white"),
+                title_segment,
+                lang_segment,
+            ]
         )
         heuristic = (tmdb_resolution.candidate.reason or "match").replace("_", " ").replace("-", " ")
         source = "filename" if tmdb_resolution.candidate.used_filename_search else "external id"
@@ -1733,6 +1771,19 @@ def run_cli(
         tmdb_line = (
             f"TMDB: {category_display}/{id_display}  "
             f"\"{display_title} ({tmdb_context.get('Year') or ''})\"  lang={lang_text}"
+        )
+        identifier = f"{category_display}/{id_display}".strip("/")
+        title_segment = _color_text(
+            escape(f'"{display_title} ({tmdb_context.get("Year") or ""})"'),
+            "bright_white",
+        )
+        lang_segment = _format_kv("lang", lang_text, label_style="dim cyan", value_style="blue")
+        tmdb_colored_line = "  ".join(
+            [
+                _format_kv("TMDB", identifier, label_style="cyan", value_style="bright_white"),
+                title_segment,
+                lang_segment,
+            ]
         )
         if slowpics_resolved_base:
             base_display = slowpics_resolved_base
@@ -1940,63 +1991,131 @@ def run_cli(
     manual_start_text = "0s" if manual_start_frame <= 0 else f"{manual_start_seconds_value:.2f}s"
     manual_end_text = "unchanged" if not manual_end_changed else f"{manual_end_seconds_value:.2f}s"
 
-    discover_lines = [
-        _color_text(
-            (
-                f"• {escape(str(record['label']))}  [{int(record['width'])}x{int(record['height'])} @ "
-                f"{record['fps']:.3f}fps]  frames={int(record['frames'])}  "
-                f"dur={_format_seconds(record['duration'])}"
-            ),
+    discover_lines = []
+    for record in clip_records:
+        label_segment = _color_text(escape(str(record["label"])), "bright_white")
+        resolution_segment = _color_text(
+            f"{int(record['width'])}x{int(record['height'])}",
             "cyan",
         )
-        for record in clip_records
-    ]
-
-    prepare_trim_lines = [
-        _color_text(
-            (
-                f"Trim[{escape(str(detail['label']))}]: lead={detail['lead_frames']}f "
-                f"({detail['lead_seconds']:.2f}s)  trail={detail['trail_frames']}f "
-                f"({detail['trail_seconds']:.2f}s)"
-            ),
-            "magenta",
+        fps_segment = _color_text(f"{record['fps']:.3f}fps", "blue")
+        frames_part = _format_kv(
+            "frames",
+            int(record["frames"]),
+            label_style="dim cyan",
+            value_style="bright_white",
         )
-        for detail in trim_details
-    ]
+        duration_part = _format_kv(
+            "dur",
+            _format_seconds(record["duration"]),
+            label_style="dim cyan",
+            value_style="blue",
+        )
+        discover_lines.append(
+            f"• {label_segment}  [{resolution_segment} @ {fps_segment}]  {frames_part}  {duration_part}"
+        )
+
+    prepare_trim_lines = []
+    for detail in trim_details:
+        label_segment = _color_text(f"Trim[{escape(str(detail['label']))}]", "magenta")
+        lead_value = f"{detail['lead_frames']}f ({detail['lead_seconds']:.2f}s)"
+        trail_value = f"{detail['trail_frames']}f ({detail['trail_seconds']:.2f}s)"
+        lead_part = _format_kv(
+            "lead",
+            lead_value,
+            label_style="dim magenta",
+            value_style="bright_white",
+        )
+        trail_part = _format_kv(
+            "trail",
+            trail_value,
+            label_style="dim magenta",
+            value_style="bright_white",
+        )
+        prepare_trim_lines.append(f"{label_segment}: {lead_part}  {trail_part}")
 
     overrides_text = "change_fps" if cfg.overrides.change_fps else "none"
-    window_line = _color_text(
-        (
-            f"Window: ignore_lead={cfg.analysis.ignore_lead_seconds:.2f}s  "
-            f"ignore_trail={cfg.analysis.ignore_trail_seconds:.2f}s  "
-            f"min_window={cfg.analysis.min_window_seconds:.2f}s"
+    window_parts = [
+        _format_kv(
+            "ignore_lead",
+            f"{cfg.analysis.ignore_lead_seconds:.2f}s",
+            label_style="dim magenta",
+            value_style="bright_white",
         ),
-        "magenta",
-    )
-    alignment_line = _color_text(
-        f"Alignment: manual_start={manual_start_text}  manual_end={manual_end_text}",
-        "magenta",
-    )
+        _format_kv(
+            "ignore_trail",
+            f"{cfg.analysis.ignore_trail_seconds:.2f}s",
+            label_style="dim magenta",
+            value_style="bright_white",
+        ),
+        _format_kv(
+            "min_window",
+            f"{cfg.analysis.min_window_seconds:.2f}s",
+            label_style="dim magenta",
+            value_style="bright_white",
+        ),
+    ]
+    window_line = f"{_color_text('Window:', 'magenta')} {'  '.join(window_parts)}"
+    alignment_parts = [
+        _format_kv(
+            "manual_start",
+            manual_start_text,
+            label_style="dim magenta",
+            value_style="bright_white",
+        ),
+        _format_kv(
+            "manual_end",
+            manual_end_text,
+            label_style="dim magenta",
+            value_style="bright_white",
+        ),
+    ]
+    alignment_line = f"{_color_text('Alignment:', 'magenta')} {'  '.join(alignment_parts)}"
 
     analysis_method = "absdiff" if cfg.analysis.motion_use_absdiff else "edge"
-    analysis_header_line = _color_text(
-        (
-            f"Analyze: step={cfg.analysis.step}  downscale={cfg.analysis.downscale_height}px  "
-            f"method={analysis_method}  scenecut_q={cfg.analysis.motion_scenecut_quantile}  "
-            f"diff_radius={cfg.analysis.motion_diff_radius}"
+    analysis_parts = [
+        _format_kv("step", cfg.analysis.step, label_style="dim blue", value_style="bright_white"),
+        _format_kv(
+            "downscale",
+            f"{cfg.analysis.downscale_height}px",
+            label_style="dim blue",
+            value_style="bright_white",
         ),
-        "blue",
-    )
-    frames_plan_line = _color_text(
-        (
-            f"Frames plan: Dark={cfg.analysis.frame_count_dark}  "
-            f"Bright={cfg.analysis.frame_count_bright}  "
-            f"Motion={cfg.analysis.frame_count_motion}  Random={cfg.analysis.random_frames}  "
-            f"User={len(cfg.analysis.user_frames)}  "
-            f"sep={cfg.analysis.screen_separation_sec}s  Seed={cfg.analysis.random_seed}"
+        _format_kv(
+            "method",
+            analysis_method,
+            label_style="dim blue",
+            value_style="bright_white",
         ),
-        "blue",
-    )
+        _format_kv(
+            "scenecut_q",
+            cfg.analysis.motion_scenecut_quantile,
+            label_style="dim blue",
+            value_style="blue",
+        ),
+        _format_kv(
+            "diff_radius",
+            cfg.analysis.motion_diff_radius,
+            label_style="dim blue",
+            value_style="bright_white",
+        ),
+    ]
+    analysis_header_line = f"{_color_text('Analyze:', 'blue')} {'  '.join(analysis_parts)}"
+    frames_plan_parts = [
+        _format_kv("Dark", cfg.analysis.frame_count_dark, label_style="dim blue", value_style="bright_white"),
+        _format_kv("Bright", cfg.analysis.frame_count_bright, label_style="dim blue", value_style="bright_white"),
+        _format_kv("Motion", cfg.analysis.frame_count_motion, label_style="dim blue", value_style="bright_white"),
+        _format_kv("Random", cfg.analysis.random_frames, label_style="dim blue", value_style="bright_white"),
+        _format_kv("User", len(cfg.analysis.user_frames), label_style="dim blue", value_style="bright_white"),
+        _format_kv(
+            "sep",
+            f"{cfg.analysis.screen_separation_sec}s",
+            label_style="dim blue",
+            value_style="bright_white",
+        ),
+        _format_kv("Seed", cfg.analysis.random_seed, label_style="dim blue", value_style="blue"),
+    ]
+    frames_plan_line = f"{_color_text('Frames plan:', 'blue')} {'  '.join(frames_plan_parts)}"
 
     json_tail["analysis"] = {
         "step": int(cfg.analysis.step),
@@ -2035,7 +2154,10 @@ def run_cli(
     for line in discover_lines:
         reporter.line(line)
     if tmdb_line:
-        reporter.line(_color_text(escape(tmdb_line), "cyan"))
+        if tmdb_colored_line:
+            reporter.line(tmdb_colored_line)
+        else:
+            reporter.line(_color_text(escape(tmdb_line), "cyan"))
         if slowpics_tmdb_disclosure_line:
             reporter.line(_color_text(slowpics_tmdb_disclosure_line, "cyan"))
     elif tmdb_notes:
@@ -2196,31 +2318,92 @@ def run_cli(
     upscale_flag = "true" if cfg.screenshots.upscale else "false"
     letterbox_flag = "true" if cfg.screenshots.letterbox_pillarbox_aware else "false"
     center_pad_flag = "true" if cfg.screenshots.center_pad else "false"
-    render_header_line = (
-        f"Render: writer={writer_name}  out_dir={cfg.screenshots.directory_name}  "
-        f"add_frame_info={add_frame_info_flag}"
-    )
+    render_parts = [
+        _format_kv("writer", writer_name, label_style="dim cyan", value_style="bright_white"),
+        _format_kv(
+            "out_dir",
+            cfg.screenshots.directory_name,
+            label_style="dim cyan",
+            value_style="bright_white",
+        ),
+        _format_bool(
+            "add_frame_info",
+            cfg.screenshots.add_frame_info,
+            label_style="dim cyan",
+            true_style="green",
+            false_style="red",
+        ),
+    ]
+    render_header_line = f"{_color_text('Render:', 'cyan')} {'  '.join(render_parts)}"
     pad_descriptor = (
         f"{cfg.screenshots.pad_to_canvas}(center_pad={center_pad_flag}, "
         f"tol={cfg.screenshots.letterbox_px_tolerance}px when auto)"
     )
-    canvas_line = (
-        f"Canvas: single_res={cfg.screenshots.single_res or 'tallest'} "
-        f"upscale={upscale_flag}  crop=mod{cfg.screenshots.mod_crop} "
-        f"letterbox-aware={letterbox_flag}  pad={pad_descriptor}"
-    )
+    canvas_parts = [
+        _format_kv(
+            "single_res",
+            cfg.screenshots.single_res or "tallest",
+            label_style="dim cyan",
+            value_style="bright_white",
+        ),
+        _format_bool("upscale", cfg.screenshots.upscale, label_style="dim cyan"),
+        _format_kv(
+            "crop",
+            f"mod{cfg.screenshots.mod_crop}",
+            label_style="dim cyan",
+            value_style="bright_white",
+        ),
+        _format_bool(
+            "letterbox-aware",
+            cfg.screenshots.letterbox_pillarbox_aware,
+            label_style="dim cyan",
+        ),
+        _format_kv(
+            "pad",
+            pad_descriptor,
+            label_style="dim cyan",
+            value_style="bright_white",
+        ),
+    ]
+    canvas_line = f"{_color_text('Canvas:', 'cyan')} {'  '.join(canvas_parts)}"
     dpd_flag = "true" if cfg.color.dynamic_peak_detection else "false"
-    tonemap_line = (
-        f"Tonemap: preset={cfg.color.preset}  curve={cfg.color.tone_curve}  "
-        f"dpd={dpd_flag}  target={cfg.color.target_nits}nits "
-        f"(verify_luma_thresh={cfg.color.verify_luma_threshold})"
+    tonemap_parts = [
+        _format_kv("preset", cfg.color.preset, label_style="dim magenta", value_style="bright_white"),
+        _format_kv("curve", cfg.color.tone_curve, label_style="dim magenta", value_style="bright_white"),
+        _format_bool("dpd", cfg.color.dynamic_peak_detection, label_style="dim magenta"),
+        _format_kv(
+            "target",
+            f"{cfg.color.target_nits}nits",
+            label_style="dim magenta",
+            value_style="bright_white",
+        ),
+    ]
+    tonemap_extra = _format_kv(
+        "verify_luma_thresh",
+        cfg.color.verify_luma_threshold,
+        label_style="dim magenta",
+        value_style="blue",
     )
+    tonemap_line = f"{_color_text('Tonemap:', 'magenta')} {'  '.join(tonemap_parts)}  ({tonemap_extra})"
     overlay_mode_value = getattr(cfg.color, "overlay_mode", "minimal")
-    overlay_suffix = "  (diagnostic via overlay_mode)" if overlay_mode_value == "diagnostic" else ""
-    overlay_line = (
-        f"Overlay: enabled={'true' if cfg.color.overlay_enabled else 'false'}  "
-        f"template=\"{cfg.color.overlay_text_template}\"{overlay_suffix}"
-    )
+    overlay_parts = [
+        _format_bool(
+            "enabled",
+            cfg.color.overlay_enabled,
+            label_style="dim blue",
+            true_style="green",
+            false_style="red",
+        ),
+        _format_kv(
+            "template",
+            f'"{cfg.color.overlay_text_template}"',
+            label_style="dim blue",
+            value_style="bright_white",
+        ),
+    ]
+    overlay_line = f"{_color_text('Overlay:', 'blue')} {'  '.join(overlay_parts)}"
+    if overlay_mode_value == "diagnostic":
+        overlay_line += _color_text("  (diagnostic via overlay_mode)", "yellow")
 
     reporter.section("Render")
     reporter.line(_color_text(render_header_line, "cyan"))
@@ -2322,29 +2505,39 @@ def run_cli(
 
     slowpics_url: Optional[str] = None
     reporter.section("Publish")
-    escaped_collection_name = escape(str(slowpics_title_inputs["collection_name"]))
-    escaped_suffix_literal = escape(str(slowpics_title_inputs["collection_suffix"]))
     reporter.line(_color_text("slow.pics collection (preview):", "blue"))
+    inputs_parts = [
+        _format_kv(
+            "collection_name",
+            slowpics_title_inputs["collection_name"],
+            label_style="dim blue",
+            value_style="bright_white",
+        ),
+        _format_kv(
+            "collection_suffix",
+            slowpics_title_inputs["collection_suffix"],
+            label_style="dim blue",
+            value_style="bright_white",
+        ),
+    ]
+    reporter.line("  " + "  ".join(inputs_parts))
+    resolved_display = slowpics_resolved_base or "(n/a)"
     reporter.line(
-        _color_text(
-            f"  inputs: collection_name=\"{escaped_collection_name}\"  "
-            f"collection_suffix=\"{escaped_suffix_literal}\"",
-            "blue",
+        "  "
+        + _format_kv(
+            "resolved_base",
+            resolved_display,
+            label_style="dim blue",
+            value_style="bright_white",
         )
     )
-    if slowpics_resolved_base:
-        reporter.line(
-            _color_text(
-                f'  resolved_base="{escape(str(slowpics_resolved_base))}"',
-                "blue",
-            )
-        )
-    else:
-        reporter.line(_color_text("  resolved_base=(n/a)", "blue"))
     reporter.line(
-        _color_text(
-            f'  final="{escape(str(slowpics_final_title))}"',
-            "bold bright_white",
+        "  "
+        + _format_kv(
+            "final",
+            f'"{slowpics_final_title}"',
+            label_style="dim blue",
+            value_style="bold bright_white",
         )
     )
     if slowpics_verbose_tmdb_tag:
@@ -2591,7 +2784,7 @@ def main(
             if key:
                 shortcut_path_str = str(out_dir / f"slowpics_{key}.url")
 
-        print("[green][✓] slow.pics: verifying & saving shortcut[/]")
+        print("[✓] slow.pics: verifying & saving shortcut")
         url_line = f"slow.pics URL: {slowpics_url}{clipboard_hint}"
         print(url_line)
         if shortcut_path_str:
