@@ -83,6 +83,12 @@ SUPPORTED_EXTS = (
 )
 
 
+def _color_text(text: str, style: Optional[str]) -> str:
+    if style:
+        return f"[{style}]{text}[/]"
+    return text
+
+
 @dataclass
 class _ClipPlan:
     path: Path
@@ -146,6 +152,16 @@ class _AudioAlignmentDisplayData:
 class CLIReporter:
     """Helper that standardises CLI output formatting and verbosity."""
 
+    _SECTION_STYLES: Dict[str, str] = {
+        "Discover": "bold cyan",
+        "Prepare": "bold magenta",
+        "Analyze": "bold blue",
+        "Render": "bold cyan",
+        "Publish": "bold blue",
+        "Warnings": "bold yellow",
+        "Summary": "bold green",
+    }
+
     def __init__(self, *, quiet: bool = False, verbose: bool = False, no_color: bool = False) -> None:
         if quiet and verbose:
             verbose = False
@@ -156,14 +172,18 @@ class CLIReporter:
         self._last_section: Optional[str] = None
 
     def banner(self, text: str) -> None:
-        self.console.print(text)
+        if self.quiet:
+            self.console.print(text)
+            return
+        self.console.print(f"[bold bright_cyan]{escape(text)}[/]")
 
     def section(self, title: str) -> None:
         if self.quiet:
             return
         if self._last_section == title:
             return
-        self.console.print(title)
+        style = self._SECTION_STYLES.get(title, "bold cyan")
+        self.console.print(f"[{style}]{title}[/]")
         self._last_section = title
 
     def line(self, text: str) -> None:
@@ -174,7 +194,9 @@ class CLIReporter:
     def verbose_line(self, text: str) -> None:
         if self.quiet or not self.verbose:
             return
-        self.console.print(text)
+        if not text:
+            return
+        self.console.print(f"[dim]{escape(text)}[/]")
 
     def warn(self, text: str) -> None:
         self._warnings.append(text)
@@ -1919,43 +1941,61 @@ def run_cli(
     manual_end_text = "unchanged" if not manual_end_changed else f"{manual_end_seconds_value:.2f}s"
 
     discover_lines = [
-        (
-            f"• {record['label']}  [{int(record['width'])}x{int(record['height'])} @ "
-            f"{record['fps']:.3f}fps]  frames={int(record['frames'])}  "
-            f"dur={_format_seconds(record['duration'])}"
+        _color_text(
+            (
+                f"• {escape(str(record['label']))}  [{int(record['width'])}x{int(record['height'])} @ "
+                f"{record['fps']:.3f}fps]  frames={int(record['frames'])}  "
+                f"dur={_format_seconds(record['duration'])}"
+            ),
+            "cyan",
         )
         for record in clip_records
     ]
 
     prepare_trim_lines = [
-        (
-            f"Trim[{detail['label']}]: lead={detail['lead_frames']}f "
-            f"({detail['lead_seconds']:.2f}s)  trail={detail['trail_frames']}f "
-            f"({detail['trail_seconds']:.2f}s)"
+        _color_text(
+            (
+                f"Trim[{escape(str(detail['label']))}]: lead={detail['lead_frames']}f "
+                f"({detail['lead_seconds']:.2f}s)  trail={detail['trail_frames']}f "
+                f"({detail['trail_seconds']:.2f}s)"
+            ),
+            "magenta",
         )
         for detail in trim_details
     ]
 
     overrides_text = "change_fps" if cfg.overrides.change_fps else "none"
-    window_line = (
-        f"Window: ignore_lead={cfg.analysis.ignore_lead_seconds:.2f}s  "
-        f"ignore_trail={cfg.analysis.ignore_trail_seconds:.2f}s  "
-        f"min_window={cfg.analysis.min_window_seconds:.2f}s"
+    window_line = _color_text(
+        (
+            f"Window: ignore_lead={cfg.analysis.ignore_lead_seconds:.2f}s  "
+            f"ignore_trail={cfg.analysis.ignore_trail_seconds:.2f}s  "
+            f"min_window={cfg.analysis.min_window_seconds:.2f}s"
+        ),
+        "magenta",
     )
-    alignment_line = f"Alignment: manual_start={manual_start_text}  manual_end={manual_end_text}"
+    alignment_line = _color_text(
+        f"Alignment: manual_start={manual_start_text}  manual_end={manual_end_text}",
+        "magenta",
+    )
 
     analysis_method = "absdiff" if cfg.analysis.motion_use_absdiff else "edge"
-    analysis_header_line = (
-        f"Analyze: step={cfg.analysis.step}  downscale={cfg.analysis.downscale_height}px  "
-        f"method={analysis_method}  scenecut_q={cfg.analysis.motion_scenecut_quantile}  "
-        f"diff_radius={cfg.analysis.motion_diff_radius}"
+    analysis_header_line = _color_text(
+        (
+            f"Analyze: step={cfg.analysis.step}  downscale={cfg.analysis.downscale_height}px  "
+            f"method={analysis_method}  scenecut_q={cfg.analysis.motion_scenecut_quantile}  "
+            f"diff_radius={cfg.analysis.motion_diff_radius}"
+        ),
+        "blue",
     )
-    frames_plan_line = (
-        f"Frames plan: Dark={cfg.analysis.frame_count_dark}  "
-        f"Bright={cfg.analysis.frame_count_bright}  "
-        f"Motion={cfg.analysis.frame_count_motion}  Random={cfg.analysis.random_frames}  "
-        f"User={len(cfg.analysis.user_frames)}  "
-        f"sep={cfg.analysis.screen_separation_sec}s  Seed={cfg.analysis.random_seed}"
+    frames_plan_line = _color_text(
+        (
+            f"Frames plan: Dark={cfg.analysis.frame_count_dark}  "
+            f"Bright={cfg.analysis.frame_count_bright}  "
+            f"Motion={cfg.analysis.frame_count_motion}  Random={cfg.analysis.random_frames}  "
+            f"User={len(cfg.analysis.user_frames)}  "
+            f"sep={cfg.analysis.screen_separation_sec}s  Seed={cfg.analysis.random_seed}"
+        ),
+        "blue",
     )
 
     json_tail["analysis"] = {
@@ -1995,28 +2035,28 @@ def run_cli(
     for line in discover_lines:
         reporter.line(line)
     if tmdb_line:
-        reporter.line(tmdb_line)
+        reporter.line(_color_text(escape(tmdb_line), "cyan"))
         if slowpics_tmdb_disclosure_line:
-            reporter.line(slowpics_tmdb_disclosure_line)
+            reporter.line(_color_text(slowpics_tmdb_disclosure_line, "cyan"))
     elif tmdb_notes:
         for note in tmdb_notes:
             reporter.verbose_line(note)
     elif slowpics_tmdb_disclosure_line:
-        reporter.line(slowpics_tmdb_disclosure_line)
+        reporter.line(_color_text(slowpics_tmdb_disclosure_line, "cyan"))
 
     reporter.section("Prepare")
     for line in prepare_trim_lines:
         reporter.line(line)
-    reporter.line(f"Overrides: {overrides_text}")
+    reporter.line(_color_text(f"Overrides: {overrides_text}", "magenta"))
     reporter.line(window_line)
     reporter.line(alignment_line)
     if alignment_display and (alignment_display.stream_lines or alignment_display.offset_lines):
         for line in alignment_display.stream_lines:
-            reporter.line(line)
+            reporter.line(_color_text(escape(line), "magenta"))
         if alignment_display.estimation_line:
-            reporter.line(alignment_display.estimation_line)
+            reporter.line(_color_text(escape(alignment_display.estimation_line), "blue"))
         for line in alignment_display.offset_lines:
-            reporter.line(line)
+            reporter.line(_color_text(escape(line), "green"))
         _confirm_alignment_with_screenshots(
             plans,
             alignment_summary,
@@ -2026,7 +2066,7 @@ def run_cli(
             alignment_display,
         )
         if alignment_display.offsets_file_line:
-            reporter.line(alignment_display.offsets_file_line)
+            reporter.line(_color_text(escape(alignment_display.offsets_file_line), "green"))
     if alignment_display is not None:
         json_tail["audio_alignment"]["preview_paths"] = alignment_display.preview_paths
         confirmation_value = alignment_display.confirmation
@@ -2140,7 +2180,10 @@ def run_cli(
     scanned_count = progress_total if progress_total > 0 else max(sample_count, kept_count)
     cache_summary_label = "reused" if cache_status == "reused" else ("new" if cache_status == "recomputed" else cache_status)
     reporter.line(
-        f"Analysis done • {kept_count}/{scanned_count} kept • cache={cache_summary_label}"
+        _color_text(
+            f"Analysis done • {kept_count}/{scanned_count} kept • cache={cache_summary_label}",
+            "green",
+        )
     )
     json_tail["analysis"]["kept"] = kept_count
     json_tail["analysis"]["scanned"] = scanned_count
@@ -2180,10 +2223,10 @@ def run_cli(
     )
 
     reporter.section("Render")
-    reporter.line(render_header_line)
-    reporter.line(canvas_line)
-    reporter.line(tonemap_line)
-    reporter.line(overlay_line)
+    reporter.line(_color_text(render_header_line, "cyan"))
+    reporter.line(_color_text(canvas_line, "cyan"))
+    reporter.line(_color_text(tonemap_line, "magenta"))
+    reporter.line(_color_text(overlay_line, "blue"))
 
     json_tail["render"] = {
         "writer": writer_name,
@@ -2281,16 +2324,29 @@ def run_cli(
     reporter.section("Publish")
     escaped_collection_name = escape(str(slowpics_title_inputs["collection_name"]))
     escaped_suffix_literal = escape(str(slowpics_title_inputs["collection_suffix"]))
-    reporter.line("slow.pics collection (preview):")
+    reporter.line(_color_text("slow.pics collection (preview):", "blue"))
     reporter.line(
-        f"  inputs: collection_name=\"{escaped_collection_name}\"  "
-        f"collection_suffix=\"{escaped_suffix_literal}\""
+        _color_text(
+            f"  inputs: collection_name=\"{escaped_collection_name}\"  "
+            f"collection_suffix=\"{escaped_suffix_literal}\"",
+            "blue",
+        )
     )
     if slowpics_resolved_base:
-        reporter.line(f'  resolved_base="{escape(str(slowpics_resolved_base))}"')
+        reporter.line(
+            _color_text(
+                f'  resolved_base="{escape(str(slowpics_resolved_base))}"',
+                "blue",
+            )
+        )
     else:
-        reporter.line("  resolved_base=(n/a)")
-    reporter.line(f'  final="{escape(str(slowpics_final_title))}"')
+        reporter.line(_color_text("  resolved_base=(n/a)", "blue"))
+    reporter.line(
+        _color_text(
+            f'  final="{escape(str(slowpics_final_title))}"',
+            "bold bright_white",
+        )
+    )
     if slowpics_verbose_tmdb_tag:
         reporter.verbose_line(f"  {escape(slowpics_verbose_tmdb_tag)}")
     if cfg.slowpics.auto_upload:
@@ -2331,7 +2387,7 @@ def run_cli(
             return stats
 
         try:
-            reporter.line("[✓] slow.pics: establishing session")
+            reporter.line(_color_text("[✓] slow.pics: establishing session", "green"))
             if upload_total > 0:
                 start_time = time.perf_counter()
                 uploaded_files = 0
@@ -2383,8 +2439,8 @@ def run_cli(
                     out_dir,
                     cfg.slowpics,
                 )
-            reporter.line(f"[✓] slow.pics: uploading {upload_total} images")
-            reporter.line("[✓] slow.pics: assembling collection")
+            reporter.line(_color_text(f"[✓] slow.pics: uploading {upload_total} images", "green"))
+            reporter.line(_color_text("[✓] slow.pics: assembling collection", "green"))
         except SlowpicsAPIError as exc:
             raise CLIAppError(
                 f"slow.pics upload failed: {exc}",
@@ -2423,9 +2479,9 @@ def run_cli(
         reporter.section("Warnings")
         if warnings_list:
             for message in warnings_list:
-                reporter.line(message)
+                reporter.line(_color_text(escape(message), "yellow"))
         else:
-            reporter.line("none")
+            reporter.line(_color_text("none", "dim"))
 
     tonemap_status = "on" if cfg.color.dynamic_peak_detection else "off"
     summary_lines = [
@@ -2465,7 +2521,7 @@ def run_cli(
     if not reporter.quiet:
         reporter.section("Summary")
         for line in summary_lines:
-            reporter.line(line)
+            reporter.line(_color_text(line, "green"))
 
     return result
 
@@ -2535,7 +2591,7 @@ def main(
             if key:
                 shortcut_path_str = str(out_dir / f"slowpics_{key}.url")
 
-        print("[✓] slow.pics: verifying & saving shortcut")
+        print("[green][✓] slow.pics: verifying & saving shortcut[/]")
         url_line = f"slow.pics URL: {slowpics_url}{clipboard_hint}"
         print(url_line)
         if shortcut_path_str:
