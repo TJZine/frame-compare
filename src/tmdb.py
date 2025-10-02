@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Helpers for resolving TMDB metadata from filenames or external IDs."""
+
+from __future__ import annotations
 
 import asyncio
 import logging
@@ -41,7 +41,10 @@ class TMDBAmbiguityError(TMDBResolutionError):
     def __init__(self, candidates: Sequence["TMDBCandidate"]) -> None:
         self.candidates = list(candidates)
         pretty = ", ".join(
-            f"{cand.category.lower()}/{cand.tmdb_id} ({cand.title} – {cand.year or '????'} score={cand.score:0.3f})"
+            (
+                f"{cand.category.lower()}/{cand.tmdb_id} "
+                f"({cand.title} – {cand.year or '????'} score={cand.score:0.3f})"
+            )
             for cand in self.candidates
         )
         super().__init__(f"Ambiguous TMDB match candidates: {pretty}")
@@ -382,7 +385,14 @@ def _build_query_plans(
         if key in seen:
             return
         seen.add(key)
-        queries.append(_QueryPlan(query=query.strip(), year=year_val, category=category, reason=reason))
+        queries.append(
+            _QueryPlan(
+                query=query.strip(),
+                year=year_val,
+                category=category,
+                reason=reason,
+            )
+        )
 
     categories: List[str] = []
     for preferred in (category_preference, category_hint, MOVIE, TV):
@@ -580,7 +590,11 @@ def _alias_similarity(
         query_tokens = query_norm.split()
         for alias_norm in alias_norms:
             alias_tokens = alias_norm.split()
-            if len(query_tokens) >= 2 and set(query_tokens).issubset(alias_tokens) and len(alias_tokens) > len(query_tokens):
+            if (
+                len(query_tokens) >= 2
+                and set(query_tokens).issubset(alias_tokens)
+                and len(alias_tokens) > len(query_tokens)
+            ):
                 best = max(best, 0.9)
             if alias_norm.startswith(query_norm) and len(query_norm) >= 4:
                 best = max(best, 0.9)
@@ -697,7 +711,11 @@ def _extract_best_candidate(
     return candidates
 
 
-def _extract_title_year(filename: str, *, enable_anime: bool) -> Tuple[str, Optional[int], Optional[str], List[str]]:
+def _extract_title_year(
+    filename: str,
+    *,
+    enable_anime: bool,
+) -> Tuple[str, Optional[int], Optional[str], List[str]]:
     guess = _call_guessit(filename)
     title = guess.get("title") if isinstance(guess, dict) else ""
     title_str = str(title or "").strip()
@@ -774,7 +792,12 @@ async def resolve_tmdb(
 
     timeout = httpx.Timeout(10.0, connect=10.0, read=10.0, write=10.0)
     params = {"api_key": config.api_key}
-    async with httpx.AsyncClient(base_url=_BASE_URL, timeout=timeout, params=params, transport=http_transport) as client:
+    async with httpx.AsyncClient(
+        base_url=_BASE_URL,
+        timeout=timeout,
+        params=params,
+        transport=http_transport,
+    ) as client:
         if imdb_lookup:
             payload = await _http_request(
                 client,
@@ -929,12 +952,17 @@ async def resolve_tmdb(
                         candidate.reason = f"{candidate.reason}+alias"
 
             all_candidates.sort(key=lambda cand: cand.score, reverse=True)
-            viable_candidates = [cand for cand in all_candidates if cand.score >= _SIMILARITY_THRESHOLD]
+            viable_candidates = [
+                cand for cand in all_candidates if cand.score >= _SIMILARITY_THRESHOLD
+            ]
 
         if not viable_candidates:
             top = all_candidates[:3]
             summary = ", ".join(
-                f"{cand.category.lower()}/{cand.tmdb_id} {cand.title} ({cand.year or '????'}) score={cand.score:0.3f}"
+                (
+                    f"{cand.category.lower()}/{cand.tmdb_id} {cand.title} "
+                    f"({cand.year or '????'}) score={cand.score:0.3f}"
+                )
                 for cand in top
             )
             logger.warning("TMDB search failed for %s. Top candidates: %s", filename, summary)
@@ -944,7 +972,11 @@ async def resolve_tmdb(
         runner_up = viable_candidates[1] if len(viable_candidates) > 1 else None
 
         margin = best_candidate.score - (runner_up.score if runner_up else 0.0)
-        resolution = TMDBResolution(candidate=best_candidate, margin=margin, source_query=cleaned_title)
+        resolution = TMDBResolution(
+            candidate=best_candidate,
+            margin=margin,
+            source_query=cleaned_title,
+        )
 
         if not unattended_mode and runner_up and margin < _AMBIGUITY_MARGIN:
             ranked = sorted(all_candidates, key=lambda cand: cand.score, reverse=True)[:5]

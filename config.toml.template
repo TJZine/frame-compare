@@ -27,6 +27,21 @@ ignore_trail_seconds = 0.0
 # Guarantee at least this much selectable footage after trimming.
 min_window_seconds = 5.0
 
+[audio_alignment]
+# Estimate offsets via audio cross-correlation before frame analysis.
+enable = false
+# reference = ""          # Optional: pick specific reference label/filename; defaults to analyze clip
+sample_rate = 16000        # Audio extraction rate (Hz)
+hop_length = 512           # Onset envelope hop length
+# start_seconds = 0.0      # Optional: analysis window start (seconds)
+# duration_seconds = 600.0 # Optional: analysis window length (seconds)
+correlation_threshold = 0.55
+max_offset_seconds = 12.0
+offsets_filename = "generated.audio_offsets.toml"
+confirm_with_screenshots = true
+random_seed = 2025
+frame_offset_bias = 1        # Frames to move toward zero (negative values push further away)
+
 [screenshots]
 # Output planning and rendering behaviour for both VapourSynth and FFmpeg writers.
 directory_name = "screens"
@@ -55,7 +70,7 @@ dynamic_peak_detection = true
 target_nits = 100.0
 dst_min_nits = 0.1
 overlay_enabled = true
-overlay_text_template = "TM:{tone_curve} dpd={dynamic_peak_detection} dst={target_nits}nits"
+overlay_text_template = "Tonemapping Algorithm: {tone_curve} dpd = {dynamic_peak_detection} dst = {target_nits} nits"
 verify_enabled = true
 # verify_frame = 4123  # Uncomment to force a specific frame index for verification
 verify_auto = true

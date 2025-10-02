@@ -8,6 +8,7 @@ import frame_compare
 from src.datatypes import (
     AnalysisConfig,
     AppConfig,
+    AudioAlignmentConfig,
     ColorConfig,
     NamingConfig,
     OverridesConfig,
@@ -65,6 +66,7 @@ def _make_config(input_dir: Path) -> AppConfig:
             change_fps={"BBB - 01.mkv": "set"},
         ),
         source=SourceConfig(preferred="lsmas"),
+        audio_alignment=AudioAlignmentConfig(enable=False),
     )
 
 
@@ -181,6 +183,7 @@ def test_label_dedupe_preserves_short_labels(tmp_path, monkeypatch, runner):
         runtime=RuntimeConfig(ram_limit_mb=1024),
         overrides=OverridesConfig(),
         source=SourceConfig(),
+        audio_alignment=AudioAlignmentConfig(enable=False),
     )
 
     monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
@@ -295,6 +298,7 @@ def test_cli_input_override_and_cleanup(tmp_path, monkeypatch, runner):
         runtime=RuntimeConfig(ram_limit_mb=1024),
         overrides=OverridesConfig(),
         source=SourceConfig(),
+        audio_alignment=AudioAlignmentConfig(enable=False),
     )
 
     monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)

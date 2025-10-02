@@ -1,21 +1,20 @@
-from __future__ import annotations
-
 """Frame analysis and selection utilities."""
 
-import math
-import random
+from __future__ import annotations
+
 import hashlib
 import json
 import logging
+import math
 import numbers
+import random
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
-from .datatypes import AnalysisConfig, ColorConfig
 from . import vs_core
-
+from .datatypes import AnalysisConfig, ColorConfig
 
 logger = logging.getLogger(__name__)
 
@@ -629,11 +628,20 @@ def _collect_metrics_vapoursynth(
                 target_h = _ensure_even(max(2, int(cfg.downscale_height)))
                 aspect = work.width / work.height
                 target_w = _ensure_even(max(2, int(round(target_h * aspect))))
-                work = vs.core.resize.Bilinear(work, width=target_w, height=target_h, **resize_kwargs)
+                work = vs.core.resize.Bilinear(
+                    work,
+                    width=target_w,
+                    height=target_h,
+                    **resize_kwargs,
+                )
 
             target_format = getattr(vs, "GRAY8", None) or getattr(vs, "GRAY16")
             gray_kwargs = dict(resize_kwargs)
-            gray_formats = {getattr(vs, "GRAY8", None), getattr(vs, "GRAY16", None), getattr(vs, "GRAY32", None)}
+            gray_formats = {
+                getattr(vs, "GRAY8", None),
+                getattr(vs, "GRAY16", None),
+                getattr(vs, "GRAY32", None),
+            }
             if work.format is not None and work.format.color_family == vs.RGB:
                 matrix_in_val = gray_kwargs.get("matrix_in")
                 if matrix_in_val is None:
@@ -819,7 +827,11 @@ def select_frames(
 
     fps = _frame_rate(clip)
     rng = random.Random(cfg.random_seed)
-    min_sep_frames = 0 if cfg.screen_separation_sec <= 0 else int(round(cfg.screen_separation_sec * fps))
+    min_sep_frames = (
+        0
+        if cfg.screen_separation_sec <= 0
+        else int(round(cfg.screen_separation_sec * fps))
+    )
     skip_head_cutoff = window_start
     if cfg.skip_head_seconds > 0 and fps > 0:
         skip_head_cutoff = min(
@@ -920,19 +932,24 @@ def select_frames(
             )
         except Exception as exc:
             logger.warning(
-                "[ANALYSIS] VapourSynth metrics collection failed (%s); falling back to synthetic metrics",
+                "[ANALYSIS] VapourSynth metrics collection failed (%s); "
+                "falling back to synthetic metrics",
                 exc,
             )
             brightness, motion = _generate_metrics_fallback(indices, cfg, progress)
             logger.info(
-                "[ANALYSIS] synthetic metrics generated in %.2fs", time.perf_counter() - start_metrics
+                "[ANALYSIS] synthetic metrics generated in %.2fs",
+                time.perf_counter() - start_metrics,
             )
 
     if cached_selection is not None:
         frames_sorted = sorted(dict.fromkeys(int(frame) for frame in cached_selection))
         if return_metadata:
             categories = cached_categories or {}
-            return frames_sorted, {frame: categories.get(frame, "Cached") for frame in frames_sorted}
+            return (
+                frames_sorted,
+                {frame: categories.get(frame, "Cached") for frame in frames_sorted},
+            )
         return frames_sorted
 
     brightness_values = [val for _, val in brightness]

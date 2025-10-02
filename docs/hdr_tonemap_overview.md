@@ -1,7 +1,7 @@
 # HDR → SDR Pipeline Overview
 
 This document summarises the rebuilt tone-mapping path introduced in September 2025. It complements
-`docs/legacy_tonemap_pipeline.md`, which captures the original `legacy/compv4_improved.py` behaviour used as
+`docs/legacy_tonemap_pipeline.md`, which captures the original placebo-based behaviour used as
 reference.
 
 ## Summary
@@ -50,7 +50,7 @@ and `verify_auto=false` falls back to the midpoint. When verification executes, 
 logs and sets `_Tonemapped="placebo:{curve},dpd={0|1},dst_max={nits}"` on the processed frames.
 
 ## Overlay & writer behaviour
-- Overlay text defaults to `TM:{tone_curve} dpd={dpd} dst={target_nits}nits` and accepts `{preset}` and `{reason}`
+- Overlay text defaults to `Tonemapping Algorithm: {tone_curve} dpd = {dynamic_peak_detection} dst = {target_nits} nits` and accepts `{preset}` and `{reason}`
   placeholders. You can fully override the template in config.
 - VapourSynth renders apply the overlay after all geometry adjustments (`CropRel`/`Spline36`) but before the final
   dither to RGB24. FFmpeg renders append a matching `drawtext` filter positioned at `x=w-tw-10:y=10`.

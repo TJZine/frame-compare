@@ -62,7 +62,9 @@ class ColorConfig:
     target_nits: float = 100.0
     dst_min_nits: float = 0.1
     overlay_enabled: bool = True
-    overlay_text_template: str = "TM:{tone_curve} dpd={dynamic_peak_detection} dst={target_nits}nits"
+    overlay_text_template: str = (
+        "Tonemapping Algorithm: {tone_curve} dpd = {dynamic_peak_detection} dst = {target_nits} nits"
+    )
     verify_enabled: bool = True
     verify_frame: Optional[int] = None
     verify_auto: bool = True
@@ -136,6 +138,24 @@ class SourceConfig:
 
 
 @dataclass
+class AudioAlignmentConfig:
+    """Audio-based offset estimation to help align clips before analysis."""
+
+    enable: bool = False
+    reference: str = ""
+    sample_rate: int = 16000
+    hop_length: int = 512
+    start_seconds: Optional[float] = None
+    duration_seconds: Optional[float] = None
+    correlation_threshold: float = 0.55
+    max_offset_seconds: float = 12.0
+    offsets_filename: str = "generated.audio_offsets.toml"
+    confirm_with_screenshots: bool = True
+    random_seed: int = 2025
+    frame_offset_bias: int = 1
+
+
+@dataclass
 class OverridesConfig:
     """Clip-specific overrides for trimming and frame rate adjustments."""
 
@@ -158,3 +178,4 @@ class AppConfig:
     overrides: OverridesConfig
     color: ColorConfig
     source: SourceConfig
+    audio_alignment: AudioAlignmentConfig

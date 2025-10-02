@@ -2,57 +2,209 @@
 
 Automated frame comparison pipeline that samples representative scenes, renders aligned screenshots, and optionally publishes a slow.pics collection.
 
-## TL;DR Quickstart
-```bash
-uv sync
-cp config.toml.template config.toml
-uv run python frame_compare.py --config config.toml --input comparison_videos
-```
-You should see `Comparison ready` followed by the selected frames, output directory, and slow.pics URL (when enabled).
+## Quickstart
+1. `uv sync` to install the core dependencies defined in `pyproject.toml`; uv will spin up `.venv/` automatically if it doesn't exist yet.
+2. Copy `config.toml.template` to `config.toml` and point `[paths].input_dir` at a folder that holds at least two source videos (for example `comparison_videos/`).
+3. Drop your reference and comparison clips into that folder; filenames drive the automatic labelling step.
+4. Run the CLI:
+   ```bash
+   uv run python frame_compare.py --config config.toml --input comparison_videos
+   ```
+5. Watch for the `Comparison ready` banner. PNG screenshots land in `screens/` (or your `[screenshots].directory_name`), the metrics cache saves to `generated.compframes` when `analysis.save_frames_data = true`, and audio alignment (when enabled) records offsets in `generated.audio_offsets.toml`.
 
-> 💡 Planning to use VapourSynth locally? Install the optional extra with `uv sync --extra vapoursynth` before running the CLI.
+## Common tasks
+### Compare two videos
+- **Goal:** Inspect a single pair with the existing config.
+- **Run:**
+  ```bash
+  uv run python frame_compare.py --config config.toml --input comparison_videos
+  ```
+- **Outputs:** Category-labelled PNGs in `screens/` and cached metrics in `generated.compframes`.
+
+### Batch multiple sources
+- **Goal:** Process every matching pair in a directory.
+- **Run:**
+  ```bash
+  uv run python frame_compare.py --config config.toml --input /data/video_batches
+  ```
+- **Outputs:** One subdirectory per comparison under `screens/`, plus the shared metrics cache `generated.compframes`.
+
+### Random frames with a fixed seed
+- **Goal:** Reproducible scatter of additional timestamps.
+- **Prepare:** Add to `config.toml`:
+  ```toml
+  [analysis]
+  random_frames = 20
+  random_seed = 123456
+  ```
+- **Run:** `uv run python frame_compare.py --config config.toml --input comparison_videos`
+- **Outputs:** Extra `Random_*.png` files in `screens/` and an updated `generated.compframes` that replays exactly with the same seed.
+
+### User-selected frames
+- **Goal:** Force specific indices into the output.
+- **Prepare:**
+  ```toml
+  [analysis]
+  user_frames = [10, 200, 501]
+  ```
+- **Run:** `uv run python frame_compare.py --config config.toml --input comparison_videos`
+- **Outputs:** `User_*.png` captures for each pinned index alongside the standard categories, plus the refreshed cache file.
+
+### Mix random and pinned frames
+- **Goal:** Blend deterministic pins with seeded randomness.
+- **Prepare:**
+  ```toml
+  [analysis]
+  user_frames = [10, 200, 501]
+  random_frames = 8
+  random_seed = 98765
+  ```
+- **Run:** `uv run python frame_compare.py --config config.toml --input comparison_videos`
+- **Outputs:** Combined `User_*.png`, `Random_*.png`, and auto-selected categories in `screens/`, plus the deterministic cache artefacts.
+
+### Auto-align mismatched sources
+- **Goal:** Suggest trim offsets when encodes drift out of sync.
+- **Prepare:**
+  ```toml
+  [audio_alignment]
+  enable = true
+  correlation_threshold = 0.6
+  ```
+- **Run:** `uv run python frame_compare.py --config config.toml --input comparison_videos`
+- **Workflow:** The CLI estimates per-source offsets, writes `generated.audio_offsets.toml`, auto-selects matching streams (language → codec → layout), and saves two preview frames under `screens/audio_alignment/`. Confirm the side-by-side results in the prompt to continue; declining captures five more random frames for inspection, opens the offsets file for manual tweaks, or honour explicit stream picks from `--audio-align-track label=index`.
+
+## Install
+### macOS quick path
+```bash
+brew install python@3.13 ffmpeg
+brew install vapoursynth          # optional: primary renderer
+brew install uv
+uv sync
+```
+Optional: manage `uv` with pipx instead (`pipx install uv`). Set `VAPOURSYNTH_PYTHONPATH` or `[runtime.vapoursynth_python_paths]` when relying on a system VapourSynth install.
+
+### Generic Python environment
+```bash
+pipx install uv
+uv sync
+```
+If `pipx` is unavailable, install uv once with `pip install --user uv` (or your platform's package manager) and then run `uv sync`. `uv sync` writes the environment into `.venv/` automatically; no manual `python -m venv` step is required.
+
+Optional: install `pyperclip` (for example, `uv pip install pyperclip`) if you want the generated slow.pics URL copied to your clipboard automatically after uploads.
+
+Fallback when uv is unavailable:
+```bash
+python3.13 -m venv .venv
+source .venv/bin/activate
+pip install -U pip wheel
+pip install -e .
+```
+Add VapourSynth support later with `uv sync --extra vapoursynth` or `pip install 'vapoursynth>=72'` inside whichever environment you are using, and keep FFmpeg on `PATH` for the fallback renderer.
+
 
 ## Features
 - Deterministic frame selection that combines quantile-based brightness picks, smoothed motion scoring, user pins, and seeded randomness, while caching metrics for reruns.
 - Configurable selection windows that respect per-clip trims, ignore/skip timing, and collapse to a safe fallback when sources disagree.
 - VapourSynth integration with optional HDR→SDR tonemapping, FFmpeg screenshot fallback, modulus-aware cropping, and placeholder creation when writers fail.
+- Audio-guided trim suggestions—the only automated offset step—that write `generated.audio_offsets.toml`, auto-select matching streams, use finer DTW hops, prompt for quick visual confirmation, and accelerate alignment for mismatched transfers.
 - Automatic slow.pics uploads with webhook retries, `.url` shortcut generation, and strict naming validation so every frame lands in the right slot.
 - Rich CLI that discovers clips, deduplicates labels, applies trims/FPS overrides consistently, and cleans up rendered images after upload when requested.
 
-## Installation
-### Requirements
-- Python 3.13 (>=3.13,<3.14).
-- Runtime tools depending on your workflow:
-  - VapourSynth with the `lsmas` plugin and (optionally) `libplacebo` for HDR tonemapping. Install it via the optional extra (`uv sync --extra vapoursynth`) or follow the manual instructions below. When VapourSynth is unavailable the tool gracefully reports the missing dependency and you can enable the FFmpeg screenshot path instead.
-  - FFmpeg when `screenshots.use_ffmpeg=true` (the CLI checks for the executable). This is the supported fallback in cloud environments where VapourSynth is impractical.
-  - `requests-toolbelt` is installed via `pyproject.toml` for slow.pics uploads; the code warns if it is missing.
-  - Optional: `pyperclip` to copy the slow.pics URL to your clipboard.
+## Configuration (start here)
+| Flag/Key | What it controls | When to use it | Type | Default | Example | Impact / Trade-offs | Notes | Source |
+|---|---|---|---|---|---|---|---|---|
+| `[paths].input_dir` | Scan root for video sources | Set it before each new batch | str | `"."` | `input_dir = "comparison_videos"` | Larger folders increase discovery time |  | original, readme, new |
+| `--input` | Temporary scan folder override | Point at ad-hoc directories without editing config | CLI Optional[str] | `None` | `--input comparison_videos` | Overrides only the current run |  | original, readme, new |
+| `[screenshots].directory_name` | Output folder name | Change when organising multiple runs | str | `"screens"` | `directory_name = "frames"` | Renaming breaks scripts that expect `screens/` |  | original, readme, new |
+| `[analysis].frame_count_dark` | Dark scene quota | Increase for shadow-heavy content | int | `20` | `frame_count_dark = 12` | Higher counts take longer to evaluate |  | original, readme, new |
+| `[analysis].frame_count_bright` | Bright scene quota | Highlight highlights in HDR/SDr mixes | int | `10` | `frame_count_bright = 16` | More frames lengthen tonemapping time |  | original, readme, new |
+| `[analysis].frame_count_motion` | Motion candidate quota | Boost when action scenes matter | int | `15` | `frame_count_motion = 24` | Extra smoothing and diff passes add CPU cost |  | original, readme, new |
+| `[analysis].random_frames` | Random frame count | Sample filler shots deterministically | int | `15` | `random_frames = 8` | More random picks extend total render count |  | original, readme, new |
+| `[analysis].user_frames` | Pinned frame list | Guarantee exact timestamps | list[int] | `[]` | `user_frames = [10, 200, 501]` | Each pin adds a render regardless of scoring |  | original, readme, new |
+| `[analysis].random_seed` | RNG seed | Match runs across machines and time | int | `20202020` | `random_seed = 1337` | Changing the seed shuffles random picks |  | original, readme, new |
+| `[analysis].downscale_height` | Analysis resolution cap | Drop it when metrics feel slow | int | `480` | `downscale_height = 720` | Lower values run faster but risk missing detail |  | original, readme, new |
+| `[audio_alignment].enable` | Audio offset detection toggle | Turn on when encodes drift before frame sampling | bool | `false` | `enable = true` | Requires FFmpeg and the built-in audio stack; prompts for preview confirmation | Writes `generated.audio_offsets.toml` | config.toml |
+| `[audio_alignment].correlation_threshold` | Minimum onset correlation | Raise for noisier sources that need manual review | float | `0.55` | `correlation_threshold = 0.65` | Higher values skip low-confidence matches | Skipped clips still land in the offsets file | config.toml |
+| `[audio_alignment].max_offset_seconds` | Largest offset to auto-apply | Keep search windows realistic | float | `12.0` | `max_offset_seconds = 4.0` | Huge offsets take longer to vet | Exceeding the limit marks the clip for manual edits | config.toml |
+| `[audio_alignment].offsets_filename` | Offset cache path | Store adjustments alongside other generated data | str | `"generated.audio_offsets.toml"` | `offsets_filename = "cache/audio_offsets.toml"` | Custom paths help track multiple scenarios | File retains both suggested and manual frame counts | config.toml |
+| `[audio_alignment].frame_offset_bias` | Frame adjustment toward/away from zero | Nudge applied offsets to match trim heuristics | int | `1` | `frame_offset_bias = 0` | Positive values pull offsets toward zero; negative push them outward | Frames clamp at zero when the adjustment exceeds the measured magnitude | config.toml |
+| `[audio_alignment].confirm_with_screenshots` | Preview confirmation prompt | Disable for unattended batch runs | bool | `true` | `confirm_with_screenshots = false` | Skipping previews removes guard rails | When false, trims apply without manual inspection | config.toml |
+| `--audio-align-track label=index` | Manual audio stream override | Force a stream when auto-selection disagrees | CLI (repeatable) | `None` | `--audio-align-track BBB=2` | Useful for commentary/dub heavy releases | Overrides both reference and target indices | new |
+| `[screenshots].use_ffmpeg` | Renderer selection | Enable when VapourSynth is unavailable | bool | `False` | `use_ffmpeg = true` | Faster on plain installs, no advanced overlays |  | original, readme, new |
+| `[color].enable_tonemap` | HDR→SDR pipeline toggle | Disable when inputs are SDR | bool | `True` | `enable_tonemap = false` | Skipping tonemap speeds renders but loses HDR cues |  | original, readme, new |
+| `[runtime].ram_limit_mb` | VapourSynth RAM guard | Tune on constrained systems | int | `8000` | `ram_limit_mb = 4096` | Lower limits prevent spikes yet may trigger reloads |  | original, readme, new |
+| `VAPOURSYNTH_PYTHONPATH` | Env search path for VapourSynth | Set when using a system install | env var | (verify) | `export VAPOURSYNTH_PYTHONPATH=/opt/vs/site-packages` | Missing path triggers ClipInit errors | Value read at src/vs_core.py:186 (verify) | original, ripgrep |
+| `--threads / --gpu / --device` | Planned performance flags | Use backend settings until CLI exposes them | CLI (n/a) | n/a | N/A | Currently unavailable; rely on VapourSynth/FFmpeg (verify frame_compare.py:1107-1108) | Placeholder only | original, readme |
+| `--output-dir / --csv / --json / --images / --grid / --slowpics` | Planned output flags | Configure outputs via config keys today | CLI (n/a) | n/a | N/A | Not yet wired; use `[screenshots.*]` and `[slowpics.*]` (verify frame_compare.py:1107-1108) | Placeholder only | original, readme |
 
-### Install Python dependencies with uv
-```bash
-uv sync
-```
-This resolves the application dependencies listed in `pyproject.toml`. Add `--group dev` when you also want linting and test tools.
+## Features & Metrics
+Brightness and darkness metrics downscale each sampled frame when needed, convert it to GRAY, and inspect the Y (luma) plane. The pipeline records the normalized mean brightness (0.0–1.0). Tonemapping in `[color].enable_tonemap` runs before sampling when HDR sources need SDR previews.
 
-Install VapourSynth support only when you need it:
+Motion metrics compare each frame with its predecessor. If `analysis.motion_use_absdiff = true`, the tool uses an absolute pixel difference, which runs fastest. Otherwise it applies `MakeDiff` followed by a Prewitt edge filter and then smooths values with `analysis.motion_diff_radius`, trading speed for crisp edge detection.
 
-```bash
-uv sync --extra vapoursynth
-```
+## Outputs
+| Artifact | Format | Path pattern | How to generate (flag/example) | Notes | Source |
+|---|---|---|---|---|---|
+| Screenshots (default pipeline) | PNG | `"<frame> - <label>.png"` under `[screenshots].directory_name` | Run the CLI with VapourSynth enabled (`use_ffmpeg = false`) | Categories include Dark, Bright, Motion, Random, and User | original, readme, new, ripgrep |
+| VapourSynth fpng renders | PNG | Same as above | Leave `[screenshots].use_ffmpeg = false`; uses `fpng.Write` | Requires the VapourSynth fpng plugin | original, new, ripgrep |
+| FFmpeg renders | PNG | Same as above | Set `[screenshots].use_ffmpeg = true` | Depends on `ffmpeg` binary on `PATH` | original, new, ripgrep |
+| Placeholder images | Text | Same as above | Written when a writer fails; see `_save_frame_placeholder` | Helpful for spotting missing renders | new, ripgrep |
+| Metrics cache | JSON | `[analysis].frame_data_filename` (`generated.compframes` by default) | Keep `analysis.save_frames_data = true` | Stores brightness, motion, and selection data | original, readme, new, ripgrep |
+| Selection sidecar | JSON | `generated.selection.v1.json` beside the cache | Saved with `_save_selection_sidecar` | Speeds up reloads when files match | original, new, ripgrep |
+| Audio offset cache | TOML | `[audio_alignment].offsets_filename` (`generated.audio_offsets.toml` by default) | Enable `[audio_alignment].enable = true` | Captures suggested and manual trim offsets per clip | new |
 
-### Provision VapourSynth
-- **Inside the virtual environment**: install the optional extra (`uv sync --extra vapoursynth`) or add the wheel manually, e.g. `uv pip install VapourSynth`.
-- **Using a system install**: install VapourSynth through your platform’s packages, then expose its Python modules by either
-  - setting the `VAPOURSYNTH_PYTHONPATH` environment variable, or
-  - listing search folders in `[runtime.vapoursynth_python_paths]` (they are prepended to `sys.path`).
+## Advanced (deep technical)
 
-Ensure the interpreter ABI matches the VapourSynth build; otherwise imports will raise `ClipInitError` with guidance on the missing module.
+### Advanced configuration (full reference)
+The CLI reads a UTF-8 TOML file and instantiates the dataclasses in `src/datatypes.py`. `_sanitize_section` coerces booleans, validates keys, and applies range checks for every section. Every field ships with a default. Update `[paths].input_dir` before each run so at least two video files are available.
 
-### FFmpeg workflow
-Keep `screenshots.use_ffmpeg=false` to render through VapourSynth. When set to `true`, make sure `ffmpeg` is on `PATH`; otherwise a `ScreenshotWriterError` is raised.
-
-## Configuration
-The CLI reads a UTF-8 TOML file and instantiates the dataclasses in `src/datatypes.py`. `_sanitize_section` coerces booleans, validates keys, and applies range checks for every section. All fields have defaults, but you should at least point `[paths].input_dir` to a folder containing **two or more** video files.
+| Flag/Key | Purpose | Type | Default | Example | Related sections |
+|---|---|---|---|---|---|
+| `--config` | Selects the TOML configuration file used for a run | CLI `str` | `config.toml` | `uv run python frame_compare.py --config myrun.toml` | Installation, Usage Modes |
+| `--input` | Overrides `[paths].input_dir` for a single invocation | CLI `Optional[str]` | `None` (use config) | `--input comparison_videos` | Usage Modes, Outputs |
+| `[paths].input_dir` | Root directory scanned for video sources | `str` | `"."` | `input_dir = "comparison_videos"` | Installation, Usage Modes |
+| `analysis.frame_count_dark` | Number of darkest frames to consider | `int` | `20` | `frame_count_dark = 12` | Detailed Features (Brightness) |
+| `analysis.frame_count_bright` | Number of brightest frames to consider | `int` | `10` | `frame_count_bright = 16` | Detailed Features (Brightness) |
+| `analysis.frame_count_motion` | Frames picked from motion scoring | `int` | `15` | `frame_count_motion = 24` | Detailed Features (Motion) |
+| `analysis.random_frames` | Additional random samples within window | `int` | `15` | `random_frames = 8` | Usage Modes (Random) |
+| `analysis.user_frames` | Explicit frame indices to force-include | `List[int]` | `[]` | `user_frames = [42, 180, 512]` | Usage Modes (User-selected) |
+| `analysis.random_seed` | Seed for deterministic RNG behaviour | `int` | `20202020` | `random_seed = 1337` | Detailed Features, Usage Modes |
+| `analysis.step` | Sampling stride when frames are sequential | `int` | `2` | `step = 1` | Performance Tips |
+| `analysis.downscale_height` | Downscale height prior to metrics | `int` | `480` | `downscale_height = 720` | Performance Tips |
+| `analysis.save_frames_data` | Persist frame metrics to cache file | `bool` | `True` | `save_frames_data = false` | Outputs, Performance Tips |
+| `analysis.motion_use_absdiff` | Switch between absdiff and Prewitt-based motion | `bool` | `False` | `motion_use_absdiff = true` | Detailed Features (Motion) |
+| `analysis.motion_scenecut_quantile` | Filters out motion spikes above quantile | `float` | `0.0` | `motion_scenecut_quantile = 0.85` | Detailed Features (Motion) |
+| `analysis.motion_diff_radius` | Radius for motion smoothing window | `int` | `4` | `motion_diff_radius = 6` | Detailed Features (Motion) |
+| `analysis.analyze_clip` | Reference clip label for scoring | `str` | `""` | `analyze_clip = "baseline"` | Usage Modes (Mixed) |
+| `analysis.frame_data_filename` | Cache filename for saved metrics | `str` | `"generated.compframes"` | `frame_data_filename = "cached_metrics.compframes"` | Outputs |
+| `audio_alignment.enable` | Toggle audio-based offset estimation | `bool` | `False` | `enable = true` | Usage Modes (Auto-align) |
+| `audio_alignment.correlation_threshold` | Minimum correlation needed before applying | `float` | `0.55` | `correlation_threshold = 0.65` | Usage Modes (Auto-align) |
+| `audio_alignment.max_offset_seconds` | Reject offsets beyond this magnitude | `float` | `12.0` | `max_offset_seconds = 6.0` | Usage Modes (Auto-align) |
+| `audio_alignment.offsets_filename` | TOML file storing per-clip trims | `str` | `"generated.audio_offsets.toml"` | `offsets_filename = "cache/audio_offsets.toml"` | Outputs |
+| `audio_alignment.confirm_with_screenshots` | Ask for preview confirmation after detection | `bool` | `True` | `confirm_with_screenshots = false` | Usage Modes (Auto-align) |
+| `screenshots.use_ffmpeg` | Use FFmpeg instead of VapourSynth writer | `bool` | `False` | `use_ffmpeg = true` | Installation, Outputs |
+| `screenshots.directory_name` | Output folder for rendered images | `str` | `"screens"` | `directory_name = "frames"` | Outputs |
+| `screenshots.compression_level` | Compression preset (0–2) | `int` | `1` | `compression_level = 2` | Outputs |
+| `screenshots.add_frame_info` | Overlay frame statistics on outputs | `bool` | `True` | `add_frame_info = false` | Detailed Features |
+| `screenshots.pad_to_canvas` | Pad images to consistent canvas | `str` | `"off"` | `pad_to_canvas = "auto"` | Outputs |
+| `color.enable_tonemap` | Enable HDR→SDR tonemapping | `bool` | `True` | `enable_tonemap = false` | Detailed Features (Brightness) |
+| `color.tone_curve` | Tonemap curve identifier | `str` | `"bt.2390"` | `tone_curve = "hable"` | Detailed Features (Brightness) |
+| `color.target_nits` | Target peak nits for tonemapping | `float` | `100.0` | `target_nits = 120.0` | Detailed Features (Brightness) |
+| `color.verify_luma_threshold` | Luma delta threshold for verification | `float` | `0.10` | `verify_luma_threshold = 0.05` | Detailed Features |
+| `slowpics.auto_upload` | Enable automatic slow.pics uploads | `bool` | `False` | `auto_upload = true` | Outputs |
+| `slowpics.webhook_url` | Webhook to notify after upload | `str` | `""` | `webhook_url = "https://slow.pics/hooks/..."` | Outputs |
+| `slowpics.delete_screen_dir_after_upload` | Remove screenshots after upload | `bool` | `True` | `delete_screen_dir_after_upload = false` | Outputs |
+| `runtime.ram_limit_mb` | Upper bound for VapourSynth RAM use | `int` | `8000` | `ram_limit_mb = 4096` | Performance Tips |
+| `runtime.vapoursynth_python_paths` | Extra Python paths for VapourSynth | `List[str]` | `[]` | `vapoursynth_python_paths = ["/opt/vs/python"]` | Installation, Performance |
+| `source.preferred` | Preferred VapourSynth source plugin | `str` | `"lsmas"` | `preferred = "ffms2"` | Detailed Features |
+| `--random-frames` *(Documented here but verify in code)* | CLI flag not implemented; use `[analysis].random_frames` instead | CLI (n/a) | n/a | `--random-frames 10` | Usage Modes |
+| `--user-frames / --frames` *(Documented here but verify in code)* | CLI shortcut not implemented; configure `[analysis].user_frames` | CLI (n/a) | n/a | `--user-frames 10,200,501` | Usage Modes |
+| `--frame-step / --frame-interval` *(Documented here but verify in code)* | Prefer `[analysis].step` for stride control | CLI (n/a) | n/a | `--frame-step 2` | Performance Tips |
+| `--seed / --deterministic` *(Documented here but verify in code)* | Determinism handled via `[analysis].random_seed` | CLI (n/a) | n/a | `--seed 20202020` | Detailed Features |
+| `--metrics / --brightness / --darkness / --motion` *(Documented here but verify in code)* | Use analysis config keys above to tune selections | CLI (n/a) | n/a | `--brightness 10` | Detailed Features |
+| `--tonemap / --hdr-to-sdr / --gamma / --colorspace / --crop / --resize / --grayscale` *(Documented here but verify in code)* | Governed by `[color.*]` and `[screenshots.*]` options listed above | CLI (n/a) | n/a | `--tonemap hable` | Detailed Features |
+| `--threads / --gpu / --device` *(Documented here but verify in code)* | No dedicated flags; consider `[runtime.ram_limit_mb]` and FFmpeg/VapourSynth configs | CLI (n/a) | n/a | `--threads 4` | Performance Tips |
+| `--output-dir / --csv / --json / --images / --grid / --slowpics` *(Documented here but verify in code)* | Output control managed via `[screenshots.*]`, `[analysis.*]`, `[slowpics.*]` | CLI (n/a) | n/a | `--output-dir screenshots` | Outputs |
 
 ### Minimal config
 ```toml
@@ -106,7 +258,7 @@ dynamic_peak_detection = true
 target_nits = 100.0
 dst_min_nits = 0.1
 overlay_enabled = true
-overlay_text_template = "TM:{tone_curve} dpd={dynamic_peak_detection} dst={target_nits}nits"
+overlay_text_template = "Tonemapping Algorithm: {tone_curve} dpd = {dynamic_peak_detection} dst = {target_nits} nits"
 verify_enabled = true
 verify_auto = true
 verify_start_seconds = 10.0
@@ -211,7 +363,7 @@ change_fps = {}
 | `target_nits` | float | 100.0 | No | SDR peak nits (`dst_max`). Must be >0.|
 | `dst_min_nits` | float | 0.1 | No | Minimum nits for libplacebo (`dst_min`). Must be ≥0.|
 | `overlay_enabled` | bool | true | No | Draw an SDR metadata overlay (top-right). If true, failures log `[OVERLAY]` and obey `strict`.|
-| `overlay_text_template` | str | `"TM:{tone_curve} dpd={dynamic_peak_detection} dst={target_nits}nits"` | No | Template for the overlay text. Placeholders: `{tone_curve}`, `{dpd}`, `{dynamic_peak_detection}`, `{target_nits}`, `{preset}`, `{reason}`.|
+| `overlay_text_template` | str | `"Tonemapping Algorithm: {tone_curve} dpd = {dynamic_peak_detection} dst = {target_nits} nits"` | No | Template for the overlay text. Placeholders: `{tone_curve}`, `{dpd}`, `{dynamic_peak_detection}`, `{target_nits}`, `{preset}`, `{reason}`.|
 | `verify_enabled` | bool | true | No | Compute Δ vs naive SDR and log `[VERIFY] frame=… avg=… max=…`.|
 | `verify_frame` | int? | null | No | Force a specific verification frame index.|
 | `verify_auto` | bool | true | No | Enable the auto-search described in `docs/hdr_tonemap_overview.md`.|
@@ -280,18 +432,18 @@ See `docs/hdr_tonemap_overview.md` for a walkthrough of the log messages, preset
 | `change_fps` | dict[str, list[int] or "set"] | `{}` | No | Either `[num, den]` to apply `AssumeFPS`, or `"set"` to mark the clip as the reference FPS for others.|
 
 ## TMDB auto-discovery
-Enabling `[tmdb].api_key` activates an asynchronous resolver that translates filenames into TMDB metadata before screenshots are rendered. The CLI analyses the first detected source to gather title/year hints (via GuessIt/Anitopy), then resolves `(category, tmdbId, original language)` once per run. Successful matches populate:
+Enabling `[tmdb].api_key` activates an asynchronous resolver that translates filenames into TMDB metadata. The CLI analyses the first detected source to gather title and year hints (via GuessIt or Anitopy). It then resolves `(category, tmdbId, original language)` once per run. Successful matches populate:
 
 - `cfg.slowpics.tmdb_id` and `cfg.slowpics.tmdb_category` when empty so the slow.pics upload automatically links to TMDB (normalizing to the legacy `MOVIE_#####` / `TV_#####` format), and
 - the templating context for `[slowpics].collection_name`, exposing `${Title}`, `${OriginalTitle}`, `${Year}`, `${TMDBId}`, `${TMDBCategory}`, `${OriginalLanguage}`, `${Filename}`, `${FileName}`, and `${Label}`.
 
 Resolution follows a deterministic pipeline:
 
-1. If the filename or metadata exposes external IDs, `find/{imdb|tvdb}_id` is queried first, honouring `[tmdb].category_preference` when both movie and TV hits are returned.
-2. Otherwise, the resolver issues `search/movie` or `search/tv` calls with progressively broader queries derived from the cleaned title. Heuristics include year windows within `[tmdb].year_tolerance`, roman-numeral conversion, subtitle/colon trimming, alternative/AKA extraction (including “VVitch”→“Witch”), reduced word sets, automatic movie↔TV switching, and, when `[tmdb].enable_anime_parsing=true`, romaji titles via Anitopy.
-3. Every response is scored by similarity, release year proximity, and light popularity boosts. Strong matches are selected immediately; otherwise the highest scoring candidate wins with logging that notes the heuristic (e.g. “roman-numeral”). Ambiguity only surfaces when `[tmdb].unattended=false`, in which case the CLI prompts for a manual identifier such as `movie/603` (the upload will normalize this to `MOVIE_603`).
+1. If the filename or metadata exposes external IDs, `find/{imdb|tvdb}_id` is queried first. The resolver honours `[tmdb].category_preference` when both movie and TV hits appear.
+2. Otherwise, the resolver issues `search/movie` or `search/tv` calls with progressively broader queries. It uses year windows (`[tmdb].year_tolerance`), roman-numeral conversion, subtitle trimming, alternative title extraction (such as “VVitch” → “Witch”), reduced word sets, automatic movie/TV switching, and (when `[tmdb].enable_anime_parsing=true`) romaji titles from Anitopy.
+3. Every response is scored by similarity, release year proximity, and light popularity boosts. Strong matches are selected immediately. If no clear winner exists, the highest scoring candidate wins and the heuristic is logged (for example “roman-numeral”). Ambiguity only surfaces when `[tmdb].unattended=false`; the CLI then prompts for a manual identifier such as `movie/603`, which normalizes to `MOVIE_603`.
 
-All HTTP requests share an in-memory cache governed by `[tmdb].cache_ttl_seconds` and automatically apply exponential backoff on rate limits or transient failures. Setting `[tmdb].api_key` is mandatory; when omitted the resolver is skipped and slow.pics falls back to whatever `tmdb_id` you manually provided in the config.
+All HTTP requests share an in-memory cache governed by `[tmdb].cache_ttl_seconds`. The client applies exponential backoff on rate limits or transient failures. Setting `[tmdb].api_key` is mandatory; when omitted the resolver is skipped and slow.pics uses whatever `tmdb_id` you supplied manually.
 
 ## CLI usage
 ```
@@ -300,20 +452,108 @@ Usage: frame_compare.py [OPTIONS]
 Options:
   --config TEXT  Path to config.toml  [default: config.toml]
   --input TEXT   Override [paths.input_dir] from config.toml
+  --audio-align-track TEXT
+                 Manual audio stream override (label=index). Repeatable.
   --help         Show this message and exit.
 ```
 
-### Common recipes
-- **Run against another folder**: `uv run python frame_compare.py --config config.toml --input D:/captures` overrides `[paths].input_dir` for a single run.
-- **Pin the analysis driver**: set `analysis.analyze_clip` to a filename, label, or index (as a string) so that clip guides scoring while others inherit its FPS when marked with `change_fps = { "name" = "set" }`.
-- **Reuse cached metrics**: keep `save_frames_data=true`. Subsequent runs load `frame_data_filename`, skip metric collection, and immediately reuse the stored frame list.
-- **Render with FFmpeg**: toggle `[screenshots].use_ffmpeg = true` to render directly from source files—useful when VapourSynth is unavailable or trims insert synthetic blanks.
-- **Upload to slow.pics**: enable `[slowpics].auto_upload`, optionally set `webhook_url`, and the CLI will stream uploads with progress bars, retry the webhook, and delete screenshots after success when configured.
+### Two-file comparison
+```bash
+uv run python frame_compare.py --config config.toml --input comparison_videos
+```
+**Produces:** aligned PNG screenshots (default `screens/`) plus cached metrics (`generated.compframes`) when `analysis.save_frames_data = true`.
 
-## Determinism & reproducibility
+**Outputs:**
+- Images in `screens/` (or the value of `[screenshots].directory_name`).
+- Cached metrics stored alongside the config file.
+- `generated.audio_offsets.toml` when `[audio_alignment].enable = true`.
+
+### Multi-file batch (N files)
+```bash
+uv run python frame_compare.py --config config.toml --input /data/video_batches
+```
+**Produces:** subdirectories under `screens/` for each comparison set; optional slow.pics upload if `[slowpics].auto_upload = true`.
+
+**Outputs:**
+- Per-source screenshots within `screens/<clip>/`.
+- Shared cache files (`generated.compframes`, `generated.audio_offsets.toml` when audio alignment runs).
+
+### Random frame selection with seed
+```toml
+[analysis]
+random_frames = 20
+random_seed = 123456
+```
+```bash
+uv run python frame_compare.py --config seeded.toml --input comparison_videos
+```
+**Produces:** deterministic `Random` category frames alongside dark/bright/motion picks.
+
+**Outputs:**
+- Frames written to `screens/` with category labels.
+- Cached metrics honouring the seed in `generated.compframes`.
+
+### User-selected frames
+```toml
+[analysis]
+user_frames = [10, 200, 501]
+```
+```bash
+uv run python frame_compare.py --config pins.toml --input comparison_videos
+```
+**Produces:** forced frame captures (10, 200, 501) in the `User` category in addition to other selections.
+
+**Outputs:**
+- Screenshots saved under `screens/`.
+- Updated cache file if enabled.
+
+### Mixed random + user selection
+```toml
+[analysis]
+user_frames = [10, 200, 501]
+random_frames = 8
+random_seed = 98765
+```
+```bash
+uv run python frame_compare.py --config mixed.toml --input comparison_videos
+```
+**Produces:** merged `User` and seeded `Random` frames alongside dark/bright/motion results.
+
+**Outputs:**
+- Combined frame set in `screens/`.
+- Deterministic cache `generated.compframes` for reuse.
+
+### Determinism & reproducibility
 - All random sampling uses `random.Random(random_seed)` so identical configs and inputs yield the same frame order.
 - Cached metrics store a config fingerprint and clip metadata; the loader validates hashes, file lists, trims, FPS, and release groups before reuse, guaranteeing identical selections when nothing changed.
 - Selection windows derive from computed clip metadata and obey deterministic rounding, so applying the same trims, ignores, and FPS overrides reproduces the same frame subset.
+
+### Performance Tips
+- **Minimise pixels processed:** Lower `analysis.downscale_height` to shrink the working resolution or raise `analysis.step` to sample fewer frames when full coverage is unnecessary. Both settings feed directly into the VapourSynth pipeline.
+- **Balance motion costs:** Prewitt-based motion scoring (default) adds an extra edge filter pass; flip `analysis.motion_use_absdiff = true` to switch to a cheaper absolute-difference metric if edge sharpness is less important. Reducing `analysis.frame_count_motion` and `motion_diff_radius` shortens motion post-processing.
+- **Tone mapping trade-offs:** HDR→SDR conversion (`color.enable_tonemap = true`, `color.tone_curve`) is one of the heavier stages. Disable tonemapping or choose a simpler curve when working with SDR sources or when throughput matters more than HDR fidelity.
+- **Leverage caching:** Keep `analysis.save_frames_data = true` so the tool reuses `analysis.frame_data_filename` on subsequent runs. Purge the cache only when footage or config changes.
+- **Choose the renderer:** VapourSynth generally offers richer processing but is heavier to initialise. Enable `[screenshots].use_ffmpeg = true` for faster, dependency-light rendering in environments where FFmpeg is already optimised.
+- **Memory footprint:** Adjust `runtime.ram_limit_mb` if VapourSynth reports allocation failures; lowering it can prevent thrashing on constrained machines, while increasing it allows larger clips to be analysed in one pass.
+- **Parallelism:** The CLI does not expose `--threads`, `--gpu`, or `--device` flags. Instead, rely on the underlying VapourSynth/FFmpeg installations for multithreading, and keep working directories on fast storage to reduce I/O contention.
+
+
+## Roadmap
+- **Must:**
+  - Expose dedicated CLI flags for random/user frame selection so documentation and options remain aligned.
+  - Add first-class output-format toggles (CSV/JSON grids) to match the documented workflow expectations.
+  - add upscaling information to the overlay when performed
+  - ensure tonemapping is still applied with a negative trim on an HDR clip
+  - refine audio alignment heuristics to better handle per-scene drift
+- **Should:**
+  - Provide an opt-in GPU/Vulkan path for tone mapping to reduce HDR processing time.
+  - Extend motion scoring with optional optical-flow backends for smoother clips.
+- **Nice-to-have:**
+  - Ship a gallery template that assembles comparison grids from the generated PNGs.
+  - Offer a guided slow.pics wizard that validates webhooks before upload.
+
+## Changelog
+- **2025-09-29:** README refresh covering installation specifics, configuration reference, metric explanations, usage walkthroughs, outputs, and performance guidance.
 
 ## Troubleshooting
 | Symptom | Likely cause | Fix |

@@ -1,9 +1,10 @@
-﻿from __future__ import annotations
+"""General-purpose utility helpers for frame comparison."""
+
+from __future__ import annotations
 
 import re
 from importlib import import_module
 from typing import Any, Dict, Mapping, Optional
-
 
 _YEAR_RE = re.compile(r"(19|20)\d{2}")
 _IMDB_ID_RE = re.compile(r"(tt\d{7,9})", re.IGNORECASE)
@@ -74,7 +75,11 @@ def _call_anitopy(file_name: str) -> Mapping[str, Any]:
     return dict(mapped) if mapped else {}
 
 
-def _episode_designator_for_label(episode_value: Any, season_value: Any, normalized_episode: str) -> str:
+def _episode_designator_for_label(
+    episode_value: Any,
+    season_value: Any,
+    normalized_episode: str,
+) -> str:
     """Build a compact episode marker for labels (e.g. S01E03)."""
 
     season = _first_sequence_value(season_value)

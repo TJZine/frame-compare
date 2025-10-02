@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import builtins
 import logging
+import math
 import re
 import sys
 import shutil
@@ -10,19 +11,22 @@ import webbrowser
 import traceback
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+import datetime as _dt
 from pathlib import Path
 from string import Template
 import time
-from typing import Dict, List, Mapping, Optional, Sequence, Tuple
+import random
+from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import click
 from rich import print
 from rich.markup import escape
-from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeRemainingColumn
 from natsort import os_sorted
 
 from src.config_loader import ConfigError, load_config
 from src.datatypes import AppConfig
+from src import audio_alignment
 from src.utils import parse_filename_metadata
 from src import vs_core
 from src.analysis import (
@@ -90,6 +94,8 @@ class _ClipPlan:
     applied_fps: Optional[Tuple[int, int]] = None
     has_trim_start_override: bool = False
     has_trim_end_override: bool = False
+    alignment_frames: int = 0
+    alignment_status: str = ""
 
 
 @dataclass
@@ -100,6 +106,19 @@ class RunResult:
     config: AppConfig
     image_paths: List[str]
     slowpics_url: Optional[str] = None
+
+
+@dataclass
+class _AudioAlignmentSummary:
+    offsets_path: Path
+    reference_name: str
+    measurements: Sequence[audio_alignment.AlignmentMeasurement]
+    applied_frames: Dict[str, int]
+    baseline_shift: int
+    statuses: Dict[str, str]
+    reference_plan: _ClipPlan
+    final_adjustments: Dict[str, int]
+    swap_details: Dict[str, str]
 
 
 class CLIAppError(RuntimeError):
@@ -177,6 +196,22 @@ def _dedupe_labels(
     for idx, meta in enumerate(metadata):
         if not (meta.get("label") or "").strip():
             meta["label"] = files[idx].name
+
+
+def _parse_audio_track_overrides(entries: Iterable[str]) -> Dict[str, int]:
+    mapping: Dict[str, int] = {}
+    for entry in entries:
+        if "=" not in entry:
+            continue
+        key, value = entry.split("=", 1)
+        key = key.strip().lower()
+        if not key:
+            continue
+        try:
+            mapping[key] = int(value.strip())
+        except ValueError:
+            continue
+    return mapping
 
 
 def _first_non_empty(metadata: Sequence[Dict[str, str]], key: str) -> str:
@@ -589,6 +624,635 @@ def _print_trim_overrides(plans: Sequence[_ClipPlan]) -> None:
         )
 
 
+def _resolve_alignment_reference(
+    plans: Sequence[_ClipPlan],
+    analyze_path: Path,
+    reference_hint: str,
+) -> _ClipPlan:
+    if not plans:
+        raise CLIAppError("No clips available for alignment")
+
+    hint = (reference_hint or "").strip().lower()
+    if hint:
+        if hint.isdigit():
+            idx = int(hint)
+            if 0 <= idx < len(plans):
+                return plans[idx]
+        for plan in plans:
+            candidates = {
+                plan.path.name.lower(),
+                plan.path.stem.lower(),
+                (plan.metadata.get("label") or "").lower(),
+            }
+            if hint in candidates and hint:
+                return plan
+
+    for plan in plans:
+        if plan.path == analyze_path:
+            return plan
+    return plans[0]
+
+
+def _maybe_apply_audio_alignment(
+    plans: Sequence[_ClipPlan],
+    cfg: AppConfig,
+    analyze_path: Path,
+    root: Path,
+    audio_track_overrides: Mapping[str, int],
+) -> _AudioAlignmentSummary | None:
+    audio_cfg = cfg.audio_alignment
+    if not audio_cfg.enable:
+        return None
+    if len(plans) < 2:
+        print("[yellow]Audio alignment skipped:[/yellow] need at least two clips.")
+        return None
+
+    reference_plan = _resolve_alignment_reference(plans, analyze_path, audio_cfg.reference)
+    targets = [plan for plan in plans if plan is not reference_plan]
+    if not targets:
+        print("[yellow]Audio alignment skipped:[/yellow] no secondary clips to compare.")
+        return None
+
+    print(
+        "[cyan]Estimating audio offsets relative to[/cyan] "
+        f"{escape(reference_plan.path.name)}"
+    )
+
+    stream_infos: Dict[Path, List[audio_alignment.AudioStreamInfo]] = {}
+    for plan in plans:
+        try:
+            infos = audio_alignment.probe_audio_streams(plan.path)
+        except audio_alignment.AudioAlignmentError as exc:
+            logger.warning("ffprobe audio stream probe failed for %s: %s", plan.path.name, exc)
+            infos = []
+        stream_infos[plan.path] = infos
+
+    def _match_audio_override(plan: _ClipPlan) -> Optional[int]:
+        value = _match_override(plans.index(plan), plan.path, plan.metadata, audio_track_overrides)
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _pick_default(streams: Sequence[audio_alignment.AudioStreamInfo]) -> int:
+        if not streams:
+            return 0
+        for stream in streams:
+            if stream.is_default:
+                return stream.index
+        return streams[0].index
+
+    ref_override = _match_audio_override(reference_plan)
+    reference_stream_index = ref_override if ref_override is not None else _pick_default(
+        stream_infos.get(reference_plan.path, [])
+    )
+
+    reference_stream_info = None
+    for candidate in stream_infos.get(reference_plan.path, []):
+        if candidate.index == reference_stream_index:
+            reference_stream_info = candidate
+            break
+
+    def _score_candidate(candidate: audio_alignment.AudioStreamInfo) -> float:
+        if reference_stream_info is None:
+            base = 0.0
+        else:
+            base = 0.0
+            if reference_stream_info.language and candidate.language == reference_stream_info.language:
+                base += 100.0
+            elif not candidate.language and reference_stream_info.language:
+                base += 10.0
+            if candidate.codec_name == reference_stream_info.codec_name:
+                base += 30.0
+            elif candidate.codec_name.split(".")[0] == reference_stream_info.codec_name.split(".")[0]:
+                base += 20.0
+            if candidate.channels == reference_stream_info.channels:
+                base += 10.0
+            if reference_stream_info.channel_layout and candidate.channel_layout == reference_stream_info.channel_layout:
+                base += 5.0
+            if reference_stream_info.sample_rate and candidate.sample_rate == reference_stream_info.sample_rate:
+                base += 10.0
+            elif reference_stream_info.sample_rate and candidate.sample_rate:
+                base -= abs(candidate.sample_rate - reference_stream_info.sample_rate) / 1000.0
+            if reference_stream_info.bitrate and candidate.bitrate:
+                base -= abs(candidate.bitrate - reference_stream_info.bitrate) / 10000.0
+        base += 3.0 if candidate.is_default else 0.0
+        base += 1.0 if candidate.is_forced else 0.0
+        if candidate.bitrate:
+            base += candidate.bitrate / 1e5
+        return base
+
+    target_stream_indices: Dict[Path, int] = {}
+    for target in targets:
+        override_idx = _match_audio_override(target)
+        if override_idx is not None:
+            target_stream_indices[target.path] = override_idx
+            continue
+        infos = stream_infos.get(target.path, [])
+        if not infos:
+            target_stream_indices[target.path] = 0
+            continue
+        best = max(infos, key=_score_candidate)
+        target_stream_indices[target.path] = best.index
+
+    print("[cyan]Audio stream selection:[/cyan]")
+    def _describe(plan: _ClipPlan, stream_idx: int) -> str:
+        infos = stream_infos.get(plan.path, [])
+        picked = next((info for info in infos if info.index == stream_idx), None)
+        if picked is None:
+            return f"{stream_idx}"
+        language = picked.language or "und"
+        layout = picked.channel_layout or (f"{picked.channels}ch" if picked.channels else "?")
+        rate = picked.sample_rate or 0
+        return (
+            f"{stream_idx} [{language} {picked.codec_name} {layout} "
+            f"{rate}Hz {'default' if picked.is_default else ''}]"
+        )
+
+    print(
+        f"  Reference {escape(reference_plan.path.name)} -> "
+        f"{_describe(reference_plan, reference_stream_index)}"
+    )
+    for target in targets:
+        idx = target_stream_indices[target.path]
+        print(
+            f"  Target    {escape(target.path.name)} -> "
+            f"{_describe(target, idx)}"
+        )
+
+    offsets_path = (root / audio_cfg.offsets_filename).resolve()
+    try:
+        _, existing_entries = audio_alignment.load_offsets(offsets_path)
+    except audio_alignment.AudioAlignmentError as exc:
+        raise CLIAppError(
+            f"Failed to read audio offsets file: {exc}",
+            rich_message=f"[red]Failed to read audio offsets file:[/red] {exc}",
+        ) from exc
+
+    try:
+        base_start = audio_cfg.start_seconds
+        base_duration = audio_cfg.duration_seconds
+
+        hop_length = max(1, min(audio_cfg.hop_length, max(1, audio_cfg.sample_rate // 100)))
+
+        measurements: List[audio_alignment.AlignmentMeasurement]
+        negative_offsets: Dict[str, bool] = {}
+
+        if targets:
+            with Progress(
+                TextColumn('{task.description}'),
+                BarColumn(),
+                TextColumn('{task.completed}/{task.total}'),
+                TextColumn('{task.percentage:>6.02f}%'),
+                TextColumn('{task.fields[rate]}'),
+                TimeRemainingColumn(),
+                transient=False,
+            ) as audio_progress:
+                task_id = audio_progress.add_task(
+                    'Estimating audio offsets',
+                    total=len(targets),
+                    rate='   0.00 pairs/s',
+                )
+                processed = 0
+                start_time = time.perf_counter()
+
+                def _advance_audio(count: int) -> None:
+                    nonlocal processed
+                    processed += count
+                    elapsed = time.perf_counter() - start_time
+                    rate_val = processed / elapsed if elapsed > 0 else 0.0
+                    audio_progress.update(
+                        task_id,
+                        completed=min(processed, len(targets)),
+                        rate=f"{rate_val:7.2f} pairs/s",
+                    )
+
+                measurements = audio_alignment.measure_offsets(
+                    reference_plan.path,
+                    [plan.path for plan in targets],
+                    sample_rate=audio_cfg.sample_rate,
+                    hop_length=hop_length,
+                    start_seconds=base_start,
+                    duration_seconds=base_duration,
+                    reference_stream=reference_stream_index,
+                    target_streams=target_stream_indices,
+                    progress_callback=_advance_audio,
+                )
+
+                if processed < len(targets):
+                    audio_progress.update(
+                        task_id,
+                        completed=len(targets),
+                        rate=f"{0.0:7.2f} pairs/s",
+                    )
+        else:
+            measurements = audio_alignment.measure_offsets(
+                reference_plan.path,
+                [plan.path for plan in targets],
+                sample_rate=audio_cfg.sample_rate,
+                hop_length=hop_length,
+                start_seconds=base_start,
+                duration_seconds=base_duration,
+                reference_stream=reference_stream_index,
+                target_streams=target_stream_indices,
+            )
+
+        frame_bias = int(audio_cfg.frame_offset_bias or 0)
+        if frame_bias != 0:
+            adjust_toward_zero = frame_bias > 0
+            bias_magnitude = abs(frame_bias)
+
+            for measurement in measurements:
+                frames_val = measurement.frames
+                if frames_val is None or frames_val == 0:
+                    continue
+
+                sign = 1 if frames_val > 0 else -1
+                magnitude = abs(frames_val)
+
+                if adjust_toward_zero:
+                    shift = min(bias_magnitude, magnitude)
+                    adjusted_magnitude = max(0, magnitude - shift)
+                else:
+                    adjusted_magnitude = magnitude + bias_magnitude
+
+                if adjusted_magnitude == magnitude:
+                    continue
+
+                new_frames = sign * adjusted_magnitude
+                measurement.frames = new_frames
+
+                if measurement.target_fps and measurement.target_fps > 0:
+                    measurement.offset_seconds = new_frames / measurement.target_fps
+                elif measurement.reference_fps and measurement.reference_fps > 0:
+                    measurement.offset_seconds = new_frames / measurement.reference_fps
+
+        negative_override_notes: Dict[str, str] = {}
+        swap_details: Dict[str, str] = {}
+        swap_candidates: List[audio_alignment.AlignmentMeasurement] = []
+        swap_enabled = len(targets) == 1
+
+        for measurement in measurements:
+            if measurement.frames is not None and measurement.frames < 0:
+                if swap_enabled:
+                    swap_candidates.append(measurement)
+                    continue
+                measurement.frames = abs(int(measurement.frames))
+                negative_offsets[measurement.file.name] = True
+                negative_override_notes[measurement.key] = \
+                    "Suggested negative offset applied to the opposite clip for trim-first behaviour."
+
+        if swap_enabled and swap_candidates:
+            additional_measurements: List[audio_alignment.AlignmentMeasurement] = []
+            reference_name = reference_plan.path.name
+            existing_keys = {m.file.name for m in measurements}
+
+            for measurement in swap_candidates:
+                seconds = float(measurement.offset_seconds)
+                seconds_abs = abs(seconds)
+                target_name = measurement.file.name
+
+                original_frames = None
+                if measurement.frames is not None:
+                    original_frames = abs(int(measurement.frames))
+
+                reference_frames = None
+                if measurement.reference_fps and measurement.reference_fps > 0:
+                    reference_frames = int(round(seconds_abs * measurement.reference_fps))
+
+                measurement.frames = 0
+                measurement.offset_seconds = 0.0
+
+                def _describe(frames: Optional[int], seconds_val: float) -> str:
+                    parts: List[str] = []
+                    if frames is not None:
+                        parts.append(f"{frames} frame(s)")
+                    if not math.isnan(seconds_val):
+                        parts.append(f"{seconds_val:.3f}s")
+                    return " / ".join(parts) if parts else "0.000s"
+
+                measured_desc = _describe(original_frames, seconds_abs)
+                applied_desc = _describe(reference_frames, seconds_abs)
+                note = (
+                    f"Measured negative offset on {target_name}: {measured_desc}; "
+                    f"applied to {reference_name} as +{applied_desc}."
+                )
+                negative_override_notes[target_name] = note
+                negative_override_notes[reference_name] = note
+                swap_details[target_name] = note
+                swap_details[reference_name] = note
+
+                if reference_name not in existing_keys:
+                    additional_measurements.append(
+                        audio_alignment.AlignmentMeasurement(
+                            file=reference_plan.path,
+                            offset_seconds=seconds_abs,
+                            frames=reference_frames,
+                            correlation=measurement.correlation,
+                            reference_fps=measurement.reference_fps,
+                            target_fps=measurement.reference_fps,
+                        )
+                    )
+                    existing_keys.add(reference_name)
+
+            measurements.extend(additional_measurements)
+
+        if measurements:
+            print("[cyan]Audio offsets:[/cyan]")
+            for measurement in measurements:
+                frames_text = (
+                    f"{measurement.frames}fr"
+                    if measurement.frames is not None
+                    else "n/a"
+                )
+                suffix = ""
+                if measurement.file.name in negative_offsets:
+                    suffix = " (reference advanced; trimming target)"
+                if measurement.error:
+                    print(
+                        f"  {escape(measurement.file.name)}: error {escape(measurement.error)}"
+                    )
+                else:
+                    print(
+                        f"  {escape(measurement.file.name)}: "
+                        f"{measurement.offset_seconds:.3f}s ({frames_text}) "
+                        f"corr={measurement.correlation:.2f}{suffix}"
+                    )
+                    detail = swap_details.get(measurement.file.name)
+                    if detail:
+                        print(f"    note: {escape(detail)}")
+    except audio_alignment.AudioAlignmentError as exc:
+        raise CLIAppError(
+            f"Audio alignment failed: {exc}",
+            rich_message=f"[red]Audio alignment failed:[/red] {exc}",
+        ) from exc
+
+    warnings: List[str] = []
+    for measurement in measurements:
+        reasons: List[str] = []
+        if measurement.error:
+            reasons.append(measurement.error)
+        if abs(measurement.offset_seconds) > audio_cfg.max_offset_seconds:
+            reasons.append(
+                f"offset {measurement.offset_seconds:.3f}s exceeds limit {audio_cfg.max_offset_seconds:.3f}s"
+            )
+        if measurement.correlation < audio_cfg.correlation_threshold:
+            reasons.append(
+                f"correlation {measurement.correlation:.2f} below threshold {audio_cfg.correlation_threshold:.2f}"
+            )
+        if measurement.frames is None:
+            reasons.append("unable to derive frame offset (missing fps)")
+
+        if reasons:
+            measurement.frames = None
+            measurement.error = "; ".join(reasons)
+            negative_offsets.pop(measurement.file.name, None)
+            warnings.append(f"{measurement.file.name}: {measurement.error}")
+    if warnings:
+        print("[yellow]Audio alignment warnings:[/yellow]")
+        for message in warnings:
+            print(f"  - {escape(message)}")
+
+    applied_frames, statuses = audio_alignment.update_offsets_file(
+        offsets_path,
+        reference_plan.path.name,
+        measurements,
+        existing_entries,
+        negative_override_notes,
+    )
+
+    final_map: Dict[str, int] = {reference_plan.path.name: 0}
+    for name, frames in applied_frames.items():
+        final_map[name] = frames
+
+    baseline = min(final_map.values()) if final_map else 0
+    baseline_shift = int(-baseline) if baseline < 0 else 0
+
+    final_adjustments: Dict[str, int] = {}
+    for plan in plans:
+        desired = final_map.get(plan.path.name)
+        if desired is None:
+            continue
+        adjustment = int(desired - baseline)
+        if adjustment < 0:
+            adjustment = 0
+        if adjustment:
+            plan.trim_start = max(0, plan.trim_start + adjustment)
+            plan.alignment_frames = adjustment
+            plan.alignment_status = statuses.get(plan.path.name, "auto")
+        else:
+            plan.alignment_frames = 0
+            plan.alignment_status = statuses.get(plan.path.name, "auto") if plan.path.name in statuses else ""
+        final_adjustments[plan.path.name] = adjustment
+
+    if baseline_shift:
+        for plan in plans:
+            if plan is reference_plan:
+                plan.alignment_status = "baseline"
+
+    return _AudioAlignmentSummary(
+        offsets_path=offsets_path,
+        reference_name=reference_plan.path.name,
+        measurements=measurements,
+        applied_frames=applied_frames,
+        baseline_shift=baseline_shift,
+        statuses=statuses,
+        reference_plan=reference_plan,
+        final_adjustments=final_adjustments,
+        swap_details=swap_details,
+    )
+
+
+def _print_alignment_summary(summary: _AudioAlignmentSummary, plans: Sequence[_ClipPlan]) -> None:
+    print("[cyan]Audio alignment summary:[/cyan]")
+    ref_label = escape(summary.reference_name)
+    if summary.baseline_shift:
+        print(
+            f"  Reference {ref_label}: trimmed +{summary.baseline_shift} frame(s) for baseline alignment"
+        )
+    else:
+        print(f"  Reference {ref_label}: no trim applied")
+
+    plan_map = {plan.path.name: plan for plan in plans}
+
+    for measurement in summary.measurements:
+        name = measurement.file.name
+        plan = plan_map.get(name)
+        status = summary.statuses.get(name, "skipped")
+        applied = summary.applied_frames.get(name)
+        corr = f"{measurement.correlation:.2f}" if not math.isnan(measurement.correlation) else "nan"
+        if plan is None:
+            continue
+        if applied is None:
+            note = measurement.error or "no offset applied"
+            print(f"  - {escape(name)}: skipped ({escape(note)})")
+            continue
+        adjustment = summary.final_adjustments.get(name, 0)
+        seconds = measurement.target_fps and applied / measurement.target_fps if measurement.target_fps else None
+        seconds_text = f" ({applied / measurement.target_fps:.3f}s)" if seconds is not None else ""
+        print(
+            f"  - {escape(name)}: {status} trim +{adjustment} frame(s) [correlation={corr}]{seconds_text}"
+        )
+        detail = summary.swap_details.get(name)
+        if detail:
+            print(f"      note: {escape(detail)}")
+
+    print(
+        f"  Offsets file: {summary.offsets_path}"
+    )
+
+
+def _pick_preview_frames(clip: object, count: int, seed: int) -> List[int]:
+    total = getattr(clip, "num_frames", 0)
+    if not isinstance(total, int) or total <= 0:
+        return [i for i in range(count)]
+    if total <= count:
+        return list(range(total))
+    step = max(total // (count + 1), 1)
+    frames = [min(total - 1, step * (idx + 1)) for idx in range(count)]
+    deduped = sorted(set(frames))
+    while len(deduped) < count:
+        next_frame = min(total - 1, deduped[-1] + 1 if deduped else 0)
+        if next_frame not in deduped:
+            deduped.append(next_frame)
+        else:
+            break
+    return deduped[:count]
+
+
+def _sample_random_frames(clip: object, count: int, seed: int, exclude: Sequence[int]) -> List[int]:
+    total = getattr(clip, "num_frames", 0)
+    if not isinstance(total, int) or total <= 0:
+        return [i for i in range(count)]
+    exclude_set = set(exclude)
+    available = [idx for idx in range(total) if idx not in exclude_set]
+    if not available:
+        return list(range(min(count, total)))
+    rng = random.Random(seed)
+    if len(available) <= count:
+        return sorted(available)
+    return sorted(rng.sample(available, count))
+
+
+def _confirm_alignment_with_screenshots(
+    plans: Sequence[_ClipPlan],
+    summary: _AudioAlignmentSummary | None,
+    cfg: AppConfig,
+    root: Path,
+) -> None:
+    if summary is None or not cfg.audio_alignment.confirm_with_screenshots:
+        return
+
+    clips = [plan.clip for plan in plans]
+    if any(clip is None for clip in clips):
+        return
+
+    reference_clip = summary.reference_plan.clip
+    if reference_clip is None:
+        return
+
+    timestamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    base_dir = Path(cfg.screenshots.directory_name)
+    metadata = summary.reference_plan.metadata
+    name_candidates = [
+        metadata.get("label"),
+        metadata.get("title"),
+        metadata.get("anime_title"),
+        metadata.get("file_name"),
+        summary.reference_name,
+        summary.reference_plan.path.stem,
+    ]
+    base_name = next((str(value).strip() for value in name_candidates if value and str(value).strip()), "clip")
+    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", base_name).strip("._-")
+    if not safe_name:
+        safe_name = "clip"
+    preview_folder = f"{safe_name}-{timestamp}"
+    preview_dir = (root / base_dir / "audio_alignment" / preview_folder).resolve()
+
+    initial_frames = _pick_preview_frames(reference_clip, 2, cfg.audio_alignment.random_seed)
+
+    try:
+            generated = generate_screenshots(
+                clips,
+                initial_frames,
+                [str(plan.path) for plan in plans],
+                [plan.metadata for plan in plans],
+                preview_dir,
+                cfg.screenshots,
+                cfg.color,
+                trim_offsets=[plan.trim_start for plan in plans],
+            )
+    except ScreenshotError as exc:
+        raise CLIAppError(
+            f"Alignment preview failed: {exc}",
+            rich_message=f"[red]Alignment preview failed:[/red] {exc}",
+        ) from exc
+
+    if generated:
+        print("[cyan]Preview frames saved:[/cyan]")
+        for path in generated:
+            print(f"  - {path}")
+
+    if not sys.stdin.isatty():  # pragma: no cover - runtime-dependent
+        print("[yellow]Audio alignment confirmation skipped (non-interactive session).[/yellow]")
+        return
+
+    print("[cyan]Awaiting audio alignment confirmation... (press Y/n)[/cyan]")
+
+    if click.confirm(
+        "Do the preview frames look aligned?",
+        default=True,
+        show_default=True,
+    ):
+        return
+
+    inspection_dir = preview_dir / "inspection"
+    extra_frames = _sample_random_frames(
+        reference_clip,
+        5,
+        cfg.audio_alignment.random_seed + 1,
+        exclude=initial_frames,
+    )
+    try:
+        extra_paths = generate_screenshots(
+            clips,
+            extra_frames,
+            [str(plan.path) for plan in plans],
+            [plan.metadata for plan in plans],
+            inspection_dir,
+            cfg.screenshots,
+            cfg.color,
+            trim_offsets=[plan.trim_start for plan in plans],
+        )
+    except ScreenshotError as exc:
+        raise CLIAppError(
+            f"Alignment inspection failed: {exc}",
+            rich_message=f"[red]Alignment inspection failed:[/red] {exc}",
+        ) from exc
+
+    if extra_paths:
+        print("[cyan]Additional inspection frames saved:[/cyan]")
+        for path in extra_paths:
+            print(f"  - {path}")
+
+    print(
+        "[yellow]Audio alignment not confirmed.[/yellow] "
+        "Adjust the offsets in the generated file and rerun."
+    )
+    try:
+        click.launch(str(summary.offsets_path))
+    except Exception:
+        print(f"[yellow]Open and edit:[/yellow] {summary.offsets_path}")
+
+    raise CLIAppError(
+        "Audio alignment requires manual adjustment.",
+        rich_message=(
+            "[red]Audio alignment requires manual adjustment.[/red] "
+            f"Edit {summary.offsets_path} and rerun."
+        ),
+    )
 def _print_summary(files: Sequence[Path], frames: Sequence[int], out_dir: Path, url: str | None) -> None:
     print("[green]Comparison ready[/green]")
     print(f"  Files     : {len(files)}")
@@ -598,7 +1262,12 @@ def _print_summary(files: Sequence[Path], frames: Sequence[int], out_dir: Path, 
         print(f"  Slow.pics : {url}")
 
 
-def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
+def run_cli(
+    config_path: str,
+    input_dir: str | None = None,
+    *,
+    audio_track_overrides: Iterable[str] | None = None,
+) -> RunResult:
     config_location = Path(config_path).expanduser()
 
     try:
@@ -638,6 +1307,8 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
             f"Input directory not found: {root}",
             rich_message=f"[red]Input directory not found:[/red] {root}",
         )
+
+    audio_track_override_map = _parse_audio_track_overrides(audio_track_overrides or [])
 
     vs_core.configure(
         search_paths=cfg.runtime.vapoursynth_python_paths,
@@ -816,6 +1487,16 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
     _print_trim_overrides(plans)
     analyze_path = _pick_analyze_file(files, metadata, cfg.analysis.analyze_clip, cache_dir=root)
 
+    alignment_summary = _maybe_apply_audio_alignment(
+        plans,
+        cfg,
+        analyze_path,
+        root,
+        audio_track_override_map,
+    )
+    if alignment_summary is not None:
+        _print_alignment_summary(alignment_summary, plans)
+
     try:
         _init_clips(plans, cfg.runtime, root)
     except vs_core.ClipInitError as exc:
@@ -826,6 +1507,8 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
     clips = [plan.clip for plan in plans]
     if any(clip is None for clip in clips):
         raise CLIAppError("Clip initialisation failed")
+
+    _confirm_alignment_with_screenshots(plans, alignment_summary, cfg, root)
 
     analyze_index = [plan.path for plan in plans].index(analyze_path)
     analyze_clip = plans[analyze_index].clip
@@ -1106,9 +1789,25 @@ def run_cli(config_path: str, input_dir: str | None = None) -> RunResult:
 @click.command()
 @click.option("--config", "config_path", default="config.toml", show_default=True, help="Path to config.toml")
 @click.option("--input", "input_dir", default=None, help="Override [paths.input_dir] from config.toml")
-def main(config_path: str, input_dir: str | None) -> None:
+@click.option(
+    "--audio-align-track",
+    "audio_align_track_option",
+    type=str,
+    multiple=True,
+    help="Manual audio track override in the form label=index. Repeatable.",
+)
+def main(
+    config_path: str,
+    input_dir: str | None,
+    *,
+    audio_align_track_option: tuple[str, ...],
+) -> None:
     try:
-        result = run_cli(config_path, input_dir)
+        result = run_cli(
+            config_path,
+            input_dir,
+            audio_track_overrides=audio_align_track_option,
+        )
     except CLIAppError as exc:
         print(exc.rich_message)
         raise click.exceptions.Exit(exc.code) from exc

@@ -2,7 +2,7 @@
 
 Date: 2025-09-22
 
-## Behaviour carried forward from `legacy/compv4_improved.py`
+## Behaviour carried forward from the pre-2025 placebo pipeline
 - **YUV→RGB staging** now always runs through zimg Spline36 into RGB48 with the original transfer/primaries/range values
   preserved, then normalises props (`_Matrix=0`, `_ColorRange=0`) before calling libplacebo.
 - **libplacebo retry ladder** mirrors the legacy script: first try with inferred `src_csp`, fall back to placebo inference,

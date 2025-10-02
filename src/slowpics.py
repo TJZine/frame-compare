@@ -1,16 +1,16 @@
-﻿from __future__ import annotations
-
 """Slow.pics upload orchestration."""
 
-from collections import defaultdict
-from contextlib import ExitStack
-import re
-from pathlib import Path
-from typing import Callable, Dict, List, Optional, TYPE_CHECKING
-from urllib.parse import urlsplit, unquote
+from __future__ import annotations
+
 import logging
+import re
 import time
 import uuid
+from collections import defaultdict
+from contextlib import ExitStack
+from pathlib import Path
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional
+from urllib.parse import unquote, urlsplit
 
 import requests
 
@@ -96,7 +96,11 @@ def _build_legacy_headers(session: requests.Session, encoder: "MultipartEncoder"
         "Content-Type": encoder.content_type,
         "Origin": "https://slow.pics/",
         "Referer": "https://slow.pics/comparison",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/113.0.0.0 Safari/537.36"
+        ),
         "X-XSRF-TOKEN": unquote(xsrf),
     }
 
@@ -150,7 +154,8 @@ def _prepare_legacy_plan(image_files: List[str]) -> tuple[List[int], List[List[t
     for frame, entries in groups.items():
         if len(entries) != expected:
             raise SlowpicsAPIError(
-                f"Inconsistent screenshot count for frame {frame}; expected {expected}, found {len(entries)}"
+                "Inconsistent screenshot count for frame "
+                f"{frame}; expected {expected}, found {len(entries)}"
             )
     ordered_groups = [groups[frame] for frame in frame_order]
     return frame_order, ordered_groups

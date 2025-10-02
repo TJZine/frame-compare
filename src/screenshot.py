@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import subprocess
-import re
 from functools import partial
 from pathlib import Path
-from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, TypedDict, cast
 
-from .datatypes import ColorConfig, ScreenshotConfig
 from . import vs_core
+from .datatypes import ColorConfig, ScreenshotConfig
 
 _INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -20,7 +20,7 @@ _INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 logger = logging.getLogger(__name__)
 
 
-def _ensure_rgb24(core, clip, frame_idx):
+def _ensure_rgb24(core: Any, clip: Any, frame_idx: int) -> Any:
     try:
         import vapoursynth as vs  # type: ignore
     except Exception as exc:  # pragma: no cover - requires runtime deps
@@ -41,23 +41,26 @@ def _ensure_rgb24(core, clip, frame_idx):
 
     dither = "error_diffusion" if isinstance(bits, int) and bits > 8 else "none"
     try:
-        converted = point(clip, format=vs.RGB24, range=vs.RANGE_FULL, dither_type=dither)
+        converted = cast(Any, point(clip, format=vs.RGB24, range=vs.RANGE_FULL, dither_type=dither))
     except Exception as exc:  # pragma: no cover - defensive
         raise ScreenshotWriterError(f"Failed to convert frame {frame_idx} to RGB24: {exc}") from exc
 
     try:
-        converted = converted.std.SetFrameProps(
+        converted = cast(
+            Any,
+            converted.std.SetFrameProps(
             _Matrix=0,
             _Primaries=1,
             _Transfer=1,
             _ColorRange=0,
+            ),
         )
     except Exception:  # pragma: no cover - best effort
         pass
     return converted
 
 
-def _clamp_frame_index(clip, frame_idx: int) -> tuple[int, bool]:
+def _clamp_frame_index(clip: Any, frame_idx: int) -> tuple[int, bool]:
     total_frames = getattr(clip, "num_frames", None)
     if not isinstance(total_frames, int) or total_frames <= 0:
         return max(0, int(frame_idx)), False
@@ -66,18 +69,25 @@ def _clamp_frame_index(clip, frame_idx: int) -> tuple[int, bool]:
     return clamped, clamped != frame_idx
 
 
-FRAME_INFO_STYLE = 'sans-serif,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,"0,0,0,0,100,100,0,0,1,2,0,7,10,10,10,1"'
-OVERLAY_STYLE = 'sans-serif,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,"0,0,0,0,100,100,0,0,1,2,0,7,10,10,70,1"'
+FRAME_INFO_STYLE = (
+    'sans-serif,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,'
+    '"0,0,0,0,100,100,0,0,1,2,0,7,10,10,10,1"'
+)
+OVERLAY_STYLE = (
+    'sans-serif,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,'
+    '"0,0,0,0,100,100,0,0,1,2,0,7,10,10,70,1"'
+)
 
 _LETTERBOX_RATIO_TOLERANCE = 0.04
 
 
-def _apply_frame_info_overlay(core, clip, title: str, requested_frame: int | None, selection_label: str | None) -> object:
-    try:
-        import vapoursynth as vs  # type: ignore
-    except Exception:  # pragma: no cover - requires runtime deps
-        return clip
-
+def _apply_frame_info_overlay(
+    core: Any,
+    clip: Any,
+    title: str,
+    requested_frame: int | None,
+    selection_label: str | None,
+) -> Any:
     std_ns = getattr(core, "std", None)
     sub_ns = getattr(core, "sub", None)
     if std_ns is None or sub_ns is None:
@@ -123,8 +133,8 @@ def _apply_frame_info_overlay(core, clip, title: str, requested_frame: int | Non
 
 
 def _apply_overlay_text(
-    core,
-    clip,
+    core: Any,
+    clip: Any,
     text: Optional[str],
     *,
     strict: bool,
@@ -192,7 +202,23 @@ class ScreenshotWriterError(ScreenshotError):
     """Raised when the underlying writer fails."""
 
 
-def plan_mod_crop(width: int, height: int, mod: int, letterbox_pillarbox_aware: bool) -> Tuple[int, int, int, int]:
+class GeometryPlan(TypedDict):
+    width: int
+    height: int
+    crop: tuple[int, int, int, int]
+    cropped_w: int
+    cropped_h: int
+    scaled: tuple[int, int]
+    pad: tuple[int, int, int, int]
+    final: tuple[int, int]
+
+
+def plan_mod_crop(
+    width: int,
+    height: int,
+    mod: int,
+    letterbox_pillarbox_aware: bool,
+) -> Tuple[int, int, int, int]:
     """Plan left/top/right/bottom croppings so dimensions align to *mod*."""
 
     if width <= 0 or height <= 0:
@@ -229,7 +255,7 @@ def plan_mod_crop(width: int, height: int, mod: int, letterbox_pillarbox_aware: 
     return (left, top, right, bottom)
 
 
-def _align_letterbox_pillarbox(plans: List[dict[str, object]]) -> None:
+def _align_letterbox_pillarbox(plans: List[GeometryPlan]) -> None:
     if not plans:
         return
 
@@ -247,7 +273,7 @@ def _align_letterbox_pillarbox(plans: List[dict[str, object]]) -> None:
                 continue
             add_top = diff // 2
             add_bottom = diff - add_top
-            left, top, right, bottom = plan["crop"]  # type: ignore[misc]
+            left, top, right, bottom = plan["crop"]
             top += add_top
             bottom += add_bottom
             plan["crop"] = (left, top, right, bottom)
@@ -261,7 +287,7 @@ def _align_letterbox_pillarbox(plans: List[dict[str, object]]) -> None:
                 continue
             add_left = diff // 2
             add_right = diff - add_left
-            left, top, right, bottom = plan["crop"]  # type: ignore[misc]
+            left, top, right, bottom = plan["crop"]
             left += add_left
             right += add_right
             plan["crop"] = (left, top, right, bottom)
@@ -269,7 +295,7 @@ def _align_letterbox_pillarbox(plans: List[dict[str, object]]) -> None:
 
 
 def _plan_letterbox_offsets(
-    plans: Sequence[dict[str, object]],
+    plans: Sequence[GeometryPlan],
     *,
     mod: int,
     tolerance: float = _LETTERBOX_RATIO_TOLERANCE,
@@ -403,8 +429,8 @@ def _compute_scaled_dimensions(
     return (target_w, desired_h)
 
 
-def _plan_geometry(clips: Sequence[object], cfg: ScreenshotConfig) -> List[dict[str, object]]:
-    plans: List[dict[str, object]] = []
+def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[GeometryPlan]:
+    plans: List[GeometryPlan] = []
     for clip in clips:
         width = getattr(clip, "width", None)
         height = getattr(clip, "height", None)
@@ -418,13 +444,16 @@ def _plan_geometry(clips: Sequence[object], cfg: ScreenshotConfig) -> List[dict[
             raise ScreenshotGeometryError("Invalid crop results")
 
         plans.append(
-            {
-                "width": width,
-                "height": height,
-                "crop": crop,
-                "cropped_w": cropped_w,
-                "cropped_h": cropped_h,
-            }
+            GeometryPlan(
+                width=width,
+                height=height,
+                crop=crop,
+                cropped_w=cropped_w,
+                cropped_h=cropped_h,
+                scaled=(cropped_w, cropped_h),
+                pad=(0, 0, 0, 0),
+                final=(cropped_w, cropped_h),
+            )
         )
 
     if cfg.auto_letterbox_crop:
@@ -440,7 +469,7 @@ def _plan_geometry(clips: Sequence[object], cfg: ScreenshotConfig) -> List[dict[
         for plan, (extra_top, extra_bottom) in zip(plans, offsets):
             if not (extra_top or extra_bottom):
                 continue
-            left, top, right, bottom = plan["crop"]  # type: ignore[misc]
+            left, top, right, bottom = plan["crop"]
             top += int(extra_top)
             bottom += int(extra_bottom)
             new_height = int(plan["height"]) - top - bottom
@@ -465,7 +494,11 @@ def _plan_geometry(clips: Sequence[object], cfg: ScreenshotConfig) -> List[dict[
         global_target = None
     else:
         desired_height = None
-        global_target = max((plan["cropped_h"] for plan in plans), default=None) if cfg.upscale else None
+        global_target = (
+            max((plan["cropped_h"] for plan in plans), default=None)
+            if cfg.upscale
+            else None
+        )
 
     max_source_width = max((int(plan["width"]) for plan in plans), default=0)
 
@@ -549,7 +582,7 @@ def _plan_geometry(clips: Sequence[object], cfg: ScreenshotConfig) -> List[dict[
 
     for plan in plans:
         scaled_w, scaled_h = plan["scaled"]
-        pad_left, pad_top, pad_right, pad_bottom = plan.get("pad", (0, 0, 0, 0))
+        pad_left, pad_top, pad_right, pad_bottom = plan["pad"]
 
         if canvas_height is not None and pad_enabled:
             target_h = canvas_height
@@ -564,7 +597,7 @@ def _plan_geometry(clips: Sequence[object], cfg: ScreenshotConfig) -> List[dict[
                     logger.debug(
                         "Skipping vertical padding (%s px) for width=%s due to tolerance",
                         diff_h,
-                        plan.get("width"),
+                        plan["width"],
                     )
 
         if canvas_width is not None and pad_enabled:
@@ -579,7 +612,7 @@ def _plan_geometry(clips: Sequence[object], cfg: ScreenshotConfig) -> List[dict[
                     logger.debug(
                         "Skipping horizontal padding (%s px) for width=%s due to tolerance",
                         diff_w,
-                        plan.get("width"),
+                        plan["width"],
                     )
 
         pad_left, pad_top, pad_right, pad_bottom = _align_padding_mod(
@@ -642,7 +675,7 @@ def _map_png_compression_level(level: int) -> int:
 
 
 def _save_frame_with_fpng(
-    clip,
+    clip: Any,
     frame_idx: int,
     crop: Tuple[int, int, int, int],
     scaled: Tuple[int, int],
@@ -704,7 +737,13 @@ def _save_frame_with_fpng(
 
     render_clip = work
     if cfg.add_frame_info:
-        render_clip = _apply_frame_info_overlay(core, render_clip, label, requested_frame, selection_label)
+        render_clip = _apply_frame_info_overlay(
+            core,
+            render_clip,
+            label,
+            requested_frame,
+            selection_label,
+        )
 
     overlay_state = overlay_state or {}
     render_clip = _apply_overlay_text(
@@ -720,7 +759,7 @@ def _save_frame_with_fpng(
 
     compression = _map_fpng_compression(cfg.compression_level)
     try:
-        job = writer(render_clip, str(path), compression=compression, overwrite=True)
+        job: Any = writer(render_clip, str(path), compression=compression, overwrite=True)
         job.get_frame(frame_idx)
     except Exception as exc:
         raise ScreenshotWriterError(f"fpng failed for frame {frame_idx}: {exc}") from exc
@@ -839,7 +878,10 @@ def _save_frame_with_ffmpeg(
     process = subprocess.run(cmd, capture_output=True)
     if process.returncode != 0:
         stderr = process.stderr.decode("utf-8", "ignore").strip()
-        raise ScreenshotWriterError(f"FFmpeg failed for frame {frame_idx}: {stderr or 'unknown error'}")
+        message = stderr or "unknown error"
+        raise ScreenshotWriterError(
+            f"FFmpeg failed for frame {frame_idx}: {message}"
+        )
 
 
 
@@ -848,7 +890,7 @@ def _save_frame_placeholder(path: Path) -> None:
 
 
 def generate_screenshots(
-    clips: Sequence[object],
+    clips: Sequence[Any],
     frames: Sequence[int],
     files: Sequence[str],
     metadata: Sequence[Mapping[str, str]],
@@ -859,6 +901,7 @@ def generate_screenshots(
     trim_offsets: Sequence[int] | None = None,
     progress_callback: Callable[[int], None] | None = None,
     frame_labels: Mapping[int, str] | None = None,
+    alignment_maps: Sequence[Any] | None = None,
 ) -> List[str]:
     """Render screenshots for *frames* from each clip using configured writer."""
 
@@ -905,11 +948,14 @@ def generate_screenshots(
     for clip_index, (result, file_path, meta, plan, trim_start) in enumerate(
         zip(processed_results, files, metadata, geometry, trim_offsets)
     ):
+        mapper = None
+        if alignment_maps is not None and clip_index < len(alignment_maps):
+            mapper = alignment_maps[clip_index]
         if frame_labels:
             logger.debug('frame_labels keys: %s', list(frame_labels.keys()))
-        crop = plan["crop"]  # type: ignore[assignment]
-        scaled = plan["scaled"]  # type: ignore[assignment]
-        pad = plan.get("pad", (0, 0, 0, 0))
+        crop = plan["crop"]
+        scaled = plan["scaled"]
+        pad = plan["pad"]
         width = int(plan["width"])
         height = int(plan["height"])
         trim_start = int(trim_start)
@@ -920,14 +966,37 @@ def generate_screenshots(
 
         for frame in frames:
             frame_idx = int(frame)
+            mapped_idx = frame_idx
+            if mapper is not None:
+                try:
+                    mapped_idx, mapped_time, clamped = mapper.map_frame(frame_idx)
+                except Exception as exc:  # pragma: no cover - mapper issues
+                    logger.warning(
+                        "Failed to map frame %s for %s via alignment: %s",
+                        frame_idx,
+                        file_path,
+                        exc,
+                    )
+                    mapped_time = None
+                    clamped = False
+                else:
+                    if clamped:
+                        logger.debug(
+                            "Alignment clamped frame %s→%s for %s",
+                            frame_idx,
+                            mapped_idx,
+                            file_path,
+                        )
+            else:
+                mapped_time = None
             selection_label = frame_labels.get(frame_idx) if frame_labels else None
             if selection_label is not None:
                 logger.debug('Selection label for frame %s: %s', frame_idx, selection_label)
-            actual_idx, was_clamped = _clamp_frame_index(result.clip, frame_idx)
+            actual_idx, was_clamped = _clamp_frame_index(result.clip, mapped_idx)
             if was_clamped:
                 logger.debug(
                     "Frame %s exceeds available frames (%s) in %s; using %s",
-                    frame_idx,
+                    mapped_idx,
                     getattr(result.clip, 'num_frames', 'unknown'),
                     file_path,
                     actual_idx,
@@ -940,11 +1009,13 @@ def generate_screenshots(
                 use_ffmpeg = cfg.use_ffmpeg and resolved_frame is not None
                 if cfg.use_ffmpeg and resolved_frame is None:
                     logger.debug(
-                        "Frame %s for %s falls within synthetic trim padding; using VapourSynth writer",
+                        "Frame %s for %s falls within synthetic trim padding; "
+                        "using VapourSynth writer",
                         frame_idx,
                         file_path,
                     )
                 if use_ffmpeg:
+                    assert resolved_frame is not None
                     if overlay_text and overlay_state.get("overlay_status") != "ok":
                         logger.info("[OVERLAY] %s applied (ffmpeg)", file_path)
                         overlay_state["overlay_status"] = "ok"

@@ -26,4 +26,4 @@ Scope: `frame_compare.py` + `src/screenshot.py` + `src/vs_core.py`.
 ## Open issues observed
 - Maintain coverage to ensure `_Tonemapped` flag survives future overlay/crop rewrites (current `std.CopyFrameProps` guard keeps it intact).
 
-This trace is the baseline for verifying ongoing changes against the legacy `legacy/compv4_improved.py` behaviour.
+This trace is the baseline for verifying ongoing changes against the retired placebo pipeline captured in the 2025-09-22 regression notes.
