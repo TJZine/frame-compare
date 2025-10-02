@@ -176,6 +176,10 @@ def load_config(path: str) -> AppConfig:
         raise ConfigError("color.verify_step_seconds must be > 0")
     if app.color.verify_max_seconds < 0:
         raise ConfigError("color.verify_max_seconds must be >= 0")
+    overlay_mode = str(getattr(app.color, "overlay_mode", "minimal")).strip().lower()
+    if overlay_mode not in {"minimal", "diagnostic"}:
+        raise ConfigError("color.overlay_mode must be 'minimal' or 'diagnostic'")
+    app.color.overlay_mode = overlay_mode
 
     preferred = app.source.preferred.strip().lower()
     if preferred not in {"lsmas", "ffms2"}:

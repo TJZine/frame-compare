@@ -71,6 +71,7 @@ target_nits = 100.0
 dst_min_nits = 0.1
 overlay_enabled = true
 overlay_text_template = "Tonemapping Algorithm: {tone_curve} dpd = {dynamic_peak_detection} dst = {target_nits} nits"
+overlay_mode = "minimal"  # Options: "minimal", "diagnostic"
 verify_enabled = true
 # verify_frame = 4123  # Uncomment to force a specific frame index for verification
 verify_auto = true

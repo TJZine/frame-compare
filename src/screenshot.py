@@ -165,6 +165,7 @@ def _apply_overlay_text(
         message = f"Overlay filter unavailable for {file_label}"
         logger.error('[OVERLAY] %s', message)
         state["overlay_status"] = "error"
+        state.setdefault("warnings", []).append(f"[OVERLAY] {message}")
         if strict:
             raise ScreenshotWriterError(message)
         return clip
@@ -174,6 +175,7 @@ def _apply_overlay_text(
         message = f"Overlay failed for {file_label}: {exc}"
         logger.error('[OVERLAY] %s', message)
         state["overlay_status"] = "error"
+        state.setdefault("warnings", []).append(f"[OVERLAY] {message}")
         if strict:
             raise ScreenshotWriterError(message) from exc
         return clip
@@ -902,6 +904,7 @@ def generate_screenshots(
     progress_callback: Callable[[int], None] | None = None,
     frame_labels: Mapping[int, str] | None = None,
     alignment_maps: Sequence[Any] | None = None,
+    warnings_sink: List[str] | None = None,
 ) -> List[str]:
     """Render screenshots for *frames* from each clip using configured writer."""
 
@@ -931,6 +934,7 @@ def generate_screenshots(
             enable_overlay=True,
             enable_verification=True,
             logger_override=logger,
+            warning_sink=warnings_sink,
         )
         processed_results.append(result)
         overlay_states.append({})
@@ -1051,16 +1055,19 @@ def generate_screenshots(
             except ScreenshotWriterError:
                 raise
             except Exception as exc:
-                logger.warning(
-                    "Falling back to placeholder for frame %s of %s: %s",
-                    frame_idx,
-                    file_path,
-                    exc,
+                message = (
+                    f"[RENDER] Falling back to placeholder for frame {frame_idx} of {file_path}: {exc}"
                 )
+                logger.warning(message)
+                if warnings_sink is not None:
+                    warnings_sink.append(message)
                 _save_frame_placeholder(target_path)
 
             created.append(str(target_path))
             if progress_callback is not None:
                 progress_callback(1)
+
+        if warnings_sink is not None:
+            warnings_sink.extend(overlay_state.get("warnings", []))
 
     return created

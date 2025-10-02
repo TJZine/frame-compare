@@ -2,26 +2,28 @@ from __future__ import annotations
 
 import asyncio
 import builtins
+import json
 import logging
 import math
+import random
 import re
-import sys
 import shutil
-import webbrowser
+import sys
+import time
 import traceback
+import webbrowser
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import datetime as _dt
 from pathlib import Path
 from string import Template
-import time
-import random
 from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import click
 from rich import print
+from rich.console import Console
 from rich.markup import escape
-from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeRemainingColumn
+from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 from natsort import os_sorted
 
 from src.config_loader import ConfigError, load_config
@@ -92,6 +94,10 @@ class _ClipPlan:
     clip: Optional[object] = None
     effective_fps: Optional[Tuple[int, int]] = None
     applied_fps: Optional[Tuple[int, int]] = None
+    source_fps: Optional[Tuple[int, int]] = None
+    source_num_frames: Optional[int] = None
+    source_width: Optional[int] = None
+    source_height: Optional[int] = None
     has_trim_start_override: bool = False
     has_trim_end_override: bool = False
     alignment_frames: int = 0
@@ -120,6 +126,63 @@ class _AudioAlignmentSummary:
     final_adjustments: Dict[str, int]
     swap_details: Dict[str, str]
 
+
+@dataclass
+class _AudioAlignmentDisplayData:
+    stream_lines: List[str]
+    estimation_line: Optional[str]
+    offset_lines: List[str]
+    offsets_file_line: str
+    json_reference_stream: Optional[str]
+    json_target_streams: Dict[str, str]
+    json_offsets_sec: Dict[str, float]
+    json_offsets_frames: Dict[str, int]
+    warnings: List[str]
+    preview_paths: List[str] = field(default_factory=list)
+    confirmation: Optional[str] = None
+
+
+class CLIReporter:
+    """Helper that standardises CLI output formatting and verbosity."""
+
+    def __init__(self, *, quiet: bool = False, verbose: bool = False, no_color: bool = False) -> None:
+        if quiet and verbose:
+            verbose = False
+        self.quiet = quiet
+        self.verbose = verbose
+        self.console = Console(no_color=no_color, highlight=False)
+        self._warnings: List[str] = []
+        self._last_section: Optional[str] = None
+
+    def banner(self, text: str) -> None:
+        self.console.print(text)
+
+    def section(self, title: str) -> None:
+        if self.quiet:
+            return
+        if self._last_section == title:
+            return
+        self.console.print(title)
+        self._last_section = title
+
+    def line(self, text: str) -> None:
+        if self.quiet:
+            return
+        self.console.print(text)
+
+    def verbose_line(self, text: str) -> None:
+        if self.quiet or not self.verbose:
+            return
+        self.console.print(text)
+
+    def warn(self, text: str) -> None:
+        self._warnings.append(text)
+
+    def iter_warnings(self) -> List[str]:
+        return list(self._warnings)
+
+    def progress(self, *columns, transient: bool = False) -> Progress:
+        return Progress(*columns, console=self.console, transient=transient)
 
 class CLIAppError(RuntimeError):
     """Raised when the CLI cannot complete its work."""
@@ -445,6 +508,30 @@ def _extract_clip_fps(clip: object) -> Tuple[int, int]:
     return (24000, 1001)
 
 
+def _format_seconds(value: float) -> str:
+    total = max(0.0, float(value))
+    hours = int(total // 3600)
+    minutes = int((total - hours * 3600) // 60)
+    seconds = total - hours * 3600 - minutes * 60
+    seconds = round(seconds, 1)
+    if seconds >= 60.0:
+        seconds = 0.0
+        minutes += 1
+    if minutes >= 60:
+        minutes -= 60
+        hours += 1
+    return f"{hours:02d}:{minutes:02d}:{seconds:04.1f}"
+
+
+def _fps_to_float(value: Tuple[int, int] | None) -> float:
+    if not value:
+        return 0.0
+    num, den = value
+    if not den:
+        return 0.0
+    return float(num) / float(den)
+
+
 def _init_clips(plans: Sequence[_ClipPlan], runtime_cfg, cache_dir: Path | None) -> None:
     vs_core.set_ram_limit(runtime_cfg.ram_limit_mb)
 
@@ -463,6 +550,10 @@ def _init_clips(plans: Sequence[_ClipPlan], runtime_cfg, cache_dir: Path | None)
         )
         plan.clip = clip
         plan.effective_fps = _extract_clip_fps(clip)
+        plan.source_fps = plan.effective_fps
+        plan.source_num_frames = int(getattr(clip, "num_frames", 0) or 0)
+        plan.source_width = int(getattr(clip, "width", 0) or 0)
+        plan.source_height = int(getattr(clip, "height", 0) or 0)
         reference_fps = plan.effective_fps
 
     for idx, plan in enumerate(plans):
@@ -482,6 +573,10 @@ def _init_clips(plans: Sequence[_ClipPlan], runtime_cfg, cache_dir: Path | None)
         plan.clip = clip
         plan.applied_fps = fps_override
         plan.effective_fps = _extract_clip_fps(clip)
+        plan.source_fps = plan.effective_fps
+        plan.source_num_frames = int(getattr(clip, "num_frames", 0) or 0)
+        plan.source_width = int(getattr(clip, "width", 0) or 0)
+        plan.source_height = int(getattr(clip, "height", 0) or 0)
 
 
 def _build_cache_info(root: Path, plans: Sequence[_ClipPlan], cfg: AppConfig, analyze_index: int) -> Optional[FrameMetricsCacheInfo]:
@@ -653,30 +748,49 @@ def _resolve_alignment_reference(
     return plans[0]
 
 
+
 def _maybe_apply_audio_alignment(
     plans: Sequence[_ClipPlan],
     cfg: AppConfig,
     analyze_path: Path,
     root: Path,
     audio_track_overrides: Mapping[str, int],
-) -> _AudioAlignmentSummary | None:
+    reporter: CLIReporter | None = None,
+) -> tuple[_AudioAlignmentSummary | None, _AudioAlignmentDisplayData | None]:
     audio_cfg = cfg.audio_alignment
+    offsets_path = (root / audio_cfg.offsets_filename).resolve()
+    display_data = _AudioAlignmentDisplayData(
+        stream_lines=[],
+        estimation_line=None,
+        offset_lines=[],
+        offsets_file_line=f"Offsets file: {offsets_path}",
+        json_reference_stream=None,
+        json_target_streams={},
+        json_offsets_sec={},
+        json_offsets_frames={},
+        warnings=[],
+    )
+
+    def _warn(message: str) -> None:
+        display_data.warnings.append(f"[AUDIO] {message}")
+
     if not audio_cfg.enable:
-        return None
+        return None, display_data
     if len(plans) < 2:
-        print("[yellow]Audio alignment skipped:[/yellow] need at least two clips.")
-        return None
+        _warn("Audio alignment skipped: need at least two clips.")
+        return None, display_data
 
     reference_plan = _resolve_alignment_reference(plans, analyze_path, audio_cfg.reference)
     targets = [plan for plan in plans if plan is not reference_plan]
     if not targets:
-        print("[yellow]Audio alignment skipped:[/yellow] no secondary clips to compare.")
-        return None
+        _warn("Audio alignment skipped: no secondary clips to compare.")
+        return None, display_data
 
-    print(
-        "[cyan]Estimating audio offsets relative to[/cyan] "
-        f"{escape(reference_plan.path.name)}"
-    )
+    plan_labels: Dict[Path, str] = {
+        plan.path: (plan.metadata.get("label") or plan.path.name).strip() or plan.path.name
+        for plan in plans
+    }
+    name_to_label: Dict[str, str] = {plan.path.name: plan_labels[plan.path] for plan in plans}
 
     stream_infos: Dict[Path, List[audio_alignment.AudioStreamInfo]] = {}
     for plan in plans:
@@ -686,6 +800,8 @@ def _maybe_apply_audio_alignment(
             logger.warning("ffprobe audio stream probe failed for %s: %s", plan.path.name, exc)
             infos = []
         stream_infos[plan.path] = infos
+
+    forced_streams: set[Path] = set()
 
     def _match_audio_override(plan: _ClipPlan) -> Optional[int]:
         value = _match_override(plans.index(plan), plan.path, plan.metadata, audio_track_overrides)
@@ -705,6 +821,8 @@ def _maybe_apply_audio_alignment(
         return streams[0].index
 
     ref_override = _match_audio_override(reference_plan)
+    if ref_override is not None:
+        forced_streams.add(reference_plan.path)
     reference_stream_index = ref_override if ref_override is not None else _pick_default(
         stream_infos.get(reference_plan.path, [])
     )
@@ -716,13 +834,11 @@ def _maybe_apply_audio_alignment(
             break
 
     def _score_candidate(candidate: audio_alignment.AudioStreamInfo) -> float:
-        if reference_stream_info is None:
-            base = 0.0
-        else:
-            base = 0.0
+        base = 0.0
+        if reference_stream_info is not None:
             if reference_stream_info.language and candidate.language == reference_stream_info.language:
                 base += 100.0
-            elif not candidate.language and reference_stream_info.language:
+            elif reference_stream_info.language and not candidate.language:
                 base += 10.0
             if candidate.codec_name == reference_stream_info.codec_name:
                 base += 30.0
@@ -749,6 +865,7 @@ def _maybe_apply_audio_alignment(
         override_idx = _match_audio_override(target)
         if override_idx is not None:
             target_stream_indices[target.path] = override_idx
+            forced_streams.add(target.path)
             continue
         infos = stream_infos.get(target.path, [])
         if not infos:
@@ -757,32 +874,49 @@ def _maybe_apply_audio_alignment(
         best = max(infos, key=_score_candidate)
         target_stream_indices[target.path] = best.index
 
-    print("[cyan]Audio stream selection:[/cyan]")
-    def _describe(plan: _ClipPlan, stream_idx: int) -> str:
+    def _describe_stream(plan: _ClipPlan, stream_idx: int) -> tuple[str, str]:
         infos = stream_infos.get(plan.path, [])
         picked = next((info for info in infos if info.index == stream_idx), None)
-        if picked is None:
-            return f"{stream_idx}"
-        language = picked.language or "und"
-        layout = picked.channel_layout or (f"{picked.channels}ch" if picked.channels else "?")
-        rate = picked.sample_rate or 0
-        return (
-            f"{stream_idx} [{language} {picked.codec_name} {layout} "
-            f"{rate}Hz {'default' if picked.is_default else ''}]"
-        )
+        codec = (picked.codec_name if picked and picked.codec_name else "unknown").strip() or "unknown"
+        language = (picked.language if picked and picked.language else "und").strip() or "und"
+        if picked and picked.channel_layout:
+            layout = picked.channel_layout.strip()
+        elif picked and picked.channels:
+            layout = f"{picked.channels}ch"
+        else:
+            layout = "?"
+        descriptor = f"{codec}/{language}/{layout}"
+        forced_suffix = " (forced)" if plan.path in forced_streams else ""
+        label = plan_labels[plan.path]
+        return f"{label}->{descriptor}{forced_suffix}", descriptor
 
-    print(
-        f"  Reference {escape(reference_plan.path.name)} -> "
-        f"{_describe(reference_plan, reference_stream_index)}"
+    reference_stream_text, reference_descriptor = _describe_stream(reference_plan, reference_stream_index)
+    display_data.json_reference_stream = reference_stream_text
+
+    for idx, target in enumerate(targets):
+        stream_idx = target_stream_indices.get(target.path, 0)
+        target_stream_text, target_descriptor = _describe_stream(target, stream_idx)
+        display_data.json_target_streams[plan_labels[target.path]] = target_descriptor
+        if idx == 0:
+            display_data.stream_lines.append(
+                f"Audio streams: ref={reference_stream_text}  target={target_stream_text}"
+            )
+        else:
+            display_data.stream_lines.append(f"Audio streams: target={target_stream_text}")
+
+    reference_fps_tuple = reference_plan.effective_fps or reference_plan.source_fps
+    reference_fps = _fps_to_float(reference_fps_tuple)
+    max_offset = float(audio_cfg.max_offset_seconds)
+    duration_seconds = float(audio_cfg.duration_seconds or 0.0)
+    start_seconds = float(audio_cfg.start_seconds or 0.0)
+    search_text = f"±{max_offset:.2f}s"
+    window_text = f"{duration_seconds:.2f}s" if duration_seconds > 0 else "auto"
+    start_text = f"{start_seconds:.2f}s"
+    display_data.estimation_line = (
+        f"Estimating audio offsets … fps={reference_fps:.3f} "
+        f"search={search_text} start={start_text} window={window_text}"
     )
-    for target in targets:
-        idx = target_stream_indices[target.path]
-        print(
-            f"  Target    {escape(target.path.name)} -> "
-            f"{_describe(target, idx)}"
-        )
 
-    offsets_path = (root / audio_cfg.offsets_filename).resolve()
     try:
         _, existing_entries = audio_alignment.load_offsets(offsets_path)
     except audio_alignment.AudioAlignmentError as exc:
@@ -792,62 +926,46 @@ def _maybe_apply_audio_alignment(
         ) from exc
 
     try:
-        base_start = audio_cfg.start_seconds
-        base_duration = audio_cfg.duration_seconds
-
+        base_start = float(audio_cfg.start_seconds or 0.0)
+        base_duration = float(audio_cfg.duration_seconds or 0.0)
         hop_length = max(1, min(audio_cfg.hop_length, max(1, audio_cfg.sample_rate // 100)))
 
         measurements: List[audio_alignment.AlignmentMeasurement]
         negative_offsets: Dict[str, bool] = {}
 
-        if targets:
-            with Progress(
-                TextColumn('{task.description}'),
-                BarColumn(),
-                TextColumn('{task.completed}/{task.total}'),
-                TextColumn('{task.percentage:>6.02f}%'),
-                TextColumn('{task.fields[rate]}'),
-                TimeRemainingColumn(),
-                transient=False,
-            ) as audio_progress:
-                task_id = audio_progress.add_task(
-                    'Estimating audio offsets',
-                    total=len(targets),
-                    rate='   0.00 pairs/s',
-                )
-                processed = 0
-                start_time = time.perf_counter()
+        progress_columns = (
+            TextColumn('{task.description}'),
+            BarColumn(),
+            TextColumn('{task.completed}/{task.total}'),
+            TextColumn('{task.percentage:>6.02f}%'),
+            TextColumn('{task.fields[rate]}'),
+            TimeRemainingColumn(),
+        )
+        progress_manager = (
+            reporter.progress(*progress_columns, transient=False)
+            if reporter is not None
+            else Progress(*progress_columns, transient=False)
+        )
+        with progress_manager as audio_progress:
+            task_id = audio_progress.add_task(
+                'Estimating audio offsets',
+                total=len(targets),
+                rate='   0.00 pairs/s',
+            )
+            processed = 0
+            start_time = time.perf_counter()
 
-                def _advance_audio(count: int) -> None:
-                    nonlocal processed
-                    processed += count
-                    elapsed = time.perf_counter() - start_time
-                    rate_val = processed / elapsed if elapsed > 0 else 0.0
-                    audio_progress.update(
-                        task_id,
-                        completed=min(processed, len(targets)),
-                        rate=f"{rate_val:7.2f} pairs/s",
-                    )
-
-                measurements = audio_alignment.measure_offsets(
-                    reference_plan.path,
-                    [plan.path for plan in targets],
-                    sample_rate=audio_cfg.sample_rate,
-                    hop_length=hop_length,
-                    start_seconds=base_start,
-                    duration_seconds=base_duration,
-                    reference_stream=reference_stream_index,
-                    target_streams=target_stream_indices,
-                    progress_callback=_advance_audio,
+            def _advance_audio(count: int) -> None:
+                nonlocal processed
+                processed += count
+                elapsed = time.perf_counter() - start_time
+                rate_val = processed / elapsed if elapsed > 0 else 0.0
+                audio_progress.update(
+                    task_id,
+                    completed=min(processed, len(targets)),
+                    rate=f"{rate_val:7.2f} pairs/s",
                 )
 
-                if processed < len(targets):
-                    audio_progress.update(
-                        task_id,
-                        completed=len(targets),
-                        rate=f"{0.0:7.2f} pairs/s",
-                    )
-        else:
             measurements = audio_alignment.measure_offsets(
                 reference_plan.path,
                 [plan.path for plan in targets],
@@ -857,7 +975,17 @@ def _maybe_apply_audio_alignment(
                 duration_seconds=base_duration,
                 reference_stream=reference_stream_index,
                 target_streams=target_stream_indices,
+                progress_callback=_advance_audio,
             )
+
+            if processed < len(targets):
+                elapsed = time.perf_counter() - start_time
+                final_rate = processed / elapsed if elapsed > 0 else 0.0
+                audio_progress.update(
+                    task_id,
+                    completed=len(targets),
+                    rate=f"{final_rate:7.2f} pairs/s",
+                )
 
         frame_bias = int(audio_cfg.frame_offset_bias or 0)
         if frame_bias != 0:
@@ -901,8 +1029,9 @@ def _maybe_apply_audio_alignment(
                     continue
                 measurement.frames = abs(int(measurement.frames))
                 negative_offsets[measurement.file.name] = True
-                negative_override_notes[measurement.key] = \
+                negative_override_notes[measurement.key] = (
                     "Suggested negative offset applied to the opposite clip for trim-first behaviour."
+                )
 
         if swap_enabled and swap_candidates:
             additional_measurements: List[audio_alignment.AlignmentMeasurement] = []
@@ -959,111 +1088,133 @@ def _maybe_apply_audio_alignment(
 
             measurements.extend(additional_measurements)
 
-        if measurements:
-            print("[cyan]Audio offsets:[/cyan]")
-            for measurement in measurements:
-                frames_text = (
-                    f"{measurement.frames}fr"
-                    if measurement.frames is not None
-                    else "n/a"
+        raw_warning_messages: List[str] = []
+        for measurement in measurements:
+            reasons: List[str] = []
+            if measurement.error:
+                reasons.append(measurement.error)
+            if abs(measurement.offset_seconds) > audio_cfg.max_offset_seconds:
+                reasons.append(
+                    f"offset {measurement.offset_seconds:.3f}s exceeds limit {audio_cfg.max_offset_seconds:.3f}s"
                 )
-                suffix = ""
-                if measurement.file.name in negative_offsets:
-                    suffix = " (reference advanced; trimming target)"
-                if measurement.error:
-                    print(
-                        f"  {escape(measurement.file.name)}: error {escape(measurement.error)}"
-                    )
-                else:
-                    print(
-                        f"  {escape(measurement.file.name)}: "
-                        f"{measurement.offset_seconds:.3f}s ({frames_text}) "
-                        f"corr={measurement.correlation:.2f}{suffix}"
-                    )
-                    detail = swap_details.get(measurement.file.name)
-                    if detail:
-                        print(f"    note: {escape(detail)}")
+            if measurement.correlation < audio_cfg.correlation_threshold:
+                reasons.append(
+                    f"correlation {measurement.correlation:.2f} below threshold {audio_cfg.correlation_threshold:.2f}"
+                )
+            if measurement.frames is None:
+                reasons.append("unable to derive frame offset (missing fps)")
+
+            if reasons:
+                measurement.frames = None
+                measurement.error = "; ".join(reasons)
+                negative_offsets.pop(measurement.file.name, None)
+                label = name_to_label.get(measurement.file.name, measurement.file.name)
+                raw_warning_messages.append(f"{label}: {measurement.error}")
+
+        for warning_message in dict.fromkeys(raw_warning_messages):
+            _warn(warning_message)
+
+        offset_lines: List[str] = []
+        offsets_sec: Dict[str, float] = {}
+        offsets_frames: Dict[str, int] = {}
+
+        for measurement in measurements:
+            clip_name = measurement.file.name
+            if clip_name == reference_plan.path.name and len(measurements) > 1:
+                continue
+            label = name_to_label.get(clip_name, clip_name)
+            if measurement.offset_seconds is not None:
+                offsets_sec[label] = float(measurement.offset_seconds)
+            if measurement.frames is not None:
+                offsets_frames[label] = int(measurement.frames)
+
+            if measurement.error:
+                offset_lines.append(
+                    f"Audio offsets: {label}: manual edit required ({measurement.error})"
+                )
+                continue
+
+            fps_value = 0.0
+            if measurement.target_fps and measurement.target_fps > 0:
+                fps_value = float(measurement.target_fps)
+            elif measurement.reference_fps and measurement.reference_fps > 0:
+                fps_value = float(measurement.reference_fps)
+
+            frames_text = "n/a"
+            if measurement.frames is not None:
+                frames_text = f"{measurement.frames:+d}f"
+            fps_text = f"{fps_value:.3f}" if fps_value > 0 else "0.000"
+            suffix = ""
+            if clip_name in negative_offsets:
+                suffix = " (reference advanced; trimming target)"
+            offset_lines.append(
+                f"Audio offsets: {label}: {measurement.offset_seconds:+.3f}s ({frames_text} @ {fps_text}){suffix}"
+            )
+            detail = swap_details.get(clip_name)
+            if detail:
+                offset_lines.append(f"  note: {detail}")
+
+        if not offset_lines:
+            offset_lines.append("Audio offsets: none detected")
+
+        display_data.offset_lines = offset_lines
+        display_data.json_offsets_sec = offsets_sec
+        display_data.json_offsets_frames = offsets_frames
+
+        applied_frames, statuses = audio_alignment.update_offsets_file(
+            offsets_path,
+            reference_plan.path.name,
+            measurements,
+            existing_entries,
+            negative_override_notes,
+        )
+
+        final_map: Dict[str, int] = {reference_plan.path.name: 0}
+        for name, frames in applied_frames.items():
+            final_map[name] = frames
+
+        baseline = min(final_map.values()) if final_map else 0
+        baseline_shift = int(-baseline) if baseline < 0 else 0
+
+        final_adjustments: Dict[str, int] = {}
+        for plan in plans:
+            desired = final_map.get(plan.path.name)
+            if desired is None:
+                continue
+            adjustment = int(desired - baseline)
+            if adjustment < 0:
+                adjustment = 0
+            if adjustment:
+                plan.trim_start = max(0, plan.trim_start + adjustment)
+                plan.alignment_frames = adjustment
+                plan.alignment_status = statuses.get(plan.path.name, "auto")
+            else:
+                plan.alignment_frames = 0
+                plan.alignment_status = statuses.get(plan.path.name, "auto") if plan.path.name in statuses else ""
+            final_adjustments[plan.path.name] = adjustment
+
+        if baseline_shift:
+            for plan in plans:
+                if plan is reference_plan:
+                    plan.alignment_status = "baseline"
+
+        summary = _AudioAlignmentSummary(
+            offsets_path=offsets_path,
+            reference_name=reference_plan.path.name,
+            measurements=measurements,
+            applied_frames=applied_frames,
+            baseline_shift=baseline_shift,
+            statuses=statuses,
+            reference_plan=reference_plan,
+            final_adjustments=final_adjustments,
+            swap_details=swap_details,
+        )
+        return summary, display_data
     except audio_alignment.AudioAlignmentError as exc:
         raise CLIAppError(
             f"Audio alignment failed: {exc}",
             rich_message=f"[red]Audio alignment failed:[/red] {exc}",
         ) from exc
-
-    warnings: List[str] = []
-    for measurement in measurements:
-        reasons: List[str] = []
-        if measurement.error:
-            reasons.append(measurement.error)
-        if abs(measurement.offset_seconds) > audio_cfg.max_offset_seconds:
-            reasons.append(
-                f"offset {measurement.offset_seconds:.3f}s exceeds limit {audio_cfg.max_offset_seconds:.3f}s"
-            )
-        if measurement.correlation < audio_cfg.correlation_threshold:
-            reasons.append(
-                f"correlation {measurement.correlation:.2f} below threshold {audio_cfg.correlation_threshold:.2f}"
-            )
-        if measurement.frames is None:
-            reasons.append("unable to derive frame offset (missing fps)")
-
-        if reasons:
-            measurement.frames = None
-            measurement.error = "; ".join(reasons)
-            negative_offsets.pop(measurement.file.name, None)
-            warnings.append(f"{measurement.file.name}: {measurement.error}")
-    if warnings:
-        print("[yellow]Audio alignment warnings:[/yellow]")
-        for message in warnings:
-            print(f"  - {escape(message)}")
-
-    applied_frames, statuses = audio_alignment.update_offsets_file(
-        offsets_path,
-        reference_plan.path.name,
-        measurements,
-        existing_entries,
-        negative_override_notes,
-    )
-
-    final_map: Dict[str, int] = {reference_plan.path.name: 0}
-    for name, frames in applied_frames.items():
-        final_map[name] = frames
-
-    baseline = min(final_map.values()) if final_map else 0
-    baseline_shift = int(-baseline) if baseline < 0 else 0
-
-    final_adjustments: Dict[str, int] = {}
-    for plan in plans:
-        desired = final_map.get(plan.path.name)
-        if desired is None:
-            continue
-        adjustment = int(desired - baseline)
-        if adjustment < 0:
-            adjustment = 0
-        if adjustment:
-            plan.trim_start = max(0, plan.trim_start + adjustment)
-            plan.alignment_frames = adjustment
-            plan.alignment_status = statuses.get(plan.path.name, "auto")
-        else:
-            plan.alignment_frames = 0
-            plan.alignment_status = statuses.get(plan.path.name, "auto") if plan.path.name in statuses else ""
-        final_adjustments[plan.path.name] = adjustment
-
-    if baseline_shift:
-        for plan in plans:
-            if plan is reference_plan:
-                plan.alignment_status = "baseline"
-
-    return _AudioAlignmentSummary(
-        offsets_path=offsets_path,
-        reference_name=reference_plan.path.name,
-        measurements=measurements,
-        applied_frames=applied_frames,
-        baseline_shift=baseline_shift,
-        statuses=statuses,
-        reference_plan=reference_plan,
-        final_adjustments=final_adjustments,
-        swap_details=swap_details,
-    )
-
 
 def _print_alignment_summary(summary: _AudioAlignmentSummary, plans: Sequence[_ClipPlan]) -> None:
     print("[cyan]Audio alignment summary:[/cyan]")
@@ -1136,21 +1287,29 @@ def _sample_random_frames(clip: object, count: int, seed: int, exclude: Sequence
     return sorted(rng.sample(available, count))
 
 
+
 def _confirm_alignment_with_screenshots(
     plans: Sequence[_ClipPlan],
     summary: _AudioAlignmentSummary | None,
     cfg: AppConfig,
     root: Path,
+    reporter: CLIReporter,
+    display: _AudioAlignmentDisplayData | None,
 ) -> None:
-    if summary is None or not cfg.audio_alignment.confirm_with_screenshots:
+    if summary is None or display is None:
+        return
+    if not cfg.audio_alignment.confirm_with_screenshots:
+        display.confirmation = display.confirmation or "auto"
         return
 
     clips = [plan.clip for plan in plans]
     if any(clip is None for clip in clips):
+        display.confirmation = display.confirmation or "auto"
         return
 
     reference_clip = summary.reference_plan.clip
     if reference_clip is None:
+        display.confirmation = display.confirmation or "auto"
         return
 
     timestamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -1165,48 +1324,53 @@ def _confirm_alignment_with_screenshots(
         summary.reference_plan.path.stem,
     ]
     base_name = next((str(value).strip() for value in name_candidates if value and str(value).strip()), "clip")
-    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", base_name).strip("._-")
-    if not safe_name:
-        safe_name = "clip"
+    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", base_name).strip("._-") or "clip"
     preview_folder = f"{safe_name}-{timestamp}"
     preview_dir = (root / base_dir / "audio_alignment" / preview_folder).resolve()
 
     initial_frames = _pick_preview_frames(reference_clip, 2, cfg.audio_alignment.random_seed)
 
     try:
-            generated = generate_screenshots(
-                clips,
-                initial_frames,
-                [str(plan.path) for plan in plans],
-                [plan.metadata for plan in plans],
-                preview_dir,
-                cfg.screenshots,
-                cfg.color,
-                trim_offsets=[plan.trim_start for plan in plans],
-            )
+        generated = generate_screenshots(
+            clips,
+            initial_frames,
+            [str(plan.path) for plan in plans],
+            [plan.metadata for plan in plans],
+            preview_dir,
+            cfg.screenshots,
+            cfg.color,
+            trim_offsets=[plan.trim_start for plan in plans],
+        )
     except ScreenshotError as exc:
         raise CLIAppError(
             f"Alignment preview failed: {exc}",
             rich_message=f"[red]Alignment preview failed:[/red] {exc}",
         ) from exc
 
-    if generated:
-        print("[cyan]Preview frames saved:[/cyan]")
-        for path in generated:
-            print(f"  - {path}")
+        preview_paths = [str(path) for path in generated]
+        display.preview_paths = preview_paths
+        if preview_paths:
+            reporter.line(f"Preview saved: {', '.join(preview_paths)}")
+
+    reporter.line("Awaiting alignment confirmation. (press y/n)")
 
     if not sys.stdin.isatty():  # pragma: no cover - runtime-dependent
-        print("[yellow]Audio alignment confirmation skipped (non-interactive session).[/yellow]")
+        display.confirmation = "auto"
+        reporter.line("confirm=auto")
+        display.warnings.append("[AUDIO] Audio alignment confirmation skipped (non-interactive session).")
         return
-
-    print("[cyan]Awaiting audio alignment confirmation... (press Y/n)[/cyan]")
 
     if click.confirm(
         "Do the preview frames look aligned?",
         default=True,
         show_default=True,
     ):
+        display.confirmation = "yes"
+        reporter.line("confirm=yes")
         return
+
+    display.confirmation = "no"
+    reporter.line("confirm=no")
 
     inspection_dir = preview_dir / "inspection"
     extra_frames = _sample_random_frames(
@@ -1232,19 +1396,18 @@ def _confirm_alignment_with_screenshots(
             rich_message=f"[red]Alignment inspection failed:[/red] {exc}",
         ) from exc
 
-    if extra_paths:
-        print("[cyan]Additional inspection frames saved:[/cyan]")
-        for path in extra_paths:
-            print(f"  - {path}")
+        if extra_paths:
+            reporter.line(
+                f"Additional inspection frames saved: {', '.join(str(path) for path in extra_paths)}"
+            )
 
-    print(
-        "[yellow]Audio alignment not confirmed.[/yellow] "
-        "Adjust the offsets in the generated file and rerun."
+    reporter.console.print(
+        "[yellow]Audio alignment not confirmed.[/yellow] Adjust the offsets in the generated file and rerun."
     )
     try:
         click.launch(str(summary.offsets_path))
     except Exception:
-        print(f"[yellow]Open and edit:[/yellow] {summary.offsets_path}")
+        reporter.console.print(f"[yellow]Open and edit:[/yellow] {summary.offsets_path}")
 
     raise CLIAppError(
         "Audio alignment requires manual adjustment.",
@@ -1253,6 +1416,7 @@ def _confirm_alignment_with_screenshots(
             f"Edit {summary.offsets_path} and rerun."
         ),
     )
+
 def _print_summary(files: Sequence[Path], frames: Sequence[int], out_dir: Path, url: str | None) -> None:
     print("[green]Comparison ready[/green]")
     print(f"  Files     : {len(files)}")
@@ -1267,6 +1431,9 @@ def run_cli(
     input_dir: str | None = None,
     *,
     audio_track_overrides: Iterable[str] | None = None,
+    quiet: bool = False,
+    verbose: bool = False,
+    no_color: bool = False,
 ) -> RunResult:
     config_location = Path(config_path).expanduser()
 
@@ -1308,6 +1475,30 @@ def run_cli(
             rich_message=f"[red]Input directory not found:[/red] {root}",
         )
 
+    reporter = CLIReporter(quiet=quiet, verbose=verbose, no_color=no_color)
+    collected_warnings: List[str] = []
+    json_tail: Dict[str, object] = {
+        "clips": [],
+        "trims": {"per_clip": {}},
+        "window": {},
+        "alignment": {"manual_start_s": 0.0, "manual_end_s": "unchanged"},
+        "audio_alignment": {
+            "enabled": bool(cfg.audio_alignment.enable),
+            "reference_stream": None,
+            "target_stream": {},
+            "offsets_sec": {},
+            "offsets_frames": {},
+            "preview_paths": [],
+            "confirmed": None,
+            "offsets_filename": str((root / cfg.audio_alignment.offsets_filename).resolve()),
+        },
+        "analysis": {},
+        "render": {},
+        "tonemap": {},
+        "cache": {},
+        "warnings": [],
+    }
+
     audio_track_override_map = _parse_audio_track_overrides(audio_track_overrides or [])
 
     vs_core.configure(
@@ -1340,6 +1531,8 @@ def run_cli(
     tmdb_error_message: Optional[str] = None
     tmdb_ambiguous = False
     tmdb_api_key_present = bool(cfg.tmdb.api_key.strip())
+    tmdb_line: Optional[str] = None
+    tmdb_notes: List[str] = []
 
     if tmdb_api_key_present:
         base_file = files[0]
@@ -1436,66 +1629,70 @@ def run_cli(
 
     if tmdb_resolution is not None:
         match_title = tmdb_resolution.title or tmdb_context.get("Title") or files[0].stem
-        year_text = f" ({tmdb_resolution.year})" if tmdb_resolution.year else ""
-        lang_text = tmdb_resolution.original_language or "unknown"
+        year_display = tmdb_context.get("Year") or ""
+        lang_text = tmdb_resolution.original_language or "und"
+        tmdb_line = (
+            f"TMDB: {tmdb_resolution.category}/{tmdb_resolution.tmdb_id}  "
+            f"\"{match_title} ({year_display})\"  lang={lang_text}"
+        )
         heuristic = (tmdb_resolution.candidate.reason or "match").replace("_", " ").replace("-", " ")
         source = "filename" if tmdb_resolution.candidate.used_filename_search else "external id"
-        category_slug = tmdb_resolution.category.lower()
-        link = f"https://www.themoviedb.org/{category_slug}/{tmdb_resolution.tmdb_id}"
-        print(
-            "[cyan]TMDB match:[/cyan] "
-            f"{match_title}{year_text} "
-            f"[{tmdb_resolution.category}] -> {link} "
-            f"({source}, {heuristic.strip()}) lang={lang_text}"
+        reporter.verbose_line(
+            f"TMDB match heuristics: source={source} heuristic={heuristic.strip()}"
         )
     elif manual_tmdb:
         display_title = tmdb_context.get("Title") or files[0].stem
-        category_slug = (tmdb_category or "").lower()
-        link = (
-            f"https://www.themoviedb.org/{category_slug}/{tmdb_id_value}"
-            if tmdb_id_value and category_slug
-            else tmdb_id_value
-        )
-        print(
-            "[cyan]TMDB manual override:[/cyan] "
-            f"{tmdb_category}/{tmdb_id_value} ({link}) for {display_title}"
+        category_display = tmdb_category or cfg.slowpics.tmdb_category or ""
+        id_display = tmdb_id_value or cfg.slowpics.tmdb_id or ""
+        lang_text = tmdb_language or tmdb_context.get("OriginalLanguage") or "und"
+        tmdb_line = (
+            f"TMDB: {category_display}/{id_display}  "
+            f"\"{display_title} ({tmdb_context.get('Year') or ''})\"  lang={lang_text}"
         )
     elif tmdb_api_key_present:
         if tmdb_error_message:
-            print(f"[yellow]TMDB lookup failed:[/yellow] {tmdb_error_message}")
+            message = f"TMDB lookup failed: {tmdb_error_message}"
+            tmdb_notes.append(message)
+            collected_warnings.append(message)
         elif tmdb_ambiguous:
-            print(
-                "[yellow]TMDB: ambiguous results for[/yellow] "
-                f"{files[0].name}; continuing without metadata."
-            )
+            message = f"TMDB ambiguous results for {files[0].name}; continuing without metadata."
+            tmdb_notes.append(message)
+            collected_warnings.append(message)
         else:
-            print(
-                "[yellow]TMDB: no confident match for[/yellow] "
-                f"{files[0].name}; continuing without metadata."
-            )
+            message = f"TMDB could not find a confident match for {files[0].name}."
+            tmdb_notes.append(message)
+            collected_warnings.append(message)
     elif not (cfg.slowpics.tmdb_id or "").strip():
-        print(
-            "[yellow]TMDB disabled:[/yellow] set [tmdb].api_key in config.toml to enable automatic matching."
-        )
-
-    labels = [meta.get("label") or file.name for meta, file in zip(metadata, files)]
-    print("[green]Files detected:[/green]")
-    for label, file in zip(labels, files):
-        print(f"  - {label} ({file.name})")
+        message = "TMDB disabled: set [tmdb].api_key in config.toml to enable automatic matching."
+        tmdb_notes.append(message)
+        collected_warnings.append(message)
 
     plans = _build_plans(files, metadata, cfg)
-    _print_trim_overrides(plans)
     analyze_path = _pick_analyze_file(files, metadata, cfg.analysis.analyze_clip, cache_dir=root)
 
-    alignment_summary = _maybe_apply_audio_alignment(
+    alignment_summary, alignment_display = _maybe_apply_audio_alignment(
         plans,
         cfg,
         analyze_path,
         root,
         audio_track_override_map,
+        reporter=reporter,
     )
-    if alignment_summary is not None:
-        _print_alignment_summary(alignment_summary, plans)
+    audio_offsets_applied = alignment_summary is not None
+    if alignment_display is not None:
+        json_tail["audio_alignment"]["offsets_filename"] = alignment_display.offsets_file_line.split(": ", 1)[-1]
+        json_tail["audio_alignment"]["reference_stream"] = alignment_display.json_reference_stream
+        json_tail["audio_alignment"]["target_stream"] = alignment_display.json_target_streams
+        json_tail["audio_alignment"]["offsets_sec"] = alignment_display.json_offsets_sec
+        json_tail["audio_alignment"]["offsets_frames"] = alignment_display.json_offsets_frames
+        if alignment_display.warnings:
+            collected_warnings.extend(alignment_display.warnings)
+    else:
+        json_tail["audio_alignment"]["reference_stream"] = None
+        json_tail["audio_alignment"]["target_stream"] = {}
+        json_tail["audio_alignment"]["offsets_sec"] = {}
+        json_tail["audio_alignment"]["offsets_frames"] = {}
+    json_tail["audio_alignment"]["enabled"] = bool(cfg.audio_alignment.enable)
 
     try:
         _init_clips(plans, cfg.runtime, root)
@@ -1508,7 +1705,59 @@ def run_cli(
     if any(clip is None for clip in clips):
         raise CLIAppError("Clip initialisation failed")
 
-    _confirm_alignment_with_screenshots(plans, alignment_summary, cfg, root)
+    clip_records: List[Dict[str, object]] = []
+    trim_details: List[Dict[str, object]] = []
+    for plan in plans:
+        label = (plan.metadata.get("label") or plan.path.name).strip()
+        frames_total = int(plan.source_num_frames or getattr(plan.clip, "num_frames", 0) or 0)
+        width = int(plan.source_width or getattr(plan.clip, "width", 0) or 0)
+        height = int(plan.source_height or getattr(plan.clip, "height", 0) or 0)
+        fps_tuple = plan.effective_fps or plan.source_fps or (24000, 1001)
+        fps_float = _fps_to_float(fps_tuple)
+        duration_seconds = frames_total / fps_float if fps_float > 0 else 0.0
+        clip_records.append(
+            {
+                "label": label,
+                "width": width,
+                "height": height,
+                "fps": fps_float,
+                "frames": frames_total,
+                "duration": duration_seconds,
+            }
+        )
+        json_tail["clips"].append(
+            {
+                "label": label,
+                "width": width,
+                "height": height,
+                "fps": fps_float,
+                "frames": frames_total,
+                "duration_s": duration_seconds,
+            }
+        )
+
+        lead_frames = max(0, int(plan.trim_start))
+        lead_seconds = lead_frames / fps_float if fps_float > 0 else 0.0
+        trail_frames = 0
+        if plan.trim_end is not None and plan.trim_end != 0:
+            if plan.trim_end < 0:
+                trail_frames = abs(int(plan.trim_end))
+            else:
+                trail_frames = 0
+        trail_seconds = trail_frames / fps_float if fps_float > 0 else 0.0
+        trim_details.append(
+            {
+                "label": label,
+                "lead_frames": lead_frames,
+                "lead_seconds": lead_seconds,
+                "trail_frames": trail_frames,
+                "trail_seconds": trail_seconds,
+            }
+        )
+        json_tail["trims"]["per_clip"][label] = {
+            "lead_f": lead_frames,
+            "trail_f": trail_frames,
+        }
 
     analyze_index = [plan.path for plan in plans].index(analyze_path)
     analyze_clip = plans[analyze_index].clip
@@ -1522,15 +1771,56 @@ def run_cli(
         analyze_clip
     )
     analyze_fps = analyze_fps_num / analyze_fps_den if analyze_fps_den else 0.0
-    _log_selection_windows(
-        plans,
-        selection_specs,
-        frame_window,
-        collapsed=windows_collapsed,
-        analyze_fps=analyze_fps,
-    )
+    manual_start_frame, manual_end_frame = frame_window
+    analyze_total_frames = int(clip_records[analyze_index]["frames"])
+    manual_start_seconds_value = manual_start_frame / analyze_fps if analyze_fps > 0 else float(manual_start_frame)
+    manual_end_seconds_value = manual_end_frame / analyze_fps if analyze_fps > 0 else float(manual_end_frame)
+    manual_end_changed = manual_end_frame < analyze_total_frames
+    json_tail["alignment"] = {
+        "manual_start_s": manual_start_seconds_value,
+        "manual_end_s": manual_end_seconds_value if manual_end_changed else None,
+    }
+
+    json_tail["window"] = {
+        "ignore_lead_seconds": float(cfg.analysis.ignore_lead_seconds),
+        "ignore_trail_seconds": float(cfg.analysis.ignore_trail_seconds),
+        "min_window_seconds": float(cfg.analysis.min_window_seconds),
+    }
+
+    for plan, spec in zip(plans, selection_specs):
+        if not spec.warnings:
+            continue
+        label = plan.metadata.get("label") or plan.path.name
+        for warning in spec.warnings:
+            message = f"Window warning for {label}: {warning}"
+            collected_warnings.append(message)
+    if windows_collapsed:
+        message = "Ignore lead/trail settings did not overlap across all sources; using fallback range."
+        collected_warnings.append(message)
 
     cache_info = _build_cache_info(root, plans, cfg, analyze_index)
+
+    cache_filename = cfg.analysis.frame_data_filename
+    cache_status = "disabled"
+    cache_reason = None
+    if not cfg.analysis.save_frames_data:
+        cache_status = "disabled"
+        cache_reason = "save_frames_data=false"
+    elif cache_info is None:
+        cache_status = "disabled"
+        cache_reason = "no_cache_info"
+    elif cache_info.path.exists():
+        cache_status = "reused"
+    else:
+        cache_status = "recomputed"
+        cache_reason = "missing"
+
+    json_tail["cache"] = {
+        "file": cache_filename,
+        "status": cache_status,
+    }
+    if cache_reason:
+        json_tail["cache"]["reason"] = cache_reason
 
     step_size = max(1, int(cfg.analysis.step))
     total_frames = getattr(analyze_clip, 'num_frames', 0)
@@ -1544,8 +1834,128 @@ def run_cli(
 
     cache_exists = cache_info is not None and cache_info.path.exists()
     if cache_exists:
-        print(f"[cyan]Using cached frame metrics:[/cyan] {cache_info.path.name}")
-        print("[cyan]Selecting frames from cached data...[/cyan]")
+        reporter.verbose_line(f"Using cached frame metrics: {cache_info.path.name}")
+    elif cache_status == "recomputed" and cache_info is not None:
+        reporter.verbose_line(f"Frame metrics cache will be refreshed: {cache_info.path.name}")
+
+    manual_start_text = "0s" if manual_start_frame <= 0 else f"{manual_start_seconds_value:.2f}s"
+    manual_end_text = "unchanged" if not manual_end_changed else f"{manual_end_seconds_value:.2f}s"
+
+    discover_lines = [
+        (
+            f"• {record['label']}  [{int(record['width'])}x{int(record['height'])} @ "
+            f"{record['fps']:.3f}fps]  frames={int(record['frames'])}  "
+            f"dur={_format_seconds(record['duration'])}"
+        )
+        for record in clip_records
+    ]
+
+    prepare_trim_lines = [
+        (
+            f"Trim[{detail['label']}]: lead={detail['lead_frames']}f "
+            f"({detail['lead_seconds']:.2f}s)  trail={detail['trail_frames']}f "
+            f"({detail['trail_seconds']:.2f}s)"
+        )
+        for detail in trim_details
+    ]
+
+    overrides_text = "change_fps" if cfg.overrides.change_fps else "none"
+    window_line = (
+        f"Window: ignore_lead={cfg.analysis.ignore_lead_seconds:.2f}s  "
+        f"ignore_trail={cfg.analysis.ignore_trail_seconds:.2f}s  "
+        f"min_window={cfg.analysis.min_window_seconds:.2f}s"
+    )
+    alignment_line = f"Alignment: manual_start={manual_start_text}  manual_end={manual_end_text}"
+
+    analysis_method = "absdiff" if cfg.analysis.motion_use_absdiff else "edge"
+    analysis_header_line = (
+        f"Analyze: step={cfg.analysis.step}  downscale={cfg.analysis.downscale_height}px  "
+        f"method={analysis_method}  scenecut_q={cfg.analysis.motion_scenecut_quantile}  "
+        f"diff_radius={cfg.analysis.motion_diff_radius}"
+    )
+    frames_plan_line = (
+        f"Frames plan: Dark={cfg.analysis.frame_count_dark}  "
+        f"Bright={cfg.analysis.frame_count_bright}  "
+        f"Motion={cfg.analysis.frame_count_motion}  Random={cfg.analysis.random_frames}  "
+        f"User={len(cfg.analysis.user_frames)}  "
+        f"sep={cfg.analysis.screen_separation_sec}s  Seed={cfg.analysis.random_seed}"
+    )
+
+    json_tail["analysis"] = {
+        "step": int(cfg.analysis.step),
+        "downscale_height": int(cfg.analysis.downscale_height),
+        "motion_method": analysis_method,
+        "motion_scenecut_quantile": float(cfg.analysis.motion_scenecut_quantile),
+        "motion_diff_radius": int(cfg.analysis.motion_diff_radius),
+        "counts": {
+            "dark": int(cfg.analysis.frame_count_dark),
+            "bright": int(cfg.analysis.frame_count_bright),
+            "motion": int(cfg.analysis.frame_count_motion),
+            "random": int(cfg.analysis.random_frames),
+            "user": len(cfg.analysis.user_frames),
+        },
+        "screen_separation_sec": float(cfg.analysis.screen_separation_sec),
+        "random_seed": int(cfg.analysis.random_seed),
+    }
+
+    cache_display = cache_filename
+    if cache_status == "reused":
+        cache_display = f"{cache_filename} (reused)"
+    elif cache_status == "recomputed" and cache_reason:
+        cache_display = f"{cache_filename} (recomputed: {cache_reason})"
+    elif cache_status == "disabled" and cache_reason:
+        cache_display = f"{cache_filename} ({cache_reason})"
+    elif cache_status != "reused":
+        cache_display = f"{cache_filename} ({cache_status})"
+
+    banner_text = (
+        f"▶ Frame Compare  • {len(plans)} clips  • seed={cfg.analysis.random_seed}  "
+        f"• cache={cache_display}"
+    )
+    reporter.banner(banner_text)
+
+    reporter.section("Discover")
+    for line in discover_lines:
+        reporter.line(line)
+    if tmdb_line:
+        reporter.line(tmdb_line)
+    elif tmdb_notes:
+        for note in tmdb_notes:
+            reporter.verbose_line(note)
+
+    reporter.section("Prepare")
+    for line in prepare_trim_lines:
+        reporter.line(line)
+    reporter.line(f"Overrides: {overrides_text}")
+    reporter.line(window_line)
+    reporter.line(alignment_line)
+    if alignment_display and (alignment_display.stream_lines or alignment_display.offset_lines):
+        for line in alignment_display.stream_lines:
+            reporter.line(line)
+        if alignment_display.estimation_line:
+            reporter.line(alignment_display.estimation_line)
+        for line in alignment_display.offset_lines:
+            reporter.line(line)
+        _confirm_alignment_with_screenshots(
+            plans,
+            alignment_summary,
+            cfg,
+            root,
+            reporter,
+            alignment_display,
+        )
+        if alignment_display.offsets_file_line:
+            reporter.line(alignment_display.offsets_file_line)
+    if alignment_display is not None:
+        json_tail["audio_alignment"]["preview_paths"] = alignment_display.preview_paths
+        confirmation_value = alignment_display.confirmation
+        if confirmation_value is None and alignment_summary is not None:
+            confirmation_value = "auto"
+        json_tail["audio_alignment"]["confirmed"] = confirmation_value
+
+    reporter.section("Analyze")
+    reporter.line(analysis_header_line)
+    reporter.line(frames_plan_line)
 
     using_frame_total = isinstance(total_frames, int) and total_frames > 0
     progress_total = int(total_frames) if using_frame_total else int(sample_count)
@@ -1586,13 +1996,14 @@ def run_cli(
             start_time = time.perf_counter()
             samples_done = 0
 
-            with Progress(
+            with reporter.progress(
                 TextColumn('{task.description}'),
                 BarColumn(),
                 TextColumn('{task.completed}/{task.total}'),
                 TextColumn('{task.percentage:>6.02f}%'),
                 TextColumn('{task.fields[fps]}'),
                 TimeRemainingColumn(),
+                TimeElapsedColumn(),
                 transient=False,
             ) as analysis_progress:
                 task_id = analysis_progress.add_task(
@@ -1644,21 +2055,90 @@ def run_cli(
             rich_message="[red]No frames were selected; cannot continue.[/red]",
         )
 
+    kept_count = len(frames)
+    scanned_count = progress_total if progress_total > 0 else max(sample_count, kept_count)
+    cache_summary_label = "reused" if cache_status == "reused" else ("new" if cache_status == "recomputed" else cache_status)
+    reporter.line(
+        f"Analysis done • {kept_count}/{scanned_count} kept • cache={cache_summary_label}"
+    )
+    json_tail["analysis"]["kept"] = kept_count
+    json_tail["analysis"]["scanned"] = scanned_count
+
     out_dir = (root / cfg.screenshots.directory_name).resolve()
     total_screens = len(frames) * len(plans)
-    print("[cyan]Preparing screenshot rendering...[/cyan]")
+
+    writer_name = "FFmpeg" if cfg.screenshots.use_ffmpeg else "VS"
+    add_frame_info_flag = "true" if cfg.screenshots.add_frame_info else "false"
+    upscale_flag = "true" if cfg.screenshots.upscale else "false"
+    letterbox_flag = "true" if cfg.screenshots.letterbox_pillarbox_aware else "false"
+    center_pad_flag = "true" if cfg.screenshots.center_pad else "false"
+    render_header_line = (
+        f"Render: writer={writer_name}  out_dir={cfg.screenshots.directory_name}  "
+        f"add_frame_info={add_frame_info_flag}"
+    )
+    pad_descriptor = (
+        f"{cfg.screenshots.pad_to_canvas}(center_pad={center_pad_flag}, "
+        f"tol={cfg.screenshots.letterbox_px_tolerance}px when auto)"
+    )
+    canvas_line = (
+        f"Canvas: single_res={cfg.screenshots.single_res or 'tallest'} "
+        f"upscale={upscale_flag}  crop=mod{cfg.screenshots.mod_crop} "
+        f"letterbox-aware={letterbox_flag}  pad={pad_descriptor}"
+    )
+    dpd_flag = "true" if cfg.color.dynamic_peak_detection else "false"
+    tonemap_line = (
+        f"Tonemap: preset={cfg.color.preset}  curve={cfg.color.tone_curve}  "
+        f"dpd={dpd_flag}  target={cfg.color.target_nits}nits "
+        f"(verify_luma_thresh={cfg.color.verify_luma_threshold})"
+    )
+    overlay_mode_value = getattr(cfg.color, "overlay_mode", "minimal")
+    overlay_suffix = "  (diagnostic via overlay_mode)" if overlay_mode_value == "diagnostic" else ""
+    overlay_line = (
+        f"Overlay: enabled={'true' if cfg.color.overlay_enabled else 'false'}  "
+        f"template=\"{cfg.color.overlay_text_template}\"{overlay_suffix}"
+    )
+
+    reporter.section("Render")
+    reporter.line(render_header_line)
+    reporter.line(canvas_line)
+    reporter.line(tonemap_line)
+    reporter.line(overlay_line)
+
+    json_tail["render"] = {
+        "writer": writer_name,
+        "out_dir": str(out_dir),
+        "add_frame_info": bool(cfg.screenshots.add_frame_info),
+        "single_res": int(cfg.screenshots.single_res),
+        "upscale": bool(cfg.screenshots.upscale),
+        "mod_crop": int(cfg.screenshots.mod_crop),
+        "letterbox_pillarbox_aware": bool(cfg.screenshots.letterbox_pillarbox_aware),
+        "pad_to_canvas": cfg.screenshots.pad_to_canvas,
+        "center_pad": bool(cfg.screenshots.center_pad),
+        "letterbox_px_tolerance": int(cfg.screenshots.letterbox_px_tolerance),
+    }
+    json_tail["tonemap"] = {
+        "preset": cfg.color.preset,
+        "tone_curve": cfg.color.tone_curve,
+        "dynamic_peak_detection": bool(cfg.color.dynamic_peak_detection),
+        "target_nits": float(cfg.color.target_nits),
+        "verify_luma_threshold": float(cfg.color.verify_luma_threshold),
+        "overlay_enabled": bool(cfg.color.overlay_enabled),
+        "overlay_mode": overlay_mode_value,
+    }
+
     try:
         if total_screens > 0:
             start_time = time.perf_counter()
             processed = 0
 
-            with Progress(
+            with reporter.progress(
                 TextColumn('{task.description}'),
                 BarColumn(),
                 TextColumn('{task.completed}/{task.total}'),
                 TextColumn('{task.percentage:>6.02f}%'),
                 TextColumn('{task.fields[rate]}'),
                 TimeRemainingColumn(),
+                TimeElapsedColumn(),
                 transient=False,
             ) as render_progress:
                 task_id = render_progress.add_task(
@@ -1688,6 +2168,7 @@ def run_cli(
                     cfg.color,
                     trim_offsets=[plan.trim_start for plan in plans],
                     progress_callback=advance_render,
+                    warnings_sink=collected_warnings,
                 )
 
                 if processed < total_screens:
@@ -1707,6 +2188,7 @@ def run_cli(
                 cfg.color,
                 trim_offsets=[plan.trim_start for plan in plans],
                 frame_labels=frame_categories,
+                warnings_sink=collected_warnings,
             )
     except ScreenshotError as exc:
         raise CLIAppError(
@@ -1715,6 +2197,7 @@ def run_cli(
         ) from exc
 
     slowpics_url: Optional[str] = None
+    reporter.section("Publish")
     if cfg.slowpics.auto_upload:
         print("[cyan]Preparing slow.pics upload...[/cyan]")
         upload_total = len(image_paths)
@@ -1782,7 +2265,61 @@ def run_cli(
         image_paths=list(image_paths),
         slowpics_url=slowpics_url,
     )
-    _print_summary(result.files, result.frames, result.out_dir, result.slowpics_url)
+    for warning in collected_warnings:
+        reporter.warn(warning)
+
+    warnings_list = list(dict.fromkeys(reporter.iter_warnings()))
+    json_tail["warnings"] = warnings_list
+
+    if not reporter.quiet:
+        reporter.section("Warnings")
+        if warnings_list:
+            for message in warnings_list:
+                reporter.line(message)
+        else:
+            reporter.line("none")
+
+    tonemap_status = "on" if cfg.color.dynamic_peak_detection else "off"
+    summary_lines = [
+        "Summary:",
+        (
+            f"• Clips: {len(plans)}  Window: lead={cfg.analysis.ignore_lead_seconds}s "
+            f"trail={cfg.analysis.ignore_trail_seconds}s  step={cfg.analysis.step} "
+            f"downscale={cfg.analysis.downscale_height}"
+        ),
+        (
+            f"• Align: audio offsets applied={'true' if audio_offsets_applied else 'false'}  "
+            f"offsets_file={json_tail['audio_alignment']['offsets_filename']}"
+        ),
+        (
+            f"• Plan: Dark={cfg.analysis.frame_count_dark}  Bright={cfg.analysis.frame_count_bright}  "
+            f"Motion={cfg.analysis.frame_count_motion}  Random={cfg.analysis.random_frames}  "
+            f"User={len(cfg.analysis.user_frames)}  sep={cfg.analysis.screen_separation_sec}s"
+        ),
+        (
+            f"• Canvas: single_res={cfg.screenshots.single_res or 'tallest'}  "
+            f"upscale={upscale_flag}  crop=mod{cfg.screenshots.mod_crop}  "
+            f"pad={cfg.screenshots.pad_to_canvas}"
+        ),
+        (
+            f"• Tonemap: {cfg.color.tone_curve}@{cfg.color.target_nits}nits dpd={tonemap_status}  "
+            f"verify≤{cfg.color.verify_luma_threshold}"
+        ),
+        (
+            f"• Output: {cfg.screenshots.directory_name}  "
+            f"compression={cfg.screenshots.compression_level}"
+        ),
+        (
+            f"• Cache: {cache_filename}  {cache_summary_label}"
+        ),
+    ]
+
+    if not reporter.quiet:
+        reporter.section("Summary")
+        for line in summary_lines:
+            reporter.line(line)
+
+    reporter.console.print(json.dumps(json_tail, separators=(",", ":")))
     return result
 
 
@@ -1796,17 +2333,26 @@ def run_cli(
     multiple=True,
     help="Manual audio track override in the form label=index. Repeatable.",
 )
+@click.option("--quiet", is_flag=True, help="Suppress verbose output; show banner, progress, and JSON only.")
+@click.option("--verbose", is_flag=True, help="Show additional diagnostic output during run.")
+@click.option("--no-color", is_flag=True, help="Disable ANSI colour output.")
 def main(
     config_path: str,
     input_dir: str | None,
     *,
     audio_align_track_option: tuple[str, ...],
+    quiet: bool,
+    verbose: bool,
+    no_color: bool,
 ) -> None:
     try:
         result = run_cli(
             config_path,
             input_dir,
             audio_track_overrides=audio_align_track_option,
+            quiet=quiet,
+            verbose=verbose,
+            no_color=no_color,
         )
     except CLIAppError as exc:
         print(exc.rich_message)

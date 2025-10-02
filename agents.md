@@ -10,54 +10,55 @@
 - No hidden globals; functions pure unless explicitly I/O.
 - Type hints + docstrings; `logging` module for library logs.
 
-# Tools (MCP) — What to use and how
+### Start Session — Auto-Continue (self-executing)
 
-> Use MCP tools in this order for most tasks: **ripgrep → context7 → sequential_thinking → memory **. Start every session with the **Tool Discovery** macro below so Codex knows exact method names/params for your installed servers.
+GOAL
+Infer the task from my last message in this chat (or from TARGET_TASK below) and complete it end-to-end **without pausing** unless there’s an error or a required tool is missing.
 
-### ripgrep (code evidence)
-**Purpose.** Find flags, examples, outputs, and metric implementations in the repo quickly.
+TARGET_TASK
+# Optional: override here; otherwise infer from the last user instruction.
 
-### sequential_thinking (gated plans)
-**Purpose.** Create stepwise plans with checkpoints.
+RUN MODE
+run_mode: auto
+pause_on: ["error", "missing_tool", "large_diff"]
+large_diff_threshold_lines: 200
+max_results_per_table: 100
 
-**Tips.** Keep steps small; require a DIFF preview before applying file edits; abort if a step exceeds ~200 changed lines.
+RULES
+- Do **not** ask for approval between steps.
+- Never emit the word “STOP” unless a pause_on condition is met.
+- If a diff would exceed large_diff_threshold_lines, split it and continue automatically.
 
-### memory (reference)
-**Purpose.** Persist decisions, version facts, and runbooks for future sessions.
+STEPS
+1) Tool discovery
+   - List tools for ripgrep, context7, sequential_thinking, memory with exact names and required params.
+   - If names/params differ from assumptions, **use the discovered names** and continue.
+   - If a required tool is missing, report `missing_tool` and stop; otherwise proceed automatically.
 
-**What to store.**
-- “README Style Policy”; “README update <date>” notes.
-- Runtime/library versions used in examples (Python, OpenCV, NumPy, ffmpeg/VapourSynth).
-- Policies: frame-selection defaults, output structure.
+2) Evidence sweep (ripgrep)
+   - Config/CLI: argparse|click|typer; YAML/TOML/JSON loads; env vars → table {Flag/Key/Env, Type?, Default?, File:Line, Context}
+   - Outputs: cv2/PIL/imageio/plt saves; csv/json dump; os.makedirs/Path().mkdir → {Artifact, Format, Path pattern, Producer (file:line)}
+   - Cap results to max_results_per_table; if larger, summarize by directory and continue.
 
-**Macros.**
+3)  Docs check (context7)
+   - If the task touches OpenCV/NumPy/ffmpeg/VapourSynth  or any other relevant APIs, fetch official snippets (title + link + example). Note doc version/date.
+   - Do not paste long excerpts. Continue.
 
-- **Search entries**
-  ```
-  memory.search tags: ["policy","frames"] query: "seed|random_frames|user_frames"
-  ```
+4) Plan (sequential_thinking)
+   - Draft a 3–7 step plan tailored to TARGET_TASK: inputs (evidence/docs), exact edits (files/sections), success checks (ripgrep queries or minimal run cmd), rollback notes.
+   - **Continue immediately** to execution.
 
-**Guardrails.** Never store secrets or user data; include dates and tags for retrieval.
+5) Execute
+   - Apply small diffs (≤ large_diff_threshold_lines per step). If larger, split into sub-steps.
+   - After each step, run the success checks from (4). If failing, rollback that step and try the smallest passing alternative.
 
----
+6) Persist (memory)
+   - Save key decisions/runbook entries (e.g., “README update <YYYY-MM-DD>”, “README Style Policy”, versions used), with tags for retrieval.
 
-### context7 (docs on tap)
-**Purpose.** Pull *official docs* snippets into context so edits match real APIs (e.g., OpenCV color conversion, NumPy image ops, ffmpeg/VapourSynth usage).
+7) Verify & summarize
+   - Re-run targeted ripgrep checks to confirm doc↔code consistency or task success.
+   - Output a concise summary (what changed, files touched, follow-ups).
 
-**Use when.**
-- whenever relevant libraries from context 7 are referenced
-- Unsure about library calls or parameters (OpenCV cvtColor codes, optical-flow APIs).
-- Need canonical examples straight from docs.
-- Want the latest guidance without hard-coding long quotes into README.
-
-**Macros.**
-
-- **Cross-check code vs docs**
-  ```
-  Compare our use of <function> (file:line) with the official context7 snippet. List mismatches and propose minimal fixes.
-  ```
-
-**Guardrails.** Prefer official domains; avoid user blogs. Summarize—don’t dump full pages. Note doc versions; if versionless, say “as of <today>”.
 
 ### Recipes (tool interplay)
 

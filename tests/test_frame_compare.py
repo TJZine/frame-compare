@@ -1,10 +1,12 @@
 from pathlib import Path
+import json
 import types
 
 import pytest
 from click.testing import CliRunner
 
 import frame_compare
+from src.audio_alignment import AlignmentMeasurement, AudioStreamInfo
 from src.datatypes import (
     AnalysisConfig,
     AppConfig,
@@ -140,14 +142,18 @@ def test_cli_applies_overrides_and_naming(tmp_path, monkeypatch, runner):
 
     monkeypatch.setattr(frame_compare, "generate_screenshots", fake_generate)
 
-    result = runner.invoke(frame_compare.main, ["--config", "dummy"], catch_exceptions=False)
+    result = runner.invoke(frame_compare.main, ["--config", "dummy", "--no-color"], catch_exceptions=False)
     assert result.exit_code == 0
-    assert "AAA Short" in result.output
-    assert "BBB Short" in result.output
+    assert "Discover" in result.output
+    assert "• AAA Short" in result.output
+    assert "• BBB Short" in result.output
 
-    assert "Trim overrides set in config" in result.output
-    assert "AAA Short (AAA - 01.mkv): start=5, end=unchanged" in result.output
-    assert "BBB Short (BBB - 01.mkv): start=unchanged, end=-12" in result.output
+    assert "Prepare" in result.output
+    assert "Trim[AAA Short]: lead=5f" in result.output
+    assert "Trim[BBB Short]: lead=0f" in result.output
+    assert "Overrides: change_fps" in result.output
+    assert "Window: ignore_lead=0.00s" in result.output
+    assert "Summary:" in result.output
 
     assert ram_limits == [cfg.runtime.ram_limit_mb]
 
@@ -164,6 +170,7 @@ def test_cli_applies_overrides_and_naming(tmp_path, monkeypatch, runner):
     assert cache_infos and cache_infos[0].path == (tmp_path / cfg.analysis.frame_data_filename).resolve()
     assert cache_infos[0].files == ["AAA - 01.mkv", "BBB - 01.mkv"]
     assert len(parse_calls) == 2
+
 
 
 def test_label_dedupe_preserves_short_labels(tmp_path, monkeypatch, runner):
@@ -213,7 +220,7 @@ def test_label_dedupe_preserves_short_labels(tmp_path, monkeypatch, runner):
 
     monkeypatch.setattr(frame_compare, "generate_screenshots", fake_generate)
 
-    result = runner.invoke(frame_compare.main, ["--config", "dummy"], catch_exceptions=False)
+    result = runner.invoke(frame_compare.main, ["--config", "dummy", "--no-color"], catch_exceptions=False)
     assert result.exit_code == 0
     assert captured
     labels = captured[0]
@@ -271,8 +278,8 @@ def test_cli_reuses_frame_cache(tmp_path, monkeypatch, runner):
 
     monkeypatch.setattr(frame_compare, "generate_screenshots", fake_generate)
 
-    runner.invoke(frame_compare.main, ["--config", "dummy"], catch_exceptions=False)
-    runner.invoke(frame_compare.main, ["--config", "dummy"], catch_exceptions=False)
+    runner.invoke(frame_compare.main, ["--config", "dummy", "--no-color"], catch_exceptions=False)
+    runner.invoke(frame_compare.main, ["--config", "dummy", "--no-color"], catch_exceptions=False)
 
     assert call_state["calls"] == 2
     assert call_state["cache_hits"] == 1
@@ -332,7 +339,7 @@ def test_cli_input_override_and_cleanup(tmp_path, monkeypatch, runner):
 
     result = runner.invoke(
         frame_compare.main,
-        ["--config", "dummy", "--input", str(override_dir)],
+        ["--config", "dummy", "--input", str(override_dir), "--no-color"],
         catch_exceptions=False,
     )
 
@@ -340,7 +347,7 @@ def test_cli_input_override_and_cleanup(tmp_path, monkeypatch, runner):
     assert uploads
     screen_dir = Path(override_dir / cfg.screenshots.directory_name).resolve()
     assert not screen_dir.exists()
-    assert str(override_dir) in result.output
+    assert uploads[0][1] == screen_dir
 
 
 def test_cli_tmdb_resolution_populates_slowpics(tmp_path, monkeypatch):
@@ -734,3 +741,141 @@ def test_cli_tmdb_confirmation_rejects(tmp_path, monkeypatch):
 
     assert result.config.slowpics.tmdb_id == ""
     assert result.config.slowpics.tmdb_category == ""
+
+
+
+def test_audio_alignment_block_and_json(tmp_path, monkeypatch, runner):
+    reference_path = tmp_path / "ClipA.mkv"
+    target_path = tmp_path / "ClipB.mkv"
+    for file in (reference_path, target_path):
+        file.write_bytes(b"data")
+
+    cfg = _make_config(tmp_path)
+    cfg.audio_alignment.enable = True
+    cfg.audio_alignment.confirm_with_screenshots = False
+    cfg.audio_alignment.max_offset_seconds = 5.0
+    cfg.audio_alignment.offsets_filename = "alignment.toml"
+    cfg.audio_alignment.frame_offset_bias = 0
+    cfg.audio_alignment.start_seconds = 0.25
+    cfg.audio_alignment.duration_seconds = 1.5
+    cfg.color.overlay_mode = "diagnostic"
+
+    monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
+
+    def fake_parse(name: str, **_kwargs):
+        if name.startswith("ClipA"):
+            return {"label": "Clip A", "file_name": name}
+        return {"label": "Clip B", "file_name": name}
+
+    monkeypatch.setattr(frame_compare, "parse_filename_metadata", fake_parse)
+    monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit: None)
+
+    def fake_init_clip(path, *, trim_start=0, trim_end=None, fps_map=None, cache_dir=None):
+        return types.SimpleNamespace(
+            path=Path(path),
+            width=1920,
+            height=1080,
+            fps_num=24000,
+            fps_den=1001,
+            num_frames=24000,
+        )
+
+    monkeypatch.setattr(frame_compare.vs_core, "init_clip", fake_init_clip)
+
+    monkeypatch.setattr(
+        frame_compare,
+        "select_frames",
+        lambda *args, **kwargs: [42],
+    )
+
+    def fake_generate(clips, frames, files, metadata, out_dir, cfg_screens, color_cfg, **kwargs):
+        out_dir.mkdir(parents=True, exist_ok=True)
+        return [str(out_dir / f"shot_{idx}.png") for idx in range(len(frames) * len(files))]
+
+    monkeypatch.setattr(frame_compare, "generate_screenshots", fake_generate)
+
+    def fake_probe(path: Path):
+        if Path(path) == reference_path:
+            return [
+                AudioStreamInfo(
+                    index=0,
+                    language="eng",
+                    codec_name="aac",
+                    channels=2,
+                    channel_layout="stereo",
+                    sample_rate=48000,
+                    bitrate=192000,
+                    is_default=True,
+                    is_forced=False,
+                )
+            ]
+        return [
+            AudioStreamInfo(
+                index=1,
+                language="jpn",
+                codec_name="aac",
+                channels=2,
+                channel_layout="stereo",
+                sample_rate=48000,
+                bitrate=192000,
+                is_default=False,
+                is_forced=False,
+            )
+        ]
+
+    monkeypatch.setattr(frame_compare.audio_alignment, "probe_audio_streams", fake_probe)
+
+    measurement = AlignmentMeasurement(
+        file=target_path,
+        offset_seconds=0.1,
+        frames=3,
+        correlation=0.93,
+        reference_fps=24.0,
+        target_fps=24.0,
+    )
+
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "measure_offsets",
+        lambda *args, **kwargs: [measurement],
+    )
+
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "load_offsets",
+        lambda *_args, **_kwargs: ({}, {}),
+    )
+
+    def fake_update(_path, reference_name, measurements, _existing, _negative_notes):
+        applied_frames = {reference_name: 0}
+        applied_frames.update({m.file.name: m.frames or 0 for m in measurements})
+        statuses = {m.file.name: "auto" for m in measurements}
+        return applied_frames, statuses
+
+    monkeypatch.setattr(frame_compare.audio_alignment, "update_offsets_file", fake_update)
+
+    result = runner.invoke(frame_compare.main, ["--config", "dummy", "--no-color"], catch_exceptions=False)
+    assert result.exit_code == 0
+
+    output_lines = result.output.splitlines()
+    assert any("Audio streams: ref=Clip A" in line and "target=Clip B" in line for line in output_lines)
+    assert any("Estimating audio offsets" in line and "search=±5.00s" in line for line in output_lines)
+    assert any("Audio offsets: Clip B" in line and "+0.100s" in line for line in output_lines)
+    assert "Offsets file:" in result.output
+    assert "alignment.toml" in result.output
+    assert "Overlay: enabled=true" in result.output
+    assert "diagnostic via" in result.output
+    assert "overlay_mode" in result.output
+
+    json_start = result.output.rfind('{"clips":')
+    json_payload = result.output[json_start:].replace('\n', '')
+    payload = json.loads(json_payload)
+    audio_json = payload["audio_alignment"]
+    assert audio_json["reference_stream"].startswith("Clip A")
+    assert audio_json["target_stream"]["Clip B"].startswith("aac/jpn")
+    assert audio_json["offsets_sec"]["Clip B"] == pytest.approx(0.1)
+    assert audio_json["offsets_frames"]["Clip B"] == 3
+    assert audio_json["preview_paths"] == []
+    assert audio_json["confirmed"] == "auto"
+    tonemap_json = payload["tonemap"]
+    assert tonemap_json["overlay_mode"] == "diagnostic"

@@ -71,7 +71,7 @@ Automated frame comparison pipeline that samples representative scenes, renders 
   correlation_threshold = 0.6
   ```
 - **Run:** `uv run python frame_compare.py --config config.toml --input comparison_videos`
-- **Workflow:** The CLI estimates per-source offsets, writes `generated.audio_offsets.toml`, auto-selects matching streams (language → codec → layout), and saves two preview frames under `screens/audio_alignment/`. Confirm the side-by-side results in the prompt to continue; declining captures five more random frames for inspection, opens the offsets file for manual tweaks, or honour explicit stream picks from `--audio-align-track label=index`.
+- **Workflow:** The CLI estimates per-source offsets, writes `generated.audio_offsets.toml`, auto-selects matching streams (language → codec → layout), and now reports the reference/target streams, search window, and per-target offsets in the `Prepare` phase. Previews still save under `screens/audio_alignment/`; confirming continues automatically, while declining captures five more random frames and opens the offsets file for manual tweaks. Explicit stream picks from `--audio-align-track label=index` remain respected.
 
 ## Install
 ### macOS quick path
@@ -259,6 +259,7 @@ target_nits = 100.0
 dst_min_nits = 0.1
 overlay_enabled = true
 overlay_text_template = "Tonemapping Algorithm: {tone_curve} dpd = {dynamic_peak_detection} dst = {target_nits} nits"
+overlay_mode = "minimal"
 verify_enabled = true
 verify_auto = true
 verify_start_seconds = 10.0
@@ -364,6 +365,7 @@ change_fps = {}
 | `dst_min_nits` | float | 0.1 | No | Minimum nits for libplacebo (`dst_min`). Must be ≥0.|
 | `overlay_enabled` | bool | true | No | Draw an SDR metadata overlay (top-right). If true, failures log `[OVERLAY]` and obey `strict`.|
 | `overlay_text_template` | str | `"Tonemapping Algorithm: {tone_curve} dpd = {dynamic_peak_detection} dst = {target_nits} nits"` | No | Template for the overlay text. Placeholders: `{tone_curve}`, `{dpd}`, `{dynamic_peak_detection}`, `{target_nits}`, `{preset}`, `{reason}`.|
+| `overlay_mode` | str | `"minimal"` | No | Selects overlay detail level: `minimal` shows the template; `diagnostic` appends pipeline and metadata diagnostics.|
 | `verify_enabled` | bool | true | No | Compute Δ vs naive SDR and log `[VERIFY] frame=… avg=… max=…`.|
 | `verify_frame` | int? | null | No | Force a specific verification frame index.|
 | `verify_auto` | bool | true | No | Enable the auto-search described in `docs/hdr_tonemap_overview.md`.|
