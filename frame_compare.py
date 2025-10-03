@@ -1603,10 +1603,10 @@ def _confirm_alignment_with_screenshots(
             rich_message=f"[red]Alignment preview failed:[/red] {exc}",
         ) from exc
 
-        preview_paths = [str(path) for path in generated]
-        display.preview_paths = preview_paths
-        if preview_paths:
-            reporter.line(f"Preview saved: {', '.join(preview_paths)}")
+    preview_paths = [str(path) for path in generated]
+    display.preview_paths = preview_paths
+    if preview_paths:
+        reporter.line(f"Preview saved: {', '.join(preview_paths)}")
 
     reporter.line("Awaiting alignment confirmation. (press y/n)")
 
