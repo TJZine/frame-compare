@@ -103,20 +103,6 @@ def _format_kv(
     return f"{_color_text(label_text, label_style)}{sep}{_color_text(value_text, value_style)}"
 
 
-def _format_bool(
-    label: str,
-    flag: bool,
-    *,
-    label_style: Optional[str] = "dim",
-    true_style: Optional[str] = "green",
-    false_style: Optional[str] = "red",
-    sep: str = "=",
-) -> str:
-    value_style = true_style if flag else false_style
-    value_text = "true" if flag else "false"
-    return _format_kv(label, value_text, label_style=label_style, value_style=value_style, sep=sep)
-
-
 @dataclass
 class _ClipPlan:
     path: Path
@@ -941,32 +927,6 @@ def _log_selection_windows(
         )
 
 
-def _print_trim_overrides(plans: Sequence[_ClipPlan]) -> None:
-    """Print the trim overrides sourced from the configuration."""
-
-    trimmed = [
-        plan
-        for plan in plans
-        if plan.has_trim_start_override or plan.has_trim_end_override
-    ]
-    if not trimmed:
-        return
-
-    print("[cyan]Trim overrides set in config:[/cyan]")
-    for plan in trimmed:
-        label = (plan.metadata.get("label") or plan.path.name).strip()
-        label_markup = escape(label)
-        filename_markup = escape(plan.path.name)
-        start_display = str(plan.trim_start) if plan.has_trim_start_override else "unchanged"
-        if plan.has_trim_end_override:
-            end_display = "None" if plan.trim_end is None else str(plan.trim_end)
-        else:
-            end_display = "unchanged"
-        print(
-            f"  - {label_markup} ({filename_markup}): start={start_display}, end={end_display}"
-        )
-
-
 def _resolve_alignment_reference(
     plans: Sequence[_ClipPlan],
     analyze_path: Path,
@@ -1472,45 +1432,6 @@ def _maybe_apply_audio_alignment(
             rich_message=f"[red]Audio alignment failed:[/red] {exc}",
         ) from exc
 
-def _print_alignment_summary(summary: _AudioAlignmentSummary, plans: Sequence[_ClipPlan]) -> None:
-    print("[cyan]Audio alignment summary:[/cyan]")
-    ref_label = escape(summary.reference_name)
-    if summary.baseline_shift:
-        print(
-            f"  Reference {ref_label}: trimmed +{summary.baseline_shift} frame(s) for baseline alignment"
-        )
-    else:
-        print(f"  Reference {ref_label}: no trim applied")
-
-    plan_map = {plan.path.name: plan for plan in plans}
-
-    for measurement in summary.measurements:
-        name = measurement.file.name
-        plan = plan_map.get(name)
-        status = summary.statuses.get(name, "skipped")
-        applied = summary.applied_frames.get(name)
-        corr = f"{measurement.correlation:.2f}" if not math.isnan(measurement.correlation) else "nan"
-        if plan is None:
-            continue
-        if applied is None:
-            note = measurement.error or "no offset applied"
-            print(f"  - {escape(name)}: skipped ({escape(note)})")
-            continue
-        adjustment = summary.final_adjustments.get(name, 0)
-        seconds = measurement.target_fps and applied / measurement.target_fps if measurement.target_fps else None
-        seconds_text = f" ({applied / measurement.target_fps:.3f}s)" if seconds is not None else ""
-        print(
-            f"  - {escape(name)}: {status} trim +{adjustment} frame(s) [correlation={corr}]{seconds_text}"
-        )
-        detail = summary.swap_details.get(name)
-        if detail:
-            print(f"      note: {escape(detail)}")
-
-    print(
-        f"  Offsets file: {summary.offsets_path}"
-    )
-
-
 def _pick_preview_frames(clip: object, count: int, seed: int) -> List[int]:
     total = getattr(clip, "num_frames", 0)
     if not isinstance(total, int) or total <= 0:
@@ -1672,15 +1593,6 @@ def _confirm_alignment_with_screenshots(
             f"Edit {summary.offsets_path} and rerun."
         ),
     )
-
-def _print_summary(files: Sequence[Path], frames: Sequence[int], out_dir: Path, url: str | None) -> None:
-    print("[green]Comparison ready[/green]")
-    print(f"  Files     : {len(files)}")
-    print(f"  Frames    : {len(frames)} -> {frames}")
-    builtins.print(f"  Output dir: {out_dir}")
-    if url:
-        print(f"  Slow.pics : {url}")
-
 
 def run_cli(
     config_path: str,
