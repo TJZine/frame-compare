@@ -1,0 +1,183 @@
+{
+  "version": "1.0",
+  "theme": {
+    "colors": {
+      "header": "cyan.bold",
+      "accent": "blue.bright",
+      "success": "green",
+      "warn": "yellow",
+      "error": "red",
+      "dim": "grey.dim"
+    },
+    "symbols": {
+      "ok": "✓",
+      "warn": "!",
+      "err": "✗",
+      "ascii_ok": "[✓]",
+      "ascii_warn": "[!]",
+      "ascii_err": "[x]"
+    },
+    "units": {
+      "seconds_decimals": 2,
+      "offset_decimals": 3,
+      "timecode_ms": 3,
+      "thousands_sep": true
+    }
+  },
+  "layout": {
+    "two_column_min_cols": 120,
+    "blank_line_between_sections": true,
+    "path_ellipsis": "middle",
+    "truncate_right_label_min_cols": 100
+  },
+  "sections": [
+    {
+      "id": "banner",
+      "type": "line",
+      "template": "▶ Frame Compare • {clips.count} clips • seed={analysis.random_seed} • cache={cache.file} ({cache.status}{cache.reason?})"
+    },
+    {
+      "id": "at_a_glance",
+      "type": "box",
+      "title": "At-a-Glance",
+      "when": "true",
+      "lines": [
+        "Clips={clips.count} • Step={analysis.step} • Downscale={analysis.downscale_height}px • Plan: Dark={analysis.counts.dark} Bright={analysis.counts.bright} Motion={analysis.counts.motion}",
+        "Window: lead={window.ignore_lead_seconds:.2f}s trail={window.ignore_trail_seconds:.2f}s • Align(audio)={audio_alignment.enabled?yes:no}{audio_alignment.enabled? ( {audio_alignment.offsets_sec:+.3f}s ):''}",
+        "Canvas: single_res={render.single_res|tallest} upscale={render.upscale} crop=mod{render.mod_crop} pad={render.center_pad},tol={render.letterbox_px_tolerance}px",
+        "Tonemap: curve={tonemap.tone_curve} dpd={tonemap.dynamic_peak_detection} target={tonemap.target_nits}nits • Seed={analysis.random_seed} • Cache={cache.status}"
+      ]
+    },
+    {
+      "id": "discover",
+      "type": "list",
+      "title_badge": "[DISCOVER]",
+      "items": [
+        "• {clips.ref.label}  {clips.ref.width}x{clips.ref.height} @ {clips.ref.fps:.3f}fps  frames={clips.ref.frames}  dur={clips.ref.duration_tc}",
+        "• {clips.tgt.label}  {clips.tgt.width}x{clips.tgt.height} @ {clips.tgt.fps:.3f}fps  frames={clips.tgt.frames}  dur={clips.tgt.duration_tc}",
+        "{tmdb_resolved?`TMDB: ${tmdb.category}/${tmdb.id}  “${tmdb.title} (${tmdb.year})”  lang=${tmdb.lang}`:''}"
+      ]
+    },
+    {
+      "id": "prepare",
+      "type": "group",
+      "title_badge": "[PREPARE]",
+      "blocks": [
+        {
+          "subtitle": "Trim",
+          "lines": [
+            "• Ref:  lead={trims.ref.lead_f:>4}f ({trims.ref.lead_s:>5.2f}s)  trail={trims.ref.trail_f:>4}f ({trims.ref.trail_s:>5.2f}s)",
+            "• Tgt:  lead={trims.tgt.lead_f:>4}f ({trims.tgt.lead_s:>5.2f}s)  trail={trims.tgt.trail_f:>4}f ({trims.tgt.trail_s:>5.2f}s)"
+          ]
+        },
+        {
+          "subtitle": "Window",
+          "lines": [
+            "ignore_lead={window.ignore_lead_seconds:.2f}s  ignore_trail={window.ignore_trail_seconds:.2f}s  min={window.min_window_seconds:.2f}s  downscale={analysis.downscale_height}px"
+          ]
+        },
+        {
+          "subtitle": "Alignment(manual)",
+          "lines": ["start={alignment.manual_start_s}s  end={alignment.manual_end_s|unchanged}"]
+        },
+        {
+          "subtitle": "Overrides",
+          "lines": ["change_fps={overrides.change_fps|none}"],
+          "when": "verbose || overrides.change_fps != 'none'"
+        }
+      ]
+    },
+    {
+      "id": "audio_align",
+      "type": "group",
+      "title_badge": "[PREPARE · Audio]",
+      "when": "audio_alignment.enabled",
+      "blocks": [
+        {
+          "lines": [
+            "Streams: ref=\"{audio_alignment.reference_stream}\"  target=\"{audio_alignment.target_stream}\"",
+            "Offset:  {audio_alignment.offsets_sec:+.3f}s  ({audio_alignment.offsets_frames:+d}f @ {clips.ref.fps:.3f}fps)  (corr={audio_alignment.corr:.2f}, thresh={audio_alignment.threshold:.2f})",
+            "Preview: {audio_alignment.preview_paths.0.e}", 
+            "         {audio_alignment.preview_paths.1.e}",
+            "Confirm: {audio_alignment.confirmed?yes:no}{audio_alignment.confirmed?`  → wrote: ${audio_alignment.offsets_filename.e}`:`  → wrote: ${audio_alignment.offsets_filename.e} (manual edit suggested)`}"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "analyze",
+      "type": "group",
+      "title_badge": "[ANALYZE]",
+      "blocks": [
+        {
+          "subtitle": "Config",
+          "lines": [
+            "step={analysis.step}  method={analysis.motion_method}  scenecut_q={analysis.motion_scenecut_quantile}  diff_radius={analysis.motion_diff_radius}  downscale={analysis.downscale_height}px"
+          ]
+        },
+        {
+          "subtitle": "Plan",
+          "lines": [
+            "Dark={analysis.counts.dark}  Bright={analysis.counts.bright}  Motion={analysis.counts.motion}  Random={analysis.counts.random}  User={analysis.counts.user}  sep={analysis.screen_separation_sec:.1f}s  Seed={analysis.random_seed}"
+          ]
+        },
+        {
+          "type": "progress",
+          "progress_id": "analyze_bar",
+          "right_label": "{progress.fps} fps | ETA {progress.eta_tc} | elapsed {progress.elapsed_tc}"
+        }
+      ]
+    },
+    {
+      "id": "render",
+      "type": "group",
+      "title_badge": "[RENDER]",
+      "blocks": [
+        { "subtitle": "Writer", "lines": ["writer={render.writer}  out_dir={render.out_dir.e}  add_frame_info={render.add_frame_info}"] },
+        { "subtitle": "Canvas", "lines": ["single_res={render.single_res|tallest}  upscale={render.upscale}  crop=mod{render.mod_crop}  letterbox_aware={render.letterbox_pillarbox_aware}  pad={render.center_pad},tol={render.letterbox_px_tolerance}px"] },
+        { "subtitle": "Tonemap", "lines": ["curve={tonemap.tone_curve}  dpd={tonemap.dynamic_peak_detection}  target={tonemap.target_nits}nits  verify_luma_thresh={tonemap.verify_luma_threshold}"] },
+        { "subtitle": "Overlay", "lines": ["enabled={overlay.enabled}  template=\"{overlay.template}\"  mode={overlay.mode}"] },
+        {
+          "type": "progress",
+          "progress_id": "render_bar",
+          "right_label": "{progress.current}/{progress.total} | {progress.fps} fps | ETA {progress.eta_tc} | elapsed {progress.elapsed_tc}"
+        }
+      ]
+    },
+    {
+      "id": "publish",
+      "type": "passthrough",
+      "title_badge": "[PUBLISH]"
+    },
+    {
+      "id": "warnings",
+      "type": "table",
+      "title_badge": "[WARNINGS]",
+      "group_by": "warning.type",
+      "row_template": "• {warning.type}  — {warning.count} occurrence(s){warning.labels?`: ${warning.labels}`:''}",
+      "fold_labels": { "head": 2, "tail": 1, "when": "!verbose" }
+    },
+    {
+      "id": "summary",
+      "type": "list",
+      "title_badge": "[SUMMARY]",
+      "items": [
+        "• Clips: {clips.count}  Window: lead={window.ignore_lead_seconds:.2f}s trail={window.ignore_trail_seconds:.2f}s  step={analysis.step} downscale={analysis.downscale_height}px",
+        "• Align: audio={audio_alignment.enabled}  offsets={audio_alignment.offsets_sec:+.3f}s  file={audio_alignment.offsets_filename.e}",
+        "• Plan: Dark={analysis.counts.dark} Bright={analysis.counts.bright} Motion={analysis.counts.motion} Random={analysis.counts.random} User={analysis.counts.user}  sep={analysis.screen_separation_sec:.1f}s",
+        "• Canvas: single_res={render.single_res|tallest} upscale={render.upscale} crop=mod{render.mod_crop} pad={render.center_pad}",
+        "• Tonemap: {tonemap.tone_curve}@{tonemap.target_nits}nits dpd={tonemap.dynamic_peak_detection}  verify≤{tonemap.verify_luma_threshold}",
+        "• Output: {render.out_dir.e}  compression={render.compression}",
+        "• Cache: {cache.file}  {cache.status}",
+        "Output frames: {analysis.output_frame_count}  e.g., [{analysis.output_frames_preview}]  (full list in JSON{verbose?' and above':''})"
+      ]
+    }
+  ],
+  "folding": {
+    "frames_preview": { "head": 4, "tail": 4, "joiner": ", ", "when": "!verbose" }
+  },
+  "json_tail": {
+    "pretty_on_flag": "json_pretty",
+    "must_be_last": true
+  }
+}

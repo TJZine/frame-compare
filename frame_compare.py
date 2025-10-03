@@ -47,6 +47,7 @@ from src.tmdb import (
     parse_manual_id,
     resolve_tmdb,
 )
+from src.cli_layout import CliLayoutRenderer, CliLayoutError, load_cli_layout
 
 logger = logging.getLogger(__name__)
 
@@ -174,29 +175,81 @@ class _AudioAlignmentDisplayData:
     warnings: List[str]
     preview_paths: List[str] = field(default_factory=list)
     confirmation: Optional[str] = None
+    correlations: Dict[str, float] = field(default_factory=dict)
+    threshold: float = 0.0
 
 
-class CLIReporter:
-    """Helper that standardises CLI output formatting and verbosity."""
+class CliOutputManager:
+    """Layout-driven CLI presentation controller."""
 
-    _SECTION_STYLES: Dict[str, str] = {
-        "Discover": "bold cyan",
-        "Prepare": "bold magenta",
-        "Analyze": "bold blue",
-        "Render": "bold cyan",
-        "Publish": "bold blue",
-        "Warnings": "bold yellow",
-        "Summary": "bold green",
-    }
-
-    def __init__(self, *, quiet: bool = False, verbose: bool = False, no_color: bool = False) -> None:
-        if quiet and verbose:
-            verbose = False
+    def __init__(
+        self,
+        *,
+        quiet: bool,
+        verbose: bool,
+        no_color: bool,
+        layout_path: Path,
+        console: Console | None = None,
+    ) -> None:
         self.quiet = quiet
-        self.verbose = verbose
-        self.console = Console(no_color=no_color, highlight=False)
+        self.verbose = verbose and not quiet
+        self.no_color = no_color
+        self.console = console or Console(no_color=no_color, highlight=False)
+        try:
+            self.layout = load_cli_layout(layout_path)
+        except CliLayoutError as exc:
+            raise CLIAppError(str(exc)) from exc
+        self.renderer = CliLayoutRenderer(
+            self.layout,
+            self.console,
+            quiet=quiet,
+            verbose=self.verbose,
+            no_color=no_color,
+        )
+        self.flags: Dict[str, Any] = {
+            "quiet": quiet,
+            "verbose": self.verbose,
+            "no_color": no_color,
+        }
+        self.values: Dict[str, Any] = {
+            "theme": {
+                "colors": dict(self.layout.theme.colors),
+                "symbols": dict(self.renderer.symbols),
+            }
+        }
         self._warnings: List[str] = []
-        self._last_section: Optional[str] = None
+
+    def set_flag(self, key: str, value: Any) -> None:
+        self.flags[key] = value
+
+    def update_values(self, mapping: Mapping[str, Any]) -> None:
+        self.values.update(mapping)
+
+    def warn(self, text: str) -> None:
+        self._warnings.append(text)
+
+    def get_warnings(self) -> List[str]:
+        return list(self._warnings)
+
+    def render_sections(self, section_ids: Iterable[str]) -> None:
+        target_ids = set(section_ids)
+        self.renderer.bind_context(self.values, self.flags)
+        for section in self.layout.sections:
+            section_id = section.get("id")
+            if section_id in target_ids:
+                self.renderer.render_section(section, self.values, self.flags)
+
+    def create_progress(self, progress_id: str, *, transient: bool = False) -> Progress:
+        self.renderer.bind_context(self.values, self.flags)
+        return self.renderer.create_progress(progress_id, transient=transient)
+
+    def update_progress_state(self, progress_id: str, **state: Any) -> None:
+        self.renderer.update_progress_state(progress_id, state=state)
+
+    # ------------------------------------------------------------------
+    # Backwards-compatible helpers (to be removed once layout integration
+    # is complete).
+    # ------------------------------------------------------------------
 
     def banner(self, text: str) -> None:
         if self.quiet:
@@ -207,11 +260,7 @@ class CLIReporter:
     def section(self, title: str) -> None:
         if self.quiet:
             return
-        if self._last_section == title:
-            return
-        style = self._SECTION_STYLES.get(title, "bold cyan")
-        self.console.print(f"[{style}]{title}[/]")
-        self._last_section = title
+        self.console.print(f"[bold cyan]{title}[/]")
 
     def line(self, text: str) -> None:
         if self.quiet:
@@ -225,14 +274,12 @@ class CLIReporter:
             return
         self.console.print(f"[dim]{escape(text)}[/]")
 
-    def warn(self, text: str) -> None:
-        self._warnings.append(text)
+    def progress(self, *columns, transient: bool = False) -> Progress:
+        return Progress(*columns, console=self.console, transient=transient)
 
     def iter_warnings(self) -> List[str]:
         return list(self._warnings)
 
-    def progress(self, *columns, transient: bool = False) -> Progress:
-        return Progress(*columns, console=self.console, transient=transient)
 
 class CLIAppError(RuntimeError):
     """Raised when the CLI cannot complete its work."""
@@ -582,6 +629,54 @@ def _fps_to_float(value: Tuple[int, int] | None) -> float:
     return float(num) / float(den)
 
 
+def _fold_sequence(
+    values: Sequence[object],
+    *,
+    head: int,
+    tail: int,
+    joiner: str,
+    enabled: bool,
+) -> str:
+    items = [str(item) for item in values]
+    if not enabled or len(items) <= head + tail:
+        return joiner.join(items)
+    head_items = items[: max(0, head)]
+    tail_items = items[-max(0, tail) :]
+    if not head_items:
+        return joiner.join(tail_items)
+    if not tail_items:
+        return joiner.join(head_items)
+    return joiner.join([*head_items, "…", *tail_items])
+
+
+def _evaluate_rule_condition(condition: Optional[str], *, flags: Mapping[str, Any]) -> bool:
+    if not condition:
+        return True
+    expr = condition.strip()
+    if not expr:
+        return True
+    if expr == "!verbose":
+        return not bool(flags.get("verbose"))
+    if expr == "verbose":
+        return bool(flags.get("verbose"))
+    if expr == "upload_enabled":
+        return bool(flags.get("upload_enabled"))
+    if expr == "!upload_enabled":
+        return not bool(flags.get("upload_enabled"))
+    return bool(flags.get(expr))
+
+
+def _format_clock(seconds: Optional[float]) -> str:
+    if seconds is None or not math.isfinite(seconds):
+        return "--:--"
+    total = max(0, int(seconds + 0.5))
+    minutes, secs = divmod(total, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours:d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+
 def _init_clips(plans: Sequence[_ClipPlan], runtime_cfg, cache_dir: Path | None) -> None:
     vs_core.set_ram_limit(runtime_cfg.ram_limit_mb)
 
@@ -805,7 +900,7 @@ def _maybe_apply_audio_alignment(
     analyze_path: Path,
     root: Path,
     audio_track_overrides: Mapping[str, int],
-    reporter: CLIReporter | None = None,
+    reporter: CliOutputManager | None = None,
 ) -> tuple[_AudioAlignmentSummary | None, _AudioAlignmentDisplayData | None]:
     audio_cfg = cfg.audio_alignment
     offsets_path = (root / audio_cfg.offsets_filename).resolve()
@@ -819,6 +914,8 @@ def _maybe_apply_audio_alignment(
         json_offsets_sec={},
         json_offsets_frames={},
         warnings=[],
+        correlations={},
+        threshold=float(audio_cfg.correlation_threshold),
     )
 
     def _warn(message: str) -> None:
@@ -1182,6 +1279,7 @@ def _maybe_apply_audio_alignment(
                 offsets_sec[label] = float(measurement.offset_seconds)
             if measurement.frames is not None:
                 offsets_frames[label] = int(measurement.frames)
+            display_data.correlations[label] = float(measurement.correlation)
 
             if measurement.error:
                 offset_lines.append(
@@ -1348,7 +1446,7 @@ def _confirm_alignment_with_screenshots(
     summary: _AudioAlignmentSummary | None,
     cfg: AppConfig,
     root: Path,
-    reporter: CLIReporter,
+    reporter: CliOutputManager,
     display: _AudioAlignmentDisplayData | None,
 ) -> None:
     if summary is None or display is None:
@@ -1530,7 +1628,13 @@ def run_cli(
             rich_message=f"[red]Input directory not found:[/red] {root}",
         )
 
-    reporter = CLIReporter(quiet=quiet, verbose=verbose, no_color=no_color)
+    layout_path = Path(__file__).with_name("cli_layout.v1.json")
+    reporter = CliOutputManager(
+        quiet=quiet,
+        verbose=verbose,
+        no_color=no_color,
+        layout_path=layout_path,
+    )
     collected_warnings: List[str] = []
     json_tail: Dict[str, object] = {
         "clips": [],
@@ -1572,6 +1676,40 @@ def run_cli(
     }
 
     audio_track_override_map = _parse_audio_track_overrides(audio_track_overrides or [])
+
+    layout_data: Dict[str, Any] = {
+        "clips": {
+            "count": 0,
+            "items": [],
+            "ref": {},
+            "tgt": {},
+        },
+        "trims": {},
+        "window": json_tail["window"],
+        "alignment": json_tail["alignment"],
+        "audio_alignment": json_tail["audio_alignment"],
+        "analysis": json_tail["analysis"],
+        "render": json_tail.get("render", {}),
+        "tonemap": json_tail.get("tonemap", {}),
+        "overlay": json_tail.get("overlay", {}),
+        "cache": json_tail["cache"],
+        "slowpics": json_tail["slowpics"],
+        "tmdb": {
+            "category": None,
+            "id": None,
+            "title": None,
+            "year": None,
+            "lang": None,
+        },
+        "overrides": {
+            "change_fps": "change_fps" if cfg.overrides.change_fps else "none",
+        },
+        "warnings": [],
+    }
+
+    reporter.update_values(layout_data)
+    reporter.set_flag("upload_enabled", bool(cfg.slowpics.auto_upload))
+    reporter.set_flag("tmdb_resolved", False)
 
     vs_core.configure(
         search_paths=cfg.runtime.vapoursynth_python_paths,
@@ -1763,6 +1901,16 @@ def run_cli(
         )
         if tmdb_category and tmdb_id_value:
             slowpics_verbose_tmdb_tag = f"TMDB={tmdb_category}_{tmdb_id_value}"
+        layout_data["tmdb"].update(
+            {
+                "category": tmdb_resolution.category,
+                "id": tmdb_resolution.tmdb_id,
+                "title": match_title,
+                "year": year_display,
+                "lang": lang_text,
+            }
+        )
+        reporter.set_flag("tmdb_resolved", True)
     elif manual_tmdb:
         display_title = tmdb_context.get("Title") or files[0].stem
         category_display = tmdb_category or cfg.slowpics.tmdb_category or ""
@@ -1799,6 +1947,16 @@ def run_cli(
         )
         if category_display and id_display:
             slowpics_verbose_tmdb_tag = f"TMDB={category_display}_{id_display}"
+        layout_data["tmdb"].update(
+            {
+                "category": category_display,
+                "id": id_display,
+                "title": display_title,
+                "year": tmdb_context.get("Year") or "",
+                "lang": lang_text,
+            }
+        )
+        reporter.set_flag("tmdb_resolved", True)
     elif tmdb_api_key_present:
         if tmdb_error_message:
             message = f"TMDB lookup failed: {tmdb_error_message}"
@@ -1873,6 +2031,8 @@ def run_cli(
                 "fps": fps_float,
                 "frames": frames_total,
                 "duration": duration_seconds,
+                "duration_tc": _format_seconds(duration_seconds),
+                "path": str(plan.path),
             }
         )
         json_tail["clips"].append(
@@ -1883,6 +2043,8 @@ def run_cli(
                 "fps": fps_float,
                 "frames": frames_total,
                 "duration_s": duration_seconds,
+                "duration_tc": _format_seconds(duration_seconds),
+                "path": str(plan.path),
             }
         )
 
@@ -1907,6 +2069,8 @@ def run_cli(
         json_tail["trims"]["per_clip"][label] = {
             "lead_f": lead_frames,
             "trail_f": trail_frames,
+            "lead_s": lead_seconds,
+            "trail_s": trail_seconds,
         }
 
     analyze_index = [plan.path for plan in plans].index(analyze_path)
@@ -1930,12 +2094,14 @@ def run_cli(
         "manual_start_s": manual_start_seconds_value,
         "manual_end_s": manual_end_seconds_value if manual_end_changed else None,
     }
+    layout_data["alignment"] = json_tail["alignment"]
 
     json_tail["window"] = {
         "ignore_lead_seconds": float(cfg.analysis.ignore_lead_seconds),
         "ignore_trail_seconds": float(cfg.analysis.ignore_trail_seconds),
         "min_window_seconds": float(cfg.analysis.min_window_seconds),
     }
+    layout_data["window"] = json_tail["window"]
 
     for plan, spec in zip(plans, selection_specs):
         if not spec.warnings:
@@ -1971,6 +2137,7 @@ def run_cli(
     }
     if cache_reason:
         json_tail["cache"]["reason"] = cache_reason
+    layout_data["cache"] = json_tail["cache"]
 
     step_size = max(1, int(cfg.analysis.step))
     total_frames = getattr(analyze_clip, 'num_frames', 0)
@@ -1987,136 +2154,10 @@ def run_cli(
         reporter.verbose_line(f"Using cached frame metrics: {cache_info.path.name}")
     elif cache_status == "recomputed" and cache_info is not None:
         reporter.verbose_line(f"Frame metrics cache will be refreshed: {cache_info.path.name}")
-
-    manual_start_text = "0s" if manual_start_frame <= 0 else f"{manual_start_seconds_value:.2f}s"
-    manual_end_text = "unchanged" if not manual_end_changed else f"{manual_end_seconds_value:.2f}s"
-
-    discover_lines = []
-    for record in clip_records:
-        label_segment = _color_text(escape(str(record["label"])), "bright_white")
-        resolution_segment = _color_text(
-            f"{int(record['width'])}x{int(record['height'])}",
-            "cyan",
-        )
-        fps_segment = _color_text(f"{record['fps']:.3f}fps", "blue")
-        frames_part = _format_kv(
-            "frames",
-            int(record["frames"]),
-            label_style="dim cyan",
-            value_style="bright_white",
-        )
-        duration_part = _format_kv(
-            "dur",
-            _format_seconds(record["duration"]),
-            label_style="dim cyan",
-            value_style="blue",
-        )
-        discover_lines.append(
-            f"• {label_segment}  [{resolution_segment} @ {fps_segment}]  {frames_part}  {duration_part}"
-        )
-
-    prepare_trim_lines = []
-    for detail in trim_details:
-        label_segment = _color_text(f"Trim[{escape(str(detail['label']))}]", "magenta")
-        lead_value = f"{detail['lead_frames']}f ({detail['lead_seconds']:.2f}s)"
-        trail_value = f"{detail['trail_frames']}f ({detail['trail_seconds']:.2f}s)"
-        lead_part = _format_kv(
-            "lead",
-            lead_value,
-            label_style="dim magenta",
-            value_style="bright_white",
-        )
-        trail_part = _format_kv(
-            "trail",
-            trail_value,
-            label_style="dim magenta",
-            value_style="bright_white",
-        )
-        prepare_trim_lines.append(f"{label_segment}: {lead_part}  {trail_part}")
-
     overrides_text = "change_fps" if cfg.overrides.change_fps else "none"
-    window_parts = [
-        _format_kv(
-            "ignore_lead",
-            f"{cfg.analysis.ignore_lead_seconds:.2f}s",
-            label_style="dim magenta",
-            value_style="bright_white",
-        ),
-        _format_kv(
-            "ignore_trail",
-            f"{cfg.analysis.ignore_trail_seconds:.2f}s",
-            label_style="dim magenta",
-            value_style="bright_white",
-        ),
-        _format_kv(
-            "min_window",
-            f"{cfg.analysis.min_window_seconds:.2f}s",
-            label_style="dim magenta",
-            value_style="bright_white",
-        ),
-    ]
-    window_line = f"{_color_text('Window:', 'magenta')} {'  '.join(window_parts)}"
-    alignment_parts = [
-        _format_kv(
-            "manual_start",
-            manual_start_text,
-            label_style="dim magenta",
-            value_style="bright_white",
-        ),
-        _format_kv(
-            "manual_end",
-            manual_end_text,
-            label_style="dim magenta",
-            value_style="bright_white",
-        ),
-    ]
-    alignment_line = f"{_color_text('Alignment:', 'magenta')} {'  '.join(alignment_parts)}"
+    layout_data["overrides"]["change_fps"] = overrides_text
 
     analysis_method = "absdiff" if cfg.analysis.motion_use_absdiff else "edge"
-    analysis_parts = [
-        _format_kv("step", cfg.analysis.step, label_style="dim blue", value_style="bright_white"),
-        _format_kv(
-            "downscale",
-            f"{cfg.analysis.downscale_height}px",
-            label_style="dim blue",
-            value_style="bright_white",
-        ),
-        _format_kv(
-            "method",
-            analysis_method,
-            label_style="dim blue",
-            value_style="bright_white",
-        ),
-        _format_kv(
-            "scenecut_q",
-            cfg.analysis.motion_scenecut_quantile,
-            label_style="dim blue",
-            value_style="blue",
-        ),
-        _format_kv(
-            "diff_radius",
-            cfg.analysis.motion_diff_radius,
-            label_style="dim blue",
-            value_style="bright_white",
-        ),
-    ]
-    analysis_header_line = f"{_color_text('Analyze:', 'blue')} {'  '.join(analysis_parts)}"
-    frames_plan_parts = [
-        _format_kv("Dark", cfg.analysis.frame_count_dark, label_style="dim blue", value_style="bright_white"),
-        _format_kv("Bright", cfg.analysis.frame_count_bright, label_style="dim blue", value_style="bright_white"),
-        _format_kv("Motion", cfg.analysis.frame_count_motion, label_style="dim blue", value_style="bright_white"),
-        _format_kv("Random", cfg.analysis.random_frames, label_style="dim blue", value_style="bright_white"),
-        _format_kv("User", len(cfg.analysis.user_frames), label_style="dim blue", value_style="bright_white"),
-        _format_kv(
-            "sep",
-            f"{cfg.analysis.screen_separation_sec}s",
-            label_style="dim blue",
-            value_style="bright_white",
-        ),
-        _format_kv("Seed", cfg.analysis.random_seed, label_style="dim blue", value_style="blue"),
-    ]
-    frames_plan_line = f"{_color_text('Frames plan:', 'blue')} {'  '.join(frames_plan_parts)}"
-
     json_tail["analysis"] = {
         "step": int(cfg.analysis.step),
         "downscale_height": int(cfg.analysis.downscale_height),
@@ -2134,71 +2175,69 @@ def run_cli(
         "random_seed": int(cfg.analysis.random_seed),
     }
 
-    cache_display = cache_filename
-    if cache_status == "reused":
-        cache_display = f"{cache_filename} (reused)"
-    elif cache_status == "recomputed" and cache_reason:
-        cache_display = f"{cache_filename} (recomputed: {cache_reason})"
-    elif cache_status == "disabled" and cache_reason:
-        cache_display = f"{cache_filename} ({cache_reason})"
-    elif cache_status != "reused":
-        cache_display = f"{cache_filename} ({cache_status})"
+    layout_data["analysis"] = dict(json_tail["analysis"])
+    layout_data["clips"]["count"] = len(clip_records)
+    layout_data["clips"]["items"] = clip_records
+    layout_data["clips"]["ref"] = clip_records[0] if clip_records else {}
+    layout_data["clips"]["tgt"] = clip_records[1] if len(clip_records) > 1 else {}
 
-    banner_text = (
-        f"▶ Frame Compare  • {len(plans)} clips  • seed={cfg.analysis.random_seed}  "
-        f"• cache={cache_display}"
-    )
-    reporter.banner(banner_text)
+    trims_per_clip = json_tail["trims"]["per_clip"]
+    trim_lookup = {detail["label"]: detail for detail in trim_details}
 
-    reporter.section("Discover")
-    for line in discover_lines:
-        reporter.line(line)
-    if tmdb_line:
-        if tmdb_colored_line:
-            reporter.line(tmdb_colored_line)
-        else:
-            reporter.line(_color_text(escape(tmdb_line), "cyan"))
-        if slowpics_tmdb_disclosure_line:
-            reporter.line(_color_text(slowpics_tmdb_disclosure_line, "cyan"))
-    elif tmdb_notes:
+    def _trim_entry(label: str) -> Dict[str, object]:
+        detail = trim_lookup.get(label, {})
+        trim = trims_per_clip.get(label, {})
+        return {
+            "lead_f": trim.get("lead_f", 0),
+            "trail_f": trim.get("trail_f", 0),
+            "lead_s": detail.get("lead_seconds", 0.0),
+            "trail_s": detail.get("trail_seconds", 0.0),
+        }
+
+    layout_data["trims"] = {}
+    if clip_records:
+        layout_data["trims"]["ref"] = _trim_entry(clip_records[0]["label"])
+    if len(clip_records) > 1:
+        layout_data["trims"]["tgt"] = _trim_entry(clip_records[1]["label"])
+
+    reporter.update_values(layout_data)
+    reporter.render_sections(["banner", "at_a_glance", "discover", "prepare"])
+    reporter.render_sections(["audio_align"])
+    reporter.render_sections(["analyze"])
+    if tmdb_notes:
         for note in tmdb_notes:
             reporter.verbose_line(note)
-    elif slowpics_tmdb_disclosure_line:
-        reporter.line(_color_text(slowpics_tmdb_disclosure_line, "cyan"))
+    if slowpics_tmdb_disclosure_line:
+        reporter.verbose_line(slowpics_tmdb_disclosure_line)
 
-    reporter.section("Prepare")
-    for line in prepare_trim_lines:
-        reporter.line(line)
-    reporter.line(_color_text(f"Overrides: {overrides_text}", "magenta"))
-    reporter.line(window_line)
-    reporter.line(alignment_line)
-    if alignment_display and (alignment_display.stream_lines or alignment_display.offset_lines):
-        for line in alignment_display.stream_lines:
-            reporter.line(_color_text(escape(line), "magenta"))
-        if alignment_display.estimation_line:
-            reporter.line(_color_text(escape(alignment_display.estimation_line), "blue"))
-        for line in alignment_display.offset_lines:
-            reporter.line(_color_text(escape(line), "green"))
-        _confirm_alignment_with_screenshots(
-            plans,
-            alignment_summary,
-            cfg,
-            root,
-            reporter,
-            alignment_display,
-        )
-        if alignment_display.offsets_file_line:
-            reporter.line(_color_text(escape(alignment_display.offsets_file_line), "green"))
     if alignment_display is not None:
         json_tail["audio_alignment"]["preview_paths"] = alignment_display.preview_paths
         confirmation_value = alignment_display.confirmation
         if confirmation_value is None and alignment_summary is not None:
             confirmation_value = "auto"
         json_tail["audio_alignment"]["confirmed"] = confirmation_value
-
-    reporter.section("Analyze")
-    reporter.line(analysis_header_line)
-    reporter.line(frames_plan_line)
+    audio_alignment_view = dict(json_tail["audio_alignment"])
+    offsets_sec_map = audio_alignment_view.get("offsets_sec", {})
+    offsets_frames_map = audio_alignment_view.get("offsets_frames", {})
+    correlations_map = alignment_display.correlations if alignment_display else {}
+    primary_label = None
+    if isinstance(offsets_sec_map, dict) and offsets_sec_map:
+        primary_label = sorted(offsets_sec_map.keys())[0]
+    offsets_sec_value = float(offsets_sec_map.get(primary_label, 0.0)) if isinstance(offsets_sec_map, dict) else 0.0
+    offsets_frames_value = int(offsets_frames_map.get(primary_label, 0)) if isinstance(offsets_frames_map, dict) else 0
+    corr_value = float(correlations_map.get(primary_label, 0.0)) if correlations_map else 0.0
+    if math.isnan(corr_value):
+        corr_value = 0.0
+    threshold_value = float(getattr(alignment_display, "threshold", cfg.audio_alignment.correlation_threshold))
+    audio_alignment_view.update(
+        {
+            "offsets_sec": offsets_sec_value,
+            "offsets_frames": offsets_frames_value,
+            "corr": corr_value,
+            "threshold": threshold_value,
+        }
+    )
+    layout_data["audio_alignment"] = audio_alignment_view
 
     using_frame_total = isinstance(total_frames, int) and total_frames > 0
     progress_total = int(total_frames) if using_frame_total else int(sample_count)
@@ -2238,21 +2277,16 @@ def run_cli(
         if sample_count > 0 and not cache_exists:
             start_time = time.perf_counter()
             samples_done = 0
-
-            with reporter.progress(
-                TextColumn('{task.description}'),
-                BarColumn(),
-                TextColumn('{task.completed}/{task.total}'),
-                TextColumn('{task.percentage:>6.02f}%'),
-                TextColumn('{task.fields[fps]}'),
-                TimeRemainingColumn(),
-                TimeElapsedColumn(),
-                transient=False,
-            ) as analysis_progress:
+            reporter.update_progress_state(
+                "analyze_bar",
+                fps="0.00 fps",
+                eta_tc="--:--",
+                elapsed_tc="00:00",
+            )
+            with reporter.create_progress("analyze_bar", transient=False) as analysis_progress:
                 task_id = analysis_progress.add_task(
-                    analyze_label_colored,
+                    analyze_label_raw,
                     total=max(1, progress_total),
-                    fps="   0.00 fps",
                 )
 
                 def _advance_samples(count: int) -> None:
@@ -2260,24 +2294,25 @@ def run_cli(
                     samples_done += count
                     if progress_total <= 0:
                         return
-                    elapsed = time.perf_counter() - start_time
+                    elapsed = max(time.perf_counter() - start_time, 1e-6)
                     frames_processed = samples_done * step_size
                     completed = (
                         min(progress_total, frames_processed)
                         if using_frame_total
                         else min(progress_total, samples_done)
                     )
-                    fps_val = 0.0
-                    if elapsed > 0:
-                        fps_val = frames_processed / elapsed
-                    analysis_progress.update(
-                        task_id,
-                        completed=completed,
+                    fps_val = frames_processed / elapsed
+                    remaining = max(progress_total - completed, 0)
+                    eta_seconds = (remaining / fps_val) if fps_val > 0 else None
+                    reporter.update_progress_state(
+                        "analyze_bar",
                         fps=f"{fps_val:7.2f} fps",
+                        eta_tc=_format_clock(eta_seconds),
+                        elapsed_tc=_format_clock(elapsed),
                     )
+                    analysis_progress.update(task_id, completed=completed)
 
                 frames, frame_categories = _run_selection(_advance_samples)
-                # Ensure progress completes even if sampling stopped early
                 final_completed = progress_total if progress_total > 0 else analysis_progress.tasks[task_id].completed
                 analysis_progress.update(task_id, completed=final_completed)
         else:
@@ -2301,115 +2336,31 @@ def run_cli(
     kept_count = len(frames)
     scanned_count = progress_total if progress_total > 0 else max(sample_count, kept_count)
     cache_summary_label = "reused" if cache_status == "reused" else ("new" if cache_status == "recomputed" else cache_status)
-    reporter.line(
-        _color_text(
-            f"Analysis done • {kept_count}/{scanned_count} kept • cache={cache_summary_label}",
-            "green",
-        )
-    )
     json_tail["analysis"]["kept"] = kept_count
     json_tail["analysis"]["scanned"] = scanned_count
+    layout_data["analysis"]["kept"] = kept_count
+    layout_data["analysis"]["scanned"] = scanned_count
+    layout_data["analysis"]["cache_summary_label"] = cache_summary_label
+    reporter.update_values(layout_data)
+
+    preview_rule: Dict[str, object] = reporter.layout.folding.get("frames_preview", {}) if hasattr(reporter, "layout") else {}
+    head = int(preview_rule.get("head", 4)) if isinstance(preview_rule.get("head"), (int, float)) else 4
+    tail = int(preview_rule.get("tail", 4)) if isinstance(preview_rule.get("tail"), (int, float)) else 4
+    joiner = str(preview_rule.get("joiner", ", "))
+    fold_enabled = _evaluate_rule_condition(str(preview_rule.get("when", "")) if preview_rule.get("when") else None, flags=reporter.flags)
+    preview_text = _fold_sequence(frames, head=head, tail=tail, joiner=joiner, enabled=fold_enabled)
+
+    json_tail["analysis"]["output_frame_count"] = kept_count
+    json_tail["analysis"]["output_frames"] = list(frames)
+    json_tail["analysis"]["output_frames_preview"] = preview_text
+    layout_data["analysis"]["output_frame_count"] = kept_count
+    layout_data["analysis"]["output_frames_preview"] = preview_text
 
     out_dir = (root / cfg.screenshots.directory_name).resolve()
     total_screens = len(frames) * len(plans)
 
     writer_name = "FFmpeg" if cfg.screenshots.use_ffmpeg else "VS"
-    add_frame_info_flag = "true" if cfg.screenshots.add_frame_info else "false"
-    upscale_flag = "true" if cfg.screenshots.upscale else "false"
-    letterbox_flag = "true" if cfg.screenshots.letterbox_pillarbox_aware else "false"
-    center_pad_flag = "true" if cfg.screenshots.center_pad else "false"
-    render_parts = [
-        _format_kv("writer", writer_name, label_style="dim cyan", value_style="bright_white"),
-        _format_kv(
-            "out_dir",
-            cfg.screenshots.directory_name,
-            label_style="dim cyan",
-            value_style="bright_white",
-        ),
-        _format_bool(
-            "add_frame_info",
-            cfg.screenshots.add_frame_info,
-            label_style="dim cyan",
-            true_style="green",
-            false_style="red",
-        ),
-    ]
-    render_header_line = f"{_color_text('Render:', 'cyan')} {'  '.join(render_parts)}"
-    pad_descriptor = (
-        f"{cfg.screenshots.pad_to_canvas}(center_pad={center_pad_flag}, "
-        f"tol={cfg.screenshots.letterbox_px_tolerance}px when auto)"
-    )
-    canvas_parts = [
-        _format_kv(
-            "single_res",
-            cfg.screenshots.single_res or "tallest",
-            label_style="dim cyan",
-            value_style="bright_white",
-        ),
-        _format_bool("upscale", cfg.screenshots.upscale, label_style="dim cyan"),
-        _format_kv(
-            "crop",
-            f"mod{cfg.screenshots.mod_crop}",
-            label_style="dim cyan",
-            value_style="bright_white",
-        ),
-        _format_bool(
-            "letterbox-aware",
-            cfg.screenshots.letterbox_pillarbox_aware,
-            label_style="dim cyan",
-        ),
-        _format_kv(
-            "pad",
-            pad_descriptor,
-            label_style="dim cyan",
-            value_style="bright_white",
-        ),
-    ]
-    canvas_line = f"{_color_text('Canvas:', 'cyan')} {'  '.join(canvas_parts)}"
-    dpd_flag = "true" if cfg.color.dynamic_peak_detection else "false"
-    tonemap_parts = [
-        _format_kv("preset", cfg.color.preset, label_style="dim magenta", value_style="bright_white"),
-        _format_kv("curve", cfg.color.tone_curve, label_style="dim magenta", value_style="bright_white"),
-        _format_bool("dpd", cfg.color.dynamic_peak_detection, label_style="dim magenta"),
-        _format_kv(
-            "target",
-            f"{cfg.color.target_nits}nits",
-            label_style="dim magenta",
-            value_style="bright_white",
-        ),
-    ]
-    tonemap_extra = _format_kv(
-        "verify_luma_thresh",
-        cfg.color.verify_luma_threshold,
-        label_style="dim magenta",
-        value_style="blue",
-    )
-    tonemap_line = f"{_color_text('Tonemap:', 'magenta')} {'  '.join(tonemap_parts)}  ({tonemap_extra})"
     overlay_mode_value = getattr(cfg.color, "overlay_mode", "minimal")
-    overlay_parts = [
-        _format_bool(
-            "enabled",
-            cfg.color.overlay_enabled,
-            label_style="dim blue",
-            true_style="green",
-            false_style="red",
-        ),
-        _format_kv(
-            "template",
-            f'"{cfg.color.overlay_text_template}"',
-            label_style="dim blue",
-            value_style="bright_white",
-        ),
-    ]
-    overlay_line = f"{_color_text('Overlay:', 'blue')} {'  '.join(overlay_parts)}"
-    if overlay_mode_value == "diagnostic":
-        overlay_line += _color_text("  (diagnostic via overlay_mode)", "yellow")
-
-    reporter.section("Render")
-    reporter.line(_color_text(render_header_line, "cyan"))
-    reporter.line(_color_text(canvas_line, "cyan"))
-    reporter.line(_color_text(tonemap_line, "magenta"))
-    reporter.line(_color_text(overlay_line, "blue"))
 
     json_tail["render"] = {
         "writer": writer_name,
@@ -2422,7 +2373,9 @@ def run_cli(
         "pad_to_canvas": cfg.screenshots.pad_to_canvas,
         "center_pad": bool(cfg.screenshots.center_pad),
         "letterbox_px_tolerance": int(cfg.screenshots.letterbox_px_tolerance),
+        "compression": int(cfg.screenshots.compression_level),
     }
+    layout_data["render"] = json_tail["render"]
     json_tail["tonemap"] = {
         "preset": cfg.color.preset,
         "tone_curve": cfg.color.tone_curve,
@@ -2432,38 +2385,53 @@ def run_cli(
         "overlay_enabled": bool(cfg.color.overlay_enabled),
         "overlay_mode": overlay_mode_value,
     }
+    layout_data["tonemap"] = json_tail["tonemap"]
+    json_tail["overlay"] = {
+        "enabled": bool(cfg.color.overlay_enabled),
+        "template": cfg.color.overlay_text_template,
+        "mode": overlay_mode_value,
+    }
+    layout_data["overlay"] = json_tail["overlay"]
+
+    reporter.update_values(layout_data)
+    reporter.render_sections(["render"])
 
     try:
         if total_screens > 0:
             start_time = time.perf_counter()
             processed = 0
 
-            with reporter.progress(
-                TextColumn('{task.description}'),
-                BarColumn(),
-                TextColumn('{task.completed}/{task.total}'),
-                TextColumn('{task.percentage:>6.02f}%'),
-                TextColumn('{task.fields[rate]}'),
-                TimeRemainingColumn(),
-                TimeElapsedColumn(),
-                transient=False,
-            ) as render_progress:
+            reporter.update_progress_state(
+                "render_bar",
+                fps="0.00 fps",
+                eta_tc="--:--",
+                elapsed_tc="00:00",
+                current=0,
+                total=total_screens,
+            )
+
+            with reporter.create_progress("render_bar", transient=False) as render_progress:
                 task_id = render_progress.add_task(
-                    'Generating screenshots',
+                    'Rendering outputs',
                     total=total_screens,
-                    rate="   0.00 fps",
                 )
 
                 def advance_render(count: int) -> None:
                     nonlocal processed
                     processed += count
-                    elapsed = time.perf_counter() - start_time
-                    rate = processed / elapsed if elapsed > 0 else 0.0
-                    render_progress.update(
-                        task_id,
-                        completed=min(total_screens, processed),
-                        rate=f"{rate:7.2f} fps",
+                    elapsed = max(time.perf_counter() - start_time, 1e-6)
+                    fps_val = processed / elapsed
+                    remaining = max(total_screens - processed, 0)
+                    eta_seconds = (remaining / fps_val) if fps_val > 0 else None
+                    reporter.update_progress_state(
+                        "render_bar",
+                        fps=f"{fps_val:7.2f} fps",
+                        eta_tc=_format_clock(eta_seconds),
+                        elapsed_tc=_format_clock(elapsed),
+                        current=min(processed, total_screens),
+                        total=total_screens,
                     )
+                    render_progress.update(task_id, completed=min(total_screens, processed))
 
                 image_paths = generate_screenshots(
                     clips,
@@ -2479,11 +2447,17 @@ def run_cli(
                 )
 
                 if processed < total_screens:
-                    render_progress.update(
-                        task_id,
-                        completed=total_screens,
-                        rate=f"{(processed / max(1e-6, time.perf_counter() - start_time)):7.2f} fps",
+                    elapsed = max(time.perf_counter() - start_time, 1e-6)
+                    fps_val = processed / elapsed
+                    reporter.update_progress_state(
+                        "render_bar",
+                        fps=f"{fps_val:7.2f} fps",
+                        eta_tc=_format_clock(0.0),
+                        elapsed_tc=_format_clock(elapsed),
+                        current=total_screens,
+                        total=total_screens,
                     )
+                    render_progress.update(task_id, completed=total_screens)
         else:
             image_paths = generate_screenshots(
                 clips,
@@ -2504,7 +2478,7 @@ def run_cli(
         ) from exc
 
     slowpics_url: Optional[str] = None
-    reporter.section("Publish")
+    reporter.render_sections(["publish"])
     reporter.line(_color_text("slow.pics collection (preview):", "blue"))
     inputs_parts = [
         _format_kv(
@@ -2667,49 +2641,36 @@ def run_cli(
 
     warnings_list = list(dict.fromkeys(reporter.iter_warnings()))
     json_tail["warnings"] = warnings_list
+    warnings_section = next((section for section in reporter.layout.sections if section.get("id") == "warnings"), {})
+    fold_config = warnings_section.get("fold_labels", {}) if isinstance(warnings_section, Mapping) else {}
+    head = int(fold_config.get("head", 2)) if isinstance(fold_config.get("head"), (int, float)) else 2
+    tail = int(fold_config.get("tail", 1)) if isinstance(fold_config.get("tail"), (int, float)) else 1
+    joiner = str(fold_config.get("joiner", ", "))
+    fold_enabled = _evaluate_rule_condition(str(fold_config.get("when")) if fold_config.get("when") else None, flags=reporter.flags)
 
-    if not reporter.quiet:
-        reporter.section("Warnings")
-        if warnings_list:
-            for message in warnings_list:
-                reporter.line(_color_text(escape(message), "yellow"))
-        else:
-            reporter.line(_color_text("none", "dim"))
+    warnings_data: List[Dict[str, object]] = []
+    if warnings_list:
+        labels_text = _fold_sequence(warnings_list, head=head, tail=tail, joiner=joiner, enabled=fold_enabled)
+        warnings_data.append(
+            {
+                "warning.type": "general",
+                "warning.count": len(warnings_list),
+                "warning.labels": labels_text,
+            }
+        )
+    else:
+        warnings_data.append(
+            {
+                "warning.type": "general",
+                "warning.count": 0,
+                "warning.labels": "none",
+            }
+        )
 
-    tonemap_status = "on" if cfg.color.dynamic_peak_detection else "off"
-    summary_lines = [
-        "Summary:",
-        (
-            f"• Clips: {len(plans)}  Window: lead={cfg.analysis.ignore_lead_seconds}s "
-            f"trail={cfg.analysis.ignore_trail_seconds}s  step={cfg.analysis.step} "
-            f"downscale={cfg.analysis.downscale_height}"
-        ),
-        (
-            f"• Align: audio offsets applied={'true' if audio_offsets_applied else 'false'}  "
-            f"offsets_file={json_tail['audio_alignment']['offsets_filename']}"
-        ),
-        (
-            f"• Plan: Dark={cfg.analysis.frame_count_dark}  Bright={cfg.analysis.frame_count_bright}  "
-            f"Motion={cfg.analysis.frame_count_motion}  Random={cfg.analysis.random_frames}  "
-            f"User={len(cfg.analysis.user_frames)}  sep={cfg.analysis.screen_separation_sec}s"
-        ),
-        (
-            f"• Canvas: single_res={cfg.screenshots.single_res or 'tallest'}  "
-            f"upscale={upscale_flag}  crop=mod{cfg.screenshots.mod_crop}  "
-            f"pad={cfg.screenshots.pad_to_canvas}"
-        ),
-        (
-            f"• Tonemap: {cfg.color.tone_curve}@{cfg.color.target_nits}nits dpd={tonemap_status}  "
-            f"verify≤{cfg.color.verify_luma_threshold}"
-        ),
-        (
-            f"• Output: {cfg.screenshots.directory_name}  "
-            f"compression={cfg.screenshots.compression_level}"
-        ),
-        (
-            f"• Cache: {cache_filename}  {cache_summary_label}"
-        ),
-    ]
+    layout_data["warnings"] = warnings_data
+    reporter.update_values(layout_data)
+    reporter.render_sections(["warnings"])
+    reporter.render_sections(["summary"])
 
     if not reporter.quiet:
         reporter.section("Summary")
@@ -2732,6 +2693,7 @@ def run_cli(
 @click.option("--quiet", is_flag=True, help="Suppress verbose output; show banner, progress, and JSON only.")
 @click.option("--verbose", is_flag=True, help="Show additional diagnostic output during run.")
 @click.option("--no-color", is_flag=True, help="Disable ANSI colour output.")
+@click.option("--json-pretty", is_flag=True, help="Pretty-print the JSON tail output.")
 def main(
     config_path: str,
     input_dir: str | None,
@@ -2740,6 +2702,7 @@ def main(
     quiet: bool,
     verbose: bool,
     no_color: bool,
+    json_pretty: bool,
 ) -> None:
     try:
         result = run_cli(
@@ -2817,7 +2780,11 @@ def main(
         slowpics_block.setdefault("shortcut_path", None)
         slowpics_block.setdefault("url", None)
 
-    print(json.dumps(json_tail, separators=(",", ":")))
+    if json_pretty:
+        json_output = json.dumps(json_tail, indent=2)
+    else:
+        json_output = json.dumps(json_tail, separators=(",", ":"))
+    print(json_output)
 
 
 if __name__ == "__main__":

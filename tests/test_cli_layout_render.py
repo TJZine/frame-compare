@@ -1,0 +1,218 @@
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+from rich.console import Console
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from src.cli_layout import LayoutContext
+
+from frame_compare import CliOutputManager
+
+
+def _project_root() -> Path:
+    return Path(__file__).resolve().parent.parent
+
+
+def test_layout_renderer_sample_output(tmp_path, monkeypatch):
+    layout_path = _project_root() / "cli_layout.v1.json"
+    console = Console(width=100, record=True, color_system=None)
+    reporter = CliOutputManager(
+        quiet=False,
+        verbose=True,
+        no_color=True,
+        layout_path=layout_path,
+        console=console,
+    )
+
+    sample_clips = [
+        {
+            "label": "Reference",
+            "width": 1920,
+            "height": 1080,
+            "fps": 23.976,
+            "frames": 240,
+            "duration": 10.0,
+            "duration_tc": "00:00:10.0",
+            "path": str(tmp_path / "ref.mkv"),
+        },
+        {
+            "label": "Target",
+            "width": 1920,
+            "height": 1080,
+            "fps": 23.976,
+            "frames": 240,
+            "duration": 10.0,
+            "duration_tc": "00:00:10.0",
+            "path": str(tmp_path / "tgt.mkv"),
+        },
+    ]
+
+    sample_values = {
+        "clips": {
+            "count": len(sample_clips),
+            "items": sample_clips,
+            "ref": sample_clips[0],
+            "tgt": sample_clips[1],
+        },
+        "trims": {
+            "ref": {"lead_f": 5, "trail_f": 0, "lead_s": 0.21, "trail_s": 0.0},
+            "tgt": {"lead_f": 3, "trail_f": 2, "lead_s": 0.12, "trail_s": 0.08},
+        },
+        "window": {
+            "ignore_lead_seconds": 0.5,
+            "ignore_trail_seconds": 0.5,
+            "min_window_seconds": 5.0,
+        },
+        "alignment": {
+            "manual_start_s": 0.0,
+            "manual_end_s": None,
+        },
+        "analysis": {
+            "step": 2,
+            "downscale_height": 540,
+            "motion_method": "edge",
+            "motion_scenecut_quantile": 0.2,
+            "motion_diff_radius": 2,
+            "counts": {
+                "dark": 4,
+                "bright": 4,
+                "motion": 4,
+                "random": 0,
+                "user": 0,
+            },
+            "screen_separation_sec": 1.0,
+            "random_seed": 1234,
+            "kept": 6,
+            "scanned": 12,
+            "output_frame_count": 6,
+            "output_frames_preview": "0, 10, 20, …, 110, 120, 130",
+        },
+        "audio_alignment": {
+            "enabled": True,
+            "offsets_sec": 0.123,
+            "offsets_frames": 3,
+            "corr": 0.95,
+            "threshold": 0.5,
+            "offsets_filename": str(tmp_path / "align.toml"),
+            "preview_paths": [str(tmp_path / "a.wav"), str(tmp_path / "b.wav")],
+            "confirmed": "auto",
+            "reference_stream": "Reference->ac3/en/5.1",
+            "target_stream": {"Target": "aac/en/5.1"},
+        },
+        "render": {
+            "writer": "VS",
+            "out_dir": str(tmp_path / "out"),
+            "add_frame_info": True,
+            "single_res": 0,
+            "upscale": True,
+            "mod_crop": 2,
+            "letterbox_pillarbox_aware": True,
+            "pad_to_canvas": "off",
+            "center_pad": False,
+            "letterbox_px_tolerance": 4,
+            "compression": 3,
+        },
+        "tonemap": {
+            "preset": "reference",
+            "tone_curve": "bt.2390",
+            "dynamic_peak_detection": True,
+            "target_nits": 100.0,
+            "verify_luma_threshold": 0.1,
+        },
+        "overlay": {
+            "enabled": True,
+            "template": "Overlay {frame}",
+            "mode": "minimal",
+        },
+        "cache": {
+            "file": "cache.bin",
+            "status": "reused",
+        },
+        "tmdb": {
+            "category": "movie",
+            "id": "100",
+            "title": "Sample Title",
+            "year": "2024",
+            "lang": "en",
+        },
+        "overrides": {
+            "change_fps": "none",
+        },
+        "warnings": [
+            {
+                "warning.type": "general",
+                "warning.count": 1,
+                "warning.labels": "demo warning",
+            }
+        ],
+        "slowpics": {
+            "enabled": False,
+            "title": {"inputs": {"resolved_base": None, "collection_name": None, "collection_suffix": ""}, "final": None},
+            "url": None,
+            "shortcut_path": None,
+            "deleted_screens_dir": False,
+            "is_public": True,
+            "is_hentai": False,
+            "remove_after_days": 0,
+        },
+        "audio_alignment_map": {},
+    }
+
+    reporter.update_values(sample_values)
+    reporter.set_flag("tmdb_resolved", True)
+    reporter.set_flag("upload_enabled", False)
+
+    context = reporter.renderer.render_template
+    layout_context = LayoutContext(reporter.values, reporter.flags, renderer=reporter.renderer)
+    assert layout_context.resolve("clips.count") == len(sample_clips)
+    rendered_check = reporter.renderer.render_template("{clips.count}", reporter.values, reporter.flags)
+    assert rendered_check.strip() == "2"
+    token = "tmdb_resolved?`TMDB: ${tmdb.category}/${tmdb.id}`:''"
+    context_obj = LayoutContext(reporter.values, reporter.flags, renderer=reporter.renderer)
+    assert reporter.renderer._find_conditional_split(token) is not None
+    rendered_token = reporter.renderer._render_token(token, context_obj)
+    assert "movie/100" in rendered_token
+    tmdb_line = reporter.renderer.render_template(f"{{{token}}}", reporter.values, reporter.flags)
+    remainder = "`TMDB: ${tmdb.category}/${tmdb.id}`:''"
+    split_index = reporter.renderer._find_matching_colon(remainder)
+    assert split_index is not None
+    assert "movie/100" in tmdb_line
+
+    section_ids = [section["id"] for section in reporter.layout.sections]
+    reporter.render_sections(section_ids)
+
+    sample_json = {
+        "analysis": sample_values["analysis"],
+        "render": sample_values["render"],
+    }
+    console.print(json.dumps(sample_json))
+
+    output_text = console.export_text()
+    lines = [line.rstrip("\n") for line in output_text.splitlines()]
+
+    required_markers = [
+        "Frame Compare",
+        "[DISCOVER]",
+        "[PREPARE]",
+        "[PREPARE · Audio]",
+        "[ANALYZE]",
+        "[RENDER]",
+        "[PUBLISH]",
+        "[WARNINGS]",
+        "[SUMMARY]",
+    ]
+    for marker in required_markers:
+        assert any(marker in line for line in lines), marker
+
+    width = console.width or 100
+    for line in lines:
+        assert len(line) <= width
+
+    assert any(line.strip().startswith("{") for line in lines)
+    json.loads(json.dumps(sample_json))
