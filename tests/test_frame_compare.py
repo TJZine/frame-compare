@@ -1107,3 +1107,133 @@ def test_confirm_alignment_raises_cli_error_on_screenshot_failure(monkeypatch, t
             _ListReporter(),
             display,
         )
+
+
+def test_run_cli_calls_alignment_confirmation(monkeypatch, tmp_path):
+    cfg = _make_config(tmp_path)
+    cfg.audio_alignment.enable = True
+    cfg.audio_alignment.confirm_with_screenshots = True
+
+    monkeypatch.setattr(frame_compare, "load_config", lambda _path: cfg)
+
+    files = [tmp_path / "Ref.mkv", tmp_path / "Tgt.mkv"]
+    for file in files:
+        file.write_bytes(b"data")
+
+    def fake_discover(_root):
+        return files
+
+    def fake_parse_metadata(_files, _naming):
+        return [
+            {
+                "label": "Reference",
+                "file_name": files[0].name,
+                "year": "",
+                "title": "",
+                "anime_title": "",
+                "imdb_id": "",
+                "tvdb_id": "",
+            },
+            {
+                "label": "Target",
+                "file_name": files[1].name,
+                "year": "",
+                "title": "",
+                "anime_title": "",
+                "imdb_id": "",
+                "tvdb_id": "",
+            },
+        ]
+
+    def fake_build_plans(_files, metadata, _cfg):
+        plans = []
+        for idx, path in enumerate(_files):
+            plans.append(
+                frame_compare._ClipPlan(
+                    path=path,
+                    metadata=metadata[idx],
+                    use_as_reference=(idx == 0),
+                )
+            )
+        return plans
+
+    def fake_pick_analyze(_files, _metadata, _analyze_clip, cache_dir=None):
+        return files[0]
+
+    offsets_path = tmp_path / "alignment.toml"
+
+    def fake_maybe_apply(plans, _cfg, _analyze_path, _root, _overrides, reporter=None):
+        summary = frame_compare._AudioAlignmentSummary(
+            offsets_path=offsets_path,
+            reference_name="Reference",
+            measurements=(),
+            applied_frames={},
+            baseline_shift=0,
+            statuses={},
+            reference_plan=plans[0],
+            final_adjustments={},
+            swap_details={},
+        )
+        display = frame_compare._AudioAlignmentDisplayData(
+            stream_lines=[],
+            estimation_line=None,
+            offset_lines=[],
+            offsets_file_line=f"Offsets file: {offsets_path}",
+            json_reference_stream="ref",
+            json_target_streams={"Target": "tgt"},
+            json_offsets_sec={"Target": 0.0},
+            json_offsets_frames={"Target": 0},
+            warnings=[],
+        )
+        return summary, display
+
+    class _DummyReporter:
+        def __init__(self, *_, **__):
+            self.console = types.SimpleNamespace(print=lambda *args, **kwargs: None)
+
+        def update_values(self, *_args, **_kwargs):
+            return None
+
+        def set_flag(self, *_args, **_kwargs):
+            return None
+
+        def line(self, *_args, **_kwargs):
+            return None
+
+        def verbose_line(self, *_args, **_kwargs):
+            return None
+
+        def render_sections(self, *_args, **_kwargs):
+            return None
+
+        def update_progress_state(self, *_args, **_kwargs):
+            return None
+
+        def set_status(self, *_args, **_kwargs):
+            return None
+
+        def create_progress(self, *_args, **_kwargs):
+            return DummyProgress()
+
+    class _SentinelError(Exception):
+        pass
+
+    called: dict[str, object] = {}
+
+    def fake_confirm(plans, summary, cfg_obj, root, reporter, display):
+        called["args"] = (plans, summary, cfg_obj, root, reporter, display)
+        raise _SentinelError
+
+    monkeypatch.setattr(frame_compare, "_discover_media", fake_discover)
+    monkeypatch.setattr(frame_compare, "_parse_metadata", fake_parse_metadata)
+    monkeypatch.setattr(frame_compare, "_build_plans", fake_build_plans)
+    monkeypatch.setattr(frame_compare, "_pick_analyze_file", fake_pick_analyze)
+    monkeypatch.setattr(frame_compare, "_maybe_apply_audio_alignment", fake_maybe_apply)
+    monkeypatch.setattr(frame_compare, "CliOutputManager", _DummyReporter)
+    monkeypatch.setattr(frame_compare, "_confirm_alignment_with_screenshots", fake_confirm)
+    monkeypatch.setattr(frame_compare.vs_core, "configure", lambda *args, **kwargs: None)
+
+    with pytest.raises(_SentinelError):
+        frame_compare.run_cli("dummy-config")
+
+    assert "args" in called

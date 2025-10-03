@@ -2089,6 +2089,19 @@ def run_cli(
         audio_track_override_map,
         reporter=reporter,
     )
+    if (
+        alignment_summary is not None
+        and alignment_display is not None
+        and cfg.audio_alignment.enable
+    ):
+        _confirm_alignment_with_screenshots(
+            plans,
+            alignment_summary,
+            cfg,
+            root,
+            reporter,
+            alignment_display,
+        )
     audio_offsets_applied = alignment_summary is not None
     if alignment_display is not None:
         json_tail["audio_alignment"]["offsets_filename"] = alignment_display.offsets_file_line.split(": ", 1)[-1]
