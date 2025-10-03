@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 import datetime as _dt
 from pathlib import Path
 from string import Template
-from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import click
 from rich import print
@@ -664,6 +664,109 @@ def _evaluate_rule_condition(condition: Optional[str], *, flags: Mapping[str, An
     if expr == "!upload_enabled":
         return not bool(flags.get("upload_enabled"))
     return bool(flags.get(expr))
+
+
+def _build_legacy_summary_lines(values: Mapping[str, Any]) -> List[str]:
+    """Compose legacy summary lines from the collected layout values."""
+
+    def _maybe_number(value: Any) -> float | None:
+        if isinstance(value, (int, float)):
+            return float(value)
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _format_number(value: Any, fmt: str, fallback: str) -> str:
+        number = _maybe_number(value)
+        if number is None:
+            return fallback
+        return format(number, fmt)
+
+    def _string(value: Any, fallback: str = "n/a") -> str:
+        if value is None:
+            return fallback
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        return str(value)
+
+    def _bool_text(value: Any) -> str:
+        return "true" if bool(value) else "false"
+
+    clips_raw = values.get("clips")
+    clips = clips_raw if isinstance(clips_raw, Mapping) else {}
+    window_raw = values.get("window")
+    window = window_raw if isinstance(window_raw, Mapping) else {}
+    analysis_raw = values.get("analysis")
+    analysis = analysis_raw if isinstance(analysis_raw, Mapping) else {}
+    counts_raw = analysis.get("counts") if isinstance(analysis, Mapping) else {}
+    counts = counts_raw if isinstance(counts_raw, Mapping) else {}
+    audio_raw = values.get("audio_alignment")
+    audio = audio_raw if isinstance(audio_raw, Mapping) else {}
+    render_raw = values.get("render")
+    render = render_raw if isinstance(render_raw, Mapping) else {}
+    tonemap_raw = values.get("tonemap")
+    tonemap = tonemap_raw if isinstance(tonemap_raw, Mapping) else {}
+    cache_raw = values.get("cache")
+    cache = cache_raw if isinstance(cache_raw, Mapping) else {}
+
+    lines: List[str] = []
+
+    clip_count = _string(clips.get("count"), "0")
+    lead_text = _format_number(window.get("ignore_lead_seconds"), ".2f", "0.00")
+    trail_text = _format_number(window.get("ignore_trail_seconds"), ".2f", "0.00")
+    step_text = _string(analysis.get("step"), "0")
+    downscale_text = _string(analysis.get("downscale_height"), "0")
+    lines.append(
+        f"Clips: {clip_count}  Window: lead={lead_text}s trail={trail_text}s  step={step_text} downscale={downscale_text}px"
+    )
+
+    offsets_text = _format_number(audio.get("offsets_sec"), "+.3f", "+0.000")
+    offsets_file = _string(audio.get("offsets_filename"), "n/a")
+    lines.append(
+        f"Align: audio={_bool_text(audio.get('enabled'))}  offsets={offsets_text}s  file={offsets_file}"
+    )
+
+    lines.append(
+        "Plan: "
+        f"Dark={_string(counts.get('dark'), '0')} "
+        f"Bright={_string(counts.get('bright'), '0')} "
+        f"Motion={_string(counts.get('motion'), '0')} "
+        f"Random={_string(counts.get('random'), '0')} "
+        f"User={_string(counts.get('user'), '0')}  "
+        f"sep={_format_number(analysis.get('screen_separation_sec'), '.1f', '0.0')}s"
+    )
+
+    lines.append(
+        "Canvas: "
+        f"single_res={_string(render.get('single_res'), '0')} "
+        f"upscale={_bool_text(render.get('upscale'))} "
+        f"crop=mod{_string(render.get('mod_crop'), '0')} "
+        f"pad={_bool_text(render.get('center_pad'))}"
+    )
+
+    lines.append(
+        "Tonemap: "
+        f"{_string(tonemap.get('tone_curve'), 'n/a')}@"
+        f"{_format_number(tonemap.get('target_nits'), '.0f', '0')}nits "
+        f"dpd={_bool_text(tonemap.get('dynamic_peak_detection'))}  "
+        f"verify≤{_format_number(tonemap.get('verify_luma_threshold'), '.2f', '0.00')}"
+    )
+
+    lines.append(
+        f"Output: {_string(render.get('out_dir'), 'n/a')}  compression={_string(render.get('compression'), 'n/a')}"
+    )
+
+    lines.append(f"Cache: {_string(cache.get('file'), 'n/a')}  {_string(cache.get('status'), 'unknown')}")
+
+    frame_count = _string(analysis.get("output_frame_count"), "0")
+    preview = _string(analysis.get("output_frames_preview"), "")
+    preview_display = f"[{preview}]" if preview else "[]"
+    lines.append(
+        f"Output frames: {frame_count}  e.g., {preview_display}  (full list in JSON)"
+    )
+
+    return [line for line in lines if line]
 
 
 def _format_clock(seconds: Optional[float]) -> str:
@@ -2672,7 +2775,19 @@ def run_cli(
     reporter.render_sections(["warnings"])
     reporter.render_sections(["summary"])
 
-    if not reporter.quiet:
+    layout_sections = getattr(getattr(reporter, "layout", None), "sections", [])
+    has_summary_section = any(
+        isinstance(section, Mapping) and section.get("id") == "summary"
+        for section in layout_sections
+    )
+    compatibility_required = bool(
+        reporter.flags.get("compat.summary_fallback")
+        or reporter.flags.get("compatibility_mode")
+        or reporter.flags.get("legacy_summary_fallback")
+    )
+
+    if not reporter.quiet and (compatibility_required or not has_summary_section):
+        summary_lines = _build_legacy_summary_lines(layout_data)
         reporter.section("Summary")
         for line in summary_lines:
             reporter.line(_color_text(line, "green"))
