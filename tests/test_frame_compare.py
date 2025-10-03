@@ -999,3 +999,111 @@ def test_audio_alignment_default_duration_avoids_zero_window(tmp_path, monkeypat
     result = runner.invoke(frame_compare.main, ["--config", "dummy", "--no-color"], catch_exceptions=False)
     assert result.exit_code == 0
     assert captured_kwargs.get("duration_seconds") is None
+
+
+def _build_alignment_context(tmp_path):
+    cfg = _make_config(tmp_path)
+    cfg.audio_alignment.enable = True
+    cfg.audio_alignment.confirm_with_screenshots = True
+
+    reference_clip = types.SimpleNamespace(num_frames=10)
+    target_clip = types.SimpleNamespace(num_frames=10)
+
+    reference_path = tmp_path / "Ref.mkv"
+    target_path = tmp_path / "Target.mkv"
+    reference_path.touch()
+    target_path.touch()
+
+    reference_plan = frame_compare._ClipPlan(
+        path=reference_path,
+        metadata={"label": "Reference Clip"},
+        clip=reference_clip,
+    )
+    target_plan = frame_compare._ClipPlan(
+        path=target_path,
+        metadata={"label": "Target Clip"},
+        clip=target_clip,
+    )
+
+    summary = frame_compare._AudioAlignmentSummary(
+        offsets_path=tmp_path / "alignment.toml",
+        reference_name="Reference Clip",
+        measurements=(),
+        applied_frames={"Reference Clip": 0},
+        baseline_shift=0,
+        statuses={},
+        reference_plan=reference_plan,
+        final_adjustments={},
+        swap_details={},
+    )
+
+    display = frame_compare._AudioAlignmentDisplayData(
+        stream_lines=[],
+        estimation_line=None,
+        offset_lines=[],
+        offsets_file_line="",
+        json_reference_stream=None,
+        json_target_streams={},
+        json_offsets_sec={},
+        json_offsets_frames={},
+        warnings=[],
+    )
+
+    return cfg, [reference_plan, target_plan], summary, display
+
+
+class _ListReporter:
+    def __init__(self) -> None:
+        self.lines: list[str] = []
+
+    def line(self, message: str) -> None:
+        self.lines.append(message)
+
+
+def test_confirm_alignment_reports_preview_paths(monkeypatch, tmp_path):
+    cfg, plans, summary, display = _build_alignment_context(tmp_path)
+
+    reporter = _ListReporter()
+    generated_paths = []
+
+    def fake_generate(*args, **_kwargs):
+        out_dir = args[4]
+        out_dir.mkdir(parents=True, exist_ok=True)
+        paths = [out_dir / "shot_0.png", out_dir / "shot_1.png"]
+        generated_paths.extend(paths)
+        return paths
+
+    monkeypatch.setattr(frame_compare, "generate_screenshots", fake_generate)
+    monkeypatch.setattr(frame_compare.sys, "stdin", types.SimpleNamespace(isatty=lambda: False))
+
+    frame_compare._confirm_alignment_with_screenshots(
+        plans,
+        summary,
+        cfg,
+        tmp_path,
+        reporter,
+        display,
+    )
+
+    expected_paths = [str(path) for path in generated_paths]
+    assert display.preview_paths == expected_paths
+    assert any("Preview saved:" in line for line in reporter.lines)
+
+
+def test_confirm_alignment_raises_cli_error_on_screenshot_failure(monkeypatch, tmp_path):
+    cfg, plans, summary, display = _build_alignment_context(tmp_path)
+
+    def fake_generate(*_args, **_kwargs):
+        raise frame_compare.ScreenshotError("boom")
+
+    monkeypatch.setattr(frame_compare, "generate_screenshots", fake_generate)
+
+    with pytest.raises(frame_compare.CLIAppError, match="Alignment preview failed"):
+        frame_compare._confirm_alignment_with_screenshots(
+            plans,
+            summary,
+            cfg,
+            tmp_path,
+            _ListReporter(),
+            display,
+        )
