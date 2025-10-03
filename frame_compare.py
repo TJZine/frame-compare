@@ -2636,6 +2636,31 @@ def run_cli(
         slowpics_url=slowpics_url,
         json_tail=json_tail,
     )
+
+    summary_lines: List[str] = []
+    summary_section = next(
+        (section for section in reporter.layout.sections if section.get("id") == "summary"),
+        None,
+    )
+    if isinstance(summary_section, Mapping):
+        items = summary_section.get("items", [])
+        if isinstance(items, list):
+            for item in items:
+                if not isinstance(item, str):
+                    continue
+                rendered = reporter.renderer.render_template(item, reporter.values, reporter.flags)
+                if rendered:
+                    summary_lines.append(rendered)
+
+    if not summary_lines:
+        summary_lines = [
+            f"Files     : {len(result.files)}",
+            f"Frames    : {len(result.frames)} -> {result.frames}",
+            f"Output dir: {result.out_dir}",
+        ]
+        if result.slowpics_url:
+            summary_lines.append(f"Slow.pics : {result.slowpics_url}")
+
     for warning in collected_warnings:
         reporter.warn(warning)
 
