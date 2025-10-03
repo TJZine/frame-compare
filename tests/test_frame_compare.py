@@ -144,16 +144,17 @@ def test_cli_applies_overrides_and_naming(tmp_path, monkeypatch, runner):
 
     result = runner.invoke(frame_compare.main, ["--config", "dummy", "--no-color"], catch_exceptions=False)
     assert result.exit_code == 0
-    assert "Discover" in result.output
+    assert "[DISCOVER]" in result.output
     assert "• AAA Short" in result.output
     assert "• BBB Short" in result.output
 
-    assert "Prepare" in result.output
-    assert "Trim[AAA Short]: lead=5f" in result.output
-    assert "Trim[BBB Short]: lead=0f" in result.output
-    assert "Overrides: change_fps" in result.output
-    assert "Window: ignore_lead=0.00s" in result.output
-    assert "Summary:" in result.output
+    assert "[PREPARE]" in result.output
+    assert "• Ref:  lead=   5f" in result.output
+    assert "• Tgt:  lead=   0f" in result.output
+    assert "ignore_lead=0.00s" in result.output
+    assert "[SUMMARY]" in result.output
+    assert "• Clips:" in result.output
+    assert "Output frames:" in result.output
 
     assert ram_limits == [cfg.runtime.ram_limit_mb]
 
@@ -872,13 +873,12 @@ def test_audio_alignment_block_and_json(tmp_path, monkeypatch, runner):
     assert result.exit_code == 0
 
     output_lines = result.output.splitlines()
-    assert any("Audio streams: ref=Clip A" in line and "target=Clip B" in line for line in output_lines)
-    assert any("Estimating audio offsets" in line and "search=±5.00s" in line for line in output_lines)
-    assert any("Audio offsets: Clip B" in line and "+0.100s" in line for line in output_lines)
-    assert "Offsets file:" in result.output
+    assert any("Streams: ref=\"Clip A->" in line and "Clip B" in line for line in output_lines)
+    assert any("Estimating audio offsets" in line for line in output_lines)
+    assert any("Offset:" in line and "Clip B" in line for line in output_lines)
+    assert "Confirm:" in result.output
     assert "alignment.toml" in result.output
-    assert "Overlay: enabled=true" in result.output
-    assert "diagnostic via" in result.output
+    assert "mode=diagnostic" in result.output
     assert "overlay_mode" in result.output
 
     json_start = result.output.rfind('{"clips":')
