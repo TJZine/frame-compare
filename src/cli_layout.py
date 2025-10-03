@@ -3,16 +3,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-import math
+import os
 import re
+import shutil
+from itertools import zip_longest
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from rich.console import Console
-from rich.columns import Columns
-from rich.panel import Panel
-from rich.table import Table
-from rich.text import Text
 from rich.progress import BarColumn, Progress, ProgressColumn, Task, TextColumn
 
 
@@ -22,6 +20,126 @@ class CliLayoutError(RuntimeError):
 
 # Regular expression used to identify key tokens.
 _KEY_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.]*")
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+_ANSI_RESET = "\x1b[0m"
+
+
+class _AnsiColorMapper:
+    """Translate theme color tokens into ANSI escape sequences."""
+
+    _TOKEN_CODES_16 = {
+        "cyan": 36,
+        "blue": 34,
+        "green": 32,
+        "yellow": 33,
+        "red": 31,
+        "grey": 37,
+        "gray": 37,
+        "white": 37,
+        "black": 30,
+        "magenta": 35,
+    }
+
+    _TOKEN_CODES_256 = {
+        "cyan": 51,
+        "blue": 75,
+        "green": 84,
+        "yellow": 214,
+        "red": 203,
+        "grey": 240,
+        "gray": 240,
+        "white": 15,
+        "black": 0,
+        "magenta": 201,
+    }
+
+    def __init__(self, *, no_color: bool) -> None:
+        env_no_color = bool(os.environ.get("NO_COLOR"))
+        self.no_color = no_color or env_no_color
+        self._capability = "none"
+        if not self.no_color:
+            self._enable_windows_vt_mode()
+            self._capability = self._detect_capability()
+
+    @staticmethod
+    def _enable_windows_vt_mode() -> None:
+        if os.name != "nt":
+            return
+        try:
+            import colorama
+
+            colorama.just_fix_windows_console()
+            colorama.init(strip=False, convert=True)
+            return
+        except Exception:  # pragma: no cover - optional dependency
+            pass
+        try:  # pragma: no cover - platform dependent
+            import ctypes
+
+            kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+            handle = kernel32.GetStdHandle(-11)
+            mode = ctypes.c_uint()
+            if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+                kernel32.SetConsoleMode(handle, mode.value | 0x0004)
+        except Exception:
+            # If enabling VT mode fails we silently continue; the console will
+            # simply ignore the escape codes.
+            pass
+
+    @staticmethod
+    def _detect_capability() -> str:
+        colorterm = os.environ.get("COLORTERM", "").lower()
+        if any(token in colorterm for token in ("truecolor", "24bit")):
+            return "256"
+        term = os.environ.get("TERM", "").lower()
+        if "256color" in term or "truecolor" in term:
+            return "256"
+        return "16"
+
+    def apply(self, token: str, text: str) -> str:
+        if not text or self.no_color:
+            return text
+        sgr = self._lookup(token)
+        if not sgr:
+            return text
+        return f"{sgr}{text}{_ANSI_RESET}"
+
+    def _lookup(self, token: str) -> str:
+        token = (token or "").strip()
+        if not token:
+            return ""
+        parts = token.lower().split(".")
+        color = parts[0] if parts else ""
+        modifiers = {part for part in parts[1:] if part}
+
+        if self._capability == "256":
+            code = self._TOKEN_CODES_256.get(color)
+            if code is None:
+                return ""
+            attrs: List[str] = []
+            if "bold" in modifiers:
+                attrs.append("1")
+            if "dim" in modifiers:
+                attrs.append("2")
+            attrs.append(f"38;5;{code}")
+            return f"\x1b[{';'.join(attrs)}m"
+
+        if self._capability == "16":
+            base = self._TOKEN_CODES_16.get(color)
+            if base is None:
+                return ""
+            if "bright" in modifiers and 30 <= base <= 37:
+                base += 60
+            attrs = []
+            if "bold" in modifiers:
+                attrs.append("1")
+            if "dim" in modifiers:
+                attrs.append("2")
+            attrs.append(str(base))
+            return f"\x1b[{';'.join(attrs)}m"
+
+        return ""
 
 
 @dataclass
@@ -177,19 +295,21 @@ class CliLayoutRenderer:
         self.console = console
         self.quiet = quiet
         self.verbose = verbose
-        self.no_color = no_color
+        self._color_mapper = _AnsiColorMapper(no_color=no_color)
+        self.no_color = self._color_mapper.no_color
         self._progress_state: Dict[str, Dict[str, Any]] = {}
         self._cached_width: Optional[int] = None
         self._rendered_section_ids: List[str] = []
         self._active_values: Mapping[str, Any] = {}
         self._active_flags: Mapping[str, Any] = {}
         self._symbols = dict(layout.theme.symbols)
-        if no_color:
+        if self.no_color:
             self._symbols = {
                 key: layout.theme.symbols.get(f"ascii_{key}", layout.theme.symbols.get(key, ""))
                 for key in layout.theme.symbols
                 if not key.startswith("ascii_")
             }
+        self._role_tokens = dict(layout.theme.colors)
         self._progress_blocks: Dict[str, Mapping[str, Any]] = {}
         for section in layout.sections:
             if section.get("type") != "group":
@@ -213,30 +333,126 @@ class CliLayoutRenderer:
     # Template rendering utilities
     # ------------------------------------------------------------------
 
+    def _console_width(self) -> int:
+        if self._cached_width is not None:
+            return self._cached_width
+        width = getattr(self.console, "width", None)
+        if isinstance(width, int) and width > 0:
+            self._cached_width = width
+            return self._cached_width
+        size = getattr(self.console, "size", None)
+        if size is not None:
+            width = getattr(size, "width", None)
+            if isinstance(width, int) and width > 0:
+                self._cached_width = width
+                return self._cached_width
+        terminal = shutil.get_terminal_size(fallback=(80, 24))
+        self._cached_width = max(terminal.columns, 40)
+        return self._cached_width
+
+    def _visible_length(self, text: str) -> int:
+        return len(_ANSI_ESCAPE_RE.sub("", text))
+
+    def _pad_to_width(self, text: str, width: int) -> str:
+        visible = self._visible_length(text)
+        if visible >= width:
+            return text
+        return text + " " * (width - visible)
+
+    def _truncate_visible(self, text: str, width: int) -> str:
+        if self._visible_length(text) <= width:
+            return text
+        plain = _ANSI_ESCAPE_RE.sub("", text)
+        if len(plain) <= width:
+            return text
+        truncated = plain[: max(1, width - 1)] + "…"
+        return truncated
+
+    def _colorize(self, role: str, text: str) -> str:
+        token = self._role_tokens.get(role, "")
+        return self._color_mapper.apply(token, text)
+
+    def _style_key_tokens(self, text: str) -> str:
+        if not text or self.no_color:
+            return text
+
+        def repl(match: re.Match[str]) -> str:
+            key = match.group(1)
+            return f"{self._colorize('accent', key)}="
+
+        def colon_repl(match: re.Match[str]) -> str:
+            key = match.group(1)
+            suffix = match.group(2)
+            return f"{self._colorize('accent', key)}{suffix}"
+
+        text = re.sub(r"(?<!\S)([A-Za-z0-9_.-]+)=", repl, text)
+        text = re.sub(r"(?<!\S)([A-Za-z0-9_.-]+)(:)(?!//)", colon_repl, text)
+
+        def bool_repl(match: re.Match[str]) -> str:
+            value = match.group(0)
+            lowered = value.lower()
+            if lowered in {"yes", "true", "enabled", "ok"}:
+                return self._colorize("success", value)
+            if lowered in {"no", "false", "disabled"}:
+                return self._colorize("warn", value)
+            return value
+
+        text = re.sub(r"(?<![A-Za-z0-9_])(yes|no|true|false|enabled|disabled|ok)(?![A-Za-z0-9_])", bool_repl, text, flags=re.IGNORECASE)
+        return text
+
+    def _prepare_output(self, text: str, *, highlight: bool = True) -> str:
+        if not text:
+            return ""
+        stripped = text.rstrip()
+        if highlight:
+            stripped = self._style_key_tokens(stripped)
+        return stripped
+
+    def _write(self, text: str = "") -> None:
+        if text:
+            self.console.print(text)
+        else:
+            self.console.print()
+
     def apply_path_ellipsis(self, value: str, *, width: Optional[int] = None) -> str:
         if value is None:
             return ""
         text = str(value)
-        limit = width or self.console.size.width or 80
+        limit = width or self._console_width()
         limit = max(10, limit - 4)
         if len(text) <= limit:
             return text
         if self.layout.options.path_ellipsis == "middle":
-            head = max(1, limit // 2 - 1)
-            tail = max(1, limit - head - 1)
-            return f"{text[:head]}…{text[-tail:]}"
-        return text[:limit - 1] + "…"
+            last_sep = max(text.rfind("/"), text.rfind("\\"))
+            if last_sep == -1:
+                return f"{text[: max(1, limit - 1)]}…"
+            prefix = text[: last_sep]
+            suffix = text[last_sep + 1 :]
+            available = limit - len(suffix) - 1
+            if available <= 0:
+                visible_tail = suffix[-(limit - 1) :]
+                return f"…{visible_tail}"
+            truncated_prefix = prefix[:available]
+            return f"{truncated_prefix}…{suffix}"
+        return f"{text[: max(1, limit - 1)]}…"
 
     def _format_value(self, value: Any, fmt: Optional[str]) -> str:
         if value is None:
             return ""
-        if isinstance(value, (int, float)) and fmt:
-            return format(value, fmt)
-        if isinstance(value, int) and not fmt:
-            if self.layout.theme.units.get("thousands_sep"):
-                return f"{value:,}"
+        if fmt:
+            try:
+                return format(value, fmt)
+            except (TypeError, ValueError):
+                pass
+        if isinstance(value, int) and not isinstance(value, bool):
+            separator = self.layout.theme.units.get("thousands_sep")
+            if separator:
+                formatted = f"{value:,}"
+                if isinstance(separator, str):
+                    formatted = formatted.replace(",", separator)
+                return formatted
             return str(value)
-        if isinstance(value, float) and not fmt:
+        if isinstance(value, float):
             decimals = int(self.layout.theme.units.get("seconds_decimals", 2))
             return f"{value:.{decimals}f}"
         return str(value)
@@ -438,8 +654,15 @@ class CliLayoutRenderer:
                 while index < len(cleaned) and (cleaned[index].isalnum() or cleaned[index] in {"_", "."}):
                     index += 1
                 token = cleaned[start:index]
+                lowered = token.lower()
                 if token in {"and", "or", "not", "True", "False", "None"}:
                     tokens.append(token)
+                elif lowered == "true":
+                    tokens.append("True")
+                elif lowered == "false":
+                    tokens.append("False")
+                elif lowered == "none":
+                    tokens.append("None")
                 else:
                     tokens.append(f"resolve('{token}')")
                 continue
@@ -490,43 +713,72 @@ class CliLayoutRenderer:
 
     def _render_line_section(self, section: Mapping[str, Any], values: Mapping[str, Any], flags: Mapping[str, Any]) -> None:
         template = section.get("template", "")
-        text = self.render_template(template, values, flags)
+        text = self._prepare_output(self.render_template(template, values, flags))
         if text:
-            self.console.print(text)
+            self._write(text)
 
     def _render_box_section(self, section: Mapping[str, Any], values: Mapping[str, Any], flags: Mapping[str, Any]) -> None:
         title = section.get("title", "")
         lines = section.get("lines", [])
         if not isinstance(lines, list):
             raise CliLayoutError("box.lines must be a list")
-        rendered = [self.render_template(line, values, flags) for line in lines]
-        content = "\n".join(rendered)
-        panel = Panel(content, title=title, expand=False)
-        self.console.print(panel)
+        rendered_lines = [self._prepare_output(self.render_template(line, values, flags)) for line in lines]
+
+        title_plain = f" {title} " if title else ""
+        title_visible = len(title_plain)
+        styled_title = self._colorize("header", title_plain) if title_plain else ""
+
+        max_line = max((self._visible_length(line) for line in rendered_lines), default=0)
+        width = min(self._console_width(), max(20, max_line + 4, title_visible + 2))
+        inner_width = max(0, width - 4)
+
+        top_fill = max(0, width - 2 - title_visible)
+        if styled_title:
+            top_border = f"┌{styled_title}{'─' * top_fill}┐"
+        else:
+            top_border = f"┌{'─' * (width - 2)}┐"
+
+        bottom_border = f"└{'─' * (width - 2)}┘"
+
+        self._write(top_border)
+        for line in rendered_lines:
+            truncated = self._truncate_visible(line, inner_width)
+            padded = self._pad_to_width(truncated, inner_width)
+            self._write(f"│ {padded} │")
+        self._write(bottom_border)
 
     def _render_list_section(self, section: Mapping[str, Any], values: Mapping[str, Any], flags: Mapping[str, Any]) -> None:
         title_badge = section.get("title_badge")
         if title_badge:
-            self.console.print(title_badge)
+            self._write(self._colorize("header", title_badge))
         items = section.get("items", [])
         if not isinstance(items, list):
             raise CliLayoutError("list.items must be a list")
-        rendered_items = [self.render_template(item, values, flags) for item in items if item]
-        two_column = (
-            len(rendered_items) > 3
-            and (self.console.size.width or 0) >= self.layout.options.two_column_min_cols
-        )
+        rendered_items = [self._prepare_output(self.render_template(item, values, flags)) for item in items if item]
+        width = self._console_width()
+        two_column = len(rendered_items) > 3 and width >= self.layout.options.two_column_min_cols
         if two_column and rendered_items:
-            self.console.print(Columns(rendered_items, equal=True, expand=False))
+            midpoint = (len(rendered_items) + 1) // 2
+            left_items = rendered_items[:midpoint]
+            right_items = rendered_items[midpoint:]
+            col_width = max(10, (width - 4) // 2)
+            for left, right in zip_longest(left_items, right_items, fillvalue=""):
+                left_text = self._truncate_visible(left or "", col_width)
+                left_text = self._pad_to_width(left_text, col_width)
+                right_text = self._truncate_visible(right or "", col_width)
+                if right_text.strip():
+                    self._write(f"{left_text}    {right_text}")
+                else:
+                    self._write(left_text.rstrip())
         else:
             for rendered in rendered_items:
                 if rendered:
-                    self.console.print(rendered)
+                    self._write(rendered)
 
     def _render_group_section(self, section: Mapping[str, Any], values: Mapping[str, Any], flags: Mapping[str, Any]) -> None:
         title_badge = section.get("title_badge")
         if title_badge:
-            self.console.print(title_badge)
+            self._write(self._colorize("header", title_badge))
         blocks = section.get("blocks", [])
         if not isinstance(blocks, list):
             raise CliLayoutError("group.blocks must be a list")
@@ -541,31 +793,29 @@ class CliLayoutRenderer:
                 continue
             subtitle = block.get("subtitle")
             if subtitle:
-                self.console.print(subtitle)
+                self._write(self._colorize("dim", subtitle))
             for line in block.get("lines", []):
-                rendered = self.render_template(line, values, flags)
+                rendered = self._prepare_output(self.render_template(line, values, flags))
                 if rendered:
-                    self.console.print(rendered)
+                    self._write(rendered)
 
     def _render_passthrough_section(self, section: Mapping[str, Any], values: Mapping[str, Any], flags: Mapping[str, Any]) -> None:
         title_badge = section.get("title_badge")
         if title_badge:
-            self.console.print(title_badge)
+            self._write(self._colorize("header", title_badge))
 
     def _render_table_section(self, section: Mapping[str, Any], values: Mapping[str, Any], flags: Mapping[str, Any]) -> None:
         title_badge = section.get("title_badge")
         if title_badge:
-            self.console.print(title_badge)
-        group_by = section.get("group_by")
+            self._write(self._colorize("header", title_badge))
         row_template = section.get("row_template", "")
         rows = values.get(section.get("id"), []) if isinstance(values, Mapping) else []
-        table = Table(show_header=False, box=None)
         for row in rows:
             context_values = dict(values)
             context_values.update(row)
-            rendered = self.render_template(row_template, context_values, flags)
-            table.add_row(Text(rendered))
-        self.console.print(table)
+            rendered = self._prepare_output(self.render_template(row_template, context_values, flags))
+            if rendered:
+                self._write(rendered)
 
     # ------------------------------------------------------------------
     # Progress helpers --------------------------------------------------
@@ -585,10 +835,8 @@ class CliLayoutRenderer:
         if block is None:
             raise CliLayoutError(f"Unknown progress block: {progress_id}")
 
-        accent_style = self.layout.theme.colors.get("accent", "") if not self.no_color else ""
-
         columns: List[ProgressColumn] = [
-            TextColumn("{task.description}", style=accent_style, justify="left"),
+            TextColumn("{task.description}", justify="left"),
             BarColumn(),
             TextColumn("{task.completed}/{task.total}", justify="right"),
         ]
@@ -608,7 +856,7 @@ class _TemplateProgressColumn(ProgressColumn):
         self.progress_id = progress_id
         self.template = template
 
-    def render(self, task: Task) -> Text:
+    def render(self, task: Task) -> Any:
         state = dict(self.renderer._progress_state.get(self.progress_id, {}))
         state.setdefault("current", task.completed)
         state.setdefault("total", task.total)
@@ -616,7 +864,13 @@ class _TemplateProgressColumn(ProgressColumn):
         context_values = dict(self.renderer._active_values)
         context_values.setdefault("progress", state)
         rendered = self.renderer.render_template(self.template, context_values, self.renderer._active_flags)
-        return Text(rendered)
+        prepared = self.renderer._prepare_output(rendered)
+        width = self.renderer._console_width()
+        min_cols = self.renderer.layout.options.truncate_right_label_min_cols
+        if width < min_cols:
+            parts = prepared.split(" | ")
+            prepared = parts[0]
+        return prepared
 
 
 __all__ = [

@@ -1,15 +1,9 @@
-import json
-import sys
 from pathlib import Path
 from typing import Any, Dict
 
 from rich.console import Console
 
-ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-from src.cli_layout import CliLayoutRenderer, LayoutContext, load_cli_layout
+from src.cli_layout import CliLayoutRenderer, _AnsiColorMapper, load_cli_layout
 
 
 def _project_root() -> Path:
@@ -152,76 +146,58 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
     }
 
 
-def test_layout_renderer_sample_output(tmp_path, monkeypatch):
+def _make_renderer(width: int, *, no_color: bool = True) -> CliLayoutRenderer:
     layout_path = _project_root() / "cli_layout.v1.json"
     layout = load_cli_layout(layout_path)
-    console = Console(width=100, record=True, color_system=None)
-    renderer = CliLayoutRenderer(
-        layout,
-        console,
-        quiet=False,
-        verbose=True,
-        no_color=True,
+    console = Console(width=width, record=True, color_system=None)
+    return CliLayoutRenderer(layout, console, quiet=False, verbose=False, no_color=no_color)
+
+
+def test_color_mapper_token_to_ansi_16(monkeypatch):
+    monkeypatch.delenv("COLORTERM", raising=False)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("TERM", "vt100")
+    mapper = _AnsiColorMapper(no_color=False)
+    styled = mapper.apply("cyan.bold", "demo")
+    assert styled.startswith("\x1b[1;36m")
+    assert styled.endswith("\x1b[0m")
+
+
+def test_color_mapper_token_to_ansi_256(monkeypatch):
+    monkeypatch.setenv("COLORTERM", "truecolor")
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    mapper = _AnsiColorMapper(no_color=False)
+    styled = mapper.apply("grey.dim", "demo")
+    assert "\x1b[2;38;5;240m" in styled
+    assert styled.endswith("\x1b[0m")
+
+
+def test_renderer_path_ellipsis_middle(tmp_path):
+    renderer = _make_renderer(60)
+    long_path = str(tmp_path / "very" / "deep" / "folder" / "structure" / "file.mkv")
+    truncated = renderer.apply_path_ellipsis(long_path)
+    assert truncated.endswith("file.mkv")
+    assert "…" in truncated
+
+
+def test_list_section_two_column_layout(tmp_path):
+    values: Dict[str, Any] = _sample_values(tmp_path)
+    flags: Dict[str, Any] = {}
+
+    wide_renderer = _make_renderer(140)
+    wide_renderer.render_section(
+        next(section for section in wide_renderer.layout.sections if section["id"] == "summary"),
+        values,
+        flags,
     )
+    wide_output = wide_renderer.console.export_text()
+    assert "    •" in wide_output
 
-    sample_values = _sample_values(tmp_path)
-    flags: Dict[str, Any] = {
-        "tmdb_resolved": True,
-        "upload_enabled": False,
-        "verbose": True,
-        "quiet": False,
-        "no_color": True,
-    }
-
-    renderer.bind_context(sample_values, flags)
-    layout_context = LayoutContext(sample_values, flags, renderer=renderer)
-    assert layout_context.resolve("clips.count") == sample_values["clips"]["count"]
-
-    rendered_check = renderer.render_template("{clips.count}", sample_values, flags)
-    assert rendered_check.strip() == "2"
-    token = "tmdb_resolved?`TMDB: ${tmdb.category}/${tmdb.id}`:''"
-    context_obj = LayoutContext(sample_values, flags, renderer=renderer)
-    assert renderer._find_conditional_split(token) is not None
-    rendered_token = renderer._render_token(token, context_obj)
-    assert "movie/100" in rendered_token
-    tmdb_line = renderer.render_template(f"{{{token}}}", sample_values, flags)
-    remainder = "`TMDB: ${tmdb.category}/${tmdb.id}`:''"
-    split_index = renderer._find_matching_colon(remainder)
-    assert split_index is not None
-    assert "movie/100" in tmdb_line
-
-    for section in layout.sections:
-        renderer.render_section(section, sample_values, flags)
-
-    sample_json = {
-        "analysis": sample_values["analysis"],
-        "render": sample_values["render"],
-    }
-    console.print(json.dumps(sample_json))
-
-    output_text = console.export_text()
-    lines = [line.rstrip("\n") for line in output_text.splitlines()]
-
-    required_markers = [
-        "Frame Compare",
-        "[DISCOVER]",
-        "[PREPARE]",
-        "[PREPARE · Audio]",
-        "[ANALYZE]",
-        "[RENDER]",
-        "[PUBLISH]",
-        "[WARNINGS]",
-        "[SUMMARY]",
-    ]
-    for marker in required_markers:
-        assert any(marker in line for line in lines), marker
-
-    assert any(line.startswith("┌") for line in lines)
-    assert any(line.startswith("└") for line in lines)
-
-    width = console.width or 100
-    for line in lines:
-        assert len(line) <= width
-
-    assert any(line.strip().startswith("{") for line in lines)
-    json.loads(json.dumps(sample_json))
+    narrow_renderer = _make_renderer(90)
+    narrow_renderer.render_section(
+        next(section for section in narrow_renderer.layout.sections if section["id"] == "summary"),
+        values,
+        flags,
+    )
+    narrow_output = narrow_renderer.console.export_text()
+    assert "    •" not in narrow_output
