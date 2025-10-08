@@ -3,7 +3,7 @@ from typing import Any, Dict
 
 from rich.console import Console
 
-from src.cli_layout import CliLayoutRenderer, _AnsiColorMapper, load_cli_layout
+from src.cli_layout import CliLayoutRenderer, LayoutContext, _AnsiColorMapper, load_cli_layout
 
 
 def _project_root() -> Path:
@@ -84,7 +84,7 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
             "preview_paths": [str(tmp_path / "a.wav"), str(tmp_path / "b.wav")],
             "confirmed": "auto",
             "reference_stream": "Reference->ac3/en/5.1",
-            "target_stream": {"Target": "aac/en/5.1"},
+            "target_stream": "Target->aac/en/5.1",
         },
         "render": {
             "writer": "VS",
@@ -105,6 +105,9 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
             "dynamic_peak_detection": True,
             "target_nits": 100.0,
             "verify_luma_threshold": 0.1,
+        },
+        "verify": {
+            "delta": {"max": 0.05}
         },
         "overlay": {
             "enabled": True,
@@ -149,7 +152,8 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
 def _make_renderer(width: int, *, no_color: bool = True) -> CliLayoutRenderer:
     layout_path = _project_root() / "cli_layout.v1.json"
     layout = load_cli_layout(layout_path)
-    console = Console(width=width, record=True, color_system=None)
+    color_system = None if no_color else "standard"
+    console = Console(width=width, record=True, color_system=color_system)
     return CliLayoutRenderer(layout, console, quiet=False, verbose=False, no_color=no_color)
 
 
@@ -201,3 +205,23 @@ def test_list_section_two_column_layout(tmp_path):
     )
     narrow_output = narrow_renderer.console.export_text()
     assert "    •" not in narrow_output
+
+
+def test_highlight_markup_and_spans(tmp_path, monkeypatch):
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    renderer = _make_renderer(100, no_color=False)
+    values = _sample_values(tmp_path)
+    flags: Dict[str, Any] = {}
+    context = LayoutContext(values, flags, renderer=renderer)
+
+    token_markup = renderer._render_token("render.add_frame_info", context)
+    assert token_markup == "[[bool_true]]True[[/]]"
+
+    wrapped = f"[[value]]{token_markup}[[/]]"
+    colored_output = renderer._prepare_output(wrapped)
+    assert colored_output == renderer._colorize("bool_true", "True")
+
+    renderer_no_color = _make_renderer(100)
+    context_no_color = LayoutContext(values, flags, renderer=renderer_no_color)
+    token_plain = renderer_no_color._render_token("render.add_frame_info", context_no_color)
+    assert renderer_no_color._prepare_output(f"[[value]]{token_plain}[[/]]") == "True"

@@ -90,7 +90,7 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
             "preview_paths": [str(tmp_path / "a.wav"), str(tmp_path / "b.wav")],
             "confirmed": "auto",
             "reference_stream": "Reference->ac3/en/5.1",
-            "target_stream": {"Target": "aac/en/5.1"},
+            "target_stream": "Target->aac/en/5.1",
         },
         "render": {
             "writer": "VS",
@@ -111,6 +111,9 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
             "dynamic_peak_detection": True,
             "target_nits": 100.0,
             "verify_luma_threshold": 0.1,
+        },
+        "verify": {
+            "delta": {"max": 0.05}
         },
         "overlay": {
             "enabled": True,
@@ -179,6 +182,9 @@ def test_layout_renderer_sample_output(tmp_path, monkeypatch):
 
     rendered_check = renderer.render_template("{clips.count}", sample_values, flags)
     assert rendered_check.strip() == "2"
+    highlight_markup = renderer._render_token("render.add_frame_info", layout_context)
+    assert highlight_markup == "[[bool_true]]True[[/]]"
+    assert renderer._prepare_output(highlight_markup) == "True"
     token = "tmdb_resolved?`TMDB: ${tmdb.category}/${tmdb.id}`:''"
     context_obj = LayoutContext(sample_values, flags, renderer=renderer)
     assert renderer._find_conditional_split(token) is not None

@@ -1,7 +1,7 @@
 """Data-driven CLI layout rendering utilities."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import os
 import re
@@ -24,6 +24,24 @@ _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 _ANSI_RESET = "\x1b[0m"
 
+_COLOR_BLIND_OVERRIDES: Dict[str, str] = {
+    "bool_true": "cyan",
+    "bool_false": "orange",
+    "number_ok": "cyan",
+    "number_warn": "orange",
+    "number_bad": "purple",
+    "success": "cyan",
+    "warn": "orange",
+    "error": "purple",
+}
+
+_SECTION_ACCENT_PATTERNS: Tuple[Tuple[str, str], ...] = (
+    ("PREPARE", "accent_prepare"),
+    ("ANALYZE", "accent_analyze"),
+    ("RENDER", "accent_render"),
+    ("PUBLISH", "accent_publish"),
+)
+
 
 class _AnsiColorMapper:
     """Translate theme color tokens into ANSI escape sequences."""
@@ -33,25 +51,29 @@ class _AnsiColorMapper:
         "blue": 34,
         "green": 32,
         "yellow": 33,
+        "orange": 33,
         "red": 31,
         "grey": 37,
         "gray": 37,
         "white": 37,
         "black": 30,
         "magenta": 35,
+        "purple": 35,
     }
 
     _TOKEN_CODES_256 = {
         "cyan": 51,
         "blue": 75,
         "green": 84,
-        "yellow": 214,
+        "yellow": 184,
+        "orange": 214,
         "red": 203,
         "grey": 240,
         "gray": 240,
         "white": 15,
         "black": 0,
         "magenta": 201,
+        "purple": 177,
     }
 
     def __init__(self, *, no_color: bool) -> None:
@@ -147,6 +169,7 @@ class LayoutTheme:
     colors: Dict[str, str]
     symbols: Dict[str, str]
     units: Dict[str, Any]
+    options: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -171,6 +194,17 @@ class CliLayout:
     sections: List[Dict[str, Any]]
     folding: Dict[str, Any]
     json_tail: JsonTailConfig
+    highlights: List["HighlightRule"]
+
+
+@dataclass
+class HighlightRule:
+    when: str
+    path: str
+    role: Optional[str] = None
+    value: Any = None
+    true_role: Optional[str] = None
+    false_role: Optional[str] = None
 
 
 def _require_keys(mapping: Mapping[str, Any], keys: Iterable[str], *, context: str) -> None:
@@ -204,6 +238,9 @@ def load_cli_layout(path: Path) -> CliLayout:
     units = theme_raw["units"]
     if not isinstance(colors, dict) or not isinstance(symbols, dict) or not isinstance(units, dict):
         raise CliLayoutError("theme colors/symbols/units must be objects")
+    theme_options_raw = theme_raw.get("options", {})
+    if theme_options_raw and not isinstance(theme_options_raw, dict):
+        raise CliLayoutError("theme.options must be an object if provided")
 
     options_raw = raw["layout"]
     if not isinstance(options_raw, dict):
@@ -227,9 +264,45 @@ def load_cli_layout(path: Path) -> CliLayout:
         raise CliLayoutError("json_tail must be an object")
     _require_keys(json_tail_raw, ("pretty_on_flag",), context="json_tail")
 
+    highlights_raw = raw.get("highlights", [])
+    if not isinstance(highlights_raw, list):
+        raise CliLayoutError("highlights must be a list when provided")
+    highlights: List[HighlightRule] = []
+    for index, rule_raw in enumerate(highlights_raw):
+        if not isinstance(rule_raw, dict):
+            raise CliLayoutError(f"highlights[{index}] must be an object")
+        when = str(rule_raw.get("when", "")).strip()
+        path = str(rule_raw.get("path", "")).strip()
+        if not when or not path:
+            raise CliLayoutError(f"highlights[{index}] must include 'when' and 'path'")
+        role = rule_raw.get("role")
+        value = rule_raw.get("value")
+        true_role = rule_raw.get("true_role")
+        false_role = rule_raw.get("false_role")
+        if when.lower() == "isbool":
+            if true_role is None or false_role is None:
+                raise CliLayoutError(f"highlights[{index}] requires true_role/false_role for 'isbool'")
+        elif rule_raw.get("role") is None:
+            raise CliLayoutError(f"highlights[{index}] requires 'role'")
+        highlights.append(
+            HighlightRule(
+                when=when,
+                path=path,
+                role=str(role) if role is not None else None,
+                value=value,
+                true_role=str(true_role) if true_role is not None else None,
+                false_role=str(false_role) if false_role is not None else None,
+            )
+        )
+
     layout = CliLayout(
         version=str(raw["version"]),
-        theme=LayoutTheme(colors=dict(colors), symbols=dict(symbols), units=dict(units)),
+        theme=LayoutTheme(
+            colors=dict(colors),
+            symbols=dict(symbols),
+            units=dict(units),
+            options=dict(theme_options_raw) if isinstance(theme_options_raw, dict) else {},
+        ),
         options=LayoutOptions(
             two_column_min_cols=int(options_raw["two_column_min_cols"]),
             blank_line_between_sections=bool(options_raw["blank_line_between_sections"]),
@@ -242,6 +315,7 @@ def load_cli_layout(path: Path) -> CliLayout:
             pretty_on_flag=str(json_tail_raw["pretty_on_flag"]),
             must_be_last=bool(json_tail_raw.get("must_be_last", True)),
         ),
+        highlights=highlights,
     )
     return layout
 
@@ -302,6 +376,7 @@ class CliLayoutRenderer:
         self._rendered_section_ids: List[str] = []
         self._active_values: Mapping[str, Any] = {}
         self._active_flags: Mapping[str, Any] = {}
+        self._theme_options = dict(layout.theme.options)
         self._symbols = dict(layout.theme.symbols)
         if self.no_color:
             self._symbols = {
@@ -310,13 +385,24 @@ class CliLayoutRenderer:
                 if not key.startswith("ascii_")
             }
         self._role_tokens = dict(layout.theme.colors)
-        self._progress_blocks: Dict[str, Mapping[str, Any]] = {}
+        self._color_blind_safe = bool(self._theme_options.get("color_blind_safe"))
+        if self._color_blind_safe:
+            for role, token in _COLOR_BLIND_OVERRIDES.items():
+                self._role_tokens.setdefault(role, token)
+                self._role_tokens[role] = token
+
+        self._highlight_rules: Dict[str, List[HighlightRule]] = {}
+        for rule in layout.highlights:
+            self._highlight_rules.setdefault(rule.path, []).append(rule)
+
+        self._progress_blocks: Dict[str, Dict[str, Any]] = {}
         for section in layout.sections:
             if section.get("type") != "group":
                 continue
+            accent_role = self._resolve_section_accent(section)
             for block in section.get("blocks", []):
                 if isinstance(block, Mapping) and block.get("type") == "progress" and block.get("progress_id"):
-                    self._progress_blocks[str(block["progress_id"])] = block
+                    self._progress_blocks[str(block["progress_id"])] = {"block": block, "accent": accent_role}
 
     # ------------------------------------------------------------------
     # High-level public API
@@ -372,6 +458,153 @@ class CliLayoutRenderer:
         token = self._role_tokens.get(role, "")
         return self._color_mapper.apply(token, text)
 
+    def _role_style(self, role: Optional[str]) -> Optional[str]:
+        if self.no_color or not role:
+            return None
+        return self._role_tokens.get(role)
+
+    def _resolve_section_accent(self, section: Mapping[str, Any], badge: Optional[str] = None) -> Optional[str]:
+        explicit = section.get("accent_role")
+        if isinstance(explicit, str) and explicit.strip():
+            return explicit.strip()
+        badge_text = badge or section.get("title_badge") or ""
+        if isinstance(badge_text, str):
+            for pattern, role in _SECTION_ACCENT_PATTERNS:
+                if pattern in badge_text:
+                    return role
+        if section.get("id") == "banner":
+            return "header"
+        return None
+
+    def _apply_role_to_chunk(self, role: Optional[str], chunk: str) -> str:
+        if not chunk:
+            return ""
+        if role and not self.no_color:
+            return self._colorize(role, chunk)
+        return chunk
+
+    def _render_title_badge(self, section: Mapping[str, Any]) -> None:
+        badge = section.get("title_badge")
+        if not badge:
+            return
+        role = self._resolve_section_accent(section, badge) or "header"
+        self._write(self._colorize(role, badge))
+
+    def _apply_style_spans(self, text: str) -> str:
+        if "[[" not in text:
+            return text
+        result: List[str] = []
+        stack: List[str] = []
+        index = 0
+        length = len(text)
+        while index < length:
+            next_marker = text.find("[[", index)
+            if next_marker == -1:
+                result.append(self._apply_role_to_chunk(stack[-1] if stack else None, text[index:]))
+                break
+            if next_marker > index:
+                result.append(self._apply_role_to_chunk(stack[-1] if stack else None, text[index:next_marker]))
+            close = text.find("]]", next_marker + 2)
+            if close == -1:
+                # unmatched marker, treat rest as plain text
+                result.append(self._apply_role_to_chunk(stack[-1] if stack else None, text[next_marker:]))
+                break
+            token = text[next_marker + 2 : close].strip()
+            if token == "/":
+                if stack:
+                    stack.pop()
+            elif token:
+                stack.append(token)
+            index = close + 2
+        return "".join(result)
+
+    def _coerce_bool(self, value: Any) -> Optional[bool]:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered in {"true", "yes", "1", "enabled", "on"}:
+                return True
+            if lowered in {"false", "no", "0", "disabled", "off"}:
+                return False
+        return None
+
+    def _to_number(self, value: Any) -> Optional[float]:
+        if isinstance(value, bool):
+            return float(value)
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            try:
+                return float(value.replace(",", ""))
+            except ValueError:
+                return None
+        return None
+
+    def _evaluate_expression(self, expression: str, context: LayoutContext) -> Any:
+        prepared = self._prepare_condition(expression)
+        namespace = {
+            "resolve": context.resolve,
+            "abs": abs,
+            "min": min,
+            "max": max,
+        }
+        try:
+            return eval(prepared, {"__builtins__": {}}, namespace)
+        except Exception:
+            return None
+
+    def _resolve_highlight_operand(self, operand: Any, context: LayoutContext) -> Any:
+        if isinstance(operand, str):
+            text = operand.strip()
+            if text.startswith("{") and text.endswith("}"):
+                inner = text[1:-1].strip()
+                if inner:
+                    return self._evaluate_expression(inner, context)
+        return operand
+
+    def _evaluate_highlight_rule(
+        self, rule: HighlightRule, value: Any, context: LayoutContext
+    ) -> Optional[str]:
+        when = rule.when.lower()
+        if when == "isbool":
+            coerced = self._coerce_bool(value)
+            if coerced is None:
+                return None
+            return rule.true_role if coerced else rule.false_role
+
+        comparator_raw = self._resolve_highlight_operand(rule.value, context)
+        value_num = self._to_number(value)
+        comparator_num = self._to_number(comparator_raw)
+        if value_num is None or comparator_num is None:
+            return None
+
+        if when == "gt" and value_num > comparator_num:
+            return rule.role or None
+        if when == "lt" and value_num < comparator_num:
+            return rule.role or None
+        if when == "abs_gt" and abs(value_num) > comparator_num:
+            return rule.role or None
+        if when == "abs_gte" and abs(value_num) >= comparator_num:
+            return rule.role or None
+        if when == "abs_lt" and abs(value_num) < comparator_num:
+            return rule.role or None
+        return None
+
+    def _pick_highlight(self, path: str, value: Any, context: LayoutContext) -> Optional[str]:
+        if not path:
+            return None
+        rules = self._highlight_rules.get(path)
+        if not rules:
+            return None
+        for rule in rules:
+            role = self._evaluate_highlight_rule(rule, value, context)
+            if role:
+                return role
+        return None
+
     def _style_key_tokens(self, text: str) -> str:
         if not text or self.no_color:
             return text
@@ -404,6 +637,8 @@ class CliLayoutRenderer:
         if not text:
             return ""
         stripped = text.rstrip()
+        if "[[" in stripped:
+            stripped = self._apply_style_spans(stripped)
         if highlight:
             stripped = self._style_key_tokens(stripped)
         return stripped
@@ -501,16 +736,21 @@ class CliLayoutRenderer:
             path_part = token
 
         filters: List[str] = []
+        raw_path = path_part
         if "|" in path_part:
-            path_part, *filters = path_part.split("|")
-        value = context.resolve(path_part)
+            raw_path, *filters = path_part.split("|")
+        value = context.resolve(raw_path)
 
         for filter_name in filters:
             value = self._apply_filter(value, filter_name)
 
         if optional_value and value in (None, ""):
             return ""
-        return self._format_value(value, fmt_spec)
+        formatted = self._format_value(value, fmt_spec)
+        highlight_role = self._pick_highlight(raw_path.strip(), value, context)
+        if highlight_role and formatted:
+            return f"[[{highlight_role}]]{formatted}[[/]]"
+        return formatted
 
     def _render_text(self, template: str, context: LayoutContext) -> str:
         result: List[str] = []
@@ -748,9 +988,7 @@ class CliLayoutRenderer:
         self._write(bottom_border)
 
     def _render_list_section(self, section: Mapping[str, Any], values: Mapping[str, Any], flags: Mapping[str, Any]) -> None:
-        title_badge = section.get("title_badge")
-        if title_badge:
-            self._write(self._colorize("header", title_badge))
+        self._render_title_badge(section)
         items = section.get("items", [])
         if not isinstance(items, list):
             raise CliLayoutError("list.items must be a list")
@@ -776,9 +1014,7 @@ class CliLayoutRenderer:
                     self._write(rendered)
 
     def _render_group_section(self, section: Mapping[str, Any], values: Mapping[str, Any], flags: Mapping[str, Any]) -> None:
-        title_badge = section.get("title_badge")
-        if title_badge:
-            self._write(self._colorize("header", title_badge))
+        self._render_title_badge(section)
         blocks = section.get("blocks", [])
         if not isinstance(blocks, list):
             raise CliLayoutError("group.blocks must be a list")
@@ -800,14 +1036,10 @@ class CliLayoutRenderer:
                     self._write(rendered)
 
     def _render_passthrough_section(self, section: Mapping[str, Any], values: Mapping[str, Any], flags: Mapping[str, Any]) -> None:
-        title_badge = section.get("title_badge")
-        if title_badge:
-            self._write(self._colorize("header", title_badge))
+        self._render_title_badge(section)
 
     def _render_table_section(self, section: Mapping[str, Any], values: Mapping[str, Any], flags: Mapping[str, Any]) -> None:
-        title_badge = section.get("title_badge")
-        if title_badge:
-            self._write(self._colorize("header", title_badge))
+        self._render_title_badge(section)
         row_template = section.get("row_template", "")
         rows = values.get(section.get("id"), []) if isinstance(values, Mapping) else []
         for row in rows:
@@ -822,7 +1054,10 @@ class CliLayoutRenderer:
     # ------------------------------------------------------------------
 
     def get_progress_block(self, progress_id: str) -> Optional[Mapping[str, Any]]:
-        return self._progress_blocks.get(progress_id)
+        info = self._progress_blocks.get(progress_id)
+        if info is None:
+            return None
+        return info.get("block")
 
     def bind_context(self, values: Mapping[str, Any], flags: Mapping[str, Any]) -> None:
         """Record the active context for later progress template evaluation."""
@@ -831,13 +1066,26 @@ class CliLayoutRenderer:
         self._active_flags = flags
 
     def create_progress(self, progress_id: str, *, transient: bool = False) -> Progress:
-        block = self.get_progress_block(progress_id)
-        if block is None:
+        info = self._progress_blocks.get(progress_id)
+        if info is None:
             raise CliLayoutError(f"Unknown progress block: {progress_id}")
+        block = info["block"]
+        accent_role = info.get("accent")
+
+        bar_style_token = self._role_style(accent_role or "accent")
+        if bar_style_token:
+            bar_column = BarColumn(
+                style=bar_style_token,
+                complete_style=bar_style_token,
+                finished_style=bar_style_token,
+                pulse_style=bar_style_token,
+            )
+        else:
+            bar_column = BarColumn()
 
         columns: List[ProgressColumn] = [
             TextColumn("{task.description}", justify="left"),
-            BarColumn(),
+            bar_column,
             TextColumn("{task.completed}/{task.total}", justify="right"),
         ]
 
@@ -877,6 +1125,7 @@ __all__ = [
     "CliLayout",
     "CliLayoutError",
     "CliLayoutRenderer",
+    "HighlightRule",
     "JsonTailConfig",
     "LayoutOptions",
     "LayoutTheme",

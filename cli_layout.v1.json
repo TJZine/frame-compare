@@ -4,6 +4,19 @@
     "colors": {
       "header": "cyan.bold",
       "accent": "blue.bright",
+      "accent_prepare": "blue",
+      "accent_analyze": "purple.bright",
+      "accent_render": "magenta.bright",
+      "accent_publish": "green.bright",
+      "value": "white.bright",
+      "unit": "grey.dim",
+      "key": "blue",
+      "bool_true": "green",
+      "bool_false": "red",
+      "number_ok": "green",
+      "number_warn": "yellow",
+      "number_bad": "red",
+      "path": "grey.dim",
       "success": "green",
       "warn": "yellow",
       "error": "red",
@@ -22,6 +35,9 @@
       "offset_decimals": 3,
       "timecode_ms": 3,
       "thousands_sep": true
+    },
+    "options": {
+      "color_blind_safe": false
     }
   },
   "layout": {
@@ -30,11 +46,22 @@
     "path_ellipsis": "middle",
     "truncate_right_label_min_cols": 100
   },
+  "highlights": [
+    { "when": "isbool", "path": "audio_alignment.enabled", "true_role": "bool_true", "false_role": "bool_false" },
+    { "when": "isbool", "path": "overlay.enabled", "true_role": "bool_true", "false_role": "bool_false" },
+    { "when": "isbool", "path": "render.add_frame_info", "true_role": "bool_true", "false_role": "bool_false" },
+    { "when": "isbool", "path": "render.upscale", "true_role": "bool_true", "false_role": "bool_false" },
+    { "when": "abs_gt", "path": "audio_alignment.offsets_sec", "value": 1.0, "role": "number_warn" },
+    { "when": "gt", "path": "analysis.counts.motion", "value": 0, "role": "accent_analyze" },
+    { "when": "lt", "path": "progress.fps", "value": 1.0, "role": "number_warn" },
+    { "when": "gt", "path": "verify.delta.max", "value": "{tonemap.verify_luma_threshold}", "role": "number_bad" },
+    { "when": "abs_gt", "path": "verify.delta.max", "value": "{tonemap.verify_luma_threshold} * 0.9", "role": "number_warn" }
+  ],
   "sections": [
     {
       "id": "banner",
       "type": "line",
-      "template": "▶ Frame Compare • {clips.count} clips • seed={analysis.random_seed} • cache={cache.file} ({cache.status}{cache.reason?})"
+      "template": "▶ Frame Compare • [[key]]clips[[/]]=[[value]]{clips.count}[[/]] • [[key]]seed[[/]]=[[value]]{analysis.random_seed}[[/]] • [[key]]cache[[/]]=[[value]]{cache.file}[[/]] ([[value]]{cache.status}[[/]]{cache.reason?` [[dim]]${cache.reason}[[/]]`:''})"
     },
     {
       "id": "at_a_glance",
@@ -42,10 +69,10 @@
       "title": "At-a-Glance",
       "when": "true",
       "lines": [
-        "Clips={clips.count} • Step={analysis.step} • Downscale={analysis.downscale_height}px • Plan: Dark={analysis.counts.dark} Bright={analysis.counts.bright} Motion={analysis.counts.motion}",
-        "Window: lead={window.ignore_lead_seconds:.2f}s trail={window.ignore_trail_seconds:.2f}s • Align(audio)={audio_alignment.enabled?yes:no}{audio_alignment.enabled? ( {audio_alignment.offsets_sec:+.3f}s ):''}",
-        "Canvas: single_res={render.single_res|tallest} upscale={render.upscale} crop=mod{render.mod_crop} pad={render.center_pad},tol={render.letterbox_px_tolerance}px",
-        "Tonemap: curve={tonemap.tone_curve} dpd={tonemap.dynamic_peak_detection} target={tonemap.target_nits}nits • Seed={analysis.random_seed} • Cache={cache.status}"
+        "Clips=[[value]]{clips.count}[[/]] • Step=[[value]]{analysis.step}[[/]] • Downscale=[[value]]{analysis.downscale_height}[[/]][[unit]]px[[/]] • Plan: Dark=[[value]]{analysis.counts.dark}[[/]] Bright=[[value]]{analysis.counts.bright}[[/]] Motion=[[value]]{analysis.counts.motion}[[/]]",
+        "Window: lead=[[value]]{window.ignore_lead_seconds:.2f}[[/]][[unit]]s[[/]] trail=[[value]]{window.ignore_trail_seconds:.2f}[[/]][[unit]]s[[/]] • Align(audio)=[[value]]{audio_alignment.enabled}[[/]] [[unit]]({audio_alignment.offsets_sec:+.3f}s)[[/]]",
+        "Canvas: single_res=[[value]]{render.single_res|tallest}[[/]] [[unit]]px[[/]]  upscale=[[value]]{render.upscale}[[/]]  crop=mod[[value]]{render.mod_crop}[[/]]  pad=[[value]]{render.center_pad}[[/]],[[unit]]tol={render.letterbox_px_tolerance}px[[/]]",
+        "Tonemap: curve=[[value]]{tonemap.tone_curve}[[/]]  dpd=[[value]]{tonemap.dynamic_peak_detection}[[/]]  target=[[value]]{tonemap.target_nits}[[/]][[unit]]nits[[/]] • Seed=[[value]]{analysis.random_seed}[[/]] • Cache=[[value]]{cache.status}[[/]]"
       ]
     },
     {
@@ -53,9 +80,9 @@
       "type": "list",
       "title_badge": "[DISCOVER]",
       "items": [
-        "• {clips.ref.label}  {clips.ref.width}x{clips.ref.height} @ {clips.ref.fps:.3f}fps  frames={clips.ref.frames}  dur={clips.ref.duration_tc}",
-        "• {clips.tgt.label}  {clips.tgt.width}x{clips.tgt.height} @ {clips.tgt.fps:.3f}fps  frames={clips.tgt.frames}  dur={clips.tgt.duration_tc}",
-        "{tmdb_resolved?`TMDB: ${tmdb.category}/${tmdb.id}  “${tmdb.title} (${tmdb.year})”  lang=${tmdb.lang}`:''}"
+        "• [[key]]ref[[/]]=[[value]]{clips.ref.label}[[/]]  [[value]]{clips.ref.width}[[/]]x[[value]]{clips.ref.height}[[/]] @ [[value]]{clips.ref.fps:.3f}[[/]][[unit]]fps[[/]]  frames=[[value]]{clips.ref.frames}[[/]]  dur=[[value]]{clips.ref.duration_tc}[[/]]",
+        "• [[key]]tgt[[/]]=[[value]]{clips.tgt.label}[[/]]  [[value]]{clips.tgt.width}[[/]]x[[value]]{clips.tgt.height}[[/]] @ [[value]]{clips.tgt.fps:.3f}[[/]][[unit]]fps[[/]]  frames=[[value]]{clips.tgt.frames}[[/]]  dur=[[value]]{clips.tgt.duration_tc}[[/]]",
+        "{tmdb_resolved?`TMDB: [[value]]${tmdb.category}/${tmdb.id}[[/]]  “[[value]]${tmdb.title} (${tmdb.year})[[/]]”  lang=[[value]]${tmdb.lang}[[/]]`:''}"
       ]
     },
     {
@@ -66,23 +93,25 @@
         {
           "subtitle": "Trim",
           "lines": [
-            "• Ref:  lead={trims.ref.lead_f:>4}f ({trims.ref.lead_s:>5.2f}s)  trail={trims.ref.trail_f:>4}f ({trims.ref.trail_s:>5.2f}s)",
-            "• Tgt:  lead={trims.tgt.lead_f:>4}f ({trims.tgt.lead_s:>5.2f}s)  trail={trims.tgt.trail_f:>4}f ({trims.tgt.trail_s:>5.2f}s)"
+            "• Ref:  lead=[[value]]{trims.ref.lead_f:>4}[[/]][[unit]]f[[/]] ([[value]]{trims.ref.lead_s:>5.2f}[[/]][[unit]]s[[/]])  trail=[[value]]{trims.ref.trail_f:>4}[[/]][[unit]]f[[/]] ([[value]]{trims.ref.trail_s:>5.2f}[[/]][[unit]]s[[/]])",
+            "• Tgt:  lead=[[value]]{trims.tgt.lead_f:>4}[[/]][[unit]]f[[/]] ([[value]]{trims.tgt.lead_s:>5.2f}[[/]][[unit]]s[[/]])  trail=[[value]]{trims.tgt.trail_f:>4}[[/]][[unit]]f[[/]] ([[value]]{trims.tgt.trail_s:>5.2f}[[/]][[unit]]s[[/]])"
           ]
         },
         {
           "subtitle": "Window",
           "lines": [
-            "ignore_lead={window.ignore_lead_seconds:.2f}s  ignore_trail={window.ignore_trail_seconds:.2f}s  min={window.min_window_seconds:.2f}s  downscale={analysis.downscale_height}px"
+            "ignore_lead=[[value]]{window.ignore_lead_seconds:.2f}[[/]][[unit]]s[[/]]  ignore_trail=[[value]]{window.ignore_trail_seconds:.2f}[[/]][[unit]]s[[/]]  min=[[value]]{window.min_window_seconds:.2f}[[/]][[unit]]s[[/]]  downscale=[[value]]{analysis.downscale_height}[[/]][[unit]]px[[/]]"
           ]
         },
         {
           "subtitle": "Alignment(manual)",
-          "lines": ["start={alignment.manual_start_s}s  end={alignment.manual_end_s|unchanged}"]
+          "lines": [
+            "start=[[value]]{alignment.manual_start_s}[[/]][[unit]]s[[/]]  end=[[value]]{alignment.manual_end_s|unchanged}[[/]][[unit]]s[[/]]"
+          ]
         },
         {
           "subtitle": "Overrides",
-          "lines": ["change_fps={overrides.change_fps|none}"],
+          "lines": ["change_fps=[[value]]{overrides.change_fps|none}[[/]]"],
           "when": "verbose || overrides.change_fps != 'none'"
         }
       ]
@@ -95,11 +124,11 @@
       "blocks": [
         {
           "lines": [
-            "Streams: ref=\"{audio_alignment.reference_stream}\"  target=\"{audio_alignment.target_stream}\"",
-            "Offset:  {audio_alignment.offsets_sec:+.3f}s  ({audio_alignment.offsets_frames:+d}f @ {clips.ref.fps:.3f}fps)  (corr={audio_alignment.corr:.2f}, thresh={audio_alignment.threshold:.2f})",
-            "Preview: {audio_alignment.preview_paths.0.e}", 
-            "         {audio_alignment.preview_paths.1.e}",
-            "Confirm: {audio_alignment.confirmed?yes:no}{audio_alignment.confirmed?`  → wrote: ${audio_alignment.offsets_filename.e}`:`  → wrote: ${audio_alignment.offsets_filename.e} (manual edit suggested)`}"
+            "Streams: [[key]]ref[[/]]=\"[[value]]{audio_alignment.reference_stream}[[/]]\"  [[key]]target[[/]]=\"[[value]]{audio_alignment.target_stream}[[/]]\"",
+            "Offset:  [[value]]{audio_alignment.offsets_sec:+.3f}[[/]][[unit]]s[[/]]  ([[value]]{audio_alignment.offsets_frames:+d}[[/]][[unit]]f[[/]] @ [[value]]{clips.ref.fps:.3f}[[/]][[unit]]fps[[/]])  (corr=[[value]]{audio_alignment.corr:.2f}[[/]], thresh=[[value]]{audio_alignment.threshold:.2f}[[/]])",
+            "Preview: [[path]]{audio_alignment.preview_paths.0.e}[[/]]",
+            "         [[path]]{audio_alignment.preview_paths.1.e}[[/]]",
+            "Confirm: [[value]]{audio_alignment.confirmed}[[/]]{audio_alignment.confirmed?`  [[dim]]→ wrote: ${audio_alignment.offsets_filename.e}[[/]]`:`  [[dim]]→ wrote: ${audio_alignment.offsets_filename.e} (manual edit suggested)[[/]]`}"
           ]
         }
       ]
@@ -112,19 +141,19 @@
         {
           "subtitle": "Config",
           "lines": [
-            "step={analysis.step}  method={analysis.motion_method}  scenecut_q={analysis.motion_scenecut_quantile}  diff_radius={analysis.motion_diff_radius}  downscale={analysis.downscale_height}px"
+            "Config: step=[[value]]{analysis.step}[[/]]  method=[[value]]{analysis.motion_method}[[/]]  scenecut_q=[[value]]{analysis.motion_scenecut_quantile}[[/]]  diff_radius=[[value]]{analysis.motion_diff_radius}[[/]]  downscale=[[value]]{analysis.downscale_height}[[/]][[unit]]px[[/]]"
           ]
         },
         {
           "subtitle": "Plan",
           "lines": [
-            "Dark={analysis.counts.dark}  Bright={analysis.counts.bright}  Motion={analysis.counts.motion}  Random={analysis.counts.random}  User={analysis.counts.user}  sep={analysis.screen_separation_sec:.1f}s  Seed={analysis.random_seed}"
+            "Plan: Dark=[[value]]{analysis.counts.dark}[[/]]  Bright=[[value]]{analysis.counts.bright}[[/]]  Motion=[[value]]{analysis.counts.motion}[[/]]  Random=[[value]]{analysis.counts.random}[[/]]  User=[[value]]{analysis.counts.user}[[/]]  sep=[[value]]{analysis.screen_separation_sec:.1f}[[/]][[unit]]s[[/]]  Seed=[[value]]{analysis.random_seed}[[/]]"
           ]
         },
         {
           "type": "progress",
           "progress_id": "analyze_bar",
-          "right_label": "{progress.fps} fps | ETA {progress.eta_tc} | elapsed {progress.elapsed_tc}"
+          "right_label": "[[value]]{progress.fps:.1f}[[/]] [[unit]]fps[[/]] | ETA [[value]]{progress.eta_tc}[[/]] | elapsed [[value]]{progress.elapsed_tc}[[/]]"
         }
       ]
     },
@@ -133,14 +162,34 @@
       "type": "group",
       "title_badge": "[RENDER]",
       "blocks": [
-        { "subtitle": "Writer", "lines": ["writer={render.writer}  out_dir={render.out_dir.e}  add_frame_info={render.add_frame_info}"] },
-        { "subtitle": "Canvas", "lines": ["single_res={render.single_res|tallest}  upscale={render.upscale}  crop=mod{render.mod_crop}  letterbox_aware={render.letterbox_pillarbox_aware}  pad={render.center_pad},tol={render.letterbox_px_tolerance}px"] },
-        { "subtitle": "Tonemap", "lines": ["curve={tonemap.tone_curve}  dpd={tonemap.dynamic_peak_detection}  target={tonemap.target_nits}nits  verify_luma_thresh={tonemap.verify_luma_threshold}"] },
-        { "subtitle": "Overlay", "lines": ["enabled={overlay.enabled}  template=\"{overlay.template}\"  mode={overlay.mode}"] },
+        {
+          "subtitle": "Writer",
+          "lines": [
+            "writer=[[key]]writer[[/]]=[[value]]{render.writer}[[/]]  out_dir=[[key]]out_dir[[/]]=[[path]]{render.out_dir.e}[[/]]  add_frame_info=[[key]]add_frame_info[[/]]=[[value]]{render.add_frame_info}[[/]]"
+          ]
+        },
+        {
+          "subtitle": "Canvas",
+          "lines": [
+            "single_res=[[value]]{render.single_res|tallest}[[/]] [[unit]]px[[/]]  upscale=[[value]]{render.upscale}[[/]]  crop=mod[[value]]{render.mod_crop}[[/]]  letterbox_aware=[[value]]{render.letterbox_pillarbox_aware}[[/]]  pad=[[value]]{render.center_pad}[[/]],[[unit]]tol={render.letterbox_px_tolerance}[[/]][[unit]]px[[/]]"
+          ]
+        },
+        {
+          "subtitle": "Tonemap",
+          "lines": [
+            "curve=[[value]]{tonemap.tone_curve}[[/]]  dpd=[[value]]{tonemap.dynamic_peak_detection}[[/]]  target=[[value]]{tonemap.target_nits}[[/]][[unit]]nits[[/]]  verify_luma_thresh=[[value]]{tonemap.verify_luma_threshold}[[/]]  verify_delta=[[value]]{verify.delta.max}[[/]]"
+          ]
+        },
+        {
+          "subtitle": "Overlay",
+          "lines": [
+            "enabled=[[value]]{overlay.enabled}[[/]]  template=\"[[value]]{overlay.template}[[/]]\"  mode=[[value]]{overlay.mode}[[/]]"
+          ]
+        },
         {
           "type": "progress",
           "progress_id": "render_bar",
-          "right_label": "{progress.current}/{progress.total} | {progress.fps} fps | ETA {progress.eta_tc} | elapsed {progress.elapsed_tc}"
+          "right_label": "[[value]]{progress.current}[[/]]/[[value]]{progress.total}[[/]] | [[value]]{progress.fps:.1f}[[/]] [[unit]]fps[[/]] | ETA [[value]]{progress.eta_tc}[[/]] | elapsed [[value]]{progress.elapsed_tc}[[/]]"
         }
       ]
     },
@@ -154,7 +203,7 @@
       "type": "table",
       "title_badge": "[WARNINGS]",
       "group_by": "warning.type",
-      "row_template": "• {warning.type}  — {warning.count} occurrence(s){warning.labels?`: ${warning.labels}`:''}",
+      "row_template": "• [[warn]]{warning.type}[[/]] — [[value]]{warning.count}[[/]] occurrence(s){warning.labels?`: [[dim]]${warning.labels}[[/]]`:''}",
       "fold_labels": { "head": 2, "tail": 1, "when": "!verbose" }
     },
     {
@@ -162,14 +211,14 @@
       "type": "list",
       "title_badge": "[SUMMARY]",
       "items": [
-        "• Clips: {clips.count}  Window: lead={window.ignore_lead_seconds:.2f}s trail={window.ignore_trail_seconds:.2f}s  step={analysis.step} downscale={analysis.downscale_height}px",
-        "• Align: audio={audio_alignment.enabled}  offsets={audio_alignment.offsets_sec:+.3f}s  file={audio_alignment.offsets_filename.e}",
-        "• Plan: Dark={analysis.counts.dark} Bright={analysis.counts.bright} Motion={analysis.counts.motion} Random={analysis.counts.random} User={analysis.counts.user}  sep={analysis.screen_separation_sec:.1f}s",
-        "• Canvas: single_res={render.single_res|tallest} upscale={render.upscale} crop=mod{render.mod_crop} pad={render.center_pad}",
-        "• Tonemap: {tonemap.tone_curve}@{tonemap.target_nits}nits dpd={tonemap.dynamic_peak_detection}  verify≤{tonemap.verify_luma_threshold}",
-        "• Output: {render.out_dir.e}  compression={render.compression}",
-        "• Cache: {cache.file}  {cache.status}",
-        "Output frames: {analysis.output_frame_count}  e.g., [{analysis.output_frames_preview}]  (full list in JSON{verbose?' and above':''})"
+        "• Clips:[[value]]{clips.count}[[/]]  Window: lead=[[value]]{window.ignore_lead_seconds:.2f}[[/]][[unit]]s[[/]] trail=[[value]]{window.ignore_trail_seconds:.2f}[[/]][[unit]]s[[/]]  step=[[value]]{analysis.step}[[/]] downscale=[[value]]{analysis.downscale_height}[[/]][[unit]]px[[/]]",
+        "• Align: audio=[[value]]{audio_alignment.enabled}[[/]]  offsets=[[value]]{audio_alignment.offsets_sec:+.3f}[[/]][[unit]]s[[/]]  file=[[path]]{audio_alignment.offsets_filename.e}[[/]]",
+        "• Plan: Dark=[[value]]{analysis.counts.dark}[[/]] Bright=[[value]]{analysis.counts.bright}[[/]] Motion=[[value]]{analysis.counts.motion}[[/]] Random=[[value]]{analysis.counts.random}[[/]] User=[[value]]{analysis.counts.user}[[/]]  sep=[[value]]{analysis.screen_separation_sec:.1f}[[/]][[unit]]s[[/]]",
+        "• Canvas: single_res=[[value]]{render.single_res|tallest}[[/]] [[unit]]px[[/]] upscale=[[value]]{render.upscale}[[/]] crop=mod[[value]]{render.mod_crop}[[/]] pad=[[value]]{render.center_pad}[[/]]",
+        "• Tonemap: [[value]]{tonemap.tone_curve}[[/]]@[[value]]{tonemap.target_nits}[[/]][[unit]]nits[[/]] dpd=[[value]]{tonemap.dynamic_peak_detection}[[/]]  verify≤[[value]]{tonemap.verify_luma_threshold}[[/]]  Δ=[[value]]{verify.delta.max}[[/]]",
+        "• Output: [[path]]{render.out_dir.e}[[/]]  compression=[[value]]{render.compression}[[/]]",
+        "• Cache: [[path]]{cache.file}[[/]]  status=[[value]]{cache.status}[[/]]",
+        "Output frames: [[value]]{analysis.output_frame_count}[[/]]  [[dim]][{analysis.output_frames_preview}][[/]]  (full list in JSON{verbose?' and above':''})"
       ]
     }
   ],
