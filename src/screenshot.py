@@ -20,6 +20,167 @@ _INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 logger = logging.getLogger(__name__)
 
 
+_SELECTION_LABELS = {
+    "dark": "Dark",
+    "bright": "Bright",
+    "motion": "Motion",
+    "user": "User",
+    "random": "Random",
+}
+
+
+def _format_dimensions(width: int, height: int) -> str:
+    return f"{int(width)} \u00D7 {int(height)}"
+
+
+def _format_resolution_summary(plan: GeometryPlan) -> str:
+    original_w = int(plan["cropped_w"])
+    original_h = int(plan["cropped_h"])
+    final_w, final_h = plan["final"]
+    original = _format_dimensions(original_w, original_h)
+    target = _format_dimensions(final_w, final_h)
+    if final_w == original_w and final_h == original_h:
+        return f"{original}  (native)"
+    return f"{original} \u2192 {target}  (original \u2192 target)"
+
+
+def _coerce_luminance_values(value: Any) -> List[float]:
+    if value is None:
+        return []
+    if isinstance(value, (int, float)):
+        return [float(value)]
+    if isinstance(value, bytes):
+        try:
+            value = value.decode("utf-8", "ignore")
+        except Exception:
+            return []
+    if isinstance(value, str):
+        matches = re.findall(r"[-+]?\d+(?:\.\d+)?", value)
+        return [float(match) for match in matches]
+    if isinstance(value, (list, tuple)):
+        results: List[float] = []
+        for item in value:
+            results.extend(_coerce_luminance_values(item))
+        return results
+    return []
+
+
+def _extract_mastering_display_luminance(props: Mapping[str, Any]) -> tuple[Optional[float], Optional[float]]:
+    min_keys = (
+        "_MasteringDisplayMinLuminance",
+        "MasteringDisplayMinLuminance",
+        "MasteringDisplayLuminanceMin",
+    )
+    max_keys = (
+        "_MasteringDisplayMaxLuminance",
+        "MasteringDisplayMaxLuminance",
+        "MasteringDisplayLuminanceMax",
+    )
+
+    min_value: Optional[float] = None
+    max_value: Optional[float] = None
+
+    for key in min_keys:
+        if key in props:
+            values = _coerce_luminance_values(props.get(key))
+            if values:
+                min_value = values[0]
+                break
+    for key in max_keys:
+        if key in props:
+            values = _coerce_luminance_values(props.get(key))
+            if values:
+                max_value = values[0]
+                break
+
+    if min_value is None or max_value is None:
+        combined_keys = ("_MasteringDisplayLuminance", "MasteringDisplayLuminance")
+        for key in combined_keys:
+            values = _coerce_luminance_values(props.get(key))
+            if len(values) >= 2:
+                if min_value is None:
+                    min_value = min(values)
+                if max_value is None:
+                    max_value = max(values)
+                if min_value is not None and max_value is not None:
+                    break
+
+    return min_value, max_value
+
+
+def _format_luminance_value(value: float) -> str:
+    if value < 1.0:
+        text = f"{value:.4f}"
+        if "." in text:
+            text = text.rstrip("0").rstrip(".")
+        return text or "0"
+    return f"{value:.1f}"
+
+
+def _format_mastering_display_line(props: Mapping[str, Any]) -> str:
+    min_value, max_value = _extract_mastering_display_luminance(props)
+    if min_value is None or max_value is None:
+        return "MDL: Insufficient data"
+    return (
+        f"MDL: min: {_format_luminance_value(min_value)} cd/m², "
+        f"max: {_format_luminance_value(max_value)} cd/m²"
+    )
+
+
+def _format_measurement_line(measurement: Optional[tuple[Optional[float], Optional[float]]]) -> str:
+    if not measurement:
+        return "Measurement: Insufficient data"
+    max_value, avg_value = measurement
+    if max_value is None or avg_value is None:
+        return "Measurement: Insufficient data"
+    max_text = f"{int(round(max_value))}"
+    avg_text = f"{avg_value:.1f}"
+    return f"Measurement MAX/AVG: {max_text}nits / {avg_text}nits"
+
+
+def _normalize_selection_label(label: Optional[str]) -> str:
+    if not label:
+        return "(unknown)"
+    normalized = label.strip().lower()
+    if not normalized:
+        return "(unknown)"
+    mapped = _SELECTION_LABELS.get(normalized)
+    if mapped:
+        return mapped
+    return "(unknown)"
+
+
+def _format_selection_line(selection_label: Optional[str]) -> str:
+    return f"Frame Selection Type: {_normalize_selection_label(selection_label)}"
+
+
+def _compose_overlay_text(
+    base_text: Optional[str],
+    color_cfg: ColorConfig,
+    plan: GeometryPlan,
+    selection_label: Optional[str],
+    source_props: Mapping[str, Any],
+    measurement: Optional[tuple[Optional[float], Optional[float]]] = None,
+) -> Optional[str]:
+    if not bool(getattr(color_cfg, "overlay_enabled", True)):
+        return None
+
+    mode = str(getattr(color_cfg, "overlay_mode", "minimal")).strip().lower()
+    if mode != "diagnostic":
+        return base_text
+
+    lines: List[str] = []
+    if base_text:
+        lines.append(base_text)
+
+    lines.append(_format_resolution_summary(plan))
+    lines.append(_format_mastering_display_line(source_props))
+    lines.append(_format_measurement_line(measurement))
+    lines.append(_format_selection_line(selection_label))
+
+    return "\n".join(lines)
+
+
 def _ensure_rgb24(core: Any, clip: Any, frame_idx: int) -> Any:
     try:
         import vapoursynth as vs  # type: ignore
@@ -977,7 +1138,8 @@ def generate_screenshots(
         raw_label, safe_label = _derive_labels(file_path, meta)
 
         overlay_state = overlay_states[clip_index]
-        overlay_text = result.overlay_text
+        base_overlay_text = getattr(result, "overlay_text", None)
+        source_props = getattr(result, "source_props", {})
 
         for frame in frames:
             frame_idx = int(frame)
@@ -1007,6 +1169,13 @@ def generate_screenshots(
             selection_label = frame_labels.get(frame_idx) if frame_labels else None
             if selection_label is not None:
                 logger.debug('Selection label for frame %s: %s', frame_idx, selection_label)
+            overlay_text = _compose_overlay_text(
+                base_overlay_text,
+                color_cfg,
+                plan,
+                selection_label,
+                source_props,
+            )
             actual_idx, was_clamped = _clamp_frame_index(result.clip, mapped_idx)
             if was_clamped:
                 logger.debug(

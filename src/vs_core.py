@@ -1038,9 +1038,8 @@ def process_clip_for_screenshot(
             "Tonemapping Algorithm: {tone_curve} dpd = {dynamic_peak_detection} dst = {target_nits} nits",
         )
     )
-    overlay_mode = str(getattr(cfg, "overlay_mode", "minimal")).strip().lower()
     if overlay_enabled:
-        base_overlay = _format_overlay_text(
+        overlay_text = _format_overlay_text(
             overlay_template,
             tone_curve=tone_curve,
             dpd=dpd,
@@ -1048,21 +1047,6 @@ def process_clip_for_screenshot(
             preset=preset,
             reason="HDR",
         )
-        if overlay_mode == "diagnostic":
-            source_summary = (
-                f"Source: matrix={_describe_code(matrix_in, _MATRIX_CODE_LABELS)} "
-                f"transfer={_describe_code(transfer_in, _TRANSFER_CODE_LABELS)} "
-                f"primaries={_describe_code(primaries_in, _PRIMARIES_CODE_LABELS)} "
-                f"range={_describe_code(color_range_in, _RANGE_CODE_LABELS)}"
-            )
-            tonemap_summary = (
-                f"Tonemap: preset={preset} curve={tone_curve} dpd={'on' if dpd else 'off'} "
-                f"target={target_nits}nits dst_min={dst_min}"
-            )
-            diagnostic_lines = [line for line in (base_overlay, source_summary, tonemap_summary) if line]
-            overlay_text = "\n".join(diagnostic_lines)
-        else:
-            overlay_text = base_overlay
         log.info("[OVERLAY] %s using text '%s'", file_name, overlay_text)
 
     log.info(

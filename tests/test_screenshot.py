@@ -16,7 +16,12 @@ class FakeClip:
 @pytest.fixture(autouse=True)
 def _stub_process_clip(monkeypatch):
     def _stub(clip, file_name, color_cfg, **kwargs):
-        return types.SimpleNamespace(clip=clip, overlay_text=None, verification=None)
+        return types.SimpleNamespace(
+            clip=clip,
+            overlay_text=None,
+            verification=None,
+            source_props={},
+        )
 
     monkeypatch.setattr(screenshot.vs_core, "process_clip_for_screenshot", _stub)
 
@@ -148,6 +153,72 @@ def test_generate_screenshots_filenames(tmp_path, monkeypatch):
         assert entry["requested"] == entry["frame"]
 
     assert len(calls) == len(frames)
+
+
+def _make_plan(
+    width=1920,
+    height=1080,
+    cropped_w=1920,
+    cropped_h=1080,
+    scaled=(1920, 1080),
+    pad=(0, 0, 0, 0),
+    final=(1920, 1080),
+):
+    return {
+        "width": width,
+        "height": height,
+        "crop": (0, 0, 0, 0),
+        "cropped_w": cropped_w,
+        "cropped_h": cropped_h,
+        "scaled": scaled,
+        "pad": pad,
+        "final": final,
+    }
+
+
+def test_compose_overlay_text_minimal_returns_base_block():
+    color_cfg = ColorConfig(overlay_mode="minimal")
+    plan = _make_plan()
+    base_text = "Tonemapping Algorithm: bt.2390 dpd = 1 dst = 100 nits"
+
+    composed = screenshot._compose_overlay_text(
+        base_text,
+        color_cfg,
+        plan,
+        selection_label="Dark",
+        source_props={},
+    )
+
+    assert composed == base_text
+
+
+def test_compose_overlay_text_diagnostic_appends_required_lines():
+    color_cfg = ColorConfig(overlay_mode="diagnostic")
+    plan = _make_plan(
+        scaled=(3840, 2160),
+        final=(3840, 2160),
+    )
+    base_text = "Tonemapping Algorithm: bt.2390 dpd = 1 dst = 100 nits"
+    props = {
+        "_MasteringDisplayMinLuminance": 0.0001,
+        "_MasteringDisplayMaxLuminance": 1000.0,
+    }
+
+    composed = screenshot._compose_overlay_text(
+        base_text,
+        color_cfg,
+        plan,
+        selection_label="Dark",
+        source_props=props,
+    )
+
+    assert composed is not None
+    lines = composed.split("\n")
+    assert lines[0] == base_text
+    assert lines[1] == "1920 × 1080 → 3840 × 2160  (original → target)"
+    assert lines[2] == "MDL: min: 0.0001 cd/m², max: 1000.0 cd/m²"
+    assert lines[3] == "Measurement: Insufficient data"
+    assert lines[4] == "Frame Selection Type: Dark"
 
 
 def test_compression_flag_passed(tmp_path, monkeypatch):

@@ -2486,6 +2486,7 @@ def run_cli(
                     cfg.color,
                     trim_offsets=[plan.trim_start for plan in plans],
                     progress_callback=advance_render,
+                    frame_labels=frame_categories,
                     warnings_sink=collected_warnings,
                     verification_sink=verification_records,
                 )
