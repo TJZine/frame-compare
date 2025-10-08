@@ -1,101 +1,79 @@
-## General Task
- - implement these overlay updates
-## Scope (presentation only)
-* Do **not** change frame selection, rendering, or file outputs.
-* Only affect overlay text content based on a config switch.
-* Respect all existing behavior in **minimal** mode.
+## Scope
+
+Presentation-only. Do **not** change analysis, selection, rendering, upload logic, or flags. Apply purely to how multi-block sections render (primarily **[RENDER]**).
 
 ---
 
-## Config
+## Objectives
 
-Add a mode switch (default should preserve current behavior):
+1. **Subheading emphasis**
 
-```toml
-[color]
-overlay_enabled = true
-overlay_mode = "minimal"      # "minimal" (today’s overlay) or "diagnostic"
-```
+   * In **[RENDER]**, render the subheadings **Writer**, **Canvas**, **Tonemap**, and **Overlay** with:
 
-* When `overlay_enabled=false`, render nothing (unchanged).
-* When `overlay_mode="minimal"`, render **exactly** today’s overlay—**no** extra lines.
-* When `overlay_mode="diagnostic"`, render **today’s overlay verbatim** + the extra lines specified below.
+     * A subtle prefix glyph: `›` (ASCII fallback `>` when `--no-color`).
+     * **Bold + accent color** (see Theme roles below).
+     * A **thin divider** line directly underneath (cropped to content width).
+   * Keep key/value lines that follow **unchanged** in content but with improved alignment/color (see below).
 
----
+2. **Spacing & alignment**
 
-## Behavior by mode
+   * Insert **one blank line** between each sub-block.
+   * Within each sub-block, **right-align numeric columns** (frame counts, fps, px, nits, thresholds).
+   * **Dim** units (`s`, `fps`, `px`, `nits`, `cd/m²`) and long paths; keep keys slightly accented; values bright.
 
-### minimal (unchanged)
+3. **Degrade gracefully**
 
-* Print **exactly** the current overlay (title and any existing fields).
-* If the current overlay includes a tonemap summary line, keep it **once**.
+   * `--no-color`: show plain text (`>` prefix, ASCII `-----` rule).
+   * **Narrow terminals** (`COLUMNS < 80`): omit the rule line but keep accent/bold and spacing consistent.
 
-### diagnostic (extended)
+4. **Ensure all subheading sections are given the same treatment**
 
-* First, print **the same minimal overlay block** *without modification*.
-* Then append **these lines** (each on its own line, in this order):
-
-1. **Resolution / Scaling**
-
-   * If resized:
-     `1920 × 1080 → 3840 × 2160  (original → target)`
-     (Use `src_w × src_h` → `dst_w × dst_h`; `×` character, not `x`.)
-   * If not resized:
-     `3840 × 2160  (native)`
-
-2. **HDR Mastering Display Luminance (MDL)**
-
-   * `MDL: min: <min_nits> cd/m², max: <max_nits> cd/m²`
-   * If absent: `MDL: Insufficient data`
-
-3. **Per-frame Measurement**
-
-   * `Measurement MAX/AVG: <max_nits>nits / <avg_nits>nits`
-   * If unavailable: `Measurement: Insufficient data`
-
-4. **Frame Selection Type**
-
-   * `Frame Selection Type: <Dark|Bright|Motion|User|Random>`
-   * If unknown: `Frame Selection Type: (unknown)` (or omit consistently)
-
-> **Do not** append any extra tonemap/settings line in diagnostic; the overlay must contain **at most one** tonemap summary (the one already present in minimal, if any).
+   * Apply the same subheading treatment to other multi-block sections (e.g., `[PREPARE]` blocks like Trim/Window/Overrides).
+   * Add a small **legend** in `--verbose` explaining tokens and dimming.
 
 
-## Data sources (expected)
+## Theme roles (extend existing palette)
 
-* **Resolution/Scale:**
+Add (or reuse if present):
 
-  * `original` = decoded frame dims before canvas/upscale/pad.
-  * `target`   = final canvas/output dims used for the screenshot.
-* **MDL:** ST.2086 mastering metadata (`minLuminance`, `maxLuminance`), reported in **cd/m²** (nits). If missing, print “Insufficient data”.
-* **Measurement:** display-referred luminance for the *current* frame (post-pipeline, same stage used for verification/tonemap checks). If you don’t have a cheap path, print “Insufficient data”.
-* **Frame Selection Type:** the category that chose this frame (Dark/Bright/Motion/User/Random) from the selection pipeline.
+* `accent_subhead` — color for subheading titles (e.g., blue or section-appropriate accent).
+* `rule_dim` — dim color for the divider line.
+
+*Example mapping (do not hardcode exact codes here; use your renderer’s color map):*
+
+* `accent_subhead`: blue (or `accent_render` if already defined)
+* `rule_dim`: grey.dim
 
 
-## Formatting rules
+## Rendering rules (exact behavior)
 
-* Use the **multiplication symbol** `×` (U+00D7) between width and height.
-* **Arrow** between original and target: `→` (U+2192).
-* **Units:** `cd/m²` (fallback `cd/m2` if font lacks superscript).
-* **Rounding:**
+* Subheading line format:
 
-  * MDL min/max: if `< 1.0`, show up to **4 decimals** (e.g., `0.0001`); otherwise **1 decimal** (e.g., `1000.0`).
-  * Measurement: `MAX` → **integer**; `AVG` → **one decimal** (e.g., `192nits / 4.1nits`).
-* **Wording/Order:** exact strings above; single space around arrows and inside parentheses.
+  * Colored/bold: `[[accent_subhead]]› Writer[[/]]`
+    (use the same for **Canvas**, **Tonemap**, **Overlay**)
+* Divider line:
 
-## Guardrails
+  * Next line prints a thin rule using box-drawing `─` repeated to match the **content width** of the widest key/value line in that sub-block (cap at terminal width).
+  * In `--no-color` or non-UTF environments, replace with ASCII `-`.
+* Body lines immediately follow (no extra blank line before the first body line).
+* After each sub-block, insert **one blank line**.
 
-* **No duplicates:** if minimal already prints a resolution line in a different format, prefer **one standardized** resolution line (as above) and suppress the duplicate **only in diagnostic mode**.
-* **Missing data:** always print “Insufficient data” rather than `0` or `N/A`.
-* **Performance:** do not add heavy reprocessing; if measurement isn’t readily available, use the wording fallback.
+
+## Alignment & micro-typography
+
+* Numbers right-aligned **within each block’s column**; padding spaces are **not** colored.
+* **Units** rendered dim; **paths** middle-ellipsized and dim.
+* Keep existing right-label on progress bars (`{fps} fps | ETA | elapsed`) unchanged.
+
 
 ## Acceptance criteria
 
-* With `overlay_mode="minimal"`: output is **bit-for-bit identical** to today’s overlay (title unchanged; nothing extra).
-* With `overlay_mode="diagnostic"`: the minimal overlay prints first (unchanged), followed by **exactly four** added lines in the order listed.
-* **Resolution** line shows `original → target` or `(native)` correctly.
-* **MDL** and **Measurement** lines follow the formatting/rounding rules or show “Insufficient data”.
-* **Frame Selection Type** prints one of the five categories (or the agreed fallback).
-* There is **no duplication** of tonemap settings; if minimal contains one tonemap line, the final overlay still has **one** such line.
+* In **[RENDER]**, each subheading (**Writer/Canvas/Tonemap/Overlay**) appears:
 
-
+  * With `›` prefix, bold, and `accent_subhead` color.
+  * With a one-line **divider** underneath (suppressed on narrow terminals).
+  * Followed by its body lines, then a **single blank line** before the next sub-block.
+* Keys/values retain current wording; only emphasis/alignment/spacing change.
+* Units and paths are **dim**; numbers are aligned; no text is lost when truncating paths.
+* `--no-color`: subheadings readable with `>` prefix and ASCII rule; spacing preserved.
+* No changes to content outside **[RENDER]** (unless you opt to apply the same pattern to other multi-block sections later).
