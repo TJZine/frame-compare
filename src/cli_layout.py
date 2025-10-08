@@ -463,6 +463,40 @@ class CliLayoutRenderer:
             return None
         return self._role_tokens.get(role)
 
+    def _rich_style_from_token(self, token: Optional[str]) -> Optional[str]:
+        if not token:
+            return None
+        parts = token.split(".")
+        if not parts:
+            return None
+        color = parts[0]
+        modifiers = parts[1:]
+        rich_modifiers: List[str] = []
+        bright = False
+        for modifier in modifiers:
+            if modifier == "bright":
+                bright = True
+            elif modifier == "dim":
+                rich_modifiers.append("dim")
+            elif modifier == "bold":
+                rich_modifiers.append("bold")
+            else:
+                rich_modifiers.append(modifier.replace(".", " "))
+        base_color = color
+        if bright:
+            if color in {"black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"}:
+                base_color = f"bright_{color}"
+            elif color in {"grey", "gray"}:
+                base_color = "bright_black"
+            elif color == "purple":
+                base_color = "purple"
+                if "bold" not in rich_modifiers:
+                    rich_modifiers.append("bold")
+            else:
+                base_color = color
+        rich_modifiers.append(base_color)
+        return " ".join(rich_modifiers).strip()
+
     def _resolve_section_accent(self, section: Mapping[str, Any], badge: Optional[str] = None) -> Optional[str]:
         explicit = section.get("accent_role")
         if isinstance(explicit, str) and explicit.strip():
@@ -749,7 +783,16 @@ class CliLayoutRenderer:
         formatted = self._format_value(value, fmt_spec)
         highlight_role = self._pick_highlight(raw_path.strip(), value, context)
         if highlight_role and formatted:
-            return f"[[{highlight_role}]]{formatted}[[/]]"
+            leading_match = re.match(r"\s*", formatted)
+            trailing_match = re.search(r"\s*$", formatted)
+            lead = leading_match.group(0) if leading_match else ""
+            trail = trailing_match.group(0) if trailing_match else ""
+            core_start = len(lead)
+            core_end = len(formatted) - len(trail)
+            core = formatted[core_start:core_end] if core_end > core_start else ""
+            if not core:
+                return formatted
+            return f"{lead}[[{highlight_role}]]{core}[[/]]{trail}"
         return formatted
 
     def _render_text(self, template: str, context: LayoutContext) -> str:
@@ -1073,12 +1116,13 @@ class CliLayoutRenderer:
         accent_role = info.get("accent")
 
         bar_style_token = self._role_style(accent_role or "accent")
-        if bar_style_token:
+        rich_bar_style = self._rich_style_from_token(bar_style_token)
+        if rich_bar_style:
             bar_column = BarColumn(
-                style=bar_style_token,
-                complete_style=bar_style_token,
-                finished_style=bar_style_token,
-                pulse_style=bar_style_token,
+                style=rich_bar_style,
+                complete_style=rich_bar_style,
+                finished_style=rich_bar_style,
+                pulse_style=rich_bar_style,
             )
         else:
             bar_column = BarColumn()

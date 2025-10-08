@@ -1669,6 +1669,18 @@ def run_cli(
         "analysis": {},
         "render": {},
         "tonemap": {},
+        "verify": {
+            "count": 0,
+            "threshold": float(cfg.color.verify_luma_threshold),
+            "delta": {
+                "max": None,
+                "average": None,
+                "frame": None,
+                "file": None,
+                "auto_selected": None,
+            },
+            "entries": [],
+        },
         "cache": {},
         "slowpics": {
             "enabled": bool(cfg.slowpics.auto_upload),
@@ -1707,6 +1719,7 @@ def run_cli(
         "render": json_tail.get("render", {}),
         "tonemap": json_tail.get("tonemap", {}),
         "overlay": json_tail.get("overlay", {}),
+        "verify": json_tail.get("verify", {}),
         "cache": json_tail["cache"],
         "slowpics": json_tail["slowpics"],
         "tmdb": {
@@ -2424,6 +2437,8 @@ def run_cli(
     reporter.update_values(layout_data)
     reporter.render_sections(["render"])
 
+    verification_records: List[Dict[str, Any]] = []
+
     try:
         if total_screens > 0:
             start_time = time.perf_counter()
@@ -2431,7 +2446,7 @@ def run_cli(
 
             reporter.update_progress_state(
                 "render_bar",
-                fps="0.00 fps",
+                fps=0.0,
                 eta_tc="--:--",
                 elapsed_tc="00:00",
                 current=0,
@@ -2453,7 +2468,7 @@ def run_cli(
                     eta_seconds = (remaining / fps_val) if fps_val > 0 else None
                     reporter.update_progress_state(
                         "render_bar",
-                        fps=f"{fps_val:7.2f} fps",
+                        fps=fps_val,
                         eta_tc=_format_clock(eta_seconds),
                         elapsed_tc=_format_clock(elapsed),
                         current=min(processed, total_screens),
@@ -2472,6 +2487,7 @@ def run_cli(
                     trim_offsets=[plan.trim_start for plan in plans],
                     progress_callback=advance_render,
                     warnings_sink=collected_warnings,
+                    verification_sink=verification_records,
                 )
 
                 if processed < total_screens:
@@ -2479,7 +2495,7 @@ def run_cli(
                     fps_val = processed / elapsed
                     reporter.update_progress_state(
                         "render_bar",
-                        fps=f"{fps_val:7.2f} fps",
+                        fps=fps_val,
                         eta_tc=_format_clock(0.0),
                         elapsed_tc=_format_clock(elapsed),
                         current=total_screens,
@@ -2498,12 +2514,45 @@ def run_cli(
                 trim_offsets=[plan.trim_start for plan in plans],
                 frame_labels=frame_categories,
                 warnings_sink=collected_warnings,
+                verification_sink=verification_records,
             )
     except ScreenshotError as exc:
         raise CLIAppError(
             f"Screenshot generation failed: {exc}",
             rich_message=f"[red]Screenshot generation failed:[/red] {exc}",
         ) from exc
+
+    verify_threshold = float(cfg.color.verify_luma_threshold)
+    if verification_records:
+        max_entry = max(verification_records, key=lambda item: item["maximum"])
+        verify_summary = {
+            "count": len(verification_records),
+            "threshold": verify_threshold,
+            "delta": {
+                "max": float(max_entry["maximum"]),
+                "average": float(max_entry["average"]),
+                "frame": int(max_entry["frame"]),
+                "file": str(max_entry["file"]),
+                "auto_selected": bool(max_entry["auto_selected"]),
+            },
+            "entries": verification_records,
+        }
+    else:
+        verify_summary = {
+            "count": 0,
+            "threshold": verify_threshold,
+            "delta": {
+                "max": None,
+                "average": None,
+                "frame": None,
+                "file": None,
+                "auto_selected": None,
+            },
+            "entries": [],
+        }
+
+    json_tail["verify"] = verify_summary
+    layout_data["verify"] = verify_summary
 
     slowpics_url: Optional[str] = None
     reporter.render_sections(["publish"])

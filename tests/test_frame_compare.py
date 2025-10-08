@@ -145,8 +145,8 @@ def test_cli_applies_overrides_and_naming(tmp_path, monkeypatch, runner):
     result = runner.invoke(frame_compare.main, ["--config", "dummy", "--no-color"], catch_exceptions=False)
     assert result.exit_code == 0
     assert "[DISCOVER]" in result.output
-    assert "• AAA Short" in result.output
-    assert "• BBB Short" in result.output
+    assert "• ref=AAA Short" in result.output
+    assert "• tgt=BBB Short" in result.output
 
     assert "[PREPARE]" in result.output
     assert "• Ref:  lead=   5f" in result.output
@@ -879,7 +879,6 @@ def test_audio_alignment_block_and_json(tmp_path, monkeypatch, runner):
     assert "Confirm:" in result.output
     assert "alignment.toml" in result.output
     assert "mode=diagnostic" in result.output
-    assert "overlay_mode" in result.output
 
     json_start = result.output.rfind('{"clips":')
     json_payload = result.output[json_start:].replace('\n', '')

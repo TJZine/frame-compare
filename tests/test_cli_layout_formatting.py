@@ -107,7 +107,16 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
             "verify_luma_threshold": 0.1,
         },
         "verify": {
-            "delta": {"max": 0.05}
+            "count": 1,
+            "threshold": 0.1,
+            "delta": {
+                "max": 0.05,
+                "average": 0.02,
+                "frame": 12,
+                "file": str(tmp_path / "ref.mkv"),
+                "auto_selected": True,
+            },
+            "entries": [],
         },
         "overlay": {
             "enabled": True,
@@ -220,6 +229,14 @@ def test_highlight_markup_and_spans(tmp_path, monkeypatch):
     wrapped = f"[[value]]{token_markup}[[/]]"
     colored_output = renderer._prepare_output(wrapped)
     assert colored_output == renderer._colorize("bool_true", "True")
+
+    padded_token = renderer._render_token("analysis.counts.motion:>5", context)
+    assert padded_token.startswith(" ")
+    padded_prepared = renderer._prepare_output(padded_token)
+    leading_spaces = len(padded_prepared) - len(padded_prepared.lstrip(" "))
+    assert leading_spaces > 0
+    numeric_segment = padded_prepared[leading_spaces:]
+    assert numeric_segment == renderer._colorize("accent_analyze", "4")
 
     renderer_no_color = _make_renderer(100)
     context_no_color = LayoutContext(values, flags, renderer=renderer_no_color)

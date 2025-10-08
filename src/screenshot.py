@@ -905,6 +905,7 @@ def generate_screenshots(
     frame_labels: Mapping[int, str] | None = None,
     alignment_maps: Sequence[Any] | None = None,
     warnings_sink: List[str] | None = None,
+    verification_sink: List[Dict[str, Any]] | None = None,
 ) -> List[str]:
     """Render screenshots for *frames* from each clip using configured writer."""
 
@@ -946,6 +947,16 @@ def generate_screenshots(
                 result.verification.average,
                 result.verification.maximum,
             )
+            if verification_sink is not None:
+                verification_sink.append(
+                    {
+                        "file": str(file_path),
+                        "frame": int(result.verification.frame),
+                        "average": float(result.verification.average),
+                        "maximum": float(result.verification.maximum),
+                        "auto_selected": bool(result.verification.auto_selected),
+                    }
+                )
 
     geometry = _plan_geometry([result.clip for result in processed_results], cfg)
 
