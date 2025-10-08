@@ -1,160 +1,101 @@
-### Goals
-
-1. Improve readability by **coloring values semantically** and **dimming glue text**.
-2. Add **rule-based highlights** (thresholds, anomalies, booleans) driven by the JSON spec—no hardcoded colors in code.
-3. Keep compatibility with `--no-color`, narrow terminals, and your current output order/strings.
-
----
-
-## A) Palette & roles (update the spec)
-
-Expand `theme.colors` to include phase accents + value semantics:
-
-```json
-"theme": {
-  "colors": {
-    "header": "cyan.bold",
-    "accent": "blue.bright",
-    "accent_prepare": "blue",
-    "accent_analyze": "purple.bright",
-    "accent_render": "magenta.bright",
-    "accent_publish": "green.bright",
-    "value": "white.bright",
-    "unit": "grey.dim",
-    "key": "blue",
-    "bool_true": "green",
-    "bool_false": "red",
-    "number_ok": "green",
-    "number_warn": "yellow",
-    "number_bad": "red",
-    "path": "grey.dim",
-    "success": "green",
-    "warn": "yellow",
-    "error": "red",
-    "dim": "grey.dim"
-  }
-}
-```
-
-> Keep 16-color fallbacks as before; if unsupported, the renderer must strip colors gracefully.
+## General Task
+ - implement these overlay updates
+## Scope (presentation only)
+* Do **not** change frame selection, rendering, or file outputs.
+* Only affect overlay text content based on a config switch.
+* Respect all existing behavior in **minimal** mode.
 
 ---
 
-## B) Inline style spans (tiny DSL)
+## Config
 
-Teach the renderer to parse **style spans** in templates:
+Add a mode switch (default should preserve current behavior):
 
-* `[[role]]text[[/]]` → wrap `text` with the ANSI for `role` (e.g., `value`, `unit`, `key`).
-* You can nest spans (inner takes precedence).
-* When `--no-color`, spans render as plain text.
+```toml
+[color]
+overlay_enabled = true
+overlay_mode = "minimal"      # "minimal" (today’s overlay) or "diagnostic"
+```
 
-**Examples inside templates:**
-
-* `step=[[value]]{analysis.step}[[/]]  downscale=[[value]]{analysis.downscale_height}[[/]][[unit]]px[[/]]`
-* `writer=[[key]]writer[[/]]=[[value]]{render.writer}[[/]]`
+* When `overlay_enabled=false`, render nothing (unchanged).
+* When `overlay_mode="minimal"`, render **exactly** today’s overlay—**no** extra lines.
+* When `overlay_mode="diagnostic"`, render **today’s overlay verbatim** + the extra lines specified below.
 
 ---
 
-## C) Rule-based highlights
+## Behavior by mode
 
-Add a new `highlights` block to the spec; renderer applies them **after** templating:
+### minimal (unchanged)
 
-```json
-"highlights": [
-  { "when": "isbool", "path": "audio_alignment.enabled", "true_role": "bool_true", "false_role": "bool_false" },
-  { "when": "gt", "path": "analysis.counts.motion", "value": 0, "role": "accent_analyze" },
-  { "when": "lt", "path": "render.fps", "value": 1.0, "role": "number_warn" },
-  { "when": "abs_gt", "path": "audio_alignment.offsets_sec", "value": 1.0, "role": "number_warn" },
-  { "when": "gt", "path": "verify.delta.max", "value": "{tonemap.verify_luma_threshold}", "role": "number_bad" }
-]
-```
+* Print **exactly** the current overlay (title and any existing fields).
+* If the current overlay includes a tonemap summary line, keep it **once**.
 
-* Each rule can target a specific **value occurrence** in a line by tokenizing `{path}` placeholders, or you can expose **named tokens** in context (e.g., `verify.delta.max`).
-* On a match, color **just the formatted value**, not the whole line.
+### diagnostic (extended)
 
----
+* First, print **the same minimal overlay block** *without modification*.
+* Then append **these lines** (each on its own line, in this order):
 
-## D) Phase accents by section
+1. **Resolution / Scaling**
 
-Apply section-specific accent roles:
+   * If resized:
+     `1920 × 1080 → 3840 × 2160  (original → target)`
+     (Use `src_w × src_h` → `dst_w × dst_h`; `×` character, not `x`.)
+   * If not resized:
+     `3840 × 2160  (native)`
 
-* `[DISCOVER]` / banner: `header`
-* `[PREPARE]`: `accent_prepare`
-* `[ANALYZE]`: `accent_analyze`
-* `[RENDER]`: `accent_render`
-* `[PUBLISH]`: `accent_publish`
+2. **HDR Mastering Display Luminance (MDL)**
 
-Keep body text neutral; only **keys** and **values** get color, **units** stay dim.
+   * `MDL: min: <min_nits> cd/m², max: <max_nits> cd/m²`
+   * If absent: `MDL: Insufficient data`
 
----
+3. **Per-frame Measurement**
 
-## E) Concrete edits to your current templates
+   * `Measurement MAX/AVG: <max_nits>nits / <avg_nits>nits`
+   * If unavailable: `Measurement: Insufficient data`
 
-1. **At-a-Glance lines** (make numbers pop, dim units):
+4. **Frame Selection Type**
 
-```
-Clips=[[value]]{clips.count}[[/]] • Step=[[value]]{analysis.step}[[/]] • Downscale=[[value]]{analysis.downscale_height}[[/]][[unit]]px[[/]] • Plan: Dark=[[value]]{analysis.counts.dark}[[/]] Bright=[[value]]{analysis.counts.bright}[[/]] Motion=[[value]]{analysis.counts.motion}[[/]]
-Window: lead=[[value]]{window.ignore_lead_seconds:.2f}[[/]][[unit]]s[[/]] trail=[[value]]{window.ignore_trail_seconds:.2f}[[/]][[unit]]s[[/]] • Align(audio)=[[value]]{audio_alignment.enabled}[[/]] [[unit]]({audio_alignment.offsets_sec:+.3f}s)[[/]]
-```
+   * `Frame Selection Type: <Dark|Bright|Motion|User|Random>`
+   * If unknown: `Frame Selection Type: (unknown)` (or omit consistently)
 
-2. **Prepare → Trim** (align numbers, dim units):
+> **Do not** append any extra tonemap/settings line in diagnostic; the overlay must contain **at most one** tonemap summary (the one already present in minimal, if any).
 
-```
-• Ref:  lead=[[value]]{trims.ref.lead_f:>4}[[/]][[unit]]f[[/]] ([[value]]{trims.ref.lead_s:>5.2f}[[/]][[unit]]s[[/]])  trail=[[value]]{trims.ref.trail_f:>4}[[/]][[unit]]f[[/]] ([[value]]{trims.ref.trail_s:>5.2f}[[/]][[unit]]s[[/]])
-```
 
-3. **Analyze/Render headers**:
+## Data sources (expected)
 
-```
-Config: step=[[value]]{analysis.step}[[/]]  method=[[value]]{analysis.motion_method}[[/]]  scenecut_q=[[value]]{analysis.motion_scenecut_quantile}[[/]]  diff_radius=[[value]]{analysis.motion_diff_radius}[[/]]  downscale=[[value]]{analysis.downscale_height}[[/]][[unit]]px[[/]]
-Tonemap: curve=[[value]]{tonemap.tone_curve}[[/]]  dpd=[[value]]{tonemap.dynamic_peak_detection}[[/]]  target=[[value]]{tonemap.target_nits}[[/]][[unit]]nits[[/]]  verify_luma_thresh=[[value]]{tonemap.verify_luma_threshold}[[/]]
-```
+* **Resolution/Scale:**
 
-4. **Publish title preview** (Phase 2): color final title:
+  * `original` = decoded frame dims before canvas/upscale/pad.
+  * `target`   = final canvas/output dims used for the screenshot.
+* **MDL:** ST.2086 mastering metadata (`minLuminance`, `maxLuminance`), reported in **cd/m²** (nits). If missing, print “Insufficient data”.
+* **Measurement:** display-referred luminance for the *current* frame (post-pipeline, same stage used for verification/tonemap checks). If you don’t have a cheap path, print “Insufficient data”.
+* **Frame Selection Type:** the category that chose this frame (Dark/Bright/Motion/User/Random) from the selection pipeline.
 
-```
-final="[[accent_publish]]{slowpics.title.final}[[/]]"
-```
 
-5. **Warnings table**: color the **type** (yellow) and **counts** (value):
+## Formatting rules
 
-```
-• [[warn]]{warning.type}[[/]] — [[value]]{warning.count}[[/]] occurrence(s){warning.labels?`: ${warning.labels}`:''}
-```
+* Use the **multiplication symbol** `×` (U+00D7) between width and height.
+* **Arrow** between original and target: `→` (U+2192).
+* **Units:** `cd/m²` (fallback `cd/m2` if font lacks superscript).
+* **Rounding:**
 
----
+  * MDL min/max: if `< 1.0`, show up to **4 decimals** (e.g., `0.0001`); otherwise **1 decimal** (e.g., `1000.0`).
+  * Measurement: `MAX` → **integer**; `AVG` → **one decimal** (e.g., `192nits / 4.1nits`).
+* **Wording/Order:** exact strings above; single space around arrows and inside parentheses.
 
-## F) Progress bars (subtle color)
+## Guardrails
 
-* Bar itself uses the **section accent**; the **right label** dims units and highlights changing numbers:
+* **No duplicates:** if minimal already prints a resolution line in a different format, prefer **one standardized** resolution line (as above) and suppress the duplicate **only in diagnostic mode**.
+* **Missing data:** always print “Insufficient data” rather than `0` or `N/A`.
+* **Performance:** do not add heavy reprocessing; if measurement isn’t readily available, use the wording fallback.
 
-  * Example: `[[value]]11.7[[/]] [[unit]]fps[[/]] | ETA [[value]]00:00:00[[/]] | elapsed [[value]]00:00:37[[/]]`
+## Acceptance criteria
 
----
+* With `overlay_mode="minimal"`: output is **bit-for-bit identical** to today’s overlay (title unchanged; nothing extra).
+* With `overlay_mode="diagnostic"`: the minimal overlay prints first (unchanged), followed by **exactly four** added lines in the order listed.
+* **Resolution** line shows `original → target` or `(native)` correctly.
+* **MDL** and **Measurement** lines follow the formatting/rounding rules or show “Insufficient data”.
+* **Frame Selection Type** prints one of the five categories (or the agreed fallback).
+* There is **no duplication** of tonemap settings; if minimal contains one tonemap line, the final overlay still has **one** such line.
 
-## G) Accessibility & contrast
 
-* Add `theme.options.color_blind_safe=true` to switch the palette to **cyan/blue/purple/orange** (avoid red/green only).
-* Never rely on color alone: keep **tokens** (`✓ ! ✗`) and keywords (`WARN`, `ERROR`) visible.
-
----
-
-## H) Acceptance criteria
-
-* Values that users tune (step, downscale, window seconds, tonemap target) render with the **`value`** color; units (`s`, `px`, `nits`) are **dim**.
-* Booleans (e.g., `overlay.enabled`, `audio_alignment.enabled`) are **green “true”** / **red “false”**.
-* Offsets show **sign-aware** coloring: positive red-tinted if `abs(offset) > 1s` (rule), neutral otherwise.
-* Verify deltas beyond `verify_luma_threshold` are **red**; near (±10%) are **yellow**.
-* Each phase badge uses its accent; body text stays neutral.
-* `--no-color` renders clean ASCII; `--color-blind-safe` swaps red/green semantics to orange/blue.
-* Wide vs narrow terminals render identically except for wrapping; colors never split tokens mid-word.
-
----
-
-## I) Quick “beauty” tweaks (small wins)
-
-* **Dim file paths** everywhere (`path` role).
-* **Right-align** all numeric columns inside a block; color the digits, not the padding.
-* **Space rhythm**: one blank line before `[ANALYZE]` and `[RENDER]`, none between their header and progress bar.
-
----
