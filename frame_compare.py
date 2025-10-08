@@ -2895,11 +2895,18 @@ def main(
         slowpics_block.setdefault("shortcut_path", None)
         slowpics_block.setdefault("url", None)
 
-    if json_pretty:
-        json_output = json.dumps(json_tail, indent=2)
-    else:
-        json_output = json.dumps(json_tail, separators=(",", ":"))
-    print(json_output)
+    cli_emit_json_tail = True
+    try:
+        cli_emit_json_tail = bool(getattr(cfg.cli, "emit_json_tail"))
+    except Exception:
+        cli_emit_json_tail = True
+
+    if cli_emit_json_tail:
+        if json_pretty:
+            json_output = json.dumps(json_tail, indent=2)
+        else:
+            json_output = json.dumps(json_tail, separators=(",", ":"))
+        print(json_output)
 
 
 if __name__ == "__main__":

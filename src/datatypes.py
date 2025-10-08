@@ -117,6 +117,13 @@ class NamingConfig:
 
 
 @dataclass
+class CLIConfig:
+    """CLI presentation controls."""
+
+    emit_json_tail: bool = True
+
+
+@dataclass
 class PathsConfig:
     """Filesystem paths configured by the user."""
 
@@ -171,6 +178,7 @@ class AppConfig:
 
     analysis: AnalysisConfig
     screenshots: ScreenshotConfig
+    cli: CLIConfig
     slowpics: SlowpicsConfig
     tmdb: TMDBConfig
     naming: NamingConfig

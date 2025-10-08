@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 from functools import partial
+import math
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, TypedDict, cast
 
@@ -26,6 +27,8 @@ _SELECTION_LABELS = {
     "motion": "Motion",
     "user": "User",
     "random": "Random",
+    "auto": "Auto",
+    "cached": "Cached",
 }
 
 
@@ -141,13 +144,14 @@ def _format_measurement_line(measurement: Optional[tuple[Optional[float], Option
 def _normalize_selection_label(label: Optional[str]) -> str:
     if not label:
         return "(unknown)"
-    normalized = label.strip().lower()
-    if not normalized:
+    cleaned = label.strip()
+    if not cleaned:
         return "(unknown)"
+    normalized = cleaned.lower()
     mapped = _SELECTION_LABELS.get(normalized)
     if mapped:
         return mapped
-    return "(unknown)"
+    return cleaned
 
 
 def _format_selection_line(selection_label: Optional[str]) -> str:
@@ -160,6 +164,8 @@ def _compose_overlay_text(
     plan: GeometryPlan,
     selection_label: Optional[str],
     source_props: Mapping[str, Any],
+    *,
+    tonemap_info: Optional[vs_core.TonemapInfo],
     measurement: Optional[tuple[Optional[float], Optional[float]]] = None,
 ) -> Optional[str]:
     if not bool(getattr(color_cfg, "overlay_enabled", True)):
@@ -174,11 +180,69 @@ def _compose_overlay_text(
         lines.append(base_text)
 
     lines.append(_format_resolution_summary(plan))
-    lines.append(_format_mastering_display_line(source_props))
-    lines.append(_format_measurement_line(measurement))
+    include_hdr_details = bool(tonemap_info and tonemap_info.applied)
+    if include_hdr_details:
+        lines.append(_format_mastering_display_line(source_props))
+        lines.append(_format_measurement_line(measurement))
     lines.append(_format_selection_line(selection_label))
 
     return "\n".join(lines)
+
+
+def _build_measurement_clip(clip: Any) -> Any | None:
+    try:
+        import vapoursynth as vs  # type: ignore
+    except Exception:
+        return None
+
+    core = getattr(clip, "core", None) or getattr(vs, "core", None)
+    if core is None:
+        return None
+
+    expr = getattr(core.std, "Expr", None)
+    if not callable(expr):
+        return None
+    try:
+        grayscale = expr(
+            [clip],
+            ["x 0.2126 * y 0.7152 * + z 0.0722 * +"],
+            format=getattr(vs, "GRAYS", None),
+        )
+    except Exception:
+        return None
+    plane_stats = getattr(core.std, "PlaneStats", None)
+    if not callable(plane_stats):
+        return None
+    try:
+        return plane_stats(grayscale)
+    except Exception:
+        return None
+
+
+def _extract_measurement(
+    measurement_clip: Any,
+    frame_idx: int,
+    target_nits: float,
+) -> Optional[tuple[float, float]]:
+    if measurement_clip is None:
+        return None
+    try:
+        frame = measurement_clip.get_frame(frame_idx)
+    except Exception:
+        return None
+    props = getattr(frame, "props", None)
+    if not isinstance(props, Mapping):
+        return None
+    avg = props.get("PlaneStatsAverage")
+    max_val = props.get("PlaneStatsMax")
+    try:
+        avg_f = float(avg)
+        max_f = float(max_val)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(avg_f) or math.isnan(max_f):
+        return None
+    return (max_f * target_nits, avg_f * target_nits)
 
 
 def _ensure_rgb24(core: Any, clip: Any, frame_idx: int) -> Any:
@@ -1087,6 +1151,7 @@ def generate_screenshots(
 
     processed_results: List[vs_core.ClipProcessResult] = []
     overlay_states: List[Dict[str, str]] = []
+    measurement_clips: List[Any] = []
 
     for clip, file_path in zip(clips, files):
         result = vs_core.process_clip_for_screenshot(
@@ -1100,6 +1165,11 @@ def generate_screenshots(
         )
         processed_results.append(result)
         overlay_states.append({})
+        measurement_clip = None
+        overlay_mode = str(getattr(color_cfg, "overlay_mode", "minimal")).strip().lower()
+        if overlay_mode == "diagnostic" and bool(result.tonemap.applied):
+            measurement_clip = _build_measurement_clip(result.clip)
+        measurement_clips.append(measurement_clip)
         if result.verification is not None:
             logger.info(
                 "[VERIFY] %s frame=%d avg=%.4f max=%.4f",
@@ -1140,6 +1210,7 @@ def generate_screenshots(
         overlay_state = overlay_states[clip_index]
         base_overlay_text = getattr(result, "overlay_text", None)
         source_props = getattr(result, "source_props", {})
+        measurement_clip = measurement_clips[clip_index]
 
         for frame in frames:
             frame_idx = int(frame)
@@ -1169,13 +1240,6 @@ def generate_screenshots(
             selection_label = frame_labels.get(frame_idx) if frame_labels else None
             if selection_label is not None:
                 logger.debug('Selection label for frame %s: %s', frame_idx, selection_label)
-            overlay_text = _compose_overlay_text(
-                base_overlay_text,
-                color_cfg,
-                plan,
-                selection_label,
-                source_props,
-            )
             actual_idx, was_clamped = _clamp_frame_index(result.clip, mapped_idx)
             if was_clamped:
                 logger.debug(
@@ -1185,6 +1249,22 @@ def generate_screenshots(
                     file_path,
                     actual_idx,
                 )
+            measurement_data = None
+            if measurement_clip is not None and result.tonemap.applied:
+                measurement_data = _extract_measurement(
+                    measurement_clip,
+                    actual_idx,
+                    float(getattr(result.tonemap, "target_nits", 100.0)),
+                )
+            overlay_text = _compose_overlay_text(
+                base_overlay_text,
+                color_cfg,
+                plan,
+                selection_label,
+                source_props,
+                tonemap_info=result.tonemap,
+                measurement=measurement_data,
+            )
             file_name = _prepare_filename(frame_idx, safe_label)
             target_path = out_dir / file_name
 

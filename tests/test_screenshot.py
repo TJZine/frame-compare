@@ -4,7 +4,7 @@ import types
 import pytest
 
 from src.datatypes import ColorConfig, ScreenshotConfig
-from src import screenshot
+from src import screenshot, vs_core
 
 
 class FakeClip:
@@ -20,6 +20,15 @@ def _stub_process_clip(monkeypatch):
             clip=clip,
             overlay_text=None,
             verification=None,
+            tonemap=vs_core.TonemapInfo(
+                applied=False,
+                tone_curve=None,
+                dpd=0,
+                target_nits=100.0,
+                dst_min_nits=0.1,
+                src_csp_hint=None,
+                reason="SDR source",
+            ),
             source_props={},
         )
 
@@ -180,6 +189,14 @@ def test_compose_overlay_text_minimal_returns_base_block():
     color_cfg = ColorConfig(overlay_mode="minimal")
     plan = _make_plan()
     base_text = "Tonemapping Algorithm: bt.2390 dpd = 1 dst = 100 nits"
+    tonemap_info = vs_core.TonemapInfo(
+        applied=True,
+        tone_curve="bt.2390",
+        dpd=1,
+        target_nits=100.0,
+        dst_min_nits=0.1,
+        src_csp_hint=None,
+    )
 
     composed = screenshot._compose_overlay_text(
         base_text,
@@ -187,6 +204,7 @@ def test_compose_overlay_text_minimal_returns_base_block():
         plan,
         selection_label="Dark",
         source_props={},
+        tonemap_info=tonemap_info,
     )
 
     assert composed == base_text
@@ -199,6 +217,14 @@ def test_compose_overlay_text_diagnostic_appends_required_lines():
         final=(3840, 2160),
     )
     base_text = "Tonemapping Algorithm: bt.2390 dpd = 1 dst = 100 nits"
+    tonemap_info = vs_core.TonemapInfo(
+        applied=True,
+        tone_curve="bt.2390",
+        dpd=1,
+        target_nits=100.0,
+        dst_min_nits=0.1,
+        src_csp_hint=None,
+    )
     props = {
         "_MasteringDisplayMinLuminance": 0.0001,
         "_MasteringDisplayMaxLuminance": 1000.0,
@@ -210,6 +236,8 @@ def test_compose_overlay_text_diagnostic_appends_required_lines():
         plan,
         selection_label="Dark",
         source_props=props,
+        tonemap_info=tonemap_info,
+        measurement=(200.0, 47.25),
     )
 
     assert composed is not None
@@ -217,8 +245,38 @@ def test_compose_overlay_text_diagnostic_appends_required_lines():
     assert lines[0] == base_text
     assert lines[1] == "1920 × 1080 → 3840 × 2160  (original → target)"
     assert lines[2] == "MDL: min: 0.0001 cd/m², max: 1000.0 cd/m²"
-    assert lines[3] == "Measurement: Insufficient data"
+    assert lines[3] == "Measurement MAX/AVG: 200nits / 47.2nits"
     assert lines[4] == "Frame Selection Type: Dark"
+
+
+def test_compose_overlay_text_skips_hdr_details_for_sdr():
+    color_cfg = ColorConfig(overlay_mode="diagnostic")
+    plan = _make_plan()
+    base_text = "Tonemapping Algorithm: bt.2390 dpd = 1 dst = 100 nits"
+    tonemap_info = vs_core.TonemapInfo(
+        applied=False,
+        tone_curve=None,
+        dpd=0,
+        target_nits=100.0,
+        dst_min_nits=0.1,
+        src_csp_hint=None,
+        reason="SDR source",
+    )
+
+    composed = screenshot._compose_overlay_text(
+        base_text,
+        color_cfg,
+        plan,
+        selection_label="Cached",
+        source_props={},
+        tonemap_info=tonemap_info,
+    )
+
+    assert composed is not None
+    lines = composed.split("\n")
+    assert "MDL:" not in composed
+    assert "Measurement" not in composed
+    assert lines[-1] == "Frame Selection Type: Cached"
 
 
 def test_compression_flag_passed(tmp_path, monkeypatch):

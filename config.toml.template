@@ -112,6 +112,10 @@ category_preference = ""
 always_full_filename = true
 prefer_guessit = true
 
+[cli]
+# Control CLI output behaviours.
+emit_json_tail = true
+
 [paths]
 # Default input folder; override via CLI when needed.
 input_dir = "comparison_videos"

@@ -10,6 +10,7 @@ from .datatypes import (
     AnalysisConfig,
     AppConfig,
     AudioAlignmentConfig,
+    CLIConfig,
     ColorConfig,
     NamingConfig,
     OverridesConfig,
@@ -99,6 +100,7 @@ def load_config(path: str) -> AppConfig:
     app = AppConfig(
         analysis=_sanitize_section(raw.get("analysis", {}), "analysis", AnalysisConfig),
         screenshots=_sanitize_section(raw.get("screenshots", {}), "screenshots", ScreenshotConfig),
+        cli=_sanitize_section(raw.get("cli", {}), "cli", CLIConfig),
         slowpics=_sanitize_section(raw.get("slowpics", {}), "slowpics", SlowpicsConfig),
         tmdb=_sanitize_section(raw.get("tmdb", {}), "tmdb", TMDBConfig),
         naming=_sanitize_section(raw.get("naming", {}), "naming", NamingConfig),

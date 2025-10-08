@@ -11,6 +11,7 @@ from src.datatypes import (
     AnalysisConfig,
     AppConfig,
     AudioAlignmentConfig,
+    CLIConfig,
     ColorConfig,
     NamingConfig,
     OverridesConfig,
@@ -56,6 +57,7 @@ def _make_config(input_dir: Path) -> AppConfig:
             user_frames=[],
         ),
         screenshots=ScreenshotConfig(directory_name="screens", add_frame_info=False),
+        cli=CLIConfig(),
         color=ColorConfig(),
         slowpics=SlowpicsConfig(auto_upload=False),
         tmdb=TMDBConfig(),
@@ -174,6 +176,45 @@ def test_cli_applies_overrides_and_naming(tmp_path, monkeypatch, runner):
 
 
 
+def test_cli_disables_json_tail_output(tmp_path, monkeypatch, runner):
+    first = tmp_path / "AAA - 01.mkv"
+    second = tmp_path / "BBB - 01.mkv"
+    for file_path in (first, second):
+        file_path.write_bytes(b"data")
+
+    cfg = _make_config(tmp_path)
+    cfg.cli.emit_json_tail = False
+
+    monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
+    monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit_mb: None)
+
+    def fake_parse(name, **kwargs):
+        return {"label": name, "release_group": "", "file_name": name}
+
+    monkeypatch.setattr(frame_compare, "parse_filename_metadata", fake_parse)
+
+    def fake_init(path, *, trim_start=0, trim_end=None, fps_map=None, cache_dir=None):
+        return types.SimpleNamespace(width=1920, height=1080, fps_num=24000, fps_den=1001, num_frames=600)
+
+    monkeypatch.setattr(frame_compare.vs_core, "init_clip", fake_init)
+
+    monkeypatch.setattr(
+        frame_compare,
+        "select_frames",
+        lambda clip, cfg, files, file_under_analysis, cache_info=None, progress=None, *, frame_window=None, return_metadata=False, color_cfg=None: [12],
+    )
+
+    def fake_generate(clips, frames, files, metadata, out_dir, cfg_screens, color_cfg, **kwargs):
+        out_dir.mkdir(parents=True, exist_ok=True)
+        return [str(out_dir / "frame.png")]
+
+    monkeypatch.setattr(frame_compare, "generate_screenshots", fake_generate)
+
+    result = runner.invoke(frame_compare.main, ["--config", "dummy", "--no-color"], catch_exceptions=False)
+    assert result.exit_code == 0
+    assert '{"analysis"' not in result.output
+
+
 def test_label_dedupe_preserves_short_labels(tmp_path, monkeypatch, runner):
     first = tmp_path / "Group - 01.mkv"
     second = tmp_path / "Group - 02.mkv"
@@ -183,6 +224,7 @@ def test_label_dedupe_preserves_short_labels(tmp_path, monkeypatch, runner):
     cfg = AppConfig(
         analysis=AnalysisConfig(frame_count_dark=0, frame_count_bright=0, frame_count_motion=0, random_frames=0),
         screenshots=ScreenshotConfig(directory_name="screens", add_frame_info=False),
+        cli=CLIConfig(),
         color=ColorConfig(),
         slowpics=SlowpicsConfig(auto_upload=False),
         tmdb=TMDBConfig(),
@@ -298,6 +340,7 @@ def test_cli_input_override_and_cleanup(tmp_path, monkeypatch, runner):
     cfg = AppConfig(
         analysis=AnalysisConfig(frame_count_dark=0, frame_count_bright=0, frame_count_motion=0, random_frames=0),
         screenshots=ScreenshotConfig(directory_name="screens", add_frame_info=False),
+        cli=CLIConfig(),
         color=ColorConfig(),
         slowpics=SlowpicsConfig(auto_upload=True, delete_screen_dir_after_upload=True, open_in_browser=False, create_url_shortcut=False),
         tmdb=TMDBConfig(),
