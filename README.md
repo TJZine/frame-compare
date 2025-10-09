@@ -356,7 +356,7 @@ change_fps = {}
 | `dst_min_nits` | float | 0.1 | No | Minimum nits for libplacebo (`dst_min`). Must be ≥0.|
 | `overlay_enabled` | bool | true | No | Draw an SDR metadata overlay (top-right). If true, failures log `[OVERLAY]` and obey `strict`.|
 | `overlay_text_template` | str | `"Tonemapping Algorithm: {tone_curve} dpd = {dynamic_peak_detection} dst = {target_nits} nits"` | No | Template for the overlay text. Placeholders: `{tone_curve}`, `{dpd}`, `{dynamic_peak_detection}`, `{target_nits}`, `{preset}`, `{reason}`.|
-| `overlay_mode` | str | `"minimal"` | No | Selects overlay detail level: `minimal` shows the template; `diagnostic` adds the render resolution summary, HDR mastering luminance (when available), and a `Frame Selection Type` line sourced from cached selection metadata.|
+| `overlay_mode` | str | `"minimal"` | No | Selects overlay detail level: `minimal` shows the template plus the render resolution summary and a `Frame Selection Type` line; `diagnostic` additionally adds HDR mastering luminance (when available).|
 | `verify_enabled` | bool | true | No | Compute Δ vs naive SDR and log `[VERIFY] frame=… avg=… max=…`.|
 | `verify_frame` | int? | null | No | Force a specific verification frame index.|
 | `verify_auto` | bool | true | No | Enable the auto-search described in `docs/hdr_tonemap_overview.md`.|

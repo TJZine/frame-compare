@@ -10,7 +10,7 @@ import subprocess
 from functools import partial
 import math
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, TypedDict, cast
+from typing import Any, Callable, Dict, List, Mapping, MutableMapping, Optional, Sequence, Tuple, TypedDict, Union, cast
 
 from . import vs_core
 from .datatypes import ColorConfig, ScreenshotConfig
@@ -30,6 +30,35 @@ _SELECTION_LABELS = {
     "auto": "Auto",
     "cached": "Cached",
 }
+
+OverlayStateValue = Union[str, List[str]]
+OverlayState = MutableMapping[str, OverlayStateValue]
+
+
+def _new_overlay_state() -> OverlayState:
+    """Create a mutable overlay state container."""
+    return cast(OverlayState, {})
+
+
+def _append_overlay_warning(state: OverlayState, message: str) -> None:
+    """
+    Append a formatted overlay warning to the state's warning list in a type-safe manner.
+    """
+    warnings_value = state.get("warnings")
+    if not isinstance(warnings_value, list):
+        warnings_value = []
+        state["warnings"] = warnings_value
+    warnings_value.append(message)
+
+
+def _get_overlay_warnings(state: OverlayState) -> List[str]:
+    """
+    Retrieve overlay warning messages from state, returning an empty list when absent.
+    """
+    warnings_value = state.get("warnings")
+    if isinstance(warnings_value, list):
+        return warnings_value
+    return []
 
 
 def _format_dimensions(width: int, height: int) -> str:
@@ -231,9 +260,9 @@ def _compose_overlay_text(
     selection_detail: Optional[Mapping[str, Any]] = None,
 ) -> Optional[str]:
     """
-    Compose diagnostic overlay text for a frame when overlays are enabled.
-    
-    When overlaying is disabled, returns None. When overlay mode is not "diagnostic", returns the provided base_text unchanged. In diagnostic mode, returns a multi-line string containing, in order: the base text (if any), a resolution summary derived from the geometry plan, a mastering-display luminance line when tonemapping was applied and HDR metadata is available, and a selection-type line.
+    Compose overlay text for a frame when overlays are enabled.
+
+    When overlaying is disabled, returns None. In "minimal" mode the returned string always includes the resolution summary and selection-type lines in addition to any base text. In "diagnostic" mode, returns a multi-line string containing, in order: the base text (if any), a resolution summary derived from the geometry plan, a mastering-display luminance line when tonemapping was applied and HDR metadata is available, and a selection-type line.
     
     Parameters:
         base_text (Optional[str]): Existing overlay text to include as the first line if present.
@@ -241,17 +270,23 @@ def _compose_overlay_text(
         plan (GeometryPlan): Geometry plan used to produce the resolution summary line.
         selection_label (Optional[str]): Selection label to format into the selection-type line.
         source_props (Mapping[str, Any]): Source properties used to extract mastering display luminance data.
-        tonemap_info (Optional[vs_core.TonemapInfo]): If provided and its `applied` flag is true, include HDR mastering-display information.
-    
+        tonemap_info (Optional[vs_core.TonemapInfo]): If provided and its `applied` flag is true, include HDR mastering-display information in diagnostic mode.
+        selection_detail (Optional[Mapping[str, Any]]): Selection metadata record retained for compatibility; overlay text omits per-frame detail lines regardless of mode.
+
     Returns:
-        Optional[str]: Composed overlay text when overlays are enabled; the original base_text when overlays are enabled but mode is not "diagnostic"; otherwise `None`.
+        Optional[str]: Composed overlay text when overlays are enabled; otherwise `None`.
     """
     if not bool(getattr(color_cfg, "overlay_enabled", True)):
         return None
 
     mode = str(getattr(color_cfg, "overlay_mode", "minimal")).strip().lower()
     if mode != "diagnostic":
-        return base_text
+        lines: List[str] = []
+        if base_text:
+            lines.append(base_text)
+        lines.append(_format_resolution_summary(plan))
+        lines.append(_format_selection_line(selection_label))
+        return "\n".join(lines)
 
     lines: List[str] = []
     if base_text:
@@ -262,17 +297,6 @@ def _compose_overlay_text(
     if include_hdr_details:
         lines.append(_format_mastering_display_line(source_props))
     lines.append(_format_selection_line(selection_label))
-    if selection_detail:
-        tc_value = selection_detail.get("timecode")
-        if tc_value:
-            lines.append(f"Selection Timecode: {tc_value}")
-        score_val = selection_detail.get("score")
-        if isinstance(score_val, (int, float)):
-            lines.append(f"Selection Score: {score_val:.4f}")
-        note_text = selection_detail.get("notes")
-        if note_text:
-            lines.append(f"Selection Notes: {note_text}")
-
     return "\n".join(lines)
 
 
@@ -446,7 +470,7 @@ def _apply_overlay_text(
     text: Optional[str],
     *,
     strict: bool,
-    state: Dict[str, str],
+    state: OverlayState,
     file_label: str,
 ) -> object:
     """
@@ -459,7 +483,7 @@ def _apply_overlay_text(
         clip: The VapourSynth clip to receive the overlay.
         text: The overlay text to apply; if None or empty, no action is taken.
         strict (bool): If True, raise ScreenshotWriterError on overlay unavailability or failure.
-        state (Dict[str, str]): Mutable state mapping used and updated by this function. Recognized keys:
+        state (OverlayState): Mutable state mapping used and updated by this function. Recognized keys:
             - "overlay_status": read and updated to "ok" or "error".
             - "warnings": a list that will be appended with overlay-related warning strings when failures occur.
         file_label (str): Human-readable identifier for logging and warning messages.
@@ -494,7 +518,7 @@ def _apply_overlay_text(
         message = f"Overlay filter unavailable for {file_label}"
         logger.error('[OVERLAY] %s', message)
         state["overlay_status"] = "error"
-        state.setdefault("warnings", []).append(f"[OVERLAY] {message}")
+        _append_overlay_warning(state, f"[OVERLAY] {message}")
         if strict:
             raise ScreenshotWriterError(message)
         return clip
@@ -504,7 +528,7 @@ def _apply_overlay_text(
         message = f"Overlay failed for {file_label}: {exc}"
         logger.error('[OVERLAY] %s', message)
         state["overlay_status"] = "error"
-        state.setdefault("warnings", []).append(f"[OVERLAY] {message}")
+        _append_overlay_warning(state, f"[OVERLAY] {message}")
         if strict:
             raise ScreenshotWriterError(message) from exc
         return clip
@@ -1031,7 +1055,7 @@ def _save_frame_with_fpng(
     selection_label: str | None = None,
     *,
     overlay_text: Optional[str] = None,
-    overlay_state: Optional[Dict[str, str]] = None,
+    overlay_state: Optional[OverlayState] = None,
     strict_overlay: bool = False,
 ) -> None:
     try:
@@ -1089,7 +1113,7 @@ def _save_frame_with_fpng(
             selection_label,
         )
 
-    overlay_state = overlay_state or {}
+    overlay_state = overlay_state or _new_overlay_state()
     render_clip = _apply_overlay_text(
         core,
         render_clip,
@@ -1290,7 +1314,7 @@ def generate_screenshots(
     created: List[str] = []
 
     processed_results: List[vs_core.ClipProcessResult] = []
-    overlay_states: List[Dict[str, str]] = []
+    overlay_states: List[OverlayState] = []
 
     for clip, file_path in zip(clips, files):
         result = vs_core.process_clip_for_screenshot(
@@ -1303,7 +1327,7 @@ def generate_screenshots(
             warning_sink=warnings_sink,
         )
         processed_results.append(result)
-        overlay_states.append({})
+        overlay_states.append(_new_overlay_state())
         overlay_mode = str(getattr(color_cfg, "overlay_mode", "minimal")).strip().lower()
         if result.verification is not None:
             logger.info(
@@ -1460,6 +1484,6 @@ def generate_screenshots(
                 progress_callback(1)
 
         if warnings_sink is not None:
-            warnings_sink.extend(overlay_state.get("warnings", []))
+            warnings_sink.extend(_get_overlay_warnings(overlay_state))
 
     return created

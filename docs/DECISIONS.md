@@ -1,5 +1,6 @@
 # Decisions Log
 
+- *2025-10-09:* Adjusted overlay text defaults so minimal mode now shows resolution/upscale context and frame-selection type while diagnostic mode drops per-frame selection detail lines that were redundant on-screen but remain available in cached metadata.
 - *2025-10-02:* Restricted audio alignment's NumPy warning suppression to local contexts, paired with regression coverage that preserves global diagnostics while muting noisy dependencies.
 - *2025-10-02:* Bounded the TMDB response cache to a configurable entry limit with TTL-aware eviction to stop unbounded growth flagged in deep-review performance findings.
 - *2025-10-01:* Documented the audio alignment pipeline in `docs/audio_alignment_pipeline.md` to centralize requirements, workflow, and offsets file semantics for ongoing feature work.

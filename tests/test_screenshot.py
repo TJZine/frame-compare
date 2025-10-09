@@ -212,7 +212,7 @@ def _make_plan(
     }
 
 
-def test_compose_overlay_text_minimal_returns_base_block():
+def test_compose_overlay_text_minimal_adds_resolution_and_selection():
     color_cfg = ColorConfig(overlay_mode="minimal")
     plan = _make_plan()
     base_text = "Tonemapping Algorithm: bt.2390 dpd = 1 dst = 100 nits"
@@ -234,7 +234,60 @@ def test_compose_overlay_text_minimal_returns_base_block():
         tonemap_info=tonemap_info,
     )
 
-    assert composed == base_text
+    assert composed is not None
+    lines = composed.split("\n")
+    assert lines[0] == base_text
+    assert lines[1] == "1920 × 1080  (native)"
+    assert lines[2] == "Frame Selection Type: Dark"
+
+
+def test_compose_overlay_text_minimal_handles_missing_base_and_label():
+    color_cfg = ColorConfig(overlay_mode="minimal")
+    plan = _make_plan()
+
+    composed = screenshot._compose_overlay_text(
+        base_text=None,
+        color_cfg=color_cfg,
+        plan=plan,
+        selection_label=None,
+        source_props={},
+        tonemap_info=None,
+    )
+
+    assert composed is not None
+    lines = composed.split("\n")
+    assert lines[0] == "1920 × 1080  (native)"
+    assert lines[1] == "Frame Selection Type: (unknown)"
+
+
+def test_compose_overlay_text_minimal_ignores_hdr_details():
+    color_cfg = ColorConfig(overlay_mode="minimal")
+    plan = _make_plan()
+    props = {
+        "_MasteringDisplayMinLuminance": 0.0001,
+        "_MasteringDisplayMaxLuminance": 1000.0,
+    }
+    tonemap_info = vs_core.TonemapInfo(
+        applied=True,
+        tone_curve="bt.2390",
+        dpd=1,
+        target_nits=100.0,
+        dst_min_nits=0.1,
+        src_csp_hint=None,
+    )
+
+    composed = screenshot._compose_overlay_text(
+        base_text=None,
+        color_cfg=color_cfg,
+        plan=plan,
+        selection_label="Dark",
+        source_props=props,
+        tonemap_info=tonemap_info,
+    )
+
+    assert composed is not None
+    assert "MDL:" not in composed
+    assert composed.endswith("Frame Selection Type: Dark")
 
 
 def test_compose_overlay_text_diagnostic_appends_required_lines():
@@ -850,7 +903,7 @@ def test_placeholder_logging(tmp_path, caplog, monkeypatch):
     assert placeholder.read_bytes() == b"placeholder\n"
 
 
-def test_compose_overlay_text_includes_selection_detail():
+def test_compose_overlay_text_omits_selection_detail_lines():
     color_cfg = ColorConfig(overlay_mode="diagnostic")
     plan = _make_plan()
     base_text = "Tonemapping Algorithm: bt.2390 dpd = 1 dst = 100 nits"
@@ -865,5 +918,14 @@ def test_compose_overlay_text_includes_selection_detail():
         selection_detail=selection_detail,
     )
     assert composed is not None
-    assert "Selection Timecode" in composed
-    assert "Selection Score" in composed
+    assert "Selection Timecode" not in composed
+    assert "Selection Score" not in composed
+    assert "Selection Notes" not in composed
+    assert "Frame Selection Type: Motion" in composed
+
+
+def test_overlay_state_warning_helpers_roundtrip():
+    state = screenshot._new_overlay_state()
+    screenshot._append_overlay_warning(state, "first")
+    screenshot._append_overlay_warning(state, "second")
+    assert screenshot._get_overlay_warnings(state) == ["first", "second"]
