@@ -1,14 +1,18 @@
+import json
 import types
-from typing import Any, cast
+from typing import Any, Dict, cast
 
 import pytest
 
 from src.analysis import (
     FrameMetricsCacheInfo,
+    SelectionDetail,
     _quantile,
     compute_selection_window,
     dedupe,
+    selection_details_to_json,
     select_frames,
+    write_selection_cache_file,
 )
 from src.datatypes import AnalysisConfig, ColorConfig
 
@@ -24,7 +28,27 @@ class FakeClip:
 
 
 def _select_frames_list(*args, **kwargs) -> list[int]:
-    return cast(list[int], select_frames(*args, **kwargs))
+    result = select_frames(*args, **kwargs)
+    if isinstance(result, tuple):
+        return list(result[0])
+    return cast(list[int], result)
+
+
+def _select_frames_with_metadata(*args, **kwargs):
+    params = dict(kwargs)
+    params.setdefault("return_metadata", True)
+    result = select_frames(*args, **params)
+    assert isinstance(result, tuple) and len(result) == 3
+    return result
+
+
+
+def _select_frames_with_metadata(*args, **kwargs):
+    params = dict(kwargs)
+    params.setdefault('return_metadata', True)
+    result = select_frames(*args, **params)
+    assert isinstance(result, tuple) and len(result) == 3
+    return result
 
 
 def test_quantile_basic():
@@ -111,6 +135,38 @@ def test_select_frames_deterministic(monkeypatch):
     assert sorted(first) == first
     assert len(calls) == 0
 
+
+
+
+def test_select_frames_returns_metadata(monkeypatch):
+    clip = FakeClip(
+        num_frames=120,
+        brightness=[i / 120 for i in range(120)],
+        motion=[(120 - i) / 120 for i in range(120)],
+    )
+
+    monkeypatch.setattr(
+        "src.analysis.vs_core.process_clip_for_screenshot",
+        lambda clip, file_name, color_cfg, **kwargs: types.SimpleNamespace(clip=clip, overlay_text=None, verification=None),
+    )
+
+    cfg = AnalysisConfig(
+        frame_count_dark=1,
+        frame_count_bright=1,
+        frame_count_motion=1,
+        random_frames=0,
+        user_frames=[5],
+        analyze_in_sdr=False,
+    )
+    color_cfg = ColorConfig()
+
+    frames, labels, details = _select_frames_with_metadata(clip, cfg, files=["a.mkv"], file_under_analysis="a.mkv", color_cfg=color_cfg)
+    assert frames
+    assert labels[frames[0]] in {"Dark", "Bright", "Motion", "User", "Auto"}
+    assert frames[0] in details
+    detail = details[frames[0]]
+    assert detail.label == labels[frames[0]]
+    assert detail.frame_index == frames[0]
 
 def test_select_frames_hdr_tonemap(monkeypatch):
     clip = FakeClip(
@@ -315,3 +371,46 @@ def test_motion_quarter_gap(monkeypatch):
     diffs = [b - a for a, b in zip(frames, frames[1:])]
     assert all(diff >= 48 for diff in diffs)
     assert any(diff < 192 for diff in diffs)
+
+def test_selection_details_to_json_roundtrip():
+    detail = SelectionDetail(
+        frame_index=10,
+        label="Bright",
+        score=0.75,
+        source="unit-test",
+        timecode="00:00:10.000",
+        clip_role="analyze",
+        notes="sample",
+    )
+    payload = selection_details_to_json({10: detail})
+    assert payload["10"]["type"] == "Bright"
+    assert payload["10"]["timecode"] == "00:00:10.000"
+    assert payload["10"]["notes"] == "sample"
+
+
+def test_write_selection_cache_file(tmp_path):
+    cfg = AnalysisConfig()
+    detail = SelectionDetail(
+        frame_index=12,
+        label="Random",
+        score=0.5,
+        source="unit",
+        timecode="00:00:05.000",
+        clip_role="analyze",
+        notes=None,
+    )
+    target = tmp_path / "generated.compframes"
+    write_selection_cache_file(
+        target,
+        analyzed_file="clip.mkv",
+        clip_paths=[tmp_path / "clip.mkv"],
+        cfg=cfg,
+        selection_hash="hash123",
+        selection_frames=[12],
+        selection_details={12: detail},
+        selection_categories={12: "Random"},
+    )
+    data = json.loads(target.read_text())
+    assert data["selection_hash"] == "hash123"
+    assert data["selection"]["frames"] == [12]
+    assert data["selection"]["annotations"]["12"].startswith("sel=Random")

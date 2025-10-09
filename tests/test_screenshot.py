@@ -237,7 +237,6 @@ def test_compose_overlay_text_diagnostic_appends_required_lines():
         selection_label="Dark",
         source_props=props,
         tonemap_info=tonemap_info,
-        measurement=(200.0, 47.25),
     )
 
     assert composed is not None
@@ -822,3 +821,22 @@ def test_placeholder_logging(tmp_path, caplog, monkeypatch):
     assert "Falling back to placeholder" in caplog.text
     placeholder = Path(created[0])
     assert placeholder.read_bytes() == b"placeholder\n"
+
+
+def test_compose_overlay_text_includes_selection_detail():
+    color_cfg = ColorConfig(overlay_mode="diagnostic")
+    plan = _make_plan()
+    base_text = "Tonemapping Algorithm: bt.2390 dpd = 1 dst = 100 nits"
+    selection_detail = {"timecode": "00:00:05.000", "score": 0.42, "notes": "motion"}
+    composed = screenshot._compose_overlay_text(
+        base_text,
+        color_cfg,
+        plan,
+        selection_label="Motion",
+        source_props={},
+        tonemap_info=None,
+        selection_detail=selection_detail,
+    )
+    assert composed is not None
+    assert "Selection Timecode" in composed
+    assert "Selection Score" in composed

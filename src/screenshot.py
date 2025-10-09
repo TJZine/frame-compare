@@ -155,6 +155,7 @@ def _compose_overlay_text(
     source_props: Mapping[str, Any],
     *,
     tonemap_info: Optional[vs_core.TonemapInfo],
+    selection_detail: Optional[Mapping[str, Any]] = None,
 ) -> Optional[str]:
     if not bool(getattr(color_cfg, "overlay_enabled", True)):
         return None
@@ -172,6 +173,16 @@ def _compose_overlay_text(
     if include_hdr_details:
         lines.append(_format_mastering_display_line(source_props))
     lines.append(_format_selection_line(selection_label))
+    if selection_detail:
+        tc_value = selection_detail.get("timecode")
+        if tc_value:
+            lines.append(f"Selection Timecode: {tc_value}")
+        score_val = selection_detail.get("score")
+        if isinstance(score_val, (int, float)):
+            lines.append(f"Selection Score: {score_val:.4f}")
+        note_text = selection_detail.get("notes")
+        if note_text:
+            lines.append(f"Selection Notes: {note_text}")
 
     return "\n".join(lines)
 
@@ -1059,6 +1070,7 @@ def generate_screenshots(
     trim_offsets: Sequence[int] | None = None,
     progress_callback: Callable[[int], None] | None = None,
     frame_labels: Mapping[int, str] | None = None,
+    selection_details: Mapping[int, Mapping[str, Any]] | None = None,
     alignment_maps: Sequence[Any] | None = None,
     warnings_sink: List[str] | None = None,
     verification_sink: List[Dict[str, Any]] | None = None,
@@ -1162,7 +1174,12 @@ def generate_screenshots(
                         )
             else:
                 mapped_time = None
+            detail_info = selection_details.get(frame_idx) if selection_details else None
             selection_label = frame_labels.get(frame_idx) if frame_labels else None
+            if selection_label is None and detail_info is not None:
+                derived_label = detail_info.get("label") or detail_info.get("type")
+                if derived_label:
+                    selection_label = str(derived_label)
             if selection_label is not None:
                 logger.debug('Selection label for frame %s: %s', frame_idx, selection_label)
             actual_idx, was_clamped = _clamp_frame_index(result.clip, mapped_idx)
@@ -1181,6 +1198,7 @@ def generate_screenshots(
                 selection_label,
                 source_props,
                 tonemap_info=result.tonemap,
+                selection_detail=detail_info,
             )
             file_name = _prepare_filename(frame_idx, safe_label)
             target_path = out_dir / file_name

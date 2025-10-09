@@ -33,9 +33,14 @@ from src.utils import parse_filename_metadata
 from src import vs_core
 from src.analysis import (
     FrameMetricsCacheInfo,
+    SelectionDetail,
     SelectionWindowSpec,
     compute_selection_window,
+    export_selection_metadata,
     select_frames,
+    selection_details_to_json,
+    selection_hash_for_config,
+    write_selection_cache_file,
 )
 from src.screenshot import generate_screenshots, ScreenshotError
 from src.slowpics import SlowpicsAPIError, upload_comparison
@@ -2310,9 +2315,17 @@ def run_cli(
                 color_cfg=cfg.color,
             )
         if isinstance(result, tuple):
-            return result
+            if len(result) == 3:
+                return result
+            if len(result) == 2:
+                frames_only, categories = result
+                return frames_only, categories, {}
+            frames_only = list(result)
+            return frames_only, {frame: "Auto" for frame in frames_only}, {}
         frames_only = list(result)
-        return frames_only, {frame: "Auto" for frame in frames_only}
+        return frames_only, {frame: "Auto" for frame in frames_only}, {}
+
+    selection_details: Dict[int, analysis.SelectionDetail] = {}
 
     try:
         if sample_count > 0 and not cache_exists:
@@ -2353,11 +2366,11 @@ def run_cli(
                     )
                     analysis_progress.update(task_id, completed=completed)
 
-                frames, frame_categories = _run_selection(_advance_samples)
+                frames, frame_categories, selection_details = _run_selection(_advance_samples)
                 final_completed = progress_total if progress_total > 0 else analysis_progress.tasks[task_id].completed
                 analysis_progress.update(task_id, completed=final_completed)
         else:
-            frames, frame_categories = _run_selection()
+            frames, frame_categories, selection_details = _run_selection()
 
     except Exception as exc:
         tb = traceback.format_exc()
@@ -2374,14 +2387,61 @@ def run_cli(
             rich_message="[red]No frames were selected; cannot continue.[/red]",
         )
 
+    selection_hash_value = selection_hash_for_config(cfg.analysis)
+    clip_paths = [plan.path for plan in plans]
+    selection_sidecar_dir = cache_info.path.parent if cache_info is not None else root
+    selection_sidecar_path = selection_sidecar_dir / "generated.selection.v1.json"
+    if cache_info is None or not cfg.analysis.save_frames_data:
+        export_selection_metadata(
+            selection_sidecar_path,
+            analyzed_file=analyze_path.name,
+            clip_paths=clip_paths,
+            cfg=cfg.analysis,
+            selection_hash=selection_hash_value,
+            selection_frames=frames,
+            selection_details=selection_overlay_details,
+        )
+    if not cfg.analysis.save_frames_data:
+        compframes_path = (root / cfg.analysis.frame_data_filename).resolve()
+        write_selection_cache_file(
+            compframes_path,
+            analyzed_file=analyze_path.name,
+            clip_paths=clip_paths,
+            cfg=cfg.analysis,
+            selection_hash=selection_hash_value,
+            selection_frames=frames,
+            selection_details=selection_overlay_details,
+            selection_categories=frame_categories,
+        )
+
     kept_count = len(frames)
     scanned_count = progress_total if progress_total > 0 else max(sample_count, kept_count)
+    selection_counts = Counter(detail.label or "Auto" for detail in selection_details.values())
+    json_tail["analysis"]["selection_counts"] = dict(selection_counts)
+    json_tail["analysis"]["selection_hash"] = selection_hash_value
+    json_tail["analysis"]["selection_sidecar"] = str(selection_sidecar_path)
+    json_tail["analysis"]["selection_details"] = selection_details_to_json(selection_details)
+    selection_overlay_details = {
+        frame: {
+            "label": detail.label,
+            "timecode": detail.timecode,
+            "source": detail.source,
+            "score": detail.score,
+            "notes": detail.notes,
+        }
+        for frame, detail in selection_details.items()
+    }
     cache_summary_label = "reused" if cache_status == "reused" else ("new" if cache_status == "recomputed" else cache_status)
     json_tail["analysis"]["kept"] = kept_count
     json_tail["analysis"]["scanned"] = scanned_count
     layout_data["analysis"]["kept"] = kept_count
     layout_data["analysis"]["scanned"] = scanned_count
     layout_data["analysis"]["cache_summary_label"] = cache_summary_label
+    layout_data["analysis"]["selection_counts"] = dict(selection_counts)
+    layout_data["analysis"]["selection_hash"] = selection_hash_value
+    layout_data["analysis"]["selection_sidecar"] = str(selection_sidecar_path)
+    layout_data["analysis"]["selection_details"] = json_tail["analysis"]["selection_details"]
+    layout_data["analysis"]["selection_counts"] = dict(selection_counts)
     reporter.update_values(layout_data)
 
     preview_rule: Dict[str, object] = reporter.layout.folding.get("frames_preview", {}) if hasattr(reporter, "layout") else {}
@@ -2487,6 +2547,7 @@ def run_cli(
                     trim_offsets=[plan.trim_start for plan in plans],
                     progress_callback=advance_render,
                     frame_labels=frame_categories,
+                    selection_details=selection_overlay_details,
                     warnings_sink=collected_warnings,
                     verification_sink=verification_records,
                 )
@@ -2514,6 +2575,7 @@ def run_cli(
                 cfg.color,
                 trim_offsets=[plan.trim_start for plan in plans],
                 frame_labels=frame_categories,
+                selection_details=selection_overlay_details,
                 warnings_sink=collected_warnings,
                 verification_sink=verification_records,
             )
