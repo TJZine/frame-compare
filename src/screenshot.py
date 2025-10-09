@@ -199,34 +199,79 @@ def _build_measurement_clip(clip: Any) -> Any | None:
     if core is None:
         return None
 
-    expr = getattr(core.std, "Expr", None)
-    if not callable(expr):
-        return None
-    plane_stats = getattr(core.std, "PlaneStats", None)
+    std_ns = getattr(core, "std", None)
+    expr = getattr(std_ns, "Expr", None) if std_ns is not None else None
+    shuffle_planes = getattr(std_ns, "ShufflePlanes", None) if std_ns is not None else None
+    plane_stats = getattr(std_ns, "PlaneStats", None) if std_ns is not None else None
     if not callable(plane_stats):
         return None
-
+    expr_inputs: List[Any] = []
     fmt = getattr(clip, "format", None)
     sample_type = getattr(fmt, "sample_type", None)
     bits_per_sample = getattr(fmt, "bits_per_sample", None)
+    vs_gray16 = getattr(vs, "GRAY16", None)
+    vs_gray8 = getattr(vs, "GRAY8", None)
+    vs_grays = getattr(vs, "GRAYS", None)
+    vs_grayh = getattr(vs, "GRAYH", None)
+    vs_gray_cf = getattr(vs, "GRAY", None)
     if sample_type == getattr(vs, "FLOAT", object()):
-        gray_format = getattr(vs, "GRAYS", None) or getattr(vs, "GRAYH", None)
+        gray_format = vs_grays or vs_grayh or vs_gray16 or vs_gray8
     elif isinstance(bits_per_sample, int) and bits_per_sample > 8:
-        gray_format = getattr(vs, "GRAY16", None)
+        gray_format = vs_gray16 or vs_grays or vs_grayh or vs_gray8
     else:
-        gray_format = getattr(vs, "GRAY8", None)
-    gray_format = gray_format or getattr(vs, "GRAYS", None) or getattr(vs, "GRAYH", None)
-    if gray_format is None:
-        return None
+        gray_format = vs_gray8 or vs_gray16 or vs_grays or vs_grayh
+    gray_format = gray_format or vs_gray8
 
-    try:
-        grayscale = expr(
-            [clip, clip, clip],
-            ["x 0.2126 * y 0.7152 * + z 0.0722 * +"],
-            format=gray_format,
-        )
-    except Exception as exc:
-        logger.debug("Failed to build measurement Expr: %s", exc, exc_info=logger.isEnabledFor(logging.DEBUG))
+    if callable(shuffle_planes):
+        try:
+            for plane_idx in range(min(getattr(fmt, "num_planes", 3) or 3, 3)):
+                plane_clip = shuffle_planes(
+                    clip,
+                    planes=[plane_idx],
+                    colorfamily=vs_gray_cf if vs_gray_cf is not None else getattr(vs, "YUV", 2),
+                )
+                expr_inputs.append(plane_clip)
+        except Exception as exc:
+            logger.debug(
+                "ShufflePlanes measurement fallback failed: %s",
+                exc,
+                exc_info=logger.isEnabledFor(logging.DEBUG),
+            )
+            expr_inputs.clear()
+
+    if not expr_inputs:
+        expr_inputs = [clip, clip, clip]
+
+    grayscale = None
+    if callable(expr):
+        try:
+            grayscale = expr(
+                expr_inputs,
+                ["x 0.2126 * y 0.7152 * + z 0.0722 * +"],
+                format=gray_format,
+            )
+        except Exception as exc:
+            logger.debug(
+                "Expr-based measurement conversion failed: %s",
+                exc,
+                exc_info=logger.isEnabledFor(logging.DEBUG),
+            )
+            grayscale = None
+
+    if grayscale is None:
+        resize_ns = getattr(core, "resize", None)
+        convert = getattr(resize_ns, "Point", None) if resize_ns is not None else None
+        if callable(convert) and gray_format is not None:
+            try:
+                grayscale = convert(clip, format=gray_format)
+            except Exception as exc:
+                logger.debug(
+                    "Resize fallback for measurement failed: %s",
+                    exc,
+                    exc_info=logger.isEnabledFor(logging.DEBUG),
+                )
+                grayscale = None
+    if grayscale is None:
         return None
 
     try:
@@ -247,8 +292,12 @@ def _extract_measurement(
 ) -> Optional[tuple[float, float]]:
     if measurement_clip is None:
         return None
+    total_frames = getattr(measurement_clip, "num_frames", None)
+    clamped_idx = frame_idx
+    if isinstance(total_frames, int) and total_frames > 0:
+        clamped_idx = max(0, min(frame_idx, total_frames - 1))
     try:
-        frame = measurement_clip.get_frame(frame_idx)
+        frame = measurement_clip.get_frame(clamped_idx)
     except Exception:
         return None
     props = getattr(frame, "props", None)
@@ -365,8 +414,6 @@ def _apply_frame_info_overlay(
             f"Frame {display_idx} of {clip_ref.num_frames}",
             f"Picture type: {pict_text}",
         ]
-        if selection_label:
-            lines.append(f"Content Type: {selection_label}")
         info = "\n".join(lines)
         return subtitle(clip_ref, text=[info], style=FRAME_INFO_STYLE)
 
@@ -1100,7 +1147,7 @@ def _save_frame_with_ffmpeg(
     if overlay_text:
         overlay_cmd = (
             "drawtext=text={text}:fontcolor=white:borderw=2:bordercolor=black:"
-            "box=0:shadowx=1:shadowy=1:shadowcolor=black:x=w-tw-20:y=40"
+            "box=0:shadowx=1:shadowy=1:shadowcolor=black:x=10:y=80"
         ).format(text=_escape_drawtext(overlay_text))
         filters.append(overlay_cmd)
 

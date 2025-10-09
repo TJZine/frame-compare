@@ -289,9 +289,14 @@ def test_build_measurement_clip_extracts_plane_stats(monkeypatch):
             }
 
     class DummyMeasurementClip:
+        num_frames = 1
+
         def get_frame(self, index: int):
             assert index == 0
             return DummyFrame()
+
+    class DummyPlaneClip:
+        pass
 
     class DummyExprClip:
         pass
@@ -299,6 +304,10 @@ def test_build_measurement_clip_extracts_plane_stats(monkeypatch):
     class DummyCoreStd:
         def __init__(self, core):
             self._core = core
+
+        def ShufflePlanes(self, clip, planes, colorfamily):
+            self._core.shuffle_calls.append((clip, tuple(planes), colorfamily))
+            return DummyPlaneClip()
 
         def Expr(self, clips, exprs, format=None):
             self._core.expr_args = (clips, exprs, format)
@@ -310,12 +319,23 @@ def test_build_measurement_clip_extracts_plane_stats(monkeypatch):
             self._core.planestats_input = clip
             return DummyMeasurementClip()
 
+    class DummyResize:
+        def __init__(self, core):
+            self._core = core
+
+        def Point(self, clip, *, format=None):
+            self._core.resize_calls.append((clip, format))
+            return DummyExprClip()
+
     class DummyCore:
         def __init__(self):
             self.std = DummyCoreStd(self)
+            self.resize = DummyResize(self)
+            self.shuffle_calls = []
             self.expr_args = None
             self.planestats_input = None
             self.expr_result = None
+            self.resize_calls = []
 
     dummy_core = DummyCore()
 
@@ -325,6 +345,7 @@ def test_build_measurement_clip_extracts_plane_stats(monkeypatch):
         GRAYH = object()
         GRAY16 = object()
         GRAY8 = object()
+        GRAY = 1
 
         def __init__(self, core):
             self.core = core
@@ -334,16 +355,17 @@ def test_build_measurement_clip_extracts_plane_stats(monkeypatch):
 
     clip = types.SimpleNamespace(
         core=dummy_core,
-        format=types.SimpleNamespace(sample_type=dummy_vs.FLOAT, bits_per_sample=32),
+        format=types.SimpleNamespace(sample_type=dummy_vs.FLOAT, bits_per_sample=32, num_planes=3),
     )
 
     measurement_clip = screenshot._build_measurement_clip(clip)
     assert isinstance(measurement_clip, DummyMeasurementClip)
+    assert len(dummy_core.shuffle_calls) == 3
     clips_used, exprs_used, format_used = dummy_core.expr_args
-    assert clips_used == [clip, clip, clip]
+    assert len(clips_used) == 3
     assert exprs_used == ["x 0.2126 * y 0.7152 * + z 0.0722 * +"]
     assert dummy_core.planestats_input is dummy_core.expr_result
-    assert format_used in {dummy_vs.GRAYS, dummy_vs.GRAYH}
+    assert format_used in {dummy_vs.GRAYS, dummy_vs.GRAYH, dummy_vs.GRAY16, dummy_vs.GRAY8}
 
     stats = screenshot._extract_measurement(measurement_clip, 0, 100.0)
     assert stats == (90.0, 50.0)
