@@ -371,6 +371,7 @@ class CliLayoutRenderer:
         self.verbose = verbose
         self._color_mapper = _AnsiColorMapper(no_color=no_color)
         self.no_color = self._color_mapper.no_color
+        self._unicode_ok = self._supports_unicode()
         self._progress_state: Dict[str, Dict[str, Any]] = {}
         self._cached_width: Optional[int] = None
         self._rendered_section_ids: List[str] = []
@@ -390,6 +391,12 @@ class CliLayoutRenderer:
             for role, token in _COLOR_BLIND_OVERRIDES.items():
                 self._role_tokens.setdefault(role, token)
                 self._role_tokens[role] = token
+        # Ensure new accent roles fall back gracefully if theme omits them.
+        if "accent_subhead" not in self._role_tokens:
+            fallback = self._role_tokens.get("accent_render") or self._role_tokens.get("accent") or ""
+            self._role_tokens["accent_subhead"] = fallback
+        if "rule_dim" not in self._role_tokens:
+            self._role_tokens["rule_dim"] = self._role_tokens.get("dim", "grey.dim")
 
         self._highlight_rules: Dict[str, List[HighlightRule]] = {}
         for rule in layout.highlights:
@@ -1061,6 +1068,7 @@ class CliLayoutRenderer:
         blocks = section.get("blocks", [])
         if not isinstance(blocks, list):
             raise CliLayoutError("group.blocks must be a list")
+        rendered_blocks: List[Tuple[Optional[str], List[str]]] = []
         for block in blocks:
             when_expr = block.get("when")
             if when_expr:
@@ -1071,12 +1079,111 @@ class CliLayoutRenderer:
             if block_type == "progress":
                 continue
             subtitle = block.get("subtitle")
-            if subtitle:
-                self._write(self._colorize("dim", subtitle))
+            lines: List[str] = []
             for line in block.get("lines", []):
                 rendered = self._prepare_output(self.render_template(line, values, flags))
                 if rendered:
-                    self._write(rendered)
+                    lines.append(rendered)
+            if not subtitle and not lines:
+                continue
+            formatted_lines = self._format_block_lines(lines)
+            rendered_blocks.append((subtitle, formatted_lines))
+        show_rule = self._console_width() >= 80
+        for index, (subtitle, lines) in enumerate(rendered_blocks):
+            if subtitle:
+                self._write(self._format_subtitle(subtitle))
+                if show_rule:
+                    rule_line = self._build_rule_line(lines)
+                    if rule_line:
+                        self._write(rule_line)
+            for line in lines:
+                self._write(line)
+            if index < len(rendered_blocks) - 1 and (lines or subtitle):
+                self._write()
+
+    def _supports_unicode(self) -> bool:
+        encoding = getattr(self.console, "encoding", None)
+        if not encoding:
+            return True
+        try:
+            return "utf" in encoding.lower()
+        except AttributeError:
+            return False
+
+    def _using_ascii_symbols(self) -> bool:
+        return self.no_color or not self._unicode_ok
+
+    def _format_subtitle(self, subtitle: str) -> str:
+        prefix = ">" if self._using_ascii_symbols() else "›"
+        text = f"{prefix} {subtitle.strip()}"
+        if self.no_color:
+            return text
+        return self._colorize("accent_subhead", text)
+
+    def _build_rule_line(self, lines: Sequence[str]) -> str:
+        if not lines:
+            return ""
+        indent: Optional[int] = None
+        max_content_width = 0
+        for line in lines:
+            stripped = line.lstrip()
+            if not stripped:
+                continue
+            current_indent = len(line) - len(stripped)
+            indent = current_indent if indent is None else min(indent, current_indent)
+            max_content_width = max(max_content_width, self._visible_length(stripped))
+        if max_content_width == 0:
+            return ""
+        indent = indent or 0
+        width_limit = max(1, self._console_width() - indent)
+        rule_width = min(max_content_width, width_limit)
+        char = "-" if self._using_ascii_symbols() else "─"
+        rule_body = char * rule_width
+        if not self._using_ascii_symbols():
+            rule_body = self._colorize("rule_dim", rule_body)
+        return (" " * indent) + rule_body
+
+    def _format_block_lines(self, lines: Sequence[str]) -> List[str]:
+        if not lines:
+            return []
+        structured: List[Tuple[int, Optional[List[str]], str]] = []
+        max_cols = 0
+        for line in lines:
+            if not line:
+                structured.append((0, None, line))
+                continue
+            stripped_line = line.strip()
+            if not stripped_line:
+                structured.append((len(line) - len(stripped_line), None, line))
+                continue
+            indent = len(line) - len(line.lstrip(" "))
+            segments = re.split(r"\s{2,}", stripped_line)
+            max_cols = max(max_cols, len(segments))
+            structured.append((indent, segments, line))
+        if max_cols <= 1:
+            return list(lines)
+        col_widths = [0] * max_cols
+        for indent, segments, _ in structured:
+            if not segments:
+                continue
+            for idx, segment in enumerate(segments):
+                col_widths[idx] = max(col_widths[idx], self._visible_length(segment))
+        formatted: List[str] = []
+        for indent, segments, original in structured:
+            if not segments or len(segments) <= 1:
+                formatted.append(original)
+                continue
+            padded_segments: List[str] = []
+            for idx, segment in enumerate(segments):
+                if idx == 0:
+                    padded_segments.append(segment)
+                    continue
+                vis = self._visible_length(segment)
+                pad = max(0, col_widths[idx] - vis)
+                padded_segments.append(" " * pad + segment)
+            body = "  ".join(padded_segments)
+            formatted.append(" " * indent + body)
+        return formatted
 
     def _render_passthrough_section(self, section: Mapping[str, Any], values: Mapping[str, Any], flags: Mapping[str, Any]) -> None:
         self._render_title_badge(section)

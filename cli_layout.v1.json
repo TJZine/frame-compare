@@ -8,6 +8,7 @@
       "accent_analyze": "purple.bright",
       "accent_render": "magenta.bright",
       "accent_publish": "green.bright",
+      "accent_subhead": "magenta.bold",
       "value": "white.bright",
       "unit": "grey.dim",
       "key": "blue",
@@ -20,7 +21,8 @@
       "success": "green",
       "warn": "yellow",
       "error": "red",
-      "dim": "grey.dim"
+      "dim": "grey.dim",
+      "rule_dim": "grey.dim"
     },
     "symbols": {
       "ok": "✓",
@@ -162,6 +164,14 @@
       "type": "group",
       "title_badge": "[RENDER]",
       "blocks": [
+        {
+          "subtitle": "Legend",
+          "when": "verbose",
+          "lines": [
+            "[[key]]Tokens[[/]]:[[key]] key[[/]] [[value]]value[[/]] [[unit]]unit[[/]] [[path]]path[[/]] ([[unit]]dim[[/]] = helper text)",
+            "[[key]]Prefix[[/]]:[[unit]]›[[/]] or [[unit]]>[[/]] marks sub-blocks; rules dim to show scope"
+          ]
+        },
         {
           "subtitle": "Writer",
           "lines": [

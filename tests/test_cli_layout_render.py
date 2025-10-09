@@ -231,6 +231,16 @@ def test_layout_renderer_sample_output(tmp_path, monkeypatch):
     for marker in required_markers:
         assert any(marker in line for line in lines), marker
 
+    assert any(line.strip().startswith("> Legend") for line in lines)
+    legend_idx = next(i for i, line in enumerate(lines) if line.strip().startswith("> Legend"))
+    assert legend_idx + 1 < len(lines)
+    assert set(lines[legend_idx + 1].strip()) <= {"-"}, "Legend divider missing"
+
+    writer_idx = next(i for i, line in enumerate(lines) if line.strip().startswith("> Writer"))
+    canvas_idx = next(i for i, line in enumerate(lines) if line.strip().startswith("> Canvas"))
+    assert writer_idx < canvas_idx
+    assert any(lines[i] == "" for i in range(writer_idx, canvas_idx)), "Expected blank line between Writer and Canvas blocks"
+
     assert any(line.startswith("┌") for line in lines)
     assert any(line.startswith("└") for line in lines)
 

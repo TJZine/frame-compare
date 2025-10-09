@@ -3,7 +3,13 @@ from typing import Any, Dict
 
 from rich.console import Console
 
-from src.cli_layout import CliLayoutRenderer, LayoutContext, _AnsiColorMapper, load_cli_layout
+from src.cli_layout import (
+    CliLayoutRenderer,
+    LayoutContext,
+    _AnsiColorMapper,
+    _ANSI_ESCAPE_RE,
+    load_cli_layout,
+)
 
 
 def _project_root() -> Path:
@@ -242,3 +248,40 @@ def test_highlight_markup_and_spans(tmp_path, monkeypatch):
     context_no_color = LayoutContext(values, flags, renderer=renderer_no_color)
     token_plain = renderer_no_color._render_token("render.add_frame_info", context_no_color)
     assert renderer_no_color._prepare_output(f"[[value]]{token_plain}[[/]]") == "True"
+
+
+def _render_section(renderer: CliLayoutRenderer, section_id: str, values: Dict[str, Any], flags: Dict[str, Any]) -> list[str]:
+    renderer.bind_context(values, flags)
+    section = next(sec for sec in renderer.layout.sections if sec.get("id") == section_id)
+    renderer.render_section(section, values, flags)
+    return [line.rstrip("\n") for line in renderer.console.export_text().splitlines()]
+
+
+def test_group_subheading_prefix_ascii_and_unicode(tmp_path):
+    values = _sample_values(tmp_path)
+    shared_flags = {"tmdb_resolved": True, "upload_enabled": False}
+
+    ascii_renderer = _make_renderer(100, no_color=True)
+    ascii_flags = {**shared_flags, "verbose": False, "quiet": False, "no_color": True}
+    ascii_lines = [_ANSI_ESCAPE_RE.sub("", line).strip() for line in _render_section(ascii_renderer, "render", values, ascii_flags)]
+    assert any(line.startswith("> Writer") for line in ascii_lines)
+
+    unicode_renderer = _make_renderer(100, no_color=False)
+    unicode_flags = {**shared_flags, "verbose": False, "quiet": False, "no_color": False}
+    unicode_lines = [_ANSI_ESCAPE_RE.sub("", line).strip() for line in _render_section(unicode_renderer, "render", values, unicode_flags)]
+    assert any(line.startswith("› Writer") for line in unicode_lines)
+
+
+def test_group_rule_omitted_on_narrow_terminal(tmp_path):
+    values = _sample_values(tmp_path)
+    renderer = _make_renderer(70, no_color=True)
+    flags = {"verbose": True, "quiet": False, "no_color": True}
+    lines = [_ANSI_ESCAPE_RE.sub("", line) for line in _render_section(renderer, "render", values, flags)]
+
+    legend_idx = next(i for i, line in enumerate(lines) if line.strip().startswith("> Legend"))
+    legend_follow = next((line for line in lines[legend_idx + 1 :] if line.strip()), "")
+    assert legend_follow and set(legend_follow.strip()) != {"-"}
+
+    writer_idx = next(i for i, line in enumerate(lines) if line.strip().startswith("> Writer"))
+    writer_follow = next((line for line in lines[writer_idx + 1 :] if line.strip()), "")
+    assert writer_follow and set(writer_follow.strip()) != {"-"}
