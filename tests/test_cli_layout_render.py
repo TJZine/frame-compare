@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict
 
+import pytest
 from rich.console import Console
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -250,3 +251,25 @@ def test_layout_renderer_sample_output(tmp_path, monkeypatch):
 
     assert any(line.strip().startswith("{") for line in lines)
     json.loads(json.dumps(sample_json))
+
+
+def test_layout_expression_rejects_dunder_access(tmp_path):
+    layout_path = _project_root() / "cli_layout.v1.json"
+    layout = load_cli_layout(layout_path)
+    console = Console(width=100, record=True, color_system=None)
+    renderer = CliLayoutRenderer(layout, console, quiet=False, verbose=False, no_color=True)
+    sample_values = _sample_values(tmp_path)
+    flags: Dict[str, Any] = {"verbose": False, "quiet": False, "no_color": True}
+    renderer.bind_context(sample_values, flags)
+    context = LayoutContext(sample_values, flags, renderer=renderer)
+
+    assert context.resolve("clips.ref.__class__") is None
+
+    assert renderer._evaluate_expression("clips.ref.__class__", context) is None
+    assert not renderer._evaluate_condition("clips.ref.__class__", context)
+
+    assert renderer._evaluate_expression("tonemap.verify_luma_threshold * 0.9", context) == pytest.approx(
+        0.09
+    )
+
+    assert renderer._evaluate_expression("__import__('os')", context) is None
