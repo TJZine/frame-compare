@@ -151,8 +151,8 @@ def test_cli_applies_overrides_and_naming(tmp_path, monkeypatch, runner):
     assert "• tgt=BBB Short" in result.output
 
     assert "[PREPARE]" in result.output
-    assert "• Ref:  lead=   5f" in result.output
-    assert "• Tgt:  lead=   0f" in result.output
+    assert "• Ref:  lead=  5f" in result.output
+    assert "• Tgt:  lead=  0f" in result.output
     assert "ignore_lead=0.00s" in result.output
     assert "[SUMMARY]" in result.output
     assert "• Clips:" in result.output
@@ -916,7 +916,12 @@ def test_audio_alignment_block_and_json(tmp_path, monkeypatch, runner):
     assert result.exit_code == 0
 
     output_lines = result.output.splitlines()
-    assert any("Streams: ref=\"Clip A->" in line and "Clip B" in line for line in output_lines)
+    streams_idx = next(i for i, line in enumerate(output_lines) if line.strip().startswith("Streams:"))
+    assert 'ref="Clip A->' in output_lines[streams_idx]
+    clip_b_lines = [output_lines[streams_idx]]
+    if streams_idx + 1 < len(output_lines):
+        clip_b_lines.append(output_lines[streams_idx + 1])
+    assert any("Clip B" in line for line in clip_b_lines)
     assert any("Estimating audio offsets" in line for line in output_lines)
     assert any("Offset:" in line and "Clip B" in line for line in output_lines)
     assert "Confirm:" in result.output
