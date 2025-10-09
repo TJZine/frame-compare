@@ -5,4 +5,4 @@ All notable user-visible updates will be documented in this file in reverse chro
 - *2025-09-29:* Initialize changelog to align with repository persistence rules.
 - *2025-09-29:* Revamped CLI presentation: extended palette, added style spans, highlights, section accents, progress bar styling, verification metrics, and refreshed templates per `features/CLI/GUIDE.md`.
 - *2025-09-30:* Enhanced CLI group blocks with accent subhead glyphs, dimmed divider rules, numeric alignment, and verbose legends describing token colouring for RENDER/PREPARE sections.
-- *2025-09-30:* Removed HDR measurement overlays and frame-info content-type rows to keep diagnostic output concise; tonemap details now focus on resolution and mastering metadata only.
+- *2025-09-30:* Diagnostic overlay now replaces the HDR MAX/AVG measurement block with the render resolution summary, mastering display luminance (when available), and a `Frame Selection Type` line sourced from cached selection metadata.
