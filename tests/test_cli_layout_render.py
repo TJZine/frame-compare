@@ -14,10 +14,41 @@ from src.cli_layout import CliLayoutRenderer, LayoutContext, load_cli_layout
 
 
 def _project_root() -> Path:
+    """
+    Get the project's root directory.
+    
+    Returns:
+        Path: Path to the project root (the parent of this file's parent).
+    """
     return Path(__file__).resolve().parent.parent
 
 
 def _sample_values(tmp_path: Path) -> Dict[str, Any]:
+    """
+    Constructs a representative sample configuration dictionary used by CLI layout rendering tests.
+    
+    Parameters:
+        tmp_path (Path): Temporary directory used to construct sample file and output paths.
+    
+    Returns:
+        sample_values (Dict[str, Any]): A nested dictionary containing test-ready configuration and metadata, including:
+            - clips: clip count, list of clip items and explicit ref/tgt entries.
+            - trims: per-clip lead/trail frame and second values.
+            - window: ignore and minimum window durations.
+            - alignment: manual alignment start/end values.
+            - analysis: analysis parameters and summary counts/previews.
+            - audio_alignment: alignment metadata, offsets, preview paths and selected streams.
+            - render: rendering options and output directory.
+            - tonemap: tonemapping settings and verification threshold.
+            - verify: verification thresholds, delta summary and entries.
+            - overlay: overlay enablement, template and mode.
+            - cache: cache file and status.
+            - tmdb: media metadata (category, id, title, year, lang).
+            - overrides: runtime overrides (e.g., change_fps).
+            - warnings: list of warning records.
+            - slowpics: slowpic-related settings and metadata.
+            - audio_alignment_map: mapping structure for audio alignments (empty by default).
+    """
     sample_clips = [
         {
             "label": "Reference",
