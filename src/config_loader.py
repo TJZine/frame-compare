@@ -84,7 +84,15 @@ def _validate_change_fps(change_fps: Dict[str, Any]) -> None:
 
 
 def load_config(path: str) -> AppConfig:
-    """Read, parse, and validate configuration from *path*."""
+    """
+    Load and validate application configuration from a TOML file at the given path.
+    
+    Returns:
+        A validated AppConfig instance.
+    
+    Raises:
+        ConfigError: If the file is not UTF-8, the TOML is invalid, a section is malformed, or any validation rule fails.
+    """
 
     with open(path, "rb") as handle:
         raw_bytes = handle.read()

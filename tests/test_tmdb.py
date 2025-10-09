@@ -17,6 +17,11 @@ from src.tmdb import (
 
 @pytest.fixture(autouse=True)
 def clear_tmdb_cache() -> None:
+    """
+    Temporarily clears and restores the TMDB in-memory cache around a test.
+    
+    Saves the cache's original max entry setting, clears the cache before yielding to the test, and after the test restores the original max entry limit and clears the cache again.
+    """
     original_max = tmdb_module._CACHE._max_entries
     tmdb_module._CACHE.clear()
     yield
@@ -29,6 +34,12 @@ def test_tmdb_cache_enforces_max_entries(monkeypatch: pytest.MonkeyPatch) -> Non
     monotonic_values = [100.0]
 
     def fake_monotonic() -> float:
+        """
+        Return the current mocked monotonic time used by tests.
+        
+        Returns:
+            float: The mocked monotonic time — the first element of the shared `monotonic_values` sequence.
+        """
         return monotonic_values[0]
 
     monkeypatch.setattr(tmdb_module.time, "monotonic", fake_monotonic)
@@ -49,6 +60,12 @@ def test_tmdb_cache_expires_entries(monkeypatch: pytest.MonkeyPatch) -> None:
     monotonic_values = [200.0]
 
     def fake_monotonic() -> float:
+        """
+        Return the current mocked monotonic time used by tests.
+        
+        Returns:
+            float: The mocked monotonic time — the first element of the shared `monotonic_values` sequence.
+        """
         return monotonic_values[0]
 
     monkeypatch.setattr(tmdb_module.time, "monotonic", fake_monotonic)

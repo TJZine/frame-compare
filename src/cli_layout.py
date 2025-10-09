@@ -67,9 +67,41 @@ _ALLOWED_COMPARE_OPS: Tuple[type[ast.cmpop], ...] = (
 
 
 def _validate_safe_expression(node: ast.AST, *, allowed_calls: Mapping[str, Any], allowed_names: Mapping[str, Any]) -> None:
-    """Ensure the parsed AST only contains whitelisted operations."""
+    """
+    Validate that an AST only contains a restricted set of safe expression constructs.
+    
+    This function walks the provided AST and enforces a whitelist of allowed node kinds:
+    boolean, binary and unary operations, comparisons, conditional (if-)expressions,
+    direct function calls where the callee is a simple name (no attribute or lambda),
+    simple name references, numeric/string/bool/None constants, and list/tuple literals.
+    Calls with keyword arguments, complex call targets, unsupported constants or any
+    other node kinds are rejected.
+    
+    Parameters:
+        node (ast.AST): The root AST node to validate.
+        allowed_calls (Mapping[str, Any]): Mapping of allowed function names to their
+            permitted meanings; a call is allowed only if the function name appears
+            in this mapping.
+        allowed_names (Mapping[str, Any]): Mapping of allowed identifier names to
+            their permitted meanings; name nodes are allowed only if present here.
+    
+    Raises:
+        ValueError: If the AST contains any disallowed node, operation, name, call,
+            or unsupported constant value.
+    """
 
     def _check(inner: ast.AST) -> None:
+        """
+        Validate an AST node subtree to ensure it contains only permitted expression constructs.
+        
+        This function recursively inspects the provided AST node and raises a ValueError if it encounters any node type, operator, name, call target, constant, or argument form that is not allowed by the surrounding validation context (e.g., the `allowed_calls` and `allowed_names` sets in the enclosing scope).
+        
+        Parameters:
+            inner (ast.AST): The AST node to validate.
+        
+        Raises:
+            ValueError: If the node contains disallowed operations, names, calls, keywords, constant types, or any unsupported AST elements.
+        """
         if isinstance(inner, ast.Expression):
             _check(inner.body)
             return
@@ -416,6 +448,24 @@ class LayoutContext:
         self._renderer = renderer
 
     def resolve(self, path: str) -> Any:
+        """
+        Resolve a dot-separated path against the renderer-bound context data or flags.
+        
+        Looks up the given path in the following order and semantics:
+        - If `path` exactly matches a key in the active flags, return that flag value.
+        - Otherwise, traverse the renderer's bound data using dot-separated segments.
+        - Numeric segments index into list/tuple-like sequences (0-based).
+        - The special segment `e` returns the renderer's path-ellipsis representation of the current value.
+        - Segments that are empty are ignored.
+        - Any segment that starts with `_` or contains `__` (except the literal `e`) halts traversal and returns `None` to prevent access to private/internal attributes.
+        - If a lookup fails at any step, `None` is returned.
+        
+        Parameters:
+            path (str): Dot-separated path string to resolve; an empty string returns the root data object.
+        
+        Returns:
+            The resolved value from flags or data, or `None` if the path cannot be resolved or is disallowed.
+        """
         if path in self._flags:
             return self._flags[path]
         segments = path.split(".") if path else []
@@ -662,6 +712,17 @@ class CliLayoutRenderer:
         return None
 
     def _to_number(self, value: Any) -> Optional[float]:
+        """
+        Convert a value to a float when it represents a number.
+        
+        Accepts booleans (True -> 1.0, False -> 0.0), int/float values, and numeric strings (commas are allowed as thousand separators). Non-convertible values return None.
+        
+        Parameters:
+            value: The input to convert; may be bool, int, float, or str containing a numeric value.
+        
+        Returns:
+            A float parsed from the input, or `None` if the value cannot be converted to a number.
+        """
         if isinstance(value, bool):
             return float(value)
         if isinstance(value, (int, float)):
@@ -680,6 +741,20 @@ class CliLayoutRenderer:
         *,
         allowed_call_names: Sequence[str],
     ) -> Any:
+        """
+        Evaluate a Python expression string after validating it only uses a restricted, whitelisted subset of operations and names.
+        
+        Parameters:
+            expression (str): The expression to validate and evaluate.
+            namespace (Mapping[str, Any]): Mapping of names available to the expression during evaluation.
+            allowed_call_names (Sequence[str]): Names from `namespace` that are permitted to be called as functions.
+        
+        Returns:
+            Any: The result of evaluating the validated expression.
+        
+        Raises:
+            ValueError: If the expression has invalid syntax or uses disallowed AST constructs or names.
+        """
         try:
             tree = ast.parse(expression, mode="eval")
         except SyntaxError as exc:
@@ -690,6 +765,16 @@ class CliLayoutRenderer:
         return eval(compiled, {"__builtins__": {}}, namespace)
 
     def _evaluate_expression(self, expression: str, context: LayoutContext) -> Any:
+        """
+        Evaluate a template expression in the given layout context and return its computed value.
+        
+        Parameters:
+        	expression (str): An expression string that may reference data via the context (e.g., names resolved by LayoutContext.resolve).
+        	context (LayoutContext): Context used to resolve names and provide runtime values for the expression.
+        
+        Returns:
+        	The evaluated result of the expression, or `None` if evaluation fails or the expression is invalid.
+        """
         prepared = self._prepare_condition(expression)
         namespace: Dict[str, Any] = {
             "resolve": context.resolve,
@@ -1025,6 +1110,16 @@ class CliLayoutRenderer:
         return None
 
     def _evaluate_condition(self, expr: str, context: LayoutContext) -> bool:
+        """
+        Evaluate a boolean-like conditional expression within the given layout context.
+        
+        Parameters:
+            expr (str): The conditional expression text to evaluate.
+            context (LayoutContext): Context used to resolve path lookups referenced by the expression.
+        
+        Returns:
+            bool: `True` if the expression evaluates to a truthy value in the provided context, `False` if it evaluates to a falsy value, is empty, or if evaluation fails.
+        """
         expression = expr.strip()
         if not expression:
             return False
@@ -1043,6 +1138,15 @@ class CliLayoutRenderer:
         return bool(result)
 
     def _prepare_condition(self, expr: str) -> str:
+        """
+        Prepare a conditional template expression for safe evaluation by normalizing operators, boolean/null literals, and variable references.
+        
+        Parameters:
+            expr (str): A conditional expression using JavaScript-style operators and identifiers (e.g. "a && b != true", "flag || other.value", "!exists").
+        
+        Returns:
+            str: An equivalent Python expression where `&&`/`||`/`!` are converted to `and`/`or`/`not`, `true`/`false`/`none` are normalized to `True`/`False`/`None`, recognized safe function names are preserved, and bare identifiers are wrapped as `resolve('identifier')` for runtime resolution.
+        """
         cleaned = expr.replace("&&", " and ").replace("||", " or ")
         tokens: List[str] = []
         index = 0

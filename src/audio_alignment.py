@@ -83,6 +83,17 @@ def ensure_external_tools() -> None:
 
 
 def _load_optional_modules() -> Tuple[Any, Any, Any]:
+    """
+    Load and return the optional audio-processing modules required for alignment.
+    
+    Attempts to import numpy, librosa, and soundfile while suppressing NumPy flush-to-zero warnings, and returns the imported module objects.
+    
+    Returns:
+        tuple: A 3-tuple (np, librosa, sf) containing the imported `numpy` module as `np`, the `librosa` module, and the `soundfile` module as `sf`.
+    
+    Raises:
+        AudioAlignmentError: If any of the required optional modules (numpy, librosa, soundfile) are not installed.
+    """
     try:
         with _suppress_flush_to_zero_warning():
             import librosa  # type: ignore
@@ -217,6 +228,20 @@ def _onset_envelope(
     sample_rate: int,
     hop_length: int,
 ) -> Tuple[Any, int]:
+    """
+    Compute an onset strength envelope for the audio in a WAV file at a given sample rate and hop length.
+    
+    Parameters:
+        wav_path (Path): Path to the WAV file to analyze.
+        sample_rate (int): Target sample rate used for resampling and envelope calculation.
+        hop_length (int): Number of samples between successive onset frames; returned unchanged.
+    
+    Returns:
+        Tuple[np.ndarray, int]: A tuple containing the onset strength envelope as a float32 1-D array and the hop_length.
+    
+    Raises:
+        AudioAlignmentError: If the file contains no audio samples.
+    """
     np, librosa, sf = _load_optional_modules()
 
     with _suppress_flush_to_zero_warning():

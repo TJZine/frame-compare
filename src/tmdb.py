@@ -110,10 +110,22 @@ class _TTLCache:
     """Bounded TTL cache shared across TMDB requests."""
 
     def __init__(self, max_entries: int = 256) -> None:
+        """
+        Initialize the bounded TTL cache.
+        
+        Parameters:
+            max_entries (int): Maximum number of entries the cache will hold; values less than 0 are treated as 0.
+        """
         self._max_entries = max(0, int(max_entries))
         self._data: "OrderedDict[Tuple[Any, ...], Tuple[float, int, Any]]" = OrderedDict()
 
     def configure(self, *, max_entries: int | None = None) -> None:
+        """
+        Adjust the maximum number of entries the cache will hold and prune entries if necessary.
+        
+        Parameters:
+            max_entries (int | None): New maximum cache size. If `None`, leaves the current limit unchanged. If set to 0, clears all entries. If set to a positive integer smaller than the current size, evicts the oldest entries until the cache size is at or below the new limit.
+        """
         if max_entries is not None:
             self._max_entries = max(0, int(max_entries))
             if self._max_entries == 0:
@@ -123,9 +135,26 @@ class _TTLCache:
                     self._data.popitem(last=False)
 
     def clear(self) -> None:
+        """
+        Clear all entries from the TTL cache.
+        
+        Removes every stored key and associated value so subsequent lookups will miss until new values are set.
+        """
         self._data.clear()
 
     def get(self, key: Tuple[Any, ...], ttl_seconds: int) -> Any | None:
+        """
+        Retrieve a cached value if present and still within its allowed TTL.
+        
+        If `ttl_seconds` is less than or equal to 0 the key is removed and `None` is returned. The effective TTL for this retrieval is the smaller of the stored entry's TTL and `ttl_seconds`. If the entry is missing or its effective TTL has elapsed the entry is removed and `None` is returned. A successful lookup updates the entry's recency and returns the stored value.
+        
+        Parameters:
+            key (tuple[Any, ...]): The cache lookup key.
+            ttl_seconds (int): Maximum allowed time-to-live for this retrieval (in seconds); capped by the entry's stored TTL. Non-positive values force eviction.
+        
+        Returns:
+            Any | None: The cached value if found and not expired, otherwise `None`.
+        """
         if ttl_seconds <= 0:
             self._data.pop(key, None)
             return None
@@ -144,6 +173,17 @@ class _TTLCache:
         return value
 
     def set(self, key: Tuple[Any, ...], value: Any, ttl_seconds: int) -> None:
+        """
+        Store a value in the cache with a per-entry time-to-live and enforce capacity limits.
+        
+        Parameters:
+            key (Tuple[Any, ...]): Cache key tuple identifying the entry.
+            value (Any): Value to store.
+            ttl_seconds (int): Time-to-live in seconds for the entry. If less than or equal to zero, the entry is removed (or not stored).
+        
+        Returns:
+            None
+        """
         if ttl_seconds <= 0 or self._max_entries == 0:
             self._data.pop(key, None)
             return
@@ -461,6 +501,23 @@ async def _http_request(
     path: str,
     params: Dict[str, Any],
 ) -> Dict[str, Any]:
+    """
+    Perform a cached HTTP GET request to the TMDB API and return the parsed JSON payload.
+    
+    This function will return a cached response when available (keyed by path and params) and will retry on transient server (5xx) or rate-limit (429) responses with exponential backoff. Client or persistent errors result in a TMDBResolutionError.
+    
+    Parameters:
+        client (httpx.AsyncClient): Configured HTTP client used for the request.
+        cache_ttl (int): Time-to-live in seconds for storing the response in the internal cache.
+        path (str): Request path or endpoint to call (relative to the client's base URL).
+        params (Dict[str, Any]): Query parameters to include with the GET request.
+    
+    Returns:
+        dict: Parsed JSON payload returned by TMDB.
+    
+    Raises:
+        TMDBResolutionError: If the request fails after retries, TMDB returns a 4xx error, or the response contains invalid JSON.
+    """
     key = (path, tuple(sorted(params.items())))
     cached = _CACHE.get(key, cache_ttl)
     if cached is not None:
@@ -795,7 +852,26 @@ async def resolve_tmdb(
     category_preference: Optional[str] = None,
     http_transport: httpx.BaseTransport | None = None,
 ) -> Optional[TMDBResolution]:
-    """Resolve TMDB metadata for *filename* using the provided *config*."""
+    """
+    Resolve TMDB metadata for a media filename using the TMDB API and heuristics.
+    
+    Parameters:
+        filename (str): File or release name to analyze and match against TMDB.
+        config (TMDBConfig): Configuration containing TMDB API key, cache and parsing options.
+        year (Optional[int]): Optional explicit release year to bias matching.
+        imdb_id (Optional[str]): Optional explicit IMDb identifier to perform an external lookup.
+        tvdb_id (Optional[str]): Optional explicit TVDB identifier to perform an external lookup.
+        unattended (Optional[bool]): When True, suppress interactive ambiguity raising and prefer automatic selection; when None, use config default.
+        category_preference (Optional[str]): Optional preferred category hint ("MOVIE" or "TV") to bias searches.
+        http_transport (Optional[httpx.BaseTransport]): Optional HTTP transport to use for requests (used for testing or custom networking).
+    
+    Returns:
+        TMDBResolution | None: A TMDBResolution describing the chosen candidate, margin versus the runner-up, and the source query; returns `None` if no viable match is found.
+    
+    Raises:
+        TMDBResolutionError: If TMDB requests fail, API key is missing, or other resolution-level errors occur.
+        TMDBAmbiguityError: If multiple candidates are plausibly tied and unattended mode is not enabled.
+    """
 
     if not config.api_key:
         raise TMDBResolutionError("tmdb.api_key must be set to resolve TMDB metadata")

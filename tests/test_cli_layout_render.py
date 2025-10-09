@@ -166,6 +166,17 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
 
 
 def test_layout_renderer_sample_output(tmp_path, monkeypatch):
+    """
+    Exercise CliLayoutRenderer with synthetic sample values and assert that rendering, token evaluation, and console output meet expected structure and content.
+    
+    Performs these checks:
+    - Binds sample values and flags to the renderer and verifies simple template resolution.
+    - Renders and validates token highlighting, conditional token splitting, and conditional rendering that includes TMDB identifiers.
+    - Renders every layout section without error.
+    - Prints a JSON snippet to the console and verifies exported text contains required section markers (Frame Compare, DISCOVER, PREPARE, ANALYZE, RENDER, PUBLISH, WARNINGS, SUMMARY).
+    - Verifies presence and formatting of the Legend divider, that the Writer block precedes the Canvas block with a blank line between, and that box-drawing characters ("┌", "└") appear.
+    - Ensures no output line exceeds the console width and that the printed JSON is syntactically valid.
+    """
     layout_path = _project_root() / "cli_layout.v1.json"
     layout = load_cli_layout(layout_path)
     console = Console(width=100, record=True, color_system=None)
