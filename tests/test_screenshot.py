@@ -15,6 +15,19 @@ class FakeClip:
 
 @pytest.fixture(autouse=True)
 def _stub_process_clip(monkeypatch):
+    """
+    Replace screenshot.vs_core.process_clip_for_screenshot with a test stub that simulates a processed clip.
+    
+    This fixture patches the target function so it returns a types.SimpleNamespace containing:
+    - clip: the passed-in clip
+    - overlay_text: None
+    - verification: None
+    - tonemap: a vs_core.TonemapInfo indicating an untonemapped SDR source (applied=False, target_nits=100.0, dst_min_nits=0.1, reason="SDR source")
+    - source_props: an empty dict
+    
+    Parameters:
+        monkeypatch: pytest's monkeypatch fixture used to apply the patch.
+    """
     def _stub(clip, file_name, color_cfg, **kwargs):
         return types.SimpleNamespace(
             clip=clip,
@@ -173,6 +186,20 @@ def _make_plan(
     pad=(0, 0, 0, 0),
     final=(1920, 1080),
 ):
+    """
+    Builds a rendering plan dictionary describing dimensions, crop, scaling, padding, and final output size.
+    
+    Returns:
+        dict: A plan mapping with the following keys:
+            - "width": source frame width.
+            - "height": source frame height.
+            - "crop": 4-tuple (left, top, right, bottom) representing pixel crop offsets.
+            - "cropped_w": width after cropping.
+            - "cropped_h": height after cropping.
+            - "scaled": 2-tuple (width, height) after scaling.
+            - "pad": 4-tuple (left, top, right, bottom) of pixels added as padding.
+            - "final": 2-tuple (width, height) of the final output frame.
+    """
     return {
         "width": width,
         "height": height,

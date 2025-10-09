@@ -42,6 +42,16 @@ class FrameMetricsCacheInfo:
 
 @dataclass
 class CachedMetrics:
+    """
+    Stored brightness and motion metrics captured from previous analyses.
+
+    Attributes:
+        brightness (List[tuple[int, float]]): Frame index and brightness pairs.
+        motion (List[tuple[int, float]]): Frame index and motion score pairs.
+        selection_frames (Optional[List[int]]): Frame indices selected during the cached run.
+        selection_hash (Optional[str]): Hash of the selection inputs that produced ``selection_frames``.
+        selection_categories (Optional[Dict[int, str]]): Optional per-frame category labels.
+    """
     brightness: List[tuple[int, float]]
     motion: List[tuple[int, float]]
     selection_frames: Optional[List[int]]
@@ -267,6 +277,19 @@ def _config_fingerprint(cfg: AnalysisConfig) -> str:
 
 
 def _coerce_seconds(value: object, label: str) -> float:
+    """
+    Convert ``value`` into a floating-point seconds value with validation.
+
+    Parameters:
+        value (object): Raw value to convert; accepts numbers or numeric strings.
+        label (str): Configuration label used when raising validation errors.
+
+    Returns:
+        float: The coerced seconds value.
+
+    Raises:
+        TypeError: If ``value`` cannot be interpreted as a number.
+    """
     if isinstance(value, numbers.Real):
         return float(value)
     if isinstance(value, str):
@@ -370,6 +393,15 @@ def compute_selection_window(
 
 
 def _selection_fingerprint(cfg: AnalysisConfig) -> str:
+    """
+    Return a hash of configuration fields relevant to frame selection.
+
+    Parameters:
+        cfg (AnalysisConfig): Analysis configuration whose selection-related fields should be fingerprinted.
+
+    Returns:
+        str: Hex digest capturing the selection-relevant configuration values.
+    """
     relevant = {
         "frame_count_dark": cfg.frame_count_dark,
         "frame_count_bright": cfg.frame_count_bright,
@@ -403,6 +435,16 @@ def selection_hash_for_config(cfg: AnalysisConfig) -> str:
 def _load_cached_metrics(
     info: FrameMetricsCacheInfo, cfg: AnalysisConfig
 ) -> Optional[CachedMetrics]:
+    """
+    Load previously computed metrics when cache metadata still matches.
+
+    Parameters:
+        info (FrameMetricsCacheInfo): Cache metadata describing the expected file and clip characteristics.
+        cfg (AnalysisConfig): Current analysis configuration whose fingerprint must match the cached payload.
+
+    Returns:
+        Optional[CachedMetrics]: Cached metrics if the persisted payload is valid; otherwise ``None``.
+    """
     path = info.path
     try:
         raw = path.read_text(encoding="utf-8")
@@ -742,8 +784,13 @@ def write_selection_cache_file(
         selection_details,
         analyzed_file,
     )
-    categories = [
-        [int(frame), str(selection_categories.get(int(frame), selection_details.get(frame, SelectionDetail(
+    normalized_frames = [int(frame) for frame in selection_frames]
+
+    def _detail_or_default(frame: int) -> SelectionDetail:
+        existing = selection_details.get(frame)
+        if existing is not None:
+            return existing
+        return SelectionDetail(
             frame_index=frame,
             label="Auto",
             score=None,
@@ -751,22 +798,18 @@ def write_selection_cache_file(
             timecode=None,
             clip_role=None,
             notes=None,
-        )).label))]
-        for frame in selection_frames
+        )
+
+    categories = [
+        [frame, str(selection_categories.get(frame, _detail_or_default(frame).label))]
+        for frame in normalized_frames
     ]
     selection_section = payload.setdefault("selection", {})
+    selection_section["frames"] = normalized_frames
     selection_section["categories"] = categories
     selection_section["annotations"] = {
-        str(frame): _format_selection_annotation(selection_details.get(frame, SelectionDetail(
-            frame_index=frame,
-            label="Auto",
-            score=None,
-            source=_SELECTION_SOURCE_ID,
-            timecode=None,
-            clip_role=None,
-            notes=None,
-        )))
-        for frame in selection_frames
+        str(frame): _format_selection_annotation(_detail_or_default(frame))
+        for frame in normalized_frames
     }
     payload.setdefault("brightness", [])
     payload.setdefault("motion", [])
@@ -844,6 +887,18 @@ def _save_cached_metrics(
     selection_categories: Optional[Dict[int, str]] = None,
     selection_details: Optional[Mapping[int, SelectionDetail]] = None,
 ) -> None:
+    """
+    Persist metrics and optional frame selections for reuse across runs.
+
+    Parameters:
+        info (FrameMetricsCacheInfo): Cache metadata describing the target persistence location.
+        cfg (AnalysisConfig): Analysis configuration whose fingerprint will be stored alongside the metrics.
+        brightness (Sequence[tuple[int, float]]): Per-frame brightness measurements.
+        motion (Sequence[tuple[int, float]]): Per-frame motion measurements.
+        selection_hash (Optional[str]): Fingerprint describing the selection parameters that produced ``selection_frames``.
+        selection_frames (Optional[Sequence[int]]): Optional frame indices chosen for screenshot generation.
+        selection_categories (Optional[Dict[int, str]]): Optional per-frame category labels to persist.
+    """
     path = info.path
     payload = {
         "version": 1,
@@ -898,7 +953,17 @@ def _save_cached_metrics(
     _save_selection_sidecar(info, cfg, selection_hash, selection_frames, selection_details or {})
 
 def dedupe(frames: Sequence[int], min_separation_sec: float, fps: float) -> List[int]:
-    """Remove frames closer than *min_separation_sec* seconds apart (in order)."""
+    """
+    Remove frames closer than ``min_separation_sec`` seconds apart while preserving order.
+
+    Parameters:
+        frames (Sequence[int]): Candidate frame indices.
+        min_separation_sec (float): Minimum allowed spacing between kept frames, expressed in seconds.
+        fps (float): Clip frame rate used to convert seconds to frame distances.
+
+    Returns:
+        List[int]: Filtered frame indices respecting the minimum separation constraint.
+    """
 
     min_gap = 0 if fps <= 0 else int(round(max(0.0, min_separation_sec) * fps))
     result: List[int] = []
@@ -917,6 +982,15 @@ def dedupe(frames: Sequence[int], min_separation_sec: float, fps: float) -> List
 
 
 def _frame_rate(clip) -> float:
+    """
+    Return the best-effort floating-point frame rate for ``clip``.
+
+    Parameters:
+        clip: VapourSynth-like clip exposing ``fps_num``/``fps_den`` attributes.
+
+    Returns:
+        float: Floating-point frames-per-second value, or ``0.0`` if unavailable.
+    """
     num = getattr(clip, "fps_num", None)
     den = getattr(clip, "fps_den", None)
     try:
@@ -928,12 +1002,31 @@ def _frame_rate(clip) -> float:
 
 
 def _clamp_frame(frame: int, total: int) -> int:
+    """
+    Clamp ``frame`` to the valid index range for a clip with ``total`` frames.
+
+    Parameters:
+        frame (int): Candidate frame index.
+        total (int): Total number of frames available.
+
+    Returns:
+        int: Frame index restricted to ``[0, total - 1]`` (or ``0`` when ``total`` is non-positive).
+    """
     if total <= 0:
         return 0
     return max(0, min(total - 1, int(frame)))
 
 
 def _ensure_even(value: int) -> int:
+    """
+    Return ``value`` unchanged when even; otherwise subtract one to make it even.
+
+    Parameters:
+        value (int): Integer to normalise.
+
+    Returns:
+        int: An even integer not greater than ``value``.
+    """
     return value if value % 2 == 0 else value - 1
 
 
@@ -1001,6 +1094,21 @@ def _collect_metrics_vapoursynth(
     indices: Sequence[int],
     progress: Callable[[int], None] | None = None,
 ) -> tuple[List[tuple[int, float]], List[tuple[int, float]]]:
+    """
+    Measure per-frame brightness and motion metrics using VapourSynth.
+
+    Parameters:
+        clip: VapourSynth clip to analyse.
+        cfg (AnalysisConfig): Analysis settings controlling scaling, colours, and motion smoothing.
+        indices (Sequence[int]): Frame indices to sample.
+        progress (Callable[[int], None] | None): Optional callback invoked with the count of processed frames.
+
+    Returns:
+        tuple[List[tuple[int, float]], List[tuple[int, float]]]: Brightness and motion metric pairs for each processed frame.
+
+    Raises:
+        RuntimeError: If VapourSynth processing fails after retries.
+    """
     try:
         import vapoursynth as vs  # type: ignore
     except Exception as exc:  # pragma: no cover - handled by fallback
@@ -1013,6 +1121,7 @@ def _collect_metrics_vapoursynth(
     matrix_in, transfer_in, primaries_in, color_range_in = vs_core._resolve_color_metadata(props)
 
     def _resize_kwargs_for_source() -> dict:
+        """Return color-metadata kwargs describing the source clip."""
         kwargs = {}
         if matrix_in is not None:
             kwargs["matrix_in"] = int(matrix_in)
@@ -1040,6 +1149,7 @@ def _collect_metrics_vapoursynth(
         return [], []
 
     def _detect_uniform_step(values: Sequence[int]) -> Optional[int]:
+        """Return a positive step size when frame indices form an arithmetic series."""
         if len(values) <= 1:
             return 1
         step_value = values[1] - values[0]
@@ -1071,6 +1181,7 @@ def _collect_metrics_vapoursynth(
         raise RuntimeError(f"Failed to trim analysis clip: {exc}") from exc
 
     def _prepare_analysis_clip(node):
+        """Resize and convert *node* to a grayscale analysis representation."""
         work = node
         try:
             if cfg.downscale_height > 0 and work.height > cfg.downscale_height:
@@ -1196,6 +1307,17 @@ def _generate_metrics_fallback(
     cfg: AnalysisConfig,
     progress: Callable[[int], None] | None = None,
 ) -> tuple[List[tuple[int, float]], List[tuple[int, float]]]:
+    """
+    Synthesize deterministic metrics when VapourSynth processing is unavailable.
+
+    Parameters:
+        indices (Sequence[int]): Frame indices to simulate metrics for.
+        cfg (AnalysisConfig): Analysis configuration controlling quantiles and smoothing.
+        progress (Callable[[int], None] | None): Optional callback invoked with the count of processed frames.
+
+    Returns:
+        tuple[List[tuple[int, float]], List[tuple[int, float]]]: Synthetic brightness and motion metric samples.
+    """
     brightness: List[tuple[int, float]] = []
     motion: List[tuple[int, float]] = []
     for idx in indices:
@@ -1208,6 +1330,16 @@ def _generate_metrics_fallback(
 
 
 def _smooth_motion(values: List[tuple[int, float]], radius: int) -> List[tuple[int, float]]:
+    """
+    Apply a simple moving average of ``radius`` to motion metric samples.
+
+    Parameters:
+        values (List[tuple[int, float]]): Motion metric samples as ``(frame, value)`` pairs.
+        radius (int): Window radius used for smoothing.
+
+    Returns:
+        List[tuple[int, float]]: Smoothed motion metric samples.
+    """
     if radius <= 0 or not values:
         return values
     smoothed: List[tuple[int, float]] = []

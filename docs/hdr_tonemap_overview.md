@@ -52,6 +52,9 @@ logs and sets `_Tonemapped="placebo:{curve},dpd={0|1},dst_max={nits}"` on the pr
 ## Overlay & writer behaviour
 - Overlay text defaults to `Tonemapping Algorithm: {tone_curve} dpd = {dynamic_peak_detection} dst = {target_nits} nits` and accepts `{preset}` and `{reason}`
   placeholders. You can fully override the template in config.
+- Diagnostic overlay mode now appends the final render resolution (original → target), the mastering display luminance parsed
+  from frame props when HDR tonemapping is applied, and `Frame Selection Type: …` sourced from persisted selection metadata.
+  The previous MAX/AVG measurement line has been retired to keep the overlay concise.
 - VapourSynth renders apply the overlay after all geometry adjustments (`CropRel`/`Spline36`) but before the final
   dither to RGB24. FFmpeg renders append a matching `drawtext` filter positioned at `x=w-tw-10:y=10`.
 - The overlay lives in the top-right corner to avoid frame info overlays (when enabled).
