@@ -371,6 +371,39 @@ def test_build_measurement_clip_extracts_plane_stats(monkeypatch):
     assert stats == (90.0, 50.0)
 
 
+def test_extract_measurement_normalizes_int_clips(monkeypatch):
+    class DummyFormat:
+        def __init__(self, sample_type=None, bits=0):
+            self.sample_type = sample_type
+            self.bits_per_sample = bits
+
+    class DummyClip:
+        def __init__(self, avg, max_, fmt):
+            self.format = fmt
+            self.num_frames = 2
+            self._frame = types.SimpleNamespace(props={"PlaneStatsAverage": avg, "PlaneStatsMax": max_})
+
+        def get_frame(self, idx):
+            return self._frame
+
+    class DummyVS:
+        FLOAT = 1
+        INTEGER = 0
+
+    monkeypatch.setitem(sys.modules, "vapoursynth", DummyVS())
+
+    int_clip = DummyClip(3276.0, 60000.0, DummyFormat(sample_type=DummyVS.INTEGER, bits=16))
+    stats = screenshot._extract_measurement(int_clip, 5, 100.0)
+    assert stats is not None
+    assert pytest.approx(stats[0], rel=1e-3) == pytest.approx(91.5, rel=1e-3)
+    assert pytest.approx(stats[1], rel=1e-3) == pytest.approx(5.0, rel=1e-3)
+
+    unknown_clip = DummyClip(5000.0, 10000.0, DummyFormat(sample_type=None, bits=None))
+    stats_unknown = screenshot._extract_measurement(unknown_clip, 0, 100.0)
+    assert stats_unknown is not None
+    assert stats_unknown[0] <= 100.0
+
+
 def test_compression_flag_passed(tmp_path, monkeypatch):
     clip = FakeClip(1920, 1080)
     cfg = ScreenshotConfig(use_ffmpeg=True, compression_level=2)

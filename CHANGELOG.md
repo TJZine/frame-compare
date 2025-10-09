@@ -6,4 +6,4 @@ All notable user-visible updates will be documented in this file in reverse chro
 - *2025-09-29:* Revamped CLI presentation: extended palette, added style spans, highlights, section accents, progress bar styling, verification metrics, and refreshed templates per `features/CLI/GUIDE.md`.
 - *2025-09-30:* Enhanced CLI group blocks with accent subhead glyphs, dimmed divider rules, numeric alignment, and verbose legends describing token colouring for RENDER/PREPARE sections.
 - *2025-09-30:* Fixed diagnostic overlays to report HDR measurements by rebuilding measurement clips with proper RGB→luma conversion and added regression coverage for PlaneStats extraction.
-- *2025-09-30:* Improved measurement clip conversion robustness (RGB plane shuffle, resize fallback, frame clamping) and simplified frame-info overlays by removing the content-type line.
+- *2025-09-30:* Improved measurement clip conversion robustness (RGB plane shuffle, resize fallback, frame clamping), normalized integer PlaneStats, and simplified frame-info overlays by removing the content-type line.

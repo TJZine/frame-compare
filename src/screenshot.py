@@ -312,6 +312,51 @@ def _extract_measurement(
         return None
     if math.isnan(avg_f) or math.isnan(max_f):
         return None
+    clip_fmt = getattr(measurement_clip, "format", None)
+    sample_type = getattr(clip_fmt, "sample_type", None) if clip_fmt is not None else None
+    bits_per_sample = getattr(clip_fmt, "bits_per_sample", None) if clip_fmt is not None else None
+    try:
+        import vapoursynth as vs  # type: ignore
+    except Exception:
+        vs = None
+
+    sample_type_float = getattr(vs, "FLOAT", None) if vs is not None else None
+    sample_type_integer = getattr(vs, "INTEGER", None) if vs is not None else None
+
+    def _apply_scale(value: float, scale: float) -> float:
+        if scale <= 0:
+            return value
+        return value / scale
+
+    normalized = False
+    if sample_type is not None and sample_type == sample_type_integer:
+        if isinstance(bits_per_sample, int) and bits_per_sample > 0:
+            scale = float((1 << bits_per_sample) - 1)
+            avg_f = _apply_scale(avg_f, scale)
+            max_f = _apply_scale(max_f, scale)
+            normalized = True
+    elif sample_type is not None and sample_type == sample_type_float:
+        normalized = True
+    elif isinstance(bits_per_sample, int) and bits_per_sample > 0:
+        scale = float((1 << bits_per_sample) - 1)
+        avg_f = _apply_scale(avg_f, scale)
+        max_f = _apply_scale(max_f, scale)
+        normalized = True
+
+    if not normalized:
+        if max_f > 1.0 or avg_f > 1.0:
+            scale_guess = 255.0
+            if max_f > 4096.0 or (bits_per_sample and bits_per_sample > 8):
+                scale_guess = 65535.0
+            elif max_f > 255.0:
+                scale_guess = max_f if max_f > 0 else 255.0
+            avg_f = _apply_scale(avg_f, scale_guess)
+            max_f = _apply_scale(max_f, scale_guess)
+
+    avg_f = max(0.0, avg_f)
+    max_f = max(0.0, max_f)
+    avg_f = min(avg_f, 1.0)
+    max_f = min(max_f, 1.0)
     return (max_f * target_nits, avg_f * target_nits)
 
 
