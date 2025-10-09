@@ -202,20 +202,41 @@ def _build_measurement_clip(clip: Any) -> Any | None:
     expr = getattr(core.std, "Expr", None)
     if not callable(expr):
         return None
-    try:
-        grayscale = expr(
-            [clip],
-            ["x 0.2126 * y 0.7152 * + z 0.0722 * +"],
-            format=getattr(vs, "GRAYS", None),
-        )
-    except Exception:
-        return None
     plane_stats = getattr(core.std, "PlaneStats", None)
     if not callable(plane_stats):
         return None
+
+    fmt = getattr(clip, "format", None)
+    sample_type = getattr(fmt, "sample_type", None)
+    bits_per_sample = getattr(fmt, "bits_per_sample", None)
+    if sample_type == getattr(vs, "FLOAT", object()):
+        gray_format = getattr(vs, "GRAYS", None) or getattr(vs, "GRAYH", None)
+    elif isinstance(bits_per_sample, int) and bits_per_sample > 8:
+        gray_format = getattr(vs, "GRAY16", None)
+    else:
+        gray_format = getattr(vs, "GRAY8", None)
+    gray_format = gray_format or getattr(vs, "GRAYS", None) or getattr(vs, "GRAYH", None)
+    if gray_format is None:
+        return None
+
+    try:
+        grayscale = expr(
+            [clip, clip, clip],
+            ["x 0.2126 * y 0.7152 * + z 0.0722 * +"],
+            format=gray_format,
+        )
+    except Exception as exc:
+        logger.debug("Failed to build measurement Expr: %s", exc, exc_info=logger.isEnabledFor(logging.DEBUG))
+        return None
+
     try:
         return plane_stats(grayscale)
-    except Exception:
+    except Exception as exc:
+        logger.debug(
+            "Failed to create measurement PlaneStats: %s",
+            exc,
+            exc_info=logger.isEnabledFor(logging.DEBUG),
+        )
         return None
 
 

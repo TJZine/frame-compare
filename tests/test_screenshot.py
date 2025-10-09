@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 import types
 
 import pytest
@@ -277,6 +278,75 @@ def test_compose_overlay_text_skips_hdr_details_for_sdr():
     assert "MDL:" not in composed
     assert "Measurement" not in composed
     assert lines[-1] == "Frame Selection Type: Cached"
+
+
+def test_build_measurement_clip_extracts_plane_stats(monkeypatch):
+    class DummyFrame:
+        def __init__(self):
+            self.props = {
+                "PlaneStatsAverage": 0.5,
+                "PlaneStatsMax": 0.9,
+            }
+
+    class DummyMeasurementClip:
+        def get_frame(self, index: int):
+            assert index == 0
+            return DummyFrame()
+
+    class DummyExprClip:
+        pass
+
+    class DummyCoreStd:
+        def __init__(self, core):
+            self._core = core
+
+        def Expr(self, clips, exprs, format=None):
+            self._core.expr_args = (clips, exprs, format)
+            clip = DummyExprClip()
+            self._core.expr_result = clip
+            return clip
+
+        def PlaneStats(self, clip):
+            self._core.planestats_input = clip
+            return DummyMeasurementClip()
+
+    class DummyCore:
+        def __init__(self):
+            self.std = DummyCoreStd(self)
+            self.expr_args = None
+            self.planestats_input = None
+            self.expr_result = None
+
+    dummy_core = DummyCore()
+
+    class DummyVSModule:
+        FLOAT = 1
+        GRAYS = object()
+        GRAYH = object()
+        GRAY16 = object()
+        GRAY8 = object()
+
+        def __init__(self, core):
+            self.core = core
+
+    dummy_vs = DummyVSModule(dummy_core)
+    monkeypatch.setitem(sys.modules, "vapoursynth", dummy_vs)
+
+    clip = types.SimpleNamespace(
+        core=dummy_core,
+        format=types.SimpleNamespace(sample_type=dummy_vs.FLOAT, bits_per_sample=32),
+    )
+
+    measurement_clip = screenshot._build_measurement_clip(clip)
+    assert isinstance(measurement_clip, DummyMeasurementClip)
+    clips_used, exprs_used, format_used = dummy_core.expr_args
+    assert clips_used == [clip, clip, clip]
+    assert exprs_used == ["x 0.2126 * y 0.7152 * + z 0.0722 * +"]
+    assert dummy_core.planestats_input is dummy_core.expr_result
+    assert format_used in {dummy_vs.GRAYS, dummy_vs.GRAYH}
+
+    stats = screenshot._extract_measurement(measurement_clip, 0, 100.0)
+    assert stats == (90.0, 50.0)
 
 
 def test_compression_flag_passed(tmp_path, monkeypatch):
