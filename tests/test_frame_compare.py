@@ -48,6 +48,18 @@ class DummyProgress:
 
 
 def _make_config(input_dir: Path) -> AppConfig:
+    """
+    Builds a test-oriented AppConfig populated with sensible defaults and example overrides.
+    
+    Parameters:
+        input_dir (Path): Directory used as the config's input path (stored in paths.input_dir).
+    
+    Returns:
+        AppConfig: An AppConfig instance with prepared sub-configs for analysis, screenshots,
+        cli, color, slowpics, tmdb, naming, paths, runtime, overrides, source, and audio_alignment.
+        Notable defaults: screenshots.directory_name is "screens", runtime.ram_limit_mb is 4096,
+        audio_alignment is disabled, and overrides include sample trim and fps entries.
+    """
     return AppConfig(
         analysis=AnalysisConfig(
             frame_count_dark=1,
@@ -189,11 +201,42 @@ def test_cli_disables_json_tail_output(tmp_path, monkeypatch, runner):
     monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit_mb: None)
 
     def fake_parse(name, **kwargs):
+        """
+        Produce a minimal parsed filename metadata dictionary.
+        
+        Parameters:
+            name (str): The filename or label to use for the parsed metadata.
+            **kwargs: Additional keyword arguments are accepted and ignored.
+        
+        Returns:
+            dict: A mapping with keys:
+                - "label": same as `name`
+                - "release_group": empty string
+                - "file_name": same as `name`
+        """
         return {"label": name, "release_group": "", "file_name": name}
 
     monkeypatch.setattr(frame_compare, "parse_filename_metadata", fake_parse)
 
     def fake_init(path, *, trim_start=0, trim_end=None, fps_map=None, cache_dir=None):
+        """
+        Create a fake clip-like object with fixed video properties.
+        
+        Parameters:
+            path (str | Path): Input path (accepted but ignored).
+            trim_start (int): Trim start in frames (accepted but ignored).
+            trim_end (int | None): Trim end in frames (accepted but ignored).
+            fps_map (Any): FPS mapping (accepted but ignored).
+            cache_dir (str | Path | None): Cache directory (accepted but ignored).
+        
+        Returns:
+            types.SimpleNamespace: An object with attributes:
+                - width (int): 1920
+                - height (int): 1080
+                - fps_num (int): 24000
+                - fps_den (int): 1001
+                - num_frames (int): 600
+        """
         return types.SimpleNamespace(width=1920, height=1080, fps_num=24000, fps_den=1001, num_frames=600)
 
     monkeypatch.setattr(frame_compare.vs_core, "init_clip", fake_init)
@@ -205,6 +248,16 @@ def test_cli_disables_json_tail_output(tmp_path, monkeypatch, runner):
     )
 
     def fake_generate(clips, frames, files, metadata, out_dir, cfg_screens, color_cfg, **kwargs):
+        """
+        Produce a single placeholder screenshot file inside out_dir and return its path.
+        
+        Parameters:
+            out_dir (Path): Directory to create and place the placeholder image.
+            **kwargs: Ignored; accepted for compatibility with the real generator.
+        
+        Returns:
+            List[str]: A list containing the string path to "frame.png" created under out_dir.
+        """
         out_dir.mkdir(parents=True, exist_ok=True)
         return [str(out_dir / "frame.png")]
 
@@ -821,6 +874,17 @@ def test_audio_alignment_block_and_json(tmp_path, monkeypatch, runner):
     monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
 
     def fake_parse(name: str, **_kwargs):
+        """
+        Create a minimal fake parse result for a clip name.
+        
+        Parameters:
+            name (str): Clip identifier or filename used to derive the returned label. Additional keyword arguments are ignored.
+        
+        Returns:
+            dict: Mapping with keys:
+                - "label" (str): "Clip A" if `name` starts with "ClipA", otherwise "Clip B".
+                - "file_name" (str): The original `name` value.
+        """
         if name.startswith("ClipA"):
             return {"label": "Clip A", "file_name": name}
         return {"label": "Clip B", "file_name": name}
@@ -829,6 +893,25 @@ def test_audio_alignment_block_and_json(tmp_path, monkeypatch, runner):
     monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit: None)
 
     def fake_init_clip(path, *, trim_start=0, trim_end=None, fps_map=None, cache_dir=None):
+        """
+        Create a lightweight fake clip object for tests that resembles the real clip interface.
+        
+        Parameters:
+            path: Path-like or str specifying the clip file path.
+            trim_start (int): Ignored in this fake; present for compatibility with callers.
+            trim_end (int | None): Ignored in this fake; present for compatibility with callers.
+            fps_map: Ignored in this fake; present for compatibility with callers.
+            cache_dir: Ignored in this fake; present for compatibility with callers.
+        
+        Returns:
+            SimpleNamespace: An object with attributes:
+                - path (Path): Resolved Path of the provided `path`.
+                - width (int): Horizontal resolution (1920).
+                - height (int): Vertical resolution (1080).
+                - fps_num (int): Frame rate numerator (24000).
+                - fps_den (int): Frame rate denominator (1001).
+                - num_frames (int): Total frame count (24000).
+        """
         return types.SimpleNamespace(
             path=Path(path),
             width=1920,
@@ -847,12 +930,34 @@ def test_audio_alignment_block_and_json(tmp_path, monkeypatch, runner):
     )
 
     def fake_generate(clips, frames, files, metadata, out_dir, cfg_screens, color_cfg, **kwargs):
+        """
+        Create a fake set of screenshot files in out_dir and return their file paths.
+        
+        This helper ensures out_dir exists and produces a list of string paths representing generated shot images; the number of returned paths is len(frames) * len(files).
+        
+        Parameters:
+            out_dir (Path): Directory where fake screenshot files are created.
+            frames (Sequence): Sequence of frame descriptors used to determine per-file shot count.
+            files (Sequence): Sequence of input files; combined with frames to compute total shots.
+        
+        Returns:
+            list[str]: Paths to the generated shot image files as strings.
+        """
         out_dir.mkdir(parents=True, exist_ok=True)
         return [str(out_dir / f"shot_{idx}.png") for idx in range(len(frames) * len(files))]
 
     monkeypatch.setattr(frame_compare, "generate_screenshots", fake_generate)
 
     def fake_probe(path: Path):
+        """
+        Create a fake audio probe result for the given file path.
+        
+        Parameters:
+            path (Path): File path to probe; compared against the module-level `reference_path` to determine which mock stream to return.
+        
+        Returns:
+            list[AudioStreamInfo]: A single-item list with a mocked audio stream. If `path == reference_path` the stream has `index=0`, `language='eng'`, and `is_default=True`; otherwise the stream has `index=1`, `language='jpn'`, and `is_default=False`.
+        """
         if Path(path) == reference_path:
             return [
                 AudioStreamInfo(
@@ -905,6 +1010,22 @@ def test_audio_alignment_block_and_json(tmp_path, monkeypatch, runner):
     )
 
     def fake_update(_path, reference_name, measurements, _existing, _negative_notes):
+        """
+        Produce applied frame indices and status labels for a set of measurement objects.
+        
+        This test helper assigns 0 to the provided reference_name and, for each item in measurements,
+        maps the measurement's file name to its frames value or 0 when frames is falsy. It also
+        marks every measurement's status as "auto".
+        
+        Parameters:
+        	reference_name (str): Identifier to be added to the applied frames mapping with value 0.
+        	measurements (Iterable): Iterable of objects with `file.name` and `frames` attributes.
+        
+        Returns:
+        	tuple: A pair (applied_frames, statuses).
+        	- applied_frames (dict): Mapping of names (reference_name and each measurement.file.name) to integer frame indices.
+        	- statuses (dict): Mapping of each measurement.file.name to the string `"auto"`.
+        """
         applied_frames = {reference_name: 0}
         applied_frames.update({m.file.name: m.frames or 0 for m in measurements})
         statuses = {m.file.name: "auto" for m in measurements}
@@ -946,6 +1067,11 @@ def test_audio_alignment_block_and_json(tmp_path, monkeypatch, runner):
 
 
 def test_audio_alignment_default_duration_avoids_zero_window(tmp_path, monkeypatch, runner):
+    """
+    Verifies that leaving audio alignment duration unspecified does not pass a zero-length window to the measurement routine.
+    
+    Configures audio alignment with start_seconds and duration_seconds set to None, runs the CLI, and asserts that the call to the alignment measurement does not include a `duration_seconds` value of zero (i.e., it remains `None`).
+    """
     reference_path = tmp_path / "ClipA.mkv"
     target_path = tmp_path / "ClipB.mkv"
     for file in (reference_path, target_path):
@@ -961,6 +1087,17 @@ def test_audio_alignment_default_duration_avoids_zero_window(tmp_path, monkeypat
     monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
 
     def fake_parse(name: str, **_kwargs):
+        """
+        Create a minimal fake parse result for a clip name.
+        
+        Parameters:
+            name (str): Clip identifier or filename used to derive the returned label. Additional keyword arguments are ignored.
+        
+        Returns:
+            dict: Mapping with keys:
+                - "label" (str): "Clip A" if `name` starts with "ClipA", otherwise "Clip B".
+                - "file_name" (str): The original `name` value.
+        """
         if name.startswith("ClipA"):
             return {"label": "Clip A", "file_name": name}
         return {"label": "Clip B", "file_name": name}
@@ -969,6 +1106,25 @@ def test_audio_alignment_default_duration_avoids_zero_window(tmp_path, monkeypat
     monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit: None)
 
     def fake_init_clip(path, *, trim_start=0, trim_end=None, fps_map=None, cache_dir=None):
+        """
+        Create a lightweight fake clip object for tests that resembles the real clip interface.
+        
+        Parameters:
+            path: Path-like or str specifying the clip file path.
+            trim_start (int): Ignored in this fake; present for compatibility with callers.
+            trim_end (int | None): Ignored in this fake; present for compatibility with callers.
+            fps_map: Ignored in this fake; present for compatibility with callers.
+            cache_dir: Ignored in this fake; present for compatibility with callers.
+        
+        Returns:
+            SimpleNamespace: An object with attributes:
+                - path (Path): Resolved Path of the provided `path`.
+                - width (int): Horizontal resolution (1920).
+                - height (int): Vertical resolution (1080).
+                - fps_num (int): Frame rate numerator (24000).
+                - fps_den (int): Frame rate denominator (1001).
+                - num_frames (int): Total frame count (24000).
+        """
         return types.SimpleNamespace(
             path=Path(path),
             width=1920,
@@ -987,12 +1143,27 @@ def test_audio_alignment_default_duration_avoids_zero_window(tmp_path, monkeypat
     )
 
     def fake_generate(clips, frames, files, metadata, out_dir, cfg_screens, color_cfg, **kwargs):
+        """
+        Create the output directory and return a single fake screenshot path.
+        
+        Returns:
+            list[str]: A one-element list containing the string path to "shot.png" inside `out_dir`.
+        """
         out_dir.mkdir(parents=True, exist_ok=True)
         return [str(out_dir / "shot.png")]
 
     monkeypatch.setattr(frame_compare, "generate_screenshots", fake_generate)
 
     def fake_probe(path: Path):
+        """
+        Create a fake audio probe result for the given file path.
+        
+        Parameters:
+            path (Path): File path to probe; compared against the module-level `reference_path` to determine which mock stream to return.
+        
+        Returns:
+            list[AudioStreamInfo]: A single-item list with a mocked audio stream. If `path == reference_path` the stream has `index=0`, `language='eng'`, and `is_default=True`; otherwise the stream has `index=1`, `language='jpn'`, and `is_default=False`.
+        """
         if Path(path) == reference_path:
             return [
                 AudioStreamInfo(
@@ -1035,6 +1206,14 @@ def test_audio_alignment_default_duration_avoids_zero_window(tmp_path, monkeypat
     captured_kwargs: dict[str, object] = {}
 
     def fake_measure(*args, **kwargs):
+        """
+        Stub measurement function used in tests.
+        
+        Records any keyword arguments into the enclosing `captured_kwargs` mapping and returns a single-element list containing the preconstructed `measurement` object.
+        
+        Returns:
+            list: A list with the `measurement` object as its only element.
+        """
         captured_kwargs.update(kwargs)
         return [measurement]
 
@@ -1052,6 +1231,19 @@ def test_audio_alignment_default_duration_avoids_zero_window(tmp_path, monkeypat
 
 
 def _build_alignment_context(tmp_path):
+    """
+    Builds a minimal audio-alignment test context with example clips, plans, and alignment state.
+    
+    Parameters:
+        tmp_path (Path): Temporary directory used to create sample reference and target clip files.
+    
+    Returns:
+        tuple: A 4-tuple containing:
+            - cfg: AppConfig with audio alignment and confirmation-with-screenshots enabled.
+            - plans: List containing the reference and target ClipPlan objects for the two sample clips.
+            - summary: AudioAlignmentSummary prepopulated for the reference clip.
+            - display: AudioAlignmentDisplayData initialized with empty/placeholder display values.
+    """
     cfg = _make_config(tmp_path)
     cfg.audio_alignment.enable = True
     cfg.audio_alignment.confirm_with_screenshots = True
@@ -1104,9 +1296,20 @@ def _build_alignment_context(tmp_path):
 
 class _ListReporter:
     def __init__(self) -> None:
+        """
+        Initialize the reporter and prepare in-memory storage for captured output lines.
+        
+        Creates the mutable attribute `lines`, a list that will hold each reported line as a string.
+        """
         self.lines: list[str] = []
 
     def line(self, message: str) -> None:
+        """
+        Append a text line to the reporter's captured output.
+        
+        Parameters:
+            message (str): The text to record; stored verbatim in the reporter's internal list.
+        """
         self.lines.append(message)
 
 
@@ -1117,6 +1320,18 @@ def test_confirm_alignment_reports_preview_paths(monkeypatch, tmp_path):
     generated_paths = []
 
     def fake_generate(*args, **_kwargs):
+        """
+        Test helper that simulates screenshot generation for tests.
+        
+        This function expects its fifth positional argument (args[4]) to be a pathlib.Path for an output directory; it ensures that directory exists, records two synthetic shot paths by appending them to the module-level list `generated_paths`, and returns the two Path objects.
+        
+        Parameters:
+            *args: Positional arguments where the fifth element (args[4]) is the output directory Path.
+            **_kwargs: Ignored.
+        
+        Returns:
+            list[pathlib.Path]: A list containing two shot Path objects (shot_0.png and shot_1.png) inside the output directory.
+        """
         out_dir = args[4]
         out_dir.mkdir(parents=True, exist_ok=True)
         paths = [out_dir / "shot_0.png", out_dir / "shot_1.png"]
@@ -1144,6 +1359,12 @@ def test_confirm_alignment_raises_cli_error_on_screenshot_failure(monkeypatch, t
     cfg, plans, summary, display = _build_alignment_context(tmp_path)
 
     def fake_generate(*_args, **_kwargs):
+        """
+        A stub screenshot-generation function that always fails.
+        
+        Raises:
+            frame_compare.ScreenshotError: Always raised with the message "boom".
+        """
         raise frame_compare.ScreenshotError("boom")
 
     monkeypatch.setattr(frame_compare, "generate_screenshots", fake_generate)
@@ -1160,6 +1381,11 @@ def test_confirm_alignment_raises_cli_error_on_screenshot_failure(monkeypatch, t
 
 
 def test_run_cli_calls_alignment_confirmation(monkeypatch, tmp_path):
+    """
+    Verifies that running the CLI triggers the audio-alignment confirmation flow when screenshot confirmation is enabled.
+    
+    Sets up a configuration enabling audio alignment with screenshot confirmation, creates two dummy media files, and monkeypatches discovery, metadata parsing, plan building, selection, and alignment application. Replaces the confirmation function with one that records its arguments and raises a sentinel exception so the test can assert the confirmation was invoked with the expected parameters.
+    """
     cfg = _make_config(tmp_path)
     cfg.audio_alignment.enable = True
     cfg.audio_alignment.confirm_with_screenshots = True
@@ -1171,9 +1397,25 @@ def test_run_cli_calls_alignment_confirmation(monkeypatch, tmp_path):
         file.write_bytes(b"data")
 
     def fake_discover(_root):
+        """
+        Return a precomputed list of discovered files; the provided `_root` argument is ignored.
+        
+        Returns:
+            files (list): The predefined list of discovered file paths.
+        """
         return files
 
     def fake_parse_metadata(_files, _naming):
+        """
+        Produce metadata for a reference/target pair using the first two entries of the provided files.
+        
+        Parameters:
+            _files (Sequence[pathlib.Path|os.PathLike|object]): Iterable where the first two items represent the reference and target files; only their `.name` is used.
+            _naming (any): Unused naming parameter kept for signature compatibility.
+        
+        Returns:
+            list[dict]: Two dictionaries with keys `label`, `file_name`, `year`, `title`, `anime_title`, `imdb_id`, and `tvdb_id`. The `label` values are `"Reference"` and `"Target"`, `file_name` is taken from the corresponding file's `.name`, and the remaining fields are empty strings.
+        """
         return [
             {
                 "label": "Reference",
@@ -1196,6 +1438,17 @@ def test_run_cli_calls_alignment_confirmation(monkeypatch, tmp_path):
         ]
 
     def fake_build_plans(_files, metadata, _cfg):
+        """
+        Builds a list of clip plans from input file paths and corresponding metadata, marking the first clip as the reference.
+        
+        Parameters:
+            _files (Sequence[Path]): Input file paths in the order they should be planned.
+            metadata (Sequence): Per-file metadata objects; must have the same length as `_files`.
+            _cfg: Configuration object (not used by this fake builder, accepted for signature compatibility).
+        
+        Returns:
+            list[frame_compare._ClipPlan]: A list of ClipPlan objects where the first element has `use_as_reference=True` and all others have `use_as_reference=False`.
+        """
         plans = []
         for idx, path in enumerate(_files):
             plans.append(
@@ -1208,11 +1461,38 @@ def test_run_cli_calls_alignment_confirmation(monkeypatch, tmp_path):
         return plans
 
     def fake_pick_analyze(_files, _metadata, _analyze_clip, cache_dir=None):
+        """
+        Select the first candidate file for analysis.
+        
+        Parameters:
+            _files: Sequence of candidate file paths; the first element is selected.
+            _metadata: Ignored.
+            _analyze_clip: Ignored.
+            cache_dir: Ignored.
+        
+        Returns:
+            The first file from `_files`.
+        """
         return files[0]
 
     offsets_path = tmp_path / "alignment.toml"
 
     def fake_maybe_apply(plans, _cfg, _analyze_path, _root, _overrides, reporter=None):
+        """
+        Create and return a synthetic audio-alignment summary and display objects for testing.
+        
+        Parameters:
+            plans (Sequence): Sequence of clip plan objects; the first plan is used as the reference.
+            reporter (optional): Ignored; present for API compatibility.
+        
+        Returns:
+            tuple: A pair (summary, display) where:
+                - summary: a frame_compare._AudioAlignmentSummary with the first plan as the reference_plan,
+                  empty measurements/applied_frames/statuses, and baseline_shift 0.
+                - display: a frame_compare._AudioAlignmentDisplayData containing empty display lines,
+                  an offsets file line referencing the module's offsets path, and JSON-ready fields
+                  for a single target with zero offset (0.0 seconds, 0 frames).
+        """
         summary = frame_compare._AudioAlignmentSummary(
             offsets_path=offsets_path,
             reference_name="Reference",
@@ -1239,30 +1519,86 @@ def test_run_cli_calls_alignment_confirmation(monkeypatch, tmp_path):
 
     class _DummyReporter:
         def __init__(self, *_, **__):
+            """
+            Create a no-op progress context used to mock progress handling in tests.
+            
+            This initializer accepts and ignores any positional or keyword arguments and configures a
+            `console` attribute whose `print` method is a no-op to suppress output during tests.
+            """
             self.console = types.SimpleNamespace(print=lambda *args, **kwargs: None)
 
         def update_values(self, *_args, **_kwargs):
+            """
+            No-op progress update method used to satisfy a progress interface.
+            
+            Accepts arbitrary positional and keyword arguments and performs no action.
+            """
             return None
 
         def set_flag(self, *_args, **_kwargs):
+            """
+            No-op method that accepts any positional and keyword arguments and does nothing.
+            
+            Used as a compatibility stub where a flag-setting method is required but no action is desired.
+            """
             return None
 
         def line(self, *_args, **_kwargs):
+            """
+            Accepts any positional and keyword arguments and performs no action.
+            
+            Used as a no-op placeholder to satisfy progress-reporting interfaces.
+            """
             return None
 
         def verbose_line(self, *_args, **_kwargs):
+            """
+            A no-op placeholder that accepts any positional or keyword arguments and does nothing.
+            
+            This method intentionally ignores all inputs and always returns None; it can be used where a verbose callback is optional or not required.
+            """
             return None
 
         def render_sections(self, *_args, **_kwargs):
+            """
+            No-op renderer for section content; accepts any positional and keyword arguments and performs no action.
+            
+            Parameters:
+                *_args: Arbitrary positional arguments that are ignored.
+                **_kwargs: Arbitrary keyword arguments that are ignored.
+            
+            Returns:
+                None: Always returns None.
+            """
             return None
 
         def update_progress_state(self, *_args, **_kwargs):
+            """
+            No-op progress update method that accepts any arguments and has no effect.
+            
+            Used as a placeholder in contexts where progress updates are optional; accepts arbitrary positional
+            and keyword arguments and performs no action.
+            """
             return None
 
         def set_status(self, *_args, **_kwargs):
+            """
+            No-op status handler that ignores all arguments.
+            
+            This method accepts any positional and keyword arguments and intentionally performs no action.
+            """
             return None
 
         def create_progress(self, *_args, **_kwargs):
+            """
+            Create a no-op progress context manager.
+            
+            Parameters:
+                *_args, **_kwargs: Ignored positional and keyword arguments kept for API compatibility.
+            
+            Returns:
+                DummyProgress: A progress-like object that performs no operations and can be used as a context manager.
+            """
             return DummyProgress()
 
     class _SentinelError(Exception):
@@ -1271,6 +1607,20 @@ def test_run_cli_calls_alignment_confirmation(monkeypatch, tmp_path):
     called: dict[str, object] = {}
 
     def fake_confirm(plans, summary, cfg_obj, root, reporter, display):
+        """
+        Test helper that records its invocation arguments and then raises a sentinel error.
+        
+        Parameters:
+            plans: The clip plans passed to the confirmation function.
+            summary: The summary object produced by analysis or alignment.
+            cfg_obj: The application configuration object.
+            root: The root path or context used by the caller.
+            reporter: The reporter used to emit messages.
+            display: The display/preview object provided to the confirmation flow.
+        
+        Raises:
+            _SentinelError: Always raised to signal that this fake confirmation was invoked.
+        """
         called["args"] = (plans, summary, cfg_obj, root, reporter, display)
         raise _SentinelError
 
