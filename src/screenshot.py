@@ -321,7 +321,7 @@ FRAME_INFO_STYLE = (
 )
 OVERLAY_STYLE = (
     'sans-serif,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,'
-    '"0,0,0,0,100,100,0,0,1,2,0,7,10,10,70,1"'
+    '"0,0,0,0,100,100,0,0,1,2,0,9,10,10,50,1"'
 )
 
 _LETTERBOX_RATIO_TOLERANCE = 0.04
@@ -1100,7 +1100,7 @@ def _save_frame_with_ffmpeg(
     if overlay_text:
         overlay_cmd = (
             "drawtext=text={text}:fontcolor=white:borderw=2:bordercolor=black:"
-            "box=0:shadowx=1:shadowy=1:shadowcolor=black:x=10:y=80"
+            "box=0:shadowx=1:shadowy=1:shadowcolor=black:x=w-tw-20:y=40"
         ).format(text=_escape_drawtext(overlay_text))
         filters.append(overlay_cmd)
 
