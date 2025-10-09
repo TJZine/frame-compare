@@ -237,7 +237,6 @@ def test_compose_overlay_text_diagnostic_appends_required_lines():
         selection_label="Dark",
         source_props=props,
         tonemap_info=tonemap_info,
-        measurement=(200.0, 47.25),
     )
 
     assert composed is not None
