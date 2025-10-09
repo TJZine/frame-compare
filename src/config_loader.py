@@ -167,6 +167,8 @@ def load_config(path: str) -> AppConfig:
         raise ConfigError("tmdb.year_tolerance must be >= 0")
     if app.tmdb.cache_ttl_seconds < 0:
         raise ConfigError("tmdb.cache_ttl_seconds must be >= 0")
+    if app.tmdb.cache_max_entries < 0:
+        raise ConfigError("tmdb.cache_max_entries must be >= 0")
     if app.tmdb.category_preference is not None:
         preference = app.tmdb.category_preference.strip().upper()
         if preference not in {"", "MOVIE", "TV"}:

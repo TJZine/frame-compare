@@ -11,20 +11,29 @@ import subprocess
 import tempfile
 import tomllib
 import warnings
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from shutil import which
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple
 
 logger = logging.getLogger(__name__)
 
-# NumPy warns when the CPU is in flush-to-zero mode; ignore the harmless subnormal notice.
-warnings.filterwarnings(
-    "ignore",
-    message="The value of the smallest subnormal.*",
-    category=UserWarning,
-    module="numpy._core.getlimits",
-)
+_FLUSH_TO_ZERO_WARNING = "The value of the smallest subnormal"
+
+
+@contextmanager
+def _suppress_flush_to_zero_warning() -> Iterator[None]:
+    """Temporarily silence NumPy's flush-to-zero diagnostic warning."""
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=f"{_FLUSH_TO_ZERO_WARNING}.*",
+            category=UserWarning,
+            module="numpy._core.getlimits",
+        )
+        yield
 
 
 class AudioAlignmentError(RuntimeError):
@@ -75,13 +84,7 @@ def ensure_external_tools() -> None:
 
 def _load_optional_modules() -> Tuple[Any, Any, Any]:
     try:
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore",
-                message="The value of the smallest subnormal",
-                category=UserWarning,
-                module="numpy._core.getlimits",
-            )
+        with _suppress_flush_to_zero_warning():
             import librosa  # type: ignore
             import numpy as np  # type: ignore
             import soundfile as sf  # type: ignore
@@ -216,24 +219,25 @@ def _onset_envelope(
 ) -> Tuple[Any, int]:
     np, librosa, sf = _load_optional_modules()
 
-    data, native_sr = sf.read(str(wav_path))
-    if data.size == 0:
-        raise AudioAlignmentError(f"No audio samples extracted from {wav_path}")
-    if data.ndim > 1:
-        data = np.mean(data, axis=1)
-    if native_sr != sample_rate:
-        data = librosa.resample(data, orig_sr=native_sr, target_sr=sample_rate)
+    with _suppress_flush_to_zero_warning():
+        data, native_sr = sf.read(str(wav_path))
+        if data.size == 0:
+            raise AudioAlignmentError(f"No audio samples extracted from {wav_path}")
+        if data.ndim > 1:
+            data = np.mean(data, axis=1)
+        if native_sr != sample_rate:
+            data = librosa.resample(data, orig_sr=native_sr, target_sr=sample_rate)
 
-    peak = float(np.max(np.abs(data))) if data.size else 0.0
-    if peak > 0:
-        data = data / peak
+        peak = float(np.max(np.abs(data))) if data.size else 0.0
+        if peak > 0:
+            data = data / peak
 
-    onset_env = librosa.onset.onset_strength(
-        y=data,
-        sr=sample_rate,
-        hop_length=hop_length,
-        center=True,
-    )
+        onset_env = librosa.onset.onset_strength(
+            y=data,
+            sr=sample_rate,
+            hop_length=hop_length,
+            center=True,
+        )
     return onset_env.astype(np.float32), hop_length
 
 

@@ -105,6 +105,7 @@ class TMDBConfig:
     year_tolerance: int = 2
     enable_anime_parsing: bool = True
     cache_ttl_seconds: int = 86400
+    cache_max_entries: int = 256
     category_preference: Optional[str] = None
 
 

@@ -6,6 +6,7 @@ import asyncio
 import logging
 import re
 import time
+from collections import OrderedDict
 import unicodedata
 from dataclasses import dataclass
 from importlib import import_module
@@ -106,25 +107,51 @@ class TMDBResolution:
 
 
 class _TTLCache:
-    """Simple TTL cache shared across TMDB requests."""
+    """Bounded TTL cache shared across TMDB requests."""
 
-    def __init__(self) -> None:
-        self._data: Dict[Tuple[Any, ...], Tuple[float, Any]] = {}
+    def __init__(self, max_entries: int = 256) -> None:
+        self._max_entries = max(0, int(max_entries))
+        self._data: "OrderedDict[Tuple[Any, ...], Tuple[float, int, Any]]" = OrderedDict()
+
+    def configure(self, *, max_entries: int | None = None) -> None:
+        if max_entries is not None:
+            self._max_entries = max(0, int(max_entries))
+            if self._max_entries == 0:
+                self._data.clear()
+            else:
+                while len(self._data) > self._max_entries:
+                    self._data.popitem(last=False)
+
+    def clear(self) -> None:
+        self._data.clear()
 
     def get(self, key: Tuple[Any, ...], ttl_seconds: int) -> Any | None:
+        if ttl_seconds <= 0:
+            self._data.pop(key, None)
+            return None
         entry = self._data.get(key)
         if not entry:
             return None
-        timestamp, value = entry
-        if ttl_seconds <= 0:
-            return None
-        if time.monotonic() - timestamp > ttl_seconds:
+        timestamp, stored_ttl, value = entry
+        ttl = min(stored_ttl, ttl_seconds)
+        if ttl <= 0:
             self._data.pop(key, None)
             return None
+        if time.monotonic() - timestamp > ttl:
+            self._data.pop(key, None)
+            return None
+        self._data.move_to_end(key)
         return value
 
-    def set(self, key: Tuple[Any, ...], value: Any) -> None:
-        self._data[key] = (time.monotonic(), value)
+    def set(self, key: Tuple[Any, ...], value: Any, ttl_seconds: int) -> None:
+        if ttl_seconds <= 0 or self._max_entries == 0:
+            self._data.pop(key, None)
+            return
+        now = time.monotonic()
+        self._data[key] = (now, int(ttl_seconds), value)
+        self._data.move_to_end(key)
+        while len(self._data) > self._max_entries:
+            self._data.popitem(last=False)
 
 
 _CACHE = _TTLCache()
@@ -465,7 +492,7 @@ async def _http_request(
                 payload = response.json()
             except ValueError as exc:  # pragma: no cover - unexpected
                 raise TMDBResolutionError("TMDB returned invalid JSON") from exc
-            _CACHE.set(key, payload)
+            _CACHE.set(key, payload, ttl_seconds=cache_ttl)
             return payload
         await asyncio.sleep(backoff)
         backoff = min(backoff * 2, 4.0)
@@ -772,6 +799,8 @@ async def resolve_tmdb(
 
     if not config.api_key:
         raise TMDBResolutionError("tmdb.api_key must be set to resolve TMDB metadata")
+
+    _CACHE.configure(max_entries=config.cache_max_entries)
 
     unattended_mode = config.unattended if unattended is None else unattended
     category_pref = (category_preference or config.category_preference or "").upper() or None
