@@ -31,12 +31,30 @@ def _normalize_episode_number(val: Any) -> str:
 
 
 def _first_sequence_value(val: Any) -> Any:
+    """
+    Return the first element from ``val`` if it is a sequence.
+
+    Parameters:
+        val (Any): Potential sequence value.
+
+    Returns:
+        Any: First element for sequence inputs; otherwise the original value.
+    """
     if isinstance(val, (list, tuple)):
         return val[0] if val else None
     return val
 
 
 def _coerce_mapping(value: Any) -> Mapping[str, Any] | None:
+    """
+    Return ``value`` as a mapping when possible, otherwise ``None``.
+
+    Parameters:
+        value (Any): Candidate mapping.
+
+    Returns:
+        Mapping[str, Any] | None: Mapping representation of ``value`` or ``None`` when coercion fails.
+    """
     if isinstance(value, Mapping):
         return value
     if isinstance(value, dict):
@@ -45,6 +63,15 @@ def _coerce_mapping(value: Any) -> Mapping[str, Any] | None:
 
 
 def _call_guessit(file_name: str) -> Mapping[str, Any] | None:
+    """
+    Invoke GuessIt for ``file_name`` and normalise the result mapping.
+
+    Parameters:
+        file_name (str): File name or path to analyse.
+
+    Returns:
+        Mapping[str, Any] | None: Normalised GuessIt result when parsing succeeds; otherwise ``None``.
+    """
     try:
         module = import_module("guessit")
     except Exception:
@@ -60,6 +87,15 @@ def _call_guessit(file_name: str) -> Mapping[str, Any] | None:
 
 
 def _call_anitopy(file_name: str) -> Mapping[str, Any]:
+    """
+    Invoke Anitopy for ``file_name`` and return a mapping of metadata.
+
+    Parameters:
+        file_name (str): File name or path to analyse.
+
+    Returns:
+        Mapping[str, Any]: Normalised Anitopy metadata mapping (empty when parsing fails).
+    """
     try:
         module = import_module("anitopy")
     except Exception:
@@ -105,6 +141,19 @@ def _build_label(
     episode_marker: str,
     episode_title: str,
 ) -> str:
+    """
+    Compose a descriptive label for an anime episode file.
+
+    Parameters:
+        file_name (str): Original file name used as a fallback label.
+        release_group (str): Release group tag extracted from the file name.
+        anime_title (str): Primary title detected for the series.
+        episode_marker (str): Episode designator (for example ``S01E03``).
+        episode_title (str): Optional episode title appended to the label.
+
+    Returns:
+        str: Formatted label suitable for CLI presentation.
+    """
     parts = []
     if release_group:
         parts.append(f"[{release_group}]")

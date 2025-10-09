@@ -44,6 +44,20 @@ def _coerce_bool(value: Any, dotted_key: str) -> bool:
 
 
 def _sanitize_section(raw: dict[str, Any], name: str, cls):
+    """
+    Coerce a raw TOML table into an instance of ``cls`` with cleaned booleans.
+
+    Parameters:
+        raw (dict[str, Any]): Raw TOML section data.
+        name (str): Section name used when reporting validation errors.
+        cls: Dataclass type used to construct the section object.
+
+    Returns:
+        Any: Instantiated dataclass populated with values from ``raw``.
+
+    Raises:
+        ConfigError: If the section is not a table or contains invalid keys or values.
+    """
     if not isinstance(raw, dict):
         raise ConfigError(f"[{name}] must be a table")
     cleaned: Dict[str, Any] = {}
@@ -66,12 +80,31 @@ def _sanitize_section(raw: dict[str, Any], name: str, cls):
 
 
 def _validate_trim(mapping: Dict[str, Any], label: str) -> None:
+    """
+    Ensure all trim overrides map to integer frame counts.
+
+    Parameters:
+        mapping (Dict[str, Any]): Raw trim override mapping.
+        label (str): Configuration label used in error messages.
+
+    Raises:
+        ConfigError: If any trim override is not an integer.
+    """
     for key, value in mapping.items():
         if not isinstance(value, int):
             raise ConfigError(f"{label} entry '{key}' must map to an integer")
 
 
 def _validate_change_fps(change_fps: Dict[str, Any]) -> None:
+    """
+    Validate ``change_fps`` overrides as ``"set"`` or two positive integers.
+
+    Parameters:
+        change_fps (Dict[str, Any]): Mapping from clip identifiers to override values.
+
+    Raises:
+        ConfigError: If any override is not ``"set"`` or a two-integer list of positive numbers.
+    """
     for key, value in change_fps.items():
         if isinstance(value, str):
             if value != "set":

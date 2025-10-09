@@ -322,6 +322,16 @@ def _ensure_rgb24(core: Any, clip: Any, frame_idx: int) -> Any:
 
 
 def _clamp_frame_index(clip: Any, frame_idx: int) -> tuple[int, bool]:
+    """
+    Clamp ``frame_idx`` to the clip's valid range and flag when adjustment occurred.
+
+    Parameters:
+        clip (Any): Clip providing a ``num_frames`` attribute describing valid indices.
+        frame_idx (int): Desired frame index.
+
+    Returns:
+        tuple[int, bool]: Tuple of the clamped frame index and ``True`` when the value was adjusted.
+    """
     total_frames = getattr(clip, "num_frames", None)
     if not isinstance(total_frames, int) or total_frames <= 0:
         return max(0, int(frame_idx)), False
@@ -513,6 +523,19 @@ class ScreenshotWriterError(ScreenshotError):
 
 
 class GeometryPlan(TypedDict):
+    """
+    Resolved crop/pad/scale plan for rendering a screenshot.
+
+    Attributes:
+        width (int): Source clip width.
+        height (int): Source clip height.
+        crop (tuple[int, int, int, int]): Cropping values for left, top, right, bottom.
+        cropped_w (int): Width after cropping.
+        cropped_h (int): Height after cropping.
+        scaled (tuple[int, int]): Dimensions after scaling.
+        pad (tuple[int, int, int, int]): Padding applied around the scaled frame.
+        final (tuple[int, int]): Final output dimensions.
+    """
     width: int
     height: int
     crop: tuple[int, int, int, int]
