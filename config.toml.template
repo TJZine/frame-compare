@@ -105,6 +105,8 @@ confirm_matches = false
 year_tolerance = 2
 enable_anime_parsing = true
 cache_ttl_seconds = 86400
+# Maximum number of distinct TMDB responses cached in-process (0 disables caching)
+cache_max_entries = 256
 category_preference = ""
 
 [naming]
