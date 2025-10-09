@@ -1,79 +1,195 @@
+# Codex Task — *Selection metadata persistence v1*
+
 ## Scope
 
-Presentation-only. Do **not** change analysis, selection, rendering, upload logic, or flags. Apply purely to how multi-block sections render (primarily **[RENDER]**).
+Presentation/data plumbing only. **Do not** change the selection algorithm or which frames are chosen. This task only **records** selection facts at selection time and **loads** them later so the overlay can display “Frame Selection Type: …” without re-running analysis.
 
 ---
 
-## Objectives
+## Goals
 
-1. **Subheading emphasis**
+1. On every run that computes selections, **persist** selection metadata:
 
-   * In **[RENDER]**, render the subheadings **Writer**, **Canvas**, **Tonemap**, and **Overlay** with:
+   * Primary, versioned JSON: `generated.selection.v1.json`.
+   * Inline annotations in `generated.compframes` (non-breaking).
+2. On later runs (including `overlay_mode="diagnostic"`), **load** the persisted metadata and **attach** selection info to the overlay for each frame **without triggering analysis**—*if* the cache is valid.
+3. Implement **safe invalidation** via a deterministic cache key.
 
-     * A subtle prefix glyph: `›` (ASCII fallback `>` when `--no-color`).
-     * **Bold + accent color** (see Theme roles below).
-     * A **thin divider** line directly underneath (cropped to content width).
-   * Keep key/value lines that follow **unchanged** in content but with improved alignment/color (see below).
+---
 
-2. **Spacing & alignment**
+## Data model
 
-   * Insert **one blank line** between each sub-block.
-   * Within each sub-block, **right-align numeric columns** (frame counts, fps, px, nits, thresholds).
-   * **Dim** units (`s`, `fps`, `px`, `nits`, `cd/m²`) and long paths; keep keys slightly accented; values bright.
+### A) `generated.selection.v1.json` (authoritative; versioned)
 
-3. **Degrade gracefully**
+**File-level structure:**
 
-   * `--no-color`: show plain text (`>` prefix, ASCII `-----` rule).
-   * **Narrow terminals** (`COLUMNS < 80`): omit the rule line but keep accent/bold and spacing consistent.
+```json
+{
+  "version": "1",
+  "created_utc": "2025-10-08T03:12:45Z",
+  "cache_key": "sha256:…",                // see Cache Key section
+  "inputs": {
+    "clips": [
+      {"role":"ref","path":"…","size":..., "mtime":"…","sha1":"…"},
+      {"role":"tgt","path":"…","size":..., "mtime":"…","sha1":"…"}
+    ],
+    "config_fingerprint": {
+      "step": 4,
+      "downscale_height": 480,
+      "motion_method": "edge",
+      "scenecut_quantile": 0.90,
+      "diff_radius": 3,
+      "ignore_lead_seconds": 180.0,
+      "ignore_trail_seconds": 360.0,
+      "rng_seed": 2020220
+    }
+  },
+  "selections": [
+    {
+      "frame_index": 14972,               // target/output frame index
+      "ts_tc": "00:10:25.123",            // timecode (optional)
+      "type": "Bright",                   // Enum: Dark|Bright|Motion|User|Random
+      "score": 0.82,                      // optional; algorithm confidence
+      "source": "analyze_v3.0",           // selection engine/version tag
+      "clip_role": "tgt",                 // which clip produced the displayed frame
+      "notes": ""                         // optional free-form note
+    }
+    // … one entry per output frame
+  ]
+}
+```
 
-4. **Ensure all subheading sections are given the same treatment**
+* **Enum** for `type`: `["Dark","Bright","Motion","User","Random"]` (exact casing).
+* All numeric lists use **integers** for frames; **strings** for timecodes to avoid FP drift.
 
-   * Apply the same subheading treatment to other multi-block sections (e.g., `[PREPARE]` blocks like Trim/Window/Overrides).
-   * Add a small **legend** in `--verbose` explaining tokens and dimming.
+### B) `generated.compframes` (non-breaking annotation)
 
+* **Do not change** existing semantics. Append **inline hints** per frame using a tolerant format that existing readers ignore (e.g., trailing comment or `key=value` fields after a separator).
+* Example line (illustrative; adapt to your current line format):
 
-## Theme roles (extend existing palette)
+```
+23928    00:16:38.250    …    # sel=Bright score=0.82 src=analyze_v3.0
+```
 
-Add (or reuse if present):
+* If comments aren’t allowed, append a final token block:
 
-* `accent_subhead` — color for subheading titles (e.g., blue or section-appropriate accent).
-* `rule_dim` — dim color for the divider line.
+```
+23928    00:16:38.250    …    sel=Bright;score=0.82;src=analyze_v3.0
+```
 
-*Example mapping (do not hardcode exact codes here; use your renderer’s color map):*
+* **Never** remove or reorder existing columns. If unsure, write a small **sidecar** `generated.compframes.meta.json` with `{frame_index: {...}}`; but per your request, still attempt to annotate `generated.compframes`.
 
-* `accent_subhead`: blue (or `accent_render` if already defined)
-* `rule_dim`: grey.dim
+---
 
+## Cache key & invalidation
 
-## Rendering rules (exact behavior)
+### Cache key inputs
 
-* Subheading line format:
+Build a stable `cache_key` (e.g., SHA-256 of a canonical JSON blob) over:
 
-  * Colored/bold: `[[accent_subhead]]› Writer[[/]]`
-    (use the same for **Canvas**, **Tonemap**, **Overlay**)
-* Divider line:
+* `inputs.clips[*].path`, `size`, `mtime` **and** `sha1` (if available).
+* `config_fingerprint` fields that influence selection (step, downscale, motion params, ignore lead/trail, rng seed).
+* Program version/selection engine id (e.g., `"analyze_v3.0"`).
 
-  * Next line prints a thin rule using box-drawing `─` repeated to match the **content width** of the widest key/value line in that sub-block (cap at terminal width).
-  * In `--no-color` or non-UTF environments, replace with ASCII `-`.
-* Body lines immediately follow (no extra blank line before the first body line).
-* After each sub-block, insert **one blank line**.
+### Load logic
 
+* On startup, if `generated.selection.v1.json` exists:
 
-## Alignment & micro-typography
+  1. Recompute `cache_key_current` from current inputs/config.
+  2. If it **matches** stored `cache_key`, **load** selections and make them available to the overlay.
+  3. If it **differs**: treat selection cache as **stale**. Do **not** load; proceed as usual (select new frames) and **rewrite** both artifacts.
 
-* Numbers right-aligned **within each block’s column**; padding spaces are **not** colored.
-* **Units** rendered dim; **paths** middle-ellipsized and dim.
-* Keep existing right-label on progress bars (`{fps} fps | ETA | elapsed`) unchanged.
+### Flags (optional)
 
+* `--no-selection-cache`: ignore existing selection cache; recompute and rewrite.
+* `--freeze-selection-cache`: **load** if key matches; if not, **fail fast** with a clear message (useful for reproducible runs).
+
+---
+
+## Write path (when selections are produced)
+
+* Generate the `selections[]` array in the order frames will be rendered.
+* **Atomic writes** on all OSes:
+
+  * Write to `generated.selection.v1.json.tmp`, fsync, rename to `generated.selection.v1.json`.
+  * Likewise for `generated.compframes` (if rewriting) or write a new annotated copy and swap.
+* Preserve line endings; do not disturb unrelated content.
+
+---
+
+## Read path (overlay usage)
+
+* When a screenshot is rendered for frame `F`, resolve selection info:
+
+  1. First try **in-memory** map `{frame_index → selectionRecord}` from `generated.selection.v1.json`.
+  2. If missing (e.g., older cache), optionally fall back to `generated.compframes` annotation parsing.
+  3. If still missing, the overlay prints **`Frame Selection Type: (unknown)`** (do **not** trigger analysis).
+
+---
+
+## Error handling
+
+* **Partial/malformed JSON** → ignore and log once; treat as missing cache; do not crash.
+* **Mismatched counts** (e.g., selections fewer than compframes) → load what exists; warn once.
+* **Out-of-range frame indices** → skip with a warning.
+
+---
+
+## Performance & memory
+
+* Build an **index map** once: `Map<int frame_index, SelectionRecord>`.
+* Use streaming/fast JSON parser if the file is large.
+* Target <10ms extra startup for typical projects.
+
+---
 
 ## Acceptance criteria
 
-* In **[RENDER]**, each subheading (**Writer/Canvas/Tonemap/Overlay**) appears:
+* After a fresh run that performs selection:
 
-  * With `›` prefix, bold, and `accent_subhead` color.
-  * With a one-line **divider** underneath (suppressed on narrow terminals).
-  * Followed by its body lines, then a **single blank line** before the next sub-block.
-* Keys/values retain current wording; only emphasis/alignment/spacing change.
-* Units and paths are **dim**; numbers are aligned; no text is lost when truncating paths.
-* `--no-color`: subheadings readable with `>` prefix and ASCII rule; spacing preserved.
-* No changes to content outside **[RENDER]** (unless you opt to apply the same pattern to other multi-block sections later).
+  * `generated.selection.v1.json` exists with the **exact** schema above, including `cache_key`.
+  * `generated.compframes` contains **non-breaking** per-frame selection hints.
+* On a subsequent run with **unchanged** inputs and params:
+
+  * No analysis is triggered to obtain selection for overlay.
+  * Overlay shows **`Frame Selection Type: <Enum>`** for every frame found in the cache.
+* On a subsequent run with **changed** inputs/params (e.g., seed, downscale, ignore window):
+
+  * Cache is detected as **stale**; fresh selection is produced and both artifacts are rewritten.
+* Deleting `generated.selection.v1.json` (or using `--no-selection-cache`) falls back to normal behavior (overlay may show “(unknown)” until selection completes or is recomputed).
+
+---
+
+## Test plan
+
+1. **Golden write**
+
+   * Run selection on a small clip; assert the JSON schema, `cache_key` presence, and compframes annotation pattern.
+2. **Load without analysis**
+
+   * Re-run with identical inputs; instrument to ensure selection analysis is **not** executed; overlay reads from cache.
+3. **Invalidation**
+
+   * Change `rng_seed` or `downscale_height`; assert cache miss and rewrite.
+4. **Missing/partial**
+
+   * Corrupt the JSON tail; confirm robust fallback (no crash) and warning.
+5. **Large set**
+
+   * 1k+ frames: measure overhead <10ms to load & map; overlay hits O(1) lookups.
+6. **Windows-safe atomicity**
+
+   * Verify rename strategy works on Windows (write→flush→close→rename).
+
+---
+
+## Rollback
+
+* Safe: delete `generated.selection.v1.json` and remove compframes annotations (or ignore them); the program reverts to live analysis behavior.
+
+---
+
+### Notes
+
+* Keep field names **stable**; if you need to evolve the schema, bump `version` and preserve backward readers.
+* If the exact format of `generated.compframes` is fragile, prefer sidecar `generated.compframes.meta.json` but still include a minimal `# sel=<Type>` comment to satisfy this task’s “write to both” requirement.

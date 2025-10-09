@@ -130,17 +130,6 @@ def _format_mastering_display_line(props: Mapping[str, Any]) -> str:
     )
 
 
-def _format_measurement_line(measurement: Optional[tuple[Optional[float], Optional[float]]]) -> str:
-    if not measurement:
-        return "Measurement: Insufficient data"
-    max_value, avg_value = measurement
-    if max_value is None or avg_value is None:
-        return "Measurement: Insufficient data"
-    max_text = f"{int(round(max_value))}"
-    avg_text = f"{avg_value:.1f}"
-    return f"Measurement MAX/AVG: {max_text}nits / {avg_text}nits"
-
-
 def _normalize_selection_label(label: Optional[str]) -> str:
     if not label:
         return "(unknown)"
@@ -166,7 +155,6 @@ def _compose_overlay_text(
     source_props: Mapping[str, Any],
     *,
     tonemap_info: Optional[vs_core.TonemapInfo],
-    measurement: Optional[tuple[Optional[float], Optional[float]]] = None,
 ) -> Optional[str]:
     if not bool(getattr(color_cfg, "overlay_enabled", True)):
         return None
@@ -183,181 +171,11 @@ def _compose_overlay_text(
     include_hdr_details = bool(tonemap_info and tonemap_info.applied)
     if include_hdr_details:
         lines.append(_format_mastering_display_line(source_props))
-        lines.append(_format_measurement_line(measurement))
     lines.append(_format_selection_line(selection_label))
 
     return "\n".join(lines)
 
 
-def _build_measurement_clip(clip: Any) -> Any | None:
-    try:
-        import vapoursynth as vs  # type: ignore
-    except Exception:
-        return None
-
-    core = getattr(clip, "core", None) or getattr(vs, "core", None)
-    if core is None:
-        return None
-
-    std_ns = getattr(core, "std", None)
-    expr = getattr(std_ns, "Expr", None) if std_ns is not None else None
-    shuffle_planes = getattr(std_ns, "ShufflePlanes", None) if std_ns is not None else None
-    plane_stats = getattr(std_ns, "PlaneStats", None) if std_ns is not None else None
-    if not callable(plane_stats):
-        return None
-    expr_inputs: List[Any] = []
-    fmt = getattr(clip, "format", None)
-    sample_type = getattr(fmt, "sample_type", None)
-    bits_per_sample = getattr(fmt, "bits_per_sample", None)
-    vs_gray16 = getattr(vs, "GRAY16", None)
-    vs_gray8 = getattr(vs, "GRAY8", None)
-    vs_grays = getattr(vs, "GRAYS", None)
-    vs_grayh = getattr(vs, "GRAYH", None)
-    vs_gray_cf = getattr(vs, "GRAY", None)
-    if sample_type == getattr(vs, "FLOAT", object()):
-        gray_format = vs_grays or vs_grayh or vs_gray16 or vs_gray8
-    elif isinstance(bits_per_sample, int) and bits_per_sample > 8:
-        gray_format = vs_gray16 or vs_grays or vs_grayh or vs_gray8
-    else:
-        gray_format = vs_gray8 or vs_gray16 or vs_grays or vs_grayh
-    gray_format = gray_format or vs_gray8
-
-    if callable(shuffle_planes):
-        try:
-            for plane_idx in range(min(getattr(fmt, "num_planes", 3) or 3, 3)):
-                plane_clip = shuffle_planes(
-                    clip,
-                    planes=[plane_idx],
-                    colorfamily=vs_gray_cf if vs_gray_cf is not None else getattr(vs, "YUV", 2),
-                )
-                expr_inputs.append(plane_clip)
-        except Exception as exc:
-            logger.debug(
-                "ShufflePlanes measurement fallback failed: %s",
-                exc,
-                exc_info=logger.isEnabledFor(logging.DEBUG),
-            )
-            expr_inputs.clear()
-
-    if not expr_inputs:
-        expr_inputs = [clip, clip, clip]
-
-    grayscale = None
-    if callable(expr):
-        try:
-            grayscale = expr(
-                expr_inputs,
-                ["x 0.2126 * y 0.7152 * + z 0.0722 * +"],
-                format=gray_format,
-            )
-        except Exception as exc:
-            logger.debug(
-                "Expr-based measurement conversion failed: %s",
-                exc,
-                exc_info=logger.isEnabledFor(logging.DEBUG),
-            )
-            grayscale = None
-
-    if grayscale is None:
-        resize_ns = getattr(core, "resize", None)
-        convert = getattr(resize_ns, "Point", None) if resize_ns is not None else None
-        if callable(convert) and gray_format is not None:
-            try:
-                grayscale = convert(clip, format=gray_format)
-            except Exception as exc:
-                logger.debug(
-                    "Resize fallback for measurement failed: %s",
-                    exc,
-                    exc_info=logger.isEnabledFor(logging.DEBUG),
-                )
-                grayscale = None
-    if grayscale is None:
-        return None
-
-    try:
-        return plane_stats(grayscale)
-    except Exception as exc:
-        logger.debug(
-            "Failed to create measurement PlaneStats: %s",
-            exc,
-            exc_info=logger.isEnabledFor(logging.DEBUG),
-        )
-        return None
-
-
-def _extract_measurement(
-    measurement_clip: Any,
-    frame_idx: int,
-    target_nits: float,
-) -> Optional[tuple[float, float]]:
-    if measurement_clip is None:
-        return None
-    total_frames = getattr(measurement_clip, "num_frames", None)
-    clamped_idx = frame_idx
-    if isinstance(total_frames, int) and total_frames > 0:
-        clamped_idx = max(0, min(frame_idx, total_frames - 1))
-    try:
-        frame = measurement_clip.get_frame(clamped_idx)
-    except Exception:
-        return None
-    props = getattr(frame, "props", None)
-    if not isinstance(props, Mapping):
-        return None
-    avg = props.get("PlaneStatsAverage")
-    max_val = props.get("PlaneStatsMax")
-    try:
-        avg_f = float(avg)
-        max_f = float(max_val)
-    except (TypeError, ValueError):
-        return None
-    if math.isnan(avg_f) or math.isnan(max_f):
-        return None
-    clip_fmt = getattr(measurement_clip, "format", None)
-    sample_type = getattr(clip_fmt, "sample_type", None) if clip_fmt is not None else None
-    bits_per_sample = getattr(clip_fmt, "bits_per_sample", None) if clip_fmt is not None else None
-    try:
-        import vapoursynth as vs  # type: ignore
-    except Exception:
-        vs = None
-
-    sample_type_float = getattr(vs, "FLOAT", None) if vs is not None else None
-    sample_type_integer = getattr(vs, "INTEGER", None) if vs is not None else None
-
-    def _apply_scale(value: float, scale: float) -> float:
-        if scale <= 0:
-            return value
-        return value / scale
-
-    normalized = False
-    if sample_type is not None and sample_type == sample_type_integer:
-        if isinstance(bits_per_sample, int) and bits_per_sample > 0:
-            scale = float((1 << bits_per_sample) - 1)
-            avg_f = _apply_scale(avg_f, scale)
-            max_f = _apply_scale(max_f, scale)
-            normalized = True
-    elif sample_type is not None and sample_type == sample_type_float:
-        normalized = True
-    elif isinstance(bits_per_sample, int) and bits_per_sample > 0:
-        scale = float((1 << bits_per_sample) - 1)
-        avg_f = _apply_scale(avg_f, scale)
-        max_f = _apply_scale(max_f, scale)
-        normalized = True
-
-    if not normalized:
-        if max_f > 1.0 or avg_f > 1.0:
-            scale_guess = 255.0
-            if max_f > 4096.0 or (bits_per_sample and bits_per_sample > 8):
-                scale_guess = 65535.0
-            elif max_f > 255.0:
-                scale_guess = max_f if max_f > 0 else 255.0
-            avg_f = _apply_scale(avg_f, scale_guess)
-            max_f = _apply_scale(max_f, scale_guess)
-
-    avg_f = max(0.0, avg_f)
-    max_f = max(0.0, max_f)
-    avg_f = min(avg_f, 1.0)
-    max_f = min(max_f, 1.0)
-    return (max_f * target_nits, avg_f * target_nits)
 
 
 def _ensure_rgb24(core: Any, clip: Any, frame_idx: int) -> Any:
@@ -1264,7 +1082,6 @@ def generate_screenshots(
 
     processed_results: List[vs_core.ClipProcessResult] = []
     overlay_states: List[Dict[str, str]] = []
-    measurement_clips: List[Any] = []
 
     for clip, file_path in zip(clips, files):
         result = vs_core.process_clip_for_screenshot(
@@ -1278,11 +1095,7 @@ def generate_screenshots(
         )
         processed_results.append(result)
         overlay_states.append({})
-        measurement_clip = None
         overlay_mode = str(getattr(color_cfg, "overlay_mode", "minimal")).strip().lower()
-        if overlay_mode == "diagnostic" and bool(result.tonemap.applied):
-            measurement_clip = _build_measurement_clip(result.clip)
-        measurement_clips.append(measurement_clip)
         if result.verification is not None:
             logger.info(
                 "[VERIFY] %s frame=%d avg=%.4f max=%.4f",
@@ -1323,7 +1136,6 @@ def generate_screenshots(
         overlay_state = overlay_states[clip_index]
         base_overlay_text = getattr(result, "overlay_text", None)
         source_props = getattr(result, "source_props", {})
-        measurement_clip = measurement_clips[clip_index]
 
         for frame in frames:
             frame_idx = int(frame)
@@ -1362,13 +1174,6 @@ def generate_screenshots(
                     file_path,
                     actual_idx,
                 )
-            measurement_data = None
-            if measurement_clip is not None and result.tonemap.applied:
-                measurement_data = _extract_measurement(
-                    measurement_clip,
-                    actual_idx,
-                    float(getattr(result.tonemap, "target_nits", 100.0)),
-                )
             overlay_text = _compose_overlay_text(
                 base_overlay_text,
                 color_cfg,
@@ -1376,7 +1181,6 @@ def generate_screenshots(
                 selection_label,
                 source_props,
                 tonemap_info=result.tonemap,
-                measurement=measurement_data,
             )
             file_name = _prepare_filename(frame_idx, safe_label)
             target_path = out_dir / file_name

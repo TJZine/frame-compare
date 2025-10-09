@@ -1,5 +1,4 @@
 from pathlib import Path
-import sys
 import types
 
 import pytest
@@ -246,8 +245,7 @@ def test_compose_overlay_text_diagnostic_appends_required_lines():
     assert lines[0] == base_text
     assert lines[1] == "1920 × 1080 → 3840 × 2160  (original → target)"
     assert lines[2] == "MDL: min: 0.0001 cd/m², max: 1000.0 cd/m²"
-    assert lines[3] == "Measurement MAX/AVG: 200nits / 47.2nits"
-    assert lines[4] == "Frame Selection Type: Dark"
+    assert lines[3] == "Frame Selection Type: Dark"
 
 
 def test_compose_overlay_text_skips_hdr_details_for_sdr():
@@ -278,130 +276,6 @@ def test_compose_overlay_text_skips_hdr_details_for_sdr():
     assert "MDL:" not in composed
     assert "Measurement" not in composed
     assert lines[-1] == "Frame Selection Type: Cached"
-
-
-def test_build_measurement_clip_extracts_plane_stats(monkeypatch):
-    class DummyFrame:
-        def __init__(self):
-            self.props = {
-                "PlaneStatsAverage": 0.5,
-                "PlaneStatsMax": 0.9,
-            }
-
-    class DummyMeasurementClip:
-        num_frames = 1
-
-        def get_frame(self, index: int):
-            assert index == 0
-            return DummyFrame()
-
-    class DummyPlaneClip:
-        pass
-
-    class DummyExprClip:
-        pass
-
-    class DummyCoreStd:
-        def __init__(self, core):
-            self._core = core
-
-        def ShufflePlanes(self, clip, planes, colorfamily):
-            self._core.shuffle_calls.append((clip, tuple(planes), colorfamily))
-            return DummyPlaneClip()
-
-        def Expr(self, clips, exprs, format=None):
-            self._core.expr_args = (clips, exprs, format)
-            clip = DummyExprClip()
-            self._core.expr_result = clip
-            return clip
-
-        def PlaneStats(self, clip):
-            self._core.planestats_input = clip
-            return DummyMeasurementClip()
-
-    class DummyResize:
-        def __init__(self, core):
-            self._core = core
-
-        def Point(self, clip, *, format=None):
-            self._core.resize_calls.append((clip, format))
-            return DummyExprClip()
-
-    class DummyCore:
-        def __init__(self):
-            self.std = DummyCoreStd(self)
-            self.resize = DummyResize(self)
-            self.shuffle_calls = []
-            self.expr_args = None
-            self.planestats_input = None
-            self.expr_result = None
-            self.resize_calls = []
-
-    dummy_core = DummyCore()
-
-    class DummyVSModule:
-        FLOAT = 1
-        GRAYS = object()
-        GRAYH = object()
-        GRAY16 = object()
-        GRAY8 = object()
-        GRAY = 1
-
-        def __init__(self, core):
-            self.core = core
-
-    dummy_vs = DummyVSModule(dummy_core)
-    monkeypatch.setitem(sys.modules, "vapoursynth", dummy_vs)
-
-    clip = types.SimpleNamespace(
-        core=dummy_core,
-        format=types.SimpleNamespace(sample_type=dummy_vs.FLOAT, bits_per_sample=32, num_planes=3),
-    )
-
-    measurement_clip = screenshot._build_measurement_clip(clip)
-    assert isinstance(measurement_clip, DummyMeasurementClip)
-    assert len(dummy_core.shuffle_calls) == 3
-    clips_used, exprs_used, format_used = dummy_core.expr_args
-    assert len(clips_used) == 3
-    assert exprs_used == ["x 0.2126 * y 0.7152 * + z 0.0722 * +"]
-    assert dummy_core.planestats_input is dummy_core.expr_result
-    assert format_used in {dummy_vs.GRAYS, dummy_vs.GRAYH, dummy_vs.GRAY16, dummy_vs.GRAY8}
-
-    stats = screenshot._extract_measurement(measurement_clip, 0, 100.0)
-    assert stats == (90.0, 50.0)
-
-
-def test_extract_measurement_normalizes_int_clips(monkeypatch):
-    class DummyFormat:
-        def __init__(self, sample_type=None, bits=0):
-            self.sample_type = sample_type
-            self.bits_per_sample = bits
-
-    class DummyClip:
-        def __init__(self, avg, max_, fmt):
-            self.format = fmt
-            self.num_frames = 2
-            self._frame = types.SimpleNamespace(props={"PlaneStatsAverage": avg, "PlaneStatsMax": max_})
-
-        def get_frame(self, idx):
-            return self._frame
-
-    class DummyVS:
-        FLOAT = 1
-        INTEGER = 0
-
-    monkeypatch.setitem(sys.modules, "vapoursynth", DummyVS())
-
-    int_clip = DummyClip(3276.0, 60000.0, DummyFormat(sample_type=DummyVS.INTEGER, bits=16))
-    stats = screenshot._extract_measurement(int_clip, 5, 100.0)
-    assert stats is not None
-    assert pytest.approx(stats[0], rel=1e-3) == pytest.approx(91.5, rel=1e-3)
-    assert pytest.approx(stats[1], rel=1e-3) == pytest.approx(5.0, rel=1e-3)
-
-    unknown_clip = DummyClip(5000.0, 10000.0, DummyFormat(sample_type=None, bits=None))
-    stats_unknown = screenshot._extract_measurement(unknown_clip, 0, 100.0)
-    assert stats_unknown is not None
-    assert stats_unknown[0] <= 100.0
 
 
 def test_compression_flag_passed(tmp_path, monkeypatch):
