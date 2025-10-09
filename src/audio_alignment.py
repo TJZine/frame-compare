@@ -54,6 +54,7 @@ class AlignmentMeasurement:
 
     @property
     def key(self) -> str:
+        """Return the file stem used when indexing alignment results."""
         return self.file.name
 
 
@@ -305,6 +306,7 @@ def measure_offsets(
     window_overrides: Mapping[Path, Tuple[Optional[float], Optional[float]]] | None = None,
     progress_callback: Callable[[int], None] | None = None,
 ) -> List[AlignmentMeasurement]:
+    """Estimate relative audio offsets for *targets* against *reference*."""
     ensure_external_tools()
 
     ref_audio = _extract_audio(
@@ -403,6 +405,7 @@ def measure_offsets(
 
 
 def load_offsets(path: Path) -> Tuple[Optional[str], Dict[str, Dict[str, Any]]]:
+    """Load previously recorded alignment offsets from *path* if available."""
     if not path.exists():
         return None, {}
     try:
@@ -425,10 +428,12 @@ def load_offsets(path: Path) -> Tuple[Optional[str], Dict[str, Dict[str, Any]]]:
 
 
 def _toml_quote(value: str) -> str:
+    """Escape TOML string characters for safe inline inclusion."""
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _format_float(value: Optional[float]) -> str:
+    """Format floats with fixed precision while preserving NaN markers."""
     if value is None or math.isnan(value):
         return "nan"
     return f"{value:.6f}"
@@ -441,6 +446,7 @@ def update_offsets_file(
     existing: Mapping[str, Dict[str, Any]] | None = None,
     negative_override_notes: Mapping[str, str] | None = None,
 ) -> Tuple[Dict[str, int], Dict[str, str]]:
+    """Write updated offset measurements to *path* and return applied adjustments."""
     applied: Dict[str, int] = {}
     statuses: Dict[str, str] = {}
     existing = existing or {}

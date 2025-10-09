@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""CLI entry point and orchestration logic for frame comparison runs."""
+
 import asyncio
 import builtins
 import json
@@ -87,13 +89,14 @@ SUPPORTED_EXTS = (
 def _color_text(text: str, style: Optional[str]) -> str:
     """
     Wrap the given text with a Rich style tag if a style is provided.
-    
+
     Parameters:
         text (str): The text to style.
-        style (Optional[str]): A Rich style name or markup; if `None` or empty, no styling is applied.
-    
+        style (Optional[str]): A Rich style name or markup; if ``None`` or empty, no styling is applied.
+
     Returns:
-        str: The input text wrapped with Rich style markup (e.g. "[style]text[/]") when `style` is provided, otherwise the original text.
+        str: The input text wrapped with Rich style markup (for example ``"[style]text[/]"``) when ``style`` is provided; otherwise
+            the original text.
     """
     if style:
         return f"[{style}]{text}[/]"
@@ -110,14 +113,14 @@ def _format_kv(
 ) -> str:
     """
     Format a label/value pair as a single string with optional Rich styling.
-    
+
     Parameters:
         label (str): The left-side label text.
         value (object): The right-side value; converted to string.
-        label_style (Optional[str]): Rich style name applied to the label, or None for no styling.
-        value_style (Optional[str]): Rich style name applied to the value, or None for no styling.
+        label_style (Optional[str]): Rich style name applied to the label, or ``None`` for no styling.
+        value_style (Optional[str]): Rich style name applied to the value, or ``None`` for no styling.
         sep (str): Separator string placed between label and value.
-    
+
     Returns:
         str: A single string containing the styled (or plain) label, the separator, and the styled (or plain) value.
     """
@@ -128,6 +131,28 @@ def _format_kv(
 
 @dataclass
 class _ClipPlan:
+    """
+    Internal plan describing how a source clip should be processed.
+
+    Attributes:
+        path (Path): Path to the source media file.
+        metadata (Dict[str, str]): Metadata parsed from the source file name.
+        trim_start (int): Leading frames to skip before analysis.
+        trim_end (Optional[int]): Final frame index (exclusive) or ``None`` to include the full clip.
+        fps_override (Optional[Tuple[int, int]]): Rational frame-rate override applied during processing.
+        use_as_reference (bool): Whether the clip should drive alignment decisions.
+        clip (Optional[object]): Lazily populated VapourSynth clip reference.
+        effective_fps (Optional[Tuple[int, int]]): Frame rate after alignment adjustments.
+        applied_fps (Optional[Tuple[int, int]]): Frame rate enforced by user configuration.
+        source_fps (Optional[Tuple[int, int]]): Native frame rate detected from the source file.
+        source_num_frames (Optional[int]): Total number of frames available in the source clip.
+        source_width (Optional[int]): Source clip width in pixels.
+        source_height (Optional[int]): Source clip height in pixels.
+        has_trim_start_override (bool): ``True`` when a manual trim start was supplied.
+        has_trim_end_override (bool): ``True`` when a manual trim end was supplied.
+        alignment_frames (int): Number of frames trimmed during audio alignment.
+        alignment_status (str): Human-friendly status describing the alignment result.
+    """
     path: Path
     metadata: Dict[str, str]
     trim_start: int = 0
@@ -149,6 +174,18 @@ class _ClipPlan:
 
 @dataclass
 class RunResult:
+    """
+    Outcome of a full frame comparison run including export artefacts.
+
+    Attributes:
+        files (List[Path]): Input media files included in the run.
+        frames (List[int]): Frame numbers selected for screenshot generation.
+        out_dir (Path): Output directory containing generated assets.
+        config (AppConfig): Effective application configuration.
+        image_paths (List[str]): Paths to the generated screenshots.
+        slowpics_url (Optional[str]): URL of the uploaded Slowpics comparison, if created.
+        json_tail (Dict[str, object] | None): Optional JSON blob persisted after run completion.
+    """
     files: List[Path]
     frames: List[int]
     out_dir: Path
@@ -160,6 +197,20 @@ class RunResult:
 
 @dataclass
 class _AudioAlignmentSummary:
+    """
+    Bundle of audio-alignment details used for reporting and persistence.
+
+    Attributes:
+        offsets_path (Path): Path to the saved alignment offsets file.
+        reference_name (str): Name of the reference clip used for alignment.
+        measurements (Sequence[audio_alignment.AlignmentMeasurement]): Raw alignment measurements per clip.
+        applied_frames (Dict[str, int]): Frame adjustments applied to each clip.
+        baseline_shift (int): Base frame shift used when aligning all clips.
+        statuses (Dict[str, str]): Status messages produced for each clip.
+        reference_plan (_ClipPlan): Clip plan of the alignment reference source.
+        final_adjustments (Dict[str, int]): Post-alignment adjustments written back to config.
+        swap_details (Dict[str, str]): Additional per-clip swap notes for CLI output.
+    """
     offsets_path: Path
     reference_name: str
     measurements: Sequence[audio_alignment.AlignmentMeasurement]
@@ -173,6 +224,15 @@ class _AudioAlignmentSummary:
 
 @dataclass
 class _AudioAlignmentDisplayData:
+    """
+    Pre-rendered data used to present audio alignment results in the CLI.
+
+    Attributes:
+        stream_lines (List[str]): Stream-level summary lines for display.
+        estimation_line (Optional[str]): Text summarising the estimated reference offset.
+        offset_lines (List[str]): Lines describing per-clip frame offsets.
+        report_lines (List[str]): Additional status lines included in the output report.
+    """
     stream_lines: List[str]
     estimation_line: Optional[str]
     offset_lines: List[str]
@@ -244,7 +304,7 @@ class CliOutputManager:
     def set_flag(self, key: str, value: Any) -> None:
         """
         Set an internal flag value used by the CLI output manager.
-        
+
         Parameters:
             key (str): Name of the flag to set.
             value (Any): Value to assign to the flag.
@@ -254,7 +314,7 @@ class CliOutputManager:
     def update_values(self, mapping: Mapping[str, Any]) -> None:
         """
         Merge the given mapping into the manager's internal values dictionary.
-        
+
         Parameters:
             mapping (Mapping[str, Any]): Key/value pairs to merge; existing keys will be overwritten.
         """
@@ -263,7 +323,7 @@ class CliOutputManager:
     def warn(self, text: str) -> None:
         """
         Record a warning message for later retrieval and display.
-        
+
         Parameters:
             text (str): Warning text to store.
         """
@@ -272,7 +332,7 @@ class CliOutputManager:
     def get_warnings(self) -> List[str]:
         """
         Return the collected warning messages.
-        
+
         Returns:
             List[str]: A list of warning strings (a copy of the internal warnings collection).
         """
@@ -281,9 +341,10 @@ class CliOutputManager:
     def render_sections(self, section_ids: Iterable[str]) -> None:
         """
         Render the specified layout sections using the current renderer context.
-        
-        Binds the manager's current values and flags into the renderer, then renders each section whose `id` is present in `section_ids`. Section identifiers that are not found in the layout are ignored.
-        
+
+        Binds the manager's current values and flags into the renderer, then renders each section whose ``id`` is present in
+        ``section_ids``. Section identifiers that are not found in the layout are ignored.
+
         Parameters:
             section_ids (Iterable[str]): Iterable of section identifier strings to render.
         """
@@ -297,13 +358,13 @@ class CliOutputManager:
     def create_progress(self, progress_id: str, *, transient: bool = False) -> Progress:
         """
         Create a named progress bar bound to the current CLI layout context.
-        
+
         Parameters:
-            progress_id: Identifier used by the layout renderer to manage and update the progress instance.
-            transient: If True, remove the progress display from the layout when it completes.
-        
+            progress_id (str): Identifier used by the layout renderer to manage and update the progress instance.
+            transient (bool): If ``True``, remove the progress display from the layout when it completes.
+
         Returns:
-            A Progress instance managed by the layout renderer and bound to the current context.
+            Progress: A progress instance managed by the layout renderer and bound to the current context.
         """
         self.renderer.bind_context(self.values, self.flags)
         return self.renderer.create_progress(progress_id, transient=transient)
@@ -311,10 +372,11 @@ class CliOutputManager:
     def update_progress_state(self, progress_id: str, **state: Any) -> None:
         """
         Update the state of a named progress bar in the current layout.
-        
+
         Parameters:
             progress_id (str): Identifier of the progress instance to update.
-            **state (Any): Keyword mapping of progress properties to set (for example: `completed`, `total`, `description`, `advance`). Each provided key will be applied to the progress renderer.
+            **state (Any): Keyword mapping of progress properties to set (for example ``completed``, ``total``, ``description``,
+                ``advance``). Each provided key is forwarded to the progress renderer.
         """
         self.renderer.update_progress_state(progress_id, state=state)
 
@@ -326,7 +388,7 @@ class CliOutputManager:
     def banner(self, text: str) -> None:
         """
         Display a banner message in the CLI with prominent styling.
-        
+
         When the manager is in quiet mode, prints the text without styling; otherwise prints the text styled bold bright cyan.
         """
         if self.quiet:
@@ -337,9 +399,6 @@ class CliOutputManager:
     def section(self, title: str) -> None:
         """
         Render a titled section header to the console unless the manager is in quiet mode.
-        
-        Parameters:
-            title (str): Text to display as the section title; rendered with emphasis (bold cyan).
         """
         if self.quiet:
             return
@@ -348,7 +407,7 @@ class CliOutputManager:
     def line(self, text: str) -> None:
         """
         Render a single line of text to the CLI console.
-        
+
         Parameters:
             text (str): The text to render.
         """
@@ -359,9 +418,10 @@ class CliOutputManager:
     def verbose_line(self, text: str) -> None:
         """
         Print a single dimmed console line when verbose output is enabled and not in quiet mode.
-        
+
         Parameters:
-            text: The message to print; empty or falsy values are ignored. The message is escaped for console markup and displayed with dim styling.
+            text (str): The message to print; empty or falsy values are ignored. The message is escaped for console markup and
+                displayed with dim styling.
         """
         if self.quiet or not self.verbose:
             return
@@ -372,22 +432,22 @@ class CliOutputManager:
     def progress(self, *columns, transient: bool = False) -> Progress:
         """
         Create a new Rich Progress instance bound to this manager's console.
-        
+
         Parameters:
-        	*columns: One or more Rich ProgressColumn objects or callables to use for the progress display.
-        	transient (bool): If True, remove the progress display from the console when complete.
-        
+            *columns: One or more Rich ``ProgressColumn`` objects or callables to use for the progress display.
+            transient (bool): If ``True``, remove the progress display from the console when complete.
+
         Returns:
-        	Progress: A Rich Progress instance configured with the given columns and bound to the manager's console.
+            Progress: A Rich ``Progress`` instance configured with the given columns and bound to the manager's console.
         """
         return Progress(*columns, console=self.console, transient=transient)
 
     def iter_warnings(self) -> List[str]:
         """
         Get the collected warning messages.
-        
+
         Returns:
-            warnings (List[str]): A list of warning strings in the order they were recorded.
+            List[str]: A list of warning strings in the order they were recorded.
         """
         return list(self._warnings)
 
@@ -402,10 +462,12 @@ class CLIAppError(RuntimeError):
 
 
 def _discover_media(root: Path) -> List[Path]:
+    """Return supported media files within *root*, sorted naturally."""
     return [p for p in os_sorted(root.iterdir()) if p.suffix.lower() in SUPPORTED_EXTS]
 
 
 def _parse_metadata(files: Sequence[Path], naming_cfg) -> List[Dict[str, str]]:
+    """Extract naming metadata for each clip using configured heuristics."""
     metadata: List[Dict[str, str]] = []
     for file in files:
         info = parse_filename_metadata(
@@ -422,6 +484,7 @@ _VERSION_PATTERN = re.compile(r"(?:^|[^0-9A-Za-z])(?P<tag>v\d{1,3})(?!\d)", re.I
 
 
 def _extract_version_suffix(file_path: Path) -> str | None:
+    """Return a version suffix (for example ``v2``) from *file_path* stem."""
     match = _VERSION_PATTERN.search(file_path.stem)
     if not match:
         return None
@@ -434,6 +497,7 @@ def _dedupe_labels(
     files: Sequence[Path],
     prefer_full_name: bool,
 ) -> None:
+    """Guarantee unique labels by appending version hints when required."""
     counts = Counter((meta.get("label") or "") for meta in metadata)
     duplicate_groups: dict[str, list[int]] = defaultdict(list)
     for idx, meta in enumerate(metadata):
@@ -470,6 +534,7 @@ def _dedupe_labels(
 
 
 def _parse_audio_track_overrides(entries: Iterable[str]) -> Dict[str, int]:
+    """Parse override entries like "release=2" into a lowercase mapping."""
     mapping: Dict[str, int] = {}
     for entry in entries:
         if "=" not in entry:
@@ -486,6 +551,7 @@ def _parse_audio_track_overrides(entries: Iterable[str]) -> Dict[str, int]:
 
 
 def _first_non_empty(metadata: Sequence[Dict[str, str]], key: str) -> str:
+    """Return the first truthy value for *key* within *metadata*."""
     for meta in metadata:
         value = meta.get(key)
         if value:
@@ -494,6 +560,7 @@ def _first_non_empty(metadata: Sequence[Dict[str, str]], key: str) -> str:
 
 
 def _parse_year_hint(value: str) -> Optional[int]:
+    """Parse a year hint string into an integer between 1900 and 2100."""
     try:
         year = int(value)
     except (TypeError, ValueError):
@@ -504,6 +571,7 @@ def _parse_year_hint(value: str) -> Optional[int]:
 
 
 def _prompt_manual_tmdb(candidates: Sequence[TMDBCandidate]) -> tuple[str, str] | None:
+    """Prompt the user to choose a TMDB candidate when multiple matches exist."""
     print("[yellow]TMDB search returned multiple plausible matches:[/yellow]")
     for cand in candidates:
         year = cand.year or "????"
@@ -528,6 +596,7 @@ def _prompt_manual_tmdb(candidates: Sequence[TMDBCandidate]) -> tuple[str, str] 
 def _prompt_tmdb_confirmation(
     resolution: TMDBResolution,
 ) -> tuple[bool, tuple[str, str] | None]:
+    """Ask the user to confirm the TMDB result or supply a manual override."""
     title = resolution.title or resolution.original_title or "(unknown title)"
     year = resolution.year or "????"
     category = resolution.category.lower()
@@ -555,6 +624,7 @@ def _prompt_tmdb_confirmation(
 
 
 def _render_collection_name(template_text: str, context: Mapping[str, str]) -> str:
+    """Render the configured TMDB collection template with *context* values."""
     if "${" not in template_text:
         return template_text
     try:
@@ -609,6 +679,7 @@ def _pick_analyze_file(
     *,
     cache_dir: Path | None = None,
 ) -> Path:
+    """Resolve the clip to analyse, honouring user targets and heuristics."""
     if not files:
         raise ValueError("No files to analyze")
     target = (target or "").strip()
@@ -643,6 +714,7 @@ def _pick_analyze_file(
 
 
 def _normalise_override_mapping(raw: Mapping[str, object]) -> Dict[str, object]:
+    """Lowercase override keys and drop empty entries."""
     normalised: Dict[str, object] = {}
     for key, value in raw.items():
         key_str = str(key).strip().lower()
@@ -657,6 +729,7 @@ def _match_override(
     metadata: Mapping[str, str],
     mapping: Mapping[str, object],
 ) -> Optional[object]:
+    """Return the override value matching *index*, file names, or metadata labels."""
     candidates = [
         str(index),
         file.name,
@@ -674,6 +747,7 @@ def _match_override(
 
 
 def _build_plans(files: Sequence[Path], metadata: Sequence[Dict[str, str]], cfg: AppConfig) -> List[_ClipPlan]:
+    """Construct clip plans with per-file trim/FPS overrides applied."""
     trim_map = _normalise_override_mapping(cfg.overrides.trim)
     trim_end_map = _normalise_override_mapping(cfg.overrides.trim_end)
     fps_map = _normalise_override_mapping(cfg.overrides.change_fps)

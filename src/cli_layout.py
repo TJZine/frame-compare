@@ -293,6 +293,7 @@ class _AnsiColorMapper:
 
 @dataclass
 class LayoutTheme:
+    """Theme definition providing colors, symbols, and formatting options."""
     colors: Dict[str, str]
     symbols: Dict[str, str]
     units: Dict[str, Any]
@@ -301,6 +302,7 @@ class LayoutTheme:
 
 @dataclass
 class LayoutOptions:
+    """Global CLI layout behaviour toggles and dimension thresholds."""
     two_column_min_cols: int
     blank_line_between_sections: bool
     path_ellipsis: str
@@ -309,12 +311,14 @@ class LayoutOptions:
 
 @dataclass
 class JsonTailConfig:
+    """Configuration describing optional JSON output appended to the CLI run."""
     pretty_on_flag: str
     must_be_last: bool = True
 
 
 @dataclass
 class CliLayout:
+    """Validated CLI layout specification loaded from disk."""
     version: str
     theme: LayoutTheme
     options: LayoutOptions
@@ -326,6 +330,7 @@ class CliLayout:
 
 @dataclass
 class HighlightRule:
+    """Conditional highlighting rule applied to rendered layout values."""
     when: str
     path: str
     role: Optional[str] = None
@@ -1996,6 +2001,7 @@ class CliLayoutRenderer:
 
 
 class _TemplateProgressColumn(ProgressColumn):
+    """Rich progress column that renders using a layout template."""
     def __init__(self, renderer: CliLayoutRenderer, progress_id: str, template: str) -> None:
         """
         Initialize the progress column with its renderer, the target progress block id, and the template used to render the right-side label.
