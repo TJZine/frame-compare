@@ -1,75 +1,38 @@
-# agents.md — Working with Codex (GPT‑5‑Codex)
+# AGENTS.md — Advisors Only (No Execution)
 
-## Autonomy & Boundaries
-- Ask first: external services, public API/CLI changes, network beyond slow.pics.
-- Never: commit secrets or run destructive commands.
+Advisors analyze and propose diffs/checks; they never execute tools or run commands. All execution follows CODEX.md.
 
-## Repo Invariants
-- No `sys.exit` in libraries; raise exceptions.
-- Config lives in TOML → dataclasses.
-- No hidden globals; functions pure unless explicitly I/O.
-- Type hints + docstrings; `logging` module for library logs.
+## Advisors & Outputs
+- **ts-advisor**: types & boundaries; no `any`; error boundaries; consistent exports.
+- **security-advisor**: authN/Z, input validation, secret handling, CSRF/SSRF/injection.
+- **perf-advisor**: budgets, N+1 avoidance, payload size, caching.
+*(Add db/api/dir advisors per feature when needed.)*
 
-# Tools (MCP) — What to use and how
+## Session Behavior
+- run_mode: **assist**
+- pause_on: [pending_approval, error, missing_tool, large_diff]
+- Return: checklists, line-anchored findings, small diff plans, risk/mitigation notes.
 
-> Use MCP tools in this order for most tasks: **ripgrep → context7 → sequential_thinking → memory **. Start every session with the **Tool Discovery** macro below so Codex knows exact method names/params for your installed servers.
+## Standard Flow
+1) **Evidence sweep** (ripgrep) → where code/config/tests live.
+2) **Docs check** (context7) → short official snippets (title+link+date).
+3) **Plan** → 3–7 steps, success checks, rollback notes.
+4) **Proposed diffs** → file-by-file changes + tests (await approval).
+5) **Persist** → append decisions to `docs/DECISIONS.md`; update `CHANGELOG.md`.
+6) **Verify** → targeted checks; concise summary.
+## Repo Invariants (enforced)
+- Add/adjust tests with code changes; keep contracts and error boundaries explicit
+- Type correctness (no `any` where strict types expected); logging for libs; no `sys.exit` in libs
+- Config from ENV/TOML → typed config object
+- Avoid N+1; caches documented; input validation and authZ for protected paths
 
-### ripgrep (code evidence)
-**Purpose.** Find flags, examples, outputs, and metric implementations in the repo quickly.
+## Tooling Registry (Capabilities)
+- Code search (preferred: ripgrep; fallback: IDE/LSP search)
+- Docs lookup (preferred: context7/official docs; fallback: project docs/README)
+- Planning (structured chain-of-thought tool; fallback: outline using bullets)
+- Logging/trace insertion (suggest exact file:line; fallback: print/console.log with labels)
+Guideline: If a preferred tool is unavailable (local or Cloud), degrade gracefully and state the fallback used.
 
-### sequential_thinking (gated plans)
-**Purpose.** Create stepwise plans with checkpoints.
-
-**Tips.** Keep steps small; require a DIFF preview before applying file edits; abort if a step exceeds ~200 changed lines.
-
-### memory (reference)
-**Purpose.** Persist decisions, version facts, and runbooks for future sessions.
-
-**What to store.**
-- “README Style Policy”; “README update <date>” notes.
-- Runtime/library versions used in examples (Python, OpenCV, NumPy, ffmpeg/VapourSynth).
-- Policies: frame-selection defaults, output structure.
-
-**Macros.**
-
-- **Search entries**
-  ```
-  memory.search tags: ["policy","frames"] query: "seed|random_frames|user_frames"
-  ```
-
-**Guardrails.** Never store secrets or user data; include dates and tags for retrieval.
-
----
-
-### context7 (docs on tap)
-**Purpose.** Pull *official docs* snippets into context so edits match real APIs (e.g., OpenCV color conversion, NumPy image ops, ffmpeg/VapourSynth usage).
-
-**Use when.**
-- whenever relevant libraries from context 7 are referenced
-- Unsure about library calls or parameters (OpenCV cvtColor codes, optical-flow APIs).
-- Need canonical examples straight from docs.
-- Want the latest guidance without hard-coding long quotes into README.
-
-**Macros.**
-
-- **Cross-check code vs docs**
-  ```
-  Compare our use of <function> (file:line) with the official context7 snippet. List mismatches and propose minimal fixes.
-  ```
-
-**Guardrails.** Prefer official domains; avoid user blogs. Summarize—don’t dump full pages. Note doc versions; if versionless, say “as of <today>”.
-
-### Recipes (tool interplay)
-
-- **Doc‑verified change**
-  1) ripgrep: find the call site and current flags.
-  2) context7: pull the official function docs.
-  3) sequential_thinking: propose a 3‑step edit with a DIFF preview.
-  4) memory: record “API rationale” with doc link & date.
-
-- **README update loop**
-  1) ripgrep: extract flags/examples/outputs.
-  2) context7: confirm definitions (e.g., luma/motion) from official docs.
-  3) sequential_thinking: apply humanized edits section‑by‑section.
-  4) memory: persist style policy and changelog note.
-
+## Execution Policy
+- Advisors provide analysis only. All execution/command runs follow CODEX.md.
+- When in doubt, stop and request approval as per CODEX.md.

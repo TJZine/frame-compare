@@ -1,0 +1,242 @@
+{
+  "version": "1.0",
+  "theme": {
+    "colors": {
+      "header": "cyan.bold",
+      "accent": "blue.bright",
+      "accent_prepare": "blue",
+      "accent_analyze": "purple.bright",
+      "accent_render": "magenta.bright",
+      "accent_publish": "green.bright",
+      "accent_subhead": "magenta.bold",
+      "value": "white.bright",
+      "unit": "grey.dim",
+      "key": "blue",
+      "bool_true": "green",
+      "bool_false": "red",
+      "number_ok": "green",
+      "number_warn": "yellow",
+      "number_bad": "red",
+      "path": "grey.dim",
+      "success": "green",
+      "warn": "yellow",
+      "error": "red",
+      "dim": "grey.dim",
+      "rule_dim": "grey.dim"
+    },
+    "symbols": {
+      "ok": "✓",
+      "warn": "!",
+      "err": "✗",
+      "ascii_ok": "[✓]",
+      "ascii_warn": "[!]",
+      "ascii_err": "[x]"
+    },
+    "units": {
+      "seconds_decimals": 2,
+      "offset_decimals": 3,
+      "timecode_ms": 3,
+      "thousands_sep": true
+    },
+    "options": {
+      "color_blind_safe": false
+    }
+  },
+  "layout": {
+    "two_column_min_cols": 120,
+    "blank_line_between_sections": true,
+    "path_ellipsis": "middle",
+    "truncate_right_label_min_cols": 100
+  },
+  "highlights": [
+    { "when": "isbool", "path": "audio_alignment.enabled", "true_role": "bool_true", "false_role": "bool_false" },
+    { "when": "isbool", "path": "overlay.enabled", "true_role": "bool_true", "false_role": "bool_false" },
+    { "when": "isbool", "path": "render.add_frame_info", "true_role": "bool_true", "false_role": "bool_false" },
+    { "when": "isbool", "path": "render.upscale", "true_role": "bool_true", "false_role": "bool_false" },
+    { "when": "abs_gt", "path": "audio_alignment.offsets_sec", "value": 1.0, "role": "number_warn" },
+    { "when": "gt", "path": "analysis.counts.motion", "value": 0, "role": "accent_analyze" },
+    { "when": "lt", "path": "progress.fps", "value": 1.0, "role": "number_warn" },
+    { "when": "gt", "path": "verify.delta.max", "value": "{tonemap.verify_luma_threshold}", "role": "number_bad" },
+    { "when": "abs_gt", "path": "verify.delta.max", "value": "{tonemap.verify_luma_threshold} * 0.9", "role": "number_warn" }
+  ],
+  "sections": [
+    {
+      "id": "banner",
+      "type": "line",
+      "template": "▶ Frame Compare • [[key]]clips[[/]]=[[value]]{clips.count}[[/]] • [[key]]seed[[/]]=[[value]]{analysis.random_seed}[[/]] • [[key]]cache[[/]]=[[value]]{cache.file}[[/]] ([[value]]{cache.status}[[/]]{cache.reason?` [[dim]]${cache.reason}[[/]]`:''})"
+    },
+    {
+      "id": "at_a_glance",
+      "type": "box",
+      "title": "At-a-Glance",
+      "when": "true",
+      "lines": [
+        "Clips=[[value]]{clips.count}[[/]] • Step=[[value]]{analysis.step}[[/]] • Downscale=[[value]]{analysis.downscale_height}[[/]][[unit]]px[[/]] • Plan: Dark=[[value]]{analysis.counts.dark}[[/]] Bright=[[value]]{analysis.counts.bright}[[/]] Motion=[[value]]{analysis.counts.motion}[[/]]",
+        "Window: lead=[[value]]{window.ignore_lead_seconds:.2f}[[/]][[unit]]s[[/]] trail=[[value]]{window.ignore_trail_seconds:.2f}[[/]][[unit]]s[[/]] • Align(audio)=[[value]]{audio_alignment.enabled}[[/]] [[unit]]({audio_alignment.offsets_sec:+.3f}s)[[/]]",
+        "Canvas: single_res=[[value]]{render.single_res|tallest}[[/]] [[unit]]px[[/]]  upscale=[[value]]{render.upscale}[[/]]  crop=mod[[value]]{render.mod_crop}[[/]]  pad=[[value]]{render.center_pad}[[/]],[[unit]]tol={render.letterbox_px_tolerance}px[[/]]",
+        "Tonemap: curve=[[value]]{tonemap.tone_curve}[[/]]  dpd=[[value]]{tonemap.dynamic_peak_detection}[[/]]  target=[[value]]{tonemap.target_nits}[[/]][[unit]]nits[[/]] • Seed=[[value]]{analysis.random_seed}[[/]] • Cache=[[value]]{cache.status}[[/]]"
+      ]
+    },
+    {
+      "id": "discover",
+      "type": "list",
+      "title_badge": "[DISCOVER]",
+      "items": [
+        "• [[key]]ref[[/]]=[[value]]{clips.ref.label}[[/]]  [[value]]{clips.ref.width}[[/]]x[[value]]{clips.ref.height}[[/]] @ [[value]]{clips.ref.fps:.3f}[[/]][[unit]]fps[[/]]  frames=[[value]]{clips.ref.frames}[[/]]  dur=[[value]]{clips.ref.duration_tc}[[/]]",
+        "• [[key]]tgt[[/]]=[[value]]{clips.tgt.label}[[/]]  [[value]]{clips.tgt.width}[[/]]x[[value]]{clips.tgt.height}[[/]] @ [[value]]{clips.tgt.fps:.3f}[[/]][[unit]]fps[[/]]  frames=[[value]]{clips.tgt.frames}[[/]]  dur=[[value]]{clips.tgt.duration_tc}[[/]]",
+        "{tmdb_resolved?`TMDB: [[value]]${tmdb.category}/${tmdb.id}[[/]]  “[[value]]${tmdb.title} (${tmdb.year})[[/]]”  lang=[[value]]${tmdb.lang}[[/]]`:''}"
+      ]
+    },
+    {
+      "id": "prepare",
+      "type": "group",
+      "title_badge": "[PREPARE]",
+      "blocks": [
+        {
+          "subtitle": "Trim",
+          "lines": [
+            "• Ref:  lead=[[value]]{trims.ref.lead_f:>4}[[/]][[unit]]f[[/]] ([[value]]{trims.ref.lead_s:>5.2f}[[/]][[unit]]s[[/]])  trail=[[value]]{trims.ref.trail_f:>4}[[/]][[unit]]f[[/]] ([[value]]{trims.ref.trail_s:>5.2f}[[/]][[unit]]s[[/]])",
+            "• Tgt:  lead=[[value]]{trims.tgt.lead_f:>4}[[/]][[unit]]f[[/]] ([[value]]{trims.tgt.lead_s:>5.2f}[[/]][[unit]]s[[/]])  trail=[[value]]{trims.tgt.trail_f:>4}[[/]][[unit]]f[[/]] ([[value]]{trims.tgt.trail_s:>5.2f}[[/]][[unit]]s[[/]])"
+          ]
+        },
+        {
+          "subtitle": "Window",
+          "lines": [
+            "ignore_lead=[[value]]{window.ignore_lead_seconds:.2f}[[/]][[unit]]s[[/]]  ignore_trail=[[value]]{window.ignore_trail_seconds:.2f}[[/]][[unit]]s[[/]]  min=[[value]]{window.min_window_seconds:.2f}[[/]][[unit]]s[[/]]  downscale=[[value]]{analysis.downscale_height}[[/]][[unit]]px[[/]]"
+          ]
+        },
+        {
+          "subtitle": "Alignment(manual)",
+          "lines": [
+            "start=[[value]]{alignment.manual_start_s}[[/]][[unit]]s[[/]]  end=[[value]]{alignment.manual_end_s|unchanged}[[/]][[unit]]s[[/]]"
+          ]
+        },
+        {
+          "subtitle": "Overrides",
+          "lines": ["change_fps=[[value]]{overrides.change_fps|none}[[/]]"],
+          "when": "verbose || overrides.change_fps != 'none'"
+        }
+      ]
+    },
+    {
+      "id": "audio_align",
+      "type": "group",
+      "title_badge": "[PREPARE · Audio]",
+      "when": "audio_alignment.enabled",
+      "blocks": [
+        {
+          "lines": [
+            "Streams: [[key]]ref[[/]]=\"[[value]]{audio_alignment.reference_stream}[[/]]\"  [[key]]target[[/]]=\"[[value]]{audio_alignment.target_stream}[[/]]\"",
+            "Offset:  [[value]]{audio_alignment.offsets_sec:+.3f}[[/]][[unit]]s[[/]]  ([[value]]{audio_alignment.offsets_frames:+d}[[/]][[unit]]f[[/]] @ [[value]]{clips.ref.fps:.3f}[[/]][[unit]]fps[[/]])  (corr=[[value]]{audio_alignment.corr:.2f}[[/]], thresh=[[value]]{audio_alignment.threshold:.2f}[[/]])",
+            "Preview: [[path]]{audio_alignment.preview_paths.0.e}[[/]]",
+            "         [[path]]{audio_alignment.preview_paths.1.e}[[/]]",
+            "Confirm: [[value]]{audio_alignment.confirmed}[[/]]{audio_alignment.confirmed?`  [[dim]]→ wrote: ${audio_alignment.offsets_filename.e}[[/]]`:`  [[dim]]→ wrote: ${audio_alignment.offsets_filename.e} (manual edit suggested)[[/]]`}"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "analyze",
+      "type": "group",
+      "title_badge": "[ANALYZE]",
+      "blocks": [
+        {
+          "subtitle": "Config",
+          "lines": [
+            "Config: step=[[value]]{analysis.step}[[/]]  method=[[value]]{analysis.motion_method}[[/]]  scenecut_q=[[value]]{analysis.motion_scenecut_quantile}[[/]]  diff_radius=[[value]]{analysis.motion_diff_radius}[[/]]  downscale=[[value]]{analysis.downscale_height}[[/]][[unit]]px[[/]]"
+          ]
+        },
+        {
+          "subtitle": "Plan",
+          "lines": [
+            "Plan: Dark=[[value]]{analysis.counts.dark}[[/]]  Bright=[[value]]{analysis.counts.bright}[[/]]  Motion=[[value]]{analysis.counts.motion}[[/]]  Random=[[value]]{analysis.counts.random}[[/]]  User=[[value]]{analysis.counts.user}[[/]]  sep=[[value]]{analysis.screen_separation_sec:.1f}[[/]][[unit]]s[[/]]  Seed=[[value]]{analysis.random_seed}[[/]]"
+          ]
+        },
+        {
+          "type": "progress",
+          "progress_id": "analyze_bar",
+          "right_label": "[[value]]{progress.fps:.1f}[[/]] [[unit]]fps[[/]] | ETA [[value]]{progress.eta_tc}[[/]] | elapsed [[value]]{progress.elapsed_tc}[[/]]"
+        }
+      ]
+    },
+    {
+      "id": "render",
+      "type": "group",
+      "title_badge": "[RENDER]",
+      "blocks": [
+        {
+          "subtitle": "Legend",
+          "when": "verbose",
+          "lines": [
+            "[[key]]Tokens[[/]]:[[key]] key[[/]] [[value]]value[[/]] [[unit]]unit[[/]] [[path]]path[[/]] ([[unit]]dim[[/]] = helper text)",
+            "[[key]]Prefix[[/]]:[[unit]]›[[/]] or [[unit]]>[[/]] marks sub-blocks; rules dim to show scope"
+          ]
+        },
+        {
+          "subtitle": "Writer",
+          "lines": [
+            "writer=[[key]]writer[[/]]=[[value]]{render.writer}[[/]]  out_dir=[[key]]out_dir[[/]]=[[path]]{render.out_dir.e}[[/]]  add_frame_info=[[key]]add_frame_info[[/]]=[[value]]{render.add_frame_info}[[/]]"
+          ]
+        },
+        {
+          "subtitle": "Canvas",
+          "lines": [
+            "single_res=[[value]]{render.single_res|tallest}[[/]] [[unit]]px[[/]]  upscale=[[value]]{render.upscale}[[/]]  crop=mod[[value]]{render.mod_crop}[[/]]  letterbox_aware=[[value]]{render.letterbox_pillarbox_aware}[[/]]  pad=[[value]]{render.center_pad}[[/]],[[unit]]tol={render.letterbox_px_tolerance}[[/]][[unit]]px[[/]]"
+          ]
+        },
+        {
+          "subtitle": "Tonemap",
+          "lines": [
+            "curve=[[value]]{tonemap.tone_curve}[[/]]  dpd=[[value]]{tonemap.dynamic_peak_detection}[[/]]  target=[[value]]{tonemap.target_nits}[[/]][[unit]]nits[[/]]  verify_luma_thresh=[[value]]{tonemap.verify_luma_threshold}[[/]]  verify_delta=[[value]]{verify.delta.max}[[/]]"
+          ]
+        },
+        {
+          "subtitle": "Overlay",
+          "lines": [
+            "enabled=[[value]]{overlay.enabled}[[/]]  template=\"[[value]]{overlay.template}[[/]]\"  mode=[[value]]{overlay.mode}[[/]]"
+          ]
+        },
+        {
+          "type": "progress",
+          "progress_id": "render_bar",
+          "right_label": "[[value]]{progress.current}[[/]]/[[value]]{progress.total}[[/]] | [[value]]{progress.fps:.1f}[[/]] [[unit]]fps[[/]] | ETA [[value]]{progress.eta_tc}[[/]] | elapsed [[value]]{progress.elapsed_tc}[[/]]"
+        }
+      ]
+    },
+    {
+      "id": "publish",
+      "type": "passthrough",
+      "title_badge": "[PUBLISH]"
+    },
+    {
+      "id": "warnings",
+      "type": "table",
+      "title_badge": "[WARNINGS]",
+      "group_by": "warning.type",
+      "row_template": "• [[warn]]{warning.type}[[/]] — [[value]]{warning.count}[[/]] occurrence(s){warning.labels?`: [[dim]]${warning.labels}[[/]]`:''}",
+      "fold_labels": { "head": 2, "tail": 1, "when": "!verbose" }
+    },
+    {
+      "id": "summary",
+      "type": "list",
+      "title_badge": "[SUMMARY]",
+      "items": [
+        "• Clips:[[value]]{clips.count}[[/]]  Window: lead=[[value]]{window.ignore_lead_seconds:.2f}[[/]][[unit]]s[[/]] trail=[[value]]{window.ignore_trail_seconds:.2f}[[/]][[unit]]s[[/]]  step=[[value]]{analysis.step}[[/]] downscale=[[value]]{analysis.downscale_height}[[/]][[unit]]px[[/]]",
+        "• Align: audio=[[value]]{audio_alignment.enabled}[[/]]  offsets=[[value]]{audio_alignment.offsets_sec:+.3f}[[/]][[unit]]s[[/]]  file=[[path]]{audio_alignment.offsets_filename.e}[[/]]",
+        "• Plan: Dark=[[value]]{analysis.counts.dark}[[/]] Bright=[[value]]{analysis.counts.bright}[[/]] Motion=[[value]]{analysis.counts.motion}[[/]] Random=[[value]]{analysis.counts.random}[[/]] User=[[value]]{analysis.counts.user}[[/]]  sep=[[value]]{analysis.screen_separation_sec:.1f}[[/]][[unit]]s[[/]]",
+        "• Canvas: single_res=[[value]]{render.single_res|tallest}[[/]] [[unit]]px[[/]] upscale=[[value]]{render.upscale}[[/]] crop=mod[[value]]{render.mod_crop}[[/]] pad=[[value]]{render.center_pad}[[/]]",
+        "• Tonemap: [[value]]{tonemap.tone_curve}[[/]]@[[value]]{tonemap.target_nits}[[/]][[unit]]nits[[/]] dpd=[[value]]{tonemap.dynamic_peak_detection}[[/]]  verify≤[[value]]{tonemap.verify_luma_threshold}[[/]]  Δ=[[value]]{verify.delta.max}[[/]]",
+        "• Output: [[path]]{render.out_dir.e}[[/]]  compression=[[value]]{render.compression}[[/]]",
+        "• Cache: [[path]]{cache.file}[[/]]  status=[[value]]{cache.status}[[/]]",
+        "Output frames: [[value]]{analysis.output_frame_count}[[/]]  [[dim]][{analysis.output_frames_preview}][[/]]  (full list in JSON{verbose?' and above':''})"
+      ]
+    }
+  ],
+  "folding": {
+    "frames_preview": { "head": 4, "tail": 4, "joiner": ", ", "when": "!verbose" }
+  },
+  "json_tail": {
+    "pretty_on_flag": "json_pretty",
+    "must_be_last": true
+  }
+}

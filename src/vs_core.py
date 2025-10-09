@@ -9,7 +9,7 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 _VS_MODULE_NAME = "vapoursynth"
 _ENV_VAR = "VAPOURSYNTH_PYTHONPATH"
@@ -145,6 +145,37 @@ _RANGE_NAME_TO_CODE = {
     "pc": 0,
     "jpeg": 0,
 }
+
+_MATRIX_CODE_LABELS = {
+    0: "rgb",
+    1: "bt709",
+    9: "bt2020",
+}
+
+_PRIMARIES_CODE_LABELS = {
+    1: "bt709",
+    9: "bt2020",
+}
+
+_TRANSFER_CODE_LABELS = {
+    1: "bt1886",
+    16: "st2084",
+    18: "hlg",
+}
+
+_RANGE_CODE_LABELS = {
+    0: "full",
+    1: "limited",
+}
+
+
+def _describe_code(value: Optional[int], mapping: Mapping[int, str], default: str = "auto") -> str:
+    if value is None:
+        return default
+    try:
+        return mapping[int(value)]
+    except Exception:
+        return str(value)
 
 
 def _normalise_search_path(path: str) -> str:
@@ -757,10 +788,20 @@ def _format_overlay_text(
         return template
 
 
-def _pick_verify_frame(clip: Any, cfg: Any, *, fps: float, file_name: str) -> tuple[int, bool]:
+def _pick_verify_frame(
+    clip: Any,
+    cfg: Any,
+    *,
+    fps: float,
+    file_name: str,
+    warning_sink: Optional[List[str]] = None,
+) -> tuple[int, bool]:
     num_frames = getattr(clip, "num_frames", 0) or 0
     if num_frames <= 0:
-        logger.warning("[VERIFY] %s has no frames; using frame 0", file_name)
+        message = f"[VERIFY] {file_name} has no frames; using frame 0"
+        logger.warning(message)
+        if warning_sink is not None:
+            warning_sink.append(message)
         return 0, False
 
     manual = getattr(cfg, "verify_frame", None)
@@ -796,7 +837,10 @@ def _pick_verify_frame(clip: Any, cfg: Any, *, fps: float, file_name: str) -> tu
     try:
         stats_clip = clip.std.PlaneStats()
     except Exception as exc:
-        logger.warning("[VERIFY] %s unable to create PlaneStats: %s", file_name, exc)
+        message = f"[VERIFY] {file_name} unable to create PlaneStats: {exc}"
+        logger.warning(message)
+        if warning_sink is not None:
+            warning_sink.append(message)
         middle = max(0, min(num_frames - 1, num_frames // 2))
         return middle, False
 
@@ -865,6 +909,7 @@ def process_clip_for_screenshot(
     enable_overlay: bool = True,
     enable_verification: bool = True,
     logger_override: Optional[logging.Logger] = None,
+    warning_sink: Optional[List[str]] = None,
 ) -> ClipProcessResult:
     """Prepare *clip* for screenshot export (tonemap, overlay metadata, verify)."""
 
@@ -1023,7 +1068,13 @@ def process_clip_for_screenshot(
             and fps_den
             else 0.0
         )
-        frame_idx, auto = _pick_verify_frame(tonemapped, cfg, fps=fps, file_name=file_name)
+        frame_idx, auto = _pick_verify_frame(
+            tonemapped,
+            cfg,
+            fps=fps,
+            file_name=file_name,
+            warning_sink=warning_sink,
+        )
         try:
             naive = spline36(
                 clip,

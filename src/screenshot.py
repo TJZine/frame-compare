@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 from functools import partial
+import math
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, TypedDict, cast
 
@@ -18,6 +19,163 @@ _INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
 logger = logging.getLogger(__name__)
+
+
+_SELECTION_LABELS = {
+    "dark": "Dark",
+    "bright": "Bright",
+    "motion": "Motion",
+    "user": "User",
+    "random": "Random",
+    "auto": "Auto",
+    "cached": "Cached",
+}
+
+
+def _format_dimensions(width: int, height: int) -> str:
+    return f"{int(width)} \u00D7 {int(height)}"
+
+
+def _format_resolution_summary(plan: GeometryPlan) -> str:
+    original_w = int(plan["cropped_w"])
+    original_h = int(plan["cropped_h"])
+    final_w, final_h = plan["final"]
+    original = _format_dimensions(original_w, original_h)
+    target = _format_dimensions(final_w, final_h)
+    if final_w == original_w and final_h == original_h:
+        return f"{original}  (native)"
+    return f"{original} \u2192 {target}  (original \u2192 target)"
+
+
+def _coerce_luminance_values(value: Any) -> List[float]:
+    if value is None:
+        return []
+    if isinstance(value, (int, float)):
+        return [float(value)]
+    if isinstance(value, bytes):
+        try:
+            value = value.decode("utf-8", "ignore")
+        except Exception:
+            return []
+    if isinstance(value, str):
+        matches = re.findall(r"[-+]?\d+(?:\.\d+)?", value)
+        return [float(match) for match in matches]
+    if isinstance(value, (list, tuple)):
+        results: List[float] = []
+        for item in value:
+            results.extend(_coerce_luminance_values(item))
+        return results
+    return []
+
+
+def _extract_mastering_display_luminance(props: Mapping[str, Any]) -> tuple[Optional[float], Optional[float]]:
+    min_keys = (
+        "_MasteringDisplayMinLuminance",
+        "MasteringDisplayMinLuminance",
+        "MasteringDisplayLuminanceMin",
+    )
+    max_keys = (
+        "_MasteringDisplayMaxLuminance",
+        "MasteringDisplayMaxLuminance",
+        "MasteringDisplayLuminanceMax",
+    )
+
+    min_value: Optional[float] = None
+    max_value: Optional[float] = None
+
+    for key in min_keys:
+        if key in props:
+            values = _coerce_luminance_values(props.get(key))
+            if values:
+                min_value = values[0]
+                break
+    for key in max_keys:
+        if key in props:
+            values = _coerce_luminance_values(props.get(key))
+            if values:
+                max_value = values[0]
+                break
+
+    if min_value is None or max_value is None:
+        combined_keys = ("_MasteringDisplayLuminance", "MasteringDisplayLuminance")
+        for key in combined_keys:
+            values = _coerce_luminance_values(props.get(key))
+            if len(values) >= 2:
+                if min_value is None:
+                    min_value = min(values)
+                if max_value is None:
+                    max_value = max(values)
+                if min_value is not None and max_value is not None:
+                    break
+
+    return min_value, max_value
+
+
+def _format_luminance_value(value: float) -> str:
+    if value < 1.0:
+        text = f"{value:.4f}"
+        if "." in text:
+            text = text.rstrip("0").rstrip(".")
+        return text or "0"
+    return f"{value:.1f}"
+
+
+def _format_mastering_display_line(props: Mapping[str, Any]) -> str:
+    min_value, max_value = _extract_mastering_display_luminance(props)
+    if min_value is None or max_value is None:
+        return "MDL: Insufficient data"
+    return (
+        f"MDL: min: {_format_luminance_value(min_value)} cd/m², "
+        f"max: {_format_luminance_value(max_value)} cd/m²"
+    )
+
+
+def _normalize_selection_label(label: Optional[str]) -> str:
+    if not label:
+        return "(unknown)"
+    cleaned = label.strip()
+    if not cleaned:
+        return "(unknown)"
+    normalized = cleaned.lower()
+    mapped = _SELECTION_LABELS.get(normalized)
+    if mapped:
+        return mapped
+    return cleaned
+
+
+def _format_selection_line(selection_label: Optional[str]) -> str:
+    return f"Frame Selection Type: {_normalize_selection_label(selection_label)}"
+
+
+def _compose_overlay_text(
+    base_text: Optional[str],
+    color_cfg: ColorConfig,
+    plan: GeometryPlan,
+    selection_label: Optional[str],
+    source_props: Mapping[str, Any],
+    *,
+    tonemap_info: Optional[vs_core.TonemapInfo],
+) -> Optional[str]:
+    if not bool(getattr(color_cfg, "overlay_enabled", True)):
+        return None
+
+    mode = str(getattr(color_cfg, "overlay_mode", "minimal")).strip().lower()
+    if mode != "diagnostic":
+        return base_text
+
+    lines: List[str] = []
+    if base_text:
+        lines.append(base_text)
+
+    lines.append(_format_resolution_summary(plan))
+    include_hdr_details = bool(tonemap_info and tonemap_info.applied)
+    if include_hdr_details:
+        lines.append(_format_mastering_display_line(source_props))
+    lines.append(_format_selection_line(selection_label))
+
+    return "\n".join(lines)
+
+
 
 
 def _ensure_rgb24(core: Any, clip: Any, frame_idx: int) -> Any:
@@ -119,8 +277,6 @@ def _apply_frame_info_overlay(
             f"Frame {display_idx} of {clip_ref.num_frames}",
             f"Picture type: {pict_text}",
         ]
-        if selection_label:
-            lines.append(f"Content Type: {selection_label}")
         info = "\n".join(lines)
         return subtitle(clip_ref, text=[info], style=FRAME_INFO_STYLE)
 
@@ -165,6 +321,7 @@ def _apply_overlay_text(
         message = f"Overlay filter unavailable for {file_label}"
         logger.error('[OVERLAY] %s', message)
         state["overlay_status"] = "error"
+        state.setdefault("warnings", []).append(f"[OVERLAY] {message}")
         if strict:
             raise ScreenshotWriterError(message)
         return clip
@@ -174,6 +331,7 @@ def _apply_overlay_text(
         message = f"Overlay failed for {file_label}: {exc}"
         logger.error('[OVERLAY] %s', message)
         state["overlay_status"] = "error"
+        state.setdefault("warnings", []).append(f"[OVERLAY] {message}")
         if strict:
             raise ScreenshotWriterError(message) from exc
         return clip
@@ -902,6 +1060,8 @@ def generate_screenshots(
     progress_callback: Callable[[int], None] | None = None,
     frame_labels: Mapping[int, str] | None = None,
     alignment_maps: Sequence[Any] | None = None,
+    warnings_sink: List[str] | None = None,
+    verification_sink: List[Dict[str, Any]] | None = None,
 ) -> List[str]:
     """Render screenshots for *frames* from each clip using configured writer."""
 
@@ -931,9 +1091,11 @@ def generate_screenshots(
             enable_overlay=True,
             enable_verification=True,
             logger_override=logger,
+            warning_sink=warnings_sink,
         )
         processed_results.append(result)
         overlay_states.append({})
+        overlay_mode = str(getattr(color_cfg, "overlay_mode", "minimal")).strip().lower()
         if result.verification is not None:
             logger.info(
                 "[VERIFY] %s frame=%d avg=%.4f max=%.4f",
@@ -942,6 +1104,16 @@ def generate_screenshots(
                 result.verification.average,
                 result.verification.maximum,
             )
+            if verification_sink is not None:
+                verification_sink.append(
+                    {
+                        "file": str(file_path),
+                        "frame": int(result.verification.frame),
+                        "average": float(result.verification.average),
+                        "maximum": float(result.verification.maximum),
+                        "auto_selected": bool(result.verification.auto_selected),
+                    }
+                )
 
     geometry = _plan_geometry([result.clip for result in processed_results], cfg)
 
@@ -962,7 +1134,8 @@ def generate_screenshots(
         raw_label, safe_label = _derive_labels(file_path, meta)
 
         overlay_state = overlay_states[clip_index]
-        overlay_text = result.overlay_text
+        base_overlay_text = getattr(result, "overlay_text", None)
+        source_props = getattr(result, "source_props", {})
 
         for frame in frames:
             frame_idx = int(frame)
@@ -1001,6 +1174,14 @@ def generate_screenshots(
                     file_path,
                     actual_idx,
                 )
+            overlay_text = _compose_overlay_text(
+                base_overlay_text,
+                color_cfg,
+                plan,
+                selection_label,
+                source_props,
+                tonemap_info=result.tonemap,
+            )
             file_name = _prepare_filename(frame_idx, safe_label)
             target_path = out_dir / file_name
 
@@ -1051,16 +1232,19 @@ def generate_screenshots(
             except ScreenshotWriterError:
                 raise
             except Exception as exc:
-                logger.warning(
-                    "Falling back to placeholder for frame %s of %s: %s",
-                    frame_idx,
-                    file_path,
-                    exc,
+                message = (
+                    f"[RENDER] Falling back to placeholder for frame {frame_idx} of {file_path}: {exc}"
                 )
+                logger.warning(message)
+                if warnings_sink is not None:
+                    warnings_sink.append(message)
                 _save_frame_placeholder(target_path)
 
             created.append(str(target_path))
             if progress_callback is not None:
                 progress_callback(1)
+
+        if warnings_sink is not None:
+            warnings_sink.extend(overlay_state.get("warnings", []))
 
     return created
