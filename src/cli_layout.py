@@ -1,6 +1,7 @@
 """Data-driven CLI layout rendering utilities."""
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass, field
 import json
 import os
@@ -24,6 +25,8 @@ _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 _ANSI_RESET = "\x1b[0m"
 
+_SAFE_FUNCTION_TOKENS = {"abs", "min", "max"}
+
 _COLOR_BLIND_OVERRIDES: Dict[str, str] = {
     "bool_true": "cyan",
     "bool_false": "orange",
@@ -41,6 +44,90 @@ _SECTION_ACCENT_PATTERNS: Tuple[Tuple[str, str], ...] = (
     ("RENDER", "accent_render"),
     ("PUBLISH", "accent_publish"),
 )
+
+
+_ALLOWED_BOOL_OPS: Tuple[type[ast.boolop], ...] = (ast.And, ast.Or)
+_ALLOWED_BIN_OPS: Tuple[type[ast.operator], ...] = (
+    ast.Add,
+    ast.Sub,
+    ast.Mult,
+    ast.Div,
+    ast.Mod,
+    ast.FloorDiv,
+)
+_ALLOWED_UNARY_OPS: Tuple[type[ast.unaryop], ...] = (ast.Not, ast.UAdd, ast.USub)
+_ALLOWED_COMPARE_OPS: Tuple[type[ast.cmpop], ...] = (
+    ast.Eq,
+    ast.NotEq,
+    ast.Lt,
+    ast.LtE,
+    ast.Gt,
+    ast.GtE,
+)
+
+
+def _validate_safe_expression(node: ast.AST, *, allowed_calls: Mapping[str, Any], allowed_names: Mapping[str, Any]) -> None:
+    """Ensure the parsed AST only contains whitelisted operations."""
+
+    def _check(inner: ast.AST) -> None:
+        if isinstance(inner, ast.Expression):
+            _check(inner.body)
+            return
+        if isinstance(inner, ast.BoolOp):
+            if not isinstance(inner.op, _ALLOWED_BOOL_OPS):
+                raise ValueError("Boolean operation not allowed")
+            for value in inner.values:
+                _check(value)
+            return
+        if isinstance(inner, ast.BinOp):
+            if not isinstance(inner.op, _ALLOWED_BIN_OPS):
+                raise ValueError("Binary operation not allowed")
+            _check(inner.left)
+            _check(inner.right)
+            return
+        if isinstance(inner, ast.UnaryOp):
+            if not isinstance(inner.op, _ALLOWED_UNARY_OPS):
+                raise ValueError("Unary operation not allowed")
+            _check(inner.operand)
+            return
+        if isinstance(inner, ast.Compare):
+            for op in inner.ops:
+                if not isinstance(op, _ALLOWED_COMPARE_OPS):
+                    raise ValueError("Comparison not allowed")
+            _check(inner.left)
+            for comparator in inner.comparators:
+                _check(comparator)
+            return
+        if isinstance(inner, ast.IfExp):
+            _check(inner.test)
+            _check(inner.body)
+            _check(inner.orelse)
+            return
+        if isinstance(inner, ast.Call):
+            if not isinstance(inner.func, ast.Name):
+                raise ValueError("Only direct function calls are allowed")
+            if inner.func.id not in allowed_calls:
+                raise ValueError(f"Call to '{inner.func.id}' not permitted")
+            if inner.keywords:
+                raise ValueError("Keyword arguments are not allowed")
+            for arg in inner.args:
+                _check(arg)
+            return
+        if isinstance(inner, ast.Name):
+            if inner.id not in allowed_names:
+                raise ValueError(f"Name '{inner.id}' is not allowed in expressions")
+            return
+        if isinstance(inner, ast.Constant):
+            if isinstance(inner.value, (int, float, str, bool)) or inner.value is None:
+                return
+            raise ValueError("Unsupported constant value")
+        if isinstance(inner, (ast.List, ast.Tuple)):
+            for element in inner.elts:
+                _check(element)
+            return
+        raise ValueError(f"Unsupported expression element: {ast.dump(inner, include_attributes=False)}")
+
+    _check(node)
 
 
 class _AnsiColorMapper:
@@ -423,6 +510,8 @@ class LayoutContext:
         for segment in segments:
             if segment == "":
                 continue
+            if (segment.startswith("_") or "__" in segment) and segment != "e":
+                return None
             if isinstance(current, Mapping):
                 current = current.get(segment)
                 continue
@@ -821,6 +910,22 @@ class CliLayoutRenderer:
                 return None
         return None
 
+    def _safe_eval(
+        self,
+        expression: str,
+        namespace: Mapping[str, Any],
+        *,
+        allowed_call_names: Sequence[str],
+    ) -> Any:
+        try:
+            tree = ast.parse(expression, mode="eval")
+        except SyntaxError as exc:
+            raise ValueError("Invalid expression syntax") from exc
+        allowed_calls = {name: namespace[name] for name in allowed_call_names if name in namespace}
+        _validate_safe_expression(tree, allowed_calls=allowed_calls, allowed_names=namespace)
+        compiled = compile(tree, "<cli-layout-expression>", "eval")
+        return eval(compiled, {"__builtins__": {}}, namespace)
+
     def _evaluate_expression(self, expression: str, context: LayoutContext) -> Any:
         """
         Evaluate a layout expression using a restricted namespace that can resolve template paths.
@@ -833,14 +938,18 @@ class CliLayoutRenderer:
             The result of the evaluated expression, or `None` if evaluation fails.
         """
         prepared = self._prepare_condition(expression)
-        namespace = {
+        namespace: Dict[str, Any] = {
             "resolve": context.resolve,
             "abs": abs,
             "min": min,
             "max": max,
         }
         try:
-            return eval(prepared, {"__builtins__": {}}, namespace)
+            return self._safe_eval(
+                prepared,
+                namespace,
+                allowed_call_names=("resolve", "abs", "min", "max"),
+            )
         except Exception:
             return None
 
@@ -1395,14 +1504,14 @@ class CliLayoutRenderer:
             return False
 
         prepared = self._prepare_condition(expression)
-        namespace = {
+        namespace: Dict[str, Any] = {
             "resolve": context.resolve,
             "True": True,
             "False": False,
             "None": None,
         }
         try:
-            result = eval(prepared, {"__builtins__": {}}, namespace)
+            result = self._safe_eval(prepared, namespace, allowed_call_names=("resolve",))
         except Exception:
             return False
         return bool(result)
@@ -1442,6 +1551,8 @@ class CliLayoutRenderer:
                     tokens.append("False")
                 elif lowered == "none":
                     tokens.append("None")
+                elif lowered in _SAFE_FUNCTION_TOKENS:
+                    tokens.append(token)
                 else:
                     tokens.append(f"resolve('{token}')")
                 continue
