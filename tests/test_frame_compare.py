@@ -918,10 +918,8 @@ def test_audio_alignment_block_and_json(tmp_path, monkeypatch, runner):
     output_lines = result.output.splitlines()
     streams_idx = next(i for i, line in enumerate(output_lines) if line.strip().startswith("Streams:"))
     assert 'ref="Clip A->' in output_lines[streams_idx]
-    clip_b_lines = [output_lines[streams_idx]]
-    if streams_idx + 1 < len(output_lines):
-        clip_b_lines.append(output_lines[streams_idx + 1])
-    assert any("Clip B" in line for line in clip_b_lines)
+    clip_b_line = output_lines[streams_idx + 1] if streams_idx + 1 < len(output_lines) else ""
+    assert "Clip B" in (output_lines[streams_idx] + clip_b_line)
     assert any("Estimating audio offsets" in line for line in output_lines)
     assert any("Offset:" in line and "Clip B" in line for line in output_lines)
     assert "Confirm:" in result.output
