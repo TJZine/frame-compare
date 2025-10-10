@@ -430,8 +430,8 @@ def load_cli_layout(path: Path) -> CliLayout:
         if not isinstance(rule_raw, dict):
             raise CliLayoutError(f"highlights[{index}] must be an object")
         when = str(rule_raw.get("when", "")).strip()
-        path = str(rule_raw.get("path", "")).strip()
-        if not when or not path:
+        rule_path = str(rule_raw.get("path", "")).strip()
+        if not when or not rule_path:
             raise CliLayoutError(f"highlights[{index}] must include 'when' and 'path'")
         role = rule_raw.get("role")
         value = rule_raw.get("value")
@@ -445,7 +445,7 @@ def load_cli_layout(path: Path) -> CliLayout:
         highlights.append(
             HighlightRule(
                 when=when,
-                path=path,
+                path=rule_path,
                 role=str(role) if role is not None else None,
                 value=value,
                 true_role=str(true_role) if true_role is not None else None,

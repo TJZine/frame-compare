@@ -4,6 +4,7 @@ import types
 
 import pytest
 from click.testing import CliRunner
+from rich.console import Console
 
 import frame_compare
 from src.audio_alignment import AlignmentMeasurement, AudioStreamInfo
@@ -1294,29 +1295,30 @@ def _build_alignment_context(tmp_path):
     return cfg, [reference_plan, target_plan], summary, display
 
 
-class _ListReporter:
+class _RecordingOutputManager(frame_compare.CliOutputManager):
+    """CliOutputManager test double that records lines emitted during confirmation flows."""
+
     def __init__(self) -> None:
-        """
-        Initialize the reporter and prepare in-memory storage for captured output lines.
-        
-        Creates the mutable attribute `lines`, a list that will hold each reported line as a string.
-        """
+        layout_path = Path(frame_compare.__file__).with_name("cli_layout.v1.json")
+        super().__init__(
+            quiet=False,
+            verbose=False,
+            no_color=True,
+            layout_path=layout_path,
+            console=Console(record=True, force_terminal=False),
+        )
         self.lines: list[str] = []
 
-    def line(self, message: str) -> None:
-        """
-        Append a text line to the reporter's captured output.
-        
-        Parameters:
-            message (str): The text to record; stored verbatim in the reporter's internal list.
-        """
-        self.lines.append(message)
+    def line(self, text: str) -> None:
+        """Record the rendered line while still delegating to the base implementation."""
+        self.lines.append(text)
+        super().line(text)
 
 
 def test_confirm_alignment_reports_preview_paths(monkeypatch, tmp_path):
     cfg, plans, summary, display = _build_alignment_context(tmp_path)
 
-    reporter = _ListReporter()
+    reporter = _RecordingOutputManager()
     generated_paths = []
 
     def fake_generate(*args, **_kwargs):
@@ -1375,7 +1377,7 @@ def test_confirm_alignment_raises_cli_error_on_screenshot_failure(monkeypatch, t
             summary,
             cfg,
             tmp_path,
-            _ListReporter(),
+            _RecordingOutputManager(),
             display,
         )
 

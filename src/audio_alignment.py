@@ -191,6 +191,7 @@ def _extract_audio(
         "-y",
         handle.name,
     ]
+    completed: subprocess.CompletedProcess[str] | None = None
     try:
         completed = subprocess.run(
             cmd,
@@ -207,7 +208,7 @@ def _extract_audio(
         ) from exc
     finally:
         # Ensure ffmpeg output doesn't spam stdout when successful
-        if 'completed' in locals() and completed.stdout:
+        if completed is not None and completed.stdout:
             logger.debug("ffmpeg audio extract stdout: %s", completed.stdout.strip())
     return Path(handle.name)
 

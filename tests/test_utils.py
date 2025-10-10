@@ -1,7 +1,8 @@
-﻿import types
+import types
 from typing import Any, Dict
 
 import pytest
+from pytest import MonkeyPatch
 
 import src.utils as utils
 
@@ -24,7 +25,7 @@ def test_normalize_episode_number(value: Any, expected: str) -> None:
     assert utils._normalize_episode_number(value) == expected
 
 
-def test_bracket_only_release_group(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_bracket_only_release_group(monkeypatch: MonkeyPatch) -> None:
     original_import = utils.import_module
 
     def fake_import(name: str):
@@ -43,7 +44,7 @@ def test_bracket_only_release_group(monkeypatch: pytest.MonkeyPatch) -> None:
     assert meta["label"] == "[Group] Title.S01E02.1080p.mkv"
 
 
-def test_guessit_path(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_guessit_path(monkeypatch: MonkeyPatch) -> None:
     original_import = utils.import_module
 
     fake_guessit_result: Dict[str, Any] = {
@@ -74,7 +75,7 @@ def test_guessit_path(monkeypatch: pytest.MonkeyPatch) -> None:
     assert meta["label"] == "[Team] Show S01E03 – Pilot"
 
 
-def test_guessit_error_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_guessit_error_fallback(monkeypatch: MonkeyPatch) -> None:
     original_import = utils.import_module
 
     fake_ani_result: Dict[str, Any] = {
@@ -107,7 +108,7 @@ def test_guessit_error_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     assert meta["label"].startswith("[FB] Fallback Show")
 
 
-def test_metadata_includes_year_and_ids(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_metadata_includes_year_and_ids(monkeypatch: MonkeyPatch) -> None:
     original_import = utils.import_module
 
     def fake_import(name: str):

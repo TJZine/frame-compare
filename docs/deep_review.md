@@ -27,3 +27,11 @@
 ## Additional Observations
 - The CLI layout DSL is powerful but currently undocumented about its trust boundaries; once the expression evaluator is hardened, add guidance for users about sourcing layout files securely.
 - Consider explicitly closing the `requests.Session` created in `slowpics.upload_comparison` to avoid leaking sockets in long-lived integrations.
+
+## Review 2025-10-10 – CLI progress style validation hardening
+- **Scope:** Commit `55e156608b18cf2e1236b29298c0b348eec7e58f` (`frame_compare.py`, `src/config_loader.py`).
+- **Summary:** The loader now normalizes and validates `cli.progress.style`, rejecting values outside `{fill, dot}`, and the runtime gracefully degrades invalid styles to `fill` with a warning when operating on pre-loaded configs. 【F:src/config_loader.py†L170-L212】【F:frame_compare.py†L2164-L2177】
+- **Security:** No new injection surfaces or privilege boundary regressions detected. Validation occurs before any downstream usage.
+- **Performance:** No measurable hot-path impact; the new checks are constant-time string operations executed once per run.
+- **Reliability:** Runtime fallback preserves compatibility for tests or integrations that bypass `load_config`.
+- **Action:** No changes required; monitor future layout/CLI adjustments against these guarantees.
