@@ -26,6 +26,11 @@ _SELECTION_SOURCE_ID = "select_frames.v1"
 _TIME_FORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
 
 
+def _now_utc_iso() -> str:
+    """Return current UTC time formatted with _TIME_FORMAT (Z-suffixed)."""
+    return _dt.datetime.now(tz=_dt.timezone.utc).strftime(_TIME_FORMAT)
+
+
 @dataclass(frozen=True)
 class FrameMetricsCacheInfo:
     """Context needed to load/save cached frame metrics for analysis."""
@@ -209,16 +214,19 @@ def _frame_to_timecode(frame_idx: int, fps: float) -> Optional[str]:
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
     remainder = seconds - hours * 3600 - minutes * 60
-    milliseconds = int(round(remainder * 1000))
+    seconds_whole = int(remainder)
+    fractional = remainder - seconds_whole
+    milliseconds = int(round(fractional * 1000))
     if milliseconds >= 1000:
         milliseconds -= 1000
-        remainder = 0.0
+        seconds_whole += 1
+    if seconds_whole >= 60:
+        seconds_whole -= 60
         minutes += 1
     # Handle rollover if minutes reached 60 (e.g., 59.9995s rounding)
     if minutes >= 60:
         hours += minutes // 60
         minutes %= 60
-    seconds_whole = int(remainder)
     return f"{hours:02d}:{minutes:02d}:{seconds_whole:02d}.{milliseconds:03d}"
 
 def _atomic_write_json(path: Path, payload: Dict[str, object]) -> None:
@@ -765,14 +773,12 @@ def _selection_payload_from_inputs(
     )
     detail_records = _serialize_selection_details(selection_details or {})
     return {
-_SELECTION_SOURCE_ID = "select_frames.v1"
-_TIME_FORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
-
-def _now_utc_iso() -> str:
-    """Return current UTC time formatted with _TIME_FORMAT (Z-suffixed)."""
-    return _dt.datetime.now(tz=_dt.timezone.utc).strftime(_TIME_FORMAT)
+        "version": _SELECTION_METADATA_VERSION,
+        "cache_key": cache_key,
         "selection_hash": selection_hash,
         "selection_source": _SELECTION_SOURCE_ID,
+        "generated_at": _now_utc_iso(),
+        "analyzed_file": analyzed_file,
         "inputs": {
             "clips": list(clip_inputs),
             "config_fingerprint": _config_fingerprint(cfg),
