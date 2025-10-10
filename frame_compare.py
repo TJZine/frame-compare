@@ -2160,21 +2160,18 @@ def run_cli(
         no_color=no_color,
         layout_path=layout_path,
     )
-    cli_cfg = getattr(cfg, "cli", None)
-    emit_json_tail_flag = bool(getattr(cli_cfg, "emit_json_tail", True))
-    progress_cfg = getattr(cli_cfg, "progress", None)
-    if progress_cfg is not None:
-        progress_style = str(getattr(progress_cfg, "style", "fill"))
-    else:
-        progress_style = "fill"
-    progress_style = progress_style.strip().lower()
-    if progress_style not in {"fill", "dot"}:
-        progress_style = "fill"
-    if progress_cfg is not None:
-        try:
-            progress_cfg.style = progress_style
-        except AttributeError:
-            pass
+    cli_cfg = cfg.cli if hasattr(cfg, "cli") else None
+    emit_json_tail_flag = True
+    if cli_cfg is not None and hasattr(cli_cfg, "emit_json_tail"):
+        emit_json_tail_flag = bool(cli_cfg.emit_json_tail)
+
+    progress_cfg = cli_cfg.progress if cli_cfg is not None and hasattr(cli_cfg, "progress") else None
+    progress_style = "fill"
+    if progress_cfg is not None and hasattr(progress_cfg, "style"):
+        candidate_style = str(progress_cfg.style).strip().lower()
+        if candidate_style in {"fill", "dot"}:
+            progress_style = candidate_style
+        progress_cfg.style = progress_style
     reporter.set_flag("progress_style", progress_style)
     reporter.set_flag("emit_json_tail", emit_json_tail_flag)
     collected_warnings: List[str] = []
