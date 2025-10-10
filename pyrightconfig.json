@@ -1,0 +1,13 @@
+{
+  "typeCheckingMode": "standard",
+  "include": ["src", "tests"],
+  "exclude": [".venv/**", "build/**", "dist/**", "**/__pycache__/**"],
+  "venvPath": ".",
+  "venv": ".venv",
+  "executionEnvironments": [
+    { "root": "src", "extraPaths": ["src"] }
+  ],
+  "reportMissingImports": "error",
+  "reportUnknownMemberType": "warning",
+  "reportOptionalMemberAccess": "error"
+}
