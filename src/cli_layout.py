@@ -2091,7 +2091,7 @@ class _DotProgressColumn(ProgressColumn):
         bar_chars = [track_char] * width
         index = 0
         if width > 1:
-            index = min(width - 1, int(round(ratio * (width - 1))))
+            index = min(width - 1, round(ratio * (width - 1)))
         bar_chars[index] = marker
         bar_text = "".join(bar_chars)
         rich_style = self.renderer._rich_style_from_token(self._style_token)

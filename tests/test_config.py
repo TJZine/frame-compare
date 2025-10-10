@@ -56,6 +56,7 @@ def test_load_defaults(tmp_path: Path) -> None:
         ("[tmdb]\nyear_tolerance = -1\n", "tmdb.year_tolerance"),
         ("[tmdb]\ncache_ttl_seconds = -5\n", "tmdb.cache_ttl_seconds"),
         ("[tmdb]\ncategory_preference = \"documentary\"\n", "tmdb.category_preference"),
+        ("[cli.progress]\nstyle = \"blink\"\n", "cli.progress.style"),
     ],
 )
 def test_validation_errors(tmp_path: Path, toml_snippet: str, message: str) -> None:
@@ -97,7 +98,7 @@ category_preference = "tv"
 emit_json_tail = false
 
 [cli.progress]
-style = "dot"
+style = "DOT"
 
 [paths]
 input_dir = "D:/comparisons"

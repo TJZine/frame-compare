@@ -2160,27 +2160,21 @@ def run_cli(
         no_color=no_color,
         layout_path=layout_path,
     )
-    try:
-        emit_json_tail_flag = bool(getattr(cfg.cli, "emit_json_tail"))
-    except Exception:
-        emit_json_tail_flag = True
-    progress_style = "fill"
-    try:
-        progress_cfg = getattr(cfg.cli, "progress")
-    except Exception:
-        progress_cfg = None
+    cli_cfg = getattr(cfg, "cli", None)
+    emit_json_tail_flag = bool(getattr(cli_cfg, "emit_json_tail", True))
+    progress_cfg = getattr(cli_cfg, "progress", None)
     if progress_cfg is not None:
-        try:
-            progress_style = str(getattr(progress_cfg, "style", "fill"))
-        except Exception:
-            progress_style = "fill"
+        progress_style = str(getattr(progress_cfg, "style", "fill"))
+    else:
+        progress_style = "fill"
     progress_style = progress_style.strip().lower()
     if progress_style not in {"fill", "dot"}:
         progress_style = "fill"
-    try:
-        setattr(cfg.cli.progress, "style", progress_style)
-    except Exception:
-        pass
+    if progress_cfg is not None:
+        try:
+            progress_cfg.style = progress_style
+        except AttributeError:
+            pass
     reporter.set_flag("progress_style", progress_style)
     reporter.set_flag("emit_json_tail", emit_json_tail_flag)
     collected_warnings: List[str] = []
@@ -2941,6 +2935,16 @@ def run_cli(
     clip_paths = [plan.path for plan in plans]
     selection_sidecar_dir = cache_info.path.parent if cache_info is not None else root
     selection_sidecar_path = selection_sidecar_dir / "generated.selection.v1.json"
+    selection_overlay_details = {
+        frame: {
+            "label": detail.label,
+            "timecode": detail.timecode,
+            "source": detail.source,
+            "score": detail.score,
+            "notes": detail.notes,
+        }
+        for frame, detail in selection_details.items()
+    }
     if cache_info is None or not cfg.analysis.save_frames_data:
         export_selection_metadata(
             selection_sidecar_path,
@@ -2971,16 +2975,6 @@ def run_cli(
     json_tail["analysis"]["selection_hash"] = selection_hash_value
     json_tail["analysis"]["selection_sidecar"] = str(selection_sidecar_path)
     json_tail["analysis"]["selection_details"] = selection_details_to_json(selection_details)
-    selection_overlay_details = {
-        frame: {
-            "label": detail.label,
-            "timecode": detail.timecode,
-            "source": detail.source,
-            "score": detail.score,
-            "notes": detail.notes,
-        }
-        for frame, detail in selection_details.items()
-    }
     cache_summary_label = "reused" if cache_status == "reused" else ("new" if cache_status == "recomputed" else cache_status)
     json_tail["analysis"]["kept"] = kept_count
     json_tail["analysis"]["scanned"] = scanned_count
@@ -2991,7 +2985,6 @@ def run_cli(
     layout_data["analysis"]["selection_hash"] = selection_hash_value
     layout_data["analysis"]["selection_sidecar"] = str(selection_sidecar_path)
     layout_data["analysis"]["selection_details"] = json_tail["analysis"]["selection_details"]
-    layout_data["analysis"]["selection_counts"] = dict(selection_counts)
     reporter.update_values(layout_data)
 
     preview_rule: Dict[str, object] = reporter.layout.folding.get("frames_preview", {}) if hasattr(reporter, "layout") else {}
@@ -3006,8 +2999,11 @@ def run_cli(
     json_tail["analysis"]["output_frames_preview"] = preview_text
     layout_data["analysis"]["output_frame_count"] = kept_count
     layout_data["analysis"]["output_frames_preview"] = preview_text
-    full_list_text = ", ".join(str(frame) for frame in frames)
-    layout_data["analysis"]["output_frames_full"] = f"[{full_list_text}]" if full_list_text else "[]"
+    if not emit_json_tail_flag:
+        full_list_text = ", ".join(str(frame) for frame in frames)
+        layout_data["analysis"]["output_frames_full"] = (
+            f"[{full_list_text}]" if full_list_text else "[]"
+        )
     reporter.update_values(layout_data)
 
     out_dir = (root / cfg.screenshots.directory_name).resolve()
@@ -3573,10 +3569,8 @@ def main(
         slowpics_block.setdefault("shortcut_path", None)
         slowpics_block.setdefault("url", None)
 
-    try:
-        emit_json_tail_flag = bool(getattr(cfg.cli, "emit_json_tail"))
-    except Exception:
-        emit_json_tail_flag = True
+    cli_cfg = getattr(cfg, "cli", None)
+    emit_json_tail_flag = bool(getattr(cli_cfg, "emit_json_tail", True))
 
     if emit_json_tail_flag:
         if json_pretty:

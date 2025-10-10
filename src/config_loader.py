@@ -201,6 +201,11 @@ def load_config(path: str) -> AppConfig:
         raise ConfigError("screenshots.pad_to_canvas must be 'off', 'on', or 'auto'")
     app.screenshots.pad_to_canvas = pad_mode
 
+    progress_style = str(app.cli.progress.style).strip().lower()
+    if progress_style not in {"fill", "dot"}:
+        raise ConfigError("cli.progress.style must be 'fill' or 'dot'")
+    app.cli.progress.style = progress_style
+
     if app.slowpics.remove_after_days < 0:
         raise ConfigError("slowpics.remove_after_days must be >= 0")
     if app.slowpics.image_upload_timeout_seconds <= 0:
