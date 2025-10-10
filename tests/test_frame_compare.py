@@ -168,7 +168,7 @@ def test_cli_applies_overrides_and_naming(tmp_path, monkeypatch, runner):
     assert "ignore_lead=0.00s" in result.output
     assert "[SUMMARY]" in result.output
     assert "• Clips:" in result.output
-    assert "Output frames:" in result.output
+    assert "Output frames (" in result.output
 
     assert ram_limits == [cfg.runtime.ram_limit_mb]
 

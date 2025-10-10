@@ -910,7 +910,7 @@ def _evaluate_rule_condition(condition: Optional[str], *, flags: Mapping[str, An
     return bool(flags.get(expr))
 
 
-def _build_legacy_summary_lines(values: Mapping[str, Any]) -> List[str]:
+def _build_legacy_summary_lines(values: Mapping[str, Any], *, emit_json_tail: bool) -> List[str]:
     """
     Generate legacy human-readable summary lines from the collected layout values.
     
@@ -1056,9 +1056,13 @@ def _build_legacy_summary_lines(values: Mapping[str, Any]) -> List[str]:
     frame_count = _string(analysis.get("output_frame_count"), "0")
     preview = _string(analysis.get("output_frames_preview"), "")
     preview_display = f"[{preview}]" if preview else "[]"
-    lines.append(
-        f"Output frames: {frame_count}  e.g., {preview_display}  (full list in JSON)"
-    )
+    if emit_json_tail:
+        lines.append(
+            f"Output frames: {frame_count}  e.g., {preview_display}  (full list in JSON)"
+        )
+    else:
+        full_list = _string(analysis.get("output_frames_full"), "[]")
+        lines.append(f"Output frames ({frame_count}): {full_list}")
 
     return [line for line in lines if line]
 
@@ -2156,6 +2160,15 @@ def run_cli(
         no_color=no_color,
         layout_path=layout_path,
     )
+    emit_json_tail_flag = True
+    progress_style = "fill"
+
+    if hasattr(cfg, "cli"):
+        emit_json_tail_flag = bool(getattr(cfg.cli, "emit_json_tail", True))
+        if hasattr(cfg.cli, "progress") and hasattr(cfg.cli.progress, "style"):
+            progress_style = str(cfg.cli.progress.style)
+    reporter.set_flag("progress_style", progress_style)
+    reporter.set_flag("emit_json_tail", emit_json_tail_flag)
     collected_warnings: List[str] = []
     json_tail: Dict[str, object] = {
         "clips": [],
@@ -2914,6 +2927,16 @@ def run_cli(
     clip_paths = [plan.path for plan in plans]
     selection_sidecar_dir = cache_info.path.parent if cache_info is not None else root
     selection_sidecar_path = selection_sidecar_dir / "generated.selection.v1.json"
+    selection_overlay_details = {
+        frame: {
+            "label": detail.label,
+            "timecode": detail.timecode,
+            "source": detail.source,
+            "score": detail.score,
+            "notes": detail.notes,
+        }
+        for frame, detail in selection_details.items()
+    }
     if cache_info is None or not cfg.analysis.save_frames_data:
         export_selection_metadata(
             selection_sidecar_path,
@@ -2944,16 +2967,6 @@ def run_cli(
     json_tail["analysis"]["selection_hash"] = selection_hash_value
     json_tail["analysis"]["selection_sidecar"] = str(selection_sidecar_path)
     json_tail["analysis"]["selection_details"] = selection_details_to_json(selection_details)
-    selection_overlay_details = {
-        frame: {
-            "label": detail.label,
-            "timecode": detail.timecode,
-            "source": detail.source,
-            "score": detail.score,
-            "notes": detail.notes,
-        }
-        for frame, detail in selection_details.items()
-    }
     cache_summary_label = "reused" if cache_status == "reused" else ("new" if cache_status == "recomputed" else cache_status)
     json_tail["analysis"]["kept"] = kept_count
     json_tail["analysis"]["scanned"] = scanned_count
@@ -2964,7 +2977,6 @@ def run_cli(
     layout_data["analysis"]["selection_hash"] = selection_hash_value
     layout_data["analysis"]["selection_sidecar"] = str(selection_sidecar_path)
     layout_data["analysis"]["selection_details"] = json_tail["analysis"]["selection_details"]
-    layout_data["analysis"]["selection_counts"] = dict(selection_counts)
     reporter.update_values(layout_data)
 
     preview_rule: Dict[str, object] = reporter.layout.folding.get("frames_preview", {}) if hasattr(reporter, "layout") else {}
@@ -2979,11 +2991,17 @@ def run_cli(
     json_tail["analysis"]["output_frames_preview"] = preview_text
     layout_data["analysis"]["output_frame_count"] = kept_count
     layout_data["analysis"]["output_frames_preview"] = preview_text
+    if not emit_json_tail_flag:
+        full_list_text = ", ".join(str(frame) for frame in frames)
+        layout_data["analysis"]["output_frames_full"] = (
+            f"[{full_list_text}]" if full_list_text else "[]"
+        )
+    reporter.update_values(layout_data)
 
     out_dir = (root / cfg.screenshots.directory_name).resolve()
     total_screens = len(frames) * len(plans)
 
-    writer_name = "FFmpeg" if cfg.screenshots.use_ffmpeg else "VS"
+    writer_name = "ffmpeg" if cfg.screenshots.use_ffmpeg else "vs"
     overlay_mode_value = getattr(cfg.color, "overlay_mode", "minimal")
 
     json_tail["render"] = {
@@ -3421,7 +3439,7 @@ def run_cli(
     )
 
     if not reporter.quiet and (compatibility_required or not has_summary_section):
-        summary_lines = _build_legacy_summary_lines(layout_data)
+        summary_lines = _build_legacy_summary_lines(layout_data, emit_json_tail=emit_json_tail_flag)
         reporter.section("Summary")
         for line in summary_lines:
             reporter.line(_color_text(line, "green"))
@@ -3543,13 +3561,11 @@ def main(
         slowpics_block.setdefault("shortcut_path", None)
         slowpics_block.setdefault("url", None)
 
-    cli_emit_json_tail = True
-    try:
-        cli_emit_json_tail = bool(getattr(cfg.cli, "emit_json_tail"))
-    except Exception:
-        cli_emit_json_tail = True
+    emit_json_tail_flag = True
+    if hasattr(cfg, "cli"):
+        emit_json_tail_flag = bool(getattr(cfg.cli, "emit_json_tail", True))
 
-    if cli_emit_json_tail:
+    if emit_json_tail_flag:
         if json_pretty:
             json_output = json.dumps(json_tail, indent=2)
         else:

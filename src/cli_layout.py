@@ -7,12 +7,14 @@ import json
 import os
 import re
 import shutil
+import textwrap
 from itertools import zip_longest
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 from rich.console import Console
 from rich.progress import BarColumn, Progress, ProgressColumn, Task, TextColumn
+from rich.text import Text
 
 
 class CliLayoutError(RuntimeError):
@@ -579,6 +581,7 @@ class CliLayoutRenderer:
                 if not key.startswith("ascii_")
             }
         self._role_tokens = dict(layout.theme.colors)
+        self._unknown_role_warnings: Set[str] = set()
         self._color_blind_safe = bool(self._theme_options.get("color_blind_safe"))
         if self._color_blind_safe:
             for role, token in _COLOR_BLIND_OVERRIDES.items():
@@ -704,11 +707,11 @@ class CliLayoutRenderer:
     def _colorize(self, role: str, text: str) -> str:
         """
         Apply the theme role's color/style to the given text.
-        
+
         Returns:
-        	The input text wrapped with ANSI escape sequences for the role, or the original text if no style is configured.
+                The input text wrapped with ANSI escape sequences for the role, or the original text if no style is configured.
         """
-        token = self._role_tokens.get(role, "")
+        token = self._lookup_role_token(role)
         return self._color_mapper.apply(token, text)
 
     def _role_style(self, role: Optional[str]) -> Optional[str]:
@@ -723,7 +726,8 @@ class CliLayoutRenderer:
         """
         if self.no_color or not role:
             return None
-        return self._role_tokens.get(role)
+        token = self._lookup_role_token(role)
+        return token or None
 
     def _rich_style_from_token(self, token: Optional[str]) -> Optional[str]:
         """
@@ -780,6 +784,37 @@ class CliLayoutRenderer:
         rich_modifiers.append(base_color)
         return " ".join(rich_modifiers).strip()
 
+    def _lookup_role_token(self, role: Optional[str]) -> str:
+        """Return the style token for ``role`` and warn once when missing."""
+
+        if not role:
+            return ""
+        token = self._role_tokens.get(role)
+        if token is not None:
+            return token
+        if role not in self._unknown_role_warnings:
+            message = f"Unknown color role '{role}' in layout"
+            if self.no_color:
+                self.console.print(f"Warning: {message}")
+            else:
+                self.console.print(f"[yellow]Warning:[/] {message}")
+            self._unknown_role_warnings.add(role)
+        return ""
+
+    def _log_section_role(self, section_id: Optional[str], role: Optional[str]) -> None:
+        """Emit a verbose log line describing the role applied to a section header."""
+
+        if not self.verbose:
+            return
+        label = section_id or "unknown"
+        applied = role or "header"
+        message = f"section[{label}] header role → {applied}"
+        if self.no_color:
+            self.console.log(message, markup=False)
+        else:
+            escaped = message.replace("[", "[[").replace("]", "]]" )
+            self.console.log(f"[dim]{escaped}[/dim]")
+
     def _resolve_section_accent(self, section: Mapping[str, Any], badge: Optional[str] = None) -> Optional[str]:
         """
         Determine the accent role for a section based on an explicit role, badge content, or the section id.
@@ -833,6 +868,7 @@ class CliLayoutRenderer:
         if not badge:
             return
         role = self._resolve_section_accent(section, badge) or "header"
+        self._log_section_role(section.get("id"), role)
         self._write(self._colorize(role, badge))
 
     def _apply_style_spans(self, text: str) -> str:
@@ -1203,6 +1239,8 @@ class CliLayoutRenderer:
                 return format(value, fmt)
             except (TypeError, ValueError):
                 pass
+        if isinstance(value, bool):
+            return "true" if value else "false"
         if isinstance(value, int) and not isinstance(value, bool):
             separator = self.layout.theme.units.get("thousands_sep")
             if separator:
@@ -1232,6 +1270,20 @@ class CliLayoutRenderer:
         Returns:
             Any: The transformed value according to the selected filter.
         """
+        if filter_name == "bool":
+            return "true" if bool(value) else "false"
+        if filter_name == "wrap_indent2":
+            text = "" if value is None else str(value)
+            if not text:
+                return ""
+            width = max(10, self._console_width() - 2)
+            return textwrap.fill(
+                text,
+                width=width,
+                subsequent_indent="  ",
+                break_long_words=False,
+                break_on_hyphens=False,
+            )
         if filter_name == "none":
             return value if value not in (None, "") else "none"
         if filter_name == "unchanged":
@@ -1415,7 +1467,7 @@ class CliLayoutRenderer:
             return None
         true_expr = remainder[:colon_index]
         false_expr = remainder[colon_index + 1 :]
-        return left.strip(), true_expr.strip(), false_expr.strip()
+        return left.strip(), true_expr, false_expr
 
     def _find_unescaped_question(self, text: str) -> Optional[int]:
         """
@@ -1765,7 +1817,7 @@ class CliLayoutRenderer:
             if subtitle:
                 self._write(self._format_subtitle(subtitle))
                 if show_rule:
-                    rule_line = self._build_rule_line(lines)
+                    rule_line = self._build_rule_line(subtitle, lines)
                     if rule_line:
                         self._write(rule_line)
             for line in lines:
@@ -1815,15 +1867,16 @@ class CliLayoutRenderer:
             return text
         return self._colorize("accent_subhead", text)
 
-    def _build_rule_line(self, lines: Sequence[str]) -> str:
+    def _build_rule_line(self, subtitle: str, lines: Sequence[str]) -> str:
         """
-        Constructs a horizontal rule aligned to the smallest indentation and visible content width of the provided lines.
-        
+        Construct a horizontal rule sized to the subtitle label and block content width.
+
         Parameters:
-            lines (Sequence[str]): Lines used to determine the minimal indentation and maximum visible content width.
-        
+            subtitle (str): Subtitle text used to size the decorative rule.
+            lines (Sequence[str]): Lines used to determine indentation and available content width.
+
         Returns:
-            str: A single-line string containing a horizontal rule indented to the minimal indentation found and truncated to fit the console width and content width. Returns an empty string if there is no visible content. Uses '-' when ASCII symbols are required; otherwise uses '─' and applies the `rule_dim` role color.
+            str: A single-line string containing a horizontal rule indented to the minimal indentation found and truncated to fit the console width, block content width, and subtitle width. Returns an empty string if there is no visible content. Uses '-' when ASCII symbols are required; otherwise uses '─' and applies the `rule_dim` role color.
         """
         if not lines:
             return ""
@@ -1841,6 +1894,11 @@ class CliLayoutRenderer:
         indent = indent or 0
         width_limit = max(1, self._console_width() - indent)
         rule_width = min(max_content_width, width_limit)
+        subtitle_width = self._visible_length(self._format_subtitle(subtitle))
+        max_rule_width = max(1, min(32, subtitle_width + 2))
+        rule_width = min(rule_width, max_rule_width)
+        if rule_width <= 0:
+            return ""
         char = "-" if self._using_ascii_symbols() else "─"
         rule_body = char * rule_width
         if not self._using_ascii_symbols():
@@ -1975,16 +2033,22 @@ class CliLayoutRenderer:
         accent_role = info.get("accent")
 
         bar_style_token = self._role_style(accent_role or "accent")
-        rich_bar_style = self._rich_style_from_token(bar_style_token)
-        if rich_bar_style:
-            bar_column = BarColumn(
-                style=rich_bar_style,
-                complete_style=rich_bar_style,
-                finished_style=rich_bar_style,
-                pulse_style=rich_bar_style,
-            )
+        progress_style = str(self._active_flags.get("progress_style", "fill")).strip().lower()
+        if progress_style not in {"fill", "dot"}:
+            progress_style = "fill"
+        if progress_style == "dot":
+            bar_column = _DotProgressColumn(self, bar_style_token)
         else:
-            bar_column = BarColumn()
+            rich_bar_style = self._rich_style_from_token(bar_style_token)
+            if rich_bar_style:
+                bar_column = BarColumn(
+                    style=rich_bar_style,
+                    complete_style=rich_bar_style,
+                    finished_style=rich_bar_style,
+                    pulse_style=rich_bar_style,
+                )
+            else:
+                bar_column = BarColumn()
 
         columns: List[ProgressColumn] = [
             TextColumn("{task.description}", justify="left"),
@@ -1998,6 +2062,42 @@ class CliLayoutRenderer:
 
         transient_flag = bool(block.get("transient", transient))
         return Progress(*columns, console=self.console, transient=transient_flag)
+
+
+class _DotProgressColumn(ProgressColumn):
+    """Progress column that renders a single moving marker along a track."""
+
+    def __init__(self, renderer: "CliLayoutRenderer", style_token: Optional[str]) -> None:
+        super().__init__()
+        self.renderer = renderer
+        self._style_token = style_token
+
+    def render(self, task: Task) -> Text:
+        total = task.total or 0
+        completed = task.completed or 0
+        ratio = 0.0
+        if total:
+            try:
+                ratio = max(0.0, min(1.0, float(completed) / float(total)))
+            except ZeroDivisionError:
+                ratio = 0.0
+        width = max(10, min(28, self.renderer._console_width() // 3))
+        if self.renderer._using_ascii_symbols():
+            track_char = "-"
+            marker = "*"
+        else:
+            track_char = "─"
+            marker = "●"
+        bar_chars = [track_char] * width
+        index = 0
+        if width > 1:
+            index = min(width - 1, round(ratio * (width - 1)))
+        bar_chars[index] = marker
+        bar_text = "".join(bar_chars)
+        rich_style = self.renderer._rich_style_from_token(self._style_token)
+        if rich_style:
+            return Text(bar_text, style=rich_style)
+        return Text(bar_text)
 
 
 class _TemplateProgressColumn(ProgressColumn):

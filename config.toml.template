@@ -118,6 +118,10 @@ prefer_guessit = true
 # Control CLI output behaviours.
 emit_json_tail = true
 
+[cli.progress]
+# Progress bar appearance: "fill" for filled bar, "dot" for single indicator.
+style = "fill"
+
 [paths]
 # Default input folder; override via CLI when needed.
 input_dir = "comparison_videos"

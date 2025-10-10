@@ -38,6 +38,7 @@ def test_load_defaults(tmp_path: Path) -> None:
     assert app.tmdb.cache_ttl_seconds == 86400
     assert app.tmdb.category_preference is None
     assert app.cli.emit_json_tail is True
+    assert app.cli.progress.style == "fill"
 
 
 @pytest.mark.parametrize(
@@ -55,6 +56,7 @@ def test_load_defaults(tmp_path: Path) -> None:
         ("[tmdb]\nyear_tolerance = -1\n", "tmdb.year_tolerance"),
         ("[tmdb]\ncache_ttl_seconds = -5\n", "tmdb.cache_ttl_seconds"),
         ("[tmdb]\ncategory_preference = \"documentary\"\n", "tmdb.category_preference"),
+        ("[cli.progress]\nstyle = \"blink\"\n", "cli.progress.style"),
     ],
 )
 def test_validation_errors(tmp_path: Path, toml_snippet: str, message: str) -> None:
@@ -95,6 +97,9 @@ category_preference = "tv"
 [cli]
 emit_json_tail = false
 
+[cli.progress]
+style = "DOT"
+
 [paths]
 input_dir = "D:/comparisons"
 
@@ -130,3 +135,4 @@ preferred = "ffms2"
     assert app.tmdb.cache_ttl_seconds == 120
     assert app.tmdb.category_preference == "TV"
     assert app.cli.emit_json_tail is False
+    assert app.cli.progress.style == "dot"

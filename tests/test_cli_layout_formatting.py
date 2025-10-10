@@ -2,6 +2,9 @@ from pathlib import Path
 from typing import Any, Dict
 
 from rich.console import Console
+from rich.progress import BarColumn
+
+import src.cli_layout as cli_layout
 
 from src.cli_layout import (
     CliLayoutRenderer,
@@ -94,6 +97,7 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
             "scanned": 12,
             "output_frame_count": 6,
             "output_frames_preview": "0, 10, 20, …, 110, 120, 130",
+            "output_frames_full": "[0, 10, 20, …, 110, 120, 130]",
         },
         "audio_alignment": {
             "enabled": True,
@@ -108,7 +112,7 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
             "target_stream": "Target->aac/en/5.1",
         },
         "render": {
-            "writer": "VS",
+            "writer": "vs",
             "out_dir": str(tmp_path / "out"),
             "add_frame_info": True,
             "single_res": 0,
@@ -255,11 +259,11 @@ def test_highlight_markup_and_spans(tmp_path, monkeypatch):
     context = LayoutContext(values, flags, renderer=renderer)
 
     token_markup = renderer._render_token("render.add_frame_info", context)
-    assert token_markup == "[[bool_true]]True[[/]]"
+    assert token_markup == "[[bool_true]]true[[/]]"
 
     wrapped = f"[[value]]{token_markup}[[/]]"
     colored_output = renderer._prepare_output(wrapped)
-    assert colored_output == renderer._colorize("bool_true", "True")
+    assert colored_output == renderer._colorize("bool_true", "true")
 
     padded_token = renderer._render_token("analysis.counts.motion:>5", context)
     assert padded_token.startswith(" ")
@@ -272,7 +276,7 @@ def test_highlight_markup_and_spans(tmp_path, monkeypatch):
     renderer_no_color = _make_renderer(100)
     context_no_color = LayoutContext(values, flags, renderer=renderer_no_color)
     token_plain = renderer_no_color._render_token("render.add_frame_info", context_no_color)
-    assert renderer_no_color._prepare_output(f"[[value]]{token_plain}[[/]]") == "True"
+    assert renderer_no_color._prepare_output(f"[[value]]{token_plain}[[/]]") == "true"
 
 
 def _render_section(renderer: CliLayoutRenderer, section_id: str, values: Dict[str, Any], flags: Dict[str, Any]) -> list[str]:
@@ -294,6 +298,25 @@ def _render_section(renderer: CliLayoutRenderer, section_id: str, values: Dict[s
     section = next(sec for sec in renderer.layout.sections if sec.get("id") == section_id)
     renderer.render_section(section, values, flags)
     return [line.rstrip("\n") for line in renderer.console.export_text().splitlines()]
+
+
+def test_progress_style_toggle(tmp_path):
+    values = _sample_values(tmp_path)
+    renderer = _make_renderer(100, no_color=True)
+
+    renderer.bind_context(values, {"progress_style": "fill"})
+    progress_fill = renderer.create_progress("render_bar")
+    try:
+        assert any(isinstance(column, BarColumn) for column in progress_fill.columns)
+    finally:
+        progress_fill.stop()
+
+    renderer.bind_context(values, {"progress_style": "dot"})
+    progress_dot = renderer.create_progress("render_bar")
+    try:
+        assert any(isinstance(column, cli_layout._DotProgressColumn) for column in progress_dot.columns)
+    finally:
+        progress_dot.stop()
 
 
 def test_group_subheading_prefix_ascii_and_unicode(tmp_path):
@@ -324,3 +347,16 @@ def test_group_rule_omitted_on_narrow_terminal(tmp_path):
     writer_idx = next(i for i, line in enumerate(lines) if line.strip().startswith("> Writer"))
     writer_follow = next((line for line in lines[writer_idx + 1 :] if line.strip()), "")
     assert writer_follow and set(writer_follow.strip()) != {"-"}
+
+
+def test_group_rule_matches_label_width(tmp_path):
+    values = _sample_values(tmp_path)
+    renderer = _make_renderer(120, no_color=True)
+    flags = {"verbose": True, "quiet": False, "no_color": True}
+    lines = [_ANSI_ESCAPE_RE.sub("", line) for line in _render_section(renderer, "render", values, flags)]
+
+    writer_idx = next(i for i, line in enumerate(lines) if line.strip().startswith("> Writer"))
+    writer_rule = next((line for line in lines[writer_idx + 1 :] if line.strip()), "")
+    assert writer_rule
+    expected_width = len("> Writer") + 2
+    assert len(writer_rule.strip()) == expected_width

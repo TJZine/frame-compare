@@ -111,6 +111,7 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
             "scanned": 12,
             "output_frame_count": 6,
             "output_frames_preview": "0, 10, 20, …, 110, 120, 130",
+            "output_frames_full": "[0, 10, 20, …, 110, 120, 130]",
         },
         "audio_alignment": {
             "enabled": True,
@@ -125,7 +126,7 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
             "target_stream": "Target->aac/en/5.1",
         },
         "render": {
-            "writer": "VS",
+            "writer": "vs",
             "out_dir": str(tmp_path / "out"),
             "add_frame_info": True,
             "single_res": 0,
@@ -215,6 +216,7 @@ def test_layout_renderer_sample_output(tmp_path, monkeypatch):
         "verbose": True,
         "quiet": False,
         "no_color": True,
+        "emit_json_tail": False,
     }
 
     renderer.bind_context(sample_values, flags)
@@ -224,8 +226,8 @@ def test_layout_renderer_sample_output(tmp_path, monkeypatch):
     rendered_check = renderer.render_template("{clips.count}", sample_values, flags)
     assert rendered_check.strip() == "2"
     highlight_markup = renderer._render_token("render.add_frame_info", layout_context)
-    assert highlight_markup == "[[bool_true]]True[[/]]"
-    assert renderer._prepare_output(highlight_markup) == "True"
+    assert highlight_markup == "[[bool_true]]true[[/]]"
+    assert renderer._prepare_output(highlight_markup) == "true"
     token = "tmdb_resolved?`TMDB: ${tmdb.category}/${tmdb.id}`:''"
     context_obj = LayoutContext(sample_values, flags, renderer=renderer)
     assert renderer._find_conditional_split(token) is not None
@@ -282,6 +284,28 @@ def test_layout_renderer_sample_output(tmp_path, monkeypatch):
 
     assert any(line.strip().startswith("{") for line in lines)
     json.loads(json.dumps(sample_json))
+
+    assert any("writer=vs" in line for line in lines)
+    assert not any("writer=writer" in line for line in lines)
+    assert any("add_frame_info=true" in line for line in lines)
+    assert not any("template=" in line for line in lines)
+
+    summary_lines = [line for line in lines if "Output frames" in line]
+    assert any("Output frames (6)" in line for line in summary_lines)
+    assert any("[0, 10, 20" in line for line in summary_lines)
+
+    section_logs = [line for line in lines if "section[" in line and "header role" in line]
+    for expected in (
+        "section[discover] header role → section_discover",
+        "section[prepare] header role → section_prepare",
+        "section[audio_align] header role → section_prepare",
+        "section[analyze] header role → section_analyze",
+        "section[render] header role → section_render",
+        "section[publish] header role → section_publish",
+        "section[warnings] header role → section_warnings",
+        "section[summary] header role → section_summary",
+    ):
+        assert any(expected in log for log in section_logs), expected
 
 
 def test_layout_expression_rejects_dunder_access(tmp_path):
