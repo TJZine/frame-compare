@@ -10,7 +10,7 @@ from collections import OrderedDict
 import unicodedata
 from dataclasses import dataclass
 from importlib import import_module
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, cast
 
 import httpx
 
@@ -489,9 +489,10 @@ async def _http_request(
                     f"TMDB request failed for {path} (status={status}): {response.text[:200]}"
                 )
             try:
-                payload = response.json()
+                payload_obj = response.json()
             except ValueError as exc:  # pragma: no cover - unexpected
                 raise TMDBResolutionError("TMDB returned invalid JSON") from exc
+            payload = _ensure_dict(payload_obj, context=f"{path} response")
             _CACHE.set(key, payload, ttl_seconds=cache_ttl)
             return payload
         await asyncio.sleep(backoff)
@@ -499,6 +500,22 @@ async def _http_request(
     if last_error:
         raise TMDBResolutionError(f"TMDB request failed after retries: {last_error}")
     raise TMDBResolutionError("TMDB request failed after retries")
+
+
+def _ensure_dict(value: object, *, context: str) -> Dict[str, Any]:
+    if isinstance(value, dict) and all(isinstance(key, str) for key in value):
+        return cast(Dict[str, Any], value)
+    raise TMDBResolutionError(f"{context} was not a JSON object")
+
+
+def _dict_entries(value: object) -> List[Dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    entries: List[Dict[str, Any]] = []
+    for item in value:
+        if isinstance(item, dict) and all(isinstance(key, str) for key in item):
+            entries.append(cast(Dict[str, Any], item))
+    return entries
 
 
 def _title_candidates(payload: Dict[str, Any]) -> List[str]:
@@ -586,10 +603,9 @@ async def _fetch_alias_titles(
         key = "results"
 
     payload = await _http_request(client, cache_ttl=cache_ttl, path=path, params={})
-    entries = payload.get(key) or []
     titles: List[str] = []
-    for entry in entries:
-        title = entry.get("title") if isinstance(entry, dict) else None
+    for entry in _dict_entries(payload.get(key)):
+        title = entry.get("title")
         if isinstance(title, str):
             stripped = title.strip()
             if stripped:
@@ -644,7 +660,7 @@ def _best_external_candidate(
 ) -> Optional[TMDBCandidate]:
     candidates: List[TMDBCandidate] = []
     for category, key in ((MOVIE, "movie_results"), (TV, "tv_results")):
-        for item in payload.get(key, []) or []:
+        for item in _dict_entries(payload.get(key)):
             score = _score_payload(
                 item,
                 category=category,
@@ -702,8 +718,7 @@ async def _perform_search(
         path="search/movie" if plan.category == MOVIE else "search/tv",
         params=params,
     )
-    results = payload.get("results", [])
-    return list(results) if isinstance(results, list) else []
+    return _dict_entries(payload.get("results"))
 
 
 def _extract_best_candidate(

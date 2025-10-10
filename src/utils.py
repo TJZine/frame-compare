@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from importlib import import_module
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 _YEAR_RE = re.compile(r"(19|20)\d{2}")
 _IMDB_ID_RE = re.compile(r"(tt\d{7,9})", re.IGNORECASE)
@@ -154,7 +154,7 @@ def _build_label(
     Returns:
         str: Formatted label suitable for CLI presentation.
     """
-    parts = []
+    parts: List[str] = []
     if release_group:
         parts.append(f"[{release_group}]")
     if anime_title:

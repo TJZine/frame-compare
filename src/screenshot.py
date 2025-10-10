@@ -10,7 +10,21 @@ import subprocess
 from functools import partial
 import math
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, MutableMapping, Optional, Sequence, Tuple, TypedDict, Union, cast
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    MutableMapping,
+    Optional,
+    Protocol,
+    Sequence,
+    Tuple,
+    TypedDict,
+    Union,
+    cast,
+)
 
 from . import vs_core
 from .datatypes import ColorConfig, ScreenshotConfig
@@ -33,6 +47,28 @@ _SELECTION_LABELS = {
 
 OverlayStateValue = Union[str, List[str]]
 OverlayState = MutableMapping[str, OverlayStateValue]
+
+
+class FrameEvalFunc(Protocol):
+    def __call__(
+        self,
+        clip: Any,
+        func: Callable[[int, Any], Any],
+        *,
+        prop_src: Any | None = None,
+    ) -> Any:
+        ...
+
+
+class SubtitleFunc(Protocol):
+    def __call__(
+        self,
+        clip: Any,
+        *,
+        text: Sequence[str] | None = None,
+        style: Any | None = None,
+    ) -> Any:
+        ...
 
 
 def _new_overlay_state() -> OverlayState:
@@ -417,11 +453,13 @@ def _apply_frame_info_overlay(
         logger.debug('VapourSynth core missing std/sub namespaces; skipping frame overlay')
         return clip
 
-    frame_eval = getattr(std_ns, 'FrameEval', None)
-    subtitle = getattr(sub_ns, 'Subtitle', None)
-    if not callable(frame_eval) or not callable(subtitle):
+    frame_eval_obj = getattr(std_ns, 'FrameEval', None)
+    subtitle_obj = getattr(sub_ns, 'Subtitle', None)
+    if not callable(frame_eval_obj) or not callable(subtitle_obj):
         logger.debug('Required VapourSynth overlay functions unavailable; skipping frame overlay')
         return clip
+    frame_eval = cast(FrameEvalFunc, frame_eval_obj)
+    subtitle = cast(SubtitleFunc, subtitle_obj)
 
     label = title.strip() if isinstance(title, str) else ''
     if not label:
@@ -429,7 +467,7 @@ def _apply_frame_info_overlay(
 
     padding_title = " " + ("\n" * 3)
 
-    def _draw_info(n: int, f, clip_ref):
+    def _draw_info(n: int, f: Any, clip_ref: Any) -> Any:
         """
         Create a subtitle node containing per-frame information (frame index and picture type) for overlay.
         
@@ -449,7 +487,7 @@ def _apply_frame_info_overlay(
         else:
             pict_text = 'N/A'
         display_idx = requested_frame if requested_frame is not None else n
-        lines = [
+        lines: List[str] = [
             f"Frame {display_idx} of {clip_ref.num_frames}",
             f"Picture type: {pict_text}",
         ]

@@ -1,9 +1,12 @@
 import json
 import types
+from pathlib import Path
+from collections.abc import Callable, Sequence
 from typing import Any, Dict, cast
 
 import pytest
 
+import src.analysis as analysis_mod
 from src.analysis import (
     FrameMetricsCacheInfo,
     SelectionDetail,
@@ -18,26 +21,66 @@ from src.datatypes import AnalysisConfig, ColorConfig
 
 
 class FakeClip:
-    def __init__(self, num_frames: int, brightness, motion):
+    def __init__(self, num_frames: int, brightness: Sequence[float], motion: Sequence[float]) -> None:
         self.num_frames = num_frames
         self.fps_num = 24
         self.fps_den = 1
-        self.analysis_brightness = brightness
-        self.analysis_motion = motion
+        self.analysis_brightness: Sequence[float] = brightness
+        self.analysis_motion: Sequence[float] = motion
         self.frame_props: dict[str, int] | None = None
 
 
-def _select_frames_list(*args, **kwargs) -> list[int]:
-    result = select_frames(*args, **kwargs)
+def _select_frames_list(
+    clip: FakeClip,
+    cfg: AnalysisConfig,
+    files: list[str],
+    file_under_analysis: str,
+    cache_info: FrameMetricsCacheInfo | None = None,
+    progress: Callable[[int], None] | None = None,
+    *,
+    frame_window: tuple[int, int] | None = None,
+    return_metadata: bool = False,
+    color_cfg: ColorConfig | None = None,
+) -> list[int]:
+    result = select_frames(
+        clip,
+        cfg,
+        files,
+        file_under_analysis,
+        cache_info,
+        progress,
+        frame_window=frame_window,
+        return_metadata=return_metadata,
+        color_cfg=color_cfg,
+    )
     if isinstance(result, tuple):
         return list(result[0])
     return cast(list[int], result)
 
 
-def _select_frames_with_metadata(*args, **kwargs):
-    params = dict(kwargs)
-    params.setdefault("return_metadata", True)
-    result = select_frames(*args, **params)
+def _select_frames_with_metadata(
+    clip: FakeClip,
+    cfg: AnalysisConfig,
+    files: list[str],
+    file_under_analysis: str,
+    cache_info: FrameMetricsCacheInfo | None = None,
+    progress: Callable[[int], None] | None = None,
+    *,
+    frame_window: tuple[int, int] | None = None,
+    return_metadata: bool = False,
+    color_cfg: ColorConfig | None = None,
+):
+    result = select_frames(
+        clip,
+        cfg,
+        files,
+        file_under_analysis,
+        cache_info,
+        progress,
+        frame_window=frame_window,
+        return_metadata=True,
+        color_cfg=color_cfg,
+    )
     assert isinstance(result, tuple) and len(result) == 3
     return result
 
@@ -88,21 +131,27 @@ def test_compute_selection_window_invalid_type():
     assert "analysis.ignore_lead_seconds" in str(excinfo.value)
 
 
-def test_select_frames_deterministic(monkeypatch):
+def test_select_frames_deterministic(monkeypatch: pytest.MonkeyPatch) -> None:
     clip = FakeClip(
         num_frames=300,
         brightness=[i / 300 for i in range(300)],
         motion=[(300 - i) / 300 for i in range(300)],
     )
 
-    calls = []
+    calls: list[str] = []
 
-    def fake_process(target_clip, file_name, color_cfg, **kwargs):
+    def fake_process(
+        target_clip: FakeClip,
+        file_name: str,
+        color_cfg: ColorConfig,
+        **kwargs: object,
+    ) -> types.SimpleNamespace:
         calls.append(file_name)
         return types.SimpleNamespace(clip=target_clip, overlay_text=None, verification=None)
 
     monkeypatch.setattr(
-        "src.analysis.vs_core.process_clip_for_screenshot",
+        analysis_mod.vs_core,
+        "process_clip_for_screenshot",
         fake_process,
     )
 
@@ -118,7 +167,7 @@ def test_select_frames_deterministic(monkeypatch):
         use_quantiles=True,
     )
 
-    files = ["a.mkv", "b.mkv"]
+    files: list[str] = ["a.mkv", "b.mkv"]
     color_cfg = ColorConfig()
     first = _select_frames_list(clip, cfg, files, file_under_analysis="a.mkv", color_cfg=color_cfg)
     second = _select_frames_list(clip, cfg, files, file_under_analysis="a.mkv", color_cfg=color_cfg)
@@ -130,7 +179,7 @@ def test_select_frames_deterministic(monkeypatch):
 
 
 
-def test_select_frames_returns_metadata(monkeypatch):
+def test_select_frames_returns_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
     clip = FakeClip(
         num_frames=120,
         brightness=[i / 120 for i in range(120)],
@@ -138,7 +187,8 @@ def test_select_frames_returns_metadata(monkeypatch):
     )
 
     monkeypatch.setattr(
-        "src.analysis.vs_core.process_clip_for_screenshot",
+        analysis_mod.vs_core,
+        "process_clip_for_screenshot",
         lambda clip, file_name, color_cfg, **kwargs: types.SimpleNamespace(clip=clip, overlay_text=None, verification=None),
     )
 
@@ -160,7 +210,7 @@ def test_select_frames_returns_metadata(monkeypatch):
     assert detail.label == labels[frames[0]]
     assert detail.frame_index == frames[0]
 
-def test_select_frames_hdr_tonemap(monkeypatch):
+def test_select_frames_hdr_tonemap(monkeypatch: pytest.MonkeyPatch) -> None:
     clip = FakeClip(
         num_frames=300,
         brightness=[i / 300 for i in range(300)],
@@ -168,14 +218,20 @@ def test_select_frames_hdr_tonemap(monkeypatch):
     )
     clip.frame_props = {"_Transfer": 16, "_Primaries": 9}
 
-    calls = []
+    calls: list[str] = []
 
-    def fake_process(target_clip, file_name, color_cfg, **kwargs):
+    def fake_process(
+        target_clip: FakeClip,
+        file_name: str,
+        color_cfg: ColorConfig,
+        **kwargs: object,
+    ) -> types.SimpleNamespace:
         calls.append(file_name)
         return types.SimpleNamespace(clip=target_clip, overlay_text=None, verification=None)
 
     monkeypatch.setattr(
-        "src.analysis.vs_core.process_clip_for_screenshot",
+        analysis_mod.vs_core,
+        "process_clip_for_screenshot",
         fake_process,
     )
 
@@ -191,7 +247,7 @@ def test_select_frames_hdr_tonemap(monkeypatch):
         use_quantiles=True,
     )
 
-    files = ["a.mkv", "b.mkv"]
+    files: list[str] = ["a.mkv", "b.mkv"]
     color_cfg = ColorConfig()
     first = _select_frames_list(clip, cfg, files, file_under_analysis="a.mkv", color_cfg=color_cfg)
     second = _select_frames_list(clip, cfg, files, file_under_analysis="a.mkv", color_cfg=color_cfg)
@@ -201,7 +257,7 @@ def test_select_frames_hdr_tonemap(monkeypatch):
     assert len(calls) == 2
 
 
-def test_user_and_random_frames(monkeypatch):
+def test_user_and_random_frames(monkeypatch: pytest.MonkeyPatch) -> None:
     clip = FakeClip(
         num_frames=200,
         brightness=[(i % 50) / 50 for i in range(200)],
@@ -209,7 +265,8 @@ def test_user_and_random_frames(monkeypatch):
     )
 
     monkeypatch.setattr(
-        "src.analysis.vs_core.process_clip_for_screenshot",
+        analysis_mod.vs_core,
+        "process_clip_for_screenshot",
         lambda clip, file_name, color_cfg, **kwargs: types.SimpleNamespace(clip=clip, overlay_text=None, verification=None),
     )
 
@@ -233,7 +290,9 @@ def test_user_and_random_frames(monkeypatch):
     assert len(extras) == cfg.random_frames
 
 
-def test_select_frames_respects_window(monkeypatch, caplog):
+def test_select_frames_respects_window(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     clip = FakeClip(
         num_frames=220,
         brightness=[i / 220 for i in range(220)],
@@ -241,7 +300,8 @@ def test_select_frames_respects_window(monkeypatch, caplog):
     )
 
     monkeypatch.setattr(
-        "src.analysis.vs_core.process_clip_for_screenshot",
+        analysis_mod.vs_core,
+        "process_clip_for_screenshot",
         lambda clip, file_name, color_cfg, **kwargs: types.SimpleNamespace(clip=clip, overlay_text=None, verification=None),
     )
 
@@ -255,26 +315,28 @@ def test_select_frames_respects_window(monkeypatch, caplog):
         step=1,
     )
 
-    caplog.set_level("WARNING")
     color_cfg = ColorConfig()
-    frames = _select_frames_list(
-        clip,
-        cfg,
-        files=["clip.mkv"],
-        file_under_analysis="clip.mkv",
-        frame_window=(50, 150),
-        color_cfg=color_cfg,
-    )
+    with caplog.at_level("WARNING"):
+        frames = _select_frames_list(
+            clip,
+            cfg,
+            files=["clip.mkv"],
+            file_under_analysis="clip.mkv",
+            frame_window=(50, 150),
+            color_cfg=color_cfg,
+        )
 
     assert frames
     assert all(50 <= frame < 150 for frame in frames)
     assert 75 in frames
     assert 10 not in frames
     assert 180 not in frames
-    assert any("Dropped" in record.message for record in caplog.records)
+    assert any("Dropped" in message for message in caplog.messages)
 
 
-def test_select_frames_uses_cache(monkeypatch, tmp_path):
+def test_select_frames_uses_cache(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     clip = FakeClip(
         num_frames=120,
         brightness=[i / 120 for i in range(120)],
@@ -282,17 +344,24 @@ def test_select_frames_uses_cache(monkeypatch, tmp_path):
     )
 
     monkeypatch.setattr(
-        "src.analysis.vs_core.process_clip_for_screenshot",
+        analysis_mod.vs_core,
+        "process_clip_for_screenshot",
         lambda clip, file_name, color_cfg, **kwargs: types.SimpleNamespace(clip=clip, overlay_text=None, verification=None),
     )
 
-    calls = {"count": 0}
+    calls: dict[str, int] = {"count": 0}
 
-    def fake_collect(analysis_clip, cfg, indices, progress=None):
+    def fake_collect(
+        analysis_clip: FakeClip,
+        cfg: AnalysisConfig,
+        indices: Sequence[int],
+        progress: object = None,
+    ) -> tuple[list[tuple[int, float]], list[tuple[int, float]]]:
         calls["count"] += 1
-        return ([(idx, float(idx)) for idx in indices], [(idx, float(idx)) for idx in indices])
+        results = [(idx, float(idx)) for idx in indices]
+        return (results, results)
 
-    monkeypatch.setattr("src.analysis._collect_metrics_vapoursynth", fake_collect)
+    monkeypatch.setattr(analysis_mod, "_collect_metrics_vapoursynth", fake_collect)
 
     cfg = AnalysisConfig(
         frame_count_dark=1,
@@ -327,21 +396,27 @@ def test_select_frames_uses_cache(monkeypatch, tmp_path):
     assert frames_first == frames_second
 
 
-def test_motion_quarter_gap(monkeypatch):
+def test_motion_quarter_gap(monkeypatch: pytest.MonkeyPatch) -> None:
     clip = FakeClip(
         num_frames=240,
         brightness=[0.5 for _ in range(240)],
         motion=[0.0 for _ in range(240)],
     )
 
-    def fake_collect(analysis_clip, cfg, indices, progress=None):
+    def fake_collect(
+        analysis_clip: FakeClip,
+        cfg: AnalysisConfig,
+        indices: Sequence[int],
+        progress: object = None,
+    ) -> tuple[list[tuple[int, float]], list[tuple[int, float]]]:
         brightness = [(idx, 0.0) for idx in indices]
         motion = [(idx, float(idx)) for idx in indices]
         return brightness, motion
 
-    monkeypatch.setattr("src.analysis._collect_metrics_vapoursynth", fake_collect)
+    monkeypatch.setattr(analysis_mod, "_collect_metrics_vapoursynth", fake_collect)
     monkeypatch.setattr(
-        "src.analysis.vs_core.process_clip_for_screenshot",
+        analysis_mod.vs_core,
+        "process_clip_for_screenshot",
         lambda clip, file_name, color_cfg, **kwargs: types.SimpleNamespace(clip=clip, overlay_text=None, verification=None),
     )
 
@@ -380,7 +455,7 @@ def test_selection_details_to_json_roundtrip():
     assert payload["10"]["notes"] == "sample"
 
 
-def test_write_selection_cache_file(tmp_path):
+def test_write_selection_cache_file(tmp_path: Path) -> None:
     cfg = AnalysisConfig()
     detail = SelectionDetail(
         frame_index=12,

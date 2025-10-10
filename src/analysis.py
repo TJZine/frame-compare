@@ -149,6 +149,59 @@ def _coerce_optional_str(value: object) -> Optional[str]:
     return None
 
 
+def _coerce_str_dict(value: object) -> Dict[str, object] | None:
+    if not isinstance(value, dict):
+        return None
+    result: Dict[str, object] = {}
+    for key, entry in value.items():
+        if not isinstance(key, str):
+            return None
+        result[key] = entry
+    return result
+
+
+def _coerce_int_list(value: object) -> List[int] | None:
+    if not isinstance(value, list):
+        return None
+    result: List[int] = []
+    for item in value:
+        try:
+            result.append(int(item))
+        except (TypeError, ValueError):
+            return None
+    return result
+
+
+def _coerce_selection_categories(value: object) -> Optional[Dict[int, str]]:
+    if not isinstance(value, list):
+        return None
+    parsed: Dict[int, str] = {}
+    for item in value:
+        if not isinstance(item, list) or len(item) != 2:
+            continue
+        frame_raw, label_raw = item
+        try:
+            frame_idx = int(frame_raw)
+        except (TypeError, ValueError):
+            continue
+        parsed[frame_idx] = str(label_raw)
+    return parsed or None
+
+
+def _coerce_metric_series(value: object) -> List[tuple[int, float]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise TypeError("metrics payload must be a list")
+    result: List[tuple[int, float]] = []
+    for entry in value:
+        if not isinstance(entry, (list, tuple)) or len(entry) != 2:
+            raise TypeError("invalid metrics entry")
+        idx_obj, val_obj = entry
+        result.append((int(idx_obj), float(val_obj)))
+    return result
+
+
 def _now_utc_iso() -> str:
     return _dt.datetime.now(tz=_dt.timezone.utc).strftime(_TIME_FORMAT)
 
@@ -517,8 +570,12 @@ def _load_cached_metrics(
         return None
 
     try:
-        data = json.loads(raw)
+        data_raw = json.loads(raw)
     except json.JSONDecodeError:
+        return None
+
+    data = _coerce_str_dict(data_raw)
+    if data is None:
         return None
 
     if data.get("version") != 1:
@@ -539,13 +596,19 @@ def _load_cached_metrics(
     if data.get("trim_end") != info.trim_end:
         return None
 
-    fps = data.get("fps") or []
-    if list(fps) != [info.fps_num, info.fps_den]:
+    fps_obj = data.get("fps")
+    fps_values: List[int] = []
+    if isinstance(fps_obj, (list, tuple)):
+        try:
+            fps_values = [int(part) for part in fps_obj]
+        except (TypeError, ValueError):
+            return None
+    if fps_values != [info.fps_num, info.fps_den]:
         return None
 
     try:
-        brightness = [(int(idx), float(val)) for idx, val in data.get("brightness", [])]
-        motion = [(int(idx), float(val)) for idx, val in data.get("motion", [])]
+        brightness = _coerce_metric_series(data.get("brightness"))
+        motion = _coerce_metric_series(data.get("motion"))
     except (TypeError, ValueError):
         return None
 
@@ -557,61 +620,52 @@ def _load_cached_metrics(
     selection_hash: Optional[str] = None
     selection_categories: Optional[Dict[int, str]] = None
     selection_details: Optional[Dict[int, SelectionDetail]] = None
-    if isinstance(selection, dict):
-        frames_val = selection.get("frames")
-        hash_val = selection.get("hash")
-        cat_val = selection.get("categories")
-        details_val = selection.get("details")
-        try:
-            if isinstance(frames_val, list):
-                selection_frames = [int(x) for x in frames_val]
-            if isinstance(hash_val, str):
-                selection_hash = hash_val
-            if isinstance(cat_val, list):
-                parsed: Dict[int, str] = {}
-                for item in cat_val:
-                    if not isinstance(item, list) or len(item) != 2:
-                        continue
-                    frame_raw, label_raw = item
-                    parsed[int(frame_raw)] = str(label_raw)
-                selection_categories = parsed or None
-            if details_val is not None:
-                parsed_details = _deserialize_selection_details(details_val)
-                if parsed_details:
-                    selection_details = parsed_details
-        except (TypeError, ValueError):
-            selection_frames = None
-            selection_hash = None
-            selection_categories = None
-            selection_details = None
+    selection_map = _coerce_str_dict(selection)
+    if selection_map is not None:
+        frames_val = _coerce_int_list(selection_map.get("frames"))
+        if frames_val is not None:
+            selection_frames = frames_val
+        hash_val = selection_map.get("hash")
+        if isinstance(hash_val, str):
+            selection_hash = hash_val
+        categories_val = _coerce_selection_categories(selection_map.get("categories"))
+        if categories_val is not None:
+            selection_categories = categories_val
+        details_val = selection_map.get("details")
+        if details_val is not None:
+            parsed_details = _deserialize_selection_details(details_val)
+            if parsed_details:
+                selection_details = parsed_details
 
     if selection_details is None:
-        annotations = data.get("selection_annotations") or {}
-        if isinstance(annotations, dict):
+        annotations_map = _coerce_str_dict(data.get("selection_annotations"))
+        if annotations_map:
             parsed_ann: Dict[int, SelectionDetail] = {}
-            for key, value in annotations.items():
+            for key, value in annotations_map.items():
                 try:
                     frame_idx = int(key)
                 except (TypeError, ValueError):
                     continue
-                label = None
-                score = None
+                label: Optional[str] = None
+                score: Optional[float] = None
                 source = _SELECTION_SOURCE_ID
-                timecode = None
-                notes = None
+                timecode: Optional[str] = None
+                notes: Optional[str] = None
                 if isinstance(value, str):
                     label = value.split(";")[0].split("=", 1)[-1] if "=" in value else value
-                elif isinstance(value, dict):
-                    label = str(value.get("type") or value.get("label") or "")
-                    raw_score = value.get("score")
-                    try:
-                        score = float(raw_score) if raw_score is not None else None
-                    except (TypeError, ValueError):
-                        score = None
-                    if value.get("source"):
-                        source = str(value["source"])
-                    timecode = value.get("ts_tc")
-                    notes = value.get("notes")
+                else:
+                    value_dict = _coerce_str_dict(value)
+                    if value_dict is None:
+                        continue
+                    label_obj = value_dict.get("type") or value_dict.get("label")
+                    if isinstance(label_obj, str):
+                        label = label_obj
+                    score = _coerce_optional_float(value_dict.get("score"))
+                    source_obj = value_dict.get("source")
+                    if isinstance(source_obj, str) and source_obj.strip():
+                        source = source_obj.strip()
+                    timecode = _coerce_optional_str(value_dict.get("ts_tc"))
+                    notes = _coerce_optional_str(value_dict.get("notes"))
                 if not label:
                     label = "Auto"
                 parsed_ann[frame_idx] = SelectionDetail(
@@ -619,8 +673,8 @@ def _load_cached_metrics(
                     label=label,
                     score=score,
                     source=source,
-                    timecode=str(timecode) if timecode else None,
-                    notes=str(notes) if notes else None,
+                    timecode=timecode,
+                    notes=notes,
                 )
             if parsed_ann:
                 selection_details = parsed_ann
@@ -900,18 +954,29 @@ def _load_selection_sidecar(
         return None
 
     try:
-        data = json.loads(raw)
+        data_raw = json.loads(raw)
     except json.JSONDecodeError:
+        return None
+
+    data = _coerce_str_dict(data_raw)
+    if data is None:
         return None
 
     version = str(data.get("version") or "")
     if version not in {"1", _SELECTION_METADATA_VERSION}:
         return None
 
-    clip_inputs = data.get("inputs", {}).get("clips")
+    inputs_section = _coerce_str_dict(data.get("inputs")) or {}
+    clip_inputs = inputs_section.get("clips")
     recomputed_inputs = _build_clip_inputs(info)
     if clip_inputs is not None:
-        clip_names = [entry.get("name") for entry in clip_inputs if isinstance(entry, dict)]
+        clip_names: List[object] = []
+        if isinstance(clip_inputs, list):
+            for entry in clip_inputs:
+                entry_map = _coerce_str_dict(entry)
+                if entry_map is None:
+                    continue
+                clip_names.append(entry_map.get("name"))
         if clip_names != list(info.files):
             return None
 
@@ -1048,7 +1113,7 @@ def dedupe(frames: Sequence[int], min_separation_sec: float, fps: float) -> List
 
     min_gap = 0 if fps <= 0 else int(round(max(0.0, min_separation_sec) * fps))
     result: List[int] = []
-    seen = set()
+    seen: set[int] = set()
     for frame in frames:
         candidate = int(frame)
         if candidate in seen:
@@ -1201,9 +1266,9 @@ def _collect_metrics_vapoursynth(
     props = vs_core._snapshot_frame_props(clip)
     matrix_in, transfer_in, primaries_in, color_range_in = vs_core._resolve_color_metadata(props)
 
-    def _resize_kwargs_for_source() -> dict:
+    def _resize_kwargs_for_source() -> Dict[str, int]:
         """Return color-metadata kwargs describing the source clip."""
-        kwargs = {}
+        kwargs: Dict[str, int] = {}
         if matrix_in is not None:
             kwargs["matrix_in"] = int(matrix_in)
         else:
@@ -1265,9 +1330,18 @@ def _collect_metrics_vapoursynth(
         """Resize and convert *node* to a grayscale analysis representation."""
         work = node
         try:
-            if cfg.downscale_height > 0 and work.height > cfg.downscale_height:
+            height_obj = getattr(work, "height", None)
+            if (
+                cfg.downscale_height > 0
+                and isinstance(height_obj, numbers.Real)
+                and float(height_obj) > float(cfg.downscale_height)
+            ):
                 target_h = _ensure_even(max(2, int(cfg.downscale_height)))
-                aspect = work.width / work.height
+                width_obj = getattr(work, "width", None)
+                height_value = max(1, int(float(height_obj)))
+                aspect = 1.0
+                if isinstance(width_obj, numbers.Real) and height_value > 0:
+                    aspect = float(width_obj) / float(height_value)
                 target_w = _ensure_even(max(2, int(round(target_h * aspect))))
                 work = vs.core.resize.Bilinear(
                     work,
@@ -1277,17 +1351,20 @@ def _collect_metrics_vapoursynth(
                 )
 
             target_format = getattr(vs, "GRAY8", None) or getattr(vs, "GRAY16")
-            gray_kwargs = dict(resize_kwargs)
+            gray_kwargs: Dict[str, int] = dict(resize_kwargs)
             gray_formats = {
                 getattr(vs, "GRAY8", None),
                 getattr(vs, "GRAY16", None),
                 getattr(vs, "GRAY32", None),
             }
-            if work.format is not None and work.format.color_family == vs.RGB:
+            format_obj = getattr(work, "format", None)
+            color_family = getattr(format_obj, "color_family", None)
+            rgb_constant = getattr(vs, "RGB", None)
+            if format_obj is not None and color_family == rgb_constant:
                 matrix_in_val = gray_kwargs.get("matrix_in")
                 if matrix_in_val is None:
                     matrix_in_val = getattr(vs, "MATRIX_RGB", 0)
-                convert_kwargs = dict(gray_kwargs)
+                convert_kwargs: Dict[str, int] = dict(gray_kwargs)
                 convert_kwargs.pop("matrix", None)
                 convert_kwargs["matrix_in"] = int(matrix_in_val)
                 if "matrix" not in convert_kwargs:
@@ -1300,8 +1377,9 @@ def _collect_metrics_vapoursynth(
                 work = vs.core.std.ShufflePlanes(yuv, planes=0, colorfamily=vs.GRAY)
             if target_format not in gray_formats:
                 if "matrix" not in gray_kwargs:
-                    if "matrix_in" in gray_kwargs:
-                        gray_kwargs["matrix"] = gray_kwargs["matrix_in"]
+                    matrix_in_value = gray_kwargs.get("matrix_in")
+                    if matrix_in_value is not None:
+                        gray_kwargs["matrix"] = int(matrix_in_value)
                     else:
                         gray_kwargs["matrix"] = getattr(vs, "MATRIX_BT709", 1)
             else:
@@ -1684,7 +1762,7 @@ def select_frames(
     brightness_values = [val for _, val in brightness]
 
     selected: List[int] = []
-    selected_set = set()
+    selected_set: set[int] = set()
     frame_categories: Dict[int, str] = {}
 
     def try_add(
@@ -1781,7 +1859,7 @@ def select_frames(
             if gap_seconds_override is None
             else int(round(max(0.0, gap_seconds_override) * fps))
         )
-        score_lookup = {}
+        score_lookup: Dict[int, float] = {}
         for idx, val in candidates:
             score_lookup.setdefault(int(idx), float(val))
         added = 0
