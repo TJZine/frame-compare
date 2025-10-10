@@ -1,11 +1,12 @@
 class Response:
-    def __init__(self, status_code: int = 200):
+    def __init__(self, status_code: int = 200, *, json=None, text=None):
         self.status_code = status_code
-        self.text = ""
+        self.text = text if text is not None else ""
         self.headers = {}
+        self._json_data = json if json is not None else {}
 
     def json(self):
-        return {}
+        return self._json_data
 
 
 class AsyncClient:
