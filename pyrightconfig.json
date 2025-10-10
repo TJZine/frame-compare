@@ -6,7 +6,9 @@
   "venvPath": ".",
   "venv": ".venv",
   "executionEnvironments": [
-    { "root": "src", "extraPaths": ["src", "typings"] }
+    { "root": "src", "extraPaths": [".", "src", "typings"] },
+    { "root": "tests", "extraPaths": [".", "src", "typings"] },
+    { "root": ".", "extraPaths": [".", "src", "typings"] }
   ],
   "reportMissingImports": "error",
   "reportUnknownMemberType": "warning",

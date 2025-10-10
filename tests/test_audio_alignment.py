@@ -5,6 +5,7 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -61,9 +62,9 @@ class FakeArray:
 
     def flatten(self) -> list[float]:
         if self.ndim == 1:
-            return [float(v) for v in self.values]  # type: ignore[list-item]
+            return [float(v) for v in cast(list[float], self.values)]
         flattened: list[float] = []
-        for row in self.values:  # type: ignore[assignment]
+        for row in cast(list[list[float]], self.values):
             flattened.extend(float(v) for v in row)
         return flattened
 

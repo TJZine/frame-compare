@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, cast
 
 import pytest
 import requests
@@ -46,9 +46,9 @@ class FakeSession:
             raise AssertionError("Unexpected request: no prepared response")
         return self._responses.pop(0)
 
-    def get(self, url: str, timeout: float | None = None):
+    def get(self, url: str, timeout: float | None = None) -> requests.Response:
         self.calls.append({"method": "GET", "url": url, "timeout": timeout})
-        return self._next()
+        return cast(requests.Response, self._next())
 
     def post(
         self,
@@ -59,7 +59,7 @@ class FakeSession:
         data: Any | None = None,
         headers: Any | None = None,
         timeout: float | None = None,
-    ):
+    ) -> requests.Response:
         self.calls.append(
             {
                 "method": "POST",
@@ -71,7 +71,7 @@ class FakeSession:
                 "headers": headers,
             }
         )
-        return self._next()
+        return cast(requests.Response, self._next())
 
 
 def _install_session(

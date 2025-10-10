@@ -1974,8 +1974,15 @@ class CliLayoutRenderer:
         """
         self._render_title_badge(section)
         row_template = section.get("row_template", "")
-        rows = values.get(section.get("id"), []) if isinstance(values, Mapping) else []
-        for row in rows:
+        section_id = section.get("id")
+        if not isinstance(section_id, str) or not isinstance(values, Mapping):
+            return
+        candidate_rows = values.get(section_id, [])
+        if not isinstance(candidate_rows, Iterable):
+            return
+        for row in candidate_rows:
+            if not isinstance(row, Mapping):
+                continue
             context_values = dict(values)
             context_values.update(row)
             rendered = self._prepare_output(self.render_template(row_template, context_values, flags))
