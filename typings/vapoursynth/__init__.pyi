@@ -6,7 +6,13 @@ class _FrameLike(Protocol):
 
 
 class _StdOps(Protocol):
-    def PlaneStats(self) -> "VideoNode": ...
+class _StdOps(Protocol):
+    def PlaneStats(
+        self,
+        clip: "VideoNode",
+        plane: int | None = ...,
+        prop: str | None = ...,
+    ) -> "VideoNode": ...
     def MakeDiff(self, clip_a: "VideoNode", clip_b: "VideoNode") -> "VideoNode": ...
     def Prewitt(self, clip: "VideoNode") -> "VideoNode": ...
     def Expr(self, clips: Sequence["VideoNode"], expr: str) -> "VideoNode": ...
@@ -15,6 +21,7 @@ class _StdOps(Protocol):
     def ShufflePlanes(self, clip: "VideoNode", planes: Sequence[int] | int, colorfamily: Any) -> "VideoNode": ...
     def CropRel(
         self,
+        clip: "VideoNode",
         left: int = ...,
         top: int = ...,
         right: int = ...,
