@@ -38,6 +38,7 @@ def test_load_defaults(tmp_path: Path) -> None:
     assert app.tmdb.cache_ttl_seconds == 86400
     assert app.tmdb.category_preference is None
     assert app.cli.emit_json_tail is True
+    assert app.cli.progress.style == "fill"
 
 
 @pytest.mark.parametrize(
@@ -95,6 +96,9 @@ category_preference = "tv"
 [cli]
 emit_json_tail = false
 
+[cli.progress]
+style = "dot"
+
 [paths]
 input_dir = "D:/comparisons"
 
@@ -130,3 +134,4 @@ preferred = "ffms2"
     assert app.tmdb.cache_ttl_seconds == 120
     assert app.tmdb.category_preference == "TV"
     assert app.cli.emit_json_tail is False
+    assert app.cli.progress.style == "dot"

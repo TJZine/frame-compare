@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import tomllib
-from dataclasses import fields
+from dataclasses import fields, is_dataclass
 from typing import Any, Dict
 
 from .datatypes import (
@@ -61,11 +61,21 @@ def _sanitize_section(raw: dict[str, Any], name: str, cls):
     if not isinstance(raw, dict):
         raise ConfigError(f"[{name}] must be a table")
     cleaned: Dict[str, Any] = {}
-    bool_fields = {field.name for field in fields(cls) if field.type is bool}
+    cls_fields = {field.name: field for field in fields(cls)}
+    bool_fields = {name for name, field in cls_fields.items() if field.type is bool}
+    nested_fields = {
+        name: field.type
+        for name, field in cls_fields.items()
+        if is_dataclass(field.type)
+    }
     provided_keys = set(raw.keys())
     for key, value in raw.items():
         if key in bool_fields:
             cleaned[key] = _coerce_bool(value, f"{name}.{key}")
+        elif key in nested_fields:
+            if not isinstance(value, dict):
+                raise ConfigError(f"[{name}.{key}] must be a table")
+            cleaned[key] = _sanitize_section(value, f"{name}.{key}", nested_fields[key])
         else:
             cleaned[key] = value
     try:

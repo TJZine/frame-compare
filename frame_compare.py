@@ -910,7 +910,7 @@ def _evaluate_rule_condition(condition: Optional[str], *, flags: Mapping[str, An
     return bool(flags.get(expr))
 
 
-def _build_legacy_summary_lines(values: Mapping[str, Any]) -> List[str]:
+def _build_legacy_summary_lines(values: Mapping[str, Any], *, emit_json_tail: bool) -> List[str]:
     """
     Generate legacy human-readable summary lines from the collected layout values.
     
@@ -1056,9 +1056,13 @@ def _build_legacy_summary_lines(values: Mapping[str, Any]) -> List[str]:
     frame_count = _string(analysis.get("output_frame_count"), "0")
     preview = _string(analysis.get("output_frames_preview"), "")
     preview_display = f"[{preview}]" if preview else "[]"
-    lines.append(
-        f"Output frames: {frame_count}  e.g., {preview_display}  (full list in JSON)"
-    )
+    if emit_json_tail:
+        lines.append(
+            f"Output frames: {frame_count}  e.g., {preview_display}  (full list in JSON)"
+        )
+    else:
+        full_list = _string(analysis.get("output_frames_full"), "[]")
+        lines.append(f"Output frames ({frame_count}): {full_list}")
 
     return [line for line in lines if line]
 
@@ -2156,6 +2160,29 @@ def run_cli(
         no_color=no_color,
         layout_path=layout_path,
     )
+    try:
+        emit_json_tail_flag = bool(getattr(cfg.cli, "emit_json_tail"))
+    except Exception:
+        emit_json_tail_flag = True
+    progress_style = "fill"
+    try:
+        progress_cfg = getattr(cfg.cli, "progress")
+    except Exception:
+        progress_cfg = None
+    if progress_cfg is not None:
+        try:
+            progress_style = str(getattr(progress_cfg, "style", "fill"))
+        except Exception:
+            progress_style = "fill"
+    progress_style = progress_style.strip().lower()
+    if progress_style not in {"fill", "dot"}:
+        progress_style = "fill"
+    try:
+        setattr(cfg.cli.progress, "style", progress_style)
+    except Exception:
+        pass
+    reporter.set_flag("progress_style", progress_style)
+    reporter.set_flag("emit_json_tail", emit_json_tail_flag)
     collected_warnings: List[str] = []
     json_tail: Dict[str, object] = {
         "clips": [],
@@ -2979,11 +3006,14 @@ def run_cli(
     json_tail["analysis"]["output_frames_preview"] = preview_text
     layout_data["analysis"]["output_frame_count"] = kept_count
     layout_data["analysis"]["output_frames_preview"] = preview_text
+    full_list_text = ", ".join(str(frame) for frame in frames)
+    layout_data["analysis"]["output_frames_full"] = f"[{full_list_text}]" if full_list_text else "[]"
+    reporter.update_values(layout_data)
 
     out_dir = (root / cfg.screenshots.directory_name).resolve()
     total_screens = len(frames) * len(plans)
 
-    writer_name = "FFmpeg" if cfg.screenshots.use_ffmpeg else "VS"
+    writer_name = "ffmpeg" if cfg.screenshots.use_ffmpeg else "vs"
     overlay_mode_value = getattr(cfg.color, "overlay_mode", "minimal")
 
     json_tail["render"] = {
@@ -3421,7 +3451,7 @@ def run_cli(
     )
 
     if not reporter.quiet and (compatibility_required or not has_summary_section):
-        summary_lines = _build_legacy_summary_lines(layout_data)
+        summary_lines = _build_legacy_summary_lines(layout_data, emit_json_tail=emit_json_tail_flag)
         reporter.section("Summary")
         for line in summary_lines:
             reporter.line(_color_text(line, "green"))
@@ -3543,13 +3573,12 @@ def main(
         slowpics_block.setdefault("shortcut_path", None)
         slowpics_block.setdefault("url", None)
 
-    cli_emit_json_tail = True
     try:
-        cli_emit_json_tail = bool(getattr(cfg.cli, "emit_json_tail"))
+        emit_json_tail_flag = bool(getattr(cfg.cli, "emit_json_tail"))
     except Exception:
-        cli_emit_json_tail = True
+        emit_json_tail_flag = True
 
-    if cli_emit_json_tail:
+    if emit_json_tail_flag:
         if json_pretty:
             json_output = json.dumps(json_tail, indent=2)
         else:
