@@ -2935,7 +2935,6 @@ def run_cli(
     selection_sidecar_dir = cache_info.path.parent if cache_info is not None else root
     selection_sidecar_path = selection_sidecar_dir / "generated.selection.v1.json"
     selection_overlay_details = {
-    selection_overlay_details = {
         frame: {
             "label": detail.label,
             "timecode": detail.timecode,
@@ -2967,8 +2966,6 @@ def run_cli(
             selection_details=selection_details,
             selection_categories=frame_categories,
         )
-        )
-
     kept_count = len(frames)
     scanned_count = progress_total if progress_total > 0 else max(sample_count, kept_count)
     selection_counts = Counter(detail.label or "Auto" for detail in selection_details.values())
