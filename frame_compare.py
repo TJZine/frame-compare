@@ -2164,9 +2164,16 @@ def run_cli(
     progress_style = "fill"
 
     if hasattr(cfg, "cli"):
-        emit_json_tail_flag = bool(getattr(cfg.cli, "emit_json_tail", True))
-        if hasattr(cfg.cli, "progress") and hasattr(cfg.cli.progress, "style"):
-            progress_style = str(cfg.cli.progress.style)
+        cli_cfg = cfg.cli
+        emit_json_tail_flag = bool(getattr(cli_cfg, "emit_json_tail", True))
+        if hasattr(cli_cfg, "progress"):
+            style_value = getattr(cli_cfg.progress, "style", "fill")
+            progress_style = str(style_value).strip().lower()
+            if progress_style not in {"fill", "dot"}:
+                logger.warning(
+                    "Invalid progress style '%s', falling back to 'fill'", style_value
+                )
+                progress_style = "fill"
     reporter.set_flag("progress_style", progress_style)
     reporter.set_flag("emit_json_tail", emit_json_tail_flag)
     collected_warnings: List[str] = []
@@ -3563,7 +3570,8 @@ def main(
 
     emit_json_tail_flag = True
     if hasattr(cfg, "cli"):
-        emit_json_tail_flag = bool(getattr(cfg.cli, "emit_json_tail", True))
+        cli_cfg = cfg.cli
+        emit_json_tail_flag = bool(getattr(cli_cfg, "emit_json_tail", True))
 
     if emit_json_tail_flag:
         if json_pretty:

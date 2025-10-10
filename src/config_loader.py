@@ -167,11 +167,10 @@ def load_config(path: str) -> AppConfig:
         ),
     )
 
-    if hasattr(app.cli, "progress") and hasattr(app.cli.progress, "style"):
-        normalized_style = str(app.cli.progress.style).strip().lower()
-        if normalized_style not in {"fill", "dot"}:
-            raise ConfigError("cli.progress.style must be 'fill' or 'dot'")
-        app.cli.progress.style = normalized_style
+    normalized_style = str(app.cli.progress.style).strip().lower()
+    if normalized_style not in {"fill", "dot"}:
+        raise ConfigError("cli.progress.style must be 'fill' or 'dot'")
+    app.cli.progress.style = normalized_style
 
     if app.analysis.step < 1:
         raise ConfigError("analysis.step must be >= 1")
