@@ -1,11 +1,12 @@
 {
   "typeCheckingMode": "standard",
   "include": ["src", "tests"],
+  "stubPath": "typings",
   "exclude": [".venv/**", "build/**", "dist/**", "**/__pycache__/**"],
   "venvPath": ".",
   "venv": ".venv",
   "executionEnvironments": [
-    { "root": "src", "extraPaths": ["src"] }
+    { "root": "src", "extraPaths": ["src", "typings"] }
   ],
   "reportMissingImports": "error",
   "reportUnknownMemberType": "warning",

@@ -14,7 +14,7 @@ import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, TypedDict, cast
 
 from . import vs_core
 from .datatypes import AnalysisConfig, ColorConfig
@@ -87,6 +87,68 @@ class SelectionDetail:
     notes: Optional[str] = None
 
 
+class _SerializedSelectionDetail(TypedDict, total=False):
+    frame_index: int | float | str
+    type: str
+    score: float | int | str | None
+    source: str | None
+    ts_tc: str | int | float | None
+    clip_role: str | None
+    notes: str | int | float | None
+
+
+def _coerce_frame_index(value: object) -> Optional[int]:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return None
+        return int(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            return int(stripped)
+        except ValueError:
+            return None
+    return None
+
+
+def _coerce_optional_float(value: object) -> Optional[float]:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
+        return float(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            parsed = float(stripped)
+        except ValueError:
+            return None
+        if not math.isfinite(parsed):
+            return None
+        return parsed
+    return None
+
+
+def _coerce_optional_str(value: object) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return str(value)
+    return None
+
+
 def _now_utc_iso() -> str:
     return _dt.datetime.now(tz=_dt.timezone.utc).strftime(_TIME_FORMAT)
 
@@ -145,21 +207,20 @@ def _compute_file_sha1(path: Path, *, chunk_size: int = 1024 * 1024) -> Optional
         return None
 
 
-def _serialize_selection_details(details: Mapping[int, SelectionDetail]) -> List[Dict[str, object]]:
-    records: List[Dict[str, object]] = []
+def _serialize_selection_details(details: Mapping[int, SelectionDetail]) -> List[_SerializedSelectionDetail]:
+    records: List[_SerializedSelectionDetail] = []
     for frame_idx in sorted(details.keys()):
         detail = details[frame_idx]
-        records.append(
-            {
-                "frame_index": int(detail.frame_index),
-                "type": detail.label,
-                "score": None if detail.score is None else float(detail.score),
-                "source": detail.source,
-                "ts_tc": detail.timecode,
-                "clip_role": detail.clip_role,
-                "notes": detail.notes,
-            }
-        )
+        record: _SerializedSelectionDetail = {
+            "frame_index": int(detail.frame_index),
+            "type": detail.label,
+            "score": None if detail.score is None else float(detail.score),
+            "source": detail.source,
+            "ts_tc": detail.timecode,
+            "clip_role": detail.clip_role,
+            "notes": detail.notes,
+        }
+        records.append(record)
     return records
 
 
@@ -170,28 +231,30 @@ def _deserialize_selection_details(value: object) -> Dict[int, SelectionDetail]:
     for entry in value:
         if not isinstance(entry, dict):
             continue
-        try:
-            frame_idx = int(entry.get("frame_index"))
-        except (TypeError, ValueError):
+        record = cast(_SerializedSelectionDetail, entry)
+        frame_idx = _coerce_frame_index(record.get("frame_index"))
+        if frame_idx is None:
             continue
-        label = str(entry.get("type") or "Auto")
-        score_val = entry.get("score")
-        try:
-            score = float(score_val) if score_val is not None else None
-        except (TypeError, ValueError):
-            score = None
-        source = str(entry.get("source") or _SELECTION_SOURCE_ID)
-        timecode = entry.get("ts_tc")
-        clip_role = entry.get("clip_role")
-        notes = entry.get("notes")
+        label_obj: object = record.get("type")
+        label = str(label_obj).strip() if isinstance(label_obj, str) and label_obj.strip() else "Auto"
+        score = _coerce_optional_float(record.get("score"))
+        source_obj: object = record.get("source")
+        source = (
+            str(source_obj).strip()
+            if isinstance(source_obj, str) and source_obj.strip()
+            else _SELECTION_SOURCE_ID
+        )
+        timecode = _coerce_optional_str(record.get("ts_tc"))
+        clip_role = _coerce_optional_str(record.get("clip_role"))
+        notes = _coerce_optional_str(record.get("notes"))
         results[frame_idx] = SelectionDetail(
             frame_index=frame_idx,
             label=label,
             score=score,
             source=source,
-            timecode=str(timecode) if timecode is not None else None,
-            clip_role=str(clip_role) if clip_role else None,
-            notes=str(notes) if notes else None,
+            timecode=timecode,
+            clip_role=clip_role,
+            notes=notes,
         )
     return results
 
@@ -804,7 +867,11 @@ def write_selection_cache_file(
         [frame, str(selection_categories.get(frame, _detail_or_default(frame).label))]
         for frame in normalized_frames
     ]
-    selection_section = payload.setdefault("selection", {})
+    selection_section_obj = payload.setdefault("selection", {})
+    if not isinstance(selection_section_obj, dict):
+        selection_section_obj = {}
+        payload["selection"] = selection_section_obj
+    selection_section = cast(Dict[str, object], selection_section_obj)
     selection_section["frames"] = normalized_frames
     selection_section["categories"] = categories
     selection_section["annotations"] = {
@@ -915,31 +982,45 @@ def _save_cached_metrics(
     annotations: Dict[str, str] = {}
     if selection_hash is not None and selection_frames is not None:
         serialized_details = _serialize_selection_details(selection_details or {})
+        selection_details_map = selection_details or {}
+
         payload["selection"] = {
             "hash": selection_hash,
             "frames": [int(frame) for frame in selection_frames],
         }
-        if selection_categories:
-            payload["selection"]["categories"] = [
-                [int(frame), str(selection_categories.get(int(frame), ""))]
-                for frame in selection_frames
-            ]
+
+        if selection_categories is not None:
+            categories_payload: List[list[object]] = []
+            for frame in selection_frames:
+                frame_idx = int(frame)
+                category_value = selection_categories.get(frame_idx, "")
+                categories_payload.append([frame_idx, str(category_value)])
+            if categories_payload:
+                payload["selection"]["categories"] = categories_payload
+
         if serialized_details:
             payload["selection"]["details"] = serialized_details
+
             for record in serialized_details:
-                frame_idx = int(record.get("frame_index", -1))
-                if frame_idx >= 0:
-                    detail = selection_details.get(frame_idx) if selection_details else None
-                    if detail is None:
-                        detail = SelectionDetail(
-                            frame_index=frame_idx,
-                            label=str(record.get("type") or "Auto"),
-                            score=record.get("score"),
-                            source=str(record.get("source") or _SELECTION_SOURCE_ID),
-                            timecode=record.get("ts_tc"),
-                            notes=record.get("notes"),
-                        )
-                    annotations[str(frame_idx)] = _format_selection_annotation(detail)
+                frame_idx = _coerce_frame_index(record.get("frame_index"))
+                if frame_idx is None or frame_idx < 0:
+                    continue
+
+                detail = selection_details_map.get(frame_idx)
+                if detail is None:
+                    label_obj: object = record.get("type")
+                    source_obj: object = record.get("source")
+                    detail = SelectionDetail(
+                        frame_index=frame_idx,
+                        label=str(label_obj).strip() if isinstance(label_obj, str) and label_obj.strip() else "Auto",
+                        score=_coerce_optional_float(record.get("score")),
+                        source=str(source_obj).strip() if isinstance(source_obj, str) and source_obj.strip() else _SELECTION_SOURCE_ID,
+                        timecode=_coerce_optional_str(record.get("ts_tc")),
+                        clip_role=_coerce_optional_str(record.get("clip_role")),
+                        notes=_coerce_optional_str(record.get("notes")),
+                    )
+                annotations[str(frame_idx)] = _format_selection_annotation(detail)
+
         if annotations:
             payload["selection_annotations"] = annotations
 

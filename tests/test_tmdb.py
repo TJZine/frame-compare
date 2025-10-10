@@ -1,8 +1,10 @@
 import asyncio
+from collections.abc import Iterator
 from typing import Dict, List
 
 import httpx
 import pytest
+from pytest import MonkeyPatch
 
 from src import tmdb as tmdb_module
 from src.tmdb import (
@@ -16,7 +18,7 @@ from src.tmdb import (
 
 
 @pytest.fixture(autouse=True)
-def clear_tmdb_cache() -> None:
+def clear_tmdb_cache() -> Iterator[None]:
     original_max = tmdb_module._CACHE._max_entries
     tmdb_module._CACHE.clear()
     yield
@@ -24,7 +26,7 @@ def clear_tmdb_cache() -> None:
     tmdb_module._CACHE.clear()
 
 
-def test_tmdb_cache_enforces_max_entries(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_tmdb_cache_enforces_max_entries(monkeypatch: MonkeyPatch) -> None:
     tmdb_module._CACHE.configure(max_entries=2)
     monotonic_values = [100.0]
 
@@ -44,7 +46,7 @@ def test_tmdb_cache_enforces_max_entries(monkeypatch: pytest.MonkeyPatch) -> Non
     assert tmdb_module._CACHE.get(("/path/b", ()), 30) == {"id": 2}
 
 
-def test_tmdb_cache_expires_entries(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_tmdb_cache_expires_entries(monkeypatch: MonkeyPatch) -> None:
     tmdb_module._CACHE.configure(max_entries=4)
     monotonic_values = [200.0]
 
@@ -189,7 +191,7 @@ def test_roman_numeral_fallback() -> None:
     assert any(query.strip().lower() == "rocky 2" for query in queries if query)
 
 
-def test_anime_parsing_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_anime_parsing_fallback(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(tmdb_module, "_call_guessit", lambda filename: {})
     monkeypatch.setattr(
         tmdb_module,
