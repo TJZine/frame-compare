@@ -2935,6 +2935,7 @@ def run_cli(
     selection_sidecar_dir = cache_info.path.parent if cache_info is not None else root
     selection_sidecar_path = selection_sidecar_dir / "generated.selection.v1.json"
     selection_overlay_details = {
+    selection_overlay_details = {
         frame: {
             "label": detail.label,
             "timecode": detail.timecode,
@@ -2952,7 +2953,7 @@ def run_cli(
             cfg=cfg.analysis,
             selection_hash=selection_hash_value,
             selection_frames=frames,
-            selection_details=selection_overlay_details,
+            selection_details=selection_details,
         )
     if not cfg.analysis.save_frames_data:
         compframes_path = (root / cfg.analysis.frame_data_filename).resolve()
@@ -2963,8 +2964,9 @@ def run_cli(
             cfg=cfg.analysis,
             selection_hash=selection_hash_value,
             selection_frames=frames,
-            selection_details=selection_overlay_details,
+            selection_details=selection_details,
             selection_categories=frame_categories,
+        )
         )
 
     kept_count = len(frames)
