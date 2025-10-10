@@ -2859,7 +2859,7 @@ def run_cli(
         frames_only = list(result)
         return frames_only, {frame: "Auto" for frame in frames_only}, {}
 
-    selection_details: Dict[int, analysis.SelectionDetail] = {}
+    selection_details: Dict[int, SelectionDetail] = {}
 
     try:
         if sample_count > 0 and not cache_exists:
