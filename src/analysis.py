@@ -765,10 +765,12 @@ def _selection_payload_from_inputs(
     )
     detail_records = _serialize_selection_details(selection_details or {})
     return {
-        "version": _SELECTION_METADATA_VERSION,
-        "created_utc": _now_utc_iso(),
-        "cache_key": cache_key,
-        "analyzed_file": analyzed_file,
+_SELECTION_SOURCE_ID = "select_frames.v1"
+_TIME_FORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
+
+def _now_utc_iso() -> str:
+    """Return current UTC time formatted with _TIME_FORMAT (Z-suffixed)."""
+    return _dt.datetime.now(tz=_dt.timezone.utc).strftime(_TIME_FORMAT)
         "selection_hash": selection_hash,
         "selection_source": _SELECTION_SOURCE_ID,
         "inputs": {
