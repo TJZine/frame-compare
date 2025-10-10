@@ -11,12 +11,13 @@ from src import slowpics
 from src.datatypes import SlowpicsConfig
 
 
-class FakeResponse:
+class FakeResponse(requests.Response):
     def __init__(self, status_code: int = 200, json_data: Any | None = None, text: str = "") -> None:
+        super().__init__()
         self.status_code = status_code
         self._json_data = json_data
-        self.text = text
-        self.content = text.encode("utf-8")
+        self._content = text.encode("utf-8")
+        self.encoding = "utf-8"
 
     def json(self) -> Any:
         if self._json_data is None:
@@ -46,7 +47,7 @@ class FakeSession:
             raise AssertionError("Unexpected request: no prepared response")
         return self._responses.pop(0)
 
-    def get(self, url: str, timeout: float | None = None):
+    def get(self, url: str, timeout: float | None = None) -> requests.Response:
         self.calls.append({"method": "GET", "url": url, "timeout": timeout})
         return self._next()
 
@@ -59,7 +60,7 @@ class FakeSession:
         data: Any | None = None,
         headers: Any | None = None,
         timeout: float | None = None,
-    ):
+    ) -> requests.Response:
         self.calls.append(
             {
                 "method": "POST",
@@ -110,7 +111,7 @@ def _write_image(tmp_path: Path, name: str) -> Path:
     return path
 
 
-def test_session_bootstrap_single_shot(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_session_bootstrap_single_shot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = SlowpicsConfig()
     image = _write_image(tmp_path, "123 - ClipA.png")
 
@@ -137,7 +138,7 @@ def test_session_bootstrap_single_shot(tmp_path, monkeypatch: pytest.MonkeyPatch
     assert image_call["timeout"][1] >= cfg.image_upload_timeout_seconds
 
 
-def test_missing_xsrf_token_raises(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_missing_xsrf_token_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = SlowpicsConfig()
     image = _write_image(tmp_path, "123 - ClipA.png")
 
@@ -148,7 +149,7 @@ def test_missing_xsrf_token_raises(tmp_path, monkeypatch: pytest.MonkeyPatch) ->
         slowpics.upload_comparison([str(image)], tmp_path, cfg)
 
 
-def test_legacy_collection_creation_fields(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_legacy_collection_creation_fields(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = SlowpicsConfig(
         collection_name="My Collection",
         is_hentai=True,
@@ -190,7 +191,7 @@ def test_legacy_collection_creation_fields(tmp_path, monkeypatch: pytest.MonkeyP
     assert comparison_fields["comparisons[1].name"] == "200"
 
 
-def test_legacy_collection_tmdb_identifier_normalization(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_legacy_collection_tmdb_identifier_normalization(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = SlowpicsConfig(
         collection_name="Example",
         tmdb_id="98765",
@@ -216,7 +217,7 @@ def test_legacy_collection_tmdb_identifier_normalization(tmp_path, monkeypatch: 
     assert comparison_fields["tmdbId"] == "MOVIE_98765"
 
 
-def test_tmdb_identifier_accepts_prefixed_values(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_tmdb_identifier_accepts_prefixed_values(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = SlowpicsConfig(
         collection_name="Example",
         tmdb_id="tv/76543",
@@ -241,7 +242,7 @@ def test_tmdb_identifier_accepts_prefixed_values(tmp_path, monkeypatch: pytest.M
     assert comparison_fields["tmdbId"] == "TV_76543"
 
 
-def test_legacy_image_upload_loop(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_legacy_image_upload_loop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = SlowpicsConfig()
     image = _write_image(tmp_path, "123 - ClipA.png")
 
@@ -264,7 +265,7 @@ def test_legacy_image_upload_loop(tmp_path, monkeypatch: pytest.MonkeyPatch) -> 
     assert file_tuple[2] == "image/png"
 
 
-def test_large_image_upload_scales_timeout(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_large_image_upload_scales_timeout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = SlowpicsConfig(image_upload_timeout_seconds=30)
     image = tmp_path / "123 - ClipA.png"
     image.write_bytes(b"x" * 8 * 1024 * 1024)  # 8 MiB file
@@ -283,7 +284,7 @@ def test_large_image_upload_scales_timeout(tmp_path, monkeypatch: pytest.MonkeyP
     assert image_call["timeout"][1] > cfg.image_upload_timeout_seconds
 
 
-def test_image_upload_non_ok_raises(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_image_upload_non_ok_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = SlowpicsConfig()
     image = _write_image(tmp_path, "123 - ClipA.png")
 
@@ -298,7 +299,7 @@ def test_image_upload_non_ok_raises(tmp_path, monkeypatch: pytest.MonkeyPatch) -
         slowpics.upload_comparison([str(image)], tmp_path, cfg)
 
 
-def test_no_json_api_calls(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_no_json_api_calls(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = SlowpicsConfig()
     image = _write_image(tmp_path, "123 - ClipA.png")
 
@@ -314,7 +315,7 @@ def test_no_json_api_calls(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert all("/api/" not in call["url"] for call in session.calls if call["method"] == "POST")
 
 
-def test_url_short_form_always(tmp_path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+def test_url_short_form_always(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
     cfg = SlowpicsConfig()
     image = _write_image(tmp_path, "123 - ClipA.png")
 
@@ -340,7 +341,7 @@ def test_url_short_form_always(tmp_path, monkeypatch: pytest.MonkeyPatch, caplog
     assert all("/c/collection-uuid/" not in message for message in caplog.messages)
 
 
-def test_url_matches_creation_key(tmp_path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+def test_url_matches_creation_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
     cfg = SlowpicsConfig()
     image = _write_image(tmp_path, "123 - ClipA.png")
 
@@ -369,7 +370,7 @@ def test_url_matches_creation_key(tmp_path, monkeypatch: pytest.MonkeyPatch, cap
     assert upload_fields["imageUuid"] == "img-from-response"
 
 
-def test_missing_key_raises(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_missing_key_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = SlowpicsConfig()
     image = _write_image(tmp_path, "123 - ClipA.png")
 

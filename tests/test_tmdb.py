@@ -1,8 +1,10 @@
 import asyncio
+from collections.abc import Iterator
 from typing import Dict, List
 
 import httpx
 import pytest
+from pytest import MonkeyPatch
 
 from src import tmdb as tmdb_module
 from src.tmdb import (
@@ -16,10 +18,48 @@ from src.tmdb import (
 
 
 @pytest.fixture(autouse=True)
-def clear_tmdb_cache() -> None:
-    tmdb_module._CACHE._data.clear()
+def clear_tmdb_cache() -> Iterator[None]:
+    original_max = tmdb_module._CACHE._max_entries
+    tmdb_module._CACHE.clear()
     yield
-    tmdb_module._CACHE._data.clear()
+    tmdb_module._CACHE.configure(max_entries=original_max)
+    tmdb_module._CACHE.clear()
+
+
+def test_tmdb_cache_enforces_max_entries(monkeypatch: MonkeyPatch) -> None:
+    tmdb_module._CACHE.configure(max_entries=2)
+    monotonic_values = [100.0]
+
+    def fake_monotonic() -> float:
+        return monotonic_values[0]
+
+    monkeypatch.setattr(tmdb_module.time, "monotonic", fake_monotonic)
+
+    tmdb_module._CACHE.set(("/path/a", ()), {"id": 1}, ttl_seconds=30)
+    monotonic_values[0] += 1
+    tmdb_module._CACHE.set(("/path/b", ()), {"id": 2}, ttl_seconds=30)
+    monotonic_values[0] += 1
+    tmdb_module._CACHE.set(("/path/c", ()), {"id": 3}, ttl_seconds=30)
+
+    assert len(tmdb_module._CACHE._data) == 2
+    assert ("/path/a", ()) not in tmdb_module._CACHE._data
+    assert tmdb_module._CACHE.get(("/path/b", ()), 30) == {"id": 2}
+
+
+def test_tmdb_cache_expires_entries(monkeypatch: MonkeyPatch) -> None:
+    tmdb_module._CACHE.configure(max_entries=4)
+    monotonic_values = [200.0]
+
+    def fake_monotonic() -> float:
+        return monotonic_values[0]
+
+    monkeypatch.setattr(tmdb_module.time, "monotonic", fake_monotonic)
+
+    tmdb_module._CACHE.set(("/path/d", ()), {"id": 4}, ttl_seconds=5)
+    monotonic_values[0] += 6
+
+    assert tmdb_module._CACHE.get(("/path/d", ()), 5) is None
+    assert ("/path/d", ()) not in tmdb_module._CACHE._data
 
 
 def test_resolve_requires_api_key() -> None:
@@ -151,7 +191,7 @@ def test_roman_numeral_fallback() -> None:
     assert any(query.strip().lower() == "rocky 2" for query in queries if query)
 
 
-def test_anime_parsing_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_anime_parsing_fallback(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(tmdb_module, "_call_guessit", lambda filename: {})
     monkeypatch.setattr(
         tmdb_module,

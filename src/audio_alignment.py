@@ -11,20 +11,52 @@ import subprocess
 import tempfile
 import tomllib
 import warnings
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from shutil import which
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple, cast
 
 logger = logging.getLogger(__name__)
 
-# NumPy warns when the CPU is in flush-to-zero mode; ignore the harmless subnormal notice.
-warnings.filterwarnings(
-    "ignore",
-    message="The value of the smallest subnormal.*",
-    category=UserWarning,
-    module="numpy._core.getlimits",
-)
+
+def _to_int(value: object, default: int = 0) -> int:
+    """Safely convert a JSON-derived value to an integer."""
+
+    if value is None:
+        return default
+    if isinstance(value, bool):  # bool is subclass of int but handle explicitly
+        return int(value)
+    if isinstance(value, (int, float)):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return default
+    return default
+
+
+def _as_str_dict(value: object) -> dict[str, object]:
+    if isinstance(value, dict) and all(isinstance(key, str) for key in value):
+        return cast(dict[str, object], value)
+    return {}
+
+_FLUSH_TO_ZERO_WARNING = "The value of the smallest subnormal"
+
+
+@contextmanager
+def _suppress_flush_to_zero_warning() -> Iterator[None]:
+    """Temporarily silence NumPy's flush-to-zero diagnostic warning."""
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=f"{_FLUSH_TO_ZERO_WARNING}.*",
+            category=UserWarning,
+            module="numpy._core.getlimits",
+        )
+        yield
 
 
 class AudioAlignmentError(RuntimeError):
@@ -45,6 +77,7 @@ class AlignmentMeasurement:
 
     @property
     def key(self) -> str:
+        """Return the file stem used when indexing alignment results."""
         return self.file.name
 
 
@@ -75,13 +108,7 @@ def ensure_external_tools() -> None:
 
 def _load_optional_modules() -> Tuple[Any, Any, Any]:
     try:
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore",
-                message="The value of the smallest subnormal",
-                category=UserWarning,
-                module="numpy._core.getlimits",
-            )
+        with _suppress_flush_to_zero_warning():
             import librosa  # type: ignore
             import numpy as np  # type: ignore
             import soundfile as sf  # type: ignore
@@ -121,28 +148,30 @@ def probe_audio_streams(path: Path) -> List[AudioStreamInfo]:
     except json.JSONDecodeError as exc:
         raise AudioAlignmentError(f"Unable to parse ffprobe output for {path.name}") from exc
 
+    if not isinstance(payload, dict) or not all(isinstance(key, str) for key in payload):
+        return []
+    payload_dict: dict[str, object] = cast(dict[str, object], payload)
+    streams_data = payload_dict.get("streams", [])
+    if not isinstance(streams_data, list):
+        return []
     streams: List[AudioStreamInfo] = []
-    for entry in payload.get("streams", []) or []:
-        try:
-            index = int(entry.get("index", 0))
-        except (TypeError, ValueError):
+    for entry in streams_data or []:
+        if not isinstance(entry, dict) or not all(isinstance(key, str) for key in entry):
             continue
-        tags = entry.get("tags", {}) or {}
-        disposition = entry.get("disposition", {}) or {}
+        entry_dict: dict[str, object] = cast(dict[str, object], entry)
+        index = _to_int(entry_dict.get("index"), default=-1)
+        if index < 0:
+            continue
+        tags = _as_str_dict(entry_dict.get("tags"))
+        disposition = _as_str_dict(entry_dict.get("disposition"))
         language = str(tags.get("language") or "").strip()
-        codec_name = str(entry.get("codec_name") or "").strip()
-        channels = int(entry.get("channels") or 0)
-        channel_layout = str(entry.get("channel_layout") or "").strip()
-        try:
-            sample_rate = int(entry.get("sample_rate") or 0)
-        except (TypeError, ValueError):
-            sample_rate = 0
-        try:
-            bitrate = int(entry.get("bit_rate") or 0)
-        except (TypeError, ValueError):
-            bitrate = 0
-        is_default = bool(disposition.get("default", 0))
-        is_forced = bool(disposition.get("forced", 0))
+        codec_name = str(entry_dict.get("codec_name") or "").strip()
+        channels = _to_int(entry_dict.get("channels"))
+        channel_layout = str(entry_dict.get("channel_layout") or "").strip()
+        sample_rate = _to_int(entry_dict.get("sample_rate"))
+        bitrate = _to_int(entry_dict.get("bit_rate"))
+        is_default = bool(_to_int(disposition.get("default")))
+        is_forced = bool(_to_int(disposition.get("forced")))
         streams.append(
             AudioStreamInfo(
                 index=index,
@@ -187,6 +216,7 @@ def _extract_audio(
         "-y",
         handle.name,
     ]
+    completed: subprocess.CompletedProcess[str] | None = None
     try:
         completed = subprocess.run(
             cmd,
@@ -203,7 +233,7 @@ def _extract_audio(
         ) from exc
     finally:
         # Ensure ffmpeg output doesn't spam stdout when successful
-        if 'completed' in locals() and completed.stdout:
+        if completed is not None and completed.stdout:
             logger.debug("ffmpeg audio extract stdout: %s", completed.stdout.strip())
     return Path(handle.name)
 
@@ -216,24 +246,25 @@ def _onset_envelope(
 ) -> Tuple[Any, int]:
     np, librosa, sf = _load_optional_modules()
 
-    data, native_sr = sf.read(str(wav_path))
-    if data.size == 0:
-        raise AudioAlignmentError(f"No audio samples extracted from {wav_path}")
-    if data.ndim > 1:
-        data = np.mean(data, axis=1)
-    if native_sr != sample_rate:
-        data = librosa.resample(data, orig_sr=native_sr, target_sr=sample_rate)
+    with _suppress_flush_to_zero_warning():
+        data, native_sr = sf.read(str(wav_path))
+        if data.size == 0:
+            raise AudioAlignmentError(f"No audio samples extracted from {wav_path}")
+        if data.ndim > 1:
+            data = np.mean(data, axis=1)
+        if native_sr != sample_rate:
+            data = librosa.resample(data, orig_sr=native_sr, target_sr=sample_rate)
 
-    peak = float(np.max(np.abs(data))) if data.size else 0.0
-    if peak > 0:
-        data = data / peak
+        peak = float(np.max(np.abs(data))) if data.size else 0.0
+        if peak > 0:
+            data = data / peak
 
-    onset_env = librosa.onset.onset_strength(
-        y=data,
-        sr=sample_rate,
-        hop_length=hop_length,
-        center=True,
-    )
+        onset_env = librosa.onset.onset_strength(
+            y=data,
+            sr=sample_rate,
+            hop_length=hop_length,
+            center=True,
+        )
     return onset_env.astype(np.float32), hop_length
 
 
@@ -301,6 +332,7 @@ def measure_offsets(
     window_overrides: Mapping[Path, Tuple[Optional[float], Optional[float]]] | None = None,
     progress_callback: Callable[[int], None] | None = None,
 ) -> List[AlignmentMeasurement]:
+    """Estimate relative audio offsets for *targets* against *reference*."""
     ensure_external_tools()
 
     ref_audio = _extract_audio(
@@ -399,6 +431,7 @@ def measure_offsets(
 
 
 def load_offsets(path: Path) -> Tuple[Optional[str], Dict[str, Dict[str, Any]]]:
+    """Load previously recorded alignment offsets from *path* if available."""
     if not path.exists():
         return None, {}
     try:
@@ -409,22 +442,26 @@ def load_offsets(path: Path) -> Tuple[Optional[str], Dict[str, Dict[str, Any]]]:
     offsets = data.get("offsets", {}) if isinstance(data, dict) else {}
     cleaned: Dict[str, Dict[str, Any]] = {}
     if isinstance(offsets, dict):
-        for key, value in offsets.items():
+        offsets_dict: dict[str, object] = cast(dict[str, object], offsets)
+        for key, value in offsets_dict.items():
             if isinstance(value, dict):
                 cleaned[key] = dict(value)
     reference_name = None
     if isinstance(meta, dict):
-        ref = meta.get("reference")
+        meta_dict: dict[str, object] = cast(dict[str, object], meta)
+        ref = meta_dict.get("reference")
         if isinstance(ref, str):
             reference_name = ref
     return reference_name, cleaned
 
 
 def _toml_quote(value: str) -> str:
+    """Escape TOML string characters for safe inline inclusion."""
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _format_float(value: Optional[float]) -> str:
+    """Format floats with fixed precision while preserving NaN markers."""
     if value is None or math.isnan(value):
         return "nan"
     return f"{value:.6f}"
@@ -437,10 +474,13 @@ def update_offsets_file(
     existing: Mapping[str, Dict[str, Any]] | None = None,
     negative_override_notes: Mapping[str, str] | None = None,
 ) -> Tuple[Dict[str, int], Dict[str, str]]:
+    """Write updated offset measurements to *path* and return applied adjustments."""
     applied: Dict[str, int] = {}
     statuses: Dict[str, str] = {}
-    existing = existing or {}
-    negative_override_notes = negative_override_notes or {}
+    existing_map: Mapping[str, Dict[str, Any]] = existing if existing is not None else {}
+    notes_map: Mapping[str, str] = (
+        negative_override_notes if negative_override_notes is not None else {}
+    )
 
     lines: List[str] = []
     timestamp = _dt.datetime.now(tz=_dt.timezone.utc).astimezone().isoformat(timespec="seconds")
@@ -453,15 +493,21 @@ def update_offsets_file(
 
     for measurement in sorted(measurements, key=lambda m: m.file.name.lower()):
         key = measurement.key
-        prior = existing.get(key, {})
-        prior_frames = prior.get("frames") if isinstance(prior, dict) else None
-        prior_status = str(prior.get("status") or "").lower() if isinstance(prior, dict) else ""
+        prior = existing_map.get(key)
+        prior_frames = None
+        prior_status = ""
+        if isinstance(prior, Mapping):
+            frames_obj = prior.get("frames")
+            if isinstance(frames_obj, (int, float)):
+                prior_frames = frames_obj
+            status_obj = prior.get("status")
+            if isinstance(status_obj, str):
+                prior_status = status_obj.lower()
         manual = prior_status == "manual"
-        if not manual and isinstance(prior_frames, (int, float)) and isinstance(prior, dict):
+        if not manual and isinstance(prior_frames, (int, float)) and isinstance(prior, Mapping):
             suggested = prior.get("suggested_frames")
-            if isinstance(suggested, (int, float)):
-                if int(prior_frames) != int(suggested):
-                    manual = True
+            if isinstance(suggested, (int, float)) and int(prior_frames) != int(suggested):
+                manual = True
         frames = prior_frames if manual else measurement.frames
 
         if frames is not None:
@@ -494,8 +540,10 @@ def update_offsets_file(
         block.append(f"status = \"{status}\"")
         if measurement.error:
             block.append(f'error = "{_toml_quote(measurement.error)}"')
-        elif key in negative_override_notes:
-            block.append(f'note = "{_toml_quote(negative_override_notes[key])}"')
+        else:
+            note = notes_map.get(key)
+            if isinstance(note, str):
+                block.append(f'note = "{_toml_quote(note)}"')
         block.append("")
         lines.extend(block)
 

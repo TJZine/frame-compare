@@ -105,6 +105,7 @@ class TMDBConfig:
     year_tolerance: int = 2
     enable_anime_parsing: bool = True
     cache_ttl_seconds: int = 86400
+    cache_max_entries: int = 256
     category_preference: Optional[str] = None
 
 
@@ -117,10 +118,18 @@ class NamingConfig:
 
 
 @dataclass
+class CLIProgressConfig:
+    """Presentation preferences for progress indicators."""
+
+    style: str = "fill"
+
+
+@dataclass
 class CLIConfig:
     """CLI presentation controls."""
 
     emit_json_tail: bool = True
+    progress: CLIProgressConfig = field(default_factory=CLIProgressConfig)
 
 
 @dataclass

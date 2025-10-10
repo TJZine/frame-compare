@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as _dt
 import hashlib
 import json
 import logging
@@ -9,14 +10,25 @@ import math
 import numbers
 import random
 import time
+import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, TypedDict, cast
 
 from . import vs_core
 from .datatypes import AnalysisConfig, ColorConfig
 
 logger = logging.getLogger(__name__)
+
+_SELECTION_METADATA_VERSION = "1"
+_SELECTION_SOURCE_ID = "select_frames.v1"
+_TIME_FORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
+
+
+def _now_utc_iso() -> str:
+    """Return current UTC time formatted with _TIME_FORMAT (Z-suffixed)."""
+    return _dt.datetime.now(tz=_dt.timezone.utc).strftime(_TIME_FORMAT)
 
 
 @dataclass(frozen=True)
@@ -35,11 +47,22 @@ class FrameMetricsCacheInfo:
 
 @dataclass
 class CachedMetrics:
+    """
+    Stored brightness and motion metrics captured from previous analyses.
+
+    Attributes:
+        brightness (List[tuple[int, float]]): Frame index and brightness pairs.
+        motion (List[tuple[int, float]]): Frame index and motion score pairs.
+        selection_frames (Optional[List[int]]): Frame indices selected during the cached run.
+        selection_hash (Optional[str]): Hash of the selection inputs that produced ``selection_frames``.
+        selection_categories (Optional[Dict[int, str]]): Optional per-frame category labels.
+    """
     brightness: List[tuple[int, float]]
     motion: List[tuple[int, float]]
     selection_frames: Optional[List[int]]
     selection_hash: Optional[str]
     selection_categories: Optional[Dict[int, str]]
+    selection_details: Optional[Dict[int, "SelectionDetail"]]
 
 
 @dataclass(frozen=True)
@@ -54,6 +77,275 @@ class SelectionWindowSpec:
     applied_trail_seconds: float
     duration_seconds: float
     warnings: Tuple[str, ...] = ()
+
+
+@dataclass
+class SelectionDetail:
+    """Captured metadata describing how and why a frame was selected."""
+
+    frame_index: int
+    label: str
+    score: Optional[float]
+    source: str
+    timecode: Optional[str]
+    clip_role: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class _SerializedSelectionDetail(TypedDict, total=False):
+    frame_index: int | float | str
+    type: str
+    score: float | int | str | None
+    source: str | None
+    ts_tc: str | int | float | None
+    clip_role: str | None
+    notes: str | int | float | None
+
+
+def _coerce_frame_index(value: object) -> Optional[int]:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return None
+        return int(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            return int(stripped)
+        except ValueError:
+            return None
+    return None
+
+
+def _coerce_optional_float(value: object) -> Optional[float]:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
+        return float(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            parsed = float(stripped)
+        except ValueError:
+            return None
+        if not math.isfinite(parsed):
+            return None
+        return parsed
+    return None
+
+
+def _coerce_optional_str(value: object) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return str(value)
+    return None
+
+
+def _coerce_str_dict(value: object) -> Dict[str, object] | None:
+    if not isinstance(value, dict):
+        return None
+    result: Dict[str, object] = {}
+    for key, entry in value.items():
+        if not isinstance(key, str):
+            return None
+        result[key] = entry
+    return result
+
+
+def _coerce_int_list(value: object) -> List[int] | None:
+    if not isinstance(value, list):
+        return None
+    result: List[int] = []
+    for item in value:
+        try:
+            result.append(int(item))
+        except (TypeError, ValueError):
+            return None
+    return result
+
+
+def _coerce_selection_categories(value: object) -> Optional[Dict[int, str]]:
+    if not isinstance(value, list):
+        return None
+    parsed: Dict[int, str] = {}
+    for item in value:
+        if not isinstance(item, list) or len(item) != 2:
+            continue
+        frame_raw, label_raw = item
+        try:
+            frame_idx = int(frame_raw)
+        except (TypeError, ValueError):
+            continue
+        parsed[frame_idx] = str(label_raw)
+    return parsed or None
+
+
+def _coerce_metric_series(value: object) -> List[tuple[int, float]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise TypeError("metrics payload must be a list")
+    result: List[tuple[int, float]] = []
+    for entry in value:
+        if not isinstance(entry, (list, tuple)) or len(entry) != 2:
+            raise TypeError("invalid metrics entry")
+        idx_obj, val_obj = entry
+        result.append((int(idx_obj), float(val_obj)))
+    return result
+
+
+def _frame_to_timecode(frame_idx: int, fps: float) -> Optional[str]:
+    if fps <= 0:
+        return None
+    seconds = frame_idx / fps
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    remainder = seconds - hours * 3600 - minutes * 60
+    seconds_whole = int(remainder)
+    fractional = remainder - seconds_whole
+    milliseconds = int(round(fractional * 1000))
+    if milliseconds >= 1000:
+        milliseconds -= 1000
+        seconds_whole += 1
+    if seconds_whole >= 60:
+        seconds_whole -= 60
+        minutes += 1
+    # Handle rollover if minutes reached 60 (e.g., 59.9995s rounding)
+    if minutes >= 60:
+        hours += minutes // 60
+        minutes %= 60
+    return f"{hours:02d}:{minutes:02d}:{seconds_whole:02d}.{milliseconds:03d}"
+
+def _atomic_write_json(path: Path, payload: Dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_handle = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            delete=False,
+            dir=str(path.parent),
+        ) as handle:
+            json.dump(payload, handle, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+            temp_handle = handle.name
+        os.replace(temp_handle, path)
+    finally:
+        if temp_handle and os.path.exists(temp_handle):
+            try:
+                os.remove(temp_handle)
+            except OSError:
+                pass
+
+
+def _compute_file_sha1(path: Path, *, chunk_size: int = 1024 * 1024) -> Optional[str]:
+    try:
+        with path.open("rb") as handle:
+            digest = hashlib.sha1()
+            while True:
+                chunk = handle.read(chunk_size)
+                if not chunk:
+                    break
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return None
+
+
+def _serialize_selection_details(details: Mapping[int, SelectionDetail]) -> List[_SerializedSelectionDetail]:
+    records: List[_SerializedSelectionDetail] = []
+    for frame_idx in sorted(details.keys()):
+        detail = details[frame_idx]
+        record: _SerializedSelectionDetail = {
+            "frame_index": int(detail.frame_index),
+            "type": detail.label,
+            "score": None if detail.score is None else float(detail.score),
+            "source": detail.source,
+            "ts_tc": detail.timecode,
+            "clip_role": detail.clip_role,
+            "notes": detail.notes,
+        }
+        records.append(record)
+    return records
+
+
+def _deserialize_selection_details(value: object) -> Dict[int, SelectionDetail]:
+    if not isinstance(value, list):
+        return {}
+    results: Dict[int, SelectionDetail] = {}
+    for entry in value:
+        if not isinstance(entry, dict):
+            continue
+        record = cast(_SerializedSelectionDetail, entry)
+        frame_idx = _coerce_frame_index(record.get("frame_index"))
+        if frame_idx is None:
+            continue
+        label_obj: object = record.get("type")
+        label = str(label_obj).strip() if isinstance(label_obj, str) and label_obj.strip() else "Auto"
+        score = _coerce_optional_float(record.get("score"))
+        source_obj: object = record.get("source")
+        source = (
+            str(source_obj).strip()
+            if isinstance(source_obj, str) and source_obj.strip()
+            else _SELECTION_SOURCE_ID
+        )
+        timecode = _coerce_optional_str(record.get("ts_tc"))
+        clip_role = _coerce_optional_str(record.get("clip_role"))
+        notes = _coerce_optional_str(record.get("notes"))
+        results[frame_idx] = SelectionDetail(
+            frame_index=frame_idx,
+            label=label,
+            score=score,
+            source=source,
+            timecode=timecode,
+            clip_role=clip_role,
+            notes=notes,
+        )
+    return results
+
+
+def _format_selection_annotation(detail: SelectionDetail) -> str:
+    parts = [f"sel={detail.label}"]
+    if detail.score is not None:
+        parts.append(f"score={detail.score:.4f}")
+    if detail.source:
+        parts.append(f"src={detail.source}")
+    if detail.timecode:
+        parts.append(f"tc={detail.timecode}")
+    if detail.notes:
+        parts.append(f"note={detail.notes}")
+    return ";".join(parts)
+
+
+def selection_details_to_json(details: Mapping[int, SelectionDetail]) -> Dict[str, Dict[str, object]]:
+    """Return JSON-friendly mapping for selection details."""
+
+    serialised: Dict[str, Dict[str, object]] = {}
+    for frame, detail in details.items():
+        serialised[str(frame)] = {
+            "frame_index": int(detail.frame_index),
+            "type": detail.label,
+            "score": detail.score,
+            "source": detail.source,
+            "timecode": detail.timecode,
+            "clip_role": detail.clip_role,
+            "notes": detail.notes,
+        }
+    return serialised
 
 
 def _quantile(sequence: Sequence[float], q: float) -> float:
@@ -107,6 +399,19 @@ def _config_fingerprint(cfg: AnalysisConfig) -> str:
 
 
 def _coerce_seconds(value: object, label: str) -> float:
+    """
+    Convert ``value`` into a floating-point seconds value with validation.
+
+    Parameters:
+        value (object): Raw value to convert; accepts numbers or numeric strings.
+        label (str): Configuration label used when raising validation errors.
+
+    Returns:
+        float: The coerced seconds value.
+
+    Raises:
+        TypeError: If ``value`` cannot be interpreted as a number.
+    """
     if isinstance(value, numbers.Real):
         return float(value)
     if isinstance(value, str):
@@ -210,6 +515,15 @@ def compute_selection_window(
 
 
 def _selection_fingerprint(cfg: AnalysisConfig) -> str:
+    """
+    Return a hash of configuration fields relevant to frame selection.
+
+    Parameters:
+        cfg (AnalysisConfig): Analysis configuration whose selection-related fields should be fingerprinted.
+
+    Returns:
+        str: Hex digest capturing the selection-relevant configuration values.
+    """
     relevant = {
         "frame_count_dark": cfg.frame_count_dark,
         "frame_count_bright": cfg.frame_count_bright,
@@ -234,9 +548,25 @@ def _selection_fingerprint(cfg: AnalysisConfig) -> str:
     return hashlib.sha1(payload).hexdigest()
 
 
+def selection_hash_for_config(cfg: AnalysisConfig) -> str:
+    """Public helper exposing the stable selection fingerprint."""
+
+    return _selection_fingerprint(cfg)
+
+
 def _load_cached_metrics(
     info: FrameMetricsCacheInfo, cfg: AnalysisConfig
 ) -> Optional[CachedMetrics]:
+    """
+    Load previously computed metrics when cache metadata still matches.
+
+    Parameters:
+        info (FrameMetricsCacheInfo): Cache metadata describing the expected file and clip characteristics.
+        cfg (AnalysisConfig): Current analysis configuration whose fingerprint must match the cached payload.
+
+    Returns:
+        Optional[CachedMetrics]: Cached metrics if the persisted payload is valid; otherwise ``None``.
+    """
     path = info.path
     try:
         raw = path.read_text(encoding="utf-8")
@@ -246,8 +576,12 @@ def _load_cached_metrics(
         return None
 
     try:
-        data = json.loads(raw)
+        data_raw = json.loads(raw)
     except json.JSONDecodeError:
+        return None
+
+    data = _coerce_str_dict(data_raw)
+    if data is None:
         return None
 
     if data.get("version") != 1:
@@ -268,13 +602,19 @@ def _load_cached_metrics(
     if data.get("trim_end") != info.trim_end:
         return None
 
-    fps = data.get("fps") or []
-    if list(fps) != [info.fps_num, info.fps_den]:
+    fps_obj = data.get("fps")
+    fps_values: List[int] = []
+    if isinstance(fps_obj, (list, tuple)):
+        try:
+            fps_values = [int(part) for part in fps_obj]
+        except (TypeError, ValueError):
+            return None
+    if fps_values != [info.fps_num, info.fps_den]:
         return None
 
     try:
-        brightness = [(int(idx), float(val)) for idx, val in data.get("brightness", [])]
-        motion = [(int(idx), float(val)) for idx, val in data.get("motion", [])]
+        brightness = _coerce_metric_series(data.get("brightness"))
+        motion = _coerce_metric_series(data.get("motion"))
     except (TypeError, ValueError):
         return None
 
@@ -285,29 +625,74 @@ def _load_cached_metrics(
     selection_frames: Optional[List[int]] = None
     selection_hash: Optional[str] = None
     selection_categories: Optional[Dict[int, str]] = None
-    if isinstance(selection, dict):
-        frames_val = selection.get("frames")
-        hash_val = selection.get("hash")
-        cat_val = selection.get("categories")
-        try:
-            if isinstance(frames_val, list):
-                selection_frames = [int(x) for x in frames_val]
-            if isinstance(hash_val, str):
-                selection_hash = hash_val
-            if isinstance(cat_val, list):
-                parsed: Dict[int, str] = {}
-                for item in cat_val:
-                    if not isinstance(item, list) or len(item) != 2:
-                        continue
-                    frame_raw, label_raw = item
-                    parsed[int(frame_raw)] = str(label_raw)
-                selection_categories = parsed or None
-        except (TypeError, ValueError):
-            selection_frames = None
-            selection_hash = None
-            selection_categories = None
+    selection_details: Optional[Dict[int, SelectionDetail]] = None
+    selection_map = _coerce_str_dict(selection)
+    if selection_map is not None:
+        frames_val = _coerce_int_list(selection_map.get("frames"))
+        if frames_val is not None:
+            selection_frames = frames_val
+        hash_val = selection_map.get("hash")
+        if isinstance(hash_val, str):
+            selection_hash = hash_val
+        categories_val = _coerce_selection_categories(selection_map.get("categories"))
+        if categories_val is not None:
+            selection_categories = categories_val
+        details_val = selection_map.get("details")
+        if details_val is not None:
+            parsed_details = _deserialize_selection_details(details_val)
+            if parsed_details:
+                selection_details = parsed_details
 
-    return CachedMetrics(brightness, motion, selection_frames, selection_hash, selection_categories)
+    if selection_details is None:
+        annotations_map = _coerce_str_dict(data.get("selection_annotations"))
+        if annotations_map:
+            parsed_ann: Dict[int, SelectionDetail] = {}
+            for key, value in annotations_map.items():
+                try:
+                    frame_idx = int(key)
+                except (TypeError, ValueError):
+                    continue
+                label: Optional[str] = None
+                score: Optional[float] = None
+                source = _SELECTION_SOURCE_ID
+                timecode: Optional[str] = None
+                notes: Optional[str] = None
+                if isinstance(value, str):
+                    label = value.split(";")[0].split("=", 1)[-1] if "=" in value else value
+                else:
+                    value_dict = _coerce_str_dict(value)
+                    if value_dict is None:
+                        continue
+                    label_obj = value_dict.get("type") or value_dict.get("label")
+                    if isinstance(label_obj, str):
+                        label = label_obj
+                    score = _coerce_optional_float(value_dict.get("score"))
+                    source_obj = value_dict.get("source")
+                    if isinstance(source_obj, str) and source_obj.strip():
+                        source = source_obj.strip()
+                    timecode = _coerce_optional_str(value_dict.get("ts_tc"))
+                    notes = _coerce_optional_str(value_dict.get("notes"))
+                if not label:
+                    label = "Auto"
+                parsed_ann[frame_idx] = SelectionDetail(
+                    frame_index=frame_idx,
+                    label=label,
+                    score=score,
+                    source=source,
+                    timecode=timecode,
+                    notes=notes,
+                )
+            if parsed_ann:
+                selection_details = parsed_ann
+
+    return CachedMetrics(
+        brightness,
+        motion,
+        selection_frames,
+        selection_hash,
+        selection_categories,
+        selection_details,
+    )
 
 
 def _selection_sidecar_path(info: FrameMetricsCacheInfo) -> Path:
@@ -316,40 +701,251 @@ def _selection_sidecar_path(info: FrameMetricsCacheInfo) -> Path:
     return info.path.parent / "generated.selection.v1.json"
 
 
+def _infer_clip_role(index: int, name: str, analyzed_file: str, total: int) -> str:
+    lowered = name.lower()
+    analyzed_lower = analyzed_file.lower()
+    if lowered == analyzed_lower:
+        return "analyze"
+    if index == 0:
+        return "ref"
+    if index == 1:
+        return "tgt"
+    return f"aux{index}"
+
+
+def _build_clip_inputs(info: FrameMetricsCacheInfo) -> List[Dict[str, object]]:
+    root = info.path.parent
+    entries: List[Dict[str, object]] = []
+    total = len(info.files)
+    for idx, file_name in enumerate(info.files):
+        candidate = Path(file_name)
+        if not candidate.is_absolute():
+            candidate = (root / candidate).resolve()
+        try:
+            stat_result = candidate.stat()
+            size = int(stat_result.st_size)
+            mtime = _dt.datetime.fromtimestamp(stat_result.st_mtime, tz=_dt.timezone.utc).isoformat()
+        except OSError:
+            size = None
+            mtime = None
+        sha1 = _compute_file_sha1(candidate)
+        entries.append(
+            {
+                "role": _infer_clip_role(idx, file_name, info.analyzed_file, total),
+                "path": str(candidate),
+                "name": file_name,
+                "size": size,
+                "mtime": mtime,
+                "sha1": sha1,
+            }
+        )
+    return entries
+
+
+def _selection_cache_key(
+    *,
+    clip_inputs: Sequence[Mapping[str, object]],
+    cfg: AnalysisConfig,
+    selection_source: str,
+) -> str:
+    payload = {
+        "clips": clip_inputs,
+        "config_hash": _config_fingerprint(cfg),
+        "selection_source": selection_source,
+    }
+    canonical = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+    return f"sha256:{hashlib.sha256(canonical).hexdigest()}"
+
+
+
+def _selection_payload_from_inputs(
+    clip_inputs: Sequence[Mapping[str, object]],
+    cfg: AnalysisConfig,
+    selection_hash: str,
+    selection_frames: Sequence[int],
+    selection_details: Mapping[int, SelectionDetail] | None,
+    analyzed_file: str,
+) -> Dict[str, object]:
+    cache_key = _selection_cache_key(
+        clip_inputs=clip_inputs,
+        cfg=cfg,
+        selection_source=_SELECTION_SOURCE_ID,
+    )
+    detail_records = _serialize_selection_details(selection_details or {})
+    return {
+        "version": _SELECTION_METADATA_VERSION,
+        "cache_key": cache_key,
+        "selection_hash": selection_hash,
+        "selection_source": _SELECTION_SOURCE_ID,
+        "generated_at": _now_utc_iso(),
+        "analyzed_file": analyzed_file,
+        "inputs": {
+            "clips": list(clip_inputs),
+            "config_fingerprint": _config_fingerprint(cfg),
+        },
+        "selections": detail_records,
+        "frames": [int(frame) for frame in selection_frames],
+    }
+
+
+def _build_selection_sidecar_payload(
+    info: FrameMetricsCacheInfo,
+    cfg: AnalysisConfig,
+    selection_hash: str,
+    selection_frames: Sequence[int],
+    selection_details: Mapping[int, SelectionDetail] | None,
+) -> Dict[str, object]:
+    clip_inputs = _build_clip_inputs(info)
+    return _selection_payload_from_inputs(
+        clip_inputs,
+        cfg,
+        selection_hash,
+        selection_frames,
+        selection_details,
+        info.analyzed_file,
+    )
+
+
 def _save_selection_sidecar(
     info: FrameMetricsCacheInfo,
+    cfg: AnalysisConfig,
     selection_hash: Optional[str],
     selection_frames: Optional[Sequence[int]],
+    selection_details: Mapping[int, SelectionDetail] | None = None,
 ) -> None:
-    """Persist the lightweight selection metadata for fast reloads."""
+    """Persist rich selection metadata for fast reloads."""
 
     if selection_hash is None or selection_frames is None:
         return
 
-    payload = {
-        "version": 1,
-        "files": list(info.files),
-        "analyzed_file": info.analyzed_file,
-        "release_group": info.release_group,
-        "trim_start": info.trim_start,
-        "trim_end": info.trim_end,
-        "fps": [info.fps_num, info.fps_den],
-        "selection_hash": selection_hash,
-        "frames": [int(frame) for frame in selection_frames],
-    }
+    payload = _build_selection_sidecar_payload(
+        info,
+        cfg,
+        selection_hash,
+        selection_frames,
+        selection_details,
+    )
 
     target = _selection_sidecar_path(info)
     try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+        _atomic_write_json(target, payload)
     except OSError:
-        # Sidecar writes are opportunistic; ignore persistence failures.
         return
 
 
+
+def build_clip_inputs_from_paths(
+    analyzed_file: str, clip_paths: Sequence[Path]
+) -> List[Dict[str, object]]:
+    entries: List[Dict[str, object]] = []
+    total = len(clip_paths)
+    for idx, clip_path in enumerate(clip_paths):
+        resolved = clip_path.resolve()
+        try:
+            stat_result = resolved.stat()
+            size = int(stat_result.st_size)
+            mtime = _dt.datetime.fromtimestamp(stat_result.st_mtime, tz=_dt.timezone.utc).isoformat()
+        except OSError:
+            size = None
+            mtime = None
+        sha1 = _compute_file_sha1(resolved)
+        entries.append(
+            {
+                "role": _infer_clip_role(idx, resolved.name, analyzed_file, total),
+                "path": str(resolved),
+                "name": resolved.name,
+                "size": size,
+                "mtime": mtime,
+                "sha1": sha1,
+            }
+        )
+    return entries
+
+
+
+def export_selection_metadata(
+    target_path: Path,
+    *,
+    analyzed_file: str,
+    clip_paths: Sequence[Path],
+    cfg: AnalysisConfig,
+    selection_hash: str,
+    selection_frames: Sequence[int],
+    selection_details: Mapping[int, SelectionDetail],
+) -> None:
+    clip_inputs = build_clip_inputs_from_paths(analyzed_file, clip_paths)
+    payload = _selection_payload_from_inputs(
+        clip_inputs,
+        cfg,
+        selection_hash,
+        selection_frames,
+        selection_details,
+        analyzed_file,
+    )
+    _atomic_write_json(target_path, payload)
+
+
+def write_selection_cache_file(
+    target_path: Path,
+    *,
+    analyzed_file: str,
+    clip_paths: Sequence[Path],
+    cfg: AnalysisConfig,
+    selection_hash: str,
+    selection_frames: Sequence[int],
+    selection_details: Mapping[int, SelectionDetail],
+    selection_categories: Mapping[int, str],
+) -> None:
+    """Write a generated.compframes-style JSON payload with selection annotations only."""
+
+    clip_inputs = build_clip_inputs_from_paths(analyzed_file, clip_paths)
+    payload = _selection_payload_from_inputs(
+        clip_inputs,
+        cfg,
+        selection_hash,
+        selection_frames,
+        selection_details,
+        analyzed_file,
+    )
+    normalized_frames = [int(frame) for frame in selection_frames]
+
+    def _detail_or_default(frame: int) -> SelectionDetail:
+        existing = selection_details.get(frame)
+        if existing is not None:
+            return existing
+        return SelectionDetail(
+            frame_index=frame,
+            label="Auto",
+            score=None,
+            source=_SELECTION_SOURCE_ID,
+            timecode=None,
+            clip_role=None,
+            notes=None,
+        )
+
+    categories = [
+        [frame, str(selection_categories.get(frame, _detail_or_default(frame).label))]
+        for frame in normalized_frames
+    ]
+    selection_section_obj = payload.setdefault("selection", {})
+    if not isinstance(selection_section_obj, dict):
+        selection_section_obj = {}
+        payload["selection"] = selection_section_obj
+    selection_section = cast(Dict[str, object], selection_section_obj)
+    selection_section["frames"] = normalized_frames
+    selection_section["categories"] = categories
+    selection_section["annotations"] = {
+        str(frame): _format_selection_annotation(_detail_or_default(frame))
+        for frame in normalized_frames
+    }
+    payload.setdefault("brightness", [])
+    payload.setdefault("motion", [])
+    _atomic_write_json(target_path, payload)
+
+
 def _load_selection_sidecar(
-    info: Optional[FrameMetricsCacheInfo], selection_hash: Optional[str]
-) -> Optional[List[int]]:
+    info: Optional[FrameMetricsCacheInfo], cfg: AnalysisConfig, selection_hash: Optional[str]
+) -> Optional[Tuple[List[int], Dict[int, SelectionDetail]]]:
     """Load previously stored selection frames if the sidecar matches current state."""
 
     if info is None or not selection_hash:
@@ -364,28 +960,42 @@ def _load_selection_sidecar(
         return None
 
     try:
-        data = json.loads(raw)
+        data_raw = json.loads(raw)
     except json.JSONDecodeError:
         return None
 
-    if data.get("version") != 1:
+    data = _coerce_str_dict(data_raw)
+    if data is None:
         return None
-    if list(data.get("files") or []) != list(info.files):
+
+    version = str(data.get("version") or "")
+    if version not in {"1", _SELECTION_METADATA_VERSION}:
         return None
+
+    inputs_section = _coerce_str_dict(data.get("inputs")) or {}
+    clip_inputs = inputs_section.get("clips")
+    recomputed_inputs = _build_clip_inputs(info)
+    if clip_inputs is not None:
+        clip_names: List[object] = []
+        if isinstance(clip_inputs, list):
+            for entry in clip_inputs:
+                entry_map = _coerce_str_dict(entry)
+                if entry_map is None:
+                    continue
+                clip_names.append(entry_map.get("name"))
+        if clip_names != list(info.files):
+            return None
+
+    cache_key = data.get("cache_key")
+    expected_cache_key = _selection_cache_key(
+        clip_inputs=recomputed_inputs,
+        cfg=cfg,
+        selection_source=str(data.get("selection_source") or _SELECTION_SOURCE_ID),
+    )
+    if cache_key and cache_key != expected_cache_key:
+        return None
+
     if data.get("analyzed_file") != info.analyzed_file:
-        return None
-
-    cached_group = str(data.get("release_group") or "").lower()
-    if cached_group != (info.release_group or "").lower():
-        return None
-
-    if data.get("trim_start") != info.trim_start:
-        return None
-    if data.get("trim_end") != info.trim_end:
-        return None
-
-    fps = data.get("fps") or []
-    if list(fps) != [info.fps_num, info.fps_den]:
         return None
 
     if data.get("selection_hash") != selection_hash:
@@ -395,14 +1005,13 @@ def _load_selection_sidecar(
     if not isinstance(frames_raw, list):
         return None
 
-    frames: List[int] = []
     try:
-        for value in frames_raw:
-            frames.append(int(value))
+        normalized_frames = [int(value) for value in frames_raw]
     except (TypeError, ValueError):
         return None
 
-    return frames
+    detail_records = _deserialize_selection_details(data.get("selections"))
+    return normalized_frames, detail_records
 
 
 def _save_cached_metrics(
@@ -414,7 +1023,20 @@ def _save_cached_metrics(
     selection_hash: Optional[str] = None,
     selection_frames: Optional[Sequence[int]] = None,
     selection_categories: Optional[Dict[int, str]] = None,
+    selection_details: Optional[Mapping[int, SelectionDetail]] = None,
 ) -> None:
+    """
+    Persist metrics and optional frame selections for reuse across runs.
+
+    Parameters:
+        info (FrameMetricsCacheInfo): Cache metadata describing the target persistence location.
+        cfg (AnalysisConfig): Analysis configuration whose fingerprint will be stored alongside the metrics.
+        brightness (Sequence[tuple[int, float]]): Per-frame brightness measurements.
+        motion (Sequence[tuple[int, float]]): Per-frame motion measurements.
+        selection_hash (Optional[str]): Fingerprint describing the selection parameters that produced ``selection_frames``.
+        selection_frames (Optional[Sequence[int]]): Optional frame indices chosen for screenshot generation.
+        selection_categories (Optional[Dict[int, str]]): Optional per-frame category labels to persist.
+    """
     path = info.path
     payload = {
         "version": 1,
@@ -428,16 +1050,50 @@ def _save_cached_metrics(
         "brightness": [(int(idx), float(val)) for idx, val in brightness],
         "motion": [(int(idx), float(val)) for idx, val in motion],
     }
+    annotations: Dict[str, str] = {}
     if selection_hash is not None and selection_frames is not None:
+        serialized_details = _serialize_selection_details(selection_details or {})
+        selection_details_map = selection_details or {}
+
         payload["selection"] = {
             "hash": selection_hash,
             "frames": [int(frame) for frame in selection_frames],
         }
-        if selection_categories:
-            payload["selection"]["categories"] = [
-                [int(frame), str(selection_categories.get(int(frame), ""))]
-                for frame in selection_frames
-            ]
+
+        if selection_categories is not None:
+            categories_payload: List[list[object]] = []
+            for frame in selection_frames:
+                frame_idx = int(frame)
+                category_value = selection_categories.get(frame_idx, "")
+                categories_payload.append([frame_idx, str(category_value)])
+            if categories_payload:
+                payload["selection"]["categories"] = categories_payload
+
+        if serialized_details:
+            payload["selection"]["details"] = serialized_details
+
+            for record in serialized_details:
+                frame_idx = _coerce_frame_index(record.get("frame_index"))
+                if frame_idx is None or frame_idx < 0:
+                    continue
+
+                detail = selection_details_map.get(frame_idx)
+                if detail is None:
+                    label_obj: object = record.get("type")
+                    source_obj: object = record.get("source")
+                    detail = SelectionDetail(
+                        frame_index=frame_idx,
+                        label=str(label_obj).strip() if isinstance(label_obj, str) and label_obj.strip() else "Auto",
+                        score=_coerce_optional_float(record.get("score")),
+                        source=str(source_obj).strip() if isinstance(source_obj, str) and source_obj.strip() else _SELECTION_SOURCE_ID,
+                        timecode=_coerce_optional_str(record.get("ts_tc")),
+                        clip_role=_coerce_optional_str(record.get("clip_role")),
+                        notes=_coerce_optional_str(record.get("notes")),
+                    )
+                annotations[str(frame_idx)] = _format_selection_annotation(detail)
+
+        if annotations:
+            payload["selection_annotations"] = annotations
 
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -446,14 +1102,24 @@ def _save_cached_metrics(
         # Failing to persist cache data should not abort the pipeline.
         return
 
-    _save_selection_sidecar(info, selection_hash, selection_frames)
+    _save_selection_sidecar(info, cfg, selection_hash, selection_frames, selection_details or {})
 
 def dedupe(frames: Sequence[int], min_separation_sec: float, fps: float) -> List[int]:
-    """Remove frames closer than *min_separation_sec* seconds apart (in order)."""
+    """
+    Remove frames closer than ``min_separation_sec`` seconds apart while preserving order.
+
+    Parameters:
+        frames (Sequence[int]): Candidate frame indices.
+        min_separation_sec (float): Minimum allowed spacing between kept frames, expressed in seconds.
+        fps (float): Clip frame rate used to convert seconds to frame distances.
+
+    Returns:
+        List[int]: Filtered frame indices respecting the minimum separation constraint.
+    """
 
     min_gap = 0 if fps <= 0 else int(round(max(0.0, min_separation_sec) * fps))
     result: List[int] = []
-    seen = set()
+    seen: set[int] = set()
     for frame in frames:
         candidate = int(frame)
         if candidate in seen:
@@ -468,6 +1134,15 @@ def dedupe(frames: Sequence[int], min_separation_sec: float, fps: float) -> List
 
 
 def _frame_rate(clip) -> float:
+    """
+    Return the best-effort floating-point frame rate for ``clip``.
+
+    Parameters:
+        clip: VapourSynth-like clip exposing ``fps_num``/``fps_den`` attributes.
+
+    Returns:
+        float: Floating-point frames-per-second value, or ``0.0`` if unavailable.
+    """
     num = getattr(clip, "fps_num", None)
     den = getattr(clip, "fps_den", None)
     try:
@@ -479,12 +1154,31 @@ def _frame_rate(clip) -> float:
 
 
 def _clamp_frame(frame: int, total: int) -> int:
+    """
+    Clamp ``frame`` to the valid index range for a clip with ``total`` frames.
+
+    Parameters:
+        frame (int): Candidate frame index.
+        total (int): Total number of frames available.
+
+    Returns:
+        int: Frame index restricted to ``[0, total - 1]`` (or ``0`` when ``total`` is non-positive).
+    """
     if total <= 0:
         return 0
     return max(0, min(total - 1, int(frame)))
 
 
 def _ensure_even(value: int) -> int:
+    """
+    Return ``value`` unchanged when even; otherwise subtract one to make it even.
+
+    Parameters:
+        value (int): Integer to normalise.
+
+    Returns:
+        int: An even integer not greater than ``value``.
+    """
     return value if value % 2 == 0 else value - 1
 
 
@@ -552,6 +1246,21 @@ def _collect_metrics_vapoursynth(
     indices: Sequence[int],
     progress: Callable[[int], None] | None = None,
 ) -> tuple[List[tuple[int, float]], List[tuple[int, float]]]:
+    """
+    Measure per-frame brightness and motion metrics using VapourSynth.
+
+    Parameters:
+        clip: VapourSynth clip to analyse.
+        cfg (AnalysisConfig): Analysis settings controlling scaling, colours, and motion smoothing.
+        indices (Sequence[int]): Frame indices to sample.
+        progress (Callable[[int], None] | None): Optional callback invoked with the count of processed frames.
+
+    Returns:
+        tuple[List[tuple[int, float]], List[tuple[int, float]]]: Brightness and motion metric pairs for each processed frame.
+
+    Raises:
+        RuntimeError: If VapourSynth processing fails after retries.
+    """
     try:
         import vapoursynth as vs  # type: ignore
     except Exception as exc:  # pragma: no cover - handled by fallback
@@ -563,8 +1272,9 @@ def _collect_metrics_vapoursynth(
     props = vs_core._snapshot_frame_props(clip)
     matrix_in, transfer_in, primaries_in, color_range_in = vs_core._resolve_color_metadata(props)
 
-    def _resize_kwargs_for_source() -> dict:
-        kwargs = {}
+    def _resize_kwargs_for_source() -> Dict[str, int]:
+        """Return color-metadata kwargs describing the source clip."""
+        kwargs: Dict[str, int] = {}
         if matrix_in is not None:
             kwargs["matrix_in"] = int(matrix_in)
         else:
@@ -591,6 +1301,7 @@ def _collect_metrics_vapoursynth(
         return [], []
 
     def _detect_uniform_step(values: Sequence[int]) -> Optional[int]:
+        """Return a positive step size when frame indices form an arithmetic series."""
         if len(values) <= 1:
             return 1
         step_value = values[1] - values[0]
@@ -622,11 +1333,21 @@ def _collect_metrics_vapoursynth(
         raise RuntimeError(f"Failed to trim analysis clip: {exc}") from exc
 
     def _prepare_analysis_clip(node):
+        """Resize and convert *node* to a grayscale analysis representation."""
         work = node
         try:
-            if cfg.downscale_height > 0 and work.height > cfg.downscale_height:
+            height_obj = getattr(work, "height", None)
+            if (
+                cfg.downscale_height > 0
+                and isinstance(height_obj, numbers.Real)
+                and float(height_obj) > float(cfg.downscale_height)
+            ):
                 target_h = _ensure_even(max(2, int(cfg.downscale_height)))
-                aspect = work.width / work.height
+                width_obj = getattr(work, "width", None)
+                height_value = max(1, int(float(height_obj)))
+                aspect = 1.0
+                if isinstance(width_obj, numbers.Real) and height_value > 0:
+                    aspect = float(width_obj) / float(height_value)
                 target_w = _ensure_even(max(2, int(round(target_h * aspect))))
                 work = vs.core.resize.Bilinear(
                     work,
@@ -636,17 +1357,20 @@ def _collect_metrics_vapoursynth(
                 )
 
             target_format = getattr(vs, "GRAY8", None) or getattr(vs, "GRAY16")
-            gray_kwargs = dict(resize_kwargs)
+            gray_kwargs: Dict[str, int] = dict(resize_kwargs)
             gray_formats = {
                 getattr(vs, "GRAY8", None),
                 getattr(vs, "GRAY16", None),
                 getattr(vs, "GRAY32", None),
             }
-            if work.format is not None and work.format.color_family == vs.RGB:
+            format_obj = getattr(work, "format", None)
+            color_family = getattr(format_obj, "color_family", None)
+            rgb_constant = getattr(vs, "RGB", None)
+            if format_obj is not None and color_family == rgb_constant:
                 matrix_in_val = gray_kwargs.get("matrix_in")
                 if matrix_in_val is None:
                     matrix_in_val = getattr(vs, "MATRIX_RGB", 0)
-                convert_kwargs = dict(gray_kwargs)
+                convert_kwargs: Dict[str, int] = dict(gray_kwargs)
                 convert_kwargs.pop("matrix", None)
                 convert_kwargs["matrix_in"] = int(matrix_in_val)
                 if "matrix" not in convert_kwargs:
@@ -659,8 +1383,9 @@ def _collect_metrics_vapoursynth(
                 work = vs.core.std.ShufflePlanes(yuv, planes=0, colorfamily=vs.GRAY)
             if target_format not in gray_formats:
                 if "matrix" not in gray_kwargs:
-                    if "matrix_in" in gray_kwargs:
-                        gray_kwargs["matrix"] = gray_kwargs["matrix_in"]
+                    matrix_in_value = gray_kwargs.get("matrix_in")
+                    if matrix_in_value is not None:
+                        gray_kwargs["matrix"] = int(matrix_in_value)
                     else:
                         gray_kwargs["matrix"] = getattr(vs, "MATRIX_BT709", 1)
             else:
@@ -747,6 +1472,17 @@ def _generate_metrics_fallback(
     cfg: AnalysisConfig,
     progress: Callable[[int], None] | None = None,
 ) -> tuple[List[tuple[int, float]], List[tuple[int, float]]]:
+    """
+    Synthesize deterministic metrics when VapourSynth processing is unavailable.
+
+    Parameters:
+        indices (Sequence[int]): Frame indices to simulate metrics for.
+        cfg (AnalysisConfig): Analysis configuration controlling quantiles and smoothing.
+        progress (Callable[[int], None] | None): Optional callback invoked with the count of processed frames.
+
+    Returns:
+        tuple[List[tuple[int, float]], List[tuple[int, float]]]: Synthetic brightness and motion metric samples.
+    """
     brightness: List[tuple[int, float]] = []
     motion: List[tuple[int, float]] = []
     for idx in indices:
@@ -759,6 +1495,16 @@ def _generate_metrics_fallback(
 
 
 def _smooth_motion(values: List[tuple[int, float]], radius: int) -> List[tuple[int, float]]:
+    """
+    Apply a simple moving average of ``radius`` to motion metric samples.
+
+    Parameters:
+        values (List[tuple[int, float]]): Motion metric samples as ``(frame, value)`` pairs.
+        radius (int): Window radius used for smoothing.
+
+    Returns:
+        List[tuple[int, float]]: Smoothed motion metric samples.
+    """
     if radius <= 0 or not values:
         return values
     smoothed: List[tuple[int, float]] = []
@@ -785,7 +1531,7 @@ def select_frames(
     frame_window: tuple[int, int] | None = None,
     return_metadata: bool = False,
     color_cfg: Optional[ColorConfig] = None,
-) -> List[int] | Tuple[List[int], Dict[int, str]]:
+) -> List[int] | Tuple[List[int], Dict[int, str], Dict[int, SelectionDetail]]:
     """Select frame indices for comparison using quantiles and motion heuristics."""
 
     num_frames = int(getattr(clip, "num_frames", 0))
@@ -866,10 +1612,60 @@ def select_frames(
     indices = list(range(window_start, window_end, step))
 
     selection_hash = _selection_fingerprint(cfg)
+    selection_details: Dict[int, SelectionDetail] = {}
+
+    def _ensure_detail(
+        frame_idx: int,
+        *,
+        label: Optional[str] = None,
+        score: Optional[float] = None,
+        note: Optional[str] = None,
+    ) -> SelectionDetail:
+        existing = selection_details.get(frame_idx)
+        if existing is None:
+            detail = SelectionDetail(
+                frame_index=frame_idx,
+                label=label or "Auto",
+                score=score,
+                source=_SELECTION_SOURCE_ID,
+                timecode=_frame_to_timecode(frame_idx, fps),
+                clip_role=None,
+                notes=note,
+            )
+            selection_details[frame_idx] = detail
+            existing = detail
+        else:
+            if label and not existing.label:
+                existing.label = label
+            if score is not None and existing.score is None:
+                existing.score = score
+            if note and not existing.notes:
+                existing.notes = note
+            if existing.timecode is None:
+                existing.timecode = _frame_to_timecode(frame_idx, fps)
+        if existing.clip_role is None:
+            existing.clip_role = selection_clip_role
+        return selection_details[frame_idx]
+
+    selection_clip_role = "analyze"
+    analyze_index_guess = 0
+    if files:
+        try:
+            analyze_index_guess = files.index(file_under_analysis)
+        except ValueError:
+            analyze_index_guess = 0
+        selection_clip_role = _infer_clip_role(
+            analyze_index_guess, files[analyze_index_guess], file_under_analysis, len(files)
+        )
+    for detail in selection_details.values():
+        if detail.clip_role is None:
+            detail.clip_role = selection_clip_role
 
     if cache_info is not None:
-        sidecar_frames = _load_selection_sidecar(cache_info, selection_hash)
-        if sidecar_frames is not None:
+        sidecar_result = _load_selection_sidecar(cache_info, cfg, selection_hash)
+        if sidecar_result is not None:
+            sidecar_frames, sidecar_details = sidecar_result
+            selection_details.update(sidecar_details)
             frames_sorted = sorted(
                 dict.fromkeys(
                     int(frame)
@@ -877,14 +1673,26 @@ def select_frames(
                     if window_start <= int(frame) < window_end
                 )
             )
+            filtered_details = {
+                frame: detail for frame, detail in selection_details.items() if frame in frames_sorted
+            }
+            selection_details.clear()
+            selection_details.update(filtered_details)
             if return_metadata:
-                return frames_sorted, {frame: "Cached" for frame in frames_sorted}
+                label_map: Dict[int, str] = {}
+                for frame in frames_sorted:
+                    detail = selection_details.get(frame)
+                    label = detail.label if detail else "Cached"
+                    detail = _ensure_detail(frame, label=label)
+                    label_map[frame] = detail.label
+                return frames_sorted, label_map, selection_details
             return frames_sorted
 
     cached_metrics = _load_cached_metrics(cache_info, cfg) if cache_info is not None else None
 
     cached_selection: Optional[List[int]] = None
     cached_categories: Optional[Dict[int, str]] = None
+    cached_details: Optional[Dict[int, SelectionDetail]] = None
 
     if cached_metrics is not None:
         brightness = [
@@ -907,6 +1715,7 @@ def select_frames(
             else:
                 cached_selection = None
             cached_categories = cached_metrics.selection_categories
+            cached_details = cached_metrics.selection_details
         if progress is not None:
             progress(len(brightness))
         logger.info(
@@ -944,18 +1753,22 @@ def select_frames(
 
     if cached_selection is not None:
         frames_sorted = sorted(dict.fromkeys(int(frame) for frame in cached_selection))
+        if cached_details:
+            selection_details.update({frame: detail for frame, detail in cached_details.items() if frame in frames_sorted})
         if return_metadata:
             categories = cached_categories or {}
-            return (
-                frames_sorted,
-                {frame: categories.get(frame, "Cached") for frame in frames_sorted},
-            )
+            label_map: Dict[int, str] = {}
+            for frame in frames_sorted:
+                label = categories.get(frame, "Cached")
+                detail = _ensure_detail(frame, label=label)
+                label_map[frame] = detail.label
+            return frames_sorted, label_map, selection_details
         return frames_sorted
 
     brightness_values = [val for _, val in brightness]
 
     selected: List[int] = []
-    selected_set = set()
+    selected_set: set[int] = set()
     frame_categories: Dict[int, str] = {}
 
     def try_add(
@@ -964,6 +1777,8 @@ def select_frames(
         gap_frames: Optional[int] = None,
         allow_edges: bool = False,
         category: Optional[str] = None,
+        score: Optional[float] = None,
+        note: Optional[str] = None,
     ) -> bool:
         frame_idx = _clamp_frame(frame, num_frames)
         if frame_idx in selected_set:
@@ -984,6 +1799,7 @@ def select_frames(
         selected_set.add(frame_idx)
         if category and frame_idx not in frame_categories:
             frame_categories[frame_idx] = category
+        _ensure_detail(frame_idx, label=category, score=score, note=note)
         return True
 
     dropped_user_frames: List[int] = []
@@ -993,7 +1809,13 @@ def select_frames(
         except (TypeError, ValueError):
             continue
         if window_start <= frame_int < window_end:
-            try_add(frame_int, enforce_gap=False, allow_edges=True, category="User")
+            try_add(
+                frame_int,
+                enforce_gap=False,
+                allow_edges=True,
+                category="User",
+                note="user_frame",
+            )
         else:
             dropped_user_frames.append(frame_int)
 
@@ -1043,10 +1865,20 @@ def select_frames(
             if gap_seconds_override is None
             else int(round(max(0.0, gap_seconds_override) * fps))
         )
+        score_lookup: Dict[int, float] = {}
+        for idx, val in candidates:
+            score_lookup.setdefault(int(idx), float(val))
         added = 0
         category_label = "Motion" if mode == "motion" else mode.capitalize()
         for frame_idx in filtered_indices:
-            if try_add(frame_idx, enforce_gap=True, gap_frames=gap_frames, category=category_label):
+            if try_add(
+                frame_idx,
+                enforce_gap=True,
+                gap_frames=gap_frames,
+                category=category_label,
+                score=score_lookup.get(frame_idx),
+                note=mode,
+            ):
                 added += 1
             if added >= count:
                 break
@@ -1089,11 +1921,14 @@ def select_frames(
     attempts = 0
     while random_count > 0 and attempts < random_count * 10 and window_span > 0:
         candidate = window_start + rng.randrange(window_span)
-        if try_add(candidate, enforce_gap=True, category="Random"):
+        if try_add(candidate, enforce_gap=True, category="Random", note="random"):
             random_count -= 1
         attempts += 1
 
     final_frames = sorted(selected)
+
+    for frame in final_frames:
+        _ensure_detail(frame, label=frame_categories.get(frame, "Auto"))
 
     if cache_info is not None:
         try:
@@ -1105,10 +1940,12 @@ def select_frames(
                 selection_hash=selection_hash,
                 selection_frames=final_frames,
                 selection_categories=frame_categories,
+                selection_details=selection_details,
             )
         except Exception:
             pass
 
     if return_metadata:
-        return final_frames, {frame: frame_categories.get(frame, "Auto") for frame in final_frames}
+        label_map = {frame: frame_categories.get(frame, "Auto") for frame in final_frames}
+        return final_frames, label_map, selection_details
     return final_frames

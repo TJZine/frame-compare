@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""CLI entry point and orchestration logic for frame comparison runs."""
+
 import asyncio
 import builtins
 import json
@@ -33,9 +35,14 @@ from src.utils import parse_filename_metadata
 from src import vs_core
 from src.analysis import (
     FrameMetricsCacheInfo,
+    SelectionDetail,
     SelectionWindowSpec,
     compute_selection_window,
+    export_selection_metadata,
     select_frames,
+    selection_details_to_json,
+    selection_hash_for_config,
+    write_selection_cache_file,
 )
 from src.screenshot import generate_screenshots, ScreenshotError
 from src.slowpics import SlowpicsAPIError, upload_comparison
@@ -85,6 +92,17 @@ SUPPORTED_EXTS = (
 
 
 def _color_text(text: str, style: Optional[str]) -> str:
+    """
+    Wrap the given text with a Rich style tag if a style is provided.
+
+    Parameters:
+        text (str): The text to style.
+        style (Optional[str]): A Rich style name or markup; if ``None`` or empty, no styling is applied.
+
+    Returns:
+        str: The input text wrapped with Rich style markup (for example ``"[style]text[/]"``) when ``style`` is provided; otherwise
+            the original text.
+    """
     if style:
         return f"[{style}]{text}[/]"
     return text
@@ -98,6 +116,19 @@ def _format_kv(
     value_style: Optional[str] = "bright_white",
     sep: str = "=",
 ) -> str:
+    """
+    Format a label/value pair as a single string with optional Rich styling.
+
+    Parameters:
+        label (str): The left-side label text.
+        value (object): The right-side value; converted to string.
+        label_style (Optional[str]): Rich style name applied to the label, or ``None`` for no styling.
+        value_style (Optional[str]): Rich style name applied to the value, or ``None`` for no styling.
+        sep (str): Separator string placed between label and value.
+
+    Returns:
+        str: A single string containing the styled (or plain) label, the separator, and the styled (or plain) value.
+    """
     label_text = escape(str(label))
     value_text = escape(str(value))
     return f"{_color_text(label_text, label_style)}{sep}{_color_text(value_text, value_style)}"
@@ -105,6 +136,28 @@ def _format_kv(
 
 @dataclass
 class _ClipPlan:
+    """
+    Internal plan describing how a source clip should be processed.
+
+    Attributes:
+        path (Path): Path to the source media file.
+        metadata (Dict[str, str]): Metadata parsed from the source file name.
+        trim_start (int): Leading frames to skip before analysis.
+        trim_end (Optional[int]): Final frame index (exclusive) or ``None`` to include the full clip.
+        fps_override (Optional[Tuple[int, int]]): Rational frame-rate override applied during processing.
+        use_as_reference (bool): Whether the clip should drive alignment decisions.
+        clip (Optional[object]): Lazily populated VapourSynth clip reference.
+        effective_fps (Optional[Tuple[int, int]]): Frame rate after alignment adjustments.
+        applied_fps (Optional[Tuple[int, int]]): Frame rate enforced by user configuration.
+        source_fps (Optional[Tuple[int, int]]): Native frame rate detected from the source file.
+        source_num_frames (Optional[int]): Total number of frames available in the source clip.
+        source_width (Optional[int]): Source clip width in pixels.
+        source_height (Optional[int]): Source clip height in pixels.
+        has_trim_start_override (bool): ``True`` when a manual trim start was supplied.
+        has_trim_end_override (bool): ``True`` when a manual trim end was supplied.
+        alignment_frames (int): Number of frames trimmed during audio alignment.
+        alignment_status (str): Human-friendly status describing the alignment result.
+    """
     path: Path
     metadata: Dict[str, str]
     trim_start: int = 0
@@ -126,6 +179,18 @@ class _ClipPlan:
 
 @dataclass
 class RunResult:
+    """
+    Outcome of a full frame comparison run including export artefacts.
+
+    Attributes:
+        files (List[Path]): Input media files included in the run.
+        frames (List[int]): Frame numbers selected for screenshot generation.
+        out_dir (Path): Output directory containing generated assets.
+        config (AppConfig): Effective application configuration.
+        image_paths (List[str]): Paths to the generated screenshots.
+        slowpics_url (Optional[str]): URL of the uploaded Slowpics comparison, if created.
+        json_tail (Dict[str, object] | None): Optional JSON blob persisted after run completion.
+    """
     files: List[Path]
     frames: List[int]
     out_dir: Path
@@ -137,6 +202,20 @@ class RunResult:
 
 @dataclass
 class _AudioAlignmentSummary:
+    """
+    Bundle of audio-alignment details used for reporting and persistence.
+
+    Attributes:
+        offsets_path (Path): Path to the saved alignment offsets file.
+        reference_name (str): Name of the reference clip used for alignment.
+        measurements (Sequence[audio_alignment.AlignmentMeasurement]): Raw alignment measurements per clip.
+        applied_frames (Dict[str, int]): Frame adjustments applied to each clip.
+        baseline_shift (int): Base frame shift used when aligning all clips.
+        statuses (Dict[str, str]): Status messages produced for each clip.
+        reference_plan (_ClipPlan): Clip plan of the alignment reference source.
+        final_adjustments (Dict[str, int]): Post-alignment adjustments written back to config.
+        swap_details (Dict[str, str]): Additional per-clip swap notes for CLI output.
+    """
     offsets_path: Path
     reference_name: str
     measurements: Sequence[audio_alignment.AlignmentMeasurement]
@@ -150,6 +229,15 @@ class _AudioAlignmentSummary:
 
 @dataclass
 class _AudioAlignmentDisplayData:
+    """
+    Pre-rendered data used to present audio alignment results in the CLI.
+
+    Attributes:
+        stream_lines (List[str]): Stream-level summary lines for display.
+        estimation_line (Optional[str]): Text summarising the estimated reference offset.
+        offset_lines (List[str]): Lines describing per-clip frame offsets.
+        report_lines (List[str]): Additional status lines included in the output report.
+    """
     stream_lines: List[str]
     estimation_line: Optional[str]
     offset_lines: List[str]
@@ -177,6 +265,19 @@ class CliOutputManager:
         layout_path: Path,
         console: Console | None = None,
     ) -> None:
+        """
+        Initialize the CLI output manager with rendering, console, and state.
+        
+        Parameters:
+        	quiet (bool): Suppress non-essential output.
+        	verbose (bool): Enable verbose output unless `quiet` is true.
+        	no_color (bool): Disable colored output in the console.
+        	layout_path (Path): Filesystem path to the CLI layout definition to load.
+        	console (Console | None): Optional Rich Console to use; a console is created if omitted.
+        
+        Raises:
+        	CLIAppError: If the layout at `layout_path` cannot be loaded.
+        """
         self.quiet = quiet
         self.verbose = verbose and not quiet
         self.no_color = no_color
@@ -206,18 +307,52 @@ class CliOutputManager:
         self._warnings: List[str] = []
 
     def set_flag(self, key: str, value: Any) -> None:
+        """
+        Set an internal flag value used by the CLI output manager.
+
+        Parameters:
+            key (str): Name of the flag to set.
+            value (Any): Value to assign to the flag.
+        """
         self.flags[key] = value
 
     def update_values(self, mapping: Mapping[str, Any]) -> None:
+        """
+        Merge the given mapping into the manager's internal values dictionary.
+
+        Parameters:
+            mapping (Mapping[str, Any]): Key/value pairs to merge; existing keys will be overwritten.
+        """
         self.values.update(mapping)
 
     def warn(self, text: str) -> None:
+        """
+        Record a warning message for later retrieval and display.
+
+        Parameters:
+            text (str): Warning text to store.
+        """
         self._warnings.append(text)
 
     def get_warnings(self) -> List[str]:
+        """
+        Return the collected warning messages.
+
+        Returns:
+            List[str]: A list of warning strings (a copy of the internal warnings collection).
+        """
         return list(self._warnings)
 
     def render_sections(self, section_ids: Iterable[str]) -> None:
+        """
+        Render the specified layout sections using the current renderer context.
+
+        Binds the manager's current values and flags into the renderer, then renders each section whose ``id`` is present in
+        ``section_ids``. Section identifiers that are not found in the layout are ignored.
+
+        Parameters:
+            section_ids (Iterable[str]): Iterable of section identifier strings to render.
+        """
         target_ids = set(section_ids)
         self.renderer.bind_context(self.values, self.flags)
         for section in self.layout.sections:
@@ -226,10 +361,28 @@ class CliOutputManager:
                 self.renderer.render_section(section, self.values, self.flags)
 
     def create_progress(self, progress_id: str, *, transient: bool = False) -> Progress:
+        """
+        Create a named progress bar bound to the current CLI layout context.
+
+        Parameters:
+            progress_id (str): Identifier used by the layout renderer to manage and update the progress instance.
+            transient (bool): If ``True``, remove the progress display from the layout when it completes.
+
+        Returns:
+            Progress: A progress instance managed by the layout renderer and bound to the current context.
+        """
         self.renderer.bind_context(self.values, self.flags)
         return self.renderer.create_progress(progress_id, transient=transient)
 
     def update_progress_state(self, progress_id: str, **state: Any) -> None:
+        """
+        Update the state of a named progress bar in the current layout.
+
+        Parameters:
+            progress_id (str): Identifier of the progress instance to update.
+            **state (Any): Keyword mapping of progress properties to set (for example ``completed``, ``total``, ``description``,
+                ``advance``). Each provided key is forwarded to the progress renderer.
+        """
         self.renderer.update_progress_state(progress_id, state=state)
 
     # ------------------------------------------------------------------
@@ -238,22 +391,43 @@ class CliOutputManager:
     # ------------------------------------------------------------------
 
     def banner(self, text: str) -> None:
+        """
+        Display a banner message in the CLI with prominent styling.
+
+        When the manager is in quiet mode, prints the text without styling; otherwise prints the text styled bold bright cyan.
+        """
         if self.quiet:
             self.console.print(text)
             return
         self.console.print(f"[bold bright_cyan]{escape(text)}[/]")
 
     def section(self, title: str) -> None:
+        """
+        Render a titled section header to the console unless the manager is in quiet mode.
+        """
         if self.quiet:
             return
         self.console.print(f"[bold cyan]{title}[/]")
 
     def line(self, text: str) -> None:
+        """
+        Render a single line of text to the CLI console.
+
+        Parameters:
+            text (str): The text to render.
+        """
         if self.quiet:
             return
         self.console.print(text)
 
     def verbose_line(self, text: str) -> None:
+        """
+        Print a single dimmed console line when verbose output is enabled and not in quiet mode.
+
+        Parameters:
+            text (str): The message to print; empty or falsy values are ignored. The message is escaped for console markup and
+                displayed with dim styling.
+        """
         if self.quiet or not self.verbose:
             return
         if not text:
@@ -261,9 +435,25 @@ class CliOutputManager:
         self.console.print(f"[dim]{escape(text)}[/]")
 
     def progress(self, *columns, transient: bool = False) -> Progress:
+        """
+        Create a new Rich Progress instance bound to this manager's console.
+
+        Parameters:
+            *columns: One or more Rich ``ProgressColumn`` objects or callables to use for the progress display.
+            transient (bool): If ``True``, remove the progress display from the console when complete.
+
+        Returns:
+            Progress: A Rich ``Progress`` instance configured with the given columns and bound to the manager's console.
+        """
         return Progress(*columns, console=self.console, transient=transient)
 
     def iter_warnings(self) -> List[str]:
+        """
+        Get the collected warning messages.
+
+        Returns:
+            List[str]: A list of warning strings in the order they were recorded.
+        """
         return list(self._warnings)
 
 
@@ -277,10 +467,12 @@ class CLIAppError(RuntimeError):
 
 
 def _discover_media(root: Path) -> List[Path]:
+    """Return supported media files within *root*, sorted naturally."""
     return [p for p in os_sorted(root.iterdir()) if p.suffix.lower() in SUPPORTED_EXTS]
 
 
 def _parse_metadata(files: Sequence[Path], naming_cfg) -> List[Dict[str, str]]:
+    """Extract naming metadata for each clip using configured heuristics."""
     metadata: List[Dict[str, str]] = []
     for file in files:
         info = parse_filename_metadata(
@@ -297,6 +489,7 @@ _VERSION_PATTERN = re.compile(r"(?:^|[^0-9A-Za-z])(?P<tag>v\d{1,3})(?!\d)", re.I
 
 
 def _extract_version_suffix(file_path: Path) -> str | None:
+    """Return a version suffix (for example ``v2``) from *file_path* stem."""
     match = _VERSION_PATTERN.search(file_path.stem)
     if not match:
         return None
@@ -309,6 +502,7 @@ def _dedupe_labels(
     files: Sequence[Path],
     prefer_full_name: bool,
 ) -> None:
+    """Guarantee unique labels by appending version hints when required."""
     counts = Counter((meta.get("label") or "") for meta in metadata)
     duplicate_groups: dict[str, list[int]] = defaultdict(list)
     for idx, meta in enumerate(metadata):
@@ -345,6 +539,7 @@ def _dedupe_labels(
 
 
 def _parse_audio_track_overrides(entries: Iterable[str]) -> Dict[str, int]:
+    """Parse override entries like "release=2" into a lowercase mapping."""
     mapping: Dict[str, int] = {}
     for entry in entries:
         if "=" not in entry:
@@ -361,6 +556,7 @@ def _parse_audio_track_overrides(entries: Iterable[str]) -> Dict[str, int]:
 
 
 def _first_non_empty(metadata: Sequence[Dict[str, str]], key: str) -> str:
+    """Return the first truthy value for *key* within *metadata*."""
     for meta in metadata:
         value = meta.get(key)
         if value:
@@ -369,6 +565,7 @@ def _first_non_empty(metadata: Sequence[Dict[str, str]], key: str) -> str:
 
 
 def _parse_year_hint(value: str) -> Optional[int]:
+    """Parse a year hint string into an integer between 1900 and 2100."""
     try:
         year = int(value)
     except (TypeError, ValueError):
@@ -379,6 +576,7 @@ def _parse_year_hint(value: str) -> Optional[int]:
 
 
 def _prompt_manual_tmdb(candidates: Sequence[TMDBCandidate]) -> tuple[str, str] | None:
+    """Prompt the user to choose a TMDB candidate when multiple matches exist."""
     print("[yellow]TMDB search returned multiple plausible matches:[/yellow]")
     for cand in candidates:
         year = cand.year or "????"
@@ -403,6 +601,7 @@ def _prompt_manual_tmdb(candidates: Sequence[TMDBCandidate]) -> tuple[str, str] 
 def _prompt_tmdb_confirmation(
     resolution: TMDBResolution,
 ) -> tuple[bool, tuple[str, str] | None]:
+    """Ask the user to confirm the TMDB result or supply a manual override."""
     title = resolution.title or resolution.original_title or "(unknown title)"
     year = resolution.year or "????"
     category = resolution.category.lower()
@@ -430,6 +629,7 @@ def _prompt_tmdb_confirmation(
 
 
 def _render_collection_name(template_text: str, context: Mapping[str, str]) -> str:
+    """Render the configured TMDB collection template with *context* values."""
     if "${" not in template_text:
         return template_text
     try:
@@ -484,6 +684,7 @@ def _pick_analyze_file(
     *,
     cache_dir: Path | None = None,
 ) -> Path:
+    """Resolve the clip to analyse, honouring user targets and heuristics."""
     if not files:
         raise ValueError("No files to analyze")
     target = (target or "").strip()
@@ -518,6 +719,7 @@ def _pick_analyze_file(
 
 
 def _normalise_override_mapping(raw: Mapping[str, object]) -> Dict[str, object]:
+    """Lowercase override keys and drop empty entries."""
     normalised: Dict[str, object] = {}
     for key, value in raw.items():
         key_str = str(key).strip().lower()
@@ -532,6 +734,7 @@ def _match_override(
     metadata: Mapping[str, str],
     mapping: Mapping[str, object],
 ) -> Optional[object]:
+    """Return the override value matching *index*, file names, or metadata labels."""
     candidates = [
         str(index),
         file.name,
@@ -549,6 +752,7 @@ def _match_override(
 
 
 def _build_plans(files: Sequence[Path], metadata: Sequence[Dict[str, str]], cfg: AppConfig) -> List[_ClipPlan]:
+    """Construct clip plans with per-file trim/FPS overrides applied."""
     trim_map = _normalise_override_mapping(cfg.overrides.trim)
     trim_end_map = _normalise_override_mapping(cfg.overrides.trim_end)
     fps_map = _normalise_override_mapping(cfg.overrides.change_fps)
@@ -584,6 +788,15 @@ def _build_plans(files: Sequence[Path], metadata: Sequence[Dict[str, str]], cfg:
 
 
 def _extract_clip_fps(clip: object) -> Tuple[int, int]:
+    """
+    Determine the clip's FPS as a (numerator, denominator) tuple, falling back to 24000/1001 if not available.
+    
+    Parameters:
+        clip (object): An object that may expose integer attributes `fps_num` and `fps_den`.
+    
+    Returns:
+        fps (Tuple[int, int]): The `(num, den)` FPS tuple from the clip if both are integers and `den` is non-zero; otherwise `(24000, 1001)`.
+    """
     num = getattr(clip, "fps_num", None)
     den = getattr(clip, "fps_den", None)
     if isinstance(num, int) and isinstance(den, int) and den:
@@ -592,6 +805,17 @@ def _extract_clip_fps(clip: object) -> Tuple[int, int]:
 
 
 def _format_seconds(value: float) -> str:
+    """
+    Format a time value in seconds as an HH:MM:SS.s string with one decimal place.
+    
+    Negative input is treated as zero. The seconds component is rounded to one decimal place and may carry into minutes (and similarly minutes into hours) when rounding produces overflow.
+    
+    Parameters:
+        value (float): Time in seconds.
+    
+    Returns:
+        str: Formatted time as "HH:MM:SS.s" with two-digit hours and minutes and one decimal place for seconds.
+    """
     total = max(0.0, float(value))
     hours = int(total // 3600)
     minutes = int((total - hours * 3600) // 60)
@@ -607,6 +831,15 @@ def _format_seconds(value: float) -> str:
 
 
 def _fps_to_float(value: Tuple[int, int] | None) -> float:
+    """
+    Convert an FPS expressed as a (numerator, denominator) tuple into a floating-point frames-per-second value.
+    
+    Parameters:
+        value ((int, int) | None): A two-integer tuple representing FPS as (numerator, denominator). May be None.
+    
+    Returns:
+        float: The FPS as a float. Returns 0.0 if `value` is None, the denominator is zero, or the tuple is invalid.
+    """
     if not value:
         return 0.0
     num, den = value
@@ -623,6 +856,19 @@ def _fold_sequence(
     joiner: str,
     enabled: bool,
 ) -> str:
+    """
+    Produce a compact string representation of a sequence by optionally folding the middle elements with an ellipsis.
+    
+    Parameters:
+        values (Sequence[object]): Items to render; each item is stringified.
+        head (int): Number of items to keep from the start when folding is enabled.
+        tail (int): Number of items to keep from the end when folding is enabled.
+        joiner (str): Separator used to join items.
+        enabled (bool): If True and the sequence is longer than head + tail, replace the omitted middle with "…".
+    
+    Returns:
+        str: The joined string containing all items when folding is disabled or not needed, or a string containing the head items, a single "…" token, and the tail items when folding is applied.
+    """
     items = [str(item) for item in values]
     if not enabled or len(items) <= head + tail:
         return joiner.join(items)
@@ -636,6 +882,18 @@ def _fold_sequence(
 
 
 def _evaluate_rule_condition(condition: Optional[str], *, flags: Mapping[str, Any]) -> bool:
+    """
+    Evaluate a simple rule condition string against a mapping of flags.
+    
+    The condition may be None/empty (treated as satisfied), a flag name (satisfied if the flag is truthy), or a negated flag name prefixed with `!`. Known tokens `verbose` and `upload_enabled` are supported like any other flag name.
+    
+    Parameters:
+    	condition (Optional[str]): The rule expression to evaluate (e.g. "verbose", "!upload_enabled") or None/empty to always satisfy.
+    	flags (Mapping[str, Any]): Mapping of flag names to values; values are interpreted by their truthiness.
+    
+    Returns:
+    	True if the condition is satisfied given `flags`, False otherwise.
+    """
     if not condition:
         return True
     expr = condition.strip()
@@ -652,10 +910,33 @@ def _evaluate_rule_condition(condition: Optional[str], *, flags: Mapping[str, An
     return bool(flags.get(expr))
 
 
-def _build_legacy_summary_lines(values: Mapping[str, Any]) -> List[str]:
-    """Compose legacy summary lines from the collected layout values."""
+def _build_legacy_summary_lines(values: Mapping[str, Any], *, emit_json_tail: bool) -> List[str]:
+    """
+    Generate legacy human-readable summary lines from the collected layout values.
+    
+    Parameters:
+        values (Mapping[str, Any]): Mapping containing layout sections (for example:
+            "clips", "window", "analysis", "audio_alignment", "render",
+            "tonemap", "cache"). The function reads specific keys from those
+            sections to synthesize compact summary lines.
+    
+    Returns:
+        List[str]: A list of non-empty summary lines suitable for the legacy
+        textual summary display.
+    """
 
     def _maybe_number(value: Any) -> float | None:
+        """
+        Convert a value to a float when possible.
+        
+        Attempts to coerce numeric-like input to a float. Returns None when the value cannot be converted.
+        
+        Parameters:
+            value (Any): The value to convert to float.
+        
+        Returns:
+            float | None: The converted float, or `None` if conversion failed.
+        """
         if isinstance(value, (int, float)):
             return float(value)
         try:
@@ -664,12 +945,33 @@ def _build_legacy_summary_lines(values: Mapping[str, Any]) -> List[str]:
             return None
 
     def _format_number(value: Any, fmt: str, fallback: str) -> str:
+        """
+        Attempt to coerce `value` to a number and format it using `fmt`; return `fallback` if `value` cannot be interpreted as a number.
+        
+        Parameters:
+            value (Any): The value to format; will be converted to a numeric type if possible.
+            fmt (str): A format specification string passed to Python's built-in `format()` (e.g., ".2f").
+            fallback (str): The string to return when `value` cannot be converted to a number.
+        
+        Returns:
+            str: The formatted number as a string, or `fallback` if `value` is not numeric.
+        """
         number = _maybe_number(value)
         if number is None:
             return fallback
         return format(number, fmt)
 
     def _string(value: Any, fallback: str = "n/a") -> str:
+        """
+        Convert a value to its string representation with special handling for None and booleans.
+        
+        Parameters:
+            value (Any): The value to convert.
+            fallback (str): String to return when `value` is None (default: "n/a").
+        
+        Returns:
+            str: `fallback` if `value` is None, `"true"` or `"false"` for booleans, otherwise `str(value)`.
+        """
         if value is None:
             return fallback
         if isinstance(value, bool):
@@ -677,6 +979,12 @@ def _build_legacy_summary_lines(values: Mapping[str, Any]) -> List[str]:
         return str(value)
 
     def _bool_text(value: Any) -> str:
+        """
+        Format a value as lowercase boolean text.
+        
+        Returns:
+            `'true'` if the value evaluates to True, `'false'` otherwise.
+        """
         return "true" if bool(value) else "false"
 
     clips_raw = values.get("clips")
@@ -748,14 +1056,29 @@ def _build_legacy_summary_lines(values: Mapping[str, Any]) -> List[str]:
     frame_count = _string(analysis.get("output_frame_count"), "0")
     preview = _string(analysis.get("output_frames_preview"), "")
     preview_display = f"[{preview}]" if preview else "[]"
-    lines.append(
-        f"Output frames: {frame_count}  e.g., {preview_display}  (full list in JSON)"
-    )
+    if emit_json_tail:
+        lines.append(
+            f"Output frames: {frame_count}  e.g., {preview_display}  (full list in JSON)"
+        )
+    else:
+        full_list = _string(analysis.get("output_frames_full"), "[]")
+        lines.append(f"Output frames ({frame_count}): {full_list}")
 
     return [line for line in lines if line]
 
 
 def _format_clock(seconds: Optional[float]) -> str:
+    """
+    Format a duration in seconds as a human-readable clock string.
+    
+    If `seconds` is None or not a finite number, returns a placeholder. Values are rounded to the nearest second, negative values are treated as zero, and durations of one hour or more are formatted as H:MM:SS; shorter durations are formatted as MM:SS.
+    
+    Parameters:
+        seconds (Optional[float]): Duration in seconds to format.
+    
+    Returns:
+        str: A clock-formatted string, either "--:--" for invalid input, "MM:SS" for durations under one hour, or "H:MM:SS" for durations of one hour or more.
+    """
     if seconds is None or not math.isfinite(seconds):
         return "--:--"
     total = max(0, int(seconds + 0.5))
@@ -767,6 +1090,19 @@ def _format_clock(seconds: Optional[float]) -> str:
 
 
 def _init_clips(plans: Sequence[_ClipPlan], runtime_cfg, cache_dir: Path | None) -> None:
+    """
+    Initialize VapourSynth clips for each clip plan and populate each plan's source and effective metadata.
+    
+    Parameters:
+        plans (Sequence[_ClipPlan]): Iterable of clip plans to initialize; plans marked as the reference will be initialized first and used to supply a fallback FPS for others.
+        runtime_cfg: Runtime configuration object providing at least `ram_limit_mb`.
+        cache_dir (Path | None): Optional cache directory to pass to clip initialization; if None, no cache directory is used.
+    
+    Detailed behavior:
+        - Sets the VapourSynth RAM limit from `runtime_cfg`.
+        - Initializes the reference clip first (if any), then initializes the remaining clips.
+        - For each plan populates: `clip`, `applied_fps` (the fps_map passed), `effective_fps` (extracted from the initialized clip), and source metadata fields `source_fps`, `source_num_frames`, `source_width`, and `source_height`.
+    """
     vs_core.set_ram_limit(runtime_cfg.ram_limit_mb)
 
     cache_dir_str = str(cache_dir) if cache_dir is not None else None
@@ -814,6 +1150,20 @@ def _init_clips(plans: Sequence[_ClipPlan], runtime_cfg, cache_dir: Path | None)
 
 
 def _build_cache_info(root: Path, plans: Sequence[_ClipPlan], cfg: AppConfig, analyze_index: int) -> Optional[FrameMetricsCacheInfo]:
+    """
+    Build cache metadata describing frame-metrics that can be saved for reuse.
+    
+    Parameters:
+        root (Path): Root output directory where the cache file will be stored.
+        plans (Sequence[_ClipPlan]): List of clip plans for the current run.
+        cfg (AppConfig): Application configuration containing analysis and caching settings.
+        analyze_index (int): Index in `plans` identifying which clip was analyzed.
+    
+    Returns:
+        FrameMetricsCacheInfo or None: A FrameMetricsCacheInfo populated with the resolved cache path,
+        filenames, analyzed file name, release group, trim window, and FPS numerator/denominator when
+        frame-data saving is enabled; `None` when saving frame-data is disabled by configuration.
+    """
     if not cfg.analysis.save_frames_data:
         return None
 
@@ -897,6 +1247,16 @@ def _log_selection_windows(
     collapsed: bool,
     analyze_fps: float,
 ) -> None:
+    """
+    Log per-clip selection windows and the computed common selection window, emitting per-plan warnings and a collapse notice when applicable.
+    
+    Parameters:
+        plans (Sequence[_ClipPlan]): Clip plans corresponding to each selection spec; used for labels and context.
+        specs (Sequence[SelectionWindowSpec]): Per-clip selection window specifications (start/end in frames and seconds, applied lead/trail, and warnings).
+        intersection (tuple[int, int]): Common selection window as a half-open frame interval (start_frame, end_frame).
+        collapsed (bool): True if per-clip lead/trail settings did not overlap and a fallback range was used; triggers a warning line when True.
+        analyze_fps (float): Frame rate used to convert frame indices to seconds; if <= 0, frames are shown as raw numbers.
+    """
     for plan, spec in zip(plans, specs):
         raw_label = plan.metadata.get("label") or plan.path.name
         label = escape((raw_label or plan.path.name).strip())
@@ -932,6 +1292,22 @@ def _resolve_alignment_reference(
     analyze_path: Path,
     reference_hint: str,
 ) -> _ClipPlan:
+    """
+    Selects which clip plan should be used as the audio alignment reference.
+    
+    If a non-empty reference_hint is provided, it will be interpreted as either a numeric index or a case-insensitive match against a clip's filename, stem, or metadata label; a matching plan is returned. If no hint yields a match, the plan whose path equals analyze_path is returned. If that also does not match, the first plan in the sequence is returned.
+    
+    Parameters:
+        plans (Sequence[_ClipPlan]): Available clip plans to choose from.
+        analyze_path (Path): Path of the file selected for analysis; used as a fallback match.
+        reference_hint (str): Optional hint guiding reference selection (index or name/label).
+    
+    Returns:
+        _ClipPlan: The selected clip plan to use as the alignment reference.
+    
+    Raises:
+        CLIAppError: If `plans` is empty.
+    """
     if not plans:
         raise CLIAppError("No clips available for alignment")
 
@@ -965,6 +1341,27 @@ def _maybe_apply_audio_alignment(
     audio_track_overrides: Mapping[str, int],
     reporter: CliOutputManager | None = None,
 ) -> tuple[_AudioAlignmentSummary | None, _AudioAlignmentDisplayData | None]:
+    """
+    Attempt audio-aligning the given clip plans and produce both a summary of applied adjustments and UI-ready display data.
+    
+    This inspects available audio streams, selects reference and target streams (respecting `audio_track_overrides`), measures offsets between the reference and each target, applies configured frame-bias and swap logic, updates the on-disk offsets file, and mutates each plan's trim/alignment fields when adjustments are applied.
+    
+    Parameters:
+        plans (Sequence[_ClipPlan]): Clip plans to consider for alignment; must contain at least the reference and one target.
+        cfg (AppConfig): Application configuration containing audio alignment settings.
+        analyze_path (Path): Path of the clip chosen for analysis; used to help resolve the alignment reference.
+        root (Path): Root directory where the offsets file (configured in `cfg`) is located.
+        audio_track_overrides (Mapping[str, int]): Mapping of clip identifiers (index, filename, or metadata keys) to forced audio stream indices.
+        reporter (CliOutputManager | None): Optional reporter used to display progress; if None, progress is shown using a local Progress instance.
+    
+    Returns:
+        tuple[_AudioAlignmentSummary | None, _AudioAlignmentDisplayData]:
+            A tuple where the first element is an _AudioAlignmentSummary when alignment was performed (or `None` if alignment was skipped),
+            and the second element is an _AudioAlignmentDisplayData containing human-readable lines, JSON-ready offsets, correlations, warnings, and related display fields.
+    
+    Raises:
+        CLIAppError: If the offsets file cannot be read or if the underlying audio alignment process fails.
+    """
     audio_cfg = cfg.audio_alignment
     offsets_path = (root / audio_cfg.offsets_filename).resolve()
     display_data = _AudioAlignmentDisplayData(
@@ -982,6 +1379,12 @@ def _maybe_apply_audio_alignment(
     )
 
     def _warn(message: str) -> None:
+        """
+        Record an audio-related warning into the current display data warnings list.
+        
+        Parameters:
+            message (str): The warning text; it will be prefixed with "[AUDIO]" and appended to display_data.warnings.
+        """
         display_data.warnings.append(f"[AUDIO] {message}")
 
     if not audio_cfg.enable:
@@ -1014,6 +1417,17 @@ def _maybe_apply_audio_alignment(
     forced_streams: set[Path] = set()
 
     def _match_audio_override(plan: _ClipPlan) -> Optional[int]:
+        """
+        Resolve an audio track override for the given clip plan and return it as an integer.
+        
+        Looks up a possible override for the clip and, if present and parseable, returns the override converted to an int; returns `None` when no override is found or the value is not a valid integer.
+        
+        Parameters:
+            plan (_ClipPlan): Clip plan to check for an audio track override.
+        
+        Returns:
+            int or None: The audio track index if a valid override exists, `None` otherwise.
+        """
         value = _match_override(plans.index(plan), plan.path, plan.metadata, audio_track_overrides)
         if value is None:
             return None
@@ -1023,6 +1437,15 @@ def _maybe_apply_audio_alignment(
             return None
 
     def _pick_default(streams: Sequence[audio_alignment.AudioStreamInfo]) -> int:
+        """
+        Choose the index of the default audio stream from a sequence of streams.
+        
+        Parameters:
+            streams (Sequence[audio_alignment.AudioStreamInfo]): Available audio stream descriptors to consider.
+        
+        Returns:
+            int: The chosen stream index. Returns `0` if `streams` is empty; otherwise returns the index of the first stream with `is_default == True`, or the first stream's `index` if none are marked default.
+        """
         if not streams:
             return 0
         for stream in streams:
@@ -1044,6 +1467,15 @@ def _maybe_apply_audio_alignment(
             break
 
     def _score_candidate(candidate: audio_alignment.AudioStreamInfo) -> float:
+        """
+        Compute a heuristic quality score for an audio stream candidate relative to the (closure) reference stream.
+        
+        Parameters:
+            candidate (audio_alignment.AudioStreamInfo): Audio stream metadata to evaluate.
+        
+        Returns:
+            score (float): Higher values indicate a better match to the reference stream based on language, codec, channels, sample rate, bitrate, and flags (`is_default`, `is_forced`); used for ranking candidate streams.
+        """
         base = 0.0
         if reference_stream_info is not None:
             if reference_stream_info.language and candidate.language == reference_stream_info.language:
@@ -1085,6 +1517,18 @@ def _maybe_apply_audio_alignment(
         target_stream_indices[target.path] = best.index
 
     def _describe_stream(plan: _ClipPlan, stream_idx: int) -> tuple[str, str]:
+        """
+        Builds a human-readable label and a concise descriptor for the chosen audio stream of a clip.
+        
+        Parameters:
+            plan (_ClipPlan): Clip plan whose path and label are used in the returned label.
+            stream_idx (int): Index of the audio stream to describe.
+        
+        Returns:
+            tuple[str, str]: A pair (display_label, descriptor) where `display_label` is formatted as
+            "<clip_label>-><codec>/<language>/<layout>" with " (forced)" appended if the stream is marked forced,
+            and `descriptor` is the "<codec>/<language>/<layout>" string.
+        """
         infos = stream_infos.get(plan.path, [])
         picked = next((info for info in infos if info.index == stream_idx), None)
         codec = (picked.codec_name if picked and picked.codec_name else "unknown").strip() or "unknown"
@@ -1171,6 +1615,14 @@ def _maybe_apply_audio_alignment(
             start_time = time.perf_counter()
 
             def _advance_audio(count: int) -> None:
+                """
+                Advance the audio-alignment progress by a given number of processed pairs.
+                
+                Increments the internal processed counter and updates the CLI progress task with the new completed count and a formatted processing rate.
+                
+                Parameters:
+                    count (int): Number of audio pair measurements to add to the processed total.
+                """
                 nonlocal processed
                 processed += count
                 elapsed = time.perf_counter() - start_time
@@ -1433,6 +1885,17 @@ def _maybe_apply_audio_alignment(
         ) from exc
 
 def _pick_preview_frames(clip: object, count: int, seed: int) -> List[int]:
+    """
+    Select preview frame indices evenly spread across a clip when possible.
+    
+    Parameters:
+        clip (object): An object that may expose an integer `num_frames` attribute used as the clip length. If missing or invalid, the function treats the clip as having unknown length and returns indices starting at 0.
+        count (int): Number of preview frame indices to produce.
+        seed (int): Ignored by this implementation; kept for API compatibility.
+    
+    Returns:
+        List[int]: A list of frame indices for previews. If the clip length is known and greater than `count`, indices are approximately evenly spaced and unique; if the clip length is less than or equal to `count`, returns all available indices; if length is unknown, returns `[0, 1, ..., count-1]`.
+    """
     total = getattr(clip, "num_frames", 0)
     if not isinstance(total, int) or total <= 0:
         return [i for i in range(count)]
@@ -1451,6 +1914,20 @@ def _pick_preview_frames(clip: object, count: int, seed: int) -> List[int]:
 
 
 def _sample_random_frames(clip: object, count: int, seed: int, exclude: Sequence[int]) -> List[int]:
+    """
+    Select a deterministic sample of frame indices from a clip, excluding specified indices.
+    
+    If the clip exposes a positive integer `num_frames`, this returns a sorted list of up to `count` unique frame indices chosen uniformly at random (deterministically seeded) from the set of available indices that are not in `exclude`. If the clip has no valid `num_frames` (missing, non-integer, or <= 0), returns the first `count` indices starting at 0. If fewer than `count` indices are available after exclusion, returns all available indices sorted.
+    
+    Parameters:
+        clip (object): Object expected to expose an integer `num_frames` attribute.
+        count (int): Number of frame indices to return.
+        seed (int): Seed for deterministic sampling.
+        exclude (Sequence[int]): Frame indices to omit from selection.
+    
+    Returns:
+        List[int]: Sorted list of selected frame indices.
+    """
     total = getattr(clip, "num_frames", 0)
     if not isinstance(total, int) or total <= 0:
         return [i for i in range(count)]
@@ -1473,6 +1950,22 @@ def _confirm_alignment_with_screenshots(
     reporter: CliOutputManager,
     display: _AudioAlignmentDisplayData | None,
 ) -> None:
+    """
+    Prompt the user to confirm audio alignment by generating preview screenshots and recording the confirmation result.
+    
+    Generates a short set of preview screenshots for the reference and target clips and stores their paths in `display.preview_paths`. If interactive confirmation is disabled or the session is non-interactive, marks confirmation as automatic. If the user rejects the previews, generates additional inspection screenshots, attempts to open the offsets file for manual editing, and raises a CLIAppError to indicate that manual adjustment is required.
+    
+    Parameters:
+        plans (Sequence[_ClipPlan]): Clip plans for which previews and offsets are being validated.
+        summary (_AudioAlignmentSummary | None): Audio alignment summary that includes the reference plan and offsets; if None, the function is a no-op.
+        cfg (AppConfig): Application configuration containing screenshot and audio-alignment settings.
+        root (Path): Root directory used to construct the preview output directory.
+        reporter (CliOutputManager): Reporter used to emit lines and render messages to the user.
+        display (_AudioAlignmentDisplayData | None): UI/display data object that will be populated with preview paths, confirmation status, and warnings; if None, the function is a no-op.
+    
+    Raises:
+        CLIAppError: If screenshot generation fails or if the user rejects alignment and manual adjustment is required.
+    """
     if summary is None or display is None:
         return
     if not cfg.audio_alignment.confirm_with_screenshots:
@@ -1603,6 +2096,23 @@ def run_cli(
     verbose: bool = False,
     no_color: bool = False,
 ) -> RunResult:
+    """
+    Orchestrate the CLI workflow: load config, discover and analyze media, generate screenshots, optionally upload to slow.pics, and return a structured run result.
+    
+    Parameters:
+        config_path (str): Path to the application configuration file.
+        input_dir (str | None): Optional override for the input directory configured in the file.
+        audio_track_overrides (Iterable[str] | None): Optional sequence of "filename=track" pairs to override audio track selection.
+        quiet (bool): Suppress nonessential output when True.
+        verbose (bool): Enable additional diagnostic output when True.
+        no_color (bool): Disable colored output when True.
+    
+    Returns:
+        RunResult: Aggregated result including processed files, selected frames, output directory, configuration used, generated image paths, optional slow.pics URL, and a JSON-tail dictionary with detailed metadata and diagnostics.
+    
+    Raises:
+        CLIAppError: For configuration loading failures, missing/invalid input directory, clip initialization failures, frame selection or screenshot generation errors, slow.pics upload failures, or other user-facing errors encountered during the run.
+    """
     config_location = Path(config_path).expanduser()
 
     try:
@@ -1650,6 +2160,22 @@ def run_cli(
         no_color=no_color,
         layout_path=layout_path,
     )
+    emit_json_tail_flag = True
+    progress_style = "fill"
+
+    if hasattr(cfg, "cli"):
+        cli_cfg = cfg.cli
+        emit_json_tail_flag = bool(getattr(cli_cfg, "emit_json_tail", True))
+        if hasattr(cli_cfg, "progress"):
+            style_value = getattr(cli_cfg.progress, "style", "fill")
+            progress_style = str(style_value).strip().lower()
+            if progress_style not in {"fill", "dot"}:
+                logger.warning(
+                    "Invalid progress style '%s', falling back to 'fill'", style_value
+                )
+                progress_style = "fill"
+    reporter.set_flag("progress_style", progress_style)
+    reporter.set_flag("emit_json_tail", emit_json_tail_flag)
     collected_warnings: List[str] = []
     json_tail: Dict[str, object] = {
         "clips": [],
@@ -2226,6 +2752,19 @@ def run_cli(
     trim_lookup = {detail["label"]: detail for detail in trim_details}
 
     def _trim_entry(label: str) -> Dict[str, object]:
+        """
+        Build a normalized trim entry for a clip label containing frame and second offsets.
+        
+        Parameters:
+            label (str): Clip label used to look up trim and detailed timing information.
+        
+        Returns:
+            dict: Mapping with keys:
+                - "lead_f": number of leading frames trimmed (int, default 0)
+                - "trail_f": number of trailing frames trimmed (int, default 0)
+                - "lead_s": leading trim in seconds (float, default 0.0)
+                - "trail_s": trailing trim in seconds (float, default 0.0)
+        """
         detail = trim_lookup.get(label, {})
         trim = trims_per_clip.get(label, {})
         return {
@@ -2310,9 +2849,17 @@ def run_cli(
                 color_cfg=cfg.color,
             )
         if isinstance(result, tuple):
-            return result
+            if len(result) == 3:
+                return result
+            if len(result) == 2:
+                frames_only, categories = result
+                return frames_only, categories, {}
+            frames_only = list(result)
+            return frames_only, {frame: "Auto" for frame in frames_only}, {}
         frames_only = list(result)
-        return frames_only, {frame: "Auto" for frame in frames_only}
+        return frames_only, {frame: "Auto" for frame in frames_only}, {}
+
+    selection_details: Dict[int, SelectionDetail] = {}
 
     try:
         if sample_count > 0 and not cache_exists:
@@ -2331,6 +2878,15 @@ def run_cli(
                 )
 
                 def _advance_samples(count: int) -> None:
+                    """
+                    Advance the internal sample counter by the given number of sample groups and refresh progress indicators.
+                    
+                    Parameters:
+                        count (int): Number of sample groups to advance; each group represents `step_size` frames.
+                    
+                    Description:
+                        Increments the internal samples counter and, when a progress total is set, recomputes processing rate, estimated time remaining, and elapsed time. Updates the external reporter's "analyze_bar" state and the analysis_progress task to reflect the new completion amount.
+                    """
                     nonlocal samples_done
                     samples_done += count
                     if progress_total <= 0:
@@ -2353,11 +2909,11 @@ def run_cli(
                     )
                     analysis_progress.update(task_id, completed=completed)
 
-                frames, frame_categories = _run_selection(_advance_samples)
+                frames, frame_categories, selection_details = _run_selection(_advance_samples)
                 final_completed = progress_total if progress_total > 0 else analysis_progress.tasks[task_id].completed
                 analysis_progress.update(task_id, completed=final_completed)
         else:
-            frames, frame_categories = _run_selection()
+            frames, frame_categories, selection_details = _run_selection()
 
     except Exception as exc:
         tb = traceback.format_exc()
@@ -2374,14 +2930,59 @@ def run_cli(
             rich_message="[red]No frames were selected; cannot continue.[/red]",
         )
 
+    selection_hash_value = selection_hash_for_config(cfg.analysis)
+    clip_paths = [plan.path for plan in plans]
+    selection_sidecar_dir = cache_info.path.parent if cache_info is not None else root
+    selection_sidecar_path = selection_sidecar_dir / "generated.selection.v1.json"
+    selection_overlay_details = {
+        frame: {
+            "label": detail.label,
+            "timecode": detail.timecode,
+            "source": detail.source,
+            "score": detail.score,
+            "notes": detail.notes,
+        }
+        for frame, detail in selection_details.items()
+    }
+    if cache_info is None or not cfg.analysis.save_frames_data:
+        export_selection_metadata(
+            selection_sidecar_path,
+            analyzed_file=analyze_path.name,
+            clip_paths=clip_paths,
+            cfg=cfg.analysis,
+            selection_hash=selection_hash_value,
+            selection_frames=frames,
+            selection_details=selection_details,
+        )
+    if not cfg.analysis.save_frames_data:
+        compframes_path = (root / cfg.analysis.frame_data_filename).resolve()
+        write_selection_cache_file(
+            compframes_path,
+            analyzed_file=analyze_path.name,
+            clip_paths=clip_paths,
+            cfg=cfg.analysis,
+            selection_hash=selection_hash_value,
+            selection_frames=frames,
+            selection_details=selection_details,
+            selection_categories=frame_categories,
+        )
     kept_count = len(frames)
     scanned_count = progress_total if progress_total > 0 else max(sample_count, kept_count)
+    selection_counts = Counter(detail.label or "Auto" for detail in selection_details.values())
+    json_tail["analysis"]["selection_counts"] = dict(selection_counts)
+    json_tail["analysis"]["selection_hash"] = selection_hash_value
+    json_tail["analysis"]["selection_sidecar"] = str(selection_sidecar_path)
+    json_tail["analysis"]["selection_details"] = selection_details_to_json(selection_details)
     cache_summary_label = "reused" if cache_status == "reused" else ("new" if cache_status == "recomputed" else cache_status)
     json_tail["analysis"]["kept"] = kept_count
     json_tail["analysis"]["scanned"] = scanned_count
     layout_data["analysis"]["kept"] = kept_count
     layout_data["analysis"]["scanned"] = scanned_count
     layout_data["analysis"]["cache_summary_label"] = cache_summary_label
+    layout_data["analysis"]["selection_counts"] = dict(selection_counts)
+    layout_data["analysis"]["selection_hash"] = selection_hash_value
+    layout_data["analysis"]["selection_sidecar"] = str(selection_sidecar_path)
+    layout_data["analysis"]["selection_details"] = json_tail["analysis"]["selection_details"]
     reporter.update_values(layout_data)
 
     preview_rule: Dict[str, object] = reporter.layout.folding.get("frames_preview", {}) if hasattr(reporter, "layout") else {}
@@ -2396,11 +2997,17 @@ def run_cli(
     json_tail["analysis"]["output_frames_preview"] = preview_text
     layout_data["analysis"]["output_frame_count"] = kept_count
     layout_data["analysis"]["output_frames_preview"] = preview_text
+    if not emit_json_tail_flag:
+        full_list_text = ", ".join(str(frame) for frame in frames)
+        layout_data["analysis"]["output_frames_full"] = (
+            f"[{full_list_text}]" if full_list_text else "[]"
+        )
+    reporter.update_values(layout_data)
 
     out_dir = (root / cfg.screenshots.directory_name).resolve()
     total_screens = len(frames) * len(plans)
 
-    writer_name = "FFmpeg" if cfg.screenshots.use_ffmpeg else "VS"
+    writer_name = "ffmpeg" if cfg.screenshots.use_ffmpeg else "vs"
     overlay_mode_value = getattr(cfg.color, "overlay_mode", "minimal")
 
     json_tail["render"] = {
@@ -2460,6 +3067,14 @@ def run_cli(
                 )
 
                 def advance_render(count: int) -> None:
+                    """
+                    Update rendering progress and notify the reporter and progress bar.
+                    
+                    Computes elapsed time, frames-per-second, and estimated time remaining after advancing by `count`, then updates the reporter's progress state and the render progress task completion.
+                    
+                    Parameters:
+                        count (int): Number of newly processed render items to add to the progress.
+                    """
                     nonlocal processed
                     processed += count
                     elapsed = max(time.perf_counter() - start_time, 1e-6)
@@ -2487,6 +3102,7 @@ def run_cli(
                     trim_offsets=[plan.trim_start for plan in plans],
                     progress_callback=advance_render,
                     frame_labels=frame_categories,
+                    selection_details=selection_overlay_details,
                     warnings_sink=collected_warnings,
                     verification_sink=verification_records,
                 )
@@ -2514,6 +3130,7 @@ def run_cli(
                 cfg.color,
                 trim_offsets=[plan.trim_start for plan in plans],
                 frame_labels=frame_categories,
+                selection_details=selection_overlay_details,
                 warnings_sink=collected_warnings,
                 verification_sink=verification_records,
             )
@@ -2598,6 +3215,15 @@ def run_cli(
         print("[cyan]Preparing slow.pics upload...[/cyan]")
         upload_total = len(image_paths)
         def _safe_size(path_str: str) -> int:
+            """
+            Return the file size for a given filesystem path, or 0 if the file cannot be accessed.
+            
+            Parameters:
+                path_str (str): Filesystem path to the file.
+            
+            Returns:
+                int: File size in bytes, or 0 if stat fails (e.g., file does not exist or is unreadable).
+            """
             try:
                 return Path(path_str).stat().st_size
             except OSError:
@@ -2610,6 +3236,19 @@ def run_cli(
         stats_width_limit = max(24, console_width - 32)
 
         def _format_duration(seconds: Optional[float]) -> str:
+            """
+            Format a duration in seconds into a human-readable time string.
+            
+            Rounds the input to the nearest second and treats negative values as zero.
+            If the value is None or not finite, returns "--:--".
+            Outputs "H:MM:SS" when the duration is one hour or more, otherwise "MM:SS".
+            
+            Parameters:
+                seconds (Optional[float]): Duration in seconds, or None.
+            
+            Returns:
+                str: Formatted time string ("MM:SS" or "H:MM:SS"), or "--:--" for unknown/invalid input.
+            """
             if seconds is None or not math.isfinite(seconds):
                 return "--:--"
             total = max(0, int(seconds + 0.5))
@@ -2620,6 +3259,17 @@ def run_cli(
             return f"{minutes:02d}:{secs:02d}"
 
         def _format_stats(files_done: int, bytes_done: int, elapsed: float) -> str:
+            """
+            Format a compact transfer progress summary string for display.
+            
+            Parameters:
+            	files_done (int): Number of files fully processed (unused in output but provided for context).
+            	bytes_done (int): Total bytes processed so far.
+            	elapsed (float): Elapsed time in seconds.
+            
+            Returns:
+            	A single-line status string containing transfer speed in MB/s, estimated time remaining, and elapsed time (formatted via `_format_duration`). If the resulting string exceeds the configured stats width, it is truncated with a trailing ellipsis.
+            """
             speed_bps = bytes_done / elapsed if elapsed > 0 else 0.0
             speed_mb = speed_bps / (1024 * 1024)
             remaining_bytes = max(total_bytes - bytes_done, 0)
@@ -2652,6 +3302,14 @@ def run_cli(
                     )
 
                     def advance_upload(count: int) -> None:
+                        """
+                        Advance the upload progress by a given number of files and refresh the progress display.
+                        
+                        Increments internal counters for uploaded files and bytes, advances the current file index for up to `count` files, computes elapsed time since the start, and updates the associated progress task with the new completed count and formatted statistics.
+                        
+                        Parameters:
+                            count (int): Number of files to mark as uploaded.
+                        """
                         nonlocal uploaded_files, uploaded_bytes, file_index
                         uploaded_files += count
                         for _ in range(count):
@@ -2787,7 +3445,7 @@ def run_cli(
     )
 
     if not reporter.quiet and (compatibility_required or not has_summary_section):
-        summary_lines = _build_legacy_summary_lines(layout_data)
+        summary_lines = _build_legacy_summary_lines(layout_data, emit_json_tail=emit_json_tail_flag)
         reporter.section("Summary")
         for line in summary_lines:
             reporter.line(_color_text(line, "green"))
@@ -2819,6 +3477,20 @@ def main(
     no_color: bool,
     json_pretty: bool,
 ) -> None:
+    """
+    Run the CLI pipeline and handle post-run outputs such as slow.pics handling and JSON tail emission.
+    
+    Runs run_cli with the provided options, handles CLIAppError by printing the rich message and exiting with the error code, processes slow.pics results (open in browser, copy to clipboard, create shortcut file, and optionally delete the screenshots directory), and finally emits the collected JSON tail to stdout (optionally pretty-printed).
+    
+    Parameters:
+        config_path: Path to the configuration file used to run the CLI pipeline.
+        input_dir: Optional input directory override for media discovery; if None the config value is used.
+        audio_align_track_option: Tuple of audio track override strings to pass through to run_cli.
+        quiet: If True, run in quiet mode (affects reporting inside run_cli).
+        verbose: If True, enable verbose reporting inside run_cli.
+        no_color: If True, disable colored output in run_cli.
+        json_pretty: If True, pretty-print the emitted JSON tail (2-space indent).
+    """
     try:
         result = run_cli(
             config_path,
@@ -2895,13 +3567,12 @@ def main(
         slowpics_block.setdefault("shortcut_path", None)
         slowpics_block.setdefault("url", None)
 
-    cli_emit_json_tail = True
-    try:
-        cli_emit_json_tail = bool(getattr(cfg.cli, "emit_json_tail"))
-    except Exception:
-        cli_emit_json_tail = True
+    emit_json_tail_flag = True
+    if hasattr(cfg, "cli"):
+        cli_cfg = cfg.cli
+        emit_json_tail_flag = bool(getattr(cli_cfg, "emit_json_tail", True))
 
-    if cli_emit_json_tail:
+    if emit_json_tail_flag:
         if json_pretty:
             json_output = json.dumps(json_tail, indent=2)
         else:

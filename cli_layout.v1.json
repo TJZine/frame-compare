@@ -8,6 +8,13 @@
       "accent_analyze": "purple.bright",
       "accent_render": "magenta.bright",
       "accent_publish": "green.bright",
+      "section_discover": "cyan.bold",
+      "section_prepare": "blue.bright",
+      "section_analyze": "purple.bright",
+      "section_render": "magenta.bright",
+      "section_publish": "green.bright",
+      "section_warnings": "yellow.bold",
+      "section_summary": "cyan.bold",
       "accent_subhead": "magenta.bold",
       "value": "white.bright",
       "unit": "grey.dim",
@@ -81,6 +88,7 @@
       "id": "discover",
       "type": "list",
       "title_badge": "[DISCOVER]",
+      "accent_role": "section_discover",
       "items": [
         "• [[key]]ref[[/]]=[[value]]{clips.ref.label}[[/]]  [[value]]{clips.ref.width}[[/]]x[[value]]{clips.ref.height}[[/]] @ [[value]]{clips.ref.fps:.3f}[[/]][[unit]]fps[[/]]  frames=[[value]]{clips.ref.frames}[[/]]  dur=[[value]]{clips.ref.duration_tc}[[/]]",
         "• [[key]]tgt[[/]]=[[value]]{clips.tgt.label}[[/]]  [[value]]{clips.tgt.width}[[/]]x[[value]]{clips.tgt.height}[[/]] @ [[value]]{clips.tgt.fps:.3f}[[/]][[unit]]fps[[/]]  frames=[[value]]{clips.tgt.frames}[[/]]  dur=[[value]]{clips.tgt.duration_tc}[[/]]",
@@ -91,6 +99,7 @@
       "id": "prepare",
       "type": "group",
       "title_badge": "[PREPARE]",
+      "accent_role": "section_prepare",
       "blocks": [
         {
           "subtitle": "Trim",
@@ -122,6 +131,7 @@
       "id": "audio_align",
       "type": "group",
       "title_badge": "[PREPARE · Audio]",
+      "accent_role": "section_prepare",
       "when": "audio_alignment.enabled",
       "blocks": [
         {
@@ -139,6 +149,7 @@
       "id": "analyze",
       "type": "group",
       "title_badge": "[ANALYZE]",
+      "accent_role": "section_analyze",
       "blocks": [
         {
           "subtitle": "Config",
@@ -155,7 +166,7 @@
         {
           "type": "progress",
           "progress_id": "analyze_bar",
-          "right_label": "[[value]]{progress.fps:.1f}[[/]] [[unit]]fps[[/]] | ETA [[value]]{progress.eta_tc}[[/]] | elapsed [[value]]{progress.elapsed_tc}[[/]]"
+          "right_label": "[[value]]{progress.fps:.2f}[[/]] [[unit]]fps[[/]] | ETA [[value]]{progress.eta_tc}[[/]] | elapsed [[value]]{progress.elapsed_tc}[[/]]"
         }
       ]
     },
@@ -163,6 +174,7 @@
       "id": "render",
       "type": "group",
       "title_badge": "[RENDER]",
+      "accent_role": "section_render",
       "blocks": [
         {
           "subtitle": "Legend",
@@ -175,43 +187,45 @@
         {
           "subtitle": "Writer",
           "lines": [
-            "writer=[[key]]writer[[/]]=[[value]]{render.writer}[[/]]  out_dir=[[key]]out_dir[[/]]=[[path]]{render.out_dir.e}[[/]]  add_frame_info=[[key]]add_frame_info[[/]]=[[value]]{render.add_frame_info}[[/]]"
+            "[[key]]writer[[/]]=[[value]]{render.writer}[[/]] [[key]]out_dir[[/]]=[[path]]{render.out_dir.e}[[/]]{render.add_frame_info? [[key]]add_frame_info[[/]]=[[value]]{render.add_frame_info|bool}[[/]]:''}"
           ]
         },
         {
           "subtitle": "Canvas",
           "lines": [
-            "single_res=[[value]]{render.single_res|tallest}[[/]] [[unit]]px[[/]]  upscale=[[value]]{render.upscale}[[/]]  crop=mod[[value]]{render.mod_crop}[[/]]  letterbox_aware=[[value]]{render.letterbox_pillarbox_aware}[[/]]  pad=[[value]]{render.center_pad}[[/]],[[unit]]tol={render.letterbox_px_tolerance}[[/]][[unit]]px[[/]]"
+            "single_res=[[value]]{render.single_res|tallest}[[/]] [[unit]]px[[/]] upscale=[[value]]{render.upscale|bool}[[/]] crop=mod[[value]]{render.mod_crop}[[/]] letterbox_aware=[[value]]{render.letterbox_pillarbox_aware|bool}[[/]] pad=[[value]]{render.center_pad|bool}[[/]] tol=[[value]]{render.letterbox_px_tolerance}[[/]][[unit]]px[[/]]"
           ]
         },
         {
           "subtitle": "Tonemap",
           "lines": [
-            "curve=[[value]]{tonemap.tone_curve}[[/]]  dpd=[[value]]{tonemap.dynamic_peak_detection}[[/]]  target=[[value]]{tonemap.target_nits}[[/]][[unit]]nits[[/]]  verify_luma_thresh=[[value]]{tonemap.verify_luma_threshold}[[/]]  verify_delta=[[value]]{verify.delta.max}[[/]]"
+            "[[key]]curve[[/]]=[[value]]{tonemap.tone_curve}[[/]] dpd=[[value]]{tonemap.dynamic_peak_detection|bool}[[/]] [[key]]target[[/]]=[[value]]{tonemap.target_nits}[[/]][[unit]]nits[[/]] [[key]]verify_luma_thresh[[/]]=[[value]]{tonemap.verify_luma_threshold}[[/]]{verify.delta.max? [[key]]verify_delta[[/]]=[[value]]{verify.delta.max}[[/]]:''}"
           ]
         },
         {
           "subtitle": "Overlay",
           "lines": [
-            "enabled=[[value]]{overlay.enabled}[[/]]  template=\"[[value]]{overlay.template}[[/]]\"  mode=[[value]]{overlay.mode}[[/]]"
+            "[[key]]enabled[[/]]=[[value]]{overlay.enabled|bool}[[/]]{overlay.mode? [[key]]mode[[/]]=[[value]]{overlay.mode}[[/]]:''}"
           ]
         },
         {
           "type": "progress",
           "progress_id": "render_bar",
-          "right_label": "[[value]]{progress.current}[[/]]/[[value]]{progress.total}[[/]] | [[value]]{progress.fps:.1f}[[/]] [[unit]]fps[[/]] | ETA [[value]]{progress.eta_tc}[[/]] | elapsed [[value]]{progress.elapsed_tc}[[/]]"
+          "right_label": "[[value]]{progress.current}[[/]]/[[value]]{progress.total}[[/]] | [[value]]{progress.fps:.2f}[[/]] [[unit]]fps[[/]] | ETA [[value]]{progress.eta_tc}[[/]] | elapsed [[value]]{progress.elapsed_tc}[[/]]"
         }
       ]
     },
     {
       "id": "publish",
       "type": "passthrough",
-      "title_badge": "[PUBLISH]"
+      "title_badge": "[PUBLISH]",
+      "accent_role": "section_publish"
     },
     {
       "id": "warnings",
       "type": "table",
       "title_badge": "[WARNINGS]",
+      "accent_role": "section_warnings",
       "group_by": "warning.type",
       "row_template": "• [[warn]]{warning.type}[[/]] — [[value]]{warning.count}[[/]] occurrence(s){warning.labels?`: [[dim]]${warning.labels}[[/]]`:''}",
       "fold_labels": { "head": 2, "tail": 1, "when": "!verbose" }
@@ -220,15 +234,16 @@
       "id": "summary",
       "type": "list",
       "title_badge": "[SUMMARY]",
+      "accent_role": "section_summary",
       "items": [
-        "• Clips:[[value]]{clips.count}[[/]]  Window: lead=[[value]]{window.ignore_lead_seconds:.2f}[[/]][[unit]]s[[/]] trail=[[value]]{window.ignore_trail_seconds:.2f}[[/]][[unit]]s[[/]]  step=[[value]]{analysis.step}[[/]] downscale=[[value]]{analysis.downscale_height}[[/]][[unit]]px[[/]]",
-        "• Align: audio=[[value]]{audio_alignment.enabled}[[/]]  offsets=[[value]]{audio_alignment.offsets_sec:+.3f}[[/]][[unit]]s[[/]]  file=[[path]]{audio_alignment.offsets_filename.e}[[/]]",
+        "• Clips:[[value]]{clips.count}[[/]] Window: lead=[[value]]{window.ignore_lead_seconds:.2f}[[/]][[unit]]s[[/]] trail=[[value]]{window.ignore_trail_seconds:.2f}[[/]][[unit]]s[[/]] step=[[value]]{analysis.step}[[/]] downscale=[[value]]{analysis.downscale_height}[[/]][[unit]]px[[/]]",
+        "• Align: audio=[[value]]{audio_alignment.enabled|bool}[[/]] offsets=[[value]]{audio_alignment.offsets_sec:+.3f}[[/]][[unit]]s[[/]] file=[[path]]{audio_alignment.offsets_filename.e}[[/]]",
         "• Plan: Dark=[[value]]{analysis.counts.dark}[[/]] Bright=[[value]]{analysis.counts.bright}[[/]] Motion=[[value]]{analysis.counts.motion}[[/]] Random=[[value]]{analysis.counts.random}[[/]] User=[[value]]{analysis.counts.user}[[/]]  sep=[[value]]{analysis.screen_separation_sec:.1f}[[/]][[unit]]s[[/]]",
-        "• Canvas: single_res=[[value]]{render.single_res|tallest}[[/]] [[unit]]px[[/]] upscale=[[value]]{render.upscale}[[/]] crop=mod[[value]]{render.mod_crop}[[/]] pad=[[value]]{render.center_pad}[[/]]",
-        "• Tonemap: [[value]]{tonemap.tone_curve}[[/]]@[[value]]{tonemap.target_nits}[[/]][[unit]]nits[[/]] dpd=[[value]]{tonemap.dynamic_peak_detection}[[/]]  verify≤[[value]]{tonemap.verify_luma_threshold}[[/]]  Δ=[[value]]{verify.delta.max}[[/]]",
+        "• Canvas: single_res=[[value]]{render.single_res|tallest}[[/]] [[unit]]px[[/]] upscale=[[value]]{render.upscale|bool}[[/]] crop=mod[[value]]{render.mod_crop}[[/]] pad=[[value]]{render.center_pad|bool}[[/]]",
+        "• Tonemap: [[value]]{tonemap.tone_curve}[[/]]@[[value]]{tonemap.target_nits}[[/]][[unit]]nits[[/]] dpd=[[value]]{tonemap.dynamic_peak_detection|bool}[[/]] verify≤[[value]]{tonemap.verify_luma_threshold}[[/]]{verify.delta.max? Δ=[[value]]{verify.delta.max}[[/]]:''}",
         "• Output: [[path]]{render.out_dir.e}[[/]]  compression=[[value]]{render.compression}[[/]]",
         "• Cache: [[path]]{cache.file}[[/]]  status=[[value]]{cache.status}[[/]]",
-        "Output frames: [[value]]{analysis.output_frame_count}[[/]]  [[dim]][{analysis.output_frames_preview}][[/]]  (full list in JSON{verbose?' and above':''})"
+        "• Output frames ([[value]]{analysis.output_frame_count}[[/]]):{emit_json_tail? [[dim]][{analysis.output_frames_preview}][[/]]  (full list in JSON{verbose?' and above':''}) :}{emit_json_tail? : [[value]]{analysis.output_frames_full|wrap_indent2}[[/]]}"
       ]
     }
   ],
