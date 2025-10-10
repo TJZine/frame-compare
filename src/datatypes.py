@@ -65,6 +65,7 @@ class ColorConfig:
     overlay_text_template: str = (
         "Tonemapping Algorithm: {tone_curve} dpd = {dynamic_peak_detection} dst = {target_nits} nits"
     )
+    overlay_mode: str = "minimal"
     verify_enabled: bool = True
     verify_frame: Optional[int] = None
     verify_auto: bool = True
@@ -113,6 +114,13 @@ class NamingConfig:
 
     always_full_filename: bool = True
     prefer_guessit: bool = True
+
+
+@dataclass
+class CLIConfig:
+    """CLI presentation controls."""
+
+    emit_json_tail: bool = True
 
 
 @dataclass
@@ -170,6 +178,7 @@ class AppConfig:
 
     analysis: AnalysisConfig
     screenshots: ScreenshotConfig
+    cli: CLIConfig
     slowpics: SlowpicsConfig
     tmdb: TMDBConfig
     naming: NamingConfig

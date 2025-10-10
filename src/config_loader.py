@@ -10,6 +10,7 @@ from .datatypes import (
     AnalysisConfig,
     AppConfig,
     AudioAlignmentConfig,
+    CLIConfig,
     ColorConfig,
     NamingConfig,
     OverridesConfig,
@@ -99,6 +100,7 @@ def load_config(path: str) -> AppConfig:
     app = AppConfig(
         analysis=_sanitize_section(raw.get("analysis", {}), "analysis", AnalysisConfig),
         screenshots=_sanitize_section(raw.get("screenshots", {}), "screenshots", ScreenshotConfig),
+        cli=_sanitize_section(raw.get("cli", {}), "cli", CLIConfig),
         slowpics=_sanitize_section(raw.get("slowpics", {}), "slowpics", SlowpicsConfig),
         tmdb=_sanitize_section(raw.get("tmdb", {}), "tmdb", TMDBConfig),
         naming=_sanitize_section(raw.get("naming", {}), "naming", NamingConfig),
@@ -176,6 +178,10 @@ def load_config(path: str) -> AppConfig:
         raise ConfigError("color.verify_step_seconds must be > 0")
     if app.color.verify_max_seconds < 0:
         raise ConfigError("color.verify_max_seconds must be >= 0")
+    overlay_mode = str(getattr(app.color, "overlay_mode", "minimal")).strip().lower()
+    if overlay_mode not in {"minimal", "diagnostic"}:
+        raise ConfigError("color.overlay_mode must be 'minimal' or 'diagnostic'")
+    app.color.overlay_mode = overlay_mode
 
     preferred = app.source.preferred.strip().lower()
     if preferred not in {"lsmas", "ffms2"}:

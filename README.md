@@ -71,7 +71,7 @@ Automated frame comparison pipeline that samples representative scenes, renders 
   correlation_threshold = 0.6
   ```
 - **Run:** `uv run python frame_compare.py --config config.toml --input comparison_videos`
-- **Workflow:** The CLI estimates per-source offsets, writes `generated.audio_offsets.toml`, auto-selects matching streams (language → codec → layout), and saves two preview frames under `screens/audio_alignment/`. Confirm the side-by-side results in the prompt to continue; declining captures five more random frames for inspection, opens the offsets file for manual tweaks, or honour explicit stream picks from `--audio-align-track label=index`.
+- **Workflow:** The CLI estimates per-source offsets, writes `generated.audio_offsets.toml`, auto-selects matching streams (language → codec → layout), and now reports the reference/target streams, search window, and per-target offsets in the `Prepare` phase. Previews still save under `screens/audio_alignment/`; confirming continues automatically, while declining captures five more random frames and opens the offsets file for manual tweaks. Explicit stream picks from `--audio-align-track label=index` remain respected.
 
 ## Install
 ### macOS quick path
@@ -108,7 +108,7 @@ Add VapourSynth support later with `uv sync --extra vapoursynth` or `pip install
 - VapourSynth integration with optional HDR→SDR tonemapping, FFmpeg screenshot fallback, modulus-aware cropping, and placeholder creation when writers fail.
 - Audio-guided trim suggestions—the only automated offset step—that write `generated.audio_offsets.toml`, auto-select matching streams, use finer DTW hops, prompt for quick visual confirmation, and accelerate alignment for mismatched transfers.
 - Automatic slow.pics uploads with webhook retries, `.url` shortcut generation, and strict naming validation so every frame lands in the right slot.
-- Rich CLI that discovers clips, deduplicates labels, applies trims/FPS overrides consistently, and cleans up rendered images after upload when requested.
+- Rich CLI that discovers clips, deduplicates labels, applies trims/FPS overrides consistently, and now renders accented section headers with Unicode/ASCII fallbacks, dimmed dividers, and a verbose legend that explains every token used in the progress dashboard.
 
 ## Configuration (start here)
 | Flag/Key | What it controls | When to use it | Type | Default | Example | Impact / Trade-offs | Notes | Source |
@@ -134,8 +134,7 @@ Add VapourSynth support later with `uv sync --extra vapoursynth` or `pip install
 | `[color].enable_tonemap` | HDR→SDR pipeline toggle | Disable when inputs are SDR | bool | `True` | `enable_tonemap = false` | Skipping tonemap speeds renders but loses HDR cues |  | original, readme, new |
 | `[runtime].ram_limit_mb` | VapourSynth RAM guard | Tune on constrained systems | int | `8000` | `ram_limit_mb = 4096` | Lower limits prevent spikes yet may trigger reloads |  | original, readme, new |
 | `VAPOURSYNTH_PYTHONPATH` | Env search path for VapourSynth | Set when using a system install | env var | (verify) | `export VAPOURSYNTH_PYTHONPATH=/opt/vs/site-packages` | Missing path triggers ClipInit errors | Value read at src/vs_core.py:186 (verify) | original, ripgrep |
-| `--threads / --gpu / --device` | Planned performance flags | Use backend settings until CLI exposes them | CLI (n/a) | n/a | N/A | Currently unavailable; rely on VapourSynth/FFmpeg (verify frame_compare.py:1107-1108) | Placeholder only | original, readme |
-| `--output-dir / --csv / --json / --images / --grid / --slowpics` | Planned output flags | Configure outputs via config keys today | CLI (n/a) | n/a | N/A | Not yet wired; use `[screenshots.*]` and `[slowpics.*]` (verify frame_compare.py:1107-1108) | Placeholder only | original, readme |
+| `[cli].emit_json_tail` | Append structured summary to CLI output | Enable downstream tooling that scrapes runs | bool | `True` | `emit_json_tail = false` | Disabling removes the trailing machine-readable block; legend output still renders | config.toml |
 
 ## Features & Metrics
 Brightness and darkness metrics downscale each sampled frame when needed, convert it to GRAY, and inspect the Y (luma) plane. The pipeline records the normalized mean brightness (0.0–1.0). Tonemapping in `[color].enable_tonemap` runs before sampling when HDR sources need SDR previews.
@@ -197,14 +196,6 @@ The CLI reads a UTF-8 TOML file and instantiates the dataclasses in `src/datatyp
 | `runtime.ram_limit_mb` | Upper bound for VapourSynth RAM use | `int` | `8000` | `ram_limit_mb = 4096` | Performance Tips |
 | `runtime.vapoursynth_python_paths` | Extra Python paths for VapourSynth | `List[str]` | `[]` | `vapoursynth_python_paths = ["/opt/vs/python"]` | Installation, Performance |
 | `source.preferred` | Preferred VapourSynth source plugin | `str` | `"lsmas"` | `preferred = "ffms2"` | Detailed Features |
-| `--random-frames` *(Documented here but verify in code)* | CLI flag not implemented; use `[analysis].random_frames` instead | CLI (n/a) | n/a | `--random-frames 10` | Usage Modes |
-| `--user-frames / --frames` *(Documented here but verify in code)* | CLI shortcut not implemented; configure `[analysis].user_frames` | CLI (n/a) | n/a | `--user-frames 10,200,501` | Usage Modes |
-| `--frame-step / --frame-interval` *(Documented here but verify in code)* | Prefer `[analysis].step` for stride control | CLI (n/a) | n/a | `--frame-step 2` | Performance Tips |
-| `--seed / --deterministic` *(Documented here but verify in code)* | Determinism handled via `[analysis].random_seed` | CLI (n/a) | n/a | `--seed 20202020` | Detailed Features |
-| `--metrics / --brightness / --darkness / --motion` *(Documented here but verify in code)* | Use analysis config keys above to tune selections | CLI (n/a) | n/a | `--brightness 10` | Detailed Features |
-| `--tonemap / --hdr-to-sdr / --gamma / --colorspace / --crop / --resize / --grayscale` *(Documented here but verify in code)* | Governed by `[color.*]` and `[screenshots.*]` options listed above | CLI (n/a) | n/a | `--tonemap hable` | Detailed Features |
-| `--threads / --gpu / --device` *(Documented here but verify in code)* | No dedicated flags; consider `[runtime.ram_limit_mb]` and FFmpeg/VapourSynth configs | CLI (n/a) | n/a | `--threads 4` | Performance Tips |
-| `--output-dir / --csv / --json / --images / --grid / --slowpics` *(Documented here but verify in code)* | Output control managed via `[screenshots.*]`, `[analysis.*]`, `[slowpics.*]` | CLI (n/a) | n/a | `--output-dir screenshots` | Outputs |
 
 ### Minimal config
 ```toml
@@ -259,6 +250,7 @@ target_nits = 100.0
 dst_min_nits = 0.1
 overlay_enabled = true
 overlay_text_template = "Tonemapping Algorithm: {tone_curve} dpd = {dynamic_peak_detection} dst = {target_nits} nits"
+overlay_mode = "minimal"
 verify_enabled = true
 verify_auto = true
 verify_start_seconds = 10.0
@@ -364,6 +356,7 @@ change_fps = {}
 | `dst_min_nits` | float | 0.1 | No | Minimum nits for libplacebo (`dst_min`). Must be ≥0.|
 | `overlay_enabled` | bool | true | No | Draw an SDR metadata overlay (top-right). If true, failures log `[OVERLAY]` and obey `strict`.|
 | `overlay_text_template` | str | `"Tonemapping Algorithm: {tone_curve} dpd = {dynamic_peak_detection} dst = {target_nits} nits"` | No | Template for the overlay text. Placeholders: `{tone_curve}`, `{dpd}`, `{dynamic_peak_detection}`, `{target_nits}`, `{preset}`, `{reason}`.|
+| `overlay_mode` | str | `"minimal"` | No | Selects overlay detail level: `minimal` shows the template; `diagnostic` adds the render resolution summary, HDR mastering luminance (when available), and a `Frame Selection Type` line sourced from cached selection metadata.|
 | `verify_enabled` | bool | true | No | Compute Δ vs naive SDR and log `[VERIFY] frame=… avg=… max=…`.|
 | `verify_frame` | int? | null | No | Force a specific verification frame index.|
 | `verify_auto` | bool | true | No | Enable the auto-search described in `docs/hdr_tonemap_overview.md`.|
@@ -407,6 +400,11 @@ See `docs/hdr_tonemap_overview.md` for a walkthrough of the log messages, preset
 | --- | --- | --- | --- | --- |
 | `always_full_filename` | bool | true | No | Use the original filename as the label instead of parsed metadata.|
 | `prefer_guessit` | bool | true | No | Prefer GuessIt over Anitopy when deriving metadata; falls back automatically.|
+
+#### `[cli]`
+| Name | Type | Default | Required? | Description |
+| --- | --- | --- | --- | --- |
+| `emit_json_tail` | bool | true | No | Append a JSON summary block to the CLI footer so scripts can scrape run metadata alongside the human-readable legend.|
 
 #### `[paths]`
 | Name | Type | Default | Required? | Description |
@@ -456,6 +454,12 @@ Options:
                  Manual audio stream override (label=index). Repeatable.
   --help         Show this message and exit.
 ```
+
+### CLI dashboard & legend
+- Section headers in the live dashboard now inherit accent colours from `cli_layout.v1.json`. When the terminal supports Unicode, subheads use `›` prefixes; ASCII fallbacks swap in `>` automatically.
+- Divider rules dim relative to the active block so verbose runs remain readable even with dozens of groups.
+- Verbose mode prints a dedicated `Legend` block under `[RENDER]` that explains every token (`key`, `value`, `unit`, `path`) and the new prefixes so operators can map colours to meaning quickly.
+- Each run ends with an optional JSON tail (governed by `[cli].emit_json_tail`) that mirrors the human-readable summary for downstream tooling.
 
 ### Two-file comparison
 ```bash

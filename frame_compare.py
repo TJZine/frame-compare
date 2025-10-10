@@ -2,26 +2,28 @@ from __future__ import annotations
 
 import asyncio
 import builtins
+import json
 import logging
 import math
+import random
 import re
-import sys
 import shutil
-import webbrowser
+import sys
+import time
 import traceback
+import webbrowser
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import datetime as _dt
 from pathlib import Path
 from string import Template
-import time
-import random
-from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import click
 from rich import print
+from rich.console import Console
 from rich.markup import escape
-from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeRemainingColumn
+from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 from natsort import os_sorted
 
 from src.config_loader import ConfigError, load_config
@@ -45,6 +47,7 @@ from src.tmdb import (
     parse_manual_id,
     resolve_tmdb,
 )
+from src.cli_layout import CliLayoutRenderer, CliLayoutError, load_cli_layout
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +84,25 @@ SUPPORTED_EXTS = (
 )
 
 
+def _color_text(text: str, style: Optional[str]) -> str:
+    if style:
+        return f"[{style}]{text}[/]"
+    return text
+
+
+def _format_kv(
+    label: str,
+    value: object,
+    *,
+    label_style: Optional[str] = "dim",
+    value_style: Optional[str] = "bright_white",
+    sep: str = "=",
+) -> str:
+    label_text = escape(str(label))
+    value_text = escape(str(value))
+    return f"{_color_text(label_text, label_style)}{sep}{_color_text(value_text, value_style)}"
+
+
 @dataclass
 class _ClipPlan:
     path: Path
@@ -92,6 +114,10 @@ class _ClipPlan:
     clip: Optional[object] = None
     effective_fps: Optional[Tuple[int, int]] = None
     applied_fps: Optional[Tuple[int, int]] = None
+    source_fps: Optional[Tuple[int, int]] = None
+    source_num_frames: Optional[int] = None
+    source_width: Optional[int] = None
+    source_height: Optional[int] = None
     has_trim_start_override: bool = False
     has_trim_end_override: bool = False
     alignment_frames: int = 0
@@ -106,6 +132,7 @@ class RunResult:
     config: AppConfig
     image_paths: List[str]
     slowpics_url: Optional[str] = None
+    json_tail: Dict[str, object] | None = None
 
 
 @dataclass
@@ -119,6 +146,125 @@ class _AudioAlignmentSummary:
     reference_plan: _ClipPlan
     final_adjustments: Dict[str, int]
     swap_details: Dict[str, str]
+
+
+@dataclass
+class _AudioAlignmentDisplayData:
+    stream_lines: List[str]
+    estimation_line: Optional[str]
+    offset_lines: List[str]
+    offsets_file_line: str
+    json_reference_stream: Optional[str]
+    json_target_streams: Dict[str, str]
+    json_offsets_sec: Dict[str, float]
+    json_offsets_frames: Dict[str, int]
+    warnings: List[str]
+    preview_paths: List[str] = field(default_factory=list)
+    confirmation: Optional[str] = None
+    correlations: Dict[str, float] = field(default_factory=dict)
+    threshold: float = 0.0
+
+
+class CliOutputManager:
+    """Layout-driven CLI presentation controller."""
+
+    def __init__(
+        self,
+        *,
+        quiet: bool,
+        verbose: bool,
+        no_color: bool,
+        layout_path: Path,
+        console: Console | None = None,
+    ) -> None:
+        self.quiet = quiet
+        self.verbose = verbose and not quiet
+        self.no_color = no_color
+        self.console = console or Console(no_color=no_color, highlight=False)
+        try:
+            self.layout = load_cli_layout(layout_path)
+        except CliLayoutError as exc:
+            raise CLIAppError(str(exc)) from exc
+        self.renderer = CliLayoutRenderer(
+            self.layout,
+            self.console,
+            quiet=quiet,
+            verbose=self.verbose,
+            no_color=no_color,
+        )
+        self.flags: Dict[str, Any] = {
+            "quiet": quiet,
+            "verbose": self.verbose,
+            "no_color": no_color,
+        }
+        self.values: Dict[str, Any] = {
+            "theme": {
+                "colors": dict(self.layout.theme.colors),
+                "symbols": dict(self.renderer.symbols),
+            }
+        }
+        self._warnings: List[str] = []
+
+    def set_flag(self, key: str, value: Any) -> None:
+        self.flags[key] = value
+
+    def update_values(self, mapping: Mapping[str, Any]) -> None:
+        self.values.update(mapping)
+
+    def warn(self, text: str) -> None:
+        self._warnings.append(text)
+
+    def get_warnings(self) -> List[str]:
+        return list(self._warnings)
+
+    def render_sections(self, section_ids: Iterable[str]) -> None:
+        target_ids = set(section_ids)
+        self.renderer.bind_context(self.values, self.flags)
+        for section in self.layout.sections:
+            section_id = section.get("id")
+            if section_id in target_ids:
+                self.renderer.render_section(section, self.values, self.flags)
+
+    def create_progress(self, progress_id: str, *, transient: bool = False) -> Progress:
+        self.renderer.bind_context(self.values, self.flags)
+        return self.renderer.create_progress(progress_id, transient=transient)
+
+    def update_progress_state(self, progress_id: str, **state: Any) -> None:
+        self.renderer.update_progress_state(progress_id, state=state)
+
+    # ------------------------------------------------------------------
+    # Backwards-compatible helpers (to be removed once layout integration
+    # is complete).
+    # ------------------------------------------------------------------
+
+    def banner(self, text: str) -> None:
+        if self.quiet:
+            self.console.print(text)
+            return
+        self.console.print(f"[bold bright_cyan]{escape(text)}[/]")
+
+    def section(self, title: str) -> None:
+        if self.quiet:
+            return
+        self.console.print(f"[bold cyan]{title}[/]")
+
+    def line(self, text: str) -> None:
+        if self.quiet:
+            return
+        self.console.print(text)
+
+    def verbose_line(self, text: str) -> None:
+        if self.quiet or not self.verbose:
+            return
+        if not text:
+            return
+        self.console.print(f"[dim]{escape(text)}[/]")
+
+    def progress(self, *columns, transient: bool = False) -> Progress:
+        return Progress(*columns, console=self.console, transient=transient)
+
+    def iter_warnings(self) -> List[str]:
+        return list(self._warnings)
 
 
 class CLIAppError(RuntimeError):
@@ -445,6 +591,181 @@ def _extract_clip_fps(clip: object) -> Tuple[int, int]:
     return (24000, 1001)
 
 
+def _format_seconds(value: float) -> str:
+    total = max(0.0, float(value))
+    hours = int(total // 3600)
+    minutes = int((total - hours * 3600) // 60)
+    seconds = total - hours * 3600 - minutes * 60
+    seconds = round(seconds, 1)
+    if seconds >= 60.0:
+        seconds = 0.0
+        minutes += 1
+    if minutes >= 60:
+        minutes -= 60
+        hours += 1
+    return f"{hours:02d}:{minutes:02d}:{seconds:04.1f}"
+
+
+def _fps_to_float(value: Tuple[int, int] | None) -> float:
+    if not value:
+        return 0.0
+    num, den = value
+    if not den:
+        return 0.0
+    return float(num) / float(den)
+
+
+def _fold_sequence(
+    values: Sequence[object],
+    *,
+    head: int,
+    tail: int,
+    joiner: str,
+    enabled: bool,
+) -> str:
+    items = [str(item) for item in values]
+    if not enabled or len(items) <= head + tail:
+        return joiner.join(items)
+    head_items = items[: max(0, head)]
+    tail_items = items[-max(0, tail) :]
+    if not head_items:
+        return joiner.join(tail_items)
+    if not tail_items:
+        return joiner.join(head_items)
+    return joiner.join([*head_items, "…", *tail_items])
+
+
+def _evaluate_rule_condition(condition: Optional[str], *, flags: Mapping[str, Any]) -> bool:
+    if not condition:
+        return True
+    expr = condition.strip()
+    if not expr:
+        return True
+    if expr == "!verbose":
+        return not bool(flags.get("verbose"))
+    if expr == "verbose":
+        return bool(flags.get("verbose"))
+    if expr == "upload_enabled":
+        return bool(flags.get("upload_enabled"))
+    if expr == "!upload_enabled":
+        return not bool(flags.get("upload_enabled"))
+    return bool(flags.get(expr))
+
+
+def _build_legacy_summary_lines(values: Mapping[str, Any]) -> List[str]:
+    """Compose legacy summary lines from the collected layout values."""
+
+    def _maybe_number(value: Any) -> float | None:
+        if isinstance(value, (int, float)):
+            return float(value)
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _format_number(value: Any, fmt: str, fallback: str) -> str:
+        number = _maybe_number(value)
+        if number is None:
+            return fallback
+        return format(number, fmt)
+
+    def _string(value: Any, fallback: str = "n/a") -> str:
+        if value is None:
+            return fallback
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        return str(value)
+
+    def _bool_text(value: Any) -> str:
+        return "true" if bool(value) else "false"
+
+    clips_raw = values.get("clips")
+    clips = clips_raw if isinstance(clips_raw, Mapping) else {}
+    window_raw = values.get("window")
+    window = window_raw if isinstance(window_raw, Mapping) else {}
+    analysis_raw = values.get("analysis")
+    analysis = analysis_raw if isinstance(analysis_raw, Mapping) else {}
+    counts_raw = analysis.get("counts") if isinstance(analysis, Mapping) else {}
+    counts = counts_raw if isinstance(counts_raw, Mapping) else {}
+    audio_raw = values.get("audio_alignment")
+    audio = audio_raw if isinstance(audio_raw, Mapping) else {}
+    render_raw = values.get("render")
+    render = render_raw if isinstance(render_raw, Mapping) else {}
+    tonemap_raw = values.get("tonemap")
+    tonemap = tonemap_raw if isinstance(tonemap_raw, Mapping) else {}
+    cache_raw = values.get("cache")
+    cache = cache_raw if isinstance(cache_raw, Mapping) else {}
+
+    lines: List[str] = []
+
+    clip_count = _string(clips.get("count"), "0")
+    lead_text = _format_number(window.get("ignore_lead_seconds"), ".2f", "0.00")
+    trail_text = _format_number(window.get("ignore_trail_seconds"), ".2f", "0.00")
+    step_text = _string(analysis.get("step"), "0")
+    downscale_text = _string(analysis.get("downscale_height"), "0")
+    lines.append(
+        f"Clips: {clip_count}  Window: lead={lead_text}s trail={trail_text}s  step={step_text} downscale={downscale_text}px"
+    )
+
+    offsets_text = _format_number(audio.get("offsets_sec"), "+.3f", "+0.000")
+    offsets_file = _string(audio.get("offsets_filename"), "n/a")
+    lines.append(
+        f"Align: audio={_bool_text(audio.get('enabled'))}  offsets={offsets_text}s  file={offsets_file}"
+    )
+
+    lines.append(
+        "Plan: "
+        f"Dark={_string(counts.get('dark'), '0')} "
+        f"Bright={_string(counts.get('bright'), '0')} "
+        f"Motion={_string(counts.get('motion'), '0')} "
+        f"Random={_string(counts.get('random'), '0')} "
+        f"User={_string(counts.get('user'), '0')}  "
+        f"sep={_format_number(analysis.get('screen_separation_sec'), '.1f', '0.0')}s"
+    )
+
+    lines.append(
+        "Canvas: "
+        f"single_res={_string(render.get('single_res'), '0')} "
+        f"upscale={_bool_text(render.get('upscale'))} "
+        f"crop=mod{_string(render.get('mod_crop'), '0')} "
+        f"pad={_bool_text(render.get('center_pad'))}"
+    )
+
+    lines.append(
+        "Tonemap: "
+        f"{_string(tonemap.get('tone_curve'), 'n/a')}@"
+        f"{_format_number(tonemap.get('target_nits'), '.0f', '0')}nits "
+        f"dpd={_bool_text(tonemap.get('dynamic_peak_detection'))}  "
+        f"verify≤{_format_number(tonemap.get('verify_luma_threshold'), '.2f', '0.00')}"
+    )
+
+    lines.append(
+        f"Output: {_string(render.get('out_dir'), 'n/a')}  compression={_string(render.get('compression'), 'n/a')}"
+    )
+
+    lines.append(f"Cache: {_string(cache.get('file'), 'n/a')}  {_string(cache.get('status'), 'unknown')}")
+
+    frame_count = _string(analysis.get("output_frame_count"), "0")
+    preview = _string(analysis.get("output_frames_preview"), "")
+    preview_display = f"[{preview}]" if preview else "[]"
+    lines.append(
+        f"Output frames: {frame_count}  e.g., {preview_display}  (full list in JSON)"
+    )
+
+    return [line for line in lines if line]
+
+
+def _format_clock(seconds: Optional[float]) -> str:
+    if seconds is None or not math.isfinite(seconds):
+        return "--:--"
+    total = max(0, int(seconds + 0.5))
+    minutes, secs = divmod(total, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours:d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+
 def _init_clips(plans: Sequence[_ClipPlan], runtime_cfg, cache_dir: Path | None) -> None:
     vs_core.set_ram_limit(runtime_cfg.ram_limit_mb)
 
@@ -463,6 +784,10 @@ def _init_clips(plans: Sequence[_ClipPlan], runtime_cfg, cache_dir: Path | None)
         )
         plan.clip = clip
         plan.effective_fps = _extract_clip_fps(clip)
+        plan.source_fps = plan.effective_fps
+        plan.source_num_frames = int(getattr(clip, "num_frames", 0) or 0)
+        plan.source_width = int(getattr(clip, "width", 0) or 0)
+        plan.source_height = int(getattr(clip, "height", 0) or 0)
         reference_fps = plan.effective_fps
 
     for idx, plan in enumerate(plans):
@@ -482,6 +807,10 @@ def _init_clips(plans: Sequence[_ClipPlan], runtime_cfg, cache_dir: Path | None)
         plan.clip = clip
         plan.applied_fps = fps_override
         plan.effective_fps = _extract_clip_fps(clip)
+        plan.source_fps = plan.effective_fps
+        plan.source_num_frames = int(getattr(clip, "num_frames", 0) or 0)
+        plan.source_width = int(getattr(clip, "width", 0) or 0)
+        plan.source_height = int(getattr(clip, "height", 0) or 0)
 
 
 def _build_cache_info(root: Path, plans: Sequence[_ClipPlan], cfg: AppConfig, analyze_index: int) -> Optional[FrameMetricsCacheInfo]:
@@ -598,32 +927,6 @@ def _log_selection_windows(
         )
 
 
-def _print_trim_overrides(plans: Sequence[_ClipPlan]) -> None:
-    """Print the trim overrides sourced from the configuration."""
-
-    trimmed = [
-        plan
-        for plan in plans
-        if plan.has_trim_start_override or plan.has_trim_end_override
-    ]
-    if not trimmed:
-        return
-
-    print("[cyan]Trim overrides set in config:[/cyan]")
-    for plan in trimmed:
-        label = (plan.metadata.get("label") or plan.path.name).strip()
-        label_markup = escape(label)
-        filename_markup = escape(plan.path.name)
-        start_display = str(plan.trim_start) if plan.has_trim_start_override else "unchanged"
-        if plan.has_trim_end_override:
-            end_display = "None" if plan.trim_end is None else str(plan.trim_end)
-        else:
-            end_display = "unchanged"
-        print(
-            f"  - {label_markup} ({filename_markup}): start={start_display}, end={end_display}"
-        )
-
-
 def _resolve_alignment_reference(
     plans: Sequence[_ClipPlan],
     analyze_path: Path,
@@ -653,30 +956,51 @@ def _resolve_alignment_reference(
     return plans[0]
 
 
+
 def _maybe_apply_audio_alignment(
     plans: Sequence[_ClipPlan],
     cfg: AppConfig,
     analyze_path: Path,
     root: Path,
     audio_track_overrides: Mapping[str, int],
-) -> _AudioAlignmentSummary | None:
+    reporter: CliOutputManager | None = None,
+) -> tuple[_AudioAlignmentSummary | None, _AudioAlignmentDisplayData | None]:
     audio_cfg = cfg.audio_alignment
+    offsets_path = (root / audio_cfg.offsets_filename).resolve()
+    display_data = _AudioAlignmentDisplayData(
+        stream_lines=[],
+        estimation_line=None,
+        offset_lines=[],
+        offsets_file_line=f"Offsets file: {offsets_path}",
+        json_reference_stream=None,
+        json_target_streams={},
+        json_offsets_sec={},
+        json_offsets_frames={},
+        warnings=[],
+        correlations={},
+        threshold=float(audio_cfg.correlation_threshold),
+    )
+
+    def _warn(message: str) -> None:
+        display_data.warnings.append(f"[AUDIO] {message}")
+
     if not audio_cfg.enable:
-        return None
+        return None, display_data
     if len(plans) < 2:
-        print("[yellow]Audio alignment skipped:[/yellow] need at least two clips.")
-        return None
+        _warn("Audio alignment skipped: need at least two clips.")
+        return None, display_data
 
     reference_plan = _resolve_alignment_reference(plans, analyze_path, audio_cfg.reference)
     targets = [plan for plan in plans if plan is not reference_plan]
     if not targets:
-        print("[yellow]Audio alignment skipped:[/yellow] no secondary clips to compare.")
-        return None
+        _warn("Audio alignment skipped: no secondary clips to compare.")
+        return None, display_data
 
-    print(
-        "[cyan]Estimating audio offsets relative to[/cyan] "
-        f"{escape(reference_plan.path.name)}"
-    )
+    plan_labels: Dict[Path, str] = {
+        plan.path: (plan.metadata.get("label") or plan.path.name).strip() or plan.path.name
+        for plan in plans
+    }
+    name_to_label: Dict[str, str] = {plan.path.name: plan_labels[plan.path] for plan in plans}
 
     stream_infos: Dict[Path, List[audio_alignment.AudioStreamInfo]] = {}
     for plan in plans:
@@ -686,6 +1010,8 @@ def _maybe_apply_audio_alignment(
             logger.warning("ffprobe audio stream probe failed for %s: %s", plan.path.name, exc)
             infos = []
         stream_infos[plan.path] = infos
+
+    forced_streams: set[Path] = set()
 
     def _match_audio_override(plan: _ClipPlan) -> Optional[int]:
         value = _match_override(plans.index(plan), plan.path, plan.metadata, audio_track_overrides)
@@ -705,6 +1031,8 @@ def _maybe_apply_audio_alignment(
         return streams[0].index
 
     ref_override = _match_audio_override(reference_plan)
+    if ref_override is not None:
+        forced_streams.add(reference_plan.path)
     reference_stream_index = ref_override if ref_override is not None else _pick_default(
         stream_infos.get(reference_plan.path, [])
     )
@@ -716,13 +1044,11 @@ def _maybe_apply_audio_alignment(
             break
 
     def _score_candidate(candidate: audio_alignment.AudioStreamInfo) -> float:
-        if reference_stream_info is None:
-            base = 0.0
-        else:
-            base = 0.0
+        base = 0.0
+        if reference_stream_info is not None:
             if reference_stream_info.language and candidate.language == reference_stream_info.language:
                 base += 100.0
-            elif not candidate.language and reference_stream_info.language:
+            elif reference_stream_info.language and not candidate.language:
                 base += 10.0
             if candidate.codec_name == reference_stream_info.codec_name:
                 base += 30.0
@@ -749,6 +1075,7 @@ def _maybe_apply_audio_alignment(
         override_idx = _match_audio_override(target)
         if override_idx is not None:
             target_stream_indices[target.path] = override_idx
+            forced_streams.add(target.path)
             continue
         infos = stream_infos.get(target.path, [])
         if not infos:
@@ -757,32 +1084,50 @@ def _maybe_apply_audio_alignment(
         best = max(infos, key=_score_candidate)
         target_stream_indices[target.path] = best.index
 
-    print("[cyan]Audio stream selection:[/cyan]")
-    def _describe(plan: _ClipPlan, stream_idx: int) -> str:
+    def _describe_stream(plan: _ClipPlan, stream_idx: int) -> tuple[str, str]:
         infos = stream_infos.get(plan.path, [])
         picked = next((info for info in infos if info.index == stream_idx), None)
-        if picked is None:
-            return f"{stream_idx}"
-        language = picked.language or "und"
-        layout = picked.channel_layout or (f"{picked.channels}ch" if picked.channels else "?")
-        rate = picked.sample_rate or 0
-        return (
-            f"{stream_idx} [{language} {picked.codec_name} {layout} "
-            f"{rate}Hz {'default' if picked.is_default else ''}]"
-        )
+        codec = (picked.codec_name if picked and picked.codec_name else "unknown").strip() or "unknown"
+        language = (picked.language if picked and picked.language else "und").strip() or "und"
+        if picked and picked.channel_layout:
+            layout = picked.channel_layout.strip()
+        elif picked and picked.channels:
+            layout = f"{picked.channels}ch"
+        else:
+            layout = "?"
+        descriptor = f"{codec}/{language}/{layout}"
+        forced_suffix = " (forced)" if plan.path in forced_streams else ""
+        label = plan_labels[plan.path]
+        return f"{label}->{descriptor}{forced_suffix}", descriptor
 
-    print(
-        f"  Reference {escape(reference_plan.path.name)} -> "
-        f"{_describe(reference_plan, reference_stream_index)}"
+    reference_stream_text, reference_descriptor = _describe_stream(reference_plan, reference_stream_index)
+    display_data.json_reference_stream = reference_stream_text
+
+    for idx, target in enumerate(targets):
+        stream_idx = target_stream_indices.get(target.path, 0)
+        target_stream_text, target_descriptor = _describe_stream(target, stream_idx)
+        display_data.json_target_streams[plan_labels[target.path]] = target_descriptor
+        if idx == 0:
+            display_data.stream_lines.append(
+                f"Audio streams: ref={reference_stream_text}  target={target_stream_text}"
+            )
+        else:
+            display_data.stream_lines.append(f"Audio streams: target={target_stream_text}")
+
+    reference_fps_tuple = reference_plan.effective_fps or reference_plan.source_fps
+    reference_fps = _fps_to_float(reference_fps_tuple)
+    max_offset = float(audio_cfg.max_offset_seconds)
+    raw_duration = audio_cfg.duration_seconds if audio_cfg.duration_seconds is not None else None
+    duration_seconds = float(raw_duration) if raw_duration is not None else None
+    start_seconds = float(audio_cfg.start_seconds or 0.0)
+    search_text = f"±{max_offset:.2f}s"
+    window_text = f"{duration_seconds:.2f}s" if duration_seconds is not None else "auto"
+    start_text = f"{start_seconds:.2f}s"
+    display_data.estimation_line = (
+        f"Estimating audio offsets … fps={reference_fps:.3f} "
+        f"search={search_text} start={start_text} window={window_text}"
     )
-    for target in targets:
-        idx = target_stream_indices[target.path]
-        print(
-            f"  Target    {escape(target.path.name)} -> "
-            f"{_describe(target, idx)}"
-        )
 
-    offsets_path = (root / audio_cfg.offsets_filename).resolve()
     try:
         _, existing_entries = audio_alignment.load_offsets(offsets_path)
     except audio_alignment.AudioAlignmentError as exc:
@@ -792,72 +1137,70 @@ def _maybe_apply_audio_alignment(
         ) from exc
 
     try:
-        base_start = audio_cfg.start_seconds
-        base_duration = audio_cfg.duration_seconds
-
+        base_start = float(audio_cfg.start_seconds or 0.0)
+        base_duration_param: Optional[float]
+        if audio_cfg.duration_seconds is None:
+            base_duration_param = None
+        else:
+            base_duration_param = float(audio_cfg.duration_seconds)
         hop_length = max(1, min(audio_cfg.hop_length, max(1, audio_cfg.sample_rate // 100)))
 
         measurements: List[audio_alignment.AlignmentMeasurement]
         negative_offsets: Dict[str, bool] = {}
 
-        if targets:
-            with Progress(
-                TextColumn('{task.description}'),
-                BarColumn(),
-                TextColumn('{task.completed}/{task.total}'),
-                TextColumn('{task.percentage:>6.02f}%'),
-                TextColumn('{task.fields[rate]}'),
-                TimeRemainingColumn(),
-                transient=False,
-            ) as audio_progress:
-                task_id = audio_progress.add_task(
-                    'Estimating audio offsets',
-                    total=len(targets),
-                    rate='   0.00 pairs/s',
-                )
-                processed = 0
-                start_time = time.perf_counter()
+        progress_columns = (
+            TextColumn('{task.description}'),
+            BarColumn(),
+            TextColumn('{task.completed}/{task.total}'),
+            TextColumn('{task.percentage:>6.02f}%'),
+            TextColumn('{task.fields[rate]}'),
+            TimeRemainingColumn(),
+        )
+        progress_manager = (
+            reporter.progress(*progress_columns, transient=False)
+            if reporter is not None
+            else Progress(*progress_columns, transient=False)
+        )
+        with progress_manager as audio_progress:
+            task_id = audio_progress.add_task(
+                'Estimating audio offsets',
+                total=len(targets),
+                rate='   0.00 pairs/s',
+            )
+            processed = 0
+            start_time = time.perf_counter()
 
-                def _advance_audio(count: int) -> None:
-                    nonlocal processed
-                    processed += count
-                    elapsed = time.perf_counter() - start_time
-                    rate_val = processed / elapsed if elapsed > 0 else 0.0
-                    audio_progress.update(
-                        task_id,
-                        completed=min(processed, len(targets)),
-                        rate=f"{rate_val:7.2f} pairs/s",
-                    )
-
-                measurements = audio_alignment.measure_offsets(
-                    reference_plan.path,
-                    [plan.path for plan in targets],
-                    sample_rate=audio_cfg.sample_rate,
-                    hop_length=hop_length,
-                    start_seconds=base_start,
-                    duration_seconds=base_duration,
-                    reference_stream=reference_stream_index,
-                    target_streams=target_stream_indices,
-                    progress_callback=_advance_audio,
+            def _advance_audio(count: int) -> None:
+                nonlocal processed
+                processed += count
+                elapsed = time.perf_counter() - start_time
+                rate_val = processed / elapsed if elapsed > 0 else 0.0
+                audio_progress.update(
+                    task_id,
+                    completed=min(processed, len(targets)),
+                    rate=f"{rate_val:7.2f} pairs/s",
                 )
 
-                if processed < len(targets):
-                    audio_progress.update(
-                        task_id,
-                        completed=len(targets),
-                        rate=f"{0.0:7.2f} pairs/s",
-                    )
-        else:
             measurements = audio_alignment.measure_offsets(
                 reference_plan.path,
                 [plan.path for plan in targets],
                 sample_rate=audio_cfg.sample_rate,
                 hop_length=hop_length,
                 start_seconds=base_start,
-                duration_seconds=base_duration,
+                duration_seconds=base_duration_param,
                 reference_stream=reference_stream_index,
                 target_streams=target_stream_indices,
+                progress_callback=_advance_audio,
             )
+
+            if processed < len(targets):
+                elapsed = time.perf_counter() - start_time
+                final_rate = processed / elapsed if elapsed > 0 else 0.0
+                audio_progress.update(
+                    task_id,
+                    completed=len(targets),
+                    rate=f"{final_rate:7.2f} pairs/s",
+                )
 
         frame_bias = int(audio_cfg.frame_offset_bias or 0)
         if frame_bias != 0:
@@ -901,8 +1244,9 @@ def _maybe_apply_audio_alignment(
                     continue
                 measurement.frames = abs(int(measurement.frames))
                 negative_offsets[measurement.file.name] = True
-                negative_override_notes[measurement.key] = \
+                negative_override_notes[measurement.key] = (
                     "Suggested negative offset applied to the opposite clip for trim-first behaviour."
+                )
 
         if swap_enabled and swap_candidates:
             additional_measurements: List[audio_alignment.AlignmentMeasurement] = []
@@ -959,150 +1303,134 @@ def _maybe_apply_audio_alignment(
 
             measurements.extend(additional_measurements)
 
-        if measurements:
-            print("[cyan]Audio offsets:[/cyan]")
-            for measurement in measurements:
-                frames_text = (
-                    f"{measurement.frames}fr"
-                    if measurement.frames is not None
-                    else "n/a"
+        raw_warning_messages: List[str] = []
+        for measurement in measurements:
+            reasons: List[str] = []
+            if measurement.error:
+                reasons.append(measurement.error)
+            if abs(measurement.offset_seconds) > audio_cfg.max_offset_seconds:
+                reasons.append(
+                    f"offset {measurement.offset_seconds:.3f}s exceeds limit {audio_cfg.max_offset_seconds:.3f}s"
                 )
-                suffix = ""
-                if measurement.file.name in negative_offsets:
-                    suffix = " (reference advanced; trimming target)"
-                if measurement.error:
-                    print(
-                        f"  {escape(measurement.file.name)}: error {escape(measurement.error)}"
-                    )
-                else:
-                    print(
-                        f"  {escape(measurement.file.name)}: "
-                        f"{measurement.offset_seconds:.3f}s ({frames_text}) "
-                        f"corr={measurement.correlation:.2f}{suffix}"
-                    )
-                    detail = swap_details.get(measurement.file.name)
-                    if detail:
-                        print(f"    note: {escape(detail)}")
+            if measurement.correlation < audio_cfg.correlation_threshold:
+                reasons.append(
+                    f"correlation {measurement.correlation:.2f} below threshold {audio_cfg.correlation_threshold:.2f}"
+                )
+            if measurement.frames is None:
+                reasons.append("unable to derive frame offset (missing fps)")
+
+            if reasons:
+                measurement.frames = None
+                measurement.error = "; ".join(reasons)
+                negative_offsets.pop(measurement.file.name, None)
+                label = name_to_label.get(measurement.file.name, measurement.file.name)
+                raw_warning_messages.append(f"{label}: {measurement.error}")
+
+        for warning_message in dict.fromkeys(raw_warning_messages):
+            _warn(warning_message)
+
+        offset_lines: List[str] = []
+        offsets_sec: Dict[str, float] = {}
+        offsets_frames: Dict[str, int] = {}
+
+        for measurement in measurements:
+            clip_name = measurement.file.name
+            if clip_name == reference_plan.path.name and len(measurements) > 1:
+                continue
+            label = name_to_label.get(clip_name, clip_name)
+            if measurement.offset_seconds is not None:
+                offsets_sec[label] = float(measurement.offset_seconds)
+            if measurement.frames is not None:
+                offsets_frames[label] = int(measurement.frames)
+            display_data.correlations[label] = float(measurement.correlation)
+
+            if measurement.error:
+                offset_lines.append(
+                    f"Audio offsets: {label}: manual edit required ({measurement.error})"
+                )
+                continue
+
+            fps_value = 0.0
+            if measurement.target_fps and measurement.target_fps > 0:
+                fps_value = float(measurement.target_fps)
+            elif measurement.reference_fps and measurement.reference_fps > 0:
+                fps_value = float(measurement.reference_fps)
+
+            frames_text = "n/a"
+            if measurement.frames is not None:
+                frames_text = f"{measurement.frames:+d}f"
+            fps_text = f"{fps_value:.3f}" if fps_value > 0 else "0.000"
+            suffix = ""
+            if clip_name in negative_offsets:
+                suffix = " (reference advanced; trimming target)"
+            offset_lines.append(
+                f"Audio offsets: {label}: {measurement.offset_seconds:+.3f}s ({frames_text} @ {fps_text}){suffix}"
+            )
+            detail = swap_details.get(clip_name)
+            if detail:
+                offset_lines.append(f"  note: {detail}")
+
+        if not offset_lines:
+            offset_lines.append("Audio offsets: none detected")
+
+        display_data.offset_lines = offset_lines
+        display_data.json_offsets_sec = offsets_sec
+        display_data.json_offsets_frames = offsets_frames
+
+        applied_frames, statuses = audio_alignment.update_offsets_file(
+            offsets_path,
+            reference_plan.path.name,
+            measurements,
+            existing_entries,
+            negative_override_notes,
+        )
+
+        final_map: Dict[str, int] = {reference_plan.path.name: 0}
+        for name, frames in applied_frames.items():
+            final_map[name] = frames
+
+        baseline = min(final_map.values()) if final_map else 0
+        baseline_shift = int(-baseline) if baseline < 0 else 0
+
+        final_adjustments: Dict[str, int] = {}
+        for plan in plans:
+            desired = final_map.get(plan.path.name)
+            if desired is None:
+                continue
+            adjustment = int(desired - baseline)
+            if adjustment < 0:
+                adjustment = 0
+            if adjustment:
+                plan.trim_start = max(0, plan.trim_start + adjustment)
+                plan.alignment_frames = adjustment
+                plan.alignment_status = statuses.get(plan.path.name, "auto")
+            else:
+                plan.alignment_frames = 0
+                plan.alignment_status = statuses.get(plan.path.name, "auto") if plan.path.name in statuses else ""
+            final_adjustments[plan.path.name] = adjustment
+
+        if baseline_shift:
+            for plan in plans:
+                if plan is reference_plan:
+                    plan.alignment_status = "baseline"
+
+        summary = _AudioAlignmentSummary(
+            offsets_path=offsets_path,
+            reference_name=reference_plan.path.name,
+            measurements=measurements,
+            applied_frames=applied_frames,
+            baseline_shift=baseline_shift,
+            statuses=statuses,
+            reference_plan=reference_plan,
+            final_adjustments=final_adjustments,
+            swap_details=swap_details,
+        )
+        return summary, display_data
     except audio_alignment.AudioAlignmentError as exc:
         raise CLIAppError(
             f"Audio alignment failed: {exc}",
             rich_message=f"[red]Audio alignment failed:[/red] {exc}",
         ) from exc
-
-    warnings: List[str] = []
-    for measurement in measurements:
-        reasons: List[str] = []
-        if measurement.error:
-            reasons.append(measurement.error)
-        if abs(measurement.offset_seconds) > audio_cfg.max_offset_seconds:
-            reasons.append(
-                f"offset {measurement.offset_seconds:.3f}s exceeds limit {audio_cfg.max_offset_seconds:.3f}s"
-            )
-        if measurement.correlation < audio_cfg.correlation_threshold:
-            reasons.append(
-                f"correlation {measurement.correlation:.2f} below threshold {audio_cfg.correlation_threshold:.2f}"
-            )
-        if measurement.frames is None:
-            reasons.append("unable to derive frame offset (missing fps)")
-
-        if reasons:
-            measurement.frames = None
-            measurement.error = "; ".join(reasons)
-            negative_offsets.pop(measurement.file.name, None)
-            warnings.append(f"{measurement.file.name}: {measurement.error}")
-    if warnings:
-        print("[yellow]Audio alignment warnings:[/yellow]")
-        for message in warnings:
-            print(f"  - {escape(message)}")
-
-    applied_frames, statuses = audio_alignment.update_offsets_file(
-        offsets_path,
-        reference_plan.path.name,
-        measurements,
-        existing_entries,
-        negative_override_notes,
-    )
-
-    final_map: Dict[str, int] = {reference_plan.path.name: 0}
-    for name, frames in applied_frames.items():
-        final_map[name] = frames
-
-    baseline = min(final_map.values()) if final_map else 0
-    baseline_shift = int(-baseline) if baseline < 0 else 0
-
-    final_adjustments: Dict[str, int] = {}
-    for plan in plans:
-        desired = final_map.get(plan.path.name)
-        if desired is None:
-            continue
-        adjustment = int(desired - baseline)
-        if adjustment < 0:
-            adjustment = 0
-        if adjustment:
-            plan.trim_start = max(0, plan.trim_start + adjustment)
-            plan.alignment_frames = adjustment
-            plan.alignment_status = statuses.get(plan.path.name, "auto")
-        else:
-            plan.alignment_frames = 0
-            plan.alignment_status = statuses.get(plan.path.name, "auto") if plan.path.name in statuses else ""
-        final_adjustments[plan.path.name] = adjustment
-
-    if baseline_shift:
-        for plan in plans:
-            if plan is reference_plan:
-                plan.alignment_status = "baseline"
-
-    return _AudioAlignmentSummary(
-        offsets_path=offsets_path,
-        reference_name=reference_plan.path.name,
-        measurements=measurements,
-        applied_frames=applied_frames,
-        baseline_shift=baseline_shift,
-        statuses=statuses,
-        reference_plan=reference_plan,
-        final_adjustments=final_adjustments,
-        swap_details=swap_details,
-    )
-
-
-def _print_alignment_summary(summary: _AudioAlignmentSummary, plans: Sequence[_ClipPlan]) -> None:
-    print("[cyan]Audio alignment summary:[/cyan]")
-    ref_label = escape(summary.reference_name)
-    if summary.baseline_shift:
-        print(
-            f"  Reference {ref_label}: trimmed +{summary.baseline_shift} frame(s) for baseline alignment"
-        )
-    else:
-        print(f"  Reference {ref_label}: no trim applied")
-
-    plan_map = {plan.path.name: plan for plan in plans}
-
-    for measurement in summary.measurements:
-        name = measurement.file.name
-        plan = plan_map.get(name)
-        status = summary.statuses.get(name, "skipped")
-        applied = summary.applied_frames.get(name)
-        corr = f"{measurement.correlation:.2f}" if not math.isnan(measurement.correlation) else "nan"
-        if plan is None:
-            continue
-        if applied is None:
-            note = measurement.error or "no offset applied"
-            print(f"  - {escape(name)}: skipped ({escape(note)})")
-            continue
-        adjustment = summary.final_adjustments.get(name, 0)
-        seconds = measurement.target_fps and applied / measurement.target_fps if measurement.target_fps else None
-        seconds_text = f" ({applied / measurement.target_fps:.3f}s)" if seconds is not None else ""
-        print(
-            f"  - {escape(name)}: {status} trim +{adjustment} frame(s) [correlation={corr}]{seconds_text}"
-        )
-        detail = summary.swap_details.get(name)
-        if detail:
-            print(f"      note: {escape(detail)}")
-
-    print(
-        f"  Offsets file: {summary.offsets_path}"
-    )
-
 
 def _pick_preview_frames(clip: object, count: int, seed: int) -> List[int]:
     total = getattr(clip, "num_frames", 0)
@@ -1136,21 +1464,29 @@ def _sample_random_frames(clip: object, count: int, seed: int, exclude: Sequence
     return sorted(rng.sample(available, count))
 
 
+
 def _confirm_alignment_with_screenshots(
     plans: Sequence[_ClipPlan],
     summary: _AudioAlignmentSummary | None,
     cfg: AppConfig,
     root: Path,
+    reporter: CliOutputManager,
+    display: _AudioAlignmentDisplayData | None,
 ) -> None:
-    if summary is None or not cfg.audio_alignment.confirm_with_screenshots:
+    if summary is None or display is None:
+        return
+    if not cfg.audio_alignment.confirm_with_screenshots:
+        display.confirmation = display.confirmation or "auto"
         return
 
     clips = [plan.clip for plan in plans]
     if any(clip is None for clip in clips):
+        display.confirmation = display.confirmation or "auto"
         return
 
     reference_clip = summary.reference_plan.clip
     if reference_clip is None:
+        display.confirmation = display.confirmation or "auto"
         return
 
     timestamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -1165,48 +1501,53 @@ def _confirm_alignment_with_screenshots(
         summary.reference_plan.path.stem,
     ]
     base_name = next((str(value).strip() for value in name_candidates if value and str(value).strip()), "clip")
-    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", base_name).strip("._-")
-    if not safe_name:
-        safe_name = "clip"
+    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", base_name).strip("._-") or "clip"
     preview_folder = f"{safe_name}-{timestamp}"
     preview_dir = (root / base_dir / "audio_alignment" / preview_folder).resolve()
 
     initial_frames = _pick_preview_frames(reference_clip, 2, cfg.audio_alignment.random_seed)
 
     try:
-            generated = generate_screenshots(
-                clips,
-                initial_frames,
-                [str(plan.path) for plan in plans],
-                [plan.metadata for plan in plans],
-                preview_dir,
-                cfg.screenshots,
-                cfg.color,
-                trim_offsets=[plan.trim_start for plan in plans],
-            )
+        generated = generate_screenshots(
+            clips,
+            initial_frames,
+            [str(plan.path) for plan in plans],
+            [plan.metadata for plan in plans],
+            preview_dir,
+            cfg.screenshots,
+            cfg.color,
+            trim_offsets=[plan.trim_start for plan in plans],
+        )
     except ScreenshotError as exc:
         raise CLIAppError(
             f"Alignment preview failed: {exc}",
             rich_message=f"[red]Alignment preview failed:[/red] {exc}",
         ) from exc
 
-    if generated:
-        print("[cyan]Preview frames saved:[/cyan]")
-        for path in generated:
-            print(f"  - {path}")
+    preview_paths = [str(path) for path in generated]
+    display.preview_paths = preview_paths
+    if preview_paths:
+        reporter.line(f"Preview saved: {', '.join(preview_paths)}")
+
+    reporter.line("Awaiting alignment confirmation. (press y/n)")
 
     if not sys.stdin.isatty():  # pragma: no cover - runtime-dependent
-        print("[yellow]Audio alignment confirmation skipped (non-interactive session).[/yellow]")
+        display.confirmation = "auto"
+        reporter.line("confirm=auto")
+        display.warnings.append("[AUDIO] Audio alignment confirmation skipped (non-interactive session).")
         return
-
-    print("[cyan]Awaiting audio alignment confirmation... (press Y/n)[/cyan]")
 
     if click.confirm(
         "Do the preview frames look aligned?",
         default=True,
         show_default=True,
     ):
+        display.confirmation = "yes"
+        reporter.line("confirm=yes")
         return
+
+    display.confirmation = "no"
+    reporter.line("confirm=no")
 
     inspection_dir = preview_dir / "inspection"
     extra_frames = _sample_random_frames(
@@ -1232,19 +1573,18 @@ def _confirm_alignment_with_screenshots(
             rich_message=f"[red]Alignment inspection failed:[/red] {exc}",
         ) from exc
 
-    if extra_paths:
-        print("[cyan]Additional inspection frames saved:[/cyan]")
-        for path in extra_paths:
-            print(f"  - {path}")
+        if extra_paths:
+            reporter.line(
+                f"Additional inspection frames saved: {', '.join(str(path) for path in extra_paths)}"
+            )
 
-    print(
-        "[yellow]Audio alignment not confirmed.[/yellow] "
-        "Adjust the offsets in the generated file and rerun."
+    reporter.console.print(
+        "[yellow]Audio alignment not confirmed.[/yellow] Adjust the offsets in the generated file and rerun."
     )
     try:
         click.launch(str(summary.offsets_path))
     except Exception:
-        print(f"[yellow]Open and edit:[/yellow] {summary.offsets_path}")
+        reporter.console.print(f"[yellow]Open and edit:[/yellow] {summary.offsets_path}")
 
     raise CLIAppError(
         "Audio alignment requires manual adjustment.",
@@ -1253,20 +1593,15 @@ def _confirm_alignment_with_screenshots(
             f"Edit {summary.offsets_path} and rerun."
         ),
     )
-def _print_summary(files: Sequence[Path], frames: Sequence[int], out_dir: Path, url: str | None) -> None:
-    print("[green]Comparison ready[/green]")
-    print(f"  Files     : {len(files)}")
-    print(f"  Frames    : {len(frames)} -> {frames}")
-    builtins.print(f"  Output dir: {out_dir}")
-    if url:
-        print(f"  Slow.pics : {url}")
-
 
 def run_cli(
     config_path: str,
     input_dir: str | None = None,
     *,
     audio_track_overrides: Iterable[str] | None = None,
+    quiet: bool = False,
+    verbose: bool = False,
+    no_color: bool = False,
 ) -> RunResult:
     config_location = Path(config_path).expanduser()
 
@@ -1308,7 +1643,101 @@ def run_cli(
             rich_message=f"[red]Input directory not found:[/red] {root}",
         )
 
+    layout_path = Path(__file__).with_name("cli_layout.v1.json")
+    reporter = CliOutputManager(
+        quiet=quiet,
+        verbose=verbose,
+        no_color=no_color,
+        layout_path=layout_path,
+    )
+    collected_warnings: List[str] = []
+    json_tail: Dict[str, object] = {
+        "clips": [],
+        "trims": {"per_clip": {}},
+        "window": {},
+        "alignment": {"manual_start_s": 0.0, "manual_end_s": "unchanged"},
+        "audio_alignment": {
+            "enabled": bool(cfg.audio_alignment.enable),
+            "reference_stream": None,
+            "target_stream": {},
+            "offsets_sec": {},
+            "offsets_frames": {},
+            "preview_paths": [],
+            "confirmed": None,
+            "offsets_filename": str((root / cfg.audio_alignment.offsets_filename).resolve()),
+        },
+        "analysis": {},
+        "render": {},
+        "tonemap": {},
+        "verify": {
+            "count": 0,
+            "threshold": float(cfg.color.verify_luma_threshold),
+            "delta": {
+                "max": None,
+                "average": None,
+                "frame": None,
+                "file": None,
+                "auto_selected": None,
+            },
+            "entries": [],
+        },
+        "cache": {},
+        "slowpics": {
+            "enabled": bool(cfg.slowpics.auto_upload),
+            "title": {
+                "inputs": {
+                    "resolved_base": None,
+                    "collection_name": None,
+                    "collection_suffix": getattr(cfg.slowpics, "collection_suffix", ""),
+                },
+                "final": None,
+            },
+            "url": None,
+            "shortcut_path": None,
+            "deleted_screens_dir": False,
+            "is_public": bool(cfg.slowpics.is_public),
+            "is_hentai": bool(cfg.slowpics.is_hentai),
+            "remove_after_days": int(cfg.slowpics.remove_after_days),
+        },
+        "warnings": [],
+    }
+
     audio_track_override_map = _parse_audio_track_overrides(audio_track_overrides or [])
+
+    layout_data: Dict[str, Any] = {
+        "clips": {
+            "count": 0,
+            "items": [],
+            "ref": {},
+            "tgt": {},
+        },
+        "trims": {},
+        "window": json_tail["window"],
+        "alignment": json_tail["alignment"],
+        "audio_alignment": json_tail["audio_alignment"],
+        "analysis": json_tail["analysis"],
+        "render": json_tail.get("render", {}),
+        "tonemap": json_tail.get("tonemap", {}),
+        "overlay": json_tail.get("overlay", {}),
+        "verify": json_tail.get("verify", {}),
+        "cache": json_tail["cache"],
+        "slowpics": json_tail["slowpics"],
+        "tmdb": {
+            "category": None,
+            "id": None,
+            "title": None,
+            "year": None,
+            "lang": None,
+        },
+        "overrides": {
+            "change_fps": "change_fps" if cfg.overrides.change_fps else "none",
+        },
+        "warnings": [],
+    }
+
+    reporter.update_values(layout_data)
+    reporter.set_flag("upload_enabled", bool(cfg.slowpics.auto_upload))
+    reporter.set_flag("tmdb_resolved", False)
 
     vs_core.configure(
         search_paths=cfg.runtime.vapoursynth_python_paths,
@@ -1340,6 +1769,11 @@ def run_cli(
     tmdb_error_message: Optional[str] = None
     tmdb_ambiguous = False
     tmdb_api_key_present = bool(cfg.tmdb.api_key.strip())
+    tmdb_line: Optional[str] = None
+    tmdb_colored_line: Optional[str] = None
+    tmdb_notes: List[str] = []
+    slowpics_tmdb_disclosure_line: Optional[str] = None
+    slowpics_verbose_tmdb_tag: Optional[str] = None
 
     if tmdb_api_key_present:
         base_file = files[0]
@@ -1417,85 +1851,197 @@ def run_cli(
     if tmdb_category and not (getattr(cfg.slowpics, "tmdb_category", "") or "").strip():
         cfg.slowpics.tmdb_category = tmdb_category
 
-    collection_template = (cfg.slowpics.collection_name or "").strip()
+    suffix_literal = getattr(cfg.slowpics, "collection_suffix", "") or ""
+    suffix = suffix_literal.strip()
+    template_raw = cfg.slowpics.collection_name or ""
+    collection_template = template_raw.strip()
+
+    resolved_title_value = (tmdb_context.get("Title") or "").strip()
+    resolved_year_value = (tmdb_context.get("Year") or "").strip()
+    resolved_base_title: Optional[str] = None
+    if resolved_title_value:
+        resolved_base_title = resolved_title_value
+        if resolved_year_value:
+            resolved_base_title = f"{resolved_title_value} ({resolved_year_value})"
+
+    # slow.pics title policy: an explicit collection_name template is treated as the exact
+    # destination title, while the suffix is only appended when we fall back to the resolved
+    # base title (ResolvedTitle + optional Year). This mirrors the README contract.
     if collection_template:
         rendered_collection = _render_collection_name(collection_template, tmdb_context).strip()
-        cfg.slowpics.collection_name = rendered_collection or "Frame Comparison"
+        final_collection_name = rendered_collection or "Frame Comparison"
     else:
-        derived_title = (tmdb_context.get("Title") or "").strip() or files[0].stem
-        derived_year = (tmdb_context.get("Year") or "").strip()
-        collection_name = derived_title
-        if derived_title and derived_year:
-            collection_name = f"{derived_title} ({derived_year})"
-        cfg.slowpics.collection_name = collection_name or "Frame Comparison"
+        derived_title = resolved_title_value or metadata_title or files[0].stem
+        derived_year = resolved_year_value
+        base_collection = (derived_title or "").strip()
+        if base_collection and derived_year:
+            base_collection = f"{base_collection} ({derived_year})"
+        final_collection_name = base_collection or "Frame Comparison"
+        if suffix:
+            final_collection_name = f"{final_collection_name} {suffix}" if final_collection_name else suffix
 
-    suffix = (getattr(cfg.slowpics, "collection_suffix", "") or "").strip()
-    if suffix:
-        base_name = (cfg.slowpics.collection_name or "").strip()
-        cfg.slowpics.collection_name = f"{base_name} {suffix}" if base_name else suffix
+    cfg.slowpics.collection_name = final_collection_name
+    slowpics_final_title = final_collection_name
+    slowpics_resolved_base = resolved_base_title
+    slowpics_title_inputs = {
+        "resolved_base": slowpics_resolved_base,
+        "collection_name": cfg.slowpics.collection_name,
+        "collection_suffix": suffix_literal,
+    }
+    slowpics_inputs_json = json_tail["slowpics"]["title"]["inputs"]
+    slowpics_inputs_json["resolved_base"] = slowpics_title_inputs["resolved_base"]
+    slowpics_inputs_json["collection_name"] = slowpics_title_inputs["collection_name"]
+    slowpics_inputs_json["collection_suffix"] = slowpics_title_inputs["collection_suffix"]
+    json_tail["slowpics"]["title"]["final"] = slowpics_final_title
 
     if tmdb_resolution is not None:
         match_title = tmdb_resolution.title or tmdb_context.get("Title") or files[0].stem
-        year_text = f" ({tmdb_resolution.year})" if tmdb_resolution.year else ""
-        lang_text = tmdb_resolution.original_language or "unknown"
+        year_display = tmdb_context.get("Year") or ""
+        lang_text = tmdb_resolution.original_language or "und"
+        tmdb_identifier = f"{tmdb_resolution.category}/{tmdb_resolution.tmdb_id}"
+        tmdb_line = (
+            f"TMDB: {tmdb_identifier}  "
+            f"\"{match_title} ({year_display})\"  lang={lang_text}"
+        )
+        title_segment = _color_text(escape(f'"{match_title} ({year_display})"'), "bright_white")
+        lang_segment = _format_kv("lang", lang_text, label_style="dim cyan", value_style="blue")
+        tmdb_colored_line = "  ".join(
+            [
+                _format_kv("TMDB", tmdb_identifier, label_style="cyan", value_style="bright_white"),
+                title_segment,
+                lang_segment,
+            ]
+        )
         heuristic = (tmdb_resolution.candidate.reason or "match").replace("_", " ").replace("-", " ")
         source = "filename" if tmdb_resolution.candidate.used_filename_search else "external id"
-        category_slug = tmdb_resolution.category.lower()
-        link = f"https://www.themoviedb.org/{category_slug}/{tmdb_resolution.tmdb_id}"
-        print(
-            "[cyan]TMDB match:[/cyan] "
-            f"{match_title}{year_text} "
-            f"[{tmdb_resolution.category}] -> {link} "
-            f"({source}, {heuristic.strip()}) lang={lang_text}"
+        reporter.verbose_line(
+            f"TMDB match heuristics: source={source} heuristic={heuristic.strip()}"
         )
+        if slowpics_resolved_base:
+            base_display = slowpics_resolved_base
+        elif match_title and year_display:
+            base_display = f"{match_title} ({year_display})"
+        else:
+            base_display = match_title or "(n/a)"
+        slowpics_tmdb_disclosure_line = (
+            f'slow.pics title inputs: base="{escape(str(base_display))}"  '
+            f'collection_suffix="{escape(str(suffix_literal))}"'
+        )
+        if tmdb_category and tmdb_id_value:
+            slowpics_verbose_tmdb_tag = f"TMDB={tmdb_category}_{tmdb_id_value}"
+        layout_data["tmdb"].update(
+            {
+                "category": tmdb_resolution.category,
+                "id": tmdb_resolution.tmdb_id,
+                "title": match_title,
+                "year": year_display,
+                "lang": lang_text,
+            }
+        )
+        reporter.set_flag("tmdb_resolved", True)
     elif manual_tmdb:
         display_title = tmdb_context.get("Title") or files[0].stem
-        category_slug = (tmdb_category or "").lower()
-        link = (
-            f"https://www.themoviedb.org/{category_slug}/{tmdb_id_value}"
-            if tmdb_id_value and category_slug
-            else tmdb_id_value
+        category_display = tmdb_category or cfg.slowpics.tmdb_category or ""
+        id_display = tmdb_id_value or cfg.slowpics.tmdb_id or ""
+        lang_text = tmdb_language or tmdb_context.get("OriginalLanguage") or "und"
+        tmdb_line = (
+            f"TMDB: {category_display}/{id_display}  "
+            f"\"{display_title} ({tmdb_context.get('Year') or ''})\"  lang={lang_text}"
         )
-        print(
-            "[cyan]TMDB manual override:[/cyan] "
-            f"{tmdb_category}/{tmdb_id_value} ({link}) for {display_title}"
+        identifier = f"{category_display}/{id_display}".strip("/")
+        title_segment = _color_text(
+            escape(f'"{display_title} ({tmdb_context.get("Year") or ""})"'),
+            "bright_white",
         )
+        lang_segment = _format_kv("lang", lang_text, label_style="dim cyan", value_style="blue")
+        tmdb_colored_line = "  ".join(
+            [
+                _format_kv("TMDB", identifier, label_style="cyan", value_style="bright_white"),
+                title_segment,
+                lang_segment,
+            ]
+        )
+        if slowpics_resolved_base:
+            base_display = slowpics_resolved_base
+        else:
+            year_component = tmdb_context.get("Year") or ""
+            if display_title and year_component:
+                base_display = f"{display_title} ({year_component})"
+            else:
+                base_display = display_title or "(n/a)"
+        slowpics_tmdb_disclosure_line = (
+            f'slow.pics title inputs: base="{escape(str(base_display))}"  '
+            f'collection_suffix="{escape(str(suffix_literal))}"'
+        )
+        if category_display and id_display:
+            slowpics_verbose_tmdb_tag = f"TMDB={category_display}_{id_display}"
+        layout_data["tmdb"].update(
+            {
+                "category": category_display,
+                "id": id_display,
+                "title": display_title,
+                "year": tmdb_context.get("Year") or "",
+                "lang": lang_text,
+            }
+        )
+        reporter.set_flag("tmdb_resolved", True)
     elif tmdb_api_key_present:
         if tmdb_error_message:
-            print(f"[yellow]TMDB lookup failed:[/yellow] {tmdb_error_message}")
+            message = f"TMDB lookup failed: {tmdb_error_message}"
+            tmdb_notes.append(message)
+            collected_warnings.append(message)
         elif tmdb_ambiguous:
-            print(
-                "[yellow]TMDB: ambiguous results for[/yellow] "
-                f"{files[0].name}; continuing without metadata."
-            )
+            message = f"TMDB ambiguous results for {files[0].name}; continuing without metadata."
+            tmdb_notes.append(message)
+            collected_warnings.append(message)
         else:
-            print(
-                "[yellow]TMDB: no confident match for[/yellow] "
-                f"{files[0].name}; continuing without metadata."
-            )
+            message = f"TMDB could not find a confident match for {files[0].name}."
+            tmdb_notes.append(message)
+            collected_warnings.append(message)
     elif not (cfg.slowpics.tmdb_id or "").strip():
-        print(
-            "[yellow]TMDB disabled:[/yellow] set [tmdb].api_key in config.toml to enable automatic matching."
-        )
-
-    labels = [meta.get("label") or file.name for meta, file in zip(metadata, files)]
-    print("[green]Files detected:[/green]")
-    for label, file in zip(labels, files):
-        print(f"  - {label} ({file.name})")
+        message = "TMDB disabled: set [tmdb].api_key in config.toml to enable automatic matching."
+        tmdb_notes.append(message)
+        collected_warnings.append(message)
 
     plans = _build_plans(files, metadata, cfg)
-    _print_trim_overrides(plans)
     analyze_path = _pick_analyze_file(files, metadata, cfg.analysis.analyze_clip, cache_dir=root)
 
-    alignment_summary = _maybe_apply_audio_alignment(
+    alignment_summary, alignment_display = _maybe_apply_audio_alignment(
         plans,
         cfg,
         analyze_path,
         root,
         audio_track_override_map,
+        reporter=reporter,
     )
-    if alignment_summary is not None:
-        _print_alignment_summary(alignment_summary, plans)
+    if (
+        alignment_summary is not None
+        and alignment_display is not None
+        and cfg.audio_alignment.enable
+    ):
+        _confirm_alignment_with_screenshots(
+            plans,
+            alignment_summary,
+            cfg,
+            root,
+            reporter,
+            alignment_display,
+        )
+    audio_offsets_applied = alignment_summary is not None
+    if alignment_display is not None:
+        json_tail["audio_alignment"]["offsets_filename"] = alignment_display.offsets_file_line.split(": ", 1)[-1]
+        json_tail["audio_alignment"]["reference_stream"] = alignment_display.json_reference_stream
+        json_tail["audio_alignment"]["target_stream"] = alignment_display.json_target_streams
+        json_tail["audio_alignment"]["offsets_sec"] = alignment_display.json_offsets_sec
+        json_tail["audio_alignment"]["offsets_frames"] = alignment_display.json_offsets_frames
+        if alignment_display.warnings:
+            collected_warnings.extend(alignment_display.warnings)
+    else:
+        json_tail["audio_alignment"]["reference_stream"] = None
+        json_tail["audio_alignment"]["target_stream"] = {}
+        json_tail["audio_alignment"]["offsets_sec"] = {}
+        json_tail["audio_alignment"]["offsets_frames"] = {}
+    json_tail["audio_alignment"]["enabled"] = bool(cfg.audio_alignment.enable)
 
     try:
         _init_clips(plans, cfg.runtime, root)
@@ -1508,7 +2054,65 @@ def run_cli(
     if any(clip is None for clip in clips):
         raise CLIAppError("Clip initialisation failed")
 
-    _confirm_alignment_with_screenshots(plans, alignment_summary, cfg, root)
+    clip_records: List[Dict[str, object]] = []
+    trim_details: List[Dict[str, object]] = []
+    for plan in plans:
+        label = (plan.metadata.get("label") or plan.path.name).strip()
+        frames_total = int(plan.source_num_frames or getattr(plan.clip, "num_frames", 0) or 0)
+        width = int(plan.source_width or getattr(plan.clip, "width", 0) or 0)
+        height = int(plan.source_height or getattr(plan.clip, "height", 0) or 0)
+        fps_tuple = plan.effective_fps or plan.source_fps or (24000, 1001)
+        fps_float = _fps_to_float(fps_tuple)
+        duration_seconds = frames_total / fps_float if fps_float > 0 else 0.0
+        clip_records.append(
+            {
+                "label": label,
+                "width": width,
+                "height": height,
+                "fps": fps_float,
+                "frames": frames_total,
+                "duration": duration_seconds,
+                "duration_tc": _format_seconds(duration_seconds),
+                "path": str(plan.path),
+            }
+        )
+        json_tail["clips"].append(
+            {
+                "label": label,
+                "width": width,
+                "height": height,
+                "fps": fps_float,
+                "frames": frames_total,
+                "duration_s": duration_seconds,
+                "duration_tc": _format_seconds(duration_seconds),
+                "path": str(plan.path),
+            }
+        )
+
+        lead_frames = max(0, int(plan.trim_start))
+        lead_seconds = lead_frames / fps_float if fps_float > 0 else 0.0
+        trail_frames = 0
+        if plan.trim_end is not None and plan.trim_end != 0:
+            if plan.trim_end < 0:
+                trail_frames = abs(int(plan.trim_end))
+            else:
+                trail_frames = 0
+        trail_seconds = trail_frames / fps_float if fps_float > 0 else 0.0
+        trim_details.append(
+            {
+                "label": label,
+                "lead_frames": lead_frames,
+                "lead_seconds": lead_seconds,
+                "trail_frames": trail_frames,
+                "trail_seconds": trail_seconds,
+            }
+        )
+        json_tail["trims"]["per_clip"][label] = {
+            "lead_f": lead_frames,
+            "trail_f": trail_frames,
+            "lead_s": lead_seconds,
+            "trail_s": trail_seconds,
+        }
 
     analyze_index = [plan.path for plan in plans].index(analyze_path)
     analyze_clip = plans[analyze_index].clip
@@ -1522,15 +2126,59 @@ def run_cli(
         analyze_clip
     )
     analyze_fps = analyze_fps_num / analyze_fps_den if analyze_fps_den else 0.0
-    _log_selection_windows(
-        plans,
-        selection_specs,
-        frame_window,
-        collapsed=windows_collapsed,
-        analyze_fps=analyze_fps,
-    )
+    manual_start_frame, manual_end_frame = frame_window
+    analyze_total_frames = int(clip_records[analyze_index]["frames"])
+    manual_start_seconds_value = manual_start_frame / analyze_fps if analyze_fps > 0 else float(manual_start_frame)
+    manual_end_seconds_value = manual_end_frame / analyze_fps if analyze_fps > 0 else float(manual_end_frame)
+    manual_end_changed = manual_end_frame < analyze_total_frames
+    json_tail["alignment"] = {
+        "manual_start_s": manual_start_seconds_value,
+        "manual_end_s": manual_end_seconds_value if manual_end_changed else None,
+    }
+    layout_data["alignment"] = json_tail["alignment"]
+
+    json_tail["window"] = {
+        "ignore_lead_seconds": float(cfg.analysis.ignore_lead_seconds),
+        "ignore_trail_seconds": float(cfg.analysis.ignore_trail_seconds),
+        "min_window_seconds": float(cfg.analysis.min_window_seconds),
+    }
+    layout_data["window"] = json_tail["window"]
+
+    for plan, spec in zip(plans, selection_specs):
+        if not spec.warnings:
+            continue
+        label = plan.metadata.get("label") or plan.path.name
+        for warning in spec.warnings:
+            message = f"Window warning for {label}: {warning}"
+            collected_warnings.append(message)
+    if windows_collapsed:
+        message = "Ignore lead/trail settings did not overlap across all sources; using fallback range."
+        collected_warnings.append(message)
 
     cache_info = _build_cache_info(root, plans, cfg, analyze_index)
+
+    cache_filename = cfg.analysis.frame_data_filename
+    cache_status = "disabled"
+    cache_reason = None
+    if not cfg.analysis.save_frames_data:
+        cache_status = "disabled"
+        cache_reason = "save_frames_data=false"
+    elif cache_info is None:
+        cache_status = "disabled"
+        cache_reason = "no_cache_info"
+    elif cache_info.path.exists():
+        cache_status = "reused"
+    else:
+        cache_status = "recomputed"
+        cache_reason = "missing"
+
+    json_tail["cache"] = {
+        "file": cache_filename,
+        "status": cache_status,
+    }
+    if cache_reason:
+        json_tail["cache"]["reason"] = cache_reason
+    layout_data["cache"] = json_tail["cache"]
 
     step_size = max(1, int(cfg.analysis.step))
     total_frames = getattr(analyze_clip, 'num_frames', 0)
@@ -1544,8 +2192,93 @@ def run_cli(
 
     cache_exists = cache_info is not None and cache_info.path.exists()
     if cache_exists:
-        print(f"[cyan]Using cached frame metrics:[/cyan] {cache_info.path.name}")
-        print("[cyan]Selecting frames from cached data...[/cyan]")
+        reporter.verbose_line(f"Using cached frame metrics: {cache_info.path.name}")
+    elif cache_status == "recomputed" and cache_info is not None:
+        reporter.verbose_line(f"Frame metrics cache will be refreshed: {cache_info.path.name}")
+    overrides_text = "change_fps" if cfg.overrides.change_fps else "none"
+    layout_data["overrides"]["change_fps"] = overrides_text
+
+    analysis_method = "absdiff" if cfg.analysis.motion_use_absdiff else "edge"
+    json_tail["analysis"] = {
+        "step": int(cfg.analysis.step),
+        "downscale_height": int(cfg.analysis.downscale_height),
+        "motion_method": analysis_method,
+        "motion_scenecut_quantile": float(cfg.analysis.motion_scenecut_quantile),
+        "motion_diff_radius": int(cfg.analysis.motion_diff_radius),
+        "counts": {
+            "dark": int(cfg.analysis.frame_count_dark),
+            "bright": int(cfg.analysis.frame_count_bright),
+            "motion": int(cfg.analysis.frame_count_motion),
+            "random": int(cfg.analysis.random_frames),
+            "user": len(cfg.analysis.user_frames),
+        },
+        "screen_separation_sec": float(cfg.analysis.screen_separation_sec),
+        "random_seed": int(cfg.analysis.random_seed),
+    }
+
+    layout_data["analysis"] = dict(json_tail["analysis"])
+    layout_data["clips"]["count"] = len(clip_records)
+    layout_data["clips"]["items"] = clip_records
+    layout_data["clips"]["ref"] = clip_records[0] if clip_records else {}
+    layout_data["clips"]["tgt"] = clip_records[1] if len(clip_records) > 1 else {}
+
+    trims_per_clip = json_tail["trims"]["per_clip"]
+    trim_lookup = {detail["label"]: detail for detail in trim_details}
+
+    def _trim_entry(label: str) -> Dict[str, object]:
+        detail = trim_lookup.get(label, {})
+        trim = trims_per_clip.get(label, {})
+        return {
+            "lead_f": trim.get("lead_f", 0),
+            "trail_f": trim.get("trail_f", 0),
+            "lead_s": detail.get("lead_seconds", 0.0),
+            "trail_s": detail.get("trail_seconds", 0.0),
+        }
+
+    layout_data["trims"] = {}
+    if clip_records:
+        layout_data["trims"]["ref"] = _trim_entry(clip_records[0]["label"])
+    if len(clip_records) > 1:
+        layout_data["trims"]["tgt"] = _trim_entry(clip_records[1]["label"])
+
+    reporter.update_values(layout_data)
+    reporter.render_sections(["banner", "at_a_glance", "discover", "prepare"])
+    reporter.render_sections(["audio_align"])
+    reporter.render_sections(["analyze"])
+    if tmdb_notes:
+        for note in tmdb_notes:
+            reporter.verbose_line(note)
+    if slowpics_tmdb_disclosure_line:
+        reporter.verbose_line(slowpics_tmdb_disclosure_line)
+
+    if alignment_display is not None:
+        json_tail["audio_alignment"]["preview_paths"] = alignment_display.preview_paths
+        confirmation_value = alignment_display.confirmation
+        if confirmation_value is None and alignment_summary is not None:
+            confirmation_value = "auto"
+        json_tail["audio_alignment"]["confirmed"] = confirmation_value
+    audio_alignment_view = dict(json_tail["audio_alignment"])
+    offsets_sec_map = audio_alignment_view.get("offsets_sec", {})
+    offsets_frames_map = audio_alignment_view.get("offsets_frames", {})
+    correlations_map = alignment_display.correlations if alignment_display else {}
+    primary_label = None
+    if isinstance(offsets_sec_map, dict) and offsets_sec_map:
+        primary_label = sorted(offsets_sec_map.keys())[0]
+    offsets_sec_value = float(offsets_sec_map.get(primary_label, 0.0)) if isinstance(offsets_sec_map, dict) else 0.0
+    offsets_frames_value = int(offsets_frames_map.get(primary_label, 0)) if isinstance(offsets_frames_map, dict) else 0
+    corr_value = float(correlations_map.get(primary_label, 0.0)) if correlations_map else 0.0
+    if math.isnan(corr_value):
+        corr_value = 0.0
+    threshold_value = float(getattr(alignment_display, "threshold", cfg.audio_alignment.correlation_threshold))
+    audio_alignment_view.update(
+        {
+            "offsets_sec": offsets_sec_value,
+            "offsets_frames": offsets_frames_value,
+            "corr": corr_value,
+            "threshold": threshold_value,
+        }
+    )
+    layout_data["audio_alignment"] = audio_alignment_view
 
     using_frame_total = isinstance(total_frames, int) and total_frames > 0
     progress_total = int(total_frames) if using_frame_total else int(sample_count)
@@ -1585,20 +2318,16 @@ def run_cli(
         if sample_count > 0 and not cache_exists:
             start_time = time.perf_counter()
             samples_done = 0
-
-            with Progress(
-                TextColumn('{task.description}'),
-                BarColumn(),
-                TextColumn('{task.completed}/{task.total}'),
-                TextColumn('{task.percentage:>6.02f}%'),
-                TextColumn('{task.fields[fps]}'),
-                TimeRemainingColumn(),
-                transient=False,
-            ) as analysis_progress:
+            reporter.update_progress_state(
+                "analyze_bar",
+                fps="0.00 fps",
+                eta_tc="--:--",
+                elapsed_tc="00:00",
+            )
+            with reporter.create_progress("analyze_bar", transient=False) as analysis_progress:
                 task_id = analysis_progress.add_task(
-                    analyze_label_colored,
+                    analyze_label_raw,
                     total=max(1, progress_total),
-                    fps="   0.00 fps",
                 )
 
                 def _advance_samples(count: int) -> None:
@@ -1606,24 +2335,25 @@ def run_cli(
                     samples_done += count
                     if progress_total <= 0:
                         return
-                    elapsed = time.perf_counter() - start_time
+                    elapsed = max(time.perf_counter() - start_time, 1e-6)
                     frames_processed = samples_done * step_size
                     completed = (
                         min(progress_total, frames_processed)
                         if using_frame_total
                         else min(progress_total, samples_done)
                     )
-                    fps_val = 0.0
-                    if elapsed > 0:
-                        fps_val = frames_processed / elapsed
-                    analysis_progress.update(
-                        task_id,
-                        completed=completed,
+                    fps_val = frames_processed / elapsed
+                    remaining = max(progress_total - completed, 0)
+                    eta_seconds = (remaining / fps_val) if fps_val > 0 else None
+                    reporter.update_progress_state(
+                        "analyze_bar",
                         fps=f"{fps_val:7.2f} fps",
+                        eta_tc=_format_clock(eta_seconds),
+                        elapsed_tc=_format_clock(elapsed),
                     )
+                    analysis_progress.update(task_id, completed=completed)
 
                 frames, frame_categories = _run_selection(_advance_samples)
-                # Ensure progress completes even if sampling stopped early
                 final_completed = progress_total if progress_total > 0 else analysis_progress.tasks[task_id].completed
                 analysis_progress.update(task_id, completed=final_completed)
         else:
@@ -1644,39 +2374,107 @@ def run_cli(
             rich_message="[red]No frames were selected; cannot continue.[/red]",
         )
 
+    kept_count = len(frames)
+    scanned_count = progress_total if progress_total > 0 else max(sample_count, kept_count)
+    cache_summary_label = "reused" if cache_status == "reused" else ("new" if cache_status == "recomputed" else cache_status)
+    json_tail["analysis"]["kept"] = kept_count
+    json_tail["analysis"]["scanned"] = scanned_count
+    layout_data["analysis"]["kept"] = kept_count
+    layout_data["analysis"]["scanned"] = scanned_count
+    layout_data["analysis"]["cache_summary_label"] = cache_summary_label
+    reporter.update_values(layout_data)
+
+    preview_rule: Dict[str, object] = reporter.layout.folding.get("frames_preview", {}) if hasattr(reporter, "layout") else {}
+    head = int(preview_rule.get("head", 4)) if isinstance(preview_rule.get("head"), (int, float)) else 4
+    tail = int(preview_rule.get("tail", 4)) if isinstance(preview_rule.get("tail"), (int, float)) else 4
+    joiner = str(preview_rule.get("joiner", ", "))
+    fold_enabled = _evaluate_rule_condition(str(preview_rule.get("when", "")) if preview_rule.get("when") else None, flags=reporter.flags)
+    preview_text = _fold_sequence(frames, head=head, tail=tail, joiner=joiner, enabled=fold_enabled)
+
+    json_tail["analysis"]["output_frame_count"] = kept_count
+    json_tail["analysis"]["output_frames"] = list(frames)
+    json_tail["analysis"]["output_frames_preview"] = preview_text
+    layout_data["analysis"]["output_frame_count"] = kept_count
+    layout_data["analysis"]["output_frames_preview"] = preview_text
+
     out_dir = (root / cfg.screenshots.directory_name).resolve()
     total_screens = len(frames) * len(plans)
-    print("[cyan]Preparing screenshot rendering...[/cyan]")
+
+    writer_name = "FFmpeg" if cfg.screenshots.use_ffmpeg else "VS"
+    overlay_mode_value = getattr(cfg.color, "overlay_mode", "minimal")
+
+    json_tail["render"] = {
+        "writer": writer_name,
+        "out_dir": str(out_dir),
+        "add_frame_info": bool(cfg.screenshots.add_frame_info),
+        "single_res": int(cfg.screenshots.single_res),
+        "upscale": bool(cfg.screenshots.upscale),
+        "mod_crop": int(cfg.screenshots.mod_crop),
+        "letterbox_pillarbox_aware": bool(cfg.screenshots.letterbox_pillarbox_aware),
+        "pad_to_canvas": cfg.screenshots.pad_to_canvas,
+        "center_pad": bool(cfg.screenshots.center_pad),
+        "letterbox_px_tolerance": int(cfg.screenshots.letterbox_px_tolerance),
+        "compression": int(cfg.screenshots.compression_level),
+    }
+    layout_data["render"] = json_tail["render"]
+    json_tail["tonemap"] = {
+        "preset": cfg.color.preset,
+        "tone_curve": cfg.color.tone_curve,
+        "dynamic_peak_detection": bool(cfg.color.dynamic_peak_detection),
+        "target_nits": float(cfg.color.target_nits),
+        "verify_luma_threshold": float(cfg.color.verify_luma_threshold),
+        "overlay_enabled": bool(cfg.color.overlay_enabled),
+        "overlay_mode": overlay_mode_value,
+    }
+    layout_data["tonemap"] = json_tail["tonemap"]
+    json_tail["overlay"] = {
+        "enabled": bool(cfg.color.overlay_enabled),
+        "template": cfg.color.overlay_text_template,
+        "mode": overlay_mode_value,
+    }
+    layout_data["overlay"] = json_tail["overlay"]
+
+    reporter.update_values(layout_data)
+    reporter.render_sections(["render"])
+
+    verification_records: List[Dict[str, Any]] = []
+
     try:
         if total_screens > 0:
             start_time = time.perf_counter()
             processed = 0
 
-            with Progress(
-                TextColumn('{task.description}'),
-                BarColumn(),
-                TextColumn('{task.completed}/{task.total}'),
-                TextColumn('{task.percentage:>6.02f}%'),
-                TextColumn('{task.fields[rate]}'),
-                TimeRemainingColumn(),
-                transient=False,
-            ) as render_progress:
+            reporter.update_progress_state(
+                "render_bar",
+                fps=0.0,
+                eta_tc="--:--",
+                elapsed_tc="00:00",
+                current=0,
+                total=total_screens,
+            )
+
+            with reporter.create_progress("render_bar", transient=False) as render_progress:
                 task_id = render_progress.add_task(
-                    'Generating screenshots',
+                    'Rendering outputs',
                     total=total_screens,
-                    rate="   0.00 fps",
                 )
 
                 def advance_render(count: int) -> None:
                     nonlocal processed
                     processed += count
-                    elapsed = time.perf_counter() - start_time
-                    rate = processed / elapsed if elapsed > 0 else 0.0
-                    render_progress.update(
-                        task_id,
-                        completed=min(total_screens, processed),
-                        rate=f"{rate:7.2f} fps",
+                    elapsed = max(time.perf_counter() - start_time, 1e-6)
+                    fps_val = processed / elapsed
+                    remaining = max(total_screens - processed, 0)
+                    eta_seconds = (remaining / fps_val) if fps_val > 0 else None
+                    reporter.update_progress_state(
+                        "render_bar",
+                        fps=fps_val,
+                        eta_tc=_format_clock(eta_seconds),
+                        elapsed_tc=_format_clock(elapsed),
+                        current=min(processed, total_screens),
+                        total=total_screens,
                     )
+                    render_progress.update(task_id, completed=min(total_screens, processed))
 
                 image_paths = generate_screenshots(
                     clips,
@@ -1688,14 +2486,23 @@ def run_cli(
                     cfg.color,
                     trim_offsets=[plan.trim_start for plan in plans],
                     progress_callback=advance_render,
+                    frame_labels=frame_categories,
+                    warnings_sink=collected_warnings,
+                    verification_sink=verification_records,
                 )
 
                 if processed < total_screens:
-                    render_progress.update(
-                        task_id,
-                        completed=total_screens,
-                        rate=f"{(processed / max(1e-6, time.perf_counter() - start_time)):7.2f} fps",
+                    elapsed = max(time.perf_counter() - start_time, 1e-6)
+                    fps_val = processed / elapsed
+                    reporter.update_progress_state(
+                        "render_bar",
+                        fps=fps_val,
+                        eta_tc=_format_clock(0.0),
+                        elapsed_tc=_format_clock(elapsed),
+                        current=total_screens,
+                        total=total_screens,
                     )
+                    render_progress.update(task_id, completed=total_screens)
         else:
             image_paths = generate_screenshots(
                 clips,
@@ -1707,6 +2514,8 @@ def run_cli(
                 cfg.color,
                 trim_offsets=[plan.trim_start for plan in plans],
                 frame_labels=frame_categories,
+                warnings_sink=collected_warnings,
+                verification_sink=verification_records,
             )
     except ScreenshotError as exc:
         raise CLIAppError(
@@ -1714,39 +2523,146 @@ def run_cli(
             rich_message=f"[red]Screenshot generation failed:[/red] {exc}",
         ) from exc
 
+    verify_threshold = float(cfg.color.verify_luma_threshold)
+    if verification_records:
+        max_entry = max(verification_records, key=lambda item: item["maximum"])
+        verify_summary = {
+            "count": len(verification_records),
+            "threshold": verify_threshold,
+            "delta": {
+                "max": float(max_entry["maximum"]),
+                "average": float(max_entry["average"]),
+                "frame": int(max_entry["frame"]),
+                "file": str(max_entry["file"]),
+                "auto_selected": bool(max_entry["auto_selected"]),
+            },
+            "entries": verification_records,
+        }
+    else:
+        verify_summary = {
+            "count": 0,
+            "threshold": verify_threshold,
+            "delta": {
+                "max": None,
+                "average": None,
+                "frame": None,
+                "file": None,
+                "auto_selected": None,
+            },
+            "entries": [],
+        }
+
+    json_tail["verify"] = verify_summary
+    layout_data["verify"] = verify_summary
+
     slowpics_url: Optional[str] = None
+    reporter.render_sections(["publish"])
+    reporter.line(_color_text("slow.pics collection (preview):", "blue"))
+    inputs_parts = [
+        _format_kv(
+            "collection_name",
+            slowpics_title_inputs["collection_name"],
+            label_style="dim blue",
+            value_style="bright_white",
+        ),
+        _format_kv(
+            "collection_suffix",
+            slowpics_title_inputs["collection_suffix"],
+            label_style="dim blue",
+            value_style="bright_white",
+        ),
+    ]
+    reporter.line("  " + "  ".join(inputs_parts))
+    resolved_display = slowpics_resolved_base or "(n/a)"
+    reporter.line(
+        "  "
+        + _format_kv(
+            "resolved_base",
+            resolved_display,
+            label_style="dim blue",
+            value_style="bright_white",
+        )
+    )
+    reporter.line(
+        "  "
+        + _format_kv(
+            "final",
+            f'"{slowpics_final_title}"',
+            label_style="dim blue",
+            value_style="bold bright_white",
+        )
+    )
+    if slowpics_verbose_tmdb_tag:
+        reporter.verbose_line(f"  {escape(slowpics_verbose_tmdb_tag)}")
     if cfg.slowpics.auto_upload:
         print("[cyan]Preparing slow.pics upload...[/cyan]")
         upload_total = len(image_paths)
+        def _safe_size(path_str: str) -> int:
+            try:
+                return Path(path_str).stat().st_size
+            except OSError:
+                return 0
+
+        file_sizes = [_safe_size(path) for path in image_paths] if upload_total else []
+        total_bytes = sum(file_sizes)
+
+        console_width = getattr(reporter.console.size, "width", 80) or 80
+        stats_width_limit = max(24, console_width - 32)
+
+        def _format_duration(seconds: Optional[float]) -> str:
+            if seconds is None or not math.isfinite(seconds):
+                return "--:--"
+            total = max(0, int(seconds + 0.5))
+            hours, remainder = divmod(total, 3600)
+            minutes, secs = divmod(remainder, 60)
+            if hours:
+                return f"{hours:d}:{minutes:02d}:{secs:02d}"
+            return f"{minutes:02d}:{secs:02d}"
+
+        def _format_stats(files_done: int, bytes_done: int, elapsed: float) -> str:
+            speed_bps = bytes_done / elapsed if elapsed > 0 else 0.0
+            speed_mb = speed_bps / (1024 * 1024)
+            remaining_bytes = max(total_bytes - bytes_done, 0)
+            eta_seconds = (remaining_bytes / speed_bps) if speed_bps > 0 else None
+            eta_text = _format_duration(eta_seconds)
+            elapsed_text = _format_duration(elapsed)
+            stats = f"{speed_mb:5.2f} MB/s | {eta_text} | {elapsed_text}"
+            if len(stats) > stats_width_limit:
+                stats = stats[: max(0, stats_width_limit - 1)] + "…"
+            return stats
+
         try:
+            reporter.line(_color_text("[✓] slow.pics: establishing session", "green"))
             if upload_total > 0:
                 start_time = time.perf_counter()
-                uploaded = 0
+                uploaded_files = 0
+                uploaded_bytes = 0
+                file_index = 0
 
-                with Progress(
-                    TextColumn('{task.description}'),
+                columns = [
+                    TextColumn('{task.percentage:>6.02f}% {task.completed}/{task.total}', justify='left'),
                     BarColumn(),
-                    TextColumn('{task.completed}/{task.total}'),
-                    TextColumn('{task.percentage:>6.02f}%'),
-                    TextColumn('{task.fields[rate]}'),
-                    TimeRemainingColumn(),
-                    transient=False,
-                ) as upload_progress:
+                    TextColumn('{task.fields[stats]}', justify='right'),
+                ]
+                with reporter.progress(*columns, transient=False) as upload_progress:
                     task_id = upload_progress.add_task(
-                        'Uploading to slow.pics',
+                        '',
                         total=upload_total,
-                        rate="   0.00 fps",
+                        stats=_format_stats(0, 0, 0.0),
                     )
 
                     def advance_upload(count: int) -> None:
-                        nonlocal uploaded
-                        uploaded += count
+                        nonlocal uploaded_files, uploaded_bytes, file_index
+                        uploaded_files += count
+                        for _ in range(count):
+                            if file_index < len(file_sizes):
+                                uploaded_bytes += file_sizes[file_index]
+                                file_index += 1
                         elapsed = time.perf_counter() - start_time
-                        rate = uploaded / elapsed if elapsed > 0 else 0.0
                         upload_progress.update(
                             task_id,
-                            completed=min(upload_total, uploaded),
-                            rate=f"{rate:7.2f} fps",
+                            completed=min(upload_total, uploaded_files),
+                            stats=_format_stats(uploaded_files, uploaded_bytes, elapsed),
                         )
 
                     slowpics_url = upload_comparison(
@@ -1756,23 +2672,38 @@ def run_cli(
                         progress_callback=advance_upload,
                     )
 
-                    if uploaded < upload_total:
-                        upload_progress.update(
-                            task_id,
-                            completed=upload_total,
-                            rate=f"{(uploaded / max(1e-6, time.perf_counter() - start_time)):7.2f} fps",
-                        )
+                    elapsed = time.perf_counter() - start_time
+                    upload_progress.update(
+                        task_id,
+                        completed=upload_total,
+                        stats=_format_stats(uploaded_files, uploaded_bytes, elapsed),
+                    )
             else:
                 slowpics_url = upload_comparison(
                     image_paths,
                     out_dir,
                     cfg.slowpics,
                 )
+            reporter.line(_color_text(f"[✓] slow.pics: uploading {upload_total} images", "green"))
+            reporter.line(_color_text("[✓] slow.pics: assembling collection", "green"))
         except SlowpicsAPIError as exc:
             raise CLIAppError(
                 f"slow.pics upload failed: {exc}",
                 rich_message=f"[red]slow.pics upload failed:[/red] {exc}",
             ) from exc
+
+    if slowpics_url:
+        slowpics_block = json_tail.get("slowpics")
+        if slowpics_block is not None:
+            slowpics_block["url"] = slowpics_url
+            if cfg.slowpics.create_url_shortcut:
+                key = slowpics_url.rstrip("/").rsplit("/", 1)[-1]
+                if key:
+                    slowpics_block["shortcut_path"] = str(out_dir / f"slowpics_{key}.url")
+                else:
+                    slowpics_block.setdefault("shortcut_path", None)
+            else:
+                slowpics_block["shortcut_path"] = None
 
     result = RunResult(
         files=[plan.path for plan in plans],
@@ -1781,8 +2712,86 @@ def run_cli(
         config=cfg,
         image_paths=list(image_paths),
         slowpics_url=slowpics_url,
+        json_tail=json_tail,
     )
-    _print_summary(result.files, result.frames, result.out_dir, result.slowpics_url)
+
+    summary_lines: List[str] = []
+    summary_section = next(
+        (section for section in reporter.layout.sections if section.get("id") == "summary"),
+        None,
+    )
+    if isinstance(summary_section, Mapping):
+        items = summary_section.get("items", [])
+        if isinstance(items, list):
+            for item in items:
+                if not isinstance(item, str):
+                    continue
+                rendered = reporter.renderer.render_template(item, reporter.values, reporter.flags)
+                if rendered:
+                    summary_lines.append(rendered)
+
+    if not summary_lines:
+        summary_lines = [
+            f"Files     : {len(result.files)}",
+            f"Frames    : {len(result.frames)} -> {result.frames}",
+            f"Output dir: {result.out_dir}",
+        ]
+        if result.slowpics_url:
+            summary_lines.append(f"Slow.pics : {result.slowpics_url}")
+
+    for warning in collected_warnings:
+        reporter.warn(warning)
+
+    warnings_list = list(dict.fromkeys(reporter.iter_warnings()))
+    json_tail["warnings"] = warnings_list
+    warnings_section = next((section for section in reporter.layout.sections if section.get("id") == "warnings"), {})
+    fold_config = warnings_section.get("fold_labels", {}) if isinstance(warnings_section, Mapping) else {}
+    head = int(fold_config.get("head", 2)) if isinstance(fold_config.get("head"), (int, float)) else 2
+    tail = int(fold_config.get("tail", 1)) if isinstance(fold_config.get("tail"), (int, float)) else 1
+    joiner = str(fold_config.get("joiner", ", "))
+    fold_enabled = _evaluate_rule_condition(str(fold_config.get("when")) if fold_config.get("when") else None, flags=reporter.flags)
+
+    warnings_data: List[Dict[str, object]] = []
+    if warnings_list:
+        labels_text = _fold_sequence(warnings_list, head=head, tail=tail, joiner=joiner, enabled=fold_enabled)
+        warnings_data.append(
+            {
+                "warning.type": "general",
+                "warning.count": len(warnings_list),
+                "warning.labels": labels_text,
+            }
+        )
+    else:
+        warnings_data.append(
+            {
+                "warning.type": "general",
+                "warning.count": 0,
+                "warning.labels": "none",
+            }
+        )
+
+    layout_data["warnings"] = warnings_data
+    reporter.update_values(layout_data)
+    reporter.render_sections(["warnings"])
+    reporter.render_sections(["summary"])
+
+    layout_sections = getattr(getattr(reporter, "layout", None), "sections", [])
+    has_summary_section = any(
+        isinstance(section, Mapping) and section.get("id") == "summary"
+        for section in layout_sections
+    )
+    compatibility_required = bool(
+        reporter.flags.get("compat.summary_fallback")
+        or reporter.flags.get("compatibility_mode")
+        or reporter.flags.get("legacy_summary_fallback")
+    )
+
+    if not reporter.quiet and (compatibility_required or not has_summary_section):
+        summary_lines = _build_legacy_summary_lines(layout_data)
+        reporter.section("Summary")
+        for line in summary_lines:
+            reporter.line(_color_text(line, "green"))
+
     return result
 
 
@@ -1796,17 +2805,28 @@ def run_cli(
     multiple=True,
     help="Manual audio track override in the form label=index. Repeatable.",
 )
+@click.option("--quiet", is_flag=True, help="Suppress verbose output; show banner, progress, and JSON only.")
+@click.option("--verbose", is_flag=True, help="Show additional diagnostic output during run.")
+@click.option("--no-color", is_flag=True, help="Disable ANSI colour output.")
+@click.option("--json-pretty", is_flag=True, help="Pretty-print the JSON tail output.")
 def main(
     config_path: str,
     input_dir: str | None,
     *,
     audio_align_track_option: tuple[str, ...],
+    quiet: bool,
+    verbose: bool,
+    no_color: bool,
+    json_pretty: bool,
 ) -> None:
     try:
         result = run_cli(
             config_path,
             input_dir,
             audio_track_overrides=audio_align_track_option,
+            quiet=quiet,
+            verbose=verbose,
+            no_color=no_color,
         )
     except CLIAppError as exc:
         print(exc.rich_message)
@@ -1815,6 +2835,12 @@ def main(
     slowpics_url = result.slowpics_url
     cfg = result.config
     out_dir = result.out_dir
+    json_tail = result.json_tail or {}
+
+    slowpics_block = json_tail.get("slowpics")
+    shortcut_path_str: Optional[str] = None
+    deleted_dir = False
+    clipboard_hint = ""
 
     if slowpics_url:
         if cfg.slowpics.open_in_browser:
@@ -1827,14 +2853,60 @@ def main(
 
             pyperclip.copy(slowpics_url)
         except Exception:
-            pass
+            clipboard_hint = ""
+        else:
+            clipboard_hint = " (copied to clipboard)"
+
+        if cfg.slowpics.create_url_shortcut:
+            key = slowpics_url.rstrip("/").rsplit("/", 1)[-1]
+            if key:
+                shortcut_path_str = str(out_dir / f"slowpics_{key}.url")
+
+        print("[✓] slow.pics: verifying & saving shortcut")
+        url_line = f"slow.pics URL: {slowpics_url}{clipboard_hint}"
+        print(url_line)
+        if shortcut_path_str:
+            print(f"Shortcut: {shortcut_path_str}")
+        else:
+            print("Shortcut: (disabled)")
+
         if cfg.slowpics.delete_screen_dir_after_upload:
             try:
                 shutil.rmtree(out_dir)
-                print("[yellow]Screenshot directory removed:[/yellow]")
+                deleted_dir = True
+                print("Cleaned up screenshots after upload")
                 builtins.print(f"  {out_dir}")
             except OSError as exc:
                 print(f"[yellow]Warning:[/yellow] Failed to delete screenshot directory: {exc}")
+        if slowpics_block is not None:
+            slowpics_block["url"] = slowpics_url
+            slowpics_block["shortcut_path"] = shortcut_path_str
+            slowpics_block["deleted_screens_dir"] = deleted_dir
+        else:
+            json_tail.setdefault("slowpics", {}).update(
+                {
+                    "url": slowpics_url,
+                    "shortcut_path": shortcut_path_str,
+                    "deleted_screens_dir": deleted_dir,
+                }
+            )
+    elif slowpics_block is not None:
+        slowpics_block.setdefault("deleted_screens_dir", False)
+        slowpics_block.setdefault("shortcut_path", None)
+        slowpics_block.setdefault("url", None)
+
+    cli_emit_json_tail = True
+    try:
+        cli_emit_json_tail = bool(getattr(cfg.cli, "emit_json_tail"))
+    except Exception:
+        cli_emit_json_tail = True
+
+    if cli_emit_json_tail:
+        if json_pretty:
+            json_output = json.dumps(json_tail, indent=2)
+        else:
+            json_output = json.dumps(json_tail, separators=(",", ":"))
+        print(json_output)
 
 
 if __name__ == "__main__":
