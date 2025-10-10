@@ -202,25 +202,24 @@ def _coerce_metric_series(value: object) -> List[tuple[int, float]]:
     return result
 
 
- def _frame_to_timecode(frame_idx: int, fps: float) -> Optional[str]:
-     if fps <= 0:
-         return None
-     seconds = frame_idx / fps
-     hours = int(seconds // 3600)
-     minutes = int((seconds % 3600) // 60)
-     remainder = seconds - hours * 3600 - minutes * 60
-     milliseconds = int(round(remainder * 1000))
-     if milliseconds >= 1000:
-         milliseconds -= 1000
-         remainder = 0.0
-         minutes += 1
+def _frame_to_timecode(frame_idx: int, fps: float) -> Optional[str]:
+    if fps <= 0:
+        return None
+    seconds = frame_idx / fps
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    remainder = seconds - hours * 3600 - minutes * 60
+    milliseconds = int(round(remainder * 1000))
+    if milliseconds >= 1000:
+        milliseconds -= 1000
+        remainder = 0.0
+        minutes += 1
     # Handle rollover if minutes reached 60 (e.g., 59.9995s rounding)
     if minutes >= 60:
         hours += minutes // 60
         minutes %= 60
-     seconds_whole = int(remainder)
--    milliseconds = int(milliseconds)
-     return f"{hours:02d}:{minutes:02d}:{seconds_whole:02d}.{milliseconds:03d}"
+    seconds_whole = int(remainder)
+    return f"{hours:02d}:{minutes:02d}:{seconds_whole:02d}.{milliseconds:03d}"
 
 def _atomic_write_json(path: Path, payload: Dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
