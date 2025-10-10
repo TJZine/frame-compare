@@ -10,7 +10,7 @@ import shutil
 import textwrap
 from itertools import zip_longest
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple, cast
 
 from rich.console import Console
 from rich.progress import BarColumn, Progress, ProgressColumn, Task, TextColumn
@@ -385,25 +385,32 @@ def load_cli_layout(path: Path) -> CliLayout:
     if not isinstance(raw, dict):
         raise CliLayoutError("Layout JSON must be an object")
 
+    raw = cast(dict[str, object], raw)
+
     _require_keys(raw, ("version", "theme", "layout", "sections", "folding", "json_tail"), context="layout root")
 
     theme_raw = raw["theme"]
     if not isinstance(theme_raw, dict):
         raise CliLayoutError("theme must be an object")
     _require_keys(theme_raw, ("colors", "symbols", "units"), context="theme")
-    colors = theme_raw["colors"]
-    symbols = theme_raw["symbols"]
-    units = theme_raw["units"]
+    theme_dict: dict[str, object] = theme_raw
+    colors = theme_dict["colors"]
+    symbols = theme_dict["symbols"]
+    units = theme_dict["units"]
     if not isinstance(colors, dict) or not isinstance(symbols, dict) or not isinstance(units, dict):
         raise CliLayoutError("theme colors/symbols/units must be objects")
-    theme_options_raw = theme_raw.get("options", {})
-    if theme_options_raw and not isinstance(theme_options_raw, dict):
-        raise CliLayoutError("theme.options must be an object if provided")
+    theme_options: dict[str, object] = {}
+    theme_options_raw = theme_dict.get("options")
+    if theme_options_raw is not None:
+        if not isinstance(theme_options_raw, dict):
+            raise CliLayoutError("theme.options must be an object if provided")
+        theme_options = dict(theme_options_raw)
 
     options_raw = raw["layout"]
     if not isinstance(options_raw, dict):
         raise CliLayoutError("layout options must be an object")
     _require_keys(options_raw, ("two_column_min_cols", "blank_line_between_sections", "path_ellipsis", "truncate_right_label_min_cols"), context="layout options")
+    options_dict: dict[str, object] = options_raw
 
     sections_raw = raw["sections"]
     if not isinstance(sections_raw, list):
@@ -421,26 +428,30 @@ def load_cli_layout(path: Path) -> CliLayout:
     if not isinstance(json_tail_raw, dict):
         raise CliLayoutError("json_tail must be an object")
     _require_keys(json_tail_raw, ("pretty_on_flag",), context="json_tail")
+    json_tail_dict = cast(dict[str, object], json_tail_raw)
 
     highlights_raw = raw.get("highlights", [])
     if not isinstance(highlights_raw, list):
         raise CliLayoutError("highlights must be a list when provided")
-    highlights: List[HighlightRule] = []
+    highlights: list[HighlightRule] = []
     for index, rule_raw in enumerate(highlights_raw):
         if not isinstance(rule_raw, dict):
             raise CliLayoutError(f"highlights[{index}] must be an object")
-        when = str(rule_raw.get("when", "")).strip()
-        rule_path = str(rule_raw.get("path", "")).strip()
+        if not all(isinstance(key, str) for key in rule_raw):
+            raise CliLayoutError(f"highlights[{index}] must use string keys")
+        rule_dict = cast(dict[str, object], rule_raw)
+        when = str(rule_dict.get("when", "")).strip()
+        rule_path = str(rule_dict.get("path", "")).strip()
         if not when or not rule_path:
             raise CliLayoutError(f"highlights[{index}] must include 'when' and 'path'")
-        role = rule_raw.get("role")
-        value = rule_raw.get("value")
-        true_role = rule_raw.get("true_role")
-        false_role = rule_raw.get("false_role")
+        role = rule_dict.get("role")
+        value = rule_dict.get("value")
+        true_role = rule_dict.get("true_role")
+        false_role = rule_dict.get("false_role")
         if when.lower() == "isbool":
             if true_role is None or false_role is None:
                 raise CliLayoutError(f"highlights[{index}] requires true_role/false_role for 'isbool'")
-        elif rule_raw.get("role") is None:
+        elif rule_dict.get("role") is None:
             raise CliLayoutError(f"highlights[{index}] requires 'role'")
         highlights.append(
             HighlightRule(
@@ -459,7 +470,7 @@ def load_cli_layout(path: Path) -> CliLayout:
             colors=dict(colors),
             symbols=dict(symbols),
             units=dict(units),
-            options=dict(theme_options_raw) if isinstance(theme_options_raw, dict) else {},
+            options=theme_options,
         ),
         options=LayoutOptions(
             two_column_min_cols=int(options_raw["two_column_min_cols"]),
@@ -470,8 +481,8 @@ def load_cli_layout(path: Path) -> CliLayout:
         sections=list(sections_raw),
         folding=dict(folding),
         json_tail=JsonTailConfig(
-            pretty_on_flag=str(json_tail_raw["pretty_on_flag"]),
-            must_be_last=bool(json_tail_raw.get("must_be_last", True)),
+            pretty_on_flag=str(json_tail_dict["pretty_on_flag"]),
+            must_be_last=bool(json_tail_dict.get("must_be_last", True)),
         ),
         highlights=highlights,
     )
@@ -520,7 +531,8 @@ class LayoutContext:
             if (segment.startswith("_") or "__" in segment) and segment != "e":
                 return None
             if isinstance(current, Mapping):
-                current = current.get(segment)
+                mapping_current = cast(Mapping[str, object], current)
+                current = mapping_current.get(segment)
                 continue
             if isinstance(current, Sequence) and not isinstance(current, (str, bytes, bytearray)):
                 if segment.isdigit():
@@ -600,12 +612,21 @@ class CliLayoutRenderer:
 
         self._progress_blocks: Dict[str, Dict[str, Any]] = {}
         for section in layout.sections:
-            if section.get("type") != "group":
+            section_data: Dict[str, Any] = section
+            if section_data.get("type") != "group":
                 continue
-            accent_role = self._resolve_section_accent(section)
-            for block in section.get("blocks", []):
-                if isinstance(block, Mapping) and block.get("type") == "progress" and block.get("progress_id"):
-                    self._progress_blocks[str(block["progress_id"])] = {"block": block, "accent": accent_role}
+            accent_role = self._resolve_section_accent(section_data)
+            blocks = section_data.get("blocks", [])
+            if not isinstance(blocks, list):
+                continue
+            for block in blocks:
+                if not isinstance(block, Mapping):
+                    continue
+                block_map = cast(Mapping[str, object], block)
+                if block_map.get("type") == "progress":
+                    progress_id = block_map.get("progress_id")
+                    if progress_id is not None:
+                        self._progress_blocks[str(progress_id)] = {"block": block, "accent": accent_role}
 
     # ------------------------------------------------------------------
     # High-level public API
@@ -1792,19 +1813,27 @@ class CliLayoutRenderer:
         blocks = section.get("blocks", [])
         if not isinstance(blocks, list):
             raise CliLayoutError("group.blocks must be a list")
-        rendered_blocks: List[Tuple[Optional[str], List[str]]] = []
+        rendered_blocks: list[Tuple[Optional[str], list[str]]] = []
         for block in blocks:
-            when_expr = block.get("when")
-            if when_expr:
+            if not isinstance(block, Mapping):
+                continue
+            block_map = cast(Mapping[str, object], block)
+            when_expr_raw = block_map.get("when")
+            if when_expr_raw:
+                when_expr = str(when_expr_raw)
                 context = LayoutContext(values, flags, renderer=self)
                 if not self._evaluate_condition(when_expr, context):
                     continue
-            block_type = block.get("type") or "lines"
+            block_type = str(block_map.get("type") or "lines")
             if block_type == "progress":
                 continue
-            subtitle = block.get("subtitle")
-            lines: List[str] = []
-            for line in block.get("lines", []):
+            subtitle_raw = block_map.get("subtitle")
+            subtitle = str(subtitle_raw) if subtitle_raw is not None else None
+            lines: list[str] = []
+            raw_lines = block_map.get("lines", [])
+            if not isinstance(raw_lines, list):
+                continue
+            for line in raw_lines:
                 rendered = self._prepare_output(self.render_template(line, values, flags))
                 if rendered:
                     lines.append(rendered)

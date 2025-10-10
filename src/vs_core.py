@@ -9,7 +9,7 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 _VS_MODULE_NAME = "vapoursynth"
 _ENV_VAR = "VAPOURSYNTH_PYTHONPATH"
@@ -249,7 +249,7 @@ def configure(
 
 
 def _build_missing_vs_message() -> str:
-    details = []
+    details: List[str] = []
     if _EXTRA_SEARCH_PATHS:
         details.append("Tried extra search paths: " + ", ".join(_EXTRA_SEARCH_PATHS))
     details.append(
@@ -743,7 +743,7 @@ def _tonemap_with_retries(
         ) from exc
 
 
-_TONEMAP_PRESETS = {
+_TONEMAP_PRESETS: Dict[str, Dict[str, float | str | bool]] = {
     "reference": {"tone_curve": "bt.2390", "target_nits": 100.0, "dynamic_peak_detection": True},
     "contrast": {"tone_curve": "mobius", "target_nits": 120.0, "dynamic_peak_detection": False},
     "filmic": {"tone_curve": "hable", "target_nits": 100.0, "dynamic_peak_detection": True},

@@ -1,8 +1,8 @@
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, cast
 
 from rich.console import Console
-from rich.progress import BarColumn
+from rich.progress import BarColumn, Progress
 
 import src.cli_layout as cli_layout
 
@@ -13,6 +13,8 @@ from src.cli_layout import (
     _ANSI_ESCAPE_RE,
     load_cli_layout,
 )
+
+from pytest import MonkeyPatch
 
 
 def _project_root() -> Path:
@@ -201,7 +203,14 @@ def _make_renderer(width: int, *, no_color: bool = True) -> CliLayoutRenderer:
     return CliLayoutRenderer(layout, console, quiet=False, verbose=False, no_color=no_color)
 
 
-def test_color_mapper_token_to_ansi_16(monkeypatch):
+def _find_section(renderer: CliLayoutRenderer, section_id: str) -> Dict[str, Any]:
+    for section in renderer.layout.sections:
+        if isinstance(section, dict) and section.get("id") == section_id:
+            return cast(Dict[str, Any], section)
+    raise AssertionError(f"Section {section_id!r} not found in layout")
+
+
+def test_color_mapper_token_to_ansi_16(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.delenv("COLORTERM", raising=False)
     monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setenv("TERM", "vt100")
@@ -211,7 +220,7 @@ def test_color_mapper_token_to_ansi_16(monkeypatch):
     assert styled.endswith("\x1b[0m")
 
 
-def test_color_mapper_token_to_ansi_256(monkeypatch):
+def test_color_mapper_token_to_ansi_256(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setenv("COLORTERM", "truecolor")
     monkeypatch.delenv("NO_COLOR", raising=False)
     mapper = _AnsiColorMapper(no_color=False)
@@ -233,25 +242,18 @@ def test_list_section_two_column_layout(tmp_path):
     flags: Dict[str, Any] = {}
 
     wide_renderer = _make_renderer(140)
-    wide_renderer.render_section(
-        next(section for section in wide_renderer.layout.sections if section["id"] == "summary"),
-        values,
-        flags,
-    )
+    summary_section = _find_section(wide_renderer, "summary")
+    wide_renderer.render_section(summary_section, values, flags)
     wide_output = wide_renderer.console.export_text()
     assert "    •" in wide_output
 
     narrow_renderer = _make_renderer(90)
-    narrow_renderer.render_section(
-        next(section for section in narrow_renderer.layout.sections if section["id"] == "summary"),
-        values,
-        flags,
-    )
+    narrow_renderer.render_section(_find_section(narrow_renderer, "summary"), values, flags)
     narrow_output = narrow_renderer.console.export_text()
     assert "    •" not in narrow_output
 
 
-def test_highlight_markup_and_spans(tmp_path, monkeypatch):
+def test_highlight_markup_and_spans(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     monkeypatch.delenv("NO_COLOR", raising=False)
     renderer = _make_renderer(100, no_color=False)
     values = _sample_values(tmp_path)
@@ -295,7 +297,7 @@ def _render_section(renderer: CliLayoutRenderer, section_id: str, values: Dict[s
         list[str]: The rendered console output split into lines, with trailing newline characters removed.
     """
     renderer.bind_context(values, flags)
-    section = next(sec for sec in renderer.layout.sections if sec.get("id") == section_id)
+    section = _find_section(renderer, section_id)
     renderer.render_section(section, values, flags)
     return [line.rstrip("\n") for line in renderer.console.export_text().splitlines()]
 
@@ -305,14 +307,14 @@ def test_progress_style_toggle(tmp_path):
     renderer = _make_renderer(100, no_color=True)
 
     renderer.bind_context(values, {"progress_style": "fill"})
-    progress_fill = renderer.create_progress("render_bar")
+    progress_fill = cast(Progress, renderer.create_progress("render_bar"))
     try:
         assert any(isinstance(column, BarColumn) for column in progress_fill.columns)
     finally:
         progress_fill.stop()
 
     renderer.bind_context(values, {"progress_style": "dot"})
-    progress_dot = renderer.create_progress("render_bar")
+    progress_dot = cast(Progress, renderer.create_progress("render_bar"))
     try:
         assert any(isinstance(column, cli_layout._DotProgressColumn) for column in progress_dot.columns)
     finally:
