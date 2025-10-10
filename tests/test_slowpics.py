@@ -11,12 +11,10 @@ from src import slowpics
 from src.datatypes import SlowpicsConfig
 
 
-class FakeResponse:
+class FakeResponse(requests.Response):
     def __init__(self, status_code: int = 200, json_data: Any | None = None, text: str = "") -> None:
-        self.status_code = status_code
+        super().__init__(status_code=status_code, text=text, content=text.encode("utf-8"))
         self._json_data = json_data
-        self.text = text
-        self.content = text.encode("utf-8")
 
     def json(self) -> Any:
         if self._json_data is None:

@@ -13,6 +13,13 @@ class _StdOps(Protocol):
     def Trim(self, clip: "VideoNode", first: int, last: int) -> "VideoNode": ...
     def SelectEvery(self, clip: "VideoNode", cycle: int, offsets: Sequence[int]) -> "VideoNode": ...
     def ShufflePlanes(self, clip: "VideoNode", planes: Sequence[int] | int, colorfamily: Any) -> "VideoNode": ...
+    def CropRel(
+        self,
+        left: int = ...,
+        top: int = ...,
+        right: int = ...,
+        bottom: int = ...,
+    ) -> "VideoNode": ...
 
 
 class _ResizeOps(Protocol):
@@ -46,10 +53,12 @@ class VideoNode(Protocol):
 
 core: _Core
 RGB: Any
+RGB24: Any
 GRAY: Any
 GRAY8: Any
 GRAY16: Any
 GRAY32: Any
 MATRIX_RGB: int
 MATRIX_BT709: int
+RANGE_FULL: int
 YUV444P16: Any

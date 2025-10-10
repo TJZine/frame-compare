@@ -554,10 +554,12 @@ def _score_payload(
             else:
                 best -= min(0.4 + (0.05 * (diff - tolerance)), 0.7)
     popularity = payload.get("popularity")
-    try:
-        popularity_value = float(popularity)
-    except (TypeError, ValueError):
-        popularity_value = 0.0
+    popularity_value = 0.0
+    if popularity is not None:
+        try:
+            popularity_value = float(popularity)
+        except (TypeError, ValueError):
+            popularity_value = 0.0
     if popularity_value > 0:
         best += min(popularity_value / 200.0, 0.05)
 

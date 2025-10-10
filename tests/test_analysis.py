@@ -43,14 +43,6 @@ def _select_frames_with_metadata(*args, **kwargs):
 
 
 
-def _select_frames_with_metadata(*args, **kwargs):
-    params = dict(kwargs)
-    params.setdefault('return_metadata', True)
-    result = select_frames(*args, **params)
-    assert isinstance(result, tuple) and len(result) == 3
-    return result
-
-
 def test_quantile_basic():
     data = [0, 1, 2, 3, 4]
     assert _quantile(data, 0.0) == 0

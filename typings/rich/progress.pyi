@@ -1,8 +1,14 @@
 from typing import Any, Protocol
 
 
+from typing import Any, Iterable, Sequence
+
+
 class Task:
     id: int
+    completed: float
+    total: float | None
+    percentage: float | None
 
 
 class ProgressColumn:
@@ -18,6 +24,8 @@ class BarColumn(ProgressColumn):
 
 
 class Progress:
+    columns: Sequence[ProgressColumn]
+
     def __init__(self, *columns: ProgressColumn, **kwargs: Any) -> None: ...
     def add_task(self, description: str, *args: Any, **kwargs: Any) -> Task: ...
     def update(self, task_id: int, advance: float | None = ..., description: str | None = ...) -> None: ...
