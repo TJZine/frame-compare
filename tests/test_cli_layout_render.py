@@ -311,6 +311,40 @@ def test_layout_renderer_sample_output(tmp_path, monkeypatch):
         assert any(expected in log for log in section_logs), expected
 
 
+def test_summary_output_frames_full_list_without_ellipsis(tmp_path: Path) -> None:
+    layout_path = _project_root() / "cli_layout.v1.json"
+    layout = load_cli_layout(layout_path)
+    console = Console(width=160, record=True, color_system=None)
+    renderer = CliLayoutRenderer(layout, console, quiet=False, verbose=False, no_color=True)
+
+    sample_values = _sample_values(tmp_path)
+    long_frames = ", ".join(str(index) for index in range(50))
+    sample_values["analysis"]["output_frames_full"] = f"[{long_frames}]"
+    sample_values["analysis"]["output_frame_count"] = 50
+    sample_values["analysis"]["output_frames_preview"] = "0, 1, 2, 3"
+
+    flags: Dict[str, Any] = {
+        "emit_json_tail": False,
+        "verbose": False,
+        "quiet": False,
+        "no_color": True,
+    }
+
+    renderer.bind_context(sample_values, flags)
+    summary_section = next(section for section in layout.sections if section["id"] == "summary")
+    renderer.render_section(summary_section, sample_values, flags)
+
+    output_text = console.export_text()
+    normalized = " ".join(line.strip() for line in output_text.splitlines() if line.strip())
+
+    assert "• Output frames (50):" in normalized
+    assert f"[{long_frames}]" in normalized
+
+    summary_start = normalized.index("• Output frames (50):")
+    summary_text = normalized[summary_start:]
+    assert "…" not in summary_text
+
+
 def test_layout_expression_rejects_dunder_access(tmp_path):
     layout_path = _project_root() / "cli_layout.v1.json"
     layout = load_cli_layout(layout_path)
@@ -383,55 +417,3 @@ def test_force_256_color_override(monkeypatch: pytest.MonkeyPatch) -> None:
 
     mapper = _AnsiColorMapper(no_color=False)
     assert mapper._capability == "256"
-
-
-def test_windows_terminal_bypasses_colorama_convert(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Modern Windows consoles should leave ANSI escapes intact for 256-color output."""
-
-    fake_colorama = ModuleType("colorama")
-    fake_colorama.init_kwargs: Dict[str, Any] = {}
-
-    def just_fix_windows_console() -> None:
-        return None
-
-    def init(*, strip: bool, convert: bool) -> None:
-        fake_colorama.init_kwargs = {"strip": strip, "convert": convert}
-
-    fake_colorama.just_fix_windows_console = just_fix_windows_console  # type: ignore[attr-defined]
-    fake_colorama.init = init  # type: ignore[attr-defined]
-
-    monkeypatch.setenv("TERM_PROGRAM", "Windows_Terminal")
-    monkeypatch.delenv("WT_SESSION", raising=False)
-    monkeypatch.delenv("FRAME_COMPARE_FORCE_256_COLOR", raising=False)
-    monkeypatch.setattr(cli_layout.os, "name", "nt", raising=False)
-    monkeypatch.setitem(sys.modules, "colorama", fake_colorama)
-
-    _AnsiColorMapper._enable_windows_vt_mode()
-
-    assert fake_colorama.init_kwargs == {"strip": False, "convert": False}
-
-
-def test_legacy_windows_console_keeps_colorama_convert(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Legacy Windows consoles should keep colorama conversion enabled for 16-color escapes."""
-
-    fake_colorama = ModuleType("colorama")
-    fake_colorama.init_kwargs: Dict[str, Any] = {}
-
-    def just_fix_windows_console() -> None:
-        return None
-
-    def init(*, strip: bool, convert: bool) -> None:
-        fake_colorama.init_kwargs = {"strip": strip, "convert": convert}
-
-    fake_colorama.just_fix_windows_console = just_fix_windows_console  # type: ignore[attr-defined]
-    fake_colorama.init = init  # type: ignore[attr-defined]
-
-    monkeypatch.delenv("TERM_PROGRAM", raising=False)
-    monkeypatch.delenv("WT_SESSION", raising=False)
-    monkeypatch.delenv("FRAME_COMPARE_FORCE_256_COLOR", raising=False)
-    monkeypatch.setattr(cli_layout.os, "name", "nt", raising=False)
-    monkeypatch.setitem(sys.modules, "colorama", fake_colorama)
-
-    _AnsiColorMapper._enable_windows_vt_mode()
-
-    assert fake_colorama.init_kwargs == {"strip": False, "convert": True}

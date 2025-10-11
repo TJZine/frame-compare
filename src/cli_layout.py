@@ -259,8 +259,8 @@ class _AnsiColorMapper:
         Returns:
             capability (str): "256" if truecolor/256-color support is likely, "16" otherwise.
         """
-        force_256 = os.environ.get("FRAME_COMPARE_FORCE_256_COLOR", "")
-        if _AnsiColorMapper._is_truthy_flag(force_256):
+        force_256 = os.environ.get("FRAME_COMPARE_FORCE_256_COLOR", "").strip().lower()
+        if force_256 and force_256 not in {"0", "false", "no", "off"}:
             return "256"
 
         colorterm = os.environ.get("COLORTERM", "").lower()
@@ -269,8 +269,23 @@ class _AnsiColorMapper:
         term = os.environ.get("TERM", "").lower()
         if "256color" in term or "truecolor" in term:
             return "256"
-        if _AnsiColorMapper._is_modern_windows_terminal():
-            return "256"
+        if os.name == "nt":
+            if os.environ.get("WT_SESSION"):
+                return "256"
+            term_program = os.environ.get("TERM_PROGRAM", "").lower()
+            if term_program == "windows_terminal":
+                return "256"
+            get_windows_version = getattr(sys, "getwindowsversion", None)
+            if callable(get_windows_version):
+                try:  # pragma: no cover - platform dependent
+                    version = get_windows_version()
+                except OSError:
+                    version = None
+                if version is not None:
+                    major = getattr(version, "major", 0)
+                    build = getattr(version, "build", 0)
+                    if major > 10 or (major == 10 and build >= 10586):
+                        return "256"
         return "16"
 
     def apply(self, token: str, text: str) -> str:
@@ -1814,8 +1829,17 @@ class CliLayoutRenderer:
         if not isinstance(items, list):
             raise CliLayoutError("list.items must be a list")
         rendered_items = [self._prepare_output(self.render_template(item, values, flags)) for item in items if item]
+        if not rendered_items:
+            return
+
+        has_multiline = any("\n" in rendered for rendered in rendered_items)
+
         width = self._console_width()
-        two_column = len(rendered_items) > 3 and width >= self.layout.options.two_column_min_cols
+        two_column = (
+            not has_multiline
+            and len(rendered_items) > 3
+            and width >= self.layout.options.two_column_min_cols
+        )
         if two_column and rendered_items:
             midpoint = (len(rendered_items) + 1) // 2
             left_items = rendered_items[:midpoint]
@@ -1831,7 +1855,15 @@ class CliLayoutRenderer:
                     self._write(left_text.rstrip())
         else:
             for rendered in rendered_items:
-                if rendered:
+                if not rendered:
+                    continue
+                if "\n" in rendered:
+                    for line in rendered.split("\n"):
+                        if line:
+                            self._write(line)
+                        else:
+                            self._write()
+                else:
                     self._write(rendered)
 
     def _render_group_section(self, section: Mapping[str, Any], values: Mapping[str, Any], flags: Mapping[str, Any]) -> None:
