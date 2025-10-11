@@ -2,6 +2,7 @@
 
 All notable user-visible updates will be documented in this file in reverse chronological order.
 
+- *2025-10-13:* Removed the `types-pytest` dev dependency so `uv run` can resolve environments on fresh clones without relying on a non-existent stub package while keeping the actual `pytest` runtime dependency in the dev group for CI and local tests.
 - *2025-10-10:* Reject invalid `cli.progress.style` values during configuration loading and persist normalized styles for downstream flag handling to keep CLI reporters consistent.
 - *2025-10-12:* Added local type stubs for optional CLI/testing dependencies and hardened JSON-tail assertions in tests so Pyright runs cleanly without relaxing diagnostic settings.
 - *2025-10-09:* Expanded minimal overlays with resolution/upscale and frame-selection type lines while simplifying diagnostic overlays by removing on-screen selection timecode/score/notes that remain available via cached metadata.
