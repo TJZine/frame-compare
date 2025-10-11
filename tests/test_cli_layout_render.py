@@ -1,6 +1,7 @@
 import json
 import sys
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Dict
 
 import pytest
