@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import textwrap
 from itertools import zip_longest
 from pathlib import Path
@@ -215,18 +216,39 @@ class _AnsiColorMapper:
     def _detect_capability() -> str:
         """
         Determine the terminal color capability based on environment variables.
-        
+
         Checks COLORTERM and TERM for indications of truecolor or 256-color support and returns "256" when detected, otherwise returns "16".
-        
+
         Returns:
             capability (str): "256" if truecolor/256-color support is likely, "16" otherwise.
         """
+        force_256 = os.environ.get("FRAME_COMPARE_FORCE_256_COLOR", "").strip().lower()
+        if force_256 and force_256 not in {"0", "false", "no", "off"}:
+            return "256"
+
         colorterm = os.environ.get("COLORTERM", "").lower()
         if any(token in colorterm for token in ("truecolor", "24bit")):
             return "256"
         term = os.environ.get("TERM", "").lower()
         if "256color" in term or "truecolor" in term:
             return "256"
+        if os.name == "nt":
+            if os.environ.get("WT_SESSION"):
+                return "256"
+            term_program = os.environ.get("TERM_PROGRAM", "").lower()
+            if term_program == "windows_terminal":
+                return "256"
+            get_windows_version = getattr(sys, "getwindowsversion", None)
+            if callable(get_windows_version):
+                try:  # pragma: no cover - platform dependent
+                    version = get_windows_version()
+                except OSError:
+                    version = None
+                if version is not None:
+                    major = getattr(version, "major", 0)
+                    build = getattr(version, "build", 0)
+                    if major > 10 or (major == 10 and build >= 10586):
+                        return "256"
         return "16"
 
     def apply(self, token: str, text: str) -> str:

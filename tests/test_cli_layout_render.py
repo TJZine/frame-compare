@@ -10,7 +10,9 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.cli_layout import CliLayoutRenderer, LayoutContext, load_cli_layout
+import src.cli_layout as cli_layout
+
+from src.cli_layout import CliLayoutRenderer, LayoutContext, _AnsiColorMapper, load_cli_layout
 
 
 def _project_root() -> Path:
@@ -328,3 +330,55 @@ def test_layout_expression_rejects_dunder_access(tmp_path):
     )
 
     assert renderer._evaluate_expression("__import__('os')", context) is None
+
+
+def test_windows_terminal_enables_256_colors(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure Windows Terminal environments are detected as 256-color capable."""
+
+    layout_path = _project_root() / "cli_layout.v1.json"
+    monkeypatch.delenv("COLORTERM", raising=False)
+    monkeypatch.delenv("TERM", raising=False)
+    monkeypatch.delenv("WT_SESSION", raising=False)
+    monkeypatch.delenv("FRAME_COMPARE_FORCE_256_COLOR", raising=False)
+    monkeypatch.setenv("TERM_PROGRAM", "Windows_Terminal")
+    monkeypatch.setattr(cli_layout.os, "name", "nt", raising=False)
+    monkeypatch.setattr(
+        _AnsiColorMapper,
+        "_enable_windows_vt_mode",
+        staticmethod(lambda: None),
+    )
+
+    capability = _AnsiColorMapper._detect_capability()
+    assert capability == "256"
+
+    mapper = _AnsiColorMapper(no_color=False)
+    layout = load_cli_layout(layout_path)
+    section_token = layout.theme.colors["section_analyze"]
+    accent_token = layout.theme.colors["accent_subhead"]
+
+    section = mapper._lookup(section_token)
+    accent = mapper._lookup(accent_token)
+
+    assert mapper._capability == "256"
+    assert section.startswith("\x1b[")
+    assert accent.startswith("\x1b[")
+    assert section != accent
+
+
+def test_force_256_color_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Explicit override should force the mapper into 256-color mode."""
+
+    monkeypatch.setenv("FRAME_COMPARE_FORCE_256_COLOR", "yes")
+    monkeypatch.delenv("COLORTERM", raising=False)
+    monkeypatch.delenv("TERM", raising=False)
+    monkeypatch.setattr(
+        _AnsiColorMapper,
+        "_enable_windows_vt_mode",
+        staticmethod(lambda: None),
+    )
+
+    capability = _AnsiColorMapper._detect_capability()
+    assert capability == "256"
+
+    mapper = _AnsiColorMapper(no_color=False)
+    assert mapper._capability == "256"
