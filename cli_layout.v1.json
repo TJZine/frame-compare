@@ -78,7 +78,7 @@
       "title": "At-a-Glance",
       "when": "true",
       "lines": [
-        "[[key]]Clips[[/]] [[value]]{clips.count}[[/]]  [[key]]Step[[/]] [[value]]{analysis.step}[[/]]  [[key]]Downscale[[/]] [[value]]{analysis.downscale_height}[[/]][[unit]]px[[/]]  [[key]]Frames[[/]] [[value]]{analysis.output_frame_count}[[/]]",
+        "[[key]]Clips[[/]]: [[value]]{clips.count}[[/]]  [[key]]Step[[/]] [[value]]{analysis.step}[[/]]  [[key]]Downscale[[/]] [[value]]{analysis.downscale_height}[[/]][[unit]]px[[/]]  [[key]]Frames[[/]] [[value]]{analysis.output_frame_count}[[/]]",
         "[[key]]Window[[/]] lead [[value]]{window.ignore_lead_seconds:.2f}[[/]][[unit]]s[[/]]  trail [[value]]{window.ignore_trail_seconds:.2f}[[/]][[unit]]s[[/]]  min [[value]]{window.min_window_seconds:.2f}[[/]][[unit]]s[[/]]",
         "[[key]]Plan[[/]] dark [[value]]{analysis.counts.dark}[[/]]  bright [[value]]{analysis.counts.bright}[[/]]  motion [[value]]{analysis.counts.motion}[[/]]  random [[value]]{analysis.counts.random}[[/]]  user [[value]]{analysis.counts.user}[[/]]",
         "[[key]]Audio align[[/]] [[value]]{audio_alignment.enabled|bool}[[/]]  offset [[value]]{audio_alignment.offsets_sec:+.3f}[[/]][[unit]]s[[/]]  corr [[value]]{audio_alignment.corr:.2f}[[/]]",
@@ -238,7 +238,7 @@
       "title_badge": "[SUMMARY]",
       "accent_role": "section_summary",
       "items": [
-        "• [[key]]Clips[[/]] [[value]]{clips.count}[[/]]\n  [[key]]Window[[/]] lead [[value]]{window.ignore_lead_seconds:.2f}[[/]][[unit]]s[[/]]  trail [[value]]{window.ignore_trail_seconds:.2f}[[/]][[unit]]s[[/]]\n  [[key]]Step[[/]] [[value]]{analysis.step}[[/]]  [[key]]Downscale[[/]] [[value]]{analysis.downscale_height}[[/]][[unit]]px[[/]]",
+        "• [[key]]Clips[[/]]: [[value]]{clips.count}[[/]]\n  [[key]]Window[[/]] lead [[value]]{window.ignore_lead_seconds:.2f}[[/]][[unit]]s[[/]]  trail [[value]]{window.ignore_trail_seconds:.2f}[[/]][[unit]]s[[/]]\n  [[key]]Step[[/]] [[value]]{analysis.step}[[/]]  [[key]]Downscale[[/]] [[value]]{analysis.downscale_height}[[/]][[unit]]px[[/]]",
         "• [[key]]Align[[/]]\n  audio [[value]]{audio_alignment.enabled|bool}[[/]]  offset [[value]]{audio_alignment.offsets_sec:+.3f}[[/]][[unit]]s[[/]]\n  file [[path]]{audio_alignment.offsets_filename.e}[[/]]",
         "• [[key]]Plan[[/]]\n  dark [[value]]{analysis.counts.dark}[[/]]  bright [[value]]{analysis.counts.bright}[[/]]  motion [[value]]{analysis.counts.motion}[[/]]\n  random [[value]]{analysis.counts.random}[[/]]  user [[value]]{analysis.counts.user}[[/]]  sep [[value]]{analysis.screen_separation_sec:.1f}[[/]][[unit]]s[[/]]",
         "• [[key]]Canvas[[/]]\n  single_res [[value]]{render.single_res|tallest}[[/]] [[unit]]px[[/]]  upscale [[value]]{render.upscale|bool}[[/]]\n  crop mod[[value]]{render.mod_crop}[[/]]  pad [[value]]{render.center_pad|bool}[[/]]",
