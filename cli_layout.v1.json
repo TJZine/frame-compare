@@ -238,14 +238,14 @@
       "title_badge": "[SUMMARY]",
       "accent_role": "section_summary",
       "items": [
-        "• [[key]]Clips[[/]]: [[value]]{clips.count}[[/]]  [[key]]Window[[/]] lead [[value]]{window.ignore_lead_seconds:.2f}[[/]][[unit]]s[[/]]  trail [[value]]{window.ignore_trail_seconds:.2f}[[/]][[unit]]s[[/]]  [[key]]step[[/]] [[value]]{analysis.step}[[/]]  [[key]]downscale[[/]] [[value]]{analysis.downscale_height}[[/]][[unit]]px[[/]]",
-        "• [[key]]Align[[/]]: audio [[value]]{audio_alignment.enabled|bool}[[/]]  offset [[value]]{audio_alignment.offsets_sec:+.3f}[[/]][[unit]]s[[/]]  file [[path]]{audio_alignment.offsets_filename.e}[[/]]",
-        "• [[key]]Plan[[/]]: dark [[value]]{analysis.counts.dark}[[/]]  bright [[value]]{analysis.counts.bright}[[/]]  motion [[value]]{analysis.counts.motion}[[/]]  random [[value]]{analysis.counts.random}[[/]]  user [[value]]{analysis.counts.user}[[/]]  sep [[value]]{analysis.screen_separation_sec:.1f}[[/]][[unit]]s[[/]]",
-        "• [[key]]Canvas[[/]]: single_res [[value]]{render.single_res|tallest}[[/]] [[unit]]px[[/]]  upscale [[value]]{render.upscale|bool}[[/]]  crop mod[[value]]{render.mod_crop}[[/]]  pad [[value]]{render.center_pad|bool}[[/]]",
-        "• [[key]]Tonemap[[/]]: curve [[value]]{tonemap.tone_curve}[[/]]  target [[value]]{tonemap.target_nits}[[/]][[unit]]nits[[/]]  dpd [[value]]{tonemap.dynamic_peak_detection|bool}[[/]]  verify ≤[[value]]{tonemap.verify_luma_threshold}[[/]]{verify.delta.max? [[dim]] Δ=[[value]]{verify.delta.max}[[/]][[/]]:''}",
-        "• [[key]]Output[[/]]: [[path]]{render.out_dir.e}[[/]]  compression [[value]]{render.compression}[[/]]  frames [[value]]{analysis.output_frame_count}[[/]]",
-        "• [[key]]Cache[[/]]: [[path]]{cache.file}[[/]]  status [[value]]{cache.status}[[/]]",
-        "• [[key]]Output frames[[/]] ([[value]]{analysis.output_frame_count}[[/]]):{emit_json_tail? [[dim]]  preview [[value]]{analysis.output_frames_preview}[[/]]  (full list in JSON{verbose?' and above':''})[[/]] : [[value]]{analysis.output_frames_full|wrap_indent2}[[/]]}"
+        "• [[key]]Clips[[/]] [[value]]{clips.count}[[/]]\n  [[key]]Window[[/]] lead [[value]]{window.ignore_lead_seconds:.2f}[[/]][[unit]]s[[/]]  trail [[value]]{window.ignore_trail_seconds:.2f}[[/]][[unit]]s[[/]]\n  [[key]]Step[[/]] [[value]]{analysis.step}[[/]]  [[key]]Downscale[[/]] [[value]]{analysis.downscale_height}[[/]][[unit]]px[[/]]",
+        "• [[key]]Align[[/]]\n  audio [[value]]{audio_alignment.enabled|bool}[[/]]  offset [[value]]{audio_alignment.offsets_sec:+.3f}[[/]][[unit]]s[[/]]\n  file [[path]]{audio_alignment.offsets_filename.e}[[/]]",
+        "• [[key]]Plan[[/]]\n  dark [[value]]{analysis.counts.dark}[[/]]  bright [[value]]{analysis.counts.bright}[[/]]  motion [[value]]{analysis.counts.motion}[[/]]\n  random [[value]]{analysis.counts.random}[[/]]  user [[value]]{analysis.counts.user}[[/]]  sep [[value]]{analysis.screen_separation_sec:.1f}[[/]][[unit]]s[[/]]",
+        "• [[key]]Canvas[[/]]\n  single_res [[value]]{render.single_res|tallest}[[/]] [[unit]]px[[/]]  upscale [[value]]{render.upscale|bool}[[/]]\n  crop mod[[value]]{render.mod_crop}[[/]]  pad [[value]]{render.center_pad|bool}[[/]]",
+        "• [[key]]Tonemap[[/]]\n  curve [[value]]{tonemap.tone_curve}[[/]]  target [[value]]{tonemap.target_nits}[[/]][[unit]]nits[[/]]\n  dpd [[value]]{tonemap.dynamic_peak_detection|bool}[[/]]  verify ≤[[value]]{tonemap.verify_luma_threshold}[[/]]{verify.delta.max? [[dim]] Δ=[[value]]{verify.delta.max}[[/]][[/]]:''}",
+        "• [[key]]Output[[/]]\n  dir [[path]]{render.out_dir.e}[[/]]  compression [[value]]{render.compression}[[/]]\n  frames [[value]]{analysis.output_frame_count}[[/]]",
+        "• [[key]]Cache[[/]]\n  file [[path]]{cache.file}[[/]]  status [[value]]{cache.status}[[/]]",
+        "• [[key]]Output frames[[/]] ([[value]]{analysis.output_frame_count}[[/]])\n  {emit_json_tail?[[dim]]preview [[value]]{analysis.output_frames_preview}[[/]]  (full list in JSON{verbose?' and above':''})[[/]]:[[value]]{analysis.output_frames_full|summary_wrap}[[/]]}"
       ]
     }
   ],
