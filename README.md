@@ -1,6 +1,6 @@
 # Frame Compare
 
-Reproducible frame reviews and slow.pics automation for multi-encode QC.
+Automated frame sampling, alignment, and slow.pics uploads for repeatable QC.
 
 <!-- tags: frame comparison, ffmpeg, vapoursynth, slow.pics, tmdb, cli -->
 
@@ -9,12 +9,12 @@ Reproducible frame reviews and slow.pics automation for multi-encode QC.
 
 ## What is this?
 
-Frame Compare scans multiple encodes of the same title and finds
-representative frames ready for quality review. It automates audio
-alignment, deterministic scene sampling, and optional slow.pics uploads
-so reviewers avoid manual scrubbing. The CLI targets home media
-archivists, fansub groups, and boutique remastering teams that need
-reproducible outputs, VapourSynth or FFmpeg flexibility, and structured
+Frame Compare samples darkest, brightest, high-motion, random, and
+user-pinned frames across multiple encodes of the same title. It aligns
+audio, renders deterministic PNGs through VapourSynth or FFmpeg, and can
+ship finished sets to slow.pics with TMDB naming. The CLI targets home
+media archivists, fansub QC crews, and boutique remastering teams that
+need repeatable comparisons, live dashboards, and machine-readable
 metadata for downstream tooling.
 
 ## Quickstart
@@ -51,8 +51,9 @@ uv run python frame_compare.py --config config.toml --input comparison_videos
 ```
 
 Expected outputs: PNGs under `screens/…`, cached metrics in
-`generated.compframes`, and (when audio alignment is enabled) offsets in
-`generated.audio_offsets.toml`.
+`generated.compframes`, optional offsets in
+`generated.audio_offsets.toml`, and (when uploads are enabled) a
+slow.pics shortcut file.
 
 ## Configuration essentials
 
@@ -64,15 +65,11 @@ The most common toggles are below; see the
 | --- | --- | --- | --- |
 | `[paths].input_dir` | Base scan directory. | `"comparison_videos"` | `input_dir="comparison_videos"` |
 | `--input PATH` | One-off scan override. | `None` | `--input /data/releases` |
-| `[analysis].frame_count_dark` | Dark-scene frame quota. | `20` | `frame_count_dark=12` |
-| `[analysis].frame_count_motion` | Motion frame quota. | `10` | `frame_count_motion=24` |
-| `[analysis].random_frames` | Deterministic random picks. | `10` | `random_frames=8` |
+| `[analysis].frame_count_dark / frame_count_bright` | Scene quotas for shadows and highlights. | `20 / 10` | `frame_count_dark=12` |
+| `[analysis].frame_count_motion` | Motion-heavy frame quota. | `10` | `frame_count_motion=24` |
+| `[analysis].random_frames / random_seed` | Deterministic random picks. | `10 / 20202020` | `random_frames=8` |
 | `[analysis].user_frames` | Always-rendered frame IDs. | `[]` | `user_frames=[10,200,501]` |
-| `[analysis].random_seed` | Seed for reproducible runs. | `20202020` | `random_seed=1337` |
-| `[audio_alignment].enable` | Audio-guided offsets. | `false` | `enable=true` |
-| `[audio_alignment].correlation_threshold` | Confidence gate. | `0.55` | `correlation_threshold=0.65` |
-| `[audio_alignment].offsets_filename` | Offset cache path. | `"generated.audio_offsets.toml"` | `offsets_filename="cache/audio.toml"` |
-| `[screenshots].directory_name` | PNG output folder. | `"screens"` | `directory_name="frames"` |
+| `[audio_alignment].enable (+confirm_with_screenshots)` | Audio-guided offsets and optional preview pause. | `false (true)` | `enable=true` |
 | `[screenshots].use_ffmpeg` | Use FFmpeg renderer. | `false` | `use_ffmpeg=true` |
 | `[slowpics].auto_upload` | Push to slow.pics. | `true` | `auto_upload=false` |
 | `[runtime].ram_limit_mb` | VapourSynth RAM guard. | `4000` | `ram_limit_mb=4096` |
@@ -80,20 +77,20 @@ The most common toggles are below; see the
 
 ## Features
 
-- Deterministic frame selection blending quantiles, motion scoring,
-  pinned frames, and seeded randomness.
+- Deterministic frame selection blending luminance quantiles, motion
+  scoring, pinned frames, and seeded randomness.
 - Cached metrics (`generated.compframes` plus selection sidecars) for
   fast reruns across large batches.
 - Audio alignment with correlation, dynamic time warping refinements,
-  and optional interactive confirmation.
+  and optional interactive confirmation frames.
 - VapourSynth-first pipeline with FFmpeg fallback, HDR→SDR tonemapping,
   and placeholder recovery when writers fail.
 - slow.pics integration with automatic uploads, retries, URL shortcuts,
   and clipboard hand-off.
 - TMDB-driven metadata resolution with GuessIt/Anitopy labelling to keep
   comparisons organised.
-- Rich CLI layout featuring progress dashboards, Unicode fallbacks, and
-  optional JSON tails for automation.
+- Rich CLI layout featuring progress dashboards, Unicode fallbacks,
+  batch auto-grouping, and optional JSON tails for automation.
 - CLI override for audio stream selection (`--audio-align-track`) when
   auto-detection needs guidance.
 - Configurable RAM guardrails and VapourSynth path injection for
@@ -115,6 +112,9 @@ The most common toggles are below; see the
 - **slow.pics upload fails:** keep `[slowpics].auto_upload=true`, ensure
   network access, and inspect the slow.pics response in the JSON tail if
   retries exhaust.
+- **Placeholder PNGs appear:** review console warnings for the failed
+  renderer, then retry with `use_ffmpeg=true` or install the missing
+  VapourSynth plugin/codec.
 
 ## Compatibility & support
 
