@@ -1792,8 +1792,17 @@ class CliLayoutRenderer:
         if not isinstance(items, list):
             raise CliLayoutError("list.items must be a list")
         rendered_items = [self._prepare_output(self.render_template(item, values, flags)) for item in items if item]
+        if not rendered_items:
+            return
+
+        has_multiline = any("\n" in rendered for rendered in rendered_items)
+
         width = self._console_width()
-        two_column = len(rendered_items) > 3 and width >= self.layout.options.two_column_min_cols
+        two_column = (
+            not has_multiline
+            and len(rendered_items) > 3
+            and width >= self.layout.options.two_column_min_cols
+        )
         if two_column and rendered_items:
             midpoint = (len(rendered_items) + 1) // 2
             left_items = rendered_items[:midpoint]
@@ -1809,7 +1818,15 @@ class CliLayoutRenderer:
                     self._write(left_text.rstrip())
         else:
             for rendered in rendered_items:
-                if rendered:
+                if not rendered:
+                    continue
+                if "\n" in rendered:
+                    for line in rendered.split("\n"):
+                        if line:
+                            self._write(line)
+                        else:
+                            self._write()
+                else:
                     self._write(rendered)
 
     def _render_group_section(self, section: Mapping[str, Any], values: Mapping[str, Any], flags: Mapping[str, Any]) -> None:
