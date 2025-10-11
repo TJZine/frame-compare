@@ -9,13 +9,13 @@
       "accent_render": "magenta.bright",
       "accent_publish": "green.bright",
       "section_discover": "cyan.bold",
-      "section_prepare": "blue.bright",
-      "section_analyze": "purple.bright",
-      "section_render": "magenta.bright",
-      "section_publish": "green.bright",
+      "section_prepare": "blue",
+      "section_analyze": "purple",
+      "section_render": "magenta",
+      "section_publish": "green",
       "section_warnings": "yellow.bold",
       "section_summary": "cyan.bold",
-      "accent_subhead": "magenta.bold",
+      "accent_subhead": "yellow.bright",
       "value": "white.bright",
       "unit": "grey.dim",
       "key": "blue",
@@ -78,10 +78,12 @@
       "title": "At-a-Glance",
       "when": "true",
       "lines": [
-        "Clips=[[value]]{clips.count}[[/]] • Step=[[value]]{analysis.step}[[/]] • Downscale=[[value]]{analysis.downscale_height}[[/]][[unit]]px[[/]] • Plan: Dark=[[value]]{analysis.counts.dark}[[/]] Bright=[[value]]{analysis.counts.bright}[[/]] Motion=[[value]]{analysis.counts.motion}[[/]]",
-        "Window: lead=[[value]]{window.ignore_lead_seconds:.2f}[[/]][[unit]]s[[/]] trail=[[value]]{window.ignore_trail_seconds:.2f}[[/]][[unit]]s[[/]] • Align(audio)=[[value]]{audio_alignment.enabled}[[/]] [[unit]]({audio_alignment.offsets_sec:+.3f}s)[[/]]",
-        "Canvas: single_res=[[value]]{render.single_res|tallest}[[/]] [[unit]]px[[/]]  upscale=[[value]]{render.upscale}[[/]]  crop=mod[[value]]{render.mod_crop}[[/]]  pad=[[value]]{render.center_pad}[[/]],[[unit]]tol={render.letterbox_px_tolerance}px[[/]]",
-        "Tonemap: curve=[[value]]{tonemap.tone_curve}[[/]]  dpd=[[value]]{tonemap.dynamic_peak_detection}[[/]]  target=[[value]]{tonemap.target_nits}[[/]][[unit]]nits[[/]] • Seed=[[value]]{analysis.random_seed}[[/]] • Cache=[[value]]{cache.status}[[/]]"
+        "[[key]]Clips[[/]] [[value]]{clips.count}[[/]]  [[key]]Step[[/]] [[value]]{analysis.step}[[/]]  [[key]]Downscale[[/]] [[value]]{analysis.downscale_height}[[/]][[unit]]px[[/]]  [[key]]Frames[[/]] [[value]]{analysis.output_frame_count}[[/]]",
+        "[[key]]Window[[/]] lead [[value]]{window.ignore_lead_seconds:.2f}[[/]][[unit]]s[[/]]  trail [[value]]{window.ignore_trail_seconds:.2f}[[/]][[unit]]s[[/]]  min [[value]]{window.min_window_seconds:.2f}[[/]][[unit]]s[[/]]",
+        "[[key]]Plan[[/]] dark [[value]]{analysis.counts.dark}[[/]]  bright [[value]]{analysis.counts.bright}[[/]]  motion [[value]]{analysis.counts.motion}[[/]]  random [[value]]{analysis.counts.random}[[/]]  user [[value]]{analysis.counts.user}[[/]]",
+        "[[key]]Audio align[[/]] [[value]]{audio_alignment.enabled|bool}[[/]]  offset [[value]]{audio_alignment.offsets_sec:+.3f}[[/]][[unit]]s[[/]]  corr [[value]]{audio_alignment.corr:.2f}[[/]]",
+        "[[key]]Canvas[[/]] single_res [[value]]{render.single_res|tallest}[[/]] [[unit]]px[[/]]  upscale [[value]]{render.upscale|bool}[[/]]  crop mod[[value]]{render.mod_crop}[[/]]  pad [[value]]{render.center_pad|bool}[[/]]",
+        "[[key]]Tonemap[[/]] [[value]]{tonemap.tone_curve}[[/]] → [[value]]{tonemap.target_nits}[[/]][[unit]]nits[[/]]  [[key]]Cache[[/]] [[value]]{cache.status}[[/]]"
       ]
     },
     {
@@ -236,14 +238,14 @@
       "title_badge": "[SUMMARY]",
       "accent_role": "section_summary",
       "items": [
-        "• Clips:[[value]]{clips.count}[[/]] Window: lead=[[value]]{window.ignore_lead_seconds:.2f}[[/]][[unit]]s[[/]] trail=[[value]]{window.ignore_trail_seconds:.2f}[[/]][[unit]]s[[/]] step=[[value]]{analysis.step}[[/]] downscale=[[value]]{analysis.downscale_height}[[/]][[unit]]px[[/]]",
-        "• Align: audio=[[value]]{audio_alignment.enabled|bool}[[/]] offsets=[[value]]{audio_alignment.offsets_sec:+.3f}[[/]][[unit]]s[[/]] file=[[path]]{audio_alignment.offsets_filename.e}[[/]]",
-        "• Plan: Dark=[[value]]{analysis.counts.dark}[[/]] Bright=[[value]]{analysis.counts.bright}[[/]] Motion=[[value]]{analysis.counts.motion}[[/]] Random=[[value]]{analysis.counts.random}[[/]] User=[[value]]{analysis.counts.user}[[/]]  sep=[[value]]{analysis.screen_separation_sec:.1f}[[/]][[unit]]s[[/]]",
-        "• Canvas: single_res=[[value]]{render.single_res|tallest}[[/]] [[unit]]px[[/]] upscale=[[value]]{render.upscale|bool}[[/]] crop=mod[[value]]{render.mod_crop}[[/]] pad=[[value]]{render.center_pad|bool}[[/]]",
-        "• Tonemap: [[value]]{tonemap.tone_curve}[[/]]@[[value]]{tonemap.target_nits}[[/]][[unit]]nits[[/]] dpd=[[value]]{tonemap.dynamic_peak_detection|bool}[[/]] verify≤[[value]]{tonemap.verify_luma_threshold}[[/]]{verify.delta.max? Δ=[[value]]{verify.delta.max}[[/]]:''}",
-        "• Output: [[path]]{render.out_dir.e}[[/]]  compression=[[value]]{render.compression}[[/]]",
-        "• Cache: [[path]]{cache.file}[[/]]  status=[[value]]{cache.status}[[/]]",
-        "• Output frames ([[value]]{analysis.output_frame_count}[[/]]):{emit_json_tail? [[dim]][{analysis.output_frames_preview}][[/]]  (full list in JSON{verbose?' and above':''}) :}{emit_json_tail? : [[value]]{analysis.output_frames_full|wrap_indent2}[[/]]}"
+        "[[key]]Clips[[/]] [[value]]{clips.count}[[/]]  [[key]]Window[[/]] lead [[value]]{window.ignore_lead_seconds:.2f}[[/]][[unit]]s[[/]]  trail [[value]]{window.ignore_trail_seconds:.2f}[[/]][[unit]]s[[/]]  step [[value]]{analysis.step}[[/]]  downscale [[value]]{analysis.downscale_height}[[/]][[unit]]px[[/]]",
+        "[[key]]Align[[/]] audio [[value]]{audio_alignment.enabled|bool}[[/]]  offset [[value]]{audio_alignment.offsets_sec:+.3f}[[/]][[unit]]s[[/]]  file [[path]]{audio_alignment.offsets_filename.e}[[/]]",
+        "[[key]]Plan[[/]] dark [[value]]{analysis.counts.dark}[[/]]  bright [[value]]{analysis.counts.bright}[[/]]  motion [[value]]{analysis.counts.motion}[[/]]  random [[value]]{analysis.counts.random}[[/]]  user [[value]]{analysis.counts.user}[[/]]  sep [[value]]{analysis.screen_separation_sec:.1f}[[/]][[unit]]s[[/]]",
+        "[[key]]Canvas[[/]] single_res [[value]]{render.single_res|tallest}[[/]] [[unit]]px[[/]]  upscale [[value]]{render.upscale|bool}[[/]]  crop mod[[value]]{render.mod_crop}[[/]]  pad [[value]]{render.center_pad|bool}[[/]]",
+        "[[key]]Tonemap[[/]] curve [[value]]{tonemap.tone_curve}[[/]]  target [[value]]{tonemap.target_nits}[[/]][[unit]]nits[[/]]  dpd [[value]]{tonemap.dynamic_peak_detection|bool}[[/]]  verify ≤[[value]]{tonemap.verify_luma_threshold}[[/]]{verify.delta.max? [[dim]] Δ=[[value]]{verify.delta.max}[[/]][[/]]:''}",
+        "[[key]]Output[[/]] [[path]]{render.out_dir.e}[[/]]  compression [[value]]{render.compression}[[/]]  frames [[value]]{analysis.output_frame_count}[[/]]",
+        "[[key]]Cache[[/]] [[path]]{cache.file}[[/]]  status [[value]]{cache.status}[[/]]",
+        "[[key]]Frames[[/]] total [[value]]{analysis.output_frame_count}[[/]]{emit_json_tail? [[dim]]  preview [[value]]{analysis.output_frames_preview}[[/]]  (full list in JSON{verbose?' and above':''})[[/]] : [[value]]{analysis.output_frames_full|wrap_indent2}[[/]]}"
       ]
     }
   ],
