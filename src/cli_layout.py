@@ -1364,18 +1364,41 @@ class CliLayoutRenderer:
                 break_long_words=False,
                 break_on_hyphens=False,
             )
+    def _wrap_with_indent(self, value: Any, padding: int) -> str:
+        """
+        Wrap text to console width minus padding, with 2-space continuation indent.
+        
+        Parameters:
+            value (Any): The input value to wrap (converted to string).
+            padding (int): Number of columns to subtract from console width.
+        
+        Returns:
+            str: Wrapped text with 2-space hanging indent, or empty string if input is empty.
+        """
+        text = "" if value is None else str(value)
+        if not text:
+            return ""
+        width = max(10, self._console_width() - padding)
+        return textwrap.fill(
+            text,
+            width=width,
+            subsequent_indent="  ",
+            break_long_words=False,
+            break_on_hyphens=False,
+        )
+
+    def _apply_filter(self, value: Any, filter_name: str) -> Any:
+        """
+        Apply a named simple display filter to a value.
+        ...
+        """
+        if filter_name == "bool":
+            return "true" if bool(value) else "false"
+        if filter_name == "wrap_indent2":
+            return self._wrap_with_indent(value, 2)
         if filter_name == "summary_wrap":
-            text = "" if value is None else str(value)
-            if not text:
-                return ""
-            width = max(10, self._console_width() - 4)
-            return textwrap.fill(
-                text,
-                width=width,
-                subsequent_indent="  ",
-                break_long_words=False,
-                break_on_hyphens=False,
-            )
+            return self._wrap_with_indent(value, 4)
+        # ... other filters unchanged ...
         if filter_name == "none":
             return value if value not in (None, "") else "none"
         if filter_name == "unchanged":
