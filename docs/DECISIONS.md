@@ -1,5 +1,6 @@
 # Decisions Log
 
+- *2025-10-13:* Dropped the unused `types-pytest` dependency from the dev group because the package is unavailable on PyPI and broke `uv run` environment creation on fresh clones. CI keeps installing real `pytest` through the dev group, so workflows and local test runs continue to function normally.
 - *2025-10-12:* Introduced local stubs for click, requests, httpx, and rich plus tighter JSON-tail helpers in tests to eliminate Pyright/Pylance import and indexing errors while keeping diagnostics strict.
 - *2025-10-10:* Hardened CLI progress configuration by validating styles during config load, normalizing the stored value, and simplifying runtime flag handling to avoid getattr/except patterns flagged by linters.
 - *2025-10-09:* Adjusted overlay text defaults so minimal mode now shows resolution/upscale context and frame-selection type while diagnostic mode drops per-frame selection detail lines that were redundant on-screen but remain available in cached metadata.
