@@ -4,7 +4,6 @@ Automated frame sampling, alignment, and slow.pics uploads for repeatable QC.
 
 <!-- tags: frame comparison, ffmpeg, vapoursynth, slow.pics, tmdb, cli -->
 
-[![CI](https://github.com/TJZine/frame-compare/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/TJZine/frame-compare/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.13+](https://img.shields.io/badge/python-3.13+-3776ab.svg)
 

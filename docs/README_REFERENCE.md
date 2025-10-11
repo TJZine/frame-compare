@@ -11,13 +11,13 @@ quick-start configuration paths.
 | --- | --- | --- | --- |
 | `[analysis].frame_count_dark` | Count of dark-scene frames per run. | int | `20` |
 | `[analysis].frame_count_bright` | Bright-scene frame quota. | int | `10` |
-| `[analysis].frame_count_motion` | Motion-heavy frames queued. | int | `15` |
-| `[analysis].random_frames` | Extra deterministic random frames. | int | `15` |
+| `[analysis].frame_count_motion` | Motion-heavy frames queued. | int | `10` |
+| `[analysis].random_frames` | Extra deterministic random frames. | int | `10` |
 | `[analysis].user_frames` | Always-rendered frame numbers. | list[int] | `[]` |
 | `[analysis].random_seed` | Seed for random selection. | int | `20202020` |
-| `[analysis].downscale_height` | Metric computation height cap. | int | `480` |
-| `[analysis].step` | Frame stride during analysis. | int | `2` |
-| `[analysis].skip_head_seconds` | Seconds trimmed from the start. | float | `0.0` |
+| `[analysis].downscale_height` | Metric computation height cap. | int | `720` |
+| `[analysis].ignore_lead_seconds` | Seconds trimmed from the start. | float | `0.0` |
+| `[analysis].ignore_trail_seconds` | Seconds trimmed from the end. | float | `0.0` |
 | `[analysis].min_window_seconds` | Minimum usable footage window. | float | `5.0` |
 | `[analysis].frame_data_filename` | Metrics cache path. | str | `"generated.compframes"` |
 <!-- markdownlint-restore -->
@@ -60,16 +60,14 @@ quick-start configuration paths.
 <!-- markdownlint-disable MD013 -->
 | Key | Purpose | Type | Default |
 | --- | --- | --- | --- |
-| `[slowpics].auto_upload` | Automatically upload runs. | bool | `false` |
+| `[slowpics].auto_upload` | Automatically upload runs. | bool | `true` |
 | `[slowpics].collection_name` | slow.pics collection label. | str | `""` |
 | `[slowpics].tmdb_id` | TMDB identifier. | str | `""` |
 | `[slowpics].open_in_browser` | Open slow.pics URLs locally. | bool | `true` |
-| `[slowpics].create_url_shortcut` | Save `.url` shortcut in output directory. | bool | `true` |
 | `[slowpics].delete_screen_dir_after_upload` | Remove PNGs after upload. | bool | `true` |
 | `[tmdb].api_key` | Key needed for TMDB lookup. | str | `""` |
 | `[tmdb].enable_anime_parsing` | Anime-specific parsing toggle. | bool | `true` |
 | `[tmdb].cache_ttl_seconds` | TMDB cache lifetime (seconds). | int | `86400` |
-| `[tmdb].cache_max_entries` | Maximum in-memory cache entries. | int | `256` |
 <!-- markdownlint-restore -->
 
 ## Runtime and environment
@@ -77,8 +75,8 @@ quick-start configuration paths.
 <!-- markdownlint-disable MD013 -->
 | Key | Purpose | Type | Default |
 | --- | --- | --- | --- |
-| `[paths].input_dir` | Default scan directory. | str | `"."` *(template uses `comparison_videos/`)* |
-| `[runtime].ram_limit_mb` | VapourSynth RAM ceiling. | int | `8000` |
+| `[paths].input_dir` | Default scan directory. | str | `"comparison_videos"` |
+| `[runtime].ram_limit_mb` | VapourSynth RAM ceiling. | int | `4000` |
 | `[runtime].vapoursynth_python_paths` | Extra VapourSynth module paths. | list[str] | `[]` |
 | `[source].preferred` | Preferred source filter. | str | `"lsmas"` |
 | `VAPOURSYNTH_PYTHONPATH` | Environment module path. | str | *(unset)* |
