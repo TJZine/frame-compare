@@ -18,10 +18,10 @@ from src.cli_layout import CliLayoutRenderer, LayoutContext, _AnsiColorMapper, l
 
 def _project_root() -> Path:
     """
-    Get the project's root directory.
+    Locate the project's root directory.
     
     Returns:
-        Path: Path to the project root (the parent of this file's parent).
+        Path: Path to the project root directory (the parent of this file's parent).
     """
     return Path(__file__).resolve().parent.parent
 
@@ -392,9 +392,23 @@ def test_windows_terminal_bypasses_colorama_convert(monkeypatch: pytest.MonkeyPa
     fake_colorama.init_kwargs: Dict[str, Any] = {}
 
     def just_fix_windows_console() -> None:
+        """
+        No-op placeholder retained for compatibility with codepaths that expect a Windows console fix.
+        
+        This function intentionally performs no action and exists so callers can invoke a single cross-platform symbol
+        when a platform-specific console virtual terminal enablement step is unnecessary or handled elsewhere.
+        """
         return None
 
     def init(*, strip: bool, convert: bool) -> None:
+        """
+        Record the provided colorama initialization flags for test inspection.
+        
+        Parameters:
+            strip (bool): Whether ANSI escape sequences should be stripped.
+            convert (bool): Whether ANSI escape sequences should be converted to the platform's console API.
+        
+        """
         fake_colorama.init_kwargs = {"strip": strip, "convert": convert}
 
     fake_colorama.just_fix_windows_console = just_fix_windows_console  # type: ignore[attr-defined]
@@ -418,9 +432,23 @@ def test_legacy_windows_console_keeps_colorama_convert(monkeypatch: pytest.Monke
     fake_colorama.init_kwargs: Dict[str, Any] = {}
 
     def just_fix_windows_console() -> None:
+        """
+        No-op placeholder retained for compatibility with codepaths that expect a Windows console fix.
+        
+        This function intentionally performs no action and exists so callers can invoke a single cross-platform symbol
+        when a platform-specific console virtual terminal enablement step is unnecessary or handled elsewhere.
+        """
         return None
 
     def init(*, strip: bool, convert: bool) -> None:
+        """
+        Record the provided colorama initialization flags for test inspection.
+        
+        Parameters:
+            strip (bool): Whether ANSI escape sequences should be stripped.
+            convert (bool): Whether ANSI escape sequences should be converted to the platform's console API.
+        
+        """
         fake_colorama.init_kwargs = {"strip": strip, "convert": convert}
 
     fake_colorama.just_fix_windows_console = just_fix_windows_console  # type: ignore[attr-defined]
