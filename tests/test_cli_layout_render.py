@@ -200,6 +200,19 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
 
 
 def test_layout_renderer_sample_output(tmp_path, monkeypatch):
+    """
+    Exercise the CLI layout renderer with representative sample data and assert the rendered sections, tokens, markers, and summary output meet expected formatting and content.
+    
+    Validates that:
+    - Template rendering, token rendering, conditional tokens, and expression evaluation produce expected strings.
+    - Each layout section can be rendered without error.
+    - Console output contains required section markers, legend and divider, writer/canvas blocks with a blank line between them, and box-drawing edges.
+    - Lines do not exceed console width and JSON output appears where expected.
+    - Specific key-value indicators (e.g., "writer=vs", "add_frame_info=true") appear or do not appear as expected.
+    - Summary includes the expected "Output frames" count and a preview of frames, and section header-to-role log lines map to the expected roles.
+    
+    (The function is a pytest test; it does not return a value and relies on pytest fixtures for setup.)
+    """
     layout_path = _project_root() / "cli_layout.v1.json"
     layout = load_cli_layout(layout_path)
     console = Console(width=100, record=True, color_system=None)

@@ -1780,12 +1780,12 @@ class CliLayoutRenderer:
 
     def _render_list_section(self, section: Mapping[str, Any], values: Mapping[str, Any], flags: Mapping[str, Any]) -> None:
         """
-        Render a "list" section: print the section badge/title and the section's items either as a single column or two columns depending on available console width.
+        Render a list section header and its items using either a single-column or two-column layout.
         
-        Each non-empty item is rendered as a template, processed for styling, and printed. When there are more than three items and the console width is at least layout.options.two_column_min_cols, items are split into two columns, truncated and padded to fit; otherwise items are printed one per line.
+        Renders the section's title/badge, evaluates each item as a template, applies inline styling and highlighting, and prints the resulting lines. If any rendered item contains a newline it is emitted as multiple lines. When no rendered item is multiline, there are more than three items, and the console width meets or exceeds layout.options.two_column_min_cols, items are split into two columns; in the two-column layout each column is truncated and padded to fit. Falsy items are skipped.
         
         Raises:
-            CliLayoutError: if `section["items"]` exists and is not a list.
+            CliLayoutError: if the section's "items" value is present and is not a list.
         """
         self._render_title_badge(section)
         items = section.get("items", [])
@@ -1831,19 +1831,20 @@ class CliLayoutRenderer:
 
     def _render_group_section(self, section: Mapping[str, Any], values: Mapping[str, Any], flags: Mapping[str, Any]) -> None:
         """
-        Render a "group" section by evaluating and printing its member blocks with optional subtitles and dividing rules.
+        Render a "group" section by evaluating its blocks and writing their subtitles and lines to the console.
         
-        Each block may include:
-        - "when": a conditional expression; the block is skipped if the condition evaluates to false.
-        - "type": if "progress", the block is skipped (progress handled separately); otherwise treated as line-based content.
-        - "subtitle": an optional subtitle rendered before the block's lines.
-        - "lines": a list of templates; each template is rendered, styled, and included if non-empty.
+        Each block may contain:
+        - "when": a condition expression; the block is skipped if the condition evaluates to false.
+        - "type": blocks with value "progress" are skipped here (progress is handled separately); other types are treated as line-based content.
+        - "subtitle": an optional subtitle written before the block's lines.
+        - "lines": a list of template strings that are rendered and included when non-empty.
         
-        Behavior:
-        - Validates that section["blocks"], if present, is a list and raises CliLayoutError if not.
-        - Renders each block's lines via render_template, applies styling and alignment, and formats multi-column block lines.
-        - Emits a decorative rule between a subtitle and its block lines when the console width is >= 80.
-        - Writes a blank line between rendered blocks.
+        Behavior details:
+        - Evaluates each block's "when" expression against the provided values and flags.
+        - Skips non-mapping blocks and blocks whose "lines" is not a list.
+        - Renders templates, applies inline styling/highlighting, and formats block lines for output.
+        - Emits a decorative rule between a subtitle and its block lines when the console width is at least 80.
+        - Writes a blank line between rendered blocks when appropriate.
         
         Raises:
             CliLayoutError: if section["blocks"] is present but is not a list.
