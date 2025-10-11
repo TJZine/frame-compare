@@ -1,5 +1,6 @@
 # Decisions Log
 
+- *2025-10-14:* Adjusted CLI theming to separate hierarchy (muted section badges, yellow subheads) and rewrote the At-a-Glance summary to surface sampling, window, and alignment metrics requested in the usability review.
 - *2025-10-13:* Dropped the unused `types-pytest` dependency from the dev group because the package is unavailable on PyPI and broke `uv run` environment creation on fresh clones. CI keeps installing real `pytest` through the dev group, so workflows and local test runs continue to function normally.
 - *2025-10-12:* Introduced local stubs for click, requests, httpx, and rich plus tighter JSON-tail helpers in tests to eliminate Pyright/Pylance import and indexing errors while keeping diagnostics strict.
 - *2025-10-11:* Audited the `docs/` catalog, refreshed the deep-review memo with current safeguards/follow-ups, and corrected README reference defaults to match the live config schema.
@@ -12,3 +13,4 @@
 - *2025-09-30:* Standardised group subhead styling across CLI sections: accent-subhead prefixes (`›`/`>` fallback), dim divider rules sized to block content, column alignment for numeric values, and verbose legends describing token roles to satisfy `features/CLI/GUIDE.md`.
 - *2025-09-30:* Simplified diagnostic overlays by replacing the HDR MAX/AVG measurement block with render resolution, mastering display luminance (for HDR sources), and cached frame-selection metadata while trimming redundant frame-info lines to keep CLI banners uncluttered.
 - *2025-09-29:* Adopted CLI layout styling DSL with semantic spans and data-driven highlight rules. Renderer now consumes palette roles (`value`, `unit`, `path`, etc.), honors section accent theming, and evaluates JSON-configured thresholds (e.g., tonemap verification, boolean states) to keep formatting declarative.
+- *2025-10-14:* Adopted key/value styling in the CLI Summary list to mirror At-a-Glance key/value formatting and keep closing metrics aligned.
