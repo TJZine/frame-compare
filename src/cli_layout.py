@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import textwrap
 from itertools import zip_longest
 from pathlib import Path
@@ -182,6 +183,37 @@ class _AnsiColorMapper:
             self._capability = self._detect_capability()
 
     @staticmethod
+    def _is_truthy_flag(raw_value: str) -> bool:
+        """Return True when an environment-style flag requests enabling behavior."""
+
+        normalized = raw_value.strip().lower()
+        return bool(normalized) and normalized not in {"0", "false", "no", "off"}
+
+    @staticmethod
+    def _is_modern_windows_terminal() -> bool:
+        """Return True if heuristics indicate a VT-capable Windows console."""
+
+        if os.name != "nt":
+            return False
+        if os.environ.get("WT_SESSION"):
+            return True
+        term_program = os.environ.get("TERM_PROGRAM", "").lower()
+        if term_program == "windows_terminal":
+            return True
+        get_windows_version = getattr(sys, "getwindowsversion", None)
+        if callable(get_windows_version):
+            try:  # pragma: no cover - platform dependent
+                version = get_windows_version()
+            except OSError:
+                version = None
+            if version is not None:
+                major = getattr(version, "major", 0)
+                build = getattr(version, "build", 0)
+                if major > 10 or (major == 10 and build >= 10586):
+                    return True
+        return False
+
+    @staticmethod
     def _enable_windows_vt_mode() -> None:
         """
         Enable ANSI VT (virtual terminal) processing on Windows consoles so ANSI escape sequences are interpreted.
@@ -194,7 +226,13 @@ class _AnsiColorMapper:
             import colorama
 
             colorama.just_fix_windows_console()
-            colorama.init(strip=False, convert=True)
+            convert = not (
+                _AnsiColorMapper._is_modern_windows_terminal()
+                or _AnsiColorMapper._is_truthy_flag(
+                    os.environ.get("FRAME_COMPARE_FORCE_256_COLOR", "")
+                )
+            )
+            colorama.init(strip=False, convert=convert)
             return
         except Exception:  # pragma: no cover - optional dependency
             pass
@@ -215,17 +253,23 @@ class _AnsiColorMapper:
     def _detect_capability() -> str:
         """
         Determine the terminal color capability based on environment variables.
-        
+
         Checks COLORTERM and TERM for indications of truecolor or 256-color support and returns "256" when detected, otherwise returns "16".
-        
+
         Returns:
             capability (str): "256" if truecolor/256-color support is likely, "16" otherwise.
         """
+        force_256 = os.environ.get("FRAME_COMPARE_FORCE_256_COLOR", "")
+        if _AnsiColorMapper._is_truthy_flag(force_256):
+            return "256"
+
         colorterm = os.environ.get("COLORTERM", "").lower()
         if any(token in colorterm for token in ("truecolor", "24bit")):
             return "256"
         term = os.environ.get("TERM", "").lower()
         if "256color" in term or "truecolor" in term:
+            return "256"
+        if _AnsiColorMapper._is_modern_windows_terminal():
             return "256"
         return "16"
 
