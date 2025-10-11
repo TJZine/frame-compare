@@ -1364,6 +1364,18 @@ class CliLayoutRenderer:
                 break_long_words=False,
                 break_on_hyphens=False,
             )
+        if filter_name == "summary_wrap":
+            text = "" if value is None else str(value)
+            if not text:
+                return ""
+            width = max(10, self._console_width() - 4)
+            return textwrap.fill(
+                text,
+                width=width,
+                subsequent_indent="  ",
+                break_long_words=False,
+                break_on_hyphens=False,
+            )
         if filter_name == "none":
             return value if value not in (None, "") else "none"
         if filter_name == "unchanged":

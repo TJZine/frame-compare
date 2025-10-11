@@ -244,13 +244,35 @@ def test_list_section_two_column_layout(tmp_path):
     wide_renderer = _make_renderer(140)
     summary_section = _find_section(wide_renderer, "summary")
     wide_renderer.render_section(summary_section, values, flags)
-    wide_output = wide_renderer.console.export_text()
-    assert "    •" in wide_output
+    wide_lines = wide_renderer.console.export_text().splitlines()
 
     narrow_renderer = _make_renderer(90)
     narrow_renderer.render_section(_find_section(narrow_renderer, "summary"), values, flags)
-    narrow_output = narrow_renderer.console.export_text()
-    assert "    •" not in narrow_output
+    narrow_lines = narrow_renderer.console.export_text().splitlines()
+
+    for lines in (wide_lines, narrow_lines):
+        groups: list[list[str]] = []
+        current: list[str] = []
+        for line in lines:
+            if not line.strip():
+                continue
+            if line.lstrip().startswith("• "):
+                if current:
+                    groups.append(current)
+                current = [line]
+                continue
+            if current and line.startswith("  "):
+                current.append(line)
+        if current:
+            groups.append(current)
+
+        assert groups, "Expected summary bullets to be present"
+        for group in groups:
+            assert len(group) >= 2, f"Expected hanging details for {group[0]}"
+            header_indent = len(group[0]) - len(group[0].lstrip())
+            for detail in group[1:]:
+                detail_indent = len(detail) - len(detail.lstrip())
+                assert detail_indent == header_indent + 2
 
 
 def test_highlight_markup_and_spans(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:

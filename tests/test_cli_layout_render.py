@@ -293,9 +293,16 @@ def test_layout_renderer_sample_output(tmp_path, monkeypatch):
     assert any("add_frame_info=true" in line for line in lines)
     assert not any("template=" in line for line in lines)
 
-    summary_lines = [line for line in lines if "Output frames" in line]
-    assert any("Output frames (6)" in line for line in summary_lines)
-    assert any("[0, 10, 20" in line for line in summary_lines)
+    header_idx = next(i for i, line in enumerate(lines) if "Output frames (6)" in line)
+    header_line = lines[header_idx]
+    assert header_line.lstrip().startswith("• Output frames (6)")
+
+    assert header_idx + 1 < len(lines), "Expected detail line after Output frames header"
+    detail_line = lines[header_idx + 1]
+    header_indent = len(header_line) - len(header_line.lstrip())
+    detail_indent = len(detail_line) - len(detail_line.lstrip())
+    assert detail_indent == header_indent + 2
+    assert "[0, 10, 20" in detail_line
 
     section_logs = [line for line in lines if "section[" in line and "header role" in line]
     for expected in (
@@ -337,10 +344,10 @@ def test_summary_output_frames_full_list_without_ellipsis(tmp_path: Path) -> Non
     output_text = console.export_text()
     normalized = " ".join(line.strip() for line in output_text.splitlines() if line.strip())
 
-    assert "• Output frames (50):" in normalized
+    assert "• Output frames (50)" in normalized
     assert f"[{long_frames}]" in normalized
 
-    summary_start = normalized.index("• Output frames (50):")
+    summary_start = normalized.index("• Output frames (50)")
     summary_text = normalized[summary_start:]
     assert "…" not in summary_text
 
