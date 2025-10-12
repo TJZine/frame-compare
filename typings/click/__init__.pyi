@@ -45,10 +45,16 @@ def option(*param_decls: str, **kwargs: Any) -> Callable[[_F], _F]: ...
 
 def prompt(
     text: str,
-    default: Any = ..., 
+    default: Any = ...,
     *,
-    type: Any | None = ..., 
-    show_default: bool | str | None = ..., 
+    hide_input: bool = ...,
+    confirmation_prompt: bool | str = ...,
+    type: Any | None = ...,
+    value_proc: Callable[[str], Any] | None = ...,
+    prompt_suffix: str = ...,
+    show_default: bool | str | None = ...,
+    err: bool = ...,
+    show_choices: bool = ...,
 ) -> Any: ...
 
 
