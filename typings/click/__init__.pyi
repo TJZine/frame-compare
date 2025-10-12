@@ -26,7 +26,6 @@ def command(__func: _F) -> Command[_F]: ...
 
 @overload
 def command(
-    *,
     name: str | None = ...,
     cls: type[Command[Any]] | None = ...,
     **kwargs: Any,
@@ -35,7 +34,6 @@ def command(
 
 def command(
     __func: _F | None = ...,
-    *,
     name: str | None = ...,
     cls: type[Command[Any]] | None = ...,
     **kwargs: Any,
