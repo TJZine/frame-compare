@@ -68,10 +68,11 @@ def launch(url: str, **kwargs: Any) -> bool | None: ...
 
 
 class exceptions:
-    class Exit(SystemExit):
+    class Exit(Exception):
+        exit_code: int | str | None
         code: int | str | None
 
-        def __init__(self, code: int | str | None = ...) -> None: ...
+        def __init__(self, exit_code: int | str | None = ...) -> None: ...
 
 
 __all__ = [
