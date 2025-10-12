@@ -284,23 +284,23 @@ def upload_comparison(
     if not image_files:
         raise SlowpicsAPIError("No image files provided for upload")
 
-    session = requests.Session()
-    try:
-        session.get("https://slow.pics/comparison", timeout=_CONNECT_TIMEOUT_SECONDS)
-    except requests.RequestException as exc:
-        raise SlowpicsAPIError(f"Failed to establish slow.pics session: {exc}") from exc
+    with requests.Session() as session:
+        try:
+            session.get("https://slow.pics/comparison", timeout=_CONNECT_TIMEOUT_SECONDS)
+        except requests.RequestException as exc:
+            raise SlowpicsAPIError(f"Failed to establish slow.pics session: {exc}") from exc
 
-    xsrf_token = session.cookies.get("XSRF-TOKEN")
-    if not xsrf_token:
-        raise SlowpicsAPIError("Missing XSRF token from slow.pics response")
+        xsrf_token = session.cookies.get("XSRF-TOKEN")
+        if not xsrf_token:
+            raise SlowpicsAPIError("Missing XSRF token from slow.pics response")
 
-    logger.info("Using slow.pics legacy upload endpoints")
-    url = _upload_comparison_legacy(
-        session,
-        image_files,
-        screen_dir,
-        cfg,
-        progress_callback=progress_callback,
-    )
-    logger.info("Slow.pics: %s", url)
-    return url
+        logger.info("Using slow.pics legacy upload endpoints")
+        url = _upload_comparison_legacy(
+            session,
+            image_files,
+            screen_dir,
+            cfg,
+            progress_callback=progress_callback,
+        )
+        logger.info("Slow.pics: %s", url)
+        return url
