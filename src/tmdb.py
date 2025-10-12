@@ -6,10 +6,11 @@ import asyncio
 import logging
 import re
 import time
+from collections import OrderedDict
 import unicodedata
 from dataclasses import dataclass
 from importlib import import_module
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, cast
 
 import httpx
 
@@ -106,25 +107,51 @@ class TMDBResolution:
 
 
 class _TTLCache:
-    """Simple TTL cache shared across TMDB requests."""
+    """Bounded TTL cache shared across TMDB requests."""
 
-    def __init__(self) -> None:
-        self._data: Dict[Tuple[Any, ...], Tuple[float, Any]] = {}
+    def __init__(self, max_entries: int = 256) -> None:
+        self._max_entries = max(0, int(max_entries))
+        self._data: "OrderedDict[Tuple[Any, ...], Tuple[float, int, Any]]" = OrderedDict()
+
+    def configure(self, *, max_entries: int | None = None) -> None:
+        if max_entries is not None:
+            self._max_entries = max(0, int(max_entries))
+            if self._max_entries == 0:
+                self._data.clear()
+            else:
+                while len(self._data) > self._max_entries:
+                    self._data.popitem(last=False)
+
+    def clear(self) -> None:
+        self._data.clear()
 
     def get(self, key: Tuple[Any, ...], ttl_seconds: int) -> Any | None:
+        if ttl_seconds <= 0:
+            self._data.pop(key, None)
+            return None
         entry = self._data.get(key)
         if not entry:
             return None
-        timestamp, value = entry
-        if ttl_seconds <= 0:
-            return None
-        if time.monotonic() - timestamp > ttl_seconds:
+        timestamp, stored_ttl, value = entry
+        ttl = min(stored_ttl, ttl_seconds)
+        if ttl <= 0:
             self._data.pop(key, None)
             return None
+        if time.monotonic() - timestamp > ttl:
+            self._data.pop(key, None)
+            return None
+        self._data.move_to_end(key)
         return value
 
-    def set(self, key: Tuple[Any, ...], value: Any) -> None:
-        self._data[key] = (time.monotonic(), value)
+    def set(self, key: Tuple[Any, ...], value: Any, ttl_seconds: int) -> None:
+        if ttl_seconds <= 0 or self._max_entries == 0:
+            self._data.pop(key, None)
+            return
+        now = time.monotonic()
+        self._data[key] = (now, int(ttl_seconds), value)
+        self._data.move_to_end(key)
+        while len(self._data) > self._max_entries:
+            self._data.popitem(last=False)
 
 
 _CACHE = _TTLCache()
@@ -462,16 +489,33 @@ async def _http_request(
                     f"TMDB request failed for {path} (status={status}): {response.text[:200]}"
                 )
             try:
-                payload = response.json()
+                payload_obj = response.json()
             except ValueError as exc:  # pragma: no cover - unexpected
                 raise TMDBResolutionError("TMDB returned invalid JSON") from exc
-            _CACHE.set(key, payload)
+            payload = _ensure_dict(payload_obj, context=f"{path} response")
+            _CACHE.set(key, payload, ttl_seconds=cache_ttl)
             return payload
         await asyncio.sleep(backoff)
         backoff = min(backoff * 2, 4.0)
     if last_error:
         raise TMDBResolutionError(f"TMDB request failed after retries: {last_error}")
     raise TMDBResolutionError("TMDB request failed after retries")
+
+
+def _ensure_dict(value: object, *, context: str) -> Dict[str, Any]:
+    if isinstance(value, dict) and all(isinstance(key, str) for key in value):
+        return cast(Dict[str, Any], value)
+    raise TMDBResolutionError(f"{context} was not a JSON object")
+
+
+def _dict_entries(value: object) -> List[Dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    entries: List[Dict[str, Any]] = []
+    for item in value:
+        if isinstance(item, dict) and all(isinstance(key, str) for key in item):
+            entries.append(cast(Dict[str, Any], item))
+    return entries
 
 
 def _title_candidates(payload: Dict[str, Any]) -> List[str]:
@@ -527,10 +571,12 @@ def _score_payload(
             else:
                 best -= min(0.4 + (0.05 * (diff - tolerance)), 0.7)
     popularity = payload.get("popularity")
-    try:
-        popularity_value = float(popularity)
-    except (TypeError, ValueError):
-        popularity_value = 0.0
+    popularity_value = 0.0
+    if popularity is not None:
+        try:
+            popularity_value = float(popularity)
+        except (TypeError, ValueError):
+            popularity_value = 0.0
     if popularity_value > 0:
         best += min(popularity_value / 200.0, 0.05)
 
@@ -557,10 +603,9 @@ async def _fetch_alias_titles(
         key = "results"
 
     payload = await _http_request(client, cache_ttl=cache_ttl, path=path, params={})
-    entries = payload.get(key) or []
     titles: List[str] = []
-    for entry in entries:
-        title = entry.get("title") if isinstance(entry, dict) else None
+    for entry in _dict_entries(payload.get(key)):
+        title = entry.get("title")
         if isinstance(title, str):
             stripped = title.strip()
             if stripped:
@@ -615,7 +660,7 @@ def _best_external_candidate(
 ) -> Optional[TMDBCandidate]:
     candidates: List[TMDBCandidate] = []
     for category, key in ((MOVIE, "movie_results"), (TV, "tv_results")):
-        for item in payload.get(key, []) or []:
+        for item in _dict_entries(payload.get(key)):
             score = _score_payload(
                 item,
                 category=category,
@@ -673,8 +718,7 @@ async def _perform_search(
         path="search/movie" if plan.category == MOVIE else "search/tv",
         params=params,
     )
-    results = payload.get("results", [])
-    return list(results) if isinstance(results, list) else []
+    return _dict_entries(payload.get("results"))
 
 
 def _extract_best_candidate(
@@ -772,6 +816,8 @@ async def resolve_tmdb(
 
     if not config.api_key:
         raise TMDBResolutionError("tmdb.api_key must be set to resolve TMDB metadata")
+
+    _CACHE.configure(max_entries=config.cache_max_entries)
 
     unattended_mode = config.unattended if unattended is None else unattended
     category_pref = (category_preference or config.category_preference or "").upper() or None

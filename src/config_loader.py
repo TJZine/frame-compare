@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import tomllib
-from dataclasses import fields
+from dataclasses import fields, is_dataclass
 from typing import Any, Dict
 
 from .datatypes import (
@@ -44,14 +44,38 @@ def _coerce_bool(value: Any, dotted_key: str) -> bool:
 
 
 def _sanitize_section(raw: dict[str, Any], name: str, cls):
+    """
+    Coerce a raw TOML table into an instance of ``cls`` with cleaned booleans.
+
+    Parameters:
+        raw (dict[str, Any]): Raw TOML section data.
+        name (str): Section name used when reporting validation errors.
+        cls: Dataclass type used to construct the section object.
+
+    Returns:
+        Any: Instantiated dataclass populated with values from ``raw``.
+
+    Raises:
+        ConfigError: If the section is not a table or contains invalid keys or values.
+    """
     if not isinstance(raw, dict):
         raise ConfigError(f"[{name}] must be a table")
     cleaned: Dict[str, Any] = {}
-    bool_fields = {field.name for field in fields(cls) if field.type is bool}
+    cls_fields = {field.name: field for field in fields(cls)}
+    bool_fields = {name for name, field in cls_fields.items() if field.type is bool}
+    nested_fields = {
+        name: field.type
+        for name, field in cls_fields.items()
+        if is_dataclass(field.type)
+    }
     provided_keys = set(raw.keys())
     for key, value in raw.items():
         if key in bool_fields:
             cleaned[key] = _coerce_bool(value, f"{name}.{key}")
+        elif key in nested_fields:
+            if not isinstance(value, dict):
+                raise ConfigError(f"[{name}.{key}] must be a table")
+            cleaned[key] = _sanitize_section(value, f"{name}.{key}", nested_fields[key])
         else:
             cleaned[key] = value
     try:
@@ -66,12 +90,31 @@ def _sanitize_section(raw: dict[str, Any], name: str, cls):
 
 
 def _validate_trim(mapping: Dict[str, Any], label: str) -> None:
+    """
+    Ensure all trim overrides map to integer frame counts.
+
+    Parameters:
+        mapping (Dict[str, Any]): Raw trim override mapping.
+        label (str): Configuration label used in error messages.
+
+    Raises:
+        ConfigError: If any trim override is not an integer.
+    """
     for key, value in mapping.items():
         if not isinstance(value, int):
             raise ConfigError(f"{label} entry '{key}' must map to an integer")
 
 
 def _validate_change_fps(change_fps: Dict[str, Any]) -> None:
+    """
+    Validate ``change_fps`` overrides as ``"set"`` or two positive integers.
+
+    Parameters:
+        change_fps (Dict[str, Any]): Mapping from clip identifiers to override values.
+
+    Raises:
+        ConfigError: If any override is not ``"set"`` or a two-integer list of positive numbers.
+    """
     for key, value in change_fps.items():
         if isinstance(value, str):
             if value != "set":
@@ -84,7 +127,17 @@ def _validate_change_fps(change_fps: Dict[str, Any]) -> None:
 
 
 def load_config(path: str) -> AppConfig:
-    """Read, parse, and validate configuration from *path*."""
+    """
+    Load and validate an application configuration from a TOML file.
+    
+    Reads the file at `path`, parses it as UTF-8 TOML (BOM is accepted), coerces and validates all top-level sections, normalizes a few fields (for example pad/overlay/source/category preferences), and returns a fully populated AppConfig ready for use by the application.
+    
+    Returns:
+        AppConfig: The validated and normalized application configuration.
+    
+    Raises:
+        ConfigError: If the file is not UTF-8, TOML parsing fails, required values are missing, or any validation rule is violated.
+    """
 
     with open(path, "rb") as handle:
         raw_bytes = handle.read()
@@ -113,6 +166,11 @@ def load_config(path: str) -> AppConfig:
             raw.get("audio_alignment", {}), "audio_alignment", AudioAlignmentConfig
         ),
     )
+
+    normalized_style = str(app.cli.progress.style).strip().lower()
+    if normalized_style not in {"fill", "dot"}:
+        raise ConfigError("cli.progress.style must be 'fill' or 'dot'")
+    app.cli.progress.style = normalized_style
 
     if app.analysis.step < 1:
         raise ConfigError("analysis.step must be >= 1")
@@ -148,6 +206,11 @@ def load_config(path: str) -> AppConfig:
         raise ConfigError("screenshots.pad_to_canvas must be 'off', 'on', or 'auto'")
     app.screenshots.pad_to_canvas = pad_mode
 
+    progress_style = str(app.cli.progress.style).strip().lower()
+    if progress_style not in {"fill", "dot"}:
+        raise ConfigError("cli.progress.style must be 'fill' or 'dot'")
+    app.cli.progress.style = progress_style
+
     if app.slowpics.remove_after_days < 0:
         raise ConfigError("slowpics.remove_after_days must be >= 0")
     if app.slowpics.image_upload_timeout_seconds <= 0:
@@ -157,6 +220,8 @@ def load_config(path: str) -> AppConfig:
         raise ConfigError("tmdb.year_tolerance must be >= 0")
     if app.tmdb.cache_ttl_seconds < 0:
         raise ConfigError("tmdb.cache_ttl_seconds must be >= 0")
+    if app.tmdb.cache_max_entries < 0:
+        raise ConfigError("tmdb.cache_max_entries must be >= 0")
     if app.tmdb.category_preference is not None:
         preference = app.tmdb.category_preference.strip().upper()
         if preference not in {"", "MOVIE", "TV"}:

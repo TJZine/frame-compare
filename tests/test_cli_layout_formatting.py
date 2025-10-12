@@ -1,7 +1,10 @@
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, cast
 
 from rich.console import Console
+from rich.progress import BarColumn, Progress
+
+import src.cli_layout as cli_layout
 
 from src.cli_layout import (
     CliLayoutRenderer,
@@ -11,12 +14,29 @@ from src.cli_layout import (
     load_cli_layout,
 )
 
+from pytest import MonkeyPatch
+
 
 def _project_root() -> Path:
+    """
+    Get the project's root directory.
+    
+    Returns:
+        Path: Path object pointing to the project's root directory (two levels above this file).
+    """
     return Path(__file__).resolve().parent.parent
 
 
 def _sample_values(tmp_path: Path) -> Dict[str, Any]:
+    """
+    Constructs a nested dictionary of representative sample values for CLI layout tests.
+    
+    Parameters:
+        tmp_path (Path): Base temporary directory used to build sample file paths referenced in the returned data.
+    
+    Returns:
+        Dict[str, Any]: A dictionary containing test-ready sections such as `clips`, `trims`, `window`, `alignment`, `analysis`, `audio_alignment`, `render`, `tonemap`, `verify`, `overlay`, `cache`, `tmdb`, `overrides`, `warnings`, `slowpics`, and `audio_alignment_map`. The entries provide realistic example values (including file paths rooted at `tmp_path`) for use by renderer and layout tests.
+    """
     sample_clips = [
         {
             "label": "Reference",
@@ -79,6 +99,8 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
             "scanned": 12,
             "output_frame_count": 6,
             "output_frames_preview": "0, 10, 20, …, 110, 120, 130",
+            "output_frames_full": "[0, 10, 20, …, 110, 120, 130]",
+            "cache_progress_message": "Loading cached frame metrics from cache.bin…",
         },
         "audio_alignment": {
             "enabled": True,
@@ -93,7 +115,7 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
             "target_stream": "Target->aac/en/5.1",
         },
         "render": {
-            "writer": "VS",
+            "writer": "vs",
             "out_dir": str(tmp_path / "out"),
             "add_frame_info": True,
             "single_res": 0,
@@ -165,6 +187,16 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
 
 
 def _make_renderer(width: int, *, no_color: bool = True) -> CliLayoutRenderer:
+    """
+    Create a CliLayoutRenderer configured with a Console of the given width and color settings.
+    
+    Parameters:
+        width (int): Console width in characters used to construct the renderer's Console.
+        no_color (bool): If True, disable ANSI/color output; if False, enable the standard color system.
+    
+    Returns:
+        CliLayoutRenderer: Renderer initialized with the 'cli_layout.v1.json' layout and a Console matching the requested width and color settings.
+    """
     layout_path = _project_root() / "cli_layout.v1.json"
     layout = load_cli_layout(layout_path)
     color_system = None if no_color else "standard"
@@ -172,7 +204,14 @@ def _make_renderer(width: int, *, no_color: bool = True) -> CliLayoutRenderer:
     return CliLayoutRenderer(layout, console, quiet=False, verbose=False, no_color=no_color)
 
 
-def test_color_mapper_token_to_ansi_16(monkeypatch):
+def _find_section(renderer: CliLayoutRenderer, section_id: str) -> Dict[str, Any]:
+    for section in renderer.layout.sections:
+        if isinstance(section, dict) and section.get("id") == section_id:
+            return cast(Dict[str, Any], section)
+    raise AssertionError(f"Section {section_id!r} not found in layout")
+
+
+def test_color_mapper_token_to_ansi_16(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.delenv("COLORTERM", raising=False)
     monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setenv("TERM", "vt100")
@@ -182,7 +221,7 @@ def test_color_mapper_token_to_ansi_16(monkeypatch):
     assert styled.endswith("\x1b[0m")
 
 
-def test_color_mapper_token_to_ansi_256(monkeypatch):
+def test_color_mapper_token_to_ansi_256(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setenv("COLORTERM", "truecolor")
     monkeypatch.delenv("NO_COLOR", raising=False)
     mapper = _AnsiColorMapper(no_color=False)
@@ -204,25 +243,40 @@ def test_list_section_two_column_layout(tmp_path):
     flags: Dict[str, Any] = {}
 
     wide_renderer = _make_renderer(140)
-    wide_renderer.render_section(
-        next(section for section in wide_renderer.layout.sections if section["id"] == "summary"),
-        values,
-        flags,
-    )
-    wide_output = wide_renderer.console.export_text()
-    assert "    •" in wide_output
+    summary_section = _find_section(wide_renderer, "summary")
+    wide_renderer.render_section(summary_section, values, flags)
+    wide_lines = wide_renderer.console.export_text().splitlines()
 
     narrow_renderer = _make_renderer(90)
-    narrow_renderer.render_section(
-        next(section for section in narrow_renderer.layout.sections if section["id"] == "summary"),
-        values,
-        flags,
-    )
-    narrow_output = narrow_renderer.console.export_text()
-    assert "    •" not in narrow_output
+    narrow_renderer.render_section(_find_section(narrow_renderer, "summary"), values, flags)
+    narrow_lines = narrow_renderer.console.export_text().splitlines()
+
+    for lines in (wide_lines, narrow_lines):
+        groups: list[list[str]] = []
+        current: list[str] = []
+        for line in lines:
+            if not line.strip():
+                continue
+            if line.lstrip().startswith("• "):
+                if current:
+                    groups.append(current)
+                current = [line]
+                continue
+            if current and line.startswith("  "):
+                current.append(line)
+        if current:
+            groups.append(current)
+
+        assert groups, "Expected summary bullets to be present"
+        for group in groups:
+            assert len(group) >= 2, f"Expected hanging details for {group[0]}"
+            header_indent = len(group[0]) - len(group[0].lstrip())
+            for detail in group[1:]:
+                detail_indent = len(detail) - len(detail.lstrip())
+                assert detail_indent == header_indent + 2
 
 
-def test_highlight_markup_and_spans(tmp_path, monkeypatch):
+def test_highlight_markup_and_spans(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     monkeypatch.delenv("NO_COLOR", raising=False)
     renderer = _make_renderer(100, no_color=False)
     values = _sample_values(tmp_path)
@@ -230,11 +284,11 @@ def test_highlight_markup_and_spans(tmp_path, monkeypatch):
     context = LayoutContext(values, flags, renderer=renderer)
 
     token_markup = renderer._render_token("render.add_frame_info", context)
-    assert token_markup == "[[bool_true]]True[[/]]"
+    assert token_markup == "[[bool_true]]true[[/]]"
 
     wrapped = f"[[value]]{token_markup}[[/]]"
     colored_output = renderer._prepare_output(wrapped)
-    assert colored_output == renderer._colorize("bool_true", "True")
+    assert colored_output == renderer._colorize("bool_true", "true")
 
     padded_token = renderer._render_token("analysis.counts.motion:>5", context)
     assert padded_token.startswith(" ")
@@ -247,14 +301,47 @@ def test_highlight_markup_and_spans(tmp_path, monkeypatch):
     renderer_no_color = _make_renderer(100)
     context_no_color = LayoutContext(values, flags, renderer=renderer_no_color)
     token_plain = renderer_no_color._render_token("render.add_frame_info", context_no_color)
-    assert renderer_no_color._prepare_output(f"[[value]]{token_plain}[[/]]") == "True"
+    assert renderer_no_color._prepare_output(f"[[value]]{token_plain}[[/]]") == "true"
 
 
 def _render_section(renderer: CliLayoutRenderer, section_id: str, values: Dict[str, Any], flags: Dict[str, Any]) -> list[str]:
+    """
+    Render a layout section by id and return the rendered console output as lines.
+    
+    Binds the provided values and flags to the renderer, renders the section identified by `section_id`, and captures the console output.
+    
+    Parameters:
+        renderer (CliLayoutRenderer): The renderer used to render the layout section.
+        section_id (str): Identifier of the section in the renderer's layout to render.
+        values (Dict[str, Any]): Data values used to populate the layout tokens.
+        flags (Dict[str, Any]): Feature and formatting flags that affect rendering.
+    
+    Returns:
+        list[str]: The rendered console output split into lines, with trailing newline characters removed.
+    """
     renderer.bind_context(values, flags)
-    section = next(sec for sec in renderer.layout.sections if sec.get("id") == section_id)
+    section = _find_section(renderer, section_id)
     renderer.render_section(section, values, flags)
     return [line.rstrip("\n") for line in renderer.console.export_text().splitlines()]
+
+
+def test_progress_style_toggle(tmp_path):
+    values = _sample_values(tmp_path)
+    renderer = _make_renderer(100, no_color=True)
+
+    renderer.bind_context(values, {"progress_style": "fill"})
+    progress_fill = cast(Progress, renderer.create_progress("render_bar"))
+    try:
+        assert any(isinstance(column, BarColumn) for column in progress_fill.columns)
+    finally:
+        progress_fill.stop()
+
+    renderer.bind_context(values, {"progress_style": "dot"})
+    progress_dot = cast(Progress, renderer.create_progress("render_bar"))
+    try:
+        assert any(isinstance(column, cli_layout._DotProgressColumn) for column in progress_dot.columns)
+    finally:
+        progress_dot.stop()
 
 
 def test_group_subheading_prefix_ascii_and_unicode(tmp_path):
@@ -285,3 +372,16 @@ def test_group_rule_omitted_on_narrow_terminal(tmp_path):
     writer_idx = next(i for i, line in enumerate(lines) if line.strip().startswith("> Writer"))
     writer_follow = next((line for line in lines[writer_idx + 1 :] if line.strip()), "")
     assert writer_follow and set(writer_follow.strip()) != {"-"}
+
+
+def test_group_rule_matches_label_width(tmp_path):
+    values = _sample_values(tmp_path)
+    renderer = _make_renderer(120, no_color=True)
+    flags = {"verbose": True, "quiet": False, "no_color": True}
+    lines = [_ANSI_ESCAPE_RE.sub("", line) for line in _render_section(renderer, "render", values, flags)]
+
+    writer_idx = next(i for i, line in enumerate(lines) if line.strip().startswith("> Writer"))
+    writer_rule = next((line for line in lines[writer_idx + 1 :] if line.strip()), "")
+    assert writer_rule
+    expected_width = len("> Writer") + 2
+    assert len(writer_rule.strip()) == expected_width

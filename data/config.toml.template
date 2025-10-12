@@ -105,6 +105,8 @@ confirm_matches = false
 year_tolerance = 2
 enable_anime_parsing = true
 cache_ttl_seconds = 86400
+# Maximum number of distinct TMDB responses cached in-process (0 disables caching)
+cache_max_entries = 256
 category_preference = ""
 
 [naming]
@@ -116,8 +118,14 @@ prefer_guessit = true
 # Control CLI output behaviours.
 emit_json_tail = true
 
+[cli.progress]
+# Progress bar appearance: "fill" for filled bar, "dot" for single indicator.
+style = "fill"
+
 [paths]
-# Default input folder; override via CLI when needed.
+# Default input folder; override via CLI when needed. The shipped
+# ``comparison_videos`` directory now lives alongside ``frame_compare.py``, so
+# relative values resolve next to the config file or project root.
 input_dir = "comparison_videos"
 
 [runtime]

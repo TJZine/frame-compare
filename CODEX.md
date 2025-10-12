@@ -16,8 +16,36 @@
 - Use ripgrep to search when possible.
 - Advisors must follow AGENTS.md §Standard Flow before implementation.
 
+## Type Safety & Pylance/Pyright Quality Gates
+
+**Policy**
+- Type checking level: **Pyright/Pylance = `standard`** across the repo.
+  - For library/core packages, raise to **`strict`** (via `pyrightconfig.json` executionEnvironments).
+- All new/modified Python code MUST:
+  - Include full type hints on function params/returns (no implicit `Any`).
+  - Handle `Optional[...]` explicitly (early return, guard, or `assert x is not None`).
+  - Narrow unions via `isinstance`/guards (no unchecked attribute access).
+  - Avoid dynamic attributes; prefer `@dataclass`/`TypedDict`/`Protocol` for shape.
+  - Keep public APIs stable; document invariants in docstrings.
+
+**Gates (pre-merge)**
+1) **Diff plan** → approval → **patch** (no auto-exec).
+2) Before asking to merge, the assistant MUST:
+   - Propose running: `npx pyright --warnings` (or equivalent) and wait for approval.
+   - Report **zero errors** and **<= N warnings** (N defaults to 10; justify any above).
+   - If errors occur, propose minimal diffs to fix them and re-check.
+3) **Suppressions policy**
+   - `# type: ignore[...]` allowed only with a one-line justification above and a follow-up ticket.
+   - Prefer stubs/`TypedDict`/`Protocol` over blanket `Any`.
+4) **Config is source of truth**: the repo’s `pyrightconfig.json` (or `[tool.pyright]`) governs analysis; do not override via editor-only settings.
+
+**Reviewer checklist (assistant must confirm)**
+- No new `Any` leaks, unknown members, or unchecked Optional access.
+- Library calls typed (stubs present or `useLibraryCodeForTypes` suffices).
+- Tests cover the typed contract (positive + None/edge cases).
+
 ## Sandbox & Network
-- Local sandbox: `workspace-write`; no network unless explicitly approved. (If Cloud: follow environment defaults.)  
+- Local sandbox: `workspace-write` except for testing; no network unless explicitly approved. (If Cloud: follow environment defaults.)  
 - Print commands before running; never run package scripts or migrations without approval. :contentReference[oaicite:9]{index=9}
 
 ## Structure-Change Policy

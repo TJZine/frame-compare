@@ -1,29 +1,69 @@
-# Deep Code Review Findings
+# Deep code review status (2025-10-11)
 
-## CRITICAL: CLI layout expression evaluation enables arbitrary code execution
-**File:** src/cli_layout.py:323-358, 587-598, 918-969
+This memo updates the prior deep-dive report with the current
+state of the codebase. Each section lists the check outcome and
+recommended follow-up, if any.
+
+## CRITICAL: Screenshot cleanup can delete arbitrary directories
+**File:** frame_compare.py:3099-3650
 **Risk Level:** HIGH
-**Impact:** Any malicious or simply unvetted layout JSON can execute arbitrary Python in the frame-compare process, giving full code execution (RCE). Attackers only need to control the layout file on disk (e.g., through a compromised distribution or shared workspace) to pivot into command execution under the user's account.
-**Evidence:** `CliLayoutRenderer` pipes layout expressions directly into `eval(...)` with a namespace that still exposes the full object graph returned by `LayoutContext.resolve`, including magic attributes like `__class__` and sequence indexing. That allows payloads such as `{resolve('clips.0').__class__.__mro__[1].__subclasses__()[index](...)}` to break out of the intended DSL. 【F:src/cli_layout.py†L323-L358】【F:src/cli_layout.py†L587-L606】【F:src/cli_layout.py†L918-L969】
-**Fix Required:** Replace `eval` with a hardened expression interpreter. Parse layout expressions with `ast.parse`, reject any node outside a small whitelist (comparisons, boolean ops, literals, attribute/name access that never traverses `__` attributes), and resolve values without exposing raw objects (e.g., resolve to primitive copies). Alternatively, replace the ad-hoc DSL with a declarative rules engine that never executes user text. Document the security expectations for layout files and add regression tests with malicious payload fixtures.
+**Impact:** Misconfiguring `screenshots.directory_name` (or a malicious config) can point `out_dir` at any writable path; when slow.pics upload succeeds the default `delete_screen_dir_after_upload` branch recursively deletes that path. In the worst case this wipes the entire input root or another critical directory (for example `..` resolves to the parent), causing catastrophic data loss on every run.
+**Evidence:** `out_dir` is resolved without constraint from the configured directory name and later passed directly to `shutil.rmtree` when cleanup runs, while the default config enables that cleanup automatically.【F:frame_compare.py†L3099-L3116】【F:frame_compare.py†L3633-L3650】【F:src/datatypes.py†L36-L95】
+**Fix Required:** Normalize the configured directory name and reject absolute paths or segments that escape the input root (e.g. use `Path.is_relative_to`/`os.path.commonpath`) before creating or deleting directories. Guard the deletion branch with an assertion that `out_dir` is a directory descendant of `root` and, ideally, store the actual creation target so only managed paths are removed.
 **Timeline:** Immediate
 
-## PERFORMANCE: TMDB cache is unbounded and leaks memory across runs
-**File:** src/tmdb.py:113-131
-**Current:** `_TTLCache` keeps every `(path, params)` combination forever until the TTL expires, but there is no eviction or cap, so a CLI that handles many distinct titles will grow without bound, retaining every JSON payload in memory.
-**Target:** Ensure the cache stays bounded (e.g., max 128-256 entries) and evicts the oldest or least-recently-used entries automatically.
-**Bottleneck:** The cache dictionary never trims entries; unique search terms accumulate indefinitely, especially when `cache_ttl_seconds` is large (default 86,400 seconds).
-**Optimization:** Replace `_TTLCache` with `collections.OrderedDict` or `functools.lru_cache`+TTL wrapper so old entries are evicted as new ones arrive; expose configuration knobs for size and TTL. Clear cache entries explicitly when the client is closed.
-**Expected Gain:** Prevents multi-megabyte steady memory growth during long comparison sessions and keeps repeated CLI runs from retaining stale process-wide state.
+This validation should also cover the audio-alignment preview folder, which currently derives from the same unbounded `screenshots.directory_name` and writes to a resolved path under `root` without confirming containment.【F:frame_compare.py†L2060-L2076】
 
-## ARCHITECTURE: Audio alignment silences global NumPy warnings for the entire process
-**File:** src/audio_alignment.py:21-27
-**Pattern Broken:** Principle of least astonishment / cross-cutting concerns containment.
-**Current Implementation:** At import time, `audio_alignment` installs a global `warnings.filterwarnings` that ignores an entire class of NumPy warnings for every module in the interpreter, not just audio alignment. Any consumer that relies on those warnings elsewhere will silently lose diagnostic coverage.
-**Correct Pattern:** Scope warning suppression to the specific operations that trigger noisy alerts (e.g., use `warnings.catch_warnings()` around the relevant NumPy calls) instead of globally muting them at import time.
-**Refactor Steps:** Remove the module-level `filterwarnings` call, wrap the librosa/Numpy operations inside `_load_optional_modules` or `_onset_envelope` with a local `catch_warnings`, and add regression tests to ensure other parts of the app still receive NumPy warnings.
-**Risk of Not Fixing:** Debugging unrelated numerical issues becomes harder, and future contributors may miss real data-quality problems because the global warning channel is muted.
+## Security
 
-## Additional Observations
-- The CLI layout DSL is powerful but currently undocumented about its trust boundaries; once the expression evaluator is hardened, add guidance for users about sourcing layout files securely.
-- Consider explicitly closing the `requests.Session` created in `slowpics.upload_comparison` to avoid leaking sockets in long-lived integrations.
+### ✅ CLI layout expression sandbox
+
+`CliLayoutRenderer` now parses expressions with `ast.parse`,
+validates every node via `_validate_safe_expression`, and executes
+in a namespace that only exposes `resolve`, `abs`, `min`, and
+`max`. `LayoutContext.resolve` rejects path segments containing
+underscores, preventing access to dunder attributes or private
+members. Together these guardrails block the arbitrary code
+execution scenario highlighted in the earlier review.
+【F:src/cli_layout.py†L16-L115】【F:src/cli_layout.py†L492-L537】【F:src/cli_layout.py†L969-L1040】
+
+**Next steps:** Document in contributor guidelines that layout
+files remain trusted configuration. The sandbox protects against
+opportunistic payloads but does not eliminate the need to vet
+custom layouts distributed with releases.
+
+## Performance
+
+### ✅ TMDB cache bounding
+
+`src/tmdb.py` now ships a bounded `_TTLCache` that evicts entries
+when the configured `max_entries` limit is exceeded. The cache is
+also exposed through `cache_max_entries` in `TMDBConfig`, allowing
+operators to shrink it for memory-constrained environments.
+【F:src/tmdb.py†L1-L120】
+
+### ⚠️ Close slow.pics sessions after upload
+
+`upload_comparison` constructs a long-lived `requests.Session`
+but never closes it, which can leak sockets for hosts that chain
+multiple uploads in one process. Wrapping the session in a
+context manager or calling `session.close()` in a `finally` block
+would tidy resources after each run.
+【F:src/slowpics.py†L267-L311】
+
+## Reliability
+
+### ✅ Scoped audio-alignment warning suppression
+
+Instead of muting NumPy warnings globally, the audio alignment
+module confines suppression to `_suppress_flush_to_zero_warning`,
+which wraps the specific operations that emit the noisy advisory.
+Other parts of the application therefore keep their diagnostics.
+【F:src/audio_alignment.py†L1-L44】
+
+## Follow-up checklist
+
+- [ ] Decide whether to add a helper that closes the slow.pics
+  `requests.Session` once uploads finish.
+- [ ] Call out layout file trust expectations in the contributor
+  docs so downstream users understand the sandbox boundary.

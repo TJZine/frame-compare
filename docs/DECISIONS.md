@@ -1,6 +1,21 @@
 # Decisions Log
 
+- *2025-10-17:* CLI layout tweaks: dropped the banner headline, repurposed the Analyze slot to show cached-metric reuse, removed the At-a-Glance crop-mod snippet in favour of resolved tonemap nits, and slimmed the Summary output block to avoid redundant frame counts.
+- *2025-10-16:* Deep review flagged that `screenshots.directory_name` must be constrained to stay under the resolved input root before cleanup; follow-up will enforce containment checks before writing or deleting screenshot outputs (see `docs/deep_review.md`).
+- *2025-10-15:* Relocated bundled comparison fixtures from `tests/fixtures/media/comparison_videos` to the repository-root
+  `comparison_videos/` directory so CLI defaults, config templates, and contributor docs reference the same location as the
+  fallback resolution added to `run_cli`.
+- *2025-10-14:* Adjusted CLI theming to separate hierarchy (muted section badges, yellow subheads) and rewrote the At-a-Glance summary to surface sampling, window, and alignment metrics requested in the usability review.
+- *2025-10-13:* Dropped the unused `types-pytest` dependency from the dev group because the package is unavailable on PyPI and broke `uv run` environment creation on fresh clones. CI keeps installing real `pytest` through the dev group, so workflows and local test runs continue to function normally.
+- *2025-10-12:* Introduced local stubs for click, requests, httpx, and rich plus tighter JSON-tail helpers in tests to eliminate Pyright/Pylance import and indexing errors while keeping diagnostics strict.
+- *2025-10-11:* Audited the `docs/` catalog, refreshed the deep-review memo with current safeguards/follow-ups, and corrected README reference defaults to match the live config schema.
+- *2025-10-10:* Hardened CLI progress configuration by validating styles during config load, normalizing the stored value, and simplifying runtime flag handling to avoid getattr/except patterns flagged by linters.
+- *2025-10-09:* Adjusted overlay text defaults so minimal mode now shows resolution/upscale context and frame-selection type while diagnostic mode drops per-frame selection detail lines that were redundant on-screen but remain available in cached metadata.
+- *2025-10-02:* Restricted audio alignment's NumPy warning suppression to local contexts, paired with regression coverage that preserves global diagnostics while muting noisy dependencies.
+- *2025-10-02:* Bounded the TMDB response cache to a configurable entry limit with TTL-aware eviction to stop unbounded growth flagged in deep-review performance findings.
 - *2025-10-01:* Documented the audio alignment pipeline in `docs/audio_alignment_pipeline.md` to centralize requirements, workflow, and offsets file semantics for ongoing feature work.
+- *2025-10-01:* Persisted selection metadata sidecar v1 with deterministic cache keys, JSON-tail exposure, and generated.compframes annotations to satisfy the CLI selection cache persistence guide.
 - *2025-09-30:* Standardised group subhead styling across CLI sections: accent-subhead prefixes (`›`/`>` fallback), dim divider rules sized to block content, column alignment for numeric values, and verbose legends describing token roles to satisfy `features/CLI/GUIDE.md`.
-- *2025-09-30:* Simplified diagnostic overlays by retiring the HDR MAX/AVG measurement line and instead appending render resolution, mastering display luminance (when HDR tonemap applies), and cached `Frame Selection Type` metadata.
+- *2025-09-30:* Simplified diagnostic overlays by replacing the HDR MAX/AVG measurement block with render resolution, mastering display luminance (for HDR sources), and cached frame-selection metadata while trimming redundant frame-info lines to keep CLI banners uncluttered.
 - *2025-09-29:* Adopted CLI layout styling DSL with semantic spans and data-driven highlight rules. Renderer now consumes palette roles (`value`, `unit`, `path`, etc.), honors section accent theming, and evaluates JSON-configured thresholds (e.g., tonemap verification, boolean states) to keep formatting declarative.
+- *2025-10-14:* Adopted key/value styling in the CLI Summary list to mirror At-a-Glance key/value formatting and keep closing metrics aligned.
