@@ -46,7 +46,7 @@ frame_compare = "src/frame_compare"
 data = "data"
 
 [tool.setuptools.package-data]
-data = ["config.toml.template"]
+data = ["config.toml", "config.toml.template"]
 
 [tool.black]
 line-length = 100

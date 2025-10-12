@@ -33,9 +33,10 @@ tiny MKV stubs suitable for smoke tests.
 uv sync
 # install the VapourSynth runtime manually (see the steps below)
 uv pip install vapoursynth  # or `uv add vapoursynth` to persist it to your project
-uv run python -c "from src.config_template import copy_default_config; copy_default_config('config.toml')"
-uv run python frame_compare.py --config config.toml --input tests/fixtures/media/comparison_videos
+uv run python frame_compare.py --input tests/fixtures/media/comparison_videos
 ```
+
+The CLI ships with a default configuration stored at `data/config.toml`. Pass `--config` to point at a custom file when needed; you can seed one with `python -c "from src.config_template import copy_default_config; copy_default_config('~/frame_compare.toml')"`.
 
 Install VapourSynth manually after `uv sync` so the renderer is available:
 
@@ -50,8 +51,7 @@ python3.13 -m venv .venv
 source .venv/bin/activate
 pip install -U pip wheel
 pip install -e .
-python -c "from src.config_template import copy_default_config; copy_default_config('config.toml')"
-python frame_compare.py --config config.toml --input tests/fixtures/media/comparison_videos
+python frame_compare.py --input tests/fixtures/media/comparison_videos
 ```
 
 ## Minimal example
@@ -59,8 +59,7 @@ python frame_compare.py --config config.toml --input tests/fixtures/media/compar
 ```bash
 uv sync
 uv pip install vapoursynth  # or `uv add vapoursynth`
-uv run python -c "from src.config_template import copy_default_config; copy_default_config('config.toml')"
-uv run python frame_compare.py --config config.toml --input tests/fixtures/media/comparison_videos
+uv run python frame_compare.py --input tests/fixtures/media/comparison_videos
 ```
 
 Expected outputs: PNGs under `screens/…`, cached metrics in

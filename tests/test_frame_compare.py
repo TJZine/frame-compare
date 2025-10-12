@@ -34,6 +34,17 @@ def runner() -> CliRunner:
     return CliRunner()
 
 
+def test_cli_uses_packaged_config_by_default(runner: CliRunner) -> None:
+    result = runner.invoke(frame_compare.main, ["--help"])
+
+    assert result.exit_code == 0, result.output
+
+    default_path = frame_compare.DEFAULT_CONFIG_PATH
+    assert default_path.parent.name == "data"
+    assert default_path.exists()
+    assert str(default_path) in result.output
+
+
 class DummyProgress:
     def __init__(self, *_, **__):
         pass

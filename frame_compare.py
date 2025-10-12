@@ -58,6 +58,8 @@ from src.cli_layout import CliLayoutRenderer, CliLayoutError, load_cli_layout
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_CONFIG_PATH = Path(__file__).resolve().with_name("data") / "config.toml"
+
 SUPPORTED_EXTS = (
     ".mkv",
     ".m2ts",
@@ -3454,7 +3456,13 @@ def run_cli(
 
 
 @click.command()
-@click.option("--config", "config_path", default="config.toml", show_default=True, help="Path to config.toml")
+@click.option(
+    "--config",
+    "config_path",
+    default=str(DEFAULT_CONFIG_PATH),
+    show_default=True,
+    help="Path to the configuration file (defaults to the packaged data/config.toml).",
+)
 @click.option("--input", "input_dir", default=None, help="Override [paths.input_dir] from config.toml")
 @click.option(
     "--audio-align-track",

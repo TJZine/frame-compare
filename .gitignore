@@ -19,7 +19,7 @@ dist/
 build/
 
 # Ignore User Config
-config.toml
+/config.toml
 # OS
 .DS_Store
 Thumbs.db
