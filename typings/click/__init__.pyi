@@ -1,4 +1,4 @@
-from typing import Any, Callable, Mapping, TypeVar
+from typing import Any, Callable, MutableMapping, TypeVar, overload
 
 _F = TypeVar("_F", bound=Callable[..., Any])
 
@@ -9,7 +9,7 @@ class Command:
 
 
 class Context:
-    params: Mapping[str, Any]
+    params: MutableMapping[str, Any]
 
 
 class Param:
@@ -20,7 +20,15 @@ class Param:
 Parameter = Param
 
 
-def command(*args: Any, **kwargs: Any) -> Callable[[_F], _F]: ...
+@overload
+def command(__func: _F) -> Command: ...
+
+
+@overload
+def command(*, name: str | None = ..., cls: type[Command] | None = ..., **kwargs: Any) -> Callable[[_F], Command]: ...
+
+
+def command(*args: Any, **kwargs: Any) -> Callable[[_F], Command] | Command: ...
 
 
 def option(*param_decls: str, **kwargs: Any) -> Callable[[_F], _F]: ...
@@ -28,11 +36,11 @@ def option(*param_decls: str, **kwargs: Any) -> Callable[[_F], _F]: ...
 
 def prompt(
     text: str,
-    default: str | None = ...,
+    default: Any = ..., 
     *,
-    type: Any | None = ...,
-    show_default: bool | None = ...,
-) -> str: ...
+    type: Any | None = ..., 
+    show_default: bool | str | None = ..., 
+) -> Any: ...
 
 
 def confirm(text: str, default: bool = ..., **kwargs: Any) -> bool: ...

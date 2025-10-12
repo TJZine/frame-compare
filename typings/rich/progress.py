@@ -9,6 +9,7 @@ class Task:
     completed: float
     total: float | None
     percentage: float | None
+    fields: dict[str, Any]
 
     def __init__(self, task_id: int = 0, description: str = "", completed: float = 0.0, total: float | None = None) -> None:
         self.id = task_id
@@ -16,6 +17,7 @@ class Task:
         self.completed = completed
         self.total = total
         self.percentage = None
+        self.fields = {}
 
 
 class ProgressColumn:
@@ -39,6 +41,16 @@ class BarColumn(ProgressColumn):
         super().__init__(*args, **kwargs)
 
 
+class TimeElapsedColumn(ProgressColumn):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+
+
+class TimeRemainingColumn(ProgressColumn):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+
+
 class Progress:
     columns: Sequence[ProgressColumn]
 
@@ -58,6 +70,7 @@ class Progress:
     def add_task(
         self,
         description: str,
+        *,
         total: float | None = None,
         completed: float = 0.0,
         start: bool = True,
@@ -66,6 +79,8 @@ class Progress:
         task_id = self._next_task_id
         self._next_task_id += 1
         task = Task(task_id=task_id, description=description, completed=completed, total=total)
+        if kwargs:
+            task.fields.update(kwargs)
         if start:
             task.percentage = self._calculate_percentage(task)
         self.tasks[task_id] = task
@@ -90,10 +105,20 @@ class Progress:
         if "advance" in kwargs and isinstance(kwargs["advance"], (int, float)):
             task.completed += float(kwargs["advance"])
 
+        for key, value in kwargs.items():
+            if key not in {"description", "total", "completed", "advance"}:
+                task.fields[key] = value
+
         task.percentage = self._calculate_percentage(task)
 
     def advance(self, task_id: int, advance: float = 1.0) -> None:
         self.update(task_id, advance=advance)
+
+    def refresh(self) -> None:
+        return None
+
+    def stop(self) -> None:
+        return None
 
     def _calculate_percentage(self, task: Task) -> float | None:
         if task.total in (None, 0):
@@ -106,5 +131,7 @@ __all__ = [
     "ProgressColumn",
     "TextColumn",
     "BarColumn",
+    "TimeElapsedColumn",
+    "TimeRemainingColumn",
     "Task",
 ]

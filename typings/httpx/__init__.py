@@ -45,8 +45,7 @@ class _TransportHandler(Protocol):
 
 
 class BaseTransport(Protocol):
-    def __call__(self, request: Any) -> Response: ...
-
+    def handle_request(self, request: Any) -> Response: ...
     async def handle_async_request(self, request: Any) -> Response: ...
 
 
@@ -55,6 +54,9 @@ class MockTransport(BaseTransport):
         self.handler = handler
 
     def __call__(self, request: Any) -> Response:
+        return self.handle_request(request)
+
+    def handle_request(self, request: Any) -> Response:
         result = self.handler(request)
         if inspect.isawaitable(result):
             raise RuntimeError("MockTransport handler returned awaitable in sync context")

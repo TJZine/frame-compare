@@ -1,4 +1,4 @@
-from typing import Any, Callable, Iterable, Optional, Protocol, TypeVar, Union
+from typing import Any, Callable, Iterable, Optional, Protocol, TypeVar
 
 
 class SupportsDunderLT(Protocol):
@@ -14,9 +14,7 @@ _T = TypeVar("_T")
 def os_sorted(
     seq: Iterable[_T],
     *,
-    key: Optional[
-        Callable[[_T], Union[SupportsDunderLT, SupportsDunderGT]]
-    ] = ...,
+    key: Optional[Callable[[_T], Any]] = ...,
     reverse: bool = ...,
     presort: bool = ...,
 ) -> list[_T]: ...

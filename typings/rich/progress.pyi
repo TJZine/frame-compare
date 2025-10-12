@@ -10,6 +10,7 @@ class Task:
     completed: float
     total: float | None
     percentage: float | None
+    fields: dict[str, Any]
 
 
 class ProgressColumn:
