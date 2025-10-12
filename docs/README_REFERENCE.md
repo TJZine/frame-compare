@@ -50,7 +50,7 @@ quick-start configuration paths.
 | `[screenshots].single_res` | Fixed output height (0 keeps source). | int | `0` |
 | `[screenshots].mod_crop` | Crop modulus. | int | `2` |
 | `[screenshots].auto_letterbox_crop` | Auto crop black bars. | bool | `false` |
-| `[screenshots].ffmpeg_timeout_seconds` | Per-frame FFmpeg timeout. | float | `120.0` |
+| `[screenshots].ffmpeg_timeout_seconds` | Per-frame FFmpeg timeout in seconds (must be > 0). | float | `120.0` |
 | `[color].enable_tonemap` | HDR→SDR conversion toggle. | bool | `true` |
 | `[color].preset` | Tonemapping preset. | str | `"reference"` |
 | `[color].overlay_enabled` | Tonemap overlay flag. | bool | `true` |
