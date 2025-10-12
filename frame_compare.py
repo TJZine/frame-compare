@@ -3157,10 +3157,8 @@ def run_cli(
     using_frame_total = isinstance(total_frames, int) and total_frames > 0
     progress_total = int(total_frames) if using_frame_total else int(sample_count)
 
-    def _run_selection(
-        progress_callback: Callable[[int], None] | None = None,
-    ) -> tuple[list[int], dict[int, str], Dict[int, SelectionDetail]]:
-        try:
+        # Final fallback for completed samples
+        final_completed = progress_total if progress_total > 0 else samples_done
             result = select_frames(
                 analyze_clip,
                 cfg.analysis,
