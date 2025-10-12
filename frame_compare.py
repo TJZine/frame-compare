@@ -1021,12 +1021,12 @@ def _build_plans(files: Sequence[Path], metadata: Sequence[Dict[str, str]], cfg:
 
         trim_val = _match_override(idx, file, meta, trim_map)
         if trim_val is not None:
-            plan.trim_start = trim_val
+            plan.trim_start = int(trim_val)
             plan.has_trim_start_override = True
 
         trim_end_val = _match_override(idx, file, meta, trim_end_map)
         if trim_end_val is not None:
-            plan.trim_end = trim_end_val
+            plan.trim_end = int(trim_end_val)
             plan.has_trim_end_override = True
 
         fps_val = _match_override(idx, file, meta, fps_map)
