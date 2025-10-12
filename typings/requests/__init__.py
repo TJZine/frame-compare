@@ -1,57 +1,42 @@
-from __future__ import annotations
-
-from typing import Any, Dict
-
-
 class RequestException(Exception):
-    """Base class for request errors."""
+    pass
 
 
 class HTTPError(RequestException):
-    def __init__(self, *args: Any, response: Response | None = None, **kwargs: Any) -> None:
+    def __init__(self, *args, **kwargs):
+        self.response = kwargs.get("response")
         super().__init__(*args)
-        self.response = response
 
 
 class Response:
-    def __init__(self, status_code: int = 200) -> None:
+    def __init__(self, status_code: int = 200):
         self.status_code = status_code
         self.text = ""
         self.content = b""
-        self.headers: Dict[str, str] = {}
+        self.headers = {}
 
-    def json(self) -> Dict[str, Any]:
+    def json(self):
         return {}
 
 
-class CookieJar(Dict[str, str]):
-    def get_dict(self) -> Dict[str, str]:
+class CookieJar(dict):
+    def get_dict(self):
         return dict(self)
 
 
 class Session:
-    def __init__(self) -> None:
+    def __init__(self):
         self.cookies = CookieJar()
 
-    def get(self, *args: Any, **kwargs: Any) -> Response:
+    def get(self, *args, **kwargs):
         return Response()
 
-    def post(self, *args: Any, **kwargs: Any) -> Response:
+    def post(self, *args, **kwargs):
         return Response()
 
     def close(self) -> None:
-        return None
+        pass
 
 
-def request(*args: Any, **kwargs: Any) -> Response:
+def request(*args, **kwargs):
     return Response()
-
-
-__all__ = [
-    "CookieJar",
-    "HTTPError",
-    "RequestException",
-    "Response",
-    "Session",
-    "request",
-]

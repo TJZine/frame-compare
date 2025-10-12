@@ -9,7 +9,6 @@ class ConsoleCapture(ContextManager[str]):
 
 class Console:
     width: int
-    size: tuple[int, int]
 
     def __init__(self, *args: Any, **kwargs: Any) -> None: ...
     def print(self, *objects: Any, **kwargs: Any) -> None: ...
