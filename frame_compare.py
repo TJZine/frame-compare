@@ -89,6 +89,8 @@ CONFIG_ENV_VAR: Final[str] = "FRAME_COMPARE_CONFIG"
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parent
 PROJECT_CONFIG_PATH: Final[Path] = (PROJECT_ROOT / "config.toml").resolve()
 PACKAGED_TEMPLATE_PATH: Final[Path] = (PROJECT_ROOT / "data" / "config.toml.template").resolve()
+_USER_CONFIG_DIR_NAME: Final[str] = ".frame-compare"
+_USER_CONFIG_FILENAME: Final[str] = "config.toml"
 
 
 def _resolve_default_config_path() -> Path:
@@ -99,6 +101,12 @@ def _resolve_default_config_path() -> Path:
 
 
 DEFAULT_CONFIG_PATH: Final[Path] = _resolve_default_config_path()
+
+
+def _default_user_config_path() -> Path:
+    """Return the per-user fallback location for the generated configuration."""
+
+    return Path.home() / _USER_CONFIG_DIR_NAME / _USER_CONFIG_FILENAME
 
 _DEFAULT_CONFIG_HELP: Final[str] = (
     f"Path to the configuration file. Defaults to ${CONFIG_ENV_VAR} when set, "
@@ -706,12 +714,29 @@ def _ensure_config_present(config_location: Path) -> Path:
     except FileExistsError:
         return resolved
     except PermissionError as exc:
-        message = f"Unable to create default config at {resolved}: {exc}"
-        raise CLIAppError(
-            message,
-            code=2,
-            rich_message=f"[red]Unable to create default config:[/red] {exc}",
-        ) from exc
+        logger.debug("default config is not writable at %s: %s", resolved, exc)
+        fallback_target = _default_user_config_path()
+        try:
+            copied_path = copy_default_config(fallback_target)
+        except FileExistsError:
+            copied_path = fallback_target
+        except OSError as fallback_exc:
+            message = (
+                "Unable to create default config because neither the project directory nor "
+                f"the user fallback path {fallback_target} is writable: {fallback_exc}"
+            )
+            raise CLIAppError(
+                message,
+                code=2,
+                rich_message=(
+                    "[red]Unable to create default config:[/red] "
+                    f"{fallback_exc}. Set $FRAME_COMPARE_CONFIG to a writable path."
+                ),
+            ) from fallback_exc
+        else:
+            logger.info(
+                "Seeded default config at %s because %s was not writable", copied_path, resolved
+            )
     except OSError as exc:
         message = f"Unable to create default config at {resolved}: {exc}"
         raise CLIAppError(

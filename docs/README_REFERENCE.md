@@ -91,7 +91,7 @@ Repository fixtures mirror the default `paths.input_dir` and live under
 <!-- markdownlint-disable MD013 -->
 | Flag | Description | Default |
 | --- | --- | --- |
-| `--config PATH` | Use a specific configuration file. | ``$FRAME_COMPARE_CONFIG`` or the repo ``config.toml`` (seeded from the bundled template) |
+| `--config PATH` | Use a specific configuration file. | ``$FRAME_COMPARE_CONFIG`` or the repo ``config.toml`` (seeded from the bundled template; falls back to ``~/.frame-compare/config.toml`` when the install tree is read-only) |
 | `--input PATH` | Override `[paths.input_dir]` for this run. | `None` |
 | `--quiet` | Show minimal console output. | `false` |
 | `--verbose` | Emit additional diagnostics. | `false` |

@@ -1,5 +1,6 @@
 # Decisions Log
 
+- *2025-10-19:* When the packaged install directory is read-only we now seed the default config under `~/.frame-compare/config.toml`, logging the relocation so users know to point overrides there instead of the site-packages path.
 - *2025-10-18:* Added `screenshots.ffmpeg_timeout_seconds` plus `-nostdin` when spawning FFmpeg to stop runaway renders from freezing Windows shells; surfaced the timeout in CLI render metadata and config docs.
 - *2025-10-17:* CLI layout tweaks: dropped the banner headline, repurposed the Analyze slot to show cached-metric reuse, removed the At-a-Glance crop-mod snippet in favour of resolved tonemap nits, and slimmed the Summary output block to avoid redundant frame counts.
 - *2025-10-16:* Deep review flagged that `screenshots.directory_name` must be constrained to stay under the resolved input root before cleanup; follow-up will enforce containment checks before writing or deleting screenshot outputs (see `docs/deep_review.md`).
