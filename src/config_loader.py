@@ -28,6 +28,13 @@ class ConfigError(ValueError):
     """Raised when the configuration file is malformed or fails validation."""
 
 
+_FFMPEG_TIMEOUT_NOT_NUMBER_MSG = "screenshots.ffmpeg_timeout_seconds must be a number"
+_FFMPEG_TIMEOUT_NOT_FINITE_MSG = (
+    "screenshots.ffmpeg_timeout_seconds must be a finite number"
+)
+_FFMPEG_TIMEOUT_NEGATIVE_MSG = "screenshots.ffmpeg_timeout_seconds must be >= 0"
+
+
 def _coerce_bool(value: Any, dotted_key: str) -> bool:
     """Return a bool, coercing simple 0/1 representations when necessary."""
 
@@ -205,13 +212,11 @@ def load_config(path: str) -> AppConfig:
     try:
         timeout_value = float(app.screenshots.ffmpeg_timeout_seconds)
     except (TypeError, ValueError) as exc:
-        raise ConfigError("screenshots.ffmpeg_timeout_seconds must be a number") from exc
+        raise ConfigError(_FFMPEG_TIMEOUT_NOT_NUMBER_MSG) from exc
     if not math.isfinite(timeout_value):
-        raise ConfigError(
-            "screenshots.ffmpeg_timeout_seconds must be a finite non-negative number"
-        )
+        raise ConfigError(_FFMPEG_TIMEOUT_NOT_FINITE_MSG)
     if timeout_value < 0:
-        raise ConfigError("screenshots.ffmpeg_timeout_seconds must be >= 0")
+        raise ConfigError(_FFMPEG_TIMEOUT_NEGATIVE_MSG)
     app.screenshots.ffmpeg_timeout_seconds = timeout_value
     pad_mode = str(app.screenshots.pad_to_canvas).strip().lower()
     if pad_mode not in {"off", "on", "auto"}:
