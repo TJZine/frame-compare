@@ -2,7 +2,10 @@ from typing import Any
 
 class Console:
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        self.width = int(kwargs.get("width", 80))
+        width = int(kwargs.get("width", 80))
+        height = int(kwargs.get("height", 25))
+        self.width = width
+        self.size = (width, height)
 
     def print(self, *args: Any, **kwargs: Any) -> None:
         pass

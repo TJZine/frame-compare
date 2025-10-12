@@ -16,22 +16,45 @@ import time
 import traceback
 import webbrowser
 from collections import Counter, defaultdict
+from collections.abc import Mapping as MappingABC
 from dataclasses import dataclass, field
 import datetime as _dt
 from pathlib import Path
 from string import Template
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Final
+from typing import (
+    Any,
+    Callable,
+    ContextManager,
+    Dict,
+    Final,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    TypedDict,
+    TypeVar,
+    cast,
+)
 
 import click
 from rich import print
 from rich.console import Console
 from rich.markup import escape
-from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn, TimeRemainingColumn
+from rich.progress import (
+    BarColumn,
+    Progress,
+    ProgressColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
 from natsort import os_sorted
 
 from src.config_loader import ConfigError, load_config
 from src.config_template import copy_default_config
-from src.datatypes import AppConfig
+from src.datatypes import AnalysisConfig, AppConfig, NamingConfig, RuntimeConfig
 from src import audio_alignment
 from src.utils import parse_filename_metadata
 from src import vs_core
@@ -201,6 +224,126 @@ class _ClipPlan:
     alignment_status: str = ""
 
 
+_OverrideValue = TypeVar("_OverrideValue")
+
+
+class SlowpicsTitleInputs(TypedDict):
+    resolved_base: Optional[str]
+    collection_name: Optional[str]
+    collection_suffix: str
+
+
+class SlowpicsTitleBlock(TypedDict):
+    inputs: SlowpicsTitleInputs
+    final: Optional[str]
+
+
+class SlowpicsJSON(TypedDict):
+    enabled: bool
+    title: SlowpicsTitleBlock
+    url: Optional[str]
+    shortcut_path: Optional[str]
+    deleted_screens_dir: bool
+    is_public: bool
+    is_hentai: bool
+    remove_after_days: int
+
+
+class AudioAlignmentJSON(TypedDict, total=False):
+    enabled: bool
+    reference_stream: Optional[str]
+    target_stream: dict[str, object]
+    offsets_sec: dict[str, object]
+    offsets_frames: dict[str, object]
+    preview_paths: list[str]
+    confirmed: bool | str | None
+    offsets_filename: str
+
+
+class TrimClipEntry(TypedDict):
+    lead_f: int
+    trail_f: int
+    lead_s: float
+    trail_s: float
+
+
+class TrimsJSON(TypedDict):
+    per_clip: dict[str, TrimClipEntry]
+
+
+class JsonTail(TypedDict, total=False):
+    clips: list[dict[str, object]]
+    trims: TrimsJSON
+    window: dict[str, object]
+    alignment: dict[str, object]
+    audio_alignment: AudioAlignmentJSON
+    analysis: dict[str, object]
+    render: dict[str, object]
+    tonemap: dict[str, object]
+    overlay: dict[str, object]
+    verify: dict[str, object]
+    cache: dict[str, object]
+    slowpics: SlowpicsJSON
+    warnings: list[str]
+
+
+class ClipRecord(TypedDict):
+    label: str
+    width: int
+    height: int
+    fps: float
+    frames: int
+    duration: float
+    duration_tc: str
+    path: str
+
+
+class TrimSummary(TypedDict):
+    label: str
+    lead_frames: int
+    lead_seconds: float
+    trail_frames: int
+    trail_seconds: float
+
+
+def _coerce_str_mapping(value: object) -> dict[str, object]:
+    """Return a shallow copy of *value* if it is a mapping with string-like keys."""
+
+    if isinstance(value, MappingABC):
+        result: dict[str, object] = {}
+        for key, item in value.items():
+            key_str = key if isinstance(key, str) else str(key)
+            result[key_str] = item
+        return result
+    return {}
+
+
+def _ensure_slowpics_block(json_tail: JsonTail, cfg: AppConfig) -> SlowpicsJSON:
+    """Ensure that ``json_tail`` contains a slow.pics block and return it."""
+
+    block = json_tail.get("slowpics")
+    if block is None:
+        block = SlowpicsJSON(
+            enabled=bool(cfg.slowpics.auto_upload),
+            title=SlowpicsTitleBlock(
+                inputs=SlowpicsTitleInputs(
+                    resolved_base=None,
+                    collection_name=None,
+                    collection_suffix=getattr(cfg.slowpics, "collection_suffix", ""),
+                ),
+                final=None,
+            ),
+            url=None,
+            shortcut_path=None,
+            deleted_screens_dir=False,
+            is_public=bool(cfg.slowpics.is_public),
+            is_hentai=bool(cfg.slowpics.is_hentai),
+            remove_after_days=int(cfg.slowpics.remove_after_days),
+        )
+        json_tail["slowpics"] = block
+    return block
+
+
 @dataclass
 class RunResult:
     """
@@ -214,7 +357,7 @@ class RunResult:
         config (AppConfig): Effective application configuration.
         image_paths (List[str]): Paths to the generated screenshots.
         slowpics_url (Optional[str]): URL of the uploaded Slowpics comparison, if created.
-        json_tail (Dict[str, object] | None): Optional JSON blob persisted after run completion.
+        json_tail (JsonTail | None): Optional JSON blob persisted after run completion.
     """
     files: List[Path]
     frames: List[int]
@@ -223,7 +366,7 @@ class RunResult:
     config: AppConfig
     image_paths: List[str]
     slowpics_url: Optional[str] = None
-    json_tail: Dict[str, object] | None = None
+    json_tail: JsonTail | None = None
 
 
 @dataclass
@@ -460,7 +603,7 @@ class CliOutputManager:
             return
         self.console.print(f"[dim]{escape(text)}[/]")
 
-    def progress(self, *columns, transient: bool = False) -> Progress:
+    def progress(self, *columns: ProgressColumn, transient: bool = False) -> Progress:
         """
         Create a new Rich Progress instance bound to this manager's console.
 
@@ -585,7 +728,7 @@ def _discover_media(root: Path) -> List[Path]:
     return [p for p in os_sorted(root.iterdir()) if p.suffix.lower() in SUPPORTED_EXTS]
 
 
-def _parse_metadata(files: Sequence[Path], naming_cfg) -> List[Dict[str, str]]:
+def _parse_metadata(files: Sequence[Path], naming_cfg: NamingConfig) -> List[Dict[str, str]]:
     """Extract naming metadata for each clip using configured heuristics."""
     metadata: List[Dict[str, str]] = []
     for file in files:
@@ -832,9 +975,9 @@ def _pick_analyze_file(
     return files[0]
 
 
-def _normalise_override_mapping(raw: Mapping[str, object]) -> Dict[str, object]:
+def _normalise_override_mapping(raw: Mapping[str, _OverrideValue]) -> Dict[str, _OverrideValue]:
     """Lowercase override keys and drop empty entries."""
-    normalised: Dict[str, object] = {}
+    normalised: Dict[str, _OverrideValue] = {}
     for key, value in raw.items():
         key_str = str(key).strip().lower()
         if key_str:
@@ -846,8 +989,8 @@ def _match_override(
     index: int,
     file: Path,
     metadata: Mapping[str, str],
-    mapping: Mapping[str, object],
-) -> Optional[object]:
+    mapping: Mapping[str, _OverrideValue],
+) -> Optional[_OverrideValue]:
     """Return the override value matching *index*, file names, or metadata labels."""
     candidates = [
         str(index),
@@ -1101,22 +1244,14 @@ def _build_legacy_summary_lines(values: Mapping[str, Any], *, emit_json_tail: bo
         """
         return "true" if bool(value) else "false"
 
-    clips_raw = values.get("clips")
-    clips = clips_raw if isinstance(clips_raw, Mapping) else {}
-    window_raw = values.get("window")
-    window = window_raw if isinstance(window_raw, Mapping) else {}
-    analysis_raw = values.get("analysis")
-    analysis = analysis_raw if isinstance(analysis_raw, Mapping) else {}
-    counts_raw = analysis.get("counts") if isinstance(analysis, Mapping) else {}
-    counts = counts_raw if isinstance(counts_raw, Mapping) else {}
-    audio_raw = values.get("audio_alignment")
-    audio = audio_raw if isinstance(audio_raw, Mapping) else {}
-    render_raw = values.get("render")
-    render = render_raw if isinstance(render_raw, Mapping) else {}
-    tonemap_raw = values.get("tonemap")
-    tonemap = tonemap_raw if isinstance(tonemap_raw, Mapping) else {}
-    cache_raw = values.get("cache")
-    cache = cache_raw if isinstance(cache_raw, Mapping) else {}
+    clips = _coerce_str_mapping(values.get("clips"))
+    window = _coerce_str_mapping(values.get("window"))
+    analysis = _coerce_str_mapping(values.get("analysis"))
+    counts = _coerce_str_mapping(analysis.get("counts")) if analysis else {}
+    audio = _coerce_str_mapping(values.get("audio_alignment"))
+    render = _coerce_str_mapping(values.get("render"))
+    tonemap = _coerce_str_mapping(values.get("tonemap"))
+    cache = _coerce_str_mapping(values.get("cache"))
 
     lines: List[str] = []
 
@@ -1203,7 +1338,9 @@ def _format_clock(seconds: Optional[float]) -> str:
     return f"{minutes:02d}:{secs:02d}"
 
 
-def _init_clips(plans: Sequence[_ClipPlan], runtime_cfg, cache_dir: Path | None) -> None:
+def _init_clips(
+    plans: Sequence[_ClipPlan], runtime_cfg: RuntimeConfig, cache_dir: Path | None
+) -> None:
     """
     Initialize VapourSynth clips for each clip plan and populate each plan's source and effective metadata.
     
@@ -1301,7 +1438,7 @@ def _build_cache_info(root: Path, plans: Sequence[_ClipPlan], cfg: AppConfig, an
 
 def _resolve_selection_windows(
     plans: Sequence[_ClipPlan],
-    analysis_cfg,
+    analysis_cfg: AnalysisConfig,
 ) -> tuple[List[SelectionWindowSpec], tuple[int, int], bool]:
     specs: List[SelectionWindowSpec] = []
     min_total_frames: Optional[int] = None
@@ -1706,7 +1843,7 @@ def _maybe_apply_audio_alignment(
         measurements: List[audio_alignment.AlignmentMeasurement]
         negative_offsets: Dict[str, bool] = {}
 
-        progress_columns = (
+        progress_columns: tuple[ProgressColumn, ...] = (
             TextColumn('{task.description}'),
             BarColumn(),
             TextColumn('{task.completed}/{task.total}'),
@@ -1714,11 +1851,14 @@ def _maybe_apply_audio_alignment(
             TextColumn('{task.fields[rate]}'),
             TimeRemainingColumn(),
         )
-        progress_manager = (
-            reporter.progress(*progress_columns, transient=False)
-            if reporter is not None
-            else Progress(*progress_columns, transient=False)
-        )
+        progress_manager: ContextManager[Progress]
+        if reporter is not None:
+            progress_manager = cast(
+                ContextManager[Progress],
+                reporter.progress(*progress_columns, transient=False),
+            )
+        else:
+            progress_manager = Progress(*progress_columns, transient=False)
         with progress_manager as audio_progress:
             task_id = audio_progress.add_task(
                 'Estimating audio offsets',
@@ -2319,7 +2459,7 @@ def run_cli(
     reporter.set_flag("progress_style", progress_style)
     reporter.set_flag("emit_json_tail", emit_json_tail_flag)
     collected_warnings: List[str] = []
-    json_tail: Dict[str, object] = {
+    json_tail: JsonTail = {
         "clips": [],
         "trims": {"per_clip": {}},
         "window": {},
@@ -2491,7 +2631,7 @@ def run_cli(
         logger.info("TMDB manual override selected: %s/%s", tmdb_category, tmdb_id_value)
 
     tmdb_context: Dict[str, str] = {
-        "Title": metadata_title or (metadata[0].get("label") if metadata else ""),
+        "Title": metadata_title or ((metadata[0].get("label") or "") if metadata else ""),
         "OriginalTitle": "",
         "Year": year_hint_raw or "",
         "TMDBId": tmdb_id_value or "",
@@ -2499,7 +2639,7 @@ def run_cli(
         "OriginalLanguage": tmdb_language or "",
         "Filename": files[0].stem,
         "FileName": files[0].name,
-        "Label": metadata[0].get("label") if metadata else files[0].name,
+        "Label": (metadata[0].get("label") or files[0].name) if metadata else files[0].name,
     }
 
     if tmdb_resolution is not None:
@@ -2551,7 +2691,7 @@ def run_cli(
     cfg.slowpics.collection_name = final_collection_name
     slowpics_final_title = final_collection_name
     slowpics_resolved_base = resolved_base_title
-    slowpics_title_inputs = {
+    slowpics_title_inputs: SlowpicsTitleInputs = {
         "resolved_base": slowpics_resolved_base,
         "collection_name": cfg.slowpics.collection_name,
         "collection_suffix": suffix_literal,
@@ -2699,16 +2839,25 @@ def run_cli(
     if alignment_display is not None:
         json_tail["audio_alignment"]["offsets_filename"] = alignment_display.offsets_file_line.split(": ", 1)[-1]
         json_tail["audio_alignment"]["reference_stream"] = alignment_display.json_reference_stream
-        json_tail["audio_alignment"]["target_stream"] = alignment_display.json_target_streams
-        json_tail["audio_alignment"]["offsets_sec"] = alignment_display.json_offsets_sec
-        json_tail["audio_alignment"]["offsets_frames"] = alignment_display.json_offsets_frames
+        target_streams: dict[str, object] = {
+            key: value for key, value in alignment_display.json_target_streams.items()
+        }
+        json_tail["audio_alignment"]["target_stream"] = target_streams
+        offsets_sec: dict[str, object] = {
+            key: float(value) for key, value in alignment_display.json_offsets_sec.items()
+        }
+        json_tail["audio_alignment"]["offsets_sec"] = offsets_sec
+        offsets_frames: dict[str, object] = {
+            key: int(value) for key, value in alignment_display.json_offsets_frames.items()
+        }
+        json_tail["audio_alignment"]["offsets_frames"] = offsets_frames
         if alignment_display.warnings:
             collected_warnings.extend(alignment_display.warnings)
     else:
         json_tail["audio_alignment"]["reference_stream"] = None
-        json_tail["audio_alignment"]["target_stream"] = {}
-        json_tail["audio_alignment"]["offsets_sec"] = {}
-        json_tail["audio_alignment"]["offsets_frames"] = {}
+        json_tail["audio_alignment"]["target_stream"] = cast(dict[str, object], {})
+        json_tail["audio_alignment"]["offsets_sec"] = cast(dict[str, object], {})
+        json_tail["audio_alignment"]["offsets_frames"] = cast(dict[str, object], {})
     json_tail["audio_alignment"]["enabled"] = bool(cfg.audio_alignment.enable)
 
     try:
@@ -2722,8 +2871,8 @@ def run_cli(
     if any(clip is None for clip in clips):
         raise CLIAppError("Clip initialisation failed")
 
-    clip_records: List[Dict[str, object]] = []
-    trim_details: List[Dict[str, object]] = []
+    clip_records: List[ClipRecord] = []
+    trim_details: List[TrimSummary] = []
     for plan in plans:
         label = (plan.metadata.get("label") or plan.path.name).strip()
         frames_total = int(plan.source_num_frames or getattr(plan.clip, "num_frames", 0) or 0)
@@ -2775,12 +2924,13 @@ def run_cli(
                 "trail_seconds": trail_seconds,
             }
         )
-        json_tail["trims"]["per_clip"][label] = {
+        clip_trim: TrimClipEntry = {
             "lead_f": lead_frames,
             "trail_f": trail_frames,
             "lead_s": lead_seconds,
             "trail_s": trail_seconds,
         }
+        json_tail["trims"]["per_clip"][label] = clip_trim
 
     analyze_index = [plan.path for plan in plans].index(analyze_path)
     analyze_clip = plans[analyze_index].clip
@@ -2795,7 +2945,7 @@ def run_cli(
     )
     analyze_fps = analyze_fps_num / analyze_fps_den if analyze_fps_den else 0.0
     manual_start_frame, manual_end_frame = frame_window
-    analyze_total_frames = int(clip_records[analyze_index]["frames"])
+    analyze_total_frames = clip_records[analyze_index]["frames"]
     manual_start_seconds_value = manual_start_frame / analyze_fps if analyze_fps > 0 else float(manual_start_frame)
     manual_end_seconds_value = manual_end_frame / analyze_fps if analyze_fps > 0 else float(manual_end_frame)
     manual_end_changed = manual_end_frame < analyze_total_frames
@@ -2919,9 +3069,9 @@ def run_cli(
     layout_data["clips"]["tgt"] = clip_records[1] if len(clip_records) > 1 else {}
 
     trims_per_clip = json_tail["trims"]["per_clip"]
-    trim_lookup = {detail["label"]: detail for detail in trim_details}
+    trim_lookup: dict[str, TrimSummary] = {detail["label"]: detail for detail in trim_details}
 
-    def _trim_entry(label: str) -> Dict[str, object]:
+    def _trim_entry(label: str) -> TrimClipEntry:
         """
         Build a normalized trim entry for a clip label containing frame and second offsets.
         
@@ -2935,13 +3085,13 @@ def run_cli(
                 - "lead_s": leading trim in seconds (float, default 0.0)
                 - "trail_s": trailing trim in seconds (float, default 0.0)
         """
-        detail = trim_lookup.get(label, {})
-        trim = trims_per_clip.get(label, {})
+        trim = trims_per_clip.get(label)
+        detail = trim_lookup.get(label)
         return {
-            "lead_f": trim.get("lead_f", 0),
-            "trail_f": trim.get("trail_f", 0),
-            "lead_s": detail.get("lead_seconds", 0.0),
-            "trail_s": detail.get("trail_seconds", 0.0),
+            "lead_f": trim["lead_f"] if trim else 0,
+            "trail_f": trim["trail_f"] if trim else 0,
+            "lead_s": detail["lead_seconds"] if detail else 0.0,
+            "trail_s": detail["trail_seconds"] if detail else 0.0,
         }
 
     layout_data["trims"] = {}
@@ -2967,15 +3117,30 @@ def run_cli(
             confirmation_value = "auto"
         json_tail["audio_alignment"]["confirmed"] = confirmation_value
     audio_alignment_view = dict(json_tail["audio_alignment"])
-    offsets_sec_map = audio_alignment_view.get("offsets_sec", {})
-    offsets_frames_map = audio_alignment_view.get("offsets_frames", {})
+    offsets_sec_map_obj = _coerce_str_mapping(audio_alignment_view.get("offsets_sec"))
+    offsets_frames_map_obj = _coerce_str_mapping(audio_alignment_view.get("offsets_frames"))
     correlations_map = alignment_display.correlations if alignment_display else {}
-    primary_label = None
-    if isinstance(offsets_sec_map, dict) and offsets_sec_map:
-        primary_label = sorted(offsets_sec_map.keys())[0]
-    offsets_sec_value = float(offsets_sec_map.get(primary_label, 0.0)) if isinstance(offsets_sec_map, dict) else 0.0
-    offsets_frames_value = int(offsets_frames_map.get(primary_label, 0)) if isinstance(offsets_frames_map, dict) else 0
-    corr_value = float(correlations_map.get(primary_label, 0.0)) if correlations_map else 0.0
+    primary_label: str | None = None
+    if offsets_sec_map_obj:
+        primary_label = sorted(offsets_sec_map_obj.keys())[0]
+    offsets_sec_value_obj = offsets_sec_map_obj.get(primary_label) if primary_label else None
+    offsets_sec_value = (
+        float(offsets_sec_value_obj)
+        if isinstance(offsets_sec_value_obj, (int, float))
+        else 0.0
+    )
+    offsets_frames_value_obj = offsets_frames_map_obj.get(primary_label) if primary_label else None
+    offsets_frames_value = (
+        int(offsets_frames_value_obj)
+        if isinstance(offsets_frames_value_obj, (int, float))
+        else 0
+    )
+    corr_value_obj = correlations_map.get(primary_label) if primary_label else None
+    corr_value = (
+        float(corr_value_obj)
+        if isinstance(corr_value_obj, (int, float))
+        else 0.0
+    )
     if math.isnan(corr_value):
         corr_value = 0.0
     threshold_value = float(getattr(alignment_display, "threshold", cfg.audio_alignment.correlation_threshold))
@@ -2992,7 +3157,9 @@ def run_cli(
     using_frame_total = isinstance(total_frames, int) and total_frames > 0
     progress_total = int(total_frames) if using_frame_total else int(sample_count)
 
-    def _run_selection(progress_callback=None):
+    def _run_selection(
+        progress_callback: Callable[[int], None] | None = None,
+    ) -> tuple[list[int], dict[int, str], Dict[int, SelectionDetail]]:
         try:
             result = select_frames(
                 analyze_clip,
@@ -3024,7 +3191,9 @@ def run_cli(
             if len(result) == 3:
                 return result
             if len(result) == 2:
-                frames_only, categories = result
+                frames_only, categories = cast(
+                    tuple[list[int], dict[int, str]], result
+                )
                 return frames_only, categories, {}
             frames_only = list(result)
             return frames_only, {frame: "Auto" for frame in frames_only}, {}
@@ -3157,11 +3326,17 @@ def run_cli(
     layout_data["analysis"]["selection_details"] = json_tail["analysis"]["selection_details"]
     reporter.update_values(layout_data)
 
-    preview_rule: Dict[str, object] = reporter.layout.folding.get("frames_preview", {}) if hasattr(reporter, "layout") else {}
-    head = int(preview_rule.get("head", 4)) if isinstance(preview_rule.get("head"), (int, float)) else 4
-    tail = int(preview_rule.get("tail", 4)) if isinstance(preview_rule.get("tail"), (int, float)) else 4
+    preview_rule: Dict[str, object] = (
+        reporter.layout.folding.get("frames_preview", {}) if hasattr(reporter, "layout") else {}
+    )
+    head_raw = preview_rule.get("head")
+    tail_raw = preview_rule.get("tail")
+    when_raw = preview_rule.get("when")
+    head = int(head_raw) if isinstance(head_raw, (int, float)) else 4
+    tail = int(tail_raw) if isinstance(tail_raw, (int, float)) else 4
     joiner = str(preview_rule.get("joiner", ", "))
-    fold_enabled = _evaluate_rule_condition(str(preview_rule.get("when", "")) if preview_rule.get("when") else None, flags=reporter.flags)
+    when_text = str(when_raw) if isinstance(when_raw, str) and when_raw else None
+    fold_enabled = _evaluate_rule_condition(when_text, flags=reporter.flags)
     preview_text = _fold_sequence(frames, head=head, tail=tail, joiner=joiner, enabled=fold_enabled)
 
     json_tail["analysis"]["output_frame_count"] = kept_count
@@ -3466,11 +3641,11 @@ def run_cli(
                 uploaded_bytes = 0
                 file_index = 0
 
-                columns = [
+                columns: tuple[ProgressColumn, ...] = (
                     TextColumn('{task.percentage:>6.02f}% {task.completed}/{task.total}', justify='left'),
                     BarColumn(),
                     TextColumn('{task.fields[stats]}', justify='right'),
-                ]
+                )
                 with reporter.progress(*columns, transient=False) as upload_progress:
                     task_id = upload_progress.add_task(
                         '',
@@ -3528,17 +3703,16 @@ def run_cli(
             ) from exc
 
     if slowpics_url:
-        slowpics_block = json_tail.get("slowpics")
-        if slowpics_block is not None:
-            slowpics_block["url"] = slowpics_url
-            if cfg.slowpics.create_url_shortcut:
-                key = slowpics_url.rstrip("/").rsplit("/", 1)[-1]
-                if key:
-                    slowpics_block["shortcut_path"] = str(out_dir / f"slowpics_{key}.url")
-                else:
-                    slowpics_block.setdefault("shortcut_path", None)
+        slowpics_block = _ensure_slowpics_block(json_tail, cfg)
+        slowpics_block["url"] = slowpics_url
+        if cfg.slowpics.create_url_shortcut:
+            key = slowpics_url.rstrip("/").rsplit("/", 1)[-1]
+            if key:
+                slowpics_block["shortcut_path"] = str(out_dir / f"slowpics_{key}.url")
             else:
-                slowpics_block["shortcut_path"] = None
+                slowpics_block.setdefault("shortcut_path", None)
+        else:
+            slowpics_block["shortcut_path"] = None
 
     result = RunResult(
         files=[plan.path for plan in plans],
@@ -3551,12 +3725,19 @@ def run_cli(
         json_tail=json_tail,
     )
 
+    raw_layout_sections = getattr(getattr(reporter, "layout", None), "sections", [])
+    layout_sections: list[dict[str, object]] = []
+    for raw_section in raw_layout_sections:
+        if isinstance(raw_section, Mapping):
+            layout_sections.append(_coerce_str_mapping(raw_section))
+
     summary_lines: List[str] = []
-    summary_section = next(
-        (section for section in reporter.layout.sections if section.get("id") == "summary"),
-        None,
-    )
-    if isinstance(summary_section, Mapping):
+    summary_section: dict[str, object] | None = None
+    for section_map in layout_sections:
+        if section_map.get("id") == "summary":
+            summary_section = section_map
+            break
+    if summary_section is not None:
         items = summary_section.get("items", [])
         if isinstance(items, list):
             for item in items:
@@ -3580,12 +3761,21 @@ def run_cli(
 
     warnings_list = list(dict.fromkeys(reporter.iter_warnings()))
     json_tail["warnings"] = warnings_list
-    warnings_section = next((section for section in reporter.layout.sections if section.get("id") == "warnings"), {})
-    fold_config = warnings_section.get("fold_labels", {}) if isinstance(warnings_section, Mapping) else {}
-    head = int(fold_config.get("head", 2)) if isinstance(fold_config.get("head"), (int, float)) else 2
-    tail = int(fold_config.get("tail", 1)) if isinstance(fold_config.get("tail"), (int, float)) else 1
+    warnings_section: dict[str, object] | None = None
+    for section_map in layout_sections:
+        if section_map.get("id") == "warnings":
+            warnings_section = section_map
+            break
+    fold_config_obj = warnings_section.get("fold_labels", {}) if warnings_section is not None else {}
+    fold_config = _coerce_str_mapping(fold_config_obj)
+    fold_head = fold_config.get("head")
+    fold_tail = fold_config.get("tail")
+    fold_when = fold_config.get("when")
+    head = int(fold_head) if isinstance(fold_head, (int, float)) else 2
+    tail = int(fold_tail) if isinstance(fold_tail, (int, float)) else 1
     joiner = str(fold_config.get("joiner", ", "))
-    fold_enabled = _evaluate_rule_condition(str(fold_config.get("when")) if fold_config.get("when") else None, flags=reporter.flags)
+    fold_when_text = str(fold_when) if isinstance(fold_when, str) and fold_when else None
+    fold_enabled = _evaluate_rule_condition(fold_when_text, flags=reporter.flags)
 
     warnings_data: List[Dict[str, object]] = []
     if warnings_list:
@@ -3611,11 +3801,7 @@ def run_cli(
     reporter.render_sections(["warnings"])
     reporter.render_sections(["summary"])
 
-    layout_sections = getattr(getattr(reporter, "layout", None), "sections", [])
-    has_summary_section = any(
-        isinstance(section, Mapping) and section.get("id") == "summary"
-        for section in layout_sections
-    )
+    has_summary_section = any(section.get("id") == "summary" for section in layout_sections)
     compatibility_required = bool(
         reporter.flags.get("compat.summary_fallback")
         or reporter.flags.get("compatibility_mode")
@@ -3691,7 +3877,11 @@ def main(
     slowpics_url = result.slowpics_url
     cfg = result.config
     out_dir = result.out_dir
-    json_tail = result.json_tail or {}
+    json_tail = (
+        cast(JsonTail, result.json_tail)
+        if result.json_tail is not None
+        else cast(JsonTail, {})
+    )
 
     slowpics_block = json_tail.get("slowpics")
     shortcut_path_str: Optional[str] = None
@@ -3742,18 +3932,10 @@ def main(
                     print(
                         f"[yellow]Warning:[/yellow] Failed to delete screenshot directory: {exc}"
                     )
-        if slowpics_block is not None:
-            slowpics_block["url"] = slowpics_url
-            slowpics_block["shortcut_path"] = shortcut_path_str
-            slowpics_block["deleted_screens_dir"] = deleted_dir
-        else:
-            json_tail.setdefault("slowpics", {}).update(
-                {
-                    "url": slowpics_url,
-                    "shortcut_path": shortcut_path_str,
-                    "deleted_screens_dir": deleted_dir,
-                }
-            )
+        slowpics_block = _ensure_slowpics_block(json_tail, cfg)
+        slowpics_block["url"] = slowpics_url
+        slowpics_block["shortcut_path"] = shortcut_path_str
+        slowpics_block["deleted_screens_dir"] = deleted_dir
     elif slowpics_block is not None:
         slowpics_block.setdefault("deleted_screens_dir", False)
         slowpics_block.setdefault("shortcut_path", None)
@@ -3773,4 +3955,5 @@ def main(
 
 
 if __name__ == "__main__":
-    main()
+    _entry_point = cast(Callable[[], None], main)
+    _entry_point()

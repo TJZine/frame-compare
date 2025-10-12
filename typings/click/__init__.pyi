@@ -1,15 +1,92 @@
-from typing import Any, Callable, Iterable, Mapping, Sequence
+from typing import Any, Callable, Generic, MutableMapping, TypeVar, overload
 
-class Command:
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+class Command(Generic[_F]):
     def __call__(self, *args: Any, **kwargs: Any) -> Any: ...
     def main(self, *args: Any, **kwargs: Any) -> Any: ...
 
-Context = object
+
+class Context:
+    params: MutableMapping[str, Any]
+
 
 class Param:
     name: str
     type: Any
 
+
 Parameter = Param
 
-__all__ = ["Command", "Context", "Param", "Parameter"]
+
+@overload
+def command(__func: _F) -> Command[_F]: ...
+
+
+@overload
+def command(
+    name: str | None = ...,
+    cls: type[Command[Any]] | None = ...,
+    **kwargs: Any,
+) -> Callable[[_F], Command[_F]]: ...
+
+
+def command(
+    __func: _F | None = ...,
+    name: str | None = ...,
+    cls: type[Command[Any]] | None = ...,
+    **kwargs: Any,
+) -> Callable[[_F], Command[_F]] | Command[_F]: ...
+
+
+def option(*param_decls: str, **kwargs: Any) -> Callable[[_F], _F]: ...
+
+
+def prompt(
+    text: str,
+    default: Any = ...,
+    *,
+    hide_input: bool = ...,
+    confirmation_prompt: bool | str = ...,
+    type: Any | None = ...,
+    value_proc: Callable[[str], Any] | None = ...,
+    prompt_suffix: str = ...,
+    show_default: bool | str | None = ...,
+    err: bool = ...,
+    show_choices: bool = ...,
+) -> Any: ...
+
+
+def confirm(text: str, default: bool = ..., **kwargs: Any) -> bool: ...
+
+
+def echo(message: object | None = ..., **kwargs: Any) -> None: ...
+
+
+def launch(url: str, **kwargs: Any) -> bool | None: ...
+
+
+class exceptions:
+    class Exit(Exception):
+        __slots__ = ("exit_code",)
+
+        exit_code: int | str | None
+        code: int | str | None
+
+        def __init__(self, exit_code: int | str | None = ...) -> None: ...
+
+
+__all__ = [
+    "Command",
+    "Context",
+    "Param",
+    "Parameter",
+    "command",
+    "option",
+    "prompt",
+    "confirm",
+    "echo",
+    "launch",
+    "exceptions",
+]
