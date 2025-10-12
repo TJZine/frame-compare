@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import tomllib
 from dataclasses import fields, is_dataclass
 from typing import Any, Dict
@@ -205,6 +206,10 @@ def load_config(path: str) -> AppConfig:
         timeout_value = float(app.screenshots.ffmpeg_timeout_seconds)
     except (TypeError, ValueError) as exc:
         raise ConfigError("screenshots.ffmpeg_timeout_seconds must be a number") from exc
+    if not math.isfinite(timeout_value):
+        raise ConfigError(
+            "screenshots.ffmpeg_timeout_seconds must be a finite non-negative number"
+        )
     if timeout_value < 0:
         raise ConfigError("screenshots.ffmpeg_timeout_seconds must be >= 0")
     app.screenshots.ffmpeg_timeout_seconds = timeout_value
