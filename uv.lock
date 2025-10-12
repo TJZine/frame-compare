@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.13"
 
 [[package]]
@@ -240,19 +240,17 @@ dependencies = [
     { name = "colorama" },
     { name = "guessit" },
     { name = "httpx" },
-    { name = "natsort" },
     { name = "librosa" },
+    { name = "natsort" },
     { name = "numpy" },
     { name = "requests" },
     { name = "requests-toolbelt" },
     { name = "rich" },
     { name = "soundfile" },
     { name = "tqdm" },
-    { name = "vapoursynth" },
 ]
 
 [package.optional-dependencies]
-audio = []
 vapoursynth = [
     { name = "vapoursynth" },
 ]
@@ -281,7 +279,6 @@ requires-dist = [
     { name = "rich" },
     { name = "soundfile" },
     { name = "tqdm" },
-    { name = "vapoursynth" },
     { name = "vapoursynth", marker = "extra == 'vapoursynth'", specifier = ">=72" },
 ]
 provides-extras = ["vapoursynth", "audio"]

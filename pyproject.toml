@@ -16,7 +16,6 @@ dependencies = [
     "librosa",
     "soundfile",
     "tqdm",
-    "vapoursynth",
 ]
 
 [project.optional-dependencies]
