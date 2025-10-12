@@ -28,7 +28,9 @@ Requirements:
 
 Repository fixtures live under `comparison_videos/` beside
 `frame_compare.py`; they provide tiny MKV stubs suitable for smoke
-tests and match the default `paths.input_dir`.
+tests. The default configuration now scans `~/comparison_videos`, so
+copy the fixtures there (or point `[paths].input_dir` somewhere else)
+before running comparisons.
 
 ```bash
 uv sync
@@ -37,7 +39,7 @@ uv pip install vapoursynth  # or `uv add vapoursynth` to persist it to your proj
 uv run python frame_compare.py
 ```
 
-The CLI ships with a configuration template stored at `data/config.toml.template`. Frame Compare resolves that template by first honouring `$FRAME_COMPARE_TEMPLATE_PATH` (useful when you store templates outside the repository), then falling back to the packaged copy or the on-disk file. When you want to edit the defaults, copy the template to a writable location—`python -c "from src.config_template import copy_default_config; copy_default_config('~/frame_compare.toml')"` is a quick way—and point the CLI at it with `--config` or by setting `$FRAME_COMPARE_CONFIG`.
+The CLI ships with a configuration template stored at `src/data/config.toml.template` (packaged as `data/config.toml.template`). Frame Compare resolves that template by first honouring `$FRAME_COMPARE_TEMPLATE_PATH` (useful when you store templates outside the repository), then falling back to the packaged copy or the on-disk file. When you want to edit the defaults, copy the template to a writable location—`python -c "from src.config_template import copy_default_config; copy_default_config('~/frame_compare.toml')"` is a quick way—and point the CLI at it with `--config` or by setting `$FRAME_COMPARE_CONFIG`.
 
 Install VapourSynth manually after `uv sync` so the renderer is available:
 
@@ -68,18 +70,18 @@ Expected outputs: PNGs under `screens/…`, cached metrics in
 `generated.audio_offsets.toml`, and (when uploads are enabled) a
 slow.pics shortcut file.
 
-Screenshot renders are written beneath the resolved input directory (for example `comparison_videos/screens`). Make sure that directory is writable before running the CLI—if you installed the project somewhere read-only, point `[paths].input_dir` at a location you control or invoke the CLI with `--input` so Frame Compare can create the screenshot subdirectories it needs.
+Screenshot renders are written beneath the resolved input directory (for example `~/comparison_videos/screens`). Make sure that directory exists and is writable before running the CLI—if you installed the project somewhere read-only, point `[paths].input_dir` at a location you control or invoke the CLI with `--input` so Frame Compare can create the screenshot subdirectories it needs.
 
 ## Configuration essentials
 
 Frame Compare looks for its configuration at the path specified by the
 ``$FRAME_COMPARE_CONFIG`` environment variable. When the variable is unset, the
-CLI uses ``config.toml`` alongside ``frame_compare.py``. If that file does not
-exist, the CLI seeds it from ``data/config.toml.template`` (falling back to the
-repository copy when the package data is unavailable) before loading so a fresh
-checkout is immediately runnable. To customise the settings, edit ``config.toml``
-directly or copy the template to another writable location with ``python -c
-'from src.config_template import copy_default_config; copy_default_config("~/frame-compare.toml")'``
+CLI uses ``~/.frame-compare/config.toml``. If that file does not exist, the CLI
+seeds it from ``data/config.toml.template`` (falling back to the repository copy
+when the package data is unavailable) before loading so a fresh install is
+immediately runnable. To customise the settings, edit the seeded file directly
+or copy the template to another writable location with ``python -c 'from
+src.config_template import copy_default_config; copy_default_config("~/frame-compare.toml")'``
 and either set ``$FRAME_COMPARE_CONFIG`` or pass ``--config`` when invoking the
 CLI. Export ``$FRAME_COMPARE_TEMPLATE_PATH`` when you need ``copy_default_config``
 to source the template from somewhere other than ``data/config.toml.template``.
@@ -90,7 +92,7 @@ The most common toggles are below; see the
 <!-- markdownlint-disable MD013 -->
 | Key | What it controls | Default | Example |
 | --- | --- | --- | --- |
-| `[paths].input_dir` | Base scan directory. | `"comparison_videos"` | `input_dir="comparison_videos"` |
+| `[paths].input_dir` | Base scan directory. | `"~/comparison_videos"` | `input_dir="~/comparison_videos"` |
 | `--input PATH` | One-off scan override. | `None` | `--input /data/releases` |
 | `[analysis].frame_count_dark / frame_count_bright` | Scene quotas for shadows and highlights. | `20 / 10` | `frame_count_dark=12` |
 | `[analysis].frame_count_motion` | Motion-heavy frame quota. | `10` | `frame_count_motion=24` |

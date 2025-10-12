@@ -137,7 +137,7 @@ class CLIConfig:
 class PathsConfig:
     """Filesystem paths configured by the user."""
 
-    input_dir: str = "."
+    input_dir: str = "~/comparison_videos"
 
 
 @dataclass

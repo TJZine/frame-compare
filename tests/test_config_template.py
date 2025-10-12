@@ -3,6 +3,9 @@ from __future__ import annotations
 from importlib import resources
 from pathlib import Path
 
+import os
+import subprocess
+import sys
 from importlib import resources
 from pathlib import Path
 
@@ -84,3 +87,56 @@ def test_copy_default_config_respects_env_override(
 
     assert written == destination
     assert destination.read_text(encoding="utf-8") == "[custom]\nvalue=1\n"
+
+
+def test_copy_default_config_available_from_wheel(tmp_path: Path) -> None:
+    dist_dir = tmp_path / "dist"
+    dist_dir.mkdir()
+    project_root = Path(__file__).resolve().parents[1]
+
+    try:
+        import pip  # type: ignore  # noqa: F401
+    except ModuleNotFoundError:
+        subprocess.run(
+            [sys.executable, "-m", "ensurepip", "--upgrade"],
+            check=True,
+        )
+
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "wheel",
+            "--no-deps",
+            "--wheel-dir",
+            str(dist_dir),
+            str(project_root),
+        ],
+        check=True,
+    )
+
+    wheel_path = next(dist_dir.glob("frame_compare-*.whl"))
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    env["PYTHONPATH"] = str(wheel_path)
+
+    script = (
+        "from pathlib import Path\n"
+        "import tempfile\n"
+        "from src.config_template import copy_default_config\n"
+        "dest = Path(tempfile.mkdtemp()) / 'config.toml'\n"
+        "copy_default_config(dest)\n"
+        "print(dest.exists())\n"
+    )
+
+    proc = subprocess.run(
+        [sys.executable, "-c", script],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+    )
+
+    assert "True" in proc.stdout

@@ -11,7 +11,7 @@ _TEMPLATE_PACKAGE: Final[str] = "data"
 _TEMPLATE_FILENAME: Final[str] = "config.toml.template"
 TEMPLATE_ENV_VAR: Final[str] = "FRAME_COMPARE_TEMPLATE_PATH"
 FILESYSTEM_TEMPLATE_PATH: Final[Path] = (
-    Path(__file__).resolve().parent.parent / "data" / _TEMPLATE_FILENAME
+    Path(__file__).resolve().parent / "data" / _TEMPLATE_FILENAME
 )
 
 
