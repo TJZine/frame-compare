@@ -71,12 +71,13 @@ slow.pics shortcut file.
 
 Frame Compare looks for its configuration at the path specified by the
 ``$FRAME_COMPARE_CONFIG`` environment variable. When the variable is unset, the
-CLI reads the bundled template at ``data/config.toml.template`` so a fresh
-installation runs without additional setup. To customise the settings, copy the
-template to a writable location with ``python -c 'from src.config_template
-import copy_default_config; copy_default_config("~/frame-compare.toml")'`` and
-either set ``$FRAME_COMPARE_CONFIG`` or pass ``--config`` when invoking the
-CLI.
+CLI uses ``config.toml`` alongside ``frame_compare.py``. If that file does not
+exist, the CLI seeds it from the bundled ``data/config.toml.template`` before
+loading so a fresh checkout is immediately runnable. To customise the
+settings, edit ``config.toml`` directly or copy the template to another
+writable location with ``python -c 'from src.config_template import
+copy_default_config; copy_default_config("~/frame-compare.toml")'`` and either
+set ``$FRAME_COMPARE_CONFIG`` or pass ``--config`` when invoking the CLI.
 
 The most common toggles are below; see the
 [full reference](docs/README_REFERENCE.md) for every option.

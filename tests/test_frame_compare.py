@@ -36,18 +36,21 @@ def runner() -> CliRunner:
     return CliRunner()
 
 
-def test_cli_uses_packaged_config_by_default(
+def test_cli_uses_repo_config_by_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runner: CliRunner
 ) -> None:
     monkeypatch.delenv("FRAME_COMPARE_CONFIG", raising=False)
     module_default = importlib.reload(frame_compare)
 
     try:
-        packaged_default = (
+        project_config = Path(module_default.__file__).resolve().with_name("config.toml")
+        template_path = (
             Path(module_default.__file__).resolve().with_name("data") / "config.toml.template"
         ).resolve()
 
-        assert module_default.DEFAULT_CONFIG_PATH == packaged_default
+        assert module_default.DEFAULT_CONFIG_PATH == project_config
+        assert module_default.PROJECT_CONFIG_PATH == project_config
+        assert module_default.PACKAGED_TEMPLATE_PATH == template_path
 
         default_result = runner.invoke(module_default.main, ["--help"])
         assert default_result.exit_code == 0, default_result.output
@@ -56,8 +59,8 @@ def test_cli_uses_packaged_config_by_default(
         default_option = next(
             param for param in module_default.main.params if param.name == "config_path"
         )
-        assert default_option.default == str(packaged_default)
-        assert str(packaged_default) in default_output
+        assert default_option.default == str(project_config)
+        assert str(project_config) in default_output
 
         override_target = (tmp_path / "config" / "config.toml").resolve()
         monkeypatch.setenv("FRAME_COMPARE_CONFIG", str(override_target))
@@ -81,6 +84,55 @@ def test_cli_uses_packaged_config_by_default(
     finally:
         monkeypatch.delenv("FRAME_COMPARE_CONFIG", raising=False)
         importlib.reload(frame_compare)
+
+
+def test_ensure_config_present_seeds_missing_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FRAME_COMPARE_CONFIG", str(tmp_path / "config.toml"))
+    module = importlib.reload(frame_compare)
+
+    try:
+        target = module.DEFAULT_CONFIG_PATH
+        assert target == tmp_path / "config.toml"
+        assert not target.exists()
+
+        calls: list[Path] = []
+
+        def fake_copy(destination: Path) -> Path:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text("seeded")
+            calls.append(destination)
+            return destination
+
+        monkeypatch.setattr(module, "copy_default_config", fake_copy)
+
+        result = module._ensure_config_present(target)
+        assert result == target
+        assert target.exists()
+        assert calls == [target]
+    finally:
+        monkeypatch.delenv("FRAME_COMPARE_CONFIG", raising=False)
+        importlib.reload(frame_compare)
+
+
+def test_ensure_config_present_skips_copy_for_non_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = importlib.reload(frame_compare)
+
+    other_path = tmp_path / "custom" / "config.toml"
+    calls: list[Path] = []
+
+    def fake_copy(destination: Path) -> Path:  # pragma: no cover - should not run
+        calls.append(destination)
+        return destination
+
+    monkeypatch.setattr(module, "copy_default_config", fake_copy)
+
+    result = module._ensure_config_present(other_path)
+    assert result == other_path
+    assert calls == []
 
 
 class DummyProgress:
