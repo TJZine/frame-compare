@@ -962,6 +962,26 @@ def _compute_verification(
     props = stats.get_frame(frame_idx).props
     average = float(props.get("PlaneStatsAverage", 0.0))
     maximum = float(props.get("PlaneStatsMax", 0.0))
+    fmt = getattr(expr, "format", None)
+    bits = getattr(fmt, "bits_per_sample", None) if fmt is not None else None
+    sample_type = getattr(fmt, "sample_type", None) if fmt is not None else None
+
+    is_integer_format = False
+    if sample_type is not None:
+        name = getattr(sample_type, "name", None)
+        if isinstance(name, str):
+            is_integer_format = name.upper() == "INTEGER"
+        else:
+            try:
+                is_integer_format = int(sample_type) == 0
+            except Exception:
+                is_integer_format = False
+
+    if is_integer_format and isinstance(bits, int) and bits > 0:
+        peak = float((1 << bits) - 1)
+        if peak > 0.0:
+            average /= peak
+            maximum /= peak
     return VerificationResult(
         frame=frame_idx,
         average=average,
