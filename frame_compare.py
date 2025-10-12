@@ -2210,12 +2210,38 @@ def run_cli(
     if input_dir:
         cfg.paths.input_dir = input_dir
 
-    root = Path(cfg.paths.input_dir).expanduser().resolve()
-    if not root.exists():
+    configured_input = Path(cfg.paths.input_dir).expanduser()
+    candidate_roots = [configured_input]
+
+    config_parent = config_location.parent
+    config_relative = (config_parent / cfg.paths.input_dir).expanduser()
+    project_relative = (PROJECT_ROOT / cfg.paths.input_dir).expanduser()
+
+    # Preserve order while avoiding duplicate fallbacks when the config lives
+    # alongside the project root (common for packaged runs).
+    for candidate in (config_relative, project_relative):
+        if candidate not in candidate_roots:
+            candidate_roots.append(candidate)
+
+    resolved_root: Path | None = None
+    for candidate in candidate_roots:
+        try:
+            resolved_root = candidate.resolve(strict=True)
+        except FileNotFoundError:
+            continue
+        else:
+            break
+
+    if resolved_root is None:
+        resolved_root = configured_input.resolve()
+
+    if not resolved_root.exists():
         raise CLIAppError(
-            f"Input directory not found: {root}",
-            rich_message=f"[red]Input directory not found:[/red] {root}",
+            f"Input directory not found: {resolved_root}",
+            rich_message=f"[red]Input directory not found:[/red] {resolved_root}",
         )
+
+    root = resolved_root
 
     layout_path = Path(__file__).with_name("cli_layout.v1.json")
     reporter = CliOutputManager(

@@ -82,8 +82,8 @@ quick-start configuration paths.
 | `VAPOURSYNTH_PYTHONPATH` | Environment module path. | str | *(unset)* |
 <!-- markdownlint-restore -->
 
-Repository fixtures mirroring the default `paths.input_dir` live under
-`tests/fixtures/media/comparison_videos` for local smoke tests.
+Repository fixtures mirror the default `paths.input_dir` and live under
+`comparison_videos/` next to `frame_compare.py` for local smoke tests.
 
 ## CLI flags
 

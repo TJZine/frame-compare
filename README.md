@@ -26,14 +26,15 @@ Requirements:
 - FFmpeg available on your `PATH`
 - VapourSynth ≥72 if you plan to use the primary renderer (install manually; see below)
 
-Repository fixtures live under `tests/fixtures/media/`; they provide
-tiny MKV stubs suitable for smoke tests.
+Repository fixtures live under `comparison_videos/` beside
+`frame_compare.py`; they provide tiny MKV stubs suitable for smoke
+tests and match the default `paths.input_dir`.
 
 ```bash
 uv sync
 # install the VapourSynth runtime manually (see the steps below)
 uv pip install vapoursynth  # or `uv add vapoursynth` to persist it to your project
-uv run python frame_compare.py --input tests/fixtures/media/comparison_videos
+uv run python frame_compare.py
 ```
 
 The CLI ships with a configuration template stored at `data/config.toml.template`. Frame Compare loads that packaged template by default so the CLI works out of the box. When you want to edit the defaults, copy the template to a writable location—`python -c "from src.config_template import copy_default_config; copy_default_config('~/frame_compare.toml')"` is a quick way—and point the CLI at it with `--config` or by setting `$FRAME_COMPARE_CONFIG`.
@@ -51,7 +52,7 @@ python3.13 -m venv .venv
 source .venv/bin/activate
 pip install -U pip wheel
 pip install -e .
-python frame_compare.py --input tests/fixtures/media/comparison_videos
+python frame_compare.py
 ```
 
 ## Minimal example
@@ -59,7 +60,7 @@ python frame_compare.py --input tests/fixtures/media/comparison_videos
 ```bash
 uv sync
 uv pip install vapoursynth  # or `uv add vapoursynth`
-uv run python frame_compare.py --input tests/fixtures/media/comparison_videos
+uv run python frame_compare.py
 ```
 
 Expected outputs: PNGs under `screens/…`, cached metrics in

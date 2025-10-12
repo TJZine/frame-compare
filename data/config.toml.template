@@ -123,7 +123,9 @@ emit_json_tail = true
 style = "fill"
 
 [paths]
-# Default input folder; override via CLI when needed.
+# Default input folder; override via CLI when needed. The shipped
+# ``comparison_videos`` directory now lives alongside ``frame_compare.py``, so
+# relative values resolve next to the config file or project root.
 input_dir = "comparison_videos"
 
 [runtime]

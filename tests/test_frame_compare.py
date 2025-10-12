@@ -199,6 +199,12 @@ def _make_config(input_dir: Path) -> AppConfig:
     )
 
 
+def _comparison_fixture_root() -> Path:
+    """Return the repository-level comparison fixture directory."""
+
+    return frame_compare.PROJECT_ROOT / "comparison_videos"
+
+
 def test_cli_applies_overrides_and_naming(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runner: CliRunner
 ) -> None:
@@ -322,6 +328,41 @@ def test_cli_applies_overrides_and_naming(
     assert cache_info.files == ["AAA - 01.mkv", "BBB - 01.mkv"]
     assert len(parse_calls) == 2
 
+
+def test_run_cli_falls_back_to_project_root_for_relative_input(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """
+    Ensure run_cli resolves a relative input directory using the project root fallback.
+
+    The config reports "comparison_videos" as the input directory and the test executes from a
+    temporary working directory so the initial resolution fails. The helper should then fall back
+    to `<repo>/comparison_videos`, which we verify by intercepting `_discover_media`.
+    """
+
+    cfg = _make_config(Path("comparison_videos"))
+
+    monkeypatch.setattr(frame_compare, "load_config", lambda _path: cfg)
+    monkeypatch.setattr(frame_compare, "_ensure_config_present", lambda path: Path(path))
+    monkeypatch.setattr(frame_compare.vs_core, "configure", lambda *args, **kwargs: None)
+
+    recorded_roots: list[Path] = []
+
+    def fake_discover(root: Path) -> list[Path]:
+        recorded_roots.append(root)
+        raise frame_compare.CLIAppError("sentinel")
+
+    monkeypatch.setattr(frame_compare, "_discover_media", fake_discover)
+
+    monkeypatch.chdir(tmp_path)
+    config_path = tmp_path / "config.toml"
+
+    with pytest.raises(frame_compare.CLIAppError, match="sentinel"):
+        frame_compare.run_cli(str(config_path))
+
+    expected_root = _comparison_fixture_root().resolve()
+    assert expected_root.exists()
+    assert recorded_roots == [expected_root]
 
 
 def test_cli_disables_json_tail_output(

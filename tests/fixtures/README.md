@@ -3,7 +3,8 @@
 This directory hosts lightweight placeholder media that exercises the CLI and
 alignment flows without requiring large binary samples. The layout is:
 
-- `media/comparison_videos/` – seed input tree used by quick-start examples.
+- `../comparison_videos/` (repository root) – seed input tree used by
+  quick-start examples and configuration defaults.
 - `media/cli/` and `media/cli_check/` – paired MKVs used by CLI regression
   scripts.
 - `media/audio/` and `media/audio_check/` – audio-alignment placeholders used by
