@@ -301,8 +301,8 @@ def test_cli_applies_overrides_and_naming(
     assert "• tgt=BBB Short" in result.output
 
     assert "[PREPARE]" in result.output
-    assert "• Ref:  lead=  5f" in result.output
-    assert "• Tgt:  lead=  0f" in result.output
+    assert "• Ref: lead=  5f" in result.output
+    assert "• Tgt: lead=  0f" in result.output
     assert "ignore_lead=0.00s" in result.output
     assert "[SUMMARY]" in result.output
     assert "• Clips:" in result.output

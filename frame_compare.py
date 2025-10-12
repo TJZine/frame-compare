@@ -2828,6 +2828,7 @@ def run_cli(
     cache_filename = cfg.analysis.frame_data_filename
     cache_status = "disabled"
     cache_reason = None
+    cache_progress_message: Optional[str] = None
     cache_probe: CacheLoadResult | None = None
 
     if not cfg.analysis.save_frames_data:
@@ -2839,12 +2840,12 @@ def run_cli(
     else:
         cache_path = cache_info.path
         if cache_path.exists():
-            reporter.line(
-                f"[cyan]Loading cached frame metrics from {escape(cache_path.name)}…[/]"
-            )
             cache_probe = probe_cached_metrics(cache_info, cfg.analysis)
             if cache_probe.status == "reused":
                 cache_status = "reused"
+                cache_progress_message = (
+                    f"Loading cached frame metrics from {cache_path.name}…"
+                )
                 reporter.line(
                     f"[green]Reused cached frame metrics from {escape(cache_path.name)}[/]"
                 )
@@ -2907,6 +2908,10 @@ def run_cli(
         "random_seed": int(cfg.analysis.random_seed),
     }
 
+    json_tail["analysis"]["cache_reused"] = bool(cache_ready)
+    if cache_progress_message:
+        json_tail["analysis"]["cache_progress_message"] = cache_progress_message
+
     layout_data["analysis"] = dict(json_tail["analysis"])
     layout_data["clips"]["count"] = len(clip_records)
     layout_data["clips"]["items"] = clip_records
@@ -2946,7 +2951,7 @@ def run_cli(
         layout_data["trims"]["tgt"] = _trim_entry(clip_records[1]["label"])
 
     reporter.update_values(layout_data)
-    reporter.render_sections(["banner", "at_a_glance", "discover", "prepare"])
+    reporter.render_sections(["at_a_glance", "discover", "prepare"])
     reporter.render_sections(["audio_align"])
     reporter.render_sections(["analyze"])
     if tmdb_notes:
@@ -3195,11 +3200,12 @@ def run_cli(
         "compression": int(cfg.screenshots.compression_level),
     }
     layout_data["render"] = json_tail["render"]
+    effective_tonemap = vs_core.resolve_effective_tonemap(cfg.color)
     json_tail["tonemap"] = {
-        "preset": cfg.color.preset,
-        "tone_curve": cfg.color.tone_curve,
-        "dynamic_peak_detection": bool(cfg.color.dynamic_peak_detection),
-        "target_nits": float(cfg.color.target_nits),
+        "preset": effective_tonemap.get("preset", cfg.color.preset),
+        "tone_curve": effective_tonemap.get("tone_curve", cfg.color.tone_curve),
+        "dynamic_peak_detection": bool(effective_tonemap.get("dynamic_peak_detection", cfg.color.dynamic_peak_detection)),
+        "target_nits": float(effective_tonemap.get("target_nits", cfg.color.target_nits)),
         "verify_luma_threshold": float(cfg.color.verify_luma_threshold),
         "overlay_enabled": bool(cfg.color.overlay_enabled),
         "overlay_mode": overlay_mode_value,
@@ -3641,7 +3647,7 @@ def run_cli(
     multiple=True,
     help="Manual audio track override in the form label=index. Repeatable.",
 )
-@click.option("--quiet", is_flag=True, help="Suppress verbose output; show banner, progress, and JSON only.")
+@click.option("--quiet", is_flag=True, help="Suppress verbose output; show At-a-Glance, progress, and JSON only.")
 @click.option("--verbose", is_flag=True, help="Show additional diagnostic output during run.")
 @click.option("--no-color", is_flag=True, help="Disable ANSI colour output.")
 @click.option("--json-pretty", is_flag=True, help="Pretty-print the JSON tail output.")

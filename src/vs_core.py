@@ -777,6 +777,19 @@ def _resolve_tonemap_settings(cfg: Any) -> tuple[str, str, float, int, float]:
     return preset or "custom", tone_curve, target_nits, int(dpd_flag), dst_min
 
 
+def resolve_effective_tonemap(cfg: Any) -> Dict[str, Any]:
+    """Resolve the effective tonemap preset, curve, and luminance for ``cfg``."""
+
+    preset, tone_curve, target_nits, dpd_flag, dst_min = _resolve_tonemap_settings(cfg)
+    return {
+        "preset": preset,
+        "tone_curve": tone_curve,
+        "target_nits": float(target_nits),
+        "dynamic_peak_detection": bool(dpd_flag),
+        "dst_min_nits": float(dst_min),
+    }
+
+
 def _format_overlay_text(
     template: str,
     *,

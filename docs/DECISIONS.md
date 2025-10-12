@@ -1,5 +1,6 @@
 # Decisions Log
 
+- *2025-10-17:* CLI layout tweaks: dropped the banner headline, repurposed the Analyze slot to show cached-metric reuse, removed the At-a-Glance crop-mod snippet in favour of resolved tonemap nits, and slimmed the Summary output block to avoid redundant frame counts.
 - *2025-10-16:* Deep review flagged that `screenshots.directory_name` must be constrained to stay under the resolved input root before cleanup; follow-up will enforce containment checks before writing or deleting screenshot outputs (see `docs/deep_review.md`).
 - *2025-10-15:* Relocated bundled comparison fixtures from `tests/fixtures/media/comparison_videos` to the repository-root
   `comparison_videos/` directory so CLI defaults, config templates, and contributor docs reference the same location as the

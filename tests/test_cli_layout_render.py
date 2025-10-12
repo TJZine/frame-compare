@@ -115,6 +115,7 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
             "output_frame_count": 6,
             "output_frames_preview": "0, 10, 20, …, 110, 120, 130",
             "output_frames_full": "[0, 10, 20, …, 110, 120, 130]",
+            "cache_progress_message": "Loading cached frame metrics from cache.bin…",
         },
         "audio_alignment": {
             "enabled": True,
@@ -255,7 +256,7 @@ def test_layout_renderer_sample_output(tmp_path, monkeypatch):
     lines = [line.rstrip("\n") for line in output_text.splitlines()]
 
     required_markers = [
-        "Frame Compare",
+        "At-a-Glance",
         "[DISCOVER]",
         "[PREPARE]",
         "[PREPARE · Audio]",
@@ -292,6 +293,10 @@ def test_layout_renderer_sample_output(tmp_path, monkeypatch):
     assert not any("writer=writer" in line for line in lines)
     assert any("add_frame_info=true" in line for line in lines)
     assert not any("template=" in line for line in lines)
+
+    assert any("Loading cached frame metrics from" in line for line in lines)
+    canvas_line = next(line for line in lines if "Canvas single_res" in line)
+    assert "crop mod" not in canvas_line
 
     header_idx = next(i for i, line in enumerate(lines) if "Output frames (6)" in line)
     header_line = lines[header_idx]

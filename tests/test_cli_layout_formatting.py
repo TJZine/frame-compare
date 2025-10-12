@@ -100,6 +100,7 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
             "output_frame_count": 6,
             "output_frames_preview": "0, 10, 20, …, 110, 120, 130",
             "output_frames_full": "[0, 10, 20, …, 110, 120, 130]",
+            "cache_progress_message": "Loading cached frame metrics from cache.bin…",
         },
         "audio_alignment": {
             "enabled": True,
