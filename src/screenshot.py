@@ -1283,11 +1283,16 @@ def _save_frame_with_ffmpeg(
     ]
 
     timeout_value = getattr(cfg, "ffmpeg_timeout_seconds", None)
-    timeout_seconds: float | None
+    timeout_seconds_raw: float | None
     try:
-        timeout_seconds = float(timeout_value) if timeout_value is not None else None
+        timeout_seconds_raw = float(timeout_value) if timeout_value is not None else None
     except (TypeError, ValueError):
-        timeout_seconds = None
+        timeout_seconds_raw = None
+
+    if timeout_seconds_raw is not None and timeout_seconds_raw <= 0:
+        timeout_seconds: float | None = None
+    else:
+        timeout_seconds = timeout_seconds_raw
 
     try:
         process = subprocess.run(

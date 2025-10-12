@@ -1083,6 +1083,40 @@ def test_save_frame_with_ffmpeg_honours_timeout(monkeypatch: pytest.MonkeyPatch,
     assert recorded.get("timeout") == pytest.approx(37.5)
 
 
+def test_save_frame_with_ffmpeg_disables_timeout_when_zero(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cfg = ScreenshotConfig(ffmpeg_timeout_seconds=0.0)
+    recorded: dict[str, object] = {}
+
+    def fake_run(cmd, **kwargs):  # type: ignore[override]
+        recorded.update(kwargs)
+
+        class _Result:
+            returncode = 0
+            stderr = b""
+
+        return _Result()
+
+    monkeypatch.setattr(screenshot.shutil, "which", lambda _: "ffmpeg")
+    monkeypatch.setattr(screenshot.subprocess, "run", fake_run)
+
+    screenshot._save_frame_with_ffmpeg(
+        source="video.mkv",
+        frame_idx=3,
+        crop=(0, 0, 0, 0),
+        scaled=(1920, 1080),
+        pad=(0, 0, 0, 0),
+        path=tmp_path / "frame.png",
+        cfg=cfg,
+        width=1920,
+        height=1080,
+        selection_label=None,
+    )
+
+    assert "timeout" not in recorded or recorded.get("timeout") is None
+
+
 def test_save_frame_with_ffmpeg_raises_on_timeout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     cfg = ScreenshotConfig(ffmpeg_timeout_seconds=5.0)
 

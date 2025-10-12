@@ -3,6 +3,7 @@
 All notable user-visible updates will be documented in this file in reverse chronological order.
 
 - *2025-10-19:* Seed the packaged default config into a per-user directory when the project tree is read-only so packaged installs no longer fail to start on permission errors.
+- *2025-10-20:* Allow disabling the per-frame FFmpeg timeout by setting `screenshots.ffmpeg_timeout_seconds` to 0 while keeping negative values invalid in validation and docs.
 - *2025-10-18:* Added a per-frame FFmpeg timeout and disabled stdin consumption to prevent hung screenshot renders and shell freezes on Windows.
 - *2025-10-17:* Streamlined CLI framing: removed the banner row, surfaced cached-metrics reuse inside the Analyze block, dropped the At-a-Glance crop-mod readout in favour of effective tonemap nits, and trimmed the Summary output frames line to match the refreshed console layout and tests.
 - *2025-10-16:* Documented deep-review finding: screenshot cleanup must enforce path containment before deleting outputs; remediation planned.

@@ -205,8 +205,8 @@ def load_config(path: str) -> AppConfig:
         timeout_value = float(app.screenshots.ffmpeg_timeout_seconds)
     except (TypeError, ValueError) as exc:
         raise ConfigError("screenshots.ffmpeg_timeout_seconds must be a number") from exc
-    if timeout_value <= 0:
-        raise ConfigError("screenshots.ffmpeg_timeout_seconds must be > 0")
+    if timeout_value < 0:
+        raise ConfigError("screenshots.ffmpeg_timeout_seconds must be >= 0")
     app.screenshots.ffmpeg_timeout_seconds = timeout_value
     pad_mode = str(app.screenshots.pad_to_canvas).strip().lower()
     if pad_mode not in {"off", "on", "auto"}:

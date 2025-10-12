@@ -53,7 +53,6 @@ def test_load_defaults(tmp_path: Path) -> None:
         ("[color]\nverify_step_seconds = 0\n", "color.verify_step_seconds"),
         ("[color]\ntarget_nits = -10\n", "color.target_nits"),
         ("[source]\npreferred = \"bogus\"\n", "source.preferred"),
-        ("[screenshots]\nffmpeg_timeout_seconds = 0\n", "screenshots.ffmpeg_timeout_seconds"),
         ("[tmdb]\nyear_tolerance = -1\n", "tmdb.year_tolerance"),
         ("[tmdb]\ncache_ttl_seconds = -5\n", "tmdb.cache_ttl_seconds"),
         ("[tmdb]\ncategory_preference = \"documentary\"\n", "tmdb.category_preference"),
@@ -66,6 +65,18 @@ def test_validation_errors(tmp_path: Path, toml_snippet: str, message: str) -> N
     with pytest.raises(ConfigError) as exc_info:
         load_config(str(cfg_path))
     assert message in str(exc_info.value)
+
+
+def test_ffmpeg_timeout_zero_is_allowed(tmp_path: Path) -> None:
+    cfg_path = _copy_default_config(tmp_path)
+    original = cfg_path.read_text(encoding="utf-8")
+    cfg_path.write_text(
+        original.replace("ffmpeg_timeout_seconds = 120.0", "ffmpeg_timeout_seconds = 0.0", 1),
+        encoding="utf-8",
+    )
+
+    app = load_config(str(cfg_path))
+    assert app.screenshots.ffmpeg_timeout_seconds == 0.0
 
 
 def test_override_values(tmp_path: Path) -> None:
