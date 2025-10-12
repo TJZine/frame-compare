@@ -24,16 +24,24 @@ Requirements:
 - Python 3.13+
 - [`uv`](https://docs.astral.sh/uv/)
 - FFmpeg available on your `PATH`
-- Optional VapourSynth ≥72 for the primary renderer
+- VapourSynth ≥72 if you plan to use the primary renderer (install manually; see below)
 
 Repository fixtures live under `tests/fixtures/media/`; they provide
 tiny MKV stubs suitable for smoke tests.
 
 ```bash
 uv sync
+# install the VapourSynth runtime manually (see the steps below)
+uv pip install vapoursynth  # or `uv add vapoursynth` to persist it to your project
 uv run python -c "from src.config_template import copy_default_config; copy_default_config('config.toml')"
 uv run python frame_compare.py --config config.toml --input tests/fixtures/media/comparison_videos
 ```
+
+Install VapourSynth manually after `uv sync` so the renderer is available:
+
+1. Follow the [official VapourSynth installation guide](https://www.vapoursynth.com/doc/installation.html) for your OS to install the core runtime (`vspipe`, libraries, and plugins). Package managers such as Homebrew, AUR, or `apt` provide maintained builds, and Windows users should run the official installer.
+2. Ensure the VapourSynth Python module directory is on `VAPOURSYNTH_PYTHONPATH` (Linux/macOS) or registered via the installer (Windows) so it can be discovered by Python.
+3. Activate your `uv` environment and install the Python bindings with `uv pip install vapoursynth`. Run `uv add vapoursynth` instead if you want the dependency recorded in `pyproject.toml` for future syncs.
 
 Fallback when `uv` is unavailable:
 
@@ -50,6 +58,7 @@ python frame_compare.py --config config.toml --input tests/fixtures/media/compar
 
 ```bash
 uv sync
+uv pip install vapoursynth  # or `uv add vapoursynth`
 uv run python -c "from src.config_template import copy_default_config; copy_default_config('config.toml')"
 uv run python frame_compare.py --config config.toml --input tests/fixtures/media/comparison_videos
 ```
