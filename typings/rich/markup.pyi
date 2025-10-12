@@ -1,3 +1,0 @@
-def escape(text: str, *, style: bool = ...) -> str: ...
-
-__all__ = ["escape"]
