@@ -71,9 +71,13 @@ status = "auto"
    ```
 2. Run the CLI against a directory containing at least two clips:
    ```bash
-   uv run python frame_compare.py --input tests/fixtures/media/comparison_videos
+   uv run python frame_compare.py
    ```
-   The run prints stream selections, estimated offsets, and writes `generated.audio_offsets.toml`. The JSON tail exposes the same data for automation. 【F:src/datatypes.py†L210-L226】【F:frame_compare.py†L1654-L1684】【F:frame_compare.py†L1985-L2065】
+   The default `paths.input_dir` resolves to the bundled
+   `comparison_videos/` directory beside `frame_compare.py`, which ships
+   with sample clips. The run prints stream selections, estimated
+   offsets, and writes `generated.audio_offsets.toml`. The JSON tail
+   exposes the same data for automation. 【F:src/datatypes.py†L210-L226】【F:frame_compare.py†L1654-L1684】【F:frame_compare.py†L1985-L2065】
 
 ## Gotchas & edge cases
 - Audio alignment is skipped (with a warning) when fewer than two clips are available or when the feature is disabled. 【F:frame_compare.py†L987-L997】
