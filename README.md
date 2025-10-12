@@ -37,7 +37,7 @@ uv pip install vapoursynth  # or `uv add vapoursynth` to persist it to your proj
 uv run python frame_compare.py
 ```
 
-The CLI ships with a configuration template stored at `data/config.toml.template`. Frame Compare loads that packaged template by default so the CLI works out of the box. When you want to edit the defaults, copy the template to a writable location—`python -c "from src.config_template import copy_default_config; copy_default_config('~/frame_compare.toml')"` is a quick way—and point the CLI at it with `--config` or by setting `$FRAME_COMPARE_CONFIG`.
+The CLI ships with a configuration template stored at `data/config.toml.template`. Frame Compare resolves that template by first honouring `$FRAME_COMPARE_TEMPLATE_PATH` (useful when you store templates outside the repository), then falling back to the packaged copy or the on-disk file. When you want to edit the defaults, copy the template to a writable location—`python -c "from src.config_template import copy_default_config; copy_default_config('~/frame_compare.toml')"` is a quick way—and point the CLI at it with `--config` or by setting `$FRAME_COMPARE_CONFIG`.
 
 Install VapourSynth manually after `uv sync` so the renderer is available:
 
@@ -68,17 +68,21 @@ Expected outputs: PNGs under `screens/…`, cached metrics in
 `generated.audio_offsets.toml`, and (when uploads are enabled) a
 slow.pics shortcut file.
 
+Screenshot renders are written beneath the resolved input directory (for example `comparison_videos/screens`). Make sure that directory is writable before running the CLI—if you installed the project somewhere read-only, point `[paths].input_dir` at a location you control or invoke the CLI with `--input` so Frame Compare can create the screenshot subdirectories it needs.
+
 ## Configuration essentials
 
 Frame Compare looks for its configuration at the path specified by the
 ``$FRAME_COMPARE_CONFIG`` environment variable. When the variable is unset, the
 CLI uses ``config.toml`` alongside ``frame_compare.py``. If that file does not
-exist, the CLI seeds it from the bundled ``data/config.toml.template`` before
-loading so a fresh checkout is immediately runnable. To customise the
-settings, edit ``config.toml`` directly or copy the template to another
-writable location with ``python -c 'from src.config_template import
-copy_default_config; copy_default_config("~/frame-compare.toml")'`` and either
-set ``$FRAME_COMPARE_CONFIG`` or pass ``--config`` when invoking the CLI.
+exist, the CLI seeds it from ``data/config.toml.template`` (falling back to the
+repository copy when the package data is unavailable) before loading so a fresh
+checkout is immediately runnable. To customise the settings, edit ``config.toml``
+directly or copy the template to another writable location with ``python -c
+'from src.config_template import copy_default_config; copy_default_config("~/frame-compare.toml")'``
+and either set ``$FRAME_COMPARE_CONFIG`` or pass ``--config`` when invoking the
+CLI. Export ``$FRAME_COMPARE_TEMPLATE_PATH`` when you need ``copy_default_config``
+to source the template from somewhere other than ``data/config.toml.template``.
 
 The most common toggles are below; see the
 [full reference](docs/README_REFERENCE.md) for every option.

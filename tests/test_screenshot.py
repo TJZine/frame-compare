@@ -208,6 +208,41 @@ def test_generate_screenshots_filenames(tmp_path: Path, monkeypatch: pytest.Monk
     assert len(calls) == len(frames)
 
 
+def test_generate_screenshots_reports_permission_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clips = [FakeClip(1280, 720)]
+    frames = [0]
+    files = ["clip.mkv"]
+    metadata = [{}]
+    cfg = ScreenshotConfig(directory_name="screens")
+    color_cfg = ColorConfig()
+    out_dir = tmp_path / "screens"
+
+    path_type = type(out_dir)
+    real_mkdir = path_type.mkdir
+
+    def _deny_mkdir(self: Path, *args: object, **kwargs: object) -> None:
+        if self == out_dir:
+            raise PermissionError("denied")
+        return real_mkdir(self, *args, **kwargs)
+
+    monkeypatch.setattr(path_type, "mkdir", _deny_mkdir)
+
+    with pytest.raises(screenshot.ScreenshotError) as excinfo:
+        screenshot.generate_screenshots(
+            clips,
+            frames,
+            files,
+            metadata,
+            out_dir,
+            cfg,
+            color_cfg,
+        )
+
+    assert "Unable to create screenshot directory" in str(excinfo.value)
+
+
 def _make_plan(
     *,
     width: int = 1920,

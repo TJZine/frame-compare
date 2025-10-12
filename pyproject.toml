@@ -38,19 +38,14 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["frame_compare", "data"]
-include-package-data = true
-
-[tool.setuptools.package-dir]
-frame_compare = "src/frame_compare"
-data = "data"
-
-[tool.setuptools.package-data]
-data = ["config.toml.template"]
+packages = {find = {where = ["src"]}}
 
 [tool.black]
 line-length = 100
 target-version = ["py313"]
+
+[tool.pytest.ini_options]
+pythonpath = [".", "src"]
 
 [tool.ruff]
 line-length = 100

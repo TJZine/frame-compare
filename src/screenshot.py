@@ -1373,7 +1373,17 @@ def generate_screenshots(
     if len(trim_offsets) != len(files):
         raise ScreenshotError("trim_offsets and files must have matching lengths")
 
-    out_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+    except PermissionError as exc:
+        raise ScreenshotError(
+            "Unable to create screenshot directory "
+            f"'{out_dir}': {exc.strerror or exc}"
+        ) from exc
+    except OSError as exc:
+        raise ScreenshotError(
+            f"Unable to prepare screenshot directory '{out_dir}': {exc}"
+        ) from exc
     created: List[str] = []
 
     processed_results: List[vs_core.ClipProcessResult] = []

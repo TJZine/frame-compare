@@ -1,5 +1,7 @@
 # Decisions Log
 
+- *2025-10-21:* `copy_default_config` now honours `$FRAME_COMPARE_TEMPLATE_PATH` and falls back to the repository template when the packaged `data` module is unavailable, letting us drop the setuptools package-dir mapping without breaking config seeding.
+- *2025-10-21:* Screenshot generation wraps directory creation failures in `ScreenshotError` so permission-denied errors surface with actionable guidance about choosing a writable `[paths].input_dir`.
 - *2025-10-19:* When the packaged install directory is read-only we now seed the default config under `~/.frame-compare/config.toml`, logging the relocation so users know to point overrides there instead of the site-packages path.
 - *2025-10-20:* Restored the ability to disable FFmpeg screenshot timeouts by permitting `screenshots.ffmpeg_timeout_seconds = 0` and treating non-positive values as "no timeout" when invoking FFmpeg.
 - *2025-10-18:* Added `screenshots.ffmpeg_timeout_seconds` plus `-nostdin` when spawning FFmpeg to stop runaway renders from freezing Windows shells; surfaced the timeout in CLI render metadata and config docs.
