@@ -14,7 +14,7 @@
       "section_render": "cyan.bold",
       "section_publish": "cyan.bold",
       "section_warnings": "yellow.bold",
-      "section_summary": "green",
+      "section_summary": "green.bold",
       "accent_subhead": "yellow.bright",
       "value": "white.bright",
       "unit": "grey.dim",
