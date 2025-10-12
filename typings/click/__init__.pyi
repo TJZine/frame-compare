@@ -1,9 +1,9 @@
-from typing import Any, Callable, MutableMapping, TypeVar, overload
+from typing import Any, Callable, Generic, MutableMapping, TypeVar, overload
 
 _F = TypeVar("_F", bound=Callable[..., Any])
 
 
-class Command:
+class Command(Generic[_F]):
     def __call__(self, *args: Any, **kwargs: Any) -> Any: ...
     def main(self, *args: Any, **kwargs: Any) -> Any: ...
 
@@ -21,17 +21,28 @@ Parameter = Param
 
 
 @overload
-def command(__func: _F) -> Command: ...
+def command(__func: _F) -> Command[_F]: ...
 
 
 @overload
-def command(*, name: str | None = ..., cls: type[Command] | None = ..., **kwargs: Any) -> Callable[[_F], Command]: ...
+def command(
+    *,
+    name: str | None = ...,
+    cls: type[Command[Any]] | None = ...,
+    **kwargs: Any,
+) -> Callable[[_F], Command[_F]]: ...
 
 
-def command(*args: Any, **kwargs: Any) -> Callable[[_F], Command] | Command: ...
+def command(
+    __func: _F | None = ...,
+    *,
+    name: str | None = ...,
+    cls: type[Command[Any]] | None = ...,
+    **kwargs: Any,
+) -> Callable[[_F], Command[_F]] | Command[_F]: ...
 
 
-def option(*param_decls: str, **kwargs: Any) -> Callable[[_F], _F]: ...
+def option(*param_decls: str, **kwargs: Any) -> Callable[[_F], Command[_F]]: ...
 
 
 def prompt(
