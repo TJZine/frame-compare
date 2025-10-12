@@ -7,7 +7,7 @@ from src.config_template import copy_default_config
 
 
 def _copy_default_config(tmp_path: Path) -> Path:
-    cfg_dst = tmp_path / "config.toml.template"
+    cfg_dst = tmp_path / "config.toml"
     return copy_default_config(cfg_dst)
 
 
@@ -59,7 +59,7 @@ def test_load_defaults(tmp_path: Path) -> None:
     ],
 )
 def test_validation_errors(tmp_path: Path, toml_snippet: str, message: str) -> None:
-    cfg_path = tmp_path / "config.toml.template"
+    cfg_path = tmp_path / "config.toml"
     cfg_path.write_text(toml_snippet, encoding="utf-8")
     with pytest.raises(ConfigError) as exc_info:
         load_config(str(cfg_path))
@@ -67,7 +67,7 @@ def test_validation_errors(tmp_path: Path, toml_snippet: str, message: str) -> N
 
 
 def test_override_values(tmp_path: Path) -> None:
-    cfg_path = tmp_path / "config.toml.template"
+    cfg_path = tmp_path / "config.toml"
     cfg_path.write_text(
         """
 [analysis]

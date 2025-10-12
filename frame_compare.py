@@ -29,6 +29,7 @@ from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn, Ti
 from natsort import os_sorted
 
 from src.config_loader import ConfigError, load_config
+from src import config_paths
 from src.datatypes import AppConfig
 from src import audio_alignment
 from src.utils import parse_filename_metadata
@@ -58,7 +59,7 @@ from src.cli_layout import CliLayoutRenderer, CliLayoutError, load_cli_layout
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_CONFIG_PATH = Path(__file__).resolve().with_name("data") / "config.toml.template"
+DEFAULT_CONFIG_PATH = config_paths.DEFAULT_CONFIG_PATH
 
 SUPPORTED_EXTS = (
     ".mkv",
@@ -3462,8 +3463,8 @@ def run_cli(
     default=str(DEFAULT_CONFIG_PATH),
     show_default=True,
     help=(
-        "Path to the configuration file (defaults to the packaged "
-        "data/config.toml.template; rename or copy it to .toml when customising)."
+        "Path to the configuration file (defaults to data/config.toml; seed it "
+        "from the packaged template with src.config_template.copy_default_config)."
     ),
 )
 @click.option("--input", "input_dir", default=None, help="Override [paths.input_dir] from config.toml")

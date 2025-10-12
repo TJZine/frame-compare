@@ -36,7 +36,7 @@ uv pip install vapoursynth  # or `uv add vapoursynth` to persist it to your proj
 uv run python frame_compare.py --input tests/fixtures/media/comparison_videos
 ```
 
-The CLI ships with a configuration template stored at `data/config.toml.template`. Copy or rename it to a `.toml` file when you want to edit the defaults, and pass `--config` to point at a custom file when needed; you can seed one with `python -c "from src.config_template import copy_default_config; copy_default_config('~/frame_compare.toml')"`.
+The CLI ships with a configuration template stored at `data/config.toml.template`. Run `python -c "from src.config_template import copy_default_config; copy_default_config()"` to populate `data/config.toml`, which is the default config consumed by the CLI. Pass `--config` to point at another file when needed, or provide a path to `copy_default_config()` to seed an alternate location.
 
 Install VapourSynth manually after `uv sync` so the renderer is available:
 

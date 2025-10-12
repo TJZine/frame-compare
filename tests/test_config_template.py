@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from src import config_paths
 from src.config_template import copy_default_config
 
 
@@ -20,6 +21,18 @@ def test_copy_default_config_writes_template(tmp_path: Path, template_bytes: byt
 
     assert written_path == destination
     assert destination.read_bytes() == template_bytes
+
+
+def test_copy_default_config_uses_cli_default_path(
+    tmp_path: Path, template_bytes: bytes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    default_path = tmp_path / "data" / "config.toml"
+    monkeypatch.setattr(config_paths, "DEFAULT_CONFIG_PATH", default_path)
+
+    written_path = copy_default_config()
+
+    assert written_path == default_path
+    assert default_path.read_bytes() == template_bytes
 
 
 def test_copy_default_config_refuses_to_overwrite(tmp_path: Path, template_bytes: bytes) -> None:
