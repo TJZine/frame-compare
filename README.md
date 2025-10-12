@@ -36,7 +36,7 @@ uv pip install vapoursynth  # or `uv add vapoursynth` to persist it to your proj
 uv run python frame_compare.py --input tests/fixtures/media/comparison_videos
 ```
 
-The CLI ships with a configuration template stored at `data/config.toml.template`. Copy or rename it to a `.toml` file when you want to edit the defaults. By default, Frame Compare keeps its live configuration at `config/config.toml` alongside the CLI module; the file is created for you on first run, or you can seed an alternate location with `python -c "from src.config_template import copy_default_config; copy_default_config('~/frame_compare.toml')"` and pass `--config` to point at it.
+The CLI ships with a configuration template stored at `data/config.toml.template`. Frame Compare loads that packaged template by default so the CLI works out of the box. When you want to edit the defaults, copy the template to a writable location—`python -c "from src.config_template import copy_default_config; copy_default_config('~/frame_compare.toml')"` is a quick way—and point the CLI at it with `--config` or by setting `$FRAME_COMPARE_CONFIG`.
 
 Install VapourSynth manually after `uv sync` so the renderer is available:
 
@@ -69,12 +69,14 @@ slow.pics shortcut file.
 
 ## Configuration essentials
 
-Frame Compare now looks for its configuration at the path specified by the
+Frame Compare looks for its configuration at the path specified by the
 ``$FRAME_COMPARE_CONFIG`` environment variable. When the variable is unset, the
-CLI falls back to ``config/config.toml`` next to the installed CLI module and
-automatically seeds that location with the bundled template on first run. You
-can also copy the template manually with ``python -c 'from
-src.config_template import copy_default_config; copy_default_config("~/frame-compare.toml")'``.
+CLI reads the bundled template at ``data/config.toml.template`` so a fresh
+installation runs without additional setup. To customise the settings, copy the
+template to a writable location with ``python -c 'from src.config_template
+import copy_default_config; copy_default_config("~/frame-compare.toml")'`` and
+either set ``$FRAME_COMPARE_CONFIG`` or pass ``--config`` when invoking the
+CLI.
 
 The most common toggles are below; see the
 [full reference](docs/README_REFERENCE.md) for every option.

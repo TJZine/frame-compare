@@ -43,11 +43,11 @@ def test_cli_uses_packaged_config_by_default(
     module_default = importlib.reload(frame_compare)
 
     try:
-        repo_default = (
-            Path(module_default.__file__).resolve().parent / "config" / "config.toml"
+        packaged_default = (
+            Path(module_default.__file__).resolve().with_name("data") / "config.toml.template"
         ).resolve()
 
-        assert module_default.DEFAULT_CONFIG_PATH == repo_default
+        assert module_default.DEFAULT_CONFIG_PATH == packaged_default
 
         default_result = runner.invoke(module_default.main, ["--help"])
         assert default_result.exit_code == 0, default_result.output
@@ -56,8 +56,8 @@ def test_cli_uses_packaged_config_by_default(
         default_option = next(
             param for param in module_default.main.params if param.name == "config_path"
         )
-        assert default_option.default == str(repo_default)
-        assert str(repo_default) in default_output
+        assert default_option.default == str(packaged_default)
+        assert str(packaged_default) in default_output
 
         override_target = (tmp_path / "config" / "config.toml").resolve()
         monkeypatch.setenv("FRAME_COMPARE_CONFIG", str(override_target))

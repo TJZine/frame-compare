@@ -30,7 +30,6 @@ from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn, Ti
 from natsort import os_sorted
 
 from src.config_loader import ConfigError, load_config
-from src.config_template import copy_default_config
 from src.datatypes import AppConfig
 from src import audio_alignment
 from src.utils import parse_filename_metadata
@@ -62,21 +61,21 @@ logger = logging.getLogger(__name__)
 
 CONFIG_ENV_VAR: Final[str] = "FRAME_COMPARE_CONFIG"
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parent
+PACKAGED_TEMPLATE_PATH: Final[Path] = (PROJECT_ROOT / "data" / "config.toml.template").resolve()
 
 
 def _resolve_default_config_path() -> Path:
     override = os.environ.get(CONFIG_ENV_VAR)
     if override:
         return Path(override).expanduser().resolve()
-    return (PROJECT_ROOT / "config" / "config.toml").resolve()
+    return PACKAGED_TEMPLATE_PATH
 
 
 DEFAULT_CONFIG_PATH: Final[Path] = _resolve_default_config_path()
 
 _DEFAULT_CONFIG_HELP: Final[str] = (
     f"Path to the configuration file. Defaults to ${CONFIG_ENV_VAR} when set, "
-    f"otherwise {PROJECT_ROOT / 'config' / 'config.toml'}. The packaged template is "
-    "copied there automatically on first run."
+    f"otherwise the bundled template at {PACKAGED_TEMPLATE_PATH}."
 )
 
 SUPPORTED_EXTS = (
@@ -2135,19 +2134,6 @@ def run_cli(
         CLIAppError: For configuration loading failures, missing/invalid input directory, clip initialization failures, frame selection or screenshot generation errors, slow.pics upload failures, or other user-facing errors encountered during the run.
     """
     config_location = Path(config_path).expanduser()
-
-    if config_location == DEFAULT_CONFIG_PATH and not config_location.exists():
-        try:
-            copy_default_config(config_location)
-        except FileExistsError:
-            pass
-        except OSError as exc:
-            message = f"Failed to create default config at {config_location}: {exc}"
-            raise CLIAppError(
-                message,
-                code=2,
-                rich_message=f"[red]Failed to create default config:[/red] {config_location}\n{exc}",
-            ) from exc
 
     try:
         cfg: AppConfig = load_config(str(config_location))
