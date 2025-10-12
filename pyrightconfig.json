@@ -1,6 +1,6 @@
 {
   "typeCheckingMode": "standard",
-  "include": ["src", "tests"],
+  "include": ["src", "tests", "frame_compare.py"],
   "stubPath": "typings",
   "exclude": [".venv/**", "build/**", "dist/**", "**/__pycache__/**"],
   "venvPath": ".",
