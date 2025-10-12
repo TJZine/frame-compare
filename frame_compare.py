@@ -58,7 +58,7 @@ from src.cli_layout import CliLayoutRenderer, CliLayoutError, load_cli_layout
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_CONFIG_PATH = Path(__file__).resolve().with_name("data") / "config.toml"
+DEFAULT_CONFIG_PATH = Path(__file__).resolve().with_name("data") / "config.toml.template"
 
 SUPPORTED_EXTS = (
     ".mkv",
@@ -3461,7 +3461,10 @@ def run_cli(
     "config_path",
     default=str(DEFAULT_CONFIG_PATH),
     show_default=True,
-    help="Path to the configuration file (defaults to the packaged data/config.toml).",
+    help=(
+        "Path to the configuration file (defaults to the packaged "
+        "data/config.toml.template; rename or copy it to .toml when customising)."
+    ),
 )
 @click.option("--input", "input_dir", default=None, help="Override [paths.input_dir] from config.toml")
 @click.option(
