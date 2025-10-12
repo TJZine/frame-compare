@@ -49,6 +49,7 @@ class ScreenshotConfig:
     pad_to_canvas: str = "off"
     letterbox_px_tolerance: int = 8
     center_pad: bool = True
+    ffmpeg_timeout_seconds: float = 120.0
 
 
 @dataclass

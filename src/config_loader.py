@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import tomllib
 from dataclasses import fields, is_dataclass
 from typing import Any, Dict
@@ -25,6 +26,13 @@ from .datatypes import (
 
 class ConfigError(ValueError):
     """Raised when the configuration file is malformed or fails validation."""
+
+
+_FFMPEG_TIMEOUT_NOT_NUMBER_MSG = "screenshots.ffmpeg_timeout_seconds must be a number"
+_FFMPEG_TIMEOUT_NOT_FINITE_MSG = (
+    "screenshots.ffmpeg_timeout_seconds must be a finite number"
+)
+_FFMPEG_TIMEOUT_NEGATIVE_MSG = "screenshots.ffmpeg_timeout_seconds must be >= 0"
 
 
 def _coerce_bool(value: Any, dotted_key: str) -> bool:
@@ -201,6 +209,15 @@ def load_config(path: str) -> AppConfig:
         raise ConfigError("screenshots.letterbox_px_tolerance must be an integer")
     if app.screenshots.letterbox_px_tolerance < 0:
         raise ConfigError("screenshots.letterbox_px_tolerance must be >= 0")
+    try:
+        timeout_value = float(app.screenshots.ffmpeg_timeout_seconds)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(_FFMPEG_TIMEOUT_NOT_NUMBER_MSG) from exc
+    if not math.isfinite(timeout_value):
+        raise ConfigError(_FFMPEG_TIMEOUT_NOT_FINITE_MSG)
+    if timeout_value < 0:
+        raise ConfigError(_FFMPEG_TIMEOUT_NEGATIVE_MSG)
+    app.screenshots.ffmpeg_timeout_seconds = timeout_value
     pad_mode = str(app.screenshots.pad_to_canvas).strip().lower()
     if pad_mode not in {"off", "on", "auto"}:
         raise ConfigError("screenshots.pad_to_canvas must be 'off', 'on', or 'auto'")

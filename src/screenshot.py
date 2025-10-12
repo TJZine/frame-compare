@@ -1265,6 +1265,7 @@ def _save_frame_with_ffmpeg(
     filter_chain = ",".join(filters)
     cmd = [
         "ffmpeg",
+        "-nostdin",
         "-loglevel",
         "error",
         "-y",
@@ -1281,7 +1282,31 @@ def _save_frame_with_ffmpeg(
         str(path),
     ]
 
-    process = subprocess.run(cmd, capture_output=True)
+    timeout_value = getattr(cfg, "ffmpeg_timeout_seconds", None)
+    timeout_seconds_raw: float | None
+    try:
+        timeout_seconds_raw = float(timeout_value) if timeout_value is not None else None
+    except (TypeError, ValueError):
+        timeout_seconds_raw = None
+
+    if timeout_seconds_raw is not None and timeout_seconds_raw <= 0:
+        timeout_seconds: float | None = None
+    else:
+        timeout_seconds = timeout_seconds_raw
+
+    try:
+        process = subprocess.run(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as exc:
+        duration = timeout_seconds if timeout_seconds is not None else 0.0
+        raise ScreenshotWriterError(
+            f"FFmpeg timed out after {duration:.1f}s for frame {frame_idx}"
+        ) from exc
     if process.returncode != 0:
         stderr = process.stderr.decode("utf-8", "ignore").strip()
         message = stderr or "unknown error"
