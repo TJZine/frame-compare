@@ -365,6 +365,27 @@ def test_run_cli_falls_back_to_project_root_for_relative_input(
     assert recorded_roots == [expected_root]
 
 
+def test_run_cli_does_not_fallback_for_cli_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Ensure run_cli reports missing CLI overrides instead of using fallbacks."""
+
+    cfg = _make_config(tmp_path)
+
+    monkeypatch.setattr(frame_compare, "load_config", lambda _path: cfg)
+    monkeypatch.setattr(frame_compare, "_ensure_config_present", lambda path: Path(path))
+    def _fail_discover(*_args: object, **_kwargs: object) -> list[Path]:
+        raise AssertionError("should not discover")
+
+    monkeypatch.setattr(frame_compare, "_discover_media", _fail_discover)
+
+    config_path = tmp_path / "config.toml"
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(frame_compare.CLIAppError, match="Input directory not found"):
+        frame_compare.run_cli(str(config_path), input_dir="comparison_videos")
+
+
 def test_cli_disables_json_tail_output(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runner: CliRunner
 ) -> None:

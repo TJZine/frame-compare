@@ -2207,21 +2207,23 @@ def run_cli(
             f"Config error: {exc}", code=2, rich_message=f"[red]Config error:[/red] {exc}"
         ) from exc
 
-    if input_dir:
+    cli_override_supplied = input_dir is not None
+    if cli_override_supplied:
         cfg.paths.input_dir = input_dir
 
     configured_input = Path(cfg.paths.input_dir).expanduser()
     candidate_roots = [configured_input]
 
-    config_parent = config_location.parent
-    config_relative = (config_parent / cfg.paths.input_dir).expanduser()
-    project_relative = (PROJECT_ROOT / cfg.paths.input_dir).expanduser()
+    if not cli_override_supplied:
+        config_parent = config_location.parent
+        config_relative = (config_parent / cfg.paths.input_dir).expanduser()
+        project_relative = (PROJECT_ROOT / cfg.paths.input_dir).expanduser()
 
-    # Preserve order while avoiding duplicate fallbacks when the config lives
-    # alongside the project root (common for packaged runs).
-    for candidate in (config_relative, project_relative):
-        if candidate not in candidate_roots:
-            candidate_roots.append(candidate)
+        # Preserve order while avoiding duplicate fallbacks when the config lives
+        # alongside the project root (common for packaged runs).
+        for candidate in (config_relative, project_relative):
+            if candidate not in candidate_roots:
+                candidate_roots.append(candidate)
 
     resolved_root: Path | None = None
     for candidate in candidate_roots:
