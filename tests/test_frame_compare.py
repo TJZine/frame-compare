@@ -11,7 +11,7 @@ from rich.console import Console
 
 import frame_compare
 from src.audio_alignment import AlignmentMeasurement, AudioStreamInfo
-from src.analysis import FrameMetricsCacheInfo
+from src.analysis import CacheLoadResult, FrameMetricsCacheInfo
 from src.datatypes import (
     AnalysisConfig,
     AppConfig,
@@ -266,6 +266,7 @@ def test_cli_applies_overrides_and_naming(
         frame_window: tuple[int, int] | None = None,
         return_metadata: bool = False,
         color_cfg: ColorConfig | None = None,
+        cache_probe: CacheLoadResult | None = None,
     ) -> list[int]:
         cache_infos.append(cache_info)
         assert frame_window is not None
@@ -459,6 +460,7 @@ def test_cli_disables_json_tail_output(
         frame_window: tuple[int, int] | None = None,
         return_metadata: bool = False,
         color_cfg: ColorConfig | None = None,
+        cache_probe: CacheLoadResult | None = None,
     ) -> list[int]:
         return [12]
 
@@ -547,6 +549,7 @@ def test_label_dedupe_preserves_short_labels(
         frame_window: tuple[int, int] | None = None,
         return_metadata: bool = False,
         color_cfg: ColorConfig | None = None,
+        cache_probe: CacheLoadResult | None = None,
     ) -> list[int]:
         return [42]
 
@@ -617,6 +620,7 @@ def test_cli_reuses_frame_cache(
         frame_window: tuple[int, int] | None = None,
         return_metadata: bool = False,
         color_cfg: ColorConfig | None = None,
+        cache_probe: CacheLoadResult | None = None,
     ) -> list[int]:
         call_state["calls"] += 1
         assert cache_info is not None
@@ -704,6 +708,7 @@ def test_cli_input_override_and_cleanup(
         frame_window: tuple[int, int] | None = None,
         return_metadata: bool = False,
         color_cfg: ColorConfig | None = None,
+        cache_probe: CacheLoadResult | None = None,
     ) -> list[int]:
         return [7]
 
@@ -831,6 +836,7 @@ def test_cli_tmdb_resolution_populates_slowpics(
         frame_window: tuple[int, int] | None = None,
         return_metadata: bool = False,
         color_cfg: ColorConfig | None = None,
+        cache_probe: CacheLoadResult | None = None,
     ) -> list[int]:
         assert frame_window is not None
         return [12, 24]

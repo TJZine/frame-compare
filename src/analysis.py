@@ -14,7 +14,7 @@ import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, TypedDict, cast
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, TypedDict, cast, Literal
 
 from . import vs_core
 from .datatypes import AnalysisConfig, ColorConfig
@@ -63,6 +63,15 @@ class CachedMetrics:
     selection_hash: Optional[str]
     selection_categories: Optional[Dict[int, str]]
     selection_details: Optional[Dict[int, "SelectionDetail"]]
+
+
+@dataclass(frozen=True)
+class CacheLoadResult:
+    """Outcome of probing previously persisted frame metrics for reuse."""
+
+    metrics: Optional[CachedMetrics]
+    status: Literal["missing", "reused", "stale", "error"]
+    reason: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -554,53 +563,43 @@ def selection_hash_for_config(cfg: AnalysisConfig) -> str:
     return _selection_fingerprint(cfg)
 
 
-def _load_cached_metrics(
-    info: FrameMetricsCacheInfo, cfg: AnalysisConfig
-) -> Optional[CachedMetrics]:
-    """
-    Load previously computed metrics when cache metadata still matches.
+def probe_cached_metrics(info: FrameMetricsCacheInfo, cfg: AnalysisConfig) -> CacheLoadResult:
+    """Validate and, when possible, load cached frame metrics for reuse."""
 
-    Parameters:
-        info (FrameMetricsCacheInfo): Cache metadata describing the expected file and clip characteristics.
-        cfg (AnalysisConfig): Current analysis configuration whose fingerprint must match the cached payload.
-
-    Returns:
-        Optional[CachedMetrics]: Cached metrics if the persisted payload is valid; otherwise ``None``.
-    """
     path = info.path
     try:
         raw = path.read_text(encoding="utf-8")
     except FileNotFoundError:
-        return None
-    except OSError:
-        return None
+        return CacheLoadResult(metrics=None, status="missing", reason="not_found")
+    except OSError as exc:
+        return CacheLoadResult(metrics=None, status="error", reason=f"read_error:{exc.errno}")
 
     try:
         data_raw = json.loads(raw)
     except json.JSONDecodeError:
-        return None
+        return CacheLoadResult(metrics=None, status="error", reason="invalid_json")
 
     data = _coerce_str_dict(data_raw)
     if data is None:
-        return None
+        return CacheLoadResult(metrics=None, status="error", reason="invalid_payload")
 
     if data.get("version") != 1:
-        return None
+        return CacheLoadResult(metrics=None, status="stale", reason="version_mismatch")
     if data.get("config_hash") != _config_fingerprint(cfg):
-        return None
+        return CacheLoadResult(metrics=None, status="stale", reason="config_mismatch")
     if data.get("files") != list(info.files):
-        return None
+        return CacheLoadResult(metrics=None, status="stale", reason="inputs_changed")
     if data.get("analyzed_file") != info.analyzed_file:
-        return None
+        return CacheLoadResult(metrics=None, status="stale", reason="analyzed_mismatch")
 
     cached_group = str(data.get("release_group") or "").lower()
     if cached_group != (info.release_group or "").lower():
-        return None
+        return CacheLoadResult(metrics=None, status="stale", reason="release_group_mismatch")
 
     if data.get("trim_start") != info.trim_start:
-        return None
+        return CacheLoadResult(metrics=None, status="stale", reason="trim_start_mismatch")
     if data.get("trim_end") != info.trim_end:
-        return None
+        return CacheLoadResult(metrics=None, status="stale", reason="trim_end_mismatch")
 
     fps_obj = data.get("fps")
     fps_values: List[int] = []
@@ -608,18 +607,18 @@ def _load_cached_metrics(
         try:
             fps_values = [int(part) for part in fps_obj]
         except (TypeError, ValueError):
-            return None
+            return CacheLoadResult(metrics=None, status="stale", reason="fps_invalid")
     if fps_values != [info.fps_num, info.fps_den]:
-        return None
+        return CacheLoadResult(metrics=None, status="stale", reason="fps_mismatch")
 
     try:
         brightness = _coerce_metric_series(data.get("brightness"))
         motion = _coerce_metric_series(data.get("motion"))
     except (TypeError, ValueError):
-        return None
+        return CacheLoadResult(metrics=None, status="error", reason="metric_type_error")
 
     if not brightness:
-        return None
+        return CacheLoadResult(metrics=None, status="stale", reason="empty_metrics")
 
     selection = data.get("selection") or {}
     selection_frames: Optional[List[int]] = None
@@ -685,14 +684,35 @@ def _load_cached_metrics(
             if parsed_ann:
                 selection_details = parsed_ann
 
-    return CachedMetrics(
-        brightness,
-        motion,
-        selection_frames,
-        selection_hash,
-        selection_categories,
-        selection_details,
+    return CacheLoadResult(
+        metrics=CachedMetrics(
+            brightness,
+            motion,
+            selection_frames,
+            selection_hash,
+            selection_categories,
+            selection_details,
+        ),
+        status="reused",
     )
+
+
+def _load_cached_metrics(
+    info: FrameMetricsCacheInfo, cfg: AnalysisConfig
+) -> Optional[CachedMetrics]:
+    """
+    Load previously computed metrics when cache metadata still matches.
+
+    Parameters:
+        info (FrameMetricsCacheInfo): Cache metadata describing the expected file and clip characteristics.
+        cfg (AnalysisConfig): Current analysis configuration whose fingerprint must match the cached payload.
+
+    Returns:
+        Optional[CachedMetrics]: Cached metrics if the persisted payload is valid; otherwise ``None``.
+    """
+
+    result = probe_cached_metrics(info, cfg)
+    return result.metrics if result.status == "reused" else None
 
 
 def _selection_sidecar_path(info: FrameMetricsCacheInfo) -> Path:
@@ -1531,8 +1551,27 @@ def select_frames(
     frame_window: tuple[int, int] | None = None,
     return_metadata: bool = False,
     color_cfg: Optional[ColorConfig] = None,
+    cache_probe: CacheLoadResult | None = None,
 ) -> List[int] | Tuple[List[int], Dict[int, str], Dict[int, SelectionDetail]]:
-    """Select frame indices for comparison using quantiles and motion heuristics."""
+    """Select frame indices for comparison using quantiles and motion heuristics.
+
+    Parameters:
+        clip: VapourSynth clip or compatible object providing frame accessors.
+        cfg (AnalysisConfig): Analysis options controlling quantiles, step size, and filtering.
+        files (List[str]): Ordered clip filenames participating in the run.
+        file_under_analysis (str): Name of the clip used for analysis heuristics.
+        cache_info (FrameMetricsCacheInfo | None): Resolved cache metadata for reuse, if available.
+        progress (Callable[[int], None] | None): Optional callback invoked as metric samples are gathered.
+        frame_window (tuple[int, int] | None): Optional inclusive/exclusive frame bounds to restrict sampling.
+        return_metadata (bool): When ``True`` return frame categories and selection details alongside frames.
+        color_cfg (ColorConfig | None): Color configuration required when SDR analysis must tonemap HDR sources.
+        cache_probe (CacheLoadResult | None): Optional preloaded cache probe to avoid re-reading disk state when
+            the caller already validated cache reuse.
+
+    Returns:
+        Either a list of selected frames or a tuple containing frames, category map, and selection details when
+        ``return_metadata`` is truthy.
+    """
 
     num_frames = int(getattr(clip, "num_frames", 0))
     if num_frames <= 0:
@@ -1688,7 +1727,14 @@ def select_frames(
                 return frames_sorted, label_map, selection_details
             return frames_sorted
 
-    cached_metrics = _load_cached_metrics(cache_info, cfg) if cache_info is not None else None
+    cache_probe_local = cache_probe
+    if cache_probe_local is None and cache_info is not None:
+        cache_probe_local = probe_cached_metrics(cache_info, cfg)
+    cached_metrics = (
+        cache_probe_local.metrics
+        if cache_probe_local is not None and cache_probe_local.status == "reused"
+        else None
+    )
 
     cached_selection: Optional[List[int]] = None
     cached_categories: Optional[Dict[int, str]] = None

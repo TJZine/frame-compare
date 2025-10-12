@@ -39,8 +39,10 @@ from src.analysis import (
     FrameMetricsCacheInfo,
     SelectionDetail,
     SelectionWindowSpec,
+    CacheLoadResult,
     compute_selection_window,
     export_selection_metadata,
+    probe_cached_metrics,
     select_frames,
     selection_details_to_json,
     selection_hash_for_config,
@@ -208,6 +210,7 @@ class RunResult:
         files (List[Path]): Input media files included in the run.
         frames (List[int]): Frame numbers selected for screenshot generation.
         out_dir (Path): Output directory containing generated assets.
+        root (Path): Resolved input root directory used for all generated artefacts.
         config (AppConfig): Effective application configuration.
         image_paths (List[str]): Paths to the generated screenshots.
         slowpics_url (Optional[str]): URL of the uploaded Slowpics comparison, if created.
@@ -216,6 +219,7 @@ class RunResult:
     files: List[Path]
     frames: List[int]
     out_dir: Path
+    root: Path
     config: AppConfig
     image_paths: List[str]
     slowpics_url: Optional[str] = None
@@ -486,6 +490,52 @@ class CLIAppError(RuntimeError):
         super().__init__(message)
         self.code = code
         self.rich_message = rich_message or message
+
+
+def _resolve_workspace_subdir(root: Path, relative: str, *, purpose: str) -> Path:
+    """Return a normalised path under *root* for user-managed directories."""
+
+    try:
+        root_resolved = root.resolve()
+    except OSError as exc:  # pragma: no cover - unexpected filesystem failure
+        raise CLIAppError(
+            f"Unable to resolve workspace root '{root}': {exc}",
+            rich_message=f"[red]Unable to resolve workspace root:[/red] {exc}",
+        ) from exc
+
+    candidate = Path(str(relative))
+    if candidate.is_absolute():
+        message = (
+            f"Configured {purpose} must be relative to the input directory, got '{relative}'"
+        )
+        raise CLIAppError(message, rich_message=f"[red]{message}[/red]")
+
+    resolved = (root_resolved / candidate).resolve()
+    try:
+        resolved.relative_to(root_resolved)
+    except ValueError as exc:
+        message = (
+            f"Configured {purpose} escapes the input directory: '{relative}' -> {resolved}"
+        )
+        raise CLIAppError(message, rich_message=f"[red]{message}[/red]") from exc
+
+    return resolved
+
+
+def _path_is_within_root(root: Path, candidate: Path) -> bool:
+    """Return True when *candidate* resides under *root* after resolution."""
+
+    try:
+        root_resolved = root.resolve()
+        candidate_resolved = candidate.resolve()
+    except OSError:  # pragma: no cover - unexpected filesystem failure
+        return False
+
+    try:
+        candidate_resolved.relative_to(root_resolved)
+    except ValueError:
+        return False
+    return True
 
 
 def _ensure_config_present(config_location: Path) -> Path:
@@ -2047,7 +2097,7 @@ def _confirm_alignment_with_screenshots(
         return
 
     timestamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-    base_dir = Path(cfg.screenshots.directory_name)
+    base_dir = _resolve_workspace_subdir(root, cfg.screenshots.directory_name, purpose="screenshots.directory_name")
     metadata = summary.reference_plan.metadata
     name_candidates = [
         metadata.get("label"),
@@ -2060,7 +2110,7 @@ def _confirm_alignment_with_screenshots(
     base_name = next((str(value).strip() for value in name_candidates if value and str(value).strip()), "clip")
     safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", base_name).strip("._-") or "clip"
     preview_folder = f"{safe_name}-{timestamp}"
-    preview_dir = (root / base_dir / "audio_alignment" / preview_folder).resolve()
+    preview_dir = (base_dir / "audio_alignment" / preview_folder).resolve()
 
     initial_frames = _pick_preview_frames(reference_clip, 2, cfg.audio_alignment.random_seed)
 
@@ -2172,7 +2222,7 @@ def run_cli(
         no_color (bool): Disable colored output when True.
     
     Returns:
-        RunResult: Aggregated result including processed files, selected frames, output directory, configuration used, generated image paths, optional slow.pics URL, and a JSON-tail dictionary with detailed metadata and diagnostics.
+        RunResult: Aggregated result including processed files, selected frames, output directory, resolved root directory, configuration used, generated image paths, optional slow.pics URL, and a JSON-tail dictionary with detailed metadata and diagnostics.
     
     Raises:
         CLIAppError: For configuration loading failures, missing/invalid input directory, clip initialization failures, frame selection or screenshot generation errors, slow.pics upload failures, or other user-facing errors encountered during the run.
@@ -2778,17 +2828,40 @@ def run_cli(
     cache_filename = cfg.analysis.frame_data_filename
     cache_status = "disabled"
     cache_reason = None
+    cache_probe: CacheLoadResult | None = None
+
     if not cfg.analysis.save_frames_data:
         cache_status = "disabled"
         cache_reason = "save_frames_data=false"
     elif cache_info is None:
         cache_status = "disabled"
         cache_reason = "no_cache_info"
-    elif cache_info.path.exists():
-        cache_status = "reused"
     else:
-        cache_status = "recomputed"
-        cache_reason = "missing"
+        cache_path = cache_info.path
+        if cache_path.exists():
+            reporter.line(
+                f"[cyan]Loading cached frame metrics from {escape(cache_path.name)}…[/]"
+            )
+            cache_probe = probe_cached_metrics(cache_info, cfg.analysis)
+            if cache_probe.status == "reused":
+                cache_status = "reused"
+                reporter.line(
+                    f"[green]Reused cached frame metrics from {escape(cache_path.name)}[/]"
+                )
+            else:
+                cache_status = "recomputed"
+                reason_code = cache_probe.reason or cache_probe.status
+                cache_reason = reason_code
+                human_reason = reason_code.replace("_", " ")
+                if cache_probe.status in {"stale", "error"}:
+                    reporter.line(
+                        f"[yellow]Frame metrics cache {cache_probe.status} "
+                        f"({escape(human_reason)}); recomputing…[/]"
+                    )
+        else:
+            cache_status = "recomputed"
+            cache_reason = "missing"
+            cache_probe = CacheLoadResult(metrics=None, status="missing", reason="missing")
 
     json_tail["cache"] = {
         "file": cache_filename,
@@ -2808,8 +2881,8 @@ def run_cli(
     analyze_label = escape(analyze_label_raw.strip())
     analyze_label_colored = f"Analyzing video: [bright_cyan]{analyze_label}[/]"
 
-    cache_exists = cache_info is not None and cache_info.path.exists()
-    if cache_exists:
+    cache_ready = cache_probe is not None and cache_probe.status == "reused"
+    if cache_ready and cache_info is not None:
         reporter.verbose_line(f"Using cached frame metrics: {cache_info.path.name}")
     elif cache_status == "recomputed" and cache_info is not None:
         reporter.verbose_line(f"Frame metrics cache will be refreshed: {cache_info.path.name}")
@@ -2926,6 +2999,7 @@ def run_cli(
                 frame_window=frame_window,
                 return_metadata=True,
                 color_cfg=cfg.color,
+                cache_probe=cache_probe,
             )
         except TypeError as exc:
             if "return_metadata" not in str(exc):
@@ -2939,6 +3013,7 @@ def run_cli(
                 progress=progress_callback,
                 frame_window=frame_window,
                 color_cfg=cfg.color,
+                cache_probe=cache_probe,
             )
         if isinstance(result, tuple):
             if len(result) == 3:
@@ -2954,7 +3029,7 @@ def run_cli(
     selection_details: Dict[int, SelectionDetail] = {}
 
     try:
-        if sample_count > 0 and not cache_exists:
+        if sample_count > 0 and not cache_ready:
             start_time = time.perf_counter()
             samples_done = 0
             reporter.update_progress_state(
@@ -3096,7 +3171,11 @@ def run_cli(
         )
     reporter.update_values(layout_data)
 
-    out_dir = (root / cfg.screenshots.directory_name).resolve()
+    out_dir = _resolve_workspace_subdir(
+        root,
+        cfg.screenshots.directory_name,
+        purpose="screenshots.directory_name",
+    )
     total_screens = len(frames) * len(plans)
 
     writer_name = "ffmpeg" if cfg.screenshots.use_ffmpeg else "vs"
@@ -3459,6 +3538,7 @@ def run_cli(
         files=[plan.path for plan in plans],
         frames=list(frames),
         out_dir=out_dir,
+        root=root,
         config=cfg,
         image_paths=list(image_paths),
         slowpics_url=slowpics_url,
@@ -3641,13 +3721,21 @@ def main(
             print("Shortcut: (disabled)")
 
         if cfg.slowpics.delete_screen_dir_after_upload:
-            try:
-                shutil.rmtree(out_dir)
-                deleted_dir = True
-                print("Cleaned up screenshots after upload")
-                builtins.print(f"  {out_dir}")
-            except OSError as exc:
-                print(f"[yellow]Warning:[/yellow] Failed to delete screenshot directory: {exc}")
+            if not _path_is_within_root(result.root, out_dir):
+                print(
+                    "[yellow]Warning:[/yellow] Skipping screenshot cleanup because the output"
+                    f" directory {out_dir} is outside the input root {result.root}"
+                )
+            else:
+                try:
+                    shutil.rmtree(out_dir)
+                    deleted_dir = True
+                    print("Cleaned up screenshots after upload")
+                    builtins.print(f"  {out_dir}")
+                except OSError as exc:
+                    print(
+                        f"[yellow]Warning:[/yellow] Failed to delete screenshot directory: {exc}"
+                    )
         if slowpics_block is not None:
             slowpics_block["url"] = slowpics_url
             slowpics_block["shortcut_path"] = shortcut_path_str
