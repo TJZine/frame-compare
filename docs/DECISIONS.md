@@ -1,5 +1,6 @@
 # Decisions Log
 
+- *2025-10-15:* Reverted the CLI default config path to the packaged template and required explicit destinations when copying the template so installations no longer attempt to write into site-packages.
 - *2025-10-14:* Adjusted CLI theming to separate hierarchy (muted section badges, yellow subheads) and rewrote the At-a-Glance summary to surface sampling, window, and alignment metrics requested in the usability review.
 - *2025-10-13:* Dropped the unused `types-pytest` dependency from the dev group because the package is unavailable on PyPI and broke `uv run` environment creation on fresh clones. CI keeps installing real `pytest` through the dev group, so workflows and local test runs continue to function normally.
 - *2025-10-12:* Introduced local stubs for click, requests, httpx, and rich plus tighter JSON-tail helpers in tests to eliminate Pyright/Pylance import and indexing errors while keeping diagnostics strict.

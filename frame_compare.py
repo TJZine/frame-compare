@@ -3463,8 +3463,9 @@ def run_cli(
     default=str(DEFAULT_CONFIG_PATH),
     show_default=True,
     help=(
-        "Path to the configuration file (defaults to data/config.toml; seed it "
-        "from the packaged template with src.config_template.copy_default_config)."
+        "Path to the configuration file (defaults to the packaged "
+        "data/config.toml.template; call src.config_template.copy_default_config "
+        "to write a copy elsewhere)."
     ),
 )
 @click.option("--input", "input_dir", default=None, help="Override [paths.input_dir] from config.toml")

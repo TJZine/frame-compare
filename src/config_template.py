@@ -6,14 +6,12 @@ from importlib import resources
 from pathlib import Path
 from typing import Final
 
-from src import config_paths
-
 _TEMPLATE_PACKAGE: Final[str] = "data"
 _TEMPLATE_FILENAME: Final[str] = "config.toml.template"
 
 
 def copy_default_config(
-    destination: str | Path | None = None,
+    destination: str | Path,
     *,
     overwrite: bool = False,
 ) -> Path:
@@ -22,8 +20,8 @@ def copy_default_config(
     Parameters
     ----------
     destination:
-        File path to write. When omitted, the file is written to the same
-        ``data/config.toml`` path that the CLI uses by default.
+        File path to write. This must point to a user-writable location such as a
+        project workspace or configuration directory.
     overwrite:
         Whether to overwrite an existing file. When ``False`` (the default), a
         :class:`FileExistsError` is raised if the destination already exists.
@@ -32,9 +30,17 @@ def copy_default_config(
     -------
     Path
         The path where the configuration template was written.
+
+    Raises
+    ------
+    ValueError
+        If ``destination`` is ``None``.
     """
 
-    target = Path(destination) if destination is not None else config_paths.DEFAULT_CONFIG_PATH
+    if destination is None:
+        raise ValueError("destination must be provided")
+
+    target = Path(destination)
     template = resources.files(_TEMPLATE_PACKAGE).joinpath(_TEMPLATE_FILENAME)
 
     if target.exists() and not overwrite:

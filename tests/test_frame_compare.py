@@ -41,13 +41,13 @@ def test_cli_uses_packaged_config_by_default(runner: CliRunner) -> None:
 
     default_path = frame_compare.DEFAULT_CONFIG_PATH
     assert default_path.parent.name == "data"
-    assert default_path.name == "config.toml"
+    assert default_path.name == "config.toml.template"
 
     config_option = next(
         param for param in frame_compare.main.params if param.name == "config_path"
     )
     assert config_option.default == str(default_path)
-    assert "data/config.toml" in result.output
+    assert "data/config.toml.template" in result.output
 
 
 class DummyProgress:
