@@ -43,9 +43,11 @@ def test_cli_uses_repo_config_by_default(
     module_default = importlib.reload(frame_compare)
 
     try:
-        project_config = Path(module_default.__file__).resolve().with_name("config.toml")
+        module_default_file = module_default.__file__
+        assert module_default_file is not None
+        project_config = Path(module_default_file).resolve().with_name("config.toml")
         template_path = (
-            Path(module_default.__file__).resolve().with_name("data") / "config.toml.template"
+            Path(module_default_file).resolve().with_name("data") / "config.toml.template"
         ).resolve()
 
         assert module_default.DEFAULT_CONFIG_PATH == project_config
@@ -65,6 +67,9 @@ def test_cli_uses_repo_config_by_default(
         override_target = (tmp_path / "config" / "config.toml").resolve()
         monkeypatch.setenv("FRAME_COMPARE_CONFIG", str(override_target))
         module_override = importlib.reload(frame_compare)
+
+        module_override_file = module_override.__file__
+        assert module_override_file is not None
 
         assert module_override.DEFAULT_CONFIG_PATH == override_target
 
@@ -883,7 +888,9 @@ def test_cli_tmdb_resolution_populates_slowpics(
     assert result.config.slowpics.tmdb_category == "MOVIE"
     assert result.config.slowpics.collection_name == "Resolved Title (2023) [MOVIE]"
     assert result.json_tail is not None
-    slowpics_json = _expect_mapping(result.json_tail["slowpics"])
+    slowpics_value = result.json_tail.get("slowpics")
+    assert slowpics_value is not None
+    slowpics_json = _expect_mapping(slowpics_value)
     title_json = _expect_mapping(slowpics_json["title"])
     inputs_json = _expect_mapping(title_json["inputs"])
     assert title_json["final"] == "Resolved Title (2023) [MOVIE]"
@@ -958,7 +965,9 @@ def test_cli_tmdb_resolution_sets_default_collection_name(
     assert result.config.slowpics.tmdb_id == "12345"
     assert result.config.slowpics.tmdb_category == "MOVIE"
     assert result.json_tail is not None
-    slowpics_json = _expect_mapping(result.json_tail["slowpics"])
+    slowpics_value = result.json_tail.get("slowpics")
+    assert slowpics_value is not None
+    slowpics_json = _expect_mapping(slowpics_value)
     title_json = _expect_mapping(slowpics_json["title"])
     inputs_json = _expect_mapping(title_json["inputs"])
     assert title_json["final"].startswith("Resolved Title (2023)")
@@ -1024,7 +1033,9 @@ def test_collection_suffix_appended(
 
     assert result.config.slowpics.collection_name == "Sample Movie (2021) [Hybrid]"
     assert result.json_tail is not None
-    slowpics_json = _expect_mapping(result.json_tail["slowpics"])
+    slowpics_value = result.json_tail.get("slowpics")
+    assert slowpics_value is not None
+    slowpics_json = _expect_mapping(slowpics_value)
     title_json = _expect_mapping(slowpics_json["title"])
     inputs_json = _expect_mapping(title_json["inputs"])
     assert title_json["final"] == "Sample Movie (2021) [Hybrid]"
