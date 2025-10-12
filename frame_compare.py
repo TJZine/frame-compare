@@ -7,6 +7,7 @@ import builtins
 import json
 import logging
 import math
+import os
 import random
 import re
 import shutil
@@ -19,7 +20,7 @@ from dataclasses import dataclass, field
 import datetime as _dt
 from pathlib import Path
 from string import Template
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Final
 
 import click
 from rich import print
@@ -29,6 +30,7 @@ from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn, Ti
 from natsort import os_sorted
 
 from src.config_loader import ConfigError, load_config
+from src.config_template import copy_default_config
 from src.datatypes import AppConfig
 from src import audio_alignment
 from src.utils import parse_filename_metadata
@@ -58,7 +60,25 @@ from src.cli_layout import CliLayoutRenderer, CliLayoutError, load_cli_layout
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_CONFIG_PATH = Path(__file__).resolve().with_name("data") / "config.toml.template"
+CONFIG_ENV_VAR: Final[str] = "FRAME_COMPARE_CONFIG"
+PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parent
+PROJECT_CONFIG_PATH: Final[Path] = (PROJECT_ROOT / "config.toml").resolve()
+PACKAGED_TEMPLATE_PATH: Final[Path] = (PROJECT_ROOT / "data" / "config.toml.template").resolve()
+
+
+def _resolve_default_config_path() -> Path:
+    override = os.environ.get(CONFIG_ENV_VAR)
+    if override:
+        return Path(override).expanduser().resolve()
+    return PROJECT_CONFIG_PATH
+
+
+DEFAULT_CONFIG_PATH: Final[Path] = _resolve_default_config_path()
+
+_DEFAULT_CONFIG_HELP: Final[str] = (
+    f"Path to the configuration file. Defaults to ${CONFIG_ENV_VAR} when set, "
+    f"otherwise {PROJECT_CONFIG_PATH}, seeding it from the bundled template when missing."
+)
 
 SUPPORTED_EXTS = (
     ".mkv",
@@ -466,6 +486,48 @@ class CLIAppError(RuntimeError):
         super().__init__(message)
         self.code = code
         self.rich_message = rich_message or message
+
+
+def _ensure_config_present(config_location: Path) -> Path:
+    """Ensure that the CLI configuration exists at ``config_location``.
+
+    When the requested path matches :data:`DEFAULT_CONFIG_PATH` and the file is missing,
+    the packaged template is copied into place. Any failure to write the default
+    configuration raises :class:`CLIAppError` with a user-friendly message.
+    """
+
+    expanded = config_location.expanduser()
+    try:
+        resolved = expanded if expanded.is_absolute() else expanded.resolve(strict=False)
+    except TypeError:
+        resolved = expanded.resolve()
+
+    if resolved.exists():
+        return resolved
+
+    if str(resolved) != str(DEFAULT_CONFIG_PATH):
+        return resolved
+
+    try:
+        copied_path = copy_default_config(resolved)
+    except FileExistsError:
+        return resolved
+    except PermissionError as exc:
+        message = f"Unable to create default config at {resolved}: {exc}"
+        raise CLIAppError(
+            message,
+            code=2,
+            rich_message=f"[red]Unable to create default config:[/red] {exc}",
+        ) from exc
+    except OSError as exc:
+        message = f"Unable to create default config at {resolved}: {exc}"
+        raise CLIAppError(
+            message,
+            code=2,
+            rich_message=f"[red]Unable to create default config:[/red] {exc}",
+        ) from exc
+
+    return copied_path
 
 
 def _discover_media(root: Path) -> List[Path]:
@@ -2115,7 +2177,7 @@ def run_cli(
     Raises:
         CLIAppError: For configuration loading failures, missing/invalid input directory, clip initialization failures, frame selection or screenshot generation errors, slow.pics upload failures, or other user-facing errors encountered during the run.
     """
-    config_location = Path(config_path).expanduser()
+    config_location = _ensure_config_present(Path(config_path))
 
     try:
         cfg: AppConfig = load_config(str(config_location))
@@ -3461,10 +3523,7 @@ def run_cli(
     "config_path",
     default=str(DEFAULT_CONFIG_PATH),
     show_default=True,
-    help=(
-        "Path to the configuration file (defaults to the packaged "
-        "data/config.toml.template; rename or copy it to .toml when customising)."
-    ),
+    help=_DEFAULT_CONFIG_HELP,
 )
 @click.option("--input", "input_dir", default=None, help="Override [paths.input_dir] from config.toml")
 @click.option(

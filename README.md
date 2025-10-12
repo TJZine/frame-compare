@@ -36,7 +36,7 @@ uv pip install vapoursynth  # or `uv add vapoursynth` to persist it to your proj
 uv run python frame_compare.py --input tests/fixtures/media/comparison_videos
 ```
 
-The CLI ships with a configuration template stored at `data/config.toml.template`. Copy or rename it to a `.toml` file when you want to edit the defaults, and pass `--config` to point at a custom file when needed; you can seed one with `python -c "from src.config_template import copy_default_config; copy_default_config('~/frame_compare.toml')"`.
+The CLI ships with a configuration template stored at `data/config.toml.template`. Frame Compare loads that packaged template by default so the CLI works out of the box. When you want to edit the defaults, copy the template to a writable location—`python -c "from src.config_template import copy_default_config; copy_default_config('~/frame_compare.toml')"` is a quick way—and point the CLI at it with `--config` or by setting `$FRAME_COMPARE_CONFIG`.
 
 Install VapourSynth manually after `uv sync` so the renderer is available:
 
@@ -68,6 +68,16 @@ Expected outputs: PNGs under `screens/…`, cached metrics in
 slow.pics shortcut file.
 
 ## Configuration essentials
+
+Frame Compare looks for its configuration at the path specified by the
+``$FRAME_COMPARE_CONFIG`` environment variable. When the variable is unset, the
+CLI uses ``config.toml`` alongside ``frame_compare.py``. If that file does not
+exist, the CLI seeds it from the bundled ``data/config.toml.template`` before
+loading so a fresh checkout is immediately runnable. To customise the
+settings, edit ``config.toml`` directly or copy the template to another
+writable location with ``python -c 'from src.config_template import
+copy_default_config; copy_default_config("~/frame-compare.toml")'`` and either
+set ``$FRAME_COMPARE_CONFIG`` or pass ``--config`` when invoking the CLI.
 
 The most common toggles are below; see the
 [full reference](docs/README_REFERENCE.md) for every option.
