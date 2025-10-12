@@ -26,10 +26,13 @@ Requirements:
 - FFmpeg available on your `PATH`
 - Optional VapourSynth ≥72 for the primary renderer
 
+Repository fixtures live under `tests/fixtures/media/`; they provide
+tiny MKV stubs suitable for smoke tests.
+
 ```bash
 uv sync
-cp config.toml.template config.toml
-uv run python frame_compare.py --config config.toml --input comparison_videos
+uv run python -c "from src.config_template import copy_default_config; copy_default_config('config.toml')"
+uv run python frame_compare.py --config config.toml --input tests/fixtures/media/comparison_videos
 ```
 
 Fallback when `uv` is unavailable:
@@ -39,15 +42,16 @@ python3.13 -m venv .venv
 source .venv/bin/activate
 pip install -U pip wheel
 pip install -e .
-python frame_compare.py --config config.toml --input comparison_videos
+python -c "from src.config_template import copy_default_config; copy_default_config('config.toml')"
+python frame_compare.py --config config.toml --input tests/fixtures/media/comparison_videos
 ```
 
 ## Minimal example
 
 ```bash
 uv sync
-cp config.toml.template config.toml
-uv run python frame_compare.py --config config.toml --input comparison_videos
+uv run python -c "from src.config_template import copy_default_config; copy_default_config('config.toml')"
+uv run python frame_compare.py --config config.toml --input tests/fixtures/media/comparison_videos
 ```
 
 Expected outputs: PNGs under `screens/…`, cached metrics in

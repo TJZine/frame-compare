@@ -3,13 +3,12 @@ from pathlib import Path
 import pytest
 
 from src.config_loader import ConfigError, load_config
+from src.config_template import copy_default_config
 
 
 def _copy_default_config(tmp_path: Path) -> Path:
-    cfg_src = Path(__file__).resolve().parents[1] / "config.toml.template"
     cfg_dst = tmp_path / "config.toml.template"
-    cfg_dst.write_text(cfg_src.read_text(encoding="utf-8"), encoding="utf-8")
-    return cfg_dst
+    return copy_default_config(cfg_dst)
 
 
 def test_load_defaults(tmp_path: Path) -> None:
