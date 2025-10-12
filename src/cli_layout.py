@@ -1334,36 +1334,6 @@ class CliLayoutRenderer:
             return f"{value:.{decimals}f}"
         return str(value)
 
-    def _apply_filter(self, value: Any, filter_name: str) -> Any:
-        """
-        Apply a named simple display filter to a value.
-        
-        Parameters:
-            value (Any): The input value to transform.
-            filter_name (str): One of the supported filters:
-                - "none": returns the original value unless it is None or empty string, in which case returns "none".
-                - "unchanged": returns "unchanged" when the value is None or empty string, otherwise returns the value.
-                - "tallest": returns "tallest" when the value is falsy, otherwise returns the value.
-                - "ellipsis": returns a path-truncated string produced by apply_path_ellipsis(str(value)).
-                Any other filter_name returns the value unchanged.
-        
-        Returns:
-            Any: The transformed value according to the selected filter.
-        """
-        if filter_name == "bool":
-            return "true" if bool(value) else "false"
-        if filter_name == "wrap_indent2":
-            text = "" if value is None else str(value)
-            if not text:
-                return ""
-            width = max(10, self._console_width() - 2)
-            return textwrap.fill(
-                text,
-                width=width,
-                subsequent_indent="  ",
-                break_long_words=False,
-                break_on_hyphens=False,
-            )
     def _wrap_with_indent(self, value: Any, padding: int) -> str:
         """
         Wrap text to console width minus padding, with 2-space continuation indent.
@@ -1390,7 +1360,21 @@ class CliLayoutRenderer:
     def _apply_filter(self, value: Any, filter_name: str) -> Any:
         """
         Apply a named simple display filter to a value.
-        ...
+
+        Parameters:
+            value (Any): The input value to transform.
+            filter_name (str): One of the supported filters:
+                - "bool": coerces the value to a ``true``/``false`` string.
+                - "wrap_indent2": wraps long text to the console width with a two-space hanging indent.
+                - "summary_wrap": wraps long text with additional padding intended for summary lines.
+                - "none": returns the original value unless it is ``None`` or an empty string, in which case returns ``"none"``.
+                - "unchanged": returns ``"unchanged"`` when the value is ``None`` or an empty string, otherwise returns the value.
+                - "tallest": returns ``"tallest"`` when the value is falsy, otherwise returns the value.
+                - "ellipsis": returns a path-truncated string produced by ``apply_path_ellipsis(str(value))``.
+                Any other ``filter_name`` returns the value unchanged.
+
+        Returns:
+            Any: The transformed value according to the selected filter.
         """
         if filter_name == "bool":
             return "true" if bool(value) else "false"
@@ -1398,7 +1382,6 @@ class CliLayoutRenderer:
             return self._wrap_with_indent(value, 2)
         if filter_name == "summary_wrap":
             return self._wrap_with_indent(value, 4)
-        # ... other filters unchanged ...
         if filter_name == "none":
             return value if value not in (None, "") else "none"
         if filter_name == "unchanged":
