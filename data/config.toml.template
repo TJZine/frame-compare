@@ -59,6 +59,8 @@ auto_letterbox_crop = false
 pad_to_canvas = "off"
 letterbox_px_tolerance = 8
 center_pad = true
+# Abort FFmpeg renders that exceed this many seconds per frame (0 disables timeout).
+ffmpeg_timeout_seconds = 120.0
 
 [color]
 # HDR → SDR pipeline controls. Presets: reference (bt.2390/100nits/dpd=1),

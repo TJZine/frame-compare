@@ -3373,6 +3373,7 @@ def run_cli(
         "center_pad": bool(cfg.screenshots.center_pad),
         "letterbox_px_tolerance": int(cfg.screenshots.letterbox_px_tolerance),
         "compression": int(cfg.screenshots.compression_level),
+        "ffmpeg_timeout_seconds": float(cfg.screenshots.ffmpeg_timeout_seconds),
     }
     layout_data["render"] = json_tail["render"]
     effective_tonemap = vs_core.resolve_effective_tonemap(cfg.color)

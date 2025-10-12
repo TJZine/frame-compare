@@ -17,6 +17,7 @@ def test_load_defaults(tmp_path: Path) -> None:
     assert app.analysis.frame_count_dark == 20
     assert app.analysis.downscale_height == 720
     assert app.screenshots.directory_name == "screens"
+    assert app.screenshots.ffmpeg_timeout_seconds == 120.0
     assert app.naming.always_full_filename is True
     assert app.runtime.ram_limit_mb == 4000
     assert isinstance(app.runtime.vapoursynth_python_paths, list)
@@ -52,6 +53,7 @@ def test_load_defaults(tmp_path: Path) -> None:
         ("[color]\nverify_step_seconds = 0\n", "color.verify_step_seconds"),
         ("[color]\ntarget_nits = -10\n", "color.target_nits"),
         ("[source]\npreferred = \"bogus\"\n", "source.preferred"),
+        ("[screenshots]\nffmpeg_timeout_seconds = 0\n", "screenshots.ffmpeg_timeout_seconds"),
         ("[tmdb]\nyear_tolerance = -1\n", "tmdb.year_tolerance"),
         ("[tmdb]\ncache_ttl_seconds = -5\n", "tmdb.cache_ttl_seconds"),
         ("[tmdb]\ncategory_preference = \"documentary\"\n", "tmdb.category_preference"),
@@ -79,6 +81,7 @@ min_window_seconds = 2.5
 
 [screenshots]
 compression_level = 2
+ffmpeg_timeout_seconds = 45.5
 
 [slowpics]
 auto_upload = "1"
@@ -120,6 +123,7 @@ preferred = "ffms2"
     assert app.analysis.ignore_trail_seconds == 1.25
     assert app.analysis.min_window_seconds == 2.5
     assert app.screenshots.compression_level == 2
+    assert app.screenshots.ffmpeg_timeout_seconds == 45.5
     assert app.slowpics.auto_upload is True
     assert app.slowpics.remove_after_days == 14
     assert app.naming.always_full_filename is False

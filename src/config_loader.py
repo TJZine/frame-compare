@@ -201,6 +201,13 @@ def load_config(path: str) -> AppConfig:
         raise ConfigError("screenshots.letterbox_px_tolerance must be an integer")
     if app.screenshots.letterbox_px_tolerance < 0:
         raise ConfigError("screenshots.letterbox_px_tolerance must be >= 0")
+    try:
+        timeout_value = float(app.screenshots.ffmpeg_timeout_seconds)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError("screenshots.ffmpeg_timeout_seconds must be a number") from exc
+    if timeout_value <= 0:
+        raise ConfigError("screenshots.ffmpeg_timeout_seconds must be > 0")
+    app.screenshots.ffmpeg_timeout_seconds = timeout_value
     pad_mode = str(app.screenshots.pad_to_canvas).strip().lower()
     if pad_mode not in {"off", "on", "auto"}:
         raise ConfigError("screenshots.pad_to_canvas must be 'off', 'on', or 'auto'")
