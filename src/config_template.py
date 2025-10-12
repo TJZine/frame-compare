@@ -6,7 +6,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Final
 
-_TEMPLATE_PACKAGE: Final[str] = "src.frame_compare.data"
+_TEMPLATE_PACKAGE: Final[str] = "data"
 _TEMPLATE_FILENAME: Final[str] = "config.toml.template"
 
 

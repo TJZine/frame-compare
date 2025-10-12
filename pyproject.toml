@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "frame-compare"
 version = "0.0.1"
@@ -32,6 +36,17 @@ dev = [
     "ruff",
     "black",
 ]
+
+[tool.setuptools]
+packages = ["frame_compare", "data"]
+include-package-data = true
+
+[tool.setuptools.package-dir]
+frame_compare = "src/frame_compare"
+data = "data"
+
+[tool.setuptools.package-data]
+data = ["config.toml.template"]
 
 [tool.black]
 line-length = 100
