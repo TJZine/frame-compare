@@ -1,5 +1,6 @@
 import json
 import types
+from dataclasses import replace
 from pathlib import Path
 from collections.abc import Callable, Sequence
 from typing import Any, Dict, cast
@@ -13,8 +14,10 @@ from src.analysis import (
     _quantile,
     compute_selection_window,
     dedupe,
+    probe_cached_metrics,
     selection_details_to_json,
     select_frames,
+    selection_hash_for_config,
     write_selection_cache_file,
 )
 from src.datatypes import AnalysisConfig, ColorConfig
@@ -83,6 +86,55 @@ def _select_frames_with_metadata(
     )
     assert isinstance(result, tuple) and len(result) == 3
     return result
+
+
+def _seed_cached_metrics(tmp_path: Path) -> tuple[FrameMetricsCacheInfo, AnalysisConfig, list[int]]:
+    cache_path = tmp_path / "metrics.json"
+    cfg = AnalysisConfig(
+        frame_count_dark=1,
+        frame_count_bright=1,
+        frame_count_motion=1,
+        random_frames=0,
+        user_frames=[],
+        downscale_height=0,
+        step=1,
+        analyze_in_sdr=False,
+    )
+    cache_info = FrameMetricsCacheInfo(
+        path=cache_path,
+        files=["sample.mkv"],
+        analyzed_file="sample.mkv",
+        release_group="",
+        trim_start=0,
+        trim_end=None,
+        fps_num=24,
+        fps_den=1,
+    )
+    brightness = [(idx, float(idx) / 10.0) for idx in range(10)]
+    motion = [(idx, float(idx) / 5.0) for idx in range(10)]
+    selection_frames = [0, 5, 9]
+    selection_hash = selection_hash_for_config(cfg)
+    selection_details = {
+        frame: SelectionDetail(
+            frame_index=frame,
+            label="Auto",
+            score=None,
+            source="unit",
+            timecode=None,
+        )
+        for frame in selection_frames
+    }
+    analysis_mod._save_cached_metrics(
+        cache_info,
+        cfg,
+        brightness,
+        motion,
+        selection_hash=selection_hash,
+        selection_frames=selection_frames,
+        selection_categories={frame: "Auto" for frame in selection_frames},
+        selection_details=selection_details,
+    )
+    return cache_info, cfg, selection_frames
 
 
 
@@ -394,6 +446,47 @@ def test_select_frames_uses_cache(
     frames_second = _select_frames_list(clip, cfg, ["a.mkv"], "a.mkv", cache_info=cache_info, color_cfg=color_cfg)
     assert calls["count"] == 0
     assert frames_first == frames_second
+
+
+def test_probe_cached_metrics_detects_config_change(tmp_path: Path) -> None:
+    cache_info, cfg, selection_frames = _seed_cached_metrics(tmp_path)
+
+    reused = probe_cached_metrics(cache_info, cfg)
+    assert reused.status == "reused"
+    assert reused.metrics is not None
+    assert reused.metrics.selection_frames == selection_frames
+
+    stale = probe_cached_metrics(cache_info, replace(cfg, frame_count_dark=cfg.frame_count_dark + 1))
+    assert stale.status == "stale"
+    assert stale.reason == "config_mismatch"
+
+
+def test_select_frames_uses_cache_probe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cache_info, cfg, selection_frames = _seed_cached_metrics(tmp_path)
+    cache_probe = probe_cached_metrics(cache_info, cfg)
+    assert cache_probe.status == "reused"
+
+    def fail_collect(*args: object, **kwargs: object) -> None:
+        raise AssertionError("metrics collection should not run when cache is reused")
+
+    monkeypatch.setattr(analysis_mod, "_collect_metrics_vapoursynth", fail_collect)
+
+    clip = FakeClip(num_frames=60, brightness=[0.1] * 60, motion=[0.2] * 60)
+    result = select_frames(
+        clip,
+        cfg,
+        list(cache_info.files),
+        cache_info.analyzed_file,
+        cache_info=cache_info,
+        return_metadata=True,
+        color_cfg=ColorConfig(),
+        cache_probe=cache_probe,
+    )
+    assert isinstance(result, tuple) and len(result) == 3
+    frames, categories, details = result
+    assert frames == selection_frames
+    assert categories == {frame: "Auto" for frame in selection_frames}
+    assert set(details) == set(selection_frames)
 
 
 def test_motion_quarter_gap(monkeypatch: pytest.MonkeyPatch) -> None:

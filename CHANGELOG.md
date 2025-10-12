@@ -2,6 +2,8 @@
 
 All notable user-visible updates will be documented in this file in reverse chronological order.
 
+- *2025-10-16:* Documented deep-review finding: screenshot cleanup must enforce path containment before deleting outputs; remediation planned.
+
 - *2025-10-15:* Relocated bundled comparison fixtures to the repository-root `comparison_videos/` directory, updated CLI docs to match the default `paths.input_dir`, and noted the new resolution fallbacks.
 - *2025-10-14:* Clarified CLI hierarchy by softening section badge colors, brightening subhead prefixes, expanding the At-a-Glance box with alignment, sampling, and canvas metrics for quicker triage, and realigning the Summary section with key/value formatting to remove ragged rows.
 - *2025-10-13:* Removed the `types-pytest` dev dependency so `uv run` can resolve environments on fresh clones without relying on a non-existent stub package while keeping the actual `pytest` runtime dependency in the dev group for CI and local tests.
