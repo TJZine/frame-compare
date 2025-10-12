@@ -90,7 +90,7 @@ Repository fixtures mirroring the default `paths.input_dir` live under
 <!-- markdownlint-disable MD013 -->
 | Flag | Description | Default |
 | --- | --- | --- |
-| `--config PATH` | Use a specific configuration file. | `config.toml` |
+| `--config PATH` | Use a specific configuration file. | `data/config.toml.template` |
 | `--input PATH` | Override `[paths.input_dir]` for this run. | `None` |
 | `--quiet` | Show minimal console output. | `false` |
 | `--verbose` | Emit additional diagnostics. | `false` |

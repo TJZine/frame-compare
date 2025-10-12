@@ -34,6 +34,23 @@ def runner() -> CliRunner:
     return CliRunner()
 
 
+def test_cli_uses_packaged_config_by_default(runner: CliRunner) -> None:
+    result = runner.invoke(frame_compare.main, ["--help"])
+
+    assert result.exit_code == 0, result.output
+
+    default_path = frame_compare.DEFAULT_CONFIG_PATH
+    assert default_path.parent.name == "data"
+    assert default_path.name == "config.toml.template"
+    assert default_path.exists()
+
+    config_option = next(
+        param for param in frame_compare.main.params if param.name == "config_path"
+    )
+    assert config_option.default == str(default_path)
+    assert "data/config.toml.template" in result.output
+
+
 class DummyProgress:
     def __init__(self, *_, **__):
         pass
