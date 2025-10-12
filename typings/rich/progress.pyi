@@ -1,11 +1,12 @@
-from typing import Any, Protocol
+from __future__ import annotations
 
-
-from typing import Any, Iterable, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 
 class Task:
     id: int
+    description: str
     completed: float
     total: float | None
     percentage: float | None
@@ -23,13 +24,45 @@ class BarColumn(ProgressColumn):
     def __init__(self, *args: Any, **kwargs: Any) -> None: ...
 
 
+class TimeElapsedColumn(ProgressColumn):
+    def __init__(self, *args: Any, **kwargs: Any) -> None: ...
+
+
+class TimeRemainingColumn(ProgressColumn):
+    def __init__(self, *args: Any, **kwargs: Any) -> None: ...
+
+
 class Progress:
     columns: Sequence[ProgressColumn]
+    tasks: dict[int, Task]
 
     def __init__(self, *columns: ProgressColumn, **kwargs: Any) -> None: ...
-    def add_task(self, description: str, *args: Any, **kwargs: Any) -> Task: ...
-    def update(self, task_id: int, advance: float | None = ..., description: str | None = ...) -> None: ...
+    def add_task(
+        self,
+        description: str,
+        *,
+        total: float | None = ...,
+        completed: float = ...,
+        start: bool = ...,
+        **kwargs: Any,
+    ) -> int: ...
+    def update(
+        self,
+        task_id: int,
+        *,
+        completed: float | None = ...,
+        advance: float | None = ...,
+        total: float | None = ...,
+        description: str | None = ...,
+        **kwargs: Any,
+    ) -> None: ...
+    def advance(self, task_id: int, advance: float = ...) -> None: ...
     def refresh(self) -> None: ...
     def stop(self) -> None: ...
     def __enter__(self) -> "Progress": ...
-    def __exit__(self, exc_type: type[BaseException] | None, exc: BaseException | None, tb: Any) -> None: ...
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: Any,
+    ) -> None: ...

@@ -1,4 +1,4 @@
-from typing import Any, ContextManager, Iterable
+from typing import Any, ContextManager, Protocol
 
 
 class ConsoleCapture(ContextManager[str]):
@@ -7,8 +7,15 @@ class ConsoleCapture(ContextManager[str]):
     def __exit__(self, exc_type, exc, tb) -> None: ...
 
 
+
+class ConsoleDimensions(Protocol):
+    width: int
+    height: int
+
+
 class Console:
     width: int
+    size: ConsoleDimensions | tuple[int, int]
 
     def __init__(self, *args: Any, **kwargs: Any) -> None: ...
     def print(self, *objects: Any, **kwargs: Any) -> None: ...
