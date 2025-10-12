@@ -26,3 +26,21 @@ def test_pick_verify_frame_warns_when_no_frames():
     assert frame_idx == 0
     assert auto_selected is False
     assert warnings == ["[VERIFY] clip.mkv has no frames; using frame 0"]
+
+
+def test_resolve_effective_tonemap_uses_preset_defaults():
+    cfg = types.SimpleNamespace(
+        preset="contrast",
+        tone_curve="bt.2390",
+        target_nits=100.0,
+        dynamic_peak_detection=True,
+        dst_min_nits=0.1,
+        _provided_keys={"preset"},
+    )
+
+    resolved = vs_core.resolve_effective_tonemap(cfg)
+
+    assert resolved["preset"] == "contrast"
+    assert resolved["tone_curve"] == "mobius"
+    assert resolved["target_nits"] == 120.0
+    assert resolved["dynamic_peak_detection"] is False

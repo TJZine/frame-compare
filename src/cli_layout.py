@@ -1753,7 +1753,8 @@ class CliLayoutRenderer:
             values (Mapping[str, Any]): Runtime values used for template rendering and condition evaluation.
             flags (Mapping[str, Any]): Runtime flags (e.g., quiet/verbose) used during rendering.
         """
-        if self.quiet and section.get("id") not in {"banner"}:
+        quiet_allowed = {"at_a_glance"}
+        if self.quiet and section.get("id") not in quiet_allowed:
             return
         condition = section.get("when")
         if condition:

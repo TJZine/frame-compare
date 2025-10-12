@@ -68,11 +68,6 @@
   ],
   "sections": [
     {
-      "id": "banner",
-      "type": "line",
-      "template": "▶ Frame Compare • [[key]]clips[[/]]=[[value]]{clips.count}[[/]] • [[key]]seed[[/]]=[[value]]{analysis.random_seed}[[/]] • [[key]]cache[[/]]=[[value]]{cache.file}[[/]] ([[value]]{cache.status}[[/]]{cache.reason?` [[dim]]${cache.reason}[[/]]`:''})"
-    },
-    {
       "id": "at_a_glance",
       "type": "box",
       "title": "At-a-Glance",
@@ -82,7 +77,7 @@
         "[[key]]Window[[/]] lead [[value]]{window.ignore_lead_seconds:.2f}[[/]][[unit]]s[[/]]  trail [[value]]{window.ignore_trail_seconds:.2f}[[/]][[unit]]s[[/]]  min [[value]]{window.min_window_seconds:.2f}[[/]][[unit]]s[[/]]",
         "[[key]]Plan[[/]] dark [[value]]{analysis.counts.dark}[[/]]  bright [[value]]{analysis.counts.bright}[[/]]  motion [[value]]{analysis.counts.motion}[[/]]  random [[value]]{analysis.counts.random}[[/]]  user [[value]]{analysis.counts.user}[[/]]",
         "[[key]]Audio align[[/]] [[value]]{audio_alignment.enabled|bool}[[/]]  offset [[value]]{audio_alignment.offsets_sec:+.3f}[[/]][[unit]]s[[/]]  corr [[value]]{audio_alignment.corr:.2f}[[/]]",
-        "[[key]]Canvas[[/]] single_res [[value]]{render.single_res|tallest}[[/]] [[unit]]px[[/]]  upscale [[value]]{render.upscale|bool}[[/]]  crop mod[[value]]{render.mod_crop}[[/]]  pad [[value]]{render.center_pad|bool}[[/]]",
+        "[[key]]Canvas[[/]] single_res [[value]]{render.single_res|tallest}[[/]] [[unit]]px[[/]]  upscale [[value]]{render.upscale|bool}[[/]]  pad [[value]]{render.center_pad|bool}[[/]]",
         "[[key]]Tonemap[[/]] [[value]]{tonemap.tone_curve}[[/]] → [[value]]{tonemap.target_nits}[[/]][[unit]]nits[[/]]  [[key]]Cache[[/]] [[value]]{cache.status}[[/]]"
       ]
     },
@@ -106,8 +101,8 @@
         {
           "subtitle": "Trim",
           "lines": [
-            "• Ref:  lead=[[value]]{trims.ref.lead_f:>4}[[/]][[unit]]f[[/]] ([[value]]{trims.ref.lead_s:>5.2f}[[/]][[unit]]s[[/]])  trail=[[value]]{trims.ref.trail_f:>4}[[/]][[unit]]f[[/]] ([[value]]{trims.ref.trail_s:>5.2f}[[/]][[unit]]s[[/]])",
-            "• Tgt:  lead=[[value]]{trims.tgt.lead_f:>4}[[/]][[unit]]f[[/]] ([[value]]{trims.tgt.lead_s:>5.2f}[[/]][[unit]]s[[/]])  trail=[[value]]{trims.tgt.trail_f:>4}[[/]][[unit]]f[[/]] ([[value]]{trims.tgt.trail_s:>5.2f}[[/]][[unit]]s[[/]])"
+            "• Ref: lead=[[value]]{trims.ref.lead_f:>4}[[/]][[unit]]f[[/]] ([[value]]{trims.ref.lead_s:>5.2f}[[/]][[unit]]s[[/]])  trail=[[value]]{trims.ref.trail_f:>4}[[/]][[unit]]f[[/]] ([[value]]{trims.ref.trail_s:>5.2f}[[/]][[unit]]s[[/]])",
+            "• Tgt: lead=[[value]]{trims.tgt.lead_f:>4}[[/]][[unit]]f[[/]] ([[value]]{trims.tgt.lead_s:>5.2f}[[/]][[unit]]s[[/]])  trail=[[value]]{trims.tgt.trail_f:>4}[[/]][[unit]]f[[/]] ([[value]]{trims.tgt.trail_s:>5.2f}[[/]][[unit]]s[[/]])"
           ]
         },
         {
@@ -163,6 +158,12 @@
           "subtitle": "Plan",
           "lines": [
             "Plan: Dark=[[value]]{analysis.counts.dark}[[/]]  Bright=[[value]]{analysis.counts.bright}[[/]]  Motion=[[value]]{analysis.counts.motion}[[/]]  Random=[[value]]{analysis.counts.random}[[/]]  User=[[value]]{analysis.counts.user}[[/]]  sep=[[value]]{analysis.screen_separation_sec:.1f}[[/]][[unit]]s[[/]]  Seed=[[value]]{analysis.random_seed}[[/]]"
+          ]
+        },
+        {
+          "when": "analysis.cache_progress_message",
+          "lines": [
+            "[[accent_analyze]]{analysis.cache_progress_message}[[/]]"
           ]
         },
         {
@@ -243,7 +244,7 @@
         "• [[key]]Plan[[/]]\n  dark [[value]]{analysis.counts.dark}[[/]]  bright [[value]]{analysis.counts.bright}[[/]]  motion [[value]]{analysis.counts.motion}[[/]]\n  random [[value]]{analysis.counts.random}[[/]]  user [[value]]{analysis.counts.user}[[/]]  sep [[value]]{analysis.screen_separation_sec:.1f}[[/]][[unit]]s[[/]]",
         "• [[key]]Canvas[[/]]\n  single_res [[value]]{render.single_res|tallest}[[/]] [[unit]]px[[/]]  upscale [[value]]{render.upscale|bool}[[/]]\n  crop mod[[value]]{render.mod_crop}[[/]]  pad [[value]]{render.center_pad|bool}[[/]]",
         "• [[key]]Tonemap[[/]]\n  curve [[value]]{tonemap.tone_curve}[[/]]  target [[value]]{tonemap.target_nits}[[/]][[unit]]nits[[/]]\n  dpd [[value]]{tonemap.dynamic_peak_detection|bool}[[/]]  verify ≤[[value]]{tonemap.verify_luma_threshold}[[/]]{verify.delta.max? [[dim]] Δ=[[value]]{verify.delta.max}[[/]][[/]]:''}",
-        "• [[key]]Output[[/]]\n  dir [[path]]{render.out_dir.e}[[/]]  compression [[value]]{render.compression}[[/]]\n  frames [[value]]{analysis.output_frame_count}[[/]]",
+        "• [[key]]Output[[/]]\n  dir [[path]]{render.out_dir.e}[[/]]  compression [[value]]{render.compression}[[/]]",
         "• [[key]]Cache[[/]]\n  file [[path]]{cache.file}[[/]]  status [[value]]{cache.status}[[/]]",
         "• [[key]]Output frames[[/]] ([[value]]{analysis.output_frame_count}[[/]])\n  {emit_json_tail?[[dim]]preview [[value]]{analysis.output_frames_preview}[[/]]  (full list in JSON{verbose?' and above':''})[[/]]:[[value]]{analysis.output_frames_full|summary_wrap}[[/]]}"
       ]
