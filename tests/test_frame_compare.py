@@ -1,6 +1,7 @@
-from pathlib import Path
 import json
 import types
+import importlib
+from pathlib import Path
 from collections.abc import Iterable, Sequence
 from typing import Any, Mapping, cast
 
@@ -27,6 +28,7 @@ from src.datatypes import (
     TMDBConfig,
 )
 from src.tmdb import TMDBAmbiguityError, TMDBCandidate, TMDBResolution
+from src.config_template import copy_default_config
 
 
 @pytest.fixture
@@ -34,21 +36,51 @@ def runner() -> CliRunner:
     return CliRunner()
 
 
-def test_cli_uses_packaged_config_by_default(runner: CliRunner) -> None:
-    result = runner.invoke(frame_compare.main, ["--help"])
+def test_cli_uses_packaged_config_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runner: CliRunner
+) -> None:
+    monkeypatch.delenv("FRAME_COMPARE_CONFIG", raising=False)
+    module_default = importlib.reload(frame_compare)
 
-    assert result.exit_code == 0, result.output
+    try:
+        repo_default = (
+            Path(module_default.__file__).resolve().parent / "config" / "config.toml"
+        ).resolve()
 
-    default_path = frame_compare.DEFAULT_CONFIG_PATH
-    assert default_path.parent.name == "data"
-    assert default_path.name == "config.toml.template"
-    assert default_path.exists()
+        assert module_default.DEFAULT_CONFIG_PATH == repo_default
 
-    config_option = next(
-        param for param in frame_compare.main.params if param.name == "config_path"
-    )
-    assert config_option.default == str(default_path)
-    assert "data/config.toml.template" in result.output
+        default_result = runner.invoke(module_default.main, ["--help"])
+        assert default_result.exit_code == 0, default_result.output
+        default_output = default_result.output.replace("\n", "").replace(" ", "")
+
+        default_option = next(
+            param for param in module_default.main.params if param.name == "config_path"
+        )
+        assert default_option.default == str(repo_default)
+        assert str(repo_default) in default_output
+
+        override_target = (tmp_path / "config" / "config.toml").resolve()
+        monkeypatch.setenv("FRAME_COMPARE_CONFIG", str(override_target))
+        module_override = importlib.reload(frame_compare)
+
+        assert module_override.DEFAULT_CONFIG_PATH == override_target
+
+        override_result = runner.invoke(module_override.main, ["--help"])
+        assert override_result.exit_code == 0, override_result.output
+        override_output = override_result.output.replace("\n", "").replace(" ", "")
+
+        override_option = next(
+            param for param in module_override.main.params if param.name == "config_path"
+        )
+        assert override_option.default == str(override_target)
+        assert str(override_target) in override_output
+
+        seeded_path = copy_default_config(tmp_path / "seeded-config.toml")
+        assert seeded_path.exists()
+        assert "[paths]" in seeded_path.read_text()
+    finally:
+        monkeypatch.delenv("FRAME_COMPARE_CONFIG", raising=False)
+        importlib.reload(frame_compare)
 
 
 class DummyProgress:
