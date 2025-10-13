@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from importlib import resources
 from pathlib import Path
 from typing import Final
@@ -72,7 +73,24 @@ def copy_default_config(
         raise FileExistsError(f"{target} already exists; pass overwrite=True to replace it.")
 
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(template_bytes)
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "wb",
+            delete=False,
+            dir=str(target.parent),
+        ) as handle:
+            handle.write(template_bytes)
+            handle.flush()
+            os.fsync(handle.fileno())
+            temp_path = Path(handle.name)
+        os.replace(temp_path, target)
+    finally:
+        if temp_path is not None and temp_path.exists():
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
     return target
 
 

@@ -76,24 +76,27 @@ quick-start configuration paths.
 <!-- markdownlint-disable MD013 -->
 | Key | Purpose | Type | Default |
 | --- | --- | --- | --- |
-| `[paths].input_dir` | Default scan directory. | str | `"~/comparison_videos"` |
+| `[paths].input_dir` | Default scan directory under the workspace root. | str | `"comparison_videos"` |
 | `[runtime].ram_limit_mb` | VapourSynth RAM ceiling. | int | `4000` |
 | `[runtime].vapoursynth_python_paths` | Extra VapourSynth module paths. | list[str] | `[]` |
 | `[source].preferred` | Preferred source filter. | str | `"lsmas"` |
 | `VAPOURSYNTH_PYTHONPATH` | Environment module path. | str | *(unset)* |
 <!-- markdownlint-restore -->
 
-Repository fixtures mirror the historical `paths.input_dir` default and live under
-`comparison_videos/` next to `frame_compare.py`; copy them into `~/comparison_videos`
-if you want to use the bundled samples.
+Repository fixtures mirror the default structure and live under
+`comparison_videos/` next to `frame_compare.py`; leave them in place when running
+from the repo or copy them beneath your chosen `ROOT` (for example
+`ROOT/comparison_videos`) if you customise the workspace.
 
 ## CLI flags
 
 <!-- markdownlint-disable MD013 -->
 | Flag | Description | Default |
 | --- | --- | --- |
-| `--config PATH` | Use a specific configuration file. | ``$FRAME_COMPARE_CONFIG`` or ``~/.frame-compare/config.toml`` seeded from the bundled template |
-| `--input PATH` | Override `[paths.input_dir]` for this run. | `None` |
+| `--root PATH` | Workspace root override (else sentinel discovery). | `None` |
+| `--config PATH` | Use a specific configuration file. | ``$FRAME_COMPARE_CONFIG`` or ``ROOT/config/config.toml`` |
+| `--input PATH` | Override `[paths].input_dir` within the root. | `None` |
+| `--write-config` | Ensure `ROOT/config/config.toml` exists then exit. | `false` |
 | `--quiet` | Show minimal console output. | `false` |
 | `--verbose` | Emit additional diagnostics. | `false` |
 | `--no-color` | Disable ANSI colour. | `false` |

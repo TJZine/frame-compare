@@ -125,9 +125,9 @@ emit_json_tail = true
 style = "fill"
 
 [paths]
-# Default input folder; override via CLI when needed. The shipped
-# ``comparison_videos`` defaults to a folder in the user's home directory.
-input_dir = "~/comparison_videos"
+# Default input folder under the workspace root. Override only when you
+# need an alternate subdirectory beneath ROOT.
+input_dir = "comparison_videos"
 
 [runtime]
 ram_limit_mb = 4000

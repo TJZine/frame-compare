@@ -29,146 +29,11 @@ from src.datatypes import (
     TMDBConfig,
 )
 from src.tmdb import TMDBAmbiguityError, TMDBCandidate, TMDBResolution
-from src.config_template import copy_default_config
 
 
 @pytest.fixture
 def runner() -> CliRunner:
     return CliRunner()
-
-
-def test_cli_defaults_to_user_config(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runner: CliRunner
-) -> None:
-    monkeypatch.delenv("FRAME_COMPARE_CONFIG", raising=False)
-    monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
-    module_default = importlib.reload(frame_compare)
-
-    try:
-        module_default_file = module_default.__file__
-        assert module_default_file is not None
-        project_config = Path(module_default_file).resolve().with_name("config.toml")
-        template_path = (
-            Path(module_default_file).resolve().with_name("src") / "data" / "config.toml.template"
-        ).resolve()
-        expected_user_config = (tmp_path / ".frame-compare" / "config.toml").resolve()
-
-        assert module_default.DEFAULT_CONFIG_PATH == expected_user_config
-        assert module_default.PROJECT_CONFIG_PATH == project_config
-        assert module_default.PACKAGED_TEMPLATE_PATH == template_path
-
-        default_result = runner.invoke(module_default.main, ["--help"])
-        assert default_result.exit_code == 0, default_result.output
-        default_output = default_result.output.replace("\n", "").replace(" ", "")
-
-        default_option = next(
-            param for param in module_default.main.params if param.name == "config_path"
-        )
-        assert default_option.default == str(expected_user_config)
-        assert str(expected_user_config) in default_output
-
-        override_target = (tmp_path / "config" / "config.toml").resolve()
-        monkeypatch.setenv("FRAME_COMPARE_CONFIG", str(override_target))
-        module_override = importlib.reload(frame_compare)
-
-        module_override_file = module_override.__file__
-        assert module_override_file is not None
-
-        assert module_override.DEFAULT_CONFIG_PATH == override_target
-
-        override_result = runner.invoke(module_override.main, ["--help"])
-        assert override_result.exit_code == 0, override_result.output
-        override_output = override_result.output.replace("\n", "").replace(" ", "")
-
-        override_option = next(
-            param for param in module_override.main.params if param.name == "config_path"
-        )
-        assert override_option.default == str(override_target)
-        assert str(override_target) in override_output
-
-        seeded_path = copy_default_config(tmp_path / "seeded-config.toml")
-        assert seeded_path.exists()
-        assert "[paths]" in seeded_path.read_text()
-    finally:
-        monkeypatch.delenv("FRAME_COMPARE_CONFIG", raising=False)
-        importlib.reload(frame_compare)
-
-
-def test_ensure_config_present_seeds_missing_default(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.delenv("FRAME_COMPARE_CONFIG", raising=False)
-    monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
-    module = importlib.reload(frame_compare)
-
-    try:
-        target = module.DEFAULT_CONFIG_PATH
-        assert target == tmp_path / ".frame-compare" / "config.toml"
-        assert not target.exists()
-
-        calls: list[Path] = []
-
-        def fake_copy(destination: Path) -> Path:
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_text("seeded")
-            calls.append(destination)
-            return destination
-
-        monkeypatch.setattr(module, "copy_default_config", fake_copy)
-
-        result = module._ensure_config_present(target)
-        assert result == target
-        assert target.exists()
-        assert calls == [target]
-    finally:
-        monkeypatch.delenv("FRAME_COMPARE_CONFIG", raising=False)
-        importlib.reload(frame_compare)
-
-
-def test_ensure_config_present_skips_copy_for_non_default(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
-    module = importlib.reload(frame_compare)
-
-    try:
-        other_path = tmp_path / "custom" / "config.toml"
-        calls: list[Path] = []
-
-        def fake_copy(destination: Path) -> Path:  # pragma: no cover - should not run
-            calls.append(destination)
-            return destination
-
-        monkeypatch.setattr(module, "copy_default_config", fake_copy)
-
-        result = module._ensure_config_present(other_path)
-        assert result == other_path
-        assert calls == []
-    finally:
-        importlib.reload(frame_compare)
-
-
-def test_ensure_config_present_raises_when_default_unwritable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
-    module = importlib.reload(frame_compare)
-
-    def fake_copy(destination: Path) -> Path:  # pragma: no cover - should be re-raised
-        raise PermissionError("read-only")
-
-    monkeypatch.setattr(module, "copy_default_config", fake_copy)
-
-    try:
-        with pytest.raises(frame_compare.CLIAppError) as excinfo:
-            module._ensure_config_present(module.DEFAULT_CONFIG_PATH)
-
-        message = str(excinfo.value)
-        assert "Unable to create default config" in message
-        assert str(module.DEFAULT_CONFIG_PATH) in message
-    finally:
-        importlib.reload(frame_compare)
-
 
 class DummyProgress:
     def __init__(self, *_, **__):
@@ -379,7 +244,6 @@ def test_run_cli_falls_back_to_project_root_for_relative_input(
     cfg = _make_config(Path("comparison_videos"))
 
     monkeypatch.setattr(frame_compare, "load_config", lambda _path: cfg)
-    monkeypatch.setattr(frame_compare, "_ensure_config_present", lambda path: Path(path))
     monkeypatch.setattr(frame_compare.vs_core, "configure", lambda *args, **kwargs: None)
 
     recorded_roots: list[Path] = []
@@ -396,8 +260,7 @@ def test_run_cli_falls_back_to_project_root_for_relative_input(
     with pytest.raises(frame_compare.CLIAppError, match="sentinel"):
         frame_compare.run_cli(str(config_path))
 
-    expected_root = _comparison_fixture_root().resolve()
-    assert expected_root.exists()
+    expected_root = (tmp_path / "comparison_videos").resolve()
     assert recorded_roots == [expected_root]
 
 
@@ -409,7 +272,6 @@ def test_run_cli_does_not_fallback_for_cli_override(
     cfg = _make_config(tmp_path)
 
     monkeypatch.setattr(frame_compare, "load_config", lambda _path: cfg)
-    monkeypatch.setattr(frame_compare, "_ensure_config_present", lambda path: Path(path))
     def _fail_discover(*_args: object, **_kwargs: object) -> list[Path]:
         raise AssertionError("should not discover")
 

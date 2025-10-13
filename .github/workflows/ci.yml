@@ -28,5 +28,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev --frozen --python 3.13 --no-install-package vapoursynth
 
+      - name: Prime workspace config
+        run: uv run --no-sync python frame_compare.py --root . --write-config
+
+      - name: Diagnose workspace paths
+        run: uv run --no-sync python frame_compare.py --root . --diagnose-paths
+
       - name: Run tests
         run: uv run --no-sync python -m pytest -q

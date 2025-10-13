@@ -54,7 +54,21 @@ from natsort import os_sorted
 
 from src.config_loader import ConfigError, load_config
 from src.config_template import copy_default_config
-from src.datatypes import AnalysisConfig, AppConfig, NamingConfig, RuntimeConfig
+from src.datatypes import (
+    AnalysisConfig,
+    AppConfig,
+    AudioAlignmentConfig,
+    CLIConfig,
+    ColorConfig,
+    NamingConfig,
+    OverridesConfig,
+    PathsConfig,
+    RuntimeConfig,
+    ScreenshotConfig,
+    SlowpicsConfig,
+    SourceConfig,
+    TMDBConfig,
+)
 from src import audio_alignment
 from src.utils import parse_filename_metadata
 from src import vs_core
@@ -86,33 +100,16 @@ from src.cli_layout import CliLayoutRenderer, CliLayoutError, load_cli_layout
 logger = logging.getLogger(__name__)
 
 CONFIG_ENV_VAR: Final[str] = "FRAME_COMPARE_CONFIG"
+ROOT_ENV_VAR: Final[str] = "FRAME_COMPARE_ROOT"
+ROOT_SENTINELS: Final[tuple[str, ...]] = ("pyproject.toml", ".git", "comparison_videos")
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parent
-PROJECT_CONFIG_PATH: Final[Path] = (PROJECT_ROOT / "config.toml").resolve()
 PACKAGED_TEMPLATE_PATH: Final[Path] = (
     PROJECT_ROOT / "src" / "data" / "config.toml.template"
 ).resolve()
-_USER_CONFIG_DIR_NAME: Final[str] = ".frame-compare"
-_USER_CONFIG_FILENAME: Final[str] = "config.toml"
-
-
-def _default_user_config_path() -> Path:
-    """Return the per-user fallback location for the generated configuration."""
-
-    return Path.home() / _USER_CONFIG_DIR_NAME / _USER_CONFIG_FILENAME
-
-
-def _resolve_default_config_path() -> Path:
-    override = os.environ.get(CONFIG_ENV_VAR)
-    if override:
-        return Path(override).expanduser().resolve()
-    return _default_user_config_path()
-
-
-DEFAULT_CONFIG_PATH: Final[Path] = _resolve_default_config_path()
 
 _DEFAULT_CONFIG_HELP: Final[str] = (
-    f"Path to the configuration file. Defaults to ${CONFIG_ENV_VAR} when set, "
-    f"otherwise {_default_user_config_path()}, seeding it from the bundled template when missing."
+    "Optional explicit path to config.toml. When omitted, Frame Compare looks for "
+    "ROOT/config/config.toml (see --root/FRAME_COMPARE_ROOT)."
 )
 
 SUPPORTED_EXTS = (
@@ -645,7 +642,9 @@ class CLIAppError(RuntimeError):
         self.rich_message = rich_message or message
 
 
-def _resolve_workspace_subdir(root: Path, relative: str, *, purpose: str) -> Path:
+def _resolve_workspace_subdir(
+    root: Path, relative: str, *, purpose: str, allow_absolute: bool = False
+) -> Path:
     """Return a normalised path under *root* for user-managed directories."""
 
     try:
@@ -658,10 +657,19 @@ def _resolve_workspace_subdir(root: Path, relative: str, *, purpose: str) -> Pat
 
     candidate = Path(str(relative))
     if candidate.is_absolute():
-        message = (
-            f"Configured {purpose} must be relative to the input directory, got '{relative}'"
-        )
-        raise CLIAppError(message, rich_message=f"[red]{message}[/red]")
+        if not allow_absolute:
+            message = (
+                f"Configured {purpose} must be relative to the input directory, got '{relative}'"
+            )
+            raise CLIAppError(message, rich_message=f"[red]{message}[/red]")
+        try:
+            resolved = candidate.resolve()
+        except OSError as exc:
+            raise CLIAppError(
+                f"Unable to resolve configured {purpose} '{relative}': {exc}",
+                rich_message=f"[red]Unable to resolve configured {purpose}:[/red] {exc}",
+            ) from exc
+        return resolved
 
     resolved = (root_resolved / candidate).resolve()
     try:
@@ -691,43 +699,354 @@ def _path_is_within_root(root: Path, candidate: Path) -> bool:
     return True
 
 
-def _ensure_config_present(config_location: Path) -> Path:
-    """Ensure that the CLI configuration exists at ``config_location``.
+_SITE_PACKAGES_MARKERS: Final[set[str]] = {"site-packages", "dist-packages"}
 
-    When the requested path matches :data:`DEFAULT_CONFIG_PATH` and the file is missing,
-    the packaged template is copied into place. Any failure to write the default
-    configuration raises :class:`CLIAppError` with a user-friendly message.
-    """
 
-    expanded = config_location.expanduser()
-    try:
-        resolved = expanded if expanded.is_absolute() else expanded.resolve(strict=False)
-    except TypeError:
-        resolved = expanded.resolve()
-
-    if resolved.exists():
-        return resolved
-
-    if str(resolved) != str(DEFAULT_CONFIG_PATH):
-        return resolved
+def _path_contains_site_packages(path: Path) -> bool:
+    """Return True when *path* (or any ancestor) lives under site/dist-packages."""
 
     try:
-        copied_path = copy_default_config(resolved)
-    except FileExistsError:
-        return resolved
+        resolved = path.resolve()
+    except OSError:
+        resolved = path
+    for part in resolved.parts:
+        if part.lower() in _SITE_PACKAGES_MARKERS:
+            return True
+    return False
+
+
+def _nearest_existing_dir(path: Path) -> Path:
+    """Return the nearest existing directory for *path* (itself or ancestor)."""
+
+    candidate = path
+    if candidate.is_file():
+        candidate = candidate.parent
+
+    while not candidate.exists():
+        parent = candidate.parent
+        if parent == candidate:
+            break
+        candidate = parent
+    return candidate
+
+
+def _is_writable_path(path: Path, *, for_file: bool) -> bool:
+    """Return True when the given path (or its nearest parent) is writable."""
+
+    target = path.parent if for_file else path
+    try:
+        target = target.resolve(strict=False)
+    except OSError:
+        pass
+    probe = _nearest_existing_dir(target)
+    try:
+        probe = probe.resolve(strict=False)
+    except OSError:
+        pass
+    return os.access(probe, os.W_OK)
+
+
+def _abort_if_site_packages(path_map: Mapping[str, Path]) -> None:
+    """Abort execution when any mapped path falls under site/dist-packages."""
+
+    for label, candidate in path_map.items():
+        if _path_contains_site_packages(candidate):
+            message = (
+                f"{label} path '{candidate}' resolves inside a site-packages/dist-packages "
+                "directory; refuse to continue. Use --root or FRAME_COMPARE_ROOT to "
+                "select a writable workspace."
+            )
+            raise CLIAppError(
+                message,
+                code=2,
+                rich_message=f"[red]{escape(message)}[/red]",
+            )
+
+
+@dataclass
+class _PathPreflightResult:
+    """Resolved configuration and workspace paths used during startup."""
+
+    workspace_root: Path
+    media_root: Path
+    config_path: Path
+    config: AppConfig
+    warnings: tuple[str, ...] = ()
+    legacy_config: bool = False
+
+
+def _discover_workspace_root(cli_root: str | None) -> Path:
+    """Resolve the workspace root using CLI flag, env var, or sentinel search."""
+
+    if cli_root:
+        candidate = Path(cli_root).expanduser()
+    else:
+        env_root = os.environ.get(ROOT_ENV_VAR)
+        if env_root:
+            candidate = Path(env_root).expanduser()
+        else:
+            start = Path.cwd()
+            current = start
+            sentinel_root: Path | None = None
+            while True:
+                if any((current / marker).exists() for marker in ROOT_SENTINELS):
+                    sentinel_root = current
+                    break
+                if current.parent == current:
+                    break
+                current = current.parent
+            candidate = sentinel_root or start
+
+    try:
+        resolved = candidate.resolve()
     except OSError as exc:
-        message = f"Unable to create default config at {resolved}: {exc}"
+        raise CLIAppError(
+            f"Failed to resolve workspace root '{candidate}': {exc}",
+            code=2,
+            rich_message=f"[red]Failed to resolve workspace root:[/red] {exc}",
+        ) from exc
+
+    if _path_contains_site_packages(resolved):
+        message = (
+            f"Workspace root '{resolved}' is inside site-packages/dist-packages; "
+            "choose a writable directory via --root or FRAME_COMPARE_ROOT."
+        )
+        raise CLIAppError(message, code=2, rich_message=f"[red]{escape(message)}[/red]")
+
+    return resolved
+
+
+def _seed_default_config(path: Path) -> None:
+    """Atomically seed config.toml at *path* from the packaged template."""
+
+    try:
+        copy_default_config(path)
+    except FileExistsError:
+        return
+    except OSError as exc:
+        message = f"Unable to create default config at {path}: {exc}"
         raise CLIAppError(
             message,
             code=2,
             rich_message=(
                 "[red]Unable to create default config:[/red] "
-                f"{exc}. Set $FRAME_COMPARE_CONFIG to a writable path."
+                f"{exc}. Set --root/FRAME_COMPARE_ROOT to a writable directory."
             ),
         ) from exc
 
-    logger.info("Seeded default config at %s", copied_path)
-    return copied_path
+
+def _fresh_app_config() -> AppConfig:
+    """Return an AppConfig populated with built-in defaults."""
+
+    return AppConfig(
+        analysis=AnalysisConfig(),
+        screenshots=ScreenshotConfig(),
+        cli=CLIConfig(),
+        slowpics=SlowpicsConfig(),
+        tmdb=TMDBConfig(),
+        naming=NamingConfig(),
+        paths=PathsConfig(),
+        runtime=RuntimeConfig(),
+        overrides=OverridesConfig(),
+        color=ColorConfig(),
+        source=SourceConfig(),
+        audio_alignment=AudioAlignmentConfig(),
+    )
+
+
+def _prepare_preflight(
+    *,
+    cli_root: str | None,
+    config_override: str | None,
+    input_override: str | None,
+    ensure_config: bool,
+    create_dirs: bool,
+    create_media_dir: bool,
+) -> _PathPreflightResult:
+    """Resolve workspace root, configuration, and media directories."""
+
+    workspace_root = _discover_workspace_root(cli_root)
+    warnings: list[str] = []
+
+    if create_dirs:
+        workspace_root.mkdir(parents=True, exist_ok=True)
+    elif not workspace_root.exists():
+        parent = workspace_root.parent
+        if not parent.exists() or not os.access(parent, os.W_OK):
+            warnings.append(
+                f"Workspace root {workspace_root} may be unwritable; parent directory is inaccessible."
+            )
+    if workspace_root.exists() and not os.access(workspace_root, os.W_OK):
+        if create_dirs:
+            raise CLIAppError(
+                f"Workspace root '{workspace_root}' is not writable.",
+                code=2,
+                rich_message=f"[red]Workspace root is not writable:[/red] {workspace_root}",
+            )
+        warnings.append(f"Workspace root {workspace_root} is not writable.")
+
+    config_path: Path
+    legacy = False
+
+    if config_override:
+        config_path = Path(config_override).expanduser()
+    else:
+        env_override = os.environ.get(CONFIG_ENV_VAR)
+        if env_override:
+            config_path = Path(env_override).expanduser()
+        else:
+            config_dir = workspace_root / "config"
+            config_path = config_dir / "config.toml"
+            legacy_path = workspace_root / "config.toml"
+
+            if config_path.exists():
+                pass
+            elif legacy_path.exists():
+                config_path = legacy_path
+                legacy = True
+                warnings.append(
+                    f"Using legacy config at {legacy_path}. Move it to {config_dir / 'config.toml'}."
+                )
+            elif ensure_config:
+                config_dir.mkdir(parents=True, exist_ok=True)
+                _seed_default_config(config_path)
+
+    if _path_contains_site_packages(config_path):
+        message = (
+            f"Config path '{config_path}' resides inside site-packages/dist-packages; "
+            "choose a writable location via --root or --config."
+        )
+        raise CLIAppError(message, code=2, rich_message=f"[red]{escape(message)}[/red]")
+
+    cfg: AppConfig
+    try:
+        cfg = load_config(str(config_path))
+    except FileNotFoundError:
+        if ensure_config:
+            raise CLIAppError(
+                f"Config file not found: {config_path}",
+                code=2,
+                rich_message=f"[red]Config file not found:[/red] {config_path}",
+            ) from None
+        cfg = _fresh_app_config()
+        warnings.append(f"Config file not found; using defaults at {config_path}")
+    except PermissionError as exc:
+        raise CLIAppError(
+            f"Config file is not readable: {config_path}",
+            code=2,
+            rich_message=f"[red]Config file is not readable:[/red] {config_path}",
+        ) from exc
+    except OSError as exc:
+        raise CLIAppError(
+            f"Failed to read config file: {exc}",
+            code=2,
+            rich_message=f"[red]Failed to read config file:[/red] {exc}",
+        ) from exc
+    except ConfigError as exc:
+        raise CLIAppError(
+            f"Config error: {exc}",
+            code=2,
+            rich_message=f"[red]Config error:[/red] {exc}",
+        ) from exc
+
+    if input_override is not None:
+        cfg.paths.input_dir = input_override
+
+    media_root = _resolve_workspace_subdir(
+        workspace_root,
+        cfg.paths.input_dir,
+        purpose="[paths].input_dir",
+        allow_absolute=True,
+    )
+
+    if create_media_dir:
+        media_root.mkdir(parents=True, exist_ok=True)
+    elif not media_root.exists():
+        parent = media_root.parent
+        if not parent.exists() or not os.access(parent, os.W_OK):
+            warnings.append(
+                f"Input workspace {media_root} may be unwritable; parent directory is inaccessible."
+            )
+    if media_root.exists() and not os.access(media_root, os.W_OK):
+        if create_media_dir:
+            raise CLIAppError(
+                f"Input workspace '{media_root}' is not writable.",
+                code=2,
+                rich_message=f"[red]Input workspace is not writable:[/red] {media_root}",
+            )
+        warnings.append(f"Input workspace {media_root} is not writable.")
+
+    return _PathPreflightResult(
+        workspace_root=workspace_root,
+        media_root=media_root,
+        config_path=config_path,
+        config=cfg,
+        warnings=tuple(warnings),
+        legacy_config=legacy,
+    )
+
+
+def _collect_path_diagnostics(
+    *,
+    cli_root: str | None,
+    config_override: str | None,
+    input_override: str | None,
+) -> Dict[str, Any]:
+    """Return a JSON-serialisable mapping describing key runtime paths."""
+
+    preflight = _prepare_preflight(
+        cli_root=cli_root,
+        config_override=config_override,
+        input_override=input_override,
+        ensure_config=False,
+        create_dirs=False,
+        create_media_dir=False,
+    )
+    cfg = preflight.config
+    workspace_root = preflight.workspace_root
+    media_root = preflight.media_root
+    config_path = preflight.config_path
+
+    screens_dir = _resolve_workspace_subdir(
+        media_root,
+        cfg.screenshots.directory_name,
+        purpose="screenshots.directory_name",
+    )
+    analysis_cache = (media_root / cfg.analysis.frame_data_filename).resolve()
+    offsets_path = (media_root / cfg.audio_alignment.offsets_filename).resolve()
+
+    path_map = {
+        "workspace_root": workspace_root,
+        "media_root": media_root,
+        "config": config_path,
+        "screens": screens_dir,
+        "analysis_cache": analysis_cache,
+        "audio_offsets": offsets_path,
+    }
+
+    under_site_packages = any(
+        _path_contains_site_packages(path) for path in (workspace_root, media_root, config_path)
+    )
+
+    diagnostics: Dict[str, Any] = {
+        "workspace_root": str(workspace_root),
+        "media_root": str(media_root),
+        "config_path": str(config_path),
+        "config_exists": config_path.exists(),
+        "legacy_config": preflight.legacy_config,
+        "screens_dir": str(screens_dir),
+        "analysis_cache": str(analysis_cache),
+        "audio_offsets": str(offsets_path),
+        "under_site_packages": under_site_packages,
+        "writable": {
+            "workspace_root": _is_writable_path(workspace_root, for_file=False),
+            "media_root": _is_writable_path(media_root, for_file=False),
+            "config_dir": _is_writable_path(config_path, for_file=True),
+            "screens_dir": _is_writable_path(screens_dir, for_file=False),
+        },
+        "warnings": list(preflight.warnings),
+    }
+    return diagnostics
 
 
 def _discover_media(root: Path) -> List[Path]:
@@ -2349,98 +2668,69 @@ def _confirm_alignment_with_screenshots(
     )
 
 def run_cli(
-    config_path: str,
+    config_path: str | None,
     input_dir: str | None = None,
     *,
+    root_override: str | None = None,
     audio_track_overrides: Iterable[str] | None = None,
     quiet: bool = False,
     verbose: bool = False,
     no_color: bool = False,
 ) -> RunResult:
     """
-    Orchestrate the CLI workflow: load config, discover and analyze media, generate screenshots, optionally upload to slow.pics, and return a structured run result.
-    
+    Orchestrate the CLI workflow.
+
     Parameters:
-        config_path (str): Path to the application configuration file.
-        input_dir (str | None): Optional override for the input directory configured in the file.
+        config_path (str | None): Optional explicit config path (CLI or env).
+        input_dir (str | None): Optional override for [paths].input_dir inside the workspace root.
+        root_override (str | None): Optional workspace root override supplied via --root.
         audio_track_overrides (Iterable[str] | None): Optional sequence of "filename=track" pairs to override audio track selection.
         quiet (bool): Suppress nonessential output when True.
         verbose (bool): Enable additional diagnostic output when True.
         no_color (bool): Disable colored output when True.
-    
+
     Returns:
         RunResult: Aggregated result including processed files, selected frames, output directory, resolved root directory, configuration used, generated image paths, optional slow.pics URL, and a JSON-tail dictionary with detailed metadata and diagnostics.
     
     Raises:
         CLIAppError: For configuration loading failures, missing/invalid input directory, clip initialization failures, frame selection or screenshot generation errors, slow.pics upload failures, or other user-facing errors encountered during the run.
     """
-    config_location = _ensure_config_present(Path(config_path))
+    preflight = _prepare_preflight(
+        cli_root=root_override,
+        config_override=config_path,
+        input_override=input_dir,
+        ensure_config=True,
+        create_dirs=True,
+        create_media_dir=input_dir is None,
+    )
+    cfg = preflight.config
+    workspace_root = preflight.workspace_root
+    root = preflight.media_root
+    config_location = preflight.config_path
 
-    try:
-        cfg: AppConfig = load_config(str(config_location))
-    except FileNotFoundError as exc:
-        message = f"Config file not found: {config_location}"
+    if not root.exists():
         raise CLIAppError(
-            message,
-            code=2,
-            rich_message=f"[red]Config file not found:[/red] {config_location}",
-        ) from exc
-    except PermissionError as exc:
-        message = f"Config file is not readable: {config_location}"
-        raise CLIAppError(
-            message,
-            code=2,
-            rich_message=f"[red]Config file is not readable:[/red] {config_location}",
-        ) from exc
-    except OSError as exc:
-        message = f"Failed to read config file: {exc}"
-        raise CLIAppError(
-            message,
-            code=2,
-            rich_message=f"[red]Failed to read config file:[/red] {exc}",
-        ) from exc
-    except ConfigError as exc:
-        raise CLIAppError(
-            f"Config error: {exc}", code=2, rich_message=f"[red]Config error:[/red] {exc}"
-        ) from exc
-
-    cli_override_supplied = input_dir is not None
-    if cli_override_supplied:
-        cfg.paths.input_dir = input_dir
-
-    configured_input = Path(cfg.paths.input_dir).expanduser()
-    candidate_roots = [configured_input]
-
-    if not cli_override_supplied:
-        config_parent = config_location.parent
-        config_relative = (config_parent / cfg.paths.input_dir).expanduser()
-        project_relative = (PROJECT_ROOT / cfg.paths.input_dir).expanduser()
-
-        # Preserve order while avoiding duplicate fallbacks when the config lives
-        # alongside the project root (common for packaged runs).
-        for candidate in (config_relative, project_relative):
-            if candidate not in candidate_roots:
-                candidate_roots.append(candidate)
-
-    resolved_root: Path | None = None
-    for candidate in candidate_roots:
-        try:
-            resolved_root = candidate.resolve(strict=True)
-        except FileNotFoundError:
-            continue
-        else:
-            break
-
-    if resolved_root is None:
-        resolved_root = configured_input.resolve()
-
-    if not resolved_root.exists():
-        raise CLIAppError(
-            f"Input directory not found: {resolved_root}",
-            rich_message=f"[red]Input directory not found:[/red] {resolved_root}",
+            f"Input directory not found: {root}",
+            rich_message=f"[red]Input directory not found:[/red] {root}",
         )
 
-    root = resolved_root
+    out_dir = _resolve_workspace_subdir(
+        root,
+        cfg.screenshots.directory_name,
+        purpose="screenshots.directory_name",
+    )
+    analysis_cache_path = (root / cfg.analysis.frame_data_filename).resolve()
+    offsets_path = (root / cfg.audio_alignment.offsets_filename).resolve()
+    _abort_if_site_packages(
+        {
+            "config": config_location,
+            "workspace_root": workspace_root,
+            "root": root,
+            "screenshots": out_dir,
+            "analysis_cache": analysis_cache_path,
+            "audio_offsets": offsets_path,
+        }
+    )
 
     layout_path = Path(__file__).with_name("cli_layout.v1.json")
     reporter = CliOutputManager(
@@ -2466,11 +2756,20 @@ def run_cli(
     reporter.set_flag("progress_style", progress_style)
     reporter.set_flag("emit_json_tail", emit_json_tail_flag)
     collected_warnings: List[str] = []
+    for note in preflight.warnings:
+        reporter.warn(note)
+        collected_warnings.append(note)
     json_tail: JsonTail = {
         "clips": [],
         "trims": {"per_clip": {}},
         "window": {},
         "alignment": {"manual_start_s": 0.0, "manual_end_s": "unchanged"},
+        "workspace": {
+            "root": str(workspace_root),
+            "media_root": str(root),
+            "config_path": str(config_location),
+            "legacy_config": bool(preflight.legacy_config),
+        },
         "audio_alignment": {
             "enabled": bool(cfg.audio_alignment.enable),
             "reference_stream": None,
@@ -2479,7 +2778,7 @@ def run_cli(
             "offsets_frames": {},
             "preview_paths": [],
             "confirmed": None,
-            "offsets_filename": str((root / cfg.audio_alignment.offsets_filename).resolve()),
+            "offsets_filename": str(offsets_path),
         },
         "analysis": {},
         "render": {},
@@ -3358,11 +3657,6 @@ def run_cli(
         )
     reporter.update_values(layout_data)
 
-    out_dir = _resolve_workspace_subdir(
-        root,
-        cfg.screenshots.directory_name,
-        purpose="screenshots.directory_name",
-    )
     total_screens = len(frames) * len(plans)
 
     writer_name = "ffmpeg" if cfg.screenshots.use_ffmpeg else "vs"
@@ -3827,10 +4121,16 @@ def run_cli(
 
 @click.command()
 @click.option(
+    "--root",
+    "root_path",
+    default=None,
+    help="Workspace root override. Defaults to FRAME_COMPARE_ROOT or sentinel discovery.",
+)
+@click.option(
     "--config",
     "config_path",
-    default=str(DEFAULT_CONFIG_PATH),
-    show_default=True,
+    default=None,
+    show_default=False,
     help=_DEFAULT_CONFIG_HELP,
 )
 @click.option("--input", "input_dir", default=None, help="Override [paths.input_dir] from config.toml")
@@ -3845,8 +4145,19 @@ def run_cli(
 @click.option("--verbose", is_flag=True, help="Show additional diagnostic output during run.")
 @click.option("--no-color", is_flag=True, help="Disable ANSI colour output.")
 @click.option("--json-pretty", is_flag=True, help="Pretty-print the JSON tail output.")
+@click.option(
+    "--diagnose-paths",
+    is_flag=True,
+    help="Print the resolved config/input/output paths as JSON and exit.",
+)
+@click.option(
+    "--write-config",
+    is_flag=True,
+    help="Ensure the workspace config exists (seeds ROOT/config/config.toml when missing) and exit.",
+)
 def main(
-    config_path: str,
+    root_path: str | None,
+    config_path: str | None,
     input_dir: str | None,
     *,
     audio_align_track_option: tuple[str, ...],
@@ -3854,6 +4165,8 @@ def main(
     verbose: bool,
     no_color: bool,
     json_pretty: bool,
+    diagnose_paths: bool,
+    write_config: bool,
 ) -> None:
     """
     Run the CLI pipeline and handle post-run outputs such as slow.pics handling and JSON tail emission.
@@ -3861,18 +4174,56 @@ def main(
     Runs run_cli with the provided options, handles CLIAppError by printing the rich message and exiting with the error code, processes slow.pics results (open in browser, copy to clipboard, create shortcut file, and optionally delete the screenshots directory), and finally emits the collected JSON tail to stdout (optionally pretty-printed).
     
     Parameters:
-        config_path: Path to the configuration file used to run the CLI pipeline.
-        input_dir: Optional input directory override for media discovery; if None the config value is used.
+        root_path: Optional explicit workspace root (overrides FRAME_COMPARE_ROOT and sentinel discovery).
+        config_path: Optional override for config.toml. When omitted, resolves to ROOT/config/config.toml.
+        input_dir: Optional override for [paths].input_dir inside the selected root.
         audio_align_track_option: Tuple of audio track override strings to pass through to run_cli.
         quiet: If True, run in quiet mode (affects reporting inside run_cli).
         verbose: If True, enable verbose reporting inside run_cli.
         no_color: If True, disable colored output in run_cli.
         json_pretty: If True, pretty-print the emitted JSON tail (2-space indent).
     """
+    preflight_for_write: _PathPreflightResult | None = None
+    if write_config:
+        try:
+            preflight_for_write = _prepare_preflight(
+                cli_root=root_path,
+                config_override=config_path,
+                input_override=input_dir,
+                ensure_config=True,
+                create_dirs=True,
+                create_media_dir=False,
+            )
+        except CLIAppError as exc:
+            print(exc.rich_message)
+            raise click.exceptions.Exit(exc.code) from exc
+        else:
+            print(f"Config ensured at {preflight_for_write.config_path}")
+        if not diagnose_paths:
+            return
+
+    if diagnose_paths:
+        try:
+            diagnostics = _collect_path_diagnostics(
+                cli_root=root_path,
+                config_override=config_path,
+                input_override=input_dir,
+            )
+        except CLIAppError as exc:
+            print(exc.rich_message)
+            raise click.exceptions.Exit(exc.code) from exc
+        if preflight_for_write is not None:
+            diagnostics.setdefault("warnings", []).extend(
+                warning for warning in preflight_for_write.warnings if warning not in diagnostics.get("warnings", [])
+            )
+        print(json.dumps(diagnostics, separators=(",", ":")))
+        return
+
     try:
         result = run_cli(
             config_path,
             input_dir,
+            root_override=root_path,
             audio_track_overrides=audio_align_track_option,
             quiet=quiet,
             verbose=verbose,
