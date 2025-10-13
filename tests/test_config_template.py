@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-from importlib import resources
-from pathlib import Path
-
 import os
 import subprocess
 import sys
-from importlib import resources
 from pathlib import Path
 
 import pytest
@@ -14,13 +10,14 @@ import pytest
 from src.config_template import (
     FILESYSTEM_TEMPLATE_PATH,
     TEMPLATE_ENV_VAR,
+    _read_template_bytes,
     copy_default_config,
 )
 
 
 @pytest.fixture(name="template_bytes")
 def fixture_template_bytes() -> bytes:
-    return FILESYSTEM_TEMPLATE_PATH.read_bytes()
+    return _read_template_bytes()
 
 
 def test_copy_default_config_writes_template(tmp_path: Path, template_bytes: bytes) -> None:
@@ -57,7 +54,7 @@ def test_copy_default_config_falls_back_without_packaged_module(
 ) -> None:
     destination = tmp_path / "config.toml"
 
-    def _raise(*args: object, **kwargs: object) -> resources.Traversable:
+    def _raise(*_args: object, **_kwargs: object) -> object:
         raise ModuleNotFoundError("data")
 
     monkeypatch.setattr(

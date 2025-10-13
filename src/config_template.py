@@ -77,7 +77,7 @@ def copy_default_config(
 
 
 __all__ = [
-    "copy_default_config",
     "FILESYSTEM_TEMPLATE_PATH",
     "TEMPLATE_ENV_VAR",
+    "copy_default_config",
 ]

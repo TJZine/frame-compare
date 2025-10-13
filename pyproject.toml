@@ -41,6 +41,7 @@ dev = [
 package-dir = {"src" = "src", "src.frame_compare" = "src/frame_compare", "data" = "src/data"}
 packages = ["src", "src.frame_compare", "data"]
 include-package-data = true
+py-modules = ["frame_compare"]
 
 [tool.setuptools.package-data]
 "data" = ["config.toml.template"]
