@@ -1,6 +1,7 @@
 import json
 import types
 import importlib
+import pathlib
 from pathlib import Path
 from collections.abc import Iterable, Sequence
 from typing import Any, Mapping, cast
@@ -36,10 +37,11 @@ def runner() -> CliRunner:
     return CliRunner()
 
 
-def test_cli_uses_repo_config_by_default(
+def test_cli_defaults_to_user_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runner: CliRunner
 ) -> None:
     monkeypatch.delenv("FRAME_COMPARE_CONFIG", raising=False)
+    monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
     module_default = importlib.reload(frame_compare)
 
     try:
@@ -47,10 +49,11 @@ def test_cli_uses_repo_config_by_default(
         assert module_default_file is not None
         project_config = Path(module_default_file).resolve().with_name("config.toml")
         template_path = (
-            Path(module_default_file).resolve().with_name("data") / "config.toml.template"
+            Path(module_default_file).resolve().with_name("src") / "data" / "config.toml.template"
         ).resolve()
+        expected_user_config = (tmp_path / ".frame-compare" / "config.toml").resolve()
 
-        assert module_default.DEFAULT_CONFIG_PATH == project_config
+        assert module_default.DEFAULT_CONFIG_PATH == expected_user_config
         assert module_default.PROJECT_CONFIG_PATH == project_config
         assert module_default.PACKAGED_TEMPLATE_PATH == template_path
 
@@ -61,8 +64,8 @@ def test_cli_uses_repo_config_by_default(
         default_option = next(
             param for param in module_default.main.params if param.name == "config_path"
         )
-        assert default_option.default == str(project_config)
-        assert str(project_config) in default_output
+        assert default_option.default == str(expected_user_config)
+        assert str(expected_user_config) in default_output
 
         override_target = (tmp_path / "config" / "config.toml").resolve()
         monkeypatch.setenv("FRAME_COMPARE_CONFIG", str(override_target))
@@ -94,12 +97,13 @@ def test_cli_uses_repo_config_by_default(
 def test_ensure_config_present_seeds_missing_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("FRAME_COMPARE_CONFIG", str(tmp_path / "config.toml"))
+    monkeypatch.delenv("FRAME_COMPARE_CONFIG", raising=False)
+    monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
     module = importlib.reload(frame_compare)
 
     try:
         target = module.DEFAULT_CONFIG_PATH
-        assert target == tmp_path / "config.toml"
+        assert target == tmp_path / ".frame-compare" / "config.toml"
         assert not target.exists()
 
         calls: list[Path] = []
@@ -124,74 +128,45 @@ def test_ensure_config_present_seeds_missing_default(
 def test_ensure_config_present_skips_copy_for_non_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
     module = importlib.reload(frame_compare)
-
-    other_path = tmp_path / "custom" / "config.toml"
-    calls: list[Path] = []
-
-    def fake_copy(destination: Path) -> Path:  # pragma: no cover - should not run
-        calls.append(destination)
-        return destination
-
-    monkeypatch.setattr(module, "copy_default_config", fake_copy)
-
-    result = module._ensure_config_present(other_path)
-    assert result == other_path
-    assert calls == []
-
-
-def test_ensure_config_present_falls_back_to_user_config(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("FRAME_COMPARE_CONFIG", str(tmp_path / "package" / "config.toml"))
-    module = importlib.reload(frame_compare)
-
-    fallback_target = tmp_path / "user" / "config.toml"
-    written: list[Path] = []
-
-    def fake_copy(destination: Path) -> Path:
-        if destination == module.DEFAULT_CONFIG_PATH:
-            raise PermissionError("read-only")
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text("seeded")
-        written.append(destination)
-        return destination
-
-    monkeypatch.setattr(module, "copy_default_config", fake_copy)
-    monkeypatch.setattr(module, "_default_user_config_path", lambda: fallback_target)
 
     try:
-        result = module._ensure_config_present(module.DEFAULT_CONFIG_PATH)
-        assert result == fallback_target
-        assert fallback_target.exists()
-        assert written == [fallback_target]
+        other_path = tmp_path / "custom" / "config.toml"
+        calls: list[Path] = []
+
+        def fake_copy(destination: Path) -> Path:  # pragma: no cover - should not run
+            calls.append(destination)
+            return destination
+
+        monkeypatch.setattr(module, "copy_default_config", fake_copy)
+
+        result = module._ensure_config_present(other_path)
+        assert result == other_path
+        assert calls == []
     finally:
-        monkeypatch.delenv("FRAME_COMPARE_CONFIG", raising=False)
         importlib.reload(frame_compare)
 
 
-def test_ensure_config_present_raises_when_all_writes_fail(
+def test_ensure_config_present_raises_when_default_unwritable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("FRAME_COMPARE_CONFIG", str(tmp_path / "package" / "config.toml"))
+    monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
     module = importlib.reload(frame_compare)
 
-    fallback_target = tmp_path / "user" / "config.toml"
-
-    def fake_copy(destination: Path) -> Path:
+    def fake_copy(destination: Path) -> Path:  # pragma: no cover - should be re-raised
         raise PermissionError("read-only")
 
     monkeypatch.setattr(module, "copy_default_config", fake_copy)
-    monkeypatch.setattr(module, "_default_user_config_path", lambda: fallback_target)
 
     try:
         with pytest.raises(frame_compare.CLIAppError) as excinfo:
             module._ensure_config_present(module.DEFAULT_CONFIG_PATH)
+
         message = str(excinfo.value)
-        assert "fallback path" in message
-        assert str(fallback_target) in message
+        assert "Unable to create default config" in message
+        assert str(module.DEFAULT_CONFIG_PATH) in message
     finally:
-        monkeypatch.delenv("FRAME_COMPARE_CONFIG", raising=False)
         importlib.reload(frame_compare)
 
 

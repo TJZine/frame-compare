@@ -233,7 +233,7 @@ wheels = [
 [[package]]
 name = "frame-compare"
 version = "0.0.1"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "anitopy" },
     { name = "click" },

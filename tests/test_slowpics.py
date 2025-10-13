@@ -41,6 +41,22 @@ class FakeSession:
         base = {"XSRF-TOKEN": "token"} if cookies is None else cookies
         self.cookies: FakeCookies = FakeCookies(base)
         self.calls: list[dict[str, Any]] = []
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+    def __enter__(self) -> "FakeSession":
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: Any | None,
+    ) -> bool:
+        self.close()
+        return False
 
     def _next(self) -> FakeResponse:
         if not self._responses:
@@ -125,6 +141,7 @@ def test_session_bootstrap_single_shot(tmp_path: Path, monkeypatch: pytest.Monke
     url = slowpics.upload_comparison([str(image)], tmp_path, cfg)
 
     assert url == "https://slow.pics/c/def"
+    assert session.closed is True
     assert len(session.calls) == 3
     landing = session.calls[0]
     assert landing["method"] == "GET"
