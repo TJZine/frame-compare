@@ -1,4 +1,6 @@
+from types import ModuleType
 from typing import Any, Callable, Generic, MutableMapping, TypeVar, overload
+from .exceptions import Exit
 
 _F = TypeVar("_F", bound=Callable[..., Any])
 
@@ -67,14 +69,7 @@ def echo(message: object | None = ..., **kwargs: Any) -> None: ...
 def launch(url: str, **kwargs: Any) -> bool | None: ...
 
 
-class exceptions:
-    class Exit(Exception):
-        __slots__ = ("exit_code", "code")
-
-        exit_code: int | str | None
-        code: int | str | None
-
-        def __init__(self, exit_code: int | str | None = ...) -> None: ...
+exceptions: ModuleType
 
 
 __all__ = [
@@ -88,5 +83,6 @@ __all__ = [
     "confirm",
     "echo",
     "launch",
+    "Exit",
     "exceptions",
 ]

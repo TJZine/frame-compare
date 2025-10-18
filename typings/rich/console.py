@@ -35,25 +35,20 @@ class Console:
         align: str = "center",
         **kwargs: Any,
     ) -> None:
-        if self._rich_console is not None:
-            self._rich_console.width = self.width
-            self._rich_console.height = self.height
-            self._rich_console.rule(
-                title if title is not None else "",
-                characters=characters,
-                style=style,
-                align=align,
-                **kwargs,
-            )
-        elif _RichConsole is not None:
+        console = self._rich_console
+        if console is None and _RichConsole is not None:
             console = _RichConsole(width=self.width, height=self.height)
-            console.rule(
-                title if title is not None else "",
-                characters=characters,
-                style=style,
-                align=align,
-                **kwargs,
-            )
+        if console is None:
+            return
+        console.width = self.width
+        console.height = self.height
+        console.rule(
+            title,
+            characters=characters,
+            style=style,
+            align=align,
+            **kwargs,
+        )
 
     def status(self, *args: Any, **kwargs: Any) -> "Status":
         return Status()

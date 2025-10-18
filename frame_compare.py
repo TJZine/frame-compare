@@ -2321,20 +2321,21 @@ def _maybe_apply_audio_alignment(
                     swap_candidates.append(measurement)
                     continue
                 measurement.frames = abs(int(measurement.frames))
-                negative_offsets[measurement.file.name] = True
-                negative_override_notes[measurement.key] = (
+                file_key = measurement.file.name
+                negative_offsets[file_key] = True
+                negative_override_notes[file_key] = (
                     "Suggested negative offset applied to the opposite clip for trim-first behaviour."
                 )
 
         if swap_enabled and swap_candidates:
             additional_measurements: List[audio_alignment.AlignmentMeasurement] = []
-            reference_name = reference_plan.path.name
+            reference_name: str = reference_plan.path.name
             existing_keys = {m.file.name for m in measurements}
 
             for measurement in swap_candidates:
                 seconds = float(measurement.offset_seconds)
                 seconds_abs = abs(seconds)
-                target_name = measurement.file.name
+                target_name: str = measurement.file.name
 
                 original_frames = None
                 if measurement.frames is not None:
@@ -2400,8 +2401,9 @@ def _maybe_apply_audio_alignment(
             if reasons:
                 measurement.frames = None
                 measurement.error = "; ".join(reasons)
-                negative_offsets.pop(measurement.file.name, None)
-                label = name_to_label.get(measurement.file.name, measurement.file.name)
+                file_key = measurement.file.name
+                negative_offsets.pop(file_key, None)
+                label = name_to_label.get(file_key, file_key)
                 raw_warning_messages.append(f"{label}: {measurement.error}")
 
         for warning_message in dict.fromkeys(raw_warning_messages):
@@ -2412,7 +2414,7 @@ def _maybe_apply_audio_alignment(
         offsets_frames: Dict[str, int] = {}
 
         for measurement in measurements:
-            clip_name = measurement.file.name
+            clip_name: str = measurement.file.name
             if clip_name == reference_plan.path.name and len(measurements) > 1:
                 continue
             label = name_to_label.get(clip_name, clip_name)
@@ -3365,8 +3367,9 @@ def run_cli(
     else:
         cache_path = cache_info.path
         if cache_path.exists():
-            cache_probe = probe_cached_metrics(cache_info, cfg.analysis)
-            if cache_probe.status == "reused":
+            probe_result = probe_cached_metrics(cache_info, cfg.analysis)
+            cache_probe = probe_result
+            if probe_result.status == "reused":
                 cache_status = "reused"
                 cache_progress_message = (
                     f"Loading cached frame metrics from {cache_path.name}…"
@@ -3376,14 +3379,15 @@ def run_cli(
                 )
             else:
                 cache_status = "recomputed"
-                reason_code = cache_probe.reason or cache_probe.status
+                reason_code = probe_result.reason or probe_result.status
                 cache_reason = reason_code
                 human_reason = reason_code.replace("_", " ")
-                if cache_probe.status in {"stale", "error"}:
+                if probe_result.status in {"stale", "error"}:
                     reporter.line(
-                        f"[yellow]Frame metrics cache {cache_probe.status} "
+                        f"[yellow]Frame metrics cache {probe_result.status} "
                         f"({escape(human_reason)}); recomputing…[/]"
                     )
+                cache_progress_message = "Recomputing frame metrics…"
         else:
             cache_status = "recomputed"
             cache_reason = "missing"
