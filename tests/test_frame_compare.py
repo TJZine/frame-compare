@@ -60,6 +60,37 @@ def _expect_mapping(value: object) -> JsonMapping:
     return cast(JsonMapping, value)
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("analysis.frame_data_filename", "../escape.compframes"),
+        ("analysis.frame_data_filename", "/tmp/outside.compframes"),
+        ("audio_alignment.offsets_filename", "../escape_offsets.toml"),
+        ("audio_alignment.offsets_filename", "/tmp/outside_offsets.toml"),
+    ),
+)
+def test_run_cli_rejects_subpath_escape(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: str,
+) -> None:
+    """
+    Ensure run_cli refuses cache or offsets paths that escape the media root.
+    """
+
+    cfg = frame_compare._fresh_app_config()
+    section_name, attr_name = field.split(".")
+    setattr(getattr(cfg, section_name), attr_name, value)
+
+    monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
+
+    with pytest.raises(frame_compare.CLIAppError) as excinfo:
+        frame_compare.run_cli("ignored", None, root_override=str(tmp_path))
+
+    assert field in str(excinfo.value)
+
+
 def _make_config(input_dir: Path) -> AppConfig:
     """
     Builds a test-oriented AppConfig populated with sensible defaults and example overrides.

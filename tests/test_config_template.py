@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+import src.config_template as config_template
 from src.config_template import (
     FILESYSTEM_TEMPLATE_PATH,
     TEMPLATE_ENV_VAR,
@@ -58,7 +59,8 @@ def test_copy_default_config_falls_back_without_packaged_module(
         raise ModuleNotFoundError("data")
 
     monkeypatch.setattr(
-        "src.config_template.resources.files",
+        config_template.resources,
+        "files",
         _raise,
     )
 

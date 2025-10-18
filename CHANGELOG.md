@@ -2,6 +2,8 @@
 
 All notable user-visible updates will be documented in this file in reverse chronological order.
 
+- *2025-10-26:* Hardened analysis cache and audio offsets paths to stay within the workspace root, added regression tests for escape attempts, removed the generated `config.toml` from source control in favour of the packaged template, and restricted screenshot cleanup to directories created during the current run.
+- *2025-10-26:* Limited supported Python versions to 3.13.x (`>=3.13,<3.14`) to align with current `librosa`/`numba` wheels; updated project metadata and lockfile.
 - *2025-10-24:* Locked workspace roots to `--root`/`FRAME_COMPARE_ROOT`/sentinel discovery, seeded config under `ROOT/config/config.toml`, enforced `ROOT/comparison_videos[/screens]`, added `--diagnose-paths`, and blocked site-packages writes before screenshotting.
 - *2025-10-22:* Default config now seeds to `~/.frame-compare/config.toml`, `[paths].input_dir` defaults to `~/comparison_videos`, and the packaged template ships from `src/data/` (with wheel coverage) to avoid site-packages permission issues. *(Superseded by 2025-10-24 workspace root lock.)*
 - *2025-10-21:* Added an optional `$FRAME_COMPARE_TEMPLATE_PATH` override and filesystem fallback for the packaged config template plus clearer screenshot permission errors so runs targeting read-only `comparison_videos` trees fail fast with guidance.

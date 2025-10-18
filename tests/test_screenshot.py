@@ -1,7 +1,7 @@
 from pathlib import Path
 import subprocess
 import types
-from typing import Optional, TypedDict
+from typing import Any, Optional, Sequence, TypedDict, cast
 
 import pytest
 
@@ -222,10 +222,15 @@ def test_generate_screenshots_reports_permission_error(
     path_type = type(out_dir)
     real_mkdir = path_type.mkdir
 
-    def _deny_mkdir(self: Path, *args: object, **kwargs: object) -> None:
+    def _deny_mkdir(
+        self: Path,
+        mode: int = 0o777,
+        parents: bool = False,
+        exist_ok: bool = False,
+    ) -> None:
         if self == out_dir:
             raise PermissionError("denied")
-        return real_mkdir(self, *args, **kwargs)
+        real_mkdir(self, mode, parents=parents, exist_ok=exist_ok)
 
     monkeypatch.setattr(path_type, "mkdir", _deny_mkdir)
 
@@ -1083,7 +1088,7 @@ def test_save_frame_with_ffmpeg_honours_timeout(monkeypatch: pytest.MonkeyPatch,
     cfg = ScreenshotConfig(ffmpeg_timeout_seconds=37.5)
     recorded: dict[str, object] = {}
 
-    def fake_run(cmd, **kwargs):  # type: ignore[override]
+    def fake_run(cmd: Sequence[str], **kwargs: Any):  # type: ignore[override]
         recorded.update(kwargs)
         recorded["cmd"] = cmd
 
@@ -1155,8 +1160,10 @@ def test_save_frame_with_ffmpeg_disables_timeout_when_zero(
 def test_save_frame_with_ffmpeg_raises_on_timeout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     cfg = ScreenshotConfig(ffmpeg_timeout_seconds=5.0)
 
-    def fake_run(*args, **kwargs):  # type: ignore[override]
-        raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs.get("timeout"))
+    def fake_run(*args: object, **kwargs: Any):  # type: ignore[override]
+        timeout_value = float(kwargs.get("timeout", 0.0) or 0.0)
+        cmd_arg = cast(Any, args[0])
+        raise subprocess.TimeoutExpired(cmd=cmd_arg, timeout=timeout_value)
 
     monkeypatch.setattr(screenshot.shutil, "which", lambda _: "ffmpeg")
     monkeypatch.setattr(screenshot.subprocess, "run", fake_run)

@@ -284,7 +284,8 @@ def upload_comparison(
     if not image_files:
         raise SlowpicsAPIError("No image files provided for upload")
 
-    with requests.Session() as session:
+    session = requests.Session()
+    try:
         try:
             session.get("https://slow.pics/comparison", timeout=_CONNECT_TIMEOUT_SECONDS)
         except requests.RequestException as exc:
@@ -304,3 +305,5 @@ def upload_comparison(
         )
         logger.info("Slow.pics: %s", url)
         return url
+    finally:
+        session.close()

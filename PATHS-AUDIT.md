@@ -43,3 +43,5 @@
 - Atomic config seeding and preflight writability probes stop permission issues before rendering.
 - Site-packages detection spans workspace root and all derived paths, preventing accidental writes alongside installed packages.
 - `PathsConfig.input_dir` default is now relative (`"comparison_videos"`), reinforcing the requirement that media and screenshots stay inside the workspace root.
+- Analysis cache (`analysis.frame_data_filename`) and audio offsets (`audio_alignment.offsets_filename`) now pass through `_resolve_workspace_subdir`, so any attempt to escape the media root (absolute paths or `..`) raises a `CLIAppError`; regression tests cover these guards.
+- slow.pics cleanup only deletes screenshot directories created during the current run, preventing accidental removal of pre-existing folders.

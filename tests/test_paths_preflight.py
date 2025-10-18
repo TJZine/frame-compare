@@ -100,6 +100,41 @@ def test_collect_path_diagnostics_reports_expected_structure(tmp_path: Path) -> 
     }
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("analysis.frame_data_filename", "../escape.compframes"),
+        ("analysis.frame_data_filename", "/tmp/outside.compframes"),
+        ("audio_alignment.offsets_filename", "../escape_offsets.toml"),
+        ("audio_alignment.offsets_filename", "/tmp/outside_offsets.toml"),
+    ),
+)
+def test_collect_path_diagnostics_rejects_escaped_subpaths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: str,
+) -> None:
+    """
+    Ensure user-configured cache or offsets paths cannot escape the media root.
+    """
+
+    cfg = frame_compare._fresh_app_config()
+    target_section, target_attr = field.split(".")
+    setattr(getattr(cfg, target_section), target_attr, value)
+
+    monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
+
+    with pytest.raises(frame_compare.CLIAppError) as excinfo:
+        frame_compare._collect_path_diagnostics(
+            cli_root=str(tmp_path),
+            config_override="ignored",
+            input_override=None,
+        )
+
+    assert target_attr in str(excinfo.value)
+
+
 def test_copy_default_config_matches_template(tmp_path: Path) -> None:
     target = tmp_path / "config.toml"
     copy_default_config(target)

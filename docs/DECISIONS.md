@@ -1,5 +1,7 @@
 # Decisions Log
 
+- *2025-10-26:* Enforced workspace containment for analysis cache and audio offset files via `_resolve_workspace_subdir`, added regression coverage for escape attempts, removed the generated `config.toml` (template remains the source of defaults), and limited automatic screenshot cleanup to directories created during the active run.
+- *2025-10-26:* Constrained supported Python versions to 3.13.x (`>=3.13,<3.14`) because `librosa`/`numba` fail to build on 3.14; updated pyproject/lock files accordingly.
 - *2025-10-24:* Locked workspace root discovery to `--root`/`FRAME_COMPARE_ROOT`/sentinel hierarchy, seeded config under `ROOT/config/config.toml`, enforced `ROOT/comparison_videos[/screens]` outputs, and added diagnostics + site-packages guardrails.
 - *2025-10-22:* Default config seeding now targets `~/.frame-compare/config.toml`, the packaged template lives under `src/data/` with explicit package data so wheels retain it, and `[paths].input_dir` defaults to `~/comparison_videos` to avoid site-packages permission traps. *(superseded by 2025-10-24 workspace root lock.)*
 - *2025-10-21:* `copy_default_config` now honours `$FRAME_COMPARE_TEMPLATE_PATH` and falls back to the repository template when the packaged `data` module is unavailable, letting us drop the setuptools package-dir mapping without breaking config seeding.

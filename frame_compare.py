@@ -278,7 +278,7 @@ class TrimsJSON(TypedDict):
     per_clip: dict[str, TrimClipEntry]
 
 
-class JsonTail(TypedDict, total=False):
+class JsonTail(TypedDict):
     clips: list[dict[str, object]]
     trims: TrimsJSON
     window: dict[str, object]
@@ -292,6 +292,7 @@ class JsonTail(TypedDict, total=False):
     cache: dict[str, object]
     slowpics: SlowpicsJSON
     warnings: list[str]
+    workspace: dict[str, object]
 
 
 class ClipRecord(TypedDict):
@@ -355,11 +356,12 @@ def _ensure_slowpics_block(json_tail: JsonTail, cfg: AppConfig) -> SlowpicsJSON:
 class RunResult:
     """
     Outcome of a full frame comparison run including export artefacts.
-
+    
     Attributes:
         files (List[Path]): Input media files included in the run.
         frames (List[int]): Frame numbers selected for screenshot generation.
         out_dir (Path): Output directory containing generated assets.
+        out_dir_created (bool): Whether this run created ``out_dir`` (used to guard cleanup).
         root (Path): Resolved input root directory used for all generated artefacts.
         config (AppConfig): Effective application configuration.
         image_paths (List[str]): Paths to the generated screenshots.
@@ -369,6 +371,7 @@ class RunResult:
     files: List[Path]
     frames: List[int]
     out_dir: Path
+    out_dir_created: bool
     root: Path
     config: AppConfig
     image_paths: List[str]
@@ -1012,8 +1015,16 @@ def _collect_path_diagnostics(
         cfg.screenshots.directory_name,
         purpose="screenshots.directory_name",
     )
-    analysis_cache = (media_root / cfg.analysis.frame_data_filename).resolve()
-    offsets_path = (media_root / cfg.audio_alignment.offsets_filename).resolve()
+    analysis_cache = _resolve_workspace_subdir(
+        media_root,
+        cfg.analysis.frame_data_filename,
+        purpose="analysis.frame_data_filename",
+    )
+    offsets_path = _resolve_workspace_subdir(
+        media_root,
+        cfg.audio_alignment.offsets_filename,
+        purpose="audio_alignment.offsets_filename",
+    )
 
     path_map = {
         "workspace_root": workspace_root,
@@ -1749,7 +1760,11 @@ def _build_cache_info(root: Path, plans: Sequence[_ClipPlan], cfg: AppConfig, an
     if fps_den <= 0:
         fps_den = 1
 
-    cache_path = (root / cfg.analysis.frame_data_filename).resolve()
+    cache_path = _resolve_workspace_subdir(
+        root,
+        cfg.analysis.frame_data_filename,
+        purpose="analysis.frame_data_filename",
+    )
     return FrameMetricsCacheInfo(
         path=cache_path,
         files=[plan.path.name for plan in plans],
@@ -1940,7 +1955,11 @@ def _maybe_apply_audio_alignment(
         CLIAppError: If the offsets file cannot be read or if the underlying audio alignment process fails.
     """
     audio_cfg = cfg.audio_alignment
-    offsets_path = (root / audio_cfg.offsets_filename).resolve()
+    offsets_path = _resolve_workspace_subdir(
+        root,
+        audio_cfg.offsets_filename,
+        purpose="audio_alignment.offsets_filename",
+    )
     display_data = _AudioAlignmentDisplayData(
         stream_lines=[],
         estimation_line=None,
@@ -2719,8 +2738,30 @@ def run_cli(
         cfg.screenshots.directory_name,
         purpose="screenshots.directory_name",
     )
-    analysis_cache_path = (root / cfg.analysis.frame_data_filename).resolve()
-    offsets_path = (root / cfg.audio_alignment.offsets_filename).resolve()
+    out_dir_preexisting = out_dir.exists()
+    created_out_dir = False
+    if not out_dir_preexisting:
+        try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise CLIAppError(
+                f"Unable to create screenshots directory '{out_dir}': {exc}",
+                rich_message=(
+                    "[red]Unable to create screenshots directory.[/red] "
+                    f"Adjust [screenshots].directory_name or choose a writable --root. ({exc})"
+                ),
+            ) from exc
+        created_out_dir = True
+    analysis_cache_path = _resolve_workspace_subdir(
+        root,
+        cfg.analysis.frame_data_filename,
+        purpose="analysis.frame_data_filename",
+    )
+    offsets_path = _resolve_workspace_subdir(
+        root,
+        cfg.audio_alignment.offsets_filename,
+        purpose="audio_alignment.offsets_filename",
+    )
     _abort_if_site_packages(
         {
             "config": config_location,
@@ -2764,12 +2805,6 @@ def run_cli(
         "trims": {"per_clip": {}},
         "window": {},
         "alignment": {"manual_start_s": 0.0, "manual_end_s": "unchanged"},
-        "workspace": {
-            "root": str(workspace_root),
-            "media_root": str(root),
-            "config_path": str(config_location),
-            "legacy_config": bool(preflight.legacy_config),
-        },
         "audio_alignment": {
             "enabled": bool(cfg.audio_alignment.enable),
             "reference_stream": None,
@@ -2783,6 +2818,7 @@ def run_cli(
         "analysis": {},
         "render": {},
         "tonemap": {},
+        "overlay": {},
         "verify": {
             "count": 0,
             "threshold": float(cfg.color.verify_luma_threshold),
@@ -2796,6 +2832,12 @@ def run_cli(
             "entries": [],
         },
         "cache": {},
+        "workspace": {
+            "root": str(workspace_root),
+            "media_root": str(root),
+            "config_path": str(config_location),
+            "legacy_config": bool(preflight.legacy_config),
+        },
         "slowpics": {
             "enabled": bool(cfg.slowpics.auto_upload),
             "title": {
@@ -3602,7 +3644,11 @@ def run_cli(
             selection_details=selection_details,
         )
     if not cfg.analysis.save_frames_data:
-        compframes_path = (root / cfg.analysis.frame_data_filename).resolve()
+        compframes_path = _resolve_workspace_subdir(
+            root,
+            cfg.analysis.frame_data_filename,
+            purpose="analysis.frame_data_filename",
+        )
         write_selection_cache_file(
             compframes_path,
             analyzed_file=analyze_path.name,
@@ -4020,6 +4066,7 @@ def run_cli(
         files=[plan.path for plan in plans],
         frames=list(frames),
         out_dir=out_dir,
+        out_dir_created=created_out_dir,
         root=root,
         config=cfg,
         image_paths=list(image_paths),
@@ -4280,6 +4327,11 @@ def main(
                 print(
                     "[yellow]Warning:[/yellow] Skipping screenshot cleanup because the output"
                     f" directory {out_dir} is outside the input root {result.root}"
+                )
+            elif not result.out_dir_created:
+                print(
+                    "[yellow]Warning:[/yellow] Screenshot directory existed before this run; "
+                    "skipping automatic cleanup."
                 )
             else:
                 try:
