@@ -17,6 +17,8 @@ __pycache__/
 screens/
 dist/
 build/
+comparison_videos/**
+!comparison_videos/.gitkeep
 
 # Ignore User Config
 /config.toml

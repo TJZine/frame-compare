@@ -69,7 +69,7 @@ def launch(url: str, **kwargs: Any) -> bool | None: ...
 
 class exceptions:
     class Exit(Exception):
-        __slots__ = ("exit_code",)
+        __slots__ = ("exit_code", "code")
 
         exit_code: int | str | None
         code: int | str | None

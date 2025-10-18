@@ -872,7 +872,19 @@ def _prepare_preflight(
     warnings: list[str] = []
 
     if create_dirs:
-        workspace_root.mkdir(parents=True, exist_ok=True)
+        try:
+            workspace_root.mkdir(parents=True, exist_ok=True)
+        except PermissionError as exc:
+            detail = exc.strerror or "Permission denied"
+            message = f"Unable to create workspace root '{workspace_root}': {detail}"
+            raise CLIAppError(
+                message,
+                code=2,
+                rich_message=(
+                    "[red]Unable to create workspace root:[/red] "
+                    f"{escape(str(workspace_root))} ({escape(detail)})"
+                ),
+            ) from exc
     elif not workspace_root.exists():
         parent = workspace_root.parent
         if not parent.exists() or not os.access(parent, os.W_OK):
@@ -911,7 +923,19 @@ def _prepare_preflight(
                     f"Using legacy config at {legacy_path}. Move it to {config_dir / 'config.toml'}."
                 )
             elif ensure_config:
-                config_dir.mkdir(parents=True, exist_ok=True)
+                try:
+                    config_dir.mkdir(parents=True, exist_ok=True)
+                except PermissionError as exc:
+                    detail = exc.strerror or "Permission denied"
+                    message = f"Unable to create config directory '{config_dir}': {detail}"
+                    raise CLIAppError(
+                        message,
+                        code=2,
+                        rich_message=(
+                            "[red]Unable to create config directory:[/red] "
+                            f"{escape(str(config_dir))} ({escape(detail)})"
+                        ),
+                    ) from exc
                 _seed_default_config(config_path)
 
     if _path_contains_site_packages(config_path):
@@ -963,7 +987,19 @@ def _prepare_preflight(
     )
 
     if create_media_dir:
-        media_root.mkdir(parents=True, exist_ok=True)
+        try:
+            media_root.mkdir(parents=True, exist_ok=True)
+        except PermissionError as exc:
+            detail = exc.strerror or "Permission denied"
+            message = f"Unable to create input workspace '{media_root}': {detail}"
+            raise CLIAppError(
+                message,
+                code=2,
+                rich_message=(
+                    "[red]Unable to create input workspace:[/red] "
+                    f"{escape(str(media_root))} ({escape(detail)})"
+                ),
+            ) from exc
     elif not media_root.exists():
         parent = media_root.parent
         if not parent.exists() or not os.access(parent, os.W_OK):
@@ -1025,15 +1061,6 @@ def _collect_path_diagnostics(
         cfg.audio_alignment.offsets_filename,
         purpose="audio_alignment.offsets_filename",
     )
-
-    path_map = {
-        "workspace_root": workspace_root,
-        "media_root": media_root,
-        "config": config_path,
-        "screens": screens_dir,
-        "analysis_cache": analysis_cache,
-        "audio_offsets": offsets_path,
-    }
 
     under_site_packages = any(
         _path_contains_site_packages(path) for path in (workspace_root, media_root, config_path)

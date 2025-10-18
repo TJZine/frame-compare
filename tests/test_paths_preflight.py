@@ -9,6 +9,18 @@ import frame_compare
 from src.config_template import copy_default_config
 
 
+def _block_mkdir(monkeypatch: pytest.MonkeyPatch, target: Path) -> None:
+    blocked_resolved = target.resolve()
+    original_mkdir = Path.mkdir
+
+    def fake(self: Path, *args: object, **kwargs: object) -> None:
+        if Path(self).resolve() == blocked_resolved:
+            raise PermissionError("Permission denied")
+        return original_mkdir(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", fake)
+
+
 def test_prepare_preflight_cli_root_seeds_config(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     ctx = frame_compare._prepare_preflight(
@@ -78,6 +90,62 @@ def test_prepare_preflight_rejects_site_packages(tmp_path: Path) -> None:
             create_dirs=True,
             create_media_dir=True,
         )
+
+
+def test_prepare_preflight_workspace_permission_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    workspace = (tmp_path / "workspace").resolve()
+    _block_mkdir(monkeypatch, workspace)
+
+    with pytest.raises(frame_compare.CLIAppError) as excinfo:
+        frame_compare._prepare_preflight(
+            cli_root=str(workspace),
+            config_override=None,
+            input_override=None,
+            ensure_config=False,
+            create_dirs=True,
+            create_media_dir=False,
+        )
+
+    assert "Unable to create workspace root" in str(excinfo.value)
+    assert excinfo.value.code == 2
+
+
+def test_prepare_preflight_config_permission_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    workspace = (tmp_path / "workspace").resolve()
+    config_dir = workspace / "config"
+    _block_mkdir(monkeypatch, config_dir)
+
+    with pytest.raises(frame_compare.CLIAppError) as excinfo:
+        frame_compare._prepare_preflight(
+            cli_root=str(workspace),
+            config_override=None,
+            input_override=None,
+            ensure_config=True,
+            create_dirs=True,
+            create_media_dir=False,
+        )
+
+    assert "Unable to create config directory" in str(excinfo.value)
+    assert excinfo.value.code == 2
+
+
+def test_prepare_preflight_media_permission_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    workspace = (tmp_path / "workspace").resolve()
+    media_dir = workspace / "comparison_videos"
+    _block_mkdir(monkeypatch, media_dir)
+
+    with pytest.raises(frame_compare.CLIAppError) as excinfo:
+        frame_compare._prepare_preflight(
+            cli_root=str(workspace),
+            config_override=None,
+            input_override=None,
+            ensure_config=False,
+            create_dirs=True,
+            create_media_dir=True,
+        )
+
+    assert "Unable to create input workspace" in str(excinfo.value)
+    assert excinfo.value.code == 2
 
 
 def test_collect_path_diagnostics_reports_expected_structure(tmp_path: Path) -> None:

@@ -1,7 +1,7 @@
 # ADR 0001 — Workspace Root Lock & Path Policy
 
 Status: Accepted  
-Date: 2025-10-24  
+Date: 2025-10-18  
 Owner: Tooling / Release
 
 ## Context
