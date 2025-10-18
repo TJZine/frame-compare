@@ -1,11 +1,54 @@
 from typing import Any
 
+try:
+    from rich.console import Console as _RichConsole
+except Exception:  # pragma: no cover - rich not available during typing stubs
+    _RichConsole = None
+
+
 class Console:
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        self.width = int(kwargs.get("width", 80))
+        width = int(kwargs.get("width", 80))
+        height = int(kwargs.get("height", 25))
+        self.width = width
+        self.height = height
+        self.size = (width, height)
+        forwarded_kwargs = dict(kwargs)
+        forwarded_kwargs["width"] = width
+        forwarded_kwargs["height"] = height
+        try:
+            self._rich_console = (
+                _RichConsole(*args, **forwarded_kwargs) if _RichConsole is not None else None
+            )
+        except Exception:
+            self._rich_console = None
 
     def print(self, *args: Any, **kwargs: Any) -> None:
         pass
+
+    def rule(
+        self,
+        title: str | None = None,
+        *,
+        characters: str = "\u2500",
+        style: str = "rule.line",
+        align: str = "center",
+        **kwargs: Any,
+    ) -> None:
+        console = self._rich_console
+        if console is None and _RichConsole is not None:
+            console = _RichConsole(width=self.width, height=self.height)
+        if console is None:
+            return
+        console.width = self.width
+        console.height = self.height
+        console.rule(
+            title,
+            characters=characters,
+            style=style,
+            align=align,
+            **kwargs,
+        )
 
     def status(self, *args: Any, **kwargs: Any) -> "Status":
         return Status()

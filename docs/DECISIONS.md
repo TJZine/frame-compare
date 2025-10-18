@@ -1,5 +1,14 @@
 # Decisions Log
 
+- *2025-10-26:* Enforced workspace containment for analysis cache and audio offset files via `_resolve_workspace_subdir`, added regression coverage for escape attempts, removed the generated `config.toml` (template remains the source of defaults), and limited automatic screenshot cleanup to directories created during the active run.
+- *2025-10-26:* Constrained supported Python versions to 3.13.x (`>=3.13,<3.14`) because `librosa`/`numba` fail to build on 3.14; updated pyproject/lock files accordingly.
+- *2025-10-24:* Locked workspace root discovery to `--root`/`FRAME_COMPARE_ROOT`/sentinel hierarchy, seeded config under `ROOT/config/config.toml`, enforced `ROOT/comparison_videos[/screens]` outputs, and added diagnostics + site-packages guardrails.
+- *2025-10-22:* Default config seeding now targets `~/.frame-compare/config.toml`, the packaged template lives under `src/data/` with explicit package data so wheels retain it, and `[paths].input_dir` defaults to `~/comparison_videos` to avoid site-packages permission traps. *(superseded by 2025-10-24 workspace root lock.)*
+- *2025-10-21:* `copy_default_config` now honours `$FRAME_COMPARE_TEMPLATE_PATH` and falls back to the repository template when the packaged `data` module is unavailable, letting us drop the setuptools package-dir mapping without breaking config seeding.
+- *2025-10-21:* Screenshot generation wraps directory creation failures in `ScreenshotError` so permission-denied errors surface with actionable guidance about choosing a writable `[paths].input_dir`.
+- *2025-10-19:* When the packaged install directory is read-only we now seed the default config under `~/.frame-compare/config.toml`, logging the relocation so users know to point overrides there instead of the site-packages path. *(legacy approach prior to 2025-10-24 root lock.)*
+- *2025-10-20:* Restored the ability to disable FFmpeg screenshot timeouts by permitting `screenshots.ffmpeg_timeout_seconds = 0` and treating non-positive values as "no timeout" when invoking FFmpeg.
+- *2025-10-18:* Added `screenshots.ffmpeg_timeout_seconds` plus `-nostdin` when spawning FFmpeg to stop runaway renders from freezing Windows shells; surfaced the timeout in CLI render metadata and config docs.
 - *2025-10-17:* CLI layout tweaks: dropped the banner headline, repurposed the Analyze slot to show cached-metric reuse, removed the At-a-Glance crop-mod snippet in favour of resolved tonemap nits, and slimmed the Summary output block to avoid redundant frame counts.
 - *2025-10-16:* Deep review flagged that `screenshots.directory_name` must be constrained to stay under the resolved input root before cleanup; follow-up will enforce containment checks before writing or deleting screenshot outputs (see `docs/deep_review.md`).
 - *2025-10-15:* Relocated bundled comparison fixtures from `tests/fixtures/media/comparison_videos` to the repository-root

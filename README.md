@@ -28,7 +28,25 @@ Requirements:
 
 Repository fixtures live under `comparison_videos/` beside
 `frame_compare.py`; they provide tiny MKV stubs suitable for smoke
-tests and match the default `paths.input_dir`.
+tests. By default the workspace root resolves to the repo checkout, so
+the tool scans `ROOT/comparison_videos`; copy the fixtures there (or
+set `[paths].input_dir` to another subdirectory under your chosen
+`ROOT`) before running comparisons.
+
+### Path diagnostics (Phase 1 guardrail)
+
+Run the temporary diagnostics flag to inspect the paths Frame Compare will touch before heavy work starts:
+
+```bash
+python -m frame_compare --diagnose-paths
+frame-compare --diagnose-paths
+FRAME_COMPARE_ROOT=. frame-compare --diagnose-paths
+frame-compare --root . --diagnose-paths
+```
+
+The command prints a single JSON line listing the resolved config, input root, screenshot directory, and basic writability flags so you can spot site-packages or read-only locations early.
+
+Need to seed a workspace config? Run `frame-compare --root <path> --write-config` (or the equivalent `python -m frame_compare --root <path> --write-config`) to ensure `ROOT/config/config.toml` is created in advance.
 
 ```bash
 uv sync
@@ -37,7 +55,7 @@ uv pip install vapoursynth  # or `uv add vapoursynth` to persist it to your proj
 uv run python frame_compare.py
 ```
 
-The CLI ships with a configuration template stored at `data/config.toml.template`. Frame Compare loads that packaged template by default so the CLI works out of the box. When you want to edit the defaults, copy the template to a writable location—`python -c "from src.config_template import copy_default_config; copy_default_config('~/frame_compare.toml')"` is a quick way—and point the CLI at it with `--config` or by setting `$FRAME_COMPARE_CONFIG`.
+The CLI ships with a configuration template stored at `src/data/config.toml.template` (packaged as `data/config.toml.template`). Frame Compare resolves that template by first honouring `$FRAME_COMPARE_TEMPLATE_PATH` (useful when you store templates outside the repository), then falling back to the packaged copy or the on-disk file. When you want to edit the defaults, copy the template to a writable location—`python -c "from src.config_template import copy_default_config; copy_default_config('config/config.toml')"` is a quick way—and point the CLI at it with `--config`/`--root` or the matching environment variables.
 
 Install VapourSynth manually after `uv sync` so the renderer is available:
 
@@ -68,17 +86,21 @@ Expected outputs: PNGs under `screens/…`, cached metrics in
 `generated.audio_offsets.toml`, and (when uploads are enabled) a
 slow.pics shortcut file.
 
+Screenshot renders are written beneath the resolved input directory (for example `ROOT/comparison_videos/screens`). Make sure that directory exists and is writable before running the CLI—if you installed the project somewhere read-only, set `--root`/`FRAME_COMPARE_ROOT` to a directory you control so Frame Compare can create the subdirectories it needs.
+
 ## Configuration essentials
 
-Frame Compare looks for its configuration at the path specified by the
-``$FRAME_COMPARE_CONFIG`` environment variable. When the variable is unset, the
-CLI uses ``config.toml`` alongside ``frame_compare.py``. If that file does not
-exist, the CLI seeds it from the bundled ``data/config.toml.template`` before
-loading so a fresh checkout is immediately runnable. To customise the
-settings, edit ``config.toml`` directly or copy the template to another
-writable location with ``python -c 'from src.config_template import
-copy_default_config; copy_default_config("~/frame-compare.toml")'`` and either
-set ``$FRAME_COMPARE_CONFIG`` or pass ``--config`` when invoking the CLI.
+Frame Compare looks for its configuration at ``ROOT/config/config.toml``, where
+``ROOT`` is resolved via ``--root``/``$FRAME_COMPARE_ROOT`` or, by default, the
+nearest ancestor containing ``pyproject.toml``, ``.git``, or
+``comparison_videos``. Override the location with ``$FRAME_COMPARE_CONFIG`` or
+``--config`` when you need an explicit path. If the file is missing, the CLI
+seeds it atomically from ``data/config.toml.template`` inside the root (refusing
+to write inside site-packages). Legacy installs with ``ROOT/config.toml`` still
+load but emit a migration warning so you can relocate the file. To customise the
+settings manually, edit the seeded file or copy the template to another
+subdirectory with ``python -c 'from src.config_template import copy_default_config; copy_default_config("my-root/config/config.toml")'`` and point ``--root`` at
+``my-root``.
 
 The most common toggles are below; see the
 [full reference](docs/README_REFERENCE.md) for every option.
@@ -86,7 +108,7 @@ The most common toggles are below; see the
 <!-- markdownlint-disable MD013 -->
 | Key | What it controls | Default | Example |
 | --- | --- | --- | --- |
-| `[paths].input_dir` | Base scan directory. | `"comparison_videos"` | `input_dir="comparison_videos"` |
+| `[paths].input_dir` | Base scan directory under the workspace root. | `"comparison_videos"` | `input_dir="comparison_videos"` |
 | `--input PATH` | One-off scan override. | `None` | `--input /data/releases` |
 | `[analysis].frame_count_dark / frame_count_bright` | Scene quotas for shadows and highlights. | `20 / 10` | `frame_count_dark=12` |
 | `[analysis].frame_count_motion` | Motion-heavy frame quota. | `10` | `frame_count_motion=24` |

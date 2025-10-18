@@ -1,6 +1,7 @@
 import json
 import types
 import importlib
+import pathlib
 from pathlib import Path
 from collections.abc import Iterable, Sequence
 from typing import Any, Mapping, cast
@@ -28,112 +29,11 @@ from src.datatypes import (
     TMDBConfig,
 )
 from src.tmdb import TMDBAmbiguityError, TMDBCandidate, TMDBResolution
-from src.config_template import copy_default_config
 
 
 @pytest.fixture
 def runner() -> CliRunner:
     return CliRunner()
-
-
-def test_cli_uses_repo_config_by_default(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runner: CliRunner
-) -> None:
-    monkeypatch.delenv("FRAME_COMPARE_CONFIG", raising=False)
-    module_default = importlib.reload(frame_compare)
-
-    try:
-        project_config = Path(module_default.__file__).resolve().with_name("config.toml")
-        template_path = (
-            Path(module_default.__file__).resolve().with_name("data") / "config.toml.template"
-        ).resolve()
-
-        assert module_default.DEFAULT_CONFIG_PATH == project_config
-        assert module_default.PROJECT_CONFIG_PATH == project_config
-        assert module_default.PACKAGED_TEMPLATE_PATH == template_path
-
-        default_result = runner.invoke(module_default.main, ["--help"])
-        assert default_result.exit_code == 0, default_result.output
-        default_output = default_result.output.replace("\n", "").replace(" ", "")
-
-        default_option = next(
-            param for param in module_default.main.params if param.name == "config_path"
-        )
-        assert default_option.default == str(project_config)
-        assert str(project_config) in default_output
-
-        override_target = (tmp_path / "config" / "config.toml").resolve()
-        monkeypatch.setenv("FRAME_COMPARE_CONFIG", str(override_target))
-        module_override = importlib.reload(frame_compare)
-
-        assert module_override.DEFAULT_CONFIG_PATH == override_target
-
-        override_result = runner.invoke(module_override.main, ["--help"])
-        assert override_result.exit_code == 0, override_result.output
-        override_output = override_result.output.replace("\n", "").replace(" ", "")
-
-        override_option = next(
-            param for param in module_override.main.params if param.name == "config_path"
-        )
-        assert override_option.default == str(override_target)
-        assert str(override_target) in override_output
-
-        seeded_path = copy_default_config(tmp_path / "seeded-config.toml")
-        assert seeded_path.exists()
-        assert "[paths]" in seeded_path.read_text()
-    finally:
-        monkeypatch.delenv("FRAME_COMPARE_CONFIG", raising=False)
-        importlib.reload(frame_compare)
-
-
-def test_ensure_config_present_seeds_missing_default(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("FRAME_COMPARE_CONFIG", str(tmp_path / "config.toml"))
-    module = importlib.reload(frame_compare)
-
-    try:
-        target = module.DEFAULT_CONFIG_PATH
-        assert target == tmp_path / "config.toml"
-        assert not target.exists()
-
-        calls: list[Path] = []
-
-        def fake_copy(destination: Path) -> Path:
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_text("seeded")
-            calls.append(destination)
-            return destination
-
-        monkeypatch.setattr(module, "copy_default_config", fake_copy)
-
-        result = module._ensure_config_present(target)
-        assert result == target
-        assert target.exists()
-        assert calls == [target]
-    finally:
-        monkeypatch.delenv("FRAME_COMPARE_CONFIG", raising=False)
-        importlib.reload(frame_compare)
-
-
-def test_ensure_config_present_skips_copy_for_non_default(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    module = importlib.reload(frame_compare)
-
-    other_path = tmp_path / "custom" / "config.toml"
-    calls: list[Path] = []
-
-    def fake_copy(destination: Path) -> Path:  # pragma: no cover - should not run
-        calls.append(destination)
-        return destination
-
-    monkeypatch.setattr(module, "copy_default_config", fake_copy)
-
-    result = module._ensure_config_present(other_path)
-    assert result == other_path
-    assert calls == []
-
 
 class DummyProgress:
     def __init__(self, *_, **__):
@@ -158,6 +58,37 @@ JsonMapping = Mapping[str, Any]
 def _expect_mapping(value: object) -> JsonMapping:
     assert isinstance(value, Mapping)
     return cast(JsonMapping, value)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("analysis.frame_data_filename", "../escape.compframes"),
+        ("analysis.frame_data_filename", "/tmp/outside.compframes"),
+        ("audio_alignment.offsets_filename", "../escape_offsets.toml"),
+        ("audio_alignment.offsets_filename", "/tmp/outside_offsets.toml"),
+    ),
+)
+def test_run_cli_rejects_subpath_escape(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: str,
+) -> None:
+    """
+    Ensure run_cli refuses cache or offsets paths that escape the media root.
+    """
+
+    cfg = frame_compare._fresh_app_config()
+    section_name, attr_name = field.split(".")
+    setattr(getattr(cfg, section_name), attr_name, value)
+
+    monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
+
+    with pytest.raises(frame_compare.CLIAppError) as excinfo:
+        frame_compare.run_cli("ignored", None, root_override=str(tmp_path))
+
+    assert field in str(excinfo.value)
 
 
 def _make_config(input_dir: Path) -> AppConfig:
@@ -344,7 +275,6 @@ def test_run_cli_falls_back_to_project_root_for_relative_input(
     cfg = _make_config(Path("comparison_videos"))
 
     monkeypatch.setattr(frame_compare, "load_config", lambda _path: cfg)
-    monkeypatch.setattr(frame_compare, "_ensure_config_present", lambda path: Path(path))
     monkeypatch.setattr(frame_compare.vs_core, "configure", lambda *args, **kwargs: None)
 
     recorded_roots: list[Path] = []
@@ -361,8 +291,7 @@ def test_run_cli_falls_back_to_project_root_for_relative_input(
     with pytest.raises(frame_compare.CLIAppError, match="sentinel"):
         frame_compare.run_cli(str(config_path))
 
-    expected_root = _comparison_fixture_root().resolve()
-    assert expected_root.exists()
+    expected_root = (tmp_path / "comparison_videos").resolve()
     assert recorded_roots == [expected_root]
 
 
@@ -374,7 +303,6 @@ def test_run_cli_does_not_fallback_for_cli_override(
     cfg = _make_config(tmp_path)
 
     monkeypatch.setattr(frame_compare, "load_config", lambda _path: cfg)
-    monkeypatch.setattr(frame_compare, "_ensure_config_present", lambda path: Path(path))
     def _fail_discover(*_args: object, **_kwargs: object) -> list[Path]:
         raise AssertionError("should not discover")
 
@@ -883,7 +811,9 @@ def test_cli_tmdb_resolution_populates_slowpics(
     assert result.config.slowpics.tmdb_category == "MOVIE"
     assert result.config.slowpics.collection_name == "Resolved Title (2023) [MOVIE]"
     assert result.json_tail is not None
-    slowpics_json = _expect_mapping(result.json_tail["slowpics"])
+    slowpics_value = result.json_tail.get("slowpics")
+    assert slowpics_value is not None
+    slowpics_json = _expect_mapping(slowpics_value)
     title_json = _expect_mapping(slowpics_json["title"])
     inputs_json = _expect_mapping(title_json["inputs"])
     assert title_json["final"] == "Resolved Title (2023) [MOVIE]"
@@ -958,7 +888,9 @@ def test_cli_tmdb_resolution_sets_default_collection_name(
     assert result.config.slowpics.tmdb_id == "12345"
     assert result.config.slowpics.tmdb_category == "MOVIE"
     assert result.json_tail is not None
-    slowpics_json = _expect_mapping(result.json_tail["slowpics"])
+    slowpics_value = result.json_tail.get("slowpics")
+    assert slowpics_value is not None
+    slowpics_json = _expect_mapping(slowpics_value)
     title_json = _expect_mapping(slowpics_json["title"])
     inputs_json = _expect_mapping(title_json["inputs"])
     assert title_json["final"].startswith("Resolved Title (2023)")
@@ -1024,7 +956,9 @@ def test_collection_suffix_appended(
 
     assert result.config.slowpics.collection_name == "Sample Movie (2021) [Hybrid]"
     assert result.json_tail is not None
-    slowpics_json = _expect_mapping(result.json_tail["slowpics"])
+    slowpics_value = result.json_tail.get("slowpics")
+    assert slowpics_value is not None
+    slowpics_json = _expect_mapping(slowpics_value)
     title_json = _expect_mapping(slowpics_json["title"])
     inputs_json = _expect_mapping(title_json["inputs"])
     assert title_json["final"] == "Sample Movie (2021) [Hybrid]"

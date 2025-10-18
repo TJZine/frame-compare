@@ -16,22 +16,59 @@ import time
 import traceback
 import webbrowser
 from collections import Counter, defaultdict
+from collections.abc import Mapping as MappingABC
 from dataclasses import dataclass, field
 import datetime as _dt
 from pathlib import Path
 from string import Template
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Final
+from typing import (
+    Any,
+    Callable,
+    ContextManager,
+    Dict,
+    Final,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    TypedDict,
+    TypeVar,
+    cast,
+)
 
 import click
 from rich import print
 from rich.console import Console
 from rich.markup import escape
-from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn, TimeRemainingColumn
+from rich.progress import (
+    BarColumn,
+    Progress,
+    ProgressColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
 from natsort import os_sorted
 
 from src.config_loader import ConfigError, load_config
 from src.config_template import copy_default_config
-from src.datatypes import AppConfig
+from src.datatypes import (
+    AnalysisConfig,
+    AppConfig,
+    AudioAlignmentConfig,
+    CLIConfig,
+    ColorConfig,
+    NamingConfig,
+    OverridesConfig,
+    PathsConfig,
+    RuntimeConfig,
+    ScreenshotConfig,
+    SlowpicsConfig,
+    SourceConfig,
+    TMDBConfig,
+)
 from src import audio_alignment
 from src.utils import parse_filename_metadata
 from src import vs_core
@@ -63,23 +100,16 @@ from src.cli_layout import CliLayoutRenderer, CliLayoutError, load_cli_layout
 logger = logging.getLogger(__name__)
 
 CONFIG_ENV_VAR: Final[str] = "FRAME_COMPARE_CONFIG"
+ROOT_ENV_VAR: Final[str] = "FRAME_COMPARE_ROOT"
+ROOT_SENTINELS: Final[tuple[str, ...]] = ("pyproject.toml", ".git", "comparison_videos")
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parent
-PROJECT_CONFIG_PATH: Final[Path] = (PROJECT_ROOT / "config.toml").resolve()
-PACKAGED_TEMPLATE_PATH: Final[Path] = (PROJECT_ROOT / "data" / "config.toml.template").resolve()
-
-
-def _resolve_default_config_path() -> Path:
-    override = os.environ.get(CONFIG_ENV_VAR)
-    if override:
-        return Path(override).expanduser().resolve()
-    return PROJECT_CONFIG_PATH
-
-
-DEFAULT_CONFIG_PATH: Final[Path] = _resolve_default_config_path()
+PACKAGED_TEMPLATE_PATH: Final[Path] = (
+    PROJECT_ROOT / "src" / "data" / "config.toml.template"
+).resolve()
 
 _DEFAULT_CONFIG_HELP: Final[str] = (
-    f"Path to the configuration file. Defaults to ${CONFIG_ENV_VAR} when set, "
-    f"otherwise {PROJECT_CONFIG_PATH}, seeding it from the bundled template when missing."
+    "Optional explicit path to config.toml. When omitted, Frame Compare looks for "
+    "ROOT/config/config.toml (see --root/FRAME_COMPARE_ROOT)."
 )
 
 SUPPORTED_EXTS = (
@@ -201,29 +231,152 @@ class _ClipPlan:
     alignment_status: str = ""
 
 
+_OverrideValue = TypeVar("_OverrideValue")
+
+
+class SlowpicsTitleInputs(TypedDict):
+    resolved_base: Optional[str]
+    collection_name: Optional[str]
+    collection_suffix: str
+
+
+class SlowpicsTitleBlock(TypedDict):
+    inputs: SlowpicsTitleInputs
+    final: Optional[str]
+
+
+class SlowpicsJSON(TypedDict):
+    enabled: bool
+    title: SlowpicsTitleBlock
+    url: Optional[str]
+    shortcut_path: Optional[str]
+    deleted_screens_dir: bool
+    is_public: bool
+    is_hentai: bool
+    remove_after_days: int
+
+
+class AudioAlignmentJSON(TypedDict, total=False):
+    enabled: bool
+    reference_stream: Optional[str]
+    target_stream: dict[str, object]
+    offsets_sec: dict[str, object]
+    offsets_frames: dict[str, object]
+    preview_paths: list[str]
+    confirmed: bool | str | None
+    offsets_filename: str
+
+
+class TrimClipEntry(TypedDict):
+    lead_f: int
+    trail_f: int
+    lead_s: float
+    trail_s: float
+
+
+class TrimsJSON(TypedDict):
+    per_clip: dict[str, TrimClipEntry]
+
+
+class JsonTail(TypedDict):
+    clips: list[dict[str, object]]
+    trims: TrimsJSON
+    window: dict[str, object]
+    alignment: dict[str, object]
+    audio_alignment: AudioAlignmentJSON
+    analysis: dict[str, object]
+    render: dict[str, object]
+    tonemap: dict[str, object]
+    overlay: dict[str, object]
+    verify: dict[str, object]
+    cache: dict[str, object]
+    slowpics: SlowpicsJSON
+    warnings: list[str]
+    workspace: dict[str, object]
+
+
+class ClipRecord(TypedDict):
+    label: str
+    width: int
+    height: int
+    fps: float
+    frames: int
+    duration: float
+    duration_tc: str
+    path: str
+
+
+class TrimSummary(TypedDict):
+    label: str
+    lead_frames: int
+    lead_seconds: float
+    trail_frames: int
+    trail_seconds: float
+
+
+def _coerce_str_mapping(value: object) -> dict[str, object]:
+    """Return a shallow copy of *value* if it is a mapping with string-like keys."""
+
+    if isinstance(value, MappingABC):
+        result: dict[str, object] = {}
+        for key, item in value.items():
+            key_str = key if isinstance(key, str) else str(key)
+            result[key_str] = item
+        return result
+    return {}
+
+
+def _ensure_slowpics_block(json_tail: JsonTail, cfg: AppConfig) -> SlowpicsJSON:
+    """Ensure that ``json_tail`` contains a slow.pics block and return it."""
+
+    block = json_tail.get("slowpics")
+    if block is None:
+        block = SlowpicsJSON(
+            enabled=bool(cfg.slowpics.auto_upload),
+            title=SlowpicsTitleBlock(
+                inputs=SlowpicsTitleInputs(
+                    resolved_base=None,
+                    collection_name=None,
+                    collection_suffix=getattr(cfg.slowpics, "collection_suffix", ""),
+                ),
+                final=None,
+            ),
+            url=None,
+            shortcut_path=None,
+            deleted_screens_dir=False,
+            is_public=bool(cfg.slowpics.is_public),
+            is_hentai=bool(cfg.slowpics.is_hentai),
+            remove_after_days=int(cfg.slowpics.remove_after_days),
+        )
+        json_tail["slowpics"] = block
+    return block
+
+
 @dataclass
 class RunResult:
     """
     Outcome of a full frame comparison run including export artefacts.
-
+    
     Attributes:
         files (List[Path]): Input media files included in the run.
         frames (List[int]): Frame numbers selected for screenshot generation.
         out_dir (Path): Output directory containing generated assets.
+        out_dir_created (bool): Whether this run created ``out_dir`` (used to guard cleanup).
         root (Path): Resolved input root directory used for all generated artefacts.
         config (AppConfig): Effective application configuration.
         image_paths (List[str]): Paths to the generated screenshots.
         slowpics_url (Optional[str]): URL of the uploaded Slowpics comparison, if created.
-        json_tail (Dict[str, object] | None): Optional JSON blob persisted after run completion.
+        json_tail (JsonTail | None): Optional JSON blob persisted after run completion.
     """
     files: List[Path]
     frames: List[int]
     out_dir: Path
+    out_dir_created: bool
     root: Path
     config: AppConfig
     image_paths: List[str]
     slowpics_url: Optional[str] = None
-    json_tail: Dict[str, object] | None = None
+    json_tail: JsonTail | None = None
 
 
 @dataclass
@@ -460,7 +613,7 @@ class CliOutputManager:
             return
         self.console.print(f"[dim]{escape(text)}[/]")
 
-    def progress(self, *columns, transient: bool = False) -> Progress:
+    def progress(self, *columns: ProgressColumn, transient: bool = False) -> Progress:
         """
         Create a new Rich Progress instance bound to this manager's console.
 
@@ -492,7 +645,9 @@ class CLIAppError(RuntimeError):
         self.rich_message = rich_message or message
 
 
-def _resolve_workspace_subdir(root: Path, relative: str, *, purpose: str) -> Path:
+def _resolve_workspace_subdir(
+    root: Path, relative: str, *, purpose: str, allow_absolute: bool = False
+) -> Path:
     """Return a normalised path under *root* for user-managed directories."""
 
     try:
@@ -505,10 +660,19 @@ def _resolve_workspace_subdir(root: Path, relative: str, *, purpose: str) -> Pat
 
     candidate = Path(str(relative))
     if candidate.is_absolute():
-        message = (
-            f"Configured {purpose} must be relative to the input directory, got '{relative}'"
-        )
-        raise CLIAppError(message, rich_message=f"[red]{message}[/red]")
+        if not allow_absolute:
+            message = (
+                f"Configured {purpose} must be relative to the input directory, got '{relative}'"
+            )
+            raise CLIAppError(message, rich_message=f"[red]{message}[/red]")
+        try:
+            resolved = candidate.resolve()
+        except OSError as exc:
+            raise CLIAppError(
+                f"Unable to resolve configured {purpose} '{relative}': {exc}",
+                rich_message=f"[red]Unable to resolve configured {purpose}:[/red] {exc}",
+            ) from exc
+        return resolved
 
     resolved = (root_resolved / candidate).resolve()
     try:
@@ -538,46 +702,389 @@ def _path_is_within_root(root: Path, candidate: Path) -> bool:
     return True
 
 
-def _ensure_config_present(config_location: Path) -> Path:
-    """Ensure that the CLI configuration exists at ``config_location``.
+_SITE_PACKAGES_MARKERS: Final[set[str]] = {"site-packages", "dist-packages"}
 
-    When the requested path matches :data:`DEFAULT_CONFIG_PATH` and the file is missing,
-    the packaged template is copied into place. Any failure to write the default
-    configuration raises :class:`CLIAppError` with a user-friendly message.
-    """
 
-    expanded = config_location.expanduser()
-    try:
-        resolved = expanded if expanded.is_absolute() else expanded.resolve(strict=False)
-    except TypeError:
-        resolved = expanded.resolve()
-
-    if resolved.exists():
-        return resolved
-
-    if str(resolved) != str(DEFAULT_CONFIG_PATH):
-        return resolved
+def _path_contains_site_packages(path: Path) -> bool:
+    """Return True when *path* (or any ancestor) lives under site/dist-packages."""
 
     try:
-        copied_path = copy_default_config(resolved)
+        resolved = path.resolve()
+    except OSError:
+        resolved = path
+    for part in resolved.parts:
+        if part.lower() in _SITE_PACKAGES_MARKERS:
+            return True
+    return False
+
+
+def _nearest_existing_dir(path: Path) -> Path:
+    """Return the nearest existing directory for *path* (itself or ancestor)."""
+
+    candidate = path
+    if candidate.is_file():
+        candidate = candidate.parent
+
+    while not candidate.exists():
+        parent = candidate.parent
+        if parent == candidate:
+            break
+        candidate = parent
+    return candidate
+
+
+def _is_writable_path(path: Path, *, for_file: bool) -> bool:
+    """Return True when the given path (or its nearest parent) is writable."""
+
+    target = path.parent if for_file else path
+    try:
+        target = target.resolve(strict=False)
+    except OSError:
+        pass
+    probe = _nearest_existing_dir(target)
+    try:
+        probe = probe.resolve(strict=False)
+    except OSError:
+        pass
+    return os.access(probe, os.W_OK)
+
+
+def _abort_if_site_packages(path_map: Mapping[str, Path]) -> None:
+    """Abort execution when any mapped path falls under site/dist-packages."""
+
+    for label, candidate in path_map.items():
+        if _path_contains_site_packages(candidate):
+            message = (
+                f"{label} path '{candidate}' resolves inside a site-packages/dist-packages "
+                "directory; refuse to continue. Use --root or FRAME_COMPARE_ROOT to "
+                "select a writable workspace."
+            )
+            raise CLIAppError(
+                message,
+                code=2,
+                rich_message=f"[red]{escape(message)}[/red]",
+            )
+
+
+@dataclass
+class _PathPreflightResult:
+    """Resolved configuration and workspace paths used during startup."""
+
+    workspace_root: Path
+    media_root: Path
+    config_path: Path
+    config: AppConfig
+    warnings: tuple[str, ...] = ()
+    legacy_config: bool = False
+
+
+def _discover_workspace_root(cli_root: str | None) -> Path:
+    """Resolve the workspace root using CLI flag, env var, or sentinel search."""
+
+    if cli_root:
+        candidate = Path(cli_root).expanduser()
+    else:
+        env_root = os.environ.get(ROOT_ENV_VAR)
+        if env_root:
+            candidate = Path(env_root).expanduser()
+        else:
+            start = Path.cwd()
+            current = start
+            sentinel_root: Path | None = None
+            while True:
+                if any((current / marker).exists() for marker in ROOT_SENTINELS):
+                    sentinel_root = current
+                    break
+                if current.parent == current:
+                    break
+                current = current.parent
+            candidate = sentinel_root or start
+
+    try:
+        resolved = candidate.resolve()
+    except OSError as exc:
+        raise CLIAppError(
+            f"Failed to resolve workspace root '{candidate}': {exc}",
+            code=2,
+            rich_message=f"[red]Failed to resolve workspace root:[/red] {exc}",
+        ) from exc
+
+    if _path_contains_site_packages(resolved):
+        message = (
+            f"Workspace root '{resolved}' is inside site-packages/dist-packages; "
+            "choose a writable directory via --root or FRAME_COMPARE_ROOT."
+        )
+        raise CLIAppError(message, code=2, rich_message=f"[red]{escape(message)}[/red]")
+
+    return resolved
+
+
+def _seed_default_config(path: Path) -> None:
+    """Atomically seed config.toml at *path* from the packaged template."""
+
+    try:
+        copy_default_config(path)
     except FileExistsError:
-        return resolved
-    except PermissionError as exc:
-        message = f"Unable to create default config at {resolved}: {exc}"
+        return
+    except OSError as exc:
+        message = f"Unable to create default config at {path}: {exc}"
         raise CLIAppError(
             message,
             code=2,
-            rich_message=f"[red]Unable to create default config:[/red] {exc}",
+            rich_message=(
+                "[red]Unable to create default config:[/red] "
+                f"{exc}. Set --root/FRAME_COMPARE_ROOT to a writable directory."
+            ),
+        ) from exc
+
+
+def _fresh_app_config() -> AppConfig:
+    """Return an AppConfig populated with built-in defaults."""
+
+    return AppConfig(
+        analysis=AnalysisConfig(),
+        screenshots=ScreenshotConfig(),
+        cli=CLIConfig(),
+        slowpics=SlowpicsConfig(),
+        tmdb=TMDBConfig(),
+        naming=NamingConfig(),
+        paths=PathsConfig(),
+        runtime=RuntimeConfig(),
+        overrides=OverridesConfig(),
+        color=ColorConfig(),
+        source=SourceConfig(),
+        audio_alignment=AudioAlignmentConfig(),
+    )
+
+
+def _prepare_preflight(
+    *,
+    cli_root: str | None,
+    config_override: str | None,
+    input_override: str | None,
+    ensure_config: bool,
+    create_dirs: bool,
+    create_media_dir: bool,
+) -> _PathPreflightResult:
+    """Resolve workspace root, configuration, and media directories."""
+
+    workspace_root = _discover_workspace_root(cli_root)
+    warnings: list[str] = []
+
+    if create_dirs:
+        try:
+            workspace_root.mkdir(parents=True, exist_ok=True)
+        except PermissionError as exc:
+            detail = exc.strerror or "Permission denied"
+            message = f"Unable to create workspace root '{workspace_root}': {detail}"
+            raise CLIAppError(
+                message,
+                code=2,
+                rich_message=(
+                    "[red]Unable to create workspace root:[/red] "
+                    f"{escape(str(workspace_root))} ({escape(detail)})"
+                ),
+            ) from exc
+    elif not workspace_root.exists():
+        parent = workspace_root.parent
+        if not parent.exists() or not os.access(parent, os.W_OK):
+            warnings.append(
+                f"Workspace root {workspace_root} may be unwritable; parent directory is inaccessible."
+            )
+    if workspace_root.exists() and not os.access(workspace_root, os.W_OK):
+        if create_dirs:
+            raise CLIAppError(
+                f"Workspace root '{workspace_root}' is not writable.",
+                code=2,
+                rich_message=f"[red]Workspace root is not writable:[/red] {workspace_root}",
+            )
+        warnings.append(f"Workspace root {workspace_root} is not writable.")
+
+    config_path: Path
+    legacy = False
+
+    if config_override:
+        config_path = Path(config_override).expanduser()
+    else:
+        env_override = os.environ.get(CONFIG_ENV_VAR)
+        if env_override:
+            config_path = Path(env_override).expanduser()
+        else:
+            config_dir = workspace_root / "config"
+            config_path = config_dir / "config.toml"
+            legacy_path = workspace_root / "config.toml"
+
+            if config_path.exists():
+                pass
+            elif legacy_path.exists():
+                config_path = legacy_path
+                legacy = True
+                warnings.append(
+                    f"Using legacy config at {legacy_path}. Move it to {config_dir / 'config.toml'}."
+                )
+            elif ensure_config:
+                try:
+                    config_dir.mkdir(parents=True, exist_ok=True)
+                except PermissionError as exc:
+                    detail = exc.strerror or "Permission denied"
+                    message = f"Unable to create config directory '{config_dir}': {detail}"
+                    raise CLIAppError(
+                        message,
+                        code=2,
+                        rich_message=(
+                            "[red]Unable to create config directory:[/red] "
+                            f"{escape(str(config_dir))} ({escape(detail)})"
+                        ),
+                    ) from exc
+                _seed_default_config(config_path)
+
+    if _path_contains_site_packages(config_path):
+        message = (
+            f"Config path '{config_path}' resides inside site-packages/dist-packages; "
+            "choose a writable location via --root or --config."
+        )
+        raise CLIAppError(message, code=2, rich_message=f"[red]{escape(message)}[/red]")
+
+    cfg: AppConfig
+    try:
+        cfg = load_config(str(config_path))
+    except FileNotFoundError:
+        if ensure_config:
+            raise CLIAppError(
+                f"Config file not found: {config_path}",
+                code=2,
+                rich_message=f"[red]Config file not found:[/red] {config_path}",
+            ) from None
+        cfg = _fresh_app_config()
+        warnings.append(f"Config file not found; using defaults at {config_path}")
+    except PermissionError as exc:
+        raise CLIAppError(
+            f"Config file is not readable: {config_path}",
+            code=2,
+            rich_message=f"[red]Config file is not readable:[/red] {config_path}",
         ) from exc
     except OSError as exc:
-        message = f"Unable to create default config at {resolved}: {exc}"
         raise CLIAppError(
-            message,
+            f"Failed to read config file: {exc}",
             code=2,
-            rich_message=f"[red]Unable to create default config:[/red] {exc}",
+            rich_message=f"[red]Failed to read config file:[/red] {exc}",
+        ) from exc
+    except ConfigError as exc:
+        raise CLIAppError(
+            f"Config error: {exc}",
+            code=2,
+            rich_message=f"[red]Config error:[/red] {exc}",
         ) from exc
 
-    return copied_path
+    if input_override is not None:
+        cfg.paths.input_dir = input_override
+
+    media_root = _resolve_workspace_subdir(
+        workspace_root,
+        cfg.paths.input_dir,
+        purpose="[paths].input_dir",
+        allow_absolute=True,
+    )
+
+    if create_media_dir:
+        try:
+            media_root.mkdir(parents=True, exist_ok=True)
+        except PermissionError as exc:
+            detail = exc.strerror or "Permission denied"
+            message = f"Unable to create input workspace '{media_root}': {detail}"
+            raise CLIAppError(
+                message,
+                code=2,
+                rich_message=(
+                    "[red]Unable to create input workspace:[/red] "
+                    f"{escape(str(media_root))} ({escape(detail)})"
+                ),
+            ) from exc
+    elif not media_root.exists():
+        parent = media_root.parent
+        if not parent.exists() or not os.access(parent, os.W_OK):
+            warnings.append(
+                f"Input workspace {media_root} may be unwritable; parent directory is inaccessible."
+            )
+    if media_root.exists() and not os.access(media_root, os.W_OK):
+        if create_media_dir:
+            raise CLIAppError(
+                f"Input workspace '{media_root}' is not writable.",
+                code=2,
+                rich_message=f"[red]Input workspace is not writable:[/red] {media_root}",
+            )
+        warnings.append(f"Input workspace {media_root} is not writable.")
+
+    return _PathPreflightResult(
+        workspace_root=workspace_root,
+        media_root=media_root,
+        config_path=config_path,
+        config=cfg,
+        warnings=tuple(warnings),
+        legacy_config=legacy,
+    )
+
+
+def _collect_path_diagnostics(
+    *,
+    cli_root: str | None,
+    config_override: str | None,
+    input_override: str | None,
+) -> Dict[str, Any]:
+    """Return a JSON-serialisable mapping describing key runtime paths."""
+
+    preflight = _prepare_preflight(
+        cli_root=cli_root,
+        config_override=config_override,
+        input_override=input_override,
+        ensure_config=False,
+        create_dirs=False,
+        create_media_dir=False,
+    )
+    cfg = preflight.config
+    workspace_root = preflight.workspace_root
+    media_root = preflight.media_root
+    config_path = preflight.config_path
+
+    screens_dir = _resolve_workspace_subdir(
+        media_root,
+        cfg.screenshots.directory_name,
+        purpose="screenshots.directory_name",
+    )
+    analysis_cache = _resolve_workspace_subdir(
+        media_root,
+        cfg.analysis.frame_data_filename,
+        purpose="analysis.frame_data_filename",
+    )
+    offsets_path = _resolve_workspace_subdir(
+        media_root,
+        cfg.audio_alignment.offsets_filename,
+        purpose="audio_alignment.offsets_filename",
+    )
+
+    under_site_packages = any(
+        _path_contains_site_packages(path) for path in (workspace_root, media_root, config_path)
+    )
+
+    diagnostics: Dict[str, Any] = {
+        "workspace_root": str(workspace_root),
+        "media_root": str(media_root),
+        "config_path": str(config_path),
+        "config_exists": config_path.exists(),
+        "legacy_config": preflight.legacy_config,
+        "screens_dir": str(screens_dir),
+        "analysis_cache": str(analysis_cache),
+        "audio_offsets": str(offsets_path),
+        "under_site_packages": under_site_packages,
+        "writable": {
+            "workspace_root": _is_writable_path(workspace_root, for_file=False),
+            "media_root": _is_writable_path(media_root, for_file=False),
+            "config_dir": _is_writable_path(config_path, for_file=True),
+            "screens_dir": _is_writable_path(screens_dir, for_file=False),
+        },
+        "warnings": list(preflight.warnings),
+    }
+    return diagnostics
 
 
 def _discover_media(root: Path) -> List[Path]:
@@ -585,7 +1092,7 @@ def _discover_media(root: Path) -> List[Path]:
     return [p for p in os_sorted(root.iterdir()) if p.suffix.lower() in SUPPORTED_EXTS]
 
 
-def _parse_metadata(files: Sequence[Path], naming_cfg) -> List[Dict[str, str]]:
+def _parse_metadata(files: Sequence[Path], naming_cfg: NamingConfig) -> List[Dict[str, str]]:
     """Extract naming metadata for each clip using configured heuristics."""
     metadata: List[Dict[str, str]] = []
     for file in files:
@@ -832,9 +1339,9 @@ def _pick_analyze_file(
     return files[0]
 
 
-def _normalise_override_mapping(raw: Mapping[str, object]) -> Dict[str, object]:
+def _normalise_override_mapping(raw: Mapping[str, _OverrideValue]) -> Dict[str, _OverrideValue]:
     """Lowercase override keys and drop empty entries."""
-    normalised: Dict[str, object] = {}
+    normalised: Dict[str, _OverrideValue] = {}
     for key, value in raw.items():
         key_str = str(key).strip().lower()
         if key_str:
@@ -846,8 +1353,8 @@ def _match_override(
     index: int,
     file: Path,
     metadata: Mapping[str, str],
-    mapping: Mapping[str, object],
-) -> Optional[object]:
+    mapping: Mapping[str, _OverrideValue],
+) -> Optional[_OverrideValue]:
     """Return the override value matching *index*, file names, or metadata labels."""
     candidates = [
         str(index),
@@ -1101,22 +1608,14 @@ def _build_legacy_summary_lines(values: Mapping[str, Any], *, emit_json_tail: bo
         """
         return "true" if bool(value) else "false"
 
-    clips_raw = values.get("clips")
-    clips = clips_raw if isinstance(clips_raw, Mapping) else {}
-    window_raw = values.get("window")
-    window = window_raw if isinstance(window_raw, Mapping) else {}
-    analysis_raw = values.get("analysis")
-    analysis = analysis_raw if isinstance(analysis_raw, Mapping) else {}
-    counts_raw = analysis.get("counts") if isinstance(analysis, Mapping) else {}
-    counts = counts_raw if isinstance(counts_raw, Mapping) else {}
-    audio_raw = values.get("audio_alignment")
-    audio = audio_raw if isinstance(audio_raw, Mapping) else {}
-    render_raw = values.get("render")
-    render = render_raw if isinstance(render_raw, Mapping) else {}
-    tonemap_raw = values.get("tonemap")
-    tonemap = tonemap_raw if isinstance(tonemap_raw, Mapping) else {}
-    cache_raw = values.get("cache")
-    cache = cache_raw if isinstance(cache_raw, Mapping) else {}
+    clips = _coerce_str_mapping(values.get("clips"))
+    window = _coerce_str_mapping(values.get("window"))
+    analysis = _coerce_str_mapping(values.get("analysis"))
+    counts = _coerce_str_mapping(analysis.get("counts")) if analysis else {}
+    audio = _coerce_str_mapping(values.get("audio_alignment"))
+    render = _coerce_str_mapping(values.get("render"))
+    tonemap = _coerce_str_mapping(values.get("tonemap"))
+    cache = _coerce_str_mapping(values.get("cache"))
 
     lines: List[str] = []
 
@@ -1203,7 +1702,9 @@ def _format_clock(seconds: Optional[float]) -> str:
     return f"{minutes:02d}:{secs:02d}"
 
 
-def _init_clips(plans: Sequence[_ClipPlan], runtime_cfg, cache_dir: Path | None) -> None:
+def _init_clips(
+    plans: Sequence[_ClipPlan], runtime_cfg: RuntimeConfig, cache_dir: Path | None
+) -> None:
     """
     Initialize VapourSynth clips for each clip plan and populate each plan's source and effective metadata.
     
@@ -1286,7 +1787,11 @@ def _build_cache_info(root: Path, plans: Sequence[_ClipPlan], cfg: AppConfig, an
     if fps_den <= 0:
         fps_den = 1
 
-    cache_path = (root / cfg.analysis.frame_data_filename).resolve()
+    cache_path = _resolve_workspace_subdir(
+        root,
+        cfg.analysis.frame_data_filename,
+        purpose="analysis.frame_data_filename",
+    )
     return FrameMetricsCacheInfo(
         path=cache_path,
         files=[plan.path.name for plan in plans],
@@ -1301,7 +1806,7 @@ def _build_cache_info(root: Path, plans: Sequence[_ClipPlan], cfg: AppConfig, an
 
 def _resolve_selection_windows(
     plans: Sequence[_ClipPlan],
-    analysis_cfg,
+    analysis_cfg: AnalysisConfig,
 ) -> tuple[List[SelectionWindowSpec], tuple[int, int], bool]:
     specs: List[SelectionWindowSpec] = []
     min_total_frames: Optional[int] = None
@@ -1477,7 +1982,11 @@ def _maybe_apply_audio_alignment(
         CLIAppError: If the offsets file cannot be read or if the underlying audio alignment process fails.
     """
     audio_cfg = cfg.audio_alignment
-    offsets_path = (root / audio_cfg.offsets_filename).resolve()
+    offsets_path = _resolve_workspace_subdir(
+        root,
+        audio_cfg.offsets_filename,
+        purpose="audio_alignment.offsets_filename",
+    )
     display_data = _AudioAlignmentDisplayData(
         stream_lines=[],
         estimation_line=None,
@@ -1706,7 +2215,7 @@ def _maybe_apply_audio_alignment(
         measurements: List[audio_alignment.AlignmentMeasurement]
         negative_offsets: Dict[str, bool] = {}
 
-        progress_columns = (
+        progress_columns: tuple[ProgressColumn, ...] = (
             TextColumn('{task.description}'),
             BarColumn(),
             TextColumn('{task.completed}/{task.total}'),
@@ -1714,11 +2223,14 @@ def _maybe_apply_audio_alignment(
             TextColumn('{task.fields[rate]}'),
             TimeRemainingColumn(),
         )
-        progress_manager = (
-            reporter.progress(*progress_columns, transient=False)
-            if reporter is not None
-            else Progress(*progress_columns, transient=False)
-        )
+        progress_manager: ContextManager[Progress]
+        if reporter is not None:
+            progress_manager = cast(
+                ContextManager[Progress],
+                reporter.progress(*progress_columns, transient=False),
+            )
+        else:
+            progress_manager = Progress(*progress_columns, transient=False)
         with progress_manager as audio_progress:
             task_id = audio_progress.add_task(
                 'Estimating audio offsets',
@@ -1809,20 +2321,21 @@ def _maybe_apply_audio_alignment(
                     swap_candidates.append(measurement)
                     continue
                 measurement.frames = abs(int(measurement.frames))
-                negative_offsets[measurement.file.name] = True
-                negative_override_notes[measurement.key] = (
+                file_key = measurement.file.name
+                negative_offsets[file_key] = True
+                negative_override_notes[file_key] = (
                     "Suggested negative offset applied to the opposite clip for trim-first behaviour."
                 )
 
         if swap_enabled and swap_candidates:
             additional_measurements: List[audio_alignment.AlignmentMeasurement] = []
-            reference_name = reference_plan.path.name
+            reference_name: str = reference_plan.path.name
             existing_keys = {m.file.name for m in measurements}
 
             for measurement in swap_candidates:
                 seconds = float(measurement.offset_seconds)
                 seconds_abs = abs(seconds)
-                target_name = measurement.file.name
+                target_name: str = measurement.file.name
 
                 original_frames = None
                 if measurement.frames is not None:
@@ -1888,8 +2401,9 @@ def _maybe_apply_audio_alignment(
             if reasons:
                 measurement.frames = None
                 measurement.error = "; ".join(reasons)
-                negative_offsets.pop(measurement.file.name, None)
-                label = name_to_label.get(measurement.file.name, measurement.file.name)
+                file_key = measurement.file.name
+                negative_offsets.pop(file_key, None)
+                label = name_to_label.get(file_key, file_key)
                 raw_warning_messages.append(f"{label}: {measurement.error}")
 
         for warning_message in dict.fromkeys(raw_warning_messages):
@@ -1900,7 +2414,7 @@ def _maybe_apply_audio_alignment(
         offsets_frames: Dict[str, int] = {}
 
         for measurement in measurements:
-            clip_name = measurement.file.name
+            clip_name: str = measurement.file.name
             if clip_name == reference_plan.path.name and len(measurements) > 1:
                 continue
             label = name_to_label.get(clip_name, clip_name)
@@ -2202,98 +2716,91 @@ def _confirm_alignment_with_screenshots(
     )
 
 def run_cli(
-    config_path: str,
+    config_path: str | None,
     input_dir: str | None = None,
     *,
+    root_override: str | None = None,
     audio_track_overrides: Iterable[str] | None = None,
     quiet: bool = False,
     verbose: bool = False,
     no_color: bool = False,
 ) -> RunResult:
     """
-    Orchestrate the CLI workflow: load config, discover and analyze media, generate screenshots, optionally upload to slow.pics, and return a structured run result.
-    
+    Orchestrate the CLI workflow.
+
     Parameters:
-        config_path (str): Path to the application configuration file.
-        input_dir (str | None): Optional override for the input directory configured in the file.
+        config_path (str | None): Optional explicit config path (CLI or env).
+        input_dir (str | None): Optional override for [paths].input_dir inside the workspace root.
+        root_override (str | None): Optional workspace root override supplied via --root.
         audio_track_overrides (Iterable[str] | None): Optional sequence of "filename=track" pairs to override audio track selection.
         quiet (bool): Suppress nonessential output when True.
         verbose (bool): Enable additional diagnostic output when True.
         no_color (bool): Disable colored output when True.
-    
+
     Returns:
         RunResult: Aggregated result including processed files, selected frames, output directory, resolved root directory, configuration used, generated image paths, optional slow.pics URL, and a JSON-tail dictionary with detailed metadata and diagnostics.
     
     Raises:
         CLIAppError: For configuration loading failures, missing/invalid input directory, clip initialization failures, frame selection or screenshot generation errors, slow.pics upload failures, or other user-facing errors encountered during the run.
     """
-    config_location = _ensure_config_present(Path(config_path))
+    preflight = _prepare_preflight(
+        cli_root=root_override,
+        config_override=config_path,
+        input_override=input_dir,
+        ensure_config=True,
+        create_dirs=True,
+        create_media_dir=input_dir is None,
+    )
+    cfg = preflight.config
+    workspace_root = preflight.workspace_root
+    root = preflight.media_root
+    config_location = preflight.config_path
 
-    try:
-        cfg: AppConfig = load_config(str(config_location))
-    except FileNotFoundError as exc:
-        message = f"Config file not found: {config_location}"
+    if not root.exists():
         raise CLIAppError(
-            message,
-            code=2,
-            rich_message=f"[red]Config file not found:[/red] {config_location}",
-        ) from exc
-    except PermissionError as exc:
-        message = f"Config file is not readable: {config_location}"
-        raise CLIAppError(
-            message,
-            code=2,
-            rich_message=f"[red]Config file is not readable:[/red] {config_location}",
-        ) from exc
-    except OSError as exc:
-        message = f"Failed to read config file: {exc}"
-        raise CLIAppError(
-            message,
-            code=2,
-            rich_message=f"[red]Failed to read config file:[/red] {exc}",
-        ) from exc
-    except ConfigError as exc:
-        raise CLIAppError(
-            f"Config error: {exc}", code=2, rich_message=f"[red]Config error:[/red] {exc}"
-        ) from exc
-
-    cli_override_supplied = input_dir is not None
-    if cli_override_supplied:
-        cfg.paths.input_dir = input_dir
-
-    configured_input = Path(cfg.paths.input_dir).expanduser()
-    candidate_roots = [configured_input]
-
-    if not cli_override_supplied:
-        config_parent = config_location.parent
-        config_relative = (config_parent / cfg.paths.input_dir).expanduser()
-        project_relative = (PROJECT_ROOT / cfg.paths.input_dir).expanduser()
-
-        # Preserve order while avoiding duplicate fallbacks when the config lives
-        # alongside the project root (common for packaged runs).
-        for candidate in (config_relative, project_relative):
-            if candidate not in candidate_roots:
-                candidate_roots.append(candidate)
-
-    resolved_root: Path | None = None
-    for candidate in candidate_roots:
-        try:
-            resolved_root = candidate.resolve(strict=True)
-        except FileNotFoundError:
-            continue
-        else:
-            break
-
-    if resolved_root is None:
-        resolved_root = configured_input.resolve()
-
-    if not resolved_root.exists():
-        raise CLIAppError(
-            f"Input directory not found: {resolved_root}",
-            rich_message=f"[red]Input directory not found:[/red] {resolved_root}",
+            f"Input directory not found: {root}",
+            rich_message=f"[red]Input directory not found:[/red] {root}",
         )
 
-    root = resolved_root
+    out_dir = _resolve_workspace_subdir(
+        root,
+        cfg.screenshots.directory_name,
+        purpose="screenshots.directory_name",
+    )
+    out_dir_preexisting = out_dir.exists()
+    created_out_dir = False
+    if not out_dir_preexisting:
+        try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise CLIAppError(
+                f"Unable to create screenshots directory '{out_dir}': {exc}",
+                rich_message=(
+                    "[red]Unable to create screenshots directory.[/red] "
+                    f"Adjust [screenshots].directory_name or choose a writable --root. ({exc})"
+                ),
+            ) from exc
+        created_out_dir = True
+    analysis_cache_path = _resolve_workspace_subdir(
+        root,
+        cfg.analysis.frame_data_filename,
+        purpose="analysis.frame_data_filename",
+    )
+    offsets_path = _resolve_workspace_subdir(
+        root,
+        cfg.audio_alignment.offsets_filename,
+        purpose="audio_alignment.offsets_filename",
+    )
+    _abort_if_site_packages(
+        {
+            "config": config_location,
+            "workspace_root": workspace_root,
+            "root": root,
+            "screenshots": out_dir,
+            "analysis_cache": analysis_cache_path,
+            "audio_offsets": offsets_path,
+        }
+    )
 
     layout_path = Path(__file__).with_name("cli_layout.v1.json")
     reporter = CliOutputManager(
@@ -2319,7 +2826,10 @@ def run_cli(
     reporter.set_flag("progress_style", progress_style)
     reporter.set_flag("emit_json_tail", emit_json_tail_flag)
     collected_warnings: List[str] = []
-    json_tail: Dict[str, object] = {
+    for note in preflight.warnings:
+        reporter.warn(note)
+        collected_warnings.append(note)
+    json_tail: JsonTail = {
         "clips": [],
         "trims": {"per_clip": {}},
         "window": {},
@@ -2332,11 +2842,12 @@ def run_cli(
             "offsets_frames": {},
             "preview_paths": [],
             "confirmed": None,
-            "offsets_filename": str((root / cfg.audio_alignment.offsets_filename).resolve()),
+            "offsets_filename": str(offsets_path),
         },
         "analysis": {},
         "render": {},
         "tonemap": {},
+        "overlay": {},
         "verify": {
             "count": 0,
             "threshold": float(cfg.color.verify_luma_threshold),
@@ -2350,6 +2861,12 @@ def run_cli(
             "entries": [],
         },
         "cache": {},
+        "workspace": {
+            "root": str(workspace_root),
+            "media_root": str(root),
+            "config_path": str(config_location),
+            "legacy_config": bool(preflight.legacy_config),
+        },
         "slowpics": {
             "enabled": bool(cfg.slowpics.auto_upload),
             "title": {
@@ -2491,7 +3008,7 @@ def run_cli(
         logger.info("TMDB manual override selected: %s/%s", tmdb_category, tmdb_id_value)
 
     tmdb_context: Dict[str, str] = {
-        "Title": metadata_title or (metadata[0].get("label") if metadata else ""),
+        "Title": metadata_title or ((metadata[0].get("label") or "") if metadata else ""),
         "OriginalTitle": "",
         "Year": year_hint_raw or "",
         "TMDBId": tmdb_id_value or "",
@@ -2499,7 +3016,7 @@ def run_cli(
         "OriginalLanguage": tmdb_language or "",
         "Filename": files[0].stem,
         "FileName": files[0].name,
-        "Label": metadata[0].get("label") if metadata else files[0].name,
+        "Label": (metadata[0].get("label") or files[0].name) if metadata else files[0].name,
     }
 
     if tmdb_resolution is not None:
@@ -2551,7 +3068,7 @@ def run_cli(
     cfg.slowpics.collection_name = final_collection_name
     slowpics_final_title = final_collection_name
     slowpics_resolved_base = resolved_base_title
-    slowpics_title_inputs = {
+    slowpics_title_inputs: SlowpicsTitleInputs = {
         "resolved_base": slowpics_resolved_base,
         "collection_name": cfg.slowpics.collection_name,
         "collection_suffix": suffix_literal,
@@ -2699,16 +3216,25 @@ def run_cli(
     if alignment_display is not None:
         json_tail["audio_alignment"]["offsets_filename"] = alignment_display.offsets_file_line.split(": ", 1)[-1]
         json_tail["audio_alignment"]["reference_stream"] = alignment_display.json_reference_stream
-        json_tail["audio_alignment"]["target_stream"] = alignment_display.json_target_streams
-        json_tail["audio_alignment"]["offsets_sec"] = alignment_display.json_offsets_sec
-        json_tail["audio_alignment"]["offsets_frames"] = alignment_display.json_offsets_frames
+        target_streams: dict[str, object] = {
+            key: value for key, value in alignment_display.json_target_streams.items()
+        }
+        json_tail["audio_alignment"]["target_stream"] = target_streams
+        offsets_sec: dict[str, object] = {
+            key: float(value) for key, value in alignment_display.json_offsets_sec.items()
+        }
+        json_tail["audio_alignment"]["offsets_sec"] = offsets_sec
+        offsets_frames: dict[str, object] = {
+            key: int(value) for key, value in alignment_display.json_offsets_frames.items()
+        }
+        json_tail["audio_alignment"]["offsets_frames"] = offsets_frames
         if alignment_display.warnings:
             collected_warnings.extend(alignment_display.warnings)
     else:
         json_tail["audio_alignment"]["reference_stream"] = None
-        json_tail["audio_alignment"]["target_stream"] = {}
-        json_tail["audio_alignment"]["offsets_sec"] = {}
-        json_tail["audio_alignment"]["offsets_frames"] = {}
+        json_tail["audio_alignment"]["target_stream"] = cast(dict[str, object], {})
+        json_tail["audio_alignment"]["offsets_sec"] = cast(dict[str, object], {})
+        json_tail["audio_alignment"]["offsets_frames"] = cast(dict[str, object], {})
     json_tail["audio_alignment"]["enabled"] = bool(cfg.audio_alignment.enable)
 
     try:
@@ -2722,8 +3248,8 @@ def run_cli(
     if any(clip is None for clip in clips):
         raise CLIAppError("Clip initialisation failed")
 
-    clip_records: List[Dict[str, object]] = []
-    trim_details: List[Dict[str, object]] = []
+    clip_records: List[ClipRecord] = []
+    trim_details: List[TrimSummary] = []
     for plan in plans:
         label = (plan.metadata.get("label") or plan.path.name).strip()
         frames_total = int(plan.source_num_frames or getattr(plan.clip, "num_frames", 0) or 0)
@@ -2775,12 +3301,13 @@ def run_cli(
                 "trail_seconds": trail_seconds,
             }
         )
-        json_tail["trims"]["per_clip"][label] = {
+        clip_trim: TrimClipEntry = {
             "lead_f": lead_frames,
             "trail_f": trail_frames,
             "lead_s": lead_seconds,
             "trail_s": trail_seconds,
         }
+        json_tail["trims"]["per_clip"][label] = clip_trim
 
     analyze_index = [plan.path for plan in plans].index(analyze_path)
     analyze_clip = plans[analyze_index].clip
@@ -2795,7 +3322,7 @@ def run_cli(
     )
     analyze_fps = analyze_fps_num / analyze_fps_den if analyze_fps_den else 0.0
     manual_start_frame, manual_end_frame = frame_window
-    analyze_total_frames = int(clip_records[analyze_index]["frames"])
+    analyze_total_frames = clip_records[analyze_index]["frames"]
     manual_start_seconds_value = manual_start_frame / analyze_fps if analyze_fps > 0 else float(manual_start_frame)
     manual_end_seconds_value = manual_end_frame / analyze_fps if analyze_fps > 0 else float(manual_end_frame)
     manual_end_changed = manual_end_frame < analyze_total_frames
@@ -2840,8 +3367,9 @@ def run_cli(
     else:
         cache_path = cache_info.path
         if cache_path.exists():
-            cache_probe = probe_cached_metrics(cache_info, cfg.analysis)
-            if cache_probe.status == "reused":
+            probe_result = probe_cached_metrics(cache_info, cfg.analysis)
+            cache_probe = probe_result
+            if probe_result.status == "reused":
                 cache_status = "reused"
                 cache_progress_message = (
                     f"Loading cached frame metrics from {cache_path.name}…"
@@ -2851,14 +3379,15 @@ def run_cli(
                 )
             else:
                 cache_status = "recomputed"
-                reason_code = cache_probe.reason or cache_probe.status
+                reason_code = probe_result.reason or probe_result.status
                 cache_reason = reason_code
                 human_reason = reason_code.replace("_", " ")
-                if cache_probe.status in {"stale", "error"}:
+                if probe_result.status in {"stale", "error"}:
                     reporter.line(
-                        f"[yellow]Frame metrics cache {cache_probe.status} "
+                        f"[yellow]Frame metrics cache {probe_result.status} "
                         f"({escape(human_reason)}); recomputing…[/]"
                     )
+                cache_progress_message = "Recomputing frame metrics…"
         else:
             cache_status = "recomputed"
             cache_reason = "missing"
@@ -2919,9 +3448,9 @@ def run_cli(
     layout_data["clips"]["tgt"] = clip_records[1] if len(clip_records) > 1 else {}
 
     trims_per_clip = json_tail["trims"]["per_clip"]
-    trim_lookup = {detail["label"]: detail for detail in trim_details}
+    trim_lookup: dict[str, TrimSummary] = {detail["label"]: detail for detail in trim_details}
 
-    def _trim_entry(label: str) -> Dict[str, object]:
+    def _trim_entry(label: str) -> TrimClipEntry:
         """
         Build a normalized trim entry for a clip label containing frame and second offsets.
         
@@ -2935,13 +3464,13 @@ def run_cli(
                 - "lead_s": leading trim in seconds (float, default 0.0)
                 - "trail_s": trailing trim in seconds (float, default 0.0)
         """
-        detail = trim_lookup.get(label, {})
-        trim = trims_per_clip.get(label, {})
+        trim = trims_per_clip.get(label)
+        detail = trim_lookup.get(label)
         return {
-            "lead_f": trim.get("lead_f", 0),
-            "trail_f": trim.get("trail_f", 0),
-            "lead_s": detail.get("lead_seconds", 0.0),
-            "trail_s": detail.get("trail_seconds", 0.0),
+            "lead_f": trim["lead_f"] if trim else 0,
+            "trail_f": trim["trail_f"] if trim else 0,
+            "lead_s": detail["lead_seconds"] if detail else 0.0,
+            "trail_s": detail["trail_seconds"] if detail else 0.0,
         }
 
     layout_data["trims"] = {}
@@ -2967,15 +3496,30 @@ def run_cli(
             confirmation_value = "auto"
         json_tail["audio_alignment"]["confirmed"] = confirmation_value
     audio_alignment_view = dict(json_tail["audio_alignment"])
-    offsets_sec_map = audio_alignment_view.get("offsets_sec", {})
-    offsets_frames_map = audio_alignment_view.get("offsets_frames", {})
+    offsets_sec_map_obj = _coerce_str_mapping(audio_alignment_view.get("offsets_sec"))
+    offsets_frames_map_obj = _coerce_str_mapping(audio_alignment_view.get("offsets_frames"))
     correlations_map = alignment_display.correlations if alignment_display else {}
-    primary_label = None
-    if isinstance(offsets_sec_map, dict) and offsets_sec_map:
-        primary_label = sorted(offsets_sec_map.keys())[0]
-    offsets_sec_value = float(offsets_sec_map.get(primary_label, 0.0)) if isinstance(offsets_sec_map, dict) else 0.0
-    offsets_frames_value = int(offsets_frames_map.get(primary_label, 0)) if isinstance(offsets_frames_map, dict) else 0
-    corr_value = float(correlations_map.get(primary_label, 0.0)) if correlations_map else 0.0
+    primary_label: str | None = None
+    if offsets_sec_map_obj:
+        primary_label = sorted(offsets_sec_map_obj.keys())[0]
+    offsets_sec_value_obj = offsets_sec_map_obj.get(primary_label) if primary_label else None
+    offsets_sec_value = (
+        float(offsets_sec_value_obj)
+        if isinstance(offsets_sec_value_obj, (int, float))
+        else 0.0
+    )
+    offsets_frames_value_obj = offsets_frames_map_obj.get(primary_label) if primary_label else None
+    offsets_frames_value = (
+        int(offsets_frames_value_obj)
+        if isinstance(offsets_frames_value_obj, (int, float))
+        else 0
+    )
+    corr_value_obj = correlations_map.get(primary_label) if primary_label else None
+    corr_value = (
+        float(corr_value_obj)
+        if isinstance(corr_value_obj, (int, float))
+        else 0.0
+    )
     if math.isnan(corr_value):
         corr_value = 0.0
     threshold_value = float(getattr(alignment_display, "threshold", cfg.audio_alignment.correlation_threshold))
@@ -2992,7 +3536,9 @@ def run_cli(
     using_frame_total = isinstance(total_frames, int) and total_frames > 0
     progress_total = int(total_frames) if using_frame_total else int(sample_count)
 
-    def _run_selection(progress_callback=None):
+    def _run_selection(
+        progress_callback: Callable[[int], None] | None = None,
+    ) -> tuple[list[int], dict[int, str], Dict[int, SelectionDetail]]:
         try:
             result = select_frames(
                 analyze_clip,
@@ -3024,7 +3570,9 @@ def run_cli(
             if len(result) == 3:
                 return result
             if len(result) == 2:
-                frames_only, categories = result
+                frames_only, categories = cast(
+                    tuple[list[int], dict[int, str]], result
+                )
                 return frames_only, categories, {}
             frames_only = list(result)
             return frames_only, {frame: "Auto" for frame in frames_only}, {}
@@ -3127,7 +3675,11 @@ def run_cli(
             selection_details=selection_details,
         )
     if not cfg.analysis.save_frames_data:
-        compframes_path = (root / cfg.analysis.frame_data_filename).resolve()
+        compframes_path = _resolve_workspace_subdir(
+            root,
+            cfg.analysis.frame_data_filename,
+            purpose="analysis.frame_data_filename",
+        )
         write_selection_cache_file(
             compframes_path,
             analyzed_file=analyze_path.name,
@@ -3157,11 +3709,17 @@ def run_cli(
     layout_data["analysis"]["selection_details"] = json_tail["analysis"]["selection_details"]
     reporter.update_values(layout_data)
 
-    preview_rule: Dict[str, object] = reporter.layout.folding.get("frames_preview", {}) if hasattr(reporter, "layout") else {}
-    head = int(preview_rule.get("head", 4)) if isinstance(preview_rule.get("head"), (int, float)) else 4
-    tail = int(preview_rule.get("tail", 4)) if isinstance(preview_rule.get("tail"), (int, float)) else 4
+    preview_rule: Dict[str, object] = (
+        reporter.layout.folding.get("frames_preview", {}) if hasattr(reporter, "layout") else {}
+    )
+    head_raw = preview_rule.get("head")
+    tail_raw = preview_rule.get("tail")
+    when_raw = preview_rule.get("when")
+    head = int(head_raw) if isinstance(head_raw, (int, float)) else 4
+    tail = int(tail_raw) if isinstance(tail_raw, (int, float)) else 4
     joiner = str(preview_rule.get("joiner", ", "))
-    fold_enabled = _evaluate_rule_condition(str(preview_rule.get("when", "")) if preview_rule.get("when") else None, flags=reporter.flags)
+    when_text = str(when_raw) if isinstance(when_raw, str) and when_raw else None
+    fold_enabled = _evaluate_rule_condition(when_text, flags=reporter.flags)
     preview_text = _fold_sequence(frames, head=head, tail=tail, joiner=joiner, enabled=fold_enabled)
 
     json_tail["analysis"]["output_frame_count"] = kept_count
@@ -3176,11 +3734,6 @@ def run_cli(
         )
     reporter.update_values(layout_data)
 
-    out_dir = _resolve_workspace_subdir(
-        root,
-        cfg.screenshots.directory_name,
-        purpose="screenshots.directory_name",
-    )
     total_screens = len(frames) * len(plans)
 
     writer_name = "ffmpeg" if cfg.screenshots.use_ffmpeg else "vs"
@@ -3198,6 +3751,7 @@ def run_cli(
         "center_pad": bool(cfg.screenshots.center_pad),
         "letterbox_px_tolerance": int(cfg.screenshots.letterbox_px_tolerance),
         "compression": int(cfg.screenshots.compression_level),
+        "ffmpeg_timeout_seconds": float(cfg.screenshots.ffmpeg_timeout_seconds),
     }
     layout_data["render"] = json_tail["render"]
     effective_tonemap = vs_core.resolve_effective_tonemap(cfg.color)
@@ -3466,11 +4020,11 @@ def run_cli(
                 uploaded_bytes = 0
                 file_index = 0
 
-                columns = [
+                columns: tuple[ProgressColumn, ...] = (
                     TextColumn('{task.percentage:>6.02f}% {task.completed}/{task.total}', justify='left'),
                     BarColumn(),
                     TextColumn('{task.fields[stats]}', justify='right'),
-                ]
+                )
                 with reporter.progress(*columns, transient=False) as upload_progress:
                     task_id = upload_progress.add_task(
                         '',
@@ -3528,22 +4082,22 @@ def run_cli(
             ) from exc
 
     if slowpics_url:
-        slowpics_block = json_tail.get("slowpics")
-        if slowpics_block is not None:
-            slowpics_block["url"] = slowpics_url
-            if cfg.slowpics.create_url_shortcut:
-                key = slowpics_url.rstrip("/").rsplit("/", 1)[-1]
-                if key:
-                    slowpics_block["shortcut_path"] = str(out_dir / f"slowpics_{key}.url")
-                else:
-                    slowpics_block.setdefault("shortcut_path", None)
+        slowpics_block = _ensure_slowpics_block(json_tail, cfg)
+        slowpics_block["url"] = slowpics_url
+        if cfg.slowpics.create_url_shortcut:
+            key = slowpics_url.rstrip("/").rsplit("/", 1)[-1]
+            if key:
+                slowpics_block["shortcut_path"] = str(out_dir / f"slowpics_{key}.url")
             else:
-                slowpics_block["shortcut_path"] = None
+                slowpics_block.setdefault("shortcut_path", None)
+        else:
+            slowpics_block["shortcut_path"] = None
 
     result = RunResult(
         files=[plan.path for plan in plans],
         frames=list(frames),
         out_dir=out_dir,
+        out_dir_created=created_out_dir,
         root=root,
         config=cfg,
         image_paths=list(image_paths),
@@ -3551,12 +4105,19 @@ def run_cli(
         json_tail=json_tail,
     )
 
+    raw_layout_sections = getattr(getattr(reporter, "layout", None), "sections", [])
+    layout_sections: list[dict[str, object]] = []
+    for raw_section in raw_layout_sections:
+        if isinstance(raw_section, Mapping):
+            layout_sections.append(_coerce_str_mapping(raw_section))
+
     summary_lines: List[str] = []
-    summary_section = next(
-        (section for section in reporter.layout.sections if section.get("id") == "summary"),
-        None,
-    )
-    if isinstance(summary_section, Mapping):
+    summary_section: dict[str, object] | None = None
+    for section_map in layout_sections:
+        if section_map.get("id") == "summary":
+            summary_section = section_map
+            break
+    if summary_section is not None:
         items = summary_section.get("items", [])
         if isinstance(items, list):
             for item in items:
@@ -3580,12 +4141,21 @@ def run_cli(
 
     warnings_list = list(dict.fromkeys(reporter.iter_warnings()))
     json_tail["warnings"] = warnings_list
-    warnings_section = next((section for section in reporter.layout.sections if section.get("id") == "warnings"), {})
-    fold_config = warnings_section.get("fold_labels", {}) if isinstance(warnings_section, Mapping) else {}
-    head = int(fold_config.get("head", 2)) if isinstance(fold_config.get("head"), (int, float)) else 2
-    tail = int(fold_config.get("tail", 1)) if isinstance(fold_config.get("tail"), (int, float)) else 1
+    warnings_section: dict[str, object] | None = None
+    for section_map in layout_sections:
+        if section_map.get("id") == "warnings":
+            warnings_section = section_map
+            break
+    fold_config_obj = warnings_section.get("fold_labels", {}) if warnings_section is not None else {}
+    fold_config = _coerce_str_mapping(fold_config_obj)
+    fold_head = fold_config.get("head")
+    fold_tail = fold_config.get("tail")
+    fold_when = fold_config.get("when")
+    head = int(fold_head) if isinstance(fold_head, (int, float)) else 2
+    tail = int(fold_tail) if isinstance(fold_tail, (int, float)) else 1
     joiner = str(fold_config.get("joiner", ", "))
-    fold_enabled = _evaluate_rule_condition(str(fold_config.get("when")) if fold_config.get("when") else None, flags=reporter.flags)
+    fold_when_text = str(fold_when) if isinstance(fold_when, str) and fold_when else None
+    fold_enabled = _evaluate_rule_condition(fold_when_text, flags=reporter.flags)
 
     warnings_data: List[Dict[str, object]] = []
     if warnings_list:
@@ -3611,11 +4181,7 @@ def run_cli(
     reporter.render_sections(["warnings"])
     reporter.render_sections(["summary"])
 
-    layout_sections = getattr(getattr(reporter, "layout", None), "sections", [])
-    has_summary_section = any(
-        isinstance(section, Mapping) and section.get("id") == "summary"
-        for section in layout_sections
-    )
+    has_summary_section = any(section.get("id") == "summary" for section in layout_sections)
     compatibility_required = bool(
         reporter.flags.get("compat.summary_fallback")
         or reporter.flags.get("compatibility_mode")
@@ -3633,10 +4199,16 @@ def run_cli(
 
 @click.command()
 @click.option(
+    "--root",
+    "root_path",
+    default=None,
+    help="Workspace root override. Defaults to FRAME_COMPARE_ROOT or sentinel discovery.",
+)
+@click.option(
     "--config",
     "config_path",
-    default=str(DEFAULT_CONFIG_PATH),
-    show_default=True,
+    default=None,
+    show_default=False,
     help=_DEFAULT_CONFIG_HELP,
 )
 @click.option("--input", "input_dir", default=None, help="Override [paths.input_dir] from config.toml")
@@ -3651,8 +4223,19 @@ def run_cli(
 @click.option("--verbose", is_flag=True, help="Show additional diagnostic output during run.")
 @click.option("--no-color", is_flag=True, help="Disable ANSI colour output.")
 @click.option("--json-pretty", is_flag=True, help="Pretty-print the JSON tail output.")
+@click.option(
+    "--diagnose-paths",
+    is_flag=True,
+    help="Print the resolved config/input/output paths as JSON and exit.",
+)
+@click.option(
+    "--write-config",
+    is_flag=True,
+    help="Ensure the workspace config exists (seeds ROOT/config/config.toml when missing) and exit.",
+)
 def main(
-    config_path: str,
+    root_path: str | None,
+    config_path: str | None,
     input_dir: str | None,
     *,
     audio_align_track_option: tuple[str, ...],
@@ -3660,6 +4243,8 @@ def main(
     verbose: bool,
     no_color: bool,
     json_pretty: bool,
+    diagnose_paths: bool,
+    write_config: bool,
 ) -> None:
     """
     Run the CLI pipeline and handle post-run outputs such as slow.pics handling and JSON tail emission.
@@ -3667,18 +4252,56 @@ def main(
     Runs run_cli with the provided options, handles CLIAppError by printing the rich message and exiting with the error code, processes slow.pics results (open in browser, copy to clipboard, create shortcut file, and optionally delete the screenshots directory), and finally emits the collected JSON tail to stdout (optionally pretty-printed).
     
     Parameters:
-        config_path: Path to the configuration file used to run the CLI pipeline.
-        input_dir: Optional input directory override for media discovery; if None the config value is used.
+        root_path: Optional explicit workspace root (overrides FRAME_COMPARE_ROOT and sentinel discovery).
+        config_path: Optional override for config.toml. When omitted, resolves to ROOT/config/config.toml.
+        input_dir: Optional override for [paths].input_dir inside the selected root.
         audio_align_track_option: Tuple of audio track override strings to pass through to run_cli.
         quiet: If True, run in quiet mode (affects reporting inside run_cli).
         verbose: If True, enable verbose reporting inside run_cli.
         no_color: If True, disable colored output in run_cli.
         json_pretty: If True, pretty-print the emitted JSON tail (2-space indent).
     """
+    preflight_for_write: _PathPreflightResult | None = None
+    if write_config:
+        try:
+            preflight_for_write = _prepare_preflight(
+                cli_root=root_path,
+                config_override=config_path,
+                input_override=input_dir,
+                ensure_config=True,
+                create_dirs=True,
+                create_media_dir=False,
+            )
+        except CLIAppError as exc:
+            print(exc.rich_message)
+            raise click.exceptions.Exit(exc.code) from exc
+        else:
+            print(f"Config ensured at {preflight_for_write.config_path}")
+        if not diagnose_paths:
+            return
+
+    if diagnose_paths:
+        try:
+            diagnostics = _collect_path_diagnostics(
+                cli_root=root_path,
+                config_override=config_path,
+                input_override=input_dir,
+            )
+        except CLIAppError as exc:
+            print(exc.rich_message)
+            raise click.exceptions.Exit(exc.code) from exc
+        if preflight_for_write is not None:
+            diagnostics.setdefault("warnings", []).extend(
+                warning for warning in preflight_for_write.warnings if warning not in diagnostics.get("warnings", [])
+            )
+        print(json.dumps(diagnostics, separators=(",", ":")))
+        return
+
     try:
         result = run_cli(
             config_path,
             input_dir,
+            root_override=root_path,
             audio_track_overrides=audio_align_track_option,
             quiet=quiet,
             verbose=verbose,
@@ -3691,7 +4314,11 @@ def main(
     slowpics_url = result.slowpics_url
     cfg = result.config
     out_dir = result.out_dir
-    json_tail = result.json_tail or {}
+    json_tail = (
+        cast(JsonTail, result.json_tail)
+        if result.json_tail is not None
+        else cast(JsonTail, {})
+    )
 
     slowpics_block = json_tail.get("slowpics")
     shortcut_path_str: Optional[str] = None
@@ -3732,6 +4359,11 @@ def main(
                     "[yellow]Warning:[/yellow] Skipping screenshot cleanup because the output"
                     f" directory {out_dir} is outside the input root {result.root}"
                 )
+            elif not result.out_dir_created:
+                print(
+                    "[yellow]Warning:[/yellow] Screenshot directory existed before this run; "
+                    "skipping automatic cleanup."
+                )
             else:
                 try:
                     shutil.rmtree(out_dir)
@@ -3742,18 +4374,10 @@ def main(
                     print(
                         f"[yellow]Warning:[/yellow] Failed to delete screenshot directory: {exc}"
                     )
-        if slowpics_block is not None:
-            slowpics_block["url"] = slowpics_url
-            slowpics_block["shortcut_path"] = shortcut_path_str
-            slowpics_block["deleted_screens_dir"] = deleted_dir
-        else:
-            json_tail.setdefault("slowpics", {}).update(
-                {
-                    "url": slowpics_url,
-                    "shortcut_path": shortcut_path_str,
-                    "deleted_screens_dir": deleted_dir,
-                }
-            )
+        slowpics_block = _ensure_slowpics_block(json_tail, cfg)
+        slowpics_block["url"] = slowpics_url
+        slowpics_block["shortcut_path"] = shortcut_path_str
+        slowpics_block["deleted_screens_dir"] = deleted_dir
     elif slowpics_block is not None:
         slowpics_block.setdefault("deleted_screens_dir", False)
         slowpics_block.setdefault("shortcut_path", None)
@@ -3773,4 +4397,5 @@ def main(
 
 
 if __name__ == "__main__":
-    main()
+    _entry_point = cast(Callable[[], None], main)
+    _entry_point()

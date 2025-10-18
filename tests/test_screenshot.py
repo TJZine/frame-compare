@@ -1,6 +1,7 @@
 from pathlib import Path
+import subprocess
 import types
-from typing import Optional, TypedDict
+from typing import Any, Optional, Sequence, TypedDict, cast
 
 import pytest
 
@@ -205,6 +206,46 @@ def test_generate_screenshots_filenames(tmp_path: Path, monkeypatch: pytest.Monk
         assert entry["requested"] == entry["frame"]
 
     assert len(calls) == len(frames)
+
+
+def test_generate_screenshots_reports_permission_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clips = [FakeClip(1280, 720)]
+    frames = [0]
+    files = ["clip.mkv"]
+    metadata = [{}]
+    cfg = ScreenshotConfig(directory_name="screens")
+    color_cfg = ColorConfig()
+    out_dir = tmp_path / "screens"
+
+    path_type = type(out_dir)
+    real_mkdir = path_type.mkdir
+
+    def _deny_mkdir(
+        self: Path,
+        mode: int = 0o777,
+        parents: bool = False,
+        exist_ok: bool = False,
+    ) -> None:
+        if self == out_dir:
+            raise PermissionError("denied")
+        real_mkdir(self, mode, parents=parents, exist_ok=exist_ok)
+
+    monkeypatch.setattr(path_type, "mkdir", _deny_mkdir)
+
+    with pytest.raises(screenshot.ScreenshotError) as excinfo:
+        screenshot.generate_screenshots(
+            clips,
+            frames,
+            files,
+            metadata,
+            out_dir,
+            cfg,
+            color_cfg,
+        )
+
+    assert "Unable to create screenshot directory" in str(excinfo.value)
 
 
 def _make_plan(
@@ -1041,3 +1082,104 @@ def test_overlay_state_warning_helpers_roundtrip() -> None:
     screenshot._append_overlay_warning(state, "first")
     screenshot._append_overlay_warning(state, "second")
     assert screenshot._get_overlay_warnings(state) == ["first", "second"]
+
+
+def test_save_frame_with_ffmpeg_honours_timeout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    cfg = ScreenshotConfig(ffmpeg_timeout_seconds=37.5)
+    recorded: dict[str, object] = {}
+
+    def fake_run(cmd: Sequence[str], **kwargs: Any):  # type: ignore[override]
+        recorded.update(kwargs)
+        recorded["cmd"] = cmd
+
+        class _Result:
+            returncode = 0
+            stderr = b""
+
+        return _Result()
+
+    monkeypatch.setattr(screenshot.shutil, "which", lambda _: "ffmpeg")
+    monkeypatch.setattr(screenshot.subprocess, "run", fake_run)
+
+    screenshot._save_frame_with_ffmpeg(
+        source="video.mkv",
+        frame_idx=12,
+        crop=(0, 0, 0, 0),
+        scaled=(1920, 1080),
+        pad=(0, 0, 0, 0),
+        path=tmp_path / "frame.png",
+        cfg=cfg,
+        width=1920,
+        height=1080,
+        selection_label=None,
+    )
+
+    cmd = recorded.get("cmd")
+    assert isinstance(cmd, list)
+    assert "-nostdin" in cmd
+    assert recorded.get("stdin") is subprocess.DEVNULL
+    assert recorded.get("stdout") is subprocess.DEVNULL
+    assert recorded.get("stderr") is subprocess.PIPE
+    assert recorded.get("timeout") == pytest.approx(37.5)
+
+
+def test_save_frame_with_ffmpeg_disables_timeout_when_zero(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cfg = ScreenshotConfig(ffmpeg_timeout_seconds=0.0)
+    recorded: dict[str, object] = {}
+
+    def fake_run(cmd, **kwargs):  # type: ignore[override]
+        recorded.update(kwargs)
+
+        class _Result:
+            returncode = 0
+            stderr = b""
+
+        return _Result()
+
+    monkeypatch.setattr(screenshot.shutil, "which", lambda _: "ffmpeg")
+    monkeypatch.setattr(screenshot.subprocess, "run", fake_run)
+
+    screenshot._save_frame_with_ffmpeg(
+        source="video.mkv",
+        frame_idx=3,
+        crop=(0, 0, 0, 0),
+        scaled=(1920, 1080),
+        pad=(0, 0, 0, 0),
+        path=tmp_path / "frame.png",
+        cfg=cfg,
+        width=1920,
+        height=1080,
+        selection_label=None,
+    )
+
+    assert "timeout" not in recorded or recorded.get("timeout") is None
+
+
+def test_save_frame_with_ffmpeg_raises_on_timeout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    cfg = ScreenshotConfig(ffmpeg_timeout_seconds=5.0)
+
+    def fake_run(*args: object, **kwargs: Any):  # type: ignore[override]
+        timeout_value = float(kwargs.get("timeout", 0.0) or 0.0)
+        cmd_arg = cast(Any, args[0])
+        raise subprocess.TimeoutExpired(cmd=cmd_arg, timeout=timeout_value)
+
+    monkeypatch.setattr(screenshot.shutil, "which", lambda _: "ffmpeg")
+    monkeypatch.setattr(screenshot.subprocess, "run", fake_run)
+
+    with pytest.raises(screenshot.ScreenshotWriterError) as exc_info:
+        screenshot._save_frame_with_ffmpeg(
+            source="video.mkv",
+            frame_idx=99,
+            crop=(0, 0, 0, 0),
+            scaled=(1280, 720),
+            pad=(0, 0, 0, 0),
+            path=tmp_path / "frame.png",
+            cfg=cfg,
+            width=1280,
+            height=720,
+            selection_label=None,
+        )
+
+    assert "timed out" in str(exc_info.value)
