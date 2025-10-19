@@ -13,10 +13,15 @@ def _block_mkdir(monkeypatch: pytest.MonkeyPatch, target: Path) -> None:
     blocked_resolved = target.resolve()
     original_mkdir = Path.mkdir
 
-    def fake(self: Path, *args: object, **kwargs: object) -> None:
+    def fake(
+        self: Path,
+        mode: int = 0o777,
+        parents: bool = False,
+        exist_ok: bool = False,
+    ) -> None:
         if Path(self).resolve() == blocked_resolved:
             raise PermissionError("Permission denied")
-        return original_mkdir(self, *args, **kwargs)
+        return original_mkdir(self, mode=mode, parents=parents, exist_ok=exist_ok)
 
     monkeypatch.setattr(Path, "mkdir", fake)
 

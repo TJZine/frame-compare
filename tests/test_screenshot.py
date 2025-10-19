@@ -7,6 +7,7 @@ import pytest
 
 from src.datatypes import ColorConfig, ScreenshotConfig
 from src import screenshot, vs_core
+from src.screenshot import GeometryPlan
 
 
 class _CapturedWriterCall(TypedDict):
@@ -258,7 +259,7 @@ def _make_plan(
     scaled: tuple[int, int] = (1920, 1080),
     pad: tuple[int, int, int, int] = (0, 0, 0, 0),
     final: tuple[int, int] = (1920, 1080),
-) -> screenshot.GeometryPlan:
+) -> GeometryPlan:
     """
     Builds a rendering plan dictionary describing dimensions, crop, scaling, padding, and final output size.
     
@@ -273,16 +274,19 @@ def _make_plan(
             - "pad": 4-tuple (left, top, right, bottom) of pixels added as padding.
             - "final": 2-tuple (width, height) of the final output frame.
     """
-    plan: screenshot.GeometryPlan = {
-        "width": width,
-        "height": height,
-        "crop": crop,
-        "cropped_w": cropped_w,
-        "cropped_h": cropped_h,
-        "scaled": scaled,
-        "pad": pad,
-        "final": final,
-    }
+    plan = cast(
+        GeometryPlan,
+        {
+            "width": width,
+            "height": height,
+            "crop": crop,
+            "cropped_w": cropped_w,
+            "cropped_h": cropped_h,
+            "scaled": scaled,
+            "pad": pad,
+            "final": final,
+        },
+    )
     return plan
 
 

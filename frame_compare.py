@@ -2273,17 +2273,20 @@ def _maybe_apply_audio_alignment(
     )
 
     try:
-        _, existing_entries = audio_alignment.load_offsets(offsets_path)
+        _, existing_entries_raw = audio_alignment.load_offsets(offsets_path)
     except audio_alignment.AudioAlignmentError as exc:
         raise CLIAppError(
             f"Failed to read audio offsets file: {exc}",
             rich_message=f"[red]Failed to read audio offsets file:[/red] {exc}",
         ) from exc
 
+    existing_entries: Dict[str, Dict[str, object]] = cast(
+        Dict[str, Dict[str, object]], existing_entries_raw
+    )
     vspreview_reuse: Dict[str, int] = {}
     if vspreview_enabled and existing_entries:
         for key, value in existing_entries.items():
-            if not isinstance(value, Mapping):
+            if not isinstance(value, dict):
                 continue
             status_obj = value.get("status")
             note_obj = value.get("note")

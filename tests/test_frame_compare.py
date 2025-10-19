@@ -330,8 +330,8 @@ def test_launch_vspreview_generates_script(
     assert recorded_command, "VSPreview command should be invoked when interactive"
     assert recorded_command[0][0] == frame_compare.sys.executable
     assert recorded_command[0][-1] == str(script_path)
-    assert audio_block["vspreview_invoked"] is True
-    assert audio_block["vspreview_exit_code"] == 0
+    assert audio_block.get("vspreview_invoked") is True
+    assert audio_block.get("vspreview_exit_code") == 0
     assert prompt_calls, "Prompt should be invoked even when returning default offsets"
     assert apply_calls == [{}]
 
@@ -488,9 +488,12 @@ def test_vspreview_manual_offsets_positive(
     deltas_map = cast(dict[str, int], audio_block.get("vspreview_manual_deltas", {}))
     assert offsets_map[target_path.name] == 12
     assert deltas_map[target_path.name] == 7
-    assert captured["notes"][target_path.name] == "VSPreview"
-    assert captured["existing"][target_path.name]["status"] == "manual"
-    assert int(captured["existing"][target_path.name]["frames"]) == 12
+    notes_map = cast(dict[str, str], captured["notes"])
+    existing_map = cast(dict[str, Mapping[str, object]], captured["existing"])
+    assert notes_map[target_path.name] == "VSPreview"
+    entry = cast(dict[str, object], existing_map[target_path.name])
+    assert entry.get("status") == "manual"
+    assert int(cast(int | float, entry.get("frames", 0))) == 12
     assert any("VSPreview manual offset applied" in line for line in reporter.lines)
 
 
