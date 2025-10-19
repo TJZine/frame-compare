@@ -716,9 +716,40 @@ def plan_mod_crop(
     return (left, top, right, bottom)
 
 
-def _align_letterbox_pillarbox(plans: List[GeometryPlan]) -> None:
+def _align_letterbox_pillarbox(plans: List[GeometryPlan], *, mod: int) -> None:
     if not plans:
         return
+
+    modulus = max(1, int(mod))
+
+    def _split_additional_crop(diff: int) -> tuple[int, int]:
+        if diff <= 0:
+            return (0, 0)
+        if modulus <= 1:
+            first = diff // 2
+            second = diff - first
+            return (first, second)
+        if diff % modulus != 0:
+            raise ScreenshotGeometryError(
+                "Additional crop adjustment must align to configured modulus"
+            )
+        units = diff // modulus
+        first_units = units // 2
+        second_units = units - first_units
+        return (first_units * modulus, second_units * modulus)
+
+    def _select_target(values: List[int]) -> int:
+        target = min(values)
+        if target <= 0:
+            return target
+        if modulus <= 1:
+            return target
+        candidate = target
+        while candidate > 0:
+            if all((value - candidate) % modulus == 0 for value in values if value >= candidate):
+                return candidate
+            candidate -= 1
+        return target
 
     widths = [int(plan["width"]) for plan in plans]
     heights = [int(plan["height"]) for plan in plans]
@@ -726,33 +757,47 @@ def _align_letterbox_pillarbox(plans: List[GeometryPlan]) -> None:
     same_h = len({h for h in heights if h > 0}) == 1
 
     if same_w:
-        target_h = min(int(plan["cropped_h"]) for plan in plans)
+        cropped_heights = [int(plan["cropped_h"]) for plan in plans if int(plan["cropped_h"]) > 0]
+        if not cropped_heights:
+            return
+        target_h = _select_target(cropped_heights)
+        if target_h <= 0:
+            raise ScreenshotGeometryError("Unable to determine a valid target height for alignment")
         for plan in plans:
             current_h = int(plan["cropped_h"])
             diff = current_h - target_h
             if diff <= 0:
                 continue
-            add_top = diff // 2
-            add_bottom = diff - add_top
+            add_top, add_bottom = _split_additional_crop(diff)
             left, top, right, bottom = plan["crop"]
             top += add_top
             bottom += add_bottom
+            new_height = int(plan["height"]) - top - bottom
+            if new_height != target_h:
+                raise ScreenshotGeometryError("Letterbox alignment produced inconsistent height")
             plan["crop"] = (left, top, right, bottom)
-            plan["cropped_h"] = plan["height"] - top - bottom
+            plan["cropped_h"] = new_height
     elif same_h:
-        target_w = min(int(plan["cropped_w"]) for plan in plans)
+        cropped_widths = [int(plan["cropped_w"]) for plan in plans if int(plan["cropped_w"]) > 0]
+        if not cropped_widths:
+            return
+        target_w = _select_target(cropped_widths)
+        if target_w <= 0:
+            raise ScreenshotGeometryError("Unable to determine a valid target width for alignment")
         for plan in plans:
             current_w = int(plan["cropped_w"])
             diff = current_w - target_w
             if diff <= 0:
                 continue
-            add_left = diff // 2
-            add_right = diff - add_left
+            add_left, add_right = _split_additional_crop(diff)
             left, top, right, bottom = plan["crop"]
             left += add_left
             right += add_right
+            new_width = int(plan["width"]) - left - right
+            if new_width != target_w:
+                raise ScreenshotGeometryError("Letterbox alignment produced inconsistent width")
             plan["crop"] = (left, top, right, bottom)
-            plan["cropped_w"] = plan["width"] - left - right
+            plan["cropped_w"] = new_width
 
 
 def _plan_letterbox_offsets(
@@ -892,6 +937,27 @@ def _compute_scaled_dimensions(
 
 def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[GeometryPlan]:
     plans: List[GeometryPlan] = []
+    modulus = max(1, int(cfg.mod_crop))
+
+    def _align_target_height(target: int, cropped: int, *, prefer_upscale: bool) -> int:
+        if modulus <= 1:
+            return target
+        if target <= 0:
+            return target
+        remainder = target % modulus
+        if remainder == 0:
+            return target
+        if prefer_upscale:
+            aligned = target + (modulus - remainder)
+        else:
+            aligned = target - remainder
+        if aligned <= 0:
+            if modulus <= cropped:
+                aligned = modulus
+            else:
+                aligned = max(1, cropped - (cropped % modulus))
+        return aligned
+
     for clip in clips:
         width = getattr(clip, "width", None)
         height = getattr(clip, "height", None)
@@ -947,7 +1013,7 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[Geometry
             )
 
     if cfg.letterbox_pillarbox_aware:
-        _align_letterbox_pillarbox(plans)
+        _align_letterbox_pillarbox(plans, mod=cfg.mod_crop)
 
     single_res_target = int(cfg.single_res) if cfg.single_res > 0 else None
     if single_res_target is not None:
@@ -982,6 +1048,15 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[Geometry
             target_h = max(cropped_h, int(global_target))
         else:
             target_h = cropped_h
+
+        prefer_upscale = target_h > cropped_h and (
+            cfg.upscale
+            or (
+                pad_enabled
+                and (pad_force or (target_h - cropped_h) <= pad_tolerance)
+            )
+        )
+        target_h = _align_target_height(target_h, cropped_h, prefer_upscale=prefer_upscale)
 
         target_heights.append(target_h)
 

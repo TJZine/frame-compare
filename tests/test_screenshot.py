@@ -151,6 +151,45 @@ def test_plan_geometry_letterbox_alignment(tmp_path: Path, monkeypatch: pytest.M
     assert captured[1]["scaled"] == (3840, 1800)
 
 
+def test_plan_geometry_letterbox_alignment_even_offsets() -> None:
+    clips = [FakeClip(1920, 1036), FakeClip(1920, 1038)]
+    cfg = ScreenshotConfig(directory_name="screens")
+
+    plans = screenshot._plan_geometry(clips, cfg)
+
+    assert len(plans) == 2
+
+    for plan in plans:
+        crop_left, crop_top, crop_right, crop_bottom = plan["crop"]
+        assert crop_left >= 0 and crop_right >= 0
+        assert crop_top >= 0 and crop_bottom >= 0
+        if plan["height"] == 1038:
+            assert crop_top % 2 == 0
+            assert crop_bottom % 2 == 0
+            assert plan["cropped_h"] == 1036
+
+
+def test_plan_geometry_upscale_padding_mod_alignment() -> None:
+    clips = [FakeClip(1280, 720)]
+    cfg = ScreenshotConfig(
+        directory_name="screens",
+        single_res=721,
+        upscale=True,
+        letterbox_pillarbox_aware=False,
+        pad_to_canvas="on",
+        mod_crop=2,
+    )
+
+    plans = screenshot._plan_geometry(clips, cfg)
+
+    assert len(plans) == 1
+    plan = plans[0]
+
+    _, pad_top, _, pad_bottom = plan["pad"]
+    assert (pad_top + pad_bottom) % 2 == 0
+    assert plan["scaled"][1] % 2 == 0
+    assert plan["final"][1] % 2 == 0
+
 def test_generate_screenshots_filenames(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     clip = FakeClip(1280, 720)
     cfg = ScreenshotConfig(directory_name="screens")
