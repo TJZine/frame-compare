@@ -112,10 +112,13 @@ def _load_optional_modules() -> Tuple[Any, Any, Any]:
             import librosa  # type: ignore
             import numpy as np  # type: ignore
             import soundfile as sf  # type: ignore
-    except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
-        raise AudioAlignmentError(
+    except Exception as exc:  # pragma: no cover - optional dependency
+        message = (
             "Audio alignment requires optional dependencies: numpy, librosa, soundfile."
-        ) from exc
+            if isinstance(exc, ModuleNotFoundError)
+            else f"Audio alignment failed to load optional dependencies: {exc}"
+        )
+        raise AudioAlignmentError(message) from exc
     return np, librosa, sf
 
 
