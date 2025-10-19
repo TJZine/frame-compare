@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import builtins
+import importlib.machinery
 import importlib.util
 import json
 import logging
@@ -2861,8 +2862,9 @@ def _launch_vspreview(
 
     env = dict(os.environ)
     search_paths = getattr(cfg.runtime, "vapoursynth_python_paths", [])
-    if search_paths:
-        env["VAPOURSYNTH_PYTHONPATH"] = os.pathsep.join(str(Path(path).expanduser()) for path in search_paths if path)
+    expanded_search_paths = [str(Path(path).expanduser()) for path in search_paths if path]
+    if expanded_search_paths:
+        env["VAPOURSYNTH_PYTHONPATH"] = os.pathsep.join(expanded_search_paths)
 
     command: list[str] | None = None
     executable = shutil.which("vspreview")
@@ -2870,6 +2872,8 @@ def _launch_vspreview(
         command = [executable, str(script_path)]
     else:
         module_spec = importlib.util.find_spec("vspreview")
+        if module_spec is None and expanded_search_paths:
+            module_spec = importlib.machinery.PathFinder.find_spec("vspreview", expanded_search_paths)
         if module_spec is not None:
             command = [sys.executable, "-m", "vspreview", str(script_path)]
 
