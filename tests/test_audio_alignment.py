@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
@@ -152,3 +153,48 @@ def test_onset_envelope_suppresses_dependency_warning(monkeypatch: pytest.Monkey
     assert hop == 512
     assert isinstance(onset_env, FakeArray)
     assert calls == ["sf.read", "librosa.resample", "librosa.onset_strength"]
+
+
+def test_measure_offsets_wraps_optional_dependency_errors(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Optional dependency runtime issues should surface as alignment errors."""
+
+    original_import = builtins.__import__
+
+    def failing_import(name: str, globals: object = None, locals: object = None, fromlist: tuple[str, ...] = (), level: int = 0):  # type: ignore[override]
+        if name == "librosa":
+            raise RuntimeError("boom")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", failing_import)
+    monkeypatch.setattr(aa, "ensure_external_tools", lambda: None)
+
+    def fake_extract_audio(
+        _infile: Path,
+        *,
+        sample_rate: int,
+        start_seconds: float | None,
+        duration_seconds: float | None,
+        stream_index: int,
+    ) -> Path:
+        wav_path = tmp_path / "extracted.wav"
+        wav_path.write_bytes(b"0")
+        return wav_path
+
+    monkeypatch.setattr(aa, "_extract_audio", fake_extract_audio)
+
+    reference = tmp_path / "ref.mp4"
+    reference.write_bytes(b"dummy")
+
+    with pytest.raises(aa.AudioAlignmentError) as excinfo:
+        aa.measure_offsets(
+            reference,
+            [],
+            sample_rate=48000,
+            hop_length=512,
+            start_seconds=None,
+            duration_seconds=None,
+        )
+
+    assert "boom" in str(excinfo.value)
