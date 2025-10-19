@@ -249,25 +249,35 @@ def _onset_envelope(
 ) -> Tuple[Any, int]:
     np, librosa, sf = _load_optional_modules()
 
-    with _suppress_flush_to_zero_warning():
-        data, native_sr = sf.read(str(wav_path))
-        if data.size == 0:
-            raise AudioAlignmentError(f"No audio samples extracted from {wav_path}")
-        if data.ndim > 1:
-            data = np.mean(data, axis=1)
-        if native_sr != sample_rate:
-            data = librosa.resample(data, orig_sr=native_sr, target_sr=sample_rate)
+    try:
+        with _suppress_flush_to_zero_warning():
+            data, native_sr = sf.read(str(wav_path))
+            if data.size == 0:
+                raise AudioAlignmentError(f"No audio samples extracted from {wav_path}")
+            if data.ndim > 1:
+                data = np.mean(data, axis=1)
+            if native_sr != sample_rate:
+                data = librosa.resample(data, orig_sr=native_sr, target_sr=sample_rate)
 
-        peak = float(np.max(np.abs(data))) if data.size else 0.0
-        if peak > 0:
-            data = data / peak
+            peak = float(np.max(np.abs(data))) if data.size else 0.0
+            if peak > 0:
+                data = data / peak
 
-        onset_env = librosa.onset.onset_strength(
-            y=data,
-            sr=sample_rate,
-            hop_length=hop_length,
-            center=True,
+            onset_env = librosa.onset.onset_strength(
+                y=data,
+                sr=sample_rate,
+                hop_length=hop_length,
+                center=True,
+            )
+    except AudioAlignmentError:
+        raise
+    except Exception as exc:  # pragma: no cover - optional dependency runtime
+        message = (
+            "Audio alignment failed during onset envelope calculation because an optional "
+            f"dependency raised an error: {exc}. Install numpy, librosa, and soundfile "
+            "(and their dependencies)."
         )
+        raise AudioAlignmentError(message) from exc
     return onset_env.astype(np.float32), hop_length
 
 

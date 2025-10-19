@@ -198,3 +198,69 @@ def test_measure_offsets_wraps_optional_dependency_errors(
         )
 
     assert "boom" in str(excinfo.value)
+
+
+def test_measure_offsets_wraps_onset_strength_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Runtime failures from onset strength propagate as alignment errors."""
+
+    fake_np = FakeNpModule()
+
+    class FakeSoundFileModule:
+        @staticmethod
+        def read(path: str):  # type: ignore[override]
+            assert path.endswith(".wav")
+            return fake_np.array([[0.2, 0.1, 0.0], [0.0, 0.1, 0.2]]), 24000
+
+    class FakeOnsetModule:
+        @staticmethod
+        def onset_strength(**_: object):  # type: ignore[override]
+            raise RuntimeError("dummy onset failure")
+
+    class FakeLibrosaModule:
+        onset = FakeOnsetModule()
+
+        @staticmethod
+        def resample(data: FakeArray, *, orig_sr: int, target_sr: int) -> FakeArray:
+            assert orig_sr == 24000
+            assert target_sr == 48000
+            return data
+
+    def fake_load_optional_modules():
+        return fake_np, FakeLibrosaModule(), FakeSoundFileModule()
+
+    monkeypatch.setattr(aa, "_load_optional_modules", fake_load_optional_modules)
+    monkeypatch.setattr(aa, "ensure_external_tools", lambda: None)
+    monkeypatch.setattr(aa, "_probe_fps", lambda _path: None)
+
+    def fake_extract_audio(
+        _infile: Path,
+        *,
+        sample_rate: int,
+        start_seconds: float | None,
+        duration_seconds: float | None,
+        stream_index: int,
+    ) -> Path:
+        wav_path = tmp_path / "extracted.wav"
+        wav_path.write_bytes(b"0")
+        return wav_path
+
+    monkeypatch.setattr(aa, "_extract_audio", fake_extract_audio)
+
+    reference = tmp_path / "ref.mp4"
+    reference.write_bytes(b"dummy")
+
+    with pytest.raises(aa.AudioAlignmentError) as excinfo:
+        aa.measure_offsets(
+            reference,
+            [],
+            sample_rate=48000,
+            hop_length=512,
+            start_seconds=None,
+            duration_seconds=None,
+        )
+
+    message = str(excinfo.value)
+    assert "optional dependency" in message
+    assert "dummy onset failure" in message
