@@ -2952,7 +2952,7 @@ def _prompt_vspreview_offsets(
                     show_default=True,
                 )
             )
-        except click.Abort:
+        except click.exceptions.Abort:
             reporter.warn("VSPreview offset entry aborted; keeping existing trims.")
             return None
         offsets[plan.path.name] = delta
@@ -4989,7 +4989,10 @@ def main(
 ) -> None:
     """
     Run the CLI pipeline and handle post-run outputs such as slow.pics handling and JSON tail emission.
-    
+
+    Includes optional VSPreview-assisted manual alignment when `[audio_alignment].use_vspreview` is enabled and the session is
+    interactive.
+
     Runs run_cli with the provided options, handles CLIAppError by printing the rich message and exiting with the error code, processes slow.pics results (open in browser, copy to clipboard, create shortcut file, and optionally delete the screenshots directory), and finally emits the collected JSON tail to stdout (optionally pretty-printed).
     
     Parameters:

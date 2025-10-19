@@ -336,6 +336,84 @@ def test_launch_vspreview_generates_script(
     assert apply_calls == [{}]
 
 
+def test_launch_vspreview_warns_when_command_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """VSPreview launcher should fall back cleanly when no executable is available."""
+
+    cfg = _make_config(tmp_path)
+    cfg.audio_alignment.use_vspreview = True
+
+    reference_path = tmp_path / "Ref.mkv"
+    target_path = tmp_path / "Target.mkv"
+    reference_path.write_bytes(b"ref")
+    target_path.write_bytes(b"tgt")
+
+    reference_plan = frame_compare._ClipPlan(
+        path=reference_path,
+        metadata={"label": "Reference"},
+    )
+    target_plan = frame_compare._ClipPlan(
+        path=target_path,
+        metadata={"label": "Target"},
+    )
+    plans = [reference_plan, target_plan]
+
+    summary = frame_compare._AudioAlignmentSummary(
+        offsets_path=tmp_path / "offsets.toml",
+        reference_name=reference_path.name,
+        measurements=(),
+        applied_frames={},
+        baseline_shift=0,
+        statuses={},
+        reference_plan=reference_plan,
+        final_adjustments={},
+        swap_details={},
+        suggested_frames={target_path.name: 4},
+        suggestion_mode=True,
+        manual_trim_starts={target_path.name: 2},
+    )
+
+    reporter = _RecordingOutputManager()
+    json_tail = _make_json_tail_stub()
+    audio_block = json_tail["audio_alignment"]
+
+    display = frame_compare._AudioAlignmentDisplayData(
+        stream_lines=[],
+        estimation_line=None,
+        offset_lines=[],
+        offsets_file_line="Offsets file: offsets.toml",
+        json_reference_stream=None,
+        json_target_streams={},
+        json_offsets_sec={},
+        json_offsets_frames={},
+        warnings=[],
+    )
+
+    monkeypatch.setattr(frame_compare.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(frame_compare.shutil, "which", lambda _: None)
+    monkeypatch.setattr(frame_compare.importlib.util, "find_spec", lambda name: None)
+
+    prompt_called: list[None] = []
+
+    def _fail_prompt(*_args: object, **_kwargs: object) -> dict[str, int]:
+        prompt_called.append(None)
+        return {}
+
+    monkeypatch.setattr(frame_compare, "_prompt_vspreview_offsets", _fail_prompt)
+
+    frame_compare._launch_vspreview(plans, summary, display, cfg, tmp_path, reporter, json_tail)
+
+    script_path_str = audio_block.get("vspreview_script")
+    assert script_path_str, "Script path should still be recorded for manual launches"
+    assert Path(script_path_str).exists()
+    assert audio_block.get("vspreview_invoked") is False
+    assert audio_block.get("vspreview_exit_code") is None
+    assert not prompt_called, "Prompt should not run when VSPreview cannot launch"
+    warnings = reporter.get_warnings()
+    assert any("VSPreview executable not found" in warning for warning in warnings)
+
+
 def _make_json_tail_stub() -> frame_compare.JsonTail:
     audio_block: frame_compare.AudioAlignmentJSON = {
         "enabled": False,

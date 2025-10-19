@@ -28,7 +28,7 @@ quick-start configuration paths.
 | Key | Purpose | Type | Default |
 | --- | --- | --- | --- |
 | `[audio_alignment].enable` | Toggle automatic offset detection. | bool | `false` |
-| `[audio_alignment].use_vspreview` | Surface offsets as suggestions and transition to VSPreview manual alignment flow. | bool | `false` |
+| `[audio_alignment].use_vspreview` | Surface offsets as suggestions, launch VSPreview for manual trims, and record the accepted delta (skips launch when non-interactive or VSPreview is missing). | bool | `false` |
 | `[audio_alignment].sample_rate` | Audio extraction rate. | int | `16000` |
 | `[audio_alignment].hop_length` | Onset envelope hop length. | int | `512` |
 | `[audio_alignment].correlation_threshold` | Minimum accepted score. | float | `0.55` |

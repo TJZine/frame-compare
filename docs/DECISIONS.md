@@ -1,5 +1,6 @@
 # Decisions Log
 
+- *2025-10-27:* Finalised the VSPreview-assisted manual alignment UX, documenting the new flag in README/REFERENCE, expanding the audio-alignment guide with prerequisites and fallback behaviour, surfacing the hook in CLI help, and extending automated + manual QA coverage for the headless fallback path.
 - *2025-10-26:* Enforced workspace containment for analysis cache and audio offset files via `_resolve_workspace_subdir`, added regression coverage for escape attempts, removed the generated `config.toml` (template remains the source of defaults), and limited automatic screenshot cleanup to directories created during the active run.
 - *2025-10-26:* Constrained supported Python versions to 3.13.x (`>=3.13,<3.14`) because `librosa`/`numba` fail to build on 3.14; updated pyproject/lock files accordingly.
 - *2025-10-24:* Locked workspace root discovery to `--root`/`FRAME_COMPARE_ROOT`/sentinel hierarchy, seeded config under `ROOT/config/config.toml`, enforced `ROOT/comparison_videos[/screens]` outputs, and added diagnostics + site-packages guardrails.
