@@ -1150,6 +1150,7 @@ def _save_frame_with_fpng(
     overlay_text: Optional[str] = None,
     overlay_state: Optional[OverlayState] = None,
     strict_overlay: bool = False,
+    source_props: Mapping[str, Any] | None = None,
 ) -> None:
     try:
         import vapoursynth as vs  # type: ignore
@@ -1595,6 +1596,7 @@ def generate_screenshots(
                         overlay_text=overlay_text,
                         overlay_state=overlay_state,
                         strict_overlay=bool(getattr(color_cfg, "strict", False)),
+                        source_props=source_props,
                     )
             except ScreenshotWriterError:
                 raise
