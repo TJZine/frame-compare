@@ -130,6 +130,176 @@ def _make_config(input_dir: Path) -> AppConfig:
     )
 
 
+def test_audio_alignment_vspreview_suggestion_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """VSPreview flow surfaces offsets without mutating trims or writing offsets."""
+
+    reference_path = tmp_path / "Ref.mkv"
+    target_path = tmp_path / "Target.mkv"
+    reference_path.write_bytes(b"ref")
+    target_path.write_bytes(b"tgt")
+
+    cfg = _make_config(tmp_path)
+    cfg.audio_alignment.enable = True
+    cfg.audio_alignment.use_vspreview = True
+    cfg.audio_alignment.confirm_with_screenshots = False
+    cfg.audio_alignment.frame_offset_bias = 0
+
+    reference_plan = frame_compare._ClipPlan(
+        path=reference_path,
+        metadata={"label": "Reference"},
+        clip=None,
+    )
+    target_plan = frame_compare._ClipPlan(
+        path=target_path,
+        metadata={"label": "Target"},
+        clip=None,
+    )
+    target_plan.trim_start = 120
+    target_plan.has_trim_start_override = True
+
+    measurement = AlignmentMeasurement(
+        file=target_path,
+        offset_seconds=0.5,
+        frames=12,
+        correlation=0.92,
+        reference_fps=24.0,
+        target_fps=24.0,
+    )
+
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "probe_audio_streams",
+        lambda _path: [],
+    )
+
+    def _fake_measure(
+        _ref: Path,
+        targets: list[Path],
+        *,
+        progress_callback,
+        **_kwargs: object,
+    ):
+        progress_callback(len(targets))
+        return [measurement]
+
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "measure_offsets",
+        _fake_measure,
+    )
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "load_offsets",
+        lambda _path: (None, {}),
+    )
+
+    def _fail_update(*_args, **_kwargs):
+        raise AssertionError("update_offsets_file should not be called in VSPreview mode")
+
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "update_offsets_file",
+        _fail_update,
+    )
+
+    summary, display = frame_compare._maybe_apply_audio_alignment(
+        [reference_plan, target_plan],
+        cfg,
+        reference_path,
+        tmp_path,
+        {},
+        reporter=None,
+    )
+
+    assert summary is not None
+    assert display is not None
+    assert summary.suggestion_mode is True
+    assert summary.applied_frames == {}
+    assert summary.suggested_frames[target_path.name] == 12
+    assert summary.manual_trim_starts[target_path.name] == 120
+    assert target_plan.trim_start == 120, "Trim should remain unchanged in suggestion mode"
+    assert any("VSPreview manual alignment enabled" in warning for warning in display.warnings)
+    assert any("Existing manual trim" in line for line in display.offset_lines)
+
+
+def test_launch_vspreview_generates_script(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """VSPreview launcher should emit a script and attempt to execute it."""
+
+    cfg = _make_config(tmp_path)
+    cfg.audio_alignment.use_vspreview = True
+
+    reference_path = tmp_path / "Ref.mkv"
+    target_path = tmp_path / "Target.mkv"
+    reference_path.write_bytes(b"ref")
+    target_path.write_bytes(b"tgt")
+
+    reference_plan = frame_compare._ClipPlan(
+        path=reference_path,
+        metadata={"label": "Reference"},
+    )
+    target_plan = frame_compare._ClipPlan(
+        path=target_path,
+        metadata={"label": "Target"},
+    )
+    target_plan.trim_start = 10
+    target_plan.has_trim_start_override = True
+    plans = [reference_plan, target_plan]
+
+    summary = frame_compare._AudioAlignmentSummary(
+        offsets_path=tmp_path / "offsets.toml",
+        reference_name=reference_path.name,
+        measurements=(),
+        applied_frames={},
+        baseline_shift=0,
+        statuses={},
+        reference_plan=reference_plan,
+        final_adjustments={},
+        swap_details={},
+        suggested_frames={target_path.name: 7},
+        suggestion_mode=True,
+        manual_trim_starts={target_path.name: 10},
+    )
+
+    reporter = _RecordingOutputManager()
+    audio_block: dict[str, object] = {}
+    json_tail: frame_compare.JsonTail = {"audio_alignment": audio_block}
+
+    monkeypatch.setattr(frame_compare.sys.stdin, "isatty", lambda: True)
+
+    recorded_command: list[list[str]] = []
+
+    class _Result:
+        def __init__(self, returncode: int = 0) -> None:
+            self.returncode = returncode
+
+    monkeypatch.setattr(frame_compare.shutil, "which", lambda _: None)
+    monkeypatch.setattr(
+        frame_compare.subprocess,
+        "run",
+        lambda cmd, env=None, check=False: recorded_command.append(list(cmd)) or _Result(0),
+    )
+
+    frame_compare._launch_vspreview(plans, summary, cfg, tmp_path, reporter, json_tail)
+
+    script_path_str = audio_block.get("vspreview_script")
+    assert script_path_str, "Script path should be recorded in JSON tail"
+    script_path = Path(script_path_str)
+    assert script_path.exists()
+    script_text = script_path.read_text(encoding="utf-8")
+    assert "OFFSET_MAP" in script_text
+    assert "vs_core.configure" in script_text
+    assert "ColorConfig" in script_text
+    assert recorded_command, "VSPreview command should be invoked when interactive"
+    assert recorded_command[0][0] == frame_compare.sys.executable
+    assert recorded_command[0][-1] == str(script_path)
+    assert audio_block["vspreview_invoked"] is True
+    assert audio_block["vspreview_exit_code"] == 0
+
+
 def _comparison_fixture_root() -> Path:
     """Return the repository-level comparison fixture directory."""
 
@@ -1627,6 +1797,9 @@ def _build_alignment_context(
         reference_plan=reference_plan,
         final_adjustments={},
         swap_details={},
+        suggested_frames={},
+        suggestion_mode=False,
+        manual_trim_starts={},
     )
 
     display = frame_compare._AudioAlignmentDisplayData(
@@ -1639,6 +1812,7 @@ def _build_alignment_context(
         json_offsets_sec={},
         json_offsets_frames={},
         warnings=[],
+        manual_trim_lines=[],
     )
 
     return cfg, [reference_plan, target_plan], summary, display
@@ -1874,6 +2048,9 @@ def test_run_cli_calls_alignment_confirmation(
             reference_plan=plans[0],
             final_adjustments={},
             swap_details={},
+            suggested_frames={},
+            suggestion_mode=False,
+            manual_trim_starts={},
         )
         display = frame_compare._AudioAlignmentDisplayData(
             stream_lines=[],
@@ -1885,6 +2062,7 @@ def test_run_cli_calls_alignment_confirmation(
             json_offsets_sec={"Target": 0.0},
             json_offsets_frames={"Target": 0},
             warnings=[],
+            manual_trim_lines=[],
         )
         return summary, display
 

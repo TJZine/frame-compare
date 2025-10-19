@@ -161,6 +161,7 @@ class AudioAlignmentConfig:
 
     enable: bool = False
     reference: str = ""
+    use_vspreview: bool = False
     sample_rate: int = 16000
     hop_length: int = 512
     start_seconds: Optional[float] = None

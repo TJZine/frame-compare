@@ -11,13 +11,15 @@ import os
 import random
 import re
 import shutil
+import subprocess
 import sys
+import textwrap
 import time
 import traceback
 import webbrowser
 from collections import Counter, defaultdict
 from collections.abc import Mapping as MappingABC
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 import datetime as _dt
 from pathlib import Path
 from string import Template
@@ -231,6 +233,21 @@ class _ClipPlan:
     alignment_status: str = ""
 
 
+def _plan_label(plan: _ClipPlan) -> str:
+    """
+    Determine a user-facing label for a clip plan using metadata fallbacks.
+    """
+
+    metadata = plan.metadata
+    for key in ("label", "title", "anime_title", "file_name"):
+        value = metadata.get(key)
+        if value:
+            text = str(value).strip()
+            if text:
+                return text
+    return plan.path.name
+
+
 _OverrideValue = TypeVar("_OverrideValue")
 
 
@@ -394,6 +411,9 @@ class _AudioAlignmentSummary:
         reference_plan (_ClipPlan): Clip plan of the alignment reference source.
         final_adjustments (Dict[str, int]): Post-alignment adjustments written back to config.
         swap_details (Dict[str, str]): Additional per-clip swap notes for CLI output.
+        suggested_frames (Dict[str, int]): Raw suggested frame offsets when VSPreview flow is enabled.
+        suggestion_mode (bool): True when trims were not auto-applied (VSPreview flow).
+        manual_trim_starts (Dict[str, int]): Existing manual trim starts applied before alignment.
     """
     offsets_path: Path
     reference_name: str
@@ -404,6 +424,9 @@ class _AudioAlignmentSummary:
     reference_plan: _ClipPlan
     final_adjustments: Dict[str, int]
     swap_details: Dict[str, str]
+    suggested_frames: Dict[str, int] = field(default_factory=dict)
+    suggestion_mode: bool = False
+    manual_trim_starts: Dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -430,6 +453,7 @@ class _AudioAlignmentDisplayData:
     confirmation: Optional[str] = None
     correlations: Dict[str, float] = field(default_factory=dict)
     threshold: float = 0.0
+    manual_trim_lines: List[str] = field(default_factory=list)
 
 
 class CliOutputManager:
@@ -2010,7 +2034,44 @@ def _maybe_apply_audio_alignment(
         """
         display_data.warnings.append(f"[AUDIO] {message}")
 
+    vspreview_enabled = bool(getattr(audio_cfg, "use_vspreview", False))
+
     if not audio_cfg.enable:
+        if vspreview_enabled and plans:
+            reference_plan = plans[0]
+            manual_trim_starts = {
+                plan.path.name: int(plan.trim_start)
+                for plan in plans
+                if plan.trim_start > 0
+            }
+            labels = {plan: _plan_label(plan) for plan in plans}
+            if manual_trim_starts:
+                for plan in plans:
+                    trim = manual_trim_starts.get(plan.path.name)
+                    if trim:
+                        display_data.manual_trim_lines.append(
+                            f"Existing manual trim: {labels[plan]} → {trim}f"
+                        )
+            display_data.offset_lines = ["Audio offsets: not computed (manual alignment only)"]
+            display_data.offset_lines.extend(display_data.manual_trim_lines)
+            display_data.warnings.append(
+                "[AUDIO] VSPreview manual alignment enabled — audio alignment disabled."
+            )
+            summary = _AudioAlignmentSummary(
+                offsets_path=offsets_path,
+                reference_name=reference_plan.path.name,
+                measurements=(),
+                applied_frames={},
+                baseline_shift=0,
+                statuses={},
+                reference_plan=reference_plan,
+                final_adjustments={},
+                swap_details={},
+                suggested_frames={},
+                suggestion_mode=True,
+                manual_trim_starts=manual_trim_starts,
+            )
+            return summary, display_data
         return None, display_data
     if len(plans) < 2:
         _warn("Audio alignment skipped: need at least two clips.")
@@ -2022,10 +2083,7 @@ def _maybe_apply_audio_alignment(
         _warn("Audio alignment skipped: no secondary clips to compare.")
         return None, display_data
 
-    plan_labels: Dict[Path, str] = {
-        plan.path: (plan.metadata.get("label") or plan.path.name).strip() or plan.path.name
-        for plan in plans
-    }
+    plan_labels: Dict[Path, str] = {plan.path: _plan_label(plan) for plan in plans}
     name_to_label: Dict[str, str] = {plan.path.name: plan_labels[plan.path] for plan in plans}
 
     stream_infos: Dict[Path, List[audio_alignment.AudioStreamInfo]] = {}
@@ -2457,6 +2515,43 @@ def _maybe_apply_audio_alignment(
         display_data.json_offsets_sec = offsets_sec
         display_data.json_offsets_frames = offsets_frames
 
+        suggested_frames: Dict[str, int] = {}
+        for measurement in measurements:
+            if measurement.frames is not None:
+                suggested_frames[measurement.file.name] = int(measurement.frames)
+
+        manual_trim_starts: Dict[str, int] = {}
+        if vspreview_enabled:
+            for plan in plans:
+                if plan.has_trim_start_override and plan.trim_start > 0:
+                    manual_trim_starts[plan.path.name] = int(plan.trim_start)
+                    label = plan_labels.get(plan.path, plan.path.name)
+                    display_data.manual_trim_lines.append(
+                        f"Existing manual trim: {label} → {plan.trim_start}f"
+                    )
+            if not display_data.offset_lines:
+                display_data.offset_lines.append("Audio offsets: none detected")
+            if display_data.manual_trim_lines:
+                display_data.offset_lines.extend(display_data.manual_trim_lines)
+            display_data.warnings.append(
+                "[AUDIO] VSPreview manual alignment enabled — offsets reported for guidance only."
+            )
+            summary = _AudioAlignmentSummary(
+                offsets_path=offsets_path,
+                reference_name=reference_plan.path.name,
+                measurements=measurements,
+                applied_frames={},
+                baseline_shift=0,
+                statuses={m.file.name: "suggested" for m in measurements},
+                reference_plan=reference_plan,
+                final_adjustments={},
+                swap_details=swap_details,
+                suggested_frames=suggested_frames,
+                suggestion_mode=True,
+                manual_trim_starts=manual_trim_starts,
+            )
+            return summary, display_data
+
         applied_frames, statuses = audio_alignment.update_offsets_file(
             offsets_path,
             reference_plan.path.name,
@@ -2504,6 +2599,9 @@ def _maybe_apply_audio_alignment(
             reference_plan=reference_plan,
             final_adjustments=final_adjustments,
             swap_details=swap_details,
+            suggested_frames=suggested_frames,
+            suggestion_mode=False,
+            manual_trim_starts=manual_trim_starts,
         )
         return summary, display_data
     except audio_alignment.AudioAlignmentError as exc:
@@ -2511,6 +2609,245 @@ def _maybe_apply_audio_alignment(
             f"Audio alignment failed: {exc}",
             rich_message=f"[red]Audio alignment failed:[/red] {exc}",
         ) from exc
+
+
+def _color_config_literal(color_cfg: ColorConfig) -> str:
+    color_dict = asdict(color_cfg)
+    items = ",\n    ".join(f"{key}={value!r}" for key, value in color_dict.items())
+    return f"ColorConfig(\n    {items}\n)"
+
+
+def _write_vspreview_script(
+    plans: Sequence[_ClipPlan],
+    summary: _AudioAlignmentSummary,
+    cfg: AppConfig,
+    root: Path,
+) -> Path:
+    reference_plan = summary.reference_plan
+    targets = [plan for plan in plans if plan is not reference_plan]
+    script_dir = _resolve_workspace_subdir(root, "vspreview", purpose="vspreview workspace")
+    script_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    script_path = script_dir / f"vspreview_{timestamp}.py"
+    project_root = PROJECT_ROOT
+
+    search_paths = [
+        str(Path(path).expanduser())
+        for path in getattr(cfg.runtime, "vapoursynth_python_paths", [])
+        if path
+    ]
+    color_literal = _color_config_literal(cfg.color)
+
+    manual_trims = {}
+    if summary.manual_trim_starts:
+        manual_trims = {
+            _plan_label(plan): summary.manual_trim_starts.get(plan.path.name, 0)
+            for plan in plans
+        }
+    else:
+        manual_trims = {_plan_label(plan): int(plan.trim_start) for plan in plans if plan.trim_start > 0}
+
+    reference_label = _plan_label(reference_plan)
+    reference_trim_end = reference_plan.trim_end if reference_plan.trim_end is not None else None
+    reference_info = textwrap.dedent(
+        f"""\
+        {{
+        'label': {reference_label!r},
+        'path': r'{str(reference_plan.path)}',
+        'trim_start': {int(reference_plan.trim_start)},
+        'trim_end': {reference_trim_end!r},
+        'fps_override': {tuple(reference_plan.fps_override) if reference_plan.fps_override else None!r},
+        }}
+        """
+    ).strip()
+
+    target_lines: list[str] = []
+    offset_lines: list[str] = []
+    if not targets:
+        offset_lines.append("    # Add entries like 'Clip Label': 0 once targets are available.")
+    for plan in targets:
+        label = _plan_label(plan)
+        trim_end_value = plan.trim_end if plan.trim_end is not None else None
+        fps_override = tuple(plan.fps_override) if plan.fps_override else None
+        suggested = summary.suggested_frames.get(plan.path.name, 0)
+        manual_trim = manual_trims.get(label, int(plan.trim_start))
+        manual_note = (
+            f"baseline trim {manual_trim}f"
+            if manual_trim
+            else "no baseline trim"
+        )
+        target_lines.append(
+            textwrap.dedent(
+                f"""\
+                {label!r}: {{
+                    'label': {label!r},
+                    'path': r'{str(plan.path)}',
+                    'trim_start': {int(plan.trim_start)},
+                    'trim_end': {trim_end_value!r},
+                    'fps_override': {fps_override!r},
+                    'manual_trim': {manual_trim},
+                    'manual_trim_description': {manual_note!r},
+                }},"""
+            ).rstrip()
+        )
+        offset_lines.append(f"    {label!r}: {int(suggested)},  # Suggested delta frames")
+
+    targets_literal = "\n".join(target_lines) if target_lines else ""
+    offsets_literal = "\n".join(offset_lines)
+
+    extra_paths = [
+        str(project_root),
+        str(project_root / "src"),
+        str(root),
+    ]
+    extra_paths_literal = ", ".join(repr(path) for path in extra_paths)
+    search_paths_literal = repr(search_paths)
+
+    script = f"""# Auto-generated by Frame Compare to assist with VSPreview alignment.
+import sys
+from pathlib import Path
+
+WORKSPACE_ROOT = Path(r"{root}")
+PROJECT_ROOT = Path(r"{project_root}")
+EXTRA_PATHS = [{extra_paths_literal}]
+for candidate in EXTRA_PATHS:
+    if candidate not in sys.path:
+        sys.path.insert(0, candidate)
+
+import vapoursynth as vs
+from src import vs_core
+from src.datatypes import ColorConfig
+
+vs_core.configure(
+    search_paths={search_paths_literal},
+    source_preference={cfg.source.preferred!r},
+)
+
+COLOR_CFG = {color_literal}
+
+REFERENCE = {reference_info}
+
+TARGETS = {{
+{targets_literal}
+}}
+
+OFFSET_MAP = {{
+{offsets_literal}
+}}
+
+core = vs.core
+
+
+def _load_clip(info):
+    clip = vs_core.init_clip(
+        str(Path(info['path'])),
+        trim_start=int(info.get('trim_start', 0)),
+        trim_end=info.get('trim_end'),
+        fps_map=tuple(info['fps_override']) if info.get('fps_override') else None,
+    )
+    processed = vs_core.process_clip_for_screenshot(
+        clip,
+        info['label'],
+        COLOR_CFG,
+        enable_overlay=False,
+        enable_verification=False,
+    ).clip
+    return processed
+
+
+def _apply_offset(reference_clip, target_clip, offset_frames):
+    if offset_frames > 0:
+        target_clip = target_clip[offset_frames:]
+    elif offset_frames < 0:
+        reference_clip = reference_clip[abs(offset_frames):]
+    return reference_clip, target_clip
+
+
+print("Reference clip:", REFERENCE['label'])
+if not TARGETS:
+    print("No target clips defined; edit TARGETS and OFFSET_MAP to add entries.")
+
+slot = 0
+for label, info in TARGETS.items():
+    reference_clip = _load_clip(REFERENCE)
+    target_clip = _load_clip(info)
+    offset_frames = int(OFFSET_MAP.get(label, 0))
+    ref_view, tgt_view = _apply_offset(reference_clip, target_clip, offset_frames)
+    ref_view.set_output(slot)
+    tgt_view.set_output(slot + 1)
+    print(
+        "Target '%s': baseline trim=%sf (%s), suggested delta=%sf"
+        % (
+            label,
+            info.get('manual_trim', 0),
+            info.get('manual_trim_description', 'n/a'),
+            offset_frames,
+        )
+    )
+    slot += 2
+
+print("VSPreview outputs: reference on even slots, target on odd slots (0↔1, 2↔3, ...).")
+print("Edit OFFSET_MAP values and press Ctrl+R in VSPreview to reload the script.")
+"""
+    script_path.write_text(textwrap.dedent(script), encoding="utf-8")
+    return script_path
+
+
+def _launch_vspreview(
+    plans: Sequence[_ClipPlan],
+    summary: _AudioAlignmentSummary | None,
+    cfg: AppConfig,
+    root: Path,
+    reporter: CliOutputManager,
+    json_tail: JsonTail,
+) -> None:
+    audio_block = json_tail.setdefault("audio_alignment", {})
+    audio_block.setdefault("vspreview_script", None)
+    audio_block.setdefault("vspreview_invoked", False)
+    audio_block.setdefault("vspreview_exit_code", None)
+
+    if summary is None:
+        reporter.warn("VSPreview skipped: no alignment summary available.")
+        return
+
+    if len(plans) < 2:
+        reporter.warn("VSPreview skipped: need at least two clips to compare.")
+        return
+
+    script_path = _write_vspreview_script(plans, summary, cfg, root)
+    audio_block["vspreview_script"] = str(script_path)
+    reporter.console.print(
+        f"[cyan]VSPreview script ready:[/cyan] {script_path}\n"
+        "Edit the OFFSET_MAP values inside the script and reload VSPreview (Ctrl+R) after changes."
+    )
+
+    if not sys.stdin.isatty():
+        reporter.warn("VSPreview launch skipped (non-interactive session). Open the script manually if needed.")
+        return
+
+    env = dict(os.environ)
+    search_paths = getattr(cfg.runtime, "vapoursynth_python_paths", [])
+    if search_paths:
+        env["VAPOURSYNTH_PYTHONPATH"] = os.pathsep.join(str(Path(path).expanduser()) for path in search_paths if path)
+
+    executable = shutil.which("vspreview")
+    if executable:
+        command = [executable, str(script_path)]
+    else:
+        command = [sys.executable, "-m", "vspreview", str(script_path)]
+
+    try:
+        result = subprocess.run(command, env=env, check=False)
+    except FileNotFoundError:
+        reporter.warn(
+            "VSPreview executable not found. Run it manually, for example: "
+            f"'python -m vspreview {script_path}'."
+        )
+        return
+    audio_block["vspreview_invoked"] = True
+    audio_block["vspreview_exit_code"] = int(result.returncode)
+    if result.returncode != 0:
+        reporter.warn(f"VSPreview exited with code {result.returncode}. Review the console output for details.")
 
 def _pick_preview_frames(clip: object, count: int, seed: int) -> List[int]:
     """
@@ -2843,6 +3180,13 @@ def run_cli(
             "preview_paths": [],
             "confirmed": None,
             "offsets_filename": str(offsets_path),
+            "manual_trim_summary": [],
+            "suggestion_mode": False,
+            "suggested_frames": {},
+            "manual_trim_starts": {},
+            "vspreview_script": None,
+            "vspreview_invoked": False,
+            "vspreview_exit_code": None,
         },
         "analysis": {},
         "render": {},
@@ -3199,10 +3543,20 @@ def run_cli(
         audio_track_override_map,
         reporter=reporter,
     )
+    if cfg.audio_alignment.use_vspreview:
+        try:
+            _launch_vspreview(plans, alignment_summary, cfg, root, reporter, json_tail)
+        except CLIAppError:
+            raise
+        except Exception as exc:
+            logger.warning("VSPreview launch failed: %s", exc, exc_info=logger.isEnabledFor(logging.DEBUG))
+            reporter.warn(f"VSPreview launch failed: {exc}")
+
     if (
         alignment_summary is not None
         and alignment_display is not None
         and cfg.audio_alignment.enable
+        and not alignment_summary.suggestion_mode
     ):
         _confirm_alignment_with_screenshots(
             plans,
@@ -3212,7 +3566,7 @@ def run_cli(
             reporter,
             alignment_display,
         )
-    audio_offsets_applied = alignment_summary is not None
+    audio_offsets_applied = alignment_summary is not None and not alignment_summary.suggestion_mode
     if alignment_display is not None:
         json_tail["audio_alignment"]["offsets_filename"] = alignment_display.offsets_file_line.split(": ", 1)[-1]
         json_tail["audio_alignment"]["reference_stream"] = alignment_display.json_reference_stream
@@ -3228,6 +3582,10 @@ def run_cli(
             key: int(value) for key, value in alignment_display.json_offsets_frames.items()
         }
         json_tail["audio_alignment"]["offsets_frames"] = offsets_frames
+        if alignment_display.manual_trim_lines:
+            json_tail["audio_alignment"]["manual_trim_summary"] = list(alignment_display.manual_trim_lines)
+        else:
+            json_tail["audio_alignment"]["manual_trim_summary"] = []
         if alignment_display.warnings:
             collected_warnings.extend(alignment_display.warnings)
     else:
@@ -3235,7 +3593,17 @@ def run_cli(
         json_tail["audio_alignment"]["target_stream"] = cast(dict[str, object], {})
         json_tail["audio_alignment"]["offsets_sec"] = cast(dict[str, object], {})
         json_tail["audio_alignment"]["offsets_frames"] = cast(dict[str, object], {})
+        json_tail["audio_alignment"]["manual_trim_summary"] = []
     json_tail["audio_alignment"]["enabled"] = bool(cfg.audio_alignment.enable)
+    json_tail["audio_alignment"]["suggestion_mode"] = bool(
+        alignment_summary.suggestion_mode if alignment_summary is not None else False
+    )
+    json_tail["audio_alignment"]["suggested_frames"] = (
+        dict(alignment_summary.suggested_frames) if alignment_summary is not None else {}
+    )
+    json_tail["audio_alignment"]["manual_trim_starts"] = (
+        dict(alignment_summary.manual_trim_starts) if alignment_summary is not None else {}
+    )
 
     try:
         _init_clips(plans, cfg.runtime, root)
