@@ -2952,11 +2952,9 @@ def _prompt_vspreview_offsets(
                     show_default=True,
                 )
             )
-        except click.exceptions.ClickException as exc:
-            if exc.__class__.__name__ == "Abort":
-                reporter.warn("VSPreview offset entry aborted; keeping existing trims.")
-                return None
-            raise
+        except click.Abort:
+            reporter.warn("VSPreview offset entry aborted; keeping existing trims.")
+            return None
         offsets[plan.path.name] = delta
         if display is not None:
             display.manual_trim_lines.append(
