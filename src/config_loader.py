@@ -129,7 +129,7 @@ def _validate_change_fps(change_fps: Dict[str, Any]) -> None:
                 raise ConfigError(f"change_fps entry '{key}' must be a [num, den] pair or \"set\"")
         elif isinstance(value, list):
             if len(value) != 2 or not all(isinstance(v, int) and v > 0 for v in value):
-            raise ConfigError(f"change_fps entry '{key}' must contain two positive integers")
+                raise ConfigError(f"change_fps entry '{key}' must contain two positive integers")
         else:
             raise ConfigError(f"change_fps entry '{key}' must be a list or \"set\"")
 
