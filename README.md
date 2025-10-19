@@ -88,6 +88,23 @@ slow.pics shortcut file.
 
 Screenshot renders are written beneath the resolved input directory (for example `ROOT/comparison_videos/screens`). Make sure that directory exists and is writable before running the CLI—if you installed the project somewhere read-only, set `--root`/`FRAME_COMPARE_ROOT` to a directory you control so Frame Compare can create the subdirectories it needs.
 
+### Manual alignment assist (VSPreview)
+
+Need to confirm or override the offsets that audio correlation suggests? Enable the optional VSPreview hook in your config and run the CLI interactively:
+
+```toml
+[audio_alignment]
+enable = true               # optional, VSPreview can run without auto measurements
+use_vspreview = true        # surface the prompt and launch VSPreview after alignment
+confirm_with_screenshots = false  # keep the run moving; VSPreview handles the pause
+```
+
+```bash
+uv run python frame_compare.py
+```
+
+When VSPreview is available on `PATH` (or importable via `python -m vspreview`) the CLI will generate a temporary script under the workspace, launch the preview, and summarise any existing manual trims before prompting for a delta. In headless or non-interactive sessions the script path is still printed so you can open it manually later.
+
 ## Configuration essentials
 
 Frame Compare looks for its configuration at ``ROOT/config/config.toml``, where

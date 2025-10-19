@@ -1,5 +1,6 @@
 from pathlib import Path
 import subprocess
+import sys
 import types
 from typing import Any, Optional, Sequence, TypedDict, cast
 
@@ -1187,3 +1188,115 @@ def test_save_frame_with_ffmpeg_raises_on_timeout(monkeypatch: pytest.MonkeyPatc
         )
 
     assert "timed out" in str(exc_info.value)
+
+
+def test_ensure_rgb24_applies_rec709_defaults_when_metadata_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class _DummyStd:
+        def __init__(self, parent: "_DummyClip") -> None:
+            self._parent = parent
+
+        def SetFrameProps(self, **kwargs: Any) -> "_DummyClip":
+            return self._parent
+
+    class _DummyClip:
+        def __init__(self) -> None:
+            self.std = _DummyStd(self)
+
+    def fake_point(clip: Any, **kwargs: Any) -> _DummyClip:
+        captured.update(kwargs)
+        return _DummyClip()
+
+    fake_core = types.SimpleNamespace(resize=types.SimpleNamespace(Point=fake_point))
+    yuv_family = object()
+    fake_vs = types.SimpleNamespace(
+        RGB24=0,
+        RGB=object(),
+        YUV=yuv_family,
+        RANGE_FULL=0,
+        RANGE_LIMITED=1,
+        MATRIX_BT709=1,
+        TRANSFER_BT709=1,
+        PRIMARIES_BT709=1,
+    )
+    fake_vs.core = fake_core
+
+    class _SourceClip:
+        def __init__(self) -> None:
+            self.core = fake_core
+            self.format = types.SimpleNamespace(color_family=yuv_family, bits_per_sample=8)
+
+        def get_frame(self, idx: int) -> Any:  # type: ignore[override]
+            return types.SimpleNamespace(props={})
+
+    patcher = cast(Any, monkeypatch)
+    patcher.setitem(sys.modules, "vapoursynth", fake_vs)
+
+    converted = screenshot._ensure_rgb24(fake_core, _SourceClip(), frame_idx=12)
+    assert isinstance(converted, _DummyClip)
+    assert captured.get("matrix_in") == 1
+    assert captured.get("transfer_in") == 1
+    assert captured.get("primaries_in") == 1
+    assert captured.get("range_in") == 1
+
+
+def test_ensure_rgb24_uses_source_colour_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    class _DummyStd:
+        def __init__(self, parent: "_DummyClip") -> None:
+            self._parent = parent
+
+        def SetFrameProps(self, **kwargs: Any) -> "_DummyClip":
+            return self._parent
+
+    class _DummyClip:
+        def __init__(self) -> None:
+            self.std = _DummyStd(self)
+
+    def fake_point(clip: Any, **kwargs: Any) -> _DummyClip:
+        captured.update(kwargs)
+        return _DummyClip()
+
+    fake_core = types.SimpleNamespace(resize=types.SimpleNamespace(Point=fake_point))
+    yuv_family = object()
+    fake_vs = types.SimpleNamespace(
+        RGB24=0,
+        RGB=object(),
+        YUV=yuv_family,
+        RANGE_FULL=0,
+        RANGE_LIMITED=1,
+        MATRIX_BT709=1,
+        TRANSFER_BT709=1,
+        PRIMARIES_BT709=1,
+    )
+    fake_vs.core = fake_core
+
+    class _SourceClip:
+        def __init__(self) -> None:
+            self.core = fake_core
+            self.format = types.SimpleNamespace(color_family=yuv_family, bits_per_sample=10)
+            self._frame = types.SimpleNamespace(
+                props={
+                    "_Matrix": 9,
+                    "_Transfer": 16,
+                    "_Primaries": 9,
+                    "_ColorRange": 0,
+                }
+            )
+
+        def get_frame(self, idx: int) -> Any:  # type: ignore[override]
+            return self._frame
+
+    patcher = cast(Any, monkeypatch)
+    patcher.setitem(sys.modules, "vapoursynth", fake_vs)
+
+    converted = screenshot._ensure_rgb24(fake_core, _SourceClip(), frame_idx=24)
+    assert isinstance(converted, _DummyClip)
+    assert captured.get("matrix_in") == 9
+    assert captured.get("transfer_in") == 16
+    assert captured.get("primaries_in") == 9
+    assert captured.get("range_in") == 0

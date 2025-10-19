@@ -338,6 +338,38 @@ def _compose_overlay_text(
 
 
 
+def _extract_frame_props(clip: Any, frame_idx: int) -> Mapping[str, Any]:
+    """Retrieve frame properties for colour metadata resolution."""
+
+    for candidate in (frame_idx, 0):
+        try:
+            frame = clip.get_frame(candidate)
+        except Exception:
+            continue
+        props = getattr(frame, "props", None)
+        if isinstance(props, Mapping):
+            return dict(props)
+    return {}
+
+
+def _resolve_resize_color_kwargs(clip: Any, frame_idx: int) -> Dict[str, int]:
+    """Build resize arguments describing the source clip's colour space."""
+
+    props = _extract_frame_props(clip, frame_idx)
+    matrix, transfer, primaries, color_range = vs_core._resolve_color_metadata(props)
+
+    kwargs: Dict[str, int] = {}
+    if matrix is not None:
+        kwargs["matrix_in"] = int(matrix)
+    if transfer is not None:
+        kwargs["transfer_in"] = int(transfer)
+    if primaries is not None:
+        kwargs["primaries_in"] = int(primaries)
+    if color_range is not None:
+        kwargs["range_in"] = int(color_range)
+    return kwargs
+
+
 def _ensure_rgb24(core: Any, clip: Any, frame_idx: int) -> Any:
     """
     Ensure the given VapourSynth frame is in 8-bit RGB24 color format.
@@ -372,8 +404,37 @@ def _ensure_rgb24(core: Any, clip: Any, frame_idx: int) -> Any:
         raise ScreenshotWriterError("VapourSynth resize.Point is unavailable")
 
     dither = "error_diffusion" if isinstance(bits, int) and bits > 8 else "none"
+    resize_kwargs = _resolve_resize_color_kwargs(clip, frame_idx)
+
+    yuv_constant = getattr(vs, "YUV", object())
+    if color_family == yuv_constant:
+        defaults: Dict[str, int] = {}
+        if "matrix_in" not in resize_kwargs:
+            defaults["matrix_in"] = int(getattr(vs, "MATRIX_BT709", 1))
+        if "transfer_in" not in resize_kwargs:
+            defaults["transfer_in"] = int(getattr(vs, "TRANSFER_BT709", 1))
+        if "primaries_in" not in resize_kwargs:
+            defaults["primaries_in"] = int(getattr(vs, "PRIMARIES_BT709", 1))
+        if "range_in" not in resize_kwargs:
+            defaults["range_in"] = int(getattr(vs, "RANGE_LIMITED", 1))
+        if defaults:
+            resize_kwargs.update(defaults)
+            logger.debug(
+                "Colour metadata missing for frame %s; applying Rec.709 limited defaults",
+                frame_idx,
+            )
+
     try:
-        converted = cast(Any, point(clip, format=vs.RGB24, range=vs.RANGE_FULL, dither_type=dither))
+        converted = cast(
+            Any,
+            point(
+                clip,
+                format=vs.RGB24,
+                range=vs.RANGE_FULL,
+                dither_type=dither,
+                **resize_kwargs,
+            ),
+        )
     except Exception as exc:  # pragma: no cover - defensive
         raise ScreenshotWriterError(f"Failed to convert frame {frame_idx} to RGB24: {exc}") from exc
 
