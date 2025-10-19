@@ -112,7 +112,8 @@ Frame Compare looks for its configuration at ``ROOT/config/config.toml``, where
 nearest ancestor containing ``pyproject.toml``, ``.git``, or
 ``comparison_videos``. Override the location with ``$FRAME_COMPARE_CONFIG`` or
 ``--config`` when you need an explicit path. If the file is missing, the CLI
-seeds it atomically from ``data/config.toml.template`` inside the root (refusing
+seeds it atomically from the packaged template (``src/data/config.toml.template``,
+exposed at runtime as ``data/config.toml.template``) inside the root (refusing
 to write inside site-packages). Legacy installs with ``ROOT/config.toml`` still
 load but emit a migration warning so you can relocate the file. To customise the
 settings manually, edit the seeded file or copy the template to another
