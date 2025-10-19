@@ -2063,13 +2063,13 @@ def _maybe_apply_audio_alignment(
                 for plan in plans
                 if plan.trim_start > 0
             }
-            labels = {plan: _plan_label(plan) for plan in plans}
+            labels = {plan.path: _plan_label(plan) for plan in plans}
             if manual_trim_starts:
                 for plan in plans:
                     trim = manual_trim_starts.get(plan.path.name)
                     if trim:
                         display_data.manual_trim_lines.append(
-                            f"Existing manual trim: {labels[plan]} → {trim}f"
+                            f"Existing manual trim: {labels[plan.path]} → {trim}f"
                         )
             display_data.offset_lines = ["Audio offsets: not computed (manual alignment only)"]
             display_data.offset_lines.extend(display_data.manual_trim_lines)

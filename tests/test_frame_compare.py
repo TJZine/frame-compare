@@ -130,6 +130,48 @@ def _make_config(input_dir: Path) -> AppConfig:
     )
 
 
+def test_audio_alignment_manual_vspreview_handles_existing_trim(
+    tmp_path: Path,
+) -> None:
+    """Manual VSPreview flow reports trims without crashing when alignment is off."""
+
+    cfg = _make_config(tmp_path)
+    cfg.audio_alignment.enable = False
+    cfg.audio_alignment.use_vspreview = True
+
+    reference_path = tmp_path / "Ref.mkv"
+    target_path = tmp_path / "Target.mkv"
+    reference_path.write_bytes(b"ref")
+    target_path.write_bytes(b"tgt")
+
+    reference_plan = frame_compare._ClipPlan(
+        path=reference_path,
+        metadata={"label": "Reference"},
+    )
+    target_plan = frame_compare._ClipPlan(
+        path=target_path,
+        metadata={"label": "Target"},
+    )
+    target_plan.trim_start = 42
+    target_plan.has_trim_start_override = True
+
+    summary, display = frame_compare._maybe_apply_audio_alignment(
+        [reference_plan, target_plan],
+        cfg,
+        reference_path,
+        tmp_path,
+        {},
+        reporter=None,
+    )
+
+    assert summary is not None
+    assert display is not None
+    assert summary.suggestion_mode is True
+    assert summary.manual_trim_starts[target_path.name] == 42
+    assert any("Existing manual trim" in line for line in display.offset_lines)
+    assert any("manual alignment enabled" in warning for warning in display.warnings)
+
+
 def test_audio_alignment_vspreview_suggestion_mode(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
