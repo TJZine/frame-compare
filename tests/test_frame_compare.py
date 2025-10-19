@@ -574,7 +574,7 @@ def test_vspreview_manual_offsets_negative(tmp_path: Path, monkeypatch: pytest.M
         frame_compare.audio_alignment,
         "update_offsets_file",
         lambda *_args, **_kwargs: (
-            {target_path.name: 0, reference_path.name: -4},
+            {target_path.name: 0, reference_path.name: 4},
             {target_path.name: "manual", reference_path.name: "manual"},
         ),
     )
@@ -589,14 +589,110 @@ def test_vspreview_manual_offsets_negative(tmp_path: Path, monkeypatch: pytest.M
     )
 
     assert target_plan.trim_start == 0
-    assert reference_plan.trim_start == -4
+    assert reference_plan.trim_start == 4
     assert summary.manual_trim_starts[target_path.name] == 0
-    assert summary.vspreview_manual_offsets[reference_path.name] == -4
-    assert summary.vspreview_manual_deltas[target_path.name] == -7
-    assert summary.vspreview_manual_deltas[reference_path.name] == -4
+    assert summary.vspreview_manual_offsets[reference_path.name] == 4
+    assert summary.vspreview_manual_deltas[target_path.name] == -3
+    assert summary.vspreview_manual_deltas[reference_path.name] == 4
     audio_block = json_tail["audio_alignment"]
-    assert audio_block.get("vspreview_reference_trim") == -4
+    assert audio_block.get("vspreview_reference_trim") == 4
     assert any("reference adjustment" in line for line in reporter.lines)
+
+
+def test_vspreview_manual_offsets_multiple_negative(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reference_path = tmp_path / "Ref.mkv"
+    target_a_path = tmp_path / "A.mkv"
+    target_b_path = tmp_path / "B.mkv"
+    reference_plan = frame_compare._ClipPlan(path=reference_path, metadata={"label": "Reference"})
+    target_a_plan = frame_compare._ClipPlan(path=target_a_path, metadata={"label": "A"})
+    target_b_plan = frame_compare._ClipPlan(path=target_b_path, metadata={"label": "B"})
+    target_a_plan.trim_start = 5
+    target_b_plan.trim_start = 5
+    summary = frame_compare._AudioAlignmentSummary(
+        offsets_path=tmp_path / "offsets.toml",
+        reference_name=reference_path.name,
+        measurements=(),
+        applied_frames={},
+        baseline_shift=0,
+        statuses={},
+        reference_plan=reference_plan,
+        final_adjustments={},
+        swap_details={},
+        suggested_frames={
+            target_a_path.name: -3,
+            target_b_path.name: -7,
+        },
+        suggestion_mode=True,
+        manual_trim_starts={
+            target_a_path.name: 5,
+            target_b_path.name: 5,
+        },
+    )
+
+    reporter = _RecordingOutputManager()
+    json_tail = _make_json_tail_stub()
+    display = _make_display_stub()
+
+    captured: dict[str, object] = {}
+
+    def fake_update(
+        path: Path,
+        reference_name: str,
+        measurements: Sequence[AlignmentMeasurement],
+        existing: Mapping[str, Mapping[str, object]],
+        notes: Mapping[str, str],
+    ) -> tuple[dict[str, int], dict[str, str]]:
+        captured["path"] = path
+        captured["reference"] = reference_name
+        captured["measurements"] = list(measurements)
+        captured["existing"] = dict(existing)
+        captured["notes"] = dict(notes)
+        applied = {m.file.name: int(m.frames or 0) for m in measurements}
+        return applied, {name: "manual" for name in applied}
+
+    monkeypatch.setattr(frame_compare.audio_alignment, "update_offsets_file", fake_update)
+
+    frame_compare._apply_vspreview_manual_offsets(
+        [reference_plan, target_a_plan, target_b_plan],
+        summary,
+        {target_a_path.name: -3, target_b_path.name: -7},
+        reporter,
+        json_tail,
+        display,
+    )
+
+    assert target_a_plan.trim_start == 4
+    assert target_b_plan.trim_start == 0
+    assert reference_plan.trim_start == 2
+    assert summary.suggestion_mode is False
+    assert summary.manual_trim_starts[target_a_path.name] == 4
+    assert summary.manual_trim_starts[target_b_path.name] == 0
+    assert summary.vspreview_manual_offsets[target_a_path.name] == 4
+    assert summary.vspreview_manual_offsets[target_b_path.name] == 0
+    assert summary.vspreview_manual_offsets[reference_path.name] == 2
+    assert summary.vspreview_manual_deltas[target_a_path.name] == -1
+    assert summary.vspreview_manual_deltas[target_b_path.name] == -5
+    assert summary.vspreview_manual_deltas[reference_path.name] == 2
+
+    audio_block = json_tail["audio_alignment"]
+    offsets_map = cast(dict[str, int], audio_block.get("vspreview_manual_offsets", {}))
+    deltas_map = cast(dict[str, int], audio_block.get("vspreview_manual_deltas", {}))
+    assert offsets_map[target_a_path.name] == 4
+    assert offsets_map[target_b_path.name] == 0
+    assert offsets_map[reference_path.name] == 2
+    assert deltas_map[target_a_path.name] == -1
+    assert deltas_map[target_b_path.name] == -5
+    assert deltas_map[reference_path.name] == 2
+
+    measurements = cast(list[AlignmentMeasurement], captured["measurements"])
+    assert {m.file.name for m in measurements} == {
+        reference_path.name,
+        target_a_path.name,
+        target_b_path.name,
+    }
+    assert any("manual offset applied" in line for line in reporter.lines)
 def _comparison_fixture_root() -> Path:
     """Return the repository-level comparison fixture directory."""
 

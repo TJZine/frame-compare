@@ -430,7 +430,7 @@ class _AudioAlignmentSummary:
         suggestion_mode (bool): True when trims were not auto-applied (VSPreview flow).
         manual_trim_starts (Dict[str, int]): Existing manual trim starts applied before alignment.
         vspreview_manual_offsets (Dict[str, int]): Persisted VSPreview manual offsets keyed by clip name.
-        vspreview_manual_deltas (Dict[str, int]): VSPreview deltas entered during the current session keyed by clip name.
+        vspreview_manual_deltas (Dict[str, int]): Applied VSPreview trim adjustments relative to the baselines keyed by clip name.
     """
     offsets_path: Path
     reference_name: str
@@ -2984,23 +2984,43 @@ def _apply_vspreview_manual_offsets(
     if reference_name not in baseline_map:
         baseline_map[reference_name] = int(reference_plan.trim_start)
 
-    manual_trim_starts: Dict[str, int] = dict(baseline_map)
+    manual_trim_starts: Dict[str, int] = {}
     delta_map: Dict[str, int] = {}
     manual_lines: List[str] = []
-    reference_deficit = 0
+
+    desired_map: Dict[str, int] = {}
+    target_adjustments: List[Tuple[_ClipPlan, int, int]] = []
 
     for plan in targets:
         key = plan.path.name
         baseline_value = baseline_map.get(key, int(plan.trim_start))
         delta_value = int(deltas.get(key, 0))
-        delta_map[key] = delta_value
-        updated = baseline_value + delta_value
-        if updated < 0:
-            reference_deficit = max(reference_deficit, abs(updated))
-            updated = 0
-        plan.trim_start = int(updated)
-        plan.has_trim_start_override = plan.has_trim_start_override or updated != 0
-        manual_trim_starts[key] = int(updated)
+        desired_value = baseline_value + delta_value
+        desired_map[key] = desired_value
+        target_adjustments.append((plan, baseline_value, delta_value))
+
+    reference_baseline = baseline_map.get(reference_name, int(reference_plan.trim_start))
+    reference_delta_input = int(deltas.get(reference_name, 0))
+    desired_map[reference_name] = reference_baseline + reference_delta_input
+
+    baseline_min = min(baseline_map.values()) if baseline_map else 0
+    desired_min = min(desired_map.values()) if desired_map else 0
+    baseline_floor = baseline_min if baseline_min < 0 else 0
+    desired_floor = desired_min if desired_min < 0 else 0
+    shift = 0
+    if desired_floor < baseline_floor:
+        shift = baseline_floor - desired_floor
+
+    for plan, baseline_value, delta_value in target_adjustments:
+        key = plan.path.name
+        desired_value = desired_map[key]
+        updated = desired_value + shift
+        updated_int = int(updated)
+        plan.trim_start = updated_int
+        plan.has_trim_start_override = plan.has_trim_start_override or updated_int != 0
+        manual_trim_starts[key] = updated_int
+        applied_delta = updated_int - baseline_value
+        delta_map[key] = applied_delta
         line = (
             f"VSPreview manual offset applied: {_plan_label(plan)} baseline {baseline_value}f "
             f"{delta_value:+d}f → {int(updated)}f"
@@ -3008,14 +3028,15 @@ def _apply_vspreview_manual_offsets(
         manual_lines.append(line)
         reporter.line(line)
 
-    reference_baseline = baseline_map.get(reference_name, int(reference_plan.trim_start))
-    adjusted_reference = reference_baseline - reference_deficit
-    reference_plan.trim_start = int(adjusted_reference)
+    adjusted_reference = desired_map[reference_name] + shift
+    adjusted_reference_int = int(adjusted_reference)
+    reference_plan.trim_start = adjusted_reference_int
     reference_plan.has_trim_start_override = (
-        reference_plan.has_trim_start_override or adjusted_reference != reference_baseline
+        reference_plan.has_trim_start_override
+        or adjusted_reference_int != int(reference_baseline)
     )
-    manual_trim_starts[reference_name] = int(adjusted_reference)
-    reference_delta = int(adjusted_reference - reference_baseline)
+    manual_trim_starts[reference_name] = adjusted_reference_int
+    reference_delta = adjusted_reference_int - reference_baseline
     delta_map[reference_name] = reference_delta
     if reference_delta != 0:
         ref_line = (
