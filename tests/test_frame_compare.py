@@ -277,6 +277,7 @@ def test_launch_vspreview_generates_script(
             self.returncode = returncode
 
     monkeypatch.setattr(frame_compare.shutil, "which", lambda _: None)
+    monkeypatch.setattr(frame_compare.importlib.util, "find_spec", lambda name: object())
     monkeypatch.setattr(
         frame_compare.subprocess,
         "run",
@@ -293,6 +294,7 @@ def test_launch_vspreview_generates_script(
     assert "OFFSET_MAP" in script_text
     assert "vs_core.configure" in script_text
     assert "ColorConfig" in script_text
+    assert "AssumeFPS" in script_text
     assert recorded_command, "VSPreview command should be invoked when interactive"
     assert recorded_command[0][0] == frame_compare.sys.executable
     assert recorded_command[0][-1] == str(script_path)

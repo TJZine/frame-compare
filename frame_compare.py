@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import builtins
+import importlib.util
 import json
 import logging
 import math
@@ -2763,6 +2764,38 @@ def _apply_offset(reference_clip, target_clip, offset_frames):
     return reference_clip, target_clip
 
 
+def _extract_fps_tuple(clip):
+    num = getattr(clip, "fps_num", None)
+    den = getattr(clip, "fps_den", None)
+    if isinstance(num, int) and isinstance(den, int) and den:
+        return int(num), int(den)
+    return None
+
+
+def _harmonise_fps(reference_clip, target_clip, label):
+    reference_fps = _extract_fps_tuple(reference_clip)
+    target_fps = _extract_fps_tuple(target_clip)
+    if not reference_fps or not target_fps:
+        return reference_clip, target_clip
+    if reference_fps == target_fps:
+        return reference_clip, target_clip
+    try:
+        target_clip = target_clip.std.AssumeFPS(num=reference_fps[0], den=reference_fps[1])
+        print(
+            "Adjusted FPS for target '%s' to match reference (%s/%s → %s/%s)"
+            % (
+                label,
+                target_fps[0],
+                target_fps[1],
+                reference_fps[0],
+                reference_fps[1],
+            )
+        )
+    except Exception as exc:
+        print("Warning: Failed to harmonise FPS for target '%s': %s" % (label, exc))
+    return reference_clip, target_clip
+
+
 print("Reference clip:", REFERENCE['label'])
 if not TARGETS:
     print("No target clips defined; edit TARGETS and OFFSET_MAP to add entries.")
@@ -2771,6 +2804,7 @@ slot = 0
 for label, info in TARGETS.items():
     reference_clip = _load_clip(REFERENCE)
     target_clip = _load_clip(info)
+    reference_clip, target_clip = _harmonise_fps(reference_clip, target_clip, label)
     offset_frames = int(OFFSET_MAP.get(label, 0))
     ref_view, tgt_view = _apply_offset(reference_clip, target_clip, offset_frames)
     ref_view.set_output(slot)
@@ -2830,11 +2864,21 @@ def _launch_vspreview(
     if search_paths:
         env["VAPOURSYNTH_PYTHONPATH"] = os.pathsep.join(str(Path(path).expanduser()) for path in search_paths if path)
 
+    command: list[str] | None = None
     executable = shutil.which("vspreview")
     if executable:
         command = [executable, str(script_path)]
     else:
-        command = [sys.executable, "-m", "vspreview", str(script_path)]
+        module_spec = importlib.util.find_spec("vspreview")
+        if module_spec is not None:
+            command = [sys.executable, "-m", "vspreview", str(script_path)]
+
+    if command is None:
+        reporter.warn(
+            "VSPreview executable not found. Run it manually, for example: "
+            f"'python -m vspreview {script_path}'."
+        )
+        return
 
     try:
         result = subprocess.run(command, env=env, check=False)
