@@ -265,8 +265,8 @@ def test_launch_vspreview_generates_script(
     )
 
     reporter = _RecordingOutputManager()
-    audio_block: dict[str, object] = {}
-    json_tail: frame_compare.JsonTail = {"audio_alignment": audio_block}
+    json_tail = _make_json_tail_stub()
+    audio_block = json_tail["audio_alignment"]
 
     monkeypatch.setattr(frame_compare.sys.stdin, "isatty", lambda: True)
 
@@ -284,7 +284,39 @@ def test_launch_vspreview_generates_script(
         lambda cmd, env=None, check=False: recorded_command.append(list(cmd)) or _Result(0),
     )
 
-    frame_compare._launch_vspreview(plans, summary, cfg, tmp_path, reporter, json_tail)
+    display = frame_compare._AudioAlignmentDisplayData(
+        stream_lines=[],
+        estimation_line=None,
+        offset_lines=[],
+        offsets_file_line="Offsets file: offsets.toml",
+        json_reference_stream=None,
+        json_target_streams={},
+        json_offsets_sec={},
+        json_offsets_frames={},
+        warnings=[],
+    )
+
+    prompt_calls: list[dict[str, int] | None] = []
+    monkeypatch.setattr(
+        frame_compare,
+        "_prompt_vspreview_offsets",
+        lambda *args, **kwargs: prompt_calls.append({}) or {},
+    )
+
+    apply_calls: list[Mapping[str, int]] = []
+
+    def _record_apply(
+        _plans: Sequence[frame_compare._ClipPlan],
+        _summary: frame_compare._AudioAlignmentSummary,
+        offsets: Mapping[str, int],
+        *_args: object,
+        **_kwargs: object,
+    ) -> None:
+        apply_calls.append(dict(offsets))
+
+    monkeypatch.setattr(frame_compare, "_apply_vspreview_manual_offsets", _record_apply)
+
+    frame_compare._launch_vspreview(plans, summary, display, cfg, tmp_path, reporter, json_tail)
 
     script_path_str = audio_block.get("vspreview_script")
     assert script_path_str, "Script path should be recorded in JSON tail"
@@ -300,8 +332,268 @@ def test_launch_vspreview_generates_script(
     assert recorded_command[0][-1] == str(script_path)
     assert audio_block["vspreview_invoked"] is True
     assert audio_block["vspreview_exit_code"] == 0
+    assert prompt_calls, "Prompt should be invoked even when returning default offsets"
+    assert apply_calls == [{}]
 
 
+def _make_json_tail_stub() -> frame_compare.JsonTail:
+    audio_block: frame_compare.AudioAlignmentJSON = {
+        "enabled": False,
+        "reference_stream": None,
+        "target_stream": {},
+        "offsets_sec": {},
+        "offsets_frames": {},
+        "preview_paths": [],
+        "confirmed": None,
+        "offsets_filename": "offsets.toml",
+        "manual_trim_summary": [],
+        "suggestion_mode": True,
+        "suggested_frames": {},
+        "manual_trim_starts": {},
+        "vspreview_manual_offsets": {},
+        "vspreview_manual_deltas": {},
+        "vspreview_reference_trim": None,
+        "vspreview_script": None,
+        "vspreview_invoked": False,
+        "vspreview_exit_code": None,
+    }
+    tail: frame_compare.JsonTail = {
+        "clips": [],
+        "trims": {"per_clip": {}},
+        "window": {},
+        "alignment": {"manual_start_s": 0.0, "manual_end_s": "unchanged"},
+        "audio_alignment": audio_block,
+        "analysis": {},
+        "render": {},
+        "tonemap": {},
+        "overlay": {},
+        "verify": {
+            "count": 0,
+            "threshold": 0.0,
+            "delta": {
+                "max": None,
+                "average": None,
+                "frame": None,
+                "file": None,
+                "auto_selected": None,
+            },
+            "entries": [],
+        },
+        "cache": {},
+        "slowpics": {
+            "enabled": False,
+            "title": {
+                "inputs": {
+                    "resolved_base": None,
+                    "collection_name": None,
+                    "collection_suffix": "",
+                },
+                "final": None,
+            },
+            "url": None,
+            "shortcut_path": None,
+            "deleted_screens_dir": False,
+            "is_public": False,
+            "is_hentai": False,
+            "remove_after_days": 0,
+        },
+        "warnings": [],
+        "workspace": {
+            "root": "",
+            "media_root": "",
+            "config_path": "",
+            "legacy_config": False,
+        },
+    }
+    return tail
+
+
+def _make_display_stub() -> frame_compare._AudioAlignmentDisplayData:
+    return frame_compare._AudioAlignmentDisplayData(
+        stream_lines=[],
+        estimation_line=None,
+        offset_lines=[],
+        offsets_file_line="Offsets file: offsets.toml",
+        json_reference_stream=None,
+        json_target_streams={},
+        json_offsets_sec={},
+        json_offsets_frames={},
+        warnings=[],
+    )
+
+
+def test_vspreview_manual_offsets_positive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reference_path = tmp_path / "Ref.mkv"
+    target_path = tmp_path / "Target.mkv"
+    reference_plan = frame_compare._ClipPlan(path=reference_path, metadata={"label": "Reference"})
+    target_plan = frame_compare._ClipPlan(path=target_path, metadata={"label": "Target"})
+    target_plan.trim_start = 5
+    target_plan.has_trim_start_override = True
+    summary = frame_compare._AudioAlignmentSummary(
+        offsets_path=tmp_path / "offsets.toml",
+        reference_name=reference_path.name,
+        measurements=(),
+        applied_frames={},
+        baseline_shift=0,
+        statuses={},
+        reference_plan=reference_plan,
+        final_adjustments={},
+        swap_details={},
+        suggested_frames={target_path.name: 3},
+        suggestion_mode=True,
+        manual_trim_starts={target_path.name: 5},
+    )
+
+    reporter = _RecordingOutputManager()
+    json_tail = _make_json_tail_stub()
+    display = _make_display_stub()
+
+    captured: dict[str, object] = {}
+
+    def fake_update(
+        path: Path,
+        reference_name: str,
+        measurements: Sequence[AlignmentMeasurement],
+        existing: Mapping[str, Mapping[str, object]],
+        notes: Mapping[str, str],
+    ) -> tuple[dict[str, int], dict[str, str]]:
+        captured["path"] = path
+        captured["reference"] = reference_name
+        captured["measurements"] = list(measurements)
+        captured["existing"] = dict(existing)
+        captured["notes"] = dict(notes)
+        applied = {m.file.name: int(m.frames or 0) for m in measurements}
+        return applied, {name: "manual" for name in applied}
+
+    monkeypatch.setattr(frame_compare.audio_alignment, "update_offsets_file", fake_update)
+
+    frame_compare._apply_vspreview_manual_offsets(
+        [reference_plan, target_plan],
+        summary,
+        {target_path.name: 7},
+        reporter,
+        json_tail,
+        display,
+    )
+
+    assert target_plan.trim_start == 12
+    assert summary.suggestion_mode is False
+    assert summary.manual_trim_starts[target_path.name] == 12
+    assert summary.vspreview_manual_offsets[target_path.name] == 12
+    assert summary.vspreview_manual_deltas[target_path.name] == 7
+    audio_block = json_tail["audio_alignment"]
+    offsets_map = cast(dict[str, int], audio_block.get("vspreview_manual_offsets", {}))
+    deltas_map = cast(dict[str, int], audio_block.get("vspreview_manual_deltas", {}))
+    assert offsets_map[target_path.name] == 12
+    assert deltas_map[target_path.name] == 7
+    assert captured["notes"][target_path.name] == "VSPreview"
+    assert captured["existing"][target_path.name]["status"] == "manual"
+    assert int(captured["existing"][target_path.name]["frames"]) == 12
+    assert any("VSPreview manual offset applied" in line for line in reporter.lines)
+
+
+def test_vspreview_manual_offsets_zero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    reference_path = tmp_path / "Ref.mkv"
+    target_path = tmp_path / "Target.mkv"
+    reference_plan = frame_compare._ClipPlan(path=reference_path, metadata={"label": "Reference"})
+    target_plan = frame_compare._ClipPlan(path=target_path, metadata={"label": "Target"})
+    target_plan.trim_start = 4
+    summary = frame_compare._AudioAlignmentSummary(
+        offsets_path=tmp_path / "offsets.toml",
+        reference_name=reference_path.name,
+        measurements=(),
+        applied_frames={},
+        baseline_shift=0,
+        statuses={},
+        reference_plan=reference_plan,
+        final_adjustments={},
+        swap_details={},
+        suggested_frames={target_path.name: 0},
+        suggestion_mode=True,
+        manual_trim_starts={target_path.name: 4},
+    )
+
+    reporter = _RecordingOutputManager()
+    json_tail = _make_json_tail_stub()
+    display = _make_display_stub()
+
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "update_offsets_file",
+        lambda *_args, **_kwargs: ({target_path.name: 4, reference_path.name: 0}, {target_path.name: "manual", reference_path.name: "manual"}),
+    )
+
+    frame_compare._apply_vspreview_manual_offsets(
+        [reference_plan, target_plan],
+        summary,
+        {target_path.name: 0},
+        reporter,
+        json_tail,
+        display,
+    )
+
+    assert target_plan.trim_start == 4
+    assert summary.manual_trim_starts[target_path.name] == 4
+    assert summary.vspreview_manual_deltas[target_path.name] == 0
+    audio_block = json_tail["audio_alignment"]
+    offsets_map = cast(dict[str, int], audio_block.get("vspreview_manual_offsets", {}))
+    assert offsets_map[target_path.name] == 4
+
+
+def test_vspreview_manual_offsets_negative(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    reference_path = tmp_path / "Ref.mkv"
+    target_path = tmp_path / "Target.mkv"
+    reference_plan = frame_compare._ClipPlan(path=reference_path, metadata={"label": "Reference"})
+    target_plan = frame_compare._ClipPlan(path=target_path, metadata={"label": "Target"})
+    target_plan.trim_start = 3
+    summary = frame_compare._AudioAlignmentSummary(
+        offsets_path=tmp_path / "offsets.toml",
+        reference_name=reference_path.name,
+        measurements=(),
+        applied_frames={},
+        baseline_shift=0,
+        statuses={},
+        reference_plan=reference_plan,
+        final_adjustments={},
+        swap_details={},
+        suggested_frames={target_path.name: -5},
+        suggestion_mode=True,
+        manual_trim_starts={target_path.name: 3},
+    )
+
+    reporter = _RecordingOutputManager()
+    json_tail = _make_json_tail_stub()
+    display = _make_display_stub()
+
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "update_offsets_file",
+        lambda *_args, **_kwargs: (
+            {target_path.name: 0, reference_path.name: -4},
+            {target_path.name: "manual", reference_path.name: "manual"},
+        ),
+    )
+
+    frame_compare._apply_vspreview_manual_offsets(
+        [reference_plan, target_plan],
+        summary,
+        {target_path.name: -7},
+        reporter,
+        json_tail,
+        display,
+    )
+
+    assert target_plan.trim_start == 0
+    assert reference_plan.trim_start == -4
+    assert summary.manual_trim_starts[target_path.name] == 0
+    assert summary.vspreview_manual_offsets[reference_path.name] == -4
+    assert summary.vspreview_manual_deltas[target_path.name] == -7
+    assert summary.vspreview_manual_deltas[reference_path.name] == -4
+    audio_block = json_tail["audio_alignment"]
+    assert audio_block.get("vspreview_reference_trim") == -4
+    assert any("reference adjustment" in line for line in reporter.lines)
 def _comparison_fixture_root() -> Path:
     """Return the repository-level comparison fixture directory."""
 
