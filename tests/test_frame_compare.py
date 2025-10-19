@@ -392,7 +392,7 @@ def test_launch_vspreview_warns_when_command_missing(
 
     monkeypatch.setattr(frame_compare.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(frame_compare.shutil, "which", lambda _: None)
-    monkeypatch.setattr(frame_compare.importlib.util, "find_spec", lambda name: None)
+    monkeypatch.setattr(frame_compare.importlib.util, "find_spec", lambda _name: None)
 
     prompt_called: list[None] = []
 
