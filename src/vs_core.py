@@ -819,7 +819,16 @@ def _resolve_color_overrides(
         value = selected.get(attr)
         if value in (None, ""):
             continue
-        resolved[attr] = _coerce_prop(value, mapping)
+        coerced = _coerce_prop(value, mapping)
+        if coerced is None:
+            logger.warning(
+                "Ignoring invalid color_overrides value for %s: %r (file=%s)",
+                attr,
+                value,
+                file_name or "",
+            )
+            continue
+        resolved[attr] = coerced
     return resolved
 
 
