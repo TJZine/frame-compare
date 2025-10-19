@@ -652,23 +652,30 @@ def _coerce_prop(value: Any, mapping: Mapping[str, int] | None = None) -> Option
     return None
 
 
+def _first_present(props: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in props:
+            return props[key]
+    return None
+
+
 def _resolve_color_metadata(
     props: Mapping[str, Any],
 ) -> tuple[Optional[int], Optional[int], Optional[int], Optional[int]]:
     matrix = _coerce_prop(
-        props.get("_Matrix") or props.get("Matrix"),
+        _first_present(props, "_Matrix", "Matrix"),
         _MATRIX_NAME_TO_CODE,
     )
     primaries = _coerce_prop(
-        props.get("_Primaries") or props.get("Primaries"),
+        _first_present(props, "_Primaries", "Primaries"),
         _PRIMARIES_NAME_TO_CODE,
     )
     transfer = _coerce_prop(
-        props.get("_Transfer") or props.get("Transfer"),
+        _first_present(props, "_Transfer", "Transfer"),
         _TRANSFER_NAME_TO_CODE,
     )
     color_range = _coerce_prop(
-        props.get("_ColorRange") or props.get("ColorRange"),
+        _first_present(props, "_ColorRange", "ColorRange"),
         _RANGE_NAME_TO_CODE,
     )
     return matrix, transfer, primaries, color_range

@@ -2,6 +2,8 @@
 
 All notable user-visible updates will be documented in this file in reverse chronological order.
 
+- *2025-10-28:* Fixed VapourSynth RGB conversion when colour metadata is absent by defaulting to Rec.709
+  limited parameters, preventing fpng "no path between colours" failures and adding regression coverage.
 - *2025-10-27:* Documented the VSPreview-assisted manual alignment flow (README, reference tables, pipeline guide), surfaced the
   CLI help text, added a fallback regression test, and published a cross-platform QA checklist for manual verification.
 - *2025-10-26:* Hardened analysis cache and audio offsets paths to stay within the workspace root, added regression tests for escape attempts, removed the generated `config.toml` from source control in favour of the packaged template, and restricted screenshot cleanup to directories created during the current run.
