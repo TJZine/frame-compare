@@ -129,9 +129,32 @@ def _validate_change_fps(change_fps: Dict[str, Any]) -> None:
                 raise ConfigError(f"change_fps entry '{key}' must be a [num, den] pair or \"set\"")
         elif isinstance(value, list):
             if len(value) != 2 or not all(isinstance(v, int) and v > 0 for v in value):
-                raise ConfigError(f"change_fps entry '{key}' must contain two positive integers")
+            raise ConfigError(f"change_fps entry '{key}' must contain two positive integers")
         else:
             raise ConfigError(f"change_fps entry '{key}' must be a list or \"set\"")
+
+
+def _validate_color_overrides(overrides: Dict[str, Any]) -> None:
+    """Validate per-clip colour override tables."""
+
+    if not isinstance(overrides, dict):
+        raise ConfigError("[color].color_overrides must be a table of clip overrides")
+
+    valid_keys = {"matrix", "transfer", "primaries", "range"}
+    for clip_name, table in overrides.items():
+        if not isinstance(table, dict):
+            raise ConfigError(
+                f"[color].color_overrides.{clip_name} must be a table of colour properties"
+            )
+        for key, value in table.items():
+            if key not in valid_keys:
+                raise ConfigError(
+                    "[color].color_overrides entries may only set matrix, transfer, primaries, or range"
+                )
+            if not isinstance(value, (str, int)):
+                raise ConfigError(
+                    f"[color].color_overrides.{clip_name}.{key} must be a string or integer"
+                )
 
 
 def load_config(path: str) -> AppConfig:
@@ -200,6 +223,8 @@ def load_config(path: str) -> AppConfig:
         raise ConfigError("analysis.ignore_trail_seconds must be >= 0")
     if app.analysis.min_window_seconds < 0:
         raise ConfigError("analysis.min_window_seconds must be >= 0")
+
+    _validate_color_overrides(app.color.color_overrides)
 
     if app.screenshots.compression_level not in (0, 1, 2):
         raise ConfigError("screenshots.compression_level must be 0, 1, or 2")

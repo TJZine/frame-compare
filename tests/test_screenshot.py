@@ -1228,14 +1228,20 @@ def test_ensure_rgb24_applies_rec709_defaults_when_metadata_missing(
         def __init__(self) -> None:
             self.core = fake_core
             self.format = types.SimpleNamespace(color_family=yuv_family, bits_per_sample=8)
+            self.height = 1080
 
         def get_frame(self, idx: int) -> Any:  # type: ignore[override]
-            return types.SimpleNamespace(props={})
+            raise AssertionError("get_frame should not be invoked when props are provided")
 
     patcher = cast(Any, monkeypatch)
     patcher.setitem(sys.modules, "vapoursynth", fake_vs)
 
-    converted = screenshot._ensure_rgb24(fake_core, _SourceClip(), frame_idx=12)
+    converted = screenshot._ensure_rgb24(
+        fake_core,
+        _SourceClip(),
+        frame_idx=12,
+        source_props={},
+    )
     assert isinstance(converted, _DummyClip)
     assert captured.get("matrix_in") == 1
     assert captured.get("transfer_in") == 1
@@ -1279,6 +1285,7 @@ def test_ensure_rgb24_uses_source_colour_metadata(monkeypatch: pytest.MonkeyPatc
         def __init__(self) -> None:
             self.core = fake_core
             self.format = types.SimpleNamespace(color_family=yuv_family, bits_per_sample=10)
+            self.height = 1080
             self._frame = types.SimpleNamespace(
                 props={
                     "_Matrix": 9,
@@ -1289,12 +1296,22 @@ def test_ensure_rgb24_uses_source_colour_metadata(monkeypatch: pytest.MonkeyPatc
             )
 
         def get_frame(self, idx: int) -> Any:  # type: ignore[override]
-            return self._frame
+            raise AssertionError("get_frame should not be called when props are supplied")
 
     patcher = cast(Any, monkeypatch)
     patcher.setitem(sys.modules, "vapoursynth", fake_vs)
 
-    converted = screenshot._ensure_rgb24(fake_core, _SourceClip(), frame_idx=24)
+    converted = screenshot._ensure_rgb24(
+        fake_core,
+        _SourceClip(),
+        frame_idx=24,
+        source_props={
+            "_Matrix": 9,
+            "_Transfer": 16,
+            "_Primaries": 9,
+            "_ColorRange": 0,
+        },
+    )
     assert isinstance(converted, _DummyClip)
     assert captured.get("matrix_in") == 9
     assert captured.get("transfer_in") == 16

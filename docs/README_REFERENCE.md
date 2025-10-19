@@ -55,6 +55,13 @@ quick-start configuration paths.
 | `[color].enable_tonemap` | HDR→SDR conversion toggle. | bool | `true` |
 | `[color].preset` | Tonemapping preset. | str | `"reference"` |
 | `[color].overlay_enabled` | Tonemap overlay flag. | bool | `true` |
+| `[color].default_matrix_hd` | Preferred matrix code when HD clips omit metadata. | str\|int\|null | `null` |
+| `[color].default_matrix_sd` | Preferred matrix code when SD clips omit metadata. | str\|int\|null | `null` |
+| `[color].default_primaries_hd` | Preferred primaries code for HD fallback. | str\|int\|null | `null` |
+| `[color].default_primaries_sd` | Preferred primaries code for SD fallback. | str\|int\|null | `null` |
+| `[color].default_transfer_sdr` | Override SDR transfer function fallback. | str\|int\|null | `null` |
+| `[color].default_range_sdr` | Override SDR range fallback (`full` or `limited`). | str\|int\|null | `null` |
+| `[color].color_overrides` | Table mapping clip names to `{matrix, primaries, transfer, range}` overrides. | table | `{}` |
 <!-- markdownlint-restore -->
 
 ## Slow.pics and metadata automation

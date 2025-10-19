@@ -10,6 +10,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src import vs_core
+from src.datatypes import ColorConfig
 from src.vs_core import VerificationResult
 
 
@@ -131,3 +132,127 @@ def test_compute_verification_preserves_float_clip() -> None:
     result = _run_compute_verification(fmt, props)
     assert math.isclose(result.average, 0.25)
     assert math.isclose(result.maximum, 0.75)
+
+
+class _DummyStd:
+    def __init__(self, clip: "_DummyClip") -> None:
+        self._clip = clip
+        self.calls: List[Dict[str, int]] = []
+
+    def SetFrameProps(self, clip: Any, **kwargs: int) -> "_DummyClip":
+        assert clip is self._clip
+        self.calls.append({key: int(value) for key, value in kwargs.items()})
+        return self._clip
+
+
+class _DummyClip:
+    def __init__(self, fake_vs: Any, height: int) -> None:
+        self.format = types.SimpleNamespace(color_family=getattr(fake_vs, "YUV", object()))
+        self.height = height
+        self.std = _DummyStd(self)
+
+
+def _install_fake_vs(monkeypatch: Any, **overrides: int) -> Any:
+    yuv_family = object()
+    attributes = dict(
+        YUV=yuv_family,
+        RGB=object(),
+        MATRIX_BT709=1,
+        MATRIX_SMPTE170M=6,
+        PRIMARIES_BT709=1,
+        PRIMARIES_SMPTE170M=6,
+        TRANSFER_BT709=1,
+        TRANSFER_SMPTE170M=6,
+        RANGE_LIMITED=1,
+    )
+    attributes.update(overrides)
+    fake_vs = types.SimpleNamespace(**attributes)
+    monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
+    monkeypatch.setattr(vs_core, "_vs_module", fake_vs, raising=False)
+    return fake_vs
+
+
+def test_normalise_color_metadata_infers_hd_defaults(monkeypatch: Any) -> None:
+    fake_vs = _install_fake_vs(monkeypatch)
+    clip = _DummyClip(fake_vs, height=1080)
+
+    normalised_clip, props, color_tuple = vs_core.normalise_color_metadata(
+        clip,
+        {},
+        color_cfg=ColorConfig(),
+        file_name="clip.mkv",
+    )
+
+    assert normalised_clip is clip
+    assert color_tuple == (
+        int(fake_vs.MATRIX_BT709),
+        int(fake_vs.TRANSFER_BT709),
+        int(fake_vs.PRIMARIES_BT709),
+        int(fake_vs.RANGE_LIMITED),
+    )
+    assert props["_Matrix"] == int(fake_vs.MATRIX_BT709)
+    assert props["_Transfer"] == int(fake_vs.TRANSFER_BT709)
+    assert props["_Primaries"] == int(fake_vs.PRIMARIES_BT709)
+    assert props["_ColorRange"] == int(fake_vs.RANGE_LIMITED)
+    assert clip.std.calls == [
+        {
+            "_Matrix": int(fake_vs.MATRIX_BT709),
+            "_Transfer": int(fake_vs.TRANSFER_BT709),
+            "_Primaries": int(fake_vs.PRIMARIES_BT709),
+            "_ColorRange": int(fake_vs.RANGE_LIMITED),
+        }
+    ]
+
+
+def test_normalise_color_metadata_infers_sd_defaults(monkeypatch: Any) -> None:
+    fake_vs = _install_fake_vs(
+        monkeypatch,
+        MATRIX_SMPTE170M=106,
+        PRIMARIES_SMPTE170M=206,
+        TRANSFER_SMPTE170M=306,
+        RANGE_LIMITED=17,
+    )
+    clip = _DummyClip(fake_vs, height=480)
+
+    normalised_clip, props, color_tuple = vs_core.normalise_color_metadata(
+        clip,
+        {},
+        color_cfg=ColorConfig(),
+        file_name="clip_sd.mkv",
+    )
+
+    assert normalised_clip is clip
+    assert color_tuple == (106, 306, 206, 17)
+    assert props["_Matrix"] == 106
+    assert props["_Transfer"] == 306
+    assert props["_Primaries"] == 206
+    assert props["_ColorRange"] == 17
+
+
+def test_normalise_color_metadata_honours_overrides(monkeypatch: Any) -> None:
+    fake_vs = _install_fake_vs(monkeypatch)
+    clip = _DummyClip(fake_vs, height=2160)
+
+    cfg = ColorConfig(
+        color_overrides={
+            "clip.mkv": {
+                "matrix": "bt2020",
+                "primaries": "bt2020",
+                "transfer": "st2084",
+                "range": "full",
+            }
+        }
+    )
+
+    _, props, color_tuple = vs_core.normalise_color_metadata(
+        clip,
+        {},
+        color_cfg=cfg,
+        file_name="clip.mkv",
+    )
+
+    assert color_tuple == (9, 16, 9, 0)
+    assert props["_Matrix"] == 9
+    assert props["_Transfer"] == 16
+    assert props["_Primaries"] == 9
+    assert props["_ColorRange"] == 0

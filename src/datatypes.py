@@ -1,6 +1,6 @@
 """Configuration dataclasses for frame comparison tool."""
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 
 @dataclass
@@ -75,6 +75,13 @@ class ColorConfig:
     verify_max_seconds: float = 90.0
     verify_luma_threshold: float = 0.10
     strict: bool = False
+    default_matrix_hd: Optional[str] = None
+    default_matrix_sd: Optional[str] = None
+    default_primaries_hd: Optional[str] = None
+    default_primaries_sd: Optional[str] = None
+    default_transfer_sdr: Optional[str] = None
+    default_range_sdr: Optional[str] = None
+    color_overrides: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
 
 @dataclass

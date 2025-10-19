@@ -1265,6 +1265,9 @@ def _collect_metrics_vapoursynth(
     cfg: AnalysisConfig,
     indices: Sequence[int],
     progress: Callable[[int], None] | None = None,
+    *,
+    color_cfg: ColorConfig | None = None,
+    file_name: str | None = None,
 ) -> tuple[List[tuple[int, float]], List[tuple[int, float]]]:
     """
     Measure per-frame brightness and motion metrics using VapourSynth.
@@ -1290,7 +1293,13 @@ def _collect_metrics_vapoursynth(
         raise TypeError("Expected a VapourSynth clip")
 
     props = vs_core._snapshot_frame_props(clip)
-    matrix_in, transfer_in, primaries_in, color_range_in = vs_core._resolve_color_metadata(props)
+    clip, props, color_tuple = vs_core.normalise_color_metadata(
+        clip,
+        props,
+        color_cfg=color_cfg,
+        file_name=file_name,
+    )
+    matrix_in, transfer_in, primaries_in, color_range_in = color_tuple
 
     def _resize_kwargs_for_source() -> Dict[str, int]:
         """Return color-metadata kwargs describing the source clip."""
@@ -1778,7 +1787,14 @@ def select_frames(
         )
         start_metrics = time.perf_counter()
         try:
-            brightness, motion = _collect_metrics_vapoursynth(analysis_clip, cfg, indices, progress)
+            brightness, motion = _collect_metrics_vapoursynth(
+                analysis_clip,
+                cfg,
+                indices,
+                progress,
+                color_cfg=color_cfg,
+                file_name=file_under_analysis,
+            )
             logger.info(
                 "[ANALYSIS] metrics collected via VapourSynth in %.2fs (brightness=%d, motion=%d)",
                 time.perf_counter() - start_metrics,
