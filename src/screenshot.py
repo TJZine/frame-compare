@@ -338,24 +338,9 @@ def _compose_overlay_text(
 
 
 
-def _extract_frame_props(clip: Any, frame_idx: int) -> Mapping[str, Any]:
-    """Retrieve frame properties for colour metadata resolution."""
-
-    for candidate in (frame_idx, 0):
-        try:
-            frame = clip.get_frame(candidate)
-        except Exception:
-            continue
-        props = getattr(frame, "props", None)
-        if isinstance(props, Mapping):
-            return dict(props)
-    return {}
-
-
-def _resolve_resize_color_kwargs(clip: Any, frame_idx: int) -> Dict[str, int]:
+def _resolve_resize_color_kwargs(props: Mapping[str, Any]) -> Dict[str, int]:
     """Build resize arguments describing the source clip's colour space."""
 
-    props = _extract_frame_props(clip, frame_idx)
     matrix, transfer, primaries, color_range = vs_core._resolve_color_metadata(props)
 
     kwargs: Dict[str, int] = {}
@@ -370,7 +355,13 @@ def _resolve_resize_color_kwargs(clip: Any, frame_idx: int) -> Dict[str, int]:
     return kwargs
 
 
-def _ensure_rgb24(core: Any, clip: Any, frame_idx: int) -> Any:
+def _ensure_rgb24(
+    core: Any,
+    clip: Any,
+    frame_idx: int,
+    *,
+    source_props: Mapping[str, Any] | None = None,
+) -> Any:
     """
     Ensure the given VapourSynth frame is in 8-bit RGB24 color format.
     
@@ -404,7 +395,10 @@ def _ensure_rgb24(core: Any, clip: Any, frame_idx: int) -> Any:
         raise ScreenshotWriterError("VapourSynth resize.Point is unavailable")
 
     dither = "error_diffusion" if isinstance(bits, int) and bits > 8 else "none"
-    resize_kwargs = _resolve_resize_color_kwargs(clip, frame_idx)
+    props = dict(source_props or {})
+    if not props:
+        props = dict(vs_core._snapshot_frame_props(clip))
+    resize_kwargs = _resolve_resize_color_kwargs(props)
 
     yuv_constant = getattr(vs, "YUV", object())
     if color_family == yuv_constant:
@@ -1156,6 +1150,7 @@ def _save_frame_with_fpng(
     overlay_text: Optional[str] = None,
     overlay_state: Optional[OverlayState] = None,
     strict_overlay: bool = False,
+    source_props: Mapping[str, Any] | None = None,
 ) -> None:
     try:
         import vapoursynth as vs  # type: ignore
@@ -1222,7 +1217,7 @@ def _save_frame_with_fpng(
         file_label=label,
     )
 
-    render_clip = _ensure_rgb24(core, render_clip, frame_idx)
+    render_clip = _ensure_rgb24(core, render_clip, frame_idx, source_props=source_props)
 
     compression = _map_fpng_compression(cfg.compression_level)
     try:
@@ -1601,6 +1596,7 @@ def generate_screenshots(
                         overlay_text=overlay_text,
                         overlay_state=overlay_state,
                         strict_overlay=bool(getattr(color_cfg, "strict", False)),
+                        source_props=source_props,
                     )
             except ScreenshotWriterError:
                 raise

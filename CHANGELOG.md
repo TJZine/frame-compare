@@ -2,6 +2,9 @@
 
 All notable user-visible updates will be documented in this file in reverse chronological order.
 
+- *2025-10-29:* Normalised VapourSynth colour metadata inference for SDR clips, cached inferred props on the
+  clip to avoid redundant frame grabs, exposed config overrides for HD/SD defaults and per-file colour
+  corrections, refreshed documentation, and expanded regression coverage for the new heuristics.
 - *2025-10-28:* Fixed VapourSynth RGB conversion when colour metadata is absent by defaulting to Rec.709
   limited parameters, preventing fpng "no path between colours" failures and adding regression coverage.
 - *2025-10-27:* Documented the VSPreview-assisted manual alignment flow (README, reference tables, pipeline guide), surfaced the

@@ -408,6 +408,9 @@ def test_select_frames_uses_cache(
         cfg: AnalysisConfig,
         indices: Sequence[int],
         progress: object = None,
+        *,
+        color_cfg: ColorConfig | None = None,
+        file_name: str | None = None,
     ) -> tuple[list[tuple[int, float]], list[tuple[int, float]]]:
         calls["count"] += 1
         results = [(idx, float(idx)) for idx in indices]
@@ -501,6 +504,9 @@ def test_motion_quarter_gap(monkeypatch: pytest.MonkeyPatch) -> None:
         cfg: AnalysisConfig,
         indices: Sequence[int],
         progress: object = None,
+        *,
+        color_cfg: ColorConfig | None = None,
+        file_name: str | None = None,
     ) -> tuple[list[tuple[int, float]], list[tuple[int, float]]]:
         brightness = [(idx, 0.0) for idx in indices]
         motion = [(idx, float(idx)) for idx in indices]

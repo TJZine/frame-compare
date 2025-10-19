@@ -9,7 +9,10 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from .datatypes import ColorConfig
 
 _VS_MODULE_NAME = "vapoursynth"
 _ENV_VAR = "VAPOURSYNTH_PYTHONPATH"
@@ -113,6 +116,12 @@ _MATRIX_NAME_TO_CODE = {
     "bt709": 1,
     "bt.709": 1,
     "709": 1,
+    "bt470bg": 5,
+    "470bg": 5,
+    "smpte170m": 6,
+    "170m": 6,
+    "bt601": 6,
+    "601": 6,
     "bt2020": 9,
     "bt.2020": 9,
     "2020": 9,
@@ -123,12 +132,20 @@ _PRIMARIES_NAME_TO_CODE = {
     "bt709": 1,
     "bt.709": 1,
     "709": 1,
+    "bt470bg": 5,
+    "470bg": 5,
+    "smpte170m": 6,
+    "170m": 6,
+    "bt601": 6,
+    "601": 6,
     "bt2020": 9,
     "bt.2020": 9,
     "2020": 9,
 }
 
 _TRANSFER_NAME_TO_CODE = {
+    "bt709": 1,
+    "709": 1,
     "bt1886": 1,
     "gamma2.2": 1,
     "st2084": 16,
@@ -136,6 +153,10 @@ _TRANSFER_NAME_TO_CODE = {
     "pq": 16,
     "hlg": 18,
     "arib-b67": 18,
+    "smpte170m": 6,
+    "170m": 6,
+    "bt601": 6,
+    "601": 6,
 }
 
 _RANGE_NAME_TO_CODE = {
@@ -149,16 +170,21 @@ _RANGE_NAME_TO_CODE = {
 _MATRIX_CODE_LABELS = {
     0: "rgb",
     1: "bt709",
+    5: "bt470bg",
+    6: "smpte170m",
     9: "bt2020",
 }
 
 _PRIMARIES_CODE_LABELS = {
     1: "bt709",
+    5: "bt470bg",
+    6: "smpte170m",
     9: "bt2020",
 }
 
 _TRANSFER_CODE_LABELS = {
     1: "bt1886",
+    6: "smpte170m",
     16: "st2084",
     18: "hlg",
 }
@@ -659,6 +685,18 @@ def _first_present(props: Mapping[str, Any], *keys: str) -> Any:
     return None
 
 
+def _normalise_resolved_code(value: Optional[int]) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        code = int(value)
+    except (TypeError, ValueError):
+        return None
+    if code == 2:
+        return None
+    return code
+
+
 def _resolve_color_metadata(
     props: Mapping[str, Any],
 ) -> tuple[Optional[int], Optional[int], Optional[int], Optional[int]]:
@@ -678,7 +716,256 @@ def _resolve_color_metadata(
         _first_present(props, "_ColorRange", "ColorRange"),
         _RANGE_NAME_TO_CODE,
     )
+    return (
+        _normalise_resolved_code(matrix),
+        _normalise_resolved_code(transfer),
+        _normalise_resolved_code(primaries),
+        _normalise_resolved_code(color_range),
+    )
+
+
+def _infer_frame_height(clip: Any, props: Mapping[str, Any]) -> Optional[int]:
+    height = getattr(clip, "height", None)
+    try:
+        if height is not None:
+            return int(height)
+    except (TypeError, ValueError):  # pragma: no cover - defensive
+        pass
+    for key in ("_Height", "Height"):
+        candidate = props.get(key)
+        try:
+            if candidate is not None:
+                return int(candidate)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _resolve_configured_color_defaults(
+    color_cfg: "ColorConfig | None",
+    *,
+    is_sd: bool,
+    is_hd: bool,
+) -> Dict[str, Optional[int]]:
+    resolved: Dict[str, Optional[int]] = {
+        "matrix": None,
+        "primaries": None,
+        "transfer": None,
+        "range": None,
+    }
+    if color_cfg is None:
+        return resolved
+
+    def _value(name: str) -> Any:
+        return getattr(color_cfg, name, None)
+
+    def _coerce(value: Any, mapping: Mapping[str, int]) -> Optional[int]:
+        if value in (None, ""):
+            return None
+        return _coerce_prop(value, mapping)
+
+    if is_sd:
+        resolved["matrix"] = _coerce(_value("default_matrix_sd"), _MATRIX_NAME_TO_CODE)
+        resolved["primaries"] = _coerce(_value("default_primaries_sd"), _PRIMARIES_NAME_TO_CODE)
+    elif is_hd:
+        resolved["matrix"] = _coerce(_value("default_matrix_hd"), _MATRIX_NAME_TO_CODE)
+        resolved["primaries"] = _coerce(_value("default_primaries_hd"), _PRIMARIES_NAME_TO_CODE)
+    else:
+        resolved["matrix"] = _coerce(
+            _value("default_matrix_hd") or _value("default_matrix_sd"),
+            _MATRIX_NAME_TO_CODE,
+        )
+        resolved["primaries"] = _coerce(
+            _value("default_primaries_hd") or _value("default_primaries_sd"),
+            _PRIMARIES_NAME_TO_CODE,
+        )
+
+    resolved["transfer"] = _coerce(_value("default_transfer_sdr"), _TRANSFER_NAME_TO_CODE)
+    resolved["range"] = _coerce(_value("default_range_sdr"), _RANGE_NAME_TO_CODE)
+    return resolved
+
+
+def _resolve_color_overrides(
+    color_cfg: "ColorConfig | None",
+    file_name: str | None,
+) -> Dict[str, Optional[int]]:
+    if color_cfg is None:
+        return {}
+    overrides: Dict[str, Dict[str, Any]] = getattr(color_cfg, "color_overrides", {})
+    if not overrides:
+        return {}
+
+    lookup_keys: List[str] = []
+    if file_name:
+        lookup_keys.append(file_name)
+        lookup_keys.append(Path(file_name).name)
+    lookup_keys.append("*")
+
+    selected: Dict[str, Any] = {}
+    for key in lookup_keys:
+        if key in overrides:
+            selected = overrides[key]
+            break
+    if not selected:
+        return {}
+
+    resolved: Dict[str, Optional[int]] = {}
+    for attr, mapping in (
+        ("matrix", _MATRIX_NAME_TO_CODE),
+        ("primaries", _PRIMARIES_NAME_TO_CODE),
+        ("transfer", _TRANSFER_NAME_TO_CODE),
+        ("range", _RANGE_NAME_TO_CODE),
+    ):
+        value = selected.get(attr)
+        if value in (None, ""):
+            continue
+        coerced = _coerce_prop(value, mapping)
+        if coerced is None:
+            logger.warning(
+                "Ignoring invalid color_overrides value for %s: %r (file=%s)",
+                attr,
+                value,
+                file_name or "",
+            )
+            continue
+        resolved[attr] = coerced
+    return resolved
+
+
+def _apply_frame_props_dict(clip: Any, props: Mapping[str, int]) -> Any:
+    if not props:
+        return clip
+    std_ns = getattr(clip, "std", None)
+    if std_ns is None:
+        return clip
+    set_props = getattr(std_ns, "SetFrameProps", None)
+    if not callable(set_props):  # pragma: no cover - depends on VapourSynth build
+        return clip
+    try:
+        return _call_set_frame_prop(set_props, clip, **props)
+    except Exception:  # pragma: no cover - best effort
+        return clip
+
+
+def _guess_default_colourspace(
+    clip: Any,
+    props: Mapping[str, Any],
+    matrix: Optional[int],
+    transfer: Optional[int],
+    primaries: Optional[int],
+    color_range: Optional[int],
+    *,
+    color_cfg: "ColorConfig | None" = None,
+) -> tuple[Optional[int], Optional[int], Optional[int], Optional[int]]:
+    if _props_signal_hdr(props):
+        return matrix, transfer, primaries, color_range
+
+    vs_module = _get_vapoursynth_module()
+    fmt = getattr(clip, "format", None)
+    color_family = getattr(fmt, "color_family", None) if fmt is not None else None
+    yuv_family = getattr(vs_module, "YUV", object())
+    if color_family != yuv_family:
+        return matrix, transfer, primaries, color_range
+
+    height = _infer_frame_height(clip, props)
+    is_sd = bool(height is not None and height <= 576)
+    is_hd = bool(height is not None and height >= 720)
+    configured = _resolve_configured_color_defaults(
+        color_cfg,
+        is_sd=is_sd,
+        is_hd=is_hd,
+    )
+
+    if matrix is None:
+        matrix = configured.get("matrix")
+        if matrix is None:
+            matrix = int(
+                getattr(
+                    vs_module,
+                    "MATRIX_SMPTE170M" if is_sd else "MATRIX_BT709",
+                    6 if is_sd else 1,
+                )
+            )
+    if primaries is None:
+        primaries = configured.get("primaries")
+        if primaries is None:
+            primaries = int(
+                getattr(
+                    vs_module,
+                    "PRIMARIES_SMPTE170M" if is_sd else "PRIMARIES_BT709",
+                    6 if is_sd else 1,
+                )
+            )
+    if transfer is None:
+        transfer = configured.get("transfer")
+        if transfer is None:
+            transfer = int(
+                getattr(
+                    vs_module,
+                    "TRANSFER_SMPTE170M" if is_sd else "TRANSFER_BT709",
+                    6 if is_sd else 1,
+                )
+            )
+    if color_range is None:
+        color_range = configured.get("range")
+        if color_range is None:
+            color_range = int(getattr(vs_module, "RANGE_LIMITED", 1))
+
     return matrix, transfer, primaries, color_range
+
+
+def normalise_color_metadata(
+    clip: Any,
+    source_props: Mapping[str, Any] | None,
+    *,
+    color_cfg: "ColorConfig | None" = None,
+    file_name: str | None = None,
+) -> tuple[
+    Any,
+    Mapping[str, Any],
+    tuple[Optional[int], Optional[int], Optional[int], Optional[int]],
+]:
+    """Ensure colour metadata is usable, applying heuristics and overrides when needed."""
+
+    props = dict(source_props or {})
+    matrix, transfer, primaries, color_range = _resolve_color_metadata(props)
+
+    overrides = _resolve_color_overrides(color_cfg, file_name)
+    if "matrix" in overrides:
+        matrix = overrides["matrix"]
+    if "transfer" in overrides:
+        transfer = overrides["transfer"]
+    if "primaries" in overrides:
+        primaries = overrides["primaries"]
+    if "range" in overrides:
+        color_range = overrides["range"]
+
+    matrix, transfer, primaries, color_range = _guess_default_colourspace(
+        clip,
+        props,
+        matrix,
+        transfer,
+        primaries,
+        color_range,
+        color_cfg=color_cfg,
+    )
+
+    update_props: Dict[str, int] = {}
+    if matrix is not None:
+        update_props["_Matrix"] = int(matrix)
+        props["_Matrix"] = int(matrix)
+    if transfer is not None:
+        update_props["_Transfer"] = int(transfer)
+        props["_Transfer"] = int(transfer)
+    if primaries is not None:
+        update_props["_Primaries"] = int(primaries)
+        props["_Primaries"] = int(primaries)
+    if color_range is not None:
+        update_props["_ColorRange"] = int(color_range)
+        props["_ColorRange"] = int(color_range)
+
+    clip_with_props = _apply_frame_props_dict(clip, update_props)
+    return clip_with_props, props, (matrix, transfer, primaries, color_range)
 
 
 def _normalize_rgb_props(clip: Any, transfer: Optional[int], primaries: Optional[int]) -> Any:
@@ -1028,6 +1315,12 @@ def process_clip_for_screenshot(
 
     log = logger_override or logger
     source_props = _snapshot_frame_props(clip)
+    clip, source_props, color_tuple = normalise_color_metadata(
+        clip,
+        source_props,
+        color_cfg=cfg,
+        file_name=file_name,
+    )
     vs_module = _get_vapoursynth_module()
     core = getattr(clip, "core", None)
     if core is None:
@@ -1040,7 +1333,7 @@ def process_clip_for_screenshot(
     verify_enabled = enable_verification and bool(getattr(cfg, "verify_enabled", True))
     strict = bool(getattr(cfg, "strict", False))
 
-    matrix_in, transfer_in, primaries_in, color_range_in = _resolve_color_metadata(source_props)
+    matrix_in, transfer_in, primaries_in, color_range_in = color_tuple
     tonemap_enabled = bool(getattr(cfg, "enable_tonemap", True))
     is_hdr_source = _props_signal_hdr(source_props)
     is_hdr = tonemap_enabled and is_hdr_source
