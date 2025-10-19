@@ -3014,8 +3014,11 @@ def _apply_vspreview_manual_offsets(
         desired_value = desired_map[key]
         updated = desired_value + shift
         updated_int = int(updated)
-        plan.trim_start = updated_int
-        plan.has_trim_start_override = plan.has_trim_start_override or updated_int != 0
+        safe_updated = max(0, updated_int)
+        plan.trim_start = safe_updated
+        plan.has_trim_start_override = (
+            plan.has_trim_start_override or safe_updated != 0
+        )
         manual_trim_starts[key] = updated_int
         applied_delta = updated_int - baseline_value
         delta_map[key] = applied_delta
@@ -3028,10 +3031,11 @@ def _apply_vspreview_manual_offsets(
 
     adjusted_reference = desired_map[reference_name] + shift
     adjusted_reference_int = int(adjusted_reference)
-    reference_plan.trim_start = adjusted_reference_int
+    safe_adjusted_reference = max(0, adjusted_reference_int)
+    reference_plan.trim_start = safe_adjusted_reference
     reference_plan.has_trim_start_override = (
         reference_plan.has_trim_start_override
-        or adjusted_reference_int != int(reference_baseline)
+        or safe_adjusted_reference != int(reference_baseline)
     )
     manual_trim_starts[reference_name] = adjusted_reference_int
     reference_delta = adjusted_reference_int - reference_baseline
