@@ -25,6 +25,7 @@ Requirements:
 - [`uv`](https://docs.astral.sh/uv/)
 - FFmpeg available on your `PATH`
 - VapourSynth ≥72 if you plan to use the primary renderer (install manually; see below)
+- Optional audio-alignment dependencies: `numpy`, `librosa`, and `soundfile` (install them when you plan to enable `[audio_alignment].enable`).
 
 Repository fixtures live under `comparison_videos/` beside
 `frame_compare.py`; they provide tiny MKV stubs suitable for smoke
@@ -104,6 +105,7 @@ uv run python frame_compare.py
 ```
 
 When VSPreview is available on `PATH` (or importable via `python -m vspreview`) the CLI will generate a temporary script under the workspace, launch the preview, and summarise any existing manual trims before prompting for a delta. In headless or non-interactive sessions the script path is still printed so you can open it manually later.
+Existing manual trims are reported using each clip's display label (the friendly slow.pics/TMDB label when available, otherwise the filename) so you can quickly see which trims are already in effect before accepting a new delta.
 
 ## Configuration essentials
 

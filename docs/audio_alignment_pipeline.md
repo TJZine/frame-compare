@@ -8,7 +8,7 @@ Frame Compare can estimate per-clip trim offsets before video analysis by correl
 * `ffmpeg` and `ffprobe` must be on `PATH`; alignment aborts early if either executable is missing. 【F:src/audio_alignment.py†L66-L118】
 
 ### Python extras
-* The optional stack `numpy`, `librosa`, and `soundfile` is required; the module raises an `AudioAlignmentError` if any import fails. 【F:src/audio_alignment.py†L76-L92】
+* The optional stack `numpy`, `librosa`, and `soundfile` is required; the module raises an `AudioAlignmentError` when an import fails or when an optional dependency errors during onset envelope calculation. 【F:src/audio_alignment.py†L76-L92】【F:src/audio_alignment.py†L240-L277】
 
 ### Configuration guard rails
 * Validation rejects non-positive sample rates, hop lengths, max offsets, or negative seeds, and constrains correlation thresholds to `[0,1]`. 【F:src/config_loader.py†L190-L214】【F:src/config_loader.py†L233-L270】
@@ -32,7 +32,7 @@ Key options live under `[audio_alignment]` in `config.toml`. Defaults and intent
 | `frame_offset_bias` | Integer bias nudging suggested frame counts toward/away from zero. | `1` |
 
 ## Workflow
-1. **Reference & target selection** – `_resolve_alignment_reference` honors the config hint, CLI-provided filename/index, or falls back to the first clip. Remaining clips become targets. 【F:frame_compare.py†L930-L999】
+1. **Reference & target selection** – `_resolve_alignment_reference` honors the config hint, CLI-provided filename/index, or falls back to the first clip. Remaining clips become targets. Existing manual trims are summarised using each plan's display label so operators can immediately see which clip the baseline applies to. 【F:frame_compare.py†L930-L999】【F:frame_compare.py†L2065-L2142】
 2. **Audio stream discovery** – `ffprobe` metadata identifies candidate streams. Forced CLI overrides (`--audio-align-track label=index`) take precedence, then the scoring heuristic prefers default language, channel count, and forced flags. 【F:frame_compare.py†L1005-L1096】【F:frame_compare.py†L2802-L2833】
 3. **Waveform extraction & onset envelopes** – `measure_offsets` extracts mono WAV snippets for the reference and each target using consistent sample-rate resampling, computes onset envelopes, and cross-correlates them to estimate lags. FPS probes translate seconds into frame counts when possible. 【F:src/audio_alignment.py†L291-L398】
 4. **Bias & negative offset handling** – `frame_offset_bias` nudges computed frame counts either toward zero (positive values) or away from zero (negative values). When only one target clip exists, negative offsets are applied to the reference clip instead, with explanatory notes recorded. 【F:frame_compare.py†L1205-L1304】

@@ -2,7 +2,7 @@
 
 ## Manual QA matrix
 - **macOS (arm64/x86_64)**
-  1. Enable `[audio_alignment].use_vspreview = true`, run interactively with VSPreview installed on `PATH`, confirm prompt summarises auto suggestion and existing manual trims, accept delta, rerun to verify reuse.
+  1. Enable `[audio_alignment].use_vspreview = true`, run interactively with VSPreview installed on `PATH`, confirm prompt summarises auto suggestion and existing manual trims (display labels should match the friendly clip labels shown elsewhere), accept delta, rerun to verify reuse.
   2. Repeat with an existing negative `trim_start` override to ensure reference padding and persisted offsets reflect `status = "manual"` with `note = "VSPreview"`.
   3. Launch from a non-interactive shell (`printf '' | frame-compare …`) to confirm the launch is skipped, warning printed, and script path recorded for manual follow-up.
 - **Linux (x86_64)**
