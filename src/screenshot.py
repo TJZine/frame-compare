@@ -355,6 +355,19 @@ def _resolve_resize_color_kwargs(props: Mapping[str, Any]) -> Dict[str, int]:
     return kwargs
 
 
+def _normalize_rgb_dither(value: RGBDither | str) -> RGBDither:
+    """Normalise a value into an ``RGBDither`` enum with logging for invalid input."""
+
+    try:
+        return RGBDither(value)
+    except (ValueError, TypeError):
+        logger.debug(
+            "Invalid rgb_dither value %r; defaulting to ERROR_DIFFUSION",
+            value,
+        )
+        return RGBDither.ERROR_DIFFUSION
+
+
 def _ensure_rgb24(
     core: Any,
     clip: Any,
@@ -395,11 +408,7 @@ def _ensure_rgb24(
     if not callable(point):
         raise ScreenshotWriterError("VapourSynth resize.Point is unavailable")
 
-    try:
-        dither_choice = RGBDither(rgb_dither)
-    except Exception:
-        dither_choice = RGBDither.ERROR_DIFFUSION
-    dither = dither_choice.value
+    dither = _normalize_rgb_dither(rgb_dither).value
     props = dict(source_props or {})
     if not props:
         props = dict(vs_core._snapshot_frame_props(clip))
@@ -756,15 +765,12 @@ def _is_sdr_pipeline(
     tonemap_info: "vs_core.TonemapInfo | None",
     source_props: Mapping[str, Any],
 ) -> bool:
-    if tonemap_info is not None:
-        if tonemap_info.applied:
-            return False
-        reason = (tonemap_info.reason or "").strip().lower()
-        if reason and reason not in {"sdr source", "tonemap bypass"}:
-            return False
+    if tonemap_info is not None and tonemap_info.applied:
+        return False
     try:
         is_hdr = vs_core._props_signal_hdr(source_props)
-    except Exception:
+    except (AttributeError, KeyError, TypeError, ValueError):
+        logger.debug("Could not determine HDR status from props; assuming SDR")
         is_hdr = False
     return not bool(is_hdr)
 
@@ -814,7 +820,7 @@ def _promote_to_yuv444p16(
             Any,
             point(
                 clip,
-                format=getattr(vs, "YUV444P16"),
+                format=vs.YUV444P16,
                 dither_type="none",
                 **resize_kwargs,
             ),
@@ -841,8 +847,8 @@ def _promote_to_yuv444p16(
         if prop_kwargs:
             try:
                 promoted = cast(Any, set_props(promoted, **prop_kwargs))
-            except Exception:  # pragma: no cover - best effort
-                pass
+            except Exception as exc:  # pragma: no cover - best effort
+                logger.debug("Failed to set frame props after promotion: %s", exc)
 
     return promoted
 
@@ -1502,10 +1508,7 @@ def _save_frame_with_fpng(
         raise ScreenshotWriterError("Expected a VapourSynth clip for rendering")
 
     resolved_policy = _normalise_geometry_policy(cfg.odd_geometry_policy)
-    try:
-        rgb_dither = RGBDither(cfg.rgb_dither)
-    except Exception:
-        rgb_dither = RGBDither.ERROR_DIFFUSION
+    rgb_dither = _normalize_rgb_dither(cfg.rgb_dither)
     source_props_map = _resolve_source_props(clip, source_props)
     requires_full_chroma = bool(geometry_plan and geometry_plan.get("requires_full_chroma"))
     fmt = getattr(clip, "format", None)
@@ -1717,10 +1720,7 @@ def _save_frame_with_ffmpeg(
         filters.append(overlay_cmd)
 
     if requires_full_chroma:
-        try:
-            configured = RGBDither(cfg.rgb_dither)
-        except Exception:
-            configured = RGBDither.ERROR_DIFFUSION
+        configured = _normalize_rgb_dither(cfg.rgb_dither)
         ffmpeg_dither = "ordered"
         if configured is RGBDither.NONE:
             ffmpeg_dither = "none"
