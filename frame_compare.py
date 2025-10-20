@@ -4585,7 +4585,12 @@ def run_cli(
     verification_records: List[Dict[str, Any]] = []
 
     try:
+        seen_pivot_messages: set[str] = set()
+
         def _notify_pivot(message: str) -> None:
+            if message in seen_pivot_messages:
+                return
+            seen_pivot_messages.add(message)
             reporter.console.log(message, markup=False)
 
         if total_screens > 0:
