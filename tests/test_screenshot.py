@@ -260,6 +260,7 @@ def _make_plan(
     scaled: tuple[int, int] = (1920, 1080),
     pad: tuple[int, int, int, int] = (0, 0, 0, 0),
     final: tuple[int, int] = (1920, 1080),
+    requires_full_chroma: bool = False,
 ) -> GeometryPlan:
     """
     Builds a rendering plan dictionary describing dimensions, crop, scaling, padding, and final output size.
@@ -286,6 +287,7 @@ def _make_plan(
             "scaled": scaled,
             "pad": pad,
             "final": final,
+            "requires_full_chroma": requires_full_chroma,
         },
     )
     return plan
