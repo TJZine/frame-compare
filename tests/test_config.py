@@ -4,6 +4,7 @@ import pytest
 
 from src.config_loader import ConfigError, load_config
 from src.config_template import copy_default_config
+from src.datatypes import OddGeometryPolicy, RGBDither
 
 
 def _copy_default_config(tmp_path: Path) -> Path:
@@ -18,6 +19,8 @@ def test_load_defaults(tmp_path: Path) -> None:
     assert app.analysis.downscale_height == 720
     assert app.screenshots.directory_name == "screens"
     assert app.screenshots.ffmpeg_timeout_seconds == 120.0
+    assert app.screenshots.odd_geometry_policy is OddGeometryPolicy.AUTO
+    assert app.screenshots.rgb_dither is RGBDither.ERROR_DIFFUSION
     assert app.naming.always_full_filename is True
     assert app.runtime.ram_limit_mb == 4000
     assert isinstance(app.runtime.vapoursynth_python_paths, list)
@@ -52,6 +55,8 @@ def test_load_defaults(tmp_path: Path) -> None:
         ("[color]\nverify_luma_threshold = 1.5\n", "color.verify_luma_threshold"),
         ("[color]\nverify_step_seconds = 0\n", "color.verify_step_seconds"),
         ("[color]\ntarget_nits = -10\n", "color.target_nits"),
+        ("[screenshots]\nodd_geometry_policy = \"bogus\"\n", "screenshots.odd_geometry_policy"),
+        ("[screenshots]\nrgb_dither = \"invalid\"\n", "screenshots.rgb_dither"),
         ("[source]\npreferred = \"bogus\"\n", "source.preferred"),
         ("[tmdb]\nyear_tolerance = -1\n", "tmdb.year_tolerance"),
         ("[tmdb]\ncache_ttl_seconds = -5\n", "tmdb.cache_ttl_seconds"),
@@ -93,6 +98,8 @@ min_window_seconds = 2.5
 [screenshots]
 compression_level = 2
 ffmpeg_timeout_seconds = 45.5
+odd_geometry_policy = "force_full_chroma"
+rgb_dither = "ordered"
 
 [slowpics]
 auto_upload = "1"
@@ -135,6 +142,10 @@ preferred = "ffms2"
     assert app.analysis.min_window_seconds == 2.5
     assert app.screenshots.compression_level == 2
     assert app.screenshots.ffmpeg_timeout_seconds == 45.5
+    assert (
+        app.screenshots.odd_geometry_policy is OddGeometryPolicy.FORCE_FULL_CHROMA
+    )
+    assert app.screenshots.rgb_dither is RGBDither.ORDERED
     assert app.slowpics.auto_upload is True
     assert app.slowpics.remove_after_days == 14
     assert app.naming.always_full_filename is False
