@@ -1,6 +1,23 @@
 """Configuration dataclasses for frame comparison tool."""
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any, Dict, List, Optional, Union
+
+
+class OddGeometryPolicy(str, Enum):
+    """Policies controlling how odd-pixel geometry is handled for screenshots."""
+
+    AUTO = "auto"
+    FORCE_FULL_CHROMA = "force_full_chroma"
+    SUBSAMP_SAFE = "subsamp_safe"
+
+
+class RGBDither(str, Enum):
+    """Dithering strategies used when converting RGB outputs to 8-bit."""
+
+    ERROR_DIFFUSION = "error_diffusion"
+    ORDERED = "ordered"
+    NONE = "none"
 
 
 @dataclass
@@ -50,6 +67,8 @@ class ScreenshotConfig:
     letterbox_px_tolerance: int = 8
     center_pad: bool = True
     ffmpeg_timeout_seconds: float = 120.0
+    odd_geometry_policy: OddGeometryPolicy = OddGeometryPolicy.AUTO
+    rgb_dither: RGBDither = RGBDither.ERROR_DIFFUSION
 
 
 @dataclass

@@ -13,7 +13,7 @@ Constraints and guardrails
 - Structure/CI edits must be proposed separately and are out-of-scope for this task.
 - Pass color metadata explicitly through zimg (matrix_in, transfer_in, primaries_in, range_in) at each conversion; do not read frame 0 to sniff props.
 - Color properties source: Use clip's inherent props (clip.format, clip.get_frame(0).props only if already loaded), with fallback to sensible defaults (BT.709 for HD, BT.601 for SD based on resolution).
-- zimg integer enums: matrix=1 (BT.709), 5 (BT.470BG/601), 9 (BT.2020); transfer=1 (BT.709), 16 (SMPTE2084/PQ); primaries=1 (BT.709), 9 (BT.2020); range=0 (full), 1 (limited)
+- zimg integer enums: matrix=1 (BT.709), 5 (BT.470BG), 6 (SMPTE‑170M/NTSC 601), 9 (BT.2020); transfer=1 (BT.709), 16 (SMPTE2084/PQ); primaries=1 (BT.709), 9 (BT.2020); range=0 (full), 1 (limited)
 - Determinism: apply dithering only on the final 16→8 RGB24 hop; the 8→16 or same-bit-depth hops must use no dithering.
 - Handle mixed bit-depths gracefully (8/10/12/16-bit sources should all promote to 16-bit for geometry)
 
@@ -95,6 +95,12 @@ Notes:
 - No dithering required when promoting to 16-bit; only when reducing to 8-bit (RGB24).
 - create_test_clip helper can use core.std.BlankClip(format=format, width=width, height=height, length=1, color=[128, 128, 128])
 
+### Strict `zip` guards
+
+- **Why enable it?** `zip(..., strict=True)` forces the planner/renderer helpers to keep their sequence lengths in lockstep—if a clip is dropped or an offsets list is truncated, we now raise immediately instead of silently pairing only the shared prefix. That keeps downstream geometry, metadata propagation, and log output consistent, and it dramatically shortens the time-to-signal when future refactors forget to append to `clip_formats`.
+- **Downside to account for:** the stricter check raises `ValueError` on the first mismatch. When operators pipe dynamic clip lists (e.g. filtered by CLI flags) a latent bug now fails fast instead of yielding a partially rendered batch. That is intentional, but CI and local smoke tests must cover the “no letterbox offsets returned” and “clip metadata missing” cases so the exception carries context rather than surprising users mid-run.
+- **Mitigation:** we assert list lengths in unit tests, preserve deterministic construction of `plans`, `offsets`, and `clip_formats`, and keep the error handling wrapping `_save_frame_with_ffmpeg`/VapourSynth writes so the raised `ValueError` is logged with the clip path before bubbling up. Operationally that gives us a clean crash with actionable context instead of a quiet truncation that could desynchronise renders.
+
 Sketch:
 def maybe_promote_to_444p16(clip: vs.VideoNode, props: ColorProps) -> vs.VideoNode:
     return core.resize.Bicubic(
@@ -136,9 +142,10 @@ def get_color_props(clip: vs.VideoNode) -> ColorProps:
 - Ensure props are kept in sync on the resulting nodes.
 
 Patch 4: FFmpeg fallback parity (optional but recommended)
-- When screenshots.use_ffmpeg = true and requires_full_chroma is true:
-  - Insert format=yuv444p16 before crop/scale/pad, then format=rgb24 at the end of the graph.
+- When `screenshots.use_ffmpeg = true`, `requires_full_chroma` is true, and the pipeline is SDR:
+  - Insert `format=yuv444p16` before crop/scale/pad, then append `format=rgb24:dither={...}` at the end of the graph.
   - Keep filters otherwise identical.
+- HDR sources should skip the FFmpeg pivot entirely to preserve the existing RGB48 flow.
 - If FFmpeg lacks a deterministic error-diffusion control for rgb24, prefer ordered or none for parity; document the limitation in the config docs
 
 Example filter graph stitching:

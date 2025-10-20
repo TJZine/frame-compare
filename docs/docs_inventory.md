@@ -9,7 +9,9 @@ and whether each artifact should stay in the tree.
 | `DECISIONS.md` | Running log of product/engineering choices. | ✅ Keep | Latest entries still describe shipped changes (CLI layout, tonemap defaults) and provide governance history. |
 | `README_REFERENCE.md` | Config quick-reference that backs the main README. | ✅ Keep | Updated defaults now mirror `src/datatypes.py`; continue revisiting when config schema shifts. |
 | `audio_alignment_pipeline.md` | Detailed workflow and requirements for audio offsets. | ✅ Keep | Matches the current code paths and is referenced from the README for advanced setup. |
+| `config_reference.md` | Deep dives for configuration options added after the main tables. | ✅ Keep | Documents `odd_geometry_policy` and `rgb_dither` trade-offs introduced with odd-geometry support. |
 | `current_pipeline_trace.md` | Step-by-step trace of the HDR screenshot pipeline. | ✅ Keep | Still accurate versus `src/screenshot.py`/`src/vs_core.py`; aids regression debugging. |
+| `geometry_pipeline.md` | SDR geometry pivot rationale and console visibility notes. | ✅ Keep | New; explains the YUV444P16 pivot, axis-aware behaviour, and dithering stages. |
 | `hdr_tonemap_overview.md` | Narrative overview of HDR→SDR strategy and presets. | ✅ Keep | Complements the pipeline trace with operator-facing guidance. |
 | `legacy_tonemap_pipeline.md` | Historical placebo-based pipeline notes. | ⚠️ Keep (archive) | Useful for regression comparisons; tag as archival if the legacy flow is ever dropped. |
 | `regression_notes_2025-09-22.md` | Change log for HDR pipeline parity work. | ✅ Keep | Documents why specific safeguards (prop stamping, fallback order) exist. |

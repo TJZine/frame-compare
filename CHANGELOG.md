@@ -2,23 +2,26 @@
 
 All notable user-visible updates will be documented in this file in reverse chronological order.
 
-- *2025-10-30:* Hardened audio alignment's optional dependency handling by surfacing clear `AudioAlignmentError` messages when
+- *2025-10-20:* Hardened audio alignment's optional dependency handling by surfacing clear `AudioAlignmentError` messages when
   `numpy`, `librosa`, or `soundfile` fail during onset envelope calculation, and refreshed regression coverage for the failure
   path.
-- *2025-10-30:* VSPreview-assisted manual alignment now displays existing manual trims using friendly clip labels so operators
+- *2025-10-20:* VSPreview-assisted manual alignment now displays existing manual trims using friendly clip labels so operators
   can immediately see which plan each baseline affects before accepting new deltas.
-- *2025-10-29:* Normalised VapourSynth colour metadata inference for SDR clips, cached inferred props on the
+- *2025-10-20:* Prevented VSPreview script overwrites by appending per-run entropy to generated filenames and warning when a
+  collision is detected.
+- *2025-10-20:* Fixed mod-2 odd-geometry failures by pivoting subsampled SDR clips through YUV444P16 when needed, emitting Rich console notes that summarise the axis/policy, and expanding docs/config guidance for the `odd_geometry_policy` and `rgb_dither` options.
+- *2025-10-19:* Normalised VapourSynth colour metadata inference for SDR clips, cached inferred props on the
   clip to avoid redundant frame grabs, exposed config overrides for HD/SD defaults and per-file colour
   corrections, refreshed documentation, and expanded regression coverage for the new heuristics.
-- *2025-10-28:* Fixed VapourSynth RGB conversion when colour metadata is absent by defaulting to Rec.709
+- *2025-10-18:* Fixed VapourSynth RGB conversion when colour metadata is absent by defaulting to Rec.709
   limited parameters, preventing fpng "no path between colours" failures and adding regression coverage.
-- *2025-10-27:* Documented the VSPreview-assisted manual alignment flow (README, reference tables, pipeline guide), surfaced the
+- *2025-10-17:* Documented the VSPreview-assisted manual alignment flow (README, reference tables, pipeline guide), surfaced the
   CLI help text, added a fallback regression test, and published a cross-platform QA checklist for manual verification.
-- *2025-10-26:* Hardened analysis cache and audio offsets paths to stay within the workspace root, added regression tests for escape attempts, removed the generated `config.toml` from source control in favour of the packaged template, and restricted screenshot cleanup to directories created during the current run.
-- *2025-10-26:* Limited supported Python versions to 3.13.x (`>=3.13,<3.14`) to align with current `librosa`/`numba` wheels; updated project metadata and lockfile.
-- *2025-10-24:* Locked workspace roots to `--root`/`FRAME_COMPARE_ROOT`/sentinel discovery, seeded config under `ROOT/config/config.toml`, enforced `ROOT/comparison_videos[/screens]`, added `--diagnose-paths`, and blocked site-packages writes before screenshotting.
-- *2025-10-22:* Default config now seeds to `~/.frame-compare/config.toml`, `[paths].input_dir` defaults to `~/comparison_videos`, and the packaged template ships from `src/data/` (with wheel coverage) to avoid site-packages permission issues. *(Superseded by 2025-10-24 workspace root lock.)*
-- *2025-10-21:* Added an optional `$FRAME_COMPARE_TEMPLATE_PATH` override and filesystem fallback for the packaged config template plus clearer screenshot permission errors so runs targeting read-only `comparison_videos` trees fail fast with guidance.
+- *2025-10-16:* Hardened analysis cache and audio offsets paths to stay within the workspace root, added regression tests for escape attempts, removed the generated `config.toml` from source control in favour of the packaged template, and restricted screenshot cleanup to directories created during the current run.
+- *2025-10-16:* Limited supported Python versions to 3.13.x (`>=3.13,<3.14`) to align with current `librosa`/`numba` wheels; updated project metadata and lockfile.
+- *2025-10-14:* Locked workspace roots to `--root`/`FRAME_COMPARE_ROOT`/sentinel discovery, seeded config under `ROOT/config/config.toml`, enforced `ROOT/comparison_videos[/screens]`, added `--diagnose-paths`, and blocked site-packages writes before screenshotting.
+- *2025-10-12:* Default config now seeds to `~/.frame-compare/config.toml`, `[paths].input_dir` defaults to `~/comparison_videos`, and the packaged template ships from `src/data/` (with wheel coverage) to avoid site-packages permission issues. *(Superseded by 2025-10-14 workspace root lock.)*
+- *2025-10-11:* Added an optional `$FRAME_COMPARE_TEMPLATE_PATH` override and filesystem fallback for the packaged config template plus clearer screenshot permission errors so runs targeting read-only `comparison_videos` trees fail fast with guidance.
 - *2025-10-19:* Seed the packaged default config into a per-user directory when the project tree is read-only so packaged installs no longer fail to start on permission errors.
 - *2025-10-20:* Allow disabling the per-frame FFmpeg timeout by setting `screenshots.ffmpeg_timeout_seconds` to 0 while keeping negative values invalid in validation and docs.
 - *2025-10-18:* Added a per-frame FFmpeg timeout and disabled stdin consumption to prevent hung screenshot renders and shell freezes on Windows.
