@@ -85,7 +85,7 @@ The optional VSPreview flow extends manual trimming without mutating clip plans 
 
 ### Prerequisites
 
-- Set `[audio_alignment].use_vspreview = true` in `config.toml`; `[audio_alignment].enable` is recommended but not required—the prompt still appears even when correlation is disabled. 【F:frame_compare.py†L2056-L2085】
+- Set `[audio_alignment].use_vspreview = true` in `config.toml`; `[audio_alignment].enable` is recommended but not required—the prompt still appears even when correlation is disabled, and persisted VSPreview trims are reapplied even during manual-only sessions. 【F:frame_compare.py†L2056-L2085】【F:frame_compare.py†L2066-L2143】
 - Install VSPreview so it is discoverable on `PATH` (`vspreview`) or importable via `python -m vspreview`. 【F:frame_compare.py†L3145-L3162】
 - Run from an interactive terminal; non-interactive sessions skip launching but still write the script path for later review. 【F:frame_compare.py†L3139-L3144】
 
@@ -98,7 +98,7 @@ The optional VSPreview flow extends manual trimming without mutating clip plans 
 ### Headless and fallback behaviour
 
 - In CI/headless runs (`stdin` not a TTY) or when VSPreview binaries are missing, the CLI logs a warning, records the script path in the JSON tail, and continues with the legacy manual-edit workflow. 【F:frame_compare.py†L3139-L3173】【F:frame_compare.py†L3959-L3976】
-- Persisted VSPreview offsets take precedence on subsequent runs; the CLI surfaces them as the new baseline and suppresses repeated prompts unless you delete or edit the offsets file. 【F:frame_compare.py†L2286-L2336】【F:frame_compare.py†L3098-L3107】
+- Persisted VSPreview offsets take precedence on subsequent runs—even when `[audio_alignment].enable = false`; the CLI surfaces them as the new baseline and suppresses repeated prompts unless you delete or edit the offsets file. 【F:frame_compare.py†L2066-L2143】【F:frame_compare.py†L2286-L2336】【F:frame_compare.py†L3098-L3107】
 
 ## Gotchas & edge cases
 - Audio alignment is skipped (with a warning) when fewer than two clips are available or when the feature is disabled. 【F:frame_compare.py†L987-L997】

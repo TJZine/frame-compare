@@ -173,6 +173,215 @@ def test_audio_alignment_manual_vspreview_handles_existing_trim(
     assert any("manual alignment enabled" in warning for warning in display.warnings)
 
 
+def test_audio_alignment_string_false_vspreview_triggers_measurement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """String config values like "off" should disable VSPreview reuse logic."""
+
+    cfg = _make_config(tmp_path)
+    cfg.audio_alignment.enable = True
+    cfg.audio_alignment.use_vspreview = "off"  # type: ignore[assignment]
+
+    reference_path = tmp_path / "Ref.mkv"
+    target_path = tmp_path / "Target.mkv"
+    reference_path.write_bytes(b"ref")
+    target_path.write_bytes(b"tgt")
+
+    reference_plan = frame_compare._ClipPlan(
+        path=reference_path,
+        metadata={"label": "Reference"},
+    )
+    target_plan = frame_compare._ClipPlan(
+        path=target_path,
+        metadata={"label": "Target"},
+    )
+
+    manual_entry = {
+        "status": "manual",
+        "note": "VSPreview delta",
+        "frames": 7,
+    }
+
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "load_offsets",
+        lambda _path: (reference_path.name, {target_path.name: manual_entry}),
+    )
+
+    class _SentinelError(Exception):
+        pass
+
+    def boom(*_args: object, **_kwargs: object) -> list[object]:
+        raise _SentinelError
+
+    monkeypatch.setattr(frame_compare.audio_alignment, "measure_offsets", boom)
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "update_offsets_file",
+        lambda *args, **kwargs: ({}, {}),
+    )
+
+    with pytest.raises(_SentinelError):
+        frame_compare._maybe_apply_audio_alignment(
+            [reference_plan, target_plan],
+            cfg,
+            reference_path,
+            tmp_path,
+            {},
+            reporter=None,
+        )
+
+
+def test_run_cli_reuses_vspreview_manual_offsets_when_alignment_disabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Manual VSPreview offsets should be reused during CLI runs when auto alignment is off."""
+
+    root = tmp_path
+    config_path = root / "config.toml"
+    config_path.write_text("config", encoding="utf-8")
+
+    reference_path = root / "Ref.mkv"
+    target_path = root / "Target.mkv"
+    for file_path in (reference_path, target_path):
+        file_path.write_bytes(b"data")
+
+    cfg = _make_config(root)
+    cfg.audio_alignment.enable = False
+    cfg.audio_alignment.use_vspreview = True
+
+    monkeypatch.setattr(frame_compare, "load_config", lambda _path: cfg)
+
+    files = [reference_path, target_path]
+    metadata = [
+        {"label": "Reference", "file_name": reference_path.name},
+        {"label": "Target", "file_name": target_path.name},
+    ]
+
+    monkeypatch.setattr(frame_compare, "_discover_media", lambda _root: list(files))
+    monkeypatch.setattr(
+        frame_compare,
+        "_parse_metadata",
+        lambda _files, _naming: list(metadata),
+    )
+    monkeypatch.setattr(
+        frame_compare,
+        "_pick_analyze_file",
+        lambda _files, _metadata, _target, **_kwargs: reference_path,
+    )
+
+    cache_file = root / cfg.analysis.frame_data_filename
+    cache_file.write_text("cache", encoding="utf-8")
+
+    manual_offsets = {
+        reference_path.name: {
+            "status": "manual",
+            "note": "vspreview reference baseline",
+            "frames": 0,
+        },
+        target_path.name: {
+            "status": "manual",
+            "note": "vspreview manual trim",
+            "frames": 8,
+        },
+    }
+
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "load_offsets",
+        lambda _path: (None, manual_offsets),
+    )
+
+    def _fail_measure(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("measure_offsets should not run when manual offsets are reused")
+
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "measure_offsets",
+        _fail_measure,
+    )
+
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "update_offsets_file",
+        _fail_measure,
+    )
+
+    init_calls: list[tuple[str, int]] = []
+
+    def fake_init_clip(
+        path: str,
+        *,
+        trim_start: int = 0,
+        trim_end: int | None = None,
+        fps_map: tuple[int, int] | None = None,
+        cache_dir: str | None = None,
+    ) -> types.SimpleNamespace:
+        init_calls.append((path, trim_start))
+        return types.SimpleNamespace(
+            path=path,
+            width=1920,
+            height=1080,
+            fps_num=24000,
+            fps_den=1001,
+            num_frames=2400,
+        )
+
+    monkeypatch.setattr(frame_compare.vs_core, "configure", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda _limit: None)
+    monkeypatch.setattr(frame_compare.vs_core, "init_clip", fake_init_clip)
+
+    monkeypatch.setattr(frame_compare, "write_selection_cache_file", lambda *args, **kwargs: None)
+    monkeypatch.setattr(frame_compare, "export_selection_metadata", lambda *args, **kwargs: None)
+    monkeypatch.setattr(frame_compare, "generate_screenshots", lambda *args, **kwargs: [])
+
+    def fake_select(
+        clip: types.SimpleNamespace,
+        analysis_cfg: AnalysisConfig,
+        files_list: list[str],
+        file_under_analysis: str,
+        cache_info: FrameMetricsCacheInfo | None = None,
+        progress: object = None,
+        *,
+        frame_window: tuple[int, int] | None = None,
+        return_metadata: bool = False,
+        color_cfg: ColorConfig | None = None,
+        cache_probe: CacheLoadResult | None = None,
+    ) -> list[int]:
+        assert cache_probe is not None and cache_probe.status == "reused"
+        return [10, 20]
+
+    monkeypatch.setattr(frame_compare, "select_frames", fake_select)
+
+    cache_probes: list[FrameMetricsCacheInfo] = []
+
+    def fake_probe(info: FrameMetricsCacheInfo, _analysis_cfg: AnalysisConfig) -> CacheLoadResult:
+        cache_probes.append(info)
+        return CacheLoadResult(metrics=None, status="reused", reason=None)
+
+    monkeypatch.setattr(frame_compare, "probe_cached_metrics", fake_probe)
+    monkeypatch.setattr(frame_compare, "Progress", DummyProgress)
+
+    result = frame_compare.run_cli(
+        str(config_path),
+        None,
+        root_override=str(root),
+    )
+
+    assert init_calls, "Clips should be initialised with trims applied"
+    trims_by_path = {Path(path).name: trim for path, trim in init_calls}
+    assert trims_by_path[target_path.name] == 8
+    assert cache_probes and cache_probes[0].path == cache_file.resolve()
+    assert result.json_tail is not None
+    audio_json = _expect_mapping(result.json_tail["audio_alignment"])
+    manual_map = cast(dict[str, int], audio_json.get("manual_trim_starts", {}))
+    assert manual_map[target_path.name] == 8
+    cache_json = _expect_mapping(result.json_tail["cache"])
+    assert cache_json["status"] == "reused"
+    analysis_json = _expect_mapping(result.json_tail["analysis"])
+    assert analysis_json["cache_reused"] is True
+
+
 def test_audio_alignment_vspreview_suggestion_mode(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
