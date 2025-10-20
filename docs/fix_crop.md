@@ -12,7 +12,10 @@ Constraints and guardrails
 - Tests must be added/updated for any code changes.
 - Structure/CI edits must be proposed separately and are out-of-scope for this task.
 - Pass color metadata explicitly through zimg (matrix_in, transfer_in, primaries_in, range_in) at each conversion; do not read frame 0 to sniff props.
+- Color properties source: Use clip's inherent props (clip.format, clip.get_frame(0).props only if already loaded), with fallback to sensible defaults (BT.709 for HD, BT.601 for SD based on resolution).
+- zimg integer enums: matrix=1 (BT.709), 5 (BT.470BG/601), 9 (BT.2020); transfer=1 (BT.709), 16 (SMPTE2084/PQ); primaries=1 (BT.709), 9 (BT.2020); range=0 (full), 1 (limited)
 - Determinism: apply dithering only on the final 16→8 RGB24 hop; the 8→16 or same-bit-depth hops must use no dithering.
+- Handle mixed bit-depths gracefully (8/10/12/16-bit sources should all promote to 16-bit for geometry)
 
 Deliverables
 - Code changes with minimal blast radius.
@@ -67,6 +70,7 @@ Patch 2: Planner signals when full-chroma is required
     - requires_full_chroma = (policy=="force_full_chroma") or (policy=="auto" and ((vertical_odd and fmt.subsampling_h>0) or (horizontal_odd and fmt.subsampling_w>0)))
     - If policy=="subsamp_safe" and odd ops exist, do not promote; instead, rebalance to even geometry and log a warning.
 - Store requires_full_chroma bool in the geometry plan object.
+- If subsamp_safe forces rebalancing: log.warning(f"Rebalanced {orig_top}/{orig_bottom} to {new_top}/{new_bottom} for mod-2 safety; content may shift by 1px")
 
 Helper function:
 - compute_requires_full_chroma(fmt, crop_top, crop_bottom, pad_top, pad_bottom, crop_left, crop_right, pad_left, pad_right, policy) -> bool
@@ -83,11 +87,13 @@ Patch 3: Renderer 444/16 pivot for SDR only
   - zimg args: use matrix_in, transfer_in, primaries_in, range_in (not *_in_s).
   - Dithering: up-promotion to 16-bit uses dither_type="none". Apply configured rgb_dither only on final RGB24 conversion.
 - HDR clips remain on existing RGB48/tonemap path; do not add redundant conversions.
+- Fast-path detection: Skip promotion if clip.format.subsampling_w == 0 and clip.format.subsampling_h == 0 (already 4:4:4/RGB)
 - Logging: INFO message as in Deliverables; DEBUG includes src/dst formats and dither choice.
 
 Notes:
 - Use core.resize.Point for no-op resampling if that’s the current policy, but ensure the dither_type argument is honored on the final RGB24 hop (zimg supports dither_type on all resize kernels; pick the kernel consistent with current behavior).
 - No dithering required when promoting to 16-bit; only when reducing to 8-bit (RGB24).
+- create_test_clip helper can use core.std.BlankClip(format=format, width=width, height=height, length=1, color=[128, 128, 128])
 
 Sketch:
 def maybe_promote_to_444p16(clip: vs.VideoNode, props: ColorProps) -> vs.VideoNode:
@@ -114,6 +120,17 @@ def to_rgb24(clip: vs.VideoNode, props: ColorProps, dither: RGBDither) -> vs.Vid
         primaries_in=props.primaries,
         range_in=props.range,
         dither_type=dither_type,
+    )
+    
+def get_color_props(clip: vs.VideoNode) -> ColorProps:
+    """Extract color properties with sensible defaults."""
+    # SD/HD heuristic for defaults
+    is_hd = clip.width >= 1280 or clip.height >= 720
+    return ColorProps(
+        matrix=getattr(clip.format, 'matrix', 1 if is_hd else 5),
+        transfer=getattr(clip.format, 'transfer', 1),
+        primaries=getattr(clip.format, 'primaries', 1),
+        range=getattr(clip.format, 'range', 0)
     )
 
 - Ensure props are kept in sync on the resulting nodes.
@@ -147,6 +164,7 @@ Patch 5: Tests (planner + renderer)
 - Optional FFmpeg test if available in CI:
   - Ensure graph contains format=yuv444p16 and format=rgb24 when odd ops present
 Example Tests:
+
 def test_odd_pixel_padding_420_clips():
     """Test 1px padding on 4:2:0 clips succeeds with full-chroma conversion."""
     # Create two synthetic 4:2:0 YUV420P8 clips
@@ -208,6 +226,13 @@ def test_dithering_determinism():
     
     # Should produce identical output
     assert frames_are_identical(rgb1, rgb2)
+
+def test_rgb_input_skips_promotion():
+    """RGB/444 inputs should never trigger promotion."""
+    clip = create_test_clip(1920, 1037, format=vs.RGB24)  # Odd height, RGB
+    config = ScreenshotConfig(odd_geometry_policy="auto")
+    plans = plan_geometry([clip], config)
+    assert not plans[0].requires_full_chroma  # Already full-chroma
 
 Patch 6: Docs and log notes
 - docs/geometry_pipeline.md (or similar): document why odd-pixel symmetry needs a full-chroma pivot and the quality rationale. Clarify axis-aware promotion (vertical vs horizontal vs subsampling). State dithering occurs only at final 16→8 RGB24 hop; earlier conversions are non-dithered. Call out FFmpeg parity limitation (if any) and chosen default (ordered/none). Reiterate SDR-only pivot; HDR path unchanged.
