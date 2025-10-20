@@ -1860,7 +1860,7 @@ def test_run_cli_coalesces_duplicate_pivot_logs(
     base_console = frame_compare.Console
 
     class RecordingConsole(base_console):  # type: ignore[misc]
-        pivot_logs: list[str] = []
+        pivot_logs: ClassVar[list[str]] = []
 
         def __init__(self, *args: object, **kwargs: object) -> None:
             super().__init__(*args, **kwargs)
