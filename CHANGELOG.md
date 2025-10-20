@@ -2,14 +2,14 @@
 
 All notable user-visible updates will be documented in this file in reverse chronological order.
 
-- *2025-10-20:* Fixed mod-2 odd-geometry failures by pivoting subsampled SDR clips through YUV444P16 when needed, emitting Rich console notes that summarise the axis/policy, and expanding docs/config guidance for the `odd_geometry_policy` and `rgb_dither` options.
-- *2025-10-30:* Hardened audio alignment's optional dependency handling by surfacing clear `AudioAlignmentError` messages when
+- *2025-10-20:* Hardened audio alignment's optional dependency handling by surfacing clear `AudioAlignmentError` messages when
   `numpy`, `librosa`, or `soundfile` fail during onset envelope calculation, and refreshed regression coverage for the failure
   path.
-- *2025-10-30:* VSPreview-assisted manual alignment now displays existing manual trims using friendly clip labels so operators
+- *2025-10-20:* VSPreview-assisted manual alignment now displays existing manual trims using friendly clip labels so operators
   can immediately see which plan each baseline affects before accepting new deltas.
-- *2025-10-30:* Prevented VSPreview script overwrites by appending per-run entropy to generated filenames and warning when a
+- *2025-10-20:* Prevented VSPreview script overwrites by appending per-run entropy to generated filenames and warning when a
   collision is detected.
+- *2025-10-20:* Fixed mod-2 odd-geometry failures by pivoting subsampled SDR clips through YUV444P16 when needed, emitting Rich console notes that summarise the axis/policy, and expanding docs/config guidance for the `odd_geometry_policy` and `rgb_dither` options.
 - *2025-10-29:* Normalised VapourSynth colour metadata inference for SDR clips, cached inferred props on the
   clip to avoid redundant frame grabs, exposed config overrides for HD/SD defaults and per-file colour
   corrections, refreshed documentation, and expanded regression coverage for the new heuristics.

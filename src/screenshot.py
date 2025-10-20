@@ -8,7 +8,6 @@ import re
 import shutil
 import subprocess
 from functools import partial
-import math
 from pathlib import Path
 from typing import (
     Any,
@@ -1185,7 +1184,7 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[Geometry
             mod=cfg.mod_crop,
             max_target_height=max_target_height,
         )
-        for plan, (extra_top, extra_bottom) in zip(plans, offsets):
+        for plan, (extra_top, extra_bottom) in zip(plans, offsets, strict=True):
             if not (extra_top or extra_bottom):
                 continue
             left, top, right, bottom = plan["crop"]
@@ -1208,7 +1207,7 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[Geometry
         _align_letterbox_pillarbox(plans)
 
     if policy is OddGeometryPolicy.SUBSAMP_SAFE:
-        for plan, fmt in zip(plans, clip_formats):
+        for plan, fmt in zip(plans, clip_formats, strict=True):
             subsampling_w = _get_subsampling(fmt, "subsampling_w")
             subsampling_h = _get_subsampling(fmt, "subsampling_h")
             left, top, right, bottom = plan["crop"]
@@ -1397,7 +1396,7 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[Geometry
             scaled_h + pad_top + pad_bottom,
         )
 
-    for plan, fmt in zip(plans, clip_formats):
+    for plan, fmt in zip(plans, clip_formats, strict=True):
         if policy is OddGeometryPolicy.SUBSAMP_SAFE:
             subsampling_w = _get_subsampling(fmt, "subsampling_w")
             subsampling_h = _get_subsampling(fmt, "subsampling_h")
@@ -1719,6 +1718,7 @@ def _save_frame_with_ffmpeg(
     *,
     overlay_text: Optional[str] = None,
     geometry_plan: GeometryPlan | None = None,
+    is_sdr: bool = True,
     pivot_notifier: Callable[[str], None] | None = None,
 ) -> None:
     if shutil.which("ffmpeg") is None:
@@ -1735,7 +1735,8 @@ def _save_frame_with_ffmpeg(
     if not axis_label:
         axis_label = _describe_plan_axes(geometry_plan)
     filters = [f"select=eq(n\\,{int(frame_idx)})"]
-    if requires_full_chroma:
+    should_apply_full_chroma = requires_full_chroma and is_sdr
+    if should_apply_full_chroma:
         filters.append("format=yuv444p16")
     if any(crop):
         filters.append(
@@ -1777,7 +1778,7 @@ def _save_frame_with_ffmpeg(
         ).format(text=_escape_drawtext(overlay_text))
         filters.append(overlay_cmd)
 
-    if requires_full_chroma:
+    if should_apply_full_chroma:
         configured = _normalize_rgb_dither(cfg.rgb_dither)
         ffmpeg_dither = "ordered"
         if configured is RGBDither.NONE:
@@ -1796,6 +1797,11 @@ def _save_frame_with_ffmpeg(
                 "Full-chroma pivot active (axis={axis}, policy={policy}, backend=ffmpeg)"
             ).format(axis=axis_label, policy=resolved_policy.value)
             _safe_pivot_notify(pivot_notifier, note)
+    elif requires_full_chroma and not is_sdr:
+        logger.debug(
+            "Skipping full-chroma pivot for HDR content (axis=%s)",
+            axis_label or "none",
+        )
 
     filter_chain = ",".join(filters)
     cmd = [
@@ -1926,7 +1932,7 @@ def generate_screenshots(
     processed_results: List[vs_core.ClipProcessResult] = []
     overlay_states: List[OverlayState] = []
 
-    for clip, file_path in zip(clips, files):
+    for clip, file_path in zip(clips, files, strict=True):
         result = vs_core.process_clip_for_screenshot(
             clip,
             file_path,
@@ -1961,7 +1967,7 @@ def generate_screenshots(
     geometry = _plan_geometry([result.clip for result in processed_results], cfg)
 
     for clip_index, (result, file_path, meta, plan, trim_start) in enumerate(
-        zip(processed_results, files, metadata, geometry, trim_offsets)
+        zip(processed_results, files, metadata, geometry, trim_offsets, strict=True)
     ):
         mapper = None
         if alignment_maps is not None and clip_index < len(alignment_maps):
@@ -1978,7 +1984,10 @@ def generate_screenshots(
 
         overlay_state = overlay_states[clip_index]
         base_overlay_text = getattr(result, "overlay_text", None)
-        source_props = getattr(result, "source_props", {})
+        source_props_raw = getattr(result, "source_props", {})
+        resolved_source_props = _resolve_source_props(result.clip, source_props_raw)
+        source_props = resolved_source_props
+        is_sdr_pipeline = _is_sdr_pipeline(result.tonemap, resolved_source_props)
 
         for frame in frames:
             frame_idx = int(frame)
@@ -2062,6 +2071,7 @@ def generate_screenshots(
                         selection_label,
                         overlay_text=overlay_text,
                         geometry_plan=plan,
+                        is_sdr=is_sdr_pipeline,
                         pivot_notifier=pivot_notifier,
                     )
                 else:
@@ -2079,7 +2089,7 @@ def generate_screenshots(
                         overlay_text=overlay_text,
                         overlay_state=overlay_state,
                         strict_overlay=bool(getattr(color_cfg, "strict", False)),
-                        source_props=source_props,
+                        source_props=resolved_source_props,
                         geometry_plan=plan,
                         tonemap_info=result.tonemap,
                         pivot_notifier=pivot_notifier,

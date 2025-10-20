@@ -7,9 +7,9 @@ from typing import Any, Optional, Sequence, TypedDict, cast
 
 import pytest
 
-from src.datatypes import ColorConfig, RGBDither, ScreenshotConfig
+from src.datatypes import ColorConfig, OddGeometryPolicy, RGBDither, ScreenshotConfig
 from src import screenshot, vs_core
-from src.screenshot import GeometryPlan, OddGeometryPolicy, _compute_requires_full_chroma
+from src.screenshot import GeometryPlan, _compute_requires_full_chroma
 
 
 class _CapturedWriterCall(TypedDict):
@@ -772,7 +772,8 @@ def test_compression_flag_passed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         selection_label: str | None,
         *,
         overlay_text: str | None = None,
-        **kwargs: Any,
+        is_sdr: bool = True,
+        **_kwargs: Any,
     ) -> None:
         captured[frame_idx] = screenshot._map_ffmpeg_compression(cfg.compression_level)
         path.write_text("ffmpeg", encoding="utf-8")
@@ -812,7 +813,8 @@ def test_ffmpeg_respects_trim_offsets(tmp_path: Path, monkeypatch: pytest.Monkey
         selection_label,
         *,
         overlay_text=None,
-        **kwargs: Any,
+        is_sdr: bool = True,
+        **_kwargs: Any,
     ):
         calls.append(frame_idx)
         Path(path).write_text("ff", encoding="utf-8")
@@ -1313,7 +1315,8 @@ def test_ffmpeg_writer_receives_padding(tmp_path: Path, monkeypatch: pytest.Monk
         selection_label,
         *,
         overlay_text=None,
-        **kwargs: Any,
+        is_sdr: bool = True,
+        **_kwargs: Any,
     ):
         calls.append(
             {

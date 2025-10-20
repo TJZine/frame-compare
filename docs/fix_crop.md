@@ -13,7 +13,7 @@ Constraints and guardrails
 - Structure/CI edits must be proposed separately and are out-of-scope for this task.
 - Pass color metadata explicitly through zimg (matrix_in, transfer_in, primaries_in, range_in) at each conversion; do not read frame 0 to sniff props.
 - Color properties source: Use clip's inherent props (clip.format, clip.get_frame(0).props only if already loaded), with fallback to sensible defaults (BT.709 for HD, BT.601 for SD based on resolution).
-- zimg integer enums: matrix=1 (BT.709), 5 (BT.470BG/601), 9 (BT.2020); transfer=1 (BT.709), 16 (SMPTE2084/PQ); primaries=1 (BT.709), 9 (BT.2020); range=0 (full), 1 (limited)
+- zimg integer enums: matrix=1 (BT.709), 5 (BT.470BG), 6 (SMPTE‑170M/NTSC 601), 9 (BT.2020); transfer=1 (BT.709), 16 (SMPTE2084/PQ); primaries=1 (BT.709), 9 (BT.2020); range=0 (full), 1 (limited)
 - Determinism: apply dithering only on the final 16→8 RGB24 hop; the 8→16 or same-bit-depth hops must use no dithering.
 - Handle mixed bit-depths gracefully (8/10/12/16-bit sources should all promote to 16-bit for geometry)
 
@@ -136,9 +136,10 @@ def get_color_props(clip: vs.VideoNode) -> ColorProps:
 - Ensure props are kept in sync on the resulting nodes.
 
 Patch 4: FFmpeg fallback parity (optional but recommended)
-- When screenshots.use_ffmpeg = true and requires_full_chroma is true:
-  - Insert format=yuv444p16 before crop/scale/pad, then format=rgb24 at the end of the graph.
+- When `screenshots.use_ffmpeg = true`, `requires_full_chroma` is true, and the pipeline is SDR:
+  - Insert `format=yuv444p16` before crop/scale/pad, then append `format=rgb24:dither={...}` at the end of the graph.
   - Keep filters otherwise identical.
+- HDR sources should skip the FFmpeg pivot entirely to preserve the existing RGB48 flow.
 - If FFmpeg lacks a deterministic error-diffusion control for rgb24, prefer ordered or none for parity; document the limitation in the config docs
 
 Example filter graph stitching:
