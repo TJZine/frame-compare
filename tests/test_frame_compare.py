@@ -1,9 +1,10 @@
-import json
-import types
+import datetime as dt
 import importlib
+import json
 import pathlib
-from pathlib import Path
+import types
 from collections.abc import Iterable, Sequence
+from pathlib import Path
 from typing import Any, Mapping, cast
 
 import pytest
@@ -376,6 +377,62 @@ def test_launch_vspreview_generates_script(
     assert audio_block.get("vspreview_exit_code") == 0
     assert prompt_calls, "Prompt should be invoked even when returning default offsets"
     assert apply_calls == [{}]
+
+
+def test_write_vspreview_script_generates_unique_filenames_same_second(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """VSPreview script writes should never clobber same-second launches."""
+
+    cfg = _make_config(tmp_path)
+    cfg.audio_alignment.use_vspreview = True
+
+    reference_path = tmp_path / "Ref.mkv"
+    target_path = tmp_path / "Target.mkv"
+    reference_path.write_bytes(b"ref")
+    target_path.write_bytes(b"tgt")
+
+    reference_plan = frame_compare._ClipPlan(
+        path=reference_path,
+        metadata={"label": "Reference"},
+    )
+    target_plan = frame_compare._ClipPlan(
+        path=target_path,
+        metadata={"label": "Target"},
+    )
+    plans = [reference_plan, target_plan]
+
+    summary = frame_compare._AudioAlignmentSummary(
+        offsets_path=tmp_path / "offsets.toml",
+        reference_name=reference_path.name,
+        measurements=(),
+        applied_frames={},
+        baseline_shift=0,
+        statuses={},
+        reference_plan=reference_plan,
+        final_adjustments={},
+        swap_details={},
+        suggested_frames={target_path.name: 7},
+        suggestion_mode=True,
+        manual_trim_starts={target_path.name: 10},
+    )
+
+    fixed_instant = dt.datetime(2024, 1, 1, 12, 34, 56)
+
+    class _FixedDatetime(dt.datetime):
+        @classmethod
+        def now(cls, tz: dt.tzinfo | None = None) -> dt.datetime:
+            return fixed_instant if tz is None else fixed_instant.replace(tzinfo=tz)
+
+    monkeypatch.setattr(frame_compare._dt, "datetime", _FixedDatetime)
+
+    first_path = frame_compare._write_vspreview_script(plans, summary, cfg, tmp_path)
+    second_path = frame_compare._write_vspreview_script(plans, summary, cfg, tmp_path)
+
+    assert first_path != second_path
+    assert first_path.exists()
+    assert second_path.exists()
+    assert first_path.name != second_path.name
 
 
 def test_launch_vspreview_warns_when_command_missing(
