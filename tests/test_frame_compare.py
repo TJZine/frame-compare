@@ -422,11 +422,7 @@ def test_write_vspreview_script_generates_unique_filenames_same_second(
     class _FixedDatetime(dt.datetime):
         @classmethod
         def now(cls, tz: dt.tzinfo | None = None) -> dt.datetime:
-            if tz is None:
-                return fixed_instant
-            assert hasattr(tz, "fromutc")
-            assert tz is not None
-            return tz.fromutc(fixed_instant.replace(tzinfo=tz))
+            return fixed_instant if tz is None else fixed_instant.replace(tzinfo=tz)
 
     monkeypatch.setattr(frame_compare._dt, "datetime", _FixedDatetime)
 
