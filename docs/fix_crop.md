@@ -95,6 +95,12 @@ Notes:
 - No dithering required when promoting to 16-bit; only when reducing to 8-bit (RGB24).
 - create_test_clip helper can use core.std.BlankClip(format=format, width=width, height=height, length=1, color=[128, 128, 128])
 
+### Strict `zip` guards
+
+- **Why enable it?** `zip(..., strict=True)` forces the planner/renderer helpers to keep their sequence lengths in lockstep—if a clip is dropped or an offsets list is truncated, we now raise immediately instead of silently pairing only the shared prefix. That keeps downstream geometry, metadata propagation, and log output consistent, and it dramatically shortens the time-to-signal when future refactors forget to append to `clip_formats`.
+- **Downside to account for:** the stricter check raises `ValueError` on the first mismatch. When operators pipe dynamic clip lists (e.g. filtered by CLI flags) a latent bug now fails fast instead of yielding a partially rendered batch. That is intentional, but CI and local smoke tests must cover the “no letterbox offsets returned” and “clip metadata missing” cases so the exception carries context rather than surprising users mid-run.
+- **Mitigation:** we assert list lengths in unit tests, preserve deterministic construction of `plans`, `offsets`, and `clip_formats`, and keep the error handling wrapping `_save_frame_with_ffmpeg`/VapourSynth writes so the raised `ValueError` is logged with the clip path before bubbling up. Operationally that gives us a clean crash with actionable context instead of a quiet truncation that could desynchronise renders.
+
 Sketch:
 def maybe_promote_to_444p16(clip: vs.VideoNode, props: ColorProps) -> vs.VideoNode:
     return core.resize.Bicubic(
