@@ -455,8 +455,8 @@ def _ensure_rgb24(
         if isinstance(transfer, int):
             prop_kwargs["_Transfer"] = int(transfer)
         converted = cast(Any, converted.std.SetFrameProps(**prop_kwargs))
-    except Exception:  # pragma: no cover - best effort
-        pass
+    except Exception as exc:  # pragma: no cover - best effort
+        logger.debug("Failed to set RGB frame props: %s", exc)
     return converted
 
 
@@ -769,8 +769,8 @@ def _is_sdr_pipeline(
         return False
     try:
         is_hdr = vs_core._props_signal_hdr(source_props)
-    except (AttributeError, KeyError, TypeError, ValueError):
-        logger.debug("Could not determine HDR status from props; assuming SDR")
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        logger.debug("HDR detection failed; defaulting to SDR: %s", exc)
         is_hdr = False
     return not bool(is_hdr)
 
