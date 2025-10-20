@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import tomllib
 from dataclasses import fields, is_dataclass
+from enum import Enum
 from typing import Any, Dict
 
 from .datatypes import (
@@ -51,6 +52,22 @@ def _coerce_bool(value: Any, dotted_key: str) -> bool:
     raise ConfigError(f"{dotted_key} must be a boolean (use true/false).")
 
 
+def _coerce_enum(value: Any, dotted_key: str, enum_type: type[Enum]) -> Enum:
+    """Return an enum member, coercing string values case-insensitively."""
+
+    if isinstance(value, enum_type):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        for member in enum_type:
+            member_value = str(member.value).lower()
+            if normalized == member_value:
+                return member
+    raise ConfigError(
+        f"{dotted_key} must be one of: {', '.join(str(member.value) for member in enum_type)}"
+    )
+
+
 def _sanitize_section(raw: dict[str, Any], name: str, cls):
     """
     Coerce a raw TOML table into an instance of ``cls`` with cleaned booleans.
@@ -71,6 +88,11 @@ def _sanitize_section(raw: dict[str, Any], name: str, cls):
     cleaned: Dict[str, Any] = {}
     cls_fields = {field.name: field for field in fields(cls)}
     bool_fields = {name for name, field in cls_fields.items() if field.type is bool}
+    enum_fields = {
+        field_name: field.type
+        for field_name, field in cls_fields.items()
+        if isinstance(field.type, type) and issubclass(field.type, Enum)
+    }
     nested_fields = {
         name: field.type
         for name, field in cls_fields.items()
@@ -80,6 +102,8 @@ def _sanitize_section(raw: dict[str, Any], name: str, cls):
     for key, value in raw.items():
         if key in bool_fields:
             cleaned[key] = _coerce_bool(value, f"{name}.{key}")
+        elif key in enum_fields:
+            cleaned[key] = _coerce_enum(value, f"{name}.{key}", enum_fields[key])
         elif key in nested_fields:
             if not isinstance(value, dict):
                 raise ConfigError(f"[{name}.{key}] must be a table")

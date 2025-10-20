@@ -50,6 +50,8 @@ quick-start configuration paths.
 | `[screenshots].upscale` | Permit global upscaling. | bool | `true` |
 | `[screenshots].single_res` | Fixed output height (0 keeps source). | int | `0` |
 | `[screenshots].mod_crop` | Crop modulus. | int | `2` |
+| `[screenshots].odd_geometry_policy` | Policy for odd-pixel trims/pads on subsampled SDR (auto, force, or subsamp-safe). | str | `"auto"` |
+| `[screenshots].rgb_dither` | Dithering applied during final RGB24 conversion. | str | `"error_diffusion"` |
 | `[screenshots].auto_letterbox_crop` | Auto crop black bars. | bool | `false` |
 | `[screenshots].ffmpeg_timeout_seconds` | Per-frame FFmpeg timeout in seconds (must be >= 0; set 0 to disable). | float | `120.0` |
 | `[color].enable_tonemap` | HDR→SDR conversion toggle. | bool | `true` |
