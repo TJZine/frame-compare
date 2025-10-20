@@ -5,7 +5,7 @@ import pathlib
 import types
 from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
-from typing import Any, Mapping, cast
+from typing import Any, ClassVar, Mapping, cast
 
 import pytest
 from click.testing import CliRunner, Result
