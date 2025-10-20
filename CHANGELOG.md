@@ -2,6 +2,7 @@
 
 All notable user-visible updates will be documented in this file in reverse chronological order.
 
+- *2025-10-20:* Fixed mod-2 odd-geometry failures by pivoting subsampled SDR clips through YUV444P16 when needed, emitting Rich console notes that summarise the axis/policy, and expanding docs/config guidance for the `odd_geometry_policy` and `rgb_dither` options.
 - *2025-10-30:* Hardened audio alignment's optional dependency handling by surfacing clear `AudioAlignmentError` messages when
   `numpy`, `librosa`, or `soundfile` fail during onset envelope calculation, and refreshed regression coverage for the failure
   path.
