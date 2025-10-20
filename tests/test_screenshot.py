@@ -495,8 +495,10 @@ def test_compression_flag_passed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         selection_label: str | None,
         *,
         overlay_text: str | None = None,
-        geometry_plan: GeometryPlan | None = None,
+        _geometry_plan: GeometryPlan | None = None,
+        **kwargs: Any,
     ) -> None:
+        _ = kwargs.pop("geometry_plan", _geometry_plan)
         captured[frame_idx] = screenshot._map_ffmpeg_compression(cfg.compression_level)
         path.write_text("ffmpeg", encoding="utf-8")
 
@@ -535,8 +537,10 @@ def test_ffmpeg_respects_trim_offsets(tmp_path: Path, monkeypatch: pytest.Monkey
         selection_label,
         *,
         overlay_text=None,
-        geometry_plan=None,
+        _geometry_plan=None,
+        **kwargs: Any,
     ):
+        _ = kwargs.pop("geometry_plan", _geometry_plan)
         calls.append(frame_idx)
         Path(path).write_text("ff", encoding="utf-8")
 
@@ -1036,8 +1040,10 @@ def test_ffmpeg_writer_receives_padding(tmp_path: Path, monkeypatch: pytest.Monk
         selection_label,
         *,
         overlay_text=None,
-        geometry_plan=None,
+        _geometry_plan=None,
+        **kwargs: Any,
     ):
+        _ = kwargs.pop("geometry_plan", _geometry_plan)
         calls.append(
             {
                 "crop": crop,
@@ -1135,8 +1141,8 @@ def test_save_frame_with_ffmpeg_honours_timeout(monkeypatch: pytest.MonkeyPatch,
     cfg = ScreenshotConfig(ffmpeg_timeout_seconds=37.5)
     recorded: dict[str, object] = {}
 
-    def fake_run(cmd: Sequence[str], **kwargs: Any):  # type: ignore[override]
-        recorded.update(kwargs)
+    def fake_run(cmd: Sequence[str], **_kwargs: Any):  # type: ignore[override]
+        recorded.update(_kwargs)
         recorded["cmd"] = cmd
 
         class _Result:
@@ -1387,7 +1393,7 @@ def test_save_frame_with_fpng_promotes_subsampled_sdr(
             return clip
 
     class _FakeFpng:
-        def Write(self, clip: _FakeClip, path: str, **kwargs: Any) -> Any:
+        def Write(self, _clip: _FakeClip, path: str, **kwargs: Any) -> Any:
             writer_calls.append(kwargs)
 
             class _Job:
@@ -1402,8 +1408,8 @@ def test_save_frame_with_fpng_promotes_subsampled_sdr(
         resize=fake_resize,
         fpng=_FakeFpng(),
         std=types.SimpleNamespace(
-            SetFrameProps=lambda clip, **kwargs: clip,
-            CopyFrameProps=lambda clip, src: clip,
+            SetFrameProps=lambda clip, **_kwargs: clip,
+            CopyFrameProps=lambda clip, _src: clip,
             AddBorders=lambda clip, *, left, right, top, bottom: clip._with_dimensions(
                 width=clip.width + left + right,
                 height=clip.height + top + bottom,
