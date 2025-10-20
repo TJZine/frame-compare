@@ -1,12 +1,13 @@
 from pathlib import Path
 import subprocess
 import sys
+import logging
 import types
 from typing import Any, Optional, Sequence, TypedDict, cast
 
 import pytest
 
-from src.datatypes import ColorConfig, ScreenshotConfig
+from src.datatypes import ColorConfig, RGBDither, ScreenshotConfig
 from src import screenshot, vs_core
 from src.screenshot import GeometryPlan, OddGeometryPolicy
 
@@ -494,6 +495,7 @@ def test_compression_flag_passed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         selection_label: str | None,
         *,
         overlay_text: str | None = None,
+        **kwargs: Any,
     ) -> None:
         captured[frame_idx] = screenshot._map_ffmpeg_compression(cfg.compression_level)
         path.write_text("ffmpeg", encoding="utf-8")
@@ -533,6 +535,7 @@ def test_ffmpeg_respects_trim_offsets(tmp_path: Path, monkeypatch: pytest.Monkey
         selection_label,
         *,
         overlay_text=None,
+        **kwargs: Any,
     ):
         calls.append(frame_idx)
         Path(path).write_text("ff", encoding="utf-8")
@@ -1033,6 +1036,7 @@ def test_ffmpeg_writer_receives_padding(tmp_path: Path, monkeypatch: pytest.Monk
         selection_label,
         *,
         overlay_text=None,
+        **kwargs: Any,
     ):
         calls.append(
             {
@@ -1200,6 +1204,48 @@ def test_save_frame_with_ffmpeg_disables_timeout_when_zero(
     assert "timeout" not in recorded or recorded.get("timeout") is None
 
 
+def test_save_frame_with_ffmpeg_inserts_full_chroma_filters(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cfg = ScreenshotConfig(rgb_dither=RGBDither.ERROR_DIFFUSION)
+    plan = _make_plan(requires_full_chroma=True)
+    recorded_cmd: list[str] = []
+
+    def fake_run(cmd: Sequence[str], **_kwargs: Any):  # type: ignore[override]
+        recorded_cmd[:] = list(cmd)
+
+        class _Result:
+            returncode = 0
+            stderr = b""
+
+        return _Result()
+
+    monkeypatch.setattr(screenshot.shutil, "which", lambda _: "ffmpeg")
+    monkeypatch.setattr(screenshot.subprocess, "run", fake_run)
+
+    screenshot._save_frame_with_ffmpeg(
+        source="video.mkv",
+        frame_idx=7,
+        crop=(1, 0, 2, 0),
+        scaled=(1917, 1080),
+        pad=(0, 1, 0, 1),
+        path=tmp_path / "frame.png",
+        cfg=cfg,
+        width=1920,
+        height=1080,
+        selection_label=None,
+        geometry_plan=plan,
+    )
+
+    assert recorded_cmd
+    vf_index = recorded_cmd.index("-vf")
+    filter_chain = recorded_cmd[vf_index + 1]
+    filters = filter_chain.split(",")
+    assert "format=yuv444p16" in filters
+    assert any(entry.startswith("format=rgb24") for entry in filters)
+    assert filters[-1].endswith("dither=ordered")
+
+
 def test_save_frame_with_ffmpeg_raises_on_timeout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     cfg = ScreenshotConfig(ffmpeg_timeout_seconds=5.0)
 
@@ -1228,16 +1274,227 @@ def test_save_frame_with_ffmpeg_raises_on_timeout(monkeypatch: pytest.MonkeyPatc
     assert "timed out" in str(exc_info.value)
 
 
+def test_save_frame_with_fpng_promotes_subsampled_sdr(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    writer_calls: list[dict[str, Any]] = []
+    resize_calls: list[dict[str, Any]] = []
+
+    class _FakeFormat:
+        def __init__(
+            self,
+            *,
+            color_family: object,
+            bits_per_sample: int,
+            subsampling_w: int,
+            subsampling_h: int,
+            name: str,
+        ) -> None:
+            self.color_family = color_family
+            self.bits_per_sample = bits_per_sample
+            self.subsampling_w = subsampling_w
+            self.subsampling_h = subsampling_h
+            self.name = name
+
+    class _FakeStd:
+        def __init__(self, parent: "_FakeClip") -> None:
+            self._parent = parent
+
+        def CropRel(
+            self,
+            *,
+            left: int,
+            right: int,
+            top: int,
+            bottom: int,
+        ) -> "_FakeClip":
+            new_width = self._parent.width - left - right
+            new_height = self._parent.height - top - bottom
+            return self._parent._with_dimensions(width=new_width, height=new_height)
+
+        def AddBorders(
+            self,
+            clip: "_FakeClip",
+            *,
+            left: int,
+            right: int,
+            top: int,
+            bottom: int,
+        ) -> "_FakeClip":
+            new_width = clip.width + left + right
+            new_height = clip.height + top + bottom
+            return clip._with_dimensions(width=new_width, height=new_height)
+
+        def CopyFrameProps(self, clip: "_FakeClip", _src: "_FakeClip") -> "_FakeClip":
+            return clip
+
+        def SetFrameProps(self, **_: Any) -> "_FakeClip":
+            return self._parent
+
+    class _FakeClip:
+        def __init__(self, width: int, height: int, format_obj: _FakeFormat) -> None:
+            self.width = width
+            self.height = height
+            self.format = format_obj
+            self.core = fake_core
+
+        def _with_dimensions(
+            self,
+            *,
+            width: int | None = None,
+            height: int | None = None,
+            format_obj: _FakeFormat | None = None,
+        ) -> "_FakeClip":
+            new_clip = _FakeClip(
+                width if width is not None else self.width,
+                height if height is not None else self.height,
+                format_obj if format_obj is not None else self.format,
+            )
+            new_clip.core = self.core
+            return new_clip
+
+        @property
+        def std(self) -> _FakeStd:
+            return _FakeStd(self)
+
+    class _FakeResize:
+        def Point(self, clip: _FakeClip, **kwargs: Any) -> _FakeClip:
+            resize_calls.append(kwargs)
+            fmt = kwargs.get("format")
+            if fmt == fake_vs.YUV444P16:
+                format_obj = _FakeFormat(
+                    color_family=fake_vs.YUV,
+                    bits_per_sample=16,
+                    subsampling_w=0,
+                    subsampling_h=0,
+                    name="YUV444P16",
+                )
+                return clip._with_dimensions(format_obj=format_obj)
+            if fmt == fake_vs.RGB24:
+                format_obj = _FakeFormat(
+                    color_family=fake_vs.RGB,
+                    bits_per_sample=8,
+                    subsampling_w=0,
+                    subsampling_h=0,
+                    name="RGB24",
+                )
+                return clip._with_dimensions(format_obj=format_obj)
+            return clip
+
+        def Spline36(self, clip: _FakeClip, **_: Any) -> _FakeClip:
+            return clip
+
+    class _FakeFpng:
+        def Write(self, _clip: _FakeClip, path: str, **kwargs: Any) -> Any:
+            writer_calls.append(kwargs)
+
+            class _Job:
+                def get_frame(self, _index: int) -> None:
+                    return None
+
+            Path(path).write_text("png", encoding="utf-8")
+            return _Job()
+
+    fake_resize = _FakeResize()
+    fake_core = types.SimpleNamespace(
+        resize=fake_resize,
+        fpng=_FakeFpng(),
+        std=types.SimpleNamespace(
+            SetFrameProps=lambda clip, **_kwargs: clip,
+            CopyFrameProps=lambda clip, _src: clip,
+            AddBorders=lambda clip, *, left, right, top, bottom: clip._with_dimensions(
+                width=clip.width + left + right,
+                height=clip.height + top + bottom,
+            ),
+        ),
+    )
+
+    fake_vs = types.SimpleNamespace(
+        VideoNode=_FakeClip,
+        RGB=object(),
+        YUV=object(),
+        RGB24="RGB24",
+        YUV444P16="YUV444P16",
+        RANGE_FULL=0,
+        RANGE_LIMITED=1,
+        MATRIX_BT709=1,
+        TRANSFER_BT709=1,
+        PRIMARIES_BT709=1,
+        core=fake_core,
+    )
+
+    patcher = cast(Any, monkeypatch)
+    patcher.setitem(sys.modules, "vapoursynth", fake_vs)
+
+    clip = _FakeClip(
+        1920,
+        1080,
+        _FakeFormat(
+            color_family=fake_vs.YUV,
+            bits_per_sample=10,
+            subsampling_w=1,
+            subsampling_h=1,
+            name="YUV420P10",
+        ),
+    )
+
+    cfg = ScreenshotConfig(add_frame_info=False, rgb_dither=RGBDither.ORDERED)
+    tonemap_info = vs_core.TonemapInfo(
+        applied=False,
+        tone_curve=None,
+        dpd=0,
+        target_nits=100.0,
+        dst_min_nits=0.1,
+        src_csp_hint=None,
+        reason="SDR source",
+    )
+    plan = _make_plan(pad=(0, 1, 0, 1), requires_full_chroma=True)
+    source_props = {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1, "_ColorRange": 1}
+
+    caplog_any = cast(Any, caplog)
+    caplog_any.set_level(logging.INFO)
+
+    screenshot._save_frame_with_fpng(
+        clip,
+        frame_idx=0,
+        crop=plan["crop"],
+        scaled=plan["scaled"],
+        pad=plan["pad"],
+        path=tmp_path / "frame.png",
+        cfg=cfg,
+        label="Clip",
+        requested_frame=0,
+        selection_label=None,
+        source_props=source_props,
+        geometry_plan=plan,
+        tonemap_info=tonemap_info,
+    )
+
+    log_records: Sequence[logging.LogRecord] = list(caplog_any.records)
+    assert any("promoting to YUV444P16" in record.getMessage() for record in log_records)
+    assert writer_calls, "fpng writer should be invoked"
+    assert len(resize_calls) >= 2
+    first_call, second_call = resize_calls[0], resize_calls[-1]
+    assert first_call.get("format") == fake_vs.YUV444P16
+    assert first_call.get("dither_type") == "none"
+    assert second_call.get("format") == fake_vs.RGB24
+    assert second_call.get("dither_type") == RGBDither.ORDERED.value
+
+
 def test_ensure_rgb24_applies_rec709_defaults_when_metadata_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, Any] = {}
+    captured_props: dict[str, Any] = {}
 
     class _DummyStd:
         def __init__(self, parent: "_DummyClip") -> None:
             self._parent = parent
 
         def SetFrameProps(self, **kwargs: Any) -> "_DummyClip":
+            captured_props.update(kwargs)
             return self._parent
 
     class _DummyClip:
@@ -1279,22 +1536,27 @@ def test_ensure_rgb24_applies_rec709_defaults_when_metadata_missing(
         _SourceClip(),
         frame_idx=12,
         source_props={},
+        rgb_dither=RGBDither.ERROR_DIFFUSION,
     )
     assert isinstance(converted, _DummyClip)
     assert captured.get("matrix_in") == 1
     assert captured.get("transfer_in") == 1
     assert captured.get("primaries_in") == 1
     assert captured.get("range_in") == 1
+    assert captured.get("dither_type") == RGBDither.ERROR_DIFFUSION.value
+    assert captured_props == {"_Matrix": 0, "_ColorRange": 0}
 
 
 def test_ensure_rgb24_uses_source_colour_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
+    captured_props: dict[str, Any] = {}
 
     class _DummyStd:
         def __init__(self, parent: "_DummyClip") -> None:
             self._parent = parent
 
         def SetFrameProps(self, **kwargs: Any) -> "_DummyClip":
+            captured_props.update(kwargs)
             return self._parent
 
     class _DummyClip:
@@ -1349,9 +1611,17 @@ def test_ensure_rgb24_uses_source_colour_metadata(monkeypatch: pytest.MonkeyPatc
             "_Primaries": 9,
             "_ColorRange": 0,
         },
+        rgb_dither=RGBDither.ORDERED,
     )
     assert isinstance(converted, _DummyClip)
     assert captured.get("matrix_in") == 9
     assert captured.get("transfer_in") == 16
     assert captured.get("primaries_in") == 9
     assert captured.get("range_in") == 0
+    assert captured.get("dither_type") == RGBDither.ORDERED.value
+    assert captured_props == {
+        "_Matrix": 0,
+        "_ColorRange": 0,
+        "_Primaries": 9,
+        "_Transfer": 16,
+    }

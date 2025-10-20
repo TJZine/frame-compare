@@ -27,7 +27,7 @@ from typing import (
 )
 
 from . import vs_core
-from .datatypes import ColorConfig, OddGeometryPolicy, ScreenshotConfig
+from .datatypes import ColorConfig, OddGeometryPolicy, RGBDither, ScreenshotConfig
 
 _INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -355,12 +355,26 @@ def _resolve_resize_color_kwargs(props: Mapping[str, Any]) -> Dict[str, int]:
     return kwargs
 
 
+def _normalize_rgb_dither(value: RGBDither | str) -> RGBDither:
+    """Normalise a value into an ``RGBDither`` enum with logging for invalid input."""
+
+    try:
+        return RGBDither(value)
+    except (ValueError, TypeError):
+        logger.debug(
+            "Invalid rgb_dither value %r; defaulting to ERROR_DIFFUSION",
+            value,
+        )
+        return RGBDither.ERROR_DIFFUSION
+
+
 def _ensure_rgb24(
     core: Any,
     clip: Any,
     frame_idx: int,
     *,
     source_props: Mapping[str, Any] | None = None,
+    rgb_dither: RGBDither | str = RGBDither.ERROR_DIFFUSION,
 ) -> Any:
     """
     Ensure the given VapourSynth frame is in 8-bit RGB24 color format.
@@ -394,7 +408,7 @@ def _ensure_rgb24(
     if not callable(point):
         raise ScreenshotWriterError("VapourSynth resize.Point is unavailable")
 
-    dither = "error_diffusion" if isinstance(bits, int) and bits > 8 else "none"
+    dither = _normalize_rgb_dither(rgb_dither).value
     props = dict(source_props or {})
     if not props:
         props = dict(vs_core._snapshot_frame_props(clip))
@@ -433,17 +447,16 @@ def _ensure_rgb24(
         raise ScreenshotWriterError(f"Failed to convert frame {frame_idx} to RGB24: {exc}") from exc
 
     try:
-        converted = cast(
-            Any,
-            converted.std.SetFrameProps(
-            _Matrix=0,
-            _Primaries=1,
-            _Transfer=1,
-            _ColorRange=0,
-            ),
-        )
-    except Exception:  # pragma: no cover - best effort
-        pass
+        prop_kwargs: Dict[str, int] = {"_Matrix": 0, "_ColorRange": 0}
+        primaries = props.get("_Primaries")
+        if isinstance(primaries, int):
+            prop_kwargs["_Primaries"] = int(primaries)
+        transfer = props.get("_Transfer")
+        if isinstance(transfer, int):
+            prop_kwargs["_Transfer"] = int(transfer)
+        converted = cast(Any, converted.std.SetFrameProps(**prop_kwargs))
+    except Exception as exc:  # pragma: no cover - best effort
+        logger.debug("Failed to set RGB frame props: %s", exc)
     return converted
 
 
@@ -705,6 +718,139 @@ def _axis_has_odd(values: Sequence[int]) -> bool:
         if current % 2 != 0:
             return True
     return False
+
+
+def _resolve_source_props(
+    clip: Any,
+    source_props: Mapping[str, Any] | None,
+) -> Dict[str, Any]:
+    """Return a snapshot of source colour metadata without mutating the caller's mapping."""
+
+    props = dict(source_props or {})
+    if props:
+        return props
+    return dict(vs_core._snapshot_frame_props(clip))
+
+
+def _describe_vs_format(fmt: Any) -> str:
+    name = getattr(fmt, "name", None)
+    if isinstance(name, str) and name:
+        return name
+    identifier = getattr(fmt, "id", None)
+    if isinstance(identifier, int):
+        return f"id={identifier}"
+    return repr(fmt)
+
+
+def _resolve_promotion_axes(
+    fmt: Any,
+    crop: tuple[int, int, int, int],
+    pad: tuple[int, int, int, int],
+) -> tuple[bool, str]:
+    subsampling_w = _get_subsampling(fmt, "subsampling_w")
+    subsampling_h = _get_subsampling(fmt, "subsampling_h")
+
+    axes: List[str] = []
+    if subsampling_h > 0 and _axis_has_odd((crop[1], crop[3], pad[1], pad[3])):
+        axes.append("vertical")
+    if subsampling_w > 0 and _axis_has_odd((crop[0], crop[2], pad[0], pad[2])):
+        axes.append("horizontal")
+
+    if not axes:
+        return (False, "none")
+    return (True, "+".join(axes))
+
+
+def _is_sdr_pipeline(
+    tonemap_info: "vs_core.TonemapInfo | None",
+    source_props: Mapping[str, Any],
+) -> bool:
+    if tonemap_info is not None and tonemap_info.applied:
+        return False
+    try:
+        is_hdr = vs_core._props_signal_hdr(source_props)
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        logger.debug("HDR detection failed; defaulting to SDR: %s", exc)
+        is_hdr = False
+    return not bool(is_hdr)
+
+
+def _promote_to_yuv444p16(
+    core: Any,
+    clip: Any,
+    *,
+    frame_idx: int,
+    source_props: Mapping[str, Any],
+) -> Any:
+    try:
+        import vapoursynth as vs  # type: ignore
+    except Exception as exc:  # pragma: no cover - requires runtime deps
+        raise ScreenshotWriterError("VapourSynth is required for screenshot export") from exc
+
+    resize_ns = getattr(core, "resize", None)
+    if resize_ns is None:
+        raise ScreenshotWriterError("VapourSynth core is missing resize namespace")
+    point = getattr(resize_ns, "Point", None)
+    if not callable(point):
+        raise ScreenshotWriterError("VapourSynth resize.Point is unavailable")
+
+    resize_kwargs = _resolve_resize_color_kwargs(source_props)
+
+    fmt = getattr(clip, "format", None)
+    yuv_constant = getattr(vs, "YUV", object())
+    if getattr(fmt, "color_family", None) == yuv_constant:
+        defaults: Dict[str, int] = {}
+        if "matrix_in" not in resize_kwargs:
+            defaults["matrix_in"] = int(getattr(vs, "MATRIX_BT709", 1))
+        if "transfer_in" not in resize_kwargs:
+            defaults["transfer_in"] = int(getattr(vs, "TRANSFER_BT709", 1))
+        if "primaries_in" not in resize_kwargs:
+            defaults["primaries_in"] = int(getattr(vs, "PRIMARIES_BT709", 1))
+        if "range_in" not in resize_kwargs:
+            defaults["range_in"] = int(getattr(vs, "RANGE_LIMITED", 1))
+        if defaults:
+            resize_kwargs.update(defaults)
+            logger.debug(
+                "Colour metadata missing for frame %s during 4:4:4 promotion; applying Rec.709 limited defaults",
+                frame_idx,
+            )
+
+    try:
+        promoted = cast(
+            Any,
+            point(
+                clip,
+                format=vs.YUV444P16,
+                dither_type="none",
+                **resize_kwargs,
+            ),
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        raise ScreenshotWriterError(f"Failed to promote frame {frame_idx} to YUV444P16: {exc}") from exc
+
+    std_ns = getattr(core, "std", None)
+    set_props = getattr(std_ns, "SetFrameProps", None) if std_ns is not None else None
+    if callable(set_props):
+        prop_kwargs: Dict[str, int] = {}
+        matrix_in = resize_kwargs.get("matrix_in")
+        transfer_in = resize_kwargs.get("transfer_in")
+        primaries_in = resize_kwargs.get("primaries_in")
+        range_in = resize_kwargs.get("range_in")
+        if matrix_in is not None:
+            prop_kwargs["_Matrix"] = int(matrix_in)
+        if transfer_in is not None:
+            prop_kwargs["_Transfer"] = int(transfer_in)
+        if primaries_in is not None:
+            prop_kwargs["_Primaries"] = int(primaries_in)
+        if range_in is not None:
+            prop_kwargs["_ColorRange"] = int(range_in)
+        if prop_kwargs:
+            try:
+                promoted = cast(Any, set_props(promoted, **prop_kwargs))
+            except Exception as exc:  # pragma: no cover - best effort
+                logger.debug("Failed to set frame props after promotion: %s", exc)
+
+    return promoted
 
 
 def _rebalance_axis_even(first: int, second: int) -> tuple[int, int]:
@@ -1350,6 +1496,8 @@ def _save_frame_with_fpng(
     overlay_state: Optional[OverlayState] = None,
     strict_overlay: bool = False,
     source_props: Mapping[str, Any] | None = None,
+    geometry_plan: GeometryPlan | None = None,
+    tonemap_info: "vs_core.TonemapInfo | None" = None,
 ) -> None:
     try:
         import vapoursynth as vs  # type: ignore
@@ -1359,6 +1507,37 @@ def _save_frame_with_fpng(
     if not isinstance(clip, vs.VideoNode):
         raise ScreenshotWriterError("Expected a VapourSynth clip for rendering")
 
+    resolved_policy = _normalise_geometry_policy(cfg.odd_geometry_policy)
+    rgb_dither = _normalize_rgb_dither(cfg.rgb_dither)
+    source_props_map = _resolve_source_props(clip, source_props)
+    requires_full_chroma = bool(geometry_plan and geometry_plan.get("requires_full_chroma"))
+    fmt = getattr(clip, "format", None)
+    has_axis, axis_label = _resolve_promotion_axes(fmt, crop, pad)
+    yuv_constant = getattr(vs, "YUV", object())
+    color_family = getattr(fmt, "color_family", None)
+    is_sdr = _is_sdr_pipeline(tonemap_info, source_props_map)
+    should_promote = (
+        requires_full_chroma
+        and has_axis
+        and is_sdr
+        and color_family == yuv_constant
+    )
+    format_label = _describe_vs_format(fmt)
+
+    if should_promote:
+        logger.info(
+            "Odd-geometry on subsampled SDR \u2192 promoting to YUV444P16 (policy=%s, axis=%s, fmt=%s)",
+            resolved_policy.value,
+            axis_label,
+            format_label,
+        )
+        logger.debug(
+            "Promotion details frame=%s src_format=%s dst_format=YUV444P16 dither=%s",
+            frame_idx,
+            format_label,
+            rgb_dither.value,
+        )
+
     core = getattr(clip, "core", None) or getattr(vs, "core", None)
     fpng_ns = getattr(core, "fpng", None) if core is not None else None
     writer = getattr(fpng_ns, "Write", None) if fpng_ns is not None else None
@@ -1366,6 +1545,13 @@ def _save_frame_with_fpng(
         raise ScreenshotWriterError("VapourSynth fpng.Write plugin is unavailable")
 
     work = clip
+    if should_promote:
+        work = _promote_to_yuv444p16(
+            core,
+            work,
+            frame_idx=frame_idx,
+            source_props=source_props_map,
+        )
     try:
         left, top, right, bottom = crop
         if any(crop):
@@ -1416,7 +1602,19 @@ def _save_frame_with_fpng(
         file_label=label,
     )
 
-    render_clip = _ensure_rgb24(core, render_clip, frame_idx, source_props=source_props)
+    render_clip = _ensure_rgb24(
+        core,
+        render_clip,
+        frame_idx,
+        source_props=source_props_map,
+        rgb_dither=rgb_dither,
+    )
+    logger.debug(
+        "RGB24 conversion for frame %s used dither=%s (policy=%s)",
+        frame_idx,
+        rgb_dither.value,
+        resolved_policy.value,
+    )
 
     compression = _map_fpng_compression(cfg.compression_level)
     try:
@@ -1469,6 +1667,7 @@ def _save_frame_with_ffmpeg(
     selection_label: str | None,
     *,
     overlay_text: Optional[str] = None,
+    geometry_plan: GeometryPlan | None = None,
 ) -> None:
     if shutil.which("ffmpeg") is None:
         raise ScreenshotWriterError("FFmpeg executable not found in PATH")
@@ -1476,7 +1675,10 @@ def _save_frame_with_ffmpeg(
     cropped_w = max(1, width - crop[0] - crop[2])
     cropped_h = max(1, height - crop[1] - crop[3])
 
+    requires_full_chroma = bool(geometry_plan and geometry_plan.get("requires_full_chroma"))
     filters = [f"select=eq(n\\,{int(frame_idx)})"]
+    if requires_full_chroma:
+        filters.append("format=yuv444p16")
     if any(crop):
         filters.append(
             "crop={w}:{h}:{x}:{y}".format(
@@ -1516,6 +1718,20 @@ def _save_frame_with_ffmpeg(
             "box=0:shadowx=1:shadowy=1:shadowcolor=black:x=10:y=80"
         ).format(text=_escape_drawtext(overlay_text))
         filters.append(overlay_cmd)
+
+    if requires_full_chroma:
+        configured = _normalize_rgb_dither(cfg.rgb_dither)
+        ffmpeg_dither = "ordered"
+        if configured is RGBDither.NONE:
+            ffmpeg_dither = "none"
+        elif configured is RGBDither.ORDERED:
+            ffmpeg_dither = "ordered"
+        else:
+            logger.debug(
+                "FFmpeg RGB24 conversion forcing deterministic dither=ordered (configured=%s)",
+                configured.value,
+            )
+        filters.append(f"format=rgb24:dither={ffmpeg_dither}")
 
     filter_chain = ",".join(filters)
     cmd = [
@@ -1779,6 +1995,7 @@ def generate_screenshots(
                         height,
                         selection_label,
                         overlay_text=overlay_text,
+                        geometry_plan=plan,
                     )
                 else:
                     _save_frame_with_fpng(
@@ -1796,6 +2013,8 @@ def generate_screenshots(
                         overlay_state=overlay_state,
                         strict_overlay=bool(getattr(color_cfg, "strict", False)),
                         source_props=source_props,
+                        geometry_plan=plan,
+                        tonemap_info=result.tonemap,
                     )
             except ScreenshotWriterError:
                 raise
