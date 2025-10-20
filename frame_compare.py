@@ -3270,6 +3270,9 @@ def _confirm_alignment_with_screenshots(
         display.confirmation = display.confirmation or "auto"
         return
 
+    def _alignment_pivot_note(message: str) -> None:
+        reporter.console.log(message, markup=False)
+
     clips = [plan.clip for plan in plans]
     if any(clip is None for clip in clips):
         display.confirmation = display.confirmation or "auto"
@@ -3308,6 +3311,7 @@ def _confirm_alignment_with_screenshots(
             cfg.screenshots,
             cfg.color,
             trim_offsets=[plan.trim_start for plan in plans],
+            pivot_notifier=_alignment_pivot_note,
         )
     except ScreenshotError as exc:
         raise CLIAppError(
@@ -3357,6 +3361,7 @@ def _confirm_alignment_with_screenshots(
             cfg.screenshots,
             cfg.color,
             trim_offsets=[plan.trim_start for plan in plans],
+            pivot_notifier=_alignment_pivot_note,
         )
     except ScreenshotError as exc:
         raise CLIAppError(
@@ -4519,6 +4524,9 @@ def run_cli(
     verification_records: List[Dict[str, Any]] = []
 
     try:
+        def _notify_pivot(message: str) -> None:
+            reporter.console.log(message, markup=False)
+
         if total_screens > 0:
             start_time = time.perf_counter()
             processed = 0
@@ -4577,6 +4585,7 @@ def run_cli(
                     selection_details=selection_overlay_details,
                     warnings_sink=collected_warnings,
                     verification_sink=verification_records,
+                    pivot_notifier=_notify_pivot,
                 )
 
                 if processed < total_screens:
@@ -4605,6 +4614,7 @@ def run_cli(
                 selection_details=selection_overlay_details,
                 warnings_sink=collected_warnings,
                 verification_sink=verification_records,
+                pivot_notifier=_notify_pivot,
             )
     except ScreenshotError as exc:
         raise CLIAppError(

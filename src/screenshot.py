@@ -720,6 +720,26 @@ def _axis_has_odd(values: Sequence[int]) -> bool:
     return False
 
 
+def _describe_plan_axes(plan: GeometryPlan | None) -> str:
+    """Return a concise axis label for plans that include odd-pixel geometry."""
+
+    if plan is None:
+        return "unknown"
+
+    crop_left, crop_top, crop_right, crop_bottom = plan["crop"]
+    pad_left, pad_top, pad_right, pad_bottom = plan["pad"]
+
+    axes: list[str] = []
+    if _axis_has_odd((crop_top, crop_bottom, pad_top, pad_bottom)):
+        axes.append("vertical")
+    if _axis_has_odd((crop_left, crop_right, pad_left, pad_right)):
+        axes.append("horizontal")
+
+    if not axes:
+        return "none"
+    return "+".join(axes)
+
+
 def _resolve_source_props(
     clip: Any,
     source_props: Mapping[str, Any] | None,
@@ -1498,6 +1518,7 @@ def _save_frame_with_fpng(
     source_props: Mapping[str, Any] | None = None,
     geometry_plan: GeometryPlan | None = None,
     tonemap_info: "vs_core.TonemapInfo | None" = None,
+    pivot_notifier: Callable[[str], None] | None = None,
 ) -> None:
     try:
         import vapoursynth as vs  # type: ignore
@@ -1537,6 +1558,11 @@ def _save_frame_with_fpng(
             format_label,
             rgb_dither.value,
         )
+        if pivot_notifier is not None:
+            note = (
+                "Full-chroma pivot active (axis={axis}, policy={policy}, fmt={fmt})"
+            ).format(axis=axis_label, policy=resolved_policy.value, fmt=format_label)
+            pivot_notifier(note)
 
     core = getattr(clip, "core", None) or getattr(vs, "core", None)
     fpng_ns = getattr(core, "fpng", None) if core is not None else None
@@ -1668,6 +1694,7 @@ def _save_frame_with_ffmpeg(
     *,
     overlay_text: Optional[str] = None,
     geometry_plan: GeometryPlan | None = None,
+    pivot_notifier: Callable[[str], None] | None = None,
 ) -> None:
     if shutil.which("ffmpeg") is None:
         raise ScreenshotWriterError("FFmpeg executable not found in PATH")
@@ -1676,6 +1703,7 @@ def _save_frame_with_ffmpeg(
     cropped_h = max(1, height - crop[1] - crop[3])
 
     requires_full_chroma = bool(geometry_plan and geometry_plan.get("requires_full_chroma"))
+    axis_label = _describe_plan_axes(geometry_plan)
     filters = [f"select=eq(n\\,{int(frame_idx)})"]
     if requires_full_chroma:
         filters.append("format=yuv444p16")
@@ -1732,6 +1760,12 @@ def _save_frame_with_ffmpeg(
                 configured.value,
             )
         filters.append(f"format=rgb24:dither={ffmpeg_dither}")
+        if pivot_notifier is not None:
+            resolved_policy = _normalise_geometry_policy(cfg.odd_geometry_policy)
+            note = (
+                "Full-chroma pivot active (axis={axis}, policy={policy}, backend=ffmpeg)"
+            ).format(axis=axis_label, policy=resolved_policy.value)
+            pivot_notifier(note)
 
     filter_chain = ",".join(filters)
     cmd = [
@@ -1807,6 +1841,7 @@ def generate_screenshots(
     alignment_maps: Sequence[Any] | None = None,
     warnings_sink: List[str] | None = None,
     verification_sink: List[Dict[str, Any]] | None = None,
+    pivot_notifier: Callable[[str], None] | None = None,
 ) -> List[str]:
     """
     Render and save screenshots for the given frames from each input clip using the configured writers.
@@ -1827,6 +1862,7 @@ def generate_screenshots(
         alignment_maps: Optional sequence of alignment mappers (one per clip) used to map source frame indices.
         warnings_sink: Optional list to which non-fatal warning messages will be appended.
         verification_sink: Optional list to which per-clip verification records will be appended; each record contains keys: file, frame, average, maximum, auto_selected.
+        pivot_notifier: Optional callable invoked with a short text note whenever a full-chroma pivot is applied.
     
     Returns:
         List[str]: Ordered list of file paths for all created screenshot files.
@@ -1996,6 +2032,7 @@ def generate_screenshots(
                         selection_label,
                         overlay_text=overlay_text,
                         geometry_plan=plan,
+                        pivot_notifier=pivot_notifier,
                     )
                 else:
                     _save_frame_with_fpng(
@@ -2015,6 +2052,7 @@ def generate_screenshots(
                         source_props=source_props,
                         geometry_plan=plan,
                         tonemap_info=result.tonemap,
+                        pivot_notifier=pivot_notifier,
                     )
             except ScreenshotWriterError:
                 raise

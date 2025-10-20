@@ -1480,6 +1480,7 @@ def test_save_frame_with_ffmpeg_inserts_full_chroma_filters(
     cfg = ScreenshotConfig(rgb_dither=RGBDither.ERROR_DIFFUSION)
     plan = _make_plan(requires_full_chroma=True)
     recorded_cmd: list[str] = []
+    pivot_notes: list[str] = []
 
     def fake_run(cmd: Sequence[str], **_kwargs: Any):  # type: ignore[override]
         recorded_cmd[:] = list(cmd)
@@ -1505,6 +1506,7 @@ def test_save_frame_with_ffmpeg_inserts_full_chroma_filters(
         height=1080,
         selection_label=None,
         geometry_plan=plan,
+        pivot_notifier=pivot_notes.append,
     )
 
     assert recorded_cmd
@@ -1514,6 +1516,7 @@ def test_save_frame_with_ffmpeg_inserts_full_chroma_filters(
     assert "format=yuv444p16" in filters
     assert any(entry.startswith("format=rgb24") for entry in filters)
     assert filters[-1].endswith("dither=ordered")
+    assert any("Full-chroma pivot" in note for note in pivot_notes)
 
 
 def test_save_frame_with_ffmpeg_raises_on_timeout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -1575,6 +1578,8 @@ def test_save_frame_with_fpng_promotes_subsampled_sdr(
     caplog_any = cast(Any, caplog)
     caplog_any.set_level(logging.INFO)
 
+    pivot_notes: list[str] = []
+
     screenshot._save_frame_with_fpng(
         clip,
         frame_idx=0,
@@ -1589,6 +1594,7 @@ def test_save_frame_with_fpng_promotes_subsampled_sdr(
         source_props=source_props,
         geometry_plan=plan,
         tonemap_info=tonemap_info,
+        pivot_notifier=pivot_notes.append,
     )
 
     log_records: Sequence[logging.LogRecord] = list(caplog_any.records)
@@ -1600,6 +1606,7 @@ def test_save_frame_with_fpng_promotes_subsampled_sdr(
     assert first_call.get("dither_type") == "none"
     assert second_call.get("format") == fake_vs.RGB24
     assert second_call.get("dither_type") == RGBDither.ORDERED.value
+    assert any("Full-chroma pivot" in note for note in pivot_notes)
 
 
 def test_save_frame_with_fpng_skips_promotion_on_even_geometry(
