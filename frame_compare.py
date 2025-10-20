@@ -2110,6 +2110,7 @@ def _maybe_apply_audio_alignment(
             raise
 
         vspreview_reuse: Dict[str, int] = {}
+        allowed_keys = {plan.path.name for plan in plans}
         for key, value in existing_entries.items():
             if not isinstance(value, dict):
                 continue
@@ -2123,7 +2124,8 @@ def _maybe_apply_audio_alignment(
             note_text = str(note_obj or "").strip().lower()
             if "vspreview" not in note_text:
                 continue
-            vspreview_reuse[key] = int(frames_obj)
+            if key in allowed_keys:
+                vspreview_reuse[key] = int(frames_obj)
 
         if not vspreview_reuse:
             return None
@@ -2148,31 +2150,31 @@ def _maybe_apply_audio_alignment(
                 f"VSPreview manual trim reused: {label} → {applied_frames}f"
             )
 
+        filtered_vspreview = {key: value for key, value in vspreview_reuse.items() if key in allowed_keys}
+
+        display_data.offset_lines = ["Audio offsets: VSPreview manual offsets applied"]
         if display_data.manual_trim_lines:
-            display_data.offset_lines = ["Audio offsets: VSPreview manual offsets applied"]
             display_data.offset_lines.extend(display_data.manual_trim_lines)
-        else:
-            display_data.offset_lines = ["Audio offsets: VSPreview manual offsets applied"]
 
         display_data.json_offsets_frames = {
             label_map.get(key, key): int(value)
-            for key, value in vspreview_reuse.items()
+            for key, value in filtered_vspreview.items()
         }
-        statuses_map = {key: "manual" for key in vspreview_reuse}
+        statuses_map = {key: "manual" for key in filtered_vspreview}
         return _AudioAlignmentSummary(
             offsets_path=offsets_path,
             reference_name=reference.path.name,
             measurements=(),
-            applied_frames=dict(vspreview_reuse),
+            applied_frames=dict(filtered_vspreview),
             baseline_shift=0,
             statuses=statuses_map,
             reference_plan=reference,
-            final_adjustments=dict(vspreview_reuse),
+            final_adjustments=dict(filtered_vspreview),
             swap_details={},
             suggested_frames={},
             suggestion_mode=False,
             manual_trim_starts=manual_trim_starts,
-            vspreview_manual_offsets=dict(vspreview_reuse),
+            vspreview_manual_offsets=dict(filtered_vspreview),
         )
 
     reused_summary = _reuse_vspreview_manual_offsets_if_available(reference_plan)
