@@ -1,9 +1,10 @@
-import json
-import types
+import datetime as dt
 import importlib
+import json
 import pathlib
-from pathlib import Path
+import types
 from collections.abc import Iterable, Sequence
+from pathlib import Path
 from typing import Any, Mapping, cast
 
 import pytest
@@ -416,15 +417,15 @@ def test_write_vspreview_script_generates_unique_filenames_same_second(
         manual_trim_starts={target_path.name: 10},
     )
 
-    fixed_instant = frame_compare._dt.datetime(2024, 1, 1, 12, 34, 56)
-    real_datetime_cls = frame_compare._dt.datetime
+    fixed_instant = dt.datetime(2024, 1, 1, 12, 34, 56)
 
-    class _FixedDatetime(real_datetime_cls):
+    class _FixedDatetime(dt.datetime):
         @classmethod
-        def now(cls, tz: object | None = None) -> real_datetime_cls:
+        def now(cls, tz: dt.tzinfo | None = None) -> dt.datetime:
             if tz is None:
                 return fixed_instant
             assert hasattr(tz, "fromutc")
+            assert tz is not None
             return tz.fromutc(fixed_instant.replace(tzinfo=tz))
 
     monkeypatch.setattr(frame_compare._dt, "datetime", _FixedDatetime)
