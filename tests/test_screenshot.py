@@ -9,7 +9,7 @@ import pytest
 
 from src.datatypes import ColorConfig, RGBDither, ScreenshotConfig
 from src import screenshot, vs_core
-from src.screenshot import GeometryPlan, OddGeometryPolicy
+from src.screenshot import GeometryPlan, OddGeometryPolicy, _compute_requires_full_chroma
 
 
 class _CapturedWriterCall(TypedDict):
@@ -28,6 +28,191 @@ class FakeClip:
         self.width = width
         self.height = height
 
+
+def _prepare_fake_vapoursynth_clip(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    width: int,
+    height: int,
+    subsampling_w: int,
+    subsampling_h: int,
+    bits_per_sample: int,
+    color_family: str = "YUV",
+    format_name: str | None = None,
+) -> tuple[Any, Any, list[dict[str, Any]], list[dict[str, Any]]]:
+    """Install a lightweight VapourSynth stub and return a synthetic clip and call logs."""
+
+    writer_calls: list[dict[str, Any]] = []
+    resize_calls: list[dict[str, Any]] = []
+
+    fake_vs = types.SimpleNamespace()
+    yuv_constant = object()
+    rgb_constant = object()
+
+    class _FakeFormat:
+        def __init__(
+            self,
+            *,
+            color_family_obj: object,
+            bits_per_sample_val: int,
+            subsampling_w_val: int,
+            subsampling_h_val: int,
+            name_val: str,
+        ) -> None:
+            self.color_family = color_family_obj
+            self.bits_per_sample = bits_per_sample_val
+            self.subsampling_w = subsampling_w_val
+            self.subsampling_h = subsampling_h_val
+            self.name = name_val
+
+    class _FakeStd:
+        def __init__(self, parent: "_FakeClip") -> None:
+            self._parent = parent
+
+        def CropRel(
+            self,
+            *,
+            left: int,
+            right: int,
+            top: int,
+            bottom: int,
+        ) -> "_FakeClip":
+            new_width = self._parent.width - left - right
+            new_height = self._parent.height - top - bottom
+            return self._parent._with_dimensions(width=new_width, height=new_height)
+
+        def AddBorders(
+            self,
+            clip: "_FakeClip",
+            *,
+            left: int,
+            right: int,
+            top: int,
+            bottom: int,
+        ) -> "_FakeClip":
+            return clip._with_dimensions(
+                width=clip.width + left + right,
+                height=clip.height + top + bottom,
+            )
+
+        def CopyFrameProps(self, clip: "_FakeClip", _src: "_FakeClip") -> "_FakeClip":
+            return clip
+
+        def SetFrameProps(self, **_: Any) -> "_FakeClip":
+            return self._parent
+
+    class _FakeClip:
+        def __init__(self, width: int, height: int, format_obj: _FakeFormat, core: Any) -> None:
+            self.width = width
+            self.height = height
+            self.format = format_obj
+            self.core = core
+
+        def _with_dimensions(
+            self,
+            *,
+            width: int | None = None,
+            height: int | None = None,
+            format_obj: _FakeFormat | None = None,
+        ) -> "_FakeClip":
+            return _FakeClip(
+                width if width is not None else self.width,
+                height if height is not None else self.height,
+                format_obj if format_obj is not None else self.format,
+                self.core,
+            )
+
+        @property
+        def std(self) -> _FakeStd:
+            return _FakeStd(self)
+
+    class _FakeResize:
+        def Point(self, clip: _FakeClip, **kwargs: Any) -> _FakeClip:
+            resize_calls.append(kwargs)
+            fmt = kwargs.get("format")
+            if fmt == fake_vs.YUV444P16:
+                promoted_format = _FakeFormat(
+                    color_family_obj=yuv_constant,
+                    bits_per_sample_val=16,
+                    subsampling_w_val=0,
+                    subsampling_h_val=0,
+                    name_val="YUV444P16",
+                )
+                return clip._with_dimensions(format_obj=promoted_format)
+            if fmt == fake_vs.RGB24:
+                rgb_format = _FakeFormat(
+                    color_family_obj=rgb_constant,
+                    bits_per_sample_val=8,
+                    subsampling_w_val=0,
+                    subsampling_h_val=0,
+                    name_val="RGB24",
+                )
+                return clip._with_dimensions(format_obj=rgb_format)
+            return clip
+
+        def Spline36(self, clip: _FakeClip, **_: Any) -> _FakeClip:
+            return clip
+
+    class _FakeFpng:
+        def Write(self, _clip: _FakeClip, path: str, **kwargs: Any) -> Any:
+            writer_calls.append(kwargs)
+
+            class _Job:
+                def get_frame(self, _index: int) -> None:
+                    return None
+
+            Path(path).write_text("png", encoding="utf-8")
+            return _Job()
+
+    def _core_add_borders(
+        clip: _FakeClip,
+        *,
+        left: int,
+        right: int,
+        top: int,
+        bottom: int,
+    ) -> _FakeClip:
+        return clip._with_dimensions(
+            width=clip.width + left + right,
+            height=clip.height + top + bottom,
+        )
+
+    fake_core = types.SimpleNamespace(
+        resize=_FakeResize(),
+        fpng=_FakeFpng(),
+        std=types.SimpleNamespace(
+            AddBorders=_core_add_borders,
+            SetFrameProps=lambda clip, **_: clip,
+            CopyFrameProps=lambda clip, _src: clip,
+        ),
+    )
+
+    fake_vs.VideoNode = _FakeClip
+    fake_vs.YUV = yuv_constant
+    fake_vs.RGB = rgb_constant
+    fake_vs.YUV444P16 = "YUV444P16"
+    fake_vs.RGB24 = "RGB24"
+    fake_vs.RANGE_FULL = 0
+    fake_vs.RANGE_LIMITED = 1
+    fake_vs.MATRIX_BT709 = 1
+    fake_vs.TRANSFER_BT709 = 1
+    fake_vs.PRIMARIES_BT709 = 1
+    fake_vs.core = fake_core
+
+    initial_color = yuv_constant if color_family.upper() == "YUV" else rgb_constant
+    initial_format = _FakeFormat(
+        color_family_obj=initial_color,
+        bits_per_sample_val=bits_per_sample,
+        subsampling_w_val=subsampling_w,
+        subsampling_h_val=subsampling_h,
+        name_val=format_name or "SyntheticFormat",
+    )
+
+    clip = _FakeClip(width, height, initial_format, fake_core)
+
+    monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
+
+    return clip, fake_vs, writer_calls, resize_calls
 
 @pytest.fixture(autouse=True)
 def _stub_process_clip(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -186,6 +371,91 @@ def test_plan_geometry_subsamp_safe_rebalance_aligns_modulus() -> None:
     assert first_plan["final"][0] % cfg.mod_crop == 0
     assert first_plan["final"][1] % cfg.mod_crop == 0
     assert not first_plan["requires_full_chroma"]
+
+
+@pytest.mark.parametrize(
+    "policy,sub_w,sub_h,crop,pad,expected",
+    [
+        (OddGeometryPolicy.AUTO, 1, 1, (0, 1, 0, 0), (0, 0, 0, 0), True),
+        (OddGeometryPolicy.AUTO, 1, 0, (0, 1, 0, 0), (0, 0, 0, 0), False),
+        (OddGeometryPolicy.AUTO, 1, 0, (1, 0, 0, 0), (0, 0, 0, 0), True),
+        (OddGeometryPolicy.AUTO, 1, 1, (0, 0, 0, 0), (0, 0, 0, 0), False),
+        (OddGeometryPolicy.FORCE_FULL_CHROMA, 0, 0, (0, 0, 0, 0), (0, 0, 0, 0), True),
+        (OddGeometryPolicy.SUBSAMP_SAFE, 1, 1, (0, 1, 0, 0), (0, 0, 0, 0), False),
+    ],
+)
+def test_compute_requires_full_chroma_policy_matrix(
+    policy: OddGeometryPolicy,
+    sub_w: int,
+    sub_h: int,
+    crop: tuple[int, int, int, int],
+    pad: tuple[int, int, int, int],
+    expected: bool,
+) -> None:
+    fmt = types.SimpleNamespace(subsampling_w=sub_w, subsampling_h=sub_h)
+    result = _compute_requires_full_chroma(fmt, crop, pad, policy)
+    assert result is expected
+
+
+def test_plan_geometry_aligns_vertical_odds_require_promotion() -> None:
+    class _Format:
+        def __init__(self, subsampling_w: int, subsampling_h: int) -> None:
+            self.subsampling_w = subsampling_w
+            self.subsampling_h = subsampling_h
+
+    class _Clip:
+        def __init__(self, width: int, height: int, fmt: _Format) -> None:
+            self.width = width
+            self.height = height
+            self.format = fmt
+
+    cfg = ScreenshotConfig(
+        odd_geometry_policy=OddGeometryPolicy.AUTO,
+        letterbox_pillarbox_aware=True,
+        mod_crop=2,
+        upscale=False,
+    )
+
+    clip_short = _Clip(1920, 1036, _Format(1, 1))
+    clip_tall = _Clip(1920, 1038, _Format(1, 1))
+
+    plans = screenshot._plan_geometry([clip_short, clip_tall], cfg)
+
+    assert len(plans) == 2
+    assert plans[0]["final"] == plans[1]["final"] == (1920, 1036)
+    assert plans[1]["crop"] == (0, 1, 0, 1)
+    assert plans[1]["requires_full_chroma"]
+    assert not plans[0]["requires_full_chroma"]
+
+
+def test_plan_geometry_even_difference_skips_full_chroma() -> None:
+    class _Format:
+        def __init__(self, subsampling_w: int, subsampling_h: int) -> None:
+            self.subsampling_w = subsampling_w
+            self.subsampling_h = subsampling_h
+
+    class _Clip:
+        def __init__(self, width: int, height: int, fmt: _Format) -> None:
+            self.width = width
+            self.height = height
+            self.format = fmt
+
+    cfg = ScreenshotConfig(
+        odd_geometry_policy=OddGeometryPolicy.AUTO,
+        letterbox_pillarbox_aware=True,
+        mod_crop=2,
+        upscale=False,
+    )
+
+    clip_short = _Clip(1920, 1036, _Format(1, 1))
+    clip_taller = _Clip(1920, 1040, _Format(1, 1))
+
+    plans = screenshot._plan_geometry([clip_short, clip_taller], cfg)
+
+    assert len(plans) == 2
+    assert plans[1]["crop"] == (0, 2, 0, 2)
+    assert all(not plan["requires_full_chroma"] for plan in plans)
+    assert plans[0]["final"] == plans[1]["final"]
 
 
 def test_generate_screenshots_filenames(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1279,165 +1549,14 @@ def test_save_frame_with_fpng_promotes_subsampled_sdr(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    writer_calls: list[dict[str, Any]] = []
-    resize_calls: list[dict[str, Any]] = []
-
-    class _FakeFormat:
-        def __init__(
-            self,
-            *,
-            color_family: object,
-            bits_per_sample: int,
-            subsampling_w: int,
-            subsampling_h: int,
-            name: str,
-        ) -> None:
-            self.color_family = color_family
-            self.bits_per_sample = bits_per_sample
-            self.subsampling_w = subsampling_w
-            self.subsampling_h = subsampling_h
-            self.name = name
-
-    class _FakeStd:
-        def __init__(self, parent: "_FakeClip") -> None:
-            self._parent = parent
-
-        def CropRel(
-            self,
-            *,
-            left: int,
-            right: int,
-            top: int,
-            bottom: int,
-        ) -> "_FakeClip":
-            new_width = self._parent.width - left - right
-            new_height = self._parent.height - top - bottom
-            return self._parent._with_dimensions(width=new_width, height=new_height)
-
-        def AddBorders(
-            self,
-            clip: "_FakeClip",
-            *,
-            left: int,
-            right: int,
-            top: int,
-            bottom: int,
-        ) -> "_FakeClip":
-            new_width = clip.width + left + right
-            new_height = clip.height + top + bottom
-            return clip._with_dimensions(width=new_width, height=new_height)
-
-        def CopyFrameProps(self, clip: "_FakeClip", _src: "_FakeClip") -> "_FakeClip":
-            return clip
-
-        def SetFrameProps(self, **_: Any) -> "_FakeClip":
-            return self._parent
-
-    class _FakeClip:
-        def __init__(self, width: int, height: int, format_obj: _FakeFormat) -> None:
-            self.width = width
-            self.height = height
-            self.format = format_obj
-            self.core = fake_core
-
-        def _with_dimensions(
-            self,
-            *,
-            width: int | None = None,
-            height: int | None = None,
-            format_obj: _FakeFormat | None = None,
-        ) -> "_FakeClip":
-            new_clip = _FakeClip(
-                width if width is not None else self.width,
-                height if height is not None else self.height,
-                format_obj if format_obj is not None else self.format,
-            )
-            new_clip.core = self.core
-            return new_clip
-
-        @property
-        def std(self) -> _FakeStd:
-            return _FakeStd(self)
-
-    class _FakeResize:
-        def Point(self, clip: _FakeClip, **kwargs: Any) -> _FakeClip:
-            resize_calls.append(kwargs)
-            fmt = kwargs.get("format")
-            if fmt == fake_vs.YUV444P16:
-                format_obj = _FakeFormat(
-                    color_family=fake_vs.YUV,
-                    bits_per_sample=16,
-                    subsampling_w=0,
-                    subsampling_h=0,
-                    name="YUV444P16",
-                )
-                return clip._with_dimensions(format_obj=format_obj)
-            if fmt == fake_vs.RGB24:
-                format_obj = _FakeFormat(
-                    color_family=fake_vs.RGB,
-                    bits_per_sample=8,
-                    subsampling_w=0,
-                    subsampling_h=0,
-                    name="RGB24",
-                )
-                return clip._with_dimensions(format_obj=format_obj)
-            return clip
-
-        def Spline36(self, clip: _FakeClip, **_: Any) -> _FakeClip:
-            return clip
-
-    class _FakeFpng:
-        def Write(self, _clip: _FakeClip, path: str, **kwargs: Any) -> Any:
-            writer_calls.append(kwargs)
-
-            class _Job:
-                def get_frame(self, _index: int) -> None:
-                    return None
-
-            Path(path).write_text("png", encoding="utf-8")
-            return _Job()
-
-    fake_resize = _FakeResize()
-    fake_core = types.SimpleNamespace(
-        resize=fake_resize,
-        fpng=_FakeFpng(),
-        std=types.SimpleNamespace(
-            SetFrameProps=lambda clip, **_kwargs: clip,
-            CopyFrameProps=lambda clip, _src: clip,
-            AddBorders=lambda clip, *, left, right, top, bottom: clip._with_dimensions(
-                width=clip.width + left + right,
-                height=clip.height + top + bottom,
-            ),
-        ),
-    )
-
-    fake_vs = types.SimpleNamespace(
-        VideoNode=_FakeClip,
-        RGB=object(),
-        YUV=object(),
-        RGB24="RGB24",
-        YUV444P16="YUV444P16",
-        RANGE_FULL=0,
-        RANGE_LIMITED=1,
-        MATRIX_BT709=1,
-        TRANSFER_BT709=1,
-        PRIMARIES_BT709=1,
-        core=fake_core,
-    )
-
-    patcher = cast(Any, monkeypatch)
-    patcher.setitem(sys.modules, "vapoursynth", fake_vs)
-
-    clip = _FakeClip(
-        1920,
-        1080,
-        _FakeFormat(
-            color_family=fake_vs.YUV,
-            bits_per_sample=10,
-            subsampling_w=1,
-            subsampling_h=1,
-            name="YUV420P10",
-        ),
+    clip, fake_vs, writer_calls, resize_calls = _prepare_fake_vapoursynth_clip(
+        monkeypatch,
+        width=1920,
+        height=1080,
+        subsampling_w=1,
+        subsampling_h=1,
+        bits_per_sample=10,
+        format_name="YUV420P10",
     )
 
     cfg = ScreenshotConfig(add_frame_info=False, rgb_dither=RGBDither.ORDERED)
@@ -1481,6 +1600,54 @@ def test_save_frame_with_fpng_promotes_subsampled_sdr(
     assert first_call.get("dither_type") == "none"
     assert second_call.get("format") == fake_vs.RGB24
     assert second_call.get("dither_type") == RGBDither.ORDERED.value
+
+
+def test_save_frame_with_fpng_skips_promotion_on_even_geometry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    clip, fake_vs, writer_calls, resize_calls = _prepare_fake_vapoursynth_clip(
+        monkeypatch,
+        width=1920,
+        height=1080,
+        subsampling_w=1,
+        subsampling_h=1,
+        bits_per_sample=10,
+        format_name="YUV420P10",
+    )
+
+    cfg = ScreenshotConfig(add_frame_info=False, rgb_dither=RGBDither.ORDERED)
+    tonemap_info = vs_core.TonemapInfo(
+        applied=False,
+        tone_curve=None,
+        dpd=0,
+        target_nits=100.0,
+        dst_min_nits=0.1,
+        src_csp_hint=None,
+        reason="SDR source",
+    )
+    plan = _make_plan(pad=(0, 2, 0, 2), requires_full_chroma=False)
+    source_props = {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1, "_ColorRange": 1}
+
+    screenshot._save_frame_with_fpng(
+        clip,
+        frame_idx=3,
+        crop=plan["crop"],
+        scaled=plan["scaled"],
+        pad=plan["pad"],
+        path=tmp_path / "frame.png",
+        cfg=cfg,
+        label="Clip",
+        requested_frame=3,
+        selection_label=None,
+        source_props=source_props,
+        geometry_plan=plan,
+        tonemap_info=tonemap_info,
+    )
+
+    assert writer_calls, "fpng writer should be invoked"
+    assert not any(call.get("format") == fake_vs.YUV444P16 for call in resize_calls)
+    assert any(call.get("format") == fake_vs.RGB24 for call in resize_calls)
 
 
 def test_ensure_rgb24_applies_rec709_defaults_when_metadata_missing(
