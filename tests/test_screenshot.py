@@ -371,6 +371,7 @@ def test_plan_geometry_subsamp_safe_rebalance_aligns_modulus() -> None:
     assert first_plan["final"][0] % cfg.mod_crop == 0
     assert first_plan["final"][1] % cfg.mod_crop == 0
     assert not first_plan["requires_full_chroma"]
+    assert first_plan["promotion_axes"] == "none"
 
 
 @pytest.mark.parametrize(
@@ -426,6 +427,8 @@ def test_plan_geometry_aligns_vertical_odds_require_promotion() -> None:
     assert plans[1]["crop"] == (0, 1, 0, 1)
     assert plans[1]["requires_full_chroma"]
     assert not plans[0]["requires_full_chroma"]
+    assert plans[1]["promotion_axes"] == "vertical"
+    assert plans[0]["promotion_axes"] == "none"
 
 
 def test_plan_geometry_even_difference_skips_full_chroma() -> None:
@@ -456,6 +459,7 @@ def test_plan_geometry_even_difference_skips_full_chroma() -> None:
     assert plans[1]["crop"] == (0, 2, 0, 2)
     assert all(not plan["requires_full_chroma"] for plan in plans)
     assert plans[0]["final"] == plans[1]["final"]
+    assert all(plan["promotion_axes"] == "none" for plan in plans)
 
 
 def test_generate_screenshots_filenames(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -568,10 +572,11 @@ def _make_plan(
     pad: tuple[int, int, int, int] = (0, 0, 0, 0),
     final: tuple[int, int] = (1920, 1080),
     requires_full_chroma: bool = False,
+    promotion_axes: str = "none",
 ) -> GeometryPlan:
     """
     Builds a rendering plan dictionary describing dimensions, crop, scaling, padding, and final output size.
-    
+
     Returns:
         dict: A plan mapping with the following keys:
             - "width": source frame width.
@@ -582,6 +587,7 @@ def _make_plan(
             - "scaled": 2-tuple (width, height) after scaling.
             - "pad": 4-tuple (left, top, right, bottom) of pixels added as padding.
             - "final": 2-tuple (width, height) of the final output frame.
+            - "promotion_axes": Label describing which axes triggered 4:4:4 promotion.
     """
     plan = cast(
         GeometryPlan,
@@ -595,6 +601,7 @@ def _make_plan(
             "pad": pad,
             "final": final,
             "requires_full_chroma": requires_full_chroma,
+            "promotion_axes": promotion_axes,
         },
     )
     return plan
@@ -1478,7 +1485,12 @@ def test_save_frame_with_ffmpeg_inserts_full_chroma_filters(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     cfg = ScreenshotConfig(rgb_dither=RGBDither.ERROR_DIFFUSION)
-    plan = _make_plan(requires_full_chroma=True)
+    plan = _make_plan(
+        crop=(1, 0, 2, 0),
+        pad=(0, 1, 0, 1),
+        requires_full_chroma=True,
+        promotion_axes="horizontal+vertical",
+    )
     recorded_cmd: list[str] = []
     pivot_notes: list[str] = []
 
@@ -1572,7 +1584,11 @@ def test_save_frame_with_fpng_promotes_subsampled_sdr(
         src_csp_hint=None,
         reason="SDR source",
     )
-    plan = _make_plan(pad=(0, 1, 0, 1), requires_full_chroma=True)
+    plan = _make_plan(
+        pad=(0, 1, 0, 1),
+        requires_full_chroma=True,
+        promotion_axes="vertical",
+    )
     source_props = {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1, "_ColorRange": 1}
 
     caplog_any = cast(Any, caplog)

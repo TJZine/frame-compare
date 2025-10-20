@@ -677,6 +677,8 @@ class GeometryPlan(TypedDict):
         pad (tuple[int, int, int, int]): Padding applied around the scaled frame.
         final (tuple[int, int]): Final output dimensions.
         requires_full_chroma (bool): Whether geometry requires a 4:4:4 pivot.
+        promotion_axes (str): Subsampling-aware axis label describing which geometry axis
+            triggered promotion, or ``"none"`` when no promotion is required.
     """
     width: int
     height: int
@@ -687,6 +689,7 @@ class GeometryPlan(TypedDict):
     pad: tuple[int, int, int, int]
     final: tuple[int, int]
     requires_full_chroma: bool
+    promotion_axes: str
 
 
 def _normalise_geometry_policy(value: OddGeometryPolicy | str) -> OddGeometryPolicy:
@@ -738,6 +741,17 @@ def _describe_plan_axes(plan: GeometryPlan | None) -> str:
     if not axes:
         return "none"
     return "+".join(axes)
+
+
+def _safe_pivot_notify(pivot_notifier: Callable[[str], None] | None, note: str) -> None:
+    """Invoke *pivot_notifier* without letting exceptions escape."""
+
+    if pivot_notifier is None:
+        return
+    try:
+        pivot_notifier(note)
+    except Exception as exc:
+        logger.debug("pivot_notifier failed: %s", exc)
 
 
 def _resolve_source_props(
@@ -1157,6 +1171,7 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[Geometry
                 pad=(0, 0, 0, 0),
                 final=(cropped_w, cropped_h),
                 requires_full_chroma=False,
+                promotion_axes="none",
             )
         )
 
@@ -1458,6 +1473,16 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[Geometry
             policy,
         )
 
+        if plan["requires_full_chroma"]:
+            needs_promotion, promotion_axes = _resolve_promotion_axes(
+                fmt,
+                plan["crop"],
+                plan["pad"],
+            )
+            plan["promotion_axes"] = promotion_axes if needs_promotion else "none"
+        else:
+            plan["promotion_axes"] = "none"
+
     return plans
 
 
@@ -1560,9 +1585,9 @@ def _save_frame_with_fpng(
         )
         if pivot_notifier is not None:
             note = (
-                "Full-chroma pivot active (axis={axis}, policy={policy}, fmt={fmt})"
+                "Full-chroma pivot active (axis={axis}, policy={policy}, backend=fpng, fmt={fmt})"
             ).format(axis=axis_label, policy=resolved_policy.value, fmt=format_label)
-            pivot_notifier(note)
+            _safe_pivot_notify(pivot_notifier, note)
 
     core = getattr(clip, "core", None) or getattr(vs, "core", None)
     fpng_ns = getattr(core, "fpng", None) if core is not None else None
@@ -1703,7 +1728,12 @@ def _save_frame_with_ffmpeg(
     cropped_h = max(1, height - crop[1] - crop[3])
 
     requires_full_chroma = bool(geometry_plan and geometry_plan.get("requires_full_chroma"))
-    axis_label = _describe_plan_axes(geometry_plan)
+    promotion_axes_value = (
+        geometry_plan.get("promotion_axes", "") if geometry_plan is not None else ""
+    )
+    axis_label = str(promotion_axes_value).strip() if promotion_axes_value is not None else ""
+    if not axis_label:
+        axis_label = _describe_plan_axes(geometry_plan)
     filters = [f"select=eq(n\\,{int(frame_idx)})"]
     if requires_full_chroma:
         filters.append("format=yuv444p16")
@@ -1765,7 +1795,7 @@ def _save_frame_with_ffmpeg(
             note = (
                 "Full-chroma pivot active (axis={axis}, policy={policy}, backend=ffmpeg)"
             ).format(axis=axis_label, policy=resolved_policy.value)
-            pivot_notifier(note)
+            _safe_pivot_notify(pivot_notifier, note)
 
     filter_chain = ",".join(filters)
     cmd = [
