@@ -120,6 +120,22 @@ _DEFAULT_CONFIG_HELP: Final[str] = (
     "ROOT/config/config.toml (see --root/FRAME_COMPARE_ROOT)."
 )
 
+
+def _coerce_config_flag(value: object) -> bool:
+    """Normalize booleans that may be provided as strings or numbers."""
+
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "yes", "1", "enabled", "on"}:
+            return True
+        if lowered in {"false", "no", "0", "disabled", "off"}:
+            return False
+    return bool(value)
+
 SUPPORTED_EXTS = (
     ".mkv",
     ".m2ts",
@@ -2054,23 +2070,134 @@ def _maybe_apply_audio_alignment(
         """
         display_data.warnings.append(f"[AUDIO] {message}")
 
-    vspreview_enabled = bool(getattr(audio_cfg, "use_vspreview", False))
+    vspreview_enabled = _coerce_config_flag(getattr(audio_cfg, "use_vspreview", False))
+
+    reference_plan: _ClipPlan | None = None
+    if plans:
+        reference_plan = _resolve_alignment_reference(plans, analyze_path, audio_cfg.reference)
+
+    plan_labels: Dict[Path, str] = {plan.path: _plan_label(plan) for plan in plans}
+    name_to_label: Dict[str, str] = {plan.path.name: plan_labels[plan.path] for plan in plans}
+
+    existing_entries_cache: Dict[str, Dict[str, object]] | None = None
+
+    def _load_existing_entries() -> Dict[str, Dict[str, object]]:
+        nonlocal existing_entries_cache
+        if existing_entries_cache is None:
+            try:
+                _, existing_entries_raw = audio_alignment.load_offsets(offsets_path)
+            except audio_alignment.AudioAlignmentError as exc:
+                raise CLIAppError(
+                    f"Failed to read audio offsets file: {exc}",
+                    rich_message=f"[red]Failed to read audio offsets file:[/red] {exc}",
+                ) from exc
+            existing_entries_cache = cast(
+                Dict[str, Dict[str, object]], existing_entries_raw
+            )
+        return existing_entries_cache
+
+    def _reuse_vspreview_manual_offsets_if_available(
+        reference: _ClipPlan | None,
+    ) -> _AudioAlignmentSummary | None:
+        if not (vspreview_enabled and reference and plans):
+            return None
+
+        try:
+            existing_entries = _load_existing_entries()
+        except CLIAppError:
+            if not audio_cfg.enable:
+                return None
+            raise
+
+        vspreview_reuse: Dict[str, int] = {}
+        allowed_keys = {plan.path.name for plan in plans}
+        for key, value in existing_entries.items():
+            if not isinstance(value, dict):
+                continue
+            status_obj = value.get("status")
+            note_obj = value.get("note")
+            frames_obj = value.get("frames")
+            if not isinstance(status_obj, str) or not isinstance(frames_obj, (int, float)):
+                continue
+            if status_obj.strip().lower() != "manual":
+                continue
+            note_text = str(note_obj or "").strip().lower()
+            if "vspreview" not in note_text:
+                continue
+            if key in allowed_keys:
+                vspreview_reuse[key] = int(frames_obj)
+
+        if not vspreview_reuse:
+            return None
+
+        if display_data.manual_trim_lines:
+            display_data.manual_trim_lines.clear()
+        label_map = {plan.path.name: plan_labels.get(plan.path, plan.path.name) for plan in plans}
+        manual_trim_starts: Dict[str, int] = {}
+        for plan in plans:
+            key = plan.path.name
+            if key not in vspreview_reuse:
+                continue
+            raw_frames_value = int(vspreview_reuse[key])
+            applied_frames = max(raw_frames_value, 0)
+            plan.trim_start = applied_frames
+            plan.has_trim_start_override = (
+                plan.has_trim_start_override or raw_frames_value != 0
+            )
+            manual_trim_starts[key] = raw_frames_value
+            label = label_map.get(key, key)
+            display_data.manual_trim_lines.append(
+                f"VSPreview manual trim reused: {label} → {applied_frames}f"
+            )
+
+        filtered_vspreview = {key: value for key, value in vspreview_reuse.items() if key in allowed_keys}
+
+        display_data.offset_lines = ["Audio offsets: VSPreview manual offsets applied"]
+        if display_data.manual_trim_lines:
+            display_data.offset_lines.extend(display_data.manual_trim_lines)
+
+        display_data.json_offsets_frames = {
+            label_map.get(key, key): int(value)
+            for key, value in filtered_vspreview.items()
+        }
+        statuses_map = {key: "manual" for key in filtered_vspreview}
+        return _AudioAlignmentSummary(
+            offsets_path=offsets_path,
+            reference_name=reference.path.name,
+            measurements=(),
+            applied_frames=dict(filtered_vspreview),
+            baseline_shift=0,
+            statuses=statuses_map,
+            reference_plan=reference,
+            final_adjustments=dict(filtered_vspreview),
+            swap_details={},
+            suggested_frames={},
+            suggestion_mode=False,
+            manual_trim_starts=manual_trim_starts,
+            vspreview_manual_offsets=dict(filtered_vspreview),
+        )
+
+    reused_summary = _reuse_vspreview_manual_offsets_if_available(reference_plan)
+    if reused_summary is not None:
+        if not audio_cfg.enable:
+            display_data.warnings.append(
+                "[AUDIO] VSPreview manual alignment enabled — audio alignment disabled."
+            )
+        return reused_summary, display_data
 
     if not audio_cfg.enable:
-        if vspreview_enabled and plans:
-            reference_plan = plans[0]
+        if vspreview_enabled and plans and reference_plan is not None:
             manual_trim_starts = {
                 plan.path.name: int(plan.trim_start)
                 for plan in plans
                 if plan.trim_start > 0
             }
-            labels = {plan.path: _plan_label(plan) for plan in plans}
             if manual_trim_starts:
                 for plan in plans:
                     trim = manual_trim_starts.get(plan.path.name)
                     if trim:
                         display_data.manual_trim_lines.append(
-                            f"Existing manual trim: {labels[plan.path]} → {trim}f"
+                            f"Existing manual trim: {plan_labels[plan.path]} → {trim}f"
                         )
             display_data.offset_lines = ["Audio offsets: not computed (manual alignment only)"]
             display_data.offset_lines.extend(display_data.manual_trim_lines)
@@ -2097,14 +2224,11 @@ def _maybe_apply_audio_alignment(
         _warn("Audio alignment skipped: need at least two clips.")
         return None, display_data
 
-    reference_plan = _resolve_alignment_reference(plans, analyze_path, audio_cfg.reference)
+    assert reference_plan is not None
     targets = [plan for plan in plans if plan is not reference_plan]
     if not targets:
         _warn("Audio alignment skipped: no secondary clips to compare.")
         return None, display_data
-
-    plan_labels: Dict[Path, str] = {plan.path: _plan_label(plan) for plan in plans}
-    name_to_label: Dict[str, str] = {plan.path.name: plan_labels[plan.path] for plan in plans}
 
     stream_infos: Dict[Path, List["AudioStreamInfo"]] = {}
     for plan in plans:
@@ -2272,80 +2396,6 @@ def _maybe_apply_audio_alignment(
         f"Estimating audio offsets … fps={reference_fps:.3f} "
         f"search={search_text} start={start_text} window={window_text}"
     )
-
-    try:
-        _, existing_entries_raw = audio_alignment.load_offsets(offsets_path)
-    except audio_alignment.AudioAlignmentError as exc:
-        raise CLIAppError(
-            f"Failed to read audio offsets file: {exc}",
-            rich_message=f"[red]Failed to read audio offsets file:[/red] {exc}",
-        ) from exc
-
-    existing_entries: Dict[str, Dict[str, object]] = cast(
-        Dict[str, Dict[str, object]], existing_entries_raw
-    )
-    vspreview_reuse: Dict[str, int] = {}
-    if vspreview_enabled and existing_entries:
-        for key, value in existing_entries.items():
-            if not isinstance(value, dict):
-                continue
-            status_obj = value.get("status")
-            note_obj = value.get("note")
-            frames_obj = value.get("frames")
-            if not isinstance(status_obj, str) or not isinstance(frames_obj, (int, float)):
-                continue
-            if status_obj.strip().lower() != "manual":
-                continue
-            note_text = str(note_obj or "").strip().lower()
-            if "vspreview" not in note_text:
-                continue
-            vspreview_reuse[key] = int(frames_obj)
-
-    if vspreview_reuse:
-        manual_trim_starts: Dict[str, int] = {}
-        if display_data.manual_trim_lines:
-            display_data.manual_trim_lines.clear()
-        label_map = {plan.path.name: plan_labels.get(plan.path, plan.path.name) for plan in plans}
-        for plan in plans:
-            key = plan.path.name
-            if key not in vspreview_reuse:
-                continue
-            frames_value = int(vspreview_reuse[key])
-            plan.trim_start = frames_value
-            plan.has_trim_start_override = plan.has_trim_start_override or frames_value != 0
-            manual_trim_starts[key] = frames_value
-            label = label_map.get(key, key)
-            display_data.manual_trim_lines.append(
-                f"VSPreview manual trim reused: {label} → {frames_value}f"
-            )
-
-        if display_data.manual_trim_lines:
-            display_data.offset_lines = ["Audio offsets: VSPreview manual offsets applied"]
-            display_data.offset_lines.extend(display_data.manual_trim_lines)
-        else:
-            display_data.offset_lines = ["Audio offsets: VSPreview manual offsets applied"]
-
-        display_data.json_offsets_frames = {
-            label_map.get(key, key): int(value)
-            for key, value in vspreview_reuse.items()
-        }
-        statuses_map = {key: "manual" for key in vspreview_reuse}
-        summary = _AudioAlignmentSummary(
-            offsets_path=offsets_path,
-            reference_name=reference_plan.path.name,
-            measurements=(),
-            applied_frames=dict(vspreview_reuse),
-            baseline_shift=0,
-            statuses=statuses_map,
-            reference_plan=reference_plan,
-            final_adjustments=dict(vspreview_reuse),
-            swap_details={},
-            suggested_frames={},
-            suggestion_mode=False,
-            manual_trim_starts=manual_trim_starts,
-            vspreview_manual_offsets=dict(vspreview_reuse),
-        )
-        return summary, display_data
 
     try:
         base_start = float(audio_cfg.start_seconds or 0.0)
@@ -2642,7 +2692,7 @@ def _maybe_apply_audio_alignment(
             offsets_path,
             reference_plan.path.name,
             measurements,
-            existing_entries,
+            _load_existing_entries(),
             negative_override_notes,
         )
 
@@ -3891,8 +3941,12 @@ def run_cli(
         audio_track_override_map,
         reporter=reporter,
     )
+    vspreview_enabled_for_session = _coerce_config_flag(
+        getattr(cfg.audio_alignment, "use_vspreview", False)
+    )
+
     if (
-        cfg.audio_alignment.use_vspreview
+        vspreview_enabled_for_session
         and alignment_summary is not None
         and alignment_summary.suggestion_mode
     ):
