@@ -495,6 +495,7 @@ def test_compression_flag_passed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         selection_label: str | None,
         *,
         overlay_text: str | None = None,
+        geometry_plan: GeometryPlan | None = None,
     ) -> None:
         captured[frame_idx] = screenshot._map_ffmpeg_compression(cfg.compression_level)
         path.write_text("ffmpeg", encoding="utf-8")
@@ -534,6 +535,7 @@ def test_ffmpeg_respects_trim_offsets(tmp_path: Path, monkeypatch: pytest.Monkey
         selection_label,
         *,
         overlay_text=None,
+        geometry_plan=None,
     ):
         calls.append(frame_idx)
         Path(path).write_text("ff", encoding="utf-8")
@@ -1034,6 +1036,7 @@ def test_ffmpeg_writer_receives_padding(tmp_path: Path, monkeypatch: pytest.Monk
         selection_label,
         *,
         overlay_text=None,
+        geometry_plan=None,
     ):
         calls.append(
             {
@@ -1199,6 +1202,48 @@ def test_save_frame_with_ffmpeg_disables_timeout_when_zero(
     )
 
     assert "timeout" not in recorded or recorded.get("timeout") is None
+
+
+def test_save_frame_with_ffmpeg_inserts_full_chroma_filters(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cfg = ScreenshotConfig(rgb_dither=RGBDither.ERROR_DIFFUSION)
+    plan = _make_plan(requires_full_chroma=True)
+    recorded_cmd: list[str] = []
+
+    def fake_run(cmd: Sequence[str], **kwargs: Any):  # type: ignore[override]
+        recorded_cmd[:] = list(cmd)
+
+        class _Result:
+            returncode = 0
+            stderr = b""
+
+        return _Result()
+
+    monkeypatch.setattr(screenshot.shutil, "which", lambda _: "ffmpeg")
+    monkeypatch.setattr(screenshot.subprocess, "run", fake_run)
+
+    screenshot._save_frame_with_ffmpeg(
+        source="video.mkv",
+        frame_idx=7,
+        crop=(1, 0, 2, 0),
+        scaled=(1917, 1080),
+        pad=(0, 1, 0, 1),
+        path=tmp_path / "frame.png",
+        cfg=cfg,
+        width=1920,
+        height=1080,
+        selection_label=None,
+        geometry_plan=plan,
+    )
+
+    assert recorded_cmd
+    vf_index = recorded_cmd.index("-vf")
+    filter_chain = recorded_cmd[vf_index + 1]
+    filters = filter_chain.split(",")
+    assert "format=yuv444p16" in filters
+    assert any(entry.startswith("format=rgb24") for entry in filters)
+    assert filters[-1].endswith("dither=ordered")
 
 
 def test_save_frame_with_ffmpeg_raises_on_timeout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

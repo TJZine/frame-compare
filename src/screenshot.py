@@ -1665,6 +1665,7 @@ def _save_frame_with_ffmpeg(
     selection_label: str | None,
     *,
     overlay_text: Optional[str] = None,
+    geometry_plan: GeometryPlan | None = None,
 ) -> None:
     if shutil.which("ffmpeg") is None:
         raise ScreenshotWriterError("FFmpeg executable not found in PATH")
@@ -1672,7 +1673,10 @@ def _save_frame_with_ffmpeg(
     cropped_w = max(1, width - crop[0] - crop[2])
     cropped_h = max(1, height - crop[1] - crop[3])
 
+    requires_full_chroma = bool(geometry_plan and geometry_plan.get("requires_full_chroma"))
     filters = [f"select=eq(n\\,{int(frame_idx)})"]
+    if requires_full_chroma:
+        filters.append("format=yuv444p16")
     if any(crop):
         filters.append(
             "crop={w}:{h}:{x}:{y}".format(
@@ -1712,6 +1716,23 @@ def _save_frame_with_ffmpeg(
             "box=0:shadowx=1:shadowy=1:shadowcolor=black:x=10:y=80"
         ).format(text=_escape_drawtext(overlay_text))
         filters.append(overlay_cmd)
+
+    if requires_full_chroma:
+        try:
+            configured = RGBDither(cfg.rgb_dither)
+        except Exception:
+            configured = RGBDither.ERROR_DIFFUSION
+        ffmpeg_dither = "ordered"
+        if configured is RGBDither.NONE:
+            ffmpeg_dither = "none"
+        elif configured is RGBDither.ORDERED:
+            ffmpeg_dither = "ordered"
+        else:
+            logger.debug(
+                "FFmpeg RGB24 conversion forcing deterministic dither=ordered (configured=%s)",
+                configured.value,
+            )
+        filters.append(f"format=rgb24:dither={ffmpeg_dither}")
 
     filter_chain = ",".join(filters)
     cmd = [
@@ -1975,6 +1996,7 @@ def generate_screenshots(
                         height,
                         selection_label,
                         overlay_text=overlay_text,
+                        geometry_plan=plan,
                     )
                 else:
                     _save_frame_with_fpng(
