@@ -1036,6 +1036,17 @@ def _rebalance_subsamp_safe_plan(
     plan["cropped_h"] = max(1, height - top - bottom)
 
     target_h = plan.get("target_height")
+    if isinstance(target_h, int) and target_h > 0:
+        subsampling_h = int(plan.get("subsampling_h", 0))
+        if subsampling_h > 0:
+            mod = 1 << subsampling_h
+            adjusted_target_h = target_h - (target_h % mod)
+            if adjusted_target_h <= 0:
+                adjusted_target_h = mod
+            if adjusted_target_h != target_h:
+                target_h = adjusted_target_h
+                plan["target_height"] = adjusted_target_h
+
     if isinstance(target_h, int) and target_h > 0 and target_h != plan["cropped_h"]:
         plan["scaled"] = _compute_scaled_dimensions(width, height, plan["crop"], target_h)
     else:

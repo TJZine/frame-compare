@@ -186,6 +186,14 @@ def test_rebalance_subsamp_safe_plan_evenises_geometry() -> None:
     assert plan["cropped_h"] == plan["scaled"][1]
 
 
+def test_rebalance_subsamp_safe_plan_evenises_target_height() -> None:
+    plan = _fake_plan(crop=(0, 1, 0, 0), pad=(0, 0, 0, 0), subsampling_w=1, subsampling_h=1)
+    changed = screenshot._rebalance_subsamp_safe_plan(plan, adjust_horizontal=False, adjust_vertical=True)
+    assert changed
+    assert plan["target_height"] % 2 == 0
+    assert plan["scaled"][1] == plan["target_height"]
+
+
 def test_plan_geometry_letterbox_alignment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     clips = [FakeClip(3840, 2160), FakeClip(3840, 1800)]
     cfg = ScreenshotConfig(directory_name="screens", add_frame_info=False)
