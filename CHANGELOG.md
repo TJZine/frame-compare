@@ -5,6 +5,7 @@ All notable user-visible updates will be documented in this file in reverse chro
 - *2025-10-30:* Hardened audio alignment's optional dependency handling by surfacing clear `AudioAlignmentError` messages when
   `numpy`, `librosa`, or `soundfile` fail during onset envelope calculation, and refreshed regression coverage for the failure
   path.
+- *2025-10-30:* Fixed odd-pixel crop/pad failures on subsampled SDR clips by conditionally promoting to `YUV444P16`, adding axis-aware `[screenshots].odd_geometry_policy` controls, exposing `[screenshots].rgb_dither`, logging pivots, falling back from FFmpeg when needed, and extending regression coverage for geometry planning and writer selection.
 - *2025-10-30:* VSPreview-assisted manual alignment now displays existing manual trims using friendly clip labels so operators
   can immediately see which plan each baseline affects before accepting new deltas.
 - *2025-10-29:* Normalised VapourSynth colour metadata inference for SDR clips, cached inferred props on the

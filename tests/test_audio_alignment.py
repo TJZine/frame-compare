@@ -6,7 +6,7 @@ import builtins
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Mapping, cast
 
 import pytest
 
@@ -162,7 +162,13 @@ def test_measure_offsets_wraps_optional_dependency_errors(
 
     original_import = builtins.__import__
 
-    def failing_import(name: str, globals: object = None, locals: object = None, fromlist: tuple[str, ...] = (), level: int = 0):  # type: ignore[override]
+    def failing_import(
+        name: str,
+        globals: Mapping[str, object] | None = None,
+        locals: Mapping[str, object] | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> object:  # type: ignore[override]
         if name == "librosa":
             raise RuntimeError("boom")
         return original_import(name, globals, locals, fromlist, level)

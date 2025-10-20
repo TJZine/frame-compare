@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import tomllib
 from dataclasses import fields, is_dataclass
-from typing import Any, Dict
+from typing import Any, Dict, Literal, cast
 
 from .datatypes import (
     AnalysisConfig,
@@ -33,6 +33,8 @@ _FFMPEG_TIMEOUT_NOT_FINITE_MSG = (
     "screenshots.ffmpeg_timeout_seconds must be a finite number"
 )
 _FFMPEG_TIMEOUT_NEGATIVE_MSG = "screenshots.ffmpeg_timeout_seconds must be >= 0"
+_ODD_GEOMETRY_POLICIES = {"auto", "force_full_chroma", "subsamp_safe"}
+_RGB_DITHER_MODES = {"error_diffusion", "ordered", "none"}
 
 
 def _coerce_bool(value: Any, dotted_key: str) -> bool:
@@ -247,6 +249,26 @@ def load_config(path: str) -> AppConfig:
     if pad_mode not in {"off", "on", "auto"}:
         raise ConfigError("screenshots.pad_to_canvas must be 'off', 'on', or 'auto'")
     app.screenshots.pad_to_canvas = pad_mode
+
+    policy_value = str(app.screenshots.odd_geometry_policy).strip().lower()
+    if policy_value not in _ODD_GEOMETRY_POLICIES:
+        raise ConfigError(
+            "screenshots.odd_geometry_policy must be 'auto', 'force_full_chroma', or 'subsamp_safe'"
+        )
+    app.screenshots.odd_geometry_policy = cast(
+        Literal["auto", "force_full_chroma", "subsamp_safe"],
+        policy_value,
+    )
+
+    dither_value = str(app.screenshots.rgb_dither).strip().lower()
+    if dither_value not in _RGB_DITHER_MODES:
+        raise ConfigError(
+            "screenshots.rgb_dither must be 'error_diffusion', 'ordered', or 'none'"
+        )
+    app.screenshots.rgb_dither = cast(
+        Literal["error_diffusion", "ordered", "none"],
+        dither_value,
+    )
 
     progress_style = str(app.cli.progress.style).strip().lower()
     if progress_style not in {"fill", "dot"}:

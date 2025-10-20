@@ -1,5 +1,6 @@
 # Decisions Log
 
+- *2025-10-30:* Enabled axis-aware odd-geometry handling for subsampled SDR captures by conditionally promoting to `YUV444P16` before geometry, adding `[screenshots].odd_geometry_policy` and `[screenshots].rgb_dither` controls, logging the axis when a pivot occurs, and falling back to the VapourSynth writer when FFmpeg would require the same promotion.
 - *2025-10-28:* When screenshot rendering receives VapourSynth clips without matrix/transfer metadata we now probe frame props and default to Rec.709 limited values so `resize.Point` can emit RGB24 without raising "no path between colours"; regression tests cover the fallback and metadata-preservation paths.
 - *2025-10-27:* Finalised the VSPreview-assisted manual alignment UX, documenting the new flag in README/REFERENCE, expanding the audio-alignment guide with prerequisites and fallback behaviour, surfacing the hook in CLI help, and extending automated + manual QA coverage for the headless fallback path.
 - *2025-10-26:* Enforced workspace containment for analysis cache and audio offset files via `_resolve_workspace_subdir`, added regression coverage for escape attempts, removed the generated `config.toml` (template remains the source of defaults), and limited automatic screenshot cleanup to directories created during the active run.

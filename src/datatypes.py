@@ -1,6 +1,7 @@
 """Configuration dataclasses for frame comparison tool."""
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
+from typing import Literal
 
 
 @dataclass
@@ -50,6 +51,8 @@ class ScreenshotConfig:
     letterbox_px_tolerance: int = 8
     center_pad: bool = True
     ffmpeg_timeout_seconds: float = 120.0
+    odd_geometry_policy: Literal["auto", "force_full_chroma", "subsamp_safe"] = "auto"
+    rgb_dither: Literal["error_diffusion", "ordered", "none"] = "error_diffusion"
 
 
 @dataclass

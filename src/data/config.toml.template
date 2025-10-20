@@ -60,6 +60,10 @@ auto_letterbox_crop = false
 pad_to_canvas = "off"
 letterbox_px_tolerance = 8
 center_pad = true
+# Allow odd-pixel crop/pad on subsampled SDR sources by promoting to YUV444 when needed.
+odd_geometry_policy = "auto"       # Options: auto, force_full_chroma, subsamp_safe
+# Dither strategy for the final RGB24 conversion when reducing bit depth.
+rgb_dither = "error_diffusion"     # Options: error_diffusion, ordered, none
 # Abort FFmpeg renders that exceed this many seconds per frame (must be >= 0; set to 0 to disable).
 ffmpeg_timeout_seconds = 120.0
 

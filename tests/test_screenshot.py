@@ -23,9 +23,28 @@ class _CapturedWriterCall(TypedDict):
 
 
 class FakeClip:
-    def __init__(self, width: int, height: int):
+    def __init__(
+        self,
+        width: int,
+        height: int,
+        *,
+        subsampling_w: int = 0,
+        subsampling_h: int = 0,
+        bits_per_sample: int = 8,
+        color_family: object | None = None,
+        format_name: str | None = None,
+    ) -> None:
         self.width = width
         self.height = height
+        if color_family is None:
+            color_family = object()
+        self.format = types.SimpleNamespace(
+            subsampling_w=subsampling_w,
+            subsampling_h=subsampling_h,
+            bits_per_sample=bits_per_sample,
+            color_family=color_family,
+            name=format_name or f"Fake-{subsampling_w}:{subsampling_h}:{bits_per_sample}",
+        )
 
 
 @pytest.fixture(autouse=True)
@@ -90,6 +109,81 @@ def test_plan_mod_crop_modulus() -> None:
     assert new_w % 4 == 0
     assert new_h % 4 == 0
     assert new_w > 0 and new_h > 0
+
+
+def _fake_plan(
+    *,
+    crop: tuple[int, int, int, int],
+    pad: tuple[int, int, int, int],
+    subsampling_w: int,
+    subsampling_h: int,
+) -> GeometryPlan:
+    width = 1920
+    height = 1080
+    cropped_w = width - crop[0] - crop[2]
+    cropped_h = height - crop[1] - crop[3]
+    scaled = (cropped_w, cropped_h)
+    final = (
+        scaled[0] + pad[0] + pad[2],
+        scaled[1] + pad[1] + pad[3],
+    )
+    plan_dict: GeometryPlan = cast(
+        GeometryPlan,
+        {
+            "width": width,
+            "height": height,
+            "crop": crop,
+            "cropped_w": cropped_w,
+            "cropped_h": cropped_h,
+            "scaled": scaled,
+            "pad": pad,
+            "final": final,
+            "subsampling_w": subsampling_w,
+            "subsampling_h": subsampling_h,
+            "requires_full_chroma": False,
+            "full_chroma_axis": "none",
+            "target_height": cropped_h,
+        },
+    )
+    return plan_dict
+
+
+def test_full_chroma_requirement_auto_horizontal() -> None:
+    plan = _fake_plan(crop=(1, 0, 1, 0), pad=(0, 0, 0, 0), subsampling_w=1, subsampling_h=1)
+    requires, axis, needs_horizontal, needs_vertical = screenshot._resolve_full_chroma_requirement(plan, "auto")
+    assert requires
+    assert axis == "horizontal"
+    assert needs_horizontal
+    assert not needs_vertical
+
+
+def test_full_chroma_requirement_auto_vertical() -> None:
+    plan = _fake_plan(crop=(0, 1, 0, 1), pad=(0, 0, 0, 0), subsampling_w=1, subsampling_h=1)
+    requires, axis, needs_horizontal, needs_vertical = screenshot._resolve_full_chroma_requirement(plan, "auto")
+    assert requires
+    assert axis == "vertical"
+    assert needs_vertical
+    assert not needs_horizontal
+
+
+def test_full_chroma_requirement_skips_unsampled_axis() -> None:
+    plan = _fake_plan(crop=(0, 1, 0, 1), pad=(0, 0, 0, 0), subsampling_w=1, subsampling_h=0)
+    requires, axis, needs_horizontal, needs_vertical = screenshot._resolve_full_chroma_requirement(plan, "auto")
+    assert not requires
+    assert axis == "none"
+    assert not needs_vertical
+
+
+def test_rebalance_subsamp_safe_plan_evenises_geometry() -> None:
+    plan = _fake_plan(crop=(1, 1, 1, 1), pad=(1, 1, 1, 1), subsampling_w=1, subsampling_h=1)
+    changed = screenshot._rebalance_subsamp_safe_plan(plan, adjust_horizontal=True, adjust_vertical=True)
+    assert changed
+    left, top, right, bottom = plan["crop"]
+    pad_left, pad_top, pad_right, pad_bottom = plan["pad"]
+    for value in (left, top, right, bottom, pad_left, pad_top, pad_right, pad_bottom):
+        assert value % 2 == 0
+    assert plan["cropped_w"] == plan["scaled"][0]
+    assert plan["cropped_h"] == plan["scaled"][1]
 
 
 def test_plan_geometry_letterbox_alignment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -514,6 +608,70 @@ def test_ffmpeg_respects_trim_offsets(tmp_path: Path, monkeypatch: pytest.Monkey
     )
 
     assert calls == [3, 8]
+
+
+def test_generate_screenshots_falls_back_when_full_chroma_needed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clip = FakeClip(1920, 1036, subsampling_w=1, subsampling_h=1)
+    cfg = ScreenshotConfig(use_ffmpeg=True)
+    color_cfg = ColorConfig()
+
+    fake_plan = cast(
+        GeometryPlan,
+        {
+            "width": 1920,
+            "height": 1036,
+            "crop": (0, 1, 0, 1),
+            "cropped_w": 1920,
+            "cropped_h": 1034,
+            "scaled": (1920, 1034),
+            "pad": (0, 0, 0, 0),
+            "final": (1920, 1034),
+            "subsampling_w": 1,
+            "subsampling_h": 1,
+            "requires_full_chroma": True,
+            "full_chroma_axis": "vertical",
+            "target_height": 1034,
+        },
+    )
+
+    monkeypatch.setattr(screenshot, "_plan_geometry", lambda clips, _: [fake_plan])
+
+    ffmpeg_calls: list[int] = []
+
+    def fake_ffmpeg(*args: Any, **kwargs: Any) -> None:
+        ffmpeg_calls.append(1)
+
+    monkeypatch.setattr(screenshot, "_save_frame_with_ffmpeg", fake_ffmpeg)
+
+    vs_calls: list[Path] = []
+
+    def fake_vs_writer(*args: Any, **kwargs: Any) -> None:
+        path_arg: object | None = None
+        if len(args) > 5:
+            path_arg = args[5]
+        if path_arg is None:
+            path_arg = kwargs.get("path")
+        if isinstance(path_arg, Path):
+            path_arg.write_text("vs", encoding="utf-8")
+            vs_calls.append(path_arg)
+
+    monkeypatch.setattr(screenshot, "_save_frame_with_fpng", fake_vs_writer)
+
+    screenshot.generate_screenshots(
+        [clip],
+        [0],
+        ["video.mkv"],
+        [{"label": "video"}],
+        tmp_path,
+        cfg,
+        color_cfg,
+        trim_offsets=[0],
+    )
+
+    assert not ffmpeg_calls
+    assert vs_calls
 
 
 def test_global_upscale_coordination(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -8,7 +8,6 @@ import re
 import shutil
 import subprocess
 from functools import partial
-import math
 from pathlib import Path
 from typing import (
     Any,
@@ -16,6 +15,7 @@ from typing import (
     Dict,
     List,
     Mapping,
+    Literal,
     MutableMapping,
     Optional,
     Protocol,
@@ -43,6 +43,12 @@ _SELECTION_LABELS = {
     "random": "Random",
     "auto": "Auto",
     "cached": "Cached",
+}
+
+_RGB_DITHER_OPTIONS: Dict[str, str] = {
+    "error_diffusion": "error_diffusion",
+    "ordered": "ordered",
+    "none": "none",
 }
 
 OverlayStateValue = Union[str, List[str]]
@@ -355,12 +361,36 @@ def _resolve_resize_color_kwargs(props: Mapping[str, Any]) -> Dict[str, int]:
     return kwargs
 
 
+def _ensure_color_metadata_defaults(
+    resize_kwargs: Dict[str, int],
+    color_family: Any,
+    vs_module: Any,
+) -> Dict[str, int]:
+    yuv_constant = getattr(vs_module, "YUV", object())
+    if color_family != yuv_constant:
+        return resize_kwargs
+
+    defaults: Dict[str, int] = {}
+    if "matrix_in" not in resize_kwargs:
+        defaults["matrix_in"] = int(getattr(vs_module, "MATRIX_BT709", 1))
+    if "transfer_in" not in resize_kwargs:
+        defaults["transfer_in"] = int(getattr(vs_module, "TRANSFER_BT709", 1))
+    if "primaries_in" not in resize_kwargs:
+        defaults["primaries_in"] = int(getattr(vs_module, "PRIMARIES_BT709", 1))
+    if "range_in" not in resize_kwargs:
+        defaults["range_in"] = int(getattr(vs_module, "RANGE_LIMITED", 1))
+    if defaults:
+        resize_kwargs = {**resize_kwargs, **defaults}
+    return resize_kwargs
+
+
 def _ensure_rgb24(
     core: Any,
     clip: Any,
     frame_idx: int,
     *,
     source_props: Mapping[str, Any] | None = None,
+    rgb_dither: str = "error_diffusion",
 ) -> Any:
     """
     Ensure the given VapourSynth frame is in 8-bit RGB24 color format.
@@ -394,29 +424,18 @@ def _ensure_rgb24(
     if not callable(point):
         raise ScreenshotWriterError("VapourSynth resize.Point is unavailable")
 
-    dither = "error_diffusion" if isinstance(bits, int) and bits > 8 else "none"
+    dither_choice = str(rgb_dither).strip().lower()
+    dither = _RGB_DITHER_OPTIONS.get(dither_choice, "error_diffusion")
+    if not (isinstance(bits, int) and bits > 8):
+        dither = "none"
     props = dict(source_props or {})
-    if not props:
-        props = dict(vs_core._snapshot_frame_props(clip))
-    resize_kwargs = _resolve_resize_color_kwargs(props)
-
-    yuv_constant = getattr(vs, "YUV", object())
-    if color_family == yuv_constant:
-        defaults: Dict[str, int] = {}
-        if "matrix_in" not in resize_kwargs:
-            defaults["matrix_in"] = int(getattr(vs, "MATRIX_BT709", 1))
-        if "transfer_in" not in resize_kwargs:
-            defaults["transfer_in"] = int(getattr(vs, "TRANSFER_BT709", 1))
-        if "primaries_in" not in resize_kwargs:
-            defaults["primaries_in"] = int(getattr(vs, "PRIMARIES_BT709", 1))
-        if "range_in" not in resize_kwargs:
-            defaults["range_in"] = int(getattr(vs, "RANGE_LIMITED", 1))
-        if defaults:
-            resize_kwargs.update(defaults)
-            logger.debug(
-                "Colour metadata missing for frame %s; applying Rec.709 limited defaults",
-                frame_idx,
-            )
+    base_kwargs = _resolve_resize_color_kwargs(props)
+    resize_kwargs = _ensure_color_metadata_defaults(dict(base_kwargs), color_family, vs)
+    if resize_kwargs != base_kwargs and color_family == getattr(vs, "YUV", object()):
+        logger.debug(
+            "Colour metadata missing for frame %s; applying Rec.709 limited defaults",
+            frame_idx,
+        )
 
     try:
         converted = cast(
@@ -663,6 +682,11 @@ class GeometryPlan(TypedDict):
         scaled (tuple[int, int]): Dimensions after scaling.
         pad (tuple[int, int, int, int]): Padding applied around the scaled frame.
         final (tuple[int, int]): Final output dimensions.
+        subsampling_w (int): Horizontal chroma subsampling exponent of the source format.
+        subsampling_h (int): Vertical chroma subsampling exponent of the source format.
+        requires_full_chroma (bool): Whether SDR processing must promote to full chroma before geometry.
+        full_chroma_axis (Literal["none", "horizontal", "vertical", "both"]): Axis triggering promotion.
+        target_height (int | None): Resample target height applied during planning.
     """
     width: int
     height: int
@@ -672,6 +696,11 @@ class GeometryPlan(TypedDict):
     scaled: tuple[int, int]
     pad: tuple[int, int, int, int]
     final: tuple[int, int]
+    subsampling_w: int
+    subsampling_h: int
+    requires_full_chroma: bool
+    full_chroma_axis: Literal["none", "horizontal", "vertical", "both"]
+    target_height: int | None
 
 
 def plan_mod_crop(
@@ -890,6 +919,137 @@ def _compute_scaled_dimensions(
     return (target_w, desired_h)
 
 
+def _describe_full_chroma_axis(
+    horizontal: bool,
+    vertical: bool,
+) -> Literal["none", "horizontal", "vertical", "both"]:
+    if horizontal and vertical:
+        return "both"
+    if horizontal:
+        return "horizontal"
+    if vertical:
+        return "vertical"
+    return "none"
+
+
+def _resolve_full_chroma_requirement(
+    plan: GeometryPlan,
+    policy: str,
+) -> tuple[bool, Literal["none", "horizontal", "vertical", "both"], bool, bool]:
+    crop_left, crop_top, crop_right, crop_bottom = plan["crop"]
+    pad_left, pad_top, pad_right, pad_bottom = plan["pad"]
+    horizontal_odd = any(value % 2 for value in (crop_left, crop_right, pad_left, pad_right))
+    vertical_odd = any(value % 2 for value in (crop_top, crop_bottom, pad_top, pad_bottom))
+    subsampling_w = int(plan.get("subsampling_w", 0))
+    subsampling_h = int(plan.get("subsampling_h", 0))
+
+    needs_horizontal = horizontal_odd and subsampling_w > 0
+    needs_vertical = vertical_odd and subsampling_h > 0
+
+    if policy == "force_full_chroma":
+        requires = (subsampling_w > 0) or (subsampling_h > 0)
+        axis = _describe_full_chroma_axis(subsampling_w > 0, subsampling_h > 0)
+    elif policy == "subsamp_safe":
+        requires = False
+        axis = "none"
+    else:
+        requires = needs_horizontal or needs_vertical
+        axis = _describe_full_chroma_axis(needs_horizontal, needs_vertical)
+
+    return requires, axis, needs_horizontal, needs_vertical
+
+
+def _rebalance_pair_even(first: int, second: int) -> tuple[int, int]:
+    if first % 2 == 0 and second % 2 == 0:
+        return (first, second)
+
+    total = first + second
+    if total % 2 != 0:
+        if first >= second:
+            first += 1
+        else:
+            second += 1
+        total = first + second
+
+    if first % 2 != 0 and second % 2 != 0:
+        if first >= second and first > 0:
+            first += 1
+            second = max(0, second - 1)
+        elif second > 0:
+            second += 1
+            first = max(0, first - 1)
+
+    if first % 2 != 0:
+        if second > 0:
+            first += 1
+            second = max(0, second - 1)
+        else:
+            first += 1
+
+    if second % 2 != 0:
+        if first > 0:
+            second += 1
+            first = max(0, first - 1)
+        else:
+            second += 1
+
+    return max(0, first), max(0, second)
+
+
+def _rebalance_subsamp_safe_plan(
+    plan: GeometryPlan,
+    adjust_horizontal: bool,
+    adjust_vertical: bool,
+) -> bool:
+    changed = False
+    left, top, right, bottom = plan["crop"]
+    pad_left, pad_top, pad_right, pad_bottom = plan["pad"]
+
+    if adjust_horizontal:
+        new_left, new_right = _rebalance_pair_even(left, right)
+        new_pad_left, new_pad_right = _rebalance_pair_even(pad_left, pad_right)
+        if (new_left, new_right) != (left, right) or (new_pad_left, new_pad_right) != (pad_left, pad_right):
+            changed = True
+        left, right = new_left, new_right
+        pad_left, pad_right = new_pad_left, new_pad_right
+
+    if adjust_vertical:
+        new_top, new_bottom = _rebalance_pair_even(top, bottom)
+        new_pad_top, new_pad_bottom = _rebalance_pair_even(pad_top, pad_bottom)
+        if (new_top, new_bottom) != (top, bottom) or (new_pad_top, new_pad_bottom) != (
+            pad_top,
+            pad_bottom,
+        ):
+            changed = True
+        top, bottom = new_top, new_bottom
+        pad_top, pad_bottom = new_pad_top, new_pad_bottom
+
+    if not changed:
+        return False
+
+    plan["crop"] = (left, top, right, bottom)
+    plan["pad"] = (pad_left, pad_top, pad_right, pad_bottom)
+
+    width = int(plan["width"])
+    height = int(plan["height"])
+    plan["cropped_w"] = max(1, width - left - right)
+    plan["cropped_h"] = max(1, height - top - bottom)
+
+    target_h = plan.get("target_height")
+    if isinstance(target_h, int) and target_h > 0 and target_h != plan["cropped_h"]:
+        plan["scaled"] = _compute_scaled_dimensions(width, height, plan["crop"], target_h)
+    else:
+        plan["scaled"] = (plan["cropped_w"], plan["cropped_h"])
+
+    scaled_w, scaled_h = plan["scaled"]
+    pad_left, pad_top, pad_right, pad_bottom = plan["pad"]
+    plan["final"] = (
+        max(1, scaled_w + pad_left + pad_right),
+        max(1, scaled_h + pad_top + pad_bottom),
+    )
+    return True
+
+
 def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[GeometryPlan]:
     plans: List[GeometryPlan] = []
     for clip in clips:
@@ -904,6 +1064,10 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[Geometry
         if cropped_w <= 0 or cropped_h <= 0:
             raise ScreenshotGeometryError("Invalid crop results")
 
+        fmt = getattr(clip, "format", None)
+        subsampling_w = int(getattr(fmt, "subsampling_w", 0) or 0)
+        subsampling_h = int(getattr(fmt, "subsampling_h", 0) or 0)
+
         plans.append(
             GeometryPlan(
                 width=width,
@@ -914,6 +1078,11 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[Geometry
                 scaled=(cropped_w, cropped_h),
                 pad=(0, 0, 0, 0),
                 final=(cropped_w, cropped_h),
+                subsampling_w=subsampling_w,
+                subsampling_h=subsampling_h,
+                requires_full_chroma=False,
+                full_chroma_axis="none",
+                target_height=None,
             )
         )
 
@@ -984,6 +1153,7 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[Geometry
             target_h = cropped_h
 
         target_heights.append(target_h)
+        plan["target_height"] = target_h
 
         pad_left = pad_top = pad_right = pad_bottom = 0
         scaled_w = cropped_w
@@ -1093,6 +1263,23 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[Geometry
             scaled_h + pad_top + pad_bottom,
         )
 
+    policy = str(getattr(cfg, "odd_geometry_policy", "auto")).strip().lower()
+    for plan in plans:
+        requires, axis, needs_horizontal, needs_vertical = _resolve_full_chroma_requirement(plan, policy)
+        if policy == "subsamp_safe" and (needs_horizontal or needs_vertical):
+            adjusted = _rebalance_subsamp_safe_plan(plan, needs_horizontal, needs_vertical)
+            if adjusted:
+                logger.warning(
+                    "[GEOMETRY] Odd geometry requires even alignment under subsamp_safe policy "
+                    "(axis=%s, source=%sx%s)",
+                    axis,
+                    plan["width"],
+                    plan["height"],
+                )
+            requires, axis, _, _ = _resolve_full_chroma_requirement(plan, policy)
+        plan["requires_full_chroma"] = requires
+        plan["full_chroma_axis"] = axis
+
     return plans
 
 
@@ -1151,6 +1338,8 @@ def _save_frame_with_fpng(
     overlay_state: Optional[OverlayState] = None,
     strict_overlay: bool = False,
     source_props: Mapping[str, Any] | None = None,
+    plan: GeometryPlan | None = None,
+    tonemap_applied: bool = False,
 ) -> None:
     try:
         import vapoursynth as vs  # type: ignore
@@ -1166,7 +1355,56 @@ def _save_frame_with_fpng(
     if not callable(writer):
         raise ScreenshotWriterError("VapourSynth fpng.Write plugin is unavailable")
 
-    work = clip
+    fmt = getattr(clip, "format", None)
+    fmt_name = getattr(fmt, "name", None) or getattr(fmt, "id", None) or "unknown"
+    color_family = getattr(fmt, "color_family", None)
+    requires_full_chroma = bool(plan and plan.get("requires_full_chroma"))
+    axis_label = (plan.get("full_chroma_axis") if plan else "none") or "none"
+    policy = str(getattr(cfg, "odd_geometry_policy", "auto")).strip().lower()
+
+    work: Any = clip
+    if (
+        requires_full_chroma
+        and not tonemap_applied
+        and color_family != getattr(vs, "RGB", object())
+    ):
+        resize_ns = getattr(core, "resize", None)
+        if resize_ns is None:
+            raise ScreenshotWriterError("VapourSynth core is missing resize namespace")
+        point = getattr(resize_ns, "Point", None)
+        if not callable(point):
+            raise ScreenshotWriterError("VapourSynth resize.Point is unavailable")
+        format_444 = getattr(vs, "YUV444P16", None)
+        if format_444 is None:
+            raise ScreenshotWriterError("VapourSynth YUV444P16 format is unavailable")
+        resize_kwargs = _ensure_color_metadata_defaults(
+            _resolve_resize_color_kwargs(dict(source_props or {})),
+            color_family,
+            vs,
+        )
+        try:
+            work = point(
+                work,
+                format=format_444,
+                dither_type="none",
+                **resize_kwargs,
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            raise ScreenshotWriterError(
+                f"Failed to promote frame {frame_idx} to YUV444P16: {exc}"
+            ) from exc
+        logger.info(
+            "Odd-geometry on subsampled SDR → promoting to YUV444P16 (policy=%s, axis=%s, fmt=%s)",
+            policy,
+            axis_label,
+            fmt_name,
+        )
+        logger.debug(
+            "Full-chroma promotion details: src_format=%s dst_format=YUV444P16 rgb_dither=%s",
+            fmt_name,
+            cfg.rgb_dither,
+        )
+
     try:
         left, top, right, bottom = crop
         if any(crop):
@@ -1217,7 +1455,13 @@ def _save_frame_with_fpng(
         file_label=label,
     )
 
-    render_clip = _ensure_rgb24(core, render_clip, frame_idx, source_props=source_props)
+    render_clip = _ensure_rgb24(
+        core,
+        render_clip,
+        frame_idx,
+        source_props=source_props,
+        rgb_dither=getattr(cfg, "rgb_dither", "error_diffusion"),
+    )
 
     compression = _map_fpng_compression(cfg.compression_level)
     try:
@@ -1498,6 +1742,7 @@ def generate_screenshots(
         overlay_state = overlay_states[clip_index]
         base_overlay_text = getattr(result, "overlay_text", None)
         source_props = getattr(result, "source_props", {})
+        tonemap_applied = bool(getattr(result, "tonemap", None) and getattr(result.tonemap, "applied", False))
 
         for frame in frames:
             frame_idx = int(frame)
@@ -1556,6 +1801,16 @@ def generate_screenshots(
             try:
                 resolved_frame = _resolve_source_frame_index(actual_idx, trim_start)
                 use_ffmpeg = cfg.use_ffmpeg and resolved_frame is not None
+                if (
+                    use_ffmpeg
+                    and plan.get("requires_full_chroma")
+                    and not tonemap_applied
+                ):
+                    logger.info(
+                        "[GEOMETRY] Falling back to VapourSynth writer for odd subsampled geometry (policy=%s)",
+                        cfg.odd_geometry_policy,
+                    )
+                    use_ffmpeg = False
                 if cfg.use_ffmpeg and resolved_frame is None:
                     logger.debug(
                         "Frame %s for %s falls within synthetic trim padding; "
@@ -1597,6 +1852,8 @@ def generate_screenshots(
                         overlay_state=overlay_state,
                         strict_overlay=bool(getattr(color_cfg, "strict", False)),
                         source_props=source_props,
+                        plan=plan,
+                        tonemap_applied=tonemap_applied,
                     )
             except ScreenshotWriterError:
                 raise
