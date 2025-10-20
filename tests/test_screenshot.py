@@ -1487,12 +1487,14 @@ def test_ensure_rgb24_applies_rec709_defaults_when_metadata_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, Any] = {}
+    captured_props: dict[str, Any] = {}
 
     class _DummyStd:
         def __init__(self, parent: "_DummyClip") -> None:
             self._parent = parent
 
         def SetFrameProps(self, **kwargs: Any) -> "_DummyClip":
+            captured_props.update(kwargs)
             return self._parent
 
     class _DummyClip:
@@ -1542,16 +1544,19 @@ def test_ensure_rgb24_applies_rec709_defaults_when_metadata_missing(
     assert captured.get("primaries_in") == 1
     assert captured.get("range_in") == 1
     assert captured.get("dither_type") == RGBDither.ERROR_DIFFUSION.value
+    assert captured_props == {"_Matrix": 0, "_ColorRange": 0}
 
 
 def test_ensure_rgb24_uses_source_colour_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
+    captured_props: dict[str, Any] = {}
 
     class _DummyStd:
         def __init__(self, parent: "_DummyClip") -> None:
             self._parent = parent
 
         def SetFrameProps(self, **kwargs: Any) -> "_DummyClip":
+            captured_props.update(kwargs)
             return self._parent
 
     class _DummyClip:
@@ -1614,3 +1619,9 @@ def test_ensure_rgb24_uses_source_colour_metadata(monkeypatch: pytest.MonkeyPatc
     assert captured.get("primaries_in") == 9
     assert captured.get("range_in") == 0
     assert captured.get("dither_type") == RGBDither.ORDERED.value
+    assert captured_props == {
+        "_Matrix": 0,
+        "_ColorRange": 0,
+        "_Primaries": 9,
+        "_Transfer": 16,
+    }

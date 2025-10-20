@@ -438,15 +438,14 @@ def _ensure_rgb24(
         raise ScreenshotWriterError(f"Failed to convert frame {frame_idx} to RGB24: {exc}") from exc
 
     try:
-        converted = cast(
-            Any,
-            converted.std.SetFrameProps(
-            _Matrix=0,
-            _Primaries=1,
-            _Transfer=1,
-            _ColorRange=0,
-            ),
-        )
+        prop_kwargs: Dict[str, int] = {"_Matrix": 0, "_ColorRange": 0}
+        primaries = props.get("_Primaries")
+        if isinstance(primaries, int):
+            prop_kwargs["_Primaries"] = int(primaries)
+        transfer = props.get("_Transfer")
+        if isinstance(transfer, int):
+            prop_kwargs["_Transfer"] = int(transfer)
+        converted = cast(Any, converted.std.SetFrameProps(**prop_kwargs))
     except Exception:  # pragma: no cover - best effort
         pass
     return converted
