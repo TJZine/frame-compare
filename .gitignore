@@ -22,6 +22,7 @@ comparison_videos/**
 
 # Ignore User Config
 /config.toml
+/config/config.toml
 # OS
 .DS_Store
 Thumbs.db
