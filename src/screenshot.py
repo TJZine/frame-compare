@@ -1257,6 +1257,34 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[Geometry
                     scaled_h + new_pad_top + new_pad_bottom,
                 )
 
+                aligned_pad_left, aligned_pad_top, aligned_pad_right, aligned_pad_bottom = _align_padding_mod(
+                    scaled_w,
+                    scaled_h,
+                    new_pad_left,
+                    new_pad_top,
+                    new_pad_right,
+                    new_pad_bottom,
+                    cfg.mod_crop,
+                    center_pad,
+                )
+
+                if (
+                    aligned_pad_left,
+                    aligned_pad_top,
+                    aligned_pad_right,
+                    aligned_pad_bottom,
+                ) != plan["pad"]:
+                    plan["pad"] = (
+                        aligned_pad_left,
+                        aligned_pad_top,
+                        aligned_pad_right,
+                        aligned_pad_bottom,
+                    )
+                    plan["final"] = (
+                        scaled_w + aligned_pad_left + aligned_pad_right,
+                        scaled_h + aligned_pad_top + aligned_pad_bottom,
+                    )
+
         plan["requires_full_chroma"] = _compute_requires_full_chroma(
             fmt,
             plan["crop"],
