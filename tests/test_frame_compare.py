@@ -3,7 +3,7 @@ import importlib
 import json
 import pathlib
 import types
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import Any, Mapping, cast
 
@@ -13,7 +13,7 @@ from rich.console import Console
 
 import frame_compare
 from src.audio_alignment import AlignmentMeasurement, AudioStreamInfo
-from src.analysis import CacheLoadResult, FrameMetricsCacheInfo
+from src.analysis import CacheLoadResult, FrameMetricsCacheInfo, SelectionDetail
 from src.datatypes import (
     AnalysisConfig,
     AppConfig,
@@ -1771,6 +1771,136 @@ def test_cli_tmdb_resolution_populates_slowpics(
     assert slowpics_json["shortcut_path"].endswith("slowpics_example.url")
     assert slowpics_json["deleted_screens_dir"] is False
 
+
+def test_run_cli_coalesces_duplicate_pivot_logs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Duplicate pivot notifications are emitted once per run."""
+
+    cfg = _make_config(tmp_path)
+    cfg.analysis.save_frames_data = False
+
+    monkeypatch.setattr(frame_compare, "load_config", lambda *_: cfg)
+
+    for name in ("Alpha.mkv", "Beta.mkv"):
+        (tmp_path / name).write_bytes(b"data")
+
+    def fake_parse(name: str, **_: object) -> dict[str, str]:
+        return {
+            "label": name,
+            "file_name": name,
+            "title": "",
+            "anime_title": "",
+            "year": "",
+            "imdb_id": "",
+            "tvdb_id": "",
+        }
+
+    monkeypatch.setattr(frame_compare, "parse_filename_metadata", fake_parse)
+    monkeypatch.setattr(frame_compare.vs_core, "configure", lambda *args, **kwargs: None)
+    monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda *args, **kwargs: None)
+
+    def fake_init_clip(
+        path: str | Path,
+        *,
+        trim_start: int = 0,
+        trim_end: int | None = None,
+        fps_map: tuple[int, int] | None = None,
+        cache_dir: str | Path | None = None,
+    ) -> types.SimpleNamespace:
+        return types.SimpleNamespace(
+            path=Path(path),
+            width=1920,
+            height=1080,
+            fps_num=24000,
+            fps_den=1001,
+            num_frames=120,
+        )
+
+    monkeypatch.setattr(frame_compare.vs_core, "init_clip", fake_init_clip)
+    monkeypatch.setattr(frame_compare.vs_core, "resolve_effective_tonemap", lambda _cfg: {})
+
+    def fake_select(
+        clip: types.SimpleNamespace,
+        analysis_cfg: AnalysisConfig,
+        files: list[str],
+        file_under_analysis: str,
+        *,
+        cache_info: FrameMetricsCacheInfo | None = None,
+        progress: Callable[[int], None] | None = None,
+        frame_window: tuple[int, int] | None = None,
+        return_metadata: bool = False,
+        color_cfg: ColorConfig | None = None,
+        cache_probe: CacheLoadResult | None = None,
+    ) -> tuple[list[int], dict[int, str], dict[int, SelectionDetail]]:
+        if progress is not None:
+            progress(1)
+        frames = [10, 20]
+        categories = {10: "Auto", 20: "Auto"}
+        details = {
+            10: SelectionDetail(
+                frame_index=10,
+                label="Auto",
+                score=None,
+                source="auto",
+                timecode="00:00:10.000",
+            ),
+            20: SelectionDetail(
+                frame_index=20,
+                label="Auto",
+                score=None,
+                source="auto",
+                timecode="00:00:20.000",
+            ),
+        }
+        return frames, categories, details
+
+    monkeypatch.setattr(frame_compare, "select_frames", fake_select)
+
+    base_console = frame_compare.Console
+
+    class RecordingConsole(base_console):  # type: ignore[misc]
+        pivot_logs: list[str] = []
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__(*args, **kwargs)
+
+        def log(self, *objects: object, **_kwargs: object) -> None:  # type: ignore[override]
+            message = objects[0] if objects else ""
+            RecordingConsole.pivot_logs.append(str(message))
+
+    RecordingConsole.pivot_logs = []
+    monkeypatch.setattr(frame_compare, "Console", RecordingConsole)
+
+    def fake_generate(
+        clips: list[types.SimpleNamespace],
+        frames: list[int],
+        files: list[str],
+        metadata: list[dict[str, object]],
+        out_dir: Path,
+        cfg_screens: ScreenshotConfig,
+        color_cfg: ColorConfig,
+        **kwargs: object,
+    ) -> list[str]:
+        pivot_notifier = kwargs.get("pivot_notifier")
+        if callable(pivot_notifier):
+            pivot_notifier("Full-chroma pivot active (YUV444P16)")
+            pivot_notifier("Full-chroma pivot active (YUV444P16)")
+            pivot_notifier("Full-chroma pivot resolved")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        return [str(out_dir / f"shot_{idx}.png") for idx in range(len(frames) * len(files))]
+
+    monkeypatch.setattr(frame_compare, "generate_screenshots", fake_generate)
+    monkeypatch.setattr(frame_compare, "export_selection_metadata", lambda *args, **kwargs: None)
+    monkeypatch.setattr(frame_compare, "write_selection_cache_file", lambda *args, **kwargs: None)
+
+    result = frame_compare.run_cli("dummy-config")
+
+    assert result.image_paths
+    assert RecordingConsole.pivot_logs == [
+        "Full-chroma pivot active (YUV444P16)",
+        "Full-chroma pivot resolved",
+    ]
 
 def test_cli_tmdb_resolution_sets_default_collection_name(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -58,4 +58,7 @@ Whenever the pivot activates the CLI emits:
   and format/backend that triggered the promotion.
 
 The note appears for both VapourSynth and FFmpeg paths and helps operators
-confirm that odd-geometry cases are handled intentionally.
+confirm that odd-geometry cases are handled intentionally. Duplicate pivot
+messages within a single CLI run are suppressed after the first emission so the
+console highlights each pivot scenario once even if the renderer retries the
+same frame set.
