@@ -1,6 +1,6 @@
 # Decisions Log
 
-- *2025-10-20:* Documented the SDR odd-geometry pivot (config guide plus dedicated geometry notes), surfaced Rich console notifications for full-chroma promotions, and clarified that dithering only occurs during the final 16→8 RGB conversion while HDR behaviour remains unchanged.
+- *2025-10-10:* Documented the SDR odd-geometry pivot (config guide plus dedicated geometry notes), surfaced Rich console notifications for full-chroma promotions, and clarified that dithering only occurs during the final 16→8 RGB conversion while HDR behaviour remains unchanged.
 - *2025-10-18:* When screenshot rendering receives VapourSynth clips without matrix/transfer metadata we now probe frame props and default to Rec.709 limited values so `resize.Point` can emit RGB24 without raising "no path between colours"; regression tests cover the fallback and metadata-preservation paths.
 - *2025-10-17:* Finalised the VSPreview-assisted manual alignment UX, documenting the new flag in README/REFERENCE, expanding the audio-alignment guide with prerequisites and fallback behaviour, surfacing the hook in CLI help, and extending automated + manual QA coverage for the headless fallback path.
 - *2025-10-16:* Enforced workspace containment for analysis cache and audio offset files via `_resolve_workspace_subdir`, added regression coverage for escape attempts, removed the generated `config.toml` (template remains the source of defaults), and limited automatic screenshot cleanup to directories created during the active run.
