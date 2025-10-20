@@ -8,7 +8,7 @@ import pytest
 
 from src.datatypes import ColorConfig, ScreenshotConfig
 from src import screenshot, vs_core
-from src.screenshot import GeometryPlan
+from src.screenshot import GeometryPlan, OddGeometryPolicy
 
 
 class _CapturedWriterCall(TypedDict):
@@ -151,6 +151,42 @@ def test_plan_geometry_letterbox_alignment(tmp_path: Path, monkeypatch: pytest.M
     assert captured[1]["scaled"] == (3840, 1800)
 
 
+def test_plan_geometry_subsamp_safe_rebalance_aligns_modulus() -> None:
+    class _Format:
+        def __init__(self, subsampling_w: int, subsampling_h: int) -> None:
+            self.subsampling_w = subsampling_w
+            self.subsampling_h = subsampling_h
+
+    class _ClipWithFormat:
+        def __init__(self, width: int, height: int, subsampling_w: int, subsampling_h: int) -> None:
+            self.width = width
+            self.height = height
+            self.format = _Format(subsampling_w, subsampling_h)
+
+    cfg = ScreenshotConfig(
+        directory_name="screens",
+        add_frame_info=False,
+        odd_geometry_policy=OddGeometryPolicy.SUBSAMP_SAFE,
+        pad_to_canvas="on",
+        mod_crop=4,
+        letterbox_pillarbox_aware=True,
+        center_pad=True,
+        upscale=False,
+    )
+
+    clips: list[_ClipWithFormat] = [
+        _ClipWithFormat(1919, 720, 1, 1),
+        _ClipWithFormat(1920, 1080, 1, 1),
+    ]
+
+    plans = screenshot._plan_geometry(clips, cfg)
+
+    first_plan = plans[0]
+    assert first_plan["final"][0] % cfg.mod_crop == 0
+    assert first_plan["final"][1] % cfg.mod_crop == 0
+    assert not first_plan["requires_full_chroma"]
+
+
 def test_generate_screenshots_filenames(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     clip = FakeClip(1280, 720)
     cfg = ScreenshotConfig(directory_name="screens")
@@ -260,6 +296,7 @@ def _make_plan(
     scaled: tuple[int, int] = (1920, 1080),
     pad: tuple[int, int, int, int] = (0, 0, 0, 0),
     final: tuple[int, int] = (1920, 1080),
+    requires_full_chroma: bool = False,
 ) -> GeometryPlan:
     """
     Builds a rendering plan dictionary describing dimensions, crop, scaling, padding, and final output size.
@@ -286,6 +323,7 @@ def _make_plan(
             "scaled": scaled,
             "pad": pad,
             "final": final,
+            "requires_full_chroma": requires_full_chroma,
         },
     )
     return plan

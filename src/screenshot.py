@@ -27,7 +27,7 @@ from typing import (
 )
 
 from . import vs_core
-from .datatypes import ColorConfig, ScreenshotConfig
+from .datatypes import ColorConfig, OddGeometryPolicy, ScreenshotConfig
 
 _INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -663,6 +663,7 @@ class GeometryPlan(TypedDict):
         scaled (tuple[int, int]): Dimensions after scaling.
         pad (tuple[int, int, int, int]): Padding applied around the scaled frame.
         final (tuple[int, int]): Final output dimensions.
+        requires_full_chroma (bool): Whether geometry requires a 4:4:4 pivot.
     """
     width: int
     height: int
@@ -672,6 +673,78 @@ class GeometryPlan(TypedDict):
     scaled: tuple[int, int]
     pad: tuple[int, int, int, int]
     final: tuple[int, int]
+    requires_full_chroma: bool
+
+
+def _normalise_geometry_policy(value: OddGeometryPolicy | str) -> OddGeometryPolicy:
+    if isinstance(value, OddGeometryPolicy):
+        return value
+    try:
+        return OddGeometryPolicy(str(value))
+    except Exception:
+        return OddGeometryPolicy.AUTO
+
+
+def _get_subsampling(fmt: Any, attr: str) -> int:
+    try:
+        raw = getattr(fmt, attr)
+    except Exception:
+        return 0
+    try:
+        return int(raw)
+    except Exception:
+        return 0
+
+
+def _axis_has_odd(values: Sequence[int]) -> bool:
+    for value in values:
+        try:
+            current = int(value)
+        except Exception:
+            continue
+        if current % 2 != 0:
+            return True
+    return False
+
+
+def _rebalance_axis_even(first: int, second: int) -> tuple[int, int]:
+    left = max(0, int(first))
+    right = max(0, int(second))
+    removed = 0
+
+    if left % 2 != 0:
+        left -= 1
+        removed += 1
+    if right % 2 != 0:
+        right -= 1
+        removed += 1
+
+    while removed >= 2:
+        right += 2
+        removed -= 2
+
+    return left, right
+
+
+def _compute_requires_full_chroma(
+    fmt: Any,
+    crop: tuple[int, int, int, int],
+    pad: tuple[int, int, int, int],
+    policy: OddGeometryPolicy,
+) -> bool:
+    resolved_policy = _normalise_geometry_policy(policy)
+    if resolved_policy is OddGeometryPolicy.FORCE_FULL_CHROMA:
+        return True
+    if resolved_policy is OddGeometryPolicy.SUBSAMP_SAFE:
+        return False
+
+    subsampling_w = _get_subsampling(fmt, "subsampling_w")
+    subsampling_h = _get_subsampling(fmt, "subsampling_h")
+
+    vertical_odd = _axis_has_odd((crop[1], crop[3], pad[1], pad[3]))
+    horizontal_odd = _axis_has_odd((crop[0], crop[2], pad[0], pad[2]))
+
+    return (vertical_odd and subsampling_h > 0) or (horizontal_odd and subsampling_w > 0)
 
 
 def plan_mod_crop(
@@ -891,6 +964,8 @@ def _compute_scaled_dimensions(
 
 
 def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[GeometryPlan]:
+    policy = _normalise_geometry_policy(cfg.odd_geometry_policy)
+    clip_formats: List[Any] = []
     plans: List[GeometryPlan] = []
     for clip in clips:
         width = getattr(clip, "width", None)
@@ -898,6 +973,7 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[Geometry
         if not isinstance(width, int) or not isinstance(height, int):
             raise ScreenshotGeometryError("Clip missing width/height metadata")
 
+        clip_formats.append(getattr(clip, "format", None))
         crop = plan_mod_crop(width, height, cfg.mod_crop, cfg.letterbox_pillarbox_aware)
         cropped_w = width - crop[0] - crop[2]
         cropped_h = height - crop[1] - crop[3]
@@ -914,6 +990,7 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[Geometry
                 scaled=(cropped_w, cropped_h),
                 pad=(0, 0, 0, 0),
                 final=(cropped_w, cropped_h),
+                requires_full_chroma=False,
             )
         )
 
@@ -948,6 +1025,52 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[Geometry
 
     if cfg.letterbox_pillarbox_aware:
         _align_letterbox_pillarbox(plans)
+
+    if policy is OddGeometryPolicy.SUBSAMP_SAFE:
+        for plan, fmt in zip(plans, clip_formats):
+            subsampling_w = _get_subsampling(fmt, "subsampling_w")
+            subsampling_h = _get_subsampling(fmt, "subsampling_h")
+            left, top, right, bottom = plan["crop"]
+
+            if subsampling_h > 0:
+                new_top, new_bottom = _rebalance_axis_even(top, bottom)
+            else:
+                new_top, new_bottom = top, bottom
+
+            if subsampling_w > 0:
+                new_left, new_right = _rebalance_axis_even(left, right)
+            else:
+                new_left, new_right = left, right
+
+            changed_vertical = (new_top, new_bottom) != (top, bottom)
+            changed_horizontal = (new_left, new_right) != (left, right)
+
+            if changed_vertical:
+                logger.warning(
+                    "[GEOMETRY] Rebalanced vertical crop from %s/%s to %s/%s for mod-2 safety; content may shift by 1px",
+                    top,
+                    bottom,
+                    new_top,
+                    new_bottom,
+                )
+            if changed_horizontal:
+                logger.warning(
+                    "[GEOMETRY] Rebalanced horizontal crop from %s/%s to %s/%s for mod-2 safety; content may shift by 1px",
+                    left,
+                    right,
+                    new_left,
+                    new_right,
+                )
+
+            if changed_vertical or changed_horizontal:
+                plan["crop"] = (new_left, new_top, new_right, new_bottom)
+                new_cropped_w = int(plan["width"]) - new_left - new_right
+                new_cropped_h = int(plan["height"]) - new_top - new_bottom
+                if new_cropped_w <= 0 or new_cropped_h <= 0:
+                    raise ScreenshotGeometryError("Rebalanced crop removed all pixels")
+                plan["cropped_w"] = new_cropped_w
+                plan["cropped_h"] = new_cropped_h
+                plan["scaled"] = (new_cropped_w, new_cropped_h)
 
     single_res_target = int(cfg.single_res) if cfg.single_res > 0 else None
     if single_res_target is not None:
@@ -1091,6 +1214,82 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[Geometry
         plan["final"] = (
             scaled_w + pad_left + pad_right,
             scaled_h + pad_top + pad_bottom,
+        )
+
+    for plan, fmt in zip(plans, clip_formats):
+        if policy is OddGeometryPolicy.SUBSAMP_SAFE:
+            subsampling_w = _get_subsampling(fmt, "subsampling_w")
+            subsampling_h = _get_subsampling(fmt, "subsampling_h")
+            pad_left, pad_top, pad_right, pad_bottom = plan["pad"]
+            scaled_w, scaled_h = plan["scaled"]
+
+            new_pad_top, new_pad_bottom = (pad_top, pad_bottom)
+            new_pad_left, new_pad_right = (pad_left, pad_right)
+
+            if subsampling_h > 0:
+                new_pad_top, new_pad_bottom = _rebalance_axis_even(pad_top, pad_bottom)
+                if (new_pad_top, new_pad_bottom) != (pad_top, pad_bottom):
+                    logger.warning(
+                        "[GEOMETRY] Rebalanced vertical padding from %s/%s to %s/%s for mod-2 safety; content may shift by 1px",
+                        pad_top,
+                        pad_bottom,
+                        new_pad_top,
+                        new_pad_bottom,
+                    )
+            if subsampling_w > 0:
+                new_pad_left, new_pad_right = _rebalance_axis_even(pad_left, pad_right)
+                if (new_pad_left, new_pad_right) != (pad_left, pad_right):
+                    logger.warning(
+                        "[GEOMETRY] Rebalanced horizontal padding from %s/%s to %s/%s for mod-2 safety; content may shift by 1px",
+                        pad_left,
+                        pad_right,
+                        new_pad_left,
+                        new_pad_right,
+                    )
+
+            if (
+                (new_pad_top, new_pad_bottom) != (pad_top, pad_bottom)
+                or (new_pad_left, new_pad_right) != (pad_left, pad_right)
+            ):
+                plan["pad"] = (new_pad_left, new_pad_top, new_pad_right, new_pad_bottom)
+                plan["final"] = (
+                    scaled_w + new_pad_left + new_pad_right,
+                    scaled_h + new_pad_top + new_pad_bottom,
+                )
+
+                aligned_pad_left, aligned_pad_top, aligned_pad_right, aligned_pad_bottom = _align_padding_mod(
+                    scaled_w,
+                    scaled_h,
+                    new_pad_left,
+                    new_pad_top,
+                    new_pad_right,
+                    new_pad_bottom,
+                    cfg.mod_crop,
+                    center_pad,
+                )
+
+                if (
+                    aligned_pad_left,
+                    aligned_pad_top,
+                    aligned_pad_right,
+                    aligned_pad_bottom,
+                ) != plan["pad"]:
+                    plan["pad"] = (
+                        aligned_pad_left,
+                        aligned_pad_top,
+                        aligned_pad_right,
+                        aligned_pad_bottom,
+                    )
+                    plan["final"] = (
+                        scaled_w + aligned_pad_left + aligned_pad_right,
+                        scaled_h + aligned_pad_top + aligned_pad_bottom,
+                    )
+
+        plan["requires_full_chroma"] = _compute_requires_full_chroma(
+            fmt,
+            plan["crop"],
+            plan["pad"],
+            policy,
         )
 
     return plans
