@@ -17,6 +17,7 @@ import sys
 import textwrap
 import time
 import traceback
+import uuid
 import webbrowser
 from collections import Counter, defaultdict
 from collections.abc import Mapping as MappingABC
@@ -2713,7 +2714,13 @@ def _write_vspreview_script(
     script_dir = _resolve_workspace_subdir(root, "vspreview", purpose="vspreview workspace")
     script_dir.mkdir(parents=True, exist_ok=True)
     timestamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-    script_path = script_dir / f"vspreview_{timestamp}.py"
+    script_path = script_dir / f"vspreview_{timestamp}_{uuid.uuid4().hex[:8]}.py"
+    while script_path.exists():
+        logger.warning(
+            "VSPreview script %s already exists; generating alternate filename to avoid overwriting",
+            script_path.name,
+        )
+        script_path = script_dir / f"vspreview_{timestamp}_{uuid.uuid4().hex[:8]}.py"
     project_root = PROJECT_ROOT
 
     search_paths = [
