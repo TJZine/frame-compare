@@ -232,6 +232,182 @@ def test_audio_alignment_string_false_vspreview_triggers_measurement(
         )
 
 
+def test_audio_alignment_prompt_reuse_decline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """When prompted and declined, cached offsets are reused without recomputation."""
+
+    cfg = _make_config(tmp_path)
+    cfg.audio_alignment.enable = True
+    cfg.audio_alignment.prompt_reuse_offsets = True
+    cfg.audio_alignment.confirm_with_screenshots = False
+    cfg.audio_alignment.frame_offset_bias = 0
+
+    reference_path = tmp_path / "Ref.mkv"
+    target_path = tmp_path / "Target.mkv"
+    reference_path.write_bytes(b"ref")
+    target_path.write_bytes(b"tgt")
+
+    reference_plan = frame_compare._ClipPlan(
+        path=reference_path,
+        metadata={"label": "Reference"},
+    )
+    target_plan = frame_compare._ClipPlan(
+        path=target_path,
+        metadata={"label": "Target"},
+    )
+
+    cached_entry = {
+        "frames": 6,
+        "seconds": 0.25,
+        "correlation": 0.95,
+        "target_fps": 24.0,
+        "status": "auto",
+    }
+
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "load_offsets",
+        lambda _path: (reference_path.name, {target_path.name: dict(cached_entry)}),
+    )
+    def _fail_measure(*_args: object, **_kwargs: object) -> list[AlignmentMeasurement]:
+        raise AssertionError("measure_offsets should not run")
+
+    def _fail_update(*_args: object, **_kwargs: object) -> tuple[dict[str, int], dict[str, str]]:
+        raise AssertionError("update_offsets_file should not run")
+
+    monkeypatch.setattr(frame_compare.audio_alignment, "measure_offsets", _fail_measure)
+    monkeypatch.setattr(frame_compare.audio_alignment, "update_offsets_file", _fail_update)
+
+    class _TTY:
+        def isatty(self) -> bool:
+            return True
+
+    monkeypatch.setattr(frame_compare.sys, "stdin", _TTY())
+
+    confirm_calls: dict[str, int] = {"count": 0}
+
+    def _fake_confirm(*_args: object, **_kwargs: object) -> bool:
+        confirm_calls["count"] += 1
+        return False
+
+    monkeypatch.setattr(frame_compare.click, "confirm", _fake_confirm)
+
+    summary, display = frame_compare._maybe_apply_audio_alignment(
+        [reference_plan, target_plan],
+        cfg,
+        reference_path,
+        tmp_path,
+        {},
+        reporter=None,
+    )
+
+    assert confirm_calls["count"] == 1
+    assert summary is not None
+    assert display is not None
+    assert summary.suggestion_mode is False
+    assert summary.applied_frames[target_path.name] == 6
+    assert target_plan.trim_start == 6
+    assert summary.final_adjustments[target_path.name] == 6
+    assert display.estimation_line and "reused" in display.estimation_line.lower()
+    assert any("Audio offsets" in line for line in display.offset_lines)
+
+
+def test_audio_alignment_prompt_reuse_affirm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Affirming the prompt (or skipping it) triggers fresh alignment."""
+
+    cfg = _make_config(tmp_path)
+    cfg.audio_alignment.enable = True
+    cfg.audio_alignment.prompt_reuse_offsets = True
+    cfg.audio_alignment.confirm_with_screenshots = False
+    cfg.audio_alignment.frame_offset_bias = 0
+
+    reference_path = tmp_path / "Ref.mkv"
+    target_path = tmp_path / "Target.mkv"
+    reference_path.write_bytes(b"ref")
+    target_path.write_bytes(b"tgt")
+
+    reference_plan = frame_compare._ClipPlan(
+        path=reference_path,
+        metadata={"label": "Reference"},
+    )
+    target_plan = frame_compare._ClipPlan(
+        path=target_path,
+        metadata={"label": "Target"},
+    )
+
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "load_offsets",
+        lambda _path: (reference_path.name, {target_path.name: {"frames": 4, "seconds": 0.2}}),
+    )
+
+    measure_calls: dict[str, int] = {"count": 0}
+
+    def _fake_measure(
+        _ref: Path,
+        targets: Sequence[Path],
+        *,
+        progress_callback,
+        **_kwargs: object,
+    ) -> list[AlignmentMeasurement]:
+        measure_calls["count"] += 1
+        progress_callback(len(targets))
+        return [
+            AlignmentMeasurement(
+                file=targets[0],
+                offset_seconds=0.3,
+                frames=7,
+                correlation=0.9,
+                reference_fps=24.0,
+                target_fps=24.0,
+            )
+        ]
+
+    monkeypatch.setattr(frame_compare.audio_alignment, "measure_offsets", _fake_measure)
+    monkeypatch.setattr(frame_compare.audio_alignment, "probe_audio_streams", lambda _path: [])
+
+    update_calls: dict[str, int] = {"count": 0}
+
+    def _fake_update(
+        _path: Path,
+        _reference_name: str,
+        measurements: Sequence[AlignmentMeasurement],
+        _existing: Mapping[str, Mapping[str, object]],
+        _notes: Mapping[str, str],
+    ) -> tuple[dict[str, int], dict[str, str]]:
+        update_calls["count"] += 1
+        applied = {m.file.name: int(m.frames or 0) for m in measurements}
+        return applied, {name: "auto" for name in applied}
+
+    monkeypatch.setattr(frame_compare.audio_alignment, "update_offsets_file", _fake_update)
+
+    class _TTY:
+        def isatty(self) -> bool:
+            return True
+
+    monkeypatch.setattr(frame_compare.sys, "stdin", _TTY())
+
+    def _confirm_true(*_args: object, **_kwargs: object) -> bool:
+        return True
+
+    monkeypatch.setattr(frame_compare.click, "confirm", _confirm_true)
+
+    summary, display = frame_compare._maybe_apply_audio_alignment(
+        [reference_plan, target_plan],
+        cfg,
+        reference_path,
+        tmp_path,
+        {},
+        reporter=None,
+    )
+
+    assert measure_calls["count"] == 1
+    assert update_calls["count"] == 1
+    assert summary is not None
+    assert display is not None
+    assert summary.applied_frames[target_path.name] == 7
+    assert target_plan.trim_start == 7
+    assert summary.suggestion_mode is False
+
 def test_run_cli_reuses_vspreview_manual_offsets_when_alignment_disabled(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

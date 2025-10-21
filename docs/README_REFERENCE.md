@@ -35,6 +35,7 @@ quick-start configuration paths.
 | `[audio_alignment].max_offset_seconds` | Offset search window. | float | `12.0` |
 | `[audio_alignment].offsets_filename` | Offset output file. | str | `"generated.audio_offsets.toml"` |
 | `[audio_alignment].confirm_with_screenshots` | Require preview confirmation. | bool | `true` |
+| `[audio_alignment].prompt_reuse_offsets` | Ask before recomputing cached offsets, reusing saved values when declined. | bool | `false` |
 | `[audio_alignment].frame_offset_bias` | Bias toward/away from zero. | int | `1` |
 | `--audio-align-track label=index` | Force a specific audio stream. | repeatable flag | `None` |
 <!-- markdownlint-restore -->
