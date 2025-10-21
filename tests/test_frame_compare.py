@@ -760,7 +760,10 @@ def test_launch_vspreview_generates_script(
     assert "'Target': 0,  # Suggested delta +7f" in script_text
     assert "SUGGESTION_MAP" in script_text
     assert "'Target': (7, 0.0)" in script_text
-    assert "Suggested: {suggested_frames:+d}f (~{suggested_seconds:+.3f}s) •" in script_text
+    assert 'seconds_value = f"{suggested_seconds:.3f}"' in script_text
+    assert "Suggested: {suggested_frames:+d}f (~{seconds_value}s) •" in script_text
+    assert 'applied_value = "0" if applied_frames == 0 else f"{applied_frames:+d}"' in script_text
+    assert "Applied in preview: {applied_value}f" in script_text
     assert "preview applied=%+df" in script_text
     assert recorded_command, "VSPreview command should be invoked when interactive"
     assert recorded_command[0][0] == frame_compare.sys.executable

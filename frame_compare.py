@@ -3212,9 +3212,13 @@ def _harmonise_fps(reference_clip, target_clip, label):
 
 def _format_overlay_text(suggested_frames, suggested_seconds, applied_frames):
     applied_label = "baseline" if applied_frames == 0 else "seeded"
+    applied_value = "0" if applied_frames == 0 else f"{{applied_frames:+d}}"
+    seconds_value = f"{{suggested_seconds:.3f}}"
+    if seconds_value == "-0.000":
+        seconds_value = "0.000"
     return (
-        f"Suggested: {suggested_frames:+d}f (~{suggested_seconds:+.3f}s) • "
-        f"Applied in preview: {applied_frames:+d}f ({applied_label}) • "
+        f"Suggested: {{suggested_frames:+d}}f (~{{seconds_value}}s) • "
+        f"Applied in preview: {{applied_value}}f ({{applied_label}}) • "
         "(+ trims target / − pads reference)"
     )
 
