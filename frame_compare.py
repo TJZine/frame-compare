@@ -3572,16 +3572,24 @@ def _report_vspreview_missing(
 
     _activate_vspreview_missing_panel(reporter, manual_command, reason=reason)
     reporter.console.print(
-        Text("VSPreview dependency missing. Install with:", no_wrap=True, overflow="ignore")
+        "VSPreview dependency missing. Install with:",
+        no_wrap=True,
+        overflow="ignore",
     )
     reporter.console.print(
-        Text(f"  Windows: {_VSPREVIEW_WINDOWS_INSTALL}", no_wrap=True, overflow="ignore")
+        f"  Windows: {_VSPREVIEW_WINDOWS_INSTALL}",
+        no_wrap=True,
+        overflow="ignore",
     )
     reporter.console.print(
-        Text(f"  Linux/macOS: {_VSPREVIEW_POSIX_INSTALL}", no_wrap=True, overflow="ignore")
+        f"  Linux/macOS: {_VSPREVIEW_POSIX_INSTALL}",
+        no_wrap=True,
+        overflow="ignore",
     )
     reporter.console.print(
-        Text(f"Then run: {manual_command}", no_wrap=True, overflow="ignore")
+        f"Then run: {manual_command}",
+        no_wrap=True,
+        overflow="ignore",
     )
     reporter.warn(
         "VSPreview dependencies missing. Install with "
