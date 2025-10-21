@@ -2071,7 +2071,7 @@ def _maybe_apply_audio_alignment(
         """
         display_data.warnings.append(f"[AUDIO] {message}")
 
-    vspreview_enabled = _coerce_config_flag(getattr(audio_cfg, "use_vspreview", False))
+    vspreview_enabled = _coerce_config_flag(audio_cfg.use_vspreview)
 
     reference_plan: _ClipPlan | None = None
     if plans:
@@ -4186,7 +4186,7 @@ def run_cli(
         reporter=reporter,
     )
     vspreview_enabled_for_session = _coerce_config_flag(
-        getattr(cfg.audio_alignment, "use_vspreview", False)
+        cfg.audio_alignment.use_vspreview
     )
 
     if (
