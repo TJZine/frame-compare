@@ -2399,11 +2399,15 @@ def test_audio_alignment_block_and_json(
         lambda *args, **kwargs: [measurement],
     )
 
-    monkeypatch.setattr(
-        frame_compare.audio_alignment,
-        "load_offsets",
-        lambda *_args, **_kwargs: ({}, {}),
-    )
+    def fake_load_offsets(*_args: object, **_kwargs: object) -> tuple[Path, dict[str, object]]:
+        """Return a persisted manual offset indicating a 2-frame trim."""
+
+        return (
+            tmp_path / "alignment.toml",
+            {target_path.name: {"frames": 2, "status": "manual"}},
+        )
+
+    monkeypatch.setattr(frame_compare.audio_alignment, "load_offsets", fake_load_offsets)
 
     def fake_update(
         _path: Path,
@@ -2413,23 +2417,14 @@ def test_audio_alignment_block_and_json(
         _negative_notes: Mapping[str, str],
     ) -> tuple[dict[str, int], dict[str, str]]:
         """
-        Produce applied frame indices and status labels for a set of measurement objects.
-        
-        This test helper assigns 0 to the provided reference_name and, for each item in measurements,
-        maps the measurement's file name to its frames value or 0 when frames is falsy. It also
-        marks every measurement's status as "auto".
-        
-        Parameters:
-        	reference_name (str): Identifier to be added to the applied frames mapping with value 0.
-        	measurements (Iterable): Iterable of objects with `file.name` and `frames` attributes.
-        
-        Returns:
-        	tuple: A pair (applied_frames, statuses).
-        	- applied_frames (dict): Mapping of names (reference_name and each measurement.file.name) to integer frame indices.
-        	- statuses (dict): Mapping of each measurement.file.name to the string `"auto"`.
+        Reuse the persisted 2-frame trim instead of the fresh measurement.
+
+        Returns a mapping that keeps the reference at frame 0 and applies a
+        2-frame trim to the target clip regardless of the measured value to
+        emulate loading a previously confirmed offset.
         """
-        applied_frames: dict[str, int] = {reference_name: 0}
-        applied_frames.update({m.file.name: m.frames or 0 for m in measurements})
+
+        applied_frames: dict[str, int] = {reference_name: 0, target_path.name: 2}
         statuses: dict[str, str] = {m.file.name: "auto" for m in measurements}
         return applied_frames, statuses
 
@@ -2463,7 +2458,7 @@ def test_audio_alignment_block_and_json(
     assert audio_json["reference_stream"].startswith("Clip A")
     assert audio_json["target_stream"]["Clip B"].startswith("aac/jpn")
     assert audio_json["offsets_sec"]["Clip B"] == pytest.approx(0.1)
-    assert audio_json["offsets_frames"]["Clip B"] == 3
+    assert audio_json["offsets_frames"]["Clip B"] == 2
     assert audio_json["preview_paths"] == []
     assert audio_json["confirmed"] == "auto"
     tonemap_json = payload["tonemap"]

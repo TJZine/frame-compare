@@ -2081,6 +2081,40 @@ def _maybe_apply_audio_alignment(
 
     existing_entries_cache: Dict[str, Dict[str, object]] | None = None
 
+    def _set_display_applied_offsets(summary: _AudioAlignmentSummary) -> None:
+        """Populate ``display_data.json_offsets_frames`` with applied trim values."""
+
+        if not plans:
+            return
+
+        source: Mapping[str, int] | None = None
+        normalise_manual = False
+        if summary.final_adjustments:
+            source = summary.final_adjustments
+        elif summary.manual_trim_starts:
+            source = summary.manual_trim_starts
+            normalise_manual = True
+
+        if not source:
+            return
+
+        applied_offsets: Dict[str, int] = {}
+        for plan in plans:
+            plan_name = plan.path.name
+            label = name_to_label.get(plan_name, plan_name)
+            raw_value = source.get(plan_name)
+            if raw_value is None:
+                value = 0
+            else:
+                normalised = int(raw_value)
+                if normalise_manual:
+                    normalised = max(normalised, 0)
+                value = normalised
+            applied_offsets[label] = value
+
+        if applied_offsets:
+            display_data.json_offsets_frames = applied_offsets
+
     def _load_existing_entries() -> Dict[str, Dict[str, object]]:
         nonlocal existing_entries_cache
         if existing_entries_cache is None:
@@ -2179,6 +2213,7 @@ def _maybe_apply_audio_alignment(
 
     reused_summary = _reuse_vspreview_manual_offsets_if_available(reference_plan)
     if reused_summary is not None:
+        _set_display_applied_offsets(reused_summary)
         if not audio_cfg.enable:
             display_data.warnings.append(
                 "[AUDIO] VSPreview manual alignment enabled — audio alignment disabled."
@@ -2218,6 +2253,7 @@ def _maybe_apply_audio_alignment(
                 suggestion_mode=True,
                 manual_trim_starts=manual_trim_starts,
             )
+            _set_display_applied_offsets(summary)
             return summary, display_data
         return None, display_data
     if len(plans) < 2:
@@ -2686,6 +2722,7 @@ def _maybe_apply_audio_alignment(
                 suggestion_mode=True,
                 manual_trim_starts=manual_trim_starts,
             )
+            _set_display_applied_offsets(summary)
             return summary, display_data
 
         applied_frames, statuses = audio_alignment.update_offsets_file(
@@ -2739,6 +2776,7 @@ def _maybe_apply_audio_alignment(
             suggestion_mode=False,
             manual_trim_starts=manual_trim_starts,
         )
+        _set_display_applied_offsets(summary)
         return summary, display_data
     except audio_alignment.AudioAlignmentError as exc:
         raise CLIAppError(
