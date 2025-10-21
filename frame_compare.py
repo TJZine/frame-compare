@@ -3571,26 +3571,40 @@ def _report_vspreview_missing(
     """Record missing VSPreview dependencies in layout output and JSON tail."""
 
     _activate_vspreview_missing_panel(reporter, manual_command, reason=reason)
-    reporter.console.print(
+    width_lines = [
         "VSPreview dependency missing. Install with:",
-        no_wrap=True,
-        overflow="ignore",
-    )
-    reporter.console.print(
         f"  Windows: {_VSPREVIEW_WINDOWS_INSTALL}",
-        no_wrap=True,
-        overflow="ignore",
-    )
-    reporter.console.print(
         f"  Linux/macOS: {_VSPREVIEW_POSIX_INSTALL}",
-        no_wrap=True,
-        overflow="ignore",
-    )
-    reporter.console.print(
         f"Then run: {manual_command}",
-        no_wrap=True,
-        overflow="ignore",
-    )
+    ]
+    target_width = max(len(line) for line in width_lines)
+    original_width = getattr(reporter.console, "_width", None)
+    width_changed = False
+    if hasattr(reporter.console, "_width"):
+        current_width = reporter.console.width
+        if current_width < target_width:
+            reporter.console._width = target_width
+            width_changed = True
+    try:
+        reporter.console.print(
+            width_lines[0],
+            no_wrap=True,
+        )
+        reporter.console.print(
+            width_lines[1],
+            no_wrap=True,
+        )
+        reporter.console.print(
+            width_lines[2],
+            no_wrap=True,
+        )
+        reporter.console.print(
+            width_lines[3],
+            no_wrap=True,
+        )
+    finally:
+        if width_changed:
+            reporter.console._width = original_width
     reporter.warn(
         "VSPreview dependencies missing. Install with "
         f"'{_VSPREVIEW_WINDOWS_INSTALL}' (Windows) or "
