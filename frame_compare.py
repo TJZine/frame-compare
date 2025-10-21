@@ -3059,7 +3059,7 @@ def _write_vspreview_script(
         f"""\
         {{
         'label': {reference_label!r},
-        'path': r'{str(reference_plan.path)}',
+        'path': {str(reference_plan.path)!r},
         'trim_start': {int(reference_plan.trim_start)},
         'trim_end': {reference_trim_end!r},
         'fps_override': {tuple(reference_plan.fps_override) if reference_plan.fps_override else None!r},
@@ -3092,7 +3092,7 @@ def _write_vspreview_script(
                 f"""\
                 {label!r}: {{
                     'label': {label!r},
-                    'path': r'{str(plan.path)}',
+                    'path': {str(plan.path)!r},
                     'trim_start': {int(plan.trim_start)},
                     'trim_end': {trim_end_value!r},
                     'fps_override': {fps_override!r},
@@ -3125,8 +3125,8 @@ def _write_vspreview_script(
 import sys
 from pathlib import Path
 
-WORKSPACE_ROOT = Path(r"{root}")
-PROJECT_ROOT = Path(r"{project_root}")
+WORKSPACE_ROOT = Path({str(root)!r})
+PROJECT_ROOT = Path({str(project_root)!r})
 EXTRA_PATHS = [{extra_paths_literal}]
 for candidate in EXTRA_PATHS:
     if candidate not in sys.path:
@@ -3149,18 +3149,18 @@ TARGETS = {{
 {targets_literal}
 }}
 
-  OFFSET_MAP = {{
-  {offsets_literal}
-  }}
+OFFSET_MAP = {{
+{offsets_literal}
+}}
 
-  SUGGESTION_MAP = {{
-  {suggestions_literal}
-  }}
+SUGGESTION_MAP = {{
+{suggestions_literal}
+}}
 
-  PREVIEW_MODE = {preview_mode_value!r}
-  SHOW_SUGGESTED_OVERLAY = {show_overlay!r}
+PREVIEW_MODE = {preview_mode_value!r}
+SHOW_SUGGESTED_OVERLAY = {show_overlay!r}
 
-  core = vs.core
+core = vs.core
 
 
 def _load_clip(info):
@@ -3247,39 +3247,39 @@ def _maybe_apply_overlay(clip, suggested_frames, suggested_seconds, applied_fram
         return clip
 
 
-  print("Reference clip:", REFERENCE['label'])
-  print("VSPreview mode:", PREVIEW_MODE)
-  if not TARGETS:
-      print("No target clips defined; edit TARGETS and OFFSET_MAP to add entries.")
+print("Reference clip:", REFERENCE['label'])
+print("VSPreview mode:", PREVIEW_MODE)
+if not TARGETS:
+    print("No target clips defined; edit TARGETS and OFFSET_MAP to add entries.")
 
-  slot = 0
-  for label, info in TARGETS.items():
-      reference_clip = _load_clip(REFERENCE)
-      target_clip = _load_clip(info)
-      reference_clip, target_clip = _harmonise_fps(reference_clip, target_clip, label)
-      offset_frames = int(OFFSET_MAP.get(label, 0))
-      suggested_entry = SUGGESTION_MAP.get(label, (0, 0.0))
-      suggested_frames = int(suggested_entry[0])
-      suggested_seconds = float(suggested_entry[1])
-      ref_view, tgt_view = _apply_offset(reference_clip, target_clip, offset_frames)
-      ref_view = _maybe_apply_overlay(ref_view, suggested_frames, suggested_seconds, offset_frames)
-      tgt_view = _maybe_apply_overlay(tgt_view, suggested_frames, suggested_seconds, offset_frames)
-      ref_view.set_output(slot)
-      tgt_view.set_output(slot + 1)
-      applied_label = "baseline" if offset_frames == 0 else "seeded"
-      print(
-          "Target '%s': baseline trim=%sf (%s), suggested delta=%+df (~%+.3fs), preview applied=%+df (%s mode)"
-          % (
-              label,
-              info.get('manual_trim', 0),
-              info.get('manual_trim_description', 'n/a'),
-              suggested_frames,
-              suggested_seconds,
-              offset_frames,
-              applied_label,
-          )
-      )
-      slot += 2
+slot = 0
+for label, info in TARGETS.items():
+    reference_clip = _load_clip(REFERENCE)
+    target_clip = _load_clip(info)
+    reference_clip, target_clip = _harmonise_fps(reference_clip, target_clip, label)
+    offset_frames = int(OFFSET_MAP.get(label, 0))
+    suggested_entry = SUGGESTION_MAP.get(label, (0, 0.0))
+    suggested_frames = int(suggested_entry[0])
+    suggested_seconds = float(suggested_entry[1])
+    ref_view, tgt_view = _apply_offset(reference_clip, target_clip, offset_frames)
+    ref_view = _maybe_apply_overlay(ref_view, suggested_frames, suggested_seconds, offset_frames)
+    tgt_view = _maybe_apply_overlay(tgt_view, suggested_frames, suggested_seconds, offset_frames)
+    ref_view.set_output(slot)
+    tgt_view.set_output(slot + 1)
+    applied_label = "baseline" if offset_frames == 0 else "seeded"
+    print(
+        "Target '%s': baseline trim=%sf (%s), suggested delta=%+df (~%+.3fs), preview applied=%+df (%s mode)"
+        % (
+            label,
+            info.get('manual_trim', 0),
+            info.get('manual_trim_description', 'n/a'),
+            suggested_frames,
+            suggested_seconds,
+            offset_frames,
+            applied_label,
+        )
+    )
+    slot += 2
 
 print("VSPreview outputs: reference on even slots, target on odd slots (0↔1, 2↔3, ...).")
 print("Edit OFFSET_MAP values and press Ctrl+R in VSPreview to reload the script.")
