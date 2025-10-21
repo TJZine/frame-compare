@@ -556,6 +556,9 @@ def test_run_cli_reuses_vspreview_manual_offsets_when_alignment_disabled(
     assert cache_json["status"] == "reused"
     analysis_json = _expect_mapping(result.json_tail["analysis"])
     assert analysis_json["cache_reused"] is True
+    assert result.json_tail["vspreview_mode"] == "baseline"
+    assert result.json_tail["suggested_frames"] == 0
+    assert result.json_tail["suggested_seconds"] == 0.0
 
 
 def test_audio_alignment_vspreview_suggestion_mode(
@@ -709,7 +712,7 @@ def test_launch_vspreview_generates_script(
     monkeypatch.setattr(
         frame_compare.subprocess,
         "run",
-        lambda cmd, env=None, check=False: recorded_command.append(list(cmd)) or _Result(0),
+        lambda cmd, env=None, check=False, **kwargs: recorded_command.append(list(cmd)) or _Result(0),
     )
 
     display = frame_compare._AudioAlignmentDisplayData(
@@ -834,7 +837,11 @@ def test_launch_vspreview_baseline_mode_persists_manual_offsets(
     monkeypatch.setattr(
         frame_compare.subprocess,
         "run",
-        lambda cmd, env=None, check=False: types.SimpleNamespace(returncode=0),
+        lambda cmd, env=None, check=False, **kwargs: types.SimpleNamespace(
+            returncode=0,
+            stdout="",
+            stderr="",
+        ),
     )
 
     monkeypatch.setattr(
@@ -1012,6 +1019,7 @@ def _make_json_tail_stub() -> frame_compare.JsonTail:
         "suggestion_mode": True,
         "suggested_frames": {},
         "manual_trim_starts": {},
+        "use_vspreview": False,
         "vspreview_manual_offsets": {},
         "vspreview_manual_deltas": {},
         "vspreview_reference_trim": None,
@@ -1066,6 +1074,9 @@ def _make_json_tail_stub() -> frame_compare.JsonTail:
             "config_path": "",
             "legacy_config": False,
         },
+        "vspreview_mode": None,
+        "suggested_frames": 0,
+        "suggested_seconds": 0.0,
     }
     return tail
 
