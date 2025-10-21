@@ -47,6 +47,7 @@ from typing import (
 import click
 from rich import print
 from rich.console import Console
+from rich.text import Text
 from rich.markup import escape
 from rich.progress import (
     BarColumn,
@@ -3570,6 +3571,12 @@ def _report_vspreview_missing(
     """Record missing VSPreview dependencies in layout output and JSON tail."""
 
     _activate_vspreview_missing_panel(reporter, manual_command, reason=reason)
+    console_message = (
+        "VSPreview dependency missing. Install with "
+        f"{_VSPREVIEW_WINDOWS_INSTALL} (Windows) or "
+        f"{_VSPREVIEW_POSIX_INSTALL} (Linux/macOS), then run {manual_command}."
+    )
+    reporter.console.print(Text(console_message, no_wrap=True, overflow="ignore"))
     reporter.warn(
         "VSPreview dependencies missing. Install with "
         f"'{_VSPREVIEW_WINDOWS_INSTALL}' (Windows) or "
