@@ -3219,7 +3219,7 @@ def _format_overlay_text(suggested_frames, suggested_seconds, applied_frames):
     return (
         f"Suggested: {{suggested_frames:+d}}f (~{{seconds_value}}s) • "
         f"Applied in preview: {{applied_value}}f ({{applied_label}}) • "
-        "(+ trims target / − pads reference)"
+        "(+ trims target / - pads reference)"
     )
 
 
