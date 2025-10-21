@@ -27,6 +27,10 @@ vapoursynth = [
     "vapoursynth>=72",
 ]
 audio = []  # backwards compatibility: audio extras are now core
+preview = [
+    "vspreview>=0.7",
+    "PySide6>=6.6",
+]
 
 [dependency-groups]
 dev = [

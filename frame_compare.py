@@ -11,6 +11,7 @@ import math
 import os
 import random
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -46,6 +47,7 @@ from typing import (
 import click
 from rich import print
 from rich.console import Console
+from rich.text import Text
 from rich.markup import escape
 from rich.progress import (
     BarColumn,
@@ -119,6 +121,32 @@ _DEFAULT_CONFIG_HELP: Final[str] = (
     "Optional explicit path to config.toml. When omitted, Frame Compare looks for "
     "ROOT/config/config.toml (see --root/FRAME_COMPARE_ROOT)."
 )
+
+_VSPREVIEW_WINDOWS_INSTALL: Final[str] = (
+    "uv add frame-compare --extra preview  # fallback: uv add vspreview PySide6"
+)
+_VSPREVIEW_POSIX_INSTALL: Final[str] = (
+    "uv add frame-compare --extra preview  # fallback: uv add vspreview PySide6"
+)
+_VSPREVIEW_MANUAL_COMMAND_TEMPLATE: Final[str] = "{python} -m vspreview {script}"
+
+
+def _format_vspreview_manual_command(script_path: Path) -> str:
+    """Build a manual VSPreview command using the active Python interpreter."""
+
+    python_exe = sys.executable or "python"
+    script_arg = str(script_path)
+    if os.name == "nt":
+        if " " in python_exe and not python_exe.startswith('"'):
+            python_exe = f'"{python_exe}"'
+        if " " in script_arg and not script_arg.startswith('"'):
+            script_arg = f'"{script_arg}"'
+    else:
+        python_exe = shlex.quote(python_exe)
+        script_arg = shlex.quote(script_arg)
+    return _VSPREVIEW_MANUAL_COMMAND_TEMPLATE.format(
+        python=python_exe, script=script_arg
+    )
 
 
 def _coerce_config_flag(value: object) -> bool:
@@ -353,6 +381,7 @@ class JsonTail(TypedDict):
     vspreview_mode: Optional[str]
     suggested_frames: int
     suggested_seconds: float
+    vspreview_offer: Optional[dict[str, object]]
 
 
 class ClipRecord(TypedDict):
@@ -3486,6 +3515,105 @@ def _apply_vspreview_manual_offsets(
     )
 
     reporter.line("VSPreview offsets saved to offsets file with manual status.")
+
+
+def _resolve_vspreview_command(script_path: Path) -> tuple[list[str] | None, str | None]:
+    """Return the VSPreview launch command or a reason string when unavailable."""
+
+    executable = shutil.which("vspreview")
+    if executable:
+        return [executable, str(script_path)], None
+    module_spec = importlib.util.find_spec("vspreview")
+    if module_spec is None:
+        return None, "vspreview-missing"
+    backend_spec = importlib.util.find_spec("PySide6") or importlib.util.find_spec("PyQt5")
+    if backend_spec is None:
+        return None, "vspreview-missing"
+    return [sys.executable, "-m", "vspreview", str(script_path)], None
+
+
+def _activate_vspreview_missing_panel(
+    reporter: CliOutputManager,
+    manual_command: str,
+    *,
+    reason: str,
+) -> None:
+    """Update layout state and render the VSPreview missing-dependency panel."""
+
+    vspreview_block = reporter.values.get("vspreview")
+    if not isinstance(vspreview_block, dict):
+        vspreview_block = {}
+    missing_block = vspreview_block.get("missing")
+    if not isinstance(missing_block, dict):
+        missing_block = {
+            "windows_install": _VSPREVIEW_WINDOWS_INSTALL,
+            "posix_install": _VSPREVIEW_POSIX_INSTALL,
+        }
+    else:
+        missing_block.setdefault("windows_install", _VSPREVIEW_WINDOWS_INSTALL)
+        missing_block.setdefault("posix_install", _VSPREVIEW_POSIX_INSTALL)
+    missing_block["command"] = manual_command
+    missing_block["reason"] = reason
+    missing_block["active"] = True
+    vspreview_block["missing"] = missing_block
+    vspreview_block["script_command"] = manual_command
+    reporter.update_values({"vspreview": vspreview_block})
+    reporter.render_sections(["vspreview_missing"])
+
+
+def _report_vspreview_missing(
+    reporter: CliOutputManager,
+    json_tail: JsonTail,
+    manual_command: str,
+    *,
+    reason: str,
+) -> None:
+    """Record missing VSPreview dependencies in layout output and JSON tail."""
+
+    _activate_vspreview_missing_panel(reporter, manual_command, reason=reason)
+    width_lines = [
+        "VSPreview dependency missing. Install with:",
+        f"  Windows: {_VSPREVIEW_WINDOWS_INSTALL}",
+        f"  Linux/macOS: {_VSPREVIEW_POSIX_INSTALL}",
+        f"Then run: {manual_command}",
+    ]
+    target_width = max(len(line) for line in width_lines)
+    original_width = getattr(reporter.console, "_width", None)
+    width_changed = False
+    if hasattr(reporter.console, "_width"):
+        current_width = reporter.console.width
+        if current_width < target_width:
+            reporter.console._width = target_width
+            width_changed = True
+    try:
+        reporter.console.print(
+            width_lines[0],
+            no_wrap=True,
+        )
+        reporter.console.print(
+            width_lines[1],
+            no_wrap=True,
+        )
+        reporter.console.print(
+            width_lines[2],
+            no_wrap=True,
+        )
+        reporter.console.print(
+            width_lines[3],
+            no_wrap=True,
+        )
+    finally:
+        if width_changed:
+            reporter.console._width = original_width
+    reporter.warn(
+        "VSPreview dependencies missing. Install with "
+        f"'{_VSPREVIEW_WINDOWS_INSTALL}' (Windows) or "
+        f"'{_VSPREVIEW_POSIX_INSTALL}' (Linux/macOS), then run "
+        f"'{manual_command}'."
+    )
+    json_tail["vspreview_offer"] = {"vspreview_offered": False, "reason": reason}
+
+
 def _launch_vspreview(
     plans: Sequence[_ClipPlan],
     summary: _AudioAlignmentSummary | None,
@@ -3515,8 +3643,34 @@ def _launch_vspreview(
         "Edit the OFFSET_MAP values inside the script and reload VSPreview (Ctrl+R) after changes."
     )
 
+    manual_command = _format_vspreview_manual_command(script_path)
+    vspreview_block = reporter.values.get("vspreview")
+    if not isinstance(vspreview_block, dict):
+        vspreview_block = {}
+    vspreview_block["script_path"] = str(script_path)
+    vspreview_block["script_command"] = manual_command
+    missing_block = vspreview_block.get("missing")
+    if not isinstance(missing_block, dict):
+        missing_block = {
+            "active": False,
+            "windows_install": _VSPREVIEW_WINDOWS_INSTALL,
+            "posix_install": _VSPREVIEW_POSIX_INSTALL,
+            "command": manual_command,
+            "reason": "",
+        }
+    else:
+        missing_block["active"] = False
+        missing_block.setdefault("windows_install", _VSPREVIEW_WINDOWS_INSTALL)
+        missing_block.setdefault("posix_install", _VSPREVIEW_POSIX_INSTALL)
+        missing_block["command"] = manual_command
+        missing_block.setdefault("reason", "")
+    vspreview_block["missing"] = missing_block
+    reporter.update_values({"vspreview": vspreview_block})
+
     if not sys.stdin.isatty():
-        reporter.warn("VSPreview launch skipped (non-interactive session). Open the script manually if needed.")
+        reporter.warn(
+            "VSPreview launch skipped (non-interactive session). Open the script manually if needed."
+        )
         return
 
     env = dict(os.environ)
@@ -3524,19 +3678,13 @@ def _launch_vspreview(
     if search_paths:
         env["VAPOURSYNTH_PYTHONPATH"] = os.pathsep.join(str(Path(path).expanduser()) for path in search_paths if path)
 
-    command: list[str] | None = None
-    executable = shutil.which("vspreview")
-    if executable:
-        command = [executable, str(script_path)]
-    else:
-        module_spec = importlib.util.find_spec("vspreview")
-        if module_spec is not None:
-            command = [sys.executable, "-m", "vspreview", str(script_path)]
-
+    command, missing_reason = _resolve_vspreview_command(script_path)
     if command is None:
-        reporter.warn(
-            "VSPreview executable not found. Run it manually, for example: "
-            f"'python -m vspreview {script_path}'."
+        _report_vspreview_missing(
+            reporter,
+            json_tail,
+            manual_command,
+            reason=missing_reason or "vspreview-missing",
         )
         return
 
@@ -3557,9 +3705,11 @@ def _launch_vspreview(
                 text=True,
             )
     except FileNotFoundError:
-        reporter.warn(
-            "VSPreview executable not found. Run it manually, for example: "
-            f"'python -m vspreview {script_path}'."
+        _report_vspreview_missing(
+            reporter,
+            json_tail,
+            manual_command,
+            reason="vspreview-missing",
         )
         return
     audio_block["vspreview_invoked"] = True
@@ -3978,6 +4128,7 @@ def run_cli(
         "vspreview_mode": vspreview_mode_value,
         "suggested_frames": 0,
         "suggested_seconds": 0.0,
+        "vspreview_offer": None,
     }
 
     audio_track_override_map = _parse_audio_track_overrides(audio_track_overrides or [])
@@ -4000,6 +4151,15 @@ def run_cli(
             "mode_display": vspreview_mode_display,
             "suggested_frames": 0,
             "suggested_seconds": 0.0,
+            "script_path": None,
+            "script_command": "",
+            "missing": {
+                "active": False,
+                "windows_install": _VSPREVIEW_WINDOWS_INSTALL,
+                "posix_install": _VSPREVIEW_POSIX_INSTALL,
+                "command": "",
+                "reason": "",
+            },
             "clips": {
                 "ref": {"label": ""},
                 "tgt": {"label": ""},
@@ -4672,6 +4832,29 @@ def run_cli(
     vspreview_block["mode_display"] = vspreview_mode_display
     vspreview_block["suggested_frames"] = vspreview_suggested_frames_value
     vspreview_block["suggested_seconds"] = vspreview_suggested_seconds_value
+    existing_vspreview = reporter.values.get("vspreview")
+    if isinstance(existing_vspreview, dict):
+        missing_layout_block = vspreview_block.get("missing")
+        missing_existing_block = existing_vspreview.get("missing")
+        if isinstance(missing_existing_block, dict):
+            merged_missing_block: dict[str, Any] = (
+                dict(missing_layout_block)
+                if isinstance(missing_layout_block, dict)
+                else {}
+            )
+            merged_missing_block.update(missing_existing_block)
+            vspreview_block["missing"] = merged_missing_block
+        script_path_value = existing_vspreview.get("script_path")
+        if isinstance(script_path_value, str) and script_path_value:
+            vspreview_block["script_path"] = script_path_value
+        script_command_value = existing_vspreview.get("script_command")
+        if isinstance(script_command_value, str) and script_command_value:
+            vspreview_block["script_command"] = script_command_value
+        for key, value in existing_vspreview.items():
+            if key in {"clips", "missing", "script_path", "script_command"}:
+                continue
+            if key not in vspreview_block:
+                vspreview_block[key] = value
     layout_data["vspreview"] = vspreview_block
 
     trims_per_clip = json_tail["trims"]["per_clip"]
@@ -4707,7 +4890,7 @@ def run_cli(
         layout_data["trims"]["tgt"] = _trim_entry(clip_records[1]["label"])
 
     reporter.update_values(layout_data)
-    reporter.render_sections(["vspreview_info", "at_a_glance", "discover", "prepare"])
+    reporter.render_sections(["vspreview_missing", "vspreview_info", "at_a_glance", "discover", "prepare"])
     reporter.render_sections(["audio_align"])
     reporter.render_sections(["analyze"])
     if tmdb_notes:
