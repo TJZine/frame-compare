@@ -3582,7 +3582,7 @@ def _report_vspreview_missing(
     )
     reporter.console.print(
         Text(f"Then run: {manual_command}", no_wrap=True, overflow="ignore")
-    
+    )
     reporter.warn(
         "VSPreview dependencies missing. Install with "
         f"'{_VSPREVIEW_WINDOWS_INSTALL}' (Windows) or "
