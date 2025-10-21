@@ -237,7 +237,7 @@ def test_audio_alignment_prompt_reuse_decline(tmp_path: Path, monkeypatch: pytes
 
     cfg = _make_config(tmp_path)
     cfg.audio_alignment.enable = True
-    cfg.audio_alignment.prompt_reuse_offsets = True  # type: ignore[attr-defined]
+    cfg.audio_alignment.prompt_reuse_offsets = True
     cfg.audio_alignment.confirm_with_screenshots = False
     cfg.audio_alignment.frame_offset_bias = 0
 
@@ -316,7 +316,7 @@ def test_audio_alignment_prompt_reuse_affirm(tmp_path: Path, monkeypatch: pytest
 
     cfg = _make_config(tmp_path)
     cfg.audio_alignment.enable = True
-    cfg.audio_alignment.prompt_reuse_offsets = True  # type: ignore[attr-defined]
+    cfg.audio_alignment.prompt_reuse_offsets = True
     cfg.audio_alignment.confirm_with_screenshots = False
     cfg.audio_alignment.frame_offset_bias = 0
 

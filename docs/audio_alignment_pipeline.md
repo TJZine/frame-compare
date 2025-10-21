@@ -28,6 +28,7 @@ Key options live under `[audio_alignment]` in `config.toml`. Defaults and intent
 | `max_offset_seconds` | Absolute cap for auto-applied offsets. | `12.0` |
 | `offsets_filename` | Relative path of the persisted offsets TOML. | `generated.audio_offsets.toml` |
 | `confirm_with_screenshots` | Whether to pause for preview confirmation. | `true` |
+| `prompt_reuse_offsets` | Prompt before recomputing cached offsets; declining reuses the saved values. | `false` |
 | `random_seed` | Seed for preview and inspection frame sampling. | `2025` |
 | `frame_offset_bias` | Integer bias nudging suggested frame counts toward/away from zero. | `1` |
 
