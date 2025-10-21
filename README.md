@@ -107,6 +107,32 @@ uv run python frame_compare.py
 When VSPreview is available on `PATH` (or importable via `python -m vspreview`) the CLI will generate a temporary script under the workspace, launch the preview, and summarise any existing manual trims before prompting for a delta. In headless or non-interactive sessions the script path is still printed so you can open it manually later.
 Existing manual trims are reported using each clip's display label (the friendly slow.pics/TMDB label when available, otherwise the filename) so you can quickly see which trims are already in effect before accepting a new delta.
 
+### Install & Run VSPreview
+
+Install the preview tooling the first time you enable `[audio_alignment].use_vspreview = true`:
+
+```powershell
+uv add vspreview PySide6
+```
+
+```bash
+uv add vspreview PyQt5
+```
+
+Persist the extras so collaborators can opt in with `uv run --with .[preview]`:
+
+```toml
+[project.optional-dependencies]
+preview = ["vspreview>=0.7", "PySide6>=6.6"]
+# or on Linux/macOS: ["vspreview>=0.7", "PyQt5>=5.15"]
+```
+
+Run VSPreview against the generated script without permanently installing the extras:
+
+```bash
+uv run --with .[preview] -- python -m vspreview path/to/vspreview_*.py
+```
+
 ## Configuration essentials
 
 Frame Compare looks for its configuration at ``ROOT/config/config.toml``, where

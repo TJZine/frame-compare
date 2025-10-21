@@ -90,6 +90,30 @@ The optional VSPreview flow extends manual trimming without mutating clip plans 
 - Install VSPreview so it is discoverable on `PATH` (`vspreview`) or importable via `python -m vspreview`. 【F:frame_compare.py†L3145-L3162】
 - Run from an interactive terminal; non-interactive sessions skip launching but still write the script path for later review. 【F:frame_compare.py†L3139-L3144】
 
+Install dependencies with platform-specific Qt bindings:
+
+```powershell
+uv add vspreview PySide6
+```
+
+```bash
+uv add vspreview PyQt5
+```
+
+Project maintainers can capture the optional group so collaborators re-use it with `uv run --with .[preview]`:
+
+```toml
+[project.optional-dependencies]
+preview = ["vspreview>=0.7", "PySide6>=6.6"]
+# or on Linux/macOS: ["vspreview>=0.7", "PyQt5>=5.15"]
+```
+
+To launch VSPreview on-demand without persisting the extras, run:
+
+```bash
+uv run --with .[preview] -- python -m vspreview path/to/vspreview_*.py
+```
+
 ### Workflow overview
 
 1. After audio alignment completes (or is skipped), the CLI summarises the measured offsets and any existing manual trims, then offers VSPreview guidance instead of auto-applying changes. 【F:frame_compare.py†L2056-L2138】【F:frame_compare.py†L2242-L2281】
@@ -99,6 +123,7 @@ The optional VSPreview flow extends manual trimming without mutating clip plans 
 ### Headless and fallback behaviour
 
 - In CI/headless runs (`stdin` not a TTY) or when VSPreview binaries are missing, the CLI logs a warning, records the script path in the JSON tail, and continues with the legacy manual-edit workflow. 【F:frame_compare.py†L3139-L3173】【F:frame_compare.py†L3959-L3976】
+- When VSPreview or its Qt backend cannot be imported, the CLI prints a dedicated warning panel with copy/paste install commands, records the `python -m vspreview …` invocation in the output, and appends `{ "vspreview_offered": false, "reason": "vspreview-missing" }` to the JSON tail so automations can detect the fallback path. 【F:frame_compare.py†L3528-L3570】【F:cli_layout.v1.json†L54-L76】
 - Persisted VSPreview offsets take precedence on subsequent runs—even when `[audio_alignment].enable = false`; the CLI surfaces them as the new baseline and suppresses repeated prompts unless you delete or edit the offsets file. 【F:frame_compare.py†L2066-L2143】【F:frame_compare.py†L2286-L2336】【F:frame_compare.py†L3098-L3107】
 
 ## Gotchas & edge cases

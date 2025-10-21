@@ -69,6 +69,19 @@
   ],
   "sections": [
     {
+      "id": "vspreview_missing",
+      "type": "box",
+      "title": "VSPreview dependency missing",
+      "when": "vspreview.missing.active",
+      "lines": [
+        "[[warn]]VSPreview is enabled but missing dependencies.[[/]]",
+        "[[key]]Install (Windows)[[/]] [[value]]{vspreview.missing.windows_install}[[/]]",
+        "[[key]]Install (Linux/macOS)[[/]] [[value]]{vspreview.missing.posix_install}[[/]]",
+        "[[key]]Manual command[[/]] [[value]]{vspreview.missing.command}[[/]]",
+        "[[key]]Script[[/]] [[path]]{vspreview.script_path}[[/]]"
+      ]
+    },
+    {
       "id": "vspreview_info",
       "type": "box",
       "title": "VSPreview Information",

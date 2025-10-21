@@ -135,6 +135,15 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
             "mode_display": "baseline (0f applied to both clips)",
             "suggested_frames": 3,
             "suggested_seconds": 0.125,
+            "script_path": str(tmp_path / "vspreview_script.py"),
+            "script_command": f"python -m vspreview {tmp_path / 'vspreview_script.py'}",
+            "missing": {
+                "active": False,
+                "windows_install": "uv add vspreview PySide6",
+                "posix_install": "uv add vspreview PyQt5",
+                "command": "",
+                "reason": "",
+            },
             "clips": {
                 "ref": {"label": "Reference"},
                 "tgt": {"label": "Target"},
@@ -337,6 +346,28 @@ def test_layout_renderer_sample_output(tmp_path, monkeypatch):
         "section[summary] header role → section_summary",
     ):
         assert any(expected in log for log in section_logs), expected
+
+
+def test_layout_renders_vspreview_missing_panel(tmp_path: Path) -> None:
+    layout_path = _project_root() / "cli_layout.v1.json"
+    layout = load_cli_layout(layout_path)
+    console = Console(width=100, record=True, color_system=None)
+    renderer = CliLayoutRenderer(layout, console, quiet=False, verbose=False, no_color=True)
+
+    sample_values = _sample_values(tmp_path)
+    sample_values["vspreview"]["missing"]["active"] = True
+    sample_values["vspreview"]["missing"]["command"] = sample_values["vspreview"]["script_command"]
+    sample_values["vspreview"]["script_path"] = str(tmp_path / "vspreview_script.py")
+
+    flags: Dict[str, Any] = {"verbose": False, "quiet": False, "no_color": True}
+    renderer.bind_context(sample_values, flags)
+    missing_section = next(section for section in layout.sections if section["id"] == "vspreview_missing")
+    renderer.render_section(missing_section, sample_values, flags)
+
+    output_text = console.export_text()
+    assert "VSPreview dependency missing" in output_text
+    assert "uv add vspreview PySide6" in output_text
+    assert "python -m vspreview" in output_text
 
 
 def test_summary_output_frames_full_list_without_ellipsis(tmp_path: Path) -> None:

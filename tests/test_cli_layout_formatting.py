@@ -120,6 +120,15 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
             "mode_display": "baseline (0f applied to both clips)",
             "suggested_frames": 3,
             "suggested_seconds": 0.125,
+            "script_path": str(tmp_path / "vspreview_script.py"),
+            "script_command": f"python -m vspreview {tmp_path / 'vspreview_script.py'}",
+            "missing": {
+                "active": False,
+                "windows_install": "uv add vspreview PySide6",
+                "posix_install": "uv add vspreview PyQt5",
+                "command": "",
+                "reason": "",
+            },
             "clips": {
                 "ref": {"label": "Reference"},
                 "tgt": {"label": "Target"},
