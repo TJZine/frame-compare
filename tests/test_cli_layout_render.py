@@ -119,6 +119,7 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
         },
         "audio_alignment": {
             "enabled": True,
+            "use_vspreview": True,
             "offsets_sec": 0.123,
             "offsets_frames": 3,
             "corr": 0.95,
@@ -128,6 +129,16 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
             "confirmed": "auto",
             "reference_stream": "Reference->ac3/en/5.1",
             "target_stream": "Target->aac/en/5.1",
+        },
+        "vspreview": {
+            "mode": "baseline",
+            "mode_display": "baseline (0f applied to both clips)",
+            "suggested_frames": 3,
+            "suggested_seconds": 0.125,
+            "clips": {
+                "ref": {"label": "Reference"},
+                "tgt": {"label": "Target"},
+            },
         },
         "render": {
             "writer": "vs",
@@ -256,6 +267,7 @@ def test_layout_renderer_sample_output(tmp_path, monkeypatch):
     lines = [line.rstrip("\n") for line in output_text.splitlines()]
 
     required_markers = [
+        "VSPreview Information",
         "At-a-Glance",
         "[DISCOVER]",
         "[PREPARE]",
@@ -293,6 +305,10 @@ def test_layout_renderer_sample_output(tmp_path, monkeypatch):
     assert not any("writer=writer" in line for line in lines)
     assert any("add_frame_info=true" in line for line in lines)
     assert not any("template=" in line for line in lines)
+
+    info_index = next(i for i, line in enumerate(lines) if "VSPreview Information" in line)
+    glance_index = next(i for i, line in enumerate(lines) if "At-a-Glance" in line)
+    assert info_index < glance_index
 
     assert any("Loading cached frame metrics from" in line for line in lines)
     canvas_line = next(line for line in lines if "Canvas single_res" in line)

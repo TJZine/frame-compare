@@ -104,6 +104,7 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
         },
         "audio_alignment": {
             "enabled": True,
+            "use_vspreview": True,
             "offsets_sec": 0.123,
             "offsets_frames": 3,
             "corr": 0.95,
@@ -113,6 +114,16 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
             "confirmed": "auto",
             "reference_stream": "Reference->ac3/en/5.1",
             "target_stream": "Target->aac/en/5.1",
+        },
+        "vspreview": {
+            "mode": "baseline",
+            "mode_display": "baseline (0f applied to both clips)",
+            "suggested_frames": 3,
+            "suggested_seconds": 0.125,
+            "clips": {
+                "ref": {"label": "Reference"},
+                "tgt": {"label": "Target"},
+            },
         },
         "render": {
             "writer": "vs",

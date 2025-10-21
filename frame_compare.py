@@ -270,6 +270,13 @@ def _plan_label(plan: _ClipPlan) -> str:
     return plan.path.name
 
 
+def _normalise_vspreview_mode(raw: object) -> str:
+    """Return a canonical VSPreview mode label (``baseline`` or ``seeded``)."""
+
+    text = str(raw or "baseline").strip().lower()
+    return "seeded" if text == "seeded" else "baseline"
+
+
 _OverrideValue = TypeVar("_OverrideValue")
 
 
@@ -304,6 +311,7 @@ class AudioAlignmentJSON(TypedDict, total=False):
     preview_paths: list[str]
     confirmed: bool | str | None
     offsets_filename: str
+    use_vspreview: bool
     vspreview_manual_offsets: dict[str, object]
     vspreview_manual_deltas: dict[str, object]
     vspreview_reference_trim: Optional[int]
@@ -342,6 +350,9 @@ class JsonTail(TypedDict):
     slowpics: SlowpicsJSON
     warnings: list[str]
     workspace: dict[str, object]
+    vspreview_mode: Optional[str]
+    suggested_frames: int
+    suggested_seconds: float
 
 
 class ClipRecord(TypedDict):
@@ -3024,10 +3035,9 @@ def _write_vspreview_script(
     ]
     color_literal = _color_config_literal(cfg.color)
 
-    preview_mode_raw = str(
-        getattr(cfg.audio_alignment, "vspreview_mode", "baseline") or "baseline"
-    ).strip().lower()
-    preview_mode_value = "seeded" if preview_mode_raw == "seeded" else "baseline"
+    preview_mode_value = _normalise_vspreview_mode(
+        getattr(cfg.audio_alignment, "vspreview_mode", "baseline")
+    )
     apply_seeded_offsets = preview_mode_value == "seeded"
     show_overlay = bool(getattr(cfg.audio_alignment, "show_suggested_in_preview", True))
     measurement_lookup = {
@@ -3049,7 +3059,7 @@ def _write_vspreview_script(
         f"""\
         {{
         'label': {reference_label!r},
-        'path': r'{str(reference_plan.path)}',
+        'path': {str(reference_plan.path)!r},
         'trim_start': {int(reference_plan.trim_start)},
         'trim_end': {reference_trim_end!r},
         'fps_override': {tuple(reference_plan.fps_override) if reference_plan.fps_override else None!r},
@@ -3082,7 +3092,7 @@ def _write_vspreview_script(
                 f"""\
                 {label!r}: {{
                     'label': {label!r},
-                    'path': r'{str(plan.path)}',
+                    'path': {str(plan.path)!r},
                     'trim_start': {int(plan.trim_start)},
                     'trim_end': {trim_end_value!r},
                     'fps_override': {fps_override!r},
@@ -3115,8 +3125,8 @@ def _write_vspreview_script(
 import sys
 from pathlib import Path
 
-WORKSPACE_ROOT = Path(r"{root}")
-PROJECT_ROOT = Path(r"{project_root}")
+WORKSPACE_ROOT = Path({str(root)!r})
+PROJECT_ROOT = Path({str(project_root)!r})
 EXTRA_PATHS = [{extra_paths_literal}]
 for candidate in EXTRA_PATHS:
     if candidate not in sys.path:
@@ -3139,18 +3149,18 @@ TARGETS = {{
 {targets_literal}
 }}
 
-  OFFSET_MAP = {{
-  {offsets_literal}
-  }}
+OFFSET_MAP = {{
+{offsets_literal}
+}}
 
-  SUGGESTION_MAP = {{
-  {suggestions_literal}
-  }}
+SUGGESTION_MAP = {{
+{suggestions_literal}
+}}
 
-  PREVIEW_MODE = {preview_mode_value!r}
-  SHOW_SUGGESTED_OVERLAY = {show_overlay!r}
+PREVIEW_MODE = {preview_mode_value!r}
+SHOW_SUGGESTED_OVERLAY = {show_overlay!r}
 
-  core = vs.core
+core = vs.core
 
 
 def _load_clip(info):
@@ -3237,39 +3247,39 @@ def _maybe_apply_overlay(clip, suggested_frames, suggested_seconds, applied_fram
         return clip
 
 
-  print("Reference clip:", REFERENCE['label'])
-  print("VSPreview mode:", PREVIEW_MODE)
-  if not TARGETS:
-      print("No target clips defined; edit TARGETS and OFFSET_MAP to add entries.")
+print("Reference clip:", REFERENCE['label'])
+print("VSPreview mode:", PREVIEW_MODE)
+if not TARGETS:
+    print("No target clips defined; edit TARGETS and OFFSET_MAP to add entries.")
 
-  slot = 0
-  for label, info in TARGETS.items():
-      reference_clip = _load_clip(REFERENCE)
-      target_clip = _load_clip(info)
-      reference_clip, target_clip = _harmonise_fps(reference_clip, target_clip, label)
-      offset_frames = int(OFFSET_MAP.get(label, 0))
-      suggested_entry = SUGGESTION_MAP.get(label, (0, 0.0))
-      suggested_frames = int(suggested_entry[0])
-      suggested_seconds = float(suggested_entry[1])
-      ref_view, tgt_view = _apply_offset(reference_clip, target_clip, offset_frames)
-      ref_view = _maybe_apply_overlay(ref_view, suggested_frames, suggested_seconds, offset_frames)
-      tgt_view = _maybe_apply_overlay(tgt_view, suggested_frames, suggested_seconds, offset_frames)
-      ref_view.set_output(slot)
-      tgt_view.set_output(slot + 1)
-      applied_label = "baseline" if offset_frames == 0 else "seeded"
-      print(
-          "Target '%s': baseline trim=%sf (%s), suggested delta=%+df (~%+.3fs), preview applied=%+df (%s mode)"
-          % (
-              label,
-              info.get('manual_trim', 0),
-              info.get('manual_trim_description', 'n/a'),
-              suggested_frames,
-              suggested_seconds,
-              offset_frames,
-              applied_label,
-          )
-      )
-      slot += 2
+slot = 0
+for label, info in TARGETS.items():
+    reference_clip = _load_clip(REFERENCE)
+    target_clip = _load_clip(info)
+    reference_clip, target_clip = _harmonise_fps(reference_clip, target_clip, label)
+    offset_frames = int(OFFSET_MAP.get(label, 0))
+    suggested_entry = SUGGESTION_MAP.get(label, (0, 0.0))
+    suggested_frames = int(suggested_entry[0])
+    suggested_seconds = float(suggested_entry[1])
+    ref_view, tgt_view = _apply_offset(reference_clip, target_clip, offset_frames)
+    ref_view = _maybe_apply_overlay(ref_view, suggested_frames, suggested_seconds, offset_frames)
+    tgt_view = _maybe_apply_overlay(tgt_view, suggested_frames, suggested_seconds, offset_frames)
+    ref_view.set_output(slot)
+    tgt_view.set_output(slot + 1)
+    applied_label = "baseline" if offset_frames == 0 else "seeded"
+    print(
+        "Target '%s': baseline trim=%sf (%s), suggested delta=%+df (~%+.3fs), preview applied=%+df (%s mode)"
+        % (
+            label,
+            info.get('manual_trim', 0),
+            info.get('manual_trim_description', 'n/a'),
+            suggested_frames,
+            suggested_seconds,
+            offset_frames,
+            applied_label,
+        )
+    )
+    slot += 2
 
 print("VSPreview outputs: reference on even slots, target on odd slots (0↔1, 2↔3, ...).")
 print("Edit OFFSET_MAP values and press Ctrl+R in VSPreview to reload the script.")
@@ -3530,8 +3540,22 @@ def _launch_vspreview(
         )
         return
 
+    verbose_requested = bool(reporter.flags.get("verbose")) or bool(
+        reporter.flags.get("debug")
+    )
+
     try:
-        result = subprocess.run(command, env=env, check=False)
+        if verbose_requested:
+            result = subprocess.run(command, env=env, check=False)
+        else:
+            result = subprocess.run(
+                command,
+                env=env,
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
     except FileNotFoundError:
         reporter.warn(
             "VSPreview executable not found. Run it manually, for example: "
@@ -3540,8 +3564,17 @@ def _launch_vspreview(
         return
     audio_block["vspreview_invoked"] = True
     audio_block["vspreview_exit_code"] = int(result.returncode)
+    captured_stdout = getattr(result, "stdout", None)
+    captured_stderr = getattr(result, "stderr", None)
+    if not verbose_requested:
+        for stream_value, label in ((captured_stdout, "stdout"), (captured_stderr, "stderr")):
+            if isinstance(stream_value, str) and stream_value.strip():
+                logger.debug("VSPreview %s (suppressed): %s", label, stream_value.strip())
     if result.returncode != 0:
-        reporter.warn(f"VSPreview exited with code {result.returncode}. Review the console output for details.")
+        reporter.warn(
+            f"VSPreview exited with code {result.returncode}."
+            + (" Re-run with --verbose to inspect VSPreview output." if not verbose_requested else "")
+        )
         return
 
     offsets = _prompt_vspreview_offsets(plans, summary, reporter, display)
@@ -3844,6 +3877,10 @@ def run_cli(
         }
     )
 
+    vspreview_mode_value = _normalise_vspreview_mode(
+        getattr(cfg.audio_alignment, "vspreview_mode", "baseline")
+    )
+
     layout_path = Path(__file__).with_name("cli_layout.v1.json")
     reporter = CliOutputManager(
         quiet=quiet,
@@ -3889,6 +3926,7 @@ def run_cli(
             "suggestion_mode": False,
             "suggested_frames": {},
             "manual_trim_starts": {},
+            "use_vspreview": bool(cfg.audio_alignment.use_vspreview),
             "vspreview_script": None,
             "vspreview_invoked": False,
             "vspreview_exit_code": None,
@@ -3937,9 +3975,18 @@ def run_cli(
             "remove_after_days": int(cfg.slowpics.remove_after_days),
         },
         "warnings": [],
+        "vspreview_mode": vspreview_mode_value,
+        "suggested_frames": 0,
+        "suggested_seconds": 0.0,
     }
 
     audio_track_override_map = _parse_audio_track_overrides(audio_track_overrides or [])
+
+    vspreview_mode_display = (
+        "baseline (0f applied to both clips)"
+        if vspreview_mode_value == "baseline"
+        else "seeded (suggested offsets applied before preview)"
+    )
 
     layout_data: Dict[str, Any] = {
         "clips": {
@@ -3947,6 +3994,16 @@ def run_cli(
             "items": [],
             "ref": {},
             "tgt": {},
+        },
+        "vspreview": {
+            "mode": vspreview_mode_value,
+            "mode_display": vspreview_mode_display,
+            "suggested_frames": 0,
+            "suggested_seconds": 0.0,
+            "clips": {
+                "ref": {"label": ""},
+                "tgt": {"label": ""},
+            },
         },
         "trims": {},
         "window": json_tail["window"],
@@ -4250,6 +4307,34 @@ def run_cli(
         root,
         audio_track_override_map,
         reporter=reporter,
+    )
+    vspreview_target_plan: _ClipPlan | None = None
+    vspreview_suggested_frames_value = 0
+    vspreview_suggested_seconds_value = 0.0
+    if alignment_summary is not None:
+        for plan in plans:
+            if plan is alignment_summary.reference_plan:
+                continue
+            vspreview_target_plan = plan
+            break
+        if vspreview_target_plan is not None:
+            vspreview_suggested_frames_value = int(
+                alignment_summary.suggested_frames.get(
+                    vspreview_target_plan.path.name, 0
+                )
+            )
+            measurement_lookup = {
+                measurement.file.name: measurement
+                for measurement in alignment_summary.measurements
+            }
+            measurement = measurement_lookup.get(vspreview_target_plan.path.name)
+            if measurement is not None and measurement.offset_seconds is not None:
+                vspreview_suggested_seconds_value = float(measurement.offset_seconds)
+
+    json_tail["vspreview_mode"] = vspreview_mode_value
+    json_tail["suggested_frames"] = int(vspreview_suggested_frames_value)
+    json_tail["suggested_seconds"] = float(
+        round(vspreview_suggested_seconds_value, 6)
     )
     vspreview_enabled_for_session = _coerce_config_flag(
         cfg.audio_alignment.use_vspreview
@@ -4564,6 +4649,31 @@ def run_cli(
     layout_data["clips"]["ref"] = clip_records[0] if clip_records else {}
     layout_data["clips"]["tgt"] = clip_records[1] if len(clip_records) > 1 else {}
 
+    reference_label = ""
+    if alignment_summary is not None:
+        reference_label = _plan_label(alignment_summary.reference_plan)
+    elif clip_records:
+        reference_label = clip_records[0]["label"]
+
+    target_label = ""
+    if vspreview_target_plan is not None:
+        target_label = _plan_label(vspreview_target_plan)
+    elif len(clip_records) > 1:
+        target_label = clip_records[1]["label"]
+
+    vspreview_block = layout_data.get("vspreview", {})
+    clips_block = vspreview_block.get("clips")
+    if not isinstance(clips_block, dict):
+        clips_block = {}
+    clips_block["ref"] = {"label": reference_label}
+    clips_block["tgt"] = {"label": target_label}
+    vspreview_block["clips"] = clips_block
+    vspreview_block["mode"] = vspreview_mode_value
+    vspreview_block["mode_display"] = vspreview_mode_display
+    vspreview_block["suggested_frames"] = vspreview_suggested_frames_value
+    vspreview_block["suggested_seconds"] = vspreview_suggested_seconds_value
+    layout_data["vspreview"] = vspreview_block
+
     trims_per_clip = json_tail["trims"]["per_clip"]
     trim_lookup: dict[str, TrimSummary] = {detail["label"]: detail for detail in trim_details}
 
@@ -4597,7 +4707,7 @@ def run_cli(
         layout_data["trims"]["tgt"] = _trim_entry(clip_records[1]["label"])
 
     reporter.update_values(layout_data)
-    reporter.render_sections(["at_a_glance", "discover", "prepare"])
+    reporter.render_sections(["vspreview_info", "at_a_glance", "discover", "prepare"])
     reporter.render_sections(["audio_align"])
     reporter.render_sections(["analyze"])
     if tmdb_notes:
