@@ -4774,6 +4774,29 @@ def run_cli(
     vspreview_block["mode_display"] = vspreview_mode_display
     vspreview_block["suggested_frames"] = vspreview_suggested_frames_value
     vspreview_block["suggested_seconds"] = vspreview_suggested_seconds_value
+    existing_vspreview = reporter.values.get("vspreview")
+    if isinstance(existing_vspreview, dict):
+        missing_layout_block = vspreview_block.get("missing")
+        missing_existing_block = existing_vspreview.get("missing")
+        if isinstance(missing_existing_block, dict):
+            merged_missing_block: dict[str, Any] = (
+                dict(missing_layout_block)
+                if isinstance(missing_layout_block, dict)
+                else {}
+            )
+            merged_missing_block.update(missing_existing_block)
+            vspreview_block["missing"] = merged_missing_block
+        script_path_value = existing_vspreview.get("script_path")
+        if isinstance(script_path_value, str) and script_path_value:
+            vspreview_block["script_path"] = script_path_value
+        script_command_value = existing_vspreview.get("script_command")
+        if isinstance(script_command_value, str) and script_command_value:
+            vspreview_block["script_command"] = script_command_value
+        for key, value in existing_vspreview.items():
+            if key in {"clips", "missing", "script_path", "script_command"}:
+                continue
+            if key not in vspreview_block:
+                vspreview_block[key] = value
     layout_data["vspreview"] = vspreview_block
 
     trims_per_clip = json_tail["trims"]["per_clip"]
