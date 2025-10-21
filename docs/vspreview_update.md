@@ -1,79 +1,117 @@
-# Codex Task — VSPreview **Baseline** Mode → Rich CLI Panel → Docs (in this order)
+# Codex Task — VSPreview Baseline Mode → CLI Panel (layout JSON) → Docs
+**Subtask order (must implement in this sequence):**
+1) **Preview changes** — baseline mode; show suggestion but **never apply** it in preview  
+2) **CLI changes** — add a **Rich panel via layout JSON** above “At‑a‑Glance”; demote noise  
+3) **Docs & missing‑dep hint** — installation & usage notes; friendly warning when preview is enabled but missing
 
-> **Subtask order (must implement in this sequence):**
-> 1) **Preview changes** — VSPreview opens in *baseline* (0‑frame) mode; suggested offset is visible but **never applied** in preview.  
-> 2) **CLI cleanup** — add a **Rich** “VSPreview Information” panel (above “At‑a‑Glance”) to highlight the suggestion & mode; demote noisy logs to `--verbose`.  
-> 3) **Docs & missing‑dep hints** — document install/run of VSPreview and show a friendly CLI hint when the feature is enabled but missing.
+> Keep instructions high‑level where repo details matter; do not over‑specify internals. Prefer existing helpers/conventions in the repository.
 
-## Phase 1 — VSPreview **Baseline** Mode (Preview changes)
+---
+
+## Repo context you can rely on
+- Config: `src/config_loader.py` → dataclasses in `src/datatypes.py`; defaults in `src/data/config.toml.template`.
+- CLI rendering: **data‑driven** via `src/cli_layout.py` + a layout JSON (e.g., `cli_layout.v1.json`). Use existing roles/styles and section types (`line`, `box`, `list`, `group`). **Do not** hard‑code Rich logic; extend the layout JSON.
+- Decisions/guardrails live in `docs/DECISIONS.md`.
+- **Preview emission/launch entrypoint: `frame_compare.py`.** Implement preview changes there; do not rename without coordination.
+
+---
+
+## Phase 1 — Preview changes (Baseline mode)
+**Goal:** VSPreview opens with both clips **untrimmed** (0‑frame), regardless of any auto suggestion. The suggestion is visible (overlay optional), but preview clips remain baseline.
 
 ### Requirements
-- When `use_vspreview = true`, the generated VSPreview script must:
-  - Load **reference** and **target** clips exactly as the pipeline would (tonemap/props/FPS parity with screenshots).
-  - Initialize `OFFSET_MAP` to **0** for all targets; **do not** pre‑apply any auto suggestion in preview.
-  - Keep even/odd output pairing (0↔1, 2↔3, …). Ensure **Sync Outputs** works as before.
-- Compute the **suggested alignment** (frames + seconds) exactly as the pipeline currently does, but **use it only for display** (see overlay & CLI in later phases). It is **guidance only**, never applied in preview.
-- **Overlay (ON by default):** draw a small text overlay on the preview outputs with:
-  - `Suggested: +{S}f (~{S_secs}s)` and `Applied in preview: 0f (baseline)`
-  - Sign hint: `(+ trims target / − pads reference)`
-  - Provide a config switch to disable overlay if desired.
+- When `use_vspreview = true`, generate VSPreview script that:
+  - Builds **reference** and **target** exactly as in screenshot path (tonemap/props/FPS parity).
+  - Initializes `OFFSET_MAP[label] = 0` for all targets; **do not** pre‑apply suggestion in preview.
+  - Keeps even/odd output pairing (0↔1, 2↔3, …). Ensure “Sync Outputs” still behaves correctly.
+- Compute **suggested alignment** (frames + seconds) the same way as today; treat it as **guidance only**.
+- **Overlay (ON by default)**: draw small text on outputs (config‑gated) showing:  
+  `Suggested: +{S}f (~{S_secs}s) • Applied in preview: 0f (baseline) • (+ trims target / − pads reference)`
+- **Persistence (unchanged)**: only the **manual** value is saved after preview (CLI prompt or “read OFFSET_MAP on exit” if present). Manual selection persists across reruns through the existing offsets file until removed.
 
-### Config additions (names may be adjusted to match your models)
+### Config additions (names may be adapted to dataclasses)
 ```toml
 [audio_alignment]
 use_vspreview = true
-vspreview_mode = "baseline"          # default; keep "seeded" as an opt‑in if needed
-show_suggested_in_preview = true     # overlay is ON by default per product decision
+vspreview_mode = "baseline"          # default; keep "seeded" as opt‑in if ever needed
+show_suggested_in_preview = true     # overlay ON by default
+```
+> Do not change sign semantics or file formats.
+
+### Tests
+- **Unit:** when mode=`baseline`, emission sets `OFFSET_MAP=0` regardless of suggestion.
+- **Unit:** overlay strings are composed from suggestion while applied offset remains 0f.
+- **Integration:** with a non‑zero suggestion, preview shows baseline; setting a manual value persists it; rerun reuses manual unless offsets file is deleted.
+
+---
+
+## Phase 2 — CLI changes via **layout JSON** (Rich panel)
+**Goal:** High‑visibility panel that tells users the preview mode and suggested value, without code‑level Rich calls. Implement by editing the **layout JSON** and plumbing values into the renderer context.
+
+### What to add
+1) **New section** (type: `box`) **above “At‑a‑Glance”** titled **“VSPreview Information”** (or a consistent variant).  
+2) **Lines** (keep minimal, reusing existing **roles** like `header`, `key`, `value`, `warn`, `unit`, etc.):  
+   - `Reference`: short label  
+   - `Target`  : short label  
+   - `Preview mode`: `baseline (0f applied to both clips)`  
+   - `Suggested`: `+Nf (~Xs)` + dim note “guidance only — not applied in preview”
+3) **Condition**: show this panel only when `audio_alignment.use_vspreview` is true (or equivalent flag in context).  
+4) **Highlights** (optional): use existing highlight rules to style values when `abs(suggested_seconds)` exceeds a threshold (e.g., > 0.5 s). Use an existing warning role rather than inventing styles.
+5) **Noise control**: default run hides third‑party chatter (plugin load lines, numpy subnormal warnings). Show them under `--verbose`/`--debug` only. Respect existing verbosity flags.
+
+### Implementation notes (keep generic)
+- Extend the **layout JSON** by inserting the new `box` section **before** the current “At‑a‑Glance” section. Keep structure consistent with existing sections.
+- **Plumb values** into the renderer context (no hard‑coding): provide a small dict under a stable key (e.g., `vspreview.*`) with:
+  - `mode` (string)
+  - `suggested_frames` (int; may be signed)
+  - `suggested_seconds` (float; round at display only)
+  - `clips.ref.label`, `clips.tgt.label` (or whatever your context uses)
+- Ensure the renderer’s JSON‑tail append includes non‑breaking fields:
+  ```json
+  {
+    "vspreview_mode": "baseline",
+    "suggested_frames": <int>,
+    "suggested_seconds": <float with stable rounding>
+  }
+  ```
+- Keep ANSI on TTYs; fall back to plain text for non‑TTY / `--no-color` as your renderer already does.
+
+### Example (illustrative; adapt to your JSON schema)
+```json
+{
+  "id": "vspreview_info",
+  "type": "box",
+  "title": "VSPreview Information",
+  "when": "audio_alignment.use_vspreview",
+  "lines": [
+    "[[key]]Reference[[/]] [[value]]{clips.ref.label}[[/]]",
+    "[[key]]Target[[/]]    [[value]]{clips.tgt.label}[[/]]",
+    "[[key]]Preview mode[[/]] [[value]]{vspreview.mode}[[/]]",
+    "[[key]]Suggested[[/]] [[value]]{vspreview.suggested_frames:+}[[/]][[unit]]f[[/]] (~[[value]]{vspreview.suggested_seconds:.3f}[[/]][[unit]]s[[/]])  [[dim]]guidance only — not applied in preview[[/]]"
+  ]
+}
+```
+```json
+{
+  "when": "abs_gt",
+  "path": "vspreview.suggested_seconds",
+  "value": 0.5,
+  "role": "number_warn"
+}
 ```
 
-### Persistence (unchanged behaviors to keep)
-- Persist **only the manual** value the user accepts **after** preview (either typed in CLI or via “read OFFSET_MAP on exit” if that flow exists).  
-- Current behavior note: manual selection **persists across reruns** via `generated.audio_alignment` (or similar) until that file is deleted. Keep that behavior unless there’s a clear reason to change it.
-
 ### Tests
-- Unit: preview emission sets `OFFSET_MAP=0` when `vspreview_mode="baseline"` (regardless of suggestion value).
-- Unit: overlay text is composed using the suggestion, *not* the applied offset (which remains 0f).
-- Integration: with a non‑zero suggestion, preview shows **baseline** clips; accepting a manual value persists that value only; a rerun reuses the manual value unless the offsets file is removed.
-
-> **Implementation pointer:** centralize the preview emission in **`frame_compare.py`** behind a small “mode” switch (baseline vs seeded), returning both clips and the computed suggestion so UI layers can render overlays without changing clip data.
+- **Formatting/snapshot:** panel renders with stable structure and roles; ordering is above “At‑a‑Glance”.
+- **TTY handling:** ANSI styles on terminals; plain on redirected output; `--no-color` honored.
+- **Verbosity:** noise hidden by default; visible under `--verbose`/`--debug`.
 
 ---
 
-## Phase 2 — CLI **Rich** Panel (“VSPreview Information”) & Noise Control
-
-> Use the project’s existing Rich theme and layout conventions (`src/cli_layout.py`). **Do not invent new color names**; reuse existing role names defined for headers, keys, values, warnings, etc. (see the layout/theme JSON in the repo).
-
-### Panel placement & title
-- **Place above the existing “At‑a‑Glance” section**.
-- Title it **“VSPreview Information”** (or a close variant consistent with your style guide).
-
-### Panel contents (high‑visibility, minimal)
-- **Reference** and **Target** labels (short basenames; include fps/frames only if your CLI already shows them nearby).
-- **Suggested alignment**: `+Nf (~Xs)` **GUIDANCE ONLY — not applied in preview**.
-- **Preview mode**: `baseline (0f applied to both clips)`.
-- **Action**: e.g., `Open VSPreview → align manually → confirm frames in CLI`  
-  (or `… → close → we read OFFSET_MAP on exit` if that path is enabled).
-
-### Behavior
-- Colorize & box the panel using Rich; fall back to plain text when no TTY / `--no-color`.
-- **Demote noise**: third‑party chatter (plugin loads, numpy subnormal warnings, etc.) must be shown only with `--verbose`/`--debug`.  
-  Default = WARNING; `--verbose` = INFO; `--debug` = DEBUG. Apply localized warning filters if safe.
-- **JSON tail** (non‑breaking): add
-  ```json
-  { "vspreview_mode": "baseline", "suggested_frames": N, "suggested_seconds": X.XXXXXX }
-  ```
-
-### Tests
-- Formatting snapshot: the panel renders with stable structure/roles; placement is **above** “At‑a‑Glance”.
-- TTY vs non‑TTY: ANSI on terminals; plain text otherwise; `--no-color` honored if present.
-- Verbosity: default suppresses plugin/warning noise; `--verbose` shows it.
-
----
-
-## Phase 3 — Docs & Missing‑Dependency Hint
+## Phase 3 — Docs & missing‑dependency hint
+**Goal:** Document how to install & run VSPreview; print a friendly warning when enabled but missing.
 
 ### Docs (README / pipeline)
-- Add **Install & Run VSPreview** section with `uv` commands:
+- Add **Install & Run VSPreview**:
   - **Windows (recommend PySide6)**  
     ```powershell
     uv add vspreview PySide6
@@ -82,37 +120,58 @@ show_suggested_in_preview = true     # overlay is ON by default per product deci
     ```bash
     uv add vspreview PyQt5
     ```
-- Show how to keep GUI deps **optional** via a project extra (example only; align with your packaging):
+- Optional dependency pattern (example; adapt to packaging):
   ```toml
   [project.optional-dependencies]
-  preview = ["vspreview>=0.7", "PySide6>=6.6"]   # Windows example
-  # preview = ["vspreview>=0.7", "PyQt5>=5.15"]  # Linux/macOS example
+  preview = ["vspreview>=0.7", "PySide6>=6.6"]
+  # or on Linux/macOS: ["vspreview>=0.7", "PyQt5>=5.15"]
   ```
-  Ephemeral run: `uv run --with .[preview] -- python -m vspreview path/to/vspreview_*.py`
+- Ephemeral usage example:  
+  `uv run --with .[preview] -- python -m vspreview path/to/vspreview_*.py`
 
 ### CLI missing‑dep hint
-- When `use_vspreview=true` but `vspreview` or the Qt backend isn’t importable:
-  - Do **not** fail the run; render a **Rich warning** near the top with copy‑paste commands (Windows vs Linux/macOS).
-  - Show the command we would have run: `python -m vspreview path/to/vspreview_*.py`.
-  - Add `{"vspreview_offered": false, "reason": "vspreview-missing"}` to JSON tail (non‑breaking).
+- When preview is enabled but `vspreview` or its Qt backend isn’t importable:
+  - **Do not fail** the run; render a top‑level **warning panel** with copy‑paste commands (Windows vs Linux/macOS).
+  - Show the exact command we would have run: `python -m vspreview path/to/vspreview_*.py`.
+  - Append to JSON tail: `{"vspreview_offered": false, "reason": "vspreview-missing"}` (non‑breaking).
 
 ### Tests
-- Docs lint passes (if present).  
-- Warning renders only when missing; otherwise suppressed.  
-- JSON tail field present when applicable.
+- Docs lint (if present).  
+- Warning panel appears only on missing deps; suppressed when present.  
+- JSON tail fields appear only when applicable.
 
 ---
 
 ## Guardrails / Non‑Goals
-- Maintain **parity** between preview clips and screenshot pipeline (same tonemap/props/FPS).  
-- Do **not** change offset sign semantics or the persistence file format without approval.  
-- Avoid large assumptions about module names or locations; prefer TODOs and lookups where repo context is needed (except the confirmed `frame_compare.py` entrypoint above).
+- Maintain parity between preview and screenshot processing paths (tonemap/props/FPS).  
+- Do **not** change sign semantics or persistence file formats without explicit approval.  
+- Avoid renaming public flags or section IDs that are referenced by tests unless you update those tests.
+
+---
+
+## Rollback
+- Config `vspreview_mode="seeded"` restores previous seed‑applied behavior.  
+- Feature flags to disable overlay or the new panel without code removal.  
+- Docs live in a standalone section; easy to revert.
 
 ---
 
 ## Risks & Mitigations
-- **Operator expectation drift** (some expect seeded preview): mitigate with the clearly titled panel and overlay stating *GUIDANCE ONLY — not applied*.
-- **Formatting regressions**: reuse existing Rich roles; add/update formatting tests.
-- **Dependency noise**: push to `--verbose`; keep default output minimal.
+- **Operator habit (seeded previews):** make the panel/overlay explicit: “guidance only — not applied”. Keep `seeded` as opt‑in.
+- **Formatting regressions:** use existing roles/section types; update snapshot tests accordingly.
+- **Dependency noise:** move plugin/warning chatter behind verbosity flags; keep default output minimal.
 
+---
 
+## Acceptance Criteria (summary)
+- Preview opens **baseline** (0f) even when suggestion ≠ 0; overlay shows suggestion + “Applied: 0f” (if enabled).  
+- CLI renders a **“VSPreview Information”** **box above At‑a‑Glance**, showing reference/target, preview mode, and suggested alignment flagged as *guidance only*.  
+- Only **manual** offsets are persisted; reruns reuse them until the offsets file is removed.  
+- Docs include OS‑specific install steps and ephemeral usage; CLI shows a friendly missing‑dep warning with copy‑paste commands.  
+- Tests pass: preview emission, panel snapshot/ordering, verbosity behavior, and docs/warning conditions.
+
+---
+
+### Notes for implementers
+- Keep specifics (function names, data keys) aligned with existing code; if uncertain, prefer small adapters and TODOs over assumptions.
+- All preview changes should be implemented in **`frame_compare.py`** (confirmed entrypoint) or its immediate helpers.
