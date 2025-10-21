@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Any, Dict, cast
 
+import frame_compare
 from rich.console import Console
 from rich.progress import BarColumn, Progress
 
@@ -59,6 +60,9 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
             "path": str(tmp_path / "tgt.mkv"),
         },
     ]
+
+    script_path = tmp_path / "vspreview_script.py"
+    manual_command = frame_compare._format_vspreview_manual_command(script_path)
 
     return {
         "clips": {
@@ -120,12 +124,12 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
             "mode_display": "baseline (0f applied to both clips)",
             "suggested_frames": 3,
             "suggested_seconds": 0.125,
-            "script_path": str(tmp_path / "vspreview_script.py"),
-            "script_command": f"python -m vspreview {tmp_path / 'vspreview_script.py'}",
+            "script_path": str(script_path),
+            "script_command": manual_command,
             "missing": {
                 "active": False,
-                "windows_install": "uv add vspreview PySide6",
-                "posix_install": "uv add vspreview PyQt5",
+                "windows_install": frame_compare._VSPREVIEW_WINDOWS_INSTALL,
+                "posix_install": frame_compare._VSPREVIEW_POSIX_INSTALL,
                 "command": "",
                 "reason": "",
             },

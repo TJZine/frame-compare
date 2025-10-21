@@ -11,6 +11,7 @@ import math
 import os
 import random
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -120,9 +121,31 @@ _DEFAULT_CONFIG_HELP: Final[str] = (
     "ROOT/config/config.toml (see --root/FRAME_COMPARE_ROOT)."
 )
 
-_VSPREVIEW_WINDOWS_INSTALL: Final[str] = "uv add vspreview PySide6"
-_VSPREVIEW_POSIX_INSTALL: Final[str] = "uv add vspreview PyQt5"
-_VSPREVIEW_MANUAL_COMMAND_TEMPLATE: Final[str] = "python -m vspreview {script}"
+_VSPREVIEW_WINDOWS_INSTALL: Final[str] = (
+    "uv add frame-compare --extra preview  # fallback: uv add vspreview PySide6"
+)
+_VSPREVIEW_POSIX_INSTALL: Final[str] = (
+    "uv add frame-compare --extra preview  # fallback: uv add vspreview PySide6"
+)
+_VSPREVIEW_MANUAL_COMMAND_TEMPLATE: Final[str] = "{python} -m vspreview {script}"
+
+
+def _format_vspreview_manual_command(script_path: Path) -> str:
+    """Build a manual VSPreview command using the active Python interpreter."""
+
+    python_exe = sys.executable or "python"
+    script_arg = str(script_path)
+    if os.name == "nt":
+        if " " in python_exe and not python_exe.startswith('"'):
+            python_exe = f'"{python_exe}"'
+        if " " in script_arg and not script_arg.startswith('"'):
+            script_arg = f'"{script_arg}"'
+    else:
+        python_exe = shlex.quote(python_exe)
+        script_arg = shlex.quote(script_arg)
+    return _VSPREVIEW_MANUAL_COMMAND_TEMPLATE.format(
+        python=python_exe, script=script_arg
+    )
 
 
 def _coerce_config_flag(value: object) -> bool:
@@ -3585,7 +3608,7 @@ def _launch_vspreview(
         "Edit the OFFSET_MAP values inside the script and reload VSPreview (Ctrl+R) after changes."
     )
 
-    manual_command = _VSPREVIEW_MANUAL_COMMAND_TEMPLATE.format(script=script_path)
+    manual_command = _format_vspreview_manual_command(script_path)
     vspreview_block = reporter.values.get("vspreview")
     if not isinstance(vspreview_block, dict):
         vspreview_block = {}

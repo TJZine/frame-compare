@@ -7,6 +7,8 @@ from typing import Any, Dict
 import pytest
 from rich.console import Console
 
+import frame_compare
+
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -75,6 +77,9 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
         },
     ]
 
+    script_path = tmp_path / "vspreview_script.py"
+    manual_command = frame_compare._format_vspreview_manual_command(script_path)
+
     return {
         "clips": {
             "count": len(sample_clips),
@@ -135,12 +140,12 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
             "mode_display": "baseline (0f applied to both clips)",
             "suggested_frames": 3,
             "suggested_seconds": 0.125,
-            "script_path": str(tmp_path / "vspreview_script.py"),
-            "script_command": f"python -m vspreview {tmp_path / 'vspreview_script.py'}",
+            "script_path": str(script_path),
+            "script_command": manual_command,
             "missing": {
                 "active": False,
-                "windows_install": "uv add vspreview PySide6",
-                "posix_install": "uv add vspreview PyQt5",
+                "windows_install": frame_compare._VSPREVIEW_WINDOWS_INSTALL,
+                "posix_install": frame_compare._VSPREVIEW_POSIX_INSTALL,
                 "command": "",
                 "reason": "",
             },
@@ -366,8 +371,10 @@ def test_layout_renders_vspreview_missing_panel(tmp_path: Path) -> None:
 
     output_text = console.export_text()
     assert "VSPreview dependency missing" in output_text
-    assert "uv add vspreview PySide6" in output_text
-    assert "python -m vspreview" in output_text
+    assert frame_compare._VSPREVIEW_WINDOWS_INSTALL in output_text
+    python_executable = frame_compare.sys.executable or "python"
+    assert python_executable in output_text
+    assert " -m vspreview" in output_text
 
 
 def test_summary_output_frames_full_list_without_ellipsis(tmp_path: Path) -> None:
