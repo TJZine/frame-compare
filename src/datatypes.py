@@ -188,6 +188,8 @@ class AudioAlignmentConfig:
     enable: bool = False
     reference: str = ""
     use_vspreview: bool = False
+    vspreview_mode: str = "baseline"
+    show_suggested_in_preview: bool = True
     prompt_reuse_offsets: bool = False
     sample_rate: int = 16000
     hop_length: int = 512

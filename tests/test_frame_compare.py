@@ -755,6 +755,13 @@ def test_launch_vspreview_generates_script(
     assert "vs_core.configure" in script_text
     assert "ColorConfig" in script_text
     assert "AssumeFPS" in script_text
+    assert "PREVIEW_MODE = 'baseline'" in script_text
+    assert "SHOW_SUGGESTED_OVERLAY = True" in script_text
+    assert "'Target': 0,  # Suggested delta +7f" in script_text
+    assert "SUGGESTION_MAP" in script_text
+    assert "'Target': (7, 0.0)" in script_text
+    assert "Suggested: {suggested_frames:+d}f (~{suggested_seconds:+.3f}s) •" in script_text
+    assert "preview applied=%+df" in script_text
     assert recorded_command, "VSPreview command should be invoked when interactive"
     assert recorded_command[0][0] == frame_compare.sys.executable
     assert recorded_command[0][-1] == str(script_path)
@@ -763,6 +770,96 @@ def test_launch_vspreview_generates_script(
     assert prompt_calls, "Prompt should be invoked even when returning default offsets"
     assert apply_calls == [{}]
 
+
+def test_launch_vspreview_baseline_mode_persists_manual_offsets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Baseline preview emits zeroed offsets yet records manual selections."""
+
+    cfg = _make_config(tmp_path)
+    cfg.audio_alignment.use_vspreview = True
+    cfg.audio_alignment.vspreview_mode = "baseline"
+
+    reference_path = tmp_path / "Ref.mkv"
+    target_path = tmp_path / "Target.mkv"
+    reference_path.write_bytes(b"ref")
+    target_path.write_bytes(b"tgt")
+
+    reference_plan = frame_compare._ClipPlan(
+        path=reference_path,
+        metadata={"label": "Reference"},
+    )
+    target_plan = frame_compare._ClipPlan(
+        path=target_path,
+        metadata={"label": "Target"},
+    )
+    target_plan.trim_start = 2
+    target_plan.has_trim_start_override = True
+    plans = [reference_plan, target_plan]
+
+    measurement = AlignmentMeasurement(
+        file=target_path,
+        offset_seconds=0.375,
+        frames=9,
+        correlation=0.91,
+        reference_fps=24.0,
+        target_fps=24.0,
+    )
+
+    summary = frame_compare._AudioAlignmentSummary(
+        offsets_path=tmp_path / "offsets.toml",
+        reference_name=reference_path.name,
+        measurements=(measurement,),
+        applied_frames={},
+        baseline_shift=0,
+        statuses={},
+        reference_plan=reference_plan,
+        final_adjustments={},
+        swap_details={},
+        suggested_frames={target_path.name: 9},
+        suggestion_mode=True,
+        manual_trim_starts={target_path.name: 2},
+    )
+
+    reporter = _RecordingOutputManager()
+    json_tail = _make_json_tail_stub()
+    audio_block = json_tail["audio_alignment"]
+
+    monkeypatch.setattr(frame_compare.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(frame_compare.shutil, "which", lambda _: None)
+    monkeypatch.setattr(frame_compare.importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(
+        frame_compare.subprocess,
+        "run",
+        lambda cmd, env=None, check=False: types.SimpleNamespace(returncode=0),
+    )
+
+    monkeypatch.setattr(
+        frame_compare,
+        "_prompt_vspreview_offsets",
+        lambda *args, **kwargs: {target_path.name: 3},
+    )
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "update_offsets_file",
+        lambda *_args, **_kwargs: (
+            {reference_path.name: 0, target_path.name: 5},
+            {reference_path.name: "manual", target_path.name: "manual"},
+        ),
+    )
+
+    frame_compare._launch_vspreview(plans, summary, None, cfg, tmp_path, reporter, json_tail)
+
+    script_path_str = audio_block.get("vspreview_script")
+    assert script_path_str, "Script path should be recorded in JSON tail"
+    script_text = Path(script_path_str).read_text(encoding="utf-8")
+    assert "'Target': 0,  # Suggested delta +9f" in script_text
+    assert summary.vspreview_manual_offsets[target_path.name] == 5
+    assert summary.vspreview_manual_deltas[target_path.name] == 3
+    manual_json = cast(dict[str, int], audio_block.get("vspreview_manual_offsets", {}))
+    assert manual_json[target_path.name] == 5
+    delta_json = cast(dict[str, int], audio_block.get("vspreview_manual_deltas", {}))
+    assert delta_json[target_path.name] == 3
 
 def test_write_vspreview_script_generates_unique_filenames_same_second(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

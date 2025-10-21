@@ -3024,6 +3024,16 @@ def _write_vspreview_script(
     ]
     color_literal = _color_config_literal(cfg.color)
 
+    preview_mode_raw = str(
+        getattr(cfg.audio_alignment, "vspreview_mode", "baseline") or "baseline"
+    ).strip().lower()
+    preview_mode_value = "seeded" if preview_mode_raw == "seeded" else "baseline"
+    apply_seeded_offsets = preview_mode_value == "seeded"
+    show_overlay = bool(getattr(cfg.audio_alignment, "show_suggested_in_preview", True))
+    measurement_lookup = {
+        measurement.file.name: measurement for measurement in summary.measurements
+    }
+
     manual_trims = {}
     if summary.manual_trim_starts:
         manual_trims = {
@@ -3049,13 +3059,18 @@ def _write_vspreview_script(
 
     target_lines: list[str] = []
     offset_lines: list[str] = []
+    suggestion_lines: list[str] = []
     if not targets:
         offset_lines.append("    # Add entries like 'Clip Label': 0 once targets are available.")
     for plan in targets:
         label = _plan_label(plan)
         trim_end_value = plan.trim_end if plan.trim_end is not None else None
         fps_override = tuple(plan.fps_override) if plan.fps_override else None
-        suggested = summary.suggested_frames.get(plan.path.name, 0)
+        suggested_frames_value = int(summary.suggested_frames.get(plan.path.name, 0))
+        measurement = measurement_lookup.get(plan.path.name)
+        suggested_seconds_value = 0.0
+        if measurement is not None and measurement.offset_seconds is not None:
+            suggested_seconds_value = float(measurement.offset_seconds)
         manual_trim = manual_trims.get(label, int(plan.trim_start))
         manual_note = (
             f"baseline trim {manual_trim}f"
@@ -3076,10 +3091,17 @@ def _write_vspreview_script(
                 }},"""
             ).rstrip()
         )
-        offset_lines.append(f"    {label!r}: {int(suggested)},  # Suggested delta frames")
+        applied_initial = suggested_frames_value if apply_seeded_offsets else 0
+        offset_lines.append(
+            f"    {label!r}: {applied_initial},  # Suggested delta {suggested_frames_value:+d}f"
+        )
+        suggestion_lines.append(
+            f"    {label!r}: ({suggested_frames_value}, {suggested_seconds_value!r}),"
+        )
 
     targets_literal = "\n".join(target_lines) if target_lines else ""
     offsets_literal = "\n".join(offset_lines)
+    suggestions_literal = "\n".join(suggestion_lines)
 
     extra_paths = [
         str(project_root),
@@ -3117,11 +3139,18 @@ TARGETS = {{
 {targets_literal}
 }}
 
-OFFSET_MAP = {{
-{offsets_literal}
-}}
+  OFFSET_MAP = {{
+  {offsets_literal}
+  }}
 
-core = vs.core
+  SUGGESTION_MAP = {{
+  {suggestions_literal}
+  }}
+
+  PREVIEW_MODE = {preview_mode_value!r}
+  SHOW_SUGGESTED_OVERLAY = {show_overlay!r}
+
+  core = vs.core
 
 
 def _load_clip(info):
@@ -3181,29 +3210,62 @@ def _harmonise_fps(reference_clip, target_clip, label):
     return reference_clip, target_clip
 
 
-print("Reference clip:", REFERENCE['label'])
-if not TARGETS:
-    print("No target clips defined; edit TARGETS and OFFSET_MAP to add entries.")
-
-slot = 0
-for label, info in TARGETS.items():
-    reference_clip = _load_clip(REFERENCE)
-    target_clip = _load_clip(info)
-    reference_clip, target_clip = _harmonise_fps(reference_clip, target_clip, label)
-    offset_frames = int(OFFSET_MAP.get(label, 0))
-    ref_view, tgt_view = _apply_offset(reference_clip, target_clip, offset_frames)
-    ref_view.set_output(slot)
-    tgt_view.set_output(slot + 1)
-    print(
-        "Target '%s': baseline trim=%sf (%s), suggested delta=%sf"
-        % (
-            label,
-            info.get('manual_trim', 0),
-            info.get('manual_trim_description', 'n/a'),
-            offset_frames,
-        )
+def _format_overlay_text(suggested_frames, suggested_seconds, applied_frames):
+    applied_label = "baseline" if applied_frames == 0 else "seeded"
+    return (
+        f"Suggested: {suggested_frames:+d}f (~{suggested_seconds:+.3f}s) • "
+        f"Applied in preview: {applied_frames:+d}f ({applied_label}) • "
+        "(+ trims target / − pads reference)"
     )
-    slot += 2
+
+
+def _maybe_apply_overlay(clip, suggested_frames, suggested_seconds, applied_frames):
+    if not SHOW_SUGGESTED_OVERLAY:
+        return clip
+    try:
+        message = _format_overlay_text(suggested_frames, suggested_seconds, applied_frames)
+    except Exception:
+        message = "Suggested offset unavailable"
+    try:
+        return clip.text.Text(message, alignment=7)
+    except Exception as exc:
+        print("Warning: Failed to draw overlay text for preview: %s" % (exc,))
+        return clip
+
+
+  print("Reference clip:", REFERENCE['label'])
+  print("VSPreview mode:", PREVIEW_MODE)
+  if not TARGETS:
+      print("No target clips defined; edit TARGETS and OFFSET_MAP to add entries.")
+
+  slot = 0
+  for label, info in TARGETS.items():
+      reference_clip = _load_clip(REFERENCE)
+      target_clip = _load_clip(info)
+      reference_clip, target_clip = _harmonise_fps(reference_clip, target_clip, label)
+      offset_frames = int(OFFSET_MAP.get(label, 0))
+      suggested_entry = SUGGESTION_MAP.get(label, (0, 0.0))
+      suggested_frames = int(suggested_entry[0])
+      suggested_seconds = float(suggested_entry[1])
+      ref_view, tgt_view = _apply_offset(reference_clip, target_clip, offset_frames)
+      ref_view = _maybe_apply_overlay(ref_view, suggested_frames, suggested_seconds, offset_frames)
+      tgt_view = _maybe_apply_overlay(tgt_view, suggested_frames, suggested_seconds, offset_frames)
+      ref_view.set_output(slot)
+      tgt_view.set_output(slot + 1)
+      applied_label = "baseline" if offset_frames == 0 else "seeded"
+      print(
+          "Target '%s': baseline trim=%sf (%s), suggested delta=%+df (~%+.3fs), preview applied=%+df (%s mode)"
+          % (
+              label,
+              info.get('manual_trim', 0),
+              info.get('manual_trim_description', 'n/a'),
+              suggested_frames,
+              suggested_seconds,
+              offset_frames,
+              applied_label,
+          )
+      )
+      slot += 2
 
 print("VSPreview outputs: reference on even slots, target on odd slots (0↔1, 2↔3, ...).")
 print("Edit OFFSET_MAP values and press Ctrl+R in VSPreview to reload the script.")
