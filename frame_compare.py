@@ -2042,9 +2042,7 @@ def _maybe_apply_audio_alignment(
         CLIAppError: If the offsets file cannot be read or if the underlying audio alignment process fails.
     """
     audio_cfg = cfg.audio_alignment
-    prompt_reuse_offsets = _coerce_config_flag(
-        getattr(audio_cfg, "prompt_reuse_offsets", False)
-    )
+    prompt_reuse_offsets = _coerce_config_flag(audio_cfg.prompt_reuse_offsets)
     offsets_path = _resolve_workspace_subdir(
         root,
         audio_cfg.offsets_filename,
