@@ -107,6 +107,11 @@ uv run python frame_compare.py
 When VSPreview is available on `PATH` (or importable via `python -m vspreview`) the CLI will generate a temporary script under the workspace, launch the preview, and summarise any existing manual trims before prompting for a delta. In headless or non-interactive sessions the script path is still printed so you can open it manually later.
 Existing manual trims are reported using each clip's display label (the friendly slow.pics/TMDB label when available, otherwise the filename) so you can quickly see which trims are already in effect before accepting a new delta.
 
+#### VSPreview console notes (Windows)
+
+- The generated helper prints ASCII arrows (`->`, `<->`) so legacy Windows consoles (`cp1252`) stay stable even when Unicode glyphs are unavailable.
+- For rich Unicode output, switch the console to UTF-8 (`chcp 65001`) or run inside Windows Terminal, which defaults to UTF-8 streams.
+
 ### Install & Run VSPreview
 
 Install the preview tooling the first time you enable `[audio_alignment].use_vspreview = true`:
