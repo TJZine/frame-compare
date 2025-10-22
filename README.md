@@ -27,37 +27,6 @@ Requirements:
 - VapourSynth ≥72 if you plan to use the primary renderer (install manually; see below)
 - Optional audio-alignment dependencies: `numpy`, `librosa`, and `soundfile` (install them when you plan to enable `[audio_alignment].enable`).
 
-Repository fixtures live under `comparison_videos/` beside
-`frame_compare.py`; they provide tiny MKV stubs suitable for smoke
-tests. By default the workspace root resolves to the repo checkout, so
-the tool scans `ROOT/comparison_videos`; copy the fixtures there (or
-set `[paths].input_dir` to another subdirectory under your chosen
-`ROOT`) before running comparisons.
-
-### Path diagnostics (Phase 1 guardrail)
-
-Run the temporary diagnostics flag to inspect the paths Frame Compare will touch before heavy work starts:
-
-```bash
-python -m frame_compare --diagnose-paths
-frame-compare --diagnose-paths
-FRAME_COMPARE_ROOT=. frame-compare --diagnose-paths
-frame-compare --root . --diagnose-paths
-```
-
-The command prints a single JSON line listing the resolved config, input root, screenshot directory, and basic writability flags so you can spot site-packages or read-only locations early.
-
-Need to seed a workspace config? Run `frame-compare --root <path> --write-config` (or the equivalent `python -m frame_compare --root <path> --write-config`) to ensure `ROOT/config/config.toml` is created in advance.
-
-```bash
-uv sync
-# install the VapourSynth runtime manually (see the steps below)
-uv pip install vapoursynth  # or `uv add vapoursynth` to persist it to your project
-uv run python frame_compare.py
-```
-
-The CLI ships with a configuration template stored at `src/data/config.toml.template` (packaged as `data/config.toml.template`). Frame Compare resolves that template by first honouring `$FRAME_COMPARE_TEMPLATE_PATH` (useful when you store templates outside the repository), then falling back to the packaged copy or the on-disk file. When you want to edit the defaults, copy the template to a writable location—`python -c "from src.config_template import copy_default_config; copy_default_config('config/config.toml')"` is a quick way—and point the CLI at it with `--config`/`--root` or the matching environment variables.
-
 Install VapourSynth manually after `uv sync` so the renderer is available:
 
 1. Follow the [official VapourSynth installation guide](https://www.vapoursynth.com/doc/installation.html) for your OS to install the core runtime (`vspipe`, libraries, and plugins). Package managers such as Homebrew, AUR, or `apt` provide maintained builds, and Windows users should run the official installer.
@@ -211,6 +180,30 @@ The most common toggles are below; see the
 - **Placeholder PNGs appear:** review console warnings for the failed
   renderer, then retry with `use_ffmpeg=true` or install the missing
   VapourSynth plugin/codec.
+
+### Path diagnostics
+
+Run the temporary diagnostics flag to inspect the paths Frame Compare will touch before heavy work starts:
+
+```bash
+python -m frame_compare --diagnose-paths
+frame-compare --diagnose-paths
+FRAME_COMPARE_ROOT=. frame-compare --diagnose-paths
+frame-compare --root . --diagnose-paths
+```
+
+The command prints a single JSON line listing the resolved config, input root, screenshot directory, and basic writability flags so you can spot site-packages or read-only locations early.
+
+Need to seed a workspace config? Run `frame-compare --root <path> --write-config` (or the equivalent `python -m frame_compare --root <path> --write-config`) to ensure `ROOT/config/config.toml` is created in advance.
+
+```bash
+uv sync
+# install the VapourSynth runtime manually (see the steps below)
+uv pip install vapoursynth  # or `uv add vapoursynth` to persist it to your project
+uv run python frame_compare.py
+```
+
+The CLI ships with a configuration template stored at `src/data/config.toml.template` (packaged as `data/config.toml.template`). Frame Compare resolves that template by first honouring `$FRAME_COMPARE_TEMPLATE_PATH` (useful when you store templates outside the repository), then falling back to the packaged copy or the on-disk file. When you want to edit the defaults, copy the template to a writable location—`python -c "from src.config_template import copy_default_config; copy_default_config('config/config.toml')"` is a quick way—and point the CLI at it with `--config`/`--root` or the matching environment variables.
 
 ## Compatibility & support
 
