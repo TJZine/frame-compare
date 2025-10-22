@@ -415,6 +415,17 @@ def _coerce_str_mapping(value: object) -> dict[str, object]:
     return {}
 
 
+def _ensure_audio_alignment_block(json_tail: JsonTail) -> AudioAlignmentJSON:
+    """Ensure the audio alignment block exists and return a mutable mapping."""
+
+    block = json_tail.get("audio_alignment")
+    if isinstance(block, dict):
+        return cast(AudioAlignmentJSON, block)
+    new_block = cast(AudioAlignmentJSON, {})
+    json_tail["audio_alignment"] = new_block
+    return new_block
+
+
 def _ensure_slowpics_block(json_tail: JsonTail, cfg: AppConfig) -> SlowpicsJSON:
     """Ensure that ``json_tail`` contains a slow.pics block and return it."""
 
@@ -3559,18 +3570,20 @@ def _activate_vspreview_missing_panel(
 ) -> None:
     """Update layout state and render the VSPreview missing-dependency panel."""
 
-    vspreview_block = reporter.values.get("vspreview")
-    if not isinstance(vspreview_block, dict):
-        vspreview_block = {}
-    missing_block = vspreview_block.get("missing")
-    if not isinstance(missing_block, dict):
+    vspreview_block = _coerce_str_mapping(reporter.values.get("vspreview"))
+    missing_block_obj = vspreview_block.get("missing")
+    missing_block: dict[str, object]
+    if isinstance(missing_block_obj, MappingABC):
+        missing_block = _coerce_str_mapping(missing_block_obj)
+    else:
         missing_block = {
             "windows_install": _VSPREVIEW_WINDOWS_INSTALL,
             "posix_install": _VSPREVIEW_POSIX_INSTALL,
         }
-    else:
-        missing_block.setdefault("windows_install", _VSPREVIEW_WINDOWS_INSTALL)
-        missing_block.setdefault("posix_install", _VSPREVIEW_POSIX_INSTALL)
+    if "windows_install" not in missing_block:
+        missing_block["windows_install"] = _VSPREVIEW_WINDOWS_INSTALL
+    if "posix_install" not in missing_block:
+        missing_block["posix_install"] = _VSPREVIEW_POSIX_INSTALL
     missing_block["command"] = manual_command
     missing_block["reason"] = reason
     missing_block["active"] = True
@@ -3596,34 +3609,8 @@ def _report_vspreview_missing(
         f"  Linux/macOS: {_VSPREVIEW_POSIX_INSTALL}",
         f"Then run: {manual_command}",
     ]
-    target_width = max(len(line) for line in width_lines)
-    original_width = getattr(reporter.console, "_width", None)
-    width_changed = False
-    if hasattr(reporter.console, "_width"):
-        current_width = reporter.console.width
-        if current_width < target_width:
-            reporter.console._width = target_width
-            width_changed = True
-    try:
-        reporter.console.print(
-            width_lines[0],
-            no_wrap=True,
-        )
-        reporter.console.print(
-            width_lines[1],
-            no_wrap=True,
-        )
-        reporter.console.print(
-            width_lines[2],
-            no_wrap=True,
-        )
-        reporter.console.print(
-            width_lines[3],
-            no_wrap=True,
-        )
-    finally:
-        if width_changed:
-            reporter.console._width = original_width
+    for line in width_lines:
+        reporter.console.print(Text(line, no_wrap=True, overflow="ignore"))
     reporter.warn(
         "VSPreview dependencies missing. Install with "
         f"'{_VSPREVIEW_WINDOWS_INSTALL}' (Windows) or "
@@ -3642,10 +3629,13 @@ def _launch_vspreview(
     reporter: CliOutputManager,
     json_tail: JsonTail,
 ) -> None:
-    audio_block = json_tail.setdefault("audio_alignment", {})
-    audio_block.setdefault("vspreview_script", None)
-    audio_block.setdefault("vspreview_invoked", False)
-    audio_block.setdefault("vspreview_exit_code", None)
+    audio_block = _ensure_audio_alignment_block(json_tail)
+    if "vspreview_script" not in audio_block:
+        audio_block["vspreview_script"] = None
+    if "vspreview_invoked" not in audio_block:
+        audio_block["vspreview_invoked"] = False
+    if "vspreview_exit_code" not in audio_block:
+        audio_block["vspreview_exit_code"] = None
 
     if summary is None:
         reporter.warn("VSPreview skipped: no alignment summary available.")
@@ -3663,26 +3653,26 @@ def _launch_vspreview(
     )
 
     manual_command = _format_vspreview_manual_command(script_path)
-    vspreview_block = reporter.values.get("vspreview")
-    if not isinstance(vspreview_block, dict):
-        vspreview_block = {}
+    vspreview_block = _coerce_str_mapping(reporter.values.get("vspreview"))
     vspreview_block["script_path"] = str(script_path)
     vspreview_block["script_command"] = manual_command
-    missing_block = vspreview_block.get("missing")
-    if not isinstance(missing_block, dict):
+    missing_block_obj = vspreview_block.get("missing")
+    missing_block: dict[str, object]
+    if isinstance(missing_block_obj, MappingABC):
+        missing_block = _coerce_str_mapping(missing_block_obj)
+    else:
         missing_block = {
-            "active": False,
             "windows_install": _VSPREVIEW_WINDOWS_INSTALL,
             "posix_install": _VSPREVIEW_POSIX_INSTALL,
-            "command": manual_command,
-            "reason": "",
         }
-    else:
-        missing_block["active"] = False
-        missing_block.setdefault("windows_install", _VSPREVIEW_WINDOWS_INSTALL)
-        missing_block.setdefault("posix_install", _VSPREVIEW_POSIX_INSTALL)
-        missing_block["command"] = manual_command
-        missing_block.setdefault("reason", "")
+    missing_block["active"] = False
+    if "windows_install" not in missing_block:
+        missing_block["windows_install"] = _VSPREVIEW_WINDOWS_INSTALL
+    if "posix_install" not in missing_block:
+        missing_block["posix_install"] = _VSPREVIEW_POSIX_INSTALL
+    missing_block["command"] = manual_command
+    if "reason" not in missing_block:
+        missing_block["reason"] = ""
     vspreview_block["missing"] = missing_block
     reporter.update_values({"vspreview": vspreview_block})
 
@@ -4840,10 +4830,8 @@ def run_cli(
     elif len(clip_records) > 1:
         target_label = clip_records[1]["label"]
 
-    vspreview_block = layout_data.get("vspreview", {})
-    clips_block = vspreview_block.get("clips")
-    if not isinstance(clips_block, dict):
-        clips_block = {}
+    vspreview_block = _coerce_str_mapping(layout_data.get("vspreview"))
+    clips_block = _coerce_str_mapping(vspreview_block.get("clips"))
     clips_block["ref"] = {"label": reference_label}
     clips_block["tgt"] = {"label": target_label}
     vspreview_block["clips"] = clips_block
@@ -4851,16 +4839,13 @@ def run_cli(
     vspreview_block["mode_display"] = vspreview_mode_display
     vspreview_block["suggested_frames"] = vspreview_suggested_frames_value
     vspreview_block["suggested_seconds"] = vspreview_suggested_seconds_value
-    existing_vspreview = reporter.values.get("vspreview")
-    if isinstance(existing_vspreview, dict):
-        missing_layout_block = vspreview_block.get("missing")
-        missing_existing_block = existing_vspreview.get("missing")
-        if isinstance(missing_existing_block, dict):
-            merged_missing_block: dict[str, Any] = (
-                dict(missing_layout_block)
-                if isinstance(missing_layout_block, dict)
-                else {}
-            )
+    existing_vspreview_obj = reporter.values.get("vspreview")
+    if isinstance(existing_vspreview_obj, MappingABC):
+        existing_vspreview = _coerce_str_mapping(existing_vspreview_obj)
+        missing_existing_block = _coerce_str_mapping(existing_vspreview.get("missing"))
+        if missing_existing_block:
+            missing_layout_block = _coerce_str_mapping(vspreview_block.get("missing"))
+            merged_missing_block = missing_layout_block.copy()
             merged_missing_block.update(missing_existing_block)
             vspreview_block["missing"] = merged_missing_block
         script_path_value = existing_vspreview.get("script_path")
