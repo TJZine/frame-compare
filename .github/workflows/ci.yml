@@ -32,49 +32,60 @@ jobs:
       - name: Run tests
         run: uv run --no-sync python -m pytest -q
 
+  typecheck:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - name: Ensure cache directory
+        run: mkdir -p ~/.cache/uv
+      - name: Cache uv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+      - name: Install dependencies
+        run: uv sync --group dev --frozen --python 3.13 --no-install-package vapoursynth
+      - name: Run pyright
+        run: npx pyright --warnings
+
   windows-smoke:
     runs-on: windows-latest
     steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
       - uses: actions/checkout@v4
       - name: VSPreview console smoke (cp1252)
         shell: pwsh
         run: |
           chcp 1252 | Out-Null
+          $env:PYTHONIOENCODING = 'cp1252'
           $scriptPath = Join-Path $env:RUNNER_TEMP "vspreview_console_smoke.py"
           @'
-import os
-import subprocess
 import sys
-import textwrap
 
-helper = textwrap.dedent(
-    """
-    import sys
+try:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
+
+def safe_print(msg: str) -> None:
     try:
-        if hasattr(sys.stdout, "reconfigure"):
-            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        if hasattr(sys.stderr, "reconfigure"):
-            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        print(msg)
     except Exception:
-        pass
-
-    def safe_print(msg: str) -> None:
         try:
-            print(msg)
+            print(msg.encode("utf-8", "replace").decode("utf-8", "replace"))
         except Exception:
-            try:
-                print(msg.encode("utf-8", "replace").decode("utf-8", "replace"))
-            except Exception:
-                print("[log message unavailable due to encoding]")
+            print("[log message unavailable due to encoding]")
 
-    safe_print("Adjusted FPS for target 'clip' to match reference (30000/1001 -> 24000/1001)")
-    safe_print("VSPreview outputs: reference on even slots, target on odd slots (0<->1, 2<->3, ...).")
-    """
-)
 
-env = dict(os.environ)
-env["PYTHONIOENCODING"] = "cp1252"
-subprocess.run([sys.executable, "-c", helper], env=env, check=True)
+safe_print("Adjusted FPS for target 'clip' to match reference (30000/1001 -> 24000/1001)")
+safe_print("VSPreview outputs: reference on even slots, target on odd slots (0<->1, 2<->3, ...).")
           '@ | Set-Content -Path $scriptPath -Encoding UTF8
           python $scriptPath

@@ -3264,7 +3264,7 @@ def _harmonise_fps(reference_clip, target_clip, label):
             )
         )
     except Exception as exc:
-        print("Warning: Failed to harmonise FPS for target '%s': %s" % (label, exc))
+        safe_print("Warning: Failed to harmonise FPS for target '%s': %s" % (label, exc))
     return reference_clip, target_clip
 
 
@@ -3291,14 +3291,14 @@ def _maybe_apply_overlay(clip, suggested_frames, suggested_seconds, applied_fram
     try:
         return clip.text.Text(message, alignment=7)
     except Exception as exc:
-        print("Warning: Failed to draw overlay text for preview: %s" % (exc,))
+        safe_print("Warning: Failed to draw overlay text for preview: %s" % (exc,))
         return clip
 
 
-print("Reference clip:", REFERENCE['label'])
-print("VSPreview mode:", PREVIEW_MODE)
+safe_print("Reference clip: %s" % (REFERENCE['label'],))
+safe_print("VSPreview mode: %s" % (PREVIEW_MODE,))
 if not TARGETS:
-    print("No target clips defined; edit TARGETS and OFFSET_MAP to add entries.")
+    safe_print("No target clips defined; edit TARGETS and OFFSET_MAP to add entries.")
 
 slot = 0
 for label, info in TARGETS.items():
@@ -3315,7 +3315,7 @@ for label, info in TARGETS.items():
     ref_view.set_output(slot)
     tgt_view.set_output(slot + 1)
     applied_label = "baseline" if offset_frames == 0 else "seeded"
-    print(
+    safe_print(
         "Target '%s': baseline trim=%sf (%s), suggested delta=%+df (~%+.3fs), preview applied=%+df (%s mode)"
         % (
             label,
@@ -3330,7 +3330,7 @@ for label, info in TARGETS.items():
     slot += 2
 
 safe_print("VSPreview outputs: reference on even slots, target on odd slots (0<->1, 2<->3, ...).")
-print("Edit OFFSET_MAP values and press Ctrl+R in VSPreview to reload the script.")
+safe_print("Edit OFFSET_MAP values and press Ctrl+R in VSPreview to reload the script.")
 """
     script_path.write_text(textwrap.dedent(script), encoding="utf-8")
     return script_path

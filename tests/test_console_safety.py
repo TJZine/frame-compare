@@ -72,13 +72,16 @@ def test_reconfigure_present(_vspreview_script_text: Sequence[str]) -> None:
 def test_safe_print_fallback_handles_unicode(_vspreview_script_text: Sequence[str]) -> None:
     """`safe_print` should degrade gracefully when faced with non-ASCII glyphs."""
 
-    pattern = re.compile(r"^def safe_print\(msg: str\) -> None:\n(?:    .+\n)+", re.MULTILINE)
+    pattern = re.compile(
+        r"^def\s+safe_print\(msg:\s*str\)\s*->\s*None:\n(?:(?:[ \t].*\n)+)",
+        re.MULTILINE,
+    )
     script_text = "\n".join(_vspreview_script_text)
     match = pattern.search(script_text)
     assert match is not None, "safe_print definition should be present"
 
     namespace: Dict[str, object] = {}
-    exec(match.group(0), namespace)
+    exec(match.group(0), namespace)  # noqa: S102 - executing generated code for test validation
 
     calls: list[str] = []
 
