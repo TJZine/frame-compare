@@ -1,6 +1,5 @@
 # Task: Harden VSPreview Helper Script for Windows Console Encodings (ASCII-only prints + UTF‑8-friendly I/O)
 
-**Owner:** Codex  
 **Target branch:** `feature/vspreview-console-safe` → PR into `Develop`  
 **Impacted area:** `frame_compare.py` (functions `_write_vspreview_script`, `_launch_vspreview`), generated `vspreview/*.py`, docs
 
@@ -93,15 +92,6 @@ Then use `safe_print(...)` for the two user‑facing lines.
 
 > **Note:** Keep this helper **inside the generated script only**, not library code.
 
-### B. Slight UX hint in `_launch_vspreview()` (Windows only)
-
-After surfacing the “VSPreview script ready” message, append a one‑liner hint:
-
-- **Windows only** (`os.name == "nt"`):  
-  “If your console shows garbled characters, use Windows Terminal/PowerShell or run `chcp 65001` before launching.”
-
-This does **not** change behavior; it just documents a quick remedy.
-
 ---
 
 ## Exact Edits (search/replace cues)
@@ -184,25 +174,6 @@ on:
     branches: [Develop, main]
 
 jobs:
-  test:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-        py: ["3.11"]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.py }}
-      - name: Install deps
-        run: |
-          python -m pip install -U pip
-          pip install -e .
-          pip install pytest
-      - name: Run unit tests
-        run: pytest -q
-
   typecheck:
     runs-on: ubuntu-latest
     steps:
@@ -254,12 +225,6 @@ jobs:
 - [ ] CI updated to include Windows smoke.  
 - [ ] Docs + changelog updated.  
 - [ ] PR description links to this task and includes before/after screenshot of the console output.
-
----
-
-## Rollback Plan
-
-Revert the commit touching `frame_compare.py` and test/docs changes. No persistent state changes are introduced.
 
 ---
 
