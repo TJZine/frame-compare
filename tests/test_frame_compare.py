@@ -1013,11 +1013,15 @@ def test_launch_vspreview_warns_when_command_missing(
     offer_entry = json_tail.get("vspreview_offer")
     assert offer_entry == {"vspreview_offered": False, "reason": "vspreview-missing"}
     console_output = reporter.console.export_text()
-    assert "VSPreview dependency missing" in console_output
-    assert frame_compare._VSPREVIEW_WINDOWS_INSTALL in console_output
+    normalized_output = " ".join(console_output.split())
+    assert "VSPreview dependency missing" in normalized_output
+    expected_windows_install = " ".join(
+        frame_compare._VSPREVIEW_WINDOWS_INSTALL.split()
+    )
+    assert expected_windows_install in normalized_output
     python_executable = frame_compare.sys.executable or "python"
-    assert python_executable in console_output
-    assert " -m vspreview" in console_output
+    assert python_executable in normalized_output
+    assert "-m vspreview" in normalized_output
 
 
 def _make_json_tail_stub() -> frame_compare.JsonTail:
