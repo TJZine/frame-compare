@@ -3610,7 +3610,7 @@ def _report_vspreview_missing(
         f"Then run: {manual_command}",
     ]
     for line in width_lines:
-        reporter.console.print(Text(line, no_wrap=True, overflow="ignore"))
+        reporter.console.print(Text(line, no_wrap=True))
     reporter.warn(
         "VSPreview dependencies missing. Install with "
         f"'{_VSPREVIEW_WINDOWS_INSTALL}' (Windows) or "
