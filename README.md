@@ -17,6 +17,29 @@ media archivists, fansub QC crews, and boutique remastering teams that
 need repeatable comparisons, live dashboards, and machine-readable
 metadata for downstream tooling.
 
+## Features
+
+- Deterministic frame selection blending luminance quantiles, motion
+  scoring, pinned frames, and seeded randomness.
+- Cached metrics (`generated.compframes` plus selection sidecars) for
+  fast reruns across large batches.
+- Audio alignment with correlation, dynamic time warping refinements,
+  and optional interactive confirmation frames.
+- VapourSynth-first pipeline with FFmpeg fallback, HDR→SDR tonemapping,
+  and placeholder recovery when writers fail.
+- slow.pics integration with automatic uploads, retries, URL shortcuts,
+  and clipboard hand-off.
+- TMDB-driven metadata resolution with GuessIt/Anitopy labelling to keep
+  comparisons organised.
+- Rich CLI layout featuring progress dashboards, Unicode fallbacks,
+  batch auto-grouping, and optional JSON tails for automation.
+- CLI override for audio stream selection (`--audio-align-track`) when
+  auto-detection needs guidance.
+- Configurable RAM guardrails and VapourSynth path injection for
+  multi-host deployments.
+- Optional clipboard support (`pyperclip`) to copy slow.pics links after
+  uploads.
+  
 ## Quickstart
 
 Requirements:
@@ -139,29 +162,6 @@ The most common toggles are below; see the
 | `[slowpics].auto_upload` | Push to slow.pics. | `true` | `auto_upload=false` |
 | `[runtime].ram_limit_mb` | VapourSynth RAM guard. | `4000` | `ram_limit_mb=4096` |
 <!-- markdownlint-restore -->
-
-## Features
-
-- Deterministic frame selection blending luminance quantiles, motion
-  scoring, pinned frames, and seeded randomness.
-- Cached metrics (`generated.compframes` plus selection sidecars) for
-  fast reruns across large batches.
-- Audio alignment with correlation, dynamic time warping refinements,
-  and optional interactive confirmation frames.
-- VapourSynth-first pipeline with FFmpeg fallback, HDR→SDR tonemapping,
-  and placeholder recovery when writers fail.
-- slow.pics integration with automatic uploads, retries, URL shortcuts,
-  and clipboard hand-off.
-- TMDB-driven metadata resolution with GuessIt/Anitopy labelling to keep
-  comparisons organised.
-- Rich CLI layout featuring progress dashboards, Unicode fallbacks,
-  batch auto-grouping, and optional JSON tails for automation.
-- CLI override for audio stream selection (`--audio-align-track`) when
-  auto-detection needs guidance.
-- Configurable RAM guardrails and VapourSynth path injection for
-  multi-host deployments.
-- Optional clipboard support (`pyperclip`) to copy slow.pics links after
-  uploads.
 
 ## Performance & troubleshooting
 
