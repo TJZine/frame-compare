@@ -40,6 +40,8 @@ quick-start configuration paths.
 | `--audio-align-track label=index` | Force a specific audio stream. | repeatable flag | `None` |
 <!-- markdownlint-restore -->
 
+*VSPreview helper notes:* generated scripts log using ASCII arrows to stay compatible with legacy Windows consoles. Overlay text inside the preview still renders with full Unicode glyphs. Switch your console to UTF-8 (`chcp 65001`) if you prefer Unicode output in logs.
+
 ## Screenshot rendering
 
 <!-- markdownlint-disable MD013 -->

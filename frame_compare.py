@@ -3154,6 +3154,15 @@ def _write_vspreview_script(
 import sys
 from pathlib import Path
 
+try:
+    # Prefer UTF-8 on Windows consoles and avoid crashing on encoding errors.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 WORKSPACE_ROOT = Path({str(root)!r})
 PROJECT_ROOT = Path({str(project_root)!r})
 EXTRA_PATHS = [{extra_paths_literal}]
@@ -3190,6 +3199,16 @@ PREVIEW_MODE = {preview_mode_value!r}
 SHOW_SUGGESTED_OVERLAY = {show_overlay!r}
 
 core = vs.core
+
+
+def safe_print(msg: str) -> None:
+    try:
+        print(msg)
+    except Exception:
+        try:
+            print(msg.encode("utf-8", "replace").decode("utf-8", "replace"))
+        except Exception:
+            print("[log message unavailable due to encoding]")
 
 
 def _load_clip(info):
@@ -3234,8 +3253,8 @@ def _harmonise_fps(reference_clip, target_clip, label):
         return reference_clip, target_clip
     try:
         target_clip = target_clip.std.AssumeFPS(num=reference_fps[0], den=reference_fps[1])
-        print(
-            "Adjusted FPS for target '%s' to match reference (%s/%s → %s/%s)"
+        safe_print(
+            "Adjusted FPS for target '%s' to match reference (%s/%s -> %s/%s)"
             % (
                 label,
                 target_fps[0],
@@ -3310,7 +3329,7 @@ for label, info in TARGETS.items():
     )
     slot += 2
 
-print("VSPreview outputs: reference on even slots, target on odd slots (0↔1, 2↔3, ...).")
+safe_print("VSPreview outputs: reference on even slots, target on odd slots (0<->1, 2<->3, ...).")
 print("Edit OFFSET_MAP values and press Ctrl+R in VSPreview to reload the script.")
 """
     script_path.write_text(textwrap.dedent(script), encoding="utf-8")
