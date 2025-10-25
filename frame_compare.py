@@ -2336,6 +2336,24 @@ def _maybe_apply_audio_alignment(
                 return int(float_value)
             return None
 
+        reference_entry = existing_entries.get(reference.path.name)
+        reference_manual_frames: int | None = None
+        reference_manual_seconds: float | None = None
+        if isinstance(reference_entry, Mapping):
+            status_obj = reference_entry.get("status")
+            if isinstance(status_obj, str) and status_obj.strip().lower() == "manual":
+                reference_manual_frames = _get_int(reference_entry.get("frames"))
+                reference_manual_seconds = _get_float(reference_entry.get("seconds"))
+                if (
+                    reference_manual_seconds is None
+                    and reference_manual_frames is not None
+                ):
+                    fps_guess = _get_float(reference_entry.get("target_fps")) or _get_float(
+                        reference_entry.get("reference_fps")
+                    )
+                    if fps_guess and fps_guess > 0:
+                        reference_manual_seconds = reference_manual_frames / fps_guess
+
         measurements: list["AlignmentMeasurement"] = []
         swap_details: Dict[str, str] = {}
         negative_offsets: Dict[str, bool] = {}
@@ -2346,10 +2364,21 @@ def _maybe_apply_audio_alignment(
             seconds_val = _get_float(entry.get("seconds")) if entry else None
             target_fps = _get_float(entry.get("target_fps")) if entry else None
             reference_fps = _get_float(entry.get("reference_fps")) if entry else None
+            status_obj = entry.get("status") if entry else None
+            is_manual = isinstance(status_obj, str) and status_obj.strip().lower() == "manual"
             if seconds_val is None and frames_val is not None:
                 fps_val = target_fps if target_fps and target_fps > 0 else reference_fps
                 if fps_val and fps_val > 0:
                     seconds_val = frames_val / fps_val
+            if is_manual and reference_manual_frames is not None:
+                if frames_val is not None:
+                    frames_val -= reference_manual_frames
+                if seconds_val is not None and reference_manual_seconds is not None:
+                    seconds_val -= reference_manual_seconds
+                elif seconds_val is None and frames_val is not None:
+                    fps_val = target_fps if target_fps and target_fps > 0 else reference_fps
+                    if fps_val and fps_val > 0:
+                        seconds_val = frames_val / fps_val
             correlation_val = _get_float(entry.get("correlation")) if entry else None
             error_obj = entry.get("error") if entry else None
             error_val = str(error_obj).strip() if isinstance(error_obj, str) and error_obj.strip() else None
@@ -3719,6 +3748,14 @@ def _launch_vspreview(
             manual_command,
             reason="vspreview-missing",
         )
+        return
+    except (OSError, subprocess.SubprocessError, RuntimeError) as exc:
+        logger.warning(
+            "VSPreview launch failed: %s",
+            exc,
+            exc_info=True,
+        )
+        reporter.warn(f"VSPreview launch failed: {exc}")
         return
     audio_block["vspreview_invoked"] = True
     audio_block["vspreview_exit_code"] = int(result.returncode)

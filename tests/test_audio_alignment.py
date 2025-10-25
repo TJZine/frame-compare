@@ -184,6 +184,7 @@ def test_measure_offsets_wraps_optional_dependency_errors(
         duration_seconds: float | None,
         stream_index: int,
     ) -> Path:
+        _ = sample_rate, start_seconds, duration_seconds, stream_index
         wav_path = tmp_path / "extracted.wav"
         wav_path.write_bytes(b"0")
         return wav_path
@@ -248,6 +249,7 @@ def test_measure_offsets_wraps_onset_strength_failure(
         duration_seconds: float | None,
         stream_index: int,
     ) -> Path:
+        _ = sample_rate, start_seconds, duration_seconds, stream_index
         wav_path = tmp_path / "extracted.wav"
         wav_path.write_bytes(b"0")
         return wav_path
