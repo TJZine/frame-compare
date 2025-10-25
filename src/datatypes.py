@@ -213,6 +213,7 @@ class OverridesConfig:
 
 
 @dataclass
+@dataclass
 class AppConfig:
     """Aggregated configuration loaded from the user-provided TOML file."""
 

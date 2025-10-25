@@ -8,13 +8,24 @@ import json
 import logging
 import math
 import numbers
-import random
-import time
 import os
+import random
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, TypedDict, cast, Literal
+from typing import (
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    TypedDict,
+    cast,
+)
 
 from . import vs_core
 from .datatypes import AnalysisConfig, ColorConfig

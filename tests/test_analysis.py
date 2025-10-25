@@ -1,9 +1,9 @@
 import json
 import types
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
-from collections.abc import Callable, Sequence
-from typing import Any, Dict, cast
+from typing import Any, cast
 
 import pytest
 
@@ -15,8 +15,8 @@ from src.analysis import (
     compute_selection_window,
     dedupe,
     probe_cached_metrics,
-    selection_details_to_json,
     select_frames,
+    selection_details_to_json,
     selection_hash_for_config,
     write_selection_cache_file,
 )

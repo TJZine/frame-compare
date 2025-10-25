@@ -11,11 +11,11 @@ quick-start configuration paths.
 | --- | --- | --- | --- |
 | `[analysis].frame_count_dark` | Count of dark-scene frames per run. | int | `20` |
 | `[analysis].frame_count_bright` | Bright-scene frame quota. | int | `10` |
-| `[analysis].frame_count_motion` | Motion-heavy frames queued. | int | `10` |
-| `[analysis].random_frames` | Extra deterministic random frames. | int | `10` |
+| `[analysis].frame_count_motion` | Motion-heavy frames queued. | int | `15` |
+| `[analysis].random_frames` | Extra deterministic random frames. | int | `15` |
 | `[analysis].user_frames` | Always-rendered frame numbers. | list[int] | `[]` |
 | `[analysis].random_seed` | Seed for random selection. | int | `20202020` |
-| `[analysis].downscale_height` | Metric computation height cap. | int | `720` |
+| `[analysis].downscale_height` | Metric computation height cap. | int | `480` |
 | `[analysis].ignore_lead_seconds` | Seconds trimmed from the start. | float | `0.0` |
 | `[analysis].ignore_trail_seconds` | Seconds trimmed from the end. | float | `0.0` |
 | `[analysis].min_window_seconds` | Minimum usable footage window. | float | `5.0` |
@@ -74,7 +74,7 @@ quick-start configuration paths.
 <!-- markdownlint-disable MD013 -->
 | Key | Purpose | Type | Default |
 | --- | --- | --- | --- |
-| `[slowpics].auto_upload` | Automatically upload runs. | bool | `true` |
+| `[slowpics].auto_upload` | Automatically upload runs. | bool | `false` |
 | `[slowpics].collection_name` | slow.pics collection label. | str | `""` |
 | `[slowpics].tmdb_id` | TMDB identifier. | str | `""` |
 | `[slowpics].open_in_browser` | Open slow.pics URLs locally. | bool | `true` |

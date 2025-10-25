@@ -92,8 +92,8 @@ verify_luma_threshold = 0.10
 strict = false
 
 [slowpics]
-# Auto-upload settings. Leave `auto_upload` off for local runs.
-auto_upload = true
+# Auto-upload settings. Disabled by default to avoid unintentional sharing; opt in explicitly.
+auto_upload = false
 collection_name = ""
 collection_suffix = ""
 is_hentai = false

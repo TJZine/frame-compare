@@ -9,7 +9,18 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .datatypes import ColorConfig
@@ -198,12 +209,12 @@ _RANGE_CODE_LABELS = {
 def _describe_code(value: Optional[int], mapping: Mapping[int, str], default: str = "auto") -> str:
     """
     Convert a numeric code to its human-readable label using a provided mapping.
-    
+
     Parameters:
         value (Optional[int]): The code to describe; if `None`, `default` is returned.
         mapping (Mapping[int, str]): Mapping from integer codes to their human-readable labels.
         default (str): Value to return when `value` is `None`. Defaults to "auto".
-    
+
     Returns:
         str: The label from `mapping` for `int(value)` if present; otherwise `default` when `value` is `None`, or `str(value)` if no mapping entry exists.
     """
@@ -218,10 +229,10 @@ def _describe_code(value: Optional[int], mapping: Mapping[int, str], default: st
 def _normalise_search_path(path: str) -> str:
     """
     Normalize a filesystem search path by expanding a user home and resolving to an absolute path when possible.
-    
+
     Parameters:
         path (str): The input filesystem path, may contain a leading `~` for the user home.
-    
+
     Returns:
         normalized_path (str): The expanded and resolved absolute path when resolution succeeds; otherwise the expanded path.
     """
@@ -1095,20 +1106,20 @@ def _format_overlay_text(
 ) -> str:
     """
     Format an overlay text template with tonemapping parameters.
-    
+
     Parameters:
-    	template (str): A format string that may reference the following keys: `tone_curve`, `curve` (alias),
-    	`dynamic_peak_detection`, `dpd` (numeric), `dynamic_peak_detection_bool`, `dpd_bool` (boolean),
-    	`target_nits` (int when whole number, otherwise float), `target_nits_float` (always float),
-    	`preset`, and `reason`.
-    	tone_curve (str): Name of the tone curve to show.
-    	dpd (int): Dynamic peak detection flag (0 or 1); boolean aliases are provided in the template values.
-    	target_nits (float): Target display luminance in nits.
-    	preset (str): Tonemap preset name.
-    	reason (Optional[str]): Optional explanatory text included as `reason` in the template.
-    
+        template (str): A format string that may reference the following keys: `tone_curve`, `curve` (alias),
+        `dynamic_peak_detection`, `dpd` (numeric), `dynamic_peak_detection_bool`, `dpd_bool` (boolean),
+        `target_nits` (int when whole number, otherwise float), `target_nits_float` (always float),
+        `preset`, and `reason`.
+        tone_curve (str): Name of the tone curve to show.
+        dpd (int): Dynamic peak detection flag (0 or 1); boolean aliases are provided in the template values.
+        target_nits (float): Target display luminance in nits.
+        preset (str): Tonemap preset name.
+        reason (Optional[str]): Optional explanatory text included as `reason` in the template.
+
     Returns:
-    	Formatted overlay string using the provided template and values; returns `template` unchanged if formatting fails.
+        Formatted overlay string using the provided template and values; returns `template` unchanged if formatting fails.
     """
     values = {
         "tone_curve": tone_curve,
@@ -1142,7 +1153,7 @@ def _pick_verify_frame(
 ) -> tuple[int, bool]:
     """
     Select a frame index to use for verification, optionally using an automatic brightness-based sampling.
-    
+
     Parameters:
         clip (Any): VapourSynth clip to inspect; must expose `num_frames` and support `std.PlaneStats()`.
         cfg (Any): Configuration object with optional attributes:
@@ -1155,7 +1166,7 @@ def _pick_verify_frame(
         fps (float): Frames-per-second used to convert seconds to frame indices.
         file_name (str): File name used in log and warning messages.
         warning_sink (Optional[List[str]]): Optional list to append human-readable warning strings.
-    
+
     Returns:
         tuple[int, bool]: Selected frame index and a flag that is `true` if the frame was chosen by automatic sampling, `false` otherwise.
     """
@@ -1296,7 +1307,7 @@ def process_clip_for_screenshot(
 ) -> ClipProcessResult:
     """
     Prepare a VapourSynth clip for screenshot export by applying HDR->SDR tonemapping, optional overlay text, and optional verification against a naive SDR conversion.
-    
+
     Parameters:
         clip: VapourSynth clip to process.
         file_name (str): Source filename used in log messages.
@@ -1305,10 +1316,10 @@ def process_clip_for_screenshot(
         enable_verification (bool): Runtime override to enable or disable verification.
         logger_override (Optional[logging.Logger]): Logger to use instead of the module logger.
         warning_sink (Optional[List[str]]): Optional list to which the function will append human-readable warning messages produced during frame selection/verification.
-    
+
     Returns:
         ClipProcessResult: Container with the processed clip, tonemap metadata (TonemapInfo), optional overlay text, optional verification results (VerificationResult), and a snapshot of source frame properties.
-    
+
     Raises:
         ClipProcessError: If VapourSynth core/resize namespaces or required resize methods are missing, if clip has no associated core, or if verification fails in strict mode; also used for other processing failures.
     """

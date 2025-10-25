@@ -1,14 +1,14 @@
-from pathlib import Path
+import logging
 import subprocess
 import sys
-import logging
 import types
+from pathlib import Path
 from typing import Any, Optional, Sequence, TypedDict, cast
 
 import pytest
 
-from src.datatypes import ColorConfig, OddGeometryPolicy, RGBDither, ScreenshotConfig
 from src import screenshot, vs_core
+from src.datatypes import ColorConfig, OddGeometryPolicy, RGBDither, ScreenshotConfig
 from src.screenshot import GeometryPlan, _compute_requires_full_chroma
 
 
@@ -218,14 +218,14 @@ def _prepare_fake_vapoursynth_clip(
 def _stub_process_clip(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     Replace screenshot.vs_core.process_clip_for_screenshot with a test stub that simulates a processed clip.
-    
+
     This fixture patches the target function so it returns a types.SimpleNamespace containing:
     - clip: the passed-in clip
     - overlay_text: None
     - verification: None
     - tonemap: a vs_core.TonemapInfo indicating an untonemapped SDR source (applied=False, target_nits=100.0, dst_min_nits=0.1, reason="SDR source")
     - source_props: an empty dict
-    
+
     Parameters:
         monkeypatch: pytest's monkeypatch fixture used to apply the patch.
     """

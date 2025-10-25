@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 import ast
-from dataclasses import dataclass, field
 import json
 import os
 import re
 import shutil
 import sys
 import textwrap
+from dataclasses import dataclass, field
 from itertools import zip_longest
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple, cast
@@ -169,9 +169,9 @@ class _AnsiColorMapper:
     def __init__(self, *, no_color: bool) -> None:
         """
         Initialize the color mapper and determine the terminal color capability.
-        
+
         Determines whether color output is disabled by combining the explicit `no_color` flag with the `NO_COLOR` environment variable, records that state on `self.no_color`, and sets `self._capability` to `"none"` when color is disabled. When color is enabled, attempts to enable Windows VT processing and detects the terminal's color capability, storing the result on `self._capability`. This may modify console state when enabling VT mode on Windows.
-        
+
         Parameters:
             no_color (bool): If True, force-disable all ANSI color output regardless of environment.
         """
@@ -217,7 +217,7 @@ class _AnsiColorMapper:
     def _enable_windows_vt_mode() -> None:
         """
         Enable ANSI VT (virtual terminal) processing on Windows consoles so ANSI escape sequences are interpreted.
-        
+
         This function is a no-op on non-Windows platforms. On Windows it first attempts to initialize color support via the optional `colorama` package; if `colorama` is unavailable it falls back to enabling VT processing through the Windows console API. Failures are handled silently — if VT mode cannot be enabled the function returns without raising.
         """
         if os.name != "nt":
@@ -291,11 +291,11 @@ class _AnsiColorMapper:
     def apply(self, token: str, text: str) -> str:
         """
         Apply the color/style represented by `token` to `text` using ANSI SGR sequences.
-        
+
         Parameters:
             token (str): Color or style token name understood by the mapper.
             text (str): The text to wrap with the style; returned unchanged if empty or styling is disabled.
-        
+
         Returns:
             str: `text` wrapped with the ANSI SGR sequence for `token` and an ANSI reset, or the original `text` if no style is applied.
         """
@@ -309,10 +309,10 @@ class _AnsiColorMapper:
     def _lookup(self, token: str) -> str:
         """
         Convert a color token into the corresponding ANSI SGR escape sequence for the renderer's detected terminal capability.
-        
+
         Parameters:
             token (str): Color token string (e.g. "accent.bold" or "green.bright") where the first segment names a color role and subsequent dot-separated segments are modifiers such as "bright", "bold", or "dim".
-        
+
         Returns:
             str: The ANSI escape sequence that applies the token's color and modifiers, or an empty string if the token is empty or not supported for the current terminal capability.
         """
@@ -403,12 +403,12 @@ class HighlightRule:
 def _require_keys(mapping: Mapping[str, Any], keys: Iterable[str], *, context: str) -> None:
     """
     Validate that all specified keys are present in a mapping.
-    
+
     Parameters:
         mapping: Mapping to validate for presence of keys.
         keys: Iterable of keys required to exist in `mapping`.
         context: Short description of the mapping used in the error message when keys are missing.
-    
+
     Raises:
         CliLayoutError: If one or more keys from `keys` are not present in `mapping`. The exception message lists the missing keys and includes `context`.
     """
@@ -421,15 +421,15 @@ def _require_keys(mapping: Mapping[str, Any], keys: Iterable[str], *, context: s
 def load_cli_layout(path: Path) -> CliLayout:
     """
     Load and validate a CLI layout from a JSON file.
-    
+
     Parses the JSON document at the given path, validates required top-level sections and theme/layout schema, and returns a populated CliLayout instance.
-    
+
     Parameters:
         path (Path): Filesystem path to the layout JSON file.
-    
+
     Returns:
         CliLayout: The parsed and validated layout configuration.
-    
+
     Raises:
         CliLayoutError: If the file cannot be read, the JSON is malformed, or the layout fails schema validation.
     """
@@ -468,8 +468,16 @@ def load_cli_layout(path: Path) -> CliLayout:
     options_raw = raw["layout"]
     if not isinstance(options_raw, dict):
         raise CliLayoutError("layout options must be an object")
-    _require_keys(options_raw, ("two_column_min_cols", "blank_line_between_sections", "path_ellipsis", "truncate_right_label_min_cols"), context="layout options")
-    options_dict: dict[str, object] = options_raw
+    _require_keys(
+        options_raw,
+        (
+            "two_column_min_cols",
+            "blank_line_between_sections",
+            "path_ellipsis",
+            "truncate_right_label_min_cols",
+        ),
+        context="layout options",
+    )
 
     sections_raw = raw["sections"]
     if not isinstance(sections_raw, list):
@@ -554,7 +562,7 @@ class LayoutContext:
     def __init__(self, data: Mapping[str, Any], flags: Mapping[str, Any], *, renderer: "CliLayoutRenderer") -> None:
         """
         Create a runtime context used to resolve template paths and flags during rendering.
-        
+
         Parameters:
             data: Mapping of the current template data available for path resolution.
             flags: Mapping of runtime flags (e.g., quiet/verbose) accessible during rendering.
@@ -567,16 +575,16 @@ class LayoutContext:
     def resolve(self, path: str) -> Any:
         """
         Resolve a dotted path or flag name against the context's data and flags.
-        
+
         Looks up `path` in flags first; if present, returns the flag value. Otherwise traverses `self._data` following dot-separated segments:
         - Dictionary-like objects: use mapping keys.
         - Sequence-like objects (except str/bytes/bytearray): numeric segments are treated as indices (out-of-range yields `None`).
         - Object attributes: use attribute access when mapping/sequence lookup does not apply.
         - The special segment `e` returns the current value converted to a path with ellipsis via the renderer's `apply_path_ellipsis`.
-        
+
         Parameters:
             path (str): A dotted lookup path (e.g. "a.b.0.c"); an empty or missing path returns the root data.
-        
+
         Returns:
             The resolved value for the path, or `None` if any lookup step fails or the path does not exist.
         """
@@ -621,9 +629,9 @@ class CliLayoutRenderer:
     ) -> None:
         """
         Initialize a CliLayoutRenderer with layout, console, and runtime flags and prepare internal rendering state.
-        
+
         Sets up color mapping (respecting no_color and color-blind options), symbol and role token maps, unicode support detection, cached width and progress state, grouped highlight rules, and progress block metadata extracted from group sections.
-        
+
         Parameters:
             layout: The parsed CliLayout describing theme, sections, options, folding, json_tail, and highlights.
             console: A Rich Console used for output.
@@ -695,7 +703,7 @@ class CliLayoutRenderer:
     def symbols(self) -> Mapping[str, str]:
         """
         Return a copy of the renderer's symbol map.
-        
+
         Returns:
             Mapping[str, str]: A mapping of symbol token names to their current string values (shallow copy).
         """
@@ -704,9 +712,9 @@ class CliLayoutRenderer:
     def update_progress_state(self, progress_id: str, *, state: Mapping[str, Any]) -> None:
         """
         Update the stored progress state for the given progress identifier.
-        
+
         Merges the provided mapping into the existing state for `progress_id`, creating a new state mapping if none exists. Existing keys are overwritten by values from `state`.
-        
+
         Parameters:
             progress_id (str): Identifier for the progress block to update.
             state (Mapping[str, Any]): Mapping of state keys and values to merge into the existing progress state.
@@ -720,9 +728,9 @@ class CliLayoutRenderer:
     def _console_width(self) -> int:
         """
         Determine the current console width to use for rendering.
-        
+
         Checks cached value, then tries console.width, then console.size.width, and finally falls back to the system terminal size with a minimum of 40 columns. Caches the resolved width for subsequent calls.
-        
+
         Returns:
             int: The number of columns to use for layout rendering (at least 40).
         """
@@ -745,20 +753,20 @@ class CliLayoutRenderer:
     def _visible_length(self, text: str) -> int:
         """
         Compute the visible character length of a string excluding ANSI escape sequences.
-        
+
         Returns:
-        	The number of printable characters in `text` after removing ANSI escape sequences.
+            The number of printable characters in `text` after removing ANSI escape sequences.
         """
         return len(_ANSI_ESCAPE_RE.sub("", text))
 
     def _pad_to_width(self, text: str, width: int) -> str:
         """
         Pad `text` with spaces so its visible (ANSI-stripped) length reaches `width`.
-        
+
         Parameters:
             text (str): The input string, may include ANSI escape sequences.
             width (int): Target visible width in characters (excluding ANSI escapes).
-        
+
         Returns:
             str: The original string if its visible length is >= `width`, otherwise the string padded on the right with spaces so its visible length equals `width`.
         """
@@ -770,9 +778,9 @@ class CliLayoutRenderer:
     def _truncate_visible(self, text: str, width: int) -> str:
         """
         Truncates a string so its visible length (excluding ANSI escape sequences) does not exceed the given width, appending an ellipsis when truncated.
-        
+
         If the visible length is already within width the original string is returned unchanged (including any ANSI sequences). If truncation is required, ANSI escape sequences are removed and a plain-text truncation with a trailing "…" is returned; the resulting visible length will be less than or equal to width.
-        
+
         Returns:
             A string whose visible length (counting characters but ignoring ANSI escapes) is <= width.
         """
@@ -797,10 +805,10 @@ class CliLayoutRenderer:
     def _role_style(self, role: Optional[str]) -> Optional[str]:
         """
         Map a theme role name to its style token used for colorization.
-        
+
         Parameters:
             role (Optional[str]): The role name to look up.
-        
+
         Returns:
             Optional[str]: The style token associated with `role`, or `None` if coloring is disabled or no token is defined for the role.
         """
@@ -812,21 +820,21 @@ class CliLayoutRenderer:
     def _rich_style_from_token(self, token: Optional[str]) -> Optional[str]:
         """
         Convert an internal color token into a Rich-compatible style string.
-        
+
         The token is a dot-separated string where the first segment is a color name and subsequent
         segments are modifiers. Recognized modifiers:
         - `bright`: prefer a bright variant of the base color when available.
         - `dim`: maps to the `dim` Rich modifier.
         - `bold`: maps to the `bold` Rich modifier.
         Any other modifier segments are included as literal words (periods replaced by spaces).
-        
+
         Special handling:
         - `grey` / `gray` with `bright` maps to `bright_black`.
         - `purple` with `bright` ensures the `bold` modifier is included.
-        
+
         Parameters:
             token (Optional[str]): A dot-separated color token or `None`.
-        
+
         Returns:
             Optional[str]: A space-separated Rich style string (modifiers followed by a base color),
             or `None` if `token` is falsy.
@@ -898,11 +906,11 @@ class CliLayoutRenderer:
     def _resolve_section_accent(self, section: Mapping[str, Any], badge: Optional[str] = None) -> Optional[str]:
         """
         Determine the accent role for a section based on an explicit role, badge content, or the section id.
-        
+
         Parameters:
             section (Mapping[str, Any]): Section metadata; may include the keys "accent_role", "title_badge", and "id".
             badge (Optional[str]): Optional badge text to use instead of the section's "title_badge".
-        
+
         Returns:
             Optional[str]: The resolved accent role name (e.g., "header", "accent") if one is determined, otherwise `None`.
         """
@@ -921,13 +929,13 @@ class CliLayoutRenderer:
     def _apply_role_to_chunk(self, role: Optional[str], chunk: str) -> str:
         """
         Apply a role-based color/style to a text chunk when coloring is enabled.
-        
+
         Parameters:
-        	role (Optional[str]): The style role token to apply (e.g., "accent", "warn"); if None or empty, no styling is applied.
-        	chunk (str): The text to style.
-        
+            role (Optional[str]): The style role token to apply (e.g., "accent", "warn"); if None or empty, no styling is applied.
+            chunk (str): The text to style.
+
         Returns:
-        	The styled string if a role is provided and coloring is enabled, otherwise the original chunk (or an empty string if `chunk` is empty).
+            The styled string if a role is provided and coloring is enabled, otherwise the original chunk (or an empty string if `chunk` is empty).
         """
         if not chunk:
             return ""
@@ -938,9 +946,9 @@ class CliLayoutRenderer:
     def _render_title_badge(self, section: Mapping[str, Any]) -> None:
         """
         Render a section's title badge if present.
-        
+
         If the section mapping contains a 'title_badge', determine an accent role from the section and badge (falling back to "header"), colorize the badge text with that role, and write it to the console.
-        
+
         Parameters:
             section (Mapping[str, Any]): Section specification mapping; may include a 'title_badge' string.
         """
@@ -954,12 +962,12 @@ class CliLayoutRenderer:
     def _apply_style_spans(self, text: str) -> str:
         """
         Apply inline style spans in the form [[role]]...[[/]] to the input text and return the styled result.
-        
+
         This recognizes role tokens enclosed in double brackets (e.g. [[accent]]) to start a styling span and the token [[/]] to end the most recent span. Spans may be nested; inner spans override outer roles for their contents. Unmatched or unterminated markers are treated as literal text.
-        
+
         Parameters:
             text (str): Input string that may contain style span markers.
-        
+
         Returns:
             str: The input string with style spans applied and replaced by their styled equivalents.
         """
@@ -993,9 +1001,9 @@ class CliLayoutRenderer:
     def _coerce_bool(self, value: Any) -> Optional[bool]:
         """
         Coerces common truthy and falsy representations into a boolean.
-        
+
         Accepts booleans, numeric types, and strings. Numeric values are treated as truthy when nonzero. String values recognized as truthy: "true", "yes", "1", "enabled", "on"; falsy: "false", "no", "0", "disabled", "off". Whitespace and case are ignored.
-        
+
         Returns:
             `True` if the value maps to a truthy representation, `False` if it maps to a falsy representation, `None` if the value cannot be determined as boolean.
         """
@@ -1014,9 +1022,9 @@ class CliLayoutRenderer:
     def _to_number(self, value: Any) -> Optional[float]:
         """
         Convert a value to a numeric float when possible.
-        
+
         Accepts ints and floats (returned as float), booleans (returned as 1.0 or 0.0), and numeric strings (commas allowed) and returns their float representation; returns None if conversion is not possible.
-        
+
         Returns:
             A float representation of the input value, or `None` if the value cannot be converted to a number.
         """
@@ -1050,11 +1058,11 @@ class CliLayoutRenderer:
     def _evaluate_expression(self, expression: str, context: LayoutContext) -> Any:
         """
         Evaluate a layout expression using a restricted namespace that can resolve template paths.
-        
+
         Parameters:
             expression (str): The expression to evaluate.
             context (LayoutContext): Context used for resolving path tokens via `resolve`.
-        
+
         Returns:
             The result of the evaluated expression, or `None` if evaluation fails.
         """
@@ -1077,13 +1085,13 @@ class CliLayoutRenderer:
     def _resolve_highlight_operand(self, operand: Any, context: LayoutContext) -> Any:
         """
         Resolve an operand that may be an expression enclosed in braces.
-        
+
         If `operand` is a string of the form "{...}" with a non-empty inner expression, evaluates that expression in `context` and returns the result; otherwise returns `operand` unchanged.
-        
+
         Parameters:
             operand: The value or expression to resolve; may be any type.
             context (LayoutContext): Context used to evaluate expressions.
-        
+
         Returns:
             The evaluated result when `operand` is a non-empty brace-enclosed expression, or the original `operand` otherwise.
         """
@@ -1100,19 +1108,19 @@ class CliLayoutRenderer:
     ) -> Optional[str]:
         """
         Evaluate a HighlightRule against a value in the given LayoutContext and return the highlight role when the rule matches.
-        
+
         Parameters:
             rule (HighlightRule): The highlight rule to evaluate; its `when` field controls the comparison type.
             value (Any): The value to test against the rule.
             context (LayoutContext): Context used to resolve operands or expressions referenced by the rule.
-        
+
         Notes:
             Supported `when` types:
               - "isbool": coerces the value to boolean and returns `true_role` or `false_role`.
               - "gt", "lt": numeric greater-than / less-than comparisons.
               - "abs_gt", "abs_gte", "abs_lt": comparisons against the absolute value.
             If operand resolution or numeric coercion fails, the rule does not match.
-        
+
         Returns:
             Optional[str]: The role name to apply when the rule matches, or `None` if it does not match or cannot be evaluated.
         """
@@ -1144,14 +1152,14 @@ class CliLayoutRenderer:
     def _pick_highlight(self, path: str, value: Any, context: LayoutContext) -> Optional[str]:
         """
         Selects the first highlight role that applies to a given path and value.
-        
+
         Checks registered highlight rules for the exact `path` and evaluates them in order using `context`. Returns the role from the first rule whose condition matches the supplied `value`.
-        
+
         Parameters:
             path (str): Dotted path used to look up highlight rules.
             value (Any): The value to evaluate against highlight rules.
             context (LayoutContext): Runtime context used when evaluating rule expressions.
-        
+
         Returns:
             Optional[str]: The highlight role from the first matching rule, or `None` if no rule applies.
         """
@@ -1169,12 +1177,12 @@ class CliLayoutRenderer:
     def _style_key_tokens(self, text: str) -> str:
         """
         Apply color styling to key-like tokens and boolean words in a text string.
-        
+
         This method highlights tokens that look like keys (words immediately followed by "=" or ":" not part of a URL) using the renderer's "accent" role, and maps boolean-like words ("yes", "no", "true", "false", "enabled", "disabled", "ok") to "success" or "warn" roles. If `text` is empty or color output is disabled, the original string is returned unchanged.
-        
+
         Parameters:
             text (str): The input text to style.
-        
+
         Returns:
             str: The input string with key tokens and boolean words wrapped with the renderer's color roles.
         """
@@ -1184,10 +1192,10 @@ class CliLayoutRenderer:
         def repl(match: re.Match[str]) -> str:
             """
             Render a regex match for a key token as a colored key followed by an equals sign.
-            
+
             Parameters:
                 match (re.Match[str]): Regex match whose first capture group is the key token.
-            
+
             Returns:
                 str: The key wrapped with the renderer's 'accent' color token followed by '='.
             """
@@ -1197,10 +1205,10 @@ class CliLayoutRenderer:
         def colon_repl(match: re.Match[str]) -> str:
             """
             Replace a regex match representing a key:suffix pair with a colorized key and the original suffix.
-            
+
             Parameters:
                 match (re.Match[str]): A regex match where group 1 is the key token and group 2 is the following suffix (e.g., delimiter and value).
-            
+
             Returns:
                 str: The input reconstructed as "<accent-colored key><suffix>".
             """
@@ -1214,10 +1222,10 @@ class CliLayoutRenderer:
         def bool_repl(match: re.Match[str]) -> str:
             """
             Map a regex match of boolean-like words to a role-colored string or return the original text.
-            
+
             Parameters:
                 match (re.Match[str]): A regex match whose matched text will be inspected.
-            
+
             Returns:
                 str: The matched text colorized with the "success" role if it is one of "yes", "true", "enabled", or "ok"; colorized with the "warn" role if it is one of "no", "false", or "disabled"; otherwise the original matched text.
             """
@@ -1235,13 +1243,13 @@ class CliLayoutRenderer:
     def _prepare_output(self, text: str, *, highlight: bool = True) -> str:
         """
         Prepare rendered output by applying inline style spans and optional key-token highlighting.
-        
+
         The function trims trailing whitespace from the input, applies inline style spans of the form `[[role]]...[[/]]` when present, and optionally transforms key-like tokens and boolean words into styled tokens.
-        
+
         Parameters:
             text (str): The rendered text to prepare.
             highlight (bool): If True, apply key-token and boolean-word styling; if False, skip that step.
-        
+
         Returns:
             str: The processed string with trailing right-side whitespace removed, style spans applied, and key-token highlighting applied when enabled. An empty string is returned for falsy input.
         """
@@ -1257,7 +1265,7 @@ class CliLayoutRenderer:
     def _write(self, text: str = "") -> None:
         """
         Write a line to the renderer's console.
-        
+
         If `text` is non-empty it is printed as a single line; if `text` is empty a blank line is emitted.
         """
         if text:
@@ -1268,13 +1276,13 @@ class CliLayoutRenderer:
     def apply_path_ellipsis(self, value: str, *, width: Optional[int] = None) -> str:
         """
         Shorten a path-like string with an ellipsis so it fits within the console width.
-        
+
         If `value` is None an empty string is returned. The effective width is `width` if provided or the current console width minus padding; a minimum usable width is enforced. When the layout option `path_ellipsis` is "middle", the function preserves the final path segment (after the last '/' or '\') and inserts an ellipsis in the middle; otherwise it truncates the end and appends an ellipsis. The result always contains at least one visible character plus the ellipsis when truncation is required.
-        
+
         Parameters:
             value (str | None): The path or text to shorten. `None` yields an empty string.
             width (int, optional): Override for the maximum width to fit; if omitted the console width is used.
-        
+
         Returns:
             str: The possibly truncated string, using "…" (ellipsis) to indicate removed content.
         """
@@ -1302,13 +1310,13 @@ class CliLayoutRenderer:
     def _format_value(self, value: Any, fmt: Optional[str]) -> str:
         """
         Format a value for display according to the layout theme and an optional format specifier.
-        
+
         When `value` is None returns an empty string. If `fmt` is provided, attempts to format using Python's `format(value, fmt)` and falls back to subsequent rules on error. Integers (excluding booleans) use the theme's `units.thousands_sep` to insert a thousands separator when present; otherwise they are converted with `str()`. Floats are formatted with a number of decimal places taken from `theme.units.seconds_decimals` (default 2). All other values are converted with `str()`.
-        
+
         Parameters:
             value (Any): The value to format.
             fmt (Optional[str]): Optional Python format specification to apply.
-        
+
         Returns:
             str: The formatted string representation suitable for CLI output.
         """
@@ -1337,11 +1345,11 @@ class CliLayoutRenderer:
     def _wrap_with_indent(self, value: Any, padding: int) -> str:
         """
         Wrap text to console width minus padding, with 2-space continuation indent.
-        
+
         Parameters:
             value (Any): The input value to wrap (converted to string).
             padding (int): Number of columns to subtract from console width.
-        
+
         Returns:
             str: Wrapped text with 2-space hanging indent, or empty string if input is empty.
         """
@@ -1399,18 +1407,18 @@ class CliLayoutRenderer:
     def _render_token(self, token: str, context: LayoutContext) -> str:
         """
         Render a single template token into its string representation using the provided context.
-        
+
         Supports:
         - Conditional tokens in the form `cond?true:else`; the chosen branch is rendered (backticked branches are treated as dollar-templates).
         - Optional tokens with a trailing `?` which yield an empty string when the resolved value is `None` or an empty string.
         - Path resolution with optional format specifier using `path:fmt`.
         - Value filters appended with `|`, e.g. `path|filter1|filter2`.
         - Highlighting: when a highlight rule matches the resolved path and value, the non-whitespace core of the formatted result is wrapped with a role span `[[role]]...[[/]]`.
-        
+
         Parameters:
             token (str): The token text to render (typically the contents between `{}` in a template).
             context (LayoutContext): Context used to resolve paths and evaluate conditions.
-        
+
         Returns:
             str: The rendered string for the token (possibly empty), with formatting, filters, conditional evaluation, and optional highlight span applied.
         """
@@ -1470,11 +1478,11 @@ class CliLayoutRenderer:
     def _render_text(self, template: str, context: LayoutContext) -> str:
         """
         Render a template string by replacing {tokens} with their rendered values using the provided context.
-        
+
         Parameters:
             template (str): Template text containing zero or more brace-enclosed tokens (e.g., "{path}") to be rendered.
             context (LayoutContext): Context used to resolve and render tokens.
-        
+
         Returns:
             str: The fully rendered string. Malformed or unmatched opening braces are preserved as literal characters; each well-formed `{...}` token is replaced by its rendered value.
         """
@@ -1502,11 +1510,11 @@ class CliLayoutRenderer:
     def _extract_token(self, text: str, start: int) -> tuple[Optional[str], int]:
         """
         Extract the token substring delimited by a matching `}` starting from a given index, supporting nested `{}` pairs.
-        
+
         Parameters:
             text (str): The full template string to scan.
             start (int): The index to begin scanning from (expected to be just after an opening `{`).
-        
+
         Returns:
             tuple[Optional[str], int]: A pair where the first element is the extracted token (the substring between `start` and the matching `}`) or `None` if no matching closing brace was found; the second element is the index immediately after the closing `}` or `len(text)` if unmatched.
         """
@@ -1527,13 +1535,13 @@ class CliLayoutRenderer:
         # Replace ${a.b} style placeholders
         """
         Replace `${path}`-style placeholders in a template with resolved values from a LayoutContext.
-        
+
         Parameters:
-        	template (str): Template text containing `${...}` placeholders where `...` is a dotted path.
-        	context (LayoutContext): Context used to resolve each placeholder path; if resolution returns `None` the placeholder is replaced with an empty string.
-        
+            template (str): Template text containing `${...}` placeholders where `...` is a dotted path.
+            context (LayoutContext): Context used to resolve each placeholder path; if resolution returns `None` the placeholder is replaced with an empty string.
+
         Returns:
-        	str: The template with all `${...}` placeholders substituted by their resolved string values.
+            str: The template with all `${...}` placeholders substituted by their resolved string values.
         """
         def replace(match: re.Match[str]) -> str:
             path = match.group(1)
@@ -1548,10 +1556,10 @@ class CliLayoutRenderer:
     def _find_conditional_split(self, token: str) -> Optional[Tuple[str, str, str]]:
         """
         Locate a ternary-style conditional in a template token and split it into condition, true branch, and false branch.
-        
+
         Parameters:
             token (str): A template token that may contain a conditional expression of the form `condition?true_expr:false_expr`.
-        
+
         Returns:
             tuple[str, str, str] | None: A 3-tuple (condition, true_expr, false_expr) with surrounding whitespace removed if a matching `?` and its corresponding `:` are found; otherwise `None`.
         """
@@ -1570,12 +1578,12 @@ class CliLayoutRenderer:
     def _find_unescaped_question(self, text: str) -> Optional[int]:
         """
         Locate the first top-level, unescaped question mark in a template string.
-        
+
         The search ignores question marks that occur inside backtick-delimited spans, inside balanced `{}` brace groups, or when nested within any parentheses at depth greater than zero.
-        
+
         Parameters:
             text (str): Template text to scan.
-        
+
         Returns:
             index (int | None): The index of the first unescaped `?` found at top-level, or `None` if none exists.
         """
@@ -1607,12 +1615,12 @@ class CliLayoutRenderer:
     def _find_matching_colon(self, text: str) -> Optional[int]:
         """
         Find the index of the colon that pairs with the first top-level conditional split in a token.
-        
+
         Scans `text` for a colon ':' that corresponds to the top-level '?' conditional operator, ignoring colons that appear inside balanced '{...}' groups or inside backtick-delimited segments. Nested conditionals are supported: each '?' increments nesting and the matching ':' for the outermost conditional is returned.
-        
+
         Parameters:
             text (str): The token text to search for a matching colon.
-        
+
         Returns:
             Optional[int]: The index of the matching colon in `text`, or `None` if no top-level matching colon is found.
         """
@@ -1644,13 +1652,13 @@ class CliLayoutRenderer:
     def _evaluate_condition(self, expr: str, context: LayoutContext) -> bool:
         """
         Determine whether a condition expression evaluates to true using the given layout context.
-        
+
         The expression is prepared for evaluation (mapping token names to calls to the context resolver) and executed in a restricted namespace where `resolve` is available along with `True`, `False`, and `None`. Any evaluation error or an empty expression results in `False`.
-        
+
         Parameters:
             expr (str): The condition expression to evaluate.
             context (LayoutContext): Context used to resolve tokens referenced by the expression.
-        
+
         Returns:
             bool: `True` if the prepared expression evaluates truthy, `False` otherwise.
         """
@@ -1674,16 +1682,16 @@ class CliLayoutRenderer:
     def _prepare_condition(self, expr: str) -> str:
         """
         Convert a layout condition expression into a Python-evaluable expression that resolves symbols at runtime.
-        
+
         The input expression may use C-style logical operators and unqualified identifiers; this function:
         - replaces `&&`/`||` with `and`/`or`,
         - normalizes boolean and null-like literals (`true`/`false`/`none`) to `True`/`False`/`None`,
         - replaces identifiers (e.g., `foo.bar`) with calls to `resolve('foo.bar')`,
         - converts unary `!` to Python `not` while preserving `!=`.
-        
+
         Parameters:
             expr (str): A condition expression from the layout template.
-        
+
         Returns:
             str: A Python expression string suitable for evaluation in the renderer's restricted namespace.
         """
@@ -1726,12 +1734,12 @@ class CliLayoutRenderer:
     def render_template(self, template: str, values: Mapping[str, Any], flags: Mapping[str, Any]) -> str:
         """
         Render a layout template string using the provided values and flags.
-        
+
         Parameters:
             template (str): Template text containing layout tokens, conditional expressions, and style spans to be resolved.
             values (Mapping[str, Any]): Mapping of variable names to values used when resolving template tokens.
             flags (Mapping[str, Any]): Runtime flags (for example quiet/verbose/no_color) that influence rendering and conditional evaluation.
-        
+
         Returns:
             str: The rendered string with tokens evaluated, filters and formatting applied, highlights and styles resolved.
         """
@@ -1745,9 +1753,9 @@ class CliLayoutRenderer:
     def render_section(self, section: Mapping[str, Any], values: Mapping[str, Any], flags: Mapping[str, Any]) -> None:
         """
         Render a single layout section according to the renderer's configuration and the provided data.
-        
+
         Evaluates the section's optional "when" condition and skips rendering when it is false; honors the renderer's quiet mode and the layout option to insert a blank line between sections; dispatches to the appropriate section-specific render method and records the section as rendered. Raises CliLayoutError if the section's type is not supported.
-        
+
         Parameters:
             section (Mapping[str, Any]): Section specification from the layout (must include "type" and may include "id" and "when").
             values (Mapping[str, Any]): Runtime values used for template rendering and condition evaluation.
@@ -1781,11 +1789,11 @@ class CliLayoutRenderer:
     def _render_line_section(self, section: Mapping[str, Any], values: Mapping[str, Any], flags: Mapping[str, Any]) -> None:
         """
         Render a single-line section by evaluating its template and writing the resulting text if non-empty.
-        
+
         Parameters:
-        	section (Mapping[str, Any]): Section definition; may contain a "template" string to render.
-        	values (Mapping[str, Any]): Data values used when rendering the template.
-        	flags (Mapping[str, Any]): Flag values used when rendering the template.
+            section (Mapping[str, Any]): Section definition; may contain a "template" string to render.
+            values (Mapping[str, Any]): Data values used when rendering the template.
+            flags (Mapping[str, Any]): Flag values used when rendering the template.
         """
         template = section.get("template", "")
         text = self._prepare_output(self.render_template(template, values, flags))
@@ -1795,9 +1803,9 @@ class CliLayoutRenderer:
     def _render_box_section(self, section: Mapping[str, Any], values: Mapping[str, Any], flags: Mapping[str, Any]) -> None:
         """
         Render a framed box section with an optional styled title and content lines.
-        
+
         Renders the section described by `section` using `values` and `flags` as the template context. Expects `section["lines"]` to be a list of template strings; each line is rendered, truncated and padded to fit the console width, and placed inside a box drawn with Unicode box-drawing characters. If a `title` is present it is shown in the top border and styled with the theme's header role. Raises CliLayoutError if `section["lines"]` is not a list.
-        
+
         Parameters:
             section (Mapping[str, Any]): Section specification; recognizes the keys:
                 - "title" (str, optional): Box title.
@@ -1837,9 +1845,9 @@ class CliLayoutRenderer:
     def _render_list_section(self, section: Mapping[str, Any], values: Mapping[str, Any], flags: Mapping[str, Any]) -> None:
         """
         Render a "list" section: print the section badge/title and the section's items either as a single column or two columns depending on available console width.
-        
+
         Each non-empty item is rendered as a template, processed for styling, and printed. When there are more than three items and the console width is at least layout.options.two_column_min_cols, items are split into two columns, truncated and padded to fit; otherwise items are printed one per line.
-        
+
         Raises:
             CliLayoutError: if `section["items"]` exists and is not a list.
         """
@@ -1888,19 +1896,19 @@ class CliLayoutRenderer:
     def _render_group_section(self, section: Mapping[str, Any], values: Mapping[str, Any], flags: Mapping[str, Any]) -> None:
         """
         Render a "group" section by evaluating and printing its member blocks with optional subtitles and dividing rules.
-        
+
         Each block may include:
         - "when": a conditional expression; the block is skipped if the condition evaluates to false.
         - "type": if "progress", the block is skipped (progress handled separately); otherwise treated as line-based content.
         - "subtitle": an optional subtitle rendered before the block's lines.
         - "lines": a list of templates; each template is rendered, styled, and included if non-empty.
-        
+
         Behavior:
         - Validates that section["blocks"], if present, is a list and raises CliLayoutError if not.
         - Renders each block's lines via render_template, applies styling and alignment, and formats multi-column block lines.
         - Emits a decorative rule between a subtitle and its block lines when the console width is >= 80.
         - Writes a blank line between rendered blocks.
-        
+
         Raises:
             CliLayoutError: if section["blocks"] is present but is not a list.
         """
@@ -1952,9 +1960,9 @@ class CliLayoutRenderer:
     def _supports_unicode(self) -> bool:
         """
         Determine whether the associated console is likely to support Unicode.
-        
+
         Checks the console's `encoding` attribute and treats encodings containing "utf" (case-insensitive) as Unicode-capable; if the console has no `encoding` attribute or it's falsy, assumes Unicode support. Returns `False` if the encoding value is present but does not appear UTF-compatible or if its type is not string-like.
-        
+
         Returns:
             `true` if the console is expected to support Unicode, `false` otherwise.
         """
@@ -1969,7 +1977,7 @@ class CliLayoutRenderer:
     def _using_ascii_symbols(self) -> bool:
         """
         Determine whether rendering should fall back to ASCII-only symbols.
-        
+
         Returns:
             `true` if rendering must use ASCII symbols (color disabled or Unicode unsupported), `false` otherwise.
         """
@@ -1978,12 +1986,12 @@ class CliLayoutRenderer:
     def _format_subtitle(self, subtitle: str) -> str:
         """
         Format a section subtitle with a leading symbol and optional accent styling.
-        
+
         Parameters:
-        	subtitle (str): Subtitle text; leading/trailing whitespace will be trimmed.
-        
+            subtitle (str): Subtitle text; leading/trailing whitespace will be trimmed.
+
         Returns:
-        	str: The subtitle prefixed with an ASCII ">" or Unicode "›" (depending on symbol mode). If colors are enabled, the result is colorized using the `accent_subhead` role; otherwise plain text is returned.
+            str: The subtitle prefixed with an ASCII ">" or Unicode "›" (depending on symbol mode). If colors are enabled, the result is colorized using the `accent_subhead` role; otherwise plain text is returned.
         """
         prefix = ">" if self._using_ascii_symbols() else "›"
         text = f"{prefix} {subtitle.strip()}"
@@ -2032,12 +2040,12 @@ class CliLayoutRenderer:
     def _format_block_lines(self, lines: Sequence[str]) -> List[str]:
         """
         Aligns multi-column text lines into evenly padded columns.
-        
+
         Takes an input sequence of lines where columns are delimited by two or more spaces, preserves leading indentation and empty lines, and returns a new list of lines with columns padded so each column aligns vertically across all lines. Lines that do not contain multiple columns are returned unchanged.
-        
+
         Parameters:
             lines (Sequence[str]): Input lines to format; columns are detected by runs of two or more spaces.
-        
+
         Returns:
             List[str]: The formatted lines with aligned columns, or the original lines when no multi-column layout is detected.
         """
@@ -2085,7 +2093,7 @@ class CliLayoutRenderer:
     def _render_passthrough_section(self, section: Mapping[str, Any], values: Mapping[str, Any], flags: Mapping[str, Any]) -> None:
         """
         Render a passthrough section header (title/badge) without additional body content.
-        
+
         This renders only the section's title badge using the current theme and accent rules; passthrough sections do not produce content lines.
         """
         self._render_title_badge(section)
@@ -2093,7 +2101,7 @@ class CliLayoutRenderer:
     def _render_table_section(self, section: Mapping[str, Any], values: Mapping[str, Any], flags: Mapping[str, Any]) -> None:
         """
         Render a table-style section by iterating over rows and rendering a per-row template.
-        
+
         For the section's "row_template", looks up an iterable of rows from the provided values using the section's "id", merges each row into the current values as the rendering context, renders and post-processes the template, and writes each non-empty rendered line to the console. Empty or falsy rendered results are skipped.
         """
         self._render_title_badge(section)
@@ -2120,7 +2128,7 @@ class CliLayoutRenderer:
     def get_progress_block(self, progress_id: str) -> Optional[Mapping[str, Any]]:
         """
         Return the progress block configuration for the given progress identifier, or None if not present.
-        
+
         Returns:
             Mapping[str, Any] or None: The progress block mapping for the specified `progress_id`, or `None` if no block exists.
         """
@@ -2132,7 +2140,7 @@ class CliLayoutRenderer:
     def bind_context(self, values: Mapping[str, Any], flags: Mapping[str, Any]) -> None:
         """
         Store the current rendering values and flags for later use by progress-template rendering.
-        
+
         Parameters:
             values (Mapping[str, Any]): Mapping of active data values available to templates.
             flags (Mapping[str, Any]): Mapping of active flags (e.g., quiet, verbose, no_color) available to templates.
@@ -2144,16 +2152,16 @@ class CliLayoutRenderer:
     def create_progress(self, progress_id: str, *, transient: bool = False) -> Progress:
         """
         Create a Rich Progress instance configured for the specified progress block.
-        
+
         Constructs a Progress configured with columns (description, progress bar, completed/total and an optional right-side template column), styled according to the block's accent role and the layout theme. Raises an error if the progress_id is not known.
-        
+
         Parameters:
             progress_id (str): Identifier of the progress block defined in the layout.
             transient (bool): Fallback transient flag used when the block does not specify its own `transient` setting.
-        
+
         Returns:
             Progress: A configured Rich Progress instance ready to be started.
-        
+
         Raises:
             CliLayoutError: If no progress block is registered for `progress_id`.
         """
@@ -2236,7 +2244,7 @@ class _TemplateProgressColumn(ProgressColumn):
     def __init__(self, renderer: CliLayoutRenderer, progress_id: str, template: str) -> None:
         """
         Initialize the progress column with its renderer, the target progress block id, and the template used to render the right-side label.
-        
+
         Parameters:
             renderer (CliLayoutRenderer): Renderer instance used to render templates and access theme/symbols.
             progress_id (str): Identifier of the progress block this column is bound to.
@@ -2250,12 +2258,12 @@ class _TemplateProgressColumn(ProgressColumn):
     def render(self, task: Task) -> Any:
         """
         Render the dynamic right-side label for a progress bar using the renderer's active context.
-        
+
         Parameters:
-        	task (Task): The progress task object whose completed, total, and percentage values will be exposed as `progress` in the template context.
-        
+            task (Task): The progress task object whose completed, total, and percentage values will be exposed as `progress` in the template context.
+
         Returns:
-        	str: The rendered and post-processed label string, truncated to a single segment if the console width is below the configured `truncate_right_label_min_cols`.
+            str: The rendered and post-processed label string, truncated to a single segment if the console width is below the configured `truncate_right_label_min_cols`.
         """
         state = dict(self.renderer._progress_state.get(self.progress_id, {}))
         state.setdefault("current", task.completed)

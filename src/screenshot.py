@@ -99,7 +99,7 @@ def _get_overlay_warnings(state: OverlayState) -> List[str]:
 def _format_dimensions(width: int, height: int) -> str:
     """
     Format width and height as "W × H" using integer values.
-    
+
     Returns:
         str: Formatted dimensions string, e.g. "1920 × 1080".
     """
@@ -109,10 +109,10 @@ def _format_dimensions(width: int, height: int) -> str:
 def _format_resolution_summary(plan: GeometryPlan) -> str:
     """
     Produce a human-readable summary comparing the plan's cropped (original) dimensions with its final dimensions.
-    
+
     Parameters:
         plan (GeometryPlan): Geometry plan containing 'cropped_w', 'cropped_h' and 'final' width/height.
-    
+
     Returns:
         str: If final dimensions equal the cropped dimensions, returns "`WxH  (native)`". Otherwise returns
              "`OriginalWxH → TargetWxH  (original → target)`", where sizes are formatted as "W×H".
@@ -130,10 +130,10 @@ def _format_resolution_summary(plan: GeometryPlan) -> str:
 def _coerce_luminance_values(value: Any) -> List[float]:
     """
     Normalize various luminance representations into a list of floats.
-    
+
     Parameters:
         value (Any): A luminance value which may be None, a number, a string containing numeric values, bytes (UTF-8), or an iterable of such values.
-    
+
     Returns:
         List[float]: A list of extracted luminance values as floats. Returns an empty list when no numeric values can be derived.
     """
@@ -160,14 +160,14 @@ def _coerce_luminance_values(value: Any) -> List[float]:
 def _extract_mastering_display_luminance(props: Mapping[str, Any]) -> tuple[Optional[float], Optional[float]]:
     """
     Extract the mastering display minimum and maximum luminance from a properties mapping.
-    
+
     Checks multiple common property keys for separate min/max entries first; if either is missing, looks for combined mastering display luminance entries that contain two values and uses their min and max as needed.
-    
+
     Parameters:
-    	props (Mapping[str, Any]): Source properties that may contain mastering display luminance metadata under several possible keys.
-    
+        props (Mapping[str, Any]): Source properties that may contain mastering display luminance metadata under several possible keys.
+
     Returns:
-    	(min_luminance, max_luminance) (tuple[Optional[float], Optional[float]]): Tuple containing the extracted minimum and maximum mastering display luminance in nits, or `None` for any value that could not be determined.
+        (min_luminance, max_luminance) (tuple[Optional[float], Optional[float]]): Tuple containing the extracted minimum and maximum mastering display luminance in nits, or `None` for any value that could not be determined.
     """
     min_keys = (
         "_MasteringDisplayMinLuminance",
@@ -214,10 +214,10 @@ def _extract_mastering_display_luminance(props: Mapping[str, Any]) -> tuple[Opti
 def _format_luminance_value(value: float) -> str:
     """
     Format a luminance value for display with sensible precision for small and large values.
-    
+
     Parameters:
         value (float): Luminance in nits.
-    
+
     Returns:
         str: Formatted luminance: values less than 1.0 are shown with up to four decimal places (trailing zeros and a trailing decimal point are removed), with "0" used if the result would be empty; values greater than or equal to 1.0 are shown with one decimal place.
     """
@@ -232,10 +232,10 @@ def _format_luminance_value(value: float) -> str:
 def _format_mastering_display_line(props: Mapping[str, Any]) -> str:
     """
     Format a single-line Mastering Display Luminance (MDL) summary suitable for overlays or logs.
-    
+
     Parameters:
         props (Mapping[str, Any]): Source metadata that may contain mastering display luminance information.
-    
+
     Returns:
         str: A one-line MDL string. If both min and max luminance are available, returns
         "MDL: min: <min> cd/m², max: <max> cd/m²"; otherwise returns "MDL: Insufficient data".
@@ -252,10 +252,10 @@ def _format_mastering_display_line(props: Mapping[str, Any]) -> str:
 def _normalize_selection_label(label: Optional[str]) -> str:
     """
     Normalize a selection label into a user-facing display name.
-    
+
     Parameters:
         label (Optional[str]): Raw selection label (may be None or empty) typically from metadata.
-    
+
     Returns:
         str: The cleaned display name for the selection; returns `"(unknown)"` if the input is missing or empty. Known internal labels are mapped to their canonical display names.
     """
@@ -274,10 +274,10 @@ def _normalize_selection_label(label: Optional[str]) -> str:
 def _format_selection_line(selection_label: Optional[str]) -> str:
     """
     Format the "Frame Selection Type" line for overlays and metadata.
-    
+
     Parameters:
         selection_label (Optional[str]): A selection label or key to be normalized; may be None.
-    
+
     Returns:
         str: A single-line string "Frame Selection Type: <label>" where <label> is a normalized, display-ready name derived from `selection_label`.
     """
@@ -298,7 +298,7 @@ def _compose_overlay_text(
     Compose overlay text for a frame when overlays are enabled.
 
     When overlaying is disabled, returns None. In "minimal" mode the returned string always includes the resolution summary and selection-type lines in addition to any base text. In "diagnostic" mode, returns a multi-line string containing, in order: the base text (if any), a resolution summary derived from the geometry plan, a mastering-display luminance line when tonemapping was applied and HDR metadata is available, and a selection-type line.
-    
+
     Parameters:
         base_text (Optional[str]): Existing overlay text to include as the first line if present.
         color_cfg (ColorConfig): Configuration object providing overlay_enabled and overlay_mode flags.
@@ -377,15 +377,15 @@ def _ensure_rgb24(
 ) -> Any:
     """
     Ensure the given VapourSynth frame is in 8-bit RGB24 color format.
-    
+
     Parameters:
         core (Any): VapourSynth core instance used for conversions.
         clip (Any): VapourSynth clip or frame to validate/convert.
         frame_idx (int): Index of the frame being processed (used in error messages).
-    
+
     Returns:
         Any: A clip in RGB24 with full range; returns the original clip if it already is 8-bit RGB24.
-    
+
     Raises:
         ScreenshotWriterError: If VapourSynth is unavailable, the core lacks the resize namespace or Point, or the conversion fails.
     """
@@ -499,18 +499,18 @@ def _apply_frame_info_overlay(
 ) -> Any:
     """
     Add a per-frame information overlay to a VapourSynth clip.
-    
+
     Attempts to draw a small text block containing the frame index and picture type onto the provided clip.
     If the required VapourSynth namespaces or overlay functions are unavailable, or an error occurs while applying
     the overlay, the original clip is returned unchanged.
-    
+
     Parameters:
         core: VapourSynth core object used to access std and sub namespaces.
         clip: VapourSynth clip to annotate.
         title: Title text shown above the per-frame info; falls back to "Clip" when empty.
         requested_frame: Frame index to display in the overlay instead of the intrinsic evaluation index; pass None to use the evaluation index.
         selection_label: Optional selection label (not used by this function).
-    
+
     Returns:
         The annotated clip if overlay application succeeded, otherwise the original clip.
     """
@@ -537,12 +537,12 @@ def _apply_frame_info_overlay(
     def _draw_info(n: int, f: Any, clip_ref: Any) -> Any:
         """
         Create a subtitle node containing per-frame information (frame index and picture type) for overlay.
-        
+
         Parameters:
             n (int): Evaluation frame index provided by the frame evaluation callback.
             f: Frame object whose properties (e.g., `_PictType`) will be read.
             clip_ref: Source clip reference used to construct the subtitle node.
-        
+
         Returns:
             A subtitle clip node containing the formatted frame information text.
         """
@@ -580,9 +580,9 @@ def _apply_overlay_text(
 ) -> object:
     """
     Apply diagnostic text as an overlay to a VapourSynth clip and update overlay state.
-    
+
     Attempts to render `text` on `clip` using available overlay filters from `core`. If `text` is falsy or the overlay status in `state` is "error", the original `clip` is returned unchanged. On successful application the returned clip contains the rendered overlay and `state["overlay_status"]` is set to `"ok"`. On failure the function records an error message into `state["warnings"]` (prefixed with "[OVERLAY]") and sets `state["overlay_status"]` to `"error"`; when `strict` is True a ScreenshotWriterError is raised instead of returning the original clip.
-    
+
     Parameters:
         core: The VapourSynth core object providing overlay/filter namespaces.
         clip: The VapourSynth clip to receive the overlay.
@@ -592,10 +592,10 @@ def _apply_overlay_text(
             - "overlay_status": read and updated to "ok" or "error".
             - "warnings": a list that will be appended with overlay-related warning strings when failures occur.
         file_label (str): Human-readable identifier for logging and warning messages.
-    
+
     Returns:
         The clip with the overlay applied, or the original `clip` if no overlay was applied.
-    
+
     Raises:
         ScreenshotWriterError: If an overlay cannot be applied and `strict` is True.
     """
@@ -1881,9 +1881,9 @@ def generate_screenshots(
 ) -> List[str]:
     """
     Render and save screenshots for the given frames from each input clip using the configured writers.
-    
+
     Render each requested frame for every clip, applying geometry planning, optional overlays, alignment mapping, and the selected writer backend (fpng or ffmpeg). Created files are written into out_dir and their paths are returned in the order they were produced.
-    
+
     Parameters:
         clips: Sequence of clip objects prepared for rendering.
         frames: Sequence of frame indices to render for each clip.
@@ -1899,7 +1899,7 @@ def generate_screenshots(
         warnings_sink: Optional list to which non-fatal warning messages will be appended.
         verification_sink: Optional list to which per-clip verification records will be appended; each record contains keys: file, frame, average, maximum, auto_selected.
         pivot_notifier: Optional callable invoked with a short text note whenever a full-chroma pivot is applied.
-    
+
     Returns:
         List[str]: Ordered list of file paths for all created screenshot files.
     """
@@ -1944,7 +1944,6 @@ def generate_screenshots(
         )
         processed_results.append(result)
         overlay_states.append(_new_overlay_state())
-        overlay_mode = str(getattr(color_cfg, "overlay_mode", "minimal")).strip().lower()
         if result.verification is not None:
             logger.info(
                 "[VERIFY] %s frame=%d avg=%.4f max=%.4f",
@@ -1994,7 +1993,7 @@ def generate_screenshots(
             mapped_idx = frame_idx
             if mapper is not None:
                 try:
-                    mapped_idx, mapped_time, clamped = mapper.map_frame(frame_idx)
+                    mapped_idx, _, clamped = mapper.map_frame(frame_idx)
                 except Exception as exc:  # pragma: no cover - mapper issues
                     logger.warning(
                         "Failed to map frame %s for %s via alignment: %s",
@@ -2002,7 +2001,6 @@ def generate_screenshots(
                         file_path,
                         exc,
                     )
-                    mapped_time = None
                     clamped = False
                 else:
                     if clamped:
@@ -2012,8 +2010,6 @@ def generate_screenshots(
                             mapped_idx,
                             file_path,
                         )
-            else:
-                mapped_time = None
             detail_info = selection_details.get(frame_idx) if selection_details else None
             selection_label = frame_labels.get(frame_idx) if frame_labels else None
             if selection_label is None and detail_info is not None:

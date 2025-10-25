@@ -1,27 +1,19 @@
 import json
-import sys
 from pathlib import Path
-from types import ModuleType
 from typing import Any, Dict
 
 import pytest
 from rich.console import Console
 
 import frame_compare
-
-ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
 import src.cli_layout as cli_layout
-
 from src.cli_layout import CliLayoutRenderer, LayoutContext, _AnsiColorMapper, load_cli_layout
 
 
 def _project_root() -> Path:
     """
     Get the project's root directory.
-    
+
     Returns:
         Path: Path to the project root (the parent of this file's parent).
     """
@@ -31,10 +23,10 @@ def _project_root() -> Path:
 def _sample_values(tmp_path: Path) -> Dict[str, Any]:
     """
     Constructs a representative sample configuration dictionary used by CLI layout rendering tests.
-    
+
     Parameters:
         tmp_path (Path): Temporary directory used to construct sample file and output paths.
-    
+
     Returns:
         sample_values (Dict[str, Any]): A nested dictionary containing test-ready configuration and metadata, including:
             - clips: clip count, list of clip items and explicit ref/tgt entries.

@@ -137,7 +137,7 @@ Configuration highlights:
 - `[screenshots]` selects renderer, geometry policy, dithering, and output directory name.
 - `[color]` sets tonemap preset (`reference`, `contrast`, `filmic`), verification options, overlay text, and strictness.
 - `[audio_alignment]` enables correlation, VSPreview hooks, offsets filename, and bias.
-- `[slowpics]` toggles auto uploads, visibility, cleanup, webhook URL, and timeout.
+- `[slowpics]` toggles auto uploads (disabled by default), visibility, cleanup, webhook URL, and timeout.
 - `[runtime]` sets VapourSynth memory guards and module search paths.
 - `[overrides]` applies per-source trims and FPS adjustments.
 
@@ -157,12 +157,12 @@ Common toggles (see [docs/README_REFERENCE.md](docs/README_REFERENCE.md) for ful
 | `[paths].input_dir` | Base scan directory under the workspace root. | `"comparison_videos"` | `input_dir="projects/comparisons"` |
 | `--input PATH` | One-off scan override. | `None` | `--input /data/releases` |
 | `[analysis].frame_count_dark / frame_count_bright` | Scene quotas for shadows/highlights. | `20 / 10` | `frame_count_dark=12` |
-| `[analysis].frame_count_motion` | Motion-heavy frame quota. | `10` | `frame_count_motion=24` |
-| `[analysis].random_frames / random_seed` | Deterministic random picks. | `10 / 20202020` | `random_frames=8` |
+| `[analysis].frame_count_motion` | Motion-heavy frame quota. | `15` | `frame_count_motion=24` |
+| `[analysis].random_frames / random_seed` | Deterministic random picks. | `15 / 20202020` | `random_frames=8` |
 | `[analysis].user_frames` | Always-rendered frame IDs. | `[]` | `user_frames=[10,200,501]` |
 | `[audio_alignment].enable` (+`confirm_with_screenshots`) | Audio-guided offsets and preview pause. | `false` (`true`) | `enable=true` |
 | `[screenshots].use_ffmpeg` | Prefer FFmpeg renderer. | `false` | `use_ffmpeg=true` |
-| `[slowpics].auto_upload` | Upload results to slow.pics. | `true` | `auto_upload=false` |
+| `[slowpics].auto_upload` | Upload results to slow.pics. | `false` | `auto_upload=true` |
 | `[runtime].ram_limit_mb` | VapourSynth RAM guard. | `4000` | `ram_limit_mb=3072` |
 
 > **Tip:** Copy the template elsewhere with `python -c "from src.config_template import copy_default_config; copy_default_config('alt-root/config/config.toml')"` when you need multiple workspaces.
@@ -247,7 +247,7 @@ The renderer promotes subsampled SDR clips to YUV444P16 before cropping/padding,
 - **FFmpeg or VapourSynth not found:** ensure binaries are on `PATH`, set `VAPOURSYNTH_PYTHONPATH`, or install the Python bindings. The CLI falls back to FFmpeg when `[screenshots].use_ffmpeg = true`.
 - **Workspace root is not writable:** choose another root via `--root` or `FRAME_COMPARE_ROOT`. Frame Compare refuses to run inside `site-packages`/`dist-packages`.
 - **HDR renders look dim:** switch `[color].preset = "filmic"` or disable `[color].enable_tonemap` for SDR sources.
-- **slow.pics upload fails:** keep `[slowpics].auto_upload = true`, ensure network access, and inspect the JSON tail for per-frame status. Adjust `[slowpics].image_upload_timeout_seconds` for slow links.
+- **slow.pics upload fails:** if uploads are enabled (`[slowpics].auto_upload = true`), ensure network access and inspect the JSON tail for per-frame status. Adjust `[slowpics].image_upload_timeout_seconds` for slow links.
 - **Placeholder PNGs appear:** review console warnings for renderer errors, then retry with FFmpeg or install missing VapourSynth plugins/codecs.
 - **Audio alignment dependency errors:** install `numpy`, `librosa`, `soundfile`. Failures raise `AudioAlignmentError` with the missing import.
 - **VSPreview fails to launch:** ensure PySide6 (or PyQt5) is installed and run from an interactive terminal. Non-interactive shells bypass the GUI launch by design.
@@ -257,8 +257,8 @@ The renderer promotes subsampled SDR clips to YUV444P16 before cropping/padding,
 **How do I change the screenshot output folder?**  
 Set `[screenshots].directory_name` to a relative path. Containment checks block absolute paths outside the workspace unless the directory existed beforehand (cleanup is skipped in that case).
 
-**Can I disable slow.pics uploads?**  
-Yes. Set `[slowpics].auto_upload = false` to keep runs local.
+**How do I opt into slow.pics uploads?**  
+Set `[slowpics].auto_upload = true` when you want automatic uploads; leave it `false` to keep runs local.
 
 **Where are cached metrics stored?**  
 `[analysis].frame_data_filename` (default `generated.compframes`) is written next to the comparison directory.

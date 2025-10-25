@@ -184,12 +184,12 @@ def _validate_color_overrides(overrides: Dict[str, Any]) -> None:
 def load_config(path: str) -> AppConfig:
     """
     Load and validate an application configuration from a TOML file.
-    
+
     Reads the file at `path`, parses it as UTF-8 TOML (BOM is accepted), coerces and validates all top-level sections, normalizes a few fields (for example pad/overlay/source/category preferences), and returns a fully populated AppConfig ready for use by the application.
-    
+
     Returns:
         AppConfig: The validated and normalized application configuration.
-    
+
     Raises:
         ConfigError: If the file is not UTF-8, TOML parsing fails, required values are missing, or any validation rule is violated.
     """

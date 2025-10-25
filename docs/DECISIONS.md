@@ -1,5 +1,6 @@
 # Decisions Log
 
+- *2025-10-22:* Default slow.pics uploads now ship disabled (`auto_upload=false`) with a CLI warning when operators opt in, documentation tables are generated from dataclass defaults, Ruff linting was added to CI (Pyright made blocking), a `frame-compare` console script was registered, and the unused `tools/readability_check.py` helper was retired.
 - *2025-10-20:* Guaranteed VSPreview script uniqueness by adding per-run UUID suffixes and logging when a timestamped name is already present so operators keep manual edits across concurrent sessions.
 - *2025-10-20:* Documented the SDR odd-geometry pivot (config guide plus dedicated geometry notes), surfaced Rich console notifications for full-chroma promotions, and clarified that dithering only occurs during the final 16→8 RGB conversion while HDR behaviour remains unchanged.
 - *2025-10-20:* Audited the new `zip(..., strict=True)` guards in geometry planning/rendering: confirmed they surface invariant breaks earlier (helpful for mismatched clip/plan lists or stale colour metadata), noted the trade-off that they now raise `ValueError` instead of silently truncating when callers mis-size inputs, and captured mitigation strategies (defensive asserts in planner tests and explicit list construction) so operational runs fail fast with actionable logs rather than partial renders.

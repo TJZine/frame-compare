@@ -6,8 +6,8 @@ import asyncio
 import logging
 import re
 import time
-from collections import OrderedDict
 import unicodedata
+from collections import OrderedDict
 from dataclasses import dataclass
 from importlib import import_module
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, cast

@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = "==3.13.*"
 resolution-markers = [
     "sys_platform == 'win32'",
@@ -251,7 +251,7 @@ source = { editable = "." }
 dependencies = [
     { name = "anitopy" },
     { name = "click" },
-    { name = "colorama" },
+    { name = "colorama", marker = "sys_platform == 'win32'" },
     { name = "guessit" },
     { name = "httpx" },
     { name = "librosa" },
@@ -286,7 +286,7 @@ dev = [
 requires-dist = [
     { name = "anitopy" },
     { name = "click", specifier = ">=8.1" },
-    { name = "colorama" },
+    { name = "colorama", marker = "sys_platform == 'win32'" },
     { name = "guessit" },
     { name = "httpx" },
     { name = "librosa" },

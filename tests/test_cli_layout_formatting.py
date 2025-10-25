@@ -1,27 +1,25 @@
 from pathlib import Path
 from typing import Any, Dict, cast
 
-import frame_compare
+from pytest import MonkeyPatch
 from rich.console import Console
 from rich.progress import BarColumn, Progress
 
+import frame_compare
 import src.cli_layout as cli_layout
-
 from src.cli_layout import (
+    _ANSI_ESCAPE_RE,
     CliLayoutRenderer,
     LayoutContext,
     _AnsiColorMapper,
-    _ANSI_ESCAPE_RE,
     load_cli_layout,
 )
-
-from pytest import MonkeyPatch
 
 
 def _project_root() -> Path:
     """
     Get the project's root directory.
-    
+
     Returns:
         Path: Path object pointing to the project's root directory (two levels above this file).
     """
@@ -31,10 +29,10 @@ def _project_root() -> Path:
 def _sample_values(tmp_path: Path) -> Dict[str, Any]:
     """
     Constructs a nested dictionary of representative sample values for CLI layout tests.
-    
+
     Parameters:
         tmp_path (Path): Base temporary directory used to build sample file paths referenced in the returned data.
-    
+
     Returns:
         Dict[str, Any]: A dictionary containing test-ready sections such as `clips`, `trims`, `window`, `alignment`, `analysis`, `audio_alignment`, `render`, `tonemap`, `verify`, `overlay`, `cache`, `tmdb`, `overrides`, `warnings`, `slowpics`, and `audio_alignment_map`. The entries provide realistic example values (including file paths rooted at `tmp_path`) for use by renderer and layout tests.
     """
@@ -213,11 +211,11 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
 def _make_renderer(width: int, *, no_color: bool = True) -> CliLayoutRenderer:
     """
     Create a CliLayoutRenderer configured with a Console of the given width and color settings.
-    
+
     Parameters:
         width (int): Console width in characters used to construct the renderer's Console.
         no_color (bool): If True, disable ANSI/color output; if False, enable the standard color system.
-    
+
     Returns:
         CliLayoutRenderer: Renderer initialized with the 'cli_layout.v1.json' layout and a Console matching the requested width and color settings.
     """
@@ -331,15 +329,15 @@ def test_highlight_markup_and_spans(tmp_path: Path, monkeypatch: MonkeyPatch) ->
 def _render_section(renderer: CliLayoutRenderer, section_id: str, values: Dict[str, Any], flags: Dict[str, Any]) -> list[str]:
     """
     Render a layout section by id and return the rendered console output as lines.
-    
+
     Binds the provided values and flags to the renderer, renders the section identified by `section_id`, and captures the console output.
-    
+
     Parameters:
         renderer (CliLayoutRenderer): The renderer used to render the layout section.
         section_id (str): Identifier of the section in the renderer's layout to render.
         values (Dict[str, Any]): Data values used to populate the layout tokens.
         flags (Dict[str, Any]): Feature and formatting flags that affect rendering.
-    
+
     Returns:
         list[str]: The rendered console output split into lines, with trailing newline characters removed.
     """
