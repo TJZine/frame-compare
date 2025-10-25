@@ -11,11 +11,11 @@ quick-start configuration paths.
 | --- | --- | --- | --- |
 | `[analysis].frame_count_dark` | Count of dark-scene frames per run. | int | `20` |
 | `[analysis].frame_count_bright` | Bright-scene frame quota. | int | `10` |
-| `[analysis].frame_count_motion` | Motion-heavy frames queued. | int | `10` |
-| `[analysis].random_frames` | Extra deterministic random frames. | int | `10` |
+| `[analysis].frame_count_motion` | Motion-heavy frames queued. | int | `15` |
+| `[analysis].random_frames` | Extra deterministic random frames. | int | `15` |
 | `[analysis].user_frames` | Always-rendered frame numbers. | list[int] | `[]` |
 | `[analysis].random_seed` | Seed for random selection. | int | `20202020` |
-| `[analysis].downscale_height` | Metric computation height cap. | int | `720` |
+| `[analysis].downscale_height` | Metric computation height cap. | int | `480` |
 | `[analysis].ignore_lead_seconds` | Seconds trimmed from the start. | float | `0.0` |
 | `[analysis].ignore_trail_seconds` | Seconds trimmed from the end. | float | `0.0` |
 | `[analysis].min_window_seconds` | Minimum usable footage window. | float | `5.0` |
@@ -28,15 +28,19 @@ quick-start configuration paths.
 | Key | Purpose | Type | Default |
 | --- | --- | --- | --- |
 | `[audio_alignment].enable` | Toggle automatic offset detection. | bool | `false` |
+| `[audio_alignment].use_vspreview` | Surface offsets as suggestions, launch VSPreview for manual trims, and record the accepted delta (skips launch when non-interactive or VSPreview is missing). | bool | `false` |
 | `[audio_alignment].sample_rate` | Audio extraction rate. | int | `16000` |
 | `[audio_alignment].hop_length` | Onset envelope hop length. | int | `512` |
 | `[audio_alignment].correlation_threshold` | Minimum accepted score. | float | `0.55` |
 | `[audio_alignment].max_offset_seconds` | Offset search window. | float | `12.0` |
 | `[audio_alignment].offsets_filename` | Offset output file. | str | `"generated.audio_offsets.toml"` |
 | `[audio_alignment].confirm_with_screenshots` | Require preview confirmation. | bool | `true` |
+| `[audio_alignment].prompt_reuse_offsets` | Ask before recomputing cached offsets, reusing saved values when declined. | bool | `false` |
 | `[audio_alignment].frame_offset_bias` | Bias toward/away from zero. | int | `1` |
 | `--audio-align-track label=index` | Force a specific audio stream. | repeatable flag | `None` |
 <!-- markdownlint-restore -->
+
+*VSPreview helper notes:* generated scripts log using ASCII arrows to stay compatible with legacy Windows consoles. Overlay text inside the preview still renders with full Unicode glyphs. Switch your console to UTF-8 (`chcp 65001`) or set `PYTHONIOENCODING=UTF-8` for Python-only runs if you prefer Unicode output in logs.
 
 ## Screenshot rendering
 
@@ -49,11 +53,20 @@ quick-start configuration paths.
 | `[screenshots].upscale` | Permit global upscaling. | bool | `true` |
 | `[screenshots].single_res` | Fixed output height (0 keeps source). | int | `0` |
 | `[screenshots].mod_crop` | Crop modulus. | int | `2` |
+| `[screenshots].odd_geometry_policy` | Policy for odd-pixel trims/pads on subsampled SDR (auto, force, or subsamp-safe). | str | `"auto"` |
+| `[screenshots].rgb_dither` | Dithering applied during final RGB24 conversion (FFmpeg path forces deterministic ordered when `"error_diffusion"` is requested). | str | `"error_diffusion"` |
 | `[screenshots].auto_letterbox_crop` | Auto crop black bars. | bool | `false` |
 | `[screenshots].ffmpeg_timeout_seconds` | Per-frame FFmpeg timeout in seconds (must be >= 0; set 0 to disable). | float | `120.0` |
 | `[color].enable_tonemap` | HDR→SDR conversion toggle. | bool | `true` |
 | `[color].preset` | Tonemapping preset. | str | `"reference"` |
 | `[color].overlay_enabled` | Tonemap overlay flag. | bool | `true` |
+| `[color].default_matrix_hd` | Preferred matrix code when HD clips omit metadata. | str\|int\|null | `null` |
+| `[color].default_matrix_sd` | Preferred matrix code when SD clips omit metadata. | str\|int\|null | `null` |
+| `[color].default_primaries_hd` | Preferred primaries code for HD fallback. | str\|int\|null | `null` |
+| `[color].default_primaries_sd` | Preferred primaries code for SD fallback. | str\|int\|null | `null` |
+| `[color].default_transfer_sdr` | Override SDR transfer function fallback. | str\|int\|null | `null` |
+| `[color].default_range_sdr` | Override SDR range fallback (`full` or `limited`). | str\|int\|null | `null` |
+| `[color].color_overrides` | Table mapping clip names to `{matrix, primaries, transfer, range}` overrides. | table | `{}` |
 <!-- markdownlint-restore -->
 
 ## Slow.pics and metadata automation
@@ -61,7 +74,7 @@ quick-start configuration paths.
 <!-- markdownlint-disable MD013 -->
 | Key | Purpose | Type | Default |
 | --- | --- | --- | --- |
-| `[slowpics].auto_upload` | Automatically upload runs. | bool | `true` |
+| `[slowpics].auto_upload` | Automatically upload runs. | bool | `false` |
 | `[slowpics].collection_name` | slow.pics collection label. | str | `""` |
 | `[slowpics].tmdb_id` | TMDB identifier. | str | `""` |
 | `[slowpics].open_in_browser` | Open slow.pics URLs locally. | bool | `true` |

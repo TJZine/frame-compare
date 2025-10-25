@@ -41,6 +41,10 @@ offsets_filename = "generated.audio_offsets.toml"
 confirm_with_screenshots = true
 random_seed = 2025
 frame_offset_bias = 1        # Frames to move toward zero (negative values push further away)
+use_vspreview = false        # surface the prompt and launch VSPreview after alignment
+vspreview_mode = "baseline"  # "baseline" keeps preview untrimmed; set "seeded" to pre-apply suggestion
+show_suggested_in_preview = true  # draw suggestion overlay text in VSPreview when available
+prompt_reuse_offsets = false # prompt before recomputing; decline to reuse cached offsets
 
 [screenshots]
 # Output planning and rendering behaviour for both VapourSynth and FFmpeg writers.
@@ -59,6 +63,10 @@ auto_letterbox_crop = false
 pad_to_canvas = "off"
 letterbox_px_tolerance = 8
 center_pad = true
+# Choose how odd-pixel trims/pads behave on subsampled SDR clips.
+odd_geometry_policy = "auto"
+# Dithering applied when converting the final RGB output to 8-bit PNGs.
+rgb_dither = "error_diffusion"
 # Abort FFmpeg renders that exceed this many seconds per frame (must be >= 0; set to 0 to disable).
 ffmpeg_timeout_seconds = 120.0
 
@@ -84,8 +92,8 @@ verify_luma_threshold = 0.10
 strict = false
 
 [slowpics]
-# Auto-upload settings. Leave `auto_upload` off for local runs.
-auto_upload = true
+# Auto-upload settings. Disabled by default to avoid unintentional sharing; opt in explicitly.
+auto_upload = false
 collection_name = ""
 collection_suffix = ""
 is_hentai = false

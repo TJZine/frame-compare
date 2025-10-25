@@ -61,12 +61,38 @@
     { "when": "isbool", "path": "render.add_frame_info", "true_role": "bool_true", "false_role": "bool_false" },
     { "when": "isbool", "path": "render.upscale", "true_role": "bool_true", "false_role": "bool_false" },
     { "when": "abs_gt", "path": "audio_alignment.offsets_sec", "value": 1.0, "role": "number_warn" },
+    { "when": "abs_gt", "path": "vspreview.suggested_seconds", "value": 0.5, "role": "number_warn" },
     { "when": "gt", "path": "analysis.counts.motion", "value": 0, "role": "accent_analyze" },
     { "when": "lt", "path": "progress.fps", "value": 1.0, "role": "number_warn" },
     { "when": "gt", "path": "verify.delta.max", "value": "{tonemap.verify_luma_threshold}", "role": "number_bad" },
     { "when": "abs_gt", "path": "verify.delta.max", "value": "{tonemap.verify_luma_threshold} * 0.9", "role": "number_warn" }
   ],
   "sections": [
+    {
+      "id": "vspreview_missing",
+      "type": "box",
+      "title": "VSPreview dependency missing",
+      "when": "vspreview.missing.active",
+      "lines": [
+        "[[warn]]VSPreview is enabled but missing dependencies.[[/]]",
+        "[[key]]Install (Windows)[[/]] [[value]]{vspreview.missing.windows_install}[[/]]",
+        "[[key]]Install (Linux/macOS)[[/]] [[value]]{vspreview.missing.posix_install}[[/]]",
+        "[[key]]Manual command[[/]] [[value]]{vspreview.missing.command}[[/]]",
+        "[[key]]Script[[/]] [[path]]{vspreview.script_path}[[/]]"
+      ]
+    },
+    {
+      "id": "vspreview_info",
+      "type": "box",
+      "title": "VSPreview Information",
+      "when": "audio_alignment.use_vspreview",
+      "lines": [
+        "[[key]]Reference[[/]] [[value]]{vspreview.clips.ref.label}[[/]]",
+        "[[key]]Target[[/]]    [[value]]{vspreview.clips.tgt.label}[[/]]",
+        "[[key]]Preview mode[[/]] [[value]]{vspreview.mode_display}[[/]]",
+        "[[key]]Suggested[[/]] [[value]]{vspreview.suggested_frames:+d}[[/]][[unit]]f[[/]] (~[[value]]{vspreview.suggested_seconds:.3f}[[/]][[unit]]s[[/]])  [[dim]]guidance only — not applied in preview[[/]]"
+      ]
+    },
     {
       "id": "at_a_glance",
       "type": "box",

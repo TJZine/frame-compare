@@ -8,7 +8,7 @@ Frame Compare can estimate per-clip trim offsets before video analysis by correl
 * `ffmpeg` and `ffprobe` must be on `PATH`; alignment aborts early if either executable is missing. 【F:src/audio_alignment.py†L66-L118】
 
 ### Python extras
-* The optional stack `numpy`, `librosa`, and `soundfile` is required; the module raises an `AudioAlignmentError` if any import fails. 【F:src/audio_alignment.py†L76-L92】
+* The optional stack `numpy`, `librosa`, and `soundfile` is required; the module raises an `AudioAlignmentError` when an import fails or when an optional dependency errors during onset envelope calculation. 【F:src/audio_alignment.py†L76-L92】【F:src/audio_alignment.py†L240-L277】
 
 ### Configuration guard rails
 * Validation rejects non-positive sample rates, hop lengths, max offsets, or negative seeds, and constrains correlation thresholds to `[0,1]`. 【F:src/config_loader.py†L190-L214】【F:src/config_loader.py†L233-L270】
@@ -28,11 +28,12 @@ Key options live under `[audio_alignment]` in `config.toml`. Defaults and intent
 | `max_offset_seconds` | Absolute cap for auto-applied offsets. | `12.0` |
 | `offsets_filename` | Relative path of the persisted offsets TOML. | `generated.audio_offsets.toml` |
 | `confirm_with_screenshots` | Whether to pause for preview confirmation. | `true` |
+| `prompt_reuse_offsets` | Prompt before recomputing cached offsets; declining reuses the saved values. | `false` |
 | `random_seed` | Seed for preview and inspection frame sampling. | `2025` |
 | `frame_offset_bias` | Integer bias nudging suggested frame counts toward/away from zero. | `1` |
 
 ## Workflow
-1. **Reference & target selection** – `_resolve_alignment_reference` honors the config hint, CLI-provided filename/index, or falls back to the first clip. Remaining clips become targets. 【F:frame_compare.py†L930-L999】
+1. **Reference & target selection** – `_resolve_alignment_reference` honors the config hint, CLI-provided filename/index, or falls back to the first clip. Remaining clips become targets. Existing manual trims are summarised using each plan's display label so operators can immediately see which clip the baseline applies to. 【F:frame_compare.py†L930-L999】【F:frame_compare.py†L2065-L2142】
 2. **Audio stream discovery** – `ffprobe` metadata identifies candidate streams. Forced CLI overrides (`--audio-align-track label=index`) take precedence, then the scoring heuristic prefers default language, channel count, and forced flags. 【F:frame_compare.py†L1005-L1096】【F:frame_compare.py†L2802-L2833】
 3. **Waveform extraction & onset envelopes** – `measure_offsets` extracts mono WAV snippets for the reference and each target using consistent sample-rate resampling, computes onset envelopes, and cross-correlates them to estimate lags. FPS probes translate seconds into frame counts when possible. 【F:src/audio_alignment.py†L291-L398】
 4. **Bias & negative offset handling** – `frame_offset_bias` nudges computed frame counts either toward zero (positive values) or away from zero (negative values). When only one target clip exists, negative offsets are applied to the reference clip instead, with explanatory notes recorded. 【F:frame_compare.py†L1205-L1304】
@@ -78,6 +79,52 @@ status = "auto"
    with sample clips. The run prints stream selections, estimated
    offsets, and writes `generated.audio_offsets.toml`. The JSON tail
    exposes the same data for automation. 【F:src/datatypes.py†L210-L226】【F:frame_compare.py†L1654-L1684】【F:frame_compare.py†L1985-L2065】
+
+## VSPreview-assisted manual alignment
+
+The optional VSPreview flow extends manual trimming without mutating clip plans until you confirm offsets.
+
+### Prerequisites
+
+- Set `[audio_alignment].use_vspreview = true` in `config.toml`; `[audio_alignment].enable` is recommended but not required—the prompt still appears even when correlation is disabled, and persisted VSPreview trims are reapplied even during manual-only sessions. 【F:frame_compare.py†L2056-L2085】【F:frame_compare.py†L2066-L2143】
+- Install VSPreview so it is discoverable on `PATH` (`vspreview`) or importable via `python -m vspreview`. 【F:frame_compare.py†L3145-L3162】
+- Run from an interactive terminal; non-interactive sessions skip launching but still write the script path for later review. 【F:frame_compare.py†L3139-L3144】
+
+Install dependencies with platform-specific Qt bindings:
+
+```powershell
+uv add vspreview PySide6
+```
+
+```bash
+uv add vspreview PyQt5
+```
+
+Project maintainers can capture the optional group so collaborators re-use it with `uv run --with .[preview]`:
+
+```toml
+[project.optional-dependencies]
+preview = ["vspreview>=0.7", "PySide6>=6.6"]
+# or on Linux/macOS: ["vspreview>=0.7", "PyQt5>=5.15"]
+```
+
+To launch VSPreview on-demand without persisting the extras, run:
+
+```bash
+uv run --with .[preview] -- python -m vspreview path/to/vspreview_*.py
+```
+
+### Workflow overview
+
+1. After audio alignment completes (or is skipped), the CLI summarises the measured offsets and any existing manual trims, then offers VSPreview guidance instead of auto-applying changes. 【F:frame_compare.py†L2056-L2138】【F:frame_compare.py†L2242-L2281】
+2. `_write_vspreview_script` mirrors the comparison pipeline, seeds the suggested offsets into an `OFFSET_MAP`, and stores the script beneath the workspace for traceability. 【F:frame_compare.py†L2705-L3143】
+3. When VSPreview is available, Frame Compare spawns it with inherited VapourSynth paths and waits for completion. Offsets are requested afterwards using `click.prompt`, and the resulting deltas adjust the clip plans plus the offsets TOML with `status="manual"` and a `note = "VSPreview"`. 【F:frame_compare.py†L3146-L3183】【F:frame_compare.py†L2914-L3083】
+
+### Headless and fallback behaviour
+
+- In CI/headless runs (`stdin` not a TTY) or when VSPreview binaries are missing, the CLI logs a warning, records the script path in the JSON tail, and continues with the legacy manual-edit workflow. 【F:frame_compare.py†L3139-L3173】【F:frame_compare.py†L3959-L3976】
+- When VSPreview or its Qt backend cannot be imported, the CLI prints a dedicated warning panel with copy/paste install commands, records the `python -m vspreview …` invocation in the output, and appends `{ "vspreview_offered": false, "reason": "vspreview-missing" }` to the JSON tail so automations can detect the fallback path. 【F:frame_compare.py†L3528-L3570】【F:cli_layout.v1.json†L54-L76】
+- Persisted VSPreview offsets take precedence on subsequent runs—even when `[audio_alignment].enable = false`; the CLI surfaces them as the new baseline and suppresses repeated prompts unless you delete or edit the offsets file. 【F:frame_compare.py†L2066-L2143】【F:frame_compare.py†L2286-L2336】【F:frame_compare.py†L3098-L3107】
 
 ## Gotchas & edge cases
 - Audio alignment is skipped (with a warning) when fewer than two clips are available or when the feature is disabled. 【F:frame_compare.py†L987-L997】

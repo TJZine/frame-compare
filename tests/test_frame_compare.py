@@ -1,18 +1,17 @@
+import datetime as dt
 import json
 import types
-import importlib
-import pathlib
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
-from collections.abc import Iterable, Sequence
-from typing import Any, Mapping, cast
+from typing import Any, ClassVar, Mapping, cast
 
 import pytest
 from click.testing import CliRunner, Result
 from rich.console import Console
 
 import frame_compare
+from src.analysis import CacheLoadResult, FrameMetricsCacheInfo, SelectionDetail
 from src.audio_alignment import AlignmentMeasurement, AudioStreamInfo
-from src.analysis import CacheLoadResult, FrameMetricsCacheInfo
 from src.datatypes import (
     AnalysisConfig,
     AppConfig,
@@ -94,10 +93,10 @@ def test_run_cli_rejects_subpath_escape(
 def _make_config(input_dir: Path) -> AppConfig:
     """
     Builds a test-oriented AppConfig populated with sensible defaults and example overrides.
-    
+
     Parameters:
         input_dir (Path): Directory used as the config's input path (stored in paths.input_dir).
-    
+
     Returns:
         AppConfig: An AppConfig instance with prepared sub-configs for analysis, screenshots,
         cli, color, slowpics, tmdb, naming, paths, runtime, overrides, source, and audio_alignment.
@@ -130,6 +129,1261 @@ def _make_config(input_dir: Path) -> AppConfig:
     )
 
 
+def test_audio_alignment_manual_vspreview_handles_existing_trim(
+    tmp_path: Path,
+) -> None:
+    """Manual VSPreview flow reports trims without crashing when alignment is off."""
+
+    cfg = _make_config(tmp_path)
+    cfg.audio_alignment.enable = False
+    cfg.audio_alignment.use_vspreview = True
+
+    reference_path = tmp_path / "Ref.mkv"
+    target_path = tmp_path / "Target.mkv"
+    reference_path.write_bytes(b"ref")
+    target_path.write_bytes(b"tgt")
+
+    reference_plan = frame_compare._ClipPlan(
+        path=reference_path,
+        metadata={"label": "Reference"},
+    )
+    target_plan = frame_compare._ClipPlan(
+        path=target_path,
+        metadata={"label": "Target"},
+    )
+    target_plan.trim_start = 42
+    target_plan.has_trim_start_override = True
+
+    summary, display = frame_compare._maybe_apply_audio_alignment(
+        [reference_plan, target_plan],
+        cfg,
+        reference_path,
+        tmp_path,
+        {},
+        reporter=None,
+    )
+
+    assert summary is not None
+    assert display is not None
+    assert summary.suggestion_mode is True
+    assert summary.manual_trim_starts[target_path.name] == 42
+    assert any("Existing manual trim" in line for line in display.offset_lines)
+    assert any("manual alignment enabled" in warning for warning in display.warnings)
+
+
+def test_audio_alignment_string_false_vspreview_triggers_measurement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """String config values like "off" should disable VSPreview reuse logic."""
+
+    cfg = _make_config(tmp_path)
+    cfg.audio_alignment.enable = True
+    cfg.audio_alignment.use_vspreview = "off"  # type: ignore[assignment]
+
+    reference_path = tmp_path / "Ref.mkv"
+    target_path = tmp_path / "Target.mkv"
+    reference_path.write_bytes(b"ref")
+    target_path.write_bytes(b"tgt")
+
+    reference_plan = frame_compare._ClipPlan(
+        path=reference_path,
+        metadata={"label": "Reference"},
+    )
+    target_plan = frame_compare._ClipPlan(
+        path=target_path,
+        metadata={"label": "Target"},
+    )
+
+    manual_entry = {
+        "status": "manual",
+        "note": "VSPreview delta",
+        "frames": 7,
+    }
+
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "load_offsets",
+        lambda _path: (reference_path.name, {target_path.name: manual_entry}),
+    )
+
+    class _SentinelError(Exception):
+        pass
+
+    def boom(*_args: object, **_kwargs: object) -> list[object]:
+        raise _SentinelError
+
+    monkeypatch.setattr(frame_compare.audio_alignment, "measure_offsets", boom)
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "update_offsets_file",
+        lambda *args, **kwargs: ({}, {}),
+    )
+
+    with pytest.raises(_SentinelError):
+        frame_compare._maybe_apply_audio_alignment(
+            [reference_plan, target_plan],
+            cfg,
+            reference_path,
+            tmp_path,
+            {},
+            reporter=None,
+        )
+
+
+def test_audio_alignment_prompt_reuse_decline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """When prompted and declined, cached offsets are reused without recomputation."""
+
+    cfg = _make_config(tmp_path)
+    cfg.audio_alignment.enable = True
+    cfg.audio_alignment.prompt_reuse_offsets = True
+    cfg.audio_alignment.confirm_with_screenshots = False
+    cfg.audio_alignment.frame_offset_bias = 0
+
+    reference_path = tmp_path / "Ref.mkv"
+    target_path = tmp_path / "Target.mkv"
+    reference_path.write_bytes(b"ref")
+    target_path.write_bytes(b"tgt")
+
+    reference_plan = frame_compare._ClipPlan(
+        path=reference_path,
+        metadata={"label": "Reference"},
+    )
+    target_plan = frame_compare._ClipPlan(
+        path=target_path,
+        metadata={"label": "Target"},
+    )
+
+    cached_entry = {
+        "frames": 6,
+        "seconds": 0.25,
+        "correlation": 0.95,
+        "target_fps": 24.0,
+        "status": "auto",
+    }
+
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "load_offsets",
+        lambda _path: (reference_path.name, {target_path.name: dict(cached_entry)}),
+    )
+    def _fail_measure(*_args: object, **_kwargs: object) -> list[AlignmentMeasurement]:
+        raise AssertionError("measure_offsets should not run")
+
+    def _fail_update(*_args: object, **_kwargs: object) -> tuple[dict[str, int], dict[str, str]]:
+        raise AssertionError("update_offsets_file should not run")
+
+    monkeypatch.setattr(frame_compare.audio_alignment, "measure_offsets", _fail_measure)
+    monkeypatch.setattr(frame_compare.audio_alignment, "update_offsets_file", _fail_update)
+
+    class _TTY:
+        def isatty(self) -> bool:
+            return True
+
+    monkeypatch.setattr(frame_compare.sys, "stdin", _TTY())
+
+    confirm_calls: dict[str, int] = {"count": 0}
+
+    def _fake_confirm(*_args: object, **_kwargs: object) -> bool:
+        confirm_calls["count"] += 1
+        return False
+
+    monkeypatch.setattr(frame_compare.click, "confirm", _fake_confirm)
+
+    summary, display = frame_compare._maybe_apply_audio_alignment(
+        [reference_plan, target_plan],
+        cfg,
+        reference_path,
+        tmp_path,
+        {},
+        reporter=None,
+    )
+
+    assert confirm_calls["count"] == 1
+    assert summary is not None
+    assert display is not None
+    assert summary.suggestion_mode is False
+    assert summary.applied_frames[target_path.name] == 6
+    assert target_plan.trim_start == 6
+    assert summary.final_adjustments[target_path.name] == 6
+    assert display.estimation_line and "reused" in display.estimation_line.lower()
+    assert any("Audio offsets" in line for line in display.offset_lines)
+
+
+def test_audio_alignment_prompt_reuse_affirm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Affirming the prompt (or skipping it) triggers fresh alignment."""
+
+    cfg = _make_config(tmp_path)
+    cfg.audio_alignment.enable = True
+    cfg.audio_alignment.prompt_reuse_offsets = True
+    cfg.audio_alignment.confirm_with_screenshots = False
+    cfg.audio_alignment.frame_offset_bias = 0
+
+    reference_path = tmp_path / "Ref.mkv"
+    target_path = tmp_path / "Target.mkv"
+    reference_path.write_bytes(b"ref")
+    target_path.write_bytes(b"tgt")
+
+    reference_plan = frame_compare._ClipPlan(
+        path=reference_path,
+        metadata={"label": "Reference"},
+    )
+    target_plan = frame_compare._ClipPlan(
+        path=target_path,
+        metadata={"label": "Target"},
+    )
+
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "load_offsets",
+        lambda _path: (reference_path.name, {target_path.name: {"frames": 4, "seconds": 0.2}}),
+    )
+
+    measure_calls: dict[str, int] = {"count": 0}
+
+    def _fake_measure(
+        _ref: Path,
+        targets: Sequence[Path],
+        *,
+        progress_callback,
+        **_kwargs: object,
+    ) -> list[AlignmentMeasurement]:
+        measure_calls["count"] += 1
+        progress_callback(len(targets))
+        return [
+            AlignmentMeasurement(
+                file=targets[0],
+                offset_seconds=0.3,
+                frames=7,
+                correlation=0.9,
+                reference_fps=24.0,
+                target_fps=24.0,
+            )
+        ]
+
+    monkeypatch.setattr(frame_compare.audio_alignment, "measure_offsets", _fake_measure)
+    monkeypatch.setattr(frame_compare.audio_alignment, "probe_audio_streams", lambda _path: [])
+
+    update_calls: dict[str, int] = {"count": 0}
+
+    def _fake_update(
+        _path: Path,
+        _reference_name: str,
+        measurements: Sequence[AlignmentMeasurement],
+        _existing: Mapping[str, Mapping[str, object]],
+        _notes: Mapping[str, str],
+    ) -> tuple[dict[str, int], dict[str, str]]:
+        update_calls["count"] += 1
+        applied = {m.file.name: int(m.frames or 0) for m in measurements}
+        return applied, {name: "auto" for name in applied}
+
+    monkeypatch.setattr(frame_compare.audio_alignment, "update_offsets_file", _fake_update)
+
+    class _TTY:
+        def isatty(self) -> bool:
+            return True
+
+    monkeypatch.setattr(frame_compare.sys, "stdin", _TTY())
+
+    def _confirm_true(*_args: object, **_kwargs: object) -> bool:
+        return True
+
+    monkeypatch.setattr(frame_compare.click, "confirm", _confirm_true)
+
+    summary, display = frame_compare._maybe_apply_audio_alignment(
+        [reference_plan, target_plan],
+        cfg,
+        reference_path,
+        tmp_path,
+        {},
+        reporter=None,
+    )
+
+    assert measure_calls["count"] == 1
+    assert update_calls["count"] == 1
+    assert summary is not None
+    assert display is not None
+    assert summary.applied_frames[target_path.name] == 7
+    assert target_plan.trim_start == 7
+    assert summary.suggestion_mode is False
+
+def test_run_cli_reuses_vspreview_manual_offsets_when_alignment_disabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Manual VSPreview offsets should be reused during CLI runs when auto alignment is off."""
+
+    root = tmp_path
+    config_path = root / "config.toml"
+    config_path.write_text("config", encoding="utf-8")
+
+    reference_path = root / "Ref.mkv"
+    target_path = root / "Target.mkv"
+    for file_path in (reference_path, target_path):
+        file_path.write_bytes(b"data")
+
+    cfg = _make_config(root)
+    cfg.audio_alignment.enable = False
+    cfg.audio_alignment.use_vspreview = True
+
+    monkeypatch.setattr(frame_compare, "load_config", lambda _path: cfg)
+
+    files = [reference_path, target_path]
+    metadata = [
+        {"label": "Reference", "file_name": reference_path.name},
+        {"label": "Target", "file_name": target_path.name},
+    ]
+
+    monkeypatch.setattr(frame_compare, "_discover_media", lambda _root: list(files))
+    monkeypatch.setattr(
+        frame_compare,
+        "_parse_metadata",
+        lambda _files, _naming: list(metadata),
+    )
+    monkeypatch.setattr(
+        frame_compare,
+        "_pick_analyze_file",
+        lambda _files, _metadata, _target, **_kwargs: reference_path,
+    )
+
+    cache_file = root / cfg.analysis.frame_data_filename
+    cache_file.write_text("cache", encoding="utf-8")
+
+    manual_offsets = {
+        reference_path.name: {
+            "status": "manual",
+            "note": "vspreview reference baseline",
+            "frames": 0,
+        },
+        target_path.name: {
+            "status": "manual",
+            "note": "vspreview manual trim",
+            "frames": 8,
+        },
+    }
+
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "load_offsets",
+        lambda _path: (None, manual_offsets),
+    )
+
+    def _fail_measure(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("measure_offsets should not run when manual offsets are reused")
+
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "measure_offsets",
+        _fail_measure,
+    )
+
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "update_offsets_file",
+        _fail_measure,
+    )
+
+    init_calls: list[tuple[str, int]] = []
+
+    def fake_init_clip(
+        path: str,
+        *,
+        trim_start: int = 0,
+        trim_end: int | None = None,
+        fps_map: tuple[int, int] | None = None,
+        cache_dir: str | None = None,
+    ) -> types.SimpleNamespace:
+        init_calls.append((path, trim_start))
+        return types.SimpleNamespace(
+            path=path,
+            width=1920,
+            height=1080,
+            fps_num=24000,
+            fps_den=1001,
+            num_frames=2400,
+        )
+
+    monkeypatch.setattr(frame_compare.vs_core, "configure", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda _limit: None)
+    monkeypatch.setattr(frame_compare.vs_core, "init_clip", fake_init_clip)
+
+    monkeypatch.setattr(frame_compare, "write_selection_cache_file", lambda *args, **kwargs: None)
+    monkeypatch.setattr(frame_compare, "export_selection_metadata", lambda *args, **kwargs: None)
+    monkeypatch.setattr(frame_compare, "generate_screenshots", lambda *args, **kwargs: [])
+
+    def fake_select(
+        clip: types.SimpleNamespace,
+        analysis_cfg: AnalysisConfig,
+        files_list: list[str],
+        file_under_analysis: str,
+        cache_info: FrameMetricsCacheInfo | None = None,
+        progress: object = None,
+        *,
+        frame_window: tuple[int, int] | None = None,
+        return_metadata: bool = False,
+        color_cfg: ColorConfig | None = None,
+        cache_probe: CacheLoadResult | None = None,
+    ) -> list[int]:
+        assert cache_probe is not None and cache_probe.status == "reused"
+        return [10, 20]
+
+    monkeypatch.setattr(frame_compare, "select_frames", fake_select)
+
+    cache_probes: list[FrameMetricsCacheInfo] = []
+
+    def fake_probe(info: FrameMetricsCacheInfo, _analysis_cfg: AnalysisConfig) -> CacheLoadResult:
+        cache_probes.append(info)
+        return CacheLoadResult(metrics=None, status="reused", reason=None)
+
+    monkeypatch.setattr(frame_compare, "probe_cached_metrics", fake_probe)
+    monkeypatch.setattr(frame_compare, "Progress", DummyProgress)
+
+    result = frame_compare.run_cli(
+        str(config_path),
+        None,
+        root_override=str(root),
+    )
+
+    assert init_calls, "Clips should be initialised with trims applied"
+    trims_by_path = {Path(path).name: trim for path, trim in init_calls}
+    assert trims_by_path[target_path.name] == 8
+    assert cache_probes and cache_probes[0].path == cache_file.resolve()
+    assert result.json_tail is not None
+    audio_json = _expect_mapping(result.json_tail["audio_alignment"])
+    manual_map = cast(dict[str, int], audio_json.get("manual_trim_starts", {}))
+    assert manual_map[target_path.name] == 8
+    cache_json = _expect_mapping(result.json_tail["cache"])
+    assert cache_json["status"] == "reused"
+    analysis_json = _expect_mapping(result.json_tail["analysis"])
+    assert analysis_json["cache_reused"] is True
+    assert result.json_tail["vspreview_mode"] == "baseline"
+    assert result.json_tail["suggested_frames"] == 0
+    assert result.json_tail["suggested_seconds"] == 0.0
+
+
+def test_audio_alignment_vspreview_suggestion_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """VSPreview flow surfaces offsets without mutating trims or writing offsets."""
+
+    reference_path = tmp_path / "Ref.mkv"
+    target_path = tmp_path / "Target.mkv"
+    reference_path.write_bytes(b"ref")
+    target_path.write_bytes(b"tgt")
+
+    cfg = _make_config(tmp_path)
+    cfg.audio_alignment.enable = True
+    cfg.audio_alignment.use_vspreview = True
+    cfg.audio_alignment.confirm_with_screenshots = False
+    cfg.audio_alignment.frame_offset_bias = 0
+
+    reference_plan = frame_compare._ClipPlan(
+        path=reference_path,
+        metadata={"label": "Reference"},
+        clip=None,
+    )
+    target_plan = frame_compare._ClipPlan(
+        path=target_path,
+        metadata={"label": "Target"},
+        clip=None,
+    )
+    target_plan.trim_start = 120
+    target_plan.has_trim_start_override = True
+
+    measurement = AlignmentMeasurement(
+        file=target_path,
+        offset_seconds=0.5,
+        frames=12,
+        correlation=0.92,
+        reference_fps=24.0,
+        target_fps=24.0,
+    )
+
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "probe_audio_streams",
+        lambda _path: [],
+    )
+
+    def _fake_measure(
+        _ref: Path,
+        targets: list[Path],
+        *,
+        progress_callback,
+        **_kwargs: object,
+    ):
+        progress_callback(len(targets))
+        return [measurement]
+
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "measure_offsets",
+        _fake_measure,
+    )
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "load_offsets",
+        lambda _path: (None, {}),
+    )
+
+    def _fail_update(*_args, **_kwargs):
+        raise AssertionError("update_offsets_file should not be called in VSPreview mode")
+
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "update_offsets_file",
+        _fail_update,
+    )
+
+    summary, display = frame_compare._maybe_apply_audio_alignment(
+        [reference_plan, target_plan],
+        cfg,
+        reference_path,
+        tmp_path,
+        {},
+        reporter=None,
+    )
+
+    assert summary is not None
+    assert display is not None
+    assert summary.suggestion_mode is True
+    assert summary.applied_frames == {}
+    assert summary.suggested_frames[target_path.name] == 12
+    assert summary.manual_trim_starts[target_path.name] == 120
+    assert target_plan.trim_start == 120, "Trim should remain unchanged in suggestion mode"
+    assert any("VSPreview manual alignment enabled" in warning for warning in display.warnings)
+    assert any("Existing manual trim" in line for line in display.offset_lines)
+
+
+def test_launch_vspreview_generates_script(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """VSPreview launcher should emit a script and attempt to execute it."""
+
+    cfg = _make_config(tmp_path)
+    cfg.audio_alignment.use_vspreview = True
+
+    reference_path = tmp_path / "Ref.mkv"
+    target_path = tmp_path / "Target.mkv"
+    reference_path.write_bytes(b"ref")
+    target_path.write_bytes(b"tgt")
+
+    reference_plan = frame_compare._ClipPlan(
+        path=reference_path,
+        metadata={"label": "Reference"},
+    )
+    target_plan = frame_compare._ClipPlan(
+        path=target_path,
+        metadata={"label": "Target"},
+    )
+    target_plan.trim_start = 10
+    target_plan.has_trim_start_override = True
+    plans = [reference_plan, target_plan]
+
+    summary = frame_compare._AudioAlignmentSummary(
+        offsets_path=tmp_path / "offsets.toml",
+        reference_name=reference_path.name,
+        measurements=(),
+        applied_frames={},
+        baseline_shift=0,
+        statuses={},
+        reference_plan=reference_plan,
+        final_adjustments={},
+        swap_details={},
+        suggested_frames={target_path.name: 7},
+        suggestion_mode=True,
+        manual_trim_starts={target_path.name: 10},
+    )
+
+    reporter = _RecordingOutputManager()
+    json_tail = _make_json_tail_stub()
+    audio_block = json_tail["audio_alignment"]
+
+    monkeypatch.setattr(frame_compare.sys.stdin, "isatty", lambda: True)
+
+    recorded_command: list[list[str]] = []
+
+    class _Result:
+        def __init__(self, returncode: int = 0) -> None:
+            self.returncode = returncode
+
+    monkeypatch.setattr(frame_compare.shutil, "which", lambda _: None)
+    monkeypatch.setattr(frame_compare.importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(
+        frame_compare.subprocess,
+        "run",
+        lambda cmd, env=None, check=False, **kwargs: recorded_command.append(list(cmd)) or _Result(0),
+    )
+
+    display = frame_compare._AudioAlignmentDisplayData(
+        stream_lines=[],
+        estimation_line=None,
+        offset_lines=[],
+        offsets_file_line="Offsets file: offsets.toml",
+        json_reference_stream=None,
+        json_target_streams={},
+        json_offsets_sec={},
+        json_offsets_frames={},
+        warnings=[],
+    )
+
+    prompt_calls: list[dict[str, int] | None] = []
+    monkeypatch.setattr(
+        frame_compare,
+        "_prompt_vspreview_offsets",
+        lambda *args, **kwargs: prompt_calls.append({}) or {},
+    )
+
+    apply_calls: list[Mapping[str, int]] = []
+
+    def _record_apply(
+        _plans: Sequence[frame_compare._ClipPlan],
+        _summary: frame_compare._AudioAlignmentSummary,
+        offsets: Mapping[str, int],
+        *_args: object,
+        **_kwargs: object,
+    ) -> None:
+        apply_calls.append(dict(offsets))
+
+    monkeypatch.setattr(frame_compare, "_apply_vspreview_manual_offsets", _record_apply)
+
+    frame_compare._launch_vspreview(plans, summary, display, cfg, tmp_path, reporter, json_tail)
+
+    script_path_str = audio_block.get("vspreview_script")
+    assert script_path_str, "Script path should be recorded in JSON tail"
+    script_path = Path(script_path_str)
+    assert script_path.exists()
+    script_text = script_path.read_text(encoding="utf-8")
+    assert "OFFSET_MAP" in script_text
+    assert "vs_core.configure" in script_text
+    assert "ColorConfig" in script_text
+    assert "AssumeFPS" in script_text
+    assert "PREVIEW_MODE = 'baseline'" in script_text
+    assert "SHOW_SUGGESTED_OVERLAY = True" in script_text
+    assert "'Target': 0,  # Suggested delta +7f" in script_text
+    assert "SUGGESTION_MAP" in script_text
+    assert "'Target': (7, 0.0)" in script_text
+    assert 'seconds_value = f"{suggested_seconds:.3f}"' in script_text
+    assert "Suggested: {suggested_frames:+d}f (~{seconds_value}s) •" in script_text
+    assert 'applied_value = "0" if applied_frames == 0 else f"{applied_frames:+d}"' in script_text
+    assert "Applied in preview: {applied_value}f" in script_text
+    assert "preview applied=%+df" in script_text
+    assert recorded_command, "VSPreview command should be invoked when interactive"
+    assert recorded_command[0][0] == frame_compare.sys.executable
+    assert recorded_command[0][-1] == str(script_path)
+    assert audio_block.get("vspreview_invoked") is True
+    assert audio_block.get("vspreview_exit_code") == 0
+    assert prompt_calls, "Prompt should be invoked even when returning default offsets"
+    assert apply_calls == [{}]
+
+
+def test_launch_vspreview_baseline_mode_persists_manual_offsets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Baseline preview emits zeroed offsets yet records manual selections."""
+
+    cfg = _make_config(tmp_path)
+    cfg.audio_alignment.use_vspreview = True
+    cfg.audio_alignment.vspreview_mode = "baseline"
+
+    reference_path = tmp_path / "Ref.mkv"
+    target_path = tmp_path / "Target.mkv"
+    reference_path.write_bytes(b"ref")
+    target_path.write_bytes(b"tgt")
+
+    reference_plan = frame_compare._ClipPlan(
+        path=reference_path,
+        metadata={"label": "Reference"},
+    )
+    target_plan = frame_compare._ClipPlan(
+        path=target_path,
+        metadata={"label": "Target"},
+    )
+    target_plan.trim_start = 2
+    target_plan.has_trim_start_override = True
+    plans = [reference_plan, target_plan]
+
+    measurement = AlignmentMeasurement(
+        file=target_path,
+        offset_seconds=0.375,
+        frames=9,
+        correlation=0.91,
+        reference_fps=24.0,
+        target_fps=24.0,
+    )
+
+    summary = frame_compare._AudioAlignmentSummary(
+        offsets_path=tmp_path / "offsets.toml",
+        reference_name=reference_path.name,
+        measurements=(measurement,),
+        applied_frames={},
+        baseline_shift=0,
+        statuses={},
+        reference_plan=reference_plan,
+        final_adjustments={},
+        swap_details={},
+        suggested_frames={target_path.name: 9},
+        suggestion_mode=True,
+        manual_trim_starts={target_path.name: 2},
+    )
+
+    reporter = _RecordingOutputManager()
+    json_tail = _make_json_tail_stub()
+    audio_block = json_tail["audio_alignment"]
+
+    monkeypatch.setattr(frame_compare.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(frame_compare.shutil, "which", lambda _: None)
+    monkeypatch.setattr(frame_compare.importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(
+        frame_compare.subprocess,
+        "run",
+        lambda cmd, env=None, check=False, **kwargs: types.SimpleNamespace(
+            returncode=0,
+            stdout="",
+            stderr="",
+        ),
+    )
+
+    monkeypatch.setattr(
+        frame_compare,
+        "_prompt_vspreview_offsets",
+        lambda *args, **kwargs: {target_path.name: 3},
+    )
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "update_offsets_file",
+        lambda *_args, **_kwargs: (
+            {reference_path.name: 0, target_path.name: 5},
+            {reference_path.name: "manual", target_path.name: "manual"},
+        ),
+    )
+
+    frame_compare._launch_vspreview(plans, summary, None, cfg, tmp_path, reporter, json_tail)
+
+    script_path_str = audio_block.get("vspreview_script")
+    assert script_path_str, "Script path should be recorded in JSON tail"
+    script_text = Path(script_path_str).read_text(encoding="utf-8")
+    assert "'Target': 0,  # Suggested delta +9f" in script_text
+    assert summary.vspreview_manual_offsets[target_path.name] == 5
+    assert summary.vspreview_manual_deltas[target_path.name] == 3
+    manual_json = cast(dict[str, int], audio_block.get("vspreview_manual_offsets", {}))
+    assert manual_json[target_path.name] == 5
+    delta_json = cast(dict[str, int], audio_block.get("vspreview_manual_deltas", {}))
+    assert delta_json[target_path.name] == 3
+
+def test_write_vspreview_script_generates_unique_filenames_same_second(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """VSPreview script writes should never clobber same-second launches."""
+
+    cfg = _make_config(tmp_path)
+    cfg.audio_alignment.use_vspreview = True
+
+    reference_path = tmp_path / "Ref.mkv"
+    target_path = tmp_path / "Target.mkv"
+    reference_path.write_bytes(b"ref")
+    target_path.write_bytes(b"tgt")
+
+    reference_plan = frame_compare._ClipPlan(
+        path=reference_path,
+        metadata={"label": "Reference"},
+    )
+    target_plan = frame_compare._ClipPlan(
+        path=target_path,
+        metadata={"label": "Target"},
+    )
+    plans = [reference_plan, target_plan]
+
+    summary = frame_compare._AudioAlignmentSummary(
+        offsets_path=tmp_path / "offsets.toml",
+        reference_name=reference_path.name,
+        measurements=(),
+        applied_frames={},
+        baseline_shift=0,
+        statuses={},
+        reference_plan=reference_plan,
+        final_adjustments={},
+        swap_details={},
+        suggested_frames={target_path.name: 7},
+        suggestion_mode=True,
+        manual_trim_starts={target_path.name: 10},
+    )
+
+    fixed_instant = dt.datetime(2024, 1, 1, 12, 34, 56)
+
+    class _FixedDatetime(dt.datetime):
+        @classmethod
+        def now(cls, tz: dt.tzinfo | None = None) -> dt.datetime:
+            return fixed_instant if tz is None else fixed_instant.replace(tzinfo=tz)
+
+    monkeypatch.setattr(frame_compare._dt, "datetime", _FixedDatetime)
+
+    first_path = frame_compare._write_vspreview_script(plans, summary, cfg, tmp_path)
+    second_path = frame_compare._write_vspreview_script(plans, summary, cfg, tmp_path)
+
+    assert first_path != second_path
+    assert first_path.exists()
+    assert second_path.exists()
+    assert first_path.name != second_path.name
+
+
+def test_launch_vspreview_warns_when_command_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """VSPreview launcher should fall back cleanly when no executable is available."""
+
+    cfg = _make_config(tmp_path)
+    cfg.audio_alignment.use_vspreview = True
+
+    reference_path = tmp_path / "Ref.mkv"
+    target_path = tmp_path / "Target.mkv"
+    reference_path.write_bytes(b"ref")
+    target_path.write_bytes(b"tgt")
+
+    reference_plan = frame_compare._ClipPlan(
+        path=reference_path,
+        metadata={"label": "Reference"},
+    )
+    target_plan = frame_compare._ClipPlan(
+        path=target_path,
+        metadata={"label": "Target"},
+    )
+    plans = [reference_plan, target_plan]
+
+    summary = frame_compare._AudioAlignmentSummary(
+        offsets_path=tmp_path / "offsets.toml",
+        reference_name=reference_path.name,
+        measurements=(),
+        applied_frames={},
+        baseline_shift=0,
+        statuses={},
+        reference_plan=reference_plan,
+        final_adjustments={},
+        swap_details={},
+        suggested_frames={target_path.name: 4},
+        suggestion_mode=True,
+        manual_trim_starts={target_path.name: 2},
+    )
+
+    reporter = _RecordingOutputManager()
+    json_tail = _make_json_tail_stub()
+    audio_block = json_tail["audio_alignment"]
+
+    display = frame_compare._AudioAlignmentDisplayData(
+        stream_lines=[],
+        estimation_line=None,
+        offset_lines=[],
+        offsets_file_line="Offsets file: offsets.toml",
+        json_reference_stream=None,
+        json_target_streams={},
+        json_offsets_sec={},
+        json_offsets_frames={},
+        warnings=[],
+    )
+
+    monkeypatch.setattr(frame_compare.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(frame_compare.shutil, "which", lambda _: None)
+    monkeypatch.setattr(frame_compare.importlib.util, "find_spec", lambda _name: None)
+
+    prompt_called: list[None] = []
+
+    def _fail_prompt(*_args: object, **_kwargs: object) -> dict[str, int]:
+        prompt_called.append(None)
+        return {}
+
+    monkeypatch.setattr(frame_compare, "_prompt_vspreview_offsets", _fail_prompt)
+
+    frame_compare._launch_vspreview(plans, summary, display, cfg, tmp_path, reporter, json_tail)
+
+    script_path_str = audio_block.get("vspreview_script")
+    assert script_path_str, "Script path should still be recorded for manual launches"
+    assert Path(script_path_str).exists()
+    assert audio_block.get("vspreview_invoked") is False
+    assert audio_block.get("vspreview_exit_code") is None
+    assert not prompt_called, "Prompt should not run when VSPreview cannot launch"
+    warnings = reporter.get_warnings()
+    assert any("VSPreview dependencies missing" in warning for warning in warnings)
+    layout_state = reporter.values.get("vspreview", {})
+    missing_state = cast(dict[str, object], layout_state.get("missing", {}))
+    assert missing_state.get("active") is True
+    expected_command = frame_compare._format_vspreview_manual_command(
+        Path(script_path_str)
+    )
+    assert missing_state.get("command") == expected_command
+    offer_entry = json_tail.get("vspreview_offer")
+    assert offer_entry == {"vspreview_offered": False, "reason": "vspreview-missing"}
+    console_output = reporter.console.export_text()
+    normalized_output = " ".join(console_output.split())
+    assert "VSPreview dependency missing" in normalized_output
+    expected_windows_install = " ".join(
+        frame_compare._VSPREVIEW_WINDOWS_INSTALL.split()
+    )
+    assert expected_windows_install in normalized_output
+    python_executable = frame_compare.sys.executable or "python"
+    assert python_executable in normalized_output
+    assert "-m vspreview" in normalized_output
+
+
+def _make_json_tail_stub() -> frame_compare.JsonTail:
+    audio_block: frame_compare.AudioAlignmentJSON = {
+        "enabled": False,
+        "reference_stream": None,
+        "target_stream": {},
+        "offsets_sec": {},
+        "offsets_frames": {},
+        "preview_paths": [],
+        "confirmed": None,
+        "offsets_filename": "offsets.toml",
+        "manual_trim_summary": [],
+        "suggestion_mode": True,
+        "suggested_frames": {},
+        "manual_trim_starts": {},
+        "use_vspreview": False,
+        "vspreview_manual_offsets": {},
+        "vspreview_manual_deltas": {},
+        "vspreview_reference_trim": None,
+        "vspreview_script": None,
+        "vspreview_invoked": False,
+        "vspreview_exit_code": None,
+    }
+    tail: frame_compare.JsonTail = {
+        "clips": [],
+        "trims": {"per_clip": {}},
+        "window": {},
+        "alignment": {"manual_start_s": 0.0, "manual_end_s": "unchanged"},
+        "audio_alignment": audio_block,
+        "analysis": {},
+        "render": {},
+        "tonemap": {},
+        "overlay": {},
+        "verify": {
+            "count": 0,
+            "threshold": 0.0,
+            "delta": {
+                "max": None,
+                "average": None,
+                "frame": None,
+                "file": None,
+                "auto_selected": None,
+            },
+            "entries": [],
+        },
+        "cache": {},
+        "slowpics": {
+            "enabled": False,
+            "title": {
+                "inputs": {
+                    "resolved_base": None,
+                    "collection_name": None,
+                    "collection_suffix": "",
+                },
+                "final": None,
+            },
+            "url": None,
+            "shortcut_path": None,
+            "deleted_screens_dir": False,
+            "is_public": False,
+            "is_hentai": False,
+            "remove_after_days": 0,
+        },
+        "warnings": [],
+        "workspace": {
+            "root": "",
+            "media_root": "",
+            "config_path": "",
+            "legacy_config": False,
+        },
+        "vspreview_mode": None,
+        "suggested_frames": 0,
+        "suggested_seconds": 0.0,
+        "vspreview_offer": None,
+    }
+    return tail
+
+
+def _make_display_stub() -> frame_compare._AudioAlignmentDisplayData:
+    return frame_compare._AudioAlignmentDisplayData(
+        stream_lines=[],
+        estimation_line=None,
+        offset_lines=[],
+        offsets_file_line="Offsets file: offsets.toml",
+        json_reference_stream=None,
+        json_target_streams={},
+        json_offsets_sec={},
+        json_offsets_frames={},
+        warnings=[],
+    )
+
+
+def test_vspreview_manual_offsets_positive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reference_path = tmp_path / "Ref.mkv"
+    target_path = tmp_path / "Target.mkv"
+    reference_plan = frame_compare._ClipPlan(path=reference_path, metadata={"label": "Reference"})
+    target_plan = frame_compare._ClipPlan(path=target_path, metadata={"label": "Target"})
+    target_plan.trim_start = 5
+    target_plan.has_trim_start_override = True
+    summary = frame_compare._AudioAlignmentSummary(
+        offsets_path=tmp_path / "offsets.toml",
+        reference_name=reference_path.name,
+        measurements=(),
+        applied_frames={},
+        baseline_shift=0,
+        statuses={},
+        reference_plan=reference_plan,
+        final_adjustments={},
+        swap_details={},
+        suggested_frames={target_path.name: 3},
+        suggestion_mode=True,
+        manual_trim_starts={target_path.name: 5},
+    )
+
+    reporter = _RecordingOutputManager()
+    json_tail = _make_json_tail_stub()
+    display = _make_display_stub()
+
+    captured: dict[str, object] = {}
+
+    def fake_update(
+        path: Path,
+        reference_name: str,
+        measurements: Sequence[AlignmentMeasurement],
+        existing: Mapping[str, Mapping[str, object]],
+        notes: Mapping[str, str],
+    ) -> tuple[dict[str, int], dict[str, str]]:
+        captured["path"] = path
+        captured["reference"] = reference_name
+        captured["measurements"] = list(measurements)
+        captured["existing"] = dict(existing)
+        captured["notes"] = dict(notes)
+        applied = {m.file.name: int(m.frames or 0) for m in measurements}
+        return applied, {name: "manual" for name in applied}
+
+    monkeypatch.setattr(frame_compare.audio_alignment, "update_offsets_file", fake_update)
+
+    frame_compare._apply_vspreview_manual_offsets(
+        [reference_plan, target_plan],
+        summary,
+        {target_path.name: 7},
+        reporter,
+        json_tail,
+        display,
+    )
+
+    assert target_plan.trim_start == 12
+    assert summary.suggestion_mode is False
+    assert summary.manual_trim_starts[target_path.name] == 12
+    assert summary.vspreview_manual_offsets[target_path.name] == 12
+    assert summary.vspreview_manual_deltas[target_path.name] == 7
+    audio_block = json_tail["audio_alignment"]
+    offsets_map = cast(dict[str, int], audio_block.get("vspreview_manual_offsets", {}))
+    deltas_map = cast(dict[str, int], audio_block.get("vspreview_manual_deltas", {}))
+    assert offsets_map[target_path.name] == 12
+    assert deltas_map[target_path.name] == 7
+    notes_map = cast(dict[str, str], captured["notes"])
+    existing_map = cast(dict[str, Mapping[str, object]], captured["existing"])
+    assert notes_map[target_path.name] == "VSPreview"
+    entry = cast(dict[str, object], existing_map[target_path.name])
+    assert entry.get("status") == "manual"
+    assert int(cast(int | float, entry.get("frames", 0))) == 12
+    assert any("VSPreview manual offset applied" in line for line in reporter.lines)
+
+
+def test_vspreview_manual_offsets_zero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    reference_path = tmp_path / "Ref.mkv"
+    target_path = tmp_path / "Target.mkv"
+    reference_plan = frame_compare._ClipPlan(path=reference_path, metadata={"label": "Reference"})
+    target_plan = frame_compare._ClipPlan(path=target_path, metadata={"label": "Target"})
+    target_plan.trim_start = 4
+    summary = frame_compare._AudioAlignmentSummary(
+        offsets_path=tmp_path / "offsets.toml",
+        reference_name=reference_path.name,
+        measurements=(),
+        applied_frames={},
+        baseline_shift=0,
+        statuses={},
+        reference_plan=reference_plan,
+        final_adjustments={},
+        swap_details={},
+        suggested_frames={target_path.name: 0},
+        suggestion_mode=True,
+        manual_trim_starts={target_path.name: 4},
+    )
+
+    reporter = _RecordingOutputManager()
+    json_tail = _make_json_tail_stub()
+    display = _make_display_stub()
+
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "update_offsets_file",
+        lambda *_args, **_kwargs: ({target_path.name: 4, reference_path.name: 0}, {target_path.name: "manual", reference_path.name: "manual"}),
+    )
+
+    frame_compare._apply_vspreview_manual_offsets(
+        [reference_plan, target_plan],
+        summary,
+        {target_path.name: 0},
+        reporter,
+        json_tail,
+        display,
+    )
+
+    assert target_plan.trim_start == 4
+    assert summary.manual_trim_starts[target_path.name] == 4
+    assert summary.vspreview_manual_deltas[target_path.name] == 0
+    audio_block = json_tail["audio_alignment"]
+    offsets_map = cast(dict[str, int], audio_block.get("vspreview_manual_offsets", {}))
+    assert offsets_map[target_path.name] == 4
+
+
+def test_vspreview_manual_offsets_negative(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    reference_path = tmp_path / "Ref.mkv"
+    target_path = tmp_path / "Target.mkv"
+    reference_plan = frame_compare._ClipPlan(path=reference_path, metadata={"label": "Reference"})
+    target_plan = frame_compare._ClipPlan(path=target_path, metadata={"label": "Target"})
+    target_plan.trim_start = 3
+    summary = frame_compare._AudioAlignmentSummary(
+        offsets_path=tmp_path / "offsets.toml",
+        reference_name=reference_path.name,
+        measurements=(),
+        applied_frames={},
+        baseline_shift=0,
+        statuses={},
+        reference_plan=reference_plan,
+        final_adjustments={},
+        swap_details={},
+        suggested_frames={target_path.name: -5},
+        suggestion_mode=True,
+        manual_trim_starts={target_path.name: 3},
+    )
+
+    reporter = _RecordingOutputManager()
+    json_tail = _make_json_tail_stub()
+    display = _make_display_stub()
+
+    monkeypatch.setattr(
+        frame_compare.audio_alignment,
+        "update_offsets_file",
+        lambda *_args, **_kwargs: (
+            {target_path.name: 0, reference_path.name: 4},
+            {target_path.name: "manual", reference_path.name: "manual"},
+        ),
+    )
+
+    frame_compare._apply_vspreview_manual_offsets(
+        [reference_plan, target_plan],
+        summary,
+        {target_path.name: -7},
+        reporter,
+        json_tail,
+        display,
+    )
+
+    assert target_plan.trim_start == 0
+    assert reference_plan.trim_start == 4
+    assert summary.manual_trim_starts[target_path.name] == 0
+    assert summary.vspreview_manual_offsets[reference_path.name] == 4
+    assert summary.vspreview_manual_deltas[target_path.name] == -3
+    assert summary.vspreview_manual_deltas[reference_path.name] == 4
+    audio_block = json_tail["audio_alignment"]
+    assert audio_block.get("vspreview_reference_trim") == 4
+    assert any("reference adjustment" in line for line in reporter.lines)
+
+
+def test_vspreview_manual_offsets_multiple_negative(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reference_path = tmp_path / "Ref.mkv"
+    target_a_path = tmp_path / "A.mkv"
+    target_b_path = tmp_path / "B.mkv"
+    reference_plan = frame_compare._ClipPlan(path=reference_path, metadata={"label": "Reference"})
+    target_a_plan = frame_compare._ClipPlan(path=target_a_path, metadata={"label": "A"})
+    target_b_plan = frame_compare._ClipPlan(path=target_b_path, metadata={"label": "B"})
+    target_a_plan.trim_start = 5
+    target_b_plan.trim_start = 5
+    summary = frame_compare._AudioAlignmentSummary(
+        offsets_path=tmp_path / "offsets.toml",
+        reference_name=reference_path.name,
+        measurements=(),
+        applied_frames={},
+        baseline_shift=0,
+        statuses={},
+        reference_plan=reference_plan,
+        final_adjustments={},
+        swap_details={},
+        suggested_frames={
+            target_a_path.name: -3,
+            target_b_path.name: -7,
+        },
+        suggestion_mode=True,
+        manual_trim_starts={
+            target_a_path.name: 5,
+            target_b_path.name: 5,
+        },
+    )
+
+    reporter = _RecordingOutputManager()
+    json_tail = _make_json_tail_stub()
+    display = _make_display_stub()
+
+    captured: dict[str, object] = {}
+
+    def fake_update(
+        path: Path,
+        reference_name: str,
+        measurements: Sequence[AlignmentMeasurement],
+        existing: Mapping[str, Mapping[str, object]],
+        notes: Mapping[str, str],
+    ) -> tuple[dict[str, int], dict[str, str]]:
+        captured["path"] = path
+        captured["reference"] = reference_name
+        captured["measurements"] = list(measurements)
+        captured["existing"] = dict(existing)
+        captured["notes"] = dict(notes)
+        applied = {m.file.name: int(m.frames or 0) for m in measurements}
+        return applied, {name: "manual" for name in applied}
+
+    monkeypatch.setattr(frame_compare.audio_alignment, "update_offsets_file", fake_update)
+
+    frame_compare._apply_vspreview_manual_offsets(
+        [reference_plan, target_a_plan, target_b_plan],
+        summary,
+        {target_a_path.name: -3, target_b_path.name: -7},
+        reporter,
+        json_tail,
+        display,
+    )
+
+    assert target_a_plan.trim_start == 4
+    assert target_b_plan.trim_start == 0
+    assert reference_plan.trim_start == 2
+    assert summary.suggestion_mode is False
+    assert summary.manual_trim_starts[target_a_path.name] == 4
+    assert summary.manual_trim_starts[target_b_path.name] == 0
+    assert summary.vspreview_manual_offsets[target_a_path.name] == 4
+    assert summary.vspreview_manual_offsets[target_b_path.name] == 0
+    assert summary.vspreview_manual_offsets[reference_path.name] == 2
+    assert summary.vspreview_manual_deltas[target_a_path.name] == -1
+    assert summary.vspreview_manual_deltas[target_b_path.name] == -5
+    assert summary.vspreview_manual_deltas[reference_path.name] == 2
+
+    audio_block = json_tail["audio_alignment"]
+    offsets_map = cast(dict[str, int], audio_block.get("vspreview_manual_offsets", {}))
+    deltas_map = cast(dict[str, int], audio_block.get("vspreview_manual_deltas", {}))
+    assert offsets_map[target_a_path.name] == 4
+    assert offsets_map[target_b_path.name] == 0
+    assert offsets_map[reference_path.name] == 2
+    assert deltas_map[target_a_path.name] == -1
+    assert deltas_map[target_b_path.name] == -5
+    assert deltas_map[reference_path.name] == 2
+
+    measurements = cast(list[AlignmentMeasurement], captured["measurements"])
+    assert {m.file.name for m in measurements} == {
+        reference_path.name,
+        target_a_path.name,
+        target_b_path.name,
+    }
+    assert any("manual offset applied" in line for line in reporter.lines)
 def _comparison_fixture_root() -> Path:
     """Return the repository-level comparison fixture directory."""
 
@@ -332,11 +1586,11 @@ def test_cli_disables_json_tail_output(
     def fake_parse(name: str, **kwargs: object) -> dict[str, str]:
         """
         Produce a minimal parsed filename metadata dictionary.
-        
+
         Parameters:
             name (str): The filename or label to use for the parsed metadata.
             **kwargs: Additional keyword arguments are accepted and ignored.
-        
+
         Returns:
             dict: A mapping with keys:
                 - "label": same as `name`
@@ -357,14 +1611,14 @@ def test_cli_disables_json_tail_output(
     ) -> types.SimpleNamespace:
         """
         Create a fake clip-like object with fixed video properties.
-        
+
         Parameters:
             path (str | Path): Input path (accepted but ignored).
             trim_start (int): Trim start in frames (accepted but ignored).
             trim_end (int | None): Trim end in frames (accepted but ignored).
             fps_map (Any): FPS mapping (accepted but ignored).
             cache_dir (str | Path | None): Cache directory (accepted but ignored).
-        
+
         Returns:
             types.SimpleNamespace: An object with attributes:
                 - width (int): 1920
@@ -406,11 +1660,11 @@ def test_cli_disables_json_tail_output(
     ) -> list[str]:
         """
         Produce a single placeholder screenshot file inside out_dir and return its path.
-        
+
         Parameters:
             out_dir (Path): Directory to create and place the placeholder image.
             **kwargs: Ignored; accepted for compatibility with the real generator.
-        
+
         Returns:
             List[str]: A list containing the string path to "frame.png" created under out_dir.
         """
@@ -823,6 +2077,136 @@ def test_cli_tmdb_resolution_populates_slowpics(
     assert slowpics_json["deleted_screens_dir"] is False
 
 
+def test_run_cli_coalesces_duplicate_pivot_logs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Duplicate pivot notifications are emitted once per run."""
+
+    cfg = _make_config(tmp_path)
+    cfg.analysis.save_frames_data = False
+
+    monkeypatch.setattr(frame_compare, "load_config", lambda *_: cfg)
+
+    for name in ("Alpha.mkv", "Beta.mkv"):
+        (tmp_path / name).write_bytes(b"data")
+
+    def fake_parse(name: str, **_: object) -> dict[str, str]:
+        return {
+            "label": name,
+            "file_name": name,
+            "title": "",
+            "anime_title": "",
+            "year": "",
+            "imdb_id": "",
+            "tvdb_id": "",
+        }
+
+    monkeypatch.setattr(frame_compare, "parse_filename_metadata", fake_parse)
+    monkeypatch.setattr(frame_compare.vs_core, "configure", lambda *args, **kwargs: None)
+    monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda *args, **kwargs: None)
+
+    def fake_init_clip(
+        path: str | Path,
+        *,
+        trim_start: int = 0,
+        trim_end: int | None = None,
+        fps_map: tuple[int, int] | None = None,
+        cache_dir: str | Path | None = None,
+    ) -> types.SimpleNamespace:
+        return types.SimpleNamespace(
+            path=Path(path),
+            width=1920,
+            height=1080,
+            fps_num=24000,
+            fps_den=1001,
+            num_frames=120,
+        )
+
+    monkeypatch.setattr(frame_compare.vs_core, "init_clip", fake_init_clip)
+    monkeypatch.setattr(frame_compare.vs_core, "resolve_effective_tonemap", lambda _cfg: {})
+
+    def fake_select(
+        clip: types.SimpleNamespace,
+        analysis_cfg: AnalysisConfig,
+        files: list[str],
+        file_under_analysis: str,
+        *,
+        cache_info: FrameMetricsCacheInfo | None = None,
+        progress: Callable[[int], None] | None = None,
+        frame_window: tuple[int, int] | None = None,
+        return_metadata: bool = False,
+        color_cfg: ColorConfig | None = None,
+        cache_probe: CacheLoadResult | None = None,
+    ) -> tuple[list[int], dict[int, str], dict[int, SelectionDetail]]:
+        if progress is not None:
+            progress(1)
+        frames = [10, 20]
+        categories = {10: "Auto", 20: "Auto"}
+        details = {
+            10: SelectionDetail(
+                frame_index=10,
+                label="Auto",
+                score=None,
+                source="auto",
+                timecode="00:00:10.000",
+            ),
+            20: SelectionDetail(
+                frame_index=20,
+                label="Auto",
+                score=None,
+                source="auto",
+                timecode="00:00:20.000",
+            ),
+        }
+        return frames, categories, details
+
+    monkeypatch.setattr(frame_compare, "select_frames", fake_select)
+
+    base_console = frame_compare.Console
+
+    class RecordingConsole(base_console):  # type: ignore[misc]
+        pivot_logs: ClassVar[list[str]] = []
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__(*args, **kwargs)
+
+        def log(self, *objects: object, **_kwargs: object) -> None:  # type: ignore[override]
+            message = objects[0] if objects else ""
+            RecordingConsole.pivot_logs.append(str(message))
+
+    RecordingConsole.pivot_logs = []
+    monkeypatch.setattr(frame_compare, "Console", RecordingConsole)
+
+    def fake_generate(
+        clips: list[types.SimpleNamespace],
+        frames: list[int],
+        files: list[str],
+        metadata: list[dict[str, object]],
+        out_dir: Path,
+        cfg_screens: ScreenshotConfig,
+        color_cfg: ColorConfig,
+        **kwargs: object,
+    ) -> list[str]:
+        pivot_notifier = kwargs.get("pivot_notifier")
+        if callable(pivot_notifier):
+            pivot_notifier("Full-chroma pivot active (YUV444P16)")
+            pivot_notifier("Full-chroma pivot active (YUV444P16)")
+            pivot_notifier("Full-chroma pivot resolved")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        return [str(out_dir / f"shot_{idx}.png") for idx in range(len(frames) * len(files))]
+
+    monkeypatch.setattr(frame_compare, "generate_screenshots", fake_generate)
+    monkeypatch.setattr(frame_compare, "export_selection_metadata", lambda *args, **kwargs: None)
+    monkeypatch.setattr(frame_compare, "write_selection_cache_file", lambda *args, **kwargs: None)
+
+    result = frame_compare.run_cli("dummy-config")
+
+    assert result.image_paths
+    assert RecordingConsole.pivot_logs == [
+        "Full-chroma pivot active (YUV444P16)",
+        "Full-chroma pivot resolved",
+    ]
+
 def test_cli_tmdb_resolution_sets_default_collection_name(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1177,10 +2561,10 @@ def test_audio_alignment_block_and_json(
     def fake_parse(name: str, **_kwargs: object) -> dict[str, str]:
         """
         Create a minimal fake parse result for a clip name.
-        
+
         Parameters:
             name (str): Clip identifier or filename used to derive the returned label. Additional keyword arguments are ignored.
-        
+
         Returns:
             dict: Mapping with keys:
                 - "label" (str): "Clip A" if `name` starts with "ClipA", otherwise "Clip B".
@@ -1203,14 +2587,14 @@ def test_audio_alignment_block_and_json(
     ) -> types.SimpleNamespace:
         """
         Create a lightweight fake clip object for tests that resembles the real clip interface.
-        
+
         Parameters:
             path: Path-like or str specifying the clip file path.
             trim_start (int): Ignored in this fake; present for compatibility with callers.
             trim_end (int | None): Ignored in this fake; present for compatibility with callers.
             fps_map: Ignored in this fake; present for compatibility with callers.
             cache_dir: Ignored in this fake; present for compatibility with callers.
-        
+
         Returns:
             SimpleNamespace: An object with attributes:
                 - path (Path): Resolved Path of the provided `path`.
@@ -1249,14 +2633,14 @@ def test_audio_alignment_block_and_json(
     ) -> list[str]:
         """
         Create a fake set of screenshot files in out_dir and return their file paths.
-        
+
         This helper ensures out_dir exists and produces a list of string paths representing generated shot images; the number of returned paths is len(frames) * len(files).
-        
+
         Parameters:
             out_dir (Path): Directory where fake screenshot files are created.
             frames (Sequence): Sequence of frame descriptors used to determine per-file shot count.
             files (Sequence): Sequence of input files; combined with frames to compute total shots.
-        
+
         Returns:
             list[str]: Paths to the generated shot image files as strings.
         """
@@ -1268,10 +2652,10 @@ def test_audio_alignment_block_and_json(
     def fake_probe(path: Path) -> list[AudioStreamInfo]:
         """
         Create a fake audio probe result for the given file path.
-        
+
         Parameters:
             path (Path): File path to probe; compared against the module-level `reference_path` to determine which mock stream to return.
-        
+
         Returns:
             list[AudioStreamInfo]: A single-item list with a mocked audio stream. If `path == reference_path` the stream has `index=0`, `language='eng'`, and `is_default=True`; otherwise the stream has `index=1`, `language='jpn'`, and `is_default=False`.
         """
@@ -1335,19 +2719,19 @@ def test_audio_alignment_block_and_json(
     ) -> tuple[dict[str, int], dict[str, str]]:
         """
         Produce applied frame indices and status labels for a set of measurement objects.
-        
+
         This test helper assigns 0 to the provided reference_name and, for each item in measurements,
         maps the measurement's file name to its frames value or 0 when frames is falsy. It also
         marks every measurement's status as "auto".
-        
+
         Parameters:
-        	reference_name (str): Identifier to be added to the applied frames mapping with value 0.
-        	measurements (Iterable): Iterable of objects with `file.name` and `frames` attributes.
-        
+            reference_name (str): Identifier to be added to the applied frames mapping with value 0.
+            measurements (Iterable): Iterable of objects with `file.name` and `frames` attributes.
+
         Returns:
-        	tuple: A pair (applied_frames, statuses).
-        	- applied_frames (dict): Mapping of names (reference_name and each measurement.file.name) to integer frame indices.
-        	- statuses (dict): Mapping of each measurement.file.name to the string `"auto"`.
+            tuple: A pair (applied_frames, statuses).
+            - applied_frames (dict): Mapping of names (reference_name and each measurement.file.name) to integer frame indices.
+            - statuses (dict): Mapping of each measurement.file.name to the string `"auto"`.
         """
         applied_frames: dict[str, int] = {reference_name: 0}
         applied_frames.update({m.file.name: m.frames or 0 for m in measurements})
@@ -1396,7 +2780,7 @@ def test_audio_alignment_default_duration_avoids_zero_window(
 ) -> None:
     """
     Verifies that leaving audio alignment duration unspecified does not pass a zero-length window to the measurement routine.
-    
+
     Configures audio alignment with start_seconds and duration_seconds set to None, runs the CLI, and asserts that the call to the alignment measurement does not include a `duration_seconds` value of zero (i.e., it remains `None`).
     """
     reference_path = tmp_path / "ClipA.mkv"
@@ -1416,10 +2800,10 @@ def test_audio_alignment_default_duration_avoids_zero_window(
     def fake_parse(name: str, **_kwargs: object) -> dict[str, str]:
         """
         Create a minimal fake parse result for a clip name.
-        
+
         Parameters:
             name (str): Clip identifier or filename used to derive the returned label. Additional keyword arguments are ignored.
-        
+
         Returns:
             dict: Mapping with keys:
                 - "label" (str): "Clip A" if `name` starts with "ClipA", otherwise "Clip B".
@@ -1442,14 +2826,14 @@ def test_audio_alignment_default_duration_avoids_zero_window(
     ) -> types.SimpleNamespace:
         """
         Create a lightweight fake clip object for tests that resembles the real clip interface.
-        
+
         Parameters:
             path: Path-like or str specifying the clip file path.
             trim_start (int): Ignored in this fake; present for compatibility with callers.
             trim_end (int | None): Ignored in this fake; present for compatibility with callers.
             fps_map: Ignored in this fake; present for compatibility with callers.
             cache_dir: Ignored in this fake; present for compatibility with callers.
-        
+
         Returns:
             SimpleNamespace: An object with attributes:
                 - path (Path): Resolved Path of the provided `path`.
@@ -1488,7 +2872,7 @@ def test_audio_alignment_default_duration_avoids_zero_window(
     ) -> list[str]:
         """
         Create the output directory and return a single fake screenshot path.
-        
+
         Returns:
             list[str]: A one-element list containing the string path to "shot.png" inside `out_dir`.
         """
@@ -1500,10 +2884,10 @@ def test_audio_alignment_default_duration_avoids_zero_window(
     def fake_probe(path: Path) -> list[AudioStreamInfo]:
         """
         Create a fake audio probe result for the given file path.
-        
+
         Parameters:
             path (Path): File path to probe; compared against the module-level `reference_path` to determine which mock stream to return.
-        
+
         Returns:
             list[AudioStreamInfo]: A single-item list with a mocked audio stream. If `path == reference_path` the stream has `index=0`, `language='eng'`, and `is_default=True`; otherwise the stream has `index=1`, `language='jpn'`, and `is_default=False`.
         """
@@ -1551,9 +2935,9 @@ def test_audio_alignment_default_duration_avoids_zero_window(
     def fake_measure(*args: object, **kwargs: object) -> list[AlignmentMeasurement]:
         """
         Stub measurement function used in tests.
-        
+
         Records any keyword arguments into the enclosing `captured_kwargs` mapping and returns a single-element list containing the preconstructed `measurement` object.
-        
+
         Returns:
             list: A list with the `measurement` object as its only element.
         """
@@ -1583,10 +2967,10 @@ def _build_alignment_context(
 ]:
     """
     Builds a minimal audio-alignment test context with example clips, plans, and alignment state.
-    
+
     Parameters:
         tmp_path (Path): Temporary directory used to create sample reference and target clip files.
-    
+
     Returns:
         tuple: A 4-tuple containing:
             - cfg: AppConfig with audio alignment and confirmation-with-screenshots enabled.
@@ -1627,6 +3011,9 @@ def _build_alignment_context(
         reference_plan=reference_plan,
         final_adjustments={},
         swap_details={},
+        suggested_frames={},
+        suggestion_mode=False,
+        manual_trim_starts={},
     )
 
     display = frame_compare._AudioAlignmentDisplayData(
@@ -1639,6 +3026,7 @@ def _build_alignment_context(
         json_offsets_sec={},
         json_offsets_frames={},
         warnings=[],
+        manual_trim_lines=[],
     )
 
     return cfg, [reference_plan, target_plan], summary, display
@@ -1675,13 +3063,13 @@ def test_confirm_alignment_reports_preview_paths(
     def fake_generate(*args: object, **_kwargs: object) -> list[Path]:
         """
         Test helper that simulates screenshot generation for tests.
-        
+
         This function expects its fifth positional argument (args[4]) to be a pathlib.Path for an output directory; it ensures that directory exists, records two synthetic shot paths by appending them to the module-level list `generated_paths`, and returns the two Path objects.
-        
+
         Parameters:
             *args: Positional arguments where the fifth element (args[4]) is the output directory Path.
             **_kwargs: Ignored.
-        
+
         Returns:
             list[pathlib.Path]: A list containing two shot Path objects (shot_0.png and shot_1.png) inside the output directory.
         """
@@ -1740,7 +3128,7 @@ def test_run_cli_calls_alignment_confirmation(
 ) -> None:
     """
     Verifies that running the CLI triggers the audio-alignment confirmation flow when screenshot confirmation is enabled.
-    
+
     Sets up a configuration enabling audio alignment with screenshot confirmation, creates two dummy media files, and monkeypatches discovery, metadata parsing, plan building, selection, and alignment application. Replaces the confirmation function with one that records its arguments and raises a sentinel exception so the test can assert the confirmation was invoked with the expected parameters.
     """
     cfg = _make_config(tmp_path)
@@ -1756,7 +3144,7 @@ def test_run_cli_calls_alignment_confirmation(
     def fake_discover(_root: Path) -> list[Path]:
         """
         Return a precomputed list of discovered files; the provided `_root` argument is ignored.
-        
+
         Returns:
             files (list): The predefined list of discovered file paths.
         """
@@ -1765,11 +3153,11 @@ def test_run_cli_calls_alignment_confirmation(
     def fake_parse_metadata(_files: Sequence[Path], _naming: object) -> list[dict[str, str]]:
         """
         Produce metadata for a reference/target pair using the first two entries of the provided files.
-        
+
         Parameters:
             _files (Sequence[pathlib.Path|os.PathLike|object]): Iterable where the first two items represent the reference and target files; only their `.name` is used.
             _naming (any): Unused naming parameter kept for signature compatibility.
-        
+
         Returns:
             list[dict]: Two dictionaries with keys `label`, `file_name`, `year`, `title`, `anime_title`, `imdb_id`, and `tvdb_id`. The `label` values are `"Reference"` and `"Target"`, `file_name` is taken from the corresponding file's `.name`, and the remaining fields are empty strings.
         """
@@ -1799,12 +3187,12 @@ def test_run_cli_calls_alignment_confirmation(
     ) -> list[frame_compare._ClipPlan]:
         """
         Builds a list of clip plans from input file paths and corresponding metadata, marking the first clip as the reference.
-        
+
         Parameters:
             _files (Sequence[Path]): Input file paths in the order they should be planned.
             metadata (Sequence): Per-file metadata objects; must have the same length as `_files`.
             _cfg: Configuration object (not used by this fake builder, accepted for signature compatibility).
-        
+
         Returns:
             list[frame_compare._ClipPlan]: A list of ClipPlan objects where the first element has `use_as_reference=True` and all others have `use_as_reference=False`.
         """
@@ -1827,13 +3215,13 @@ def test_run_cli_calls_alignment_confirmation(
     ) -> Path:
         """
         Select the first candidate file for analysis.
-        
+
         Parameters:
             _files: Sequence of candidate file paths; the first element is selected.
             _metadata: Ignored.
             _analyze_clip: Ignored.
             cache_dir: Ignored.
-        
+
         Returns:
             The first file from `_files`.
         """
@@ -1851,11 +3239,11 @@ def test_run_cli_calls_alignment_confirmation(
     ) -> tuple[frame_compare._AudioAlignmentSummary, frame_compare._AudioAlignmentDisplayData]:
         """
         Create and return a synthetic audio-alignment summary and display objects for testing.
-        
+
         Parameters:
             plans (Sequence): Sequence of clip plan objects; the first plan is used as the reference.
             reporter (optional): Ignored; present for API compatibility.
-        
+
         Returns:
             tuple: A pair (summary, display) where:
                 - summary: a frame_compare._AudioAlignmentSummary with the first plan as the reference_plan,
@@ -1874,6 +3262,9 @@ def test_run_cli_calls_alignment_confirmation(
             reference_plan=plans[0],
             final_adjustments={},
             swap_details={},
+            suggested_frames={},
+            suggestion_mode=False,
+            manual_trim_starts={},
         )
         display = frame_compare._AudioAlignmentDisplayData(
             stream_lines=[],
@@ -1885,6 +3276,7 @@ def test_run_cli_calls_alignment_confirmation(
             json_offsets_sec={"Target": 0.0},
             json_offsets_frames={"Target": 0},
             warnings=[],
+            manual_trim_lines=[],
         )
         return summary, display
 
@@ -1892,7 +3284,7 @@ def test_run_cli_calls_alignment_confirmation(
         def __init__(self, *_, **__):
             """
             Create a no-op progress context used to mock progress handling in tests.
-            
+
             This initializer accepts and ignores any positional or keyword arguments and configures a
             `console` attribute whose `print` method is a no-op to suppress output during tests.
             """
@@ -1901,7 +3293,7 @@ def test_run_cli_calls_alignment_confirmation(
         def update_values(self, *_args, **_kwargs):
             """
             No-op progress update method used to satisfy a progress interface.
-            
+
             Accepts arbitrary positional and keyword arguments and performs no action.
             """
             return None
@@ -1909,7 +3301,7 @@ def test_run_cli_calls_alignment_confirmation(
         def set_flag(self, *_args, **_kwargs):
             """
             No-op method that accepts any positional and keyword arguments and does nothing.
-            
+
             Used as a compatibility stub where a flag-setting method is required but no action is desired.
             """
             return None
@@ -1917,7 +3309,7 @@ def test_run_cli_calls_alignment_confirmation(
         def line(self, *_args, **_kwargs):
             """
             Accepts any positional and keyword arguments and performs no action.
-            
+
             Used as a no-op placeholder to satisfy progress-reporting interfaces.
             """
             return None
@@ -1925,7 +3317,7 @@ def test_run_cli_calls_alignment_confirmation(
         def verbose_line(self, *_args, **_kwargs):
             """
             A no-op placeholder that accepts any positional or keyword arguments and does nothing.
-            
+
             This method intentionally ignores all inputs and always returns None; it can be used where a verbose callback is optional or not required.
             """
             return None
@@ -1933,11 +3325,11 @@ def test_run_cli_calls_alignment_confirmation(
         def render_sections(self, *_args, **_kwargs):
             """
             No-op renderer for section content; accepts any positional and keyword arguments and performs no action.
-            
+
             Parameters:
                 *_args: Arbitrary positional arguments that are ignored.
                 **_kwargs: Arbitrary keyword arguments that are ignored.
-            
+
             Returns:
                 None: Always returns None.
             """
@@ -1946,7 +3338,7 @@ def test_run_cli_calls_alignment_confirmation(
         def update_progress_state(self, *_args, **_kwargs):
             """
             No-op progress update method that accepts any arguments and has no effect.
-            
+
             Used as a placeholder in contexts where progress updates are optional; accepts arbitrary positional
             and keyword arguments and performs no action.
             """
@@ -1955,7 +3347,7 @@ def test_run_cli_calls_alignment_confirmation(
         def set_status(self, *_args, **_kwargs):
             """
             No-op status handler that ignores all arguments.
-            
+
             This method accepts any positional and keyword arguments and intentionally performs no action.
             """
             return None
@@ -1963,10 +3355,10 @@ def test_run_cli_calls_alignment_confirmation(
         def create_progress(self, *_args, **_kwargs):
             """
             Create a no-op progress context manager.
-            
+
             Parameters:
                 *_args, **_kwargs: Ignored positional and keyword arguments kept for API compatibility.
-            
+
             Returns:
                 DummyProgress: A progress-like object that performs no operations and can be used as a context manager.
             """
@@ -1987,7 +3379,7 @@ def test_run_cli_calls_alignment_confirmation(
     ) -> None:
         """
         Test helper that records its invocation arguments and then raises a sentinel error.
-        
+
         Parameters:
             plans: The clip plans passed to the confirmation function.
             summary: The summary object produced by analysis or alignment.
@@ -1995,7 +3387,7 @@ def test_run_cli_calls_alignment_confirmation(
             root: The root path or context used by the caller.
             reporter: The reporter used to emit messages.
             display: The display/preview object provided to the confirmation flow.
-        
+
         Raises:
             _SentinelError: Always raised to signal that this fake confirmation was invoked.
         """

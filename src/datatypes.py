@@ -1,6 +1,23 @@
 """Configuration dataclasses for frame comparison tool."""
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Union
+from enum import Enum
+from typing import Any, Dict, List, Optional, Union
+
+
+class OddGeometryPolicy(str, Enum):
+    """Policies controlling how odd-pixel geometry is handled for screenshots."""
+
+    AUTO = "auto"
+    FORCE_FULL_CHROMA = "force_full_chroma"
+    SUBSAMP_SAFE = "subsamp_safe"
+
+
+class RGBDither(str, Enum):
+    """Dithering strategies used when converting RGB outputs to 8-bit."""
+
+    ERROR_DIFFUSION = "error_diffusion"
+    ORDERED = "ordered"
+    NONE = "none"
 
 
 @dataclass
@@ -50,6 +67,8 @@ class ScreenshotConfig:
     letterbox_px_tolerance: int = 8
     center_pad: bool = True
     ffmpeg_timeout_seconds: float = 120.0
+    odd_geometry_policy: OddGeometryPolicy = OddGeometryPolicy.AUTO
+    rgb_dither: RGBDither = RGBDither.ERROR_DIFFUSION
 
 
 @dataclass
@@ -75,6 +94,13 @@ class ColorConfig:
     verify_max_seconds: float = 90.0
     verify_luma_threshold: float = 0.10
     strict: bool = False
+    default_matrix_hd: Optional[str] = None
+    default_matrix_sd: Optional[str] = None
+    default_primaries_hd: Optional[str] = None
+    default_primaries_sd: Optional[str] = None
+    default_transfer_sdr: Optional[str] = None
+    default_range_sdr: Optional[str] = None
+    color_overrides: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
 
 @dataclass
@@ -161,6 +187,10 @@ class AudioAlignmentConfig:
 
     enable: bool = False
     reference: str = ""
+    use_vspreview: bool = False
+    vspreview_mode: str = "baseline"
+    show_suggested_in_preview: bool = True
+    prompt_reuse_offsets: bool = False
     sample_rate: int = 16000
     hop_length: int = 512
     start_seconds: Optional[float] = None

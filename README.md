@@ -1,187 +1,335 @@
 # Frame Compare
 
-Automated frame sampling, alignment, and slow.pics uploads for repeatable QC.
-
-<!-- tags: frame comparison, ffmpeg, vapoursynth, slow.pics, tmdb, cli -->
-
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.13+](https://img.shields.io/badge/python-3.13+-3776ab.svg)
 
-## What is this?
+Automated frame sampling, alignment, tonemapping, and slow.pics uploads for deterministic encode comparisons.
 
-Frame Compare samples darkest, brightest, high-motion, random, and
-user-pinned frames across multiple encodes of the same title. It aligns
-audio, renders deterministic PNGs through VapourSynth or FFmpeg, and can
-ship finished sets to slow.pics with TMDB naming. The CLI targets home
-media archivists, fansub QC crews, and boutique remastering teams that
-need repeatable comparisons, live dashboards, and machine-readable
-metadata for downstream tooling.
+## Table of Contents
+- [Overview](#overview)
+- [Features](#features)
+- [Quickstart](#quickstart)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Configuration](#configuration)
+- [CLI Reference](#cli-reference)
+- [Examples](#examples)
+- [Troubleshooting](#troubleshooting)
+- [FAQ](#faq)
+- [Performance](#performance)
+- [Security](#security)
+- [Privacy & Telemetry](#privacy--telemetry)
+- [Versioning](#versioning)
+- [Contributing](#contributing)
+- [License](#license)
+- [Support](#support)
+
+## Overview
+
+Frame Compare samples darkest, brightest, high-motion, random, and user-pinned frames across multiple encodes of the same title. It aligns audio, renders deterministic PNGs through VapourSynth or FFmpeg, and can ship finished sets to slow.pics with TMDB naming. The CLI targets home media archivists, fansub QC crews, and boutique remastering teams that need repeatable comparisons, live dashboards, and machine-readable metadata for downstream tooling.
+
+## Features
+
+- Deterministic frame selection blending luminance quantiles, motion scoring, pinned frames, and seeded randomness.
+- Cached metrics (`generated.compframes` plus selection sidecars) for fast reruns across large batches.
+- Audio alignment with correlation, dynamic time warping refinements, and optional interactive confirmation frames.
+- VapourSynth-first pipeline with FFmpeg fallback, HDR→SDR tonemapping, and placeholder recovery when writers fail.
+- slow.pics integration with automatic uploads, retries, URL shortcuts, and clipboard hand-off.
+- TMDB-driven metadata resolution with GuessIt/Anitopy labelling to keep comparisons organised.
+- Rich CLI layout featuring progress dashboards, Unicode fallbacks, batch auto-grouping, and optional JSON tails for automation.
+- CLI override for audio stream selection (`--audio-align-track`) when auto-detection needs guidance.
+- Configurable RAM guardrails and VapourSynth path injection for multi-host deployments.
+- Optional clipboard support (`pyperclip`) to copy slow.pics links after uploads.
 
 ## Quickstart
 
 Requirements:
 
-- Python 3.13+
-- [`uv`](https://docs.astral.sh/uv/)
-- FFmpeg available on your `PATH`
-- VapourSynth ≥72 if you plan to use the primary renderer (install manually; see below)
+- Python 3.13.x
+- [uv](https://docs.astral.sh/uv/)
+- [FFmpeg](https://ffmpeg.org/) and `ffprobe` on your `PATH`
+- VapourSynth ≥72 (optional, enables the primary renderer)
+- Optional audio-alignment stack: `numpy`, `librosa`, `soundfile`
 
-Repository fixtures live under `comparison_videos/` beside
-`frame_compare.py`; they provide tiny MKV stubs suitable for smoke
-tests. By default the workspace root resolves to the repo checkout, so
-the tool scans `ROOT/comparison_videos`; copy the fixtures there (or
-set `[paths].input_dir` to another subdirectory under your chosen
-`ROOT`) before running comparisons.
+1. Install dependencies and ensure the workspace config exists:
 
-### Path diagnostics (Phase 1 guardrail)
+   ```bash
+   uv sync
+   uv run python -m frame_compare --write-config
+   ```
 
-Run the temporary diagnostics flag to inspect the paths Frame Compare will touch before heavy work starts:
+2. Create a minimal comparison set and run the pipeline:
 
-```bash
-python -m frame_compare --diagnose-paths
-frame-compare --diagnose-paths
-FRAME_COMPARE_ROOT=. frame-compare --diagnose-paths
-frame-compare --root . --diagnose-paths
-```
+   ```bash
+   mkdir -p comparison_videos/quickstart
+   ffmpeg -y -f lavfi -i color=c=black:s=640x360:d=2 -vf "drawtext=text=SourceA:fontsize=48:x=20:y=20" comparison_videos/quickstart/clip-a.mp4
+   ffmpeg -y -f lavfi -i color=c=blue:s=640x360:d=2 -vf "drawtext=text=SourceB:fontsize=48:x=20:y=20" comparison_videos/quickstart/clip-b.mp4
 
-The command prints a single JSON line listing the resolved config, input root, screenshot directory, and basic writability flags so you can spot site-packages or read-only locations early.
+   uv run python -m frame_compare --root . --input comparison_videos/quickstart
+   ```
 
-Need to seed a workspace config? Run `frame-compare --root <path> --write-config` (or the equivalent `python -m frame_compare --root <path> --write-config`) to ensure `ROOT/config/config.toml` is created in advance.
+One-line usage after setup:
 
 ```bash
-uv sync
-# install the VapourSynth runtime manually (see the steps below)
-uv pip install vapoursynth  # or `uv add vapoursynth` to persist it to your project
-uv run python frame_compare.py
+uv run python -m frame_compare --root .
 ```
 
-The CLI ships with a configuration template stored at `src/data/config.toml.template` (packaged as `data/config.toml.template`). Frame Compare resolves that template by first honouring `$FRAME_COMPARE_TEMPLATE_PATH` (useful when you store templates outside the repository), then falling back to the packaged copy or the on-disk file. When you want to edit the defaults, copy the template to a writable location—`python -c "from src.config_template import copy_default_config; copy_default_config('config/config.toml')"` is a quick way—and point the CLI at it with `--config`/`--root` or the matching environment variables.
+Expected outputs: PNGs under `comparison_videos/quickstart/screens`, cached metrics in `generated.compframes`, optional offsets in `generated.audio_offsets.toml`, and a slow.pics shortcut when uploads succeed.
 
-Install VapourSynth manually after `uv sync` so the renderer is available:
+> **Tip:** Run `uv run python -m frame_compare --diagnose-paths` to confirm workspace, config, and screenshot directories before heavy runs.
 
-1. Follow the [official VapourSynth installation guide](https://www.vapoursynth.com/doc/installation.html) for your OS to install the core runtime (`vspipe`, libraries, and plugins). Package managers such as Homebrew, AUR, or `apt` provide maintained builds, and Windows users should run the official installer.
-2. Ensure the VapourSynth Python module directory is on `VAPOURSYNTH_PYTHONPATH` (Linux/macOS) or registered via the installer (Windows) so it can be discovered by Python.
-3. Activate your `uv` environment and install the Python bindings with `uv pip install vapoursynth`. Run `uv add vapoursynth` instead if you want the dependency recorded in `pyproject.toml` for future syncs.
+## Installation
 
-Fallback when `uv` is unavailable:
+| Method | When to use | Commands |
+| ------ | ----------- | -------- |
+| `uv` (recommended) | Isolated, reproducible environments | `uv sync`<br>`uv pip install vapoursynth` *(optional, for VS renderer)* |
+| `pip` | System or virtualenv workflows | `python3.13 -m venv .venv`<br>`source .venv/bin/activate`<br>`pip install -U pip wheel`<br>`pip install -e .` |
+
+Optional extras:
+
+| Feature | Extras |
+| ------- | ------ |
+| VapourSynth renderer | `uv pip install vapoursynth` |
+| VSPreview manual alignment | `uv pip install vspreview PySide6` *(or add the `preview` dependency group)* |
+| slow.pics clipboard shortcut | `uv pip install pyperclip` |
+
+> **Note:** Follow the [official VapourSynth installation guide](https://www.vapoursynth.com/doc/installation.html) for OS-specific runtime packages. Ensure the Python bindings are importable (e.g., set `VAPOURSYNTH_PYTHONPATH` on Linux/macOS).
+
+## Usage
+
+Frame Compare operates within a **workspace root** that controls config, media, and outputs. Root detection order:
+
+1. `--root` flag
+2. `$FRAME_COMPARE_ROOT`
+3. Nearest ancestor containing `pyproject.toml`, `.git`, or `comparison_videos`
+4. Current working directory
+
+Within the root, each comparison lives under `comparison_videos/<set>/` with at least two supported video files.
+
+Common commands:
 
 ```bash
-python3.13 -m venv .venv
-source .venv/bin/activate
-pip install -U pip wheel
-pip install -e .
-python frame_compare.py
+# Seed config without running the pipeline
+uv run python -m frame_compare --root /path/to/workspace --write-config
+
+# Run the default pipeline (tonemapping, VapourSynth if available)
+uv run python -m frame_compare --root /path/to/workspace
+
+# Inspect resolved paths and writability
+uv run python -m frame_compare --root /path/to/workspace --diagnose-paths
+
+# Force FFmpeg screenshots for environments without VapourSynth
+uv run python -m frame_compare --root /path --config config/config.toml --json-pretty --no-color
 ```
 
-## Minimal example
+Outputs are written beneath the input directory: screenshots under `screens` (configurable), cached metrics alongside video inputs, slow.pics shortcuts in the same directory, and a JSON summary on stdout.
 
-```bash
-uv sync
-uv pip install vapoursynth  # or `uv add vapoursynth`
-uv run python frame_compare.py
-```
+> **Warning:** The default `[slowpics].delete_screen_dir_after_upload = true` removes the screenshots directory after successful uploads. Keep `screenshots.directory_name` relative to the input root and avoid reusing directories shared with other projects.
 
-Expected outputs: PNGs under `screens/…`, cached metrics in
-`generated.compframes`, optional offsets in
-`generated.audio_offsets.toml`, and (when uploads are enabled) a
-slow.pics shortcut file.
+## Configuration
 
-Screenshot renders are written beneath the resolved input directory (for example `ROOT/comparison_videos/screens`). Make sure that directory exists and is writable before running the CLI—if you installed the project somewhere read-only, set `--root`/`FRAME_COMPARE_ROOT` to a directory you control so Frame Compare can create the subdirectories it needs.
+Frame Compare seeds `config/config.toml` from `src/data/config.toml.template`. Override the path with `--config` or `$FRAME_COMPARE_CONFIG`. Legacy `ROOT/config.toml` is still read but emits a migration warning.
 
-## Configuration essentials
+Configuration highlights:
 
-Frame Compare looks for its configuration at ``ROOT/config/config.toml``, where
-``ROOT`` is resolved via ``--root``/``$FRAME_COMPARE_ROOT`` or, by default, the
-nearest ancestor containing ``pyproject.toml``, ``.git``, or
-``comparison_videos``. Override the location with ``$FRAME_COMPARE_CONFIG`` or
-``--config`` when you need an explicit path. If the file is missing, the CLI
-seeds it atomically from ``data/config.toml.template`` inside the root (refusing
-to write inside site-packages). Legacy installs with ``ROOT/config.toml`` still
-load but emit a migration warning so you can relocate the file. To customise the
-settings manually, edit the seeded file or copy the template to another
-subdirectory with ``python -c 'from src.config_template import copy_default_config; copy_default_config("my-root/config/config.toml")'`` and point ``--root`` at
-``my-root``.
+- `[paths].input_dir` controls the media subdirectory (default `comparison_videos`).
+- `[analysis]` governs frame quotas, random seed, and metric cache filename.
+- `[screenshots]` selects renderer, geometry policy, dithering, and output directory name.
+- `[color]` sets tonemap preset (`reference`, `contrast`, `filmic`), verification options, overlay text, and strictness.
+- `[audio_alignment]` enables correlation, VSPreview hooks, offsets filename, and bias.
+- `[slowpics]` toggles auto uploads (disabled by default), visibility, cleanup, webhook URL, and timeout.
+- `[runtime]` sets VapourSynth memory guards and module search paths.
+- `[overrides]` applies per-source trims and FPS adjustments.
 
-The most common toggles are below; see the
-[full reference](docs/README_REFERENCE.md) for every option.
+Environment variables:
 
-<!-- markdownlint-disable MD013 -->
-| Key | What it controls | Default | Example |
+| Name | Purpose |
+| ---- | ------- |
+| `FRAME_COMPARE_ROOT` | Workspace root override |
+| `FRAME_COMPARE_CONFIG` | Explicit config file path |
+| `FRAME_COMPARE_TEMPLATE_PATH` | Custom config template location |
+| `VAPOURSYNTH_PYTHONPATH` | Additional module path when VapourSynth bindings live outside the environment |
+
+Common toggles (see [docs/README_REFERENCE.md](docs/README_REFERENCE.md) for full coverage):
+
+| Key | Controls | Default | Example |
 | --- | --- | --- | --- |
-| `[paths].input_dir` | Base scan directory under the workspace root. | `"comparison_videos"` | `input_dir="comparison_videos"` |
+| `[paths].input_dir` | Base scan directory under the workspace root. | `"comparison_videos"` | `input_dir="projects/comparisons"` |
 | `--input PATH` | One-off scan override. | `None` | `--input /data/releases` |
-| `[analysis].frame_count_dark / frame_count_bright` | Scene quotas for shadows and highlights. | `20 / 10` | `frame_count_dark=12` |
-| `[analysis].frame_count_motion` | Motion-heavy frame quota. | `10` | `frame_count_motion=24` |
-| `[analysis].random_frames / random_seed` | Deterministic random picks. | `10 / 20202020` | `random_frames=8` |
+| `[analysis].frame_count_dark / frame_count_bright` | Scene quotas for shadows/highlights. | `20 / 10` | `frame_count_dark=12` |
+| `[analysis].frame_count_motion` | Motion-heavy frame quota. | `15` | `frame_count_motion=24` |
+| `[analysis].random_frames / random_seed` | Deterministic random picks. | `15 / 20202020` | `random_frames=8` |
 | `[analysis].user_frames` | Always-rendered frame IDs. | `[]` | `user_frames=[10,200,501]` |
-| `[audio_alignment].enable (+confirm_with_screenshots)` | Audio-guided offsets and optional preview pause. | `false (true)` | `enable=true` |
-| `[screenshots].use_ffmpeg` | Use FFmpeg renderer. | `false` | `use_ffmpeg=true` |
-| `[slowpics].auto_upload` | Push to slow.pics. | `true` | `auto_upload=false` |
-| `[runtime].ram_limit_mb` | VapourSynth RAM guard. | `4000` | `ram_limit_mb=4096` |
-<!-- markdownlint-restore -->
+| `[audio_alignment].enable` (+`confirm_with_screenshots`) | Audio-guided offsets and preview pause. | `false` (`true`) | `enable=true` |
+| `[screenshots].use_ffmpeg` | Prefer FFmpeg renderer. | `false` | `use_ffmpeg=true` |
+| `[slowpics].auto_upload` | Upload results to slow.pics. | `false` | `auto_upload=true` |
+| `[runtime].ram_limit_mb` | VapourSynth RAM guard. | `4000` | `ram_limit_mb=3072` |
 
-## Features
+> **Tip:** Copy the template elsewhere with `python -c "from src.config_template import copy_default_config; copy_default_config('alt-root/config/config.toml')"` when you need multiple workspaces.
 
-- Deterministic frame selection blending luminance quantiles, motion
-  scoring, pinned frames, and seeded randomness.
-- Cached metrics (`generated.compframes` plus selection sidecars) for
-  fast reruns across large batches.
-- Audio alignment with correlation, dynamic time warping refinements,
-  and optional interactive confirmation frames.
-- VapourSynth-first pipeline with FFmpeg fallback, HDR→SDR tonemapping,
-  and placeholder recovery when writers fail.
-- slow.pics integration with automatic uploads, retries, URL shortcuts,
-  and clipboard hand-off.
-- TMDB-driven metadata resolution with GuessIt/Anitopy labelling to keep
-  comparisons organised.
-- Rich CLI layout featuring progress dashboards, Unicode fallbacks,
-  batch auto-grouping, and optional JSON tails for automation.
-- CLI override for audio stream selection (`--audio-align-track`) when
-  auto-detection needs guidance.
-- Configurable RAM guardrails and VapourSynth path injection for
-  multi-host deployments.
-- Optional clipboard support (`pyperclip`) to copy slow.pics links after
-  uploads.
+## CLI Reference
 
-## Performance & troubleshooting
+| Flag | Description |
+| ---- | ----------- |
+| `--root PATH` | Override workspace root discovery |
+| `--config PATH` | Use a specific config file (falls back to `FRAME_COMPARE_CONFIG`) |
+| `--input PATH` | Override `[paths].input_dir` for a single run |
+| `--audio-align-track label=index` | Force the audio stream used per clip (repeatable) |
+| `--write-config` | Ensure `ROOT/config/config.toml` exists, then exit |
+| `--diagnose-paths` | Print JSON diagnostics (root, media, screens, writability) |
+| `--quiet` / `--verbose` | Adjust console verbosity |
+| `--no-color` | Disable ANSI colour output |
+| `--json-pretty` | Pretty-print the JSON tail |
+| `--help` | Display Click help |
 
-- **FFmpeg or VapourSynth not found:** ensure binaries are on `PATH`, set
-  `VAPOURSYNTH_PYTHONPATH`, or populate
-  `[runtime].vapoursynth_python_paths`. The CLI falls back to FFmpeg
-  captures when `use_ffmpeg=true`.
-- **High RAM usage:** lower `[runtime].ram_limit_mb` or
-  `[analysis].downscale_height`; VapourSynth reloads clips automatically
-  if limits are hit.
-- **HDR renders look dim:** disable `[color].enable_tonemap` for SDR
-  sources or switch `[color].preset` to `filmic` for brighter curves.
-- **slow.pics upload fails:** keep `[slowpics].auto_upload=true`, ensure
-  network access, and inspect the slow.pics response in the JSON tail if
-  retries exhaust.
-- **Placeholder PNGs appear:** review console warnings for the failed
-  renderer, then retry with `use_ffmpeg=true` or install the missing
-  VapourSynth plugin/codec.
+Exit codes:
 
-## Compatibility & support
+- `0` — success
+- `2` — configuration or preflight error (invalid root, missing dependencies)
+- `3` — runtime failure (rendering, uploads, analysis)
+- `>3` — reserved for module-specific errors (`AudioAlignmentError`, `SlowpicsAPIError`, etc.)
 
-- Runs on macOS, Linux, and Windows (64-bit Python 3.13+) with FFmpeg
-  available; VapourSynth support requires matching architecture builds.
-- File issues or feature requests via the GitHub issue tracker. For
-  security concerns, open a private GitHub security advisory so details
-  stay confidential until patched.
+## Examples
+
+### VSPreview manual alignment assistant
+
+1. Enable VSPreview support:
+
+   ```toml
+   [audio_alignment]
+   enable = true
+   use_vspreview = true
+   confirm_with_screenshots = false  # let VSPreview handle the pause
+   ```
+
+2. Install the extras once per environment:
+
+   ```bash
+   uv pip install vspreview PySide6
+   ```
+
+3. Run the CLI interactively:
+
+   ```bash
+   uv run python -m frame_compare --root /workspace
+   ```
+
+The CLI launches VSPreview, summarises existing manual trims using friendly labels, and writes accepted offsets to `generated.audio_offsets.toml`. Headless sessions skip the launch but print the generated script path for manual review.
+
+> **Note:** On legacy Windows consoles (`cp1252`), VSPreview helper logs use ASCII arrows (`->`, `<->`) to avoid encoding issues. Switch to UTF-8 with `chcp 65001` or run inside Windows Terminal for full Unicode output.
+
+### Path diagnostics before heavy runs
+
+```bash
+uv run python -m frame_compare --root /workspace --diagnose-paths
+```
+
+This prints a single JSON object showing root, media, screenshot directories, whether they exist, and writability flags so you can catch site-packages or read-only locations early.
+
+### FFmpeg-only captures
+
+When VapourSynth is unavailable:
+
+```toml
+[screenshots]
+use_ffmpeg = true
+ffmpeg_timeout_seconds = 0  # disable per-frame timeout if desired
+```
+
+```bash
+uv run python -m frame_compare --root /workspace --quiet
+```
+
+The renderer promotes subsampled SDR clips to YUV444P16 before cropping/padding, preventing mod-2 geometry failures.
+
+## Troubleshooting
+
+- **FFmpeg or VapourSynth not found:** ensure binaries are on `PATH`, set `VAPOURSYNTH_PYTHONPATH`, or install the Python bindings. The CLI falls back to FFmpeg when `[screenshots].use_ffmpeg = true`.
+- **Workspace root is not writable:** choose another root via `--root` or `FRAME_COMPARE_ROOT`. Frame Compare refuses to run inside `site-packages`/`dist-packages`.
+- **HDR renders look dim:** switch `[color].preset = "filmic"` or disable `[color].enable_tonemap` for SDR sources.
+- **slow.pics upload fails:** if uploads are enabled (`[slowpics].auto_upload = true`), ensure network access and inspect the JSON tail for per-frame status. Adjust `[slowpics].image_upload_timeout_seconds` for slow links.
+- **Placeholder PNGs appear:** review console warnings for renderer errors, then retry with FFmpeg or install missing VapourSynth plugins/codecs.
+- **Audio alignment dependency errors:** install `numpy`, `librosa`, `soundfile`. Failures raise `AudioAlignmentError` with the missing import.
+- **VSPreview fails to launch:** ensure PySide6 (or PyQt5) is installed and run from an interactive terminal. Non-interactive shells bypass the GUI launch by design.
+
+## FAQ
+
+**How do I change the screenshot output folder?**  
+Set `[screenshots].directory_name` to a relative path. Containment checks block absolute paths outside the workspace unless the directory existed beforehand (cleanup is skipped in that case).
+
+**How do I opt into slow.pics uploads?**  
+Set `[slowpics].auto_upload = true` when you want automatic uploads; leave it `false` to keep runs local.
+
+**Where are cached metrics stored?**  
+`[analysis].frame_data_filename` (default `generated.compframes`) is written next to the comparison directory.
+
+**Which operating systems are supported?**  
+macOS, Linux, and Windows (64-bit Python 3.13+). VapourSynth support requires matching architecture builds. FFmpeg is mandatory across all platforms.
+
+**Is there a GUI?**  
+The pipeline is CLI-driven. VSPreview provides an optional GUI for manual alignment checks.
+
+## Performance
+
+- Metric caches let you reuse analysis results when inputs and settings match the stored `selection_hash`.
+- Tonemapping runs once per clip with verification frames selected via `[color].verify_*` settings.
+- Audio alignment extracts mono waveforms at configurable sample rates for faster correlation.
+- Use `[analysis].save_frames_data = false` when caches are unnecessary to reduce IO pressure.
+- Quiet runs (`--quiet`) cut console overhead for large batches while preserving JSON output.
+
+## Security
+
+- Workspace guardrails prevent writes inside `site-packages` and require writable roots before execution.
+- `_path_is_within_root` ensures screenshot cleanup and caches stay under the workspace root.
+- slow.pics uploads run over HTTPS and redact webhook hostnames in logs.
+- TMDB API keys live in config files you control; no secrets are written elsewhere.
+
+> **Warning:** Misconfiguring `[screenshots].directory_name` to point at shared directories may still delete pre-existing contents after upload, even with containment checks. Use dedicated directories per run.
+
+## Privacy & Telemetry
+
+Frame Compare sends no telemetry. Network calls occur only when:
+
+- `[slowpics].auto_upload = true` (uploads PNGs to `https://slow.pics/`, optional webhook POST)
+- `[tmdb].api_key` is provided (queries TMDB endpoints)
+
+Disable these features to run entirely offline—screenshots and caches remain local.
+
+## Versioning
+
+Current version: `0.0.1`. Until 1.0 the API may change without notice. See [CHANGELOG.md](CHANGELOG.md) for detailed history. Recent highlights:
+
+- 2025-10-21: Hardened VSPreview helper output on Windows consoles.
+- 2025-10-20: Added odd-geometry YUV444 pivots and refreshed tonemap documentation.
+- 2025-10-16: Locked workspace root discovery and enforced path containment.
 
 ## Contributing
 
-Dev env: `uv sync --group dev` · Lint: `uv run ruff` · Test: `uv run pytest -q`.
-Please follow conventional commits, add regression tests for behavioural
-changes, and keep docs aligned with new flags.
+1. Fork and clone the repository.
+2. Install development dependencies:
 
-## License & acknowledgements
+   ```bash
+   uv sync --group dev
+   ```
 
-Distributed under the [MIT License](LICENSE). Frame Compare builds on
-FFmpeg, VapourSynth, slow.pics, TMDB, GuessIt, Anitopy, and the wider
-Python ecosystem.
+3. Run quality checks:
 
-## Changelog
+   ```bash
+   uv run pytest -q
+   uv run pyright --warnings
+   uv run ruff check
+   ```
 
-See [CHANGELOG.md](CHANGELOG.md). README last updated 2025-10-11
-(America/New_York).
+4. Add regression tests for behavioural changes and document decisions in `docs/DECISIONS.md` plus user-visible updates in `CHANGELOG.md`.
+
+> **Tip:** Type hints are mandatory. Avoid introducing `Any`; guard `Optional[...]` values explicitly to satisfy Pyright.
+
+## License
+
+Distributed under the [MIT License](LICENSE). Frame Compare builds on FFmpeg, VapourSynth, slow.pics, TMDB, GuessIt, Anitopy, and the wider Python ecosystem.
+
+## Support
+
+- Runs on macOS, Linux, and Windows (64-bit). Ensure FFmpeg is on `PATH` and VapourSynth is installed when opting into the primary renderer.
+- Consult the in-repo guides for deeper dives: [docs/audio_alignment_pipeline.md](docs/audio_alignment_pipeline.md), [docs/geometry_pipeline.md](docs/geometry_pipeline.md), [docs/hdr_tonemap_overview.md](docs/hdr_tonemap_overview.md), [docs/context_summary.md](docs/context_summary.md).
+- File issues or feature requests via the GitHub issue tracker. For security concerns, open a private advisory so details remain confidential until patched.

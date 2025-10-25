@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import tomllib
 from dataclasses import fields, is_dataclass
+from enum import Enum
 from typing import Any, Dict
 
 from .datatypes import (
@@ -51,6 +52,22 @@ def _coerce_bool(value: Any, dotted_key: str) -> bool:
     raise ConfigError(f"{dotted_key} must be a boolean (use true/false).")
 
 
+def _coerce_enum(value: Any, dotted_key: str, enum_type: type[Enum]) -> Enum:
+    """Return an enum member, coercing string values case-insensitively."""
+
+    if isinstance(value, enum_type):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        for member in enum_type:
+            member_value = str(member.value).lower()
+            if normalized == member_value:
+                return member
+    raise ConfigError(
+        f"{dotted_key} must be one of: {', '.join(str(member.value) for member in enum_type)}"
+    )
+
+
 def _sanitize_section(raw: dict[str, Any], name: str, cls):
     """
     Coerce a raw TOML table into an instance of ``cls`` with cleaned booleans.
@@ -71,6 +88,11 @@ def _sanitize_section(raw: dict[str, Any], name: str, cls):
     cleaned: Dict[str, Any] = {}
     cls_fields = {field.name: field for field in fields(cls)}
     bool_fields = {name for name, field in cls_fields.items() if field.type is bool}
+    enum_fields = {
+        field_name: field.type
+        for field_name, field in cls_fields.items()
+        if isinstance(field.type, type) and issubclass(field.type, Enum)
+    }
     nested_fields = {
         name: field.type
         for name, field in cls_fields.items()
@@ -80,6 +102,8 @@ def _sanitize_section(raw: dict[str, Any], name: str, cls):
     for key, value in raw.items():
         if key in bool_fields:
             cleaned[key] = _coerce_bool(value, f"{name}.{key}")
+        elif key in enum_fields:
+            cleaned[key] = _coerce_enum(value, f"{name}.{key}", enum_fields[key])
         elif key in nested_fields:
             if not isinstance(value, dict):
                 raise ConfigError(f"[{name}.{key}] must be a table")
@@ -134,15 +158,38 @@ def _validate_change_fps(change_fps: Dict[str, Any]) -> None:
             raise ConfigError(f"change_fps entry '{key}' must be a list or \"set\"")
 
 
+def _validate_color_overrides(overrides: Dict[str, Any]) -> None:
+    """Validate per-clip colour override tables."""
+
+    if not isinstance(overrides, dict):
+        raise ConfigError("[color].color_overrides must be a table of clip overrides")
+
+    valid_keys = {"matrix", "transfer", "primaries", "range"}
+    for clip_name, table in overrides.items():
+        if not isinstance(table, dict):
+            raise ConfigError(
+                f"[color].color_overrides.{clip_name} must be a table of colour properties"
+            )
+        for key, value in table.items():
+            if key not in valid_keys:
+                raise ConfigError(
+                    "[color].color_overrides entries may only set matrix, transfer, primaries, or range"
+                )
+            if not isinstance(value, (str, int)):
+                raise ConfigError(
+                    f"[color].color_overrides.{clip_name}.{key} must be a string or integer"
+                )
+
+
 def load_config(path: str) -> AppConfig:
     """
     Load and validate an application configuration from a TOML file.
-    
+
     Reads the file at `path`, parses it as UTF-8 TOML (BOM is accepted), coerces and validates all top-level sections, normalizes a few fields (for example pad/overlay/source/category preferences), and returns a fully populated AppConfig ready for use by the application.
-    
+
     Returns:
         AppConfig: The validated and normalized application configuration.
-    
+
     Raises:
         ConfigError: If the file is not UTF-8, TOML parsing fails, required values are missing, or any validation rule is violated.
     """
@@ -200,6 +247,8 @@ def load_config(path: str) -> AppConfig:
         raise ConfigError("analysis.ignore_trail_seconds must be >= 0")
     if app.analysis.min_window_seconds < 0:
         raise ConfigError("analysis.min_window_seconds must be >= 0")
+
+    _validate_color_overrides(app.color.color_overrides)
 
     if app.screenshots.compression_level not in (0, 1, 2):
         raise ConfigError("screenshots.compression_level must be 0, 1, or 2")

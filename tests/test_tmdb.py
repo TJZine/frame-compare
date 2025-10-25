@@ -10,7 +10,6 @@ from src import tmdb as tmdb_module
 from src.tmdb import (
     MOVIE,
     TV,
-    TMDBCandidate,
     TMDBConfig,
     TMDBResolutionError,
     resolve_tmdb,

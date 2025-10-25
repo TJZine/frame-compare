@@ -1,9 +1,9 @@
 import json
 import types
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
-from collections.abc import Callable, Sequence
-from typing import Any, Dict, cast
+from typing import Any, cast
 
 import pytest
 
@@ -15,8 +15,8 @@ from src.analysis import (
     compute_selection_window,
     dedupe,
     probe_cached_metrics,
-    selection_details_to_json,
     select_frames,
+    selection_details_to_json,
     selection_hash_for_config,
     write_selection_cache_file,
 )
@@ -408,6 +408,9 @@ def test_select_frames_uses_cache(
         cfg: AnalysisConfig,
         indices: Sequence[int],
         progress: object = None,
+        *,
+        color_cfg: ColorConfig | None = None,
+        file_name: str | None = None,
     ) -> tuple[list[tuple[int, float]], list[tuple[int, float]]]:
         calls["count"] += 1
         results = [(idx, float(idx)) for idx in indices]
@@ -501,6 +504,9 @@ def test_motion_quarter_gap(monkeypatch: pytest.MonkeyPatch) -> None:
         cfg: AnalysisConfig,
         indices: Sequence[int],
         progress: object = None,
+        *,
+        color_cfg: ColorConfig | None = None,
+        file_name: str | None = None,
     ) -> tuple[list[tuple[int, float]], list[tuple[int, float]]]:
         brightness = [(idx, 0.0) for idx in indices]
         motion = [(idx, float(idx)) for idx in indices]

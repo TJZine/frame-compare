@@ -1,27 +1,33 @@
-from __future__ import annotations
-
 """CLI entry point and orchestration logic for frame comparison runs."""
+
+from __future__ import annotations
 
 import asyncio
 import builtins
+import datetime as _dt
+import importlib.util
 import json
 import logging
 import math
 import os
 import random
 import re
+import shlex
 import shutil
+import subprocess
 import sys
+import textwrap
 import time
 import traceback
+import uuid
 import webbrowser
 from collections import Counter, defaultdict
 from collections.abc import Mapping as MappingABC
-from dataclasses import dataclass, field
-import datetime as _dt
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from string import Template
 from typing import (
+    TYPE_CHECKING,
     Any,
     Callable,
     ContextManager,
@@ -39,6 +45,7 @@ from typing import (
 )
 
 import click
+from natsort import os_sorted
 from rich import print
 from rich.console import Console
 from rich.markup import escape
@@ -47,11 +54,11 @@ from rich.progress import (
     Progress,
     ProgressColumn,
     TextColumn,
-    TimeElapsedColumn,
     TimeRemainingColumn,
 )
-from natsort import os_sorted
+from rich.text import Text
 
+from src import audio_alignment
 from src.config_loader import ConfigError, load_config
 from src.config_template import copy_default_config
 from src.datatypes import (
@@ -69,14 +76,15 @@ from src.datatypes import (
     SourceConfig,
     TMDBConfig,
 )
-from src import audio_alignment
-from src.utils import parse_filename_metadata
+
+if TYPE_CHECKING:
+    from src.audio_alignment import AlignmentMeasurement, AudioStreamInfo
 from src import vs_core
 from src.analysis import (
+    CacheLoadResult,
     FrameMetricsCacheInfo,
     SelectionDetail,
     SelectionWindowSpec,
-    CacheLoadResult,
     compute_selection_window,
     export_selection_metadata,
     probe_cached_metrics,
@@ -85,7 +93,8 @@ from src.analysis import (
     selection_hash_for_config,
     write_selection_cache_file,
 )
-from src.screenshot import generate_screenshots, ScreenshotError
+from src.cli_layout import CliLayoutError, CliLayoutRenderer, load_cli_layout
+from src.screenshot import ScreenshotError, generate_screenshots
 from src.slowpics import SlowpicsAPIError, upload_comparison
 from src.tmdb import (
     TMDBAmbiguityError,
@@ -95,7 +104,7 @@ from src.tmdb import (
     parse_manual_id,
     resolve_tmdb,
 )
-from src.cli_layout import CliLayoutRenderer, CliLayoutError, load_cli_layout
+from src.utils import parse_filename_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +120,48 @@ _DEFAULT_CONFIG_HELP: Final[str] = (
     "Optional explicit path to config.toml. When omitted, Frame Compare looks for "
     "ROOT/config/config.toml (see --root/FRAME_COMPARE_ROOT)."
 )
+
+_VSPREVIEW_WINDOWS_INSTALL: Final[str] = (
+    "uv add frame-compare --extra preview  # fallback: uv add vspreview PySide6"
+)
+_VSPREVIEW_POSIX_INSTALL: Final[str] = (
+    "uv add frame-compare --extra preview  # fallback: uv add vspreview PySide6"
+)
+_VSPREVIEW_MANUAL_COMMAND_TEMPLATE: Final[str] = "{python} -m vspreview {script}"
+
+
+def _format_vspreview_manual_command(script_path: Path) -> str:
+    """Build a manual VSPreview command using the active Python interpreter."""
+
+    python_exe = sys.executable or "python"
+    script_arg = str(script_path)
+    if os.name == "nt":
+        if " " in python_exe and not python_exe.startswith('"'):
+            python_exe = f'"{python_exe}"'
+        if " " in script_arg and not script_arg.startswith('"'):
+            script_arg = f'"{script_arg}"'
+    else:
+        python_exe = shlex.quote(python_exe)
+        script_arg = shlex.quote(script_arg)
+    return _VSPREVIEW_MANUAL_COMMAND_TEMPLATE.format(
+        python=python_exe, script=script_arg
+    )
+
+
+def _coerce_config_flag(value: object) -> bool:
+    """Normalize booleans that may be provided as strings or numbers."""
+
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "yes", "1", "enabled", "on"}:
+            return True
+        if lowered in {"false", "no", "0", "disabled", "off"}:
+            return False
+    return bool(value)
 
 SUPPORTED_EXTS = (
     ".mkv",
@@ -231,6 +282,28 @@ class _ClipPlan:
     alignment_status: str = ""
 
 
+def _plan_label(plan: _ClipPlan) -> str:
+    """
+    Determine a user-facing label for a clip plan using metadata fallbacks.
+    """
+
+    metadata = plan.metadata
+    for key in ("label", "title", "anime_title", "file_name"):
+        value = metadata.get(key)
+        if value:
+            text = str(value).strip()
+            if text:
+                return text
+    return plan.path.name
+
+
+def _normalise_vspreview_mode(raw: object) -> str:
+    """Return a canonical VSPreview mode label (``baseline`` or ``seeded``)."""
+
+    text = str(raw or "baseline").strip().lower()
+    return "seeded" if text == "seeded" else "baseline"
+
+
 _OverrideValue = TypeVar("_OverrideValue")
 
 
@@ -265,6 +338,17 @@ class AudioAlignmentJSON(TypedDict, total=False):
     preview_paths: list[str]
     confirmed: bool | str | None
     offsets_filename: str
+    use_vspreview: bool
+    vspreview_manual_offsets: dict[str, object]
+    vspreview_manual_deltas: dict[str, object]
+    vspreview_reference_trim: Optional[int]
+    manual_trim_summary: list[str]
+    suggestion_mode: bool
+    suggested_frames: dict[str, int]
+    manual_trim_starts: dict[str, int]
+    vspreview_script: Optional[str]
+    vspreview_invoked: bool
+    vspreview_exit_code: Optional[int]
 
 
 class TrimClipEntry(TypedDict):
@@ -293,6 +377,10 @@ class JsonTail(TypedDict):
     slowpics: SlowpicsJSON
     warnings: list[str]
     workspace: dict[str, object]
+    vspreview_mode: Optional[str]
+    suggested_frames: int
+    suggested_seconds: float
+    vspreview_offer: Optional[dict[str, object]]
 
 
 class ClipRecord(TypedDict):
@@ -326,6 +414,17 @@ def _coerce_str_mapping(value: object) -> dict[str, object]:
     return {}
 
 
+def _ensure_audio_alignment_block(json_tail: JsonTail) -> AudioAlignmentJSON:
+    """Ensure the audio alignment block exists and return a mutable mapping."""
+
+    block = json_tail.get("audio_alignment")
+    if isinstance(block, dict):
+        return cast(AudioAlignmentJSON, block)
+    new_block = cast(AudioAlignmentJSON, {})
+    json_tail["audio_alignment"] = new_block
+    return new_block
+
+
 def _ensure_slowpics_block(json_tail: JsonTail, cfg: AppConfig) -> SlowpicsJSON:
     """Ensure that ``json_tail`` contains a slow.pics block and return it."""
 
@@ -356,7 +455,7 @@ def _ensure_slowpics_block(json_tail: JsonTail, cfg: AppConfig) -> SlowpicsJSON:
 class RunResult:
     """
     Outcome of a full frame comparison run including export artefacts.
-    
+
     Attributes:
         files (List[Path]): Input media files included in the run.
         frames (List[int]): Frame numbers selected for screenshot generation.
@@ -394,16 +493,26 @@ class _AudioAlignmentSummary:
         reference_plan (_ClipPlan): Clip plan of the alignment reference source.
         final_adjustments (Dict[str, int]): Post-alignment adjustments written back to config.
         swap_details (Dict[str, str]): Additional per-clip swap notes for CLI output.
+        suggested_frames (Dict[str, int]): Raw suggested frame offsets when VSPreview flow is enabled.
+        suggestion_mode (bool): True when trims were not auto-applied (VSPreview flow).
+        manual_trim_starts (Dict[str, int]): Existing manual trim starts applied before alignment.
+        vspreview_manual_offsets (Dict[str, int]): Persisted VSPreview manual offsets keyed by clip name.
+        vspreview_manual_deltas (Dict[str, int]): Applied VSPreview trim adjustments relative to the baselines keyed by clip name.
     """
     offsets_path: Path
     reference_name: str
-    measurements: Sequence[audio_alignment.AlignmentMeasurement]
+    measurements: Sequence["AlignmentMeasurement"]
     applied_frames: Dict[str, int]
     baseline_shift: int
     statuses: Dict[str, str]
     reference_plan: _ClipPlan
     final_adjustments: Dict[str, int]
     swap_details: Dict[str, str]
+    suggested_frames: Dict[str, int] = field(default_factory=dict)
+    suggestion_mode: bool = False
+    manual_trim_starts: Dict[str, int] = field(default_factory=dict)
+    vspreview_manual_offsets: Dict[str, int] = field(default_factory=dict)
+    vspreview_manual_deltas: Dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -430,6 +539,7 @@ class _AudioAlignmentDisplayData:
     confirmation: Optional[str] = None
     correlations: Dict[str, float] = field(default_factory=dict)
     threshold: float = 0.0
+    manual_trim_lines: List[str] = field(default_factory=list)
 
 
 class CliOutputManager:
@@ -446,16 +556,16 @@ class CliOutputManager:
     ) -> None:
         """
         Initialize the CLI output manager with rendering, console, and state.
-        
+
         Parameters:
-        	quiet (bool): Suppress non-essential output.
-        	verbose (bool): Enable verbose output unless `quiet` is true.
-        	no_color (bool): Disable colored output in the console.
-        	layout_path (Path): Filesystem path to the CLI layout definition to load.
-        	console (Console | None): Optional Rich Console to use; a console is created if omitted.
-        
+            quiet (bool): Suppress non-essential output.
+            verbose (bool): Enable verbose output unless `quiet` is true.
+            no_color (bool): Disable colored output in the console.
+            layout_path (Path): Filesystem path to the CLI layout definition to load.
+            console (Console | None): Optional Rich Console to use; a console is created if omitted.
+
         Raises:
-        	CLIAppError: If the layout at `layout_path` cannot be loaded.
+            CLIAppError: If the layout at `layout_path` cannot be loaded.
         """
         self.quiet = quiet
         self.verbose = verbose and not quiet
@@ -1411,10 +1521,10 @@ def _build_plans(files: Sequence[Path], metadata: Sequence[Dict[str, str]], cfg:
 def _extract_clip_fps(clip: object) -> Tuple[int, int]:
     """
     Determine the clip's FPS as a (numerator, denominator) tuple, falling back to 24000/1001 if not available.
-    
+
     Parameters:
         clip (object): An object that may expose integer attributes `fps_num` and `fps_den`.
-    
+
     Returns:
         fps (Tuple[int, int]): The `(num, den)` FPS tuple from the clip if both are integers and `den` is non-zero; otherwise `(24000, 1001)`.
     """
@@ -1428,12 +1538,12 @@ def _extract_clip_fps(clip: object) -> Tuple[int, int]:
 def _format_seconds(value: float) -> str:
     """
     Format a time value in seconds as an HH:MM:SS.s string with one decimal place.
-    
+
     Negative input is treated as zero. The seconds component is rounded to one decimal place and may carry into minutes (and similarly minutes into hours) when rounding produces overflow.
-    
+
     Parameters:
         value (float): Time in seconds.
-    
+
     Returns:
         str: Formatted time as "HH:MM:SS.s" with two-digit hours and minutes and one decimal place for seconds.
     """
@@ -1454,10 +1564,10 @@ def _format_seconds(value: float) -> str:
 def _fps_to_float(value: Tuple[int, int] | None) -> float:
     """
     Convert an FPS expressed as a (numerator, denominator) tuple into a floating-point frames-per-second value.
-    
+
     Parameters:
         value ((int, int) | None): A two-integer tuple representing FPS as (numerator, denominator). May be None.
-    
+
     Returns:
         float: The FPS as a float. Returns 0.0 if `value` is None, the denominator is zero, or the tuple is invalid.
     """
@@ -1479,14 +1589,14 @@ def _fold_sequence(
 ) -> str:
     """
     Produce a compact string representation of a sequence by optionally folding the middle elements with an ellipsis.
-    
+
     Parameters:
         values (Sequence[object]): Items to render; each item is stringified.
         head (int): Number of items to keep from the start when folding is enabled.
         tail (int): Number of items to keep from the end when folding is enabled.
         joiner (str): Separator used to join items.
         enabled (bool): If True and the sequence is longer than head + tail, replace the omitted middle with "…".
-    
+
     Returns:
         str: The joined string containing all items when folding is disabled or not needed, or a string containing the head items, a single "…" token, and the tail items when folding is applied.
     """
@@ -1505,15 +1615,15 @@ def _fold_sequence(
 def _evaluate_rule_condition(condition: Optional[str], *, flags: Mapping[str, Any]) -> bool:
     """
     Evaluate a simple rule condition string against a mapping of flags.
-    
+
     The condition may be None/empty (treated as satisfied), a flag name (satisfied if the flag is truthy), or a negated flag name prefixed with `!`. Known tokens `verbose` and `upload_enabled` are supported like any other flag name.
-    
+
     Parameters:
-    	condition (Optional[str]): The rule expression to evaluate (e.g. "verbose", "!upload_enabled") or None/empty to always satisfy.
-    	flags (Mapping[str, Any]): Mapping of flag names to values; values are interpreted by their truthiness.
-    
+        condition (Optional[str]): The rule expression to evaluate (e.g. "verbose", "!upload_enabled") or None/empty to always satisfy.
+        flags (Mapping[str, Any]): Mapping of flag names to values; values are interpreted by their truthiness.
+
     Returns:
-    	True if the condition is satisfied given `flags`, False otherwise.
+        True if the condition is satisfied given `flags`, False otherwise.
     """
     if not condition:
         return True
@@ -1534,13 +1644,13 @@ def _evaluate_rule_condition(condition: Optional[str], *, flags: Mapping[str, An
 def _build_legacy_summary_lines(values: Mapping[str, Any], *, emit_json_tail: bool) -> List[str]:
     """
     Generate legacy human-readable summary lines from the collected layout values.
-    
+
     Parameters:
         values (Mapping[str, Any]): Mapping containing layout sections (for example:
             "clips", "window", "analysis", "audio_alignment", "render",
             "tonemap", "cache"). The function reads specific keys from those
             sections to synthesize compact summary lines.
-    
+
     Returns:
         List[str]: A list of non-empty summary lines suitable for the legacy
         textual summary display.
@@ -1549,12 +1659,12 @@ def _build_legacy_summary_lines(values: Mapping[str, Any], *, emit_json_tail: bo
     def _maybe_number(value: Any) -> float | None:
         """
         Convert a value to a float when possible.
-        
+
         Attempts to coerce numeric-like input to a float. Returns None when the value cannot be converted.
-        
+
         Parameters:
             value (Any): The value to convert to float.
-        
+
         Returns:
             float | None: The converted float, or `None` if conversion failed.
         """
@@ -1568,12 +1678,12 @@ def _build_legacy_summary_lines(values: Mapping[str, Any], *, emit_json_tail: bo
     def _format_number(value: Any, fmt: str, fallback: str) -> str:
         """
         Attempt to coerce `value` to a number and format it using `fmt`; return `fallback` if `value` cannot be interpreted as a number.
-        
+
         Parameters:
             value (Any): The value to format; will be converted to a numeric type if possible.
             fmt (str): A format specification string passed to Python's built-in `format()` (e.g., ".2f").
             fallback (str): The string to return when `value` cannot be converted to a number.
-        
+
         Returns:
             str: The formatted number as a string, or `fallback` if `value` is not numeric.
         """
@@ -1585,11 +1695,11 @@ def _build_legacy_summary_lines(values: Mapping[str, Any], *, emit_json_tail: bo
     def _string(value: Any, fallback: str = "n/a") -> str:
         """
         Convert a value to its string representation with special handling for None and booleans.
-        
+
         Parameters:
             value (Any): The value to convert.
             fallback (str): String to return when `value` is None (default: "n/a").
-        
+
         Returns:
             str: `fallback` if `value` is None, `"true"` or `"false"` for booleans, otherwise `str(value)`.
         """
@@ -1602,7 +1712,7 @@ def _build_legacy_summary_lines(values: Mapping[str, Any], *, emit_json_tail: bo
     def _bool_text(value: Any) -> str:
         """
         Format a value as lowercase boolean text.
-        
+
         Returns:
             `'true'` if the value evaluates to True, `'false'` otherwise.
         """
@@ -1683,12 +1793,12 @@ def _build_legacy_summary_lines(values: Mapping[str, Any], *, emit_json_tail: bo
 def _format_clock(seconds: Optional[float]) -> str:
     """
     Format a duration in seconds as a human-readable clock string.
-    
+
     If `seconds` is None or not a finite number, returns a placeholder. Values are rounded to the nearest second, negative values are treated as zero, and durations of one hour or more are formatted as H:MM:SS; shorter durations are formatted as MM:SS.
-    
+
     Parameters:
         seconds (Optional[float]): Duration in seconds to format.
-    
+
     Returns:
         str: A clock-formatted string, either "--:--" for invalid input, "MM:SS" for durations under one hour, or "H:MM:SS" for durations of one hour or more.
     """
@@ -1707,12 +1817,12 @@ def _init_clips(
 ) -> None:
     """
     Initialize VapourSynth clips for each clip plan and populate each plan's source and effective metadata.
-    
+
     Parameters:
         plans (Sequence[_ClipPlan]): Iterable of clip plans to initialize; plans marked as the reference will be initialized first and used to supply a fallback FPS for others.
         runtime_cfg: Runtime configuration object providing at least `ram_limit_mb`.
         cache_dir (Path | None): Optional cache directory to pass to clip initialization; if None, no cache directory is used.
-    
+
     Detailed behavior:
         - Sets the VapourSynth RAM limit from `runtime_cfg`.
         - Initializes the reference clip first (if any), then initializes the remaining clips.
@@ -1767,13 +1877,13 @@ def _init_clips(
 def _build_cache_info(root: Path, plans: Sequence[_ClipPlan], cfg: AppConfig, analyze_index: int) -> Optional[FrameMetricsCacheInfo]:
     """
     Build cache metadata describing frame-metrics that can be saved for reuse.
-    
+
     Parameters:
         root (Path): Root output directory where the cache file will be stored.
         plans (Sequence[_ClipPlan]): List of clip plans for the current run.
         cfg (AppConfig): Application configuration containing analysis and caching settings.
         analyze_index (int): Index in `plans` identifying which clip was analyzed.
-    
+
     Returns:
         FrameMetricsCacheInfo or None: A FrameMetricsCacheInfo populated with the resolved cache path,
         filenames, analyzed file name, release group, trim window, and FPS numerator/denominator when
@@ -1868,7 +1978,7 @@ def _log_selection_windows(
 ) -> None:
     """
     Log per-clip selection windows and the computed common selection window, emitting per-plan warnings and a collapse notice when applicable.
-    
+
     Parameters:
         plans (Sequence[_ClipPlan]): Clip plans corresponding to each selection spec; used for labels and context.
         specs (Sequence[SelectionWindowSpec]): Per-clip selection window specifications (start/end in frames and seconds, applied lead/trail, and warnings).
@@ -1913,17 +2023,17 @@ def _resolve_alignment_reference(
 ) -> _ClipPlan:
     """
     Selects which clip plan should be used as the audio alignment reference.
-    
+
     If a non-empty reference_hint is provided, it will be interpreted as either a numeric index or a case-insensitive match against a clip's filename, stem, or metadata label; a matching plan is returned. If no hint yields a match, the plan whose path equals analyze_path is returned. If that also does not match, the first plan in the sequence is returned.
-    
+
     Parameters:
         plans (Sequence[_ClipPlan]): Available clip plans to choose from.
         analyze_path (Path): Path of the file selected for analysis; used as a fallback match.
         reference_hint (str): Optional hint guiding reference selection (index or name/label).
-    
+
     Returns:
         _ClipPlan: The selected clip plan to use as the alignment reference.
-    
+
     Raises:
         CLIAppError: If `plans` is empty.
     """
@@ -1962,9 +2072,9 @@ def _maybe_apply_audio_alignment(
 ) -> tuple[_AudioAlignmentSummary | None, _AudioAlignmentDisplayData | None]:
     """
     Attempt audio-aligning the given clip plans and produce both a summary of applied adjustments and UI-ready display data.
-    
+
     This inspects available audio streams, selects reference and target streams (respecting `audio_track_overrides`), measures offsets between the reference and each target, applies configured frame-bias and swap logic, updates the on-disk offsets file, and mutates each plan's trim/alignment fields when adjustments are applied.
-    
+
     Parameters:
         plans (Sequence[_ClipPlan]): Clip plans to consider for alignment; must contain at least the reference and one target.
         cfg (AppConfig): Application configuration containing audio alignment settings.
@@ -1972,16 +2082,17 @@ def _maybe_apply_audio_alignment(
         root (Path): Root directory where the offsets file (configured in `cfg`) is located.
         audio_track_overrides (Mapping[str, int]): Mapping of clip identifiers (index, filename, or metadata keys) to forced audio stream indices.
         reporter (CliOutputManager | None): Optional reporter used to display progress; if None, progress is shown using a local Progress instance.
-    
+
     Returns:
         tuple[_AudioAlignmentSummary | None, _AudioAlignmentDisplayData]:
             A tuple where the first element is an _AudioAlignmentSummary when alignment was performed (or `None` if alignment was skipped),
             and the second element is an _AudioAlignmentDisplayData containing human-readable lines, JSON-ready offsets, correlations, warnings, and related display fields.
-    
+
     Raises:
         CLIAppError: If the offsets file cannot be read or if the underlying audio alignment process fails.
     """
     audio_cfg = cfg.audio_alignment
+    prompt_reuse_offsets = _coerce_config_flag(audio_cfg.prompt_reuse_offsets)
     offsets_path = _resolve_workspace_subdir(
         root,
         audio_cfg.offsets_filename,
@@ -2004,31 +2115,445 @@ def _maybe_apply_audio_alignment(
     def _warn(message: str) -> None:
         """
         Record an audio-related warning into the current display data warnings list.
-        
+
         Parameters:
             message (str): The warning text; it will be prefixed with "[AUDIO]" and appended to display_data.warnings.
         """
         display_data.warnings.append(f"[AUDIO] {message}")
 
+    vspreview_enabled = _coerce_config_flag(audio_cfg.use_vspreview)
+
+    reference_plan: _ClipPlan | None = None
+    if plans:
+        reference_plan = _resolve_alignment_reference(plans, analyze_path, audio_cfg.reference)
+
+    plan_labels: Dict[Path, str] = {plan.path: _plan_label(plan) for plan in plans}
+    name_to_label: Dict[str, str] = {plan.path.name: plan_labels[plan.path] for plan in plans}
+
+    existing_entries_cache: tuple[
+        str | None, Dict[str, Dict[str, object]]
+    ] | None = None
+
+    def _load_existing_entries() -> tuple[str | None, Dict[str, Dict[str, object]]]:
+        nonlocal existing_entries_cache
+        if existing_entries_cache is None:
+            try:
+                reference_name, existing_entries_raw = audio_alignment.load_offsets(
+                    offsets_path
+                )
+            except audio_alignment.AudioAlignmentError as exc:
+                raise CLIAppError(
+                    f"Failed to read audio offsets file: {exc}",
+                    rich_message=f"[red]Failed to read audio offsets file:[/red] {exc}",
+                ) from exc
+            existing_entries_cache = (
+                reference_name,
+                cast(Dict[str, Dict[str, object]], existing_entries_raw),
+            )
+        return existing_entries_cache
+
+    def _reuse_vspreview_manual_offsets_if_available(
+        reference: _ClipPlan | None,
+    ) -> _AudioAlignmentSummary | None:
+        if not (vspreview_enabled and reference and plans):
+            return None
+
+        try:
+            _, existing_entries = _load_existing_entries()
+        except CLIAppError:
+            if not audio_cfg.enable:
+                return None
+            raise
+
+        vspreview_reuse: Dict[str, int] = {}
+        allowed_keys = {plan.path.name for plan in plans}
+        for key, value in existing_entries.items():
+            if not isinstance(value, dict):
+                continue
+            status_obj = value.get("status")
+            note_obj = value.get("note")
+            frames_obj = value.get("frames")
+            if not isinstance(status_obj, str) or not isinstance(frames_obj, (int, float)):
+                continue
+            if status_obj.strip().lower() != "manual":
+                continue
+            note_text = str(note_obj or "").strip().lower()
+            if "vspreview" not in note_text:
+                continue
+            if key in allowed_keys:
+                vspreview_reuse[key] = int(frames_obj)
+
+        if not vspreview_reuse:
+            return None
+
+        if display_data.manual_trim_lines:
+            display_data.manual_trim_lines.clear()
+        label_map = {plan.path.name: plan_labels.get(plan.path, plan.path.name) for plan in plans}
+        manual_trim_starts: Dict[str, int] = {}
+        for plan in plans:
+            key = plan.path.name
+            if key not in vspreview_reuse:
+                continue
+            raw_frames_value = int(vspreview_reuse[key])
+            applied_frames = max(raw_frames_value, 0)
+            plan.trim_start = applied_frames
+            plan.has_trim_start_override = (
+                plan.has_trim_start_override or raw_frames_value != 0
+            )
+            manual_trim_starts[key] = raw_frames_value
+            label = label_map.get(key, key)
+            display_data.manual_trim_lines.append(
+                f"VSPreview manual trim reused: {label} → {applied_frames}f"
+            )
+
+        filtered_vspreview = {key: value for key, value in vspreview_reuse.items() if key in allowed_keys}
+
+        display_data.offset_lines = ["Audio offsets: VSPreview manual offsets applied"]
+        if display_data.manual_trim_lines:
+            display_data.offset_lines.extend(display_data.manual_trim_lines)
+
+        display_data.json_offsets_frames = {
+            label_map.get(key, key): int(value)
+            for key, value in filtered_vspreview.items()
+        }
+        statuses_map = {key: "manual" for key in filtered_vspreview}
+        return _AudioAlignmentSummary(
+            offsets_path=offsets_path,
+            reference_name=reference.path.name,
+            measurements=(),
+            applied_frames=dict(filtered_vspreview),
+            baseline_shift=0,
+            statuses=statuses_map,
+            reference_plan=reference,
+            final_adjustments=dict(filtered_vspreview),
+            swap_details={},
+            suggested_frames={},
+            suggestion_mode=False,
+            manual_trim_starts=manual_trim_starts,
+            vspreview_manual_offsets=dict(filtered_vspreview),
+        )
+
+    reused_summary = _reuse_vspreview_manual_offsets_if_available(reference_plan)
+    if reused_summary is not None:
+        if not audio_cfg.enable:
+            display_data.warnings.append(
+                "[AUDIO] VSPreview manual alignment enabled — audio alignment disabled."
+            )
+        return reused_summary, display_data
+
     if not audio_cfg.enable:
+        if vspreview_enabled and plans and reference_plan is not None:
+            manual_trim_starts = {
+                plan.path.name: int(plan.trim_start)
+                for plan in plans
+                if plan.trim_start > 0
+            }
+            if manual_trim_starts:
+                for plan in plans:
+                    trim = manual_trim_starts.get(plan.path.name)
+                    if trim:
+                        display_data.manual_trim_lines.append(
+                            f"Existing manual trim: {plan_labels[plan.path]} → {trim}f"
+                        )
+            display_data.offset_lines = ["Audio offsets: not computed (manual alignment only)"]
+            display_data.offset_lines.extend(display_data.manual_trim_lines)
+            display_data.warnings.append(
+                "[AUDIO] VSPreview manual alignment enabled — audio alignment disabled."
+            )
+            summary = _AudioAlignmentSummary(
+                offsets_path=offsets_path,
+                reference_name=reference_plan.path.name,
+                measurements=(),
+                applied_frames={},
+                baseline_shift=0,
+                statuses={},
+                reference_plan=reference_plan,
+                final_adjustments={},
+                swap_details={},
+                suggested_frames={},
+                suggestion_mode=True,
+                manual_trim_starts=manual_trim_starts,
+            )
+            return summary, display_data
         return None, display_data
     if len(plans) < 2:
         _warn("Audio alignment skipped: need at least two clips.")
         return None, display_data
 
-    reference_plan = _resolve_alignment_reference(plans, analyze_path, audio_cfg.reference)
+    assert reference_plan is not None
     targets = [plan for plan in plans if plan is not reference_plan]
     if not targets:
         _warn("Audio alignment skipped: no secondary clips to compare.")
         return None, display_data
 
-    plan_labels: Dict[Path, str] = {
-        plan.path: (plan.metadata.get("label") or plan.path.name).strip() or plan.path.name
-        for plan in plans
-    }
-    name_to_label: Dict[str, str] = {plan.path.name: plan_labels[plan.path] for plan in plans}
+    def _maybe_reuse_cached_offsets(
+        reference: _ClipPlan,
+        candidate_targets: Sequence[_ClipPlan],
+    ) -> _AudioAlignmentSummary | None:
+        if not prompt_reuse_offsets:
+            return None
+        if not sys.stdin.isatty():
+            return None
+        try:
+            cached_reference, existing_entries = _load_existing_entries()
+        except CLIAppError:
+            return None
+        if not existing_entries:
+            return None
+        if cached_reference is not None and cached_reference != reference.path.name:
+            return None
 
-    stream_infos: Dict[Path, List[audio_alignment.AudioStreamInfo]] = {}
+        required_names = [plan.path.name for plan in candidate_targets]
+        if any(name not in existing_entries for name in required_names):
+            return None
+
+        if click.confirm(
+            "Recompute audio offsets using current clips?",
+            default=True,
+            show_default=True,
+        ):
+            return None
+
+        display_data.estimation_line = (
+            f"Audio offsets reused from existing file ({offsets_path.name})."
+        )
+
+        plan_map: Dict[str, _ClipPlan] = {plan.path.name: plan for plan in plans}
+
+        def _get_float(value: object) -> float | None:
+            if isinstance(value, (int, float)):
+                float_value = float(value)
+                if math.isnan(float_value):
+                    return None
+                return float_value
+            return None
+
+        def _get_int(value: object) -> int | None:
+            if isinstance(value, (int, float)):
+                float_value = float(value)
+                if math.isnan(float_value):
+                    return None
+                return int(float_value)
+            return None
+
+        reference_entry = existing_entries.get(reference.path.name)
+        reference_manual_frames: int | None = None
+        reference_manual_seconds: float | None = None
+        if isinstance(reference_entry, Mapping):
+            status_obj = reference_entry.get("status")
+            if isinstance(status_obj, str) and status_obj.strip().lower() == "manual":
+                reference_manual_frames = _get_int(reference_entry.get("frames"))
+                reference_manual_seconds = _get_float(reference_entry.get("seconds"))
+                if (
+                    reference_manual_seconds is None
+                    and reference_manual_frames is not None
+                ):
+                    fps_guess = _get_float(reference_entry.get("target_fps")) or _get_float(
+                        reference_entry.get("reference_fps")
+                    )
+                    if fps_guess and fps_guess > 0:
+                        reference_manual_seconds = reference_manual_frames / fps_guess
+
+        measurements: list["AlignmentMeasurement"] = []
+        swap_details: Dict[str, str] = {}
+        negative_offsets: Dict[str, bool] = {}
+
+        def _build_measurement(name: str, entry: Mapping[str, object]) -> "AlignmentMeasurement":
+            plan = plan_map[name]
+            frames_val = _get_int(entry.get("frames")) if entry else None
+            seconds_val = _get_float(entry.get("seconds")) if entry else None
+            target_fps = _get_float(entry.get("target_fps")) if entry else None
+            reference_fps = _get_float(entry.get("reference_fps")) if entry else None
+            status_obj = entry.get("status") if entry else None
+            is_manual = isinstance(status_obj, str) and status_obj.strip().lower() == "manual"
+            if seconds_val is None and frames_val is not None:
+                fps_val = target_fps if target_fps and target_fps > 0 else reference_fps
+                if fps_val and fps_val > 0:
+                    seconds_val = frames_val / fps_val
+            if is_manual and reference_manual_frames is not None:
+                if frames_val is not None:
+                    frames_val -= reference_manual_frames
+                if seconds_val is not None and reference_manual_seconds is not None:
+                    seconds_val -= reference_manual_seconds
+                elif seconds_val is None and frames_val is not None:
+                    fps_val = target_fps if target_fps and target_fps > 0 else reference_fps
+                    if fps_val and fps_val > 0:
+                        seconds_val = frames_val / fps_val
+            correlation_val = _get_float(entry.get("correlation")) if entry else None
+            error_obj = entry.get("error") if entry else None
+            error_val = str(error_obj).strip() if isinstance(error_obj, str) and error_obj.strip() else None
+            measurement = audio_alignment.AlignmentMeasurement(
+                file=plan.path,
+                offset_seconds=seconds_val if seconds_val is not None else 0.0,
+                frames=frames_val,
+                correlation=correlation_val if correlation_val is not None else 0.0,
+                reference_fps=reference_fps,
+                target_fps=target_fps,
+                error=error_val,
+            )
+            note_obj = entry.get("note") if entry else None
+            if isinstance(note_obj, str) and note_obj.strip():
+                note_text = note_obj.strip()
+                swap_details[name] = note_text
+                if "opposite clip" in note_text.lower():
+                    negative_offsets[name] = True
+            return measurement
+
+        for target_plan in candidate_targets:
+            entry = existing_entries.get(target_plan.path.name)
+            if entry is None:
+                return None
+            measurements.append(_build_measurement(target_plan.path.name, entry))
+
+        reference_entry = existing_entries.get(reference.path.name)
+        if reference_entry is not None:
+            measurements.append(_build_measurement(reference.path.name, reference_entry))
+
+        raw_warning_messages: List[str] = []
+        for measurement in measurements:
+            reasons: List[str] = []
+            if measurement.error:
+                reasons.append(measurement.error)
+            if abs(measurement.offset_seconds) > audio_cfg.max_offset_seconds:
+                reasons.append(
+                    f"offset {measurement.offset_seconds:.3f}s exceeds limit {audio_cfg.max_offset_seconds:.3f}s"
+                )
+            if measurement.correlation < audio_cfg.correlation_threshold:
+                reasons.append(
+                    f"correlation {measurement.correlation:.2f} below threshold {audio_cfg.correlation_threshold:.2f}"
+                )
+            if measurement.frames is None:
+                reasons.append("unable to derive frame offset (missing fps)")
+
+            if reasons:
+                measurement.frames = None
+                measurement.error = "; ".join(reasons)
+                file_key = measurement.file.name
+                negative_offsets.pop(file_key, None)
+                label = name_to_label.get(file_key, file_key)
+                raw_warning_messages.append(f"{label}: {measurement.error}")
+
+        for warning_message in dict.fromkeys(raw_warning_messages):
+            _warn(warning_message)
+
+        offset_lines: List[str] = []
+        offsets_sec: Dict[str, float] = {}
+        offsets_frames: Dict[str, int] = {}
+
+        for measurement in measurements:
+            clip_name = measurement.file.name
+            if clip_name == reference.path.name and len(measurements) > 1:
+                continue
+            label = name_to_label.get(clip_name, clip_name)
+            if measurement.offset_seconds is not None:
+                offsets_sec[label] = float(measurement.offset_seconds)
+            if measurement.frames is not None:
+                offsets_frames[label] = int(measurement.frames)
+            display_data.correlations[label] = float(measurement.correlation)
+
+            if measurement.error:
+                offset_lines.append(
+                    f"Audio offsets: {label}: manual edit required ({measurement.error})"
+                )
+                continue
+
+            fps_value = 0.0
+            if measurement.target_fps and measurement.target_fps > 0:
+                fps_value = float(measurement.target_fps)
+            elif measurement.reference_fps and measurement.reference_fps > 0:
+                fps_value = float(measurement.reference_fps)
+
+            frames_text = "n/a"
+            if measurement.frames is not None:
+                frames_text = f"{measurement.frames:+d}f"
+            fps_text = f"{fps_value:.3f}" if fps_value > 0 else "0.000"
+            suffix = ""
+            if clip_name in negative_offsets:
+                suffix = " (reference advanced; trimming target)"
+            offset_lines.append(
+                f"Audio offsets: {label}: {measurement.offset_seconds:+.3f}s ({frames_text} @ {fps_text}){suffix}"
+            )
+            detail = swap_details.get(clip_name)
+            if detail:
+                offset_lines.append(f"  note: {detail}")
+
+        if not offset_lines:
+            offset_lines.append("Audio offsets: none detected")
+
+        display_data.offset_lines = offset_lines
+        display_data.json_offsets_sec = offsets_sec
+        display_data.json_offsets_frames = offsets_frames
+
+        suggested_frames: Dict[str, int] = {}
+        for measurement in measurements:
+            if measurement.frames is not None:
+                suggested_frames[measurement.file.name] = int(measurement.frames)
+
+        applied_frames: Dict[str, int] = {}
+        statuses: Dict[str, str] = {}
+        for name, entry in existing_entries.items():
+            if name not in plan_map:
+                continue
+            frames_val = _get_int(entry.get("frames")) if entry else None
+            if frames_val is not None:
+                applied_frames[name] = frames_val
+            status_obj = entry.get("status") if entry else None
+            if isinstance(status_obj, str):
+                statuses[name] = status_obj
+
+        final_map: Dict[str, int] = {reference.path.name: 0}
+        for name, frames in applied_frames.items():
+            final_map[name] = frames
+
+        baseline = min(final_map.values()) if final_map else 0
+        baseline_shift = int(-baseline) if baseline < 0 else 0
+
+        final_adjustments: Dict[str, int] = {}
+        for plan in plans:
+            desired = final_map.get(plan.path.name)
+            if desired is None:
+                continue
+            adjustment = int(desired - baseline)
+            if adjustment < 0:
+                adjustment = 0
+            if adjustment:
+                plan.trim_start = max(0, plan.trim_start + adjustment)
+                plan.alignment_frames = adjustment
+                plan.alignment_status = statuses.get(plan.path.name, "auto")
+            else:
+                plan.alignment_frames = 0
+                if plan.path.name in statuses:
+                    plan.alignment_status = statuses.get(plan.path.name, "auto")
+                else:
+                    plan.alignment_status = ""
+            final_adjustments[plan.path.name] = adjustment
+
+        if baseline_shift:
+            for plan in plans:
+                if plan is reference:
+                    plan.alignment_status = "baseline"
+
+        summary = _AudioAlignmentSummary(
+            offsets_path=offsets_path,
+            reference_name=reference.path.name,
+            measurements=measurements,
+            applied_frames=applied_frames,
+            baseline_shift=baseline_shift,
+            statuses=statuses,
+            reference_plan=reference,
+            final_adjustments=final_adjustments,
+            swap_details=swap_details,
+            suggested_frames=suggested_frames,
+            suggestion_mode=False,
+            manual_trim_starts={},
+        )
+        return summary
+
+    reused_cached = _maybe_reuse_cached_offsets(reference_plan, targets)
+    if reused_cached is not None:
+        return reused_cached, display_data
+
+    stream_infos: Dict[Path, List["AudioStreamInfo"]] = {}
     for plan in plans:
         try:
             infos = audio_alignment.probe_audio_streams(plan.path)
@@ -2042,12 +2567,12 @@ def _maybe_apply_audio_alignment(
     def _match_audio_override(plan: _ClipPlan) -> Optional[int]:
         """
         Resolve an audio track override for the given clip plan and return it as an integer.
-        
+
         Looks up a possible override for the clip and, if present and parseable, returns the override converted to an int; returns `None` when no override is found or the value is not a valid integer.
-        
+
         Parameters:
             plan (_ClipPlan): Clip plan to check for an audio track override.
-        
+
         Returns:
             int or None: The audio track index if a valid override exists, `None` otherwise.
         """
@@ -2059,13 +2584,13 @@ def _maybe_apply_audio_alignment(
         except (TypeError, ValueError):
             return None
 
-    def _pick_default(streams: Sequence[audio_alignment.AudioStreamInfo]) -> int:
+    def _pick_default(streams: Sequence["AudioStreamInfo"]) -> int:
         """
         Choose the index of the default audio stream from a sequence of streams.
-        
+
         Parameters:
             streams (Sequence[audio_alignment.AudioStreamInfo]): Available audio stream descriptors to consider.
-        
+
         Returns:
             int: The chosen stream index. Returns `0` if `streams` is empty; otherwise returns the index of the first stream with `is_default == True`, or the first stream's `index` if none are marked default.
         """
@@ -2089,13 +2614,13 @@ def _maybe_apply_audio_alignment(
             reference_stream_info = candidate
             break
 
-    def _score_candidate(candidate: audio_alignment.AudioStreamInfo) -> float:
+    def _score_candidate(candidate: "AudioStreamInfo") -> float:
         """
         Compute a heuristic quality score for an audio stream candidate relative to the (closure) reference stream.
-        
+
         Parameters:
             candidate (audio_alignment.AudioStreamInfo): Audio stream metadata to evaluate.
-        
+
         Returns:
             score (float): Higher values indicate a better match to the reference stream based on language, codec, channels, sample rate, bitrate, and flags (`is_default`, `is_forced`); used for ranking candidate streams.
         """
@@ -2142,11 +2667,11 @@ def _maybe_apply_audio_alignment(
     def _describe_stream(plan: _ClipPlan, stream_idx: int) -> tuple[str, str]:
         """
         Builds a human-readable label and a concise descriptor for the chosen audio stream of a clip.
-        
+
         Parameters:
             plan (_ClipPlan): Clip plan whose path and label are used in the returned label.
             stream_idx (int): Index of the audio stream to describe.
-        
+
         Returns:
             tuple[str, str]: A pair (display_label, descriptor) where `display_label` is formatted as
             "<clip_label>-><codec>/<language>/<layout>" with " (forced)" appended if the stream is marked forced,
@@ -2196,14 +2721,6 @@ def _maybe_apply_audio_alignment(
     )
 
     try:
-        _, existing_entries = audio_alignment.load_offsets(offsets_path)
-    except audio_alignment.AudioAlignmentError as exc:
-        raise CLIAppError(
-            f"Failed to read audio offsets file: {exc}",
-            rich_message=f"[red]Failed to read audio offsets file:[/red] {exc}",
-        ) from exc
-
-    try:
         base_start = float(audio_cfg.start_seconds or 0.0)
         base_duration_param: Optional[float]
         if audio_cfg.duration_seconds is None:
@@ -2212,7 +2729,7 @@ def _maybe_apply_audio_alignment(
             base_duration_param = float(audio_cfg.duration_seconds)
         hop_length = max(1, min(audio_cfg.hop_length, max(1, audio_cfg.sample_rate // 100)))
 
-        measurements: List[audio_alignment.AlignmentMeasurement]
+        measurements: List["AlignmentMeasurement"]
         negative_offsets: Dict[str, bool] = {}
 
         progress_columns: tuple[ProgressColumn, ...] = (
@@ -2243,9 +2760,9 @@ def _maybe_apply_audio_alignment(
             def _advance_audio(count: int) -> None:
                 """
                 Advance the audio-alignment progress by a given number of processed pairs.
-                
+
                 Increments the internal processed counter and updates the CLI progress task with the new completed count and a formatted processing rate.
-                
+
                 Parameters:
                     count (int): Number of audio pair measurements to add to the processed total.
                 """
@@ -2312,7 +2829,7 @@ def _maybe_apply_audio_alignment(
 
         negative_override_notes: Dict[str, str] = {}
         swap_details: Dict[str, str] = {}
-        swap_candidates: List[audio_alignment.AlignmentMeasurement] = []
+        swap_candidates: List["AlignmentMeasurement"] = []
         swap_enabled = len(targets) == 1
 
         for measurement in measurements:
@@ -2328,7 +2845,7 @@ def _maybe_apply_audio_alignment(
                 )
 
         if swap_enabled and swap_candidates:
-            additional_measurements: List[audio_alignment.AlignmentMeasurement] = []
+            additional_measurements: List["AlignmentMeasurement"] = []
             reference_name: str = reference_plan.path.name
             existing_keys = {m.file.name for m in measurements}
 
@@ -2457,11 +2974,48 @@ def _maybe_apply_audio_alignment(
         display_data.json_offsets_sec = offsets_sec
         display_data.json_offsets_frames = offsets_frames
 
+        suggested_frames: Dict[str, int] = {}
+        for measurement in measurements:
+            if measurement.frames is not None:
+                suggested_frames[measurement.file.name] = int(measurement.frames)
+
+        manual_trim_starts: Dict[str, int] = {}
+        if vspreview_enabled:
+            for plan in plans:
+                if plan.has_trim_start_override and plan.trim_start > 0:
+                    manual_trim_starts[plan.path.name] = int(plan.trim_start)
+                    label = plan_labels.get(plan.path, plan.path.name)
+                    display_data.manual_trim_lines.append(
+                        f"Existing manual trim: {label} → {plan.trim_start}f"
+                    )
+            if not display_data.offset_lines:
+                display_data.offset_lines.append("Audio offsets: none detected")
+            if display_data.manual_trim_lines:
+                display_data.offset_lines.extend(display_data.manual_trim_lines)
+            display_data.warnings.append(
+                "[AUDIO] VSPreview manual alignment enabled — offsets reported for guidance only."
+            )
+            summary = _AudioAlignmentSummary(
+                offsets_path=offsets_path,
+                reference_name=reference_plan.path.name,
+                measurements=measurements,
+                applied_frames={},
+                baseline_shift=0,
+                statuses={m.file.name: "suggested" for m in measurements},
+                reference_plan=reference_plan,
+                final_adjustments={},
+                swap_details=swap_details,
+                suggested_frames=suggested_frames,
+                suggestion_mode=True,
+                manual_trim_starts=manual_trim_starts,
+            )
+            return summary, display_data
+
         applied_frames, statuses = audio_alignment.update_offsets_file(
             offsets_path,
             reference_plan.path.name,
             measurements,
-            existing_entries,
+            _load_existing_entries()[1],
             negative_override_notes,
         )
 
@@ -2504,6 +3058,9 @@ def _maybe_apply_audio_alignment(
             reference_plan=reference_plan,
             final_adjustments=final_adjustments,
             swap_details=swap_details,
+            suggested_frames=suggested_frames,
+            suggestion_mode=False,
+            manual_trim_starts=manual_trim_starts,
         )
         return summary, display_data
     except audio_alignment.AudioAlignmentError as exc:
@@ -2512,15 +3069,723 @@ def _maybe_apply_audio_alignment(
             rich_message=f"[red]Audio alignment failed:[/red] {exc}",
         ) from exc
 
+
+def _color_config_literal(color_cfg: ColorConfig) -> str:
+    color_dict = asdict(color_cfg)
+    items = ",\n    ".join(f"{key}={value!r}" for key, value in color_dict.items())
+    return f"ColorConfig(\n    {items}\n)"
+
+
+def _write_vspreview_script(
+    plans: Sequence[_ClipPlan],
+    summary: _AudioAlignmentSummary,
+    cfg: AppConfig,
+    root: Path,
+) -> Path:
+    reference_plan = summary.reference_plan
+    targets = [plan for plan in plans if plan is not reference_plan]
+    script_dir = _resolve_workspace_subdir(root, "vspreview", purpose="vspreview workspace")
+    script_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    script_path = script_dir / f"vspreview_{timestamp}_{uuid.uuid4().hex[:8]}.py"
+    while script_path.exists():
+        logger.warning(
+            "VSPreview script %s already exists; generating alternate filename to avoid overwriting",
+            script_path.name,
+        )
+        script_path = script_dir / f"vspreview_{timestamp}_{uuid.uuid4().hex[:8]}.py"
+    project_root = PROJECT_ROOT
+
+    search_paths = [
+        str(Path(path).expanduser())
+        for path in getattr(cfg.runtime, "vapoursynth_python_paths", [])
+        if path
+    ]
+    color_literal = _color_config_literal(cfg.color)
+
+    preview_mode_value = _normalise_vspreview_mode(
+        getattr(cfg.audio_alignment, "vspreview_mode", "baseline")
+    )
+    apply_seeded_offsets = preview_mode_value == "seeded"
+    show_overlay = bool(getattr(cfg.audio_alignment, "show_suggested_in_preview", True))
+    measurement_lookup = {
+        measurement.file.name: measurement for measurement in summary.measurements
+    }
+
+    manual_trims = {}
+    if summary.manual_trim_starts:
+        manual_trims = {
+            _plan_label(plan): summary.manual_trim_starts.get(plan.path.name, 0)
+            for plan in plans
+        }
+    else:
+        manual_trims = {_plan_label(plan): int(plan.trim_start) for plan in plans if plan.trim_start > 0}
+
+    reference_label = _plan_label(reference_plan)
+    reference_trim_end = reference_plan.trim_end if reference_plan.trim_end is not None else None
+    reference_info = textwrap.dedent(
+        f"""\
+        {{
+        'label': {reference_label!r},
+        'path': {str(reference_plan.path)!r},
+        'trim_start': {int(reference_plan.trim_start)},
+        'trim_end': {reference_trim_end!r},
+        'fps_override': {tuple(reference_plan.fps_override) if reference_plan.fps_override else None!r},
+        }}
+        """
+    ).strip()
+
+    target_lines: list[str] = []
+    offset_lines: list[str] = []
+    suggestion_lines: list[str] = []
+    if not targets:
+        offset_lines.append("    # Add entries like 'Clip Label': 0 once targets are available.")
+    for plan in targets:
+        label = _plan_label(plan)
+        trim_end_value = plan.trim_end if plan.trim_end is not None else None
+        fps_override = tuple(plan.fps_override) if plan.fps_override else None
+        suggested_frames_value = int(summary.suggested_frames.get(plan.path.name, 0))
+        measurement = measurement_lookup.get(plan.path.name)
+        suggested_seconds_value = 0.0
+        if measurement is not None and measurement.offset_seconds is not None:
+            suggested_seconds_value = float(measurement.offset_seconds)
+        manual_trim = manual_trims.get(label, int(plan.trim_start))
+        manual_note = (
+            f"baseline trim {manual_trim}f"
+            if manual_trim
+            else "no baseline trim"
+        )
+        target_lines.append(
+            textwrap.dedent(
+                f"""\
+                {label!r}: {{
+                    'label': {label!r},
+                    'path': {str(plan.path)!r},
+                    'trim_start': {int(plan.trim_start)},
+                    'trim_end': {trim_end_value!r},
+                    'fps_override': {fps_override!r},
+                    'manual_trim': {manual_trim},
+                    'manual_trim_description': {manual_note!r},
+                }},"""
+            ).rstrip()
+        )
+        applied_initial = suggested_frames_value if apply_seeded_offsets else 0
+        offset_lines.append(
+            f"    {label!r}: {applied_initial},  # Suggested delta {suggested_frames_value:+d}f"
+        )
+        suggestion_lines.append(
+            f"    {label!r}: ({suggested_frames_value}, {suggested_seconds_value!r}),"
+        )
+
+    targets_literal = "\n".join(target_lines) if target_lines else ""
+    offsets_literal = "\n".join(offset_lines)
+    suggestions_literal = "\n".join(suggestion_lines)
+
+    extra_paths = [
+        str(project_root),
+        str(project_root / "src"),
+        str(root),
+    ]
+    extra_paths_literal = ", ".join(repr(path) for path in extra_paths)
+    search_paths_literal = repr(search_paths)
+
+    script = f"""# Auto-generated by Frame Compare to assist with VSPreview alignment.
+import sys
+from pathlib import Path
+
+try:
+    # Prefer UTF-8 on Windows consoles and avoid crashing on encoding errors.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
+WORKSPACE_ROOT = Path({str(root)!r})
+PROJECT_ROOT = Path({str(project_root)!r})
+EXTRA_PATHS = [{extra_paths_literal}]
+for candidate in EXTRA_PATHS:
+    if candidate not in sys.path:
+        sys.path.insert(0, candidate)
+
+import vapoursynth as vs
+from src import vs_core
+from src.datatypes import ColorConfig
+
+vs_core.configure(
+    search_paths={search_paths_literal},
+    source_preference={cfg.source.preferred!r},
+)
+
+COLOR_CFG = {color_literal}
+
+REFERENCE = {reference_info}
+
+TARGETS = {{
+{targets_literal}
+}}
+
+OFFSET_MAP = {{
+{offsets_literal}
+}}
+
+SUGGESTION_MAP = {{
+{suggestions_literal}
+}}
+
+PREVIEW_MODE = {preview_mode_value!r}
+SHOW_SUGGESTED_OVERLAY = {show_overlay!r}
+
+core = vs.core
+
+
+def safe_print(msg: str) -> None:
+    try:
+        print(msg)
+    except Exception:
+        try:
+            print(msg.encode("utf-8", "replace").decode("utf-8", "replace"))
+        except Exception:
+            print("[log message unavailable due to encoding]")
+
+
+def _load_clip(info):
+    clip = vs_core.init_clip(
+        str(Path(info['path'])),
+        trim_start=int(info.get('trim_start', 0)),
+        trim_end=info.get('trim_end'),
+        fps_map=tuple(info['fps_override']) if info.get('fps_override') else None,
+    )
+    processed = vs_core.process_clip_for_screenshot(
+        clip,
+        info['label'],
+        COLOR_CFG,
+        enable_overlay=False,
+        enable_verification=False,
+    ).clip
+    return processed
+
+
+def _apply_offset(reference_clip, target_clip, offset_frames):
+    if offset_frames > 0:
+        target_clip = target_clip[offset_frames:]
+    elif offset_frames < 0:
+        reference_clip = reference_clip[abs(offset_frames):]
+    return reference_clip, target_clip
+
+
+def _extract_fps_tuple(clip):
+    num = getattr(clip, "fps_num", None)
+    den = getattr(clip, "fps_den", None)
+    if isinstance(num, int) and isinstance(den, int) and den:
+        return int(num), int(den)
+    return None
+
+
+def _harmonise_fps(reference_clip, target_clip, label):
+    reference_fps = _extract_fps_tuple(reference_clip)
+    target_fps = _extract_fps_tuple(target_clip)
+    if not reference_fps or not target_fps:
+        return reference_clip, target_clip
+    if reference_fps == target_fps:
+        return reference_clip, target_clip
+    try:
+        target_clip = target_clip.std.AssumeFPS(num=reference_fps[0], den=reference_fps[1])
+        safe_print(
+            "Adjusted FPS for target '%s' to match reference (%s/%s -> %s/%s)"
+            % (
+                label,
+                target_fps[0],
+                target_fps[1],
+                reference_fps[0],
+                reference_fps[1],
+            )
+        )
+    except Exception as exc:
+        safe_print("Warning: Failed to harmonise FPS for target '%s': %s" % (label, exc))
+    return reference_clip, target_clip
+
+
+def _format_overlay_text(suggested_frames, suggested_seconds, applied_frames):
+    applied_label = "baseline" if applied_frames == 0 else "seeded"
+    applied_value = "0" if applied_frames == 0 else f"{{applied_frames:+d}}"
+    seconds_value = f"{{suggested_seconds:.3f}}"
+    if seconds_value == "-0.000":
+        seconds_value = "0.000"
+    return (
+        f"Suggested: {{suggested_frames:+d}}f (~{{seconds_value}}s) • "
+        f"Applied in preview: {{applied_value}}f ({{applied_label}}) • "
+        "(+ trims target / - pads reference)"
+    )
+
+
+def _maybe_apply_overlay(clip, suggested_frames, suggested_seconds, applied_frames):
+    if not SHOW_SUGGESTED_OVERLAY:
+        return clip
+    try:
+        message = _format_overlay_text(suggested_frames, suggested_seconds, applied_frames)
+    except Exception:
+        message = "Suggested offset unavailable"
+    try:
+        return clip.text.Text(message, alignment=7)
+    except Exception as exc:
+        safe_print("Warning: Failed to draw overlay text for preview: %s" % (exc,))
+        return clip
+
+
+safe_print("Reference clip: %s" % (REFERENCE['label'],))
+safe_print("VSPreview mode: %s" % (PREVIEW_MODE,))
+if not TARGETS:
+    safe_print("No target clips defined; edit TARGETS and OFFSET_MAP to add entries.")
+
+slot = 0
+for label, info in TARGETS.items():
+    reference_clip = _load_clip(REFERENCE)
+    target_clip = _load_clip(info)
+    reference_clip, target_clip = _harmonise_fps(reference_clip, target_clip, label)
+    offset_frames = int(OFFSET_MAP.get(label, 0))
+    suggested_entry = SUGGESTION_MAP.get(label, (0, 0.0))
+    suggested_frames = int(suggested_entry[0])
+    suggested_seconds = float(suggested_entry[1])
+    ref_view, tgt_view = _apply_offset(reference_clip, target_clip, offset_frames)
+    ref_view = _maybe_apply_overlay(ref_view, suggested_frames, suggested_seconds, offset_frames)
+    tgt_view = _maybe_apply_overlay(tgt_view, suggested_frames, suggested_seconds, offset_frames)
+    ref_view.set_output(slot)
+    tgt_view.set_output(slot + 1)
+    applied_label = "baseline" if offset_frames == 0 else "seeded"
+    safe_print(
+        "Target '%s': baseline trim=%sf (%s), suggested delta=%+df (~%+.3fs), preview applied=%+df (%s mode)"
+        % (
+            label,
+            info.get('manual_trim', 0),
+            info.get('manual_trim_description', 'n/a'),
+            suggested_frames,
+            suggested_seconds,
+            offset_frames,
+            applied_label,
+        )
+    )
+    slot += 2
+
+safe_print("VSPreview outputs: reference on even slots, target on odd slots (0<->1, 2<->3, ...).")
+safe_print("Edit OFFSET_MAP values and press Ctrl+R in VSPreview to reload the script.")
+"""
+    script_path.write_text(textwrap.dedent(script), encoding="utf-8")
+    return script_path
+
+
+def _prompt_vspreview_offsets(
+    plans: Sequence[_ClipPlan],
+    summary: _AudioAlignmentSummary,
+    reporter: CliOutputManager,
+    display: _AudioAlignmentDisplayData | None,
+) -> dict[str, int] | None:
+    reference_plan = summary.reference_plan
+    targets = [plan for plan in plans if plan is not reference_plan]
+    if not targets:
+        return {}
+
+    baseline_map: Dict[str, int] = {
+        plan.path.name: summary.manual_trim_starts.get(plan.path.name, int(plan.trim_start))
+        for plan in plans
+    }
+
+    reference_label = _plan_label(reference_plan)
+    reporter.line(
+        "Enter VSPreview frame offsets relative to the reported baselines. Positive trims the target; negative advances the reference."
+    )
+    offsets: Dict[str, int] = {}
+    for plan in targets:
+        label = _plan_label(plan)
+        baseline_value = baseline_map.get(plan.path.name, int(plan.trim_start))
+        suggested = summary.suggested_frames.get(plan.path.name)
+        prompt_parts = [
+            f"VSPreview offset for {label} relative to {reference_label}",
+            f"baseline {baseline_value}f",
+        ]
+        if suggested is not None:
+            prompt_parts.append(f"suggested {suggested:+d}f")
+        prompt_message = " (".join([prompt_parts[0], ", ".join(prompt_parts[1:])]) + ")"
+        try:
+            delta = int(
+                click.prompt(
+                    prompt_message,
+                    type=int,
+                    default=0,
+                    show_default=True,
+                )
+            )
+        except click.exceptions.Abort:
+            reporter.warn("VSPreview offset entry aborted; keeping existing trims.")
+            return None
+        offsets[plan.path.name] = delta
+        if display is not None:
+            display.manual_trim_lines.append(
+                f"Baseline for {label}: {baseline_value}f"
+            )
+    return offsets
+
+
+def _apply_vspreview_manual_offsets(
+    plans: Sequence[_ClipPlan],
+    summary: _AudioAlignmentSummary,
+    deltas: Mapping[str, int],
+    reporter: CliOutputManager,
+    json_tail: JsonTail,
+    display: _AudioAlignmentDisplayData | None,
+) -> None:
+    reference_plan = summary.reference_plan
+    reference_name = reference_plan.path.name
+    targets = [plan for plan in plans if plan is not reference_plan]
+
+    baseline_map: Dict[str, int] = {
+        plan.path.name: summary.manual_trim_starts.get(plan.path.name, int(plan.trim_start))
+        for plan in plans
+    }
+    if reference_name not in baseline_map:
+        baseline_map[reference_name] = int(reference_plan.trim_start)
+
+    manual_trim_starts: Dict[str, int] = {}
+    delta_map: Dict[str, int] = {}
+    manual_lines: List[str] = []
+
+    desired_map: Dict[str, int] = {}
+    target_adjustments: List[Tuple[_ClipPlan, int, int]] = []
+
+    for plan in targets:
+        key = plan.path.name
+        baseline_value = baseline_map.get(key, int(plan.trim_start))
+        delta_value = int(deltas.get(key, 0))
+        desired_value = baseline_value + delta_value
+        desired_map[key] = desired_value
+        target_adjustments.append((plan, baseline_value, delta_value))
+
+    reference_baseline = baseline_map.get(reference_name, int(reference_plan.trim_start))
+    reference_delta_input = int(deltas.get(reference_name, 0))
+    desired_map[reference_name] = reference_baseline + reference_delta_input
+
+    baseline_min = min(baseline_map.values()) if baseline_map else 0
+    desired_min = min(desired_map.values()) if desired_map else 0
+    baseline_floor = baseline_min if baseline_min < 0 else 0
+    desired_floor = desired_min if desired_min < 0 else 0
+    shift = 0
+    if desired_floor < baseline_floor:
+        shift = baseline_floor - desired_floor
+
+    for plan, baseline_value, delta_value in target_adjustments:
+        key = plan.path.name
+        desired_value = desired_map[key]
+        updated = desired_value + shift
+        updated_int = int(updated)
+        safe_updated = max(0, updated_int)
+        plan.trim_start = safe_updated
+        plan.has_trim_start_override = (
+            plan.has_trim_start_override or safe_updated != 0
+        )
+        manual_trim_starts[key] = updated_int
+        applied_delta = updated_int - baseline_value
+        delta_map[key] = applied_delta
+        line = (
+            f"VSPreview manual offset applied: {_plan_label(plan)} baseline {baseline_value}f "
+            f"{delta_value:+d}f → {int(updated)}f"
+        )
+        manual_lines.append(line)
+        reporter.line(line)
+
+    adjusted_reference = desired_map[reference_name] + shift
+    adjusted_reference_int = int(adjusted_reference)
+    safe_adjusted_reference = max(0, adjusted_reference_int)
+    reference_plan.trim_start = safe_adjusted_reference
+    reference_plan.has_trim_start_override = (
+        reference_plan.has_trim_start_override
+        or safe_adjusted_reference != int(reference_baseline)
+    )
+    manual_trim_starts[reference_name] = adjusted_reference_int
+    reference_delta = adjusted_reference_int - reference_baseline
+    delta_map[reference_name] = reference_delta
+    if reference_delta != 0:
+        ref_line = (
+            f"VSPreview reference adjustment: {_plan_label(reference_plan)} baseline {reference_baseline}f → {int(adjusted_reference)}f"
+        )
+        manual_lines.append(ref_line)
+        reporter.line(ref_line)
+
+    if display is not None:
+        if display.manual_trim_lines is None:
+            display.manual_trim_lines = []
+        display.manual_trim_lines.extend(manual_lines)
+        display.offset_lines = ["Audio offsets: VSPreview manual offsets applied"]
+        display.offset_lines.extend(display.manual_trim_lines)
+
+    fps_lookup: Dict[str, Tuple[int, int] | None] = {}
+    for plan in plans:
+        fps_lookup[plan.path.name] = (
+            plan.effective_fps or plan.source_fps or plan.fps_override
+        )
+
+    measurements: List["AlignmentMeasurement"] = []
+    existing_override_map: Dict[str, Dict[str, object]] = {}
+    notes_map: Dict[str, str] = {}
+    for plan in plans:
+        key = plan.path.name
+        frames_value = int(manual_trim_starts.get(key, int(plan.trim_start)))
+        fps_tuple = fps_lookup.get(key)
+        fps_float = _fps_to_float(fps_tuple) if fps_tuple else 0.0
+        seconds_value = float(frames_value) / fps_float if fps_float else 0.0
+        measurements.append(
+            audio_alignment.AlignmentMeasurement(
+                file=plan.path,
+                offset_seconds=seconds_value,
+                frames=frames_value,
+                correlation=1.0,
+                reference_fps=fps_float or None,
+                target_fps=fps_float or None,
+            )
+        )
+        existing_override_map[key] = {"frames": frames_value, "status": "manual"}
+        notes_map[key] = "VSPreview"
+
+    applied_frames, statuses = audio_alignment.update_offsets_file(
+        summary.offsets_path,
+        reference_plan.path.name,
+        tuple(measurements),
+        existing_override_map,
+        notes_map,
+    )
+
+    summary.applied_frames = dict(applied_frames)
+    summary.statuses = dict(statuses)
+    summary.final_adjustments = dict(manual_trim_starts)
+    summary.manual_trim_starts = dict(manual_trim_starts)
+    summary.suggestion_mode = False
+    summary.vspreview_manual_offsets = dict(manual_trim_starts)
+    summary.vspreview_manual_deltas = dict(delta_map)
+    summary.measurements = tuple(measurements)
+
+    audio_block = json_tail.setdefault("audio_alignment", {})
+    audio_block["suggestion_mode"] = False
+    audio_block["manual_trim_starts"] = dict(manual_trim_starts)
+    audio_block["vspreview_manual_offsets"] = dict(manual_trim_starts)
+    audio_block["vspreview_manual_deltas"] = dict(delta_map)
+    audio_block["vspreview_reference_trim"] = int(
+        manual_trim_starts.get(reference_name, int(reference_plan.trim_start))
+    )
+
+    reporter.line("VSPreview offsets saved to offsets file with manual status.")
+
+
+def _resolve_vspreview_command(script_path: Path) -> tuple[list[str] | None, str | None]:
+    """Return the VSPreview launch command or a reason string when unavailable."""
+
+    executable = shutil.which("vspreview")
+    if executable:
+        return [executable, str(script_path)], None
+    module_spec = importlib.util.find_spec("vspreview")
+    if module_spec is None:
+        return None, "vspreview-missing"
+    backend_spec = importlib.util.find_spec("PySide6") or importlib.util.find_spec("PyQt5")
+    if backend_spec is None:
+        return None, "vspreview-missing"
+    return [sys.executable, "-m", "vspreview", str(script_path)], None
+
+
+def _activate_vspreview_missing_panel(
+    reporter: CliOutputManager,
+    manual_command: str,
+    *,
+    reason: str,
+) -> None:
+    """Update layout state and render the VSPreview missing-dependency panel."""
+
+    vspreview_block = _coerce_str_mapping(reporter.values.get("vspreview"))
+    missing_block_obj = vspreview_block.get("missing")
+    missing_block: dict[str, object]
+    if isinstance(missing_block_obj, MappingABC):
+        missing_block = _coerce_str_mapping(missing_block_obj)
+    else:
+        missing_block = {
+            "windows_install": _VSPREVIEW_WINDOWS_INSTALL,
+            "posix_install": _VSPREVIEW_POSIX_INSTALL,
+        }
+    if "windows_install" not in missing_block:
+        missing_block["windows_install"] = _VSPREVIEW_WINDOWS_INSTALL
+    if "posix_install" not in missing_block:
+        missing_block["posix_install"] = _VSPREVIEW_POSIX_INSTALL
+    missing_block["command"] = manual_command
+    missing_block["reason"] = reason
+    missing_block["active"] = True
+    vspreview_block["missing"] = missing_block
+    vspreview_block["script_command"] = manual_command
+    reporter.update_values({"vspreview": vspreview_block})
+    reporter.render_sections(["vspreview_missing"])
+
+
+def _report_vspreview_missing(
+    reporter: CliOutputManager,
+    json_tail: JsonTail,
+    manual_command: str,
+    *,
+    reason: str,
+) -> None:
+    """Record missing VSPreview dependencies in layout output and JSON tail."""
+
+    _activate_vspreview_missing_panel(reporter, manual_command, reason=reason)
+    width_lines = [
+        "VSPreview dependency missing. Install with:",
+        f"  Windows: {_VSPREVIEW_WINDOWS_INSTALL}",
+        f"  Linux/macOS: {_VSPREVIEW_POSIX_INSTALL}",
+        f"Then run: {manual_command}",
+    ]
+    for line in width_lines:
+        reporter.console.print(Text(line, no_wrap=True))
+    reporter.warn(
+        "VSPreview dependencies missing. Install with "
+        f"'{_VSPREVIEW_WINDOWS_INSTALL}' (Windows) or "
+        f"'{_VSPREVIEW_POSIX_INSTALL}' (Linux/macOS), then run "
+        f"'{manual_command}'."
+    )
+    json_tail["vspreview_offer"] = {"vspreview_offered": False, "reason": reason}
+
+
+def _launch_vspreview(
+    plans: Sequence[_ClipPlan],
+    summary: _AudioAlignmentSummary | None,
+    display: _AudioAlignmentDisplayData | None,
+    cfg: AppConfig,
+    root: Path,
+    reporter: CliOutputManager,
+    json_tail: JsonTail,
+) -> None:
+    audio_block = _ensure_audio_alignment_block(json_tail)
+    if "vspreview_script" not in audio_block:
+        audio_block["vspreview_script"] = None
+    if "vspreview_invoked" not in audio_block:
+        audio_block["vspreview_invoked"] = False
+    if "vspreview_exit_code" not in audio_block:
+        audio_block["vspreview_exit_code"] = None
+
+    if summary is None:
+        reporter.warn("VSPreview skipped: no alignment summary available.")
+        return
+
+    if len(plans) < 2:
+        reporter.warn("VSPreview skipped: need at least two clips to compare.")
+        return
+
+    script_path = _write_vspreview_script(plans, summary, cfg, root)
+    audio_block["vspreview_script"] = str(script_path)
+    reporter.console.print(
+        f"[cyan]VSPreview script ready:[/cyan] {script_path}\n"
+        "Edit the OFFSET_MAP values inside the script and reload VSPreview (Ctrl+R) after changes."
+    )
+
+    manual_command = _format_vspreview_manual_command(script_path)
+    vspreview_block = _coerce_str_mapping(reporter.values.get("vspreview"))
+    vspreview_block["script_path"] = str(script_path)
+    vspreview_block["script_command"] = manual_command
+    missing_block_obj = vspreview_block.get("missing")
+    missing_block: dict[str, object]
+    if isinstance(missing_block_obj, MappingABC):
+        missing_block = _coerce_str_mapping(missing_block_obj)
+    else:
+        missing_block = {
+            "windows_install": _VSPREVIEW_WINDOWS_INSTALL,
+            "posix_install": _VSPREVIEW_POSIX_INSTALL,
+        }
+    missing_block["active"] = False
+    if "windows_install" not in missing_block:
+        missing_block["windows_install"] = _VSPREVIEW_WINDOWS_INSTALL
+    if "posix_install" not in missing_block:
+        missing_block["posix_install"] = _VSPREVIEW_POSIX_INSTALL
+    missing_block["command"] = manual_command
+    if "reason" not in missing_block:
+        missing_block["reason"] = ""
+    vspreview_block["missing"] = missing_block
+    reporter.update_values({"vspreview": vspreview_block})
+
+    if not sys.stdin.isatty():
+        reporter.warn(
+            "VSPreview launch skipped (non-interactive session). Open the script manually if needed."
+        )
+        return
+
+    env = dict(os.environ)
+    search_paths = getattr(cfg.runtime, "vapoursynth_python_paths", [])
+    if search_paths:
+        env["VAPOURSYNTH_PYTHONPATH"] = os.pathsep.join(str(Path(path).expanduser()) for path in search_paths if path)
+
+    command, missing_reason = _resolve_vspreview_command(script_path)
+    if command is None:
+        _report_vspreview_missing(
+            reporter,
+            json_tail,
+            manual_command,
+            reason=missing_reason or "vspreview-missing",
+        )
+        return
+
+    verbose_requested = bool(reporter.flags.get("verbose")) or bool(
+        reporter.flags.get("debug")
+    )
+
+    try:
+        if verbose_requested:
+            result = subprocess.run(command, env=env, check=False)
+        else:
+            result = subprocess.run(
+                command,
+                env=env,
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+    except FileNotFoundError:
+        _report_vspreview_missing(
+            reporter,
+            json_tail,
+            manual_command,
+            reason="vspreview-missing",
+        )
+        return
+    except (OSError, subprocess.SubprocessError, RuntimeError) as exc:
+        logger.warning(
+            "VSPreview launch failed: %s",
+            exc,
+            exc_info=True,
+        )
+        reporter.warn(f"VSPreview launch failed: {exc}")
+        return
+    audio_block["vspreview_invoked"] = True
+    audio_block["vspreview_exit_code"] = int(result.returncode)
+    captured_stdout = getattr(result, "stdout", None)
+    captured_stderr = getattr(result, "stderr", None)
+    if not verbose_requested:
+        for stream_value, label in ((captured_stdout, "stdout"), (captured_stderr, "stderr")):
+            if isinstance(stream_value, str) and stream_value.strip():
+                logger.debug("VSPreview %s (suppressed): %s", label, stream_value.strip())
+    if result.returncode != 0:
+        reporter.warn(
+            f"VSPreview exited with code {result.returncode}."
+            + (" Re-run with --verbose to inspect VSPreview output." if not verbose_requested else "")
+        )
+        return
+
+    offsets = _prompt_vspreview_offsets(plans, summary, reporter, display)
+    if offsets is None:
+        return
+    _apply_vspreview_manual_offsets(plans, summary, offsets, reporter, json_tail, display)
+
 def _pick_preview_frames(clip: object, count: int, seed: int) -> List[int]:
     """
     Select preview frame indices evenly spread across a clip when possible.
-    
+
     Parameters:
         clip (object): An object that may expose an integer `num_frames` attribute used as the clip length. If missing or invalid, the function treats the clip as having unknown length and returns indices starting at 0.
         count (int): Number of preview frame indices to produce.
         seed (int): Ignored by this implementation; kept for API compatibility.
-    
+
     Returns:
         List[int]: A list of frame indices for previews. If the clip length is known and greater than `count`, indices are approximately evenly spaced and unique; if the clip length is less than or equal to `count`, returns all available indices; if length is unknown, returns `[0, 1, ..., count-1]`.
     """
@@ -2544,15 +3809,15 @@ def _pick_preview_frames(clip: object, count: int, seed: int) -> List[int]:
 def _sample_random_frames(clip: object, count: int, seed: int, exclude: Sequence[int]) -> List[int]:
     """
     Select a deterministic sample of frame indices from a clip, excluding specified indices.
-    
+
     If the clip exposes a positive integer `num_frames`, this returns a sorted list of up to `count` unique frame indices chosen uniformly at random (deterministically seeded) from the set of available indices that are not in `exclude`. If the clip has no valid `num_frames` (missing, non-integer, or <= 0), returns the first `count` indices starting at 0. If fewer than `count` indices are available after exclusion, returns all available indices sorted.
-    
+
     Parameters:
         clip (object): Object expected to expose an integer `num_frames` attribute.
         count (int): Number of frame indices to return.
         seed (int): Seed for deterministic sampling.
         exclude (Sequence[int]): Frame indices to omit from selection.
-    
+
     Returns:
         List[int]: Sorted list of selected frame indices.
     """
@@ -2580,9 +3845,9 @@ def _confirm_alignment_with_screenshots(
 ) -> None:
     """
     Prompt the user to confirm audio alignment by generating preview screenshots and recording the confirmation result.
-    
+
     Generates a short set of preview screenshots for the reference and target clips and stores their paths in `display.preview_paths`. If interactive confirmation is disabled or the session is non-interactive, marks confirmation as automatic. If the user rejects the previews, generates additional inspection screenshots, attempts to open the offsets file for manual editing, and raises a CLIAppError to indicate that manual adjustment is required.
-    
+
     Parameters:
         plans (Sequence[_ClipPlan]): Clip plans for which previews and offsets are being validated.
         summary (_AudioAlignmentSummary | None): Audio alignment summary that includes the reference plan and offsets; if None, the function is a no-op.
@@ -2590,7 +3855,7 @@ def _confirm_alignment_with_screenshots(
         root (Path): Root directory used to construct the preview output directory.
         reporter (CliOutputManager): Reporter used to emit lines and render messages to the user.
         display (_AudioAlignmentDisplayData | None): UI/display data object that will be populated with preview paths, confirmation status, and warnings; if None, the function is a no-op.
-    
+
     Raises:
         CLIAppError: If screenshot generation fails or if the user rejects alignment and manual adjustment is required.
     """
@@ -2599,6 +3864,9 @@ def _confirm_alignment_with_screenshots(
     if not cfg.audio_alignment.confirm_with_screenshots:
         display.confirmation = display.confirmation or "auto"
         return
+
+    def _alignment_pivot_note(message: str) -> None:
+        reporter.console.log(message, markup=False)
 
     clips = [plan.clip for plan in plans]
     if any(clip is None for clip in clips):
@@ -2638,6 +3906,7 @@ def _confirm_alignment_with_screenshots(
             cfg.screenshots,
             cfg.color,
             trim_offsets=[plan.trim_start for plan in plans],
+            pivot_notifier=_alignment_pivot_note,
         )
     except ScreenshotError as exc:
         raise CLIAppError(
@@ -2687,6 +3956,7 @@ def _confirm_alignment_with_screenshots(
             cfg.screenshots,
             cfg.color,
             trim_offsets=[plan.trim_start for plan in plans],
+            pivot_notifier=_alignment_pivot_note,
         )
     except ScreenshotError as exc:
         raise CLIAppError(
@@ -2739,7 +4009,7 @@ def run_cli(
 
     Returns:
         RunResult: Aggregated result including processed files, selected frames, output directory, resolved root directory, configuration used, generated image paths, optional slow.pics URL, and a JSON-tail dictionary with detailed metadata and diagnostics.
-    
+
     Raises:
         CLIAppError: For configuration loading failures, missing/invalid input directory, clip initialization failures, frame selection or screenshot generation errors, slow.pics upload failures, or other user-facing errors encountered during the run.
     """
@@ -2802,6 +4072,10 @@ def run_cli(
         }
     )
 
+    vspreview_mode_value = _normalise_vspreview_mode(
+        getattr(cfg.audio_alignment, "vspreview_mode", "baseline")
+    )
+
     layout_path = Path(__file__).with_name("cli_layout.v1.json")
     reporter = CliOutputManager(
         quiet=quiet,
@@ -2826,6 +4100,14 @@ def run_cli(
     reporter.set_flag("progress_style", progress_style)
     reporter.set_flag("emit_json_tail", emit_json_tail_flag)
     collected_warnings: List[str] = []
+    if bool(getattr(cfg.slowpics, "auto_upload", False)):
+        auto_upload_warning = (
+            "slow.pics auto-upload is enabled; confirm you trust the destination or disable "
+            "[slowpics].auto_upload to keep screenshots local."
+        )
+        reporter.warn(auto_upload_warning)
+        logger.warning(auto_upload_warning)
+        collected_warnings.append(auto_upload_warning)
     for note in preflight.warnings:
         reporter.warn(note)
         collected_warnings.append(note)
@@ -2843,6 +4125,17 @@ def run_cli(
             "preview_paths": [],
             "confirmed": None,
             "offsets_filename": str(offsets_path),
+            "manual_trim_summary": [],
+            "suggestion_mode": False,
+            "suggested_frames": {},
+            "manual_trim_starts": {},
+            "use_vspreview": bool(cfg.audio_alignment.use_vspreview),
+            "vspreview_script": None,
+            "vspreview_invoked": False,
+            "vspreview_exit_code": None,
+            "vspreview_manual_offsets": {},
+            "vspreview_manual_deltas": {},
+            "vspreview_reference_trim": None,
         },
         "analysis": {},
         "render": {},
@@ -2885,9 +4178,19 @@ def run_cli(
             "remove_after_days": int(cfg.slowpics.remove_after_days),
         },
         "warnings": [],
+        "vspreview_mode": vspreview_mode_value,
+        "suggested_frames": 0,
+        "suggested_seconds": 0.0,
+        "vspreview_offer": None,
     }
 
     audio_track_override_map = _parse_audio_track_overrides(audio_track_overrides or [])
+
+    vspreview_mode_display = (
+        "baseline (0f applied to both clips)"
+        if vspreview_mode_value == "baseline"
+        else "seeded (suggested offsets applied before preview)"
+    )
 
     layout_data: Dict[str, Any] = {
         "clips": {
@@ -2895,6 +4198,25 @@ def run_cli(
             "items": [],
             "ref": {},
             "tgt": {},
+        },
+        "vspreview": {
+            "mode": vspreview_mode_value,
+            "mode_display": vspreview_mode_display,
+            "suggested_frames": 0,
+            "suggested_seconds": 0.0,
+            "script_path": None,
+            "script_command": "",
+            "missing": {
+                "active": False,
+                "windows_install": _VSPREVIEW_WINDOWS_INSTALL,
+                "posix_install": _VSPREVIEW_POSIX_INSTALL,
+                "command": "",
+                "reason": "",
+            },
+            "clips": {
+                "ref": {"label": ""},
+                "tgt": {"label": ""},
+            },
         },
         "trims": {},
         "window": json_tail["window"],
@@ -2954,8 +4276,6 @@ def run_cli(
     tmdb_error_message: Optional[str] = None
     tmdb_ambiguous = False
     tmdb_api_key_present = bool(cfg.tmdb.api_key.strip())
-    tmdb_line: Optional[str] = None
-    tmdb_colored_line: Optional[str] = None
     tmdb_notes: List[str] = []
     slowpics_tmdb_disclosure_line: Optional[str] = None
     slowpics_verbose_tmdb_tag: Optional[str] = None
@@ -3084,18 +4404,16 @@ def run_cli(
         year_display = tmdb_context.get("Year") or ""
         lang_text = tmdb_resolution.original_language or "und"
         tmdb_identifier = f"{tmdb_resolution.category}/{tmdb_resolution.tmdb_id}"
-        tmdb_line = (
-            f"TMDB: {tmdb_identifier}  "
-            f"\"{match_title} ({year_display})\"  lang={lang_text}"
-        )
         title_segment = _color_text(escape(f'"{match_title} ({year_display})"'), "bright_white")
         lang_segment = _format_kv("lang", lang_text, label_style="dim cyan", value_style="blue")
-        tmdb_colored_line = "  ".join(
-            [
-                _format_kv("TMDB", tmdb_identifier, label_style="cyan", value_style="bright_white"),
-                title_segment,
-                lang_segment,
-            ]
+        reporter.verbose_line(
+            "  ".join(
+                [
+                    _format_kv("TMDB", tmdb_identifier, label_style="cyan", value_style="bright_white"),
+                    title_segment,
+                    lang_segment,
+                ]
+            )
         )
         heuristic = (tmdb_resolution.candidate.reason or "match").replace("_", " ").replace("-", " ")
         source = "filename" if tmdb_resolution.candidate.used_filename_search else "external id"
@@ -3129,22 +4447,20 @@ def run_cli(
         category_display = tmdb_category or cfg.slowpics.tmdb_category or ""
         id_display = tmdb_id_value or cfg.slowpics.tmdb_id or ""
         lang_text = tmdb_language or tmdb_context.get("OriginalLanguage") or "und"
-        tmdb_line = (
-            f"TMDB: {category_display}/{id_display}  "
-            f"\"{display_title} ({tmdb_context.get('Year') or ''})\"  lang={lang_text}"
-        )
         identifier = f"{category_display}/{id_display}".strip("/")
         title_segment = _color_text(
             escape(f'"{display_title} ({tmdb_context.get("Year") or ""})"'),
             "bright_white",
         )
         lang_segment = _format_kv("lang", lang_text, label_style="dim cyan", value_style="blue")
-        tmdb_colored_line = "  ".join(
-            [
-                _format_kv("TMDB", identifier, label_style="cyan", value_style="bright_white"),
-                title_segment,
-                lang_segment,
-            ]
+        reporter.verbose_line(
+            "  ".join(
+                [
+                    _format_kv("TMDB", identifier, label_style="cyan", value_style="bright_white"),
+                    title_segment,
+                    lang_segment,
+                ]
+            )
         )
         if slowpics_resolved_base:
             base_display = slowpics_resolved_base
@@ -3199,10 +4515,68 @@ def run_cli(
         audio_track_override_map,
         reporter=reporter,
     )
+    vspreview_target_plan: _ClipPlan | None = None
+    vspreview_suggested_frames_value = 0
+    vspreview_suggested_seconds_value = 0.0
+    if alignment_summary is not None:
+        for plan in plans:
+            if plan is alignment_summary.reference_plan:
+                continue
+            vspreview_target_plan = plan
+            break
+        if vspreview_target_plan is not None:
+            vspreview_suggested_frames_value = int(
+                alignment_summary.suggested_frames.get(
+                    vspreview_target_plan.path.name, 0
+                )
+            )
+            measurement_lookup = {
+                measurement.file.name: measurement
+                for measurement in alignment_summary.measurements
+            }
+            measurement = measurement_lookup.get(vspreview_target_plan.path.name)
+            if measurement is not None and measurement.offset_seconds is not None:
+                vspreview_suggested_seconds_value = float(measurement.offset_seconds)
+
+    json_tail["vspreview_mode"] = vspreview_mode_value
+    json_tail["suggested_frames"] = int(vspreview_suggested_frames_value)
+    json_tail["suggested_seconds"] = float(
+        round(vspreview_suggested_seconds_value, 6)
+    )
+    vspreview_enabled_for_session = _coerce_config_flag(
+        cfg.audio_alignment.use_vspreview
+    )
+
+    if (
+        vspreview_enabled_for_session
+        and alignment_summary is not None
+        and alignment_summary.suggestion_mode
+    ):
+        try:
+            _launch_vspreview(
+                plans,
+                alignment_summary,
+                alignment_display,
+                cfg,
+                root,
+                reporter,
+                json_tail,
+            )
+        except CLIAppError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "VSPreview launch failed: %s",
+                exc,
+                exc_info=logger.isEnabledFor(logging.DEBUG),
+            )
+            reporter.warn(f"VSPreview launch failed: {exc}")
+
     if (
         alignment_summary is not None
         and alignment_display is not None
         and cfg.audio_alignment.enable
+        and not alignment_summary.suggestion_mode
     ):
         _confirm_alignment_with_screenshots(
             plans,
@@ -3212,7 +4586,6 @@ def run_cli(
             reporter,
             alignment_display,
         )
-    audio_offsets_applied = alignment_summary is not None
     if alignment_display is not None:
         json_tail["audio_alignment"]["offsets_filename"] = alignment_display.offsets_file_line.split(": ", 1)[-1]
         json_tail["audio_alignment"]["reference_stream"] = alignment_display.json_reference_stream
@@ -3228,6 +4601,10 @@ def run_cli(
             key: int(value) for key, value in alignment_display.json_offsets_frames.items()
         }
         json_tail["audio_alignment"]["offsets_frames"] = offsets_frames
+        if alignment_display.manual_trim_lines:
+            json_tail["audio_alignment"]["manual_trim_summary"] = list(alignment_display.manual_trim_lines)
+        else:
+            json_tail["audio_alignment"]["manual_trim_summary"] = []
         if alignment_display.warnings:
             collected_warnings.extend(alignment_display.warnings)
     else:
@@ -3235,7 +4612,38 @@ def run_cli(
         json_tail["audio_alignment"]["target_stream"] = cast(dict[str, object], {})
         json_tail["audio_alignment"]["offsets_sec"] = cast(dict[str, object], {})
         json_tail["audio_alignment"]["offsets_frames"] = cast(dict[str, object], {})
+        json_tail["audio_alignment"]["manual_trim_summary"] = []
     json_tail["audio_alignment"]["enabled"] = bool(cfg.audio_alignment.enable)
+    json_tail["audio_alignment"]["suggestion_mode"] = bool(
+        alignment_summary.suggestion_mode if alignment_summary is not None else False
+    )
+    json_tail["audio_alignment"]["suggested_frames"] = (
+        dict(alignment_summary.suggested_frames) if alignment_summary is not None else {}
+    )
+    json_tail["audio_alignment"]["manual_trim_starts"] = (
+        dict(alignment_summary.manual_trim_starts) if alignment_summary is not None else {}
+    )
+    json_tail["audio_alignment"]["vspreview_manual_offsets"] = (
+        dict(alignment_summary.vspreview_manual_offsets)
+        if alignment_summary is not None
+        else {}
+    )
+    json_tail["audio_alignment"]["vspreview_manual_deltas"] = (
+        dict(alignment_summary.vspreview_manual_deltas)
+        if alignment_summary is not None
+        else {}
+    )
+    if (
+        alignment_summary is not None
+        and alignment_summary.vspreview_manual_offsets
+        and alignment_summary.reference_plan.path.name
+        in alignment_summary.vspreview_manual_offsets
+    ):
+        json_tail["audio_alignment"]["vspreview_reference_trim"] = int(
+            alignment_summary.vspreview_manual_offsets[
+                alignment_summary.reference_plan.path.name
+            ]
+        )
 
     try:
         _init_clips(plans, cfg.runtime, root)
@@ -3408,8 +4816,6 @@ def run_cli(
         sample_count = (total_frames + step_size - 1) // step_size
 
     analyze_label_raw = plans[analyze_index].metadata.get('label') or analyze_path.name
-    analyze_label = escape(analyze_label_raw.strip())
-    analyze_label_colored = f"Analyzing video: [bright_cyan]{analyze_label}[/]"
 
     cache_ready = cache_probe is not None and cache_probe.status == "reused"
     if cache_ready and cache_info is not None:
@@ -3447,16 +4853,59 @@ def run_cli(
     layout_data["clips"]["ref"] = clip_records[0] if clip_records else {}
     layout_data["clips"]["tgt"] = clip_records[1] if len(clip_records) > 1 else {}
 
+    reference_label = ""
+    if alignment_summary is not None:
+        reference_label = _plan_label(alignment_summary.reference_plan)
+    elif clip_records:
+        reference_label = clip_records[0]["label"]
+
+    target_label = ""
+    if vspreview_target_plan is not None:
+        target_label = _plan_label(vspreview_target_plan)
+    elif len(clip_records) > 1:
+        target_label = clip_records[1]["label"]
+
+    vspreview_block = _coerce_str_mapping(layout_data.get("vspreview"))
+    clips_block = _coerce_str_mapping(vspreview_block.get("clips"))
+    clips_block["ref"] = {"label": reference_label}
+    clips_block["tgt"] = {"label": target_label}
+    vspreview_block["clips"] = clips_block
+    vspreview_block["mode"] = vspreview_mode_value
+    vspreview_block["mode_display"] = vspreview_mode_display
+    vspreview_block["suggested_frames"] = vspreview_suggested_frames_value
+    vspreview_block["suggested_seconds"] = vspreview_suggested_seconds_value
+    existing_vspreview_obj = reporter.values.get("vspreview")
+    if isinstance(existing_vspreview_obj, MappingABC):
+        existing_vspreview = _coerce_str_mapping(existing_vspreview_obj)
+        missing_existing_block = _coerce_str_mapping(existing_vspreview.get("missing"))
+        if missing_existing_block:
+            missing_layout_block = _coerce_str_mapping(vspreview_block.get("missing"))
+            merged_missing_block = missing_layout_block.copy()
+            merged_missing_block.update(missing_existing_block)
+            vspreview_block["missing"] = merged_missing_block
+        script_path_value = existing_vspreview.get("script_path")
+        if isinstance(script_path_value, str) and script_path_value:
+            vspreview_block["script_path"] = script_path_value
+        script_command_value = existing_vspreview.get("script_command")
+        if isinstance(script_command_value, str) and script_command_value:
+            vspreview_block["script_command"] = script_command_value
+        for key, value in existing_vspreview.items():
+            if key in {"clips", "missing", "script_path", "script_command"}:
+                continue
+            if key not in vspreview_block:
+                vspreview_block[key] = value
+    layout_data["vspreview"] = vspreview_block
+
     trims_per_clip = json_tail["trims"]["per_clip"]
     trim_lookup: dict[str, TrimSummary] = {detail["label"]: detail for detail in trim_details}
 
     def _trim_entry(label: str) -> TrimClipEntry:
         """
         Build a normalized trim entry for a clip label containing frame and second offsets.
-        
+
         Parameters:
             label (str): Clip label used to look up trim and detailed timing information.
-        
+
         Returns:
             dict: Mapping with keys:
                 - "lead_f": number of leading frames trimmed (int, default 0)
@@ -3480,7 +4929,7 @@ def run_cli(
         layout_data["trims"]["tgt"] = _trim_entry(clip_records[1]["label"])
 
     reporter.update_values(layout_data)
-    reporter.render_sections(["at_a_glance", "discover", "prepare"])
+    reporter.render_sections(["vspreview_missing", "vspreview_info", "at_a_glance", "discover", "prepare"])
     reporter.render_sections(["audio_align"])
     reporter.render_sections(["analyze"])
     if tmdb_notes:
@@ -3600,10 +5049,10 @@ def run_cli(
                 def _advance_samples(count: int) -> None:
                     """
                     Advance the internal sample counter by the given number of sample groups and refresh progress indicators.
-                    
+
                     Parameters:
                         count (int): Number of sample groups to advance; each group represents `step_size` frames.
-                    
+
                     Description:
                         Increments the internal samples counter and, when a progress total is set, recomputes processing rate, estimated time remaining, and elapsed time. Updates the external reporter's "analyze_bar" state and the analysis_progress task to reflect the new completion amount.
                     """
@@ -3778,6 +5227,14 @@ def run_cli(
     verification_records: List[Dict[str, Any]] = []
 
     try:
+        seen_pivot_messages: set[str] = set()
+
+        def _notify_pivot(message: str) -> None:
+            if message in seen_pivot_messages:
+                return
+            seen_pivot_messages.add(message)
+            reporter.console.log(message, markup=False)
+
         if total_screens > 0:
             start_time = time.perf_counter()
             processed = 0
@@ -3800,9 +5257,9 @@ def run_cli(
                 def advance_render(count: int) -> None:
                     """
                     Update rendering progress and notify the reporter and progress bar.
-                    
+
                     Computes elapsed time, frames-per-second, and estimated time remaining after advancing by `count`, then updates the reporter's progress state and the render progress task completion.
-                    
+
                     Parameters:
                         count (int): Number of newly processed render items to add to the progress.
                     """
@@ -3836,6 +5293,7 @@ def run_cli(
                     selection_details=selection_overlay_details,
                     warnings_sink=collected_warnings,
                     verification_sink=verification_records,
+                    pivot_notifier=_notify_pivot,
                 )
 
                 if processed < total_screens:
@@ -3864,6 +5322,7 @@ def run_cli(
                 selection_details=selection_overlay_details,
                 warnings_sink=collected_warnings,
                 verification_sink=verification_records,
+                pivot_notifier=_notify_pivot,
             )
     except ScreenshotError as exc:
         raise CLIAppError(
@@ -3948,10 +5407,10 @@ def run_cli(
         def _safe_size(path_str: str) -> int:
             """
             Return the file size for a given filesystem path, or 0 if the file cannot be accessed.
-            
+
             Parameters:
                 path_str (str): Filesystem path to the file.
-            
+
             Returns:
                 int: File size in bytes, or 0 if stat fails (e.g., file does not exist or is unreadable).
             """
@@ -3969,14 +5428,14 @@ def run_cli(
         def _format_duration(seconds: Optional[float]) -> str:
             """
             Format a duration in seconds into a human-readable time string.
-            
+
             Rounds the input to the nearest second and treats negative values as zero.
             If the value is None or not finite, returns "--:--".
             Outputs "H:MM:SS" when the duration is one hour or more, otherwise "MM:SS".
-            
+
             Parameters:
                 seconds (Optional[float]): Duration in seconds, or None.
-            
+
             Returns:
                 str: Formatted time string ("MM:SS" or "H:MM:SS"), or "--:--" for unknown/invalid input.
             """
@@ -3992,14 +5451,14 @@ def run_cli(
         def _format_stats(files_done: int, bytes_done: int, elapsed: float) -> str:
             """
             Format a compact transfer progress summary string for display.
-            
+
             Parameters:
-            	files_done (int): Number of files fully processed (unused in output but provided for context).
-            	bytes_done (int): Total bytes processed so far.
-            	elapsed (float): Elapsed time in seconds.
-            
+                files_done (int): Number of files fully processed (unused in output but provided for context).
+                bytes_done (int): Total bytes processed so far.
+                elapsed (float): Elapsed time in seconds.
+
             Returns:
-            	A single-line status string containing transfer speed in MB/s, estimated time remaining, and elapsed time (formatted via `_format_duration`). If the resulting string exceeds the configured stats width, it is truncated with a trailing ellipsis.
+                A single-line status string containing transfer speed in MB/s, estimated time remaining, and elapsed time (formatted via `_format_duration`). If the resulting string exceeds the configured stats width, it is truncated with a trailing ellipsis.
             """
             speed_bps = bytes_done / elapsed if elapsed > 0 else 0.0
             speed_mb = speed_bps / (1024 * 1024)
@@ -4035,9 +5494,9 @@ def run_cli(
                     def advance_upload(count: int) -> None:
                         """
                         Advance the upload progress by a given number of files and refresh the progress display.
-                        
+
                         Increments internal counters for uploaded files and bytes, advances the current file index for up to `count` files, computes elapsed time since the start, and updates the associated progress task with the new completed count and formatted statistics.
-                        
+
                         Parameters:
                             count (int): Number of files to mark as uploaded.
                         """
@@ -4248,9 +5707,12 @@ def main(
 ) -> None:
     """
     Run the CLI pipeline and handle post-run outputs such as slow.pics handling and JSON tail emission.
-    
+
+    Includes optional VSPreview-assisted manual alignment when `[audio_alignment].use_vspreview` is enabled and the session is
+    interactive.
+
     Runs run_cli with the provided options, handles CLIAppError by printing the rich message and exiting with the error code, processes slow.pics results (open in browser, copy to clipboard, create shortcut file, and optionally delete the screenshots directory), and finally emits the collected JSON tail to stdout (optionally pretty-printed).
-    
+
     Parameters:
         root_path: Optional explicit workspace root (overrides FRAME_COMPARE_ROOT and sentinel discovery).
         config_path: Optional override for config.toml. When omitted, resolves to ROOT/config/config.toml.

@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, cast
 
 try:
     from rich.console import Console as _RichConsole
@@ -40,8 +40,8 @@ class Console:
             console = _RichConsole(width=self.width, height=self.height)
         if console is None:
             return
-        console.width = self.width
-        console.height = self.height
+        cast(Any, console).width = self.width
+        cast(Any, console).height = self.height
         console.rule(
             title,
             characters=characters,

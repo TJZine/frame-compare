@@ -9,7 +9,6 @@ import pytest
 
 import src.config_template as config_template
 from src.config_template import (
-    FILESYSTEM_TEMPLATE_PATH,
     TEMPLATE_ENV_VAR,
     _read_template_bytes,
     copy_default_config,

@@ -1,25 +1,19 @@
 import json
-import sys
 from pathlib import Path
-from types import ModuleType
 from typing import Any, Dict
 
 import pytest
 from rich.console import Console
 
-ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
+import frame_compare
 import src.cli_layout as cli_layout
-
 from src.cli_layout import CliLayoutRenderer, LayoutContext, _AnsiColorMapper, load_cli_layout
 
 
 def _project_root() -> Path:
     """
     Get the project's root directory.
-    
+
     Returns:
         Path: Path to the project root (the parent of this file's parent).
     """
@@ -29,10 +23,10 @@ def _project_root() -> Path:
 def _sample_values(tmp_path: Path) -> Dict[str, Any]:
     """
     Constructs a representative sample configuration dictionary used by CLI layout rendering tests.
-    
+
     Parameters:
         tmp_path (Path): Temporary directory used to construct sample file and output paths.
-    
+
     Returns:
         sample_values (Dict[str, Any]): A nested dictionary containing test-ready configuration and metadata, including:
             - clips: clip count, list of clip items and explicit ref/tgt entries.
@@ -74,6 +68,9 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
             "path": str(tmp_path / "tgt.mkv"),
         },
     ]
+
+    script_path = tmp_path / "vspreview_script.py"
+    manual_command = frame_compare._format_vspreview_manual_command(script_path)
 
     return {
         "clips": {
@@ -119,6 +116,7 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
         },
         "audio_alignment": {
             "enabled": True,
+            "use_vspreview": True,
             "offsets_sec": 0.123,
             "offsets_frames": 3,
             "corr": 0.95,
@@ -128,6 +126,25 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
             "confirmed": "auto",
             "reference_stream": "Reference->ac3/en/5.1",
             "target_stream": "Target->aac/en/5.1",
+        },
+        "vspreview": {
+            "mode": "baseline",
+            "mode_display": "baseline (0f applied to both clips)",
+            "suggested_frames": 3,
+            "suggested_seconds": 0.125,
+            "script_path": str(script_path),
+            "script_command": manual_command,
+            "missing": {
+                "active": False,
+                "windows_install": frame_compare._VSPREVIEW_WINDOWS_INSTALL,
+                "posix_install": frame_compare._VSPREVIEW_POSIX_INSTALL,
+                "command": "",
+                "reason": "",
+            },
+            "clips": {
+                "ref": {"label": "Reference"},
+                "tgt": {"label": "Target"},
+            },
         },
         "render": {
             "writer": "vs",
@@ -256,6 +273,7 @@ def test_layout_renderer_sample_output(tmp_path, monkeypatch):
     lines = [line.rstrip("\n") for line in output_text.splitlines()]
 
     required_markers = [
+        "VSPreview Information",
         "At-a-Glance",
         "[DISCOVER]",
         "[PREPARE]",
@@ -294,6 +312,10 @@ def test_layout_renderer_sample_output(tmp_path, monkeypatch):
     assert any("add_frame_info=true" in line for line in lines)
     assert not any("template=" in line for line in lines)
 
+    info_index = next(i for i, line in enumerate(lines) if "VSPreview Information" in line)
+    glance_index = next(i for i, line in enumerate(lines) if "At-a-Glance" in line)
+    assert info_index < glance_index
+
     assert any("Loading cached frame metrics from" in line for line in lines)
     canvas_line = next(line for line in lines if "Canvas single_res" in line)
     assert "crop mod" not in canvas_line
@@ -321,6 +343,30 @@ def test_layout_renderer_sample_output(tmp_path, monkeypatch):
         "section[summary] header role → section_summary",
     ):
         assert any(expected in log for log in section_logs), expected
+
+
+def test_layout_renders_vspreview_missing_panel(tmp_path: Path) -> None:
+    layout_path = _project_root() / "cli_layout.v1.json"
+    layout = load_cli_layout(layout_path)
+    console = Console(width=100, record=True, color_system=None)
+    renderer = CliLayoutRenderer(layout, console, quiet=False, verbose=False, no_color=True)
+
+    sample_values = _sample_values(tmp_path)
+    sample_values["vspreview"]["missing"]["active"] = True
+    sample_values["vspreview"]["missing"]["command"] = sample_values["vspreview"]["script_command"]
+    sample_values["vspreview"]["script_path"] = str(tmp_path / "vspreview_script.py")
+
+    flags: Dict[str, Any] = {"verbose": False, "quiet": False, "no_color": True}
+    renderer.bind_context(sample_values, flags)
+    missing_section = next(section for section in layout.sections if section["id"] == "vspreview_missing")
+    renderer.render_section(missing_section, sample_values, flags)
+
+    output_text = console.export_text()
+    assert "VSPreview dependency missing" in output_text
+    assert frame_compare._VSPREVIEW_WINDOWS_INSTALL in output_text
+    python_executable = frame_compare.sys.executable or "python"
+    assert python_executable in output_text
+    assert " -m vspreview" in output_text
 
 
 def test_summary_output_frames_full_list_without_ellipsis(tmp_path: Path) -> None:

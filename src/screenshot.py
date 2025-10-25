@@ -8,7 +8,6 @@ import re
 import shutil
 import subprocess
 from functools import partial
-import math
 from pathlib import Path
 from typing import (
     Any,
@@ -27,7 +26,7 @@ from typing import (
 )
 
 from . import vs_core
-from .datatypes import ColorConfig, ScreenshotConfig
+from .datatypes import ColorConfig, OddGeometryPolicy, RGBDither, ScreenshotConfig
 
 _INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -100,7 +99,7 @@ def _get_overlay_warnings(state: OverlayState) -> List[str]:
 def _format_dimensions(width: int, height: int) -> str:
     """
     Format width and height as "W × H" using integer values.
-    
+
     Returns:
         str: Formatted dimensions string, e.g. "1920 × 1080".
     """
@@ -110,10 +109,10 @@ def _format_dimensions(width: int, height: int) -> str:
 def _format_resolution_summary(plan: GeometryPlan) -> str:
     """
     Produce a human-readable summary comparing the plan's cropped (original) dimensions with its final dimensions.
-    
+
     Parameters:
         plan (GeometryPlan): Geometry plan containing 'cropped_w', 'cropped_h' and 'final' width/height.
-    
+
     Returns:
         str: If final dimensions equal the cropped dimensions, returns "`WxH  (native)`". Otherwise returns
              "`OriginalWxH → TargetWxH  (original → target)`", where sizes are formatted as "W×H".
@@ -131,10 +130,10 @@ def _format_resolution_summary(plan: GeometryPlan) -> str:
 def _coerce_luminance_values(value: Any) -> List[float]:
     """
     Normalize various luminance representations into a list of floats.
-    
+
     Parameters:
         value (Any): A luminance value which may be None, a number, a string containing numeric values, bytes (UTF-8), or an iterable of such values.
-    
+
     Returns:
         List[float]: A list of extracted luminance values as floats. Returns an empty list when no numeric values can be derived.
     """
@@ -161,14 +160,14 @@ def _coerce_luminance_values(value: Any) -> List[float]:
 def _extract_mastering_display_luminance(props: Mapping[str, Any]) -> tuple[Optional[float], Optional[float]]:
     """
     Extract the mastering display minimum and maximum luminance from a properties mapping.
-    
+
     Checks multiple common property keys for separate min/max entries first; if either is missing, looks for combined mastering display luminance entries that contain two values and uses their min and max as needed.
-    
+
     Parameters:
-    	props (Mapping[str, Any]): Source properties that may contain mastering display luminance metadata under several possible keys.
-    
+        props (Mapping[str, Any]): Source properties that may contain mastering display luminance metadata under several possible keys.
+
     Returns:
-    	(min_luminance, max_luminance) (tuple[Optional[float], Optional[float]]): Tuple containing the extracted minimum and maximum mastering display luminance in nits, or `None` for any value that could not be determined.
+        (min_luminance, max_luminance) (tuple[Optional[float], Optional[float]]): Tuple containing the extracted minimum and maximum mastering display luminance in nits, or `None` for any value that could not be determined.
     """
     min_keys = (
         "_MasteringDisplayMinLuminance",
@@ -215,10 +214,10 @@ def _extract_mastering_display_luminance(props: Mapping[str, Any]) -> tuple[Opti
 def _format_luminance_value(value: float) -> str:
     """
     Format a luminance value for display with sensible precision for small and large values.
-    
+
     Parameters:
         value (float): Luminance in nits.
-    
+
     Returns:
         str: Formatted luminance: values less than 1.0 are shown with up to four decimal places (trailing zeros and a trailing decimal point are removed), with "0" used if the result would be empty; values greater than or equal to 1.0 are shown with one decimal place.
     """
@@ -233,10 +232,10 @@ def _format_luminance_value(value: float) -> str:
 def _format_mastering_display_line(props: Mapping[str, Any]) -> str:
     """
     Format a single-line Mastering Display Luminance (MDL) summary suitable for overlays or logs.
-    
+
     Parameters:
         props (Mapping[str, Any]): Source metadata that may contain mastering display luminance information.
-    
+
     Returns:
         str: A one-line MDL string. If both min and max luminance are available, returns
         "MDL: min: <min> cd/m², max: <max> cd/m²"; otherwise returns "MDL: Insufficient data".
@@ -253,10 +252,10 @@ def _format_mastering_display_line(props: Mapping[str, Any]) -> str:
 def _normalize_selection_label(label: Optional[str]) -> str:
     """
     Normalize a selection label into a user-facing display name.
-    
+
     Parameters:
         label (Optional[str]): Raw selection label (may be None or empty) typically from metadata.
-    
+
     Returns:
         str: The cleaned display name for the selection; returns `"(unknown)"` if the input is missing or empty. Known internal labels are mapped to their canonical display names.
     """
@@ -275,10 +274,10 @@ def _normalize_selection_label(label: Optional[str]) -> str:
 def _format_selection_line(selection_label: Optional[str]) -> str:
     """
     Format the "Frame Selection Type" line for overlays and metadata.
-    
+
     Parameters:
         selection_label (Optional[str]): A selection label or key to be normalized; may be None.
-    
+
     Returns:
         str: A single-line string "Frame Selection Type: <label>" where <label> is a normalized, display-ready name derived from `selection_label`.
     """
@@ -299,7 +298,7 @@ def _compose_overlay_text(
     Compose overlay text for a frame when overlays are enabled.
 
     When overlaying is disabled, returns None. In "minimal" mode the returned string always includes the resolution summary and selection-type lines in addition to any base text. In "diagnostic" mode, returns a multi-line string containing, in order: the base text (if any), a resolution summary derived from the geometry plan, a mastering-display luminance line when tonemapping was applied and HDR metadata is available, and a selection-type line.
-    
+
     Parameters:
         base_text (Optional[str]): Existing overlay text to include as the first line if present.
         color_cfg (ColorConfig): Configuration object providing overlay_enabled and overlay_mode flags.
@@ -338,18 +337,55 @@ def _compose_overlay_text(
 
 
 
-def _ensure_rgb24(core: Any, clip: Any, frame_idx: int) -> Any:
+def _resolve_resize_color_kwargs(props: Mapping[str, Any]) -> Dict[str, int]:
+    """Build resize arguments describing the source clip's colour space."""
+
+    matrix, transfer, primaries, color_range = vs_core._resolve_color_metadata(props)
+
+    kwargs: Dict[str, int] = {}
+    if matrix is not None:
+        kwargs["matrix_in"] = int(matrix)
+    if transfer is not None:
+        kwargs["transfer_in"] = int(transfer)
+    if primaries is not None:
+        kwargs["primaries_in"] = int(primaries)
+    if color_range is not None:
+        kwargs["range_in"] = int(color_range)
+    return kwargs
+
+
+def _normalize_rgb_dither(value: RGBDither | str) -> RGBDither:
+    """Normalise a value into an ``RGBDither`` enum with logging for invalid input."""
+
+    try:
+        return RGBDither(value)
+    except (ValueError, TypeError):
+        logger.debug(
+            "Invalid rgb_dither value %r; defaulting to ERROR_DIFFUSION",
+            value,
+        )
+        return RGBDither.ERROR_DIFFUSION
+
+
+def _ensure_rgb24(
+    core: Any,
+    clip: Any,
+    frame_idx: int,
+    *,
+    source_props: Mapping[str, Any] | None = None,
+    rgb_dither: RGBDither | str = RGBDither.ERROR_DIFFUSION,
+) -> Any:
     """
     Ensure the given VapourSynth frame is in 8-bit RGB24 color format.
-    
+
     Parameters:
         core (Any): VapourSynth core instance used for conversions.
         clip (Any): VapourSynth clip or frame to validate/convert.
         frame_idx (int): Index of the frame being processed (used in error messages).
-    
+
     Returns:
         Any: A clip in RGB24 with full range; returns the original clip if it already is 8-bit RGB24.
-    
+
     Raises:
         ScreenshotWriterError: If VapourSynth is unavailable, the core lacks the resize namespace or Point, or the conversion fails.
     """
@@ -371,24 +407,55 @@ def _ensure_rgb24(core: Any, clip: Any, frame_idx: int) -> Any:
     if not callable(point):
         raise ScreenshotWriterError("VapourSynth resize.Point is unavailable")
 
-    dither = "error_diffusion" if isinstance(bits, int) and bits > 8 else "none"
-    try:
-        converted = cast(Any, point(clip, format=vs.RGB24, range=vs.RANGE_FULL, dither_type=dither))
-    except Exception as exc:  # pragma: no cover - defensive
-        raise ScreenshotWriterError(f"Failed to convert frame {frame_idx} to RGB24: {exc}") from exc
+    dither = _normalize_rgb_dither(rgb_dither).value
+    props = dict(source_props or {})
+    if not props:
+        props = dict(vs_core._snapshot_frame_props(clip))
+    resize_kwargs = _resolve_resize_color_kwargs(props)
+
+    yuv_constant = getattr(vs, "YUV", object())
+    if color_family == yuv_constant:
+        defaults: Dict[str, int] = {}
+        if "matrix_in" not in resize_kwargs:
+            defaults["matrix_in"] = int(getattr(vs, "MATRIX_BT709", 1))
+        if "transfer_in" not in resize_kwargs:
+            defaults["transfer_in"] = int(getattr(vs, "TRANSFER_BT709", 1))
+        if "primaries_in" not in resize_kwargs:
+            defaults["primaries_in"] = int(getattr(vs, "PRIMARIES_BT709", 1))
+        if "range_in" not in resize_kwargs:
+            defaults["range_in"] = int(getattr(vs, "RANGE_LIMITED", 1))
+        if defaults:
+            resize_kwargs.update(defaults)
+            logger.debug(
+                "Colour metadata missing for frame %s; applying Rec.709 limited defaults",
+                frame_idx,
+            )
 
     try:
         converted = cast(
             Any,
-            converted.std.SetFrameProps(
-            _Matrix=0,
-            _Primaries=1,
-            _Transfer=1,
-            _ColorRange=0,
+            point(
+                clip,
+                format=vs.RGB24,
+                range=vs.RANGE_FULL,
+                dither_type=dither,
+                **resize_kwargs,
             ),
         )
-    except Exception:  # pragma: no cover - best effort
-        pass
+    except Exception as exc:  # pragma: no cover - defensive
+        raise ScreenshotWriterError(f"Failed to convert frame {frame_idx} to RGB24: {exc}") from exc
+
+    try:
+        prop_kwargs: Dict[str, int] = {"_Matrix": 0, "_ColorRange": 0}
+        primaries = props.get("_Primaries")
+        if isinstance(primaries, int):
+            prop_kwargs["_Primaries"] = int(primaries)
+        transfer = props.get("_Transfer")
+        if isinstance(transfer, int):
+            prop_kwargs["_Transfer"] = int(transfer)
+        converted = cast(Any, converted.std.SetFrameProps(**prop_kwargs))
+    except Exception as exc:  # pragma: no cover - best effort
+        logger.debug("Failed to set RGB frame props: %s", exc)
     return converted
 
 
@@ -432,18 +499,18 @@ def _apply_frame_info_overlay(
 ) -> Any:
     """
     Add a per-frame information overlay to a VapourSynth clip.
-    
+
     Attempts to draw a small text block containing the frame index and picture type onto the provided clip.
     If the required VapourSynth namespaces or overlay functions are unavailable, or an error occurs while applying
     the overlay, the original clip is returned unchanged.
-    
+
     Parameters:
         core: VapourSynth core object used to access std and sub namespaces.
         clip: VapourSynth clip to annotate.
         title: Title text shown above the per-frame info; falls back to "Clip" when empty.
         requested_frame: Frame index to display in the overlay instead of the intrinsic evaluation index; pass None to use the evaluation index.
         selection_label: Optional selection label (not used by this function).
-    
+
     Returns:
         The annotated clip if overlay application succeeded, otherwise the original clip.
     """
@@ -470,12 +537,12 @@ def _apply_frame_info_overlay(
     def _draw_info(n: int, f: Any, clip_ref: Any) -> Any:
         """
         Create a subtitle node containing per-frame information (frame index and picture type) for overlay.
-        
+
         Parameters:
             n (int): Evaluation frame index provided by the frame evaluation callback.
             f: Frame object whose properties (e.g., `_PictType`) will be read.
             clip_ref: Source clip reference used to construct the subtitle node.
-        
+
         Returns:
             A subtitle clip node containing the formatted frame information text.
         """
@@ -513,9 +580,9 @@ def _apply_overlay_text(
 ) -> object:
     """
     Apply diagnostic text as an overlay to a VapourSynth clip and update overlay state.
-    
+
     Attempts to render `text` on `clip` using available overlay filters from `core`. If `text` is falsy or the overlay status in `state` is "error", the original `clip` is returned unchanged. On successful application the returned clip contains the rendered overlay and `state["overlay_status"]` is set to `"ok"`. On failure the function records an error message into `state["warnings"]` (prefixed with "[OVERLAY]") and sets `state["overlay_status"]` to `"error"`; when `strict` is True a ScreenshotWriterError is raised instead of returning the original clip.
-    
+
     Parameters:
         core: The VapourSynth core object providing overlay/filter namespaces.
         clip: The VapourSynth clip to receive the overlay.
@@ -525,10 +592,10 @@ def _apply_overlay_text(
             - "overlay_status": read and updated to "ok" or "error".
             - "warnings": a list that will be appended with overlay-related warning strings when failures occur.
         file_label (str): Human-readable identifier for logging and warning messages.
-    
+
     Returns:
         The clip with the overlay applied, or the original `clip` if no overlay was applied.
-    
+
     Raises:
         ScreenshotWriterError: If an overlay cannot be applied and `strict` is True.
     """
@@ -608,6 +675,9 @@ class GeometryPlan(TypedDict):
         scaled (tuple[int, int]): Dimensions after scaling.
         pad (tuple[int, int, int, int]): Padding applied around the scaled frame.
         final (tuple[int, int]): Final output dimensions.
+        requires_full_chroma (bool): Whether geometry requires a 4:4:4 pivot.
+        promotion_axes (str): Subsampling-aware axis label describing which geometry axis
+            triggered promotion, or ``"none"`` when no promotion is required.
     """
     width: int
     height: int
@@ -617,6 +687,243 @@ class GeometryPlan(TypedDict):
     scaled: tuple[int, int]
     pad: tuple[int, int, int, int]
     final: tuple[int, int]
+    requires_full_chroma: bool
+    promotion_axes: str
+
+
+def _normalise_geometry_policy(value: OddGeometryPolicy | str) -> OddGeometryPolicy:
+    if isinstance(value, OddGeometryPolicy):
+        return value
+    try:
+        return OddGeometryPolicy(str(value))
+    except Exception:
+        return OddGeometryPolicy.AUTO
+
+
+def _get_subsampling(fmt: Any, attr: str) -> int:
+    try:
+        raw = getattr(fmt, attr)
+    except Exception:
+        return 0
+    try:
+        return int(raw)
+    except Exception:
+        return 0
+
+
+def _axis_has_odd(values: Sequence[int]) -> bool:
+    for value in values:
+        try:
+            current = int(value)
+        except Exception:
+            continue
+        if current % 2 != 0:
+            return True
+    return False
+
+
+def _describe_plan_axes(plan: GeometryPlan | None) -> str:
+    """Return a concise axis label for plans that include odd-pixel geometry."""
+
+    if plan is None:
+        return "unknown"
+
+    crop_left, crop_top, crop_right, crop_bottom = plan["crop"]
+    pad_left, pad_top, pad_right, pad_bottom = plan["pad"]
+
+    axes: list[str] = []
+    if _axis_has_odd((crop_top, crop_bottom, pad_top, pad_bottom)):
+        axes.append("vertical")
+    if _axis_has_odd((crop_left, crop_right, pad_left, pad_right)):
+        axes.append("horizontal")
+
+    if not axes:
+        return "none"
+    return "+".join(axes)
+
+
+def _safe_pivot_notify(pivot_notifier: Callable[[str], None] | None, note: str) -> None:
+    """Invoke *pivot_notifier* without letting exceptions escape."""
+
+    if pivot_notifier is None:
+        return
+    try:
+        pivot_notifier(note)
+    except Exception as exc:
+        logger.debug("pivot_notifier failed: %s", exc)
+
+
+def _resolve_source_props(
+    clip: Any,
+    source_props: Mapping[str, Any] | None,
+) -> Dict[str, Any]:
+    """Return a snapshot of source colour metadata without mutating the caller's mapping."""
+
+    props = dict(source_props or {})
+    if props:
+        return props
+    return dict(vs_core._snapshot_frame_props(clip))
+
+
+def _describe_vs_format(fmt: Any) -> str:
+    name = getattr(fmt, "name", None)
+    if isinstance(name, str) and name:
+        return name
+    identifier = getattr(fmt, "id", None)
+    if isinstance(identifier, int):
+        return f"id={identifier}"
+    return repr(fmt)
+
+
+def _resolve_promotion_axes(
+    fmt: Any,
+    crop: tuple[int, int, int, int],
+    pad: tuple[int, int, int, int],
+) -> tuple[bool, str]:
+    subsampling_w = _get_subsampling(fmt, "subsampling_w")
+    subsampling_h = _get_subsampling(fmt, "subsampling_h")
+
+    axes: List[str] = []
+    if subsampling_h > 0 and _axis_has_odd((crop[1], crop[3], pad[1], pad[3])):
+        axes.append("vertical")
+    if subsampling_w > 0 and _axis_has_odd((crop[0], crop[2], pad[0], pad[2])):
+        axes.append("horizontal")
+
+    if not axes:
+        return (False, "none")
+    return (True, "+".join(axes))
+
+
+def _is_sdr_pipeline(
+    tonemap_info: "vs_core.TonemapInfo | None",
+    source_props: Mapping[str, Any],
+) -> bool:
+    if tonemap_info is not None and tonemap_info.applied:
+        return False
+    try:
+        is_hdr = vs_core._props_signal_hdr(source_props)
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        logger.debug("HDR detection failed; defaulting to SDR: %s", exc)
+        is_hdr = False
+    return not bool(is_hdr)
+
+
+def _promote_to_yuv444p16(
+    core: Any,
+    clip: Any,
+    *,
+    frame_idx: int,
+    source_props: Mapping[str, Any],
+) -> Any:
+    try:
+        import vapoursynth as vs  # type: ignore
+    except Exception as exc:  # pragma: no cover - requires runtime deps
+        raise ScreenshotWriterError("VapourSynth is required for screenshot export") from exc
+
+    resize_ns = getattr(core, "resize", None)
+    if resize_ns is None:
+        raise ScreenshotWriterError("VapourSynth core is missing resize namespace")
+    point = getattr(resize_ns, "Point", None)
+    if not callable(point):
+        raise ScreenshotWriterError("VapourSynth resize.Point is unavailable")
+
+    resize_kwargs = _resolve_resize_color_kwargs(source_props)
+
+    fmt = getattr(clip, "format", None)
+    yuv_constant = getattr(vs, "YUV", object())
+    if getattr(fmt, "color_family", None) == yuv_constant:
+        defaults: Dict[str, int] = {}
+        if "matrix_in" not in resize_kwargs:
+            defaults["matrix_in"] = int(getattr(vs, "MATRIX_BT709", 1))
+        if "transfer_in" not in resize_kwargs:
+            defaults["transfer_in"] = int(getattr(vs, "TRANSFER_BT709", 1))
+        if "primaries_in" not in resize_kwargs:
+            defaults["primaries_in"] = int(getattr(vs, "PRIMARIES_BT709", 1))
+        if "range_in" not in resize_kwargs:
+            defaults["range_in"] = int(getattr(vs, "RANGE_LIMITED", 1))
+        if defaults:
+            resize_kwargs.update(defaults)
+            logger.debug(
+                "Colour metadata missing for frame %s during 4:4:4 promotion; applying Rec.709 limited defaults",
+                frame_idx,
+            )
+
+    try:
+        promoted = cast(
+            Any,
+            point(
+                clip,
+                format=vs.YUV444P16,
+                dither_type="none",
+                **resize_kwargs,
+            ),
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        raise ScreenshotWriterError(f"Failed to promote frame {frame_idx} to YUV444P16: {exc}") from exc
+
+    std_ns = getattr(core, "std", None)
+    set_props = getattr(std_ns, "SetFrameProps", None) if std_ns is not None else None
+    if callable(set_props):
+        prop_kwargs: Dict[str, int] = {}
+        matrix_in = resize_kwargs.get("matrix_in")
+        transfer_in = resize_kwargs.get("transfer_in")
+        primaries_in = resize_kwargs.get("primaries_in")
+        range_in = resize_kwargs.get("range_in")
+        if matrix_in is not None:
+            prop_kwargs["_Matrix"] = int(matrix_in)
+        if transfer_in is not None:
+            prop_kwargs["_Transfer"] = int(transfer_in)
+        if primaries_in is not None:
+            prop_kwargs["_Primaries"] = int(primaries_in)
+        if range_in is not None:
+            prop_kwargs["_ColorRange"] = int(range_in)
+        if prop_kwargs:
+            try:
+                promoted = cast(Any, set_props(promoted, **prop_kwargs))
+            except Exception as exc:  # pragma: no cover - best effort
+                logger.debug("Failed to set frame props after promotion: %s", exc)
+
+    return promoted
+
+
+def _rebalance_axis_even(first: int, second: int) -> tuple[int, int]:
+    left = max(0, int(first))
+    right = max(0, int(second))
+    removed = 0
+
+    if left % 2 != 0:
+        left -= 1
+        removed += 1
+    if right % 2 != 0:
+        right -= 1
+        removed += 1
+
+    while removed >= 2:
+        right += 2
+        removed -= 2
+
+    return left, right
+
+
+def _compute_requires_full_chroma(
+    fmt: Any,
+    crop: tuple[int, int, int, int],
+    pad: tuple[int, int, int, int],
+    policy: OddGeometryPolicy,
+) -> bool:
+    resolved_policy = _normalise_geometry_policy(policy)
+    if resolved_policy is OddGeometryPolicy.FORCE_FULL_CHROMA:
+        return True
+    if resolved_policy is OddGeometryPolicy.SUBSAMP_SAFE:
+        return False
+
+    subsampling_w = _get_subsampling(fmt, "subsampling_w")
+    subsampling_h = _get_subsampling(fmt, "subsampling_h")
+
+    vertical_odd = _axis_has_odd((crop[1], crop[3], pad[1], pad[3]))
+    horizontal_odd = _axis_has_odd((crop[0], crop[2], pad[0], pad[2]))
+
+    return (vertical_odd and subsampling_h > 0) or (horizontal_odd and subsampling_w > 0)
 
 
 def plan_mod_crop(
@@ -836,6 +1143,8 @@ def _compute_scaled_dimensions(
 
 
 def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[GeometryPlan]:
+    policy = _normalise_geometry_policy(cfg.odd_geometry_policy)
+    clip_formats: List[Any] = []
     plans: List[GeometryPlan] = []
     for clip in clips:
         width = getattr(clip, "width", None)
@@ -843,6 +1152,7 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[Geometry
         if not isinstance(width, int) or not isinstance(height, int):
             raise ScreenshotGeometryError("Clip missing width/height metadata")
 
+        clip_formats.append(getattr(clip, "format", None))
         crop = plan_mod_crop(width, height, cfg.mod_crop, cfg.letterbox_pillarbox_aware)
         cropped_w = width - crop[0] - crop[2]
         cropped_h = height - crop[1] - crop[3]
@@ -859,6 +1169,8 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[Geometry
                 scaled=(cropped_w, cropped_h),
                 pad=(0, 0, 0, 0),
                 final=(cropped_w, cropped_h),
+                requires_full_chroma=False,
+                promotion_axes="none",
             )
         )
 
@@ -872,7 +1184,7 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[Geometry
             mod=cfg.mod_crop,
             max_target_height=max_target_height,
         )
-        for plan, (extra_top, extra_bottom) in zip(plans, offsets):
+        for plan, (extra_top, extra_bottom) in zip(plans, offsets, strict=True):
             if not (extra_top or extra_bottom):
                 continue
             left, top, right, bottom = plan["crop"]
@@ -893,6 +1205,52 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[Geometry
 
     if cfg.letterbox_pillarbox_aware:
         _align_letterbox_pillarbox(plans)
+
+    if policy is OddGeometryPolicy.SUBSAMP_SAFE:
+        for plan, fmt in zip(plans, clip_formats, strict=True):
+            subsampling_w = _get_subsampling(fmt, "subsampling_w")
+            subsampling_h = _get_subsampling(fmt, "subsampling_h")
+            left, top, right, bottom = plan["crop"]
+
+            if subsampling_h > 0:
+                new_top, new_bottom = _rebalance_axis_even(top, bottom)
+            else:
+                new_top, new_bottom = top, bottom
+
+            if subsampling_w > 0:
+                new_left, new_right = _rebalance_axis_even(left, right)
+            else:
+                new_left, new_right = left, right
+
+            changed_vertical = (new_top, new_bottom) != (top, bottom)
+            changed_horizontal = (new_left, new_right) != (left, right)
+
+            if changed_vertical:
+                logger.warning(
+                    "[GEOMETRY] Rebalanced vertical crop from %s/%s to %s/%s for mod-2 safety; content may shift by 1px",
+                    top,
+                    bottom,
+                    new_top,
+                    new_bottom,
+                )
+            if changed_horizontal:
+                logger.warning(
+                    "[GEOMETRY] Rebalanced horizontal crop from %s/%s to %s/%s for mod-2 safety; content may shift by 1px",
+                    left,
+                    right,
+                    new_left,
+                    new_right,
+                )
+
+            if changed_vertical or changed_horizontal:
+                plan["crop"] = (new_left, new_top, new_right, new_bottom)
+                new_cropped_w = int(plan["width"]) - new_left - new_right
+                new_cropped_h = int(plan["height"]) - new_top - new_bottom
+                if new_cropped_w <= 0 or new_cropped_h <= 0:
+                    raise ScreenshotGeometryError("Rebalanced crop removed all pixels")
+                plan["cropped_w"] = new_cropped_w
+                plan["cropped_h"] = new_cropped_h
+                plan["scaled"] = (new_cropped_w, new_cropped_h)
 
     single_res_target = int(cfg.single_res) if cfg.single_res > 0 else None
     if single_res_target is not None:
@@ -1038,6 +1396,92 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[Geometry
             scaled_h + pad_top + pad_bottom,
         )
 
+    for plan, fmt in zip(plans, clip_formats, strict=True):
+        if policy is OddGeometryPolicy.SUBSAMP_SAFE:
+            subsampling_w = _get_subsampling(fmt, "subsampling_w")
+            subsampling_h = _get_subsampling(fmt, "subsampling_h")
+            pad_left, pad_top, pad_right, pad_bottom = plan["pad"]
+            scaled_w, scaled_h = plan["scaled"]
+
+            new_pad_top, new_pad_bottom = (pad_top, pad_bottom)
+            new_pad_left, new_pad_right = (pad_left, pad_right)
+
+            if subsampling_h > 0:
+                new_pad_top, new_pad_bottom = _rebalance_axis_even(pad_top, pad_bottom)
+                if (new_pad_top, new_pad_bottom) != (pad_top, pad_bottom):
+                    logger.warning(
+                        "[GEOMETRY] Rebalanced vertical padding from %s/%s to %s/%s for mod-2 safety; content may shift by 1px",
+                        pad_top,
+                        pad_bottom,
+                        new_pad_top,
+                        new_pad_bottom,
+                    )
+            if subsampling_w > 0:
+                new_pad_left, new_pad_right = _rebalance_axis_even(pad_left, pad_right)
+                if (new_pad_left, new_pad_right) != (pad_left, pad_right):
+                    logger.warning(
+                        "[GEOMETRY] Rebalanced horizontal padding from %s/%s to %s/%s for mod-2 safety; content may shift by 1px",
+                        pad_left,
+                        pad_right,
+                        new_pad_left,
+                        new_pad_right,
+                    )
+
+            if (
+                (new_pad_top, new_pad_bottom) != (pad_top, pad_bottom)
+                or (new_pad_left, new_pad_right) != (pad_left, pad_right)
+            ):
+                plan["pad"] = (new_pad_left, new_pad_top, new_pad_right, new_pad_bottom)
+                plan["final"] = (
+                    scaled_w + new_pad_left + new_pad_right,
+                    scaled_h + new_pad_top + new_pad_bottom,
+                )
+
+                aligned_pad_left, aligned_pad_top, aligned_pad_right, aligned_pad_bottom = _align_padding_mod(
+                    scaled_w,
+                    scaled_h,
+                    new_pad_left,
+                    new_pad_top,
+                    new_pad_right,
+                    new_pad_bottom,
+                    cfg.mod_crop,
+                    center_pad,
+                )
+
+                if (
+                    aligned_pad_left,
+                    aligned_pad_top,
+                    aligned_pad_right,
+                    aligned_pad_bottom,
+                ) != plan["pad"]:
+                    plan["pad"] = (
+                        aligned_pad_left,
+                        aligned_pad_top,
+                        aligned_pad_right,
+                        aligned_pad_bottom,
+                    )
+                    plan["final"] = (
+                        scaled_w + aligned_pad_left + aligned_pad_right,
+                        scaled_h + aligned_pad_top + aligned_pad_bottom,
+                    )
+
+        plan["requires_full_chroma"] = _compute_requires_full_chroma(
+            fmt,
+            plan["crop"],
+            plan["pad"],
+            policy,
+        )
+
+        if plan["requires_full_chroma"]:
+            needs_promotion, promotion_axes = _resolve_promotion_axes(
+                fmt,
+                plan["crop"],
+                plan["pad"],
+            )
+            plan["promotion_axes"] = promotion_axes if needs_promotion else "none"
+        else:
+            plan["promotion_axes"] = "none"
+
     return plans
 
 
@@ -1095,6 +1539,10 @@ def _save_frame_with_fpng(
     overlay_text: Optional[str] = None,
     overlay_state: Optional[OverlayState] = None,
     strict_overlay: bool = False,
+    source_props: Mapping[str, Any] | None = None,
+    geometry_plan: GeometryPlan | None = None,
+    tonemap_info: "vs_core.TonemapInfo | None" = None,
+    pivot_notifier: Callable[[str], None] | None = None,
 ) -> None:
     try:
         import vapoursynth as vs  # type: ignore
@@ -1104,6 +1552,42 @@ def _save_frame_with_fpng(
     if not isinstance(clip, vs.VideoNode):
         raise ScreenshotWriterError("Expected a VapourSynth clip for rendering")
 
+    resolved_policy = _normalise_geometry_policy(cfg.odd_geometry_policy)
+    rgb_dither = _normalize_rgb_dither(cfg.rgb_dither)
+    source_props_map = _resolve_source_props(clip, source_props)
+    requires_full_chroma = bool(geometry_plan and geometry_plan.get("requires_full_chroma"))
+    fmt = getattr(clip, "format", None)
+    has_axis, axis_label = _resolve_promotion_axes(fmt, crop, pad)
+    yuv_constant = getattr(vs, "YUV", object())
+    color_family = getattr(fmt, "color_family", None)
+    is_sdr = _is_sdr_pipeline(tonemap_info, source_props_map)
+    should_promote = (
+        requires_full_chroma
+        and has_axis
+        and is_sdr
+        and color_family == yuv_constant
+    )
+    format_label = _describe_vs_format(fmt)
+
+    if should_promote:
+        logger.info(
+            "Odd-geometry on subsampled SDR \u2192 promoting to YUV444P16 (policy=%s, axis=%s, fmt=%s)",
+            resolved_policy.value,
+            axis_label,
+            format_label,
+        )
+        logger.debug(
+            "Promotion details frame=%s src_format=%s dst_format=YUV444P16 dither=%s",
+            frame_idx,
+            format_label,
+            rgb_dither.value,
+        )
+        if pivot_notifier is not None:
+            note = (
+                "Full-chroma pivot active (axis={axis}, policy={policy}, backend=fpng, fmt={fmt})"
+            ).format(axis=axis_label, policy=resolved_policy.value, fmt=format_label)
+            _safe_pivot_notify(pivot_notifier, note)
+
     core = getattr(clip, "core", None) or getattr(vs, "core", None)
     fpng_ns = getattr(core, "fpng", None) if core is not None else None
     writer = getattr(fpng_ns, "Write", None) if fpng_ns is not None else None
@@ -1111,6 +1595,13 @@ def _save_frame_with_fpng(
         raise ScreenshotWriterError("VapourSynth fpng.Write plugin is unavailable")
 
     work = clip
+    if should_promote:
+        work = _promote_to_yuv444p16(
+            core,
+            work,
+            frame_idx=frame_idx,
+            source_props=source_props_map,
+        )
     try:
         left, top, right, bottom = crop
         if any(crop):
@@ -1161,7 +1652,19 @@ def _save_frame_with_fpng(
         file_label=label,
     )
 
-    render_clip = _ensure_rgb24(core, render_clip, frame_idx)
+    render_clip = _ensure_rgb24(
+        core,
+        render_clip,
+        frame_idx,
+        source_props=source_props_map,
+        rgb_dither=rgb_dither,
+    )
+    logger.debug(
+        "RGB24 conversion for frame %s used dither=%s (policy=%s)",
+        frame_idx,
+        rgb_dither.value,
+        resolved_policy.value,
+    )
 
     compression = _map_fpng_compression(cfg.compression_level)
     try:
@@ -1214,6 +1717,9 @@ def _save_frame_with_ffmpeg(
     selection_label: str | None,
     *,
     overlay_text: Optional[str] = None,
+    geometry_plan: GeometryPlan | None = None,
+    is_sdr: bool = True,
+    pivot_notifier: Callable[[str], None] | None = None,
 ) -> None:
     if shutil.which("ffmpeg") is None:
         raise ScreenshotWriterError("FFmpeg executable not found in PATH")
@@ -1221,7 +1727,17 @@ def _save_frame_with_ffmpeg(
     cropped_w = max(1, width - crop[0] - crop[2])
     cropped_h = max(1, height - crop[1] - crop[3])
 
+    requires_full_chroma = bool(geometry_plan and geometry_plan.get("requires_full_chroma"))
+    promotion_axes_value = (
+        geometry_plan.get("promotion_axes", "") if geometry_plan is not None else ""
+    )
+    axis_label = str(promotion_axes_value).strip() if promotion_axes_value is not None else ""
+    if not axis_label:
+        axis_label = _describe_plan_axes(geometry_plan)
     filters = [f"select=eq(n\\,{int(frame_idx)})"]
+    should_apply_full_chroma = requires_full_chroma and is_sdr
+    if should_apply_full_chroma:
+        filters.append("format=yuv444p16")
     if any(crop):
         filters.append(
             "crop={w}:{h}:{x}:{y}".format(
@@ -1261,6 +1777,31 @@ def _save_frame_with_ffmpeg(
             "box=0:shadowx=1:shadowy=1:shadowcolor=black:x=10:y=80"
         ).format(text=_escape_drawtext(overlay_text))
         filters.append(overlay_cmd)
+
+    if should_apply_full_chroma:
+        configured = _normalize_rgb_dither(cfg.rgb_dither)
+        ffmpeg_dither = "ordered"
+        if configured is RGBDither.NONE:
+            ffmpeg_dither = "none"
+        elif configured is RGBDither.ORDERED:
+            ffmpeg_dither = "ordered"
+        else:
+            logger.debug(
+                "FFmpeg RGB24 conversion forcing deterministic dither=ordered (configured=%s)",
+                configured.value,
+            )
+        filters.append(f"format=rgb24:dither={ffmpeg_dither}")
+        if pivot_notifier is not None:
+            resolved_policy = _normalise_geometry_policy(cfg.odd_geometry_policy)
+            note = (
+                "Full-chroma pivot active (axis={axis}, policy={policy}, backend=ffmpeg)"
+            ).format(axis=axis_label, policy=resolved_policy.value)
+            _safe_pivot_notify(pivot_notifier, note)
+    elif requires_full_chroma and not is_sdr:
+        logger.debug(
+            "Skipping full-chroma pivot for HDR content (axis=%s)",
+            axis_label or "none",
+        )
 
     filter_chain = ",".join(filters)
     cmd = [
@@ -1336,12 +1877,13 @@ def generate_screenshots(
     alignment_maps: Sequence[Any] | None = None,
     warnings_sink: List[str] | None = None,
     verification_sink: List[Dict[str, Any]] | None = None,
+    pivot_notifier: Callable[[str], None] | None = None,
 ) -> List[str]:
     """
     Render and save screenshots for the given frames from each input clip using the configured writers.
-    
+
     Render each requested frame for every clip, applying geometry planning, optional overlays, alignment mapping, and the selected writer backend (fpng or ffmpeg). Created files are written into out_dir and their paths are returned in the order they were produced.
-    
+
     Parameters:
         clips: Sequence of clip objects prepared for rendering.
         frames: Sequence of frame indices to render for each clip.
@@ -1356,7 +1898,8 @@ def generate_screenshots(
         alignment_maps: Optional sequence of alignment mappers (one per clip) used to map source frame indices.
         warnings_sink: Optional list to which non-fatal warning messages will be appended.
         verification_sink: Optional list to which per-clip verification records will be appended; each record contains keys: file, frame, average, maximum, auto_selected.
-    
+        pivot_notifier: Optional callable invoked with a short text note whenever a full-chroma pivot is applied.
+
     Returns:
         List[str]: Ordered list of file paths for all created screenshot files.
     """
@@ -1389,7 +1932,7 @@ def generate_screenshots(
     processed_results: List[vs_core.ClipProcessResult] = []
     overlay_states: List[OverlayState] = []
 
-    for clip, file_path in zip(clips, files):
+    for clip, file_path in zip(clips, files, strict=True):
         result = vs_core.process_clip_for_screenshot(
             clip,
             file_path,
@@ -1401,7 +1944,6 @@ def generate_screenshots(
         )
         processed_results.append(result)
         overlay_states.append(_new_overlay_state())
-        overlay_mode = str(getattr(color_cfg, "overlay_mode", "minimal")).strip().lower()
         if result.verification is not None:
             logger.info(
                 "[VERIFY] %s frame=%d avg=%.4f max=%.4f",
@@ -1424,7 +1966,7 @@ def generate_screenshots(
     geometry = _plan_geometry([result.clip for result in processed_results], cfg)
 
     for clip_index, (result, file_path, meta, plan, trim_start) in enumerate(
-        zip(processed_results, files, metadata, geometry, trim_offsets)
+        zip(processed_results, files, metadata, geometry, trim_offsets, strict=True)
     ):
         mapper = None
         if alignment_maps is not None and clip_index < len(alignment_maps):
@@ -1441,14 +1983,17 @@ def generate_screenshots(
 
         overlay_state = overlay_states[clip_index]
         base_overlay_text = getattr(result, "overlay_text", None)
-        source_props = getattr(result, "source_props", {})
+        source_props_raw = getattr(result, "source_props", {})
+        resolved_source_props = _resolve_source_props(result.clip, source_props_raw)
+        source_props = resolved_source_props
+        is_sdr_pipeline = _is_sdr_pipeline(result.tonemap, resolved_source_props)
 
         for frame in frames:
             frame_idx = int(frame)
             mapped_idx = frame_idx
             if mapper is not None:
                 try:
-                    mapped_idx, mapped_time, clamped = mapper.map_frame(frame_idx)
+                    mapped_idx, _, clamped = mapper.map_frame(frame_idx)
                 except Exception as exc:  # pragma: no cover - mapper issues
                     logger.warning(
                         "Failed to map frame %s for %s via alignment: %s",
@@ -1456,7 +2001,6 @@ def generate_screenshots(
                         file_path,
                         exc,
                     )
-                    mapped_time = None
                     clamped = False
                 else:
                     if clamped:
@@ -1466,8 +2010,6 @@ def generate_screenshots(
                             mapped_idx,
                             file_path,
                         )
-            else:
-                mapped_time = None
             detail_info = selection_details.get(frame_idx) if selection_details else None
             selection_label = frame_labels.get(frame_idx) if frame_labels else None
             if selection_label is None and detail_info is not None:
@@ -1524,6 +2066,9 @@ def generate_screenshots(
                         height,
                         selection_label,
                         overlay_text=overlay_text,
+                        geometry_plan=plan,
+                        is_sdr=is_sdr_pipeline,
+                        pivot_notifier=pivot_notifier,
                     )
                 else:
                     _save_frame_with_fpng(
@@ -1540,6 +2085,10 @@ def generate_screenshots(
                         overlay_text=overlay_text,
                         overlay_state=overlay_state,
                         strict_overlay=bool(getattr(color_cfg, "strict", False)),
+                        source_props=resolved_source_props,
+                        geometry_plan=plan,
+                        tonemap_info=result.tonemap,
+                        pivot_notifier=pivot_notifier,
                     )
             except ScreenshotWriterError:
                 raise
