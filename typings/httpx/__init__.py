@@ -127,7 +127,7 @@ class AsyncClient:
     ) -> None:
         self.args = args
         self.kwargs = kwargs
-        self.transport = transport or MockTransport(lambda _request: Response())
+        self.transport = transport or MockTransport(lambda request: Response())
 
     async def get(
         self,
