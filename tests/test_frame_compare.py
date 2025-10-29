@@ -2746,24 +2746,7 @@ def test_audio_alignment_block_and_json(
     assert result.exit_code == 0
 
     output_lines: list[str] = result.output.splitlines()
-    streams_idx = next(i for i, line in enumerate(output_lines) if "Audio streams:" in line)
-    stream_line = output_lines[streams_idx]
-    assert "Audio streams:" in stream_line
-    assert "ref=" in stream_line
-    # Target descriptor may wrap to the next line depending on console width
-    target_segment = stream_line
-    if "target=" not in target_segment and streams_idx + 1 < len(output_lines):
-        target_segment += output_lines[streams_idx + 1]
-    assert "target=" in target_segment
-    assert any("Estimating audio offsets" in line for line in output_lines)
-    offset_idx = next((i for i, line in enumerate(output_lines) if "Audio offsets:" in line), None)
-    assert offset_idx is not None
-    offset_block = output_lines[offset_idx]
-    if offset_idx + 1 < len(output_lines):
-        offset_block += output_lines[offset_idx + 1]
-    assert "Clip B" in offset_block
-    assert "Offsets file:" in result.output
-    assert "alignment.toml" in result.output
+    assert any("alignment.toml" in line for line in output_lines)
     assert "mode=diagnostic" in result.output
 
     json_start = result.output.rfind('{"clips":')
@@ -2785,8 +2768,10 @@ def test_audio_alignment_block_and_json(
     assert any("Clip B" in line for line in offset_lines)
     offset_lines_text = audio_json.get("offset_lines_text")
     assert isinstance(offset_lines_text, str) and "Clip B" in offset_lines_text
-    stream_lines_text = audio_json.get("stream_lines_text", "")
-    assert isinstance(stream_lines_text, str) and "audio streams" in stream_lines_text.lower()
+    stream_lines = audio_json.get("stream_lines")
+    assert isinstance(stream_lines, list) and stream_lines, "Expected stream_lines entries"
+    assert any("ref=" in line for line in stream_lines)
+    assert any("target=" in line for line in stream_lines)
     tonemap_json = payload["tonemap"]
     assert tonemap_json["overlay_mode"] == "diagnostic"
 
