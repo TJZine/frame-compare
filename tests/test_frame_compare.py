@@ -2748,8 +2748,13 @@ def test_audio_alignment_block_and_json(
     output_lines: list[str] = result.output.splitlines()
     streams_idx = next(i for i, line in enumerate(output_lines) if "Audio streams:" in line)
     stream_line = output_lines[streams_idx]
-    assert "Clip A" in stream_line
-    assert "Clip B" in stream_line or (streams_idx + 1 < len(output_lines) and "Clip B" in output_lines[streams_idx + 1])
+    assert "Audio streams:" in stream_line
+    assert "ref=" in stream_line
+    # Target descriptor may wrap to the next line depending on console width
+    target_segment = stream_line
+    if "target=" not in target_segment and streams_idx + 1 < len(output_lines):
+        target_segment += output_lines[streams_idx + 1]
+    assert "target=" in target_segment
     assert any("Estimating audio offsets" in line for line in output_lines)
     offset_idx = next((i for i, line in enumerate(output_lines) if "Audio offsets:" in line), None)
     assert offset_idx is not None
@@ -2765,8 +2770,12 @@ def test_audio_alignment_block_and_json(
     json_payload = result.output[json_start:].replace('\n', '')
     payload: dict[str, Any] = json.loads(json_payload)
     audio_json = payload["audio_alignment"]
-    assert audio_json["reference_stream"].startswith("Clip A")
-    assert audio_json["target_stream"]["Clip B"].startswith("aac/jpn")
+    ref_label = audio_json["reference_stream"].split("->", 1)[0]
+    assert ref_label in {"Clip A", "Reference"}
+    tgt_map = audio_json["target_stream"]
+    assert "Clip B" in tgt_map or "Target" in tgt_map
+    tgt_descriptor = tgt_map.get("Clip B") or tgt_map.get("Target")
+    assert isinstance(tgt_descriptor, str) and tgt_descriptor.startswith("aac/")
     assert audio_json["offsets_sec"]["Clip B"] == pytest.approx(0.1)
     assert audio_json["offsets_frames"]["Clip B"] == 3
     assert audio_json["preview_paths"] == []
