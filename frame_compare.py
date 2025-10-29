@@ -95,7 +95,7 @@ from src.analysis import (
 )
 from src.cli_layout import CliLayoutError, CliLayoutRenderer, load_cli_layout
 from src.screenshot import ScreenshotError, generate_screenshots
-from src.slowpics import SlowpicsAPIError, upload_comparison
+from src.slowpics import SlowpicsAPIError, build_shortcut_filename, upload_comparison
 from src.tmdb import (
     TMDBAmbiguityError,
     TMDBCandidate,
@@ -5560,11 +5560,8 @@ def run_cli(
         slowpics_block = _ensure_slowpics_block(json_tail, cfg)
         slowpics_block["url"] = slowpics_url
         if cfg.slowpics.create_url_shortcut:
-            key = slowpics_url.rstrip("/").rsplit("/", 1)[-1]
-            if key:
-                slowpics_block["shortcut_path"] = str(out_dir / f"slowpics_{key}.url")
-            else:
-                slowpics_block.setdefault("shortcut_path", None)
+            shortcut_filename = build_shortcut_filename(cfg.slowpics.collection_name, slowpics_url)
+            slowpics_block["shortcut_path"] = str(out_dir / shortcut_filename)
         else:
             slowpics_block["shortcut_path"] = None
 
@@ -5820,9 +5817,9 @@ def main(
             clipboard_hint = " (copied to clipboard)"
 
         if cfg.slowpics.create_url_shortcut:
-            key = slowpics_url.rstrip("/").rsplit("/", 1)[-1]
-            if key:
-                shortcut_path_str = str(out_dir / f"slowpics_{key}.url")
+            shortcut_filename = build_shortcut_filename(cfg.slowpics.collection_name, slowpics_url)
+            if shortcut_filename:
+                shortcut_path_str = str(out_dir / shortcut_filename)
 
         print("[✓] slow.pics: verifying & saving shortcut")
         url_line = f"slow.pics URL: {slowpics_url}{clipboard_hint}"

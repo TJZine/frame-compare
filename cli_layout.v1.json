@@ -102,9 +102,9 @@
         "[[key]]Clips[[/]]: [[value]]{clips.count}[[/]]  [[key]]Step[[/]] [[value]]{analysis.step}[[/]]  [[key]]Downscale[[/]] [[value]]{analysis.downscale_height}[[/]][[unit]]px[[/]]  [[key]]Frames[[/]] [[value]]{analysis.output_frame_count}[[/]]",
         "[[key]]Window[[/]] lead [[value]]{window.ignore_lead_seconds:.2f}[[/]][[unit]]s[[/]]  trail [[value]]{window.ignore_trail_seconds:.2f}[[/]][[unit]]s[[/]]  min [[value]]{window.min_window_seconds:.2f}[[/]][[unit]]s[[/]]",
         "[[key]]Plan[[/]] dark [[value]]{analysis.counts.dark}[[/]]  bright [[value]]{analysis.counts.bright}[[/]]  motion [[value]]{analysis.counts.motion}[[/]]  random [[value]]{analysis.counts.random}[[/]]  user [[value]]{analysis.counts.user}[[/]]",
-        "[[key]]Audio align[[/]] [[value]]{audio_alignment.enabled|bool}[[/]]  offset [[value]]{audio_alignment.offsets_sec:+.3f}[[/]][[unit]]s[[/]]  corr [[value]]{audio_alignment.corr:.2f}[[/]]",
+        "[[key]]Audio align[[/]] [[value]]{audio_alignment.enabled|bool}[[/]]",
         "[[key]]Canvas[[/]] single_res [[value]]{render.single_res|tallest}[[/]] [[unit]]px[[/]]  upscale [[value]]{render.upscale|bool}[[/]]  pad [[value]]{render.center_pad|bool}[[/]]",
-        "[[key]]Tonemap[[/]] [[value]]{tonemap.tone_curve}[[/]] → [[value]]{tonemap.target_nits}[[/]][[unit]]nits[[/]]  [[key]]Cache[[/]] [[value]]{cache.status}[[/]]"
+        "[[key]]Tonemap[[/]] [[value]]{tonemap.tone_curve}[[/]] → [[value]]{tonemap.target_nits:.0f}[[/]][[unit]]nits[[/]]  [[key]]Cache[[/]] [[value]]{cache.status}[[/]]"
       ]
     },
     {
@@ -160,10 +160,8 @@
         {
           "lines": [
             "Streams: [[key]]ref[[/]]=\"[[value]]{audio_alignment.reference_stream}[[/]]\"  [[key]]target[[/]]=\"[[value]]{audio_alignment.target_stream}[[/]]\"",
-            "Offset:  [[value]]{audio_alignment.offsets_sec:+.3f}[[/]][[unit]]s[[/]]  ([[value]]{audio_alignment.offsets_frames:+d}[[/]][[unit]]f[[/]] @ [[value]]{clips.ref.fps:.3f}[[/]][[unit]]fps[[/]])  (corr=[[value]]{audio_alignment.corr:.2f}[[/]], thresh=[[value]]{audio_alignment.threshold:.2f}[[/]])",
-            "Preview: [[path]]{audio_alignment.preview_paths.0.e}[[/]]",
-            "         [[path]]{audio_alignment.preview_paths.1.e}[[/]]",
-            "Confirm: [[value]]{audio_alignment.confirmed}[[/]]{audio_alignment.confirmed?`  [[dim]]→ wrote: ${audio_alignment.offsets_filename.e}[[/]]`:`  [[dim]]→ wrote: ${audio_alignment.offsets_filename.e} (manual edit suggested)[[/]]`}"
+            "Offset:  [[value]]{audio_alignment.offsets_sec:+.3f}[[/]][[unit]]s[[/]]  ([[value]]{audio_alignment.offsets_frames:+d}[[/]][[unit]]f[[/]] @ [[value]]{clips.ref.fps:.3f}[[/]][[unit]]fps[[/]])",
+            "[[dim]]wrote: [[path]]{audio_alignment.offsets_filename.e}[[/]]{audio_alignment.confirmed?'':' (manual edit suggested)'}[[/]]"
           ]
         }
       ]

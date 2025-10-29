@@ -2073,7 +2073,7 @@ def test_cli_tmdb_resolution_populates_slowpics(
     assert title_json["final"] == "Resolved Title (2023) [MOVIE]"
     assert inputs_json["resolved_base"] == "Resolved Title (2023)"
     assert slowpics_json["url"] == "https://slow.pics/c/example"
-    assert slowpics_json["shortcut_path"].endswith("slowpics_example.url")
+    assert slowpics_json["shortcut_path"].endswith("Resolved_Title_2023_MOVIE.url")
     assert slowpics_json["deleted_screens_dir"] is False
 
 
@@ -2757,7 +2757,7 @@ def test_audio_alignment_block_and_json(
     if offset_idx + 1 < len(output_lines):
         offset_block += output_lines[offset_idx + 1]
     assert "Clip B" in offset_block
-    assert "Confirm:" in result.output
+    assert "wrote:" in result.output
     assert "alignment.toml" in result.output
     assert "mode=diagnostic" in result.output
 
