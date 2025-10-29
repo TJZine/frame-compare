@@ -42,6 +42,13 @@ quick-start configuration paths.
 
 *VSPreview helper notes:* generated scripts log using ASCII arrows to stay compatible with legacy Windows consoles. Overlay text inside the preview still renders with full Unicode glyphs. Switch your console to UTF-8 (`chcp 65001`) or set `PYTHONIOENCODING=UTF-8` for Python-only runs if you prefer Unicode output in logs.
 
+### CLI output hints
+
+- The **Prepare · Audio** panel now mirrors the runtime summary produced by `_maybe_apply_audio_alignment` (`frame_compare.py:2620-2735, 4606-4630`).  
+- When offsets are reused from disk, the estimation line switches to `Audio offsets reused from existing file (…)` so you can confirm cached trims without digging into logs.  
+- Per-clip offset lines include both seconds and frame counts (for example `+0.083s (+2f @ 23.976)`), helping you spot outliers before renders begin.  
+- The footer always surfaces the resolved offsets file so you can open or edit `alignment.toml` directly.
+
 ## Screenshot rendering
 
 <!-- markdownlint-disable MD013 -->
@@ -83,6 +90,9 @@ quick-start configuration paths.
 | `[tmdb].enable_anime_parsing` | Anime-specific parsing toggle. | bool | `true` |
 | `[tmdb].cache_ttl_seconds` | TMDB cache lifetime (seconds). | int | `86400` |
 <!-- markdownlint-restore -->
+
+**Shortcut naming:** uploaded runs create a `.url` file using the resolved collection name (sanitised via `build_shortcut_filename` in `src/slowpics.py:148-164`).  
+If the name collapses to an empty string, the CLI falls back to the canonical comparison key; otherwise repeated runs with the same collection name will refresh the same shortcut file—append a suffix in `[slowpics].collection_name` if you need per-run artifacts.
 
 ## Runtime and environment
 

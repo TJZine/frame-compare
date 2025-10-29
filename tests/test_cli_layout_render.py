@@ -126,6 +126,15 @@ def _sample_values(tmp_path: Path) -> Dict[str, Any]:
             "confirmed": "auto",
             "reference_stream": "Reference->ac3/en/5.1",
             "target_stream": "Target->aac/en/5.1",
+            "stream_lines": [
+                "Audio streams: ref=Reference->ac3/en/5.1  target=Target->aac/en/5.1",
+                "Estimating audio offsets … fps=23.976 search=±12.00s start=0.00s window=auto",
+            ],
+            "stream_lines_text": "Audio streams: ref=Reference->ac3/en/5.1  target=Target->aac/en/5.1\nEstimating audio offsets … fps=23.976 search=±12.00s start=0.00s window=auto",
+            "offset_lines": [
+                "Audio offsets: Target: +0.123s (+3f @ 23.976)",
+            ],
+            "offset_lines_text": "Audio offsets: Target: +0.123s (+3f @ 23.976)",
         },
         "vspreview": {
             "mode": "baseline",

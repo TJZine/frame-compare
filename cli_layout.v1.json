@@ -159,9 +159,9 @@
       "blocks": [
         {
           "lines": [
-            "Streams: [[key]]ref[[/]]=\"[[value]]{audio_alignment.reference_stream}[[/]]\"  [[key]]target[[/]]=\"[[value]]{audio_alignment.target_stream}[[/]]\"",
-            "Offset:  [[value]]{audio_alignment.offsets_sec:+.3f}[[/]][[unit]]s[[/]]  ([[value]]{audio_alignment.offsets_frames:+d}[[/]][[unit]]f[[/]] @ [[value]]{clips.ref.fps:.3f}[[/]][[unit]]fps[[/]])",
-            "[[dim]]wrote: [[path]]{audio_alignment.offsets_filename.e}[[/]]{audio_alignment.confirmed?'':' (manual edit suggested)'}[[/]]"
+            "{audio_alignment.stream_lines_text?`[[value]]${audio_alignment.stream_lines_text|wrap_indent2}[[/]]`:''}",
+            "{audio_alignment.offset_lines_text?`[[value]]${audio_alignment.offset_lines_text|wrap_indent2}[[/]]`:''}",
+            "[[dim]]Offsets file: [[path]]{audio_alignment.offsets_filename.e}[[/]]{audio_alignment.confirmed?'':' (manual edit suggested)'}[[/]]"
           ]
         }
       ]

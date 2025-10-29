@@ -6,23 +6,28 @@
 Automated frame sampling, alignment, tonemapping, and slow.pics uploads for deterministic encode comparisons.
 
 ## Table of Contents
-- [Overview](#overview)
-- [Features](#features)
-- [Quickstart](#quickstart)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Configuration](#configuration)
-- [CLI Reference](#cli-reference)
-- [Examples](#examples)
-- [Troubleshooting](#troubleshooting)
-- [FAQ](#faq)
-- [Performance](#performance)
-- [Security](#security)
-- [Privacy & Telemetry](#privacy--telemetry)
-- [Versioning](#versioning)
-- [Contributing](#contributing)
-- [License](#license)
-- [Support](#support)
+- [Frame Compare](#frame-compare)
+  - [Table of Contents](#table-of-contents)
+  - [Overview](#overview)
+  - [Features](#features)
+  - [Quickstart](#quickstart)
+  - [Installation](#installation)
+  - [Usage](#usage)
+  - [Configuration](#configuration)
+  - [CLI Reference](#cli-reference)
+  - [Examples](#examples)
+    - [VSPreview manual alignment assistant](#vspreview-manual-alignment-assistant)
+    - [Path diagnostics before heavy runs](#path-diagnostics-before-heavy-runs)
+    - [FFmpeg-only captures](#ffmpeg-only-captures)
+  - [Troubleshooting](#troubleshooting)
+  - [FAQ](#faq)
+  - [Performance](#performance)
+  - [Security](#security)
+  - [Privacy \& Telemetry](#privacy--telemetry)
+  - [Versioning](#versioning)
+  - [Contributing](#contributing)
+  - [License](#license)
+  - [Support](#support)
 
 ## Overview
 
@@ -122,7 +127,7 @@ uv run python -m frame_compare --root /path/to/workspace --diagnose-paths
 uv run python -m frame_compare --root /path --config config/config.toml --json-pretty --no-color
 ```
 
-Outputs are written beneath the input directory: screenshots under `screens` (configurable), cached metrics alongside video inputs, slow.pics shortcuts in the same directory, and a JSON summary on stdout.
+Outputs are written beneath the input directory: screenshots under `screens` (configurable), cached metrics alongside video inputs, slow.pics shortcuts in the same directory, and a JSON summary on stdout. Shortcut filenames mirror the resolved slow.pics collection name.
 
 > **Warning:** The default `[slowpics].delete_screen_dir_after_upload = true` removes the screenshots directory after successful uploads. Keep `screenshots.directory_name` relative to the input root and avoid reusing directories shared with other projects.
 

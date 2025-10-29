@@ -387,6 +387,38 @@ def test_url_matches_creation_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert upload_fields["imageUuid"] == "img-from-response"
 
 
+@pytest.mark.parametrize(
+    ("collection_name", "canonical_url", "expected"),
+    [
+        ("Simple Title", "https://slow.pics/c/abc123", "Simple_Title.url"),
+        ("Title with / separators", "https://slow.pics/c/key", "Title_with_separators.url"),
+        ("   ", "https://slow.pics/c/key", "key.url"),
+        ("../escape_attempt", "https://slow.pics/c/key", "escape_attempt.url"),
+    ],
+)
+def test_build_shortcut_filename_sanitizes_and_falls_back(
+    collection_name: str,
+    canonical_url: str,
+    expected: str,
+) -> None:
+    actual = slowpics.build_shortcut_filename(collection_name, canonical_url)
+    assert actual == expected
+
+
+def test_build_shortcut_filename_uses_default_when_no_segment() -> None:
+    actual = slowpics.build_shortcut_filename("", "not-a-url")
+    assert actual == "not-a-url.url"
+
+
+def test_build_shortcut_filename_truncates_long_names() -> None:
+    long_name = "x" * 200
+    filename = slowpics.build_shortcut_filename(long_name, "https://slow.pics/c/key")
+    assert filename.endswith(".url")
+    basename = filename[:-4]
+    assert len(basename) == 120
+    assert set(basename) == {"x"}
+
+
 def test_missing_key_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = SlowpicsConfig()
     image = _write_image(tmp_path, "123 - ClipA.png")

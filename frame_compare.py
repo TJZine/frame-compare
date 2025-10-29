@@ -335,6 +335,10 @@ class AudioAlignmentJSON(TypedDict, total=False):
     target_stream: dict[str, object]
     offsets_sec: dict[str, object]
     offsets_frames: dict[str, object]
+    stream_lines: list[str]
+    stream_lines_text: str
+    offset_lines: list[str]
+    offset_lines_text: str
     preview_paths: list[str]
     confirmed: bool | str | None
     offsets_filename: str
@@ -4617,6 +4621,14 @@ def run_cli(
             key: int(value) for key, value in alignment_display.json_offsets_frames.items()
         }
         json_tail["audio_alignment"]["offsets_frames"] = offsets_frames
+        stream_lines_output = list(alignment_display.stream_lines)
+        if alignment_display.estimation_line:
+            stream_lines_output.append(alignment_display.estimation_line)
+        json_tail["audio_alignment"]["stream_lines"] = stream_lines_output
+        json_tail["audio_alignment"]["stream_lines_text"] = "\n".join(stream_lines_output) if stream_lines_output else ""
+        offset_lines_output = list(alignment_display.offset_lines)
+        json_tail["audio_alignment"]["offset_lines"] = offset_lines_output
+        json_tail["audio_alignment"]["offset_lines_text"] = "\n".join(offset_lines_output) if offset_lines_output else ""
         if alignment_display.manual_trim_lines:
             json_tail["audio_alignment"]["manual_trim_summary"] = list(alignment_display.manual_trim_lines)
         else:
@@ -4629,6 +4641,10 @@ def run_cli(
         json_tail["audio_alignment"]["offsets_sec"] = cast(dict[str, object], {})
         json_tail["audio_alignment"]["offsets_frames"] = cast(dict[str, object], {})
         json_tail["audio_alignment"]["manual_trim_summary"] = []
+        json_tail["audio_alignment"]["stream_lines"] = []
+        json_tail["audio_alignment"]["stream_lines_text"] = ""
+        json_tail["audio_alignment"]["offset_lines"] = []
+        json_tail["audio_alignment"]["offset_lines_text"] = ""
     json_tail["audio_alignment"]["enabled"] = bool(cfg.audio_alignment.enable)
     json_tail["audio_alignment"]["suggestion_mode"] = bool(
         alignment_summary.suggestion_mode if alignment_summary is not None else False

@@ -2746,18 +2746,18 @@ def test_audio_alignment_block_and_json(
     assert result.exit_code == 0
 
     output_lines: list[str] = result.output.splitlines()
-    streams_idx = next(i for i, line in enumerate(output_lines) if line.strip().startswith("Streams:"))
-    assert 'ref="Clip A->' in output_lines[streams_idx]
-    clip_b_line = output_lines[streams_idx + 1] if streams_idx + 1 < len(output_lines) else ""
-    assert "Clip B" in (output_lines[streams_idx] + clip_b_line)
+    streams_idx = next(i for i, line in enumerate(output_lines) if "Audio streams:" in line)
+    stream_line = output_lines[streams_idx]
+    assert "Clip A" in stream_line
+    assert "Clip B" in stream_line or (streams_idx + 1 < len(output_lines) and "Clip B" in output_lines[streams_idx + 1])
     assert any("Estimating audio offsets" in line for line in output_lines)
-    offset_idx = next((i for i, line in enumerate(output_lines) if line.strip().startswith("Offset:")), None)
+    offset_idx = next((i for i, line in enumerate(output_lines) if "Audio offsets:" in line), None)
     assert offset_idx is not None
     offset_block = output_lines[offset_idx]
     if offset_idx + 1 < len(output_lines):
         offset_block += output_lines[offset_idx + 1]
     assert "Clip B" in offset_block
-    assert "wrote:" in result.output
+    assert "Offsets file:" in result.output
     assert "alignment.toml" in result.output
     assert "mode=diagnostic" in result.output
 
@@ -2771,6 +2771,13 @@ def test_audio_alignment_block_and_json(
     assert audio_json["offsets_frames"]["Clip B"] == 3
     assert audio_json["preview_paths"] == []
     assert audio_json["confirmed"] == "auto"
+    offset_lines = audio_json.get("offset_lines")
+    assert isinstance(offset_lines, list) and offset_lines, "Expected offset_lines for cached alignment reuse"
+    assert any("Clip B" in line for line in offset_lines)
+    offset_lines_text = audio_json.get("offset_lines_text")
+    assert isinstance(offset_lines_text, str) and "Clip B" in offset_lines_text
+    stream_lines_text = audio_json.get("stream_lines_text", "")
+    assert isinstance(stream_lines_text, str) and "audio streams" in stream_lines_text.lower()
     tonemap_json = payload["tonemap"]
     assert tonemap_json["overlay_mode"] == "diagnostic"
 
