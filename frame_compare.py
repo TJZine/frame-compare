@@ -429,7 +429,7 @@ def _ensure_slowpics_block(json_tail: JsonTail, cfg: AppConfig) -> SlowpicsJSON:
     """Ensure that ``json_tail`` contains a slow.pics block and return it."""
 
     block = json_tail.get("slowpics")
-    if block is None:
+    if not isinstance(block, dict):
         block = SlowpicsJSON(
             enabled=bool(cfg.slowpics.auto_upload),
             title=SlowpicsTitleBlock(
@@ -448,7 +448,15 @@ def _ensure_slowpics_block(json_tail: JsonTail, cfg: AppConfig) -> SlowpicsJSON:
             remove_after_days=int(cfg.slowpics.remove_after_days),
         )
         json_tail["slowpics"] = block
-    return block
+    else:
+        block = cast(SlowpicsJSON, block)
+        if "url" not in block:
+            block["url"] = None
+        if "shortcut_path" not in block:
+            block["shortcut_path"] = None
+        if "deleted_screens_dir" not in block:
+            block["deleted_screens_dir"] = False
+    return cast(SlowpicsJSON, block)
 
 
 @dataclass
@@ -461,6 +469,8 @@ class RunResult:
         frames (List[int]): Frame numbers selected for screenshot generation.
         out_dir (Path): Output directory containing generated assets.
         out_dir_created (bool): Whether this run created ``out_dir`` (used to guard cleanup).
+        out_dir_created_path (Optional[Path]): Resolved directory path created during this run when
+            ``out_dir_created`` is True; used to ensure clean-up only removes directories we manage.
         root (Path): Resolved input root directory used for all generated artefacts.
         config (AppConfig): Effective application configuration.
         image_paths (List[str]): Paths to the generated screenshots.
@@ -471,6 +481,7 @@ class RunResult:
     frames: List[int]
     out_dir: Path
     out_dir_created: bool
+    out_dir_created_path: Optional[Path]
     root: Path
     config: AppConfig
     image_paths: List[str]
@@ -4039,6 +4050,7 @@ def run_cli(
     )
     out_dir_preexisting = out_dir.exists()
     created_out_dir = False
+    created_out_dir_path: Optional[Path] = None
     if not out_dir_preexisting:
         try:
             out_dir.mkdir(parents=True, exist_ok=True)
@@ -4051,6 +4063,10 @@ def run_cli(
                 ),
             ) from exc
         created_out_dir = True
+        try:
+            created_out_dir_path = out_dir.resolve()
+        except OSError:
+            created_out_dir_path = out_dir
     analysis_cache_path = _resolve_workspace_subdir(
         root,
         cfg.analysis.frame_data_filename,
@@ -5557,6 +5573,7 @@ def run_cli(
         frames=list(frames),
         out_dir=out_dir,
         out_dir_created=created_out_dir,
+        out_dir_created_path=created_out_dir_path,
         root=root,
         config=cfg,
         image_paths=list(image_paths),
@@ -5816,34 +5833,53 @@ def main(
             print("Shortcut: (disabled)")
 
         if cfg.slowpics.delete_screen_dir_after_upload:
-            if not _path_is_within_root(result.root, out_dir):
-                print(
-                    "[yellow]Warning:[/yellow] Skipping screenshot cleanup because the output"
-                    f" directory {out_dir} is outside the input root {result.root}"
-                )
-            elif not result.out_dir_created:
-                print(
-                    "[yellow]Warning:[/yellow] Screenshot directory existed before this run; "
-                    "skipping automatic cleanup."
-                )
+            created_path = result.out_dir_created_path if result.out_dir_created else None
+            if created_path is None:
+                if result.out_dir_created:
+                    print(
+                        "[yellow]Warning:[/yellow] Unable to resolve created screenshots "
+                        "directory; skipping automatic cleanup."
+                    )
+                else:
+                    print(
+                        "[yellow]Warning:[/yellow] Screenshot directory existed before this run; "
+                        "skipping automatic cleanup."
+                    )
             else:
                 try:
-                    shutil.rmtree(out_dir)
-                    deleted_dir = True
-                    print("Cleaned up screenshots after upload")
-                    builtins.print(f"  {out_dir}")
-                except OSError as exc:
+                    resolved_created = created_path.resolve()
+                except OSError:
+                    resolved_created = created_path
+                try:
+                    resolved_out_dir = out_dir.resolve()
+                except OSError:
+                    resolved_out_dir = out_dir
+                if not _path_is_within_root(result.root, resolved_created):
                     print(
-                        f"[yellow]Warning:[/yellow] Failed to delete screenshot directory: {exc}"
+                        "[yellow]Warning:[/yellow] Skipping screenshot cleanup because the output"
+                        f" directory {resolved_created} is outside the input root {result.root}"
                     )
+                elif resolved_created != resolved_out_dir:
+                    print(
+                        "[yellow]Warning:[/yellow] Skipping screenshot cleanup because the "
+                        "resolved screenshots directory changed during the run."
+                    )
+                else:
+                    try:
+                        shutil.rmtree(resolved_created)
+                        deleted_dir = True
+                        print("Cleaned up screenshots after upload")
+                        builtins.print(f"  {resolved_created}")
+                    except OSError as exc:
+                        print(
+                            f"[yellow]Warning:[/yellow] Failed to delete screenshot directory: {exc}"
+                        )
         slowpics_block = _ensure_slowpics_block(json_tail, cfg)
         slowpics_block["url"] = slowpics_url
         slowpics_block["shortcut_path"] = shortcut_path_str
         slowpics_block["deleted_screens_dir"] = deleted_dir
-    elif slowpics_block is not None:
-        slowpics_block.setdefault("deleted_screens_dir", False)
-        slowpics_block.setdefault("shortcut_path", None)
-        slowpics_block.setdefault("url", None)
+    elif isinstance(slowpics_block, dict):
+        _ensure_slowpics_block(json_tail, cfg)
 
     emit_json_tail_flag = True
     if hasattr(cfg, "cli"):
