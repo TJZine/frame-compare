@@ -39,15 +39,6 @@
     root.appendChild(error);
   }
 
-  function fetchJson(url) {
-    return fetch(url).then((response) => {
-      if (!response.ok) {
-        throw new Error(`Failed to load ${url}: ${response.status}`);
-      }
-      return response.json();
-    });
-  }
-
   function setSlider(value) {
     const percent = Math.min(100, Math.max(0, Number(value) || 0));
     overlay.style.width = `${percent}%`;
@@ -322,10 +313,28 @@
     }
   });
 
-  fetchJson(DATA_URL)
-    .then((data) => init(data))
-    .catch((error) => {
-      console.error(error);
-      showError("Unable to load report data. Ensure data.json is present alongside index.html.");
-    });
+  (function loadData() {
+    const script = document.getElementById("report-data");
+    if (script && script.textContent) {
+      try {
+        const parsed = JSON.parse(script.textContent);
+        init(parsed);
+        return;
+      } catch (error) {
+        console.error("Failed to parse embedded report data", error);
+      }
+    }
+    fetch(DATA_URL)
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Failed to load ${DATA_URL}: ${response.status}`);
+        }
+        return response.json();
+      })
+      .then((data) => init(data))
+      .catch((error) => {
+        console.error(error);
+        showError("Unable to load report data. Ensure data.json is present alongside index.html.");
+      });
+  })();
 })();

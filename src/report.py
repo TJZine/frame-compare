@@ -214,11 +214,14 @@ def generate_html_report(
     }
 
     data_path = report_dir / "data.json"
-    data_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    json_text = json.dumps(data, indent=2, ensure_ascii=False)
+    data_path.write_text(json_text, encoding="utf-8")
 
     template_text = _INDEX_TEMPLATE_PATH.read_text(encoding="utf-8")
     escaped_title = html.escape(document_title, quote=True)
-    html_output = template_text.replace("{{TITLE}}", escaped_title)
+    embedded_json = json.dumps(data, separators=(",", ":"), ensure_ascii=False)
+    embedded_json = embedded_json.replace("</", "<\\/")
+    html_output = template_text.replace("{{TITLE}}", escaped_title).replace("{{DATA_JSON}}", embedded_json)
     (report_dir / "index.html").write_text(html_output, encoding="utf-8")
 
     return report_dir / "index.html"
