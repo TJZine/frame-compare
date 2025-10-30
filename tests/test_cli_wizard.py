@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import sys
 import tomllib
-from pathlib import Path
-
 from io import TextIOBase
+from pathlib import Path
 from typing import Any, TextIO
 
 from click.testing import CliRunner
