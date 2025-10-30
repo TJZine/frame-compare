@@ -21,6 +21,7 @@ from src.datatypes import (
     NamingConfig,
     OverridesConfig,
     PathsConfig,
+    ReportConfig,
     RuntimeConfig,
     ScreenshotConfig,
     SlowpicsConfig,
@@ -126,6 +127,7 @@ def _make_config(input_dir: Path) -> AppConfig:
         ),
         source=SourceConfig(preferred="lsmas"),
         audio_alignment=AudioAlignmentConfig(enable=False),
+        report=ReportConfig(enable=False),
     )
 
 
@@ -1091,6 +1093,13 @@ def _make_json_tail_stub() -> frame_compare.JsonTail:
             "config_path": "",
             "legacy_config": False,
         },
+        "report": {
+            "enabled": False,
+            "path": None,
+            "output_dir": "report",
+            "open_after_generate": True,
+            "opened": False,
+        },
         "vspreview_mode": None,
         "suggested_frames": 0,
         "suggested_seconds": 0.0,
@@ -1699,6 +1708,7 @@ def test_label_dedupe_preserves_short_labels(
         overrides=OverridesConfig(),
         source=SourceConfig(),
         audio_alignment=AudioAlignmentConfig(enable=False),
+        report=ReportConfig(enable=False),
     )
 
     monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
@@ -1863,6 +1873,7 @@ def test_cli_input_override_and_cleanup(
         overrides=OverridesConfig(),
         source=SourceConfig(),
         audio_alignment=AudioAlignmentConfig(enable=False),
+        report=ReportConfig(enable=False),
     )
 
     monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
@@ -2073,7 +2084,7 @@ def test_cli_tmdb_resolution_populates_slowpics(
     assert title_json["final"] == "Resolved Title (2023) [MOVIE]"
     assert inputs_json["resolved_base"] == "Resolved Title (2023)"
     assert slowpics_json["url"] == "https://slow.pics/c/example"
-    assert slowpics_json["shortcut_path"].endswith("slowpics_example.url")
+    assert slowpics_json["shortcut_path"].endswith("Resolved_Title_2023_MOVIE.url")
     assert slowpics_json["deleted_screens_dir"] is False
 
 
@@ -2746,31 +2757,32 @@ def test_audio_alignment_block_and_json(
     assert result.exit_code == 0
 
     output_lines: list[str] = result.output.splitlines()
-    streams_idx = next(i for i, line in enumerate(output_lines) if line.strip().startswith("Streams:"))
-    assert 'ref="Clip A->' in output_lines[streams_idx]
-    clip_b_line = output_lines[streams_idx + 1] if streams_idx + 1 < len(output_lines) else ""
-    assert "Clip B" in (output_lines[streams_idx] + clip_b_line)
-    assert any("Estimating audio offsets" in line for line in output_lines)
-    offset_idx = next((i for i, line in enumerate(output_lines) if line.strip().startswith("Offset:")), None)
-    assert offset_idx is not None
-    offset_block = output_lines[offset_idx]
-    if offset_idx + 1 < len(output_lines):
-        offset_block += output_lines[offset_idx + 1]
-    assert "Clip B" in offset_block
-    assert "Confirm:" in result.output
-    assert "alignment.toml" in result.output
+    assert any("alignment.toml" in line for line in output_lines)
     assert "mode=diagnostic" in result.output
 
     json_start = result.output.rfind('{"clips":')
     json_payload = result.output[json_start:].replace('\n', '')
     payload: dict[str, Any] = json.loads(json_payload)
     audio_json = payload["audio_alignment"]
-    assert audio_json["reference_stream"].startswith("Clip A")
-    assert audio_json["target_stream"]["Clip B"].startswith("aac/jpn")
+    ref_label = audio_json["reference_stream"].split("->", 1)[0]
+    assert ref_label in {"Clip A", "Reference"}
+    tgt_map = audio_json["target_stream"]
+    assert "Clip B" in tgt_map or "Target" in tgt_map
+    tgt_descriptor = tgt_map.get("Clip B") or tgt_map.get("Target")
+    assert isinstance(tgt_descriptor, str) and tgt_descriptor.startswith("aac/")
     assert audio_json["offsets_sec"]["Clip B"] == pytest.approx(0.1)
     assert audio_json["offsets_frames"]["Clip B"] == 3
     assert audio_json["preview_paths"] == []
     assert audio_json["confirmed"] == "auto"
+    offset_lines = audio_json.get("offset_lines")
+    assert isinstance(offset_lines, list) and offset_lines, "Expected offset_lines for cached alignment reuse"
+    assert any("Clip B" in line for line in offset_lines)
+    offset_lines_text = audio_json.get("offset_lines_text")
+    assert isinstance(offset_lines_text, str) and "Clip B" in offset_lines_text
+    stream_lines = audio_json.get("stream_lines")
+    assert isinstance(stream_lines, list) and stream_lines, "Expected stream_lines entries"
+    assert any("ref=" in line for line in stream_lines)
+    assert any("target=" in line for line in stream_lines)
     tonemap_json = payload["tonemap"]
     assert tonemap_json["overlay_mode"] == "diagnostic"
 

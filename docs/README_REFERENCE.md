@@ -4,6 +4,33 @@ Supplemental reference material for [`README.md`](../README.md).
 Use these tables when you need to fine-tune behaviour beyond the
 quick-start configuration paths.
 
+## CLI helpers
+
+- `frame-compare wizard` — interactive configuration assistant. Prompts for workspace root, input directory, slow.pics settings, audio alignment, and renderer preference. Provide `--preset <name>` when stdin is not a TTY to avoid blocking automation.
+- `frame-compare doctor` — quick dependency checklist (VapourSynth, FFmpeg, audio extras, VSPreview, slow.pics, clipboard, config writability). Always exits with 0; add `--json` for machine-readable output.
+- `frame-compare preset list` — enumerate packaged presets: `quick-compare`, `hdr-vs-sdr`, `batch-qc`.
+- `frame-compare preset apply <name>` — merge the selected preset with the default template and write `config/config.toml` (supports `--root`/`--config` like the primary command).
+
+Preset summaries:
+
+| Preset | Focus |
+| --- | --- |
+| `quick-compare` | FFmpeg renderer, reduced sampling quotas, slow.pics disabled for fast iterations. |
+| `hdr-vs-sdr` | Tonemap verification tightened (stricter thresholds and `color.strict=true`). |
+| `batch-qc` | Larger sampling windows and automatic slow.pics uploads for review batches. |
+
+Sample doctor output:
+
+```text
+Dependency check:
+✅ Config path writable  — /workspace/config/config.toml is writable.
+✅ VapourSynth import    — VapourSynth module available.
+✅ FFmpeg binaries       — ffmpeg/ffprobe available.
+✅ Audio alignment deps  — Optional audio dependencies available.
+⚠️ slow.pics network     — [slowpics].auto_upload is enabled. Allow network access to https://slow.pics/ or disable auto_upload.
+✅ Clipboard helper      — Clipboard helper optional when slow.pics auto-upload is disabled.
+```
+
 ## Analysis settings
 
 <!-- markdownlint-disable MD013 -->
@@ -41,6 +68,13 @@ quick-start configuration paths.
 <!-- markdownlint-restore -->
 
 *VSPreview helper notes:* generated scripts log using ASCII arrows to stay compatible with legacy Windows consoles. Overlay text inside the preview still renders with full Unicode glyphs. Switch your console to UTF-8 (`chcp 65001`) or set `PYTHONIOENCODING=UTF-8` for Python-only runs if you prefer Unicode output in logs.
+
+### CLI output hints
+
+- The **Prepare · Audio** panel now mirrors the runtime summary produced after audio alignment completes.  
+- When offsets are reused from disk, the estimation line switches to `Audio offsets reused from existing file (…)` so you can confirm cached trims without digging into logs.  
+- Per-clip offset lines include both seconds and frame counts (for example `+0.083s (+2f @ 23.976)`), helping you spot outliers before renders begin.  
+- The footer always surfaces the resolved offsets file so you can open or edit `alignment.toml` directly.
 
 ## Screenshot rendering
 
@@ -84,6 +118,9 @@ quick-start configuration paths.
 | `[tmdb].cache_ttl_seconds` | TMDB cache lifetime (seconds). | int | `86400` |
 <!-- markdownlint-restore -->
 
+**Shortcut naming:** uploaded runs create a `.url` file using the resolved collection name (sanitised via `build_shortcut_filename` in `src/slowpics.py:148-164`).  
+If the name collapses to an empty string, the CLI falls back to the canonical comparison key; otherwise repeated runs with the same collection name will refresh the same shortcut file—append a suffix in `[slowpics].collection_name` if you need per-run artifacts.
+
 ## Runtime and environment
 
 <!-- markdownlint-disable MD013 -->
@@ -115,3 +152,4 @@ from the repo or copy them beneath your chosen `ROOT` (for example
 | `--no-color` | Disable ANSI colour. | `false` |
 | `--json-pretty` | Pretty-print the JSON tail. | `false` |
 <!-- markdownlint-restore -->
+> The CLI refuses workspace roots inside `site-packages`/`dist-packages`, seeds `ROOT/config/config.toml` when missing, validates writability before running, and blocks derived paths from escaping the workspace. Use `--diagnose-paths` to inspect the resolved locations.

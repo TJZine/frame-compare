@@ -1,0 +1,362 @@
+:root {
+  color-scheme: dark light;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.5;
+}
+
+body {
+  margin: 0;
+  background: #0f1115;
+  color: #f4f6fb;
+}
+
+.rc-header {
+  padding: 1.5rem clamp(1.5rem, 4vw, 3rem);
+  background: linear-gradient(120deg, #1f2330, #131621);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.rc-header h1 {
+  margin: 0 0 0.25rem;
+  font-size: clamp(1.6rem, 3vw, 2.3rem);
+}
+
+.rc-subtitle {
+  margin: 0;
+  color: rgba(240, 244, 255, 0.7);
+  font-size: 0.95rem;
+}
+
+.rc-links a {
+  color: #9fd2ff;
+  text-decoration: none;
+  margin-right: 1rem;
+}
+
+.rc-main {
+  padding: clamp(1rem, 2vw, 2rem) clamp(1.5rem, 4vw, 3rem) 3rem;
+  display: grid;
+  gap: 1.5rem;
+}
+
+.rc-controls {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  align-content: flex-start;
+}
+
+.rc-control-group {
+  display: flex;
+  flex-direction: column;
+  min-width: 9rem;
+}
+
+.rc-control-group label {
+  font-size: 0.85rem;
+  color: rgba(250, 252, 255, 0.8);
+  margin-bottom: 0.35rem;
+}
+
+.rc-control-group select,
+.rc-control-group input[type="range"] {
+  font: inherit;
+  background: #1b1f2b;
+  color: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.4rem;
+  padding: 0.45rem 0.6rem;
+  min-height: 2.4rem;
+}
+
+.rc-slider-control input[type="range"] {
+  width: min(18rem, 40vw);
+}
+
+.rc-zoom-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.rc-zoom-toolbar button {
+  background: #1b1f2b;
+  color: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 0.45rem;
+  padding: 0.35rem 0.7rem;
+  font: inherit;
+  cursor: pointer;
+  min-height: 2.4rem;
+  transition: background 120ms linear, border-color 120ms linear;
+}
+
+.rc-zoom-toolbar button:hover,
+.rc-zoom-toolbar button:focus-visible {
+  border-color: rgba(159, 210, 255, 0.8);
+  background: rgba(159, 210, 255, 0.14);
+}
+
+.rc-zoom-toolbar button:focus-visible {
+  outline: 2px solid rgba(159, 210, 255, 0.8);
+  outline-offset: 2px;
+}
+
+.rc-zoom-toolbar input[type="range"] {
+  width: min(14rem, 32vw);
+}
+
+.rc-zoom-readout {
+  font-size: 0.9rem;
+  color: rgba(240, 244, 255, 0.75);
+  min-width: 3.5rem;
+  text-align: right;
+}
+
+.rc-fit-toolbar {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+
+.rc-fit-toolbar button {
+  background: #1b1f2b;
+  color: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.45rem;
+  padding: 0.35rem 0.6rem;
+  font: inherit;
+  cursor: pointer;
+  transition: background 120ms linear, border-color 120ms linear;
+}
+
+.rc-fit-toolbar button:hover,
+.rc-fit-toolbar button:focus-visible {
+  border-color: rgba(159, 210, 255, 0.8);
+  background: rgba(159, 210, 255, 0.12);
+}
+
+.rc-fit-toolbar button[aria-pressed="true"] {
+  border-color: rgba(159, 210, 255, 0.8);
+  background: rgba(159, 210, 255, 0.2);
+}
+
+.rc-alignment-control select {
+  min-width: 12rem;
+}
+
+.rc-viewer {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.rc-viewer-stage {
+  position: relative;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  background: #090b11;
+  min-height: 16rem;
+  cursor: default;
+}
+
+.rc-viewer-stage.rc-mode-slider:not(.rc-pan-available) {
+  cursor: ew-resize;
+}
+
+.rc-viewer-stage.rc-mode-overlay {
+  cursor: pointer;
+}
+
+.rc-viewer-stage.rc-pan-available {
+  cursor: grab;
+}
+
+.rc-viewer-stage.rc-pan-active {
+  cursor: grabbing;
+}
+
+.rc-canvas {
+  position: relative;
+  width: var(--rc-canvas-width, 100%);
+  height: var(--rc-canvas-height, auto);
+  transform-origin: top left;
+  will-change: transform;
+}
+
+.rc-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.rc-image--right {
+  position: relative;
+  z-index: 1;
+}
+
+.rc-overlay {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  z-index: 2;
+  border-right: 2px solid rgba(159, 210, 255, 0.7);
+  pointer-events: none;
+  clip-path: inset(0 50% 0 0);
+}
+
+.rc-overlay .rc-image--left {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.rc-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: rgba(159, 210, 255, 0.8);
+  z-index: 3;
+  transform: translateX(-1px);
+}
+
+.rc-viewer-stage:focus-visible {
+  outline: 2px solid rgba(159, 210, 255, 0.9);
+  outline-offset: 2px;
+}
+
+.rc-frame-info {
+  font-size: 0.95rem;
+  color: rgba(240, 244, 255, 0.85);
+}
+
+.rc-viewer-help {
+  margin: 0;
+  font-size: 0.85rem;
+  color: rgba(240, 244, 255, 0.6);
+}
+
+.rc-filmstrip {
+  overflow-x: auto;
+}
+
+.rc-frame-list {
+  display: flex;
+  gap: 0.5rem;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.rc-frame-list button {
+  background: #1b1f2b;
+  color: inherit;
+  border: 1px solid transparent;
+  border-radius: 0.6rem;
+  padding: 0.45rem 0.75rem;
+  font: inherit;
+  min-width: 3.5rem;
+  cursor: pointer;
+  transition: border-color 120ms linear, background 120ms linear;
+}
+
+.rc-frame-list button[aria-current="true"] {
+  border-color: rgba(159, 210, 255, 0.8);
+  background: rgba(159, 210, 255, 0.14);
+}
+
+.rc-encode-info,
+.rc-frame-metadata {
+  background: rgba(15, 17, 25, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  font-size: 0.9rem;
+}
+
+.rc-encode-card {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding-bottom: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.rc-encode-card:last-of-type {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.rc-encode-card h3 {
+  margin: 0 0 0.4rem;
+  font-size: 1.05rem;
+}
+
+.rc-encode-card dl {
+  display: grid;
+  grid-template-columns: minmax(6rem, 30%) 1fr;
+  row-gap: 0.2rem;
+  column-gap: 0.75rem;
+  margin: 0;
+}
+
+.rc-encode-card dt {
+  font-weight: 600;
+  color: rgba(240, 244, 255, 0.7);
+}
+
+.rc-encode-card dd {
+  margin: 0;
+}
+
+.rc-frame-metadata table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.rc-frame-metadata th,
+.rc-frame-metadata td {
+  text-align: left;
+  padding: 0.35rem 0.25rem;
+}
+
+.rc-frame-metadata th {
+  width: 8rem;
+  color: rgba(240, 244, 255, 0.7);
+  font-weight: 600;
+}
+
+.rc-footer {
+  padding: 1.5rem clamp(1.5rem, 4vw, 3rem) 2.5rem;
+  color: rgba(240, 244, 255, 0.6);
+  font-size: 0.85rem;
+}
+
+.rc-error {
+  background: rgba(255, 82, 82, 0.12);
+  border: 1px solid rgba(255, 82, 82, 0.4);
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+  color: #ffb3b3;
+  font-size: 0.95rem;
+}
+
+@media (max-width: 768px) {
+  .rc-viewer-stage {
+    min-height: 14rem;
+  }
+
+  .rc-frame-list {
+    gap: 0.35rem;
+  }
+
+  .rc-frame-list button {
+    padding-inline: 0.6rem;
+  }
+}

@@ -106,7 +106,14 @@ def ensure_external_tools() -> None:
         )
 
 
+_OPTIONAL_MODULES: Optional[Tuple[Any, Any, Any]] = None
+
+
 def _load_optional_modules() -> Tuple[Any, Any, Any]:
+    global _OPTIONAL_MODULES
+    if _OPTIONAL_MODULES is not None:
+        return _OPTIONAL_MODULES
+
     try:
         with _suppress_flush_to_zero_warning():
             import librosa  # type: ignore
@@ -119,7 +126,8 @@ def _load_optional_modules() -> Tuple[Any, Any, Any]:
             else f"Audio alignment failed to load optional dependencies: {exc}"
         )
         raise AudioAlignmentError(message) from exc
-    return np, librosa, sf
+    _OPTIONAL_MODULES = (np, librosa, sf)
+    return _OPTIONAL_MODULES
 
 
 def probe_audio_streams(path: Path) -> List[AudioStreamInfo]:
@@ -201,6 +209,7 @@ def _extract_audio(
     stream_index: int,
 ) -> Path:
     handle = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+    path = Path(handle.name)
     handle.close()
     cmd: List[str] = ["ffmpeg", "-hide_banner", "-loglevel", "error"]
     if start_seconds is not None:
@@ -217,7 +226,7 @@ def _extract_audio(
         str(sample_rate),
         "-vn",
         "-y",
-        handle.name,
+        str(path),
     ]
     completed: subprocess.CompletedProcess[str] | None = None
     try:
@@ -238,7 +247,32 @@ def _extract_audio(
         # Ensure ffmpeg output doesn't spam stdout when successful
         if completed is not None and completed.stdout:
             logger.debug("ffmpeg audio extract stdout: %s", completed.stdout.strip())
-    return Path(handle.name)
+    return path
+
+
+@contextmanager
+def _temporary_audio(
+    infile: Path,
+    *,
+    sample_rate: int,
+    start_seconds: Optional[float],
+    duration_seconds: Optional[float],
+    stream_index: int,
+) -> Iterator[Path]:
+    path = _extract_audio(
+        infile,
+        sample_rate=sample_rate,
+        start_seconds=start_seconds,
+        duration_seconds=duration_seconds,
+        stream_index=stream_index,
+    )
+    try:
+        yield path
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
 
 
 def _onset_envelope(
@@ -348,21 +382,16 @@ def measure_offsets(
     """Estimate relative audio offsets for *targets* against *reference*."""
     ensure_external_tools()
 
-    ref_audio = _extract_audio(
+    ref_env: Optional[Any] = None
+    hop: int
+    with _temporary_audio(
         reference,
         sample_rate=sample_rate,
         start_seconds=start_seconds,
         duration_seconds=duration_seconds,
         stream_index=reference_stream,
-    )
-    ref_env: Optional[Any] = None
-    try:
+    ) as ref_audio:
         ref_env, hop = _onset_envelope(ref_audio, sample_rate=sample_rate, hop_length=hop_length)
-    finally:
-        try:
-            os.unlink(ref_audio)
-        except OSError:
-            pass
 
     if ref_env is None:
         raise AudioAlignmentError(f"Failed to compute onset envelope for {reference.name}")
@@ -372,7 +401,6 @@ def measure_offsets(
 
     for target in targets:
         target_fps = _probe_fps(target)
-        target_audio = None
         try:
             stream_idx = 0
             if target_streams is not None:
@@ -385,18 +413,18 @@ def measure_offsets(
                     win_start = override_start
                 if override_dur is not None:
                     win_dur = override_dur
-            target_audio = _extract_audio(
+            with _temporary_audio(
                 target,
                 sample_rate=sample_rate,
                 start_seconds=win_start,
                 duration_seconds=win_dur,
                 stream_index=stream_idx,
-            )
-            target_env, _ = _onset_envelope(
-                target_audio,
-                sample_rate=sample_rate,
-                hop_length=hop_length,
-            )
+            ) as target_audio:
+                target_env, _ = _onset_envelope(
+                    target_audio,
+                    sample_rate=sample_rate,
+                    hop_length=hop_length,
+                )
             lag_frames, strength = _cross_correlation(ref_env, target_env)
             seconds_per_onset = hop_length / float(sample_rate)
             offset_seconds = lag_frames * seconds_per_onset
@@ -428,12 +456,6 @@ def measure_offsets(
                     error=str(exc),
                 )
             )
-        finally:
-            if target_audio:
-                try:
-                    os.unlink(target_audio)
-                except OSError:
-                    pass
         if progress_callback is not None:
             try:
                 progress_callback(1)

@@ -18,7 +18,7 @@ Automated frame sampling, alignment, tonemapping, and slow.pics uploads for dete
 - [FAQ](#faq)
 - [Performance](#performance)
 - [Security](#security)
-- [Privacy & Telemetry](#privacy--telemetry)
+- [Privacy \& Telemetry](#privacy--telemetry)
 - [Versioning](#versioning)
 - [Contributing](#contributing)
 - [License](#license)
@@ -35,6 +35,7 @@ Frame Compare samples darkest, brightest, high-motion, random, and user-pinned f
 - Audio alignment with correlation, dynamic time warping refinements, and optional interactive confirmation frames.
 - VapourSynth-first pipeline with FFmpeg fallback, HDR→SDR tonemapping, and placeholder recovery when writers fail.
 - slow.pics integration with automatic uploads, retries, URL shortcuts, and clipboard hand-off.
+- Optional HTML report generation for offline, browser-based comparisons with slider/overlay modes, pointer-anchored zoom + fit presets, and persistent pan/align controls inspired by slow.pics.
 - TMDB-driven metadata resolution with GuessIt/Anitopy labelling to keep comparisons organised.
 - Rich CLI layout featuring progress dashboards, Unicode fallbacks, batch auto-grouping, and optional JSON tails for automation.
 - CLI override for audio stream selection (`--audio-align-track`) when auto-detection needs guidance.
@@ -120,9 +121,38 @@ uv run python -m frame_compare --root /path/to/workspace --diagnose-paths
 
 # Force FFmpeg screenshots for environments without VapourSynth
 uv run python -m frame_compare --root /path --config config/config.toml --json-pretty --no-color
+
+# Launch the interactive wizard (prompts for workspace, renderer, slow.pics)
+uv run python -m frame_compare --root /path/to/workspace wizard
+
+# Check dependency readiness (non-fatal, supports --json)
+uv run python -m frame_compare --root /path/to/workspace doctor
+
+# Apply a preset without prompts (non-interactive safe)
+uv run python -m frame_compare --root /path/to/workspace preset apply quick-compare
 ```
 
-Outputs are written beneath the input directory: screenshots under `screens` (configurable), cached metrics alongside video inputs, slow.pics shortcuts in the same directory, and a JSON summary on stdout.
+> **Tip:** The first interactive run now launches the wizard automatically when `config/config.toml` is missing. Opt out with `--no-wizard` or by setting `FRAME_COMPARE_NO_WIZARD=1`.
+
+### Wizard & Presets
+
+`frame-compare wizard` guides you through workspace selection, input discovery, slow.pics options, audio alignment, and renderer preference. When stdin is not a TTY, supply `--preset <name>` to reuse a predefined profile without hanging automation.
+
+The same prompts appear automatically on an interactive first run so new users can capture tailored settings without memorising command flags.
+
+Available presets can be listed with `frame-compare preset list`. They ship with:
+
+- `quick-compare` – minimal sampling, FFmpeg renderer, slow.pics disabled.
+- `hdr-vs-sdr` – tonemap-focused defaults with stricter verification.
+- `batch-qc` – expanded sampling quotas with slow.pics uploads enabled.
+
+Use `frame-compare preset apply <name>` to seed `config/config.toml` in one step, optionally alongside `--root`/`--config` overrides.
+
+### Dependency Doctor
+
+`frame-compare doctor` performs fast, read-only diagnostics for VapourSynth, FFmpeg, audio extras, VSPreview tooling, slow.pics networking, clipboard helpers, and config writability. It always exits with code 0, making it safe to run during install scripts, and supports `--json` for machine-readable integrations. The wizard invokes it automatically after collecting answers so you can decide whether to continue when optional dependencies are missing.
+
+Outputs are written beneath the input directory: screenshots under `screens` (configurable), cached metrics alongside video inputs, slow.pics shortcuts in the same directory, and a JSON summary on stdout. Shortcut filenames mirror the resolved slow.pics collection name.
 
 > **Warning:** The default `[slowpics].delete_screen_dir_after_upload = true` removes the screenshots directory after successful uploads. Keep `screenshots.directory_name` relative to the input root and avoid reusing directories shared with other projects.
 
@@ -133,11 +163,13 @@ Frame Compare seeds `config/config.toml` from `src/data/config.toml.template`. O
 Configuration highlights:
 
 - `[paths].input_dir` controls the media subdirectory (default `comparison_videos`).
+- Workspace guardrails keep everything under the resolved root: the CLI refuses `site-packages` roots, auto-seeds `ROOT/config/config.toml`, validates writability up front, and blocks relative paths that escape the workspace. Run `frame-compare --diagnose-paths` to confirm the resolved locations when in doubt.
 - `[analysis]` governs frame quotas, random seed, and metric cache filename.
 - `[screenshots]` selects renderer, geometry policy, dithering, and output directory name.
 - `[color]` sets tonemap preset (`reference`, `contrast`, `filmic`), verification options, overlay text, and strictness.
 - `[audio_alignment]` enables correlation, VSPreview hooks, offsets filename, and bias.
 - `[slowpics]` toggles auto uploads (disabled by default), visibility, cleanup, webhook URL, and timeout.
+- `[report]` enables the offline HTML report, output directory, default comparison pair, and auto-open behaviour.
 - `[runtime]` sets VapourSynth memory guards and module search paths.
 - `[overrides]` applies per-source trims and FPS adjustments.
 
@@ -162,10 +194,14 @@ Common toggles (see [docs/README_REFERENCE.md](docs/README_REFERENCE.md) for ful
 | `[analysis].user_frames` | Always-rendered frame IDs. | `[]` | `user_frames=[10,200,501]` |
 | `[audio_alignment].enable` (+`confirm_with_screenshots`) | Audio-guided offsets and preview pause. | `false` (`true`) | `enable=true` |
 | `[screenshots].use_ffmpeg` | Prefer FFmpeg renderer. | `false` | `use_ffmpeg=true` |
+| `[report].enable` (+`--html-report` / `--no-html-report`) | Generate the local HTML report and auto-open it. | `false` | `enable=true` |
+| `[report].default_mode` | Initial viewer mode (`slider` or `overlay`). | `"slider"` | `default_mode="overlay"` |
 | `[slowpics].auto_upload` | Upload results to slow.pics. | `false` | `auto_upload=true` |
 | `[runtime].ram_limit_mb` | VapourSynth RAM guard. | `4000` | `ram_limit_mb=3072` |
 
-> **Tip:** Copy the template elsewhere with `python -c "from src.config_template import copy_default_config; copy_default_config('alt-root/config/config.toml')"` when you need multiple workspaces.
+Offline HTML reports mirror slow.pics ergonomics: Actual/Fit/Fill presets, an alignment selector, pointer-anchored zoom via the slider, +/- buttons, or Ctrl/⌘ + mouse wheel, and pan support (space + drag or regular drag once zoomed beyond fit). Zoom, fit, mode, and alignment choices persist in `localStorage` so every frame opens with the same viewer state.
+
+> **Tip:** To seed another workspace, run `uv run python -m frame_compare --root alt-root --write-config`.
 
 ## CLI Reference
 

@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>{{TITLE}}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="app.css">
+  </head>
+  <body>
+    <header class="rc-header">
+      <h1 id="report-title">{{TITLE}}</h1>
+      <p id="report-subtitle" class="rc-subtitle"></p>
+      <nav class="rc-links" id="report-links"></nav>
+    </header>
+    <main class="rc-main" data-report-root>
+      <section class="rc-controls">
+        <div class="rc-control-group">
+          <label for="frame-select">Frame</label>
+          <select id="frame-select" aria-label="Selected frame"></select>
+        </div>
+        <div class="rc-control-group" id="left-control">
+          <label for="left-select" id="left-label" data-slider-label="Left encode" data-overlay-label="Displayed encode">Left encode</label>
+          <select id="left-select" aria-label="Left encode"></select>
+        </div>
+        <div class="rc-control-group" id="right-control">
+          <label for="right-select" id="right-label">Right encode</label>
+          <select id="right-select" aria-label="Right encode"></select>
+        </div>
+        <div class="rc-control-group rc-slider-control">
+          <label for="slider-control">Reveal</label>
+          <input type="range" id="slider-control" min="0" max="100" value="50" aria-valuemin="0" aria-valuemax="100" aria-label="Reveal slider">
+        </div>
+        <div class="rc-control-group">
+          <label for="mode-select">Viewer mode</label>
+          <select id="mode-select" aria-label="Viewer mode">
+            <option value="slider">Slider</option>
+            <option value="overlay">Overlay</option>
+          </select>
+        </div>
+        <div class="rc-control-group rc-zoom-control">
+          <label for="zoom-control">Zoom</label>
+          <div class="rc-zoom-toolbar" role="group" aria-label="Zoom controls">
+            <button type="button" id="zoom-out" aria-label="Zoom out" title="Zoom out">−</button>
+            <input type="range" id="zoom-control" min="25" max="400" value="100" step="1" aria-label="Zoom percentage">
+            <button type="button" id="zoom-in" aria-label="Zoom in" title="Zoom in">+</button>
+            <button type="button" id="zoom-reset" aria-label="Reset zoom" title="Reset zoom to 100%">Reset</button>
+            <span id="zoom-readout" class="rc-zoom-readout" aria-live="polite" aria-atomic="true">100%</span>
+          </div>
+          <div class="rc-fit-toolbar" role="group" aria-label="Fit presets">
+            <button type="button" data-fit="actual" title="Display at native pixel size">Actual size</button>
+            <button type="button" data-fit="fit-width" title="Scale to fit width">Fit width</button>
+            <button type="button" data-fit="fit-height" title="Scale to fit height">Fit height</button>
+            <button type="button" data-fit="fill" title="Fill the viewer canvas">Fill canvas</button>
+          </div>
+        </div>
+        <div class="rc-control-group rc-alignment-control">
+          <label for="alignment-select">Alignment</label>
+          <select id="alignment-select" aria-label="Image alignment">
+            <option value="center">Center</option>
+            <option value="top-left">Top left</option>
+            <option value="top-right">Top right</option>
+            <option value="bottom-left">Bottom left</option>
+            <option value="bottom-right">Bottom right</option>
+          </select>
+        </div>
+      </section>
+
+      <section class="rc-viewer" aria-live="polite">
+        <div class="rc-viewer-stage" id="viewer-stage" tabindex="0" role="region" aria-label="Comparison viewer">
+          <div class="rc-canvas" id="viewer-canvas">
+            <img id="right-image" class="rc-image rc-image--right" alt="" loading="lazy">
+            <div class="rc-overlay" id="overlay">
+              <img id="left-image" class="rc-image rc-image--left" alt="" loading="lazy">
+            </div>
+            <div class="rc-divider" id="divider" aria-hidden="true"></div>
+          </div>
+        </div>
+        <div class="rc-frame-info" id="frame-label"></div>
+        <p class="rc-viewer-help" id="viewer-help">
+          Shortcuts: Ctrl/Cmd + wheel = zoom • Space + drag = pan • R = reset zoom
+        </p>
+      </section>
+
+      <section class="rc-filmstrip" aria-label="Frames">
+        <ul id="frame-list" class="rc-frame-list"></ul>
+      </section>
+
+      <section class="rc-encode-info" id="encode-info"></section>
+      <section class="rc-frame-metadata" id="frame-metadata" hidden></section>
+    </main>
+
+    <footer class="rc-footer" id="report-footer"></footer>
+
+    <script id="report-data" type="application/json">{{DATA_JSON}}</script>
+    <script src="app.js" defer></script>
+  </body>
+</html>

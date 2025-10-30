@@ -5,7 +5,7 @@ Date: 2025-10-18
 Owner: Tooling / Release
 
 ## Context
-- Default config seeding may currently target `site-packages`, leading to permission issues and freezes during screenshot generation (`PATHS-AUDIT.md`).
+- Default config seeding may currently target `site-packages`, leading to permission issues and freezes during screenshot generation (see the workspace guardrails in README).
 - Workspace discovery relies on relative paths that drift with the working directory, so installers running inside package directories inherit read-only roots.
 - We must provide a low-risk, multi-platform plan that locks configuration and IO under a predictable project root without breaking existing repo workflows.
 

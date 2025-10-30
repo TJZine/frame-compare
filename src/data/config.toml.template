@@ -107,6 +107,18 @@ open_in_browser = true
 create_url_shortcut = true
 delete_screen_dir_after_upload = true
 
+[report]
+# Optional offline HTML report packaged with generated screenshots.
+enable = false
+open_after_generate = true
+output_dir = "report"
+title = ""
+default_left_label = ""
+default_right_label = ""
+include_metadata = "minimal"  # "minimal" or "full"
+thumb_height = 0              # Reserved for future thumbnail generation
+default_mode = "slider"       # "slider" or "overlay"
+
 [tmdb]
 # TMDB lookup automation. Provide an API key to enable matching.
 api_key = ""

@@ -182,6 +182,21 @@ class SourceConfig:
 
 
 @dataclass
+class ReportConfig:
+    """HTML report generation controls."""
+
+    enable: bool = False
+    open_after_generate: bool = True
+    output_dir: str = "report"
+    title: Optional[str] = None
+    default_left_label: Optional[str] = None
+    default_right_label: Optional[str] = None
+    include_metadata: str = "minimal"
+    thumb_height: int = 0
+    default_mode: str = "slider"
+
+
+@dataclass
 class AudioAlignmentConfig:
     """Audio-based offset estimation to help align clips before analysis."""
 
@@ -228,3 +243,4 @@ class AppConfig:
     color: ColorConfig
     source: SourceConfig
     audio_alignment: AudioAlignmentConfig
+    report: ReportConfig

@@ -1,0 +1,14 @@
+[analysis]
+frame_count_dark = 10
+frame_count_bright = 5
+frame_count_motion = 5
+random_frames = 5
+
+[screenshots]
+use_ffmpeg = true
+upscale = false
+
+[slowpics]
+auto_upload = false
+create_url_shortcut = false
+delete_screen_dir_after_upload = false

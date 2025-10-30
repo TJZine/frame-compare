@@ -2,6 +2,12 @@
 
 All notable user-visible updates will be documented in this file in reverse chronological order.
 
+- *2025-10-30:* Auto-launched the configuration wizard during interactive first runs when `config/config.toml` is missing, added a `--no-wizard` flag plus `FRAME_COMPARE_NO_WIZARD` override, surfaced a fallback reminder for non-interactive sessions, and refreshed README/tests accordingly.
+- *2025-10-30:* Replaced the audio alignment “progress” bar with a spinner so CLI output stays truthful while offsets are estimated.
+- *2025-10-30:* Overhauled the offline HTML report viewer with persistent zoom/fit presets, pointer-anchored wheel zoom, pan/align controls, and shortcut legends to better mirror slow.pics.
+- *2025-10-29:* Added optional HTML report generation (configurable via `[report]` or `--html-report`), including vendored assets, CLI auto-open support, JSON-tail disclosures, embedded report data for offline viewing, and unit coverage for the new generator. Added overlay mode toggle with keyboard/click encode cycling.
+- *2025-10-29:* Added interactive `frame-compare wizard` with presets, introduced `frame-compare doctor` dependency checklist (JSON-capable), expanded reference docs, and strengthened CLI help/tests for the new commands.
+- *2025-10-29:* Clarified the CLI audio alignment panel output (stream summaries, cached reuse messaging, offsets file footer) and aligned documentation; slow.pics shortcut filenames now derive from the sanitised collection name with regression tests for edge cases; README and reference tables updated.
 - *2025-10-22:* Disabled slow.pics auto-upload by default, added an upfront CLI warning when it is enabled, aligned documentation with dataclass defaults, introduced a packaged `frame-compare` console entry point, and wired Ruff linting into CI (Pyright now blocks failures).
 - *2025-10-21:* Prevented VSPreview helper crashes on Windows `cp1252` consoles by sanitising printed arrows to ASCII, preferring UTF-8 output streams, adding regression coverage, and documenting the console behaviour.
 - *2025-10-20:* Hardened audio alignment's optional dependency handling by surfacing clear `AudioAlignmentError` messages when

@@ -14,8 +14,6 @@ and whether each artifact should stay in the tree.
 | `geometry_pipeline.md` | SDR geometry pivot rationale and console visibility notes. | ✅ Keep | New; explains the YUV444P16 pivot, axis-aware behaviour, and dithering stages. |
 | `hdr_tonemap_overview.md` | Narrative overview of HDR→SDR strategy and presets. | ✅ Keep | Complements the pipeline trace with operator-facing guidance. |
 | `legacy_tonemap_pipeline.md` | Historical placebo-based pipeline notes. | ⚠️ Keep (archive) | Useful for regression comparisons; tag as archival if the legacy flow is ever dropped. |
-| `regression_notes_2025-09-22.md` | Change log for HDR pipeline parity work. | ✅ Keep | Documents why specific safeguards (prop stamping, fallback order) exist. |
-| `deep_review.md` | Security/perf audit follow-ups. | ✅ Keep | Refreshed with current findings plus open checklist items. |
 | `docs_inventory.md` | This index. | ✅ Keep | Re-run after any major docs purge or reorganization. |
 <!-- markdownlint-restore -->
 

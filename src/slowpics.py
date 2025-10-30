@@ -106,6 +106,7 @@ def _build_legacy_headers(session: requests.Session, encoder: "MultipartEncoder"
 
 
 _TMDB_MANUAL_RE = re.compile(r"^(movie|tv)[/_:-]?(\d+)$", re.IGNORECASE)
+_SHORTCUT_SANITIZE_RE = re.compile(r"[^0-9A-Za-z._-]+")
 
 
 def _format_tmdb_identifier(tmdb_id: str, category: str | None) -> str:
@@ -125,6 +126,42 @@ def _format_tmdb_identifier(tmdb_id: str, category: str | None) -> str:
         return f"{normalized_category.upper()}_{text}"
 
     return text
+
+
+def _sanitize_shortcut_component(value: str) -> str:
+    """Return a filesystem-safe fragment for slow.pics shortcut filenames."""
+
+    trimmed = value.strip()
+    if not trimmed:
+        return ""
+    replaced = _SHORTCUT_SANITIZE_RE.sub("_", trimmed)
+    deduped = re.sub(r"_+", "_", replaced)
+    cleaned = deduped.strip("._-")
+    if not cleaned:
+        return ""
+    # Keep filenames at a reasonable length while preserving extension space.
+    if len(cleaned) > 120:
+        cleaned = cleaned[:120].rstrip("._-")
+    return cleaned
+
+
+def build_shortcut_filename(collection_name: str | None, canonical_url: str) -> str:
+    """
+    Resolve the `.url` filename used for slow.pics shortcuts.
+
+    Preference order:
+        1. Sanitised collection name.
+        2. Sanitised comparison key from the canonical URL.
+        3. Fallback literal ``"slowpics"``.
+    """
+
+    base = _sanitize_shortcut_component(collection_name or "")
+    if not base:
+        key = canonical_url.rstrip("/").rsplit("/", 1)[-1]
+        base = _sanitize_shortcut_component(key)
+    if not base:
+        base = "slowpics"
+    return f"{base}.url"
 
 
 def _prepare_legacy_plan(image_files: List[str]) -> tuple[List[int], List[List[tuple[str, Path]]]]:
@@ -267,7 +304,8 @@ def _upload_comparison_legacy(
     if cfg.webhook_url:
         _post_direct_webhook(session, cfg.webhook_url, canonical_url)
     if cfg.create_url_shortcut:
-        shortcut_path = screen_dir / f"slowpics_{key}.url"
+        shortcut_name = build_shortcut_filename(cfg.collection_name, canonical_url)
+        shortcut_path = screen_dir / shortcut_name
         shortcut_path.write_text(f"[InternetShortcut]\nURL={canonical_url}\n", encoding="utf-8")
     return canonical_url
 

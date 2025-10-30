@@ -1,0 +1,13 @@
+[color]
+enable_tonemap = true
+preset = "reference"
+verify_enabled = true
+verify_step_seconds = 5.0
+verify_luma_threshold = 0.20
+strict = true
+
+[screenshots]
+use_ffmpeg = false
+
+[analysis]
+analyze_in_sdr = false

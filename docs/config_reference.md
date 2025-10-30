@@ -24,3 +24,22 @@ Controls how the final 16-bit frame is quantised to RGB24.
 - `"none"`: Disable dithering during the final RGB24 hop (not recommended for noisy footage).
 
 Earlier conversions (8/10/12-bit → 16-bit) always run with `dither_type="none"` to maintain determinism. The setting only applies to the last conversion step when producing PNG output.
+
+## `[report]`
+
+The HTML report bundles the rendered screenshots with a slider-based viewer and
+metadata, giving teams an offline alternative to slow.pics uploads. All paths
+remain relative to the workspace root and require no HTTP server.
+
+| Key | Purpose | Default |
+| --- | --- | --- |
+| `enable` | Generate the report bundle alongside `screens/`. | `false` |
+| `open_after_generate` | Launch `index.html` in the default browser after a run. | `true` |
+| `output_dir` | Target subdirectory under the workspace root. | `"report"` |
+| `title` | Custom report title (falls back to inferred metadata). | `""` |
+| `default_left_label` / `default_right_label` | Preferred encodes for the slider’s left/right panes. | `""` |
+| `include_metadata` | Controls the JSON payload: `"minimal"` or `"full"`. | `"minimal"` |
+| `thumb_height` | Reserved for future thumbnail support; keep at `0` today. | `0` |
+| `default_mode` | Viewer mode (`slider` or `overlay`) for initial render. | `"slider"` |
+
+The viewer now mirrors slow.pics ergonomics: zoom persists per session (slider, +/- buttons, or Ctrl/⌘ + mouse wheel), presets cover Actual/Fit/Fit Height/Fill, and you can re-anchor content with the alignment dropdown or pan (drag once zoomed past fit, or hold Space + drag). These choices are stored in `localStorage`, so switching frames keeps the same layout.

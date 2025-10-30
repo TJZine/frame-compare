@@ -1,0 +1,12 @@
+[analysis]
+frame_count_dark = 30
+frame_count_bright = 20
+frame_count_motion = 25
+random_frames = 30
+
+[slowpics]
+auto_upload = true
+remove_after_days = 14
+
+[screenshots]
+directory_name = "screens-batch"
