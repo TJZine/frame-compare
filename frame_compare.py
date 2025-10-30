@@ -114,6 +114,7 @@ logger = logging.getLogger(__name__)
 CONFIG_ENV_VAR: Final[str] = "FRAME_COMPARE_CONFIG"
 ROOT_ENV_VAR: Final[str] = "FRAME_COMPARE_ROOT"
 ROOT_SENTINELS: Final[tuple[str, ...]] = ("pyproject.toml", ".git", "comparison_videos")
+NO_WIZARD_ENV_VAR: Final[str] = "FRAME_COMPARE_NO_WIZARD"
 PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parent
 PACKAGED_TEMPLATE_PATH: Final[Path] = (
     PROJECT_ROOT / "src" / "data" / "config.toml.template"
@@ -150,6 +151,15 @@ def _format_vspreview_manual_command(script_path: Path) -> str:
     return _VSPREVIEW_MANUAL_COMMAND_TEMPLATE.format(
         python=python_exe, script=script_arg
     )
+
+
+def _env_flag_enabled(value: str | None) -> bool:
+    """Interpret typical truthy strings from environment variables."""
+
+    if value is None:
+        return False
+    normalized = value.strip().lower()
+    return normalized in {"1", "true", "yes", "on"}
 
 
 def _coerce_config_flag(value: object) -> bool:
@@ -1596,6 +1606,36 @@ def _emit_doctor_results(
             click.echo(f"  - {note}")
 
 
+def _auto_generate_config_via_wizard(initial_root: Path) -> tuple[Path, Path]:
+    """
+    Collect configuration via the interactive wizard and persist it.
+
+    Returns the workspace root selected in the wizard and the resolved config path.
+    """
+
+    click.echo("No config found. Launching interactive wizard...")
+    template_text = _read_template_text()
+    template_config = _load_template_config()
+    final_config = copy.deepcopy(template_config)
+    click.echo("Starting interactive wizard. Press Enter to accept defaults.")
+    workspace_root, final_config = _run_wizard_prompts(initial_root, final_config)
+    try:
+        workspace_root.mkdir(parents=True, exist_ok=True)
+    except PermissionError as exc:
+        raise CLIAppError(
+            f"Unable to create workspace root '{workspace_root}': {exc}",
+            code=2,
+            rich_message=f"[red]Unable to create workspace root:[/red] {workspace_root} ({exc})",
+        ) from exc
+    config_dir = workspace_root / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_path = config_dir / "config.toml"
+    updated_text = _render_config_text(template_text, template_config, final_config)
+    _write_config_file(config_path, updated_text)
+    click.echo(f"Wrote config to {config_path}")
+    return workspace_root, config_path
+
+
 def _prepare_preflight(
     *,
     cli_root: str | None,
@@ -1604,11 +1644,14 @@ def _prepare_preflight(
     ensure_config: bool,
     create_dirs: bool,
     create_media_dir: bool,
-) -> _PathPreflightResult:
+    allow_auto_wizard: bool = False,
+    skip_auto_wizard: bool = False,
+    ) -> _PathPreflightResult:
     """Resolve workspace root, configuration, and media directories."""
 
     workspace_root = _discover_workspace_root(cli_root)
     warnings: list[str] = []
+    skip_auto_wizard = skip_auto_wizard or _env_flag_enabled(os.environ.get(NO_WIZARD_ENV_VAR))
 
     if create_dirs:
         try:
@@ -1662,6 +1705,26 @@ def _prepare_preflight(
                     f"Using legacy config at {legacy_path}. Move it to {config_dir / 'config.toml'}."
                 )
             elif ensure_config:
+                interactive = sys.stdin.isatty()
+                auto_wizard_allowed = (
+                    allow_auto_wizard
+                    and not skip_auto_wizard
+                    and env_override is None
+                    and config_override is None
+                    and interactive
+                )
+                if auto_wizard_allowed:
+                    new_root, new_config_path = _auto_generate_config_via_wizard(workspace_root)
+                    return _prepare_preflight(
+                        cli_root=str(new_root),
+                        config_override=str(new_config_path),
+                        input_override=input_override,
+                        ensure_config=ensure_config,
+                        create_dirs=create_dirs,
+                        create_media_dir=create_media_dir,
+                        allow_auto_wizard=False,
+                        skip_auto_wizard=skip_auto_wizard,
+                    )
                 try:
                     config_dir.mkdir(parents=True, exist_ok=True)
                 except PermissionError as exc:
@@ -1676,6 +1739,8 @@ def _prepare_preflight(
                         ),
                     ) from exc
                 _seed_default_config(config_path)
+                if allow_auto_wizard and (skip_auto_wizard or not interactive):
+                    click.echo("Seeded default config. Run 'frame-compare wizard' to customise settings.")
 
     if _path_contains_site_packages(config_path):
         message = (
@@ -4491,6 +4556,7 @@ def run_cli(
     verbose: bool = False,
     no_color: bool = False,
     report_enable_override: Optional[bool] = None,
+    skip_wizard: bool = False,
 ) -> RunResult:
     """
     Orchestrate the CLI workflow.
@@ -4518,6 +4584,8 @@ def run_cli(
         ensure_config=True,
         create_dirs=True,
         create_media_dir=input_dir is None,
+        allow_auto_wizard=True,
+        skip_auto_wizard=skip_wizard,
     )
     cfg = preflight.config
     workspace_root = preflight.workspace_root
@@ -6240,10 +6308,13 @@ def _run_cli_entry(
     json_pretty: bool,
     diagnose_paths: bool,
     write_config: bool,
+    skip_wizard: bool,
     html_report_enable: bool,
     html_report_disable: bool,
 ) -> None:
     """Execute the primary CLI workflow with the provided options."""
+
+    skip_wizard = skip_wizard or _env_flag_enabled(os.environ.get(NO_WIZARD_ENV_VAR))
 
     if html_report_enable and html_report_disable:
         raise click.ClickException("Cannot use both --html-report and --no-html-report.")
@@ -6265,6 +6336,8 @@ def _run_cli_entry(
                 ensure_config=True,
                 create_dirs=True,
                 create_media_dir=False,
+                allow_auto_wizard=True,
+                skip_auto_wizard=skip_wizard,
             )
         except CLIAppError as exc:
             print(exc.rich_message)
@@ -6301,6 +6374,7 @@ def _run_cli_entry(
             verbose=verbose,
             no_color=no_color,
             report_enable_override=report_override,
+            skip_wizard=skip_wizard,
         )
     except CLIAppError as exc:
         print(exc.rich_message)
@@ -6470,6 +6544,11 @@ def _run_cli_entry(
     help="Ensure the workspace config exists (seeds ROOT/config/config.toml when missing) and exit.",
 )
 @click.option(
+    "--no-wizard",
+    is_flag=True,
+    help="Skip automatic wizard prompts when creating a new config.",
+)
+@click.option(
     "--html-report",
     "html_report_enable",
     is_flag=True,
@@ -6495,6 +6574,7 @@ def main(
     json_pretty: bool,
     diagnose_paths: bool,
     write_config: bool,
+    no_wizard: bool,
     html_report_enable: bool,
     html_report_disable: bool,
 ) -> None:
@@ -6511,6 +6591,7 @@ def main(
         "json_pretty": json_pretty,
         "diagnose_paths": diagnose_paths,
         "write_config": write_config,
+        "skip_wizard": no_wizard,
         "html_report_enable": html_report_enable,
         "html_report_disable": html_report_disable,
     }
@@ -6538,6 +6619,7 @@ def run_command(ctx: click.Context) -> None:
         json_pretty=bool(params.get("json_pretty", False)),
         diagnose_paths=bool(params.get("diagnose_paths", False)),
         write_config=bool(params.get("write_config", False)),
+        skip_wizard=bool(params.get("skip_wizard", False)),
         html_report_enable=bool(params.get("html_report_enable", False)),
         html_report_disable=bool(params.get("html_report_disable", False)),
     )

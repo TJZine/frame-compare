@@ -132,9 +132,13 @@ uv run python -m frame_compare --root /path/to/workspace doctor
 uv run python -m frame_compare --root /path/to/workspace preset apply quick-compare
 ```
 
+> **Tip:** The first interactive run now launches the wizard automatically when `config/config.toml` is missing. Opt out with `--no-wizard` or by setting `FRAME_COMPARE_NO_WIZARD=1`.
+
 ### Wizard & Presets
 
 `frame-compare wizard` guides you through workspace selection, input discovery, slow.pics options, audio alignment, and renderer preference. When stdin is not a TTY, supply `--preset <name>` to reuse a predefined profile without hanging automation.
+
+The same prompts appear automatically on an interactive first run so new users can capture tailored settings without memorising command flags.
 
 Available presets can be listed with `frame-compare preset list`. They ship with:
 
