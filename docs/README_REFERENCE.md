@@ -4,6 +4,33 @@ Supplemental reference material for [`README.md`](../README.md).
 Use these tables when you need to fine-tune behaviour beyond the
 quick-start configuration paths.
 
+## CLI helpers
+
+- `frame-compare wizard` — interactive configuration assistant. Prompts for workspace root, input directory, slow.pics settings, audio alignment, and renderer preference. Provide `--preset <name>` when stdin is not a TTY to avoid blocking automation.
+- `frame-compare doctor` — quick dependency checklist (VapourSynth, FFmpeg, audio extras, VSPreview, slow.pics, clipboard, config writability). Always exits with 0; add `--json` for machine-readable output.
+- `frame-compare preset list` — enumerate packaged presets: `quick-compare`, `hdr-vs-sdr`, `batch-qc`.
+- `frame-compare preset apply <name>` — merge the selected preset with the default template and write `config/config.toml` (supports `--root`/`--config` like the primary command).
+
+Preset summaries:
+
+| Preset | Focus |
+| --- | --- |
+| `quick-compare` | FFmpeg renderer, reduced sampling quotas, slow.pics disabled for fast iterations. |
+| `hdr-vs-sdr` | Tonemap verification tightened (stricter thresholds and `color.strict=true`). |
+| `batch-qc` | Larger sampling windows and automatic slow.pics uploads for review batches. |
+
+Sample doctor output:
+
+```text
+Dependency check:
+✅ Config path writable  — /workspace/config/config.toml is writable.
+✅ VapourSynth import    — VapourSynth module available.
+✅ FFmpeg binaries       — ffmpeg/ffprobe available.
+✅ Audio alignment deps  — Optional audio dependencies available.
+⚠️ slow.pics network     — [slowpics].auto_upload is enabled. Allow network access to https://slow.pics/ or disable auto_upload.
+✅ Clipboard helper      — Clipboard helper optional when slow.pics auto-upload is disabled.
+```
+
 ## Analysis settings
 
 <!-- markdownlint-disable MD013 -->

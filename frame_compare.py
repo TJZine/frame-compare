@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import builtins
+import copy
 import datetime as _dt
+import difflib
 import importlib.util
 import json
 import logging
@@ -16,8 +18,10 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import textwrap
 import time
+import tomllib
 import traceback
 import uuid
 import webbrowser
@@ -35,6 +39,7 @@ from typing import (
     Final,
     Iterable,
     List,
+    Literal,
     Mapping,
     Optional,
     Sequence,
@@ -105,6 +110,7 @@ from src.tmdb import (
     resolve_tmdb,
 )
 from src.utils import parse_filename_metadata
+from src.vs_core import ClipProcessError
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +121,7 @@ PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parent
 PACKAGED_TEMPLATE_PATH: Final[Path] = (
     PROJECT_ROOT / "src" / "data" / "config.toml.template"
 ).resolve()
+PRESETS_DIR: Final[Path] = (PROJECT_ROOT / "presets").resolve()
 
 _DEFAULT_CONFIG_HELP: Final[str] = (
     "Optional explicit path to config.toml. When omitted, Frame Compare looks for "
@@ -982,6 +989,603 @@ def _fresh_app_config() -> AppConfig:
     )
 
 
+def _read_template_text() -> str:
+    """Return the config template text, preserving existing comments."""
+
+    text = PACKAGED_TEMPLATE_PATH.read_text(encoding="utf-8")
+    return text
+
+
+def _load_template_config() -> Dict[str, Any]:
+    """Load the template configuration into a nested dictionary."""
+
+    text = _read_template_text()
+    return tomllib.loads(text.lstrip("\ufeff"))
+
+
+def _deep_merge(dest: Dict[str, Any], src: Mapping[str, Any]) -> None:
+    """Recursively merge ``src`` into ``dest`` in-place."""
+
+    for key, value in src.items():
+        if isinstance(value, Mapping) and isinstance(dest.get(key), MappingABC):
+            existing = dest[key]
+            if not isinstance(existing, dict):
+                dest[key] = copy.deepcopy(value)
+            else:
+                _deep_merge(existing, value)  # type: ignore[arg-type]
+        elif isinstance(value, Mapping) and key not in dest:
+            dest[key] = copy.deepcopy(value)
+        else:
+            dest[key] = copy.deepcopy(value)
+
+
+def _diff_config(base: Mapping[str, Any], modified: Mapping[str, Any]) -> Dict[str, Any]:
+    """Return a nested mapping of values that differ between ``base`` and ``modified``."""
+
+    diff: Dict[str, Any] = {}
+    for key, value in modified.items():
+        base_value = base.get(key)
+        if isinstance(value, Mapping) and isinstance(base_value, Mapping):
+            nested = _diff_config(base_value, value)
+            if nested:
+                diff[key] = nested
+        else:
+            if key not in base or base_value != value:
+                diff[key] = value
+    return diff
+
+
+def _format_toml_value(value: Any) -> str:
+    """Format a Python value as TOML literal."""
+
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if isinstance(value, float):
+            if not math.isfinite(value):
+                raise ValueError("Non-finite float cannot be serialized to TOML")
+            return format(value, "g")
+        return str(value)
+    if isinstance(value, str):
+        escaped = value.replace("\\", "\\\\").replace("\"", "\\\"")
+        return f'"{escaped}"'
+    if isinstance(value, list):
+        return "[" + ", ".join(_format_toml_value(item) for item in value) + "]"
+    if value is None:
+        return '""'  # Represent None as empty string literal.
+    raise ValueError(f"Unsupported TOML value type: {type(value)!r}")
+
+
+def _flatten_overrides(overrides: Mapping[str, Any]) -> Dict[Tuple[str, ...], Dict[str, Any]]:
+    """Flatten nested override mapping to section tuples -> key/value pairs."""
+
+    flattened: Dict[Tuple[str, ...], Dict[str, Any]] = {}
+
+    def _walk(mapping: Mapping[str, Any], prefix: Tuple[str, ...]) -> None:
+        for key, value in mapping.items():
+            if isinstance(value, Mapping):
+                _walk(value, prefix + (key,))
+            else:
+                flattened.setdefault(prefix, {})[key] = value
+
+    _walk(overrides, ())
+    return flattened
+
+
+def _apply_overrides_to_template(template_text: str, overrides: Mapping[str, Any]) -> str:
+    """Return template text with overrides applied without discarding comments."""
+
+    if not overrides:
+        return template_text
+
+    lines = template_text.splitlines()
+    section_ranges: Dict[Tuple[str, ...], Tuple[int, int]] = {}
+    current_section: Tuple[str, ...] = ()
+    section_start = 0
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]") and not stripped.startswith("[["):
+            if current_section not in section_ranges:
+                section_ranges[current_section] = (section_start, index)
+            section_name = stripped[1:-1]
+            current_section = tuple(part.strip() for part in section_name.split(".")) if section_name else ()
+            section_start = index + 1
+    if current_section not in section_ranges:
+        section_ranges[current_section] = (section_start, len(lines))
+
+    flattened = _flatten_overrides(overrides)
+    applied: set[Tuple[Tuple[str, ...], str]] = set()
+    current_section = ()
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]") and not stripped.startswith("[["):
+            section_name = stripped[1:-1]
+            current_section = tuple(part.strip() for part in section_name.split(".")) if section_name else ()
+            continue
+        if "=" not in line or stripped.startswith("#"):
+            continue
+        key, _, _ = stripped.partition("=")
+        key = key.strip()
+        overrides_for_section = flattened.get(current_section)
+        if overrides_for_section and key in overrides_for_section:
+            formatted = _format_toml_value(overrides_for_section[key])
+            prefix = line[: line.index(key)]
+            lines[idx] = f"{prefix}{key} = {formatted}"
+            applied.add((current_section, key))
+
+    for section, key_values in flattened.items():
+        for key, value in key_values.items():
+            identifier = (section, key)
+            if identifier in applied:
+                continue
+            start, end = section_ranges.get(section, (len(lines), len(lines)))
+            formatted = _format_toml_value(value)
+            insert_line = f"{key} = {formatted}"
+            lines.insert(end, insert_line)
+            # Update stored ranges for following insertions.
+            section_ranges = {
+                sect: (s, e + 1 if e >= end else e) for sect, (s, e) in section_ranges.items()
+            }
+            applied.add(identifier)
+
+    return "\n".join(lines) + ("\n" if template_text.endswith("\n") else "")
+
+
+def _write_config_file(path: Path, content: str) -> None:
+    """Atomically write ``content`` to ``path`` with UTF-8 encoding."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            delete=False,
+            dir=str(path.parent),
+        ) as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+            temp_path = Path(handle.name)
+        os.replace(temp_path, path)
+    finally:
+        if temp_path is not None and temp_path.exists():
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+
+
+def _present_diff(original: str, updated: str) -> None:
+    """Print a unified diff between ``original`` and ``updated`` strings."""
+
+    diff = list(
+        difflib.unified_diff(
+            original.splitlines(),
+            updated.splitlines(),
+            fromfile="template",
+            tofile="generated",
+            lineterm="",
+        )
+    )
+    if diff:
+        for line in diff:
+            print(line)
+    else:
+        print("No differences from the template.")
+
+
+def _list_preset_paths() -> Dict[str, Path]:
+    """Return available preset names mapped to their file paths."""
+
+    if not PRESETS_DIR.exists():
+        return {}
+    presets: Dict[str, Path] = {}
+    for path in PRESETS_DIR.glob("*.toml"):
+        if path.is_file():
+            presets[path.stem] = path
+    return presets
+
+
+def _load_preset_data(name: str) -> Dict[str, Any]:
+    """Load a preset TOML fragment by name."""
+
+    presets = _list_preset_paths()
+    try:
+        preset_path = presets[name]
+    except KeyError as exc:
+        raise click.ClickException(f"Unknown preset '{name}'. Use 'preset list' to inspect options.") from exc
+    try:
+        text = preset_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise click.ClickException(f"Failed to read preset '{name}': {exc}") from exc
+    try:
+        data = tomllib.loads(text.lstrip("\ufeff"))
+    except tomllib.TOMLDecodeError as exc:
+        raise click.ClickException(f"Preset '{name}' is invalid TOML: {exc}") from exc
+    return cast(Dict[str, Any], data)
+
+
+PRESET_DESCRIPTIONS: Final[Dict[str, str]] = {
+    "quick-compare": "Minimal runtime defaults with FFmpeg renderer and slow.pics disabled.",
+    "hdr-vs-sdr": "Tonemap-first workflow with stricter verification thresholds.",
+    "batch-qc": "Expanded sampling with slow.pics uploads enabled for review batches.",
+}
+
+
+DoctorStatus = Literal["pass", "fail", "warn"]
+
+
+class DoctorCheck(TypedDict):
+    """Structured result for dependency doctor checks."""
+
+    id: str
+    label: str
+    status: DoctorStatus
+    message: str
+
+
+_DOCTOR_STATUS_ICONS: Final[Dict[DoctorStatus, str]] = {
+    "pass": "✅",
+    "fail": "❌",
+    "warn": "⚠️",
+}
+
+
+def _resolve_wizard_paths(root_override: str | None, config_override: str | None) -> tuple[Path, Path]:
+    """Resolve workspace root and config path for wizard/preset workflows."""
+
+    root = _discover_workspace_root(root_override)
+    config_path = Path(config_override).expanduser() if config_override else root / "config" / "config.toml"
+    _abort_if_site_packages({"workspace": root, "config": config_path})
+    if not _is_writable_path(root, for_file=False):
+        raise click.ClickException(f"Workspace root '{root}' is not writable.")
+    if not _is_writable_path(config_path, for_file=True):
+        raise click.ClickException(
+            f"Config path '{config_path}' is not writable; pass --config to select another location."
+        )
+    return root, config_path
+
+
+def _render_config_text(
+    template_text: str,
+    template_config: Mapping[str, Any],
+    final_config: Mapping[str, Any],
+) -> str:
+    """Generate TOML text for ``final_config`` using the original template layout."""
+
+    overrides = _diff_config(template_config, final_config)
+    return _apply_overrides_to_template(template_text, overrides)
+
+
+def _prompt_workspace_root(default_root: Path) -> Path:
+    """Interactively prompt for a writable workspace root."""
+
+    current = default_root
+    while True:
+        response = click.prompt("Workspace root", default=str(current))
+        candidate_input = response.strip() or str(current)
+        try:
+            candidate = _discover_workspace_root(candidate_input)
+        except CLIAppError as exc:
+            click.echo(f"Error: {exc}")
+            continue
+        if not _is_writable_path(candidate, for_file=False):
+            click.echo(f"Workspace root '{candidate}' is not writable; choose another directory.")
+            continue
+        return candidate
+
+
+def _show_detected_subdirs(root: Path, relative_dir: str) -> None:
+    """Display up to ten detected subdirectories for the given relative input directory."""
+
+    candidate = root / relative_dir
+    if not candidate.exists():
+        return
+    try:
+        subdirs = sorted(path.name for path in candidate.iterdir() if path.is_dir())
+    except OSError:
+        return
+    if not subdirs:
+        return
+    click.echo("Detected input subdirectories:")
+    for name in subdirs[:10]:
+        click.echo(f"  - {name}")
+    if len(subdirs) > 10:
+        click.echo("  …")
+
+
+def _prompt_input_directory(root: Path, current_default: str) -> str:
+    """Prompt for the media input directory under the workspace root."""
+
+    _show_detected_subdirs(root, current_default)
+    while True:
+        response = click.prompt(
+            "Input directory (relative to workspace)",
+            default=current_default,
+        )
+        value = response.strip() or current_default
+        try:
+            _resolve_workspace_subdir(root, value, purpose="[paths].input_dir")
+        except CLIAppError as exc:
+            click.echo(str(exc))
+            continue
+        return value
+
+
+def _prompt_slowpics_options(config: Dict[str, Any]) -> None:
+    """Interactively configure slow.pics options."""
+
+    click.echo("Slow.pics options:")
+    auto_default = bool(config.get("auto_upload", False))
+    auto_upload = click.confirm("Enable slow.pics auto-upload?", default=auto_default)
+    config["auto_upload"] = auto_upload
+
+    tmdb_default = str(config.get("tmdb_id", ""))
+    if click.confirm("Set a TMDB identifier?", default=bool(tmdb_default)):
+        tmdb_id = click.prompt(
+            "TMDB identifier (e.g. movie/603)",
+            default=tmdb_default or "",
+            show_default=bool(tmdb_default),
+        )
+        config["tmdb_id"] = tmdb_id.strip()
+
+    cleanup_default = bool(config.get("delete_screen_dir_after_upload", True))
+    cleanup = click.confirm(
+        "Delete screenshot directory after upload completes?",
+        default=cleanup_default,
+    )
+    config["delete_screen_dir_after_upload"] = cleanup
+
+
+def _prompt_audio_alignment_option(config: Dict[str, Any]) -> None:
+    """Prompt for enabling or disabling audio alignment."""
+
+    message = "Enable audio alignment (requires numpy, librosa, soundfile, and FFmpeg)?"
+    default = bool(config.get("enable", False))
+    config["enable"] = click.confirm(message, default=default)
+
+
+def _prompt_renderer_preference(config: Dict[str, Any]) -> None:
+    """Prompt for VapourSynth vs FFmpeg renderer preference."""
+
+    click.echo("Renderer preference:")
+    renderer_default = "ffmpeg" if config.get("use_ffmpeg", False) else "vapoursynth"
+    choice = click.prompt(
+        "Choose renderer",
+        type=click.Choice(["vapoursynth", "ffmpeg"], case_sensitive=False),
+        default=renderer_default,
+    )
+    config["use_ffmpeg"] = choice.lower() == "ffmpeg"
+
+
+def _run_wizard_prompts(root: Path, config: Dict[str, Any]) -> tuple[Path, Dict[str, Any]]:
+    """Execute the interactive wizard prompts and return the updated root/config."""
+
+    workspace_root = _prompt_workspace_root(root)
+    paths_section = cast(Dict[str, Any], config.setdefault("paths", {}))
+    default_input = str(paths_section.get("input_dir", "comparison_videos"))
+    paths_section["input_dir"] = _prompt_input_directory(workspace_root, default_input)
+    slowpics_section = cast(Dict[str, Any], config.setdefault("slowpics", {}))
+    _prompt_slowpics_options(slowpics_section)
+    audio_section = cast(Dict[str, Any], config.setdefault("audio_alignment", {}))
+    _prompt_audio_alignment_option(audio_section)
+    screenshots_section = cast(Dict[str, Any], config.setdefault("screenshots", {}))
+    _prompt_renderer_preference(screenshots_section)
+    return workspace_root, config
+
+
+def _get_config_value(mapping: Mapping[str, Any], path: Sequence[str], default: Any = None) -> Any:
+    """Return a nested configuration value from *mapping* using ``path`` segments."""
+
+    current: Any = mapping
+    for segment in path:
+        if isinstance(current, Mapping) and segment in current:
+            current = current[segment]
+        else:
+            return default
+    return current
+
+
+def _collect_doctor_checks(
+    root: Path,
+    config_path: Path,
+    config_mapping: Mapping[str, Any],
+    *,
+    root_issue: Optional[str] = None,
+    config_issue: Optional[str] = None,
+) -> tuple[list[DoctorCheck], list[str]]:
+    """Generate doctor check results and auxiliary notes."""
+
+    notes: list[str] = []
+    if root_issue:
+        notes.append(root_issue)
+    if config_issue:
+        notes.append(config_issue)
+
+    use_ffmpeg = bool(_get_config_value(config_mapping, ("screenshots", "use_ffmpeg"), False))
+    audio_enabled = bool(_get_config_value(config_mapping, ("audio_alignment", "enable"), False))
+    vspreview_enabled = bool(_get_config_value(config_mapping, ("audio_alignment", "use_vspreview"), False))
+    auto_upload = bool(_get_config_value(config_mapping, ("slowpics", "auto_upload"), False))
+
+    vapoursynth_spec = importlib.util.find_spec("vapoursynth")
+    vapoursynth_available = vapoursynth_spec is not None
+
+    ffmpeg_path = shutil.which("ffmpeg")
+    ffprobe_path = shutil.which("ffprobe")
+
+    checks: list[DoctorCheck] = []
+
+    config_writable = _is_writable_path(config_path, for_file=True)
+    config_label = "Config path writable"
+    if root_issue:
+        config_status: DoctorStatus = "fail"
+        config_message = root_issue
+    elif config_issue:
+        config_status = "warn"
+        config_message = config_issue
+    elif config_writable:
+        config_status = "pass"
+        config_message = f"{config_path} is writable."
+    else:
+        config_status = "fail"
+        config_message = (
+            f"{config_path} is not writable. Choose another --root/--config or adjust permissions."
+        )
+    checks.append({
+        "id": "config",
+        "label": config_label,
+        "status": config_status,
+        "message": config_message,
+    })
+
+    if vapoursynth_available:
+        vap_message = "VapourSynth module available."
+        vap_status: DoctorStatus = "pass"
+    else:
+        if use_ffmpeg:
+            vap_status = "warn"
+            vap_message = "VapourSynth not found; screenshots are configured for FFmpeg fallback."
+        else:
+            vap_status = "fail"
+            vap_message = "VapourSynth not found. Install VapourSynth or set [screenshots].use_ffmpeg=true."
+    checks.append({
+        "id": "vapoursynth",
+        "label": "VapourSynth import",
+        "status": vap_status,
+        "message": vap_message,
+    })
+
+    ffmpeg_missing = [name for name, present in (("ffmpeg", ffmpeg_path), ("ffprobe", ffprobe_path)) if not present]
+    if not ffmpeg_missing:
+        ffmpeg_status: DoctorStatus = "pass"
+        ffmpeg_message = "ffmpeg/ffprobe available."
+    else:
+        if use_ffmpeg:
+            ffmpeg_status = "fail"
+        elif vapoursynth_available:
+            ffmpeg_status = "warn"
+        else:
+            ffmpeg_status = "fail"
+        missing_str = ", ".join(ffmpeg_missing)
+        ffmpeg_message = (
+            f"Missing {missing_str}. Install FFmpeg or adjust renderer settings."
+        )
+    checks.append({
+        "id": "ffmpeg",
+        "label": "FFmpeg binaries",
+        "status": ffmpeg_status,
+        "message": ffmpeg_message,
+    })
+
+    audio_modules = {"librosa": importlib.util.find_spec("librosa"), "soundfile": importlib.util.find_spec("soundfile")}
+    missing_audio = [name for name, spec in audio_modules.items() if spec is None]
+    if not missing_audio:
+        audio_status: DoctorStatus = "pass"
+        audio_message = "Optional audio dependencies available."
+    else:
+        install_hint = "Install with 'uv pip install frame-compare[audio]'."
+        if audio_enabled:
+            audio_status = "fail"
+            audio_message = f"Missing {', '.join(missing_audio)}. {install_hint}"
+        else:
+            audio_status = "warn"
+            audio_message = f"Missing {', '.join(missing_audio)} (audio alignment disabled). {install_hint}"
+    checks.append({
+        "id": "audio",
+        "label": "Audio alignment deps",
+        "status": audio_status,
+        "message": audio_message,
+    })
+
+    vspreview_detected = bool(shutil.which("vspreview") or importlib.util.find_spec("vspreview"))
+    pyside_available = importlib.util.find_spec("PySide6") is not None
+    if vspreview_detected and pyside_available:
+        vs_status: DoctorStatus = "pass"
+        vs_message = "VSPreview tooling available."
+    else:
+        if vspreview_enabled:
+            vs_status = "fail"
+            vs_message = "VSPreview extras missing. Install the 'preview' extras group."
+        else:
+            vs_status = "warn"
+            vs_message = "VSPreview extras not detected (feature disabled)."
+    checks.append({
+        "id": "vspreview",
+        "label": "VSPreview extras",
+        "status": vs_status,
+        "message": vs_message,
+    })
+
+    if auto_upload:
+        slowpics_status: DoctorStatus = "warn"
+        slowpics_message = (
+            "[slowpics].auto_upload is enabled. Allow network access to https://slow.pics/ or disable auto_upload."
+        )
+    else:
+        slowpics_status = "pass"
+        slowpics_message = "Slow.pics auto-upload disabled."
+    checks.append({
+        "id": "slowpics",
+        "label": "slow.pics network",
+        "status": slowpics_status,
+        "message": slowpics_message,
+    })
+
+    pyperclip_spec = importlib.util.find_spec("pyperclip")
+    if auto_upload and pyperclip_spec is None:
+        clip_status: DoctorStatus = "warn"
+        clip_message = "Clipboard helper missing. Install 'pyperclip' or ignore to skip clipboard copying."
+    else:
+        clip_status = "pass"
+        if auto_upload:
+            clip_message = "pyperclip available for clipboard copy."
+        else:
+            clip_message = "Clipboard helper optional when slow.pics auto-upload is disabled."
+    checks.append({
+        "id": "pyperclip",
+        "label": "Clipboard helper",
+        "status": clip_status,
+        "message": clip_message,
+    })
+
+    return checks, notes
+
+
+def _emit_doctor_results(
+    checks: Sequence[DoctorCheck],
+    notes: Sequence[str],
+    *,
+    json_mode: bool,
+    workspace_root: Path,
+    config_path: Path,
+) -> None:
+    """Render doctor results either as text table or JSON payload."""
+
+    if json_mode:
+        payload = {
+            "workspace_root": str(workspace_root),
+            "config_path": str(config_path),
+            "checks": list(checks),
+            "notes": list(notes),
+        }
+        click.echo(json.dumps(payload, indent=2))
+        return
+
+    if checks:
+        width = max(len(check["label"]) for check in checks)
+    else:
+        width = 0
+    for check in checks:
+        icon = _DOCTOR_STATUS_ICONS.get(check["status"], "•")
+        label = check["label"].ljust(width)
+        click.echo(f"{icon} {label} — {check['message']}")
+    if notes:
+        click.echo("Notes:")
+        for note in notes:
+            click.echo(f"  - {note}")
+
+
 def _prepare_preflight(
     *,
     cli_root: str | None,
@@ -1534,15 +2138,7 @@ def _build_plans(files: Sequence[Path], metadata: Sequence[Dict[str, str]], cfg:
 
 
 def _extract_clip_fps(clip: object) -> Tuple[int, int]:
-    """
-    Determine the clip's FPS as a (numerator, denominator) tuple, falling back to 24000/1001 if not available.
-
-    Parameters:
-        clip (object): An object that may expose integer attributes `fps_num` and `fps_den`.
-
-    Returns:
-        fps (Tuple[int, int]): The `(num, den)` FPS tuple from the clip if both are integers and `den` is non-zero; otherwise `(24000, 1001)`.
-    """
+    """Return (fps_num, fps_den) from *clip*, defaulting to 24000/1001 when missing."""
     num = getattr(clip, "fps_num", None)
     den = getattr(clip, "fps_den", None)
     if isinstance(num, int) and isinstance(den, int) and den:
@@ -1672,17 +2268,7 @@ def _build_legacy_summary_lines(values: Mapping[str, Any], *, emit_json_tail: bo
     """
 
     def _maybe_number(value: Any) -> float | None:
-        """
-        Convert a value to a float when possible.
-
-        Attempts to coerce numeric-like input to a float. Returns None when the value cannot be converted.
-
-        Parameters:
-            value (Any): The value to convert to float.
-
-        Returns:
-            float | None: The converted float, or `None` if conversion failed.
-        """
+        """Convert numeric-like input to float, returning ``None`` on failure."""
         if isinstance(value, (int, float)):
             return float(value)
         try:
@@ -1691,33 +2277,14 @@ def _build_legacy_summary_lines(values: Mapping[str, Any], *, emit_json_tail: bo
             return None
 
     def _format_number(value: Any, fmt: str, fallback: str) -> str:
-        """
-        Attempt to coerce `value` to a number and format it using `fmt`; return `fallback` if `value` cannot be interpreted as a number.
-
-        Parameters:
-            value (Any): The value to format; will be converted to a numeric type if possible.
-            fmt (str): A format specification string passed to Python's built-in `format()` (e.g., ".2f").
-            fallback (str): The string to return when `value` cannot be converted to a number.
-
-        Returns:
-            str: The formatted number as a string, or `fallback` if `value` is not numeric.
-        """
+        """Format numeric values with ``fmt``; fall back to the provided string."""
         number = _maybe_number(value)
         if number is None:
             return fallback
         return format(number, fmt)
 
     def _string(value: Any, fallback: str = "n/a") -> str:
-        """
-        Convert a value to its string representation with special handling for None and booleans.
-
-        Parameters:
-            value (Any): The value to convert.
-            fallback (str): String to return when `value` is None (default: "n/a").
-
-        Returns:
-            str: `fallback` if `value` is None, `"true"` or `"false"` for booleans, otherwise `str(value)`.
-        """
+        """Return lowercase booleans, fallback for ``None``, else ``str(value)``."""
         if value is None:
             return fallback
         if isinstance(value, bool):
@@ -1806,17 +2373,7 @@ def _build_legacy_summary_lines(values: Mapping[str, Any], *, emit_json_tail: bo
 
 
 def _format_clock(seconds: Optional[float]) -> str:
-    """
-    Format a duration in seconds as a human-readable clock string.
-
-    If `seconds` is None or not a finite number, returns a placeholder. Values are rounded to the nearest second, negative values are treated as zero, and durations of one hour or more are formatted as H:MM:SS; shorter durations are formatted as MM:SS.
-
-    Parameters:
-        seconds (Optional[float]): Duration in seconds to format.
-
-    Returns:
-        str: A clock-formatted string, either "--:--" for invalid input, "MM:SS" for durations under one hour, or "H:MM:SS" for durations of one hour or more.
-    """
+    """Format seconds as H:MM:SS (or MM:SS) with a placeholder for invalid input."""
     if seconds is None or not math.isfinite(seconds):
         return "--:--"
     total = max(0, int(seconds + 0.5))
@@ -1830,19 +2387,7 @@ def _format_clock(seconds: Optional[float]) -> str:
 def _init_clips(
     plans: Sequence[_ClipPlan], runtime_cfg: RuntimeConfig, cache_dir: Path | None
 ) -> None:
-    """
-    Initialize VapourSynth clips for each clip plan and populate each plan's source and effective metadata.
-
-    Parameters:
-        plans (Sequence[_ClipPlan]): Iterable of clip plans to initialize; plans marked as the reference will be initialized first and used to supply a fallback FPS for others.
-        runtime_cfg: Runtime configuration object providing at least `ram_limit_mb`.
-        cache_dir (Path | None): Optional cache directory to pass to clip initialization; if None, no cache directory is used.
-
-    Detailed behavior:
-        - Sets the VapourSynth RAM limit from `runtime_cfg`.
-        - Initializes the reference clip first (if any), then initializes the remaining clips.
-        - For each plan populates: `clip`, `applied_fps` (the fps_map passed), `effective_fps` (extracted from the initialized clip), and source metadata fields `source_fps`, `source_num_frames`, `source_width`, and `source_height`.
-    """
+    """Initialise VapourSynth clips for each plan and capture source metadata."""
     vs_core.set_ram_limit(runtime_cfg.ram_limit_mb)
 
     cache_dir_str = str(cache_dir) if cache_dir is not None else None
@@ -1991,16 +2536,7 @@ def _log_selection_windows(
     collapsed: bool,
     analyze_fps: float,
 ) -> None:
-    """
-    Log per-clip selection windows and the computed common selection window, emitting per-plan warnings and a collapse notice when applicable.
-
-    Parameters:
-        plans (Sequence[_ClipPlan]): Clip plans corresponding to each selection spec; used for labels and context.
-        specs (Sequence[SelectionWindowSpec]): Per-clip selection window specifications (start/end in frames and seconds, applied lead/trail, and warnings).
-        intersection (tuple[int, int]): Common selection window as a half-open frame interval (start_frame, end_frame).
-        collapsed (bool): True if per-clip lead/trail settings did not overlap and a fallback range was used; triggers a warning line when True.
-        analyze_fps (float): Frame rate used to convert frame indices to seconds; if <= 0, frames are shown as raw numbers.
-    """
+    """Log per-clip selection windows plus the common intersection summary."""
     for plan, spec in zip(plans, specs):
         raw_label = plan.metadata.get("label") or plan.path.name
         label = escape((raw_label or plan.path.name).strip())
@@ -2036,22 +2572,7 @@ def _resolve_alignment_reference(
     analyze_path: Path,
     reference_hint: str,
 ) -> _ClipPlan:
-    """
-    Selects which clip plan should be used as the audio alignment reference.
-
-    If a non-empty reference_hint is provided, it will be interpreted as either a numeric index or a case-insensitive match against a clip's filename, stem, or metadata label; a matching plan is returned. If no hint yields a match, the plan whose path equals analyze_path is returned. If that also does not match, the first plan in the sequence is returned.
-
-    Parameters:
-        plans (Sequence[_ClipPlan]): Available clip plans to choose from.
-        analyze_path (Path): Path of the file selected for analysis; used as a fallback match.
-        reference_hint (str): Optional hint guiding reference selection (index or name/label).
-
-    Returns:
-        _ClipPlan: The selected clip plan to use as the alignment reference.
-
-    Raises:
-        CLIAppError: If `plans` is empty.
-    """
+    """Choose the audio alignment reference plan using optional hint and fallbacks."""
     if not plans:
         raise CLIAppError("No clips available for alignment")
 
@@ -2085,27 +2606,7 @@ def _maybe_apply_audio_alignment(
     audio_track_overrides: Mapping[str, int],
     reporter: CliOutputManager | None = None,
 ) -> tuple[_AudioAlignmentSummary | None, _AudioAlignmentDisplayData | None]:
-    """
-    Attempt audio-aligning the given clip plans and produce both a summary of applied adjustments and UI-ready display data.
-
-    This inspects available audio streams, selects reference and target streams (respecting `audio_track_overrides`), measures offsets between the reference and each target, applies configured frame-bias and swap logic, updates the on-disk offsets file, and mutates each plan's trim/alignment fields when adjustments are applied.
-
-    Parameters:
-        plans (Sequence[_ClipPlan]): Clip plans to consider for alignment; must contain at least the reference and one target.
-        cfg (AppConfig): Application configuration containing audio alignment settings.
-        analyze_path (Path): Path of the clip chosen for analysis; used to help resolve the alignment reference.
-        root (Path): Root directory where the offsets file (configured in `cfg`) is located.
-        audio_track_overrides (Mapping[str, int]): Mapping of clip identifiers (index, filename, or metadata keys) to forced audio stream indices.
-        reporter (CliOutputManager | None): Optional reporter used to display progress; if None, progress is shown using a local Progress instance.
-
-    Returns:
-        tuple[_AudioAlignmentSummary | None, _AudioAlignmentDisplayData]:
-            A tuple where the first element is an _AudioAlignmentSummary when alignment was performed (or `None` if alignment was skipped),
-            and the second element is an _AudioAlignmentDisplayData containing human-readable lines, JSON-ready offsets, correlations, warnings, and related display fields.
-
-    Raises:
-        CLIAppError: If the offsets file cannot be read or if the underlying audio alignment process fails.
-    """
+    """Apply audio alignment when enabled, returning summary and display data."""
     audio_cfg = cfg.audio_alignment
     prompt_reuse_offsets = _coerce_config_flag(audio_cfg.prompt_reuse_offsets)
     offsets_path = _resolve_workspace_subdir(
@@ -2128,12 +2629,6 @@ def _maybe_apply_audio_alignment(
     )
 
     def _warn(message: str) -> None:
-        """
-        Record an audio-related warning into the current display data warnings list.
-
-        Parameters:
-            message (str): The warning text; it will be prefixed with "[AUDIO]" and appended to display_data.warnings.
-        """
         display_data.warnings.append(f"[AUDIO] {message}")
 
     vspreview_enabled = _coerce_config_flag(audio_cfg.use_vspreview)
@@ -2580,17 +3075,7 @@ def _maybe_apply_audio_alignment(
     forced_streams: set[Path] = set()
 
     def _match_audio_override(plan: _ClipPlan) -> Optional[int]:
-        """
-        Resolve an audio track override for the given clip plan and return it as an integer.
-
-        Looks up a possible override for the clip and, if present and parseable, returns the override converted to an int; returns `None` when no override is found or the value is not a valid integer.
-
-        Parameters:
-            plan (_ClipPlan): Clip plan to check for an audio track override.
-
-        Returns:
-            int or None: The audio track index if a valid override exists, `None` otherwise.
-        """
+        """Return override index for *plan* when configured, otherwise ``None``."""
         value = _match_override(plans.index(plan), plan.path, plan.metadata, audio_track_overrides)
         if value is None:
             return None
@@ -2600,15 +3085,7 @@ def _maybe_apply_audio_alignment(
             return None
 
     def _pick_default(streams: Sequence["AudioStreamInfo"]) -> int:
-        """
-        Choose the index of the default audio stream from a sequence of streams.
-
-        Parameters:
-            streams (Sequence[audio_alignment.AudioStreamInfo]): Available audio stream descriptors to consider.
-
-        Returns:
-            int: The chosen stream index. Returns `0` if `streams` is empty; otherwise returns the index of the first stream with `is_default == True`, or the first stream's `index` if none are marked default.
-        """
+        """Return default stream index, falling back to the first entry or zero."""
         if not streams:
             return 0
         for stream in streams:
@@ -3923,6 +4400,12 @@ def _confirm_alignment_with_screenshots(
             trim_offsets=[plan.trim_start for plan in plans],
             pivot_notifier=_alignment_pivot_note,
         )
+    except ClipProcessError as exc:
+        hint = "Run 'frame-compare doctor' for dependency diagnostics."
+        raise CLIAppError(
+            f"Alignment preview failed: {exc}\nHint: {hint}",
+            rich_message=f"[red]Alignment preview failed:[/red] {exc}\n[yellow]Hint:[/yellow] {hint}",
+        ) from exc
     except ScreenshotError as exc:
         raise CLIAppError(
             f"Alignment preview failed: {exc}",
@@ -3973,6 +4456,12 @@ def _confirm_alignment_with_screenshots(
             trim_offsets=[plan.trim_start for plan in plans],
             pivot_notifier=_alignment_pivot_note,
         )
+    except ClipProcessError as exc:
+        hint = "Run 'frame-compare doctor' for dependency diagnostics."
+        raise CLIAppError(
+            f"Alignment inspection failed: {exc}\nHint: {hint}",
+            rich_message=f"[red]Alignment inspection failed:[/red] {exc}\n[yellow]Hint:[/yellow] {hint}",
+        ) from exc
     except ScreenshotError as exc:
         raise CLIAppError(
             f"Alignment inspection failed: {exc}",
@@ -5079,15 +5568,7 @@ def run_cli(
                 )
 
                 def _advance_samples(count: int) -> None:
-                    """
-                    Advance the internal sample counter by the given number of sample groups and refresh progress indicators.
-
-                    Parameters:
-                        count (int): Number of sample groups to advance; each group represents `step_size` frames.
-
-                    Description:
-                        Increments the internal samples counter and, when a progress total is set, recomputes processing rate, estimated time remaining, and elapsed time. Updates the external reporter's "analyze_bar" state and the analysis_progress task to reflect the new completion amount.
-                    """
+                    """Advance sample counter, update stats, and refresh progress displays."""
                     nonlocal samples_done
                     samples_done += count
                     if progress_total <= 0:
@@ -5287,14 +5768,7 @@ def run_cli(
                 )
 
                 def advance_render(count: int) -> None:
-                    """
-                    Update rendering progress and notify the reporter and progress bar.
-
-                    Computes elapsed time, frames-per-second, and estimated time remaining after advancing by `count`, then updates the reporter's progress state and the render progress task completion.
-
-                    Parameters:
-                        count (int): Number of newly processed render items to add to the progress.
-                    """
+                    """Update rendering progress metrics and visible bars."""
                     nonlocal processed
                     processed += count
                     elapsed = max(time.perf_counter() - start_time, 1e-6)
@@ -5356,6 +5830,12 @@ def run_cli(
                 verification_sink=verification_records,
                 pivot_notifier=_notify_pivot,
             )
+    except ClipProcessError as exc:
+        hint = "Run 'frame-compare doctor' for dependency diagnostics."
+        raise CLIAppError(
+            f"Screenshot generation failed: {exc}\nHint: {hint}",
+            rich_message=f"[red]Screenshot generation failed:[/red] {exc}\n[yellow]Hint:[/yellow] {hint}",
+        ) from exc
     except ScreenshotError as exc:
         raise CLIAppError(
             f"Screenshot generation failed: {exc}",
@@ -5686,47 +6166,11 @@ def run_cli(
     return result
 
 
-@click.command()
-@click.option(
-    "--root",
-    "root_path",
-    default=None,
-    help="Workspace root override. Defaults to FRAME_COMPARE_ROOT or sentinel discovery.",
-)
-@click.option(
-    "--config",
-    "config_path",
-    default=None,
-    show_default=False,
-    help=_DEFAULT_CONFIG_HELP,
-)
-@click.option("--input", "input_dir", default=None, help="Override [paths.input_dir] from config.toml")
-@click.option(
-    "--audio-align-track",
-    "audio_align_track_option",
-    type=str,
-    multiple=True,
-    help="Manual audio track override in the form label=index. Repeatable.",
-)
-@click.option("--quiet", is_flag=True, help="Suppress verbose output; show At-a-Glance, progress, and JSON only.")
-@click.option("--verbose", is_flag=True, help="Show additional diagnostic output during run.")
-@click.option("--no-color", is_flag=True, help="Disable ANSI colour output.")
-@click.option("--json-pretty", is_flag=True, help="Pretty-print the JSON tail output.")
-@click.option(
-    "--diagnose-paths",
-    is_flag=True,
-    help="Print the resolved config/input/output paths as JSON and exit.",
-)
-@click.option(
-    "--write-config",
-    is_flag=True,
-    help="Ensure the workspace config exists (seeds ROOT/config/config.toml when missing) and exit.",
-)
-def main(
+def _run_cli_entry(
+    *,
     root_path: str | None,
     config_path: str | None,
     input_dir: str | None,
-    *,
     audio_align_track_option: tuple[str, ...],
     quiet: bool,
     verbose: bool,
@@ -5735,24 +6179,8 @@ def main(
     diagnose_paths: bool,
     write_config: bool,
 ) -> None:
-    """
-    Run the CLI pipeline and handle post-run outputs such as slow.pics handling and JSON tail emission.
+    """Execute the primary CLI workflow with the provided options."""
 
-    Includes optional VSPreview-assisted manual alignment when `[audio_alignment].use_vspreview` is enabled and the session is
-    interactive.
-
-    Runs run_cli with the provided options, handles CLIAppError by printing the rich message and exiting with the error code, processes slow.pics results (open in browser, copy to clipboard, create shortcut file, and optionally delete the screenshots directory), and finally emits the collected JSON tail to stdout (optionally pretty-printed).
-
-    Parameters:
-        root_path: Optional explicit workspace root (overrides FRAME_COMPARE_ROOT and sentinel discovery).
-        config_path: Optional override for config.toml. When omitted, resolves to ROOT/config/config.toml.
-        input_dir: Optional override for [paths].input_dir inside the selected root.
-        audio_align_track_option: Tuple of audio track override strings to pass through to run_cli.
-        quiet: If True, run in quiet mode (affects reporting inside run_cli).
-        verbose: If True, enable verbose reporting inside run_cli.
-        no_color: If True, disable colored output in run_cli.
-        json_pretty: If True, pretty-print the emitted JSON tail (2-space indent).
-    """
     preflight_for_write: _PathPreflightResult | None = None
     if write_config:
         try:
@@ -5905,6 +6333,291 @@ def main(
         else:
             json_output = json.dumps(json_tail, separators=(",", ":"))
         print(json_output)
+
+
+@click.group(invoke_without_command=True)
+@click.option(
+    "--root",
+    "root_path",
+    default=None,
+    help="Workspace root override. Defaults to FRAME_COMPARE_ROOT or sentinel discovery.",
+)
+@click.option(
+    "--config",
+    "config_path",
+    default=None,
+    show_default=False,
+    help=_DEFAULT_CONFIG_HELP,
+)
+@click.option("--input", "input_dir", default=None, help="Override [paths.input_dir] from config.toml")
+@click.option(
+    "--audio-align-track",
+    "audio_align_track_option",
+    type=str,
+    multiple=True,
+    help="Manual audio track override in the form label=index. Repeatable.",
+)
+@click.option("--quiet", is_flag=True, help="Suppress verbose output; show At-a-Glance, progress, and JSON only.")
+@click.option("--verbose", is_flag=True, help="Show additional diagnostic output during run.")
+@click.option("--no-color", is_flag=True, help="Disable ANSI colour output.")
+@click.option("--json-pretty", is_flag=True, help="Pretty-print the JSON tail output.")
+@click.option(
+    "--diagnose-paths",
+    is_flag=True,
+    help="Print the resolved config/input/output paths as JSON and exit.",
+)
+@click.option(
+    "--write-config",
+    is_flag=True,
+    help="Ensure the workspace config exists (seeds ROOT/config/config.toml when missing) and exit.",
+)
+@click.pass_context
+def main(
+    ctx: click.Context,
+    root_path: str | None,
+    config_path: str | None,
+    input_dir: str | None,
+    *,
+    audio_align_track_option: tuple[str, ...],
+    quiet: bool,
+    verbose: bool,
+    no_color: bool,
+    json_pretty: bool,
+    diagnose_paths: bool,
+    write_config: bool,
+) -> None:
+    """Command group entry point that dispatches to subcommands or the default run."""
+
+    params = {
+        "root_path": root_path,
+        "config_path": config_path,
+        "input_dir": input_dir,
+        "audio_align_track_option": audio_align_track_option,
+        "quiet": quiet,
+        "verbose": verbose,
+        "no_color": no_color,
+        "json_pretty": json_pretty,
+        "diagnose_paths": diagnose_paths,
+        "write_config": write_config,
+    }
+    ctx.ensure_object(dict)
+    ctx.obj.update(params)
+
+    if ctx.invoked_subcommand is None:
+        _run_cli_entry(**params)
+
+
+@main.command("run")
+@click.pass_context
+def run_command(ctx: click.Context) -> None:
+    """Explicit subcommand to run the primary pipeline."""
+
+    params = ctx.obj or {}
+    _run_cli_entry(
+        root_path=params.get("root_path"),
+        config_path=params.get("config_path"),
+        input_dir=params.get("input_dir"),
+        audio_align_track_option=tuple(params.get("audio_align_track_option", ())),
+        quiet=bool(params.get("quiet", False)),
+        verbose=bool(params.get("verbose", False)),
+        no_color=bool(params.get("no_color", False)),
+        json_pretty=bool(params.get("json_pretty", False)),
+        diagnose_paths=bool(params.get("diagnose_paths", False)),
+        write_config=bool(params.get("write_config", False)),
+    )
+
+
+@main.command("doctor")
+@click.option("--json", "json_mode", is_flag=True, help="Emit machine-readable diagnostics.")
+@click.pass_context
+def doctor(ctx: click.Context, json_mode: bool) -> None:
+    """Summarise dependency readiness without altering workspace state."""
+
+    params = ctx.obj or {}
+    root_override = params.get("root_path")
+    config_override = params.get("config_path")
+    input_override = params.get("input_dir")
+
+    root_issue: Optional[str] = None
+    try:
+        workspace_root = _discover_workspace_root(root_override)
+    except CLIAppError as exc:
+        root_issue = str(exc)
+        if root_override:
+            workspace_root = Path(root_override).expanduser()
+        else:
+            workspace_root = Path.cwd()
+
+    config_path = Path(config_override).expanduser() if config_override else workspace_root / "config" / "config.toml"
+
+    config_issue: Optional[str] = None
+    config_mapping: Mapping[str, Any]
+    try:
+        cfg_obj = load_config(str(config_path))
+        if input_override is not None:
+            cfg_obj.paths.input_dir = input_override
+        config_mapping = asdict(cfg_obj)
+    except FileNotFoundError:
+        config_issue = f"Config file not found at {config_path}; using defaults."
+        config_mapping = asdict(_fresh_app_config())
+        if input_override is not None:
+            config_mapping.setdefault("paths", {})["input_dir"] = input_override
+    except ConfigError as exc:
+        config_issue = f"Config parsing failed: {exc}" if not root_issue else str(exc)
+        config_mapping = asdict(_fresh_app_config())
+    except Exception as exc:  # pragma: no cover - unexpected I/O failure
+        config_issue = f"Unable to load config: {exc}"
+        config_mapping = asdict(_fresh_app_config())
+
+    checks, notes = _collect_doctor_checks(
+        workspace_root,
+        config_path,
+        config_mapping,
+        root_issue=root_issue,
+        config_issue=config_issue,
+    )
+
+    _emit_doctor_results(
+        checks,
+        notes,
+        json_mode=json_mode,
+        workspace_root=workspace_root,
+        config_path=config_path,
+    )
+
+
+@main.command("wizard")
+@click.option("--preset", "preset_name", default=None, help="Apply preset defaults before prompting.")
+@click.pass_context
+def wizard(ctx: click.Context, preset_name: str | None) -> None:
+    """Interactive configuration wizard with optional preset overlays."""
+
+    params = ctx.obj or {}
+    root_override = params.get("root_path")
+    config_override = params.get("config_path")
+    input_override = params.get("input_dir")
+
+    root, config_path = _resolve_wizard_paths(root_override, config_override)
+    template_text = _read_template_text()
+    template_config = _load_template_config()
+    final_config = copy.deepcopy(template_config)
+
+    if preset_name:
+        preset_data = _load_preset_data(preset_name)
+        _deep_merge(final_config, preset_data)
+
+    interactive = sys.stdin.isatty()
+    if not interactive and not preset_name:
+        raise click.ClickException("wizard requires an interactive terminal or --preset.")
+
+    if interactive:
+        click.echo("Starting interactive wizard. Press Enter to accept defaults.")
+        root, final_config = _run_wizard_prompts(root, final_config)
+        if config_override is None:
+            config_path = root / "config" / "config.toml"
+    else:
+        click.echo("Non-interactive mode detected; applying preset configuration.")
+
+    if input_override:
+        try:
+            _resolve_workspace_subdir(root, input_override, purpose="[paths].input_dir")
+        except CLIAppError as exc:
+            raise click.ClickException(str(exc)) from exc
+        paths_section = cast(Dict[str, Any], final_config.setdefault("paths", {}))
+        paths_section["input_dir"] = input_override
+
+    doctor_checks, doctor_notes = _collect_doctor_checks(root, config_path, final_config)
+    click.echo("\nDependency check:")
+    _emit_doctor_results(
+        doctor_checks,
+        doctor_notes,
+        json_mode=False,
+        workspace_root=root,
+        config_path=config_path,
+    )
+
+    blocking = [check for check in doctor_checks if check["status"] != "pass"]
+    if interactive and blocking:
+        if not click.confirm("Continue despite missing dependencies?", default=False):
+            click.echo("Aborted.")
+            return
+
+    updated_text = _render_config_text(template_text, template_config, final_config)
+    _present_diff(template_text, updated_text)
+
+    if interactive:
+        if not click.confirm("Write config?", default=True):
+            click.echo("Aborted.")
+            return
+    else:
+        click.echo("Writing config without confirmation (non-interactive).")
+
+    _write_config_file(config_path, updated_text)
+    click.echo(f"Wrote config to {config_path}")
+
+
+@main.group()
+@click.pass_context
+def preset(ctx: click.Context) -> None:
+    """Preset management helpers."""
+
+    ctx.obj = ctx.parent.obj if ctx.parent is not None else {}
+
+
+@preset.command("list")
+def preset_list() -> None:
+    """List available configuration presets."""
+
+    presets = _list_preset_paths()
+    if not presets:
+        click.echo("No presets available.")
+        return
+    for name in sorted(presets):
+        description = PRESET_DESCRIPTIONS.get(name, "")
+        if description:
+            click.echo(f"{name}: {description}")
+        else:
+            click.echo(name)
+
+
+@preset.command("apply")
+@click.argument("name")
+@click.pass_context
+def preset_apply(ctx: click.Context, name: str) -> None:
+    """Apply a preset without running the full wizard."""
+
+    params = ctx.obj or {}
+    root_override = params.get("root_path")
+    config_override = params.get("config_path")
+    input_override = params.get("input_dir")
+
+    root, config_path = _resolve_wizard_paths(root_override, config_override)
+    template_text = _read_template_text()
+    template_config = _load_template_config()
+    final_config = copy.deepcopy(template_config)
+
+    preset_data = _load_preset_data(name)
+    _deep_merge(final_config, preset_data)
+
+    if input_override:
+        try:
+            _resolve_workspace_subdir(root, input_override, purpose="[paths].input_dir")
+        except CLIAppError as exc:
+            raise click.ClickException(str(exc)) from exc
+        final_config.setdefault("paths", {})["input_dir"] = input_override
+
+    updated_text = _render_config_text(template_text, template_config, final_config)
+    _present_diff(template_text, updated_text)
+
+    if sys.stdin.isatty():
+        if not click.confirm("Write config?", default=True):
+            click.echo("Aborted.")
+            return
+    else:
+        click.echo("Writing config without confirmation (non-interactive).")
+
+    _write_config_file(config_path, updated_text)
+    click.echo(f"Wrote config to {config_path}")
 
 
 if __name__ == "__main__":

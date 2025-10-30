@@ -125,7 +125,32 @@ uv run python -m frame_compare --root /path/to/workspace --diagnose-paths
 
 # Force FFmpeg screenshots for environments without VapourSynth
 uv run python -m frame_compare --root /path --config config/config.toml --json-pretty --no-color
+
+# Launch the interactive wizard (prompts for workspace, renderer, slow.pics)
+uv run python -m frame_compare --root /path/to/workspace wizard
+
+# Check dependency readiness (non-fatal, supports --json)
+uv run python -m frame_compare --root /path/to/workspace doctor
+
+# Apply a preset without prompts (non-interactive safe)
+uv run python -m frame_compare --root /path/to/workspace preset apply quick-compare
 ```
+
+### Wizard & Presets
+
+`frame-compare wizard` guides you through workspace selection, input discovery, slow.pics options, audio alignment, and renderer preference. When stdin is not a TTY, supply `--preset <name>` to reuse a predefined profile without hanging automation.
+
+Available presets can be listed with `frame-compare preset list`. They ship with:
+
+- `quick-compare` – minimal sampling, FFmpeg renderer, slow.pics disabled.
+- `hdr-vs-sdr` – tonemap-focused defaults with stricter verification.
+- `batch-qc` – expanded sampling quotas with slow.pics uploads enabled.
+
+Use `frame-compare preset apply <name>` to seed `config/config.toml` in one step, optionally alongside `--root`/`--config` overrides.
+
+### Dependency Doctor
+
+`frame-compare doctor` performs fast, read-only diagnostics for VapourSynth, FFmpeg, audio extras, VSPreview tooling, slow.pics networking, clipboard helpers, and config writability. It always exits with code 0, making it safe to run during install scripts, and supports `--json` for machine-readable integrations. The wizard invokes it automatically after collecting answers so you can decide whether to continue when optional dependencies are missing.
 
 Outputs are written beneath the input directory: screenshots under `screens` (configurable), cached metrics alongside video inputs, slow.pics shortcuts in the same directory, and a JSON summary on stdout. Shortcut filenames mirror the resolved slow.pics collection name.
 
