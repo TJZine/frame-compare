@@ -84,6 +84,13 @@ body {
   overflow: hidden;
   background: #090b11;
   min-height: 16rem;
+}
+
+.rc-viewer-stage.rc-mode-slider {
+  cursor: ew-resize;
+}
+
+.rc-viewer-stage.rc-mode-overlay {
   cursor: pointer;
 }
 

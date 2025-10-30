@@ -318,9 +318,30 @@
     return state.data.encodes.map((encode) => encode.label);
   }
 
+  function swapSelectedEncodes() {
+    if (!state.leftEncode || !state.rightEncode) {
+      return;
+    }
+    const temp = state.leftEncode;
+    state.leftEncode = state.rightEncode;
+    state.rightEncode = temp;
+    if (leftSelect) {
+      leftSelect.value = state.leftEncode;
+    }
+    if (rightSelect) {
+      rightSelect.value = state.rightEncode;
+    }
+    updateImages();
+  }
+
   function updateModeUI(sliderEnabled, leftAvailable, rightAvailable) {
     if (sliderGroup instanceof HTMLElement) {
       sliderGroup.style.display = state.mode === "overlay" ? "none" : "";
+    }
+    if (viewerStage instanceof HTMLElement) {
+      viewerStage.dataset.mode = state.mode;
+      viewerStage.classList.toggle("rc-mode-overlay", state.mode === "overlay");
+      viewerStage.classList.toggle("rc-mode-slider", state.mode === "slider");
     }
     if (state.mode === "overlay") {
       const overlayActive = leftAvailable && rightAvailable;
@@ -330,17 +351,43 @@
       divider.style.visibility = "hidden";
     } else {
       sliderControl.disabled = !sliderEnabled;
-      const isVisible = sliderEnabled;
-      overlay.style.visibility = isVisible ? "visible" : "hidden";
-      divider.style.visibility = isVisible ? "visible" : "hidden";
-      setSlider(sliderControl.value);
+      if (sliderEnabled) {
+        overlay.style.visibility = "visible";
+        const percent = Math.min(100, Math.max(0, Number(sliderControl.value) || 0));
+        const clipRight = 100 - percent;
+        overlay.style.clipPath = `inset(0 ${clipRight}% 0 0)`;
+        divider.style.visibility = "visible";
+        divider.style.left = `${percent}%`;
+      } else {
+        overlay.style.visibility = "hidden";
+        divider.style.visibility = "hidden";
+      }
     }
     if (modeSelect) {
       modeSelect.value = state.mode;
     }
   }
 
+  let sliderDragActive = false;
+  let sliderPointerId = null;
+
+  function setSliderFromClientX(clientX) {
+    const rect = viewerStage.getBoundingClientRect();
+    if (rect.width <= 0) {
+      return;
+    }
+    const percent = ((clientX - rect.left) / rect.width) * 100;
+    setSlider(percent);
+    if (state.mode === "slider") {
+      updateImages();
+    }
+  }
+
   function cycleRightEncode(step) {
+    if (state.mode === "overlay") {
+      swapSelectedEncodes();
+      return;
+    }
     const labels = encodeLabels();
     if (!labels.length) {
       return;
@@ -408,6 +455,44 @@
       cycleRightEncode(1);
     }
   });
+
+  viewerStage.addEventListener("pointerdown", (event) => {
+    if (state.mode !== "slider" || sliderControl.disabled) {
+      return;
+    }
+    sliderDragActive = true;
+    sliderPointerId = event.pointerId;
+    try {
+      viewerStage.setPointerCapture(event.pointerId);
+    } catch (error) {
+      // Safari may throw if pointer capture not supported; ignore.
+    }
+    event.preventDefault();
+    setSliderFromClientX(event.clientX);
+  });
+
+  viewerStage.addEventListener("pointermove", (event) => {
+    if (!sliderDragActive || event.pointerId !== sliderPointerId) {
+      return;
+    }
+    event.preventDefault();
+    setSliderFromClientX(event.clientX);
+  });
+
+  function endSliderDrag(event) {
+    if (!sliderDragActive || event.pointerId !== sliderPointerId) {
+      return;
+    }
+    sliderDragActive = false;
+    try {
+      viewerStage.releasePointerCapture(event.pointerId);
+    } catch (error) {
+      // Ignore release errors.
+    }
+  }
+
+  viewerStage.addEventListener("pointerup", endSliderDrag);
+  viewerStage.addEventListener("pointercancel", endSliderDrag);
 
   (function loadData() {
     const script = document.getElementById("report-data");
