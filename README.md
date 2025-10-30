@@ -35,7 +35,7 @@ Frame Compare samples darkest, brightest, high-motion, random, and user-pinned f
 - Audio alignment with correlation, dynamic time warping refinements, and optional interactive confirmation frames.
 - VapourSynth-first pipeline with FFmpeg fallback, HDR→SDR tonemapping, and placeholder recovery when writers fail.
 - slow.pics integration with automatic uploads, retries, URL shortcuts, and clipboard hand-off.
-- Optional HTML report generation for offline, browser-based comparisons with draggable before/after sliders.
+- Optional HTML report generation for offline, browser-based comparisons with draggable sliders or overlay toggles for keyboard/click-driven encode swaps.
 - TMDB-driven metadata resolution with GuessIt/Anitopy labelling to keep comparisons organised.
 - Rich CLI layout featuring progress dashboards, Unicode fallbacks, batch auto-grouping, and optional JSON tails for automation.
 - CLI override for audio stream selection (`--audio-align-track`) when auto-detection needs guidance.
@@ -190,6 +190,7 @@ Common toggles (see [docs/README_REFERENCE.md](docs/README_REFERENCE.md) for ful
 | `[audio_alignment].enable` (+`confirm_with_screenshots`) | Audio-guided offsets and preview pause. | `false` (`true`) | `enable=true` |
 | `[screenshots].use_ffmpeg` | Prefer FFmpeg renderer. | `false` | `use_ffmpeg=true` |
 | `[report].enable` (+`--html-report` / `--no-html-report`) | Generate the local HTML report and auto-open it. | `false` | `enable=true` |
+| `[report].default_mode` | Initial viewer mode (`slider` or `overlay`). | `"slider"` | `default_mode="overlay"` |
 | `[slowpics].auto_upload` | Upload results to slow.pics. | `false` | `auto_upload=true` |
 | `[runtime].ram_limit_mb` | VapourSynth RAM guard. | `4000` | `ram_limit_mb=3072` |
 

@@ -381,6 +381,7 @@ class ReportJSON(TypedDict, total=False):
     output_dir: str
     open_after_generate: bool
     opened: bool
+    mode: str
 
 
 class JsonTail(TypedDict):
@@ -4707,6 +4708,7 @@ def run_cli(
             "path": None,
             "output_dir": cfg.report.output_dir,
             "open_after_generate": bool(getattr(cfg.report, "open_after_generate", True)),
+            "mode": cfg.report.default_mode,
         },
         "warnings": [],
         "vspreview_mode": vspreview_mode_value,
@@ -6434,6 +6436,7 @@ def _run_cli_entry(
                 report_block.setdefault("opened", False)
                 report_block["path"] = str(report_path)
                 report_block["opened"] = opened_flag
+                report_block["mode"] = cfg.report.default_mode
         else:
             print("[yellow]Warning:[/yellow] HTML report generation failed.")
             if isinstance(report_block, dict):

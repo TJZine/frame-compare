@@ -354,6 +354,10 @@ def load_config(path: str) -> AppConfig:
     if include_mode not in {"minimal", "full"}:
         raise ConfigError("report.include_metadata must be 'minimal' or 'full'")
     report_cfg.include_metadata = include_mode
+    default_mode = str(getattr(report_cfg, "default_mode", "slider")).strip().lower()
+    if default_mode not in {"slider", "overlay"}:
+        raise ConfigError("report.default_mode must be 'slider' or 'overlay'")
+    report_cfg.default_mode = default_mode
     if isinstance(report_cfg.title, str):
         stripped_title = report_cfg.title.strip()
         report_cfg.title = stripped_title or None

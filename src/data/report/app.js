@@ -10,6 +10,7 @@
   const leftSelect = document.getElementById("left-select");
   const rightSelect = document.getElementById("right-select");
   const sliderControl = document.getElementById("slider-control");
+  const modeSelect = document.getElementById("mode-select");
   const viewerStage = document.getElementById("viewer-stage");
   const overlay = document.getElementById("overlay");
   const divider = document.getElementById("divider");
@@ -22,6 +23,7 @@
   const subtitle = document.getElementById("report-subtitle");
   const footer = document.getElementById("report-footer");
   const linkContainer = document.getElementById("report-links");
+  const sliderGroup = document.querySelector(".rc-slider-control");
 
   const state = {
     data: null,
@@ -29,6 +31,7 @@
     currentFrame: null,
     leftEncode: null,
     rightEncode: null,
+    mode: "slider",
   };
 
   function showError(message) {
@@ -41,8 +44,16 @@
 
   function setSlider(value) {
     const percent = Math.min(100, Math.max(0, Number(value) || 0));
-    overlay.style.width = `${percent}%`;
+    sliderControl.value = String(percent);
+    if (state.mode === "overlay") {
+      overlay.style.clipPath = "inset(0 0 0 0)";
+      divider.style.visibility = "hidden";
+      return;
+    }
+    const clipRight = 100 - percent;
+    overlay.style.clipPath = `inset(0 ${clipRight}% 0 0)`;
     divider.style.left = `${percent}%`;
+    divider.style.visibility = "visible";
   }
 
   function renderFooter(data) {
@@ -184,13 +195,9 @@
     if (leftPath) {
       leftImage.src = leftPath;
       leftImage.alt = `${state.leftEncode} at frame ${frame.index}`;
-      overlay.style.display = "block";
-      divider.style.display = "block";
     } else {
       leftImage.removeAttribute("src");
       leftImage.alt = "";
-      overlay.style.display = "none";
-      divider.style.display = "none";
     }
 
     if (rightPath) {
@@ -201,7 +208,9 @@
       rightImage.alt = "";
     }
 
-    sliderControl.disabled = !(leftPath && rightPath);
+    const sliderEnabled = Boolean(leftPath && rightPath && state.leftEncode !== state.rightEncode);
+    setSlider(sliderControl.value);
+    updateModeUI(sliderEnabled, Boolean(leftPath), Boolean(rightPath));
 
     frameLabel.textContent = frame.label ? `Frame ${frame.index} — ${frame.label}` : `Frame ${frame.index}`;
     frameSelect.value = String(frame.index);
@@ -263,6 +272,10 @@
     applyDefaults(data);
     const firstFrame = frames.length ? frames[0].index : null;
     if (firstFrame !== null) {
+      state.mode = (data.viewer_mode || "slider") === "overlay" ? "overlay" : "slider";
+      if (modeSelect) {
+        modeSelect.value = state.mode;
+      }
       selectFrame(firstFrame);
     } else {
       showError("No frames found in report data.");
@@ -286,30 +299,113 @@
 
   sliderControl.addEventListener("input", (event) => {
     setSlider(event.target.value);
+    if (state.mode === "slider") {
+      updateImages();
+    }
   });
   setSlider(sliderControl.value);
+
+  if (modeSelect) {
+    modeSelect.addEventListener("change", (event) => {
+      applyMode(event.target.value);
+    });
+  }
+
+  function encodeLabels() {
+    if (!state.data || !Array.isArray(state.data.encodes)) {
+      return [];
+    }
+    return state.data.encodes.map((encode) => encode.label);
+  }
+
+  function updateModeUI(sliderEnabled, leftAvailable, rightAvailable) {
+    if (sliderGroup instanceof HTMLElement) {
+      sliderGroup.style.display = state.mode === "overlay" ? "none" : "";
+    }
+    if (state.mode === "overlay") {
+      const overlayActive = leftAvailable && rightAvailable;
+      sliderControl.disabled = true;
+      overlay.style.visibility = overlayActive ? "visible" : "hidden";
+      overlay.style.clipPath = "inset(0 0 0 0)";
+      divider.style.visibility = "hidden";
+    } else {
+      sliderControl.disabled = !sliderEnabled;
+      const isVisible = sliderEnabled;
+      overlay.style.visibility = isVisible ? "visible" : "hidden";
+      divider.style.visibility = isVisible ? "visible" : "hidden";
+      setSlider(sliderControl.value);
+    }
+    if (modeSelect) {
+      modeSelect.value = state.mode;
+    }
+  }
+
+  function cycleRightEncode(step) {
+    const labels = encodeLabels();
+    if (!labels.length) {
+      return;
+    }
+    let index = labels.indexOf(state.rightEncode || "");
+    if (index < 0) {
+      index = 0;
+    }
+    const total = labels.length;
+    for (let i = 0; i < total; i += 1) {
+      index = (index + step + total) % total;
+      const candidate = labels[index];
+      if (candidate !== state.leftEncode || total === 1) {
+        state.rightEncode = candidate;
+        rightSelect.value = candidate;
+        updateImages();
+        break;
+      }
+    }
+  }
+
+  function applyMode(mode) {
+    state.mode = mode === "overlay" ? "overlay" : "slider";
+    updateImages();
+  }
 
   window.addEventListener("keydown", (event) => {
     if (!state.currentFrame) {
       return;
     }
-    if (event.target && [frameSelect, leftSelect, rightSelect].includes(event.target)) {
+    const ignoreTargets = [frameSelect, leftSelect, rightSelect, sliderControl, modeSelect];
+    if (event.target && ignoreTargets.includes(event.target)) {
       return;
     }
-    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+    if (event.key === "ArrowRight") {
       event.preventDefault();
       const frames = Array.from(state.framesByIndex.keys()).sort((a, b) => a - b);
       const index = frames.indexOf(state.currentFrame);
       if (index >= 0 && index + 1 < frames.length) {
         selectFrame(frames[index + 1]);
       }
-    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+    } else if (event.key === "ArrowLeft") {
       event.preventDefault();
       const frames = Array.from(state.framesByIndex.keys()).sort((a, b) => a - b);
       const index = frames.indexOf(state.currentFrame);
       if (index > 0) {
         selectFrame(frames[index - 1]);
       }
+    } else if (event.key === "ArrowUp") {
+      if (state.mode === "overlay") {
+        event.preventDefault();
+        cycleRightEncode(-1);
+      }
+    } else if (event.key === "ArrowDown") {
+      if (state.mode === "overlay") {
+        event.preventDefault();
+        cycleRightEncode(1);
+      }
+    }
+  });
+
+  viewerStage.addEventListener("click", () => {
+    viewerStage.focus();
+    if (state.mode === "overlay") {
+      cycleRightEncode(1);
     }
   });
 

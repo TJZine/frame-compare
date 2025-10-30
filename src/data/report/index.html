@@ -30,10 +30,17 @@
           <label for="slider-control">Reveal</label>
           <input type="range" id="slider-control" min="0" max="100" value="50" aria-valuemin="0" aria-valuemax="100" aria-label="Reveal slider">
         </div>
+        <div class="rc-control-group">
+          <label for="mode-select">Viewer mode</label>
+          <select id="mode-select" aria-label="Viewer mode">
+            <option value="slider">Slider</option>
+            <option value="overlay">Overlay</option>
+          </select>
+        </div>
       </section>
 
       <section class="rc-viewer" aria-live="polite">
-        <div class="rc-viewer-stage" id="viewer-stage">
+        <div class="rc-viewer-stage" id="viewer-stage" tabindex="0" role="region" aria-label="Comparison viewer">
           <img id="right-image" class="rc-image rc-image--right" alt="" loading="lazy">
           <div class="rc-overlay" id="overlay">
             <img id="left-image" class="rc-image rc-image--left" alt="" loading="lazy">

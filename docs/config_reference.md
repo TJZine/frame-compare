@@ -40,3 +40,4 @@ remain relative to the workspace root and require no HTTP server.
 | `default_left_label` / `default_right_label` | Preferred encodes for the slider’s left/right panes. | `""` |
 | `include_metadata` | Controls the JSON payload: `"minimal"` or `"full"`. | `"minimal"` |
 | `thumb_height` | Reserved for future thumbnail support; keep at `0` today. | `0` |
+| `default_mode` | Viewer mode (`slider` or `overlay`) for initial render. | `"slider"` |

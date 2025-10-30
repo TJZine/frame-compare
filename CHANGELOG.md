@@ -2,7 +2,7 @@
 
 All notable user-visible updates will be documented in this file in reverse chronological order.
 
-- *2025-10-29:* Added optional HTML report generation (configurable via `[report]` or `--html-report`), including vendored assets, CLI auto-open support, JSON-tail disclosures, and unit coverage for the new generator.
+- *2025-10-29:* Added optional HTML report generation (configurable via `[report]` or `--html-report`), including vendored assets, CLI auto-open support, JSON-tail disclosures, embedded report data for offline viewing, and unit coverage for the new generator. Added overlay mode toggle with keyboard/click encode cycling.
 - *2025-10-29:* Added interactive `frame-compare wizard` with presets, introduced `frame-compare doctor` dependency checklist (JSON-capable), expanded reference docs, and strengthened CLI help/tests for the new commands.
 - *2025-10-29:* Clarified the CLI audio alignment panel output (stream summaries, cached reuse messaging, offsets file footer) and aligned documentation; slow.pics shortcut filenames now derive from the sanitised collection name with regression tests for edge cases; README and reference tables updated.
 - *2025-10-22:* Disabled slow.pics auto-upload by default, added an upfront CLI warning when it is enabled, aligned documentation with dataclass defaults, introduced a packaged `frame-compare` console entry point, and wired Ruff linting into CI (Pyright now blocks failures).

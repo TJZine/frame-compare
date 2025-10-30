@@ -193,6 +193,7 @@ class ReportConfig:
     default_right_label: Optional[str] = None
     include_metadata: str = "minimal"
     thumb_height: int = 0
+    default_mode: str = "slider"
 
 
 @dataclass

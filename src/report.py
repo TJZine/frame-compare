@@ -206,6 +206,7 @@ def generate_html_report(
         "frames": frame_payload,
         "defaults": defaults,
         "include_metadata": include_metadata,
+        "viewer_mode": report_cfg.default_mode,
         "slowpics_url": slowpics_url,
         "stats": {
             "frames": len(frame_payload),
