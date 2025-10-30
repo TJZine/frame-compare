@@ -6,8 +6,6 @@
 Automated frame sampling, alignment, tonemapping, and slow.pics uploads for deterministic encode comparisons.
 
 ## Table of Contents
-- [Frame Compare](#frame-compare)
-  - [Table of Contents](#table-of-contents)
   - [Overview](#overview)
   - [Features](#features)
   - [Quickstart](#quickstart)
@@ -16,9 +14,6 @@ Automated frame sampling, alignment, tonemapping, and slow.pics uploads for dete
   - [Configuration](#configuration)
   - [CLI Reference](#cli-reference)
   - [Examples](#examples)
-    - [VSPreview manual alignment assistant](#vspreview-manual-alignment-assistant)
-    - [Path diagnostics before heavy runs](#path-diagnostics-before-heavy-runs)
-    - [FFmpeg-only captures](#ffmpeg-only-captures)
   - [Troubleshooting](#troubleshooting)
   - [FAQ](#faq)
   - [Performance](#performance)
