@@ -18,6 +18,10 @@
   const zoomReadout = document.getElementById("zoom-readout");
   const fitButtons = Array.from(document.querySelectorAll("[data-fit]"));
   const alignmentSelect = document.getElementById("alignment-select");
+  const leftControl = document.getElementById("left-control");
+  const rightControl = document.getElementById("right-control");
+  const leftLabel = document.getElementById("left-label");
+  const rightLabel = document.getElementById("right-label");
   const viewerStage = document.getElementById("viewer-stage");
   const canvas = document.getElementById("viewer-canvas");
   const overlay = document.getElementById("overlay");
@@ -311,6 +315,23 @@
       } else if (alignmentSelect.options.length > 0) {
         alignmentSelect.value = alignmentSelect.options[0].value;
       }
+    }
+  }
+
+  function updateEncodeControlsForMode() {
+    if (!leftControl || !rightControl || !leftLabel) {
+      return;
+    }
+    const sliderLabel = leftLabel.dataset.sliderLabel || "Left encode";
+    const overlayLabel = leftLabel.dataset.overlayLabel || "Displayed encode";
+    if (state.mode === "overlay") {
+      leftControl.style.display = "";
+      leftLabel.textContent = overlayLabel;
+      rightControl.style.display = "none";
+    } else {
+      leftControl.style.display = "";
+      leftLabel.textContent = sliderLabel;
+      rightControl.style.display = "";
     }
   }
 
@@ -658,6 +679,7 @@
       if (modeSelect) {
         modeSelect.value = state.mode;
       }
+      updateEncodeControlsForMode();
       selectFrame(firstFrame);
     } else {
       showError("No frames found in report data.");
@@ -813,6 +835,7 @@
     if (modeSelect) {
       modeSelect.value = state.mode;
     }
+    updateEncodeControlsForMode();
     applyTransform();
   }
 
@@ -873,6 +896,9 @@
     }
     if (state.panModifier) {
       return true;
+    }
+    if (state.mode === "slider") {
+      return false;
     }
     const stage = getStageSize();
     const scale = currentScale();
@@ -1028,7 +1054,7 @@
       startPan(event);
       return;
     }
-    if (state.mode === "slider" && !state.panAvailable && !sliderControl.disabled) {
+    if (state.mode === "slider" && !sliderControl.disabled) {
       sliderDragActive = true;
       sliderPointerId = event.pointerId;
       sliderCaptureElement = viewerStage;
