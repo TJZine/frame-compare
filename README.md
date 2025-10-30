@@ -163,6 +163,7 @@ Frame Compare seeds `config/config.toml` from `src/data/config.toml.template`. O
 Configuration highlights:
 
 - `[paths].input_dir` controls the media subdirectory (default `comparison_videos`).
+- Workspace guardrails keep everything under the resolved root: the CLI refuses `site-packages` roots, auto-seeds `ROOT/config/config.toml`, validates writability up front, and blocks relative paths that escape the workspace. Run `frame-compare --diagnose-paths` to confirm the resolved locations when in doubt.
 - `[analysis]` governs frame quotas, random seed, and metric cache filename.
 - `[screenshots]` selects renderer, geometry policy, dithering, and output directory name.
 - `[color]` sets tonemap preset (`reference`, `contrast`, `filmic`), verification options, overlay text, and strictness.

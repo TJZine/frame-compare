@@ -42,6 +42,7 @@ from typing import (
     List,
     Literal,
     Mapping,
+    MutableMapping,
     Optional,
     Sequence,
     Tuple,
@@ -1606,36 +1607,6 @@ def _emit_doctor_results(
             click.echo(f"  - {note}")
 
 
-def _auto_generate_config_via_wizard(initial_root: Path) -> tuple[Path, Path]:
-    """
-    Collect configuration via the interactive wizard and persist it.
-
-    Returns the workspace root selected in the wizard and the resolved config path.
-    """
-
-    click.echo("No config found. Launching interactive wizard...")
-    template_text = _read_template_text()
-    template_config = _load_template_config()
-    final_config = copy.deepcopy(template_config)
-    click.echo("Starting interactive wizard. Press Enter to accept defaults.")
-    workspace_root, final_config = _run_wizard_prompts(initial_root, final_config)
-    try:
-        workspace_root.mkdir(parents=True, exist_ok=True)
-    except PermissionError as exc:
-        raise CLIAppError(
-            f"Unable to create workspace root '{workspace_root}': {exc}",
-            code=2,
-            rich_message=f"[red]Unable to create workspace root:[/red] {workspace_root} ({exc})",
-        ) from exc
-    config_dir = workspace_root / "config"
-    config_dir.mkdir(parents=True, exist_ok=True)
-    config_path = config_dir / "config.toml"
-    updated_text = _render_config_text(template_text, template_config, final_config)
-    _write_config_file(config_path, updated_text)
-    click.echo(f"Wrote config to {config_path}")
-    return workspace_root, config_path
-
-
 def _prepare_preflight(
     *,
     cli_root: str | None,
@@ -1714,7 +1685,16 @@ def _prepare_preflight(
                     and interactive
                 )
                 if auto_wizard_allowed:
-                    new_root, new_config_path = _auto_generate_config_via_wizard(workspace_root)
+                    try:
+                        new_root, new_config_path = _execute_wizard_session(
+                            root_override=str(workspace_root),
+                            config_override=None,
+                            input_override=input_override,
+                            preset_name=None,
+                            auto_launch=True,
+                        )
+                    except click.exceptions.Exit as exc:
+                        raise exc
                     return _prepare_preflight(
                         cli_root=str(new_root),
                         config_override=str(new_config_path),
@@ -6595,8 +6575,9 @@ def main(
         "html_report_enable": html_report_enable,
         "html_report_disable": html_report_disable,
     }
-    ctx.ensure_object(dict)
-    ctx.obj.update(params)
+    params_map: MutableMapping[str, Any] = ctx.ensure_object()
+    params_map.update(params)
+    ctx.obj = params_map
 
     if ctx.invoked_subcommand is None:
         _run_cli_entry(**params)
@@ -6607,7 +6588,7 @@ def main(
 def run_command(ctx: click.Context) -> None:
     """Explicit subcommand to run the primary pipeline."""
 
-    params = ctx.obj or {}
+    params: MutableMapping[str, Any] = ctx.ensure_object()
     _run_cli_entry(
         root_path=params.get("root_path"),
         config_path=params.get("config_path"),
@@ -6631,7 +6612,7 @@ def run_command(ctx: click.Context) -> None:
 def doctor(ctx: click.Context, json_mode: bool) -> None:
     """Summarise dependency readiness without altering workspace state."""
 
-    params = ctx.obj or {}
+    params: MutableMapping[str, Any] = ctx.ensure_object()
     root_override = params.get("root_path")
     config_override = params.get("config_path")
     input_override = params.get("input_dir")
@@ -6684,16 +6665,15 @@ def doctor(ctx: click.Context, json_mode: bool) -> None:
     )
 
 
-@main.command("wizard")
-@click.option("--preset", "preset_name", default=None, help="Apply preset defaults before prompting.")
-@click.pass_context
-def wizard(ctx: click.Context, preset_name: str | None) -> None:
-    """Interactive configuration wizard with optional preset overlays."""
-
-    params = ctx.obj or {}
-    root_override = params.get("root_path")
-    config_override = params.get("config_path")
-    input_override = params.get("input_dir")
+def _execute_wizard_session(
+    *,
+    root_override: str | None,
+    config_override: str | None,
+    input_override: str | None,
+    preset_name: str | None,
+    auto_launch: bool = False,
+) -> tuple[Path, Path]:
+    """Shared wizard flow used by both the CLI command and auto-launch path."""
 
     root, config_path = _resolve_wizard_paths(root_override, config_override)
     template_text = _read_template_text()
@@ -6707,6 +6687,9 @@ def wizard(ctx: click.Context, preset_name: str | None) -> None:
     interactive = sys.stdin.isatty()
     if not interactive and not preset_name:
         raise click.ClickException("wizard requires an interactive terminal or --preset.")
+
+    if auto_launch and interactive:
+        click.echo("No config found. Launching interactive wizard...")
 
     if interactive:
         click.echo("Starting interactive wizard. Press Enter to accept defaults.")
@@ -6738,7 +6721,7 @@ def wizard(ctx: click.Context, preset_name: str | None) -> None:
     if interactive and blocking:
         if not click.confirm("Continue despite missing dependencies?", default=False):
             click.echo("Aborted.")
-            return
+            raise click.exceptions.Exit(1)
 
     updated_text = _render_config_text(template_text, template_config, final_config)
     _present_diff(template_text, updated_text)
@@ -6746,12 +6729,33 @@ def wizard(ctx: click.Context, preset_name: str | None) -> None:
     if interactive:
         if not click.confirm("Write config?", default=True):
             click.echo("Aborted.")
-            return
+            raise click.exceptions.Exit(1)
     else:
         click.echo("Writing config without confirmation (non-interactive).")
 
     _write_config_file(config_path, updated_text)
     click.echo(f"Wrote config to {config_path}")
+    return root, config_path
+
+
+@main.command("wizard")
+@click.option("--preset", "preset_name", default=None, help="Apply preset defaults before prompting.")
+@click.pass_context
+def wizard(ctx: click.Context, preset_name: str | None) -> None:
+    """Interactive configuration wizard with optional preset overlays."""
+
+    params: MutableMapping[str, Any] = ctx.ensure_object()
+    root_override = params.get("root_path")
+    config_override = params.get("config_path")
+    input_override = params.get("input_dir")
+
+    _execute_wizard_session(
+        root_override=root_override,
+        config_override=config_override,
+        input_override=input_override,
+        preset_name=preset_name,
+        auto_launch=False,
+    )
 
 
 @main.group()
@@ -6759,7 +6763,10 @@ def wizard(ctx: click.Context, preset_name: str | None) -> None:
 def preset(ctx: click.Context) -> None:
     """Preset management helpers."""
 
-    ctx.obj = ctx.parent.obj if ctx.parent is not None else {}
+    if ctx.parent is not None:
+        ctx.obj = ctx.parent.ensure_object()
+    else:
+        ctx.obj = ctx.ensure_object()
 
 
 @preset.command("list")
@@ -6784,7 +6791,7 @@ def preset_list() -> None:
 def preset_apply(ctx: click.Context, name: str) -> None:
     """Apply a preset without running the full wizard."""
 
-    params = ctx.obj or {}
+    params: MutableMapping[str, Any] = ctx.ensure_object()
     root_override = params.get("root_path")
     config_override = params.get("config_path")
     input_override = params.get("input_dir")

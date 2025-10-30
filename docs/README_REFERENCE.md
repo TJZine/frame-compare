@@ -152,3 +152,4 @@ from the repo or copy them beneath your chosen `ROOT` (for example
 | `--no-color` | Disable ANSI colour. | `false` |
 | `--json-pretty` | Pretty-print the JSON tail. | `false` |
 <!-- markdownlint-restore -->
+> The CLI refuses workspace roots inside `site-packages`/`dist-packages`, seeds `ROOT/config/config.toml` when missing, validates writability before running, and blocks derived paths from escaping the workspace. Use `--diagnose-paths` to inspect the resolved locations.

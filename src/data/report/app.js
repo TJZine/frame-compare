@@ -947,7 +947,7 @@
   }
 
   window.addEventListener("keydown", (event) => {
-    if (!state.currentFrame) {
+    if (state.currentFrame == null) {
       return;
     }
     const ignoreTargets = [frameSelect, leftSelect, rightSelect, sliderControl, modeSelect, alignmentSelect];

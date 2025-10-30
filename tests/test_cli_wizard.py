@@ -119,6 +119,7 @@ def test_auto_wizard_runs_during_write_config(tmp_path: Path, monkeypatch) -> No
     result = runner.invoke(
         frame_compare.main,
         ["--root", str(tmp_path), "--write-config"],
+        input="y\ny\n",
         catch_exceptions=False,
     )
     assert result.exit_code == 0

@@ -91,7 +91,10 @@ def _detail_to_payload(detail: SelectionDetail) -> Dict[str, object]:
 
 
 def _relative_path(path: Path, base: Path) -> str:
-    rel = os.path.relpath(path, base)
+    try:
+        rel = os.path.relpath(path, base)
+    except ValueError:
+        return path.resolve().as_posix()
     return rel.replace(os.sep, "/")
 
 

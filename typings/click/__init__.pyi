@@ -3,6 +3,7 @@ from typing import Any, Callable, Generic, MutableMapping, TypeVar, overload
 from .exceptions import Exit
 
 _F = TypeVar("_F", bound=Callable[..., Any])
+_T = TypeVar("_T")
 
 
 class Command(Generic[_F]):
@@ -25,11 +26,15 @@ class Command(Generic[_F]):
 
 class Context:
     params: MutableMapping[str, Any]
-    obj: MutableMapping[str, Any] | dict[str, Any]
+    obj: Any
     invoked_subcommand: str | None
     parent: Context | None
 
-    def ensure_object(self, object_type: type[MutableMapping[str, Any]] | type[dict[str, Any]] = ...) -> MutableMapping[str, Any]: ...
+    @overload
+    def ensure_object(self, object_type: type[_T]) -> _T: ...
+
+    @overload
+    def ensure_object(self) -> MutableMapping[str, Any]: ...
 
 
 class Param:
