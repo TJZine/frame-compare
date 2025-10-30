@@ -136,7 +136,7 @@ def generate_html_report(
     document_title = raw_title.strip() or "Frame Compare Report"
 
     encode_entries: List[EncodeEntry] = []
-    encode_lookup: Dict[str, EncodeEntry] = {}
+    seen_safe: set[str] = set()
     for plan in plans:
         label = str(plan.get("label") or "").strip() or str(plan.get("path") or "")
         safe_label = _sanitise_label(label)
@@ -145,7 +145,11 @@ def generate_html_report(
         entry: EncodeEntry = {
             "label": label,
             "safe_label": safe_label,
-            "source": str(source_path) if isinstance(source_path, Path) else str(source_path),
+            "source": (
+                str(source_path)
+                if isinstance(source_path, Path)
+                else (source_path if isinstance(source_path, str) else "")
+            ),
         }
         if include_metadata == "full" and isinstance(metadata, Mapping):
             metadata_dict: Dict[str, str] = {
@@ -153,8 +157,10 @@ def generate_html_report(
             }
             if metadata_dict:
                 entry["metadata"] = metadata_dict
+        if safe_label in seen_safe:
+            continue
+        seen_safe.add(safe_label)
         encode_entries.append(entry)
-        encode_lookup[safe_label] = entry
 
     files_by_frame: Dict[int, Dict[str, str]] = {}
     for path_str in image_paths:

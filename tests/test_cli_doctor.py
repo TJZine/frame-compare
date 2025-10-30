@@ -66,8 +66,8 @@ auto_upload = true
 
     payload = json.loads(result.output)
     statuses = {check["id"]: check["status"] for check in payload["checks"]}
-    assert statuses["vapoursynth"] in {"fail", "warn"}
-    assert statuses["ffmpeg"] in {"fail", "warn"}
+    assert statuses["vapoursynth"] == "fail"
+    assert statuses["ffmpeg"] == "fail"
     assert statuses["audio"] == "fail"
     assert statuses["vspreview"] == "fail"
     assert statuses["slowpics"] == "warn"
@@ -106,4 +106,5 @@ auto_upload = false
         catch_exceptions=False,
     )
     assert result.exit_code == 0
-    assert "✅" in result.output
+    assert "❌" not in result.output
+    assert "✅ Config path writable" in result.output

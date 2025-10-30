@@ -4567,6 +4567,11 @@ def run_cli(
         skip_auto_wizard=skip_wizard,
     )
     cfg = preflight.config
+    report_enabled = (
+        bool(report_enable_override)
+        if report_enable_override is not None
+        else bool(getattr(cfg.report, "enable", False))
+    )
     workspace_root = preflight.workspace_root
     root = preflight.media_root
     config_location = preflight.config_path
@@ -6111,8 +6116,20 @@ def run_cli(
             slowpics_block["shortcut_path"] = None
 
     report_index_path: Optional[Path] = None
-    report_block = json_tail.get("report")
-    if bool(getattr(cfg.report, "enable", False)):
+    report_block_existing = json_tail.get("report")
+    report_defaults: ReportJSON = {
+        "enabled": report_enabled,
+        "path": None,
+        "output_dir": cfg.report.output_dir,
+        "open_after_generate": bool(getattr(cfg.report, "open_after_generate", True)),
+    }
+    if isinstance(report_block_existing, dict):
+        report_block = cast(ReportJSON, report_block_existing)
+        report_block.update(report_defaults)
+    else:
+        report_block = cast(ReportJSON, report_defaults.copy())
+        json_tail["report"] = report_block
+    if report_enabled:
         try:
             report_dir = _resolve_workspace_subdir(
                 root,
@@ -6142,32 +6159,21 @@ def run_cli(
             message = f"HTML report generation failed: {exc}"
             reporter.warn(message)
             collected_warnings.append(message)
-            if isinstance(report_block, dict):
-                report_block["enabled"] = False
-                report_block["path"] = None
+            report_block["enabled"] = False
+            report_block["path"] = None
         except Exception as exc:  # pragma: no cover - defensive
             logger.exception("HTML report generation failed")
             message = f"HTML report generation failed: {exc}"
             reporter.warn(message)
             collected_warnings.append(message)
-            if isinstance(report_block, dict):
-                report_block["enabled"] = False
-                report_block["path"] = None
-        else:
-            if isinstance(report_block, dict):
-                report_block["enabled"] = True
-                report_block["path"] = str(report_index_path)
-            else:
-                json_tail["report"] = {
-                    "enabled": True,
-                    "path": str(report_index_path),
-                    "output_dir": cfg.report.output_dir,
-                    "open_after_generate": bool(getattr(cfg.report, "open_after_generate", True)),
-                }
-    else:
-        if isinstance(report_block, dict):
             report_block["enabled"] = False
             report_block["path"] = None
+        else:
+            report_block["enabled"] = True
+            report_block["path"] = str(report_index_path)
+    else:
+        report_block["enabled"] = False
+        report_block["path"] = None
 
     result = RunResult(
         files=[plan.path for plan in plans],

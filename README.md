@@ -201,7 +201,7 @@ Common toggles (see [docs/README_REFERENCE.md](docs/README_REFERENCE.md) for ful
 
 Offline HTML reports mirror slow.pics ergonomics: Actual/Fit/Fill presets, an alignment selector, pointer-anchored zoom via the slider, +/- buttons, or Ctrl/⌘ + mouse wheel, and pan support (space + drag or regular drag once zoomed beyond fit). Zoom, fit, mode, and alignment choices persist in `localStorage` so every frame opens with the same viewer state.
 
-> **Tip:** Copy the template elsewhere with `python -c "from src.config_template import copy_default_config; copy_default_config('alt-root/config/config.toml')"` when you need multiple workspaces.
+> **Tip:** To seed another workspace, run `uv run python -m frame_compare --root alt-root --write-config`.
 
 ## CLI Reference
 

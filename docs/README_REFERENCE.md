@@ -71,7 +71,7 @@ Dependency check:
 
 ### CLI output hints
 
-- The **Prepare · Audio** panel now mirrors the runtime summary produced by `_maybe_apply_audio_alignment` (`frame_compare.py:2620-2735, 4606-4630`).  
+- The **Prepare · Audio** panel now mirrors the runtime summary produced after audio alignment completes.  
 - When offsets are reused from disk, the estimation line switches to `Audio offsets reused from existing file (…)` so you can confirm cached trims without digging into logs.  
 - Per-clip offset lines include both seconds and frame counts (for example `+0.083s (+2f @ 23.976)`), helping you spot outliers before renders begin.  
 - The footer always surfaces the resolved offsets file so you can open or edit `alignment.toml` directly.

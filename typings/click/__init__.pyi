@@ -132,6 +132,7 @@ class Choice:
 
 class ClickException(Exception):
     message: str
+    def __init__(self, message: str) -> None: ...
 
 
 __all__ = [
