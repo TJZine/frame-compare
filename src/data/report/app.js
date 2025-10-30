@@ -12,6 +12,12 @@
   const sliderControl = document.getElementById("slider-control");
   const modeSelect = document.getElementById("mode-select");
   const zoomControl = document.getElementById("zoom-control");
+  const zoomOutButton = document.getElementById("zoom-out");
+  const zoomInButton = document.getElementById("zoom-in");
+  const zoomResetButton = document.getElementById("zoom-reset");
+  const zoomReadout = document.getElementById("zoom-readout");
+  const fitButtons = Array.from(document.querySelectorAll("[data-fit]"));
+  const alignmentSelect = document.getElementById("alignment-select");
   const viewerStage = document.getElementById("viewer-stage");
   const canvas = document.getElementById("viewer-canvas");
   const overlay = document.getElementById("overlay");
@@ -26,6 +32,12 @@
   const footer = document.getElementById("report-footer");
   const linkContainer = document.getElementById("report-links");
   const sliderGroup = document.querySelector(".rc-slider-control");
+  const viewerHelp = document.getElementById("viewer-help");
+
+  const STORAGE_KEY = "frameCompareReportViewer.v2";
+  const ZOOM_MIN = 25;
+  const ZOOM_MAX = 400;
+  const ZOOM_STEP = 10;
 
   const state = {
     data: null,
@@ -35,7 +47,70 @@
     rightEncode: null,
     mode: "slider",
     zoom: 100,
+    fitPreset: "fit-width",
+    alignment: "center",
+    pan: { x: 0, y: 0 },
+    imageSize: null,
+    pointer: null,
+    panActive: false,
+    panPointerId: null,
+    panStart: null,
+    panModifier: false,
+    panAvailable: false,
   };
+
+  function clampZoom(value) {
+    const numeric = Number(value) || 100;
+    return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, numeric));
+  }
+
+  function loadPreferences() {
+    try {
+      const raw = window.localStorage ? window.localStorage.getItem(STORAGE_KEY) : null;
+      if (!raw) {
+        return {};
+      }
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        return parsed;
+      }
+    } catch (error) {
+      console.warn("Unable to load report viewer preferences", error);
+    }
+    return {};
+  }
+
+  function savePreferences() {
+    try {
+      if (!window.localStorage) {
+        return;
+      }
+      const payload = {
+        zoom: state.zoom,
+        fitPreset: state.fitPreset,
+        alignment: state.alignment,
+        mode: state.mode,
+      };
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    } catch (error) {
+      // Ignore storage errors (private mode, etc.).
+    }
+  }
+
+  const preferences = loadPreferences();
+  const hasModePreference = typeof preferences.mode === "string";
+  if (preferences.zoom) {
+    state.zoom = clampZoom(preferences.zoom);
+  }
+  if (typeof preferences.fitPreset === "string") {
+    state.fitPreset = preferences.fitPreset;
+  }
+  if (typeof preferences.alignment === "string") {
+    state.alignment = preferences.alignment;
+  }
+  if (typeof preferences.mode === "string") {
+    state.mode = preferences.mode === "overlay" ? "overlay" : "slider";
+  }
 
   function showError(message) {
     root.innerHTML = "";
@@ -59,12 +134,206 @@
     divider.style.visibility = "visible";
   }
 
-  function applyZoom() {
+  function currentScale() {
+    return Number.isFinite(state.zoom) ? state.zoom / 100 : 1;
+  }
+
+  function getStageSize() {
+    if (!viewerStage) {
+      return { width: 0, height: 0 };
+    }
+    return {
+      width: viewerStage.clientWidth || viewerStage.offsetWidth || 0,
+      height: viewerStage.clientHeight || viewerStage.offsetHeight || 0,
+    };
+  }
+
+  function computeFitScale(preset) {
+    if (!state.imageSize) {
+      return 1;
+    }
+    const stage = getStageSize();
+    if (!stage.width || !stage.height) {
+      return 1;
+    }
+    const widthScale = stage.width / state.imageSize.width;
+    const heightScale = stage.height / state.imageSize.height;
+    switch (preset) {
+      case "actual":
+        return 1;
+      case "fit-height":
+        return heightScale;
+      case "fill":
+        return Math.max(widthScale, heightScale);
+      case "fit-width":
+      default:
+        return widthScale;
+    }
+  }
+
+  function computeAlignmentOffset(stage, content) {
+    const gapX = stage.width - content.width;
+    const gapY = stage.height - content.height;
+    const alignment = state.alignment || "center";
+    let offsetX = 0;
+    let offsetY = 0;
+    switch (alignment) {
+      case "top-left":
+        offsetX = 0;
+        offsetY = 0;
+        break;
+      case "top-right":
+        offsetX = gapX;
+        offsetY = 0;
+        break;
+      case "bottom-left":
+        offsetX = 0;
+        offsetY = gapY;
+        break;
+      case "bottom-right":
+        offsetX = gapX;
+        offsetY = gapY;
+        break;
+      case "center":
+      default:
+        offsetX = gapX / 2;
+        offsetY = gapY / 2;
+        break;
+    }
+    return { x: offsetX, y: offsetY };
+  }
+
+  function updatePanAvailability(contentWidth, contentHeight, stage) {
+    if (!viewerStage) {
+      return;
+    }
+    const canPanFromScale = contentWidth > stage.width + 1 || contentHeight > stage.height + 1;
+    const available = canPanFromScale || state.panModifier;
+    state.panAvailable = available;
+    viewerStage.classList.toggle("rc-pan-available", available);
+    viewerStage.dataset.pan = available ? "enabled" : "disabled";
+    if (viewerHelp) {
+      viewerHelp.hidden = false;
+    }
+  }
+
+  function applyTransform() {
     if (!canvas) {
       return;
     }
-    const scale = state.zoom / 100;
-    canvas.style.transform = `scale(${scale})`;
+    const scale = currentScale();
+    if (!state.imageSize) {
+      canvas.style.transform = `scale(${scale})`;
+      viewerStage.classList.remove("rc-pan-available");
+      viewerStage.dataset.pan = "disabled";
+      return;
+    }
+
+    const stage = getStageSize();
+    const contentWidth = state.imageSize.width * scale;
+    const contentHeight = state.imageSize.height * scale;
+    const baseOffset = computeAlignmentOffset(stage, { width: contentWidth, height: contentHeight });
+
+    let translationX = baseOffset.x + state.pan.x;
+    let translationY = baseOffset.y + state.pan.y;
+
+    const minX = Math.min(0, stage.width - contentWidth);
+    const maxX = Math.max(0, stage.width - contentWidth);
+    if (translationX < minX) {
+      state.pan.x += minX - translationX;
+      translationX = minX;
+    } else if (translationX > maxX) {
+      state.pan.x += maxX - translationX;
+      translationX = maxX;
+    }
+
+    const minY = Math.min(0, stage.height - contentHeight);
+    const maxY = Math.max(0, stage.height - contentHeight);
+    if (translationY < minY) {
+      state.pan.y += minY - translationY;
+      translationY = minY;
+    } else if (translationY > maxY) {
+      state.pan.y += maxY - translationY;
+      translationY = maxY;
+    }
+
+    canvas.style.transform = `translate(${translationX}px, ${translationY}px) scale(${scale})`;
+    updatePanAvailability(contentWidth, contentHeight, stage);
+  }
+
+  function updateZoomUI() {
+    const rounded = Math.round(state.zoom);
+    if (zoomControl) {
+      zoomControl.value = String(rounded);
+    }
+    if (zoomReadout) {
+      zoomReadout.textContent = `${rounded}%`;
+    }
+  }
+
+  function updateFitButtons() {
+    fitButtons.forEach((button) => {
+      const preset = button.dataset.fit;
+      const pressed = preset && preset === state.fitPreset;
+      button.setAttribute("aria-pressed", pressed ? "true" : "false");
+    });
+  }
+
+  function updateAlignmentSelect() {
+    if (alignmentSelect) {
+      alignmentSelect.value = state.alignment;
+    }
+  }
+
+  function setZoom(newZoom, focusPoint, options = {}) {
+    const clamped = clampZoom(newZoom);
+    const fromPreset = Boolean(options.fromPreset);
+    const previousZoom = state.zoom;
+    state.zoom = clamped;
+    if (!fromPreset) {
+      state.fitPreset = null;
+      updateFitButtons();
+    }
+    updateZoomUI();
+
+    if (focusPoint && previousZoom !== clamped && state.imageSize) {
+      const stageRect = viewerStage.getBoundingClientRect();
+      const stageX = focusPoint.x - stageRect.left;
+      const stageY = focusPoint.y - stageRect.top;
+      const prevScale = previousZoom / 100;
+      const nextScale = clamped / 100;
+      if (prevScale > 0 && nextScale > 0) {
+        const stage = getStageSize();
+        const prevAlignment = computeAlignmentOffset(stage, {
+          width: state.imageSize.width * prevScale,
+          height: state.imageSize.height * prevScale,
+        });
+        const contentX = (stageX - state.pan.x - prevAlignment.x) / prevScale;
+        const contentY = (stageY - state.pan.y - prevAlignment.y) / prevScale;
+        if (Number.isFinite(contentX) && Number.isFinite(contentY)) {
+          const nextAlignment = computeAlignmentOffset(stage, {
+            width: state.imageSize.width * nextScale,
+            height: state.imageSize.height * nextScale,
+          });
+          const targetX = stageX - (contentX * nextScale) - nextAlignment.x;
+          const targetY = stageY - (contentY * nextScale) - nextAlignment.y;
+          state.pan.x = targetX;
+          state.pan.y = targetY;
+        }
+      }
+    }
+
+    applyTransform();
+    savePreferences();
+  }
+
+  function applyFitPreset(preset) {
+    state.fitPreset = preset;
+    state.pan = { x: 0, y: 0 };
+    updateFitButtons();
+    const scale = computeFitScale(preset);
+    const percent = clampZoom(scale * 100);
+    setZoom(percent, null, { fromPreset: true });
   }
 
   function renderFooter(data) {
@@ -182,6 +451,52 @@
     frameMetadata.hidden = false;
   }
 
+  function syncImageMetrics() {
+    if (!canvas) {
+      return;
+    }
+    const candidates = [];
+    if (rightImage && rightImage.naturalWidth && rightImage.naturalHeight) {
+      candidates.push({ width: rightImage.naturalWidth, height: rightImage.naturalHeight });
+    }
+    if (leftImage && leftImage.naturalWidth && leftImage.naturalHeight) {
+      candidates.push({ width: leftImage.naturalWidth, height: leftImage.naturalHeight });
+    }
+    if (!candidates.length) {
+      return;
+    }
+    const primary = candidates.reduce((best, candidate) => {
+      const bestArea = best.width * best.height;
+      const candidateArea = candidate.width * candidate.height;
+      return candidateArea > bestArea ? candidate : best;
+    });
+    state.imageSize = primary;
+    canvas.style.setProperty("--rc-canvas-width", `${primary.width}px`);
+    canvas.style.setProperty("--rc-canvas-height", `${primary.height}px`);
+    if (state.fitPreset) {
+      const target = clampZoom(computeFitScale(state.fitPreset) * 100);
+      state.zoom = target;
+      updateZoomUI();
+    }
+    applyTransform();
+  }
+
+  function handleImageLoad() {
+    window.requestAnimationFrame(() => {
+      syncImageMetrics();
+    });
+  }
+
+  [leftImage, rightImage].forEach((image) => {
+    if (!image) {
+      return;
+    }
+    image.addEventListener("load", handleImageLoad);
+    if (image.complete && image.naturalWidth && image.naturalHeight) {
+      handleImageLoad();
+    }
+  });
+
   function findFrame(frameIndex) {
     return state.framesByIndex.get(frameIndex) || null;
   }
@@ -227,6 +542,11 @@
     frameSelect.value = String(frame.index);
     updateFilmstripActive(frame.index);
     updateFrameMetadata(frame, state.data);
+    state.pan = { x: 0, y: 0 };
+    window.requestAnimationFrame(() => {
+      syncImageMetrics();
+    });
+    applyTransform();
   }
 
   function selectFrame(frameIndex, focusFilmstrip = false) {
@@ -283,7 +603,9 @@
     applyDefaults(data);
     const firstFrame = frames.length ? frames[0].index : null;
     if (firstFrame !== null) {
-      state.mode = (data.viewer_mode || "slider") === "overlay" ? "overlay" : "slider";
+      if (!hasModePreference) {
+        state.mode = (data.viewer_mode || "slider") === "overlay" ? "overlay" : "slider";
+      }
       if (modeSelect) {
         modeSelect.value = state.mode;
       }
@@ -318,13 +640,59 @@
 
   if (zoomControl) {
     zoomControl.addEventListener("input", (event) => {
-      const value = Number(event.target.value) || 100;
-      state.zoom = Math.min(400, Math.max(50, value));
-      applyZoom();
+      const value = Number(event.target.value) || state.zoom;
+      const focusPoint = state.pointer;
+      setZoom(value, focusPoint);
     });
     zoomControl.value = String(state.zoom);
-    applyZoom();
   }
+
+  if (zoomOutButton) {
+    zoomOutButton.addEventListener("click", () => {
+      const stageRect = viewerStage.getBoundingClientRect();
+      const focus = state.pointer || { x: stageRect.left + stageRect.width / 2, y: stageRect.top + stageRect.height / 2 };
+      setZoom(state.zoom - ZOOM_STEP, focus);
+    });
+  }
+
+  if (zoomInButton) {
+    zoomInButton.addEventListener("click", () => {
+      const stageRect = viewerStage.getBoundingClientRect();
+      const focus = state.pointer || { x: stageRect.left + stageRect.width / 2, y: stageRect.top + stageRect.height / 2 };
+      setZoom(state.zoom + ZOOM_STEP, focus);
+    });
+  }
+
+  if (zoomResetButton) {
+    zoomResetButton.addEventListener("click", () => {
+      state.pan = { x: 0, y: 0 };
+      state.fitPreset = null;
+      updateFitButtons();
+      setZoom(100);
+    });
+  }
+
+  fitButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const preset = button.dataset.fit || "fit-width";
+      applyFitPreset(preset);
+    });
+  });
+
+  if (alignmentSelect) {
+    alignmentSelect.addEventListener("change", (event) => {
+      state.alignment = event.target.value || "center";
+      state.pan = { x: 0, y: 0 };
+      updateAlignmentSelect();
+      applyTransform();
+      savePreferences();
+    });
+    updateAlignmentSelect();
+  }
+
+  updateZoomUI();
+  updateFitButtons();
+  applyTransform();
 
   if (modeSelect) {
     modeSelect.addEventListener("change", (event) => {
@@ -387,11 +755,12 @@
     if (modeSelect) {
       modeSelect.value = state.mode;
     }
-    applyZoom();
+    applyTransform();
   }
 
   let sliderDragActive = false;
   let sliderPointerId = null;
+  let sliderCaptureElement = null;
 
   function setSliderFromClientX(clientX) {
     if (!canvas) {
@@ -437,14 +806,85 @@
   function applyMode(mode) {
     state.mode = mode === "overlay" ? "overlay" : "slider";
     updateImages();
+    savePreferences();
+  }
+
+  function shouldStartPan(event) {
+    if (event.button !== 0 || !state.imageSize) {
+      return false;
+    }
+    if (state.panModifier) {
+      return true;
+    }
+    const stage = getStageSize();
+    const scale = currentScale();
+    return (
+      state.imageSize.width * scale > stage.width + 1 ||
+      state.imageSize.height * scale > stage.height + 1
+    );
+  }
+
+  function startPan(event) {
+    state.panActive = true;
+    state.panPointerId = event.pointerId;
+    state.panStart = {
+      x: state.pan.x,
+      y: state.pan.y,
+      clientX: event.clientX,
+      clientY: event.clientY,
+    };
+    viewerStage.classList.add("rc-pan-active");
+    try {
+      viewerStage.setPointerCapture(event.pointerId);
+    } catch (error) {
+      // ignore capture errors
+    }
+    event.preventDefault();
+  }
+
+  function endPan(event) {
+    const pointerId = event ? event.pointerId : state.panPointerId;
+    if (!state.panActive || (typeof pointerId === "number" && pointerId !== state.panPointerId)) {
+      return;
+    }
+    state.panActive = false;
+    state.panPointerId = null;
+    state.panStart = null;
+    viewerStage.classList.remove("rc-pan-active");
+    if (typeof pointerId === "number") {
+      try {
+        viewerStage.releasePointerCapture(pointerId);
+      } catch (error) {
+        // ignore release errors
+      }
+    }
+    applyTransform();
   }
 
   window.addEventListener("keydown", (event) => {
     if (!state.currentFrame) {
       return;
     }
-    const ignoreTargets = [frameSelect, leftSelect, rightSelect, sliderControl, modeSelect];
+    const ignoreTargets = [frameSelect, leftSelect, rightSelect, sliderControl, modeSelect, alignmentSelect];
     if (event.target && ignoreTargets.includes(event.target)) {
+      return;
+    }
+    if (event.code === "Space") {
+      state.panModifier = true;
+      updatePanAvailability(
+        state.imageSize ? state.imageSize.width * currentScale() : 0,
+        state.imageSize ? state.imageSize.height * currentScale() : 0,
+        getStageSize(),
+      );
+      event.preventDefault();
+      return;
+    }
+    if (event.key === "r" || event.key === "R") {
+      event.preventDefault();
+      state.pan = { x: 0, y: 0 };
+      state.fitPreset = null;
+      updateFitButtons();
+      setZoom(100);
       return;
     }
     if (event.key === "ArrowRight") {
@@ -474,50 +914,147 @@
     }
   });
 
+  window.addEventListener("keyup", (event) => {
+    if (event.code === "Space") {
+      state.panModifier = false;
+      if (!state.panActive) {
+        updatePanAvailability(
+          state.imageSize ? state.imageSize.width * currentScale() : 0,
+          state.imageSize ? state.imageSize.height * currentScale() : 0,
+          getStageSize(),
+        );
+      }
+    }
+  });
+
+  window.addEventListener("blur", () => {
+    state.panModifier = false;
+    endPan({ pointerId: state.panPointerId });
+    updatePanAvailability(
+      state.imageSize ? state.imageSize.width * currentScale() : 0,
+      state.imageSize ? state.imageSize.height * currentScale() : 0,
+      getStageSize(),
+    );
+  });
+
   viewerStage.addEventListener("click", () => {
     viewerStage.focus();
-    if (state.mode === "overlay") {
+    if (state.mode === "overlay" && !state.panActive) {
       cycleRightEncode(1);
     }
   });
 
   viewerStage.addEventListener("pointerdown", (event) => {
-    if (state.mode !== "slider" || sliderControl.disabled) {
+    viewerStage.focus();
+    state.pointer = { x: event.clientX, y: event.clientY };
+    if (event.target === divider && state.mode === "slider" && !sliderControl.disabled) {
+      sliderDragActive = true;
+      sliderPointerId = event.pointerId;
+      sliderCaptureElement = divider;
+      try {
+        sliderCaptureElement.setPointerCapture(event.pointerId);
+      } catch (error) {
+        // ignore capture errors
+      }
+      event.preventDefault();
+      setSliderFromClientX(event.clientX);
       return;
     }
-    sliderDragActive = true;
-    sliderPointerId = event.pointerId;
-    try {
-      viewerStage.setPointerCapture(event.pointerId);
-    } catch (error) {
-      // Safari may throw if pointer capture not supported; ignore.
+    if (shouldStartPan(event)) {
+      startPan(event);
+      return;
     }
-    event.preventDefault();
-    setSliderFromClientX(event.clientX);
+    if (state.mode === "slider" && !state.panAvailable && !sliderControl.disabled) {
+      sliderDragActive = true;
+      sliderPointerId = event.pointerId;
+      sliderCaptureElement = viewerStage;
+      try {
+        viewerStage.setPointerCapture(event.pointerId);
+      } catch (error) {
+        // ignore capture errors
+      }
+      event.preventDefault();
+      setSliderFromClientX(event.clientX);
+    }
   });
 
   viewerStage.addEventListener("pointermove", (event) => {
-    if (!sliderDragActive || event.pointerId !== sliderPointerId) {
+    state.pointer = { x: event.clientX, y: event.clientY };
+    if (state.panActive && event.pointerId === state.panPointerId) {
+      if (state.panStart) {
+        const deltaX = event.clientX - state.panStart.clientX;
+        const deltaY = event.clientY - state.panStart.clientY;
+        state.pan.x = state.panStart.x + deltaX;
+        state.pan.y = state.panStart.y + deltaY;
+        applyTransform();
+      }
+      event.preventDefault();
       return;
     }
-    event.preventDefault();
-    setSliderFromClientX(event.clientX);
+    if (sliderDragActive && event.pointerId === sliderPointerId) {
+      event.preventDefault();
+      setSliderFromClientX(event.clientX);
+    }
   });
 
   function endSliderDrag(event) {
-    if (!sliderDragActive || event.pointerId !== sliderPointerId) {
+    if (!sliderDragActive || (event && event.pointerId !== sliderPointerId)) {
       return;
     }
     sliderDragActive = false;
-    try {
-      viewerStage.releasePointerCapture(event.pointerId);
-    } catch (error) {
-      // Ignore release errors.
+    if (sliderCaptureElement && event) {
+      try {
+        sliderCaptureElement.releasePointerCapture(event.pointerId);
+      } catch (error) {
+        // ignore release errors
+      }
     }
+    sliderCaptureElement = null;
   }
 
-  viewerStage.addEventListener("pointerup", endSliderDrag);
-  viewerStage.addEventListener("pointercancel", endSliderDrag);
+  viewerStage.addEventListener("pointerup", (event) => {
+    if (state.panActive) {
+      endPan(event);
+    }
+    if (sliderDragActive) {
+      endSliderDrag(event);
+    }
+  });
+
+  viewerStage.addEventListener("pointercancel", (event) => {
+    if (state.panActive) {
+      endPan(event);
+    }
+    if (sliderDragActive) {
+      endSliderDrag(event);
+    }
+  });
+
+  viewerStage.addEventListener(
+    "wheel",
+    (event) => {
+      if (!(event.ctrlKey || event.metaKey)) {
+        return;
+      }
+      event.preventDefault();
+      const stepMultiplier = Math.max(1, Math.round(Math.abs(event.deltaY) / 120));
+      const direction = event.deltaY > 0 ? -1 : 1;
+      const delta = direction * stepMultiplier * (ZOOM_STEP / 2);
+      const stageRect = viewerStage.getBoundingClientRect();
+      const focus = { x: event.clientX, y: event.clientY };
+      setZoom(state.zoom + delta, focus);
+    },
+    { passive: false },
+  );
+
+  window.addEventListener("resize", () => {
+    if (state.fitPreset) {
+      const target = clampZoom(computeFitScale(state.fitPreset) * 100);
+      state.zoom = target;
+      updateZoomUI();
+    }
+    applyTransform();
+  });
 
   (function loadData() {
     const script = document.getElementById("report-data");

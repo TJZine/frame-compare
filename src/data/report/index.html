@@ -39,7 +39,29 @@
         </div>
         <div class="rc-control-group rc-zoom-control">
           <label for="zoom-control">Zoom</label>
-          <input type="range" id="zoom-control" min="50" max="300" value="100" step="10" aria-label="Zoom percentage">
+          <div class="rc-zoom-toolbar" role="group" aria-label="Zoom controls">
+            <button type="button" id="zoom-out" aria-label="Zoom out" title="Zoom out">−</button>
+            <input type="range" id="zoom-control" min="25" max="400" value="100" step="1" aria-label="Zoom percentage">
+            <button type="button" id="zoom-in" aria-label="Zoom in" title="Zoom in">+</button>
+            <button type="button" id="zoom-reset" aria-label="Reset zoom" title="Reset zoom to 100%">Reset</button>
+            <span id="zoom-readout" class="rc-zoom-readout" aria-live="polite" aria-atomic="true">100%</span>
+          </div>
+          <div class="rc-fit-toolbar" role="group" aria-label="Fit presets">
+            <button type="button" data-fit="actual" title="Display at native pixel size">Actual size</button>
+            <button type="button" data-fit="fit-width" title="Scale to fit width">Fit width</button>
+            <button type="button" data-fit="fit-height" title="Scale to fit height">Fit height</button>
+            <button type="button" data-fit="fill" title="Fill the viewer canvas">Fill canvas</button>
+          </div>
+        </div>
+        <div class="rc-control-group rc-alignment-control">
+          <label for="alignment-select">Alignment</label>
+          <select id="alignment-select" aria-label="Image alignment">
+            <option value="center">Center</option>
+            <option value="top-left">Top left</option>
+            <option value="top-right">Top right</option>
+            <option value="bottom-left">Bottom left</option>
+            <option value="bottom-right">Bottom right</option>
+          </select>
         </div>
       </section>
 
@@ -54,6 +76,9 @@
           </div>
         </div>
         <div class="rc-frame-info" id="frame-label"></div>
+        <p class="rc-viewer-help" id="viewer-help">
+          Shortcuts: Ctrl/Cmd + wheel = zoom • Space + drag = pan • R = reset zoom
+        </p>
       </section>
 
       <section class="rc-filmstrip" aria-label="Frames">

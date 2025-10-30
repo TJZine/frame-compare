@@ -44,6 +44,7 @@ body {
   gap: 1rem;
   flex-wrap: wrap;
   align-items: flex-end;
+  align-content: flex-start;
 }
 
 .rc-control-group {
@@ -73,6 +74,80 @@ body {
   width: min(18rem, 40vw);
 }
 
+.rc-zoom-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.rc-zoom-toolbar button {
+  background: #1b1f2b;
+  color: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 0.45rem;
+  padding: 0.35rem 0.7rem;
+  font: inherit;
+  cursor: pointer;
+  min-height: 2.4rem;
+  transition: background 120ms linear, border-color 120ms linear;
+}
+
+.rc-zoom-toolbar button:hover,
+.rc-zoom-toolbar button:focus-visible {
+  border-color: rgba(159, 210, 255, 0.8);
+  background: rgba(159, 210, 255, 0.14);
+}
+
+.rc-zoom-toolbar button:focus-visible {
+  outline: 2px solid rgba(159, 210, 255, 0.8);
+  outline-offset: 2px;
+}
+
+.rc-zoom-toolbar input[type="range"] {
+  width: min(14rem, 32vw);
+}
+
+.rc-zoom-readout {
+  font-size: 0.9rem;
+  color: rgba(240, 244, 255, 0.75);
+  min-width: 3.5rem;
+  text-align: right;
+}
+
+.rc-fit-toolbar {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+
+.rc-fit-toolbar button {
+  background: #1b1f2b;
+  color: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.45rem;
+  padding: 0.35rem 0.6rem;
+  font: inherit;
+  cursor: pointer;
+  transition: background 120ms linear, border-color 120ms linear;
+}
+
+.rc-fit-toolbar button:hover,
+.rc-fit-toolbar button:focus-visible {
+  border-color: rgba(159, 210, 255, 0.8);
+  background: rgba(159, 210, 255, 0.12);
+}
+
+.rc-fit-toolbar button[aria-pressed="true"] {
+  border-color: rgba(159, 210, 255, 0.8);
+  background: rgba(159, 210, 255, 0.2);
+}
+
+.rc-alignment-control select {
+  min-width: 12rem;
+}
+
 .rc-viewer {
   display: grid;
   gap: 0.75rem;
@@ -81,12 +156,13 @@ body {
 .rc-viewer-stage {
   position: relative;
   border-radius: 0.75rem;
-  overflow: auto;
+  overflow: hidden;
   background: #090b11;
   min-height: 16rem;
+  cursor: default;
 }
 
-.rc-viewer-stage.rc-mode-slider {
+.rc-viewer-stage.rc-mode-slider:not(.rc-pan-available) {
   cursor: ew-resize;
 }
 
@@ -94,17 +170,27 @@ body {
   cursor: pointer;
 }
 
+.rc-viewer-stage.rc-pan-available {
+  cursor: grab;
+}
+
+.rc-viewer-stage.rc-pan-active {
+  cursor: grabbing;
+}
+
 .rc-canvas {
   position: relative;
-  width: 100%;
-  height: 100%;
+  width: var(--rc-canvas-width, 100%);
+  height: var(--rc-canvas-height, auto);
   transform-origin: top left;
+  will-change: transform;
 }
 
 .rc-image {
   display: block;
   width: 100%;
-  height: auto;
+  height: 100%;
+  object-fit: contain;
   pointer-events: none;
 }
 
@@ -149,6 +235,12 @@ body {
 .rc-frame-info {
   font-size: 0.95rem;
   color: rgba(240, 244, 255, 0.85);
+}
+
+.rc-viewer-help {
+  margin: 0;
+  font-size: 0.85rem;
+  color: rgba(240, 244, 255, 0.6);
 }
 
 .rc-filmstrip {

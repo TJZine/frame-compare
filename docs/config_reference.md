@@ -41,3 +41,5 @@ remain relative to the workspace root and require no HTTP server.
 | `include_metadata` | Controls the JSON payload: `"minimal"` or `"full"`. | `"minimal"` |
 | `thumb_height` | Reserved for future thumbnail support; keep at `0` today. | `0` |
 | `default_mode` | Viewer mode (`slider` or `overlay`) for initial render. | `"slider"` |
+
+The viewer now mirrors slow.pics ergonomics: zoom persists per session (slider, +/- buttons, or Ctrl/⌘ + mouse wheel), presets cover Actual/Fit/Fit Height/Fill, and you can re-anchor content with the alignment dropdown or pan (drag once zoomed past fit, or hold Space + drag). These choices are stored in `localStorage`, so switching frames keeps the same layout.

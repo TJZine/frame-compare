@@ -35,7 +35,7 @@ Frame Compare samples darkest, brightest, high-motion, random, and user-pinned f
 - Audio alignment with correlation, dynamic time warping refinements, and optional interactive confirmation frames.
 - VapourSynth-first pipeline with FFmpeg fallback, HDR→SDR tonemapping, and placeholder recovery when writers fail.
 - slow.pics integration with automatic uploads, retries, URL shortcuts, and clipboard hand-off.
-- Optional HTML report generation for offline, browser-based comparisons with draggable sliders or overlay toggles for keyboard/click-driven encode swaps.
+- Optional HTML report generation for offline, browser-based comparisons with slider/overlay modes, pointer-anchored zoom + fit presets, and persistent pan/align controls inspired by slow.pics.
 - TMDB-driven metadata resolution with GuessIt/Anitopy labelling to keep comparisons organised.
 - Rich CLI layout featuring progress dashboards, Unicode fallbacks, batch auto-grouping, and optional JSON tails for automation.
 - CLI override for audio stream selection (`--audio-align-track`) when auto-detection needs guidance.
@@ -193,6 +193,8 @@ Common toggles (see [docs/README_REFERENCE.md](docs/README_REFERENCE.md) for ful
 | `[report].default_mode` | Initial viewer mode (`slider` or `overlay`). | `"slider"` | `default_mode="overlay"` |
 | `[slowpics].auto_upload` | Upload results to slow.pics. | `false` | `auto_upload=true` |
 | `[runtime].ram_limit_mb` | VapourSynth RAM guard. | `4000` | `ram_limit_mb=3072` |
+
+Offline HTML reports mirror slow.pics ergonomics: Actual/Fit/Fill presets, an alignment selector, pointer-anchored zoom via the slider, +/- buttons, or Ctrl/⌘ + mouse wheel, and pan support (space + drag or regular drag once zoomed beyond fit). Zoom, fit, mode, and alignment choices persist in `localStorage` so every frame opens with the same viewer state.
 
 > **Tip:** Copy the template elsewhere with `python -c "from src.config_template import copy_default_config; copy_default_config('alt-root/config/config.toml')"` when you need multiple workspaces.
 
