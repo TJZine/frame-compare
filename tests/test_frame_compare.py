@@ -21,6 +21,7 @@ from src.datatypes import (
     NamingConfig,
     OverridesConfig,
     PathsConfig,
+    ReportConfig,
     RuntimeConfig,
     ScreenshotConfig,
     SlowpicsConfig,
@@ -126,6 +127,7 @@ def _make_config(input_dir: Path) -> AppConfig:
         ),
         source=SourceConfig(preferred="lsmas"),
         audio_alignment=AudioAlignmentConfig(enable=False),
+        report=ReportConfig(enable=False),
     )
 
 
@@ -1091,6 +1093,13 @@ def _make_json_tail_stub() -> frame_compare.JsonTail:
             "config_path": "",
             "legacy_config": False,
         },
+        "report": {
+            "enabled": False,
+            "path": None,
+            "output_dir": "report",
+            "open_after_generate": True,
+            "opened": False,
+        },
         "vspreview_mode": None,
         "suggested_frames": 0,
         "suggested_seconds": 0.0,
@@ -1699,6 +1708,7 @@ def test_label_dedupe_preserves_short_labels(
         overrides=OverridesConfig(),
         source=SourceConfig(),
         audio_alignment=AudioAlignmentConfig(enable=False),
+        report=ReportConfig(enable=False),
     )
 
     monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
@@ -1863,6 +1873,7 @@ def test_cli_input_override_and_cleanup(
         overrides=OverridesConfig(),
         source=SourceConfig(),
         audio_alignment=AudioAlignmentConfig(enable=False),
+        report=ReportConfig(enable=False),
     )
 
     monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)

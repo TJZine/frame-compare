@@ -51,7 +51,7 @@ include-package-data = true
 py-modules = ["frame_compare"]
 
 [tool.setuptools.package-data]
-"data" = ["config.toml.template"]
+"data" = ["config.toml.template", "report/*"]
 
 [tool.black]
 line-length = 100

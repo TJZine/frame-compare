@@ -75,6 +75,7 @@ from src.datatypes import (
     NamingConfig,
     OverridesConfig,
     PathsConfig,
+    ReportConfig,
     RuntimeConfig,
     ScreenshotConfig,
     SlowpicsConfig,
@@ -84,6 +85,7 @@ from src.datatypes import (
 
 if TYPE_CHECKING:
     from src.audio_alignment import AlignmentMeasurement, AudioStreamInfo
+import src.report as html_report
 from src import vs_core
 from src.analysis import (
     CacheLoadResult,
@@ -373,6 +375,14 @@ class TrimsJSON(TypedDict):
     per_clip: dict[str, TrimClipEntry]
 
 
+class ReportJSON(TypedDict, total=False):
+    enabled: bool
+    path: Optional[str]
+    output_dir: str
+    open_after_generate: bool
+    opened: bool
+
+
 class JsonTail(TypedDict):
     clips: list[dict[str, object]]
     trims: TrimsJSON
@@ -386,6 +396,7 @@ class JsonTail(TypedDict):
     verify: dict[str, object]
     cache: dict[str, object]
     slowpics: SlowpicsJSON
+    report: ReportJSON
     warnings: list[str]
     workspace: dict[str, object]
     vspreview_mode: Optional[str]
@@ -487,6 +498,7 @@ class RunResult:
         image_paths (List[str]): Paths to the generated screenshots.
         slowpics_url (Optional[str]): URL of the uploaded Slowpics comparison, if created.
         json_tail (JsonTail | None): Optional JSON blob persisted after run completion.
+        report_path (Optional[Path]): Path to the generated HTML report index, when created.
     """
     files: List[Path]
     frames: List[int]
@@ -498,6 +510,7 @@ class RunResult:
     image_paths: List[str]
     slowpics_url: Optional[str] = None
     json_tail: JsonTail | None = None
+    report_path: Optional[Path] = None
 
 
 @dataclass
@@ -982,11 +995,12 @@ def _fresh_app_config() -> AppConfig:
         naming=NamingConfig(),
         paths=PathsConfig(),
         runtime=RuntimeConfig(),
-        overrides=OverridesConfig(),
-        color=ColorConfig(),
-        source=SourceConfig(),
-        audio_alignment=AudioAlignmentConfig(),
-    )
+    overrides=OverridesConfig(),
+    color=ColorConfig(),
+    source=SourceConfig(),
+    audio_alignment=AudioAlignmentConfig(),
+    report=ReportConfig(),
+)
 
 
 def _read_template_text() -> str:
@@ -4498,6 +4512,7 @@ def run_cli(
     quiet: bool = False,
     verbose: bool = False,
     no_color: bool = False,
+    report_enable_override: Optional[bool] = None,
 ) -> RunResult:
     """
     Orchestrate the CLI workflow.
@@ -4510,6 +4525,7 @@ def run_cli(
         quiet (bool): Suppress nonessential output when True.
         verbose (bool): Enable additional diagnostic output when True.
         no_color (bool): Disable colored output when True.
+        report_enable_override (Optional[bool]): Optional override for HTML report generation toggle.
 
     Returns:
         RunResult: Aggregated result including processed files, selected frames, output directory, resolved root directory, configuration used, generated image paths, optional slow.pics URL, and a JSON-tail dictionary with detailed metadata and diagnostics.
@@ -4686,6 +4702,12 @@ def run_cli(
             "is_hentai": bool(cfg.slowpics.is_hentai),
             "remove_after_days": int(cfg.slowpics.remove_after_days),
         },
+        "report": {
+            "enabled": bool(getattr(cfg.report, "enable", False)),
+            "path": None,
+            "output_dir": cfg.report.output_dir,
+            "open_after_generate": bool(getattr(cfg.report, "open_after_generate", True)),
+        },
         "warnings": [],
         "vspreview_mode": vspreview_mode_value,
         "suggested_frames": 0,
@@ -4738,6 +4760,7 @@ def run_cli(
         "verify": json_tail.get("verify", {}),
         "cache": json_tail["cache"],
         "slowpics": json_tail["slowpics"],
+        "report": json_tail["report"],
         "tmdb": {
             "category": None,
             "id": None,
@@ -6061,6 +6084,65 @@ def run_cli(
         else:
             slowpics_block["shortcut_path"] = None
 
+    report_index_path: Optional[Path] = None
+    report_block = json_tail.get("report")
+    if bool(getattr(cfg.report, "enable", False)):
+        try:
+            report_dir = _resolve_workspace_subdir(
+                root,
+                cfg.report.output_dir,
+                purpose="report.output_dir",
+            )
+            plan_payload = [
+                {
+                    "label": _plan_label(plan),
+                    "metadata": dict(plan.metadata),
+                    "path": plan.path,
+                }
+                for plan in plans
+            ]
+            report_index_path = html_report.generate_html_report(
+                report_dir=report_dir,
+                report_cfg=cfg.report,
+                frames=list(frames),
+                selection_details=selection_details,
+                image_paths=image_paths,
+                plans=plan_payload,
+                metadata_title=metadata_title,
+                include_metadata=str(getattr(cfg.report, "include_metadata", "minimal")),
+                slowpics_url=slowpics_url,
+            )
+        except CLIAppError as exc:
+            message = f"HTML report generation failed: {exc}"
+            reporter.warn(message)
+            collected_warnings.append(message)
+            if isinstance(report_block, dict):
+                report_block["enabled"] = False
+                report_block["path"] = None
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception("HTML report generation failed")
+            message = f"HTML report generation failed: {exc}"
+            reporter.warn(message)
+            collected_warnings.append(message)
+            if isinstance(report_block, dict):
+                report_block["enabled"] = False
+                report_block["path"] = None
+        else:
+            if isinstance(report_block, dict):
+                report_block["enabled"] = True
+                report_block["path"] = str(report_index_path)
+            else:
+                json_tail["report"] = {
+                    "enabled": True,
+                    "path": str(report_index_path),
+                    "output_dir": cfg.report.output_dir,
+                    "open_after_generate": bool(getattr(cfg.report, "open_after_generate", True)),
+                }
+    else:
+        if isinstance(report_block, dict):
+            report_block["enabled"] = False
+            report_block["path"] = None
+
     result = RunResult(
         files=[plan.path for plan in plans],
         frames=list(frames),
@@ -6072,6 +6154,7 @@ def run_cli(
         image_paths=list(image_paths),
         slowpics_url=slowpics_url,
         json_tail=json_tail,
+        report_path=report_index_path,
     )
 
     raw_layout_sections = getattr(getattr(reporter, "layout", None), "sections", [])
@@ -6178,8 +6261,20 @@ def _run_cli_entry(
     json_pretty: bool,
     diagnose_paths: bool,
     write_config: bool,
+    html_report_enable: bool,
+    html_report_disable: bool,
 ) -> None:
     """Execute the primary CLI workflow with the provided options."""
+
+    if html_report_enable and html_report_disable:
+        raise click.ClickException("Cannot use both --html-report and --no-html-report.")
+    report_override: Optional[bool]
+    if html_report_enable:
+        report_override = True
+    elif html_report_disable:
+        report_override = False
+    else:
+        report_override = None
 
     preflight_for_write: _PathPreflightResult | None = None
     if write_config:
@@ -6226,6 +6321,7 @@ def _run_cli_entry(
             quiet=quiet,
             verbose=verbose,
             no_color=no_color,
+            report_enable_override=report_override,
         )
     except CLIAppError as exc:
         print(exc.rich_message)
@@ -6322,6 +6418,28 @@ def _run_cli_entry(
     elif isinstance(slowpics_block, dict):
         _ensure_slowpics_block(json_tail, cfg)
 
+    report_block = json_tail.get("report")
+    report_path = result.report_path
+    if cfg.report.enable:
+        if report_path is not None:
+            print(f"[✓] HTML report: {report_path}")
+            opened_flag = False
+            if cfg.report.open_after_generate:
+                try:
+                    opened_flag = bool(webbrowser.open(report_path.resolve().as_uri()))
+                except Exception:
+                    print("[yellow]Warning:[/yellow] Unable to open browser for HTML report")
+                    opened_flag = False
+            if isinstance(report_block, dict):
+                report_block.setdefault("opened", False)
+                report_block["path"] = str(report_path)
+                report_block["opened"] = opened_flag
+        else:
+            print("[yellow]Warning:[/yellow] HTML report generation failed.")
+            if isinstance(report_block, dict):
+                report_block["enabled"] = False
+                report_block["path"] = None
+
     emit_json_tail_flag = True
     if hasattr(cfg, "cli"):
         cli_cfg = cfg.cli
@@ -6371,6 +6489,18 @@ def _run_cli_entry(
     is_flag=True,
     help="Ensure the workspace config exists (seeds ROOT/config/config.toml when missing) and exit.",
 )
+@click.option(
+    "--html-report",
+    "html_report_enable",
+    is_flag=True,
+    help="Enable HTML report generation regardless of config.",
+)
+@click.option(
+    "--no-html-report",
+    "html_report_disable",
+    is_flag=True,
+    help="Disable HTML report generation regardless of config.",
+)
 @click.pass_context
 def main(
     ctx: click.Context,
@@ -6385,6 +6515,8 @@ def main(
     json_pretty: bool,
     diagnose_paths: bool,
     write_config: bool,
+    html_report_enable: bool,
+    html_report_disable: bool,
 ) -> None:
     """Command group entry point that dispatches to subcommands or the default run."""
 
@@ -6399,6 +6531,8 @@ def main(
         "json_pretty": json_pretty,
         "diagnose_paths": diagnose_paths,
         "write_config": write_config,
+        "html_report_enable": html_report_enable,
+        "html_report_disable": html_report_disable,
     }
     ctx.ensure_object(dict)
     ctx.obj.update(params)
@@ -6424,6 +6558,8 @@ def run_command(ctx: click.Context) -> None:
         json_pretty=bool(params.get("json_pretty", False)),
         diagnose_paths=bool(params.get("diagnose_paths", False)),
         write_config=bool(params.get("write_config", False)),
+        html_report_enable=bool(params.get("html_report_enable", False)),
+        html_report_disable=bool(params.get("html_report_disable", False)),
     )
 
 

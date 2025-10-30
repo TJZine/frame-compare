@@ -6,6 +6,7 @@ import math
 import tomllib
 from dataclasses import fields, is_dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Any, Dict
 
 from .datatypes import (
@@ -17,6 +18,7 @@ from .datatypes import (
     NamingConfig,
     OverridesConfig,
     PathsConfig,
+    ReportConfig,
     RuntimeConfig,
     ScreenshotConfig,
     SlowpicsConfig,
@@ -220,6 +222,7 @@ def load_config(path: str) -> AppConfig:
         audio_alignment=_sanitize_section(
             raw.get("audio_alignment", {}), "audio_alignment", AudioAlignmentConfig
         ),
+        report=_sanitize_section(raw.get("report", {}), "report", ReportConfig),
     )
 
     normalized_style = str(app.cli.progress.style).strip().lower()
@@ -336,6 +339,34 @@ def load_config(path: str) -> AppConfig:
         raise ConfigError("audio_alignment.offsets_filename must be set")
     if audio_cfg.random_seed < 0:
         raise ConfigError("audio_alignment.random_seed must be >= 0")
+
+    report_cfg = app.report
+    report_output_dir = report_cfg.output_dir.strip()
+    if not report_output_dir:
+        raise ConfigError("report.output_dir must be set")
+    output_path = Path(report_output_dir)
+    if output_path.is_absolute():
+        raise ConfigError("report.output_dir must be relative to the workspace root")
+    if ".." in output_path.parts:
+        raise ConfigError("report.output_dir may not contain '..' segments")
+    report_cfg.output_dir = report_output_dir
+    include_mode = str(report_cfg.include_metadata).strip().lower()
+    if include_mode not in {"minimal", "full"}:
+        raise ConfigError("report.include_metadata must be 'minimal' or 'full'")
+    report_cfg.include_metadata = include_mode
+    if isinstance(report_cfg.title, str):
+        stripped_title = report_cfg.title.strip()
+        report_cfg.title = stripped_title or None
+    else:
+        report_cfg.title = None
+    if isinstance(report_cfg.default_left_label, str):
+        stripped_left = report_cfg.default_left_label.strip()
+        report_cfg.default_left_label = stripped_left or None
+    if isinstance(report_cfg.default_right_label, str):
+        stripped_right = report_cfg.default_right_label.strip()
+        report_cfg.default_right_label = stripped_right or None
+    if report_cfg.thumb_height < 0:
+        raise ConfigError("report.thumb_height must be >= 0")
 
     _validate_trim(app.overrides.trim, "overrides.trim")
     _validate_trim(app.overrides.trim_end, "overrides.trim_end")

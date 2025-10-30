@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>{{TITLE}}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="app.css">
+  </head>
+  <body>
+    <header class="rc-header">
+      <h1 id="report-title">{{TITLE}}</h1>
+      <p id="report-subtitle" class="rc-subtitle"></p>
+      <nav class="rc-links" id="report-links"></nav>
+    </header>
+    <main class="rc-main" data-report-root>
+      <section class="rc-controls">
+        <div class="rc-control-group">
+          <label for="frame-select">Frame</label>
+          <select id="frame-select" aria-label="Selected frame"></select>
+        </div>
+        <div class="rc-control-group">
+          <label for="left-select">Left encode</label>
+          <select id="left-select" aria-label="Left encode"></select>
+        </div>
+        <div class="rc-control-group">
+          <label for="right-select">Right encode</label>
+          <select id="right-select" aria-label="Right encode"></select>
+        </div>
+        <div class="rc-control-group rc-slider-control">
+          <label for="slider-control">Reveal</label>
+          <input type="range" id="slider-control" min="0" max="100" value="50" aria-valuemin="0" aria-valuemax="100" aria-label="Reveal slider">
+        </div>
+      </section>
+
+      <section class="rc-viewer" aria-live="polite">
+        <div class="rc-viewer-stage" id="viewer-stage">
+          <img id="right-image" class="rc-image rc-image--right" alt="" loading="lazy">
+          <div class="rc-overlay" id="overlay">
+            <img id="left-image" class="rc-image rc-image--left" alt="" loading="lazy">
+          </div>
+          <div class="rc-divider" id="divider" aria-hidden="true"></div>
+        </div>
+        <div class="rc-frame-info" id="frame-label"></div>
+      </section>
+
+      <section class="rc-filmstrip" aria-label="Frames">
+        <ul id="frame-list" class="rc-frame-list"></ul>
+      </section>
+
+      <section class="rc-encode-info" id="encode-info"></section>
+      <section class="rc-frame-metadata" id="frame-metadata" hidden></section>
+    </main>
+
+    <footer class="rc-footer" id="report-footer"></footer>
+
+    <script src="app.js" defer></script>
+  </body>
+</html>
