@@ -38,6 +38,7 @@
   const ZOOM_MIN = 25;
   const ZOOM_MAX = 400;
   const ZOOM_STEP = 10;
+  const CUSTOM_ALIGNMENT = "custom";
 
   const state = {
     data: null,
@@ -49,6 +50,7 @@
     zoom: 100,
     fitPreset: "fit-width",
     alignment: "center",
+    prevAlignment: "center",
     pan: { x: 0, y: 0 },
     imageSize: null,
     pointer: null,
@@ -89,7 +91,7 @@
       const payload = {
         zoom: state.zoom,
         fitPreset: state.fitPreset,
-        alignment: state.alignment,
+        alignment: state.alignment === CUSTOM_ALIGNMENT ? (state.prevAlignment || "center") : state.alignment,
         mode: state.mode,
       };
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
@@ -107,7 +109,11 @@
     state.fitPreset = preferences.fitPreset;
   }
   if (typeof preferences.alignment === "string") {
-    state.alignment = preferences.alignment;
+    const storedAlignment = preferences.alignment === CUSTOM_ALIGNMENT ? "center" : preferences.alignment;
+    state.alignment = storedAlignment;
+    if (state.alignment !== CUSTOM_ALIGNMENT) {
+      state.prevAlignment = state.alignment;
+    }
   }
   if (typeof preferences.mode === "string") {
     state.mode = preferences.mode === "overlay" ? "overlay" : "slider";
@@ -179,6 +185,8 @@
     let offsetX = 0;
     let offsetY = 0;
     switch (alignment) {
+      case CUSTOM_ALIGNMENT:
+        return { x: 0, y: 0 };
       case "top-left":
         offsetX = 0;
         offsetY = 0;
@@ -281,8 +289,28 @@
   }
 
   function updateAlignmentSelect() {
-    if (alignmentSelect) {
-      alignmentSelect.value = state.alignment;
+    if (!alignmentSelect) {
+      return;
+    }
+    let customOption = alignmentSelect.querySelector(`option[value="${CUSTOM_ALIGNMENT}"]`);
+    if (state.alignment === CUSTOM_ALIGNMENT) {
+      if (!customOption) {
+        customOption = document.createElement("option");
+        customOption.value = CUSTOM_ALIGNMENT;
+        customOption.textContent = "Custom (manual)";
+        customOption.dataset.dynamic = "true";
+        alignmentSelect.appendChild(customOption);
+      }
+      alignmentSelect.value = CUSTOM_ALIGNMENT;
+    } else {
+      if (customOption && customOption.dataset.dynamic === "true") {
+        customOption.remove();
+      }
+      if (Array.from(alignmentSelect.options).some((option) => option.value === state.alignment)) {
+        alignmentSelect.value = state.alignment;
+      } else if (alignmentSelect.options.length > 0) {
+        alignmentSelect.value = alignmentSelect.options[0].value;
+      }
     }
   }
 
@@ -320,6 +348,14 @@
           const targetY = stageY - (contentY * nextScale) - nextAlignment.y;
           state.pan.x = targetX;
           state.pan.y = targetY;
+          if (!fromPreset) {
+            state.panHasMoved = true;
+            if (state.alignment !== CUSTOM_ALIGNMENT) {
+              state.prevAlignment = state.alignment;
+              state.alignment = CUSTOM_ALIGNMENT;
+              updateAlignmentSelect();
+            }
+          }
         }
       }
     }
@@ -332,6 +368,10 @@
     state.fitPreset = preset;
     state.pan = { x: 0, y: 0 };
     state.panHasMoved = false;
+    if (state.alignment === CUSTOM_ALIGNMENT) {
+      state.alignment = state.prevAlignment || "center";
+      updateAlignmentSelect();
+    }
     updateFitButtons();
     const scale = computeFitScale(preset);
     const percent = clampZoom(scale * 100);
@@ -503,7 +543,7 @@
     return state.framesByIndex.get(frameIndex) || null;
   }
 
-  function updateImages() {
+  function updateImages(preservePan = false) {
     const frame = findFrame(state.currentFrame);
     if (!frame) {
       leftImage.removeAttribute("src");
@@ -544,8 +584,14 @@
     frameSelect.value = String(frame.index);
     updateFilmstripActive(frame.index);
     updateFrameMetadata(frame, state.data);
-    state.pan = { x: 0, y: 0 };
-    state.panHasMoved = false;
+    if (!preservePan) {
+      state.pan = { x: 0, y: 0 };
+      state.panHasMoved = false;
+      if (state.alignment === CUSTOM_ALIGNMENT) {
+        state.alignment = state.prevAlignment || "center";
+        updateAlignmentSelect();
+      }
+    }
     window.requestAnimationFrame(() => {
       syncImageMetrics();
     });
@@ -625,12 +671,12 @@
 
   leftSelect.addEventListener("change", (event) => {
     state.leftEncode = event.target.value;
-    updateImages();
+    updateImages(state.mode === "overlay");
   });
 
   rightSelect.addEventListener("change", (event) => {
     state.rightEncode = event.target.value;
-    updateImages();
+    updateImages(state.mode === "overlay");
   });
 
   sliderControl.addEventListener("input", (event) => {
@@ -686,7 +732,13 @@
 
   if (alignmentSelect) {
     alignmentSelect.addEventListener("change", (event) => {
-      state.alignment = event.target.value || "center";
+      const selected = event.target.value || "center";
+      if (selected === CUSTOM_ALIGNMENT) {
+        alignmentSelect.value = state.alignment;
+        return;
+      }
+      state.alignment = selected;
+      state.prevAlignment = selected;
       state.pan = { x: 0, y: 0 };
       state.panHasMoved = false;
       updateAlignmentSelect();
@@ -726,7 +778,7 @@
     if (rightSelect) {
       rightSelect.value = state.rightEncode;
     }
-    updateImages();
+    updateImages(true);
   }
 
   function updateModeUI(sliderEnabled, leftAvailable, rightAvailable) {
@@ -803,7 +855,7 @@
       if (candidate !== state.leftEncode || total === 1) {
         state.rightEncode = candidate;
         rightSelect.value = candidate;
-        updateImages();
+        updateImages(state.mode === "overlay");
         break;
       }
     }
@@ -811,7 +863,7 @@
 
   function applyMode(mode) {
     state.mode = mode === "overlay" ? "overlay" : "slider";
-    updateImages();
+    updateImages(state.mode === "overlay");
     savePreferences();
   }
 
@@ -1003,6 +1055,11 @@
           (Math.abs(deltaX) > 1 || Math.abs(deltaY) > 1)
         ) {
           state.panHasMoved = true;
+          if (state.alignment !== CUSTOM_ALIGNMENT) {
+            state.prevAlignment = state.alignment;
+            state.alignment = CUSTOM_ALIGNMENT;
+            updateAlignmentSelect();
+          }
         }
         applyTransform();
       }
