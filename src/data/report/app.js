@@ -47,6 +47,7 @@
   const state = {
     data: null,
     framesByIndex: new Map(),
+    sortedFrameIndexes: [],
     currentFrame: null,
     leftEncode: null,
     rightEncode: null,
@@ -654,6 +655,7 @@
     frames.forEach((frame) => {
       state.framesByIndex.set(frame.index, frame);
     });
+    state.sortedFrameIndexes = frames.map((frame) => frame.index).sort((a, b) => a - b);
 
     fillSelect(leftSelect, data.encodes || []);
     fillSelect(rightSelect, data.encodes || []);
@@ -974,14 +976,14 @@
     }
     if (event.key === "ArrowRight") {
       event.preventDefault();
-      const frames = Array.from(state.framesByIndex.keys()).sort((a, b) => a - b);
+      const frames = state.sortedFrameIndexes;
       const index = frames.indexOf(state.currentFrame);
       if (index >= 0 && index + 1 < frames.length) {
         selectFrame(frames[index + 1]);
       }
     } else if (event.key === "ArrowLeft") {
       event.preventDefault();
-      const frames = Array.from(state.framesByIndex.keys()).sort((a, b) => a - b);
+      const frames = state.sortedFrameIndexes;
       const index = frames.indexOf(state.currentFrame);
       if (index > 0) {
         selectFrame(frames[index - 1]);
