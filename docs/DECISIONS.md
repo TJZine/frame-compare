@@ -1,6 +1,7 @@
 # Decisions Log
 
 - *2025-10-30:* Revamped the offline HTML report viewer with persistent zoom/fit presets, mouse-wheel zoom around the pointer, pan gestures, alignment presets, and shortcut guidance to align the offline experience with slow.pics.
+- *2025-10-30:* Audio alignment progress now uses a Rich spinner instead of a misleading 0/1 progress bar to keep CLI feedback honest during offset estimation.
 - *2025-10-22:* Default slow.pics uploads now ship disabled (`auto_upload=false`) with a CLI warning when operators opt in, documentation tables are generated from dataclass defaults, Ruff linting was added to CI (Pyright made blocking), a `frame-compare` console script was registered, and the unused `tools/readability_check.py` helper was retired.
 - *2025-10-23:* Introduced the offline HTML report (configurable via `[report]` or `--html-report`) backed by `src/report.py`, vendored assets (`src/data/report/`), and CLI integration that auto-opens the generated `index.html` when requested. Added unit coverage (`tests/test_report.py`) and documented the workflow in README/config references.
 - *2025-10-24:* Enhanced the HTML report viewer with a mode toggle (`slider` vs `overlay`), added keyboard/click encode cycling, embedded report data to avoid `file://` fetch issues, and expanded JS/CSS to support both viewing experiences.

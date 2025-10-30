@@ -57,6 +57,7 @@
     panStart: null,
     panModifier: false,
     panAvailable: false,
+    panHasMoved: false,
   };
 
   function clampZoom(value) {
@@ -330,6 +331,7 @@
   function applyFitPreset(preset) {
     state.fitPreset = preset;
     state.pan = { x: 0, y: 0 };
+    state.panHasMoved = false;
     updateFitButtons();
     const scale = computeFitScale(preset);
     const percent = clampZoom(scale * 100);
@@ -543,6 +545,7 @@
     updateFilmstripActive(frame.index);
     updateFrameMetadata(frame, state.data);
     state.pan = { x: 0, y: 0 };
+    state.panHasMoved = false;
     window.requestAnimationFrame(() => {
       syncImageMetrics();
     });
@@ -666,6 +669,7 @@
   if (zoomResetButton) {
     zoomResetButton.addEventListener("click", () => {
       state.pan = { x: 0, y: 0 };
+      state.panHasMoved = false;
       state.fitPreset = null;
       updateFitButtons();
       setZoom(100);
@@ -675,6 +679,7 @@
   fitButtons.forEach((button) => {
     button.addEventListener("click", () => {
       const preset = button.dataset.fit || "fit-width";
+      state.panHasMoved = false;
       applyFitPreset(preset);
     });
   });
@@ -683,6 +688,7 @@
     alignmentSelect.addEventListener("change", (event) => {
       state.alignment = event.target.value || "center";
       state.pan = { x: 0, y: 0 };
+      state.panHasMoved = false;
       updateAlignmentSelect();
       applyTransform();
       savePreferences();
@@ -833,6 +839,7 @@
       clientX: event.clientX,
       clientY: event.clientY,
     };
+    state.panHasMoved = false;
     viewerStage.classList.add("rc-pan-active");
     try {
       viewerStage.setPointerCapture(event.pointerId);
@@ -939,9 +946,14 @@
 
   viewerStage.addEventListener("click", () => {
     viewerStage.focus();
+    if (state.panHasMoved) {
+      state.panHasMoved = false;
+      return;
+    }
     if (state.mode === "overlay" && !state.panActive) {
       cycleRightEncode(1);
     }
+    state.panHasMoved = false;
   });
 
   viewerStage.addEventListener("pointerdown", (event) => {
@@ -986,6 +998,12 @@
         const deltaY = event.clientY - state.panStart.clientY;
         state.pan.x = state.panStart.x + deltaX;
         state.pan.y = state.panStart.y + deltaY;
+        if (
+          !state.panHasMoved &&
+          (Math.abs(deltaX) > 1 || Math.abs(deltaY) > 1)
+        ) {
+          state.panHasMoved = true;
+        }
         applyTransform();
       }
       event.preventDefault();

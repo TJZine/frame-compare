@@ -27,6 +27,7 @@ import uuid
 import webbrowser
 from collections import Counter, defaultdict
 from collections.abc import Mapping as MappingABC
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from string import Template
@@ -54,13 +55,7 @@ from natsort import os_sorted
 from rich import print
 from rich.console import Console
 from rich.markup import escape
-from rich.progress import (
-    BarColumn,
-    Progress,
-    ProgressColumn,
-    TextColumn,
-    TimeRemainingColumn,
-)
+from rich.progress import BarColumn, Progress, ProgressColumn, TextColumn
 from rich.text import Text
 
 from src import audio_alignment
@@ -3239,49 +3234,40 @@ def _maybe_apply_audio_alignment(
         measurements: List["AlignmentMeasurement"]
         negative_offsets: Dict[str, bool] = {}
 
-        progress_columns: tuple[ProgressColumn, ...] = (
-            TextColumn('{task.description}'),
-            BarColumn(),
-            TextColumn('{task.completed}/{task.total}'),
-            TextColumn('{task.percentage:>6.02f}%'),
-            TextColumn('{task.fields[rate]}'),
-            TimeRemainingColumn(),
-        )
-        progress_manager: ContextManager[Progress]
-        if reporter is not None:
-            progress_manager = cast(
-                ContextManager[Progress],
-                reporter.progress(*progress_columns, transient=False),
+        spinner_context: ContextManager[object]
+        status_factory = None
+        if reporter is not None and not getattr(reporter, "quiet", False):
+            status_factory = getattr(reporter.console, "status", None)
+        if callable(status_factory):
+            spinner_context = cast(
+                ContextManager[object],
+                status_factory("[cyan]Estimating audio offsets…[/cyan]", spinner="dots"),
             )
         else:
-            progress_manager = Progress(*progress_columns, transient=False)
-        with progress_manager as audio_progress:
-            task_id = audio_progress.add_task(
-                'Estimating audio offsets',
-                total=len(targets),
-                rate='   0.00 pairs/s',
-            )
-            processed = 0
-            start_time = time.perf_counter()
+            spinner_context = nullcontext()
+        processed = 0
+        start_time = time.perf_counter()
+        total_targets = len(targets)
 
+        with spinner_context as status:
             def _advance_audio(count: int) -> None:
                 """
                 Advance the audio-alignment progress by a given number of processed pairs.
-
-                Increments the internal processed counter and updates the CLI progress task with the new completed count and a formatted processing rate.
 
                 Parameters:
                     count (int): Number of audio pair measurements to add to the processed total.
                 """
                 nonlocal processed
                 processed += count
-                elapsed = time.perf_counter() - start_time
-                rate_val = processed / elapsed if elapsed > 0 else 0.0
-                audio_progress.update(
-                    task_id,
-                    completed=min(processed, len(targets)),
-                    rate=f"{rate_val:7.2f} pairs/s",
-                )
+                if status is None or total_targets <= 0:
+                    return
+                status_update = getattr(status, "update", None)
+                if callable(status_update):
+                    elapsed = time.perf_counter() - start_time
+                    rate_val = processed / elapsed if elapsed > 0 else 0.0
+                    status_update(
+                        f"[cyan]Estimating audio offsets… {processed}/{total_targets} ({rate_val:0.2f} pairs/s)[/cyan]"
+                    )
 
             measurements = audio_alignment.measure_offsets(
                 reference_plan.path,
@@ -3294,15 +3280,6 @@ def _maybe_apply_audio_alignment(
                 target_streams=target_stream_indices,
                 progress_callback=_advance_audio,
             )
-
-            if processed < len(targets):
-                elapsed = time.perf_counter() - start_time
-                final_rate = processed / elapsed if elapsed > 0 else 0.0
-                audio_progress.update(
-                    task_id,
-                    completed=len(targets),
-                    rate=f"{final_rate:7.2f} pairs/s",
-                )
 
         frame_bias = int(audio_cfg.frame_offset_bias or 0)
         if frame_bias != 0:
