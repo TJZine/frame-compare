@@ -37,15 +37,21 @@
             <option value="overlay">Overlay</option>
           </select>
         </div>
+        <div class="rc-control-group rc-zoom-control">
+          <label for="zoom-control">Zoom</label>
+          <input type="range" id="zoom-control" min="50" max="300" value="100" step="10" aria-label="Zoom percentage">
+        </div>
       </section>
 
       <section class="rc-viewer" aria-live="polite">
         <div class="rc-viewer-stage" id="viewer-stage" tabindex="0" role="region" aria-label="Comparison viewer">
-          <img id="right-image" class="rc-image rc-image--right" alt="" loading="lazy">
-          <div class="rc-overlay" id="overlay">
-            <img id="left-image" class="rc-image rc-image--left" alt="" loading="lazy">
+          <div class="rc-canvas" id="viewer-canvas">
+            <img id="right-image" class="rc-image rc-image--right" alt="" loading="lazy">
+            <div class="rc-overlay" id="overlay">
+              <img id="left-image" class="rc-image rc-image--left" alt="" loading="lazy">
+            </div>
+            <div class="rc-divider" id="divider" aria-hidden="true"></div>
           </div>
-          <div class="rc-divider" id="divider" aria-hidden="true"></div>
         </div>
         <div class="rc-frame-info" id="frame-label"></div>
       </section>

@@ -11,7 +11,9 @@
   const rightSelect = document.getElementById("right-select");
   const sliderControl = document.getElementById("slider-control");
   const modeSelect = document.getElementById("mode-select");
+  const zoomControl = document.getElementById("zoom-control");
   const viewerStage = document.getElementById("viewer-stage");
+  const canvas = document.getElementById("viewer-canvas");
   const overlay = document.getElementById("overlay");
   const divider = document.getElementById("divider");
   const leftImage = document.getElementById("left-image");
@@ -32,6 +34,7 @@
     leftEncode: null,
     rightEncode: null,
     mode: "slider",
+    zoom: 100,
   };
 
   function showError(message) {
@@ -54,6 +57,14 @@
     overlay.style.clipPath = `inset(0 ${clipRight}% 0 0)`;
     divider.style.left = `${percent}%`;
     divider.style.visibility = "visible";
+  }
+
+  function applyZoom() {
+    if (!canvas) {
+      return;
+    }
+    const scale = state.zoom / 100;
+    canvas.style.transform = `scale(${scale})`;
   }
 
   function renderFooter(data) {
@@ -305,6 +316,16 @@
   });
   setSlider(sliderControl.value);
 
+  if (zoomControl) {
+    zoomControl.addEventListener("input", (event) => {
+      const value = Number(event.target.value) || 100;
+      state.zoom = Math.min(400, Math.max(50, value));
+      applyZoom();
+    });
+    zoomControl.value = String(state.zoom);
+    applyZoom();
+  }
+
   if (modeSelect) {
     modeSelect.addEventListener("change", (event) => {
       applyMode(event.target.value);
@@ -366,13 +387,17 @@
     if (modeSelect) {
       modeSelect.value = state.mode;
     }
+    applyZoom();
   }
 
   let sliderDragActive = false;
   let sliderPointerId = null;
 
   function setSliderFromClientX(clientX) {
-    const rect = viewerStage.getBoundingClientRect();
+    if (!canvas) {
+      return;
+    }
+    const rect = canvas.getBoundingClientRect();
     if (rect.width <= 0) {
       return;
     }
