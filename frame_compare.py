@@ -6458,26 +6458,30 @@ def _run_cli_entry(
 
     report_block = json_tail.get("report")
     report_path = result.report_path
-    if cfg.report.enable:
-        if report_path is not None:
-            print(f"[✓] HTML report: {report_path}")
-            opened_flag = False
-            if cfg.report.open_after_generate:
-                try:
-                    opened_flag = bool(webbrowser.open(report_path.resolve().as_uri()))
-                except Exception:
-                    print("[yellow]Warning:[/yellow] Unable to open browser for HTML report")
-                    opened_flag = False
-            if isinstance(report_block, dict):
-                report_block.setdefault("opened", False)
-                report_block["path"] = str(report_path)
-                report_block["opened"] = opened_flag
-                report_block["mode"] = cfg.report.default_mode
-        else:
-            print("[yellow]Warning:[/yellow] HTML report generation failed.")
-            if isinstance(report_block, dict):
-                report_block["enabled"] = False
-                report_block["path"] = None
+    report_enabled_output = bool(report_block.get("enabled")) if isinstance(report_block, dict) else False
+    if report_enabled_output and report_path is not None:
+        print(f"[✓] HTML report: {report_path}")
+        opened_flag = False
+        open_after_generate = bool(report_block.get("open_after_generate", getattr(cfg.report, "open_after_generate", True)))
+        if open_after_generate:
+            try:
+                opened_flag = bool(webbrowser.open(report_path.resolve().as_uri()))
+            except Exception:
+                print("[yellow]Warning:[/yellow] Unable to open browser for HTML report")
+                opened_flag = False
+        report_block["path"] = str(report_path)
+        report_block["opened"] = opened_flag
+        report_block["mode"] = report_block.get("mode") or getattr(cfg.report, "default_mode", "slider")
+    elif report_enabled_output and report_path is None:
+        print("[yellow]Warning:[/yellow] HTML report generation failed.")
+        report_block["enabled"] = False
+        report_block["path"] = None
+        report_block["opened"] = False
+    else:
+        if isinstance(report_block, dict):
+            report_block["enabled"] = False
+            report_block["path"] = None
+            report_block["opened"] = False
 
     emit_json_tail_flag = True
     if hasattr(cfg, "cli"):
