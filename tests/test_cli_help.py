@@ -13,3 +13,5 @@ def test_cli_help_lists_commands() -> None:
     assert "wizard" in output
     assert "preset" in output
     assert "doctor" in output
+    assert "--html-report" in output
+    assert "--no-html-report" in output

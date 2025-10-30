@@ -24,10 +24,10 @@ def _patch_find_spec(monkeypatch: pytest.MonkeyPatch, missing: set[str]) -> None
 def _patch_which(monkeypatch: pytest.MonkeyPatch, missing: set[str]) -> None:
     original = frame_compare.shutil.which
 
-    def fake(cmd: str):
+    def fake(cmd: str, *args: Any, **kwargs: Any):
         if cmd in missing:
             return None
-        return original(cmd)
+        return original(cmd, *args, **kwargs)
 
     monkeypatch.setattr(frame_compare.shutil, "which", fake)
 
@@ -107,4 +107,3 @@ auto_upload = false
     )
     assert result.exit_code == 0
     assert "✅" in result.output
-

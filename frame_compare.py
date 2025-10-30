@@ -42,7 +42,6 @@ from typing import (
     List,
     Literal,
     Mapping,
-    MutableMapping,
     Optional,
     Sequence,
     Tuple,
@@ -6575,7 +6574,7 @@ def main(
         "html_report_enable": html_report_enable,
         "html_report_disable": html_report_disable,
     }
-    params_map: MutableMapping[str, Any] = ctx.ensure_object()
+    params_map = cast(Dict[str, Any], ctx.ensure_object(dict))
     params_map.update(params)
     ctx.obj = params_map
 
@@ -6588,7 +6587,7 @@ def main(
 def run_command(ctx: click.Context) -> None:
     """Explicit subcommand to run the primary pipeline."""
 
-    params: MutableMapping[str, Any] = ctx.ensure_object()
+    params = cast(Dict[str, Any], ctx.ensure_object(dict))
     _run_cli_entry(
         root_path=params.get("root_path"),
         config_path=params.get("config_path"),
@@ -6612,7 +6611,7 @@ def run_command(ctx: click.Context) -> None:
 def doctor(ctx: click.Context, json_mode: bool) -> None:
     """Summarise dependency readiness without altering workspace state."""
 
-    params: MutableMapping[str, Any] = ctx.ensure_object()
+    params = cast(Dict[str, Any], ctx.ensure_object(dict))
     root_override = params.get("root_path")
     config_override = params.get("config_path")
     input_override = params.get("input_dir")
@@ -6744,7 +6743,7 @@ def _execute_wizard_session(
 def wizard(ctx: click.Context, preset_name: str | None) -> None:
     """Interactive configuration wizard with optional preset overlays."""
 
-    params: MutableMapping[str, Any] = ctx.ensure_object()
+    params = cast(Dict[str, Any], ctx.ensure_object(dict))
     root_override = params.get("root_path")
     config_override = params.get("config_path")
     input_override = params.get("input_dir")
@@ -6764,9 +6763,9 @@ def preset(ctx: click.Context) -> None:
     """Preset management helpers."""
 
     if ctx.parent is not None:
-        ctx.obj = ctx.parent.ensure_object()
+        ctx.obj = ctx.parent.ensure_object(dict)
     else:
-        ctx.obj = ctx.ensure_object()
+        ctx.obj = ctx.ensure_object(dict)
 
 
 @preset.command("list")
@@ -6791,7 +6790,7 @@ def preset_list() -> None:
 def preset_apply(ctx: click.Context, name: str) -> None:
     """Apply a preset without running the full wizard."""
 
-    params: MutableMapping[str, Any] = ctx.ensure_object()
+    params = cast(Dict[str, Any], ctx.ensure_object(dict))
     root_override = params.get("root_path")
     config_override = params.get("config_path")
     input_override = params.get("input_dir")
