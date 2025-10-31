@@ -56,6 +56,7 @@ class FrameEntryBase(TypedDict):
 
 class FrameEntryOptional(TypedDict, total=False):
     detail: Dict[str, object]
+    thumbnail: str
 
 
 class FrameEntry(FrameEntryBase, FrameEntryOptional):
@@ -194,6 +195,10 @@ def generate_html_report(
                 }
             )
         detail = selection_details.get(frame_idx)
+        thumbnail_path: Optional[str] = None
+        if records:
+            # Prefer the first listed encode for consistent filmstrip thumbnails.
+            thumbnail_path = records[0]["path"]
         frame_entry: FrameEntry = {
             "index": frame_idx,
             "files": records,
@@ -201,6 +206,8 @@ def generate_html_report(
         }
         if include_metadata == "full" and detail is not None:
             frame_entry["detail"] = _detail_to_payload(detail)
+        if thumbnail_path:
+            frame_entry["thumbnail"] = thumbnail_path
         frame_payload.append(frame_entry)
 
     defaults = {

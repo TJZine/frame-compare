@@ -468,8 +468,34 @@
       const button = document.createElement("button");
       button.type = "button";
       button.dataset.frame = String(frame.index);
-      const label = frame.label ? `${frame.index} · ${frame.label}` : String(frame.index);
-      button.textContent = label;
+      button.className = "rc-frame-thumb";
+      const frameLabelText = frame.label ? `${frame.index} · ${frame.label}` : String(frame.index);
+      button.setAttribute("aria-label", frameLabelText);
+
+      const thumbnailPath = typeof frame.thumbnail === "string" ? frame.thumbnail : null;
+      if (thumbnailPath) {
+        const figure = document.createElement("figure");
+        figure.className = "rc-frame-thumb__figure";
+        const image = document.createElement("img");
+        image.className = "rc-frame-thumb__image";
+        image.src = thumbnailPath;
+        image.loading = "lazy";
+        image.decoding = "async";
+        image.alt = frame.label ? `Frame ${frame.index} — ${frame.label}` : `Frame ${frame.index}`;
+        figure.appendChild(image);
+        button.appendChild(figure);
+      } else {
+        const placeholder = document.createElement("div");
+        placeholder.className = "rc-frame-thumb__placeholder";
+        placeholder.textContent = frame.index;
+        button.appendChild(placeholder);
+      }
+
+      const caption = document.createElement("span");
+      caption.className = "rc-frame-thumb__caption";
+      caption.textContent = frameLabelText;
+      button.appendChild(caption);
+
       button.addEventListener("click", () => {
         selectFrame(frame.index, true);
       });
@@ -482,7 +508,15 @@
     frameList.querySelectorAll("button").forEach((button) => {
       const isActive = Number(button.dataset.frame) === frameIndex;
       button.setAttribute("aria-current", isActive ? "true" : "false");
+      button.classList.toggle("rc-frame-thumb--active", isActive);
     });
+  }
+
+  function ensureActiveThumbnailVisible(frameIndex) {
+    const activeButton = frameList.querySelector(`button[data-frame="${frameIndex}"]`);
+    if (activeButton && typeof activeButton.scrollIntoView === "function") {
+      activeButton.scrollIntoView({ block: "nearest", inline: "center" });
+    }
   }
 
   function updateFrameMetadata(frame, data) {
@@ -605,6 +639,7 @@
     frameLabel.textContent = frame.label ? `Frame ${frame.index} — ${frame.label}` : `Frame ${frame.index}`;
     frameSelect.value = String(frame.index);
     updateFilmstripActive(frame.index);
+    ensureActiveThumbnailVisible(frame.index);
     updateFrameMetadata(frame, state.data);
     if (!preservePan) {
       state.pan = { x: 0, y: 0 };

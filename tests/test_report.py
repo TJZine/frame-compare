@@ -87,4 +87,5 @@ def test_generate_html_report(tmp_path: Path) -> None:
     files_entry = payload["frames"][0]["files"]
     labels = {item["encode"] for item in files_entry}
     assert labels == {"Encode A", "Encode B"}
+    assert payload["frames"][0]["thumbnail"] == "../screens/10 - Encode A.png"
     assert payload["viewer_mode"] == "slider"
