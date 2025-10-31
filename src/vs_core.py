@@ -20,6 +20,7 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
+    cast,
 )
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -925,12 +926,97 @@ def _guess_default_colourspace(
     return matrix, transfer, primaries, color_range
 
 
+def _coerce_float(value: Any) -> Optional[float]:
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
+
+
+def _compute_luma_bounds(clip: Any) -> tuple[Optional[float], Optional[float]]:
+    core = getattr(clip, "core", None)
+    std_ns = getattr(core, "std", None)
+    plane_stats = getattr(std_ns, "PlaneStats", None) if std_ns is not None else None
+    if not callable(plane_stats):
+        return (None, None)
+    try:
+        stats_clip = cast(Any, plane_stats(clip))
+    except Exception:
+        return (None, None)
+
+    total_frames = getattr(clip, "num_frames", 0) or 0
+    if total_frames <= 0:
+        indices = [0]
+    else:
+        indices = list(range(min(total_frames, 3)))
+
+    mins: List[float] = []
+    maxs: List[float] = []
+
+    for idx in indices:
+        try:
+            frame = stats_clip.get_frame(idx)
+        except Exception:
+            break
+        props = getattr(frame, "props", {})
+        y_min = _coerce_float(props.get("PlaneStatsMin"))
+        y_max = _coerce_float(props.get("PlaneStatsMax"))
+        if y_min is not None:
+            mins.append(y_min)
+        if y_max is not None:
+            maxs.append(y_max)
+
+    if not mins or not maxs:
+        return (None, None)
+    return (min(mins), max(maxs))
+
+
+def _adjust_color_range_from_signal(
+    clip: Any,
+    *,
+    color_range: Optional[int],
+    warning_sink: Optional[List[str]],
+    file_name: str | None,
+    range_inferred: bool,
+) -> Optional[int]:
+    vs_module = _get_vapoursynth_module()
+    limited_code = int(getattr(vs_module, "RANGE_LIMITED", 1))
+    full_code = int(getattr(vs_module, "RANGE_FULL", 0))
+
+    # If already limited and appears consistent, keep as-is but warn when signal contradicts metadata.
+    y_min, y_max = _compute_luma_bounds(clip)
+    if y_min is None or y_max is None:
+        return color_range
+
+    label = file_name or "clip"
+
+    if range_inferred or color_range in (None, full_code):
+        if 12.0 <= y_min <= 20.0 and y_max <= 245.0:
+            message = (
+                f"[COLOR] {label} lacks reliable colour-range metadata; "
+                f"treating as limited (sample min={y_min:.1f}, max={y_max:.1f})."
+            )
+            logger.warning(message)
+            if warning_sink is not None:
+                warning_sink.append(message)
+            return limited_code
+    if color_range == limited_code and (y_min < 4.0 or y_max > 251.0):
+        message = (
+            f"[COLOR] {label} is tagged limited but sampled values span full range "
+            f"(min={y_min:.1f}, max={y_max:.1f}); verify source metadata."
+        )
+        logger.warning(message)
+        if warning_sink is not None:
+            warning_sink.append(message)
+    return color_range
+
+
 def normalise_color_metadata(
     clip: Any,
     source_props: Mapping[str, Any] | None,
     *,
     color_cfg: "ColorConfig | None" = None,
     file_name: str | None = None,
+    warning_sink: Optional[List[str]] = None,
 ) -> tuple[
     Any,
     Mapping[str, Any],
@@ -950,6 +1036,7 @@ def normalise_color_metadata(
         primaries = overrides["primaries"]
     if "range" in overrides:
         color_range = overrides["range"]
+    range_inferred = color_range is None and "range" not in overrides
 
     matrix, transfer, primaries, color_range = _guess_default_colourspace(
         clip,
@@ -959,6 +1046,14 @@ def normalise_color_metadata(
         primaries,
         color_range,
         color_cfg=color_cfg,
+    )
+
+    color_range = _adjust_color_range_from_signal(
+        clip,
+        color_range=color_range,
+        warning_sink=warning_sink,
+        file_name=file_name,
+        range_inferred=range_inferred,
     )
 
     update_props: Dict[str, int] = {}
@@ -1331,6 +1426,7 @@ def process_clip_for_screenshot(
         source_props,
         color_cfg=cfg,
         file_name=file_name,
+        warning_sink=warning_sink,
     )
     vs_module = _get_vapoursynth_module()
     core = getattr(clip, "core", None)

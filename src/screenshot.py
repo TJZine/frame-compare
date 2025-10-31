@@ -756,13 +756,23 @@ def _safe_pivot_notify(pivot_notifier: Callable[[str], None] | None, note: str) 
 def _resolve_source_props(
     clip: Any,
     source_props: Mapping[str, Any] | None,
-) -> Dict[str, Any]:
-    """Return a snapshot of source colour metadata without mutating the caller's mapping."""
+    *,
+    color_cfg: "ColorConfig | None" = None,
+    file_name: str | None = None,
+) -> tuple[Any, Dict[str, Any]]:
+    """Return a clip and colour metadata ensuring defaults/overrides are applied."""
 
     props = dict(source_props or {})
-    if props:
-        return props
-    return dict(vs_core._snapshot_frame_props(clip))
+    if props.get("_ColorRange") is not None:
+        return clip, props
+
+    normalised_clip, resolved_props, _ = vs_core.normalise_color_metadata(
+        clip,
+        props if props else None,
+        color_cfg=color_cfg,
+        file_name=file_name,
+    )
+    return normalised_clip, dict(resolved_props)
 
 
 def _describe_vs_format(fmt: Any) -> str:
@@ -1543,6 +1553,8 @@ def _save_frame_with_fpng(
     geometry_plan: GeometryPlan | None = None,
     tonemap_info: "vs_core.TonemapInfo | None" = None,
     pivot_notifier: Callable[[str], None] | None = None,
+    color_cfg: "ColorConfig | None" = None,
+    file_name: str | None = None,
 ) -> None:
     try:
         import vapoursynth as vs  # type: ignore
@@ -1554,7 +1566,12 @@ def _save_frame_with_fpng(
 
     resolved_policy = _normalise_geometry_policy(cfg.odd_geometry_policy)
     rgb_dither = _normalize_rgb_dither(cfg.rgb_dither)
-    source_props_map = _resolve_source_props(clip, source_props)
+    clip, source_props_map = _resolve_source_props(
+        clip,
+        source_props,
+        color_cfg=color_cfg,
+        file_name=file_name,
+    )
     requires_full_chroma = bool(geometry_plan and geometry_plan.get("requires_full_chroma"))
     fmt = getattr(clip, "format", None)
     has_axis, axis_label = _resolve_promotion_axes(fmt, crop, pad)
@@ -1984,7 +2001,12 @@ def generate_screenshots(
         overlay_state = overlay_states[clip_index]
         base_overlay_text = getattr(result, "overlay_text", None)
         source_props_raw = getattr(result, "source_props", {})
-        resolved_source_props = _resolve_source_props(result.clip, source_props_raw)
+        resolved_clip, resolved_source_props = _resolve_source_props(
+            result.clip,
+            source_props_raw,
+            color_cfg=color_cfg,
+            file_name=str(file_path),
+        )
         source_props = resolved_source_props
         is_sdr_pipeline = _is_sdr_pipeline(result.tonemap, resolved_source_props)
 
@@ -2018,12 +2040,12 @@ def generate_screenshots(
                     selection_label = str(derived_label)
             if selection_label is not None:
                 logger.debug('Selection label for frame %s: %s', frame_idx, selection_label)
-            actual_idx, was_clamped = _clamp_frame_index(result.clip, mapped_idx)
+            actual_idx, was_clamped = _clamp_frame_index(resolved_clip, mapped_idx)
             if was_clamped:
                 logger.debug(
                     "Frame %s exceeds available frames (%s) in %s; using %s",
                     mapped_idx,
-                    getattr(result.clip, 'num_frames', 'unknown'),
+                    getattr(resolved_clip, 'num_frames', 'unknown'),
                     file_path,
                     actual_idx,
                 )
@@ -2072,7 +2094,7 @@ def generate_screenshots(
                     )
                 else:
                     _save_frame_with_fpng(
-                        result.clip,
+                        resolved_clip,
                         actual_idx,
                         crop,
                         scaled,
@@ -2089,6 +2111,8 @@ def generate_screenshots(
                         geometry_plan=plan,
                         tonemap_info=result.tonemap,
                         pivot_notifier=pivot_notifier,
+                        color_cfg=color_cfg,
+                        file_name=str(file_path),
                     )
             except ScreenshotWriterError:
                 raise

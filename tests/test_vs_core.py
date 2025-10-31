@@ -251,3 +251,42 @@ def test_normalise_color_metadata_honours_overrides(monkeypatch: Any) -> None:
     assert props["_Transfer"] == 16
     assert props["_Primaries"] == 9
     assert props["_ColorRange"] == 0
+
+
+def test_normalise_color_metadata_infers_limited_via_signal(monkeypatch: Any) -> None:
+    fake_vs = _install_fake_vs(monkeypatch)
+    clip = _DummyClip(fake_vs, height=1080)
+
+    monkeypatch.setattr(vs_core, "_compute_luma_bounds", lambda _: (16.0, 234.0))
+
+    warnings: list[str] = []
+    _, props, _ = vs_core.normalise_color_metadata(
+        clip,
+        {},
+        color_cfg=ColorConfig(),
+        file_name="clip.mkv",
+        warning_sink=warnings,
+    )
+
+    assert props["_ColorRange"] == int(fake_vs.RANGE_LIMITED)
+    assert warnings  # warning emitted for metadata adjustment
+
+
+def test_normalise_color_metadata_warns_for_mismatched_limited(monkeypatch: Any) -> None:
+    fake_vs = _install_fake_vs(monkeypatch)
+    clip = _DummyClip(fake_vs, height=1080)
+
+    monkeypatch.setattr(vs_core, "_compute_luma_bounds", lambda _: (0.0, 255.0))
+
+    warnings: list[str] = []
+    _, props, _ = vs_core.normalise_color_metadata(
+        clip,
+        {"_ColorRange": int(fake_vs.RANGE_LIMITED)},
+        color_cfg=ColorConfig(),
+        file_name="clip.mkv",
+        warning_sink=warnings,
+    )
+
+    # Range remains limited but a warning is emitted for the suspicious signal.
+    assert props["_ColorRange"] == int(fake_vs.RANGE_LIMITED)
+    assert warnings

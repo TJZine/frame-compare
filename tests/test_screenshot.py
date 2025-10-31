@@ -254,6 +254,49 @@ def _stub_process_clip(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(screenshot.vs_core, "process_clip_for_screenshot", _stub)
 
 
+def test_resolve_source_props_normalises_missing_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_normalise(clip: Any, source_props: Any, **kwargs: Any) -> tuple[str, dict[str, int], tuple[int, int, int, int]]:
+        captured["kwargs"] = kwargs
+        return "normalized", {"_ColorRange": 1}, (1, 1, 1, 1)
+
+    monkeypatch.setattr(vs_core, "normalise_color_metadata", fake_normalise)
+
+    clip, props = screenshot._resolve_source_props(
+        "clip",
+        {},
+        color_cfg=ColorConfig(),
+        file_name="demo.mkv",
+    )
+
+    assert clip == "normalized"
+    assert props == {"_ColorRange": 1}
+    assert captured["kwargs"]["file_name"] == "demo.mkv"
+
+
+def test_resolve_source_props_skips_normalisation_when_range_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    called = False
+
+    def fake_normalise(*_args: Any, **_kwargs: Any) -> Any:
+        nonlocal called
+        called = True
+        return "normalized", {"_ColorRange": 1}, (1, 1, 1, 1)
+
+    monkeypatch.setattr(vs_core, "normalise_color_metadata", fake_normalise)
+
+    clip, props = screenshot._resolve_source_props(
+        "original",
+        {"_ColorRange": 1},
+        color_cfg=ColorConfig(),
+        file_name="demo.mkv",
+    )
+
+    assert clip == "original"
+    assert props == {"_ColorRange": 1}
+    assert called is False
+
+
 def test_sanitise_label_replaces_forbidden_characters(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(screenshot.os, "name", "nt")
     raw = 'Group: Episode? 01*<>"| '
