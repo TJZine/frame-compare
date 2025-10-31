@@ -759,6 +759,7 @@ def _resolve_source_props(
     *,
     color_cfg: "ColorConfig | None" = None,
     file_name: str | None = None,
+    warning_sink: Optional[List[str]] = None,
 ) -> tuple[Any, Dict[str, Any]]:
     """Return a clip and colour metadata ensuring defaults/overrides are applied."""
 
@@ -771,6 +772,7 @@ def _resolve_source_props(
         props if props else None,
         color_cfg=color_cfg,
         file_name=file_name,
+        warning_sink=warning_sink,
     )
     return normalised_clip, dict(resolved_props)
 
@@ -1555,6 +1557,7 @@ def _save_frame_with_fpng(
     pivot_notifier: Callable[[str], None] | None = None,
     color_cfg: "ColorConfig | None" = None,
     file_name: str | None = None,
+    warning_sink: Optional[List[str]] = None,
 ) -> None:
     try:
         import vapoursynth as vs  # type: ignore
@@ -1571,6 +1574,7 @@ def _save_frame_with_fpng(
         source_props,
         color_cfg=color_cfg,
         file_name=file_name,
+        warning_sink=warning_sink,
     )
     requires_full_chroma = bool(geometry_plan and geometry_plan.get("requires_full_chroma"))
     fmt = getattr(clip, "format", None)
@@ -2006,6 +2010,7 @@ def generate_screenshots(
             source_props_raw,
             color_cfg=color_cfg,
             file_name=str(file_path),
+            warning_sink=warnings_sink,
         )
         source_props = resolved_source_props
         is_sdr_pipeline = _is_sdr_pipeline(result.tonemap, resolved_source_props)
@@ -2113,6 +2118,7 @@ def generate_screenshots(
                         pivot_notifier=pivot_notifier,
                         color_cfg=color_cfg,
                         file_name=str(file_path),
+                        warning_sink=warnings_sink,
                     )
             except ScreenshotWriterError:
                 raise

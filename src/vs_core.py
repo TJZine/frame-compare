@@ -977,6 +977,7 @@ def _adjust_color_range_from_signal(
     warning_sink: Optional[List[str]],
     file_name: str | None,
     range_inferred: bool,
+    range_from_override: bool,
 ) -> Optional[int]:
     vs_module = _get_vapoursynth_module()
     limited_code = int(getattr(vs_module, "RANGE_LIMITED", 1))
@@ -985,6 +986,15 @@ def _adjust_color_range_from_signal(
     # If already limited and appears consistent, keep as-is but warn when signal contradicts metadata.
     y_min, y_max = _compute_luma_bounds(clip)
     if y_min is None or y_max is None:
+        if range_inferred or (not range_from_override and color_range in (None, full_code)):
+            message = (
+                f"[COLOR] {file_name or 'clip'} lacks colour-range metadata and "
+                "signal sampling is unavailable; defaulting to limited range."
+            )
+            logger.warning(message)
+            if warning_sink is not None:
+                warning_sink.append(message)
+            return limited_code
         return color_range
 
     label = file_name or "clip"
@@ -1036,6 +1046,7 @@ def normalise_color_metadata(
         primaries = overrides["primaries"]
     if "range" in overrides:
         color_range = overrides["range"]
+    range_from_override = "range" in overrides
     range_inferred = color_range is None and "range" not in overrides
 
     matrix, transfer, primaries, color_range = _guess_default_colourspace(
@@ -1054,6 +1065,7 @@ def normalise_color_metadata(
         warning_sink=warning_sink,
         file_name=file_name,
         range_inferred=range_inferred,
+        range_from_override=range_from_override,
     )
 
     update_props: Dict[str, int] = {}

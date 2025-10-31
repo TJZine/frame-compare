@@ -63,7 +63,7 @@ pythonpath = [".", "src"]
 [tool.ruff]
 line-length = 120
 target-version = "py313"
-extend-exclude = ["typings"]
+extend-exclude = ["typings", "legacy", "Legacy"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
