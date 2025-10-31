@@ -6,23 +6,31 @@
 Automated frame sampling, alignment, tonemapping, and slow.pics uploads for deterministic encode comparisons.
 
 ## Table of Contents
-- [Overview](#overview)
-- [Features](#features)
-- [Quickstart](#quickstart)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Configuration](#configuration)
-- [CLI Reference](#cli-reference)
-- [Examples](#examples)
-- [Troubleshooting](#troubleshooting)
-- [FAQ](#faq)
-- [Performance](#performance)
-- [Security](#security)
-- [Privacy \& Telemetry](#privacy--telemetry)
-- [Versioning](#versioning)
-- [Contributing](#contributing)
-- [License](#license)
-- [Support](#support)
+- [Frame Compare](#frame-compare)
+  - [Table of Contents](#table-of-contents)
+  - [Overview](#overview)
+  - [Features](#features)
+  - [Quickstart](#quickstart)
+  - [Installation](#installation)
+  - [Usage](#usage)
+    - [Wizard \& Presets](#wizard--presets)
+    - [Dependency Doctor](#dependency-doctor)
+  - [Configuration](#configuration)
+  - [CLI Reference](#cli-reference)
+  - [Examples](#examples)
+    - [VSPreview manual alignment assistant](#vspreview-manual-alignment-assistant)
+    - [Path diagnostics before heavy runs](#path-diagnostics-before-heavy-runs)
+    - [FFmpeg-only captures](#ffmpeg-only-captures)
+  - [Troubleshooting](#troubleshooting)
+  - [FAQ](#faq)
+  - [Performance](#performance)
+  - [Security](#security)
+  - [Privacy \& Telemetry](#privacy--telemetry)
+  - [Versioning](#versioning)
+  - [Contributing](#contributing)
+  - [License](#license)
+  - [Support](#support)
+  - [Future updates](#future-updates)
 
 ## Overview
 
@@ -380,3 +388,5 @@ Distributed under the [MIT License](LICENSE). Frame Compare builds on FFmpeg, Va
 - progress bar is still a dot on a solid line when set to fill, ensure fill/dot modes are both working or just keep the one present if both are not and remove the dead code. Investigate why progress bar color is linked to heading color (CYAN)
 - audio alignment step in the CLI always missing the information as if loading from the generated offset file. I think this is because when vspreview mode is also active it loads the values of the offset file after as if it wasn't just generated. Can we look into this behavior? what is the expected behavior for different settings combinations?
 - investigate audio offset behavior in situations with multiple encodes. TNBC example where suggested is 0 but 1 encode is slightly mismatched. Its now showing 26f suggested diff but one of the encodes with this suggestion is already matched with the ref. The issue is that when set to 26f the other encode also is adjusted even though it isnt needed after vs preview. Can we also add the video title name in the vspreview overlay along with the suggested frame offset and other information already present? Important note: audio offset values display incorrectly in vspreview overlay only. When prompted after closing vspreview it suggests the correct offsets from the audio analyzation process. ie 0f mainframe rel to remux and 26 frame mainframe to dsnp.
+- when panning or really when swapping between images at all the position on the page is reset. so if im zoomed in towards the top of the image and swap between them in overlay mode or move the reveal bar in slider mode i am pulled down to where the thumbnails are just at the bottom of the visible screen and no longer and looking at the same spot in the image/overall webpage that i want to be. I think this is related to the new changes we made, possibly with the thumbnails since they are ending up perfectly at the bottom of my screen upon swap like mentioned.
+- id also like overlay mode to swap between all available encode sources of the same frame per frame. Right now its only the 2 selected encodes from slider whereas slow.pics allows swapping through all sources in overlay mode. I have page source for a comparision from slow,pics with 3 sources. If there is anything you want to see page source wise or anything else i can access from slow.pics let me know and i can get it for you.
