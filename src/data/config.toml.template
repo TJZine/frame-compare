@@ -90,6 +90,7 @@ verify_step_seconds = 10.0
 verify_max_seconds = 90.0
 verify_luma_threshold = 0.10
 strict = false
+debug_color = false          # Enable colour pipeline debug logging and intermediate frame dumps
 
 [slowpics]
 # Auto-upload settings. Disabled by default to avoid unintentional sharing; opt in explicitly.

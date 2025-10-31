@@ -112,6 +112,15 @@ class VerificationResult:
 
 
 @dataclass(frozen=True)
+class ColorDebugArtifacts:
+    """Clips and metadata captured for colour debugging."""
+
+    normalized_clip: Any | None
+    normalized_props: Mapping[str, Any] | None
+    color_tuple: tuple[Optional[int], Optional[int], Optional[int], Optional[int]] | None
+
+
+@dataclass(frozen=True)
 class ClipProcessResult:
     """Container for processed clip and metadata."""
 
@@ -120,6 +129,7 @@ class ClipProcessResult:
     overlay_text: Optional[str]
     verification: Optional[VerificationResult]
     source_props: Mapping[str, Any]
+    debug: Optional[ColorDebugArtifacts] = None
 
 
 _MATRIX_NAME_TO_CODE = {
@@ -1411,6 +1421,7 @@ def process_clip_for_screenshot(
     enable_verification: bool = True,
     logger_override: Optional[logging.Logger] = None,
     warning_sink: Optional[List[str]] = None,
+    debug_color: bool = False,
 ) -> ClipProcessResult:
     """
     Prepare a VapourSynth clip for screenshot export by applying HDR->SDR tonemapping, optional overlay text, and optional verification against a naive SDR conversion.
@@ -1440,6 +1451,13 @@ def process_clip_for_screenshot(
         file_name=file_name,
         warning_sink=warning_sink,
     )
+    debug_artifacts: Optional[ColorDebugArtifacts] = None
+    if debug_color:
+        debug_artifacts = ColorDebugArtifacts(
+            normalized_clip=clip,
+            normalized_props=dict(source_props),
+            color_tuple=color_tuple,
+        )
     vs_module = _get_vapoursynth_module()
     core = getattr(clip, "core", None)
     if core is None:
@@ -1448,7 +1466,7 @@ def process_clip_for_screenshot(
         raise ClipProcessError("Clip has no associated VapourSynth core")
 
     preset, tone_curve, target_nits, dpd, dst_min = _resolve_tonemap_settings(cfg)
-    overlay_enabled = enable_overlay and bool(getattr(cfg, "overlay_enabled", True))
+    overlay_enabled = enable_overlay and bool(getattr(cfg, "overlay_enabled", True)) and not debug_color
     verify_enabled = enable_verification and bool(getattr(cfg, "verify_enabled", True))
     strict = bool(getattr(cfg, "strict", False))
 
@@ -1497,6 +1515,7 @@ def process_clip_for_screenshot(
             overlay_text=overlay_text,
             verification=None,
             source_props=source_props,
+            debug=debug_artifacts,
         )
 
     resize_ns = getattr(core, "resize", None)
@@ -1648,4 +1667,5 @@ def process_clip_for_screenshot(
         overlay_text=overlay_text,
         verification=verification,
         source_props=source_props,
+        debug=debug_artifacts,
     )

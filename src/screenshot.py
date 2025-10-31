@@ -367,6 +367,167 @@ def _normalize_rgb_dither(value: RGBDither | str) -> RGBDither:
         return RGBDither.ERROR_DIFFUSION
 
 
+class _ColorDebugState:
+    """Collects colour debug logs and intermediate PNGs for a single clip."""
+
+    def __init__(
+        self,
+        *,
+        enabled: bool,
+        base_dir: Path,
+        label: str,
+        core: Any | None,
+        compression_level: int,
+        rgb_dither: RGBDither,
+        logger_obj: logging.Logger,
+        artifacts: Optional[vs_core.ColorDebugArtifacts],
+    ) -> None:
+        self.enabled = bool(enabled and core is not None)
+        self.base_dir = base_dir
+        self.label = label
+        self.core = core
+        self._logger = logger_obj
+        self._compression_value = _map_fpng_compression(compression_level)
+        self._rgb_dither = rgb_dither
+        self._writer: Optional[Callable[..., Any]] = None
+        self._warned_writer = False
+        self.normalized_clip = artifacts.normalized_clip if artifacts is not None else None
+        self.normalized_props = (
+            dict(artifacts.normalized_props)
+            if artifacts is not None and artifacts.normalized_props is not None
+            else None
+        )
+        self.color_tuple = artifacts.color_tuple if artifacts is not None else None
+
+    def capture_stage(
+        self,
+        stage: str,
+        frame_idx: int,
+        clip: Any | None,
+        props: Mapping[str, Any] | None = None,
+    ) -> None:
+        if not self.enabled or clip is None:
+            return
+        try:
+            props_map = dict(props or vs_core._snapshot_frame_props(clip))
+        except Exception:
+            props_map = {}
+        try:
+            y_min, y_max = self._measure_plane_bounds(clip, frame_idx)
+        except Exception as exc:
+            self._logger.debug(
+                "Colour debug PlaneStats failed for %s stage=%s frame=%s: %s",
+                self.label,
+                stage,
+                frame_idx,
+                exc,
+            )
+            y_min = y_max = float("nan")
+        self._logger.info(
+            "[DEBUG-COLOR] %s stage=%s frame=%d Matrix=%s Transfer=%s Primaries=%s Range=%s Ymin=%.2f Ymax=%.2f",
+            self.label,
+            stage,
+            frame_idx,
+            props_map.get("_Matrix"),
+            props_map.get("_Transfer"),
+            props_map.get("_Primaries"),
+            props_map.get("_ColorRange"),
+            y_min,
+            y_max,
+        )
+        try:
+            self._write_png(stage, frame_idx, clip, props_map)
+        except Exception as exc:  # pragma: no cover - debug only
+            self._logger.debug(
+                "Colour debug PNG write failed for %s stage=%s frame=%s: %s",
+                self.label,
+                stage,
+                frame_idx,
+                exc,
+            )
+
+    def _measure_plane_bounds(self, clip: Any, frame_idx: int) -> tuple[float, float]:
+        std_ns = getattr(self.core, "std", None) if self.core is not None else None
+        plane_stats = getattr(std_ns, "PlaneStats", None) if std_ns is not None else None
+        if not callable(plane_stats):
+            raise RuntimeError("VapourSynth std.PlaneStats unavailable for colour debug")
+        stats_clip = cast(Any, plane_stats(clip))
+        frame = stats_clip.get_frame(frame_idx)
+        props = cast(Mapping[str, Any], getattr(frame, "props", {}))
+        min_value = float(props.get("PlaneStatsMin", 0.0))
+        max_value = float(props.get("PlaneStatsMax", 0.0))
+        return (min_value, max_value)
+
+    def _write_png(
+        self,
+        stage: str,
+        frame_idx: int,
+        clip: Any,
+        props: Mapping[str, Any],
+    ) -> None:
+        path = self.base_dir / f"{frame_idx:06d}_{stage}.png"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if self._writer is None:
+            fpng_ns = getattr(self.core, "fpng", None) if self.core is not None else None
+            writer = getattr(fpng_ns, "Write", None) if fpng_ns is not None else None
+            if not callable(writer):
+                if not self._warned_writer:
+                    self._logger.warning(
+                        "Colour debug unable to emit PNGs for %s (fpng.Write unavailable)",
+                        self.label,
+                    )
+                    self._warned_writer = True
+                return
+            self._writer = writer
+        rgb_clip = _ensure_rgb24(
+            self.core,
+            clip,
+            frame_idx,
+            source_props=props,
+            rgb_dither=self._rgb_dither,
+        )
+        job = self._writer(rgb_clip, str(path), compression=self._compression_value, overwrite=True)
+        job.get_frame(frame_idx)
+
+
+def _legacy_rgb24_from_clip(
+    core: Any,
+    clip: Any,
+    color_tuple: tuple[Optional[int], Optional[int], Optional[int], Optional[int]] | None,
+) -> Any | None:
+    if color_tuple is None:
+        return None
+    try:
+        import vapoursynth as vs  # type: ignore
+    except Exception:
+        return None
+
+    resize_ns = getattr(core, "resize", None)
+    lanczos = getattr(resize_ns, "Lanczos", None) if resize_ns is not None else None
+    if not callable(lanczos):
+        return None
+
+    matrix, transfer, primaries, color_range = color_tuple
+    kwargs: Dict[str, int] = {}
+    if matrix is not None:
+        kwargs["matrix_in"] = int(matrix)
+    if transfer is not None:
+        kwargs["transfer_in"] = int(transfer)
+    if primaries is not None:
+        kwargs["primaries_in"] = int(primaries)
+    kwargs["range_in"] = int(color_range) if color_range is not None else int(getattr(vs, "RANGE_LIMITED", 1))
+    try:
+        legacy_rgb = lanczos(
+            clip,
+            format=vs.RGB24,
+            dither_type="error_diffusion",
+            **kwargs,
+        )
+    except Exception:
+        return None
+    return legacy_rgb
+
+
 def _ensure_rgb24(
     core: Any,
     clip: Any,
@@ -1558,6 +1719,9 @@ def _save_frame_with_fpng(
     color_cfg: "ColorConfig | None" = None,
     file_name: str | None = None,
     warning_sink: Optional[List[str]] = None,
+    debug_state: Optional[_ColorDebugState] = None,
+    frame_info_allowed: bool = True,
+    overlays_allowed: bool = True,
 ) -> None:
     try:
         import vapoursynth as vs  # type: ignore
@@ -1654,7 +1818,25 @@ def _save_frame_with_fpng(
         raise ScreenshotWriterError(f"Failed to prepare frame {frame_idx}: {exc}") from exc
 
     render_clip = work
-    if cfg.add_frame_info:
+    if debug_state is not None:
+        try:
+            post_geom_props = vs_core._snapshot_frame_props(work)
+        except Exception:
+            post_geom_props = {}
+        debug_state.capture_stage(
+            "post_geometry",
+            frame_idx,
+            work,
+            post_geom_props,
+        )
+        legacy_clip = _legacy_rgb24_from_clip(core, work, getattr(debug_state, "color_tuple", None))
+        if legacy_clip is not None:
+            try:
+                legacy_props = vs_core._snapshot_frame_props(legacy_clip)
+            except Exception:
+                legacy_props = {}
+            debug_state.capture_stage("legacy_rgb24", frame_idx, legacy_clip, legacy_props)
+    if frame_info_allowed:
         render_clip = _apply_frame_info_overlay(
             core,
             render_clip,
@@ -1664,14 +1846,15 @@ def _save_frame_with_fpng(
         )
 
     overlay_state = overlay_state or _new_overlay_state()
-    render_clip = _apply_overlay_text(
-        core,
-        render_clip,
-        overlay_text,
-        strict=strict_overlay,
-        state=overlay_state,
-        file_label=label,
-    )
+    if overlays_allowed and overlay_text:
+        render_clip = _apply_overlay_text(
+            core,
+            render_clip,
+            overlay_text,
+            strict=strict_overlay,
+            state=overlay_state,
+            file_label=label,
+        )
 
     render_clip = _ensure_rgb24(
         core,
@@ -1680,6 +1863,12 @@ def _save_frame_with_fpng(
         source_props=source_props_map,
         rgb_dither=rgb_dither,
     )
+    if debug_state is not None:
+        try:
+            rgb_props = vs_core._snapshot_frame_props(render_clip)
+        except Exception:
+            rgb_props = {}
+        debug_state.capture_stage("post_rgb24", frame_idx, render_clip, rgb_props)
     logger.debug(
         "RGB24 conversion for frame %s used dither=%s (policy=%s)",
         frame_idx,
@@ -1741,6 +1930,8 @@ def _save_frame_with_ffmpeg(
     geometry_plan: GeometryPlan | None = None,
     is_sdr: bool = True,
     pivot_notifier: Callable[[str], None] | None = None,
+    frame_info_allowed: bool = True,
+    overlays_allowed: bool = True,
 ) -> None:
     if shutil.which("ffmpeg") is None:
         raise ScreenshotWriterError("FFmpeg executable not found in PATH")
@@ -1782,7 +1973,7 @@ def _save_frame_with_ffmpeg(
                 y=max(0, pad_top),
             )
         )
-    if cfg.add_frame_info:
+    if frame_info_allowed:
         text_lines = [f"Frame\\ {int(frame_idx)}"]
         if selection_label:
             text_lines.append(f"Content Type\\: {selection_label}")
@@ -1792,7 +1983,7 @@ def _save_frame_with_ffmpeg(
             "box=0:shadowx=1:shadowy=1:shadowcolor=black:x=10:y=10"
         ).format(text=_escape_drawtext(text))
         filters.append(drawtext)
-    if overlay_text:
+    if overlays_allowed and overlay_text:
         overlay_cmd = (
             "drawtext=text={text}:fontcolor=white:borderw=2:bordercolor=black:"
             "box=0:shadowx=1:shadowy=1:shadowcolor=black:x=10:y=80"
@@ -1899,6 +2090,7 @@ def generate_screenshots(
     warnings_sink: List[str] | None = None,
     verification_sink: List[Dict[str, Any]] | None = None,
     pivot_notifier: Callable[[str], None] | None = None,
+    debug_color: bool = False,
 ) -> List[str]:
     """
     Render and save screenshots for the given frames from each input clip using the configured writers.
@@ -1920,6 +2112,7 @@ def generate_screenshots(
         warnings_sink: Optional list to which non-fatal warning messages will be appended.
         verification_sink: Optional list to which per-clip verification records will be appended; each record contains keys: file, frame, average, maximum, auto_selected.
         pivot_notifier: Optional callable invoked with a short text note whenever a full-chroma pivot is applied.
+        debug_color: Enable detailed colour debugging (logs, intermediate PNGs, legacy conversions) when True.
 
     Returns:
         List[str]: Ordered list of file paths for all created screenshot files.
@@ -1952,6 +2145,12 @@ def generate_screenshots(
 
     processed_results: List[vs_core.ClipProcessResult] = []
     overlay_states: List[OverlayState] = []
+    debug_enabled = bool(debug_color or getattr(color_cfg, "debug_color", False))
+    debug_root = out_dir / "debug" if debug_enabled else None
+    debug_dither = _normalize_rgb_dither(cfg.rgb_dither)
+    use_ffmpeg_runtime = bool(cfg.use_ffmpeg and not debug_enabled)
+    frame_info_allowed_default = bool(cfg.add_frame_info and not debug_enabled)
+    overlays_allowed_default = not debug_enabled
 
     for clip, file_path in zip(clips, files, strict=True):
         result = vs_core.process_clip_for_screenshot(
@@ -1962,6 +2161,7 @@ def generate_screenshots(
             enable_verification=True,
             logger_override=logger,
             warning_sink=warnings_sink,
+            debug_color=debug_enabled,
         )
         processed_results.append(result)
         overlay_states.append(_new_overlay_state())
@@ -2001,6 +2201,23 @@ def generate_screenshots(
         height = int(plan["height"])
         trim_start = int(trim_start)
         raw_label, safe_label = _derive_labels(file_path, meta)
+
+        debug_state: Optional[_ColorDebugState] = None
+        if debug_enabled and debug_root is not None:
+            artifacts = getattr(result, "debug", None)
+            core = getattr(result.clip, "core", None)
+            if core is None and artifacts is not None and artifacts.normalized_clip is not None:
+                core = getattr(artifacts.normalized_clip, "core", None)
+            debug_state = _ColorDebugState(
+                enabled=core is not None,
+                base_dir=(debug_root / safe_label),
+                label=safe_label,
+                core=core,
+                compression_level=int(getattr(cfg, "compression_level", 1)),
+                rgb_dither=debug_dither,
+                logger_obj=logger,
+                artifacts=artifacts,
+            )
 
         overlay_state = overlay_states[clip_index]
         base_overlay_text = getattr(result, "overlay_text", None)
@@ -2054,22 +2271,32 @@ def generate_screenshots(
                     file_path,
                     actual_idx,
                 )
-            overlay_text = _compose_overlay_text(
-                base_overlay_text,
-                color_cfg,
-                plan,
-                selection_label,
-                source_props,
-                tonemap_info=result.tonemap,
-                selection_detail=detail_info,
-            )
+            if debug_state and debug_state.normalized_clip is not None:
+                debug_state.capture_stage(
+                    "post_normalisation",
+                    actual_idx,
+                    debug_state.normalized_clip,
+                    debug_state.normalized_props,
+                )
+            if debug_enabled:
+                overlay_text = None
+            else:
+                overlay_text = _compose_overlay_text(
+                    base_overlay_text,
+                    color_cfg,
+                    plan,
+                    selection_label,
+                    source_props,
+                    tonemap_info=result.tonemap,
+                    selection_detail=detail_info,
+                )
             file_name = _prepare_filename(frame_idx, safe_label)
             target_path = out_dir / file_name
 
             try:
                 resolved_frame = _resolve_source_frame_index(actual_idx, trim_start)
-                use_ffmpeg = cfg.use_ffmpeg and resolved_frame is not None
-                if cfg.use_ffmpeg and resolved_frame is None:
+                use_ffmpeg = use_ffmpeg_runtime and resolved_frame is not None
+                if use_ffmpeg_runtime and resolved_frame is None:
                     logger.debug(
                         "Frame %s for %s falls within synthetic trim padding; "
                         "using VapourSynth writer",
@@ -2096,6 +2323,8 @@ def generate_screenshots(
                         geometry_plan=plan,
                         is_sdr=is_sdr_pipeline,
                         pivot_notifier=pivot_notifier,
+                        frame_info_allowed=frame_info_allowed_default,
+                        overlays_allowed=overlays_allowed_default and bool(overlay_text),
                     )
                 else:
                     _save_frame_with_fpng(
@@ -2119,6 +2348,9 @@ def generate_screenshots(
                         color_cfg=color_cfg,
                         file_name=str(file_path),
                         warning_sink=warnings_sink,
+                        debug_state=debug_state,
+                        frame_info_allowed=frame_info_allowed_default,
+                        overlays_allowed=overlays_allowed_default,
                     )
             except ScreenshotWriterError:
                 raise

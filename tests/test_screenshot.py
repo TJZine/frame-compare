@@ -380,6 +380,98 @@ def test_plan_geometry_letterbox_alignment(tmp_path: Path, monkeypatch: pytest.M
     assert captured[1]["scaled"] == (3840, 1800)
 
 
+def test_generate_screenshots_debug_color_disables_overlays(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    clip, fake_vs, _, _ = _prepare_fake_vapoursynth_clip(
+        monkeypatch,
+        width=1920,
+        height=1080,
+        subsampling_w=1,
+        subsampling_h=1,
+        bits_per_sample=8,
+        color_family="YUV",
+        format_name="YUV420P8",
+    )
+    monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
+
+    cfg = ScreenshotConfig(directory_name="screens", add_frame_info=True, use_ffmpeg=False)
+    color_cfg = ColorConfig()
+    color_cfg.debug_color = True
+
+    captured: dict[str, Any] = {}
+
+    def fake_writer(
+        clip: Any,
+        frame_idx: int,
+        crop: tuple[int, int, int, int],
+        scaled: tuple[int, int],
+        pad: tuple[int, int, int, int],
+        path: Path,
+        cfg: ScreenshotConfig,
+        label: str,
+        requested_frame: int,
+        selection_label: str | None = None,
+        *,
+        overlay_text: Optional[str] = None,
+        debug_state: Any = None,
+        frame_info_allowed: bool = True,
+        overlays_allowed: bool = True,
+        **kwargs: Any,
+    ) -> None:
+        captured.setdefault("overlay_text", overlay_text)
+        captured.setdefault("frame_info_allowed", frame_info_allowed)
+        captured.setdefault("overlays_allowed", overlays_allowed)
+        Path(path).write_text("data", encoding="utf-8")
+
+    monkeypatch.setattr(screenshot, "_save_frame_with_fpng", fake_writer)
+    monkeypatch.setattr(screenshot, "_save_frame_with_ffmpeg", lambda *args, **kwargs: None)
+
+    artifact = vs_core.ColorDebugArtifacts(
+        normalized_clip=clip,
+        normalized_props={},
+        color_tuple=(1, 1, 1, 1),
+    )
+    tonemap_info = vs_core.TonemapInfo(
+        applied=False,
+        tone_curve=None,
+        dpd=0,
+        target_nits=100.0,
+        dst_min_nits=0.1,
+        src_csp_hint=None,
+        reason="SDR source",
+    )
+
+    def fake_process(
+        clip_in: Any,
+        file_name: str,
+        color_cfg_in: ColorConfig,
+        **kwargs: Any,
+    ) -> types.SimpleNamespace:
+        return types.SimpleNamespace(
+            clip=clip_in,
+            overlay_text="should be suppressed",
+            verification=None,
+            tonemap=tonemap_info,
+            source_props={},
+            debug=artifact,
+        )
+
+    monkeypatch.setattr(screenshot.vs_core, "process_clip_for_screenshot", fake_process)
+
+    screenshot.generate_screenshots(
+        [clip],
+        [0],
+        ["clip.mkv"],
+        [{"label": "Debug Clip"}],
+        tmp_path,
+        cfg,
+        color_cfg,
+    )
+
+    assert captured["overlay_text"] is None
+    assert captured["frame_info_allowed"] is False
+    assert captured["overlays_allowed"] is False
+
+
 def test_plan_geometry_subsamp_safe_rebalance_aligns_modulus() -> None:
     class _Format:
         def __init__(self, subsampling_w: int, subsampling_h: int) -> None:
@@ -1482,6 +1574,8 @@ def test_save_frame_with_ffmpeg_honours_timeout(monkeypatch: pytest.MonkeyPatch,
         width=1920,
         height=1080,
         selection_label=None,
+        frame_info_allowed=True,
+        overlays_allowed=True,
     )
 
     cmd = recorded.get("cmd")
@@ -1522,6 +1616,8 @@ def test_save_frame_with_ffmpeg_disables_timeout_when_zero(
         width=1920,
         height=1080,
         selection_label=None,
+        frame_info_allowed=True,
+        overlays_allowed=True,
     )
 
     assert "timeout" not in recorded or recorded.get("timeout") is None
@@ -1565,6 +1661,8 @@ def test_save_frame_with_ffmpeg_inserts_full_chroma_filters(
         selection_label=None,
         geometry_plan=plan,
         pivot_notifier=pivot_notes.append,
+        frame_info_allowed=True,
+        overlays_allowed=True,
     )
 
     assert recorded_cmd
@@ -1600,6 +1698,8 @@ def test_save_frame_with_ffmpeg_raises_on_timeout(monkeypatch: pytest.MonkeyPatc
             width=1280,
             height=720,
             selection_label=None,
+            frame_info_allowed=True,
+            overlays_allowed=True,
         )
 
     assert "timed out" in str(exc_info.value)
@@ -1657,6 +1757,9 @@ def test_save_frame_with_fpng_promotes_subsampled_sdr(
         geometry_plan=plan,
         tonemap_info=tonemap_info,
         pivot_notifier=pivot_notes.append,
+        debug_state=None,
+        frame_info_allowed=False,
+        overlays_allowed=False,
     )
 
     log_records: Sequence[logging.LogRecord] = list(caplog_any.records)
@@ -1712,6 +1815,9 @@ def test_save_frame_with_fpng_skips_promotion_on_even_geometry(
         source_props=source_props,
         geometry_plan=plan,
         tonemap_info=tonemap_info,
+        debug_state=None,
+        frame_info_allowed=False,
+        overlays_allowed=False,
     )
 
     assert writer_calls, "fpng writer should be invoked"

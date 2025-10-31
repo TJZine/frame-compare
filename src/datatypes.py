@@ -101,6 +101,7 @@ class ColorConfig:
     default_transfer_sdr: Optional[str] = None
     default_range_sdr: Optional[str] = None
     color_overrides: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    debug_color: bool = False
 
 
 @dataclass

@@ -29,6 +29,16 @@ Earlier conversions (8/10/12-bit → 16-bit) always run with `dither_type="none"
 
 The pipeline now samples the luma plane when range metadata is missing or indicates full-range SDR. When samples land inside the studio range (≈16–235 for 8-bit sources), the clip is treated as limited and a warning is emitted. This prevents washed-out PNG exports for masters that omit container/VUI flags. Operators can still force behaviour per clip via `[color].color_overrides`, and mismatches (metadata says limited but the signal spans 0–255) surface as warnings for manual review.
 
+## `[color].debug_color`
+
+Setting `debug_color = true` (or supplying `--debug-color` to the CLI) activates the colour investigation toolkit:
+
+- PlaneStats min/max values and frame-property metadata (`_Matrix`, `_Transfer`, `_Primaries`, `_ColorRange`) are logged after post-normalisation, post-geometry, the legacy RGB24 conversion, and the final `_ensure_rgb24` stage.
+- Intermediate PNGs are emitted to `screens/debug/<clip>/<frame>_{post_normalisation|post_geometry|legacy_rgb24|post_rgb24}.png`, enabling pixel-for-pixel comparisons with the legacy pipeline.
+- Frame-info overlays and diagnostic text are suppressed so each debug PNG represents raw image content.
+
+Use this mode when tracking range regressions between the modern pipeline and `Legacy/comp.py`. Debug artefacts share frame indices with the main output directory, making diffs straightforward.
+
 ## `[report]`
 
 The HTML report bundles the rendered screenshots with a slider-based viewer and

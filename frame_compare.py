@@ -4435,6 +4435,7 @@ def _confirm_alignment_with_screenshots(
             cfg.color,
             trim_offsets=[plan.trim_start for plan in plans],
             pivot_notifier=_alignment_pivot_note,
+            debug_color=bool(getattr(cfg.color, "debug_color", False)),
         )
     except ClipProcessError as exc:
         hint = "Run 'frame-compare doctor' for dependency diagnostics."
@@ -4491,6 +4492,7 @@ def _confirm_alignment_with_screenshots(
             cfg.color,
             trim_offsets=[plan.trim_start for plan in plans],
             pivot_notifier=_alignment_pivot_note,
+            debug_color=bool(getattr(cfg.color, "debug_color", False)),
         )
     except ClipProcessError as exc:
         hint = "Run 'frame-compare doctor' for dependency diagnostics."
@@ -4536,6 +4538,7 @@ def run_cli(
     no_color: bool = False,
     report_enable_override: Optional[bool] = None,
     skip_wizard: bool = False,
+    debug_color: bool = False,
 ) -> RunResult:
     """
     Orchestrate the CLI workflow.
@@ -4567,6 +4570,11 @@ def run_cli(
         skip_auto_wizard=skip_wizard,
     )
     cfg = preflight.config
+    if debug_color:
+        try:
+            setattr(cfg.color, "debug_color", True)
+        except AttributeError:
+            pass
     report_enabled = (
         bool(report_enable_override)
         if report_enable_override is not None
@@ -5854,6 +5862,7 @@ def run_cli(
                     warnings_sink=collected_warnings,
                     verification_sink=verification_records,
                     pivot_notifier=_notify_pivot,
+                    debug_color=bool(getattr(cfg.color, "debug_color", False)),
                 )
 
                 if processed < total_screens:
@@ -5883,6 +5892,7 @@ def run_cli(
                 warnings_sink=collected_warnings,
                 verification_sink=verification_records,
                 pivot_notifier=_notify_pivot,
+                debug_color=bool(getattr(cfg.color, "debug_color", False)),
             )
     except ClipProcessError as exc:
         hint = "Run 'frame-compare doctor' for dependency diagnostics."
@@ -6296,6 +6306,7 @@ def _run_cli_entry(
     skip_wizard: bool,
     html_report_enable: bool,
     html_report_disable: bool,
+    debug_color: bool,
 ) -> None:
     """Execute the primary CLI workflow with the provided options."""
 
@@ -6360,6 +6371,7 @@ def _run_cli_entry(
             no_color=no_color,
             report_enable_override=report_override,
             skip_wizard=skip_wizard,
+            debug_color=debug_color,
         )
     except CLIAppError as exc:
         print(exc.rich_message)
@@ -6549,6 +6561,11 @@ def _run_cli_entry(
     is_flag=True,
     help="Disable HTML report generation regardless of config.",
 )
+@click.option(
+    "--debug-color",
+    is_flag=True,
+    help="Enable colour pipeline debugging (logs plane stats, dumps intermediate PNGs).",
+)
 @click.pass_context
 def main(
     ctx: click.Context,
@@ -6566,6 +6583,7 @@ def main(
     no_wizard: bool,
     html_report_enable: bool,
     html_report_disable: bool,
+    debug_color: bool,
 ) -> None:
     """Command group entry point that dispatches to subcommands or the default run."""
 
@@ -6583,6 +6601,7 @@ def main(
         "skip_wizard": no_wizard,
         "html_report_enable": html_report_enable,
         "html_report_disable": html_report_disable,
+        "debug_color": debug_color,
     }
     params_map = cast(Dict[str, Any], ctx.ensure_object(dict))
     params_map.update(params)
@@ -6612,6 +6631,7 @@ def run_command(ctx: click.Context) -> None:
         skip_wizard=bool(params.get("skip_wizard", False)),
         html_report_enable=bool(params.get("html_report_enable", False)),
         html_report_disable=bool(params.get("html_report_disable", False)),
+        debug_color=bool(params.get("debug_color", False)),
     )
 
 
