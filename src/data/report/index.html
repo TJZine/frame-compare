@@ -35,6 +35,8 @@
           <select id="mode-select" aria-label="Viewer mode">
             <option value="slider">Slider</option>
             <option value="overlay">Overlay</option>
+            <option value="difference">Difference</option>
+            <option value="blink">Blink</option>
           </select>
         </div>
         <div class="rc-control-group rc-zoom-control">
@@ -45,6 +47,7 @@
             <button type="button" id="zoom-in" aria-label="Zoom in" title="Zoom in">+</button>
             <button type="button" id="zoom-reset" aria-label="Reset zoom" title="Reset zoom to 100%">Reset</button>
             <span id="zoom-readout" class="rc-zoom-readout" aria-live="polite" aria-atomic="true">100%</span>
+            <button type="button" id="fullscreen-toggle" class="rc-fullscreen-button" aria-pressed="false" aria-label="Toggle fullscreen" title="Toggle fullscreen (F)">Fullscreen</button>
           </div>
           <div class="rc-fit-toolbar" role="group" aria-label="Fit presets">
             <button type="button" data-fit="actual" title="Display at native pixel size">Actual size</button>
@@ -77,11 +80,12 @@
         </div>
         <div class="rc-frame-info" id="frame-label"></div>
         <p class="rc-viewer-help" id="viewer-help">
-          Shortcuts: Ctrl/Cmd + wheel = zoom • Space + drag = pan • R = reset zoom
+          Shortcuts: Ctrl/Cmd + wheel = zoom • Space + drag = pan • R = reset zoom • D = difference mode • B = blink mode • F = fullscreen
         </p>
       </section>
 
       <section class="rc-filmstrip" aria-label="Frames">
+        <div class="rc-category-filter-container" id="category-filter" hidden></div>
         <ul id="frame-list" class="rc-frame-list"></ul>
       </section>
 

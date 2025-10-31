@@ -121,6 +121,15 @@ Dependency check:
 **Shortcut naming:** uploaded runs create a `.url` file using the resolved collection name (sanitised via `build_shortcut_filename` in `src/slowpics.py:148-164`).  
 If the name collapses to an empty string, the CLI falls back to the canonical comparison key; otherwise repeated runs with the same collection name will refresh the same shortcut file—append a suffix in `[slowpics].collection_name` if you need per-run artifacts.
 
+## HTML report viewer
+
+The bundled offline report mirrors slow.pics ergonomics and now includes:
+
+- Filmstrip thumbnails with per-frame selection badges and category filters (labels come from `SelectionDetail`).
+- Viewer modes for slider, overlay, difference, and blink comparisons, plus a fullscreen toggle.
+- Pointer-anchored zoom controls, fit presets, alignment presets, and persistent viewer state saved in `localStorage` (zoom, fit, mode, alignment, filters).
+- Keyboard shortcuts: `Ctrl/Cmd + wheel` to zoom, `Space + drag` to pan, `R` to reset zoom, `D`/`B` to switch modes, and `F` to toggle fullscreen.
+
 ## Runtime and environment
 
 <!-- markdownlint-disable MD013 -->

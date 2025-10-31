@@ -30,6 +30,7 @@
   const rightImage = document.getElementById("right-image");
   const frameLabel = document.getElementById("frame-label");
   const frameList = document.getElementById("frame-list");
+  const filterContainer = document.getElementById("category-filter");
   const encodeInfo = document.getElementById("encode-info");
   const frameMetadata = document.getElementById("frame-metadata");
   const subtitle = document.getElementById("report-subtitle");
@@ -37,17 +38,21 @@
   const linkContainer = document.getElementById("report-links");
   const sliderGroup = document.querySelector(".rc-slider-control");
   const viewerHelp = document.getElementById("viewer-help");
+  const fullscreenButton = document.getElementById("fullscreen-toggle");
 
-  const STORAGE_KEY = "frameCompareReportViewer.v2";
+  const STORAGE_KEY = "frameCompareReportViewer.v3";
   const ZOOM_MIN = 25;
   const ZOOM_MAX = 400;
   const ZOOM_STEP = 10;
   const CUSTOM_ALIGNMENT = "custom";
+  const BLINK_INTERVAL_MS = 700;
+  const VIEWER_MODES = new Set(["slider", "overlay", "difference", "blink"]);
 
   const state = {
     data: null,
     framesByIndex: new Map(),
     sortedFrameIndexes: [],
+    allFrameIndexes: [],
     currentFrame: null,
     leftEncode: null,
     rightEncode: null,
@@ -65,6 +70,13 @@
     panModifier: false,
     panAvailable: false,
     panHasMoved: false,
+    categories: [],
+    activeCategories: new Set(),
+    blinkTimerId: null,
+    blinkVisible: true,
+    blinkPaused: false,
+    fullscreenActive: false,
+    fullscreenReturnFocus: null,
   };
 
   function clampZoom(value) {
@@ -98,6 +110,7 @@
         fitPreset: state.fitPreset,
         alignment: state.alignment === CUSTOM_ALIGNMENT ? (state.prevAlignment || "center") : state.alignment,
         mode: state.mode,
+        activeCategories: Array.from(state.activeCategories),
       };
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
     } catch (error) {
@@ -105,8 +118,222 @@
     }
   }
 
+  function stopBlink() {
+    if (state.blinkTimerId !== null) {
+      window.clearInterval(state.blinkTimerId);
+      state.blinkTimerId = null;
+    }
+    state.blinkPaused = false;
+    state.blinkVisible = true;
+  }
+
+  function startBlink() {
+    stopBlink();
+    state.blinkVisible = true;
+    state.blinkPaused = false;
+    applyBlinkVisibility();
+    state.blinkTimerId = window.setInterval(() => {
+      if (state.blinkPaused) {
+        return;
+      }
+      state.blinkVisible = !state.blinkVisible;
+      applyBlinkVisibility();
+    }, BLINK_INTERVAL_MS);
+  }
+
+  function pauseBlink(setVisibleLeft = false) {
+    state.blinkPaused = true;
+    if (setVisibleLeft) {
+      state.blinkVisible = true;
+      applyBlinkVisibility();
+    }
+  }
+
+  function resumeBlink() {
+    const wasPaused = state.blinkPaused;
+    state.blinkPaused = false;
+    if (wasPaused) {
+      applyBlinkVisibility();
+    }
+  }
+
+  function applyBlinkVisibility() {
+    if (state.mode !== "blink" || !overlay || !rightImage) {
+      return;
+    }
+    const showLeft = state.blinkVisible;
+    overlay.style.visibility = showLeft ? "visible" : "hidden";
+    rightImage.style.visibility = showLeft ? "hidden" : "visible";
+  }
+
+  function getFullscreenElement() {
+    if (typeof document === "undefined") {
+      return null;
+    }
+    return (
+      document.fullscreenElement ||
+      document.webkitFullscreenElement ||
+      document.mozFullScreenElement ||
+      document.msFullscreenElement ||
+      null
+    );
+  }
+
+  function isFullscreenSupported() {
+    if (!viewerStage || typeof document === "undefined") {
+      return false;
+    }
+    return Boolean(
+      document.fullscreenEnabled ||
+        document.webkitFullscreenEnabled ||
+        document.mozFullScreenEnabled ||
+        document.msFullscreenEnabled ||
+        viewerStage.requestFullscreen ||
+        viewerStage.webkitRequestFullscreen ||
+        viewerStage.mozRequestFullScreen ||
+        viewerStage.msRequestFullscreen
+    );
+  }
+
+  function isFullscreenActive() {
+    return Boolean(getFullscreenElement());
+  }
+
+  function syncFullscreenState() {
+    const active = isFullscreenActive();
+    state.fullscreenActive = active;
+    if (fullscreenButton) {
+      fullscreenButton.setAttribute("aria-pressed", active ? "true" : "false");
+      fullscreenButton.title = active ? "Exit fullscreen (F)" : "Toggle fullscreen (F)";
+    }
+    if (document.body) {
+      document.body.classList.toggle("rc-fullscreen-active", active);
+    }
+    if (active) {
+      if (viewerStage && typeof viewerStage.focus === "function") {
+        viewerStage.focus({ preventScroll: true });
+      }
+    } else {
+      const returnFocus = state.fullscreenReturnFocus;
+      state.fullscreenReturnFocus = null;
+      if (returnFocus && typeof returnFocus.focus === "function") {
+        try {
+          returnFocus.focus({ preventScroll: true });
+        } catch (error) {
+          // Swallow focus errors.
+        }
+      } else if (fullscreenButton && typeof fullscreenButton.focus === "function") {
+        fullscreenButton.focus({ preventScroll: true });
+      }
+    }
+    applyBlinkVisibility();
+    window.requestAnimationFrame(() => {
+      applyTransform();
+      if (state.imageSize) {
+        updatePanAvailability(
+          state.imageSize.width * currentScale(),
+          state.imageSize.height * currentScale(),
+          getStageSize(),
+        );
+      } else {
+        updatePanAvailability(0, 0, getStageSize());
+      }
+    });
+  }
+
+  function enterFullscreen() {
+    if (!viewerStage || !isFullscreenSupported()) {
+      return;
+    }
+    const focusTarget = document.activeElement;
+    if (focusTarget && focusTarget instanceof HTMLElement) {
+      state.fullscreenReturnFocus = focusTarget;
+    } else {
+      state.fullscreenReturnFocus = fullscreenButton instanceof HTMLElement ? fullscreenButton : null;
+    }
+    const request =
+      viewerStage.requestFullscreen?.bind(viewerStage) ||
+      viewerStage.webkitRequestFullscreen?.bind(viewerStage) ||
+      viewerStage.mozRequestFullScreen?.bind(viewerStage) ||
+      viewerStage.msRequestFullscreen?.bind(viewerStage);
+    if (!request) {
+      syncFullscreenState();
+      return;
+    }
+    try {
+      const result = request();
+      if (result && typeof result.then === "function") {
+        result.catch(() => {
+          syncFullscreenState();
+        });
+      }
+    } catch (error) {
+      syncFullscreenState();
+    }
+  }
+
+  function exitFullscreen() {
+    if (typeof document === "undefined") {
+      return;
+    }
+    if (!state.fullscreenReturnFocus && fullscreenButton instanceof HTMLElement) {
+      state.fullscreenReturnFocus = fullscreenButton;
+    }
+    const exit =
+      document.exitFullscreen?.bind(document) ||
+      document.webkitExitFullscreen?.bind(document) ||
+      document.mozCancelFullScreen?.bind(document) ||
+      document.msExitFullscreen?.bind(document);
+    if (!exit) {
+      syncFullscreenState();
+      return;
+    }
+    try {
+      const result = exit();
+      if (result && typeof result.then === "function") {
+        result.catch(() => {
+          syncFullscreenState();
+        });
+      }
+    } catch (error) {
+      syncFullscreenState();
+    }
+  }
+
+  function toggleFullscreen() {
+    if (!isFullscreenSupported()) {
+      return;
+    }
+    if (isFullscreenActive()) {
+      exitFullscreen();
+    } else {
+      enterFullscreen();
+    }
+  }
+
+  function handleFullscreenChange() {
+    syncFullscreenState();
+  }
+
+  const fullscreenEvents = [
+    "fullscreenchange",
+    "webkitfullscreenchange",
+    "mozfullscreenchange",
+    "MSFullscreenChange",
+  ];
+  fullscreenEvents.forEach((eventName) => {
+    document.addEventListener(eventName, handleFullscreenChange, false);
+  });
+
   const preferences = loadPreferences();
-  const hasModePreference = typeof preferences.mode === "string";
+  const storedMode = typeof preferences.mode === "string" && VIEWER_MODES.has(preferences.mode)
+    ? preferences.mode
+    : null;
+  const hasModePreference = Boolean(storedMode);
+  const storedCategoryKeys = Array.isArray(preferences.activeCategories)
+    ? preferences.activeCategories.filter((value) => typeof value === "string" && value.length > 0)
+    : [];
+  const hasCategoryPreference = storedCategoryKeys.length > 0;
   if (preferences.zoom) {
     state.zoom = clampZoom(preferences.zoom);
   }
@@ -120,8 +347,8 @@
       state.prevAlignment = state.alignment;
     }
   }
-  if (typeof preferences.mode === "string") {
-    state.mode = preferences.mode === "overlay" ? "overlay" : "slider";
+  if (storedMode) {
+    state.mode = storedMode;
   }
 
   function showError(message) {
@@ -135,7 +362,7 @@
   function setSlider(value) {
     const percent = Math.min(100, Math.max(0, Number(value) || 0));
     sliderControl.value = String(percent);
-    if (state.mode === "overlay") {
+    if (state.mode === "overlay" || state.mode === "difference" || state.mode === "blink") {
       overlay.style.clipPath = "inset(0 0 0 0)";
       divider.style.visibility = "hidden";
       return;
@@ -461,6 +688,132 @@
     });
   }
 
+  function renderFrameSelectOptions(frames) {
+    if (!frameSelect) {
+      return;
+    }
+    const desiredValue = state.currentFrame != null ? String(state.currentFrame) : null;
+    frameSelect.innerHTML = "";
+    frames.forEach((frame) => {
+      const option = document.createElement("option");
+      option.value = String(frame.index);
+      option.textContent = frame.label ? `${frame.index} — ${frame.label}` : String(frame.index);
+      frameSelect.appendChild(option);
+    });
+    if (desiredValue && frames.some((frame) => String(frame.index) === desiredValue)) {
+      frameSelect.value = desiredValue;
+    } else if (frames.length) {
+      frameSelect.value = String(frames[0].index);
+    } else {
+      frameSelect.value = "";
+    }
+  }
+
+  function getVisibleFrames() {
+    if (!state.data || !Array.isArray(state.data.frames)) {
+      return [];
+    }
+    if (state.activeCategories.size === 0) {
+      return state.data.frames;
+    }
+    return state.data.frames.filter((frame) => {
+      if (!frame || typeof frame !== "object") {
+        return false;
+      }
+      if (typeof frame.category_key !== "string") {
+        return false;
+      }
+      return state.activeCategories.has(frame.category_key);
+    });
+  }
+
+  function applyCategoryFilters() {
+    const frames = getVisibleFrames();
+    if (!Array.isArray(frames) || frames.length === 0) {
+      state.sortedFrameIndexes = [];
+      renderFilmstrip([]);
+      renderFrameSelectOptions([]);
+      state.currentFrame = null;
+      updateImages();
+      return;
+    }
+    const currentVisible = frames.some((frame) => frame.index === state.currentFrame);
+    if (!currentVisible) {
+      state.currentFrame = frames[0].index;
+    }
+    state.sortedFrameIndexes = frames.map((frame) => frame.index).sort((a, b) => a - b);
+    renderFilmstrip(frames);
+    renderFrameSelectOptions(frames);
+    selectFrame(state.currentFrame);
+  }
+
+  function renderCategoryFilters(categories) {
+    if (!filterContainer) {
+      return;
+    }
+    filterContainer.innerHTML = "";
+    if (!Array.isArray(categories) || categories.length === 0) {
+      filterContainer.hidden = true;
+      return;
+    }
+    filterContainer.hidden = false;
+
+    const toolbar = document.createElement("div");
+    toolbar.className = "rc-category-filter";
+
+    const showAllActive = state.activeCategories.size === 0;
+    const allButton = document.createElement("button");
+    allButton.type = "button";
+    allButton.className = "rc-category-filter__chip";
+    allButton.textContent = "All";
+    allButton.setAttribute("aria-pressed", showAllActive ? "true" : "false");
+    allButton.addEventListener("click", () => {
+      if (state.activeCategories.size === 0) {
+        return;
+      }
+      state.activeCategories.clear();
+      savePreferences();
+      renderCategoryFilters(state.categories);
+      applyCategoryFilters();
+    });
+    toolbar.appendChild(allButton);
+
+    categories.forEach((category) => {
+      if (!category || typeof category !== "object") {
+        return;
+      }
+      const key = typeof category.key === "string" ? category.key : "";
+      const label = typeof category.label === "string" ? category.label : "";
+      const count = typeof category.count === "number" ? category.count : null;
+      if (!key || !label) {
+        return;
+      }
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "rc-category-filter__chip";
+      button.dataset.key = key;
+      button.textContent = count != null ? `${label} (${count})` : label;
+      const isActive = state.activeCategories.has(key);
+      button.setAttribute("aria-pressed", isActive ? "true" : "false");
+      button.addEventListener("click", () => {
+        if (state.activeCategories.has(key)) {
+          state.activeCategories.delete(key);
+        } else {
+          state.activeCategories.add(key);
+        }
+        if (state.activeCategories.size === state.categories.length) {
+          state.activeCategories.clear();
+        }
+        savePreferences();
+        renderCategoryFilters(state.categories);
+        applyCategoryFilters();
+      });
+      toolbar.appendChild(button);
+    });
+
+    filterContainer.appendChild(toolbar);
+  }
+
   function renderFilmstrip(frames) {
     frameList.innerHTML = "";
     frames.forEach((frame) => {
@@ -489,6 +842,14 @@
         placeholder.className = "rc-frame-thumb__placeholder";
         placeholder.textContent = frame.index;
         button.appendChild(placeholder);
+      }
+
+      const categoryLabel = typeof frame.category === "string" && frame.category ? frame.category : null;
+      if (categoryLabel) {
+        const badge = document.createElement("span");
+        badge.className = "rc-frame-thumb__badge";
+        badge.textContent = categoryLabel;
+        button.appendChild(badge);
       }
 
       const caption = document.createElement("span");
@@ -687,40 +1048,68 @@
   function init(data) {
     state.data = data;
     const frames = Array.isArray(data.frames) ? data.frames : [];
+    state.framesByIndex.clear();
     frames.forEach((frame) => {
       state.framesByIndex.set(frame.index, frame);
     });
-    state.sortedFrameIndexes = frames.map((frame) => frame.index).sort((a, b) => a - b);
+    state.allFrameIndexes = frames.map((frame) => frame.index).sort((a, b) => a - b);
+
+    state.categories = Array.isArray(data.categories)
+      ? data.categories.filter(
+        (category) =>
+          category &&
+          typeof category === "object" &&
+          typeof category.key === "string" &&
+          category.key.length > 0 &&
+          typeof category.label === "string" &&
+          category.label.length > 0,
+      )
+      : [];
+    state.activeCategories.clear();
+    if (hasCategoryPreference && state.categories.length > 0) {
+      storedCategoryKeys.forEach((key) => {
+        if (state.categories.some((category) => category.key === key)) {
+          state.activeCategories.add(key);
+        }
+      });
+    }
 
     fillSelect(leftSelect, data.encodes || []);
     fillSelect(rightSelect, data.encodes || []);
     renderEncodes(data.encodes || []);
-    renderFilmstrip(frames);
+    renderCategoryFilters(state.categories);
+
+    applyDefaults(data);
+
+    if (!hasModePreference) {
+      const defaultMode = typeof data.viewer_mode === "string" ? data.viewer_mode : "slider";
+      state.mode = VIEWER_MODES.has(defaultMode) ? defaultMode : defaultMode === "overlay" ? "overlay" : "slider";
+    }
+    if (modeSelect) {
+      modeSelect.value = state.mode;
+    }
+    updateEncodeControlsForMode();
+
+    applyCategoryFilters();
+
+    if (state.currentFrame == null && state.sortedFrameIndexes.length === 0) {
+      showError("No frames found in report data.");
+      return;
+    }
     renderSubtitle(data);
     renderFooter(data);
 
-    frameSelect.innerHTML = "";
-    frames.forEach((frame) => {
-      const option = document.createElement("option");
-      option.value = String(frame.index);
-      option.textContent = frame.label ? `${frame.index} — ${frame.label}` : String(frame.index);
-      frameSelect.appendChild(option);
-    });
-
-    applyDefaults(data);
-    const firstFrame = frames.length ? frames[0].index : null;
-    if (firstFrame !== null) {
-      if (!hasModePreference) {
-        state.mode = (data.viewer_mode || "slider") === "overlay" ? "overlay" : "slider";
+    if (fullscreenButton) {
+      const supported = isFullscreenSupported();
+      fullscreenButton.disabled = !supported;
+      fullscreenButton.setAttribute("aria-pressed", "false");
+      if (supported) {
+        fullscreenButton.addEventListener("click", () => {
+          toggleFullscreen();
+        });
       }
-      if (modeSelect) {
-        modeSelect.value = state.mode;
-      }
-      updateEncodeControlsForMode();
-      selectFrame(firstFrame);
-    } else {
-      showError("No frames found in report data.");
     }
+    syncFullscreenState();
   }
 
   frameSelect.addEventListener("change", (event) => {
@@ -730,12 +1119,12 @@
 
   leftSelect.addEventListener("change", (event) => {
     state.leftEncode = event.target.value;
-    updateImages(state.mode === "overlay");
+    updateImages(state.mode !== "slider");
   });
 
   rightSelect.addEventListener("change", (event) => {
     state.rightEncode = event.target.value;
-    updateImages(state.mode === "overlay");
+    updateImages(state.mode !== "slider");
   });
 
   sliderControl.addEventListener("input", (event) => {
@@ -841,22 +1230,47 @@
   }
 
   function updateModeUI(sliderEnabled, leftAvailable, rightAvailable) {
-    if (sliderGroup instanceof HTMLElement) {
-      sliderGroup.style.display = state.mode === "overlay" ? "none" : "";
+    const hasBoth = leftAvailable && rightAvailable;
+    const previousMode = state.mode;
+    let mode = state.mode;
+
+    if ((mode === "difference" || mode === "blink") && !hasBoth) {
+      mode = leftAvailable ? "overlay" : "slider";
+    } else if (mode === "overlay" && !leftAvailable) {
+      mode = sliderEnabled ? "slider" : (hasBoth ? "difference" : "slider");
     }
+
+    if (!VIEWER_MODES.has(mode)) {
+      mode = "slider";
+    }
+
+    if (mode !== state.mode) {
+      state.mode = mode;
+    }
+    if (previousMode === "blink" && state.mode !== "blink") {
+      stopBlink();
+    }
+
+    if (modeSelect) {
+      modeSelect.value = state.mode;
+    }
+
     if (viewerStage instanceof HTMLElement) {
       viewerStage.dataset.mode = state.mode;
       viewerStage.classList.toggle("rc-mode-overlay", state.mode === "overlay");
       viewerStage.classList.toggle("rc-mode-slider", state.mode === "slider");
+      viewerStage.classList.toggle("rc-mode-difference", state.mode === "difference");
+      viewerStage.classList.toggle("rc-mode-blink", state.mode === "blink");
     }
-    if (state.mode === "overlay") {
-      const overlayActive = leftAvailable && rightAvailable;
-      sliderControl.disabled = true;
-      overlay.style.visibility = overlayActive ? "visible" : "hidden";
-      overlay.style.clipPath = "inset(0 0 0 0)";
-      divider.style.visibility = "hidden";
-    } else {
-      sliderControl.disabled = !sliderEnabled;
+
+    const hideSlider = state.mode !== "slider";
+    if (sliderGroup instanceof HTMLElement) {
+      sliderGroup.style.display = hideSlider ? "none" : "";
+    }
+    sliderControl.disabled = hideSlider || !sliderEnabled;
+
+    if (state.mode === "slider") {
+      stopBlink();
       if (sliderEnabled) {
         overlay.style.visibility = "visible";
         const percent = Math.min(100, Math.max(0, Number(sliderControl.value) || 0));
@@ -868,12 +1282,40 @@
         overlay.style.visibility = "hidden";
         divider.style.visibility = "hidden";
       }
+      rightImage.style.visibility = rightAvailable ? "visible" : "hidden";
+    } else if (state.mode === "overlay") {
+      stopBlink();
+      overlay.style.visibility = leftAvailable ? "visible" : "hidden";
+      overlay.style.clipPath = "inset(0 0 0 0)";
+      divider.style.visibility = "hidden";
+      rightImage.style.visibility = rightAvailable ? "visible" : "hidden";
+    } else if (state.mode === "difference") {
+      stopBlink();
+      overlay.style.visibility = hasBoth ? "visible" : "hidden";
+      overlay.style.clipPath = "inset(0 0 0 0)";
+      divider.style.visibility = "hidden";
+      rightImage.style.visibility = hasBoth ? "visible" : "hidden";
+    } else if (state.mode === "blink") {
+      overlay.style.clipPath = "inset(0 0 0 0)";
+      divider.style.visibility = "hidden";
+      if (hasBoth) {
+        startBlink();
+      } else {
+        stopBlink();
+        overlay.style.visibility = leftAvailable ? "visible" : "hidden";
+        rightImage.style.visibility = rightAvailable ? "visible" : "hidden";
+      }
     }
+
     if (modeSelect) {
       modeSelect.value = state.mode;
     }
     updateEncodeControlsForMode();
+    applyBlinkVisibility();
     applyTransform();
+    if (previousMode !== state.mode) {
+      savePreferences();
+    }
   }
 
   let sliderDragActive = false;
@@ -896,7 +1338,7 @@
   }
 
   function cycleRightEncode(step) {
-    if (state.mode === "overlay") {
+    if (state.mode === "overlay" || state.mode === "difference") {
       swapSelectedEncodes();
       return;
     }
@@ -915,15 +1357,20 @@
       if (candidate !== state.leftEncode || total === 1) {
         state.rightEncode = candidate;
         rightSelect.value = candidate;
-        updateImages(state.mode === "overlay");
+        updateImages(state.mode !== "slider");
         break;
       }
     }
   }
 
   function applyMode(mode) {
-    state.mode = mode === "overlay" ? "overlay" : "slider";
-    updateImages(state.mode === "overlay");
+    const normalized = VIEWER_MODES.has(mode) ? mode : "slider";
+    const preservePan = normalized !== "slider";
+    state.mode = normalized;
+    updateImages(preservePan);
+    if (modeSelect) {
+      modeSelect.value = state.mode;
+    }
     savePreferences();
   }
 
@@ -1009,6 +1456,21 @@
       setZoom(100);
       return;
     }
+    if (event.key === "f" || event.key === "F") {
+      event.preventDefault();
+      toggleFullscreen();
+      return;
+    }
+    if (event.key === "d" || event.key === "D") {
+      event.preventDefault();
+      applyMode("difference");
+      return;
+    }
+    if (event.key === "b" || event.key === "B") {
+      event.preventDefault();
+      applyMode("blink");
+      return;
+    }
     if (event.key === "ArrowRight") {
       event.preventDefault();
       const frames = state.sortedFrameIndexes;
@@ -1024,12 +1486,12 @@
         selectFrame(frames[index - 1]);
       }
     } else if (event.key === "ArrowUp") {
-      if (state.mode === "overlay") {
+      if (state.mode === "overlay" || state.mode === "difference" || state.mode === "blink") {
         event.preventDefault();
         cycleRightEncode(-1);
       }
     } else if (event.key === "ArrowDown") {
-      if (state.mode === "overlay") {
+      if (state.mode === "overlay" || state.mode === "difference" || state.mode === "blink") {
         event.preventDefault();
         cycleRightEncode(1);
       }
@@ -1057,6 +1519,9 @@
       state.imageSize ? state.imageSize.height * currentScale() : 0,
       getStageSize(),
     );
+    if (state.mode === "blink") {
+      resumeBlink();
+    }
   });
 
   viewerStage.addEventListener("click", () => {
@@ -1065,7 +1530,7 @@
       state.panHasMoved = false;
       return;
     }
-    if (state.mode === "overlay" && !state.panActive) {
+    if ((state.mode === "overlay" || state.mode === "difference") && !state.panActive) {
       cycleRightEncode(1);
     }
     state.panHasMoved = false;
@@ -1074,6 +1539,9 @@
   viewerStage.addEventListener("pointerdown", (event) => {
     viewerStage.focus();
     state.pointer = { x: event.clientX, y: event.clientY };
+    if (state.mode === "blink") {
+      pauseBlink(true);
+    }
     if (event.target === divider && state.mode === "slider" && !sliderControl.disabled) {
       sliderDragActive = true;
       sliderPointerId = event.pointerId;
@@ -1157,6 +1625,9 @@
     if (sliderDragActive) {
       endSliderDrag(event);
     }
+    if (state.mode === "blink") {
+      resumeBlink();
+    }
   });
 
   viewerStage.addEventListener("pointercancel", (event) => {
@@ -1165,6 +1636,9 @@
     }
     if (sliderDragActive) {
       endSliderDrag(event);
+    }
+    if (state.mode === "blink") {
+      resumeBlink();
     }
   });
 

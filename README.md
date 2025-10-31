@@ -35,7 +35,7 @@ Frame Compare samples darkest, brightest, high-motion, random, and user-pinned f
 - Audio alignment with correlation, dynamic time warping refinements, and optional interactive confirmation frames.
 - VapourSynth-first pipeline with FFmpeg fallback, HDR→SDR tonemapping, and placeholder recovery when writers fail.
 - slow.pics integration with automatic uploads, retries, URL shortcuts, and clipboard hand-off.
-- Optional HTML report generation for offline, browser-based comparisons with slider/overlay modes, pointer-anchored zoom + fit presets, and persistent pan/align controls inspired by slow.pics.
+- Optional HTML report generation for offline, browser-based comparisons with filmstrip thumbnails, selection filters, slider/overlay/difference/blink modes, pointer-anchored zoom + fit presets, persistent pan/align controls, and a fullscreen toggle inspired by slow.pics.
 - TMDB-driven metadata resolution with GuessIt/Anitopy labelling to keep comparisons organised.
 - Rich CLI layout featuring progress dashboards, Unicode fallbacks, batch auto-grouping, and optional JSON tails for automation.
 - CLI override for audio stream selection (`--audio-align-track`) when auto-detection needs guidance.
@@ -195,11 +195,11 @@ Common toggles (see [docs/README_REFERENCE.md](docs/README_REFERENCE.md) for ful
 | `[audio_alignment].enable` (+`confirm_with_screenshots`) | Audio-guided offsets and preview pause. | `false` (`true`) | `enable=true` |
 | `[screenshots].use_ffmpeg` | Prefer FFmpeg renderer. | `false` | `use_ffmpeg=true` |
 | `[report].enable` (+`--html-report` / `--no-html-report`) | Generate the local HTML report and auto-open it. | `false` | `enable=true` |
-| `[report].default_mode` | Initial viewer mode (`slider` or `overlay`). | `"slider"` | `default_mode="overlay"` |
+| `[report].default_mode` | Initial viewer mode (`slider`, `overlay`, `difference`, or `blink`). | `"slider"` | `default_mode="difference"` |
 | `[slowpics].auto_upload` | Upload results to slow.pics. | `false` | `auto_upload=true` |
 | `[runtime].ram_limit_mb` | VapourSynth RAM guard. | `4000` | `ram_limit_mb=3072` |
 
-Offline HTML reports mirror slow.pics ergonomics: Actual/Fit/Fill presets, an alignment selector, pointer-anchored zoom via the slider, +/- buttons, or Ctrl/⌘ + mouse wheel, and pan support (space + drag or regular drag once zoomed beyond fit). Zoom, fit, mode, and alignment choices persist in `localStorage` so every frame opens with the same viewer state.
+Offline HTML reports mirror slow.pics ergonomics: filmstrip thumbnails with selection-category filters, Actual/Fit/Fill presets, an alignment selector, pointer-anchored zoom via the slider, +/- buttons, or Ctrl/⌘ + mouse wheel, and pan support (space + drag or regular drag once zoomed beyond fit). Slider, overlay, difference, and blink viewer modes plus a fullscreen toggle round out the controls. Zoom, fit, mode, alignment, and category filters persist in `localStorage` so every frame opens with the same viewer state.
 
 > **Tip:** To seed another workspace, run `uv run python -m frame_compare --root alt-root --write-config`.
 
@@ -369,3 +369,14 @@ Distributed under the [MIT License](LICENSE). Frame Compare builds on FFmpeg, Va
 - Runs on macOS, Linux, and Windows (64-bit). Ensure FFmpeg is on `PATH` and VapourSynth is installed when opting into the primary renderer.
 - Consult the in-repo guides for deeper dives: [docs/audio_alignment_pipeline.md](docs/audio_alignment_pipeline.md), [docs/geometry_pipeline.md](docs/geometry_pipeline.md), [docs/hdr_tonemap_overview.md](docs/hdr_tonemap_overview.md), [docs/context_summary.md](docs/context_summary.md).
 - File issues or feature requests via the GitHub issue tracker. For security concerns, open a private advisory so details remain confidential until patched.
+
+## Future updates
+- Rework current presets to better preset and expand upon them.
+- Do a check of all current config options to ensure all are working correctly and see if any can be trimmed or combined (like the letterbox options) 
+- identify which file is being indexed during the creation of the lwi index files.
+- at a glance box in cli output still not showing what viewer mode is selected between None, Local Report, and Slow.pics
+- no nits number showing in the at a glance box still.
+- Frames in line 1 of the at a glance box has nothing after it.
+- progress bar is still a dot on a solid line when set to fill, ensure fill/dot modes are both working or just keep the one present if both are not and remove the dead code. Investigate why progress bar color is linked to heading color (CYAN)
+- audio alignment step in the CLI always missing the information as if loading from the generated offset file. I think this is because when vspreview mode is also active it loads the values of the offset file after as if it wasn't just generated. Can we look into this behavior? what is the expected behavior for different settings combinations?
+- investigate audio offset behavior in situations with multiple encodes. TNBC example where suggested is 0 but 1 encode is slightly mismatched. Its now showing 26f suggested diff but one of the encodes with this suggestion is already matched with the ref. The issue is that when set to 26f the other encode also is adjusted even though it isnt needed after vs preview. Can we also add the video title name in the vspreview overlay along with the suggested frame offset and other information already present? Important note: audio offset values display incorrectly in vspreview overlay only. When prompted after closing vspreview it suggests the correct offsets from the audio analyzation process. ie 0f mainframe rel to remux and 26 frame mainframe to dsnp.

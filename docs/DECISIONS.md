@@ -1,5 +1,6 @@
 # Decisions Log
 
+- *2025-10-31:* Enhanced the offline HTML report viewer with filmstrip thumbnails, selection-category filters, new difference/blink modes, and a fullscreen toggle. Updated styles, keyboard shortcuts, and documentation to reflect the richer theatre experience while keeping persistence compatible with previous localStorage payloads.
 - *2025-10-30:* Auto-launched the wizard when `config/config.toml` is missing in interactive sessions, added `--no-wizard`/`FRAME_COMPARE_NO_WIZARD` opt-outs, reused the existing wizard prompt stack for config creation, and left non-interactive runs seeding the template with a reminder about `frame-compare wizard`.
 - *2025-10-30:* Revamped the offline HTML report viewer with persistent zoom/fit presets, mouse-wheel zoom around the pointer, pan gestures, alignment presets, and shortcut guidance to align the offline experience with slow.pics.
 - *2025-10-30:* Audio alignment progress now uses a Rich spinner instead of a misleading 0/1 progress bar to keep CLI feedback honest during offset estimation.
