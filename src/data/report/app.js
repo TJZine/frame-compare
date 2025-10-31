@@ -875,8 +875,23 @@
 
   function ensureActiveThumbnailVisible(frameIndex) {
     const activeButton = frameList.querySelector(`button[data-frame="${frameIndex}"]`);
-    if (activeButton && typeof activeButton.scrollIntoView === "function") {
-      activeButton.scrollIntoView({ block: "nearest", inline: "center" });
+    if (!activeButton) {
+      return;
+    }
+    const scroller = frameList.closest(".rc-filmstrip");
+    if (!(scroller instanceof HTMLElement)) {
+      return;
+    }
+    // Keep the active thumbnail visible without altering the page scroll position.
+    const scrollerRect = scroller.getBoundingClientRect();
+    const buttonRect = activeButton.getBoundingClientRect();
+    const overflowLeft = buttonRect.left - scrollerRect.left;
+    const overflowRight = buttonRect.right - scrollerRect.right;
+    if (overflowLeft < 0) {
+      scroller.scrollLeft = Math.max(0, scroller.scrollLeft + overflowLeft);
+    } else if (overflowRight > 0) {
+      const maxScrollLeft = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
+      scroller.scrollLeft = Math.min(maxScrollLeft, scroller.scrollLeft + overflowRight);
     }
   }
 
