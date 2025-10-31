@@ -61,6 +61,9 @@
     fitPreset: "fit-width",
     alignment: "center",
     prevAlignment: "center",
+    overlayEncode: null,
+    overlayIndex: -1,
+    overlayOrder: [],
     pan: { x: 0, y: 0 },
     imageSize: null,
     pointer: null,
@@ -110,6 +113,7 @@
         fitPreset: state.fitPreset,
         alignment: state.alignment === CUSTOM_ALIGNMENT ? (state.prevAlignment || "center") : state.alignment,
         mode: state.mode,
+        overlayEncode: state.overlayEncode,
         activeCategories: Array.from(state.activeCategories),
       };
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
@@ -334,6 +338,11 @@
     ? preferences.activeCategories.filter((value) => typeof value === "string" && value.length > 0)
     : [];
   const hasCategoryPreference = storedCategoryKeys.length > 0;
+  const storedOverlayEncode =
+    typeof preferences.overlayEncode === "string" && preferences.overlayEncode.length > 0
+      ? preferences.overlayEncode
+      : null;
+  const hasOverlayPreference = Boolean(storedOverlayEncode);
   if (preferences.zoom) {
     state.zoom = clampZoom(preferences.zoom);
   }
@@ -560,6 +569,15 @@
       leftControl.style.display = "";
       leftLabel.textContent = sliderLabel;
       rightControl.style.display = "";
+    }
+    if (leftSelect) {
+      if (state.mode === "overlay") {
+        if (state.overlayEncode && leftSelect.value !== state.overlayEncode) {
+          leftSelect.value = state.overlayEncode;
+        }
+      } else if (state.leftEncode && leftSelect.value !== state.leftEncode) {
+        leftSelect.value = state.leftEncode;
+      }
     }
   }
 
@@ -989,12 +1007,15 @@
     (frame.files || []).forEach((entry) => {
       fileMap.set(entry.encode, entry.path);
     });
-    const leftPath = fileMap.get(state.leftEncode) || null;
-    const rightPath = fileMap.get(state.rightEncode) || null;
+    const overlayLabelForMode = state.mode === "overlay" ? state.overlayEncode : null;
+    const leftLabelForMode = overlayLabelForMode || state.leftEncode;
+    const rightLabelForMode = state.rightEncode;
+    const leftPath = leftLabelForMode ? fileMap.get(leftLabelForMode) || null : null;
+    const rightPath = rightLabelForMode ? fileMap.get(rightLabelForMode) || null : null;
 
     if (leftPath) {
       leftImage.src = leftPath;
-      leftImage.alt = `${state.leftEncode} at frame ${frame.index}`;
+      leftImage.alt = `${leftLabelForMode} at frame ${frame.index}`;
     } else {
       leftImage.removeAttribute("src");
       leftImage.alt = "";
@@ -1002,13 +1023,16 @@
 
     if (rightPath) {
       rightImage.src = rightPath;
-      rightImage.alt = `${state.rightEncode} at frame ${frame.index}`;
+      rightImage.alt = `${rightLabelForMode} at frame ${frame.index}`;
     } else {
       rightImage.removeAttribute("src");
       rightImage.alt = "";
     }
 
-    const sliderEnabled = Boolean(leftPath && rightPath && state.leftEncode !== state.rightEncode);
+    const sliderLeftPath = state.leftEncode ? fileMap.get(state.leftEncode) || null : null;
+    const sliderEnabled = Boolean(
+      sliderLeftPath && rightPath && state.leftEncode && state.leftEncode !== state.rightEncode,
+    );
     setSlider(sliderControl.value);
     updateModeUI(sliderEnabled, Boolean(leftPath), Boolean(rightPath));
 
@@ -1052,7 +1076,20 @@
     const rightDefault = defaults.right && encodes.find((encode) => encode.label === defaults.right);
     state.leftEncode = leftDefault ? leftDefault.label : (encodes[0] ? encodes[0].label : null);
     state.rightEncode = rightDefault ? rightDefault.label : (encodes[1] ? encodes[1].label : state.leftEncode);
-    if (state.leftEncode) {
+    let overlayLabel = null;
+    if (hasOverlayPreference && storedOverlayEncode && state.overlayOrder.includes(storedOverlayEncode)) {
+      overlayLabel = storedOverlayEncode;
+    }
+    if (!overlayLabel) {
+      overlayLabel = state.leftEncode || (state.overlayOrder.length > 0 ? state.overlayOrder[0] : null);
+    }
+    state.overlayEncode = overlayLabel;
+    state.overlayIndex = overlayLabel ? state.overlayOrder.indexOf(overlayLabel) : -1;
+    if (state.mode === "overlay") {
+      if (state.overlayEncode) {
+        leftSelect.value = state.overlayEncode;
+      }
+    } else if (state.leftEncode) {
       leftSelect.value = state.leftEncode;
     }
     if (state.rightEncode) {
@@ -1062,6 +1099,13 @@
 
   function init(data) {
     state.data = data;
+    state.overlayOrder = Array.isArray(data.encodes)
+      ? data.encodes
+          .map((encode) =>
+            encode && typeof encode.label === "string" && encode.label.length > 0 ? encode.label : null,
+          )
+          .filter((label) => typeof label === "string")
+      : [];
     const frames = Array.isArray(data.frames) ? data.frames : [];
     state.framesByIndex.clear();
     frames.forEach((frame) => {
@@ -1133,8 +1177,24 @@
   });
 
   leftSelect.addEventListener("change", (event) => {
-    state.leftEncode = event.target.value;
-    updateImages(state.mode !== "slider");
+    const selected = event.target.value;
+    if (state.mode === "overlay") {
+      setOverlayEncode(selected);
+    } else {
+      const previousLeft = state.leftEncode;
+      state.leftEncode = selected;
+      if (
+        selected &&
+        typeof selected === "string" &&
+        state.overlayOrder.includes(selected) &&
+        (!state.overlayEncode || state.overlayEncode === previousLeft)
+      ) {
+        state.overlayEncode = selected;
+        state.overlayIndex = state.overlayOrder.indexOf(selected);
+      }
+      updateImages(state.mode !== "slider");
+      savePreferences();
+    }
   });
 
   rightSelect.addEventListener("change", (event) => {
@@ -1226,22 +1286,6 @@
       return [];
     }
     return state.data.encodes.map((encode) => encode.label);
-  }
-
-  function swapSelectedEncodes() {
-    if (!state.leftEncode || !state.rightEncode) {
-      return;
-    }
-    const temp = state.leftEncode;
-    state.leftEncode = state.rightEncode;
-    state.rightEncode = temp;
-    if (leftSelect) {
-      leftSelect.value = state.leftEncode;
-    }
-    if (rightSelect) {
-      rightSelect.value = state.rightEncode;
-    }
-    updateImages(true);
   }
 
   function updateModeUI(sliderEnabled, leftAvailable, rightAvailable) {
@@ -1352,9 +1396,51 @@
     }
   }
 
+  function setOverlayEncode(label) {
+    if (!label || typeof label !== "string") {
+      state.overlayEncode = null;
+      state.overlayIndex = -1;
+      savePreferences();
+      return;
+    }
+    if (!state.overlayOrder.includes(label)) {
+      return;
+    }
+    if (state.overlayEncode === label) {
+      return;
+    }
+    state.overlayEncode = label;
+    state.overlayIndex = state.overlayOrder.indexOf(label);
+    if (state.mode === "overlay" && leftSelect && leftSelect.value !== label) {
+      leftSelect.value = label;
+    }
+    updateImages(true);
+    savePreferences();
+  }
+
+  function cycleOverlayEncode(step) {
+    const labels = state.overlayOrder;
+    if (!labels.length) {
+      return;
+    }
+    let index = state.overlayIndex;
+    if (index < 0) {
+      index = state.overlayEncode ? labels.indexOf(state.overlayEncode) : -1;
+    }
+    if (index < 0) {
+      index = 0;
+    }
+    const total = labels.length;
+    index = (index + step + total) % total;
+    const candidate = labels[index];
+    if (candidate) {
+      setOverlayEncode(candidate);
+    }
+  }
+
   function cycleRightEncode(step) {
-    if (state.mode === "overlay" || state.mode === "difference") {
-      swapSelectedEncodes();
+    if (state.mode === "overlay") {
+      cycleOverlayEncode(step);
       return;
     }
     const labels = encodeLabels();
@@ -1381,6 +1467,22 @@
   function applyMode(mode) {
     const normalized = VIEWER_MODES.has(mode) ? mode : "slider";
     const preservePan = normalized !== "slider";
+    if (normalized === "overlay") {
+      if (!state.overlayEncode || !state.overlayOrder.includes(state.overlayEncode)) {
+        let fallback = null;
+        if (state.leftEncode && state.overlayOrder.includes(state.leftEncode)) {
+          fallback = state.leftEncode;
+        } else if (state.overlayOrder.length > 0) {
+          fallback = state.overlayOrder[0];
+        }
+        if (fallback) {
+          state.overlayEncode = fallback;
+        }
+      }
+      if (state.overlayEncode && state.overlayIndex < 0) {
+        state.overlayIndex = state.overlayOrder.indexOf(state.overlayEncode);
+      }
+    }
     state.mode = normalized;
     updateImages(preservePan);
     if (modeSelect) {
