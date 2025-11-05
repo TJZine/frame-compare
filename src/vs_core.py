@@ -979,15 +979,15 @@ def _classify_rgb_range_from_stats(
 
     limited_low = 16.0
     limited_high = 235.0
-    undershoot = limited_low - 1.5
-    overshoot = limited_high + 1.5
+    limited_tolerance = 4.0
+    full_margin = 16.0
 
-    if min_8 < undershoot or max_8 > overshoot:
+    if max_8 <= limited_high + limited_tolerance and min_8 >= limited_low - limited_tolerance:
+        return "limited"
+    if (max_8 - min_8) <= 6.0 and min_8 >= limited_low - limited_tolerance:
+        return "limited"
+    if max_8 >= limited_high + full_margin or min_8 <= limited_low - full_margin:
         return "full"
-    if min_8 >= (limited_low - 0.5) and max_8 <= (limited_high + 0.5):
-        return "limited"
-    if (max_8 - min_8) <= 6.0 and min_8 >= (limited_low - 0.5):
-        return "limited"
     return None
 
 
@@ -1059,10 +1059,10 @@ def _detect_rgb_color_range(
     full_code = int(getattr(vs_module, "RANGE_FULL", 0))
 
     if limited_hits and not full_hits:
-        log.debug("[TM RANGE] %s detected limited RGB (samples=%d)", label, limited_hits)
+        log.info("[TM RANGE] %s detected limited RGB (samples=%d)", label, limited_hits)
         return (limited_code, "plane_stats")
     if full_hits and not limited_hits:
-        log.debug("[TM RANGE] %s detected full-range RGB (samples=%d)", label, full_hits)
+        log.info("[TM RANGE] %s detected full-range RGB (samples=%d)", label, full_hits)
         return (full_code, "plane_stats")
     if limited_hits and full_hits:
         log.warning(
