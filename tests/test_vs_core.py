@@ -1,3 +1,4 @@
+import logging
 import math
 import sys
 import types
@@ -85,6 +86,31 @@ class _FakeStatsClip:
         return _FakeFrame(self._props)
 
 
+class _DetectStatsFrame:
+    def __init__(self, props: Dict[str, float]) -> None:
+        self.props = props
+
+
+class _DetectStatsClip:
+    def __init__(self, frames: Sequence[Dict[str, float]]) -> None:
+        self._frames = [_DetectStatsFrame(item) for item in frames]
+        self.num_frames = len(self._frames)
+
+    def get_frame(self, index: int) -> _DetectStatsFrame:
+        if not self._frames:
+            raise RuntimeError("no frames available")
+        clamped = min(max(index, 0), len(self._frames) - 1)
+        return self._frames[clamped]
+
+
+class _DetectStd:
+    def __init__(self, frames: Sequence[Dict[str, float]]) -> None:
+        self._stats_clip = _DetectStatsClip(frames)
+
+    def PlaneStats(self, clip: Any) -> _DetectStatsClip:
+        return self._stats_clip
+
+
 class _FakeStd:
     def __init__(self, expr_clip: _FakeClip, stats_clip: _FakeStatsClip) -> None:
         self._expr_clip = expr_clip
@@ -111,6 +137,87 @@ def _run_compute_verification(
     stats_clip = _FakeStatsClip(props)
     core = _FakeCore(expr_clip, stats_clip)
     return vs_core._compute_verification(core, object(), object(), 3, auto_selected=False)
+
+
+def test_detect_rgb_color_range_identifies_limited(monkeypatch: Any) -> None:
+    fake_vs = _install_fake_vs(monkeypatch)
+    frames = [
+        {"PlaneStatsMin": 4096.0, "PlaneStatsMax": 50200.0},
+        {"PlaneStatsMin": 4200.0, "PlaneStatsMax": 49600.0},
+    ]
+    std = _DetectStd(frames)
+    clip = types.SimpleNamespace(
+        format=types.SimpleNamespace(
+            color_family=getattr(fake_vs, "RGB"),
+            sample_type=_FakeSampleType("INTEGER", 0),
+            bits_per_sample=16,
+        )
+    )
+    core = types.SimpleNamespace(std=std)
+
+    detected, source = vs_core._detect_rgb_color_range(
+        core,
+        clip,
+        log=logging.getLogger("test"),
+        label="limited",
+    )
+
+    assert detected == getattr(fake_vs, "RANGE_LIMITED")
+    assert source == "plane_stats"
+
+
+def test_detect_rgb_color_range_identifies_full(monkeypatch: Any) -> None:
+    fake_vs = _install_fake_vs(monkeypatch)
+    frames = [
+        {"PlaneStatsMin": 0.0, "PlaneStatsMax": 65535.0},
+        {"PlaneStatsMin": 300.0, "PlaneStatsMax": 64000.0},
+    ]
+    std = _DetectStd(frames)
+    clip = types.SimpleNamespace(
+        format=types.SimpleNamespace(
+            color_family=getattr(fake_vs, "RGB"),
+            sample_type=_FakeSampleType("INTEGER", 0),
+            bits_per_sample=16,
+        )
+    )
+    core = types.SimpleNamespace(std=std)
+
+    detected, source = vs_core._detect_rgb_color_range(
+        core,
+        clip,
+        log=logging.getLogger("test"),
+        label="full",
+    )
+
+    assert detected == getattr(fake_vs, "RANGE_FULL")
+    assert source == "plane_stats"
+
+
+def test_detect_rgb_color_range_detects_undershoot(monkeypatch: Any) -> None:
+    fake_vs = _install_fake_vs(monkeypatch)
+    frames = [
+        {"PlaneStatsMin": 2000.0, "PlaneStatsMax": 42000.0},
+        {"PlaneStatsMin": 2100.0, "PlaneStatsMax": 43000.0},
+    ]
+    std = _DetectStd(frames)
+    clip = types.SimpleNamespace(
+        format=types.SimpleNamespace(
+            color_family=getattr(fake_vs, "RGB"),
+            sample_type=_FakeSampleType("INTEGER", 0),
+            bits_per_sample=16,
+        )
+    )
+    core = types.SimpleNamespace(std=std)
+
+    detected, source = vs_core._detect_rgb_color_range(
+        core,
+        clip,
+        log=logging.getLogger("test"),
+        label="undershoot",
+    )
+
+    assert detected == getattr(fake_vs, "RANGE_FULL")
+    assert source == "plane_stats"
 
 
 def test_compute_verification_normalizes_integer_clip() -> None:
@@ -159,6 +266,7 @@ def _install_fake_vs(monkeypatch: Any, **overrides: int) -> Any:
         TRANSFER_BT709=1,
         TRANSFER_SMPTE170M=6,
         RANGE_LIMITED=1,
+        RANGE_FULL=0,
     )
     attributes.update(overrides)
     fake_vs = types.SimpleNamespace(**attributes)

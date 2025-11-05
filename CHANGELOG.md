@@ -2,6 +2,7 @@
 
 All notable user-visible updates will be documented in this file in reverse chronological order.
 
+- *2025-11-05:* Harmonised HDR tonemap range metadata with sampled RGB output, wiring detected `_ColorRange` through geometry and overlays, preserving frame props during subtitle paths, and extending regression coverage/docs for the updated pipeline.
 - *2025-10-30:* Auto-launched the configuration wizard during interactive first runs when `config/config.toml` is missing, added a `--no-wizard` flag plus `FRAME_COMPARE_NO_WIZARD` override, surfaced a fallback reminder for non-interactive sessions, and refreshed README/tests accordingly.
 - *2025-10-30:* Replaced the audio alignment “progress” bar with a spinner so CLI output stays truthful while offsets are estimated.
 - *2025-10-30:* Overhauled the offline HTML report viewer with persistent zoom/fit presets, pointer-anchored wheel zoom, pan/align controls, and shortcut legends to better mirror slow.pics.

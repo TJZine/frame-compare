@@ -4,7 +4,7 @@ import subprocess
 import sys
 import types
 from pathlib import Path
-from typing import Any, Mapping, Optional, Sequence, TypedDict, cast
+from typing import Any, Dict, Mapping, Optional, Sequence, TypedDict, cast
 
 import pytest
 
@@ -1589,6 +1589,69 @@ def test_overlay_state_warning_helpers_roundtrip() -> None:
     screenshot._append_overlay_warning(state, "first")
     screenshot._append_overlay_warning(state, "second")
     assert screenshot._get_overlay_warnings(state) == ["first", "second"]
+
+
+def test_apply_frame_info_overlay_preserves_metadata() -> None:
+    clip = types.SimpleNamespace(num_frames=10, props={"_ColorRange": 1})
+
+    class DummyStd:
+        def __init__(self) -> None:
+            self.copy_invocations = 0
+
+        def FrameEval(self, clip_ref: Any, func: Any, *, prop_src: Any = None) -> Any:
+            frame = types.SimpleNamespace(props={"_PictType": b"I"})
+            return func(0, frame, clip_ref)
+
+        def CopyFrameProps(self, target: Any, source: Any) -> Any:
+            self.copy_invocations += 1
+            target.props = dict(getattr(source, "props", {}))
+            return target
+
+    class DummySub:
+        def Subtitle(self, clip_ref: Any, *, text: Sequence[str], style: str) -> Any:
+            return types.SimpleNamespace(props={})
+
+    core = types.SimpleNamespace(std=DummyStd(), sub=DummySub())
+    result = screenshot._apply_frame_info_overlay(
+        core,
+        clip,
+        title="Test Clip",
+        requested_frame=None,
+        selection_label="dark",
+    )
+    assert getattr(result, "props", {}).get("_ColorRange") == 1
+    assert core.std.copy_invocations > 0
+
+
+def test_apply_overlay_text_subtitle_path_preserves_metadata() -> None:
+    clip = types.SimpleNamespace(props={"_ColorRange": 1})
+
+    class DummyStd:
+        def __init__(self) -> None:
+            self.copy_invocations = 0
+
+        def CopyFrameProps(self, target: Any, source: Any) -> Any:
+            self.copy_invocations += 1
+            target.props = dict(getattr(source, "props", {}))
+            return target
+
+    class DummySub:
+        def Subtitle(self, clip_ref: Any, *, text: Sequence[str], style: str) -> Any:
+            return types.SimpleNamespace(props={})
+
+    core = types.SimpleNamespace(std=DummyStd(), sub=DummySub())
+    state: Dict[str, Any] = {}
+
+    result = screenshot._apply_overlay_text(
+        core,
+        clip,
+        text="Overlay",
+        strict=False,
+        state=state,
+        file_label="clip",
+    )
+    assert getattr(result, "props", {}).get("_ColorRange") == 1
+    assert core.std.copy_invocations > 0
 
 
 def test_save_frame_with_ffmpeg_honours_timeout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

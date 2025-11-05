@@ -99,6 +99,8 @@ class TonemapInfo:
     dst_min_nits: float
     src_csp_hint: Optional[int]
     reason: Optional[str] = None
+    output_color_range: Optional[int] = None
+    range_detection: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -943,6 +945,142 @@ def _coerce_float(value: Any) -> Optional[float]:
     return None
 
 
+def _normalise_to_8bit(
+    sample_type: Any,
+    bits_per_sample: Optional[int],
+    value: Optional[float],
+) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        sample_type_int = int(sample_type)
+    except Exception:
+        sample_type_int = None
+    if sample_type_int == 1:  # FLOAT
+        return float(value) * 255.0
+    if bits_per_sample is None or bits_per_sample <= 0:
+        return None
+    scale = float((1 << bits_per_sample) - 1)
+    if scale <= 0.0:
+        return None
+    return float(value) * 255.0 / scale
+
+
+def _classify_rgb_range_from_stats(
+    sample_type: Any,
+    bits_per_sample: Optional[int],
+    y_min: Optional[float],
+    y_max: Optional[float],
+) -> Optional[str]:
+    min_8 = _normalise_to_8bit(sample_type, bits_per_sample, y_min)
+    max_8 = _normalise_to_8bit(sample_type, bits_per_sample, y_max)
+    if min_8 is None or max_8 is None:
+        return None
+
+    limited_low = 16.0
+    limited_high = 235.0
+    undershoot = limited_low - 1.5
+    overshoot = limited_high + 1.5
+
+    if min_8 < undershoot or max_8 > overshoot:
+        return "full"
+    if min_8 >= (limited_low - 0.5) and max_8 <= (limited_high + 0.5):
+        return "limited"
+    if (max_8 - min_8) <= 6.0 and min_8 >= (limited_low - 0.5):
+        return "limited"
+    return None
+
+
+def _detect_rgb_color_range(
+    core: Any,
+    clip: Any,
+    *,
+    log: logging.Logger,
+    label: str,
+    max_samples: int = 6,
+) -> tuple[Optional[int], Optional[str]]:
+    vs_module = _get_vapoursynth_module()
+    std_ns = getattr(core, "std", None)
+    plane_stats = getattr(std_ns, "PlaneStats", None) if std_ns is not None else None
+    if not callable(plane_stats):
+        return (None, None)
+
+    fmt = getattr(clip, "format", None)
+    if fmt is None:
+        return (None, None)
+    if getattr(fmt, "color_family", None) != getattr(vs_module, "RGB", object()):
+        return (None, None)
+
+    sample_type = getattr(fmt, "sample_type", None)
+    bits_per_sample = getattr(fmt, "bits_per_sample", None)
+
+    try:
+        stats_clip = cast(Any, plane_stats(clip))
+    except Exception as exc:
+        log.debug("[TM RANGE] %s failed to create PlaneStats node: %s", label, exc)
+        return (None, None)
+
+    total_frames = getattr(stats_clip, "num_frames", None)
+    candidate_indices: set[int] = {0}
+    if isinstance(total_frames, int) and total_frames > 0:
+        candidate_indices.update(
+            {
+                max(0, total_frames - 1),
+                total_frames // 2,
+                total_frames // 4,
+                (3 * total_frames) // 4,
+            }
+        )
+    indices = sorted(idx for idx in candidate_indices if isinstance(idx, int) and idx >= 0)
+    indices = indices[:max_samples] if max_samples > 0 else indices
+
+    limited_hits = 0
+    full_hits = 0
+
+    for idx in indices:
+        try:
+            frame = stats_clip.get_frame(idx)
+        except Exception as exc:
+            log.debug("[TM RANGE] %s failed to sample frame %s: %s", label, idx, exc)
+            continue
+        props = getattr(frame, "props", {})
+        classification = _classify_rgb_range_from_stats(
+            sample_type,
+            bits_per_sample,
+            _coerce_float(props.get("PlaneStatsMin")),
+            _coerce_float(props.get("PlaneStatsMax")),
+        )
+        if classification == "limited":
+            limited_hits += 1
+        elif classification == "full":
+            full_hits += 1
+
+    limited_code = int(getattr(vs_module, "RANGE_LIMITED", 1))
+    full_code = int(getattr(vs_module, "RANGE_FULL", 0))
+
+    if limited_hits and not full_hits:
+        log.debug("[TM RANGE] %s detected limited RGB (samples=%d)", label, limited_hits)
+        return (limited_code, "plane_stats")
+    if full_hits and not limited_hits:
+        log.debug("[TM RANGE] %s detected full-range RGB (samples=%d)", label, full_hits)
+        return (full_code, "plane_stats")
+    if limited_hits and full_hits:
+        log.warning(
+            "[TM RANGE] %s samples span both limited and full ranges (limited=%d full=%d)",
+            label,
+            limited_hits,
+            full_hits,
+        )
+    else:
+        log.debug(
+            "[TM RANGE] %s range detection inconclusive (limited=%d full=%d)",
+            label,
+            limited_hits,
+            full_hits,
+        )
+    return (None, None)
+
+
 def _compute_luma_bounds(clip: Any) -> tuple[Optional[float], Optional[float]]:
     core = getattr(clip, "core", None)
     std_ns = getattr(core, "std", None)
@@ -1490,6 +1628,14 @@ def process_clip_for_screenshot(
         else:
             tonemap_reason = "Tonemap bypass"
 
+    source_range_value: Optional[int]
+    try:
+        source_range_value = int(color_range_in) if color_range_in is not None else None
+    except Exception:
+        source_range_value = None
+    if source_range_value not in (range_full, range_limited):
+        source_range_value = None
+
     tonemap_info = TonemapInfo(
         applied=False,
         tone_curve=None,
@@ -1498,6 +1644,8 @@ def process_clip_for_screenshot(
         dst_min_nits=dst_min,
         src_csp_hint=None,
         reason=tonemap_reason,
+        output_color_range=source_range_value,
+        range_detection="source_props" if source_range_value is not None else None,
     )
     overlay_text = None
     verification: Optional[VerificationResult] = None
@@ -1565,8 +1713,58 @@ def process_clip_for_screenshot(
         prop="_Tonemapped",
         data=f"placebo:{tone_curve},dpd={dpd},dst_max={target_nits}",
     )
-    tonemapped = _apply_set_frame_prop(tonemapped, prop="_ColorRange", intval=0)
     tonemapped = _normalize_rgb_props(tonemapped, transfer=1, primaries=1)
+
+    detected_range, detection_source = _detect_rgb_color_range(
+        core,
+        tonemapped,
+        log=log,
+        label=file_name,
+    )
+
+    effective_range: Optional[int] = detected_range
+    fallback_source = detection_source
+    if (
+        effective_range is None
+        and color_range_in is not None
+        and color_range_in in (range_full, range_limited)
+    ):
+        try:
+            effective_range = int(color_range_in)
+        except Exception:
+            effective_range = None
+        else:
+            fallback_source = fallback_source or "source_props"
+
+    source_range_int: Optional[int] = None
+    if color_range_in is not None and color_range_in in (range_full, range_limited):
+        try:
+            source_range_int = int(color_range_in)
+        except Exception:
+            source_range_int = None
+
+    if effective_range is not None:
+        changed_from_source = (
+            source_range_int is not None and source_range_int != int(effective_range)
+        )
+        tonemapped = _apply_set_frame_prop(
+            tonemapped,
+            prop="_ColorRange",
+            intval=int(effective_range),
+        )
+        if changed_from_source:
+            log.info(
+                "[TM RANGE] %s remapping colour range %s\u2192%s",
+                file_name,
+                color_range_in,
+                effective_range,
+            )
+            if source_range_int is not None:
+                tonemapped = _apply_set_frame_prop(
+                    tonemapped,
+                    prop="_SourceColorRange",
+                    intval=source_range_int,
+                )
 
     tonemap_info = TonemapInfo(
         applied=True,
@@ -1576,6 +1774,8 @@ def process_clip_for_screenshot(
         dst_min_nits=dst_min,
         src_csp_hint=src_hint,
         reason=None,
+        output_color_range=effective_range,
+        range_detection=fallback_source,
     )
 
     overlay_template = str(

@@ -786,7 +786,8 @@ def _apply_frame_info_overlay(
 
     try:
         info_clip = frame_eval(clip, partial(_draw_info, clip_ref=clip), prop_src=clip)
-        return subtitle(info_clip, text=[padding_title + label], style=FRAME_INFO_STYLE)
+        result = subtitle(info_clip, text=[padding_title + label], style=FRAME_INFO_STYLE)
+        return _copy_frame_props(core, result, clip, context="frame info overlay")
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug('Applying frame overlay failed: %s', exc)
         return clip
@@ -835,6 +836,7 @@ def _apply_overlay_text(
         except Exception as exc:  # pragma: no cover - defensive
             logger.debug('Subtitle overlay failed, falling back: %s', exc)
         else:
+            result = _copy_frame_props(core, result, clip, context="overlay preservation")
             if status != "ok":
                 logger.info('[OVERLAY] %s applied', file_label)
                 state["overlay_status"] = "ok"
@@ -1138,8 +1140,10 @@ def _resolve_output_color_range(
     range_limited = int(getattr(vs, "RANGE_LIMITED", 1))
     if _FORCE_FULL_RANGE_RGB:
         return range_full
-    if tonemap_applied:
-        return range_full
+    if tonemap_info and tonemap_info.output_color_range in (range_full, range_limited):
+        if tonemap_applied:
+            return int(tonemap_info.output_color_range)
+        return int(tonemap_info.output_color_range)
     matrix, transfer, primaries, color_range = vs_core._resolve_color_metadata(source_props)
     if color_range is None:
         try:
@@ -1933,7 +1937,9 @@ def _save_frame_with_fpng(
     color_family = getattr(fmt, "color_family", None)
     is_sdr = _is_sdr_pipeline(tonemap_info, source_props_map)
     output_color_range = _resolve_output_color_range(source_props_map, tonemap_info)
-    include_color_range = not tonemap_applied
+    include_color_range = bool(
+        (tonemap_info and tonemap_info.output_color_range is not None) or not tonemap_applied
+    )
     should_promote = (
         requires_full_chroma
         and has_axis
