@@ -2208,6 +2208,25 @@ def generate_screenshots(
             core = getattr(result.clip, "core", None)
             if core is None and artifacts is not None and artifacts.normalized_clip is not None:
                 core = getattr(artifacts.normalized_clip, "core", None)
+            if artifacts is None:
+                fallback_props = {}
+                if hasattr(result, "source_props"):
+                    try:
+                        fallback_props = dict(getattr(result, "source_props", {}) or {})
+                    except Exception:
+                        fallback_props = {}
+                fallback_clip = result.clip if result.clip is not None else None
+                if fallback_clip is not None and core is None:
+                    core = getattr(fallback_clip, "core", None)
+                logger.debug(
+                    "Colour debug artifacts unavailable for %s; falling back to processed clip",
+                    file_path,
+                )
+                artifacts = vs_core.ColorDebugArtifacts(
+                    normalized_clip=fallback_clip,
+                    normalized_props=fallback_props,
+                    color_tuple=(None, None, None, None),
+                )
             debug_state = _ColorDebugState(
                 enabled=core is not None,
                 base_dir=(debug_root / safe_label),
