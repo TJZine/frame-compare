@@ -20,6 +20,13 @@ class RGBDither(str, Enum):
     NONE = "none"
 
 
+class ExportRange(str, Enum):
+    """Output range options for exported RGB PNGs."""
+
+    FULL = "full"
+    LIMITED = "limited"
+
+
 @dataclass
 class AnalysisConfig:
     """Options controlling frame analysis, selection, and data caching."""
@@ -69,6 +76,7 @@ class ScreenshotConfig:
     ffmpeg_timeout_seconds: float = 120.0
     odd_geometry_policy: OddGeometryPolicy = OddGeometryPolicy.AUTO
     rgb_dither: RGBDither = RGBDither.ERROR_DIFFUSION
+    export_range: ExportRange = ExportRange.FULL
 
 
 @dataclass

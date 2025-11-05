@@ -31,6 +31,10 @@ Set `preset="custom"` to honour manual `tone_curve`, `target_nits`, and `dynamic
 libplacebo's `dst_min`. Logs include `[TM INPUT]` and `[TM APPLIED]` lines showing the inferred color props and the
 resolved curve/DPD/nits.
 
+The screenshot writer controls the final PNG range via `[screenshots].export_range`. The default `"full"` setting expands
+limited-range SDR pixels to full-range RGB just before export (recording the original value in `_SourceColorRange`), while
+`"limited"` preserves the source range for workflows that expect video-range PNGs.
+
 ## Log cheat sheet
 - `[TM INPUT]` — Source properties at the start of processing. Includes Matrix/Transfer/Primaries/Range.
 - `[Tonemap attempt A/B failed]` — Retry ladder when libplacebo rejects the hinted/inferred colours.

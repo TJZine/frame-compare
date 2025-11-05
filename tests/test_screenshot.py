@@ -9,7 +9,13 @@ from typing import Any, Dict, Mapping, Optional, Sequence, TypedDict, cast
 import pytest
 
 from src import screenshot, vs_core
-from src.datatypes import ColorConfig, OddGeometryPolicy, RGBDither, ScreenshotConfig
+from src.datatypes import (
+    ColorConfig,
+    ExportRange,
+    OddGeometryPolicy,
+    RGBDither,
+    ScreenshotConfig,
+)
 from src.screenshot import GeometryPlan, _compute_requires_full_chroma
 
 _vapoursynth_available = importlib.util.find_spec("vapoursynth") is not None
@@ -1787,6 +1793,59 @@ def test_save_frame_with_ffmpeg_inserts_full_chroma_filters(
     assert recorded_cmd[range_flag_index + 1] == "pc"
 
 
+def test_ffmpeg_expands_limited_range_when_exporting_full(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cfg = ScreenshotConfig()
+    cfg.export_range = ExportRange.FULL
+    plan = _make_plan(
+        pad=(0, 0, 0, 0),
+        requires_full_chroma=False,
+        promotion_axes="none",
+    )
+    recorded_cmd: list[str] = []
+
+    def fake_run(cmd: Sequence[str], **_kwargs: Any):  # type: ignore[override]
+        recorded_cmd[:] = list(cmd)
+
+        class _Result:
+            returncode = 0
+            stderr = b""
+
+        return _Result()
+
+    monkeypatch.setattr(screenshot.shutil, "which", lambda _: "ffmpeg")
+    monkeypatch.setattr(screenshot.subprocess, "run", fake_run)
+
+    screenshot._save_frame_with_ffmpeg(
+        source="video.mkv",
+        frame_idx=11,
+        crop=(0, 0, 0, 0),
+        scaled=(1920, 1080),
+        pad=(0, 0, 0, 0),
+        path=tmp_path / "frame.png",
+        cfg=cfg,
+        width=1920,
+        height=1080,
+        selection_label=None,
+        geometry_plan=plan,
+        pivot_notifier=None,
+        frame_info_allowed=False,
+        overlays_allowed=False,
+        target_range=1,
+        expand_to_full=True,
+        source_color_range=1,
+    )
+
+    assert recorded_cmd
+    vf_index = recorded_cmd.index("-vf")
+    filters = recorded_cmd[vf_index + 1].split(",")
+    assert "scale=in_range=tv:out_range=pc" in filters
+    assert "-color_range" in recorded_cmd
+    flag_idx = recorded_cmd.index("-color_range")
+    assert recorded_cmd[flag_idx + 1] == "pc"
+
+
 def test_save_frame_with_ffmpeg_raises_on_timeout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     cfg = ScreenshotConfig(ffmpeg_timeout_seconds=5.0)
 
@@ -1967,6 +2026,7 @@ def test_geometry_preserves_colour_props(monkeypatch: pytest.MonkeyPatch, tmp_pa
     monkeypatch.setattr(screenshot, "_ensure_rgb24", _capture_ensure)
 
     cfg = ScreenshotConfig(add_frame_info=False)
+    cfg.export_range = ExportRange.FULL
     tonemap_info = vs_core.TonemapInfo(
         applied=False,
         tone_curve=None,
@@ -2004,8 +2064,65 @@ def test_geometry_preserves_colour_props(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert captured_source_props.get("_ColorRange") == 1
     assert writer_calls, "fpng writer should receive clip"
     final_props = writer_calls[-1]["props"]
-    assert final_props.get("_ColorRange") == (0 if screenshot._FORCE_FULL_RANGE_RGB else 1)
+    expected_range = 0 if cfg.export_range is ExportRange.FULL else 1
+    assert final_props.get("_ColorRange") == expected_range
     assert final_props.get("_Matrix") == 0
+
+
+def test_fpng_respects_limited_export_range(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    clip, _fake_vs, writer_calls, _ = _prepare_fake_vapoursynth_clip(
+        monkeypatch,
+        width=1920,
+        height=1080,
+        subsampling_w=1,
+        subsampling_h=1,
+        bits_per_sample=10,
+        format_name="YUV420P10",
+    )
+    clip.props.update({"_Matrix": 1, "_ColorRange": 1})
+
+    cfg = ScreenshotConfig(add_frame_info=False)
+    cfg.export_range = ExportRange.LIMITED
+    tonemap_info = vs_core.TonemapInfo(
+        applied=False,
+        tone_curve=None,
+        dpd=0,
+        target_nits=100.0,
+        dst_min_nits=0.1,
+        src_csp_hint=None,
+        reason="SDR source",
+    )
+    plan = _make_plan(
+        pad=(0, 0, 0, 0),
+        requires_full_chroma=False,
+        promotion_axes="none",
+    )
+    screenshot._save_frame_with_fpng(
+        clip,
+        frame_idx=2,
+        crop=plan["crop"],
+        scaled=plan["scaled"],
+        pad=plan["pad"],
+        path=tmp_path / "frame.png",
+        cfg=cfg,
+        label="Clip",
+        requested_frame=2,
+        selection_label=None,
+        source_props={"_Matrix": 1, "_Transfer": 1, "_Primaries": 1, "_ColorRange": 1},
+        geometry_plan=plan,
+        tonemap_info=tonemap_info,
+        pivot_notifier=None,
+        debug_state=None,
+        frame_info_allowed=False,
+        overlays_allowed=False,
+    )
+
+    assert writer_calls, "fpng writer should receive clip"
+    final_props = writer_calls[-1]["props"]
+    assert final_props.get("_ColorRange") == 1
+    assert "_SourceColorRange" not in final_props
 
 
 def test_ensure_rgb24_applies_rec709_defaults_when_metadata_missing(
@@ -2069,11 +2186,9 @@ def test_ensure_rgb24_applies_rec709_defaults_when_metadata_missing(
     assert captured.get("primaries_in") == 1
     assert captured.get("range_in") == 1
     assert captured.get("dither_type") == RGBDither.ERROR_DIFFUSION.value
-    expected_range = 0 if screenshot._FORCE_FULL_RANGE_RGB else 1
+    expected_range = 1
     assert captured.get("range") == expected_range
     expected_props = {"_Matrix": 0, "_ColorRange": expected_range}
-    if screenshot._FORCE_FULL_RANGE_RGB:
-        expected_props["_SourceColorRange"] = 1
     assert captured_props == expected_props
 
 
@@ -2147,13 +2262,12 @@ def test_ensure_rgb24_uses_source_colour_metadata(monkeypatch: pytest.MonkeyPatc
     assert captured.get("matrix_in") == 9
     assert captured.get("range_in") == 0
     assert captured.get("dither_type") == RGBDither.ORDERED.value
-    assert captured.get("range") == (0 if screenshot._FORCE_FULL_RANGE_RGB else 0)
+    expected_range = 0
+    assert captured.get("range") == expected_range
     expected_props = {
         "_Matrix": 0,
-        "_ColorRange": 0 if screenshot._FORCE_FULL_RANGE_RGB else 0,
+        "_ColorRange": expected_range,
         "_Primaries": 9,
         "_Transfer": 16,
     }
-    if screenshot._FORCE_FULL_RANGE_RGB:
-        expected_props["_SourceColorRange"] = 0
     assert captured_props == expected_props

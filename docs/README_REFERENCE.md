@@ -89,6 +89,7 @@ Dependency check:
 | `[screenshots].mod_crop` | Crop modulus. | int | `2` |
 | `[screenshots].odd_geometry_policy` | Policy for odd-pixel trims/pads on subsampled SDR (auto, force, or subsamp-safe). | str | `"auto"` |
 | `[screenshots].rgb_dither` | Dithering applied during final RGB24 conversion (FFmpeg path forces deterministic ordered when `"error_diffusion"` is requested). | str | `"error_diffusion"` |
+| `[screenshots].export_range` | Output range for PNGs (`"full"` expands limited SDR to full-range RGB; `"limited"` keeps video-range output). | str | `"full"` |
 | `[screenshots].auto_letterbox_crop` | Auto crop black bars. | bool | `false` |
 | `[screenshots].ffmpeg_timeout_seconds` | Per-frame FFmpeg timeout in seconds (must be >= 0; set 0 to disable). | float | `120.0` |
 | `[color].enable_tonemap` | HDR→SDR conversion toggle. | bool | `true` |

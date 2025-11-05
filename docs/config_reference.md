@@ -25,6 +25,15 @@ Controls how the final 16-bit frame is quantised to RGB24.
 
 Earlier conversions (8/10/12-bit → 16-bit) always run with `dither_type="none"` to maintain determinism. The setting only applies to the last conversion step when producing PNG output.
 
+## `[screenshots].export_range`
+
+Controls the RGB range written to PNG files at the end of the pipeline.
+
+| Value | Behaviour | When to use |
+| ----- | --------- | ----------- |
+| `"full"` (default) | Expands limited-range SDR (16–235) to full-range RGB (0–255) before saving, stamping `_SourceColorRange=1` for provenance. | General-purpose comparisons on PC displays and browsers that expect sRGB PNGs. |
+| `"limited"` | Preserves the detected source range, matching Rec.709 video behaviour. `_SourceColorRange` is omitted. | Workflows that rely on video-range PNGs or downstream tooling that compensates for studio range. |
+
 ## `[color]` automatic range detection
 
 The pipeline now samples the luma plane when range metadata is missing or indicates full-range SDR. When samples land inside the studio range (≈16–235 for 8-bit sources), the clip is treated as limited and a warning is emitted. This prevents washed-out PNG exports for masters that omit container/VUI flags. Operators can still force behaviour per clip via `[color].color_overrides`, and mismatches (metadata says limited but the signal spans 0–255) surface as warnings for manual review.

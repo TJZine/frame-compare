@@ -5,20 +5,20 @@ These notes capture the recent fixes that bring the modern pipeline back in sync
 ## Summary of Changes
 - **Metadata preservation** – After every crop/resize/pad step we now re-apply the original `_Matrix`, `_Transfer`, `_Primaries`, and `_ColorRange` props. This prevents viewers or later filters from re-interpreting subsampled SDR clips.
 - **Tonemap range detection** – HDR tonemap output now samples RGB frames via `PlaneStats` to decide whether pixels remain limited, stamping `_ColorRange` (and `_SourceColorRange` when remapping) so downstream geometry and overlays stay truthful.
-- **RGB conversion parity** – `_legacy_rgb24_from_clip` and `_ensure_rgb24` mirror the legacy script by only hinting the input matrix. The new `_FORCE_FULL_RANGE_RGB` switch (default `False`) controls whether we expand limited-range SDR to full-range RGB; flipping it to `True` stretches 16–235 to 0–255 while keeping the source range recorded in `_SourceColorRange`.
+- **RGB conversion parity** – `_legacy_rgb24_from_clip` and `_ensure_rgb24` mirror the legacy script by only hinting the input matrix. The new `[screenshots].export_range` option (default `"full"`) controls whether we expand limited-range SDR to full-range RGB before writing PNGs; switching to `"limited"` preserves the original range while `"full"` stretches 16–235 to 0–255 and records the source range in `_SourceColorRange`.
 - **Range expansion helper** – `_expand_limited_rgb` applies `std.Levels` to SDR RGB before writing PNGs when the override is enabled.
 - **Debug staging** – Colour debug snapshots now report accurate metadata at every stage (`post_geometry` retains the original range, `legacy_rgb24` and `post_rgb24` reflect the final RGB choice).
 - **Tonemapped HDR metadata** – `_restore_color_props` skips `_ColorRange` once tonemapping runs and now snapshots frame props directly from the tonemapped RGB node before geometry. This keeps overlays/resizes from re-stamping YUV matrices onto RGB frames and avoids fpng resize failures.
 
 ## Behavioural Impact
-- **Limited SDR encodes (e.g. Blu-ray AVC)** stay limited through geometry and can optionally be promoted to full-range RGB at the end by setting `_FORCE_FULL_RANGE_RGB = True`. Legacy compatibility remains when the flag is `False`.
+- **Limited SDR encodes (e.g. Blu-ray AVC)** stay limited through geometry and can optionally be promoted to full-range RGB at the end when `[screenshots].export_range = "full"`. Legacy compatibility remains when the option is set to `"limited"`.
 - **HDR sources** still stamp `_Tonemapped` but now expose colour range derived from sampled RGB output, preventing metadata/pixel mismatches without altering the rendered clip.
 - **Metadata inference** still defaults to limited when the container omits range information and frame sampling fails (e.g. empty clips), matching the old script’s behaviour.
 - **Geometry-heavy workflows** (odd padding, scaling) no longer lose their colour tags, so external viewers or downstream filters should render them consistently with `comp.py`.
 
 ## Watchlist & Regression Risks
 - **Metadata drop** – If VapourSynth filters are swapped for alternatives that do not accept metadata reapplication, `_restore_color_props` may silently fail. Logs and debug output should be checked whenever geometry filters change.
-- **Full-range override side effects** – With `_FORCE_FULL_RANGE_RGB = True`, HDR-to-SDR tonemap remains untouched, but SDR overlays now contain both `_ColorRange=0` and `_SourceColorRange=1`. Consumers that inspect `_SourceColorRange` must be aware that this key may not exist when the flag is off.
+- **Full-range override side effects** – With `[screenshots].export_range = "full"`, HDR-to-SDR tonemap remains untouched, but SDR overlays now contain both `_ColorRange=0` and `_SourceColorRange=1`. Consumers that inspect `_SourceColorRange` must be aware that this key may not exist when the option is `"limited"`.
 - **Old viewers** – Some image viewers ignore `_ColorRange`. Whenever the flag is toggled to full-range, verify the PNGs against the source to confirm the expected look.
 - **HDR geometry regressions** – If another stage starts pulling metadata from the source clips instead of the tonemapped node, fpng will reject RGB frames tagged with `_Matrix`/`_Transfer` values from YUV. Re-run the HDR regression set if geometry helpers change.
 
@@ -50,5 +50,5 @@ run_cli(
 
 ## When to Revisit
 - Introducing new geometry filters, alternative writers, or colour-managed viewers.
-- Adding automated full-range expansion (`_FORCE_FULL_RANGE_RGB = True`) to production defaults; ensure end-users expect full-range SDR PNGs.
+- Adding automated full-range expansion (`[screenshots].export_range = "full"`) to production defaults; ensure end-users expect full-range SDR PNGs.
 - Investigating sources with mixed or incorrect metadata (e.g. hybrid SDR/HDR, tinted anime masters) where `_adjust_color_range_from_signal` currently falls back to limited.

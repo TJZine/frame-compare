@@ -7,7 +7,6 @@ import os
 import re
 import shutil
 import subprocess
-import types
 from functools import partial
 from pathlib import Path
 from typing import (
@@ -27,15 +26,18 @@ from typing import (
 )
 
 from . import vs_core
-from .datatypes import ColorConfig, OddGeometryPolicy, RGBDither, ScreenshotConfig
+from .datatypes import (
+    ColorConfig,
+    ExportRange,
+    OddGeometryPolicy,
+    RGBDither,
+    ScreenshotConfig,
+)
 
 _INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
 logger = logging.getLogger(__name__)
-
-
-_FORCE_FULL_RANGE_RGB = False  # set True to expand limited SDR RGB to full range
 
 
 _SELECTION_LABELS = {
@@ -77,6 +79,26 @@ class SubtitleFunc(Protocol):
 def _new_overlay_state() -> OverlayState:
     """Create a mutable overlay state container."""
     return cast(OverlayState, {})
+
+
+def _range_constants() -> tuple[int, int]:
+    """Return the VapourSynth range constant values (full, limited)."""
+
+    try:
+        import vapoursynth as vs  # type: ignore
+    except Exception:  # pragma: no cover - runtime dependency
+        return (0, 1)
+    return int(getattr(vs, "RANGE_FULL", 0)), int(getattr(vs, "RANGE_LIMITED", 1))
+
+
+def _should_expand_to_full(export_range: ExportRange | str | None) -> bool:
+    """Return True when final RGB PNGs should be exported in full range."""
+
+    if isinstance(export_range, ExportRange):
+        return export_range is ExportRange.FULL
+    if isinstance(export_range, str):
+        return export_range.strip().lower() == ExportRange.FULL.value
+    return False
 
 
 def _append_overlay_warning(state: OverlayState, message: str) -> None:
@@ -505,6 +527,8 @@ def _legacy_rgb24_from_clip(
     core: Any,
     clip: Any,
     color_tuple: tuple[Optional[int], Optional[int], Optional[int], Optional[int]] | None,
+    *,
+    expand_to_full: bool = False,
 ) -> Any | None:
     if color_tuple is None:
         return None
@@ -529,7 +553,7 @@ def _legacy_rgb24_from_clip(
     resolved_range_raw = range_limited if color_range is None else int(color_range)
     source_range = resolved_range_raw if resolved_range_raw in {range_limited, range_full} else range_full
     kwargs["range_in"] = source_range
-    target_range = range_full if _FORCE_FULL_RANGE_RGB else source_range
+    target_range = range_full if expand_to_full else source_range
     try:
         legacy_rgb = lanczos(
             clip,
@@ -541,7 +565,7 @@ def _legacy_rgb24_from_clip(
     except Exception:
         return None
     legacy_rgb = _copy_frame_props(core, legacy_rgb, clip, context="legacy RGB24 conversion")
-    if _FORCE_FULL_RANGE_RGB and source_range == range_limited:
+    if expand_to_full and source_range == range_limited:
         legacy_rgb = _expand_limited_rgb(core, legacy_rgb)
         legacy_rgb = _copy_frame_props(core, legacy_rgb, clip, context="legacy RGB24 expansion")
     try:
@@ -550,7 +574,7 @@ def _legacy_rgb24_from_clip(
             prop_kwargs["_Primaries"] = int(primaries)
         if transfer is not None:
             prop_kwargs["_Transfer"] = int(transfer)
-        if _FORCE_FULL_RANGE_RGB and source_range != target_range:
+        if expand_to_full and source_range != target_range:
             prop_kwargs["_SourceColorRange"] = int(source_range)
         legacy_rgb = cast(Any, legacy_rgb.std.SetFrameProps(**prop_kwargs))
     except Exception as exc:  # pragma: no cover - best effort
@@ -566,6 +590,7 @@ def _ensure_rgb24(
     source_props: Mapping[str, Any] | None = None,
     rgb_dither: RGBDither | str = RGBDither.ERROR_DIFFUSION,
     target_range: int | None = None,
+    expand_to_full: bool = False,
 ) -> Any:
     """
     Ensure the given VapourSynth frame is in 8-bit RGB24 color format.
@@ -576,7 +601,7 @@ def _ensure_rgb24(
         frame_idx (int): Index of the frame being processed (used in error messages).
 
     Returns:
-        Any: A clip in RGB24 with full range; returns the original clip if it already is 8-bit RGB24.
+        Any: A clip in RGB24 using the requested range; returns the original clip if it already is 8-bit RGB24.
 
     Raises:
         ScreenshotWriterError: If VapourSynth is unavailable, the core lacks the resize namespace or Point, or the conversion fails.
@@ -643,7 +668,7 @@ def _ensure_rgb24(
     if desired_range is None:
         desired_range = source_range
 
-    output_range = range_full if _FORCE_FULL_RANGE_RGB else desired_range
+    output_range = range_full if expand_to_full else desired_range
 
     try:
         converted = cast(
@@ -660,7 +685,7 @@ def _ensure_rgb24(
         raise ScreenshotWriterError(f"Failed to convert frame {frame_idx} to RGB24: {exc}") from exc
 
     converted = _copy_frame_props(core, converted, clip, context="RGB24 conversion")
-    if _FORCE_FULL_RANGE_RGB and source_range == range_limited:
+    if expand_to_full and source_range == range_limited:
         converted = _expand_limited_rgb(core, converted)
         converted = _copy_frame_props(core, converted, clip, context="RGB24 expansion")
 
@@ -674,7 +699,7 @@ def _ensure_rgb24(
             prop_kwargs["_Transfer"] = int(transfer)
         elif isinstance(props.get("_Transfer"), int):
             prop_kwargs["_Transfer"] = int(props["_Transfer"])
-        if _FORCE_FULL_RANGE_RGB and source_range != output_range:
+        if expand_to_full and source_range != output_range:
             prop_kwargs["_SourceColorRange"] = int(source_range)
         converted = cast(Any, converted.std.SetFrameProps(**prop_kwargs))
     except Exception as exc:  # pragma: no cover - best effort
@@ -1132,14 +1157,7 @@ def _resolve_output_color_range(
     tonemap_info: "vs_core.TonemapInfo | None",
 ) -> int | None:
     tonemap_applied = bool(tonemap_info and tonemap_info.applied)
-    try:
-        import vapoursynth as vs  # type: ignore
-    except Exception:  # pragma: no cover - optional deps
-        vs = types.SimpleNamespace(RANGE_FULL=0, RANGE_LIMITED=1)  # type: ignore[arg-type]
-    range_full = int(getattr(vs, "RANGE_FULL", 0))
-    range_limited = int(getattr(vs, "RANGE_LIMITED", 1))
-    if _FORCE_FULL_RANGE_RGB:
-        return range_full
+    range_full, range_limited = _range_constants()
     if tonemap_info and tonemap_info.output_color_range in (range_full, range_limited):
         if tonemap_applied:
             return int(tonemap_info.output_color_range)
@@ -1900,6 +1918,7 @@ def _save_frame_with_fpng(
     debug_state: Optional[_ColorDebugState] = None,
     frame_info_allowed: bool = True,
     overlays_allowed: bool = True,
+    expand_to_full: bool = False,
 ) -> None:
     try:
         import vapoursynth as vs  # type: ignore
@@ -1937,6 +1956,9 @@ def _save_frame_with_fpng(
     color_family = getattr(fmt, "color_family", None)
     is_sdr = _is_sdr_pipeline(tonemap_info, source_props_map)
     output_color_range = _resolve_output_color_range(source_props_map, tonemap_info)
+    range_full, range_limited = _range_constants()
+    if expand_to_full:
+        output_color_range = range_full
     include_color_range = bool(
         (tonemap_info and tonemap_info.output_color_range is not None) or not tonemap_applied
     )
@@ -2048,13 +2070,6 @@ def _save_frame_with_fpng(
 
     render_clip = work
     overlay_range: Optional[int] = output_color_range
-    try:
-        import vapoursynth as vs  # type: ignore
-    except Exception:  # pragma: no cover - optional at runtime
-        vs = types.SimpleNamespace(RANGE_FULL=0, RANGE_LIMITED=1)  # type: ignore[arg-type]
-
-    range_full = int(getattr(vs, "RANGE_FULL", 0))
-    range_limited = int(getattr(vs, "RANGE_LIMITED", 1))
     if overlay_range not in (range_full, range_limited):
         overlay_range = range_full
 
@@ -2069,7 +2084,12 @@ def _save_frame_with_fpng(
             work,
             post_geom_props,
         )
-        legacy_clip = _legacy_rgb24_from_clip(core, work, getattr(debug_state, "color_tuple", None))
+        legacy_clip = _legacy_rgb24_from_clip(
+            core,
+            work,
+            getattr(debug_state, "color_tuple", None),
+            expand_to_full=expand_to_full,
+        )
         if legacy_clip is not None:
             try:
                 legacy_props = vs_core._snapshot_frame_props(legacy_clip)
@@ -2138,6 +2158,7 @@ def _save_frame_with_fpng(
         source_props=source_props_map,
         rgb_dither=rgb_dither,
         target_range=output_color_range,
+        expand_to_full=expand_to_full,
     )
     if debug_state is not None:
         try:
@@ -2209,6 +2230,8 @@ def _save_frame_with_ffmpeg(
     frame_info_allowed: bool = True,
     overlays_allowed: bool = True,
     target_range: int | None = None,
+    expand_to_full: bool = False,
+    source_color_range: int | None = None,
 ) -> None:
     if shutil.which("ffmpeg") is None:
         raise ScreenshotWriterError("FFmpeg executable not found in PATH")
@@ -2267,6 +2290,15 @@ def _save_frame_with_ffmpeg(
         ).format(text=_escape_drawtext(overlay_text))
         filters.append(overlay_cmd)
 
+    range_full, range_limited = _range_constants()
+    limited_source = source_color_range == range_limited
+    if source_color_range is None and target_range in (range_full, range_limited):
+        limited_source = int(target_range) == range_limited
+    resolved_target_range = target_range
+    if expand_to_full:
+        resolved_target_range = range_full
+        if limited_source:
+            filters.append("scale=in_range=tv:out_range=pc")
     if should_apply_full_chroma:
         configured = _normalize_rgb_dither(cfg.rgb_dither)
         ffmpeg_dither = "ordered"
@@ -2311,8 +2343,9 @@ def _save_frame_with_ffmpeg(
         str(_map_ffmpeg_compression(cfg.compression_level)),
     ]
 
-    if target_range is not None:
-        color_range_flag = "pc" if int(target_range) == 0 else "tv"
+    if resolved_target_range is not None:
+        range_value = int(resolved_target_range)
+        color_range_flag = "pc" if range_value == range_full else "tv"
         cmd.extend(["-color_range", color_range_flag])
 
     cmd.append(str(path))
@@ -2540,7 +2573,18 @@ def generate_screenshots(
         )
         source_props = resolved_source_props
         is_sdr_pipeline = _is_sdr_pipeline(result.tonemap, resolved_source_props)
+        range_full, range_limited = _range_constants()
+        export_range = getattr(cfg, "export_range", ExportRange.FULL)
+        expand_to_full = _should_expand_to_full(export_range)
         clip_color_range = _resolve_output_color_range(resolved_source_props, result.tonemap)
+        original_color_range = clip_color_range
+        if expand_to_full:
+            clip_color_range = range_full
+        _, _, _, source_color_meta = vs_core._resolve_color_metadata(resolved_source_props)
+        if source_color_meta not in (range_full, range_limited):
+            source_color_hint = original_color_range
+        else:
+            source_color_hint = int(source_color_meta)
 
         for frame in frames:
             frame_idx = int(frame)
@@ -2636,6 +2680,8 @@ def generate_screenshots(
                         frame_info_allowed=frame_info_allowed_default,
                         overlays_allowed=overlays_allowed_default and bool(overlay_text),
                         target_range=clip_color_range,
+                        expand_to_full=expand_to_full,
+                        source_color_range=source_color_hint,
                     )
                 else:
                     _save_frame_with_fpng(
@@ -2662,6 +2708,7 @@ def generate_screenshots(
                         debug_state=debug_state,
                         frame_info_allowed=frame_info_allowed_default,
                         overlays_allowed=overlays_allowed_default,
+                        expand_to_full=expand_to_full,
                     )
             except ScreenshotWriterError:
                 raise
