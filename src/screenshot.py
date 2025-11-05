@@ -2047,6 +2047,17 @@ def _save_frame_with_fpng(
     )
 
     render_clip = work
+    overlay_range: Optional[int] = output_color_range
+    try:
+        import vapoursynth as vs  # type: ignore
+    except Exception:  # pragma: no cover - optional at runtime
+        vs = types.SimpleNamespace(RANGE_FULL=0, RANGE_LIMITED=1)  # type: ignore[arg-type]
+
+    range_full = int(getattr(vs, "RANGE_FULL", 0))
+    range_limited = int(getattr(vs, "RANGE_LIMITED", 1))
+    if overlay_range not in (range_full, range_limited):
+        overlay_range = range_full
+
     if debug_state is not None:
         try:
             post_geom_props = vs_core._snapshot_frame_props(work)
@@ -2065,6 +2076,22 @@ def _save_frame_with_fpng(
             except Exception:
                 legacy_props = {}
             debug_state.capture_stage("legacy_rgb24", frame_idx, legacy_clip, legacy_props)
+    overlay_input_range = overlay_range
+    if frame_info_allowed or (overlays_allowed and overlay_text):
+        resize_ns = getattr(core, "resize", None)
+        point = getattr(resize_ns, "Point", None) if resize_ns is not None else None
+        if callable(point):
+            try:
+                render_clip = point(
+                    render_clip,
+                    range=int(overlay_input_range),
+                    dither_type="none",
+                )
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug("Failed to normalize overlay range for frame %s: %s", frame_idx, exc)
+        else:
+            logger.debug("VapourSynth resize.Point unavailable; skipping overlay range normalization")
+
     if frame_info_allowed:
         render_clip = _apply_frame_info_overlay(
             core,
@@ -2084,6 +2111,25 @@ def _save_frame_with_fpng(
             state=overlay_state,
             file_label=label,
         )
+
+    if overlay_input_range != output_color_range and output_color_range in (range_full, range_limited):
+        resize_ns = getattr(core, "resize", None)
+        point = getattr(resize_ns, "Point", None) if resize_ns is not None else None
+        if callable(point):
+            try:
+                render_clip = point(
+                    render_clip,
+                    range=int(output_color_range),
+                    dither_type="none",
+                )
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug(
+                    "Failed to restore target range after overlay for frame %s: %s",
+                    frame_idx,
+                    exc,
+                )
+        else:
+            logger.debug("VapourSynth resize.Point unavailable; skipping overlay range restore")
 
     render_clip = _ensure_rgb24(
         core,
