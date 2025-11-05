@@ -1708,7 +1708,7 @@ def test_save_frame_with_ffmpeg_inserts_full_chroma_filters(
         pivot_notifier=pivot_notes.append,
         frame_info_allowed=True,
         overlays_allowed=True,
-        target_range=1,
+        target_range=0,
     )
 
     assert recorded_cmd
@@ -1721,7 +1721,7 @@ def test_save_frame_with_ffmpeg_inserts_full_chroma_filters(
     assert any("Full-chroma pivot" in note for note in pivot_notes)
     assert "-color_range" in recorded_cmd
     range_flag_index = recorded_cmd.index("-color_range")
-    assert recorded_cmd[range_flag_index + 1] == "tv"
+    assert recorded_cmd[range_flag_index + 1] == "pc"
 
 
 def test_save_frame_with_ffmpeg_raises_on_timeout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -1941,7 +1941,8 @@ def test_geometry_preserves_colour_props(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert captured_source_props.get("_ColorRange") == 1
     assert writer_calls, "fpng writer should receive clip"
     final_props = writer_calls[-1]["props"]
-    assert final_props.get("_ColorRange") == 1
+    assert final_props.get("_ColorRange") == 0
+    assert final_props.get("_SourceColorRange") == 1
     assert final_props.get("_Matrix") == 0
 
 
@@ -2006,8 +2007,8 @@ def test_ensure_rgb24_applies_rec709_defaults_when_metadata_missing(
     assert captured.get("primaries_in") == 1
     assert captured.get("range_in") == 1
     assert captured.get("dither_type") == RGBDither.ERROR_DIFFUSION.value
-    assert captured.get("range") == 1
-    assert captured_props == {"_Matrix": 0, "_ColorRange": 1}
+    assert captured.get("range") == 0
+    assert captured_props == {"_Matrix": 0, "_ColorRange": 0, "_SourceColorRange": 1}
 
 
 def test_ensure_rgb24_uses_source_colour_metadata(monkeypatch: pytest.MonkeyPatch) -> None:

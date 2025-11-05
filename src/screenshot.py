@@ -35,6 +35,9 @@ _INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 logger = logging.getLogger(__name__)
 
 
+_FORCE_FULL_RANGE_RGB = True  # set False to revert to source-range RGB output
+
+
 _SELECTION_LABELS = {
     "dark": "Dark",
     "bright": "Bright",
@@ -525,9 +528,10 @@ def _legacy_rgb24_from_clip(
         kwargs["primaries_in"] = int(primaries)
     range_limited = int(getattr(vs, "RANGE_LIMITED", 1))
     range_full = int(getattr(vs, "RANGE_FULL", 0))
-    resolved_range = range_limited if color_range is None else int(color_range)
-    kwargs["range_in"] = resolved_range
-    target_range = resolved_range if resolved_range in {range_limited, range_full} else range_full
+    resolved_range_raw = range_limited if color_range is None else int(color_range)
+    source_range = resolved_range_raw if resolved_range_raw in {range_limited, range_full} else range_full
+    kwargs["range_in"] = source_range
+    target_range = range_full if _FORCE_FULL_RANGE_RGB else source_range
     try:
         legacy_rgb = lanczos(
             clip,
@@ -543,8 +547,14 @@ def _legacy_rgb24_from_clip(
         prop_kwargs: Dict[str, int] = {"_Matrix": 0, "_ColorRange": int(target_range)}
         if primaries is not None:
             prop_kwargs["_Primaries"] = int(primaries)
+        elif "primaries_in" in kwargs:
+            prop_kwargs["_Primaries"] = int(kwargs["primaries_in"])
         if transfer is not None:
             prop_kwargs["_Transfer"] = int(transfer)
+        elif "transfer_in" in kwargs:
+            prop_kwargs["_Transfer"] = int(kwargs["transfer_in"])
+        if _FORCE_FULL_RANGE_RGB and source_range != target_range:
+            prop_kwargs["_SourceColorRange"] = int(source_range)
         legacy_rgb = cast(Any, legacy_rgb.std.SetFrameProps(**prop_kwargs))
     except Exception as exc:  # pragma: no cover - best effort
         logger.debug("Failed to set legacy RGB frame props: %s", exc)
@@ -619,16 +629,22 @@ def _ensure_rgb24(
 
     range_full = int(getattr(vs, "RANGE_FULL", 0))
     range_limited = int(getattr(vs, "RANGE_LIMITED", 1))
-    if target_range is None:
+
+    source_range = range_limited if color_range is None else int(color_range)
+    if source_range not in (range_full, range_limited):
+        source_range = range_full
+
+    desired_range = None
+    if target_range in (range_full, range_limited):
+        desired_range = int(target_range)
+    else:
         range_hint = resize_kwargs.get("range_in")
-        if range_hint is not None:
-            target_range = int(range_hint)
-        elif color_range is None:
-            target_range = range_full
-        else:
-            target_range = int(color_range)
-    if target_range not in (range_full, range_limited):
-        target_range = range_full
+        if range_hint in (range_full, range_limited):
+            desired_range = int(range_hint)
+    if desired_range is None:
+        desired_range = source_range
+
+    output_range = range_full if _FORCE_FULL_RANGE_RGB else desired_range
 
     try:
         converted = cast(
@@ -636,7 +652,7 @@ def _ensure_rgb24(
             point(
                 clip,
                 format=vs.RGB24,
-                range=target_range,
+                range=output_range,
                 dither_type=dither,
                 **resize_kwargs,
             ),
@@ -647,7 +663,7 @@ def _ensure_rgb24(
     converted = _copy_frame_props(core, converted, clip, context="RGB24 conversion")
 
     try:
-        prop_kwargs: Dict[str, int] = {"_Matrix": 0, "_ColorRange": int(target_range)}
+        prop_kwargs: Dict[str, int] = {"_Matrix": 0, "_ColorRange": int(output_range)}
         if primaries is not None:
             prop_kwargs["_Primaries"] = int(primaries)
         elif isinstance(props.get("_Primaries"), int):
@@ -656,6 +672,8 @@ def _ensure_rgb24(
             prop_kwargs["_Transfer"] = int(transfer)
         elif isinstance(props.get("_Transfer"), int):
             prop_kwargs["_Transfer"] = int(props["_Transfer"])
+        if _FORCE_FULL_RANGE_RGB and source_range != output_range:
+            prop_kwargs["_SourceColorRange"] = int(source_range)
         converted = cast(Any, converted.std.SetFrameProps(**prop_kwargs))
     except Exception as exc:  # pragma: no cover - best effort
         logger.debug("Failed to set RGB frame props: %s", exc)
@@ -1050,6 +1068,8 @@ def _resolve_output_color_range(
         vs = types.SimpleNamespace(RANGE_FULL=0, RANGE_LIMITED=1)  # type: ignore[arg-type]
     range_full = int(getattr(vs, "RANGE_FULL", 0))
     range_limited = int(getattr(vs, "RANGE_LIMITED", 1))
+    if _FORCE_FULL_RANGE_RGB:
+        return range_full
     if tonemap_applied:
         return range_full
     matrix, transfer, primaries, color_range = vs_core._resolve_color_metadata(source_props)
