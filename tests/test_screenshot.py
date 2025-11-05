@@ -1,21 +1,23 @@
+import importlib.util
 import logging
 import subprocess
 import sys
 import types
 from pathlib import Path
-from typing import Any, Callable, Optional, Sequence, TypedDict, cast
+from typing import Any, Mapping, Optional, Sequence, TypedDict, cast
 
 import pytest
-
-_importorskip = cast(
-    Any,
-    getattr(pytest, "importorskip"),
-)
-_importorskip("vapoursynth", reason="VapourSynth not available – skipping screenshot tests")
 
 from src import screenshot, vs_core
 from src.datatypes import ColorConfig, OddGeometryPolicy, RGBDither, ScreenshotConfig
 from src.screenshot import GeometryPlan, _compute_requires_full_chroma
+
+_vapoursynth_available = importlib.util.find_spec("vapoursynth") is not None
+
+pytestmark = pytest.mark.skipif(  # type: ignore[attr-defined]
+    not _vapoursynth_available,
+    reason="VapourSynth not available – skipping screenshot tests",
+)
 
 
 class _CapturedWriterCall(TypedDict):
@@ -102,17 +104,28 @@ def _prepare_fake_vapoursynth_clip(
             )
 
         def CopyFrameProps(self, clip: "_FakeClip", _src: "_FakeClip") -> "_FakeClip":
+            clip.props = dict(getattr(_src, "props", {}))
             return clip
 
-        def SetFrameProps(self, **_: Any) -> "_FakeClip":
+        def SetFrameProps(self, **kwargs: Any) -> "_FakeClip":
+            self._parent.props.update(kwargs)
             return self._parent
 
     class _FakeClip:
-        def __init__(self, width: int, height: int, format_obj: _FakeFormat, core: Any) -> None:
+        def __init__(
+            self,
+            width: int,
+            height: int,
+            format_obj: _FakeFormat,
+            core: Any,
+            *,
+            props: Mapping[str, Any] | None = None,
+        ) -> None:
             self.width = width
             self.height = height
             self.format = format_obj
             self.core = core
+            self.props: dict[str, Any] = dict(props or {})
 
         def _with_dimensions(
             self,
@@ -126,6 +139,7 @@ def _prepare_fake_vapoursynth_clip(
                 height if height is not None else self.height,
                 format_obj if format_obj is not None else self.format,
                 self.core,
+                props=self.props,
             )
 
         @property
@@ -144,7 +158,9 @@ def _prepare_fake_vapoursynth_clip(
                     subsampling_h_val=0,
                     name_val="YUV444P16",
                 )
-                return clip._with_dimensions(format_obj=promoted_format)
+                new_clip = clip._with_dimensions(format_obj=promoted_format)
+                new_clip.props = {}
+                return new_clip
             if fmt == fake_vs.RGB24:
                 rgb_format = _FakeFormat(
                     color_family_obj=rgb_constant,
@@ -153,15 +169,26 @@ def _prepare_fake_vapoursynth_clip(
                     subsampling_h_val=0,
                     name_val="RGB24",
                 )
-                return clip._with_dimensions(format_obj=rgb_format)
-            return clip
+                new_clip = clip._with_dimensions(format_obj=rgb_format)
+                new_clip.props = {}
+                return new_clip
+            default_clip = clip._with_dimensions()
+            default_clip.props = {}
+            return default_clip
 
-        def Spline36(self, clip: _FakeClip, **_: Any) -> _FakeClip:
-            return clip
+        def Spline36(self, clip: _FakeClip, **kwargs: Any) -> _FakeClip:
+            resized = clip._with_dimensions(
+                width=kwargs.get("width", clip.width),
+                height=kwargs.get("height", clip.height),
+            )
+            resized.props = {}
+            return resized
 
     class _FakeFpng:
-        def Write(self, _clip: _FakeClip, path: str, **kwargs: Any) -> Any:
-            writer_calls.append(kwargs)
+        def Write(self, clip_obj: _FakeClip, path: str, **kwargs: Any) -> Any:
+            recorded_kwargs = dict(kwargs)
+            recorded_kwargs["props"] = dict(getattr(clip_obj, "props", {}))
+            writer_calls.append(recorded_kwargs)
 
             class _Job:
                 def get_frame(self, _index: int) -> None:
@@ -178,18 +205,28 @@ def _prepare_fake_vapoursynth_clip(
         top: int,
         bottom: int,
     ) -> _FakeClip:
-        return clip._with_dimensions(
+        bordered = clip._with_dimensions(
             width=clip.width + left + right,
             height=clip.height + top + bottom,
         )
+        bordered.props = dict(clip.props)
+        return bordered
+
+    def _std_copy_frame_props(clip: _FakeClip, src: _FakeClip) -> _FakeClip:
+        clip.props = dict(getattr(src, "props", {}))
+        return clip
+
+    def _std_set_frame_props(clip: _FakeClip, **kwargs: Any) -> _FakeClip:
+        clip.props.update(kwargs)
+        return clip
 
     fake_core = types.SimpleNamespace(
         resize=_FakeResize(),
         fpng=_FakeFpng(),
         std=types.SimpleNamespace(
             AddBorders=_core_add_borders,
-            SetFrameProps=lambda clip, **_: clip,
-            CopyFrameProps=lambda clip, _src: clip,
+            SetFrameProps=_std_set_frame_props,
+            CopyFrameProps=_std_copy_frame_props,
         ),
     )
 
@@ -215,6 +252,7 @@ def _prepare_fake_vapoursynth_clip(
     )
 
     clip = _FakeClip(width, height, initial_format, fake_core)
+    clip.props = {"_Matrix": 1, "_ColorRange": 1}
 
     monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
 
@@ -434,6 +472,7 @@ def test_generate_screenshots_debug_color_disables_overlays(tmp_path: Path, monk
     artifact = vs_core.ColorDebugArtifacts(
         normalized_clip=clip,
         normalized_props={},
+        original_props={},
         color_tuple=(1, 1, 1, 1),
     )
     tonemap_info = vs_core.TonemapInfo(
@@ -1669,6 +1708,7 @@ def test_save_frame_with_ffmpeg_inserts_full_chroma_filters(
         pivot_notifier=pivot_notes.append,
         frame_info_allowed=True,
         overlays_allowed=True,
+        target_range=1,
     )
 
     assert recorded_cmd
@@ -1679,6 +1719,9 @@ def test_save_frame_with_ffmpeg_inserts_full_chroma_filters(
     assert any(entry.startswith("format=rgb24") for entry in filters)
     assert filters[-1].endswith("dither=ordered")
     assert any("Full-chroma pivot" in note for note in pivot_notes)
+    assert "-color_range" in recorded_cmd
+    range_flag_index = recorded_cmd.index("-color_range")
+    assert recorded_cmd[range_flag_index + 1] == "tv"
 
 
 def test_save_frame_with_ffmpeg_raises_on_timeout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -1831,6 +1874,77 @@ def test_save_frame_with_fpng_skips_promotion_on_even_geometry(
     assert any(call.get("format") == fake_vs.RGB24 for call in resize_calls)
 
 
+def test_geometry_preserves_colour_props(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    clip, _fake_vs, writer_calls, _ = _prepare_fake_vapoursynth_clip(
+        monkeypatch,
+        width=1920,
+        height=1080,
+        subsampling_w=1,
+        subsampling_h=1,
+        bits_per_sample=10,
+        format_name="YUV420P10",
+    )
+    clip.props.update({"_Matrix": 1, "_ColorRange": 1})
+
+    captured_source_props: dict[str, Any] = {}
+    original_ensure = screenshot._ensure_rgb24
+
+    def _capture_ensure(
+        core: Any,
+        render_clip: Any,
+        frame_idx: int,
+        *,
+        source_props: Mapping[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        if source_props is not None:
+            captured_source_props.update(source_props)
+        return original_ensure(core, render_clip, frame_idx, source_props=source_props, **kwargs)
+
+    monkeypatch.setattr(screenshot, "_ensure_rgb24", _capture_ensure)
+
+    cfg = ScreenshotConfig(add_frame_info=False)
+    tonemap_info = vs_core.TonemapInfo(
+        applied=False,
+        tone_curve=None,
+        dpd=0,
+        target_nits=100.0,
+        dst_min_nits=0.1,
+        src_csp_hint=None,
+        reason="SDR source",
+    )
+    plan = _make_plan(
+        pad=(2, 4, 2, 4),
+        requires_full_chroma=True,
+        promotion_axes="horizontal+vertical",
+    )
+    screenshot._save_frame_with_fpng(
+        clip,
+        frame_idx=5,
+        crop=plan["crop"],
+        scaled=plan["scaled"],
+        pad=plan["pad"],
+        path=tmp_path / "frame.png",
+        cfg=cfg,
+        label="Clip",
+        requested_frame=5,
+        selection_label=None,
+        source_props={"_Matrix": 1, "_Transfer": 1, "_Primaries": 1, "_ColorRange": 1},
+        geometry_plan=plan,
+        tonemap_info=tonemap_info,
+        pivot_notifier=None,
+        debug_state=None,
+        frame_info_allowed=False,
+        overlays_allowed=False,
+    )
+
+    assert captured_source_props.get("_ColorRange") == 1
+    assert writer_calls, "fpng writer should receive clip"
+    final_props = writer_calls[-1]["props"]
+    assert final_props.get("_ColorRange") == 1
+    assert final_props.get("_Matrix") == 0
+
+
 def test_ensure_rgb24_applies_rec709_defaults_when_metadata_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1892,7 +2006,8 @@ def test_ensure_rgb24_applies_rec709_defaults_when_metadata_missing(
     assert captured.get("primaries_in") == 1
     assert captured.get("range_in") == 1
     assert captured.get("dither_type") == RGBDither.ERROR_DIFFUSION.value
-    assert captured_props == {"_Matrix": 0, "_ColorRange": 0}
+    assert captured.get("range") == 1
+    assert captured_props == {"_Matrix": 0, "_ColorRange": 1}
 
 
 def test_ensure_rgb24_uses_source_colour_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1967,6 +2082,7 @@ def test_ensure_rgb24_uses_source_colour_metadata(monkeypatch: pytest.MonkeyPatc
     assert captured.get("primaries_in") == 9
     assert captured.get("range_in") == 0
     assert captured.get("dither_type") == RGBDither.ORDERED.value
+    assert captured.get("range") == 0
     assert captured_props == {
         "_Matrix": 0,
         "_ColorRange": 0,

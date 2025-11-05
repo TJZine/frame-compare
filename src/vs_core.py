@@ -117,6 +117,7 @@ class ColorDebugArtifacts:
 
     normalized_clip: Any | None
     normalized_props: Mapping[str, Any] | None
+    original_props: Mapping[str, Any] | None
     color_tuple: tuple[Optional[int], Optional[int], Optional[int], Optional[int]] | None
 
 
@@ -1444,6 +1445,7 @@ def process_clip_for_screenshot(
 
     log = logger_override or logger
     source_props = _snapshot_frame_props(clip)
+    original_props = dict(source_props)
     clip, source_props, color_tuple = normalise_color_metadata(
         clip,
         source_props,
@@ -1456,6 +1458,7 @@ def process_clip_for_screenshot(
         debug_artifacts = ColorDebugArtifacts(
             normalized_clip=clip,
             normalized_props=dict(source_props),
+            original_props=original_props,
             color_tuple=color_tuple,
         )
     vs_module = _get_vapoursynth_module()

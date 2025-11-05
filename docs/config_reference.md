@@ -39,6 +39,20 @@ Setting `debug_color = true` (or supplying `--debug-color` to the CLI) activates
 
 Use this mode when tracking range regressions between the modern pipeline and `Legacy/comp.py`. Debug artefacts share frame indices with the main output directory, making diffs straightforward.
 
+```python
+import logging
+from frame_compare import run_cli
+
+logging.basicConfig(level=logging.INFO)
+run_cli(
+    config_path="config/config.toml",
+    root_override=".",
+    debug_color=True,
+    quiet=False,
+    verbose=True,
+)
+```
+
 ## `[report]`
 
 The HTML report bundles the rendered screenshots with a slider-based viewer and

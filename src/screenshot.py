@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+import types
 from functools import partial
 from pathlib import Path
 from typing import (
@@ -397,6 +398,11 @@ class _ColorDebugState:
             if artifacts is not None and artifacts.normalized_props is not None
             else None
         )
+        self.original_props = (
+            dict(artifacts.original_props)
+            if artifacts is not None and artifacts.original_props is not None
+            else None
+        )
         self.color_tuple = artifacts.color_tuple if artifacts is not None else None
 
     def capture_stage(
@@ -479,12 +485,14 @@ class _ColorDebugState:
                     self._warned_writer = True
                 return
             self._writer = writer
+        _, _, _, debug_range = vs_core._resolve_color_metadata(props)
         rgb_clip = _ensure_rgb24(
             self.core,
             clip,
             frame_idx,
             source_props=props,
             rgb_dither=self._rgb_dither,
+            target_range=int(debug_range) if debug_range is not None else None,
         )
         job = self._writer(rgb_clip, str(path), compression=self._compression_value, overwrite=True)
         job.get_frame(frame_idx)
@@ -515,16 +523,31 @@ def _legacy_rgb24_from_clip(
         kwargs["transfer_in"] = int(transfer)
     if primaries is not None:
         kwargs["primaries_in"] = int(primaries)
-    kwargs["range_in"] = int(color_range) if color_range is not None else int(getattr(vs, "RANGE_LIMITED", 1))
+    range_limited = int(getattr(vs, "RANGE_LIMITED", 1))
+    range_full = int(getattr(vs, "RANGE_FULL", 0))
+    resolved_range = range_limited if color_range is None else int(color_range)
+    kwargs["range_in"] = resolved_range
+    target_range = resolved_range if resolved_range in {range_limited, range_full} else range_full
     try:
         legacy_rgb = lanczos(
             clip,
             format=vs.RGB24,
             dither_type="error_diffusion",
+            range=target_range,
             **kwargs,
         )
     except Exception:
         return None
+    legacy_rgb = _copy_frame_props(core, legacy_rgb, clip, context="legacy RGB24 conversion")
+    try:
+        prop_kwargs: Dict[str, int] = {"_Matrix": 0, "_ColorRange": int(target_range)}
+        if primaries is not None:
+            prop_kwargs["_Primaries"] = int(primaries)
+        if transfer is not None:
+            prop_kwargs["_Transfer"] = int(transfer)
+        legacy_rgb = cast(Any, legacy_rgb.std.SetFrameProps(**prop_kwargs))
+    except Exception as exc:  # pragma: no cover - best effort
+        logger.debug("Failed to set legacy RGB frame props: %s", exc)
     return legacy_rgb
 
 
@@ -535,6 +558,7 @@ def _ensure_rgb24(
     *,
     source_props: Mapping[str, Any] | None = None,
     rgb_dither: RGBDither | str = RGBDither.ERROR_DIFFUSION,
+    target_range: int | None = None,
 ) -> Any:
     """
     Ensure the given VapourSynth frame is in 8-bit RGB24 color format.
@@ -573,6 +597,7 @@ def _ensure_rgb24(
     if not props:
         props = dict(vs_core._snapshot_frame_props(clip))
     resize_kwargs = _resolve_resize_color_kwargs(props)
+    matrix, transfer, primaries, color_range = vs_core._resolve_color_metadata(props)
 
     yuv_constant = getattr(vs, "YUV", object())
     if color_family == yuv_constant:
@@ -592,13 +617,26 @@ def _ensure_rgb24(
                 frame_idx,
             )
 
+    range_full = int(getattr(vs, "RANGE_FULL", 0))
+    range_limited = int(getattr(vs, "RANGE_LIMITED", 1))
+    if target_range is None:
+        range_hint = resize_kwargs.get("range_in")
+        if range_hint is not None:
+            target_range = int(range_hint)
+        elif color_range is None:
+            target_range = range_full
+        else:
+            target_range = int(color_range)
+    if target_range not in (range_full, range_limited):
+        target_range = range_full
+
     try:
         converted = cast(
             Any,
             point(
                 clip,
                 format=vs.RGB24,
-                range=vs.RANGE_FULL,
+                range=target_range,
                 dither_type=dither,
                 **resize_kwargs,
             ),
@@ -606,14 +644,18 @@ def _ensure_rgb24(
     except Exception as exc:  # pragma: no cover - defensive
         raise ScreenshotWriterError(f"Failed to convert frame {frame_idx} to RGB24: {exc}") from exc
 
+    converted = _copy_frame_props(core, converted, clip, context="RGB24 conversion")
+
     try:
-        prop_kwargs: Dict[str, int] = {"_Matrix": 0, "_ColorRange": 0}
-        primaries = props.get("_Primaries")
-        if isinstance(primaries, int):
+        prop_kwargs: Dict[str, int] = {"_Matrix": 0, "_ColorRange": int(target_range)}
+        if primaries is not None:
             prop_kwargs["_Primaries"] = int(primaries)
-        transfer = props.get("_Transfer")
-        if isinstance(transfer, int):
+        elif isinstance(props.get("_Primaries"), int):
+            prop_kwargs["_Primaries"] = int(props["_Primaries"])
+        if transfer is not None:
             prop_kwargs["_Transfer"] = int(transfer)
+        elif isinstance(props.get("_Transfer"), int):
+            prop_kwargs["_Transfer"] = int(props["_Transfer"])
         converted = cast(Any, converted.std.SetFrameProps(**prop_kwargs))
     except Exception as exc:  # pragma: no cover - best effort
         logger.debug("Failed to set RGB frame props: %s", exc)
@@ -798,17 +840,33 @@ def _apply_overlay_text(
         if strict:
             raise ScreenshotWriterError(message) from exc
         return clip
-    std_ns = getattr(core, "std", None)
-    copy_props = getattr(std_ns, "CopyFrameProps", None) if std_ns is not None else None
-    if callable(copy_props):
-        try:
-            result = copy_props(result, clip)
-        except Exception as exc:  # pragma: no cover - best effort
-            logger.debug('CopyFrameProps failed during overlay preservation: %s', exc)
+    result = _copy_frame_props(core, result, clip, context="overlay preservation")
     if status != "ok":
         logger.info('[OVERLAY] %s applied', file_label)
         state["overlay_status"] = "ok"
     return result
+
+
+def _copy_frame_props(core: Any, target: Any, source: Any, *, context: str) -> Any:
+    """
+    Best-effort propagation of frame properties from ``source`` to ``target``.
+
+    Parameters:
+        core: VapourSynth core providing std.CopyFrameProps.
+        target: Clip that should inherit metadata.
+        source: Clip supplying the metadata.
+        context: Debug label describing the copy site.
+    """
+
+    std_ns = getattr(core, "std", None)
+    copy_props = getattr(std_ns, "CopyFrameProps", None) if std_ns is not None else None
+    if not callable(copy_props):
+        return target
+    try:
+        return copy_props(target, source)
+    except Exception as exc:  # pragma: no cover - best effort
+        logger.debug("CopyFrameProps failed during %s: %s", context, exc)
+        return target
 
 
 class ScreenshotError(RuntimeError):
@@ -981,6 +1039,32 @@ def _is_sdr_pipeline(
     return not bool(is_hdr)
 
 
+def _resolve_output_color_range(
+    source_props: Mapping[str, Any],
+    tonemap_info: "vs_core.TonemapInfo | None",
+) -> int | None:
+    tonemap_applied = bool(tonemap_info and tonemap_info.applied)
+    try:
+        import vapoursynth as vs  # type: ignore
+    except Exception:  # pragma: no cover - optional deps
+        vs = types.SimpleNamespace(RANGE_FULL=0, RANGE_LIMITED=1)  # type: ignore[arg-type]
+    range_full = int(getattr(vs, "RANGE_FULL", 0))
+    range_limited = int(getattr(vs, "RANGE_LIMITED", 1))
+    if tonemap_applied:
+        return range_full
+    matrix, transfer, primaries, color_range = vs_core._resolve_color_metadata(source_props)
+    if color_range is None:
+        try:
+            is_hdr = vs_core._props_signal_hdr(source_props)
+        except Exception:
+            is_hdr = False
+        return range_full if is_hdr else range_limited
+    resolved = int(color_range)
+    if resolved in (range_full, range_limited):
+        return resolved
+    return range_full
+
+
 def _promote_to_yuv444p16(
     core: Any,
     clip: Any,
@@ -1055,6 +1139,8 @@ def _promote_to_yuv444p16(
                 promoted = cast(Any, set_props(promoted, **prop_kwargs))
             except Exception as exc:  # pragma: no cover - best effort
                 logger.debug("Failed to set frame props after promotion: %s", exc)
+
+    promoted = _copy_frame_props(core, promoted, clip, context="4:4:4 promotion")
 
     return promoted
 
@@ -1746,6 +1832,7 @@ def _save_frame_with_fpng(
     yuv_constant = getattr(vs, "YUV", object())
     color_family = getattr(fmt, "color_family", None)
     is_sdr = _is_sdr_pipeline(tonemap_info, source_props_map)
+    output_color_range = _resolve_output_color_range(source_props_map, tonemap_info)
     should_promote = (
         requires_full_chroma
         and has_axis
@@ -1790,7 +1877,9 @@ def _save_frame_with_fpng(
     try:
         left, top, right, bottom = crop
         if any(crop):
+            pre_crop = work
             work = work.std.CropRel(left=left, right=right, top=top, bottom=bottom)
+            work = _copy_frame_props(core, work, pre_crop, context="geometry cropping")
         target_w, target_h = scaled
         if work.width != target_w or work.height != target_h:
             resize_ns = getattr(core, "resize", None)
@@ -1799,7 +1888,9 @@ def _save_frame_with_fpng(
             resampler = getattr(resize_ns, "Spline36", None)
             if not callable(resampler):
                 raise ScreenshotWriterError("VapourSynth resize.Spline36 is unavailable")
+            pre_resize = work
             work = resampler(work, width=target_w, height=target_h)
+            work = _copy_frame_props(core, work, pre_resize, context="geometry resize")
 
         pad_left, pad_top, pad_right, pad_bottom = pad
         if pad_left or pad_top or pad_right or pad_bottom:
@@ -1807,6 +1898,7 @@ def _save_frame_with_fpng(
             add_borders = getattr(std_ns, "AddBorders", None) if std_ns is not None else None
             if not callable(add_borders):
                 raise ScreenshotWriterError("VapourSynth std.AddBorders is unavailable")
+            pre_pad = work
             work = add_borders(
                 work,
                 left=max(0, pad_left),
@@ -1814,6 +1906,7 @@ def _save_frame_with_fpng(
                 top=max(0, pad_top),
                 bottom=max(0, pad_bottom),
             )
+            work = _copy_frame_props(core, work, pre_pad, context="geometry padding")
     except Exception as exc:
         raise ScreenshotWriterError(f"Failed to prepare frame {frame_idx}: {exc}") from exc
 
@@ -1862,6 +1955,7 @@ def _save_frame_with_fpng(
         frame_idx,
         source_props=source_props_map,
         rgb_dither=rgb_dither,
+        target_range=output_color_range,
     )
     if debug_state is not None:
         try:
@@ -1932,6 +2026,7 @@ def _save_frame_with_ffmpeg(
     pivot_notifier: Callable[[str], None] | None = None,
     frame_info_allowed: bool = True,
     overlays_allowed: bool = True,
+    target_range: int | None = None,
 ) -> None:
     if shutil.which("ffmpeg") is None:
         raise ScreenshotWriterError("FFmpeg executable not found in PATH")
@@ -2032,8 +2127,13 @@ def _save_frame_with_ffmpeg(
         "0",
         "-compression_level",
         str(_map_ffmpeg_compression(cfg.compression_level)),
-        str(path),
     ]
+
+    if target_range is not None:
+        color_range_flag = "pc" if int(target_range) == 0 else "tv"
+        cmd.extend(["-color_range", color_range_flag])
+
+    cmd.append(str(path))
 
     timeout_value = getattr(cfg, "ffmpeg_timeout_seconds", None)
     timeout_seconds_raw: float | None
@@ -2225,6 +2325,7 @@ def generate_screenshots(
                 artifacts = vs_core.ColorDebugArtifacts(
                     normalized_clip=fallback_clip,
                     normalized_props=fallback_props,
+                    original_props=fallback_props,
                     color_tuple=(None, None, None, None),
                 )
             if core is None:
@@ -2257,6 +2358,7 @@ def generate_screenshots(
         )
         source_props = resolved_source_props
         is_sdr_pipeline = _is_sdr_pipeline(result.tonemap, resolved_source_props)
+        clip_color_range = _resolve_output_color_range(resolved_source_props, result.tonemap)
 
         for frame in frames:
             frame_idx = int(frame)
@@ -2351,6 +2453,7 @@ def generate_screenshots(
                         pivot_notifier=pivot_notifier,
                         frame_info_allowed=frame_info_allowed_default,
                         overlays_allowed=overlays_allowed_default and bool(overlay_text),
+                        target_range=clip_color_range,
                     )
                 else:
                     _save_frame_with_fpng(
