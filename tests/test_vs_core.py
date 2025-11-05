@@ -216,8 +216,8 @@ def test_detect_rgb_color_range_detects_undershoot(monkeypatch: Any) -> None:
         label="undershoot",
     )
 
-    assert detected is None
-    assert source is None
+    assert detected == getattr(fake_vs, "RANGE_LIMITED")
+    assert source == "plane_stats"
 
 
 def test_compute_verification_normalizes_integer_clip() -> None:

@@ -979,14 +979,17 @@ def _classify_rgb_range_from_stats(
 
     limited_low = 16.0
     limited_high = 235.0
-    limited_tolerance = 4.0
-    full_margin = 16.0
+    limited_tolerance = 12.0
+    limited_by_max = max_8 <= limited_high + limited_tolerance
+    limited_by_band = (max_8 - min_8) <= 6.0 and min_8 <= limited_low + limited_tolerance
+    if limited_by_max or limited_by_band:
+        return "limited"
 
-    if max_8 <= limited_high + limited_tolerance and min_8 >= limited_low - limited_tolerance:
-        return "limited"
-    if (max_8 - min_8) <= 6.0 and min_8 >= limited_low - limited_tolerance:
-        return "limited"
-    if max_8 >= limited_high + full_margin or min_8 <= limited_low - full_margin:
+    full_margin_high = 6.0
+    full_margin_low = 6.0
+    full_high = max_8 >= limited_high + full_margin_high
+    full_low = min_8 <= limited_low - full_margin_low
+    if full_high and full_low:
         return "full"
     return None
 
@@ -1744,13 +1747,28 @@ def process_clip_for_screenshot(
             source_range_int = None
 
     if effective_range is not None:
+        range_value = int(effective_range)
         changed_from_source = (
-            source_range_int is not None and source_range_int != int(effective_range)
+            source_range_int is not None and source_range_int != range_value
         )
+        if (
+            changed_from_source
+            and source_range_int == range_limited
+            and range_value == range_full
+        ):
+            log.info(
+                "[TM RANGE] %s plane-stats suggested full range; retaining limited metadata",
+                file_name,
+            )
+            fallback_source = (fallback_source or "plane_stats") + "_conflict"
+            assert source_range_int is not None
+            effective_range = source_range_int
+            range_value = int(source_range_int)
+            changed_from_source = False
         tonemapped = _apply_set_frame_prop(
             tonemapped,
             prop="_ColorRange",
-            intval=int(effective_range),
+            intval=range_value,
         )
         if changed_from_source:
             log.info(
