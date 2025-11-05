@@ -3,9 +3,15 @@ import subprocess
 import sys
 import types
 from pathlib import Path
-from typing import Any, Optional, Sequence, TypedDict, cast
+from typing import Any, Callable, Optional, Sequence, TypedDict, cast
 
 import pytest
+
+_importorskip = cast(
+    Any,
+    getattr(pytest, "importorskip"),
+)
+_importorskip("vapoursynth", reason="VapourSynth not available – skipping screenshot tests")
 
 from src import screenshot, vs_core
 from src.datatypes import ColorConfig, OddGeometryPolicy, RGBDither, ScreenshotConfig

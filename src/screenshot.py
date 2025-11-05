@@ -2227,6 +2227,13 @@ def generate_screenshots(
                     normalized_props=fallback_props,
                     color_tuple=(None, None, None, None),
                 )
+            if core is None:
+                try:
+                    import vapoursynth as vs  # type: ignore
+
+                    core = getattr(vs, "core", None)
+                except Exception:
+                    core = None
             debug_state = _ColorDebugState(
                 enabled=core is not None,
                 base_dir=(debug_root / safe_label),
