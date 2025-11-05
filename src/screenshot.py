@@ -1914,6 +1914,18 @@ def _save_frame_with_fpng(
         file_name=file_name,
         warning_sink=warning_sink,
     )
+    tonemap_applied = bool(tonemap_info and tonemap_info.applied)
+    if tonemap_applied:
+        try:
+            tonemapped_props = vs_core._snapshot_frame_props(clip)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug(
+                "Falling back to source props for tonemapped clip %s: %s",
+                file_name or "<unknown>",
+                exc,
+            )
+        else:
+            source_props_map = dict(tonemapped_props)
     requires_full_chroma = bool(geometry_plan and geometry_plan.get("requires_full_chroma"))
     fmt = getattr(clip, "format", None)
     has_axis, axis_label = _resolve_promotion_axes(fmt, crop, pad)
@@ -1921,7 +1933,6 @@ def _save_frame_with_fpng(
     color_family = getattr(fmt, "color_family", None)
     is_sdr = _is_sdr_pipeline(tonemap_info, source_props_map)
     output_color_range = _resolve_output_color_range(source_props_map, tonemap_info)
-    tonemap_applied = bool(tonemap_info and tonemap_info.applied)
     include_color_range = not tonemap_applied
     should_promote = (
         requires_full_chroma
