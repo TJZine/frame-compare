@@ -2107,6 +2107,16 @@ def _save_frame_with_fpng(
                     range=int(overlay_input_range),
                     dither_type="none",
                 )
+                overlay_props = dict(source_props_map)
+                if overlay_range in (range_full, range_limited):
+                    overlay_props["_ColorRange"] = int(overlay_range)
+                render_clip = _restore_color_props(
+                    core,
+                    render_clip,
+                    overlay_props,
+                    context="overlay range normalisation",
+                    include_color_range=True,
+                )
             except Exception as exc:  # pragma: no cover - defensive
                 logger.debug("Failed to normalize overlay range for frame %s: %s", frame_idx, exc)
         else:
@@ -2141,6 +2151,15 @@ def _save_frame_with_fpng(
                     render_clip,
                     range=int(output_color_range),
                     dither_type="none",
+                )
+                target_props = dict(source_props_map)
+                target_props["_ColorRange"] = int(output_color_range)
+                render_clip = _restore_color_props(
+                    core,
+                    render_clip,
+                    target_props,
+                    context="overlay range restore",
+                    include_color_range=True,
                 )
             except Exception as exc:  # pragma: no cover - defensive
                 logger.debug(
