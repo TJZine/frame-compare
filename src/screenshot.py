@@ -922,6 +922,32 @@ def _expand_limited_rgb(core: Any, clip: Any) -> Any:
         return clip
 
 
+def _restore_color_props(core: Any, clip: Any, props: Mapping[str, Any], *, context: str) -> Any:
+    """Reapply colour metadata to *clip* based on *props*."""
+
+    std_ns = getattr(core, "std", None)
+    set_props = getattr(std_ns, "SetFrameProps", None) if std_ns is not None else None
+    if not callable(set_props):
+        return clip
+
+    matrix, transfer, primaries, color_range = vs_core._resolve_color_metadata(props)
+    prop_kwargs: Dict[str, int] = {}
+    if matrix is not None:
+        prop_kwargs["_Matrix"] = int(matrix)
+    if transfer is not None:
+        prop_kwargs["_Transfer"] = int(transfer)
+    if primaries is not None:
+        prop_kwargs["_Primaries"] = int(primaries)
+    if color_range is not None:
+        prop_kwargs["_ColorRange"] = int(color_range)
+    if not prop_kwargs:
+        return clip
+    try:
+        return set_props(clip, **prop_kwargs)
+    except Exception as exc:  # pragma: no cover - best effort
+        logger.debug("Failed to restore colour props during %s: %s", context, exc)
+        return clip
+
 class ScreenshotError(RuntimeError):
     """Base class for screenshot related issues."""
 
@@ -1935,6 +1961,7 @@ def _save_frame_with_fpng(
             pre_crop = work
             work = work.std.CropRel(left=left, right=right, top=top, bottom=bottom)
             work = _copy_frame_props(core, work, pre_crop, context="geometry cropping")
+            work = _restore_color_props(core, work, source_props_map, context="geometry cropping")
         target_w, target_h = scaled
         if work.width != target_w or work.height != target_h:
             resize_ns = getattr(core, "resize", None)
@@ -1946,6 +1973,7 @@ def _save_frame_with_fpng(
             pre_resize = work
             work = resampler(work, width=target_w, height=target_h)
             work = _copy_frame_props(core, work, pre_resize, context="geometry resize")
+            work = _restore_color_props(core, work, source_props_map, context="geometry resize")
 
         pad_left, pad_top, pad_right, pad_bottom = pad
         if pad_left or pad_top or pad_right or pad_bottom:
@@ -1962,6 +1990,7 @@ def _save_frame_with_fpng(
                 bottom=max(0, pad_bottom),
             )
             work = _copy_frame_props(core, work, pre_pad, context="geometry padding")
+            work = _restore_color_props(core, work, source_props_map, context="geometry padding")
     except Exception as exc:
         raise ScreenshotWriterError(f"Failed to prepare frame {frame_idx}: {exc}") from exc
 
