@@ -922,7 +922,14 @@ def _expand_limited_rgb(core: Any, clip: Any) -> Any:
         return clip
 
 
-def _restore_color_props(core: Any, clip: Any, props: Mapping[str, Any], *, context: str) -> Any:
+def _restore_color_props(
+    core: Any,
+    clip: Any,
+    props: Mapping[str, Any],
+    *,
+    context: str,
+    include_color_range: bool = True,
+) -> Any:
     """Reapply colour metadata to *clip* based on *props*."""
 
     std_ns = getattr(core, "std", None)
@@ -938,7 +945,7 @@ def _restore_color_props(core: Any, clip: Any, props: Mapping[str, Any], *, cont
         prop_kwargs["_Transfer"] = int(transfer)
     if primaries is not None:
         prop_kwargs["_Primaries"] = int(primaries)
-    if color_range is not None:
+    if include_color_range and color_range is not None:
         prop_kwargs["_ColorRange"] = int(color_range)
     if not prop_kwargs:
         return clip
@@ -1914,6 +1921,8 @@ def _save_frame_with_fpng(
     color_family = getattr(fmt, "color_family", None)
     is_sdr = _is_sdr_pipeline(tonemap_info, source_props_map)
     output_color_range = _resolve_output_color_range(source_props_map, tonemap_info)
+    tonemap_applied = bool(tonemap_info and tonemap_info.applied)
+    include_color_range = not tonemap_applied
     should_promote = (
         requires_full_chroma
         and has_axis
@@ -1961,7 +1970,13 @@ def _save_frame_with_fpng(
             pre_crop = work
             work = work.std.CropRel(left=left, right=right, top=top, bottom=bottom)
             work = _copy_frame_props(core, work, pre_crop, context="geometry cropping")
-            work = _restore_color_props(core, work, source_props_map, context="geometry cropping")
+            work = _restore_color_props(
+                core,
+                work,
+                source_props_map,
+                context="geometry cropping",
+                include_color_range=include_color_range,
+            )
         target_w, target_h = scaled
         if work.width != target_w or work.height != target_h:
             resize_ns = getattr(core, "resize", None)
@@ -1973,7 +1988,13 @@ def _save_frame_with_fpng(
             pre_resize = work
             work = resampler(work, width=target_w, height=target_h)
             work = _copy_frame_props(core, work, pre_resize, context="geometry resize")
-            work = _restore_color_props(core, work, source_props_map, context="geometry resize")
+            work = _restore_color_props(
+                core,
+                work,
+                source_props_map,
+                context="geometry resize",
+                include_color_range=include_color_range,
+            )
 
         pad_left, pad_top, pad_right, pad_bottom = pad
         if pad_left or pad_top or pad_right or pad_bottom:
@@ -1990,11 +2011,23 @@ def _save_frame_with_fpng(
                 bottom=max(0, pad_bottom),
             )
             work = _copy_frame_props(core, work, pre_pad, context="geometry padding")
-            work = _restore_color_props(core, work, source_props_map, context="geometry padding")
+            work = _restore_color_props(
+                core,
+                work,
+                source_props_map,
+                context="geometry padding",
+                include_color_range=include_color_range,
+            )
     except Exception as exc:
         raise ScreenshotWriterError(f"Failed to prepare frame {frame_idx}: {exc}") from exc
 
-    work = _restore_color_props(core, work, source_props_map, context="geometry final")
+    work = _restore_color_props(
+        core,
+        work,
+        source_props_map,
+        context="geometry final",
+        include_color_range=include_color_range,
+    )
 
     render_clip = work
     if debug_state is not None:
