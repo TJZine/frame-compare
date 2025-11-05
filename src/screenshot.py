@@ -522,10 +522,8 @@ def _legacy_rgb24_from_clip(
     kwargs: Dict[str, int] = {}
     if matrix is not None:
         kwargs["matrix_in"] = int(matrix)
-    if transfer is not None:
-        kwargs["transfer_in"] = int(transfer)
-    if primaries is not None:
-        kwargs["primaries_in"] = int(primaries)
+    # Legacy pipeline historically relied on matrix only; avoid injecting
+    # transfer/primaries hints to mirror original conversion behaviour.
     range_limited = int(getattr(vs, "RANGE_LIMITED", 1))
     range_full = int(getattr(vs, "RANGE_FULL", 0))
     resolved_range_raw = range_limited if color_range is None else int(color_range)
@@ -547,12 +545,8 @@ def _legacy_rgb24_from_clip(
         prop_kwargs: Dict[str, int] = {"_Matrix": 0, "_ColorRange": int(target_range)}
         if primaries is not None:
             prop_kwargs["_Primaries"] = int(primaries)
-        elif "primaries_in" in kwargs:
-            prop_kwargs["_Primaries"] = int(kwargs["primaries_in"])
         if transfer is not None:
             prop_kwargs["_Transfer"] = int(transfer)
-        elif "transfer_in" in kwargs:
-            prop_kwargs["_Transfer"] = int(kwargs["transfer_in"])
         if _FORCE_FULL_RANGE_RGB and source_range != target_range:
             prop_kwargs["_SourceColorRange"] = int(source_range)
         legacy_rgb = cast(Any, legacy_rgb.std.SetFrameProps(**prop_kwargs))
@@ -608,6 +602,8 @@ def _ensure_rgb24(
         props = dict(vs_core._snapshot_frame_props(clip))
     resize_kwargs = _resolve_resize_color_kwargs(props)
     matrix, transfer, primaries, color_range = vs_core._resolve_color_metadata(props)
+    resize_kwargs.pop("transfer_in", None)
+    resize_kwargs.pop("primaries_in", None)
 
     yuv_constant = getattr(vs, "YUV", object())
     if color_family == yuv_constant:

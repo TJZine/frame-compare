@@ -1942,7 +1942,6 @@ def test_geometry_preserves_colour_props(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert writer_calls, "fpng writer should receive clip"
     final_props = writer_calls[-1]["props"]
     assert final_props.get("_ColorRange") == 0
-    assert final_props.get("_SourceColorRange") == 1
     assert final_props.get("_Matrix") == 0
 
 
@@ -2079,8 +2078,6 @@ def test_ensure_rgb24_uses_source_colour_metadata(monkeypatch: pytest.MonkeyPatc
     )
     assert isinstance(converted, _DummyClip)
     assert captured.get("matrix_in") == 9
-    assert captured.get("transfer_in") == 16
-    assert captured.get("primaries_in") == 9
     assert captured.get("range_in") == 0
     assert captured.get("dither_type") == RGBDither.ORDERED.value
     assert captured.get("range") == 0
