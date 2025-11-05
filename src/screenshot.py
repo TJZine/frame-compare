@@ -1994,6 +1994,8 @@ def _save_frame_with_fpng(
     except Exception as exc:
         raise ScreenshotWriterError(f"Failed to prepare frame {frame_idx}: {exc}") from exc
 
+    work = _restore_color_props(core, work, source_props_map, context="geometry final")
+
     render_clip = work
     if debug_state is not None:
         try:
