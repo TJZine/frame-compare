@@ -541,6 +541,9 @@ def _legacy_rgb24_from_clip(
     except Exception:
         return None
     legacy_rgb = _copy_frame_props(core, legacy_rgb, clip, context="legacy RGB24 conversion")
+    if _FORCE_FULL_RANGE_RGB and source_range == range_limited:
+        legacy_rgb = _expand_limited_rgb(core, legacy_rgb)
+        legacy_rgb = _copy_frame_props(core, legacy_rgb, clip, context="legacy RGB24 expansion")
     try:
         prop_kwargs: Dict[str, int] = {"_Matrix": 0, "_ColorRange": int(target_range)}
         if primaries is not None:
@@ -657,6 +660,9 @@ def _ensure_rgb24(
         raise ScreenshotWriterError(f"Failed to convert frame {frame_idx} to RGB24: {exc}") from exc
 
     converted = _copy_frame_props(core, converted, clip, context="RGB24 conversion")
+    if _FORCE_FULL_RANGE_RGB and source_range == range_limited:
+        converted = _expand_limited_rgb(core, converted)
+        converted = _copy_frame_props(core, converted, clip, context="RGB24 expansion")
 
     try:
         prop_kwargs: Dict[str, int] = {"_Matrix": 0, "_ColorRange": int(output_range)}
@@ -881,6 +887,39 @@ def _copy_frame_props(core: Any, target: Any, source: Any, *, context: str) -> A
     except Exception as exc:  # pragma: no cover - best effort
         logger.debug("CopyFrameProps failed during %s: %s", context, exc)
         return target
+
+
+def _expand_limited_rgb(core: Any, clip: Any) -> Any:
+    """Scale limited-range RGB to full range when possible."""
+
+    std_ns = getattr(core, "std", None)
+    levels = getattr(std_ns, "Levels", None) if std_ns is not None else None
+    if not callable(levels):
+        return clip
+
+    fmt = getattr(clip, "format", None)
+    bits = getattr(fmt, "bits_per_sample", None)
+    if not isinstance(bits, int) or bits <= 0:
+        return clip
+
+    max_code = (1 << bits) - 1
+    scale = 1 << (bits - 8) if bits >= 8 else 1
+
+    min_in = 16 * scale
+    max_in = 235 * scale
+
+    try:
+        return levels(
+            clip,
+            min_in=min_in,
+            max_in=max_in,
+            min_out=0,
+            max_out=max_code,
+            planes=[0, 1, 2],
+        )
+    except Exception as exc:  # pragma: no cover - best effort
+        logger.debug("Failed to expand limited RGB range: %s", exc)
+        return clip
 
 
 class ScreenshotError(RuntimeError):
