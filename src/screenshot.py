@@ -35,7 +35,7 @@ _INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 logger = logging.getLogger(__name__)
 
 
-_FORCE_FULL_RANGE_RGB = True  # set False to revert to source-range RGB output
+_FORCE_FULL_RANGE_RGB = False  # set True to expand limited SDR RGB to full range
 
 
 _SELECTION_LABELS = {

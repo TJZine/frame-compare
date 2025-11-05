@@ -1941,7 +1941,7 @@ def test_geometry_preserves_colour_props(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert captured_source_props.get("_ColorRange") == 1
     assert writer_calls, "fpng writer should receive clip"
     final_props = writer_calls[-1]["props"]
-    assert final_props.get("_ColorRange") == 0
+    assert final_props.get("_ColorRange") == (0 if screenshot._FORCE_FULL_RANGE_RGB else 1)
     assert final_props.get("_Matrix") == 0
 
 
@@ -2006,8 +2006,12 @@ def test_ensure_rgb24_applies_rec709_defaults_when_metadata_missing(
     assert captured.get("primaries_in") == 1
     assert captured.get("range_in") == 1
     assert captured.get("dither_type") == RGBDither.ERROR_DIFFUSION.value
-    assert captured.get("range") == 0
-    assert captured_props == {"_Matrix": 0, "_ColorRange": 0, "_SourceColorRange": 1}
+    expected_range = 0 if screenshot._FORCE_FULL_RANGE_RGB else 1
+    assert captured.get("range") == expected_range
+    expected_props = {"_Matrix": 0, "_ColorRange": expected_range}
+    if screenshot._FORCE_FULL_RANGE_RGB:
+        expected_props["_SourceColorRange"] = 1
+    assert captured_props == expected_props
 
 
 def test_ensure_rgb24_uses_source_colour_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2080,10 +2084,13 @@ def test_ensure_rgb24_uses_source_colour_metadata(monkeypatch: pytest.MonkeyPatc
     assert captured.get("matrix_in") == 9
     assert captured.get("range_in") == 0
     assert captured.get("dither_type") == RGBDither.ORDERED.value
-    assert captured.get("range") == 0
-    assert captured_props == {
+    assert captured.get("range") == (0 if screenshot._FORCE_FULL_RANGE_RGB else 0)
+    expected_props = {
         "_Matrix": 0,
-        "_ColorRange": 0,
+        "_ColorRange": 0 if screenshot._FORCE_FULL_RANGE_RGB else 0,
         "_Primaries": 9,
         "_Transfer": 16,
     }
+    if screenshot._FORCE_FULL_RANGE_RGB:
+        expected_props["_SourceColorRange"] = 0
+    assert captured_props == expected_props
