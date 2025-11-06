@@ -65,7 +65,7 @@ def test_resolve_effective_tonemap_uses_preset_defaults() -> None:
     assert resolved["target_nits"] == 120.0
     assert resolved["dynamic_peak_detection"] is False
     assert resolved["dst_min_nits"] == 0.10
-    assert resolved["knee_offset"] == 0.4
+    assert resolved["knee_offset"] == 0.5
     assert resolved["dpd_preset"] == "off"
 
 
@@ -264,7 +264,7 @@ def test_apply_post_gamma_levels_uses_limited_bounds() -> None:
     clip = types.SimpleNamespace(
         format=_FakeFormat(bits_per_sample=16, sample_type=_FakeSampleType("INTEGER", 0))
     )
-    result = vs_core._apply_post_gamma_levels(
+    result, applied = vs_core._apply_post_gamma_levels(
         core,
         clip=clip,
         gamma=0.95,
@@ -272,6 +272,7 @@ def test_apply_post_gamma_levels_uses_limited_bounds() -> None:
         log=logging.getLogger("test"),
     )
     assert result == "gamma"
+    assert applied is True
     assert captured["min_in"] == 16 * 257
     assert captured["max_in"] == 235 * 257
     assert captured["min_out"] == 16 * 257
@@ -282,7 +283,7 @@ def test_apply_post_gamma_levels_uses_limited_bounds() -> None:
 def test_apply_post_gamma_levels_skips_when_unity() -> None:
     core = types.SimpleNamespace(std=None)
     clip = object()
-    result = vs_core._apply_post_gamma_levels(
+    result, applied = vs_core._apply_post_gamma_levels(
         core,
         clip=clip,
         gamma=1.0,
@@ -290,6 +291,7 @@ def test_apply_post_gamma_levels_skips_when_unity() -> None:
         log=logging.getLogger("test"),
     )
     assert result is clip
+    assert applied is False
 
 
 def test_apply_post_gamma_levels_scales_float_clip() -> None:
@@ -304,13 +306,14 @@ def test_apply_post_gamma_levels_scales_float_clip() -> None:
         format=_FakeFormat(bits_per_sample=32, sample_type=_FakeSampleType("FLOAT", 1))
     )
     core = types.SimpleNamespace(std=FakeStd())
-    vs_core._apply_post_gamma_levels(
+    _, applied = vs_core._apply_post_gamma_levels(
         core,
         clip=clip,
         gamma=1.05,
         file_name="float",
         log=logging.getLogger("test"),
     )
+    assert applied is True
     assert captured["min_in"] == pytest.approx(16 / 255)
     assert captured["max_in"] == pytest.approx(235 / 255)
     assert captured["min_out"] == pytest.approx(16 / 255)

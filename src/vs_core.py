@@ -1326,9 +1326,9 @@ def _apply_post_gamma_levels(
     gamma: float,
     file_name: str,
     log: logging.Logger,
-) -> Any:
+) -> tuple[Any, bool]:
     if abs(gamma - 1.0) < 1e-4:
-        return clip
+        return clip, False
 
     def _resolve_level_bounds() -> tuple[float | int, float | int, float | int, float | int]:
         fmt = getattr(clip, "format", None)
@@ -1362,7 +1362,7 @@ def _apply_post_gamma_levels(
     levels = getattr(std_ns, "Levels", None) if std_ns is not None else None
     if not callable(levels):
         log.warning("[TM GAMMA] %s requested post-gamma but std.Levels is unavailable", file_name)
-        return clip
+        return clip, False
     try:
         adjusted = levels(
             clip,
@@ -1373,10 +1373,10 @@ def _apply_post_gamma_levels(
             gamma=float(gamma),
         )
         log.info("[TM GAMMA] %s applied gamma=%.3f", file_name, gamma)
-        return adjusted
+        return adjusted, True
     except Exception as exc:  # pragma: no cover - defensive
         log.warning("[TM GAMMA] %s failed to apply gamma: %s", file_name, exc)
-        return clip
+        return clip, False
 
 
 def _tonemap_with_retries(
@@ -1485,6 +1485,7 @@ _TONEMAP_PRESETS: Dict[str, Dict[str, float | str | bool]] = {
         "dst_min_nits": 0.10,
         "dpd_preset": "off",
         "dpd_black_cutoff": 0.0,
+        "knee_offset": 0.50,
     },
 }
 
@@ -1945,14 +1946,13 @@ def process_clip_for_screenshot(
     tonemapped = _normalize_rgb_props(tonemapped, transfer=1, primaries=1)
     applied_post_gamma = False
     if post_gamma_cfg_enabled:
-        tonemapped = _apply_post_gamma_levels(
+        tonemapped, applied_post_gamma = _apply_post_gamma_levels(
             core,
             tonemapped,
             gamma=post_gamma_value,
             file_name=file_name,
             log=log,
         )
-        applied_post_gamma = True
 
     detected_range, detection_source = _detect_rgb_color_range(
         core,

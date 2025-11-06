@@ -109,6 +109,21 @@ def test_validate_tonemap_overrides_rejects_invalid_cutoff() -> None:
         frame_compare._validate_tonemap_overrides({"dpd_black_cutoff": 0.2})
 
 
+def test_validate_tonemap_overrides_rejects_bad_knee() -> None:
+    with pytest.raises(click.ClickException):
+        frame_compare._validate_tonemap_overrides({"knee_offset": 1.5})
+
+
+def test_validate_tonemap_overrides_rejects_bad_gamma() -> None:
+    with pytest.raises(click.ClickException):
+        frame_compare._validate_tonemap_overrides({"post_gamma": 1.5})
+
+
+def test_validate_tonemap_overrides_rejects_bad_preset() -> None:
+    with pytest.raises(click.ClickException):
+        frame_compare._validate_tonemap_overrides({"dpd_preset": "turbo"})
+
+
 def _make_config(input_dir: Path) -> AppConfig:
     """
     Builds a test-oriented AppConfig populated with sensible defaults and example overrides.

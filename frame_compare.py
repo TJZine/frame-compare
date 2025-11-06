@@ -2403,16 +2403,21 @@ def _build_legacy_summary_lines(values: Mapping[str, Any], *, emit_json_tail: bo
     tonemap_dst_min = _format_number(tonemap.get("dst_min_nits"), ".2f", "0.00")
     tonemap_knee = _format_number(tonemap.get("knee_offset"), ".2f", "0.00")
     tonemap_preset_label = _string(tonemap.get("dpd_preset"), "n/a")
+    tonemap_cutoff = _format_number(tonemap.get("dpd_black_cutoff"), ".3f", "0.000")
     tonemap_gamma = _format_number(tonemap.get("post_gamma"), ".2f", "1.00")
     gamma_flag = "*" if bool(tonemap.get("post_gamma_enabled")) else ""
-    dpd_enabled = bool(tonemap.get("dpd"))
+    dpd_enabled = bool(
+        tonemap.get("dpd")
+        if "dpd" in tonemap
+        else tonemap.get("dynamic_peak_detection")
+    )
     preset_suffix = f" ({tonemap_preset_label})" if dpd_enabled and tonemap_preset_label.lower() != "n/a" else ""
     lines.append(
         "Tonemap: "
         f"{tonemap_curve}@{tonemap_target}nits "
         f"dst_min={tonemap_dst_min} knee={tonemap_knee} "
         f"dpd={_bool_text(dpd_enabled)}"
-        f"{preset_suffix}  "
+        f"{preset_suffix} black_cutoff={tonemap_cutoff}  "
         f"gamma={tonemap_gamma}{gamma_flag}  "
         f"verify≤{_format_number(tonemap.get('verify_luma_threshold'), '.2f', '0.00')}"
     )
@@ -4547,27 +4552,42 @@ def _validate_tonemap_overrides(overrides: Mapping[str, Any]) -> None:
 
     def _bad(message: str) -> None:
         raise click.ClickException(message)
-
     if "knee_offset" in overrides:
-        knee_value = float(overrides["knee_offset"])
-        if knee_value < 0.0 or knee_value > 1.0:
-            _bad("--tm-knee must be between 0.0 and 1.0")
+        try:
+            knee_value = float(overrides["knee_offset"])
+        except (TypeError, ValueError):
+            _bad("--tm-knee must be a number in [0.0, 1.0]")
+        else:
+            if knee_value < 0.0 or knee_value > 1.0:
+                _bad("--tm-knee must be between 0.0 and 1.0")
     if "dst_min_nits" in overrides:
-        dst_value = float(overrides["dst_min_nits"])
-        if dst_value < 0.0:
-            _bad("--tm-dst-min must be >= 0.0")
+        try:
+            dst_value = float(overrides["dst_min_nits"])
+        except (TypeError, ValueError):
+            _bad("--tm-dst-min must be a non-negative number")
+        else:
+            if dst_value < 0.0:
+                _bad("--tm-dst-min must be >= 0.0")
     if "post_gamma" in overrides:
-        gamma_value = float(overrides["post_gamma"])
-        if gamma_value < 0.9 or gamma_value > 1.1:
-            _bad("--tm-gamma must be between 0.9 and 1.1")
+        try:
+            gamma_value = float(overrides["post_gamma"])
+        except (TypeError, ValueError):
+            _bad("--tm-gamma must be a number between 0.9 and 1.1")
+        else:
+            if gamma_value < 0.9 or gamma_value > 1.1:
+                _bad("--tm-gamma must be between 0.9 and 1.1")
     if "dpd_preset" in overrides:
         dpd_value = str(overrides["dpd_preset"]).strip().lower()
         if dpd_value not in {"off", "fast", "balanced", "high_quality"}:
             _bad("--tm-dpd-preset must be one of: off, fast, balanced, high_quality")
     if "dpd_black_cutoff" in overrides:
-        cutoff = float(overrides["dpd_black_cutoff"])
-        if cutoff < 0.0 or cutoff > 0.05:
-            _bad("--tm-dpd-black-cutoff must be between 0.0 and 0.05")
+        try:
+            cutoff = float(overrides["dpd_black_cutoff"])
+        except (TypeError, ValueError):
+            _bad("--tm-dpd-black-cutoff must be a number in [0.0, 0.05]")
+        else:
+            if cutoff < 0.0 or cutoff > 0.05:
+                _bad("--tm-dpd-black-cutoff must be between 0.0 and 0.05")
 
 
 def run_cli(
