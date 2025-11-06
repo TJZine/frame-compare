@@ -840,7 +840,9 @@ def _apply_frame_info_overlay(
     try:
         info_clip = frame_eval(clip, partial(_draw_info, clip_ref=clip), prop_src=clip)
         result = subtitle(info_clip, text=[padding_title + label], style=FRAME_INFO_STYLE)
-        return _copy_frame_props(core, result, clip, context="frame info overlay")
+        result = _copy_frame_props(core, result, clip, context="frame info overlay")
+        result = _set_clip_range(core, result, 0, context="frame info overlay range")
+        return result
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug('Applying frame overlay failed: %s', exc)
         return clip
@@ -890,6 +892,7 @@ def _apply_overlay_text(
             logger.debug('Subtitle overlay failed, falling back: %s', exc)
         else:
             result = _copy_frame_props(core, result, clip, context="overlay preservation")
+            result = _set_clip_range(core, result, 0, context="overlay preservation range")
             if status != "ok":
                 logger.info('[OVERLAY] %s applied', file_label)
                 state["overlay_status"] = "ok"
@@ -916,6 +919,7 @@ def _apply_overlay_text(
             raise ScreenshotWriterError(message) from exc
         return clip
     result = _copy_frame_props(core, result, clip, context="overlay preservation")
+    result = _set_clip_range(core, result, 0, context="overlay preservation range")
     if status != "ok":
         logger.info('[OVERLAY] %s applied', file_label)
         state["overlay_status"] = "ok"
@@ -2125,6 +2129,14 @@ def _save_frame_with_fpng(
     overlay_input_range = overlay_range
     clip_format = getattr(render_clip, "format", None)
     overlay_resize_kwargs: Dict[str, Any] = {}
+    overlay_original_format = getattr(clip_format, "id", None)
+    overlay_rgb_format = None
+    try:
+        import vapoursynth as vs  # type: ignore
+    except Exception:
+        vs = None  # type: ignore[assignment]
+    if vs is not None:
+        overlay_rgb_format = getattr(vs, "RGB24", None)
     log_overlay = bool(os.getenv("FRAME_COMPARE_LOG_OVERLAY_RANGE"))
     if log_overlay:
         fmt_name = getattr(clip_format, "name", None)
@@ -2141,12 +2153,11 @@ def _save_frame_with_fpng(
         point = getattr(resize_ns, "Point", None) if resize_ns is not None else None
         if callable(point):
             try:
-                render_clip = point(
-                    render_clip,
-                    range=int(overlay_input_range),
-                    dither_type="none",
-                    **overlay_resize_kwargs,
-                )
+                point_kwargs: Dict[str, Any] = {"range": int(overlay_input_range), "dither_type": "none"}
+                if overlay_rgb_format is not None:
+                    point_kwargs["format"] = overlay_rgb_format
+                point_kwargs.update(overlay_resize_kwargs)
+                render_clip = point(render_clip, **point_kwargs)
                 converted_for_overlay = True
                 render_clip = _set_clip_range(
                     core,
@@ -2196,12 +2207,11 @@ def _save_frame_with_fpng(
         point = getattr(resize_ns, "Point", None) if resize_ns is not None else None
         if callable(point):
             try:
-                render_clip = point(
-                    render_clip,
-                    range=int(output_color_range),
-                    dither_type="none",
-                    **overlay_resize_kwargs,
-                )
+                point_kwargs: Dict[str, Any] = {"range": int(output_color_range), "dither_type": "none"}
+                if isinstance(overlay_original_format, int):
+                    point_kwargs["format"] = overlay_original_format
+                point_kwargs.update(overlay_resize_kwargs)
+                render_clip = point(render_clip, **point_kwargs)
                 render_clip = _set_clip_range(
                     core,
                     render_clip,
