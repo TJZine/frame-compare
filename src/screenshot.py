@@ -2087,9 +2087,7 @@ def _save_frame_with_fpng(
     )
 
     render_clip = work
-    overlay_range: Optional[int] = output_color_range
-    if overlay_range not in (range_full, range_limited):
-        overlay_range = range_full
+    overlay_range: Optional[int] = range_full
 
     if debug_state is not None:
         try:
@@ -2115,6 +2113,7 @@ def _save_frame_with_fpng(
                 legacy_props = {}
             debug_state.capture_stage("legacy_rgb24", frame_idx, legacy_clip, legacy_props)
     overlay_input_range = overlay_range
+    converted_for_overlay = False
     if frame_info_allowed or (overlays_allowed and overlay_text):
         resize_ns = getattr(core, "resize", None)
         point = getattr(resize_ns, "Point", None) if resize_ns is not None else None
@@ -2125,6 +2124,7 @@ def _save_frame_with_fpng(
                     range=int(overlay_input_range),
                     dither_type="none",
                 )
+                converted_for_overlay = True
                 render_clip = _set_clip_range(
                     core,
                     render_clip,
@@ -2156,7 +2156,11 @@ def _save_frame_with_fpng(
             file_label=label,
         )
 
-    if overlay_input_range != output_color_range and output_color_range in (range_full, range_limited):
+    if (
+        converted_for_overlay
+        and overlay_input_range != output_color_range
+        and output_color_range in (range_full, range_limited)
+    ):
         resize_ns = getattr(core, "resize", None)
         point = getattr(resize_ns, "Point", None) if resize_ns is not None else None
         if callable(point):
