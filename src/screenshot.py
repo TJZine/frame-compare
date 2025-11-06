@@ -2113,6 +2113,11 @@ def _save_frame_with_fpng(
                 legacy_props = {}
             debug_state.capture_stage("legacy_rgb24", frame_idx, legacy_clip, legacy_props)
     overlay_input_range = overlay_range
+    clip_format = getattr(render_clip, "format", None)
+    overlay_format_id = getattr(clip_format, "id", None)
+    overlay_resize_kwargs: Dict[str, Any] = {}
+    if isinstance(overlay_format_id, int):
+        overlay_resize_kwargs["format"] = overlay_format_id
     converted_for_overlay = False
     if frame_info_allowed or (overlays_allowed and overlay_text):
         resize_ns = getattr(core, "resize", None)
@@ -2123,12 +2128,13 @@ def _save_frame_with_fpng(
                     render_clip,
                     range=int(overlay_input_range),
                     dither_type="none",
+                    **overlay_resize_kwargs,
                 )
                 converted_for_overlay = True
                 render_clip = _set_clip_range(
                     core,
                     render_clip,
-                    int(overlay_range) if overlay_range in (range_full, range_limited) else None,
+                    range_full,
                     context="overlay range normalisation",
                 )
             except Exception as exc:  # pragma: no cover - defensive
@@ -2169,6 +2175,7 @@ def _save_frame_with_fpng(
                     render_clip,
                     range=int(output_color_range),
                     dither_type="none",
+                    **overlay_resize_kwargs,
                 )
                 render_clip = _set_clip_range(
                     core,
