@@ -101,6 +101,24 @@ def _should_expand_to_full(export_range: ExportRange | str | None) -> bool:
     return False
 
 
+def _set_clip_range(core: Any, clip: Any, color_range: int | None, *, context: str) -> Any:
+    """Stamp `_ColorRange` on *clip* when ``SetFrameProps`` is available."""
+
+    if color_range not in (0, 1, None):
+        return clip
+    std_ns = getattr(core, "std", None)
+    set_props = getattr(std_ns, "SetFrameProps", None) if std_ns is not None else None
+    if not callable(set_props):
+        return clip
+    try:
+        if color_range is None:
+            return clip
+        return set_props(clip, _ColorRange=int(color_range))
+    except Exception as exc:  # pragma: no cover - best effort
+        logger.debug("Failed to set _ColorRange during %s: %s", context, exc)
+        return clip
+
+
 def _append_overlay_warning(state: OverlayState, message: str) -> None:
     """
     Append a formatted overlay warning to the state's warning list in a type-safe manner.
@@ -2107,15 +2125,11 @@ def _save_frame_with_fpng(
                     range=int(overlay_input_range),
                     dither_type="none",
                 )
-                overlay_props = dict(source_props_map)
-                if overlay_range in (range_full, range_limited):
-                    overlay_props["_ColorRange"] = int(overlay_range)
-                render_clip = _restore_color_props(
+                render_clip = _set_clip_range(
                     core,
                     render_clip,
-                    overlay_props,
+                    int(overlay_range) if overlay_range in (range_full, range_limited) else None,
                     context="overlay range normalisation",
-                    include_color_range=True,
                 )
             except Exception as exc:  # pragma: no cover - defensive
                 logger.debug("Failed to normalize overlay range for frame %s: %s", frame_idx, exc)
@@ -2152,14 +2166,11 @@ def _save_frame_with_fpng(
                     range=int(output_color_range),
                     dither_type="none",
                 )
-                target_props = dict(source_props_map)
-                target_props["_ColorRange"] = int(output_color_range)
-                render_clip = _restore_color_props(
+                render_clip = _set_clip_range(
                     core,
                     render_clip,
-                    target_props,
+                    int(output_color_range),
                     context="overlay range restore",
-                    include_color_range=True,
                 )
             except Exception as exc:  # pragma: no cover - defensive
                 logger.debug(
