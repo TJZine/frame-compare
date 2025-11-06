@@ -2124,10 +2124,7 @@ def _save_frame_with_fpng(
             debug_state.capture_stage("legacy_rgb24", frame_idx, legacy_clip, legacy_props)
     overlay_input_range = overlay_range
     clip_format = getattr(render_clip, "format", None)
-    overlay_format_id = getattr(clip_format, "id", None)
     overlay_resize_kwargs: Dict[str, Any] = {}
-    if isinstance(overlay_format_id, int):
-        overlay_resize_kwargs["format"] = overlay_format_id
     log_overlay = bool(os.getenv("FRAME_COMPARE_LOG_OVERLAY_RANGE"))
     if log_overlay:
         fmt_name = getattr(clip_format, "name", None)
