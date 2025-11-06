@@ -5,6 +5,7 @@ from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import Any, ClassVar, Mapping, cast
 
+import click
 import pytest
 from click.testing import CliRunner, Result
 from rich.console import Console
@@ -89,6 +90,38 @@ def test_run_cli_rejects_subpath_escape(
         frame_compare.run_cli("ignored", None, root_override=str(tmp_path))
 
     assert field in str(excinfo.value)
+
+
+def test_validate_tonemap_overrides_accepts_valid_values() -> None:
+    frame_compare._validate_tonemap_overrides(
+        {
+            "knee_offset": 0.5,
+            "dst_min_nits": 0.0,
+            "post_gamma": 0.95,
+            "dpd_preset": "fast",
+            "dpd_black_cutoff": 0.02,
+        }
+    )
+
+
+def test_validate_tonemap_overrides_rejects_invalid_cutoff() -> None:
+    with pytest.raises(click.ClickException):
+        frame_compare._validate_tonemap_overrides({"dpd_black_cutoff": 0.2})
+
+
+def test_validate_tonemap_overrides_rejects_bad_knee() -> None:
+    with pytest.raises(click.ClickException):
+        frame_compare._validate_tonemap_overrides({"knee_offset": 1.5})
+
+
+def test_validate_tonemap_overrides_rejects_bad_gamma() -> None:
+    with pytest.raises(click.ClickException):
+        frame_compare._validate_tonemap_overrides({"post_gamma": 1.5})
+
+
+def test_validate_tonemap_overrides_rejects_bad_preset() -> None:
+    with pytest.raises(click.ClickException):
+        frame_compare._validate_tonemap_overrides({"dpd_preset": "turbo"})
 
 
 def _make_config(input_dir: Path) -> AppConfig:

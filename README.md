@@ -174,7 +174,7 @@ Configuration highlights:
 - Workspace guardrails keep everything under the resolved root: the CLI refuses `site-packages` roots, auto-seeds `ROOT/config/config.toml`, validates writability up front, and blocks relative paths that escape the workspace. Run `frame-compare --diagnose-paths` to confirm the resolved locations when in doubt.
 - `[analysis]` governs frame quotas, random seed, and metric cache filename.
 - `[screenshots]` selects renderer, geometry policy, dithering, and output directory name.
-- `[color]` sets tonemap preset (`reference`, `contrast`, `filmic`), verification options, overlay text, and strictness.
+- `[color]` sets tonemap preset (`reference`, `contrast`, `filmic`, `bt2390_spec`, `spline`), verification options, overlay text, BT.2390 knee offsets, dynamic-peak-detection presets, post-tonemap gamma, and strictness.
 - `[audio_alignment]` enables correlation, VSPreview hooks, offsets filename, and bias.
 - `[slowpics]` toggles auto uploads (disabled by default), visibility, cleanup, webhook URL, and timeout.
 - `[report]` enables the offline HTML report, output directory, default comparison pair, and auto-open behaviour.
@@ -209,6 +209,11 @@ Common toggles (see [docs/README_REFERENCE.md](docs/README_REFERENCE.md) for ful
 
 Offline HTML reports mirror slow.pics ergonomics: filmstrip thumbnails with selection-category filters, Actual/Fit/Fill presets, an alignment selector, pointer-anchored zoom via the slider, +/- buttons, or Ctrl/⌘ + mouse wheel, and pan support (space + drag or regular drag once zoomed beyond fit). Slider, overlay, difference, and blink viewer modes plus a fullscreen toggle round out the controls. Zoom, fit, mode, alignment, and category filters persist in `localStorage` so every frame opens with the same viewer state.
 
+### Tonemap Quick Recipes
+
+- **Reference SDR (BT.2390):** keep `preset="reference"` (or select with `--tm-preset reference`), which resolves to `tone_curve="bt.2390"`, `target_nits=100`, `dst_min_nits=0.18`, `knee_offset=0.50`, and `dpd_preset="high_quality"`. This maximises texture in low APL scenes without blowing highlights. Pair with the default overlay template to surface the resolved parameters.
+- **BT.2446A Filmic:** set `preset="filmic"` (or `--tm-preset filmic`) to switch to the libplacebo BT.2446A curve with the same 100 nit target and conservative dynamic peak detection. This preset keeps a softer shoulder and works well for well-mastered PQ sources. Tweak `--tm-dst-min`/`[color].dst_min_nits` or `--tm-gamma` when you need extra lift.
+
 > **Tip:** To seed another workspace, run `uv run python -m frame_compare --root alt-root --write-config`.
 
 ## CLI Reference
@@ -219,6 +224,15 @@ Offline HTML reports mirror slow.pics ergonomics: filmstrip thumbnails with sele
 | `--config PATH` | Use a specific config file (falls back to `FRAME_COMPARE_CONFIG`) |
 | `--input PATH` | Override `[paths].input_dir` for a single run |
 | `--audio-align-track label=index` | Force the audio stream used per clip (repeatable) |
+| `--tm-preset NAME` | Override tone-mapping preset (`reference`, `contrast`, `filmic`, `bt2390_spec`, `spline`) |
+| `--tm-curve NAME` | Override `[color].tone_curve` without touching presets |
+| `--tm-target NITS` | Override `[color].target_nits` |
+| `--tm-dst-min VALUE` | Override `[color].dst_min_nits` |
+| `--tm-knee VALUE` | Override `[color].knee_offset` (0–1) |
+| `--tm-dpd-preset NAME` | Override `[color].dpd_preset` (`off`, `fast`, `balanced`, `high_quality`) |
+| `--tm-dpd-black-cutoff VALUE` | Override `[color].dpd_black_cutoff` (`0.0–0.05`) |
+| `--tm-gamma VALUE` | Override `[color].post_gamma` and enable the gamma lift |
+| `--tm-gamma-disable` | Disable the post-tonemap gamma lift for this run |
 | `--write-config` | Ensure `ROOT/config/config.toml` exists, then exit |
 | `--diagnose-paths` | Print JSON diagnostics (root, media, screens, writability) |
 | `--quiet` / `--verbose` | Adjust console verbosity |

@@ -62,6 +62,21 @@ run_cli(
 )
 ```
 
+## `[color].dst_min_nits`, `knee_offset`, and preset tuning
+
+- `dst_min_nits` lifts the HDR toe before the final RGB24 conversion. Values between **0.18–0.25** keep detail in crushed shadows while avoiding milky blacks. Lower values increase contrast at the cost of near-black texture.
+- `knee_offset` (default **0.50**) controls the BT.2390 shoulder; smaller values compress highlights earlier while larger values push the roll-off further out. The extended preset map (`reference`, `bt2390_spec`, `filmic`, `spline`, `contrast`) now records the preferred knee alongside target nits and DPD behaviour.
+- CLI overrides are available via `--tm-dst-min` and `--tm-knee` for ad-hoc tuning without editing the config file.
+
+## `[color].dpd_preset` and `dpd_black_cutoff`
+
+- `dpd_preset` selects libplacebo's dynamic-peak-detection profile: `off`, `fast`, `balanced`, or `high_quality`. The presets default to `high_quality` for stills, but you can switch per run with `--tm-dpd-preset`.
+- `dpd_black_cutoff` (default **0.01**) skips a fraction of PQ blacks when sampling highlights for DPD. Keep it within **0–0.05**. When `[color].dynamic_peak_detection = false`, the loader and CLI coerce the preset to `off` and zero out the cutoff.
+
+## `[color].post_gamma_enable` / `post_gamma`
+
+Set `post_gamma_enable = true` to apply a limited-range (`16`–`235`) `std.Levels` gamma adjustment after tonemapping and before overlays/geometry. This stage is disabled by default; when enabled, keep `post_gamma` close to **1.00** (for example, `0.95` for a subtle lift). The CLI provides `--tm-gamma <value>` to tweak a single run and `--tm-gamma-disable` to force the stage off without editing `config.toml`.
+
 ## `[report]`
 
 The HTML report bundles the rendered screenshots with a slider-based viewer and

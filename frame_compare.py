@@ -2398,11 +2398,27 @@ def _build_legacy_summary_lines(values: Mapping[str, Any], *, emit_json_tail: bo
         f"pad={_bool_text(render.get('center_pad'))}"
     )
 
+    tonemap_curve = _string(tonemap.get("tone_curve"), "n/a")
+    tonemap_target = _format_number(tonemap.get("target_nits"), ".0f", "0")
+    tonemap_dst_min = _format_number(tonemap.get("dst_min_nits"), ".2f", "0.00")
+    tonemap_knee = _format_number(tonemap.get("knee_offset"), ".2f", "0.00")
+    tonemap_preset_label = _string(tonemap.get("dpd_preset"), "n/a")
+    tonemap_cutoff = _format_number(tonemap.get("dpd_black_cutoff"), ".3f", "0.000")
+    tonemap_gamma = _format_number(tonemap.get("post_gamma"), ".2f", "1.00")
+    gamma_flag = "*" if bool(tonemap.get("post_gamma_enabled")) else ""
+    dpd_enabled = bool(
+        tonemap.get("dpd")
+        if "dpd" in tonemap
+        else tonemap.get("dynamic_peak_detection")
+    )
+    preset_suffix = f" ({tonemap_preset_label})" if dpd_enabled and tonemap_preset_label.lower() != "n/a" else ""
     lines.append(
         "Tonemap: "
-        f"{_string(tonemap.get('tone_curve'), 'n/a')}@"
-        f"{_format_number(tonemap.get('target_nits'), '.0f', '0')}nits "
-        f"dpd={_bool_text(tonemap.get('dynamic_peak_detection'))}  "
+        f"{tonemap_curve}@{tonemap_target}nits "
+        f"dst_min={tonemap_dst_min} knee={tonemap_knee} "
+        f"dpd={_bool_text(dpd_enabled)}"
+        f"{preset_suffix} black_cutoff={tonemap_cutoff}  "
+        f"gamma={tonemap_gamma}{gamma_flag}  "
         f"verify≤{_format_number(tonemap.get('verify_luma_threshold'), '.2f', '0.00')}"
     )
 
@@ -4527,6 +4543,53 @@ def _confirm_alignment_with_screenshots(
         ),
     )
 
+
+def _validate_tonemap_overrides(overrides: Mapping[str, Any]) -> None:
+    """Validate CLI-provided tonemap overrides and raise ClickException on invalid values."""
+
+    if not overrides:
+        return
+
+    def _bad(message: str) -> None:
+        raise click.ClickException(message)
+    if "knee_offset" in overrides:
+        try:
+            knee_value = float(overrides["knee_offset"])
+        except (TypeError, ValueError):
+            _bad("--tm-knee must be a number in [0.0, 1.0]")
+        else:
+            if knee_value < 0.0 or knee_value > 1.0:
+                _bad("--tm-knee must be between 0.0 and 1.0")
+    if "dst_min_nits" in overrides:
+        try:
+            dst_value = float(overrides["dst_min_nits"])
+        except (TypeError, ValueError):
+            _bad("--tm-dst-min must be a non-negative number")
+        else:
+            if dst_value < 0.0:
+                _bad("--tm-dst-min must be >= 0.0")
+    if "post_gamma" in overrides:
+        try:
+            gamma_value = float(overrides["post_gamma"])
+        except (TypeError, ValueError):
+            _bad("--tm-gamma must be a number between 0.9 and 1.1")
+        else:
+            if gamma_value < 0.9 or gamma_value > 1.1:
+                _bad("--tm-gamma must be between 0.9 and 1.1")
+    if "dpd_preset" in overrides:
+        dpd_value = str(overrides["dpd_preset"]).strip().lower()
+        if dpd_value not in {"off", "fast", "balanced", "high_quality"}:
+            _bad("--tm-dpd-preset must be one of: off, fast, balanced, high_quality")
+    if "dpd_black_cutoff" in overrides:
+        try:
+            cutoff = float(overrides["dpd_black_cutoff"])
+        except (TypeError, ValueError):
+            _bad("--tm-dpd-black-cutoff must be a number in [0.0, 0.05]")
+        else:
+            if cutoff < 0.0 or cutoff > 0.05:
+                _bad("--tm-dpd-black-cutoff must be between 0.0 and 0.05")
+
+
 def run_cli(
     config_path: str | None,
     input_dir: str | None = None,
@@ -4539,6 +4602,7 @@ def run_cli(
     report_enable_override: Optional[bool] = None,
     skip_wizard: bool = False,
     debug_color: bool = False,
+    tonemap_overrides: Optional[Dict[str, Any]] = None,
 ) -> RunResult:
     """
     Orchestrate the CLI workflow.
@@ -4552,6 +4616,7 @@ def run_cli(
         verbose (bool): Enable additional diagnostic output when True.
         no_color (bool): Disable colored output when True.
         report_enable_override (Optional[bool]): Optional override for HTML report generation toggle.
+        tonemap_overrides (Optional[Dict[str, Any]]): Optional overrides for tone-mapping parameters supplied via CLI.
 
     Returns:
         RunResult: Aggregated result including processed files, selected frames, output directory, resolved root directory, configuration used, generated image paths, optional slow.pics URL, and a JSON-tail dictionary with detailed metadata and diagnostics.
@@ -4570,6 +4635,28 @@ def run_cli(
         skip_auto_wizard=skip_wizard,
     )
     cfg = preflight.config
+    if tonemap_overrides:
+        _validate_tonemap_overrides(tonemap_overrides)
+        color_cfg = getattr(cfg, "color", None)
+        if color_cfg is not None:
+            if "preset" in tonemap_overrides:
+                color_cfg.preset = str(tonemap_overrides["preset"])
+            if "tone_curve" in tonemap_overrides:
+                color_cfg.tone_curve = str(tonemap_overrides["tone_curve"])
+            if "target_nits" in tonemap_overrides:
+                color_cfg.target_nits = float(tonemap_overrides["target_nits"])
+            if "dst_min_nits" in tonemap_overrides:
+                color_cfg.dst_min_nits = float(tonemap_overrides["dst_min_nits"])
+            if "knee_offset" in tonemap_overrides:
+                color_cfg.knee_offset = float(tonemap_overrides["knee_offset"])
+            if "dpd_preset" in tonemap_overrides:
+                color_cfg.dpd_preset = str(tonemap_overrides["dpd_preset"])
+            if "dpd_black_cutoff" in tonemap_overrides:
+                color_cfg.dpd_black_cutoff = float(tonemap_overrides["dpd_black_cutoff"])
+            if "post_gamma" in tonemap_overrides:
+                color_cfg.post_gamma = float(tonemap_overrides["post_gamma"])
+            if "post_gamma_enable" in tonemap_overrides:
+                color_cfg.post_gamma_enable = bool(tonemap_overrides["post_gamma_enable"])
     if debug_color:
         try:
             setattr(cfg.color, "debug_color", True)
@@ -5783,10 +5870,17 @@ def run_cli(
         "preset": effective_tonemap.get("preset", cfg.color.preset),
         "tone_curve": effective_tonemap.get("tone_curve", cfg.color.tone_curve),
         "dynamic_peak_detection": bool(effective_tonemap.get("dynamic_peak_detection", cfg.color.dynamic_peak_detection)),
+        "dpd": bool(effective_tonemap.get("dynamic_peak_detection", cfg.color.dynamic_peak_detection)),
         "target_nits": float(effective_tonemap.get("target_nits", cfg.color.target_nits)),
+        "dst_min_nits": float(effective_tonemap.get("dst_min_nits", cfg.color.dst_min_nits)),
+        "knee_offset": float(effective_tonemap.get("knee_offset", getattr(cfg.color, "knee_offset", 0.5))),
+        "dpd_preset": effective_tonemap.get("dpd_preset", getattr(cfg.color, "dpd_preset", "")),
+        "dpd_black_cutoff": float(effective_tonemap.get("dpd_black_cutoff", getattr(cfg.color, "dpd_black_cutoff", 0.0))),
         "verify_luma_threshold": float(cfg.color.verify_luma_threshold),
         "overlay_enabled": bool(cfg.color.overlay_enabled),
         "overlay_mode": overlay_mode_value,
+        "post_gamma": float(getattr(cfg.color, "post_gamma", 1.0)),
+        "post_gamma_enabled": bool(getattr(cfg.color, "post_gamma_enable", False)),
     }
     layout_data["tonemap"] = json_tail["tonemap"]
     json_tail["overlay"] = {
@@ -6307,6 +6401,15 @@ def _run_cli_entry(
     html_report_enable: bool,
     html_report_disable: bool,
     debug_color: bool,
+    tm_preset: str | None,
+    tm_curve: str | None,
+    tm_target: float | None,
+    tm_dst_min: float | None,
+    tm_knee: float | None,
+    tm_dpd_preset: str | None,
+    tm_dpd_black_cutoff: float | None,
+    tm_gamma: float | None,
+    tm_gamma_disable: bool,
 ) -> None:
     """Execute the primary CLI workflow with the provided options."""
 
@@ -6321,6 +6424,30 @@ def _run_cli_entry(
         report_override = False
     else:
         report_override = None
+
+    if tm_gamma_disable and tm_gamma is not None:
+        raise click.ClickException("Cannot use --tm-gamma-disable together with --tm-gamma.")
+
+    tonemap_override: Dict[str, Any] = {}
+    if tm_preset:
+        tonemap_override["preset"] = tm_preset
+    if tm_curve:
+        tonemap_override["tone_curve"] = tm_curve
+    if tm_target is not None:
+        tonemap_override["target_nits"] = tm_target
+    if tm_dst_min is not None:
+        tonemap_override["dst_min_nits"] = tm_dst_min
+    if tm_knee is not None:
+        tonemap_override["knee_offset"] = tm_knee
+    if tm_dpd_preset:
+        tonemap_override["dpd_preset"] = tm_dpd_preset
+    if tm_dpd_black_cutoff is not None:
+        tonemap_override["dpd_black_cutoff"] = tm_dpd_black_cutoff
+    if tm_gamma is not None:
+        tonemap_override["post_gamma"] = tm_gamma
+        tonemap_override["post_gamma_enable"] = True
+    elif tm_gamma_disable:
+        tonemap_override["post_gamma_enable"] = False
 
     preflight_for_write: _PathPreflightResult | None = None
     if write_config:
@@ -6372,6 +6499,7 @@ def _run_cli_entry(
             report_enable_override=report_override,
             skip_wizard=skip_wizard,
             debug_color=debug_color,
+            tonemap_overrides=tonemap_override or None,
         )
     except CLIAppError as exc:
         print(exc.rich_message)
@@ -6566,6 +6694,37 @@ def _run_cli_entry(
     is_flag=True,
     help="Enable colour pipeline debugging (logs plane stats, dumps intermediate PNGs).",
 )
+@click.option("--tm-preset", "tm_preset", default=None, help="Override [color].preset for this run.")
+@click.option("--tm-curve", "tm_curve", default=None, help="Override [color].tone_curve for this run.")
+@click.option("--tm-target", "tm_target", type=float, default=None, help="Override [color].target_nits for this run.")
+@click.option("--tm-dst-min", "tm_dst_min", type=float, default=None, help="Override [color].dst_min_nits for this run.")
+@click.option("--tm-knee", "tm_knee", type=float, default=None, help="Override [color].knee_offset for this run.")
+@click.option(
+    "--tm-dpd-preset",
+    "tm_dpd_preset",
+    type=click.Choice(["off", "fast", "balanced", "high_quality"], case_sensitive=False),
+    default=None,
+    help="Override [color].dpd_preset.",
+)
+@click.option(
+    "--tm-dpd-black-cutoff",
+    "tm_dpd_black_cutoff",
+    type=float,
+    default=None,
+    help="Override [color].dpd_black_cutoff (0.0–0.05) for this run.",
+)
+@click.option(
+    "--tm-gamma",
+    "tm_gamma",
+    type=float,
+    default=None,
+    help="Override [color].post_gamma and enable post-tonemap gamma lift for this run.",
+)
+@click.option(
+    "--tm-gamma-disable",
+    is_flag=True,
+    help="Disable post-tonemap gamma lift for this run regardless of config.",
+)
 @click.pass_context
 def main(
     ctx: click.Context,
@@ -6584,6 +6743,15 @@ def main(
     html_report_enable: bool,
     html_report_disable: bool,
     debug_color: bool,
+    tm_preset: str | None,
+    tm_curve: str | None,
+    tm_target: float | None,
+    tm_dst_min: float | None,
+    tm_knee: float | None,
+    tm_dpd_preset: str | None,
+    tm_dpd_black_cutoff: float | None,
+    tm_gamma: float | None,
+    tm_gamma_disable: bool,
 ) -> None:
     """Command group entry point that dispatches to subcommands or the default run."""
 
@@ -6602,6 +6770,15 @@ def main(
         "html_report_enable": html_report_enable,
         "html_report_disable": html_report_disable,
         "debug_color": debug_color,
+        "tm_preset": tm_preset,
+        "tm_curve": tm_curve,
+        "tm_target": tm_target,
+        "tm_dst_min": tm_dst_min,
+        "tm_knee": tm_knee,
+        "tm_dpd_preset": tm_dpd_preset,
+        "tm_dpd_black_cutoff": tm_dpd_black_cutoff,
+        "tm_gamma": tm_gamma,
+        "tm_gamma_disable": tm_gamma_disable,
     }
     params_map = cast(Dict[str, Any], ctx.ensure_object(dict))
     params_map.update(params)
@@ -6632,6 +6809,15 @@ def run_command(ctx: click.Context) -> None:
         html_report_enable=bool(params.get("html_report_enable", False)),
         html_report_disable=bool(params.get("html_report_disable", False)),
         debug_color=bool(params.get("debug_color", False)),
+        tm_preset=params.get("tm_preset"),
+        tm_curve=params.get("tm_curve"),
+        tm_target=params.get("tm_target"),
+        tm_dst_min=params.get("tm_dst_min"),
+        tm_knee=params.get("tm_knee"),
+        tm_dpd_preset=params.get("tm_dpd_preset"),
+        tm_dpd_black_cutoff=params.get("tm_dpd_black_cutoff"),
+        tm_gamma=params.get("tm_gamma"),
+        tm_gamma_disable=bool(params.get("tm_gamma_disable", False)),
     )
 
 

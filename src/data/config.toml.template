@@ -80,7 +80,12 @@ preset = "reference"
 tone_curve = "bt.2390"
 dynamic_peak_detection = true
 target_nits = 100.0
-dst_min_nits = 0.1
+dst_min_nits = 0.18
+knee_offset = 0.50               # BT.2390 knee parameter (0-1); 0.50 matches the spec.
+dpd_preset = "high_quality"      # Dynamic peak detection preset: off, fast, balanced, high_quality
+dpd_black_cutoff = 0.01          # PQ fraction to ignore during DPD (0-0.05). Ignored when DPD is off.
+post_gamma_enable = false        # Optional limited-range gamma lift after tonemap (Levels min/max 16-235)
+post_gamma = 0.95                # Gamma factor when enabled (0.90-1.10). Stick near 1.0 to avoid haze.
 overlay_enabled = true
 overlay_text_template = "Tonemapping Algorithm: {tone_curve} dpd = {dynamic_peak_detection} dst = {target_nits} nits"
 overlay_mode = "minimal"  # Options: "minimal", "diagnostic"

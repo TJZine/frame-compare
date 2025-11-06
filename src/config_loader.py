@@ -304,6 +304,31 @@ def load_config(path: str) -> AppConfig:
         raise ConfigError("color.target_nits must be > 0")
     if app.color.dst_min_nits < 0:
         raise ConfigError("color.dst_min_nits must be >= 0")
+    if app.color.knee_offset < 0 or app.color.knee_offset > 1:
+        raise ConfigError("color.knee_offset must be between 0 and 1")
+    dpd_preset_value = str(getattr(app.color, "dpd_preset", "") or "").strip().lower() or "off"
+    valid_dpd_presets = {"off", "fast", "balanced", "high_quality"}
+    if dpd_preset_value not in valid_dpd_presets:
+        raise ConfigError("color.dpd_preset must be one of off, fast, balanced, or high_quality")
+    if not app.color.dynamic_peak_detection:
+        dpd_preset_value = "off"
+        app.color.dpd_black_cutoff = 0.0
+    else:
+        try:
+            cutoff_value = float(app.color.dpd_black_cutoff)
+        except (TypeError, ValueError) as exc:
+            raise ConfigError("color.dpd_black_cutoff must be a number") from exc
+        if cutoff_value < 0 or cutoff_value > 0.05:
+            raise ConfigError("color.dpd_black_cutoff must be between 0 and 0.05")
+        app.color.dpd_black_cutoff = cutoff_value
+    app.color.dpd_preset = dpd_preset_value
+    try:
+        post_gamma_value = float(app.color.post_gamma)
+    except (TypeError, ValueError) as exc:  # pragma: no cover - defensive
+        raise ConfigError("color.post_gamma must be a number") from exc
+    if post_gamma_value < 0.9 or post_gamma_value > 1.1:
+        raise ConfigError("color.post_gamma must be between 0.9 and 1.1")
+    app.color.post_gamma = post_gamma_value
     if app.color.verify_luma_threshold < 0 or app.color.verify_luma_threshold > 1:
         raise ConfigError("color.verify_luma_threshold must be between 0 and 1")
     if app.color.verify_start_seconds < 0:
