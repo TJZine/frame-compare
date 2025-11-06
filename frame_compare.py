@@ -4558,8 +4558,8 @@ def _validate_tonemap_overrides(overrides: Mapping[str, Any]) -> None:
             _bad("--tm-dst-min must be >= 0.0")
     if "post_gamma" in overrides:
         gamma_value = float(overrides["post_gamma"])
-        if gamma_value < 0.7 or gamma_value > 1.3:
-            _bad("--tm-gamma should be between 0.7 and 1.3")
+        if gamma_value < 0.9 or gamma_value > 1.1:
+            _bad("--tm-gamma must be between 0.9 and 1.1")
     if "dpd_preset" in overrides:
         dpd_value = str(overrides["dpd_preset"]).strip().lower()
         if dpd_value not in {"off", "fast", "balanced", "high_quality"}:
