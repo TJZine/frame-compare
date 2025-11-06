@@ -1278,12 +1278,36 @@ def _deduce_src_csp_hint(transfer: Optional[int], primaries: Optional[int]) -> O
 _TONEMAP_UNSUPPORTED_KWARGS: set[str] = set()
 
 
-def _parse_unexpected_kwarg(exc: BaseException) -> Optional[str]:
+def _parse_unexpected_kwarg(exc: BaseException) -> tuple[str, ...]:
+    """
+    Extract unexpected keyword argument names from TypeError/vapoursynth errors.
+
+    Returns:
+        tuple[str, ...]: Names of any kwargs rejected by the downstream Tonemap call.
+    """
+
     message = str(exc)
     match = re.search(r"unexpected keyword argument '([^']+)'", message)
     if match:
-        return match.group(1)
-    return None
+        return (match.group(1),)
+
+    match = re.search(
+        r"does not take argument\(s\) named ([^:]+)",
+        message,
+        re.IGNORECASE,
+    )
+    if match:
+        raw = match.group(1)
+        sanitized = raw.replace(" and ", ",")
+        names = [
+            part.strip().strip("'\"")
+            for part in sanitized.split(",")
+        ]
+        filtered = tuple(name for name in names if name)
+        if filtered:
+            return filtered
+
+    return ()
 
 
 def _call_tonemap_function(
@@ -1302,19 +1326,21 @@ def _call_tonemap_function(
         attempts += 1
         try:
             return func(clip, **usable_kwargs)
-        except TypeError as exc:
-            missing = _parse_unexpected_kwarg(exc)
-            if missing and missing in usable_kwargs:
-                if missing not in _TONEMAP_UNSUPPORTED_KWARGS:
-                    _TONEMAP_UNSUPPORTED_KWARGS.add(missing)
-                    logger.warning(
-                        "[Tonemap compat] %s missing support for '%s'; retrying without it",
-                        file_name,
-                        missing,
-                    )
-                usable_kwargs.pop(missing, None)
-                if attempts >= max_attempts:
-                    raise
+        except Exception as exc:  # pragma: no cover - vapoursynth raises custom errors
+            missing_names = _parse_unexpected_kwarg(exc)
+            handled = False
+            for missing in missing_names:
+                if missing in usable_kwargs:
+                    if missing not in _TONEMAP_UNSUPPORTED_KWARGS:
+                        _TONEMAP_UNSUPPORTED_KWARGS.add(missing)
+                        logger.warning(
+                            "[Tonemap compat] %s missing support for '%s'; retrying without it",
+                            file_name,
+                            missing,
+                        )
+                    usable_kwargs.pop(missing, None)
+                    handled = True
+            if handled and attempts < max_attempts:
                 continue
             raise
 

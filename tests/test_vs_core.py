@@ -382,6 +382,46 @@ def test_tonemap_drops_unsupported_kwargs_and_warns() -> None:
     assert "black_cutoff" in captured
 
 
+def test_tonemap_drops_kwargs_when_vapoursynth_error_lists_multiple_names() -> None:
+    captured: Dict[str, Any] = {}
+
+    class FakeVSError(Exception):
+        pass
+
+    class RejectingTonemap:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(self, clip: Any, **kwargs: Any) -> Any:
+            self.calls += 1
+            if self.calls == 1:
+                raise FakeVSError(
+                    "Tonemap: Function does not take argument(s) named "
+                    "peak_detection_preset, black_cutoff"
+                )
+            captured.update(kwargs)
+            return clip
+
+    core = types.SimpleNamespace(libplacebo=types.SimpleNamespace(Tonemap=RejectingTonemap()))
+    vs_core._tonemap_with_retries(
+        core,
+        rgb_clip=object(),
+        tone_curve="bt.2390",
+        target_nits=100.0,
+        dst_min=0.18,
+        dpd=1,
+        knee_offset=0.5,
+        dpd_preset="high_quality",
+        dpd_black_cutoff=0.01,
+        src_hint=None,
+        file_name="vapoursynth",
+    )
+
+    assert "peak_detection_preset" not in captured
+    assert "black_cutoff" not in captured
+    assert "tone_mapping_param" in captured
+
+
 class _DummyStd:
     def __init__(self, clip: "_DummyClip") -> None:
         self._clip = clip
