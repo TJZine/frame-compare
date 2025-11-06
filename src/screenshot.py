@@ -628,6 +628,9 @@ def _finalize_existing_rgb24(
         except Exception:
             props = {}
 
+    tonemapped_flag = props.get("_Tonemapped")
+    is_tonemapped = tonemapped_flag is not None
+
     matrix, transfer, primaries, color_range = vs_core._resolve_color_metadata(props)
     current_range = range_limited if color_range is None else int(color_range)
     if current_range not in (range_full, range_limited):
@@ -637,12 +640,14 @@ def _finalize_existing_rgb24(
     source_range_meta: int | None = None
 
     if expand_to_full:
-        if current_range == range_limited:
+        if current_range == range_limited and not is_tonemapped:
             clip = _expand_limited_rgb(core, clip)
             output_range = range_full
             source_range_meta = range_limited
+        elif current_range in (range_full, range_limited):
+            output_range = current_range
         else:
-            output_range = range_full if current_range not in (range_full, range_limited) else current_range
+            output_range = range_full
     elif target_range in (range_full, range_limited):
         output_range = int(target_range)
 

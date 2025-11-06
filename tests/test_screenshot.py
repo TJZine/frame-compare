@@ -2282,6 +2282,33 @@ def test_overlay_expands_range_when_exporting_full(
     assert fake_vs.core._overlay_calls, "Overlay path should be invoked"
 
 
+def test_ensure_rgb24_skips_tonemapped_expansion(monkeypatch: pytest.MonkeyPatch) -> None:
+    clip, fake_vs, _, _, levels_calls = _prepare_fake_vapoursynth_clip(
+        monkeypatch,
+        width=960,
+        height=540,
+        subsampling_w=0,
+        subsampling_h=0,
+        bits_per_sample=8,
+        color_family="RGB",
+        format_name="RGB24",
+    )
+    clip.props.update({"_ColorRange": 1, "_Tonemapped": "placebo:bt.2390"})
+
+    converted = screenshot._ensure_rgb24(
+        fake_vs.core,
+        clip,
+        frame_idx=0,
+        source_props={"_ColorRange": 1, "_Tonemapped": "placebo:bt.2390"},
+        expand_to_full=True,
+    )
+
+    assert isinstance(converted, type(clip))
+    assert levels_calls == []
+    assert converted.props.get("_ColorRange") == 1
+    assert converted.props.get("_Tonemapped") == "placebo:bt.2390"
+
+
 def test_ensure_rgb24_applies_rec709_defaults_when_metadata_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
