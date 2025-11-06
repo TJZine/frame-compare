@@ -907,8 +907,20 @@ def _apply_frame_info_overlay(
         info = "\n".join(lines)
         return subtitle(clip_ref, text=[info], style=FRAME_INFO_STYLE)
 
-    def _frame_info_callback(n: int, frame: Any, clip_ref: Any = clip) -> Any:
-        return _draw_info(n, frame, clip_ref)
+    def _frame_info_callback(
+        n: int,
+        f: Any,
+        clip_ref: Any = clip,
+        **kwargs: Any,
+    ) -> Any:
+        """
+        Wrapper passed to std.FrameEval that tolerates keyword arguments supplied by VapourSynth.
+        """
+
+        clip_override = kwargs.get("clip")
+        if clip_override is not None:
+            clip_ref = clip_override
+        return _draw_info(n, f, clip_ref)
 
     try:
         info_clip = frame_eval(clip, _frame_info_callback, prop_src=clip)
