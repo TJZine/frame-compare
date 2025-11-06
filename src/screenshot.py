@@ -2153,16 +2153,18 @@ def _save_frame_with_fpng(
         point = getattr(resize_ns, "Point", None) if resize_ns is not None else None
         if callable(point):
             try:
-                point_kwargs: Dict[str, Any] = {"range": int(overlay_input_range), "dither_type": "none"}
+                point_kwargs: Dict[str, Any] = {"dither_type": "none"}
                 if overlay_rgb_format is not None:
                     point_kwargs["format"] = overlay_rgb_format
+                if overlay_input_range in (range_full, range_limited):
+                    point_kwargs["range"] = int(overlay_input_range)
                 point_kwargs.update(overlay_resize_kwargs)
                 render_clip = point(render_clip, **point_kwargs)
                 converted_for_overlay = True
                 render_clip = _set_clip_range(
                     core,
                     render_clip,
-                    range_full,
+                    overlay_input_range,
                     context="overlay range normalisation",
                 )
                 if log_overlay:
@@ -2207,9 +2209,11 @@ def _save_frame_with_fpng(
         point = getattr(resize_ns, "Point", None) if resize_ns is not None else None
         if callable(point):
             try:
-                point_kwargs: Dict[str, Any] = {"range": int(output_color_range), "dither_type": "none"}
+                point_kwargs: Dict[str, Any] = {"dither_type": "none"}
                 if isinstance(overlay_original_format, int):
                     point_kwargs["format"] = overlay_original_format
+                if output_color_range in (range_full, range_limited):
+                    point_kwargs["range"] = int(output_color_range)
                 point_kwargs.update(overlay_resize_kwargs)
                 render_clip = point(render_clip, **point_kwargs)
                 render_clip = _set_clip_range(
