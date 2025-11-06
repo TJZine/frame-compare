@@ -4,6 +4,7 @@ import subprocess
 import sys
 import types
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Dict, Mapping, Optional, Sequence, TypedDict, cast
 
 import pytest
@@ -53,11 +54,13 @@ def _prepare_fake_vapoursynth_clip(
     bits_per_sample: int,
     color_family: str = "YUV",
     format_name: str | None = None,
-) -> tuple[Any, Any, list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[Any, Any, list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Install a lightweight VapourSynth stub and return a synthetic clip and call logs."""
 
     writer_calls: list[dict[str, Any]] = []
     resize_calls: list[dict[str, Any]] = []
+    levels_calls: list[dict[str, Any]] = []
+    overlay_calls: list[dict[str, Any]] = []
 
     fake_vs = types.SimpleNamespace()
     yuv_constant = object()
@@ -78,6 +81,37 @@ def _prepare_fake_vapoursynth_clip(
             self.subsampling_w = subsampling_w_val
             self.subsampling_h = subsampling_h_val
             self.name = name_val
+
+    def _std_levels(clip: "_FakeClip", **kwargs: Any) -> "_FakeClip":
+        levels_calls.append(dict(kwargs))
+        clip.props.setdefault("_levels_calls", []).append(kwargs)
+        return clip
+
+    class _FakeSub:
+        def __init__(self, core: SimpleNamespace) -> None:
+            self._core = core
+
+        def Subtitle(
+            self,
+            clip_obj: "_FakeClip",
+            *,
+            text: Sequence[str],
+            style: str,
+        ) -> "_FakeClip":
+            overlay_calls.append({"text": list(text), "style": style})
+            new_clip = clip_obj._with_dimensions()
+            new_clip.props = dict(getattr(clip_obj, "props", {}))
+            return new_clip
+
+    class _FakeText:
+        def __init__(self, core: SimpleNamespace) -> None:
+            self._core = core
+
+        def Text(self, clip_obj: "_FakeClip", text: str, alignment: int = 9) -> "_FakeClip":
+            overlay_calls.append({"text": [text], "alignment": alignment})
+            new_clip = clip_obj._with_dimensions()
+            new_clip.props = dict(getattr(clip_obj, "props", {}))
+            return new_clip
 
     class _FakeStd:
         def __init__(self, parent: "_FakeClip") -> None:
@@ -116,6 +150,9 @@ def _prepare_fake_vapoursynth_clip(
         def SetFrameProps(self, **kwargs: Any) -> "_FakeClip":
             self._parent.props.update(kwargs)
             return self._parent
+
+        def Levels(self, clip: "_FakeClip", **kwargs: Any) -> "_FakeClip":
+            return _std_levels(clip, **kwargs)
 
     class _FakeClip:
         def __init__(
@@ -233,8 +270,14 @@ def _prepare_fake_vapoursynth_clip(
             AddBorders=_core_add_borders,
             SetFrameProps=_std_set_frame_props,
             CopyFrameProps=_std_copy_frame_props,
+            Levels=_std_levels,
         ),
+        sub=None,
+        text=None,
+        _overlay_calls=overlay_calls,
     )
+    fake_core.sub = _FakeSub(fake_core)
+    fake_core.text = _FakeText(fake_core)
 
     fake_vs.VideoNode = _FakeClip
     fake_vs.YUV = yuv_constant
@@ -262,7 +305,7 @@ def _prepare_fake_vapoursynth_clip(
 
     monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
 
-    return clip, fake_vs, writer_calls, resize_calls
+    return clip, fake_vs, writer_calls, resize_calls, levels_calls
 
 @pytest.fixture(autouse=True)
 def _stub_process_clip(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -431,7 +474,7 @@ def test_plan_geometry_letterbox_alignment(tmp_path: Path, monkeypatch: pytest.M
 
 
 def test_generate_screenshots_debug_color_disables_overlays(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    clip, fake_vs, _, _ = _prepare_fake_vapoursynth_clip(
+    clip, fake_vs, _, _, _ = _prepare_fake_vapoursynth_clip(
         monkeypatch,
         width=1920,
         height=1080,
@@ -1881,7 +1924,7 @@ def test_save_frame_with_fpng_promotes_subsampled_sdr(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    clip, fake_vs, writer_calls, resize_calls = _prepare_fake_vapoursynth_clip(
+    clip, fake_vs, writer_calls, resize_calls, _ = _prepare_fake_vapoursynth_clip(
         monkeypatch,
         width=1920,
         height=1080,
@@ -1949,7 +1992,7 @@ def test_save_frame_with_fpng_skips_promotion_on_even_geometry(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    clip, fake_vs, writer_calls, resize_calls = _prepare_fake_vapoursynth_clip(
+    clip, fake_vs, writer_calls, resize_calls, _ = _prepare_fake_vapoursynth_clip(
         monkeypatch,
         width=1920,
         height=1080,
@@ -1997,7 +2040,7 @@ def test_save_frame_with_fpng_skips_promotion_on_even_geometry(
 
 
 def test_geometry_preserves_colour_props(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    clip, _fake_vs, writer_calls, _ = _prepare_fake_vapoursynth_clip(
+    clip, _fake_vs, writer_calls, _, _ = _prepare_fake_vapoursynth_clip(
         monkeypatch,
         width=1920,
         height=1080,
@@ -2072,7 +2115,7 @@ def test_geometry_preserves_colour_props(monkeypatch: pytest.MonkeyPatch, tmp_pa
 def test_fpng_respects_limited_export_range(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    clip, _fake_vs, writer_calls, _ = _prepare_fake_vapoursynth_clip(
+    clip, _fake_vs, writer_calls, _, _ = _prepare_fake_vapoursynth_clip(
         monkeypatch,
         width=1920,
         height=1080,
@@ -2123,6 +2166,120 @@ def test_fpng_respects_limited_export_range(
     final_props = writer_calls[-1]["props"]
     assert final_props.get("_ColorRange") == 1
     assert "_SourceColorRange" not in final_props
+
+
+def test_overlay_preserves_limited_range_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clip, fake_vs, writer_calls, resize_calls, levels_calls = _prepare_fake_vapoursynth_clip(
+        monkeypatch,
+        width=1280,
+        height=720,
+        subsampling_w=1,
+        subsampling_h=1,
+        bits_per_sample=8,
+        format_name="YUV420P8",
+    )
+    cfg = ScreenshotConfig(add_frame_info=False)
+    cfg.export_range = ExportRange.LIMITED
+    tonemap_info = vs_core.TonemapInfo(
+        applied=False,
+        tone_curve=None,
+        dpd=0,
+        target_nits=100.0,
+        dst_min_nits=0.1,
+        src_csp_hint=None,
+        reason="SDR source",
+    )
+    overlay_state: dict[str, Any] = {}
+
+    screenshot._save_frame_with_fpng(
+        clip,
+        frame_idx=0,
+        crop=(0, 0, 0, 0),
+        scaled=(clip.width, clip.height),
+        pad=(0, 0, 0, 0),
+        path=tmp_path / "limited.png",
+        cfg=cfg,
+        label="Clip",
+        requested_frame=0,
+        selection_label=None,
+        overlay_text="Demo overlay",
+        overlay_state=overlay_state,
+        strict_overlay=False,
+        source_props={"_Matrix": 1, "_ColorRange": 1, "_Primaries": 1, "_Transfer": 1},
+        geometry_plan={"requires_full_chroma": False},
+        tonemap_info=tonemap_info,
+        color_cfg=ColorConfig(),
+        warning_sink=[],
+        frame_info_allowed=False,
+        overlays_allowed=True,
+        expand_to_full=False,
+    )
+
+    assert writer_calls, "fpng writer should have been invoked"
+    props = writer_calls[0]["props"]
+    assert props.get("_ColorRange") == 1
+    assert "_SourceColorRange" not in props
+    assert any(call.get("format") == fake_vs.RGB24 for call in resize_calls)
+    assert not levels_calls, "Limited export should not expand range"
+    assert fake_vs.core._overlay_calls, "Overlay path should be invoked"
+
+
+def test_overlay_expands_range_when_exporting_full(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clip, fake_vs, writer_calls, resize_calls, levels_calls = _prepare_fake_vapoursynth_clip(
+        monkeypatch,
+        width=1280,
+        height=720,
+        subsampling_w=1,
+        subsampling_h=1,
+        bits_per_sample=8,
+        format_name="YUV420P8",
+    )
+    cfg = ScreenshotConfig(add_frame_info=False)
+    tonemap_info = vs_core.TonemapInfo(
+        applied=False,
+        tone_curve=None,
+        dpd=0,
+        target_nits=100.0,
+        dst_min_nits=0.1,
+        src_csp_hint=None,
+        reason="SDR source",
+    )
+
+    screenshot._save_frame_with_fpng(
+        clip,
+        frame_idx=0,
+        crop=(0, 0, 0, 0),
+        scaled=(clip.width, clip.height),
+        pad=(0, 0, 0, 0),
+        path=tmp_path / "full.png",
+        cfg=cfg,
+        label="Clip",
+        requested_frame=0,
+        selection_label=None,
+        overlay_text="Demo overlay",
+        overlay_state={},
+        strict_overlay=False,
+        source_props={"_Matrix": 1, "_ColorRange": 1, "_Primaries": 1, "_Transfer": 1},
+        geometry_plan={"requires_full_chroma": False},
+        tonemap_info=tonemap_info,
+        color_cfg=ColorConfig(),
+        warning_sink=[],
+        frame_info_allowed=False,
+        overlays_allowed=True,
+        expand_to_full=True,
+    )
+
+    assert writer_calls, "fpng writer should have been invoked"
+    props = writer_calls[0]["props"]
+    assert props.get("_ColorRange") == 0
+    assert props.get("_SourceColorRange") == 1
+    assert any(call.get("format") == fake_vs.RGB24 for call in resize_calls)
+    assert levels_calls, "Full export should apply limited-to-full expansion"
+    assert fake_vs.core._overlay_calls, "Overlay path should be invoked"
 
 
 def test_ensure_rgb24_applies_rec709_defaults_when_metadata_missing(

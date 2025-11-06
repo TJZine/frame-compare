@@ -7,7 +7,6 @@ import os
 import re
 import shutil
 import subprocess
-from functools import partial
 from pathlib import Path
 from typing import (
     Any,
@@ -610,6 +609,69 @@ def _legacy_rgb24_from_clip(
     return legacy_rgb
 
 
+def _finalize_existing_rgb24(
+    core: Any,
+    clip: Any,
+    *,
+    source_props: Mapping[str, Any] | None,
+    target_range: int | None,
+    expand_to_full: bool,
+    range_full: int,
+    range_limited: int,
+) -> Any:
+    """Adjust metadata and optional range expansion for clips already in RGB24."""
+
+    props: Dict[str, Any] = dict(source_props or {})
+    if not props:
+        try:
+            props = dict(vs_core._snapshot_frame_props(clip))
+        except Exception:
+            props = {}
+
+    matrix, transfer, primaries, color_range = vs_core._resolve_color_metadata(props)
+    current_range = range_limited if color_range is None else int(color_range)
+    if current_range not in (range_full, range_limited):
+        current_range = range_limited
+
+    output_range = current_range
+    source_range_meta: int | None = None
+
+    if expand_to_full:
+        if current_range == range_limited:
+            clip = _expand_limited_rgb(core, clip)
+            output_range = range_full
+            source_range_meta = range_limited
+        else:
+            output_range = range_full if current_range not in (range_full, range_limited) else current_range
+    elif target_range in (range_full, range_limited):
+        output_range = int(target_range)
+
+    std_ns = getattr(core, "std", None)
+    set_props = getattr(std_ns, "SetFrameProps", None) if std_ns is not None else None
+    if callable(set_props):
+        prop_kwargs: Dict[str, int] = {"_Matrix": 0, "_ColorRange": int(output_range)}
+        if primaries is not None:
+            prop_kwargs["_Primaries"] = int(primaries)
+        elif isinstance(props.get("_Primaries"), int):
+            prop_kwargs["_Primaries"] = int(props["_Primaries"])
+        if transfer is not None:
+            prop_kwargs["_Transfer"] = int(transfer)
+        elif isinstance(props.get("_Transfer"), int):
+            prop_kwargs["_Transfer"] = int(props["_Transfer"])
+        if source_range_meta is not None and source_range_meta != output_range:
+            prop_kwargs["_SourceColorRange"] = int(source_range_meta)
+        elif (
+            not expand_to_full
+            and isinstance(props.get("_SourceColorRange"), int)
+        ):
+            prop_kwargs["_SourceColorRange"] = int(props["_SourceColorRange"])
+        try:
+            clip = cast(Any, set_props(clip, **prop_kwargs))
+        except Exception as exc:  # pragma: no cover - best effort
+            logger.debug("Failed to set RGB frame props: %s", exc)
+    return clip
+
+
 def _ensure_rgb24(
     core: Any,
     clip: Any,
@@ -639,11 +701,22 @@ def _ensure_rgb24(
     except Exception as exc:  # pragma: no cover - requires runtime deps
         raise ScreenshotWriterError("VapourSynth is required for screenshot export") from exc
 
+    range_full = int(getattr(vs, "RANGE_FULL", 0))
+    range_limited = int(getattr(vs, "RANGE_LIMITED", 1))
+
     fmt = getattr(clip, "format", None)
     color_family = getattr(fmt, "color_family", None) if fmt is not None else None
     bits = getattr(fmt, "bits_per_sample", None) if fmt is not None else None
     if color_family == getattr(vs, "RGB", object()) and bits == 8:
-        return clip
+        return _finalize_existing_rgb24(
+            core,
+            clip,
+            source_props=source_props,
+            target_range=target_range,
+            expand_to_full=expand_to_full,
+            range_full=range_full,
+            range_limited=range_limited,
+        )
 
     resize_ns = getattr(core, "resize", None)
     if resize_ns is None:
@@ -678,9 +751,6 @@ def _ensure_rgb24(
                 "Colour metadata missing for frame %s; applying Rec.709 limited defaults",
                 frame_idx,
             )
-
-    range_full = int(getattr(vs, "RANGE_FULL", 0))
-    range_limited = int(getattr(vs, "RANGE_LIMITED", 1))
 
     source_range = range_limited if color_range is None else int(color_range)
     if source_range not in (range_full, range_limited):
@@ -837,11 +907,13 @@ def _apply_frame_info_overlay(
         info = "\n".join(lines)
         return subtitle(clip_ref, text=[info], style=FRAME_INFO_STYLE)
 
+    def _frame_info_callback(n: int, frame: Any, clip_ref: Any = clip) -> Any:
+        return _draw_info(n, frame, clip_ref)
+
     try:
-        info_clip = frame_eval(clip, partial(_draw_info, clip_ref=clip), prop_src=clip)
+        info_clip = frame_eval(clip, _frame_info_callback, prop_src=clip)
         result = subtitle(info_clip, text=[padding_title + label], style=FRAME_INFO_STYLE)
         result = _copy_frame_props(core, result, clip, context="frame info overlay")
-        result = _set_clip_range(core, result, 0, context="frame info overlay range")
         return result
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug('Applying frame overlay failed: %s', exc)
@@ -892,7 +964,6 @@ def _apply_overlay_text(
             logger.debug('Subtitle overlay failed, falling back: %s', exc)
         else:
             result = _copy_frame_props(core, result, clip, context="overlay preservation")
-            result = _set_clip_range(core, result, 0, context="overlay preservation range")
             if status != "ok":
                 logger.info('[OVERLAY] %s applied', file_label)
                 state["overlay_status"] = "ok"
@@ -919,7 +990,6 @@ def _apply_overlay_text(
             raise ScreenshotWriterError(message) from exc
         return clip
     result = _copy_frame_props(core, result, clip, context="overlay preservation")
-    result = _set_clip_range(core, result, 0, context="overlay preservation range")
     if status != "ok":
         logger.info('[OVERLAY] %s applied', file_label)
         state["overlay_status"] = "ok"
@@ -1962,6 +2032,7 @@ def _save_frame_with_fpng(
 
     resolved_policy = _normalise_geometry_policy(cfg.odd_geometry_policy)
     rgb_dither = _normalize_rgb_dither(cfg.rgb_dither)
+    expand_to_full = bool(expand_to_full) or _should_expand_to_full(getattr(cfg, "export_range", None))
     clip, source_props_map = _resolve_source_props(
         clip,
         source_props,
@@ -2101,7 +2172,11 @@ def _save_frame_with_fpng(
     )
 
     render_clip = work
-    overlay_range: Optional[int] = range_full
+    overlay_range: Optional[int] = (
+        output_color_range
+        if output_color_range in (range_full, range_limited)
+        else range_full
+    )
 
     if debug_state is not None:
         try:
@@ -2172,7 +2247,7 @@ def _save_frame_with_fpng(
                     print(
                         "[OVERLAY DEBUG] clip="
                         f"{_sanitize_for_log(label)} frame={frame_idx} stage=normalized "
-                        f"range={range_full} fmt={_sanitize_for_log(fmt_name)}",
+                        f"range={overlay_input_range} fmt={_sanitize_for_log(fmt_name)}",
                         flush=True,
                     )
             except Exception as exc:  # pragma: no cover - defensive
