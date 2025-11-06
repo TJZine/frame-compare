@@ -2118,6 +2118,17 @@ def _save_frame_with_fpng(
     overlay_resize_kwargs: Dict[str, Any] = {}
     if isinstance(overlay_format_id, int):
         overlay_resize_kwargs["format"] = overlay_format_id
+    log_overlay = bool(os.getenv("FRAME_COMPARE_LOG_OVERLAY_RANGE"))
+    if log_overlay:
+        fmt_name = getattr(clip_format, "name", None)
+        logger.info(
+            "[OVERLAY DEBUG] clip=%s frame=%s stage=pre-overlay range=%s props_range=%s fmt=%s",
+            label,
+            frame_idx,
+            overlay_input_range,
+            source_props_map.get("_ColorRange"),
+            fmt_name,
+        )
     converted_for_overlay = False
     if frame_info_allowed or (overlays_allowed and overlay_text):
         resize_ns = getattr(core, "resize", None)
@@ -2137,6 +2148,15 @@ def _save_frame_with_fpng(
                     range_full,
                     context="overlay range normalisation",
                 )
+                if log_overlay:
+                    fmt_name = getattr(getattr(render_clip, "format", None), "name", None)
+                    logger.info(
+                        "[OVERLAY DEBUG] clip=%s frame=%s stage=normalized range=%s fmt=%s",
+                        label,
+                        frame_idx,
+                        range_full,
+                        fmt_name,
+                    )
             except Exception as exc:  # pragma: no cover - defensive
                 logger.debug("Failed to normalize overlay range for frame %s: %s", frame_idx, exc)
         else:
@@ -2183,6 +2203,15 @@ def _save_frame_with_fpng(
                     int(output_color_range),
                     context="overlay range restore",
                 )
+                if log_overlay:
+                    fmt_name = getattr(getattr(render_clip, "format", None), "name", None)
+                    logger.info(
+                        "[OVERLAY DEBUG] clip=%s frame=%s stage=restored range=%s fmt=%s",
+                        label,
+                        frame_idx,
+                        output_color_range,
+                        fmt_name,
+                    )
             except Exception as exc:  # pragma: no cover - defensive
                 logger.debug(
                     "Failed to restore target range after overlay for frame %s: %s",
