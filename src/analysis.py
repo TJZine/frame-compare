@@ -1673,6 +1673,11 @@ def select_frames(
     selection_hash = _selection_fingerprint(cfg)
     selection_details: Dict[int, SelectionDetail] = {}
 
+    needs_dark = cfg.frame_count_dark > 0
+    needs_bright = cfg.frame_count_bright > 0
+    needs_motion = cfg.frame_count_motion > 0
+    needs_metrics = needs_dark or needs_bright or needs_motion
+
     def _ensure_detail(
         frame_idx: int,
         *,
@@ -1720,6 +1725,9 @@ def select_frames(
         if detail.clip_role is None:
             detail.clip_role = selection_clip_role
 
+    brightness: List[tuple[int, float]] = []
+    motion: List[tuple[int, float]] = []
+
     if cache_info is not None:
         sidecar_result = _load_selection_sidecar(cache_info, cfg, selection_hash)
         if sidecar_result is not None:
@@ -1761,16 +1769,30 @@ def select_frames(
     cached_details: Optional[Dict[int, SelectionDetail]] = None
 
     if cached_metrics is not None:
-        brightness = [
-            (idx, val)
-            for idx, val in cached_metrics.brightness
-            if window_start <= idx < window_end
-        ]
-        motion = [
-            (idx, val)
-            for idx, val in cached_metrics.motion
-            if window_start <= idx < window_end
-        ]
+        if needs_metrics:
+            brightness = [
+                (idx, val)
+                for idx, val in cached_metrics.brightness
+                if window_start <= idx < window_end
+            ]
+            motion = [
+                (idx, val)
+                for idx, val in cached_metrics.motion
+                if window_start <= idx < window_end
+            ]
+            if progress is not None:
+                progress(len(brightness))
+            logger.info(
+                "[ANALYSIS] using cached metrics (brightness=%d, motion=%d)",
+                len(brightness),
+                len(motion),
+            )
+        else:
+            brightness = []
+            motion = []
+            logger.info(
+                "[ANALYSIS] skipping cached metric reuse (dark/bright/motion disabled)"
+            )
         if cached_metrics.selection_hash == selection_hash:
             if cached_metrics.selection_frames is not None:
                 cached_selection = [
@@ -1782,46 +1804,44 @@ def select_frames(
                 cached_selection = None
             cached_categories = cached_metrics.selection_categories
             cached_details = cached_metrics.selection_details
-        if progress is not None:
-            progress(len(brightness))
-        logger.info(
-            "[ANALYSIS] using cached metrics (brightness=%d, motion=%d)",
-            len(brightness),
-            len(motion),
-        )
     else:
-        logger.info(
-            "[ANALYSIS] collecting metrics (indices=%d, step=%d, analyze_in_sdr=%s)",
-            len(indices),
-            step,
-            cfg.analyze_in_sdr,
-        )
-        start_metrics = time.perf_counter()
-        try:
-            brightness, motion = _collect_metrics_vapoursynth(
-                analysis_clip,
-                cfg,
-                indices,
-                progress,
-                color_cfg=color_cfg,
-                file_name=file_under_analysis,
-            )
+        if needs_metrics:
             logger.info(
-                "[ANALYSIS] metrics collected via VapourSynth in %.2fs (brightness=%d, motion=%d)",
-                time.perf_counter() - start_metrics,
-                len(brightness),
-                len(motion),
+                "[ANALYSIS] collecting metrics (indices=%d, step=%d, analyze_in_sdr=%s)",
+                len(indices),
+                step,
+                cfg.analyze_in_sdr,
             )
-        except Exception as exc:
-            logger.warning(
-                "[ANALYSIS] VapourSynth metrics collection failed (%s); "
-                "falling back to synthetic metrics",
-                exc,
-            )
-            brightness, motion = _generate_metrics_fallback(indices, cfg, progress)
+            start_metrics = time.perf_counter()
+            try:
+                brightness, motion = _collect_metrics_vapoursynth(
+                    analysis_clip,
+                    cfg,
+                    indices,
+                    progress,
+                    color_cfg=color_cfg,
+                    file_name=file_under_analysis,
+                )
+                logger.info(
+                    "[ANALYSIS] metrics collected via VapourSynth in %.2fs (brightness=%d, motion=%d)",
+                    time.perf_counter() - start_metrics,
+                    len(brightness),
+                    len(motion),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[ANALYSIS] VapourSynth metrics collection failed (%s); "
+                    "falling back to synthetic metrics",
+                    exc,
+                )
+                brightness, motion = _generate_metrics_fallback(indices, cfg, progress)
+                logger.info(
+                    "[ANALYSIS] synthetic metrics generated in %.2fs",
+                    time.perf_counter() - start_metrics,
+                )
+        else:
             logger.info(
-                "[ANALYSIS] synthetic metrics generated in %.2fs",
-                time.perf_counter() - start_metrics,
+                "[ANALYSIS] skipping brightness/motion analysis (dark/bright/motion counts are zero)"
             )
 
     if cached_selection is not None:

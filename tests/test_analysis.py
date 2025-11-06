@@ -538,6 +538,43 @@ def test_motion_quarter_gap(monkeypatch: pytest.MonkeyPatch) -> None:
     assert all(diff >= 48 for diff in diffs)
     assert any(diff < 192 for diff in diffs)
 
+
+def test_select_frames_skips_metric_collection_when_unneeded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clip = FakeClip(
+        num_frames=120,
+        brightness=[i / 120 for i in range(120)],
+        motion=[(120 - i) / 120 for i in range(120)],
+    )
+
+    cfg = AnalysisConfig(
+        frame_count_dark=0,
+        frame_count_bright=0,
+        frame_count_motion=0,
+        random_frames=2,
+        user_frames=[10],
+        screen_separation_sec=0,
+        step=1,
+        analyze_in_sdr=False,
+    )
+
+    def _fail_collect(*args: object, **kwargs: object) -> None:
+        raise AssertionError("metric collection should be bypassed")
+
+    monkeypatch.setattr(analysis_mod, "_collect_metrics_vapoursynth", _fail_collect)
+    monkeypatch.setattr(analysis_mod, "_generate_metrics_fallback", _fail_collect)
+
+    frames, categories, _details = _select_frames_with_metadata(
+        clip,
+        cfg,
+        files=["clip.mkv"],
+        file_under_analysis="clip.mkv",
+    )
+
+    assert frames
+    assert set(categories.values()).issubset({"User", "Random"})
+
 def test_selection_details_to_json_roundtrip():
     detail = SelectionDetail(
         frame_index=10,
