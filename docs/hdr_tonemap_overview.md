@@ -41,7 +41,7 @@ limited-range SDR pixels to full-range RGB just before export (recording the ori
 `"limited"` preserves the source range for workflows that expect video-range PNGs.
 
 The optional post-tonemap gamma stage applies a limited-range (`16`–`235`) `std.Levels` adjustment after tonemapping but
-before overlays, geometry, and dithering. Enable it with `[color].post_gamma_enable = true` (or `--tm-gamma <value>`)
+before overlays, geometry, and dithering, preserving video-level encoding. Enable it with `[color].post_gamma_enable = true` (or `--tm-gamma <value>`)
 when you need a gentle lift (`post_gamma ≈ 0.95`) for especially dark masters; use `--tm-gamma-disable` to force it off
 for a single run.
 

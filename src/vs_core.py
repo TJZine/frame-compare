@@ -1497,7 +1497,7 @@ def _resolve_tonemap_settings(cfg: Any) -> TonemapSettings:
     dst_min = float(getattr(cfg, "dst_min_nits", 0.18))
     knee_offset = float(getattr(cfg, "knee_offset", 0.5))
     dpd_preset_value = str(getattr(cfg, "dpd_preset", "high_quality") or "").strip().lower()
-    dpd_black_cutoff = float(getattr(cfg, "dpd_black_cutoff", 0.0))
+    dpd_black_cutoff = float(getattr(cfg, "dpd_black_cutoff", 0.01))
 
     provided = getattr(cfg, "_provided_keys", None)
 
@@ -1870,7 +1870,7 @@ def process_clip_for_screenshot(
         knee_offset=tonemap_settings.knee_offset,
         dpd_preset=tonemap_settings.dpd_preset,
         dpd_black_cutoff=tonemap_settings.dpd_black_cutoff if dpd else 0.0,
-        post_gamma=post_gamma_value,
+        post_gamma=post_gamma_value if post_gamma_cfg_enabled else 1.0,
         post_gamma_enabled=False,
     )
     overlay_text = None
@@ -2033,7 +2033,7 @@ def process_clip_for_screenshot(
         knee_offset=tonemap_settings.knee_offset,
         dpd_preset=tonemap_settings.dpd_preset,
         dpd_black_cutoff=tonemap_settings.dpd_black_cutoff if dpd else 0.0,
-        post_gamma=post_gamma_value if applied_post_gamma else post_gamma_value,
+        post_gamma=post_gamma_value if applied_post_gamma else 1.0,
         post_gamma_enabled=applied_post_gamma,
     )
 

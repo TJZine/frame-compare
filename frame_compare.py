@@ -2405,12 +2405,14 @@ def _build_legacy_summary_lines(values: Mapping[str, Any], *, emit_json_tail: bo
     tonemap_preset_label = _string(tonemap.get("dpd_preset"), "n/a")
     tonemap_gamma = _format_number(tonemap.get("post_gamma"), ".2f", "1.00")
     gamma_flag = "*" if bool(tonemap.get("post_gamma_enabled")) else ""
+    dpd_enabled = bool(tonemap.get("dpd"))
+    preset_suffix = f" ({tonemap_preset_label})" if dpd_enabled and tonemap_preset_label.lower() != "n/a" else ""
     lines.append(
         "Tonemap: "
         f"{tonemap_curve}@{tonemap_target}nits "
         f"dst_min={tonemap_dst_min} knee={tonemap_knee} "
-        f"dpd={_bool_text(tonemap.get('dynamic_peak_detection'))}"
-        f" ({tonemap_preset_label})  "
+        f"dpd={_bool_text(dpd_enabled)}"
+        f"{preset_suffix}  "
         f"gamma={tonemap_gamma}{gamma_flag}  "
         f"verify≤{_format_number(tonemap.get('verify_luma_threshold'), '.2f', '0.00')}"
     )
@@ -6680,8 +6682,9 @@ def _run_cli_entry(
 @click.option(
     "--tm-dpd-preset",
     "tm_dpd_preset",
+    type=click.Choice(["off", "fast", "balanced", "high_quality"], case_sensitive=False),
     default=None,
-    help="Override [color].dpd_preset (off, fast, balanced, high_quality) for this run.",
+    help="Override [color].dpd_preset.",
 )
 @click.option(
     "--tm-dpd-black-cutoff",
