@@ -4536,6 +4536,38 @@ def _confirm_alignment_with_screenshots(
         ),
     )
 
+
+def _validate_tonemap_overrides(overrides: Mapping[str, Any]) -> None:
+    """Validate CLI-provided tonemap overrides and raise ClickException on invalid values."""
+
+    if not overrides:
+        return
+
+    def _bad(message: str) -> None:
+        raise click.ClickException(message)
+
+    if "knee_offset" in overrides:
+        knee_value = float(overrides["knee_offset"])
+        if knee_value < 0.0 or knee_value > 1.0:
+            _bad("--tm-knee must be between 0.0 and 1.0")
+    if "dst_min_nits" in overrides:
+        dst_value = float(overrides["dst_min_nits"])
+        if dst_value < 0.0:
+            _bad("--tm-dst-min must be >= 0.0")
+    if "post_gamma" in overrides:
+        gamma_value = float(overrides["post_gamma"])
+        if gamma_value < 0.7 or gamma_value > 1.3:
+            _bad("--tm-gamma should be between 0.7 and 1.3")
+    if "dpd_preset" in overrides:
+        dpd_value = str(overrides["dpd_preset"]).strip().lower()
+        if dpd_value not in {"off", "fast", "balanced", "high_quality"}:
+            _bad("--tm-dpd-preset must be one of: off, fast, balanced, high_quality")
+    if "dpd_black_cutoff" in overrides:
+        cutoff = float(overrides["dpd_black_cutoff"])
+        if cutoff < 0.0 or cutoff > 0.05:
+            _bad("--tm-dpd-black-cutoff must be between 0.0 and 0.05")
+
+
 def run_cli(
     config_path: str | None,
     input_dir: str | None = None,
@@ -4582,6 +4614,7 @@ def run_cli(
     )
     cfg = preflight.config
     if tonemap_overrides:
+        _validate_tonemap_overrides(tonemap_overrides)
         color_cfg = getattr(cfg, "color", None)
         if color_cfg is not None:
             if "preset" in tonemap_overrides:
@@ -4596,6 +4629,8 @@ def run_cli(
                 color_cfg.knee_offset = float(tonemap_overrides["knee_offset"])
             if "dpd_preset" in tonemap_overrides:
                 color_cfg.dpd_preset = str(tonemap_overrides["dpd_preset"])
+            if "dpd_black_cutoff" in tonemap_overrides:
+                color_cfg.dpd_black_cutoff = float(tonemap_overrides["dpd_black_cutoff"])
             if "post_gamma" in tonemap_overrides:
                 color_cfg.post_gamma = float(tonemap_overrides["post_gamma"])
             if "post_gamma_enable" in tonemap_overrides:
@@ -5813,6 +5848,7 @@ def run_cli(
         "preset": effective_tonemap.get("preset", cfg.color.preset),
         "tone_curve": effective_tonemap.get("tone_curve", cfg.color.tone_curve),
         "dynamic_peak_detection": bool(effective_tonemap.get("dynamic_peak_detection", cfg.color.dynamic_peak_detection)),
+        "dpd": bool(effective_tonemap.get("dynamic_peak_detection", cfg.color.dynamic_peak_detection)),
         "target_nits": float(effective_tonemap.get("target_nits", cfg.color.target_nits)),
         "dst_min_nits": float(effective_tonemap.get("dst_min_nits", cfg.color.dst_min_nits)),
         "knee_offset": float(effective_tonemap.get("knee_offset", getattr(cfg.color, "knee_offset", 0.5))),
@@ -6349,6 +6385,7 @@ def _run_cli_entry(
     tm_dst_min: float | None,
     tm_knee: float | None,
     tm_dpd_preset: str | None,
+    tm_dpd_black_cutoff: float | None,
     tm_gamma: float | None,
     tm_gamma_disable: bool,
 ) -> None:
@@ -6382,6 +6419,8 @@ def _run_cli_entry(
         tonemap_override["knee_offset"] = tm_knee
     if tm_dpd_preset:
         tonemap_override["dpd_preset"] = tm_dpd_preset
+    if tm_dpd_black_cutoff is not None:
+        tonemap_override["dpd_black_cutoff"] = tm_dpd_black_cutoff
     if tm_gamma is not None:
         tonemap_override["post_gamma"] = tm_gamma
         tonemap_override["post_gamma_enable"] = True
@@ -6645,6 +6684,13 @@ def _run_cli_entry(
     help="Override [color].dpd_preset (off, fast, balanced, high_quality) for this run.",
 )
 @click.option(
+    "--tm-dpd-black-cutoff",
+    "tm_dpd_black_cutoff",
+    type=float,
+    default=None,
+    help="Override [color].dpd_black_cutoff (0.0–0.05) for this run.",
+)
+@click.option(
     "--tm-gamma",
     "tm_gamma",
     type=float,
@@ -6680,6 +6726,7 @@ def main(
     tm_dst_min: float | None,
     tm_knee: float | None,
     tm_dpd_preset: str | None,
+    tm_dpd_black_cutoff: float | None,
     tm_gamma: float | None,
     tm_gamma_disable: bool,
 ) -> None:
@@ -6706,6 +6753,7 @@ def main(
         "tm_dst_min": tm_dst_min,
         "tm_knee": tm_knee,
         "tm_dpd_preset": tm_dpd_preset,
+        "tm_dpd_black_cutoff": tm_dpd_black_cutoff,
         "tm_gamma": tm_gamma,
         "tm_gamma_disable": tm_gamma_disable,
     }
@@ -6744,6 +6792,7 @@ def run_command(ctx: click.Context) -> None:
         tm_dst_min=params.get("tm_dst_min"),
         tm_knee=params.get("tm_knee"),
         tm_dpd_preset=params.get("tm_dpd_preset"),
+        tm_dpd_black_cutoff=params.get("tm_dpd_black_cutoff"),
         tm_gamma=params.get("tm_gamma"),
         tm_gamma_disable=bool(params.get("tm_gamma_disable", False)),
     )

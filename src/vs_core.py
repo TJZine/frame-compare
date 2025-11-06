@@ -1296,7 +1296,10 @@ def _call_tonemap_function(
     usable_kwargs = {
         key: value for key, value in call_kwargs.items() if key not in _TONEMAP_UNSUPPORTED_KWARGS
     }
+    max_attempts = len(usable_kwargs) + 1
+    attempts = 0
     while True:
+        attempts += 1
         try:
             return func(clip, **usable_kwargs)
         except TypeError as exc:
@@ -1310,6 +1313,8 @@ def _call_tonemap_function(
                         missing,
                     )
                 usable_kwargs.pop(missing, None)
+                if attempts >= max_attempts:
+                    raise
                 continue
             raise
 
@@ -1324,6 +1329,35 @@ def _apply_post_gamma_levels(
 ) -> Any:
     if abs(gamma - 1.0) < 1e-4:
         return clip
+
+    def _resolve_level_bounds() -> tuple[float | int, float | int, float | int, float | int]:
+        fmt = getattr(clip, "format", None)
+        if fmt is None:
+            return 16, 235, 16, 235
+        sample_type = getattr(fmt, "sample_type", None)
+        bits = getattr(fmt, "bits_per_sample", None)
+        sample_type_val: Optional[int] = None
+        if sample_type is not None:
+            try:
+                sample_type_val = int(sample_type)
+            except Exception:
+                name = str(getattr(sample_type, "name", "")).upper()
+                if name == "INTEGER":
+                    sample_type_val = 0
+                elif name == "FLOAT":
+                    sample_type_val = 1
+        min_ratio = 16.0 / 255.0
+        max_ratio = 235.0 / 255.0
+        if sample_type_val == 1:
+            return min_ratio, max_ratio, min_ratio, max_ratio
+        if sample_type_val == 0 and isinstance(bits, int) and bits > 0:
+            full_scale = float((1 << bits) - 1)
+            min_value = round(min_ratio * full_scale)
+            max_value = round(max_ratio * full_scale)
+            return int(min_value), int(max_value), int(min_value), int(max_value)
+        return 16, 235, 16, 235
+
+    min_in, max_in, min_out, max_out = _resolve_level_bounds()
     std_ns = getattr(core, "std", None)
     levels = getattr(std_ns, "Levels", None) if std_ns is not None else None
     if not callable(levels):
@@ -1332,10 +1366,10 @@ def _apply_post_gamma_levels(
     try:
         adjusted = levels(
             clip,
-            min_in=16,
-            max_in=235,
-            min_out=16,
-            max_out=235,
+            min_in=min_in,
+            max_in=max_in,
+            min_out=min_out,
+            max_out=max_out,
             gamma=float(gamma),
         )
         log.info("[TM GAMMA] %s applied gamma=%.3f", file_name, gamma)
@@ -1433,6 +1467,7 @@ _TONEMAP_PRESETS: Dict[str, Dict[str, float | str | bool]] = {
         "dst_min_nits": 0.18,
         "dpd_preset": "high_quality",
         "dpd_black_cutoff": 0.01,
+        "knee_offset": 0.50,
     },
     "spline": {
         "tone_curve": "spline",
@@ -1441,6 +1476,7 @@ _TONEMAP_PRESETS: Dict[str, Dict[str, float | str | bool]] = {
         "dst_min_nits": 0.18,
         "dpd_preset": "high_quality",
         "dpd_black_cutoff": 0.01,
+        "knee_offset": 0.50,
     },
     "contrast": {
         "tone_curve": "mobius",

@@ -261,18 +261,21 @@ def test_apply_post_gamma_levels_uses_limited_bounds() -> None:
             return "gamma"
 
     core = types.SimpleNamespace(std=FakeStd())
+    clip = types.SimpleNamespace(
+        format=_FakeFormat(bits_per_sample=16, sample_type=_FakeSampleType("INTEGER", 0))
+    )
     result = vs_core._apply_post_gamma_levels(
         core,
-        clip="clip",
+        clip=clip,
         gamma=0.95,
         file_name="sample",
         log=logging.getLogger("test"),
     )
     assert result == "gamma"
-    assert captured["min_in"] == 16
-    assert captured["max_in"] == 235
-    assert captured["min_out"] == 16
-    assert captured["max_out"] == 235
+    assert captured["min_in"] == 16 * 257
+    assert captured["max_in"] == 235 * 257
+    assert captured["min_out"] == 16 * 257
+    assert captured["max_out"] == 235 * 257
     assert captured["gamma"] == pytest.approx(0.95)
 
 
@@ -287,6 +290,32 @@ def test_apply_post_gamma_levels_skips_when_unity() -> None:
         log=logging.getLogger("test"),
     )
     assert result is clip
+
+
+def test_apply_post_gamma_levels_scales_float_clip() -> None:
+    captured: Dict[str, Any] = {}
+
+    class FakeStd:
+        def Levels(self, clip: Any, **kwargs: Any) -> Any:
+            captured.update(kwargs)
+            return clip
+
+    clip = types.SimpleNamespace(
+        format=_FakeFormat(bits_per_sample=32, sample_type=_FakeSampleType("FLOAT", 1))
+    )
+    core = types.SimpleNamespace(std=FakeStd())
+    vs_core._apply_post_gamma_levels(
+        core,
+        clip=clip,
+        gamma=1.05,
+        file_name="float",
+        log=logging.getLogger("test"),
+    )
+    assert captured["min_in"] == pytest.approx(16 / 255)
+    assert captured["max_in"] == pytest.approx(235 / 255)
+    assert captured["min_out"] == pytest.approx(16 / 255)
+    assert captured["max_out"] == pytest.approx(235 / 255)
+    assert captured["gamma"] == pytest.approx(1.05)
 
 
 def test_tonemap_kwargs_include_optional_parameters() -> None:

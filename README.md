@@ -230,6 +230,7 @@ Offline HTML reports mirror slow.pics ergonomics: filmstrip thumbnails with sele
 | `--tm-dst-min VALUE` | Override `[color].dst_min_nits` |
 | `--tm-knee VALUE` | Override `[color].knee_offset` (0–1) |
 | `--tm-dpd-preset NAME` | Override `[color].dpd_preset` (`off`, `fast`, `balanced`, `high_quality`) |
+| `--tm-dpd-black-cutoff VALUE` | Override `[color].dpd_black_cutoff` (`0.0–0.05`) |
 | `--tm-gamma VALUE` | Override `[color].post_gamma` and enable the gamma lift |
 | `--tm-gamma-disable` | Disable the post-tonemap gamma lift for this run |
 | `--write-config` | Ensure `ROOT/config/config.toml` exists, then exit |
