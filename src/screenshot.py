@@ -101,6 +101,16 @@ def _should_expand_to_full(export_range: ExportRange | str | None) -> bool:
     return False
 
 
+def _sanitize_for_log(value: object) -> str:
+    """Return an ASCII-safe representation of *value* for logging."""
+
+    text = str(value)
+    try:
+        return text.encode("ascii", "replace").decode("ascii")
+    except Exception:
+        return repr(value)
+
+
 def _set_clip_range(core: Any, clip: Any, color_range: int | None, *, context: str) -> Any:
     """Stamp `_ColorRange` on *clip* when ``SetFrameProps`` is available."""
 
@@ -2123,11 +2133,11 @@ def _save_frame_with_fpng(
         fmt_name = getattr(clip_format, "name", None)
         logger.info(
             "[OVERLAY DEBUG] clip=%s frame=%s stage=pre-overlay range=%s props_range=%s fmt=%s",
-            label,
+            _sanitize_for_log(label),
             frame_idx,
             overlay_input_range,
             source_props_map.get("_ColorRange"),
-            fmt_name,
+            _sanitize_for_log(fmt_name),
         )
     converted_for_overlay = False
     if frame_info_allowed or (overlays_allowed and overlay_text):
@@ -2152,10 +2162,10 @@ def _save_frame_with_fpng(
                     fmt_name = getattr(getattr(render_clip, "format", None), "name", None)
                     logger.info(
                         "[OVERLAY DEBUG] clip=%s frame=%s stage=normalized range=%s fmt=%s",
-                        label,
+                        _sanitize_for_log(label),
                         frame_idx,
                         range_full,
-                        fmt_name,
+                        _sanitize_for_log(fmt_name),
                     )
             except Exception as exc:  # pragma: no cover - defensive
                 logger.debug("Failed to normalize overlay range for frame %s: %s", frame_idx, exc)
@@ -2207,10 +2217,10 @@ def _save_frame_with_fpng(
                     fmt_name = getattr(getattr(render_clip, "format", None), "name", None)
                     logger.info(
                         "[OVERLAY DEBUG] clip=%s frame=%s stage=restored range=%s fmt=%s",
-                        label,
+                        _sanitize_for_log(label),
                         frame_idx,
                         output_color_range,
-                        fmt_name,
+                        _sanitize_for_log(fmt_name),
                     )
             except Exception as exc:  # pragma: no cover - defensive
                 logger.debug(
