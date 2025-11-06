@@ -101,6 +101,11 @@ class TonemapInfo:
     reason: Optional[str] = None
     output_color_range: Optional[int] = None
     range_detection: Optional[str] = None
+    knee_offset: Optional[float] = None
+    dpd_preset: Optional[str] = None
+    dpd_black_cutoff: Optional[float] = None
+    post_gamma: Optional[float] = None
+    post_gamma_enabled: bool = False
 
 
 @dataclass(frozen=True)
@@ -121,6 +126,20 @@ class ColorDebugArtifacts:
     normalized_props: Mapping[str, Any] | None
     original_props: Mapping[str, Any] | None
     color_tuple: tuple[Optional[int], Optional[int], Optional[int], Optional[int]] | None
+
+
+@dataclass(frozen=True)
+class TonemapSettings:
+    """Resolved tonemap configuration used for the current clip."""
+
+    preset: str
+    tone_curve: str
+    target_nits: float
+    dynamic_peak_detection: bool
+    dst_min_nits: float
+    knee_offset: float
+    dpd_preset: str
+    dpd_black_cutoff: float
 
 
 @dataclass(frozen=True)
@@ -1256,6 +1275,76 @@ def _deduce_src_csp_hint(transfer: Optional[int], primaries: Optional[int]) -> O
     return None
 
 
+_TONEMAP_UNSUPPORTED_KWARGS: set[str] = set()
+
+
+def _parse_unexpected_kwarg(exc: BaseException) -> Optional[str]:
+    message = str(exc)
+    match = re.search(r"unexpected keyword argument '([^']+)'", message)
+    if match:
+        return match.group(1)
+    return None
+
+
+def _call_tonemap_function(
+    func: Callable[..., Any],
+    clip: Any,
+    call_kwargs: Dict[str, Any],
+    *,
+    file_name: str,
+) -> Any:
+    usable_kwargs = {
+        key: value for key, value in call_kwargs.items() if key not in _TONEMAP_UNSUPPORTED_KWARGS
+    }
+    while True:
+        try:
+            return func(clip, **usable_kwargs)
+        except TypeError as exc:
+            missing = _parse_unexpected_kwarg(exc)
+            if missing and missing in usable_kwargs:
+                if missing not in _TONEMAP_UNSUPPORTED_KWARGS:
+                    _TONEMAP_UNSUPPORTED_KWARGS.add(missing)
+                    logger.warning(
+                        "[Tonemap compat] %s missing support for '%s'; retrying without it",
+                        file_name,
+                        missing,
+                    )
+                usable_kwargs.pop(missing, None)
+                continue
+            raise
+
+
+def _apply_post_gamma_levels(
+    core: Any,
+    clip: Any,
+    *,
+    gamma: float,
+    file_name: str,
+    log: logging.Logger,
+) -> Any:
+    if abs(gamma - 1.0) < 1e-4:
+        return clip
+    std_ns = getattr(core, "std", None)
+    levels = getattr(std_ns, "Levels", None) if std_ns is not None else None
+    if not callable(levels):
+        log.warning("[TM GAMMA] %s requested post-gamma but std.Levels is unavailable", file_name)
+        return clip
+    try:
+        adjusted = levels(
+            clip,
+            min_in=16,
+            max_in=235,
+            min_out=16,
+            max_out=235,
+            gamma=float(gamma),
+        )
+        log.info("[TM GAMMA] %s applied gamma=%.3f", file_name, gamma)
+        return adjusted
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning("[TM GAMMA] %s failed to apply gamma: %s", file_name, exc)
+        return clip
+
+
 def _tonemap_with_retries(
     core: Any,
     rgb_clip: Any,
@@ -1264,6 +1353,9 @@ def _tonemap_with_retries(
     target_nits: float,
     dst_min: float,
     dpd: int,
+    knee_offset: float,
+    dpd_preset: str,
+    dpd_black_cutoff: float,
     src_hint: Optional[int],
     file_name: str,
 ) -> Any:
@@ -1286,21 +1378,29 @@ def _tonemap_with_retries(
         scene_threshold_high=0.30,
         gamut_mapping=1,
         tone_mapping_function_s=tone_curve,
+        tone_mapping_param=float(knee_offset),
+        peak_detection_preset=str(dpd_preset),
+        black_cutoff=float(dpd_black_cutoff),
         use_dovi=True,
         log_level=2,
     )
 
+    def _attempt(**extra_kwargs: Any) -> Any:
+        combined = dict(kwargs)
+        combined.update(extra_kwargs)
+        return _call_tonemap_function(tonemap, rgb_clip, combined, file_name=file_name)
+
     if src_hint is not None:
         try:
-            return tonemap(rgb_clip, src_csp=src_hint, **kwargs)
+            return _attempt(src_csp=src_hint)
         except Exception as exc:
             logger.warning("[Tonemap attempt A failed] %s src_csp=%s: %s", file_name, src_hint, exc)
     try:
-        return tonemap(rgb_clip, **kwargs)
+        return _attempt()
     except Exception as exc:
         logger.warning("[Tonemap attempt B failed] %s infer-from-props: %s", file_name, exc)
     try:
-        return tonemap(rgb_clip, src_csp=1, **kwargs)
+        return _attempt(src_csp=1)
     except Exception as exc:
         raise ClipProcessError(
             f"libplacebo.Tonemap final fallback failed for '{file_name}': {exc}"
@@ -1308,18 +1408,60 @@ def _tonemap_with_retries(
 
 
 _TONEMAP_PRESETS: Dict[str, Dict[str, float | str | bool]] = {
-    "reference": {"tone_curve": "bt.2390", "target_nits": 100.0, "dynamic_peak_detection": True},
-    "contrast": {"tone_curve": "mobius", "target_nits": 120.0, "dynamic_peak_detection": False},
-    "filmic": {"tone_curve": "hable", "target_nits": 100.0, "dynamic_peak_detection": True},
+    "reference": {
+        "tone_curve": "bt.2390",
+        "target_nits": 100.0,
+        "dynamic_peak_detection": True,
+        "knee_offset": 0.50,
+        "dst_min_nits": 0.18,
+        "dpd_preset": "high_quality",
+        "dpd_black_cutoff": 0.01,
+    },
+    "bt2390_spec": {
+        "tone_curve": "bt.2390",
+        "target_nits": 100.0,
+        "dynamic_peak_detection": True,
+        "knee_offset": 0.50,
+        "dst_min_nits": 0.18,
+        "dpd_preset": "high_quality",
+        "dpd_black_cutoff": 0.0,
+    },
+    "filmic": {
+        "tone_curve": "bt.2446a",
+        "target_nits": 100.0,
+        "dynamic_peak_detection": True,
+        "dst_min_nits": 0.18,
+        "dpd_preset": "high_quality",
+        "dpd_black_cutoff": 0.01,
+    },
+    "spline": {
+        "tone_curve": "spline",
+        "target_nits": 100.0,
+        "dynamic_peak_detection": True,
+        "dst_min_nits": 0.18,
+        "dpd_preset": "high_quality",
+        "dpd_black_cutoff": 0.01,
+    },
+    "contrast": {
+        "tone_curve": "mobius",
+        "target_nits": 120.0,
+        "dynamic_peak_detection": False,
+        "dst_min_nits": 0.10,
+        "dpd_preset": "off",
+        "dpd_black_cutoff": 0.0,
+    },
 }
 
 
-def _resolve_tonemap_settings(cfg: Any) -> tuple[str, str, float, int, float]:
+def _resolve_tonemap_settings(cfg: Any) -> TonemapSettings:
     preset = str(getattr(cfg, "preset", "") or "").strip().lower()
     tone_curve = str(getattr(cfg, "tone_curve", "bt.2390") or "bt.2390")
     target_nits = float(getattr(cfg, "target_nits", 100.0))
     dpd_flag = bool(getattr(cfg, "dynamic_peak_detection", True))
-    dst_min = float(getattr(cfg, "dst_min_nits", 0.1))
+    dst_min = float(getattr(cfg, "dst_min_nits", 0.18))
+    knee_offset = float(getattr(cfg, "knee_offset", 0.5))
+    dpd_preset_value = str(getattr(cfg, "dpd_preset", "high_quality") or "").strip().lower()
+    dpd_black_cutoff = float(getattr(cfg, "dpd_black_cutoff", 0.0))
 
     provided = getattr(cfg, "_provided_keys", None)
 
@@ -1331,26 +1473,46 @@ def _resolve_tonemap_settings(cfg: Any) -> tuple[str, str, float, int, float]:
     if preset and preset != "custom":
         preset_vals = _TONEMAP_PRESETS.get(preset)
         if preset_vals:
-            if not _was_provided("tone_curve"):
+            if not _was_provided("tone_curve") and "tone_curve" in preset_vals:
                 tone_curve = str(preset_vals["tone_curve"])
-            if not _was_provided("target_nits"):
+            if not _was_provided("target_nits") and "target_nits" in preset_vals:
                 target_nits = float(preset_vals["target_nits"])
-            if not _was_provided("dynamic_peak_detection"):
+            if not _was_provided("dynamic_peak_detection") and "dynamic_peak_detection" in preset_vals:
                 dpd_flag = bool(preset_vals["dynamic_peak_detection"])
+            if not _was_provided("dst_min_nits") and "dst_min_nits" in preset_vals:
+                dst_min = float(preset_vals["dst_min_nits"])
+            if not _was_provided("knee_offset") and "knee_offset" in preset_vals:
+                knee_offset = float(preset_vals["knee_offset"])
+            if not _was_provided("dpd_preset") and "dpd_preset" in preset_vals:
+                dpd_preset_value = str(preset_vals["dpd_preset"])
+            if not _was_provided("dpd_black_cutoff") and "dpd_black_cutoff" in preset_vals:
+                dpd_black_cutoff = float(preset_vals["dpd_black_cutoff"])
 
-    return preset or "custom", tone_curve, target_nits, int(dpd_flag), dst_min
+    return TonemapSettings(
+        preset=preset or "custom",
+        tone_curve=tone_curve,
+        target_nits=float(target_nits),
+        dynamic_peak_detection=bool(dpd_flag),
+        dst_min_nits=float(dst_min),
+        knee_offset=float(knee_offset),
+        dpd_preset=dpd_preset_value or ("off" if not dpd_flag else "high_quality"),
+        dpd_black_cutoff=float(dpd_black_cutoff),
+    )
 
 
 def resolve_effective_tonemap(cfg: Any) -> Dict[str, Any]:
     """Resolve the effective tonemap preset, curve, and luminance for ``cfg``."""
 
-    preset, tone_curve, target_nits, dpd_flag, dst_min = _resolve_tonemap_settings(cfg)
+    settings = _resolve_tonemap_settings(cfg)
     return {
-        "preset": preset,
-        "tone_curve": tone_curve,
-        "target_nits": float(target_nits),
-        "dynamic_peak_detection": bool(dpd_flag),
-        "dst_min_nits": float(dst_min),
+        "preset": settings.preset,
+        "tone_curve": settings.tone_curve,
+        "target_nits": float(settings.target_nits),
+        "dynamic_peak_detection": bool(settings.dynamic_peak_detection),
+        "dst_min_nits": float(settings.dst_min_nits),
+        "knee_offset": float(settings.knee_offset),
+        "dpd_preset": settings.dpd_preset,
+        "dpd_black_cutoff": float(settings.dpd_black_cutoff),
     }
 
 
@@ -1361,6 +1523,12 @@ def _format_overlay_text(
     dpd: int,
     target_nits: float,
     preset: str,
+    dst_min_nits: float,
+    knee_offset: float,
+    dpd_preset: str,
+    dpd_black_cutoff: float,
+    post_gamma: float,
+    post_gamma_enabled: bool,
     reason: Optional[str] = None,
 ) -> str:
     """
@@ -1370,7 +1538,8 @@ def _format_overlay_text(
         template (str): A format string that may reference the following keys: `tone_curve`, `curve` (alias),
         `dynamic_peak_detection`, `dpd` (numeric), `dynamic_peak_detection_bool`, `dpd_bool` (boolean),
         `target_nits` (int when whole number, otherwise float), `target_nits_float` (always float),
-        `preset`, and `reason`.
+        `dst_min_nits`, `knee_offset`, `dpd_preset`, `dpd_black_cutoff`, `post_gamma`,
+        `post_gamma_enabled`, `preset`, and `reason`.
         tone_curve (str): Name of the tone curve to show.
         dpd (int): Dynamic peak detection flag (0 or 1); boolean aliases are provided in the template values.
         target_nits (float): Target display luminance in nits.
@@ -1395,6 +1564,12 @@ def _format_overlay_text(
         "target_nits_float": target_nits,
         "preset": preset,
         "reason": reason or "",
+        "dst_min_nits": dst_min_nits,
+        "knee_offset": knee_offset,
+        "dpd_preset": dpd_preset,
+        "dpd_black_cutoff": dpd_black_cutoff,
+        "post_gamma": post_gamma,
+        "post_gamma_enabled": post_gamma_enabled,
     }
     try:
         return template.format(**values)
@@ -1609,7 +1784,14 @@ def process_clip_for_screenshot(
     if core is None:
         raise ClipProcessError("Clip has no associated VapourSynth core")
 
-    preset, tone_curve, target_nits, dpd, dst_min = _resolve_tonemap_settings(cfg)
+    tonemap_settings = _resolve_tonemap_settings(cfg)
+    preset = tonemap_settings.preset
+    tone_curve = tonemap_settings.tone_curve
+    target_nits = tonemap_settings.target_nits
+    dpd = int(tonemap_settings.dynamic_peak_detection)
+    dst_min = tonemap_settings.dst_min_nits
+    post_gamma_cfg_enabled = bool(getattr(cfg, "post_gamma_enable", False))
+    post_gamma_value = float(getattr(cfg, "post_gamma", 1.0))
     overlay_enabled = enable_overlay and bool(getattr(cfg, "overlay_enabled", True)) and not debug_color
     verify_enabled = enable_verification and bool(getattr(cfg, "verify_enabled", True))
     strict = bool(getattr(cfg, "strict", False))
@@ -1649,6 +1831,11 @@ def process_clip_for_screenshot(
         reason=tonemap_reason,
         output_color_range=source_range_value,
         range_detection="source_props" if source_range_value is not None else None,
+        knee_offset=tonemap_settings.knee_offset,
+        dpd_preset=tonemap_settings.dpd_preset,
+        dpd_black_cutoff=tonemap_settings.dpd_black_cutoff if dpd else 0.0,
+        post_gamma=post_gamma_value,
+        post_gamma_enabled=False,
     )
     overlay_text = None
     verification: Optional[VerificationResult] = None
@@ -1707,6 +1894,9 @@ def process_clip_for_screenshot(
         target_nits=target_nits,
         dst_min=dst_min,
         dpd=dpd,
+        knee_offset=tonemap_settings.knee_offset,
+        dpd_preset=tonemap_settings.dpd_preset,
+        dpd_black_cutoff=tonemap_settings.dpd_black_cutoff,
         src_hint=src_hint,
         file_name=file_name,
     )
@@ -1717,6 +1907,16 @@ def process_clip_for_screenshot(
         data=f"placebo:{tone_curve},dpd={dpd},dst_max={target_nits}",
     )
     tonemapped = _normalize_rgb_props(tonemapped, transfer=1, primaries=1)
+    applied_post_gamma = False
+    if post_gamma_cfg_enabled:
+        tonemapped = _apply_post_gamma_levels(
+            core,
+            tonemapped,
+            gamma=post_gamma_value,
+            file_name=file_name,
+            log=log,
+        )
+        applied_post_gamma = True
 
     detected_range, detection_source = _detect_rgb_color_range(
         core,
@@ -1794,6 +1994,11 @@ def process_clip_for_screenshot(
         reason=None,
         output_color_range=effective_range,
         range_detection=fallback_source,
+        knee_offset=tonemap_settings.knee_offset,
+        dpd_preset=tonemap_settings.dpd_preset,
+        dpd_black_cutoff=tonemap_settings.dpd_black_cutoff if dpd else 0.0,
+        post_gamma=post_gamma_value if applied_post_gamma else post_gamma_value,
+        post_gamma_enabled=applied_post_gamma,
     )
 
     overlay_template = str(
@@ -1810,6 +2015,12 @@ def process_clip_for_screenshot(
             dpd=dpd,
             target_nits=target_nits,
             preset=preset,
+            dst_min_nits=dst_min,
+            knee_offset=tonemap_settings.knee_offset,
+            dpd_preset=tonemap_settings.dpd_preset,
+            dpd_black_cutoff=tonemap_settings.dpd_black_cutoff if dpd else 0.0,
+            post_gamma=post_gamma_value,
+            post_gamma_enabled=applied_post_gamma,
             reason="HDR",
         )
         log.info("[OVERLAY] %s using text '%s'", file_name, overlay_text)

@@ -21,19 +21,29 @@ reference.
 ## Presets & configuration
 `[color]` defines the behaviour, defaulting to the "reference" preset:
 
-| Preset | Tone curve | Target nits | DPD |
-| ------ | ---------- | ----------- | --- |
-| reference | `bt.2390` | 100 | enabled |
-| contrast  | `mobius`  | 120 | disabled |
-| filmic    | `hable`   | 100 | enabled |
+| Preset | Tone curve | Target nits | DPD | Notes |
+| ------ | ---------- | ----------- | --- | ----- |
+| reference | `bt.2390` | 100 | enabled | Knee `0.50`, dst_min `0.18`, `dpd_preset="high_quality"` |
+| bt2390_spec | `bt.2390` | 100 | enabled | Identical to reference but with a neutral DPD cutoff |
+| contrast | `mobius` | 120 | disabled | Legacy punchy look, dst_min `0.10`, forces DPD off |
+| filmic | `bt.2446a` | 100 | enabled | Softer shoulder for well-mastered PQ |
+| spline | `spline` | 100 | enabled | Smooth roll-off for high-contrast footage |
 
 Set `preset="custom"` to honour manual `tone_curve`, `target_nits`, and `dynamic_peak_detection`. `dst_min_nits` feeds
-libplacebo's `dst_min`. Logs include `[TM INPUT]` and `[TM APPLIED]` lines showing the inferred color props and the
-resolved curve/DPD/nits.
+libplacebo's `dst_min`. `knee_offset` forwards to `tone_mapping_param` for BT.2390 curves, and `dpd_preset` selects the
+libplacebo peak-detection mode (`off`, `fast`, `balanced`, `high_quality`). Logs include `[TM INPUT]` and `[TM APPLIED]`
+lines showing the inferred color props and the resolved curve/DPD/nits. Runtime tweaks are available via CLI flags such
+as `--tm-preset`, `--tm-knee`, `--tm-dst-min`, and `--tm-dpd-preset`, making it easy to audition settings before
+committing them to `config.toml`.
 
 The screenshot writer controls the final PNG range via `[screenshots].export_range`. The default `"full"` setting expands
 limited-range SDR pixels to full-range RGB just before export (recording the original value in `_SourceColorRange`), while
 `"limited"` preserves the source range for workflows that expect video-range PNGs.
+
+The optional post-tonemap gamma stage applies a limited-range (`16`–`235`) `std.Levels` adjustment after tonemapping but
+before overlays, geometry, and dithering. Enable it with `[color].post_gamma_enable = true` (or `--tm-gamma <value>`)
+when you need a gentle lift (`post_gamma ≈ 0.95`) for especially dark masters; use `--tm-gamma-disable` to force it off
+for a single run.
 
 ## Log cheat sheet
 - `[TM INPUT]` — Source properties at the start of processing. Includes Matrix/Transfer/Primaries/Range.

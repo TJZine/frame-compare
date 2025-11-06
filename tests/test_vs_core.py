@@ -2,12 +2,22 @@ import logging
 import math
 import sys
 import types
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any, Dict, List, Sequence
+
+import pytest
 
 from src import vs_core
 from src.datatypes import ColorConfig
 from src.vs_core import VerificationResult
+
+
+@pytest.fixture(autouse=True)
+def reset_tonemap_kwargs() -> Iterator[None]:
+    vs_core._TONEMAP_UNSUPPORTED_KWARGS.clear()
+    yield
+    vs_core._TONEMAP_UNSUPPORTED_KWARGS.clear()
 
 
 def test_pick_verify_frame_warns_when_no_frames() -> None:
@@ -42,6 +52,9 @@ def test_resolve_effective_tonemap_uses_preset_defaults() -> None:
         target_nits=100.0,
         dynamic_peak_detection=True,
         dst_min_nits=0.1,
+        knee_offset=0.4,
+        dpd_preset="high_quality",
+        dpd_black_cutoff=0.02,
         _provided_keys={"preset"},
     )
 
@@ -51,6 +64,9 @@ def test_resolve_effective_tonemap_uses_preset_defaults() -> None:
     assert resolved["tone_curve"] == "mobius"
     assert resolved["target_nits"] == 120.0
     assert resolved["dynamic_peak_detection"] is False
+    assert resolved["dst_min_nits"] == 0.10
+    assert resolved["knee_offset"] == 0.4
+    assert resolved["dpd_preset"] == "off"
 
 
 class _FakeSampleType:
@@ -234,6 +250,104 @@ def test_compute_verification_preserves_float_clip() -> None:
     result = _run_compute_verification(fmt, props)
     assert math.isclose(result.average, 0.25)
     assert math.isclose(result.maximum, 0.75)
+
+
+def test_apply_post_gamma_levels_uses_limited_bounds() -> None:
+    captured: Dict[str, Any] = {}
+
+    class FakeStd:
+        def Levels(self, clip: Any, **kwargs: Any) -> Any:
+            captured.update(kwargs)
+            return "gamma"
+
+    core = types.SimpleNamespace(std=FakeStd())
+    result = vs_core._apply_post_gamma_levels(
+        core,
+        clip="clip",
+        gamma=0.95,
+        file_name="sample",
+        log=logging.getLogger("test"),
+    )
+    assert result == "gamma"
+    assert captured["min_in"] == 16
+    assert captured["max_in"] == 235
+    assert captured["min_out"] == 16
+    assert captured["max_out"] == 235
+    assert captured["gamma"] == pytest.approx(0.95)
+
+
+def test_apply_post_gamma_levels_skips_when_unity() -> None:
+    core = types.SimpleNamespace(std=None)
+    clip = object()
+    result = vs_core._apply_post_gamma_levels(
+        core,
+        clip=clip,
+        gamma=1.0,
+        file_name="skip",
+        log=logging.getLogger("test"),
+    )
+    assert result is clip
+
+
+def test_tonemap_kwargs_include_optional_parameters() -> None:
+    captured: Dict[str, Any] = {}
+
+    def fake_tonemap(clip: Any, **kwargs: Any) -> Any:
+        captured.update(kwargs)
+        return clip
+
+    core = types.SimpleNamespace(libplacebo=types.SimpleNamespace(Tonemap=fake_tonemap))
+    vs_core._tonemap_with_retries(
+        core,
+        rgb_clip=object(),
+        tone_curve="bt.2390",
+        target_nits=120.0,
+        dst_min=0.18,
+        dpd=1,
+        knee_offset=0.45,
+        dpd_preset="high_quality",
+        dpd_black_cutoff=0.01,
+        src_hint=None,
+        file_name="demo",
+    )
+
+    assert captured["tone_mapping_param"] == pytest.approx(0.45)
+    assert captured["peak_detection_preset"] == "high_quality"
+    assert captured["black_cutoff"] == pytest.approx(0.01)
+
+
+def test_tonemap_drops_unsupported_kwargs_and_warns() -> None:
+    captured: Dict[str, Any] = {}
+
+    class RejectingTonemap:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(self, clip: Any, **kwargs: Any) -> Any:
+            self.calls += 1
+            if self.calls == 1:
+                raise TypeError("got an unexpected keyword argument 'peak_detection_preset'")
+            captured.update(kwargs)
+            return clip
+
+    core = types.SimpleNamespace(libplacebo=types.SimpleNamespace(Tonemap=RejectingTonemap()))
+    vs_core._tonemap_with_retries(
+        core,
+        rgb_clip=object(),
+        tone_curve="bt.2390",
+        target_nits=100.0,
+        dst_min=0.18,
+        dpd=1,
+        knee_offset=0.5,
+        dpd_preset="high_quality",
+        dpd_black_cutoff=0.01,
+        src_hint=None,
+        file_name="compat",
+    )
+
+    assert "peak_detection_preset" not in captured
+    assert "tone_mapping_param" in captured
+    assert "black_cutoff" in captured
 
 
 class _DummyStd:

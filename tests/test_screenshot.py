@@ -316,7 +316,7 @@ def _stub_process_clip(monkeypatch: pytest.MonkeyPatch) -> None:
     - clip: the passed-in clip
     - overlay_text: None
     - verification: None
-    - tonemap: a vs_core.TonemapInfo indicating an untonemapped SDR source (applied=False, target_nits=100.0, dst_min_nits=0.1, reason="SDR source")
+    - tonemap: a vs_core.TonemapInfo indicating an untonemapped SDR source (applied=False, target_nits=100.0, dst_min_nits=0.18, reason="SDR source")
     - source_props: an empty dict
 
     Parameters:
@@ -337,7 +337,7 @@ def _stub_process_clip(monkeypatch: pytest.MonkeyPatch) -> None:
                 tone_curve=None,
                 dpd=0,
                 target_nits=100.0,
-                dst_min_nits=0.1,
+                dst_min_nits=0.18,
                 src_csp_hint=None,
                 reason="SDR source",
             ),
@@ -529,7 +529,7 @@ def test_generate_screenshots_debug_color_disables_overlays(tmp_path: Path, monk
         tone_curve=None,
         dpd=0,
         target_nits=100.0,
-        dst_min_nits=0.1,
+        dst_min_nits=0.18,
         src_csp_hint=None,
         reason="SDR source",
     )
@@ -845,7 +845,7 @@ def test_compose_overlay_text_minimal_adds_resolution_and_selection() -> None:
         tone_curve="bt.2390",
         dpd=1,
         target_nits=100.0,
-        dst_min_nits=0.1,
+        dst_min_nits=0.18,
         src_csp_hint=None,
     )
 
@@ -896,7 +896,7 @@ def test_compose_overlay_text_minimal_ignores_hdr_details() -> None:
         tone_curve="bt.2390",
         dpd=1,
         target_nits=100.0,
-        dst_min_nits=0.1,
+        dst_min_nits=0.18,
         src_csp_hint=None,
     )
 
@@ -926,7 +926,7 @@ def test_compose_overlay_text_diagnostic_appends_required_lines() -> None:
         tone_curve="bt.2390",
         dpd=1,
         target_nits=100.0,
-        dst_min_nits=0.1,
+        dst_min_nits=0.18,
         src_csp_hint=None,
     )
     props = {
@@ -960,7 +960,7 @@ def test_compose_overlay_text_skips_hdr_details_for_sdr() -> None:
         tone_curve=None,
         dpd=0,
         target_nits=100.0,
-        dst_min_nits=0.1,
+        dst_min_nits=0.18,
         src_csp_hint=None,
         reason="SDR source",
     )
@@ -1940,7 +1940,7 @@ def test_save_frame_with_fpng_promotes_subsampled_sdr(
         tone_curve=None,
         dpd=0,
         target_nits=100.0,
-        dst_min_nits=0.1,
+        dst_min_nits=0.18,
         src_csp_hint=None,
         reason="SDR source",
     )
@@ -2008,7 +2008,7 @@ def test_save_frame_with_fpng_skips_promotion_on_even_geometry(
         tone_curve=None,
         dpd=0,
         target_nits=100.0,
-        dst_min_nits=0.1,
+        dst_min_nits=0.18,
         src_csp_hint=None,
         reason="SDR source",
     )
@@ -2075,7 +2075,7 @@ def test_geometry_preserves_colour_props(monkeypatch: pytest.MonkeyPatch, tmp_pa
         tone_curve=None,
         dpd=0,
         target_nits=100.0,
-        dst_min_nits=0.1,
+        dst_min_nits=0.18,
         src_csp_hint=None,
         reason="SDR source",
     )
@@ -2133,7 +2133,7 @@ def test_fpng_respects_limited_export_range(
         tone_curve=None,
         dpd=0,
         target_nits=100.0,
-        dst_min_nits=0.1,
+        dst_min_nits=0.18,
         src_csp_hint=None,
         reason="SDR source",
     )
@@ -2187,7 +2187,7 @@ def test_overlay_preserves_limited_range_metadata(
         tone_curve=None,
         dpd=0,
         target_nits=100.0,
-        dst_min_nits=0.1,
+        dst_min_nits=0.18,
         src_csp_hint=None,
         reason="SDR source",
     )
@@ -2244,7 +2244,7 @@ def test_overlay_expands_range_when_exporting_full(
         tone_curve=None,
         dpd=0,
         target_nits=100.0,
-        dst_min_nits=0.1,
+        dst_min_nits=0.18,
         src_csp_hint=None,
         reason="SDR source",
     )

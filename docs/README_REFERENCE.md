@@ -94,6 +94,12 @@ Dependency check:
 | `[screenshots].ffmpeg_timeout_seconds` | Per-frame FFmpeg timeout in seconds (must be >= 0; set 0 to disable). | float | `120.0` |
 | `[color].enable_tonemap` | HDR→SDR conversion toggle. | bool | `true` |
 | `[color].preset` | Tonemapping preset. | str | `"reference"` |
+| `[color].dst_min_nits` | Controls HDR toe lift before RGB export. | float | `0.18` |
+| `[color].knee_offset` | BT.2390 shoulder adjustment (0–1). | float | `0.50` |
+| `[color].dpd_preset` | libplacebo dynamic peak detection profile (`off`, `fast`, `balanced`, `high_quality`). | str | `"high_quality"` |
+| `[color].dpd_black_cutoff` | PQ fraction ignored during DPD sampling (0–0.05). | float | `0.01` |
+| `[color].post_gamma_enable` | Enables limited-range post-tonemap gamma lift. | bool | `false` |
+| `[color].post_gamma` | Gamma factor applied when the lift is enabled (≈0.90–1.10). | float | `1.0` |
 | `[color].overlay_enabled` | Tonemap overlay flag. | bool | `true` |
 | `[color].default_matrix_hd` | Preferred matrix code when HD clips omit metadata. | str\|int\|null | `null` |
 | `[color].default_matrix_sd` | Preferred matrix code when SD clips omit metadata. | str\|int\|null | `null` |

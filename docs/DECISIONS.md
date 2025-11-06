@@ -1,5 +1,6 @@
 # Decisions Log
 
+- *2025-11-06:* Added BT.2390 knee/DPD controls and the limited-range post-tonemap gamma stage. Config schema now exposes `knee_offset`, `dst_min_nits=0.18` defaults, `dpd_preset`, `dpd_black_cutoff`, and optional gamma lift toggles, alongside CLI overrides (`--tm-*`) and updated presets/docs/tests to prevent near-black crush regressions.
 - *2025-11-06:* Added `[screenshots].export_range` (default `"full"`) to control final PNG range, expanding limited SDR to sRGB by default while retaining a `"limited"` escape hatch; updated screenshot writers, config templates, docs, and tests to reflect the change.
 - *2025-11-05:* Sampled tonemapped RGB clips to detect actual colour range, aligning `_ColorRange` metadata with pixel values, preserving props across overlays, and documenting/testing the harmonised path to prevent washed-out PNGs.
 - *2025-10-31:* Enhanced the offline HTML report viewer with filmstrip thumbnails, selection-category filters, new difference/blink modes, and a fullscreen toggle. Updated styles, keyboard shortcuts, and documentation to reflect the richer theatre experience while keeping persistence compatible with previous localStorage payloads.
