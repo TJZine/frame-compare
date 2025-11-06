@@ -106,6 +106,15 @@ class TonemapInfo:
     dpd_black_cutoff: Optional[float] = None
     post_gamma: Optional[float] = None
     post_gamma_enabled: bool = False
+    smoothing_period: Optional[float] = None
+    scene_threshold_low: Optional[float] = None
+    scene_threshold_high: Optional[float] = None
+    percentile: Optional[float] = None
+    contrast_recovery: Optional[float] = None
+    metadata: Optional[int] = None
+    use_dovi: Optional[bool] = None
+    visualize_lut: bool = False
+    show_clipping: bool = False
 
 
 @dataclass(frozen=True)
@@ -140,6 +149,15 @@ class TonemapSettings:
     knee_offset: float
     dpd_preset: str
     dpd_black_cutoff: float
+    smoothing_period: float
+    scene_threshold_low: float
+    scene_threshold_high: float
+    percentile: float
+    contrast_recovery: float
+    metadata: Optional[int]
+    use_dovi: Optional[bool]
+    visualize_lut: bool
+    show_clipping: bool
 
 
 @dataclass(frozen=True)
@@ -1416,6 +1434,15 @@ def _tonemap_with_retries(
     knee_offset: float,
     dpd_preset: str,
     dpd_black_cutoff: float,
+    smoothing_period: float,
+    scene_threshold_low: float,
+    scene_threshold_high: float,
+    percentile: float,
+    contrast_recovery: float,
+    metadata: Optional[int],
+    use_dovi: Optional[bool],
+    visualize_lut: bool,
+    show_clipping: bool,
     src_hint: Optional[int],
     file_name: str,
 ) -> Any:
@@ -1433,17 +1460,24 @@ def _tonemap_with_retries(
         dst_max=float(target_nits),
         dst_min=float(dst_min),
         dynamic_peak_detection=int(dpd),
-        smoothing_period=2.0,
-        scene_threshold_low=0.15,
-        scene_threshold_high=0.30,
+        smoothing_period=float(smoothing_period),
+        scene_threshold_low=float(scene_threshold_low),
+        scene_threshold_high=float(scene_threshold_high),
+        percentile=float(percentile),
         gamut_mapping=1,
         tone_mapping_function_s=tone_curve,
         tone_mapping_param=float(knee_offset),
         peak_detection_preset=str(dpd_preset),
         black_cutoff=float(dpd_black_cutoff),
-        use_dovi=True,
+        contrast_recovery=float(contrast_recovery),
+        visualize_lut=bool(visualize_lut),
+        show_clipping=bool(show_clipping),
         log_level=2,
     )
+    if metadata is not None:
+        kwargs["metadata"] = int(metadata)
+    if use_dovi is not None:
+        kwargs["use_dovi"] = bool(use_dovi)
 
     def _attempt(**extra_kwargs: Any) -> Any:
         combined = dict(kwargs)
@@ -1476,6 +1510,15 @@ _TONEMAP_PRESETS: Dict[str, Dict[str, float | str | bool]] = {
         "dst_min_nits": 0.18,
         "dpd_preset": "high_quality",
         "dpd_black_cutoff": 0.01,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "contrast_recovery": 0.30,
+        "metadata": "auto",
+        "use_dovi": True,
+        "visualize_lut": False,
+        "show_clipping": False,
     },
     "bt2390_spec": {
         "tone_curve": "bt.2390",
@@ -1485,71 +1528,191 @@ _TONEMAP_PRESETS: Dict[str, Dict[str, float | str | bool]] = {
         "dst_min_nits": 0.18,
         "dpd_preset": "high_quality",
         "dpd_black_cutoff": 0.0,
+        "smoothing_period": 25.0,
+        "scene_threshold_low": 0.9,
+        "scene_threshold_high": 3.0,
+        "percentile": 100.0,
+        "contrast_recovery": 0.05,
+        "metadata": "auto",
+        "use_dovi": True,
+        "visualize_lut": False,
+        "show_clipping": False,
     },
     "filmic": {
         "tone_curve": "bt.2446a",
         "target_nits": 100.0,
         "dynamic_peak_detection": True,
-        "dst_min_nits": 0.18,
+        "dst_min_nits": 0.16,
         "dpd_preset": "high_quality",
-        "dpd_black_cutoff": 0.01,
-        "knee_offset": 0.50,
+        "dpd_black_cutoff": 0.008,
+        "knee_offset": 0.58,
+        "smoothing_period": 55.0,
+        "scene_threshold_low": 0.7,
+        "scene_threshold_high": 2.0,
+        "percentile": 99.9,
+        "contrast_recovery": 0.20,
+        "metadata": "auto",
+        "use_dovi": True,
+        "visualize_lut": False,
+        "show_clipping": False,
     },
     "spline": {
         "tone_curve": "spline",
-        "target_nits": 100.0,
+        "target_nits": 105.0,
         "dynamic_peak_detection": True,
-        "dst_min_nits": 0.18,
+        "dst_min_nits": 0.17,
         "dpd_preset": "high_quality",
-        "dpd_black_cutoff": 0.01,
-        "knee_offset": 0.50,
+        "dpd_black_cutoff": 0.009,
+        "knee_offset": 0.52,
+        "smoothing_period": 35.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.2,
+        "percentile": 99.98,
+        "contrast_recovery": 0.25,
+        "metadata": "auto",
+        "use_dovi": True,
+        "visualize_lut": False,
+        "show_clipping": False,
     },
     "contrast": {
-        "tone_curve": "mobius",
-        "target_nits": 120.0,
-        "dynamic_peak_detection": False,
-        "dst_min_nits": 0.10,
-        "dpd_preset": "off",
-        "dpd_black_cutoff": 0.0,
-        "knee_offset": 0.50,
+        "tone_curve": "bt.2390",
+        "target_nits": 110.0,
+        "dynamic_peak_detection": True,
+        "dst_min_nits": 0.15,
+        "dpd_preset": "high_quality",
+        "dpd_black_cutoff": 0.008,
+        "knee_offset": 0.42,
+        "smoothing_period": 30.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.2,
+        "percentile": 99.99,
+        "contrast_recovery": 0.45,
+        "metadata": "auto",
+        "use_dovi": True,
+        "visualize_lut": False,
+        "show_clipping": False,
     },
+    "bright_lift": {
+        "tone_curve": "bt.2390",
+        "target_nits": 130.0,
+        "dynamic_peak_detection": True,
+        "dst_min_nits": 0.22,
+        "dpd_preset": "high_quality",
+        "dpd_black_cutoff": 0.012,
+        "knee_offset": 0.46,
+        "smoothing_period": 35.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.0,
+        "percentile": 99.99,
+        "contrast_recovery": 0.50,
+        "metadata": "auto",
+        "use_dovi": True,
+        "visualize_lut": False,
+        "show_clipping": False,
+    },
+    "highlight_guard": {
+        "tone_curve": "bt.2390",
+        "target_nits": 90.0,
+        "dynamic_peak_detection": True,
+        "dst_min_nits": 0.16,
+        "dpd_preset": "high_quality",
+        "dpd_black_cutoff": 0.008,
+        "knee_offset": 0.55,
+        "smoothing_period": 50.0,
+        "scene_threshold_low": 0.9,
+        "scene_threshold_high": 3.0,
+        "percentile": 99.9,
+        "contrast_recovery": 0.15,
+        "metadata": "auto",
+        "use_dovi": True,
+        "visualize_lut": False,
+        "show_clipping": False,
+    },
+}
+
+
+_METADATA_NAME_TO_CODE = {
+    "auto": 0,
+    "none": 1,
+    "hdr10": 2,
+    "hdr10+": 3,
+    "hdr10plus": 3,
+    "luminance": 4,
+    "ciey": 4,
+    "cie_y": 4,
 }
 
 
 def _resolve_tonemap_settings(cfg: Any) -> TonemapSettings:
     preset = str(getattr(cfg, "preset", "") or "").strip().lower()
     tone_curve = str(getattr(cfg, "tone_curve", "bt.2390") or "bt.2390")
-    target_nits = float(getattr(cfg, "target_nits", 100.0))
-    dpd_flag = bool(getattr(cfg, "dynamic_peak_detection", True))
-    dst_min = float(getattr(cfg, "dst_min_nits", 0.18))
-    knee_offset = float(getattr(cfg, "knee_offset", 0.5))
-    dpd_preset_value = str(getattr(cfg, "dpd_preset", "high_quality") or "").strip().lower()
-    dpd_black_cutoff = float(getattr(cfg, "dpd_black_cutoff", 0.01))
-
-    provided = getattr(cfg, "_provided_keys", None)
-
-    def _was_provided(field: str) -> bool:
-        if provided is None:
-            return True
-        return field in provided
-
+    provided = getattr(cfg, "_provided_keys", None) or set()
     if preset and preset != "custom":
-        preset_vals = _TONEMAP_PRESETS.get(preset)
-        if preset_vals:
-            if not _was_provided("tone_curve") and "tone_curve" in preset_vals:
-                tone_curve = str(preset_vals["tone_curve"])
-            if not _was_provided("target_nits") and "target_nits" in preset_vals:
-                target_nits = float(preset_vals["target_nits"])
-            if not _was_provided("dynamic_peak_detection") and "dynamic_peak_detection" in preset_vals:
-                dpd_flag = bool(preset_vals["dynamic_peak_detection"])
-            if not _was_provided("dst_min_nits") and "dst_min_nits" in preset_vals:
-                dst_min = float(preset_vals["dst_min_nits"])
-            if not _was_provided("knee_offset") and "knee_offset" in preset_vals:
-                knee_offset = float(preset_vals["knee_offset"])
-            if not _was_provided("dpd_preset") and "dpd_preset" in preset_vals:
-                dpd_preset_value = str(preset_vals["dpd_preset"])
-            if not _was_provided("dpd_black_cutoff") and "dpd_black_cutoff" in preset_vals:
-                dpd_black_cutoff = float(preset_vals["dpd_black_cutoff"])
+        preset_vals = _TONEMAP_PRESETS.get(preset) or {}
+    else:
+        preset_vals = {}
+
+    def _resolve_value(field: str, default: Any) -> Any:
+        if preset_vals and field in preset_vals and field not in provided:
+            return preset_vals[field]
+        return getattr(cfg, field, preset_vals.get(field, default))
+
+    tone_curve = str(_resolve_value("tone_curve", tone_curve))
+    target_nits = float(_resolve_value("target_nits", 100.0))
+    dpd_flag = bool(_resolve_value("dynamic_peak_detection", True))
+    dst_min = float(_resolve_value("dst_min_nits", 0.18))
+    knee_offset = float(_resolve_value("knee_offset", 0.5))
+    dpd_preset_value = str(_resolve_value("dpd_preset", "high_quality") or "").strip().lower()
+    dpd_black_cutoff = float(_resolve_value("dpd_black_cutoff", 0.01))
+    smoothing_period = float(_resolve_value("smoothing_period", 20.0))
+    scene_threshold_low = float(_resolve_value("scene_threshold_low", 1.0))
+    scene_threshold_high = float(_resolve_value("scene_threshold_high", 3.0))
+    percentile = float(_resolve_value("percentile", 100.0))
+    contrast_recovery = float(_resolve_value("contrast_recovery", 0.0))
+    metadata_value = _resolve_value("metadata", "auto")
+    use_dovi_value = _resolve_value("use_dovi", None)
+    visualize_lut = bool(_resolve_value("visualize_lut", False))
+    show_clipping = bool(_resolve_value("show_clipping", False))
+
+    if not dpd_flag:
+        dpd_preset_value = "off"
+        dpd_black_cutoff = 0.0
+
+    if dpd_preset_value not in {"off", "fast", "balanced", "high_quality"}:
+        dpd_preset_value = "off" if not dpd_flag else "high_quality"
+
+    metadata_code: Optional[int]
+    if metadata_value is None:
+        metadata_code = None
+    elif isinstance(metadata_value, (int, float)):
+        metadata_code = int(metadata_value)
+    else:
+        metadata_key = str(metadata_value).strip().lower().replace(" ", "")
+        if metadata_key in _METADATA_NAME_TO_CODE:
+            metadata_code = _METADATA_NAME_TO_CODE[metadata_key]
+        else:
+            try:
+                metadata_code = int(metadata_key)
+            except ValueError:
+                metadata_code = 0
+            else:
+                metadata_code = max(0, min(4, metadata_code))
+
+    if metadata_code is not None and metadata_code < 0:
+        metadata_code = 0
+
+    if isinstance(use_dovi_value, str):
+        lowered = use_dovi_value.strip().lower()
+        if lowered in {"auto", ""}:
+            use_dovi_value = None
+        elif lowered in {"true", "1", "yes", "on"}:
+            use_dovi_value = True
+        elif lowered in {"false", "0", "no", "off"}:
+            use_dovi_value = False
+        else:
+            use_dovi_value = None
+    elif use_dovi_value is not None:
+        use_dovi_value = bool(use_dovi_value)
 
     return TonemapSettings(
         preset=preset or "custom",
@@ -1560,6 +1723,15 @@ def _resolve_tonemap_settings(cfg: Any) -> TonemapSettings:
         knee_offset=float(knee_offset),
         dpd_preset=dpd_preset_value or ("off" if not dpd_flag else "high_quality"),
         dpd_black_cutoff=float(dpd_black_cutoff),
+        smoothing_period=float(smoothing_period),
+        scene_threshold_low=float(scene_threshold_low),
+        scene_threshold_high=float(scene_threshold_high),
+        percentile=float(percentile),
+        contrast_recovery=float(contrast_recovery),
+        metadata=metadata_code,
+        use_dovi=use_dovi_value if isinstance(use_dovi_value, (bool, type(None))) else None,
+        visualize_lut=bool(visualize_lut),
+        show_clipping=bool(show_clipping),
     )
 
 
@@ -1576,6 +1748,15 @@ def resolve_effective_tonemap(cfg: Any) -> Dict[str, Any]:
         "knee_offset": float(settings.knee_offset),
         "dpd_preset": settings.dpd_preset,
         "dpd_black_cutoff": float(settings.dpd_black_cutoff),
+        "smoothing_period": float(settings.smoothing_period),
+        "scene_threshold_low": float(settings.scene_threshold_low),
+        "scene_threshold_high": float(settings.scene_threshold_high),
+        "percentile": float(settings.percentile),
+        "contrast_recovery": float(settings.contrast_recovery),
+        "metadata": settings.metadata,
+        "use_dovi": settings.use_dovi,
+        "visualize_lut": bool(settings.visualize_lut),
+        "show_clipping": bool(settings.show_clipping),
     }
 
 
@@ -1592,6 +1773,15 @@ def _format_overlay_text(
     dpd_black_cutoff: float,
     post_gamma: float,
     post_gamma_enabled: bool,
+    smoothing_period: float,
+    scene_threshold_low: float,
+    scene_threshold_high: float,
+    percentile: float,
+    contrast_recovery: float,
+    metadata: Optional[int],
+    use_dovi: Optional[bool],
+    visualize_lut: bool,
+    show_clipping: bool,
     reason: Optional[str] = None,
 ) -> str:
     """
@@ -1633,6 +1823,15 @@ def _format_overlay_text(
         "dpd_black_cutoff": dpd_black_cutoff,
         "post_gamma": post_gamma,
         "post_gamma_enabled": post_gamma_enabled,
+        "smoothing_period": smoothing_period,
+        "scene_threshold_low": scene_threshold_low,
+        "scene_threshold_high": scene_threshold_high,
+        "percentile": percentile,
+        "contrast_recovery": contrast_recovery,
+        "metadata": metadata,
+        "use_dovi": use_dovi,
+        "visualize_lut": visualize_lut,
+        "show_clipping": show_clipping,
     }
     try:
         return template.format(**values)
@@ -1899,6 +2098,15 @@ def process_clip_for_screenshot(
         dpd_black_cutoff=tonemap_settings.dpd_black_cutoff if dpd else 0.0,
         post_gamma=post_gamma_value if post_gamma_cfg_enabled else 1.0,
         post_gamma_enabled=False,
+        smoothing_period=tonemap_settings.smoothing_period,
+        scene_threshold_low=tonemap_settings.scene_threshold_low,
+        scene_threshold_high=tonemap_settings.scene_threshold_high,
+        percentile=tonemap_settings.percentile,
+        contrast_recovery=tonemap_settings.contrast_recovery,
+        metadata=tonemap_settings.metadata,
+        use_dovi=tonemap_settings.use_dovi,
+        visualize_lut=tonemap_settings.visualize_lut,
+        show_clipping=tonemap_settings.show_clipping,
     )
     overlay_text = None
     verification: Optional[VerificationResult] = None
@@ -1960,6 +2168,15 @@ def process_clip_for_screenshot(
         knee_offset=tonemap_settings.knee_offset,
         dpd_preset=tonemap_settings.dpd_preset,
         dpd_black_cutoff=tonemap_settings.dpd_black_cutoff,
+        smoothing_period=tonemap_settings.smoothing_period,
+        scene_threshold_low=tonemap_settings.scene_threshold_low,
+        scene_threshold_high=tonemap_settings.scene_threshold_high,
+        percentile=tonemap_settings.percentile,
+        contrast_recovery=tonemap_settings.contrast_recovery,
+        metadata=tonemap_settings.metadata,
+        use_dovi=tonemap_settings.use_dovi,
+        visualize_lut=tonemap_settings.visualize_lut,
+        show_clipping=tonemap_settings.show_clipping,
         src_hint=src_hint,
         file_name=file_name,
     )
@@ -2061,6 +2278,15 @@ def process_clip_for_screenshot(
         dpd_black_cutoff=tonemap_settings.dpd_black_cutoff if dpd else 0.0,
         post_gamma=post_gamma_value if applied_post_gamma else 1.0,
         post_gamma_enabled=applied_post_gamma,
+        smoothing_period=tonemap_settings.smoothing_period,
+        scene_threshold_low=tonemap_settings.scene_threshold_low,
+        scene_threshold_high=tonemap_settings.scene_threshold_high,
+        percentile=tonemap_settings.percentile,
+        contrast_recovery=tonemap_settings.contrast_recovery,
+        metadata=tonemap_settings.metadata,
+        use_dovi=tonemap_settings.use_dovi,
+        visualize_lut=tonemap_settings.visualize_lut,
+        show_clipping=tonemap_settings.show_clipping,
     )
 
     overlay_template = str(
@@ -2083,6 +2309,15 @@ def process_clip_for_screenshot(
             dpd_black_cutoff=tonemap_settings.dpd_black_cutoff if dpd else 0.0,
             post_gamma=post_gamma_value,
             post_gamma_enabled=applied_post_gamma,
+            smoothing_period=tonemap_settings.smoothing_period,
+            scene_threshold_low=tonemap_settings.scene_threshold_low,
+            scene_threshold_high=tonemap_settings.scene_threshold_high,
+            percentile=tonemap_settings.percentile,
+            contrast_recovery=tonemap_settings.contrast_recovery,
+            metadata=tonemap_settings.metadata,
+            use_dovi=tonemap_settings.use_dovi,
+            visualize_lut=tonemap_settings.visualize_lut,
+            show_clipping=tonemap_settings.show_clipping,
             reason="HDR",
         )
         log.info("[OVERLAY] %s using text '%s'", file_name, overlay_text)

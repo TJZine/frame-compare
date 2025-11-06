@@ -51,7 +51,7 @@ Implement and expose *robust, standards‑aligned* tonemapping controls to **pre
      post_gamma_enable = false
      post_gamma = 0.95                # Gentle lift (0.90–1.05); applied as VS Levels in limited
      ```
-   - **Preset map** (see implementation §3): “reference” = `bt.2390/100nits/dpd=on(knee=0.5/dst_min=0.18)`; “filmic” = `bt.2446a/100nits/dpd=on`; “contrast” = `mobius/120nits/dpd=off`; “bt2390_spec” = `bt.2390/100nits/knee=0.5/dpd=on`; “spline” = `spline/100nits/dpd=on`.
+  - **Preset map** (see implementation §3): “reference” = `bt.2390/100nits/dpd=on` (smoothing 45f, percentile `99.995`, contrast `0.30`); “filmic” = `bt.2446a/100nits/dpd=on`; “contrast” = `bt.2390/110nits/dpd=on/contrast=0.45`; “bt2390_spec” = `bt.2390/100nits/dpd=on` with neutral cutoff; “spline” = `spline/105nits/dpd=on`; “bright_lift” = `bt.2390/130nits/dpd=on`; “highlight_guard” = `bt.2390/90nits/dpd=on`.
 
 4. **CLI & overlays**:
    - Ensure current overlay text can display new fields: `{knee_offset}`, `{dpd_preset}`, `{dst_min_nits}`, `{target_nits}`.
@@ -112,7 +112,7 @@ Implement and expose *robust, standards‑aligned* tonemapping controls to **pre
       "bt2390_spec":   {"tone_curve": "bt.2390", "target_nits": 100.0, "dynamic_peak_detection": True, "knee_offset": 0.50, "dst_min_nits": 0.18},
       "filmic":        {"tone_curve": "bt.2446a", "target_nits": 100.0, "dynamic_peak_detection": True, "dst_min_nits": 0.18},
       "spline":        {"tone_curve": "spline",  "target_nits": 100.0, "dynamic_peak_detection": True, "dst_min_nits": 0.18},
-      "contrast":      {"tone_curve": "mobius",  "target_nits": 120.0, "dynamic_peak_detection": False, "dst_min_nits": 0.10},
+     "contrast":      {"tone_curve": "bt.2390", "target_nits": 110.0, "dynamic_peak_detection": True,  "dst_min_nits": 0.15},
   }
   ```
 - Extend `_resolve_tonemap_settings` to also adopt `knee_offset`, `dst_min_nits`, and later `dpd_preset` if not explicitly provided by user. Return payload expanded or set them in `resolve_effective_tonemap`.
@@ -263,18 +263,24 @@ post_gamma_enable = false
 ```
 ```toml
 [color]
-preset = "contrast"   # Legacy look
-tone_curve = "mobius"
-target_nits = 120.0
-dst_min_nits = 0.10
-dynamic_peak_detection = false
+preset = "contrast"
+tone_curve = "bt.2390"
+target_nits = 110.0
+dst_min_nits = 0.15
+dynamic_peak_detection = true
+dpd_preset = "high_quality"
+dpd_black_cutoff = 0.008
+smoothing_period = 30.0
+scene_threshold_low = 0.8
+scene_threshold_high = 2.2
+percentile = 99.99
+contrast_recovery = 0.45
 post_gamma_enable = false
 ```
 
 ---
 
 ### Notes for maintainers
-- Keep `dst_min_nits` default conservative (0.18) to avoid crush in limited output; current repo default `0.30` looks milky—consider lowering when flipping `preset="reference"`.
-- Prefer **100 nits** reference unless we have a strong reason to keep **110 nits** as the project default.
-- If we later add “export full‑range PNG” as an option, *then* we can recommend smaller `dst_min_nits` and disabling the gamma lift.
-
+- Keep `dst_min_nits` default conservative (0.18) to avoid near-black crush; raising beyond ~0.25 can introduce haze.
+- Prefer **100 nits** reference unless a specific preset aims to brighten (`bright_lift`) or dim (`highlight_guard`) the output.
+- If we later add “export full‑range PNG” as an option, revisit presets to ensure range expansion pairs well with the chosen tone curve.

@@ -42,6 +42,7 @@ from typing import (
     List,
     Literal,
     Mapping,
+    MutableMapping,
     Optional,
     Sequence,
     Tuple,
@@ -4544,7 +4545,7 @@ def _confirm_alignment_with_screenshots(
     )
 
 
-def _validate_tonemap_overrides(overrides: Mapping[str, Any]) -> None:
+def _validate_tonemap_overrides(overrides: MutableMapping[str, Any]) -> None:
     """Validate CLI-provided tonemap overrides and raise ClickException on invalid values."""
 
     if not overrides:
@@ -4588,6 +4589,80 @@ def _validate_tonemap_overrides(overrides: Mapping[str, Any]) -> None:
         else:
             if cutoff < 0.0 or cutoff > 0.05:
                 _bad("--tm-dpd-black-cutoff must be between 0.0 and 0.05")
+    if "smoothing_period" in overrides:
+        try:
+            smoothing = float(overrides["smoothing_period"])
+        except (TypeError, ValueError):
+            _bad("--tm-smoothing must be a non-negative number")
+        else:
+            if smoothing < 0.0:
+                _bad("--tm-smoothing must be >= 0")
+    if "scene_threshold_low" in overrides:
+        try:
+            low_value = float(overrides["scene_threshold_low"])
+        except (TypeError, ValueError):
+            _bad("--tm-scene-low must be a non-negative number")
+        else:
+            if low_value < 0.0:
+                _bad("--tm-scene-low must be >= 0")
+    if "scene_threshold_high" in overrides:
+        try:
+            high_value = float(overrides["scene_threshold_high"])
+        except (TypeError, ValueError):
+            _bad("--tm-scene-high must be a non-negative number")
+        else:
+            if high_value < 0.0:
+                _bad("--tm-scene-high must be >= 0")
+    if "scene_threshold_low" in overrides and "scene_threshold_high" in overrides:
+        if float(overrides["scene_threshold_high"]) < float(overrides["scene_threshold_low"]):
+            _bad("--tm-scene-high must be >= --tm-scene-low")
+    if "percentile" in overrides:
+        try:
+            percentile = float(overrides["percentile"])
+        except (TypeError, ValueError):
+            _bad("--tm-percentile must be between 0 and 100")
+        else:
+            if percentile < 0.0 or percentile > 100.0:
+                _bad("--tm-percentile must be between 0 and 100")
+    if "contrast_recovery" in overrides:
+        try:
+            contrast = float(overrides["contrast_recovery"])
+        except (TypeError, ValueError):
+            _bad("--tm-contrast must be a non-negative number")
+        else:
+            if contrast < 0.0:
+                _bad("--tm-contrast must be >= 0")
+    if "metadata" in overrides:
+        meta_value = overrides["metadata"]
+        if isinstance(meta_value, str):
+            lowered = meta_value.strip().lower()
+            if lowered in {"auto", ""}:
+                overrides["metadata"] = "auto"
+            elif lowered in {"none", "hdr10", "hdr10+", "hdr10plus", "luminance"}:
+                overrides["metadata"] = lowered
+            else:
+                try:
+                    meta_int = int(lowered)
+                except ValueError:
+                    _bad("--tm-metadata must be auto, none, hdr10, hdr10+, luminance, or 0-4")
+                else:
+                    if meta_int < 0 or meta_int > 4:
+                        _bad("--tm-metadata integer must be between 0 and 4")
+                    overrides["metadata"] = meta_int
+        else:
+            try:
+                meta_int = int(meta_value)
+            except (TypeError, ValueError):
+                _bad("--tm-metadata must be auto, none, hdr10, hdr10+, luminance, or 0-4")
+            else:
+                if meta_int < 0 or meta_int > 4:
+                    _bad("--tm-metadata integer must be between 0 and 4")
+    if "use_dovi" in overrides:
+        if overrides["use_dovi"] not in {None, True, False}:
+            _bad("--tm-use-dovi/--tm-no-dovi must be specified without a value")
+    for boolean_key in ("visualize_lut", "show_clipping"):
+        if boolean_key in overrides and not isinstance(overrides[boolean_key], bool):
+            _bad(f"--tm-{boolean_key.replace('_', '-')} must be used without a value")
 
 
 def run_cli(
@@ -4657,6 +4732,24 @@ def run_cli(
                 color_cfg.post_gamma = float(tonemap_overrides["post_gamma"])
             if "post_gamma_enable" in tonemap_overrides:
                 color_cfg.post_gamma_enable = bool(tonemap_overrides["post_gamma_enable"])
+            if "smoothing_period" in tonemap_overrides:
+                color_cfg.smoothing_period = float(tonemap_overrides["smoothing_period"])
+            if "scene_threshold_low" in tonemap_overrides:
+                color_cfg.scene_threshold_low = float(tonemap_overrides["scene_threshold_low"])
+            if "scene_threshold_high" in tonemap_overrides:
+                color_cfg.scene_threshold_high = float(tonemap_overrides["scene_threshold_high"])
+            if "percentile" in tonemap_overrides:
+                color_cfg.percentile = float(tonemap_overrides["percentile"])
+            if "contrast_recovery" in tonemap_overrides:
+                color_cfg.contrast_recovery = float(tonemap_overrides["contrast_recovery"])
+            if "metadata" in tonemap_overrides:
+                color_cfg.metadata = tonemap_overrides["metadata"]
+            if "use_dovi" in tonemap_overrides:
+                color_cfg.use_dovi = tonemap_overrides["use_dovi"]
+            if "visualize_lut" in tonemap_overrides:
+                color_cfg.visualize_lut = bool(tonemap_overrides["visualize_lut"])
+            if "show_clipping" in tonemap_overrides:
+                color_cfg.show_clipping = bool(tonemap_overrides["show_clipping"])
     if debug_color:
         try:
             setattr(cfg.color, "debug_color", True)
@@ -5881,7 +5974,47 @@ def run_cli(
         "overlay_mode": overlay_mode_value,
         "post_gamma": float(getattr(cfg.color, "post_gamma", 1.0)),
         "post_gamma_enabled": bool(getattr(cfg.color, "post_gamma_enable", False)),
+        "smoothing_period": float(effective_tonemap.get("smoothing_period", getattr(cfg.color, "smoothing_period", 20.0))),
+        "scene_threshold_low": float(effective_tonemap.get("scene_threshold_low", getattr(cfg.color, "scene_threshold_low", 1.0))),
+        "scene_threshold_high": float(effective_tonemap.get("scene_threshold_high", getattr(cfg.color, "scene_threshold_high", 3.0))),
+        "percentile": float(effective_tonemap.get("percentile", getattr(cfg.color, "percentile", 100.0))),
+        "contrast_recovery": float(effective_tonemap.get("contrast_recovery", getattr(cfg.color, "contrast_recovery", 0.0))),
+        "metadata": effective_tonemap.get("metadata", getattr(cfg.color, "metadata", "auto")),
+        "use_dovi": effective_tonemap.get("use_dovi", getattr(cfg.color, "use_dovi", None)),
+        "visualize_lut": bool(effective_tonemap.get("visualize_lut", getattr(cfg.color, "visualize_lut", False))),
+        "show_clipping": bool(effective_tonemap.get("show_clipping", getattr(cfg.color, "show_clipping", False))),
     }
+    metadata_code = json_tail["tonemap"]["metadata"]
+    metadata_label_map = {
+        0: "auto",
+        1: "none",
+        2: "hdr10",
+        3: "hdr10+",
+        4: "luminance",
+    }
+    if isinstance(metadata_code, int):
+        metadata_label = metadata_label_map.get(metadata_code, "auto")
+    elif isinstance(metadata_code, str):
+        metadata_label = metadata_code
+    else:
+        metadata_label = "auto"
+    json_tail["tonemap"]["metadata_label"] = metadata_label
+    use_dovi_value = json_tail["tonemap"]["use_dovi"]
+    if isinstance(use_dovi_value, str):
+        lowered = use_dovi_value.strip().lower()
+        if lowered in {"auto", ""}:
+            use_dovi_label = "auto"
+        elif lowered in {"true", "1", "yes", "on"}:
+            use_dovi_label = "on"
+        elif lowered in {"false", "0", "no", "off"}:
+            use_dovi_label = "off"
+        else:
+            use_dovi_label = lowered or "auto"
+    elif use_dovi_value is None:
+        use_dovi_label = "auto"
+    else:
+        use_dovi_label = "on" if use_dovi_value else "off"
+    json_tail["tonemap"]["use_dovi_label"] = use_dovi_label
     layout_data["tonemap"] = json_tail["tonemap"]
     json_tail["overlay"] = {
         "enabled": bool(cfg.color.overlay_enabled),
@@ -6410,6 +6543,15 @@ def _run_cli_entry(
     tm_dpd_black_cutoff: float | None,
     tm_gamma: float | None,
     tm_gamma_disable: bool,
+    tm_smoothing: float | None,
+    tm_scene_low: float | None,
+    tm_scene_high: float | None,
+    tm_percentile: float | None,
+    tm_contrast: float | None,
+    tm_metadata: str | None,
+    tm_use_dovi: bool | None,
+    tm_visualize_lut: bool | None,
+    tm_show_clipping: bool | None,
 ) -> None:
     """Execute the primary CLI workflow with the provided options."""
 
@@ -6448,6 +6590,24 @@ def _run_cli_entry(
         tonemap_override["post_gamma_enable"] = True
     elif tm_gamma_disable:
         tonemap_override["post_gamma_enable"] = False
+    if tm_smoothing is not None:
+        tonemap_override["smoothing_period"] = tm_smoothing
+    if tm_scene_low is not None:
+        tonemap_override["scene_threshold_low"] = tm_scene_low
+    if tm_scene_high is not None:
+        tonemap_override["scene_threshold_high"] = tm_scene_high
+    if tm_percentile is not None:
+        tonemap_override["percentile"] = tm_percentile
+    if tm_contrast is not None:
+        tonemap_override["contrast_recovery"] = tm_contrast
+    if tm_metadata is not None:
+        tonemap_override["metadata"] = tm_metadata
+    if tm_use_dovi is not None:
+        tonemap_override["use_dovi"] = tm_use_dovi
+    if tm_visualize_lut is not None:
+        tonemap_override["visualize_lut"] = tm_visualize_lut
+    if tm_show_clipping is not None:
+        tonemap_override["show_clipping"] = tm_show_clipping
 
     preflight_for_write: _PathPreflightResult | None = None
     if write_config:
@@ -6725,6 +6885,56 @@ def _run_cli_entry(
     is_flag=True,
     help="Disable post-tonemap gamma lift for this run regardless of config.",
 )
+@click.option("--tm-smoothing", "tm_smoothing", type=float, default=None, help="Override [color].smoothing_period.")
+@click.option("--tm-scene-low", "tm_scene_low", type=float, default=None, help="Override [color].scene_threshold_low.")
+@click.option("--tm-scene-high", "tm_scene_high", type=float, default=None, help="Override [color].scene_threshold_high.")
+@click.option("--tm-percentile", "tm_percentile", type=float, default=None, help="Override [color].percentile.")
+@click.option("--tm-contrast", "tm_contrast", type=float, default=None, help="Override [color].contrast_recovery.")
+@click.option(
+    "--tm-metadata",
+    "tm_metadata",
+    default=None,
+    help="Override [color].metadata (auto|none|hdr10|hdr10+|luminance or 0-4).",
+)
+@click.option(
+    "--tm-use-dovi",
+    "tm_use_dovi",
+    flag_value=True,
+    default=None,
+    help="Force Dolby Vision metadata usage during tonemapping.",
+)
+@click.option(
+    "--tm-no-dovi",
+    "tm_use_dovi",
+    flag_value=False,
+    help="Disable Dolby Vision metadata usage during tonemapping.",
+)
+@click.option(
+    "--tm-visualize-lut",
+    "tm_visualize_lut",
+    flag_value=True,
+    default=None,
+    help="Enable libplacebo tone-mapping LUT visualization for this run.",
+)
+@click.option(
+    "--tm-no-visualize-lut",
+    "tm_visualize_lut",
+    flag_value=False,
+    help="Disable libplacebo tone-mapping LUT visualization for this run.",
+)
+@click.option(
+    "--tm-show-clipping",
+    "tm_show_clipping",
+    flag_value=True,
+    default=None,
+    help="Highlight clipped pixels during tonemapping for this run.",
+)
+@click.option(
+    "--tm-hide-clipping",
+    "tm_show_clipping",
+    flag_value=False,
+    help="Do not highlight clipped pixels during tonemapping for this run.",
+)
 @click.pass_context
 def main(
     ctx: click.Context,
@@ -6752,6 +6962,15 @@ def main(
     tm_dpd_black_cutoff: float | None,
     tm_gamma: float | None,
     tm_gamma_disable: bool,
+    tm_smoothing: float | None,
+    tm_scene_low: float | None,
+    tm_scene_high: float | None,
+    tm_percentile: float | None,
+    tm_contrast: float | None,
+    tm_metadata: str | None,
+    tm_use_dovi: bool | None,
+    tm_visualize_lut: bool | None,
+    tm_show_clipping: bool | None,
 ) -> None:
     """Command group entry point that dispatches to subcommands or the default run."""
 
@@ -6779,6 +6998,15 @@ def main(
         "tm_dpd_black_cutoff": tm_dpd_black_cutoff,
         "tm_gamma": tm_gamma,
         "tm_gamma_disable": tm_gamma_disable,
+        "tm_smoothing": tm_smoothing,
+        "tm_scene_low": tm_scene_low,
+        "tm_scene_high": tm_scene_high,
+        "tm_percentile": tm_percentile,
+        "tm_contrast": tm_contrast,
+        "tm_metadata": tm_metadata,
+        "tm_use_dovi": tm_use_dovi,
+        "tm_visualize_lut": tm_visualize_lut,
+        "tm_show_clipping": tm_show_clipping,
     }
     params_map = cast(Dict[str, Any], ctx.ensure_object(dict))
     params_map.update(params)
@@ -6818,6 +7046,15 @@ def run_command(ctx: click.Context) -> None:
         tm_dpd_black_cutoff=params.get("tm_dpd_black_cutoff"),
         tm_gamma=params.get("tm_gamma"),
         tm_gamma_disable=bool(params.get("tm_gamma_disable", False)),
+        tm_smoothing=params.get("tm_smoothing"),
+        tm_scene_low=params.get("tm_scene_low"),
+        tm_scene_high=params.get("tm_scene_high"),
+        tm_percentile=params.get("tm_percentile"),
+        tm_contrast=params.get("tm_contrast"),
+        tm_metadata=params.get("tm_metadata"),
+        tm_use_dovi=params.get("tm_use_dovi"),
+        tm_visualize_lut=params.get("tm_visualize_lut"),
+        tm_show_clipping=params.get("tm_show_clipping"),
     )
 
 

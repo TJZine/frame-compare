@@ -38,6 +38,15 @@ def test_load_defaults(tmp_path: Path) -> None:
     assert app.color.verify_enabled is True
     assert app.color.post_gamma_enable is False
     assert app.color.post_gamma == pytest.approx(0.95)
+    assert app.color.smoothing_period == pytest.approx(45.0)
+    assert app.color.scene_threshold_low == pytest.approx(0.8)
+    assert app.color.scene_threshold_high == pytest.approx(2.4)
+    assert app.color.percentile == pytest.approx(99.995)
+    assert app.color.contrast_recovery == pytest.approx(0.3)
+    assert app.color.metadata == "auto"
+    assert app.color.use_dovi is None
+    assert app.color.visualize_lut is False
+    assert app.color.show_clipping is False
     assert app.source.preferred == "lsmas"
     assert app.tmdb.api_key == ""
     assert app.tmdb.unattended is True
@@ -66,6 +75,11 @@ def test_load_defaults(tmp_path: Path) -> None:
         ("[color]\ndpd_preset = \"invalid\"\n", "color.dpd_preset"),
         ("[color]\ndpd_black_cutoff = 0.5\n", "color.dpd_black_cutoff"),
         ("[color]\npost_gamma = 0.5\n", "color.post_gamma"),
+        ("[color]\nsmoothing_period = -1\n", "color.smoothing_period"),
+        ("[color]\nscene_threshold_low = -0.5\n", "color.scene_threshold_low"),
+        ("[color]\npercentile = 120\n", "color.percentile"),
+        ("[color]\ncontrast_recovery = -0.1\n", "color.contrast_recovery"),
+        ("[color]\nmetadata = \"invalid\"\n", "color.metadata"),
         ("[screenshots]\nodd_geometry_policy = \"bogus\"\n", "screenshots.odd_geometry_policy"),
         ("[screenshots]\nrgb_dither = \"invalid\"\n", "screenshots.rgb_dither"),
         ("[source]\npreferred = \"bogus\"\n", "source.preferred"),

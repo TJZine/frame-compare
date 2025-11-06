@@ -100,6 +100,15 @@ def test_validate_tonemap_overrides_accepts_valid_values() -> None:
             "post_gamma": 0.95,
             "dpd_preset": "fast",
             "dpd_black_cutoff": 0.02,
+            "smoothing_period": 5.0,
+            "scene_threshold_low": 0.5,
+            "scene_threshold_high": 1.5,
+            "percentile": 99.9,
+            "contrast_recovery": 0.2,
+            "metadata": "hdr10",
+            "use_dovi": True,
+            "visualize_lut": False,
+            "show_clipping": True,
         }
     )
 
@@ -122,6 +131,23 @@ def test_validate_tonemap_overrides_rejects_bad_gamma() -> None:
 def test_validate_tonemap_overrides_rejects_bad_preset() -> None:
     with pytest.raises(click.ClickException):
         frame_compare._validate_tonemap_overrides({"dpd_preset": "turbo"})
+
+
+def test_validate_tonemap_overrides_rejects_bad_percentile() -> None:
+    with pytest.raises(click.ClickException):
+        frame_compare._validate_tonemap_overrides({"percentile": 120.0})
+
+
+def test_validate_tonemap_overrides_rejects_scene_range() -> None:
+    with pytest.raises(click.ClickException):
+        frame_compare._validate_tonemap_overrides(
+            {"scene_threshold_low": 2.0, "scene_threshold_high": 1.0}
+        )
+
+
+def test_validate_tonemap_overrides_rejects_unknown_metadata() -> None:
+    with pytest.raises(click.ClickException):
+        frame_compare._validate_tonemap_overrides({"metadata": "foobar"})
 
 
 def _make_config(input_dir: Path) -> AppConfig:
@@ -2818,6 +2844,9 @@ def test_audio_alignment_block_and_json(
     assert any("target=" in line for line in stream_lines)
     tonemap_json = payload["tonemap"]
     assert tonemap_json["overlay_mode"] == "diagnostic"
+    assert "smoothing_period" in tonemap_json
+    assert "metadata_label" in tonemap_json
+    assert "use_dovi_label" in tonemap_json
 
 
 def test_audio_alignment_default_duration_avoids_zero_window(

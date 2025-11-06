@@ -211,8 +211,17 @@ Offline HTML reports mirror slow.pics ergonomics: filmstrip thumbnails with sele
 
 ### Tonemap Quick Recipes
 
-- **Reference SDR (BT.2390):** keep `preset="reference"` (or select with `--tm-preset reference`), which resolves to `tone_curve="bt.2390"`, `target_nits=100`, `dst_min_nits=0.18`, `knee_offset=0.50`, and `dpd_preset="high_quality"`. This maximises texture in low APL scenes without blowing highlights. Pair with the default overlay template to surface the resolved parameters.
-- **BT.2446A Filmic:** set `preset="filmic"` (or `--tm-preset filmic`) to switch to the libplacebo BT.2446A curve with the same 100 nit target and conservative dynamic peak detection. This preset keeps a softer shoulder and works well for well-mastered PQ sources. Tweak `--tm-dst-min`/`[color].dst_min_nits` or `--tm-gamma` when you need extra lift.
+- **Reference SDR (BT.2390):** keep `preset="reference"` (or select with `--tm-preset reference`) for the high-quality baseline: `tone_curve="bt.2390"`, `target_nits=100`, `dst_min_nits=0.18`, `knee_offset=0.50`, smoothing `45f`, percentile `99.995`, contrast recovery `0.30`, and `dpd_preset="high_quality"`. This maximises texture in low APL scenes while guarding highlights.
+- **BT.2446A Filmic:** pick `preset="filmic"` for the libplacebo BT.2446A shoulder. It softens highlight roll-off (`knee_offset≈0.58`), keeps target nits at 100, and retains conservative dynamic peak detection—ideal for well-mastered HDR sources. Adjust `--tm-dst-min` or `--tm-gamma` for subtle lift.
+- **Bright Lift:** use `preset="bright_lift"` when SDR conversions feel too dim. It raises target nits to 130, lifts the toe (`dst_min_nits=0.22`), and applies stronger contrast recovery (`0.50`) while keeping DPD engaged so highlights stay controlled.
+- **Highlight Guard:** choose `preset="highlight_guard"` to tame aggressive grades. Target nits drop to 90 with an extended smoothing window (50f) and moderate contrast recovery (`0.15`), pulling peaks down without flattening the whole frame.
+
+Fine-grained controls are also exposed through `[color]` (and matching `--tm-*` flags) when you need extra headroom:
+
+- `smoothing_period`, `scene_threshold_low`, `scene_threshold_high` tune the HDR peak smoothing window.
+- `percentile` and `contrast_recovery` replicate libplacebo’s `high_quality` preset when set to `99.995` and `0.3`.
+- `metadata` selects the tone-mapping metadata source (`auto`, `none`, `hdr10`, `hdr10+`, `luminance`), while `use_dovi` lets you force or disable Dolby Vision RPU usage.
+- `visualize_lut` and `show_clipping` surface debugging views without editing scripts.
 
 > **Tip:** To seed another workspace, run `uv run python -m frame_compare --root alt-root --write-config`.
 
@@ -224,7 +233,7 @@ Offline HTML reports mirror slow.pics ergonomics: filmstrip thumbnails with sele
 | `--config PATH` | Use a specific config file (falls back to `FRAME_COMPARE_CONFIG`) |
 | `--input PATH` | Override `[paths].input_dir` for a single run |
 | `--audio-align-track label=index` | Force the audio stream used per clip (repeatable) |
-| `--tm-preset NAME` | Override tone-mapping preset (`reference`, `contrast`, `filmic`, `bt2390_spec`, `spline`) |
+| `--tm-preset NAME` | Override tone-mapping preset (`reference`, `bt2390_spec`, `filmic`, `spline`, `contrast`, `bright_lift`, `highlight_guard`) |
 | `--tm-curve NAME` | Override `[color].tone_curve` without touching presets |
 | `--tm-target NITS` | Override `[color].target_nits` |
 | `--tm-dst-min VALUE` | Override `[color].dst_min_nits` |
@@ -233,6 +242,15 @@ Offline HTML reports mirror slow.pics ergonomics: filmstrip thumbnails with sele
 | `--tm-dpd-black-cutoff VALUE` | Override `[color].dpd_black_cutoff` (`0.0–0.05`) |
 | `--tm-gamma VALUE` | Override `[color].post_gamma` and enable the gamma lift |
 | `--tm-gamma-disable` | Disable the post-tonemap gamma lift for this run |
+| `--tm-smoothing VALUE` | Override `[color].smoothing_period` (frames) |
+| `--tm-scene-low VALUE` | Override `[color].scene_threshold_low` |
+| `--tm-scene-high VALUE` | Override `[color].scene_threshold_high` |
+| `--tm-percentile VALUE` | Override `[color].percentile` (0–100) |
+| `--tm-contrast VALUE` | Override `[color].contrast_recovery` |
+| `--tm-metadata VALUE` | Override `[color].metadata` (`auto`, `none`, `hdr10`, `hdr10+`, `luminance`, or `0-4`) |
+| `--tm-use-dovi / --tm-no-dovi` | Force Dolby Vision metadata usage on/off (default auto) |
+| `--tm-visualize-lut / --tm-no-visualize-lut` | Toggle libplacebo LUT visualisation |
+| `--tm-show-clipping / --tm-hide-clipping` | Toggle clipped-pixel highlighting during tonemapping |
 | `--write-config` | Ensure `ROOT/config/config.toml` exists, then exit |
 | `--diagnose-paths` | Print JSON diagnostics (root, media, screens, writability) |
 | `--quiet` / `--verbose` | Adjust console verbosity |
