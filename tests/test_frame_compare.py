@@ -368,6 +368,10 @@ def test_audio_alignment_prompt_reuse_decline(tmp_path: Path, monkeypatch: pytes
     assert summary.final_adjustments[target_path.name] == 6
     assert display.estimation_line and "reused" in display.estimation_line.lower()
     assert any("Audio offsets" in line for line in display.offset_lines)
+    first_line = display.offset_lines[0]
+    assert "[unknown/und/?]" in first_line
+    assert "corr=" in first_line
+    assert "status=auto/applied" in first_line
 
 
 def test_audio_alignment_prompt_reuse_affirm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -551,6 +555,7 @@ def test_run_cli_reuses_vspreview_manual_offsets_when_alignment_disabled(
         trim_end: int | None = None,
         fps_map: tuple[int, int] | None = None,
         cache_dir: str | None = None,
+        **_kwargs: object,
     ) -> types.SimpleNamespace:
         init_calls.append((path, trim_start))
         return types.SimpleNamespace(
@@ -706,7 +711,7 @@ def test_audio_alignment_vspreview_suggestion_mode(
     assert summary is not None
     assert display is not None
     assert summary.suggestion_mode is True
-    assert summary.applied_frames == {}
+    assert summary.applied_frames == {target_path.name: 120}
     assert summary.suggested_frames[target_path.name] == 12
     assert summary.manual_trim_starts[target_path.name] == 120
     assert target_plan.trim_start == 120, "Trim should remain unchanged in suggestion mode"
@@ -823,9 +828,12 @@ def test_launch_vspreview_generates_script(
     assert "SUGGESTION_MAP" in script_text
     assert "'Target': (7, 0.0)" in script_text
     assert 'seconds_value = f"{suggested_seconds:.3f}"' in script_text
-    assert "Suggested: {suggested_frames:+d}f (~{seconds_value}s) •" in script_text
-    assert 'applied_value = "0" if applied_frames == 0 else f"{applied_frames:+d}"' in script_text
-    assert "Applied in preview: {applied_value}f" in script_text
+    assert (
+        "def _format_overlay_text(label, suggested_frames, suggested_seconds, applied_frames):"
+        in script_text
+    )
+    assert 'f"{label}: {suggested_frames:+d}f (~{seconds_value}s) • "' in script_text
+    assert "Preview applied: {applied_value}f ({applied_label})" in script_text
     assert "preview applied=%+df" in script_text
     assert recorded_command, "VSPreview command should be invoked when interactive"
     assert recorded_command[0][0] == frame_compare.sys.executable
@@ -1499,6 +1507,7 @@ def test_cli_applies_overrides_and_naming(
         trim_end: int | None = None,
         fps_map: tuple[int, int] | None = None,
         cache_dir: str | None = None,
+        **_kwargs: object,
     ) -> types.SimpleNamespace:
         clip = types.SimpleNamespace(
             path=path,
@@ -1683,6 +1692,7 @@ def test_cli_disables_json_tail_output(
         trim_end: int | None = None,
         fps_map: tuple[int, int] | None = None,
         cache_dir: str | None = None,
+        **_kwargs: object,
     ) -> types.SimpleNamespace:
         """
         Create a fake clip-like object with fixed video properties.
@@ -1792,6 +1802,7 @@ def test_label_dedupe_preserves_short_labels(
         trim_end: int | None = None,
         fps_map: tuple[int, int] | None = None,
         cache_dir: str | None = None,
+        **_kwargs: object,
     ) -> types.SimpleNamespace:
         return types.SimpleNamespace(width=1920, height=1080, fps_num=24000, fps_den=1001, num_frames=2400)
 
@@ -1860,6 +1871,7 @@ def test_cli_reuses_frame_cache(
         trim_end: int | None = None,
         fps_map: tuple[int, int] | None = None,
         cache_dir: str | None = None,
+        **_kwargs: object,
     ) -> types.SimpleNamespace:
         return types.SimpleNamespace(width=1280, height=720, fps_num=24000, fps_den=1001, num_frames=1800)
 
@@ -1952,6 +1964,7 @@ def test_cli_input_override_and_cleanup(
         trim_end: int | None = None,
         fps_map: tuple[int, int] | None = None,
         cache_dir: str | None = None,
+        **_kwargs: object,
     ) -> types.SimpleNamespace:
         return types.SimpleNamespace(width=1280, height=720, fps_num=24000, fps_den=1001, num_frames=1800)
 
@@ -2073,6 +2086,7 @@ def test_cli_tmdb_resolution_populates_slowpics(
         trim_end: int | None = None,
         fps_map: tuple[int, int] | None = None,
         cache_dir: str | None = None,
+        **_kwargs: object,
     ) -> types.SimpleNamespace:
         return types.SimpleNamespace(
             width=1280,
@@ -2189,6 +2203,7 @@ def test_run_cli_coalesces_duplicate_pivot_logs(
         trim_end: int | None = None,
         fps_map: tuple[int, int] | None = None,
         cache_dir: str | Path | None = None,
+        **_kwargs: object,
     ) -> types.SimpleNamespace:
         return types.SimpleNamespace(
             path=Path(path),
@@ -2661,6 +2676,7 @@ def test_audio_alignment_block_and_json(
         trim_end: int | None = None,
         fps_map: tuple[int, int] | None = None,
         cache_dir: str | Path | None = None,
+        **_kwargs: object,
     ) -> types.SimpleNamespace:
         """
         Create a lightweight fake clip object for tests that resembles the real clip interface.
@@ -2829,15 +2845,18 @@ def test_audio_alignment_block_and_json(
     json_start = result.output.rfind('{"clips":')
     json_payload = result.output[json_start:].replace('\n', '')
     payload: dict[str, Any] = json.loads(json_payload)
-    audio_json = payload["audio_alignment"]
+    audio_json = _expect_mapping(payload["audio_alignment"])
     ref_label = audio_json["reference_stream"].split("->", 1)[0]
     assert ref_label in {"Clip A", "Reference"}
-    tgt_map = audio_json["target_stream"]
+    tgt_map = _expect_mapping(audio_json["target_stream"])
     assert "Clip B" in tgt_map or "Target" in tgt_map
     tgt_descriptor = tgt_map.get("Clip B") or tgt_map.get("Target")
     assert isinstance(tgt_descriptor, str) and tgt_descriptor.startswith("aac/")
-    assert audio_json["offsets_sec"]["Clip B"] == pytest.approx(0.1)
-    assert audio_json["offsets_frames"]["Clip B"] == 3
+    offsets_sec_map = _expect_mapping(audio_json["offsets_sec"])
+    offsets_frames_map = _expect_mapping(audio_json["offsets_frames"])
+    clip_key = "Clip B" if "Clip B" in offsets_sec_map else "Target"
+    assert offsets_sec_map[clip_key] == pytest.approx(0.1)
+    assert offsets_frames_map[clip_key] == 3
     assert audio_json["preview_paths"] == []
     assert audio_json["confirmed"] == "auto"
     offset_lines = audio_json.get("offset_lines")
@@ -2849,6 +2868,27 @@ def test_audio_alignment_block_and_json(
     assert isinstance(stream_lines, list) and stream_lines, "Expected stream_lines entries"
     assert any("ref=" in line for line in stream_lines)
     assert any("target=" in line for line in stream_lines)
+    measurements_obj = audio_json.get("measurements") or {}
+    measurements_map = _expect_mapping(measurements_obj)
+    measurement_value = measurements_map.get(clip_key)
+    assert measurement_value is not None
+    measurement_entry = _expect_mapping(measurement_value)
+    stream_value = measurement_entry.get("stream")
+    assert isinstance(stream_value, str)
+    assert stream_value.startswith("aac/")
+    seconds_value = measurement_entry.get("seconds")
+    assert isinstance(seconds_value, (int, float))
+    assert pytest.approx(seconds_value) == 0.1
+    frames_value = measurement_entry.get("frames")
+    assert isinstance(frames_value, (int, float))
+    assert frames_value == 3
+    correlation_value = measurement_entry.get("correlation")
+    assert isinstance(correlation_value, (int, float))
+    assert pytest.approx(correlation_value) == 0.93
+    status_value = measurement_entry.get("status")
+    assert status_value == "auto"
+    applied_value = measurement_entry.get("applied")
+    assert applied_value is True
     tonemap_json = payload["tonemap"]
     assert tonemap_json["overlay_mode"] == "diagnostic"
     assert "smoothing_period" in tonemap_json
@@ -2904,6 +2944,7 @@ def test_audio_alignment_default_duration_avoids_zero_window(
         trim_end: int | None = None,
         fps_map: tuple[int, int] | None = None,
         cache_dir: str | Path | None = None,
+        **_kwargs: object,
     ) -> types.SimpleNamespace:
         """
         Create a lightweight fake clip object for tests that resembles the real clip interface.

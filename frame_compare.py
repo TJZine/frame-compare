@@ -350,6 +350,7 @@ class AudioAlignmentJSON(TypedDict, total=False):
     target_stream: dict[str, object]
     offsets_sec: dict[str, object]
     offsets_frames: dict[str, object]
+    measurements: dict[str, dict[str, object]]
     stream_lines: list[str]
     stream_lines_text: str
     offset_lines: list[str]
@@ -563,6 +564,21 @@ class _AudioAlignmentSummary:
     manual_trim_starts: Dict[str, int] = field(default_factory=dict)
     vspreview_manual_offsets: Dict[str, int] = field(default_factory=dict)
     vspreview_manual_deltas: Dict[str, int] = field(default_factory=dict)
+    measured_offsets: Dict[str, "_AudioMeasurementDetail"] = field(default_factory=dict)
+
+
+@dataclass
+class _AudioMeasurementDetail:
+    """Snapshot of an audio alignment measurement for CLI/JSON reporting."""
+
+    label: str
+    stream: str
+    offset_seconds: Optional[float]
+    frames: Optional[int]
+    correlation: Optional[float]
+    status: str
+    applied: bool
+    note: Optional[str] = None
 
 
 @dataclass
@@ -590,6 +606,7 @@ class _AudioAlignmentDisplayData:
     correlations: Dict[str, float] = field(default_factory=dict)
     threshold: float = 0.0
     manual_trim_lines: List[str] = field(default_factory=list)
+    measurements: Dict[str, _AudioMeasurementDetail] = field(default_factory=dict)
 
 
 class CliOutputManager:
@@ -2866,7 +2883,7 @@ def _maybe_apply_audio_alignment(
                 offsets_path=offsets_path,
                 reference_name=reference_plan.path.name,
                 measurements=(),
-                applied_frames={},
+                applied_frames=dict(manual_trim_starts),
                 baseline_shift=0,
                 statuses={},
                 reference_plan=reference_plan,
@@ -3149,11 +3166,22 @@ def _maybe_apply_audio_alignment(
             suggestion_mode=False,
             manual_trim_starts={},
         )
+        detail_map = _compose_measurement_details(
+            measurements,
+            applied_frames_map=applied_frames,
+            statuses_map=statuses,
+            suggestion_mode_active=False,
+            manual_trims={},
+            swap_map=swap_details,
+            negative_notes=negative_override_notes,
+        )
+        summary.measured_offsets = detail_map
+        _emit_measurement_lines(
+            detail_map,
+            measurement_order,
+            append_manual=bool(display_data.manual_trim_lines),
+        )
         return summary
-
-    reused_cached = _maybe_reuse_cached_offsets(reference_plan, targets)
-    if reused_cached is not None:
-        return reused_cached, display_data
 
     stream_infos: Dict[Path, List["AudioStreamInfo"]] = {}
     for plan in plans:
@@ -3278,17 +3306,219 @@ def _maybe_apply_audio_alignment(
 
     reference_stream_text, reference_descriptor = _describe_stream(reference_plan, reference_stream_index)
     display_data.json_reference_stream = reference_stream_text
+    stream_descriptors: Dict[str, str] = {reference_plan.path.name: reference_descriptor}
 
     for idx, target in enumerate(targets):
         stream_idx = target_stream_indices.get(target.path, 0)
         target_stream_text, target_descriptor = _describe_stream(target, stream_idx)
         display_data.json_target_streams[plan_labels[target.path]] = target_descriptor
+        stream_descriptors[target.path.name] = target_descriptor
         if idx == 0:
             display_data.stream_lines.append(
                 f"Audio streams: ref={reference_stream_text}  target={target_stream_text}"
             )
         else:
             display_data.stream_lines.append(f"Audio streams: target={target_stream_text}")
+
+    def _format_measurement_line(detail: _AudioMeasurementDetail) -> str:
+        stream_text = detail.stream or "?"
+        seconds_text = (
+            f"{detail.offset_seconds:+.3f}s"
+            if detail.offset_seconds is not None
+            else "n/a"
+        )
+        frames_text = (
+            f"{detail.frames:+d}f" if detail.frames is not None else "n/a"
+        )
+        corr_text = (
+            f"{detail.correlation:.2f}"
+            if detail.correlation is not None and not math.isnan(detail.correlation)
+            else "n/a"
+        )
+        applied_text = "applied" if detail.applied else "suggested"
+        status_bits: List[str] = []
+        if detail.status:
+            status_bits.append(detail.status)
+        status_bits.append(applied_text)
+        status_text = "/".join(status_bits)
+        return (
+            f"Audio offsets: {detail.label}: [{stream_text}] "
+            f"{seconds_text} ({frames_text}) corr={corr_text} status={status_text}"
+        )
+
+    def _emit_measurement_lines(
+        detail_map: Dict[str, _AudioMeasurementDetail],
+        order: Sequence[str],
+        *,
+        append_manual: bool = False,
+    ) -> None:
+        offsets_sec: Dict[str, float] = {}
+        offsets_frames: Dict[str, int] = {}
+        offset_lines: List[str] = []
+        for name in order:
+            detail = detail_map.get(name)
+            if detail is None:
+                continue
+            if (
+                name == reference_plan.path.name
+                and len(detail_map) > 1
+            ):
+                continue
+            if detail.offset_seconds is not None:
+                offsets_sec[detail.label] = float(detail.offset_seconds)
+            if detail.frames is not None:
+                offsets_frames[detail.label] = int(detail.frames)
+            offset_lines.append(_format_measurement_line(detail))
+            if detail.note:
+                offset_lines.append(f"  note: {detail.note}")
+        if not offset_lines:
+            offset_lines.append("Audio offsets: none detected")
+        if append_manual and display_data.manual_trim_lines:
+            offset_lines.extend(display_data.manual_trim_lines)
+        display_data.offset_lines = offset_lines
+        display_data.json_offsets_sec = offsets_sec
+        display_data.json_offsets_frames = offsets_frames
+        display_data.measurements = {
+            detail.label: detail for detail in detail_map.values()
+        }
+        display_data.correlations = {
+            detail.label: detail.correlation
+            for detail in detail_map.values()
+            if detail.correlation is not None
+        }
+
+    fps_lookup: Dict[str, float] = {}
+    for plan in plans:
+        fps_tuple = plan.effective_fps or plan.source_fps or plan.fps_override
+        fps_lookup[plan.path.name] = _fps_to_float(fps_tuple)
+
+    measurement_order = [plan.path.name for plan in plans]
+    negative_override_notes: Dict[str, str] = {}
+
+    def _compose_measurement_details(
+        measurement_seq: Sequence["AlignmentMeasurement"],
+        *,
+        applied_frames_map: Mapping[str, int] | None,
+        statuses_map: Mapping[str, str] | None,
+        suggestion_mode_active: bool,
+        manual_trims: Mapping[str, int],
+        swap_map: Mapping[str, str],
+        negative_notes: Mapping[str, str],
+    ) -> Dict[str, _AudioMeasurementDetail]:
+        """
+        Convert raw measurement objects into detail records used for CLI + JSON reporting.
+
+        Parameters:
+            measurement_seq: Measurements returned by the alignment pipeline.
+            applied_frames_map: Mapping of clip names to frame adjustments actually applied.
+            statuses_map: Mapping of clip names to status labels ("auto", "manual", etc.).
+            suggestion_mode_active: True when offsets are suggestions only (VSPreview flow).
+            manual_trims: Existing manual trims discovered earlier in the run.
+            swap_map: Swap/notes per clip (e.g., "reference advanced" notes).
+            negative_notes: Notes produced when negative offsets were redirected.
+
+        Returns:
+            Dict[str, _AudioMeasurementDetail]: Mapping keyed by clip filename.
+        """
+
+        detail_map: Dict[str, _AudioMeasurementDetail] = {}
+        for measurement in measurement_seq:
+            clip_name = measurement.file.name
+            label = name_to_label.get(clip_name, clip_name)
+            descriptor = stream_descriptors.get(clip_name, "")
+            seconds_value: Optional[float]
+            if measurement.offset_seconds is None:
+                seconds_value = None
+            else:
+                seconds_value = float(measurement.offset_seconds)
+            frames_value = int(measurement.frames) if measurement.frames is not None else None
+            correlation_value: Optional[float]
+            if measurement.correlation is None or math.isnan(measurement.correlation):
+                correlation_value = None
+            else:
+                correlation_value = float(measurement.correlation)
+            status_text = ""
+            if statuses_map and clip_name in statuses_map:
+                status_text = statuses_map[clip_name]
+            applied_flag = False
+            if not suggestion_mode_active and applied_frames_map and clip_name in applied_frames_map:
+                applied_flag = True
+            note_parts: List[str] = []
+            swap_note = swap_map.get(clip_name)
+            if swap_note:
+                note_parts.append(swap_note)
+            negative_note = negative_notes.get(clip_name)
+            if negative_note:
+                note_parts.append(negative_note)
+            if measurement.error:
+                note_parts.append(measurement.error)
+                if not status_text:
+                    status_text = "error"
+                applied_flag = False
+            note_value = " ".join(note_parts) if note_parts else None
+            detail_map[clip_name] = _AudioMeasurementDetail(
+                label=label,
+                stream=descriptor,
+                offset_seconds=seconds_value,
+                frames=frames_value,
+                correlation=correlation_value,
+                status=status_text,
+                applied=applied_flag,
+                note=note_value,
+            )
+
+        for clip_name, trim_frames in manual_trims.items():
+            if clip_name in detail_map:
+                continue
+            label = name_to_label.get(clip_name, clip_name)
+            descriptor = stream_descriptors.get(clip_name, "")
+            fps_value = fps_lookup.get(clip_name, 0.0)
+            seconds_value = (trim_frames / fps_value) if fps_value else None
+            detail_map[clip_name] = _AudioMeasurementDetail(
+                label=label,
+                stream=descriptor,
+                offset_seconds=seconds_value,
+                frames=int(trim_frames),
+                correlation=None,
+                status="manual",
+                applied=not suggestion_mode_active,
+                note=None,
+            )
+        return detail_map
+
+    reused_cached = _maybe_reuse_cached_offsets(reference_plan, targets)
+    if reused_cached is not None:
+        summary = reused_cached
+        detail_map: Dict[str, _AudioMeasurementDetail] = {}
+        for plan in plans:
+            key = plan.path.name
+            frames_val = summary.applied_frames.get(key)
+            seconds_val: Optional[float]
+            fps_val = fps_lookup.get(key, 0.0)
+            if frames_val is None or not fps_val:
+                seconds_val = None
+            else:
+                seconds_val = frames_val / fps_val if fps_val else None
+            descriptor = stream_descriptors.get(key, "")
+            detail_map[key] = _AudioMeasurementDetail(
+                label=name_to_label.get(key, key),
+                stream=descriptor,
+                offset_seconds=seconds_val,
+                frames=frames_val,
+                correlation=None,
+                status=summary.statuses.get(key, "manual"),
+                applied=True,
+            )
+        summary.measured_offsets = detail_map
+        display_data.measurements = {
+            detail.label: detail for detail in detail_map.values()
+        }
+        _emit_measurement_lines(
+            detail_map,
+            measurement_order,
+            append_manual=bool(display_data.manual_trim_lines),
+        )
+        return summary, display_data
 
     reference_fps_tuple = reference_plan.effective_fps or reference_plan.source_fps
     reference_fps = _fps_to_float(reference_fps_tuple)
@@ -3393,7 +3623,7 @@ def _maybe_apply_audio_alignment(
                 elif measurement.reference_fps and measurement.reference_fps > 0:
                     measurement.offset_seconds = new_frames / measurement.reference_fps
 
-        negative_override_notes: Dict[str, str] = {}
+        negative_override_notes = {}
         swap_details: Dict[str, str] = {}
         swap_candidates: List["AlignmentMeasurement"] = []
         swap_enabled = len(targets) == 1
@@ -3492,54 +3722,6 @@ def _maybe_apply_audio_alignment(
         for warning_message in dict.fromkeys(raw_warning_messages):
             _warn(warning_message)
 
-        offset_lines: List[str] = []
-        offsets_sec: Dict[str, float] = {}
-        offsets_frames: Dict[str, int] = {}
-
-        for measurement in measurements:
-            clip_name: str = measurement.file.name
-            if clip_name == reference_plan.path.name and len(measurements) > 1:
-                continue
-            label = name_to_label.get(clip_name, clip_name)
-            if measurement.offset_seconds is not None:
-                offsets_sec[label] = float(measurement.offset_seconds)
-            if measurement.frames is not None:
-                offsets_frames[label] = int(measurement.frames)
-            display_data.correlations[label] = float(measurement.correlation)
-
-            if measurement.error:
-                offset_lines.append(
-                    f"Audio offsets: {label}: manual edit required ({measurement.error})"
-                )
-                continue
-
-            fps_value = 0.0
-            if measurement.target_fps and measurement.target_fps > 0:
-                fps_value = float(measurement.target_fps)
-            elif measurement.reference_fps and measurement.reference_fps > 0:
-                fps_value = float(measurement.reference_fps)
-
-            frames_text = "n/a"
-            if measurement.frames is not None:
-                frames_text = f"{measurement.frames:+d}f"
-            fps_text = f"{fps_value:.3f}" if fps_value > 0 else "0.000"
-            suffix = ""
-            if clip_name in negative_offsets:
-                suffix = " (reference advanced; trimming target)"
-            offset_lines.append(
-                f"Audio offsets: {label}: {measurement.offset_seconds:+.3f}s ({frames_text} @ {fps_text}){suffix}"
-            )
-            detail = swap_details.get(clip_name)
-            if detail:
-                offset_lines.append(f"  note: {detail}")
-
-        if not offset_lines:
-            offset_lines.append("Audio offsets: none detected")
-
-        display_data.offset_lines = offset_lines
-        display_data.json_offsets_sec = offsets_sec
-        display_data.json_offsets_frames = offsets_frames
-
         suggested_frames: Dict[str, int] = {}
         for measurement in measurements:
             if measurement.frames is not None:
@@ -3554,10 +3736,6 @@ def _maybe_apply_audio_alignment(
                     display_data.manual_trim_lines.append(
                         f"Existing manual trim: {label} → {plan.trim_start}f"
                     )
-            if not display_data.offset_lines:
-                display_data.offset_lines.append("Audio offsets: none detected")
-            if display_data.manual_trim_lines:
-                display_data.offset_lines.extend(display_data.manual_trim_lines)
             display_data.warnings.append(
                 "[AUDIO] VSPreview manual alignment enabled — offsets reported for guidance only."
             )
@@ -3565,7 +3743,7 @@ def _maybe_apply_audio_alignment(
                 offsets_path=offsets_path,
                 reference_name=reference_plan.path.name,
                 measurements=measurements,
-                applied_frames={},
+                applied_frames=dict(manual_trim_starts),
                 baseline_shift=0,
                 statuses={m.file.name: "suggested" for m in measurements},
                 reference_plan=reference_plan,
@@ -3574,6 +3752,21 @@ def _maybe_apply_audio_alignment(
                 suggested_frames=suggested_frames,
                 suggestion_mode=True,
                 manual_trim_starts=manual_trim_starts,
+            )
+            detail_map = _compose_measurement_details(
+                measurements,
+                applied_frames_map=summary.applied_frames,
+                statuses_map=summary.statuses,
+                suggestion_mode_active=True,
+                manual_trims=manual_trim_starts,
+                swap_map=swap_details,
+                negative_notes=negative_override_notes,
+            )
+            summary.measured_offsets = detail_map
+            _emit_measurement_lines(
+                detail_map,
+                measurement_order,
+                append_manual=bool(display_data.manual_trim_lines),
             )
             return summary, display_data
 
@@ -3628,6 +3821,21 @@ def _maybe_apply_audio_alignment(
             suggestion_mode=False,
             manual_trim_starts=manual_trim_starts,
         )
+        detail_map = _compose_measurement_details(
+            measurements,
+            applied_frames_map=applied_frames,
+            statuses_map=statuses,
+            suggestion_mode_active=False,
+            manual_trims=manual_trim_starts,
+            swap_map=swap_details,
+            negative_notes=negative_override_notes,
+        )
+        summary.measured_offsets = detail_map
+        _emit_measurement_lines(
+            detail_map,
+            measurement_order,
+            append_manual=bool(display_data.manual_trim_lines),
+        )
         return summary, display_data
     except audio_alignment.AudioAlignmentError as exc:
         raise CLIAppError(
@@ -3674,9 +3882,15 @@ def _write_vspreview_script(
     )
     apply_seeded_offsets = preview_mode_value == "seeded"
     show_overlay = bool(getattr(cfg.audio_alignment, "show_suggested_in_preview", True))
-    measurement_lookup = {
-        measurement.file.name: measurement for measurement in summary.measurements
-    }
+    if summary.measured_offsets:
+        measurement_lookup: Dict[str, Optional[float]] = {
+            name: detail.offset_seconds for name, detail in summary.measured_offsets.items()
+        }
+    else:
+        measurement_lookup = {
+            measurement.file.name: measurement.offset_seconds
+            for measurement in summary.measurements
+        }
 
     manual_trims = {}
     if summary.manual_trim_starts:
@@ -3711,10 +3925,10 @@ def _write_vspreview_script(
         trim_end_value = plan.trim_end if plan.trim_end is not None else None
         fps_override = tuple(plan.fps_override) if plan.fps_override else None
         suggested_frames_value = int(summary.suggested_frames.get(plan.path.name, 0))
-        measurement = measurement_lookup.get(plan.path.name)
+        measurement_seconds = measurement_lookup.get(plan.path.name)
         suggested_seconds_value = 0.0
-        if measurement is not None and measurement.offset_seconds is not None:
-            suggested_seconds_value = float(measurement.offset_seconds)
+        if measurement_seconds is not None:
+            suggested_seconds_value = float(measurement_seconds)
         manual_trim = manual_trims.get(label, int(plan.trim_start))
         manual_note = (
             f"baseline trim {manual_trim}f"
@@ -3873,24 +4087,24 @@ def _harmonise_fps(reference_clip, target_clip, label):
     return reference_clip, target_clip
 
 
-def _format_overlay_text(suggested_frames, suggested_seconds, applied_frames):
+def _format_overlay_text(label, suggested_frames, suggested_seconds, applied_frames):
     applied_label = "baseline" if applied_frames == 0 else "seeded"
     applied_value = "0" if applied_frames == 0 else f"{{applied_frames:+d}}"
     seconds_value = f"{{suggested_seconds:.3f}}"
     if seconds_value == "-0.000":
         seconds_value = "0.000"
     return (
-        f"Suggested: {{suggested_frames:+d}}f (~{{seconds_value}}s) • "
-        f"Applied in preview: {{applied_value}}f ({{applied_label}}) • "
+        f"{{label}}: {{suggested_frames:+d}}f (~{{seconds_value}}s) • "
+        f"Preview applied: {{applied_value}}f ({{applied_label}}) • "
         "(+ trims target / - pads reference)"
     )
 
 
-def _maybe_apply_overlay(clip, suggested_frames, suggested_seconds, applied_frames):
+def _maybe_apply_overlay(clip, label, suggested_frames, suggested_seconds, applied_frames):
     if not SHOW_SUGGESTED_OVERLAY:
         return clip
     try:
-        message = _format_overlay_text(suggested_frames, suggested_seconds, applied_frames)
+        message = _format_overlay_text(label, suggested_frames, suggested_seconds, applied_frames)
     except Exception:
         message = "Suggested offset unavailable"
     try:
@@ -3915,8 +4129,20 @@ for label, info in TARGETS.items():
     suggested_frames = int(suggested_entry[0])
     suggested_seconds = float(suggested_entry[1])
     ref_view, tgt_view = _apply_offset(reference_clip, target_clip, offset_frames)
-    ref_view = _maybe_apply_overlay(ref_view, suggested_frames, suggested_seconds, offset_frames)
-    tgt_view = _maybe_apply_overlay(tgt_view, suggested_frames, suggested_seconds, offset_frames)
+    ref_view = _maybe_apply_overlay(
+        ref_view,
+        REFERENCE['label'],
+        suggested_frames,
+        suggested_seconds,
+        offset_frames,
+    )
+    tgt_view = _maybe_apply_overlay(
+        tgt_view,
+        label,
+        suggested_frames,
+        suggested_seconds,
+        offset_frames,
+    )
     ref_view.set_output(slot)
     tgt_view.set_output(slot + 1)
     applied_label = "baseline" if offset_frames == 0 else "seeded"
@@ -5304,18 +5530,25 @@ def run_cli(
             vspreview_target_plan = plan
             break
         if vspreview_target_plan is not None:
+            clip_key = vspreview_target_plan.path.name
             vspreview_suggested_frames_value = int(
-                alignment_summary.suggested_frames.get(
-                    vspreview_target_plan.path.name, 0
-                )
+                alignment_summary.suggested_frames.get(clip_key, 0)
             )
-            measurement_lookup = {
-                measurement.file.name: measurement
-                for measurement in alignment_summary.measurements
-            }
-            measurement = measurement_lookup.get(vspreview_target_plan.path.name)
-            if measurement is not None and measurement.offset_seconds is not None:
-                vspreview_suggested_seconds_value = float(measurement.offset_seconds)
+            measurement_seconds: Optional[float] = None
+            if alignment_summary.measured_offsets:
+                detail = alignment_summary.measured_offsets.get(clip_key)
+                if detail and detail.offset_seconds is not None:
+                    measurement_seconds = float(detail.offset_seconds)
+            if measurement_seconds is None and alignment_summary.measurements:
+                measurement_lookup = {
+                    measurement.file.name: measurement
+                    for measurement in alignment_summary.measurements
+                }
+                measurement = measurement_lookup.get(clip_key)
+                if measurement is not None and measurement.offset_seconds is not None:
+                    measurement_seconds = float(measurement.offset_seconds)
+            if measurement_seconds is not None:
+                vspreview_suggested_seconds_value = measurement_seconds
 
     json_tail["vspreview_mode"] = vspreview_mode_value
     json_tail["suggested_frames"] = int(vspreview_suggested_frames_value)
@@ -5372,12 +5605,26 @@ def run_cli(
             key: value for key, value in alignment_display.json_target_streams.items()
         }
         json_tail["audio_alignment"]["target_stream"] = target_streams
+        offsets_sec_source = alignment_display.json_offsets_sec
+        offsets_frames_source = alignment_display.json_offsets_frames
+        if (
+            not offsets_sec_source
+            and alignment_summary is not None
+            and alignment_summary.measured_offsets
+        ):
+            offsets_sec_source = {}
+            offsets_frames_source = {}
+            for detail in alignment_summary.measured_offsets.values():
+                if detail.offset_seconds is not None:
+                    offsets_sec_source[detail.label] = float(detail.offset_seconds)
+                if detail.frames is not None:
+                    offsets_frames_source[detail.label] = int(detail.frames)
         offsets_sec: dict[str, object] = {
-            key: float(value) for key, value in alignment_display.json_offsets_sec.items()
+            key: float(value) for key, value in offsets_sec_source.items()
         }
         json_tail["audio_alignment"]["offsets_sec"] = offsets_sec
         offsets_frames: dict[str, object] = {
-            key: int(value) for key, value in alignment_display.json_offsets_frames.items()
+            key: int(value) for key, value in offsets_frames_source.items()
         }
         json_tail["audio_alignment"]["offsets_frames"] = offsets_frames
         stream_lines_output = list(alignment_display.stream_lines)
@@ -5388,6 +5635,28 @@ def run_cli(
         offset_lines_output = list(alignment_display.offset_lines)
         json_tail["audio_alignment"]["offset_lines"] = offset_lines_output
         json_tail["audio_alignment"]["offset_lines_text"] = "\n".join(offset_lines_output) if offset_lines_output else ""
+        measurement_source = alignment_display.measurements
+        if (
+            not measurement_source
+            and alignment_summary is not None
+            and alignment_summary.measured_offsets
+        ):
+            measurement_source = {
+                detail.label: detail
+                for detail in alignment_summary.measured_offsets.values()
+            }
+        measurements_output: dict[str, dict[str, object]] = {}
+        for label, detail in measurement_source.items():
+            measurements_output[label] = {
+                "stream": detail.stream,
+                "seconds": detail.offset_seconds,
+                "frames": detail.frames,
+                "correlation": detail.correlation,
+                "status": detail.status,
+                "applied": detail.applied,
+                "note": detail.note,
+            }
+        json_tail["audio_alignment"]["measurements"] = measurements_output
         if alignment_display.manual_trim_lines:
             json_tail["audio_alignment"]["manual_trim_summary"] = list(alignment_display.manual_trim_lines)
         else:
@@ -5404,6 +5673,7 @@ def run_cli(
         json_tail["audio_alignment"]["stream_lines_text"] = ""
         json_tail["audio_alignment"]["offset_lines"] = []
         json_tail["audio_alignment"]["offset_lines_text"] = ""
+        json_tail["audio_alignment"]["measurements"] = {}
     json_tail["audio_alignment"]["enabled"] = bool(cfg.audio_alignment.enable)
     json_tail["audio_alignment"]["suggestion_mode"] = bool(
         alignment_summary.suggestion_mode if alignment_summary is not None else False
@@ -5772,6 +6042,7 @@ def run_cli(
             "threshold": threshold_value,
         }
     )
+    audio_alignment_view["measurements"] = json_tail["audio_alignment"].get("measurements", {})
     layout_data["audio_alignment"] = audio_alignment_view
 
     using_frame_total = isinstance(total_frames, int) and total_frames > 0

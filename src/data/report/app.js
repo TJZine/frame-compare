@@ -374,12 +374,14 @@
     if (state.mode === "overlay" || state.mode === "difference" || state.mode === "blink") {
       overlay.style.clipPath = "inset(0 0 0 0)";
       divider.style.visibility = "hidden";
+      divider.style.display = "none";
       return;
     }
     const clipRight = 100 - percent;
     overlay.style.clipPath = `inset(0 ${clipRight}% 0 0)`;
     divider.style.left = `${percent}%`;
     divider.style.visibility = "visible";
+    divider.style.display = "";
   }
 
   function currentScale() {
@@ -1335,11 +1337,13 @@
         const percent = Math.min(100, Math.max(0, Number(sliderControl.value) || 0));
         const clipRight = 100 - percent;
         overlay.style.clipPath = `inset(0 ${clipRight}% 0 0)`;
+        divider.style.display = "";
         divider.style.visibility = "visible";
         divider.style.left = `${percent}%`;
       } else {
         overlay.style.visibility = "hidden";
         divider.style.visibility = "hidden";
+        divider.style.display = "none";
       }
       rightImage.style.visibility = rightAvailable ? "visible" : "hidden";
     } else if (state.mode === "overlay") {
@@ -1347,16 +1351,19 @@
       overlay.style.visibility = leftAvailable ? "visible" : "hidden";
       overlay.style.clipPath = "inset(0 0 0 0)";
       divider.style.visibility = "hidden";
+      divider.style.display = "none";
       rightImage.style.visibility = rightAvailable ? "visible" : "hidden";
     } else if (state.mode === "difference") {
       stopBlink();
       overlay.style.visibility = hasBoth ? "visible" : "hidden";
       overlay.style.clipPath = "inset(0 0 0 0)";
       divider.style.visibility = "hidden";
+      divider.style.display = "none";
       rightImage.style.visibility = hasBoth ? "visible" : "hidden";
     } else if (state.mode === "blink") {
       overlay.style.clipPath = "inset(0 0 0 0)";
       divider.style.visibility = "hidden";
+      divider.style.display = "none";
       if (hasBoth) {
         startBlink();
       } else {
