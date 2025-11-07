@@ -44,6 +44,7 @@ class FakeSession:
         self.calls: list[dict[str, Any]] = []
         self.closed = False
         self._lock = threading.Lock()
+        self.mounts: list[tuple[str, Any]] = []
 
     def close(self) -> None:
         self.closed = True
@@ -95,6 +96,10 @@ class FakeSession:
             )
         return self._next()
 
+    def mount(self, prefix: str, adapter: Any) -> None:
+        with self._lock:
+            self.mounts.append((prefix, adapter))
+
 
 def _install_session(
     monkeypatch: pytest.MonkeyPatch,
@@ -138,6 +143,22 @@ def test_session_bootstrap_single_shot(tmp_path: Path, monkeypatch: pytest.Monke
     cfg = SlowpicsConfig()
     image = _write_image(tmp_path, "123 - ClipA.png")
 
+    captured_adapter: dict[str, Any] = {}
+
+    class DummyAdapter:
+        def __init__(
+            self,
+            *,
+            max_retries: Any,
+            pool_connections: int,
+            pool_maxsize: int,
+        ) -> None:
+            captured_adapter["max_retries"] = max_retries
+            captured_adapter["pool_connections"] = pool_connections
+            captured_adapter["pool_maxsize"] = pool_maxsize
+
+    monkeypatch.setattr(slowpics, "HTTPAdapter", DummyAdapter)
+
     responses = [
         FakeResponse(200),
         FakeResponse(200, {"collectionUuid": "abc", "key": "def", "images": [["img1"]]}),
@@ -160,6 +181,11 @@ def test_session_bootstrap_single_shot(tmp_path: Path, monkeypatch: pytest.Monke
     image_call = session.calls[2]
     assert image_call["timeout"][0] == pytest.approx(10.0)
     assert image_call["timeout"][1] >= cfg.image_upload_timeout_seconds
+    assert session.mounts and session.mounts[0][0] == "https://"
+    adapter_kwargs = captured_adapter
+    assert adapter_kwargs["max_retries"].total == 3
+    assert adapter_kwargs["pool_connections"] == 4
+    assert adapter_kwargs["pool_maxsize"] == 4
 
 
 def test_missing_xsrf_token_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

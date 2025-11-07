@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Callable, Dict, List, Optional
 from urllib.parse import unquote, urlsplit
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util import Retry
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from requests_toolbelt.multipart.encoder import MultipartEncoder
@@ -333,6 +335,33 @@ def _upload_comparison_legacy(
     return canonical_url
 
 
+def _configure_slowpics_session(session: requests.Session, *, workers: Optional[int] = None) -> None:
+    """
+    Configure the provided session with retry-capable HTTP adapters sized for concurrent uploads.
+
+    Parameters:
+        session: The Requests session that will perform slow.pics HTTP calls.
+        workers: Expected parallel upload workers; defaults to `_DEFAULT_UPLOAD_CONCURRENCY`.
+    """
+
+    effective_workers = workers if workers and workers > 0 else _DEFAULT_UPLOAD_CONCURRENCY
+    pool_size = max(4, effective_workers)
+    retries = Retry(
+        total=3,
+        backoff_factor=0.1,
+        status_forcelist=[502, 503, 504],
+        allowed_methods=frozenset({"POST"}),
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(
+        max_retries=retries,
+        pool_connections=pool_size,
+        pool_maxsize=pool_size,
+    )
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+
+
 def upload_comparison(
     image_files: List[str],
     screen_dir: Path,
@@ -346,8 +375,10 @@ def upload_comparison(
     if not image_files:
         raise SlowpicsAPIError("No image files provided for upload")
 
+    expected_workers = min(max_workers or _DEFAULT_UPLOAD_CONCURRENCY, len(image_files) or 1)
     session = requests.Session()
     try:
+        _configure_slowpics_session(session, workers=expected_workers)
         try:
             session.get("https://slow.pics/comparison", timeout=_CONNECT_TIMEOUT_SECONDS)
         except requests.RequestException as exc:
