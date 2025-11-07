@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import time
 import tomllib
 import traceback
@@ -56,7 +57,7 @@ from natsort import os_sorted
 from rich import print
 from rich.console import Console
 from rich.markup import escape
-from rich.progress import BarColumn, Progress, ProgressColumn, TextColumn
+from rich.progress import Progress, ProgressColumn
 from rich.text import Text
 
 from src import audio_alignment
@@ -5495,6 +5496,15 @@ def run_cli(
     slowpics_inputs_json["collection_name"] = slowpics_title_inputs["collection_name"]
     slowpics_inputs_json["collection_suffix"] = slowpics_title_inputs["collection_suffix"]
     json_tail["slowpics"]["title"]["final"] = slowpics_final_title
+    slowpics_layout_view = layout_data.get("slowpics", {})
+    slowpics_layout_view["collection_name"] = slowpics_final_title
+    slowpics_layout_view["auto_upload"] = bool(cfg.slowpics.auto_upload)
+    slowpics_layout_view.setdefault(
+        "status",
+        "pending" if cfg.slowpics.auto_upload else "disabled",
+    )
+    layout_data["slowpics"] = slowpics_layout_view
+    reporter.update_values(layout_data)
 
     if tmdb_resolution is not None:
         match_title = tmdb_resolution.title or tmdb_context.get("Title") or files[0].stem
@@ -6684,6 +6694,8 @@ def run_cli(
     if slowpics_verbose_tmdb_tag:
         reporter.verbose_line(f"  {escape(slowpics_verbose_tmdb_tag)}")
     if cfg.slowpics.auto_upload:
+        layout_data["slowpics"]["status"] = "preparing"
+        reporter.update_values(layout_data)
         print("[cyan]Preparing slow.pics upload...[/cyan]")
         upload_total = len(image_paths)
         def _safe_size(path_str: str) -> int:
@@ -6754,24 +6766,29 @@ def run_cli(
             return stats
 
         try:
+            layout_data["slowpics"]["status"] = "uploading"
+            reporter.update_values(layout_data)
             reporter.line(_color_text("[✓] slow.pics: establishing session", "green"))
             if upload_total > 0:
                 start_time = time.perf_counter()
                 uploaded_files = 0
                 uploaded_bytes = 0
                 file_index = 0
-
-                columns: tuple[ProgressColumn, ...] = (
-                    TextColumn('{task.percentage:>6.02f}% {task.completed}/{task.total}', justify='left'),
-                    BarColumn(),
-                    TextColumn('{task.fields[stats]}', justify='right'),
+                initial_stats = _format_stats(0, 0, 0.0)
+                reporter.update_progress_state(
+                    "upload_bar",
+                    description="slow.pics upload",
+                    current=0,
+                    total=upload_total,
+                    stats=initial_stats,
                 )
-                with reporter.progress(*columns, transient=False) as upload_progress:
+                reporter.render_sections(["publish"])
+                with reporter.create_progress("upload_bar", transient=False) as upload_progress:
                     task_id = upload_progress.add_task(
-                        '',
+                        "slow.pics upload",
                         total=upload_total,
-                        stats=_format_stats(0, 0, 0.0),
                     )
+                    progress_lock = threading.Lock()
 
                     def advance_upload(count: int) -> None:
                         """
@@ -6783,17 +6800,25 @@ def run_cli(
                             count (int): Number of files to mark as uploaded.
                         """
                         nonlocal uploaded_files, uploaded_bytes, file_index
-                        uploaded_files += count
-                        for _ in range(count):
-                            if file_index < len(file_sizes):
-                                uploaded_bytes += file_sizes[file_index]
-                                file_index += 1
-                        elapsed = time.perf_counter() - start_time
-                        upload_progress.update(
-                            task_id,
-                            completed=min(upload_total, uploaded_files),
-                            stats=_format_stats(uploaded_files, uploaded_bytes, elapsed),
-                        )
+                        with progress_lock:
+                            uploaded_files += count
+                            for _ in range(count):
+                                if file_index < len(file_sizes):
+                                    uploaded_bytes += file_sizes[file_index]
+                                    file_index += 1
+                            elapsed = time.perf_counter() - start_time
+                            stats_text = _format_stats(uploaded_files, uploaded_bytes, elapsed)
+                            completed = min(upload_total, uploaded_files)
+                            reporter.update_progress_state(
+                                "upload_bar",
+                                current=completed,
+                                total=upload_total,
+                                stats=stats_text,
+                            )
+                            upload_progress.update(
+                                task_id,
+                                completed=completed,
+                            )
 
                     slowpics_url = upload_comparison(
                         image_paths,
@@ -6803,10 +6828,16 @@ def run_cli(
                     )
 
                     elapsed = time.perf_counter() - start_time
+                    final_stats = _format_stats(uploaded_files, uploaded_bytes, elapsed)
+                    reporter.update_progress_state(
+                        "upload_bar",
+                        current=upload_total,
+                        total=upload_total,
+                        stats=final_stats,
+                    )
                     upload_progress.update(
                         task_id,
                         completed=upload_total,
-                        stats=_format_stats(uploaded_files, uploaded_bytes, elapsed),
                     )
             else:
                 slowpics_url = upload_comparison(
@@ -6814,9 +6845,13 @@ def run_cli(
                     out_dir,
                     cfg.slowpics,
                 )
+            layout_data["slowpics"]["status"] = "completed"
+            reporter.update_values(layout_data)
             reporter.line(_color_text(f"[✓] slow.pics: uploading {upload_total} images", "green"))
             reporter.line(_color_text("[✓] slow.pics: assembling collection", "green"))
         except SlowpicsAPIError as exc:
+            layout_data["slowpics"]["status"] = "failed"
+            reporter.update_values(layout_data)
             raise CLIAppError(
                 f"slow.pics upload failed: {exc}",
                 rich_message=f"[red]slow.pics upload failed:[/red] {exc}",

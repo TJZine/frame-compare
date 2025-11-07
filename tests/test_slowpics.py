@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 from typing import Any, List
 
@@ -42,6 +43,8 @@ class FakeSession:
         self.cookies: FakeCookies = FakeCookies(base)
         self.calls: list[dict[str, Any]] = []
         self.closed = False
+        self._lock = threading.Lock()
+        self.mounts: list[tuple[str, Any]] = []
 
     def close(self) -> None:
         self.closed = True
@@ -59,12 +62,14 @@ class FakeSession:
         return False
 
     def _next(self) -> FakeResponse:
-        if not self._responses:
-            raise AssertionError("Unexpected request: no prepared response")
-        return self._responses.pop(0)
+        with self._lock:
+            if not self._responses:
+                raise AssertionError("Unexpected request: no prepared response")
+            return self._responses.pop(0)
 
     def get(self, url: str, timeout: float | None = None) -> requests.Response:
-        self.calls.append({"method": "GET", "url": url, "timeout": timeout})
+        with self._lock:
+            self.calls.append({"method": "GET", "url": url, "timeout": timeout})
         return self._next()
 
     def post(
@@ -77,18 +82,23 @@ class FakeSession:
         headers: Any | None = None,
         timeout: float | None = None,
     ) -> requests.Response:
-        self.calls.append(
-            {
-                "method": "POST",
-                "url": url,
-                "timeout": timeout,
-                "json": json,
-                "files": files,
-                "data": data,
-                "headers": headers,
-            }
-        )
+        with self._lock:
+            self.calls.append(
+                {
+                    "method": "POST",
+                    "url": url,
+                    "timeout": timeout,
+                    "json": json,
+                    "files": files,
+                    "data": data,
+                    "headers": headers,
+                }
+            )
         return self._next()
+
+    def mount(self, prefix: str, adapter: Any) -> None:
+        with self._lock:
+            self.mounts.append((prefix, adapter))
 
 
 def _install_session(
@@ -103,13 +113,15 @@ def _install_session(
 
 class DummyEncoder:
     instances: List["DummyEncoder"] = []
+    _lock = threading.Lock()
 
     def __init__(self, fields: dict[str, Any], boundary: str) -> None:
         self.fields = fields
         self.boundary = boundary
         self.content_type = "multipart/form-data"
         self.len = len(str(fields))
-        DummyEncoder.instances.append(self)
+        with DummyEncoder._lock:
+            DummyEncoder.instances.append(self)
 
     def to_string(self) -> bytes:
         return b"encoded"
@@ -130,6 +142,22 @@ def _write_image(tmp_path: Path, name: str) -> Path:
 def test_session_bootstrap_single_shot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = SlowpicsConfig()
     image = _write_image(tmp_path, "123 - ClipA.png")
+
+    captured_adapter: dict[str, Any] = {}
+
+    class DummyAdapter:
+        def __init__(
+            self,
+            *,
+            max_retries: Any,
+            pool_connections: int,
+            pool_maxsize: int,
+        ) -> None:
+            captured_adapter["max_retries"] = max_retries
+            captured_adapter["pool_connections"] = pool_connections
+            captured_adapter["pool_maxsize"] = pool_maxsize
+
+    monkeypatch.setattr(slowpics, "HTTPAdapter", DummyAdapter)
 
     responses = [
         FakeResponse(200),
@@ -153,6 +181,11 @@ def test_session_bootstrap_single_shot(tmp_path: Path, monkeypatch: pytest.Monke
     image_call = session.calls[2]
     assert image_call["timeout"][0] == pytest.approx(10.0)
     assert image_call["timeout"][1] >= cfg.image_upload_timeout_seconds
+    assert session.mounts and session.mounts[0][0] == "https://"
+    adapter_kwargs = captured_adapter
+    assert adapter_kwargs["max_retries"].total == 3
+    assert adapter_kwargs["pool_connections"] == 4
+    assert adapter_kwargs["pool_maxsize"] == 4
 
 
 def test_missing_xsrf_token_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -257,6 +290,35 @@ def test_tmdb_identifier_accepts_prefixed_values(tmp_path: Path, monkeypatch: py
 
     comparison_fields = DummyEncoder.instances[0].fields
     assert comparison_fields["tmdbId"] == "TV_76543"
+
+
+def test_progress_callback_invoked_per_image(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = SlowpicsConfig(collection_name="Example")
+    files = [
+        _write_image(tmp_path, "10 - ClipA.png"),
+        _write_image(tmp_path, "10 - ClipB.png"),
+    ]
+    responses = [
+        FakeResponse(200),
+        FakeResponse(200, {"collectionUuid": "abc", "key": "def", "images": [["img1", "img2"]]}),
+        FakeResponse(200, text="OK"),
+        FakeResponse(200, text="OK"),
+    ]
+    _install_session(monkeypatch, responses)
+    calls: list[int] = []
+
+    def progress(value: int) -> None:
+        calls.append(value)
+
+    slowpics.upload_comparison(
+        [str(path) for path in files],
+        tmp_path,
+        cfg,
+        progress_callback=progress,
+        max_workers=2,
+    )
+
+    assert sum(calls) == len(files)
 
 
 def test_legacy_image_upload_loop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

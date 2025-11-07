@@ -305,9 +305,23 @@
     },
     {
       "id": "publish",
-      "type": "passthrough",
+      "type": "group",
       "title_badge": "[PUBLISH]",
-      "accent_role": "section_publish"
+      "accent_role": "section_publish",
+      "blocks": [
+        {
+          "subtitle": "slow.pics",
+          "lines": [
+            "[[key]]collection[[/]]=[[value]]{slowpics.collection_name}[[/]] [[key]]auto[[/]]=[[value]]{slowpics.auto_upload|bool}[[/]]",
+            "[[key]]status[[/]]=[[value]]{slowpics.status}[[/]]"
+          ]
+        },
+        {
+          "type": "progress",
+          "progress_id": "upload_bar",
+          "right_label": "[[value]]{progress.stats}[[/]]"
+        }
+      ]
     },
     {
       "id": "warnings",
