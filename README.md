@@ -16,6 +16,7 @@ Automated frame sampling, alignment, tonemapping, and slow.pics uploads for dete
     - [Wizard \& Presets](#wizard--presets)
     - [Dependency Doctor](#dependency-doctor)
   - [Configuration](#configuration)
+    - [Tonemap Quick Recipes](#tonemap-quick-recipes)
   - [CLI Reference](#cli-reference)
   - [Examples](#examples)
     - [VSPreview manual alignment assistant](#vspreview-manual-alignment-assistant)
@@ -211,8 +212,17 @@ Offline HTML reports mirror slow.pics ergonomics: filmstrip thumbnails with sele
 
 ### Tonemap Quick Recipes
 
-- **Reference SDR (BT.2390):** keep `preset="reference"` (or select with `--tm-preset reference`), which resolves to `tone_curve="bt.2390"`, `target_nits=100`, `dst_min_nits=0.18`, `knee_offset=0.50`, and `dpd_preset="high_quality"`. This maximises texture in low APL scenes without blowing highlights. Pair with the default overlay template to surface the resolved parameters.
-- **BT.2446A Filmic:** set `preset="filmic"` (or `--tm-preset filmic`) to switch to the libplacebo BT.2446A curve with the same 100 nit target and conservative dynamic peak detection. This preset keeps a softer shoulder and works well for well-mastered PQ sources. Tweak `--tm-dst-min`/`[color].dst_min_nits` or `--tm-gamma` when you need extra lift.
+- **Reference SDR (BT.2390):** keep `preset="reference"` (or select with `--tm-preset reference`) for the high-quality baseline: `tone_curve="bt.2390"`, `target_nits=100`, `dst_min_nits=0.18`, `knee_offset=0.50`, smoothing `45f`, percentile `99.995`, contrast recovery `0.30`, and `dpd_preset="high_quality"`. This maximises texture in low APL scenes while guarding highlights.
+- **BT.2446A Filmic:** pick `preset="filmic"` for the libplacebo BT.2446A shoulder. It softens highlight roll-off (`knee_offset≈0.58`), keeps target nits at 100, and retains conservative dynamic peak detection—ideal for well-mastered HDR sources. Adjust `--tm-dst-min` or `--tm-gamma` for subtle lift.
+- **Bright Lift:** use `preset="bright_lift"` when SDR conversions feel too dim. It raises target nits to 130, lifts the toe (`dst_min_nits=0.22`), and applies stronger contrast recovery (`0.50`) while keeping DPD engaged so highlights stay controlled.
+- **Highlight Guard:** choose `preset="highlight_guard"` to tame aggressive grades. Target nits drop to 90 with an extended smoothing window (50f) and moderate contrast recovery (`0.15`), pulling peaks down without flattening the whole frame.
+
+Fine-grained controls are also exposed through `[color]` (and matching `--tm-*` flags) when you need extra headroom:
+
+- `smoothing_period`, `scene_threshold_low`, `scene_threshold_high` tune the HDR peak smoothing window.
+- `percentile` and `contrast_recovery` replicate libplacebo’s `high_quality` preset when set to `99.995` and `0.3`.
+- `metadata` selects the tone-mapping metadata source (`auto`, `none`, `hdr10`, `hdr10+`, `luminance`), while `use_dovi` lets you force or disable Dolby Vision RPU usage.
+- `visualize_lut` and `show_clipping` surface debugging views without editing scripts.
 
 > **Tip:** To seed another workspace, run `uv run python -m frame_compare --root alt-root --write-config`.
 
@@ -224,7 +234,7 @@ Offline HTML reports mirror slow.pics ergonomics: filmstrip thumbnails with sele
 | `--config PATH` | Use a specific config file (falls back to `FRAME_COMPARE_CONFIG`) |
 | `--input PATH` | Override `[paths].input_dir` for a single run |
 | `--audio-align-track label=index` | Force the audio stream used per clip (repeatable) |
-| `--tm-preset NAME` | Override tone-mapping preset (`reference`, `contrast`, `filmic`, `bt2390_spec`, `spline`) |
+| `--tm-preset NAME` | Override tone-mapping preset (`reference`, `bt2390_spec`, `filmic`, `spline`, `contrast`, `bright_lift`, `highlight_guard`) |
 | `--tm-curve NAME` | Override `[color].tone_curve` without touching presets |
 | `--tm-target NITS` | Override `[color].target_nits` |
 | `--tm-dst-min VALUE` | Override `[color].dst_min_nits` |
@@ -233,6 +243,15 @@ Offline HTML reports mirror slow.pics ergonomics: filmstrip thumbnails with sele
 | `--tm-dpd-black-cutoff VALUE` | Override `[color].dpd_black_cutoff` (`0.0–0.05`) |
 | `--tm-gamma VALUE` | Override `[color].post_gamma` and enable the gamma lift |
 | `--tm-gamma-disable` | Disable the post-tonemap gamma lift for this run |
+| `--tm-smoothing VALUE` | Override `[color].smoothing_period` (frames) |
+| `--tm-scene-low VALUE` | Override `[color].scene_threshold_low` |
+| `--tm-scene-high VALUE` | Override `[color].scene_threshold_high` |
+| `--tm-percentile VALUE` | Override `[color].percentile` (0–100) |
+| `--tm-contrast VALUE` | Override `[color].contrast_recovery` |
+| `--tm-metadata VALUE` | Override `[color].metadata` (`auto`, `none`, `hdr10`, `hdr10+`, `luminance`, or `0-4`) |
+| `--tm-use-dovi / --tm-no-dovi` | Force Dolby Vision metadata usage on/off (default auto) |
+| `--tm-visualize-lut / --tm-no-visualize-lut` | Toggle libplacebo LUT visualisation |
+| `--tm-show-clipping / --tm-no-show-clipping` | Toggle clipped-pixel highlighting during tonemapping |
 | `--write-config` | Ensure `ROOT/config/config.toml` exists, then exit |
 | `--diagnose-paths` | Print JSON diagnostics (root, media, screens, writability) |
 | `--quiet` / `--verbose` | Adjust console verbosity |
@@ -393,18 +412,8 @@ Distributed under the [MIT License](LICENSE). Frame Compare builds on FFmpeg, Va
 - File issues or feature requests via the GitHub issue tracker. For security concerns, open a private advisory so details remain confidential until patched.
 
 ## Future updates
-- Rework current presets to better preset and expand upon them.
-- Do a check of all current config options to ensure all are working correctly and see if any can be trimmed or combined (like the letterbox options) 
-- identify which file is being indexed during the creation of the lwi index files.
-- at a glance box in cli output still not showing what viewer mode is selected between None, Local Report, and Slow.pics
-- no nits number showing in the at a glance box still.
-- Frames in line 1 of the at a glance box has nothing after it.
-- progress bar is still a dot on a solid line when set to fill, ensure fill/dot modes are both working or just keep the one present if both are not and remove the dead code. Investigate why progress bar color is linked to heading color (CYAN)
-- audio alignment step in the CLI always missing the information as if loading from the generated offset file. I think this is because when vspreview mode is also active it loads the values of the offset file after as if it wasn't just generated. Can we look into this behavior? what is the expected behavior for different settings combinations?
-- investigate audio offset behavior in situations with multiple encodes. TNBC example where suggested is 0 but 1 encode is slightly mismatched. Its now showing 26f suggested diff but one of the encodes with this suggestion is already matched with the ref. The issue is that when set to 26f the other encode also is adjusted even though it isnt needed after vs preview. Can we also add the video title name in the vspreview overlay along with the suggested frame offset and other information already present? Important note: audio offset values display incorrectly in vspreview overlay only. When prompted after closing vspreview it suggests the correct offsets from the audio analyzation process. ie 0f mainframe rel to remux and 26 frame mainframe to dsnp.
-- when panning or really when swapping between images at all the position on the page is reset. so if im zoomed in towards the top of the image and swap between them in overlay mode or move the reveal bar in slider mode i am pulled down to where the thumbnails are just at the bottom of the visible screen and no longer and looking at the same spot in the image/overall webpage that i want to be. I think this is related to the new changes we made, possibly with the thumbnails since they are ending up perfectly at the bottom of my screen upon swap like mentioned.
-- id also like overlay mode to swap between all available encode sources of the same frame per frame. Right now its only the 2 selected encodes from slider whereas slow.pics allows swapping through all sources in overlay mode. I have page source for a comparision from slow,pics with 3 sources attached after this message. If there is anything you want to see page source wise or anything else i can access from slow.pics let me know and i can get it for you. let me know if you need anything else than come up with a detailed best practice plan to implement these changes.
--  use sequential thinking. use context7. use RIPGREP for any searching. Do a thorough analysis of legacy/comp.py and identify any possible
-  regressions in our project vs this original file and any possible improvements to take from it. 2 things of note ive noticed, screenshot
-  progress bar in ours is a regression, the old version shows which encode is being screenshot as well as a total progress bar. 2. Uploaded
-  to slow.pics is exponentially faster in this old version of the script.
+- Continue refining CLI status panels and VSPreview-assisted workflows so long-running batches communicate progress and slow.pics uploads complete as efficiently as the legacy script.
+- Polish the local viewer experience (persistent zoom/slider behavior, richer overlays, multi-encode alignment summaries) to remove the remaining parity gaps with earlier tooling.
+- Audit configuration surfaces for clarity and consolidation, trimming duplicate options while keeping power-user overrides accessible.
+
+Detailed technical tasks are tracked on the [GitHub Issues board](https://github.com/TJZine/frame-compare/issues).

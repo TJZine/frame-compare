@@ -73,8 +73,16 @@ export_range = "full"
 ffmpeg_timeout_seconds = 120.0
 
 [color]
-# HDR → SDR pipeline controls. Presets: reference (bt.2390/100nits/dpd=1),
-# contrast (mobius/120nits/dpd=0), filmic (hable/100nits/dpd=1), or custom values below.
+# HDR → SDR pipeline controls.
+# Presets:
+#   • reference          — bt.2390 with high-quality libplacebo defaults tuned for stills.
+#   • bt2390_spec        — bt.2390 adhering closely to spec targets with minimal enhancements.
+#   • filmic             — bt.2446a shoulder for softer roll-off and cinematic mids.
+#   • contrast           — bt.2390 with enhanced micro-contrast while keeping peaks in check.
+#   • spline             — smooth spline curve with modest lift across the range.
+#   • bright_lift        — bt.2390 tuned to brighten mids/highs without crushing blacks.
+#   • highlight_guard    — bt.2390 tuned to pull highlights down for difficult masters.
+# Override individual fields below when preset=\"custom\" or when layering manual tweaks.
 enable_tonemap = true
 preset = "reference"
 tone_curve = "bt.2390"
@@ -84,6 +92,15 @@ dst_min_nits = 0.18
 knee_offset = 0.50               # BT.2390 knee parameter (0-1); 0.50 matches the spec.
 dpd_preset = "high_quality"      # Dynamic peak detection preset: off, fast, balanced, high_quality
 dpd_black_cutoff = 0.01          # PQ fraction to ignore during DPD (0-0.05). Ignored when DPD is off.
+smoothing_period = 45.0          # IIR smoothing window (frames). Set 0 to disable smoothing.
+scene_threshold_low = 0.8        # Lower bound (in 1% PQ units) where smoothing relaxes on scene changes.
+scene_threshold_high = 2.4       # Upper bound for the smoothing disable window.
+percentile = 99.995              # Brightness percentile considered the scene peak (0-100).
+contrast_recovery = 0.3          # HDR high-frequency detail recovery (0 disables).
+metadata = "auto"                # Metadata source: auto|none|hdr10|hdr10+|luminance or 0-4.
+use_dovi = "auto"                # Dolby Vision metadata usage: auto|true|false.
+visualize_lut = false            # Visualise tone-mapping LUT instead of output frames.
+show_clipping = false            # Highlight clipped pixels during tonemapping.
 post_gamma_enable = false        # Optional limited-range gamma lift after tonemap (Levels min/max 16-235)
 post_gamma = 0.95                # Gamma factor when enabled (0.90-1.10). Stick near 1.0 to avoid haze.
 overlay_enabled = true

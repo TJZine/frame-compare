@@ -177,6 +177,11 @@ body.rc-fullscreen-active .rc-main {
   transition: background-color 150ms linear;
 }
 
+.rc-viewer-stage:focus,
+.rc-viewer-stage:focus-visible {
+  outline: none;
+}
+
 .rc-viewer-stage.rc-mode-slider:not(.rc-pan-available) {
   cursor: ew-resize;
 }
@@ -231,9 +236,12 @@ body.rc-fullscreen-active .rc-main {
   inset: 0;
   overflow: hidden;
   z-index: 2;
-  border-right: 2px solid rgba(159, 210, 255, 0.7);
   pointer-events: none;
   clip-path: inset(0 50% 0 0);
+}
+
+.rc-mode-slider .rc-overlay {
+  border-right: 2px solid rgba(159, 210, 255, 0.7);
 }
 
 .rc-overlay .rc-image--left {
@@ -252,11 +260,6 @@ body.rc-fullscreen-active .rc-main {
   background: rgba(159, 210, 255, 0.8);
   z-index: 3;
   transform: translateX(-1px);
-}
-
-.rc-viewer-stage:focus-visible {
-  outline: 2px solid rgba(159, 210, 255, 0.9);
-  outline-offset: 2px;
 }
 
 .rc-frame-info {

@@ -115,6 +115,15 @@ class ColorConfig:
     dpd_black_cutoff: float = 0.01
     post_gamma_enable: bool = False
     post_gamma: float = 1.0
+    smoothing_period: float = 45.0
+    scene_threshold_low: float = 0.8
+    scene_threshold_high: float = 2.4
+    percentile: float = 99.995
+    contrast_recovery: float = 0.3
+    metadata: str | int = "auto"
+    use_dovi: Optional[bool] = None
+    visualize_lut: bool = False
+    show_clipping: bool = False
 
 
 @dataclass

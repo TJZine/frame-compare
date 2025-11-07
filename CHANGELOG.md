@@ -2,6 +2,7 @@
 
 All notable user-visible updates will be documented in this file in reverse chronological order.
 
+- *2025-11-07:* Refreshed tone-mapping presets to align with the new advanced controls: upgraded `reference`, `filmic`, `spline`, and `contrast` profiles, added `bright_lift` and `highlight_guard`, and updated defaults (smoothing 45f, percentile `99.995`, contrast recovery `0.30`) across docs, template, and layout.
 - *2025-11-06:* Added BT.2390 knee, dynamic-peak-detection presets, and optional post-tonemap gamma lift. `[color]` now exposes `dst_min_nits=0.18`, `knee_offset`, `dpd_preset`, `dpd_black_cutoff`, and `post_gamma`, libplacebo calls forward `tone_mapping_param`/`peak_detection_preset`/`black_cutoff` with compatibility shims, overlays understand `{knee_offset}`, `{dpd_preset}`, `{dst_min_nits}`, and new CLI flags (`--tm-*`) allow per-run overrides. Docs, presets, and tests updated accordingly.
 - *2025-11-06:* Default screenshot exports now expand limited-range SDR to full-range RGB via a new `[screenshots].export_range` setting (default `"full"`), with `"limited"` preserving video-range PNGs. Both VapourSynth and FFmpeg writers honour the option, `_SourceColorRange` provenance is recorded when expanding, and documentation/tests/config templates were updated accordingly.
 - *2025-11-05:* Harmonised HDR tonemap range metadata with sampled RGB output, wiring detected `_ColorRange` through geometry and overlays, preserving frame props during subtitle paths, and extending regression coverage/docs for the updated pipeline.

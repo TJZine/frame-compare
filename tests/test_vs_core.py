@@ -61,12 +61,48 @@ def test_resolve_effective_tonemap_uses_preset_defaults() -> None:
     resolved = vs_core.resolve_effective_tonemap(cfg)
 
     assert resolved["preset"] == "contrast"
-    assert resolved["tone_curve"] == "mobius"
-    assert resolved["target_nits"] == 120.0
-    assert resolved["dynamic_peak_detection"] is False
-    assert resolved["dst_min_nits"] == 0.10
-    assert resolved["knee_offset"] == 0.5
-    assert resolved["dpd_preset"] == "off"
+    assert resolved["tone_curve"] == "bt.2390"
+    assert resolved["target_nits"] == 110.0
+    assert resolved["dynamic_peak_detection"] is True
+    assert resolved["dst_min_nits"] == pytest.approx(0.15)
+    assert resolved["knee_offset"] == pytest.approx(0.42)
+    assert resolved["dpd_preset"] == "high_quality"
+    assert resolved["dpd_black_cutoff"] == pytest.approx(0.008)
+    assert resolved["smoothing_period"] == pytest.approx(30.0)
+    assert resolved["scene_threshold_low"] == pytest.approx(0.8)
+    assert resolved["scene_threshold_high"] == pytest.approx(2.2)
+    assert resolved["percentile"] == pytest.approx(99.99)
+    assert resolved["contrast_recovery"] == pytest.approx(0.45)
+    assert resolved["metadata"] == 0
+    assert resolved["use_dovi"] is True
+    assert resolved["visualize_lut"] is False
+    assert resolved["show_clipping"] is False
+
+
+def test_resolve_tonemap_settings_uses_color_defaults() -> None:
+    cfg = types.SimpleNamespace(
+        preset="custom",
+        tone_curve="bt.2390",
+        target_nits=100.0,
+        dynamic_peak_detection=True,
+        dst_min_nits=0.18,
+        knee_offset=0.5,
+        dpd_preset="high_quality",
+        dpd_black_cutoff=0.01,
+        metadata="auto",
+        use_dovi=None,
+        visualize_lut=False,
+        show_clipping=False,
+        _provided_keys=set(),
+    )
+
+    settings = vs_core._resolve_tonemap_settings(cfg)
+
+    assert settings.smoothing_period == pytest.approx(45.0)
+    assert settings.scene_threshold_low == pytest.approx(0.8)
+    assert settings.scene_threshold_high == pytest.approx(2.4)
+    assert settings.percentile == pytest.approx(99.995)
+    assert settings.contrast_recovery == pytest.approx(0.3)
 
 
 class _FakeSampleType:
@@ -339,6 +375,15 @@ def test_tonemap_kwargs_include_optional_parameters() -> None:
         knee_offset=0.45,
         dpd_preset="high_quality",
         dpd_black_cutoff=0.01,
+        smoothing_period=25.0,
+        scene_threshold_low=0.8,
+        scene_threshold_high=2.5,
+        percentile=99.5,
+        contrast_recovery=0.3,
+        metadata=2,
+        use_dovi=True,
+        visualize_lut=False,
+        show_clipping=False,
         src_hint=None,
         file_name="demo",
     )
@@ -346,6 +391,15 @@ def test_tonemap_kwargs_include_optional_parameters() -> None:
     assert captured["tone_mapping_param"] == pytest.approx(0.45)
     assert captured["peak_detection_preset"] == "high_quality"
     assert captured["black_cutoff"] == pytest.approx(0.01)
+    assert captured["smoothing_period"] == pytest.approx(25.0)
+    assert captured["scene_threshold_low"] == pytest.approx(0.8)
+    assert captured["scene_threshold_high"] == pytest.approx(2.5)
+    assert captured["percentile"] == pytest.approx(99.5)
+    assert captured["contrast_recovery"] == pytest.approx(0.3)
+    assert captured["metadata"] == 2
+    assert captured["use_dovi"] is True
+    assert captured["visualize_lut"] is False
+    assert captured["show_clipping"] is False
 
 
 def test_tonemap_drops_unsupported_kwargs_and_warns() -> None:
@@ -373,6 +427,15 @@ def test_tonemap_drops_unsupported_kwargs_and_warns() -> None:
         knee_offset=0.5,
         dpd_preset="high_quality",
         dpd_black_cutoff=0.01,
+        smoothing_period=20.0,
+        scene_threshold_low=1.0,
+        scene_threshold_high=3.0,
+        percentile=100.0,
+        contrast_recovery=0.0,
+        metadata=None,
+        use_dovi=True,
+        visualize_lut=False,
+        show_clipping=False,
         src_hint=None,
         file_name="compat",
     )
@@ -380,6 +443,63 @@ def test_tonemap_drops_unsupported_kwargs_and_warns() -> None:
     assert "peak_detection_preset" not in captured
     assert "tone_mapping_param" in captured
     assert "black_cutoff" in captured
+    assert captured["smoothing_period"] == pytest.approx(20.0)
+    assert captured["scene_threshold_low"] == pytest.approx(1.0)
+    assert captured["scene_threshold_high"] == pytest.approx(3.0)
+    assert "percentile" in captured
+    assert "contrast_recovery" in captured
+
+
+def test_tonemap_drops_kwargs_when_vapoursynth_error_lists_multiple_names() -> None:
+    captured: Dict[str, Any] = {}
+
+    class FakeVSError(Exception):
+        pass
+
+    class RejectingTonemap:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(self, clip: Any, **kwargs: Any) -> Any:
+            self.calls += 1
+            if self.calls == 1:
+                raise FakeVSError(
+                    "Tonemap: Function does not take argument(s) named "
+                    "peak_detection_preset, black_cutoff"
+                )
+            captured.update(kwargs)
+            return clip
+
+    core = types.SimpleNamespace(libplacebo=types.SimpleNamespace(Tonemap=RejectingTonemap()))
+    vs_core._tonemap_with_retries(
+        core,
+        rgb_clip=object(),
+        tone_curve="bt.2390",
+        target_nits=100.0,
+        dst_min=0.18,
+        dpd=1,
+        knee_offset=0.5,
+        dpd_preset="high_quality",
+        dpd_black_cutoff=0.01,
+        smoothing_period=20.0,
+        scene_threshold_low=1.0,
+        scene_threshold_high=3.0,
+        percentile=100.0,
+        contrast_recovery=0.0,
+        metadata=None,
+        use_dovi=True,
+        visualize_lut=False,
+        show_clipping=False,
+        src_hint=None,
+        file_name="vapoursynth",
+    )
+
+    assert "peak_detection_preset" not in captured
+    assert "black_cutoff" not in captured
+    assert "tone_mapping_param" in captured
+    assert captured["smoothing_period"] == pytest.approx(20.0)
+    assert captured["scene_threshold_low"] == pytest.approx(1.0)
+    assert captured["scene_threshold_high"] == pytest.approx(3.0)
 
 
 class _DummyStd:
