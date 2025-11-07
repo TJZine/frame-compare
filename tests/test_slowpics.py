@@ -259,6 +259,29 @@ def test_tmdb_identifier_accepts_prefixed_values(tmp_path: Path, monkeypatch: py
     assert comparison_fields["tmdbId"] == "TV_76543"
 
 
+def test_progress_callback_invoked_per_image(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = SlowpicsConfig(collection_name="Example")
+    files = [
+        _write_image(tmp_path, "10 - ClipA.png"),
+        _write_image(tmp_path, "10 - ClipB.png"),
+    ]
+    responses = [
+        FakeResponse(200),
+        FakeResponse(200, {"collectionUuid": "abc", "key": "def", "images": [["img1", "img2"]]}),
+        FakeResponse(200, text="OK"),
+        FakeResponse(200, text="OK"),
+    ]
+    _install_session(monkeypatch, responses)
+    calls: list[int] = []
+
+    def progress(value: int) -> None:
+        calls.append(value)
+
+    slowpics.upload_comparison([str(path) for path in files], tmp_path, cfg, progress_callback=progress)
+
+    assert sum(calls) == len(files)
+
+
 def test_legacy_image_upload_loop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = SlowpicsConfig()
     image = _write_image(tmp_path, "123 - ClipA.png")
