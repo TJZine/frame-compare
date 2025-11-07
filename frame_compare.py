@@ -4093,10 +4093,17 @@ def _format_overlay_text(label, suggested_frames, suggested_seconds, applied_fra
     seconds_value = f"{{suggested_seconds:.3f}}"
     if seconds_value == "-0.000":
         seconds_value = "0.000"
+    suggested_value = f"{{suggested_frames:+d}}"
     return (
-        f"{{label}}: {{suggested_frames:+d}}f (~{{seconds_value}}s) • "
-        f"Preview applied: {{applied_value}}f ({{applied_label}}) • "
+        "{{label}}: {{suggested}}f (~{{seconds}}s) • "
+        "Preview applied: {{applied}}f ({{status}}) • "
         "(+ trims target / - pads reference)"
+    ).format(
+        label=label,
+        suggested=suggested_value,
+        seconds=seconds_value,
+        applied=applied_value,
+        status=applied_label,
     )
 
 
@@ -6359,11 +6366,11 @@ def run_cli(
         "overlay_mode": overlay_mode_value,
         "post_gamma": float(getattr(cfg.color, "post_gamma", 1.0)),
         "post_gamma_enabled": bool(getattr(cfg.color, "post_gamma_enable", False)),
-        "smoothing_period": float(effective_tonemap.get("smoothing_period", getattr(cfg.color, "smoothing_period", 20.0))),
-        "scene_threshold_low": float(effective_tonemap.get("scene_threshold_low", getattr(cfg.color, "scene_threshold_low", 1.0))),
-        "scene_threshold_high": float(effective_tonemap.get("scene_threshold_high", getattr(cfg.color, "scene_threshold_high", 3.0))),
-        "percentile": float(effective_tonemap.get("percentile", getattr(cfg.color, "percentile", 100.0))),
-        "contrast_recovery": float(effective_tonemap.get("contrast_recovery", getattr(cfg.color, "contrast_recovery", 0.0))),
+        "smoothing_period": float(effective_tonemap.get("smoothing_period", getattr(cfg.color, "smoothing_period", 45.0))),
+        "scene_threshold_low": float(effective_tonemap.get("scene_threshold_low", getattr(cfg.color, "scene_threshold_low", 0.8))),
+        "scene_threshold_high": float(effective_tonemap.get("scene_threshold_high", getattr(cfg.color, "scene_threshold_high", 2.4))),
+        "percentile": float(effective_tonemap.get("percentile", getattr(cfg.color, "percentile", 99.995))),
+        "contrast_recovery": float(effective_tonemap.get("contrast_recovery", getattr(cfg.color, "contrast_recovery", 0.3))),
         "metadata": effective_tonemap.get("metadata", getattr(cfg.color, "metadata", "auto")),
         "use_dovi": effective_tonemap.get("use_dovi", getattr(cfg.color, "use_dovi", None)),
         "visualize_lut": bool(effective_tonemap.get("visualize_lut", getattr(cfg.color, "visualize_lut", False))),

@@ -832,8 +832,8 @@ def test_launch_vspreview_generates_script(
         "def _format_overlay_text(label, suggested_frames, suggested_seconds, applied_frames):"
         in script_text
     )
-    assert 'f"{label}: {suggested_frames:+d}f (~{seconds_value}s) • "' in script_text
-    assert "Preview applied: {applied_value}f ({applied_label})" in script_text
+    assert '"{label}: {suggested}f (~{seconds}s) • "' in script_text
+    assert "Preview applied: {applied}f ({status})" in script_text
     assert "preview applied=%+df" in script_text
     assert recorded_command, "VSPreview command should be invoked when interactive"
     assert recorded_command[0][0] == frame_compare.sys.executable
