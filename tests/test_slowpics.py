@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 from typing import Any, List
 
@@ -42,6 +43,7 @@ class FakeSession:
         self.cookies: FakeCookies = FakeCookies(base)
         self.calls: list[dict[str, Any]] = []
         self.closed = False
+        self._lock = threading.Lock()
 
     def close(self) -> None:
         self.closed = True
@@ -59,12 +61,14 @@ class FakeSession:
         return False
 
     def _next(self) -> FakeResponse:
-        if not self._responses:
-            raise AssertionError("Unexpected request: no prepared response")
-        return self._responses.pop(0)
+        with self._lock:
+            if not self._responses:
+                raise AssertionError("Unexpected request: no prepared response")
+            return self._responses.pop(0)
 
     def get(self, url: str, timeout: float | None = None) -> requests.Response:
-        self.calls.append({"method": "GET", "url": url, "timeout": timeout})
+        with self._lock:
+            self.calls.append({"method": "GET", "url": url, "timeout": timeout})
         return self._next()
 
     def post(
@@ -77,17 +81,18 @@ class FakeSession:
         headers: Any | None = None,
         timeout: float | None = None,
     ) -> requests.Response:
-        self.calls.append(
-            {
-                "method": "POST",
-                "url": url,
-                "timeout": timeout,
-                "json": json,
-                "files": files,
-                "data": data,
-                "headers": headers,
-            }
-        )
+        with self._lock:
+            self.calls.append(
+                {
+                    "method": "POST",
+                    "url": url,
+                    "timeout": timeout,
+                    "json": json,
+                    "files": files,
+                    "data": data,
+                    "headers": headers,
+                }
+            )
         return self._next()
 
 
@@ -103,13 +108,15 @@ def _install_session(
 
 class DummyEncoder:
     instances: List["DummyEncoder"] = []
+    _lock = threading.Lock()
 
     def __init__(self, fields: dict[str, Any], boundary: str) -> None:
         self.fields = fields
         self.boundary = boundary
         self.content_type = "multipart/form-data"
         self.len = len(str(fields))
-        DummyEncoder.instances.append(self)
+        with DummyEncoder._lock:
+            DummyEncoder.instances.append(self)
 
     def to_string(self) -> bytes:
         return b"encoded"
@@ -277,7 +284,13 @@ def test_progress_callback_invoked_per_image(tmp_path: Path, monkeypatch: pytest
     def progress(value: int) -> None:
         calls.append(value)
 
-    slowpics.upload_comparison([str(path) for path in files], tmp_path, cfg, progress_callback=progress)
+    slowpics.upload_comparison(
+        [str(path) for path in files],
+        tmp_path,
+        cfg,
+        progress_callback=progress,
+        max_workers=2,
+    )
 
     assert sum(calls) == len(files)
 

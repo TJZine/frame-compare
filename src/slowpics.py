@@ -7,6 +7,7 @@ import re
 import time
 import uuid
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import ExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional
@@ -33,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 
 _CONNECT_TIMEOUT_SECONDS = 10.0
+_DEFAULT_UPLOAD_CONCURRENCY = 3
 _MIN_UPLOAD_THROUGHPUT_BYTES_PER_SEC = 256 * 1024  # 256 KiB/s baseline assumption
 _UPLOAD_TIMEOUT_MARGIN_SECONDS = 15.0
 
@@ -215,6 +217,7 @@ def _upload_comparison_legacy(
     cfg: SlowpicsConfig,
     *,
     progress_callback: Optional[Callable[[int], None]] = None,
+    max_workers: Optional[int] = None,
 ) -> str:
     if MultipartEncoder is None:
         raise SlowpicsAPIError(
@@ -271,35 +274,55 @@ def _upload_comparison_legacy(
     if len(images) != len(upload_plan):
         raise SlowpicsAPIError("Unexpected slow.pics response structure for comparisons")
 
+    jobs: List[tuple[Path, str]] = []
     for per_frame_paths, image_ids in zip(upload_plan, images):
         if not isinstance(image_ids, list) or len(image_ids) != len(per_frame_paths):
             raise SlowpicsAPIError("Slow.pics returned mismatched image identifiers")
-        for path, image_uuid in zip(per_frame_paths, image_ids):
-            file_size = path.stat().st_size
-            timeout = _compute_image_upload_timeout(cfg, file_size)
-            with ExitStack() as stack:
-                file_handle = stack.enter_context(path.open("rb"))
-                upload_fields = {
-                    "collectionUuid": collection_uuid,
-                    "imageUuid": image_uuid,
-                    "file": (path.name, file_handle, "image/png"),
-                    "browserId": browser_id,
-                }
-                upload_encoder = MultipartEncoder(upload_fields, str(uuid.uuid4()))
-                upload_headers = _build_legacy_headers(session, upload_encoder)
-                upload_resp = session.post(
-                    "https://slow.pics/upload/image",
-                    data=upload_encoder,
-                    headers=upload_headers,
-                    timeout=timeout,
-                )
-            _raise_for_status(upload_resp, f"Upload frame {path.name}")
-            if getattr(upload_resp, "content", b""):
-                text = upload_resp.content.decode("utf-8", "ignore").strip()
-                if text and text.upper() != "OK":
-                    raise SlowpicsAPIError(f"Unexpected slow.pics response: {text}")
-            if progress_callback is not None:
-                progress_callback(1)
+        jobs.extend(zip(per_frame_paths, image_ids))
+
+    worker_count = max_workers if max_workers is not None else _DEFAULT_UPLOAD_CONCURRENCY
+    worker_count = max(1, min(worker_count, len(jobs) or 1))
+
+    def _upload_single(path: Path, image_uuid: str) -> None:
+        file_size = path.stat().st_size
+        timeout = _compute_image_upload_timeout(cfg, file_size)
+        with ExitStack() as stack:
+            file_handle = stack.enter_context(path.open("rb"))
+            upload_fields = {
+                "collectionUuid": collection_uuid,
+                "imageUuid": image_uuid,
+                "file": (path.name, file_handle, "image/png"),
+                "browserId": browser_id,
+            }
+            upload_encoder = MultipartEncoder(upload_fields, str(uuid.uuid4()))
+            upload_headers = _build_legacy_headers(session, upload_encoder)
+            upload_resp = session.post(
+                "https://slow.pics/upload/image",
+                data=upload_encoder,
+                headers=upload_headers,
+                timeout=timeout,
+            )
+        _raise_for_status(upload_resp, f"Upload frame {path.name}")
+        if getattr(upload_resp, "content", b""):
+            text = upload_resp.content.decode("utf-8", "ignore").strip()
+            if text and text.upper() != "OK":
+                raise SlowpicsAPIError(f"Unexpected slow.pics response: {text}")
+        if progress_callback is not None:
+            progress_callback(1)
+
+    if worker_count == 1:
+        for path, image_uuid in jobs:
+            _upload_single(path, image_uuid)
+    else:
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            futures = [executor.submit(_upload_single, path, image_uuid) for path, image_uuid in jobs]
+            try:
+                for future in as_completed(futures):
+                    future.result()
+            except Exception:
+                for future in futures:
+                    future.cancel()
+                raise
 
     if cfg.webhook_url:
         _post_direct_webhook(session, cfg.webhook_url, canonical_url)
@@ -316,6 +339,7 @@ def upload_comparison(
     cfg: SlowpicsConfig,
     *,
     progress_callback: Optional[Callable[[int], None]] = None,
+    max_workers: Optional[int] = None,
 ) -> str:
     """Upload screenshots to slow.pics and return the collection URL."""
 
@@ -340,6 +364,7 @@ def upload_comparison(
             screen_dir,
             cfg,
             progress_callback=progress_callback,
+            max_workers=max_workers,
         )
         logger.info("Slow.pics: %s", url)
         return url
