@@ -413,9 +413,9 @@ Distributed under the [MIT License](LICENSE). Frame Compare builds on FFmpeg, Va
 
 ## Future updates
 - Do a check of all current config options to ensure all are working correctly and see if any can be trimmed or combined (like the letterbox options) 
-- at a glance box in cli output still not showing what viewer mode is selected between None, Local Report, and Slow.pics
-- no nits number showing in the at a glance box still.
-- Frames in line 1 of the at a glance box has nothing after it.
+- ✅ at a glance box in cli output still not showing what viewer mode is selected between None, Local Report, and Slow.pics
+- ✅ no nits number showing in the at a glance box still.
+- ✅ Frames in line 1 of the at a glance box has nothing after it.
 - progress bar is still a dot on a solid line when set to fill, ensure fill/dot modes are both working or just keep the one present if both are not and remove the dead code. Investigate why progress bar color is linked to heading color (CYAN)
 - audio alignment step in the CLI always missing the information as if loading from the generated offset file. I think this is because when vspreview mode is also active it loads the values of the offset file after as if it wasn't just generated. Can we look into this behavior? what is the expected behavior for different settings combinations?
 - investigate audio offset behavior in situations with multiple encodes. TNBC example where suggested is 0 but 1 encode is slightly mismatched. Its now showing 26f suggested diff but one of the encodes with this suggestion is already matched with the ref. The issue is that when set to 26f the other encode also is adjusted even though it isnt needed after vs preview. Can we also add the video title name in the vspreview overlay along with the suggested frame offset and other information already present? Important note: audio offset values display incorrectly in vspreview overlay only. When prompted after closing vspreview it suggests the correct offsets from the audio analyzation process. ie 0f mainframe rel to remux and 26 frame mainframe to dsnp.
