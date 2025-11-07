@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import logging
+import queue
 import re
 import time
 import uuid
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Callable, Dict, Iterator, List, Optional
 from urllib.parse import unquote, urlsplit
 
 import requests
@@ -39,6 +40,43 @@ _CONNECT_TIMEOUT_SECONDS = 10.0
 _DEFAULT_UPLOAD_CONCURRENCY = 3
 _MIN_UPLOAD_THROUGHPUT_BYTES_PER_SEC = 256 * 1024  # 256 KiB/s baseline assumption
 _UPLOAD_TIMEOUT_MARGIN_SECONDS = 15.0
+
+
+class _SessionPool:
+    """Simple bounded pool that hands out preconfigured Requests sessions."""
+
+    def __init__(self, session_factory: Callable[[], requests.Session], size: int) -> None:
+        self._session_factory = session_factory
+        self._queue: "queue.Queue[requests.Session]" = queue.Queue(maxsize=max(1, size))
+        self._sessions: List[requests.Session] = []
+        try:
+            for _ in range(max(1, size)):
+                session = session_factory()
+                self._sessions.append(session)
+                self._queue.put(session)
+        except Exception:
+            self.close()
+            raise
+
+    @contextmanager
+    def acquire(self) -> Iterator[requests.Session]:
+        """Check out a session for exclusive use within a worker thread."""
+
+        session = self._queue.get()
+        try:
+            yield session
+        finally:
+            self._queue.put(session)
+
+    def close(self) -> None:
+        """Close every underlying session."""
+
+        while self._sessions:
+            session = self._sessions.pop()
+            try:
+                session.close()
+            except Exception:
+                logger.debug("Failed to close slow.pics session cleanly", exc_info=True)
 
 
 def _raise_for_status(response: requests.Response, context: str) -> None:
@@ -286,52 +324,51 @@ def _upload_comparison_legacy(
     worker_count = max_workers if max_workers is not None else _DEFAULT_UPLOAD_CONCURRENCY
     worker_count = max(1, min(worker_count, len(jobs) or 1))
 
-    def _upload_single(path: Path, image_uuid: str) -> None:
-        file_size = path.stat().st_size
-        timeout = _compute_image_upload_timeout(cfg, file_size)
-        with ExitStack() as stack:
-            file_handle = stack.enter_context(path.open("rb"))
-            upload_fields = {
-                "collectionUuid": collection_uuid,
-                "imageUuid": image_uuid,
-                "file": (path.name, file_handle, "image/png"),
-                "browserId": browser_id,
-            }
-            upload_encoder = MultipartEncoder(upload_fields, str(uuid.uuid4()))
-            local_session = session_factory()
-            try:
-                upload_headers = _build_legacy_headers(local_session, upload_encoder)
-                upload_resp = local_session.post(
-                    "https://slow.pics/upload/image",
-                    data=upload_encoder,
-                    headers=upload_headers,
-                    timeout=timeout,
-                )
-            finally:
-                local_session.close()
-        _raise_for_status(upload_resp, f"Upload frame {path.name}")
-        if getattr(upload_resp, "content", b""):
-            text = upload_resp.content.decode("utf-8", "ignore").strip()
-            if text and text.upper() != "OK":
-                raise SlowpicsAPIError(f"Unexpected slow.pics response: {text}")
-        if progress_callback is not None:
-            progress_callback(1)
+    session_pool = _SessionPool(session_factory, worker_count)
+    try:
+        def _upload_single(path: Path, image_uuid: str) -> None:
+            file_size = path.stat().st_size
+            timeout = _compute_image_upload_timeout(cfg, file_size)
+            with ExitStack() as stack:
+                file_handle = stack.enter_context(path.open("rb"))
+                upload_fields = {
+                    "collectionUuid": collection_uuid,
+                    "imageUuid": image_uuid,
+                    "file": (path.name, file_handle, "image/png"),
+                    "browserId": browser_id,
+                }
+                upload_encoder = MultipartEncoder(upload_fields, str(uuid.uuid4()))
+                with session_pool.acquire() as local_session:
+                    upload_headers = _build_legacy_headers(local_session, upload_encoder)
+                    upload_resp = local_session.post(
+                        "https://slow.pics/upload/image",
+                        data=upload_encoder,
+                        headers=upload_headers,
+                        timeout=timeout,
+                    )
+            _raise_for_status(upload_resp, f"Upload frame {path.name}")
+            if getattr(upload_resp, "content", b""):
+                text = upload_resp.content.decode("utf-8", "ignore").strip()
+                if text and text.upper() != "OK":
+                    raise SlowpicsAPIError(f"Unexpected slow.pics response: {text}")
+            if progress_callback is not None:
+                progress_callback(1)
 
-    if worker_count == 1:
-        for path, image_uuid in jobs:
-            _upload_single(path, image_uuid)
-    else:
-        with ThreadPoolExecutor(max_workers=worker_count) as executor:
-            futures = [executor.submit(_upload_single, path, image_uuid) for path, image_uuid in jobs]
-            try:
-                for future in as_completed(futures):
-                    future.result()
-            except Exception:
-                # Cancel pending futures; uploads already running will complete but their
-                # results are ignored once an error has been observed.
-                for future in futures:
-                    future.cancel()
-                raise
+        if worker_count == 1:
+            for path, image_uuid in jobs:
+                _upload_single(path, image_uuid)
+        else:
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                futures = [executor.submit(_upload_single, path, image_uuid) for path, image_uuid in jobs]
+                try:
+                    for future in as_completed(futures):
+                        future.result()
+                except Exception:
+                    for future in futures:
+                        future.cancel()
+                    raise
+    finally:
+        session_pool.close()
 
     if cfg.webhook_url:
         _post_direct_webhook(session, cfg.webhook_url, canonical_url)
