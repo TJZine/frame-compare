@@ -257,11 +257,6 @@ body.rc-fullscreen-active .rc-main {
   transform: translateX(-1px);
 }
 
-.rc-viewer-stage:focus-visible {
-  outline: 2px solid rgba(159, 210, 255, 0.9);
-  outline-offset: 2px;
-}
-
 .rc-frame-info {
   font-size: 0.95rem;
   color: rgba(240, 244, 255, 0.85);
