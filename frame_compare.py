@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import time
 import tomllib
 import traceback
@@ -6787,6 +6788,7 @@ def run_cli(
                         "slow.pics upload",
                         total=upload_total,
                     )
+                    progress_lock = threading.Lock()
 
                     def advance_upload(count: int) -> None:
                         """
@@ -6798,24 +6800,25 @@ def run_cli(
                             count (int): Number of files to mark as uploaded.
                         """
                         nonlocal uploaded_files, uploaded_bytes, file_index
-                        uploaded_files += count
-                        for _ in range(count):
-                            if file_index < len(file_sizes):
-                                uploaded_bytes += file_sizes[file_index]
-                                file_index += 1
-                        elapsed = time.perf_counter() - start_time
-                        stats_text = _format_stats(uploaded_files, uploaded_bytes, elapsed)
-                        completed = min(upload_total, uploaded_files)
-                        reporter.update_progress_state(
-                            "upload_bar",
-                            current=completed,
-                            total=upload_total,
-                            stats=stats_text,
-                        )
-                        upload_progress.update(
-                            task_id,
-                            completed=completed,
-                        )
+                        with progress_lock:
+                            uploaded_files += count
+                            for _ in range(count):
+                                if file_index < len(file_sizes):
+                                    uploaded_bytes += file_sizes[file_index]
+                                    file_index += 1
+                            elapsed = time.perf_counter() - start_time
+                            stats_text = _format_stats(uploaded_files, uploaded_bytes, elapsed)
+                            completed = min(upload_total, uploaded_files)
+                            reporter.update_progress_state(
+                                "upload_bar",
+                                current=completed,
+                                total=upload_total,
+                                stats=stats_text,
+                            )
+                            upload_progress.update(
+                                task_id,
+                                completed=completed,
+                            )
 
                     slowpics_url = upload_comparison(
                         image_paths,

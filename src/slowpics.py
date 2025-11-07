@@ -370,7 +370,16 @@ def upload_comparison(
     progress_callback: Optional[Callable[[int], None]] = None,
     max_workers: Optional[int] = None,
 ) -> str:
-    """Upload screenshots to slow.pics and return the collection URL."""
+    """Upload screenshots to slow.pics and return the collection URL.
+
+    Notes:
+        When ``max_workers`` is greater than 1 (or left as ``None`` and defaults to
+        parallel uploads), ``progress_callback`` may be invoked concurrently from
+        multiple worker threads. Callers should ensure the callback is thread-safe
+        (for example, by using ``threading.Lock`` or other synchronization
+        primitives) if they mutate shared state or emit UI updates inside the
+        callback.
+    """
 
     if not image_files:
         raise SlowpicsAPIError("No image files provided for upload")
