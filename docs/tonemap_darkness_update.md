@@ -51,7 +51,7 @@ Implement and expose *robust, standards‑aligned* tonemapping controls to **pre
      post_gamma_enable = false
      post_gamma = 0.95                # Gentle lift (0.90–1.05); applied as VS Levels in limited
      ```
-  - **Preset map** (see implementation §3): “reference” = `bt.2390/100nits/dpd=on` (smoothing 45f, percentile `99.995`, contrast `0.30`); “filmic” = `bt.2446a/100nits/dpd=on`; “contrast” = `bt.2390/110nits/dpd=on/contrast=0.45`; “bt2390_spec” = `bt.2390/100nits/dpd=on` with neutral cutoff; “spline” = `spline/105nits/dpd=on`; “bright_lift” = `bt.2390/130nits/dpd=on`; “highlight_guard” = `bt.2390/90nits/dpd=on`.
+- **Preset map** (see implementation §3): “reference” = `bt.2390/100nits/dpd=on` (smoothing 45f, percentile `99.995`, contrast `0.30`); “filmic” = `bt.2446a/100nits/dpd=on`; “contrast” = `bt.2390/110nits/dpd=on/contrast=0.45`; “bt2390_spec” = `bt.2390/100nits/dpd=on` with neutral cutoff; “spline” = `spline/105nits/dpd=on`; “bright_lift” = `bt.2390/130nits/dpd=on`; “highlight_guard” = `bt.2390/90nits/dpd=on`.
 
 4. **CLI & overlays**:
    - Ensure current overlay text can display new fields: `{knee_offset}`, `{dpd_preset}`, `{dst_min_nits}`, `{target_nits}`.

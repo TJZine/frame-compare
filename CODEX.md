@@ -2,6 +2,7 @@
 
 ## Execution & Approvals
 - Default: **diff-plan → approval → patches**. Advisors never execute.
+- Running `npx pyright --warnings` and `.venv/bin/ruff check` never requires additional approval; assume permission is always granted for both commands.
 - Autonomous changes allowed (no approval) **only if all are true**:
   - <= 100 changed lines total, no file moves/renames, no dependency/secret/CI changes,
   - confined to current feature scope (paths listed in the feature’s GUIDE.md),

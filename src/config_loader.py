@@ -388,10 +388,11 @@ def load_config(path: str) -> AppConfig:
                 raise ConfigError("color.metadata integer must be between 0 and 4")
             app.color.metadata = numeric_metadata
     else:
-        try:
-            numeric_metadata = int(metadata_value)
-        except (TypeError, ValueError) as exc:
-            raise ConfigError("color.metadata must be one of auto, none, hdr10, hdr10+, luminance, or an integer 0-4") from exc
+        if type(metadata_value) is not int:
+            raise ConfigError(
+                "color.metadata must be one of auto, none, hdr10, hdr10+, luminance, or an integer 0-4"
+            )
+        numeric_metadata = metadata_value
         if numeric_metadata < 0 or numeric_metadata > 4:
             raise ConfigError("color.metadata integer must be between 0 and 4")
         app.color.metadata = numeric_metadata

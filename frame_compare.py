@@ -2905,6 +2905,9 @@ def _maybe_apply_audio_alignment(
         _warn("Audio alignment skipped: no secondary clips to compare.")
         return None, display_data
 
+    measurement_order = [plan.path.name for plan in plans]
+    negative_override_notes: Dict[str, str] = {}
+
     def _maybe_reuse_cached_offsets(
         reference: _ClipPlan,
         candidate_targets: Sequence[_ClipPlan],
@@ -3392,9 +3395,6 @@ def _maybe_apply_audio_alignment(
         fps_tuple = plan.effective_fps or plan.source_fps or plan.fps_override
         fps_lookup[plan.path.name] = _fps_to_float(fps_tuple)
 
-    measurement_order = [plan.path.name for plan in plans]
-    negative_override_notes: Dict[str, str] = {}
-
     def _compose_measurement_details(
         measurement_seq: Sequence["AlignmentMeasurement"],
         *,
@@ -3623,7 +3623,7 @@ def _maybe_apply_audio_alignment(
                 elif measurement.reference_fps and measurement.reference_fps > 0:
                     measurement.offset_seconds = new_frames / measurement.reference_fps
 
-        negative_override_notes = {}
+        negative_override_notes.clear()
         swap_details: Dict[str, str] = {}
         swap_candidates: List["AlignmentMeasurement"] = []
         swap_enabled = len(targets) == 1
