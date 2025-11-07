@@ -7437,7 +7437,7 @@ def _run_cli_entry(
     help="Highlight clipped pixels during tonemapping for this run.",
 )
 @click.option(
-    "--tm-hide-clipping",
+    "--tm-no-show-clipping",
     "tm_show_clipping",
     flag_value=False,
     help="Do not highlight clipped pixels during tonemapping for this run.",

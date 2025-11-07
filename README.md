@@ -251,7 +251,7 @@ Fine-grained controls are also exposed through `[color]` (and matching `--tm-*` 
 | `--tm-metadata VALUE` | Override `[color].metadata` (`auto`, `none`, `hdr10`, `hdr10+`, `luminance`, or `0-4`) |
 | `--tm-use-dovi / --tm-no-dovi` | Force Dolby Vision metadata usage on/off (default auto) |
 | `--tm-visualize-lut / --tm-no-visualize-lut` | Toggle libplacebo LUT visualisation |
-| `--tm-show-clipping / --tm-hide-clipping` | Toggle clipped-pixel highlighting during tonemapping |
+| `--tm-show-clipping / --tm-no-show-clipping` | Toggle clipped-pixel highlighting during tonemapping |
 | `--write-config` | Ensure `ROOT/config/config.toml` exists, then exit |
 | `--diagnose-paths` | Print JSON diagnostics (root, media, screens, writability) |
 | `--quiet` / `--verbose` | Adjust console verbosity |
