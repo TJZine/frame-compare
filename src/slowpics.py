@@ -213,7 +213,7 @@ def _compute_image_upload_timeout(cfg: SlowpicsConfig, size_bytes: int) -> tuple
 
 
 def _upload_comparison_legacy(
-    session: requests.Session,
+    session_factory: Callable[[], requests.Session],
     image_files: List[str],
     screen_dir: Path,
     cfg: SlowpicsConfig,
@@ -251,6 +251,7 @@ def _upload_comparison_legacy(
             per_frame_paths.append(path)
         upload_plan.append(per_frame_paths)
 
+    session = session_factory()
     encoder = MultipartEncoder(fields, str(uuid.uuid4()))
     headers = _build_legacy_headers(session, encoder)
     response = session.post(
@@ -297,8 +298,9 @@ def _upload_comparison_legacy(
                 "browserId": browser_id,
             }
             upload_encoder = MultipartEncoder(upload_fields, str(uuid.uuid4()))
-            upload_headers = _build_legacy_headers(session, upload_encoder)
-            upload_resp = session.post(
+            local_session = session_factory()
+            upload_headers = _build_legacy_headers(local_session, upload_encoder)
+            upload_resp = local_session.post(
                 "https://slow.pics/upload/image",
                 data=upload_encoder,
                 headers=upload_headers,
@@ -332,6 +334,7 @@ def _upload_comparison_legacy(
         shortcut_name = build_shortcut_filename(cfg.collection_name, canonical_url)
         shortcut_path = screen_dir / shortcut_name
         shortcut_path.write_text(f"[InternetShortcut]\nURL={canonical_url}\n", encoding="utf-8")
+    session.close()
     return canonical_url
 
 
@@ -385,21 +388,28 @@ def upload_comparison(
         raise SlowpicsAPIError("No image files provided for upload")
 
     expected_workers = min(max_workers or _DEFAULT_UPLOAD_CONCURRENCY, len(image_files) or 1)
-    session = requests.Session()
+    bootstrap_session = requests.Session()
     try:
-        _configure_slowpics_session(session, workers=expected_workers)
+        _configure_slowpics_session(bootstrap_session, workers=expected_workers)
         try:
-            session.get("https://slow.pics/comparison", timeout=_CONNECT_TIMEOUT_SECONDS)
+            bootstrap_session.get("https://slow.pics/comparison", timeout=_CONNECT_TIMEOUT_SECONDS)
         except requests.RequestException as exc:
             raise SlowpicsAPIError(f"Failed to establish slow.pics session: {exc}") from exc
 
-        xsrf_token = session.cookies.get("XSRF-TOKEN")
+        xsrf_token = bootstrap_session.cookies.get("XSRF-TOKEN")
         if not xsrf_token:
             raise SlowpicsAPIError("Missing XSRF token from slow.pics response")
 
         logger.info("Using slow.pics legacy upload endpoints")
+
+        def _new_session() -> requests.Session:
+            worker_session = requests.Session()
+            worker_session.cookies.update(bootstrap_session.cookies.get_dict())
+            _configure_slowpics_session(worker_session, workers=expected_workers)
+            return worker_session
+
         url = _upload_comparison_legacy(
-            session,
+            _new_session,
             image_files,
             screen_dir,
             cfg,
@@ -409,4 +419,4 @@ def upload_comparison(
         logger.info("Slow.pics: %s", url)
         return url
     finally:
-        session.close()
+        bootstrap_session.close()
