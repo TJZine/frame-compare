@@ -4316,6 +4316,9 @@ def _apply_vspreview_manual_offsets(
             plan.effective_fps or plan.source_fps or plan.fps_override
         )
 
+    measurement_order = [plan.path.name for plan in plans]
+    plan_lookup: Dict[str, _ClipPlan] = {plan.path.name: plan for plan in plans}
+
     measurements: List["AlignmentMeasurement"] = []
     existing_override_map: Dict[str, Dict[str, object]] = {}
     notes_map: Dict[str, str] = {}
@@ -4355,6 +4358,37 @@ def _apply_vspreview_manual_offsets(
     summary.vspreview_manual_deltas = dict(delta_map)
     summary.measurements = tuple(measurements)
 
+    existing_details = summary.measured_offsets if isinstance(summary.measured_offsets, dict) else {}
+    detail_map: Dict[str, _AudioMeasurementDetail] = {}
+    for measurement in measurements:
+        clip_name = measurement.file.name
+        prev_detail = existing_details.get(clip_name) if isinstance(existing_details, dict) else None
+        plan = plan_lookup.get(clip_name)
+        label = (
+            prev_detail.label
+            if prev_detail
+            else (_plan_label(plan) if plan is not None else clip_name)
+        )
+        descriptor = prev_detail.stream if prev_detail else ""
+        seconds_value = float(measurement.offset_seconds) if measurement.offset_seconds is not None else None
+        frames_value = int(measurement.frames) if measurement.frames is not None else None
+        correlation_value = (
+            float(measurement.correlation) if measurement.correlation is not None else None
+        )
+        status_text = summary.statuses.get(clip_name, "manual")
+        note_text = notes_map.get(clip_name)
+        detail_map[clip_name] = _AudioMeasurementDetail(
+            label=label,
+            stream=descriptor,
+            offset_seconds=seconds_value,
+            frames=frames_value,
+            correlation=correlation_value,
+            status=status_text,
+            applied=True,
+            note=note_text,
+        )
+    summary.measured_offsets = detail_map
+
     audio_block = json_tail.setdefault("audio_alignment", {})
     audio_block["suggestion_mode"] = False
     audio_block["manual_trim_starts"] = dict(manual_trim_starts)
@@ -4363,6 +4397,57 @@ def _apply_vspreview_manual_offsets(
     audio_block["vspreview_reference_trim"] = int(
         manual_trim_starts.get(reference_name, int(reference_plan.trim_start))
     )
+
+    if display is not None:
+        offsets_sec: Dict[str, float] = {}
+        offsets_frames: Dict[str, int] = {}
+        offset_lines: List[str] = []
+        for clip_name in measurement_order:
+            detail = detail_map.get(clip_name)
+            if detail is None:
+                continue
+            if clip_name == reference_name and len(detail_map) > 1:
+                continue
+            stream_text = detail.stream or "?"
+            seconds_text = (
+                f"{detail.offset_seconds:+.3f}s"
+                if detail.offset_seconds is not None
+                else "n/a"
+            )
+            frames_text = f"{detail.frames:+d}f" if detail.frames is not None else "n/a"
+            corr_text = (
+                f"{detail.correlation:.2f}"
+                if detail.correlation is not None and not math.isnan(detail.correlation)
+                else "n/a"
+            )
+            status_text = detail.status or "manual"
+            offset_lines.append(
+                f"Audio offsets: {detail.label}: [{stream_text}] {seconds_text} ({frames_text}) "
+                f"corr={corr_text} status={status_text}"
+            )
+            if detail.note:
+                offset_lines.append(f"  note: {detail.note}")
+            if detail.offset_seconds is not None:
+                offsets_sec[detail.label] = float(detail.offset_seconds)
+            if detail.frames is not None:
+                offsets_frames[detail.label] = int(detail.frames)
+        if not offset_lines:
+            offset_lines.append("Audio offsets: VSPreview manual offsets applied")
+        else:
+            offset_lines.insert(0, "Audio offsets: VSPreview manual offsets applied")
+        if display.manual_trim_lines:
+            offset_lines.extend(display.manual_trim_lines)
+        display.offset_lines = offset_lines
+        display.json_offsets_sec = offsets_sec
+        display.json_offsets_frames = offsets_frames
+        display.measurements = {
+            detail.label: detail for detail in detail_map.values()
+        }
+        display.correlations = {
+            detail.label: detail.correlation
+            for detail in detail_map.values()
+            if detail.correlation is not None
+        }
 
     reporter.line("VSPreview offsets saved to offsets file with manual status.")
 

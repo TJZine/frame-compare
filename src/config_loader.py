@@ -408,7 +408,12 @@ def load_config(path: str) -> AppConfig:
         else:
             raise ConfigError("color.use_dovi must be true, false, or auto")
     elif use_dovi_value is not None:
-        app.color.use_dovi = bool(use_dovi_value)
+        if isinstance(use_dovi_value, bool):
+            app.color.use_dovi = use_dovi_value
+        elif isinstance(use_dovi_value, int) and use_dovi_value in (0, 1):
+            app.color.use_dovi = bool(use_dovi_value)
+        else:
+            raise ConfigError("color.use_dovi must be true, false, or auto")
     overlay_mode = str(getattr(app.color, "overlay_mode", "minimal")).strip().lower()
     if overlay_mode not in {"minimal", "diagnostic"}:
         raise ConfigError("color.overlay_mode must be 'minimal' or 'diagnostic'")
