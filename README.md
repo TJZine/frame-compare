@@ -16,6 +16,7 @@ Automated frame sampling, alignment, tonemapping, and slow.pics uploads for dete
     - [Wizard \& Presets](#wizard--presets)
     - [Dependency Doctor](#dependency-doctor)
   - [Configuration](#configuration)
+    - [Tonemap Quick Recipes](#tonemap-quick-recipes)
   - [CLI Reference](#cli-reference)
   - [Examples](#examples)
     - [VSPreview manual alignment assistant](#vspreview-manual-alignment-assistant)
@@ -411,9 +412,7 @@ Distributed under the [MIT License](LICENSE). Frame Compare builds on FFmpeg, Va
 - File issues or feature requests via the GitHub issue tracker. For security concerns, open a private advisory so details remain confidential until patched.
 
 ## Future updates
-- Rework current presets to better preset and expand upon them.
 - Do a check of all current config options to ensure all are working correctly and see if any can be trimmed or combined (like the letterbox options) 
-- identify which file is being indexed during the creation of the lwi index files.
 - at a glance box in cli output still not showing what viewer mode is selected between None, Local Report, and Slow.pics
 - no nits number showing in the at a glance box still.
 - Frames in line 1 of the at a glance box has nothing after it.

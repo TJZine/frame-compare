@@ -149,12 +149,14 @@
       "title": "At-a-Glance",
       "when": "true",
       "lines": [
-        "[[key]]Clips[[/]]: [[value]]{clips.count}[[/]]  [[key]]Step[[/]] [[value]]{analysis.step}[[/]]  [[key]]Downscale[[/]] [[value]]{analysis.downscale_height}[[/]][[unit]]px[[/]]  [[key]]Frames[[/]] [[value]]{analysis.output_frame_count}[[/]]",
+        "[[key]]Clips[[/]]: [[value]]{clips.count}[[/]]  [[key]]Step[[/]] [[value]]{analysis.step}[[/]]  [[key]]Downscale[[/]] [[value]]{analysis.downscale_height}[[/]][[unit]]px[[/]]",
+        "[[key]]Frames[[/]] kept [[value]]{analysis.output_frame_count}[[/]]  scanned [[value]]{analysis.scanned}[[/]]  [[key]]Cache[[/]] [[value]]{cache.status}[[/]]",
+        "[[key]]Viewer[[/]] [[value]]{viewer.mode_display}[[/]]{viewer.destination_label?` \u2192 [[value]]${viewer.destination_label}[[/]]`:''}",
         "[[key]]Window[[/]] lead [[value]]{window.ignore_lead_seconds:.2f}[[/]][[unit]]s[[/]]  trail [[value]]{window.ignore_trail_seconds:.2f}[[/]][[unit]]s[[/]]  min [[value]]{window.min_window_seconds:.2f}[[/]][[unit]]s[[/]]",
         "[[key]]Plan[[/]] dark [[value]]{analysis.counts.dark}[[/]]  bright [[value]]{analysis.counts.bright}[[/]]  motion [[value]]{analysis.counts.motion}[[/]]  random [[value]]{analysis.counts.random}[[/]]  user [[value]]{analysis.counts.user}[[/]]",
         "[[key]]Audio align[[/]] [[value]]{audio_alignment.enabled|bool}[[/]]",
         "[[key]]Canvas[[/]] single_res [[value]]{render.single_res|tallest}[[/]] [[unit]]px[[/]]  upscale [[value]]{render.upscale|bool}[[/]]  pad [[value]]{render.center_pad|bool}[[/]]",
-        "[[key]]Tonemap[[/]] [[value]]{tonemap.tone_curve}[[/]] \u2192 [[value]]{tonemap.target_nits:.0f}[[/]][[unit]]nits[[/]]  [[key]]Cache[[/]] [[value]]{cache.status}[[/]]"
+        "[[key]]Tonemap[[/]] [[value]]{tonemap.preset}[[/]] \u2192 [[value]]{tonemap.target_nits:.0f}[[/]][[unit]]nits[[/]]  [[key]]Curve[[/]] [[value]]{tonemap.tone_curve}[[/]]"
       ]
     },
     {
@@ -292,6 +294,12 @@
           "type": "progress",
           "progress_id": "render_bar",
           "right_label": "[[value]]{progress.current}[[/]]/[[value]]{progress.total}[[/]] | [[value]]{progress.fps:.2f}[[/]] [[unit]]fps[[/]] | ETA [[value]]{progress.eta_tc}[[/]] | elapsed [[value]]{progress.elapsed_tc}[[/]]"
+        },
+        {
+          "subtitle": "Active Clip",
+          "type": "progress",
+          "progress_id": "render_clip_bar",
+          "right_label": "Clip [[value]]{progress.clip_index}[[/]]/[[value]]{progress.clip_total}[[/]] | [[value]]{progress.current}[[/]]/[[value]]{progress.total}"
         }
       ]
     },

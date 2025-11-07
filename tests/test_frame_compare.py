@@ -1158,6 +1158,13 @@ def _make_json_tail_stub() -> frame_compare.JsonTail:
             "output_dir": "report",
             "open_after_generate": True,
             "opened": False,
+            "mode": "slider",
+        },
+        "viewer": {
+            "mode": "none",
+            "mode_display": "None",
+            "destination": None,
+            "destination_label": "",
         },
         "vspreview_mode": None,
         "suggested_frames": 0,

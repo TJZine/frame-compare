@@ -27,7 +27,7 @@ import uuid
 import webbrowser
 from collections import Counter, defaultdict
 from collections.abc import Mapping as MappingABC
-from contextlib import nullcontext
+from contextlib import ExitStack, nullcontext
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from string import Template
@@ -390,6 +390,13 @@ class ReportJSON(TypedDict, total=False):
     mode: str
 
 
+class ViewerJSON(TypedDict, total=False):
+    mode: str
+    mode_display: str
+    destination: Optional[str]
+    destination_label: str
+
+
 class JsonTail(TypedDict):
     clips: list[dict[str, object]]
     trims: TrimsJSON
@@ -404,6 +411,7 @@ class JsonTail(TypedDict):
     cache: dict[str, object]
     slowpics: SlowpicsJSON
     report: ReportJSON
+    viewer: ViewerJSON
     warnings: list[str]
     workspace: dict[str, object]
     vspreview_mode: Optional[str]
@@ -4880,7 +4888,7 @@ def run_cli(
             "vspreview_manual_deltas": {},
             "vspreview_reference_trim": None,
         },
-        "analysis": {},
+        "analysis": {"output_frame_count": 0, "scanned": 0},
         "render": {},
         "tonemap": {},
         "overlay": {},
@@ -4926,6 +4934,12 @@ def run_cli(
             "output_dir": cfg.report.output_dir,
             "open_after_generate": bool(getattr(cfg.report, "open_after_generate", True)),
             "mode": cfg.report.default_mode,
+        },
+        "viewer": {
+            "mode": "none",
+            "mode_display": "None",
+            "destination": None,
+            "destination_label": "",
         },
         "warnings": [],
         "vspreview_mode": vspreview_mode_value,
@@ -4990,6 +5004,7 @@ def run_cli(
         "overrides": {
             "change_fps": "change_fps" if cfg.overrides.change_fps else "none",
         },
+        "viewer": json_tail["viewer"],
         "warnings": [],
     }
 
@@ -5595,6 +5610,7 @@ def run_cli(
         "motion_method": analysis_method,
         "motion_scenecut_quantile": float(cfg.analysis.motion_scenecut_quantile),
         "motion_diff_radius": int(cfg.analysis.motion_diff_radius),
+        "output_frame_count": 0,
         "counts": {
             "dark": int(cfg.analysis.frame_count_dark),
             "bright": int(cfg.analysis.frame_count_bright),
@@ -6040,6 +6056,19 @@ def run_cli(
         if total_screens > 0:
             start_time = time.perf_counter()
             processed = 0
+            clip_labels = [_plan_label(plan) for plan in plans]
+            clip_total_frames = len(frames)
+            clip_count = len(clip_labels)
+            clip_progress_enabled = clip_count > 0 and clip_total_frames > 0
+            if clip_progress_enabled:
+                reporter.update_progress_state(
+                    "render_clip_bar",
+                    label=clip_labels[0],
+                    clip_index=1,
+                    clip_total=clip_count,
+                    current=0,
+                    total=clip_total_frames,
+                )
 
             reporter.update_progress_state(
                 "render_bar",
@@ -6050,15 +6079,39 @@ def run_cli(
                 total=total_screens,
             )
 
-            with reporter.create_progress("render_bar", transient=False) as render_progress:
+            clip_progress = None
+            clip_task_id: Optional[int] = None
+            clip_index = 0
+            clip_completed = 0
+
+            def _clip_description(idx: int) -> str:
+                if not clip_labels:
+                    return "Rendering clip"
+                bounded = max(0, min(idx, len(clip_labels) - 1))
+                return f"{clip_labels[bounded]} ({bounded + 1}/{clip_count})"
+
+            with ExitStack() as progress_stack:
+                render_progress = progress_stack.enter_context(
+                    reporter.create_progress("render_bar", transient=False)
+                )
                 task_id = render_progress.add_task(
-                    'Rendering outputs',
+                    "Rendering outputs",
                     total=total_screens,
                 )
+                if clip_progress_enabled:
+                    clip_progress = progress_stack.enter_context(
+                        reporter.create_progress("render_clip_bar", transient=False)
+                    )
+                    clip_task_id = clip_progress.add_task(
+                        _clip_description(clip_index),
+                        total=clip_total_frames,
+                    )
 
                 def advance_render(count: int) -> None:
                     """Update rendering progress metrics and visible bars."""
                     nonlocal processed
+                    nonlocal clip_index
+                    nonlocal clip_completed
                     processed += count
                     elapsed = max(time.perf_counter() - start_time, 1e-6)
                     fps_val = processed / elapsed
@@ -6073,6 +6126,42 @@ def run_cli(
                         total=total_screens,
                     )
                     render_progress.update(task_id, completed=min(total_screens, processed))
+                    if clip_progress_enabled and clip_progress is not None and clip_task_id is not None:
+                        clip_completed += count
+                        clip_completed = min(clip_completed, clip_total_frames)
+                        clip_progress.update(
+                            clip_task_id,
+                            completed=clip_completed,
+                            description=_clip_description(clip_index),
+                        )
+                        reporter.update_progress_state(
+                            "render_clip_bar",
+                            current=clip_completed,
+                            total=clip_total_frames,
+                            clip_index=clip_index + 1,
+                            clip_total=clip_count,
+                            label=clip_labels[clip_index],
+                        )
+                        if clip_completed >= clip_total_frames and clip_index + 1 < clip_count:
+                            clip_index += 1
+                            clip_completed = 0
+                            cast(Any, clip_progress).reset(
+                                clip_task_id,
+                                total=clip_total_frames,
+                            )
+                            clip_progress.update(
+                                clip_task_id,
+                                completed=clip_completed,
+                                description=_clip_description(clip_index),
+                            )
+                            reporter.update_progress_state(
+                                "render_clip_bar",
+                                current=clip_completed,
+                                total=clip_total_frames,
+                                clip_index=clip_index + 1,
+                                clip_total=clip_count,
+                                label=clip_labels[clip_index],
+                            )
 
                 image_paths = generate_screenshots(
                     clips,
@@ -6104,6 +6193,20 @@ def run_cli(
                         total=total_screens,
                     )
                     render_progress.update(task_id, completed=total_screens)
+                if clip_progress_enabled and clip_progress is not None and clip_task_id is not None:
+                    clip_progress.update(
+                        clip_task_id,
+                        completed=clip_total_frames,
+                        description=_clip_description(min(clip_index, clip_count - 1)),
+                    )
+                    reporter.update_progress_state(
+                        "render_clip_bar",
+                        current=clip_total_frames,
+                        total=clip_total_frames,
+                        clip_index=min(clip_index, clip_count - 1) + 1,
+                        clip_total=clip_count,
+                        label=clip_labels[min(clip_index, clip_count - 1)],
+                    )
         else:
             image_paths = generate_screenshots(
                 clips,
@@ -6411,6 +6514,41 @@ def run_cli(
     else:
         report_block["enabled"] = False
         report_block["path"] = None
+
+    viewer_block = json_tail.get("viewer", {})
+    viewer_mode = "slow_pics" if slowpics_url else "local_report" if report_block.get("enabled") and report_block.get("path") else "none"
+    viewer_destination: Optional[str]
+    viewer_label = ""
+    if viewer_mode == "slow_pics":
+        viewer_destination = slowpics_url
+        viewer_label = slowpics_url or ""
+    elif viewer_mode == "local_report":
+        viewer_destination = report_block.get("path")
+        viewer_label = viewer_destination or ""
+        if viewer_destination:
+            try:
+                viewer_label = str(Path(viewer_destination).resolve().relative_to(root.resolve()))
+            except ValueError:
+                viewer_label = viewer_destination
+    else:
+        viewer_destination = None
+    viewer_mode_display = {
+        "slow_pics": "slow.pics",
+        "local_report": "Local report",
+        "none": "None",
+    }.get(viewer_mode, viewer_mode.title())
+    viewer_block.update(
+        {
+            "mode": viewer_mode,
+            "mode_display": viewer_mode_display,
+            "destination": viewer_destination,
+            "destination_label": viewer_label,
+        }
+    )
+    json_tail["viewer"] = viewer_block
+    layout_data["viewer"] = viewer_block
+    reporter.update_values(layout_data)
+    reporter.render_sections(["at_a_glance"])
 
     result = RunResult(
         files=[plan.path for plan in plans],

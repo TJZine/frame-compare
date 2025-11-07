@@ -1,6 +1,6 @@
 # AGENTS.md — Advisors Only (No Execution)
 
-Advisors analyze and propose diffs/checks; they never execute tools or run commands. All execution follows CODEX.md.
+Advisors analyze and propose diffs/checks. All execution follows CODEX.md.
 
 ## Advisors & Outputs
 - **ts-advisor**: types & boundaries; no `any`; error boundaries; consistent exports.
