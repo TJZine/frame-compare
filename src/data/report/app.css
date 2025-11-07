@@ -177,6 +177,11 @@ body.rc-fullscreen-active .rc-main {
   transition: background-color 150ms linear;
 }
 
+.rc-viewer-stage:focus,
+.rc-viewer-stage:focus-visible {
+  outline: none;
+}
+
 .rc-viewer-stage.rc-mode-slider:not(.rc-pan-available) {
   cursor: ew-resize;
 }
