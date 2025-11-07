@@ -299,13 +299,16 @@ def _upload_comparison_legacy(
             }
             upload_encoder = MultipartEncoder(upload_fields, str(uuid.uuid4()))
             local_session = session_factory()
-            upload_headers = _build_legacy_headers(local_session, upload_encoder)
-            upload_resp = local_session.post(
-                "https://slow.pics/upload/image",
-                data=upload_encoder,
-                headers=upload_headers,
-                timeout=timeout,
-            )
+            try:
+                upload_headers = _build_legacy_headers(local_session, upload_encoder)
+                upload_resp = local_session.post(
+                    "https://slow.pics/upload/image",
+                    data=upload_encoder,
+                    headers=upload_headers,
+                    timeout=timeout,
+                )
+            finally:
+                local_session.close()
         _raise_for_status(upload_resp, f"Upload frame {path.name}")
         if getattr(upload_resp, "content", b""):
             text = upload_resp.content.decode("utf-8", "ignore").strip()
@@ -324,6 +327,8 @@ def _upload_comparison_legacy(
                 for future in as_completed(futures):
                     future.result()
             except Exception:
+                # Cancel pending futures; uploads already running will complete but their
+                # results are ignored once an error has been observed.
                 for future in futures:
                     future.cancel()
                 raise
@@ -353,7 +358,7 @@ def _configure_slowpics_session(session: requests.Session, *, workers: Optional[
         total=3,
         backoff_factor=0.1,
         status_forcelist=[502, 503, 504],
-        allowed_methods=frozenset({"POST"}),
+        allowed_methods=frozenset({"GET", "POST"}),
         raise_on_status=False,
     )
     adapter = HTTPAdapter(
