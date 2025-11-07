@@ -79,6 +79,32 @@ def test_resolve_effective_tonemap_uses_preset_defaults() -> None:
     assert resolved["show_clipping"] is False
 
 
+def test_resolve_tonemap_settings_uses_color_defaults() -> None:
+    cfg = types.SimpleNamespace(
+        preset="custom",
+        tone_curve="bt.2390",
+        target_nits=100.0,
+        dynamic_peak_detection=True,
+        dst_min_nits=0.18,
+        knee_offset=0.5,
+        dpd_preset="high_quality",
+        dpd_black_cutoff=0.01,
+        metadata="auto",
+        use_dovi=None,
+        visualize_lut=False,
+        show_clipping=False,
+        _provided_keys=set(),
+    )
+
+    settings = vs_core._resolve_tonemap_settings(cfg)
+
+    assert settings.smoothing_period == pytest.approx(45.0)
+    assert settings.scene_threshold_low == pytest.approx(0.8)
+    assert settings.scene_threshold_high == pytest.approx(2.4)
+    assert settings.percentile == pytest.approx(99.995)
+    assert settings.contrast_recovery == pytest.approx(0.3)
+
+
 class _FakeSampleType:
     def __init__(self, name: str, value: int) -> None:
         self.name = name

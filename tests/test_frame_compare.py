@@ -2891,7 +2891,11 @@ def test_audio_alignment_block_and_json(
     assert applied_value is True
     tonemap_json = payload["tonemap"]
     assert tonemap_json["overlay_mode"] == "diagnostic"
-    assert "smoothing_period" in tonemap_json
+    assert tonemap_json["smoothing_period"] == pytest.approx(45.0)
+    assert tonemap_json["scene_threshold_low"] == pytest.approx(0.8)
+    assert tonemap_json["scene_threshold_high"] == pytest.approx(2.4)
+    assert tonemap_json["percentile"] == pytest.approx(99.995)
+    assert tonemap_json["contrast_recovery"] == pytest.approx(0.3)
     assert "metadata_label" in tonemap_json
     assert "use_dovi_label" in tonemap_json
 
