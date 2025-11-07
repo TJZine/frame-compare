@@ -115,6 +115,7 @@
         mode: state.mode,
         overlayEncode: state.overlayEncode,
         activeCategories: Array.from(state.activeCategories),
+        currentFrame: state.currentFrame,
       };
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
     } catch (error) {
@@ -343,6 +344,10 @@
       ? preferences.overlayEncode
       : null;
   const hasOverlayPreference = Boolean(storedOverlayEncode);
+  const storedFrameIndex =
+    typeof preferences.currentFrame === "number" && Number.isFinite(preferences.currentFrame)
+      ? preferences.currentFrame
+      : null;
   if (preferences.zoom) {
     state.zoom = clampZoom(preferences.zoom);
   }
@@ -1062,6 +1067,7 @@
       return;
     }
     state.currentFrame = frameIndex;
+    savePreferences();
     updateImages();
     if (focusFilmstrip) {
       const button = frameList.querySelector(`button[data-frame="${frameIndex}"]`);
@@ -1114,6 +1120,11 @@
       state.framesByIndex.set(frame.index, frame);
     });
     state.allFrameIndexes = frames.map((frame) => frame.index).sort((a, b) => a - b);
+    if (storedFrameIndex !== null && state.framesByIndex.has(storedFrameIndex)) {
+      state.currentFrame = storedFrameIndex;
+    } else {
+      state.currentFrame = null;
+    }
 
     state.categories = Array.isArray(data.categories)
       ? data.categories.filter(
