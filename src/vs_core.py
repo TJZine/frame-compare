@@ -518,7 +518,13 @@ def _classify_plugin_exception(plugin: str, exc: Exception) -> VSPluginError | N
     return None
 
 
-def _open_clip_with_sources(core: Any, path: str, cache_root: Path) -> Any:
+def _open_clip_with_sources(
+    core: Any,
+    path: str,
+    cache_root: Path,
+    *,
+    indexing_notifier: Optional[Callable[[str], None]] = None,
+) -> Any:
     order = _build_source_order()
     errors: dict[str, VSPluginError] = {}
     base_name = Path(path).name
@@ -534,6 +540,10 @@ def _open_clip_with_sources(core: Any, path: str, cache_root: Path) -> Any:
 
         cache_path = _cache_path_for(cache_root, base_name, plugin)
         try:
+            if not cache_path.exists():
+                logger.info("[CACHE] Indexing %s via %s", base_name, plugin)
+                if indexing_notifier is not None:
+                    indexing_notifier(base_name)
             return source(path, cachefile=str(cache_path))
         except Exception as exc:
             classified = _classify_plugin_exception(plugin, exc)
@@ -634,6 +644,7 @@ def init_clip(
     fps_map: Tuple[int, int] | None = None,
     cache_dir: Optional[str | Path] = None,
     core: Optional[Any] = None,
+    indexing_notifier: Optional[Callable[[str], None]] = None,
 ) -> Any:
     """Initialise a VapourSynth clip for subsequent processing."""
 
@@ -647,7 +658,12 @@ def init_clip(
         raise ClipInitError(f"Failed to prepare cache directory '{cache_root}': {exc}") from exc
 
     try:
-        clip = _open_clip_with_sources(resolved_core, str(path_obj), cache_root)
+        clip = _open_clip_with_sources(
+            resolved_core,
+            str(path_obj),
+            cache_root,
+            indexing_notifier=indexing_notifier,
+        )
     except ClipInitError:
         raise
     except Exception as exc:  # pragma: no cover - defensive

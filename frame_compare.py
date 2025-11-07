@@ -2464,10 +2464,21 @@ def _format_clock(seconds: Optional[float]) -> str:
 
 
 def _init_clips(
-    plans: Sequence[_ClipPlan], runtime_cfg: RuntimeConfig, cache_dir: Path | None
+    plans: Sequence[_ClipPlan],
+    runtime_cfg: RuntimeConfig,
+    cache_dir: Path | None,
+    *,
+    reporter: CliOutputManager | None = None,
 ) -> None:
     """Initialise VapourSynth clips for each plan and capture source metadata."""
     vs_core.set_ram_limit(runtime_cfg.ram_limit_mb)
+
+    def _indexing_note(filename: str) -> None:
+        label = escape(filename)
+        if reporter is not None:
+            reporter.console.print(f"[dim][CACHE] Indexing {label}…[/]")
+        else:
+            print(f"[CACHE] Indexing {filename}…")
 
     cache_dir_str = str(cache_dir) if cache_dir is not None else None
 
@@ -2481,6 +2492,7 @@ def _init_clips(
             trim_start=plan.trim_start,
             trim_end=plan.trim_end,
             cache_dir=cache_dir_str,
+            indexing_notifier=_indexing_note,
         )
         plan.clip = clip
         plan.effective_fps = _extract_clip_fps(clip)
@@ -2503,6 +2515,7 @@ def _init_clips(
             trim_end=plan.trim_end,
             fps_map=fps_override,
             cache_dir=cache_dir_str,
+            indexing_notifier=_indexing_note,
         )
         plan.clip = clip
         plan.applied_fps = fps_override
@@ -5424,7 +5437,7 @@ def run_cli(
         )
 
     try:
-        _init_clips(plans, cfg.runtime, root)
+        _init_clips(plans, cfg.runtime, root, reporter=reporter)
     except vs_core.ClipInitError as exc:
         raise CLIAppError(
             f"Failed to open clip: {exc}", rich_message=f"[red]Failed to open clip:[/red] {exc}"
