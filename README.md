@@ -43,7 +43,7 @@ Frame Compare samples darkest, brightest, high-motion, random, and user-pinned f
 - Cached metrics (`generated.compframes` plus selection sidecars) for fast reruns across large batches.
 - Audio alignment with correlation, dynamic time warping refinements, and optional interactive confirmation frames.
 - VapourSynth-first pipeline with FFmpeg fallback, HDR→SDR tonemapping, and placeholder recovery when writers fail.
-- slow.pics integration with automatic uploads, retries, URL shortcuts, and clipboard hand-off.
+- slow.pics integration with automatic uploads, retries, URL shortcuts, and clipboard hand-off using the original comp.py-style single-threaded uploader for predictable progress.
 - Optional HTML report generation for offline, browser-based comparisons with filmstrip thumbnails, selection filters, slider/overlay/difference/blink modes, pointer-anchored zoom + fit presets, persistent pan/align controls, and a fullscreen toggle inspired by slow.pics.
 - TMDB-driven metadata resolution with GuessIt/Anitopy labelling to keep comparisons organised.
 - Rich CLI layout featuring progress dashboards, Unicode fallbacks, batch auto-grouping, and optional JSON tails for automation.
@@ -324,7 +324,7 @@ The renderer promotes subsampled SDR clips to YUV444P16 before cropping/padding,
 - **FFmpeg or VapourSynth not found:** ensure binaries are on `PATH`, set `VAPOURSYNTH_PYTHONPATH`, or install the Python bindings. The CLI falls back to FFmpeg when `[screenshots].use_ffmpeg = true`.
 - **Workspace root is not writable:** choose another root via `--root` or `FRAME_COMPARE_ROOT`. Frame Compare refuses to run inside `site-packages`/`dist-packages`.
 - **HDR renders look dim:** switch `[color].preset = "filmic"` or disable `[color].enable_tonemap` for SDR sources.
-- **slow.pics upload fails:** if uploads are enabled (`[slowpics].auto_upload = true`), ensure network access and inspect the JSON tail for per-frame status. Adjust `[slowpics].image_upload_timeout_seconds` for slow links.
+- **slow.pics upload fails:** if uploads are enabled (`[slowpics].auto_upload = true`), ensure network access and inspect the JSON tail for per-frame status. The CLI now logs “Uploading screenshot X/Y” for each sequential upload, so freezes usually map to the most recent frame. Adjust `[slowpics].image_upload_timeout_seconds` for slow links.
 - **Placeholder PNGs appear:** review console warnings for renderer errors, then retry with FFmpeg or install missing VapourSynth plugins/codecs.
 - **Audio alignment dependency errors:** install `numpy`, `librosa`, `soundfile`. Failures raise `AudioAlignmentError` with the missing import.
 - **VSPreview fails to launch:** ensure PySide6 (or PyQt5) is installed and run from an interactive terminal. Non-interactive shells bypass the GUI launch by design.

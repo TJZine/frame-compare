@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 import logging
-import queue
 import re
 import time
 import uuid
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Dict, Iterator, List, Optional
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional
 from urllib.parse import unquote, urlsplit
 
 import requests
@@ -37,46 +35,8 @@ logger = logging.getLogger(__name__)
 
 
 _CONNECT_TIMEOUT_SECONDS = 10.0
-_DEFAULT_UPLOAD_CONCURRENCY = 3
 _MIN_UPLOAD_THROUGHPUT_BYTES_PER_SEC = 256 * 1024  # 256 KiB/s baseline assumption
 _UPLOAD_TIMEOUT_MARGIN_SECONDS = 15.0
-
-
-class _SessionPool:
-    """Simple bounded pool that hands out preconfigured Requests sessions."""
-
-    def __init__(self, session_factory: Callable[[], requests.Session], size: int) -> None:
-        self._session_factory = session_factory
-        self._queue: "queue.Queue[requests.Session]" = queue.Queue(maxsize=max(1, size))
-        self._sessions: List[requests.Session] = []
-        try:
-            for _ in range(max(1, size)):
-                session = session_factory()
-                self._sessions.append(session)
-                self._queue.put(session)
-        except Exception:
-            self.close()
-            raise
-
-    @contextmanager
-    def acquire(self) -> Iterator[requests.Session]:
-        """Check out a session for exclusive use within a worker thread."""
-
-        session = self._queue.get()
-        try:
-            yield session
-        finally:
-            self._queue.put(session)
-
-    def close(self) -> None:
-        """Close every underlying session."""
-
-        while self._sessions:
-            session = self._sessions.pop()
-            try:
-                session.close()
-            except Exception:
-                logger.debug("Failed to close slow.pics session cleanly", exc_info=True)
 
 
 def _raise_for_status(response: requests.Response, context: str) -> None:
@@ -250,19 +210,51 @@ def _compute_image_upload_timeout(cfg: SlowpicsConfig, size_bytes: int) -> tuple
     return (_CONNECT_TIMEOUT_SECONDS, max(base, estimated))
 
 
-def _upload_comparison_legacy(
-    session_factory: Callable[[], requests.Session],
+def _configure_slowpics_session(session: requests.Session) -> None:
+    """
+    Configure the provided session with retry-capable HTTP adapters.
+
+    Parameters:
+        session: The Requests session that will perform slow.pics HTTP calls.
+    """
+
+    pool_size = 4
+    retries = Retry(
+        total=3,
+        backoff_factor=0.1,
+        status_forcelist=[502, 503, 504],
+        allowed_methods=frozenset({"GET", "POST"}),
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(
+        max_retries=retries,
+        pool_connections=pool_size,
+        pool_maxsize=pool_size,
+    )
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+
+
+def upload_comparison(
     image_files: List[str],
     screen_dir: Path,
     cfg: SlowpicsConfig,
     *,
     progress_callback: Optional[Callable[[int], None]] = None,
-    max_workers: Optional[int] = None,
 ) -> str:
+    """Upload screenshots to slow.pics and return the collection URL.
+
+    Uploads follow the original comp.py flow: create the collection, then send each
+    screenshot sequentially over a single session. The optional ``progress_callback``
+    is invoked once per completed upload.
+    """
+
     if MultipartEncoder is None:
         raise SlowpicsAPIError(
             "requests-toolbelt is required for slow.pics uploads. Install it to enable auto-upload."
         )
+    if not image_files:
+        raise SlowpicsAPIError("No image files provided for upload")
 
     frame_order, grouped = _prepare_legacy_plan(image_files)
     browser_id = str(uuid.uuid4())
@@ -289,44 +281,52 @@ def _upload_comparison_legacy(
             per_frame_paths.append(path)
         upload_plan.append(per_frame_paths)
 
-    session = session_factory()
-    encoder = MultipartEncoder(fields, str(uuid.uuid4()))
-    headers = _build_legacy_headers(session, encoder)
-    response = session.post(
-        "https://slow.pics/upload/comparison",
-        data=encoder,
-        headers=headers,
-        timeout=(_CONNECT_TIMEOUT_SECONDS, 30.0),
-    )
-    _raise_for_status(response, "Legacy collection creation")
+    session = requests.Session()
     try:
-        comp_json = response.json()
-    except ValueError as exc:
-        raise SlowpicsAPIError("Invalid JSON response returned by slow.pics") from exc
+        _configure_slowpics_session(session)
+        try:
+            session.get("https://slow.pics/comparison", timeout=_CONNECT_TIMEOUT_SECONDS)
+        except requests.RequestException as exc:
+            raise SlowpicsAPIError(f"Failed to establish slow.pics session: {exc}") from exc
 
-    collection_uuid = comp_json.get("collectionUuid")
-    key = comp_json.get("key")
-    if not key:
-        raise SlowpicsAPIError("Missing collection key in slow.pics response")
-    canonical_url = f"https://slow.pics/c/{key}"
-    images = comp_json.get("images")
-    if not isinstance(images, list):
-        raise SlowpicsAPIError("Slow.pics response missing image identifiers")
-    if len(images) != len(upload_plan):
-        raise SlowpicsAPIError("Unexpected slow.pics response structure for comparisons")
+        xsrf_token = session.cookies.get("XSRF-TOKEN")
+        if not xsrf_token:
+            raise SlowpicsAPIError("Missing XSRF token from slow.pics response")
 
-    jobs: List[tuple[Path, str]] = []
-    for per_frame_paths, image_ids in zip(upload_plan, images):
-        if not isinstance(image_ids, list) or len(image_ids) != len(per_frame_paths):
-            raise SlowpicsAPIError("Slow.pics returned mismatched image identifiers")
-        jobs.extend(zip(per_frame_paths, image_ids))
+        logger.info("Using slow.pics legacy upload endpoints")
 
-    worker_count = max_workers if max_workers is not None else _DEFAULT_UPLOAD_CONCURRENCY
-    worker_count = max(1, min(worker_count, len(jobs) or 1))
+        encoder = MultipartEncoder(fields, str(uuid.uuid4()))
+        headers = _build_legacy_headers(session, encoder)
+        response = session.post(
+            "https://slow.pics/upload/comparison",
+            data=encoder,
+            headers=headers,
+            timeout=(_CONNECT_TIMEOUT_SECONDS, 30.0),
+        )
+        _raise_for_status(response, "Legacy collection creation")
+        try:
+            comp_json = response.json()
+        except ValueError as exc:  # pragma: no cover - defensive
+            raise SlowpicsAPIError("Invalid JSON response returned by slow.pics") from exc
 
-    session_pool = _SessionPool(session_factory, worker_count)
-    try:
-        def _upload_single(path: Path, image_uuid: str) -> None:
+        collection_uuid = comp_json.get("collectionUuid")
+        key = comp_json.get("key")
+        if not key:
+            raise SlowpicsAPIError("Missing collection key in slow.pics response")
+        canonical_url = f"https://slow.pics/c/{key}"
+        images = comp_json.get("images")
+        if not isinstance(images, list):
+            raise SlowpicsAPIError("Slow.pics response missing image identifiers")
+        if len(images) != len(upload_plan):
+            raise SlowpicsAPIError("Unexpected slow.pics response structure for comparisons")
+
+        jobs: List[tuple[Path, str]] = []
+        for per_frame_paths, image_ids in zip(upload_plan, images):
+            if not isinstance(image_ids, list) or len(image_ids) != len(per_frame_paths):
+                raise SlowpicsAPIError("Slow.pics returned mismatched image identifiers")
+            jobs.extend(zip(per_frame_paths, image_ids))
+
+        for path, image_uuid in jobs:
             file_size = path.stat().st_size
             timeout = _compute_image_upload_timeout(cfg, file_size)
             with ExitStack() as stack:
@@ -338,14 +338,13 @@ def _upload_comparison_legacy(
                     "browserId": browser_id,
                 }
                 upload_encoder = MultipartEncoder(upload_fields, str(uuid.uuid4()))
-                with session_pool.acquire() as local_session:
-                    upload_headers = _build_legacy_headers(local_session, upload_encoder)
-                    upload_resp = local_session.post(
-                        "https://slow.pics/upload/image",
-                        data=upload_encoder,
-                        headers=upload_headers,
-                        timeout=timeout,
-                    )
+                upload_headers = _build_legacy_headers(session, upload_encoder)
+                upload_resp = session.post(
+                    "https://slow.pics/upload/image",
+                    data=upload_encoder,
+                    headers=upload_headers,
+                    timeout=timeout,
+                )
             _raise_for_status(upload_resp, f"Upload frame {path.name}")
             if getattr(upload_resp, "content", b""):
                 text = upload_resp.content.decode("utf-8", "ignore").strip()
@@ -354,111 +353,14 @@ def _upload_comparison_legacy(
             if progress_callback is not None:
                 progress_callback(1)
 
-        if worker_count == 1:
-            for path, image_uuid in jobs:
-                _upload_single(path, image_uuid)
-        else:
-            with ThreadPoolExecutor(max_workers=worker_count) as executor:
-                futures = [executor.submit(_upload_single, path, image_uuid) for path, image_uuid in jobs]
-                try:
-                    for future in as_completed(futures):
-                        future.result()
-                except Exception:
-                    for future in futures:
-                        future.cancel()
-                    raise
+        if cfg.webhook_url:
+            _post_direct_webhook(session, cfg.webhook_url, canonical_url)
+        if cfg.create_url_shortcut:
+            shortcut_name = build_shortcut_filename(cfg.collection_name, canonical_url)
+            shortcut_path = screen_dir / shortcut_name
+            shortcut_path.write_text(f"[InternetShortcut]\nURL={canonical_url}\n", encoding="utf-8")
+
+        logger.info("Slow.pics: %s", canonical_url)
+        return canonical_url
     finally:
-        session_pool.close()
-
-    if cfg.webhook_url:
-        _post_direct_webhook(session, cfg.webhook_url, canonical_url)
-    if cfg.create_url_shortcut:
-        shortcut_name = build_shortcut_filename(cfg.collection_name, canonical_url)
-        shortcut_path = screen_dir / shortcut_name
-        shortcut_path.write_text(f"[InternetShortcut]\nURL={canonical_url}\n", encoding="utf-8")
-    session.close()
-    return canonical_url
-
-
-def _configure_slowpics_session(session: requests.Session, *, workers: Optional[int] = None) -> None:
-    """
-    Configure the provided session with retry-capable HTTP adapters sized for concurrent uploads.
-
-    Parameters:
-        session: The Requests session that will perform slow.pics HTTP calls.
-        workers: Expected parallel upload workers; defaults to `_DEFAULT_UPLOAD_CONCURRENCY`.
-    """
-
-    effective_workers = workers if workers and workers > 0 else _DEFAULT_UPLOAD_CONCURRENCY
-    pool_size = max(4, effective_workers)
-    retries = Retry(
-        total=3,
-        backoff_factor=0.1,
-        status_forcelist=[502, 503, 504],
-        allowed_methods=frozenset({"GET", "POST"}),
-        raise_on_status=False,
-    )
-    adapter = HTTPAdapter(
-        max_retries=retries,
-        pool_connections=pool_size,
-        pool_maxsize=pool_size,
-    )
-    session.mount("https://", adapter)
-    session.mount("http://", adapter)
-
-
-def upload_comparison(
-    image_files: List[str],
-    screen_dir: Path,
-    cfg: SlowpicsConfig,
-    *,
-    progress_callback: Optional[Callable[[int], None]] = None,
-    max_workers: Optional[int] = None,
-) -> str:
-    """Upload screenshots to slow.pics and return the collection URL.
-
-    Notes:
-        When ``max_workers`` is greater than 1 (or left as ``None`` and defaults to
-        parallel uploads), ``progress_callback`` may be invoked concurrently from
-        multiple worker threads. Callers should ensure the callback is thread-safe
-        (for example, by using ``threading.Lock`` or other synchronization
-        primitives) if they mutate shared state or emit UI updates inside the
-        callback.
-    """
-
-    if not image_files:
-        raise SlowpicsAPIError("No image files provided for upload")
-
-    expected_workers = min(max_workers or _DEFAULT_UPLOAD_CONCURRENCY, len(image_files) or 1)
-    bootstrap_session = requests.Session()
-    try:
-        _configure_slowpics_session(bootstrap_session, workers=expected_workers)
-        try:
-            bootstrap_session.get("https://slow.pics/comparison", timeout=_CONNECT_TIMEOUT_SECONDS)
-        except requests.RequestException as exc:
-            raise SlowpicsAPIError(f"Failed to establish slow.pics session: {exc}") from exc
-
-        xsrf_token = bootstrap_session.cookies.get("XSRF-TOKEN")
-        if not xsrf_token:
-            raise SlowpicsAPIError("Missing XSRF token from slow.pics response")
-
-        logger.info("Using slow.pics legacy upload endpoints")
-
-        def _new_session() -> requests.Session:
-            worker_session = requests.Session()
-            worker_session.cookies.update(bootstrap_session.cookies.get_dict())
-            _configure_slowpics_session(worker_session, workers=expected_workers)
-            return worker_session
-
-        url = _upload_comparison_legacy(
-            _new_session,
-            image_files,
-            screen_dir,
-            cfg,
-            progress_callback=progress_callback,
-            max_workers=max_workers,
-        )
-        logger.info("Slow.pics: %s", url)
-        return url
-    finally:
-        bootstrap_session.close()
+        session.close()

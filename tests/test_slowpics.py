@@ -371,44 +371,9 @@ def test_progress_callback_invoked_per_image(tmp_path: Path, monkeypatch: pytest
         tmp_path,
         cfg,
         progress_callback=progress,
-        max_workers=2,
     )
 
     assert sum(calls) == len(files)
-
-
-def test_worker_sessions_reused_for_multiple_uploads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    cfg = SlowpicsConfig(collection_name="ReusePool")
-    files = [
-        _write_image(tmp_path, "10 - ClipA.png"),
-        _write_image(tmp_path, "10 - ClipB.png"),
-        _write_image(tmp_path, "20 - ClipA.png"),
-        _write_image(tmp_path, "20 - ClipB.png"),
-    ]
-    responses = [
-        FakeResponse(200),
-        FakeResponse(
-            200,
-            {"collectionUuid": "abc", "key": "def", "images": [["img1", "img2"], ["img3", "img4"]]},
-        ),
-    ]
-    responses.extend(FakeResponse(200, text="OK") for _ in files)
-    recorder = _install_session(monkeypatch, responses)
-
-    slowpics.upload_comparison([str(path) for path in files], tmp_path, cfg, max_workers=2)
-
-    # requests.Session is called for bootstrap + collection + worker_count sessions
-    assert len(recorder.sessions) == 1 + 1 + min(2, len(files))
-    worker_sessions = recorder.sessions[2:]
-    assert len(worker_sessions) == min(2, len(files))
-    per_session_uploads = [
-        sum(1 for call in session.calls if call["url"].endswith("/upload/image"))
-        for session in worker_sessions
-    ]
-    assert sum(per_session_uploads) == len(files)
-    # At least one worker should handle multiple uploads when there are more jobs than workers.
-    assert any(count >= 2 for count in per_session_uploads)
-
 
 def test_legacy_image_upload_loop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = SlowpicsConfig()

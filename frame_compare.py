@@ -20,7 +20,6 @@ import subprocess
 import sys
 import tempfile
 import textwrap
-import threading
 import time
 import tomllib
 import traceback
@@ -6698,41 +6697,17 @@ def run_cli(
         reporter.update_values(layout_data)
         print("[cyan]Preparing slow.pics upload...[/cyan]")
         upload_total = len(image_paths)
+
         def _safe_size(path_str: str) -> int:
-            """
-            Return the file size for a given filesystem path, or 0 if the file cannot be accessed.
-
-            Parameters:
-                path_str (str): Filesystem path to the file.
-
-            Returns:
-                int: File size in bytes, or 0 if stat fails (e.g., file does not exist or is unreadable).
-            """
             try:
                 return Path(path_str).stat().st_size
             except OSError:
                 return 0
 
-        file_sizes = [_safe_size(path) for path in image_paths] if upload_total else []
-        total_bytes = sum(file_sizes)
-
         console_width = getattr(reporter.console.size, "width", 80) or 80
         stats_width_limit = max(24, console_width - 32)
 
         def _format_duration(seconds: Optional[float]) -> str:
-            """
-            Format a duration in seconds into a human-readable time string.
-
-            Rounds the input to the nearest second and treats negative values as zero.
-            If the value is None or not finite, returns "--:--".
-            Outputs "H:MM:SS" when the duration is one hour or more, otherwise "MM:SS".
-
-            Parameters:
-                seconds (Optional[float]): Duration in seconds, or None.
-
-            Returns:
-                str: Formatted time string ("MM:SS" or "H:MM:SS"), or "--:--" for unknown/invalid input.
-            """
             if seconds is None or not math.isfinite(seconds):
                 return "--:--"
             total = max(0, int(seconds + 0.5))
@@ -6743,17 +6718,6 @@ def run_cli(
             return f"{minutes:02d}:{secs:02d}"
 
         def _format_stats(files_done: int, bytes_done: int, elapsed: float) -> str:
-            """
-            Format a compact transfer progress summary string for display.
-
-            Parameters:
-                files_done (int): Number of files fully processed (unused in output but provided for context).
-                bytes_done (int): Total bytes processed so far.
-                elapsed (float): Elapsed time in seconds.
-
-            Returns:
-                A single-line status string containing transfer speed in MB/s, estimated time remaining, and elapsed time (formatted via `_format_duration`). If the resulting string exceeds the configured stats width, it is truncated with a trailing ellipsis.
-            """
             speed_bps = bytes_done / elapsed if elapsed > 0 else 0.0
             speed_mb = speed_bps / (1024 * 1024)
             remaining_bytes = max(total_bytes - bytes_done, 0)
@@ -6769,7 +6733,12 @@ def run_cli(
             layout_data["slowpics"]["status"] = "uploading"
             reporter.update_values(layout_data)
             reporter.line(_color_text("[✓] slow.pics: establishing session", "green"))
-            if upload_total > 0:
+            if upload_total == 0:
+                reporter.line(_color_text("[yellow]slow.pics: no screenshots to upload[/yellow]", "yellow"))
+                slowpics_url = None
+            else:
+                file_sizes = [_safe_size(path) for path in image_paths]
+                total_bytes = sum(file_sizes)
                 start_time = time.perf_counter()
                 uploaded_files = 0
                 uploaded_bytes = 0
@@ -6788,37 +6757,27 @@ def run_cli(
                         "slow.pics upload",
                         total=upload_total,
                     )
-                    progress_lock = threading.Lock()
 
                     def advance_upload(count: int) -> None:
-                        """
-                        Advance the upload progress by a given number of files and refresh the progress display.
-
-                        Increments internal counters for uploaded files and bytes, advances the current file index for up to `count` files, computes elapsed time since the start, and updates the associated progress task with the new completed count and formatted statistics.
-
-                        Parameters:
-                            count (int): Number of files to mark as uploaded.
-                        """
                         nonlocal uploaded_files, uploaded_bytes, file_index
-                        with progress_lock:
-                            uploaded_files += count
-                            for _ in range(count):
-                                if file_index < len(file_sizes):
-                                    uploaded_bytes += file_sizes[file_index]
-                                    file_index += 1
-                            elapsed = time.perf_counter() - start_time
-                            stats_text = _format_stats(uploaded_files, uploaded_bytes, elapsed)
-                            completed = min(upload_total, uploaded_files)
-                            reporter.update_progress_state(
-                                "upload_bar",
-                                current=completed,
-                                total=upload_total,
-                                stats=stats_text,
-                            )
-                            upload_progress.update(
-                                task_id,
-                                completed=completed,
-                            )
+                        uploaded_files += count
+                        for _ in range(count):
+                            if file_index < len(file_sizes):
+                                uploaded_bytes += file_sizes[file_index]
+                                file_index += 1
+                        elapsed = time.perf_counter() - start_time
+                        stats_text = _format_stats(uploaded_files, uploaded_bytes, elapsed)
+                        completed = min(upload_total, uploaded_files)
+                        reporter.update_progress_state(
+                            "upload_bar",
+                            current=completed,
+                            total=upload_total,
+                            stats=stats_text,
+                        )
+                        upload_progress.update(
+                            task_id,
+                            completed=completed,
+                        )
 
                     slowpics_url = upload_comparison(
                         image_paths,
@@ -6828,7 +6787,7 @@ def run_cli(
                     )
 
                     elapsed = time.perf_counter() - start_time
-                    final_stats = _format_stats(uploaded_files, uploaded_bytes, elapsed)
+                    final_stats = _format_stats(upload_total, uploaded_bytes, elapsed)
                     reporter.update_progress_state(
                         "upload_bar",
                         current=upload_total,
@@ -6839,15 +6798,9 @@ def run_cli(
                         task_id,
                         completed=upload_total,
                     )
-            else:
-                slowpics_url = upload_comparison(
-                    image_paths,
-                    out_dir,
-                    cfg.slowpics,
-                )
             layout_data["slowpics"]["status"] = "completed"
             reporter.update_values(layout_data)
-            reporter.line(_color_text(f"[✓] slow.pics: uploading {upload_total} images", "green"))
+            reporter.line(_color_text(f"[✓] slow.pics: uploaded {upload_total} images", "green"))
             reporter.line(_color_text("[✓] slow.pics: assembling collection", "green"))
         except SlowpicsAPIError as exc:
             layout_data["slowpics"]["status"] = "failed"

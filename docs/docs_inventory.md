@@ -15,6 +15,7 @@ and whether each artifact should stay in the tree.
 | `hdr_tonemap_overview.md` | Narrative overview of HDR→SDR strategy and presets. | ✅ Keep | Complements the pipeline trace with operator-facing guidance. |
 | `legacy_tonemap_pipeline.md` | Historical placebo-based pipeline notes. | ⚠️ Keep (archive) | Useful for regression comparisons; tag as archival if the legacy flow is ever dropped. |
 | `docs_inventory.md` | This index. | ✅ Keep | Re-run after any major docs purge or reorganization. |
+| `runner_refactor_checklist.md` | Checklist for the CLI runner cleanup. | ✅ Keep | Tracks the single-thread slow.pics uploader requirement and future runner refactors. |
 <!-- markdownlint-restore -->
 
 ## Suggested clean-up follow-ups

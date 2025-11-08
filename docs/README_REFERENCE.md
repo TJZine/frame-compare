@@ -143,6 +143,8 @@ Preset highlights:
 | `[tmdb].cache_ttl_seconds` | TMDB cache lifetime (seconds). | int | `86400` |
 <!-- markdownlint-restore -->
 
+Slow.pics uploads now follow the original comp.py flow: a single session creates the collection and uploads each screenshot sequentially. The CLI prints `Uploading screenshot X/Y` as each file completes, and there is no longer a threaded mode to toggle.
+
 **Shortcut naming:** uploaded runs create a `.url` file using the resolved collection name (sanitised via `build_shortcut_filename` in `src/slowpics.py:148-164`).  
 If the name collapses to an empty string, the CLI falls back to the canonical comparison key; otherwise repeated runs with the same collection name will refresh the same shortcut file—append a suffix in `[slowpics].collection_name` if you need per-run artifacts.
 
