@@ -6807,8 +6807,9 @@ def run_cli(
                     )
             layout_data["slowpics"]["status"] = "completed"
             reporter.update_values(layout_data)
-            reporter.line(_color_text(f"[✓] slow.pics: uploaded {upload_total} images", "green"))
-            reporter.line(_color_text("[✓] slow.pics: assembling collection", "green"))
+            if upload_total > 0:
+                reporter.line(_color_text(f"[✓] slow.pics: uploaded {upload_total} images", "green"))
+                reporter.line(_color_text("[✓] slow.pics: assembling collection", "green"))
         except SlowpicsAPIError as exc:
             layout_data["slowpics"]["status"] = "failed"
             reporter.update_values(layout_data)

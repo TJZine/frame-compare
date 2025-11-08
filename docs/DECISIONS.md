@@ -1,7 +1,5 @@
 # Decisions Log
 
-# Decisions Log
-
 - *2025-11-08:* Reverted slow.pics uploads to the comp.py single-threaded flow, removed the unreliable multi-session worker pool, simplified the CLI to log “Uploading screenshot X/Y”, and updated docs/tests to reflect the deterministic behaviour operators asked for.
 - *2025-11-07:* Retuned tone-mapping presets to use the new libplacebo controls: upgraded `reference`/`filmic`/`spline`/`contrast`, added `bright_lift` and `highlight_guard`, nudged defaults (smoothing 45f, percentile `99.995`, contrast `0.30`), and propagated the changes through docs, config templates, and layout summaries.
 - *2025-11-06:* Exposed libplacebo smoothing/scene thresholds, percentile, contrast recovery, metadata selection, Dolby Vision toggles, and tonemap debugging flags (`visualize_lut`, `show_clipping`). Config schema, CLI, layout, and docs were updated so operators can replicate libplacebo’s `high_quality` profile or audit tone-mapping output without editing scripts; compatibility shims still cover older plugins.
