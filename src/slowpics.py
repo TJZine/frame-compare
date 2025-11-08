@@ -326,7 +326,8 @@ def upload_comparison(
                 raise SlowpicsAPIError("Slow.pics returned mismatched image identifiers")
             jobs.extend(zip(per_frame_paths, image_ids))
 
-        for path, image_uuid in jobs:
+        for index, (path, image_uuid) in enumerate(jobs, start=1):
+            logger.info("Uploading slow.pics image %s/%s: %s", index, len(jobs), path.name)
             file_size = path.stat().st_size
             timeout = _compute_image_upload_timeout(cfg, file_size)
             with ExitStack() as stack:

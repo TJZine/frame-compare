@@ -6735,6 +6735,13 @@ def run_cli(
             reporter.line(_color_text("[✓] slow.pics: establishing session", "green"))
             if upload_total == 0:
                 reporter.line(_color_text("[yellow]slow.pics: no screenshots to upload[/yellow]", "yellow"))
+                reporter.update_progress_state(
+                    "upload_bar",
+                    description="slow.pics upload",
+                    current=0,
+                    total=0,
+                    stats="--",
+                )
                 slowpics_url = None
             else:
                 file_sizes = [_safe_size(path) for path in image_paths]
