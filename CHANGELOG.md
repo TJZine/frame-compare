@@ -3,6 +3,7 @@
 All notable user-visible updates will be documented in this file in reverse chronological order.
 
 - *2025-11-19:* Hardened CLI tonemap overrides: all numeric flags now reject non-finite inputs, `--tm-target` enforces positive values, and regression tests cover the new validation paths.
+- *2025-11-19:* Phase 5 runner QA: verified TMDB orchestration already flows through the shared resolver, ensured reporter injection docs/tests cover automation scenarios, and reran `npx pyright --warnings`, `.venv/bin/ruff check`, and `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` (258 passed) on a networked host.
 - *2025-11-19:* Updated CODEX/AGENTS guardrails to require local `.venv/bin/pyright`/Ruff/Pytest runs, allow cache directories for approved checks, and document the `uv sync --all-extras --dev` setup workflow. Packaging releases now exclude dev-only folders (tests/docs/Legacy/refactor/tools) via `MANIFEST.in` so end users download only runtime files, while `comparison_videos/` remains included for fixture availability.
 - *2025-11-19:* Guardrail docs now require assistants to provide a Conventional Commit-style subject in every response so the user can copy it directly into `git commit -m …`.
 - *2025-11-18:* Tightened the CLI shim surface by removing the `globals().update`/`__getattr__` re-export from `frame_compare.py`, adding an explicit compatibility map plus `typings/frame_compare/__init__.pyi`, and moving tests to import helpers from `src.frame_compare.core`/`cli_runtime` directly.

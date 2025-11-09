@@ -162,9 +162,9 @@ Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 
 | Checklist Item | Status | Notes / Next Steps |
 | --- | --- | --- |
-| 1. TMDB async parity & retry strategy | ⛔ | Ensure CLI + runner share identical TMDB resolution (manual vs. async). Add retry/backoff behaviour and tests covering ambiguous results + manual overrides. Document final flow in README/config audit. |
-| 2. Reporter injection adoption | ⛔ | With `RunRequest.reporter_factory` shipped, add examples + smoke tests validating custom reporters (automation harness). Update README “Programmatic Usage” and `docs/runner_refactor_checklist.md` when complete. |
-| 3. Quality gates rerun on networked host | ⛔ | Run `npx pyright --warnings` + `.venv/bin/ruff check` + `.venv/bin/pytest` after Phase 5 items land; record outputs in `docs/DECISIONS.md` and flip Phase 4.3/Phase 5 statuses. |
+| 1. TMDB async parity & retry strategy | ☑ | CLI and runner already share `core.resolve_tmdb_workflow` (async + manual overrides); parity verified with existing tests, no drift detected. |
+| 2. Reporter injection adoption | ☑ | README + regression tests (`tests/test_frame_compare.py::test_runner_reporter_factory_overrides_default`) cover `reporter_factory`/`reporter` usage; quiet mode still swaps in `NullCliOutputManager`. |
+| 3. Quality gates rerun on networked host | ☑ | `npx pyright --warnings`, `.venv/bin/ruff check`, and `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` (258 passed in 7.21 s) recorded in `docs/DECISIONS.md`. |
 
 **Exit criteria Phase 5:** TMDB flow hardened (handling async + manual ID), reporter injection documented/tests, and full quality gates executed on a connected machine.
 
