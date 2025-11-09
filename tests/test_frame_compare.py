@@ -827,13 +827,16 @@ def test_launch_vspreview_generates_script(
     assert "'Target': 0,  # Suggested delta +7f" in script_text
     assert "SUGGESTION_MAP" in script_text
     assert "'Target': (7, 0.0)" in script_text
-    assert 'seconds_value = f"{suggested_seconds:.3f}"' in script_text
+    assert 'seconds_value = format(suggested_seconds, ".3f")' in script_text
+    assert 'suggested_value = format(suggested_frames, "+d")' in script_text
+    assert 'applied_value = format(applied_frames, "+d")' in script_text
     assert (
         "def _format_overlay_text(label, suggested_frames, suggested_seconds, applied_frames):"
         in script_text
     )
-    assert '"{label}: {suggested}f (~{seconds}s) • "' in script_text
-    assert "Preview applied: {applied}f ({status})" in script_text
+    assert ' + ": "' in script_text
+    assert ' + applied_value' in script_text
+    assert "Preview applied: " in script_text
     assert "preview applied=%+df" in script_text
     assert recorded_command, "VSPreview command should be invoked when interactive"
     assert recorded_command[0][0] == frame_compare.sys.executable

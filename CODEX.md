@@ -61,12 +61,12 @@ pytest -q
 **Gates (pre-merge)**
 1) **Diff plan** → approval → **patch** (no auto-exec).
 2) Before asking to merge, the assistant MUST:
-   - Propose running: `npx pyright --warnings` (or equivalent) and wait for approval.
-   - Report **zero errors** and **<= N warnings** (N defaults to 10; justify any above).
-   - If errors occur, propose minimal diffs to fix them and re-check.
+  - Propose running: `npx pyright --warnings` (or equivalent) and wait for approval.
+  - Report **zero errors** and **<= N warnings** (N defaults to 10; justify any above).
+  - If errors occur, propose minimal diffs to fix them and re-check.
 3) **Suppressions policy**
-   - `# type: ignore[...]` allowed only with a one-line justification above and a follow-up ticket.
-   - Prefer stubs/`TypedDict`/`Protocol` over blanket `Any`.
+  - `# type: ignore[...]` allowed only with a one-line justification above and a follow-up ticket.
+  - Prefer stubs/`TypedDict`/`Protocol` over blanket `Any`.
 4) **Config is source of truth**: the repo’s `pyrightconfig.json` (or `[tool.pyright]`) governs analysis; do not override via editor-only settings.
 
 **Reviewer checklist (assistant must confirm)**
@@ -75,11 +75,9 @@ pytest -q
 - Tests cover the typed contract (positive + None/edge cases).
 
 ## Sandbox & Network
-- Local sandbox: `workspace-write` except for testing; no network unless explicitly approved. (If Cloud: follow environment defaults.)  
-- Print commands before running; never run package scripts or migrations without approval. :contentReference[oaicite:9]{index=9}
--  Local sandbox: `workspace-write` except for testing; **no network** unless explicitly approved or needed for pyright/ruff.  
+- Local sandbox: `workspace-write` except for testing; **no network** unless explicitly approved or needed for pyright/ruff. (If Cloud: follow environment defaults.)
 - **Checks exception**: pyright/ruff/pytest (under Test Guardrails) are permitted without extra approval.
-- Print commands before running; never run package scripts or migrations without approval.
+- Print commands before running; never run package scripts or migrations without approval. :contentReference[oaicite:9]{index=9}
 
 
 ## Structure-Change Policy
@@ -95,4 +93,3 @@ pytest -q
 
 ## Visibility & Summaries
 - For each task, output: proposed diff plan → patches → test results → summary of changes, risks, and follow-ups.
-
