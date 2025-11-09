@@ -3,7 +3,7 @@
 Central log for the end-to-end configuration review requested on 2025‑11‑18. Each section records the current understanding of the options, verification status, proposed trims/consolidations, and the decision the user approves (or rejects). Update this file whenever a category is reviewed so future sessions can resume quickly.
 
 ## Workflow Overview
-- **Source of truth:** `config/config.toml`, `src/config_loader.py`, `src/datatypes.py`, and the feature modules listed per category.
+- **Source of truth:** the workspace config generated after first run, `src/config_loader.py`, `src/datatypes.py`, and the feature modules listed per category.
 - **Validation hooks:** Loader invariants, tests under `tests/`, and any runtime guards exercised via `frame_compare.runner`.
 - **Decision protocol:** Summaries flow to the user category-by-category. No code/doc changes land until the user explicitly approves the recommendations for that category.
 - **References:** TOML structure and boolean typing follow the upstream spec (see `/toml-lang/toml` docs pulled via Context7 on 2025‑11‑18).
@@ -16,15 +16,15 @@ Central log for the end-to-end configuration review requested on 2025‑11‑18.
 | `[audio_alignment]` | Reviewed      | Findings logged below; awaiting next steps. |
 | `[screenshots]`     | Reviewed      | Findings logged below; awaiting next steps. |
 | `[color]`           | Reviewed      | Findings logged below; awaiting next steps. |
-| `[slowpics]`        | Not started   | Pending. |
-| `[report]`          | Not started   | Pending. |
-| `[tmdb]`            | Not started   | Pending. |
-| `[naming]`          | Not started   | Pending. |
+| `[slowpics]`        | Reviewed      | Findings logged below; awaiting next steps. |
+| `[report]`          | Reviewed      | Findings logged below; awaiting next steps. |
+| `[tmdb]`            | Reviewed      | Findings logged below; awaiting next steps. |
+| `[naming]`          | Reviewed      | Findings logged below; awaiting next steps. |
 | `[cli]`             | Not started   | Pending. |
-| `[paths]`           | Not started   | Pending. |
-| `[runtime]`         | Not started   | Pending. |
+| `[paths]`           | Reviewed      | Findings logged below; awaiting next steps. |
+| `[runtime]`         | Reviewed      | Findings logged below; awaiting next steps. |
 | `[source]`          | Not started   | Pending. |
-| `[overrides]`       | Not started   | Pending. |
+| `[overrides]`       | Reviewed      | Findings logged below; awaiting next steps. |
 
 ---
 
@@ -122,36 +122,207 @@ Central log for the end-to-end configuration review requested on 2025‑11‑18.
 
 ---
 
-## `[slowpics]` … *(pending detailed review)*
+## `[slowpics]` (reviewed 2025‑11‑19)
+
+**Feature surface.** `SlowpicsConfig` (`src/datatypes.py:150-163`) and loader validation (`src/config_loader.py:370-439`) cover auto-upload toggles, TMDB wiring, visibility flags, cleanup behaviour, webhook delivery, timeout heuristics, and shortcut creation. The setup wizard prompts for these values (`src/frame_compare/core.py:763-786`), the doctor command surfaces the network requirement (`src/frame_compare/core.py:856-980`), and runner orchestration injects warnings, JSON-tail metadata, and collection-title derivation before invoking the uploader (`src/frame_compare/runner.py:333-700`). Runtime execution lives in `src/slowpics.py:200-430`, which enforces screenshot naming, sizes HTTP adapters, requires XSRF tokens, scales timeouts, and redacts webhook hosts. CLI post-run handling launches browsers, copies URLs to the clipboard, emits `.url` shortcuts, and conditionally deletes screenshots (`frame_compare.py:280-360`). Regression coverage spans `tests/test_frame_compare.py:2199-2345` (cleanup + reporting) and `tests/test_slowpics.py:1-460` (adapter sizing, timeout math, dependency failures).
+
+**Health check.**
+- Template defaults keep uploads opt-in, blank out webhook/TMDB identifiers, and enable deletion, matching README guidance (`README.md:233-423`). The CLI always warns when auto-upload is active, and doctor warns when network readiness is uncertain.
+- `_prepare_legacy_plan` validates `<frame> - <label>.png` names before any HTTP calls, `_build_legacy_headers` refuses to proceed without an XSRF token, `_post_direct_webhook` retries with exponential backoff while redacting hostnames, and `_compute_image_upload_timeout` scales read timeouts with file size so large PNGs don’t stall on slow links.
+- JSON tail + layout data persist TMDB metadata, final/derived titles, suffixes, deletion status, and auto-upload flags so automation has ground truth after each run.
+- Tests cover upload-plan validation, timeout calculations, HTTP adapter sizing, concurrency, cleanup safeguards, and JSON-tail reporting, keeping the module verifiable.
+
+**Opportunities.**
+1. **Docs parity:** `docs/README_REFERENCE.md:145-156` lists only a subset of keys. Expand the reference tables (and README config section) to enumerate `collection_suffix`, `remove_after_days`, visibility flags, shortcut controls, webhook, timeout, and TMDB category—plus mention timeout/concurrency behaviour from `src/slowpics.py`.
+2. **Secrets handling:** Webhook URLs and TMDB identifiers live in user configs that might be shared between machines. Document best practices (environment variables or encrypted stores) so operators don’t accidentally share live webhooks/API keys when enabling uploads.
+3. **Readiness checks:** Doctor currently warns only about network access. Add probes for `requests_toolbelt` (required for uploads) and optionally a lightweight slow.pics connectivity test so operators catch missing dependencies before toggling auto-upload.
+4. **Timeout & concurrency tuning:** `_DEFAULT_UPLOAD_CONCURRENCY = 3` and `_MIN_UPLOAD_THROUGHPUT_BYTES_PER_SEC = 256 * 1024` are hard-coded. Consider exposing a config knob (e.g., `[slowpics].max_workers` or throughput override) for large batches or constrained links.
+5. **Cleanup transparency:** `delete_screen_dir_after_upload` only triggers when the run created the screenshots directory and the path stays under the workspace root. Document that nuance and explore retention/rotation controls (see `[screenshots]` follow-ups) so operators can keep recent PNGs while still cleaning old directories.
+
+**Risks / follow-ups.**
+- Update docs to cover the full config surface and timeout heuristics.
+- Add doctor checks for upload dependencies/network readiness before enabling auto-upload.
+- Evaluate exposing max-worker/throughput knobs in the uploader.
+- Clarify cleanup semantics to prevent accidental deletions and align with future retention settings.
 
 ---
 
-## `[report]` … *(pending detailed review)*
+## `[report]` (reviewed 2025‑11‑19)
+
+**Feature surface.** `ReportConfig` (`src/datatypes.py:225-237`) plus loader validation (`src/config_loader.py:598-628`) govern enablement, browser auto-open, output directory, optional title/labels, metadata verbosity, thumbnail placeholder, and initial viewer mode. Runner orchestration respects `--html-report` / `--no-html-report`, evaluates overrides, resolves an output subdirectory under the workspace root, and invokes `src/report.py:116-312` to bundle assets + data (`src/frame_compare/runner.py:2072-2149`). CLI post-run handling logs the final `index.html`, optionally opens it via `webbrowser`, and records JSON-tail metadata (`frame_compare.py:360-396`). Tests cover generator payloads (`tests/test_report.py`) and CLI/runner wiring (`tests/test_frame_compare.py:250-320`). Docs describe the viewer in `README.md:233-320`, `docs/config_reference.md:97-120`, and changelog entries highlight the October 2025 rollout.
+
+**Health check.**
+- Loader enforces safe paths: `report.output_dir` must be relative, contain no `..`, and is resolved via `_resolve_workspace_subdir` before writing (`src/config_loader.py:598-607`, `src/frame_compare/core.py:2088-2098`). Static assets copy alongside `data.json`, and titles/default labels are stripped to `None` when blank.
+- JSON tail exposes report state (`enabled`, `path`, `open_after_generate`, `mode`) so automation can download or publish the bundle even when CLI output is quiet. CLI also warns when generation fails and disables the report block to avoid stale metadata.
+- The renderer sanitises encode labels via `_sanitise_label`, enforces unique safe labels, and builds per-frame/category metadata; tests confirm expected payload structure and viewer stats.
+- README and reference docs explain the viewer experience (slider/overlay/difference/blink, zoom/pan persistence), and changelog entries document the CLI toggles plus offline workflow.
+
+**Opportunities.**
+1. **`default_mode` validation mismatch:** Docs advertise `slider`, `overlay`, `difference`, and `blink`, but the loader currently restricts `report.default_mode` to `slider`/`overlay` (`src/config_loader.py:612-615`). Attempting to use `difference` or `blink` results in a `ConfigError`, so either expand validation and layout handling or update docs/UI copy to reflect the real options.
+2. **Unused `thumb_height`:** The config exposes `thumb_height` yet the generator ignores it (docs label it “reserved”). Consider hiding the knob until thumbnail support ships or implement the intended behaviour to prevent confusion.
+3. **Wizard discoverability:** The initial setup wizard skips `[report]`, so new users must edit the config manually to enable offline bundles. Adding wizard prompts (or at least doctor guidance) would make the feature more discoverable.
+4. **Output lifecycle:** Unlike screenshots (which can auto-delete after slow.pics uploads), report directories accumulate indefinitely. Provide a retention/cleanup toggle or document best practices for rotating `report.output_dir` to keep workspaces tidy.
+
+**Risks / follow-ups.**
+- Align loader validation, docs, and viewer implementation for `default_mode`.
+- Decide whether to implement or hide `thumb_height` until thumbnail support exists.
+- Extend the wizard/doctor surfaces so operators can enable reports without manual edits.
+- Consider retention/cleanup guidance for report directories.
 
 ---
 
-## `[tmdb]` … *(pending detailed review)*
+## `[tmdb]` (reviewed 2025‑11‑19)
+
+**Feature surface.** `TMDBConfig` (`src/datatypes.py:165-177`) defines API key, unattended/confirmation flags, year tolerance, anime parsing toggle, cache TTL/size, and category preference. Loader guards enforce non-negative values and normalise `category_preference` to `MOVIE`/`TV` (`src/config_loader.py:441-451`). Wizard prompts let operators set a TMDB identifier for slow.pics but do not yet collect API keys (`src/frame_compare/core.py:771-778`). Runtime behaviour spans `_resolve_tmdb_blocking` (`src/frame_compare/runner.py:111-151`), the async resolver (`src/tmdb.py:200-1100`), and CLI prompts (`src/frame_compare/core.py:1424-1456`). Runner integrates TMDB metadata into layout data, JSON tail, slow.pics naming, and warnings (`src/frame_compare/runner.py:540-777`). Tests cover resolver caching/errors (`tests/test_tmdb.py`), config validation (`tests/test_config.py`), and CLI flows (manual overrides, slow.pics propagation) in `tests/test_frame_compare.py:2718-3352`.
+
+**Health check.**
+- Resolver enforces API key presence, caches HTTP responses with bounded TTL, supports IMDb/TVDB external IDs, handles anime title variants via GuessIt/Anitopy (configurable), and raises `TMDBAmbiguityError` when multiple candidates tie within `_AMBIGUITY_MARGIN`.
+- Runner respects unattended/confirmation settings: interactive sessions can confirm matches, provide manual overrides, or skip TMDB entirely; unattended mode auto-accepts best candidates. When TMDB is disabled or fails, user-facing warnings land in the reporter and JSON tail.
+- Slow.pics integration backfills `[slowpics].tmdb_id`/`tmdb_category` when metadata resolves, ensuring uploads/tagging stay consistent. Layout + JSON tail preserve TMDB fields for downstream automation.
+- Tests exercise caching, TTL expiration, external ID handling, ambiguous flows, manual overrides, and CLI interactions so regressions are caught.
+
+**Opportunities.**
+1. **Wizard discoverability:** The initial wizard never asks for `[tmdb].api_key`, so users must edit the config manually to unlock TMDB lookups. Add prompts (or doctor guidance) to surface the requirement earlier.
+2. **Secrets handling:** API keys currently live in plain text within the user config (and earlier samples accidentally shipped real values). Document environment-variable support (or add it if missing) so keys stay out of version control.
+3. **Rate limiting & retries:** Resolver uses a simple timeout and relies on `_http_request` for retries, but there’s no per-minute rate-limit guard or backoff when hitting TMDB quotas. Consider tracking 429 responses and backing off or surfacing better guidance.
+4. **Anime parsing control:** `[tmdb].enable_anime_parsing` toggles Anitopy usage, but docs only mention it briefly. Expand README/reference coverage with pros/cons (e.g., potential mismatches when both GuessIt and Anitopy disagree) so users know when to disable it.
+5. **Category preference UX:** `category_preference` accepts MOVIE/TV but provides no CLI flag or wizard hook. Consider exposing a CLI flag (`--tmdb-category`) or warning when lookups repeatedly fall back to the non-preferred category.
+
+**Risks / follow-ups.**
+- Add wizard/doctor messaging about supplying TMDB keys via env vars to avoid storing secrets in config files.
+- Improve documentation around anime parsing, category preference, and manual override flow (`docs/audio_alignment_pipeline.md`/README currently only hint at TMDB usage).
+- Evaluate rate limiting/backoff strategy to handle TMDB quota errors more gracefully.
+- Ensure future features reading TMDB metadata (e.g., HTML report, JSON tail consumers) are aware of optional fields (language/year) when matches fail.
 
 ---
 
-## `[naming]` … *(pending detailed review)*
+## `[naming]` (reviewed 2025‑11‑19)
+
+**Feature surface.** `NamingConfig` (`src/datatypes.py:179-184`) exposes two toggles: `always_full_filename` (fallback to full filenames when duplicates arise) and `prefer_guessit` (choose GuessIt over Anitopy parsing). Loader simply deserialises the section (`src/config_loader.py:372`), and runtime heuristics live in `src/utils.py:1-200` (`parse_filename_metadata`, release-group extraction, anime-specific labels) plus `_dedupe_labels` in `src/frame_compare/core.py:1320-1384`. Runner invokes `_parse_metadata(files, cfg.naming)` before planning, feeding labels into CLI layout, JSON tail, and slow.pics titles (`src/frame_compare/runner.py:537-700`). Tests under `tests/test_frame_compare.py:1723-2105` verify overrides, deduping, and prefer-full-filename behaviour.
+
+**Health check.**
+- GuessIt + Anitopy fallback: when `prefer_guessit=True` the parser leverages GuessIt metadata (title, episode, release group, year), otherwise Anitopy provides anime-centric fields; both paths standardise episodes via `_normalize_episode_number`.
+- `_dedupe_labels` guarantees unique labels by switching to full filenames when configured, or by appending version tags (e.g., `v2`) or ordinal suffixes (`#2`) when short labels collide. Tests assert dedupe safety (`tests/test_frame_compare.py:1995-2105`).
+- Metadata dictionaries include release group, normalized episode markers, year, and fallback file name, enabling slow.pics/JSON tails to display consistent labels.
+
+**Opportunities.**
+1. **Docs coverage:** Neither README nor `docs/README_REFERENCE.md` explain `[naming].prefer_guessit` / `always_full_filename`. Add a table with examples (e.g., anime vs. live action naming) so operators understand the trade-offs.
+2. **Granular control:** Current config is binary. Consider exposing per-directory or pattern-based controls (e.g., prefer Anitopy only for `[anime]` folders) or allowing custom label templates (include release group / resolution).
+3. **CLI/wizard discoverability:** The wizard and CLI flags never mention naming options; adding prompts or `--prefer-guessit/--prefer-anitopy` flags would make the feature more accessible.
+4. **Metadata enrichment:** We discard GuessIt’s `edition`, `other`, or audio cues that might render useful UI labels. Document or expose a hook for custom label formatting without editing core code.
+
+**Risks / follow-ups.**
+- Update docs to describe both knobs and the dedupe behaviour so users know why labels change.
+- Consider structured label templates to avoid hardcoding `[Group] Title SxxEyy` logic inside `_build_label`.
+- Evaluate adding CLI overrides (`--label-full-file-name`, `--label-prefer-anitopy`) for ad-hoc runs.
 
 ---
 
-## `[cli]` … *(pending detailed review)*
+## `[cli]` (reviewed 2025‑11‑19)
+
+**Feature surface.** `CLIConfig` (`src/datatypes.py:187-205`) currently exposes two knobs: `emit_json_tail` (default `true`) and `progress.style` (`fill` or `dot`). Loader normalises and validates the progress style (`src/config_loader.py:369-389`, `431-434`). Runtime consumption happens inside `runner.run`: the reporter flags `progress_style` for layout sections and suppresses JSON output when `emit_json_tail` is false (`src/frame_compare/runner.py:333-360`). Tests cover both behaviours: disabling the JSON tail (`tests/test_frame_compare.py:1895-1965`) and progress-style binding in the Rich layout renderer (`tests/test_cli_layout.py:17-30`). The template comments mention these keys, but README/reference docs omit them.
+
+**Health check.**
+- Validation rejects invalid styles up front and falls back to `"fill"` at runtime if configs drift, preventing layout crashes.
+- Quiet/verbose behaviour is still governed by CLI flags rather than config, so the `[cli]` section only affects default JSON emission and progress look-and-feel; that separation is clear in code.
+- When `emit_json_tail = false`, CLI output shows only Rich sections; `frame_compare.py:360-396` respects that flag.
+
+**Opportunities.**
+1. **Documentation gap:** Neither README nor `docs/README_REFERENCE.md` document `[cli]` options. Add entries describing JSON tail suppression (e.g., for CI logs) and progress style (fill vs dot) so users don’t have to inspect the template comments.
+2. **Wizard discoverability:** The setup wizard never mentions `[cli]`; exposing prompts (or CLI flags like `--json-tail/--no-json-tail`) would improve usability, especially for operators who always want machine-readable output.
+3. **Layout overrides:** Many users customise Rich layout paths or want to disable certain sections; consider expanding `[cli]` to include defaults for quiet/verbose, layout file overrides, or progress-bar enablement, rather than leaving everything flag-only.
+4. **Testing for invalid configs:** Loader guards exist, but there’s no Doc/test ensuring incompatible combinations (e.g., emit_json_tail=false + automation expecting JSON). A doctor check or README warning could help automation teams avoid surprises.
+
+**Risks / follow-ups.**
+- Extend docs (and possibly wizard prompts) to cover `[cli]` keys.
+- Evaluate adding env/flag overrides for `emit_json_tail` so automation doesn’t require config edits.
+- Consider future `[cli]` fields (custom layout path, quiet default) and document the plan to avoid ad-hoc CLI flags.
 
 ---
 
-## `[paths]` … *(pending detailed review)*
+## `[paths]` (reviewed 2025‑11‑19)
+
+**Feature surface.** `PathsConfig` currently exposes `[paths].input_dir` (default `comparison_videos`). Loader deserialises the section (`src/config_loader.py:373`), while runtime enforcement lives in ADR‑driven helpers inside `src/frame_compare/core.py`: `_discover_workspace_root`, `_resolve_workspace_subdir`, `_is_writable_path`, `_path_is_within_root`, and `_abort_if_site_packages`. Wizard prompts let operators choose the relative input directory under the workspace root (`src/frame_compare/core.py:756-782`), doctor reports root/input paths and writability (`src/frame_compare/core.py:856-980`), and the `--diagnose-paths` command prints JSON diagnostics for root/config/media/screen directories (`frame_compare.py:200-320`). Runner uses `_resolve_workspace_subdir` to locate media, screenshots, analysis caches, report directories, VSPreview workspaces, etc. (`src/frame_compare/runner.py:260-2149`). Tests `tests/test_paths_preflight.py` exercise escape/writability guards, and ADR 0001 documents the root-lock policy (`docs/adr/0001-paths-root-lock.md`).
+
+**Health check.**
+- Root detection order honours `--root`, `FRAME_COMPARE_ROOT`, sentinel discovery, and rejects paths under `site-packages`/`dist-packages`. `_prepare_preflight` ensures config/screen directories exist (or are created) and refuses to run when directories fall outside the workspace.
+- `_resolve_workspace_subdir` guarantees subdirectories remain under the resolved root unless explicitly allowed (`allow_absolute=True` for ffmpeg temp files, etc.), preventing path traversal. That guard backs every path derived from config (screenshots directories, caches, reports, VSPreview scripts, etc.).
+- `frame_compare --diagnose-paths` plus README guidance give users a supported way to inspect resolved directories and permission states before long runs.
+- Tests cover path-escape attempts, non-writable directories, and CLI error messages so regressions are caught quickly (`tests/test_paths_preflight.py`, `tests/test_frame_compare.py`).
+
+**Opportunities.**
+1. **Docs clarity:** Reference docs describe `[paths].input_dir` briefly, but ADR details (site-packages rejection, diag tool, config seeding) live elsewhere. Consolidate guidance in README/reference so operators don’t have to read ADRs for basic path info.
+2. **Multi-root workflows:** Some users run comparisons from multiple media roots. Consider supporting a list of search paths or per-run overrides beyond `--input` (e.g., named presets or CLI arguments for multiple directories) to reduce config editing.
+3. **Doctor coverage:** Doctor currently reports root and config issues; consider adding explicit warnings when `[paths].input_dir` doesn’t exist or is empty, mirroring the runtime error but earlier in the workflow.
+4. **Wizard enhancements:** The wizard lists subdirectories but doesn’t explain the site-packages restriction or `--diagnose-paths`. Add guidance to reduce confusion when users pick non-writable locations.
+
+**Risks / follow-ups.**
+- Update docs (README + reference) to highlight ADR 0001 constraints and the `--diagnose-paths` workflow.
+- Evaluate whether to expose optional absolute paths (with explicit opt-in) for advanced users while keeping defaults safe.
+- Enhance doctor/wizard messaging to warn about empty/non-existent input directories before runs fail.
 
 ---
 
-## `[runtime]` … *(pending detailed review)*
+## `[runtime]` (reviewed 2025‑11‑19)
+
+**Feature surface.** `RuntimeConfig` (`src/datatypes.py:209-216`) exposes `ram_limit_mb` and `vapoursynth_python_paths`. Loader validation ensures the RAM limit is positive (`src/config_loader.py:453-454`). `_init_clips` applies the limit via `vs_core.set_ram_limit` before indexing clips (`src/frame_compare/core.py:1884-1950`), and VS core functions enforce positive values (`src/vs_core.py:688`). `vapoursynth_python_paths` feeds VSPreview script generation and runtime configuration, with paths expanded and handed to VS core (`src/frame_compare/core.py:3291-3340`, `src/frame_compare/runner.py:519`). The feature is documented lightly in README (`[runtime].ram_limit_mb`, `VAPOURSYNTH_PYTHONPATH`) and validated by config tests (`tests/test_config.py`).
+
+**Health check.**
+- RAM guard prevents VapourSynth from exceeding memory limits on large clips; number is enforced during clip initialization and fails early when invalid.
+- VapourSynth Python paths propagate into VSPreview scripts and runner configuration, giving operators a supported way to inject custom module locations.
+- README and reference tables mention the RAM guard and environment variable for module paths, so the essentials are discoverable.
+
+**Opportunities.**
+1. **Docs depth:** Expand reference docs to explain how `ram_limit_mb` interacts with VapourSynth (e.g., recommended values for 4K vs 1080p) and show how `vapoursynth_python_paths` plays with `VAPOURSYNTH_PYTHONPATH`. Currently, operators must infer behaviour from template comments.
+2. **Wizard support:** The setup wizard skips `[runtime]`. Consider prompting for RAM limits on constrained machines or at least documenting how to adjust the setting post-wizard.
+3. **Diagnostics:** `--diagnose-paths` covers directories but not runtime environment (e.g., whether VapourSynth imports succeed). Adding doctor checks for VapourSynth module discovery would tie into `vapoursynth_python_paths`.
+4. **Per-workload overrides:** Some workflows may need temporary RAM guard adjustments; exposing CLI flags (e.g., `--ram-limit`) or environment overrides would reduce config edits.
+
+**Risks / follow-ups.**
+- Enhance documentation/wizard guidance for `[runtime]`.
+- Consider CLI/env overrides for `ram_limit_mb` and python paths.
+- Add doctor diagnostics to detect missing VapourSynth modules and recommend editing `[runtime].vapoursynth_python_paths`.
 
 ---
 
-## `[source]` … *(pending detailed review)*
+## `[source]` (reviewed 2025‑11‑19)
+
+**Feature surface.** `SourceConfig` (`src/datatypes.py:217-221`) exposes a single knob: `preferred`, defaulting to `"lsmas"`. Loader validation restricts the value to `"lsmas"` or `"ffms2"` (`src/config_loader.py:575-577`). Runtime plumbs the choice into VapourSynth via `vs_core.configure(..., source_preference=cfg.source.preferred)` used by runner and VSPreview scripts (`src/frame_compare/core.py:3291-3340`, `src/frame_compare/runner.py:519`). `vs_core` enforces the preference and raises informative errors when unsupported values are provided or when liblsmash/FFMS2 binaries are missing (`src/vs_core.py:310-480`). Tests cover config validation (`tests/test_config.py`), while docs only briefly mention the key (`docs/README_REFERENCE.md:175`).
+
+**Health check.**
+- Loader guards and VS core validation ensure only supported plugins are configured, preventing late failures.
+- Preference flows through both runtime and VSPreview scripts, so manual alignment and CLI rendering stay in sync.
+- Error messages hint at required dependencies (e.g., brew install l-smash) when LSmas libraries are missing.
+
+**Opportunities.**
+1. **Docs depth:** README/reference only list the key without explaining when to switch to `ffms2` (e.g., for exotic codecs or OS X). Expand documentation with guidance/examples.
+2. **Wizard discoverability:** The initial wizard does not prompt for source preference. Adding an optional question (LSMAS vs FFMS2) would help operators who know their pipelines upfront.
+3. **Fallback strategy:** If `lsmas` fails at runtime, the pipeline currently errors. Consider an optional fallback to FFMS2 with warnings, or at least a CLI flag to override on the fly (`--source ffms2`).
+4. **Per-clip overrides:** Some sources require different loaders. Exposing per-file overrides (similar to `[overrides]` trims) would add flexibility.
+
+**Risks / follow-ups.**
+- Improve docs/wizard messaging so operators understand the trade-offs between LSMAS and FFMS2.
+- Evaluate CLI/env overrides and auto-fallback strategies for better resiliency.
+- Consider per-clip loader overrides for edge cases.
 
 ---
 
-## `[overrides]` … *(pending detailed review)*
+## `[overrides]` (reviewed 2025‑11‑19)
+
+**Feature surface.** `OverridesConfig` (`src/datatypes.py:261-268`) exposes per-clip `trim`, `trim_end`, and `change_fps` maps. Loader validation enforces integer trims and `["num","den"]` or `"set"` for FPS overrides (`src/config_loader.py:630-632`). `_build_plans` normalises keys (index, filename, stem, release group, `file_name`) and applies matching overrides to clip plans (`src/frame_compare/core.py:1567-1635`). Runner telemetry discloses active overrides (`src/frame_compare/runner.py:507-1160`), and tests (`tests/test_frame_compare.py:1723-2105`) cover both config parsing and runtime behaviour alongside naming logic.
+
+**Health check.**
+- Strict validation prevents malformed overrides from slipping through.
+- Matching logic supports multiple identifiers per clip, so operators can target overrides without renaming files.
+- JSON tail/layout output reflects applied trims/FPS overrides, aiding visibility.
+
+**Opportunities.**
+1. **Docs coverage:** README/reference barely mention `[overrides]`. Add a table with examples (`trim = { "0" = 120, "encode.mkv" = -24 }`, `change_fps = { "clip" = [24000,1001], "1" = "set" }`) and explain lookup precedence.
+2. **Wizard + diagnostics:** The wizard doesn’t surface overrides, and typos silently no-op. Consider prompts or doctor warnings for override keys that did not match any clip.
+3. **Additional override types:** Operators often ask for per-clip overlay toggles, color overrides, or render exclusions. Plan how to extend overrides (or introduce sibling sections) without bloating the schema.
+4. **Runtime feedback:** Add explicit log lines (“Applied trim override: clip=Foo +120f”) to reduce guesswork when overrides apply.
+
+**Risks / follow-ups.**
+- Document lookup rules and add wizard/doctor guidance for `[overrides]`.
+- Detect/report unused override entries.
+- Expand override capabilities (color/report toggles) carefully to avoid schema sprawl.

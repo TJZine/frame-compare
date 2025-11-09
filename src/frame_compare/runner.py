@@ -20,7 +20,12 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Mapping, 
 from rich.console import Console
 from rich.markup import escape
 
+import src.frame_compare.alignment_preview as alignment_preview_utils
+import src.frame_compare.cache as cache_utils
+import src.frame_compare.config_helpers as config_helpers
 import src.frame_compare.core as core
+import src.frame_compare.media as media_utils
+import src.frame_compare.preflight as preflight_utils
 import src.report as html_report
 from src import vs_core
 from src.analysis import (
@@ -186,7 +191,7 @@ def run(request: RunRequest) -> RunResult:
     impl = request.impl_module or importlib.import_module("frame_compare")
     module_file = Path(getattr(impl, '__file__', Path(__file__)))
 
-    preflight = core._prepare_preflight(
+    preflight = preflight_utils._prepare_preflight(
         cli_root=root_override,
         config_override=config_path,
         input_override=input_dir,
@@ -257,7 +262,7 @@ def run(request: RunRequest) -> RunResult:
             rich_message=f"[red]Input directory not found:[/red] {root}",
         )
 
-    out_dir = core._resolve_workspace_subdir(
+    out_dir = preflight_utils._resolve_workspace_subdir(
         root,
         cfg.screenshots.directory_name,
         purpose="screenshots.directory_name",
@@ -281,12 +286,12 @@ def run(request: RunRequest) -> RunResult:
             created_out_dir_path = out_dir.resolve()
         except OSError:
             created_out_dir_path = out_dir
-    analysis_cache_path = core._resolve_workspace_subdir(
+    analysis_cache_path = preflight_utils._resolve_workspace_subdir(
         root,
         cfg.analysis.frame_data_filename,
         purpose="analysis.frame_data_filename",
     )
-    offsets_path = core._resolve_workspace_subdir(
+    offsets_path = preflight_utils._resolve_workspace_subdir(
         root,
         cfg.audio_alignment.offsets_filename,
         purpose="audio_alignment.offsets_filename",
@@ -521,7 +526,7 @@ def run(request: RunRequest) -> RunResult:
     )
 
     try:
-        files = core._discover_media(root)
+        files = media_utils._discover_media(root)
     except OSError as exc:
         raise CLIAppError(
             f"Failed to list input directory: {exc}",
@@ -824,7 +829,7 @@ def run(request: RunRequest) -> RunResult:
     json_tail["suggested_seconds"] = float(
         round(vspreview_suggested_seconds_value, 6)
     )
-    vspreview_enabled_for_session = core._coerce_config_flag(
+    vspreview_enabled_for_session = config_helpers.coerce_config_flag(
         cfg.audio_alignment.use_vspreview
     )
 
@@ -859,7 +864,7 @@ def run(request: RunRequest) -> RunResult:
         and cfg.audio_alignment.enable
         and not alignment_summary.suggestion_mode
     ):
-        core._confirm_alignment_with_screenshots(
+        alignment_preview_utils._confirm_alignment_with_screenshots(
             plans,
             alignment_summary,
             cfg,
@@ -1088,7 +1093,7 @@ def run(request: RunRequest) -> RunResult:
         message = "Ignore lead/trail settings did not overlap across all sources; using fallback range."
         collected_warnings.append(message)
 
-    cache_info = core._build_cache_info(root, plans, cfg, analyze_index)
+    cache_info = cache_utils._build_cache_info(root, plans, cfg, analyze_index)
 
     cache_filename = cfg.analysis.frame_data_filename
     cache_status = "disabled"
@@ -1476,7 +1481,7 @@ def run(request: RunRequest) -> RunResult:
             selection_details=selection_details,
         )
     if not cfg.analysis.save_frames_data:
-        compframes_path = core._resolve_workspace_subdir(
+        compframes_path = preflight_utils._resolve_workspace_subdir(
             root,
             cfg.analysis.frame_data_filename,
             purpose="analysis.frame_data_filename",
@@ -2085,7 +2090,7 @@ def run(request: RunRequest) -> RunResult:
         json_tail["report"] = report_block
     if report_enabled:
         try:
-            report_dir = core._resolve_workspace_subdir(
+            report_dir = preflight_utils._resolve_workspace_subdir(
                 root,
                 cfg.report.output_dir,
                 purpose="report.output_dir",

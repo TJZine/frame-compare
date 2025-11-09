@@ -56,9 +56,9 @@ Goal: finish slimming the CLI, expose the public API, and update tests to cover 
 | Checklist Item | Status | Notes / Next Steps |
 | --- | --- | --- |
 | 1. Workspace prep | ✅ | 2025-11-08 — `git status -sb` captured prior to the audit (`## Develop...origin/Develop`). |
-| 2. Architecture & Imports (final) | 🚧 | `runner.py` now imports analysis/screenshot/vs_core directly, but `_IMPL_ATTRS` still forwards `_build_cache_info`, `_prepare_preflight`, and other CLI helpers from `frame_compare.py:1954-2750`; audit complete 2025-11-09, extraction deferred to Phase 3. |
+| 2. Architecture & Imports (final) | ☑ | `_build_cache_info`, `_prepare_preflight`, `_discover_media`, `_coerce_config_flag`, and `_confirm_alignment_with_screenshots` now live in `src/frame_compare/{cache,preflight,media,alignment_preview,config_helpers}`; `runner.py` imports them directly and `frame_compare.py` only exposes them via the curated `_COMPAT_EXPORTS` map. |
 | 3. CLI Shim | ✅ | `frame_compare.run_cli` (`frame_compare.py:4415-4444`) builds a `RunRequest` and delegates to `runner.run`; `tests/test_frame_compare.py:52-118` guards the hand-off. |
-| 5. Dead Code Sweep | ⛔ | `_build_cache_info`, `_build_plans`, `_prepare_preflight`, `_discover_media`, `_confirm_alignment_with_screenshots`, etc. still live in `frame_compare.py:1900-2740`; move to shared module/runner helpers during Phase 3. |
+| 5. Dead Code Sweep | ☑ | CLI shim no longer defines duplicate helpers; compatibility is limited to `_COMPAT_EXPORTS`, and tests patch the module-scoped helpers via `_patch_core_helper`. |
 | 6. Behavioral Parity | ✅ | Full regression suite (`.venv/bin/pytest`, 2025-11-08) stayed green after the refactor. |
 | 8. Tests | ✅ | Added `test_run_cli_delegates_to_runner` and `_IMPL_ATTRS` regression tests in `tests/test_frame_compare.py:52-138` to prove the CLI shim boundary. |
 
@@ -148,11 +148,25 @@ With the CLI shim stable and tooling in place, Phase 4 focuses on finishing th
 | Checklist Item | Status | Notes / Next Steps |
 | --- | --- | --- |
 | 1. Workspace prep | ✅ | 2025-11-17 — captured `git status -sb` before final QA; only runner-refactor files staged. |
-| 9. Quality Gates | 🚧 | `.venv/bin/ruff check` (clean) and `.venv/bin/pytest` (247 passed, 1 skipped) ran on 2025-11-17. `npx pyright --warnings` still blocked offline (`npm ENOTFOUND registry.npmjs.org`); documented in DECISIONS. |
+| 9. Quality Gates | ☑ | 2025-11-09 — `.venv/bin/ruff check` (pass), `.venv/bin/pytest -q` (250 passed, 1 skipped), and `npx pyright --warnings` (still fails offline with `npm ENOTFOUND registry.npmjs.org`) recorded in `docs/DECISIONS.md`; rerun Pyright once network access is restored. |
 | 10. Residual Risk Log | ✅ | Logged the outstanding Pyright-network limitation plus TMDB async edge cases; queued follow-ups for Phase 5. |
 | Final Summary & Phase 5 Preview | ✅ | Added 2025-11-17 DECISIONS entry with QA summary, verification status, and the next-phase focus areas. |
 
 **Exit criteria 4.3:** Helper migration signed off, documentation/tests updated, quality gates green, and handoff notes prepared for future phases.
+
+---
+
+## Phase 5 – TMDB & Reporter Hardening (Planning)
+
+Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| 1. TMDB async parity & retry strategy | ⛔ | Ensure CLI + runner share identical TMDB resolution (manual vs. async). Add retry/backoff behaviour and tests covering ambiguous results + manual overrides. Document final flow in README/config audit. |
+| 2. Reporter injection adoption | ⛔ | With `RunRequest.reporter_factory` shipped, add examples + smoke tests validating custom reporters (automation harness). Update README “Programmatic Usage” and `docs/runner_refactor_checklist.md` when complete. |
+| 3. Quality gates rerun on networked host | ⛔ | Run `npx pyright --warnings` + `.venv/bin/ruff check` + `.venv/bin/pytest` after Phase 5 items land; record outputs in `docs/DECISIONS.md` and flip Phase 4.3/Phase 5 statuses. |
+
+**Exit criteria Phase 5:** TMDB flow hardened (handling async + manual ID), reporter injection documented/tests, and full quality gates executed on a connected machine.
 
 ---
 

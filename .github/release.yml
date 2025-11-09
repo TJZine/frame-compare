@@ -1,0 +1,15 @@
+changelog:
+  categories:
+    - title: ✨ Features
+      labels: [feat, feature, enhancement]
+    - title: 🐛 Fixes
+      labels: [fix, bug]
+    - title: ⚙️ Performance
+      labels: [perf]
+    - title: 🧪 Tests
+      labels: [test]
+    - title: 🧰 CI/Build
+      labels: [ci, build]
+  exclude:
+    labels: [skip-release]
+    authors: [dependabot, renovate-bot]

@@ -20,6 +20,14 @@ build/
 comparison_videos/**
 !comparison_videos/.gitkeep
 
+# Node tooling (commitlint/husky)
+node_modules/
+.pnpm-store/
+.npm/
+.npmrc
+.pnp.*      # Yarn PnP
+coverage/
+
 # Ignore User Config
 /config.toml
 /config/config.toml

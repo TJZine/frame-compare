@@ -1,0 +1,11 @@
+recursive-exclude tests *
+recursive-exclude docs *
+recursive-exclude Legacy *
+recursive-exclude refactor *
+recursive-exclude tools *
+prune __pycache__
+prune build
+prune frame_compare.egg-info
+prune .github
+prune .git
+exclude commitlint.config.cjs

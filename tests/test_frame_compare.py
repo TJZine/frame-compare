@@ -13,7 +13,12 @@ from click.testing import CliRunner, Result
 from rich.console import Console
 
 import frame_compare
+import src.frame_compare.alignment_preview as alignment_preview_module
+import src.frame_compare.cache as cache_module
+import src.frame_compare.config_helpers as config_helpers_module
 import src.frame_compare.core as core_module
+import src.frame_compare.media as media_module
+import src.frame_compare.preflight as preflight_module
 from src.analysis import CacheLoadResult, FrameMetricsCacheInfo, SelectionDetail
 from src.audio_alignment import AlignmentMeasurement, AudioStreamInfo
 from src.datatypes import (
@@ -79,6 +84,9 @@ def _patch_load_config(monkeypatch: pytest.MonkeyPatch, cfg: AppConfig) -> None:
 
     monkeypatch.setattr(core_module, "load_config", lambda *_args, **_kwargs: cfg)
     monkeypatch.setattr(frame_compare, "load_config", lambda *_args, **_kwargs: cfg)
+    monkeypatch.setattr(preflight_module, "load_config", lambda *_args, **_kwargs: cfg)
+    if hasattr(runner_module, "preflight_utils"):
+        monkeypatch.setattr(runner_module.preflight_utils, "load_config", lambda *_args, **_kwargs: cfg, raising=False)
 
 
 def _selection_details_to_json(details: Mapping[int, SelectionDetail]) -> Dict[int, Dict[str, str]]:
@@ -160,8 +168,17 @@ class _CliRunnerEnv:
         def _fake_preflight(**_kwargs: object) -> core_module._PathPreflightResult:
             return preflight
 
-        for module in (core_module, frame_compare, runner_module.core):
-            self._monkeypatch.setattr(module, "_prepare_preflight", _fake_preflight)
+        module_targets = (
+            core_module,
+            frame_compare,
+            runner_module.core,
+            preflight_module,
+            getattr(runner_module, "preflight_utils", None),
+        )
+        for module in module_targets:
+            if module is None:
+                continue
+            self._monkeypatch.setattr(module, "_prepare_preflight", _fake_preflight, raising=False)
 
         self.state = _CliRunnerEnvState(
             workspace_root=preflight.workspace_root,
@@ -190,8 +207,25 @@ class _CliRunnerEnv:
 def _patch_core_helper(monkeypatch: pytest.MonkeyPatch, attr: str, value: object) -> None:
     """Patch both frame_compare.* and runner_module.core.* helpers simultaneously."""
 
-    monkeypatch.setattr(frame_compare, attr, value, raising=False)
-    monkeypatch.setattr(runner_module.core, attr, value, raising=False)
+    targets = [
+        frame_compare,
+        runner_module.core,
+        preflight_module,
+        media_module,
+        cache_module,
+        alignment_preview_module,
+        config_helpers_module,
+        getattr(runner_module, "preflight_utils", None),
+        getattr(runner_module, "media_utils", None),
+        getattr(runner_module, "cache_utils", None),
+        getattr(runner_module, "alignment_preview_utils", None),
+        getattr(runner_module, "config_helpers", None),
+    ]
+    for target in targets:
+        if target is None:
+            continue
+        if hasattr(target, attr):
+            monkeypatch.setattr(target, attr, value, raising=False)
 
 
 def _patch_vs_core(monkeypatch: pytest.MonkeyPatch, attr: str, value: object) -> None:
@@ -204,11 +238,22 @@ def _patch_vs_core(monkeypatch: pytest.MonkeyPatch, attr: str, value: object) ->
 def _patch_runner_module(monkeypatch: pytest.MonkeyPatch, attr: str, value: object) -> None:
     """Patch shared runner dependencies exposed at the runner module level."""
 
-    if hasattr(frame_compare, attr):
-        monkeypatch.setattr(frame_compare, attr, value, raising=False)
-    if hasattr(core_module, attr):
-        monkeypatch.setattr(core_module, attr, value, raising=False)
-    monkeypatch.setattr(runner_module, attr, value, raising=False)
+    targets = [
+        frame_compare,
+        core_module,
+        runner_module,
+        getattr(runner_module, "preflight_utils", None),
+        getattr(runner_module, "media_utils", None),
+        getattr(runner_module, "cache_utils", None),
+        getattr(runner_module, "alignment_preview_utils", None),
+        getattr(runner_module, "config_helpers", None),
+        alignment_preview_module,
+    ]
+    for target in targets:
+        if target is None:
+            continue
+        if hasattr(target, attr):
+            monkeypatch.setattr(target, attr, value, raising=False)
 
 
 def _patch_audio_alignment(monkeypatch: pytest.MonkeyPatch, attr: str, value: object) -> None:
@@ -345,6 +390,7 @@ def test_validate_tonemap_overrides_accepts_valid_values() -> None:
         {
             "knee_offset": 0.5,
             "dst_min_nits": 0.0,
+            "target_nits": 250.0,
             "post_gamma": 0.95,
             "dpd_preset": "fast",
             "dpd_black_cutoff": 0.02,
@@ -396,6 +442,21 @@ def test_validate_tonemap_overrides_rejects_scene_range() -> None:
 def test_validate_tonemap_overrides_rejects_unknown_metadata() -> None:
     with pytest.raises(click.ClickException):
         core_module._validate_tonemap_overrides({"metadata": "foobar"})
+
+
+def test_validate_tonemap_overrides_rejects_nonfinite_numbers() -> None:
+    with pytest.raises(click.ClickException):
+        core_module._validate_tonemap_overrides({"dst_min_nits": float("nan")})
+
+
+def test_validate_tonemap_overrides_rejects_nonpositive_target_nits() -> None:
+    with pytest.raises(click.ClickException):
+        core_module._validate_tonemap_overrides({"target_nits": 0})
+
+
+def test_validate_tonemap_overrides_rejects_infinite_scene_threshold() -> None:
+    with pytest.raises(click.ClickException):
+        core_module._validate_tonemap_overrides({"scene_threshold_low": float("inf")})
 
 
 def _make_config(input_dir: Path) -> AppConfig:
@@ -2303,7 +2364,7 @@ def test_runner_auto_upload_cleans_screens_dir(tmp_path: Path, monkeypatch: pyte
     cfg.slowpics.create_url_shortcut = False
 
     preflight = _make_runner_preflight(workspace, media_root, cfg)
-    monkeypatch.setattr(runner_module.core, "_prepare_preflight", lambda **_: preflight)
+    _patch_core_helper(monkeypatch, "_prepare_preflight", lambda **_: preflight)
 
     files = [media_root / "Alpha.mkv", media_root / "Beta.mkv"]
     metadata = [{"label": "Alpha"}, {"label": "Beta"}]
@@ -2313,7 +2374,7 @@ def test_runner_auto_upload_cleans_screens_dir(tmp_path: Path, monkeypatch: pyte
     ]
     plans[0].use_as_reference = True
 
-    monkeypatch.setattr(runner_module.core, "_discover_media", lambda _root: list(files))
+    _patch_core_helper(monkeypatch, "_discover_media", lambda _root: list(files))
     monkeypatch.setattr(runner_module.core, "_parse_metadata", lambda *_: list(metadata))
     monkeypatch.setattr(runner_module.core, "_build_plans", lambda *_: list(plans))
     monkeypatch.setattr(runner_module.core, "_pick_analyze_file", lambda *_args, **_kwargs: files[0])
@@ -2328,7 +2389,7 @@ def test_runner_auto_upload_cleans_screens_dir(tmp_path: Path, monkeypatch: pyte
         fps_num=24000,
         fps_den=1001,
     )
-    monkeypatch.setattr(runner_module.core, "_build_cache_info", lambda *_: cache_info)
+    _patch_core_helper(monkeypatch, "_build_cache_info", lambda *_: cache_info)
     monkeypatch.setattr(runner_module.core, "_maybe_apply_audio_alignment", lambda *args, **kwargs: (None, None))
 
     monkeypatch.setattr(runner_module.vs_core, "configure", lambda **_: None)
@@ -2512,7 +2573,7 @@ def test_runner_audio_alignment_summary_passthrough(
     cfg.analysis.save_frames_data = False
 
     preflight = _make_runner_preflight(workspace, media_root, cfg)
-    monkeypatch.setattr(runner_module.core, "_prepare_preflight", lambda **_: preflight)
+    _patch_core_helper(monkeypatch, "_prepare_preflight", lambda **_: preflight)
 
     files = [media_root / "Reference.mkv", media_root / "Target.mkv"]
     metadata = [{"label": "Reference"}, {"label": "Target"}]
@@ -2522,7 +2583,7 @@ def test_runner_audio_alignment_summary_passthrough(
     ]
     plans[0].use_as_reference = True
 
-    monkeypatch.setattr(runner_module.core, "_discover_media", lambda _root: list(files))
+    _patch_core_helper(monkeypatch, "_discover_media", lambda _root: list(files))
     monkeypatch.setattr(runner_module.core, "_parse_metadata", lambda *_: list(metadata))
     monkeypatch.setattr(runner_module.core, "_build_plans", lambda *_: list(plans))
     monkeypatch.setattr(runner_module.core, "_pick_analyze_file", lambda *_args, **_kwargs: files[0])
@@ -2537,7 +2598,7 @@ def test_runner_audio_alignment_summary_passthrough(
         fps_num=24000,
         fps_den=1001,
     )
-    monkeypatch.setattr(runner_module.core, "_build_cache_info", lambda *_: cache_info)
+    _patch_core_helper(monkeypatch, "_build_cache_info", lambda *_: cache_info)
 
     summary = _AudioAlignmentSummary(
         offsets_path=workspace / "generated.audio_offsets.toml",
@@ -2633,7 +2694,7 @@ def test_runner_handles_existing_event_loop(tmp_path: Path, monkeypatch: pytest.
     cfg.analysis.save_frames_data = False
 
     preflight = _make_runner_preflight(workspace, media_root, cfg)
-    monkeypatch.setattr(runner_module.core, "_prepare_preflight", lambda **_: preflight)
+    _patch_core_helper(monkeypatch, "_prepare_preflight", lambda **_: preflight)
 
     files = [media_root / "Alpha.mkv", media_root / "Beta.mkv"]
     metadata = [{"label": "Alpha"}, {"label": "Beta"}]
@@ -2643,7 +2704,7 @@ def test_runner_handles_existing_event_loop(tmp_path: Path, monkeypatch: pytest.
     ]
     plans[0].use_as_reference = True
 
-    monkeypatch.setattr(runner_module.core, "_discover_media", lambda _root: list(files))
+    _patch_core_helper(monkeypatch, "_discover_media", lambda _root: list(files))
     monkeypatch.setattr(runner_module.core, "_parse_metadata", lambda *_: list(metadata))
     monkeypatch.setattr(runner_module.core, "_build_plans", lambda *_: list(plans))
     monkeypatch.setattr(runner_module.core, "_pick_analyze_file", lambda *_args, **_kwargs: files[0])
@@ -2658,7 +2719,7 @@ def test_runner_handles_existing_event_loop(tmp_path: Path, monkeypatch: pytest.
         fps_num=24000,
         fps_den=1001,
     )
-    monkeypatch.setattr(runner_module.core, "_build_cache_info", lambda *_: cache_info)
+    _patch_core_helper(monkeypatch, "_build_cache_info", lambda *_: cache_info)
     monkeypatch.setattr(runner_module.core, "_maybe_apply_audio_alignment", lambda *args, **kwargs: (None, None))
 
     monkeypatch.setattr(runner_module.vs_core, "configure", lambda **_: None)

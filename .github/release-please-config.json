@@ -1,0 +1,26 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "packages": {
+    ".": {
+      "release-type": "python",
+      "package-name": "frame-compare",
+      "changelog-path": "CHANGELOG.md",
+
+      "separate-pull-requests": false,
+
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": true,
+
+      "changelog-sections": [
+        { "type": "feat",     "section": "Features" },
+        { "type": "fix",      "section": "Bug Fixes" },
+        { "type": "perf",     "section": "Performance" },
+        { "type": "refactor", "section": "Refactors", "hidden": false },
+        { "type": "docs",     "section": "Documentation" },
+        { "type": "ci",       "section": "CI" },
+        { "type": "test",     "section": "Tests", "hidden": true },
+        { "type": "chore",    "section": "Chores", "hidden": true }
+      ]
+    }
+  }
+}

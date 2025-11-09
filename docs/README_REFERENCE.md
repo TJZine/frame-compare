@@ -181,6 +181,21 @@ Repository fixtures mirror the default structure and live under
 from the repo or copy them beneath your chosen `ROOT` (for example
 `ROOT/comparison_videos`) if you customise the workspace.
 
+> Need a quick health check after changing `[runtime]` or `[paths]`? Run `frame-compare --diagnose-paths` to confirm the resolved root, media directory, and VapourSynth search paths. The `[runtime]` audit entry in `docs/config_audit.md` covers additional tuning tips the wizard references during setup.
+
+## `[cli]` defaults
+
+These toggles control CLI output independent of per-run flags (`--quiet`, `--json-pretty`, etc.).
+
+<!-- markdownlint-disable MD013 -->
+| Key | Purpose | Type | Default |
+| --- | --- | --- | --- |
+| `[cli].emit_json_tail` | Emit the JSON diagnostics block at the end of each run. Disable when CI logs must stay minimal. | bool | `true` |
+| `[cli.progress].style` | Pick progress renderer style (`"fill"` bar vs `"dot"` indicator). Invalid values fall back to `"fill"`. | str | `"fill"` |
+<!-- markdownlint-restore -->
+
+Both the wizard and `docs/config_audit.md` highlight scenarios where suppressing the JSON tail or switching the progress style is helpful (for example, in automation harnesses with strict log parsers).
+
 ## CLI flags
 
 <!-- markdownlint-disable MD013 -->
@@ -196,3 +211,17 @@ from the repo or copy them beneath your chosen `ROOT` (for example
 | `--json-pretty` | Pretty-print the JSON tail. | `false` |
 <!-- markdownlint-restore -->
 > The CLI refuses workspace roots inside `site-packages`/`dist-packages`, seeds `ROOT/config/config.toml` when missing, validates writability before running, and blocks derived paths from escaping the workspace. Use `--diagnose-paths` to inspect the resolved locations.
+
+## Overrides (`[overrides]`)
+
+Per-clip trim and FPS adjustments. Keys match clip index, filename (with extension), filename stem, or parsed release group. Values must be integers (frames) or `[num, den]` pairs.
+
+<!-- markdownlint-disable MD013 -->
+| Key | Purpose | Example | Default |
+| --- | --- | --- | --- |
+| `trim` | Shift clip start by N frames (positive trims leading frames). | `{"0" = 120, "EncodeA.mkv" = -24}` | `{}` |
+| `trim_end` | Adjust clip end by N frames (negative removes trailing frames). | `{"EncodeB" = -48}` | `{}` |
+| `change_fps` | Override FPS per clip. Use `["num","den"]` to set explicit FPS or `"set"` to force reference selection. | `{"1" = [24000,1001], "BonusClip" = "set"}` | `{}` |
+<!-- markdownlint-restore -->
+
+See the `[overrides]` section of `docs/config_audit.md` for troubleshooting tips. Mis-typed keys are silently ignored, so prefer descriptive filenames or indices to ensure overrides apply.

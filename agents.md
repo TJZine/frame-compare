@@ -43,14 +43,18 @@ Advisors analyze and propose diffs/checks. All execution follows CODEX.md.
     - pause_on: [pending_approval, error, missing_tool, large_diff]
     - Return: checklists, line-anchored findings, small diff plans, risk/mitigation notes.
   )
+## Global Defaults (Always On)
+- **Planning protocol = Sequential Thinking**: produce plans using a step-wise, explicitly reasoned checklist before proposing diffs.
+- **Docs lookup = context7**: pull short, dated snippets from official sources/best-practice docs for each claim. If unavailable, log the fallback.
+- **Search = ripgrep**: all evidence sweeps MUST use `ripgrep` first (respect repo ignores). If unavailable, log the fallback search method.
 
 ## Standard Flow
-1) **Evidence sweep** (ripgrep) → where code/config/tests live.
-2) **Docs check** (context7) → short official snippets (title+link+date).
-3) **Plan** → 3–7 steps, success checks, rollback notes.
+1) **Evidence sweep (ripgrep)** → enumerate where code/config/tests live. If `ripgrep` unavailable, record the fallback used.
+2) **Docs check (context7)** → short official snippets (title+link+date). If context7 unavailable, record the fallback and proceed.
+3) **Plan (Sequential Thinking)** → 3–7 steps, success checks, rollback notes.
 4) **Proposed diffs** → file-by-file changes + tests (await approval).
 5) **Persist** → append decisions to `docs/DECISIONS.md`; update `CHANGELOG.md`.
-6) **Verify** → targeted checks; concise summary.
+6) **Verify** → run `.venv/bin/pyright --warnings`, `.venv/bin/ruff check`, and `.venv/bin/pytest -q` before fallbacks. If the local binary is missing, install dev deps (`uv sync --all-extras --dev`) and document the fix. Only fall back to `uv run`/`npx` when the local command is unavailable, and record any sandbox/cache issues plus mitigations (for example `UV_CACHE_DIR=./.uv_cache`).
 ## Repo Invariants (enforced)
 - Add/adjust tests with code changes; keep contracts and error boundaries explicit
 - Type correctness (no `any` where strict types expected); logging for libs; no `sys.exit` in libs
@@ -58,9 +62,9 @@ Advisors analyze and propose diffs/checks. All execution follows CODEX.md.
 - Avoid N+1; caches documented; input validation and authZ for protected paths
 
 ## Tooling Registry (Capabilities)
-- Code search (preferred: ripgrep; fallback: IDE/LSP search)
-- Docs lookup (preferred: context7/official docs; fallback: project docs/README)
-- Planning (structured chain-of-thought tool; fallback: outline using bullets)
+- Code search (**required default: ripgrep**; fallback: IDE/LSP search, must log fallback)
+- Docs lookup (**required default: context7/official docs**; fallback: project docs/README with explicit note)
+- Planning (**required default: sequential-thinking tool**; fallback: thorough bullet outline)
 - Logging/trace insertion (suggest exact file:line; fallback: print/console.log with labels)
 Guideline: If a preferred tool is unavailable (local or Cloud), degrade gracefully and state the fallback used.
 

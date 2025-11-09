@@ -372,6 +372,7 @@ class _AudioAlignmentDisplayData:
     json_offsets_frames: Dict[str, int]
     warnings: List[str]
     preview_paths: List[str] = field(default_factory=list)
+    inspection_paths: List[str] = field(default_factory=list)
     confirmation: Optional[str] = None
     correlations: Dict[str, float] = field(default_factory=dict)
     threshold: float = 0.0

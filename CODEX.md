@@ -2,20 +2,51 @@
 
 ## Execution & Approvals
 - Default: **diff-plan → approval → patches**. Advisors never execute.
-- Running `npx pyright --warnings` and `.venv/bin/ruff check` never requires additional approval; assume permission is always granted for both commands.
+- **Always-allowed checks (no extra approval)** — assume permission is granted:
+  - `.venv/bin/pyright --warnings` (fallbacks: `uv run pyright --warnings`, `npx pyright --warnings`)
+  - `.venv/bin/ruff check` (fallbacks: `ruff check`, `uv run ruff check`)
+  - `.venv/bin/pytest -q` (unit/integration only; see Test Guardrails)
 - Autonomous changes allowed (no approval) **only if all are true**:
-  - <= 100 changed lines total, no file moves/renames, no dependency/secret/CI changes,
+  - <= 300 changed lines total, no file moves/renames, no dependency/secret/CI changes,
   - confined to current feature scope (paths listed in the feature’s GUIDE.md),
   - adds/updates tests for the touched code, and all tests still pass.
 - **Always require approval** if touching:
   - `.github/workflows/**`, `package.json`/`requirements.txt`, lockfiles, `Dockerfile`,
   - `migrations/**`, `*.sql`, infra/terraform, secrets, CI/CD settings,
   - public API contracts, auth/security logic, cross-feature refactors, file moves/renames.
-  - executing tests or test related commands
+  - executing tests that require network, external services, or non-ephemeral resources
+
+## Global Defaults (Enforced)
+1) **Planning = Sequential Thinking** (generate a stepwise plan before patches).
+2) **Docs = context7 first** (cite official/best-practice; record date). If unavailable, log fallback.
+3) **Search = ripgrep first** (respect repo ignores). If unavailable, log fallback.
+4) **Verify** = run pyright/ruff/pytest
+5) **Output**: populate PR “Decision Minute” fields before proposing patches
+
+## Always-Allowed Commands (details)
+Print each command before execution and capture exit code + duration. These checks may read/write their standard caches (`.venv/**`, `.uv_cache/**`, `~/.cache/uv/**`). If a host sandbox blocks `~/.cache/uv`, set `UV_CACHE_DIR=./.uv_cache` (already gitignored) and rerun the command.
+
+```bash
+# Primary (repo-local virtualenv)
+.venv/bin/pyright --warnings
+.venv/bin/ruff check
+.venv/bin/pytest -q
+
+# Fallbacks (auto-detected if the above fail)
+uv run pyright --warnings
+npx pyright --warnings
+ruff check
+pytest -q
+```
+
+### Test Guardrails (for always-allowed pytest)
+- **No external services**: skip DB/services unless ephemeral/mocked.
+- **Filesystem scope**: writes must stay under repo temp dirs (pytest tmp_path). Fail closed if outside.
+
 
 ## Advisory Flow
-- Use ripgrep to search when possible.
-- Advisors must follow AGENTS.md §Standard Flow before implementation.
+- **Use ripgrep** for the evidence sweep and any searching (fallback must be logged).
+- **Follow AGENTS.md §Standard Flow**; planning must use sequential thinking.
 
 ## Type Safety & Pylance/Pyright Quality Gates
 
@@ -46,8 +77,16 @@
 - Tests cover the typed contract (positive + None/edge cases).
 
 ## Sandbox & Network
-- Local sandbox: `workspace-write` except for testing; no network unless explicitly approved. (If Cloud: follow environment defaults.)  
-- Print commands before running; never run package scripts or migrations without approval. :contentReference[oaicite:9]{index=9}
+- Local sandbox: `workspace-write` except for testing; **no network** unless explicitly approved (If Cloud: follow environment defaults).
+- Always print commands before running; never run package scripts or migrations without approval.
+- Tool caches required by the approved checks (`.venv/**`, `.uv_cache/**`, `~/.cache/uv/**`) are allowed. If a host blocks `~/.cache/uv`, set `UV_CACHE_DIR=./.uv_cache` and rerun.
+- **Checks exception:** pyright/ruff/pytest (under Test Guardrails) may run without extra approval as long as they respect the guardrails above.
+
+## Local Toolchain Expectations
+- Bootstrap the virtualenv via `uv sync --all-extras --dev` (preferred) or `python -m venv .venv && .venv/bin/pip install -e .[dev]` so `.venv/bin/pyright`, Ruff, and Pytest are always available offline.
+- Activate `.venv` (or prefix commands with `.venv/bin/`) before running checks to ensure everyone uses the same binaries.
+- When falling back to `uv run`, set `UV_CACHE_DIR` to a workspace path (for example `./.uv_cache`) if the default cache path is sandboxed.
+
 
 ## Structure-Change Policy
 - No renames/moves or project reorg without a **Structure-Change micro-plan** (impact, rollback, test plan).
@@ -62,4 +101,3 @@
 
 ## Visibility & Summaries
 - For each task, output: proposed diff plan → patches → test results → summary of changes, risks, and follow-ups.
-

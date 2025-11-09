@@ -25,8 +25,6 @@ from src.frame_compare.core import (
     ScreenshotError,
     _apply_vspreview_manual_offsets,
     _collect_path_diagnostics,
-    _confirm_alignment_with_screenshots,
-    _discover_media,
     _fresh_app_config,
     _launch_vspreview,
     _maybe_apply_audio_alignment,
@@ -35,6 +33,8 @@ from src.frame_compare.core import (
     _validate_tonemap_overrides,
     _dt,
 )
+from src.frame_compare.media import _discover_media
+from src.frame_compare.alignment_preview import _confirm_alignment_with_screenshots
 from src.frame_compare.runner import RunRequest as RunRequest
 from src.frame_compare.runner import RunResult as RunResult
 

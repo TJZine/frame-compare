@@ -1,0 +1,37 @@
+name: decision-minute
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, closed]
+
+jobs:
+  extract-and-store:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Write Decision Minute to docs/notes
+        shell: bash
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY:  ${{ github.event.pull_request.body }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_MERGED_AT: ${{ github.event.pull_request.merged_at }}
+        run: |
+          mkdir -p docs/notes
+          slug="$(echo "${PR_TITLE,,}" | tr -cd '[:alnum:]- ' | tr ' ' '-' | sed 's/--*/-/g')"
+          date="${PR_MERGED_AT%%T}"
+          file="docs/notes/${date}-${slug:-pr-${PR_NUMBER}}.md"
+
+          echo "# Decision Minute – PR #${PR_NUMBER}: ${PR_TITLE}" > "$file"
+          echo "" >> "$file"
+          echo "${PR_BODY}" >> "$file"
+
+      - name: Create PR with note
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "docs(notes): add Decision Minute for PR #${{ github.event.pull_request.number }}"
+          title: "docs: add Decision Minute for PR #${{ github.event.pull_request.number }}"
+          body: "Automated Decision Minute extracted from PR body."
+          branch: "docs/decision-minute-pr-${{ github.event.pull_request.number }}"

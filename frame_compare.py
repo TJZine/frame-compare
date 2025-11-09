@@ -19,37 +19,42 @@ import click
 from rich import print
 from rich.console import Console as _Console
 
+import src.frame_compare.alignment_preview as _alignment_preview
 import src.frame_compare.cli_runtime as _cli_runtime
 import src.frame_compare.core as _core
+import src.frame_compare.media as _media
+import src.frame_compare.preflight as _preflight
 from src import vs_core as _vs_core
 from src.config_loader import ConfigError, load_config
 from src.frame_compare import runner
 from src.frame_compare.cli_runtime import JsonTail, _ensure_slowpics_block
+from src.frame_compare.config_helpers import env_flag_enabled as _env_flag_enabled
 from src.frame_compare.core import (
     _DEFAULT_CONFIG_HELP,
     NO_WIZARD_ENV_VAR,
     PRESET_DESCRIPTIONS,
     CLIAppError,
     _collect_doctor_checks,
-    _collect_path_diagnostics,
     _deep_merge,
-    _discover_workspace_root,
     _emit_doctor_results,
-    _env_flag_enabled,
-    _fresh_app_config,
     _list_preset_paths,
     _load_preset_data,
     _load_template_config,
-    _path_is_within_root,
-    _PathPreflightResult,
-    _prepare_preflight,
     _present_diff,
     _read_template_text,
     _render_config_text,
     _resolve_wizard_paths,
-    _resolve_workspace_subdir,
     _run_wizard_prompts,
     _write_config_file,
+)
+from src.frame_compare.preflight import (
+    _collect_path_diagnostics,
+    _discover_workspace_root,
+    _fresh_app_config,
+    _path_is_within_root,
+    _PathPreflightResult,
+    _prepare_preflight,
+    _resolve_workspace_subdir,
 )
 from src.slowpics import build_shortcut_filename
 
@@ -61,13 +66,13 @@ _COMPAT_EXPORTS: dict[str, object] = {
     "_ClipPlan": _core._ClipPlan,
     "_AudioAlignmentSummary": _core._AudioAlignmentSummary,
     "_AudioAlignmentDisplayData": _core._AudioAlignmentDisplayData,
-    "_collect_path_diagnostics": _core._collect_path_diagnostics,
-    "_confirm_alignment_with_screenshots": _core._confirm_alignment_with_screenshots,
-    "_discover_media": _core._discover_media,
-    "_fresh_app_config": _core._fresh_app_config,
+    "_collect_path_diagnostics": _preflight._collect_path_diagnostics,
+    "_confirm_alignment_with_screenshots": _alignment_preview._confirm_alignment_with_screenshots,
+    "_discover_media": _media._discover_media,
+    "_fresh_app_config": _preflight._fresh_app_config,
     "_launch_vspreview": _core._launch_vspreview,
     "_maybe_apply_audio_alignment": _core._maybe_apply_audio_alignment,
-    "_prepare_preflight": _core._prepare_preflight,
+    "_prepare_preflight": _preflight._prepare_preflight,
     "_apply_vspreview_manual_offsets": _core._apply_vspreview_manual_offsets,
     "_write_vspreview_script": _core._write_vspreview_script,
     "_validate_tonemap_overrides": _core._validate_tonemap_overrides,

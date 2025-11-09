@@ -10,7 +10,6 @@ import json
 import logging
 import math
 import os
-import random
 import re
 import shlex
 import shutil
@@ -24,7 +23,7 @@ import uuid
 from collections import Counter, defaultdict
 from collections.abc import Mapping as MappingABC
 from contextlib import nullcontext
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from pathlib import Path
 from string import Template
 from typing import (
@@ -38,6 +37,7 @@ from typing import (
     Literal,
     Mapping,
     MutableMapping,
+    NoReturn,
     Optional,
     Sequence,
     Tuple,
@@ -46,7 +46,6 @@ from typing import (
 )
 
 import click
-from natsort import os_sorted
 from rich import print
 from rich.console import Console  # noqa: F401
 from rich.markup import escape
@@ -54,30 +53,16 @@ from rich.progress import Progress, ProgressColumn  # noqa: F401
 from rich.text import Text
 
 from src import audio_alignment
-from src.config_loader import ConfigError, load_config
-from src.config_template import copy_default_config
-from src.datatypes import (
-    AnalysisConfig,
-    AppConfig,
-    AudioAlignmentConfig,
-    CLIConfig,
-    ColorConfig,
-    NamingConfig,
-    OverridesConfig,
-    PathsConfig,
-    ReportConfig,
-    RuntimeConfig,
-    ScreenshotConfig,
-    SlowpicsConfig,
-    SourceConfig,
-    TMDBConfig,
-)
+from src.config_loader import load_config as _load_config
+from src.datatypes import AnalysisConfig, AppConfig, ColorConfig, NamingConfig, RuntimeConfig
 
 if TYPE_CHECKING:
     from src.audio_alignment import AlignmentMeasurement, AudioStreamInfo
+import src.frame_compare.alignment_preview as _alignment_preview_module
+import src.frame_compare.preflight as _preflight_constants
+import src.screenshot as _screenshot_module
 from src import vs_core
 from src.analysis import (
-    FrameMetricsCacheInfo,
     SelectionWindowSpec,
     compute_selection_window,
     export_selection_metadata,  # noqa: F401
@@ -111,7 +96,15 @@ from src.frame_compare.cli_runtime import (
     _OverrideValue,
     _plan_label,
 )
-from src.screenshot import ScreenshotError, generate_screenshots
+from src.frame_compare.config_helpers import coerce_config_flag as _coerce_config_flag
+from src.frame_compare.preflight import (
+    PACKAGED_TEMPLATE_PATH,
+    PROJECT_ROOT,
+    _abort_if_site_packages,
+    _discover_workspace_root,
+    _is_writable_path,
+    _resolve_workspace_subdir,
+)
 from src.slowpics import SlowpicsAPIError, build_shortcut_filename, upload_comparison  # noqa: F401
 from src.tmdb import (
     TMDBAmbiguityError,  # noqa: F401
@@ -126,14 +119,20 @@ from src.vs_core import ClipInitError, ClipProcessError  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
-CONFIG_ENV_VAR: Final[str] = "FRAME_COMPARE_CONFIG"
-ROOT_ENV_VAR: Final[str] = "FRAME_COMPARE_ROOT"
-ROOT_SENTINELS: Final[tuple[str, ...]] = ("pyproject.toml", ".git", "comparison_videos")
-NO_WIZARD_ENV_VAR: Final[str] = "FRAME_COMPARE_NO_WIZARD"
-PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
-PACKAGED_TEMPLATE_PATH: Final[Path] = (
-    PROJECT_ROOT / "src" / "data" / "config.toml.template"
-).resolve()
+CONFIG_ENV_VAR: Final[str] = _preflight_constants.CONFIG_ENV_VAR
+NO_WIZARD_ENV_VAR: Final[str] = _preflight_constants.NO_WIZARD_ENV_VAR
+ROOT_ENV_VAR: Final[str] = _preflight_constants.ROOT_ENV_VAR
+ROOT_SENTINELS: Final[tuple[str, ...]] = _preflight_constants.ROOT_SENTINELS
+
+ScreenshotError = _screenshot_module.ScreenshotError
+generate_screenshots = _screenshot_module.generate_screenshots
+_PathPreflightResult = _preflight_constants._PathPreflightResult
+_fresh_app_config = _preflight_constants._fresh_app_config
+_prepare_preflight = _preflight_constants._prepare_preflight
+_collect_path_diagnostics = _preflight_constants._collect_path_diagnostics
+_confirm_alignment_with_screenshots = _alignment_preview_module._confirm_alignment_with_screenshots
+load_config = _load_config
+
 PRESETS_DIR: Final[Path] = (PROJECT_ROOT / "presets").resolve()
 
 _DEFAULT_CONFIG_HELP: Final[str] = (
@@ -166,274 +165,6 @@ def _format_vspreview_manual_command(script_path: Path) -> str:
     return _VSPREVIEW_MANUAL_COMMAND_TEMPLATE.format(
         python=python_exe, script=script_arg
     )
-
-
-def _env_flag_enabled(value: str | None) -> bool:
-    """Interpret typical truthy strings from environment variables."""
-
-    if value is None:
-        return False
-    normalized = value.strip().lower()
-    return normalized in {"1", "true", "yes", "on"}
-
-
-def _coerce_config_flag(value: object) -> bool:
-    """Normalize booleans that may be provided as strings or numbers."""
-
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    if isinstance(value, str):
-        lowered = value.strip().lower()
-        if lowered in {"true", "yes", "1", "enabled", "on"}:
-            return True
-        if lowered in {"false", "no", "0", "disabled", "off"}:
-            return False
-    return bool(value)
-
-SUPPORTED_EXTS = (
-    ".mkv",
-    ".m2ts",
-    ".mp4",
-    ".webm",
-    ".ogm",
-    ".mpg",
-    ".vob",
-    ".iso",
-    ".ts",
-    ".mts",
-    ".mov",
-    ".qv",
-    ".yuv",
-    ".flv",
-    ".avi",
-    ".rm",
-    ".rmvb",
-    ".m2v",
-    ".m4v",
-    ".mp2",
-    ".mpeg",
-    ".mpe",
-    ".mpv",
-    ".wmv",
-    ".avc",
-    ".hevc",
-    ".264",
-    ".265",
-    ".av1",
-)
-def _resolve_workspace_subdir(
-    root: Path, relative: str, *, purpose: str, allow_absolute: bool = False
-) -> Path:
-    """Return a normalised path under *root* for user-managed directories."""
-
-    try:
-        root_resolved = root.resolve()
-    except OSError as exc:  # pragma: no cover - unexpected filesystem failure
-        raise CLIAppError(
-            f"Unable to resolve workspace root '{root}': {exc}",
-            rich_message=f"[red]Unable to resolve workspace root:[/red] {exc}",
-        ) from exc
-
-    candidate = Path(str(relative))
-    if candidate.is_absolute():
-        if not allow_absolute:
-            message = (
-                f"Configured {purpose} must be relative to the input directory, got '{relative}'"
-            )
-            raise CLIAppError(message, rich_message=f"[red]{message}[/red]")
-        try:
-            resolved = candidate.resolve()
-        except OSError as exc:
-            raise CLIAppError(
-                f"Unable to resolve configured {purpose} '{relative}': {exc}",
-                rich_message=f"[red]Unable to resolve configured {purpose}:[/red] {exc}",
-            ) from exc
-        return resolved
-
-    resolved = (root_resolved / candidate).resolve()
-    try:
-        resolved.relative_to(root_resolved)
-    except ValueError as exc:
-        message = (
-            f"Configured {purpose} escapes the input directory: '{relative}' -> {resolved}"
-        )
-        raise CLIAppError(message, rich_message=f"[red]{message}[/red]") from exc
-
-    return resolved
-
-
-def _path_is_within_root(root: Path, candidate: Path) -> bool:
-    """Return True when *candidate* resides under *root* after resolution."""
-
-    try:
-        root_resolved = root.resolve()
-        candidate_resolved = candidate.resolve()
-    except OSError:  # pragma: no cover - unexpected filesystem failure
-        return False
-
-    try:
-        candidate_resolved.relative_to(root_resolved)
-    except ValueError:
-        return False
-    return True
-
-
-_SITE_PACKAGES_MARKERS: Final[set[str]] = {"site-packages", "dist-packages"}
-
-
-def _path_contains_site_packages(path: Path) -> bool:
-    """Return True when *path* (or any ancestor) lives under site/dist-packages."""
-
-    try:
-        resolved = path.resolve()
-    except OSError:
-        resolved = path
-    for part in resolved.parts:
-        if part.lower() in _SITE_PACKAGES_MARKERS:
-            return True
-    return False
-
-
-def _nearest_existing_dir(path: Path) -> Path:
-    """Return the nearest existing directory for *path* (itself or ancestor)."""
-
-    candidate = path
-    if candidate.is_file():
-        candidate = candidate.parent
-
-    while not candidate.exists():
-        parent = candidate.parent
-        if parent == candidate:
-            break
-        candidate = parent
-    return candidate
-
-
-def _is_writable_path(path: Path, *, for_file: bool) -> bool:
-    """Return True when the given path (or its nearest parent) is writable."""
-
-    target = path.parent if for_file else path
-    try:
-        target = target.resolve(strict=False)
-    except OSError:
-        pass
-    probe = _nearest_existing_dir(target)
-    try:
-        probe = probe.resolve(strict=False)
-    except OSError:
-        pass
-    return os.access(probe, os.W_OK)
-
-
-def _abort_if_site_packages(path_map: Mapping[str, Path]) -> None:
-    """Abort execution when any mapped path falls under site/dist-packages."""
-
-    for label, candidate in path_map.items():
-        if _path_contains_site_packages(candidate):
-            message = (
-                f"{label} path '{candidate}' resolves inside a site-packages/dist-packages "
-                "directory; refuse to continue. Use --root or FRAME_COMPARE_ROOT to "
-                "select a writable workspace."
-            )
-            raise CLIAppError(
-                message,
-                code=2,
-                rich_message=f"[red]{escape(message)}[/red]",
-            )
-
-
-@dataclass
-class _PathPreflightResult:
-    """Resolved configuration and workspace paths used during startup."""
-
-    workspace_root: Path
-    media_root: Path
-    config_path: Path
-    config: AppConfig
-    warnings: tuple[str, ...] = ()
-    legacy_config: bool = False
-
-
-def _discover_workspace_root(cli_root: str | None) -> Path:
-    """Resolve the workspace root using CLI flag, env var, or sentinel search."""
-
-    if cli_root:
-        candidate = Path(cli_root).expanduser()
-    else:
-        env_root = os.environ.get(ROOT_ENV_VAR)
-        if env_root:
-            candidate = Path(env_root).expanduser()
-        else:
-            start = Path.cwd()
-            current = start
-            sentinel_root: Path | None = None
-            while True:
-                if any((current / marker).exists() for marker in ROOT_SENTINELS):
-                    sentinel_root = current
-                    break
-                if current.parent == current:
-                    break
-                current = current.parent
-            candidate = sentinel_root or start
-
-    try:
-        resolved = candidate.resolve()
-    except OSError as exc:
-        raise CLIAppError(
-            f"Failed to resolve workspace root '{candidate}': {exc}",
-            code=2,
-            rich_message=f"[red]Failed to resolve workspace root:[/red] {exc}",
-        ) from exc
-
-    if _path_contains_site_packages(resolved):
-        message = (
-            f"Workspace root '{resolved}' is inside site-packages/dist-packages; "
-            "choose a writable directory via --root or FRAME_COMPARE_ROOT."
-        )
-        raise CLIAppError(message, code=2, rich_message=f"[red]{escape(message)}[/red]")
-
-    return resolved
-
-
-def _seed_default_config(path: Path) -> None:
-    """Atomically seed config.toml at *path* from the packaged template."""
-
-    try:
-        copy_default_config(path)
-    except FileExistsError:
-        return
-    except OSError as exc:
-        message = f"Unable to create default config at {path}: {exc}"
-        raise CLIAppError(
-            message,
-            code=2,
-            rich_message=(
-                "[red]Unable to create default config:[/red] "
-                f"{exc}. Set --root/FRAME_COMPARE_ROOT to a writable directory."
-            ),
-        ) from exc
-
-
-def _fresh_app_config() -> AppConfig:
-    """Return an AppConfig populated with built-in defaults."""
-
-    return AppConfig(
-        analysis=AnalysisConfig(),
-        screenshots=ScreenshotConfig(),
-        cli=CLIConfig(),
-        slowpics=SlowpicsConfig(),
-        tmdb=TMDBConfig(),
-        naming=NamingConfig(),
-        paths=PathsConfig(),
-        runtime=RuntimeConfig(),
-    overrides=OverridesConfig(),
-    color=ColorConfig(),
-    source=SourceConfig(),
-    audio_alignment=AudioAlignmentConfig(),
-    report=ReportConfig(),
-)
 
 
 def _read_template_text() -> str:
@@ -1031,290 +762,6 @@ def _emit_doctor_results(
         click.echo("Notes:")
         for note in notes:
             click.echo(f"  - {note}")
-
-
-def _prepare_preflight(
-    *,
-    cli_root: str | None,
-    config_override: str | None,
-    input_override: str | None,
-    ensure_config: bool,
-    create_dirs: bool,
-    create_media_dir: bool,
-    allow_auto_wizard: bool = False,
-    skip_auto_wizard: bool = False,
-    ) -> _PathPreflightResult:
-    """Resolve workspace root, configuration, and media directories."""
-
-    workspace_root = _discover_workspace_root(cli_root)
-    warnings: list[str] = []
-    skip_auto_wizard = skip_auto_wizard or _env_flag_enabled(os.environ.get(NO_WIZARD_ENV_VAR))
-
-    if create_dirs:
-        try:
-            workspace_root.mkdir(parents=True, exist_ok=True)
-        except PermissionError as exc:
-            detail = exc.strerror or "Permission denied"
-            message = f"Unable to create workspace root '{workspace_root}': {detail}"
-            raise CLIAppError(
-                message,
-                code=2,
-                rich_message=(
-                    "[red]Unable to create workspace root:[/red] "
-                    f"{escape(str(workspace_root))} ({escape(detail)})"
-                ),
-            ) from exc
-    elif not workspace_root.exists():
-        parent = workspace_root.parent
-        if not parent.exists() or not os.access(parent, os.W_OK):
-            warnings.append(
-                f"Workspace root {workspace_root} may be unwritable; parent directory is inaccessible."
-            )
-    if workspace_root.exists() and not os.access(workspace_root, os.W_OK):
-        if create_dirs:
-            raise CLIAppError(
-                f"Workspace root '{workspace_root}' is not writable.",
-                code=2,
-                rich_message=f"[red]Workspace root is not writable:[/red] {workspace_root}",
-            )
-        warnings.append(f"Workspace root {workspace_root} is not writable.")
-
-    config_path: Path
-    legacy = False
-
-    if config_override:
-        config_path = Path(config_override).expanduser()
-    else:
-        env_override = os.environ.get(CONFIG_ENV_VAR)
-        if env_override:
-            config_path = Path(env_override).expanduser()
-        else:
-            config_dir = workspace_root / "config"
-            config_path = config_dir / "config.toml"
-            legacy_path = workspace_root / "config.toml"
-
-            if config_path.exists():
-                pass
-            elif legacy_path.exists():
-                config_path = legacy_path
-                legacy = True
-                warnings.append(
-                    f"Using legacy config at {legacy_path}. Move it to {config_dir / 'config.toml'}."
-                )
-            elif ensure_config:
-                interactive = sys.stdin.isatty()
-                cli_module = None
-                auto_wizard_base_allowed = (
-                    allow_auto_wizard
-                    and not skip_auto_wizard
-                    and env_override is None
-                    and config_override is None
-                )
-                if auto_wizard_base_allowed:
-                    try:
-                        cli_module = importlib.import_module("frame_compare")
-                    except Exception:
-                        cli_module = None
-                    if not interactive and cli_module is not None:
-                        proxy_sys = getattr(cli_module, "sys", None)
-                        proxy_stdin = getattr(proxy_sys, "stdin", None) if proxy_sys is not None else None
-                        if proxy_stdin is not None:
-                            try:
-                                interactive = bool(proxy_stdin.isatty())
-                            except Exception:
-                                pass
-                auto_wizard_allowed = bool(cli_module and auto_wizard_base_allowed and interactive)
-                if auto_wizard_allowed:
-                    try:
-                        execute_wizard = getattr(cli_module, "_execute_wizard_session")
-                        new_root, new_config_path = execute_wizard(
-                            root_override=str(workspace_root),
-                            config_override=None,
-                            input_override=input_override,
-                            preset_name=None,
-                            auto_launch=True,
-                        )
-                    except click.exceptions.Exit as exc:
-                        raise exc
-                    return _prepare_preflight(
-                        cli_root=str(new_root),
-                        config_override=str(new_config_path),
-                        input_override=input_override,
-                        ensure_config=ensure_config,
-                        create_dirs=create_dirs,
-                        create_media_dir=create_media_dir,
-                        allow_auto_wizard=False,
-                        skip_auto_wizard=skip_auto_wizard,
-                    )
-                try:
-                    config_dir.mkdir(parents=True, exist_ok=True)
-                except PermissionError as exc:
-                    detail = exc.strerror or "Permission denied"
-                    message = f"Unable to create config directory '{config_dir}': {detail}"
-                    raise CLIAppError(
-                        message,
-                        code=2,
-                        rich_message=(
-                            "[red]Unable to create config directory:[/red] "
-                            f"{escape(str(config_dir))} ({escape(detail)})"
-                        ),
-                    ) from exc
-                _seed_default_config(config_path)
-                if allow_auto_wizard and (skip_auto_wizard or not interactive):
-                    click.echo("Seeded default config. Run 'frame-compare wizard' to customise settings.")
-
-    if _path_contains_site_packages(config_path):
-        message = (
-            f"Config path '{config_path}' resides inside site-packages/dist-packages; "
-            "choose a writable location via --root or --config."
-        )
-        raise CLIAppError(message, code=2, rich_message=f"[red]{escape(message)}[/red]")
-
-    cfg: AppConfig
-    try:
-        cfg = load_config(str(config_path))
-    except FileNotFoundError:
-        if ensure_config:
-            raise CLIAppError(
-                f"Config file not found: {config_path}",
-                code=2,
-                rich_message=f"[red]Config file not found:[/red] {config_path}",
-            ) from None
-        cfg = _fresh_app_config()
-        warnings.append(f"Config file not found; using defaults at {config_path}")
-    except PermissionError as exc:
-        raise CLIAppError(
-            f"Config file is not readable: {config_path}",
-            code=2,
-            rich_message=f"[red]Config file is not readable:[/red] {config_path}",
-        ) from exc
-    except OSError as exc:
-        raise CLIAppError(
-            f"Failed to read config file: {exc}",
-            code=2,
-            rich_message=f"[red]Failed to read config file:[/red] {exc}",
-        ) from exc
-    except ConfigError as exc:
-        raise CLIAppError(
-            f"Config error: {exc}",
-            code=2,
-            rich_message=f"[red]Config error:[/red] {exc}",
-        ) from exc
-
-    if input_override is not None:
-        cfg.paths.input_dir = input_override
-
-    media_root = _resolve_workspace_subdir(
-        workspace_root,
-        cfg.paths.input_dir,
-        purpose="[paths].input_dir",
-        allow_absolute=True,
-    )
-
-    if create_media_dir:
-        try:
-            media_root.mkdir(parents=True, exist_ok=True)
-        except PermissionError as exc:
-            detail = exc.strerror or "Permission denied"
-            message = f"Unable to create input workspace '{media_root}': {detail}"
-            raise CLIAppError(
-                message,
-                code=2,
-                rich_message=(
-                    "[red]Unable to create input workspace:[/red] "
-                    f"{escape(str(media_root))} ({escape(detail)})"
-                ),
-            ) from exc
-    elif not media_root.exists():
-        parent = media_root.parent
-        if not parent.exists() or not os.access(parent, os.W_OK):
-            warnings.append(
-                f"Input workspace {media_root} may be unwritable; parent directory is inaccessible."
-            )
-    if media_root.exists() and not os.access(media_root, os.W_OK):
-        if create_media_dir:
-            raise CLIAppError(
-                f"Input workspace '{media_root}' is not writable.",
-                code=2,
-                rich_message=f"[red]Input workspace is not writable:[/red] {media_root}",
-            )
-        warnings.append(f"Input workspace {media_root} is not writable.")
-
-    return _PathPreflightResult(
-        workspace_root=workspace_root,
-        media_root=media_root,
-        config_path=config_path,
-        config=cfg,
-        warnings=tuple(warnings),
-        legacy_config=legacy,
-    )
-
-
-def _collect_path_diagnostics(
-    *,
-    cli_root: str | None,
-    config_override: str | None,
-    input_override: str | None,
-) -> Dict[str, Any]:
-    """Return a JSON-serialisable mapping describing key runtime paths."""
-
-    preflight = _prepare_preflight(
-        cli_root=cli_root,
-        config_override=config_override,
-        input_override=input_override,
-        ensure_config=False,
-        create_dirs=False,
-        create_media_dir=False,
-    )
-    cfg = preflight.config
-    workspace_root = preflight.workspace_root
-    media_root = preflight.media_root
-    config_path = preflight.config_path
-
-    screens_dir = _resolve_workspace_subdir(
-        media_root,
-        cfg.screenshots.directory_name,
-        purpose="screenshots.directory_name",
-    )
-    analysis_cache = _resolve_workspace_subdir(
-        media_root,
-        cfg.analysis.frame_data_filename,
-        purpose="analysis.frame_data_filename",
-    )
-    offsets_path = _resolve_workspace_subdir(
-        media_root,
-        cfg.audio_alignment.offsets_filename,
-        purpose="audio_alignment.offsets_filename",
-    )
-
-    under_site_packages = any(
-        _path_contains_site_packages(path) for path in (workspace_root, media_root, config_path)
-    )
-
-    diagnostics: Dict[str, Any] = {
-        "workspace_root": str(workspace_root),
-        "media_root": str(media_root),
-        "config_path": str(config_path),
-        "config_exists": config_path.exists(),
-        "legacy_config": preflight.legacy_config,
-        "screens_dir": str(screens_dir),
-        "analysis_cache": str(analysis_cache),
-        "audio_offsets": str(offsets_path),
-        "under_site_packages": under_site_packages,
-        "writable": {
-            "workspace_root": _is_writable_path(workspace_root, for_file=False),
-            "media_root": _is_writable_path(media_root, for_file=False),
-            "config_dir": _is_writable_path(config_path, for_file=True),
-            "screens_dir": _is_writable_path(screens_dir, for_file=False),
-        },
-        "warnings": list(preflight.warnings),
-    }
-    return diagnostics
-
-
-def _discover_media(root: Path) -> List[Path]:
-    """Return supported media files within *root*, sorted naturally."""
-    return [p for p in os_sorted(root.iterdir()) if p.suffix.lower() in SUPPORTED_EXTS]
 
 
 def _parse_metadata(files: Sequence[Path], naming_cfg: NamingConfig) -> List[Dict[str, str]]:
@@ -1957,46 +1404,6 @@ def _init_clips(
         plan.source_num_frames = int(getattr(clip, "num_frames", 0) or 0)
         plan.source_width = int(getattr(clip, "width", 0) or 0)
         plan.source_height = int(getattr(clip, "height", 0) or 0)
-
-
-def _build_cache_info(root: Path, plans: Sequence[_ClipPlan], cfg: AppConfig, analyze_index: int) -> Optional[FrameMetricsCacheInfo]:
-    """
-    Build cache metadata describing frame-metrics that can be saved for reuse.
-
-    Parameters:
-        root (Path): Root output directory where the cache file will be stored.
-        plans (Sequence[_ClipPlan]): List of clip plans for the current run.
-        cfg (AppConfig): Application configuration containing analysis and caching settings.
-        analyze_index (int): Index in `plans` identifying which clip was analyzed.
-
-    Returns:
-        FrameMetricsCacheInfo or None: A FrameMetricsCacheInfo populated with the resolved cache path,
-        filenames, analyzed file name, release group, trim window, and FPS numerator/denominator when
-        frame-data saving is enabled; `None` when saving frame-data is disabled by configuration.
-    """
-    if not cfg.analysis.save_frames_data:
-        return None
-
-    analyzed = plans[analyze_index]
-    fps_num, fps_den = analyzed.effective_fps or (24000, 1001)
-    if fps_den <= 0:
-        fps_den = 1
-
-    cache_path = _resolve_workspace_subdir(
-        root,
-        cfg.analysis.frame_data_filename,
-        purpose="analysis.frame_data_filename",
-    )
-    return FrameMetricsCacheInfo(
-        path=cache_path,
-        files=[plan.path.name for plan in plans],
-        analyzed_file=analyzed.path.name,
-        release_group=analyzed.metadata.get("release_group", ""),
-        trim_start=analyzed.trim_start,
-        trim_end=analyzed.trim_end,
-        fps_num=fps_num,
-        fps_den=fps_den,
-    )
 
 
 def _resolve_selection_windows(
@@ -4077,316 +3484,108 @@ def _launch_vspreview(
         return
     _apply_vspreview_manual_offsets(plans, summary, offsets, reporter, json_tail, display)
 
-def _pick_preview_frames(clip: object, count: int, seed: int) -> List[int]:
-    """
-    Select preview frame indices evenly spread across a clip when possible.
-
-    Parameters:
-        clip (object): An object that may expose an integer `num_frames` attribute used as the clip length. If missing or invalid, the function treats the clip as having unknown length and returns indices starting at 0.
-        count (int): Number of preview frame indices to produce.
-        seed (int): Ignored by this implementation; kept for API compatibility.
-
-    Returns:
-        List[int]: A list of frame indices for previews. If the clip length is known and greater than `count`, indices are approximately evenly spaced and unique; if the clip length is less than or equal to `count`, returns all available indices; if length is unknown, returns `[0, 1, ..., count-1]`.
-    """
-    total = getattr(clip, "num_frames", 0)
-    if not isinstance(total, int) or total <= 0:
-        return [i for i in range(count)]
-    if total <= count:
-        return list(range(total))
-    step = max(total // (count + 1), 1)
-    frames = [min(total - 1, step * (idx + 1)) for idx in range(count)]
-    deduped = sorted(set(frames))
-    while len(deduped) < count:
-        next_frame = min(total - 1, deduped[-1] + 1 if deduped else 0)
-        if next_frame not in deduped:
-            deduped.append(next_frame)
-        else:
-            break
-    return deduped[:count]
-
-
-def _sample_random_frames(clip: object, count: int, seed: int, exclude: Sequence[int]) -> List[int]:
-    """
-    Select a deterministic sample of frame indices from a clip, excluding specified indices.
-
-    If the clip exposes a positive integer `num_frames`, this returns a sorted list of up to `count` unique frame indices chosen uniformly at random (deterministically seeded) from the set of available indices that are not in `exclude`. If the clip has no valid `num_frames` (missing, non-integer, or <= 0), returns the first `count` indices starting at 0. If fewer than `count` indices are available after exclusion, returns all available indices sorted.
-
-    Parameters:
-        clip (object): Object expected to expose an integer `num_frames` attribute.
-        count (int): Number of frame indices to return.
-        seed (int): Seed for deterministic sampling.
-        exclude (Sequence[int]): Frame indices to omit from selection.
-
-    Returns:
-        List[int]: Sorted list of selected frame indices.
-    """
-    total = getattr(clip, "num_frames", 0)
-    if not isinstance(total, int) or total <= 0:
-        return [i for i in range(count)]
-    exclude_set = set(exclude)
-    available = [idx for idx in range(total) if idx not in exclude_set]
-    if not available:
-        return list(range(min(count, total)))
-    rng = random.Random(seed)
-    if len(available) <= count:
-        return sorted(available)
-    return sorted(rng.sample(available, count))
-
-
-
-def _confirm_alignment_with_screenshots(
-    plans: Sequence[_ClipPlan],
-    summary: _AudioAlignmentSummary | None,
-    cfg: AppConfig,
-    root: Path,
-    reporter: CliOutputManagerProtocol,
-    display: _AudioAlignmentDisplayData | None,
-) -> None:
-    """
-    Prompt the user to confirm audio alignment by generating preview screenshots and recording the confirmation result.
-
-    Generates a short set of preview screenshots for the reference and target clips and stores their paths in `display.preview_paths`. If interactive confirmation is disabled or the session is non-interactive, marks confirmation as automatic. If the user rejects the previews, generates additional inspection screenshots, attempts to open the offsets file for manual editing, and raises a CLIAppError to indicate that manual adjustment is required.
-
-    Parameters:
-        plans (Sequence[_ClipPlan]): Clip plans for which previews and offsets are being validated.
-        summary (_AudioAlignmentSummary | None): Audio alignment summary that includes the reference plan and offsets; if None, the function is a no-op.
-        cfg (AppConfig): Application configuration containing screenshot and audio-alignment settings.
-        root (Path): Root directory used to construct the preview output directory.
-        reporter (CliOutputManagerProtocol): Reporter used to emit lines and render messages to the user.
-        display (_AudioAlignmentDisplayData | None): UI/display data object that will be populated with preview paths, confirmation status, and warnings; if None, the function is a no-op.
-
-    Raises:
-        CLIAppError: If screenshot generation fails or if the user rejects alignment and manual adjustment is required.
-    """
-    if summary is None or display is None:
-        return
-    if not cfg.audio_alignment.confirm_with_screenshots:
-        display.confirmation = display.confirmation or "auto"
-        return
-
-    def _alignment_pivot_note(message: str) -> None:
-        reporter.console.log(message, markup=False)
-
-    clips = [plan.clip for plan in plans]
-    if any(clip is None for clip in clips):
-        display.confirmation = display.confirmation or "auto"
-        return
-
-    reference_clip = summary.reference_plan.clip
-    if reference_clip is None:
-        display.confirmation = display.confirmation or "auto"
-        return
-
-    timestamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-    base_dir = _resolve_workspace_subdir(root, cfg.screenshots.directory_name, purpose="screenshots.directory_name")
-    metadata = summary.reference_plan.metadata
-    name_candidates = [
-        metadata.get("label"),
-        metadata.get("title"),
-        metadata.get("anime_title"),
-        metadata.get("file_name"),
-        summary.reference_name,
-        summary.reference_plan.path.stem,
-    ]
-    base_name = next((str(value).strip() for value in name_candidates if value and str(value).strip()), "clip")
-    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", base_name).strip("._-") or "clip"
-    preview_folder = f"{safe_name}-{timestamp}"
-    preview_dir = (base_dir / "audio_alignment" / preview_folder).resolve()
-
-    initial_frames = _pick_preview_frames(reference_clip, 2, cfg.audio_alignment.random_seed)
-
-    try:
-        generated = generate_screenshots(
-            clips,
-            initial_frames,
-            [str(plan.path) for plan in plans],
-            [plan.metadata for plan in plans],
-            preview_dir,
-            cfg.screenshots,
-            cfg.color,
-            trim_offsets=[plan.trim_start for plan in plans],
-            pivot_notifier=_alignment_pivot_note,
-            debug_color=bool(getattr(cfg.color, "debug_color", False)),
-        )
-    except ClipProcessError as exc:
-        hint = "Run 'frame-compare doctor' for dependency diagnostics."
-        raise CLIAppError(
-            f"Alignment preview failed: {exc}\nHint: {hint}",
-            rich_message=f"[red]Alignment preview failed:[/red] {exc}\n[yellow]Hint:[/yellow] {hint}",
-        ) from exc
-    except ScreenshotError as exc:
-        raise CLIAppError(
-            f"Alignment preview failed: {exc}",
-            rich_message=f"[red]Alignment preview failed:[/red] {exc}",
-        ) from exc
-
-    preview_paths = [str(path) for path in generated]
-    display.preview_paths = preview_paths
-    if preview_paths:
-        reporter.line(f"Preview saved: {', '.join(preview_paths)}")
-
-    reporter.line("Awaiting alignment confirmation. (press y/n)")
-
-    if not sys.stdin.isatty():  # pragma: no cover - runtime-dependent
-        display.confirmation = "auto"
-        reporter.line("confirm=auto")
-        display.warnings.append("[AUDIO] Audio alignment confirmation skipped (non-interactive session).")
-        return
-
-    if click.confirm(
-        "Do the preview frames look aligned?",
-        default=True,
-        show_default=True,
-    ):
-        display.confirmation = "yes"
-        reporter.line("confirm=yes")
-        return
-
-    display.confirmation = "no"
-    reporter.line("confirm=no")
-
-    inspection_dir = preview_dir / "inspection"
-    extra_frames = _sample_random_frames(
-        reference_clip,
-        5,
-        cfg.audio_alignment.random_seed + 1,
-        exclude=initial_frames,
-    )
-    try:
-        extra_paths = generate_screenshots(
-            clips,
-            extra_frames,
-            [str(plan.path) for plan in plans],
-            [plan.metadata for plan in plans],
-            inspection_dir,
-            cfg.screenshots,
-            cfg.color,
-            trim_offsets=[plan.trim_start for plan in plans],
-            pivot_notifier=_alignment_pivot_note,
-            debug_color=bool(getattr(cfg.color, "debug_color", False)),
-        )
-    except ClipProcessError as exc:
-        hint = "Run 'frame-compare doctor' for dependency diagnostics."
-        raise CLIAppError(
-            f"Alignment inspection failed: {exc}\nHint: {hint}",
-            rich_message=f"[red]Alignment inspection failed:[/red] {exc}\n[yellow]Hint:[/yellow] {hint}",
-        ) from exc
-    except ScreenshotError as exc:
-        raise CLIAppError(
-            f"Alignment inspection failed: {exc}",
-            rich_message=f"[red]Alignment inspection failed:[/red] {exc}",
-        ) from exc
-
-        if extra_paths:
-            reporter.line(
-                f"Additional inspection frames saved: {', '.join(str(path) for path in extra_paths)}"
-            )
-
-    reporter.console.print(
-        "[yellow]Audio alignment not confirmed.[/yellow] Adjust the offsets in the generated file and rerun."
-    )
-    try:
-        click.launch(str(summary.offsets_path))
-    except Exception:
-        reporter.console.print(f"[yellow]Open and edit:[/yellow] {summary.offsets_path}")
-
-    raise CLIAppError(
-        "Audio alignment requires manual adjustment.",
-        rich_message=(
-            "[red]Audio alignment requires manual adjustment.[/red] "
-            f"Edit {summary.offsets_path} and rerun."
-        ),
-    )
-
-
 def _validate_tonemap_overrides(overrides: MutableMapping[str, Any]) -> None:
     """Validate CLI-provided tonemap overrides and raise ClickException on invalid values."""
 
     if not overrides:
         return
 
-    def _bad(message: str) -> None:
+    def _bad(message: str) -> NoReturn:
         raise click.ClickException(message)
+
+    parsed_floats: dict[str, float] = {}
+
+    def _get_float(key: str, error_message: str) -> float:
+        if key in parsed_floats:
+            return parsed_floats[key]
+        try:
+            value = float(overrides[key])
+        except (TypeError, ValueError):
+            _bad(error_message)
+        if not math.isfinite(value):
+            _bad(error_message)
+        parsed_floats[key] = value
+        return value
+
     if "knee_offset" in overrides:
-        try:
-            knee_value = float(overrides["knee_offset"])
-        except (TypeError, ValueError):
-            _bad("--tm-knee must be a number in [0.0, 1.0]")
-        else:
-            if knee_value < 0.0 or knee_value > 1.0:
-                _bad("--tm-knee must be between 0.0 and 1.0")
+        knee_value = _get_float(
+            "knee_offset",
+            "--tm-knee must be a finite number in [0.0, 1.0]",
+        )
+        if knee_value < 0.0 or knee_value > 1.0:
+            _bad("--tm-knee must be between 0.0 and 1.0")
     if "dst_min_nits" in overrides:
-        try:
-            dst_value = float(overrides["dst_min_nits"])
-        except (TypeError, ValueError):
-            _bad("--tm-dst-min must be a non-negative number")
-        else:
-            if dst_value < 0.0:
-                _bad("--tm-dst-min must be >= 0.0")
+        dst_value = _get_float(
+            "dst_min_nits",
+            "--tm-dst-min must be a finite, non-negative number",
+        )
+        if dst_value < 0.0:
+            _bad("--tm-dst-min must be >= 0.0")
+    if "target_nits" in overrides:
+        target_value = _get_float(
+            "target_nits",
+            "--tm-target must be a finite, positive number",
+        )
+        if target_value <= 0.0:
+            _bad("--tm-target must be > 0")
     if "post_gamma" in overrides:
-        try:
-            gamma_value = float(overrides["post_gamma"])
-        except (TypeError, ValueError):
-            _bad("--tm-gamma must be a number between 0.9 and 1.1")
-        else:
-            if gamma_value < 0.9 or gamma_value > 1.1:
-                _bad("--tm-gamma must be between 0.9 and 1.1")
+        gamma_value = _get_float(
+            "post_gamma",
+            "--tm-gamma must be a finite number between 0.9 and 1.1",
+        )
+        if gamma_value < 0.9 or gamma_value > 1.1:
+            _bad("--tm-gamma must be between 0.9 and 1.1")
     if "dpd_preset" in overrides:
         dpd_value = str(overrides["dpd_preset"]).strip().lower()
         if dpd_value not in {"off", "fast", "balanced", "high_quality"}:
             _bad("--tm-dpd-preset must be one of: off, fast, balanced, high_quality")
     if "dpd_black_cutoff" in overrides:
-        try:
-            cutoff = float(overrides["dpd_black_cutoff"])
-        except (TypeError, ValueError):
-            _bad("--tm-dpd-black-cutoff must be a number in [0.0, 0.05]")
-        else:
-            if cutoff < 0.0 or cutoff > 0.05:
-                _bad("--tm-dpd-black-cutoff must be between 0.0 and 0.05")
+        cutoff = _get_float(
+            "dpd_black_cutoff",
+            "--tm-dpd-black-cutoff must be a finite number in [0.0, 0.05]",
+        )
+        if cutoff < 0.0 or cutoff > 0.05:
+            _bad("--tm-dpd-black-cutoff must be between 0.0 and 0.05")
     if "smoothing_period" in overrides:
-        try:
-            smoothing = float(overrides["smoothing_period"])
-        except (TypeError, ValueError):
-            _bad("--tm-smoothing must be a non-negative number")
-        else:
-            if smoothing < 0.0:
-                _bad("--tm-smoothing must be >= 0")
+        smoothing = _get_float(
+            "smoothing_period",
+            "--tm-smoothing must be a finite, non-negative number",
+        )
+        if smoothing < 0.0:
+            _bad("--tm-smoothing must be >= 0")
     if "scene_threshold_low" in overrides:
-        try:
-            low_value = float(overrides["scene_threshold_low"])
-        except (TypeError, ValueError):
-            _bad("--tm-scene-low must be a non-negative number")
-        else:
-            if low_value < 0.0:
-                _bad("--tm-scene-low must be >= 0")
+        low_value = _get_float(
+            "scene_threshold_low",
+            "--tm-scene-low must be a finite, non-negative number",
+        )
+        if low_value < 0.0:
+            _bad("--tm-scene-low must be >= 0")
     if "scene_threshold_high" in overrides:
-        try:
-            high_value = float(overrides["scene_threshold_high"])
-        except (TypeError, ValueError):
-            _bad("--tm-scene-high must be a non-negative number")
-        else:
-            if high_value < 0.0:
-                _bad("--tm-scene-high must be >= 0")
+        high_value = _get_float(
+            "scene_threshold_high",
+            "--tm-scene-high must be a finite, non-negative number",
+        )
+        if high_value < 0.0:
+            _bad("--tm-scene-high must be >= 0")
     if "scene_threshold_low" in overrides and "scene_threshold_high" in overrides:
-        if float(overrides["scene_threshold_high"]) < float(overrides["scene_threshold_low"]):
+        high_value = parsed_floats["scene_threshold_high"]
+        low_value = parsed_floats["scene_threshold_low"]
+        if high_value < low_value:
             _bad("--tm-scene-high must be >= --tm-scene-low")
     if "percentile" in overrides:
-        try:
-            percentile = float(overrides["percentile"])
-        except (TypeError, ValueError):
+        percentile = _get_float(
+            "percentile",
+            "--tm-percentile must be a finite number between 0 and 100",
+        )
+        if percentile < 0.0 or percentile > 100.0:
             _bad("--tm-percentile must be between 0 and 100")
-        else:
-            if percentile < 0.0 or percentile > 100.0:
-                _bad("--tm-percentile must be between 0 and 100")
     if "contrast_recovery" in overrides:
-        try:
-            contrast = float(overrides["contrast_recovery"])
-        except (TypeError, ValueError):
-            _bad("--tm-contrast must be a non-negative number")
-        else:
-            if contrast < 0.0:
-                _bad("--tm-contrast must be >= 0")
+        contrast = _get_float(
+            "contrast_recovery",
+            "--tm-contrast must be a finite, non-negative number",
+        )
+        if contrast < 0.0:
+            _bad("--tm-contrast must be >= 0")
     if "metadata" in overrides:
         meta_value = overrides["metadata"]
         if isinstance(meta_value, str):
