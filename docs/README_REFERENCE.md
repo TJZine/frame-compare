@@ -89,10 +89,25 @@ Dependency check:
 | `[screenshots].mod_crop` | Crop modulus. | int | `2` |
 | `[screenshots].odd_geometry_policy` | Policy for odd-pixel trims/pads on subsampled SDR (auto, force, or subsamp-safe). | str | `"auto"` |
 | `[screenshots].rgb_dither` | Dithering applied during final RGB24 conversion (FFmpeg path forces deterministic ordered when `"error_diffusion"` is requested). | str | `"error_diffusion"` |
+| `[screenshots].export_range` | Output range for PNGs (`"full"` expands limited SDR to full-range RGB; `"limited"` keeps video-range output). | str | `"full"` |
 | `[screenshots].auto_letterbox_crop` | Auto crop black bars. | bool | `false` |
 | `[screenshots].ffmpeg_timeout_seconds` | Per-frame FFmpeg timeout in seconds (must be >= 0; set 0 to disable). | float | `120.0` |
 | `[color].enable_tonemap` | HDR→SDR conversion toggle. | bool | `true` |
 | `[color].preset` | Tonemapping preset. | str | `"reference"` |
+| `[color].dst_min_nits` | Controls HDR toe lift before RGB export. | float | `0.18` |
+| `[color].knee_offset` | BT.2390 shoulder adjustment (0–1). | float | `0.50` |
+| `[color].dpd_preset` | libplacebo dynamic peak detection profile (`off`, `fast`, `balanced`, `high_quality`). | str | `"high_quality"` |
+| `[color].dpd_black_cutoff` | PQ fraction ignored during DPD sampling (0–0.05). | float | `0.01` |
+| `[color].smoothing_period` | Frames used by the HDR peak smoothing window (0 disables smoothing). | float | `45.0` |
+| `[color].scene_threshold_low` / `scene_threshold_high` | Window (in 1% PQ) that relaxes smoothing on scene changes. | float | `0.8` / `2.4` |
+| `[color].percentile` | Brightness percentile considered the scene peak (0–100). | float | `99.995` |
+| `[color].contrast_recovery` | High-frequency detail recovery strength. | float | `0.3` |
+| `[color].metadata` | Metadata source (`auto`, `none`, `hdr10`, `hdr10+`, `luminance`, or `0-4`). | str\|int | `"auto"` |
+| `[color].use_dovi` | Dolby Vision metadata usage (`auto`, `true`, `false`). | str\|bool\|null | `null` |
+| `[color].visualize_lut` | Replace output with libplacebo LUT visualisation. | bool | `false` |
+| `[color].show_clipping` | Highlight clipped pixels during tonemapping. | bool | `false` |
+| `[color].post_gamma_enable` | Enables limited-range post-tonemap gamma lift. | bool | `false` |
+| `[color].post_gamma` | Gamma factor applied when the lift is enabled (≈0.90–1.10). | float | `0.95` |
 | `[color].overlay_enabled` | Tonemap overlay flag. | bool | `true` |
 | `[color].default_matrix_hd` | Preferred matrix code when HD clips omit metadata. | str\|int\|null | `null` |
 | `[color].default_matrix_sd` | Preferred matrix code when SD clips omit metadata. | str\|int\|null | `null` |
@@ -102,6 +117,16 @@ Dependency check:
 | `[color].default_range_sdr` | Override SDR range fallback (`full` or `limited`). | str\|int\|null | `null` |
 | `[color].color_overrides` | Table mapping clip names to `{matrix, primaries, transfer, range}` overrides. | table | `{}` |
 <!-- markdownlint-restore -->
+
+Preset highlights:
+
+- `reference` — bt.2390 baseline with smoothing 45f, percentile `99.995`, contrast recovery `0.30`, and `dpd_preset=\"high_quality\"`.
+- `bt2390_spec` — spec-faithful bt.2390 variant with neutral cutoff and gentle contrast recovery `0.05`.
+- `filmic` — bt.2446a shoulder for softer roll-off and cinematic mid-tones.
+- `spline` — smooth spline curve with modest lift (target 105 nits, contrast `0.25`).
+- `contrast` — bt.2390 with extra punch (`target_nits=110`, contrast `0.45`) while keeping DPD active.
+- `bright_lift` — brightens dim masters (`target_nits=130`, dst_min `0.22`, contrast `0.50`).
+- `highlight_guard` — tames harsh highlights (`target_nits=90`, smoothing 50f, contrast `0.15`).
 
 ## Slow.pics and metadata automation
 
@@ -120,6 +145,15 @@ Dependency check:
 
 **Shortcut naming:** uploaded runs create a `.url` file using the resolved collection name (sanitised via `build_shortcut_filename` in `src/slowpics.py:148-164`).  
 If the name collapses to an empty string, the CLI falls back to the canonical comparison key; otherwise repeated runs with the same collection name will refresh the same shortcut file—append a suffix in `[slowpics].collection_name` if you need per-run artifacts.
+
+## HTML report viewer
+
+The bundled offline report mirrors slow.pics ergonomics and now includes:
+
+- Filmstrip thumbnails with per-frame selection badges and category filters (labels come from `SelectionDetail`).
+- Viewer modes for slider, overlay, difference, and blink comparisons, plus a fullscreen toggle.
+- Pointer-anchored zoom controls, fit presets, alignment presets, and persistent viewer state saved in `localStorage` (zoom, fit, mode, alignment, filters).
+- Keyboard shortcuts: `Ctrl/Cmd + wheel` to zoom, `Space + drag` to pan, `R` to reset zoom, `D`/`B` to switch modes, and `F` to toggle fullscreen.
 
 ## Runtime and environment
 

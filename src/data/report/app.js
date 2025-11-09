@@ -30,6 +30,7 @@
   const rightImage = document.getElementById("right-image");
   const frameLabel = document.getElementById("frame-label");
   const frameList = document.getElementById("frame-list");
+  const filterContainer = document.getElementById("category-filter");
   const encodeInfo = document.getElementById("encode-info");
   const frameMetadata = document.getElementById("frame-metadata");
   const subtitle = document.getElementById("report-subtitle");
@@ -37,17 +38,21 @@
   const linkContainer = document.getElementById("report-links");
   const sliderGroup = document.querySelector(".rc-slider-control");
   const viewerHelp = document.getElementById("viewer-help");
+  const fullscreenButton = document.getElementById("fullscreen-toggle");
 
-  const STORAGE_KEY = "frameCompareReportViewer.v2";
+  const STORAGE_KEY = "frameCompareReportViewer.v3";
   const ZOOM_MIN = 25;
   const ZOOM_MAX = 400;
   const ZOOM_STEP = 10;
   const CUSTOM_ALIGNMENT = "custom";
+  const BLINK_INTERVAL_MS = 700;
+  const VIEWER_MODES = new Set(["slider", "overlay", "difference", "blink"]);
 
   const state = {
     data: null,
     framesByIndex: new Map(),
     sortedFrameIndexes: [],
+    allFrameIndexes: [],
     currentFrame: null,
     leftEncode: null,
     rightEncode: null,
@@ -56,6 +61,9 @@
     fitPreset: "fit-width",
     alignment: "center",
     prevAlignment: "center",
+    overlayEncode: null,
+    overlayIndex: -1,
+    overlayOrder: [],
     pan: { x: 0, y: 0 },
     imageSize: null,
     pointer: null,
@@ -65,6 +73,13 @@
     panModifier: false,
     panAvailable: false,
     panHasMoved: false,
+    categories: [],
+    activeCategories: new Set(),
+    blinkTimerId: null,
+    blinkVisible: true,
+    blinkPaused: false,
+    fullscreenActive: false,
+    fullscreenReturnFocus: null,
   };
 
   function clampZoom(value) {
@@ -98,6 +113,9 @@
         fitPreset: state.fitPreset,
         alignment: state.alignment === CUSTOM_ALIGNMENT ? (state.prevAlignment || "center") : state.alignment,
         mode: state.mode,
+        overlayEncode: state.overlayEncode,
+        activeCategories: Array.from(state.activeCategories),
+        currentFrame: state.currentFrame,
       };
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
     } catch (error) {
@@ -105,8 +123,231 @@
     }
   }
 
+  function stopBlink() {
+    if (state.blinkTimerId !== null) {
+      window.clearInterval(state.blinkTimerId);
+      state.blinkTimerId = null;
+    }
+    state.blinkPaused = false;
+    state.blinkVisible = true;
+  }
+
+  function startBlink() {
+    stopBlink();
+    state.blinkVisible = true;
+    state.blinkPaused = false;
+    applyBlinkVisibility();
+    state.blinkTimerId = window.setInterval(() => {
+      if (state.blinkPaused) {
+        return;
+      }
+      state.blinkVisible = !state.blinkVisible;
+      applyBlinkVisibility();
+    }, BLINK_INTERVAL_MS);
+  }
+
+  function pauseBlink(setVisibleLeft = false) {
+    state.blinkPaused = true;
+    if (setVisibleLeft) {
+      state.blinkVisible = true;
+      applyBlinkVisibility();
+    }
+  }
+
+  function resumeBlink() {
+    const wasPaused = state.blinkPaused;
+    state.blinkPaused = false;
+    if (wasPaused) {
+      applyBlinkVisibility();
+    }
+  }
+
+  function applyBlinkVisibility() {
+    if (state.mode !== "blink" || !overlay || !rightImage) {
+      return;
+    }
+    const showLeft = state.blinkVisible;
+    overlay.style.visibility = showLeft ? "visible" : "hidden";
+    rightImage.style.visibility = showLeft ? "hidden" : "visible";
+  }
+
+  function getFullscreenElement() {
+    if (typeof document === "undefined") {
+      return null;
+    }
+    return (
+      document.fullscreenElement ||
+      document.webkitFullscreenElement ||
+      document.mozFullScreenElement ||
+      document.msFullscreenElement ||
+      null
+    );
+  }
+
+  function isFullscreenSupported() {
+    if (!viewerStage || typeof document === "undefined") {
+      return false;
+    }
+    return Boolean(
+      document.fullscreenEnabled ||
+        document.webkitFullscreenEnabled ||
+        document.mozFullScreenEnabled ||
+        document.msFullscreenEnabled ||
+        viewerStage.requestFullscreen ||
+        viewerStage.webkitRequestFullscreen ||
+        viewerStage.mozRequestFullScreen ||
+        viewerStage.msRequestFullscreen
+    );
+  }
+
+  function isFullscreenActive() {
+    return Boolean(getFullscreenElement());
+  }
+
+  function syncFullscreenState() {
+    const active = isFullscreenActive();
+    state.fullscreenActive = active;
+    if (fullscreenButton) {
+      fullscreenButton.setAttribute("aria-pressed", active ? "true" : "false");
+      fullscreenButton.title = active ? "Exit fullscreen (F)" : "Toggle fullscreen (F)";
+    }
+    if (document.body) {
+      document.body.classList.toggle("rc-fullscreen-active", active);
+    }
+    if (active) {
+      if (viewerStage && typeof viewerStage.focus === "function") {
+        viewerStage.focus({ preventScroll: true });
+      }
+    } else {
+      const returnFocus = state.fullscreenReturnFocus;
+      state.fullscreenReturnFocus = null;
+      if (returnFocus && typeof returnFocus.focus === "function") {
+        try {
+          returnFocus.focus({ preventScroll: true });
+        } catch (error) {
+          // Swallow focus errors.
+        }
+      } else if (fullscreenButton && typeof fullscreenButton.focus === "function") {
+        fullscreenButton.focus({ preventScroll: true });
+      }
+    }
+    applyBlinkVisibility();
+    window.requestAnimationFrame(() => {
+      applyTransform();
+      if (state.imageSize) {
+        updatePanAvailability(
+          state.imageSize.width * currentScale(),
+          state.imageSize.height * currentScale(),
+          getStageSize(),
+        );
+      } else {
+        updatePanAvailability(0, 0, getStageSize());
+      }
+    });
+  }
+
+  function enterFullscreen() {
+    if (!viewerStage || !isFullscreenSupported()) {
+      return;
+    }
+    const focusTarget = document.activeElement;
+    if (focusTarget && focusTarget instanceof HTMLElement) {
+      state.fullscreenReturnFocus = focusTarget;
+    } else {
+      state.fullscreenReturnFocus = fullscreenButton instanceof HTMLElement ? fullscreenButton : null;
+    }
+    const request =
+      viewerStage.requestFullscreen?.bind(viewerStage) ||
+      viewerStage.webkitRequestFullscreen?.bind(viewerStage) ||
+      viewerStage.mozRequestFullScreen?.bind(viewerStage) ||
+      viewerStage.msRequestFullscreen?.bind(viewerStage);
+    if (!request) {
+      syncFullscreenState();
+      return;
+    }
+    try {
+      const result = request();
+      if (result && typeof result.then === "function") {
+        result.catch(() => {
+          syncFullscreenState();
+        });
+      }
+    } catch (error) {
+      syncFullscreenState();
+    }
+  }
+
+  function exitFullscreen() {
+    if (typeof document === "undefined") {
+      return;
+    }
+    if (!state.fullscreenReturnFocus && fullscreenButton instanceof HTMLElement) {
+      state.fullscreenReturnFocus = fullscreenButton;
+    }
+    const exit =
+      document.exitFullscreen?.bind(document) ||
+      document.webkitExitFullscreen?.bind(document) ||
+      document.mozCancelFullScreen?.bind(document) ||
+      document.msExitFullscreen?.bind(document);
+    if (!exit) {
+      syncFullscreenState();
+      return;
+    }
+    try {
+      const result = exit();
+      if (result && typeof result.then === "function") {
+        result.catch(() => {
+          syncFullscreenState();
+        });
+      }
+    } catch (error) {
+      syncFullscreenState();
+    }
+  }
+
+  function toggleFullscreen() {
+    if (!isFullscreenSupported()) {
+      return;
+    }
+    if (isFullscreenActive()) {
+      exitFullscreen();
+    } else {
+      enterFullscreen();
+    }
+  }
+
+  function handleFullscreenChange() {
+    syncFullscreenState();
+  }
+
+  const fullscreenEvents = [
+    "fullscreenchange",
+    "webkitfullscreenchange",
+    "mozfullscreenchange",
+    "MSFullscreenChange",
+  ];
+  fullscreenEvents.forEach((eventName) => {
+    document.addEventListener(eventName, handleFullscreenChange, false);
+  });
+
   const preferences = loadPreferences();
-  const hasModePreference = typeof preferences.mode === "string";
+  const storedMode = typeof preferences.mode === "string" && VIEWER_MODES.has(preferences.mode)
+    ? preferences.mode
+    : null;
+  const hasModePreference = Boolean(storedMode);
+  const storedCategoryKeys = Array.isArray(preferences.activeCategories)
+    ? preferences.activeCategories.filter((value) => typeof value === "string" && value.length > 0)
+    : [];
+  const hasCategoryPreference = storedCategoryKeys.length > 0;
+  const storedOverlayEncode =
+    typeof preferences.overlayEncode === "string" && preferences.overlayEncode.length > 0
+      ? preferences.overlayEncode
+      : null;
+  const hasOverlayPreference = Boolean(storedOverlayEncode);
+  const storedFrameIndex =
+    typeof preferences.currentFrame === "number" && Number.isFinite(preferences.currentFrame)
+      ? preferences.currentFrame
+      : null;
   if (preferences.zoom) {
     state.zoom = clampZoom(preferences.zoom);
   }
@@ -120,8 +361,8 @@
       state.prevAlignment = state.alignment;
     }
   }
-  if (typeof preferences.mode === "string") {
-    state.mode = preferences.mode === "overlay" ? "overlay" : "slider";
+  if (storedMode) {
+    state.mode = storedMode;
   }
 
   function showError(message) {
@@ -135,15 +376,17 @@
   function setSlider(value) {
     const percent = Math.min(100, Math.max(0, Number(value) || 0));
     sliderControl.value = String(percent);
-    if (state.mode === "overlay") {
+    if (state.mode === "overlay" || state.mode === "difference" || state.mode === "blink") {
       overlay.style.clipPath = "inset(0 0 0 0)";
       divider.style.visibility = "hidden";
+      divider.style.display = "none";
       return;
     }
     const clipRight = 100 - percent;
     overlay.style.clipPath = `inset(0 ${clipRight}% 0 0)`;
     divider.style.left = `${percent}%`;
     divider.style.visibility = "visible";
+    divider.style.display = "";
   }
 
   function currentScale() {
@@ -334,6 +577,15 @@
       leftLabel.textContent = sliderLabel;
       rightControl.style.display = "";
     }
+    if (leftSelect) {
+      if (state.mode === "overlay") {
+        if (state.overlayEncode && leftSelect.value !== state.overlayEncode) {
+          leftSelect.value = state.overlayEncode;
+        }
+      } else if (state.leftEncode && leftSelect.value !== state.leftEncode) {
+        leftSelect.value = state.leftEncode;
+      }
+    }
   }
 
   function setZoom(newZoom, focusPoint, options = {}) {
@@ -461,6 +713,132 @@
     });
   }
 
+  function renderFrameSelectOptions(frames) {
+    if (!frameSelect) {
+      return;
+    }
+    const desiredValue = state.currentFrame != null ? String(state.currentFrame) : null;
+    frameSelect.innerHTML = "";
+    frames.forEach((frame) => {
+      const option = document.createElement("option");
+      option.value = String(frame.index);
+      option.textContent = frame.label ? `${frame.index} — ${frame.label}` : String(frame.index);
+      frameSelect.appendChild(option);
+    });
+    if (desiredValue && frames.some((frame) => String(frame.index) === desiredValue)) {
+      frameSelect.value = desiredValue;
+    } else if (frames.length) {
+      frameSelect.value = String(frames[0].index);
+    } else {
+      frameSelect.value = "";
+    }
+  }
+
+  function getVisibleFrames() {
+    if (!state.data || !Array.isArray(state.data.frames)) {
+      return [];
+    }
+    if (state.activeCategories.size === 0) {
+      return state.data.frames;
+    }
+    return state.data.frames.filter((frame) => {
+      if (!frame || typeof frame !== "object") {
+        return false;
+      }
+      if (typeof frame.category_key !== "string") {
+        return false;
+      }
+      return state.activeCategories.has(frame.category_key);
+    });
+  }
+
+  function applyCategoryFilters() {
+    const frames = getVisibleFrames();
+    if (!Array.isArray(frames) || frames.length === 0) {
+      state.sortedFrameIndexes = [];
+      renderFilmstrip([]);
+      renderFrameSelectOptions([]);
+      state.currentFrame = null;
+      updateImages();
+      return;
+    }
+    const currentVisible = frames.some((frame) => frame.index === state.currentFrame);
+    if (!currentVisible) {
+      state.currentFrame = frames[0].index;
+    }
+    state.sortedFrameIndexes = frames.map((frame) => frame.index).sort((a, b) => a - b);
+    renderFilmstrip(frames);
+    renderFrameSelectOptions(frames);
+    selectFrame(state.currentFrame);
+  }
+
+  function renderCategoryFilters(categories) {
+    if (!filterContainer) {
+      return;
+    }
+    filterContainer.innerHTML = "";
+    if (!Array.isArray(categories) || categories.length === 0) {
+      filterContainer.hidden = true;
+      return;
+    }
+    filterContainer.hidden = false;
+
+    const toolbar = document.createElement("div");
+    toolbar.className = "rc-category-filter";
+
+    const showAllActive = state.activeCategories.size === 0;
+    const allButton = document.createElement("button");
+    allButton.type = "button";
+    allButton.className = "rc-category-filter__chip";
+    allButton.textContent = "All";
+    allButton.setAttribute("aria-pressed", showAllActive ? "true" : "false");
+    allButton.addEventListener("click", () => {
+      if (state.activeCategories.size === 0) {
+        return;
+      }
+      state.activeCategories.clear();
+      savePreferences();
+      renderCategoryFilters(state.categories);
+      applyCategoryFilters();
+    });
+    toolbar.appendChild(allButton);
+
+    categories.forEach((category) => {
+      if (!category || typeof category !== "object") {
+        return;
+      }
+      const key = typeof category.key === "string" ? category.key : "";
+      const label = typeof category.label === "string" ? category.label : "";
+      const count = typeof category.count === "number" ? category.count : null;
+      if (!key || !label) {
+        return;
+      }
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "rc-category-filter__chip";
+      button.dataset.key = key;
+      button.textContent = count != null ? `${label} (${count})` : label;
+      const isActive = state.activeCategories.has(key);
+      button.setAttribute("aria-pressed", isActive ? "true" : "false");
+      button.addEventListener("click", () => {
+        if (state.activeCategories.has(key)) {
+          state.activeCategories.delete(key);
+        } else {
+          state.activeCategories.add(key);
+        }
+        if (state.activeCategories.size === state.categories.length) {
+          state.activeCategories.clear();
+        }
+        savePreferences();
+        renderCategoryFilters(state.categories);
+        applyCategoryFilters();
+      });
+      toolbar.appendChild(button);
+    });
+
+    filterContainer.appendChild(toolbar);
+  }
+
   function renderFilmstrip(frames) {
     frameList.innerHTML = "";
     frames.forEach((frame) => {
@@ -468,8 +846,42 @@
       const button = document.createElement("button");
       button.type = "button";
       button.dataset.frame = String(frame.index);
-      const label = frame.label ? `${frame.index} · ${frame.label}` : String(frame.index);
-      button.textContent = label;
+      button.className = "rc-frame-thumb";
+      const frameLabelText = frame.label ? `${frame.index} · ${frame.label}` : String(frame.index);
+      button.setAttribute("aria-label", frameLabelText);
+
+      const thumbnailPath = typeof frame.thumbnail === "string" ? frame.thumbnail : null;
+      if (thumbnailPath) {
+        const figure = document.createElement("figure");
+        figure.className = "rc-frame-thumb__figure";
+        const image = document.createElement("img");
+        image.className = "rc-frame-thumb__image";
+        image.src = thumbnailPath;
+        image.loading = "lazy";
+        image.decoding = "async";
+        image.alt = frame.label ? `Frame ${frame.index} — ${frame.label}` : `Frame ${frame.index}`;
+        figure.appendChild(image);
+        button.appendChild(figure);
+      } else {
+        const placeholder = document.createElement("div");
+        placeholder.className = "rc-frame-thumb__placeholder";
+        placeholder.textContent = frame.index;
+        button.appendChild(placeholder);
+      }
+
+      const categoryLabel = typeof frame.category === "string" && frame.category ? frame.category : null;
+      if (categoryLabel) {
+        const badge = document.createElement("span");
+        badge.className = "rc-frame-thumb__badge";
+        badge.textContent = categoryLabel;
+        button.appendChild(badge);
+      }
+
+      const caption = document.createElement("span");
+      caption.className = "rc-frame-thumb__caption";
+      caption.textContent = frameLabelText;
+      button.appendChild(caption);
+
       button.addEventListener("click", () => {
         selectFrame(frame.index, true);
       });
@@ -482,7 +894,30 @@
     frameList.querySelectorAll("button").forEach((button) => {
       const isActive = Number(button.dataset.frame) === frameIndex;
       button.setAttribute("aria-current", isActive ? "true" : "false");
+      button.classList.toggle("rc-frame-thumb--active", isActive);
     });
+  }
+
+  function ensureActiveThumbnailVisible(frameIndex) {
+    const activeButton = frameList.querySelector(`button[data-frame="${frameIndex}"]`);
+    if (!activeButton) {
+      return;
+    }
+    const scroller = frameList.closest(".rc-filmstrip");
+    if (!(scroller instanceof HTMLElement)) {
+      return;
+    }
+    // Keep the active thumbnail visible without altering the page scroll position.
+    const scrollerRect = scroller.getBoundingClientRect();
+    const buttonRect = activeButton.getBoundingClientRect();
+    const overflowLeft = buttonRect.left - scrollerRect.left;
+    const overflowRight = buttonRect.right - scrollerRect.right;
+    if (overflowLeft < 0) {
+      scroller.scrollLeft = Math.max(0, scroller.scrollLeft + overflowLeft);
+    } else if (overflowRight > 0) {
+      const maxScrollLeft = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
+      scroller.scrollLeft = Math.min(maxScrollLeft, scroller.scrollLeft + overflowRight);
+    }
   }
 
   function updateFrameMetadata(frame, data) {
@@ -579,12 +1014,15 @@
     (frame.files || []).forEach((entry) => {
       fileMap.set(entry.encode, entry.path);
     });
-    const leftPath = fileMap.get(state.leftEncode) || null;
-    const rightPath = fileMap.get(state.rightEncode) || null;
+    const overlayLabelForMode = state.mode === "overlay" ? state.overlayEncode : null;
+    const leftLabelForMode = overlayLabelForMode || state.leftEncode;
+    const rightLabelForMode = state.rightEncode;
+    const leftPath = leftLabelForMode ? fileMap.get(leftLabelForMode) || null : null;
+    const rightPath = rightLabelForMode ? fileMap.get(rightLabelForMode) || null : null;
 
     if (leftPath) {
       leftImage.src = leftPath;
-      leftImage.alt = `${state.leftEncode} at frame ${frame.index}`;
+      leftImage.alt = `${leftLabelForMode} at frame ${frame.index}`;
     } else {
       leftImage.removeAttribute("src");
       leftImage.alt = "";
@@ -592,19 +1030,23 @@
 
     if (rightPath) {
       rightImage.src = rightPath;
-      rightImage.alt = `${state.rightEncode} at frame ${frame.index}`;
+      rightImage.alt = `${rightLabelForMode} at frame ${frame.index}`;
     } else {
       rightImage.removeAttribute("src");
       rightImage.alt = "";
     }
 
-    const sliderEnabled = Boolean(leftPath && rightPath && state.leftEncode !== state.rightEncode);
+    const sliderLeftPath = state.leftEncode ? fileMap.get(state.leftEncode) || null : null;
+    const sliderEnabled = Boolean(
+      sliderLeftPath && rightPath && state.leftEncode && state.leftEncode !== state.rightEncode,
+    );
     setSlider(sliderControl.value);
     updateModeUI(sliderEnabled, Boolean(leftPath), Boolean(rightPath));
 
     frameLabel.textContent = frame.label ? `Frame ${frame.index} — ${frame.label}` : `Frame ${frame.index}`;
     frameSelect.value = String(frame.index);
     updateFilmstripActive(frame.index);
+    ensureActiveThumbnailVisible(frame.index);
     updateFrameMetadata(frame, state.data);
     if (!preservePan) {
       state.pan = { x: 0, y: 0 };
@@ -625,6 +1067,7 @@
       return;
     }
     state.currentFrame = frameIndex;
+    savePreferences();
     updateImages();
     if (focusFilmstrip) {
       const button = frameList.querySelector(`button[data-frame="${frameIndex}"]`);
@@ -641,7 +1084,20 @@
     const rightDefault = defaults.right && encodes.find((encode) => encode.label === defaults.right);
     state.leftEncode = leftDefault ? leftDefault.label : (encodes[0] ? encodes[0].label : null);
     state.rightEncode = rightDefault ? rightDefault.label : (encodes[1] ? encodes[1].label : state.leftEncode);
-    if (state.leftEncode) {
+    let overlayLabel = null;
+    if (hasOverlayPreference && storedOverlayEncode && state.overlayOrder.includes(storedOverlayEncode)) {
+      overlayLabel = storedOverlayEncode;
+    }
+    if (!overlayLabel) {
+      overlayLabel = state.leftEncode || (state.overlayOrder.length > 0 ? state.overlayOrder[0] : null);
+    }
+    state.overlayEncode = overlayLabel;
+    state.overlayIndex = overlayLabel ? state.overlayOrder.indexOf(overlayLabel) : -1;
+    if (state.mode === "overlay") {
+      if (state.overlayEncode) {
+        leftSelect.value = state.overlayEncode;
+      }
+    } else if (state.leftEncode) {
       leftSelect.value = state.leftEncode;
     }
     if (state.rightEncode) {
@@ -651,41 +1107,81 @@
 
   function init(data) {
     state.data = data;
+    state.overlayOrder = Array.isArray(data.encodes)
+      ? data.encodes
+          .map((encode) =>
+            encode && typeof encode.label === "string" && encode.label.length > 0 ? encode.label : null,
+          )
+          .filter((label) => typeof label === "string")
+      : [];
     const frames = Array.isArray(data.frames) ? data.frames : [];
+    state.framesByIndex.clear();
     frames.forEach((frame) => {
       state.framesByIndex.set(frame.index, frame);
     });
-    state.sortedFrameIndexes = frames.map((frame) => frame.index).sort((a, b) => a - b);
+    state.allFrameIndexes = frames.map((frame) => frame.index).sort((a, b) => a - b);
+    if (storedFrameIndex !== null && state.framesByIndex.has(storedFrameIndex)) {
+      state.currentFrame = storedFrameIndex;
+    } else {
+      state.currentFrame = null;
+    }
+
+    state.categories = Array.isArray(data.categories)
+      ? data.categories.filter(
+        (category) =>
+          category &&
+          typeof category === "object" &&
+          typeof category.key === "string" &&
+          category.key.length > 0 &&
+          typeof category.label === "string" &&
+          category.label.length > 0,
+      )
+      : [];
+    state.activeCategories.clear();
+    if (hasCategoryPreference && state.categories.length > 0) {
+      storedCategoryKeys.forEach((key) => {
+        if (state.categories.some((category) => category.key === key)) {
+          state.activeCategories.add(key);
+        }
+      });
+    }
 
     fillSelect(leftSelect, data.encodes || []);
     fillSelect(rightSelect, data.encodes || []);
     renderEncodes(data.encodes || []);
-    renderFilmstrip(frames);
+    renderCategoryFilters(state.categories);
+
+    applyDefaults(data);
+
+    if (!hasModePreference) {
+      const defaultMode = typeof data.viewer_mode === "string" ? data.viewer_mode : "slider";
+      state.mode = VIEWER_MODES.has(defaultMode) ? defaultMode : defaultMode === "overlay" ? "overlay" : "slider";
+    }
+    if (modeSelect) {
+      modeSelect.value = state.mode;
+    }
+    updateEncodeControlsForMode();
+
+    applyCategoryFilters();
+
+    if (state.currentFrame == null && state.sortedFrameIndexes.length === 0) {
+      showError("No frames found in report data.");
+      return;
+    }
     renderSubtitle(data);
     renderFooter(data);
 
-    frameSelect.innerHTML = "";
-    frames.forEach((frame) => {
-      const option = document.createElement("option");
-      option.value = String(frame.index);
-      option.textContent = frame.label ? `${frame.index} — ${frame.label}` : String(frame.index);
-      frameSelect.appendChild(option);
-    });
-
-    applyDefaults(data);
-    const firstFrame = frames.length ? frames[0].index : null;
-    if (firstFrame !== null) {
-      if (!hasModePreference) {
-        state.mode = (data.viewer_mode || "slider") === "overlay" ? "overlay" : "slider";
+    if (fullscreenButton) {
+      const supported = isFullscreenSupported();
+      fullscreenButton.disabled = !supported;
+      fullscreenButton.setAttribute("aria-pressed", "false");
+      if (supported) {
+        fullscreenButton.addEventListener("click", () => {
+          toggleFullscreen();
+        });
       }
-      if (modeSelect) {
-        modeSelect.value = state.mode;
-      }
-      updateEncodeControlsForMode();
-      selectFrame(firstFrame);
-    } else {
-      showError("No frames found in report data.");
     }
+    syncFullscreenState();
   }
 
   frameSelect.addEventListener("change", (event) => {
@@ -694,13 +1190,29 @@
   });
 
   leftSelect.addEventListener("change", (event) => {
-    state.leftEncode = event.target.value;
-    updateImages(state.mode === "overlay");
+    const selected = event.target.value;
+    if (state.mode === "overlay") {
+      setOverlayEncode(selected);
+    } else {
+      const previousLeft = state.leftEncode;
+      state.leftEncode = selected;
+      if (
+        selected &&
+        typeof selected === "string" &&
+        state.overlayOrder.includes(selected) &&
+        (!state.overlayEncode || state.overlayEncode === previousLeft)
+      ) {
+        state.overlayEncode = selected;
+        state.overlayIndex = state.overlayOrder.indexOf(selected);
+      }
+      updateImages(state.mode !== "slider");
+      savePreferences();
+    }
   });
 
   rightSelect.addEventListener("change", (event) => {
     state.rightEncode = event.target.value;
-    updateImages(state.mode === "overlay");
+    updateImages(state.mode !== "slider");
   });
 
   sliderControl.addEventListener("input", (event) => {
@@ -789,56 +1301,98 @@
     return state.data.encodes.map((encode) => encode.label);
   }
 
-  function swapSelectedEncodes() {
-    if (!state.leftEncode || !state.rightEncode) {
-      return;
-    }
-    const temp = state.leftEncode;
-    state.leftEncode = state.rightEncode;
-    state.rightEncode = temp;
-    if (leftSelect) {
-      leftSelect.value = state.leftEncode;
-    }
-    if (rightSelect) {
-      rightSelect.value = state.rightEncode;
-    }
-    updateImages(true);
-  }
-
   function updateModeUI(sliderEnabled, leftAvailable, rightAvailable) {
-    if (sliderGroup instanceof HTMLElement) {
-      sliderGroup.style.display = state.mode === "overlay" ? "none" : "";
+    const hasBoth = leftAvailable && rightAvailable;
+    const previousMode = state.mode;
+    let mode = state.mode;
+
+    if ((mode === "difference" || mode === "blink") && !hasBoth) {
+      mode = leftAvailable ? "overlay" : "slider";
+    } else if (mode === "overlay" && !leftAvailable) {
+      mode = sliderEnabled ? "slider" : (hasBoth ? "difference" : "slider");
     }
+
+    if (!VIEWER_MODES.has(mode)) {
+      mode = "slider";
+    }
+
+    if (mode !== state.mode) {
+      state.mode = mode;
+    }
+    if (previousMode === "blink" && state.mode !== "blink") {
+      stopBlink();
+    }
+
+    if (modeSelect) {
+      modeSelect.value = state.mode;
+    }
+
     if (viewerStage instanceof HTMLElement) {
       viewerStage.dataset.mode = state.mode;
       viewerStage.classList.toggle("rc-mode-overlay", state.mode === "overlay");
       viewerStage.classList.toggle("rc-mode-slider", state.mode === "slider");
+      viewerStage.classList.toggle("rc-mode-difference", state.mode === "difference");
+      viewerStage.classList.toggle("rc-mode-blink", state.mode === "blink");
     }
-    if (state.mode === "overlay") {
-      const overlayActive = leftAvailable && rightAvailable;
-      sliderControl.disabled = true;
-      overlay.style.visibility = overlayActive ? "visible" : "hidden";
-      overlay.style.clipPath = "inset(0 0 0 0)";
-      divider.style.visibility = "hidden";
-    } else {
-      sliderControl.disabled = !sliderEnabled;
+
+    const hideSlider = state.mode !== "slider";
+    if (sliderGroup instanceof HTMLElement) {
+      sliderGroup.style.display = hideSlider ? "none" : "";
+    }
+    sliderControl.disabled = hideSlider || !sliderEnabled;
+
+    if (state.mode === "slider") {
+      stopBlink();
       if (sliderEnabled) {
         overlay.style.visibility = "visible";
         const percent = Math.min(100, Math.max(0, Number(sliderControl.value) || 0));
         const clipRight = 100 - percent;
         overlay.style.clipPath = `inset(0 ${clipRight}% 0 0)`;
+        divider.style.display = "";
         divider.style.visibility = "visible";
         divider.style.left = `${percent}%`;
       } else {
         overlay.style.visibility = "hidden";
         divider.style.visibility = "hidden";
+        divider.style.display = "none";
+      }
+      rightImage.style.visibility = rightAvailable ? "visible" : "hidden";
+    } else if (state.mode === "overlay") {
+      stopBlink();
+      overlay.style.visibility = leftAvailable ? "visible" : "hidden";
+      overlay.style.clipPath = "inset(0 0 0 0)";
+      divider.style.visibility = "hidden";
+      divider.style.display = "none";
+      rightImage.style.visibility = rightAvailable ? "visible" : "hidden";
+    } else if (state.mode === "difference") {
+      stopBlink();
+      overlay.style.visibility = hasBoth ? "visible" : "hidden";
+      overlay.style.clipPath = "inset(0 0 0 0)";
+      divider.style.visibility = "hidden";
+      divider.style.display = "none";
+      rightImage.style.visibility = hasBoth ? "visible" : "hidden";
+    } else if (state.mode === "blink") {
+      overlay.style.clipPath = "inset(0 0 0 0)";
+      divider.style.visibility = "hidden";
+      divider.style.display = "none";
+      if (hasBoth) {
+        startBlink();
+      } else {
+        stopBlink();
+        overlay.style.visibility = leftAvailable ? "visible" : "hidden";
+        rightImage.style.visibility = rightAvailable ? "visible" : "hidden";
       }
     }
+
     if (modeSelect) {
       modeSelect.value = state.mode;
     }
     updateEncodeControlsForMode();
+    applyBlinkVisibility();
     applyTransform();
+    if (previousMode !== state.mode) {
+      savePreferences();
+    }
   }
 
   let sliderDragActive = false;
@@ -860,9 +1414,51 @@
     }
   }
 
+  function setOverlayEncode(label) {
+    if (!label || typeof label !== "string") {
+      state.overlayEncode = null;
+      state.overlayIndex = -1;
+      savePreferences();
+      return;
+    }
+    if (!state.overlayOrder.includes(label)) {
+      return;
+    }
+    if (state.overlayEncode === label) {
+      return;
+    }
+    state.overlayEncode = label;
+    state.overlayIndex = state.overlayOrder.indexOf(label);
+    if (state.mode === "overlay" && leftSelect && leftSelect.value !== label) {
+      leftSelect.value = label;
+    }
+    updateImages(true);
+    savePreferences();
+  }
+
+  function cycleOverlayEncode(step) {
+    const labels = state.overlayOrder;
+    if (!labels.length) {
+      return;
+    }
+    let index = state.overlayIndex;
+    if (index < 0) {
+      index = state.overlayEncode ? labels.indexOf(state.overlayEncode) : -1;
+    }
+    if (index < 0) {
+      index = 0;
+    }
+    const total = labels.length;
+    index = (index + step + total) % total;
+    const candidate = labels[index];
+    if (candidate) {
+      setOverlayEncode(candidate);
+    }
+  }
+
   function cycleRightEncode(step) {
     if (state.mode === "overlay") {
-      swapSelectedEncodes();
+      cycleOverlayEncode(step);
       return;
     }
     const labels = encodeLabels();
@@ -880,15 +1476,36 @@
       if (candidate !== state.leftEncode || total === 1) {
         state.rightEncode = candidate;
         rightSelect.value = candidate;
-        updateImages(state.mode === "overlay");
+        updateImages(state.mode !== "slider");
         break;
       }
     }
   }
 
   function applyMode(mode) {
-    state.mode = mode === "overlay" ? "overlay" : "slider";
-    updateImages(state.mode === "overlay");
+    const normalized = VIEWER_MODES.has(mode) ? mode : "slider";
+    const preservePan = normalized !== "slider";
+    if (normalized === "overlay") {
+      if (!state.overlayEncode || !state.overlayOrder.includes(state.overlayEncode)) {
+        let fallback = null;
+        if (state.leftEncode && state.overlayOrder.includes(state.leftEncode)) {
+          fallback = state.leftEncode;
+        } else if (state.overlayOrder.length > 0) {
+          fallback = state.overlayOrder[0];
+        }
+        if (fallback) {
+          state.overlayEncode = fallback;
+        }
+      }
+      if (state.overlayEncode && state.overlayIndex < 0) {
+        state.overlayIndex = state.overlayOrder.indexOf(state.overlayEncode);
+      }
+    }
+    state.mode = normalized;
+    updateImages(preservePan);
+    if (modeSelect) {
+      modeSelect.value = state.mode;
+    }
     savePreferences();
   }
 
@@ -974,6 +1591,21 @@
       setZoom(100);
       return;
     }
+    if (event.key === "f" || event.key === "F") {
+      event.preventDefault();
+      toggleFullscreen();
+      return;
+    }
+    if (event.key === "d" || event.key === "D") {
+      event.preventDefault();
+      applyMode("difference");
+      return;
+    }
+    if (event.key === "b" || event.key === "B") {
+      event.preventDefault();
+      applyMode("blink");
+      return;
+    }
     if (event.key === "ArrowRight") {
       event.preventDefault();
       const frames = state.sortedFrameIndexes;
@@ -989,12 +1621,12 @@
         selectFrame(frames[index - 1]);
       }
     } else if (event.key === "ArrowUp") {
-      if (state.mode === "overlay") {
+      if (state.mode === "overlay" || state.mode === "difference" || state.mode === "blink") {
         event.preventDefault();
         cycleRightEncode(-1);
       }
     } else if (event.key === "ArrowDown") {
-      if (state.mode === "overlay") {
+      if (state.mode === "overlay" || state.mode === "difference" || state.mode === "blink") {
         event.preventDefault();
         cycleRightEncode(1);
       }
@@ -1022,6 +1654,9 @@
       state.imageSize ? state.imageSize.height * currentScale() : 0,
       getStageSize(),
     );
+    if (state.mode === "blink") {
+      resumeBlink();
+    }
   });
 
   viewerStage.addEventListener("click", () => {
@@ -1030,7 +1665,7 @@
       state.panHasMoved = false;
       return;
     }
-    if (state.mode === "overlay" && !state.panActive) {
+    if ((state.mode === "overlay" || state.mode === "difference") && !state.panActive) {
       cycleRightEncode(1);
     }
     state.panHasMoved = false;
@@ -1039,6 +1674,9 @@
   viewerStage.addEventListener("pointerdown", (event) => {
     viewerStage.focus();
     state.pointer = { x: event.clientX, y: event.clientY };
+    if (state.mode === "blink") {
+      pauseBlink(true);
+    }
     if (event.target === divider && state.mode === "slider" && !sliderControl.disabled) {
       sliderDragActive = true;
       sliderPointerId = event.pointerId;
@@ -1122,6 +1760,9 @@
     if (sliderDragActive) {
       endSliderDrag(event);
     }
+    if (state.mode === "blink") {
+      resumeBlink();
+    }
   });
 
   viewerStage.addEventListener("pointercancel", (event) => {
@@ -1130,6 +1771,9 @@
     }
     if (sliderDragActive) {
       endSliderDrag(event);
+    }
+    if (state.mode === "blink") {
+      resumeBlink();
     }
   });
 

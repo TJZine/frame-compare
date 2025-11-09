@@ -87,4 +87,13 @@ def test_generate_html_report(tmp_path: Path) -> None:
     files_entry = payload["frames"][0]["files"]
     labels = {item["encode"] for item in files_entry}
     assert labels == {"Encode A", "Encode B"}
+    assert payload["frames"][0]["thumbnail"] == "../screens/10 - Encode A.png"
+    assert payload["frames"][0]["category"] == "Bright"
+    assert payload["frames"][0]["category_key"] == "bright"
+    assert payload["frames"][1]["category"] == "Motion"
+    assert payload["frames"][1]["category_key"] == "motion"
+    assert payload["categories"] == [
+        {"key": "bright", "label": "Bright", "count": 1},
+        {"key": "motion", "label": "Motion", "count": 1},
+    ]
     assert payload["viewer_mode"] == "slider"

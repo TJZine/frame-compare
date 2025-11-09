@@ -20,6 +20,13 @@ class RGBDither(str, Enum):
     NONE = "none"
 
 
+class ExportRange(str, Enum):
+    """Output range options for exported RGB PNGs."""
+
+    FULL = "full"
+    LIMITED = "limited"
+
+
 @dataclass
 class AnalysisConfig:
     """Options controlling frame analysis, selection, and data caching."""
@@ -69,6 +76,7 @@ class ScreenshotConfig:
     ffmpeg_timeout_seconds: float = 120.0
     odd_geometry_policy: OddGeometryPolicy = OddGeometryPolicy.AUTO
     rgb_dither: RGBDither = RGBDither.ERROR_DIFFUSION
+    export_range: ExportRange = ExportRange.FULL
 
 
 @dataclass
@@ -80,7 +88,7 @@ class ColorConfig:
     tone_curve: str = "bt.2390"
     dynamic_peak_detection: bool = True
     target_nits: float = 100.0
-    dst_min_nits: float = 0.1
+    dst_min_nits: float = 0.18
     overlay_enabled: bool = True
     overlay_text_template: str = (
         "Tonemapping Algorithm: {tone_curve} dpd = {dynamic_peak_detection} dst = {target_nits} nits"
@@ -101,6 +109,21 @@ class ColorConfig:
     default_transfer_sdr: Optional[str] = None
     default_range_sdr: Optional[str] = None
     color_overrides: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    debug_color: bool = False
+    knee_offset: float = 0.5
+    dpd_preset: str = "high_quality"
+    dpd_black_cutoff: float = 0.01
+    post_gamma_enable: bool = False
+    post_gamma: float = 1.0
+    smoothing_period: float = 45.0
+    scene_threshold_low: float = 0.8
+    scene_threshold_high: float = 2.4
+    percentile: float = 99.995
+    contrast_recovery: float = 0.3
+    metadata: str | int = "auto"
+    use_dovi: Optional[bool] = None
+    visualize_lut: bool = False
+    show_clipping: bool = False
 
 
 @dataclass

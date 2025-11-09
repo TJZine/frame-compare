@@ -304,6 +304,31 @@ def load_config(path: str) -> AppConfig:
         raise ConfigError("color.target_nits must be > 0")
     if app.color.dst_min_nits < 0:
         raise ConfigError("color.dst_min_nits must be >= 0")
+    if app.color.knee_offset < 0 or app.color.knee_offset > 1:
+        raise ConfigError("color.knee_offset must be between 0 and 1")
+    dpd_preset_value = str(getattr(app.color, "dpd_preset", "") or "").strip().lower() or "off"
+    valid_dpd_presets = {"off", "fast", "balanced", "high_quality"}
+    if dpd_preset_value not in valid_dpd_presets:
+        raise ConfigError("color.dpd_preset must be one of off, fast, balanced, or high_quality")
+    if not app.color.dynamic_peak_detection:
+        dpd_preset_value = "off"
+        app.color.dpd_black_cutoff = 0.0
+    else:
+        try:
+            cutoff_value = float(app.color.dpd_black_cutoff)
+        except (TypeError, ValueError) as exc:
+            raise ConfigError("color.dpd_black_cutoff must be a number") from exc
+        if cutoff_value < 0 or cutoff_value > 0.05:
+            raise ConfigError("color.dpd_black_cutoff must be between 0 and 0.05")
+        app.color.dpd_black_cutoff = cutoff_value
+    app.color.dpd_preset = dpd_preset_value
+    try:
+        post_gamma_value = float(app.color.post_gamma)
+    except (TypeError, ValueError) as exc:  # pragma: no cover - defensive
+        raise ConfigError("color.post_gamma must be a number") from exc
+    if post_gamma_value < 0.9 or post_gamma_value > 1.1:
+        raise ConfigError("color.post_gamma must be between 0.9 and 1.1")
+    app.color.post_gamma = post_gamma_value
     if app.color.verify_luma_threshold < 0 or app.color.verify_luma_threshold > 1:
         raise ConfigError("color.verify_luma_threshold must be between 0 and 1")
     if app.color.verify_start_seconds < 0:
@@ -312,6 +337,83 @@ def load_config(path: str) -> AppConfig:
         raise ConfigError("color.verify_step_seconds must be > 0")
     if app.color.verify_max_seconds < 0:
         raise ConfigError("color.verify_max_seconds must be >= 0")
+    try:
+        smoothing_period = float(app.color.smoothing_period)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError("color.smoothing_period must be a number") from exc
+    if smoothing_period < 0:
+        raise ConfigError("color.smoothing_period must be >= 0")
+    app.color.smoothing_period = smoothing_period
+    try:
+        scene_low = float(app.color.scene_threshold_low)
+        scene_high = float(app.color.scene_threshold_high)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError("color.scene_threshold_low/high must be numbers") from exc
+    if scene_low < 0:
+        raise ConfigError("color.scene_threshold_low must be >= 0")
+    if scene_high < 0:
+        raise ConfigError("color.scene_threshold_high must be >= 0")
+    if scene_high < scene_low:
+        raise ConfigError("color.scene_threshold_high must be >= color.scene_threshold_low")
+    app.color.scene_threshold_low = scene_low
+    app.color.scene_threshold_high = scene_high
+    try:
+        percentile_value = float(app.color.percentile)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError("color.percentile must be a number") from exc
+    if percentile_value < 0 or percentile_value > 100:
+        raise ConfigError("color.percentile must be between 0 and 100")
+    app.color.percentile = percentile_value
+    try:
+        contrast_recovery = float(app.color.contrast_recovery)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError("color.contrast_recovery must be a number") from exc
+    if contrast_recovery < 0:
+        raise ConfigError("color.contrast_recovery must be >= 0")
+    app.color.contrast_recovery = contrast_recovery
+    metadata_value = getattr(app.color, "metadata", "auto")
+    metadata_options = {"none", "hdr10", "hdr10+", "hdr10plus", "luminance"}
+    if isinstance(metadata_value, str):
+        lowered = metadata_value.strip().lower()
+        if lowered in {"", "auto"}:
+            app.color.metadata = "auto"
+        elif lowered in metadata_options:
+            app.color.metadata = lowered
+        else:
+            try:
+                numeric_metadata = int(lowered)
+            except ValueError as exc:
+                raise ConfigError("color.metadata must be one of auto, none, hdr10, hdr10+, luminance, or an integer 0-4") from exc
+            if numeric_metadata < 0 or numeric_metadata > 4:
+                raise ConfigError("color.metadata integer must be between 0 and 4")
+            app.color.metadata = numeric_metadata
+    else:
+        if type(metadata_value) is not int:
+            raise ConfigError(
+                "color.metadata must be one of auto, none, hdr10, hdr10+, luminance, or an integer 0-4"
+            )
+        numeric_metadata = metadata_value
+        if numeric_metadata < 0 or numeric_metadata > 4:
+            raise ConfigError("color.metadata integer must be between 0 and 4")
+        app.color.metadata = numeric_metadata
+    use_dovi_value = getattr(app.color, "use_dovi", None)
+    if isinstance(use_dovi_value, str):
+        lowered = use_dovi_value.strip().lower()
+        if lowered in {"auto", ""}:
+            app.color.use_dovi = None
+        elif lowered in {"true", "1", "yes", "on"}:
+            app.color.use_dovi = True
+        elif lowered in {"false", "0", "no", "off"}:
+            app.color.use_dovi = False
+        else:
+            raise ConfigError("color.use_dovi must be true, false, or auto")
+    elif use_dovi_value is not None:
+        if isinstance(use_dovi_value, bool):
+            app.color.use_dovi = use_dovi_value
+        elif isinstance(use_dovi_value, int) and use_dovi_value in (0, 1):
+            app.color.use_dovi = bool(use_dovi_value)
+        else:
+            raise ConfigError("color.use_dovi must be true, false, or auto")
     overlay_mode = str(getattr(app.color, "overlay_mode", "minimal")).strip().lower()
     if overlay_mode not in {"minimal", "diagnostic"}:
         raise ConfigError("color.overlay_mode must be 'minimal' or 'diagnostic'")

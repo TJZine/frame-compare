@@ -21,15 +21,39 @@ reference.
 ## Presets & configuration
 `[color]` defines the behaviour, defaulting to the "reference" preset:
 
-| Preset | Tone curve | Target nits | DPD |
-| ------ | ---------- | ----------- | --- |
-| reference | `bt.2390` | 100 | enabled |
-| contrast  | `mobius`  | 120 | disabled |
-| filmic    | `hable`   | 100 | enabled |
+| Preset | Tone curve | Target nits | DPD | Notes |
+| ------ | ---------- | ----------- | --- | ----- |
+| reference | `bt.2390` | 100 | enabled | High-quality baseline: smoothing 45f, percentile `99.995`, contrast recovery `0.30`. |
+| bt2390_spec | `bt.2390` | 100 | enabled | Spec-faithful: neutral cutoff, gentle contrast recovery `0.05`. |
+| filmic | `bt.2446a` | 100 | enabled | Cinematic shoulder with knee `0.58`, percentile `99.9`, subtle contrast lift. |
+| spline | `spline` | 105 | enabled | Smooth spline roll-off, mids gently lifted with contrast `0.25`. |
+| contrast | `bt.2390` | 110 | enabled | Punchier mids/highs, contrast recovery `0.45`, DPD kept on to protect highlights. |
+| bright_lift | `bt.2390` | 130 | enabled | Aggressively brightens mids, dst_min `0.22`, contrast `0.50`, best for dark masters. |
+| highlight_guard | `bt.2390` | 90 | enabled | Lowers peak brightness, smoothing 50f, keeps highlights under control on harsh grades. |
 
 Set `preset="custom"` to honour manual `tone_curve`, `target_nits`, and `dynamic_peak_detection`. `dst_min_nits` feeds
-libplacebo's `dst_min`. Logs include `[TM INPUT]` and `[TM APPLIED]` lines showing the inferred color props and the
-resolved curve/DPD/nits.
+libplacebo's `dst_min`. `knee_offset` forwards to `tone_mapping_param` for BT.2390 curves, and `dpd_preset` selects the
+libplacebo peak-detection mode (`off`, `fast`, `balanced`, `high_quality`). Logs include `[TM INPUT]` and `[TM APPLIED]`
+lines showing the inferred color props and the resolved curve/DPD/nits. Runtime tweaks are available via CLI flags such
+as `--tm-preset`, `--tm-knee`, `--tm-dst-min`, and `--tm-dpd-preset`, making it easy to audition settings before
+committing them to `config.toml`.
+
+For finer control, additional `[color]` keys expose libplacebo’s smoothing and debugging options:
+
+- `smoothing_period`, `scene_threshold_low`, and `scene_threshold_high` steer the HDR peak smoothing window.
+- `percentile` and `contrast_recovery` allow you to match the libplacebo `high_quality` preset (`99.995` / `0.3`) or dial them back.
+- `metadata` and `use_dovi` select the metadata source (`auto`, `none`, `hdr10`, `hdr10+`, `luminance`) and whether Dolby Vision RPUs are consumed.
+- `visualize_lut` renders the tone-mapping LUT instead of frames, while `show_clipping` highlights clipped pixels—useful for quick QA passes.
+Matching CLI overrides (`--tm-smoothing`, `--tm-scene-low`, `--tm-percentile`, `--tm-contrast`, `--tm-metadata`, `--tm-use-dovi`, `--tm-visualize-lut`, `--tm-show-clipping`) keep experimentation fast.
+
+The screenshot writer controls the final PNG range via `[screenshots].export_range`. The default `"full"` setting expands
+limited-range SDR pixels to full-range RGB just before export (recording the original value in `_SourceColorRange`), while
+`"limited"` preserves the source range for workflows that expect video-range PNGs.
+
+The optional post-tonemap gamma stage applies a limited-range (`16`–`235`) `std.Levels` adjustment after tonemapping but
+before overlays, geometry, and dithering, preserving video-level encoding. Enable it with `[color].post_gamma_enable = true` (or `--tm-gamma <value>`)
+when you need a gentle lift (`post_gamma ≈ 0.95`) for especially dark masters; use `--tm-gamma-disable` to force it off
+for a single run.
 
 ## Log cheat sheet
 - `[TM INPUT]` — Source properties at the start of processing. Includes Matrix/Transfer/Primaries/Range.

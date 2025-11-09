@@ -14,8 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple, cast
 
 from rich.console import Console
-from rich.progress import BarColumn, Progress, ProgressColumn, Task, TextColumn
-from rich.text import Text
+from rich.progress import BarColumn, Progress, ProgressColumn, SpinnerColumn, Task, TextColumn
 
 
 class CliLayoutError(RuntimeError):
@@ -2172,13 +2171,21 @@ class CliLayoutRenderer:
         accent_role = info.get("accent")
 
         bar_style_token = self._role_style(accent_role or "accent")
+        rich_bar_style = self._rich_style_from_token(bar_style_token)
         progress_style = str(self._active_flags.get("progress_style", "fill")).strip().lower()
         if progress_style not in {"fill", "dot"}:
             progress_style = "fill"
+        columns: List[ProgressColumn]
         if progress_style == "dot":
-            bar_column = _DotProgressColumn(self, bar_style_token)
+            accent_token = self._lookup_role_token("accent")
+            spinner_accent_style = self._rich_style_from_token(accent_token or None)
+            spinner_style = rich_bar_style or spinner_accent_style or "cyan"
+            columns = [
+                SpinnerColumn(style=spinner_style),
+                TextColumn("{task.description}", justify="left"),
+                TextColumn("{task.completed}/{task.total}", justify="right"),
+            ]
         else:
-            rich_bar_style = self._rich_style_from_token(bar_style_token)
             if rich_bar_style:
                 bar_column = BarColumn(
                     style=rich_bar_style,
@@ -2188,12 +2195,11 @@ class CliLayoutRenderer:
                 )
             else:
                 bar_column = BarColumn()
-
-        columns: List[ProgressColumn] = [
-            TextColumn("{task.description}", justify="left"),
-            bar_column,
-            TextColumn("{task.completed}/{task.total}", justify="right"),
-        ]
+            columns = [
+                TextColumn("{task.description}", justify="left"),
+                bar_column,
+                TextColumn("{task.completed}/{task.total}", justify="right"),
+            ]
 
         right_label = str(block.get("right_label", ""))
         if right_label:
@@ -2201,42 +2207,6 @@ class CliLayoutRenderer:
 
         transient_flag = bool(block.get("transient", transient))
         return Progress(*columns, console=self.console, transient=transient_flag)
-
-
-class _DotProgressColumn(ProgressColumn):
-    """Progress column that renders a single moving marker along a track."""
-
-    def __init__(self, renderer: "CliLayoutRenderer", style_token: Optional[str]) -> None:
-        super().__init__()
-        self.renderer = renderer
-        self._style_token = style_token
-
-    def render(self, task: Task) -> Text:
-        total = task.total or 0
-        completed = task.completed or 0
-        ratio = 0.0
-        if total:
-            try:
-                ratio = max(0.0, min(1.0, float(completed) / float(total)))
-            except ZeroDivisionError:
-                ratio = 0.0
-        width = max(10, min(28, self.renderer._console_width() // 3))
-        if self.renderer._using_ascii_symbols():
-            track_char = "-"
-            marker = "*"
-        else:
-            track_char = "─"
-            marker = "●"
-        bar_chars = [track_char] * width
-        index = 0
-        if width > 1:
-            index = min(width - 1, round(ratio * (width - 1)))
-        bar_chars[index] = marker
-        bar_text = "".join(bar_chars)
-        rich_style = self.renderer._rich_style_from_token(self._style_token)
-        if rich_style:
-            return Text(bar_text, style=rich_style)
-        return Text(bar_text)
 
 
 class _TemplateProgressColumn(ProgressColumn):

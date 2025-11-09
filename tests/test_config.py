@@ -30,8 +30,23 @@ def test_load_defaults(tmp_path: Path) -> None:
     assert app.color.enable_tonemap is True
     assert app.color.preset == "reference"
     assert app.color.target_nits == 100.0
+    assert app.color.dst_min_nits == 0.18
+    assert app.color.knee_offset == 0.5
+    assert app.color.dpd_preset == "high_quality"
+    assert app.color.dpd_black_cutoff == 0.01
     assert app.color.overlay_enabled is True
     assert app.color.verify_enabled is True
+    assert app.color.post_gamma_enable is False
+    assert app.color.post_gamma == pytest.approx(0.95)
+    assert app.color.smoothing_period == pytest.approx(45.0)
+    assert app.color.scene_threshold_low == pytest.approx(0.8)
+    assert app.color.scene_threshold_high == pytest.approx(2.4)
+    assert app.color.percentile == pytest.approx(99.995)
+    assert app.color.contrast_recovery == pytest.approx(0.3)
+    assert app.color.metadata == "auto"
+    assert app.color.use_dovi is None
+    assert app.color.visualize_lut is False
+    assert app.color.show_clipping is False
     assert app.source.preferred == "lsmas"
     assert app.tmdb.api_key == ""
     assert app.tmdb.unattended is True
@@ -55,6 +70,16 @@ def test_load_defaults(tmp_path: Path) -> None:
         ("[color]\nverify_luma_threshold = 1.5\n", "color.verify_luma_threshold"),
         ("[color]\nverify_step_seconds = 0\n", "color.verify_step_seconds"),
         ("[color]\ntarget_nits = -10\n", "color.target_nits"),
+        ("[color]\ndst_min_nits = -0.1\n", "color.dst_min_nits"),
+        ("[color]\nknee_offset = 1.5\n", "color.knee_offset"),
+        ("[color]\ndpd_preset = \"invalid\"\n", "color.dpd_preset"),
+        ("[color]\ndpd_black_cutoff = 0.5\n", "color.dpd_black_cutoff"),
+        ("[color]\npost_gamma = 0.5\n", "color.post_gamma"),
+        ("[color]\nsmoothing_period = -1\n", "color.smoothing_period"),
+        ("[color]\nscene_threshold_low = -0.5\n", "color.scene_threshold_low"),
+        ("[color]\npercentile = 120\n", "color.percentile"),
+        ("[color]\ncontrast_recovery = -0.1\n", "color.contrast_recovery"),
+        ("[color]\nmetadata = \"invalid\"\n", "color.metadata"),
         ("[screenshots]\nodd_geometry_policy = \"bogus\"\n", "screenshots.odd_geometry_policy"),
         ("[screenshots]\nrgb_dither = \"invalid\"\n", "screenshots.rgb_dither"),
         ("[source]\npreferred = \"bogus\"\n", "source.preferred"),
@@ -161,3 +186,20 @@ preferred = "ffms2"
     assert app.tmdb.category_preference == "TV"
     assert app.cli.emit_json_tail is False
     assert app.cli.progress.style == "dot"
+
+
+def test_dynamic_peak_detection_override_disables_dpd_fields(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "config.toml.template"
+    cfg_path.write_text(
+        """
+[color]
+dynamic_peak_detection = false
+dpd_preset = "high_quality"
+dpd_black_cutoff = 0.02
+        """.strip(),
+        encoding="utf-8",
+    )
+    app = load_config(str(cfg_path))
+    assert app.color.dynamic_peak_detection is False
+    assert app.color.dpd_preset == "off"
+    assert app.color.dpd_black_cutoff == 0.0

@@ -20,6 +20,7 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
+    cast,
 )
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -98,6 +99,22 @@ class TonemapInfo:
     dst_min_nits: float
     src_csp_hint: Optional[int]
     reason: Optional[str] = None
+    output_color_range: Optional[int] = None
+    range_detection: Optional[str] = None
+    knee_offset: Optional[float] = None
+    dpd_preset: Optional[str] = None
+    dpd_black_cutoff: Optional[float] = None
+    post_gamma: Optional[float] = None
+    post_gamma_enabled: bool = False
+    smoothing_period: Optional[float] = None
+    scene_threshold_low: Optional[float] = None
+    scene_threshold_high: Optional[float] = None
+    percentile: Optional[float] = None
+    contrast_recovery: Optional[float] = None
+    metadata: Optional[int] = None
+    use_dovi: Optional[bool] = None
+    visualize_lut: bool = False
+    show_clipping: bool = False
 
 
 @dataclass(frozen=True)
@@ -111,6 +128,39 @@ class VerificationResult:
 
 
 @dataclass(frozen=True)
+class ColorDebugArtifacts:
+    """Clips and metadata captured for colour debugging."""
+
+    normalized_clip: Any | None
+    normalized_props: Mapping[str, Any] | None
+    original_props: Mapping[str, Any] | None
+    color_tuple: tuple[Optional[int], Optional[int], Optional[int], Optional[int]] | None
+
+
+@dataclass(frozen=True)
+class TonemapSettings:
+    """Resolved tonemap configuration used for the current clip."""
+
+    preset: str
+    tone_curve: str
+    target_nits: float
+    dynamic_peak_detection: bool
+    dst_min_nits: float
+    knee_offset: float
+    dpd_preset: str
+    dpd_black_cutoff: float
+    smoothing_period: float
+    scene_threshold_low: float
+    scene_threshold_high: float
+    percentile: float
+    contrast_recovery: float
+    metadata: Optional[int]
+    use_dovi: Optional[bool]
+    visualize_lut: bool
+    show_clipping: bool
+
+
+@dataclass(frozen=True)
 class ClipProcessResult:
     """Container for processed clip and metadata."""
 
@@ -119,6 +169,7 @@ class ClipProcessResult:
     overlay_text: Optional[str]
     verification: Optional[VerificationResult]
     source_props: Mapping[str, Any]
+    debug: Optional[ColorDebugArtifacts] = None
 
 
 _MATRIX_NAME_TO_CODE = {
@@ -467,7 +518,13 @@ def _classify_plugin_exception(plugin: str, exc: Exception) -> VSPluginError | N
     return None
 
 
-def _open_clip_with_sources(core: Any, path: str, cache_root: Path) -> Any:
+def _open_clip_with_sources(
+    core: Any,
+    path: str,
+    cache_root: Path,
+    *,
+    indexing_notifier: Optional[Callable[[str], None]] = None,
+) -> Any:
     order = _build_source_order()
     errors: dict[str, VSPluginError] = {}
     base_name = Path(path).name
@@ -483,6 +540,10 @@ def _open_clip_with_sources(core: Any, path: str, cache_root: Path) -> Any:
 
         cache_path = _cache_path_for(cache_root, base_name, plugin)
         try:
+            if not cache_path.exists():
+                logger.info("[CACHE] Indexing %s via %s", base_name, plugin)
+                if indexing_notifier is not None:
+                    indexing_notifier(base_name)
             return source(path, cachefile=str(cache_path))
         except Exception as exc:
             classified = _classify_plugin_exception(plugin, exc)
@@ -583,6 +644,7 @@ def init_clip(
     fps_map: Tuple[int, int] | None = None,
     cache_dir: Optional[str | Path] = None,
     core: Optional[Any] = None,
+    indexing_notifier: Optional[Callable[[str], None]] = None,
 ) -> Any:
     """Initialise a VapourSynth clip for subsequent processing."""
 
@@ -596,7 +658,12 @@ def init_clip(
         raise ClipInitError(f"Failed to prepare cache directory '{cache_root}': {exc}") from exc
 
     try:
-        clip = _open_clip_with_sources(resolved_core, str(path_obj), cache_root)
+        clip = _open_clip_with_sources(
+            resolved_core,
+            str(path_obj),
+            cache_root,
+            indexing_notifier=indexing_notifier,
+        )
     except ClipInitError:
         raise
     except Exception as exc:  # pragma: no cover - defensive
@@ -925,12 +992,246 @@ def _guess_default_colourspace(
     return matrix, transfer, primaries, color_range
 
 
+def _coerce_float(value: Any) -> Optional[float]:
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
+
+
+def _normalise_to_8bit(
+    sample_type: Any,
+    bits_per_sample: Optional[int],
+    value: Optional[float],
+) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        sample_type_int = int(sample_type)
+    except Exception:
+        sample_type_int = None
+    if sample_type_int == 1:  # FLOAT
+        return float(value) * 255.0
+    if bits_per_sample is None or bits_per_sample <= 0:
+        return None
+    scale = float((1 << bits_per_sample) - 1)
+    if scale <= 0.0:
+        return None
+    return float(value) * 255.0 / scale
+
+
+def _classify_rgb_range_from_stats(
+    sample_type: Any,
+    bits_per_sample: Optional[int],
+    y_min: Optional[float],
+    y_max: Optional[float],
+) -> Optional[str]:
+    min_8 = _normalise_to_8bit(sample_type, bits_per_sample, y_min)
+    max_8 = _normalise_to_8bit(sample_type, bits_per_sample, y_max)
+    if min_8 is None or max_8 is None:
+        return None
+
+    limited_low = 16.0
+    limited_high = 235.0
+    limited_tolerance = 12.0
+    limited_by_max = max_8 <= limited_high + limited_tolerance
+    limited_by_band = (max_8 - min_8) <= 6.0 and min_8 <= limited_low + limited_tolerance
+    if limited_by_max or limited_by_band:
+        return "limited"
+
+    full_margin_high = 6.0
+    full_margin_low = 6.0
+    full_high = max_8 >= limited_high + full_margin_high
+    full_low = min_8 <= limited_low - full_margin_low
+    if full_high and full_low:
+        return "full"
+    return None
+
+
+def _detect_rgb_color_range(
+    core: Any,
+    clip: Any,
+    *,
+    log: logging.Logger,
+    label: str,
+    max_samples: int = 6,
+) -> tuple[Optional[int], Optional[str]]:
+    vs_module = _get_vapoursynth_module()
+    std_ns = getattr(core, "std", None)
+    plane_stats = getattr(std_ns, "PlaneStats", None) if std_ns is not None else None
+    if not callable(plane_stats):
+        return (None, None)
+
+    fmt = getattr(clip, "format", None)
+    if fmt is None:
+        return (None, None)
+    if getattr(fmt, "color_family", None) != getattr(vs_module, "RGB", object()):
+        return (None, None)
+
+    sample_type = getattr(fmt, "sample_type", None)
+    bits_per_sample = getattr(fmt, "bits_per_sample", None)
+
+    try:
+        stats_clip = cast(Any, plane_stats(clip))
+    except Exception as exc:
+        log.debug("[TM RANGE] %s failed to create PlaneStats node: %s", label, exc)
+        return (None, None)
+
+    total_frames = getattr(stats_clip, "num_frames", None)
+    candidate_indices: set[int] = {0}
+    if isinstance(total_frames, int) and total_frames > 0:
+        candidate_indices.update(
+            {
+                max(0, total_frames - 1),
+                total_frames // 2,
+                total_frames // 4,
+                (3 * total_frames) // 4,
+            }
+        )
+    indices = sorted(idx for idx in candidate_indices if isinstance(idx, int) and idx >= 0)
+    indices = indices[:max_samples] if max_samples > 0 else indices
+
+    limited_hits = 0
+    full_hits = 0
+
+    for idx in indices:
+        try:
+            frame = stats_clip.get_frame(idx)
+        except Exception as exc:
+            log.debug("[TM RANGE] %s failed to sample frame %s: %s", label, idx, exc)
+            continue
+        props = getattr(frame, "props", {})
+        classification = _classify_rgb_range_from_stats(
+            sample_type,
+            bits_per_sample,
+            _coerce_float(props.get("PlaneStatsMin")),
+            _coerce_float(props.get("PlaneStatsMax")),
+        )
+        if classification == "limited":
+            limited_hits += 1
+        elif classification == "full":
+            full_hits += 1
+
+    limited_code = int(getattr(vs_module, "RANGE_LIMITED", 1))
+    full_code = int(getattr(vs_module, "RANGE_FULL", 0))
+
+    if limited_hits and not full_hits:
+        log.info("[TM RANGE] %s detected limited RGB (samples=%d)", label, limited_hits)
+        return (limited_code, "plane_stats")
+    if full_hits and not limited_hits:
+        log.info("[TM RANGE] %s detected full-range RGB (samples=%d)", label, full_hits)
+        return (full_code, "plane_stats")
+    if limited_hits and full_hits:
+        log.warning(
+            "[TM RANGE] %s samples span both limited and full ranges (limited=%d full=%d)",
+            label,
+            limited_hits,
+            full_hits,
+        )
+    else:
+        log.debug(
+            "[TM RANGE] %s range detection inconclusive (limited=%d full=%d)",
+            label,
+            limited_hits,
+            full_hits,
+        )
+    return (None, None)
+
+
+def _compute_luma_bounds(clip: Any) -> tuple[Optional[float], Optional[float]]:
+    core = getattr(clip, "core", None)
+    std_ns = getattr(core, "std", None)
+    plane_stats = getattr(std_ns, "PlaneStats", None) if std_ns is not None else None
+    if not callable(plane_stats):
+        return (None, None)
+    try:
+        stats_clip = cast(Any, plane_stats(clip))
+    except Exception:
+        return (None, None)
+
+    total_frames = getattr(clip, "num_frames", 0) or 0
+    if total_frames <= 0:
+        indices = [0]
+    else:
+        indices = list(range(min(total_frames, 3)))
+
+    mins: List[float] = []
+    maxs: List[float] = []
+
+    for idx in indices:
+        try:
+            frame = stats_clip.get_frame(idx)
+        except Exception:
+            break
+        props = getattr(frame, "props", {})
+        y_min = _coerce_float(props.get("PlaneStatsMin"))
+        y_max = _coerce_float(props.get("PlaneStatsMax"))
+        if y_min is not None:
+            mins.append(y_min)
+        if y_max is not None:
+            maxs.append(y_max)
+
+    if not mins or not maxs:
+        return (None, None)
+    return (min(mins), max(maxs))
+
+
+def _adjust_color_range_from_signal(
+    clip: Any,
+    *,
+    color_range: Optional[int],
+    warning_sink: Optional[List[str]],
+    file_name: str | None,
+    range_inferred: bool,
+    range_from_override: bool,
+) -> Optional[int]:
+    vs_module = _get_vapoursynth_module()
+    limited_code = int(getattr(vs_module, "RANGE_LIMITED", 1))
+    full_code = int(getattr(vs_module, "RANGE_FULL", 0))
+
+    # If already limited and appears consistent, keep as-is but warn when signal contradicts metadata.
+    y_min, y_max = _compute_luma_bounds(clip)
+    if y_min is None or y_max is None:
+        if (range_inferred or color_range in (None, full_code)) and not range_from_override:
+            message = (
+                f"[COLOR] {file_name or 'clip'} lacks colour-range metadata and "
+                "signal sampling is unavailable; defaulting to limited range."
+            )
+            logger.warning(message)
+            if warning_sink is not None:
+                warning_sink.append(message)
+            return limited_code
+        return color_range
+
+    label = file_name or "clip"
+
+    if (range_inferred or color_range in (None, full_code)) and not range_from_override:
+        if 12.0 <= y_min <= 20.0 and y_max <= 245.0:
+            message = (
+                f"[COLOR] {label} lacks reliable colour-range metadata; "
+                f"treating as limited (sample min={y_min:.1f}, max={y_max:.1f})."
+            )
+            logger.warning(message)
+            if warning_sink is not None:
+                warning_sink.append(message)
+            return limited_code
+    if color_range == limited_code and (y_min < 4.0 or y_max > 251.0):
+        message = (
+            f"[COLOR] {label} is tagged limited but sampled values span full range "
+            f"(min={y_min:.1f}, max={y_max:.1f}); verify source metadata."
+        )
+        logger.warning(message)
+        if warning_sink is not None:
+            warning_sink.append(message)
+    return color_range
+
+
 def normalise_color_metadata(
     clip: Any,
     source_props: Mapping[str, Any] | None,
     *,
     color_cfg: "ColorConfig | None" = None,
     file_name: str | None = None,
+    warning_sink: Optional[List[str]] = None,
 ) -> tuple[
     Any,
     Mapping[str, Any],
@@ -950,6 +1251,10 @@ def normalise_color_metadata(
         primaries = overrides["primaries"]
     if "range" in overrides:
         color_range = overrides["range"]
+    range_from_override = "range" in overrides
+    if range_from_override:
+        props["_ColorRangeOverride"] = 1
+    range_inferred = color_range is None and "range" not in overrides
 
     matrix, transfer, primaries, color_range = _guess_default_colourspace(
         clip,
@@ -959,6 +1264,15 @@ def normalise_color_metadata(
         primaries,
         color_range,
         color_cfg=color_cfg,
+    )
+
+    color_range = _adjust_color_range_from_signal(
+        clip,
+        color_range=color_range,
+        warning_sink=warning_sink,
+        file_name=file_name,
+        range_inferred=range_inferred,
+        range_from_override=range_from_override,
     )
 
     update_props: Dict[str, int] = {}
@@ -974,6 +1288,8 @@ def normalise_color_metadata(
     if color_range is not None:
         update_props["_ColorRange"] = int(color_range)
         props["_ColorRange"] = int(color_range)
+    if range_from_override:
+        update_props["_ColorRangeOverride"] = 1
 
     clip_with_props = _apply_frame_props_dict(clip, update_props)
     return clip_with_props, props, (matrix, transfer, primaries, color_range)
@@ -997,6 +1313,136 @@ def _deduce_src_csp_hint(transfer: Optional[int], primaries: Optional[int]) -> O
     return None
 
 
+_TONEMAP_UNSUPPORTED_KWARGS: set[str] = set()
+
+
+def _parse_unexpected_kwarg(exc: BaseException) -> tuple[str, ...]:
+    """
+    Extract unexpected keyword argument names from TypeError/vapoursynth errors.
+
+    Returns:
+        tuple[str, ...]: Names of any kwargs rejected by the downstream Tonemap call.
+    """
+
+    message = str(exc)
+    match = re.search(r"unexpected keyword argument '([^']+)'", message)
+    if match:
+        return (match.group(1),)
+
+    match = re.search(
+        r"does not take argument\(s\) named ([^:]+)",
+        message,
+        re.IGNORECASE,
+    )
+    if match:
+        raw = match.group(1)
+        sanitized = raw.replace(" and ", ",")
+        names = [
+            part.strip().strip("'\"")
+            for part in sanitized.split(",")
+        ]
+        filtered = tuple(name for name in names if name)
+        if filtered:
+            return filtered
+
+    return ()
+
+
+def _call_tonemap_function(
+    func: Callable[..., Any],
+    clip: Any,
+    call_kwargs: Dict[str, Any],
+    *,
+    file_name: str,
+) -> Any:
+    usable_kwargs = {
+        key: value for key, value in call_kwargs.items() if key not in _TONEMAP_UNSUPPORTED_KWARGS
+    }
+    max_attempts = len(usable_kwargs) + 1
+    attempts = 0
+    while True:
+        attempts += 1
+        try:
+            return func(clip, **usable_kwargs)
+        except Exception as exc:  # pragma: no cover - vapoursynth raises custom errors
+            missing_names = _parse_unexpected_kwarg(exc)
+            handled = False
+            for missing in missing_names:
+                if missing in usable_kwargs:
+                    if missing not in _TONEMAP_UNSUPPORTED_KWARGS:
+                        _TONEMAP_UNSUPPORTED_KWARGS.add(missing)
+                        logger.warning(
+                            "[Tonemap compat] %s missing support for '%s'; retrying without it",
+                            file_name,
+                            missing,
+                        )
+                    usable_kwargs.pop(missing, None)
+                    handled = True
+            if handled and attempts < max_attempts:
+                continue
+            raise
+
+
+def _apply_post_gamma_levels(
+    core: Any,
+    clip: Any,
+    *,
+    gamma: float,
+    file_name: str,
+    log: logging.Logger,
+) -> tuple[Any, bool]:
+    if abs(gamma - 1.0) < 1e-4:
+        return clip, False
+
+    def _resolve_level_bounds() -> tuple[float | int, float | int, float | int, float | int]:
+        fmt = getattr(clip, "format", None)
+        if fmt is None:
+            return 16, 235, 16, 235
+        sample_type = getattr(fmt, "sample_type", None)
+        bits = getattr(fmt, "bits_per_sample", None)
+        sample_type_val: Optional[int] = None
+        if sample_type is not None:
+            try:
+                sample_type_val = int(sample_type)
+            except Exception:
+                name = str(getattr(sample_type, "name", "")).upper()
+                if name == "INTEGER":
+                    sample_type_val = 0
+                elif name == "FLOAT":
+                    sample_type_val = 1
+        min_ratio = 16.0 / 255.0
+        max_ratio = 235.0 / 255.0
+        if sample_type_val == 1:
+            return min_ratio, max_ratio, min_ratio, max_ratio
+        if sample_type_val == 0 and isinstance(bits, int) and bits > 0:
+            full_scale = float((1 << bits) - 1)
+            min_value = round(min_ratio * full_scale)
+            max_value = round(max_ratio * full_scale)
+            return int(min_value), int(max_value), int(min_value), int(max_value)
+        return 16, 235, 16, 235
+
+    min_in, max_in, min_out, max_out = _resolve_level_bounds()
+    std_ns = getattr(core, "std", None)
+    levels = getattr(std_ns, "Levels", None) if std_ns is not None else None
+    if not callable(levels):
+        log.warning("[TM GAMMA] %s requested post-gamma but std.Levels is unavailable", file_name)
+        return clip, False
+    try:
+        adjusted = levels(
+            clip,
+            min_in=min_in,
+            max_in=max_in,
+            min_out=min_out,
+            max_out=max_out,
+            gamma=float(gamma),
+        )
+        log.info("[TM GAMMA] %s applied gamma=%.3f", file_name, gamma)
+        return adjusted, True
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning("[TM GAMMA] %s failed to apply gamma: %s", file_name, exc)
+        return clip, False
+
+
 def _tonemap_with_retries(
     core: Any,
     rgb_clip: Any,
@@ -1005,6 +1451,18 @@ def _tonemap_with_retries(
     target_nits: float,
     dst_min: float,
     dpd: int,
+    knee_offset: float,
+    dpd_preset: str,
+    dpd_black_cutoff: float,
+    smoothing_period: float,
+    scene_threshold_low: float,
+    scene_threshold_high: float,
+    percentile: float,
+    contrast_recovery: float,
+    metadata: Optional[int],
+    use_dovi: Optional[bool],
+    visualize_lut: bool,
+    show_clipping: bool,
     src_hint: Optional[int],
     file_name: str,
 ) -> Any:
@@ -1022,26 +1480,41 @@ def _tonemap_with_retries(
         dst_max=float(target_nits),
         dst_min=float(dst_min),
         dynamic_peak_detection=int(dpd),
-        smoothing_period=2.0,
-        scene_threshold_low=0.15,
-        scene_threshold_high=0.30,
+        smoothing_period=float(smoothing_period),
+        scene_threshold_low=float(scene_threshold_low),
+        scene_threshold_high=float(scene_threshold_high),
+        percentile=float(percentile),
         gamut_mapping=1,
         tone_mapping_function_s=tone_curve,
-        use_dovi=True,
+        tone_mapping_param=float(knee_offset),
+        peak_detection_preset=str(dpd_preset),
+        black_cutoff=float(dpd_black_cutoff),
+        contrast_recovery=float(contrast_recovery),
+        visualize_lut=bool(visualize_lut),
+        show_clipping=bool(show_clipping),
         log_level=2,
     )
+    if metadata is not None:
+        kwargs["metadata"] = int(metadata)
+    if use_dovi is not None:
+        kwargs["use_dovi"] = bool(use_dovi)
+
+    def _attempt(**extra_kwargs: Any) -> Any:
+        combined = dict(kwargs)
+        combined.update(extra_kwargs)
+        return _call_tonemap_function(tonemap, rgb_clip, combined, file_name=file_name)
 
     if src_hint is not None:
         try:
-            return tonemap(rgb_clip, src_csp=src_hint, **kwargs)
+            return _attempt(src_csp=src_hint)
         except Exception as exc:
             logger.warning("[Tonemap attempt A failed] %s src_csp=%s: %s", file_name, src_hint, exc)
     try:
-        return tonemap(rgb_clip, **kwargs)
+        return _attempt()
     except Exception as exc:
         logger.warning("[Tonemap attempt B failed] %s infer-from-props: %s", file_name, exc)
     try:
-        return tonemap(rgb_clip, src_csp=1, **kwargs)
+        return _attempt(src_csp=1)
     except Exception as exc:
         raise ClipProcessError(
             f"libplacebo.Tonemap final fallback failed for '{file_name}': {exc}"
@@ -1049,49 +1522,261 @@ def _tonemap_with_retries(
 
 
 _TONEMAP_PRESETS: Dict[str, Dict[str, float | str | bool]] = {
-    "reference": {"tone_curve": "bt.2390", "target_nits": 100.0, "dynamic_peak_detection": True},
-    "contrast": {"tone_curve": "mobius", "target_nits": 120.0, "dynamic_peak_detection": False},
-    "filmic": {"tone_curve": "hable", "target_nits": 100.0, "dynamic_peak_detection": True},
+    "reference": {
+        "tone_curve": "bt.2390",
+        "target_nits": 100.0,
+        "dynamic_peak_detection": True,
+        "knee_offset": 0.50,
+        "dst_min_nits": 0.18,
+        "dpd_preset": "high_quality",
+        "dpd_black_cutoff": 0.01,
+        "smoothing_period": 45.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.4,
+        "percentile": 99.995,
+        "contrast_recovery": 0.30,
+        "metadata": "auto",
+        "use_dovi": True,
+        "visualize_lut": False,
+        "show_clipping": False,
+    },
+    "bt2390_spec": {
+        "tone_curve": "bt.2390",
+        "target_nits": 100.0,
+        "dynamic_peak_detection": True,
+        "knee_offset": 0.50,
+        "dst_min_nits": 0.18,
+        "dpd_preset": "high_quality",
+        "dpd_black_cutoff": 0.0,
+        "smoothing_period": 25.0,
+        "scene_threshold_low": 0.9,
+        "scene_threshold_high": 3.0,
+        "percentile": 100.0,
+        "contrast_recovery": 0.05,
+        "metadata": "auto",
+        "use_dovi": True,
+        "visualize_lut": False,
+        "show_clipping": False,
+    },
+    "filmic": {
+        "tone_curve": "bt.2446a",
+        "target_nits": 100.0,
+        "dynamic_peak_detection": True,
+        "dst_min_nits": 0.16,
+        "dpd_preset": "high_quality",
+        "dpd_black_cutoff": 0.008,
+        "knee_offset": 0.58,
+        "smoothing_period": 55.0,
+        "scene_threshold_low": 0.7,
+        "scene_threshold_high": 2.0,
+        "percentile": 99.9,
+        "contrast_recovery": 0.20,
+        "metadata": "auto",
+        "use_dovi": True,
+        "visualize_lut": False,
+        "show_clipping": False,
+    },
+    "spline": {
+        "tone_curve": "spline",
+        "target_nits": 105.0,
+        "dynamic_peak_detection": True,
+        "dst_min_nits": 0.17,
+        "dpd_preset": "high_quality",
+        "dpd_black_cutoff": 0.009,
+        "knee_offset": 0.52,
+        "smoothing_period": 35.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.2,
+        "percentile": 99.98,
+        "contrast_recovery": 0.25,
+        "metadata": "auto",
+        "use_dovi": True,
+        "visualize_lut": False,
+        "show_clipping": False,
+    },
+    "contrast": {
+        "tone_curve": "bt.2390",
+        "target_nits": 110.0,
+        "dynamic_peak_detection": True,
+        "dst_min_nits": 0.15,
+        "dpd_preset": "high_quality",
+        "dpd_black_cutoff": 0.008,
+        "knee_offset": 0.42,
+        "smoothing_period": 30.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.2,
+        "percentile": 99.99,
+        "contrast_recovery": 0.45,
+        "metadata": "auto",
+        "use_dovi": True,
+        "visualize_lut": False,
+        "show_clipping": False,
+    },
+    "bright_lift": {
+        "tone_curve": "bt.2390",
+        "target_nits": 130.0,
+        "dynamic_peak_detection": True,
+        "dst_min_nits": 0.22,
+        "dpd_preset": "high_quality",
+        "dpd_black_cutoff": 0.012,
+        "knee_offset": 0.46,
+        "smoothing_period": 35.0,
+        "scene_threshold_low": 0.8,
+        "scene_threshold_high": 2.0,
+        "percentile": 99.99,
+        "contrast_recovery": 0.50,
+        "metadata": "auto",
+        "use_dovi": True,
+        "visualize_lut": False,
+        "show_clipping": False,
+    },
+    "highlight_guard": {
+        "tone_curve": "bt.2390",
+        "target_nits": 90.0,
+        "dynamic_peak_detection": True,
+        "dst_min_nits": 0.16,
+        "dpd_preset": "high_quality",
+        "dpd_black_cutoff": 0.008,
+        "knee_offset": 0.55,
+        "smoothing_period": 50.0,
+        "scene_threshold_low": 0.9,
+        "scene_threshold_high": 3.0,
+        "percentile": 99.9,
+        "contrast_recovery": 0.15,
+        "metadata": "auto",
+        "use_dovi": True,
+        "visualize_lut": False,
+        "show_clipping": False,
+    },
 }
 
 
-def _resolve_tonemap_settings(cfg: Any) -> tuple[str, str, float, int, float]:
+_METADATA_NAME_TO_CODE = {
+    "auto": 0,
+    "none": 1,
+    "hdr10": 2,
+    "hdr10+": 3,
+    "hdr10plus": 3,
+    "luminance": 4,
+    "ciey": 4,
+    "cie_y": 4,
+}
+
+
+def _resolve_tonemap_settings(cfg: Any) -> TonemapSettings:
     preset = str(getattr(cfg, "preset", "") or "").strip().lower()
     tone_curve = str(getattr(cfg, "tone_curve", "bt.2390") or "bt.2390")
-    target_nits = float(getattr(cfg, "target_nits", 100.0))
-    dpd_flag = bool(getattr(cfg, "dynamic_peak_detection", True))
-    dst_min = float(getattr(cfg, "dst_min_nits", 0.1))
-
-    provided = getattr(cfg, "_provided_keys", None)
-
-    def _was_provided(field: str) -> bool:
-        if provided is None:
-            return True
-        return field in provided
-
+    provided = getattr(cfg, "_provided_keys", None) or set()
     if preset and preset != "custom":
-        preset_vals = _TONEMAP_PRESETS.get(preset)
-        if preset_vals:
-            if not _was_provided("tone_curve"):
-                tone_curve = str(preset_vals["tone_curve"])
-            if not _was_provided("target_nits"):
-                target_nits = float(preset_vals["target_nits"])
-            if not _was_provided("dynamic_peak_detection"):
-                dpd_flag = bool(preset_vals["dynamic_peak_detection"])
+        preset_vals = _TONEMAP_PRESETS.get(preset) or {}
+    else:
+        preset_vals = {}
 
-    return preset or "custom", tone_curve, target_nits, int(dpd_flag), dst_min
+    def _resolve_value(field: str, default: Any) -> Any:
+        if preset_vals and field in preset_vals and field not in provided:
+            return preset_vals[field]
+        return getattr(cfg, field, preset_vals.get(field, default))
+
+    tone_curve = str(_resolve_value("tone_curve", tone_curve))
+    target_nits = float(_resolve_value("target_nits", 100.0))
+    dpd_flag = bool(_resolve_value("dynamic_peak_detection", True))
+    dst_min = float(_resolve_value("dst_min_nits", 0.18))
+    knee_offset = float(_resolve_value("knee_offset", 0.5))
+    dpd_preset_value = str(_resolve_value("dpd_preset", "high_quality") or "").strip().lower()
+    dpd_black_cutoff = float(_resolve_value("dpd_black_cutoff", 0.01))
+    smoothing_period = float(_resolve_value("smoothing_period", 45.0))
+    scene_threshold_low = float(_resolve_value("scene_threshold_low", 0.8))
+    scene_threshold_high = float(_resolve_value("scene_threshold_high", 2.4))
+    percentile = float(_resolve_value("percentile", 99.995))
+    contrast_recovery = float(_resolve_value("contrast_recovery", 0.3))
+    metadata_value = _resolve_value("metadata", "auto")
+    use_dovi_value = _resolve_value("use_dovi", None)
+    visualize_lut = bool(_resolve_value("visualize_lut", False))
+    show_clipping = bool(_resolve_value("show_clipping", False))
+
+    if not dpd_flag:
+        dpd_preset_value = "off"
+        dpd_black_cutoff = 0.0
+
+    if dpd_preset_value not in {"off", "fast", "balanced", "high_quality"}:
+        dpd_preset_value = "off" if not dpd_flag else "high_quality"
+
+    metadata_code: Optional[int]
+    if metadata_value is None:
+        metadata_code = None
+    elif isinstance(metadata_value, (int, float)):
+        metadata_code = int(metadata_value)
+    else:
+        metadata_key = str(metadata_value).strip().lower().replace(" ", "")
+        if metadata_key in _METADATA_NAME_TO_CODE:
+            metadata_code = _METADATA_NAME_TO_CODE[metadata_key]
+        else:
+            try:
+                metadata_code = int(metadata_key)
+            except ValueError:
+                metadata_code = 0
+            else:
+                metadata_code = max(0, min(4, metadata_code))
+
+    if metadata_code is not None and metadata_code < 0:
+        metadata_code = 0
+
+    if isinstance(use_dovi_value, str):
+        lowered = use_dovi_value.strip().lower()
+        if lowered in {"auto", ""}:
+            use_dovi_value = None
+        elif lowered in {"true", "1", "yes", "on"}:
+            use_dovi_value = True
+        elif lowered in {"false", "0", "no", "off"}:
+            use_dovi_value = False
+        else:
+            use_dovi_value = None
+    elif use_dovi_value is not None:
+        use_dovi_value = bool(use_dovi_value)
+
+    return TonemapSettings(
+        preset=preset or "custom",
+        tone_curve=tone_curve,
+        target_nits=float(target_nits),
+        dynamic_peak_detection=bool(dpd_flag),
+        dst_min_nits=float(dst_min),
+        knee_offset=float(knee_offset),
+        dpd_preset=dpd_preset_value or ("off" if not dpd_flag else "high_quality"),
+        dpd_black_cutoff=float(dpd_black_cutoff),
+        smoothing_period=float(smoothing_period),
+        scene_threshold_low=float(scene_threshold_low),
+        scene_threshold_high=float(scene_threshold_high),
+        percentile=float(percentile),
+        contrast_recovery=float(contrast_recovery),
+        metadata=metadata_code,
+        use_dovi=use_dovi_value if isinstance(use_dovi_value, (bool, type(None))) else None,
+        visualize_lut=bool(visualize_lut),
+        show_clipping=bool(show_clipping),
+    )
 
 
 def resolve_effective_tonemap(cfg: Any) -> Dict[str, Any]:
     """Resolve the effective tonemap preset, curve, and luminance for ``cfg``."""
 
-    preset, tone_curve, target_nits, dpd_flag, dst_min = _resolve_tonemap_settings(cfg)
+    settings = _resolve_tonemap_settings(cfg)
     return {
-        "preset": preset,
-        "tone_curve": tone_curve,
-        "target_nits": float(target_nits),
-        "dynamic_peak_detection": bool(dpd_flag),
-        "dst_min_nits": float(dst_min),
+        "preset": settings.preset,
+        "tone_curve": settings.tone_curve,
+        "target_nits": float(settings.target_nits),
+        "dynamic_peak_detection": bool(settings.dynamic_peak_detection),
+        "dst_min_nits": float(settings.dst_min_nits),
+        "knee_offset": float(settings.knee_offset),
+        "dpd_preset": settings.dpd_preset,
+        "dpd_black_cutoff": float(settings.dpd_black_cutoff),
+        "smoothing_period": float(settings.smoothing_period),
+        "scene_threshold_low": float(settings.scene_threshold_low),
+        "scene_threshold_high": float(settings.scene_threshold_high),
+        "percentile": float(settings.percentile),
+        "contrast_recovery": float(settings.contrast_recovery),
+        "metadata": settings.metadata,
+        "use_dovi": settings.use_dovi,
+        "visualize_lut": bool(settings.visualize_lut),
+        "show_clipping": bool(settings.show_clipping),
     }
 
 
@@ -1102,6 +1787,21 @@ def _format_overlay_text(
     dpd: int,
     target_nits: float,
     preset: str,
+    dst_min_nits: float,
+    knee_offset: float,
+    dpd_preset: str,
+    dpd_black_cutoff: float,
+    post_gamma: float,
+    post_gamma_enabled: bool,
+    smoothing_period: float,
+    scene_threshold_low: float,
+    scene_threshold_high: float,
+    percentile: float,
+    contrast_recovery: float,
+    metadata: Optional[int],
+    use_dovi: Optional[bool],
+    visualize_lut: bool,
+    show_clipping: bool,
     reason: Optional[str] = None,
 ) -> str:
     """
@@ -1111,7 +1811,8 @@ def _format_overlay_text(
         template (str): A format string that may reference the following keys: `tone_curve`, `curve` (alias),
         `dynamic_peak_detection`, `dpd` (numeric), `dynamic_peak_detection_bool`, `dpd_bool` (boolean),
         `target_nits` (int when whole number, otherwise float), `target_nits_float` (always float),
-        `preset`, and `reason`.
+        `dst_min_nits`, `knee_offset`, `dpd_preset`, `dpd_black_cutoff`, `post_gamma`,
+        `post_gamma_enabled`, `preset`, and `reason`.
         tone_curve (str): Name of the tone curve to show.
         dpd (int): Dynamic peak detection flag (0 or 1); boolean aliases are provided in the template values.
         target_nits (float): Target display luminance in nits.
@@ -1136,6 +1837,21 @@ def _format_overlay_text(
         "target_nits_float": target_nits,
         "preset": preset,
         "reason": reason or "",
+        "dst_min_nits": dst_min_nits,
+        "knee_offset": knee_offset,
+        "dpd_preset": dpd_preset,
+        "dpd_black_cutoff": dpd_black_cutoff,
+        "post_gamma": post_gamma,
+        "post_gamma_enabled": post_gamma_enabled,
+        "smoothing_period": smoothing_period,
+        "scene_threshold_low": scene_threshold_low,
+        "scene_threshold_high": scene_threshold_high,
+        "percentile": percentile,
+        "contrast_recovery": contrast_recovery,
+        "metadata": metadata,
+        "use_dovi": use_dovi,
+        "visualize_lut": visualize_lut,
+        "show_clipping": show_clipping,
     }
     try:
         return template.format(**values)
@@ -1304,6 +2020,7 @@ def process_clip_for_screenshot(
     enable_verification: bool = True,
     logger_override: Optional[logging.Logger] = None,
     warning_sink: Optional[List[str]] = None,
+    debug_color: bool = False,
 ) -> ClipProcessResult:
     """
     Prepare a VapourSynth clip for screenshot export by applying HDR->SDR tonemapping, optional overlay text, and optional verification against a naive SDR conversion.
@@ -1326,12 +2043,23 @@ def process_clip_for_screenshot(
 
     log = logger_override or logger
     source_props = _snapshot_frame_props(clip)
+    original_props = dict(source_props)
     clip, source_props, color_tuple = normalise_color_metadata(
         clip,
         source_props,
         color_cfg=cfg,
         file_name=file_name,
+        warning_sink=warning_sink,
     )
+    range_override_flag = bool(source_props.get("_ColorRangeOverride"))
+    debug_artifacts: Optional[ColorDebugArtifacts] = None
+    if debug_color:
+        debug_artifacts = ColorDebugArtifacts(
+            normalized_clip=clip,
+            normalized_props=dict(source_props),
+            original_props=original_props,
+            color_tuple=color_tuple,
+        )
     vs_module = _get_vapoursynth_module()
     core = getattr(clip, "core", None)
     if core is None:
@@ -1339,8 +2067,15 @@ def process_clip_for_screenshot(
     if core is None:
         raise ClipProcessError("Clip has no associated VapourSynth core")
 
-    preset, tone_curve, target_nits, dpd, dst_min = _resolve_tonemap_settings(cfg)
-    overlay_enabled = enable_overlay and bool(getattr(cfg, "overlay_enabled", True))
+    tonemap_settings = _resolve_tonemap_settings(cfg)
+    preset = tonemap_settings.preset
+    tone_curve = tonemap_settings.tone_curve
+    target_nits = tonemap_settings.target_nits
+    dpd = int(tonemap_settings.dynamic_peak_detection)
+    dst_min = tonemap_settings.dst_min_nits
+    post_gamma_cfg_enabled = bool(getattr(cfg, "post_gamma_enable", False))
+    post_gamma_value = float(getattr(cfg, "post_gamma", 1.0))
+    overlay_enabled = enable_overlay and bool(getattr(cfg, "overlay_enabled", True)) and not debug_color
     verify_enabled = enable_verification and bool(getattr(cfg, "verify_enabled", True))
     strict = bool(getattr(cfg, "strict", False))
 
@@ -1361,6 +2096,14 @@ def process_clip_for_screenshot(
         else:
             tonemap_reason = "Tonemap bypass"
 
+    source_range_value: Optional[int]
+    try:
+        source_range_value = int(color_range_in) if color_range_in is not None else None
+    except Exception:
+        source_range_value = None
+    if source_range_value not in (range_full, range_limited):
+        source_range_value = None
+
     tonemap_info = TonemapInfo(
         applied=False,
         tone_curve=None,
@@ -1369,6 +2112,22 @@ def process_clip_for_screenshot(
         dst_min_nits=dst_min,
         src_csp_hint=None,
         reason=tonemap_reason,
+        output_color_range=source_range_value,
+        range_detection="source_props" if source_range_value is not None else None,
+        knee_offset=tonemap_settings.knee_offset,
+        dpd_preset=tonemap_settings.dpd_preset,
+        dpd_black_cutoff=tonemap_settings.dpd_black_cutoff if dpd else 0.0,
+        post_gamma=post_gamma_value if post_gamma_cfg_enabled else 1.0,
+        post_gamma_enabled=False,
+        smoothing_period=tonemap_settings.smoothing_period,
+        scene_threshold_low=tonemap_settings.scene_threshold_low,
+        scene_threshold_high=tonemap_settings.scene_threshold_high,
+        percentile=tonemap_settings.percentile,
+        contrast_recovery=tonemap_settings.contrast_recovery,
+        metadata=tonemap_settings.metadata,
+        use_dovi=tonemap_settings.use_dovi,
+        visualize_lut=tonemap_settings.visualize_lut,
+        show_clipping=tonemap_settings.show_clipping,
     )
     overlay_text = None
     verification: Optional[VerificationResult] = None
@@ -1389,6 +2148,7 @@ def process_clip_for_screenshot(
             overlay_text=overlay_text,
             verification=None,
             source_props=source_props,
+            debug=debug_artifacts,
         )
 
     resize_ns = getattr(core, "resize", None)
@@ -1426,6 +2186,18 @@ def process_clip_for_screenshot(
         target_nits=target_nits,
         dst_min=dst_min,
         dpd=dpd,
+        knee_offset=tonemap_settings.knee_offset,
+        dpd_preset=tonemap_settings.dpd_preset,
+        dpd_black_cutoff=tonemap_settings.dpd_black_cutoff,
+        smoothing_period=tonemap_settings.smoothing_period,
+        scene_threshold_low=tonemap_settings.scene_threshold_low,
+        scene_threshold_high=tonemap_settings.scene_threshold_high,
+        percentile=tonemap_settings.percentile,
+        contrast_recovery=tonemap_settings.contrast_recovery,
+        metadata=tonemap_settings.metadata,
+        use_dovi=tonemap_settings.use_dovi,
+        visualize_lut=tonemap_settings.visualize_lut,
+        show_clipping=tonemap_settings.show_clipping,
         src_hint=src_hint,
         file_name=file_name,
     )
@@ -1435,8 +2207,92 @@ def process_clip_for_screenshot(
         prop="_Tonemapped",
         data=f"placebo:{tone_curve},dpd={dpd},dst_max={target_nits}",
     )
-    tonemapped = _apply_set_frame_prop(tonemapped, prop="_ColorRange", intval=0)
     tonemapped = _normalize_rgb_props(tonemapped, transfer=1, primaries=1)
+    applied_post_gamma = False
+    if post_gamma_cfg_enabled:
+        tonemapped, applied_post_gamma = _apply_post_gamma_levels(
+            core,
+            tonemapped,
+            gamma=post_gamma_value,
+            file_name=file_name,
+            log=log,
+        )
+
+    detected_range, detection_source = _detect_rgb_color_range(
+        core,
+        tonemapped,
+        log=log,
+        label=file_name,
+    )
+
+    effective_range: Optional[int] = detected_range
+    fallback_source = detection_source
+
+    source_range_int: Optional[int] = None
+    if color_range_in is not None and color_range_in in (range_full, range_limited):
+        try:
+            source_range_int = int(color_range_in)
+        except Exception:
+            source_range_int = None
+
+    if range_override_flag:
+        if source_range_int is not None:
+            effective_range = source_range_int
+        fallback_source = fallback_source or "override"
+    else:
+        if (
+            effective_range is None
+            and color_range_in is not None
+            and color_range_in in (range_full, range_limited)
+        ):
+            try:
+                effective_range = int(color_range_in)
+            except Exception:
+                effective_range = None
+            else:
+                fallback_source = fallback_source or "source_props"
+
+    if effective_range is not None:
+        range_value = int(effective_range)
+        changed_from_source = (
+            source_range_int is not None and source_range_int != range_value
+        )
+        if (
+            not range_override_flag
+            and changed_from_source
+            and source_range_int == range_limited
+            and range_value == range_full
+        ):
+            log.info(
+                "[TM RANGE] %s plane-stats suggested full range; retaining limited metadata",
+                file_name,
+            )
+            fallback_source = (fallback_source or "plane_stats") + "_conflict"
+            assert source_range_int is not None
+            effective_range = source_range_int
+            range_value = int(source_range_int)
+            changed_from_source = False
+        tonemapped = _apply_set_frame_prop(
+            tonemapped,
+            prop="_ColorRange",
+            intval=range_value,
+        )
+        if (
+            not range_override_flag
+            and changed_from_source
+            and source_range_int is not None
+        ):
+            log.info(
+                "[TM RANGE] %s remapping colour range %s\u2192%s",
+                file_name,
+                color_range_in,
+                effective_range,
+            )
+            tonemapped = _apply_set_frame_prop(
+                tonemapped,
+                prop="_SourceColorRange",
+                intval=source_range_int,
+            )
 
     tonemap_info = TonemapInfo(
         applied=True,
@@ -1446,6 +2302,22 @@ def process_clip_for_screenshot(
         dst_min_nits=dst_min,
         src_csp_hint=src_hint,
         reason=None,
+        output_color_range=effective_range,
+        range_detection=fallback_source,
+        knee_offset=tonemap_settings.knee_offset,
+        dpd_preset=tonemap_settings.dpd_preset,
+        dpd_black_cutoff=tonemap_settings.dpd_black_cutoff if dpd else 0.0,
+        post_gamma=post_gamma_value if applied_post_gamma else 1.0,
+        post_gamma_enabled=applied_post_gamma,
+        smoothing_period=tonemap_settings.smoothing_period,
+        scene_threshold_low=tonemap_settings.scene_threshold_low,
+        scene_threshold_high=tonemap_settings.scene_threshold_high,
+        percentile=tonemap_settings.percentile,
+        contrast_recovery=tonemap_settings.contrast_recovery,
+        metadata=tonemap_settings.metadata,
+        use_dovi=tonemap_settings.use_dovi,
+        visualize_lut=tonemap_settings.visualize_lut,
+        show_clipping=tonemap_settings.show_clipping,
     )
 
     overlay_template = str(
@@ -1462,6 +2334,21 @@ def process_clip_for_screenshot(
             dpd=dpd,
             target_nits=target_nits,
             preset=preset,
+            dst_min_nits=dst_min,
+            knee_offset=tonemap_settings.knee_offset,
+            dpd_preset=tonemap_settings.dpd_preset,
+            dpd_black_cutoff=tonemap_settings.dpd_black_cutoff if dpd else 0.0,
+            post_gamma=post_gamma_value,
+            post_gamma_enabled=applied_post_gamma,
+            smoothing_period=tonemap_settings.smoothing_period,
+            scene_threshold_low=tonemap_settings.scene_threshold_low,
+            scene_threshold_high=tonemap_settings.scene_threshold_high,
+            percentile=tonemap_settings.percentile,
+            contrast_recovery=tonemap_settings.contrast_recovery,
+            metadata=tonemap_settings.metadata,
+            use_dovi=tonemap_settings.use_dovi,
+            visualize_lut=tonemap_settings.visualize_lut,
+            show_clipping=tonemap_settings.show_clipping,
             reason="HDR",
         )
         log.info("[OVERLAY] %s using text '%s'", file_name, overlay_text)
@@ -1540,4 +2427,5 @@ def process_clip_for_screenshot(
         overlay_text=overlay_text,
         verification=verification,
         source_props=source_props,
+        debug=debug_artifacts,
     )

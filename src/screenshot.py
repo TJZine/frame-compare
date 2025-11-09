@@ -7,7 +7,6 @@ import os
 import re
 import shutil
 import subprocess
-from functools import partial
 from pathlib import Path
 from typing import (
     Any,
@@ -26,7 +25,13 @@ from typing import (
 )
 
 from . import vs_core
-from .datatypes import ColorConfig, OddGeometryPolicy, RGBDither, ScreenshotConfig
+from .datatypes import (
+    ColorConfig,
+    ExportRange,
+    OddGeometryPolicy,
+    RGBDither,
+    ScreenshotConfig,
+)
 
 _INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -73,6 +78,54 @@ class SubtitleFunc(Protocol):
 def _new_overlay_state() -> OverlayState:
     """Create a mutable overlay state container."""
     return cast(OverlayState, {})
+
+
+def _range_constants() -> tuple[int, int]:
+    """Return the VapourSynth range constant values (full, limited)."""
+
+    try:
+        import vapoursynth as vs  # type: ignore
+    except Exception:  # pragma: no cover - runtime dependency
+        return (0, 1)
+    return int(getattr(vs, "RANGE_FULL", 0)), int(getattr(vs, "RANGE_LIMITED", 1))
+
+
+def _should_expand_to_full(export_range: ExportRange | str | None) -> bool:
+    """Return True when final RGB PNGs should be exported in full range."""
+
+    if isinstance(export_range, ExportRange):
+        return export_range is ExportRange.FULL
+    if isinstance(export_range, str):
+        return export_range.strip().lower() == ExportRange.FULL.value
+    return False
+
+
+def _sanitize_for_log(value: object) -> str:
+    """Return an ASCII-safe representation of *value* for logging."""
+
+    text = str(value)
+    try:
+        return text.encode("ascii", "replace").decode("ascii")
+    except Exception:
+        return repr(value)
+
+
+def _set_clip_range(core: Any, clip: Any, color_range: int | None, *, context: str) -> Any:
+    """Stamp `_ColorRange` on *clip* when ``SetFrameProps`` is available."""
+
+    if color_range not in (0, 1, None):
+        return clip
+    std_ns = getattr(core, "std", None)
+    set_props = getattr(std_ns, "SetFrameProps", None) if std_ns is not None else None
+    if not callable(set_props):
+        return clip
+    try:
+        if color_range is None:
+            return clip
+        return set_props(clip, _ColorRange=int(color_range))
+    except Exception as exc:  # pragma: no cover - best effort
+        logger.debug("Failed to set _ColorRange during %s: %s", context, exc)
+        return clip
 
 
 def _append_overlay_warning(state: OverlayState, message: str) -> None:
@@ -367,6 +420,263 @@ def _normalize_rgb_dither(value: RGBDither | str) -> RGBDither:
         return RGBDither.ERROR_DIFFUSION
 
 
+class _ColorDebugState:
+    """Collects colour debug logs and intermediate PNGs for a single clip."""
+
+    def __init__(
+        self,
+        *,
+        enabled: bool,
+        base_dir: Path,
+        label: str,
+        core: Any | None,
+        compression_level: int,
+        rgb_dither: RGBDither,
+        logger_obj: logging.Logger,
+        artifacts: Optional[vs_core.ColorDebugArtifacts],
+    ) -> None:
+        self.enabled = bool(enabled and core is not None)
+        self.base_dir = base_dir
+        self.label = label
+        self.core = core
+        self._logger = logger_obj
+        self._compression_value = _map_fpng_compression(compression_level)
+        self._rgb_dither = rgb_dither
+        self._writer: Optional[Callable[..., Any]] = None
+        self._warned_writer = False
+        self.normalized_clip = artifacts.normalized_clip if artifacts is not None else None
+        self.normalized_props = (
+            dict(artifacts.normalized_props)
+            if artifacts is not None and artifacts.normalized_props is not None
+            else None
+        )
+        self.original_props = (
+            dict(artifacts.original_props)
+            if artifacts is not None and artifacts.original_props is not None
+            else None
+        )
+        self.color_tuple = artifacts.color_tuple if artifacts is not None else None
+
+    def capture_stage(
+        self,
+        stage: str,
+        frame_idx: int,
+        clip: Any | None,
+        props: Mapping[str, Any] | None = None,
+    ) -> None:
+        if not self.enabled or clip is None:
+            return
+        try:
+            props_map = dict(props or vs_core._snapshot_frame_props(clip))
+        except Exception:
+            props_map = {}
+        try:
+            y_min, y_max = self._measure_plane_bounds(clip, frame_idx)
+        except Exception as exc:
+            self._logger.debug(
+                "Colour debug PlaneStats failed for %s stage=%s frame=%s: %s",
+                self.label,
+                stage,
+                frame_idx,
+                exc,
+            )
+            y_min = y_max = float("nan")
+        self._logger.info(
+            "[DEBUG-COLOR] %s stage=%s frame=%d Matrix=%s Transfer=%s Primaries=%s Range=%s Ymin=%.2f Ymax=%.2f",
+            self.label,
+            stage,
+            frame_idx,
+            props_map.get("_Matrix"),
+            props_map.get("_Transfer"),
+            props_map.get("_Primaries"),
+            props_map.get("_ColorRange"),
+            y_min,
+            y_max,
+        )
+        try:
+            self._write_png(stage, frame_idx, clip, props_map)
+        except Exception as exc:  # pragma: no cover - debug only
+            self._logger.debug(
+                "Colour debug PNG write failed for %s stage=%s frame=%s: %s",
+                self.label,
+                stage,
+                frame_idx,
+                exc,
+            )
+
+    def _measure_plane_bounds(self, clip: Any, frame_idx: int) -> tuple[float, float]:
+        std_ns = getattr(self.core, "std", None) if self.core is not None else None
+        plane_stats = getattr(std_ns, "PlaneStats", None) if std_ns is not None else None
+        if not callable(plane_stats):
+            raise RuntimeError("VapourSynth std.PlaneStats unavailable for colour debug")
+        stats_clip = cast(Any, plane_stats(clip))
+        frame = stats_clip.get_frame(frame_idx)
+        props = cast(Mapping[str, Any], getattr(frame, "props", {}))
+        min_value = float(props.get("PlaneStatsMin", 0.0))
+        max_value = float(props.get("PlaneStatsMax", 0.0))
+        return (min_value, max_value)
+
+    def _write_png(
+        self,
+        stage: str,
+        frame_idx: int,
+        clip: Any,
+        props: Mapping[str, Any],
+    ) -> None:
+        path = self.base_dir / f"{frame_idx:06d}_{stage}.png"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if self._writer is None:
+            fpng_ns = getattr(self.core, "fpng", None) if self.core is not None else None
+            writer = getattr(fpng_ns, "Write", None) if fpng_ns is not None else None
+            if not callable(writer):
+                if not self._warned_writer:
+                    self._logger.warning(
+                        "Colour debug unable to emit PNGs for %s (fpng.Write unavailable)",
+                        self.label,
+                    )
+                    self._warned_writer = True
+                return
+            self._writer = writer
+        _, _, _, debug_range = vs_core._resolve_color_metadata(props)
+        rgb_clip = _ensure_rgb24(
+            self.core,
+            clip,
+            frame_idx,
+            source_props=props,
+            rgb_dither=self._rgb_dither,
+            target_range=int(debug_range) if debug_range is not None else None,
+        )
+        job = self._writer(rgb_clip, str(path), compression=self._compression_value, overwrite=True)
+        job.get_frame(frame_idx)
+
+
+def _legacy_rgb24_from_clip(
+    core: Any,
+    clip: Any,
+    color_tuple: tuple[Optional[int], Optional[int], Optional[int], Optional[int]] | None,
+    *,
+    expand_to_full: bool = False,
+) -> Any | None:
+    if color_tuple is None:
+        return None
+    try:
+        import vapoursynth as vs  # type: ignore
+    except Exception:
+        return None
+
+    resize_ns = getattr(core, "resize", None)
+    lanczos = getattr(resize_ns, "Lanczos", None) if resize_ns is not None else None
+    if not callable(lanczos):
+        return None
+
+    matrix, transfer, primaries, color_range = color_tuple
+    kwargs: Dict[str, int] = {}
+    if matrix is not None:
+        kwargs["matrix_in"] = int(matrix)
+    # Legacy pipeline historically relied on matrix only; avoid injecting
+    # transfer/primaries hints to mirror original conversion behaviour.
+    range_limited = int(getattr(vs, "RANGE_LIMITED", 1))
+    range_full = int(getattr(vs, "RANGE_FULL", 0))
+    resolved_range_raw = range_limited if color_range is None else int(color_range)
+    source_range = resolved_range_raw if resolved_range_raw in {range_limited, range_full} else range_full
+    kwargs["range_in"] = source_range
+    target_range = range_full if expand_to_full else source_range
+    try:
+        legacy_rgb = lanczos(
+            clip,
+            format=vs.RGB24,
+            dither_type="error_diffusion",
+            range=target_range,
+            **kwargs,
+        )
+    except Exception:
+        return None
+    legacy_rgb = _copy_frame_props(core, legacy_rgb, clip, context="legacy RGB24 conversion")
+    if expand_to_full and source_range == range_limited:
+        legacy_rgb = _expand_limited_rgb(core, legacy_rgb)
+        legacy_rgb = _copy_frame_props(core, legacy_rgb, clip, context="legacy RGB24 expansion")
+    try:
+        prop_kwargs: Dict[str, int] = {"_Matrix": 0, "_ColorRange": int(target_range)}
+        if primaries is not None:
+            prop_kwargs["_Primaries"] = int(primaries)
+        if transfer is not None:
+            prop_kwargs["_Transfer"] = int(transfer)
+        if expand_to_full and source_range != target_range:
+            prop_kwargs["_SourceColorRange"] = int(source_range)
+        legacy_rgb = cast(Any, legacy_rgb.std.SetFrameProps(**prop_kwargs))
+    except Exception as exc:  # pragma: no cover - best effort
+        logger.debug("Failed to set legacy RGB frame props: %s", exc)
+    return legacy_rgb
+
+
+def _finalize_existing_rgb24(
+    core: Any,
+    clip: Any,
+    *,
+    source_props: Mapping[str, Any] | None,
+    target_range: int | None,
+    expand_to_full: bool,
+    range_full: int,
+    range_limited: int,
+) -> Any:
+    """Adjust metadata and optional range expansion for clips already in RGB24."""
+
+    props: Dict[str, Any] = dict(source_props or {})
+    if not props:
+        try:
+            props = dict(vs_core._snapshot_frame_props(clip))
+        except Exception:
+            props = {}
+
+    tonemapped_flag = props.get("_Tonemapped")
+    is_tonemapped = tonemapped_flag is not None
+
+    matrix, transfer, primaries, color_range = vs_core._resolve_color_metadata(props)
+    current_range = range_limited if color_range is None else int(color_range)
+    if current_range not in (range_full, range_limited):
+        current_range = range_limited
+
+    output_range = current_range
+    source_range_meta: int | None = None
+
+    if expand_to_full:
+        if current_range == range_limited and not is_tonemapped:
+            clip = _expand_limited_rgb(core, clip)
+            output_range = range_full
+            source_range_meta = range_limited
+        elif current_range in (range_full, range_limited):
+            output_range = current_range
+        else:
+            output_range = range_full
+    elif target_range in (range_full, range_limited):
+        output_range = int(target_range)
+
+    std_ns = getattr(core, "std", None)
+    set_props = getattr(std_ns, "SetFrameProps", None) if std_ns is not None else None
+    if callable(set_props):
+        prop_kwargs: Dict[str, int] = {"_Matrix": 0, "_ColorRange": int(output_range)}
+        if primaries is not None:
+            prop_kwargs["_Primaries"] = int(primaries)
+        elif isinstance(props.get("_Primaries"), int):
+            prop_kwargs["_Primaries"] = int(props["_Primaries"])
+        if transfer is not None:
+            prop_kwargs["_Transfer"] = int(transfer)
+        elif isinstance(props.get("_Transfer"), int):
+            prop_kwargs["_Transfer"] = int(props["_Transfer"])
+        if source_range_meta is not None and source_range_meta != output_range:
+            prop_kwargs["_SourceColorRange"] = int(source_range_meta)
+        elif (
+            not expand_to_full
+            and isinstance(props.get("_SourceColorRange"), int)
+        ):
+            prop_kwargs["_SourceColorRange"] = int(props["_SourceColorRange"])
+        try:
+            clip = cast(Any, set_props(clip, **prop_kwargs))
+        except Exception as exc:  # pragma: no cover - best effort
+            logger.debug("Failed to set RGB frame props: %s", exc)
+    return clip
+
+
 def _ensure_rgb24(
     core: Any,
     clip: Any,
@@ -374,6 +684,8 @@ def _ensure_rgb24(
     *,
     source_props: Mapping[str, Any] | None = None,
     rgb_dither: RGBDither | str = RGBDither.ERROR_DIFFUSION,
+    target_range: int | None = None,
+    expand_to_full: bool = False,
 ) -> Any:
     """
     Ensure the given VapourSynth frame is in 8-bit RGB24 color format.
@@ -384,7 +696,7 @@ def _ensure_rgb24(
         frame_idx (int): Index of the frame being processed (used in error messages).
 
     Returns:
-        Any: A clip in RGB24 with full range; returns the original clip if it already is 8-bit RGB24.
+        Any: A clip in RGB24 using the requested range; returns the original clip if it already is 8-bit RGB24.
 
     Raises:
         ScreenshotWriterError: If VapourSynth is unavailable, the core lacks the resize namespace or Point, or the conversion fails.
@@ -394,11 +706,22 @@ def _ensure_rgb24(
     except Exception as exc:  # pragma: no cover - requires runtime deps
         raise ScreenshotWriterError("VapourSynth is required for screenshot export") from exc
 
+    range_full = int(getattr(vs, "RANGE_FULL", 0))
+    range_limited = int(getattr(vs, "RANGE_LIMITED", 1))
+
     fmt = getattr(clip, "format", None)
     color_family = getattr(fmt, "color_family", None) if fmt is not None else None
     bits = getattr(fmt, "bits_per_sample", None) if fmt is not None else None
     if color_family == getattr(vs, "RGB", object()) and bits == 8:
-        return clip
+        return _finalize_existing_rgb24(
+            core,
+            clip,
+            source_props=source_props,
+            target_range=target_range,
+            expand_to_full=expand_to_full,
+            range_full=range_full,
+            range_limited=range_limited,
+        )
 
     resize_ns = getattr(core, "resize", None)
     if resize_ns is None:
@@ -412,6 +735,9 @@ def _ensure_rgb24(
     if not props:
         props = dict(vs_core._snapshot_frame_props(clip))
     resize_kwargs = _resolve_resize_color_kwargs(props)
+    matrix, transfer, primaries, color_range = vs_core._resolve_color_metadata(props)
+    resize_kwargs.pop("transfer_in", None)
+    resize_kwargs.pop("primaries_in", None)
 
     yuv_constant = getattr(vs, "YUV", object())
     if color_family == yuv_constant:
@@ -431,13 +757,29 @@ def _ensure_rgb24(
                 frame_idx,
             )
 
+    source_range = range_limited if color_range is None else int(color_range)
+    if source_range not in (range_full, range_limited):
+        source_range = range_full
+
+    desired_range = None
+    if target_range in (range_full, range_limited):
+        desired_range = int(target_range)
+    else:
+        range_hint = resize_kwargs.get("range_in")
+        if range_hint in (range_full, range_limited):
+            desired_range = int(range_hint)
+    if desired_range is None:
+        desired_range = source_range
+
+    output_range = range_full if expand_to_full else desired_range
+
     try:
         converted = cast(
             Any,
             point(
                 clip,
                 format=vs.RGB24,
-                range=vs.RANGE_FULL,
+                range=output_range,
                 dither_type=dither,
                 **resize_kwargs,
             ),
@@ -445,14 +787,23 @@ def _ensure_rgb24(
     except Exception as exc:  # pragma: no cover - defensive
         raise ScreenshotWriterError(f"Failed to convert frame {frame_idx} to RGB24: {exc}") from exc
 
+    converted = _copy_frame_props(core, converted, clip, context="RGB24 conversion")
+    if expand_to_full and source_range == range_limited:
+        converted = _expand_limited_rgb(core, converted)
+        converted = _copy_frame_props(core, converted, clip, context="RGB24 expansion")
+
     try:
-        prop_kwargs: Dict[str, int] = {"_Matrix": 0, "_ColorRange": 0}
-        primaries = props.get("_Primaries")
-        if isinstance(primaries, int):
+        prop_kwargs: Dict[str, int] = {"_Matrix": 0, "_ColorRange": int(output_range)}
+        if primaries is not None:
             prop_kwargs["_Primaries"] = int(primaries)
-        transfer = props.get("_Transfer")
-        if isinstance(transfer, int):
+        elif isinstance(props.get("_Primaries"), int):
+            prop_kwargs["_Primaries"] = int(props["_Primaries"])
+        if transfer is not None:
             prop_kwargs["_Transfer"] = int(transfer)
+        elif isinstance(props.get("_Transfer"), int):
+            prop_kwargs["_Transfer"] = int(props["_Transfer"])
+        if expand_to_full and source_range != output_range:
+            prop_kwargs["_SourceColorRange"] = int(source_range)
         converted = cast(Any, converted.std.SetFrameProps(**prop_kwargs))
     except Exception as exc:  # pragma: no cover - best effort
         logger.debug("Failed to set RGB frame props: %s", exc)
@@ -561,9 +912,26 @@ def _apply_frame_info_overlay(
         info = "\n".join(lines)
         return subtitle(clip_ref, text=[info], style=FRAME_INFO_STYLE)
 
+    def _frame_info_callback(
+        n: int,
+        f: Any,
+        clip_ref: Any = clip,
+        **kwargs: Any,
+    ) -> Any:
+        """
+        Wrapper passed to std.FrameEval that tolerates keyword arguments supplied by VapourSynth.
+        """
+
+        clip_override = kwargs.get("clip")
+        if clip_override is not None:
+            clip_ref = clip_override
+        return _draw_info(n, f, clip_ref)
+
     try:
-        info_clip = frame_eval(clip, partial(_draw_info, clip_ref=clip), prop_src=clip)
-        return subtitle(info_clip, text=[padding_title + label], style=FRAME_INFO_STYLE)
+        info_clip = frame_eval(clip, _frame_info_callback, prop_src=clip)
+        result = subtitle(info_clip, text=[padding_title + label], style=FRAME_INFO_STYLE)
+        result = _copy_frame_props(core, result, clip, context="frame info overlay")
+        return result
     except Exception as exc:  # pragma: no cover - defensive
         logger.debug('Applying frame overlay failed: %s', exc)
         return clip
@@ -612,6 +980,7 @@ def _apply_overlay_text(
         except Exception as exc:  # pragma: no cover - defensive
             logger.debug('Subtitle overlay failed, falling back: %s', exc)
         else:
+            result = _copy_frame_props(core, result, clip, context="overlay preservation")
             if status != "ok":
                 logger.info('[OVERLAY] %s applied', file_label)
                 state["overlay_status"] = "ok"
@@ -637,18 +1006,100 @@ def _apply_overlay_text(
         if strict:
             raise ScreenshotWriterError(message) from exc
         return clip
-    std_ns = getattr(core, "std", None)
-    copy_props = getattr(std_ns, "CopyFrameProps", None) if std_ns is not None else None
-    if callable(copy_props):
-        try:
-            result = copy_props(result, clip)
-        except Exception as exc:  # pragma: no cover - best effort
-            logger.debug('CopyFrameProps failed during overlay preservation: %s', exc)
+    result = _copy_frame_props(core, result, clip, context="overlay preservation")
     if status != "ok":
         logger.info('[OVERLAY] %s applied', file_label)
         state["overlay_status"] = "ok"
     return result
 
+
+def _copy_frame_props(core: Any, target: Any, source: Any, *, context: str) -> Any:
+    """
+    Best-effort propagation of frame properties from ``source`` to ``target``.
+
+    Parameters:
+        core: VapourSynth core providing std.CopyFrameProps.
+        target: Clip that should inherit metadata.
+        source: Clip supplying the metadata.
+        context: Debug label describing the copy site.
+    """
+
+    std_ns = getattr(core, "std", None)
+    copy_props = getattr(std_ns, "CopyFrameProps", None) if std_ns is not None else None
+    if not callable(copy_props):
+        return target
+    try:
+        return copy_props(target, source)
+    except Exception as exc:  # pragma: no cover - best effort
+        logger.debug("CopyFrameProps failed during %s: %s", context, exc)
+        return target
+
+
+def _expand_limited_rgb(core: Any, clip: Any) -> Any:
+    """Scale limited-range RGB to full range when possible."""
+
+    std_ns = getattr(core, "std", None)
+    levels = getattr(std_ns, "Levels", None) if std_ns is not None else None
+    if not callable(levels):
+        return clip
+
+    fmt = getattr(clip, "format", None)
+    bits = getattr(fmt, "bits_per_sample", None)
+    if not isinstance(bits, int) or bits <= 0:
+        return clip
+
+    max_code = (1 << bits) - 1
+    scale = 1 << (bits - 8) if bits >= 8 else 1
+
+    min_in = 16 * scale
+    max_in = 235 * scale
+
+    try:
+        return levels(
+            clip,
+            min_in=min_in,
+            max_in=max_in,
+            min_out=0,
+            max_out=max_code,
+            planes=[0, 1, 2],
+        )
+    except Exception as exc:  # pragma: no cover - best effort
+        logger.debug("Failed to expand limited RGB range: %s", exc)
+        return clip
+
+
+def _restore_color_props(
+    core: Any,
+    clip: Any,
+    props: Mapping[str, Any],
+    *,
+    context: str,
+    include_color_range: bool = True,
+) -> Any:
+    """Reapply colour metadata to *clip* based on *props*."""
+
+    std_ns = getattr(core, "std", None)
+    set_props = getattr(std_ns, "SetFrameProps", None) if std_ns is not None else None
+    if not callable(set_props):
+        return clip
+
+    matrix, transfer, primaries, color_range = vs_core._resolve_color_metadata(props)
+    prop_kwargs: Dict[str, int] = {}
+    if matrix is not None:
+        prop_kwargs["_Matrix"] = int(matrix)
+    if transfer is not None:
+        prop_kwargs["_Transfer"] = int(transfer)
+    if primaries is not None:
+        prop_kwargs["_Primaries"] = int(primaries)
+    if include_color_range and color_range is not None:
+        prop_kwargs["_ColorRange"] = int(color_range)
+    if not prop_kwargs:
+        return clip
+    try:
+        return set_props(clip, **prop_kwargs)
+    except Exception as exc:  # pragma: no cover - best effort
+        logger.debug("Failed to restore colour props during %s: %s", context, exc)
+        return clip
 
 class ScreenshotError(RuntimeError):
     """Base class for screenshot related issues."""
@@ -756,13 +1207,25 @@ def _safe_pivot_notify(pivot_notifier: Callable[[str], None] | None, note: str) 
 def _resolve_source_props(
     clip: Any,
     source_props: Mapping[str, Any] | None,
-) -> Dict[str, Any]:
-    """Return a snapshot of source colour metadata without mutating the caller's mapping."""
+    *,
+    color_cfg: "ColorConfig | None" = None,
+    file_name: str | None = None,
+    warning_sink: Optional[List[str]] = None,
+) -> tuple[Any, Dict[str, Any]]:
+    """Return a clip and colour metadata ensuring defaults/overrides are applied."""
 
     props = dict(source_props or {})
-    if props:
-        return props
-    return dict(vs_core._snapshot_frame_props(clip))
+    if props.get("_ColorRange") is not None:
+        return clip, props
+
+    normalised_clip, resolved_props, _ = vs_core.normalise_color_metadata(
+        clip,
+        props if props else None,
+        color_cfg=color_cfg,
+        file_name=file_name,
+        warning_sink=warning_sink,
+    )
+    return normalised_clip, dict(resolved_props)
 
 
 def _describe_vs_format(fmt: Any) -> str:
@@ -806,6 +1269,29 @@ def _is_sdr_pipeline(
         logger.debug("HDR detection failed; defaulting to SDR: %s", exc)
         is_hdr = False
     return not bool(is_hdr)
+
+
+def _resolve_output_color_range(
+    source_props: Mapping[str, Any],
+    tonemap_info: "vs_core.TonemapInfo | None",
+) -> int | None:
+    tonemap_applied = bool(tonemap_info and tonemap_info.applied)
+    range_full, range_limited = _range_constants()
+    if tonemap_info and tonemap_info.output_color_range in (range_full, range_limited):
+        if tonemap_applied:
+            return int(tonemap_info.output_color_range)
+        return int(tonemap_info.output_color_range)
+    matrix, transfer, primaries, color_range = vs_core._resolve_color_metadata(source_props)
+    if color_range is None:
+        try:
+            is_hdr = vs_core._props_signal_hdr(source_props)
+        except Exception:
+            is_hdr = False
+        return range_full if is_hdr else range_limited
+    resolved = int(color_range)
+    if resolved in (range_full, range_limited):
+        return resolved
+    return range_full
 
 
 def _promote_to_yuv444p16(
@@ -882,6 +1368,8 @@ def _promote_to_yuv444p16(
                 promoted = cast(Any, set_props(promoted, **prop_kwargs))
             except Exception as exc:  # pragma: no cover - best effort
                 logger.debug("Failed to set frame props after promotion: %s", exc)
+
+    promoted = _copy_frame_props(core, promoted, clip, context="4:4:4 promotion")
 
     return promoted
 
@@ -1543,6 +2031,13 @@ def _save_frame_with_fpng(
     geometry_plan: GeometryPlan | None = None,
     tonemap_info: "vs_core.TonemapInfo | None" = None,
     pivot_notifier: Callable[[str], None] | None = None,
+    color_cfg: "ColorConfig | None" = None,
+    file_name: str | None = None,
+    warning_sink: Optional[List[str]] = None,
+    debug_state: Optional[_ColorDebugState] = None,
+    frame_info_allowed: bool = True,
+    overlays_allowed: bool = True,
+    expand_to_full: bool = False,
 ) -> None:
     try:
         import vapoursynth as vs  # type: ignore
@@ -1554,13 +2049,39 @@ def _save_frame_with_fpng(
 
     resolved_policy = _normalise_geometry_policy(cfg.odd_geometry_policy)
     rgb_dither = _normalize_rgb_dither(cfg.rgb_dither)
-    source_props_map = _resolve_source_props(clip, source_props)
+    expand_to_full = bool(expand_to_full) or _should_expand_to_full(getattr(cfg, "export_range", None))
+    clip, source_props_map = _resolve_source_props(
+        clip,
+        source_props,
+        color_cfg=color_cfg,
+        file_name=file_name,
+        warning_sink=warning_sink,
+    )
+    tonemap_applied = bool(tonemap_info and tonemap_info.applied)
+    if tonemap_applied:
+        try:
+            tonemapped_props = vs_core._snapshot_frame_props(clip)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug(
+                "Falling back to source props for tonemapped clip %s: %s",
+                file_name or "<unknown>",
+                exc,
+            )
+        else:
+            source_props_map = dict(tonemapped_props)
     requires_full_chroma = bool(geometry_plan and geometry_plan.get("requires_full_chroma"))
     fmt = getattr(clip, "format", None)
     has_axis, axis_label = _resolve_promotion_axes(fmt, crop, pad)
     yuv_constant = getattr(vs, "YUV", object())
     color_family = getattr(fmt, "color_family", None)
     is_sdr = _is_sdr_pipeline(tonemap_info, source_props_map)
+    output_color_range = _resolve_output_color_range(source_props_map, tonemap_info)
+    range_full, range_limited = _range_constants()
+    if expand_to_full:
+        output_color_range = range_full
+    include_color_range = bool(
+        (tonemap_info and tonemap_info.output_color_range is not None) or not tonemap_applied
+    )
     should_promote = (
         requires_full_chroma
         and has_axis
@@ -1605,7 +2126,16 @@ def _save_frame_with_fpng(
     try:
         left, top, right, bottom = crop
         if any(crop):
+            pre_crop = work
             work = work.std.CropRel(left=left, right=right, top=top, bottom=bottom)
+            work = _copy_frame_props(core, work, pre_crop, context="geometry cropping")
+            work = _restore_color_props(
+                core,
+                work,
+                source_props_map,
+                context="geometry cropping",
+                include_color_range=include_color_range,
+            )
         target_w, target_h = scaled
         if work.width != target_w or work.height != target_h:
             resize_ns = getattr(core, "resize", None)
@@ -1614,7 +2144,16 @@ def _save_frame_with_fpng(
             resampler = getattr(resize_ns, "Spline36", None)
             if not callable(resampler):
                 raise ScreenshotWriterError("VapourSynth resize.Spline36 is unavailable")
+            pre_resize = work
             work = resampler(work, width=target_w, height=target_h)
+            work = _copy_frame_props(core, work, pre_resize, context="geometry resize")
+            work = _restore_color_props(
+                core,
+                work,
+                source_props_map,
+                context="geometry resize",
+                include_color_range=include_color_range,
+            )
 
         pad_left, pad_top, pad_right, pad_bottom = pad
         if pad_left or pad_top or pad_right or pad_bottom:
@@ -1622,6 +2161,7 @@ def _save_frame_with_fpng(
             add_borders = getattr(std_ns, "AddBorders", None) if std_ns is not None else None
             if not callable(add_borders):
                 raise ScreenshotWriterError("VapourSynth std.AddBorders is unavailable")
+            pre_pad = work
             work = add_borders(
                 work,
                 left=max(0, pad_left),
@@ -1629,11 +2169,110 @@ def _save_frame_with_fpng(
                 top=max(0, pad_top),
                 bottom=max(0, pad_bottom),
             )
+            work = _copy_frame_props(core, work, pre_pad, context="geometry padding")
+            work = _restore_color_props(
+                core,
+                work,
+                source_props_map,
+                context="geometry padding",
+                include_color_range=include_color_range,
+            )
     except Exception as exc:
         raise ScreenshotWriterError(f"Failed to prepare frame {frame_idx}: {exc}") from exc
 
+    work = _restore_color_props(
+        core,
+        work,
+        source_props_map,
+        context="geometry final",
+        include_color_range=include_color_range,
+    )
+
     render_clip = work
-    if cfg.add_frame_info:
+    overlay_range: Optional[int] = (
+        output_color_range
+        if output_color_range in (range_full, range_limited)
+        else range_full
+    )
+
+    if debug_state is not None:
+        try:
+            post_geom_props = vs_core._snapshot_frame_props(work)
+        except Exception:
+            post_geom_props = {}
+        debug_state.capture_stage(
+            "post_geometry",
+            frame_idx,
+            work,
+            post_geom_props,
+        )
+        legacy_clip = _legacy_rgb24_from_clip(
+            core,
+            work,
+            getattr(debug_state, "color_tuple", None),
+            expand_to_full=expand_to_full,
+        )
+        if legacy_clip is not None:
+            try:
+                legacy_props = vs_core._snapshot_frame_props(legacy_clip)
+            except Exception:
+                legacy_props = {}
+            debug_state.capture_stage("legacy_rgb24", frame_idx, legacy_clip, legacy_props)
+    overlay_input_range = overlay_range
+    clip_format = getattr(render_clip, "format", None)
+    overlay_resize_kwargs: Dict[str, Any] = {}
+    overlay_original_format = getattr(clip_format, "id", None)
+    overlay_rgb_format = None
+    try:
+        import vapoursynth as vs  # type: ignore
+    except Exception:
+        vs = None  # type: ignore[assignment]
+    if vs is not None:
+        overlay_rgb_format = getattr(vs, "RGB24", None)
+    log_overlay = bool(os.getenv("FRAME_COMPARE_LOG_OVERLAY_RANGE"))
+    if log_overlay:
+        fmt_name = getattr(clip_format, "name", None)
+        print(
+            "[OVERLAY DEBUG] clip="
+            f"{_sanitize_for_log(label)} frame={frame_idx} stage=pre-overlay "
+            f"range={overlay_input_range} props_range={source_props_map.get('_ColorRange')} "
+            f"fmt={_sanitize_for_log(fmt_name)}",
+            flush=True,
+        )
+    converted_for_overlay = False
+    if frame_info_allowed or (overlays_allowed and overlay_text):
+        resize_ns = getattr(core, "resize", None)
+        point = getattr(resize_ns, "Point", None) if resize_ns is not None else None
+        if callable(point):
+            try:
+                point_kwargs: Dict[str, Any] = {"dither_type": "none"}
+                if overlay_rgb_format is not None:
+                    point_kwargs["format"] = overlay_rgb_format
+                if overlay_input_range in (range_full, range_limited):
+                    point_kwargs["range"] = int(overlay_input_range)
+                point_kwargs.update(overlay_resize_kwargs)
+                render_clip = point(render_clip, **point_kwargs)
+                converted_for_overlay = True
+                render_clip = _set_clip_range(
+                    core,
+                    render_clip,
+                    overlay_input_range,
+                    context="overlay range normalisation",
+                )
+                if log_overlay:
+                    fmt_name = getattr(getattr(render_clip, "format", None), "name", None)
+                    print(
+                        "[OVERLAY DEBUG] clip="
+                        f"{_sanitize_for_log(label)} frame={frame_idx} stage=normalized "
+                        f"range={overlay_input_range} fmt={_sanitize_for_log(fmt_name)}",
+                        flush=True,
+                    )
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug("Failed to normalize overlay range for frame %s: %s", frame_idx, exc)
+        else:
+            logger.debug("VapourSynth resize.Point unavailable; skipping overlay range normalization")
+
+    if frame_info_allowed:
         render_clip = _apply_frame_info_overlay(
             core,
             render_clip,
@@ -1643,14 +2282,54 @@ def _save_frame_with_fpng(
         )
 
     overlay_state = overlay_state or _new_overlay_state()
-    render_clip = _apply_overlay_text(
-        core,
-        render_clip,
-        overlay_text,
-        strict=strict_overlay,
-        state=overlay_state,
-        file_label=label,
-    )
+    if overlays_allowed and overlay_text:
+        render_clip = _apply_overlay_text(
+            core,
+            render_clip,
+            overlay_text,
+            strict=strict_overlay,
+            state=overlay_state,
+            file_label=label,
+        )
+
+    if (
+        converted_for_overlay
+        and overlay_input_range != output_color_range
+        and output_color_range in (range_full, range_limited)
+    ):
+        resize_ns = getattr(core, "resize", None)
+        point = getattr(resize_ns, "Point", None) if resize_ns is not None else None
+        if callable(point):
+            try:
+                point_kwargs: Dict[str, Any] = {"dither_type": "none"}
+                if isinstance(overlay_original_format, int):
+                    point_kwargs["format"] = overlay_original_format
+                if output_color_range in (range_full, range_limited):
+                    point_kwargs["range"] = int(output_color_range)
+                point_kwargs.update(overlay_resize_kwargs)
+                render_clip = point(render_clip, **point_kwargs)
+                render_clip = _set_clip_range(
+                    core,
+                    render_clip,
+                    int(output_color_range),
+                    context="overlay range restore",
+                )
+                if log_overlay:
+                    fmt_name = getattr(getattr(render_clip, "format", None), "name", None)
+                    print(
+                        "[OVERLAY DEBUG] clip="
+                        f"{_sanitize_for_log(label)} frame={frame_idx} stage=restored "
+                        f"range={output_color_range} fmt={_sanitize_for_log(fmt_name)}",
+                        flush=True,
+                    )
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug(
+                    "Failed to restore target range after overlay for frame %s: %s",
+                    frame_idx,
+                    exc,
+                )
+        else:
+            logger.debug("VapourSynth resize.Point unavailable; skipping overlay range restore")
 
     render_clip = _ensure_rgb24(
         core,
@@ -1658,7 +2337,15 @@ def _save_frame_with_fpng(
         frame_idx,
         source_props=source_props_map,
         rgb_dither=rgb_dither,
+        target_range=output_color_range,
+        expand_to_full=expand_to_full,
     )
+    if debug_state is not None:
+        try:
+            rgb_props = vs_core._snapshot_frame_props(render_clip)
+        except Exception:
+            rgb_props = {}
+        debug_state.capture_stage("post_rgb24", frame_idx, render_clip, rgb_props)
     logger.debug(
         "RGB24 conversion for frame %s used dither=%s (policy=%s)",
         frame_idx,
@@ -1720,6 +2407,11 @@ def _save_frame_with_ffmpeg(
     geometry_plan: GeometryPlan | None = None,
     is_sdr: bool = True,
     pivot_notifier: Callable[[str], None] | None = None,
+    frame_info_allowed: bool = True,
+    overlays_allowed: bool = True,
+    target_range: int | None = None,
+    expand_to_full: bool = False,
+    source_color_range: int | None = None,
 ) -> None:
     if shutil.which("ffmpeg") is None:
         raise ScreenshotWriterError("FFmpeg executable not found in PATH")
@@ -1761,7 +2453,7 @@ def _save_frame_with_ffmpeg(
                 y=max(0, pad_top),
             )
         )
-    if cfg.add_frame_info:
+    if frame_info_allowed:
         text_lines = [f"Frame\\ {int(frame_idx)}"]
         if selection_label:
             text_lines.append(f"Content Type\\: {selection_label}")
@@ -1771,13 +2463,22 @@ def _save_frame_with_ffmpeg(
             "box=0:shadowx=1:shadowy=1:shadowcolor=black:x=10:y=10"
         ).format(text=_escape_drawtext(text))
         filters.append(drawtext)
-    if overlay_text:
+    if overlays_allowed and overlay_text:
         overlay_cmd = (
             "drawtext=text={text}:fontcolor=white:borderw=2:bordercolor=black:"
             "box=0:shadowx=1:shadowy=1:shadowcolor=black:x=10:y=80"
         ).format(text=_escape_drawtext(overlay_text))
         filters.append(overlay_cmd)
 
+    range_full, range_limited = _range_constants()
+    limited_source = source_color_range == range_limited
+    if source_color_range is None and target_range in (range_full, range_limited):
+        limited_source = int(target_range) == range_limited
+    resolved_target_range = target_range
+    if expand_to_full:
+        resolved_target_range = range_full
+        if limited_source:
+            filters.append("scale=in_range=tv:out_range=pc")
     if should_apply_full_chroma:
         configured = _normalize_rgb_dither(cfg.rgb_dither)
         ffmpeg_dither = "ordered"
@@ -1820,8 +2521,14 @@ def _save_frame_with_ffmpeg(
         "0",
         "-compression_level",
         str(_map_ffmpeg_compression(cfg.compression_level)),
-        str(path),
     ]
+
+    if resolved_target_range is not None:
+        range_value = int(resolved_target_range)
+        color_range_flag = "pc" if range_value == range_full else "tv"
+        cmd.extend(["-color_range", color_range_flag])
+
+    cmd.append(str(path))
 
     timeout_value = getattr(cfg, "ffmpeg_timeout_seconds", None)
     timeout_seconds_raw: float | None
@@ -1878,6 +2585,7 @@ def generate_screenshots(
     warnings_sink: List[str] | None = None,
     verification_sink: List[Dict[str, Any]] | None = None,
     pivot_notifier: Callable[[str], None] | None = None,
+    debug_color: bool = False,
 ) -> List[str]:
     """
     Render and save screenshots for the given frames from each input clip using the configured writers.
@@ -1899,6 +2607,7 @@ def generate_screenshots(
         warnings_sink: Optional list to which non-fatal warning messages will be appended.
         verification_sink: Optional list to which per-clip verification records will be appended; each record contains keys: file, frame, average, maximum, auto_selected.
         pivot_notifier: Optional callable invoked with a short text note whenever a full-chroma pivot is applied.
+        debug_color: Enable detailed colour debugging (logs, intermediate PNGs, legacy conversions) when True.
 
     Returns:
         List[str]: Ordered list of file paths for all created screenshot files.
@@ -1931,6 +2640,12 @@ def generate_screenshots(
 
     processed_results: List[vs_core.ClipProcessResult] = []
     overlay_states: List[OverlayState] = []
+    debug_enabled = bool(debug_color or getattr(color_cfg, "debug_color", False))
+    debug_root = out_dir / "debug" if debug_enabled else None
+    debug_dither = _normalize_rgb_dither(cfg.rgb_dither)
+    use_ffmpeg_runtime = bool(cfg.use_ffmpeg and not debug_enabled)
+    frame_info_allowed_default = bool(cfg.add_frame_info and not debug_enabled)
+    overlays_allowed_default = not debug_enabled
 
     for clip, file_path in zip(clips, files, strict=True):
         result = vs_core.process_clip_for_screenshot(
@@ -1941,6 +2656,7 @@ def generate_screenshots(
             enable_verification=True,
             logger_override=logger,
             warning_sink=warnings_sink,
+            debug_color=debug_enabled,
         )
         processed_results.append(result)
         overlay_states.append(_new_overlay_state())
@@ -1981,12 +2697,74 @@ def generate_screenshots(
         trim_start = int(trim_start)
         raw_label, safe_label = _derive_labels(file_path, meta)
 
+        debug_state: Optional[_ColorDebugState] = None
+        if debug_enabled and debug_root is not None:
+            artifacts = getattr(result, "debug", None)
+            core = getattr(result.clip, "core", None)
+            if core is None and artifacts is not None and artifacts.normalized_clip is not None:
+                core = getattr(artifacts.normalized_clip, "core", None)
+            if artifacts is None:
+                fallback_props = {}
+                if hasattr(result, "source_props"):
+                    try:
+                        fallback_props = dict(getattr(result, "source_props", {}) or {})
+                    except Exception:
+                        fallback_props = {}
+                fallback_clip = result.clip if result.clip is not None else None
+                if fallback_clip is not None and core is None:
+                    core = getattr(fallback_clip, "core", None)
+                logger.debug(
+                    "Colour debug artifacts unavailable for %s; falling back to processed clip",
+                    file_path,
+                )
+                artifacts = vs_core.ColorDebugArtifacts(
+                    normalized_clip=fallback_clip,
+                    normalized_props=fallback_props,
+                    original_props=fallback_props,
+                    color_tuple=(None, None, None, None),
+                )
+            if core is None:
+                try:
+                    import vapoursynth as vs  # type: ignore
+
+                    core = getattr(vs, "core", None)
+                except Exception:
+                    core = None
+            debug_state = _ColorDebugState(
+                enabled=core is not None,
+                base_dir=(debug_root / safe_label),
+                label=safe_label,
+                core=core,
+                compression_level=int(getattr(cfg, "compression_level", 1)),
+                rgb_dither=debug_dither,
+                logger_obj=logger,
+                artifacts=artifacts,
+            )
+
         overlay_state = overlay_states[clip_index]
         base_overlay_text = getattr(result, "overlay_text", None)
         source_props_raw = getattr(result, "source_props", {})
-        resolved_source_props = _resolve_source_props(result.clip, source_props_raw)
+        resolved_clip, resolved_source_props = _resolve_source_props(
+            result.clip,
+            source_props_raw,
+            color_cfg=color_cfg,
+            file_name=str(file_path),
+            warning_sink=warnings_sink,
+        )
         source_props = resolved_source_props
         is_sdr_pipeline = _is_sdr_pipeline(result.tonemap, resolved_source_props)
+        range_full, range_limited = _range_constants()
+        export_range = getattr(cfg, "export_range", ExportRange.FULL)
+        expand_to_full = _should_expand_to_full(export_range)
+        clip_color_range = _resolve_output_color_range(resolved_source_props, result.tonemap)
+        original_color_range = clip_color_range
+        if expand_to_full:
+            clip_color_range = range_full
+        _, _, _, source_color_meta = vs_core._resolve_color_metadata(resolved_source_props)
+        if source_color_meta not in (range_full, range_limited):
+            source_color_hint = original_color_range
+        else:
+            source_color_hint = int(source_color_meta)
 
         for frame in frames:
             frame_idx = int(frame)
@@ -2018,31 +2796,41 @@ def generate_screenshots(
                     selection_label = str(derived_label)
             if selection_label is not None:
                 logger.debug('Selection label for frame %s: %s', frame_idx, selection_label)
-            actual_idx, was_clamped = _clamp_frame_index(result.clip, mapped_idx)
+            actual_idx, was_clamped = _clamp_frame_index(resolved_clip, mapped_idx)
             if was_clamped:
                 logger.debug(
                     "Frame %s exceeds available frames (%s) in %s; using %s",
                     mapped_idx,
-                    getattr(result.clip, 'num_frames', 'unknown'),
+                    getattr(resolved_clip, 'num_frames', 'unknown'),
                     file_path,
                     actual_idx,
                 )
-            overlay_text = _compose_overlay_text(
-                base_overlay_text,
-                color_cfg,
-                plan,
-                selection_label,
-                source_props,
-                tonemap_info=result.tonemap,
-                selection_detail=detail_info,
-            )
+            if debug_state and debug_state.normalized_clip is not None:
+                debug_state.capture_stage(
+                    "post_normalisation",
+                    actual_idx,
+                    debug_state.normalized_clip,
+                    debug_state.normalized_props,
+                )
+            if debug_enabled:
+                overlay_text = None
+            else:
+                overlay_text = _compose_overlay_text(
+                    base_overlay_text,
+                    color_cfg,
+                    plan,
+                    selection_label,
+                    source_props,
+                    tonemap_info=result.tonemap,
+                    selection_detail=detail_info,
+                )
             file_name = _prepare_filename(frame_idx, safe_label)
             target_path = out_dir / file_name
 
             try:
                 resolved_frame = _resolve_source_frame_index(actual_idx, trim_start)
-                use_ffmpeg = cfg.use_ffmpeg and resolved_frame is not None
-                if cfg.use_ffmpeg and resolved_frame is None:
+                use_ffmpeg = use_ffmpeg_runtime and resolved_frame is not None
+                if use_ffmpeg_runtime and resolved_frame is None:
                     logger.debug(
                         "Frame %s for %s falls within synthetic trim padding; "
                         "using VapourSynth writer",
@@ -2069,10 +2857,15 @@ def generate_screenshots(
                         geometry_plan=plan,
                         is_sdr=is_sdr_pipeline,
                         pivot_notifier=pivot_notifier,
+                        frame_info_allowed=frame_info_allowed_default,
+                        overlays_allowed=overlays_allowed_default and bool(overlay_text),
+                        target_range=clip_color_range,
+                        expand_to_full=expand_to_full,
+                        source_color_range=source_color_hint,
                     )
                 else:
                     _save_frame_with_fpng(
-                        result.clip,
+                        resolved_clip,
                         actual_idx,
                         crop,
                         scaled,
@@ -2089,6 +2882,13 @@ def generate_screenshots(
                         geometry_plan=plan,
                         tonemap_info=result.tonemap,
                         pivot_notifier=pivot_notifier,
+                        color_cfg=color_cfg,
+                        file_name=str(file_path),
+                        warning_sink=warnings_sink,
+                        debug_state=debug_state,
+                        frame_info_allowed=frame_info_allowed_default,
+                        overlays_allowed=overlays_allowed_default,
+                        expand_to_full=expand_to_full,
                     )
             except ScreenshotWriterError:
                 raise

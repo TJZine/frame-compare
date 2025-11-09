@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import time
 import tomllib
 import traceback
@@ -27,7 +28,7 @@ import uuid
 import webbrowser
 from collections import Counter, defaultdict
 from collections.abc import Mapping as MappingABC
-from contextlib import nullcontext
+from contextlib import ExitStack, nullcontext
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from string import Template
@@ -42,6 +43,7 @@ from typing import (
     List,
     Literal,
     Mapping,
+    MutableMapping,
     Optional,
     Sequence,
     Tuple,
@@ -55,7 +57,7 @@ from natsort import os_sorted
 from rich import print
 from rich.console import Console
 from rich.markup import escape
-from rich.progress import BarColumn, Progress, ProgressColumn, TextColumn
+from rich.progress import Progress, ProgressColumn
 from rich.text import Text
 
 from src import audio_alignment
@@ -349,6 +351,7 @@ class AudioAlignmentJSON(TypedDict, total=False):
     target_stream: dict[str, object]
     offsets_sec: dict[str, object]
     offsets_frames: dict[str, object]
+    measurements: dict[str, dict[str, object]]
     stream_lines: list[str]
     stream_lines_text: str
     offset_lines: list[str]
@@ -389,6 +392,13 @@ class ReportJSON(TypedDict, total=False):
     mode: str
 
 
+class ViewerJSON(TypedDict, total=False):
+    mode: str
+    mode_display: str
+    destination: Optional[str]
+    destination_label: str
+
+
 class JsonTail(TypedDict):
     clips: list[dict[str, object]]
     trims: TrimsJSON
@@ -403,6 +413,7 @@ class JsonTail(TypedDict):
     cache: dict[str, object]
     slowpics: SlowpicsJSON
     report: ReportJSON
+    viewer: ViewerJSON
     warnings: list[str]
     workspace: dict[str, object]
     vspreview_mode: Optional[str]
@@ -554,6 +565,21 @@ class _AudioAlignmentSummary:
     manual_trim_starts: Dict[str, int] = field(default_factory=dict)
     vspreview_manual_offsets: Dict[str, int] = field(default_factory=dict)
     vspreview_manual_deltas: Dict[str, int] = field(default_factory=dict)
+    measured_offsets: Dict[str, "_AudioMeasurementDetail"] = field(default_factory=dict)
+
+
+@dataclass
+class _AudioMeasurementDetail:
+    """Snapshot of an audio alignment measurement for CLI/JSON reporting."""
+
+    label: str
+    stream: str
+    offset_seconds: Optional[float]
+    frames: Optional[int]
+    correlation: Optional[float]
+    status: str
+    applied: bool
+    note: Optional[str] = None
 
 
 @dataclass
@@ -581,6 +607,7 @@ class _AudioAlignmentDisplayData:
     correlations: Dict[str, float] = field(default_factory=dict)
     threshold: float = 0.0
     manual_trim_lines: List[str] = field(default_factory=list)
+    measurements: Dict[str, _AudioMeasurementDetail] = field(default_factory=dict)
 
 
 class CliOutputManager:
@@ -2398,11 +2425,27 @@ def _build_legacy_summary_lines(values: Mapping[str, Any], *, emit_json_tail: bo
         f"pad={_bool_text(render.get('center_pad'))}"
     )
 
+    tonemap_curve = _string(tonemap.get("tone_curve"), "n/a")
+    tonemap_target = _format_number(tonemap.get("target_nits"), ".0f", "0")
+    tonemap_dst_min = _format_number(tonemap.get("dst_min_nits"), ".2f", "0.00")
+    tonemap_knee = _format_number(tonemap.get("knee_offset"), ".2f", "0.00")
+    tonemap_preset_label = _string(tonemap.get("dpd_preset"), "n/a")
+    tonemap_cutoff = _format_number(tonemap.get("dpd_black_cutoff"), ".3f", "0.000")
+    tonemap_gamma = _format_number(tonemap.get("post_gamma"), ".2f", "1.00")
+    gamma_flag = "*" if bool(tonemap.get("post_gamma_enabled")) else ""
+    dpd_enabled = bool(
+        tonemap.get("dpd")
+        if "dpd" in tonemap
+        else tonemap.get("dynamic_peak_detection")
+    )
+    preset_suffix = f" ({tonemap_preset_label})" if dpd_enabled and tonemap_preset_label.lower() != "n/a" else ""
     lines.append(
         "Tonemap: "
-        f"{_string(tonemap.get('tone_curve'), 'n/a')}@"
-        f"{_format_number(tonemap.get('target_nits'), '.0f', '0')}nits "
-        f"dpd={_bool_text(tonemap.get('dynamic_peak_detection'))}  "
+        f"{tonemap_curve}@{tonemap_target}nits "
+        f"dst_min={tonemap_dst_min} knee={tonemap_knee} "
+        f"dpd={_bool_text(dpd_enabled)}"
+        f"{preset_suffix} black_cutoff={tonemap_cutoff}  "
+        f"gamma={tonemap_gamma}{gamma_flag}  "
         f"verify≤{_format_number(tonemap.get('verify_luma_threshold'), '.2f', '0.00')}"
     )
 
@@ -2439,10 +2482,21 @@ def _format_clock(seconds: Optional[float]) -> str:
 
 
 def _init_clips(
-    plans: Sequence[_ClipPlan], runtime_cfg: RuntimeConfig, cache_dir: Path | None
+    plans: Sequence[_ClipPlan],
+    runtime_cfg: RuntimeConfig,
+    cache_dir: Path | None,
+    *,
+    reporter: CliOutputManager | None = None,
 ) -> None:
     """Initialise VapourSynth clips for each plan and capture source metadata."""
     vs_core.set_ram_limit(runtime_cfg.ram_limit_mb)
+
+    def _indexing_note(filename: str) -> None:
+        label = escape(filename)
+        if reporter is not None:
+            reporter.console.print(f"[dim][CACHE] Indexing {label}…[/]")
+        else:
+            print(f"[CACHE] Indexing {filename}…")
 
     cache_dir_str = str(cache_dir) if cache_dir is not None else None
 
@@ -2456,6 +2510,7 @@ def _init_clips(
             trim_start=plan.trim_start,
             trim_end=plan.trim_end,
             cache_dir=cache_dir_str,
+            indexing_notifier=_indexing_note,
         )
         plan.clip = clip
         plan.effective_fps = _extract_clip_fps(clip)
@@ -2478,6 +2533,7 @@ def _init_clips(
             trim_end=plan.trim_end,
             fps_map=fps_override,
             cache_dir=cache_dir_str,
+            indexing_notifier=_indexing_note,
         )
         plan.clip = clip
         plan.applied_fps = fps_override
@@ -2828,7 +2884,7 @@ def _maybe_apply_audio_alignment(
                 offsets_path=offsets_path,
                 reference_name=reference_plan.path.name,
                 measurements=(),
-                applied_frames={},
+                applied_frames=dict(manual_trim_starts),
                 baseline_shift=0,
                 statuses={},
                 reference_plan=reference_plan,
@@ -2849,6 +2905,9 @@ def _maybe_apply_audio_alignment(
     if not targets:
         _warn("Audio alignment skipped: no secondary clips to compare.")
         return None, display_data
+
+    measurement_order = [plan.path.name for plan in plans]
+    negative_override_notes: Dict[str, str] = {}
 
     def _maybe_reuse_cached_offsets(
         reference: _ClipPlan,
@@ -3111,11 +3170,22 @@ def _maybe_apply_audio_alignment(
             suggestion_mode=False,
             manual_trim_starts={},
         )
+        detail_map = _compose_measurement_details(
+            measurements,
+            applied_frames_map=applied_frames,
+            statuses_map=statuses,
+            suggestion_mode_active=False,
+            manual_trims={},
+            swap_map=swap_details,
+            negative_notes=negative_override_notes,
+        )
+        summary.measured_offsets = detail_map
+        _emit_measurement_lines(
+            detail_map,
+            measurement_order,
+            append_manual=bool(display_data.manual_trim_lines),
+        )
         return summary
-
-    reused_cached = _maybe_reuse_cached_offsets(reference_plan, targets)
-    if reused_cached is not None:
-        return reused_cached, display_data
 
     stream_infos: Dict[Path, List["AudioStreamInfo"]] = {}
     for plan in plans:
@@ -3240,17 +3310,216 @@ def _maybe_apply_audio_alignment(
 
     reference_stream_text, reference_descriptor = _describe_stream(reference_plan, reference_stream_index)
     display_data.json_reference_stream = reference_stream_text
+    stream_descriptors: Dict[str, str] = {reference_plan.path.name: reference_descriptor}
 
     for idx, target in enumerate(targets):
         stream_idx = target_stream_indices.get(target.path, 0)
         target_stream_text, target_descriptor = _describe_stream(target, stream_idx)
         display_data.json_target_streams[plan_labels[target.path]] = target_descriptor
+        stream_descriptors[target.path.name] = target_descriptor
         if idx == 0:
             display_data.stream_lines.append(
                 f"Audio streams: ref={reference_stream_text}  target={target_stream_text}"
             )
         else:
             display_data.stream_lines.append(f"Audio streams: target={target_stream_text}")
+
+    def _format_measurement_line(detail: _AudioMeasurementDetail) -> str:
+        stream_text = detail.stream or "?"
+        seconds_text = (
+            f"{detail.offset_seconds:+.3f}s"
+            if detail.offset_seconds is not None
+            else "n/a"
+        )
+        frames_text = (
+            f"{detail.frames:+d}f" if detail.frames is not None else "n/a"
+        )
+        corr_text = (
+            f"{detail.correlation:.2f}"
+            if detail.correlation is not None and not math.isnan(detail.correlation)
+            else "n/a"
+        )
+        applied_text = "applied" if detail.applied else "suggested"
+        status_bits: List[str] = []
+        if detail.status:
+            status_bits.append(detail.status)
+        status_bits.append(applied_text)
+        status_text = "/".join(status_bits)
+        return (
+            f"Audio offsets: {detail.label}: [{stream_text}] "
+            f"{seconds_text} ({frames_text}) corr={corr_text} status={status_text}"
+        )
+
+    def _emit_measurement_lines(
+        detail_map: Dict[str, _AudioMeasurementDetail],
+        order: Sequence[str],
+        *,
+        append_manual: bool = False,
+    ) -> None:
+        offsets_sec: Dict[str, float] = {}
+        offsets_frames: Dict[str, int] = {}
+        offset_lines: List[str] = []
+        for name in order:
+            detail = detail_map.get(name)
+            if detail is None:
+                continue
+            if (
+                name == reference_plan.path.name
+                and len(detail_map) > 1
+            ):
+                continue
+            if detail.offset_seconds is not None:
+                offsets_sec[detail.label] = float(detail.offset_seconds)
+            if detail.frames is not None:
+                offsets_frames[detail.label] = int(detail.frames)
+            offset_lines.append(_format_measurement_line(detail))
+            if detail.note:
+                offset_lines.append(f"  note: {detail.note}")
+        if not offset_lines:
+            offset_lines.append("Audio offsets: none detected")
+        if append_manual and display_data.manual_trim_lines:
+            offset_lines.extend(display_data.manual_trim_lines)
+        display_data.offset_lines = offset_lines
+        display_data.json_offsets_sec = offsets_sec
+        display_data.json_offsets_frames = offsets_frames
+        display_data.measurements = {
+            detail.label: detail for detail in detail_map.values()
+        }
+        display_data.correlations = {
+            detail.label: detail.correlation
+            for detail in detail_map.values()
+            if detail.correlation is not None
+        }
+
+    fps_lookup: Dict[str, float] = {}
+    for plan in plans:
+        fps_tuple = plan.effective_fps or plan.source_fps or plan.fps_override
+        fps_lookup[plan.path.name] = _fps_to_float(fps_tuple)
+
+    def _compose_measurement_details(
+        measurement_seq: Sequence["AlignmentMeasurement"],
+        *,
+        applied_frames_map: Mapping[str, int] | None,
+        statuses_map: Mapping[str, str] | None,
+        suggestion_mode_active: bool,
+        manual_trims: Mapping[str, int],
+        swap_map: Mapping[str, str],
+        negative_notes: Mapping[str, str],
+    ) -> Dict[str, _AudioMeasurementDetail]:
+        """
+        Convert raw measurement objects into detail records used for CLI + JSON reporting.
+
+        Parameters:
+            measurement_seq: Measurements returned by the alignment pipeline.
+            applied_frames_map: Mapping of clip names to frame adjustments actually applied.
+            statuses_map: Mapping of clip names to status labels ("auto", "manual", etc.).
+            suggestion_mode_active: True when offsets are suggestions only (VSPreview flow).
+            manual_trims: Existing manual trims discovered earlier in the run.
+            swap_map: Swap/notes per clip (e.g., "reference advanced" notes).
+            negative_notes: Notes produced when negative offsets were redirected.
+
+        Returns:
+            Dict[str, _AudioMeasurementDetail]: Mapping keyed by clip filename.
+        """
+
+        detail_map: Dict[str, _AudioMeasurementDetail] = {}
+        for measurement in measurement_seq:
+            clip_name = measurement.file.name
+            label = name_to_label.get(clip_name, clip_name)
+            descriptor = stream_descriptors.get(clip_name, "")
+            seconds_value: Optional[float]
+            if measurement.offset_seconds is None:
+                seconds_value = None
+            else:
+                seconds_value = float(measurement.offset_seconds)
+            frames_value = int(measurement.frames) if measurement.frames is not None else None
+            correlation_value: Optional[float]
+            if measurement.correlation is None or math.isnan(measurement.correlation):
+                correlation_value = None
+            else:
+                correlation_value = float(measurement.correlation)
+            status_text = ""
+            if statuses_map and clip_name in statuses_map:
+                status_text = statuses_map[clip_name]
+            applied_flag = False
+            if not suggestion_mode_active and applied_frames_map and clip_name in applied_frames_map:
+                applied_flag = True
+            note_parts: List[str] = []
+            swap_note = swap_map.get(clip_name)
+            if swap_note:
+                note_parts.append(swap_note)
+            negative_note = negative_notes.get(clip_name)
+            if negative_note:
+                note_parts.append(negative_note)
+            if measurement.error:
+                note_parts.append(measurement.error)
+                if not status_text:
+                    status_text = "error"
+                applied_flag = False
+            note_value = " ".join(note_parts) if note_parts else None
+            detail_map[clip_name] = _AudioMeasurementDetail(
+                label=label,
+                stream=descriptor,
+                offset_seconds=seconds_value,
+                frames=frames_value,
+                correlation=correlation_value,
+                status=status_text,
+                applied=applied_flag,
+                note=note_value,
+            )
+
+        for clip_name, trim_frames in manual_trims.items():
+            if clip_name in detail_map:
+                continue
+            label = name_to_label.get(clip_name, clip_name)
+            descriptor = stream_descriptors.get(clip_name, "")
+            fps_value = fps_lookup.get(clip_name, 0.0)
+            seconds_value = (trim_frames / fps_value) if fps_value else None
+            detail_map[clip_name] = _AudioMeasurementDetail(
+                label=label,
+                stream=descriptor,
+                offset_seconds=seconds_value,
+                frames=int(trim_frames),
+                correlation=None,
+                status="manual",
+                applied=not suggestion_mode_active,
+                note=None,
+            )
+        return detail_map
+
+    reused_cached = _maybe_reuse_cached_offsets(reference_plan, targets)
+    if reused_cached is not None:
+        summary = reused_cached
+        detail_map: Dict[str, _AudioMeasurementDetail] = {}
+        for plan in plans:
+            key = plan.path.name
+            frames_val = summary.applied_frames.get(key)
+            seconds_val: Optional[float]
+            fps_val = fps_lookup.get(key, 0.0)
+            if frames_val is None or not fps_val:
+                seconds_val = None
+            else:
+                seconds_val = frames_val / fps_val if fps_val else None
+            descriptor = stream_descriptors.get(key, "")
+            detail_map[key] = _AudioMeasurementDetail(
+                label=name_to_label.get(key, key),
+                stream=descriptor,
+                offset_seconds=seconds_val,
+                frames=frames_val,
+                correlation=None,
+                status=summary.statuses.get(key, "manual"),
+                applied=True,
+            )
+        summary.measured_offsets = detail_map
+        display_data.measurements = {
+            detail.label: detail for detail in detail_map.values()
+        }
+        _emit_measurement_lines(
+            detail_map,
+            measurement_order,
+            append_manual=bool(display_data.manual_trim_lines),
+        )
+        return summary, display_data
 
     reference_fps_tuple = reference_plan.effective_fps or reference_plan.source_fps
     reference_fps = _fps_to_float(reference_fps_tuple)
@@ -3355,7 +3624,7 @@ def _maybe_apply_audio_alignment(
                 elif measurement.reference_fps and measurement.reference_fps > 0:
                     measurement.offset_seconds = new_frames / measurement.reference_fps
 
-        negative_override_notes: Dict[str, str] = {}
+        negative_override_notes.clear()
         swap_details: Dict[str, str] = {}
         swap_candidates: List["AlignmentMeasurement"] = []
         swap_enabled = len(targets) == 1
@@ -3454,54 +3723,6 @@ def _maybe_apply_audio_alignment(
         for warning_message in dict.fromkeys(raw_warning_messages):
             _warn(warning_message)
 
-        offset_lines: List[str] = []
-        offsets_sec: Dict[str, float] = {}
-        offsets_frames: Dict[str, int] = {}
-
-        for measurement in measurements:
-            clip_name: str = measurement.file.name
-            if clip_name == reference_plan.path.name and len(measurements) > 1:
-                continue
-            label = name_to_label.get(clip_name, clip_name)
-            if measurement.offset_seconds is not None:
-                offsets_sec[label] = float(measurement.offset_seconds)
-            if measurement.frames is not None:
-                offsets_frames[label] = int(measurement.frames)
-            display_data.correlations[label] = float(measurement.correlation)
-
-            if measurement.error:
-                offset_lines.append(
-                    f"Audio offsets: {label}: manual edit required ({measurement.error})"
-                )
-                continue
-
-            fps_value = 0.0
-            if measurement.target_fps and measurement.target_fps > 0:
-                fps_value = float(measurement.target_fps)
-            elif measurement.reference_fps and measurement.reference_fps > 0:
-                fps_value = float(measurement.reference_fps)
-
-            frames_text = "n/a"
-            if measurement.frames is not None:
-                frames_text = f"{measurement.frames:+d}f"
-            fps_text = f"{fps_value:.3f}" if fps_value > 0 else "0.000"
-            suffix = ""
-            if clip_name in negative_offsets:
-                suffix = " (reference advanced; trimming target)"
-            offset_lines.append(
-                f"Audio offsets: {label}: {measurement.offset_seconds:+.3f}s ({frames_text} @ {fps_text}){suffix}"
-            )
-            detail = swap_details.get(clip_name)
-            if detail:
-                offset_lines.append(f"  note: {detail}")
-
-        if not offset_lines:
-            offset_lines.append("Audio offsets: none detected")
-
-        display_data.offset_lines = offset_lines
-        display_data.json_offsets_sec = offsets_sec
-        display_data.json_offsets_frames = offsets_frames
-
         suggested_frames: Dict[str, int] = {}
         for measurement in measurements:
             if measurement.frames is not None:
@@ -3516,10 +3737,6 @@ def _maybe_apply_audio_alignment(
                     display_data.manual_trim_lines.append(
                         f"Existing manual trim: {label} → {plan.trim_start}f"
                     )
-            if not display_data.offset_lines:
-                display_data.offset_lines.append("Audio offsets: none detected")
-            if display_data.manual_trim_lines:
-                display_data.offset_lines.extend(display_data.manual_trim_lines)
             display_data.warnings.append(
                 "[AUDIO] VSPreview manual alignment enabled — offsets reported for guidance only."
             )
@@ -3527,7 +3744,7 @@ def _maybe_apply_audio_alignment(
                 offsets_path=offsets_path,
                 reference_name=reference_plan.path.name,
                 measurements=measurements,
-                applied_frames={},
+                applied_frames=dict(manual_trim_starts),
                 baseline_shift=0,
                 statuses={m.file.name: "suggested" for m in measurements},
                 reference_plan=reference_plan,
@@ -3536,6 +3753,21 @@ def _maybe_apply_audio_alignment(
                 suggested_frames=suggested_frames,
                 suggestion_mode=True,
                 manual_trim_starts=manual_trim_starts,
+            )
+            detail_map = _compose_measurement_details(
+                measurements,
+                applied_frames_map=summary.applied_frames,
+                statuses_map=summary.statuses,
+                suggestion_mode_active=True,
+                manual_trims=manual_trim_starts,
+                swap_map=swap_details,
+                negative_notes=negative_override_notes,
+            )
+            summary.measured_offsets = detail_map
+            _emit_measurement_lines(
+                detail_map,
+                measurement_order,
+                append_manual=bool(display_data.manual_trim_lines),
             )
             return summary, display_data
 
@@ -3590,6 +3822,21 @@ def _maybe_apply_audio_alignment(
             suggestion_mode=False,
             manual_trim_starts=manual_trim_starts,
         )
+        detail_map = _compose_measurement_details(
+            measurements,
+            applied_frames_map=applied_frames,
+            statuses_map=statuses,
+            suggestion_mode_active=False,
+            manual_trims=manual_trim_starts,
+            swap_map=swap_details,
+            negative_notes=negative_override_notes,
+        )
+        summary.measured_offsets = detail_map
+        _emit_measurement_lines(
+            detail_map,
+            measurement_order,
+            append_manual=bool(display_data.manual_trim_lines),
+        )
         return summary, display_data
     except audio_alignment.AudioAlignmentError as exc:
         raise CLIAppError(
@@ -3636,9 +3883,15 @@ def _write_vspreview_script(
     )
     apply_seeded_offsets = preview_mode_value == "seeded"
     show_overlay = bool(getattr(cfg.audio_alignment, "show_suggested_in_preview", True))
-    measurement_lookup = {
-        measurement.file.name: measurement for measurement in summary.measurements
-    }
+    if summary.measured_offsets:
+        measurement_lookup: Dict[str, Optional[float]] = {
+            name: detail.offset_seconds for name, detail in summary.measured_offsets.items()
+        }
+    else:
+        measurement_lookup = {
+            measurement.file.name: measurement.offset_seconds
+            for measurement in summary.measurements
+        }
 
     manual_trims = {}
     if summary.manual_trim_starts:
@@ -3673,10 +3926,10 @@ def _write_vspreview_script(
         trim_end_value = plan.trim_end if plan.trim_end is not None else None
         fps_override = tuple(plan.fps_override) if plan.fps_override else None
         suggested_frames_value = int(summary.suggested_frames.get(plan.path.name, 0))
-        measurement = measurement_lookup.get(plan.path.name)
+        measurement_seconds = measurement_lookup.get(plan.path.name)
         suggested_seconds_value = 0.0
-        if measurement is not None and measurement.offset_seconds is not None:
-            suggested_seconds_value = float(measurement.offset_seconds)
+        if measurement_seconds is not None:
+            suggested_seconds_value = float(measurement_seconds)
         manual_trim = manual_trims.get(label, int(plan.trim_start))
         manual_note = (
             f"baseline trim {manual_trim}f"
@@ -3835,24 +4088,35 @@ def _harmonise_fps(reference_clip, target_clip, label):
     return reference_clip, target_clip
 
 
-def _format_overlay_text(suggested_frames, suggested_seconds, applied_frames):
+def _format_overlay_text(label, suggested_frames, suggested_seconds, applied_frames):
     applied_label = "baseline" if applied_frames == 0 else "seeded"
-    applied_value = "0" if applied_frames == 0 else f"{{applied_frames:+d}}"
-    seconds_value = f"{{suggested_seconds:.3f}}"
+    if applied_frames == 0:
+        applied_value = "0"
+    else:
+        applied_value = format(applied_frames, "+d")
+    seconds_value = format(suggested_seconds, ".3f")
     if seconds_value == "-0.000":
         seconds_value = "0.000"
+    suggested_value = format(suggested_frames, "+d")
     return (
-        f"Suggested: {{suggested_frames:+d}}f (~{{seconds_value}}s) • "
-        f"Applied in preview: {{applied_value}}f ({{applied_label}}) • "
-        "(+ trims target / - pads reference)"
+        label
+        + ": "
+        + suggested_value
+        + "f (~"
+        + seconds_value
+        + "s) • Preview applied: "
+        + applied_value
+        + "f ("
+        + applied_label
+        + ") • (+ trims target / - pads reference)"
     )
 
 
-def _maybe_apply_overlay(clip, suggested_frames, suggested_seconds, applied_frames):
+def _maybe_apply_overlay(clip, label, suggested_frames, suggested_seconds, applied_frames):
     if not SHOW_SUGGESTED_OVERLAY:
         return clip
     try:
-        message = _format_overlay_text(suggested_frames, suggested_seconds, applied_frames)
+        message = _format_overlay_text(label, suggested_frames, suggested_seconds, applied_frames)
     except Exception:
         message = "Suggested offset unavailable"
     try:
@@ -3877,8 +4141,20 @@ for label, info in TARGETS.items():
     suggested_frames = int(suggested_entry[0])
     suggested_seconds = float(suggested_entry[1])
     ref_view, tgt_view = _apply_offset(reference_clip, target_clip, offset_frames)
-    ref_view = _maybe_apply_overlay(ref_view, suggested_frames, suggested_seconds, offset_frames)
-    tgt_view = _maybe_apply_overlay(tgt_view, suggested_frames, suggested_seconds, offset_frames)
+    ref_view = _maybe_apply_overlay(
+        ref_view,
+        REFERENCE['label'],
+        suggested_frames,
+        suggested_seconds,
+        offset_frames,
+    )
+    tgt_view = _maybe_apply_overlay(
+        tgt_view,
+        label,
+        suggested_frames,
+        suggested_seconds,
+        offset_frames,
+    )
     ref_view.set_output(slot)
     tgt_view.set_output(slot + 1)
     applied_label = "baseline" if offset_frames == 0 else "seeded"
@@ -4052,6 +4328,9 @@ def _apply_vspreview_manual_offsets(
             plan.effective_fps or plan.source_fps or plan.fps_override
         )
 
+    measurement_order = [plan.path.name for plan in plans]
+    plan_lookup: Dict[str, _ClipPlan] = {plan.path.name: plan for plan in plans}
+
     measurements: List["AlignmentMeasurement"] = []
     existing_override_map: Dict[str, Dict[str, object]] = {}
     notes_map: Dict[str, str] = {}
@@ -4091,6 +4370,37 @@ def _apply_vspreview_manual_offsets(
     summary.vspreview_manual_deltas = dict(delta_map)
     summary.measurements = tuple(measurements)
 
+    existing_details = summary.measured_offsets if isinstance(summary.measured_offsets, dict) else {}
+    detail_map: Dict[str, _AudioMeasurementDetail] = {}
+    for measurement in measurements:
+        clip_name = measurement.file.name
+        prev_detail = existing_details.get(clip_name) if isinstance(existing_details, dict) else None
+        plan = plan_lookup.get(clip_name)
+        label = (
+            prev_detail.label
+            if prev_detail
+            else (_plan_label(plan) if plan is not None else clip_name)
+        )
+        descriptor = prev_detail.stream if prev_detail else ""
+        seconds_value = float(measurement.offset_seconds) if measurement.offset_seconds is not None else None
+        frames_value = int(measurement.frames) if measurement.frames is not None else None
+        correlation_value = (
+            float(measurement.correlation) if measurement.correlation is not None else None
+        )
+        status_text = summary.statuses.get(clip_name, "manual")
+        note_text = notes_map.get(clip_name)
+        detail_map[clip_name] = _AudioMeasurementDetail(
+            label=label,
+            stream=descriptor,
+            offset_seconds=seconds_value,
+            frames=frames_value,
+            correlation=correlation_value,
+            status=status_text,
+            applied=True,
+            note=note_text,
+        )
+    summary.measured_offsets = detail_map
+
     audio_block = json_tail.setdefault("audio_alignment", {})
     audio_block["suggestion_mode"] = False
     audio_block["manual_trim_starts"] = dict(manual_trim_starts)
@@ -4099,6 +4409,57 @@ def _apply_vspreview_manual_offsets(
     audio_block["vspreview_reference_trim"] = int(
         manual_trim_starts.get(reference_name, int(reference_plan.trim_start))
     )
+
+    if display is not None:
+        offsets_sec: Dict[str, float] = {}
+        offsets_frames: Dict[str, int] = {}
+        offset_lines: List[str] = []
+        for clip_name in measurement_order:
+            detail = detail_map.get(clip_name)
+            if detail is None:
+                continue
+            if clip_name == reference_name and len(detail_map) > 1:
+                continue
+            stream_text = detail.stream or "?"
+            seconds_text = (
+                f"{detail.offset_seconds:+.3f}s"
+                if detail.offset_seconds is not None
+                else "n/a"
+            )
+            frames_text = f"{detail.frames:+d}f" if detail.frames is not None else "n/a"
+            corr_text = (
+                f"{detail.correlation:.2f}"
+                if detail.correlation is not None and not math.isnan(detail.correlation)
+                else "n/a"
+            )
+            status_text = detail.status or "manual"
+            offset_lines.append(
+                f"Audio offsets: {detail.label}: [{stream_text}] {seconds_text} ({frames_text}) "
+                f"corr={corr_text} status={status_text}"
+            )
+            if detail.note:
+                offset_lines.append(f"  note: {detail.note}")
+            if detail.offset_seconds is not None:
+                offsets_sec[detail.label] = float(detail.offset_seconds)
+            if detail.frames is not None:
+                offsets_frames[detail.label] = int(detail.frames)
+        if not offset_lines:
+            offset_lines.append("Audio offsets: VSPreview manual offsets applied")
+        else:
+            offset_lines.insert(0, "Audio offsets: VSPreview manual offsets applied")
+        if display.manual_trim_lines:
+            offset_lines.extend(display.manual_trim_lines)
+        display.offset_lines = offset_lines
+        display.json_offsets_sec = offsets_sec
+        display.json_offsets_frames = offsets_frames
+        display.measurements = {
+            detail.label: detail for detail in detail_map.values()
+        }
+        display.correlations = {
+            detail.label: detail.correlation
+            for detail in detail_map.values()
+            if detail.correlation is not None
+        }
 
     reporter.line("VSPreview offsets saved to offsets file with manual status.")
 
@@ -4435,6 +4796,7 @@ def _confirm_alignment_with_screenshots(
             cfg.color,
             trim_offsets=[plan.trim_start for plan in plans],
             pivot_notifier=_alignment_pivot_note,
+            debug_color=bool(getattr(cfg.color, "debug_color", False)),
         )
     except ClipProcessError as exc:
         hint = "Run 'frame-compare doctor' for dependency diagnostics."
@@ -4491,6 +4853,7 @@ def _confirm_alignment_with_screenshots(
             cfg.color,
             trim_offsets=[plan.trim_start for plan in plans],
             pivot_notifier=_alignment_pivot_note,
+            debug_color=bool(getattr(cfg.color, "debug_color", False)),
         )
     except ClipProcessError as exc:
         hint = "Run 'frame-compare doctor' for dependency diagnostics."
@@ -4525,6 +4888,162 @@ def _confirm_alignment_with_screenshots(
         ),
     )
 
+
+def _validate_tonemap_overrides(overrides: MutableMapping[str, Any]) -> None:
+    """Validate CLI-provided tonemap overrides and raise ClickException on invalid values."""
+
+    if not overrides:
+        return
+
+    def _bad(message: str) -> None:
+        raise click.ClickException(message)
+    if "knee_offset" in overrides:
+        try:
+            knee_value = float(overrides["knee_offset"])
+        except (TypeError, ValueError):
+            _bad("--tm-knee must be a number in [0.0, 1.0]")
+        else:
+            if not math.isfinite(knee_value):
+                _bad("--tm-knee must be a number in [0.0, 1.0]")
+            if knee_value < 0.0 or knee_value > 1.0:
+                _bad("--tm-knee must be between 0.0 and 1.0")
+    if "dst_min_nits" in overrides:
+        try:
+            dst_value = float(overrides["dst_min_nits"])
+        except (TypeError, ValueError):
+            _bad("--tm-dst-min must be a non-negative number")
+        else:
+            if not math.isfinite(dst_value):
+                _bad("--tm-dst-min must be a non-negative number")
+            if dst_value < 0.0:
+                _bad("--tm-dst-min must be >= 0.0")
+    if "target_nits" in overrides:
+        try:
+            target_value = float(overrides["target_nits"])
+        except (TypeError, ValueError):
+            _bad("--tm-target must be a positive finite number")
+        else:
+            if not math.isfinite(target_value):
+                _bad("--tm-target must be a positive finite number")
+            if target_value <= 0.0:
+                _bad("--tm-target must be > 0.0")
+    if "post_gamma" in overrides:
+        try:
+            gamma_value = float(overrides["post_gamma"])
+        except (TypeError, ValueError):
+            _bad("--tm-gamma must be a number between 0.9 and 1.1")
+        else:
+            if not math.isfinite(gamma_value):
+                _bad("--tm-gamma must be a number between 0.9 and 1.1")
+            if gamma_value < 0.9 or gamma_value > 1.1:
+                _bad("--tm-gamma must be between 0.9 and 1.1")
+    if "dpd_preset" in overrides:
+        dpd_value = str(overrides["dpd_preset"]).strip().lower()
+        if dpd_value not in {"off", "fast", "balanced", "high_quality"}:
+            _bad("--tm-dpd-preset must be one of: off, fast, balanced, high_quality")
+    if "dpd_black_cutoff" in overrides:
+        try:
+            cutoff = float(overrides["dpd_black_cutoff"])
+        except (TypeError, ValueError):
+            _bad("--tm-dpd-black-cutoff must be a number in [0.0, 0.05]")
+        else:
+            if not math.isfinite(cutoff):
+                _bad("--tm-dpd-black-cutoff must be a number in [0.0, 0.05]")
+            if cutoff < 0.0 or cutoff > 0.05:
+                _bad("--tm-dpd-black-cutoff must be between 0.0 and 0.05")
+    if "smoothing_period" in overrides:
+        try:
+            smoothing = float(overrides["smoothing_period"])
+        except (TypeError, ValueError):
+            _bad("--tm-smoothing must be a non-negative number")
+        else:
+            if not math.isfinite(smoothing):
+                _bad("--tm-smoothing must be a non-negative number")
+            if smoothing < 0.0:
+                _bad("--tm-smoothing must be >= 0")
+    scene_low_value: float | None = None
+    if "scene_threshold_low" in overrides:
+        try:
+            scene_low_value = float(overrides["scene_threshold_low"])
+        except (TypeError, ValueError):
+            _bad("--tm-scene-low must be a non-negative number")
+        else:
+            if not math.isfinite(scene_low_value):
+                _bad("--tm-scene-low must be a non-negative number")
+            if scene_low_value < 0.0:
+                _bad("--tm-scene-low must be >= 0")
+    scene_high_value: float | None = None
+    if "scene_threshold_high" in overrides:
+        try:
+            scene_high_value = float(overrides["scene_threshold_high"])
+        except (TypeError, ValueError):
+            _bad("--tm-scene-high must be a non-negative number")
+        else:
+            if not math.isfinite(scene_high_value):
+                _bad("--tm-scene-high must be a non-negative number")
+            if scene_high_value < 0.0:
+                _bad("--tm-scene-high must be >= 0")
+    if (
+        "scene_threshold_low" in overrides
+        and "scene_threshold_high" in overrides
+        and scene_low_value is not None
+        and scene_high_value is not None
+    ):
+        if scene_high_value < scene_low_value:
+            _bad("--tm-scene-high must be >= --tm-scene-low")
+    if "percentile" in overrides:
+        try:
+            percentile = float(overrides["percentile"])
+        except (TypeError, ValueError):
+            _bad("--tm-percentile must be between 0 and 100")
+        else:
+            if not math.isfinite(percentile):
+                _bad("--tm-percentile must be between 0 and 100")
+            if percentile < 0.0 or percentile > 100.0:
+                _bad("--tm-percentile must be between 0 and 100")
+    if "contrast_recovery" in overrides:
+        try:
+            contrast = float(overrides["contrast_recovery"])
+        except (TypeError, ValueError):
+            _bad("--tm-contrast must be a non-negative number")
+        else:
+            if not math.isfinite(contrast):
+                _bad("--tm-contrast must be a non-negative number")
+            if contrast < 0.0:
+                _bad("--tm-contrast must be >= 0")
+    if "metadata" in overrides:
+        meta_value = overrides["metadata"]
+        if isinstance(meta_value, str):
+            lowered = meta_value.strip().lower()
+            if lowered in {"auto", ""}:
+                overrides["metadata"] = "auto"
+            elif lowered in {"none", "hdr10", "hdr10+", "hdr10plus", "luminance"}:
+                overrides["metadata"] = lowered
+            else:
+                try:
+                    meta_int = int(lowered)
+                except ValueError:
+                    _bad("--tm-metadata must be auto, none, hdr10, hdr10+, luminance, or 0-4")
+                else:
+                    if meta_int < 0 or meta_int > 4:
+                        _bad("--tm-metadata integer must be between 0 and 4")
+                    overrides["metadata"] = meta_int
+        else:
+            try:
+                meta_int = int(meta_value)
+            except (TypeError, ValueError):
+                _bad("--tm-metadata must be auto, none, hdr10, hdr10+, luminance, or 0-4")
+            else:
+                if meta_int < 0 or meta_int > 4:
+                    _bad("--tm-metadata integer must be between 0 and 4")
+    if "use_dovi" in overrides:
+        if overrides["use_dovi"] not in {None, True, False}:
+            _bad("--tm-use-dovi/--tm-no-dovi must be specified without a value")
+    for boolean_key in ("visualize_lut", "show_clipping"):
+        if boolean_key in overrides and not isinstance(overrides[boolean_key], bool):
+            _bad(f"--tm-{boolean_key.replace('_', '-')} must be used without a value")
+
+
 def run_cli(
     config_path: str | None,
     input_dir: str | None = None,
@@ -4536,6 +5055,8 @@ def run_cli(
     no_color: bool = False,
     report_enable_override: Optional[bool] = None,
     skip_wizard: bool = False,
+    debug_color: bool = False,
+    tonemap_overrides: Optional[Dict[str, Any]] = None,
 ) -> RunResult:
     """
     Orchestrate the CLI workflow.
@@ -4549,6 +5070,7 @@ def run_cli(
         verbose (bool): Enable additional diagnostic output when True.
         no_color (bool): Disable colored output when True.
         report_enable_override (Optional[bool]): Optional override for HTML report generation toggle.
+        tonemap_overrides (Optional[Dict[str, Any]]): Optional overrides for tone-mapping parameters supplied via CLI.
 
     Returns:
         RunResult: Aggregated result including processed files, selected frames, output directory, resolved root directory, configuration used, generated image paths, optional slow.pics URL, and a JSON-tail dictionary with detailed metadata and diagnostics.
@@ -4567,6 +5089,51 @@ def run_cli(
         skip_auto_wizard=skip_wizard,
     )
     cfg = preflight.config
+    if tonemap_overrides:
+        _validate_tonemap_overrides(tonemap_overrides)
+        color_cfg = getattr(cfg, "color", None)
+        if color_cfg is not None:
+            if "preset" in tonemap_overrides:
+                color_cfg.preset = str(tonemap_overrides["preset"])
+            if "tone_curve" in tonemap_overrides:
+                color_cfg.tone_curve = str(tonemap_overrides["tone_curve"])
+            if "target_nits" in tonemap_overrides:
+                color_cfg.target_nits = float(tonemap_overrides["target_nits"])
+            if "dst_min_nits" in tonemap_overrides:
+                color_cfg.dst_min_nits = float(tonemap_overrides["dst_min_nits"])
+            if "knee_offset" in tonemap_overrides:
+                color_cfg.knee_offset = float(tonemap_overrides["knee_offset"])
+            if "dpd_preset" in tonemap_overrides:
+                color_cfg.dpd_preset = str(tonemap_overrides["dpd_preset"])
+            if "dpd_black_cutoff" in tonemap_overrides:
+                color_cfg.dpd_black_cutoff = float(tonemap_overrides["dpd_black_cutoff"])
+            if "post_gamma" in tonemap_overrides:
+                color_cfg.post_gamma = float(tonemap_overrides["post_gamma"])
+            if "post_gamma_enable" in tonemap_overrides:
+                color_cfg.post_gamma_enable = bool(tonemap_overrides["post_gamma_enable"])
+            if "smoothing_period" in tonemap_overrides:
+                color_cfg.smoothing_period = float(tonemap_overrides["smoothing_period"])
+            if "scene_threshold_low" in tonemap_overrides:
+                color_cfg.scene_threshold_low = float(tonemap_overrides["scene_threshold_low"])
+            if "scene_threshold_high" in tonemap_overrides:
+                color_cfg.scene_threshold_high = float(tonemap_overrides["scene_threshold_high"])
+            if "percentile" in tonemap_overrides:
+                color_cfg.percentile = float(tonemap_overrides["percentile"])
+            if "contrast_recovery" in tonemap_overrides:
+                color_cfg.contrast_recovery = float(tonemap_overrides["contrast_recovery"])
+            if "metadata" in tonemap_overrides:
+                color_cfg.metadata = tonemap_overrides["metadata"]
+            if "use_dovi" in tonemap_overrides:
+                color_cfg.use_dovi = tonemap_overrides["use_dovi"]
+            if "visualize_lut" in tonemap_overrides:
+                color_cfg.visualize_lut = bool(tonemap_overrides["visualize_lut"])
+            if "show_clipping" in tonemap_overrides:
+                color_cfg.show_clipping = bool(tonemap_overrides["show_clipping"])
+    if debug_color:
+        try:
+            setattr(cfg.color, "debug_color", True)
+        except AttributeError:
+            pass
     report_enabled = (
         bool(report_enable_override)
         if report_enable_override is not None
@@ -4692,7 +5259,7 @@ def run_cli(
             "vspreview_manual_deltas": {},
             "vspreview_reference_trim": None,
         },
-        "analysis": {},
+        "analysis": {"output_frame_count": 0, "scanned": 0},
         "render": {},
         "tonemap": {},
         "overlay": {},
@@ -4738,6 +5305,12 @@ def run_cli(
             "output_dir": cfg.report.output_dir,
             "open_after_generate": bool(getattr(cfg.report, "open_after_generate", True)),
             "mode": cfg.report.default_mode,
+        },
+        "viewer": {
+            "mode": "none",
+            "mode_display": "None",
+            "destination": None,
+            "destination_label": "",
         },
         "warnings": [],
         "vspreview_mode": vspreview_mode_value,
@@ -4802,6 +5375,7 @@ def run_cli(
         "overrides": {
             "change_fps": "change_fps" if cfg.overrides.change_fps else "none",
         },
+        "viewer": json_tail["viewer"],
         "warnings": [],
     }
 
@@ -4961,6 +5535,15 @@ def run_cli(
     slowpics_inputs_json["collection_name"] = slowpics_title_inputs["collection_name"]
     slowpics_inputs_json["collection_suffix"] = slowpics_title_inputs["collection_suffix"]
     json_tail["slowpics"]["title"]["final"] = slowpics_final_title
+    slowpics_layout_view = layout_data.get("slowpics", {})
+    slowpics_layout_view["collection_name"] = slowpics_final_title
+    slowpics_layout_view["auto_upload"] = bool(cfg.slowpics.auto_upload)
+    slowpics_layout_view.setdefault(
+        "status",
+        "pending" if cfg.slowpics.auto_upload else "disabled",
+    )
+    layout_data["slowpics"] = slowpics_layout_view
+    reporter.update_values(layout_data)
 
     if tmdb_resolution is not None:
         match_title = tmdb_resolution.title or tmdb_context.get("Title") or files[0].stem
@@ -5088,18 +5671,25 @@ def run_cli(
             vspreview_target_plan = plan
             break
         if vspreview_target_plan is not None:
+            clip_key = vspreview_target_plan.path.name
             vspreview_suggested_frames_value = int(
-                alignment_summary.suggested_frames.get(
-                    vspreview_target_plan.path.name, 0
-                )
+                alignment_summary.suggested_frames.get(clip_key, 0)
             )
-            measurement_lookup = {
-                measurement.file.name: measurement
-                for measurement in alignment_summary.measurements
-            }
-            measurement = measurement_lookup.get(vspreview_target_plan.path.name)
-            if measurement is not None and measurement.offset_seconds is not None:
-                vspreview_suggested_seconds_value = float(measurement.offset_seconds)
+            measurement_seconds: Optional[float] = None
+            if alignment_summary.measured_offsets:
+                detail = alignment_summary.measured_offsets.get(clip_key)
+                if detail and detail.offset_seconds is not None:
+                    measurement_seconds = float(detail.offset_seconds)
+            if measurement_seconds is None and alignment_summary.measurements:
+                measurement_lookup = {
+                    measurement.file.name: measurement
+                    for measurement in alignment_summary.measurements
+                }
+                measurement = measurement_lookup.get(clip_key)
+                if measurement is not None and measurement.offset_seconds is not None:
+                    measurement_seconds = float(measurement.offset_seconds)
+            if measurement_seconds is not None:
+                vspreview_suggested_seconds_value = measurement_seconds
 
     json_tail["vspreview_mode"] = vspreview_mode_value
     json_tail["suggested_frames"] = int(vspreview_suggested_frames_value)
@@ -5156,12 +5746,26 @@ def run_cli(
             key: value for key, value in alignment_display.json_target_streams.items()
         }
         json_tail["audio_alignment"]["target_stream"] = target_streams
+        offsets_sec_source = alignment_display.json_offsets_sec
+        offsets_frames_source = alignment_display.json_offsets_frames
+        if (
+            not offsets_sec_source
+            and alignment_summary is not None
+            and alignment_summary.measured_offsets
+        ):
+            offsets_sec_source = {}
+            offsets_frames_source = {}
+            for detail in alignment_summary.measured_offsets.values():
+                if detail.offset_seconds is not None:
+                    offsets_sec_source[detail.label] = float(detail.offset_seconds)
+                if detail.frames is not None:
+                    offsets_frames_source[detail.label] = int(detail.frames)
         offsets_sec: dict[str, object] = {
-            key: float(value) for key, value in alignment_display.json_offsets_sec.items()
+            key: float(value) for key, value in offsets_sec_source.items()
         }
         json_tail["audio_alignment"]["offsets_sec"] = offsets_sec
         offsets_frames: dict[str, object] = {
-            key: int(value) for key, value in alignment_display.json_offsets_frames.items()
+            key: int(value) for key, value in offsets_frames_source.items()
         }
         json_tail["audio_alignment"]["offsets_frames"] = offsets_frames
         stream_lines_output = list(alignment_display.stream_lines)
@@ -5172,6 +5776,28 @@ def run_cli(
         offset_lines_output = list(alignment_display.offset_lines)
         json_tail["audio_alignment"]["offset_lines"] = offset_lines_output
         json_tail["audio_alignment"]["offset_lines_text"] = "\n".join(offset_lines_output) if offset_lines_output else ""
+        measurement_source = alignment_display.measurements
+        if (
+            not measurement_source
+            and alignment_summary is not None
+            and alignment_summary.measured_offsets
+        ):
+            measurement_source = {
+                detail.label: detail
+                for detail in alignment_summary.measured_offsets.values()
+            }
+        measurements_output: dict[str, dict[str, object]] = {}
+        for label, detail in measurement_source.items():
+            measurements_output[label] = {
+                "stream": detail.stream,
+                "seconds": detail.offset_seconds,
+                "frames": detail.frames,
+                "correlation": detail.correlation,
+                "status": detail.status,
+                "applied": detail.applied,
+                "note": detail.note,
+            }
+        json_tail["audio_alignment"]["measurements"] = measurements_output
         if alignment_display.manual_trim_lines:
             json_tail["audio_alignment"]["manual_trim_summary"] = list(alignment_display.manual_trim_lines)
         else:
@@ -5188,6 +5814,7 @@ def run_cli(
         json_tail["audio_alignment"]["stream_lines_text"] = ""
         json_tail["audio_alignment"]["offset_lines"] = []
         json_tail["audio_alignment"]["offset_lines_text"] = ""
+        json_tail["audio_alignment"]["measurements"] = {}
     json_tail["audio_alignment"]["enabled"] = bool(cfg.audio_alignment.enable)
     json_tail["audio_alignment"]["suggestion_mode"] = bool(
         alignment_summary.suggestion_mode if alignment_summary is not None else False
@@ -5221,7 +5848,7 @@ def run_cli(
         )
 
     try:
-        _init_clips(plans, cfg.runtime, root)
+        _init_clips(plans, cfg.runtime, root, reporter=reporter)
     except vs_core.ClipInitError as exc:
         raise CLIAppError(
             f"Failed to open clip: {exc}", rich_message=f"[red]Failed to open clip:[/red] {exc}"
@@ -5407,6 +6034,7 @@ def run_cli(
         "motion_method": analysis_method,
         "motion_scenecut_quantile": float(cfg.analysis.motion_scenecut_quantile),
         "motion_diff_radius": int(cfg.analysis.motion_diff_radius),
+        "output_frame_count": 0,
         "counts": {
             "dark": int(cfg.analysis.frame_count_dark),
             "bright": int(cfg.analysis.frame_count_bright),
@@ -5555,6 +6183,7 @@ def run_cli(
             "threshold": threshold_value,
         }
     )
+    audio_alignment_view["measurements"] = json_tail["audio_alignment"].get("measurements", {})
     layout_data["audio_alignment"] = audio_alignment_view
 
     using_frame_total = isinstance(total_frames, int) and total_frames > 0
@@ -5775,11 +6404,58 @@ def run_cli(
         "preset": effective_tonemap.get("preset", cfg.color.preset),
         "tone_curve": effective_tonemap.get("tone_curve", cfg.color.tone_curve),
         "dynamic_peak_detection": bool(effective_tonemap.get("dynamic_peak_detection", cfg.color.dynamic_peak_detection)),
+        "dpd": bool(effective_tonemap.get("dynamic_peak_detection", cfg.color.dynamic_peak_detection)),
         "target_nits": float(effective_tonemap.get("target_nits", cfg.color.target_nits)),
+        "dst_min_nits": float(effective_tonemap.get("dst_min_nits", cfg.color.dst_min_nits)),
+        "knee_offset": float(effective_tonemap.get("knee_offset", getattr(cfg.color, "knee_offset", 0.5))),
+        "dpd_preset": effective_tonemap.get("dpd_preset", getattr(cfg.color, "dpd_preset", "")),
+        "dpd_black_cutoff": float(effective_tonemap.get("dpd_black_cutoff", getattr(cfg.color, "dpd_black_cutoff", 0.0))),
         "verify_luma_threshold": float(cfg.color.verify_luma_threshold),
         "overlay_enabled": bool(cfg.color.overlay_enabled),
         "overlay_mode": overlay_mode_value,
+        "post_gamma": float(getattr(cfg.color, "post_gamma", 1.0)),
+        "post_gamma_enabled": bool(getattr(cfg.color, "post_gamma_enable", False)),
+        "smoothing_period": float(effective_tonemap.get("smoothing_period", getattr(cfg.color, "smoothing_period", 45.0))),
+        "scene_threshold_low": float(effective_tonemap.get("scene_threshold_low", getattr(cfg.color, "scene_threshold_low", 0.8))),
+        "scene_threshold_high": float(effective_tonemap.get("scene_threshold_high", getattr(cfg.color, "scene_threshold_high", 2.4))),
+        "percentile": float(effective_tonemap.get("percentile", getattr(cfg.color, "percentile", 99.995))),
+        "contrast_recovery": float(effective_tonemap.get("contrast_recovery", getattr(cfg.color, "contrast_recovery", 0.3))),
+        "metadata": effective_tonemap.get("metadata", getattr(cfg.color, "metadata", "auto")),
+        "use_dovi": effective_tonemap.get("use_dovi", getattr(cfg.color, "use_dovi", None)),
+        "visualize_lut": bool(effective_tonemap.get("visualize_lut", getattr(cfg.color, "visualize_lut", False))),
+        "show_clipping": bool(effective_tonemap.get("show_clipping", getattr(cfg.color, "show_clipping", False))),
     }
+    metadata_code = json_tail["tonemap"]["metadata"]
+    metadata_label_map = {
+        0: "auto",
+        1: "none",
+        2: "hdr10",
+        3: "hdr10+",
+        4: "luminance",
+    }
+    if isinstance(metadata_code, int):
+        metadata_label = metadata_label_map.get(metadata_code, "auto")
+    elif isinstance(metadata_code, str):
+        metadata_label = metadata_code
+    else:
+        metadata_label = "auto"
+    json_tail["tonemap"]["metadata_label"] = metadata_label
+    use_dovi_value = json_tail["tonemap"]["use_dovi"]
+    if isinstance(use_dovi_value, str):
+        lowered = use_dovi_value.strip().lower()
+        if lowered in {"auto", ""}:
+            use_dovi_label = "auto"
+        elif lowered in {"true", "1", "yes", "on"}:
+            use_dovi_label = "on"
+        elif lowered in {"false", "0", "no", "off"}:
+            use_dovi_label = "off"
+        else:
+            use_dovi_label = lowered or "auto"
+    elif use_dovi_value is None:
+        use_dovi_label = "auto"
+    else:
+        use_dovi_label = "on" if use_dovi_value else "off"
+    json_tail["tonemap"]["use_dovi_label"] = use_dovi_label
     layout_data["tonemap"] = json_tail["tonemap"]
     json_tail["overlay"] = {
         "enabled": bool(cfg.color.overlay_enabled),
@@ -5805,6 +6481,19 @@ def run_cli(
         if total_screens > 0:
             start_time = time.perf_counter()
             processed = 0
+            clip_labels = [_plan_label(plan) for plan in plans]
+            clip_total_frames = len(frames)
+            clip_count = len(clip_labels)
+            clip_progress_enabled = clip_count > 0 and clip_total_frames > 0
+            if clip_progress_enabled:
+                reporter.update_progress_state(
+                    "render_clip_bar",
+                    label=clip_labels[0],
+                    clip_index=1,
+                    clip_total=clip_count,
+                    current=0,
+                    total=clip_total_frames,
+                )
 
             reporter.update_progress_state(
                 "render_bar",
@@ -5815,15 +6504,39 @@ def run_cli(
                 total=total_screens,
             )
 
-            with reporter.create_progress("render_bar", transient=False) as render_progress:
+            clip_progress = None
+            clip_task_id: Optional[int] = None
+            clip_index = 0
+            clip_completed = 0
+
+            def _clip_description(idx: int) -> str:
+                if not clip_labels:
+                    return "Rendering clip"
+                bounded = max(0, min(idx, len(clip_labels) - 1))
+                return f"{clip_labels[bounded]} ({bounded + 1}/{clip_count})"
+
+            with ExitStack() as progress_stack:
+                render_progress = progress_stack.enter_context(
+                    reporter.create_progress("render_bar", transient=False)
+                )
                 task_id = render_progress.add_task(
-                    'Rendering outputs',
+                    "Rendering outputs",
                     total=total_screens,
                 )
+                if clip_progress_enabled:
+                    clip_progress = progress_stack.enter_context(
+                        reporter.create_progress("render_clip_bar", transient=False)
+                    )
+                    clip_task_id = clip_progress.add_task(
+                        _clip_description(clip_index),
+                        total=clip_total_frames,
+                    )
 
                 def advance_render(count: int) -> None:
                     """Update rendering progress metrics and visible bars."""
                     nonlocal processed
+                    nonlocal clip_index
+                    nonlocal clip_completed
                     processed += count
                     elapsed = max(time.perf_counter() - start_time, 1e-6)
                     fps_val = processed / elapsed
@@ -5838,6 +6551,42 @@ def run_cli(
                         total=total_screens,
                     )
                     render_progress.update(task_id, completed=min(total_screens, processed))
+                    if clip_progress_enabled and clip_progress is not None and clip_task_id is not None:
+                        clip_completed += count
+                        clip_completed = min(clip_completed, clip_total_frames)
+                        clip_progress.update(
+                            clip_task_id,
+                            completed=clip_completed,
+                            description=_clip_description(clip_index),
+                        )
+                        reporter.update_progress_state(
+                            "render_clip_bar",
+                            current=clip_completed,
+                            total=clip_total_frames,
+                            clip_index=clip_index + 1,
+                            clip_total=clip_count,
+                            label=clip_labels[clip_index],
+                        )
+                        if clip_completed >= clip_total_frames and clip_index + 1 < clip_count:
+                            clip_index += 1
+                            clip_completed = 0
+                            cast(Any, clip_progress).reset(
+                                clip_task_id,
+                                total=clip_total_frames,
+                            )
+                            clip_progress.update(
+                                clip_task_id,
+                                completed=clip_completed,
+                                description=_clip_description(clip_index),
+                            )
+                            reporter.update_progress_state(
+                                "render_clip_bar",
+                                current=clip_completed,
+                                total=clip_total_frames,
+                                clip_index=clip_index + 1,
+                                clip_total=clip_count,
+                                label=clip_labels[clip_index],
+                            )
 
                 image_paths = generate_screenshots(
                     clips,
@@ -5854,6 +6603,7 @@ def run_cli(
                     warnings_sink=collected_warnings,
                     verification_sink=verification_records,
                     pivot_notifier=_notify_pivot,
+                    debug_color=bool(getattr(cfg.color, "debug_color", False)),
                 )
 
                 if processed < total_screens:
@@ -5868,6 +6618,20 @@ def run_cli(
                         total=total_screens,
                     )
                     render_progress.update(task_id, completed=total_screens)
+                if clip_progress_enabled and clip_progress is not None and clip_task_id is not None:
+                    clip_progress.update(
+                        clip_task_id,
+                        completed=clip_total_frames,
+                        description=_clip_description(min(clip_index, clip_count - 1)),
+                    )
+                    reporter.update_progress_state(
+                        "render_clip_bar",
+                        current=clip_total_frames,
+                        total=clip_total_frames,
+                        clip_index=min(clip_index, clip_count - 1) + 1,
+                        clip_total=clip_count,
+                        label=clip_labels[min(clip_index, clip_count - 1)],
+                    )
         else:
             image_paths = generate_screenshots(
                 clips,
@@ -5883,6 +6647,7 @@ def run_cli(
                 warnings_sink=collected_warnings,
                 verification_sink=verification_records,
                 pivot_notifier=_notify_pivot,
+                debug_color=bool(getattr(cfg.color, "debug_color", False)),
             )
     except ClipProcessError as exc:
         hint = "Run 'frame-compare doctor' for dependency diagnostics."
@@ -5968,6 +6733,8 @@ def run_cli(
     if slowpics_verbose_tmdb_tag:
         reporter.verbose_line(f"  {escape(slowpics_verbose_tmdb_tag)}")
     if cfg.slowpics.auto_upload:
+        layout_data["slowpics"]["status"] = "preparing"
+        reporter.update_values(layout_data)
         print("[cyan]Preparing slow.pics upload...[/cyan]")
         upload_total = len(image_paths)
         def _safe_size(path_str: str) -> int:
@@ -6038,24 +6805,29 @@ def run_cli(
             return stats
 
         try:
+            layout_data["slowpics"]["status"] = "uploading"
+            reporter.update_values(layout_data)
             reporter.line(_color_text("[✓] slow.pics: establishing session", "green"))
             if upload_total > 0:
                 start_time = time.perf_counter()
                 uploaded_files = 0
                 uploaded_bytes = 0
                 file_index = 0
-
-                columns: tuple[ProgressColumn, ...] = (
-                    TextColumn('{task.percentage:>6.02f}% {task.completed}/{task.total}', justify='left'),
-                    BarColumn(),
-                    TextColumn('{task.fields[stats]}', justify='right'),
+                initial_stats = _format_stats(0, 0, 0.0)
+                reporter.update_progress_state(
+                    "upload_bar",
+                    description="slow.pics upload",
+                    current=0,
+                    total=upload_total,
+                    stats=initial_stats,
                 )
-                with reporter.progress(*columns, transient=False) as upload_progress:
+                reporter.render_sections(["publish"])
+                with reporter.create_progress("upload_bar", transient=False) as upload_progress:
                     task_id = upload_progress.add_task(
-                        '',
+                        "slow.pics upload",
                         total=upload_total,
-                        stats=_format_stats(0, 0, 0.0),
                     )
+                    progress_lock = threading.Lock()
 
                     def advance_upload(count: int) -> None:
                         """
@@ -6067,17 +6839,25 @@ def run_cli(
                             count (int): Number of files to mark as uploaded.
                         """
                         nonlocal uploaded_files, uploaded_bytes, file_index
-                        uploaded_files += count
-                        for _ in range(count):
-                            if file_index < len(file_sizes):
-                                uploaded_bytes += file_sizes[file_index]
-                                file_index += 1
-                        elapsed = time.perf_counter() - start_time
-                        upload_progress.update(
-                            task_id,
-                            completed=min(upload_total, uploaded_files),
-                            stats=_format_stats(uploaded_files, uploaded_bytes, elapsed),
-                        )
+                        with progress_lock:
+                            uploaded_files += count
+                            for _ in range(count):
+                                if file_index < len(file_sizes):
+                                    uploaded_bytes += file_sizes[file_index]
+                                    file_index += 1
+                            elapsed = time.perf_counter() - start_time
+                            stats_text = _format_stats(uploaded_files, uploaded_bytes, elapsed)
+                            completed = min(upload_total, uploaded_files)
+                            reporter.update_progress_state(
+                                "upload_bar",
+                                current=completed,
+                                total=upload_total,
+                                stats=stats_text,
+                            )
+                            upload_progress.update(
+                                task_id,
+                                completed=completed,
+                            )
 
                     slowpics_url = upload_comparison(
                         image_paths,
@@ -6087,10 +6867,16 @@ def run_cli(
                     )
 
                     elapsed = time.perf_counter() - start_time
+                    final_stats = _format_stats(uploaded_files, uploaded_bytes, elapsed)
+                    reporter.update_progress_state(
+                        "upload_bar",
+                        current=upload_total,
+                        total=upload_total,
+                        stats=final_stats,
+                    )
                     upload_progress.update(
                         task_id,
                         completed=upload_total,
-                        stats=_format_stats(uploaded_files, uploaded_bytes, elapsed),
                     )
             else:
                 slowpics_url = upload_comparison(
@@ -6098,9 +6884,13 @@ def run_cli(
                     out_dir,
                     cfg.slowpics,
                 )
+            layout_data["slowpics"]["status"] = "completed"
+            reporter.update_values(layout_data)
             reporter.line(_color_text(f"[✓] slow.pics: uploading {upload_total} images", "green"))
             reporter.line(_color_text("[✓] slow.pics: assembling collection", "green"))
         except SlowpicsAPIError as exc:
+            layout_data["slowpics"]["status"] = "failed"
+            reporter.update_values(layout_data)
             raise CLIAppError(
                 f"slow.pics upload failed: {exc}",
                 rich_message=f"[red]slow.pics upload failed:[/red] {exc}",
@@ -6174,6 +6964,41 @@ def run_cli(
     else:
         report_block["enabled"] = False
         report_block["path"] = None
+
+    viewer_block = json_tail.get("viewer", {})
+    viewer_mode = "slow_pics" if slowpics_url else "local_report" if report_block.get("enabled") and report_block.get("path") else "none"
+    viewer_destination: Optional[str]
+    viewer_label = ""
+    if viewer_mode == "slow_pics":
+        viewer_destination = slowpics_url
+        viewer_label = slowpics_url or ""
+    elif viewer_mode == "local_report":
+        viewer_destination = report_block.get("path")
+        viewer_label = viewer_destination or ""
+        if viewer_destination:
+            try:
+                viewer_label = str(Path(viewer_destination).resolve().relative_to(root.resolve()))
+            except ValueError:
+                viewer_label = viewer_destination
+    else:
+        viewer_destination = None
+    viewer_mode_display = {
+        "slow_pics": "slow.pics",
+        "local_report": "Local report",
+        "none": "None",
+    }.get(viewer_mode, viewer_mode.title())
+    viewer_block.update(
+        {
+            "mode": viewer_mode,
+            "mode_display": viewer_mode_display,
+            "destination": viewer_destination,
+            "destination_label": viewer_label,
+        }
+    )
+    json_tail["viewer"] = viewer_block
+    layout_data["viewer"] = viewer_block
+    reporter.update_values(layout_data)
+    reporter.render_sections(["at_a_glance"])
 
     result = RunResult(
         files=[plan.path for plan in plans],
@@ -6296,6 +7121,25 @@ def _run_cli_entry(
     skip_wizard: bool,
     html_report_enable: bool,
     html_report_disable: bool,
+    debug_color: bool,
+    tm_preset: str | None,
+    tm_curve: str | None,
+    tm_target: float | None,
+    tm_dst_min: float | None,
+    tm_knee: float | None,
+    tm_dpd_preset: str | None,
+    tm_dpd_black_cutoff: float | None,
+    tm_gamma: float | None,
+    tm_gamma_disable: bool,
+    tm_smoothing: float | None,
+    tm_scene_low: float | None,
+    tm_scene_high: float | None,
+    tm_percentile: float | None,
+    tm_contrast: float | None,
+    tm_metadata: str | None,
+    tm_use_dovi: bool | None,
+    tm_visualize_lut: bool | None,
+    tm_show_clipping: bool | None,
 ) -> None:
     """Execute the primary CLI workflow with the provided options."""
 
@@ -6310,6 +7154,48 @@ def _run_cli_entry(
         report_override = False
     else:
         report_override = None
+
+    if tm_gamma_disable and tm_gamma is not None:
+        raise click.ClickException("Cannot use --tm-gamma-disable together with --tm-gamma.")
+
+    tonemap_override: Dict[str, Any] = {}
+    if tm_preset:
+        tonemap_override["preset"] = tm_preset
+    if tm_curve:
+        tonemap_override["tone_curve"] = tm_curve
+    if tm_target is not None:
+        tonemap_override["target_nits"] = tm_target
+    if tm_dst_min is not None:
+        tonemap_override["dst_min_nits"] = tm_dst_min
+    if tm_knee is not None:
+        tonemap_override["knee_offset"] = tm_knee
+    if tm_dpd_preset:
+        tonemap_override["dpd_preset"] = tm_dpd_preset
+    if tm_dpd_black_cutoff is not None:
+        tonemap_override["dpd_black_cutoff"] = tm_dpd_black_cutoff
+    if tm_gamma is not None:
+        tonemap_override["post_gamma"] = tm_gamma
+        tonemap_override["post_gamma_enable"] = True
+    elif tm_gamma_disable:
+        tonemap_override["post_gamma_enable"] = False
+    if tm_smoothing is not None:
+        tonemap_override["smoothing_period"] = tm_smoothing
+    if tm_scene_low is not None:
+        tonemap_override["scene_threshold_low"] = tm_scene_low
+    if tm_scene_high is not None:
+        tonemap_override["scene_threshold_high"] = tm_scene_high
+    if tm_percentile is not None:
+        tonemap_override["percentile"] = tm_percentile
+    if tm_contrast is not None:
+        tonemap_override["contrast_recovery"] = tm_contrast
+    if tm_metadata is not None:
+        tonemap_override["metadata"] = tm_metadata
+    if tm_use_dovi is not None:
+        tonemap_override["use_dovi"] = tm_use_dovi
+    if tm_visualize_lut is not None:
+        tonemap_override["visualize_lut"] = tm_visualize_lut
+    if tm_show_clipping is not None:
+        tonemap_override["show_clipping"] = tm_show_clipping
 
     preflight_for_write: _PathPreflightResult | None = None
     if write_config:
@@ -6360,6 +7246,8 @@ def _run_cli_entry(
             no_color=no_color,
             report_enable_override=report_override,
             skip_wizard=skip_wizard,
+            debug_color=debug_color,
+            tonemap_overrides=tonemap_override or None,
         )
     except CLIAppError as exc:
         print(exc.rich_message)
@@ -6549,6 +7437,92 @@ def _run_cli_entry(
     is_flag=True,
     help="Disable HTML report generation regardless of config.",
 )
+@click.option(
+    "--debug-color",
+    is_flag=True,
+    help="Enable colour pipeline debugging (logs plane stats, dumps intermediate PNGs).",
+)
+@click.option("--tm-preset", "tm_preset", default=None, help="Override [color].preset for this run.")
+@click.option("--tm-curve", "tm_curve", default=None, help="Override [color].tone_curve for this run.")
+@click.option("--tm-target", "tm_target", type=float, default=None, help="Override [color].target_nits for this run.")
+@click.option("--tm-dst-min", "tm_dst_min", type=float, default=None, help="Override [color].dst_min_nits for this run.")
+@click.option("--tm-knee", "tm_knee", type=float, default=None, help="Override [color].knee_offset for this run.")
+@click.option(
+    "--tm-dpd-preset",
+    "tm_dpd_preset",
+    type=click.Choice(["off", "fast", "balanced", "high_quality"], case_sensitive=False),
+    default=None,
+    help="Override [color].dpd_preset.",
+)
+@click.option(
+    "--tm-dpd-black-cutoff",
+    "tm_dpd_black_cutoff",
+    type=float,
+    default=None,
+    help="Override [color].dpd_black_cutoff (0.0–0.05) for this run.",
+)
+@click.option(
+    "--tm-gamma",
+    "tm_gamma",
+    type=float,
+    default=None,
+    help="Override [color].post_gamma and enable post-tonemap gamma lift for this run.",
+)
+@click.option(
+    "--tm-gamma-disable",
+    is_flag=True,
+    help="Disable post-tonemap gamma lift for this run regardless of config.",
+)
+@click.option("--tm-smoothing", "tm_smoothing", type=float, default=None, help="Override [color].smoothing_period.")
+@click.option("--tm-scene-low", "tm_scene_low", type=float, default=None, help="Override [color].scene_threshold_low.")
+@click.option("--tm-scene-high", "tm_scene_high", type=float, default=None, help="Override [color].scene_threshold_high.")
+@click.option("--tm-percentile", "tm_percentile", type=float, default=None, help="Override [color].percentile.")
+@click.option("--tm-contrast", "tm_contrast", type=float, default=None, help="Override [color].contrast_recovery.")
+@click.option(
+    "--tm-metadata",
+    "tm_metadata",
+    default=None,
+    help="Override [color].metadata (auto|none|hdr10|hdr10+|luminance or 0-4).",
+)
+@click.option(
+    "--tm-use-dovi",
+    "tm_use_dovi",
+    flag_value=True,
+    default=None,
+    help="Force Dolby Vision metadata usage during tonemapping.",
+)
+@click.option(
+    "--tm-no-dovi",
+    "tm_use_dovi",
+    flag_value=False,
+    help="Disable Dolby Vision metadata usage during tonemapping.",
+)
+@click.option(
+    "--tm-visualize-lut",
+    "tm_visualize_lut",
+    flag_value=True,
+    default=None,
+    help="Enable libplacebo tone-mapping LUT visualization for this run.",
+)
+@click.option(
+    "--tm-no-visualize-lut",
+    "tm_visualize_lut",
+    flag_value=False,
+    help="Disable libplacebo tone-mapping LUT visualization for this run.",
+)
+@click.option(
+    "--tm-show-clipping",
+    "tm_show_clipping",
+    flag_value=True,
+    default=None,
+    help="Highlight clipped pixels during tonemapping for this run.",
+)
+@click.option(
+    "--tm-no-show-clipping",
+    "tm_show_clipping",
+    flag_value=False,
+    help="Do not highlight clipped pixels during tonemapping for this run.",
+)
 @click.pass_context
 def main(
     ctx: click.Context,
@@ -6566,6 +7540,25 @@ def main(
     no_wizard: bool,
     html_report_enable: bool,
     html_report_disable: bool,
+    debug_color: bool,
+    tm_preset: str | None,
+    tm_curve: str | None,
+    tm_target: float | None,
+    tm_dst_min: float | None,
+    tm_knee: float | None,
+    tm_dpd_preset: str | None,
+    tm_dpd_black_cutoff: float | None,
+    tm_gamma: float | None,
+    tm_gamma_disable: bool,
+    tm_smoothing: float | None,
+    tm_scene_low: float | None,
+    tm_scene_high: float | None,
+    tm_percentile: float | None,
+    tm_contrast: float | None,
+    tm_metadata: str | None,
+    tm_use_dovi: bool | None,
+    tm_visualize_lut: bool | None,
+    tm_show_clipping: bool | None,
 ) -> None:
     """Command group entry point that dispatches to subcommands or the default run."""
 
@@ -6583,6 +7576,25 @@ def main(
         "skip_wizard": no_wizard,
         "html_report_enable": html_report_enable,
         "html_report_disable": html_report_disable,
+        "debug_color": debug_color,
+        "tm_preset": tm_preset,
+        "tm_curve": tm_curve,
+        "tm_target": tm_target,
+        "tm_dst_min": tm_dst_min,
+        "tm_knee": tm_knee,
+        "tm_dpd_preset": tm_dpd_preset,
+        "tm_dpd_black_cutoff": tm_dpd_black_cutoff,
+        "tm_gamma": tm_gamma,
+        "tm_gamma_disable": tm_gamma_disable,
+        "tm_smoothing": tm_smoothing,
+        "tm_scene_low": tm_scene_low,
+        "tm_scene_high": tm_scene_high,
+        "tm_percentile": tm_percentile,
+        "tm_contrast": tm_contrast,
+        "tm_metadata": tm_metadata,
+        "tm_use_dovi": tm_use_dovi,
+        "tm_visualize_lut": tm_visualize_lut,
+        "tm_show_clipping": tm_show_clipping,
     }
     params_map = cast(Dict[str, Any], ctx.ensure_object(dict))
     params_map.update(params)
@@ -6612,6 +7624,25 @@ def run_command(ctx: click.Context) -> None:
         skip_wizard=bool(params.get("skip_wizard", False)),
         html_report_enable=bool(params.get("html_report_enable", False)),
         html_report_disable=bool(params.get("html_report_disable", False)),
+        debug_color=bool(params.get("debug_color", False)),
+        tm_preset=params.get("tm_preset"),
+        tm_curve=params.get("tm_curve"),
+        tm_target=params.get("tm_target"),
+        tm_dst_min=params.get("tm_dst_min"),
+        tm_knee=params.get("tm_knee"),
+        tm_dpd_preset=params.get("tm_dpd_preset"),
+        tm_dpd_black_cutoff=params.get("tm_dpd_black_cutoff"),
+        tm_gamma=params.get("tm_gamma"),
+        tm_gamma_disable=bool(params.get("tm_gamma_disable", False)),
+        tm_smoothing=params.get("tm_smoothing"),
+        tm_scene_low=params.get("tm_scene_low"),
+        tm_scene_high=params.get("tm_scene_high"),
+        tm_percentile=params.get("tm_percentile"),
+        tm_contrast=params.get("tm_contrast"),
+        tm_metadata=params.get("tm_metadata"),
+        tm_use_dovi=params.get("tm_use_dovi"),
+        tm_visualize_lut=params.get("tm_visualize_lut"),
+        tm_show_clipping=params.get("tm_show_clipping"),
     )
 
 

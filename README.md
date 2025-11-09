@@ -6,23 +6,32 @@
 Automated frame sampling, alignment, tonemapping, and slow.pics uploads for deterministic encode comparisons.
 
 ## Table of Contents
-- [Overview](#overview)
-- [Features](#features)
-- [Quickstart](#quickstart)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Configuration](#configuration)
-- [CLI Reference](#cli-reference)
-- [Examples](#examples)
-- [Troubleshooting](#troubleshooting)
-- [FAQ](#faq)
-- [Performance](#performance)
-- [Security](#security)
-- [Privacy \& Telemetry](#privacy--telemetry)
-- [Versioning](#versioning)
-- [Contributing](#contributing)
-- [License](#license)
-- [Support](#support)
+- [Frame Compare](#frame-compare)
+  - [Table of Contents](#table-of-contents)
+  - [Overview](#overview)
+  - [Features](#features)
+  - [Quickstart](#quickstart)
+  - [Installation](#installation)
+  - [Usage](#usage)
+    - [Wizard \& Presets](#wizard--presets)
+    - [Dependency Doctor](#dependency-doctor)
+  - [Configuration](#configuration)
+    - [Tonemap Quick Recipes](#tonemap-quick-recipes)
+  - [CLI Reference](#cli-reference)
+  - [Examples](#examples)
+    - [VSPreview manual alignment assistant](#vspreview-manual-alignment-assistant)
+    - [Path diagnostics before heavy runs](#path-diagnostics-before-heavy-runs)
+    - [FFmpeg-only captures](#ffmpeg-only-captures)
+  - [Troubleshooting](#troubleshooting)
+  - [FAQ](#faq)
+  - [Performance](#performance)
+  - [Security](#security)
+  - [Privacy \& Telemetry](#privacy--telemetry)
+  - [Versioning](#versioning)
+  - [Contributing](#contributing)
+  - [License](#license)
+  - [Support](#support)
+  - [Future updates](#future-updates)
 
 ## Overview
 
@@ -35,7 +44,7 @@ Frame Compare samples darkest, brightest, high-motion, random, and user-pinned f
 - Audio alignment with correlation, dynamic time warping refinements, and optional interactive confirmation frames.
 - VapourSynth-first pipeline with FFmpeg fallback, HDR→SDR tonemapping, and placeholder recovery when writers fail.
 - slow.pics integration with automatic uploads, retries, URL shortcuts, and clipboard hand-off.
-- Optional HTML report generation for offline, browser-based comparisons with slider/overlay modes, pointer-anchored zoom + fit presets, and persistent pan/align controls inspired by slow.pics.
+- Optional HTML report generation for offline, browser-based comparisons with filmstrip thumbnails, selection filters, slider/overlay/difference/blink modes, pointer-anchored zoom + fit presets, persistent pan/align controls, and a fullscreen toggle inspired by slow.pics.
 - TMDB-driven metadata resolution with GuessIt/Anitopy labelling to keep comparisons organised.
 - Rich CLI layout featuring progress dashboards, Unicode fallbacks, batch auto-grouping, and optional JSON tails for automation.
 - CLI override for audio stream selection (`--audio-align-track`) when auto-detection needs guidance.
@@ -166,7 +175,7 @@ Configuration highlights:
 - Workspace guardrails keep everything under the resolved root: the CLI refuses `site-packages` roots, auto-seeds `ROOT/config/config.toml`, validates writability up front, and blocks relative paths that escape the workspace. Run `frame-compare --diagnose-paths` to confirm the resolved locations when in doubt.
 - `[analysis]` governs frame quotas, random seed, and metric cache filename.
 - `[screenshots]` selects renderer, geometry policy, dithering, and output directory name.
-- `[color]` sets tonemap preset (`reference`, `contrast`, `filmic`), verification options, overlay text, and strictness.
+- `[color]` sets tonemap preset (`reference`, `contrast`, `filmic`, `bt2390_spec`, `spline`), verification options, overlay text, BT.2390 knee offsets, dynamic-peak-detection presets, post-tonemap gamma, and strictness.
 - `[audio_alignment]` enables correlation, VSPreview hooks, offsets filename, and bias.
 - `[slowpics]` toggles auto uploads (disabled by default), visibility, cleanup, webhook URL, and timeout.
 - `[report]` enables the offline HTML report, output directory, default comparison pair, and auto-open behaviour.
@@ -195,11 +204,25 @@ Common toggles (see [docs/README_REFERENCE.md](docs/README_REFERENCE.md) for ful
 | `[audio_alignment].enable` (+`confirm_with_screenshots`) | Audio-guided offsets and preview pause. | `false` (`true`) | `enable=true` |
 | `[screenshots].use_ffmpeg` | Prefer FFmpeg renderer. | `false` | `use_ffmpeg=true` |
 | `[report].enable` (+`--html-report` / `--no-html-report`) | Generate the local HTML report and auto-open it. | `false` | `enable=true` |
-| `[report].default_mode` | Initial viewer mode (`slider` or `overlay`). | `"slider"` | `default_mode="overlay"` |
+| `[report].default_mode` | Initial viewer mode (`slider`, `overlay`, `difference`, or `blink`). | `"slider"` | `default_mode="difference"` |
 | `[slowpics].auto_upload` | Upload results to slow.pics. | `false` | `auto_upload=true` |
 | `[runtime].ram_limit_mb` | VapourSynth RAM guard. | `4000` | `ram_limit_mb=3072` |
 
-Offline HTML reports mirror slow.pics ergonomics: Actual/Fit/Fill presets, an alignment selector, pointer-anchored zoom via the slider, +/- buttons, or Ctrl/⌘ + mouse wheel, and pan support (space + drag or regular drag once zoomed beyond fit). Zoom, fit, mode, and alignment choices persist in `localStorage` so every frame opens with the same viewer state.
+Offline HTML reports mirror slow.pics ergonomics: filmstrip thumbnails with selection-category filters, Actual/Fit/Fill presets, an alignment selector, pointer-anchored zoom via the slider, +/- buttons, or Ctrl/⌘ + mouse wheel, and pan support (space + drag or regular drag once zoomed beyond fit). Slider, overlay, difference, and blink viewer modes plus a fullscreen toggle round out the controls. Zoom, fit, mode, alignment, and category filters persist in `localStorage` so every frame opens with the same viewer state.
+
+### Tonemap Quick Recipes
+
+- **Reference SDR (BT.2390):** keep `preset="reference"` (or select with `--tm-preset reference`) for the high-quality baseline: `tone_curve="bt.2390"`, `target_nits=100`, `dst_min_nits=0.18`, `knee_offset=0.50`, smoothing `45f`, percentile `99.995`, contrast recovery `0.30`, and `dpd_preset="high_quality"`. This maximises texture in low APL scenes while guarding highlights.
+- **BT.2446A Filmic:** pick `preset="filmic"` for the libplacebo BT.2446A shoulder. It softens highlight roll-off (`knee_offset≈0.58`), keeps target nits at 100, and retains conservative dynamic peak detection—ideal for well-mastered HDR sources. Adjust `--tm-dst-min` or `--tm-gamma` for subtle lift.
+- **Bright Lift:** use `preset="bright_lift"` when SDR conversions feel too dim. It raises target nits to 130, lifts the toe (`dst_min_nits=0.22`), and applies stronger contrast recovery (`0.50`) while keeping DPD engaged so highlights stay controlled.
+- **Highlight Guard:** choose `preset="highlight_guard"` to tame aggressive grades. Target nits drop to 90 with an extended smoothing window (50f) and moderate contrast recovery (`0.15`), pulling peaks down without flattening the whole frame.
+
+Fine-grained controls are also exposed through `[color]` (and matching `--tm-*` flags) when you need extra headroom:
+
+- `smoothing_period`, `scene_threshold_low`, `scene_threshold_high` tune the HDR peak smoothing window.
+- `percentile` and `contrast_recovery` replicate libplacebo’s `high_quality` preset when set to `99.995` and `0.3`.
+- `metadata` selects the tone-mapping metadata source (`auto`, `none`, `hdr10`, `hdr10+`, `luminance`), while `use_dovi` lets you force or disable Dolby Vision RPU usage.
+- `visualize_lut` and `show_clipping` surface debugging views without editing scripts.
 
 > **Tip:** To seed another workspace, run `uv run python -m frame_compare --root alt-root --write-config`.
 
@@ -211,6 +234,24 @@ Offline HTML reports mirror slow.pics ergonomics: Actual/Fit/Fill presets, an al
 | `--config PATH` | Use a specific config file (falls back to `FRAME_COMPARE_CONFIG`) |
 | `--input PATH` | Override `[paths].input_dir` for a single run |
 | `--audio-align-track label=index` | Force the audio stream used per clip (repeatable) |
+| `--tm-preset NAME` | Override tone-mapping preset (`reference`, `bt2390_spec`, `filmic`, `spline`, `contrast`, `bright_lift`, `highlight_guard`) |
+| `--tm-curve NAME` | Override `[color].tone_curve` without touching presets |
+| `--tm-target NITS` | Override `[color].target_nits` |
+| `--tm-dst-min VALUE` | Override `[color].dst_min_nits` |
+| `--tm-knee VALUE` | Override `[color].knee_offset` (0–1) |
+| `--tm-dpd-preset NAME` | Override `[color].dpd_preset` (`off`, `fast`, `balanced`, `high_quality`) |
+| `--tm-dpd-black-cutoff VALUE` | Override `[color].dpd_black_cutoff` (`0.0–0.05`) |
+| `--tm-gamma VALUE` | Override `[color].post_gamma` and enable the gamma lift |
+| `--tm-gamma-disable` | Disable the post-tonemap gamma lift for this run |
+| `--tm-smoothing VALUE` | Override `[color].smoothing_period` (frames) |
+| `--tm-scene-low VALUE` | Override `[color].scene_threshold_low` |
+| `--tm-scene-high VALUE` | Override `[color].scene_threshold_high` |
+| `--tm-percentile VALUE` | Override `[color].percentile` (0–100) |
+| `--tm-contrast VALUE` | Override `[color].contrast_recovery` |
+| `--tm-metadata VALUE` | Override `[color].metadata` (`auto`, `none`, `hdr10`, `hdr10+`, `luminance`, or `0-4`) |
+| `--tm-use-dovi / --tm-no-dovi` | Force Dolby Vision metadata usage on/off (default auto) |
+| `--tm-visualize-lut / --tm-no-visualize-lut` | Toggle libplacebo LUT visualisation |
+| `--tm-show-clipping / --tm-no-show-clipping` | Toggle clipped-pixel highlighting during tonemapping |
 | `--write-config` | Ensure `ROOT/config/config.toml` exists, then exit |
 | `--diagnose-paths` | Print JSON diagnostics (root, media, screens, writability) |
 | `--quiet` / `--verbose` | Adjust console verbosity |
@@ -369,3 +410,10 @@ Distributed under the [MIT License](LICENSE). Frame Compare builds on FFmpeg, Va
 - Runs on macOS, Linux, and Windows (64-bit). Ensure FFmpeg is on `PATH` and VapourSynth is installed when opting into the primary renderer.
 - Consult the in-repo guides for deeper dives: [docs/audio_alignment_pipeline.md](docs/audio_alignment_pipeline.md), [docs/geometry_pipeline.md](docs/geometry_pipeline.md), [docs/hdr_tonemap_overview.md](docs/hdr_tonemap_overview.md), [docs/context_summary.md](docs/context_summary.md).
 - File issues or feature requests via the GitHub issue tracker. For security concerns, open a private advisory so details remain confidential until patched.
+
+## Future updates
+- Continue refining CLI status panels and VSPreview-assisted workflows so long-running batches communicate progress and slow.pics uploads complete as efficiently as the legacy script.
+- Polish the local viewer experience (persistent zoom/slider behavior, richer overlays, multi-encode alignment summaries) to remove the remaining parity gaps with earlier tooling.
+- Audit configuration surfaces for clarity and consolidation, trimming duplicate options while keeping power-user overrides accessible.
+
+Detailed technical tasks are tracked on the [GitHub Issues board](https://github.com/TJZine/frame-compare/issues).

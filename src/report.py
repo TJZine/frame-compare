@@ -18,6 +18,7 @@ _ASSET_DIR = Path(__file__).resolve().parent / "data" / "report"
 _INDEX_TEMPLATE_PATH = _ASSET_DIR / "index.html"
 _ASSETS = ("app.js", "app.css")
 _INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_CATEGORY_KEY_PATTERN = re.compile(r"[^a-z0-9]+")
 
 
 def _sanitise_label(label: str) -> str:
@@ -26,6 +27,11 @@ def _sanitise_label(label: str) -> str:
         cleaned = cleaned.rstrip(" .")
     cleaned = cleaned.strip()
     return cleaned or "comparison"
+
+
+def _normalise_category_key(label: str) -> str:
+    key = _CATEGORY_KEY_PATTERN.sub("-", label.strip().lower())
+    return key.strip("-") or "uncategorized"
 
 
 class EncodeEntryBase(TypedDict):
@@ -56,10 +62,19 @@ class FrameEntryBase(TypedDict):
 
 class FrameEntryOptional(TypedDict, total=False):
     detail: Dict[str, object]
+    thumbnail: str
+    category: str
+    category_key: str
 
 
 class FrameEntry(FrameEntryBase, FrameEntryOptional):
     """Typed representation of per-frame payload entries."""
+
+
+class CategoryEntry(TypedDict):
+    key: str
+    label: str
+    count: int
 
 
 def _normalise_default(label: Optional[str], encodes: Sequence[EncodeEntry]) -> Optional[str]:
@@ -178,6 +193,7 @@ def generate_html_report(
 
     frames_sorted = [int(frame) for frame in frames]
     frame_payload: List[FrameEntry] = []
+    category_stats: Dict[str, CategoryEntry] = {}
     for frame_idx in frames_sorted:
         files_for_frame = files_by_frame.get(frame_idx, {})
         records: List[FileRecord] = []
@@ -194,6 +210,25 @@ def generate_html_report(
                 }
             )
         detail = selection_details.get(frame_idx)
+        thumbnail_path: Optional[str] = None
+        if records:
+            # Prefer the first listed encode for consistent filmstrip thumbnails.
+            thumbnail_path = records[0]["path"]
+        category_label: Optional[str] = None
+        category_key: Optional[str] = None
+        if detail and detail.label:
+            category_label = detail.label.strip()
+            if category_label:
+                category_key = _normalise_category_key(category_label)
+                category_entry = category_stats.get(category_key)
+                if category_entry is None:
+                    category_stats[category_key] = {
+                        "key": category_key,
+                        "label": category_label,
+                        "count": 1,
+                    }
+                else:
+                    category_entry["count"] += 1
         frame_entry: FrameEntry = {
             "index": frame_idx,
             "files": records,
@@ -201,6 +236,11 @@ def generate_html_report(
         }
         if include_metadata == "full" and detail is not None:
             frame_entry["detail"] = _detail_to_payload(detail)
+        if thumbnail_path:
+            frame_entry["thumbnail"] = thumbnail_path
+        if category_label and category_key:
+            frame_entry["category"] = category_label
+            frame_entry["category_key"] = category_key
         frame_payload.append(frame_entry)
 
     defaults = {
@@ -221,6 +261,7 @@ def generate_html_report(
             "frames": len(frame_payload),
             "encodes": len(encode_entries),
         },
+        "categories": list(category_stats.values()),
     }
 
     data_path = report_dir / "data.json"
