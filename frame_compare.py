@@ -4917,6 +4917,16 @@ def _validate_tonemap_overrides(overrides: MutableMapping[str, Any]) -> None:
                 _bad("--tm-dst-min must be a non-negative number")
             if dst_value < 0.0:
                 _bad("--tm-dst-min must be >= 0.0")
+    if "target_nits" in overrides:
+        try:
+            target_value = float(overrides["target_nits"])
+        except (TypeError, ValueError):
+            _bad("--tm-target must be a positive finite number")
+        else:
+            if not math.isfinite(target_value):
+                _bad("--tm-target must be a positive finite number")
+            if target_value <= 0.0:
+                _bad("--tm-target must be > 0.0")
     if "post_gamma" in overrides:
         try:
             gamma_value = float(overrides["post_gamma"])

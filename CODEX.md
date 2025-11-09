@@ -61,12 +61,12 @@ pytest -q
 **Gates (pre-merge)**
 1) **Diff plan** → approval → **patch** (no auto-exec).
 2) Before asking to merge, the assistant MUST:
-  - Propose running: `npx pyright --warnings` (or equivalent) and wait for approval.
-  - Report **zero errors** and **<= N warnings** (N defaults to 10; justify any above).
-  - If errors occur, propose minimal diffs to fix them and re-check.
+- Propose running: `npx pyright --warnings` (or equivalent) and wait for approval.
+- Report **zero errors** and **<= N warnings** (N defaults to 10; justify any above).
+- If errors occur, propose minimal diffs to fix them and re-check.
 3) **Suppressions policy**
-  - `# type: ignore[...]` allowed only with a one-line justification above and a follow-up ticket.
-  - Prefer stubs/`TypedDict`/`Protocol` over blanket `Any`.
+- `# type: ignore[...]` allowed only with a one-line justification above and a follow-up ticket.
+- Prefer stubs/`TypedDict`/`Protocol` over blanket `Any`.
 4) **Config is source of truth**: the repo’s `pyrightconfig.json` (or `[tool.pyright]`) governs analysis; do not override via editor-only settings.
 
 **Reviewer checklist (assistant must confirm)**
