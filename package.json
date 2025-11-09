@@ -10,7 +10,7 @@
   "scripts": {
     "lint": ".venv/bin/ruff check",
     "typecheck": ".venv/bin/pyright --warnings",
-    "test": ".venv/bin/pytest -q",
+    "test": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q",
     "prepare": "husky"
   },
   "repository": {
