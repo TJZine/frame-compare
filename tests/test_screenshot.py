@@ -18,6 +18,7 @@ from src.datatypes import (
 )
 from src.screenshot import GeometryPlan, _compute_requires_full_chroma
 
+
 class _CapturedWriterCall(TypedDict):
     crop: tuple[int, int, int, int]
     scaled: tuple[int, int]
