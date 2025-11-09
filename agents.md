@@ -55,6 +55,7 @@ Advisors analyze and propose diffs/checks. All execution follows CODEX.md.
 4) **Proposed diffs** → file-by-file changes + tests (await approval).
 5) **Persist** → append decisions to `docs/DECISIONS.md`; update `CHANGELOG.md`.
 6) **Verify** → run `.venv/bin/pyright --warnings`, `.venv/bin/ruff check`, and `.venv/bin/pytest -q` before fallbacks. If the local binary is missing, install dev deps (`uv sync --all-extras --dev`) and document the fix. Only fall back to `uv run`/`npx` when the local command is unavailable, and record any sandbox/cache issues plus mitigations (for example `UV_CACHE_DIR=./.uv_cache`).
+7) **Commit subject** → finish every task report with a Conventional Commit-style subject line (e.g., `chore: update packaging excludes`). This is what the user pastes into `git commit -m`, so it must include a type and summary per commitlint rules.
 ## Repo Invariants (enforced)
 - Add/adjust tests with code changes; keep contracts and error boundaries explicit
 - Type correctness (no `any` where strict types expected); logging for libs; no `sys.exit` in libs

@@ -21,7 +21,8 @@
 2) **Docs = context7 first** (cite official/best-practice; record date). If unavailable, log fallback.
 3) **Search = ripgrep first** (respect repo ignores). If unavailable, log fallback.
 4) **Verify** = run pyright/ruff/pytest
-5) **Output**: populate PR “Decision Minute” fields before proposing patches
+5) **Output**: populate PR “Decision Minute” fields before proposing patches.
+6) **Commit Title**: every task response must include a Conventional Commit-style subject (for example, `feat: …`, `chore: …`) that can be copied directly into `git commit -m`. State it explicitly before the summary so users running commit hooks don’t have to invent one.
 
 ## Always-Allowed Commands (details)
 Print each command before execution and capture exit code + duration. These checks may read/write their standard caches (`.venv/**`, `.uv_cache/**`, `~/.cache/uv/**`). If a host sandbox blocks `~/.cache/uv`, set `UV_CACHE_DIR=./.uv_cache` (already gitignored) and rerun the command.
