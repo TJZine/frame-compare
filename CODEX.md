@@ -77,7 +77,7 @@ pytest -q
 ## Sandbox & Network
 - Local sandbox: `workspace-write` except for testing; **no network** unless explicitly approved or needed for pyright/ruff. (If Cloud: follow environment defaults.)
 - **Checks exception**: pyright/ruff/pytest (under Test Guardrails) are permitted without extra approval.
-- Print commands before running; never run package scripts or migrations without approval. :contentReference[oaicite:9]{index=9}
+- Print commands before running; never run package scripts or migrations without approval.
 
 
 ## Structure-Change Policy
