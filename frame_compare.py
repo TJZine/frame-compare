@@ -4899,6 +4899,8 @@ def _validate_tonemap_overrides(overrides: MutableMapping[str, Any]) -> None:
         except (TypeError, ValueError):
             _bad("--tm-knee must be a number in [0.0, 1.0]")
         else:
+            if not math.isfinite(knee_value):
+                _bad("--tm-knee must be a number in [0.0, 1.0]")
             if knee_value < 0.0 or knee_value > 1.0:
                 _bad("--tm-knee must be between 0.0 and 1.0")
     if "dst_min_nits" in overrides:
@@ -4907,6 +4909,8 @@ def _validate_tonemap_overrides(overrides: MutableMapping[str, Any]) -> None:
         except (TypeError, ValueError):
             _bad("--tm-dst-min must be a non-negative number")
         else:
+            if not math.isfinite(dst_value):
+                _bad("--tm-dst-min must be a non-negative number")
             if dst_value < 0.0:
                 _bad("--tm-dst-min must be >= 0.0")
     if "post_gamma" in overrides:
@@ -4915,6 +4919,8 @@ def _validate_tonemap_overrides(overrides: MutableMapping[str, Any]) -> None:
         except (TypeError, ValueError):
             _bad("--tm-gamma must be a number between 0.9 and 1.1")
         else:
+            if not math.isfinite(gamma_value):
+                _bad("--tm-gamma must be a number between 0.9 and 1.1")
             if gamma_value < 0.9 or gamma_value > 1.1:
                 _bad("--tm-gamma must be between 0.9 and 1.1")
     if "dpd_preset" in overrides:
@@ -4927,6 +4933,8 @@ def _validate_tonemap_overrides(overrides: MutableMapping[str, Any]) -> None:
         except (TypeError, ValueError):
             _bad("--tm-dpd-black-cutoff must be a number in [0.0, 0.05]")
         else:
+            if not math.isfinite(cutoff):
+                _bad("--tm-dpd-black-cutoff must be a number in [0.0, 0.05]")
             if cutoff < 0.0 or cutoff > 0.05:
                 _bad("--tm-dpd-black-cutoff must be between 0.0 and 0.05")
     if "smoothing_period" in overrides:
@@ -4935,26 +4943,39 @@ def _validate_tonemap_overrides(overrides: MutableMapping[str, Any]) -> None:
         except (TypeError, ValueError):
             _bad("--tm-smoothing must be a non-negative number")
         else:
+            if not math.isfinite(smoothing):
+                _bad("--tm-smoothing must be a non-negative number")
             if smoothing < 0.0:
                 _bad("--tm-smoothing must be >= 0")
+    scene_low_value: float | None = None
     if "scene_threshold_low" in overrides:
         try:
-            low_value = float(overrides["scene_threshold_low"])
+            scene_low_value = float(overrides["scene_threshold_low"])
         except (TypeError, ValueError):
             _bad("--tm-scene-low must be a non-negative number")
         else:
-            if low_value < 0.0:
+            if not math.isfinite(scene_low_value):
+                _bad("--tm-scene-low must be a non-negative number")
+            if scene_low_value < 0.0:
                 _bad("--tm-scene-low must be >= 0")
+    scene_high_value: float | None = None
     if "scene_threshold_high" in overrides:
         try:
-            high_value = float(overrides["scene_threshold_high"])
+            scene_high_value = float(overrides["scene_threshold_high"])
         except (TypeError, ValueError):
             _bad("--tm-scene-high must be a non-negative number")
         else:
-            if high_value < 0.0:
+            if not math.isfinite(scene_high_value):
+                _bad("--tm-scene-high must be a non-negative number")
+            if scene_high_value < 0.0:
                 _bad("--tm-scene-high must be >= 0")
-    if "scene_threshold_low" in overrides and "scene_threshold_high" in overrides:
-        if float(overrides["scene_threshold_high"]) < float(overrides["scene_threshold_low"]):
+    if (
+        "scene_threshold_low" in overrides
+        and "scene_threshold_high" in overrides
+        and scene_low_value is not None
+        and scene_high_value is not None
+    ):
+        if scene_high_value < scene_low_value:
             _bad("--tm-scene-high must be >= --tm-scene-low")
     if "percentile" in overrides:
         try:
@@ -4962,6 +4983,8 @@ def _validate_tonemap_overrides(overrides: MutableMapping[str, Any]) -> None:
         except (TypeError, ValueError):
             _bad("--tm-percentile must be between 0 and 100")
         else:
+            if not math.isfinite(percentile):
+                _bad("--tm-percentile must be between 0 and 100")
             if percentile < 0.0 or percentile > 100.0:
                 _bad("--tm-percentile must be between 0 and 100")
     if "contrast_recovery" in overrides:
@@ -4970,6 +4993,8 @@ def _validate_tonemap_overrides(overrides: MutableMapping[str, Any]) -> None:
         except (TypeError, ValueError):
             _bad("--tm-contrast must be a non-negative number")
         else:
+            if not math.isfinite(contrast):
+                _bad("--tm-contrast must be a non-negative number")
             if contrast < 0.0:
                 _bad("--tm-contrast must be >= 0")
     if "metadata" in overrides:

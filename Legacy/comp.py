@@ -998,9 +998,9 @@ def run_comparison():
             clip = extend_clip(clip, frames)
 
             #get release group or filename of file
-            suffix = files_info[findex].get('suffix')
+            suffix = files_info[findex].get("suffix")
             #remove any characters not suited for filepath
-            suffix = suffix.replace("[\\/:\"*?<>|]+", "").strip()
+            suffix = re.sub(r'[\\/:\"*?<>|]+', "", suffix or "").strip()
 
             if files_info[findex].get("suffix_color") == "yellow":
                 message = f'[yellow]{suffix}'

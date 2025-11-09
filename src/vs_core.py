@@ -1191,7 +1191,7 @@ def _adjust_color_range_from_signal(
     # If already limited and appears consistent, keep as-is but warn when signal contradicts metadata.
     y_min, y_max = _compute_luma_bounds(clip)
     if y_min is None or y_max is None:
-        if range_inferred or (not range_from_override and color_range in (None, full_code)):
+        if (range_inferred or color_range in (None, full_code)) and not range_from_override:
             message = (
                 f"[COLOR] {file_name or 'clip'} lacks colour-range metadata and "
                 "signal sampling is unavailable; defaulting to limited range."
@@ -1204,7 +1204,7 @@ def _adjust_color_range_from_signal(
 
     label = file_name or "clip"
 
-    if range_inferred or color_range in (None, full_code):
+    if (range_inferred or color_range in (None, full_code)) and not range_from_override:
         if 12.0 <= y_min <= 20.0 and y_max <= 245.0:
             message = (
                 f"[COLOR] {label} lacks reliable colour-range metadata; "
@@ -1252,6 +1252,8 @@ def normalise_color_metadata(
     if "range" in overrides:
         color_range = overrides["range"]
     range_from_override = "range" in overrides
+    if range_from_override:
+        props["_ColorRangeOverride"] = 1
     range_inferred = color_range is None and "range" not in overrides
 
     matrix, transfer, primaries, color_range = _guess_default_colourspace(
@@ -1286,6 +1288,8 @@ def normalise_color_metadata(
     if color_range is not None:
         update_props["_ColorRange"] = int(color_range)
         props["_ColorRange"] = int(color_range)
+    if range_from_override:
+        update_props["_ColorRangeOverride"] = 1
 
     clip_with_props = _apply_frame_props_dict(clip, update_props)
     return clip_with_props, props, (matrix, transfer, primaries, color_range)
@@ -2047,6 +2051,7 @@ def process_clip_for_screenshot(
         file_name=file_name,
         warning_sink=warning_sink,
     )
+    range_override_flag = bool(source_props.get("_ColorRangeOverride"))
     debug_artifacts: Optional[ColorDebugArtifacts] = None
     if debug_color:
         debug_artifacts = ColorDebugArtifacts(
@@ -2222,17 +2227,6 @@ def process_clip_for_screenshot(
 
     effective_range: Optional[int] = detected_range
     fallback_source = detection_source
-    if (
-        effective_range is None
-        and color_range_in is not None
-        and color_range_in in (range_full, range_limited)
-    ):
-        try:
-            effective_range = int(color_range_in)
-        except Exception:
-            effective_range = None
-        else:
-            fallback_source = fallback_source or "source_props"
 
     source_range_int: Optional[int] = None
     if color_range_in is not None and color_range_in in (range_full, range_limited):
@@ -2241,13 +2235,31 @@ def process_clip_for_screenshot(
         except Exception:
             source_range_int = None
 
+    if range_override_flag:
+        if source_range_int is not None:
+            effective_range = source_range_int
+        fallback_source = fallback_source or "override"
+    else:
+        if (
+            effective_range is None
+            and color_range_in is not None
+            and color_range_in in (range_full, range_limited)
+        ):
+            try:
+                effective_range = int(color_range_in)
+            except Exception:
+                effective_range = None
+            else:
+                fallback_source = fallback_source or "source_props"
+
     if effective_range is not None:
         range_value = int(effective_range)
         changed_from_source = (
             source_range_int is not None and source_range_int != range_value
         )
         if (
-            changed_from_source
+            not range_override_flag
+            and changed_from_source
             and source_range_int == range_limited
             and range_value == range_full
         ):
@@ -2265,19 +2277,22 @@ def process_clip_for_screenshot(
             prop="_ColorRange",
             intval=range_value,
         )
-        if changed_from_source:
+        if (
+            not range_override_flag
+            and changed_from_source
+            and source_range_int is not None
+        ):
             log.info(
                 "[TM RANGE] %s remapping colour range %s\u2192%s",
                 file_name,
                 color_range_in,
                 effective_range,
             )
-            if source_range_int is not None:
-                tonemapped = _apply_set_frame_prop(
-                    tonemapped,
-                    prop="_SourceColorRange",
-                    intval=source_range_int,
-                )
+            tonemapped = _apply_set_frame_prop(
+                tonemapped,
+                prop="_SourceColorRange",
+                intval=source_range_int,
+            )
 
     tonemap_info = TonemapInfo(
         applied=True,

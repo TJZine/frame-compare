@@ -1,4 +1,3 @@
-import importlib.util
 import logging
 import subprocess
 import sys
@@ -18,14 +17,6 @@ from src.datatypes import (
     ScreenshotConfig,
 )
 from src.screenshot import GeometryPlan, _compute_requires_full_chroma
-
-_vapoursynth_available = importlib.util.find_spec("vapoursynth") is not None
-
-pytestmark = pytest.mark.skipif(  # type: ignore[attr-defined]
-    not _vapoursynth_available,
-    reason="VapourSynth not available – skipping screenshot tests",
-)
-
 
 class _CapturedWriterCall(TypedDict):
     crop: tuple[int, int, int, int]
@@ -306,6 +297,21 @@ def _prepare_fake_vapoursynth_clip(
     monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
 
     return clip, fake_vs, writer_calls, resize_calls, levels_calls
+
+
+@pytest.fixture(autouse=True)
+def _ensure_fake_vapoursynth(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure a lightweight fake VapourSynth module is always importable."""
+
+    _prepare_fake_vapoursynth_clip(
+        monkeypatch,
+        width=16,
+        height=9,
+        subsampling_w=1,
+        subsampling_h=1,
+        bits_per_sample=8,
+    )
+
 
 @pytest.fixture(autouse=True)
 def _stub_process_clip(monkeypatch: pytest.MonkeyPatch) -> None:

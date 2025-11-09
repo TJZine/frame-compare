@@ -2177,7 +2177,9 @@ class CliLayoutRenderer:
             progress_style = "fill"
         columns: List[ProgressColumn]
         if progress_style == "dot":
-            spinner_style = rich_bar_style or self._rich_style_from_token("accent") or "cyan"
+            accent_token = self._lookup_role_token("accent")
+            spinner_accent_style = self._rich_style_from_token(accent_token or None)
+            spinner_style = rich_bar_style or spinner_accent_style or "cyan"
             columns = [
                 SpinnerColumn(style=spinner_style),
                 TextColumn("{task.description}", justify="left"),
