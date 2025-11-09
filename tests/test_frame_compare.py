@@ -47,7 +47,7 @@ from src.frame_compare.cli_runtime import (
     _ClipPlan,
 )
 from src.screenshot import ScreenshotError
-from src.tmdb import TMDBAmbiguityError, TMDBCandidate, TMDBResolution
+from src.tmdb import TMDBAmbiguityError, TMDBCandidate, TMDBResolution, TMDBResolutionError
 
 
 @pytest.fixture
@@ -2362,6 +2362,16 @@ def test_runner_auto_upload_cleans_screens_dir(tmp_path: Path, monkeypatch: pyte
     cfg.slowpics.delete_screen_dir_after_upload = True
     cfg.slowpics.open_in_browser = False
     cfg.slowpics.create_url_shortcut = False
+    monkeypatch.setattr(
+        core_module,
+        "resolve_tmdb_workflow",
+        lambda **_: core_module.TMDBLookupResult(
+            resolution=None,
+            manual_override=None,
+            error_message=None,
+            ambiguous=False,
+        ),
+    )
 
     preflight = _make_runner_preflight(workspace, media_root, cfg)
     _patch_core_helper(monkeypatch, "_prepare_preflight", lambda **_: preflight)
@@ -2551,6 +2561,51 @@ def test_runner_reporter_factory_overrides_default(
         runner_module.run(request)
 
     assert len(factory_calls) == 1
+
+
+def test_runner_uses_explicit_reporter_instance(
+    monkeypatch: pytest.MonkeyPatch, cli_runner_env: _CliRunnerEnv
+) -> None:
+    """RunRequest.reporter shortcuts the default reporter construction."""
+
+    cli_runner_env.reinstall()
+    sentinel = RuntimeError("stop")
+
+    def _raise_stop(*_: object) -> list[Path]:
+        raise sentinel
+
+    _patch_core_helper(monkeypatch, "_discover_media", _raise_stop)
+
+    created: list[str] = []
+
+    class _FailingReporter(CliOutputManager):
+        def __init__(self, *args: object, **kwargs: object) -> None:  # pragma: no cover - should not run
+            created.append("default")
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(runner_module, "CliOutputManager", _FailingReporter)
+    monkeypatch.setattr(frame_compare, "CliOutputManager", _FailingReporter)
+    monkeypatch.setattr(runner_module, "NullCliOutputManager", _FailingReporter)
+    monkeypatch.setattr(frame_compare, "NullCliOutputManager", _FailingReporter)
+
+    layout_path = Path(frame_compare.__file__).with_name("cli_layout.v1.json")
+    custom_reporter = CliOutputManager(
+        quiet=False,
+        verbose=False,
+        no_color=False,
+        layout_path=layout_path,
+        console=Console(width=80, record=True),
+    )
+
+    request = runner_module.RunRequest(
+        config_path=str(cli_runner_env.config_path),
+        reporter=custom_reporter,
+    )
+
+    with pytest.raises(RuntimeError, match="stop"):
+        runner_module.run(request)
+
+    assert created == []
 
 
 def test_runner_audio_alignment_summary_passthrough(
@@ -2777,11 +2832,17 @@ def test_runner_handles_existing_event_loop(tmp_path: Path, monkeypatch: pytest.
     monkeypatch.setattr(runner_module, "generate_screenshots", fake_generate)
 
     tmdb_calls: list[dict[str, object]] = []
-    monkeypatch.setattr(
-        runner_module,
-        "_resolve_tmdb_blocking",
-        lambda **kwargs: tmdb_calls.append(kwargs) or None,
-    )
+
+    def fake_tmdb_workflow(**kwargs: object) -> core_module.TMDBLookupResult:
+        tmdb_calls.append(kwargs)
+        return core_module.TMDBLookupResult(
+            resolution=None,
+            manual_override=None,
+            error_message=None,
+            ambiguous=False,
+        )
+
+    monkeypatch.setattr(core_module, "resolve_tmdb_workflow", fake_tmdb_workflow)
 
     request = runner_module.RunRequest(
         config_path=str(preflight.config_path),
@@ -3411,6 +3472,129 @@ def test_cli_tmdb_confirmation_rejects(
 
     assert result.config.slowpics.tmdb_id == ""
     assert result.config.slowpics.tmdb_category == ""
+
+
+def test_resolve_tmdb_workflow_unattended_ambiguous(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = TMDBConfig(api_key="token")
+    cfg.unattended = True
+    files = [tmp_path / "SourceA.mkv", tmp_path / "SourceB.mkv"]
+    for file in files:
+        file.write_text("x", encoding="utf-8")
+
+    candidate = TMDBCandidate(
+        category="MOVIE",
+        tmdb_id="1",
+        title="Example",
+        original_title=None,
+        year=2023,
+        score=0.9,
+        original_language="en",
+        reason="search",
+        used_filename_search=True,
+        payload={},
+    )
+
+    monkeypatch.setattr(
+        core_module,
+        "_resolve_tmdb_blocking",
+        lambda **_: (_ for _ in ()).throw(TMDBAmbiguityError([candidate])),
+    )
+    prompted = False
+
+    def _fail_prompt(_: Sequence[TMDBCandidate]) -> tuple[str, str] | None:  # pragma: no cover - should not run
+        nonlocal prompted
+        prompted = True
+        return None
+
+    monkeypatch.setattr(core_module, "_prompt_manual_tmdb", _fail_prompt)
+
+    result = core_module.resolve_tmdb_workflow(
+        files=files,
+        metadata=[{"label": "Example"}],
+        tmdb_cfg=cfg,
+    )
+
+    assert result.manual_override is None
+    assert result.ambiguous is True
+    assert result.error_message is not None
+    assert prompted is False
+
+
+def test_resolve_tmdb_workflow_manual_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = TMDBConfig(api_key="token")
+    cfg.unattended = False
+    files = [Path("SourceA.mkv"), Path("SourceB.mkv")]
+
+    candidate = TMDBCandidate(
+        category="MOVIE",
+        tmdb_id="1",
+        title="Example",
+        original_title=None,
+        year=2023,
+        score=0.9,
+        original_language="en",
+        reason="search",
+        used_filename_search=True,
+        payload={},
+    )
+
+    monkeypatch.setattr(
+        core_module,
+        "_resolve_tmdb_blocking",
+        lambda **_: (_ for _ in ()).throw(TMDBAmbiguityError([candidate])),
+    )
+    manual_return = ("TV", "999")
+    monkeypatch.setattr(core_module, "_prompt_manual_tmdb", lambda _: manual_return)
+
+    result = core_module.resolve_tmdb_workflow(
+        files=files,
+        metadata=[{"label": "Example"}],
+        tmdb_cfg=cfg,
+    )
+
+    assert result.manual_override == manual_return
+    assert result.resolution is None
+
+
+def test_resolve_tmdb_blocking_retries_transient_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = {"count": 0}
+
+    async def fake_resolve(*_: object, **__: object) -> TMDBResolution:
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise TMDBResolutionError("TMDB request failed after retries: boom")
+        candidate = TMDBCandidate(
+            category="MOVIE",
+            tmdb_id="42",
+            title="Recovered",
+            original_title=None,
+            year=2024,
+            score=0.99,
+            original_language="en",
+            reason="search",
+            used_filename_search=True,
+            payload={},
+        )
+        return TMDBResolution(candidate=candidate, margin=1.0, source_query="Recovered")
+
+    monkeypatch.setattr(core_module, "resolve_tmdb", fake_resolve)
+    monkeypatch.setattr(core_module.time, "sleep", lambda _seconds: None)
+
+    cfg = TMDBConfig(api_key="token")
+    result = core_module._resolve_tmdb_blocking(
+        file_name="Example.mkv",
+        tmdb_cfg=cfg,
+        year_hint=None,
+        imdb_id=None,
+        tvdb_id=None,
+    )
+
+    assert isinstance(result, TMDBResolution)
+    assert attempts["count"] == 2
 
 
 

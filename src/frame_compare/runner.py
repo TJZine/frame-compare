@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import importlib
 import logging
 import math
@@ -38,15 +37,10 @@ from src.analysis import (
     selection_hash_for_config,
     write_selection_cache_file,
 )
-from src.datatypes import AppConfig, TMDBConfig
+from src.datatypes import AppConfig
 from src.screenshot import ScreenshotError, generate_screenshots
 from src.slowpics import SlowpicsAPIError, build_shortcut_filename, upload_comparison
-from src.tmdb import (
-    TMDBAmbiguityError,
-    TMDBResolution,
-    TMDBResolutionError,
-    resolve_tmdb,
-)
+from src.tmdb import TMDBResolution
 from src.vs_core import ClipInitError, ClipProcessError
 
 from .cli_runtime import (
@@ -111,49 +105,6 @@ class RunRequest:
 
 
 logger = logging.getLogger('frame_compare')
-
-
-def _resolve_tmdb_blocking(
-    *,
-    file_name: str,
-    tmdb_cfg: TMDBConfig,
-    year_hint: Optional[int],
-    imdb_id: Optional[str],
-    tvdb_id: Optional[str],
-) -> TMDBResolution | None:
-    """Resolve TMDB metadata even when the caller already owns an event loop."""
-
-    def _make_coro():
-        return resolve_tmdb(
-            file_name,
-            config=tmdb_cfg,
-            year=year_hint,
-            imdb_id=imdb_id,
-            tvdb_id=tvdb_id,
-            unattended=tmdb_cfg.unattended,
-            category_preference=tmdb_cfg.category_preference,
-        )
-
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(_make_coro())
-
-    result_holder: list[TMDBResolution | None] = []
-    error_holder: list[BaseException] = []
-
-    def _worker() -> None:
-        try:
-            result_holder.append(asyncio.run(_make_coro()))
-        except BaseException as exc:  # pragma: no cover - bubbled up when joined
-            error_holder.append(exc)
-
-    thread = threading.Thread(target=_worker, daemon=True)
-    thread.start()
-    thread.join()
-    if error_holder:
-        raise error_holder[0]
-    return result_holder[0] if result_holder else None
 
 
 def run(request: RunRequest) -> RunResult:
@@ -555,47 +506,30 @@ def run(request: RunRequest) -> RunResult:
     slowpics_verbose_tmdb_tag: Optional[str] = None
 
     if tmdb_api_key_present:
-        base_file = files[0]
-        imdb_hint = core._first_non_empty(metadata, "imdb_id").lower()
-        tvdb_hint = core._first_non_empty(metadata, "tvdb_id")
-        year_hint = core._parse_year_hint(year_hint_raw)
-        try:
-            tmdb_resolution = _resolve_tmdb_blocking(
-                file_name=base_file.name,
-                tmdb_cfg=cfg.tmdb,
-                year_hint=year_hint,
-                imdb_id=imdb_hint or None,
-                tvdb_id=tvdb_hint or None,
-            )
-        except TMDBAmbiguityError as exc:
-            tmdb_ambiguous = True
-            manual_tmdb = core._prompt_manual_tmdb(exc.candidates)
-        except TMDBResolutionError as exc:
-            logger.warning("TMDB lookup failed for %s: %s", base_file.name, exc)
-            tmdb_error_message = str(exc)
-        else:
-            if tmdb_resolution is not None:
-                if cfg.tmdb.confirm_matches and not cfg.tmdb.unattended:
-                    accepted, override = core._prompt_tmdb_confirmation(tmdb_resolution)
-                    if override:
-                        manual_tmdb = override
-                        tmdb_resolution = None
-                    elif not accepted:
-                        tmdb_resolution = None
-                    else:
-                        tmdb_category = tmdb_resolution.category
-                        tmdb_id_value = tmdb_resolution.tmdb_id
-                        tmdb_language = tmdb_resolution.original_language
-                else:
-                    tmdb_category = tmdb_resolution.category
-                    tmdb_id_value = tmdb_resolution.tmdb_id
-                    tmdb_language = tmdb_resolution.original_language
+        lookup = core.resolve_tmdb_workflow(
+            files=files,
+            metadata=metadata,
+            tmdb_cfg=cfg.tmdb,
+            year_hint_raw=year_hint_raw,
+        )
+        tmdb_resolution = lookup.resolution
+        manual_tmdb = lookup.manual_override
+        tmdb_error_message = lookup.error_message
+        tmdb_ambiguous = lookup.ambiguous
+
+    if tmdb_resolution is not None:
+        tmdb_category = tmdb_resolution.category
+        tmdb_id_value = tmdb_resolution.tmdb_id
+        tmdb_language = tmdb_resolution.original_language
 
     if manual_tmdb:
         tmdb_category, tmdb_id_value = manual_tmdb
         tmdb_language = None
         tmdb_resolution = None
         logger.info("TMDB manual override selected: %s/%s", tmdb_category, tmdb_id_value)
+
+    if tmdb_error_message and tmdb_api_key_present:
+        logger.warning("TMDB lookup failed for %s: %s", files[0].name, tmdb_error_message)
 
     tmdb_context: Dict[str, str] = {
         "Title": metadata_title or ((metadata[0].get("label") or "") if metadata else ""),

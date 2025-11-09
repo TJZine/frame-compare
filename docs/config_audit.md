@@ -173,7 +173,7 @@ Central log for the end-to-end configuration review requested on 2025‑11‑18.
 
 ## `[tmdb]` (reviewed 2025‑11‑19)
 
-**Feature surface.** `TMDBConfig` (`src/datatypes.py:165-177`) defines API key, unattended/confirmation flags, year tolerance, anime parsing toggle, cache TTL/size, and category preference. Loader guards enforce non-negative values and normalise `category_preference` to `MOVIE`/`TV` (`src/config_loader.py:441-451`). Wizard prompts let operators set a TMDB identifier for slow.pics but do not yet collect API keys (`src/frame_compare/core.py:771-778`). Runtime behaviour spans `_resolve_tmdb_blocking` (`src/frame_compare/runner.py:111-151`), the async resolver (`src/tmdb.py:200-1100`), and CLI prompts (`src/frame_compare/core.py:1424-1456`). Runner integrates TMDB metadata into layout data, JSON tail, slow.pics naming, and warnings (`src/frame_compare/runner.py:540-777`). Tests cover resolver caching/errors (`tests/test_tmdb.py`), config validation (`tests/test_config.py`), and CLI flows (manual overrides, slow.pics propagation) in `tests/test_frame_compare.py:2718-3352`.
+**Feature surface.** `TMDBConfig` (`src/datatypes.py:165-177`) defines API key, unattended/confirmation flags, year tolerance, anime parsing toggle, cache TTL/size, and category preference. Loader guards enforce non-negative values and normalise `category_preference` to `MOVIE`/`TV` (`src/config_loader.py:441-451`). Wizard prompts let operators set a TMDB identifier for slow.pics but do not yet collect API keys (`src/frame_compare/core.py:771-778`). Runtime behaviour now flows through `core.resolve_tmdb_workflow` (shared by CLI + runner) which calls `_resolve_tmdb_blocking` inside `src/frame_compare/core.py` for HTTPX-backed retries, then surfaces prompts via `_prompt_manual_tmdb` / `_prompt_tmdb_confirmation`. The async resolver lives in `src/tmdb.py:200-1100`, and runner integration (`src/frame_compare/runner.py:540-777`) pipes TMDB data into layout data, JSON tails, and slow.pics naming. Tests cover resolver caching/errors (`tests/test_tmdb.py`), config validation (`tests/test_config.py`), and CLI flows (manual overrides, slow.pics propagation) in `tests/test_frame_compare.py:2718-3352`.
 
 **Health check.**
 - Resolver enforces API key presence, caches HTTP responses with bounded TTL, supports IMDb/TVDB external IDs, handles anime title variants via GuessIt/Anitopy (configurable), and raises `TMDBAmbiguityError` when multiple candidates tie within `_AMBIGUITY_MARGIN`.
@@ -183,15 +183,13 @@ Central log for the end-to-end configuration review requested on 2025‑11‑18.
 
 **Opportunities.**
 1. **Wizard discoverability:** The initial wizard never asks for `[tmdb].api_key`, so users must edit the config manually to unlock TMDB lookups. Add prompts (or doctor guidance) to surface the requirement earlier.
-2. **Secrets handling:** API keys currently live in plain text within the user config (and earlier samples accidentally shipped real values). Document environment-variable support (or add it if missing) so keys stay out of version control.
-3. **Rate limiting & retries:** Resolver uses a simple timeout and relies on `_http_request` for retries, but there’s no per-minute rate-limit guard or backoff when hitting TMDB quotas. Consider tracking 429 responses and backing off or surfacing better guidance.
-4. **Anime parsing control:** `[tmdb].enable_anime_parsing` toggles Anitopy usage, but docs only mention it briefly. Expand README/reference coverage with pros/cons (e.g., potential mismatches when both GuessIt and Anitopy disagree) so users know when to disable it.
-5. **Category preference UX:** `category_preference` accepts MOVIE/TV but provides no CLI flag or wizard hook. Consider exposing a CLI flag (`--tmdb-category`) or warning when lookups repeatedly fall back to the non-preferred category.
+2. **Rate limiting & retries:** ✅ Phase 5 updated `_resolve_tmdb_blocking` to wrap `httpx.HTTPTransport(retries=...)` with exponential backoff plus shared workflow logging; future work could still monitor sustained 429 responses for friendlier guidance.
+3. **Anime parsing control:** `[tmdb].enable_anime_parsing` toggles Anitopy usage, but docs only mention it briefly. Expand README/reference coverage with pros/cons (e.g., potential mismatches when both GuessIt and Anitopy disagree) so users know when to disable it.
+4. **Category preference UX:** `category_preference` accepts MOVIE/TV but provides no CLI flag or wizard hook. Consider exposing a CLI flag (`--tmdb-category`) or warning when lookups repeatedly fall back to the non-preferred category.
 
 **Risks / follow-ups.**
 - Add wizard/doctor messaging about supplying TMDB keys via env vars to avoid storing secrets in config files.
 - Improve documentation around anime parsing, category preference, and manual override flow (`docs/audio_alignment_pipeline.md`/README currently only hint at TMDB usage).
-- Evaluate rate limiting/backoff strategy to handle TMDB quota errors more gracefully.
 - Ensure future features reading TMDB metadata (e.g., HTML report, JSON tail consumers) are aware of optional fields (language/year) when matches fail.
 
 ---

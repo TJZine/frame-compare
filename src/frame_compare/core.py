@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import datetime as _dt
 import difflib
@@ -17,13 +18,14 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import time
 import tomllib
 import uuid
 from collections import Counter, defaultdict
 from collections.abc import Mapping as MappingABC
 from contextlib import nullcontext
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from string import Template
 from typing import (
@@ -39,6 +41,7 @@ from typing import (
     MutableMapping,
     NoReturn,
     Optional,
+    Protocol,
     Sequence,
     Tuple,
     TypedDict,
@@ -46,6 +49,7 @@ from typing import (
 )
 
 import click
+import httpx
 from rich import print
 from rich.console import Console  # noqa: F401
 from rich.markup import escape
@@ -54,10 +58,21 @@ from rich.text import Text
 
 from src import audio_alignment
 from src.config_loader import load_config as _load_config
-from src.datatypes import AnalysisConfig, AppConfig, ColorConfig, NamingConfig, RuntimeConfig
+from src.datatypes import (
+    AnalysisConfig,
+    AppConfig,
+    ColorConfig,
+    NamingConfig,
+    RuntimeConfig,
+    TMDBConfig,
+)
 
 if TYPE_CHECKING:
     from src.audio_alignment import AlignmentMeasurement, AudioStreamInfo
+
+    class _AsyncHTTPTransport(Protocol):
+        def __init__(self, retries: int = ...) -> None: ...
+        def close(self) -> None: ...
 import src.frame_compare.alignment_preview as _alignment_preview_module
 import src.frame_compare.preflight as _preflight_constants
 import src.screenshot as _screenshot_module
@@ -848,7 +863,7 @@ def _parse_audio_track_overrides(entries: Iterable[str]) -> Dict[str, int]:
     return mapping
 
 
-def _first_non_empty(metadata: Sequence[Dict[str, str]], key: str) -> str:
+def _first_non_empty(metadata: Sequence[Mapping[str, str]], key: str) -> str:
     """Return the first truthy value for *key* within *metadata*."""
     for meta in metadata:
         value = meta.get(key)
@@ -866,6 +881,165 @@ def _parse_year_hint(value: str) -> Optional[int]:
     if 1900 <= year <= 2100:
         return year
     return None
+
+
+@dataclass
+class TMDBLookupResult:
+    """Outcome of the TMDB workflow (resolution, manual overrides, or failure)."""
+
+    resolution: TMDBResolution | None
+    manual_override: tuple[str, str] | None
+    error_message: Optional[str]
+    ambiguous: bool
+
+
+def _should_retry_tmdb_error(message: str) -> bool:
+    """Return True when *message* indicates a transient TMDB/HTTP failure."""
+
+    lowered = message.lower()
+    transient_markers = (
+        "request failed",
+        "timeout",
+        "temporarily",
+        "connection",
+        "503",
+        "502",
+        "504",
+        "429",
+    )
+    return any(marker in lowered for marker in transient_markers)
+
+
+def _resolve_tmdb_blocking(
+    *,
+    file_name: str,
+    tmdb_cfg: TMDBConfig,
+    year_hint: Optional[int],
+    imdb_id: Optional[str],
+    tvdb_id: Optional[str],
+    attempts: int = 3,
+    transport_retries: int = 2,
+) -> TMDBResolution | None:
+    """Resolve TMDB metadata even when the caller already owns an event loop."""
+
+    max_attempts = max(1, attempts)
+    backoff = 0.75
+    for attempt in range(max_attempts):
+        transport_cls = getattr(httpx, "AsyncHTTPTransport", None)
+        if transport_cls is None:
+            raise RuntimeError("httpx.AsyncHTTPTransport is unavailable in this environment")
+        transport = transport_cls(retries=max(0, transport_retries))
+
+        async def _make_coro():
+            return await resolve_tmdb(
+                file_name,
+                config=tmdb_cfg,
+                year=year_hint,
+                imdb_id=imdb_id,
+                tvdb_id=tvdb_id,
+                unattended=tmdb_cfg.unattended,
+                category_preference=tmdb_cfg.category_preference,
+                http_transport=transport,
+            )
+
+        try:
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                return asyncio.run(_make_coro())
+
+            result_holder: list[TMDBResolution | None] = []
+            error_holder: list[BaseException] = []
+
+            def _worker() -> None:
+                try:
+                    result_holder.append(asyncio.run(_make_coro()))
+                except BaseException as exc:  # pragma: no cover - bubbled up when joined
+                    error_holder.append(exc)
+
+            thread = threading.Thread(target=_worker, daemon=True)
+            thread.start()
+            thread.join()
+            if error_holder:
+                raise error_holder[0]
+            return result_holder[0] if result_holder else None
+        except TMDBResolutionError as exc:
+            message = str(exc)
+            if attempt + 1 >= max_attempts or not _should_retry_tmdb_error(message):
+                raise
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 4.0)
+        finally:
+            close_fn = getattr(transport, "close", None)
+            if callable(close_fn):
+                close_fn()
+    return None
+
+
+def resolve_tmdb_workflow(
+    *,
+    files: Sequence[Path],
+    metadata: Sequence[Mapping[str, str]],
+    tmdb_cfg: TMDBConfig,
+    year_hint_raw: Optional[str] = None,
+) -> TMDBLookupResult:
+    """
+    Resolve TMDB metadata for the current comparison set, prompting when needed.
+    """
+
+    if not files or not tmdb_cfg.api_key.strip():
+        return TMDBLookupResult(
+            resolution=None,
+            manual_override=None,
+            error_message=None,
+            ambiguous=False,
+        )
+
+    base_file = files[0]
+    imdb_hint_raw = _first_non_empty(metadata, "imdb_id")
+    imdb_hint = imdb_hint_raw.lower() if imdb_hint_raw else None
+    tvdb_hint = _first_non_empty(metadata, "tvdb_id") or None
+    effective_year_hint = year_hint_raw or _first_non_empty(metadata, "year")
+    year_hint = _parse_year_hint(effective_year_hint)
+
+    resolution: TMDBResolution | None = None
+    manual_tmdb: tuple[str, str] | None = None
+    error_message: Optional[str] = None
+    ambiguous = False
+
+    try:
+        resolution = _resolve_tmdb_blocking(
+            file_name=base_file.name,
+            tmdb_cfg=tmdb_cfg,
+            year_hint=year_hint,
+            imdb_id=imdb_hint,
+            tvdb_id=tvdb_hint,
+        )
+    except TMDBAmbiguityError as exc:
+        ambiguous = True
+        if tmdb_cfg.unattended:
+            error_message = (
+                "TMDB returned multiple matches but unattended mode prevented prompts."
+            )
+        else:
+            manual_tmdb = _prompt_manual_tmdb(exc.candidates)
+    except TMDBResolutionError as exc:
+        error_message = str(exc)
+    else:
+        if resolution is not None and tmdb_cfg.confirm_matches and not tmdb_cfg.unattended:
+            accepted, override = _prompt_tmdb_confirmation(resolution)
+            if override:
+                manual_tmdb = override
+                resolution = None
+            elif not accepted:
+                resolution = None
+
+    return TMDBLookupResult(
+        resolution=resolution,
+        manual_override=manual_tmdb,
+        error_message=error_message,
+        ambiguous=ambiguous,
+    )
 
 
 def _prompt_manual_tmdb(candidates: Sequence[TMDBCandidate]) -> tuple[str, str] | None:

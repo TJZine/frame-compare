@@ -152,6 +152,8 @@ Preset highlights:
 | `[tmdb].cache_ttl_seconds` | TMDB cache lifetime (seconds). | int | `86400` |
 <!-- markdownlint-restore -->
 
+TMDB lookups reuse the same workflow for CLI and automation: `_resolve_tmdb_blocking` now retries transient HTTP failures via `httpx.HTTPTransport(retries=...)`, `resolve_tmdb_workflow` prompts once per run, and `[tmdb].unattended=true` suppresses ambiguity prompts while logging a warning instead of blocking the process. Manual identifiers entered during the prompt (movie/##### or tv/#####) propagate into slow.pics metadata, layout data, and JSON tails.
+
 **Shortcut naming:** uploaded runs create a `.url` file using the resolved collection name (sanitised via `build_shortcut_filename` in `src/slowpics.py:148-164`).  
 If the name collapses to an empty string, the CLI falls back to the canonical comparison key; otherwise repeated runs with the same collection name will refresh the same shortcut file—append a suffix in `[slowpics].collection_name` if you need per-run artifacts.
 

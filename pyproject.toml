@@ -20,6 +20,8 @@ dependencies = [
     "librosa",
     "soundfile",
     "tqdm",
+    "vapoursynth>=72",
+    "pyright>=1.1.407",
 ]
 
 [project.optional-dependencies]
