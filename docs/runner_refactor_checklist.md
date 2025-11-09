@@ -81,7 +81,7 @@ Goal: document the new API, run tooling, and start the residual risk log.
 
 ### Residual Risk Log (Phase 2.3)
 
-1. **CLI helper migration** — `_IMPL_ATTRS` still depends on `_build_cache_info`, `_build_plans`, `_prepare_preflight`, `_discover_media`, `_confirm_alignment_with_screenshots`, and related helpers under `frame_compare.py`. Relocate or wrap them before Phase 3 finalizes the runner contract.
+1. **CLI helper migration (Phase 4 kickoff)** — `_IMPL_ATTRS` still depends on `_build_cache_info`, `_build_plans`, `_prepare_preflight`, `_discover_media`, `_confirm_alignment_with_screenshots`, and related helpers under `frame_compare.py`. Relocate or wrap them during Phase 4 to finish slimming the CLI and lock the public runner API. *(Completed by Phase 4.1: helper logic now lives in `src/frame_compare/core.py` and runner imports it directly.)*
 
 ---
 
@@ -93,10 +93,10 @@ Phase 3 also splits into two sub-phases: final QA/doc polish and quality gates
 
 | Checklist Item | Status | Notes / Next Steps |
 | --- | --- | --- |
-| 1. Workspace prep | ⛔ | Capture `git status -sb`; confirm only expected files staged. |
-| 2–6. Architecture / Shim / Type Safety / Dead Code / Behavior | ⛔ | Walk through each checklist item, recording verification notes. |
-| 7. Documentation | ⛔ | Final README/DECISIONS review + add CHANGELOG entry summarizing runner work. |
-| 8. Tests | ⛔ | Final `.venv/bin/pytest` run; note command + duration. |
+| 1. Workspace prep | ✅ | 2025-11-09 — `git status -sb` shows `## Develop...origin/Develop` plus the expected runner/doc edits only. |
+| 2–6. Architecture / Shim / Type Safety / Dead Code / Behavior | 🚧 | Shim + behavior verified: `frame_compare.run_cli` (`frame_compare.py:4415-4444`) delegates cleanly and `tests/test_frame_compare.py:52-138` guard the boundary; type safety confirmed via `npx pyright --warnings` (2025-11-09, zero findings). Architecture/dead-code still pending because `_IMPL_ATTRS` in `src/frame_compare/runner.py:98-168` imports `_build_cache_info`/`_prepare_preflight`/`_discover_media` from `frame_compare.py:1954-2740`. *(Resolved by Phase 4.1, see table below.)* |
+| 7. Documentation | ✅ | README programmatic usage (`README.md:169-192`) and `docs/DECISIONS.md` now capture the Phase 3.1 review; this checklist updated with the latest audit results. |
+| 8. Tests | ✅ | `.venv/bin/pytest` (2025-11-09) → 246 passed in 2.42 s; recorded as the Phase 3.1 verification run. |
 
 **Exit criteria 3.1:** Checklist items 1–8 signed off with notes; CHANGELOG updated.
 
@@ -104,11 +104,55 @@ Phase 3 also splits into two sub-phases: final QA/doc polish and quality gates
 
 | Checklist Item | Status | Notes / Next Steps |
 | --- | --- | --- |
-| 9. Quality Gates | ⛔ | Final pyright/ruff/pytest runs (if not already captured), attach outputs. |
-| 10. Residual Risk Log | ⛔ | Complete risk log + Phase 4/backlog pointers. |
-| Final Summary & Phase 4 Preview | ⛔ | Draft final Codex summary and handoff plan for wizard refactors or other future objectives. |
+| 9. Quality Gates | ✅ | 2025-11-09 — `npx pyright --warnings` (0 issues), `.venv/bin/ruff check` (clean), `.venv/bin/pytest` (246 passed in 2.36 s). |
+| 10. Residual Risk Log | ✅ | Residual risk section below now scoped to the CLI-helper migration that anchors Phase 4. |
+| Final Summary & Phase 4 Preview | ✅ | Phase 3 closes with docs + tooling captured; Phase 4 starts with extracting the remaining helpers from `_IMPL_ATTRS` and tightening the runner contract (see residual risk + `docs/DECISIONS.md`). |
 
 **Exit criteria 3.2:** All ten checklist sections ✅, risk log finalized, Phase 4 objectives documented.
+
+---
+
+## Phase 4 – Runner Hardening & Release (Upcoming)
+
+With the CLI shim stable and tooling in place, Phase 4 focuses on finishing the helper migration, revalidating parity with the legacy CLI behavior, and locking the public runner API for downstream automation.
+
+### Phase 4.1 – Helper Extraction & Surface Cleanup
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| 1. Workspace prep | ✅ | Captured `git status -sb` before splitting helpers into `src/frame_compare/core.py`; tree was clean aside from generated artifacts. |
+| 2. Architecture & Imports | ✅ | Extracted all helper logic into `src/frame_compare/core.py` and pointed `runner.py` at that module directly, eliminating `_IMPL_ATTRS` entirely. |
+| 3. CLI Shim | ✅ | `frame_compare.py` now re-exports helpers from `core.py` and only owns Click wiring + `run_cli`, keeping the shim thin. |
+| 5. Dead Code Sweep | ✅ | Removed dynamic attribute plumbing and unused helper duplicates; CLI references now bind to the shared core module. |
+| 8. Tests | ✅ | Updated the runner integration test to assert `_IMPL_ATTRS` is gone and exercised the existing CLI delegation test to keep the boundary intact. |
+
+**Exit criteria 4.1:** `_IMPL_ATTRS` minimized/eliminated, helpers relocated, and unit tests updated accordingly.
+
+### Phase 4.2 – Regression Parity & Documentation
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| 4. Type Safety | ✅ | `npx pyright --warnings` re-run on 2025-11-12 after CLI import fixes (0 errors; 9 expected warnings isolated to pytest helpers) to keep the helper extraction compliant. |
+| 6. Behavioral Parity | ✅ | Re-ran the wizard/doctor CLI suite (`pytest tests/test_cli_doctor.py tests/test_cli_wizard.py`) to confirm presets + auto-wizard flow remain intact alongside the new runner-focused parity tests. |
+| 7. Documentation | ✅ | README programmatic section, `docs/DECISIONS.md`, and `CHANGELOG.md` now record the runner API stability plus the Phase 4.2 verification work. |
+| 8. Tests | ✅ | Added runner-oriented tests (`tests/test_frame_compare.py`) that assert slow.pics cleanup and audio-alignment reuse run correctly through `runner.run`, complementing the existing CLI delegation checks. |
+| Harness Adoption (2025-11-13) | ✅ | Added the `_CliRunnerEnv` fixture + `_patch_*` helpers, migrated CLI-heavy tests in `tests/test_frame_compare.py`/`tests/test_paths_preflight.py` to the new harness, and ran `.venv/bin/pytest tests/test_frame_compare.py tests/test_paths_preflight.py` followed by the full test suite (247 passed, 1 skipped). `npx pyright --warnings` remains blocked offline (npm ENOTFOUND). |
+
+**Exit criteria 4.2:** Docs/tests describe and cover the new helper layout, and behavior matches the original CLI experience.
+
+- *2025-11-18 update:* Removed the blanket `globals().update`/`__getattr__` bridge from `frame_compare.py`, enumerated the remaining compatibility aliases, and added `typings/frame_compare/__init__.pyi` so Pyright enforces the curated shim surface. CLI/tests now import helpers from `src.frame_compare.core`/`cli_runtime` directly.
+- *2025-11-18 update:* Added an injection point for automation callers by extending `RunRequest` with `reporter_factory`/`reporter` overrides, introducing `NullCliOutputManager` for `quiet=True`, and documenting the knobs in README. New runner tests assert that quiet runs suppress console output and that custom factories bypass the default CliOutputManager.
+
+### Phase 4.3 – Release QA & Handoff
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| 1. Workspace prep | ✅ | 2025-11-17 — captured `git status -sb` before final QA; only runner-refactor files staged. |
+| 9. Quality Gates | 🚧 | `.venv/bin/ruff check` (clean) and `.venv/bin/pytest` (247 passed, 1 skipped) ran on 2025-11-17. `npx pyright --warnings` still blocked offline (`npm ENOTFOUND registry.npmjs.org`); documented in DECISIONS. |
+| 10. Residual Risk Log | ✅ | Logged the outstanding Pyright-network limitation plus TMDB async edge cases; queued follow-ups for Phase 5. |
+| Final Summary & Phase 5 Preview | ✅ | Added 2025-11-17 DECISIONS entry with QA summary, verification status, and the next-phase focus areas. |
+
+**Exit criteria 4.3:** Helper migration signed off, documentation/tests updated, quality gates green, and handoff notes prepared for future phases.
 
 ---
 

@@ -28,7 +28,7 @@ from typing import (
 )
 
 from . import vs_core
-from .datatypes import AnalysisConfig, ColorConfig
+from .datatypes import AnalysisConfig, AnalysisThresholdMode, AnalysisThresholds, ColorConfig
 
 logger = logging.getLogger(__name__)
 
@@ -390,6 +390,22 @@ def _quantile(sequence: Sequence[float], q: float) -> float:
     return sorted_vals[lower_index] * (1 - fraction) + sorted_vals[upper_index] * fraction
 
 
+def _threshold_snapshot(thresholds: AnalysisThresholds) -> Dict[str, float | str]:
+    """Return a JSON-serialisable view of the threshold configuration."""
+
+    mode_value = getattr(thresholds.mode, "value", thresholds.mode)
+    snapshot: Dict[str, float | str] = {
+        "mode": str(mode_value),
+        "dark_quantile": float(thresholds.dark_quantile),
+        "bright_quantile": float(thresholds.bright_quantile),
+        "dark_luma_min": float(thresholds.dark_luma_min),
+        "dark_luma_max": float(thresholds.dark_luma_max),
+        "bright_luma_min": float(thresholds.bright_luma_min),
+        "bright_luma_max": float(thresholds.bright_luma_max),
+    }
+    return snapshot
+
+
 def _config_fingerprint(cfg: AnalysisConfig) -> str:
     """Return a stable hash for config fields that influence metrics generation."""
 
@@ -400,19 +416,15 @@ def _config_fingerprint(cfg: AnalysisConfig) -> str:
         "downscale_height": cfg.downscale_height,
         "step": cfg.step,
         "analyze_in_sdr": cfg.analyze_in_sdr,
-        "use_quantiles": cfg.use_quantiles,
-        "dark_quantile": cfg.dark_quantile,
-        "bright_quantile": cfg.bright_quantile,
         "motion_use_absdiff": cfg.motion_use_absdiff,
         "motion_scenecut_quantile": cfg.motion_scenecut_quantile,
         "screen_separation_sec": cfg.screen_separation_sec,
         "motion_diff_radius": cfg.motion_diff_radius,
         "random_seed": cfg.random_seed,
-        "skip_head_seconds": cfg.skip_head_seconds,
-        "skip_tail_seconds": cfg.skip_tail_seconds,
         "ignore_lead_seconds": cfg.ignore_lead_seconds,
         "ignore_trail_seconds": cfg.ignore_trail_seconds,
         "min_window_seconds": cfg.min_window_seconds,
+        "thresholds": _threshold_snapshot(cfg.thresholds),
     }
     payload = json.dumps(relevant, sort_keys=True).encode("utf-8")
     return hashlib.sha1(payload).hexdigest()
@@ -551,18 +563,14 @@ def _selection_fingerprint(cfg: AnalysisConfig) -> str:
         "random_frames": cfg.random_frames,
         "random_seed": cfg.random_seed,
         "user_frames": [int(frame) for frame in cfg.user_frames],
-        "use_quantiles": cfg.use_quantiles,
-        "dark_quantile": cfg.dark_quantile,
-        "bright_quantile": cfg.bright_quantile,
         "motion_use_absdiff": cfg.motion_use_absdiff,
         "motion_scenecut_quantile": cfg.motion_scenecut_quantile,
         "screen_separation_sec": cfg.screen_separation_sec,
         "motion_diff_radius": cfg.motion_diff_radius,
-        "skip_head_seconds": cfg.skip_head_seconds,
-        "skip_tail_seconds": cfg.skip_tail_seconds,
         "ignore_lead_seconds": cfg.ignore_lead_seconds,
         "ignore_trail_seconds": cfg.ignore_trail_seconds,
         "min_window_seconds": cfg.min_window_seconds,
+        "thresholds": _threshold_snapshot(cfg.thresholds),
     }
     payload = json.dumps(relevant, sort_keys=True).encode("utf-8")
     return hashlib.sha1(payload).hexdigest()
@@ -1638,17 +1646,7 @@ def select_frames(
         else int(round(cfg.screen_separation_sec * fps))
     )
     skip_head_cutoff = window_start
-    if cfg.skip_head_seconds > 0 and fps > 0:
-        skip_head_cutoff = min(
-            window_end,
-            window_start + max(0, int(round(cfg.skip_head_seconds * fps))),
-        )
     skip_tail_limit = window_end
-    if cfg.skip_tail_seconds > 0 and fps > 0:
-        skip_tail_limit = max(
-            window_start,
-            window_end - max(0, int(round(cfg.skip_tail_seconds * fps))),
-        )
 
     analysis_clip = clip
     if cfg.analyze_in_sdr:
@@ -1677,6 +1675,14 @@ def select_frames(
     needs_bright = cfg.frame_count_bright > 0
     needs_motion = cfg.frame_count_motion > 0
     needs_metrics = needs_dark or needs_bright or needs_motion
+    thresholds_cfg = cfg.thresholds
+    threshold_mode = thresholds_cfg.mode
+    if isinstance(threshold_mode, str):
+        try:
+            threshold_mode = AnalysisThresholdMode(threshold_mode.lower())
+        except ValueError:
+            threshold_mode = AnalysisThresholdMode.QUANTILE
+    use_quantiles = threshold_mode == AnalysisThresholdMode.QUANTILE
 
     def _ensure_detail(
         frame_idx: int,
@@ -1978,20 +1984,24 @@ def select_frames(
 
     dark_candidates: List[tuple[int, float]] = []
     if cfg.frame_count_dark > 0 and brightness_values:
-        if cfg.use_quantiles:
-            threshold = _quantile(brightness_values, cfg.dark_quantile)
+        if use_quantiles:
+            threshold = _quantile(brightness_values, float(thresholds_cfg.dark_quantile))
             dark_candidates = [(idx, val) for idx, val in brightness if val <= threshold]
         else:
-            dark_candidates = [(idx, val) for idx, val in brightness if 0.062746 <= val <= 0.38]
+            dark_min = float(thresholds_cfg.dark_luma_min)
+            dark_max = float(thresholds_cfg.dark_luma_max)
+            dark_candidates = [(idx, val) for idx, val in brightness if dark_min <= val <= dark_max]
     pick_from_candidates(dark_candidates, cfg.frame_count_dark, mode="dark")
 
     bright_candidates: List[tuple[int, float]] = []
     if cfg.frame_count_bright > 0 and brightness_values:
-        if cfg.use_quantiles:
-            threshold = _quantile(brightness_values, cfg.bright_quantile)
+        if use_quantiles:
+            threshold = _quantile(brightness_values, float(thresholds_cfg.bright_quantile))
             bright_candidates = [(idx, val) for idx, val in brightness if val >= threshold]
         else:
-            bright_candidates = [(idx, val) for idx, val in brightness if 0.45 <= val <= 0.8]
+            bright_min = float(thresholds_cfg.bright_luma_min)
+            bright_max = float(thresholds_cfg.bright_luma_max)
+            bright_candidates = [(idx, val) for idx, val in brightness if bright_min <= val <= bright_max]
     pick_from_candidates(bright_candidates, cfg.frame_count_bright, mode="bright")
 
     motion_candidates: List[tuple[int, float]] = []

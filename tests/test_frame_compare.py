@@ -1,9 +1,11 @@
+import asyncio
 import datetime as dt
 import json
 import types
 from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar, Mapping, cast
+from typing import Any, ClassVar, Dict, Mapping, cast
 
 import click
 import pytest
@@ -11,6 +13,7 @@ from click.testing import CliRunner, Result
 from rich.console import Console
 
 import frame_compare
+import src.frame_compare.core as core_module
 from src.analysis import CacheLoadResult, FrameMetricsCacheInfo, SelectionDetail
 from src.audio_alignment import AlignmentMeasurement, AudioStreamInfo
 from src.datatypes import (
@@ -29,6 +32,16 @@ from src.datatypes import (
     SourceConfig,
     TMDBConfig,
 )
+from src.frame_compare import runner as runner_module
+from src.frame_compare.cli_runtime import (
+    AudioAlignmentJSON,
+    CliOutputManager,
+    JsonTail,
+    _AudioAlignmentDisplayData,
+    _AudioAlignmentSummary,
+    _ClipPlan,
+)
+from src.screenshot import ScreenshotError
 from src.tmdb import TMDBAmbiguityError, TMDBCandidate, TMDBResolution
 
 
@@ -61,6 +74,242 @@ def _expect_mapping(value: object) -> JsonMapping:
     return cast(JsonMapping, value)
 
 
+def _patch_load_config(monkeypatch: pytest.MonkeyPatch, cfg: AppConfig) -> None:
+    """Ensure both the CLI shim and core module reuse the provided config."""
+
+    monkeypatch.setattr(core_module, "load_config", lambda *_args, **_kwargs: cfg)
+    monkeypatch.setattr(frame_compare, "load_config", lambda *_args, **_kwargs: cfg)
+
+
+def _selection_details_to_json(details: Mapping[int, SelectionDetail]) -> Dict[int, Dict[str, str]]:
+    """Helper used across tests to serialize selection details."""
+
+    return {frame: {"label": detail.label} for frame, detail in details.items()}
+
+
+@dataclass
+class _CliRunnerEnvState:
+    """Tracked state for the CLI harness."""
+
+    workspace_root: Path
+    media_root: Path
+    config_path: Path
+    cfg: AppConfig
+
+
+def _make_cli_preflight(
+    base_dir: Path,
+    cfg: AppConfig,
+    *,
+    workspace_name: str | None = None,
+) -> core_module._PathPreflightResult:
+    """Build a _PathPreflightResult anchored in a temporary workspace."""
+
+    workspace_root = base_dir / (workspace_name or "workspace")
+    workspace_root.mkdir(parents=True, exist_ok=True)
+
+    config_dir = workspace_root / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_path = config_dir / "config.toml"
+    if not config_path.exists():
+        config_path.write_text("config = true\n", encoding="utf-8")
+
+    input_dir = Path(cfg.paths.input_dir)
+    if input_dir.is_absolute():
+        media_root = input_dir
+    else:
+        media_root = workspace_root / input_dir
+    media_root.mkdir(parents=True, exist_ok=True)
+
+    return core_module._PathPreflightResult(
+        workspace_root=workspace_root,
+        media_root=media_root,
+        config_path=config_path,
+        config=cfg,
+        warnings=(),
+        legacy_config=False,
+    )
+
+
+class _CliRunnerEnv:
+    """Factory that installs deterministic CLI preflight results for tests."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, base_dir: Path) -> None:
+        self._monkeypatch = monkeypatch
+        self._base_dir = base_dir
+        self.cfg = core_module._fresh_app_config()
+        self.state: _CliRunnerEnvState | None = None
+        self.reinstall()
+
+    def reinstall(
+        self,
+        cfg: AppConfig | None = None,
+        *,
+        workspace_name: str | None = None,
+    ) -> _CliRunnerEnvState:
+        """Rebuild the harness with the provided config and workspace label."""
+
+        if cfg is not None:
+            self.cfg = cfg
+        preflight = _make_cli_preflight(
+            self._base_dir,
+            self.cfg,
+            workspace_name=workspace_name,
+        )
+
+        def _fake_preflight(**_kwargs: object) -> core_module._PathPreflightResult:
+            return preflight
+
+        for module in (core_module, frame_compare, runner_module.core):
+            self._monkeypatch.setattr(module, "_prepare_preflight", _fake_preflight)
+
+        self.state = _CliRunnerEnvState(
+            workspace_root=preflight.workspace_root,
+            media_root=preflight.media_root,
+            config_path=preflight.config_path,
+            cfg=self.cfg,
+        )
+        return self.state
+
+    @property
+    def workspace_root(self) -> Path:
+        assert self.state is not None
+        return self.state.workspace_root
+
+    @property
+    def media_root(self) -> Path:
+        assert self.state is not None
+        return self.state.media_root
+
+    @property
+    def config_path(self) -> Path:
+        assert self.state is not None
+        return self.state.config_path
+
+
+def _patch_core_helper(monkeypatch: pytest.MonkeyPatch, attr: str, value: object) -> None:
+    """Patch both frame_compare.* and runner_module.core.* helpers simultaneously."""
+
+    monkeypatch.setattr(frame_compare, attr, value, raising=False)
+    monkeypatch.setattr(runner_module.core, attr, value, raising=False)
+
+
+def _patch_vs_core(monkeypatch: pytest.MonkeyPatch, attr: str, value: object) -> None:
+    """Patch VapourSynth helpers in both the shim module and the runner module."""
+
+    monkeypatch.setattr(frame_compare.vs_core, attr, value, raising=False)
+    monkeypatch.setattr(runner_module.vs_core, attr, value, raising=False)
+
+
+def _patch_runner_module(monkeypatch: pytest.MonkeyPatch, attr: str, value: object) -> None:
+    """Patch shared runner dependencies exposed at the runner module level."""
+
+    if hasattr(frame_compare, attr):
+        monkeypatch.setattr(frame_compare, attr, value, raising=False)
+    if hasattr(core_module, attr):
+        monkeypatch.setattr(core_module, attr, value, raising=False)
+    monkeypatch.setattr(runner_module, attr, value, raising=False)
+
+
+def _patch_audio_alignment(monkeypatch: pytest.MonkeyPatch, attr: str, value: object) -> None:
+    """Patch audio alignment helpers in both frame_compare and core module namespaces."""
+
+    target = getattr(frame_compare, "audio_alignment", None)
+    if target is not None:
+        monkeypatch.setattr(target, attr, value, raising=False)
+    monkeypatch.setattr(core_module.audio_alignment, attr, value, raising=False)
+    monkeypatch.setattr(runner_module.core.audio_alignment, attr, value, raising=False)
+
+
+@pytest.fixture
+def cli_runner_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _CliRunnerEnv:
+    """Install a deterministic CLI harness and expose its state to tests."""
+
+    return _CliRunnerEnv(monkeypatch, tmp_path)
+
+
+@pytest.fixture(autouse=True)
+def stub_vs_core(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Provide a default VapourSynth stub so tests never import the real module."""
+
+    def _noop(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    def _default_clip(*_args: object, **_kwargs: object) -> types.SimpleNamespace:
+        return types.SimpleNamespace(
+            width=1280,
+            height=720,
+            fps_num=24000,
+            fps_den=1001,
+            num_frames=120,
+        )
+
+    _patch_vs_core(monkeypatch, "configure", _noop)
+    _patch_vs_core(monkeypatch, "set_ram_limit", _noop)
+    _patch_vs_core(monkeypatch, "init_clip", _default_clip)
+
+
+def test_run_cli_delegates_to_runner(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The run_cli shim should forward requests to the runner module."""
+
+    cfg = core_module._fresh_app_config()
+    dummy_result = frame_compare.RunResult(
+        files=[],
+        frames=[],
+        out_dir=tmp_path,
+        out_dir_created=False,
+        out_dir_created_path=None,
+        root=tmp_path,
+        config=cfg,
+        image_paths=[],
+        slowpics_url=None,
+        json_tail=None,
+        report_path=None,
+    )
+    captured: dict[str, runner_module.RunRequest] = {}
+
+    def _fake_run(request: runner_module.RunRequest) -> frame_compare.RunResult:
+        captured["request"] = request
+        return dummy_result
+
+    monkeypatch.setattr(runner_module, "run", _fake_run)
+    result = frame_compare.run_cli(
+        "config-path",
+        "input-dir",
+        root_override=str(tmp_path),
+        audio_track_overrides=("A=B",),
+        quiet=True,
+        verbose=True,
+        no_color=True,
+        report_enable_override=True,
+        skip_wizard=True,
+        debug_color=True,
+        tonemap_overrides={"preset": "reference"},
+    )
+
+    assert result is dummy_result
+    request = captured["request"]
+    assert request.config_path == "config-path"
+    assert request.input_dir == "input-dir"
+    assert request.root_override == str(tmp_path)
+    assert request.audio_track_overrides == ("A=B",)
+    assert request.quiet is True
+    assert request.verbose is True
+    assert request.no_color is True
+    assert request.report_enable_override is True
+    assert request.skip_wizard is True
+    assert request.debug_color is True
+    assert request.tonemap_overrides == {"preset": "reference"}
+
+
+def test_runner_no_impl_attrs() -> None:
+    """Helper indirection list was removed in favor of direct imports."""
+
+    import importlib
+
+    runner_refreshed = importlib.reload(runner_module)
+    assert not hasattr(runner_refreshed, "_IMPL_ATTRS")
+
 @pytest.mark.parametrize(
     ("field", "value"),
     (
@@ -71,8 +320,7 @@ def _expect_mapping(value: object) -> JsonMapping:
     ),
 )
 def test_run_cli_rejects_subpath_escape(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    cli_runner_env: _CliRunnerEnv,
     field: str,
     value: str,
 ) -> None:
@@ -80,20 +328,20 @@ def test_run_cli_rejects_subpath_escape(
     Ensure run_cli refuses cache or offsets paths that escape the media root.
     """
 
-    cfg = frame_compare._fresh_app_config()
+    cfg = cli_runner_env.cfg
     section_name, attr_name = field.split(".")
     setattr(getattr(cfg, section_name), attr_name, value)
 
-    monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
+    cli_runner_env.reinstall(cfg)
 
-    with pytest.raises(frame_compare.CLIAppError) as excinfo:
-        frame_compare.run_cli("ignored", None, root_override=str(tmp_path))
+    with pytest.raises(core_module.CLIAppError) as excinfo:
+        frame_compare.run_cli(None, None)
 
     assert field in str(excinfo.value)
 
 
 def test_validate_tonemap_overrides_accepts_valid_values() -> None:
-    frame_compare._validate_tonemap_overrides(
+    core_module._validate_tonemap_overrides(
         {
             "knee_offset": 0.5,
             "dst_min_nits": 0.0,
@@ -115,39 +363,39 @@ def test_validate_tonemap_overrides_accepts_valid_values() -> None:
 
 def test_validate_tonemap_overrides_rejects_invalid_cutoff() -> None:
     with pytest.raises(click.ClickException):
-        frame_compare._validate_tonemap_overrides({"dpd_black_cutoff": 0.2})
+        core_module._validate_tonemap_overrides({"dpd_black_cutoff": 0.2})
 
 
 def test_validate_tonemap_overrides_rejects_bad_knee() -> None:
     with pytest.raises(click.ClickException):
-        frame_compare._validate_tonemap_overrides({"knee_offset": 1.5})
+        core_module._validate_tonemap_overrides({"knee_offset": 1.5})
 
 
 def test_validate_tonemap_overrides_rejects_bad_gamma() -> None:
     with pytest.raises(click.ClickException):
-        frame_compare._validate_tonemap_overrides({"post_gamma": 1.5})
+        core_module._validate_tonemap_overrides({"post_gamma": 1.5})
 
 
 def test_validate_tonemap_overrides_rejects_bad_preset() -> None:
     with pytest.raises(click.ClickException):
-        frame_compare._validate_tonemap_overrides({"dpd_preset": "turbo"})
+        core_module._validate_tonemap_overrides({"dpd_preset": "turbo"})
 
 
 def test_validate_tonemap_overrides_rejects_bad_percentile() -> None:
     with pytest.raises(click.ClickException):
-        frame_compare._validate_tonemap_overrides({"percentile": 120.0})
+        core_module._validate_tonemap_overrides({"percentile": 120.0})
 
 
 def test_validate_tonemap_overrides_rejects_scene_range() -> None:
     with pytest.raises(click.ClickException):
-        frame_compare._validate_tonemap_overrides(
+        core_module._validate_tonemap_overrides(
             {"scene_threshold_low": 2.0, "scene_threshold_high": 1.0}
         )
 
 
 def test_validate_tonemap_overrides_rejects_unknown_metadata() -> None:
     with pytest.raises(click.ClickException):
-        frame_compare._validate_tonemap_overrides({"metadata": "foobar"})
+        core_module._validate_tonemap_overrides({"metadata": "foobar"})
 
 
 def _make_config(input_dir: Path) -> AppConfig:
@@ -190,6 +438,25 @@ def _make_config(input_dir: Path) -> AppConfig:
     )
 
 
+def _make_runner_preflight(workspace_root: Path, media_root: Path, cfg: AppConfig) -> core_module._PathPreflightResult:
+    """
+    Build a _PathPreflightResult pointing at prepared workspace/media roots for runner tests.
+    """
+    config_dir = workspace_root / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_path = config_dir / "config.toml"
+    config_path.write_text("config", encoding="utf-8")
+    cfg.paths.input_dir = str(media_root)
+    return core_module._PathPreflightResult(
+        workspace_root=workspace_root,
+        media_root=media_root,
+        config_path=config_path,
+        config=cfg,
+        warnings=(),
+        legacy_config=False,
+    )
+
+
 def test_audio_alignment_manual_vspreview_handles_existing_trim(
     tmp_path: Path,
 ) -> None:
@@ -204,18 +471,18 @@ def test_audio_alignment_manual_vspreview_handles_existing_trim(
     reference_path.write_bytes(b"ref")
     target_path.write_bytes(b"tgt")
 
-    reference_plan = frame_compare._ClipPlan(
+    reference_plan = _ClipPlan(
         path=reference_path,
         metadata={"label": "Reference"},
     )
-    target_plan = frame_compare._ClipPlan(
+    target_plan = _ClipPlan(
         path=target_path,
         metadata={"label": "Target"},
     )
     target_plan.trim_start = 42
     target_plan.has_trim_start_override = True
 
-    summary, display = frame_compare._maybe_apply_audio_alignment(
+    summary, display = core_module._maybe_apply_audio_alignment(
         [reference_plan, target_plan],
         cfg,
         reference_path,
@@ -246,11 +513,11 @@ def test_audio_alignment_string_false_vspreview_triggers_measurement(
     reference_path.write_bytes(b"ref")
     target_path.write_bytes(b"tgt")
 
-    reference_plan = frame_compare._ClipPlan(
+    reference_plan = _ClipPlan(
         path=reference_path,
         metadata={"label": "Reference"},
     )
-    target_plan = frame_compare._ClipPlan(
+    target_plan = _ClipPlan(
         path=target_path,
         metadata={"label": "Target"},
     )
@@ -262,7 +529,7 @@ def test_audio_alignment_string_false_vspreview_triggers_measurement(
     }
 
     monkeypatch.setattr(
-        frame_compare.audio_alignment,
+        core_module.audio_alignment,
         "load_offsets",
         lambda _path: (reference_path.name, {target_path.name: manual_entry}),
     )
@@ -273,15 +540,15 @@ def test_audio_alignment_string_false_vspreview_triggers_measurement(
     def boom(*_args: object, **_kwargs: object) -> list[object]:
         raise _SentinelError
 
-    monkeypatch.setattr(frame_compare.audio_alignment, "measure_offsets", boom)
+    _patch_audio_alignment(monkeypatch, "measure_offsets", boom)
     monkeypatch.setattr(
-        frame_compare.audio_alignment,
+        core_module.audio_alignment,
         "update_offsets_file",
         lambda *args, **kwargs: ({}, {}),
     )
 
     with pytest.raises(_SentinelError):
-        frame_compare._maybe_apply_audio_alignment(
+        core_module._maybe_apply_audio_alignment(
             [reference_plan, target_plan],
             cfg,
             reference_path,
@@ -305,11 +572,11 @@ def test_audio_alignment_prompt_reuse_decline(tmp_path: Path, monkeypatch: pytes
     reference_path.write_bytes(b"ref")
     target_path.write_bytes(b"tgt")
 
-    reference_plan = frame_compare._ClipPlan(
+    reference_plan = _ClipPlan(
         path=reference_path,
         metadata={"label": "Reference"},
     )
-    target_plan = frame_compare._ClipPlan(
+    target_plan = _ClipPlan(
         path=target_path,
         metadata={"label": "Target"},
     )
@@ -323,7 +590,7 @@ def test_audio_alignment_prompt_reuse_decline(tmp_path: Path, monkeypatch: pytes
     }
 
     monkeypatch.setattr(
-        frame_compare.audio_alignment,
+        core_module.audio_alignment,
         "load_offsets",
         lambda _path: (reference_path.name, {target_path.name: dict(cached_entry)}),
     )
@@ -333,8 +600,8 @@ def test_audio_alignment_prompt_reuse_decline(tmp_path: Path, monkeypatch: pytes
     def _fail_update(*_args: object, **_kwargs: object) -> tuple[dict[str, int], dict[str, str]]:
         raise AssertionError("update_offsets_file should not run")
 
-    monkeypatch.setattr(frame_compare.audio_alignment, "measure_offsets", _fail_measure)
-    monkeypatch.setattr(frame_compare.audio_alignment, "update_offsets_file", _fail_update)
+    _patch_audio_alignment(monkeypatch, "measure_offsets", _fail_measure)
+    _patch_audio_alignment(monkeypatch, "update_offsets_file", _fail_update)
 
     class _TTY:
         def isatty(self) -> bool:
@@ -350,7 +617,7 @@ def test_audio_alignment_prompt_reuse_decline(tmp_path: Path, monkeypatch: pytes
 
     monkeypatch.setattr(frame_compare.click, "confirm", _fake_confirm)
 
-    summary, display = frame_compare._maybe_apply_audio_alignment(
+    summary, display = core_module._maybe_apply_audio_alignment(
         [reference_plan, target_plan],
         cfg,
         reference_path,
@@ -388,17 +655,17 @@ def test_audio_alignment_prompt_reuse_affirm(tmp_path: Path, monkeypatch: pytest
     reference_path.write_bytes(b"ref")
     target_path.write_bytes(b"tgt")
 
-    reference_plan = frame_compare._ClipPlan(
+    reference_plan = _ClipPlan(
         path=reference_path,
         metadata={"label": "Reference"},
     )
-    target_plan = frame_compare._ClipPlan(
+    target_plan = _ClipPlan(
         path=target_path,
         metadata={"label": "Target"},
     )
 
     monkeypatch.setattr(
-        frame_compare.audio_alignment,
+        core_module.audio_alignment,
         "load_offsets",
         lambda _path: (reference_path.name, {target_path.name: {"frames": 4, "seconds": 0.2}}),
     )
@@ -425,8 +692,8 @@ def test_audio_alignment_prompt_reuse_affirm(tmp_path: Path, monkeypatch: pytest
             )
         ]
 
-    monkeypatch.setattr(frame_compare.audio_alignment, "measure_offsets", _fake_measure)
-    monkeypatch.setattr(frame_compare.audio_alignment, "probe_audio_streams", lambda _path: [])
+    _patch_audio_alignment(monkeypatch, "measure_offsets", _fake_measure)
+    _patch_audio_alignment(monkeypatch, "probe_audio_streams", lambda _path: [])
 
     update_calls: dict[str, int] = {"count": 0}
 
@@ -441,7 +708,7 @@ def test_audio_alignment_prompt_reuse_affirm(tmp_path: Path, monkeypatch: pytest
         applied = {m.file.name: int(m.frames or 0) for m in measurements}
         return applied, {name: "auto" for name in applied}
 
-    monkeypatch.setattr(frame_compare.audio_alignment, "update_offsets_file", _fake_update)
+    _patch_audio_alignment(monkeypatch, "update_offsets_file", _fake_update)
 
     class _TTY:
         def isatty(self) -> bool:
@@ -454,7 +721,7 @@ def test_audio_alignment_prompt_reuse_affirm(tmp_path: Path, monkeypatch: pytest
 
     monkeypatch.setattr(frame_compare.click, "confirm", _confirm_true)
 
-    summary, display = frame_compare._maybe_apply_audio_alignment(
+    summary, display = core_module._maybe_apply_audio_alignment(
         [reference_plan, target_plan],
         cfg,
         reference_path,
@@ -472,24 +739,20 @@ def test_audio_alignment_prompt_reuse_affirm(tmp_path: Path, monkeypatch: pytest
     assert summary.suggestion_mode is False
 
 def test_run_cli_reuses_vspreview_manual_offsets_when_alignment_disabled(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
+    cli_runner_env: _CliRunnerEnv,
 ) -> None:
     """Manual VSPreview offsets should be reused during CLI runs when auto alignment is off."""
 
-    root = tmp_path
-    config_path = root / "config.toml"
-    config_path.write_text("config", encoding="utf-8")
-
-    reference_path = root / "Ref.mkv"
-    target_path = root / "Target.mkv"
+    reference_path = cli_runner_env.media_root / "Ref.mkv"
+    target_path = cli_runner_env.media_root / "Target.mkv"
     for file_path in (reference_path, target_path):
         file_path.write_bytes(b"data")
 
-    cfg = _make_config(root)
+    cfg = cli_runner_env.cfg
+    cfg.analysis.frame_data_filename = "generated.compframes"
     cfg.audio_alignment.enable = False
     cfg.audio_alignment.use_vspreview = True
-
-    monkeypatch.setattr(frame_compare, "load_config", lambda _path: cfg)
 
     files = [reference_path, target_path]
     metadata = [
@@ -497,19 +760,19 @@ def test_run_cli_reuses_vspreview_manual_offsets_when_alignment_disabled(
         {"label": "Target", "file_name": target_path.name},
     ]
 
-    monkeypatch.setattr(frame_compare, "_discover_media", lambda _root: list(files))
-    monkeypatch.setattr(
-        frame_compare,
+    _patch_core_helper(monkeypatch, "_discover_media", lambda _root: list(files))
+    _patch_core_helper(
+        monkeypatch,
         "_parse_metadata",
         lambda _files, _naming: list(metadata),
     )
-    monkeypatch.setattr(
-        frame_compare,
+    _patch_core_helper(
+        monkeypatch,
         "_pick_analyze_file",
         lambda _files, _metadata, _target, **_kwargs: reference_path,
     )
 
-    cache_file = root / cfg.analysis.frame_data_filename
+    cache_file = cli_runner_env.media_root / cfg.analysis.frame_data_filename
     cache_file.write_text("cache", encoding="utf-8")
 
     manual_offsets = {
@@ -525,26 +788,13 @@ def test_run_cli_reuses_vspreview_manual_offsets_when_alignment_disabled(
         },
     }
 
-    monkeypatch.setattr(
-        frame_compare.audio_alignment,
-        "load_offsets",
-        lambda _path: (None, manual_offsets),
-    )
+    monkeypatch.setattr(core_module.audio_alignment, "load_offsets", lambda _path: (None, manual_offsets))
 
     def _fail_measure(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("measure_offsets should not run when manual offsets are reused")
 
-    monkeypatch.setattr(
-        frame_compare.audio_alignment,
-        "measure_offsets",
-        _fail_measure,
-    )
-
-    monkeypatch.setattr(
-        frame_compare.audio_alignment,
-        "update_offsets_file",
-        _fail_measure,
-    )
+    monkeypatch.setattr(core_module.audio_alignment, "measure_offsets", _fail_measure)
+    monkeypatch.setattr(core_module.audio_alignment, "update_offsets_file", _fail_measure)
 
     init_calls: list[tuple[str, int]] = []
 
@@ -567,13 +817,11 @@ def test_run_cli_reuses_vspreview_manual_offsets_when_alignment_disabled(
             num_frames=2400,
         )
 
-    monkeypatch.setattr(frame_compare.vs_core, "configure", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda _limit: None)
-    monkeypatch.setattr(frame_compare.vs_core, "init_clip", fake_init_clip)
+    _patch_vs_core(monkeypatch, "init_clip", fake_init_clip)
 
-    monkeypatch.setattr(frame_compare, "write_selection_cache_file", lambda *args, **kwargs: None)
-    monkeypatch.setattr(frame_compare, "export_selection_metadata", lambda *args, **kwargs: None)
-    monkeypatch.setattr(frame_compare, "generate_screenshots", lambda *args, **kwargs: [])
+    monkeypatch.setattr(runner_module, "write_selection_cache_file", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner_module, "export_selection_metadata", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner_module, "generate_screenshots", lambda *args, **kwargs: [])
 
     def fake_select(
         clip: types.SimpleNamespace,
@@ -591,7 +839,7 @@ def test_run_cli_reuses_vspreview_manual_offsets_when_alignment_disabled(
         assert cache_probe is not None and cache_probe.status == "reused"
         return [10, 20]
 
-    monkeypatch.setattr(frame_compare, "select_frames", fake_select)
+    monkeypatch.setattr(runner_module, "select_frames", fake_select)
 
     cache_probes: list[FrameMetricsCacheInfo] = []
 
@@ -599,13 +847,12 @@ def test_run_cli_reuses_vspreview_manual_offsets_when_alignment_disabled(
         cache_probes.append(info)
         return CacheLoadResult(metrics=None, status="reused", reason=None)
 
-    monkeypatch.setattr(frame_compare, "probe_cached_metrics", fake_probe)
-    monkeypatch.setattr(frame_compare, "Progress", DummyProgress)
+    monkeypatch.setattr(runner_module, "probe_cached_metrics", fake_probe)
+    _patch_core_helper(monkeypatch, "Progress", DummyProgress)
 
     result = frame_compare.run_cli(
-        str(config_path),
         None,
-        root_override=str(root),
+        None,
     )
 
     assert init_calls, "Clips should be initialised with trims applied"
@@ -641,12 +888,12 @@ def test_audio_alignment_vspreview_suggestion_mode(
     cfg.audio_alignment.confirm_with_screenshots = False
     cfg.audio_alignment.frame_offset_bias = 0
 
-    reference_plan = frame_compare._ClipPlan(
+    reference_plan = _ClipPlan(
         path=reference_path,
         metadata={"label": "Reference"},
         clip=None,
     )
-    target_plan = frame_compare._ClipPlan(
+    target_plan = _ClipPlan(
         path=target_path,
         metadata={"label": "Target"},
         clip=None,
@@ -664,7 +911,7 @@ def test_audio_alignment_vspreview_suggestion_mode(
     )
 
     monkeypatch.setattr(
-        frame_compare.audio_alignment,
+        core_module.audio_alignment,
         "probe_audio_streams",
         lambda _path: [],
     )
@@ -680,12 +927,12 @@ def test_audio_alignment_vspreview_suggestion_mode(
         return [measurement]
 
     monkeypatch.setattr(
-        frame_compare.audio_alignment,
+        core_module.audio_alignment,
         "measure_offsets",
         _fake_measure,
     )
     monkeypatch.setattr(
-        frame_compare.audio_alignment,
+        core_module.audio_alignment,
         "load_offsets",
         lambda _path: (None, {}),
     )
@@ -694,12 +941,12 @@ def test_audio_alignment_vspreview_suggestion_mode(
         raise AssertionError("update_offsets_file should not be called in VSPreview mode")
 
     monkeypatch.setattr(
-        frame_compare.audio_alignment,
+        core_module.audio_alignment,
         "update_offsets_file",
         _fail_update,
     )
 
-    summary, display = frame_compare._maybe_apply_audio_alignment(
+    summary, display = core_module._maybe_apply_audio_alignment(
         [reference_plan, target_plan],
         cfg,
         reference_path,
@@ -732,11 +979,11 @@ def test_launch_vspreview_generates_script(
     reference_path.write_bytes(b"ref")
     target_path.write_bytes(b"tgt")
 
-    reference_plan = frame_compare._ClipPlan(
+    reference_plan = _ClipPlan(
         path=reference_path,
         metadata={"label": "Reference"},
     )
-    target_plan = frame_compare._ClipPlan(
+    target_plan = _ClipPlan(
         path=target_path,
         metadata={"label": "Target"},
     )
@@ -744,7 +991,7 @@ def test_launch_vspreview_generates_script(
     target_plan.has_trim_start_override = True
     plans = [reference_plan, target_plan]
 
-    summary = frame_compare._AudioAlignmentSummary(
+    summary = _AudioAlignmentSummary(
         offsets_path=tmp_path / "offsets.toml",
         reference_name=reference_path.name,
         measurements=(),
@@ -772,14 +1019,14 @@ def test_launch_vspreview_generates_script(
             self.returncode = returncode
 
     monkeypatch.setattr(frame_compare.shutil, "which", lambda _: None)
-    monkeypatch.setattr(frame_compare.importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(core_module.importlib.util, "find_spec", lambda name: object())
     monkeypatch.setattr(
         frame_compare.subprocess,
         "run",
         lambda cmd, env=None, check=False, **kwargs: recorded_command.append(list(cmd)) or _Result(0),
     )
 
-    display = frame_compare._AudioAlignmentDisplayData(
+    display = _AudioAlignmentDisplayData(
         stream_lines=[],
         estimation_line=None,
         offset_lines=[],
@@ -792,8 +1039,8 @@ def test_launch_vspreview_generates_script(
     )
 
     prompt_calls: list[dict[str, int] | None] = []
-    monkeypatch.setattr(
-        frame_compare,
+    _patch_core_helper(
+        monkeypatch,
         "_prompt_vspreview_offsets",
         lambda *args, **kwargs: prompt_calls.append({}) or {},
     )
@@ -801,17 +1048,17 @@ def test_launch_vspreview_generates_script(
     apply_calls: list[Mapping[str, int]] = []
 
     def _record_apply(
-        _plans: Sequence[frame_compare._ClipPlan],
-        _summary: frame_compare._AudioAlignmentSummary,
+        _plans: Sequence[_ClipPlan],
+        _summary: _AudioAlignmentSummary,
         offsets: Mapping[str, int],
         *_args: object,
         **_kwargs: object,
     ) -> None:
         apply_calls.append(dict(offsets))
 
-    monkeypatch.setattr(frame_compare, "_apply_vspreview_manual_offsets", _record_apply)
+    _patch_core_helper(monkeypatch, "_apply_vspreview_manual_offsets", _record_apply)
 
-    frame_compare._launch_vspreview(plans, summary, display, cfg, tmp_path, reporter, json_tail)
+    core_module._launch_vspreview(plans, summary, display, cfg, tmp_path, reporter, json_tail)
 
     script_path_str = audio_block.get("vspreview_script")
     assert script_path_str, "Script path should be recorded in JSON tail"
@@ -858,11 +1105,11 @@ def test_launch_vspreview_baseline_mode_persists_manual_offsets(
     reference_path.write_bytes(b"ref")
     target_path.write_bytes(b"tgt")
 
-    reference_plan = frame_compare._ClipPlan(
+    reference_plan = _ClipPlan(
         path=reference_path,
         metadata={"label": "Reference"},
     )
-    target_plan = frame_compare._ClipPlan(
+    target_plan = _ClipPlan(
         path=target_path,
         metadata={"label": "Target"},
     )
@@ -879,7 +1126,7 @@ def test_launch_vspreview_baseline_mode_persists_manual_offsets(
         target_fps=24.0,
     )
 
-    summary = frame_compare._AudioAlignmentSummary(
+    summary = _AudioAlignmentSummary(
         offsets_path=tmp_path / "offsets.toml",
         reference_name=reference_path.name,
         measurements=(measurement,),
@@ -900,7 +1147,7 @@ def test_launch_vspreview_baseline_mode_persists_manual_offsets(
 
     monkeypatch.setattr(frame_compare.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(frame_compare.shutil, "which", lambda _: None)
-    monkeypatch.setattr(frame_compare.importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(core_module.importlib.util, "find_spec", lambda name: object())
     monkeypatch.setattr(
         frame_compare.subprocess,
         "run",
@@ -911,13 +1158,13 @@ def test_launch_vspreview_baseline_mode_persists_manual_offsets(
         ),
     )
 
-    monkeypatch.setattr(
-        frame_compare,
+    _patch_core_helper(
+        monkeypatch,
         "_prompt_vspreview_offsets",
         lambda *args, **kwargs: {target_path.name: 3},
     )
-    monkeypatch.setattr(
-        frame_compare.audio_alignment,
+    _patch_audio_alignment(
+        monkeypatch,
         "update_offsets_file",
         lambda *_args, **_kwargs: (
             {reference_path.name: 0, target_path.name: 5},
@@ -925,7 +1172,7 @@ def test_launch_vspreview_baseline_mode_persists_manual_offsets(
         ),
     )
 
-    frame_compare._launch_vspreview(plans, summary, None, cfg, tmp_path, reporter, json_tail)
+    core_module._launch_vspreview(plans, summary, None, cfg, tmp_path, reporter, json_tail)
 
     script_path_str = audio_block.get("vspreview_script")
     assert script_path_str, "Script path should be recorded in JSON tail"
@@ -951,17 +1198,17 @@ def test_write_vspreview_script_generates_unique_filenames_same_second(
     reference_path.write_bytes(b"ref")
     target_path.write_bytes(b"tgt")
 
-    reference_plan = frame_compare._ClipPlan(
+    reference_plan = _ClipPlan(
         path=reference_path,
         metadata={"label": "Reference"},
     )
-    target_plan = frame_compare._ClipPlan(
+    target_plan = _ClipPlan(
         path=target_path,
         metadata={"label": "Target"},
     )
     plans = [reference_plan, target_plan]
 
-    summary = frame_compare._AudioAlignmentSummary(
+    summary = _AudioAlignmentSummary(
         offsets_path=tmp_path / "offsets.toml",
         reference_name=reference_path.name,
         measurements=(),
@@ -983,10 +1230,10 @@ def test_write_vspreview_script_generates_unique_filenames_same_second(
         def now(cls, tz: dt.tzinfo | None = None) -> dt.datetime:
             return fixed_instant if tz is None else fixed_instant.replace(tzinfo=tz)
 
-    monkeypatch.setattr(frame_compare._dt, "datetime", _FixedDatetime)
+    monkeypatch.setattr(core_module._dt, "datetime", _FixedDatetime)
 
-    first_path = frame_compare._write_vspreview_script(plans, summary, cfg, tmp_path)
-    second_path = frame_compare._write_vspreview_script(plans, summary, cfg, tmp_path)
+    first_path = core_module._write_vspreview_script(plans, summary, cfg, tmp_path)
+    second_path = core_module._write_vspreview_script(plans, summary, cfg, tmp_path)
 
     assert first_path != second_path
     assert first_path.exists()
@@ -1007,17 +1254,17 @@ def test_launch_vspreview_warns_when_command_missing(
     reference_path.write_bytes(b"ref")
     target_path.write_bytes(b"tgt")
 
-    reference_plan = frame_compare._ClipPlan(
+    reference_plan = _ClipPlan(
         path=reference_path,
         metadata={"label": "Reference"},
     )
-    target_plan = frame_compare._ClipPlan(
+    target_plan = _ClipPlan(
         path=target_path,
         metadata={"label": "Target"},
     )
     plans = [reference_plan, target_plan]
 
-    summary = frame_compare._AudioAlignmentSummary(
+    summary = _AudioAlignmentSummary(
         offsets_path=tmp_path / "offsets.toml",
         reference_name=reference_path.name,
         measurements=(),
@@ -1036,7 +1283,7 @@ def test_launch_vspreview_warns_when_command_missing(
     json_tail = _make_json_tail_stub()
     audio_block = json_tail["audio_alignment"]
 
-    display = frame_compare._AudioAlignmentDisplayData(
+    display = _AudioAlignmentDisplayData(
         stream_lines=[],
         estimation_line=None,
         offset_lines=[],
@@ -1050,7 +1297,7 @@ def test_launch_vspreview_warns_when_command_missing(
 
     monkeypatch.setattr(frame_compare.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(frame_compare.shutil, "which", lambda _: None)
-    monkeypatch.setattr(frame_compare.importlib.util, "find_spec", lambda _name: None)
+    monkeypatch.setattr(core_module.importlib.util, "find_spec", lambda _name: None)
 
     prompt_called: list[None] = []
 
@@ -1058,9 +1305,9 @@ def test_launch_vspreview_warns_when_command_missing(
         prompt_called.append(None)
         return {}
 
-    monkeypatch.setattr(frame_compare, "_prompt_vspreview_offsets", _fail_prompt)
+    _patch_core_helper(monkeypatch, "_prompt_vspreview_offsets", _fail_prompt)
 
-    frame_compare._launch_vspreview(plans, summary, display, cfg, tmp_path, reporter, json_tail)
+    core_module._launch_vspreview(plans, summary, display, cfg, tmp_path, reporter, json_tail)
 
     script_path_str = audio_block.get("vspreview_script")
     assert script_path_str, "Script path should still be recorded for manual launches"
@@ -1091,8 +1338,8 @@ def test_launch_vspreview_warns_when_command_missing(
     assert "-m vspreview" in normalized_output
 
 
-def _make_json_tail_stub() -> frame_compare.JsonTail:
-    audio_block: frame_compare.AudioAlignmentJSON = {
+def _make_json_tail_stub() -> JsonTail:
+    audio_block: AudioAlignmentJSON = {
         "enabled": False,
         "reference_stream": None,
         "target_stream": {},
@@ -1113,7 +1360,7 @@ def _make_json_tail_stub() -> frame_compare.JsonTail:
         "vspreview_invoked": False,
         "vspreview_exit_code": None,
     }
-    tail: frame_compare.JsonTail = {
+    tail: JsonTail = {
         "clips": [],
         "trims": {"per_clip": {}},
         "window": {},
@@ -1182,8 +1429,8 @@ def _make_json_tail_stub() -> frame_compare.JsonTail:
     return tail
 
 
-def _make_display_stub() -> frame_compare._AudioAlignmentDisplayData:
-    return frame_compare._AudioAlignmentDisplayData(
+def _make_display_stub() -> _AudioAlignmentDisplayData:
+    return _AudioAlignmentDisplayData(
         stream_lines=[],
         estimation_line=None,
         offset_lines=[],
@@ -1201,11 +1448,11 @@ def test_vspreview_manual_offsets_positive(
 ) -> None:
     reference_path = tmp_path / "Ref.mkv"
     target_path = tmp_path / "Target.mkv"
-    reference_plan = frame_compare._ClipPlan(path=reference_path, metadata={"label": "Reference"})
-    target_plan = frame_compare._ClipPlan(path=target_path, metadata={"label": "Target"})
+    reference_plan = _ClipPlan(path=reference_path, metadata={"label": "Reference"})
+    target_plan = _ClipPlan(path=target_path, metadata={"label": "Target"})
     target_plan.trim_start = 5
     target_plan.has_trim_start_override = True
-    summary = frame_compare._AudioAlignmentSummary(
+    summary = _AudioAlignmentSummary(
         offsets_path=tmp_path / "offsets.toml",
         reference_name=reference_path.name,
         measurements=(),
@@ -1241,9 +1488,9 @@ def test_vspreview_manual_offsets_positive(
         applied = {m.file.name: int(m.frames or 0) for m in measurements}
         return applied, {name: "manual" for name in applied}
 
-    monkeypatch.setattr(frame_compare.audio_alignment, "update_offsets_file", fake_update)
+    _patch_audio_alignment(monkeypatch, "update_offsets_file", fake_update)
 
-    frame_compare._apply_vspreview_manual_offsets(
+    core_module._apply_vspreview_manual_offsets(
         [reference_plan, target_plan],
         summary,
         {target_path.name: 7},
@@ -1274,10 +1521,10 @@ def test_vspreview_manual_offsets_positive(
 def test_vspreview_manual_offsets_zero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     reference_path = tmp_path / "Ref.mkv"
     target_path = tmp_path / "Target.mkv"
-    reference_plan = frame_compare._ClipPlan(path=reference_path, metadata={"label": "Reference"})
-    target_plan = frame_compare._ClipPlan(path=target_path, metadata={"label": "Target"})
+    reference_plan = _ClipPlan(path=reference_path, metadata={"label": "Reference"})
+    target_plan = _ClipPlan(path=target_path, metadata={"label": "Target"})
     target_plan.trim_start = 4
-    summary = frame_compare._AudioAlignmentSummary(
+    summary = _AudioAlignmentSummary(
         offsets_path=tmp_path / "offsets.toml",
         reference_name=reference_path.name,
         measurements=(),
@@ -1297,12 +1544,12 @@ def test_vspreview_manual_offsets_zero(tmp_path: Path, monkeypatch: pytest.Monke
     display = _make_display_stub()
 
     monkeypatch.setattr(
-        frame_compare.audio_alignment,
+        core_module.audio_alignment,
         "update_offsets_file",
         lambda *_args, **_kwargs: ({target_path.name: 4, reference_path.name: 0}, {target_path.name: "manual", reference_path.name: "manual"}),
     )
 
-    frame_compare._apply_vspreview_manual_offsets(
+    core_module._apply_vspreview_manual_offsets(
         [reference_plan, target_plan],
         summary,
         {target_path.name: 0},
@@ -1322,10 +1569,10 @@ def test_vspreview_manual_offsets_zero(tmp_path: Path, monkeypatch: pytest.Monke
 def test_vspreview_manual_offsets_negative(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     reference_path = tmp_path / "Ref.mkv"
     target_path = tmp_path / "Target.mkv"
-    reference_plan = frame_compare._ClipPlan(path=reference_path, metadata={"label": "Reference"})
-    target_plan = frame_compare._ClipPlan(path=target_path, metadata={"label": "Target"})
+    reference_plan = _ClipPlan(path=reference_path, metadata={"label": "Reference"})
+    target_plan = _ClipPlan(path=target_path, metadata={"label": "Target"})
     target_plan.trim_start = 3
-    summary = frame_compare._AudioAlignmentSummary(
+    summary = _AudioAlignmentSummary(
         offsets_path=tmp_path / "offsets.toml",
         reference_name=reference_path.name,
         measurements=(),
@@ -1345,7 +1592,7 @@ def test_vspreview_manual_offsets_negative(tmp_path: Path, monkeypatch: pytest.M
     display = _make_display_stub()
 
     monkeypatch.setattr(
-        frame_compare.audio_alignment,
+        core_module.audio_alignment,
         "update_offsets_file",
         lambda *_args, **_kwargs: (
             {target_path.name: 0, reference_path.name: 4},
@@ -1353,7 +1600,7 @@ def test_vspreview_manual_offsets_negative(tmp_path: Path, monkeypatch: pytest.M
         ),
     )
 
-    frame_compare._apply_vspreview_manual_offsets(
+    core_module._apply_vspreview_manual_offsets(
         [reference_plan, target_plan],
         summary,
         {target_path.name: -7},
@@ -1379,12 +1626,12 @@ def test_vspreview_manual_offsets_multiple_negative(
     reference_path = tmp_path / "Ref.mkv"
     target_a_path = tmp_path / "A.mkv"
     target_b_path = tmp_path / "B.mkv"
-    reference_plan = frame_compare._ClipPlan(path=reference_path, metadata={"label": "Reference"})
-    target_a_plan = frame_compare._ClipPlan(path=target_a_path, metadata={"label": "A"})
-    target_b_plan = frame_compare._ClipPlan(path=target_b_path, metadata={"label": "B"})
+    reference_plan = _ClipPlan(path=reference_path, metadata={"label": "Reference"})
+    target_a_plan = _ClipPlan(path=target_a_path, metadata={"label": "A"})
+    target_b_plan = _ClipPlan(path=target_b_path, metadata={"label": "B"})
     target_a_plan.trim_start = 5
     target_b_plan.trim_start = 5
-    summary = frame_compare._AudioAlignmentSummary(
+    summary = _AudioAlignmentSummary(
         offsets_path=tmp_path / "offsets.toml",
         reference_name=reference_path.name,
         measurements=(),
@@ -1426,9 +1673,9 @@ def test_vspreview_manual_offsets_multiple_negative(
         applied = {m.file.name: int(m.frames or 0) for m in measurements}
         return applied, {name: "manual" for name in applied}
 
-    monkeypatch.setattr(frame_compare.audio_alignment, "update_offsets_file", fake_update)
+    _patch_audio_alignment(monkeypatch, "update_offsets_file", fake_update)
 
-    frame_compare._apply_vspreview_manual_offsets(
+    core_module._apply_vspreview_manual_offsets(
         [reference_plan, target_a_plan, target_b_plan],
         summary,
         {target_a_path.name: -3, target_b_path.name: -7},
@@ -1470,20 +1717,21 @@ def test_vspreview_manual_offsets_multiple_negative(
 def _comparison_fixture_root() -> Path:
     """Return the repository-level comparison fixture directory."""
 
-    return frame_compare.PROJECT_ROOT / "comparison_videos"
+    return core_module.PROJECT_ROOT / "comparison_videos"
 
 
 def test_cli_applies_overrides_and_naming(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runner: CliRunner
+    monkeypatch: pytest.MonkeyPatch,
+    runner: CliRunner,
+    cli_runner_env: _CliRunnerEnv,
 ) -> None:
-    first = tmp_path / "AAA - 01.mkv"
-    second = tmp_path / "BBB - 01.mkv"
+    first = cli_runner_env.media_root / "AAA - 01.mkv"
+    second = cli_runner_env.media_root / "BBB - 01.mkv"
     for file in (first, second):
         file.write_bytes(b"data")
 
-    cfg = _make_config(tmp_path)
-
-    monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
+    cfg = _make_config(cli_runner_env.media_root)
+    cli_runner_env.reinstall(cfg)
 
     parse_calls: list[tuple[str, dict[str, object]]] = []
 
@@ -1493,10 +1741,10 @@ def test_cli_applies_overrides_and_naming(
             return {"label": "AAA Short", "release_group": "AAA", "file_name": name}
         return {"label": "BBB Short", "release_group": "BBB", "file_name": name}
 
-    monkeypatch.setattr(frame_compare, "parse_filename_metadata", fake_parse)
+    _patch_core_helper(monkeypatch, "parse_filename_metadata", fake_parse)
 
     ram_limits: list[int] = []
-    monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit_mb: ram_limits.append(int(limit_mb)))
+    _patch_vs_core(monkeypatch, "set_ram_limit", lambda limit_mb: ram_limits.append(int(limit_mb)))
 
     init_calls: list[tuple[str, int, int | None, tuple[int, int] | None, str | None]] = []
 
@@ -1520,7 +1768,7 @@ def test_cli_applies_overrides_and_naming(
         init_calls.append((path, trim_start, trim_end, fps_map, cache_dir))
         return clip
 
-    monkeypatch.setattr(frame_compare.vs_core, "init_clip", fake_init_clip)
+    _patch_vs_core(monkeypatch, "init_clip", fake_init_clip)
 
     cache_infos: list[FrameMetricsCacheInfo | None] = []
 
@@ -1542,7 +1790,7 @@ def test_cli_applies_overrides_and_naming(
         assert isinstance(frame_window, tuple)
         return [10, 20]
 
-    monkeypatch.setattr(frame_compare, "select_frames", fake_select)
+    _patch_runner_module(monkeypatch, "select_frames", fake_select)
 
     generated_metadata: list[list[dict[str, object]]] = []
 
@@ -1561,9 +1809,9 @@ def test_cli_applies_overrides_and_naming(
         out_dir.mkdir(parents=True, exist_ok=True)
         return [str(out_dir / f"shot_{idx}.png") for idx in range(len(frames) * len(files))]
 
-    monkeypatch.setattr(frame_compare, "generate_screenshots", fake_generate)
+    _patch_runner_module(monkeypatch, "generate_screenshots", fake_generate)
 
-    result: Result = runner.invoke(frame_compare.main, ["--config", "dummy", "--no-color"], catch_exceptions=False)
+    result: Result = runner.invoke(frame_compare.main, ["--no-color"], catch_exceptions=False)
     assert result.exit_code == 0
     assert "[DISCOVER]" in result.output
     assert "• ref=AAA Short" in result.output
@@ -1579,7 +1827,7 @@ def test_cli_applies_overrides_and_naming(
 
     assert ram_limits == [cfg.runtime.ram_limit_mb]
 
-    expected_cache_dir = str(tmp_path.resolve())
+    expected_cache_dir = str(cli_runner_env.media_root.resolve())
     assert len(init_calls) >= 2
     # Reference clip (BBB) initialised without fps override but with trim_end applied
     assert (str(second), 0, -12, None, expected_cache_dir) in init_calls
@@ -1594,7 +1842,7 @@ def test_cli_applies_overrides_and_naming(
 
     assert cache_infos and cache_infos[0] is not None
     cache_info = cache_infos[0]
-    assert cache_info.path == (tmp_path / cfg.analysis.frame_data_filename).resolve()
+    assert cache_info.path == (cli_runner_env.media_root / cfg.analysis.frame_data_filename).resolve()
     assert cache_info.files == ["AAA - 01.mkv", "BBB - 01.mkv"]
     assert len(parse_calls) == 2
 
@@ -1612,21 +1860,21 @@ def test_run_cli_falls_back_to_project_root_for_relative_input(
 
     cfg = _make_config(Path("comparison_videos"))
 
-    monkeypatch.setattr(frame_compare, "load_config", lambda _path: cfg)
-    monkeypatch.setattr(frame_compare.vs_core, "configure", lambda *args, **kwargs: None)
+    _patch_load_config(monkeypatch, cfg)
+    _patch_vs_core(monkeypatch, "configure", lambda *args, **kwargs: None)
 
     recorded_roots: list[Path] = []
 
     def fake_discover(root: Path) -> list[Path]:
         recorded_roots.append(root)
-        raise frame_compare.CLIAppError("sentinel")
+        raise core_module.CLIAppError("sentinel")
 
-    monkeypatch.setattr(frame_compare, "_discover_media", fake_discover)
+    _patch_core_helper(monkeypatch, "_discover_media", fake_discover)
 
     monkeypatch.chdir(tmp_path)
     config_path = tmp_path / "config.toml"
 
-    with pytest.raises(frame_compare.CLIAppError, match="sentinel"):
+    with pytest.raises(core_module.CLIAppError, match="sentinel"):
         frame_compare.run_cli(str(config_path))
 
     expected_root = (tmp_path / "comparison_videos").resolve()
@@ -1640,32 +1888,33 @@ def test_run_cli_does_not_fallback_for_cli_override(
 
     cfg = _make_config(tmp_path)
 
-    monkeypatch.setattr(frame_compare, "load_config", lambda _path: cfg)
+    _patch_load_config(monkeypatch, cfg)
     def _fail_discover(*_args: object, **_kwargs: object) -> list[Path]:
         raise AssertionError("should not discover")
 
-    monkeypatch.setattr(frame_compare, "_discover_media", _fail_discover)
+    _patch_core_helper(monkeypatch, "_discover_media", _fail_discover)
 
     config_path = tmp_path / "config.toml"
     monkeypatch.chdir(tmp_path)
 
-    with pytest.raises(frame_compare.CLIAppError, match="Input directory not found"):
+    with pytest.raises(core_module.CLIAppError, match="Input directory not found"):
         frame_compare.run_cli(str(config_path), input_dir="comparison_videos")
 
 
 def test_cli_disables_json_tail_output(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runner: CliRunner
+    monkeypatch: pytest.MonkeyPatch,
+    runner: CliRunner,
+    cli_runner_env: _CliRunnerEnv,
 ) -> None:
-    first = tmp_path / "AAA - 01.mkv"
-    second = tmp_path / "BBB - 01.mkv"
+    first = cli_runner_env.media_root / "AAA - 01.mkv"
+    second = cli_runner_env.media_root / "BBB - 01.mkv"
     for file_path in (first, second):
         file_path.write_bytes(b"data")
 
-    cfg = _make_config(tmp_path)
+    cfg = _make_config(cli_runner_env.media_root)
     cfg.cli.emit_json_tail = False
 
-    monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
-    monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit_mb: None)
+    cli_runner_env.reinstall(cfg)
 
     def fake_parse(name: str, **kwargs: object) -> dict[str, str]:
         """
@@ -1683,7 +1932,7 @@ def test_cli_disables_json_tail_output(
         """
         return {"label": name, "release_group": "", "file_name": name}
 
-    monkeypatch.setattr(frame_compare, "parse_filename_metadata", fake_parse)
+    _patch_core_helper(monkeypatch, "parse_filename_metadata", fake_parse)
 
     def fake_init(
         path: str,
@@ -1714,7 +1963,7 @@ def test_cli_disables_json_tail_output(
         """
         return types.SimpleNamespace(width=1920, height=1080, fps_num=24000, fps_den=1001, num_frames=600)
 
-    monkeypatch.setattr(frame_compare.vs_core, "init_clip", fake_init)
+    _patch_vs_core(monkeypatch, "init_clip", fake_init)
 
     def fake_select(
         clip: types.SimpleNamespace,
@@ -1731,7 +1980,7 @@ def test_cli_disables_json_tail_output(
     ) -> list[int]:
         return [12]
 
-    monkeypatch.setattr(frame_compare, "select_frames", fake_select)
+    _patch_runner_module(monkeypatch, "select_frames", fake_select)
 
     def fake_generate(
         clips: list[types.SimpleNamespace],
@@ -1756,18 +2005,20 @@ def test_cli_disables_json_tail_output(
         out_dir.mkdir(parents=True, exist_ok=True)
         return [str(out_dir / "frame.png")]
 
-    monkeypatch.setattr(frame_compare, "generate_screenshots", fake_generate)
+    _patch_runner_module(monkeypatch, "generate_screenshots", fake_generate)
 
-    result: Result = runner.invoke(frame_compare.main, ["--config", "dummy", "--no-color"], catch_exceptions=False)
+    result: Result = runner.invoke(frame_compare.main, ["--no-color"], catch_exceptions=False)
     assert result.exit_code == 0
     assert '{"analysis"' not in result.output
 
 
 def test_label_dedupe_preserves_short_labels(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runner: CliRunner
+    monkeypatch: pytest.MonkeyPatch,
+    runner: CliRunner,
+    cli_runner_env: _CliRunnerEnv,
 ) -> None:
-    first = tmp_path / "Group - 01.mkv"
-    second = tmp_path / "Group - 02.mkv"
+    first = cli_runner_env.media_root / "Group - 01.mkv"
+    second = cli_runner_env.media_root / "Group - 02.mkv"
     for file in (first, second):
         file.write_bytes(b"data")
 
@@ -1779,7 +2030,7 @@ def test_label_dedupe_preserves_short_labels(
         slowpics=SlowpicsConfig(auto_upload=False),
         tmdb=TMDBConfig(),
         naming=NamingConfig(always_full_filename=False, prefer_guessit=False),
-        paths=PathsConfig(input_dir=str(tmp_path)),
+        paths=PathsConfig(input_dir=str(cli_runner_env.media_root)),
         runtime=RuntimeConfig(ram_limit_mb=1024),
         overrides=OverridesConfig(),
         source=SourceConfig(),
@@ -1787,13 +2038,12 @@ def test_label_dedupe_preserves_short_labels(
         report=ReportConfig(enable=False),
     )
 
-    monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
+    cli_runner_env.reinstall(cfg)
 
     def fake_parse(name: str, **kwargs: object) -> dict[str, str]:
         return {"label": "[Group]", "release_group": "Group", "file_name": name}
 
-    monkeypatch.setattr(frame_compare, "parse_filename_metadata", fake_parse)
-    monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit: None)
+    _patch_core_helper(monkeypatch, "parse_filename_metadata", fake_parse)
 
     def fake_init_clip(
         path: str,
@@ -1806,7 +2056,7 @@ def test_label_dedupe_preserves_short_labels(
     ) -> types.SimpleNamespace:
         return types.SimpleNamespace(width=1920, height=1080, fps_num=24000, fps_den=1001, num_frames=2400)
 
-    monkeypatch.setattr(frame_compare.vs_core, "init_clip", fake_init_clip)
+    _patch_vs_core(monkeypatch, "init_clip", fake_init_clip)
     def fake_select(
         clip: types.SimpleNamespace,
         cfg: AnalysisConfig,
@@ -1822,7 +2072,7 @@ def test_label_dedupe_preserves_short_labels(
     ) -> list[int]:
         return [42]
 
-    monkeypatch.setattr(frame_compare, "select_frames", fake_select)
+    _patch_runner_module(monkeypatch, "select_frames", fake_select)
 
     captured: list[list[str]] = []
 
@@ -1840,9 +2090,9 @@ def test_label_dedupe_preserves_short_labels(
         out_dir.mkdir(parents=True, exist_ok=True)
         return [str(out_dir / "shot.png")]
 
-    monkeypatch.setattr(frame_compare, "generate_screenshots", fake_generate)
+    _patch_runner_module(monkeypatch, "generate_screenshots", fake_generate)
 
-    result: Result = runner.invoke(frame_compare.main, ["--config", "dummy", "--no-color"], catch_exceptions=False)
+    result: Result = runner.invoke(frame_compare.main, ["--no-color"], catch_exceptions=False)
     assert result.exit_code == 0
     assert captured
     labels = captured[0]
@@ -1852,17 +2102,18 @@ def test_label_dedupe_preserves_short_labels(
 
 
 def test_cli_reuses_frame_cache(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runner: CliRunner
+    monkeypatch: pytest.MonkeyPatch,
+    runner: CliRunner,
+    cli_runner_env: _CliRunnerEnv,
 ) -> None:
-    files = [tmp_path / "A.mkv", tmp_path / "B.mkv"]
+    files = [cli_runner_env.media_root / "A.mkv", cli_runner_env.media_root / "B.mkv"]
     for file in files:
         file.write_bytes(b"data")
 
-    cfg = _make_config(tmp_path)
+    cfg = _make_config(cli_runner_env.media_root)
     cfg.analysis.save_frames_data = True
 
-    monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
-    monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit: None)
+    cli_runner_env.reinstall(cfg)
 
     def fake_init(
         path: str,
@@ -1875,7 +2126,7 @@ def test_cli_reuses_frame_cache(
     ) -> types.SimpleNamespace:
         return types.SimpleNamespace(width=1280, height=720, fps_num=24000, fps_den=1001, num_frames=1800)
 
-    monkeypatch.setattr(frame_compare.vs_core, "init_clip", fake_init)
+    _patch_vs_core(monkeypatch, "init_clip", fake_init)
 
     call_state: dict[str, int] = {"calls": 0, "cache_hits": 0}
 
@@ -1901,7 +2152,7 @@ def test_cli_reuses_frame_cache(
             cache_info.path.write_text("cached", encoding="utf-8")
         return [12]
 
-    monkeypatch.setattr(frame_compare, "select_frames", fake_select)
+    _patch_runner_module(monkeypatch, "select_frames", fake_select)
 
     def fake_generate(
         clips: list[types.SimpleNamespace],
@@ -1918,7 +2169,7 @@ def test_cli_reuses_frame_cache(
             (out_dir / f"shot_{index}.png").write_text("data", encoding="utf-8")
         return [str(out_dir / f"shot_{idx}.png") for idx in range(len(frames) * len(clips))]
 
-    monkeypatch.setattr(frame_compare, "generate_screenshots", fake_generate)
+    _patch_runner_module(monkeypatch, "generate_screenshots", fake_generate)
 
     runner.invoke(frame_compare.main, ["--config", "dummy", "--no-color"], catch_exceptions=False)
     runner.invoke(frame_compare.main, ["--config", "dummy", "--no-color"], catch_exceptions=False)
@@ -1928,7 +2179,9 @@ def test_cli_reuses_frame_cache(
 
 
 def test_cli_input_override_and_cleanup(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runner: CliRunner
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    runner: CliRunner,
 ) -> None:
     default_dir = tmp_path / "default"
     default_dir.mkdir()
@@ -1954,8 +2207,7 @@ def test_cli_input_override_and_cleanup(
         report=ReportConfig(enable=False),
     )
 
-    monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
-    monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit: None)
+    _patch_load_config(monkeypatch, cfg)
 
     def fake_init(
         path: str,
@@ -1968,7 +2220,7 @@ def test_cli_input_override_and_cleanup(
     ) -> types.SimpleNamespace:
         return types.SimpleNamespace(width=1280, height=720, fps_num=24000, fps_den=1001, num_frames=1800)
 
-    monkeypatch.setattr(frame_compare.vs_core, "init_clip", fake_init)
+    _patch_vs_core(monkeypatch, "init_clip", fake_init)
     def fake_select(
         clip: types.SimpleNamespace,
         cfg: AnalysisConfig,
@@ -1984,7 +2236,7 @@ def test_cli_input_override_and_cleanup(
     ) -> list[int]:
         return [7]
 
-    monkeypatch.setattr(frame_compare, "select_frames", fake_select)
+    _patch_runner_module(monkeypatch, "select_frames", fake_select)
 
     def fake_generate(
         clips: list[types.SimpleNamespace],
@@ -2001,7 +2253,7 @@ def test_cli_input_override_and_cleanup(
         path.write_text("img", encoding="utf-8")
         return [str(path)]
 
-    monkeypatch.setattr(frame_compare, "generate_screenshots", fake_generate)
+    _patch_runner_module(monkeypatch, "generate_screenshots", fake_generate)
 
     uploads: list[tuple[list[str], Path]] = []
 
@@ -2014,11 +2266,11 @@ def test_cli_input_override_and_cleanup(
         uploads.append((image_paths, screen_dir))
         return "https://slow.pics/c/abc/def"
 
-    monkeypatch.setattr(frame_compare, "upload_comparison", fake_upload)
+    _patch_runner_module(monkeypatch, "upload_comparison", fake_upload)
 
     result: Result = runner.invoke(
         frame_compare.main,
-        ["--config", "dummy", "--input", str(override_dir), "--no-color"],
+        ["--input", str(override_dir), "--no-color"],
         catch_exceptions=False,
     )
 
@@ -2029,21 +2281,480 @@ def test_cli_input_override_and_cleanup(
     assert uploads[0][1] == screen_dir
 
 
-def test_cli_tmdb_resolution_populates_slowpics(
+def test_runner_auto_upload_cleans_screens_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    workspace = tmp_path / "workspace"
+    media_root = workspace / "media"
+    workspace.mkdir(parents=True, exist_ok=True)
+    media_root.mkdir(parents=True, exist_ok=True)
+    for name in ("Alpha.mkv", "Beta.mkv"):
+        (media_root / name).write_bytes(b"data")
+
+    cfg = _make_config(media_root)
+    cfg.tmdb.api_key = "token"
+    cfg.analysis.frame_count_dark = 0
+    cfg.analysis.frame_count_bright = 0
+    cfg.analysis.frame_count_motion = 0
+    cfg.analysis.random_frames = 0
+    cfg.analysis.save_frames_data = False
+    cfg.report.enable = False
+    cfg.slowpics.auto_upload = True
+    cfg.slowpics.delete_screen_dir_after_upload = True
+    cfg.slowpics.open_in_browser = False
+    cfg.slowpics.create_url_shortcut = False
+
+    preflight = _make_runner_preflight(workspace, media_root, cfg)
+    monkeypatch.setattr(runner_module.core, "_prepare_preflight", lambda **_: preflight)
+
+    files = [media_root / "Alpha.mkv", media_root / "Beta.mkv"]
+    metadata = [{"label": "Alpha"}, {"label": "Beta"}]
+    plans = [
+        core_module._ClipPlan(path=files[0], metadata={"label": "Alpha"}),
+        core_module._ClipPlan(path=files[1], metadata={"label": "Beta"}),
+    ]
+    plans[0].use_as_reference = True
+
+    monkeypatch.setattr(runner_module.core, "_discover_media", lambda _root: list(files))
+    monkeypatch.setattr(runner_module.core, "_parse_metadata", lambda *_: list(metadata))
+    monkeypatch.setattr(runner_module.core, "_build_plans", lambda *_: list(plans))
+    monkeypatch.setattr(runner_module.core, "_pick_analyze_file", lambda *_args, **_kwargs: files[0])
+
+    cache_info = FrameMetricsCacheInfo(
+        path=workspace / cfg.analysis.frame_data_filename,
+        files=[file.name for file in files],
+        analyzed_file=files[0].name,
+        release_group="",
+        trim_start=0,
+        trim_end=None,
+        fps_num=24000,
+        fps_den=1001,
+    )
+    monkeypatch.setattr(runner_module.core, "_build_cache_info", lambda *_: cache_info)
+    monkeypatch.setattr(runner_module.core, "_maybe_apply_audio_alignment", lambda *args, **kwargs: (None, None))
+
+    monkeypatch.setattr(runner_module.vs_core, "configure", lambda **_: None)
+    monkeypatch.setattr(runner_module.vs_core, "set_ram_limit", lambda *_: None)
+
+    def fake_init_clip(*_args, **_kwargs):
+        return types.SimpleNamespace(
+            width=1280,
+            height=720,
+            fps_num=24000,
+            fps_den=1001,
+            num_frames=120,
+        )
+
+    monkeypatch.setattr(runner_module.vs_core, "init_clip", fake_init_clip)
+
+    def fake_select(
+        *_args,
+        **_kwargs,
+    ):
+        selection_details = {
+            10: SelectionDetail(frame_index=10, label="Auto", score=None, source="Test", timecode="00:00:10.0")
+        }
+        return [10], {10: "Auto"}, selection_details
+
+    monkeypatch.setattr(runner_module, "select_frames", fake_select)
+    monkeypatch.setattr(runner_module, "selection_details_to_json", _selection_details_to_json)
+    monkeypatch.setattr(
+        runner_module,
+        "probe_cached_metrics",
+        lambda *_: CacheLoadResult(metrics=None, status="missing", reason=None),
+    )
+    monkeypatch.setattr(runner_module, "selection_hash_for_config", lambda *_: "selection-hash")
+    monkeypatch.setattr(runner_module, "write_selection_cache_file", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner_module, "export_selection_metadata", lambda *args, **kwargs: None)
+
+    def fake_generate(
+        clips: Sequence[object],
+        frames: Sequence[int],
+        files_for_run: Sequence[Path],
+        metadata_list: Sequence[Mapping[str, Any]],
+        out_dir: Path,
+        cfg_screens: ScreenshotConfig,
+        color_cfg: ColorConfig,
+        **kwargs: Any,
+    ) -> list[str]:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        shot = out_dir / "shot.png"
+        shot.write_text("data", encoding="utf-8")
+        return [str(shot)]
+
+    monkeypatch.setattr(runner_module, "generate_screenshots", fake_generate)
+
+    uploads: list[tuple[list[str], Path]] = []
+
+    def fake_upload(image_paths, screen_dir, cfg_slow, **kwargs):
+        uploads.append((list(image_paths), screen_dir))
+        return "https://slow.pics/test"
+
+    monkeypatch.setattr(runner_module, "upload_comparison", fake_upload)
+    monkeypatch.setattr(runner_module, "build_shortcut_filename", lambda *_: "slowpics.url")
+
+    monkeypatch.setattr(runner_module, "impl", frame_compare, raising=False)
+    request = runner_module.RunRequest(
+        config_path=str(preflight.config_path),
+        root_override=str(workspace),
+    )
+    result = runner_module.run(request)
+
+    assert uploads, "Slow.pics upload should be invoked"
+    assert result.slowpics_url == "https://slow.pics/test"
+    assert result.json_tail is not None
+    slowpics_json = _expect_mapping(result.json_tail["slowpics"])
+    assert slowpics_json["url"] == "https://slow.pics/test"
+
+
+def test_runner_quiet_uses_null_reporter(
+    monkeypatch: pytest.MonkeyPatch, cli_runner_env: _CliRunnerEnv
+) -> None:
+    """When quiet=True the runner should instantiate the null reporter instead of the CLI renderer."""
+
+    cli_runner_env.reinstall()
+    sentinel = RuntimeError("stop")
+
+    def _raise_stop(*_: object) -> list[Path]:
+        raise sentinel
+
+    _patch_core_helper(monkeypatch, "_discover_media", _raise_stop)
+
+    created: list[str] = []
+
+    class _RecorderNull(runner_module.NullCliOutputManager):
+        def __init__(self, **kwargs: Any) -> None:
+            created.append("null")
+            super().__init__(**kwargs)
+
+    class _RecorderCli(CliOutputManager):
+        def __init__(self, **kwargs: Any) -> None:
+            created.append("cli")
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr(runner_module, "NullCliOutputManager", _RecorderNull)
+    monkeypatch.setattr(runner_module, "CliOutputManager", _RecorderCli)
+    monkeypatch.setattr(frame_compare, "NullCliOutputManager", _RecorderNull)
+    monkeypatch.setattr(frame_compare, "CliOutputManager", _RecorderCli)
+
+    request = runner_module.RunRequest(
+        config_path=str(cli_runner_env.config_path),
+        quiet=True,
+    )
+
+    with pytest.raises(RuntimeError, match="stop"):
+        runner_module.run(request)
+
+    assert created == ["null"]
+
+
+def test_runner_reporter_factory_overrides_default(
+    monkeypatch: pytest.MonkeyPatch, cli_runner_env: _CliRunnerEnv
+) -> None:
+    """Programmatic callers can inject a custom reporter factory."""
+
+    cli_runner_env.reinstall()
+    sentinel = RuntimeError("stop")
+
+    def _raise_stop(*_: object) -> list[Path]:
+        raise sentinel
+
+    _patch_core_helper(monkeypatch, "_discover_media", _raise_stop)
+
+    class _FailingReporter:
+        def __init__(self, *args: object, **kwargs: object) -> None:  # pragma: no cover - should not run
+            raise AssertionError("Default CliOutputManager should not be used when a reporter factory is provided")
+
+    monkeypatch.setattr(runner_module, "CliOutputManager", _FailingReporter)
+
+    factory_calls: list[Path] = []
+
+    def reporter_factory(
+        request: runner_module.RunRequest,
+        layout_path: Path,
+        console: Console,
+    ) -> CliOutputManager:
+        factory_calls.append(layout_path)
+        return CliOutputManager(
+            quiet=request.quiet,
+            verbose=request.verbose,
+            no_color=request.no_color,
+            layout_path=layout_path,
+            console=console,
+        )
+
+    request = runner_module.RunRequest(
+        config_path=str(cli_runner_env.config_path),
+        reporter_factory=reporter_factory,
+    )
+
+    with pytest.raises(RuntimeError, match="stop"):
+        runner_module.run(request)
+
+    assert len(factory_calls) == 1
+
+
+def test_runner_audio_alignment_summary_passthrough(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    first = tmp_path / "SourceA.mkv"
-    second = tmp_path / "SourceB.mkv"
+    workspace = tmp_path / "workspace"
+    media_root = workspace / "media"
+    workspace.mkdir(parents=True, exist_ok=True)
+    media_root.mkdir(parents=True, exist_ok=True)
+    for name in ("Reference.mkv", "Target.mkv"):
+        (media_root / name).write_bytes(b"data")
+
+    cfg = _make_config(media_root)
+    cfg.tmdb.api_key = "token"
+    cfg.slowpics.auto_upload = False
+    cfg.analysis.frame_count_dark = 0
+    cfg.analysis.frame_count_bright = 0
+    cfg.analysis.frame_count_motion = 0
+    cfg.analysis.random_frames = 0
+    cfg.analysis.save_frames_data = False
+
+    preflight = _make_runner_preflight(workspace, media_root, cfg)
+    monkeypatch.setattr(runner_module.core, "_prepare_preflight", lambda **_: preflight)
+
+    files = [media_root / "Reference.mkv", media_root / "Target.mkv"]
+    metadata = [{"label": "Reference"}, {"label": "Target"}]
+    plans = [
+        core_module._ClipPlan(path=files[0], metadata={"label": "Reference"}),
+        core_module._ClipPlan(path=files[1], metadata={"label": "Target"}),
+    ]
+    plans[0].use_as_reference = True
+
+    monkeypatch.setattr(runner_module.core, "_discover_media", lambda _root: list(files))
+    monkeypatch.setattr(runner_module.core, "_parse_metadata", lambda *_: list(metadata))
+    monkeypatch.setattr(runner_module.core, "_build_plans", lambda *_: list(plans))
+    monkeypatch.setattr(runner_module.core, "_pick_analyze_file", lambda *_args, **_kwargs: files[0])
+
+    cache_info = FrameMetricsCacheInfo(
+        path=workspace / cfg.analysis.frame_data_filename,
+        files=[file.name for file in files],
+        analyzed_file=files[0].name,
+        release_group="",
+        trim_start=0,
+        trim_end=None,
+        fps_num=24000,
+        fps_den=1001,
+    )
+    monkeypatch.setattr(runner_module.core, "_build_cache_info", lambda *_: cache_info)
+
+    summary = _AudioAlignmentSummary(
+        offsets_path=workspace / "generated.audio_offsets.toml",
+        reference_name="Reference",
+        measurements=[],
+        applied_frames={files[1].name: 8},
+        baseline_shift=0,
+        statuses={files[1].name: "manual"},
+        reference_plan=plans[0],
+        final_adjustments={files[1].name: 8},
+        swap_details={},
+        suggested_frames={},
+        suggestion_mode=False,
+        manual_trim_starts={files[1].name: 8},
+        vspreview_manual_offsets={files[1].name: 8},
+        vspreview_manual_deltas={files[1].name: 8},
+        measured_offsets={},
+    )
+    display = _AudioAlignmentDisplayData(
+        stream_lines=["Reference stream"],
+        estimation_line="Audio offsets reused from VSPreview",
+        offset_lines=["VSPreview manual trim reused"],
+        offsets_file_line="Offsets file: generated.audio_offsets.toml",
+        json_reference_stream="Reference",
+        json_target_streams={files[1].name: "0"},
+        json_offsets_sec={files[1].name: 0.333},
+        json_offsets_frames={files[1].name: 8},
+        warnings=[],
+        preview_paths=[],
+        confirmation=None,
+        correlations={files[1].name: 0.98},
+        threshold=0.55,
+        manual_trim_lines=["Target -> 8f"],
+        measurements={},
+    )
+
+    monkeypatch.setattr(
+        runner_module.core,
+        "_maybe_apply_audio_alignment",
+        lambda *args, **kwargs: (summary, display),
+    )
+
+    monkeypatch.setattr(runner_module.vs_core, "configure", lambda **_: None)
+    monkeypatch.setattr(runner_module.vs_core, "set_ram_limit", lambda *_: None)
+    monkeypatch.setattr(runner_module.vs_core, "init_clip", lambda *args, **kwargs: types.SimpleNamespace(num_frames=120, fps_num=24000, fps_den=1001, width=1280, height=720))
+    monkeypatch.setattr(
+        runner_module,
+        "probe_cached_metrics",
+        lambda *_: CacheLoadResult(metrics=None, status="missing", reason=None),
+    )
+    monkeypatch.setattr(runner_module, "selection_hash_for_config", lambda *_: "selection-hash")
+    monkeypatch.setattr(runner_module, "write_selection_cache_file", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner_module, "export_selection_metadata", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        runner_module,
+        "select_frames",
+        lambda *args, **kwargs: ([5], {5: "Auto"}, {5: SelectionDetail(frame_index=5, label="Auto", score=None, source="Test", timecode="00:00:05.0")}),
+    )
+    monkeypatch.setattr(runner_module, "selection_details_to_json", _selection_details_to_json)
+    monkeypatch.setattr(runner_module, "generate_screenshots", lambda *args, **kwargs: [str(media_root / "shot.png")])
+
+    monkeypatch.setattr(runner_module, "impl", frame_compare, raising=False)
+    request = runner_module.RunRequest(
+        config_path=str(preflight.config_path),
+        root_override=str(workspace),
+    )
+    result = runner_module.run(request)
+
+    assert result.json_tail is not None
+    audio_json = _expect_mapping(result.json_tail["audio_alignment"])
+    manual_trims = cast(dict[str, int], audio_json.get("manual_trim_starts"))
+    assert manual_trims[files[1].name] == 8
+    assert any("VSPreview" in line for line in audio_json.get("offset_lines", []))
+    assert audio_json.get("vspreview_invoked") is False
+    assert audio_json.get("offsets_sec").get(files[1].name) == pytest.approx(0.333)  # type: ignore[arg-type]
+
+
+def test_runner_handles_existing_event_loop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    workspace = tmp_path / "workspace"
+    media_root = workspace / "media"
+    workspace.mkdir(parents=True, exist_ok=True)
+    media_root.mkdir(parents=True, exist_ok=True)
+    for name in ("Alpha.mkv", "Beta.mkv"):
+        (media_root / name).write_bytes(b"data")
+
+    cfg = _make_config(media_root)
+    cfg.tmdb.api_key = "token"
+    cfg.slowpics.auto_upload = False
+    cfg.analysis.frame_count_dark = 0
+    cfg.analysis.frame_count_bright = 0
+    cfg.analysis.frame_count_motion = 0
+    cfg.analysis.random_frames = 0
+    cfg.analysis.save_frames_data = False
+
+    preflight = _make_runner_preflight(workspace, media_root, cfg)
+    monkeypatch.setattr(runner_module.core, "_prepare_preflight", lambda **_: preflight)
+
+    files = [media_root / "Alpha.mkv", media_root / "Beta.mkv"]
+    metadata = [{"label": "Alpha"}, {"label": "Beta"}]
+    plans = [
+        core_module._ClipPlan(path=files[0], metadata={"label": "Alpha"}),
+        core_module._ClipPlan(path=files[1], metadata={"label": "Beta"}),
+    ]
+    plans[0].use_as_reference = True
+
+    monkeypatch.setattr(runner_module.core, "_discover_media", lambda _root: list(files))
+    monkeypatch.setattr(runner_module.core, "_parse_metadata", lambda *_: list(metadata))
+    monkeypatch.setattr(runner_module.core, "_build_plans", lambda *_: list(plans))
+    monkeypatch.setattr(runner_module.core, "_pick_analyze_file", lambda *_args, **_kwargs: files[0])
+
+    cache_info = FrameMetricsCacheInfo(
+        path=workspace / cfg.analysis.frame_data_filename,
+        files=[file.name for file in files],
+        analyzed_file=files[0].name,
+        release_group="",
+        trim_start=0,
+        trim_end=None,
+        fps_num=24000,
+        fps_den=1001,
+    )
+    monkeypatch.setattr(runner_module.core, "_build_cache_info", lambda *_: cache_info)
+    monkeypatch.setattr(runner_module.core, "_maybe_apply_audio_alignment", lambda *args, **kwargs: (None, None))
+
+    monkeypatch.setattr(runner_module.vs_core, "configure", lambda **_: None)
+    monkeypatch.setattr(runner_module.vs_core, "set_ram_limit", lambda *_: None)
+    monkeypatch.setattr(
+        runner_module.vs_core,
+        "init_clip",
+        lambda *args, **kwargs: types.SimpleNamespace(
+            width=1280,
+            height=720,
+            fps_num=24000,
+            fps_den=1001,
+            num_frames=120,
+        ),
+    )
+
+    def fake_select(*_args, **_kwargs):
+        selection_details = {
+            10: SelectionDetail(
+                frame_index=10,
+                label="Auto",
+                score=None,
+                source="Test",
+                timecode="00:00:10.0",
+            )
+        }
+        return [10], {10: "Auto"}, selection_details
+
+    monkeypatch.setattr(runner_module, "select_frames", fake_select)
+    monkeypatch.setattr(runner_module, "selection_details_to_json", _selection_details_to_json)
+    monkeypatch.setattr(
+        runner_module,
+        "probe_cached_metrics",
+        lambda *_: CacheLoadResult(metrics=None, status="missing", reason=None),
+    )
+    monkeypatch.setattr(runner_module, "selection_hash_for_config", lambda *_: "selection-hash")
+    monkeypatch.setattr(runner_module, "write_selection_cache_file", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner_module, "export_selection_metadata", lambda *args, **kwargs: None)
+
+    def fake_generate(
+        clips: Sequence[object],
+        frames: Sequence[int],
+        files_for_run: Sequence[Path],
+        metadata_list: Sequence[Mapping[str, Any]],
+        out_dir: Path,
+        cfg_screens: ScreenshotConfig,
+        color_cfg: ColorConfig,
+        **kwargs: Any,
+    ) -> list[str]:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        shot = out_dir / "shot.png"
+        shot.write_text("data", encoding="utf-8")
+        return [str(shot)]
+
+    monkeypatch.setattr(runner_module, "generate_screenshots", fake_generate)
+
+    tmdb_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        runner_module,
+        "_resolve_tmdb_blocking",
+        lambda **kwargs: tmdb_calls.append(kwargs) or None,
+    )
+
+    request = runner_module.RunRequest(
+        config_path=str(preflight.config_path),
+        root_override=str(workspace),
+    )
+
+    async def _invoke() -> runner_module.RunResult:
+        return runner_module.run(request)
+
+    loop = asyncio.new_event_loop()
+    try:
+        result = loop.run_until_complete(_invoke())
+    finally:
+        loop.close()
+    assert result.frames == [10]
+    assert tmdb_calls, "TMDB helper should be invoked once"
+
+
+def test_cli_tmdb_resolution_populates_slowpics(
+    monkeypatch: pytest.MonkeyPatch,
+    cli_runner_env: _CliRunnerEnv,
+) -> None:
+    first = cli_runner_env.media_root / "SourceA.mkv"
+    second = cli_runner_env.media_root / "SourceB.mkv"
     for file in (first, second):
         file.write_bytes(b"data")
 
-    cfg = _make_config(tmp_path)
+    cfg = _make_config(cli_runner_env.media_root)
     cfg.tmdb.api_key = "token"
     cfg.slowpics.auto_upload = True
     cfg.slowpics.collection_name = "${Title} (${Year}) [${TMDBCategory}]"
     cfg.slowpics.delete_screen_dir_after_upload = False
 
-    monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
+    cli_runner_env.reinstall(cfg)
 
     def fake_parse(name: str, **_: object) -> dict[str, str]:
         return {
@@ -2057,7 +2768,7 @@ def test_cli_tmdb_resolution_populates_slowpics(
             "tvdb_id": "",
         }
 
-    monkeypatch.setattr(frame_compare, "parse_filename_metadata", fake_parse)
+    _patch_core_helper(monkeypatch, "parse_filename_metadata", fake_parse)
 
     candidate = TMDBCandidate(
         category="MOVIE",
@@ -2076,8 +2787,8 @@ def test_cli_tmdb_resolution_populates_slowpics(
     async def fake_resolve(*_, **__):  # pragma: no cover - simple stub
         return resolution
 
-    monkeypatch.setattr(frame_compare, "resolve_tmdb", fake_resolve)
-    monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit: None)
+    _patch_runner_module(monkeypatch, "resolve_tmdb", fake_resolve)
+    _patch_vs_core(monkeypatch, "set_ram_limit", lambda limit: None)
 
     def fake_init(
         path: str,
@@ -2096,7 +2807,7 @@ def test_cli_tmdb_resolution_populates_slowpics(
             num_frames=1800,
         )
 
-    monkeypatch.setattr(frame_compare.vs_core, "init_clip", fake_init)
+    _patch_vs_core(monkeypatch, "init_clip", fake_init)
 
     def fake_select(
         clip: types.SimpleNamespace,
@@ -2114,7 +2825,7 @@ def test_cli_tmdb_resolution_populates_slowpics(
         assert frame_window is not None
         return [12, 24]
 
-    monkeypatch.setattr(frame_compare, "select_frames", fake_select)
+    _patch_runner_module(monkeypatch, "select_frames", fake_select)
 
     def fake_generate(
         clips: list[types.SimpleNamespace],
@@ -2129,7 +2840,7 @@ def test_cli_tmdb_resolution_populates_slowpics(
         out_dir.mkdir(parents=True, exist_ok=True)
         return [str(out_dir / f"shot_{idx}.png") for idx in range(len(frames) * len(files))]
 
-    monkeypatch.setattr(frame_compare, "generate_screenshots", fake_generate)
+    _patch_runner_module(monkeypatch, "generate_screenshots", fake_generate)
 
     uploads: list[tuple[list[str], Path, str, str]] = []
 
@@ -2142,11 +2853,11 @@ def test_cli_tmdb_resolution_populates_slowpics(
         uploads.append((list(image_paths), screen_dir, cfg_slow.tmdb_id, cfg_slow.collection_name))
         return "https://slow.pics/c/example"
 
-    monkeypatch.setattr(frame_compare, "upload_comparison", fake_upload)
+    _patch_runner_module(monkeypatch, "upload_comparison", fake_upload)
 
-    monkeypatch.setattr(frame_compare, "Progress", DummyProgress)
+    _patch_runner_module(monkeypatch, "Progress", DummyProgress)
 
-    result = frame_compare.run_cli("dummy", None)
+    result = frame_compare.run_cli(None, None)
 
     assert uploads
     _, _, upload_tmdb_id, upload_collection = uploads[0]
@@ -2169,17 +2880,18 @@ def test_cli_tmdb_resolution_populates_slowpics(
 
 
 def test_run_cli_coalesces_duplicate_pivot_logs(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
+    cli_runner_env: _CliRunnerEnv,
 ) -> None:
     """Duplicate pivot notifications are emitted once per run."""
 
-    cfg = _make_config(tmp_path)
+    cfg = _make_config(cli_runner_env.media_root)
     cfg.analysis.save_frames_data = False
 
-    monkeypatch.setattr(frame_compare, "load_config", lambda *_: cfg)
+    cli_runner_env.reinstall(cfg)
 
     for name in ("Alpha.mkv", "Beta.mkv"):
-        (tmp_path / name).write_bytes(b"data")
+        (cli_runner_env.media_root / name).write_bytes(b"data")
 
     def fake_parse(name: str, **_: object) -> dict[str, str]:
         return {
@@ -2192,9 +2904,9 @@ def test_run_cli_coalesces_duplicate_pivot_logs(
             "tvdb_id": "",
         }
 
-    monkeypatch.setattr(frame_compare, "parse_filename_metadata", fake_parse)
-    monkeypatch.setattr(frame_compare.vs_core, "configure", lambda *args, **kwargs: None)
-    monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda *args, **kwargs: None)
+    _patch_core_helper(monkeypatch, "parse_filename_metadata", fake_parse)
+    _patch_vs_core(monkeypatch, "configure", lambda *args, **kwargs: None)
+    _patch_vs_core(monkeypatch, "set_ram_limit", lambda *args, **kwargs: None)
 
     def fake_init_clip(
         path: str | Path,
@@ -2214,8 +2926,8 @@ def test_run_cli_coalesces_duplicate_pivot_logs(
             num_frames=120,
         )
 
-    monkeypatch.setattr(frame_compare.vs_core, "init_clip", fake_init_clip)
-    monkeypatch.setattr(frame_compare.vs_core, "resolve_effective_tonemap", lambda _cfg: {})
+    _patch_vs_core(monkeypatch, "init_clip", fake_init_clip)
+    _patch_vs_core(monkeypatch, "resolve_effective_tonemap", lambda _cfg: {})
 
     def fake_select(
         clip: types.SimpleNamespace,
@@ -2252,11 +2964,9 @@ def test_run_cli_coalesces_duplicate_pivot_logs(
         }
         return frames, categories, details
 
-    monkeypatch.setattr(frame_compare, "select_frames", fake_select)
+    _patch_runner_module(monkeypatch, "select_frames", fake_select)
 
-    base_console = frame_compare.Console
-
-    class RecordingConsole(base_console):  # type: ignore[misc]
+    class RecordingConsole(Console):
         pivot_logs: ClassVar[list[str]] = []
 
         def __init__(self, *args: object, **kwargs: object) -> None:
@@ -2287,11 +2997,11 @@ def test_run_cli_coalesces_duplicate_pivot_logs(
         out_dir.mkdir(parents=True, exist_ok=True)
         return [str(out_dir / f"shot_{idx}.png") for idx in range(len(frames) * len(files))]
 
-    monkeypatch.setattr(frame_compare, "generate_screenshots", fake_generate)
-    monkeypatch.setattr(frame_compare, "export_selection_metadata", lambda *args, **kwargs: None)
-    monkeypatch.setattr(frame_compare, "write_selection_cache_file", lambda *args, **kwargs: None)
+    _patch_runner_module(monkeypatch, "generate_screenshots", fake_generate)
+    _patch_runner_module(monkeypatch, "export_selection_metadata", lambda *args, **kwargs: None)
+    _patch_runner_module(monkeypatch, "write_selection_cache_file", lambda *args, **kwargs: None)
 
-    result = frame_compare.run_cli("dummy-config")
+    result = frame_compare.run_cli(None, None)
 
     assert result.image_paths
     assert RecordingConsole.pivot_logs == [
@@ -2300,20 +3010,21 @@ def test_run_cli_coalesces_duplicate_pivot_logs(
     ]
 
 def test_cli_tmdb_resolution_sets_default_collection_name(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
+    cli_runner_env: _CliRunnerEnv,
 ) -> None:
-    first = tmp_path / "SourceA.mkv"
-    second = tmp_path / "SourceB.mkv"
+    first = cli_runner_env.media_root / "SourceA.mkv"
+    second = cli_runner_env.media_root / "SourceB.mkv"
     for file in (first, second):
         file.write_bytes(b"data")
 
-    cfg = _make_config(tmp_path)
+    cfg = _make_config(cli_runner_env.media_root)
     cfg.tmdb.api_key = "token"
     cfg.slowpics.auto_upload = True
     cfg.slowpics.collection_name = ""
     cfg.slowpics.delete_screen_dir_after_upload = False
 
-    monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
+    cli_runner_env.reinstall(cfg)
 
     def fake_parse(name: str, **_: object) -> dict[str, str]:
         return {
@@ -2327,7 +3038,7 @@ def test_cli_tmdb_resolution_sets_default_collection_name(
             "tvdb_id": "",
         }
 
-    monkeypatch.setattr(frame_compare, "parse_filename_metadata", fake_parse)
+    _patch_core_helper(monkeypatch, "parse_filename_metadata", fake_parse)
 
     candidate = TMDBCandidate(
         category="MOVIE",
@@ -2346,19 +3057,23 @@ def test_cli_tmdb_resolution_sets_default_collection_name(
     async def fake_resolve(*_, **__):
         return resolution
 
-    monkeypatch.setattr(frame_compare, "resolve_tmdb", fake_resolve)
-    monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit: None)
-    monkeypatch.setattr(
-        frame_compare.vs_core,
+    _patch_runner_module(monkeypatch, "resolve_tmdb", fake_resolve)
+    _patch_vs_core(monkeypatch, "set_ram_limit", lambda limit: None)
+    _patch_vs_core(
+        monkeypatch,
         "init_clip",
         lambda *_, **__: types.SimpleNamespace(width=1280, height=720, fps_num=24000, fps_den=1001, num_frames=1800),
     )
-    monkeypatch.setattr(frame_compare, "select_frames", lambda *_, **__: [10, 20])
-    monkeypatch.setattr(frame_compare, "generate_screenshots", lambda *args, **kwargs: [str(tmp_path / "shot.png")])
-    monkeypatch.setattr(frame_compare, "upload_comparison", lambda *args, **kwargs: "https://slow.pics/c/example")
-    monkeypatch.setattr(frame_compare, "Progress", DummyProgress)
+    _patch_runner_module(monkeypatch, "select_frames", lambda *_, **__: [10, 20])
+    _patch_runner_module(
+        monkeypatch,
+        "generate_screenshots",
+        lambda *args, **kwargs: [str(cli_runner_env.media_root / "shot.png")],
+    )
+    _patch_runner_module(monkeypatch, "upload_comparison", lambda *args, **kwargs: "https://slow.pics/c/example")
+    _patch_runner_module(monkeypatch, "Progress", DummyProgress)
 
-    result = frame_compare.run_cli("dummy", None)
+    result = frame_compare.run_cli(None, None)
 
     assert result.config.slowpics.collection_name.startswith("Resolved Title (2023)")
     assert result.config.slowpics.tmdb_id == "12345"
@@ -2375,20 +3090,21 @@ def test_cli_tmdb_resolution_sets_default_collection_name(
 
 
 def test_collection_suffix_appended(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
+    cli_runner_env: _CliRunnerEnv,
 ) -> None:
-    first = tmp_path / "Movie.mkv"
-    second = tmp_path / "Movie2.mkv"
+    first = cli_runner_env.media_root / "Movie.mkv"
+    second = cli_runner_env.media_root / "Movie2.mkv"
     for file_path in (first, second):
         file_path.write_bytes(b"data")
 
-    cfg = _make_config(tmp_path)
+    cfg = _make_config(cli_runner_env.media_root)
     cfg.tmdb.api_key = "token"
     cfg.slowpics.auto_upload = False
     cfg.slowpics.collection_name = ""
     cfg.slowpics.collection_suffix = "[Hybrid]"
 
-    monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
+    cli_runner_env.reinstall(cfg)
 
     def fake_parse(name: str, **_: object) -> dict[str, str]:
         return {
@@ -2402,7 +3118,7 @@ def test_collection_suffix_appended(
             "tvdb_id": "",
         }
 
-    monkeypatch.setattr(frame_compare, "parse_filename_metadata", fake_parse)
+    _patch_core_helper(monkeypatch, "parse_filename_metadata", fake_parse)
 
     candidate = TMDBCandidate(
         category="MOVIE",
@@ -2421,14 +3137,18 @@ def test_collection_suffix_appended(
     async def fake_resolve(*_, **__):
         return resolution
 
-    monkeypatch.setattr(frame_compare, "resolve_tmdb", fake_resolve)
-    monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit: None)
-    monkeypatch.setattr(frame_compare.vs_core, "init_clip", lambda *_, **__: types.SimpleNamespace(width=1280, height=720, fps_num=24000, fps_den=1001, num_frames=1200))
-    monkeypatch.setattr(frame_compare, "select_frames", lambda *_, **__: [5, 15])
-    monkeypatch.setattr(frame_compare, "generate_screenshots", lambda *args, **kwargs: [str(tmp_path / "shot.png")])
-    monkeypatch.setattr(frame_compare, "Progress", DummyProgress)
+    _patch_runner_module(monkeypatch, "resolve_tmdb", fake_resolve)
+    _patch_vs_core(monkeypatch, "set_ram_limit", lambda limit: None)
+    _patch_vs_core(monkeypatch, "init_clip", lambda *_, **__: types.SimpleNamespace(width=1280, height=720, fps_num=24000, fps_den=1001, num_frames=1200))
+    _patch_runner_module(monkeypatch, "select_frames", lambda *_, **__: [5, 15])
+    _patch_runner_module(
+        monkeypatch,
+        "generate_screenshots",
+        lambda *args, **kwargs: [str(cli_runner_env.media_root / "shot.png")],
+    )
+    _patch_runner_module(monkeypatch, "Progress", DummyProgress)
 
-    result = frame_compare.run_cli("dummy", None)
+    result = frame_compare.run_cli(None, None)
 
     assert result.config.slowpics.collection_name == "Sample Movie (2021) [Hybrid]"
     assert result.json_tail is not None
@@ -2442,19 +3162,20 @@ def test_collection_suffix_appended(
     assert inputs_json["collection_name"] == "Sample Movie (2021) [Hybrid]"
 
 def test_cli_tmdb_manual_override(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
+    cli_runner_env: _CliRunnerEnv,
 ) -> None:
-    first = tmp_path / "Alpha.mkv"
-    second = tmp_path / "Beta.mkv"
+    first = cli_runner_env.media_root / "Alpha.mkv"
+    second = cli_runner_env.media_root / "Beta.mkv"
     for file in (first, second):
         file.write_bytes(b"data")
 
-    cfg = _make_config(tmp_path)
+    cfg = _make_config(cli_runner_env.media_root)
     cfg.tmdb.api_key = "token"
     cfg.tmdb.unattended = False
     cfg.slowpics.collection_name = "${Label}"
 
-    monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
+    cli_runner_env.reinstall(cfg)
 
     def fake_parse(name: str, **_: object) -> dict[str, str]:
         return {
@@ -2468,7 +3189,7 @@ def test_cli_tmdb_manual_override(
             "tvdb_id": "",
         }
 
-    monkeypatch.setattr(frame_compare, "parse_filename_metadata", fake_parse)
+    _patch_core_helper(monkeypatch, "parse_filename_metadata", fake_parse)
 
     candidate = TMDBCandidate(
         category="TV",
@@ -2486,19 +3207,19 @@ def test_cli_tmdb_manual_override(
     def fake_resolve(*_: object, **__: object) -> None:
         raise TMDBAmbiguityError([candidate])
 
-    monkeypatch.setattr(frame_compare, "resolve_tmdb", fake_resolve)
-    monkeypatch.setattr(frame_compare, "_prompt_manual_tmdb", lambda candidates: ("TV", "9999"))
-    monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit: None)
-    monkeypatch.setattr(
-        frame_compare.vs_core,
+    _patch_runner_module(monkeypatch, "resolve_tmdb", fake_resolve)
+    _patch_core_helper(monkeypatch, "_prompt_manual_tmdb", lambda candidates: ("TV", "9999"))
+    _patch_vs_core(monkeypatch, "set_ram_limit", lambda limit: None)
+    _patch_vs_core(
+        monkeypatch,
         "init_clip",
         lambda *_, **__: types.SimpleNamespace(width=1920, height=1080, fps_num=24000, fps_den=1001, num_frames=2400),
     )
-    monkeypatch.setattr(frame_compare, "select_frames", lambda *_, **__: [3, 6])
-    monkeypatch.setattr(frame_compare, "generate_screenshots", lambda *args, **kwargs: [str(tmp_path / "img.png")])
-    monkeypatch.setattr(frame_compare, "Progress", DummyProgress)
+    _patch_runner_module(monkeypatch, "select_frames", lambda *_, **__: [3, 6])
+    _patch_runner_module(monkeypatch, "generate_screenshots", lambda *args, **kwargs: [str(cli_runner_env.media_root / "img.png")])
+    _patch_runner_module(monkeypatch, "Progress", DummyProgress)
 
-    result = frame_compare.run_cli("dummy", None)
+    result = frame_compare.run_cli(None, None)
 
     assert result.config.slowpics.tmdb_id == "9999"
     assert result.config.slowpics.tmdb_category == "TV"
@@ -2506,19 +3227,20 @@ def test_cli_tmdb_manual_override(
 
 
 def test_cli_tmdb_confirmation_manual_id(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
+    cli_runner_env: _CliRunnerEnv,
 ) -> None:
-    first = tmp_path / "Alpha.mkv"
-    second = tmp_path / "Beta.mkv"
+    first = cli_runner_env.media_root / "Alpha.mkv"
+    second = cli_runner_env.media_root / "Beta.mkv"
     for file in (first, second):
         file.write_bytes(b"data")
 
-    cfg = _make_config(tmp_path)
+    cfg = _make_config(cli_runner_env.media_root)
     cfg.tmdb.api_key = "token"
     cfg.tmdb.unattended = False
     cfg.tmdb.confirm_matches = True
 
-    monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
+    cli_runner_env.reinstall(cfg)
 
     def fake_parse(name: str, **_: object) -> dict[str, str]:
         return {
@@ -2532,7 +3254,7 @@ def test_cli_tmdb_confirmation_manual_id(
             "tvdb_id": "",
         }
 
-    monkeypatch.setattr(frame_compare, "parse_filename_metadata", fake_parse)
+    _patch_core_helper(monkeypatch, "parse_filename_metadata", fake_parse)
 
     candidate = TMDBCandidate(
         category="MOVIE",
@@ -2551,38 +3273,39 @@ def test_cli_tmdb_confirmation_manual_id(
     async def fake_resolve(*_: object, **__: object) -> TMDBResolution:
         return resolution
 
-    monkeypatch.setattr(frame_compare, "resolve_tmdb", fake_resolve)
-    monkeypatch.setattr(frame_compare, "_prompt_tmdb_confirmation", lambda res: (True, ("MOVIE", "999")))
-    monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit: None)
-    monkeypatch.setattr(
-        frame_compare.vs_core,
+    _patch_runner_module(monkeypatch, "resolve_tmdb", fake_resolve)
+    _patch_core_helper(monkeypatch, "_prompt_tmdb_confirmation", lambda res: (True, ("MOVIE", "999")))
+    _patch_vs_core(monkeypatch, "set_ram_limit", lambda limit: None)
+    _patch_vs_core(
+        monkeypatch,
         "init_clip",
         lambda *_, **__: types.SimpleNamespace(width=1920, height=1080, fps_num=24000, fps_den=1001, num_frames=2400),
     )
-    monkeypatch.setattr(frame_compare, "select_frames", lambda *_, **__: [1, 2])
-    monkeypatch.setattr(frame_compare, "generate_screenshots", lambda *args, **kwargs: [str(tmp_path / "img.png")])
-    monkeypatch.setattr(frame_compare, "Progress", DummyProgress)
+    _patch_runner_module(monkeypatch, "select_frames", lambda *_, **__: [1, 2])
+    _patch_runner_module(monkeypatch, "generate_screenshots", lambda *args, **kwargs: [str(cli_runner_env.media_root / "img.png")])
+    _patch_runner_module(monkeypatch, "Progress", DummyProgress)
 
-    result = frame_compare.run_cli("dummy", None)
+    result = frame_compare.run_cli(None, None)
 
     assert result.config.slowpics.tmdb_id == "999"
     assert result.config.slowpics.tmdb_category == "MOVIE"
 
 
 def test_cli_tmdb_confirmation_rejects(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
+    cli_runner_env: _CliRunnerEnv,
 ) -> None:
-    first = tmp_path / "Alpha.mkv"
-    second = tmp_path / "Beta.mkv"
+    first = cli_runner_env.media_root / "Alpha.mkv"
+    second = cli_runner_env.media_root / "Beta.mkv"
     for file in (first, second):
         file.write_bytes(b"data")
 
-    cfg = _make_config(tmp_path)
+    cfg = _make_config(cli_runner_env.media_root)
     cfg.tmdb.api_key = "token"
     cfg.tmdb.unattended = False
     cfg.tmdb.confirm_matches = True
 
-    monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
+    cli_runner_env.reinstall(cfg)
 
     def fake_parse(name: str, **_: object) -> dict[str, str]:
         return {
@@ -2596,7 +3319,7 @@ def test_cli_tmdb_confirmation_rejects(
             "tvdb_id": "",
         }
 
-    monkeypatch.setattr(frame_compare, "parse_filename_metadata", fake_parse)
+    _patch_core_helper(monkeypatch, "parse_filename_metadata", fake_parse)
 
     candidate = TMDBCandidate(
         category="MOVIE",
@@ -2615,15 +3338,15 @@ def test_cli_tmdb_confirmation_rejects(
     async def fake_resolve(*_: object, **__: object) -> TMDBResolution:
         return resolution
 
-    monkeypatch.setattr(frame_compare, "resolve_tmdb", fake_resolve)
-    monkeypatch.setattr(frame_compare, "_prompt_tmdb_confirmation", lambda res: (False, None))
-    monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit: None)
-    monkeypatch.setattr(frame_compare.vs_core, "init_clip", lambda *_, **__: types.SimpleNamespace(width=1280, height=720, fps_num=24000, fps_den=1001, num_frames=1800))
-    monkeypatch.setattr(frame_compare, "select_frames", lambda *_, **__: [1, 2])
-    monkeypatch.setattr(frame_compare, "generate_screenshots", lambda *args, **kwargs: [str(tmp_path / "img.png")])
-    monkeypatch.setattr(frame_compare, "Progress", DummyProgress)
+    _patch_runner_module(monkeypatch, "resolve_tmdb", fake_resolve)
+    _patch_core_helper(monkeypatch, "_prompt_tmdb_confirmation", lambda res: (False, None))
+    _patch_vs_core(monkeypatch, "set_ram_limit", lambda limit: None)
+    _patch_vs_core(monkeypatch, "init_clip", lambda *_, **__: types.SimpleNamespace(width=1280, height=720, fps_num=24000, fps_den=1001, num_frames=1800))
+    _patch_runner_module(monkeypatch, "select_frames", lambda *_, **__: [1, 2])
+    _patch_runner_module(monkeypatch, "generate_screenshots", lambda *args, **kwargs: [str(cli_runner_env.media_root / "img.png")])
+    _patch_runner_module(monkeypatch, "Progress", DummyProgress)
 
-    result = frame_compare.run_cli("dummy", None)
+    result = frame_compare.run_cli(None, None)
 
     assert result.config.slowpics.tmdb_id == ""
     assert result.config.slowpics.tmdb_category == ""
@@ -2631,14 +3354,16 @@ def test_cli_tmdb_confirmation_rejects(
 
 
 def test_audio_alignment_block_and_json(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runner: CliRunner
+    monkeypatch: pytest.MonkeyPatch,
+    runner: CliRunner,
+    cli_runner_env: _CliRunnerEnv,
 ) -> None:
-    reference_path = tmp_path / "ClipA.mkv"
-    target_path = tmp_path / "ClipB.mkv"
+    reference_path = cli_runner_env.media_root / "ClipA.mkv"
+    target_path = cli_runner_env.media_root / "ClipB.mkv"
     for file in (reference_path, target_path):
         file.write_bytes(b"data")
 
-    cfg = _make_config(tmp_path)
+    cfg = _make_config(cli_runner_env.media_root)
     cfg.audio_alignment.enable = True
     cfg.audio_alignment.confirm_with_screenshots = False
     cfg.audio_alignment.max_offset_seconds = 5.0
@@ -2648,7 +3373,7 @@ def test_audio_alignment_block_and_json(
     cfg.audio_alignment.duration_seconds = 1.5
     cfg.color.overlay_mode = "diagnostic"
 
-    monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
+    cli_runner_env.reinstall(cfg)
 
     def fake_parse(name: str, **_kwargs: object) -> dict[str, str]:
         """
@@ -2666,8 +3391,8 @@ def test_audio_alignment_block_and_json(
             return {"label": "Clip A", "file_name": name}
         return {"label": "Clip B", "file_name": name}
 
-    monkeypatch.setattr(frame_compare, "parse_filename_metadata", fake_parse)
-    monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit: None)
+    _patch_core_helper(monkeypatch, "parse_filename_metadata", fake_parse)
+    _patch_vs_core(monkeypatch, "set_ram_limit", lambda limit: None)
 
     def fake_init_clip(
         path: str | Path,
@@ -2706,13 +3431,9 @@ def test_audio_alignment_block_and_json(
             num_frames=24000,
         )
 
-    monkeypatch.setattr(frame_compare.vs_core, "init_clip", fake_init_clip)
+    _patch_vs_core(monkeypatch, "init_clip", fake_init_clip)
 
-    monkeypatch.setattr(
-        frame_compare,
-        "select_frames",
-        lambda *args, **kwargs: [42],
-    )
+    _patch_runner_module(monkeypatch, "select_frames", lambda *args, **kwargs: [42])
 
     def fake_generate(
         clips: list[types.SimpleNamespace],
@@ -2740,7 +3461,7 @@ def test_audio_alignment_block_and_json(
         out_dir.mkdir(parents=True, exist_ok=True)
         return [str(out_dir / f"shot_{idx}.png") for idx in range(len(frames) * len(files))]
 
-    monkeypatch.setattr(frame_compare, "generate_screenshots", fake_generate)
+    _patch_runner_module(monkeypatch, "generate_screenshots", fake_generate)
 
     def fake_probe(path: Path) -> list[AudioStreamInfo]:
         """
@@ -2780,7 +3501,7 @@ def test_audio_alignment_block_and_json(
             )
         ]
 
-    monkeypatch.setattr(frame_compare.audio_alignment, "probe_audio_streams", fake_probe)
+    _patch_audio_alignment(monkeypatch, "probe_audio_streams", fake_probe)
 
     measurement = AlignmentMeasurement(
         file=target_path,
@@ -2791,17 +3512,8 @@ def test_audio_alignment_block_and_json(
         target_fps=24.0,
     )
 
-    monkeypatch.setattr(
-        frame_compare.audio_alignment,
-        "measure_offsets",
-        lambda *args, **kwargs: [measurement],
-    )
-
-    monkeypatch.setattr(
-        frame_compare.audio_alignment,
-        "load_offsets",
-        lambda *_args, **_kwargs: ({}, {}),
-    )
+    _patch_audio_alignment(monkeypatch, "measure_offsets", lambda *args, **kwargs: [measurement])
+    _patch_audio_alignment(monkeypatch, "load_offsets", lambda *_args, **_kwargs: ({}, {}))
 
     def fake_update(
         _path: Path,
@@ -2831,11 +3543,9 @@ def test_audio_alignment_block_and_json(
         statuses: dict[str, str] = {m.file.name: "auto" for m in measurements}
         return applied_frames, statuses
 
-    monkeypatch.setattr(frame_compare.audio_alignment, "update_offsets_file", fake_update)
+    _patch_audio_alignment(monkeypatch, "update_offsets_file", fake_update)
 
-    result: Result = runner.invoke(
-        frame_compare.main, ["--config", "dummy", "--no-color"], catch_exceptions=False
-    )
+    result: Result = runner.invoke(frame_compare.main, ["--no-color"], catch_exceptions=False)
     assert result.exit_code == 0
 
     output_lines: list[str] = result.output.splitlines()
@@ -2901,26 +3611,28 @@ def test_audio_alignment_block_and_json(
 
 
 def test_audio_alignment_default_duration_avoids_zero_window(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runner: CliRunner
+    monkeypatch: pytest.MonkeyPatch,
+    runner: CliRunner,
+    cli_runner_env: _CliRunnerEnv,
 ) -> None:
     """
     Verifies that leaving audio alignment duration unspecified does not pass a zero-length window to the measurement routine.
 
     Configures audio alignment with start_seconds and duration_seconds set to None, runs the CLI, and asserts that the call to the alignment measurement does not include a `duration_seconds` value of zero (i.e., it remains `None`).
     """
-    reference_path = tmp_path / "ClipA.mkv"
-    target_path = tmp_path / "ClipB.mkv"
+    reference_path = cli_runner_env.media_root / "ClipA.mkv"
+    target_path = cli_runner_env.media_root / "ClipB.mkv"
     for file in (reference_path, target_path):
         file.write_bytes(b"data")
 
-    cfg = _make_config(tmp_path)
+    cfg = _make_config(cli_runner_env.media_root)
     cfg.audio_alignment.enable = True
     cfg.audio_alignment.confirm_with_screenshots = False
     cfg.audio_alignment.max_offset_seconds = 5.0
     cfg.audio_alignment.start_seconds = None
     cfg.audio_alignment.duration_seconds = None
 
-    monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
+    cli_runner_env.reinstall(cfg)
 
     def fake_parse(name: str, **_kwargs: object) -> dict[str, str]:
         """
@@ -2938,8 +3650,8 @@ def test_audio_alignment_default_duration_avoids_zero_window(
             return {"label": "Clip A", "file_name": name}
         return {"label": "Clip B", "file_name": name}
 
-    monkeypatch.setattr(frame_compare, "parse_filename_metadata", fake_parse)
-    monkeypatch.setattr(frame_compare.vs_core, "set_ram_limit", lambda limit: None)
+    _patch_core_helper(monkeypatch, "parse_filename_metadata", fake_parse)
+    _patch_vs_core(monkeypatch, "set_ram_limit", lambda limit: None)
 
     def fake_init_clip(
         path: str | Path,
@@ -2978,13 +3690,9 @@ def test_audio_alignment_default_duration_avoids_zero_window(
             num_frames=24000,
         )
 
-    monkeypatch.setattr(frame_compare.vs_core, "init_clip", fake_init_clip)
+    _patch_vs_core(monkeypatch, "init_clip", fake_init_clip)
 
-    monkeypatch.setattr(
-        frame_compare,
-        "select_frames",
-        lambda *args, **kwargs: [42],
-    )
+    _patch_runner_module(monkeypatch, "select_frames", lambda *args, **kwargs: [42])
 
     def fake_generate(
         clips: list[types.SimpleNamespace],
@@ -3005,7 +3713,7 @@ def test_audio_alignment_default_duration_avoids_zero_window(
         out_dir.mkdir(parents=True, exist_ok=True)
         return [str(out_dir / "shot.png")]
 
-    monkeypatch.setattr(frame_compare, "generate_screenshots", fake_generate)
+    _patch_runner_module(monkeypatch, "generate_screenshots", fake_generate)
 
     def fake_probe(path: Path) -> list[AudioStreamInfo]:
         """
@@ -3045,7 +3753,7 @@ def test_audio_alignment_default_duration_avoids_zero_window(
             )
         ]
 
-    monkeypatch.setattr(frame_compare.audio_alignment, "probe_audio_streams", fake_probe)
+    _patch_audio_alignment(monkeypatch, "probe_audio_streams", fake_probe)
 
     measurement = AlignmentMeasurement(
         file=target_path,
@@ -3070,15 +3778,15 @@ def test_audio_alignment_default_duration_avoids_zero_window(
         captured_kwargs.update(kwargs)
         return [measurement]
 
-    monkeypatch.setattr(frame_compare.audio_alignment, "measure_offsets", fake_measure)
-    monkeypatch.setattr(frame_compare.audio_alignment, "load_offsets", lambda *_args, **_kwargs: ({}, {}))
-    monkeypatch.setattr(
-        frame_compare.audio_alignment,
+    _patch_audio_alignment(monkeypatch, "measure_offsets", fake_measure)
+    _patch_audio_alignment(monkeypatch, "load_offsets", lambda *_args, **_kwargs: ({}, {}))
+    _patch_audio_alignment(
+        monkeypatch,
         "update_offsets_file",
         lambda *_args, **_kwargs: ({target_path.name: 3}, {target_path.name: "auto"}),
     )
 
-    result: Result = runner.invoke(frame_compare.main, ["--config", "dummy", "--no-color"], catch_exceptions=False)
+    result: Result = runner.invoke(frame_compare.main, ["--no-color"], catch_exceptions=False)
     assert result.exit_code == 0
     assert captured_kwargs.get("duration_seconds") is None
 
@@ -3087,9 +3795,9 @@ def _build_alignment_context(
     tmp_path: Path,
 ) -> tuple[
     AppConfig,
-    list[frame_compare._ClipPlan],
-    frame_compare._AudioAlignmentSummary,
-    frame_compare._AudioAlignmentDisplayData,
+    list[_ClipPlan],
+    _AudioAlignmentSummary,
+    _AudioAlignmentDisplayData,
 ]:
     """
     Builds a minimal audio-alignment test context with example clips, plans, and alignment state.
@@ -3108,26 +3816,38 @@ def _build_alignment_context(
     cfg.audio_alignment.enable = True
     cfg.audio_alignment.confirm_with_screenshots = True
 
-    reference_clip = types.SimpleNamespace(num_frames=10)
-    target_clip = types.SimpleNamespace(num_frames=10)
+    reference_clip = types.SimpleNamespace(
+        width=1920,
+        height=1080,
+        fps_num=24000,
+        fps_den=1001,
+        num_frames=10,
+    )
+    target_clip = types.SimpleNamespace(
+        width=1920,
+        height=1080,
+        fps_num=24000,
+        fps_den=1001,
+        num_frames=10,
+    )
 
     reference_path = tmp_path / "Ref.mkv"
     target_path = tmp_path / "Target.mkv"
     reference_path.touch()
     target_path.touch()
 
-    reference_plan = frame_compare._ClipPlan(
+    reference_plan = _ClipPlan(
         path=reference_path,
         metadata={"label": "Reference Clip"},
         clip=reference_clip,
     )
-    target_plan = frame_compare._ClipPlan(
+    target_plan = _ClipPlan(
         path=target_path,
         metadata={"label": "Target Clip"},
         clip=target_clip,
     )
 
-    summary = frame_compare._AudioAlignmentSummary(
+    summary = _AudioAlignmentSummary(
         offsets_path=tmp_path / "alignment.toml",
         reference_name="Reference Clip",
         measurements=(),
@@ -3142,7 +3862,7 @@ def _build_alignment_context(
         manual_trim_starts={},
     )
 
-    display = frame_compare._AudioAlignmentDisplayData(
+    display = _AudioAlignmentDisplayData(
         stream_lines=[],
         estimation_line=None,
         offset_lines=[],
@@ -3158,7 +3878,7 @@ def _build_alignment_context(
     return cfg, [reference_plan, target_plan], summary, display
 
 
-class _RecordingOutputManager(frame_compare.CliOutputManager):
+class _RecordingOutputManager(CliOutputManager):
     """CliOutputManager test double that records lines emitted during confirmation flows."""
 
     def __init__(self) -> None:
@@ -3205,10 +3925,10 @@ def test_confirm_alignment_reports_preview_paths(
         generated_paths.extend(paths)
         return paths
 
-    monkeypatch.setattr(frame_compare, "generate_screenshots", fake_generate)
+    _patch_runner_module(monkeypatch, "generate_screenshots", fake_generate)
     monkeypatch.setattr(frame_compare.sys, "stdin", types.SimpleNamespace(isatty=lambda: False))
 
-    frame_compare._confirm_alignment_with_screenshots(
+    core_module._confirm_alignment_with_screenshots(
         plans,
         summary,
         cfg,
@@ -3232,14 +3952,14 @@ def test_confirm_alignment_raises_cli_error_on_screenshot_failure(
         A stub screenshot-generation function that always fails.
 
         Raises:
-            frame_compare.ScreenshotError: Always raised with the message "boom".
+            ScreenshotError: Always raised with the message "boom".
         """
-        raise frame_compare.ScreenshotError("boom")
+        raise ScreenshotError("boom")
 
-    monkeypatch.setattr(frame_compare, "generate_screenshots", fake_generate)
+    _patch_runner_module(monkeypatch, "generate_screenshots", fake_generate)
 
-    with pytest.raises(frame_compare.CLIAppError, match="Alignment preview failed"):
-        frame_compare._confirm_alignment_with_screenshots(
+    with pytest.raises(core_module.CLIAppError, match="Alignment preview failed"):
+        core_module._confirm_alignment_with_screenshots(
             plans,
             summary,
             cfg,
@@ -3250,20 +3970,24 @@ def test_confirm_alignment_raises_cli_error_on_screenshot_failure(
 
 
 def test_run_cli_calls_alignment_confirmation(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    cli_runner_env: _CliRunnerEnv,
 ) -> None:
     """
     Verifies that running the CLI triggers the audio-alignment confirmation flow when screenshot confirmation is enabled.
 
     Sets up a configuration enabling audio alignment with screenshot confirmation, creates two dummy media files, and monkeypatches discovery, metadata parsing, plan building, selection, and alignment application. Replaces the confirmation function with one that records its arguments and raises a sentinel exception so the test can assert the confirmation was invoked with the expected parameters.
     """
-    cfg = _make_config(tmp_path)
+    cfg = _make_config(cli_runner_env.media_root)
     cfg.audio_alignment.enable = True
     cfg.audio_alignment.confirm_with_screenshots = True
 
-    monkeypatch.setattr(frame_compare, "load_config", lambda _path: cfg)
+    cli_runner_env.reinstall(cfg)
 
-    files: list[Path] = [tmp_path / "Ref.mkv", tmp_path / "Tgt.mkv"]
+    files: list[Path] = [
+        cli_runner_env.media_root / "Ref.mkv",
+        cli_runner_env.media_root / "Tgt.mkv",
+    ]
     for file in files:
         file.write_bytes(b"data")
 
@@ -3310,7 +4034,7 @@ def test_run_cli_calls_alignment_confirmation(
 
     def fake_build_plans(
         _files: Sequence[Path], metadata: Sequence[dict[str, str]], _cfg: AppConfig
-    ) -> list[frame_compare._ClipPlan]:
+    ) -> list[_ClipPlan]:
         """
         Builds a list of clip plans from input file paths and corresponding metadata, marking the first clip as the reference.
 
@@ -3320,12 +4044,12 @@ def test_run_cli_calls_alignment_confirmation(
             _cfg: Configuration object (not used by this fake builder, accepted for signature compatibility).
 
         Returns:
-            list[frame_compare._ClipPlan]: A list of ClipPlan objects where the first element has `use_as_reference=True` and all others have `use_as_reference=False`.
+            list[_ClipPlan]: A list of ClipPlan objects where the first element has `use_as_reference=True` and all others have `use_as_reference=False`.
         """
-        plans: list[frame_compare._ClipPlan] = []
+        plans: list[_ClipPlan] = []
         for idx, path in enumerate(_files):
             plans.append(
-                frame_compare._ClipPlan(
+                _ClipPlan(
                     path=path,
                     metadata=metadata[idx],
                     use_as_reference=(idx == 0),
@@ -3353,16 +4077,16 @@ def test_run_cli_calls_alignment_confirmation(
         """
         return files[0]
 
-    offsets_path = tmp_path / "alignment.toml"
+    offsets_path = cli_runner_env.workspace_root / "alignment.toml"
 
     def fake_maybe_apply(
-        plans: Sequence[frame_compare._ClipPlan],
+        plans: Sequence[_ClipPlan],
         _cfg: AppConfig,
         _analyze_path: Path,
         _root: Path,
         _overrides: object,
         reporter: object | None = None,
-    ) -> tuple[frame_compare._AudioAlignmentSummary, frame_compare._AudioAlignmentDisplayData]:
+    ) -> tuple[_AudioAlignmentSummary, _AudioAlignmentDisplayData]:
         """
         Create and return a synthetic audio-alignment summary and display objects for testing.
 
@@ -3372,13 +4096,13 @@ def test_run_cli_calls_alignment_confirmation(
 
         Returns:
             tuple: A pair (summary, display) where:
-                - summary: a frame_compare._AudioAlignmentSummary with the first plan as the reference_plan,
+                - summary: a _AudioAlignmentSummary with the first plan as the reference_plan,
                   empty measurements/applied_frames/statuses, and baseline_shift 0.
-                - display: a frame_compare._AudioAlignmentDisplayData containing empty display lines,
+                - display: a _AudioAlignmentDisplayData containing empty display lines,
                   an offsets file line referencing the module's offsets path, and JSON-ready fields
                   for a single target with zero offset (0.0 seconds, 0 frames).
         """
-        summary = frame_compare._AudioAlignmentSummary(
+        summary = _AudioAlignmentSummary(
             offsets_path=offsets_path,
             reference_name="Reference",
             measurements=(),
@@ -3392,7 +4116,7 @@ def test_run_cli_calls_alignment_confirmation(
             suggestion_mode=False,
             manual_trim_starts={},
         )
-        display = frame_compare._AudioAlignmentDisplayData(
+        display = _AudioAlignmentDisplayData(
             stream_lines=[],
             estimation_line=None,
             offset_lines=[],
@@ -3496,12 +4220,12 @@ def test_run_cli_calls_alignment_confirmation(
     called: dict[str, object] = {}
 
     def fake_confirm(
-        plans: Sequence[frame_compare._ClipPlan],
-        summary: frame_compare._AudioAlignmentSummary,
+        plans: Sequence[_ClipPlan],
+        summary: _AudioAlignmentSummary,
         cfg_obj: AppConfig,
         root: Path,
         reporter: object,
-        display: frame_compare._AudioAlignmentDisplayData,
+        display: _AudioAlignmentDisplayData,
     ) -> None:
         """
         Test helper that records its invocation arguments and then raises a sentinel error.
@@ -3520,16 +4244,16 @@ def test_run_cli_calls_alignment_confirmation(
         called["args"] = (plans, summary, cfg_obj, root, reporter, display)
         raise _SentinelError
 
-    monkeypatch.setattr(frame_compare, "_discover_media", fake_discover)
-    monkeypatch.setattr(frame_compare, "_parse_metadata", fake_parse_metadata)
-    monkeypatch.setattr(frame_compare, "_build_plans", fake_build_plans)
-    monkeypatch.setattr(frame_compare, "_pick_analyze_file", fake_pick_analyze)
-    monkeypatch.setattr(frame_compare, "_maybe_apply_audio_alignment", fake_maybe_apply)
-    monkeypatch.setattr(frame_compare, "CliOutputManager", _DummyReporter)
-    monkeypatch.setattr(frame_compare, "_confirm_alignment_with_screenshots", fake_confirm)
-    monkeypatch.setattr(frame_compare.vs_core, "configure", lambda *args, **kwargs: None)
+    _patch_core_helper(monkeypatch, "_discover_media", fake_discover)
+    _patch_core_helper(monkeypatch, "_parse_metadata", fake_parse_metadata)
+    _patch_core_helper(monkeypatch, "_build_plans", fake_build_plans)
+    _patch_core_helper(monkeypatch, "_pick_analyze_file", fake_pick_analyze)
+    _patch_core_helper(monkeypatch, "_maybe_apply_audio_alignment", fake_maybe_apply)
+    _patch_runner_module(monkeypatch, "CliOutputManager", _DummyReporter)
+    _patch_core_helper(monkeypatch, "_confirm_alignment_with_screenshots", fake_confirm)
+    _patch_vs_core(monkeypatch, "configure", lambda *args, **kwargs: None)
 
     with pytest.raises(_SentinelError):
-        frame_compare.run_cli("dummy-config")
+        frame_compare.run_cli(None, None)
 
     assert "args" in called

@@ -8,17 +8,18 @@ import pytest
 from click.testing import CliRunner
 
 import frame_compare
+import src.frame_compare.core as core_module
 
 
 def _patch_find_spec(monkeypatch: pytest.MonkeyPatch, missing: set[str]) -> None:
-    original = frame_compare.importlib.util.find_spec
+    original = core_module.importlib.util.find_spec
 
     def fake(name: str, *args: Any, **kwargs: Any):
         if name in missing:
             return None
         return original(name, *args, **kwargs)
 
-    monkeypatch.setattr(frame_compare.importlib.util, "find_spec", fake)
+    monkeypatch.setattr(core_module.importlib.util, "find_spec", fake)
 
 
 def _patch_which(monkeypatch: pytest.MonkeyPatch, missing: set[str]) -> None:

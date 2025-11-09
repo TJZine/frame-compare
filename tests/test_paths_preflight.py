@@ -6,6 +6,7 @@ import pytest
 from click.testing import CliRunner
 
 import frame_compare
+import src.frame_compare.core as core_module
 from src.config_template import copy_default_config
 
 
@@ -26,9 +27,16 @@ def _block_mkdir(monkeypatch: pytest.MonkeyPatch, target: Path) -> None:
     monkeypatch.setattr(Path, "mkdir", fake)
 
 
+def _patch_load_config(monkeypatch: pytest.MonkeyPatch, cfg):
+    """Ensure preflight utilities reuse the provided config object."""
+
+    monkeypatch.setattr(core_module, "load_config", lambda *_args, **_kwargs: cfg)
+    monkeypatch.setattr(frame_compare, "load_config", lambda *_args, **_kwargs: cfg)
+
+
 def test_prepare_preflight_cli_root_seeds_config(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
-    ctx = frame_compare._prepare_preflight(
+    ctx = core_module._prepare_preflight(
         cli_root=str(workspace),
         config_override=None,
         input_override=None,
@@ -48,7 +56,7 @@ def test_prepare_preflight_env_root(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     env_root = tmp_path / "env-root"
     monkeypatch.setenv("FRAME_COMPARE_ROOT", str(env_root))
     try:
-        ctx = frame_compare._prepare_preflight(
+        ctx = core_module._prepare_preflight(
             cli_root=None,
             config_override=None,
             input_override=None,
@@ -69,7 +77,7 @@ def test_prepare_preflight_sentinel_discovery(monkeypatch: pytest.MonkeyPatch, t
     (project / "subdir").mkdir(parents=True)
     monkeypatch.chdir(project / "subdir")
 
-    ctx = frame_compare._prepare_preflight(
+    ctx = core_module._prepare_preflight(
         cli_root=None,
         config_override=None,
         input_override=None,
@@ -86,8 +94,8 @@ def test_prepare_preflight_sentinel_discovery(monkeypatch: pytest.MonkeyPatch, t
 
 def test_prepare_preflight_rejects_site_packages(tmp_path: Path) -> None:
     root = tmp_path / "lib" / "python" / "site-packages" / "frame_compare"
-    with pytest.raises(frame_compare.CLIAppError):
-        frame_compare._prepare_preflight(
+    with pytest.raises(core_module.CLIAppError):
+        core_module._prepare_preflight(
             cli_root=str(root),
             config_override=None,
             input_override=None,
@@ -101,8 +109,8 @@ def test_prepare_preflight_workspace_permission_error(tmp_path: Path, monkeypatc
     workspace = (tmp_path / "workspace").resolve()
     _block_mkdir(monkeypatch, workspace)
 
-    with pytest.raises(frame_compare.CLIAppError) as excinfo:
-        frame_compare._prepare_preflight(
+    with pytest.raises(core_module.CLIAppError) as excinfo:
+        core_module._prepare_preflight(
             cli_root=str(workspace),
             config_override=None,
             input_override=None,
@@ -120,8 +128,8 @@ def test_prepare_preflight_config_permission_error(tmp_path: Path, monkeypatch: 
     config_dir = workspace / "config"
     _block_mkdir(monkeypatch, config_dir)
 
-    with pytest.raises(frame_compare.CLIAppError) as excinfo:
-        frame_compare._prepare_preflight(
+    with pytest.raises(core_module.CLIAppError) as excinfo:
+        core_module._prepare_preflight(
             cli_root=str(workspace),
             config_override=None,
             input_override=None,
@@ -139,8 +147,8 @@ def test_prepare_preflight_media_permission_error(tmp_path: Path, monkeypatch: p
     media_dir = workspace / "comparison_videos"
     _block_mkdir(monkeypatch, media_dir)
 
-    with pytest.raises(frame_compare.CLIAppError) as excinfo:
-        frame_compare._prepare_preflight(
+    with pytest.raises(core_module.CLIAppError) as excinfo:
+        core_module._prepare_preflight(
             cli_root=str(workspace),
             config_override=None,
             input_override=None,
@@ -155,7 +163,7 @@ def test_prepare_preflight_media_permission_error(tmp_path: Path, monkeypatch: p
 
 def test_collect_path_diagnostics_reports_expected_structure(tmp_path: Path) -> None:
     root = tmp_path / "diagnostics"
-    report = frame_compare._collect_path_diagnostics(
+    report = core_module._collect_path_diagnostics(
         cli_root=str(root),
         config_override=None,
         input_override=None,
@@ -192,14 +200,14 @@ def test_collect_path_diagnostics_rejects_escaped_subpaths(
     Ensure user-configured cache or offsets paths cannot escape the media root.
     """
 
-    cfg = frame_compare._fresh_app_config()
+    cfg = core_module._fresh_app_config()
     target_section, target_attr = field.split(".")
     setattr(getattr(cfg, target_section), target_attr, value)
 
-    monkeypatch.setattr(frame_compare, "load_config", lambda _: cfg)
+    _patch_load_config(monkeypatch, cfg)
 
-    with pytest.raises(frame_compare.CLIAppError) as excinfo:
-        frame_compare._collect_path_diagnostics(
+    with pytest.raises(core_module.CLIAppError) as excinfo:
+        core_module._collect_path_diagnostics(
             cli_root=str(tmp_path),
             config_override="ignored",
             input_override=None,

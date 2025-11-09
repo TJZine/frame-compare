@@ -15,6 +15,7 @@ Automated frame sampling, alignment, tonemapping, and slow.pics uploads for dete
   - [Usage](#usage)
     - [Wizard \& Presets](#wizard--presets)
     - [Dependency Doctor](#dependency-doctor)
+  - [Programmatic Usage](#programmatic-usage)
   - [Configuration](#configuration)
     - [Tonemap Quick Recipes](#tonemap-quick-recipes)
   - [CLI Reference](#cli-reference)
@@ -164,6 +165,58 @@ Use `frame-compare preset apply <name>` to seed `config/config.toml` in one step
 Outputs are written beneath the input directory: screenshots under `screens` (configurable), cached metrics alongside video inputs, slow.pics shortcuts in the same directory, and a JSON summary on stdout. Shortcut filenames mirror the resolved slow.pics collection name.
 
 > **Warning:** The default `[slowpics].delete_screen_dir_after_upload = true` removes the screenshots directory after successful uploads. Keep `screenshots.directory_name` relative to the input root and avoid reusing directories shared with other projects.
+
+## Programmatic Usage
+
+The CLI is now a thin delegator to the shared runner in `src/frame_compare/runner.py`. Automation can bypass Click entirely by constructing a `RunRequest` and calling `runner.run`, mirroring the CLI flags without needing Rich output plumbing.
+
+```python
+from frame_compare.runner import RunRequest, run
+
+request = RunRequest(
+    config_path="config/config.toml",
+    input_dir="comparison_videos/demo",
+    root_override=".",
+    quiet=True,
+    tonemap_overrides={"preset": "reference"},
+)
+
+result = run(request)
+print(result.files)
+print(result.json_tail)
+```
+
+Setting `quiet=True` disables all Rich console output (the runner swaps in a null reporter) so automation logs stay clean—only the `RunResult` and JSON tail remain. For more control, provide a `reporter_factory` that receives the resolved layout path and console:
+
+```python
+from pathlib import Path
+
+from rich.console import Console
+
+from frame_compare.runner import RunRequest, run
+from src.frame_compare.cli_runtime import CliOutputManager
+
+
+def build_reporter(request: RunRequest, layout_path: Path, console: Console) -> CliOutputManager:
+    return CliOutputManager(
+        quiet=request.quiet,
+        verbose=request.verbose,
+        no_color=request.no_color,
+        layout_path=layout_path,
+        console=console,
+    )
+
+
+request = RunRequest(
+    config_path="config/config.toml",
+    reporter_factory=build_reporter,
+)
+
+run(request)
+```
+
+`RunResult` exposes the rendered files, selected frame indices, resolved workspace root, optional slow.pics URL, and generated HTML report path so downstream tooling can upload or archive artefacts. Keep CLI-only helpers (wizard, doctor, presets) for operator workflows, but rely on the runner for scheduled jobs, notebooks, or integration tests that require deterministic orchestration.
+The regression test suite now exercises `runner.run` directly so slow.pics uploads, audio-alignment reuse, and JSON-tail reporting stay in lockstep with the Click entrypoint.
 
 ## Configuration
 

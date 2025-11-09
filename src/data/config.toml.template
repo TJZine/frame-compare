@@ -11,9 +11,6 @@ save_frames_data = true
 downscale_height = 720
 step = 2
 analyze_in_sdr = true
-use_quantiles = true
-dark_quantile = 0.20
-bright_quantile = 0.80
 motion_use_absdiff = false
 motion_scenecut_quantile = 0.0
 screen_separation_sec = 6
@@ -26,6 +23,15 @@ ignore_lead_seconds = 0.0
 ignore_trail_seconds = 0.0
 # Guarantee at least this much selectable footage after trimming.
 min_window_seconds = 5.0
+
+[analysis.thresholds]
+mode = "quantile"
+dark_quantile = 0.20
+bright_quantile = 0.80
+dark_luma_min = 0.062746
+dark_luma_max = 0.38
+bright_luma_min = 0.45
+bright_luma_max = 0.80
 
 [audio_alignment]
 # Estimate offsets via audio cross-correlation before frame analysis.

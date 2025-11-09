@@ -8,12 +8,13 @@ from typing import Callable, Dict, Sequence, cast
 
 import pytest
 
-import frame_compare
+import src.frame_compare.core as core_module
+from src.frame_compare.cli_runtime import _AudioAlignmentSummary, _ClipPlan
 
 
 @pytest.fixture
 def _vspreview_script_text(tmp_path: Path) -> Sequence[str]:
-    cfg = frame_compare._fresh_app_config()
+    cfg = core_module._fresh_app_config()
     cfg.audio_alignment.use_vspreview = True
     cfg.audio_alignment.enable = True
 
@@ -22,17 +23,17 @@ def _vspreview_script_text(tmp_path: Path) -> Sequence[str]:
     reference_path.write_bytes(b"ref")
     target_path.write_bytes(b"tgt")
 
-    reference_plan = frame_compare._ClipPlan(
+    reference_plan = _ClipPlan(
         path=reference_path,
         metadata={"label": "Reference"},
     )
-    target_plan = frame_compare._ClipPlan(
+    target_plan = _ClipPlan(
         path=target_path,
         metadata={"label": "Target"},
     )
     plans = [reference_plan, target_plan]
 
-    summary = frame_compare._AudioAlignmentSummary(
+    summary = _AudioAlignmentSummary(
         offsets_path=tmp_path / "offsets.toml",
         reference_name=reference_path.name,
         measurements=(),
@@ -47,7 +48,7 @@ def _vspreview_script_text(tmp_path: Path) -> Sequence[str]:
         manual_trim_starts={},
     )
 
-    script_path = frame_compare._write_vspreview_script(plans, summary, cfg, tmp_path)
+    script_path = core_module._write_vspreview_script(plans, summary, cfg, tmp_path)
     return script_path.read_text(encoding="utf-8").splitlines()
 
 

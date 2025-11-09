@@ -27,6 +27,26 @@ class ExportRange(str, Enum):
     LIMITED = "limited"
 
 
+class AnalysisThresholdMode(str, Enum):
+    """Strategies for categorising frames by brightness."""
+
+    QUANTILE = "quantile"
+    FIXED_RANGE = "fixed_range"
+
+
+@dataclass
+class AnalysisThresholds:
+    """Configuration values for dark/bright frame detection."""
+
+    mode: AnalysisThresholdMode = AnalysisThresholdMode.QUANTILE
+    dark_quantile: float = 0.20
+    bright_quantile: float = 0.80
+    dark_luma_min: float = 0.062746
+    dark_luma_max: float = 0.38
+    bright_luma_min: float = 0.45
+    bright_luma_max: float = 0.80
+
+
 @dataclass
 class AnalysisConfig:
     """Options controlling frame analysis, selection, and data caching."""
@@ -40,9 +60,7 @@ class AnalysisConfig:
     downscale_height: int = 480
     step: int = 2
     analyze_in_sdr: bool = True
-    use_quantiles: bool = True
-    dark_quantile: float = 0.20
-    bright_quantile: float = 0.80
+    thresholds: AnalysisThresholds = field(default_factory=AnalysisThresholds)
     motion_use_absdiff: bool = False
     motion_scenecut_quantile: float = 0.0
     screen_separation_sec: int = 6
@@ -50,8 +68,6 @@ class AnalysisConfig:
     analyze_clip: str = ""
     random_seed: int = 20202020
     frame_data_filename: str = "generated.compframes"
-    skip_head_seconds: float = 0.0
-    skip_tail_seconds: float = 0.0
     ignore_lead_seconds: float = 0.0
     ignore_trail_seconds: float = 0.0
     min_window_seconds: float = 5.0

@@ -47,6 +47,15 @@ Dependency check:
 | `[analysis].ignore_trail_seconds` | Seconds trimmed from the end. | float | `0.0` |
 | `[analysis].min_window_seconds` | Minimum usable footage window. | float | `5.0` |
 | `[analysis].frame_data_filename` | Metrics cache path. | str | `"generated.compframes"` |
+
+### `[analysis.thresholds]`
+
+| Key | Purpose | Type | Default |
+| --- | --- | --- | --- |
+| `mode` | Selection strategy: `"quantile"` chooses percentiles, `"fixed_range"` compares against absolute luma bands. | str | `"quantile"` |
+| `dark_quantile / bright_quantile` | Percentile thresholds (fractions in `[0,1]`) used when `mode="quantile"`. | float | `0.20 / 0.80` |
+| `dark_luma_min / dark_luma_max` | Inclusive brightness band used when `mode="fixed_range"` to tag “dark” scenes. | float | `0.062746 / 0.38` |
+| `bright_luma_min / bright_luma_max` | Inclusive brightness band used when `mode="fixed_range"` to tag “bright” scenes. | float | `0.45 / 0.80` |
 <!-- markdownlint-restore -->
 
 ## Audio alignment

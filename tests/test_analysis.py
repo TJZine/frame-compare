@@ -216,7 +216,6 @@ def test_select_frames_deterministic(monkeypatch: pytest.MonkeyPatch) -> None:
         downscale_height=0,
         step=10,
         analyze_in_sdr=True,
-        use_quantiles=True,
     )
 
     files: list[str] = ["a.mkv", "b.mkv"]
@@ -296,7 +295,6 @@ def test_select_frames_hdr_tonemap(monkeypatch: pytest.MonkeyPatch) -> None:
         downscale_height=0,
         step=10,
         analyze_in_sdr=True,
-        use_quantiles=True,
     )
 
     files: list[str] = ["a.mkv", "b.mkv"]
@@ -426,7 +424,6 @@ def test_select_frames_uses_cache(
         user_frames=[],
         downscale_height=0,
         analyze_in_sdr=False,
-        use_quantiles=True,
     )
 
     cache_info = FrameMetricsCacheInfo(

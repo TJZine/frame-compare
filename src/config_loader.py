@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import tomllib
+import warnings
 from dataclasses import fields, is_dataclass
 from enum import Enum
 from pathlib import Path
@@ -11,6 +12,8 @@ from typing import Any, Dict
 
 from .datatypes import (
     AnalysisConfig,
+    AnalysisThresholdMode,
+    AnalysisThresholds,
     AppConfig,
     AudioAlignmentConfig,
     CLIConfig,
@@ -123,6 +126,156 @@ def _sanitize_section(raw: dict[str, Any], name: str, cls):
     return instance
 
 
+def _values_match(first: Any, second: Any) -> bool:
+    """Best-effort comparison that tolerates string/number pairs."""
+
+    if first == second:
+        return True
+    try:
+        return float(first) == float(second)
+    except (TypeError, ValueError):
+        return False
+
+
+def _migrate_skip_field(
+    section: Dict[str, Any],
+    *,
+    legacy_key: str,
+    target_key: str,
+) -> None:
+    """Map legacy skip_* fields onto ignore_* while warning users."""
+
+    if legacy_key not in section:
+        return
+    value = section.pop(legacy_key)
+    warnings.warn(
+        f"{legacy_key} is deprecated; set {target_key} instead.",
+        UserWarning,
+    )
+    existing = section.get(target_key)
+    if existing is None:
+        section[target_key] = value
+        return
+    if not _values_match(existing, value):
+        raise ConfigError(
+            f"{legacy_key} conflicts with {target_key}. Remove the legacy key or "
+            f"ensure both values match."
+        )
+
+
+def _migrate_threshold_fields(section: Dict[str, Any]) -> None:
+    """Backfill the structured thresholds table from legacy keys."""
+
+    thresholds = section.get("thresholds")
+    if thresholds is not None and not isinstance(thresholds, dict):
+        raise ConfigError("[analysis.thresholds] must be a table")
+
+    def _ensure_thresholds_table() -> Dict[str, Any]:
+        nonlocal thresholds
+        if thresholds is None:
+            thresholds = {}
+            section["thresholds"] = thresholds
+        return thresholds
+
+    for key in ("dark_quantile", "bright_quantile"):
+        if key in section:
+            warnings.warn(
+                f"analysis.{key} is deprecated; set analysis.thresholds.{key} instead.",
+                UserWarning,
+            )
+            _ensure_thresholds_table().setdefault(key, section.pop(key))
+
+    use_quantiles_value = section.pop("use_quantiles", None)
+    if use_quantiles_value is not None:
+        mode_value = (
+            AnalysisThresholdMode.QUANTILE.value
+            if _coerce_bool(use_quantiles_value, "analysis.use_quantiles")
+            else AnalysisThresholdMode.FIXED_RANGE.value
+        )
+        warnings.warn(
+            "analysis.use_quantiles is deprecated; configure analysis.thresholds.mode instead.",
+            UserWarning,
+        )
+        _ensure_thresholds_table().setdefault("mode", mode_value)
+
+    if thresholds is not None:
+        section["thresholds"] = thresholds
+
+
+def _migrate_analysis_section(section: Dict[str, Any]) -> None:
+    """Apply backwards-compatible rewrites for legacy analysis keys."""
+
+    _migrate_skip_field(
+        section,
+        legacy_key="skip_head_seconds",
+        target_key="ignore_lead_seconds",
+    )
+    _migrate_skip_field(
+        section,
+        legacy_key="skip_tail_seconds",
+        target_key="ignore_trail_seconds",
+    )
+    _migrate_threshold_fields(section)
+
+
+def _normalize_float(value: Any, dotted_key: str) -> float:
+    """Return ``value`` as a finite float, raising ConfigError otherwise."""
+
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(f"{dotted_key} must be a number") from exc
+    if not math.isfinite(numeric):
+        raise ConfigError(f"{dotted_key} must be a finite number")
+    return numeric
+
+
+def _normalize_fraction(value: Any, dotted_key: str) -> float:
+    """Return a float in the [0, 1] range."""
+
+    numeric = _normalize_float(value, dotted_key)
+    if numeric < 0 or numeric > 1:
+        raise ConfigError(f"{dotted_key} must be between 0 and 1")
+    return numeric
+
+
+def _validate_thresholds(thresholds: AnalysisThresholds) -> None:
+    """Validate and normalize the analysis threshold configuration."""
+
+    mode = thresholds.mode
+    if isinstance(mode, str):
+        try:
+            mode = AnalysisThresholdMode(mode.lower())
+        except ValueError as exc:  # pragma: no cover - defensive
+            raise ConfigError("analysis.thresholds.mode must be 'quantile' or 'fixed_range'") from exc
+        thresholds.mode = mode
+
+    if mode == AnalysisThresholdMode.QUANTILE:
+        dark = _normalize_fraction(thresholds.dark_quantile, "analysis.thresholds.dark_quantile")
+        bright = _normalize_fraction(thresholds.bright_quantile, "analysis.thresholds.bright_quantile")
+        if bright <= dark:
+            raise ConfigError("analysis.thresholds.bright_quantile must be > analysis.thresholds.dark_quantile")
+        thresholds.dark_quantile = dark
+        thresholds.bright_quantile = bright
+    elif mode == AnalysisThresholdMode.FIXED_RANGE:
+        dark_min = _normalize_fraction(thresholds.dark_luma_min, "analysis.thresholds.dark_luma_min")
+        dark_max = _normalize_fraction(thresholds.dark_luma_max, "analysis.thresholds.dark_luma_max")
+        if dark_max <= dark_min:
+            raise ConfigError("analysis.thresholds.dark_luma_max must be > dark_luma_min")
+        bright_min = _normalize_fraction(thresholds.bright_luma_min, "analysis.thresholds.bright_luma_min")
+        bright_max = _normalize_fraction(thresholds.bright_luma_max, "analysis.thresholds.bright_luma_max")
+        if bright_max <= bright_min:
+            raise ConfigError("analysis.thresholds.bright_luma_max must be > bright_luma_min")
+        thresholds.dark_luma_min = dark_min
+        thresholds.dark_luma_max = dark_max
+        thresholds.bright_luma_min = bright_min
+        thresholds.bright_luma_max = bright_max
+    else:  # pragma: no cover - future-proof
+        raise ConfigError(
+            "analysis.thresholds.mode must be one of: "
+            f"{', '.join(m.value for m in AnalysisThresholdMode)}"
+        )
+
 def _validate_trim(mapping: Dict[str, Any], label: str) -> None:
     """
     Ensure all trim overrides map to integer frame counts.
@@ -207,8 +360,11 @@ def load_config(path: str) -> AppConfig:
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(f"Failed to parse TOML: {exc}") from exc
 
+    analysis_section = raw.get("analysis", {})
+    if isinstance(analysis_section, dict):
+        _migrate_analysis_section(analysis_section)
     app = AppConfig(
-        analysis=_sanitize_section(raw.get("analysis", {}), "analysis", AnalysisConfig),
+        analysis=_sanitize_section(analysis_section, "analysis", AnalysisConfig),
         screenshots=_sanitize_section(raw.get("screenshots", {}), "screenshots", ScreenshotConfig),
         cli=_sanitize_section(raw.get("cli", {}), "cli", CLIConfig),
         slowpics=_sanitize_section(raw.get("slowpics", {}), "slowpics", SlowpicsConfig),
@@ -240,16 +396,13 @@ def load_config(path: str) -> AppConfig:
         raise ConfigError("analysis.random_seed must be >= 0")
     if not app.analysis.frame_data_filename:
         raise ConfigError("analysis.frame_data_filename must be set")
-    if app.analysis.skip_head_seconds < 0:
-        raise ConfigError("analysis.skip_head_seconds must be >= 0")
-    if app.analysis.skip_tail_seconds < 0:
-        raise ConfigError("analysis.skip_tail_seconds must be >= 0")
     if app.analysis.ignore_lead_seconds < 0:
         raise ConfigError("analysis.ignore_lead_seconds must be >= 0")
     if app.analysis.ignore_trail_seconds < 0:
         raise ConfigError("analysis.ignore_trail_seconds must be >= 0")
     if app.analysis.min_window_seconds < 0:
         raise ConfigError("analysis.min_window_seconds must be >= 0")
+    _validate_thresholds(app.analysis.thresholds)
 
     _validate_color_overrides(app.color.color_overrides)
 
