@@ -1,4 +1,4 @@
-"""Workspace-resolution helpers shared between the CLI shim and runner."""
+"""Workspace-resolution helpers extracted per docs/refactor/mod_refactor.md Phase 1.1."""
 
 from __future__ import annotations
 
@@ -50,21 +50,21 @@ __all__ = [
     "NO_WIZARD_ENV_VAR",
     "PROJECT_ROOT",
     "PACKAGED_TEMPLATE_PATH",
-    "_PathPreflightResult",
-    "_resolve_workspace_subdir",
+    "PreflightResult",
+    "resolve_workspace_root",
+    "resolve_subdir",
+    "collect_path_diagnostics",
+    "prepare_preflight",
     "_path_is_within_root",
     "_path_contains_site_packages",
     "_is_writable_path",
     "_abort_if_site_packages",
-    "_discover_workspace_root",
     "_seed_default_config",
     "_fresh_app_config",
-    "_prepare_preflight",
-    "_collect_path_diagnostics",
 ]
 
 
-def _resolve_workspace_subdir(
+def resolve_subdir(
     root: Path, relative: str, *, purpose: str, allow_absolute: bool = False
 ) -> Path:
     """Return a normalised path under *root* for user-managed directories."""
@@ -103,6 +103,9 @@ def _resolve_workspace_subdir(
         raise CLIAppError(message, rich_message=f"[red]{message}[/red]") from exc
 
     return resolved
+
+
+_resolve_workspace_subdir = resolve_subdir
 
 
 def _path_is_within_root(root: Path, candidate: Path) -> bool:
@@ -186,7 +189,7 @@ def _abort_if_site_packages(path_map: Mapping[str, Path]) -> None:
 
 
 @dataclass
-class _PathPreflightResult:
+class PreflightResult:
     """Resolved configuration and workspace paths used during startup."""
 
     workspace_root: Path
@@ -197,7 +200,10 @@ class _PathPreflightResult:
     legacy_config: bool = False
 
 
-def _discover_workspace_root(cli_root: str | None) -> Path:
+_PathPreflightResult = PreflightResult
+
+
+def resolve_workspace_root(cli_root: str | None) -> Path:
     """Resolve the workspace root using CLI flag, env var, or sentinel search."""
 
     if cli_root:
@@ -236,6 +242,9 @@ def _discover_workspace_root(cli_root: str | None) -> Path:
         raise CLIAppError(message, code=2, rich_message=f"[red]{escape(message)}[/red]")
 
     return resolved
+
+
+_discover_workspace_root = resolve_workspace_root
 
 
 def _seed_default_config(path: Path) -> None:
@@ -277,7 +286,7 @@ def _fresh_app_config() -> AppConfig:
     )
 
 
-def _prepare_preflight(
+def prepare_preflight(
     *,
     cli_root: str | None,
     config_override: str | None,
@@ -287,10 +296,10 @@ def _prepare_preflight(
     create_media_dir: bool,
     allow_auto_wizard: bool = False,
     skip_auto_wizard: bool = False,
-) -> _PathPreflightResult:
+    ) -> PreflightResult:
     """Resolve workspace root, configuration, and media directories."""
 
-    workspace_root = _discover_workspace_root(cli_root)
+    workspace_root = resolve_workspace_root(cli_root)
     warnings: list[str] = []
     skip_auto_wizard = skip_auto_wizard or env_flag_enabled(os.environ.get(NO_WIZARD_ENV_VAR))
 
@@ -380,7 +389,7 @@ def _prepare_preflight(
                         )
                     except click.exceptions.Exit as exc:
                         raise exc
-                    return _prepare_preflight(
+                    return prepare_preflight(
                         cli_root=str(new_root),
                         config_override=str(new_config_path),
                         input_override=input_override,
@@ -452,7 +461,7 @@ def _prepare_preflight(
         )
 
     media_relative = input_override or cfg.paths.input_dir
-    media_root = _resolve_workspace_subdir(
+    media_root = resolve_subdir(
         workspace_root,
         media_relative,
         purpose="[paths].input_dir",
@@ -486,7 +495,7 @@ def _prepare_preflight(
             )
         warnings.append(f"Input workspace {media_root} is not writable.")
 
-    return _PathPreflightResult(
+    return PreflightResult(
         workspace_root=workspace_root,
         media_root=media_root,
         config_path=config_path,
@@ -496,7 +505,10 @@ def _prepare_preflight(
     )
 
 
-def _collect_path_diagnostics(
+_prepare_preflight = prepare_preflight
+
+
+def collect_path_diagnostics(
     *,
     cli_root: str | None,
     config_override: str | None,
@@ -504,7 +516,7 @@ def _collect_path_diagnostics(
 ) -> Dict[str, Any]:
     """Return a JSON-serialisable mapping describing key runtime paths."""
 
-    preflight = _prepare_preflight(
+    preflight = prepare_preflight(
         cli_root=cli_root,
         config_override=config_override,
         input_override=input_override,
@@ -517,17 +529,17 @@ def _collect_path_diagnostics(
     media_root = preflight.media_root
     config_path = preflight.config_path
 
-    screens_dir = _resolve_workspace_subdir(
+    screens_dir = resolve_subdir(
         media_root,
         cfg.screenshots.directory_name,
         purpose="screenshots.directory_name",
     )
-    analysis_cache = _resolve_workspace_subdir(
+    analysis_cache = resolve_subdir(
         media_root,
         cfg.analysis.frame_data_filename,
         purpose="analysis.frame_data_filename",
     )
-    offsets_path = _resolve_workspace_subdir(
+    offsets_path = resolve_subdir(
         media_root,
         cfg.audio_alignment.offsets_filename,
         purpose="audio_alignment.offsets_filename",
@@ -556,3 +568,6 @@ def _collect_path_diagnostics(
         "warnings": list(preflight.warnings),
     }
     return diagnostics
+
+
+_collect_path_diagnostics = collect_path_diagnostics

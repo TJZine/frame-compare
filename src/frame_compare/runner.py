@@ -142,7 +142,7 @@ def run(request: RunRequest) -> RunResult:
     impl = request.impl_module or importlib.import_module("frame_compare")
     module_file = Path(getattr(impl, '__file__', Path(__file__)))
 
-    preflight = preflight_utils._prepare_preflight(
+    preflight = preflight_utils.prepare_preflight(
         cli_root=root_override,
         config_override=config_path,
         input_override=input_dir,

@@ -28,6 +28,8 @@ Goal: ensure `src/frame_compare/runner.py` solely owns orchestration logic, whil
 - `_IMPL_ATTRS` reduced or replaced with direct imports.  
 - Delegation tests sketched out (even if not yet implemented).
 
+**2025‑11‑19 update (Phase 1.1)** — Preflight scaffolding is now complete. `src/frame_compare/preflight.py` exposes the public API (`resolve_workspace_root`, `resolve_subdir`, `collect_path_diagnostics`, `prepare_preflight`, `PreflightResult`), `frame_compare.py`/`runner.py` consume the new names directly, and the CLI/tests reference the shared helpers without reaching back through `core.py`.
+
 ---
 
 ## Phase 2 – CLI Slimming & Public Runner API (Current Phase 🚧)

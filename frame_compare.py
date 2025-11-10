@@ -48,13 +48,13 @@ from src.frame_compare.core import (
     _write_config_file,
 )
 from src.frame_compare.preflight import (
-    _collect_path_diagnostics,
-    _discover_workspace_root,
+    PreflightResult,
     _fresh_app_config,
     _path_is_within_root,
-    _PathPreflightResult,
-    _prepare_preflight,
-    _resolve_workspace_subdir,
+    collect_path_diagnostics,
+    prepare_preflight,
+    resolve_subdir,
+    resolve_workspace_root,
 )
 from src.slowpics import build_shortcut_filename
 
@@ -66,13 +66,15 @@ _COMPAT_EXPORTS: dict[str, object] = {
     "_ClipPlan": _core._ClipPlan,
     "_AudioAlignmentSummary": _core._AudioAlignmentSummary,
     "_AudioAlignmentDisplayData": _core._AudioAlignmentDisplayData,
-    "_collect_path_diagnostics": _preflight._collect_path_diagnostics,
+    "collect_path_diagnostics": _preflight.collect_path_diagnostics,
+    "_collect_path_diagnostics": _preflight.collect_path_diagnostics,
     "_confirm_alignment_with_screenshots": _alignment_preview._confirm_alignment_with_screenshots,
     "_discover_media": _media._discover_media,
     "_fresh_app_config": _preflight._fresh_app_config,
     "_launch_vspreview": _core._launch_vspreview,
     "_maybe_apply_audio_alignment": _core._maybe_apply_audio_alignment,
-    "_prepare_preflight": _preflight._prepare_preflight,
+    "prepare_preflight": _preflight.prepare_preflight,
+    "_prepare_preflight": _preflight.prepare_preflight,
     "_apply_vspreview_manual_offsets": _core._apply_vspreview_manual_offsets,
     "_write_vspreview_script": _core._write_vspreview_script,
     "_validate_tonemap_overrides": _core._validate_tonemap_overrides,
@@ -92,6 +94,9 @@ _COMPAT_EXPORTS: dict[str, object] = {
     "Console": _Console,
     "CliOutputManager": _cli_runtime.CliOutputManager,
     "NullCliOutputManager": _cli_runtime.NullCliOutputManager,
+    "resolve_workspace_root": _preflight.resolve_workspace_root,
+    "resolve_subdir": _preflight.resolve_subdir,
+    "PreflightResult": _preflight.PreflightResult,
 }
 for _name, _value in _COMPAT_EXPORTS.items():
     globals()[_name] = _value
@@ -223,10 +228,10 @@ def _run_cli_entry(
     if tm_show_clipping is not None:
         tonemap_override["show_clipping"] = tm_show_clipping
 
-    preflight_for_write: _PathPreflightResult | None = None
+    preflight_for_write: PreflightResult | None = None
     if write_config:
         try:
-            preflight_for_write = _prepare_preflight(
+            preflight_for_write = prepare_preflight(
                 cli_root=root_path,
                 config_override=config_path,
                 input_override=input_dir,
@@ -246,7 +251,7 @@ def _run_cli_entry(
 
     if diagnose_paths:
         try:
-            diagnostics = _collect_path_diagnostics(
+            diagnostics = collect_path_diagnostics(
                 cli_root=root_path,
                 config_override=config_path,
                 input_override=input_dir,
@@ -685,7 +690,7 @@ def doctor(ctx: click.Context, json_mode: bool) -> None:
 
     root_issue: Optional[str] = None
     try:
-        workspace_root = _discover_workspace_root(root_override)
+        workspace_root = resolve_workspace_root(root_override)
     except CLIAppError as exc:
         root_issue = str(exc)
         if root_override:
@@ -767,7 +772,7 @@ def _execute_wizard_session(
 
     if input_override:
         try:
-            _resolve_workspace_subdir(root, input_override, purpose="[paths].input_dir")
+            resolve_subdir(root, input_override, purpose="[paths].input_dir")
         except CLIAppError as exc:
             raise click.ClickException(str(exc)) from exc
         paths_section = cast(Dict[str, Any], final_config.setdefault("paths", {}))
@@ -872,7 +877,7 @@ def preset_apply(ctx: click.Context, name: str) -> None:
 
     if input_override:
         try:
-            _resolve_workspace_subdir(root, input_override, purpose="[paths].input_dir")
+            resolve_subdir(root, input_override, purpose="[paths].input_dir")
         except CLIAppError as exc:
             raise click.ClickException(str(exc)) from exc
         final_config.setdefault("paths", {})["input_dir"] = input_override

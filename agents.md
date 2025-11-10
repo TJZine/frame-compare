@@ -50,10 +50,10 @@ Advisors analyze and propose diffs/checks. All execution follows CODEX.md.
 
 ## Standard Flow
 1) **Evidence sweep (ripgrep)** → enumerate where code/config/tests live. If `ripgrep` unavailable, record the fallback used.
-2) **Docs check (context7)** → short official snippets (title+link+date). If context7 unavailable, record the fallback and proceed.
+2) **Docs check (context7 ➜ MCP)** → start with Context7 (title + link + date). When Context7 lacks the needed source, call the Fetch MCP server via `mcp__fetch__fetch`, constrain `max_length` (default ≤ 20000 chars), and log URL, timestamp, format (HTML/JSON/Markdown/TXT), `start_index`, and chunk count in your response plus `docs/DECISIONS.md`. Only fetch publicly reachable URLs; escalate before touching authenticated or private targets.
 3) **Plan (Sequential Thinking)** → 3–7 steps, success checks, rollback notes.
 4) **Proposed diffs** → file-by-file changes + tests (await approval).
-5) **Persist** → append decisions to `docs/DECISIONS.md`; update `CHANGELOG.md`.
+5) **Persist** → append decisions to `docs/DECISIONS.md`; update `CHANGELOG.md`. Before adding an entry, run `date -u +%Y-%m-%d` (or equivalent) and stamp the log with that exact value—never extrapolate future dates. When referencing MCP output, cite the URL + timestamp (from that command) and summarize any key snippets directly in the response so reviewers can replay the call without re-fetching.
 6) **Verify** → run `.venv/bin/pyright --warnings`, `.venv/bin/ruff check`, and `.venv/bin/pytest -q` before fallbacks. If the local binary is missing, install dev deps (`uv sync --all-extras --dev`) and document the fix. Only fall back to `uv run`/`npx` when the local command is unavailable, and record any sandbox/cache issues plus mitigations (for example `UV_CACHE_DIR=./.uv_cache`).
 7) **Commit subject** → finish every task report with a Conventional Commit-style subject line (e.g., `chore: update packaging excludes`). This is what the user pastes into `git commit -m`, so it must include a type and summary per commitlint rules.
 ## Repo Invariants (enforced)
@@ -65,10 +65,12 @@ Advisors analyze and propose diffs/checks. All execution follows CODEX.md.
 ## Tooling Registry (Capabilities)
 - Code search (**required default: ripgrep**; fallback: IDE/LSP search, must log fallback)
 - Docs lookup (**required default: context7/official docs**; fallback: project docs/README with explicit note)
+- External context MCP servers — Context7 stays first-line. Use Fetch MCP (`mcp__fetch__fetch`) for live docs and APIs (private-IP blocking + length limits per `/zcaceres/fetch-mcp`, 2025‑11‑10). For structured task decomposition, TaskFlow MCP enforces plan/approval phases and dependency tracking (`/pinkpixel-dev/taskflow-mcp`, 2025‑11‑10). For combined search + fetch, snf-mcp provides DuckDuckGo/Wikipedia search plus rate-limited HTML/Markdown retrieval (`/mseri/snf-mcp`, 2025‑11‑10). Record the server, tool name, key arguments, and cite the resulting snippet (URL + timestamp) every time.
 - Planning (**required default: sequential-thinking tool**; fallback: thorough bullet outline)
 - Logging/trace insertion (suggest exact file:line; fallback: print/console.log with labels)
 Guideline: If a preferred tool is unavailable (local or Cloud), degrade gracefully and state the fallback used.
 
 ## Execution Policy
 - Advisors provide analysis only. All execution/command runs follow CODEX.md.
+- MCP calls count as “analysis actions” but must be logged like commands: cite `source:<url>@<timestamp>` in findings, mention chunking/pagination, and mirror the metadata in `docs/DECISIONS.md`.
 - When in doubt, stop and request approval as per CODEX.md.

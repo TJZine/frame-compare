@@ -10,6 +10,7 @@
   - <= 300 changed lines total, no file moves/renames, no dependency/secret/CI changes,
   - confined to current feature scope (paths listed in the feature’s GUIDE.md),
   - adds/updates tests for the touched code, and all tests still pass.
+- **MCP tools**: Context7 and Fetch MCP calls against public URLs with `max_length ≤ 20000` (≈20 KB) and recorded metadata (URL, timestamp, format, chunk count) are pre-approved. Any authenticated target, pagination burst (>5 sequential chunks), or private-network URL still requires explicit approval before execution.
 - **Always require approval** if touching:
   - `.github/workflows/**`, `package.json`/`requirements.txt`, lockfiles, `Dockerfile`,
   - `migrations/**`, `*.sql`, infra/terraform, secrets, CI/CD settings,
@@ -20,9 +21,10 @@
 1) **Planning = Sequential Thinking** (generate a stepwise plan before patches).
 2) **Docs = context7 first** (cite official/best-practice; record date). If unavailable, log fallback.
 3) **Search = ripgrep first** (respect repo ignores). If unavailable, log fallback.
-4) **Verify** = run pyright/ruff/pytest
+4) **Verify** = run `.venv/bin/pyright --warnings`, `.venv/bin/ruff check`, `.venv/bin/pytest -q` (only fall back to `uv run`/`npx`/system binaries after attempting `uv sync --all-extras --dev` to install the local venv).
 5) **Output**: populate PR “Decision Minute” fields before proposing patches.
 6) **Commit Title**: every task response must include a Conventional Commit-style subject (for example, `feat: …`, `chore: …`) that can be copied directly into `git commit -m`. State it explicitly before the summary so users running commit hooks don’t have to invent one.
+7) **Log Dates Accurately**: when updating `docs/DECISIONS.md`, `CHANGELOG.md`, or similar logs, run `date -u +%Y-%m-%d` and use that exact stamp—do not future-date entries.
 
 ## Always-Allowed Commands (details)
 Print each command before execution and capture exit code + duration. These checks may read/write their standard caches (`.venv/**`, `.uv_cache/**`, `~/.cache/uv/**`). If a host sandbox blocks `~/.cache/uv`, set `UV_CACHE_DIR=./.uv_cache` (already gitignored) and rerun the command.
@@ -39,6 +41,16 @@ npx pyright --warnings
 ruff check
 pytest -q
 ```
+
+### Always-logged MCP calls
+- Every Context7 or Fetch MCP invocation must log tool name, URL, format, `max_length`, `start_index`, chunk count, latency, and summarize the returned snippet (or quote the relevant portion) directly in your response.
+- Respect server-side caps: Fetch MCP already enforces private-IP blocking and length filtering (`/zcaceres/fetch-mcp`, 2025‑11‑10); document any override (`DEFAULT_LIMIT`, pagination strategy) when you use it.
+- When using broader MCP servers (e.g., TaskFlow MCP for workflow planning or snf-mcp for DuckDuckGo/Wikipedia search), include the server ID and describe the resulting artifacts so reviewers can replay the call.
+
+## Escalation Playbook
+1. If an allowed command/tool fails because of sandbox, missing permissions, or blocked cache paths, immediately rerun it with `with_escalated_permissions=true` and a one-sentence justification (e.g., “Need unsandboxed pyright to read node_modules”).
+2. If the rerun still fails, capture the full stderr/exit code in your response and note the mitigation attempted (cache dir override, `uv sync`, etc.).
+3. Never abandon a required check silently—either secure approval, provide the failure log, or propose an alternative verification path (e.g., `uv run pyright`) before moving on.
 
 ### Test Guardrails (for always-allowed pytest)
 - **No external services**: skip DB/services unless ephemeral/mocked.
@@ -81,6 +93,7 @@ pytest -q
 - Local sandbox: `workspace-write` except for testing; **no network** unless explicitly approved (If Cloud: follow environment defaults).
 - Always print commands before running; never run package scripts or migrations without approval.
 - Tool caches required by the approved checks (`.venv/**`, `.uv_cache/**`, `~/.cache/uv/**`) are allowed. If a host blocks `~/.cache/uv`, set `UV_CACHE_DIR=./.uv_cache` and rerun.
+- MCP fetch/context7 calls are permitted without extra approval because the servers enforce private-IP blocking, HTTP status validation, and chunked length limits (per `/zcaceres/fetch-mcp`, 2025‑11‑10). Still log URLs/timestamps and stop if a request would hit authenticated resources or violate robots/security policies.
 - **Checks exception:** pyright/ruff/pytest (under Test Guardrails) may run without extra approval as long as they respect the guardrails above.
 
 ## Local Toolchain Expectations

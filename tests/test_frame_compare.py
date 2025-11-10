@@ -110,8 +110,8 @@ def _make_cli_preflight(
     cfg: AppConfig,
     *,
     workspace_name: str | None = None,
-) -> core_module._PathPreflightResult:
-    """Build a _PathPreflightResult anchored in a temporary workspace."""
+) -> core_module.PreflightResult:
+    """Build a PreflightResult anchored in a temporary workspace."""
 
     workspace_root = base_dir / (workspace_name or "workspace")
     workspace_root.mkdir(parents=True, exist_ok=True)
@@ -129,7 +129,7 @@ def _make_cli_preflight(
         media_root = workspace_root / input_dir
     media_root.mkdir(parents=True, exist_ok=True)
 
-    return core_module._PathPreflightResult(
+    return core_module.PreflightResult(
         workspace_root=workspace_root,
         media_root=media_root,
         config_path=config_path,
@@ -165,7 +165,7 @@ class _CliRunnerEnv:
             workspace_name=workspace_name,
         )
 
-        def _fake_preflight(**_kwargs: object) -> core_module._PathPreflightResult:
+        def _fake_preflight(**_kwargs: object) -> core_module.PreflightResult:
             return preflight
 
         module_targets = (
@@ -178,7 +178,8 @@ class _CliRunnerEnv:
         for module in module_targets:
             if module is None:
                 continue
-            self._monkeypatch.setattr(module, "_prepare_preflight", _fake_preflight, raising=False)
+            for attr_name in ("prepare_preflight", "_prepare_preflight"):
+                self._monkeypatch.setattr(module, attr_name, _fake_preflight, raising=False)
 
         self.state = _CliRunnerEnvState(
             workspace_root=preflight.workspace_root,
@@ -207,6 +208,14 @@ class _CliRunnerEnv:
 def _patch_core_helper(monkeypatch: pytest.MonkeyPatch, attr: str, value: object) -> None:
     """Patch both frame_compare.* and runner_module.core.* helpers simultaneously."""
 
+    alias_map = {
+        "prepare_preflight": ("_prepare_preflight",),
+        "_prepare_preflight": ("prepare_preflight",),
+        "collect_path_diagnostics": ("_collect_path_diagnostics",),
+        "_collect_path_diagnostics": ("collect_path_diagnostics",),
+    }
+    attrs_to_patch = (attr,) + alias_map.get(attr, tuple())
+
     targets = [
         frame_compare,
         runner_module.core,
@@ -224,8 +233,9 @@ def _patch_core_helper(monkeypatch: pytest.MonkeyPatch, attr: str, value: object
     for target in targets:
         if target is None:
             continue
-        if hasattr(target, attr):
-            monkeypatch.setattr(target, attr, value, raising=False)
+        for attr_name in attrs_to_patch:
+            if hasattr(target, attr_name):
+                monkeypatch.setattr(target, attr_name, value, raising=False)
 
 
 def _patch_vs_core(monkeypatch: pytest.MonkeyPatch, attr: str, value: object) -> None:
@@ -499,16 +509,14 @@ def _make_config(input_dir: Path) -> AppConfig:
     )
 
 
-def _make_runner_preflight(workspace_root: Path, media_root: Path, cfg: AppConfig) -> core_module._PathPreflightResult:
-    """
-    Build a _PathPreflightResult pointing at prepared workspace/media roots for runner tests.
-    """
+def _make_runner_preflight(workspace_root: Path, media_root: Path, cfg: AppConfig) -> core_module.PreflightResult:
+    """Build a PreflightResult pointing at prepared workspace/media roots for runner tests."""
     config_dir = workspace_root / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
     config_path = config_dir / "config.toml"
     config_path.write_text("config", encoding="utf-8")
     cfg.paths.input_dir = str(media_root)
-    return core_module._PathPreflightResult(
+    return core_module.PreflightResult(
         workspace_root=workspace_root,
         media_root=media_root,
         config_path=config_path,
@@ -2374,7 +2382,7 @@ def test_runner_auto_upload_cleans_screens_dir(tmp_path: Path, monkeypatch: pyte
     )
 
     preflight = _make_runner_preflight(workspace, media_root, cfg)
-    _patch_core_helper(monkeypatch, "_prepare_preflight", lambda **_: preflight)
+    _patch_core_helper(monkeypatch, "prepare_preflight", lambda **_: preflight)
 
     files = [media_root / "Alpha.mkv", media_root / "Beta.mkv"]
     metadata = [{"label": "Alpha"}, {"label": "Beta"}]
@@ -2628,7 +2636,7 @@ def test_runner_audio_alignment_summary_passthrough(
     cfg.analysis.save_frames_data = False
 
     preflight = _make_runner_preflight(workspace, media_root, cfg)
-    _patch_core_helper(monkeypatch, "_prepare_preflight", lambda **_: preflight)
+    _patch_core_helper(monkeypatch, "prepare_preflight", lambda **_: preflight)
 
     files = [media_root / "Reference.mkv", media_root / "Target.mkv"]
     metadata = [{"label": "Reference"}, {"label": "Target"}]
@@ -2749,7 +2757,7 @@ def test_runner_handles_existing_event_loop(tmp_path: Path, monkeypatch: pytest.
     cfg.analysis.save_frames_data = False
 
     preflight = _make_runner_preflight(workspace, media_root, cfg)
-    _patch_core_helper(monkeypatch, "_prepare_preflight", lambda **_: preflight)
+    _patch_core_helper(monkeypatch, "prepare_preflight", lambda **_: preflight)
 
     files = [media_root / "Alpha.mkv", media_root / "Beta.mkv"]
     metadata = [{"label": "Alpha"}, {"label": "Beta"}]

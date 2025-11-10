@@ -115,10 +115,13 @@ from src.frame_compare.config_helpers import coerce_config_flag as _coerce_confi
 from src.frame_compare.preflight import (
     PACKAGED_TEMPLATE_PATH,
     PROJECT_ROOT,
+    PreflightResult,
     _abort_if_site_packages,
-    _discover_workspace_root,
     _is_writable_path,
-    _resolve_workspace_subdir,
+    collect_path_diagnostics,
+    prepare_preflight,
+    resolve_subdir,
+    resolve_workspace_root,
 )
 from src.slowpics import SlowpicsAPIError, build_shortcut_filename, upload_comparison  # noqa: F401
 from src.tmdb import (
@@ -141,10 +144,10 @@ ROOT_SENTINELS: Final[tuple[str, ...]] = _preflight_constants.ROOT_SENTINELS
 
 ScreenshotError = _screenshot_module.ScreenshotError
 generate_screenshots = _screenshot_module.generate_screenshots
-_PathPreflightResult = _preflight_constants._PathPreflightResult
 _fresh_app_config = _preflight_constants._fresh_app_config
-_prepare_preflight = _preflight_constants._prepare_preflight
-_collect_path_diagnostics = _preflight_constants._collect_path_diagnostics
+_PathPreflightResult = PreflightResult
+_prepare_preflight = prepare_preflight
+_collect_path_diagnostics = collect_path_diagnostics
 _confirm_alignment_with_screenshots = _alignment_preview_module._confirm_alignment_with_screenshots
 load_config = _load_config
 
@@ -428,7 +431,7 @@ _DOCTOR_STATUS_ICONS: Final[Dict[DoctorStatus, str]] = {
 def _resolve_wizard_paths(root_override: str | None, config_override: str | None) -> tuple[Path, Path]:
     """Resolve workspace root and config path for wizard/preset workflows."""
 
-    root = _discover_workspace_root(root_override)
+    root = resolve_workspace_root(root_override)
     config_path = Path(config_override).expanduser() if config_override else root / "config" / "config.toml"
     _abort_if_site_packages({"workspace": root, "config": config_path})
     if not _is_writable_path(root, for_file=False):
@@ -459,7 +462,7 @@ def _prompt_workspace_root(default_root: Path) -> Path:
         response = click.prompt("Workspace root", default=str(current))
         candidate_input = response.strip() or str(current)
         try:
-            candidate = _discover_workspace_root(candidate_input)
+            candidate = resolve_workspace_root(candidate_input)
         except CLIAppError as exc:
             click.echo(f"Error: {exc}")
             continue
@@ -499,7 +502,7 @@ def _prompt_input_directory(root: Path, current_default: str) -> str:
         )
         value = response.strip() or current_default
         try:
-            _resolve_workspace_subdir(root, value, purpose="[paths].input_dir")
+            resolve_subdir(root, value, purpose="[paths].input_dir")
         except CLIAppError as exc:
             click.echo(str(exc))
             continue
@@ -1715,7 +1718,7 @@ def _maybe_apply_audio_alignment(
     """Apply audio alignment when enabled, returning summary and display data."""
     audio_cfg = cfg.audio_alignment
     prompt_reuse_offsets = _coerce_config_flag(audio_cfg.prompt_reuse_offsets)
-    offsets_path = _resolve_workspace_subdir(
+    offsets_path = resolve_subdir(
         root,
         audio_cfg.offsets_filename,
         purpose="audio_alignment.offsets_filename",
@@ -2855,7 +2858,7 @@ def _write_vspreview_script(
 ) -> Path:
     reference_plan = summary.reference_plan
     targets = [plan for plan in plans if plan is not reference_plan]
-    script_dir = _resolve_workspace_subdir(root, "vspreview", purpose="vspreview workspace")
+    script_dir = resolve_subdir(root, "vspreview", purpose="vspreview workspace")
     script_dir.mkdir(parents=True, exist_ok=True)
     timestamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     script_path = script_dir / f"vspreview_{timestamp}_{uuid.uuid4().hex[:8]}.py"

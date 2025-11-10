@@ -21,8 +21,8 @@ Keep this DoD visible when reviewing PRs.
 
 | Phase | Sub-phase | Owner | Status | Notes |
 | --- | --- | --- | --- | --- |
-| 0 | Preparation |  | ☐ |  |
-| 1 | 1.1 Preflight scaffolding |  | ☐ |  |
+| 0 | Preparation |  | ☑ | Phase 0 checklist (git status + pytest/ruff/pyright) logged on 2025‑11‑19 ahead of Phase 1 work. |
+| 1 | 1.1 Preflight scaffolding |  | ☑ | Extracted the public preflight API (`resolve_workspace_root`, `resolve_subdir`, `collect_path_diagnostics`, `prepare_preflight`, `PreflightResult`) and rewired CLI/runner/tests. |
 | 1 | 1.2 Wizard path integration |  | ☐ |  |
 | 2 | 2.1 Wizard module creation |  | ☐ |  |
 | 2 | 2.2 Loader/CLI updates |  | ☐ |  |
