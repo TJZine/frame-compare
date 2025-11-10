@@ -17,6 +17,13 @@
   - public API contracts, auth/security logic, cross-feature refactors, file moves/renames.
   - executing tests that require network, external services, or non-ephemeral resources
 
+### Sequential Thinking Context Management
+- When calling `process_thought` or `generate_summary`, only echo a condensed digest in chat (stage, immediate next steps, blockers/alerts). Never dump the raw JSON payloads back to the user; the MCP log already preserves them.
+- Archive or truncate aged thoughts once they are logged—keep roughly the last 7–10 items in active memory (expand temporarily if needed) and rely on the MCP server for historical retrieval instead of reprinting prior entries.
+- Prefer the lighter summary path (short synopsis rather than full analytics) whenever detailed telemetry is not needed for the current decision; escalate to the verbose output only for debugging or reviewer requests.
+- Note in task reports when you have rotated context (e.g., “older Sequential Thinking context archived per guidelines”) so reviewers know why earlier thoughts are omitted.
+- When filling metadata (`files_touched`, `tests_to_run`, `dependencies`, `risk_level`, `confidence_score`, etc.), provide real values or leave the schema defaults/empty lists; never fabricate filenames, tests, or risk signals just to satisfy the shape.
+
 ## Global Defaults (Enforced)
 1) **Planning = Sequential Thinking** (generate a stepwise plan before patches).
 2) **Docs = context7 first** (cite official/best-practice; record date). If unavailable, log fallback.

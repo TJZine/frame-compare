@@ -47,11 +47,13 @@ Advisors analyze and propose diffs/checks. All execution follows CODEX.md.
 - **Planning protocol = Sequential Thinking**: produce plans using a step-wise, explicitly reasoned checklist before proposing diffs.
 - **Docs lookup = context7**: pull short, dated snippets from official sources/best-practice docs for each claim. If unavailable, log the fallback.
 - **Search = ripgrep**: all evidence sweeps MUST use `ripgrep` first (respect repo ignores). If unavailable, log the fallback search method.
+- **Context lean**: Advisors remind Codex to follow CODEX’s Sequential Thinking Context Management rules (condense `process_thought` output, keep roughly the last 7–10 thoughts in working memory, and lean on MCP history for archives).
+- **Metadata accuracy**: Flag hallucinated Sequential Thinking metadata—`files_touched`, `tests_to_run`, `dependencies`, `risk_level`, `confidence_score`, etc. should stay empty/default unless there is real evidence.
 
 ## Standard Flow
 1) **Evidence sweep (ripgrep)** → enumerate where code/config/tests live. If `ripgrep` unavailable, record the fallback used.
 2) **Docs check (context7 ➜ MCP)** → start with Context7 (title + link + date). When Context7 lacks the needed source, call the Fetch MCP server via `mcp__fetch__fetch`, constrain `max_length` (default ≤ 20000 chars), and log URL, timestamp, format (HTML/JSON/Markdown/TXT), `start_index`, and chunk count in your response plus `docs/DECISIONS.md`. Only fetch publicly reachable URLs; escalate before touching authenticated or private targets.
-3) **Plan (Sequential Thinking)** → 3–7 steps, success checks, rollback notes.
+3) **Plan (Sequential Thinking)** → 3–7 steps, success checks, rollback notes; prompt Codex to summarize planning outputs per CODEX’s context-management guidance (no raw JSON, only recent thoughts retained) and ensure metadata fields are truthful or left empty.
 4) **Proposed diffs** → file-by-file changes + tests (await approval).
 5) **Persist** → append decisions to `docs/DECISIONS.md`; update `CHANGELOG.md`. Before adding an entry, run `date -u +%Y-%m-%d` (or equivalent) and stamp the log with that exact value—never extrapolate future dates. When referencing MCP output, cite the URL + timestamp (from that command) and summarize any key snippets directly in the response so reviewers can replay the call without re-fetching.
 6) **Verify** → run `.venv/bin/pyright --warnings`, `.venv/bin/ruff check`, and `.venv/bin/pytest -q` before fallbacks. If the local binary is missing, install dev deps (`uv sync --all-extras --dev`) and document the fix. Only fall back to `uv run`/`npx` when the local command is unavailable, and record any sandbox/cache issues plus mitigations (for example `UV_CACHE_DIR=./.uv_cache`).

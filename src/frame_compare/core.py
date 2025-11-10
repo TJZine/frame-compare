@@ -432,7 +432,11 @@ def _resolve_wizard_paths(root_override: str | None, config_override: str | None
     """Resolve workspace root and config path for wizard/preset workflows."""
 
     root = resolve_workspace_root(root_override)
-    config_path = Path(config_override).expanduser() if config_override else root / "config" / "config.toml"
+    if config_override:
+        config_path = Path(config_override).expanduser()
+    else:
+        config_dir = resolve_subdir(root, "config", purpose="config directory")
+        config_path = config_dir / "config.toml"
     _abort_if_site_packages({"workspace": root, "config": config_path})
     if not _is_writable_path(root, for_file=False):
         raise click.ClickException(f"Workspace root '{root}' is not writable.")

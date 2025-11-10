@@ -51,7 +51,6 @@ from src.frame_compare.preflight import (
     PreflightResult,
     _fresh_app_config,
     _path_is_within_root,
-    collect_path_diagnostics,
     prepare_preflight,
     resolve_subdir,
     resolve_workspace_root,
@@ -251,7 +250,7 @@ def _run_cli_entry(
 
     if diagnose_paths:
         try:
-            diagnostics = collect_path_diagnostics(
+            diagnostics = _preflight.collect_path_diagnostics(
                 cli_root=root_path,
                 config_override=config_path,
                 input_override=input_dir,

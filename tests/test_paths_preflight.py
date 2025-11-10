@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -240,3 +241,32 @@ def test_cli_diagnose_rejects_site_packages_root(tmp_path: Path) -> None:
     result = runner.invoke(frame_compare.main, ["--root", str(site_root), "--diagnose-paths"])
     assert result.exit_code != 0
     assert "site-packages" in result.output
+
+
+def test_cli_diagnose_paths_uses_preflight_collect(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    runner = CliRunner()
+    captured: dict[str, dict[str, object]] = {}
+    expected = {
+        "workspace_root": "root",
+        "media_root": "media",
+        "config_path": "config",
+        "config_exists": False,
+        "writable": {},
+        "warnings": [],
+    }
+
+    def fake_collect(**kwargs):
+        captured["kwargs"] = kwargs
+        return expected
+
+    monkeypatch.setattr(preflight_module, "collect_path_diagnostics", fake_collect)
+
+    result = runner.invoke(frame_compare.main, ["--root", str(tmp_path), "--diagnose-paths"])
+
+    assert result.exit_code == 0
+    assert captured["kwargs"]["cli_root"] == str(tmp_path)
+    output = result.output
+    start = output.index("{")
+    end = output.rindex("}") + 1
+    payload = "".join(output[start:end].splitlines())
+    assert json.loads(payload) == expected

@@ -30,6 +30,8 @@ Goal: ensure `src/frame_compare/runner.py` solely owns orchestration logic, whil
 
 **2025‑11‑19 update (Phase 1.1)** — Preflight scaffolding is now complete. `src/frame_compare/preflight.py` exposes the public API (`resolve_workspace_root`, `resolve_subdir`, `collect_path_diagnostics`, `prepare_preflight`, `PreflightResult`), `frame_compare.py`/`runner.py` consume the new names directly, and the CLI/tests reference the shared helpers without reaching back through `core.py`.
 
+**2025‑11‑10 update (Phase 1.2)** — Wizard workflows now reuse the preflight helpers end-to-end: `_resolve_wizard_paths` and the interactive prompts lean on `resolve_workspace_root`/`resolve_subdir`, and the `--diagnose-paths` command calls `preflight.collect_path_diagnostics` directly. Added regression coverage in `tests/test_preflight.py` plus a CLI test ensuring the diagnostics flag routes through the shared module.
+
 ---
 
 ## Phase 2 – CLI Slimming & Public Runner API (Current Phase 🚧)

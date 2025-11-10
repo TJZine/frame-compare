@@ -23,7 +23,7 @@ Keep this DoD visible when reviewing PRs.
 | --- | --- | --- | --- | --- |
 | 0 | Preparation |  | ☑ | Phase 0 checklist (git status + pytest/ruff/pyright) logged on 2025‑11‑19 ahead of Phase 1 work. |
 | 1 | 1.1 Preflight scaffolding |  | ☑ | Extracted the public preflight API (`resolve_workspace_root`, `resolve_subdir`, `collect_path_diagnostics`, `prepare_preflight`, `PreflightResult`) and rewired CLI/runner/tests. |
-| 1 | 1.2 Wizard path integration |  | ☐ |  |
+| 1 | 1.2 Wizard path integration |  | ☑ | Wizard prompts now delegate to `preflight.resolve_workspace_root/resolve_subdir`, `--diagnose-paths` calls `preflight.collect_path_diagnostics`, and new preflight/CLI diagnostics tests cover site-packages and escape attempts. |
 | 2 | 2.1 Wizard module creation |  | ☐ |  |
 | 2 | 2.2 Loader/CLI updates |  | ☐ |  |
 | 3 | 3.1 Metadata utilities |  | ☐ |  |
@@ -198,6 +198,16 @@ Copy this block into each PR or session log:
 - [ ] Follow-ups for next session:
 
 _Optional fields:_ Date, Branch, Reviewer, Metrics (LOC touched, tests runtime).
+
+## Session Checklist — 2025-11-10
+
+- [x] Phase/Sub-phase: `1 / 1.2 Wizard path integration`
+- [x] Modules touched: `src/frame_compare/core.py`, `frame_compare.py`, `tests/test_preflight.py`, `tests/test_paths_preflight.py`
+- [x] Commands run: `git status -sb`, `pytest -q`, `.venv/bin/ruff check`, `npx pyright --warnings` (fails: ENOTFOUND registry.npmjs.org), `.venv/bin/pyright --warnings`
+- [x] Docs updated? (`runner_refactor_checklist`, `DECISIONS`, `CHANGELOG`?): Updated `docs/DECISIONS.md`, `docs/runner_refactor_checklist.md`, and this tracker (CHANGELOG unchanged—no user-visible behavior change).
+- [x] Tests added/updated: Added `tests/test_preflight.py`, extended `tests/test_paths_preflight.py` with a diagnostics routing check.
+- [x] Risks noted: Config dir derivation now flows through `resolve_subdir`; if validation fails the message references the generic “input directory” wording—monitor for user confusion.
+- [x] Follow-ups for next session: Phase 2.1 wizard module creation (extract prompts), consider documenting diagnostics routing in README once the wizard module stabilizes.
 
 ---
 

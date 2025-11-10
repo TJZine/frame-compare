@@ -36,6 +36,7 @@ Automated frame sampling, audio alignment, HDR tonemapping, and slow.pics upload
   - [Security](#security)
   - [Privacy & Telemetry](#privacy--telemetry)
   - [Versioning](#versioning)
+  - [Context Management](#context-management)
   - [Contributing](#contributing)
   - [License](#license)
   - [Support](#support)
@@ -351,6 +352,12 @@ Frame Compare sends no telemetry. Network calls only occur when `[slowpics].auto
 ### Versioning
 
 Current version: `0.0.1`. Until 1.0, APIs may change without notice. See [CHANGELOG.md](CHANGELOG.md) for release notes (recent entries cover VSPreview helper fixes, odd-geometry pivots, and tonemap refinements).
+
+### Context Management
+
+Advisors and Codex sessions keep Sequential Thinking logs lean to avoid flooding reviewers: only short stage/next-step summaries show up in chat, and only the latest ~10 thoughts stay visible while older ones move into the MCP history. See [CODEX.md](CODEX.md#sequential-thinking-context-management) for the full policy if you notice intentionally condensed responses.
+
+**Metadata etiquette:** when Sequential Thinking metadata like `files_touched`, `tests_to_run`, or `dependencies` doesn’t apply, leave those lists empty instead of inventing placeholder entries. Likewise, keep `risk_level` and `confidence_score` at their defaults unless you have real signal to share. Fabricated values corrupt downstream analysis and reviewer trust.
 
 ### Contributing
 
