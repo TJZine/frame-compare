@@ -2,6 +2,7 @@
 
 All notable user-visible updates will be documented in this file in reverse chronological order.
 
+- *2025-11-10:* Finalized the audio alignment module split by routing `runner.py` through `alignment_runner.apply_audio_alignment`, dropping the redundant `_maybe_apply_audio_alignment` alias, and updating docs/trackers to match. Verification: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` (265 passed, 1 skipped), `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`.
 - *2025-11-10:* Phase 2.3 documentation/tooling hand-off: refreshed the runner-refactor trackers, reiterated the wizard compatibility surface (`frame_compare.resolve_wizard_paths` / `_resolve_wizard_paths` now forward into `src.frame_compare.wizard`), and re-ran the quality gates (`pytest -q` 209 passed / 54 skipped, `.venv/bin/ruff check`, `npx pyright --warnings` still blocked offline so `.venv/bin/pyright --warnings` recorded as the fallback).
 - *2025-11-10:* Codex/AGENTS/README now explicitly require Sequential Thinking loops to log every stage with `next_thought_needed=true` until the Review entry so orchestration never stops mid-plan.
 - *2025-11-19:* Phase 1.1 modularization: `src/frame_compare/preflight.py` now exposes `resolve_workspace_root`, `resolve_subdir`, `collect_path_diagnostics`, `prepare_preflight`, and `PreflightResult`, and the CLI/runner/tests were rewired to consume the shared API (legacy `_…` aliases remain for compatibility).

@@ -2507,7 +2507,7 @@ def test_runner_auto_upload_cleans_screens_dir(tmp_path: Path, monkeypatch: pyte
         fps_den=1001,
     )
     _patch_core_helper(monkeypatch, "_build_cache_info", lambda *_: cache_info)
-    monkeypatch.setattr(runner_module.core, "_maybe_apply_audio_alignment", lambda *args, **kwargs: (None, None))
+    _patch_core_helper(monkeypatch, "_maybe_apply_audio_alignment", lambda *args, **kwargs: (None, None))
 
     monkeypatch.setattr(runner_module.vs_core, "configure", lambda **_: None)
     monkeypatch.setattr(runner_module.vs_core, "set_ram_limit", lambda *_: None)
@@ -2797,8 +2797,8 @@ def test_runner_audio_alignment_summary_passthrough(
         measurements={},
     )
 
-    monkeypatch.setattr(
-        runner_module.core,
+    _patch_core_helper(
+        monkeypatch,
         "_maybe_apply_audio_alignment",
         lambda *args, **kwargs: (summary, display),
     )
@@ -2882,7 +2882,7 @@ def test_runner_handles_existing_event_loop(tmp_path: Path, monkeypatch: pytest.
         fps_den=1001,
     )
     _patch_core_helper(monkeypatch, "_build_cache_info", lambda *_: cache_info)
-    monkeypatch.setattr(runner_module.core, "_maybe_apply_audio_alignment", lambda *args, **kwargs: (None, None))
+    _patch_core_helper(monkeypatch, "_maybe_apply_audio_alignment", lambda *args, **kwargs: (None, None))
 
     monkeypatch.setattr(runner_module.vs_core, "configure", lambda **_: None)
     monkeypatch.setattr(runner_module.vs_core, "set_ram_limit", lambda *_: None)

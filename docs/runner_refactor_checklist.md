@@ -147,9 +147,9 @@ With the CLI shim stable and tooling in place, Phase 4 focuses on finishing th
 | Checklist Item | Status | Notes / Next Steps |
 | --- | --- | --- |
 | Module creation | ✅ | Added `src/frame_compare/alignment_runner.py` owning the alignment dataclasses, measurement helpers, and VSPreview orchestration previously buried in `core.py`. |
-| Runner wiring | ✅ | `runner.py` now imports `alignment_runner.apply_audio_alignment`/`format_alignment_output`; `core.py` simply re-exports the helpers so downstream shims keep working without `_maybe_*` rewrites. |
+| Runner wiring | ✅ | `runner.py` now calls `alignment_runner.apply_audio_alignment`/`format_alignment_output` directly, while `core.py` merely re-exports the helpers so downstream shims keep working without `_maybe_*` rewrites. |
 | Tests | ✅ | Extended `_patch_core_helper` to patch the new module, plus a focused `test_format_alignment_output_updates_json_tail` to ensure the formatter still populates telemetry/warnings. Existing VSPreview tests cover the moved launch helpers. |
-| Docs & residual risks | ✅ | Updated `docs/refactor/mod_refactor.md`, this checklist, and `docs/config_audit.md` to mention the new module; residual risk logged in `docs/DECISIONS.md` for the pending VSPreview script-unit tests. |
+| Docs & residual risks | ✅ | Updated `docs/refactor/mod_refactor.md`, this checklist, and `docs/config_audit.md` to mention the new module; see the 2025‑11‑10 DEC entry for the outstanding VSPreview script-unit tests. |
 
 ### Phase 4.2 – Regression Parity & Documentation
 

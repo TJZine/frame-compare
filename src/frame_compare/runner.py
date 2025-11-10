@@ -723,7 +723,7 @@ def run(request: RunRequest) -> RunResult:
     plans = planner_utils.build_plans(files, metadata, cfg)
     analyze_path = core._pick_analyze_file(files, metadata, cfg.analysis.analyze_clip, cache_dir=root)
 
-    alignment_summary, alignment_display = core._maybe_apply_audio_alignment(
+    alignment_summary, alignment_display = alignment_runner.apply_audio_alignment(
         plans,
         cfg,
         analyze_path,

@@ -28,7 +28,7 @@ Keep this DoD visible when reviewing PRs.
 | 2 | 2.2 Loader/CLI updates |  | ☑ | CLI + preset flows now call `src.frame_compare.wizard` APIs directly; CLI tests patched to assert the new boundary. |
 | 3 | 3.1 Metadata utilities |  | ☑ | Created `src/frame_compare/metadata.py`, rewired `runner.py`/tests to import it directly, and updated docs/QA logs. |
 | 3 | 3.2 Plan builder |  | ☑ | Extracted `build_plans` into `src/frame_compare/planner.py`, rewired `runner.py`, and added planner-focused tests/QA logs. |
-| 4 | 4.1 Alignment summary module |  | ☐ |  |
+| 4 | 4.1 Alignment summary module |  | ☑ | Extracted `_AudioAlignmentSummary`/display helpers into `src/frame_compare/alignment_runner.py`, rewired `runner.py` to call the module directly, and re-exported the helpers for compatibility. |
 | 4 | 4.2 VSPreview integration |  | ☐ |  |
 | 5 | 5.1 VSPreview module |  | ☐ |  |
 | 5 | 5.2 Layout utilities |  | ☐ |  |

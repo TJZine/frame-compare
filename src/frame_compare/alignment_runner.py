@@ -2299,6 +2299,3 @@ def format_alignment_output(
         audio_block["vspreview_reference_trim"] = int(
             summary.vspreview_manual_offsets[summary.reference_plan.path.name]
         )
-
-
-_maybe_apply_audio_alignment = apply_audio_alignment
