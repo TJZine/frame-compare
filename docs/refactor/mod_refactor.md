@@ -231,6 +231,27 @@ _Optional fields:_ Date, Branch, Reviewer, Metrics (LOC touched, tests runtime).
 - [x] Risks noted: Downstream tools that previously patched `frame_compare._resolve_wizard_paths` now hit the alias that forwards to `src.frame_compare.wizard`—monitor for any imports that reach into `src.frame_compare.core` directly.
 - [x] Follow-ups for next session: Begin Phase 3 metadata extraction; audit README once the CLI shim is slimmer to mention the new wizard module boundary if user-facing behavior changes.
 
+### Phase 2.3 – Docs, Tooling & Risk Log
+
+Goal: capture the tooling outputs, refresh compatibility documentation, and extend the residual-risk notes before moving on.
+
+| Checklist Item | Status | Notes |
+| --- | --- | --- |
+| Workspace prep & tooling | ✅ | 2025-11-10 — `git status -sb` shows `runner-refactor...origin/runner-refactor [ahead 3]`; `pytest -q` (209 passed / 54 skipped, 39.71 s), `.venv/bin/ruff check` (clean), `npx pyright --warnings` (fails: npm ENOTFOUND) with fallback `.venv/bin/pyright --warnings` (0 errors). |
+| Documentation & CHANGELOG | ✅ | README now explains that `frame_compare.resolve_wizard_paths` / `_resolve_wizard_paths` forward into `src.frame_compare.wizard`, this tracker plus `docs/runner_refactor_checklist.md` record the risk notes, and CHANGELOG captures the doc/tooling refresh. |
+| Session logs | ✅ | `docs/DECISIONS.md` includes both the pre- and post-edit command captures stamped via `date -u +%Y-%m-%d`, and the Session Checklist below records scope/risks. |
+| Residual risk | ✅ | Added explicit migration guidance so downstream scripts keep patching the compatibility exports instead of the retired `src.frame_compare.core` helpers; no additional manual wizard/preset QA was required for this doc-only pass. |
+
+## Session Checklist — 2025-11-10 (Phase 2.3)
+
+- [x] Phase/Sub-phase: `2 / 2.3 Docs, Tooling & Risk Log`
+- [x] Modules touched: `README.md`, `CHANGELOG.md`, `docs/refactor/mod_refactor.md`, `docs/runner_refactor_checklist.md`, `docs/DECISIONS.md`
+- [x] Commands run: `git status -sb`, `pytest -q`, `.venv/bin/ruff check`, `npx pyright --warnings` (fails: ENOTFOUND registry.npmjs.org), `.venv/bin/pyright --warnings`
+- [x] Docs updated? (`runner_refactor_checklist`, `DECISIONS`, `CHANGELOG`?): Yes — README compatibility note, CHANGELOG entry, both refactor trackers, and `docs/DECISIONS.md`.
+- [x] Tests added/updated: None (documentation-only pass; existing suites already cover the wizard boundary).
+- [x] Risks noted: Legacy scripts must patch `frame_compare.resolve_wizard_paths` (or `_resolve_wizard_paths`) because those names now forward into `src.frame_compare.wizard`; manual wizard/preset QA deferred until behavior changes again.
+- [x] Follow-ups for next session: Pick up the Phase 3 metadata extraction once additional module splits resume.
+
 ---
 
 ## Verification Commands Reference

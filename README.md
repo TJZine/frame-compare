@@ -223,6 +223,8 @@ run(
 )
 ```
 
+Need to override wizard prompts programmatically? Continue patching the compatibility shims that `frame_compare` re-exports. Both `resolve_wizard_paths` and `_resolve_wizard_paths` forward to `src.frame_compare.wizard`, so legacy automation that previously pointed at `frame_compare._resolve_wizard_paths` keeps working without reaching into `src.frame_compare.core`.
+
 ## Advanced Guides & Reference
 
 ### Configuration Highlights

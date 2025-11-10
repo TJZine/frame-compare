@@ -3,7 +3,7 @@
 ## Execution & Approvals
 - Default: **diff-plan → approval → patches**. Advisors never execute.
 - **Always-allowed checks (no extra approval)** — assume permission is granted:
-  - `.venv/bin/pyright --warnings` (fallbacks: `uv run pyright --warnings`, `npx pyright --warnings`)
+  - `.venv/bin/pyright --warnings` (must run first; only fall back to `uv run pyright --warnings` or `npx pyright --warnings` if the local binary is unavailable. When using the `npx` fallback, request escalated permissions for that command.)
   - `.venv/bin/ruff check` (fallbacks: `ruff check`, `uv run ruff check`)
   - `.venv/bin/pytest -q` (unit/integration only; see Test Guardrails)
 - Autonomous changes allowed (no approval) **only if all are true**:
@@ -28,7 +28,7 @@
 1) **Planning = Sequential Thinking** (generate a stepwise plan before patches).
 2) **Docs = context7 first** (cite official/best-practice; record date). If unavailable, log fallback.
 3) **Search = ripgrep first** (respect repo ignores). If unavailable, log fallback.
-4) **Verify** = run `.venv/bin/pyright --warnings`, `.venv/bin/ruff check`, `.venv/bin/pytest -q` (only fall back to `uv run`/`npx`/system binaries after attempting `uv sync --all-extras --dev` to install the local venv).
+4) **Verify** = run `.venv/bin/pyright --warnings`, `.venv/bin/ruff check`, `.venv/bin/pytest -q` (only fall back to `uv run`/`npx`/system binaries after attempting `uv sync --all-extras --dev` to install the local venv; any `npx pyright --warnings` fallback must be executed with escalated permissions enabled).
 5) **Output**: populate PR “Decision Minute” fields before proposing patches.
 6) **Commit Title**: every task response must include a Conventional Commit-style subject (for example, `feat: …`, `chore: …`) that can be copied directly into `git commit -m`. State it explicitly before the summary so users running commit hooks don’t have to invent one.
 7) **Log Dates Accurately**: when updating `docs/DECISIONS.md`, `CHANGELOG.md`, or similar logs, run `date -u +%Y-%m-%d` and use that exact stamp—do not future-date entries.
@@ -44,6 +44,7 @@ Print each command before execution and capture exit code + duration. These chec
 
 # Fallbacks (auto-detected if the above fail)
 uv run pyright --warnings
+# Request escalated permissions when running this fallback:
 npx pyright --warnings
 ruff check
 pytest -q
@@ -83,7 +84,7 @@ pytest -q
 **Gates (pre-merge)**
 1) **Diff plan** → approval → **patch** (no auto-exec).
 2) Before asking to merge, the assistant MUST:
-   - Propose running: `npx pyright --warnings` (or equivalent) and wait for approval.
+   - Propose running: `.venv/bin/pyright --warnings` first; only if the local binary fails or is missing should you fall back to `npx pyright --warnings`, and that fallback must be issued with escalated permissions requested up front.
    - Report **zero errors** and **<= N warnings** (N defaults to 10; justify any above).
    - If errors occur, propose minimal diffs to fix them and re-check.
 3) **Suppressions policy**

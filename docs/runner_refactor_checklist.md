@@ -78,18 +78,21 @@ Goal: document the new API, run tooling, and start the residual risk log.
 
 | Checklist Item | Status | Notes / Next Steps |
 | --- | --- | --- |
-| 1. Workspace prep (pre-tooling) | ✅ | 2025-11-08 — verified clean tree via `git status -sb` before lint/test runs. |
-| 4. Type Safety | ✅ | `npx pyright --warnings` ran successfully on 2025-11-09 (0 errors, 0 warnings, 0 information). |
-| 7. Documentation | ✅ | README now includes a “Programmatic Usage” section, `docs/DECISIONS.md` logs the Phase 2.3 work, and `CHANGELOG.md` highlights the runner API docs plus tooling results. |
-| 8. Tests | ✅ | `.venv/bin/pytest` (246 passed in 2.42s on 2025-11-08) captured as the verification baseline. |
-| 9. Quality Gates | ✅ | `.venv/bin/ruff check` completed with “All checks passed!”; pytest output recorded alongside. |
-| 10. Residual Risk Log | ✅ | See the section below for deferred tasks (CLI helper migration). |
+| 1. Workspace prep (pre-tooling) | ✅ | 2025-11-10 — `git status -sb` shows `runner-refactor...origin/runner-refactor [ahead 3]` before the documentation/tooling pass. |
+| 4. Type Safety | ✅ | 2025-11-10 — `npx pyright --warnings` remains blocked offline (npm ENOTFOUND); recorded the fallback `.venv/bin/pyright --warnings` run (0 errors, 0 warnings) per guardrails. |
+| 7. Documentation | ✅ | README now calls out the wizard compatibility shims, `docs/refactor/mod_refactor.md` + `docs/runner_refactor_checklist.md` include the Phase 2.3 notes, and `CHANGELOG.md` records the doc/tooling refresh. |
+| 8. Tests | ✅ | 2025-11-10 — `pytest -q` reports 209 passed / 54 skipped (≈39.7 s) before and after the doc updates. |
+| 9. Quality Gates | ✅ | `.venv/bin/ruff check` returned “All checks passed!”; results logged alongside the pytest and pyright entries in `docs/DECISIONS.md`. |
+| 10. Residual Risk Log | ✅ | Risk entry now references the `frame_compare.resolve_wizard_paths` / `_resolve_wizard_paths` aliases so downstream scripts know where to patch while `src.frame_compare.wizard` owns the implementation. |
 
 **Exit criteria 2.3:** Docs updated, tooling outputs captured, residual risk section initialized.
+
+Manual QA: no additional wizard or preset runs were required for this documentation-only pass; compatibility was validated by confirming the shimmed exports in `frame_compare._COMPAT_EXPORTS`.
 
 ### Residual Risk Log (Phase 2.3)
 
 1. **CLI helper migration (Phase 4 kickoff)** — `_IMPL_ATTRS` still depends on `_build_cache_info`, `_build_plans`, `_prepare_preflight`, `_discover_media`, `_confirm_alignment_with_screenshots`, and related helpers under `frame_compare.py`. Relocate or wrap them during Phase 4 to finish slimming the CLI and lock the public runner API. *(Completed by Phase 4.1: helper logic now lives in `src/frame_compare/core.py` and runner imports it directly.)*
+2. **Wizard patch points** — Downstream scripts that previously monkeypatched `frame_compare._resolve_wizard_paths` must now target the exported `frame_compare.resolve_wizard_paths` (or its underscored alias) which forwards into `src.frame_compare.wizard`. Documented in README + CHANGELOG so any future migration continues to rely on the shimmed surface.
 
 ---
 
