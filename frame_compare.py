@@ -71,6 +71,8 @@ _COMPAT_EXPORTS: dict[str, object] = {
     "_fresh_app_config": _preflight._fresh_app_config,
     "_launch_vspreview": _core._launch_vspreview,
     "_maybe_apply_audio_alignment": _core._maybe_apply_audio_alignment,
+    "apply_audio_alignment": _core.apply_audio_alignment,
+    "format_alignment_output": _core.format_alignment_output,
     "prepare_preflight": _preflight.prepare_preflight,
     "_prepare_preflight": _preflight.prepare_preflight,
     "_apply_vspreview_manual_offsets": _core._apply_vspreview_manual_offsets,

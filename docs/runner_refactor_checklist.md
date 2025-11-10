@@ -142,6 +142,15 @@ With the CLI shim stable and tooling in place, Phase 4 focuses on finishing th
 
 **Exit criteria 4.1:** `_IMPL_ATTRS` minimized/eliminated, helpers relocated, and unit tests updated accordingly.
 
+#### Phase 4.1a – Audio Alignment module split (2025-11-10)
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| Module creation | ✅ | Added `src/frame_compare/alignment_runner.py` owning the alignment dataclasses, measurement helpers, and VSPreview orchestration previously buried in `core.py`. |
+| Runner wiring | ✅ | `runner.py` now imports `alignment_runner.apply_audio_alignment`/`format_alignment_output`; `core.py` simply re-exports the helpers so downstream shims keep working without `_maybe_*` rewrites. |
+| Tests | ✅ | Extended `_patch_core_helper` to patch the new module, plus a focused `test_format_alignment_output_updates_json_tail` to ensure the formatter still populates telemetry/warnings. Existing VSPreview tests cover the moved launch helpers. |
+| Docs & residual risks | ✅ | Updated `docs/refactor/mod_refactor.md`, this checklist, and `docs/config_audit.md` to mention the new module; residual risk logged in `docs/DECISIONS.md` for the pending VSPreview script-unit tests. |
+
 ### Phase 4.2 – Regression Parity & Documentation
 
 | Checklist Item | Status | Notes / Next Steps |

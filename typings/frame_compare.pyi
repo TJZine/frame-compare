@@ -26,8 +26,9 @@ from src.frame_compare.core import (
     PreflightResult,
     collect_path_diagnostics,
     prepare_preflight,
-    resolve_subdir,
     resolve_workspace_root,
+    apply_audio_alignment,
+    format_alignment_output,
     _apply_vspreview_manual_offsets,
     _collect_path_diagnostics,
     _fresh_app_config,
@@ -38,6 +39,7 @@ from src.frame_compare.core import (
     _validate_tonemap_overrides,
     _dt,
 )
+from src.frame_compare.preflight import resolve_subdir
 from src.frame_compare.media import _discover_media
 from src.frame_compare.alignment_preview import _confirm_alignment_with_screenshots
 from src.frame_compare.runner import RunRequest as RunRequest

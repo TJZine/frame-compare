@@ -135,12 +135,16 @@ Notes:
 **Goal:** Move CLI/runner-specific audio alignment helpers into `src/frame_compare/alignment_runner.py`.
 
 ### Sub-phase 4.1 – Summary and display data extraction
-- [ ] Relocate `_AudioAlignmentSummary`, `_AudioAlignmentDisplayData`, `_compose_measurement_details`, `_emit_measurement_lines` into new module.
-- [ ] Provide functions `apply_audio_alignment` and `format_alignment_output`.
+- [x] Relocate `_AudioAlignmentSummary`, `_AudioAlignmentDisplayData`, `_compose_measurement_details`, `_emit_measurement_lines` into new module.
+- [x] Provide functions `apply_audio_alignment` and `format_alignment_output`.
+
+**2025-11-10 update:** `src/frame_compare/alignment_runner.py` now owns the alignment dataclasses plus `_compose_measurement_details`/`_emit_measurement_lines`, and exposes `apply_audio_alignment` + `format_alignment_output`. `core.py` re-exports those names for compatibility, while `runner.py` imports the new module directly. Tests gained coverage for the formatter to ensure JSON tail wiring stays intact.
 
 ### Sub-phase 4.2 – VSPreview integration
-- [ ] Move `_write_vspreview_script`, `_launch_vspreview`, `_apply_vspreview_manual_offsets` into the alignment module or a dedicated `vspreview.py`.
+- [x] Move `_write_vspreview_script`, `_launch_vspreview`, `_apply_vspreview_manual_offsets` into the alignment module or a dedicated `vspreview.py`.
 - [ ] Add focused tests for script generation (mock filesystem).
+
+**2025-11-10 update:** VSPreview orchestration (`_write_vspreview_script`, `_launch_vspreview`, `_apply_vspreview_manual_offsets`) moved alongside the alignment summary helpers so runner/core only delegate. Script-generation tests are still pending; leave this box open until we add mocks for the filesystem workflow.
 
 Notes:
 - Coordinate with doc `audio_alignment_pipeline.md` if surface changes.

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import io
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -14,7 +14,6 @@ from typing import (
     Mapping,
     Optional,
     Protocol,
-    Sequence,
     Tuple,
     TypedDict,
     TypeVar,
@@ -28,7 +27,6 @@ from rich.progress import Progress, ProgressColumn
 from src.cli_layout import CliLayoutError, CliLayoutRenderer, load_cli_layout
 
 if TYPE_CHECKING:  # pragma: no cover
-    from src.audio_alignment import AlignmentMeasurement
     from src.datatypes import AppConfig
 
 
@@ -319,65 +317,20 @@ def _ensure_slowpics_block(json_tail: JsonTail, cfg: "AppConfig") -> SlowpicsJSO
     return cast(SlowpicsJSON, block)
 
 
-@dataclass
-class _AudioAlignmentSummary:
-    """
-    Bundle of audio-alignment details used for reporting and persistence.
-    """
+class CLIAppError(RuntimeError):
+    """Raised when the CLI cannot complete its work."""
 
-    offsets_path: Path
-    reference_name: str
-    measurements: Sequence["AlignmentMeasurement"]
-    applied_frames: Dict[str, int]
-    baseline_shift: int
-    statuses: Dict[str, str]
-    reference_plan: _ClipPlan
-    final_adjustments: Dict[str, int]
-    swap_details: Dict[str, str]
-    suggested_frames: Dict[str, int] = field(default_factory=dict)
-    suggestion_mode: bool = False
-    manual_trim_starts: Dict[str, int] = field(default_factory=dict)
-    vspreview_manual_offsets: Dict[str, int] = field(default_factory=dict)
-    vspreview_manual_deltas: Dict[str, int] = field(default_factory=dict)
-    measured_offsets: Dict[str, "_AudioMeasurementDetail"] = field(default_factory=dict)
+    def __init__(self, message: str, *, code: int = 1, rich_message: Optional[str] = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.rich_message = rich_message or message
 
 
-@dataclass
-class _AudioMeasurementDetail:
-    """Snapshot of an audio alignment measurement for CLI/JSON reporting."""
+from src.frame_compare import alignment_runner as _alignment_runner_module  # noqa: E402
 
-    label: str
-    stream: str
-    offset_seconds: Optional[float]
-    frames: Optional[int]
-    correlation: Optional[float]
-    status: str
-    applied: bool
-    note: Optional[str] = None
-
-
-@dataclass
-class _AudioAlignmentDisplayData:
-    """
-    Pre-rendered data used to present audio alignment results in the CLI.
-    """
-
-    stream_lines: List[str]
-    estimation_line: Optional[str]
-    offset_lines: List[str]
-    offsets_file_line: str
-    json_reference_stream: Optional[str]
-    json_target_streams: Dict[str, str]
-    json_offsets_sec: Dict[str, float]
-    json_offsets_frames: Dict[str, int]
-    warnings: List[str]
-    preview_paths: List[str] = field(default_factory=list)
-    inspection_paths: List[str] = field(default_factory=list)
-    confirmation: Optional[str] = None
-    correlations: Dict[str, float] = field(default_factory=dict)
-    threshold: float = 0.0
-    manual_trim_lines: List[str] = field(default_factory=list)
-    measurements: Dict[str, _AudioMeasurementDetail] = field(default_factory=dict)
+_AudioAlignmentSummary = _alignment_runner_module._AudioAlignmentSummary
+_AudioMeasurementDetail = _alignment_runner_module._AudioMeasurementDetail
+_AudioAlignmentDisplayData = _alignment_runner_module._AudioAlignmentDisplayData
 
 
 class CliOutputManagerProtocol(Protocol):
@@ -585,15 +538,6 @@ class NullCliOutputManager(CliOutputManagerProtocol):
 
     def iter_warnings(self) -> List[str]:
         return list(self._warnings)
-
-
-class CLIAppError(RuntimeError):
-    """Raised when the CLI cannot complete its work."""
-
-    def __init__(self, message: str, *, code: int = 1, rich_message: Optional[str] = None) -> None:
-        super().__init__(message)
-        self.code = code
-        self.rich_message = rich_message or message
 
 
 __all__ = [

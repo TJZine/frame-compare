@@ -13,7 +13,9 @@ from click.testing import CliRunner, Result
 from rich.console import Console
 
 import frame_compare
+import src.audio_alignment as audio_alignment_module
 import src.frame_compare.alignment_preview as alignment_preview_module
+import src.frame_compare.alignment_runner as alignment_runner_module
 import src.frame_compare.cache as cache_module
 import src.frame_compare.config_helpers as config_helpers_module
 import src.frame_compare.core as core_module
@@ -44,6 +46,7 @@ from src.frame_compare.cli_runtime import (
     AudioAlignmentJSON,
     CliOutputManager,
     JsonTail,
+    NullCliOutputManager,
     _AudioAlignmentDisplayData,
     _AudioAlignmentSummary,
     _ClipPlan,
@@ -219,12 +222,15 @@ def _patch_core_helper(monkeypatch: pytest.MonkeyPatch, attr: str, value: object
         "parse_metadata": ("_parse_metadata",),
         "_build_plans": ("build_plans",),
         "build_plans": ("_build_plans",),
+        "apply_audio_alignment": ("_maybe_apply_audio_alignment",),
+        "_maybe_apply_audio_alignment": ("apply_audio_alignment",),
     }
     attrs_to_patch = (attr,) + alias_map.get(attr, tuple())
 
     targets = [
         frame_compare,
         runner_module.core,
+        alignment_runner_module,
         preflight_module,
         media_module,
         cache_module,
@@ -234,6 +240,7 @@ def _patch_core_helper(monkeypatch: pytest.MonkeyPatch, attr: str, value: object
         getattr(runner_module, "media_utils", None),
         getattr(runner_module, "cache_utils", None),
         getattr(runner_module, "alignment_preview_utils", None),
+        getattr(runner_module, "alignment_runner", None),
         getattr(runner_module, "config_helpers", None),
         metadata_module,
         getattr(runner_module, "metadata_utils", None),
@@ -284,6 +291,11 @@ def _patch_audio_alignment(monkeypatch: pytest.MonkeyPatch, attr: str, value: ob
         monkeypatch.setattr(target, attr, value, raising=False)
     monkeypatch.setattr(core_module.audio_alignment, attr, value, raising=False)
     monkeypatch.setattr(runner_module.core.audio_alignment, attr, value, raising=False)
+    monkeypatch.setattr(alignment_runner_module.audio_alignment, attr, value, raising=False)
+    runner_alignment = getattr(runner_module, "alignment_runner", None)
+    if runner_alignment is not None:
+        monkeypatch.setattr(runner_alignment.audio_alignment, attr, value, raising=False)
+    monkeypatch.setattr(audio_alignment_module, attr, value, raising=False)
 
 
 @pytest.fixture
@@ -616,10 +628,14 @@ def test_audio_alignment_string_false_vspreview_triggers_measurement(
     class _SentinelError(Exception):
         pass
 
+    calls: list[str] = []
+
     def boom(*_args: object, **_kwargs: object) -> list[object]:
+        calls.append("called")
         raise _SentinelError
 
     _patch_audio_alignment(monkeypatch, "measure_offsets", boom)
+    assert alignment_runner_module.audio_alignment.measure_offsets is boom
     monkeypatch.setattr(
         core_module.audio_alignment,
         "update_offsets_file",
@@ -635,6 +651,7 @@ def test_audio_alignment_string_false_vspreview_triggers_measurement(
             {},
             reporter=None,
         )
+    assert calls
 
 
 def test_audio_alignment_prompt_reuse_decline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1415,6 +1432,78 @@ def test_launch_vspreview_warns_when_command_missing(
     python_executable = frame_compare.sys.executable or "python"
     assert python_executable in normalized_output
     assert "-m vspreview" in normalized_output
+
+
+def test_format_alignment_output_updates_json_tail(tmp_path: Path) -> None:
+    cfg = _make_config(tmp_path)
+    cfg.audio_alignment.enable = True
+
+    reference_plan = _ClipPlan(path=tmp_path / "Ref.mkv", metadata={"label": "Reference"})
+    target_plan = _ClipPlan(path=tmp_path / "Target.mkv", metadata={"label": "Target"})
+    plans = [reference_plan, target_plan]
+
+    offsets_path = tmp_path / "offsets.json"
+    summary = _AudioAlignmentSummary(
+        offsets_path=offsets_path,
+        reference_name=reference_plan.path.name,
+        measurements=tuple(),
+        applied_frames={reference_plan.path.name: 0, target_plan.path.name: 3},
+        baseline_shift=0,
+        statuses={target_plan.path.name: "auto"},
+        reference_plan=reference_plan,
+        final_adjustments={target_plan.path.name: 3},
+        swap_details={},
+        suggested_frames={target_plan.path.name: 5},
+        suggestion_mode=False,
+        manual_trim_starts={target_plan.path.name: 12},
+    )
+    detail = alignment_runner_module._AudioMeasurementDetail(
+        label="Target",
+        stream="1/2",
+        offset_seconds=0.25,
+        frames=3,
+        correlation=0.95,
+        status="auto",
+        applied=True,
+        note="ok",
+    )
+    summary.measured_offsets = {target_plan.path.name: detail}
+
+    display = _AudioAlignmentDisplayData(
+        stream_lines=["Reference: Audio"],
+        estimation_line="Peak correlation 0.95",
+        offset_lines=["Audio offsets: Target +3f"],
+        offsets_file_line=f"Offsets file: {offsets_path}",
+        json_reference_stream="Ref Track",
+        json_target_streams={"Target": "Track 1"},
+        json_offsets_sec={"Target": 0.25},
+        json_offsets_frames={"Target": 3},
+        warnings=["[AUDIO] verify offsets"],
+    )
+    display.measurements = {"Target": detail}
+
+    reporter = NullCliOutputManager(quiet=True, verbose=False, no_color=True)
+    json_tail = _make_json_tail_stub()
+    collected_warnings: list[str] = []
+
+    alignment_runner_module.format_alignment_output(
+        plans,
+        summary,
+        display,
+        cfg=cfg,
+        root=tmp_path,
+        reporter=reporter,
+        json_tail=json_tail,
+        vspreview_mode="baseline",
+        collected_warnings=collected_warnings,
+    )
+
+    assert json_tail["suggested_frames"] == 5
+    audio_block = json_tail["audio_alignment"]
+    offsets_frames = audio_block.get("offsets_frames", {})
+    assert offsets_frames.get("Target") == 3
+    assert audio_block.get("suggestion_mode") is False
+    assert collected_warnings == display.warnings
 
 
 def _make_json_tail_stub() -> JsonTail:
