@@ -24,7 +24,7 @@ Keep this DoD visible when reviewing PRs.
 | 0 | Preparation |  | ☑ | Phase 0 checklist (git status + pytest/ruff/pyright) logged on 2025‑11‑19 ahead of Phase 1 work. |
 | 1 | 1.1 Preflight scaffolding |  | ☑ | Extracted the public preflight API (`resolve_workspace_root`, `resolve_subdir`, `collect_path_diagnostics`, `prepare_preflight`, `PreflightResult`) and rewired CLI/runner/tests. |
 | 1 | 1.2 Wizard path integration |  | ☑ | Wizard prompts now delegate to `preflight.resolve_workspace_root/resolve_subdir`, `--diagnose-paths` calls `preflight.collect_path_diagnostics`, and new preflight/CLI diagnostics tests cover site-packages and escape attempts. |
-| 2 | 2.1 Wizard module creation |  | ☐ |  |
+| 2 | 2.1 Wizard module creation |  | ☑ | Wizard prompts now live in `src/frame_compare/wizard.py` with dedicated tests (`tests/test_wizard.py`) and CLI wiring updated (2025‑11‑10). |
 | 2 | 2.2 Loader/CLI updates |  | ☐ |  |
 | 3 | 3.1 Metadata utilities |  | ☐ |  |
 | 3 | 3.2 Plan builder |  | ☐ |  |
@@ -43,14 +43,14 @@ _Mark status with ☑ when completed. Keep the "Notes" column for future session
 ## Phase 0 – Preparation (each session)
 
 1. **Sync & Baseline**
-   - [ ] `git fetch --all` and rebase/merge latest `Develop`.
-   - [ ] Record `git status -sb`.
-   - [ ] Run `pytest -q`, `.venv/bin/ruff check`, and `npx pyright --warnings` (or note if blocked) and paste summaries into `docs/DECISIONS.md`.
+   - [x] `git fetch --all` and rebase/merge latest `Develop`.
+   - [x] Record `git status -sb`.
+   - [x] Run `pytest -q`, `.venv/bin/ruff check`, and `npx pyright --warnings` (or note if blocked) and paste summaries into `docs/DECISIONS.md`.
 2. **Context Refresh**
-   - [ ] Re-read latest entries in `docs/runner_refactor_checklist.md` and `refactor/mod_refactor.md` progress tracker.
-   - [ ] Identify target sub-phase for the session; jot down scope in Session Checklist.
+   - [x] Re-read latest entries in `docs/runner_refactor_checklist.md` and `refactor/mod_refactor.md` progress tracker.
+   - [x] Identify target sub-phase for the session; jot down scope in Session Checklist.
 3. **Branching**
-   - [ ] Create/checkout feature branch (e.g., `feature/refactor-phase1.1`).
+   - [x] Create/checkout feature branch (e.g., `feature/refactor-phase1.1`).
 
 Notes:
 - Keep sub-phase change sets small (<300 LOC) to ease review.
@@ -63,21 +63,21 @@ Notes:
 **Goal:** Move workspace/preflight logic from `src/frame_compare/core.py` into a dedicated module. This reduces repeated IO coupling and clarifies path guardrails.
 
 ### Sub-phase 1.1 – Preflight module scaffolding
-- [ ] Create `src/frame_compare/preflight.py` exporting:
+- [x] Create `src/frame_compare/preflight.py` exporting:
   - `resolve_workspace_root`
   - `resolve_subdir`
   - `collect_path_diagnostics`
   - dataclass for preflight result (`PreflightResult`)
-- [ ] Move `_discover_workspace_root`, `_resolve_workspace_subdir`, `_path_is_within_root`, `_abort_if_site_packages`, `_is_writable_path`, `_collect_path_diagnostics`, `_prepare_preflight` into the new module.
-- [ ] Ensure functions remain importable (re-export minimal API from `core.py` if needed).
-- [ ] Update imports in `frame_compare.py`, `runner.py`, tests.
-- [ ] Update tracker table row (Phase 1 / Sub-phase 1.1) with ☑ when merged.
+- [x] Move `_discover_workspace_root`, `_resolve_workspace_subdir`, `_path_is_within_root`, `_abort_if_site_packages`, `_is_writable_path`, `_collect_path_diagnostics`, `_prepare_preflight` into the new module.
+- [x] Ensure functions remain importable (re-export minimal API from `core.py` if needed).
+- [x] Update imports in `frame_compare.py`, `runner.py`, tests.
+- [x] Update tracker table row (Phase 1 / Sub-phase 1.1) with ☑ when merged.
 
 ### Sub-phase 1.2 – Wizard path prompts & CLI diagnostics
-- [ ] Update wizard helpers in `core.py` to call `preflight.resolve_subdir`.
-- [ ] Ensure `frame_compare --diagnose-paths` uses `preflight.collect_path_diagnostics` directly.
-- [ ] Add targeted unit tests (e.g., new `tests/test_preflight.py`) covering path-escape & site-packages rejection.
-- [ ] Record verification commands + notes in Session Checklist and `docs/DECISIONS.md`.
+- [x] Update wizard helpers in `core.py` to call `preflight.resolve_subdir`.
+- [x] Ensure `frame_compare --diagnose-paths` uses `preflight.collect_path_diagnostics` directly.
+- [x] Add targeted unit tests (e.g., new `tests/test_preflight.py`) covering path-escape & site-packages rejection.
+- [x] Record verification commands + notes in Session Checklist and `docs/DECISIONS.md`.
 
 Notes:
 - Keep logging behavior identical; consumers rely on warning strings.
@@ -90,11 +90,11 @@ Notes:
 **Goal:** Extract interactive wizard logic from `core.py`.
 
 ### Sub-phase 2.1 – Module creation
-- [ ] Create `src/frame_compare/wizard.py` with:
+- [x] Create `src/frame_compare/wizard.py` with:
   - `run_wizard_prompts`
   - Prompt helpers (`prompt_workspace_root`, `prompt_input_dir`, `prompt_slowpics`, etc.)
-- [ ] Maintain CLI colorized output; use `click` import local to module.
-- [ ] Add docstring referencing relevant config audit sections.
+- [x] Maintain CLI colorized output; use `click` import local to module.
+- [x] Add docstring referencing relevant config audit sections.
 
 ### Sub-phase 2.2 – Loader & CLI updates
 - [ ] Modify `frame_compare.py` to import `wizard.ensure_config`, `wizard.run_wizard`.
@@ -208,6 +208,16 @@ _Optional fields:_ Date, Branch, Reviewer, Metrics (LOC touched, tests runtime).
 - [x] Tests added/updated: Added `tests/test_preflight.py`, extended `tests/test_paths_preflight.py` with a diagnostics routing check.
 - [x] Risks noted: Config dir derivation now flows through `resolve_subdir`; if validation fails the message references the generic “input directory” wording—monitor for user confusion.
 - [x] Follow-ups for next session: Phase 2.1 wizard module creation (extract prompts), consider documenting diagnostics routing in README once the wizard module stabilizes.
+
+## Session Checklist — 2025-11-10 (Phase 2.1)
+
+- [x] Phase/Sub-phase: `2 / 2.1 Wizard module creation`
+- [x] Modules touched: `src/frame_compare/wizard.py`, `src/frame_compare/core.py`, `frame_compare.py`, `tests/test_cli_wizard.py`, `tests/test_wizard.py`, `docs/DECISIONS.md`, `docs/refactor/mod_refactor.md`, `docs/runner_refactor_checklist.md`
+- [x] Commands run: `git status -sb`, `pytest -q`, `.venv/bin/ruff check`, `npx pyright --warnings` (fails: ENOTFOUND registry.npmjs.org), `.venv/bin/pyright --warnings`
+- [x] Docs updated? (`runner_refactor_checklist`, `DECISIONS`, `CHANGELOG`?): Updated `docs/DECISIONS.md`, `docs/refactor/mod_refactor.md`, `docs/runner_refactor_checklist.md` (CHANGELOG unchanged—internal refactor only).
+- [x] Tests added/updated: Added `tests/test_wizard.py`, updated `tests/test_cli_wizard.py` to patch the new module boundary.
+- [x] Risks noted: CLI still exposes compatibility shims but downstream scripts that patched `frame_compare._run_wizard_prompts` must now patch `src.frame_compare.wizard.run_wizard_prompts` for behavior to change.
+- [x] Follow-ups for next session: Phase 2.2 should reroute loader/CLI helpers to import the wizard module directly and document the new boundary in README once the CLI shim is simplified.
 
 ---
 

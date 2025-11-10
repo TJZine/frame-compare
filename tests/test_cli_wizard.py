@@ -9,6 +9,7 @@ from typing import Any, TextIO
 from click.testing import CliRunner
 
 import frame_compare
+import src.frame_compare.wizard as wizard
 
 
 class _SysProxy:
@@ -114,7 +115,7 @@ def test_auto_wizard_runs_during_write_config(tmp_path: Path, monkeypatch) -> No
         config.setdefault("paths", {})["input_dir"] = "custom-dir"
         return root, config
 
-    monkeypatch.setattr(frame_compare, "_run_wizard_prompts", fake_prompts)  # type: ignore[reportUnknownMemberType]
+    monkeypatch.setattr(wizard, "run_wizard_prompts", fake_prompts, raising=False)  # type: ignore[reportUnknownMemberType]
 
     result = runner.invoke(
         frame_compare.main,
@@ -137,7 +138,7 @@ def test_auto_wizard_skipped_when_not_tty(tmp_path: Path, monkeypatch) -> None:
     def fail_prompts(*args, **kwargs):
         raise AssertionError("wizard should not run when stdin is not a TTY")
 
-    monkeypatch.setattr(frame_compare, "_run_wizard_prompts", fail_prompts)  # type: ignore[reportUnknownMemberType]
+    monkeypatch.setattr(wizard, "run_wizard_prompts", fail_prompts, raising=False)  # type: ignore[reportUnknownMemberType]
 
     result = runner.invoke(
         frame_compare.main,
@@ -157,7 +158,7 @@ def test_auto_wizard_skipped_with_no_wizard_flag(tmp_path: Path, monkeypatch) ->
     def fail_prompts(*args, **kwargs):
         raise AssertionError("wizard should be skipped when --no-wizard is supplied")
 
-    monkeypatch.setattr(frame_compare, "_run_wizard_prompts", fail_prompts)  # type: ignore[reportUnknownMemberType]
+    monkeypatch.setattr(wizard, "run_wizard_prompts", fail_prompts, raising=False)  # type: ignore[reportUnknownMemberType]
 
     result = runner.invoke(
         frame_compare.main,

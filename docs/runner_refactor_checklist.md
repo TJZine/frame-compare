@@ -53,6 +53,8 @@ Goal: extract shared structures/helpers, reduce `_IMPL_ATTRS`, keep runner impor
 
 **Exit criteria 2.1:** Shared module checked in, `_IMPL_ATTRS` list updated/tracked, baseline tests still pass.
 
+**2025‑11‑10 update:** Extracted all wizard prompts into `src/frame_compare/wizard.py` (docstring links to `docs/config_audit.md`), re-pointed the CLI shim to the new module, and added regression coverage via `tests/test_wizard.py` plus refreshed `tests/test_cli_wizard.py` so future loader/CLI work can rely on the dedicated boundary.
+
 ### Phase 2.2 – CLI Shim & Runner API
 
 Goal: finish slimming the CLI, expose the public API, and update tests to cover both CLI delegation and direct runner entry.

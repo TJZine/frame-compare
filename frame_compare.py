@@ -24,6 +24,7 @@ import src.frame_compare.cli_runtime as _cli_runtime
 import src.frame_compare.core as _core
 import src.frame_compare.media as _media
 import src.frame_compare.preflight as _preflight
+import src.frame_compare.wizard as _wizard
 from src import vs_core as _vs_core
 from src.config_loader import ConfigError, load_config
 from src.frame_compare import runner
@@ -44,7 +45,6 @@ from src.frame_compare.core import (
     _read_template_text,
     _render_config_text,
     _resolve_wizard_paths,
-    _run_wizard_prompts,
     _write_config_file,
 )
 from src.frame_compare.preflight import (
@@ -96,6 +96,14 @@ _COMPAT_EXPORTS: dict[str, object] = {
     "resolve_workspace_root": _preflight.resolve_workspace_root,
     "resolve_subdir": _preflight.resolve_subdir,
     "PreflightResult": _preflight.PreflightResult,
+    "wizard": _wizard,
+    "run_wizard_prompts": _wizard.run_wizard_prompts,
+    "_run_wizard_prompts": _wizard.run_wizard_prompts,
+    "prompt_workspace_root": _wizard.prompt_workspace_root,
+    "prompt_input_directory": _wizard.prompt_input_directory,
+    "prompt_slowpics_options": _wizard.prompt_slowpics_options,
+    "prompt_audio_alignment_option": _wizard.prompt_audio_alignment_option,
+    "prompt_renderer_preference": _wizard.prompt_renderer_preference,
 }
 for _name, _value in _COMPAT_EXPORTS.items():
     globals()[_name] = _value
@@ -763,7 +771,7 @@ def _execute_wizard_session(
 
     if interactive:
         click.echo("Starting interactive wizard. Press Enter to accept defaults.")
-        root, final_config = _run_wizard_prompts(root, final_config)
+        root, final_config = _wizard.run_wizard_prompts(root, final_config)
         if config_override is None:
             config_path = root / "config" / "config.toml"
     else:
