@@ -113,15 +113,16 @@ Phase 3 also splits into two sub-phases: final QA/doc polish and quality gates
 
 Manual QA: Not run for this metadata extraction; existing CLI delegation + runner harness tests enforce the boundary and compatibility exports remain unchanged.
 
-### Phase 3.2 – Quality Gates & Handoff
+### Phase 3.2 – Plan Builder Extraction
 
 | Checklist Item | Status | Notes / Next Steps |
 | --- | --- | --- |
-| 9. Quality Gates | ✅ | 2025-11-09 — `npx pyright --warnings` (0 issues), `.venv/bin/ruff check` (clean), `.venv/bin/pytest` (246 passed in 2.36 s). |
-| 10. Residual Risk Log | ✅ | Residual risk section below now scoped to the CLI-helper migration that anchors Phase 4. |
-| Final Summary & Phase 4 Preview | ✅ | Phase 3 closes with docs + tooling captured; Phase 4 starts with extracting the remaining helpers from `_IMPL_ATTRS` and tightening the runner contract (see residual risk + `docs/DECISIONS.md`). |
+| Planner module split | ✅ | Added `src/frame_compare/planner.py` with a typed `build_plans` helper that now owns trim/trim_end/FPS override logic adjacent to the metadata utilities. |
+| Runner wiring & compatibility | ✅ | `runner.py` imports `planner_utils.build_plans`, and `core.py` re-exports both `_build_plans`/`build_plans` so compatibility patches and `_COMPAT_EXPORTS` keep working. |
+| Tests | ✅ | Introduced `tests/test_planner.py` plus runner harness updates to patch the new module; coverage asserts override application and invalid override failures. |
+| Docs & risk log | ✅ | Refreshed this checklist, `docs/refactor/mod_refactor.md`, `docs/config_audit.md`, and `docs/DECISIONS.md` with 2025-11-10 verification logs; CHANGELOG untouched (internal refactor). |
 
-**Exit criteria 3.2:** All ten checklist sections ✅, risk log finalized, Phase 4 objectives documented.
+Manual QA: Not executed for this extraction—automation covers override parity. Residual risk centers on downstream scripts still patching `frame_compare.core._build_plans`; helper bridges exist today, but Phase 4 should document & deprecate the legacy path.
 
 ---
 

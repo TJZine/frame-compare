@@ -27,7 +27,7 @@ Keep this DoD visible when reviewing PRs.
 | 2 | 2.1 Wizard module creation |  | ☑ | Wizard prompts now live in `src/frame_compare/wizard.py` with dedicated tests (`tests/test_wizard.py`) and CLI wiring updated (2025‑11‑10). |
 | 2 | 2.2 Loader/CLI updates |  | ☑ | CLI + preset flows now call `src.frame_compare.wizard` APIs directly; CLI tests patched to assert the new boundary. |
 | 3 | 3.1 Metadata utilities |  | ☑ | Created `src/frame_compare/metadata.py`, rewired `runner.py`/tests to import it directly, and updated docs/QA logs. |
-| 3 | 3.2 Plan builder |  | ☐ |  |
+| 3 | 3.2 Plan builder |  | ☑ | Extracted `build_plans` into `src/frame_compare/planner.py`, rewired `runner.py`, and added planner-focused tests/QA logs. |
 | 4 | 4.1 Alignment summary module |  | ☐ |  |
 | 4 | 4.2 VSPreview integration |  | ☐ |  |
 | 5 | 5.1 VSPreview module |  | ☐ |  |
@@ -119,9 +119,11 @@ Notes:
 **2025-11-10 update:** Metadata parsing/dedupe/override helpers now live in `src/frame_compare/metadata.py`, `runner.py` consumes the module directly, and tests patch the new namespace through `_patch_core_helper`. Docs (`docs/config_audit.md`, tracker tables) capture the new layout; no CHANGELOG entry required.
 
 ### Sub-phase 3.2 – Plan builder
-- [ ] Create `src/frame_compare/planner.py` exporting `build_plans`.
-- [ ] Ensure `build_plans` encapsulates trim/trim_end/FPS overrides and returns typed `_ClipPlan` objects (import from `cli_runtime` or define protocol).
-- [ ] Add unit tests (`tests/test_planner.py`) verifying overrides apply correctly.
+- [x] Create `src/frame_compare/planner.py` exporting `build_plans`.
+- [x] Ensure `build_plans` encapsulates trim/trim_end/FPS overrides and returns typed `_ClipPlan` objects (import from `cli_runtime` or define protocol).
+- [x] Add unit tests (`tests/test_planner.py`) verifying overrides apply correctly.
+
+**2025-11-10 update:** Planner extraction complete—`runner.py` imports `planner_utils.build_plans`, `core.py` re-exports the helper for compatibility, and a dedicated `tests/test_planner.py` suite covers trims/FPS overrides plus error handling. Tracker docs, DECISIONS logs, and Session Checklist entries capture the verification commands; behavior remains internal so CHANGELOG/README are unchanged.
 
 Notes:
 - Keep `CliOutputManager` integration unchanged; only move pure logic.
@@ -261,8 +263,18 @@ Goal: capture the tooling outputs, refresh compatibility documentation, and exte
 - [x] Commands run: `git status -sb`, `pytest -q`, `.venv/bin/ruff check`, `npx pyright --warnings` (fails: ENOTFOUND registry.npmjs.org), `.venv/bin/pyright --warnings`
 - [x] Docs updated? (`runner_refactor_checklist`, `DECISIONS`, `CHANGELOG`?): Yes — trackers plus `docs/config_audit.md` refreshed; `CHANGELOG.md` unchanged (internal refactor only).
 - [x] Tests added/updated: Patched `tests/test_frame_compare.py` helpers to target `src.frame_compare.metadata.parse_metadata` via `_patch_core_helper`, ensuring runner/CLI patches hit the new module.
-- [x] Risks noted: Compatibility shim still funnels through `frame_compare._COMPAT_EXPORTS`; no `_IMPL_ATTRS` remain, but Phase 3.2 must extract `_build_plans` next to keep plan overrides co-located with the new metadata module.
+- [x] Risks noted: Compatibility shim still funnels through `frame_compare._COMPAT_EXPORTS`; no `_IMPL_ATTRS` remain, but Phase 3.2 must extract `_build_plans` next to keep plan overrides co-located with the new metadata module (resolved in the Phase 3.2 entry below).
 - [x] Follow-ups for next session: Start Phase 3.2 (`planner.py`) so trim/FPS logic moves alongside the override helpers; consider documenting the new module boundary in README once planners stabilize.
+
+## Session Checklist — 2025-11-10 (Phase 3.2)
+
+- [x] Phase/Sub-phase: `3 / 3.2 Plan builder`
+- [x] Modules touched: `src/frame_compare/planner.py`, `src/frame_compare/core.py`, `src/frame_compare/runner.py`, `tests/test_planner.py`, `tests/test_frame_compare.py`, `docs/config_audit.md`, `docs/refactor/mod_refactor.md`, `docs/runner_refactor_checklist.md`, `docs/DECISIONS.md`
+- [x] Commands run: `git status -sb`, `pytest -q`, `.venv/bin/ruff check`, `npx pyright --warnings` (fails: ENOTFOUND registry.npmjs.org), `.venv/bin/pyright --warnings`
+- [x] Docs updated? (`runner_refactor_checklist`, `DECISIONS`, `CHANGELOG`?): Tracker docs refreshed; CHANGELOG unchanged (internal refactor only).
+- [x] Tests added/updated: New `tests/test_planner.py` plus runner harness patches covering planner overrides.
+- [x] Risks noted: Planner now shares `_ClipPlan`; downstream callers patching `frame_compare.core._build_plans` should shift to `planner.build_plans` (compat helper bridges both, but test coverage is key). Monitor for CLI scripts that assumed `_match_override` lived beside `_build_plans`.
+- [x] Follow-ups for next session: Phase 4 alignment summary module extraction; rerun manual plan-builder QA with real configs once CLI glue thins further.
 
 ---
 

@@ -370,6 +370,8 @@ Advisors and Codex sessions keep Sequential Thinking logs lean to avoid flooding
 
 **Metadata etiquette:** when Sequential Thinking metadata like `files_touched`, `tests_to_run`, or `dependencies` doesn’t apply, leave those lists empty instead of inventing placeholder entries. Likewise, keep `risk_level` and `confidence_score` at their defaults unless you have real signal to share. Fabricated values corrupt downstream analysis and reviewer trust.
 
+Sequential Thinking always walks through Scoping → Research & Spike → Implementation → Testing → Review thoughts; keep `next_thought_needed=true` until the Review entry lands so the orchestrator knows the flow is still active.
+
 ### Contributing
 
 1. Fork/clone the repo.

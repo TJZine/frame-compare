@@ -19,6 +19,7 @@ import src.frame_compare.config_helpers as config_helpers_module
 import src.frame_compare.core as core_module
 import src.frame_compare.media as media_module
 import src.frame_compare.metadata as metadata_module
+import src.frame_compare.planner as planner_module
 import src.frame_compare.preflight as preflight_module
 from src.analysis import CacheLoadResult, FrameMetricsCacheInfo, SelectionDetail
 from src.audio_alignment import AlignmentMeasurement, AudioStreamInfo
@@ -216,6 +217,8 @@ def _patch_core_helper(monkeypatch: pytest.MonkeyPatch, attr: str, value: object
         "_collect_path_diagnostics": ("collect_path_diagnostics",),
         "_parse_metadata": ("parse_metadata",),
         "parse_metadata": ("_parse_metadata",),
+        "_build_plans": ("build_plans",),
+        "build_plans": ("_build_plans",),
     }
     attrs_to_patch = (attr,) + alias_map.get(attr, tuple())
 
@@ -234,6 +237,8 @@ def _patch_core_helper(monkeypatch: pytest.MonkeyPatch, attr: str, value: object
         getattr(runner_module, "config_helpers", None),
         metadata_module,
         getattr(runner_module, "metadata_utils", None),
+        planner_module,
+        getattr(runner_module, "planner_utils", None),
     ]
     for target in targets:
         if target is None:
@@ -2399,7 +2404,7 @@ def test_runner_auto_upload_cleans_screens_dir(tmp_path: Path, monkeypatch: pyte
 
     _patch_core_helper(monkeypatch, "_discover_media", lambda _root: list(files))
     _patch_core_helper(monkeypatch, "parse_metadata", lambda *_: list(metadata))
-    monkeypatch.setattr(runner_module.core, "_build_plans", lambda *_: list(plans))
+    _patch_core_helper(monkeypatch, "_build_plans", lambda *_: list(plans))
     monkeypatch.setattr(runner_module.core, "_pick_analyze_file", lambda *_args, **_kwargs: files[0])
 
     cache_info = FrameMetricsCacheInfo(
@@ -2653,7 +2658,7 @@ def test_runner_audio_alignment_summary_passthrough(
 
     _patch_core_helper(monkeypatch, "_discover_media", lambda _root: list(files))
     _patch_core_helper(monkeypatch, "parse_metadata", lambda *_: list(metadata))
-    monkeypatch.setattr(runner_module.core, "_build_plans", lambda *_: list(plans))
+    _patch_core_helper(monkeypatch, "_build_plans", lambda *_: list(plans))
     monkeypatch.setattr(runner_module.core, "_pick_analyze_file", lambda *_args, **_kwargs: files[0])
 
     cache_info = FrameMetricsCacheInfo(
@@ -2774,7 +2779,7 @@ def test_runner_handles_existing_event_loop(tmp_path: Path, monkeypatch: pytest.
 
     _patch_core_helper(monkeypatch, "_discover_media", lambda _root: list(files))
     _patch_core_helper(monkeypatch, "parse_metadata", lambda *_: list(metadata))
-    monkeypatch.setattr(runner_module.core, "_build_plans", lambda *_: list(plans))
+    _patch_core_helper(monkeypatch, "_build_plans", lambda *_: list(plans))
     monkeypatch.setattr(runner_module.core, "_pick_analyze_file", lambda *_args, **_kwargs: files[0])
 
     cache_info = FrameMetricsCacheInfo(

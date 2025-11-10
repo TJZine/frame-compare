@@ -66,6 +66,7 @@ if TYPE_CHECKING:
         def close(self) -> None: ...
 
 import src.frame_compare.alignment_preview as _alignment_preview_module
+import src.frame_compare.planner as _planner_module
 import src.frame_compare.preflight as _preflight_constants
 import src.frame_compare.wizard as _wizard_module
 import src.screenshot as _screenshot_module
@@ -107,9 +108,6 @@ from src.frame_compare.config_helpers import coerce_config_flag as _coerce_confi
 from src.frame_compare.metadata import (
     match_override as _match_override,
 )
-from src.frame_compare.metadata import (
-    normalise_override_mapping as _normalise_override_mapping,
-)
 from src.frame_compare.preflight import (
     PACKAGED_TEMPLATE_PATH,
     PROJECT_ROOT,
@@ -149,6 +147,8 @@ _prepare_preflight = prepare_preflight
 _collect_path_diagnostics = collect_path_diagnostics
 _confirm_alignment_with_screenshots = _alignment_preview_module._confirm_alignment_with_screenshots
 load_config = _load_config
+build_plans = _planner_module.build_plans
+_build_plans = _planner_module.build_plans
 
 PRESETS_DIR: Final[Path] = (PROJECT_ROOT / "presets").resolve()
 
@@ -998,42 +998,6 @@ def _pick_analyze_file(
             return file
 
     return files[0]
-
-
-def _build_plans(files: Sequence[Path], metadata: Sequence[Dict[str, str]], cfg: AppConfig) -> List[_ClipPlan]:
-    """Construct clip plans with per-file trim/FPS overrides applied."""
-    trim_map = _normalise_override_mapping(cfg.overrides.trim)
-    trim_end_map = _normalise_override_mapping(cfg.overrides.trim_end)
-    fps_map = _normalise_override_mapping(cfg.overrides.change_fps)
-
-    plans: List[_ClipPlan] = []
-    for idx, file in enumerate(files):
-        meta = dict(metadata[idx])
-        plan = _ClipPlan(path=file, metadata=meta)
-
-        trim_val = _match_override(idx, file, meta, trim_map)
-        if trim_val is not None:
-            plan.trim_start = int(trim_val)
-            plan.has_trim_start_override = True
-
-        trim_end_val = _match_override(idx, file, meta, trim_end_map)
-        if trim_end_val is not None:
-            plan.trim_end = int(trim_end_val)
-            plan.has_trim_end_override = True
-
-        fps_val = _match_override(idx, file, meta, fps_map)
-        if isinstance(fps_val, str):
-            if fps_val.lower() == "set":
-                plan.use_as_reference = True
-        elif isinstance(fps_val, list):
-            if len(fps_val) == 2:
-                plan.fps_override = (int(fps_val[0]), int(fps_val[1]))
-        elif fps_val is not None:
-            raise ValueError("Unsupported change_fps override type")
-
-        plans.append(plan)
-
-    return plans
 
 
 def _extract_clip_fps(clip: object) -> Tuple[int, int]:

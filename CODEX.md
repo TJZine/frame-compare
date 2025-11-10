@@ -23,6 +23,8 @@
 - Prefer the lighter summary path (short synopsis rather than full analytics) whenever detailed telemetry is not needed for the current decision; escalate to the verbose output only for debugging or reviewer requests.
 - Note in task reports when you have rotated context (e.g., “older Sequential Thinking context archived per guidelines”) so reviewers know why earlier thoughts are omitted.
 - When filling metadata (`files_touched`, `tests_to_run`, `dependencies`, `risk_level`, `confidence_score`, etc.), provide real values or leave the schema defaults/empty lists; never fabricate filenames, tests, or risk signals just to satisfy the shape.
+- Every `process_thought` call must set `next_thought_needed=true` until the final Review-stage thought is logged. Only flip it to `false` once the full Scoping → Research & Spike → Implementation → Testing → Review sequence is recorded so the orchestrator keeps the loop open.
+- Keep logging thoughts for each stage in that sequence—do not skip a phase unless you explicitly state why it does not apply for the task.
 
 ## Global Defaults (Enforced)
 1) **Planning = Sequential Thinking** (generate a stepwise plan before patches).

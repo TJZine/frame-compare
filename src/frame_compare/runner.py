@@ -25,6 +25,7 @@ import src.frame_compare.config_helpers as config_helpers
 import src.frame_compare.core as core
 import src.frame_compare.media as media_utils
 import src.frame_compare.metadata as metadata_utils
+import src.frame_compare.planner as planner_utils
 import src.frame_compare.preflight as preflight_utils
 import src.report as html_report
 from src import vs_core
@@ -718,7 +719,7 @@ def run(request: RunRequest) -> RunResult:
         tmdb_notes.append(message)
         collected_warnings.append(message)
 
-    plans = core._build_plans(files, metadata, cfg)
+    plans = planner_utils.build_plans(files, metadata, cfg)
     analyze_path = core._pick_analyze_file(files, metadata, cfg.analysis.analyze_clip, cache_dir=root)
 
     alignment_summary, alignment_display = core._maybe_apply_audio_alignment(

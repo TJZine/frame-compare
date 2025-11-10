@@ -307,7 +307,7 @@ Central log for the end-to-end configuration review requested on 2025‑11‑18.
 
 ## `[overrides]` (reviewed 2025‑11‑19)
 
-**Feature surface.** `OverridesConfig` (`src/datatypes.py:261-268`) exposes per-clip `trim`, `trim_end`, and `change_fps` maps. Loader validation enforces integer trims and `["num","den"]` or `"set"` for FPS overrides (`src/config_loader.py:630-632`). `_build_plans` normalises keys (index, filename, stem, release group, `file_name`) and applies matching overrides to clip plans (`src/frame_compare/core.py:1567-1635`). Runner telemetry discloses active overrides (`src/frame_compare/runner.py:507-1160`), and tests (`tests/test_frame_compare.py:1723-2105`) cover both config parsing and runtime behaviour alongside naming logic.
+**Feature surface.** `OverridesConfig` (`src/datatypes.py:261-268`) exposes per-clip `trim`, `trim_end`, and `change_fps` maps. Loader validation enforces integer trims and `["num","den"]` or `"set"` for FPS overrides (`src/config_loader.py:630-632`). `planner.build_plans` normalises keys (index, filename, stem, release group, `file_name`) and applies matching overrides to clip plans (`src/frame_compare/planner.py`). Runner telemetry discloses active overrides (`src/frame_compare/runner.py:507-1160`), and tests (`tests/test_frame_compare.py:1723-2105`, `tests/test_planner.py`) cover both config parsing and runtime behaviour alongside naming logic.
 
 **Health check.**
 - Strict validation prevents malformed overrides from slipping through.
