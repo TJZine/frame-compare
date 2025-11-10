@@ -19,28 +19,37 @@ Automated frame sampling, audio alignment, HDR tonemapping, and slow.pics upload
 <details>
 <summary>Table of Contents</summary>
 
-- [Overview](#overview)
-- [Get Started](#get-started)
-- [Workspace & Usage Essentials](#workspace--usage-essentials)
-- [Guided Setup & Presets](#guided-setup--presets)
-- [Dependency Doctor](#dependency-doctor)
-- [Programmatic Usage](#programmatic-usage)
-- [Advanced Guides & Reference](#advanced-guides--reference)
-  - [Configuration Highlights](#configuration-highlights)
-  - [Tonemap Quick Recipes](#tonemap-quick-recipes)
-  - [CLI Reference](#cli-reference)
-  - [Examples](#examples)
-  - [Troubleshooting](#troubleshooting)
-  - [FAQ](#faq)
-  - [Performance](#performance)
-  - [Security](#security)
-  - [Privacy & Telemetry](#privacy--telemetry)
-  - [Versioning](#versioning)
-  - [Context Management](#context-management)
-  - [Contributing](#contributing)
-  - [License](#license)
-  - [Support](#support)
-  - [Future Updates](#future-updates)
+- [Frame Compare](#frame-compare)
+  - [At a Glance](#at-a-glance)
+  - [Overview](#overview)
+  - [Get Started](#get-started)
+    - [Requirements](#requirements)
+    - [Install](#install)
+    - [First Comparison](#first-comparison)
+    - [Verify](#verify)
+  - [Workspace \& Usage Essentials](#workspace--usage-essentials)
+  - [Guided Setup \& Presets](#guided-setup--presets)
+  - [Dependency Doctor](#dependency-doctor)
+  - [Programmatic Usage](#programmatic-usage)
+  - [Advanced Guides \& Reference](#advanced-guides--reference)
+    - [Configuration Highlights](#configuration-highlights)
+    - [Tonemap Quick Recipes](#tonemap-quick-recipes)
+    - [CLI Reference](#cli-reference)
+    - [Examples](#examples)
+      - [VSPreview manual alignment assistant](#vspreview-manual-alignment-assistant)
+      - [Path diagnostics before heavy runs](#path-diagnostics-before-heavy-runs)
+      - [FFmpeg-only captures](#ffmpeg-only-captures)
+    - [Troubleshooting](#troubleshooting)
+    - [FAQ](#faq)
+    - [Performance](#performance)
+    - [Security](#security)
+    - [Privacy \& Telemetry](#privacy--telemetry)
+    - [Versioning](#versioning)
+    - [Context Management](#context-management)
+    - [Contributing](#contributing)
+    - [License](#license)
+    - [Support](#support)
+    - [Future Updates](#future-updates)
 
 </details>
 
@@ -388,5 +397,6 @@ Distributed under the [MIT License](LICENSE). Frame Compare builds upon FFmpeg, 
 - Continue refining CLI status panels and VSPreview workflows so long-running batches communicate progress while matching legacy scripts.
 - Polish the local viewer (persistent zoom/mode state, richer overlays, multi-encode summaries).
 - Audit configuration surfaces for clarity, trimming duplicates while keeping power-user overrides accessible.
+- Ensure there is a flag like --slowpics to pass via CLI that will enable auto upload feature for slowpics and take an argument for the collection suffix portion that can be passed alongside like "4k dv/hdr MA WEB-dl vs. 4k DV/HDR Bluray Remux"
 
 Detailed technical tasks live on the [GitHub Issues board](https://github.com/TJZine/frame-compare/issues).

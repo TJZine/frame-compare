@@ -25,7 +25,7 @@ Keep this DoD visible when reviewing PRs.
 | 1 | 1.1 Preflight scaffolding |  | ☑ | Extracted the public preflight API (`resolve_workspace_root`, `resolve_subdir`, `collect_path_diagnostics`, `prepare_preflight`, `PreflightResult`) and rewired CLI/runner/tests. |
 | 1 | 1.2 Wizard path integration |  | ☑ | Wizard prompts now delegate to `preflight.resolve_workspace_root/resolve_subdir`, `--diagnose-paths` calls `preflight.collect_path_diagnostics`, and new preflight/CLI diagnostics tests cover site-packages and escape attempts. |
 | 2 | 2.1 Wizard module creation |  | ☑ | Wizard prompts now live in `src/frame_compare/wizard.py` with dedicated tests (`tests/test_wizard.py`) and CLI wiring updated (2025‑11‑10). |
-| 2 | 2.2 Loader/CLI updates |  | ☐ |  |
+| 2 | 2.2 Loader/CLI updates |  | ☑ | CLI + preset flows now call `src.frame_compare.wizard` APIs directly; CLI tests patched to assert the new boundary. |
 | 3 | 3.1 Metadata utilities |  | ☐ |  |
 | 3 | 3.2 Plan builder |  | ☐ |  |
 | 4 | 4.1 Alignment summary module |  | ☐ |  |
@@ -97,9 +97,11 @@ Notes:
 - [x] Add docstring referencing relevant config audit sections.
 
 ### Sub-phase 2.2 – Loader & CLI updates
-- [ ] Modify `frame_compare.py` to import `wizard.ensure_config`, `wizard.run_wizard`.
-- [ ] Update tests referencing wizard behavior (e.g., `tests/test_cli_wizard.py`).
-- [ ] Document wizard module boundaries in `docs/runner_refactor_checklist.md`.
+- [x] Updated `frame_compare.py` (`--write-config`, `wizard`, `preset apply`) to call `src.frame_compare.wizard.resolve_wizard_paths` and expanded `_COMPAT_EXPORTS` so downstream scripts can continue patching `_run/_resolve_wizard_prompts`.
+- [x] Patched `tests/test_cli_wizard.py` to monitor `wizard.resolve_wizard_paths` during auto-wizard runs, ensuring the CLI exercises the new module boundary.
+- [x] Captured the boundary shift in `docs/refactor/mod_refactor.md`, `docs/runner_refactor_checklist.md`, and `docs/DECISIONS.md` (no CHANGELOG entry — internal refactor).
+
+**2025‑11‑10 update (Phase 2.2)** — Loader helpers (`--write-config`, auto-wizard, preset apply) now rely solely on `src.frame_compare.wizard`, so wizard logic lives in one module. Compatibility exports keep `_run/_resolve_wizard_prompts` accessible, and CLI wizard tests assert that the resolver path is exercised when auto-seeding configs.
 
 ---
 
@@ -218,6 +220,16 @@ _Optional fields:_ Date, Branch, Reviewer, Metrics (LOC touched, tests runtime).
 - [x] Tests added/updated: Added `tests/test_wizard.py`, updated `tests/test_cli_wizard.py` to patch the new module boundary.
 - [x] Risks noted: CLI still exposes compatibility shims but downstream scripts that patched `frame_compare._run_wizard_prompts` must now patch `src.frame_compare.wizard.run_wizard_prompts` for behavior to change.
 - [x] Follow-ups for next session: Phase 2.2 should reroute loader/CLI helpers to import the wizard module directly and document the new boundary in README once the CLI shim is simplified.
+
+## Session Checklist — 2025-11-10 (Phase 2.2)
+
+- [x] Phase/Sub-phase: `2 / 2.2 Loader & CLI updates`
+- [x] Modules touched: `frame_compare.py`, `src/frame_compare/wizard.py`, `src/frame_compare/core.py`, `tests/test_cli_wizard.py`
+- [x] Commands run: `git status -sb`, `pytest -q`, `.venv/bin/ruff check`, `npx pyright --warnings` (fails: ENOTFOUND registry.npmjs.org), `.venv/bin/pyright --warnings`
+- [x] Docs updated? (`runner_refactor_checklist`, `DECISIONS`, `CHANGELOG`?): `docs/DECISIONS.md`, `docs/refactor/mod_refactor.md`, and `docs/runner_refactor_checklist.md` updated (CHANGELOG untouched — internal refactor).
+- [x] Tests added/updated: `tests/test_cli_wizard.py` now asserts the resolver hook is exercised during auto-wizard seeding.
+- [x] Risks noted: Downstream tools that previously patched `frame_compare._resolve_wizard_paths` now hit the alias that forwards to `src.frame_compare.wizard`—monitor for any imports that reach into `src.frame_compare.core` directly.
+- [x] Follow-ups for next session: Begin Phase 3 metadata extraction; audit README once the CLI shim is slimmer to mention the new wizard module boundary if user-facing behavior changes.
 
 ---
 

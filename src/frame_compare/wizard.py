@@ -13,7 +13,12 @@ from typing import Any, Dict, cast
 import click
 
 from .cli_runtime import CLIAppError
-from .preflight import _is_writable_path, resolve_subdir, resolve_workspace_root
+from .preflight import (
+    _abort_if_site_packages,
+    _is_writable_path,
+    resolve_subdir,
+    resolve_workspace_root,
+)
 
 __all__ = [
     "run_wizard_prompts",
@@ -22,6 +27,7 @@ __all__ = [
     "prompt_slowpics_options",
     "prompt_audio_alignment_option",
     "prompt_renderer_preference",
+    "resolve_wizard_paths",
 ]
 
 
@@ -142,5 +148,25 @@ def run_wizard_prompts(root: Path, config: Dict[str, Any]) -> tuple[Path, Dict[s
     return workspace_root, config
 
 
+def resolve_wizard_paths(root_override: str | None, config_override: str | None) -> tuple[Path, Path]:
+    """Resolve workspace root and config path for wizard/preset workflows."""
+
+    root = resolve_workspace_root(root_override)
+    if config_override:
+        config_path = Path(config_override).expanduser()
+    else:
+        config_dir = resolve_subdir(root, "config", purpose="config directory")
+        config_path = config_dir / "config.toml"
+    _abort_if_site_packages({"workspace": root, "config": config_path})
+    if not _is_writable_path(root, for_file=False):
+        raise click.ClickException(f"Workspace root '{root}' is not writable.")
+    if not _is_writable_path(config_path, for_file=True):
+        raise click.ClickException(
+            f"Config path '{config_path}' is not writable; pass --config to select another location."
+        )
+    return root, config_path
+
+
 # Backwards-compatibility alias (older modules referenced the underscored name).
 _run_wizard_prompts = run_wizard_prompts
+_resolve_wizard_paths = resolve_wizard_paths

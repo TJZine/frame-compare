@@ -44,7 +44,6 @@ from src.frame_compare.core import (
     _present_diff,
     _read_template_text,
     _render_config_text,
-    _resolve_wizard_paths,
     _write_config_file,
 )
 from src.frame_compare.preflight import (
@@ -99,6 +98,8 @@ _COMPAT_EXPORTS: dict[str, object] = {
     "wizard": _wizard,
     "run_wizard_prompts": _wizard.run_wizard_prompts,
     "_run_wizard_prompts": _wizard.run_wizard_prompts,
+    "resolve_wizard_paths": _wizard.resolve_wizard_paths,
+    "_resolve_wizard_paths": _wizard.resolve_wizard_paths,
     "prompt_workspace_root": _wizard.prompt_workspace_root,
     "prompt_input_directory": _wizard.prompt_input_directory,
     "prompt_slowpics_options": _wizard.prompt_slowpics_options,
@@ -753,7 +754,7 @@ def _execute_wizard_session(
 ) -> tuple[Path, Path]:
     """Shared wizard flow used by both the CLI command and auto-launch path."""
 
-    root, config_path = _resolve_wizard_paths(root_override, config_override)
+    root, config_path = _wizard.resolve_wizard_paths(root_override, config_override)
     template_text = _read_template_text()
     template_config = _load_template_config()
     final_config = copy.deepcopy(template_config)
@@ -874,7 +875,7 @@ def preset_apply(ctx: click.Context, name: str) -> None:
     config_override = params.get("config_path")
     input_override = params.get("input_dir")
 
-    root, config_path = _resolve_wizard_paths(root_override, config_override)
+    root, config_path = _wizard.resolve_wizard_paths(root_override, config_override)
     template_text = _read_template_text()
     template_config = _load_template_config()
     final_config = copy.deepcopy(template_config)

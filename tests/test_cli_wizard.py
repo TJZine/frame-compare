@@ -109,13 +109,19 @@ def test_auto_wizard_runs_during_write_config(tmp_path: Path, monkeypatch) -> No
     monkeypatch.setattr(frame_compare, "sys", _SysProxy(sys), raising=False)  # type: ignore[attr-defined]
 
     calls: dict[str, Any] = {}
+    original_resolver = wizard.resolve_wizard_paths
 
     def fake_prompts(root: Path, config: dict[str, Any]) -> tuple[Path, dict[str, Any]]:
         calls["invoked"] = True
         config.setdefault("paths", {})["input_dir"] = "custom-dir"
         return root, config
 
+    def tracking_resolver(root_override: str | None, config_override: str | None) -> tuple[Path, Path]:
+        calls["resolver_calls"] = calls.get("resolver_calls", 0) + 1
+        return original_resolver(root_override, config_override)
+
     monkeypatch.setattr(wizard, "run_wizard_prompts", fake_prompts, raising=False)  # type: ignore[reportUnknownMemberType]
+    monkeypatch.setattr(wizard, "resolve_wizard_paths", tracking_resolver, raising=False)  # type: ignore[reportUnknownMemberType]
 
     result = runner.invoke(
         frame_compare.main,
@@ -125,6 +131,7 @@ def test_auto_wizard_runs_during_write_config(tmp_path: Path, monkeypatch) -> No
     )
     assert result.exit_code == 0
     assert calls.get("invoked") is True
+    assert calls.get("resolver_calls", 0) >= 1
     config_path = tmp_path / "config" / "config.toml"
     assert config_path.exists()
     data = tomllib.loads(config_path.read_text(encoding="utf-8").lstrip("\ufeff"))

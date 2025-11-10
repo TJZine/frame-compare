@@ -70,6 +70,8 @@ Goal: finish slimming the CLI, expose the public API, and update tests to cover 
 
 **Exit criteria 2.2:** CLI shim complete, runner API re-exported (`RunRequest`, `RunResult`, `run`), unit tests green.
 
+**2025‑11‑10 update (Phase 2.2)** — Wizard auto-launch (`--write-config`), the `wizard` subcommand, and `preset apply` now call `src.frame_compare.wizard.resolve_wizard_paths` directly. `_COMPAT_EXPORTS` exposes both `resolve_wizard_paths` and `_resolve_wizard_paths`, so downstream scripts that previously patched the core helper continue working while tests (`tests/test_cli_wizard.py`) assert that the resolver hook is exercised.
+
 ### Phase 2.3 – Docs, Tooling & Risk Log
 
 Goal: document the new API, run tooling, and start the residual risk log.

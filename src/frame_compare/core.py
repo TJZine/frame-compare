@@ -75,6 +75,7 @@ if TYPE_CHECKING:
         def close(self) -> None: ...
 import src.frame_compare.alignment_preview as _alignment_preview_module
 import src.frame_compare.preflight as _preflight_constants
+import src.frame_compare.wizard as _wizard_module
 import src.screenshot as _screenshot_module
 from src import vs_core
 from src.analysis import (
@@ -116,12 +117,13 @@ from src.frame_compare.preflight import (
     PACKAGED_TEMPLATE_PATH,
     PROJECT_ROOT,
     PreflightResult,
-    _abort_if_site_packages,
     _is_writable_path,
     collect_path_diagnostics,
     prepare_preflight,
     resolve_subdir,
-    resolve_workspace_root,
+)
+from src.frame_compare.preflight import (
+    _abort_if_site_packages as _preflight_abort_if_site_packages,
 )
 from src.slowpics import SlowpicsAPIError, build_shortcut_filename, upload_comparison  # noqa: F401
 from src.tmdb import (
@@ -141,6 +143,7 @@ CONFIG_ENV_VAR: Final[str] = _preflight_constants.CONFIG_ENV_VAR
 NO_WIZARD_ENV_VAR: Final[str] = _preflight_constants.NO_WIZARD_ENV_VAR
 ROOT_ENV_VAR: Final[str] = _preflight_constants.ROOT_ENV_VAR
 ROOT_SENTINELS: Final[tuple[str, ...]] = _preflight_constants.ROOT_SENTINELS
+resolve_workspace_root = _preflight_constants.resolve_workspace_root
 
 ScreenshotError = _screenshot_module.ScreenshotError
 generate_screenshots = _screenshot_module.generate_screenshots
@@ -429,22 +432,15 @@ _DOCTOR_STATUS_ICONS: Final[Dict[DoctorStatus, str]] = {
 
 
 def _resolve_wizard_paths(root_override: str | None, config_override: str | None) -> tuple[Path, Path]:
-    """Resolve workspace root and config path for wizard/preset workflows."""
+    """Backward-compatible shim that defers to the wizard module implementation."""
 
-    root = resolve_workspace_root(root_override)
-    if config_override:
-        config_path = Path(config_override).expanduser()
-    else:
-        config_dir = resolve_subdir(root, "config", purpose="config directory")
-        config_path = config_dir / "config.toml"
-    _abort_if_site_packages({"workspace": root, "config": config_path})
-    if not _is_writable_path(root, for_file=False):
-        raise click.ClickException(f"Workspace root '{root}' is not writable.")
-    if not _is_writable_path(config_path, for_file=True):
-        raise click.ClickException(
-            f"Config path '{config_path}' is not writable; pass --config to select another location."
-        )
-    return root, config_path
+    return _wizard_module.resolve_wizard_paths(root_override, config_override)
+
+
+def _abort_if_site_packages(path_map: Mapping[str, Path]) -> None:
+    """Backward-compatible shim that defers to the preflight helper."""
+
+    _preflight_abort_if_site_packages(path_map)
 
 
 def _render_config_text(
