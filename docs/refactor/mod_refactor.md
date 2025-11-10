@@ -26,7 +26,7 @@ Keep this DoD visible when reviewing PRs.
 | 1 | 1.2 Wizard path integration |  | ☑ | Wizard prompts now delegate to `preflight.resolve_workspace_root/resolve_subdir`, `--diagnose-paths` calls `preflight.collect_path_diagnostics`, and new preflight/CLI diagnostics tests cover site-packages and escape attempts. |
 | 2 | 2.1 Wizard module creation |  | ☑ | Wizard prompts now live in `src/frame_compare/wizard.py` with dedicated tests (`tests/test_wizard.py`) and CLI wiring updated (2025‑11‑10). |
 | 2 | 2.2 Loader/CLI updates |  | ☑ | CLI + preset flows now call `src.frame_compare.wizard` APIs directly; CLI tests patched to assert the new boundary. |
-| 3 | 3.1 Metadata utilities |  | ☐ |  |
+| 3 | 3.1 Metadata utilities |  | ☑ | Created `src/frame_compare/metadata.py`, rewired `runner.py`/tests to import it directly, and updated docs/QA logs. |
 | 3 | 3.2 Plan builder |  | ☐ |  |
 | 4 | 4.1 Alignment summary module |  | ☐ |  |
 | 4 | 4.2 VSPreview integration |  | ☐ |  |
@@ -110,11 +110,13 @@ Notes:
 **Goal:** Separate clip metadata parsing and plan construction from orchestration.
 
 ### Sub-phase 3.1 – Metadata utilities
-- [ ] Create `src/frame_compare/metadata.py` containing:
+- [x] Create `src/frame_compare/metadata.py` containing:
   - `parse_metadata` (formerly `_parse_metadata`)
   - Label dedup helpers
   - Override matching utilities (`normalise_override_mapping`, `_match_override`)
-- [ ] Update `runner.py` + tests to import from new module.
+- [x] Update `runner.py` + tests to import from the new module, patch helpers via `metadata_utils`, and keep CLI shim compatibility intact.
+
+**2025-11-10 update:** Metadata parsing/dedupe/override helpers now live in `src/frame_compare/metadata.py`, `runner.py` consumes the module directly, and tests patch the new namespace through `_patch_core_helper`. Docs (`docs/config_audit.md`, tracker tables) capture the new layout; no CHANGELOG entry required.
 
 ### Sub-phase 3.2 – Plan builder
 - [ ] Create `src/frame_compare/planner.py` exporting `build_plans`.
@@ -251,6 +253,16 @@ Goal: capture the tooling outputs, refresh compatibility documentation, and exte
 - [x] Tests added/updated: None (documentation-only pass; existing suites already cover the wizard boundary).
 - [x] Risks noted: Legacy scripts must patch `frame_compare.resolve_wizard_paths` (or `_resolve_wizard_paths`) because those names now forward into `src.frame_compare.wizard`; manual wizard/preset QA deferred until behavior changes again.
 - [x] Follow-ups for next session: Pick up the Phase 3 metadata extraction once additional module splits resume.
+
+## Session Checklist — 2025-11-10 (Phase 3.1)
+
+- [x] Phase/Sub-phase: `3 / 3.1 Metadata utilities`
+- [x] Modules touched: `src/frame_compare/metadata.py`, `src/frame_compare/runner.py`, `src/frame_compare/core.py`, `tests/test_frame_compare.py`, `docs/config_audit.md`, `docs/refactor/mod_refactor.md`, `docs/runner_refactor_checklist.md`, `docs/DECISIONS.md`
+- [x] Commands run: `git status -sb`, `pytest -q`, `.venv/bin/ruff check`, `npx pyright --warnings` (fails: ENOTFOUND registry.npmjs.org), `.venv/bin/pyright --warnings`
+- [x] Docs updated? (`runner_refactor_checklist`, `DECISIONS`, `CHANGELOG`?): Yes — trackers plus `docs/config_audit.md` refreshed; `CHANGELOG.md` unchanged (internal refactor only).
+- [x] Tests added/updated: Patched `tests/test_frame_compare.py` helpers to target `src.frame_compare.metadata.parse_metadata` via `_patch_core_helper`, ensuring runner/CLI patches hit the new module.
+- [x] Risks noted: Compatibility shim still funnels through `frame_compare._COMPAT_EXPORTS`; no `_IMPL_ATTRS` remain, but Phase 3.2 must extract `_build_plans` next to keep plan overrides co-located with the new metadata module.
+- [x] Follow-ups for next session: Start Phase 3.2 (`planner.py`) so trim/FPS logic moves alongside the override helpers; consider documenting the new module boundary in README once planners stabilize.
 
 ---
 

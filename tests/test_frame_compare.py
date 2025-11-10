@@ -18,6 +18,7 @@ import src.frame_compare.cache as cache_module
 import src.frame_compare.config_helpers as config_helpers_module
 import src.frame_compare.core as core_module
 import src.frame_compare.media as media_module
+import src.frame_compare.metadata as metadata_module
 import src.frame_compare.preflight as preflight_module
 from src.analysis import CacheLoadResult, FrameMetricsCacheInfo, SelectionDetail
 from src.audio_alignment import AlignmentMeasurement, AudioStreamInfo
@@ -213,6 +214,8 @@ def _patch_core_helper(monkeypatch: pytest.MonkeyPatch, attr: str, value: object
         "_prepare_preflight": ("prepare_preflight",),
         "collect_path_diagnostics": ("_collect_path_diagnostics",),
         "_collect_path_diagnostics": ("collect_path_diagnostics",),
+        "_parse_metadata": ("parse_metadata",),
+        "parse_metadata": ("_parse_metadata",),
     }
     attrs_to_patch = (attr,) + alias_map.get(attr, tuple())
 
@@ -229,6 +232,8 @@ def _patch_core_helper(monkeypatch: pytest.MonkeyPatch, attr: str, value: object
         getattr(runner_module, "cache_utils", None),
         getattr(runner_module, "alignment_preview_utils", None),
         getattr(runner_module, "config_helpers", None),
+        metadata_module,
+        getattr(runner_module, "metadata_utils", None),
     ]
     for target in targets:
         if target is None:
@@ -832,7 +837,7 @@ def test_run_cli_reuses_vspreview_manual_offsets_when_alignment_disabled(
     _patch_core_helper(monkeypatch, "_discover_media", lambda _root: list(files))
     _patch_core_helper(
         monkeypatch,
-        "_parse_metadata",
+        "parse_metadata",
         lambda _files, _naming: list(metadata),
     )
     _patch_core_helper(
@@ -2393,7 +2398,7 @@ def test_runner_auto_upload_cleans_screens_dir(tmp_path: Path, monkeypatch: pyte
     plans[0].use_as_reference = True
 
     _patch_core_helper(monkeypatch, "_discover_media", lambda _root: list(files))
-    monkeypatch.setattr(runner_module.core, "_parse_metadata", lambda *_: list(metadata))
+    _patch_core_helper(monkeypatch, "parse_metadata", lambda *_: list(metadata))
     monkeypatch.setattr(runner_module.core, "_build_plans", lambda *_: list(plans))
     monkeypatch.setattr(runner_module.core, "_pick_analyze_file", lambda *_args, **_kwargs: files[0])
 
@@ -2647,7 +2652,7 @@ def test_runner_audio_alignment_summary_passthrough(
     plans[0].use_as_reference = True
 
     _patch_core_helper(monkeypatch, "_discover_media", lambda _root: list(files))
-    monkeypatch.setattr(runner_module.core, "_parse_metadata", lambda *_: list(metadata))
+    _patch_core_helper(monkeypatch, "parse_metadata", lambda *_: list(metadata))
     monkeypatch.setattr(runner_module.core, "_build_plans", lambda *_: list(plans))
     monkeypatch.setattr(runner_module.core, "_pick_analyze_file", lambda *_args, **_kwargs: files[0])
 
@@ -2768,7 +2773,7 @@ def test_runner_handles_existing_event_loop(tmp_path: Path, monkeypatch: pytest.
     plans[0].use_as_reference = True
 
     _patch_core_helper(monkeypatch, "_discover_media", lambda _root: list(files))
-    monkeypatch.setattr(runner_module.core, "_parse_metadata", lambda *_: list(metadata))
+    _patch_core_helper(monkeypatch, "parse_metadata", lambda *_: list(metadata))
     monkeypatch.setattr(runner_module.core, "_build_plans", lambda *_: list(plans))
     monkeypatch.setattr(runner_module.core, "_pick_analyze_file", lambda *_args, **_kwargs: files[0])
 
@@ -4498,7 +4503,7 @@ def test_run_cli_calls_alignment_confirmation(
         raise _SentinelError
 
     _patch_core_helper(monkeypatch, "_discover_media", fake_discover)
-    _patch_core_helper(monkeypatch, "_parse_metadata", fake_parse_metadata)
+    _patch_core_helper(monkeypatch, "parse_metadata", fake_parse_metadata)
     _patch_core_helper(monkeypatch, "_build_plans", fake_build_plans)
     _patch_core_helper(monkeypatch, "_pick_analyze_file", fake_pick_analyze)
     _patch_core_helper(monkeypatch, "_maybe_apply_audio_alignment", fake_maybe_apply)

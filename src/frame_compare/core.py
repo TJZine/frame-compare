@@ -11,7 +11,6 @@ import json
 import logging
 import math
 import os
-import re
 import shlex
 import shutil
 import subprocess
@@ -22,7 +21,6 @@ import threading
 import time
 import tomllib
 import uuid
-from collections import Counter, defaultdict
 from collections.abc import Mapping as MappingABC
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
@@ -58,14 +56,7 @@ from rich.text import Text
 
 from src import audio_alignment
 from src.config_loader import load_config as _load_config
-from src.datatypes import (
-    AnalysisConfig,
-    AppConfig,
-    ColorConfig,
-    NamingConfig,
-    RuntimeConfig,
-    TMDBConfig,
-)
+from src.datatypes import AnalysisConfig, AppConfig, ColorConfig, RuntimeConfig, TMDBConfig
 
 if TYPE_CHECKING:
     from src.audio_alignment import AlignmentMeasurement, AudioStreamInfo
@@ -73,6 +64,7 @@ if TYPE_CHECKING:
     class _AsyncHTTPTransport(Protocol):
         def __init__(self, retries: int = ...) -> None: ...
         def close(self) -> None: ...
+
 import src.frame_compare.alignment_preview as _alignment_preview_module
 import src.frame_compare.preflight as _preflight_constants
 import src.frame_compare.wizard as _wizard_module
@@ -109,10 +101,15 @@ from src.frame_compare.cli_runtime import (
     _coerce_str_mapping,
     _ensure_audio_alignment_block,
     _normalise_vspreview_mode,
-    _OverrideValue,
     _plan_label,
 )
 from src.frame_compare.config_helpers import coerce_config_flag as _coerce_config_flag
+from src.frame_compare.metadata import (
+    match_override as _match_override,
+)
+from src.frame_compare.metadata import (
+    normalise_override_mapping as _normalise_override_mapping,
+)
 from src.frame_compare.preflight import (
     PACKAGED_TEMPLATE_PATH,
     PROJECT_ROOT,
@@ -134,7 +131,6 @@ from src.tmdb import (
     parse_manual_id,
     resolve_tmdb,  # noqa: F401
 )
-from src.utils import parse_filename_metadata
 from src.vs_core import ClipInitError, ClipProcessError  # noqa: F401
 
 logger = logging.getLogger(__name__)
@@ -665,73 +661,6 @@ def _emit_doctor_results(
             click.echo(f"  - {note}")
 
 
-def _parse_metadata(files: Sequence[Path], naming_cfg: NamingConfig) -> List[Dict[str, str]]:
-    """Extract naming metadata for each clip using configured heuristics."""
-    metadata: List[Dict[str, str]] = []
-    for file in files:
-        info = parse_filename_metadata(
-            file.name,
-            prefer_guessit=naming_cfg.prefer_guessit,
-            always_full_filename=naming_cfg.always_full_filename,
-        )
-        metadata.append(info)
-    _dedupe_labels(metadata, files, naming_cfg.always_full_filename)
-    return metadata
-
-
-_VERSION_PATTERN = re.compile(r"(?:^|[^0-9A-Za-z])(?P<tag>v\d{1,3})(?!\d)", re.IGNORECASE)
-
-
-def _extract_version_suffix(file_path: Path) -> str | None:
-    """Return a version suffix (for example ``v2``) from *file_path* stem."""
-    match = _VERSION_PATTERN.search(file_path.stem)
-    if not match:
-        return None
-    tag = match.group("tag")
-    return tag.upper() if tag else None
-
-
-def _dedupe_labels(
-    metadata: Sequence[Dict[str, str]],
-    files: Sequence[Path],
-    prefer_full_name: bool,
-) -> None:
-    """Guarantee unique labels by appending version hints when required."""
-    counts = Counter((meta.get("label") or "") for meta in metadata)
-    duplicate_groups: dict[str, list[int]] = defaultdict(list)
-    for idx, meta in enumerate(metadata):
-        label = meta.get("label") or ""
-        if not label:
-            meta["label"] = files[idx].name
-            continue
-        if counts[label] > 1:
-            duplicate_groups[label].append(idx)
-
-    if prefer_full_name:
-        for indices in duplicate_groups.values():
-            for idx in indices:
-                metadata[idx]["label"] = files[idx].name
-        return
-
-    for label, indices in duplicate_groups.items():
-        for idx in indices:
-            version = _extract_version_suffix(files[idx])
-            if version:
-                metadata[idx]["label"] = f"{label} {version}".strip()
-
-        temp_counts = Counter(metadata[idx].get("label") or "" for idx in indices)
-        for idx in indices:
-            resolved = metadata[idx].get("label") or label
-            if temp_counts[resolved] <= 1:
-                continue
-            order = indices.index(idx) + 1
-            metadata[idx]["label"] = f"{resolved} #{order}"
-
-    for idx, meta in enumerate(metadata):
-        if not (meta.get("label") or "").strip():
-            meta["label"] = files[idx].name
-
-
 def _parse_audio_track_overrides(entries: Iterable[str]) -> Dict[str, int]:
     """Parse override entries like "release=2" into a lowercase mapping."""
     mapping: Dict[str, int] = {}
@@ -1069,39 +998,6 @@ def _pick_analyze_file(
             return file
 
     return files[0]
-
-
-def _normalise_override_mapping(raw: Mapping[str, _OverrideValue]) -> Dict[str, _OverrideValue]:
-    """Lowercase override keys and drop empty entries."""
-    normalised: Dict[str, _OverrideValue] = {}
-    for key, value in raw.items():
-        key_str = str(key).strip().lower()
-        if key_str:
-            normalised[key_str] = value
-    return normalised
-
-
-def _match_override(
-    index: int,
-    file: Path,
-    metadata: Mapping[str, str],
-    mapping: Mapping[str, _OverrideValue],
-) -> Optional[_OverrideValue]:
-    """Return the override value matching *index*, file names, or metadata labels."""
-    candidates = [
-        str(index),
-        file.name,
-        file.stem,
-        metadata.get("release_group", ""),
-        metadata.get("file_name", ""),
-    ]
-    for candidate in candidates:
-        if not candidate:
-            continue
-        value = mapping.get(candidate.lower())
-        if value is not None:
-            return value
-    return None
 
 
 def _build_plans(files: Sequence[Path], metadata: Sequence[Dict[str, str]], cfg: AppConfig) -> List[_ClipPlan]:

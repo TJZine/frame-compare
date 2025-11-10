@@ -24,6 +24,7 @@ import src.frame_compare.cache as cache_utils
 import src.frame_compare.config_helpers as config_helpers
 import src.frame_compare.core as core
 import src.frame_compare.media as media_utils
+import src.frame_compare.metadata as metadata_utils
 import src.frame_compare.preflight as preflight_utils
 import src.report as html_report
 from src import vs_core
@@ -490,7 +491,7 @@ def run(request: RunRequest) -> RunResult:
             rich_message="[red]Need at least two video files to compare.[/red]",
         )
 
-    metadata = core._parse_metadata(files, cfg.naming)
+    metadata = metadata_utils.parse_metadata(files, cfg.naming)
     year_hint_raw = core._first_non_empty(metadata, "year")
     metadata_title = core._first_non_empty(metadata, "title") or core._first_non_empty(metadata, "anime_title")
     tmdb_resolution: TMDBResolution | None = None

@@ -196,11 +196,11 @@ Central log for the end-to-end configuration review requested on 2025‑11‑18.
 
 ## `[naming]` (reviewed 2025‑11‑19)
 
-**Feature surface.** `NamingConfig` (`src/datatypes.py:179-184`) exposes two toggles: `always_full_filename` (fallback to full filenames when duplicates arise) and `prefer_guessit` (choose GuessIt over Anitopy parsing). Loader simply deserialises the section (`src/config_loader.py:372`), and runtime heuristics live in `src/utils.py:1-200` (`parse_filename_metadata`, release-group extraction, anime-specific labels) plus `_dedupe_labels` in `src/frame_compare/core.py:1320-1384`. Runner invokes `_parse_metadata(files, cfg.naming)` before planning, feeding labels into CLI layout, JSON tail, and slow.pics titles (`src/frame_compare/runner.py:537-700`). Tests under `tests/test_frame_compare.py:1723-2105` verify overrides, deduping, and prefer-full-filename behaviour.
+**Feature surface.** `NamingConfig` (`src/datatypes.py:179-184`) exposes two toggles: `always_full_filename` (fallback to full filenames when duplicates arise) and `prefer_guessit` (choose GuessIt over Anitopy parsing). Loader simply deserialises the section (`src/config_loader.py:372`), and runtime heuristics live in `src/utils.py:1-200` (`parse_filename_metadata`, release-group extraction, anime-specific labels) plus `dedupe_labels` in `src/frame_compare/metadata.py:39-75`. Runner invokes `metadata.parse_metadata(files, cfg.naming)` before planning, feeding labels into CLI layout, JSON tail, and slow.pics titles (`src/frame_compare/runner.py:494-520`). Tests under `tests/test_frame_compare.py:1723-2105` verify overrides, deduping, and prefer-full-filename behaviour.
 
 **Health check.**
 - GuessIt + Anitopy fallback: when `prefer_guessit=True` the parser leverages GuessIt metadata (title, episode, release group, year), otherwise Anitopy provides anime-centric fields; both paths standardise episodes via `_normalize_episode_number`.
-- `_dedupe_labels` guarantees unique labels by switching to full filenames when configured, or by appending version tags (e.g., `v2`) or ordinal suffixes (`#2`) when short labels collide. Tests assert dedupe safety (`tests/test_frame_compare.py:1995-2105`).
+- `metadata.dedupe_labels` guarantees unique labels by switching to full filenames when configured, or by appending version tags (e.g., `v2`) or ordinal suffixes (`#2`) when short labels collide. Tests assert dedupe safety (`tests/test_frame_compare.py:1995-2105`).
 - Metadata dictionaries include release group, normalized episode markers, year, and fallback file name, enabling slow.pics/JSON tails to display consistent labels.
 
 **Opportunities.**

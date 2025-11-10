@@ -34,7 +34,7 @@ Goal: ensure `src/frame_compare/runner.py` solely owns orchestration logic, whil
 
 ---
 
-## Phase 2 – CLI Slimming & Public Runner API (Current Phase 🚧)
+## Phase 2 – CLI Slimming & Public Runner API (Complete ✅)
 
 Phase 2 is split into three incremental sub-phases so each Codex session can land a coherent chunk of work.
 
@@ -96,7 +96,7 @@ Manual QA: no additional wizard or preset runs were required for this documentat
 
 ---
 
-## Phase 3 – Final Review & Docs (Future)
+## Phase 3 – Final Review & Docs (Current Phase 🚧)
 
 Phase 3 also splits into two sub-phases: final QA/doc polish and quality gates + handoff.
 
@@ -104,12 +104,14 @@ Phase 3 also splits into two sub-phases: final QA/doc polish and quality gates
 
 | Checklist Item | Status | Notes / Next Steps |
 | --- | --- | --- |
-| 1. Workspace prep | ✅ | 2025-11-09 — `git status -sb` shows `## Develop...origin/Develop` plus the expected runner/doc edits only. |
-| 2–6. Architecture / Shim / Type Safety / Dead Code / Behavior | 🚧 | Shim + behavior verified: `frame_compare.run_cli` (`frame_compare.py:4415-4444`) delegates cleanly and `tests/test_frame_compare.py:52-138` guard the boundary; type safety confirmed via `npx pyright --warnings` (2025-11-09, zero findings). Architecture/dead-code still pending because `_IMPL_ATTRS` in `src/frame_compare/runner.py:98-168` imports `_build_cache_info`/`_prepare_preflight`/`_discover_media` from `frame_compare.py:1954-2740`. *(Resolved by Phase 4.1, see table below.)* |
-| 7. Documentation | ✅ | README programmatic usage (`README.md:169-192`) and `docs/DECISIONS.md` now capture the Phase 3.1 review; this checklist updated with the latest audit results. |
-| 8. Tests | ✅ | `.venv/bin/pytest` (2025-11-09) → 246 passed in 2.42 s; recorded as the Phase 3.1 verification run. |
+| 1. Workspace prep | ✅ | 2025-11-10 — `git status -sb` reported `runner-refactor...origin/runner-refactor [ahead 4]`; baseline `pytest -q` / `.venv/bin/ruff check` / `npx pyright --warnings` (fails offline) plus the `.venv/bin/pyright --warnings` fallback were logged in `docs/DECISIONS.md` before edits. |
+| 2–6. Architecture / Shim / Type Safety / Dead Code / Behavior | ✅ | Introduced `src/frame_compare/metadata.py` for `parse_metadata`, label dedupe, and override helpers; `runner.py` imports it directly, `_IMPL_ATTRS` stays absent (guarded by `tests/test_frame_compare.py::test_runner_refreshed_has_no_impl_attrs`), and `.venv/bin/pyright --warnings` still reports zero diagnostics after the move. |
+| 7. Documentation | ✅ | Refreshed `docs/refactor/mod_refactor.md`, this checklist, and `docs/config_audit.md` to point at the new module layout; README unchanged because CLI usage is unaffected. |
+| 8. Tests | ✅ | 2025-11-10 — `pytest -q` remains at 209 passed / 54 skipped (~39.7 s) with the metadata helpers extracted; output captured both before and after the change. |
 
-**Exit criteria 3.1:** Checklist items 1–8 signed off with notes; CHANGELOG updated.
+**Exit criteria 3.1:** Checklist items 1–8 signed off with notes; documentation updated (no CHANGELOG entry required).
+
+Manual QA: Not run for this metadata extraction; existing CLI delegation + runner harness tests enforce the boundary and compatibility exports remain unchanged.
 
 ### Phase 3.2 – Quality Gates & Handoff
 
