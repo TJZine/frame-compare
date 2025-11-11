@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Final, List, Optional, Sequence, Tuple
 
 from rich import print
 from rich.markup import escape
@@ -13,7 +13,7 @@ from src.analysis import SelectionWindowSpec, compute_selection_window
 from src.datatypes import AnalysisConfig, RuntimeConfig
 from src.frame_compare.cli_runtime import CLIAppError
 
-__all__ = [
+__all__: Final = [
     "init_clips",
     "resolve_selection_windows",
     "log_selection_windows",

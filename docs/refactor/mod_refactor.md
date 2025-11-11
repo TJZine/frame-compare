@@ -340,6 +340,16 @@ _Optional fields:_ Date, Branch, Reviewer, Metrics (LOC touched, tests runtime).
 - [x] Risks noted: Any tooling that referenced the old `tests/test_cli_*.py` paths (CI filters, docs) must be updated to `tests/cli/test_*.py`; pytest needed the package marker to prevent duplicate module imports when `tests/test_wizard.py` remains at the top level.
 - [x] Follow-ups for next session: Audit workflow/test-selection globs for the renamed files and continue Phase 9.10 export hardening once CI confirms the new layout.
 
+## Session Checklist — 2025-11-11 (Phase 9.10)
+
+- [x] Phase/Sub-phase: `9 / 9.10 Public __all__ contracts`
+- [x] Modules touched: `src/frame_compare/selection.py`, `docs/refactor/mod_refactor.md`, `docs/DECISIONS.md`
+- [x] Commands run: `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` (273 passed / 1 skipped, 39.91 s), `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`
+- [x] Docs updated? (`runner_refactor_checklist`, `DECISIONS`, `CHANGELOG`?): Updated this tracker + `docs/DECISIONS.md` (RUNNER checklist/CHANGELOG unaffected).
+- [x] Tests added/updated: None needed; existing suites already cover selection window behavior.
+- [x] Risks noted: `selection` only re-exports three helpers now; downstream wildcard imports must import explicitly or rely on curated exports (documented in DECISIONS entry).
+- [x] Follow-ups for next session: Audit remaining modules before Phase 9.11 strictness ratchet to ensure `__all__` lists stay in sync with CLI/runner imports.
+
 ### Phase 2.3 – Docs, Tooling & Risk Log
 
 Goal: capture the tooling outputs, refresh compatibility documentation, and extend the residual-risk notes before moving on.
@@ -542,7 +552,7 @@ Goal: finish modularizing `src/frame_compare/core.py` by extracting remaining CL
 | 9 | 9.7 Import contracts |  | ☑ | `importlinter.ini` enforces runner→core→modules layering plus module→CLI/core bans, and the lint job now installs + runs `lint-imports` (runner→core ignore documented). |
 | 9 | 9.8 Remove legacy shims |  | ☑ | Removed `core` doctor/config-writer/presets/metadata/selection shims and trimmed curated exports to point at the extracted modules directly. |
 | 9 | 9.9 Test layout finalization |  | ☑ | CLI suites now live in `tests/cli/` (package-ified to avoid duplicate module names), mirroring the runner layout. |
-| 9 | 9.10 Public __all__ |  | ⛔ | Add explicit exports to new modules to avoid bleed. |
+| 9 | 9.10 Public __all__ |  | ☑ | `selection.py` now exposes only `init_clips`, `resolve_selection_windows`, `log_selection_windows` via `__all__`; tracker + DECISIONS stamped 2025‑11‑11. |
 | 9 | 9.11 Type strictness ratchet |  | ⛔ | Raise Pyright to strict for library modules (recommended). |
 | 9 | 9.12 Runner API docs |  | ⛔ | Document programmatic API usage and examples. |
 
