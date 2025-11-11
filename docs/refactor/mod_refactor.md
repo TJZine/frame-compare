@@ -30,8 +30,8 @@ Keep this DoD visible when reviewing PRs.
 | 3 | 3.2 Plan builder |  | ☑ | Extracted `build_plans` into `src/frame_compare/planner.py`, rewired `runner.py`, and added planner-focused tests/QA logs. |
 | 4 | 4.1 Alignment summary module |  | ☑ | Extracted `_AudioAlignmentSummary`/display helpers into `src/frame_compare/alignment_runner.py`, rewired `runner.py` to call the module directly, and re-exported the helpers for compatibility. |
 | 4 | 4.2 VSPreview integration |  | ☑ | VSPreview script writer/launcher hardened (new helpers, logging, and telemetry) with dedicated unit tests plus docs/log updates for manual offset reuse. |
-| 5 | 5.1 VSPreview module |  | ☐ |  |
-| 5 | 5.2 Layout utilities |  | ☐ |  |
+| 5 | 5.1 VSPreview module |  | ☑ | `src/frame_compare/vspreview.py` owns script rendering/persistence/launch plus manual-offset helpers; CLI/runner now import from the module, `_COMPAT_EXPORTS` re-exports for shims, and tests cover rendering, launch, and telemetry paths. |
+| 5 | 5.2 Layout utilities |  | ☑ | `src/frame_compare/layout_utils.py` centralizes `plan_label`, `format_resolution_summary`, color helpers, etc., and all layout consumers (cli_runtime, alignment_runner, runner, screenshot) import from it to avoid circular dependencies. |
 | 6 | 6.1 Shared fixtures |  | ☑ | Helpers/fixtures promoted into `tests/helpers/runner_env.py` plus `tests/conftest.py` so runner suites share `_CliRunnerEnv`, `_patch_*`, and the JSON/VSPreview stubs. |
 | 6 | 6.2 Test split |  | ☑ | Split the monolithic runner suite into `tests/runner/test_cli_entry.py`, `tests/runner/test_audio_alignment_cli.py`, and `tests/runner/test_slowpics_workflow.py`; added `runner`/`runner_vs_core_stub` fixtures and documented the relocation in `docs/runner_refactor_checklist.md`. |
 | 6 | 6.3 Runner test polish |  | ☑ | Added shared `dummy_progress` fixture, VSPreview shim exports, and centralized helpers so Phase 6 suites rely exclusively on the helper module. |
@@ -312,6 +312,228 @@ Goal: capture the tooling outputs, refresh compatibility documentation, and exte
 - [x] Follow-ups for next session: Phase 4 alignment summary module extraction; rerun manual plan-builder QA with real configs once CLI glue thins further.
 
 ---
+
+## Phase 9 – CLI vs Runner Boundary Hardening (Sized per session)
+
+Goal: finish modularizing `src/frame_compare/core.py` by extracting remaining CLI-only helpers into purpose-built modules, reduce runner’s dependency on `core`, and present a stable runner API. Each sub‑phase below is scoped to complete within a single Codex session and follows our orchestrator handoff pattern.
+
+### Evidence Sweep (current state)
+
+- Monolith hotspots in `src/frame_compare/core.py` (still present):
+  - Config template/preset + writer helpers: `_read_template_text`, `_load_template_config`, `_deep_merge`, `_diff_config`, `_format_toml_value`, `_flatten_overrides`, `_apply_overrides_to_template`, `_write_config_file`, `_present_diff`, `_list_preset_paths`, `_load_preset_data`, `PRESETS_DIR`, `PRESET_DESCRIPTIONS`.
+  - Doctor: `DoctorCheck` (TypedDict), `_collect_doctor_checks`, `_emit_doctor_results`.
+  - Runtime helpers consumed by runner: `_parse_audio_track_overrides`, `_first_non_empty`, `_parse_year_hint`, `_format_seconds`, `_fps_to_float`, `_fold_sequence`, `_evaluate_rule_condition`, `_build_legacy_summary_lines`, `_format_clock`, `_init_clips`, `_resolve_selection_windows`, `_log_selection_windows`, `_validate_tonemap_overrides`.
+  - TMDB workflow: `TMDBLookupResult`, `_should_retry_tmdb_error`, `_resolve_tmdb_blocking`, `resolve_tmdb_workflow`, `_prompt_manual_tmdb`, `_prompt_tmdb_confirmation`, `_render_collection_name`.
+  - CLI constants used by `frame_compare.py`: `_DEFAULT_CONFIG_HELP`, `PRESET_DESCRIPTIONS`.
+- Existing extractions already in place: `wizard.py`, `preflight.py`, `vspreview.py`, `cli_runtime.py`, `metadata.py`, `layout_utils.py`.
+- Tests import `core` broadly for shims/monkeypatching across `tests/runner` and CLI suites; compatibility exports must be preserved during the transition.
+
+### Sub‑phase 9.1 – Extract Doctor module (single session)
+
+- Scope
+  - Create `src/frame_compare/doctor.py` exposing:
+    - `DoctorCheck` (TypedDict)
+    - `collect_checks(config_path: Path, cfg) -> list[DoctorCheck]`
+    - `emit_results(checks: list[DoctorCheck], *, json_mode: bool) -> None`
+  - Rewire `frame_compare.py` doctor subcommand to use the new module.
+  - Keep `core._collect_doctor_checks` and `core._emit_doctor_results` as thin shims (deprecation planned post‑stabilization).
+  - Design: keep the doctor surface programmatic — `collect_checks` returns structured data (`list[DoctorCheck]`), and the CLI formats output; this enables external tooling to reuse checks without importing CLI wiring.
+- Orchestrator Handoff
+  - Provide target file list, function moves, and acceptance tests (`tests/test_cli_doctor.py`).
+  - Confirm no change to CLI flags/structures.
+- Success Checks
+  - `pytest -q` passes, no CLI behavior change, `ruff`/`pyright` clean.
+  - New module covered by existing tests; no new failures.
+- Rollback
+  - Revert import wiring to `core` and retain the module for future re‑attempt.
+
+**2025-11-11 update (Phase 9.1):** `src/frame_compare/doctor.py` now owns `DoctorCheck`, `collect_checks`, and `emit_results`; `frame_compare.py` imports the module as `doctor_module` to avoid clashing with the CLI command while both the `doctor` subcommand and the wizard invoke the extracted helpers. `src/frame_compare/core.py` aliases the new types and keeps `_collect_doctor_checks` / `_emit_doctor_results` as shims so downstream monkeypatches continue to target `core`. `tests/test_cli_doctor.py` plus the wizard/runner suites exercised the flow unchanged, and docs/checklists reference the new boundary.
+
+### Sub‑phase 9.2 – Extract Config Writer and Presets (single session)
+
+- Scope
+  - Add `src/frame_compare/config_writer.py` with: `read_template_text`, `load_template_config`, `render_config_text`, `write_config_file` (public); supporting `_deep_merge`, `_diff_config`, `_format_toml_value`, `_flatten_overrides` (private).
+  - Add `src/frame_compare/presets.py` with: `PRESETS_DIR`, `PRESET_DESCRIPTIONS`, `list_preset_paths`, `load_preset_data`.
+  - Update `frame_compare.py` to import from these modules; maintain `core` shims for one release.
+- Orchestrator Handoff
+  - Provide mapping of function names moved and CLI call sites.
+  - Ensure preset descriptions remain identical (affects `frame_compare.py` help text).
+- Success Checks
+  - `pytest`/`ruff`/`pyright` clean; CLI `wizard`/`preset` flows unchanged.
+  - Docs updated where they reference template/preset responsibilities.
+- Rollback
+  - Repoint CLI imports to `core` functions; keep the new modules staged but unused.
+
+### Sub‑phase 9.3 – Unhook Runner from `core` where trivial (single session)
+
+- Scope
+  - Replace `core._abort_if_site_packages` with `preflight._abort_if_site_packages` in `runner.py`.
+  - Replace `core._VSPREVIEW_*` constants with direct imports from `vspreview`.
+  - Introduce shared formatting helpers (time/FPS/clock/fold/conditions) under `layout_utils` (or new `runtime_utils`) and update `runner.py` callers.
+  - Move `_first_non_empty` (and optionally `_parse_year_hint`) into `metadata.py`; update runner references.
+  - Move `_parse_audio_track_overrides` from `core` to `metadata.py` and refactor `runner.py` call sites accordingly.
+- Orchestrator Handoff
+  - Provide the exact runner call sites to update and the replacement helpers.
+- Success Checks
+  - `pytest`/`ruff`/`pyright` clean; zero behavior drift in logs/JSON.
+- Rollback
+  - Temporary re‑alias the new helpers back through `core` if needed.
+
+### Sub‑phase 9.4 – Selection and Clip Initialization helpers (single session)
+
+- Scope
+  - Move `_init_clips`, `_resolve_selection_windows`, `_log_selection_windows` to `alignment_runner.py` (or a new `selection.py`).
+  - Publicly export stable names; update runner imports.
+  - Keep `core` shims to forward for one release.
+- Orchestrator Handoff
+  - Provide the function signatures and test touch points in `tests/runner/test_cli_entry.py` and related suites.
+- Success Checks
+  - `pytest`/`ruff`/`pyright` clean;
+  - Runner path retains identical messages/progress lines.
+- Rollback
+  - Restore runner imports to `core` and leave new exports in place.
+
+### Sub‑phase 9.5 – Curated exports + typing surface (single session)
+
+- Scope
+  - Update top‑level `frame_compare` curated exports to point to new modules.
+  - Maintain `_COMPAT_EXPORTS` shims for removed `core` members with deprecation notes.
+  - Update `typings/frame_compare.pyi` for any newly surfaced functions when exposed via `frame_compare`.
+  - Decide on shipping `py.typed` (likely yes) to support inline typing across modules.
+- Orchestrator Handoff
+  - Provide the intended public API list and any deprecations to announce.
+- Success Checks
+  - `pyright --warnings` remains clean for consumers importing from `frame_compare`.
+  - CHANGELOG entry drafted (internal: deprecations noted; external: new stable imports).
+- Rollback
+  - Limit curated exports to previous set and hold new modules as internal.
+
+### Sub‑phase 9.6 – Test and fixture cleanup planning (single session)
+
+- Scope
+  - Document the test moves for CLI (`tests/cli/test_wizard.py`, `tests/cli/test_doctor.py`) to mirror `tests/runner/` pattern.
+  - Design fixtures to replace `_patch_*` helpers (e.g., a fixture for CLI dependency patching, VSPreview context manager), keeping current tests intact for now.
+- Orchestrator Handoff
+  - Provide a fixture design proposal with 1–2 representative refactors guarded by existing tests.
+- Success Checks
+  - No test failures; clearer path for Phase 10 test reorg.
+- Rollback
+  - Keep design notes; do not change existing `_patch_*` usages.
+
+### Risks & Mitigations
+
+- Test breakage from shim changes
+  - Keep `core` shims and `_COMPAT_EXPORTS` intact for one release; update curated exports last. If failures appear, temporarily re‑alias new helpers back through `core`.
+- Runner drift from duplicated helpers
+  - Centralize time/FPS/fold/condition/clock/formatting helpers in `layout_utils` (or `runtime_utils`). Consider adding a tiny unit test for these pure helpers if gaps appear; otherwise rely on existing suites.
+- CLI regressions in doctor/presets flows
+  - Keep CLI command signatures/flags unchanged; wire to new modules beneath. `tests/test_cli_doctor.py` covers JSON/text outputs and dependency checks.
+- Downstream patch points
+  - Preserve `frame_compare._COMPAT_EXPORTS` names for the compatibility window and document deprecations in CHANGELOG with migration notes.
+
+### Verification (each sub‑phase)
+
+- Commands
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`
+  - `.venv/bin/ruff check`
+  - `.venv/bin/pyright --warnings`
+  - Optional smoke: `python -m frame_compare --help`
+- Artifacts
+  - Update `docs/DECISIONS.md` with UTC date stamp, brief summary, and quartet outcomes.
+  - Update tracker tables here and in `docs/runner_refactor_checklist.md`.
+
+### Documentation updates (each sub‑phase)
+
+- README.md: Runner API examples (`RunRequest`, `RunResult`, `runner.run`) and import guidance (avoid `src.*`).
+- CHANGELOG.md: Note deprecations/new modules and typed surface updates.
+- `docs/DECISIONS.md`: Session logs and verification output summaries.
+- This file: mark sub‑phase as ☑ when merged; keep notes concise.
+
+### Progress Tracker Rows (Phase 9)
+
+| Phase | Sub-phase | Owner | Status | Notes |
+| --- | --- | --- | --- | --- |
+| 9 | 9.1 Doctor extraction |  | ☑ | `doctor.py` added; CLI routes via `doctor_module`; `core` keeps shims for compatibility. |
+| 9 | 9.2 Config writer + presets |  | ⛔ | Split template/presets; update CLI; keep shims. |
+| 9 | 9.3 Runner unhook (trivial) |  | ⛔ | Preflight/VSPreview/constants/format helpers. |
+| 9 | 9.4 Selection/init helpers |  | ⛔ | Move selection/clip init; shims retained. |
+| 9 | 9.5 Curated exports + typing |  | ⛔ | Public API updates, `_COMPAT_EXPORTS`, stubs/py.typed. |
+| 9 | 9.6 Fixture cleanup plan |  | ⛔ | Design fixtures to replace `_patch_*`. |
+
+---
+
+## Phase 10 – TMDB Workflow Extraction (stub)
+
+Goal: move TMDB workflow out of `core` into `src/frame_compare/tmdb_workflow.py` with stable, typed API for both CLI and runner.
+
+- Scope (future sessions)
+  - Extract `TMDBLookupResult`, `_should_retry_tmdb_error`, `_resolve_tmdb_blocking`, `resolve_tmdb_workflow`, `_prompt_manual_tmdb`, `_prompt_tmdb_confirmation`, `_render_collection_name`.
+  - Provide non‑interactive/unattended paths and prompt hooks; centralize retry/backoff.
+  - Update runner and CLI to import workflow; keep `core` shims for one release.
+- Verification
+  - Same quartet; ensure existing `tests/test_tmdb.py` and runner slow.pics workflow tests keep passing.
+- Docs
+  - README and `docs/README_REFERENCE.md` to reference shared workflow; CHANGELOG notes compatibility window.
+
+### Orchestrator Handoff Protocol (applies to Phases 9–10)
+
+- Reviewer orchestrator prepares: scope, entry points, acceptance tests to watch, and risk notes per sub‑phase.
+- Coding agent executes the sub‑phase within a single session, requests approvals as needed, and updates DECISIONS/tracker entries.
+- Shims/deprecations: keep compatibility for at least one release; document exit criteria to remove shims later.
+
+### Appendix — Function Moves (line anchors)
+
+Planned moves from `src/frame_compare/core.py` with start lines for reviewer navigation:
+
+- To `src/frame_compare/config_writer.py`
+  - `_read_template_text` (src/frame_compare/core.py:157)
+  - `_load_template_config` (src/frame_compare/core.py:164)
+  - `_deep_merge` (src/frame_compare/core.py:171)
+  - `_diff_config` (src/frame_compare/core.py:187)
+  - `_format_toml_value` (src/frame_compare/core.py:203)
+  - `_flatten_overrides` (src/frame_compare/core.py:224)
+  - `_apply_overrides_to_template` (src/frame_compare/core.py:240)
+  - `_render_config_text` (src/frame_compare/core.py:412)
+  - `_write_config_file` (src/frame_compare/core.py:299)
+  - `_present_diff` (src/frame_compare/core.py:324)
+
+- To `src/frame_compare/presets.py`
+  - `PRESETS_DIR` (src/frame_compare/core.py:150)
+  - `_list_preset_paths` (src/frame_compare/core.py:343)
+  - `_load_preset_data` (src/frame_compare/core.py:355)
+  - `PRESET_DESCRIPTIONS` (src/frame_compare/core.py:374)
+
+- To `src/frame_compare/doctor.py`
+  - `DoctorCheck` (src/frame_compare/core.py:384)
+  - `_collect_doctor_checks` (src/frame_compare/core.py:435)
+  - `_emit_doctor_results` (src/frame_compare/core.py:600)
+
+- To `src/frame_compare/metadata.py`
+  - `_parse_audio_track_overrides` (src/frame_compare/core.py:634)
+  - `_first_non_empty` (src/frame_compare/core.py:651)
+  - `_parse_year_hint` (src/frame_compare/core.py:660)
+
+- To `src/frame_compare/layout_utils.py` (or new `runtime_utils.py`)
+  - `_format_seconds` (src/frame_compare/core.py:982)
+  - `_fps_to_float` (src/frame_compare/core.py:1008)
+  - `_fold_sequence` (src/frame_compare/core.py:1026)
+  - `_evaluate_rule_condition` (src/frame_compare/core.py:1059)
+  - `_build_legacy_summary_lines` (src/frame_compare/core.py:1088)
+  - `_format_clock` (src/frame_compare/core.py:1224)
+
+- To `src/frame_compare/alignment_runner.py` (or new `selection.py`)
+  - `_init_clips` (src/frame_compare/core.py:1236)
+  - `_resolve_selection_windows` (src/frame_compare/core.py:1299)
+  - `_log_selection_windows` (src/frame_compare/core.py:1353)
+
+- Keep in `core` (Phase 10 extraction plan to `tmdb_workflow.py`)
+  - `TMDBLookupResult` (src/frame_compare/core.py:671)
+  - `_should_retry_tmdb_error` (src/frame_compare/core.py:681)
+  - `_resolve_tmdb_blocking` (src/frame_compare/core.py:698)
+  - `resolve_tmdb_workflow` (src/frame_compare/core.py:764)
+  - `_prompt_manual_tmdb` (src/frame_compare/core.py:830)
+  - `_prompt_tmdb_confirmation` (src/frame_compare/core.py:853)
+  - `_render_collection_name` (src/frame_compare/core.py:883)
 
 ## Verification Commands Reference
 

@@ -248,6 +248,18 @@ Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 
 ---
 
+## Phase 9 – CLI vs Runner Boundary Hardening (2025‑11‑11 kickoff)
+
+### Phase 9.1 – Doctor module extraction
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| Module creation | ☑ | Added `src/frame_compare/doctor.py` with `DoctorCheck`, `collect_checks`, and `emit_results`, mirroring the prior `core` implementations so external tooling can reuse the checks directly. |
+| CLI rewiring | ☑ | `frame_compare.py` imports the module as `doctor_module`; the doctor subcommand and wizard now call `collect_checks`/`emit_results` while keeping JSON/text output identical. |
+| Core shims/tests | ☑ | `src/frame_compare/core.py` aliases the types and keeps `_collect_doctor_checks` / `_emit_doctor_results` delegating to the new module, which satisfies existing monkeypatches in `tests/test_cli_doctor.py` and runner suites. |
+
+---
+
 ### Usage Notes
 - Update this file at the end of each session: mark status, jot short notes, and mention pending verifications.  
 - When referencing best practices (Click CLI, Pyright typing), cite the relevant doc links as reminders for reviewers.  

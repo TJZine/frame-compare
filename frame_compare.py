@@ -22,6 +22,7 @@ from rich.console import Console as _Console
 import src.frame_compare.alignment_preview as _alignment_preview
 import src.frame_compare.cli_runtime as _cli_runtime
 import src.frame_compare.core as _core
+import src.frame_compare.doctor as doctor_module
 import src.frame_compare.media as _media
 import src.frame_compare.preflight as _preflight
 import src.frame_compare.vspreview as _vspreview
@@ -36,9 +37,7 @@ from src.frame_compare.core import (
     NO_WIZARD_ENV_VAR,
     PRESET_DESCRIPTIONS,
     CLIAppError,
-    _collect_doctor_checks,
     _deep_merge,
-    _emit_doctor_results,
     _list_preset_paths,
     _load_preset_data,
     _load_template_config,
@@ -733,7 +732,7 @@ def doctor(ctx: click.Context, json_mode: bool) -> None:
         config_issue = f"Unable to load config: {exc}"
         config_mapping = asdict(_fresh_app_config())
 
-    checks, notes = _collect_doctor_checks(
+    checks, notes = doctor_module.collect_checks(
         workspace_root,
         config_path,
         config_mapping,
@@ -741,7 +740,7 @@ def doctor(ctx: click.Context, json_mode: bool) -> None:
         config_issue=config_issue,
     )
 
-    _emit_doctor_results(
+    doctor_module.emit_results(
         checks,
         notes,
         json_mode=json_mode,
@@ -792,9 +791,9 @@ def _execute_wizard_session(
         paths_section = cast(Dict[str, Any], final_config.setdefault("paths", {}))
         paths_section["input_dir"] = input_override
 
-    doctor_checks, doctor_notes = _collect_doctor_checks(root, config_path, final_config)
+    doctor_checks, doctor_notes = doctor_module.collect_checks(root, config_path, final_config)
     click.echo("\nDependency check:")
-    _emit_doctor_results(
+    doctor_module.emit_results(
         doctor_checks,
         doctor_notes,
         json_mode=False,
