@@ -300,6 +300,16 @@ _Optional fields:_ Date, Branch, Reviewer, Metrics (LOC touched, tests runtime).
 - [x] Risks noted: Monitor for any latent import cycles if future modules import `selection.py`; `core` shims remain in place so downstream `core._init_clips` patch points stay valid until curated exports ship.
 - [x] Follow-ups for next session: Phase 9.5 curated exports/typing cleanup plus planning for TMDB workflow extraction in Phase 10.
 
+## Session Checklist — 2025-11-11 (Phase 9.5)
+
+- [x] Phase/Sub-phase: `9 / 9.5 Curated exports + typing`
+- [x] Modules touched: `frame_compare.py`, `typings/frame_compare.pyi`, `src/frame_compare/py.typed`, `MANIFEST.in`, `docs/refactor/mod_refactor.md`, `docs/DECISIONS.md`
+- [x] Commands run: `git status -sb`, `.venv/bin/pyright --warnings`, `.venv/bin/ruff check`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`
+- [x] Docs updated? (`runner_refactor_checklist`, `DECISIONS`, `CHANGELOG`?): Updated this tracker plus `docs/DECISIONS.md` (README/CHANGELOG unchanged; CLI surface still stable apart from curated exports).
+- [x] Tests added/updated: None — existing CLI/runner suites already cover doctor, presets, config_writer, and VSPreview helpers.
+- [x] Risks noted: Downstream extensions must import doctor/config_writer/presets through `frame_compare`; continue promoting the compatibility map comments and monitor for reports before removing shims in a future release.
+- [x] Follow-ups for next session: Phase 9.6 fixture cleanup plan and TMDB workflow extraction planning for Phase 10.
+
 ### Phase 2.3 – Docs, Tooling & Risk Log
 
 Goal: capture the tooling outputs, refresh compatibility documentation, and extend the residual-risk notes before moving on.
@@ -425,6 +435,8 @@ Goal: finish modularizing `src/frame_compare/core.py` by extracting remaining CL
 - Rollback
   - Restore runner imports to `core` and leave new exports in place.
 
+**2025-11-11 update (Phase 9.4):** Added `src/frame_compare/selection.py` to house `_extract_clip_fps`, `init_clips`, `resolve_selection_windows`, and `log_selection_windows`. `runner.py` now imports `selection_utils` for clip init and selection logging, while `src.frame_compare.core` exposes shim functions that delegate to the new module so `_COMPAT_EXPORTS` consumers keep working. No new tests were required because the existing runner suites already cover selection window logging and clip initialization, and the CLI behavior (progress output + Rich messages) remains unchanged.
+
 ### Sub‑phase 9.5 – Curated exports + typing surface (single session)
 
 - Scope
@@ -439,6 +451,8 @@ Goal: finish modularizing `src/frame_compare/core.py` by extracting remaining CL
   - CHANGELOG entry drafted (internal: deprecations noted; external: new stable imports).
 - Rollback
   - Limit curated exports to previous set and hold new modules as internal.
+
+**2025-11-11 update (Phase 9.5):** `frame_compare.py` now re-exports the dedicated doctor, config_writer, presets, and VSPreview helpers through `_COMPAT_EXPORTS` so downstream imports no longer reach into `src.frame_compare.core`. `typings/frame_compare.pyi` advertises the curated surface (doctor helpers, VSPreview constants, `RunRequest/RunResult`), and `src/frame_compare/py.typed` plus the `MANIFEST.in` entry mark the package as typed per PEP 561. Tests remain unchanged because the compatibility map still exposes the legacy names, but Pyright now sees the public doctor helpers without falling back to `Any`.
 
 ### Sub‑phase 9.6 – Test and fixture cleanup planning (single session)
 
@@ -489,7 +503,7 @@ Goal: finish modularizing `src/frame_compare/core.py` by extracting remaining CL
 | 9 | 9.2 Config writer + presets |  | ☑ | Extracted config_writer/presets modules, rewired CLI, and left core shims for back-compat. |
 | 9 | 9.3 Runner unhook (trivial) |  | ☑ | Runner now sources metadata helpers + runtime utils outside `core`, uses `preflight` `_abort_if_site_packages`, and reads VSPreview constants directly. |
 | 9 | 9.4 Selection/init helpers |  | ☑ | `selection.py` now owns clip init + selection window logging; runner imports it and `core` shims delegate (2025‑11‑11). |
-| 9 | 9.5 Curated exports + typing |  | ⛔ | Public API updates, `_COMPAT_EXPORTS`, stubs/py.typed. |
+| 9 | 9.5 Curated exports + typing |  | ☑ | `_COMPAT_EXPORTS` now points to the doctor/presets/config_writer modules plus VSPreview helpers, typings expose the doctor helpers, and `py.typed` ships for PEP 561. |
 | 9 | 9.6 Fixture cleanup plan |  | ⛔ | Design fixtures to replace `_patch_*`. |
 
 ---

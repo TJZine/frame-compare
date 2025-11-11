@@ -267,6 +267,30 @@ Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 | Core shims/tests | ☑ | `src/frame_compare/core.py` forwards `_read_template_text`, `_deep_merge`, `_list_preset_paths`, etc., to the new modules so existing monkeypatches and `_COMPAT_EXPORTS` consumers keep working without code changes. |
 | Verification | ☑ | `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` (273 passed, 1 skipped), `.venv/bin/ruff check`, and `.venv/bin/pyright --warnings` captured in `docs/DECISIONS.md` on 2025-11-11. |
 
+### Phase 9.3 – Runner unhook (trivial callers)
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| Metadata/runtime helpers | ☑ | `runner.py` now imports `_abort_if_site_packages` from `src.frame_compare.preflight`, VSPreview constants from `src.frame_compare.vspreview`, the new `runtime_utils` for fps/time/folding helpers, and `metadata.parse_audio_track_overrides` / `first_non_empty`; `core` keeps shims for compatibility. |
+| Behavioral parity | ☑ | Existing runner + CLI suites cover layout JSON, VSPreview prompts, and metadata parsing, so no additional tests were required; verified no change in console/layout output. |
+| Verification | ☑ | Quartet (`git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`) logged in `docs/DECISIONS.md` on 2025-11-11. |
+
+### Phase 9.4 – Selection/init helper extraction
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| Module creation | ☑ | Added `src/frame_compare/selection.py` with `_extract_clip_fps`, `init_clips`, `resolve_selection_windows`, and `log_selection_windows`, guarded with `TYPE_CHECKING` imports to avoid runtime cycles. |
+| Runner wiring | ☑ | `runner.py` imports `selection_utils` for clip init + selection logging; `src.frame_compare.core` exposes shim functions so `_COMPAT_EXPORTS` callers (and tests) continue to work without modification. |
+| Verification | ☑ | `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` (273 passed, 1 skipped), `.venv/bin/ruff check`, `.venv/bin/pyright --warnings` recorded in `docs/DECISIONS.md` (2025-11-11 Phase 9.4 entry). |
+
+### Phase 9.5 – Curated exports + typing
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| Export cleanup | ☑ | `frame_compare._COMPAT_EXPORTS` now points to the dedicated doctor/config_writer/presets modules (plus VSPreview helpers), reducing the need to import `src.frame_compare.core` directly. |
+| Typings & packaging | ☑ | `typings/frame_compare.pyi` exposes the curated doctor helpers, and `src/frame_compare/py.typed` (added to `MANIFEST.in`) marks the package as typed for consumers. |
+| Verification | ☑ | Quartet (`git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`) logged in `docs/DECISIONS.md` on 2025-11-11. |
+
 ---
 
 ### Usage Notes

@@ -8,4 +8,5 @@ prune build
 prune frame_compare.egg-info
 prune .github
 prune .git
+include src/frame_compare/py.typed
 exclude commitlint.config.cjs

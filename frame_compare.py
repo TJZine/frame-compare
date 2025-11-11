@@ -49,11 +49,34 @@ from src.frame_compare.preflight import (
 )
 from src.slowpics import build_shortcut_filename
 
+
+def collect_doctor_checks(
+    workspace_root: Path,
+    config_path: Path,
+    config_mapping: Mapping[str, Any],
+    *,
+    root_issue: Optional[str] = None,
+    config_issue: Optional[str] = None,
+) -> tuple[list[doctor_module.DoctorCheck], list[str]]:
+    """Programmatic entry point mirroring ``doctor_module.collect_checks``."""
+
+    return doctor_module.collect_checks(
+        workspace_root,
+        config_path,
+        config_mapping,
+        root_issue=root_issue,
+        config_issue=config_issue,
+    )
+
+
 # Legacy compatibility surface: enumerate the few core helpers we still expose.
 _COMPAT_EXPORTS: dict[str, object] = {
     "core": _core,
     "cli_runtime": _cli_runtime,
     "vspreview": _vspreview,
+    "doctor": doctor_module,
+    "config_writer": config_writer,
+    "presets": presets_lib,
     "AudioAlignmentJSON": _core.AudioAlignmentJSON,
     "_ClipPlan": _core._ClipPlan,
     "_AudioAlignmentSummary": _core._AudioAlignmentSummary,
@@ -84,9 +107,9 @@ _COMPAT_EXPORTS: dict[str, object] = {
     "subprocess": subprocess,
     "sys": sys,
     "click": click,
-    "_format_vspreview_manual_command": _core._format_vspreview_manual_command,  # Deprecated: use frame_compare.vspreview.format_manual_command
-    "_VSPREVIEW_WINDOWS_INSTALL": _core._VSPREVIEW_WINDOWS_INSTALL,  # Deprecated: use frame_compare.vspreview.VSPREVIEW_WINDOWS_INSTALL
-    "_VSPREVIEW_POSIX_INSTALL": _core._VSPREVIEW_POSIX_INSTALL,  # Deprecated: use frame_compare.vspreview.VSPREVIEW_POSIX_INSTALL
+    "_format_vspreview_manual_command": _vspreview.format_manual_command,  # Deprecated: use frame_compare.vspreview.format_manual_command
+    "_VSPREVIEW_WINDOWS_INSTALL": _vspreview.VSPREVIEW_WINDOWS_INSTALL,  # Deprecated: use frame_compare.vspreview.VSPREVIEW_WINDOWS_INSTALL
+    "_VSPREVIEW_POSIX_INSTALL": _vspreview.VSPREVIEW_POSIX_INSTALL,  # Deprecated: use frame_compare.vspreview.VSPREVIEW_POSIX_INSTALL
     "Console": _Console,
     "CliOutputManager": _cli_runtime.CliOutputManager,
     "NullCliOutputManager": _cli_runtime.NullCliOutputManager,
@@ -103,6 +126,9 @@ _COMPAT_EXPORTS: dict[str, object] = {
     "prompt_slowpics_options": _wizard.prompt_slowpics_options,
     "prompt_audio_alignment_option": _wizard.prompt_audio_alignment_option,
     "prompt_renderer_preference": _wizard.prompt_renderer_preference,
+    "collect_doctor_checks": collect_doctor_checks,
+    "emit_doctor_results": doctor_module.emit_results,
+    "DoctorCheck": doctor_module.DoctorCheck,
 }
 for _name, _value in _COMPAT_EXPORTS.items():
     globals()[_name] = _value

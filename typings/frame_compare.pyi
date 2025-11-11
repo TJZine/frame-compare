@@ -12,6 +12,9 @@ from rich.console import Console as Console
 from src import vs_core as vs_core
 from src.frame_compare import cli_runtime as cli_runtime
 from src.frame_compare import core as core
+from src.frame_compare import config_writer as config_writer
+from src.frame_compare import doctor as doctor
+from src.frame_compare import presets as presets
 from src.frame_compare import vspreview as vspreview
 from src.frame_compare.cli_runtime import (
     AudioAlignmentJSON,
@@ -37,6 +40,7 @@ from src.frame_compare.core import (
     _validate_tonemap_overrides,
     _dt,
 )
+from src.frame_compare.doctor import DoctorCheck as DoctorCheck
 from src.frame_compare.vspreview import (
     VSPREVIEW_POSIX_INSTALL as _VSPREVIEW_POSIX_INSTALL,
     VSPREVIEW_WINDOWS_INSTALL as _VSPREVIEW_WINDOWS_INSTALL,
@@ -68,6 +72,26 @@ def run_cli(
     debug_color: bool = ...,
     tonemap_overrides: Optional[Mapping[str, Any]] = ...,
 ) -> RunResult: ...
+
+
+def collect_doctor_checks(
+    workspace_root: Path,
+    config_path: Path,
+    config_mapping: Mapping[str, Any],
+    *,
+    root_issue: Optional[str] = ...,
+    config_issue: Optional[str] = ...,
+) -> tuple[list[DoctorCheck], list[str]]: ...
+
+
+def emit_doctor_results(
+    checks: list[DoctorCheck],
+    notes: list[str],
+    *,
+    json_mode: bool,
+    workspace_root: Path,
+    config_path: Path,
+) -> None: ...
 
 
 main: Group
