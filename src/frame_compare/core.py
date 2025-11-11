@@ -32,7 +32,6 @@ import click
 import httpx
 from rich import print
 from rich.console import Console  # noqa: F401
-from rich.markup import escape
 from rich.progress import Progress, ProgressColumn  # noqa: F401
 
 from src import audio_alignment as _audio_alignment_module
@@ -52,13 +51,13 @@ import src.frame_compare.metadata as _metadata_module
 import src.frame_compare.planner as _planner_module
 import src.frame_compare.preflight as _preflight_constants
 import src.frame_compare.presets as _presets_module
+import src.frame_compare.selection as _selection_module
 import src.frame_compare.vspreview as _vspreview_module
 import src.frame_compare.wizard as _wizard_module
 import src.screenshot as _screenshot_module
 from src import vs_core
 from src.analysis import (
     SelectionWindowSpec,
-    compute_selection_window,
     export_selection_metadata,  # noqa: F401
     probe_cached_metrics,  # noqa: F401
     select_frames,  # noqa: F401
@@ -68,7 +67,7 @@ from src.analysis import (
 )
 from src.frame_compare.cli_runtime import (
     AudioAlignmentJSON,  # noqa: F401 - re-exported for compatibility
-    CLIAppError,
+    CLIAppError,  # noqa: F401 - re-exported for compatibility
     CliOutputManagerProtocol,
     ClipRecord,  # noqa: F401 - re-exported for compatibility
     JsonTail,  # noqa: F401 - re-exported for compatibility
@@ -867,114 +866,21 @@ def _init_clips(
     *,
     reporter: CliOutputManagerProtocol | None = None,
 ) -> None:
-    """Initialise VapourSynth clips for each plan and capture source metadata."""
-    vs_core.set_ram_limit(runtime_cfg.ram_limit_mb)
-
-    def _indexing_note(filename: str) -> None:
-        label = escape(filename)
-        if reporter is not None:
-            reporter.console.print(f"[dim][CACHE] Indexing {label}…[/]")
-        else:
-            print(f"[CACHE] Indexing {filename}…")
-
-    cache_dir_str = str(cache_dir) if cache_dir is not None else None
-
-    reference_index = next((idx for idx, plan in enumerate(plans) if plan.use_as_reference), None)
-    reference_fps: Optional[Tuple[int, int]] = None
-
-    if reference_index is not None:
-        plan = plans[reference_index]
-        clip = vs_core.init_clip(
-            str(plan.path),
-            trim_start=plan.trim_start,
-            trim_end=plan.trim_end,
-            cache_dir=cache_dir_str,
-            indexing_notifier=_indexing_note,
-        )
-        plan.clip = clip
-        plan.effective_fps = _extract_clip_fps(clip)
-        plan.source_fps = plan.effective_fps
-        plan.source_num_frames = int(getattr(clip, "num_frames", 0) or 0)
-        plan.source_width = int(getattr(clip, "width", 0) or 0)
-        plan.source_height = int(getattr(clip, "height", 0) or 0)
-        reference_fps = plan.effective_fps
-
-    for idx, plan in enumerate(plans):
-        if idx == reference_index and plan.clip is not None:
-            continue
-        fps_override = plan.fps_override
-        if fps_override is None and reference_fps is not None and idx != reference_index:
-            fps_override = reference_fps
-
-        clip = vs_core.init_clip(
-            str(plan.path),
-            trim_start=plan.trim_start,
-            trim_end=plan.trim_end,
-            fps_map=fps_override,
-            cache_dir=cache_dir_str,
-            indexing_notifier=_indexing_note,
-        )
-        plan.clip = clip
-        plan.applied_fps = fps_override
-        plan.effective_fps = _extract_clip_fps(clip)
-        plan.source_fps = plan.effective_fps
-        plan.source_num_frames = int(getattr(clip, "num_frames", 0) or 0)
-        plan.source_width = int(getattr(clip, "width", 0) or 0)
-        plan.source_height = int(getattr(clip, "height", 0) or 0)
+    """Shim retained for compatibility; delegates to selection module."""
+    return _selection_module.init_clips(
+        plans,
+        runtime_cfg,
+        cache_dir,
+        reporter=reporter,
+    )
 
 
 def _resolve_selection_windows(
     plans: Sequence[_ClipPlan],
     analysis_cfg: AnalysisConfig,
 ) -> tuple[List[SelectionWindowSpec], tuple[int, int], bool]:
-    specs: List[SelectionWindowSpec] = []
-    min_total_frames: Optional[int] = None
-    for plan in plans:
-        clip = plan.clip
-        if clip is None:
-            raise CLIAppError("Clip initialisation failed")
-        total_frames = int(getattr(clip, "num_frames", 0))
-        if min_total_frames is None or total_frames < min_total_frames:
-            min_total_frames = total_frames
-        fps_num, fps_den = plan.effective_fps or _extract_clip_fps(clip)
-        fps_val = fps_num / fps_den if fps_den else 0.0
-        try:
-            spec = compute_selection_window(
-                total_frames,
-                fps_val,
-                analysis_cfg.ignore_lead_seconds,
-                analysis_cfg.ignore_trail_seconds,
-                analysis_cfg.min_window_seconds,
-            )
-        except TypeError as exc:
-            detail = (
-                f"Invalid analysis window values for {plan.path.name}: "
-                f"lead={analysis_cfg.ignore_lead_seconds!r} "
-                f"trail={analysis_cfg.ignore_trail_seconds!r} "
-                f"min={analysis_cfg.min_window_seconds!r}"
-            )
-            raise CLIAppError(
-                detail,
-                rich_message=f"[red]{escape(detail)}[/red]",
-            ) from exc
-        specs.append(spec)
-
-    if not specs:
-        return [], (0, 0), False
-
-    start = max(spec.start_frame for spec in specs)
-    end = min(spec.end_frame for spec in specs)
-    collapsed = False
-    if end <= start:
-        collapsed = True
-        fallback_end = min_total_frames or 0
-        start = 0
-        end = fallback_end
-
-    if end <= start:
-        raise CLIAppError("No frames remain after applying ignore window")
-
-    return specs, (start, end), collapsed
+    """Shim retained for compatibility; delegates to selection module."""
+    return _selection_module.resolve_selection_windows(plans, analysis_cfg)
 
 
 def _log_selection_windows(
@@ -985,35 +891,14 @@ def _log_selection_windows(
     collapsed: bool,
     analyze_fps: float,
 ) -> None:
-    """Log per-clip selection windows plus the common intersection summary."""
-    for plan, spec in zip(plans, specs):
-        raw_label = plan.metadata.get("label") or plan.path.name
-        label = escape((raw_label or plan.path.name).strip())
-        print(
-            f"[cyan]{label}[/]: Selecting frames within [start={spec.start_seconds:.2f}s, "
-            f"end={spec.end_seconds:.2f}s] (frames [{spec.start_frame}, {spec.end_frame})) — "
-            f"lead={spec.applied_lead_seconds:.2f}s, trail={spec.applied_trail_seconds:.2f}s"
-        )
-        for warning in spec.warnings:
-            print(f"[yellow]{label}[/]: {warning}")
-
-    start_frame, end_frame = intersection
-    if analyze_fps > 0 and end_frame > start_frame:
-        start_seconds = start_frame / analyze_fps
-        end_seconds = end_frame / analyze_fps
-    else:
-        start_seconds = float(start_frame)
-        end_seconds = float(end_frame)
-
-    print(
-        f"[cyan]Common selection window[/]: frames [{start_frame}, {end_frame}) — "
-        f"seconds [{start_seconds:.2f}s, {end_seconds:.2f}s)"
+    """Shim retained for compatibility; delegates to selection module."""
+    return _selection_module.log_selection_windows(
+        plans,
+        specs,
+        intersection,
+        collapsed=collapsed,
+        analyze_fps=analyze_fps,
     )
-
-    if collapsed:
-        print(
-            "[yellow]Ignore lead/trail settings did not overlap across all sources; using fallback range.[/yellow]"
-        )
 
 
 def _validate_tonemap_overrides(overrides: MutableMapping[str, Any]) -> None:

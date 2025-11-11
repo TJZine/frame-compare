@@ -29,6 +29,7 @@ import src.frame_compare.metadata as metadata_utils
 import src.frame_compare.planner as planner_utils
 import src.frame_compare.preflight as preflight_utils
 import src.frame_compare.runtime_utils as runtime_utils
+import src.frame_compare.selection as selection_utils
 import src.frame_compare.vspreview as vspreview_utils
 import src.report as html_report
 from src import vs_core
@@ -765,7 +766,7 @@ def run(request: RunRequest) -> RunResult:
         )
 
     try:
-        core._init_clips(plans, cfg.runtime, root, reporter=reporter)
+        selection_utils.init_clips(plans, cfg.runtime, root, reporter=reporter)
     except ClipInitError as exc:
         raise CLIAppError(
             f"Failed to open clip: {exc}", rich_message=f"[red]Failed to open clip:[/red] {exc}"
@@ -841,7 +842,7 @@ def run(request: RunRequest) -> RunResult:
     if analyze_clip is None:
         raise CLIAppError("Missing clip for analysis")
 
-    selection_specs, frame_window, windows_collapsed = core._resolve_selection_windows(
+    selection_specs, frame_window, windows_collapsed = selection_utils.resolve_selection_windows(
         plans, cfg.analysis
     )
     analyze_fps_num, analyze_fps_den = plans[analyze_index].effective_fps or core._extract_clip_fps(

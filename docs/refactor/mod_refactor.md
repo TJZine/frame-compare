@@ -290,6 +290,16 @@ _Optional fields:_ Date, Branch, Reviewer, Metrics (LOC touched, tests runtime).
 - [x] Risks noted: New `runtime_utils` import must stay acyclic—verify no modules other than runner rely on it until Phase 9.4 extracts additional helpers; monitor for any callers still expecting `core._parse_*` implementations once shims flip to metadata.
 - [x] Follow-ups for next session: Phase 9.4 selection/init helpers extraction plus early planning for Phase 9.5 curated exports & deprecations.
 
+## Session Checklist — 2025-11-11 (Phase 9.4)
+
+- [x] Phase/Sub-phase: `9 / 9.4 Selection & clip init helpers`
+- [x] Modules touched: `src/frame_compare/selection.py`, `src/frame_compare/runner.py`, `src/frame_compare/core.py`, `docs/refactor/mod_refactor.md`, `docs/DECISIONS.md`
+- [x] Commands run: `git status -sb`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`
+- [x] Docs updated? (`runner_refactor_checklist`, `DECISIONS`, `CHANGELOG`?): Updated this tracker plus `docs/DECISIONS.md` (README/CHANGELOG unchanged because the API surface remains internal pending Phase 9.5 curated exports).
+- [x] Tests added/updated: None (existing runner + CLI suites already cover clip init failures and selection-window logging; moving code preserved behavior byte-for-byte).
+- [x] Risks noted: Monitor for any latent import cycles if future modules import `selection.py`; `core` shims remain in place so downstream `core._init_clips` patch points stay valid until curated exports ship.
+- [x] Follow-ups for next session: Phase 9.5 curated exports/typing cleanup plus planning for TMDB workflow extraction in Phase 10.
+
 ### Phase 2.3 – Docs, Tooling & Risk Log
 
 Goal: capture the tooling outputs, refresh compatibility documentation, and extend the residual-risk notes before moving on.
@@ -399,6 +409,8 @@ Goal: finish modularizing `src/frame_compare/core.py` by extracting remaining CL
 - Rollback
   - Temporary re‑alias the new helpers back through `core` if needed.
 
+**2025-11-11 update (Phase 9.3):** `runner.py` now imports `_abort_if_site_packages` directly from `src.frame_compare.preflight`, reads VSPreview install hints and manual-command helpers from `src.frame_compare.vspreview`, and relies on the new `src/frame_compare/runtime_utils.py` module for FPS math, elapsed/ETA clocks, legacy summary folding, and simple condition evaluation. `_parse_audio_track_overrides`, `first_non_empty`, and `parse_year_hint` live in `src.frame_compare.metadata`, with `core` providing shims so downstream scripts continue to patch the legacy names. No behavior changes were observed in the layout JSON or console output, and the existing runner/CLI suites exercise the updated helpers without modification.
+
 ### Sub‑phase 9.4 – Selection and Clip Initialization helpers (single session)
 
 - Scope
@@ -476,7 +488,7 @@ Goal: finish modularizing `src/frame_compare/core.py` by extracting remaining CL
 | 9 | 9.1 Doctor extraction |  | ☑ | `doctor.py` added; CLI routes via `doctor_module`; `core` keeps shims for compatibility. |
 | 9 | 9.2 Config writer + presets |  | ☑ | Extracted config_writer/presets modules, rewired CLI, and left core shims for back-compat. |
 | 9 | 9.3 Runner unhook (trivial) |  | ☑ | Runner now sources metadata helpers + runtime utils outside `core`, uses `preflight` `_abort_if_site_packages`, and reads VSPreview constants directly. |
-| 9 | 9.4 Selection/init helpers |  | ⛔ | Move selection/clip init; shims retained. |
+| 9 | 9.4 Selection/init helpers |  | ☑ | `selection.py` now owns clip init + selection window logging; runner imports it and `core` shims delegate (2025‑11‑11). |
 | 9 | 9.5 Curated exports + typing |  | ⛔ | Public API updates, `_COMPAT_EXPORTS`, stubs/py.typed. |
 | 9 | 9.6 Fixture cleanup plan |  | ⛔ | Design fixtures to replace `_patch_*`. |
 
