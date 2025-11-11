@@ -48,6 +48,7 @@ import src.frame_compare.alignment_preview as _alignment_preview_module
 import src.frame_compare.alignment_runner as _alignment_runner_module
 import src.frame_compare.config_writer as _config_writer_module
 import src.frame_compare.doctor as _doctor_module
+import src.frame_compare.metadata as _metadata_module
 import src.frame_compare.planner as _planner_module
 import src.frame_compare.preflight as _preflight_constants
 import src.frame_compare.presets as _presets_module
@@ -280,40 +281,18 @@ def _emit_doctor_results(
 
 
 def _parse_audio_track_overrides(entries: Iterable[str]) -> Dict[str, int]:
-    """Parse override entries like "release=2" into a lowercase mapping."""
-    mapping: Dict[str, int] = {}
-    for entry in entries:
-        if "=" not in entry:
-            continue
-        key, value = entry.split("=", 1)
-        key = key.strip().lower()
-        if not key:
-            continue
-        try:
-            mapping[key] = int(value.strip())
-        except ValueError:
-            continue
-    return mapping
+    """Backward-compatible shim delegating to ``src.frame_compare.metadata``."""
+    return _metadata_module.parse_audio_track_overrides(entries)
 
 
 def _first_non_empty(metadata: Sequence[Mapping[str, str]], key: str) -> str:
-    """Return the first truthy value for *key* within *metadata*."""
-    for meta in metadata:
-        value = meta.get(key)
-        if value:
-            return str(value)
-    return ""
+    """Backward-compatible shim delegating to ``src.frame_compare.metadata``."""
+    return _metadata_module.first_non_empty(metadata, key)
 
 
 def _parse_year_hint(value: str) -> Optional[int]:
-    """Parse a year hint string into an integer between 1900 and 2100."""
-    try:
-        year = int(value)
-    except (TypeError, ValueError):
-        return None
-    if 1900 <= year <= 2100:
-        return year
-    return None
+    """Backward-compatible shim delegating to ``src.frame_compare.metadata``."""
+    return _metadata_module.parse_year_hint(value)
 
 
 @dataclass

@@ -258,6 +258,15 @@ Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 | CLI rewiring | ☑ | `frame_compare.py` imports the module as `doctor_module`; the doctor subcommand and wizard now call `collect_checks`/`emit_results` while keeping JSON/text output identical. |
 | Core shims/tests | ☑ | `src/frame_compare/core.py` aliases the types and keeps `_collect_doctor_checks` / `_emit_doctor_results` delegating to the new module, which satisfies existing monkeypatches in `tests/test_cli_doctor.py` and runner suites. |
 
+### Phase 9.2 – Config writer & presets extraction
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| Module creation | ☑ | Introduced `src/frame_compare/config_writer.py` (read/load/render/write helpers) and `src/frame_compare/presets.py` (preset discovery/descriptions) so CLI callers share a single implementation. |
+| CLI rewiring | ☑ | `frame_compare.py` now imports the new modules (`config_writer`, `presets_lib`) for wizard/preset commands; behavior and prompts remain byte-identical. |
+| Core shims/tests | ☑ | `src/frame_compare/core.py` forwards `_read_template_text`, `_deep_merge`, `_list_preset_paths`, etc., to the new modules so existing monkeypatches and `_COMPAT_EXPORTS` consumers keep working without code changes. |
+| Verification | ☑ | `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` (273 passed, 1 skipped), `.venv/bin/ruff check`, and `.venv/bin/pyright --warnings` captured in `docs/DECISIONS.md` on 2025-11-11. |
+
 ---
 
 ### Usage Notes

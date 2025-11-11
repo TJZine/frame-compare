@@ -280,6 +280,16 @@ _Optional fields:_ Date, Branch, Reviewer, Metrics (LOC touched, tests runtime).
 - [x] Risks noted: CLI preset/wizard outputs must remain byte-for-byte identical; shims in `src.frame_compare.core` keep third-party imports stable but we should monitor for missed aliasing before Phase 9.5 curated-export cleanup.
 - [x] Follow-ups for next session: Phase 9.3 unhook (move runner callers to preflight/vspreview constants) and start planning the curated export adjustments slated for Phase 9.5.
 
+## Session Checklist — 2025-11-11 (Phase 9.3)
+
+- [x] Phase/Sub-phase: `9 / 9.3 Runner unhook (trivial callers)`
+- [x] Modules touched: `src/frame_compare/runner.py`, `src/frame_compare/metadata.py`, `src/frame_compare/runtime_utils.py`, `src/frame_compare/core.py`, `docs/refactor/mod_refactor.md`, `docs/DECISIONS.md`
+- [x] Commands run: `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`
+- [x] Docs updated? (`runner_refactor_checklist`, `DECISIONS`, `CHANGELOG`?): Updated this tracker + `docs/DECISIONS.md` (README/CHANGELOG untouched—internal refactor only).
+- [x] Tests added/updated: None (existing runner/CLI suites already cover metadata parsing, VSPreview hints, and layout summaries).
+- [x] Risks noted: New `runtime_utils` import must stay acyclic—verify no modules other than runner rely on it until Phase 9.4 extracts additional helpers; monitor for any callers still expecting `core._parse_*` implementations once shims flip to metadata.
+- [x] Follow-ups for next session: Phase 9.4 selection/init helpers extraction plus early planning for Phase 9.5 curated exports & deprecations.
+
 ### Phase 2.3 – Docs, Tooling & Risk Log
 
 Goal: capture the tooling outputs, refresh compatibility documentation, and extend the residual-risk notes before moving on.
@@ -465,7 +475,7 @@ Goal: finish modularizing `src/frame_compare/core.py` by extracting remaining CL
 | --- | --- | --- | --- | --- |
 | 9 | 9.1 Doctor extraction |  | ☑ | `doctor.py` added; CLI routes via `doctor_module`; `core` keeps shims for compatibility. |
 | 9 | 9.2 Config writer + presets |  | ☑ | Extracted config_writer/presets modules, rewired CLI, and left core shims for back-compat. |
-| 9 | 9.3 Runner unhook (trivial) |  | ⛔ | Preflight/VSPreview/constants/format helpers. |
+| 9 | 9.3 Runner unhook (trivial) |  | ☑ | Runner now sources metadata helpers + runtime utils outside `core`, uses `preflight` `_abort_if_site_packages`, and reads VSPreview constants directly. |
 | 9 | 9.4 Selection/init helpers |  | ⛔ | Move selection/clip init; shims retained. |
 | 9 | 9.5 Curated exports + typing |  | ⛔ | Public API updates, `_COMPAT_EXPORTS`, stubs/py.typed. |
 | 9 | 9.6 Fixture cleanup plan |  | ⛔ | Design fixtures to replace `_patch_*`. |

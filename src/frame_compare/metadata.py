@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Dict, Mapping, MutableSequence, Optional, Sequence, TypeVar
+from typing import Dict, Iterable, Mapping, MutableSequence, Optional, Sequence, TypeVar
 
 from src.datatypes import NamingConfig
 from src.utils import parse_filename_metadata
@@ -119,10 +119,50 @@ def match_override(
     return None
 
 
+def parse_audio_track_overrides(entries: Iterable[str]) -> dict[str, int]:
+    """Parse override entries like ``release=2`` into a lowercase mapping."""
+    mapping: dict[str, int] = {}
+    for entry in entries:
+        if "=" not in entry:
+            continue
+        key, value = entry.split("=", 1)
+        key = key.strip().lower()
+        if not key:
+            continue
+        try:
+            mapping[key] = int(value.strip())
+        except ValueError:
+            continue
+    return mapping
+
+
+def first_non_empty(metadata: Sequence[Mapping[str, str]], key: str) -> str:
+    """Return the first truthy value for ``key`` within ``metadata``."""
+    for meta in metadata:
+        value = meta.get(key)
+        if value:
+            return str(value)
+    return ""
+
+
+def parse_year_hint(value: str) -> int | None:
+    """Parse a year string into an integer between 1900 and 2100."""
+    try:
+        year = int(value)
+    except (TypeError, ValueError):
+        return None
+    if 1900 <= year <= 2100:
+        return year
+    return None
+
+
 __all__ = [
     "OverrideValue",
     "parse_metadata",
     "dedupe_labels",
     "normalise_override_mapping",
     "match_override",
+    "parse_audio_track_overrides",
+    "first_non_empty",
+    "parse_year_hint",
 ]

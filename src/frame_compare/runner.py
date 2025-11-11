@@ -28,6 +28,8 @@ import src.frame_compare.media as media_utils
 import src.frame_compare.metadata as metadata_utils
 import src.frame_compare.planner as planner_utils
 import src.frame_compare.preflight as preflight_utils
+import src.frame_compare.runtime_utils as runtime_utils
+import src.frame_compare.vspreview as vspreview_utils
 import src.report as html_report
 from src import vs_core
 from src.analysis import (
@@ -254,7 +256,7 @@ def run(request: RunRequest) -> RunResult:
         cfg.audio_alignment.offsets_filename,
         purpose="audio_alignment.offsets_filename",
     )
-    core._abort_if_site_packages(
+    preflight_utils._abort_if_site_packages(
         {
             "config": config_location,
             "workspace_root": workspace_root,
@@ -414,7 +416,7 @@ def run(request: RunRequest) -> RunResult:
         "vspreview_offer": None,
     }
 
-    audio_track_override_map = core._parse_audio_track_overrides(audio_track_overrides or [])
+    audio_track_override_map = metadata_utils.parse_audio_track_overrides(audio_track_overrides or [])
 
     vspreview_mode_display = (
         "baseline (0f applied to both clips)"
@@ -438,8 +440,8 @@ def run(request: RunRequest) -> RunResult:
             "script_command": "",
             "missing": {
                 "active": False,
-                "windows_install": core._VSPREVIEW_WINDOWS_INSTALL,
-                "posix_install": core._VSPREVIEW_POSIX_INSTALL,
+                "windows_install": vspreview_utils.VSPREVIEW_WINDOWS_INSTALL,
+                "posix_install": vspreview_utils.VSPREVIEW_POSIX_INSTALL,
                 "command": "",
                 "reason": "",
             },
@@ -498,8 +500,8 @@ def run(request: RunRequest) -> RunResult:
         )
 
     metadata = metadata_utils.parse_metadata(files, cfg.naming)
-    year_hint_raw = core._first_non_empty(metadata, "year")
-    metadata_title = core._first_non_empty(metadata, "title") or core._first_non_empty(metadata, "anime_title")
+    year_hint_raw = metadata_utils.first_non_empty(metadata, "year")
+    metadata_title = metadata_utils.first_non_empty(metadata, "title") or metadata_utils.first_non_empty(metadata, "anime_title")
     tmdb_resolution: TMDBResolution | None = None
     manual_tmdb: tuple[str, str] | None = None
     tmdb_category: Optional[str] = None
@@ -781,7 +783,7 @@ def run(request: RunRequest) -> RunResult:
         width = int(plan.source_width or getattr(plan.clip, "width", 0) or 0)
         height = int(plan.source_height or getattr(plan.clip, "height", 0) or 0)
         fps_tuple = plan.effective_fps or plan.source_fps or (24000, 1001)
-        fps_float = core._fps_to_float(fps_tuple)
+        fps_float = runtime_utils.fps_to_float(fps_tuple)
         duration_seconds = frames_total / fps_float if fps_float > 0 else 0.0
         clip_records.append(
             {
@@ -791,7 +793,7 @@ def run(request: RunRequest) -> RunResult:
                 "fps": fps_float,
                 "frames": frames_total,
                 "duration": duration_seconds,
-                "duration_tc": core._format_seconds(duration_seconds),
+                "duration_tc": runtime_utils.format_seconds(duration_seconds),
                 "path": str(plan.path),
             }
         )
@@ -803,7 +805,7 @@ def run(request: RunRequest) -> RunResult:
                 "fps": fps_float,
                 "frames": frames_total,
                 "duration_s": duration_seconds,
-                "duration_tc": core._format_seconds(duration_seconds),
+                "duration_tc": runtime_utils.format_seconds(duration_seconds),
                 "path": str(plan.path),
             }
         )
@@ -1239,8 +1241,8 @@ def run(request: RunRequest) -> RunResult:
                     reporter.update_progress_state(
                         "analyze_bar",
                         fps=f"{fps_val:7.2f} fps",
-                        eta_tc=core._format_clock(eta_seconds),
-                        elapsed_tc=core._format_clock(elapsed),
+                        eta_tc=runtime_utils.format_clock(eta_seconds),
+                        elapsed_tc=runtime_utils.format_clock(elapsed),
                     )
                     analysis_progress.update(task_id, completed=completed)
 
@@ -1340,8 +1342,8 @@ def run(request: RunRequest) -> RunResult:
     tail = int(tail_raw) if isinstance(tail_raw, (int, float)) else 4
     joiner = str(preview_rule["joiner"] if "joiner" in preview_rule else ", ")
     when_text = str(when_raw) if isinstance(when_raw, str) and when_raw else None
-    fold_enabled = core._evaluate_rule_condition(when_text, flags=reporter.flags)
-    preview_text = core._fold_sequence(frames, head=head, tail=tail, joiner=joiner, enabled=fold_enabled)
+    fold_enabled = runtime_utils.evaluate_rule_condition(when_text, flags=reporter.flags)
+    preview_text = runtime_utils.fold_sequence(frames, head=head, tail=tail, joiner=joiner, enabled=fold_enabled)
 
     json_tail["analysis"]["output_frame_count"] = kept_count
     json_tail["analysis"]["output_frames"] = list(frames)
@@ -1521,8 +1523,8 @@ def run(request: RunRequest) -> RunResult:
                     reporter.update_progress_state(
                         "render_bar",
                         fps=fps_val,
-                        eta_tc=core._format_clock(eta_seconds),
-                        elapsed_tc=core._format_clock(elapsed),
+                        eta_tc=runtime_utils.format_clock(eta_seconds),
+                        elapsed_tc=runtime_utils.format_clock(elapsed),
                         current=min(processed, total_screens),
                         total=total_screens,
                     )
@@ -1588,8 +1590,8 @@ def run(request: RunRequest) -> RunResult:
                     reporter.update_progress_state(
                         "render_bar",
                         fps=fps_val,
-                        eta_tc=core._format_clock(0.0),
-                        elapsed_tc=core._format_clock(elapsed),
+                        eta_tc=runtime_utils.format_clock(0.0),
+                        elapsed_tc=runtime_utils.format_clock(elapsed),
                         current=total_screens,
                         total=total_screens,
                     )
@@ -2047,11 +2049,11 @@ def run(request: RunRequest) -> RunResult:
     tail = int(fold_tail) if isinstance(fold_tail, (int, float)) else 1
     joiner = str(fold_config.get("joiner", ", "))
     fold_when_text = str(fold_when) if isinstance(fold_when, str) and fold_when else None
-    fold_enabled = core._evaluate_rule_condition(fold_when_text, flags=reporter.flags)
+    fold_enabled = runtime_utils.evaluate_rule_condition(fold_when_text, flags=reporter.flags)
 
     warnings_data: List[Dict[str, object]] = []
     if warnings_list:
-        labels_text = core._fold_sequence(warnings_list, head=head, tail=tail, joiner=joiner, enabled=fold_enabled)
+        labels_text = runtime_utils.fold_sequence(warnings_list, head=head, tail=tail, joiner=joiner, enabled=fold_enabled)
         warnings_data.append(
             {
                 "warning.type": "general",
@@ -2081,7 +2083,7 @@ def run(request: RunRequest) -> RunResult:
     )
 
     if not reporter.quiet and (compatibility_required or not has_summary_section):
-        summary_lines = core._build_legacy_summary_lines(layout_data, emit_json_tail=emit_json_tail_flag)
+        summary_lines = runtime_utils.build_legacy_summary_lines(layout_data, emit_json_tail=emit_json_tail_flag)
         reporter.section("Summary")
         for line in summary_lines:
             reporter.line(_color_text(line, "green"))
