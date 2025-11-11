@@ -3,18 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import copy
 import datetime as _dt  # noqa: F401  (re-exported via frame_compare)
-import difflib
 import importlib.util  # noqa: F401  # Legacy tests monkeypatch core.importlib
 import logging
 import math
-import os
-import tempfile
 import threading
 import time
-import tomllib
-from collections.abc import Mapping as MappingABC
 from dataclasses import dataclass
 from pathlib import Path
 from string import Template
@@ -32,7 +26,6 @@ from typing import (
     Protocol,
     Sequence,
     Tuple,
-    cast,
 )
 
 import click
@@ -53,9 +46,11 @@ if TYPE_CHECKING:
 
 import src.frame_compare.alignment_preview as _alignment_preview_module
 import src.frame_compare.alignment_runner as _alignment_runner_module
+import src.frame_compare.config_writer as _config_writer_module
 import src.frame_compare.doctor as _doctor_module
 import src.frame_compare.planner as _planner_module
 import src.frame_compare.preflight as _preflight_constants
+import src.frame_compare.presets as _presets_module
 import src.frame_compare.vspreview as _vspreview_module
 import src.frame_compare.wizard as _wizard_module
 import src.screenshot as _screenshot_module
@@ -88,8 +83,8 @@ from src.frame_compare.cli_runtime import (
     _coerce_str_mapping,
 )
 from src.frame_compare.preflight import (
-    PACKAGED_TEMPLATE_PATH,
-    PROJECT_ROOT,
+    PACKAGED_TEMPLATE_PATH,  # noqa: F401 - compatibility re-export
+    PROJECT_ROOT,  # noqa: F401 - compatibility re-export
     PreflightResult,
     collect_path_diagnostics,
     prepare_preflight,
@@ -143,235 +138,91 @@ _format_vspreview_manual_command = _vspreview_module.format_manual_command
 _VSPREVIEW_WINDOWS_INSTALL = _vspreview_module.VSPREVIEW_WINDOWS_INSTALL
 _VSPREVIEW_POSIX_INSTALL = _vspreview_module.VSPREVIEW_POSIX_INSTALL
 
-PRESETS_DIR: Final[Path] = (PROJECT_ROOT / "presets").resolve()
+PRESETS_DIR: Final[Path] = _presets_module.PRESETS_DIR
 
 _DEFAULT_CONFIG_HELP: Final[str] = (
     "Optional explicit path to config.toml. When omitted, Frame Compare looks for "
     "ROOT/config/config.toml (see --root/FRAME_COMPARE_ROOT)."
 )
 
-def _read_template_text() -> str:
-    """Return the config template text, preserving existing comments."""
 
-    text = PACKAGED_TEMPLATE_PATH.read_text(encoding="utf-8")
-    return text
+def _read_template_text() -> str:
+    """Backward-compatible shim for config_writer.read_template_text()."""
+
+    return _config_writer_module.read_template_text()
 
 
 def _load_template_config() -> Dict[str, Any]:
-    """Load the template configuration into a nested dictionary."""
+    """Backward-compatible shim for config_writer.load_template_config()."""
 
-    text = _read_template_text()
-    return tomllib.loads(text.lstrip("\ufeff"))
+    return _config_writer_module.load_template_config()
 
 
 def _deep_merge(dest: Dict[str, Any], src: Mapping[str, Any]) -> None:
-    """Recursively merge ``src`` into ``dest`` in-place."""
+    """Backward-compatible shim for config_writer._deep_merge()."""
 
-    for key, value in src.items():
-        if isinstance(value, Mapping) and isinstance(dest.get(key), MappingABC):
-            existing = dest[key]
-            if not isinstance(existing, dict):
-                dest[key] = copy.deepcopy(value)
-            else:
-                _deep_merge(existing, value)  # type: ignore[arg-type]
-        elif isinstance(value, Mapping) and key not in dest:
-            dest[key] = copy.deepcopy(value)
-        else:
-            dest[key] = copy.deepcopy(value)
+    _config_writer_module._deep_merge(dest, src)
 
 
 def _diff_config(base: Mapping[str, Any], modified: Mapping[str, Any]) -> Dict[str, Any]:
-    """Return a nested mapping of values that differ between ``base`` and ``modified``."""
+    """Backward-compatible shim for config_writer._diff_config()."""
 
-    diff: Dict[str, Any] = {}
-    for key, value in modified.items():
-        base_value = base.get(key)
-        if isinstance(value, Mapping) and isinstance(base_value, Mapping):
-            nested = _diff_config(base_value, value)
-            if nested:
-                diff[key] = nested
-        else:
-            if key not in base or base_value != value:
-                diff[key] = value
-    return diff
+    return _config_writer_module._diff_config(base, modified)
 
 
 def _format_toml_value(value: Any) -> str:
-    """Format a Python value as TOML literal."""
+    """Backward-compatible shim for config_writer._format_toml_value()."""
 
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        if isinstance(value, float):
-            if not math.isfinite(value):
-                raise ValueError("Non-finite float cannot be serialized to TOML")
-            return format(value, "g")
-        return str(value)
-    if isinstance(value, str):
-        escaped = value.replace("\\", "\\\\").replace("\"", "\\\"")
-        return f'"{escaped}"'
-    if isinstance(value, list):
-        return "[" + ", ".join(_format_toml_value(item) for item in value) + "]"
-    if value is None:
-        return '""'  # Represent None as empty string literal.
-    raise ValueError(f"Unsupported TOML value type: {type(value)!r}")
+    return _config_writer_module._format_toml_value(value)
 
 
 def _flatten_overrides(overrides: Mapping[str, Any]) -> Dict[Tuple[str, ...], Dict[str, Any]]:
-    """Flatten nested override mapping to section tuples -> key/value pairs."""
+    """Backward-compatible shim for config_writer._flatten_overrides()."""
 
-    flattened: Dict[Tuple[str, ...], Dict[str, Any]] = {}
-
-    def _walk(mapping: Mapping[str, Any], prefix: Tuple[str, ...]) -> None:
-        for key, value in mapping.items():
-            if isinstance(value, Mapping):
-                _walk(value, prefix + (key,))
-            else:
-                flattened.setdefault(prefix, {})[key] = value
-
-    _walk(overrides, ())
-    return flattened
+    return _config_writer_module._flatten_overrides(overrides)
 
 
 def _apply_overrides_to_template(template_text: str, overrides: Mapping[str, Any]) -> str:
-    """Return template text with overrides applied without discarding comments."""
+    """Backward-compatible shim for config_writer._apply_overrides_to_template()."""
 
-    if not overrides:
-        return template_text
-
-    lines = template_text.splitlines()
-    section_ranges: Dict[Tuple[str, ...], Tuple[int, int]] = {}
-    current_section: Tuple[str, ...] = ()
-    section_start = 0
-    for index, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped.startswith("[") and stripped.endswith("]") and not stripped.startswith("[["):
-            if current_section not in section_ranges:
-                section_ranges[current_section] = (section_start, index)
-            section_name = stripped[1:-1]
-            current_section = tuple(part.strip() for part in section_name.split(".")) if section_name else ()
-            section_start = index + 1
-    if current_section not in section_ranges:
-        section_ranges[current_section] = (section_start, len(lines))
-
-    flattened = _flatten_overrides(overrides)
-    applied: set[Tuple[Tuple[str, ...], str]] = set()
-    current_section = ()
-    for idx, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped.startswith("[") and stripped.endswith("]") and not stripped.startswith("[["):
-            section_name = stripped[1:-1]
-            current_section = tuple(part.strip() for part in section_name.split(".")) if section_name else ()
-            continue
-        if "=" not in line or stripped.startswith("#"):
-            continue
-        key, _, _ = stripped.partition("=")
-        key = key.strip()
-        overrides_for_section = flattened.get(current_section)
-        if overrides_for_section and key in overrides_for_section:
-            formatted = _format_toml_value(overrides_for_section[key])
-            prefix = line[: line.index(key)]
-            lines[idx] = f"{prefix}{key} = {formatted}"
-            applied.add((current_section, key))
-
-    for section, key_values in flattened.items():
-        for key, value in key_values.items():
-            identifier = (section, key)
-            if identifier in applied:
-                continue
-            start, end = section_ranges.get(section, (len(lines), len(lines)))
-            formatted = _format_toml_value(value)
-            insert_line = f"{key} = {formatted}"
-            lines.insert(end, insert_line)
-            # Update stored ranges for following insertions.
-            section_ranges = {
-                sect: (s, e + 1 if e >= end else e) for sect, (s, e) in section_ranges.items()
-            }
-            applied.add(identifier)
-
-    return "\n".join(lines) + ("\n" if template_text.endswith("\n") else "")
+    return _config_writer_module._apply_overrides_to_template(template_text, overrides)
 
 
 def _write_config_file(path: Path, content: str) -> None:
-    """Atomically write ``content`` to ``path`` with UTF-8 encoding."""
+    """Backward-compatible shim for config_writer.write_config_file()."""
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            "w",
-            encoding="utf-8",
-            delete=False,
-            dir=str(path.parent),
-        ) as handle:
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
-            temp_path = Path(handle.name)
-        os.replace(temp_path, path)
-    finally:
-        if temp_path is not None and temp_path.exists():
-            try:
-                temp_path.unlink()
-            except OSError:
-                pass
+    _config_writer_module.write_config_file(path, content)
 
 
 def _present_diff(original: str, updated: str) -> None:
-    """Print a unified diff between ``original`` and ``updated`` strings."""
+    """Backward-compatible shim for config_writer._present_diff()."""
 
-    diff = list(
-        difflib.unified_diff(
-            original.splitlines(),
-            updated.splitlines(),
-            fromfile="template",
-            tofile="generated",
-            lineterm="",
-        )
-    )
-    if diff:
-        for line in diff:
-            print(line)
-    else:
-        print("No differences from the template.")
+    _config_writer_module._present_diff(original, updated)
 
 
 def _list_preset_paths() -> Dict[str, Path]:
-    """Return available preset names mapped to their file paths."""
+    """Backward-compatible shim for presets.list_preset_paths()."""
 
-    if not PRESETS_DIR.exists():
-        return {}
-    presets: Dict[str, Path] = {}
-    for path in PRESETS_DIR.glob("*.toml"):
-        if path.is_file():
-            presets[path.stem] = path
-    return presets
+    return _presets_module.list_preset_paths()
 
 
 def _load_preset_data(name: str) -> Dict[str, Any]:
-    """Load a preset TOML fragment by name."""
+    """Backward-compatible shim for presets.load_preset_data()."""
 
-    presets = _list_preset_paths()
-    try:
-        preset_path = presets[name]
-    except KeyError as exc:
-        raise click.ClickException(f"Unknown preset '{name}'. Use 'preset list' to inspect options.") from exc
-    try:
-        text = preset_path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise click.ClickException(f"Failed to read preset '{name}': {exc}") from exc
-    try:
-        data = tomllib.loads(text.lstrip("\ufeff"))
-    except tomllib.TOMLDecodeError as exc:
-        raise click.ClickException(f"Preset '{name}' is invalid TOML: {exc}") from exc
-    return cast(Dict[str, Any], data)
+    return _presets_module.load_preset_data(name)
 
 
-PRESET_DESCRIPTIONS: Final[Dict[str, str]] = {
-    "quick-compare": "Minimal runtime defaults with FFmpeg renderer and slow.pics disabled.",
-    "hdr-vs-sdr": "Tonemap-first workflow with stricter verification thresholds.",
-    "batch-qc": "Expanded sampling with slow.pics uploads enabled for review batches.",
-}
+def _render_config_text(
+    template_text: str,
+    template_config: Mapping[str, Any],
+    final_config: Mapping[str, Any],
+) -> str:
+    """Backward-compatible shim for config_writer.render_config_text()."""
+
+    return _config_writer_module.render_config_text(template_text, template_config, final_config)
+
+
+PRESET_DESCRIPTIONS: Final[Dict[str, str]] = _presets_module.PRESET_DESCRIPTIONS
 
 
 DoctorStatus = _doctor_module.DoctorStatus
@@ -388,17 +239,6 @@ def _abort_if_site_packages(path_map: Mapping[str, Path]) -> None:
     """Backward-compatible shim that defers to the preflight helper."""
 
     _preflight_abort_if_site_packages(path_map)
-
-
-def _render_config_text(
-    template_text: str,
-    template_config: Mapping[str, Any],
-    final_config: Mapping[str, Any],
-) -> str:
-    """Generate TOML text for ``final_config`` using the original template layout."""
-
-    overrides = _diff_config(template_config, final_config)
-    return _apply_overrides_to_template(template_text, overrides)
 
 
 def _collect_doctor_checks(

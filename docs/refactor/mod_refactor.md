@@ -270,6 +270,16 @@ _Optional fields:_ Date, Branch, Reviewer, Metrics (LOC touched, tests runtime).
 - [x] Risks noted: Downstream tools that previously patched `frame_compare._resolve_wizard_paths` now hit the alias that forwards to `src.frame_compare.wizard`—monitor for any imports that reach into `src.frame_compare.core` directly.
 - [x] Follow-ups for next session: Begin Phase 3 metadata extraction; audit README once the CLI shim is slimmer to mention the new wizard module boundary if user-facing behavior changes.
 
+## Session Checklist — 2025-11-11 (Phase 9.2)
+
+- [x] Phase/Sub-phase: `9 / 9.2 Config writer + presets`
+- [x] Modules touched: `frame_compare.py`, `src/frame_compare/core.py`, `src/frame_compare/config_writer.py`, `src/frame_compare/presets.py`, `docs/refactor/mod_refactor.md`, `docs/DECISIONS.md`
+- [x] Commands run: `git status -sb`, `.venv/bin/pyright --warnings`, `.venv/bin/ruff check`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`
+- [x] Docs updated? (`runner_refactor_checklist`, `DECISIONS`, `CHANGELOG`?): Updated this tracker + `docs/DECISIONS.md` (no README/CHANGELOG deltas for this internal refactor).
+- [x] Tests added/updated: None—existing CLI wizard/preset suites already cover the flows.
+- [x] Risks noted: CLI preset/wizard outputs must remain byte-for-byte identical; shims in `src.frame_compare.core` keep third-party imports stable but we should monitor for missed aliasing before Phase 9.5 curated-export cleanup.
+- [x] Follow-ups for next session: Phase 9.3 unhook (move runner callers to preflight/vspreview constants) and start planning the curated export adjustments slated for Phase 9.5.
+
 ### Phase 2.3 – Docs, Tooling & Risk Log
 
 Goal: capture the tooling outputs, refresh compatibility documentation, and extend the residual-risk notes before moving on.
@@ -454,7 +464,7 @@ Goal: finish modularizing `src/frame_compare/core.py` by extracting remaining CL
 | Phase | Sub-phase | Owner | Status | Notes |
 | --- | --- | --- | --- | --- |
 | 9 | 9.1 Doctor extraction |  | ☑ | `doctor.py` added; CLI routes via `doctor_module`; `core` keeps shims for compatibility. |
-| 9 | 9.2 Config writer + presets |  | ⛔ | Split template/presets; update CLI; keep shims. |
+| 9 | 9.2 Config writer + presets |  | ☑ | Extracted config_writer/presets modules, rewired CLI, and left core shims for back-compat. |
 | 9 | 9.3 Runner unhook (trivial) |  | ⛔ | Preflight/VSPreview/constants/format helpers. |
 | 9 | 9.4 Selection/init helpers |  | ⛔ | Move selection/clip init; shims retained. |
 | 9 | 9.5 Curated exports + typing |  | ⛔ | Public API updates, `_COMPAT_EXPORTS`, stubs/py.typed. |

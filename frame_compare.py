@@ -21,10 +21,12 @@ from rich.console import Console as _Console
 
 import src.frame_compare.alignment_preview as _alignment_preview
 import src.frame_compare.cli_runtime as _cli_runtime
+import src.frame_compare.config_writer as config_writer
 import src.frame_compare.core as _core
 import src.frame_compare.doctor as doctor_module
 import src.frame_compare.media as _media
 import src.frame_compare.preflight as _preflight
+import src.frame_compare.presets as presets_lib
 import src.frame_compare.vspreview as _vspreview
 import src.frame_compare.wizard as _wizard
 from src import vs_core as _vs_core
@@ -35,16 +37,7 @@ from src.frame_compare.config_helpers import env_flag_enabled as _env_flag_enabl
 from src.frame_compare.core import (
     _DEFAULT_CONFIG_HELP,
     NO_WIZARD_ENV_VAR,
-    PRESET_DESCRIPTIONS,
     CLIAppError,
-    _deep_merge,
-    _list_preset_paths,
-    _load_preset_data,
-    _load_template_config,
-    _present_diff,
-    _read_template_text,
-    _render_config_text,
-    _write_config_file,
 )
 from src.frame_compare.preflight import (
     PreflightResult,
@@ -760,13 +753,13 @@ def _execute_wizard_session(
     """Shared wizard flow used by both the CLI command and auto-launch path."""
 
     root, config_path = _wizard.resolve_wizard_paths(root_override, config_override)
-    template_text = _read_template_text()
-    template_config = _load_template_config()
+    template_text = config_writer.read_template_text()
+    template_config = config_writer.load_template_config()
     final_config = copy.deepcopy(template_config)
 
     if preset_name:
-        preset_data = _load_preset_data(preset_name)
-        _deep_merge(final_config, preset_data)
+        preset_data = presets_lib.load_preset_data(preset_name)
+        config_writer._deep_merge(final_config, preset_data)
 
     interactive = sys.stdin.isatty()
     if not interactive and not preset_name:
@@ -807,8 +800,8 @@ def _execute_wizard_session(
             click.echo("Aborted.")
             raise click.exceptions.Exit(1)
 
-    updated_text = _render_config_text(template_text, template_config, final_config)
-    _present_diff(template_text, updated_text)
+    updated_text = config_writer.render_config_text(template_text, template_config, final_config)
+    config_writer._present_diff(template_text, updated_text)
 
     if interactive:
         if not click.confirm("Write config?", default=True):
@@ -817,7 +810,7 @@ def _execute_wizard_session(
     else:
         click.echo("Writing config without confirmation (non-interactive).")
 
-    _write_config_file(config_path, updated_text)
+    config_writer.write_config_file(config_path, updated_text)
     click.echo(f"Wrote config to {config_path}")
     return root, config_path
 
@@ -857,12 +850,12 @@ def preset(ctx: click.Context) -> None:
 def preset_list() -> None:
     """List available configuration presets."""
 
-    presets = _list_preset_paths()
+    presets = presets_lib.list_preset_paths()
     if not presets:
         click.echo("No presets available.")
         return
     for name in sorted(presets):
-        description = PRESET_DESCRIPTIONS.get(name, "")
+        description = presets_lib.PRESET_DESCRIPTIONS.get(name, "")
         if description:
             click.echo(f"{name}: {description}")
         else:
@@ -881,12 +874,12 @@ def preset_apply(ctx: click.Context, name: str) -> None:
     input_override = params.get("input_dir")
 
     root, config_path = _wizard.resolve_wizard_paths(root_override, config_override)
-    template_text = _read_template_text()
-    template_config = _load_template_config()
+    template_text = config_writer.read_template_text()
+    template_config = config_writer.load_template_config()
     final_config = copy.deepcopy(template_config)
 
-    preset_data = _load_preset_data(name)
-    _deep_merge(final_config, preset_data)
+    preset_data = presets_lib.load_preset_data(name)
+    config_writer._deep_merge(final_config, preset_data)
 
     if input_override:
         try:
@@ -895,8 +888,8 @@ def preset_apply(ctx: click.Context, name: str) -> None:
             raise click.ClickException(str(exc)) from exc
         final_config.setdefault("paths", {})["input_dir"] = input_override
 
-    updated_text = _render_config_text(template_text, template_config, final_config)
-    _present_diff(template_text, updated_text)
+    updated_text = config_writer.render_config_text(template_text, template_config, final_config)
+    config_writer._present_diff(template_text, updated_text)
 
     if sys.stdin.isatty():
         if not click.confirm("Write config?", default=True):
@@ -905,7 +898,7 @@ def preset_apply(ctx: click.Context, name: str) -> None:
     else:
         click.echo("Writing config without confirmation (non-interactive).")
 
-    _write_config_file(config_path, updated_text)
+    config_writer.write_config_file(config_path, updated_text)
     click.echo(f"Wrote config to {config_path}")
 
 
