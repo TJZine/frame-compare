@@ -238,6 +238,14 @@ Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 | Regression coverage | ☑ | Added `tests/runner/test_audio_alignment_cli.py::test_audio_alignment_vspreview_constants_raise_when_missing`, which temporarily clears the exports, reloads the shim, and asserts the import now fails so pytest surfaces the drift immediately. |
 | Verification log | ☑ | Phase 7 entries in `docs/DECISIONS.md` capture the baseline quartet (git status, pytest, Ruff, Pyright) plus the follow-up run after the shim/test changes so reviewers can confirm failures remain isolated to the VSPreview surface. |
 
+## Phase 8 – Documentation & cleanup (2025‑11‑11)
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| Doc refresh | ☑ | README now documents the shared `tests/helpers/runner_env.py` fixtures, the `tests/runner/` split, and the VSPreview guardrails; `CHANGELOG.md`, `docs/refactor/mod_refactor.md`, and this checklist all capture the test-layout rationale plus verification references. |
+| Ruff debt decision | ☑ | Re-ran `.venv/bin/ruff check` as part of the Phase 8 prep quartet (recorded in `docs/DECISIONS.md`), which now reports `All checks passed`, so no import-order/unused-import warnings remain to fix; leave the residual-risk row empty unless the warnings resurface. |
+| Residual risks | ⚠️ | Still rely on reloading `tests.helpers.runner_env` in the VSPreview regression test; document the one-off mutation + cleanup in `docs/DECISIONS.md` Phase 7 entries and revisit if pytest adds a cleaner import-hook. |
+
 ---
 
 ### Usage Notes

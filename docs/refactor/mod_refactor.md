@@ -35,8 +35,8 @@ Keep this DoD visible when reviewing PRs.
 | 6 | 6.1 Shared fixtures |  | ☑ | Helpers/fixtures promoted into `tests/helpers/runner_env.py` plus `tests/conftest.py` so runner suites share `_CliRunnerEnv`, `_patch_*`, and the JSON/VSPreview stubs. |
 | 6 | 6.2 Test split |  | ☑ | Split the monolithic runner suite into `tests/runner/test_cli_entry.py`, `tests/runner/test_audio_alignment_cli.py`, and `tests/runner/test_slowpics_workflow.py`; added `runner`/`runner_vs_core_stub` fixtures and documented the relocation in `docs/runner_refactor_checklist.md`. |
 | 6 | 6.3 Runner test polish |  | ☑ | Added shared `dummy_progress` fixture, VSPreview shim exports, and centralized helpers so Phase 6 suites rely exclusively on the helper module. |
-| 7 | 7.1 VSPreview shim validation |  | ☐ |  |
-| 8 | Docs & cleanup |  | ☐ |  |
+| 7 | 7.1 VSPreview shim validation |  | ☑ | VSPreview shim exports now fail fast via `_require_vspreview_constant`, `tests/runner/test_audio_alignment_cli.py` asserts the error path, and verification details live in the Phase 7 DECISIONS entry. |
+| 8 | Docs & cleanup |  | ☑ | README/CHANGELOG/checklists updated to describe the `tests/runner/` split, shared fixtures, and lint status, with both Phase 8 prep/completion quartets logged in `docs/DECISIONS.md`. |
 
 _Mark status with ☑ when completed. Keep the "Notes" column for future session reminders._
 
@@ -208,10 +208,10 @@ Scope: finalize Phase 6 by ensuring all runner tests rely on the shared fixtur
 
 **Goal:** Harden the VSPreview shims used by CLI/runner tests so regressions in the public compatibility layer immediately surface through pytest/Pyright.
 
-### Sub-phase 7.1 – Shim constant enforcement (planned)
-- [ ] Update `tests/helpers/runner_env.py` so `_VSPREVIEW_WINDOWS_INSTALL` / `_VSPREVIEW_POSIX_INSTALL` raise `RuntimeError` when the frame_compare module no longer exposes the constants (rather than silently providing defaults).
-- [ ] Add or adapt an audio-alignment CLI test that asserts we surface the error when the constants are missing, ensuring behavior coverage alongside the typing guard.
-- [ ] Re-run `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, and `.venv/bin/pyright --warnings`, logging outputs with `date -u +%Y-%m-%d` in `docs/DECISIONS.md`.
+### Sub-phase 7.1 – Shim constant enforcement (2025-11-11)
+- [x] Update `tests/helpers/runner_env.py` so `_VSPREVIEW_WINDOWS_INSTALL` / `_VSPREVIEW_POSIX_INSTALL` raise `RuntimeError` when the frame_compare module no longer exposes the constants (rather than silently providing defaults), matching the `_format_vspreview_manual_command` guard.
+- [x] Add an audio-alignment CLI test (`tests/runner/test_audio_alignment_cli.py::test_audio_alignment_vspreview_constants_raise_when_missing`) that asserts we surface the error when the constants are missing, ensuring behavior coverage alongside the typing guard.
+- [x] Re-run `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, and `.venv/bin/pyright --warnings`, logging outputs with `date -u +%Y-%m-%d` in `docs/DECISIONS.md` (Phase 7 entries capture both the baseline and post-change quartets).
 
 Scope: make VSPreview surface areas fail fast before tackling the broader documentation/cleanup phase.
 
@@ -219,10 +219,10 @@ Scope: make VSPreview surface areas fail fast before tackling the broader docume
 
 ## Phase 8 – Documentation & Cleanup
 
-- [ ] Update `docs/runner_refactor_checklist.md` after each sub-phase (status + notes).
-- [ ] Summarize changes in `docs/DECISIONS.md` with dates and verification steps.
-- [ ] Ensure `CHANGELOG.md` captures user-visible improvements (easier configuration, new modules).
-- [ ] Re-run `ruff`, `pyright`, and targeted `pytest` suites after every major extraction.
+- [x] Update `docs/runner_refactor_checklist.md` after each sub-phase (status + notes). ✅ Added the Phase 8 section summarizing the doc refresh, Ruff decision, and residual risks.
+- [x] Summarize changes in `docs/DECISIONS.md` with dates and verification steps. ✅ Phase 8 prep/completion entries log the 2025-11-11 quartets (`git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`) and cite the pytest fixture doc that backs the shared runner fixtures.
+- [x] Ensure `CHANGELOG.md` captures user-visible improvements (easier configuration, new modules). ✅ Added the Phase 6–7 bullet describing the `tests/runner/` split, shared fixtures, VSPreview guardrails, and verification commands.
+- [x] Re-run `ruff`, `pyright`, and targeted `pytest` suites after every major extraction. ✅ Phase 8 prep re-ran the quartet (all clean) before touching docs; Phase 8 completion re-run recorded below.
 
 ---
 

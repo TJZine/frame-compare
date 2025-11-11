@@ -389,6 +389,12 @@ Sequential Thinking always walks through Scoping → Research & Spike → Implem
 
 Type hints are mandatory—avoid introducing `Any` and guard `Optional[...]`s explicitly to satisfy Pyright.
 
+#### Runner test fixtures & layout
+
+- End-to-end runner suites now live under `tests/runner/` (split into CLI entry/audio alignment/slowpics workflows) and share helpers from `tests/helpers/runner_env.py`.
+- `tests/conftest.py` wires those helpers into pytest fixtures (`cli_runner_env`, `runner_env`, `dummy_progress`, `vspreview_shim`) so every suite benefits from the same Click runner harness, Rich progress stub, and VSPreview shims.
+- The VSPreview guardrails intentionally re-import `frame_compare.vspreview` constants via `_require_vspreview_constant`; if `_VSPREVIEW_WINDOWS_INSTALL` / `_VSPREVIEW_POSIX_INSTALL` ever disappear, pytest fails immediately so we notice the regression before shipping.
+
 ### License
 
 Distributed under the [MIT License](LICENSE). Frame Compare builds upon FFmpeg, VapourSynth, slow.pics, TMDB, GuessIt, Anitopy, and the wider Python ecosystem.
