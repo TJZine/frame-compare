@@ -230,6 +230,14 @@ Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 | VSPreview shim | ☑ | Added typed exports for `_format_vspreview_manual_command` and `_VSPREVIEW_*` constants in `tests/helpers/runner_env.py`, referencing Pyright’s guidance on `Final` constants (source:https://github.com/microsoft/pyright/blob/main/docs/typed-libraries.md@2025-11-10). Audio-alignment tests import the shim to satisfy Pyright without touching production CLI glue. |
 | Helper audit & residual risks | ☑ | Reviewed the new `tests/runner/*` modules; no additional inline helpers were shared across files, so no further moves were needed. Ruff still flags the long-standing import-order issues in `src/frame_compare/*`, and Pyright’s only remaining alerts come from the alignment-runner backlog recorded elsewhere. |
 
+## Phase 7 – VSPreview shim validation (2025‑11‑11)
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| Shim enforcement | ☑ | Updated `tests/helpers/runner_env.py` so `_VSPREVIEW_WINDOWS_INSTALL`/`_VSPREVIEW_POSIX_INSTALL` use accessor helpers that raise `RuntimeError` when `frame_compare` stops exporting the shims, mirroring `_format_vspreview_manual_command` and Pyright’s `Final` constant guidance (source:https://github.com/microsoft/pyright/blob/main/docs/typed-libraries.md@2025-11-11). |
+| Regression coverage | ☑ | Added `tests/runner/test_audio_alignment_cli.py::test_audio_alignment_vspreview_constants_raise_when_missing`, which temporarily clears the exports, reloads the shim, and asserts the import now fails so pytest surfaces the drift immediately. |
+| Verification log | ☑ | Phase 7 entries in `docs/DECISIONS.md` capture the baseline quartet (git status, pytest, Ruff, Pyright) plus the follow-up run after the shim/test changes so reviewers can confirm failures remain isolated to the VSPreview surface. |
+
 ---
 
 ### Usage Notes

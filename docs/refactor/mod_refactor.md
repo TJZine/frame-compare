@@ -34,7 +34,9 @@ Keep this DoD visible when reviewing PRs.
 | 5 | 5.2 Layout utilities |  | ☐ |  |
 | 6 | 6.1 Shared fixtures |  | ☑ | Helpers/fixtures promoted into `tests/helpers/runner_env.py` plus `tests/conftest.py` so runner suites share `_CliRunnerEnv`, `_patch_*`, and the JSON/VSPreview stubs. |
 | 6 | 6.2 Test split |  | ☑ | Split the monolithic runner suite into `tests/runner/test_cli_entry.py`, `tests/runner/test_audio_alignment_cli.py`, and `tests/runner/test_slowpics_workflow.py`; added `runner`/`runner_vs_core_stub` fixtures and documented the relocation in `docs/runner_refactor_checklist.md`. |
-| 7 | Docs & cleanup |  | ☐ |  |
+| 6 | 6.3 Runner test polish |  | ☑ | Added shared `dummy_progress` fixture, VSPreview shim exports, and centralized helpers so Phase 6 suites rely exclusively on the helper module. |
+| 7 | 7.1 VSPreview shim validation |  | ☐ |  |
+| 8 | Docs & cleanup |  | ☐ |  |
 
 _Mark status with ☑ when completed. Keep the "Notes" column for future session reminders._
 
@@ -202,7 +204,20 @@ Scope: finalize Phase 6 by ensuring all runner tests rely on the shared fixtur
 
 ---
 
-## Phase 7 – Documentation & Cleanup
+## Phase 7 – VSPreview shim validation
+
+**Goal:** Harden the VSPreview shims used by CLI/runner tests so regressions in the public compatibility layer immediately surface through pytest/Pyright.
+
+### Sub-phase 7.1 – Shim constant enforcement (planned)
+- [ ] Update `tests/helpers/runner_env.py` so `_VSPREVIEW_WINDOWS_INSTALL` / `_VSPREVIEW_POSIX_INSTALL` raise `RuntimeError` when the frame_compare module no longer exposes the constants (rather than silently providing defaults).
+- [ ] Add or adapt an audio-alignment CLI test that asserts we surface the error when the constants are missing, ensuring behavior coverage alongside the typing guard.
+- [ ] Re-run `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, and `.venv/bin/pyright --warnings`, logging outputs with `date -u +%Y-%m-%d` in `docs/DECISIONS.md`.
+
+Scope: make VSPreview surface areas fail fast before tackling the broader documentation/cleanup phase.
+
+---
+
+## Phase 8 – Documentation & Cleanup
 
 - [ ] Update `docs/runner_refactor_checklist.md` after each sub-phase (status + notes).
 - [ ] Summarize changes in `docs/DECISIONS.md` with dates and verification steps.

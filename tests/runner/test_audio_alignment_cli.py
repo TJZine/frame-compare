@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import importlib
 import json
 import types
 from collections.abc import Iterable, Mapping, Sequence
@@ -50,6 +51,24 @@ from tests.helpers.runner_env import (
 )
 
 pytestmark = pytest.mark.usefixtures("runner_vs_core_stub", "dummy_progress")  # type: ignore[attr-defined]
+
+
+def test_audio_alignment_vspreview_constants_raise_when_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """VSPreview helpers should fail fast when the CLI shim stops exporting constants."""
+
+    import tests.helpers.runner_env as runner_env_module
+
+    monkeypatch.delattr(frame_compare, "_VSPREVIEW_WINDOWS_INSTALL", raising=False)
+    monkeypatch.delattr(frame_compare, "_VSPREVIEW_POSIX_INSTALL", raising=False)
+
+    with pytest.raises(RuntimeError, match="_VSPREVIEW_WINDOWS_INSTALL"):
+        importlib.reload(runner_env_module)
+
+    # Undo the temporary removal so other tests reload the shim with real exports.
+    monkeypatch.undo()
+    importlib.reload(runner_env_module)
 
 
 def test_audio_alignment_manual_vspreview_handles_existing_trim(

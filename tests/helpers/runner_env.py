@@ -546,16 +546,17 @@ def install_vs_core_stub(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_vs_core(monkeypatch, "init_clip", _default_clip)
 
 
-_VSPREVIEW_WINDOWS_INSTALL: Final[str] = getattr(
-    frame_compare,
-    "_VSPREVIEW_WINDOWS_INSTALL",
-    "vspreview.exe",
-)
-_VSPREVIEW_POSIX_INSTALL: Final[str] = getattr(
-    frame_compare,
-    "_VSPREVIEW_POSIX_INSTALL",
-    "vspreview",
-)
+def _require_vspreview_constant(attr_name: str) -> str:
+    """Fetch a VSPreview constant from frame_compare and raise if it is missing."""
+
+    value = getattr(frame_compare, attr_name, None)
+    if value is None:
+        raise RuntimeError(f"{attr_name} is not available on frame_compare")
+    return cast(str, value)
+
+
+_VSPREVIEW_WINDOWS_INSTALL: Final[str] = _require_vspreview_constant("_VSPREVIEW_WINDOWS_INSTALL")
+_VSPREVIEW_POSIX_INSTALL: Final[str] = _require_vspreview_constant("_VSPREVIEW_POSIX_INSTALL")
 
 
 def _format_vspreview_manual_command(script_path: Path) -> str:
