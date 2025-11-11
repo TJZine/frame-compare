@@ -1,5 +1,4 @@
 """Unit tests for the dedicated vspreview module."""
-
 from __future__ import annotations
 
 import datetime as dt
@@ -14,10 +13,10 @@ import frame_compare as _frame_compare  # noqa: F401  # Ensure CLI shim initiali
 from src.frame_compare import alignment_runner as alignment_runner_module
 from src.frame_compare import vspreview as vspreview_module
 from src.frame_compare.cli_runtime import _ClipPlan
-from tests.test_frame_compare import (
-    _RecordingOutputManager,
+from tests.helpers.runner_env import (
     _make_config,
     _make_json_tail_stub,
+    _RecordingOutputManager,
 )
 
 

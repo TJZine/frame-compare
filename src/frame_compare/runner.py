@@ -15,7 +15,7 @@ from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Mapping, Optional, cast
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, cast
 
 from rich.console import Console
 from rich.markup import escape
@@ -63,14 +63,16 @@ from .cli_runtime import (
 )
 from .layout_utils import (
     color_text as _color_text,
+)
+from .layout_utils import (
     format_kv as _format_kv,
+)
+from .layout_utils import (
     normalise_vspreview_mode as _normalise_vspreview_mode,
+)
+from .layout_utils import (
     plan_label as _plan_label,
 )
-
-if TYPE_CHECKING:  # pragma: no cover
-    from src.tmdb import TMDBResolution
-
 
 ReporterFactory = Callable[['RunRequest', Path, Console], CliOutputManagerProtocol]
 

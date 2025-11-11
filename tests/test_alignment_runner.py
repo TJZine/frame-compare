@@ -11,10 +11,7 @@ import frame_compare as _frame_compare  # noqa: F401  # Ensure CLI shim initiali
 from src.audio_alignment import AlignmentMeasurement, AudioStreamInfo
 from src.frame_compare import alignment_runner as alignment_runner_module
 from src.frame_compare.cli_runtime import _ClipPlan
-from tests.test_frame_compare import (
-    _make_config,
-    _RecordingOutputManager,
-)
+from tests.helpers.runner_env import _make_config, _RecordingOutputManager
 
 
 def test_apply_audio_alignment_derives_frames_from_seconds(

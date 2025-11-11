@@ -32,8 +32,8 @@ Keep this DoD visible when reviewing PRs.
 | 4 | 4.2 VSPreview integration |  | ☑ | VSPreview script writer/launcher hardened (new helpers, logging, and telemetry) with dedicated unit tests plus docs/log updates for manual offset reuse. |
 | 5 | 5.1 VSPreview module |  | ☐ |  |
 | 5 | 5.2 Layout utilities |  | ☐ |  |
-| 6 | 6.1 Shared fixtures |  | ☐ |  |
-| 6 | 6.2 Test split |  | ☐ |  |
+| 6 | 6.1 Shared fixtures |  | ☑ | Helpers/fixtures promoted into `tests/helpers/runner_env.py` plus `tests/conftest.py` so runner suites share `_CliRunnerEnv`, `_patch_*`, and the JSON/VSPreview stubs. |
+| 6 | 6.2 Test split |  | ☑ | Split the monolithic runner suite into `tests/runner/test_cli_entry.py`, `tests/runner/test_audio_alignment_cli.py`, and `tests/runner/test_slowpics_workflow.py`; added `runner`/`runner_vs_core_stub` fixtures and documented the relocation in `docs/runner_refactor_checklist.md`. |
 | 7 | Docs & cleanup |  | ☐ |  |
 
 _Mark status with ☑ when completed. Keep the "Notes" column for future session reminders._
@@ -174,19 +174,31 @@ Notes:
 **Goal:** Align tests with new module boundaries.
 
 ### Sub-phase 6.1 – Shared fixtures
-- [ ] Move `_CliRunnerEnv` and patch helpers into `tests/conftest.py` or `tests/helpers/runner.py`.
-- [ ] Ensure helper module exports patch utilities used across new test files.
+- [x] Move `_CliRunnerEnv` and patch helpers into `tests/helpers/runner_env.py` + `tests/conftest.py`.
+- [x] Ensure the helper module exports the patch utilities and pytest fixtures consumed across the runner/VSPreview test suites.
+
+**2025-11-11 update:** Added `tests/helpers/runner_env.py` containing `_CliRunnerEnv`, the `_patch_*` helpers, `_make_config`, JSON/VSPreview stubs, and `tests/conftest.py` fixtures (`cli_runner_env`, `recording_output_manager`, `json_tail_stub`). Updated `tests/test_frame_compare.py`, `tests/test_alignment_runner.py`, and `tests/test_vspreview.py` to import from the helper module so later splits can share the scaffolding without circular imports.
 
 ### Sub-phase 6.2 – Test split
-- [ ] Carve `tests/test_frame_compare.py` into:
+- [x] Carve `tests/test_frame_compare.py` into:
   - `tests/runner/test_cli_entry.py`
-  - `tests/runner/test_slowpics_workflow.py`
   - `tests/runner/test_audio_alignment_cli.py`
-- [ ] Ensure each file imports shared fixtures.
-- [ ] Update `pytest` selection docs (if any) to reference new paths.
+  - `tests/runner/test_slowpics_workflow.py`
+- [x] Ensure each file imports shared fixtures.
+- [x] Update `pytest` selection docs (if any) to reference new paths.
 
 Notes:
 - Update `docs/runner_refactor_checklist.md` each time a split happens.
+
+### Sub-phase 6.3 – Runner test polish
+- [☑] Replace remaining direct `_patch_core_helper("Progress", DummyProgress)` usage in the slow.pics suites with a shared `dummy_progress` fixture exported from `tests/helpers/runner_env.py`.
+- [☑] Provide a typed helper or shim for `_format_vspreview_manual_command` and the `_VSPREVIEW_*` constants so the relocated audio-alignment tests no longer trigger Pyright attribute warnings.
+- [☑] Audit the new `tests/runner/*` modules for lingering inline helpers and move reusable pieces into `tests/helpers/runner_env.py`.
+- [☑] Re-run `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, and `.venv/bin/pyright --warnings`, then log the outputs (with `date -u +%Y-%m-%d`) in `docs/DECISIONS.md`.
+
+**2025-11-11 update:** Added `dummy_progress` as a shared fixture in `tests/conftest.py` so every runner suite automatically patches the Rich `Progress` helper, avoiding per-test `_patch_*` calls. The VSPreview shim (typed constants + `_format_vspreview_manual_command`) now lives in `tests/helpers/runner_env.py`, mirroring Pyright’s constant guidance for `Final` exports (source:https://github.com/microsoft/pyright/blob/main/docs/typed-libraries.md@2025-11-10). Audio-alignment tests import the shim directly, and no additional inline helpers required migration after the audit. Ruff still reports the longstanding import-order debt in `src/frame_compare/*`, and Pyright is back to the known alignment-runner backlog only.
+
+Scope: finalize Phase 6 by ensuring all runner tests rely on the shared fixture module and that the only remaining Ruff/Pyright failures are the known alignment-module backlog, not test-level shims.
 
 ---
 

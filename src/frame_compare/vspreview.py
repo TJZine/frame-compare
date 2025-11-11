@@ -14,10 +14,11 @@ import subprocess
 import sys
 import textwrap
 import uuid
-from collections.abc import Mapping as MappingABC, Sequence
+from collections.abc import Mapping as MappingABC
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, Final, Mapping, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Any, Callable, Dict, Final, List, Mapping, Optional, Tuple, cast
 
 import click
 from rich.text import Text
@@ -26,25 +27,31 @@ from src import audio_alignment
 from src.datatypes import AppConfig, ColorConfig
 from src.frame_compare.layout_utils import (
     normalise_vspreview_mode as _normalise_vspreview_mode,
+)
+from src.frame_compare.layout_utils import (
     plan_label as _plan_label,
 )
 from src.frame_compare.preflight import PROJECT_ROOT, resolve_subdir
 
 if TYPE_CHECKING:  # pragma: no cover
-    from src.frame_compare.cli_runtime import (
-        CliOutputManagerProtocol,
-        JsonTail,
-        _ClipPlan,
-    )
+    from src.audio_alignment import AlignmentMeasurement
     from src.frame_compare.alignment_runner import (
         _AudioAlignmentDisplayData,
         _AudioAlignmentSummary,
         _AudioMeasurementDetail,
     )
+    from src.frame_compare.cli_runtime import (
+        AudioAlignmentJSON,
+        CliOutputManagerProtocol,
+        JsonTail,
+        _ClipPlan,
+    )
 else:  # pragma: no cover - runtime stubs avoid circular import
     CliOutputManagerProtocol = Any  # type: ignore[misc,assignment]
     JsonTail = Dict[str, Any]  # type: ignore[misc,assignment]
     _ClipPlan = Any  # type: ignore[misc,assignment]
+    AlignmentMeasurement = Any  # type: ignore[misc,assignment]
+    AudioAlignmentJSON = Dict[str, Any]  # type: ignore[misc,assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -74,10 +81,15 @@ def _coerce_str_mapping(mapping: Mapping[str, object] | MappingABC[str, object] 
     return _impl(mapping)
 
 
-def _ensure_audio_alignment_block(json_tail: JsonTail) -> dict[str, Any]:
-    from src.frame_compare.cli_runtime import _ensure_audio_alignment_block as _impl
+def _ensure_audio_alignment_block(json_tail: JsonTail) -> "AudioAlignmentJSON":
+    from src.frame_compare.cli_runtime import (
+        AudioAlignmentJSON,
+    )
+    from src.frame_compare.cli_runtime import (
+        _ensure_audio_alignment_block as _impl,
+    )
 
-    return _impl(json_tail)
+    return cast(AudioAlignmentJSON, _impl(json_tail))
 
 
 def format_manual_command(script_path: Path) -> str:
@@ -127,15 +139,9 @@ def _format_overlay_text(
         seconds_value = "0.000"
     suggested_value = f"{suggested_frames:+d}"
     return (
-        "{{label}}: {{suggested}}f (~{{seconds}}s) • "
-        "Preview applied: {{applied}}f ({{status}}) • "
+        f"{label}: {suggested_value}f (~{seconds_value}s) • "
+        f"Preview applied: {applied_value}f ({applied_label}) • "
         "(+ trims target / - pads reference)"
-    ).format(
-        label=label,
-        suggested=suggested_value,
-        seconds=seconds_value,
-        applied=applied_value,
-        status=applied_label,
     )
 
 
@@ -258,12 +264,9 @@ def render_script(
             f"    {label!r}: ({suggested_frames_value}, {suggested_seconds_value!r}),"
         )
 
-    targets_literal = "
-".join(target_lines) if target_lines else ""
-    offsets_literal = "
-".join(offset_lines)
-    suggestions_literal = "
-".join(suggestion_lines)
+    targets_literal = "\n".join(target_lines) if target_lines else ""
+    offsets_literal = "\n".join(offset_lines)
+    suggestions_literal = "\n".join(suggestion_lines)
 
     extra_paths = [
         str(project_root),
@@ -569,10 +572,8 @@ def apply_manual_offsets(
     deltas: Mapping[str, int],
     reporter: CliOutputManagerProtocol,
     json_tail: JsonTail,
-    display: Optional["_AudioAlignmentDisplayData"],
+    display: "_AudioAlignmentDisplayData | None",
 ) -> None:
-    """Apply VSPreview manual deltas to the clip plans, summary, and telemetry."""
-
     reference_plan = summary.reference_plan
     reference_name = reference_plan.path.name
     targets = [plan for plan in plans if plan is not reference_plan]
@@ -586,10 +587,10 @@ def apply_manual_offsets(
 
     manual_trim_starts: Dict[str, int] = {}
     delta_map: Dict[str, int] = {}
-    manual_lines: list[str] = []
+    manual_lines: List[str] = []
 
     desired_map: Dict[str, int] = {}
-    target_adjustments: list[Tuple[_ClipPlan, int, int]] = []
+    target_adjustments: List[Tuple[_ClipPlan, int, int]] = []
 
     unknown_deltas = sorted(set(deltas.keys()) - set(baseline_map.keys()))
     if unknown_deltas:
@@ -627,7 +628,9 @@ def apply_manual_offsets(
         updated_int = int(updated)
         safe_updated = max(0, updated_int)
         plan.trim_start = safe_updated
-        plan.has_trim_start_override = plan.has_trim_start_override or safe_updated != 0
+        plan.has_trim_start_override = (
+            plan.has_trim_start_override or safe_updated != 0
+        )
         manual_trim_starts[key] = updated_int
         applied_delta = updated_int - baseline_value
         delta_map[key] = applied_delta
@@ -639,48 +642,113 @@ def apply_manual_offsets(
         reporter.line(line)
 
     adjusted_reference = desired_map[reference_name] + shift
-    manual_trim_starts[reference_name] = int(adjusted_reference)
-    reporter.line(
-        f"VSPreview reference adjustment: {_plan_label(reference_plan)} "
-        f"baseline {reference_baseline}f → {int(adjusted_reference)}f"
+    adjusted_reference_int = int(adjusted_reference)
+    safe_adjusted_reference = max(0, adjusted_reference_int)
+    reference_plan.trim_start = safe_adjusted_reference
+    reference_plan.has_trim_start_override = (
+        reference_plan.has_trim_start_override
+        or safe_adjusted_reference != int(reference_baseline)
+    )
+    manual_trim_starts[reference_name] = adjusted_reference_int
+    reference_delta = adjusted_reference_int - reference_baseline
+    delta_map[reference_name] = reference_delta
+    if reference_delta != 0:
+        ref_line = (
+            f"VSPreview reference adjustment: {_plan_label(reference_plan)} baseline {reference_baseline}f → {int(adjusted_reference)}f"
+        )
+        manual_lines.append(ref_line)
+        reporter.line(ref_line)
+
+    if display is not None:
+        if display.manual_trim_lines is None:
+            display.manual_trim_lines = []
+        display.manual_trim_lines.extend(manual_lines)
+        display.offset_lines = ["Audio offsets: VSPreview manual offsets applied"]
+        display.offset_lines.extend(display.manual_trim_lines)
+
+    fps_lookup: Dict[str, Tuple[int, int] | None] = {}
+    for plan in plans:
+        fps_lookup[plan.path.name] = (
+            plan.effective_fps or plan.source_fps or plan.fps_override
+        )
+
+    measurement_order = [plan.path.name for plan in plans]
+    plan_lookup: Dict[str, _ClipPlan] = {plan.path.name: plan for plan in plans}
+
+    measurements: List["AlignmentMeasurement"] = []
+    existing_override_map: Dict[str, Dict[str, object]] = {}
+    notes_map: Dict[str, str] = {}
+    for plan in plans:
+        key = plan.path.name
+        frames_value = int(manual_trim_starts.get(key, int(plan.trim_start)))
+        fps_tuple = fps_lookup.get(key)
+        fps_float = _fps_to_float(fps_tuple) if fps_tuple else 0.0
+        seconds_value = float(frames_value) / fps_float if fps_float else 0.0
+        measurements.append(
+            audio_alignment.AlignmentMeasurement(
+                file=plan.path,
+                offset_seconds=seconds_value,
+                frames=frames_value,
+                correlation=1.0,
+                reference_fps=fps_float or None,
+                target_fps=fps_float or None,
+            )
+        )
+        existing_override_map[key] = {"frames": frames_value, "status": "manual"}
+        notes_map[key] = "VSPreview"
+
+    applied_frames, statuses = audio_alignment.update_offsets_file(
+        summary.offsets_path,
+        reference_plan.path.name,
+        tuple(measurements),
+        existing_override_map,
+        notes_map,
     )
 
-    delta_map[reference_name] = int(adjusted_reference) - reference_baseline
-
-    summary.applied_frames = dict(manual_trim_starts)
-    summary.statuses = {name: "manual" for name in manual_trim_starts}
+    summary.applied_frames = dict(applied_frames)
+    summary.statuses = dict(statuses)
     summary.final_adjustments = dict(manual_trim_starts)
     summary.manual_trim_starts = dict(manual_trim_starts)
     summary.suggestion_mode = False
     summary.vspreview_manual_offsets = dict(manual_trim_starts)
     summary.vspreview_manual_deltas = dict(delta_map)
+    summary.measurements = tuple(measurements)
 
-    plan_lookup = {plan.path.name: plan for plan in plans}
-    measurement_order = [plan.path.name for plan in plans]
+    existing_details = (
+        summary.measured_offsets if isinstance(summary.measured_offsets, dict) else {}
+    )
     detail_cls = _measurement_detail_cls()
     detail_map: Dict[str, "_AudioMeasurementDetail"] = {}
-
-    for clip_name, trim_value in manual_trim_starts.items():
-        plan = plan_lookup.get(clip_name)
-        label = _plan_label(plan) if plan is not None else clip_name
-        descriptor = ""
-        fps_tuple = None
-        if plan is not None:
-            fps_tuple = plan.effective_fps or plan.source_fps or plan.fps_override
-        fps_float = _fps_to_float(fps_tuple)
-        delta_frames = delta_map.get(clip_name, 0)
-        seconds_value = (
-            float(delta_frames) / fps_float if fps_float and fps_float > 0 else None
+    for measurement in measurements:
+        clip_name = measurement.file.name
+        prev_detail = (
+            existing_details.get(clip_name)
+            if isinstance(existing_details, dict)
+            else None
         )
+        plan = plan_lookup.get(clip_name)
+        label = (
+            prev_detail.label
+            if prev_detail
+            else (_plan_label(plan) if plan is not None else clip_name)
+        )
+        descriptor = prev_detail.stream if prev_detail else ""
+        seconds_value = float(measurement.offset_seconds) if measurement.offset_seconds is not None else None
+        frames_value = int(measurement.frames) if measurement.frames is not None else None
+        correlation_value = (
+            float(measurement.correlation) if measurement.correlation is not None else None
+        )
+        status_text = summary.statuses.get(clip_name, "manual")
+        note_text = notes_map.get(clip_name)
         detail_map[clip_name] = detail_cls(
             label=label,
             stream=descriptor,
             offset_seconds=seconds_value,
-            frames=delta_frames,
-            correlation=None,
-            status="manual",
+            frames=frames_value,
+            correlation=correlation_value,
+            status=status_text,
             applied=True,
-            note=None,
+            note=note_text,
         )
     summary.measured_offsets = detail_map
 
@@ -692,6 +760,7 @@ def apply_manual_offsets(
     audio_block["vspreview_reference_trim"] = int(
         manual_trim_starts.get(reference_name, int(reference_plan.trim_start))
     )
+
     offsets_sec_block: Dict[str, float] = {}
     offsets_frames_block: Dict[str, int] = {}
     for clip_name, detail in detail_map.items():
@@ -702,12 +771,14 @@ def apply_manual_offsets(
         if detail.frames is not None:
             offsets_frames_block[detail.label] = int(detail.frames)
     audio_block["offsets_sec"] = cast(dict[str, object], dict(offsets_sec_block))
-    audio_block["offsets_frames"] = cast(dict[str, object], dict(offsets_frames_block))
+    audio_block["offsets_frames"] = cast(
+        dict[str, object], dict(offsets_frames_block)
+    )
 
     if display is not None:
         offsets_sec: Dict[str, float] = {}
         offsets_frames: Dict[str, int] = {}
-        offset_lines: list[str] = []
+        offset_lines: List[str] = []
         for clip_name in measurement_order:
             detail = detail_map.get(clip_name)
             if detail is None:
@@ -756,6 +827,7 @@ def apply_manual_offsets(
         }
 
     reporter.line("VSPreview offsets saved to offsets file with manual status.")
+
 
 
 def resolve_command(script_path: Path) -> tuple[list[str] | None, str | None]:

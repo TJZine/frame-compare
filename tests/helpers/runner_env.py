@@ -1,0 +1,567 @@
+from __future__ import annotations
+
+import types
+from collections.abc import Mapping
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, Final, cast
+
+import pytest
+from rich.console import Console
+
+import frame_compare
+import src.audio_alignment as audio_alignment_module
+import src.frame_compare.alignment_preview as alignment_preview_module
+import src.frame_compare.alignment_runner as alignment_runner_module
+import src.frame_compare.cache as cache_module
+import src.frame_compare.config_helpers as config_helpers_module
+import src.frame_compare.core as core_module
+import src.frame_compare.media as media_module
+import src.frame_compare.metadata as metadata_module
+import src.frame_compare.planner as planner_module
+import src.frame_compare.preflight as preflight_module
+import src.frame_compare.vspreview as vspreview_module
+from src.analysis import SelectionDetail
+from src.datatypes import (
+    AnalysisConfig,
+    AppConfig,
+    AudioAlignmentConfig,
+    CLIConfig,
+    ColorConfig,
+    NamingConfig,
+    OverridesConfig,
+    PathsConfig,
+    ReportConfig,
+    RuntimeConfig,
+    ScreenshotConfig,
+    SlowpicsConfig,
+    SourceConfig,
+    TMDBConfig,
+)
+from src.frame_compare import runner as runner_module
+from src.frame_compare.cli_runtime import (
+    AudioAlignmentJSON,
+    CliOutputManager,
+    JsonTail,
+    _AudioAlignmentDisplayData,
+)
+
+__all__ = [
+    "_CliRunnerEnv",
+    "_CliRunnerEnvState",
+    "_RecordingOutputManager",
+    "_make_cli_preflight",
+    "_patch_core_helper",
+    "_patch_runner_module",
+    "_patch_vs_core",
+    "_patch_audio_alignment",
+    "_make_json_tail_stub",
+    "_make_display_stub",
+    "_make_config",
+    "_make_runner_preflight",
+    "DummyProgress",
+    "_expect_mapping",
+    "_patch_load_config",
+    "_selection_details_to_json",
+    "install_vs_core_stub",
+    "install_dummy_progress",
+    "_format_vspreview_manual_command",
+    "_VSPREVIEW_WINDOWS_INSTALL",
+    "_VSPREVIEW_POSIX_INSTALL",
+]
+
+
+@dataclass
+class _CliRunnerEnvState:
+    """Tracked state for the CLI harness."""
+
+    workspace_root: Path
+    media_root: Path
+    config_path: Path
+    cfg: AppConfig
+
+
+def _make_cli_preflight(
+    base_dir: Path,
+    cfg: AppConfig,
+    *,
+    workspace_name: str | None = None,
+) -> core_module.PreflightResult:
+    """Build a PreflightResult anchored in a temporary workspace."""
+
+    workspace_root = base_dir / (workspace_name or "workspace")
+    workspace_root.mkdir(parents=True, exist_ok=True)
+
+    config_dir = workspace_root / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_path = config_dir / "config.toml"
+    if not config_path.exists():
+        config_path.write_text("config = true\n", encoding="utf-8")
+
+    input_dir = Path(cfg.paths.input_dir)
+    media_root = input_dir if input_dir.is_absolute() else workspace_root / input_dir
+    media_root.mkdir(parents=True, exist_ok=True)
+
+    return core_module.PreflightResult(
+        workspace_root=workspace_root,
+        media_root=media_root,
+        config_path=config_path,
+        config=cfg,
+        warnings=(),
+        legacy_config=False,
+    )
+
+
+class _CliRunnerEnv:
+    """Factory that installs deterministic CLI preflight results for tests."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, base_dir: Path) -> None:
+        self._monkeypatch = monkeypatch
+        self._base_dir = base_dir
+        self.cfg = core_module._fresh_app_config()
+        self.state: _CliRunnerEnvState | None = None
+        self.reinstall()
+
+    def reinstall(
+        self,
+        cfg: AppConfig | None = None,
+        *,
+        workspace_name: str | None = None,
+    ) -> _CliRunnerEnvState:
+        """Rebuild the harness with the provided config and workspace label."""
+
+        if cfg is not None:
+            self.cfg = cfg
+        preflight = _make_cli_preflight(
+            self._base_dir,
+            self.cfg,
+            workspace_name=workspace_name,
+        )
+
+        def _fake_preflight(**_kwargs: object) -> core_module.PreflightResult:
+            return preflight
+
+        module_targets = (
+            core_module,
+            frame_compare,
+            runner_module.core,
+            preflight_module,
+            getattr(runner_module, "preflight_utils", None),
+        )
+        for module in module_targets:
+            if module is None:
+                continue
+            for attr_name in ("prepare_preflight", "_prepare_preflight"):
+                self._monkeypatch.setattr(module, attr_name, _fake_preflight, raising=False)
+
+        self.state = _CliRunnerEnvState(
+            workspace_root=preflight.workspace_root,
+            media_root=preflight.media_root,
+            config_path=preflight.config_path,
+            cfg=self.cfg,
+        )
+        return self.state
+
+    @property
+    def workspace_root(self) -> Path:
+        assert self.state is not None
+        return self.state.workspace_root
+
+    @property
+    def media_root(self) -> Path:
+        assert self.state is not None
+        return self.state.media_root
+
+    @property
+    def config_path(self) -> Path:
+        assert self.state is not None
+        return self.state.config_path
+
+
+def _patch_core_helper(monkeypatch: pytest.MonkeyPatch, attr: str, value: object) -> None:
+    """Patch both frame_compare.* and runner_module.core.* helpers simultaneously."""
+
+    alias_map: dict[str, tuple[str, ...]] = {
+        "prepare_preflight": ("_prepare_preflight",),
+        "_prepare_preflight": ("prepare_preflight",),
+        "collect_path_diagnostics": ("_collect_path_diagnostics",),
+        "_collect_path_diagnostics": ("collect_path_diagnostics",),
+        "_parse_metadata": ("parse_metadata",),
+        "parse_metadata": ("_parse_metadata",),
+        "_build_plans": ("build_plans",),
+        "build_plans": ("_build_plans",),
+        "apply_audio_alignment": ("_maybe_apply_audio_alignment",),
+        "_maybe_apply_audio_alignment": ("apply_audio_alignment",),
+        "_apply_vspreview_manual_offsets": ("apply_manual_offsets",),
+        "apply_manual_offsets": ("_apply_vspreview_manual_offsets",),
+        "write_script": ("_write_vspreview_script",),
+        "_write_vspreview_script": ("write_script",),
+        "_persist_script": ("persist_script",),
+        "persist_script": ("_persist_script",),
+        "_resolve_vspreview_command": ("resolve_command",),
+        "resolve_command": ("_resolve_vspreview_command",),
+        "_resolve_vspreview_subdir": ("resolve_subdir",),
+        "resolve_subdir": ("_resolve_vspreview_subdir",),
+        "_launch_vspreview": ("launch",),
+        "launch": ("_launch_vspreview",),
+        "_prompt_offsets": ("prompt_offsets",),
+        "_prompt_vspreview_offsets": ("prompt_offsets",),
+        "prompt_offsets": ("_prompt_offsets", "_prompt_vspreview_offsets"),
+    }
+    attrs_to_patch = (attr,) + alias_map.get(attr, tuple())
+
+    targets = [
+        frame_compare,
+        runner_module.core,
+        alignment_runner_module,
+        vspreview_module,
+        getattr(runner_module, "vspreview", None),
+        preflight_module,
+        media_module,
+        cache_module,
+        alignment_preview_module,
+        config_helpers_module,
+        getattr(runner_module, "preflight_utils", None),
+        getattr(runner_module, "media_utils", None),
+        getattr(runner_module, "cache_utils", None),
+        getattr(runner_module, "alignment_preview_utils", None),
+        getattr(runner_module, "alignment_runner", None),
+        getattr(runner_module, "config_helpers", None),
+        metadata_module,
+        getattr(runner_module, "metadata_utils", None),
+        planner_module,
+        getattr(runner_module, "planner_utils", None),
+    ]
+    for target in targets:
+        if target is None:
+            continue
+        for attr_name in attrs_to_patch:
+            if hasattr(target, attr_name):
+                monkeypatch.setattr(target, attr_name, value, raising=False)
+
+
+def _patch_vs_core(monkeypatch: pytest.MonkeyPatch, attr: str, value: object) -> None:
+    """Patch VapourSynth helpers in both the shim module and the runner module."""
+
+    monkeypatch.setattr(frame_compare.vs_core, attr, value, raising=False)
+    monkeypatch.setattr(runner_module.vs_core, attr, value, raising=False)
+
+
+def _patch_runner_module(monkeypatch: pytest.MonkeyPatch, attr: str, value: object) -> None:
+    """Patch shared runner dependencies exposed at the runner module level."""
+
+    targets = [
+        frame_compare,
+        core_module,
+        runner_module,
+        getattr(runner_module, "preflight_utils", None),
+        getattr(runner_module, "media_utils", None),
+        getattr(runner_module, "cache_utils", None),
+        getattr(runner_module, "alignment_preview_utils", None),
+        getattr(runner_module, "config_helpers", None),
+        alignment_preview_module,
+    ]
+    for target in targets:
+        if target is None:
+            continue
+        if hasattr(target, attr):
+            monkeypatch.setattr(target, attr, value, raising=False)
+
+
+def _patch_audio_alignment(monkeypatch: pytest.MonkeyPatch, attr: str, value: object) -> None:
+    """Patch audio alignment helpers in multiple namespaces simultaneously."""
+
+    target = getattr(frame_compare, "audio_alignment", None)
+    if target is not None:
+        monkeypatch.setattr(target, attr, value, raising=False)
+    monkeypatch.setattr(core_module.audio_alignment, attr, value, raising=False)
+    monkeypatch.setattr(runner_module.core.audio_alignment, attr, value, raising=False)
+    monkeypatch.setattr(alignment_runner_module.audio_alignment, attr, value, raising=False)
+    monkeypatch.setattr(vspreview_module.audio_alignment, attr, value, raising=False)
+    runner_alignment = getattr(runner_module, "alignment_runner", None)
+    if runner_alignment is not None:
+        monkeypatch.setattr(runner_alignment.audio_alignment, attr, value, raising=False)
+    monkeypatch.setattr(audio_alignment_module, attr, value, raising=False)
+
+
+def _make_json_tail_stub() -> JsonTail:
+    """Replicate the full JsonTail payload used by CLI telemetry assertions."""
+
+    audio_block: AudioAlignmentJSON = {
+        "enabled": False,
+        "reference_stream": None,
+        "target_stream": {},
+        "offsets_sec": {},
+        "offsets_frames": {},
+        "preview_paths": [],
+        "confirmed": None,
+        "offsets_filename": "offsets.toml",
+        "manual_trim_summary": [],
+        "suggestion_mode": True,
+        "suggested_frames": {},
+        "manual_trim_starts": {},
+        "use_vspreview": False,
+        "vspreview_manual_offsets": {},
+        "vspreview_manual_deltas": {},
+        "vspreview_reference_trim": None,
+        "vspreview_script": None,
+        "vspreview_invoked": False,
+        "vspreview_exit_code": None,
+    }
+    tail: JsonTail = {
+        "clips": [],
+        "trims": {"per_clip": {}},
+        "window": {},
+        "alignment": {"manual_start_s": 0.0, "manual_end_s": "unchanged"},
+        "audio_alignment": audio_block,
+        "analysis": {},
+        "render": {},
+        "tonemap": {},
+        "overlay": {},
+        "verify": {
+            "count": 0,
+            "threshold": 0.0,
+            "delta": {
+                "max": None,
+                "average": None,
+                "frame": None,
+                "file": None,
+                "auto_selected": None,
+            },
+            "entries": [],
+        },
+        "cache": {},
+        "slowpics": {
+            "enabled": False,
+            "title": {
+                "inputs": {
+                    "resolved_base": None,
+                    "collection_name": None,
+                    "collection_suffix": "",
+                },
+                "final": None,
+            },
+            "url": None,
+            "shortcut_path": None,
+            "deleted_screens_dir": False,
+            "is_public": False,
+            "is_hentai": False,
+            "remove_after_days": 0,
+        },
+        "warnings": [],
+        "workspace": {
+            "root": "",
+            "media_root": "",
+            "config_path": "",
+            "legacy_config": False,
+        },
+        "report": {
+            "enabled": False,
+            "path": None,
+            "output_dir": "report",
+            "open_after_generate": True,
+            "opened": False,
+            "mode": "slider",
+        },
+        "viewer": {
+            "mode": "none",
+            "mode_display": "None",
+            "destination": None,
+            "destination_label": "",
+        },
+        "vspreview_mode": None,
+        "suggested_frames": 0,
+        "suggested_seconds": 0.0,
+        "vspreview_offer": None,
+    }
+    return tail
+
+
+def _make_display_stub() -> _AudioAlignmentDisplayData:
+    """Return a reusable AudioAlignmentDisplayData stub."""
+
+    return _AudioAlignmentDisplayData(
+        stream_lines=[],
+        estimation_line=None,
+        offset_lines=[],
+        offsets_file_line="Offsets file: offsets.toml",
+        json_reference_stream=None,
+        json_target_streams={},
+        json_offsets_sec={},
+        json_offsets_frames={},
+        warnings=[],
+        manual_trim_lines=[],
+    )
+
+
+def _make_config(input_dir: Path) -> AppConfig:
+    """Create an AppConfig with deterministic defaults rooted at input_dir."""
+
+    return AppConfig(
+        analysis=AnalysisConfig(
+            frame_count_dark=1,
+            frame_count_bright=1,
+            frame_count_motion=1,
+            random_frames=0,
+            user_frames=[],
+        ),
+        screenshots=ScreenshotConfig(directory_name="screens", add_frame_info=False),
+        cli=CLIConfig(),
+        color=ColorConfig(),
+        slowpics=SlowpicsConfig(auto_upload=False),
+        tmdb=TMDBConfig(),
+        naming=NamingConfig(always_full_filename=False, prefer_guessit=False),
+        paths=PathsConfig(input_dir=str(input_dir)),
+        runtime=RuntimeConfig(ram_limit_mb=4096),
+        overrides=OverridesConfig(
+            trim={"0": 5},
+            trim_end={"BBB - 01.mkv": -12},
+            change_fps={"BBB - 01.mkv": "set"},
+        ),
+        source=SourceConfig(preferred="lsmas"),
+        audio_alignment=AudioAlignmentConfig(enable=False),
+        report=ReportConfig(enable=False),
+    )
+
+
+def _make_runner_preflight(
+    workspace_root: Path,
+    media_root: Path,
+    cfg: AppConfig,
+) -> core_module.PreflightResult:
+    """Build a PreflightResult pointing at prepared workspace/media roots for runner tests."""
+
+    config_dir = workspace_root / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_path = config_dir / "config.toml"
+    config_path.write_text("config", encoding="utf-8")
+    cfg.paths.input_dir = str(media_root)
+    return core_module.PreflightResult(
+        workspace_root=workspace_root,
+        media_root=media_root,
+        config_path=config_path,
+        config=cfg,
+        warnings=(),
+        legacy_config=False,
+    )
+
+
+class _RecordingOutputManager(CliOutputManager):
+    """CliOutputManager test double that records lines emitted during confirmation flows."""
+
+    def __init__(self) -> None:
+        layout_path = Path(frame_compare.__file__).with_name("cli_layout.v1.json")
+        super().__init__(
+            quiet=False,
+            verbose=False,
+            no_color=True,
+            layout_path=layout_path,
+            console=Console(record=True, force_terminal=False),
+        )
+        self.lines: list[str] = []
+
+    def line(self, text: str) -> None:
+        """Record the rendered line while still delegating to the base implementation."""
+
+        self.lines.append(text)
+        super().line(text)
+
+
+class DummyProgress:
+    """No-op progress helper used to stub Rich progress bars in CLI tests."""
+
+    def __init__(self, *_: object, **__: object) -> None:
+        pass
+
+    def __enter__(self) -> DummyProgress:
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> bool:
+        return False
+
+    def add_task(self, *_: object, **__: object) -> int:
+        return 1
+
+    def update(self, *_: object, **__: object) -> None:
+        return None
+
+
+def install_dummy_progress(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Install DummyProgress as the Progress implementation across runner entry points."""
+
+    _patch_runner_module(monkeypatch, "Progress", DummyProgress)
+    _patch_core_helper(monkeypatch, "Progress", DummyProgress)
+
+
+JsonMapping = Mapping[str, Any]
+
+
+def _expect_mapping(value: object) -> JsonMapping:
+    """Assert the provided value is a mapping and return it with a narrowed type."""
+
+    assert isinstance(value, Mapping)
+    return cast(JsonMapping, value)
+
+
+def _patch_load_config(monkeypatch: pytest.MonkeyPatch, cfg: AppConfig) -> None:
+    """Force both the shim and runner modules to load the provided config instance."""
+
+    monkeypatch.setattr(core_module, "load_config", lambda *_args, **_kwargs: cfg)
+    monkeypatch.setattr(frame_compare, "load_config", lambda *_args, **_kwargs: cfg)
+    monkeypatch.setattr(preflight_module, "load_config", lambda *_args, **_kwargs: cfg)
+    if hasattr(runner_module, "preflight_utils"):
+        monkeypatch.setattr(
+            runner_module.preflight_utils,
+            "load_config",
+            lambda *_args, **_kwargs: cfg,
+            raising=False,
+        )
+
+
+def _selection_details_to_json(
+    details: Mapping[int, SelectionDetail]
+) -> Dict[int, Dict[str, str]]:
+    """Convert SelectionDetail mappings into serializable JSON structures."""
+
+    return {frame: {"label": detail.label} for frame, detail in details.items()}
+
+
+def install_vs_core_stub(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Install a default VapourSynth stub so CLI tests never import the real module."""
+
+    def _noop(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    def _default_clip(*_args: object, **_kwargs: object) -> types.SimpleNamespace:
+        return types.SimpleNamespace(
+            width=1280,
+            height=720,
+            fps_num=24000,
+            fps_den=1001,
+            num_frames=120,
+        )
+
+    _patch_vs_core(monkeypatch, "configure", _noop)
+    _patch_vs_core(monkeypatch, "set_ram_limit", _noop)
+    _patch_vs_core(monkeypatch, "init_clip", _default_clip)
+
+
+_VSPREVIEW_WINDOWS_INSTALL: Final[str] = getattr(
+    frame_compare,
+    "_VSPREVIEW_WINDOWS_INSTALL",
+    "vspreview.exe",
+)
+_VSPREVIEW_POSIX_INSTALL: Final[str] = getattr(
+    frame_compare,
+    "_VSPREVIEW_POSIX_INSTALL",
+    "vspreview",
+)
+
+
+def _format_vspreview_manual_command(script_path: Path) -> str:
+    """Typed shim that returns the VSPreview manual command used by CLI tests."""
+
+    formatter = getattr(frame_compare, "_format_vspreview_manual_command", None)
+    if formatter is None:
+        raise RuntimeError("_format_vspreview_manual_command is not available on frame_compare")
+    return formatter(script_path)

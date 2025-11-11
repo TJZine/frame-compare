@@ -27,9 +27,17 @@ from rich.progress import Progress, ProgressColumn
 from src.cli_layout import CliLayoutError, CliLayoutRenderer, load_cli_layout
 from src.frame_compare.layout_utils import (
     color_text as _color_text,
+)
+from src.frame_compare.layout_utils import (
     format_kv as _format_kv,
+)
+from src.frame_compare.layout_utils import (
     normalise_vspreview_mode as _normalise_vspreview_mode,
+)
+from src.frame_compare.layout_utils import (
     plan_label as _plan_label,
+)
+from src.frame_compare.layout_utils import (
     plan_label_parts as _plan_label_parts,
 )
 
@@ -268,7 +276,7 @@ class CLIAppError(RuntimeError):
         self.rich_message = rich_message or message
 
 
-from src.frame_compare import alignment_runner as _alignment_runner_module  # noqa: E402
+from src.frame_compare import alignment_runner as _alignment_runner_module  # noqa: E402,I001
 
 _AudioAlignmentSummary = _alignment_runner_module._AudioAlignmentSummary
 _AudioMeasurementDetail = _alignment_runner_module._AudioMeasurementDetail

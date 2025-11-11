@@ -24,6 +24,8 @@ from typing import (
     cast,
 )
 
+from src.frame_compare.layout_utils import format_resolution_summary as _format_resolution_summary
+
 from . import vs_core
 from .datatypes import (
     ColorConfig,
@@ -32,7 +34,6 @@ from .datatypes import (
     RGBDither,
     ScreenshotConfig,
 )
-from src.frame_compare.layout_utils import format_resolution_summary as _format_resolution_summary
 
 _INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 

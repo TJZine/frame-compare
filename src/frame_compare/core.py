@@ -57,9 +57,9 @@ if TYPE_CHECKING:
 
 import src.frame_compare.alignment_preview as _alignment_preview_module
 import src.frame_compare.alignment_runner as _alignment_runner_module
-import src.frame_compare.vspreview as _vspreview_module
 import src.frame_compare.planner as _planner_module
 import src.frame_compare.preflight as _preflight_constants
+import src.frame_compare.vspreview as _vspreview_module
 import src.frame_compare.wizard as _wizard_module
 import src.screenshot as _screenshot_module
 from src import vs_core

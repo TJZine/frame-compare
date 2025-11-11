@@ -135,4 +135,4 @@ uv run --with .[preview] -- python -m vspreview path/to/vspreview_*.py
 
 ## Related
 - `README.md` → “Auto-align mismatched sources” quick start for user-facing guidance.
-- `tests/test_frame_compare.py` covers CLI output wiring for alignment JSON and previews.
+- `tests/runner/test_audio_alignment_cli.py` covers CLI output wiring for alignment JSON and previews.

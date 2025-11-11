@@ -208,8 +208,27 @@ Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 | 1. TMDB async parity & retry strategy | ☑ | CLI and runner already share `core.resolve_tmdb_workflow` (async + manual overrides); parity verified with existing tests, no drift detected. |
 | 2. Reporter injection adoption | ☑ | README + regression tests (`tests/test_frame_compare.py::test_runner_reporter_factory_overrides_default`) cover `reporter_factory`/`reporter` usage; quiet mode still swaps in `NullCliOutputManager`. |
 | 3. Quality gates rerun on networked host | ☑ | `npx pyright --warnings`, `.venv/bin/ruff check`, and `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` (258 passed in 7.21 s) recorded in `docs/DECISIONS.md`. |
+| Shared CLI/test fixtures (2025-11-11) | ✅ | Extracted `_CliRunnerEnv`, `_RecordingOutputManager`, JSON tail/display stubs, and `_patch_*` helpers into `tests/helpers/runner_env.py`, exposed `cli_runner_env`/`recording_output_manager`/`json_tail_stub` fixtures in `tests/conftest.py`, and repointed the runner + VSPreview suites to the shared helpers. Ruff/Pyright still flag the known import-order and `_VSPREVIEW_*` Final constant issues outside this change. |
 
 **Exit criteria Phase 6:** TMDB flow hardened (handling async + manual ID), reporter injection documented/tests, and full quality gates executed on a connected machine.
+
+### Phase 6.2 – Runner test split (2025‑11‑11)
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| Test file split | ✅ | `tests/test_frame_compare.py` now only keeps the shim delegation test plus a relocation map. New suites live in:<br>• `tests/runner/test_cli_entry.py` — CLI entry + runner orchestration, depends on `cli_runner_env`, `runner`, `recording_output_manager`, `_patch_*` helpers, and `runner_vs_core_stub`.<br>• `tests/runner/test_audio_alignment_cli.py` — VSPreview/audio-alignment prompts, depends on `cli_runner_env`, `runner`, `recording_output_manager`, `json_tail_stub`, `DummyProgress`, and the shared `_make_*` helpers.<br>• `tests/runner/test_slowpics_workflow.py` — slow.pics/TMDB workflows, depends on `cli_runner_env`, `runner`, `_patch_load_config`, `DummyProgress`, and `runner_vs_core_stub`. |
+| Fixture hygiene | ✅ | Added `runner` + `runner_vs_core_stub` fixtures to `tests/conftest.py`; moved `_expect_mapping`, `_patch_load_config`, `_selection_details_to_json`, `DummyProgress`, and the VSCore stub installer into `tests/helpers/runner_env.py` so all runner suites consume the same helpers. |
+| Residual risks | ⚠️ | Slowpics coverage still patches `_patch_core_helper("Progress", DummyProgress)` directly; Phase 6.3 should replace this with a shared fixture. Audio/TMDB suites still rely on `_selection_details_to_json` and JSON-tail stubs; documented in `docs/DECISIONS.md` as known debt. |
+
+---
+
+### Phase 6.3 – Runner test polish (2025‑11‑11)
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| Dummy progress fixture | ☑ | `tests/helpers/runner_env.py` now exposes `install_dummy_progress`, and `tests/conftest.py` provides a `dummy_progress` fixture consumed by every runner suite via `pytestmark`. Slow.pics/audio workflows no longer call `_patch_*("Progress", DummyProgress)` directly. |
+| VSPreview shim | ☑ | Added typed exports for `_format_vspreview_manual_command` and `_VSPREVIEW_*` constants in `tests/helpers/runner_env.py`, referencing Pyright’s guidance on `Final` constants (source:https://github.com/microsoft/pyright/blob/main/docs/typed-libraries.md@2025-11-10). Audio-alignment tests import the shim to satisfy Pyright without touching production CLI glue. |
+| Helper audit & residual risks | ☑ | Reviewed the new `tests/runner/*` modules; no additional inline helpers were shared across files, so no further moves were needed. Ruff still flags the long-standing import-order issues in `src/frame_compare/*`, and Pyright’s only remaining alerts come from the alignment-runner backlog recorded elsewhere. |
 
 ---
 

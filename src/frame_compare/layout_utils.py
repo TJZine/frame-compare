@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Mapping, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Mapping, Optional
 
 from rich.markup import escape
 

@@ -6,40 +6,34 @@ import logging
 import math
 import sys
 import time
-from collections.abc import Mapping as MappingABC
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
-    Any,
     ContextManager,
     Dict,
     List,
     Mapping,
     Optional,
     Sequence,
-    Tuple,
     cast,
 )
 
 import click
+
 from src import audio_alignment
 from src.datatypes import AppConfig
 from src.frame_compare import vspreview
 from src.frame_compare.cli_runtime import (
     CLIAppError,
     _ClipPlan,
-    _coerce_str_mapping,
     _ensure_audio_alignment_block,
 )
-from src.frame_compare.layout_utils import (
-    normalise_vspreview_mode as _normalise_vspreview_mode,
-    plan_label as _plan_label,
-)
 from src.frame_compare.config_helpers import coerce_config_flag as _coerce_config_flag
+from src.frame_compare.layout_utils import plan_label as _plan_label
 from src.frame_compare.metadata import match_override as _match_override
-from src.frame_compare.preflight import PROJECT_ROOT, resolve_subdir
+from src.frame_compare.preflight import resolve_subdir
 
 if TYPE_CHECKING:
     from src.audio_alignment import AlignmentMeasurement, AudioStreamInfo

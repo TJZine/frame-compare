@@ -51,10 +51,6 @@ from src.frame_compare.alignment_preview import _confirm_alignment_with_screensh
 from src.frame_compare.runner import RunRequest as RunRequest
 from src.frame_compare.runner import RunResult as RunResult
 
-_VSPREVIEW_WINDOWS_INSTALL: str
-_VSPREVIEW_POSIX_INSTALL: str
-
-
 def _format_vspreview_manual_command(script_path: Path) -> str: ...
 
 
