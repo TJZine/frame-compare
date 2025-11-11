@@ -32,6 +32,7 @@ from .datatypes import (
     RGBDither,
     ScreenshotConfig,
 )
+from src.frame_compare.layout_utils import format_resolution_summary as _format_resolution_summary
 
 _INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -157,27 +158,6 @@ def _format_dimensions(width: int, height: int) -> str:
         str: Formatted dimensions string, e.g. "1920 × 1080".
     """
     return f"{int(width)} \u00D7 {int(height)}"
-
-
-def _format_resolution_summary(plan: GeometryPlan) -> str:
-    """
-    Produce a human-readable summary comparing the plan's cropped (original) dimensions with its final dimensions.
-
-    Parameters:
-        plan (GeometryPlan): Geometry plan containing 'cropped_w', 'cropped_h' and 'final' width/height.
-
-    Returns:
-        str: If final dimensions equal the cropped dimensions, returns "`WxH  (native)`". Otherwise returns
-             "`OriginalWxH → TargetWxH  (original → target)`", where sizes are formatted as "W×H".
-    """
-    original_w = int(plan["cropped_w"])
-    original_h = int(plan["cropped_h"])
-    final_w, final_h = plan["final"]
-    original = _format_dimensions(original_w, original_h)
-    target = _format_dimensions(final_w, final_h)
-    if final_w == original_w and final_h == original_h:
-        return f"{original}  (native)"
-    return f"{original} \u2192 {target}  (original \u2192 target)"
 
 
 def _coerce_luminance_values(value: Any) -> List[float]:

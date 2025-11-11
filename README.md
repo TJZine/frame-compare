@@ -196,6 +196,9 @@ print(result.json_tail)
 
 `RunResult` exposes rendered files, selected frame indices, resolved root, optional slow.pics URL, and HTML report path. Setting `quiet=True` swaps in a `NullCliOutputManager` so automation logs stay clean. The regression suite calls `runner.run` directly to keep CLI and programmatic behavior in sync.
 
+> [!NOTE]
+> VSPreview helpers now live under `frame_compare.vspreview` (`render_script`, `persist_script`, `write_script`, `launch`, `apply_manual_offsets`, `prompt_offsets`). Import that module when you need to generate scripts or replay manual offsets outside the CLI.
+
 Already own a configured reporter? Pass it via `RunRequest.reporter` to skip the default Rich wiring. This is handy when you need to mirror output into JSON/metrics without losing the familiar CLI layout:
 
 ```python

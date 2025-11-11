@@ -12,6 +12,7 @@ from rich.console import Console as Console
 from src import vs_core as vs_core
 from src.frame_compare import cli_runtime as cli_runtime
 from src.frame_compare import core as core
+from src.frame_compare import vspreview as vspreview
 from src.frame_compare.cli_runtime import (
     AudioAlignmentJSON,
     JsonTail,
@@ -29,15 +30,20 @@ from src.frame_compare.core import (
     resolve_workspace_root,
     apply_audio_alignment,
     format_alignment_output,
-    _apply_vspreview_manual_offsets,
     _collect_path_diagnostics,
     _fresh_app_config,
-    _launch_vspreview,
-    _maybe_apply_audio_alignment,
+    _maybe_apply_audio_alignment,  # legacy alias for apply_audio_alignment
     _prepare_preflight,
-    _write_vspreview_script,
     _validate_tonemap_overrides,
     _dt,
+)
+from src.frame_compare.vspreview import (
+    VSPREVIEW_POSIX_INSTALL as _VSPREVIEW_POSIX_INSTALL,
+    VSPREVIEW_WINDOWS_INSTALL as _VSPREVIEW_WINDOWS_INSTALL,
+    apply_manual_offsets as _apply_vspreview_manual_offsets,
+    format_manual_command as _format_vspreview_manual_command,
+    launch as _launch_vspreview,
+    write_script as _write_vspreview_script,
 )
 from src.frame_compare.preflight import resolve_subdir
 from src.frame_compare.media import _discover_media
@@ -46,6 +52,7 @@ from src.frame_compare.runner import RunRequest as RunRequest
 from src.frame_compare.runner import RunResult as RunResult
 
 _VSPREVIEW_WINDOWS_INSTALL: str
+_VSPREVIEW_POSIX_INSTALL: str
 
 
 def _format_vspreview_manual_command(script_path: Path) -> str: ...

@@ -24,6 +24,7 @@ import src.frame_compare.cli_runtime as _cli_runtime
 import src.frame_compare.core as _core
 import src.frame_compare.media as _media
 import src.frame_compare.preflight as _preflight
+import src.frame_compare.vspreview as _vspreview
 import src.frame_compare.wizard as _wizard
 from src import vs_core as _vs_core
 from src.config_loader import ConfigError, load_config
@@ -60,6 +61,7 @@ from src.slowpics import build_shortcut_filename
 _COMPAT_EXPORTS: dict[str, object] = {
     "core": _core,
     "cli_runtime": _cli_runtime,
+    "vspreview": _vspreview,
     "AudioAlignmentJSON": _core.AudioAlignmentJSON,
     "_ClipPlan": _core._ClipPlan,
     "_AudioAlignmentSummary": _core._AudioAlignmentSummary,
@@ -69,14 +71,15 @@ _COMPAT_EXPORTS: dict[str, object] = {
     "_confirm_alignment_with_screenshots": _alignment_preview._confirm_alignment_with_screenshots,
     "_discover_media": _media._discover_media,
     "_fresh_app_config": _preflight._fresh_app_config,
-    "_launch_vspreview": _core._launch_vspreview,
+    "_launch_vspreview": _core._launch_vspreview,  # Deprecated: use frame_compare.vspreview.launch
+    # Legacy alias: keep `_maybe_apply_audio_alignment` until downstream scripts migrate.
     "_maybe_apply_audio_alignment": _core._maybe_apply_audio_alignment,
     "apply_audio_alignment": _core.apply_audio_alignment,
     "format_alignment_output": _core.format_alignment_output,
     "prepare_preflight": _preflight.prepare_preflight,
     "_prepare_preflight": _preflight.prepare_preflight,
-    "_apply_vspreview_manual_offsets": _core._apply_vspreview_manual_offsets,
-    "_write_vspreview_script": _core._write_vspreview_script,
+    "_apply_vspreview_manual_offsets": _core._apply_vspreview_manual_offsets,  # Deprecated: use frame_compare.vspreview.apply_manual_offsets
+    "_write_vspreview_script": _core._write_vspreview_script,  # Deprecated: use frame_compare.vspreview.write_script
     "_validate_tonemap_overrides": _core._validate_tonemap_overrides,
     "_resolve_tmdb_blocking": _core._resolve_tmdb_blocking,
     "resolve_tmdb_workflow": _core.resolve_tmdb_workflow,
@@ -89,8 +92,9 @@ _COMPAT_EXPORTS: dict[str, object] = {
     "subprocess": subprocess,
     "sys": sys,
     "click": click,
-    "_format_vspreview_manual_command": _core._format_vspreview_manual_command,
-    "_VSPREVIEW_WINDOWS_INSTALL": _core._VSPREVIEW_WINDOWS_INSTALL,
+    "_format_vspreview_manual_command": _core._format_vspreview_manual_command,  # Deprecated: use frame_compare.vspreview.format_manual_command
+    "_VSPREVIEW_WINDOWS_INSTALL": _core._VSPREVIEW_WINDOWS_INSTALL,  # Deprecated: use frame_compare.vspreview.VSPREVIEW_WINDOWS_INSTALL
+    "_VSPREVIEW_POSIX_INSTALL": _core._VSPREVIEW_POSIX_INSTALL,  # Deprecated: use frame_compare.vspreview.VSPREVIEW_POSIX_INSTALL
     "Console": _Console,
     "CliOutputManager": _cli_runtime.CliOutputManager,
     "NullCliOutputManager": _cli_runtime.NullCliOutputManager,

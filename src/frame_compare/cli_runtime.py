@@ -25,52 +25,16 @@ from rich.markup import escape
 from rich.progress import Progress, ProgressColumn
 
 from src.cli_layout import CliLayoutError, CliLayoutRenderer, load_cli_layout
+from src.frame_compare.layout_utils import (
+    color_text as _color_text,
+    format_kv as _format_kv,
+    normalise_vspreview_mode as _normalise_vspreview_mode,
+    plan_label as _plan_label,
+    plan_label_parts as _plan_label_parts,
+)
 
 if TYPE_CHECKING:  # pragma: no cover
     from src.datatypes import AppConfig
-
-
-def _color_text(text: str, style: Optional[str]) -> str:
-    """
-    Wrap the given text with a Rich style tag if a style is provided.
-
-    Parameters:
-        text (str): The text to style.
-        style (Optional[str]): A Rich style name or markup; if ``None`` or empty, no styling is applied.
-
-    Returns:
-        str: The input text wrapped with Rich style markup (for example ``"[style]text[/]"``) when ``style`` is provided; otherwise
-            the original text.
-    """
-    if style:
-        return f"[{style}]{text}[/]"
-    return text
-
-
-def _format_kv(
-    label: str,
-    value: object,
-    *,
-    label_style: Optional[str] = "dim",
-    value_style: Optional[str] = "bright_white",
-    sep: str = "=",
-) -> str:
-    """
-    Format a label/value pair as a single string with optional Rich styling.
-
-    Parameters:
-        label (str): The left-side label text.
-        value (object): The right-side value; converted to string.
-        label_style (Optional[str]): Rich style name applied to the label, or ``None`` for no styling.
-        value_style (Optional[str]): Rich style name applied to the value, or ``None`` for no styling.
-        sep (str): Separator string placed between label and value.
-
-    Returns:
-        str: A single string containing the styled (or plain) label, the separator, and the styled (or plain) value.
-    """
-    label_text = escape(str(label))
-    value_text = escape(str(value))
-    return f"{_color_text(label_text, label_style)}{sep}{_color_text(value_text, value_style)}"
 
 
 @dataclass
@@ -115,28 +79,6 @@ class _ClipPlan:
     has_trim_end_override: bool = False
     alignment_frames: int = 0
     alignment_status: str = ""
-
-
-def _plan_label(plan: _ClipPlan) -> str:
-    """
-    Determine a user-facing label for a clip plan using metadata fallbacks.
-    """
-
-    metadata = plan.metadata
-    for key in ("label", "title", "anime_title", "file_name"):
-        value = metadata.get(key)
-        if value:
-            text = str(value).strip()
-            if text:
-                return text
-    return plan.path.name
-
-
-def _normalise_vspreview_mode(raw: object) -> str:
-    """Return a canonical VSPreview mode label (``baseline`` or ``seeded``)."""
-
-    text = str(raw or "baseline").strip().lower()
-    return "seeded" if text == "seeded" else "baseline"
 
 
 _OverrideValue = TypeVar("_OverrideValue")
@@ -561,6 +503,7 @@ __all__ = [
     "_format_kv",
     "_normalise_vspreview_mode",
     "_plan_label",
+    "_plan_label_parts",
     "AudioAlignmentJSON",
     "ClipRecord",
     "ReportJSON",

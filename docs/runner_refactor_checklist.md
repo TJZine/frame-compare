@@ -147,9 +147,18 @@ With the CLI shim stable and tooling in place, Phase 4 focuses on finishing th
 | Checklist Item | Status | Notes / Next Steps |
 | --- | --- | --- |
 | Module creation | ✅ | Added `src/frame_compare/alignment_runner.py` owning the alignment dataclasses, measurement helpers, and VSPreview orchestration previously buried in `core.py`. |
-| Runner wiring | ✅ | `runner.py` now calls `alignment_runner.apply_audio_alignment`/`format_alignment_output` directly, while `core.py` merely re-exports the helpers so downstream shims keep working without `_maybe_*` rewrites. |
+| Runner wiring | ✅ | `runner.py` now calls `alignment_runner.apply_audio_alignment`/`format_alignment_output` directly; `core.py` only re-exports them (plus a documented `_maybe_apply_audio_alignment` alias) for downstream compatibility. |
 | Tests | ✅ | Extended `_patch_core_helper` to patch the new module, plus a focused `test_format_alignment_output_updates_json_tail` to ensure the formatter still populates telemetry/warnings. Existing VSPreview tests cover the moved launch helpers. |
 | Docs & residual risks | ✅ | Updated `docs/refactor/mod_refactor.md`, this checklist, and `docs/config_audit.md` to mention the new module; see the 2025‑11‑10 DEC entry for the outstanding VSPreview script-unit tests. |
+
+#### Phase 4.2a – VSPreview helper polish (2025-11-10)
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| Script generation | ✅ | `_write_vspreview_script` now delegates to `vspreview.render_script` + `vspreview.persist_script`, making filesystem writes testable and ensuring workspace-relative paths with unique filenames. |
+| Launcher logging & injection | ✅ | `_launch_vspreview` logs missing executables/`VAPOURSYNTH_PYTHONPATH`, accepts an injected `process_runner`, and reuses a typed `_VSPreviewCommandData` container for layout + warning surfaces. |
+| Manual offset telemetry | ✅ | `_apply_vspreview_manual_offsets` warns about unknown clip names and synchronizes JSON-tail `offsets_frames`/`offsets_sec` with the applied manual trims. |
+| Tests | ✅ | Added `tests/test_alignment_runner.py` covering script persistence, launcher injection/missing-backend paths, and manual-offset JSON tail updates; existing runner tests still exercise the higher-level VSPreview flows. |
 
 ### Phase 4.2 – Regression Parity & Documentation
 
@@ -179,7 +188,18 @@ With the CLI shim stable and tooling in place, Phase 4 focuses on finishing th
 
 ---
 
-## Phase 5 – TMDB & Reporter Hardening (Planning)
+## Phase 5 – VSPreview & Layout Utilities (2025-11-10)
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| VSPreview module extraction | ✅ | Added `src/frame_compare/vspreview.py` exposing `render_script`, `persist_script`, `write_script`, `launch`, `apply_manual_offsets`, and `prompt_offsets`. `alignment_runner.py`/`core.py` alias the helpers with deprecation notes, `_COMPAT_EXPORTS` advertises them, and `typings/frame_compare.pyi` matches the curated surface. |
+| Layout helper consolidation | ✅ | Introduced `src/frame_compare/layout_utils.py` with `color_text`, `format_kv`, `plan_label`, `plan_label_parts`, `normalise_vspreview_mode`, and `format_resolution_summary`; `cli_runtime`, `alignment_runner`, `runner`, and `screenshot` now import from it to keep presentation logic centralized. |
+| Tests & patch helpers | ✅ | Created `tests/test_vspreview.py` for script rendering, persistence failures, launcher injection/missing-backend telemetry, and manual-offset propagation; trimmed `tests/test_alignment_runner.py` to audio-alignment coverage and expanded `_patch_core_helper` so runner/CLI suites patch the new module. |
+| Docs & README | ✅ | Updated README (Programmatic Usage section), `docs/config_audit.md`, `docs/audio_alignment_pipeline.md`, `docs/refactor/mod_refactor.md`, this checklist, and `docs/DECISIONS.md` with the Phase 5 verification commands and new module boundaries. |
+
+**Exit criteria 5:** VSPreview helpers fully owned by the dedicated module, layout helpers centralized, compatibility shims updated, and programmatic surfaces + docs reflecting the split.
+
+## Phase 6 – TMDB & Reporter Hardening (Planning)
 
 Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 
@@ -189,7 +209,7 @@ Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 | 2. Reporter injection adoption | ☑ | README + regression tests (`tests/test_frame_compare.py::test_runner_reporter_factory_overrides_default`) cover `reporter_factory`/`reporter` usage; quiet mode still swaps in `NullCliOutputManager`. |
 | 3. Quality gates rerun on networked host | ☑ | `npx pyright --warnings`, `.venv/bin/ruff check`, and `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` (258 passed in 7.21 s) recorded in `docs/DECISIONS.md`. |
 
-**Exit criteria Phase 5:** TMDB flow hardened (handling async + manual ID), reporter injection documented/tests, and full quality gates executed on a connected machine.
+**Exit criteria Phase 6:** TMDB flow hardened (handling async + manual ID), reporter injection documented/tests, and full quality gates executed on a connected machine.
 
 ---
 

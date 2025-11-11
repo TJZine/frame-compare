@@ -59,11 +59,13 @@ from .cli_runtime import (
     TrimSummary,
     _ClipPlan,
     _coerce_str_mapping,
-    _color_text,
     _ensure_slowpics_block,
-    _format_kv,
-    _normalise_vspreview_mode,
-    _plan_label,
+)
+from .layout_utils import (
+    color_text as _color_text,
+    format_kv as _format_kv,
+    normalise_vspreview_mode as _normalise_vspreview_mode,
+    plan_label as _plan_label,
 )
 
 if TYPE_CHECKING:  # pragma: no cover

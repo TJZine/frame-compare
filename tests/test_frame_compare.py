@@ -23,6 +23,7 @@ import src.frame_compare.media as media_module
 import src.frame_compare.metadata as metadata_module
 import src.frame_compare.planner as planner_module
 import src.frame_compare.preflight as preflight_module
+import src.frame_compare.vspreview as vspreview_module
 from src.analysis import CacheLoadResult, FrameMetricsCacheInfo, SelectionDetail
 from src.audio_alignment import AlignmentMeasurement, AudioStreamInfo
 from src.datatypes import (
@@ -224,6 +225,14 @@ def _patch_core_helper(monkeypatch: pytest.MonkeyPatch, attr: str, value: object
         "build_plans": ("_build_plans",),
         "apply_audio_alignment": ("_maybe_apply_audio_alignment",),
         "_maybe_apply_audio_alignment": ("apply_audio_alignment",),
+        "_launch_vspreview": ("launch",),
+        "launch": ("_launch_vspreview",),
+        "_apply_vspreview_manual_offsets": ("apply_manual_offsets",),
+        "apply_manual_offsets": ("_apply_vspreview_manual_offsets",),
+        "_write_vspreview_script": ("write_script",),
+        "write_script": ("_write_vspreview_script",),
+        "_prompt_vspreview_offsets": ("prompt_offsets",),
+        "prompt_offsets": ("_prompt_vspreview_offsets",),
     }
     attrs_to_patch = (attr,) + alias_map.get(attr, tuple())
 
@@ -231,6 +240,8 @@ def _patch_core_helper(monkeypatch: pytest.MonkeyPatch, attr: str, value: object
         frame_compare,
         runner_module.core,
         alignment_runner_module,
+        vspreview_module,
+        getattr(runner_module, "vspreview", None),
         preflight_module,
         media_module,
         cache_module,
@@ -1170,7 +1181,7 @@ def test_launch_vspreview_generates_script(
     assert "'Target': 0,  # Suggested delta +7f" in script_text
     assert "SUGGESTION_MAP" in script_text
     assert "'Target': (7, 0.0)" in script_text
-    assert 'seconds_value = f"{suggested_seconds:.3f}"' in script_text
+    assert "message = _format_overlay_text" in script_text
     assert (
         "def _format_overlay_text(label, suggested_frames, suggested_seconds, applied_frames):"
         in script_text
@@ -1421,7 +1432,10 @@ def test_launch_vspreview_warns_when_command_missing(
     )
     assert missing_state.get("command") == expected_command
     offer_entry = json_tail.get("vspreview_offer")
-    assert offer_entry == {"vspreview_offered": False, "reason": "vspreview-missing"}
+    assert offer_entry == {
+        "vspreview_offered": False,
+        "reason": "vspreview-executable-missing",
+    }
     console_output = reporter.console.export_text()
     normalized_output = " ".join(console_output.split())
     assert "VSPreview dependency missing" in normalized_output

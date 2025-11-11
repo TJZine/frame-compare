@@ -57,6 +57,7 @@ if TYPE_CHECKING:
 
 import src.frame_compare.alignment_preview as _alignment_preview_module
 import src.frame_compare.alignment_runner as _alignment_runner_module
+import src.frame_compare.vspreview as _vspreview_module
 import src.frame_compare.planner as _planner_module
 import src.frame_compare.preflight as _preflight_constants
 import src.frame_compare.wizard as _wizard_module
@@ -138,13 +139,13 @@ apply_audio_alignment = _alignment_runner_module.apply_audio_alignment
 format_alignment_output = _alignment_runner_module.format_alignment_output
 _maybe_apply_audio_alignment = _alignment_runner_module.apply_audio_alignment
 _resolve_alignment_reference = _alignment_runner_module._resolve_alignment_reference
-_prompt_vspreview_offsets = _alignment_runner_module._prompt_vspreview_offsets
-_apply_vspreview_manual_offsets = _alignment_runner_module._apply_vspreview_manual_offsets
-_write_vspreview_script = _alignment_runner_module._write_vspreview_script
-_launch_vspreview = _alignment_runner_module._launch_vspreview
-_format_vspreview_manual_command = _alignment_runner_module._format_vspreview_manual_command
-_VSPREVIEW_WINDOWS_INSTALL = _alignment_runner_module._VSPREVIEW_WINDOWS_INSTALL
-_VSPREVIEW_POSIX_INSTALL = _alignment_runner_module._VSPREVIEW_POSIX_INSTALL
+_prompt_vspreview_offsets = _vspreview_module.prompt_offsets
+_apply_vspreview_manual_offsets = _vspreview_module.apply_manual_offsets
+_write_vspreview_script = _vspreview_module.write_script
+_launch_vspreview = _vspreview_module.launch
+_format_vspreview_manual_command = _vspreview_module.format_manual_command
+_VSPREVIEW_WINDOWS_INSTALL = _vspreview_module.VSPREVIEW_WINDOWS_INSTALL
+_VSPREVIEW_POSIX_INSTALL = _vspreview_module.VSPREVIEW_POSIX_INSTALL
 
 PRESETS_DIR: Final[Path] = (PROJECT_ROOT / "presets").resolve()
 

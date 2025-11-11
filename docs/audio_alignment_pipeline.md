@@ -117,7 +117,7 @@ uv run --with .[preview] -- python -m vspreview path/to/vspreview_*.py
 ### Workflow overview
 
 1. After audio alignment completes (or is skipped), the CLI summarises the measured offsets and any existing manual trims, then offers VSPreview guidance instead of auto-applying changes. 【F:frame_compare.py†L2056-L2138】【F:frame_compare.py†L2242-L2281】
-2. `_write_vspreview_script` mirrors the comparison pipeline, seeds the suggested offsets into an `OFFSET_MAP`, and stores the script beneath the workspace for traceability. 【F:frame_compare.py†L2705-L3143】
+2. `vspreview.write_script` mirrors the comparison pipeline, seeds the suggested offsets into an `OFFSET_MAP`, and stores the script beneath the workspace for traceability. 【F:src/frame_compare/vspreview.py†L138-L364】
 3. When VSPreview is available, Frame Compare spawns it with inherited VapourSynth paths and waits for completion. Offsets are requested afterwards using `click.prompt`, and the resulting deltas adjust the clip plans plus the offsets TOML with `status="manual"` and a `note = "VSPreview"`. 【F:frame_compare.py†L3146-L3183】【F:frame_compare.py†L2914-L3083】
 
 ### Headless and fallback behaviour

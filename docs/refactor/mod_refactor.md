@@ -29,7 +29,7 @@ Keep this DoD visible when reviewing PRs.
 | 3 | 3.1 Metadata utilities |  | ☑ | Created `src/frame_compare/metadata.py`, rewired `runner.py`/tests to import it directly, and updated docs/QA logs. |
 | 3 | 3.2 Plan builder |  | ☑ | Extracted `build_plans` into `src/frame_compare/planner.py`, rewired `runner.py`, and added planner-focused tests/QA logs. |
 | 4 | 4.1 Alignment summary module |  | ☑ | Extracted `_AudioAlignmentSummary`/display helpers into `src/frame_compare/alignment_runner.py`, rewired `runner.py` to call the module directly, and re-exported the helpers for compatibility. |
-| 4 | 4.2 VSPreview integration |  | ☐ |  |
+| 4 | 4.2 VSPreview integration |  | ☑ | VSPreview script writer/launcher hardened (new helpers, logging, and telemetry) with dedicated unit tests plus docs/log updates for manual offset reuse. |
 | 5 | 5.1 VSPreview module |  | ☐ |  |
 | 5 | 5.2 Layout utilities |  | ☐ |  |
 | 6 | 6.1 Shared fixtures |  | ☐ |  |
@@ -142,9 +142,9 @@ Notes:
 
 ### Sub-phase 4.2 – VSPreview integration
 - [x] Move `_write_vspreview_script`, `_launch_vspreview`, `_apply_vspreview_manual_offsets` into the alignment module or a dedicated `vspreview.py`.
-- [ ] Add focused tests for script generation (mock filesystem).
+- [x] Add focused tests for script generation and VSPreview launch/manual-offset flows (mock filesystem/subprocess).
 
-**2025-11-10 update:** VSPreview orchestration (`_write_vspreview_script`, `_launch_vspreview`, `_apply_vspreview_manual_offsets`) moved alongside the alignment summary helpers so runner/core only delegate. Script-generation tests are still pending; leave this box open until we add mocks for the filesystem workflow.
+**2025-11-10 update:** VSPreview orchestration (`_write_vspreview_script`, `_launch_vspreview`, `_apply_vspreview_manual_offsets`) now owns rendering, persistence, and telemetry inside `alignment_runner`; the runner calls `alignment_runner.apply_audio_alignment` directly, `_write_vspreview_script` gained a pure renderer + persistence helper, `_launch_vspreview` logs missing executables/env vars with injectable subprocess runners, `_apply_vspreview_manual_offsets` updates JSON-tail offsets with guardrails, and `tests/test_alignment_runner.py` exercises the new seams.
 
 Notes:
 - Coordinate with doc `audio_alignment_pipeline.md` if surface changes.
@@ -156,12 +156,16 @@ Notes:
 **Goal:** Split UI-related helpers away from `core.py`.
 
 ### Sub-phase 5.1 – VSPreview module
-- [ ] Introduce `src/frame_compare/vspreview.py` for script generation + launching.
-- [ ] Update CLI to import from module; keep manual CLI instructions identical.
+- [x] Introduce `src/frame_compare/vspreview.py` for script generation + launching.
+- [x] Update CLI/runner to import from the module; keep manual CLI instructions identical.
+
+**2025-11-10 update:** VSPreview orchestration now lives in `src/frame_compare/vspreview.py` (`render_script`, `persist_script`, `write_script`, `launch`, `apply_manual_offsets`, `prompt_offsets`). `alignment_runner.py` and `core.py` alias those helpers, `_COMPAT_EXPORTS` re-exports them (with deprecation notes), and `typings/frame_compare.pyi` shares the same surface. `tests/test_vspreview.py` exercises script rendering, persistence failures, launcher injection/missing-backend telemetry, and manual-offset propagation; `_patch_core_helper` now patches the new module for CLI/runner suites.
 
 ### Sub-phase 5.2 – Layout annotations
-- [ ] Extract `_plan_label`, `_format_resolution_summary`, other Rich layout helpers into `src/frame_compare/layout_utils.py`.
-- [ ] Ensure `CliOutputManager` still receives same data structures.
+- [x] Extract `_plan_label`, `_format_resolution_summary`, other Rich layout helpers into `src/frame_compare/layout_utils.py`.
+- [x] Ensure `CliOutputManager` still receives same data structures.
+
+**2025-11-10 update:** Added `src/frame_compare/layout_utils.py` with `color_text`, `format_kv`, `plan_label`, `plan_label_parts`, `normalise_vspreview_mode`, and `format_resolution_summary`. `cli_runtime`, `alignment_runner`, `runner`, and `screenshot` import from the shared module, reducing circular imports and keeping presentation helpers centralized for both CLI output and programmatic reporters.
 
 ---
 
