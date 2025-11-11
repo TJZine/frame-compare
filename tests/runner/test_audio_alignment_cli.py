@@ -459,6 +459,8 @@ def test_run_cli_reuses_vspreview_manual_offsets_when_alignment_disabled(
     audio_json = _expect_mapping(result.json_tail["audio_alignment"])
     manual_map = cast(dict[str, int], audio_json.get("manual_trim_starts", {}))
     assert manual_map[target_path.name] == 8
+    offsets_frames = _expect_mapping(audio_json.get("offsets_frames", {}))
+    assert offsets_frames.get("Target") == 8
     cache_json = _expect_mapping(result.json_tail["cache"])
     assert cache_json["status"] == "reused"
     analysis_json = _expect_mapping(result.json_tail["analysis"])
@@ -1067,12 +1069,20 @@ def test_vspreview_manual_offsets_positive(
     deltas_map = cast(dict[str, int], audio_block.get("vspreview_manual_deltas", {}))
     assert offsets_map[target_path.name] == 12
     assert deltas_map[target_path.name] == 7
+    measurements_list = cast(list[AlignmentMeasurement], captured["measurements"])
+    assert measurements_list
+    target_measurements = [
+        int(measurement.frames or 0)
+        for measurement in measurements_list
+        if measurement.file.name == target_path.name
+    ]
+    assert target_measurements and target_measurements[0] == 7
     notes_map = cast(dict[str, str], captured["notes"])
     existing_map = cast(dict[str, Mapping[str, object]], captured["existing"])
     assert notes_map[target_path.name] == "VSPreview"
     entry = cast(dict[str, object], existing_map[target_path.name])
     assert entry.get("status") == "manual"
-    assert int(cast(int | float, entry.get("frames", 0))) == 12
+    assert int(cast(int | float, entry.get("frames", 0))) == 7
     assert any("VSPreview manual offset applied" in line for line in reporter.lines)
 
 def test_vspreview_manual_offsets_zero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

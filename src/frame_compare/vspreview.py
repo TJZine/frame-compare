@@ -680,7 +680,7 @@ def apply_manual_offsets(
     notes_map: Dict[str, str] = {}
     for plan in plans:
         key = plan.path.name
-        frames_value = int(manual_trim_starts.get(key, int(plan.trim_start)))
+        frames_value = int(delta_map.get(key, 0))
         fps_tuple = fps_lookup.get(key)
         fps_float = _fps_to_float(fps_tuple) if fps_tuple else 0.0
         seconds_value = float(frames_value) / fps_float if fps_float else 0.0

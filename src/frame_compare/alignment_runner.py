@@ -257,24 +257,29 @@ def apply_audio_alignment(
         if display_data.manual_trim_lines:
             display_data.manual_trim_lines.clear()
         label_map = {plan.path.name: plan_labels.get(plan.path, plan.path.name) for plan in plans}
+        baseline_map = {plan.path.name: int(plan.trim_start) for plan in plans}
         manual_trim_starts: Dict[str, int] = {}
+        delta_map: Dict[str, int] = {}
         for plan in plans:
             key = plan.path.name
             if key not in vspreview_reuse:
                 continue
-            raw_frames_value = int(vspreview_reuse[key])
-            applied_frames = max(raw_frames_value, 0)
+            delta_frames = int(vspreview_reuse[key])
+            baseline_value = baseline_map.get(key, int(plan.trim_start))
+            applied_frames = max(0, baseline_value + delta_frames)
             plan.trim_start = applied_frames
             plan.has_trim_start_override = (
-                plan.has_trim_start_override or raw_frames_value != 0
+                plan.has_trim_start_override or delta_frames != 0
             )
-            manual_trim_starts[key] = raw_frames_value
+            manual_trim_starts[key] = applied_frames
+            delta_map[key] = delta_frames
             label = label_map.get(key, key)
             display_data.manual_trim_lines.append(
-                f"VSPreview manual trim reused: {label} → {applied_frames}f"
+                f"VSPreview manual trim reused: {label} baseline {baseline_value}f {delta_frames:+d}f → {applied_frames}f"
             )
 
-        filtered_vspreview = {key: value for key, value in vspreview_reuse.items() if key in allowed_keys}
+        if not manual_trim_starts:
+            return None
 
         display_data.offset_lines = ["Audio offsets: VSPreview manual offsets applied"]
         if display_data.manual_trim_lines:
@@ -282,23 +287,24 @@ def apply_audio_alignment(
 
         display_data.json_offsets_frames = {
             label_map.get(key, key): int(value)
-            for key, value in filtered_vspreview.items()
+            for key, value in delta_map.items()
         }
-        statuses_map = {key: "manual" for key in filtered_vspreview}
+        statuses_map = {key: "manual" for key in delta_map}
         return _AudioAlignmentSummary(
             offsets_path=offsets_path,
             reference_name=reference.path.name,
             measurements=(),
-            applied_frames=dict(filtered_vspreview),
+            applied_frames=dict(delta_map),
             baseline_shift=0,
             statuses=statuses_map,
             reference_plan=reference,
-            final_adjustments=dict(filtered_vspreview),
+            final_adjustments=dict(manual_trim_starts),
             swap_details={},
             suggested_frames={},
             suggestion_mode=False,
             manual_trim_starts=manual_trim_starts,
-            vspreview_manual_offsets=dict(filtered_vspreview),
+            vspreview_manual_offsets=dict(manual_trim_starts),
+            vspreview_manual_deltas=dict(delta_map),
         )
 
     reused_summary = _reuse_vspreview_manual_offsets_if_available(reference_plan)
