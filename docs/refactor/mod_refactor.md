@@ -519,7 +519,7 @@ Goal: finish modularizing `src/frame_compare/core.py` by extracting remaining CL
 | 9 | 9.4 Selection/init helpers |  | ☑ | `selection.py` now owns clip init + selection window logging; runner imports it and `core` shims delegate (2025‑11‑11). |
 | 9 | 9.5 Curated exports + typing |  | ☑ | `_COMPAT_EXPORTS` now points to the doctor/presets/config_writer modules plus VSPreview helpers, typings expose the doctor helpers, and `py.typed` ships for PEP 561. |
 | 9 | 9.6 Fixture cleanup plan |  | ☑ | Added VSPreview/which fixtures + runner context manager, refactored doctor/audio-alignment tests, and documented the upcoming CLI test split plan. |
-| 9 | 9.7 Import contracts |  | ⛔ | Enforce import layering using import-linter; fail CI on violations. |
+| 9 | 9.7 Import contracts |  | ☑ | `importlinter.ini` enforces runner→core→modules layering plus module→CLI/core bans, and the lint job now installs + runs `lint-imports` (runner→core ignore documented). |
 | 9 | 9.8 Remove legacy shims |  | ⛔ | Delete `core` forwarders for extracted modules; prune redundant curated exports. |
 | 9 | 9.9 Test layout finalization |  | ⛔ | Move CLI tests to tests/cli/ mirroring runner layout. |
 | 9 | 9.10 Public __all__ |  | ⛔ | Add explicit exports to new modules to avoid bleed. |
@@ -542,8 +542,10 @@ Deliverables
   - Forbidden contract blocking direct imports from `src.frame_compare.*` into `frame_compare.py` (only curated exports allowed).
 - CI step in `.github/workflows/ci.yml` running import-linter.
 
+**2025-11-11 update:** `importlinter.ini` now encodes a runner→core→modules layering contract plus forbidden module→CLI/core rules (the existing `runner.py` dependency on `core` is temporarily ignored and tagged for Phase 10 cleanup). The lint workflow installs `import-linter` and runs `lint-imports --config importlinter.ini` so CI fails on new violations, and Ruff’s config now treats `frame_compare` as first-party so style checks stay stable around the CLI shim.
+
 Acceptance
-- Local run documented in DECISIONS: `python -m importlinter --config importlinter.ini` passes.
+- Local run documented in DECISIONS: `lint-imports --config importlinter.ini` passes (import-linter ships this entrypoint instead of `python -m importlinter`).
 - CI job passes; violations fail with clear messages.
 
 Risks & Mitigations

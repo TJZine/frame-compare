@@ -64,6 +64,10 @@ jobs:
         run: uv sync --group dev --frozen --python 3.13 --no-install-package vapoursynth
       - name: Ruff lint
         run: uv run --no-sync ruff check
+      - name: Install import-linter
+        run: uv run --no-sync python -m pip install import-linter
+      - name: Verify import contracts
+        run: uv run --no-sync lint-imports --config importlinter.ini
   windows-smoke:
     runs-on: windows-latest
     steps:

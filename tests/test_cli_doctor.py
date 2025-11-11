@@ -4,10 +4,10 @@ import importlib.util as importlib_util
 import json
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 import frame_compare
-import pytest
 
 
 def test_doctor_json_outputs_failures(

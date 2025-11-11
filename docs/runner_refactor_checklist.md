@@ -300,6 +300,14 @@ Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 | Verification | ☑ | `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` (273 passed, 1 skipped), `.venv/bin/ruff check`, `.venv/bin/pyright --warnings` captured in `docs/DECISIONS.md` for the Phase 9.6 session. |
 | Follow-up plan | ☑ | Recorded Phase 10 action items (split CLI tests into `tests/cli/` and continue retiring `_patch_*` helpers) so future sessions can build on the fixture work. |
 
+### Phase 9.7 – Import contracts
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| Contracts | ☑ | Added `importlinter.ini` with a runner→core→modules layering contract plus forbidden module→CLI/core rules (temporary ignore documents the existing runner→core dependency). |
+| CI enforcement | ☑ | `.github/workflows/ci.yml` installs `import-linter` and runs `lint-imports --config importlinter.ini` so new violations fail CI immediately. |
+| Verification | ☑ | `uv run --no-sync lint-imports --config importlinter.ini`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, and `.venv/bin/pyright --warnings` logged in `docs/DECISIONS.md` for the Phase 9.7 session. |
+
 ---
 
 ### Usage Notes

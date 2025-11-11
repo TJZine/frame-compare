@@ -67,7 +67,11 @@ addopts = "-p no:vsengine"
 line-length = 120
 target-version = "py313"
 extend-exclude = ["typings", "legacy", "Legacy"]
+src = ["src", "."]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
 ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["frame_compare", "src"]
