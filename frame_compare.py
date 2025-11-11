@@ -49,24 +49,7 @@ from src.frame_compare.preflight import (
 )
 from src.slowpics import build_shortcut_filename
 
-
-def collect_doctor_checks(
-    workspace_root: Path,
-    config_path: Path,
-    config_mapping: Mapping[str, Any],
-    *,
-    root_issue: Optional[str] = None,
-    config_issue: Optional[str] = None,
-) -> tuple[list[doctor_module.DoctorCheck], list[str]]:
-    """Programmatic entry point mirroring ``doctor_module.collect_checks``."""
-
-    return doctor_module.collect_checks(
-        workspace_root,
-        config_path,
-        config_mapping,
-        root_issue=root_issue,
-        config_issue=config_issue,
-    )
+collect_doctor_checks = doctor_module.collect_checks
 
 
 # Legacy compatibility surface: enumerate the few core helpers we still expose.

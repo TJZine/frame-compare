@@ -256,7 +256,7 @@ Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 | --- | --- | --- |
 | Module creation | ☑ | Added `src/frame_compare/doctor.py` with `DoctorCheck`, `collect_checks`, and `emit_results`, mirroring the prior `core` implementations so external tooling can reuse the checks directly. |
 | CLI rewiring | ☑ | `frame_compare.py` imports the module as `doctor_module`; the doctor subcommand and wizard now call `collect_checks`/`emit_results` while keeping JSON/text output identical. |
-| Core shims/tests | ☑ | `src/frame_compare/core.py` aliases the types and keeps `_collect_doctor_checks` / `_emit_doctor_results` delegating to the new module, which satisfies existing monkeypatches in `tests/test_cli_doctor.py` and runner suites. |
+| Core shims/tests | ☑ | `src/frame_compare/core.py` temporarily aliased `_collect_doctor_checks` / `_emit_doctor_results` during rollout; Phase 9.8 removed the shims so callers now rely on `frame_compare.doctor` / `_COMPAT_EXPORTS` directly. |
 
 ### Phase 9.2 – Config writer & presets extraction
 
@@ -264,14 +264,14 @@ Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 | --- | --- | --- |
 | Module creation | ☑ | Introduced `src/frame_compare/config_writer.py` (read/load/render/write helpers) and `src/frame_compare/presets.py` (preset discovery/descriptions) so CLI callers share a single implementation. |
 | CLI rewiring | ☑ | `frame_compare.py` now imports the new modules (`config_writer`, `presets_lib`) for wizard/preset commands; behavior and prompts remain byte-identical. |
-| Core shims/tests | ☑ | `src/frame_compare/core.py` forwards `_read_template_text`, `_deep_merge`, `_list_preset_paths`, etc., to the new modules so existing monkeypatches and `_COMPAT_EXPORTS` consumers keep working without code changes. |
+| Core shims/tests | ☑ | `src/frame_compare/core.py` forwarded `_read_template_text`, `_deep_merge`, `_list_preset_paths`, etc., until Phase 9.8 removed the wrappers; curated exports now reference `config_writer` / `presets` directly. |
 | Verification | ☑ | `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` (273 passed, 1 skipped), `.venv/bin/ruff check`, and `.venv/bin/pyright --warnings` captured in `docs/DECISIONS.md` on 2025-11-11. |
 
 ### Phase 9.3 – Runner unhook (trivial callers)
 
 | Checklist Item | Status | Notes / Next Steps |
 | --- | --- | --- |
-| Metadata/runtime helpers | ☑ | `runner.py` now imports `_abort_if_site_packages` from `src.frame_compare.preflight`, VSPreview constants from `src.frame_compare.vspreview`, the new `runtime_utils` for fps/time/folding helpers, and `metadata.parse_audio_track_overrides` / `first_non_empty`; `core` keeps shims for compatibility. |
+| Metadata/runtime helpers | ☑ | `runner.py` now imports `_abort_if_site_packages` from `src.frame_compare.preflight`, VSPreview constants from `src.frame_compare.vspreview`, the new `runtime_utils` for fps/time/folding helpers, and `metadata.parse_audio_track_overrides` / `first_non_empty`; those temporary `core` shims were removed in Phase 9.8. |
 | Behavioral parity | ☑ | Existing runner + CLI suites cover layout JSON, VSPreview prompts, and metadata parsing, so no additional tests were required; verified no change in console/layout output. |
 | Verification | ☑ | Quartet (`git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`) logged in `docs/DECISIONS.md` on 2025-11-11. |
 
@@ -280,7 +280,7 @@ Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 | Checklist Item | Status | Notes / Next Steps |
 | --- | --- | --- |
 | Module creation | ☑ | Added `src/frame_compare/selection.py` with `_extract_clip_fps`, `init_clips`, `resolve_selection_windows`, and `log_selection_windows`, guarded with `TYPE_CHECKING` imports to avoid runtime cycles. |
-| Runner wiring | ☑ | `runner.py` imports `selection_utils` for clip init + selection logging; `src.frame_compare.core` exposes shim functions so `_COMPAT_EXPORTS` callers (and tests) continue to work without modification. |
+| Runner wiring | ☑ | `runner.py` imports `selection_utils` for clip init + selection logging; the interim `core` shim points were removed in Phase 9.8, so callers now consume `frame_compare.selection` directly. |
 | Verification | ☑ | `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` (273 passed, 1 skipped), `.venv/bin/ruff check`, `.venv/bin/pyright --warnings` recorded in `docs/DECISIONS.md` (2025-11-11 Phase 9.4 entry). |
 
 ### Phase 9.5 – Curated exports + typing
@@ -307,6 +307,15 @@ Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 | Contracts | ☑ | Added `importlinter.ini` with a runner→core→modules layering contract plus forbidden module→CLI/core rules (temporary ignore documents the existing runner→core dependency). |
 | CI enforcement | ☑ | `.github/workflows/ci.yml` installs `import-linter` and runs `lint-imports --config importlinter.ini` so new violations fail CI immediately. |
 | Verification | ☑ | `uv run --no-sync lint-imports --config importlinter.ini`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, and `.venv/bin/pyright --warnings` logged in `docs/DECISIONS.md` for the Phase 9.7 session. |
+
+### Phase 9.8 – Remove legacy shims
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| Shim removals | ☑ | Deleted the doctor/config-writer/presets/metadata/selection shims from `src.frame_compare.core`; runtime callers now import the extracted modules directly. |
+| Export cleanup | ☑ | `frame_compare._COMPAT_EXPORTS` forwards to `doctor_module`, `config_writer`, `presets_lib`, and selection helpers without wrapper functions, aligning the curated surface with the real modules. |
+| Verification | ☑ | `git status -sb`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, and `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` recorded in `docs/DECISIONS.md` (2025-11-11 Phase 9.8 entry). |
+| Residual risks | ☑ | Third-party scripts that relied on `src.frame_compare.core._*` helpers must migrate to the documented exports; TMDB + wizard shims remain scheduled for Phase 10. |
 
 ---
 

@@ -320,6 +320,16 @@ _Optional fields:_ Date, Branch, Reviewer, Metrics (LOC touched, tests runtime).
 - [x] Risks noted: Downstream extensions must import doctor/config_writer/presets through `frame_compare`; continue promoting the compatibility map comments and monitor for reports before removing shims in a future release.
 - [x] Follow-ups for next session: Phase 9.6 fixture cleanup plan and TMDB workflow extraction planning for Phase 10.
 
+## Session Checklist — 2025-11-11 (Phase 9.8)
+
+- [x] Phase/Sub-phase: `9 / 9.8 Remove legacy shims`
+- [x] Modules touched: `src/frame_compare/core.py`, `frame_compare.py`, `docs/refactor/mod_refactor.md`, `docs/DECISIONS.md`
+- [x] Commands run: `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` (273 passed, 1 skipped in 39.96 s), `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`
+- [x] Docs updated? (`runner_refactor_checklist`, `DECISIONS`, `CHANGELOG`?): Updated this tracker + `docs/DECISIONS.md` (README/CHANGELOG unchanged because the API still targets internal callers).
+- [x] Tests added/updated: None — existing runner + CLI suites already exercise doctor/config-writer/presets/selection workflows now that they import the extracted modules directly.
+- [x] Risks noted: Third-party scripts that still import `src.frame_compare.core._*` helpers will now fail; monitor incoming bug reports and steer users to the documented module entry points.
+- [x] Follow-ups for next session: Phase 10 TMDB workflow extraction plus the planned VSPreview/wizard shim removals once dependent tests migrate.
+
 ### Phase 2.3 – Docs, Tooling & Risk Log
 
 Goal: capture the tooling outputs, refresh compatibility documentation, and extend the residual-risk notes before moving on.
@@ -397,7 +407,7 @@ Goal: finish modularizing `src/frame_compare/core.py` by extracting remaining CL
 - Rollback
   - Revert import wiring to `core` and retain the module for future re‑attempt.
 
-**2025-11-11 update (Phase 9.1):** `src/frame_compare/doctor.py` now owns `DoctorCheck`, `collect_checks`, and `emit_results`; `frame_compare.py` imports the module as `doctor_module` to avoid clashing with the CLI command while both the `doctor` subcommand and the wizard invoke the extracted helpers. `src/frame_compare/core.py` aliases the new types and keeps `_collect_doctor_checks` / `_emit_doctor_results` as shims so downstream monkeypatches continue to target `core`. `tests/test_cli_doctor.py` plus the wizard/runner suites exercised the flow unchanged, and docs/checklists reference the new boundary.
+**2025-11-11 update (Phase 9.1):** `src/frame_compare/doctor.py` now owns `DoctorCheck`, `collect_checks`, and `emit_results`; `frame_compare.py` imports the module as `doctor_module` to avoid clashing with the CLI command while both the `doctor` subcommand and the wizard invoke the extracted helpers. `src/frame_compare/core.py` initially aliased `_collect_doctor_checks` / `_emit_doctor_results` so downstream monkeypatches could continue targeting `core`; those shims were deleted in Phase 9.8 once the curated exports proved stable. `tests/test_cli_doctor.py` plus the wizard/runner suites exercised the flow unchanged, and docs/checklists reference the new boundary.
 
 ### Sub‑phase 9.2 – Extract Config Writer and Presets (single session)
 
@@ -429,7 +439,7 @@ Goal: finish modularizing `src/frame_compare/core.py` by extracting remaining CL
 - Rollback
   - Temporary re‑alias the new helpers back through `core` if needed.
 
-**2025-11-11 update (Phase 9.3):** `runner.py` now imports `_abort_if_site_packages` directly from `src.frame_compare.preflight`, reads VSPreview install hints and manual-command helpers from `src.frame_compare.vspreview`, and relies on the new `src/frame_compare/runtime_utils.py` module for FPS math, elapsed/ETA clocks, legacy summary folding, and simple condition evaluation. `_parse_audio_track_overrides`, `first_non_empty`, and `parse_year_hint` live in `src.frame_compare.metadata`, with `core` providing shims so downstream scripts continue to patch the legacy names. No behavior changes were observed in the layout JSON or console output, and the existing runner/CLI suites exercise the updated helpers without modification.
+**2025-11-11 update (Phase 9.3):** `runner.py` now imports `_abort_if_site_packages` directly from `src.frame_compare.preflight`, reads VSPreview install hints and manual-command helpers from `src.frame_compare.vspreview`, and relies on the new `src.frame_compare/runtime_utils.py` module for FPS math, elapsed/ETA clocks, legacy summary folding, and simple condition evaluation. `_parse_audio_track_overrides`, `first_non_empty`, and `parse_year_hint` live in `src.frame_compare.metadata`; `core` briefly provided shims for those names until Phase 9.8 removed them. No behavior changes were observed in the layout JSON or console output, and the existing runner/CLI suites exercise the updated helpers without modification.
 
 ### Sub‑phase 9.4 – Selection and Clip Initialization helpers (single session)
 
@@ -445,7 +455,7 @@ Goal: finish modularizing `src/frame_compare/core.py` by extracting remaining CL
 - Rollback
   - Restore runner imports to `core` and leave new exports in place.
 
-**2025-11-11 update (Phase 9.4):** Added `src/frame_compare/selection.py` to house `_extract_clip_fps`, `init_clips`, `resolve_selection_windows`, and `log_selection_windows`. `runner.py` now imports `selection_utils` for clip init and selection logging, while `src.frame_compare.core` exposes shim functions that delegate to the new module so `_COMPAT_EXPORTS` consumers keep working. No new tests were required because the existing runner suites already cover selection window logging and clip initialization, and the CLI behavior (progress output + Rich messages) remains unchanged.
+**2025-11-11 update (Phase 9.4):** Added `src/frame_compare/selection.py` to house `_extract_clip_fps`, `init_clips`, `resolve_selection_windows`, and `log_selection_windows`. `runner.py` now imports `selection_utils` for clip init and selection logging; the temporary `core` delegates kept `_COMPAT_EXPORTS` consumers working until Phase 9.8 removed those shims entirely. No new tests were required because the existing runner suites already cover selection window logging and clip initialization, and the CLI behavior (progress output + Rich messages) remains unchanged.
 
 ### Sub‑phase 9.5 – Curated exports + typing surface (single session)
 
@@ -513,14 +523,14 @@ Goal: finish modularizing `src/frame_compare/core.py` by extracting remaining CL
 
 | Phase | Sub-phase | Owner | Status | Notes |
 | --- | --- | --- | --- | --- |
-| 9 | 9.1 Doctor extraction |  | ☑ | `doctor.py` added; CLI routes via `doctor_module`; `core` keeps shims for compatibility. |
-| 9 | 9.2 Config writer + presets |  | ☑ | Extracted config_writer/presets modules, rewired CLI, and left core shims for back-compat. |
-| 9 | 9.3 Runner unhook (trivial) |  | ☑ | Runner now sources metadata helpers + runtime utils outside `core`, uses `preflight` `_abort_if_site_packages`, and reads VSPreview constants directly. |
-| 9 | 9.4 Selection/init helpers |  | ☑ | `selection.py` now owns clip init + selection window logging; runner imports it and `core` shims delegate (2025‑11‑11). |
+| 9 | 9.1 Doctor extraction |  | ☑ | `doctor.py` added; CLI routes via `doctor_module`; rollout shims lived in `core` until Phase 9.8 removed them. |
+| 9 | 9.2 Config writer + presets |  | ☑ | Extracted config_writer/presets modules, rewired CLI, and retired the temporary `core` shims as part of Phase 9.8. |
+| 9 | 9.3 Runner unhook (trivial) |  | ☑ | Runner now sources metadata helpers + runtime utils outside `core`, uses `preflight` `_abort_if_site_packages`, and reads VSPreview constants directly; the interim metadata shims were deleted in Phase 9.8. |
+| 9 | 9.4 Selection/init helpers |  | ☑ | `selection.py` now owns clip init + selection window logging; runner imports it directly and the compatibility shims were removed during Phase 9.8. |
 | 9 | 9.5 Curated exports + typing |  | ☑ | `_COMPAT_EXPORTS` now points to the doctor/presets/config_writer modules plus VSPreview helpers, typings expose the doctor helpers, and `py.typed` ships for PEP 561. |
 | 9 | 9.6 Fixture cleanup plan |  | ☑ | Added VSPreview/which fixtures + runner context manager, refactored doctor/audio-alignment tests, and documented the upcoming CLI test split plan. |
 | 9 | 9.7 Import contracts |  | ☑ | `importlinter.ini` enforces runner→core→modules layering plus module→CLI/core bans, and the lint job now installs + runs `lint-imports` (runner→core ignore documented). |
-| 9 | 9.8 Remove legacy shims |  | ⛔ | Delete `core` forwarders for extracted modules; prune redundant curated exports. |
+| 9 | 9.8 Remove legacy shims |  | ☑ | Removed `core` doctor/config-writer/presets/metadata/selection shims and trimmed curated exports to point at the extracted modules directly. |
 | 9 | 9.9 Test layout finalization |  | ⛔ | Move CLI tests to tests/cli/ mirroring runner layout. |
 | 9 | 9.10 Public __all__ |  | ⛔ | Add explicit exports to new modules to avoid bleed. |
 | 9 | 9.11 Type strictness ratchet |  | ⛔ | Raise Pyright to strict for library modules (recommended). |
@@ -579,6 +589,8 @@ Acceptance
 
 Verification
 - Record removed names and replacement imports in `docs/DECISIONS.md` with a UTC stamp.
+
+**2025-11-11 update:** `src/frame_compare/core.py` no longer defines the doctor/config-writer/presets/metadata/selection shims—the CLI and runner call the extracted modules directly, and `frame_compare._COMPAT_EXPORTS` simply aliases `doctor_module.collect_checks` plus the module surfaces instead of forwarding through `core`. `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` (273 passed, 1 skipped in 39.96 s), `.venv/bin/ruff check`, and `.venv/bin/pyright --warnings` all passed after the cleanup, matching the acceptance criteria above.
 
 ## Sub‑phase 9.9 — Test Layout Finalization (CLI split)
 

@@ -15,9 +15,7 @@ from string import Template
 from typing import (
     TYPE_CHECKING,
     Any,
-    Dict,
     Final,
-    Iterable,
     List,
     Mapping,
     MutableMapping,
@@ -36,7 +34,7 @@ from rich.progress import Progress, ProgressColumn  # noqa: F401
 
 from src import audio_alignment as _audio_alignment_module
 from src.config_loader import load_config as _load_config
-from src.datatypes import AnalysisConfig, RuntimeConfig, TMDBConfig
+from src.datatypes import TMDBConfig
 
 if TYPE_CHECKING:
     class _AsyncHTTPTransport(Protocol):
@@ -45,19 +43,15 @@ if TYPE_CHECKING:
 
 import src.frame_compare.alignment_preview as _alignment_preview_module
 import src.frame_compare.alignment_runner as _alignment_runner_module
-import src.frame_compare.config_writer as _config_writer_module
 import src.frame_compare.doctor as _doctor_module
 import src.frame_compare.metadata as _metadata_module
 import src.frame_compare.planner as _planner_module
 import src.frame_compare.preflight as _preflight_constants
-import src.frame_compare.presets as _presets_module
-import src.frame_compare.selection as _selection_module
 import src.frame_compare.vspreview as _vspreview_module
 import src.frame_compare.wizard as _wizard_module
 import src.screenshot as _screenshot_module
 from src import vs_core
 from src.analysis import (
-    SelectionWindowSpec,
     export_selection_metadata,  # noqa: F401
     probe_cached_metrics,  # noqa: F401
     select_frames,  # noqa: F401
@@ -68,7 +62,6 @@ from src.analysis import (
 from src.frame_compare.cli_runtime import (
     AudioAlignmentJSON,  # noqa: F401 - re-exported for compatibility
     CLIAppError,  # noqa: F401 - re-exported for compatibility
-    CliOutputManagerProtocol,
     ClipRecord,  # noqa: F401 - re-exported for compatibility
     JsonTail,  # noqa: F401 - re-exported for compatibility
     ReportJSON,  # noqa: F401 - re-exported for compatibility
@@ -79,7 +72,7 @@ from src.frame_compare.cli_runtime import (
     TrimsJSON,  # noqa: F401 - re-exported for compatibility
     TrimSummary,  # noqa: F401 - re-exported for compatibility
     ViewerJSON,  # noqa: F401 - re-exported for compatibility
-    _ClipPlan,
+    _ClipPlan,  # noqa: F401 - re-exported for compatibility
     _coerce_str_mapping,
 )
 from src.frame_compare.preflight import (
@@ -138,91 +131,10 @@ _format_vspreview_manual_command = _vspreview_module.format_manual_command
 _VSPREVIEW_WINDOWS_INSTALL = _vspreview_module.VSPREVIEW_WINDOWS_INSTALL
 _VSPREVIEW_POSIX_INSTALL = _vspreview_module.VSPREVIEW_POSIX_INSTALL
 
-PRESETS_DIR: Final[Path] = _presets_module.PRESETS_DIR
-
 _DEFAULT_CONFIG_HELP: Final[str] = (
     "Optional explicit path to config.toml. When omitted, Frame Compare looks for "
     "ROOT/config/config.toml (see --root/FRAME_COMPARE_ROOT)."
 )
-
-
-def _read_template_text() -> str:
-    """Backward-compatible shim for config_writer.read_template_text()."""
-
-    return _config_writer_module.read_template_text()
-
-
-def _load_template_config() -> Dict[str, Any]:
-    """Backward-compatible shim for config_writer.load_template_config()."""
-
-    return _config_writer_module.load_template_config()
-
-
-def _deep_merge(dest: Dict[str, Any], src: Mapping[str, Any]) -> None:
-    """Backward-compatible shim for config_writer._deep_merge()."""
-
-    _config_writer_module._deep_merge(dest, src)
-
-
-def _diff_config(base: Mapping[str, Any], modified: Mapping[str, Any]) -> Dict[str, Any]:
-    """Backward-compatible shim for config_writer._diff_config()."""
-
-    return _config_writer_module._diff_config(base, modified)
-
-
-def _format_toml_value(value: Any) -> str:
-    """Backward-compatible shim for config_writer._format_toml_value()."""
-
-    return _config_writer_module._format_toml_value(value)
-
-
-def _flatten_overrides(overrides: Mapping[str, Any]) -> Dict[Tuple[str, ...], Dict[str, Any]]:
-    """Backward-compatible shim for config_writer._flatten_overrides()."""
-
-    return _config_writer_module._flatten_overrides(overrides)
-
-
-def _apply_overrides_to_template(template_text: str, overrides: Mapping[str, Any]) -> str:
-    """Backward-compatible shim for config_writer._apply_overrides_to_template()."""
-
-    return _config_writer_module._apply_overrides_to_template(template_text, overrides)
-
-
-def _write_config_file(path: Path, content: str) -> None:
-    """Backward-compatible shim for config_writer.write_config_file()."""
-
-    _config_writer_module.write_config_file(path, content)
-
-
-def _present_diff(original: str, updated: str) -> None:
-    """Backward-compatible shim for config_writer._present_diff()."""
-
-    _config_writer_module._present_diff(original, updated)
-
-
-def _list_preset_paths() -> Dict[str, Path]:
-    """Backward-compatible shim for presets.list_preset_paths()."""
-
-    return _presets_module.list_preset_paths()
-
-
-def _load_preset_data(name: str) -> Dict[str, Any]:
-    """Backward-compatible shim for presets.load_preset_data()."""
-
-    return _presets_module.load_preset_data(name)
-
-
-def _render_config_text(
-    template_text: str,
-    template_config: Mapping[str, Any],
-    final_config: Mapping[str, Any],
-) -> str:
-    """Backward-compatible shim for config_writer.render_config_text()."""
-
-    return _config_writer_module.render_config_text(template_text, template_config, final_config)
-
-
-PRESET_DESCRIPTIONS: Final[Dict[str, str]] = _presets_module.PRESET_DESCRIPTIONS
 
 
 DoctorStatus = _doctor_module.DoctorStatus
@@ -241,57 +153,6 @@ def _abort_if_site_packages(path_map: Mapping[str, Path]) -> None:
     _preflight_abort_if_site_packages(path_map)
 
 
-def _collect_doctor_checks(
-    root: Path,
-    config_path: Path,
-    config_mapping: Mapping[str, Any],
-    *,
-    root_issue: Optional[str] = None,
-    config_issue: Optional[str] = None,
-) -> tuple[list[DoctorCheck], list[str]]:
-    """Backward-compatible shim that delegates to the doctor module."""
-
-    return _doctor_module.collect_checks(
-        root,
-        config_path,
-        config_mapping,
-        root_issue=root_issue,
-        config_issue=config_issue,
-    )
-
-
-def _emit_doctor_results(
-    checks: Sequence[DoctorCheck],
-    notes: Sequence[str],
-    *,
-    json_mode: bool,
-    workspace_root: Path,
-    config_path: Path,
-) -> None:
-    """Backward-compatible shim that delegates to the doctor module."""
-
-    _doctor_module.emit_results(
-        checks,
-        notes,
-        json_mode=json_mode,
-        workspace_root=workspace_root,
-        config_path=config_path,
-    )
-
-
-def _parse_audio_track_overrides(entries: Iterable[str]) -> Dict[str, int]:
-    """Backward-compatible shim delegating to ``src.frame_compare.metadata``."""
-    return _metadata_module.parse_audio_track_overrides(entries)
-
-
-def _first_non_empty(metadata: Sequence[Mapping[str, str]], key: str) -> str:
-    """Backward-compatible shim delegating to ``src.frame_compare.metadata``."""
-    return _metadata_module.first_non_empty(metadata, key)
-
-
-def _parse_year_hint(value: str) -> Optional[int]:
-    """Backward-compatible shim delegating to ``src.frame_compare.metadata``."""
-    return _metadata_module.parse_year_hint(value)
 
 
 @dataclass
@@ -407,11 +268,11 @@ def resolve_tmdb_workflow(
         )
 
     base_file = files[0]
-    imdb_hint_raw = _first_non_empty(metadata, "imdb_id")
+    imdb_hint_raw = _metadata_module.first_non_empty(metadata, "imdb_id")
     imdb_hint = imdb_hint_raw.lower() if imdb_hint_raw else None
-    tvdb_hint = _first_non_empty(metadata, "tvdb_id") or None
-    effective_year_hint = year_hint_raw or _first_non_empty(metadata, "year")
-    year_hint = _parse_year_hint(effective_year_hint)
+    tvdb_hint = _metadata_module.first_non_empty(metadata, "tvdb_id") or None
+    effective_year_hint = year_hint_raw or _metadata_module.first_non_empty(metadata, "year")
+    year_hint = _metadata_module.parse_year_hint(effective_year_hint)
 
     resolution: TMDBResolution | None = None
     manual_tmdb: tuple[str, str] | None = None
@@ -857,48 +718,6 @@ def _format_clock(seconds: Optional[float]) -> str:
     if hours:
         return f"{hours:d}:{minutes:02d}:{secs:02d}"
     return f"{minutes:02d}:{secs:02d}"
-
-
-def _init_clips(
-    plans: Sequence[_ClipPlan],
-    runtime_cfg: RuntimeConfig,
-    cache_dir: Path | None,
-    *,
-    reporter: CliOutputManagerProtocol | None = None,
-) -> None:
-    """Shim retained for compatibility; delegates to selection module."""
-    return _selection_module.init_clips(
-        plans,
-        runtime_cfg,
-        cache_dir,
-        reporter=reporter,
-    )
-
-
-def _resolve_selection_windows(
-    plans: Sequence[_ClipPlan],
-    analysis_cfg: AnalysisConfig,
-) -> tuple[List[SelectionWindowSpec], tuple[int, int], bool]:
-    """Shim retained for compatibility; delegates to selection module."""
-    return _selection_module.resolve_selection_windows(plans, analysis_cfg)
-
-
-def _log_selection_windows(
-    plans: Sequence[_ClipPlan],
-    specs: Sequence[SelectionWindowSpec],
-    intersection: tuple[int, int],
-    *,
-    collapsed: bool,
-    analyze_fps: float,
-) -> None:
-    """Shim retained for compatibility; delegates to selection module."""
-    return _selection_module.log_selection_windows(
-        plans,
-        specs,
-        intersection,
-        collapsed=collapsed,
-        analyze_fps=analyze_fps,
-    )
 
 
 def _validate_tonemap_overrides(overrides: MutableMapping[str, Any]) -> None:
