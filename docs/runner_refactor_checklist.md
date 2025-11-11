@@ -53,7 +53,7 @@ Goal: extract shared structures/helpers, reduce `_IMPL_ATTRS`, keep runner impor
 
 **Exit criteria 2.1:** Shared module checked in, `_IMPL_ATTRS` list updated/tracked, baseline tests still pass.
 
-**2025‑11‑10 update:** Extracted all wizard prompts into `src/frame_compare/wizard.py` (docstring links to `docs/config_audit.md`), re-pointed the CLI shim to the new module, and added regression coverage via `tests/test_wizard.py` plus refreshed `tests/test_cli_wizard.py` so future loader/CLI work can rely on the dedicated boundary.
+**2025‑11‑10 update:** Extracted all wizard prompts into `src/frame_compare/wizard.py` (docstring links to `docs/config_audit.md`), re-pointed the CLI shim to the new module, and added regression coverage via `tests/test_wizard.py` plus refreshed `tests/cli/test_wizard.py` (formerly `tests/test_cli_wizard.py`) so future loader/CLI work can rely on the dedicated boundary.
 
 ### Phase 2.2 – CLI Shim & Runner API
 
@@ -70,7 +70,7 @@ Goal: finish slimming the CLI, expose the public API, and update tests to cover 
 
 **Exit criteria 2.2:** CLI shim complete, runner API re-exported (`RunRequest`, `RunResult`, `run`), unit tests green.
 
-**2025‑11‑10 update (Phase 2.2)** — Wizard auto-launch (`--write-config`), the `wizard` subcommand, and `preset apply` now call `src.frame_compare.wizard.resolve_wizard_paths` directly. `_COMPAT_EXPORTS` exposes both `resolve_wizard_paths` and `_resolve_wizard_paths`, so downstream scripts that previously patched the core helper continue working while tests (`tests/test_cli_wizard.py`) assert that the resolver hook is exercised.
+**2025‑11‑10 update (Phase 2.2)** — Wizard auto-launch (`--write-config`), the `wizard` subcommand, and `preset apply` now call `src.frame_compare.wizard.resolve_wizard_paths` directly. `_COMPAT_EXPORTS` exposes both `resolve_wizard_paths` and `_resolve_wizard_paths`, so downstream scripts that previously patched the core helper continue working while tests (`tests/cli/test_wizard.py`, relocated from `tests/test_cli_wizard.py`) assert that the resolver hook is exercised.
 
 ### Phase 2.3 – Docs, Tooling & Risk Log
 
@@ -165,7 +165,7 @@ With the CLI shim stable and tooling in place, Phase 4 focuses on finishing th
 | Checklist Item | Status | Notes / Next Steps |
 | --- | --- | --- |
 | 4. Type Safety | ✅ | `npx pyright --warnings` re-run on 2025-11-12 after CLI import fixes (0 errors; 9 expected warnings isolated to pytest helpers) to keep the helper extraction compliant. |
-| 6. Behavioral Parity | ✅ | Re-ran the wizard/doctor CLI suite (`pytest tests/test_cli_doctor.py tests/test_cli_wizard.py`) to confirm presets + auto-wizard flow remain intact alongside the new runner-focused parity tests. |
+| 6. Behavioral Parity | ✅ | Re-ran the wizard/doctor CLI suite (`pytest tests/cli/test_doctor.py tests/cli/test_wizard.py`; these files lived at `tests/test_cli_*.py` before Phase 9.9) to confirm presets + auto-wizard flow remain intact alongside the new runner-focused parity tests. |
 | 7. Documentation | ✅ | README programmatic section, `docs/DECISIONS.md`, and `CHANGELOG.md` now record the runner API stability plus the Phase 4.2 verification work. |
 | 8. Tests | ✅ | Added runner-oriented tests (`tests/test_frame_compare.py`) that assert slow.pics cleanup and audio-alignment reuse run correctly through `runner.run`, complementing the existing CLI delegation checks. |
 | Harness Adoption (2025-11-13) | ✅ | Added the `_CliRunnerEnv` fixture + `_patch_*` helpers, migrated CLI-heavy tests in `tests/test_frame_compare.py`/`tests/test_paths_preflight.py` to the new harness, and ran `.venv/bin/pytest tests/test_frame_compare.py tests/test_paths_preflight.py` followed by the full test suite (247 passed, 1 skipped). `npx pyright --warnings` remains blocked offline (npm ENOTFOUND). |
@@ -296,7 +296,7 @@ Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 | Checklist Item | Status | Notes / Next Steps |
 | --- | --- | --- |
 | Shared fixtures | ☑ | Added `vspreview_env`, `which_map`, and `cli_env` fixtures (built on new helpers in `tests/helpers/runner_env.py`) so CLI + runner suites share consistent VSPreview/shutil.which behavior. |
-| Test refactors | ☑ | Updated `tests/test_cli_doctor.py` and `tests/runner/test_audio_alignment_cli.py` to consume the new fixtures, keeping legacy `_patch_*` utilities only where necessary. |
+| Test refactors | ☑ | Updated `tests/cli/test_doctor.py` (renamed from `tests/test_cli_doctor.py`) and `tests/runner/test_audio_alignment_cli.py` to consume the new fixtures, keeping legacy `_patch_*` utilities only where necessary. |
 | Verification | ☑ | `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` (273 passed, 1 skipped), `.venv/bin/ruff check`, `.venv/bin/pyright --warnings` captured in `docs/DECISIONS.md` for the Phase 9.6 session. |
 | Follow-up plan | ☑ | Recorded Phase 10 action items (split CLI tests into `tests/cli/` and continue retiring `_patch_*` helpers) so future sessions can build on the fixture work. |
 
@@ -316,6 +316,15 @@ Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 | Export cleanup | ☑ | `frame_compare._COMPAT_EXPORTS` forwards to `doctor_module`, `config_writer`, `presets_lib`, and selection helpers without wrapper functions, aligning the curated surface with the real modules. |
 | Verification | ☑ | `git status -sb`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, and `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` recorded in `docs/DECISIONS.md` (2025-11-11 Phase 9.8 entry). |
 | Residual risks | ☑ | Third-party scripts that relied on `src.frame_compare.core._*` helpers must migrate to the documented exports; TMDB + wizard shims remain scheduled for Phase 10. |
+
+### Phase 9.9 – CLI test split
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| Directory move | ☑ | Moved the remaining CLI suites to `tests/cli/` (`test_doctor.py`, `test_wizard.py`, `test_help.py`, `test_layout.py`) and added `tests/cli/__init__.py` so pytest derives unique module names even while `tests/test_wizard.py` continues to cover the module-layer helpers. |
+| Fixture wiring | ☑ | Existing fixtures from `tests/conftest.py` (`cli_env`, `vspreview_env`, `which_map`, etc.) still apply without changes; no bespoke path adjustments were required for the new package layout. |
+| Verification | ☑ | `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` (targeted CLI files + full suite), `.venv/bin/ruff check`, and `.venv/bin/pyright --warnings` captured in `docs/DECISIONS.md` (2025-11-11 Phase 9.9 entry). |
+| Residual risks | ☑ | Downstream scripts or CI filters referencing the pre-move `tests/test_cli_*.py` paths must update to `tests/cli/test_*.py`; this was noted in the trackers, and pytest’s package structure prevents duplicate-module imports. Phase 10 will continue with TMDB + wizard shim removals. |
 
 ---
 

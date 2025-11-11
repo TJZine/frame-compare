@@ -220,7 +220,7 @@ VSPreview orchestration now lives under `src/frame_compare/vspreview.py`: `rende
 
 ## `[cli]` (reviewed 2025‑11‑19)
 
-**Feature surface.** `CLIConfig` (`src/datatypes.py:187-205`) currently exposes two knobs: `emit_json_tail` (default `true`) and `progress.style` (`fill` or `dot`). Loader normalises and validates the progress style (`src/config_loader.py:369-389`, `431-434`). Runtime consumption happens inside `runner.run`: the reporter flags `progress_style` for layout sections and suppresses JSON output when `emit_json_tail` is false (`src/frame_compare/runner.py:333-360`). Tests cover both behaviours: disabling the JSON tail (`tests/runner/test_cli_entry.py`) and progress-style binding in the Rich layout renderer (`tests/test_cli_layout.py:17-30`). The template comments mention these keys, but README/reference docs omit them.
+**Feature surface.** `CLIConfig` (`src/datatypes.py:187-205`) currently exposes two knobs: `emit_json_tail` (default `true`) and `progress.style` (`fill` or `dot`). Loader normalises and validates the progress style (`src/config_loader.py:369-389`, `431-434`). Runtime consumption happens inside `runner.run`: the reporter flags `progress_style` for layout sections and suppresses JSON output when `emit_json_tail` is false (`src/frame_compare/runner.py:333-360`). Tests cover both behaviours: disabling the JSON tail (`tests/runner/test_cli_entry.py`) and progress-style binding in the Rich layout renderer (`tests/cli/test_layout.py:17-30`, relocated from `tests/test_cli_layout.py`). The template comments mention these keys, but README/reference docs omit them.
 
 **Health check.**
 - Validation rejects invalid styles up front and falls back to `"fill"` at runtime if configs drift, preventing layout crashes.

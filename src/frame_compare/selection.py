@@ -13,6 +13,12 @@ from src.analysis import SelectionWindowSpec, compute_selection_window
 from src.datatypes import AnalysisConfig, RuntimeConfig
 from src.frame_compare.cli_runtime import CLIAppError
 
+__all__ = [
+    "init_clips",
+    "resolve_selection_windows",
+    "log_selection_windows",
+]
+
 if TYPE_CHECKING:
     from src.frame_compare.cli_runtime import CliOutputManagerProtocol, _ClipPlan
 else:  # pragma: no cover - runtime-only fallback
@@ -183,4 +189,3 @@ def log_selection_windows(
         print(
             "[yellow]Ignore lead/trail settings did not overlap across all sources; using fallback range.[/yellow]"
         )
-
