@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,8 @@ from tests.helpers.runner_env import (
     _RecordingOutputManager,
     install_dummy_progress,
     install_vs_core_stub,
+    install_vspreview_presence,
+    install_which_map,
 )
 
 
@@ -21,6 +24,14 @@ def cli_runner_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _CliRunne
     """Install a deterministic CLI harness for CLI-heavy tests."""
 
     return _CliRunnerEnv(monkeypatch, tmp_path)
+
+
+@pytest.fixture
+def cli_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[_CliRunnerEnv]:
+    """Yield a `_CliRunnerEnv` harness (Phase 10 fixture consolidation target)."""
+
+    env = _CliRunnerEnv(monkeypatch, tmp_path)
+    yield env
 
 
 @pytest.fixture
@@ -57,3 +68,23 @@ def dummy_progress(monkeypatch: pytest.MonkeyPatch) -> type[DummyProgress]:
 
     install_dummy_progress(monkeypatch)
     return DummyProgress
+
+
+@pytest.fixture
+def vspreview_env(monkeypatch: pytest.MonkeyPatch) -> Callable[[bool], None]:
+    """Return a toggle that marks VSPreview modules/CLI present or missing."""
+
+    def _toggle(present: bool) -> None:
+        install_vspreview_presence(monkeypatch, present=present)
+
+    return _toggle
+
+
+@pytest.fixture
+def which_map(monkeypatch: pytest.MonkeyPatch) -> Callable[[set[str] | None], None]:
+    """Return a helper that flags specific CLI tools as missing (others resolved under /usr/bin)."""
+
+    def _apply(missing: set[str] | None = None) -> None:
+        install_which_map(monkeypatch, missing=missing)
+
+    return _apply

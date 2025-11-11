@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import os
+import shutil
 import types
 from collections.abc import Mapping
 from dataclasses import dataclass
+from importlib import util as importlib_util
 from pathlib import Path
-from typing import Any, Dict, Final, cast
+from typing import Any, Callable, Dict, Final, cast
 
 import pytest
 from rich.console import Console
@@ -68,6 +71,9 @@ __all__ = [
     "_format_vspreview_manual_command",
     "_VSPREVIEW_WINDOWS_INSTALL",
     "_VSPREVIEW_POSIX_INSTALL",
+    "VSPreviewPatch",
+    "install_vspreview_presence",
+    "install_which_map",
 ]
 
 
@@ -566,3 +572,71 @@ def _format_vspreview_manual_command(script_path: Path) -> str:
     if formatter is None:
         raise RuntimeError("_format_vspreview_manual_command is not available on frame_compare")
     return formatter(script_path)
+
+
+_VSPREVIEW_IMPORT_NAMES: Final[frozenset[str]] = frozenset({"vapoursynth", "vspreview", "PySide6"})
+
+
+class VSPreviewPatch:
+    """Context manager for deterministic VSPreview availability (sunsets in Phase 10)."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, present: bool) -> None:
+        self._monkeypatch = monkeypatch
+        self._present = present
+
+    def __enter__(self) -> VSPreviewPatch:
+        install_vspreview_presence(self._monkeypatch, present=self._present)
+        return self
+
+    def __exit__(self, *_exc_info: object) -> bool:
+        return False
+
+
+def install_vspreview_presence(monkeypatch: pytest.MonkeyPatch, *, present: bool) -> None:
+    """Toggle VSPreview module/CLI availability (fixtures replace this helper in Phase 10)."""
+
+    original_find_spec = importlib_util.find_spec
+
+    def _patched_find_spec(name: str, package: str | None = None):
+        if name in _VSPREVIEW_IMPORT_NAMES and not present:
+            return None
+        return original_find_spec(name, package)
+
+    monkeypatch.setattr(importlib_util, "find_spec", _patched_find_spec, raising=False)
+
+    original_which = shutil.which
+
+    def _patched_which(cmd: str, mode: int = os.F_OK, path: str | None = None) -> str | None:
+        if cmd == "vspreview":
+            if present:
+                return f"/usr/bin/{cmd}"
+            return None
+        return original_which(cmd, mode=mode, path=path)
+
+    _patch_shutil_which(monkeypatch, _patched_which)
+
+
+def install_which_map(monkeypatch: pytest.MonkeyPatch, missing: set[str] | None = None) -> None:
+    """Map command availability to `/usr/bin/<cmd>` except for requested missing tools (Phase 10 sunset)."""
+
+    missing_set = set(missing or set())
+
+    def _patched_which(cmd: str, mode: int = os.F_OK, path: str | None = None) -> str | None:
+        if cmd in missing_set:
+            return None
+        return f"/usr/bin/{cmd}"
+
+    _patch_shutil_which(monkeypatch, _patched_which)
+
+
+def _patch_shutil_which(
+    monkeypatch: pytest.MonkeyPatch,
+    stub: Callable[[str, int, str | None], str | None],
+) -> None:
+    """Apply the provided which stub across shim/core modules."""
+
+    targets = [shutil, getattr(frame_compare, "shutil", None), getattr(core_module, "shutil", None)]
+    for target in targets:
+        if target is None:
+            continue
+        monkeypatch.setattr(target, "which", stub, raising=False)

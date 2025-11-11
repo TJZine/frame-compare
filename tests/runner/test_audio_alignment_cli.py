@@ -582,7 +582,9 @@ def test_audio_alignment_vspreview_suggestion_mode(
     assert any("Existing manual trim" in line for line in display.offset_lines)
 
 def test_launch_vspreview_generates_script(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    vspreview_env,
 ) -> None:
     """VSPreview launcher should emit a script and attempt to execute it."""
 
@@ -633,8 +635,8 @@ def test_launch_vspreview_generates_script(
         def __init__(self, returncode: int = 0) -> None:
             self.returncode = returncode
 
+    vspreview_env(True)
     monkeypatch.setattr(frame_compare.shutil, "which", lambda _: None)
-    monkeypatch.setattr(core_module.importlib.util, "find_spec", lambda name: object())
     monkeypatch.setattr(
         frame_compare.subprocess,
         "run",
@@ -855,7 +857,9 @@ def test_write_vspreview_script_generates_unique_filenames_same_second(
     assert first_path.name != second_path.name
 
 def test_launch_vspreview_warns_when_command_missing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    vspreview_env,
 ) -> None:
     """VSPreview launcher should fall back cleanly when no executable is available."""
 
@@ -910,7 +914,7 @@ def test_launch_vspreview_warns_when_command_missing(
 
     monkeypatch.setattr(frame_compare.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(frame_compare.shutil, "which", lambda _: None)
-    monkeypatch.setattr(core_module.importlib.util, "find_spec", lambda _name: None)
+    vspreview_env(False)
 
     prompt_called: list[None] = []
 

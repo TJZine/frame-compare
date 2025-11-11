@@ -300,6 +300,16 @@ _Optional fields:_ Date, Branch, Reviewer, Metrics (LOC touched, tests runtime).
 - [x] Risks noted: Monitor for any latent import cycles if future modules import `selection.py`; `core` shims remain in place so downstream `core._init_clips` patch points stay valid until curated exports ship.
 - [x] Follow-ups for next session: Phase 9.5 curated exports/typing cleanup plus planning for TMDB workflow extraction in Phase 10.
 
+## Session Checklist — 2025-11-11 (Phase 9.6)
+
+- [x] Phase/Sub-phase: `9 / 9.6 Fixture cleanup plan`
+- [x] Modules touched: `tests/helpers/runner_env.py`, `tests/conftest.py`, `tests/test_cli_doctor.py`, `tests/runner/test_audio_alignment_cli.py`, `docs/refactor/mod_refactor.md`, `docs/DECISIONS.md`
+- [x] Commands run: `git status -sb` → `## runner-refactor...origin/runner-refactor [ahead 18]`; `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`; `.venv/bin/ruff check` → `All checks passed!`; `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` → `273 passed, 1 skipped in 40.13 s`
+- [x] Docs updated? (`runner_refactor_checklist`, `DECISIONS`, `CHANGELOG`?): Logged this tracker plus `docs/DECISIONS.md`; other docs unchanged because prod code stayed the same.
+- [x] Tests added/updated: `tests/test_cli_doctor.py` now uses the shared fixtures + localized audio dependency patches; `tests/runner/test_audio_alignment_cli.py` covers the VSPreview fixtures for both present/missing runs.
+- [x] Risks noted: New fixtures sit alongside legacy `_patch_*` helpers—ensure future refactors keep the helper docstrings in sync and avoid reordering `monkeypatch` patches that intentionally override fixture behavior (e.g., forcing `shutil.which` to fail when VSPreview is “present”).
+- [x] Follow-ups for next session: Phase 10 CLI test relocation into `tests/cli/` plus continuing to replace bespoke `_patch_*` helpers once the fixtures soak.
+
 ## Session Checklist — 2025-11-11 (Phase 9.5)
 
 - [x] Phase/Sub-phase: `9 / 9.5 Curated exports + typing`
@@ -454,7 +464,7 @@ Goal: finish modularizing `src/frame_compare/core.py` by extracting remaining CL
 
 **2025-11-11 update (Phase 9.5):** `frame_compare.py` now re-exports the dedicated doctor, config_writer, presets, and VSPreview helpers through `_COMPAT_EXPORTS` so downstream imports no longer reach into `src.frame_compare.core`. `typings/frame_compare.pyi` advertises the curated surface (doctor helpers, VSPreview constants, `RunRequest/RunResult`), and `src/frame_compare/py.typed` plus the `MANIFEST.in` entry mark the package as typed per PEP 561. Tests remain unchanged because the compatibility map still exposes the legacy names, but Pyright now sees the public doctor helpers without falling back to `Any`.
 
-### Sub‑phase 9.6 – Test and fixture cleanup planning (single session)
+### Sub‑phase 9.6 – Fixture cleanup plan + representative refactors (single session)
 
 - Scope
   - Document the test moves for CLI (`tests/cli/test_wizard.py`, `tests/cli/test_doctor.py`) to mirror `tests/runner/` pattern.
@@ -465,6 +475,10 @@ Goal: finish modularizing `src/frame_compare/core.py` by extracting remaining CL
   - No test failures; clearer path for Phase 10 test reorg.
 - Rollback
   - Keep design notes; do not change existing `_patch_*` usages.
+
+**2025-11-11 update (Phase 9.6):** Added shared VSPreview helpers/fixtures plus a thin CLI harness fixture, refactored `tests/test_cli_doctor.py` and `tests/runner/test_audio_alignment_cli.py` to consume them, and noted in helper docstrings that legacy `_patch_*` utilities survive until Phase 10.
+
+- **CLI test split plan:** When we relocate the CLI-focused suites in Phase 10, target `tests/cli/test_wizard.py` and `tests/cli/test_doctor.py` so the structure mirrors `tests/runner/`.
 
 ### Risks & Mitigations
 
@@ -504,9 +518,131 @@ Goal: finish modularizing `src/frame_compare/core.py` by extracting remaining CL
 | 9 | 9.3 Runner unhook (trivial) |  | ☑ | Runner now sources metadata helpers + runtime utils outside `core`, uses `preflight` `_abort_if_site_packages`, and reads VSPreview constants directly. |
 | 9 | 9.4 Selection/init helpers |  | ☑ | `selection.py` now owns clip init + selection window logging; runner imports it and `core` shims delegate (2025‑11‑11). |
 | 9 | 9.5 Curated exports + typing |  | ☑ | `_COMPAT_EXPORTS` now points to the doctor/presets/config_writer modules plus VSPreview helpers, typings expose the doctor helpers, and `py.typed` ships for PEP 561. |
-| 9 | 9.6 Fixture cleanup plan |  | ⛔ | Design fixtures to replace `_patch_*`. |
+| 9 | 9.6 Fixture cleanup plan |  | ☑ | Added VSPreview/which fixtures + runner context manager, refactored doctor/audio-alignment tests, and documented the upcoming CLI test split plan. |
+| 9 | 9.7 Import contracts |  | ⛔ | Enforce import layering using import-linter; fail CI on violations. |
+| 9 | 9.8 Remove legacy shims |  | ⛔ | Delete `core` forwarders for extracted modules; prune redundant curated exports. |
+| 9 | 9.9 Test layout finalization |  | ⛔ | Move CLI tests to tests/cli/ mirroring runner layout. |
+| 9 | 9.10 Public __all__ |  | ⛔ | Add explicit exports to new modules to avoid bleed. |
+| 9 | 9.11 Type strictness ratchet |  | ⛔ | Raise Pyright to strict for library modules (recommended). |
+| 9 | 9.12 Runner API docs |  | ⛔ | Document programmatic API usage and examples. |
 
 ---
+
+## Sub‑phase 9.7 — Import Contracts (enforce boundaries)
+
+Goal: codify and enforce import layering so CLI shims stay thin and modules don’t back‑import higher layers.
+
+Scope
+- Define layers: `frame_compare (CLI)` → `src.frame_compare.runner` → `src.frame_compare.*` modules. Prohibit `modules → CLI` and `modules → core` (core is shim only).
+- Add import-linter contracts and wire into CI.
+
+Deliverables
+- `importlinter.ini` at repo root with contracts:
+  - Layered contract enforcing the ordering above.
+  - Forbidden contract blocking direct imports from `src.frame_compare.*` into `frame_compare.py` (only curated exports allowed).
+- CI step in `.github/workflows/ci.yml` running import-linter.
+
+Acceptance
+- Local run documented in DECISIONS: `python -m importlinter --config importlinter.ini` passes.
+- CI job passes; violations fail with clear messages.
+
+Risks & Mitigations
+- Transitional shims may trip contracts; add temporary ignores with TODO removal notes.
+
+Verification
+- Record command outputs and waivers in `docs/DECISIONS.md` (UTC stamped).
+
+## Sub‑phase 9.8 — Remove Legacy Shims (no deprecation window)
+
+Goal: eliminate redundant `core` forwarders introduced in Phase 9 and rely solely on the extracted modules; minimize dead code and confusion.
+
+Scope
+- Remove the following shim functions from `src/frame_compare/core.py` (they currently delegate to extracted modules):
+  - Doctor: `_collect_doctor_checks`, `_emit_doctor_results` → use `src.frame_compare.doctor`
+  - Config writer/presets: `_read_template_text`, `_load_template_config`, `_deep_merge`, `_diff_config`, `_format_toml_value`, `_flatten_overrides`, `_apply_overrides_to_template`, `_render_config_text`, `_write_config_file`, `_present_diff`, `PRESETS_DIR`, `_list_preset_paths`, `_load_preset_data`, `PRESET_DESCRIPTIONS` → use `src.frame_compare.config_writer` and `src.frame_compare.presets`
+  - Metadata helpers: `_parse_audio_track_overrides`, `_first_non_empty`, `_parse_year_hint` → use `src.frame_compare.metadata`
+  - Selection: `_init_clips`, `_resolve_selection_windows`, `_log_selection_windows` → use `src.frame_compare.selection`
+- Prune redundant curated exports in `frame_compare.py` where they only existed to expose the above shims; ensure curated names point to final modules, not `core`.
+- Intentionally out of scope for 9.8 (kept for Phase 10): TMDB workflow and any remaining VSPreview/wizard shims used by tests.
+
+Deliverables
+- Deletions in `core.py` for the shim functions above.
+- Trim `_COMPAT_EXPORTS` in `frame_compare.py` to remove entries for deleted shims (or repoint to the concrete modules if still useful at top level).
+- Test adjustments only if they directly import deleted shims (prefer importing the concrete module or curated export instead). Aim to keep changes minimal.
+
+Acceptance
+- `pytest -q`, `ruff`, and `pyright --warnings` are clean.
+- No runtime references to removed shims remain in runner/CLI.
+- Tests (and any curated exports) refer to concrete modules after removal.
+
+Verification
+- Record removed names and replacement imports in `docs/DECISIONS.md` with a UTC stamp.
+
+## Sub‑phase 9.9 — Test Layout Finalization (CLI split)
+
+Goal: move remaining CLI tests to `tests/cli/` to mirror `tests/runner/` and improve discoverability.
+
+Scope
+- Move tests: `tests/test_cli_wizard.py` → `tests/cli/test_wizard.py`, `tests/test_cli_doctor.py` → `tests/cli/test_doctor.py`, plus preset CLI tests if present.
+- Ensure fixtures in `tests/conftest.py` keep paths/imports stable.
+
+Deliverables
+- File moves with updated imports if necessary; no behavior changes.
+- Docs tracker updates reflecting new locations.
+
+Acceptance
+- `pytest -q` passes with the same count (modulo path changes).
+
+Verification
+- Record pre/post test discovery and path changes in DECISIONS.
+
+## Sub‑phase 9.10 — Public __all__ Contracts
+
+Goal: constrain module surfaces to intended exports to avoid accidental bleed of private helpers.
+
+Scope
+- Add explicit `__all__` lists to: `src/frame_compare/selection.py`, `runtime_utils.py`, `presets.py`, `config_writer.py`, `doctor.py`.
+- Ensure runner/CLI imports align with `__all__`.
+
+Deliverables
+- Updated modules with `__all__` and any import fixes in call sites.
+
+Acceptance
+- `ruff`/`pyright` clean; no import errors.
+
+## Sub‑phase 9.11 — Type Strictness Ratchet (recommended)
+
+Goal: increase type safety for library modules now that surfaces are stable.
+
+Scope
+- Update `pyrightconfig.json` to set `strict` for `src/frame_compare/**` (excluding the top-level `frame_compare.py` CLI shim if needed).
+- Address surfaced annotations/Optional guards in the new modules (doctor, selection, presets, config_writer, runtime_utils).
+
+Deliverables
+- `pyrightconfig.json` edits and minimal code annotation/guard tweaks if warnings appear.
+
+Acceptance
+- `.venv/bin/pyright --warnings` clean; no behavior changes.
+
+Risks & Mitigations
+- If strictness produces noisy false positives, scope it to the extracted modules first, then widen later.
+
+## Sub‑phase 9.12 — Runner API Docs + Examples
+
+Goal: document the stable programmatic API and provide concise usage recipes.
+
+Scope
+- Update `docs/README_REFERENCE.md` (or README) with examples for:
+  - `RunRequest` → `runner.run` → `RunResult`
+  - Programmatic doctor usage (`collect_checks`/`emit_results`)
+  - Import guidance: use `frame_compare` curated exports; avoid `src.*`.
+
+Deliverables
+- Docs updated; link MIGRATIONS and module map.
+
+Acceptance
+- Examples run in a minimal snippet; no code changes needed.
+
 
 ## Phase 10 – TMDB Workflow Extraction (stub)
 
@@ -520,6 +656,24 @@ Goal: move TMDB workflow out of `core` into `src/frame_compare/tmdb_workflow.py`
   - Same quartet; ensure existing `tests/test_tmdb.py` and runner slow.pics workflow tests keep passing.
 - Docs
   - README and `docs/README_REFERENCE.md` to reference shared workflow; CHANGELOG notes compatibility window.
+
+### Sub‑phase 10.2 — Remove Legacy Shims (post‑extraction cleanup)
+
+Goal: eliminate any remaining `core` forwarders related to TMDB/VSPreview/Wizard that were retained for test stability, so only the extracted modules provide the functionality.
+
+Scope
+- After 10.1 lands, delete TMDB shims from `core` (e.g., `_resolve_tmdb_blocking`, `resolve_tmdb_workflow`, prompts, `_render_collection_name`) and repoint or prune any curated exports that referenced them.
+- Remove lingering VSPreview/Wizard compatibility shims if tests no longer need them (they should rely on `src.frame_compare.vspreview` and `src.frame_compare.wizard`).
+- Update tests to import concrete modules or curated exports where they still referenced the shim names.
+
+Deliverables
+- Shim removals in `src/frame_compare/core.py`.
+- Pruned or repointed entries in `frame_compare._COMPAT_EXPORTS`.
+- Any necessary test import updates.
+
+Acceptance
+- `pytest -q`, `ruff`, and `pyright --warnings` clean with no references to removed shims.
+- Docs updated in `docs/DECISIONS.md` (UTC) summarizing removed names and replacements.
 
 ### Orchestrator Handoff Protocol (applies to Phases 9–10)
 

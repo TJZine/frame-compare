@@ -291,6 +291,15 @@ Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 | Typings & packaging | ☑ | `typings/frame_compare.pyi` exposes the curated doctor helpers, and `src/frame_compare/py.typed` (added to `MANIFEST.in`) marks the package as typed for consumers. |
 | Verification | ☑ | Quartet (`git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`) logged in `docs/DECISIONS.md` on 2025-11-11. |
 
+### Phase 9.6 – Fixture cleanup plan
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| Shared fixtures | ☑ | Added `vspreview_env`, `which_map`, and `cli_env` fixtures (built on new helpers in `tests/helpers/runner_env.py`) so CLI + runner suites share consistent VSPreview/shutil.which behavior. |
+| Test refactors | ☑ | Updated `tests/test_cli_doctor.py` and `tests/runner/test_audio_alignment_cli.py` to consume the new fixtures, keeping legacy `_patch_*` utilities only where necessary. |
+| Verification | ☑ | `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` (273 passed, 1 skipped), `.venv/bin/ruff check`, `.venv/bin/pyright --warnings` captured in `docs/DECISIONS.md` for the Phase 9.6 session. |
+| Follow-up plan | ☑ | Recorded Phase 10 action items (split CLI tests into `tests/cli/` and continue retiring `_patch_*` helpers) so future sessions can build on the fixture work. |
+
 ---
 
 ### Usage Notes

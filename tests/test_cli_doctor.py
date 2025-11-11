@@ -1,39 +1,21 @@
 from __future__ import annotations
 
+import importlib.util as importlib_util
 import json
 from pathlib import Path
-from typing import Any
 
-import pytest
 from click.testing import CliRunner
 
 import frame_compare
-import src.frame_compare.core as core_module
+import pytest
 
 
-def _patch_find_spec(monkeypatch: pytest.MonkeyPatch, missing: set[str]) -> None:
-    original = core_module.importlib.util.find_spec
-
-    def fake(name: str, *args: Any, **kwargs: Any):
-        if name in missing:
-            return None
-        return original(name, *args, **kwargs)
-
-    monkeypatch.setattr(core_module.importlib.util, "find_spec", fake)
-
-
-def _patch_which(monkeypatch: pytest.MonkeyPatch, missing: set[str]) -> None:
-    original = frame_compare.shutil.which
-
-    def fake(cmd: str, *args: Any, **kwargs: Any):
-        if cmd in missing:
-            return None
-        return original(cmd, *args, **kwargs)
-
-    monkeypatch.setattr(frame_compare.shutil, "which", fake)
-
-
-def test_doctor_json_outputs_failures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_doctor_json_outputs_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    vspreview_env,
+    which_map,
+) -> None:
     config_dir = tmp_path / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
     (config_dir / "config.toml").write_text(
@@ -51,11 +33,17 @@ auto_upload = true
         encoding="utf-8",
     )
 
-    _patch_find_spec(
-        monkeypatch,
-        {"vapoursynth", "librosa", "soundfile", "vspreview", "PySide6", "pyperclip"},
-    )
-    _patch_which(monkeypatch, {"ffmpeg", "ffprobe", "vspreview"})
+    vspreview_env(False)
+    which_map({"ffmpeg", "ffprobe", "vspreview"})
+
+    original_find_spec = importlib_util.find_spec
+
+    def _patch_audio_deps(name: str, package: str | None = None):
+        if name in {"librosa", "pyperclip", "soundfile"}:
+            return None
+        return original_find_spec(name, package)
+
+    monkeypatch.setattr(importlib_util, "find_spec", _patch_audio_deps)
 
     runner = CliRunner()
     result = runner.invoke(
@@ -75,7 +63,11 @@ auto_upload = true
     assert statuses["pyperclip"] == "warn"
 
 
-def test_doctor_text_output_with_all_dependencies(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_doctor_text_output_with_all_dependencies(
+    tmp_path: Path,
+    vspreview_env,
+    which_map,
+) -> None:
     config_dir = tmp_path / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
     (config_dir / "config.toml").write_text(
@@ -93,12 +85,8 @@ auto_upload = false
         encoding="utf-8",
     )
 
-    _patch_find_spec(monkeypatch, set())
-
-    def fake_which(cmd: str) -> str:
-        return f"/usr/bin/{cmd}"
-
-    monkeypatch.setattr(frame_compare.shutil, "which", fake_which)
+    vspreview_env(True)
+    which_map(set())
 
     runner = CliRunner()
     result = runner.invoke(
