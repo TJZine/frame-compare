@@ -23,6 +23,7 @@ import src.frame_compare.media as media_module
 import src.frame_compare.metadata as metadata_module
 import src.frame_compare.planner as planner_module
 import src.frame_compare.preflight as preflight_module
+import src.frame_compare.tmdb_workflow as tmdb_workflow_module
 import src.frame_compare.vspreview as vspreview_module
 from src.analysis import SelectionDetail
 from src.datatypes import (
@@ -190,6 +191,8 @@ def _patch_core_helper(monkeypatch: pytest.MonkeyPatch, attr: str, value: object
     alias_map: dict[str, tuple[str, ...]] = {
         "prepare_preflight": ("_prepare_preflight",),
         "_prepare_preflight": ("prepare_preflight",),
+        "resolve_tmdb_workflow": ("resolve_workflow",),
+        "_resolve_tmdb_blocking": ("resolve_blocking",),
         "collect_path_diagnostics": ("_collect_path_diagnostics",),
         "_collect_path_diagnostics": ("collect_path_diagnostics",),
         "_parse_metadata": ("parse_metadata",),
@@ -239,6 +242,8 @@ def _patch_core_helper(monkeypatch: pytest.MonkeyPatch, attr: str, value: object
         getattr(runner_module, "metadata_utils", None),
         planner_module,
         getattr(runner_module, "planner_utils", None),
+        tmdb_workflow_module,
+        getattr(runner_module, "tmdb_workflow", None),
     ]
     for target in targets:
         if target is None:
@@ -268,6 +273,8 @@ def _patch_runner_module(monkeypatch: pytest.MonkeyPatch, attr: str, value: obje
         getattr(runner_module, "alignment_preview_utils", None),
         getattr(runner_module, "config_helpers", None),
         alignment_preview_module,
+        tmdb_workflow_module,
+        getattr(runner_module, "tmdb_workflow", None),
     ]
     for target in targets:
         if target is None:

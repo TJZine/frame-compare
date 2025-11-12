@@ -12,6 +12,7 @@ from click.testing import CliRunner, Result
 
 import frame_compare
 import src.frame_compare.core as core_module
+import src.frame_compare.tmdb_workflow as tmdb_utils
 from src.analysis import CacheLoadResult, FrameMetricsCacheInfo, SelectionDetail
 from src.datatypes import (
     AnalysisConfig,
@@ -169,9 +170,9 @@ def test_runner_auto_upload_cleans_screens_dir(tmp_path: Path, monkeypatch: pyte
     cfg.slowpics.open_in_browser = False
     cfg.slowpics.create_url_shortcut = False
     monkeypatch.setattr(
-        core_module,
-        "resolve_tmdb_workflow",
-        lambda **_: core_module.TMDBLookupResult(
+        tmdb_utils,
+        "resolve_workflow",
+        lambda **_: tmdb_utils.TMDBLookupResult(
             resolution=None,
             manual_override=None,
             error_message=None,
@@ -615,7 +616,7 @@ def test_cli_tmdb_manual_override(
         raise TMDBAmbiguityError([candidate])
 
     _patch_runner_module(monkeypatch, "resolve_tmdb", fake_resolve)
-    _patch_core_helper(monkeypatch, "_prompt_manual_tmdb", lambda candidates: ("TV", "9999"))
+    monkeypatch.setattr(tmdb_utils, "_prompt_manual_tmdb", lambda candidates: ("TV", "9999"))
     _patch_vs_core(monkeypatch, "set_ram_limit", lambda limit: None)
     _patch_vs_core(
         monkeypatch,
@@ -679,7 +680,7 @@ def test_cli_tmdb_confirmation_manual_id(
         return resolution
 
     _patch_runner_module(monkeypatch, "resolve_tmdb", fake_resolve)
-    _patch_core_helper(monkeypatch, "_prompt_tmdb_confirmation", lambda res: (True, ("MOVIE", "999")))
+    monkeypatch.setattr(tmdb_utils, "_prompt_tmdb_confirmation", lambda res: (True, ("MOVIE", "999")))
     _patch_vs_core(monkeypatch, "set_ram_limit", lambda limit: None)
     _patch_vs_core(
         monkeypatch,
@@ -742,7 +743,7 @@ def test_cli_tmdb_confirmation_rejects(
         return resolution
 
     _patch_runner_module(monkeypatch, "resolve_tmdb", fake_resolve)
-    _patch_core_helper(monkeypatch, "_prompt_tmdb_confirmation", lambda res: (False, None))
+    monkeypatch.setattr(tmdb_utils, "_prompt_tmdb_confirmation", lambda res: (False, None))
     _patch_vs_core(monkeypatch, "set_ram_limit", lambda limit: None)
     _patch_vs_core(monkeypatch, "init_clip", lambda *_, **__: types.SimpleNamespace(width=1280, height=720, fps_num=24000, fps_den=1001, num_frames=1800))
     _patch_runner_module(monkeypatch, "select_frames", lambda *_, **__: [1, 2])
@@ -776,8 +777,8 @@ def test_resolve_tmdb_workflow_unattended_ambiguous(
     )
 
     monkeypatch.setattr(
-        core_module,
-        "_resolve_tmdb_blocking",
+        tmdb_utils,
+        "resolve_blocking",
         lambda **_: (_ for _ in ()).throw(TMDBAmbiguityError([candidate])),
     )
     prompted = False
@@ -787,7 +788,7 @@ def test_resolve_tmdb_workflow_unattended_ambiguous(
         prompted = True
         return None
 
-    monkeypatch.setattr(core_module, "_prompt_manual_tmdb", _fail_prompt)
+    monkeypatch.setattr(tmdb_utils, "_prompt_manual_tmdb", _fail_prompt)
 
     result = core_module.resolve_tmdb_workflow(
         files=files,
@@ -819,12 +820,12 @@ def test_resolve_tmdb_workflow_manual_override(monkeypatch: pytest.MonkeyPatch) 
     )
 
     monkeypatch.setattr(
-        core_module,
-        "_resolve_tmdb_blocking",
+        tmdb_utils,
+        "resolve_blocking",
         lambda **_: (_ for _ in ()).throw(TMDBAmbiguityError([candidate])),
     )
     manual_return = ("TV", "999")
-    monkeypatch.setattr(core_module, "_prompt_manual_tmdb", lambda _: manual_return)
+    monkeypatch.setattr(tmdb_utils, "_prompt_manual_tmdb", lambda _: manual_return)
 
     result = core_module.resolve_tmdb_workflow(
         files=files,
@@ -858,7 +859,7 @@ def test_resolve_tmdb_blocking_retries_transient_errors(
         )
         return TMDBResolution(candidate=candidate, margin=1.0, source_query="Recovered")
 
-    monkeypatch.setattr(core_module, "resolve_tmdb", fake_resolve)
+    monkeypatch.setattr(tmdb_utils, "resolve_tmdb", fake_resolve)
     monkeypatch.setattr(core_module.time, "sleep", lambda _seconds: None)
 
     cfg = TMDBConfig(api_key="token")

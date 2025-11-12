@@ -555,6 +555,7 @@ Goal: finish modularizing `src/frame_compare/core.py` by extracting remaining CL
 | 9 | 9.10 Public __all__ |  | ☑ | Added explicit `__all__` lists for the extracted modules (doctor/config_writer/presets/runtime_utils/selection) so wildcard imports mirror the curated exports; tracked in DECISIONS on 2025‑11‑11. |
 | 9 | 9.11 Type strictness ratchet |  | ☑ | `pyrightconfig.json` now enables `"strict": ["src/frame_compare"]`, and the resulting annotation/Optional fixes keep `.venv/bin/pyright --warnings` clean (see DECISIONS 2025‑11‑11). |
 | 9 | 9.12 Runner API docs |  | ☑ | Documented curated runner/doctor API usage, reference guide, and tracker/log updates. |
+| 10 | 10.1 TMDB workflow extraction |  | ⛔ | Pending extraction of TMDB helpers into `src/frame_compare/tmdb_workflow.py`; `core.py` still imports `_tmdb_module` directly. |
 | 10 | Compatibility cleanup |  | ⛔ | After Phases 9–10 land, audit `_COMPAT_EXPORTS`/shims and remove any temporary bridges before closing the refactor. |
 
 ---
@@ -684,23 +685,6 @@ Deliverables
 Acceptance
 - Examples run in a minimal snippet; no code changes needed.
 
-## Post-phase Cleanup — Compatibility shim retirement
-
-Goal: ensure all temporary bridges (compat exports, wizard/VSPreview/TMDB shims) are removed once the refactor finishes.
-
-Scope
-- Audit `_COMPAT_EXPORTS`, wizard/VSPreview/TMDB helpers, and any other aliases marked “temporary” during Phases 1–10.
-- Confirm downstream automation/imports now rely on the extracted modules or curated exports.
-
-Deliverables
-- Deletions of obsolete compatibility surfaces plus documentation updates (README/CHANGELOG, trackers, DEC).
-- Verification quartet demonstrating no remaining references to the removed shims.
-
-Acceptance
-- `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings` all pass after the cleanup.
-- Trackers and DEC log explicitly note the removed names and replacement guidance.
-
-
 ## Phase 10 – TMDB Workflow Extraction (stub)
 
 Goal: move TMDB workflow out of `core` into `src/frame_compare/tmdb_workflow.py` with stable, typed API for both CLI and runner.
@@ -714,7 +698,15 @@ Goal: move TMDB workflow out of `core` into `src/frame_compare/tmdb_workflow.py`
 - Docs
   - README and `docs/README_REFERENCE.md` to reference shared workflow; CHANGELOG notes compatibility window.
 
-### Sub‑phase 10.2 — Remove Legacy Shims (post‑extraction cleanup)
+### Sub-phase 10.1 — Extract TMDB Workflow
+
+- [x] Move `TMDBLookupResult`, `_should_retry_tmdb_error`, `_resolve_tmdb_blocking`, `resolve_tmdb_workflow`, `_prompt_manual_tmdb`, `_prompt_tmdb_confirmation`, and `_render_collection_name` into `src/frame_compare/tmdb_workflow.py` behind a public API (`resolve_workflow`, `resolve_blocking`, `render_collection_name`).
+- [x] Rewire `core`, `runner`, curated exports, and typings to import the new module while keeping thin forwarders so existing tests/scripts stay stable ahead of Phase 10.2.
+- [x] Append docs/DECISIONS + tracker notes plus rerun the verification quartet to confirm behavior parity (slow.pics naming, prompts, unattended paths).
+
+**2025-11-12 update:** New module `src/frame_compare/tmdb_workflow.py` now owns the TMDB workflow dataclass, blocking resolver, rendering helper, and prompt utilities. `core.py` simply forwards the public API plus transitional prompt wrappers, the runner imports `tmdb_workflow` directly, and `_COMPAT_EXPORTS`/typing stubs now point to the extracted module (including an optional `render_collection_name` export for scripts). `docs/refactor/mod_refactor.md` + `docs/DECISIONS.md` capture the migration details and the `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings` run recorded below passed without regressions.
+
+### Sub-phase 10.2 — Remove Legacy Shims (post-extraction cleanup)
 
 Goal: eliminate any remaining `core` forwarders related to TMDB/VSPreview/Wizard that were retained for test stability, so only the extracted modules provide the functionality.
 
@@ -732,6 +724,21 @@ Acceptance
 - `pytest -q`, `ruff`, and `pyright --warnings` clean with no references to removed shims.
 - Docs updated in `docs/DECISIONS.md` (UTC) summarizing removed names and replacements.
 
+## Post-phase Cleanup — Compatibility shim retirement
+
+Goal: ensure all temporary bridges (compat exports, wizard/VSPreview/TMDB shims, !_runner helpers that no longer need to bounce through _patch_core_helper and any other bridge code (if its still in use note this)) are removed once the refactor finishes.
+
+Scope
+- Audit `_COMPAT_EXPORTS`, wizard/VSPreview/TMDB helpers, and any other aliases marked “temporary” during Phases 1–10.
+- Confirm downstream automation/imports now rely on the extracted modules or curated exports.
+Deliverables
+- Deletions of obsolete compatibility surfaces plus documentation updates (README/CHANGELOG, trackers, DEC).
+- Verification quartet demonstrating no remaining references to the removed shims.
+
+Acceptance
+- `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings` all pass after the cleanup.
+- Trackers and DEC log explicitly note the removed names and replacement guidance.
+  
 ### Orchestrator Handoff Protocol (applies to Phases 9–10)
 
 - Reviewer orchestrator prepares: scope, entry points, acceptance tests to watch, and risk notes per sub‑phase.
@@ -783,7 +790,7 @@ Planned moves from `src/frame_compare/core.py` with start lines for reviewer nav
   - `_resolve_selection_windows` (src/frame_compare/core.py:1299)
   - `_log_selection_windows` (src/frame_compare/core.py:1353)
 
-- Keep in `core` (Phase 10 extraction plan to `tmdb_workflow.py`)
+- Moved to `src/frame_compare/tmdb_workflow.py` during Phase 10.1 (thin forwarders remain in `core` until Sub-phase 10.2 removes them)
   - `TMDBLookupResult` (src/frame_compare/core.py:671)
   - `_should_retry_tmdb_error` (src/frame_compare/core.py:681)
   - `_resolve_tmdb_blocking` (src/frame_compare/core.py:698)
@@ -801,6 +808,16 @@ Planned moves from `src/frame_compare/core.py` with start lines for reviewer nav
 - [x] Tests added/updated: No
 - [x] Risks noted: None (docs only)
 - [x] Follow-ups for next session: None
+
+## Session Checklist — 2025-11-12 (Phase 10.1)
+
+- [x] Phase/Sub-phase: `10 / 10.1`
+- [x] Modules/files touched: `src/frame_compare/tmdb_workflow.py`, `src/frame_compare/core.py`, `src/frame_compare/runner.py`, `frame_compare.py`, `tests/helpers/runner_env.py`, `tests/runner/test_cli_entry.py`, `tests/runner/test_slowpics_workflow.py`, `typings/frame_compare.pyi`, `docs/refactor/mod_refactor.md`, `docs/DECISIONS.md`
+- [x] Commands run: `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`
+- [x] Docs updated? (`runner_refactor_checklist`, `DECISIONS`, `CHANGELOG`?): docs/refactor/mod_refactor.md (phase tracker + session log) and docs/DECISIONS.md
+- [x] Tests added/updated: Updated runner + slow.pics suites to patch `tmdb_workflow` and ensure TMDB prompts/resolution stubs hit the new module
+- [x] Risks noted: Transitional core shims still exist until Phase 10.2; need follow-up to delete shim exports once callers migrate
+- [x] Follow-ups for next session: Phase 10.2 cleanup (delete core shims, point tests directly at `tmdb_workflow`)
 
 ## Verification Commands Reference
 

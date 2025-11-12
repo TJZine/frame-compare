@@ -3,20 +3,15 @@
 
 from __future__ import annotations
 
-import asyncio
 import datetime as _dt  # noqa: F401  (re-exported via frame_compare)
 import importlib as _importlib
 import logging
 import math
-import threading
 import time
-from dataclasses import dataclass
 from pathlib import Path
-from string import Template
 from typing import Any, Final, List, Mapping, MutableMapping, NoReturn, Optional, Sequence, Tuple, cast
 
 import click
-import httpx
 from rich import print
 from rich.console import Console as _Console  # noqa: F401
 from rich.progress import Progress as _Progress  # noqa: F401
@@ -25,9 +20,9 @@ from rich.progress import ProgressColumn as _ProgressColumn
 import src.frame_compare.alignment_preview as _alignment_preview_module
 import src.frame_compare.alignment_runner as _alignment_runner_module
 import src.frame_compare.doctor as _doctor_module
-import src.frame_compare.metadata as _metadata_module
 import src.frame_compare.planner as _planner_module
 import src.frame_compare.preflight as _preflight_constants
+import src.frame_compare.tmdb_workflow as _tmdb_module
 import src.frame_compare.vspreview as _vspreview_module
 import src.frame_compare.wizard as _wizard_module
 import src.screenshot as _screenshot_module
@@ -52,7 +47,6 @@ from src.analysis import (
     write_selection_cache_file as _write_selection_cache_file,  # noqa: F401
 )
 from src.config_loader import load_config as _load_config
-from src.datatypes import TMDBConfig
 from src.frame_compare.cli_runtime import (
     AudioAlignmentJSON as _AudioAlignmentJSON,  # noqa: F401 - re-exported for compatibility
 )
@@ -121,14 +115,8 @@ from src.slowpics import (
 from src.slowpics import (
     upload_comparison as _upload_comparison,
 )
-from src.tmdb import (
-    TMDBAmbiguityError,  # noqa: F401
-    TMDBCandidate,
-    TMDBResolution,
-    TMDBResolutionError,
-    parse_manual_id,
-    resolve_tmdb,  # noqa: F401
-)
+from src.tmdb import TMDBCandidate, TMDBResolution
+from src.tmdb import resolve_tmdb as _resolve_tmdb_public
 from src.vs_core import ClipInitError as _ClipInitError
 from src.vs_core import ClipProcessError as _ClipProcessError
 
@@ -162,6 +150,7 @@ select_frames = cast(Any, _select_frames)
 selection_details_to_json = cast(Any, _selection_details_to_json)
 selection_hash_for_config = cast(Any, _selection_hash_for_config)
 write_selection_cache_file = cast(Any, _write_selection_cache_file)
+resolve_tmdb = _resolve_tmdb_public
 AudioAlignmentJSON = _AudioAlignmentJSON
 CLIAppError = _CLIAppError
 ClipRecord = _ClipRecord
@@ -224,230 +213,25 @@ _abort_if_site_packages = abort_if_site_packages
 
 
 
-@dataclass
-class TMDBLookupResult:
-    """Outcome of the TMDB workflow (resolution, manual overrides, or failure)."""
-
-    resolution: TMDBResolution | None
-    manual_override: tuple[str, str] | None
-    error_message: Optional[str]
-    ambiguous: bool
-
-
-def _should_retry_tmdb_error(message: str) -> bool:
-    """Return True when *message* indicates a transient TMDB/HTTP failure."""
-
-    lowered = message.lower()
-    transient_markers = (
-        "request failed",
-        "timeout",
-        "temporarily",
-        "connection",
-        "503",
-        "502",
-        "504",
-        "429",
-    )
-    return any(marker in lowered for marker in transient_markers)
-
-
-def _resolve_tmdb_blocking(
-    *,
-    file_name: str,
-    tmdb_cfg: TMDBConfig,
-    year_hint: Optional[int],
-    imdb_id: Optional[str],
-    tvdb_id: Optional[str],
-    attempts: int = 3,
-    transport_retries: int = 2,
-) -> TMDBResolution | None:
-    """Resolve TMDB metadata even when the caller already owns an event loop."""
-
-    max_attempts = max(1, attempts)
-    backoff = 0.75
-    for attempt in range(max_attempts):
-        transport_cls = getattr(httpx, "AsyncHTTPTransport", None)
-        if transport_cls is None:
-            raise RuntimeError("httpx.AsyncHTTPTransport is unavailable in this environment")
-        transport = transport_cls(retries=max(0, transport_retries))
-
-        async def _make_coro():
-            return await resolve_tmdb(
-                file_name,
-                config=tmdb_cfg,
-                year=year_hint,
-                imdb_id=imdb_id,
-                tvdb_id=tvdb_id,
-                unattended=tmdb_cfg.unattended,
-                category_preference=tmdb_cfg.category_preference,
-                http_transport=transport,
-            )
-
-        try:
-            try:
-                asyncio.get_running_loop()
-            except RuntimeError:
-                return asyncio.run(_make_coro())
-
-            result_holder: list[TMDBResolution | None] = []
-            error_holder: list[BaseException] = []
-
-            def _worker() -> None:
-                try:
-                    result_holder.append(asyncio.run(_make_coro()))
-                except BaseException as exc:  # pragma: no cover - bubbled up when joined
-                    error_holder.append(exc)
-
-            thread = threading.Thread(target=_worker, daemon=True)
-            thread.start()
-            thread.join()
-            if error_holder:
-                raise error_holder[0]
-            return result_holder[0] if result_holder else None
-        except TMDBResolutionError as exc:
-            message = str(exc)
-            if attempt + 1 >= max_attempts or not _should_retry_tmdb_error(message):
-                raise
-            time.sleep(backoff)
-            backoff = min(backoff * 2, 4.0)
-        finally:
-            close_fn = getattr(transport, "close", None)
-            if callable(close_fn):
-                close_fn()
-    return None
-
-
-def resolve_tmdb_workflow(
-    *,
-    files: Sequence[Path],
-    metadata: Sequence[Mapping[str, str]],
-    tmdb_cfg: TMDBConfig,
-    year_hint_raw: Optional[str] = None,
-) -> TMDBLookupResult:
-    """
-    Resolve TMDB metadata for the current comparison set, prompting when needed.
-    """
-
-    if not files or not tmdb_cfg.api_key.strip():
-        return TMDBLookupResult(
-            resolution=None,
-            manual_override=None,
-            error_message=None,
-            ambiguous=False,
-        )
-
-    base_file = files[0]
-    imdb_hint_raw = _metadata_module.first_non_empty(metadata, "imdb_id")
-    imdb_hint = imdb_hint_raw.lower() if imdb_hint_raw else None
-    tvdb_hint = _metadata_module.first_non_empty(metadata, "tvdb_id") or None
-    effective_year_hint = year_hint_raw or _metadata_module.first_non_empty(metadata, "year")
-    year_hint = _metadata_module.parse_year_hint(effective_year_hint)
-
-    resolution: TMDBResolution | None = None
-    manual_tmdb: tuple[str, str] | None = None
-    error_message: Optional[str] = None
-    ambiguous = False
-
-    try:
-        resolution = _resolve_tmdb_blocking(
-            file_name=base_file.name,
-            tmdb_cfg=tmdb_cfg,
-            year_hint=year_hint,
-            imdb_id=imdb_hint,
-            tvdb_id=tvdb_hint,
-        )
-    except TMDBAmbiguityError as exc:
-        ambiguous = True
-        if tmdb_cfg.unattended:
-            error_message = (
-                "TMDB returned multiple matches but unattended mode prevented prompts."
-            )
-        else:
-            manual_tmdb = _prompt_manual_tmdb(exc.candidates)
-    except TMDBResolutionError as exc:
-        error_message = str(exc)
-    else:
-        if resolution is not None and tmdb_cfg.confirm_matches and not tmdb_cfg.unattended:
-            accepted, override = _prompt_tmdb_confirmation(resolution)
-            if override:
-                manual_tmdb = override
-                resolution = None
-            elif not accepted:
-                resolution = None
-
-    return TMDBLookupResult(
-        resolution=resolution,
-        manual_override=manual_tmdb,
-        error_message=error_message,
-        ambiguous=ambiguous,
-    )
+TMDBLookupResult = _tmdb_module.TMDBLookupResult
+_resolve_tmdb_blocking = _tmdb_module.resolve_blocking
+resolve_tmdb_workflow = _tmdb_module.resolve_workflow
+_render_collection_name = _tmdb_module.render_collection_name
+render_collection_name = _tmdb_module.render_collection_name
 
 
 def _prompt_manual_tmdb(candidates: Sequence[TMDBCandidate]) -> tuple[str, str] | None:
     """Prompt the user to choose a TMDB candidate when multiple matches exist."""
-    print("[yellow]TMDB search returned multiple plausible matches:[/yellow]")
-    for cand in candidates:
-        year = cand.year or "????"
-        print(
-            f"  • [cyan]{cand.category.lower()}/{cand.tmdb_id}[/cyan] "
-            f"{cand.title or '(unknown title)'} ({year}) score={cand.score:0.3f}"
-        )
-    while True:
-        response = click.prompt(
-            "Enter TMDB id (movie/##### or tv/#####) or leave blank to skip",
-            default="",
-            show_default=False,
-        ).strip()
-        if not response:
-            return None
-        try:
-            return parse_manual_id(response)
-        except TMDBResolutionError as exc:
-            print(f"[red]Invalid TMDB identifier:[/red] {exc}")
+    prompt = getattr(_tmdb_module, "_prompt_manual_tmdb")
+    return prompt(candidates)
 
 
 def _prompt_tmdb_confirmation(
     resolution: TMDBResolution,
 ) -> tuple[bool, tuple[str, str] | None]:
     """Ask the user to confirm the TMDB result or supply a manual override."""
-    title = resolution.title or resolution.original_title or "(unknown title)"
-    year = resolution.year or "????"
-    category = resolution.category.lower()
-    link = f"https://www.themoviedb.org/{category}/{resolution.tmdb_id}"
-    print(
-        "[cyan]TMDB match found:[/cyan] "
-        f"{title} ({year}) -> [underline]{link}[/underline]"
-    )
-    while True:
-        response = click.prompt(
-            "Confirm TMDB match? [Y/n or enter movie/#####]",
-            default="y",
-            show_default=False,
-        ).strip()
-        if not response or response.lower() in {"y", "yes"}:
-            return True, None
-        if response.lower() in {"n", "no"}:
-            return False, None
-        try:
-            manual = parse_manual_id(response)
-        except TMDBResolutionError as exc:
-            print(f"[red]Invalid TMDB identifier:[/red] {exc}")
-        else:
-            return True, manual
-
-
-def _render_collection_name(template_text: str, context: Mapping[str, str]) -> str:
-    """Render the configured TMDB collection template with *context* values."""
-    if "${" not in template_text:
-        return template_text
-    try:
-        template = Template(template_text)
-        return template.safe_substitute(context)
-    except Exception:
-        return template_text
-
-
-render_collection_name = _render_collection_name
+    confirm = getattr(_tmdb_module, "_prompt_tmdb_confirmation")
+    return confirm(resolution)
 
 
 def _estimate_analysis_time(file: Path, cache_dir: Path | None) -> float:

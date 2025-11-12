@@ -29,6 +29,7 @@ import src.frame_compare.planner as planner_utils
 import src.frame_compare.preflight as preflight_utils
 import src.frame_compare.runtime_utils as runtime_utils
 import src.frame_compare.selection as selection_utils
+import src.frame_compare.tmdb_workflow as tmdb_workflow
 import src.frame_compare.vspreview as vspreview_utils
 import src.report as html_report
 from src import vs_core
@@ -515,7 +516,7 @@ def run(request: RunRequest) -> RunResult:
     slowpics_verbose_tmdb_tag: Optional[str] = None
 
     if tmdb_api_key_present:
-        lookup = core.resolve_tmdb_workflow(
+        lookup = tmdb_workflow.resolve_workflow(
             files=files,
             metadata=metadata,
             tmdb_cfg=cfg.tmdb,
@@ -586,7 +587,7 @@ def run(request: RunRequest) -> RunResult:
     # destination title, while the suffix is only appended when we fall back to the resolved
     # base title (ResolvedTitle + optional Year). This mirrors the README contract.
     if collection_template:
-        rendered_collection = core.render_collection_name(collection_template, tmdb_context).strip()
+        rendered_collection = tmdb_workflow.render_collection_name(collection_template, tmdb_context).strip()
         final_collection_name = rendered_collection or "Frame Comparison"
     else:
         derived_title = resolved_title_value or metadata_title or files[0].stem

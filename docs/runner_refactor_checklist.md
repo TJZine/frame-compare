@@ -362,6 +362,14 @@ Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 | Removal + verification | ⛔ | Delete obsolete compatibility exports, run the quartet, and log the removals in `docs/DECISIONS.md` with replacement guidance so future contributors know the final surfaces. |
 | Final doc pass | ⛔ | Update this checklist + tracker tables to mark compatibility cleanup complete, signalling the refactor’s closure. |
 
+### Phase 10.1 – TMDB workflow extraction (planned)
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| Module creation | ⛔ | `src/frame_compare/core.py:216-274` still imports `_tmdb_module` and exposes `_resolve_tmdb_blocking`, `resolve_tmdb_workflow`, `_prompt_manual_tmdb`, `_prompt_tmdb_confirmation`, and `_render_collection_name`; these need to move into `src/frame_compare/tmdb_workflow.py` per the plan. |
+| Runner/CLI rewiring | ⛔ | Runner and CLI continue to call the core shims; after extracting the workflow, they should import from the new module while `_COMPAT_EXPORTS`/core provide temporary aliases. |
+| Tests/docs | ⛔ | No DEC entry or tracker logs exist for Phase 10.1 yet; once the module extraction lands, update this checklist, `docs/refactor/mod_refactor.md`, and DEC with the verification quartet. |
+
 ---
 
 ### Usage Notes

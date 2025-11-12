@@ -27,6 +27,7 @@ import src.frame_compare.doctor as doctor_module
 import src.frame_compare.media as _media
 import src.frame_compare.preflight as _preflight
 import src.frame_compare.presets as presets_lib
+import src.frame_compare.tmdb_workflow as tmdb_workflow
 import src.frame_compare.vspreview as _vspreview
 import src.frame_compare.wizard as _wizard
 from src import vs_core as _vs_core
@@ -79,9 +80,10 @@ _COMPAT_EXPORTS: dict[str, object] = {
     "_apply_vspreview_manual_offsets": _core._apply_vspreview_manual_offsets,  # Deprecated: use frame_compare.vspreview.apply_manual_offsets
     "_write_vspreview_script": _core._write_vspreview_script,  # Deprecated: use frame_compare.vspreview.write_script
     "_validate_tonemap_overrides": _core._validate_tonemap_overrides,
-    "_resolve_tmdb_blocking": _core._resolve_tmdb_blocking,
-    "resolve_tmdb_workflow": _core.resolve_tmdb_workflow,
-    "TMDBLookupResult": _core.TMDBLookupResult,
+    "_resolve_tmdb_blocking": tmdb_workflow.resolve_blocking,
+    "resolve_tmdb_workflow": tmdb_workflow.resolve_workflow,
+    "TMDBLookupResult": tmdb_workflow.TMDBLookupResult,
+    "render_collection_name": tmdb_workflow.render_collection_name,
     "PROJECT_ROOT": _core.PROJECT_ROOT,
     "ScreenshotError": _core.ScreenshotError,
     "_dt": _core._dt,

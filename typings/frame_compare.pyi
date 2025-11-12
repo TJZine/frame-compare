@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Optional
+from typing import Any, Iterable, Mapping, Optional, Sequence, Tuple
 
 import click as click
 import shutil as shutil
@@ -10,12 +10,14 @@ import sys as sys
 from click.core import Group
 from rich.console import Console as Console
 from src import vs_core as vs_core
+from src.datatypes import TMDBConfig
 from src.frame_compare import cli_runtime as cli_runtime
 from src.frame_compare import core as core
 from src.frame_compare import config_writer as config_writer
 from src.frame_compare import doctor as doctor
 from src.frame_compare import presets as presets
 from src.frame_compare import vspreview as vspreview
+from src.frame_compare.tmdb_workflow import TMDBLookupResult as TMDBLookupResult
 from src.frame_compare.cli_runtime import (
     AudioAlignmentJSON,
     JsonTail,
@@ -54,6 +56,7 @@ from src.frame_compare.media import _discover_media
 from src.frame_compare.alignment_preview import _confirm_alignment_with_screenshots
 from src.frame_compare.runner import RunRequest as RunRequest
 from src.frame_compare.runner import RunResult as RunResult
+from src.tmdb import TMDBResolution
 
 def _format_vspreview_manual_command(script_path: Path) -> str: ...
 
@@ -95,3 +98,27 @@ def emit_doctor_results(
 
 
 main: Group
+
+
+def _resolve_tmdb_blocking(
+    *,
+    file_name: str,
+    tmdb_cfg: TMDBConfig,
+    year_hint: Optional[int],
+    imdb_id: Optional[str],
+    tvdb_id: Optional[str],
+    attempts: int = ...,
+    transport_retries: int = ...,
+) -> Optional[TMDBResolution]: ...
+
+
+def resolve_tmdb_workflow(
+    *,
+    files: Sequence[Path],
+    metadata: Sequence[Mapping[str, str]],
+    tmdb_cfg: TMDBConfig,
+    year_hint_raw: Optional[str] = ...,
+) -> TMDBLookupResult: ...
+
+
+def render_collection_name(template_text: str, context: Mapping[str, Any]) -> str: ...

@@ -15,6 +15,7 @@ from rich.console import Console
 
 import frame_compare
 import src.frame_compare.core as core_module
+import src.frame_compare.tmdb_workflow as tmdb_utils
 from src.analysis import CacheLoadResult, FrameMetricsCacheInfo, SelectionDetail
 from src.datatypes import (
     AnalysisConfig,
@@ -840,7 +841,7 @@ def test_runner_handles_existing_event_loop(tmp_path: Path, monkeypatch: pytest.
             ambiguous=False,
         )
 
-    monkeypatch.setattr(core_module, "resolve_tmdb_workflow", fake_tmdb_workflow)
+    monkeypatch.setattr(tmdb_utils, "resolve_workflow", fake_tmdb_workflow)
 
     request = runner_module.RunRequest(
         config_path=str(preflight.config_path),
