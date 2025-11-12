@@ -387,7 +387,7 @@ Promotes subsampled SDR clips to YUV444P16 before cropping/padding to prevent mo
 - **Change screenshot output folder?** Set `[screenshots].directory_name` to a relative path; containment checks block escapes.
 - **Opt into slow.pics uploads?** Set `[slowpics].auto_upload = true`.
 - **Where are caches stored?** `[analysis].frame_data_filename` (default `generated.compframes`).
-- **Supported OS?** macOS, Linux, Windows (64-bit Python 3.13+).
+- **Supported OS?** Linux and Windows (64-bit Python 3.13+). macOS support is temporarily paused until the VapourSynth/L-SMASH stack is stable upstream.
 - **GUI available?** CLI-first; VSPreview supplies optional GUI alignment flows.
 
 ### Performance
@@ -450,7 +450,7 @@ Distributed under the [MIT License](LICENSE). Frame Compare builds upon FFmpeg, 
 
 ### Support
 
-- Works on macOS, Linux, Windows (64-bit). Ensure FFmpeg is on `PATH` and VapourSynth is installed when using the primary renderer.
+- Works on Linux and Windows (64-bit). Ensure FFmpeg is on `PATH` and VapourSynth is installed when using the primary renderer. macOS support is currently paused pending fixes in the upstream VapourSynth/L-SMASH toolchain.
 - Additional docs: [docs/audio_alignment_pipeline.md](docs/audio_alignment_pipeline.md), [docs/geometry_pipeline.md](docs/geometry_pipeline.md), [docs/hdr_tonemap_overview.md](docs/hdr_tonemap_overview.md), [docs/context_summary.md](docs/context_summary.md).
 - File issues or feature requests via GitHub; report sensitive bugs privately.
 

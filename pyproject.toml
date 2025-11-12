@@ -44,6 +44,9 @@ dev = [
     "requests-mock",
     "ruff",
     "black",
+    "build",
+    "twine",
+    "check-wheel-contents",
 ]
 
 [tool.setuptools]

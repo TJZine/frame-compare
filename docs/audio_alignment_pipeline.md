@@ -105,7 +105,7 @@ Project maintainers can capture the optional group so collaborators re-use it wi
 ```toml
 [project.optional-dependencies]
 preview = ["vspreview>=0.7", "PySide6>=6.6"]
-# or on Linux/macOS: ["vspreview>=0.7", "PyQt5>=5.15"]
+# or on Linux (macOS support pending): ["vspreview>=0.7", "PyQt5>=5.15"]
 ```
 
 To launch VSPreview on-demand without persisting the extras, run:

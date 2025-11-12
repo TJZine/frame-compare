@@ -1,5 +1,31 @@
 # Decisions Log
 
+- *2025-11-12:* Sub-phase 11.9 — CI & packaging checks. Extended the forbidden import-linter contracts so `src.frame_compare.render`, `src.frame_compare.analysis`, and `src.frame_compare.vs` cannot back-import the CLI shim or `src.frame_compare.core`, wired the lint workflow to run the config-doc generator `--check` step before enforcing `lint-imports`, and added a dedicated `packaging` GitHub job that builds artifacts, runs `twine check`, validates wheel contents, and surfaces warning-level notices from `check-wheel-contents`.
+  - `date -u +%Y-%m-%d` → `2025-11-12`
+  - `git status -sb` →
+    ```
+    ## runner-refactor...origin/runner-refactor [ahead 4]
+     M .github/workflows/ci.yml
+     M CHANGELOG.md
+     M docs/DECISIONS.md
+     M docs/refactor/mod_refactor.md
+     M docs/runner_refactor_checklist.md
+     M importlinter.ini
+     M pyproject.toml
+    ```
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` → `290 passed, 1 skipped in 40.69s` (after installing Homebrew `vapoursynth`, then running `UV_CACHE_DIR=.uv_cache uv pip install vapoursynth` to expose the Python bindings, followed by `UV_CACHE_DIR=.uv_cache uv pip install vspreview PySide6`).
+  - `.venv/bin/ruff check` → `All checks passed!`
+  - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+  - `python3 tools/gen_config_docs.py --check docs/_generated/config_tables.md` → exits `0` with no output
+  - `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini` → `Contracts: 3 kept, 0 broken` (after `UV_CACHE_DIR=.uv_cache uv pip install import-linter`)
+  - Packaging sweep (ran earlier in this session with network access): `uv run --no-sync python -m build` (produced sdist+wheel), `uv run --no-sync twine check dist/*` (clean aside from twine’s known description warning), inline wheel audit script (confirmed `src/frame_compare/py.typed` plus `data/config.toml.template`, `data/report/index.html`, `data/report/app.css`, `data/report/app.js`), and `uv run --no-sync check-wheel-contents dist/*.whl || true` (warnings only). Results recorded here so future sessions can rely on the verified artifacts.
+
+- *2025-11-12:* CI adds a dedicated packaging job that runs `uv run --no-sync python -m build`, `uv run --no-sync twine check dist/*`, a wheel-contents validation script for `src/frame_compare/py.typed` plus `data/config.toml.template` and `data/report/{index.html,app.css,app.js}`, and `uv run --no-sync check-wheel-contents dist/*.whl || true` so the split modules keep shipping type/data assets correctly.
+
+- *2025-11-12:* Import-linter’s `forbid_cli_backimports` and `forbid_core_backimports` contracts now list `src.frame_compare.render`, `src.frame_compare.analysis`, and `src.frame_compare.vs`, keeping the freshly split packages from depending on the CLI shim or `core`; verification stays `uv run --no-sync lint-imports --config importlinter.ini`.
+
+- *2025-11-12:* The config-doc generator check from Sub-phase 11.8 now runs inside the lint workflow via `uv run --no-sync python tools/gen_config_docs.py --check docs/_generated/config_tables.md`, preventing drift between `src/datatypes.py` and the generated tables.
+
 - *2025-11-12:* Sub-phase 11.8 — Config docs generation (stamped via `date -u +%Y-%m-%d`). Added `tools/gen_config_docs.py` to introspect the dataclasses in `src/datatypes.py`, generate `docs/_generated/config_tables.md`, and gate the `--check` mode so the verification bundle can detect drift without mutating the committed tables. The generated reference is linked from `docs/README_REFERENCE.md`, and the sentinel test `python3 tools/gen_config_docs.py --check docs/_generated/config_tables.md` now guards schema changes.
   - `date -u +%Y-%m-%d` → `2025-11-12`
   - `git status -sb` →

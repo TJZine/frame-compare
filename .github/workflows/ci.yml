@@ -64,6 +64,8 @@ jobs:
         run: uv sync --group dev --frozen --python 3.13 --no-install-package vapoursynth
       - name: Ruff lint
         run: uv run --no-sync ruff check
+      - name: Config docs generator check
+        run: uv run --no-sync python tools/gen_config_docs.py --check docs/_generated/config_tables.md
       - name: Install import-linter
         run: uv pip install import-linter
       - name: Verify import contracts
@@ -108,3 +110,47 @@ jobs:
           '@
           Set-Content -Path $scriptPath -Value $script -Encoding UTF8
           python $scriptPath
+  packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - name: Ensure cache directory
+        run: mkdir -p ~/.cache/uv
+      - name: Cache uv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+      - name: Install packaging tooling
+        run: uv pip install build twine check-wheel-contents
+      - name: Build wheel and sdist
+        run: uv run --no-sync python -m build
+      - name: Validate metadata with twine
+        run: uv run --no-sync twine check dist/*
+      - name: Validate wheel contents
+        run: |
+          uv run --no-sync python - <<'PY'
+          import glob
+          import sys
+          import zipfile
+
+          wheels = glob.glob('dist/*.whl')
+          if not wheels:
+              sys.exit('No wheel built.')
+          with zipfile.ZipFile(wheels[0]) as z:
+              names = set(z.namelist())
+          required = {
+              'src/frame_compare/py.typed',
+              'data/config.toml.template',
+              'data/report/index.html',
+              'data/report/app.css',
+              'data/report/app.js',
+          }
+          missing = sorted(name for name in required if name not in names)
+          if missing:
+              sys.exit(f'Missing expected files in wheel: {missing}')
+          print('Wheel contents OK')
+          PY
+      - name: check-wheel-contents (warnings only)
+        run: uv run --no-sync check-wheel-contents dist/*.whl || true

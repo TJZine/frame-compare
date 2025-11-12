@@ -747,7 +747,7 @@ Goal: reduce remaining monoliths, harden subprocess/logging practices, and final
 | 11 | 11.6 vs_core split by concerns |  | ☑ | `src/frame_compare/vs/{env,source,props,color,tonemap}.py` host the VS helpers; `src/vs_core.py` is now a shim until 11.10 (2025‑11‑12). |
 | 11 | 11.7 Retry/backoff consolidation |  | ☑ | Added `src/frame_compare/net.py` centralizing retry/backoff helpers and rewired slow.pics + TMDB transports to consume the shared policy. |
 | 11 | 11.8 Config docs generation |  | ☑ | Added `tools/gen_config_docs.py`, committed `docs/_generated/config_tables.md`, and verified the `--check` sentinel to keep the reference aligned with `src/datatypes.py`. |
-| 11 | 11.9 CI + packaging checks |  | ⛔ | Update import‑linter, build wheel, validate artifacts. |
+| 11 | 11.9 CI + packaging checks |  | ☑ | CI now enforces config-doc drift checks, import contracts, and wheel validation across the new packages. |
 | 11 | 11.10 Remove transitional shims |  | ⛔ | Delete temporary shims/bridges introduced in Phase 11. |
 
 ### Sub‑phase 11.1 — Render Helpers Extraction (from `src/screenshot.py`)
@@ -1245,16 +1245,24 @@ Acceptance
 
 **2025-11-12 update:** `tools/gen_config_docs.py` now introspects the dataclasses in `src/datatypes.py`, writes `docs/_generated/config_tables.md`, and only rewrites the target file when `--out` is provided without `--check`, leaving the `--check` sentinel to detect drift without mutating the repo. The generated table is committed alongside the script, and the sentinel test (`python3 tools/gen_config_docs.py --check docs/_generated/config_tables.md`) is now part of the verification bundle. Additional verification commands completed successfully: `date -u +%Y-%m-%d`, `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, and `.venv/bin/pyright --warnings`. Residual risk: any change to `src/datatypes.py` requires rerunning the generator before committing so `docs/_generated/config_tables.md` stays synchronized; consider gating the regen in CI once the subprocess is reliable. Blockers: none discovered beyond the manual regen step for datatypes edits.
 
-### Sub‑phase 11.9 — CI & Packaging Checks
+### Sub-phase 11.9 — CI & Packaging Checks
 
 Goal: ensure quality as modules split.
 
 Scope
-- Update import‑linter contracts for new packages (`render`, `analysis`, `vs`).
+- Update import-linter contracts for new packages (`render`, `analysis`, `vs`).
 - Build a wheel in CI and confirm packaged files (py.typed, data assets) are correct.
 
+Implementation
+- Extend the forbidden import-linter contracts so `render`, `analysis`, and `vs` cannot back-import the CLI or core modules.
+- Add a CI packaging job that builds the sdist/wheel, runs `twine check`, and validates type/data assets inside the wheel.
+- Wire the config-doc generator `--check` mode into the lint job so drift is caught automatically.
+
 Acceptance
-- CI green; wheel contents validated.
+- CI green across tests/typecheck/lint/windows-smoke/packaging with wheel contents validated for py.typed + data assets.
+- Config docs generator check passes in lint (`uv run --no-sync python tools/gen_config_docs.py --check docs/_generated/config_tables.md`).
+
+**2025-11-12 update:** Extended both forbidden import-linter contracts so `src.frame_compare.render`, `src.frame_compare.analysis`, and `src.frame_compare.vs` cannot pull the CLI shim or `core`, keeping the new modules in the Runner→Core→Modules layer. The lint workflow now runs `uv run --no-sync python tools/gen_config_docs.py --check docs/_generated/config_tables.md` immediately after Ruff and then installs/runs `lint-imports` to enforce contracts. A dedicated `packaging` GitHub job installs `build`, `twine`, and `check-wheel-contents`, builds the sdist/wheel, validates metadata (`uv run --no-sync twine check dist/*`), asserts the wheel contains `src/frame_compare/py.typed` plus the required data assets, and records warning-level notices from `check-wheel-contents`. Local verification (run via `uv run --no-sync python -m pytest -q`, `uv run --no-sync ruff check`, `uv run --no-sync pyright --warnings`, `uv run --no-sync python tools/gen_config_docs.py --check docs/_generated/config_tables.md`, and `uv run --no-sync lint-imports --config importlinter.ini`) was captured in `docs/DECISIONS.md`; the packaging sweep (`uv run --no-sync python -m build`, `uv run --no-sync twine check dist/*`, wheel-content script, and `uv run --no-sync check-wheel-contents dist/*.whl || true`) also completed successfully. Residual risk: local environments without VSPreview/PySide6 or outbound package access may need to skip the VSPreview test and rely on CI for import-linter/install steps; document the failure reason when dependencies are unavailable.
 
 ### Sub‑phase 11.10 — Remove Transitional Shims (post‑Phase 11 cleanup)
 

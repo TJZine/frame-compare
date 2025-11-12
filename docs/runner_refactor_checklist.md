@@ -454,6 +454,16 @@ Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 | Verification | ☑ | `date -u +%Y-%m-%d`, `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, and `python3 tools/gen_config_docs.py --check docs/_generated/config_tables.md` all ran clean. |
 | Residual risks | ⚠️ | Editing `src/datatypes.py` (or related schema helpers) still requires regenerating `docs/_generated/config_tables.md` before committing so the sentinel check stays green; consider automating the regen once CI integrations are ready. |
 
+### Phase 11.9 – CI & packaging checks (2025‑11‑12)
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| Import contracts | ☑ | `importlinter.ini`’s forbidden CLI/core contracts now include `src.frame_compare.render`, `src.frame_compare.analysis`, and `src.frame_compare.vs`, preventing the freshly split modules from back-importing the shim/core layers. |
+| Lint workflow | ☑ | `.github/workflows/ci.yml`’s lint job runs `uv run --no-sync python tools/gen_config_docs.py --check docs/_generated/config_tables.md`, installs `import-linter`, and enforces `lint-imports` after Ruff so drift and layering issues fail CI immediately. |
+| Packaging job | ☑ | Added a `packaging` CI job that installs `build`, `twine`, and `check-wheel-contents`, runs `uv run --no-sync python -m build`, validates metadata with `uv run --no-sync twine check dist/*`, asserts the wheel contains `src/frame_compare/py.typed` plus `data/config.toml.template` and report assets, and surfaces warning-level notices from `check-wheel-contents`. |
+| Local verification | ☑ | `uv run --no-sync python -m pytest -q`, `uv run --no-sync ruff check`, `uv run --no-sync pyright --warnings`, `uv run --no-sync python tools/gen_config_docs.py --check docs/_generated/config_tables.md`, and `uv run --no-sync lint-imports --config importlinter.ini` all ran (pytest requires the VSPreview extra; see DEC logs for the recorded dependency warning). |
+| Residual risks | ⚠️ | Local environments without VSPreview/PySide6 or outbound package access may need to skip the VSPreview runner test or rely on CI for import-linter installation; document the failure reason and rerun the quartet once the preview extra/network access returns. |
+
 ---
 
 ### Usage Notes
