@@ -401,6 +401,26 @@ Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 | Verification commands | ☑ | `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini` rerun clean; recorded in the 2025‑11‑12 Phase 11.3 DEC entry. |
 | Residual risks | ⚠️ | Future subprocess users must route through `subproc.run_checked`; watch for any lingering `subprocess.run`/`check_output` usages outside CLI scripts and schedule follow-up cleanup if discovered. |
 
+### Phase 11.4 – Logging normalization (2025‑11‑12)
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| Logger migration | ☑ | `config_writer`, `core`, `runner`, `selection`, `tmdb_workflow`, and `screenshot` replaced library-level `print()`/`rich.print()` calls with module loggers or reporter console output so CLI formatting stays centralized. |
+| Reporter integration | ☑ | `selection.log_selection_windows` now accepts an optional reporter (defaults to logging when absent), and `runner` keeps user-visible traces routed through `reporter.console.print`, ensuring Rich styling persists. |
+| Guardrails | ☑ | Updated checklist best practices to note that only CLI presentation layers (and the generated VSPreview script) should call `print()` directly; DEC logs capture the normalization steps and verification. |
+| Verification commands | ☑ | `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, and `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini` ran clean (see 2025‑11‑12 Phase 11.4 DEC entry). |
+| Residual risks | ⚠️ | Future modules must log through `logger`/reporter; only CLI-facing code or generated scripts may emit direct prints. Watch for any new `print()` usage under `src/frame_compare/` and back it out promptly. |
+
+### Phase 11.5 – Packaging cleanup + legacy removal (2025‑11‑12)
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| Module relocations | ☑ | Moved `src/{cli_layout,report,slowpics,config_template}.py` into `src/frame_compare/` (plus the `.pyi` facades) so core modules live under a single package. |
+| Compatibility shims | ☑ | Legacy modules now proxy the `src.frame_compare.*` modules via `sys.modules[__name__] = _real_module`, letting imports and monkeypatches hit the canonical definitions until 11.10 removes the shims. |
+| Legacy deletions | ☑ | Removed `Legacy/comp.py` and added `tests/__init__.py` to keep the repo-local package highest on `sys.path`. |
+| Verification commands | ☑ | `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` (after installing the VSPreview extra), `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, and `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini` recorded in the 2025‑11‑12 Phase 11.5 DEC entry. |
+| Residual risks | ⚠️ | Shim removal is scheduled for 11.10; encourage new code to import from `src.frame_compare.*` directly to minimize churn later. |
+
 ---
 
 ### Usage Notes

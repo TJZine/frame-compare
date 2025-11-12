@@ -742,8 +742,8 @@ Goal: reduce remaining monoliths, harden subprocess/logging practices, and final
 | 11 | 11.1 Render helpers extraction |  | ☑ | `src/frame_compare/render/{naming,overlay,encoders,geometry,errors}.py` host the pure helpers moved out of `src/screenshot.py`, with wrappers/tests + import-linter layering recorded on 2025‑11‑12. |
 | 11 | 11.2 Analysis split |  | ☑ | Analysis helpers now live in `src/frame_compare/analysis/{metrics,selection,cache_io}.py` with `src/analysis.py` as a shim; DEC logs + tests recorded on 2025‑11‑12. |
 | 11 | 11.3 Subprocess hardening |  | ☑ | `src/frame_compare/subproc.py::run_checked` now wraps FFmpeg/FFprobe/VSPreview calls from screenshot, audio_alignment, and vspreview; tests/logs updated on 2025‑11‑12. |
-| 11 | 11.4 Logging normalization |  | ⛔ | Replace print() with logging in library modules; keep CLI formatting. |
-| 11 | 11.5 Packaging cleanup + legacy removal |  | ⛔ | Move top‑level modules under `src/frame_compare/`; delete `Legacy/comp.py`. |
+| 11 | 11.4 Logging normalization |  | ☑ | Library modules now log via `logger`/reporter instead of `print()`, with CLI surfaces unchanged (2025‑11‑12). |
+| 11 | 11.5 Packaging cleanup + legacy removal |  | ☑ | Moved `src/{cli_layout,report,slowpics,config_template}.py` under `src/frame_compare/`, added shims, and removed `Legacy/comp.py` (2025‑11‑12). |
 | 11 | 11.6 vs_core split by concerns |  | ⛔ | Split `src/vs_core.py` into `src/frame_compare/vs/*` submodules. |
 | 11 | 11.7 Retry/backoff consolidation |  | ⛔ | Introduce `net.py` retry/HTTP client helpers; refactor network users. |
 | 11 | 11.8 Config docs generation |  | ⛔ | Script to generate config reference from `src/datatypes.py`. |
@@ -986,7 +986,7 @@ Conventional Commit subject
 
 **2025-11-12 update:** Introduced `src/frame_compare/subproc.py::run_checked` (argv-only, `shell=False`, safe stdio defaults, optional `check`) and refactored `src/screenshot.py`, `src/frame_compare/vspreview.py`, and `src/audio_alignment.py` to route FFmpeg/FFprobe/VSPreview invocations through the helper so timeout handling and error messages stayed identical while banning `shell=True`. `tests/test_screenshot.py` now monkeypatches `src.frame_compare.subproc.run_checked` in the timeout/filter-chain cases, and `importlinter.ini` lists `src.frame_compare.subproc` in the Runner→Core→Modules layer to keep contracts green. Verification commands (`git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini`) ran clean; see the 2025‑11‑12 Phase 11.3 entry in `docs/DECISIONS.md` for logs.
 
-**2025-11-12 update:** Introduced `src/frame_compare/subproc.py::run_checked` (shell=False, safe stdio defaults, optional `check`) and refactored `src/screenshot.py`, `src/frame_compare/vspreview.py`, and `src/audio_alignment.py` to call it so FFmpeg/FFprobe/VSPreview keep identical timeout/error messages while banning `shell=True`. Screenshot timeout/command-construction tests now patch `src.frame_compare.subproc.run_checked`, and `importlinter.ini`’s third layer lists the new module so contracts stay green. Verification commands (`git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, `uv run --no-sync lint-imports --config importlinter.ini`) ran clean; see the 2025-11-12 Phase 11.3 entry in `docs/DECISIONS.md` for logs.
+**2025-11-12 update:** Replaced the remaining `print()`/`rich.print()` calls in library modules with loggers or reporter console output so CLI formatting stays centralized. `config_writer`, `core`, `runner`, `selection`, `tmdb_workflow`, and `screenshot` now emit via `logger`/reporter (with `selection.log_selection_windows` accepting an optional reporter), while VSPreview script prints remain untouched. Verification (`git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini`) is captured in the 2025‑11‑12 Phase 11.4 DEC entry.
 
 ### Sub‑phase 11.4 — Logging Normalization
 
@@ -1134,17 +1134,38 @@ Risks & mitigations
 Conventional Commit subject
 - `refactor(packaging): move internal modules under frame_compare and remove legacy file`
 
+**2025-11-12 update:** Moved `src/{cli_layout,report,slowpics,config_template}.py` (plus their `.pyi` stubs) into `src/frame_compare/`, added compatibility shims at the old paths that now proxy the actual modules via `sys.modules` so monkeypatching works, updated `importlinter.ini` to include the new modules, and deleted `Legacy/comp.py`. Packaging logic now locates template/report assets from `Path(__file__).resolve().parents[1] / "data"` after the move. Verification commands (`git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini`) ran clean with the VSPreview extra installed locally; see the 2025‑11‑12 Phase 11.5 DEC entry for logs.
+
 ### Sub‑phase 11.6 — vs_core Split by Concerns
 
-Goal: split `src/vs_core.py` (~2.4K LOC) into a subpackage for better isolation and testing.
+Source of truth for the coding agent: this section in `docs/refactor/mod_refactor.md` (Sub‑phase 11.6). Follow these steps rather than relying solely on the prompt.
 
-Scope
-- Add `src/frame_compare/vs/` with modules such as `source.py`, `tonemap.py`, `props.py` (exact split guided by code boundaries).
-- Move functions and update imports.
-- Keep a brief shim in `src/vs_core.py` for this session (remove in 11.10).
+Goal
+- Decompose the monolithic `src/vs_core.py` into `src/frame_compare/vs/` grouped by responsibilities (env/config, source/open/trim, props/color metadata, tonemap/verification) with a compatibility shim left in `src/vs_core.py` for this phase.
+
+Scope & constraints
+- Create `src/frame_compare/vs/` with modules:
+  - `env.py`: VapourSynth discovery/config and RAM limit.
+  - `source.py`: opening/trim/FPS mapping, plugin discovery/errors, `init_clip`.
+  - `props.py`: frame props access and color metadata extraction/mappings.
+  - `color.py`: color defaults/overrides/heuristics, `normalise_color_metadata`.
+  - `tonemap.py`: tonemap settings/processing, verification helpers, containers.
+- Backward compatibility shim: `src/vs_core.py` re-exports all used public/private names. Remove in 11.10.
+- Avoid behavioral/logging changes; copy functions verbatim. Maintain Pyright/Ruff cleanliness and import-linter contracts.
+
+Detailed step list (anchors)
+1) Scaffold subpackage: add `src/frame_compare/vs/{__init__,env,source,props,color,tonemap}.py`.
+2) Move env/config: `_VS_MODULE_NAME`, `_ENV_VAR`, `_EXTRA_SEARCH_PATHS`, `_normalise_search_path`, `_add_search_paths`, `_load_env_paths_from_env`, `configure`, `_get_vapoursynth_module`, `set_ram_limit` (anchors ~21–28, ~229–360, ~326, ~1134).
+3) Move source/open: `_SOURCE_*` constants (~17–22), plugin error classes (~41–76), `_set_source_preference` (~300), `_resolve_core` (~366), `_open_clip_with_sources` (search in file), `_slice_clip` (~1056), `_extend_with_blank` (~1070), `_apply_fps_map` (~1090), `init_clip` (~1104), `ClipInitError`.
+4) Move props/color extraction: mappings/labels (~138–227), `_describe_code` (~229), `_coerce_prop` (~750), `_first_present` (~768), `_normalise_resolved_code` (~774), `_resolve_color_metadata` (~778), `_extract_frame_props` (~1186), `_snapshot_frame_props` (~1196), `_props_signal_hdr` (~736), `_infer_frame_height` (~812).
+5) Move color normalization: `_resolve_configured_color_defaults` (~834), `_resolve_color_overrides` (search), `_guess_default_colourspace` (search), `_adjust_color_range_from_signal` (~1208), `normalise_color_metadata` (~1228).
+6) Move tonemap/verification: dataclasses `TonemapInfo` (~92), `VerificationResult` (~121), `ColorDebugArtifacts` (~137), `TonemapSettings` (~150), `_parse_unexpected_kwarg` (~1872), `_call_tonemap_function` (~1898), `_apply_post_gamma_levels` (~1926), `_compute_verification` (~1969), `process_clip_for_screenshot` (~2010), `ClipProcessError`.
+7) Add shim in `src/vs_core.py` that re-exports from `src.frame_compare.vs` (temporary until 11.10). Keep module docstring; add `# type: ignore[F401,F403]` for star exports.
+8) Wire intra-vs imports: `color` imports from `props`; `tonemap` imports from `env`, `props`, `color`.
+9) Update import‑linter: add `src.frame_compare.vs` (or the five modules) to the third layer under the modules contract.
 
 Acceptance
-- VS tests (e.g., `tests/test_vs_core.py`) pass; behavior unchanged.
+- Parity: all VS paths unchanged; tests (e.g., `tests/test_vs_core.py`, screenshot/selection/vspreview) pass; pyright/ruff clean; contracts kept.
 
 ### Sub‑phase 11.7 — Retry/Backoff Consolidation
 
