@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -14,17 +13,23 @@ from typing import (
     Dict,
     List,
     Mapping,
-    MutableMapping,
     Optional,
     Protocol,
     Sequence,
     Tuple,
     TypedDict,
-    Union,
     cast,
 )
 
-from src.frame_compare.layout_utils import format_resolution_summary as _format_resolution_summary
+from src.frame_compare.render import encoders as _enc
+from src.frame_compare.render import geometry as _geo
+from src.frame_compare.render import naming as _naming
+from src.frame_compare.render import overlay as _overlay
+from src.frame_compare.render.errors import (
+    ScreenshotError,
+    ScreenshotGeometryError,
+    ScreenshotWriterError,
+)
 
 from . import vs_core
 from .datatypes import (
@@ -35,24 +40,13 @@ from .datatypes import (
     ScreenshotConfig,
 )
 
-_INVALID_LABEL_PATTERN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
-
-
 logger = logging.getLogger(__name__)
 
+OverlayStateValue = _overlay.OverlayStateValue
+OverlayState = _overlay.OverlayState
 
-_SELECTION_LABELS = {
-    "dark": "Dark",
-    "bright": "Bright",
-    "motion": "Motion",
-    "user": "User",
-    "random": "Random",
-    "auto": "Auto",
-    "cached": "Cached",
-}
-
-OverlayStateValue = Union[str, List[str]]
-OverlayState = MutableMapping[str, OverlayStateValue]
+FRAME_INFO_STYLE = _overlay.FRAME_INFO_STYLE
+OVERLAY_STYLE = _overlay.OVERLAY_STYLE
 
 
 class FrameEvalFunc(Protocol):
@@ -79,7 +73,7 @@ class SubtitleFunc(Protocol):
 
 def _new_overlay_state() -> OverlayState:
     """Create a mutable overlay state container."""
-    return cast(OverlayState, {})
+    return _overlay.new_overlay_state()
 
 
 def _range_constants() -> tuple[int, int]:
@@ -134,21 +128,14 @@ def _append_overlay_warning(state: OverlayState, message: str) -> None:
     """
     Append a formatted overlay warning to the state's warning list in a type-safe manner.
     """
-    warnings_value = state.get("warnings")
-    if not isinstance(warnings_value, list):
-        warnings_value = []
-        state["warnings"] = warnings_value
-    warnings_value.append(message)
+    _overlay.append_overlay_warning(state, message)
 
 
 def _get_overlay_warnings(state: OverlayState) -> List[str]:
     """
     Retrieve overlay warning messages from state, returning an empty list when absent.
     """
-    warnings_value = state.get("warnings")
-    if isinstance(warnings_value, list):
-        return warnings_value
-    return []
+    return _overlay.get_overlay_warnings(state)
 
 
 def _format_dimensions(width: int, height: int) -> str:
@@ -158,37 +145,7 @@ def _format_dimensions(width: int, height: int) -> str:
     Returns:
         str: Formatted dimensions string, e.g. "1920 × 1080".
     """
-    return f"{int(width)} \u00D7 {int(height)}"
-
-
-def _coerce_luminance_values(value: Any) -> List[float]:
-    """
-    Normalize various luminance representations into a list of floats.
-
-    Parameters:
-        value (Any): A luminance value which may be None, a number, a string containing numeric values, bytes (UTF-8), or an iterable of such values.
-
-    Returns:
-        List[float]: A list of extracted luminance values as floats. Returns an empty list when no numeric values can be derived.
-    """
-    if value is None:
-        return []
-    if isinstance(value, (int, float)):
-        return [float(value)]
-    if isinstance(value, bytes):
-        try:
-            value = value.decode("utf-8", "ignore")
-        except Exception:
-            return []
-    if isinstance(value, str):
-        matches = re.findall(r"[-+]?\d+(?:\.\d+)?", value)
-        return [float(match) for match in matches]
-    if isinstance(value, (list, tuple)):
-        results: List[float] = []
-        for item in value:
-            results.extend(_coerce_luminance_values(item))
-        return results
-    return []
+    return _geo.format_dimensions(width, height)
 
 
 def _extract_mastering_display_luminance(props: Mapping[str, Any]) -> tuple[Optional[float], Optional[float]]:
@@ -203,46 +160,7 @@ def _extract_mastering_display_luminance(props: Mapping[str, Any]) -> tuple[Opti
     Returns:
         (min_luminance, max_luminance) (tuple[Optional[float], Optional[float]]): Tuple containing the extracted minimum and maximum mastering display luminance in nits, or `None` for any value that could not be determined.
     """
-    min_keys = (
-        "_MasteringDisplayMinLuminance",
-        "MasteringDisplayMinLuminance",
-        "MasteringDisplayLuminanceMin",
-    )
-    max_keys = (
-        "_MasteringDisplayMaxLuminance",
-        "MasteringDisplayMaxLuminance",
-        "MasteringDisplayLuminanceMax",
-    )
-
-    min_value: Optional[float] = None
-    max_value: Optional[float] = None
-
-    for key in min_keys:
-        if key in props:
-            values = _coerce_luminance_values(props.get(key))
-            if values:
-                min_value = values[0]
-                break
-    for key in max_keys:
-        if key in props:
-            values = _coerce_luminance_values(props.get(key))
-            if values:
-                max_value = values[0]
-                break
-
-    if min_value is None or max_value is None:
-        combined_keys = ("_MasteringDisplayLuminance", "MasteringDisplayLuminance")
-        for key in combined_keys:
-            values = _coerce_luminance_values(props.get(key))
-            if len(values) >= 2:
-                if min_value is None:
-                    min_value = min(values)
-                if max_value is None:
-                    max_value = max(values)
-                if min_value is not None and max_value is not None:
-                    break
-
-    return min_value, max_value
+    return _overlay.extract_mastering_display_luminance(props)
 
 
 def _format_luminance_value(value: float) -> str:
@@ -255,12 +173,7 @@ def _format_luminance_value(value: float) -> str:
     Returns:
         str: Formatted luminance: values less than 1.0 are shown with up to four decimal places (trailing zeros and a trailing decimal point are removed), with "0" used if the result would be empty; values greater than or equal to 1.0 are shown with one decimal place.
     """
-    if value < 1.0:
-        text = f"{value:.4f}"
-        if "." in text:
-            text = text.rstrip("0").rstrip(".")
-        return text or "0"
-    return f"{value:.1f}"
+    return _overlay.format_luminance_value(value)
 
 
 def _format_mastering_display_line(props: Mapping[str, Any]) -> str:
@@ -274,13 +187,7 @@ def _format_mastering_display_line(props: Mapping[str, Any]) -> str:
         str: A one-line MDL string. If both min and max luminance are available, returns
         "MDL: min: <min> cd/m², max: <max> cd/m²"; otherwise returns "MDL: Insufficient data".
     """
-    min_value, max_value = _extract_mastering_display_luminance(props)
-    if min_value is None or max_value is None:
-        return "MDL: Insufficient data"
-    return (
-        f"MDL: min: {_format_luminance_value(min_value)} cd/m², "
-        f"max: {_format_luminance_value(max_value)} cd/m²"
-    )
+    return _overlay.format_mastering_display_line(props)
 
 
 def _normalize_selection_label(label: Optional[str]) -> str:
@@ -293,29 +200,14 @@ def _normalize_selection_label(label: Optional[str]) -> str:
     Returns:
         str: The cleaned display name for the selection; returns `"(unknown)"` if the input is missing or empty. Known internal labels are mapped to their canonical display names.
     """
-    if not label:
-        return "(unknown)"
-    cleaned = label.strip()
-    if not cleaned:
-        return "(unknown)"
-    normalized = cleaned.lower()
-    mapped = _SELECTION_LABELS.get(normalized)
-    if mapped:
-        return mapped
-    return cleaned
+    return _overlay.normalize_selection_label(label)
 
 
 def _format_selection_line(selection_label: Optional[str]) -> str:
     """
     Format the "Frame Selection Type" line for overlays and metadata.
-
-    Parameters:
-        selection_label (Optional[str]): A selection label or key to be normalized; may be None.
-
-    Returns:
-        str: A single-line string "Frame Selection Type: <label>" where <label> is a normalized, display-ready name derived from `selection_label`.
     """
-    return f"Frame Selection Type: {_normalize_selection_label(selection_label)}"
+    return _overlay.format_selection_line(selection_label)
 
 
 def _compose_overlay_text(
@@ -330,43 +222,16 @@ def _compose_overlay_text(
 ) -> Optional[str]:
     """
     Compose overlay text for a frame when overlays are enabled.
-
-    When overlaying is disabled, returns None. In "minimal" mode the returned string always includes the resolution summary and selection-type lines in addition to any base text. In "diagnostic" mode, returns a multi-line string containing, in order: the base text (if any), a resolution summary derived from the geometry plan, a mastering-display luminance line when tonemapping was applied and HDR metadata is available, and a selection-type line.
-
-    Parameters:
-        base_text (Optional[str]): Existing overlay text to include as the first line if present.
-        color_cfg (ColorConfig): Configuration object providing overlay_enabled and overlay_mode flags.
-        plan (GeometryPlan): Geometry plan used to produce the resolution summary line.
-        selection_label (Optional[str]): Selection label to format into the selection-type line.
-        source_props (Mapping[str, Any]): Source properties used to extract mastering display luminance data.
-        tonemap_info (Optional[vs_core.TonemapInfo]): If provided and its `applied` flag is true, include HDR mastering-display information in diagnostic mode.
-        selection_detail (Optional[Mapping[str, Any]]): Selection metadata record retained for compatibility; overlay text omits per-frame detail lines regardless of mode.
-
-    Returns:
-        Optional[str]: Composed overlay text when overlays are enabled; otherwise `None`.
     """
-    if not bool(getattr(color_cfg, "overlay_enabled", True)):
-        return None
-
-    mode = str(getattr(color_cfg, "overlay_mode", "minimal")).strip().lower()
-    if mode != "diagnostic":
-        lines: List[str] = []
-        if base_text:
-            lines.append(base_text)
-        lines.append(_format_resolution_summary(plan))
-        lines.append(_format_selection_line(selection_label))
-        return "\n".join(lines)
-
-    lines: List[str] = []
-    if base_text:
-        lines.append(base_text)
-
-    lines.append(_format_resolution_summary(plan))
-    include_hdr_details = bool(tonemap_info and tonemap_info.applied)
-    if include_hdr_details:
-        lines.append(_format_mastering_display_line(source_props))
-    lines.append(_format_selection_line(selection_label))
-    return "\n".join(lines)
+    return _overlay.compose_overlay_text(
+        base_text,
+        color_cfg,
+        plan,
+        selection_label,
+        source_props,
+        tonemap_info=tonemap_info,
+        selection_detail=selection_detail,
+    )
 
 
 
@@ -809,19 +674,6 @@ def _clamp_frame_index(clip: Any, frame_idx: int) -> tuple[int, bool]:
     clamped = max(0, min(int(frame_idx), max_index))
     return clamped, clamped != frame_idx
 
-
-FRAME_INFO_STYLE = (
-    'sans-serif,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,'
-    '"0,0,0,0,100,100,0,0,1,2,0,7,10,10,10,1"'
-)
-OVERLAY_STYLE = (
-    'sans-serif,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,'
-    '"0,0,0,0,100,100,0,0,1,2,0,7,10,10,70,1"'
-)
-
-_LETTERBOX_RATIO_TOLERANCE = 0.04
-
-
 def _apply_frame_info_overlay(
     core: Any,
     clip: Any,
@@ -1082,18 +934,6 @@ def _restore_color_props(
         logger.debug("Failed to restore colour props during %s: %s", context, exc)
         return clip
 
-class ScreenshotError(RuntimeError):
-    """Base class for screenshot related issues."""
-
-
-class ScreenshotGeometryError(ScreenshotError):
-    """Raised when geometry or cropping cannot be satisfied."""
-
-
-class ScreenshotWriterError(ScreenshotError):
-    """Raised when the underlying writer fails."""
-
-
 class GeometryPlan(TypedDict):
     """
     Resolved crop/pad/scale plan for rendering a screenshot.
@@ -1124,54 +964,21 @@ class GeometryPlan(TypedDict):
 
 
 def _normalise_geometry_policy(value: OddGeometryPolicy | str) -> OddGeometryPolicy:
-    if isinstance(value, OddGeometryPolicy):
-        return value
-    try:
-        return OddGeometryPolicy(str(value))
-    except Exception:
-        return OddGeometryPolicy.AUTO
+    return _geo.normalise_geometry_policy(value)
 
 
 def _get_subsampling(fmt: Any, attr: str) -> int:
-    try:
-        raw = getattr(fmt, attr)
-    except Exception:
-        return 0
-    try:
-        return int(raw)
-    except Exception:
-        return 0
+    return _geo.get_subsampling(fmt, attr)
 
 
 def _axis_has_odd(values: Sequence[int]) -> bool:
-    for value in values:
-        try:
-            current = int(value)
-        except Exception:
-            continue
-        if current % 2 != 0:
-            return True
-    return False
+    return _geo.axis_has_odd(values)
 
 
 def _describe_plan_axes(plan: GeometryPlan | None) -> str:
     """Return a concise axis label for plans that include odd-pixel geometry."""
 
-    if plan is None:
-        return "unknown"
-
-    crop_left, crop_top, crop_right, crop_bottom = plan["crop"]
-    pad_left, pad_top, pad_right, pad_bottom = plan["pad"]
-
-    axes: list[str] = []
-    if _axis_has_odd((crop_top, crop_bottom, pad_top, pad_bottom)):
-        axes.append("vertical")
-    if _axis_has_odd((crop_left, crop_right, pad_left, pad_right)):
-        axes.append("horizontal")
-
-    if not axes:
-        return "none"
-    return "+".join(axes)
+    return _geo.describe_plan_axes(plan)
 
 
 def _safe_pivot_notify(pivot_notifier: Callable[[str], None] | None, note: str) -> None:
@@ -1380,19 +1187,7 @@ def _compute_requires_full_chroma(
     pad: tuple[int, int, int, int],
     policy: OddGeometryPolicy,
 ) -> bool:
-    resolved_policy = _normalise_geometry_policy(policy)
-    if resolved_policy is OddGeometryPolicy.FORCE_FULL_CHROMA:
-        return True
-    if resolved_policy is OddGeometryPolicy.SUBSAMP_SAFE:
-        return False
-
-    subsampling_w = _get_subsampling(fmt, "subsampling_w")
-    subsampling_h = _get_subsampling(fmt, "subsampling_h")
-
-    vertical_odd = _axis_has_odd((crop[1], crop[3], pad[1], pad[3]))
-    horizontal_odd = _axis_has_odd((crop[0], crop[2], pad[0], pad[2]))
-
-    return (vertical_odd and subsampling_h > 0) or (horizontal_odd and subsampling_w > 0)
+    return _geo.compute_requires_full_chroma(fmt, crop, pad, policy)
 
 
 def plan_mod_crop(
@@ -1403,156 +1198,30 @@ def plan_mod_crop(
 ) -> Tuple[int, int, int, int]:
     """Plan left/top/right/bottom croppings so dimensions align to *mod*."""
 
-    if width <= 0 or height <= 0:
-        raise ScreenshotGeometryError("Clip dimensions must be positive")
-    if mod <= 1:
-        return (0, 0, 0, 0)
-
-    def _axis_crop(size: int) -> Tuple[int, int]:
-        remainder = size % mod
-        if remainder == 0:
-            return (0, 0)
-        before = remainder // 2
-        after = remainder - before
-        return (before, after)
-
-    left, right = _axis_crop(width)
-    top, bottom = _axis_crop(height)
-
-    if letterbox_pillarbox_aware:
-        if width > height and (top + bottom) == 0 and (left + right) > 0:
-            total = left + right
-            left = total // 2
-            right = total - left
-        elif height >= width and (left + right) == 0 and (top + bottom) > 0:
-            total = top + bottom
-            top = total // 2
-            bottom = total - top
-
-    cropped_w = width - left - right
-    cropped_h = height - top - bottom
-    if cropped_w <= 0 or cropped_h <= 0:
-        raise ScreenshotGeometryError("Cropping removed all pixels")
-
-    return (left, top, right, bottom)
+    return _geo.plan_mod_crop(width, height, mod, letterbox_pillarbox_aware)
 
 
 def _align_letterbox_pillarbox(plans: List[GeometryPlan]) -> None:
-    if not plans:
-        return
-
-    widths = [int(plan["width"]) for plan in plans]
-    heights = [int(plan["height"]) for plan in plans]
-    same_w = len({w for w in widths if w > 0}) == 1
-    same_h = len({h for h in heights if h > 0}) == 1
-
-    if same_w:
-        target_h = min(int(plan["cropped_h"]) for plan in plans)
-        for plan in plans:
-            current_h = int(plan["cropped_h"])
-            diff = current_h - target_h
-            if diff <= 0:
-                continue
-            add_top = diff // 2
-            add_bottom = diff - add_top
-            left, top, right, bottom = plan["crop"]
-            top += add_top
-            bottom += add_bottom
-            plan["crop"] = (left, top, right, bottom)
-            plan["cropped_h"] = plan["height"] - top - bottom
-    elif same_h:
-        target_w = min(int(plan["cropped_w"]) for plan in plans)
-        for plan in plans:
-            current_w = int(plan["cropped_w"])
-            diff = current_w - target_w
-            if diff <= 0:
-                continue
-            add_left = diff // 2
-            add_right = diff - add_left
-            left, top, right, bottom = plan["crop"]
-            left += add_left
-            right += add_right
-            plan["crop"] = (left, top, right, bottom)
-            plan["cropped_w"] = plan["width"] - left - right
+    _geo.align_letterbox_pillarbox(plans)
 
 
 def _plan_letterbox_offsets(
     plans: Sequence[GeometryPlan],
     *,
     mod: int,
-    tolerance: float = _LETTERBOX_RATIO_TOLERANCE,
+    tolerance: float = _geo.LETTERBOX_RATIO_TOLERANCE,
     max_target_height: int | None = None,
 ) -> List[tuple[int, int]]:
-    ratios: List[float] = []
-    for plan in plans:
-        try:
-            width = float(plan["width"])
-            height = float(plan["height"])
-        except Exception:
-            continue
-        if width > 0 and height > 0:
-            ratios.append(width / height)
-
-    if not ratios:
-        return [(0, 0) for _ in plans]
-
-    target_ratio = max(ratios)
-    if target_ratio <= 0:
-        return [(0, 0) for _ in plans]
-
-    tolerance = max(0.0, tolerance)
-    min_ratio_allowed = target_ratio * (1.0 - tolerance)
-
-    offsets: List[tuple[int, int]] = []
-    for plan in plans:
-        try:
-            width = int(plan["width"])
-            height = int(plan["height"])
-        except Exception:
-            offsets.append((0, 0))
-            continue
-        if width <= 0 or height <= 0:
-            offsets.append((0, 0))
-            continue
-
-        ratio = width / height
-        if ratio >= min_ratio_allowed:
-            offsets.append((0, 0))
-            continue
-
-        desired_height = width / target_ratio
-        target_height = int(round(desired_height))
-        if max_target_height is not None:
-            target_height = min(target_height, max_target_height)
-
-        if mod > 1:
-            target_height -= target_height % mod
-        target_height = max(mod if mod > 0 else 1, target_height)
-        if target_height >= height:
-            offsets.append((0, 0))
-            continue
-
-        crop_total = height - target_height
-        if crop_total <= 0:
-            offsets.append((0, 0))
-            continue
-
-        top_extra = crop_total // 2
-        bottom_extra = crop_total - top_extra
-        offsets.append((top_extra, bottom_extra))
-
-    return offsets
+    return _geo.plan_letterbox_offsets(
+        plans,
+        mod=mod,
+        tolerance=tolerance,
+        max_target_height=max_target_height,
+    )
 
 
 def _split_padding(total: int, center: bool) -> tuple[int, int]:
-    amount = max(0, int(total))
-    if amount <= 0:
-        return (0, 0)
-    if center:
-        first = amount // 2
-        second = amount - first
-        return (first, second)
-    return (0, amount)
+    return _geo.split_padding(total, center)
 
 
 def _align_padding_mod(
@@ -1565,32 +1234,16 @@ def _align_padding_mod(
     mod: int,
     center: bool,
 ) -> tuple[int, int, int, int]:
-    if mod <= 1:
-        return (pad_left, pad_top, pad_right, pad_bottom)
-
-    total_pad = pad_left + pad_top + pad_right + pad_bottom
-    if total_pad <= 0:
-        return (pad_left, pad_top, pad_right, pad_bottom)
-
-    final_w = width + pad_left + pad_right
-    final_h = height + pad_top + pad_bottom
-
-    remainder_w = final_w % mod
-    if remainder_w:
-        extra = mod - remainder_w
-        add_left, add_right = _split_padding(extra, center)
-        pad_left += add_left
-        pad_right += add_right
-        final_w += extra
-
-    remainder_h = final_h % mod
-    if remainder_h:
-        extra = mod - remainder_h
-        add_top, add_bottom = _split_padding(extra, center)
-        pad_top += add_top
-        pad_bottom += add_bottom
-
-    return (pad_left, pad_top, pad_right, pad_bottom)
+    return _geo.align_padding_mod(
+        width,
+        height,
+        pad_left,
+        pad_top,
+        pad_right,
+        pad_bottom,
+        mod,
+        center,
+    )
 
 
 def _compute_scaled_dimensions(
@@ -1599,16 +1252,7 @@ def _compute_scaled_dimensions(
     crop: Tuple[int, int, int, int],
     target_height: int,
 ) -> Tuple[int, int]:
-    cropped_w = width - crop[0] - crop[2]
-    cropped_h = height - crop[1] - crop[3]
-    if cropped_w <= 0 or cropped_h <= 0:
-        raise ScreenshotGeometryError("Invalid crop results")
-
-    desired_h = max(1, int(round(target_height)))
-    scale = desired_h / cropped_h if cropped_h else 1.0
-    target_w = int(round(cropped_w * scale)) if scale != 1 else cropped_w
-    target_w = max(1, target_w)
-    return (target_w, desired_h)
+    return _geo.compute_scaled_dimensions(width, height, crop, target_height)
 
 
 def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[GeometryPlan]:
@@ -1955,42 +1599,29 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[Geometry
 
 
 def _sanitise_label(label: str) -> str:
-    cleaned = _INVALID_LABEL_PATTERN.sub("_", label)
-    if os.name == "nt":
-        cleaned = cleaned.rstrip(" .")
-    cleaned = cleaned.strip()
-    return cleaned or "comparison"
+    return _naming.sanitise_label(label)
 
 
 def _derive_labels(source: str, metadata: Mapping[str, str]) -> tuple[str, str]:
-    raw = metadata.get("label") or Path(source).stem
-    cleaned = _sanitise_label(raw)
-    return raw.strip() or cleaned, cleaned
+    return _naming.derive_labels(source, metadata)
 
 
 def _prepare_filename(frame: int, label: str) -> str:
-    return f"{frame} - {label}.png"
+    return _naming.prepare_filename(frame, label)
 
 
 def _normalise_compression_level(level: int) -> int:
-    try:
-        value = int(level)
-    except Exception:
-        return 1
-    return max(0, min(2, value))
+    return _enc.normalise_compression_level(level)
 
 
 def _map_fpng_compression(level: int) -> int:
-    normalised = _normalise_compression_level(level)
-    return {0: 0, 1: 1, 2: 2}.get(normalised, 1)
+    return _enc.map_fpng_compression(level)
 
 
 def _map_png_compression_level(level: int) -> int:
     """Translate the user configured level into a PNG compress level."""
 
-    normalised = _normalise_compression_level(level)
-    mapping = {0: 0, 1: 6, 2: 9}
-    return mapping.get(normalised, 6)
+    return _enc.map_png_compression_level(level)
 
 
 def _save_frame_with_fpng(
@@ -2345,20 +1976,11 @@ def _save_frame_with_fpng(
 def _map_ffmpeg_compression(level: int) -> int:
     """Map config compression level to ffmpeg's PNG compression scale."""
 
-    return _map_png_compression_level(level)
+    return _enc.map_ffmpeg_compression(level)
 
 
 def _escape_drawtext(text: str) -> str:
-    return (
-        text.replace("\\", "\\\\")
-        .replace(":", "\\:")
-        .replace("=", "\\=")
-        .replace(",", "\\,")
-        .replace("[", "\\[")
-        .replace("]", "\\]")
-        .replace("'", "\\'")
-        .replace("\n", "\\\n")
-    )
+    return _enc.escape_drawtext(text)
 
 
 def _resolve_source_frame_index(frame_idx: int, trim_start: int) -> int | None:

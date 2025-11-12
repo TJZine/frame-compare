@@ -752,16 +752,97 @@ Goal: reduce remaining monoliths, harden subprocess/logging practices, and final
 
 ### Sub‑phase 11.1 — Render Helpers Extraction (from `src/screenshot.py`)
 
-Goal: extract pure helpers (naming, geometry, overlay, encoders) into dedicated modules to shrink the screenshot monolith and enable focused tests.
+Goal: extract pure helpers (naming, geometry shaping/formatting, overlay text/state, encoder mappings) into dedicated modules to shrink the screenshot monolith and enable focused tests — with zero behavior changes.
 
-Scope
-- Add package `src/frame_compare/render/` with modules: `naming.py`, `geometry.py`, `overlay.py`, `encoders.py`.
-- Move pure helper functions from `src/screenshot.py` into new modules (no behavior changes).
-- Update `src/screenshot.py` to import and use the new helpers.
-- Add unit tests for pure helpers (reusing/porting assertions from `tests/test_screenshot.py`).
+Scope & constraints
+- Keep public behavior and CLI outputs stable; file naming and overlay text must not change.
+- Do not introduce new runtime deps; extracted helpers must remain pure (no VapourSynth or subprocess usage).
+- Preserve existing private helper names in `src/screenshot.py` via thin wrappers to avoid touching current tests.
+- Package location: `src/frame_compare/render/` with modules `naming.py`, `geometry.py`, `overlay.py`, `encoders.py` and curated `__all__`.
+- Leave heavy VS‑dependent functions in `src/screenshot.py` (e.g., `_apply_frame_info_overlay`, `_apply_overlay_text`, writers); only move pure helpers.
+- Keep `GeometryPlan` TypedDict defined in `src/screenshot.py` for this sub‑phase to avoid churn; geometry helpers may accept/return plain tuples/ints.
 
-Acceptance
-- `pytest -q`, `ruff`, `pyright --warnings` clean; CLI output unchanged.
+Detailed step list (per‑file; anchors/search)
+1) Scaffold package structure
+   - Add files: `src/frame_compare/render/__init__.py`, `src/frame_compare/render/naming.py`, `src/frame_compare/render/geometry.py`, `src/frame_compare/render/overlay.py`, `src/frame_compare/render/encoders.py`.
+   - `__init__.py` should re‑export curated symbols for convenience; include `__all__`.
+
+2) Extract naming helpers to `render/naming.py`
+   - Move constants and helpers (keep same semantics; public names without leading underscore):
+     - `INVALID_LABEL_PATTERN` from `src/screenshot.py:38` (pattern literal) → export.
+     - `sanitise_label(label: str) -> str` from `src/screenshot.py:1957`.
+     - `derive_labels(source: str, metadata: Mapping[str, str]) -> tuple[str, str]` from `src/screenshot.py:1965`.
+     - `prepare_filename(frame: int, label: str) -> str` from `src/screenshot.py:1971`.
+   - In `src/screenshot.py`, replace bodies with thin wrappers that call into `render.naming.*` and keep original private names:
+     - `_sanitise_label`, `_derive_labels`, `_prepare_filename`.
+
+3) Extract overlay text/state helpers to `render/overlay.py`
+   - Move mapping + helpers:
+     - Selection labels map `_SELECTION_LABELS` from `src/screenshot.py:58` (export as `SELECTION_LABELS`).
+     - `new_overlay_state`, `append_overlay_warning`, `get_overlay_warnings` from `src/screenshot.py:80`, `:133`, `:144`.
+     - `normalize_selection_label`, `format_selection_line` from `src/screenshot.py:286`, `:308`.
+     - MDL helpers: `extract_mastering_display_luminance`, `format_luminance_value`, `format_mastering_display_line` from `src/screenshot.py:194`, `:248`, `:266`.
+     - `compose_overlay_text` from `src/screenshot.py:321`.
+     - Style constants `FRAME_INFO_STYLE` and `OVERLAY_STYLE` from `src/screenshot.py:813`, `:817` (export; used by overlay application in screenshot module).
+   - In `src/screenshot.py`, import from `render.overlay` and keep wrappers under original private names: `_new_overlay_state`, `_append_overlay_warning`, `_get_overlay_warnings`, `_normalize_selection_label`, `_format_selection_line`, `_format_mastering_display_line`, `_compose_overlay_text`. Update constant references to imported ones.
+   - Leave VS‑dependent overlay application functions in place (`_apply_frame_info_overlay` at `src/screenshot.py:825`, `_apply_overlay_text` at `src/screenshot.py:921`).
+
+4) Extract encoder/compression helpers to `render/encoders.py`
+   - Move helpers:
+     - `normalise_compression_level`, `map_fpng_compression`, `map_png_compression_level` from `src/screenshot.py:1975`, `:1983`, `:1988`.
+     - `map_ffmpeg_compression` from `src/screenshot.py:2345`.
+     - `escape_drawtext` from `src/screenshot.py:2351`.
+   - In `src/screenshot.py`, keep wrappers under original private names: `_normalise_compression_level`, `_map_fpng_compression`, `_map_png_compression_level`, `_map_ffmpeg_compression`, `_escape_drawtext`.
+
+5) Extract minimal geometry formatting/odds helpers to `render/geometry.py`
+   - Move strictly pure helpers (no VS/frame objects):
+     - `format_dimensions` from `src/screenshot.py:154`.
+     - `axis_has_odd`, `get_subsampling` from `src/screenshot.py:1146`, `:1135`.
+     - `compute_requires_full_chroma` from `src/screenshot.py:1377`.
+     - `plan_mod_crop` from `src/screenshot.py:1398`.
+     - `align_letterbox_pillarbox` from `src/screenshot.py:1440`.
+     - `plan_letterbox_offsets` from `src/screenshot.py:1479`.
+     - `split_padding`, `align_padding_mod` from `src/screenshot.py:1556` (search: `def _split_padding`), `:1568` (search: `def _align_padding_mod`).
+     - `compute_scaled_dimensions` from `src/screenshot.py:1602` (search: `def _compute_scaled_dimensions`).
+     - `describe_plan_axes` from `src/screenshot.py:1157`.
+   - Keep `_plan_geometry` in `src/screenshot.py` and switch its internal calls to the imported helpers from `render.geometry` to avoid type churn on `GeometryPlan` this session.
+   - In `src/screenshot.py`, keep wrapper names for moved helpers to preserve existing test imports: `_format_dimensions`, `_compute_requires_full_chroma`, etc., delegating to `render.geometry`.
+
+6) Rewire references inside `src/screenshot.py`
+   - Add imports at top: `from src.frame_compare.render import naming as _naming, overlay as _overlay, encoders as _enc, geometry as _geo`.
+   - Replace internal calls to moved helpers with their delegated equivalents. Keep function docstrings and signatures unchanged in the wrappers.
+
+7) Add focused unit tests for the new modules (no VS required)
+   - New files:
+     - `tests/render/test_naming.py`: port assertions from `tests/test_screenshot.py::test_sanitise_label_*`, plus `_derive_labels`, `_prepare_filename` happy paths.
+     - `tests/render/test_overlay_text.py`: port assertions from `tests/test_screenshot.py::test_compose_overlay_text_*` that don’t need VS; assert MDL formatting edge cases.
+     - `tests/render/test_encoders.py`: cover normalise/map functions and `escape_drawtext` escaping matrix.
+     - `tests/render/test_geometry_helpers.py`: cover `plan_mod_crop`, `compute_requires_full_chroma` (using simple fake fmt objects), `split/align padding`, `format_dimensions`.
+   - Keep existing `tests/test_screenshot.py` intact; wrappers ensure parity.
+
+8) Import‑linter layering (coding step in 11.1)
+   - Update `importlinter.ini` modules layer to include `src.frame_compare.render` in the third layer list so render helpers are treated as modules consumed by `core`/`runner` but never vice‑versa.
+
+Acceptance criteria & verification commands
+- Behavior parity: filenames, overlay text lines, and writer selection logic unchanged for existing tests.
+- Lint/type/tests clean:
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q` (or `.venv/bin/pytest -q`) → all existing tests pass; new `tests/render/` pass without VapourSynth.
+  - `.venv/bin/ruff check` → no issues.
+  - `.venv/bin/pyright --warnings` → 0 errors/warnings. If local binaries missing, use `uv run --no-sync ruff check` and `npx pyright --warnings` as fallback.
+- Import contracts unchanged: run `uv run --no-sync lint-imports --config importlinter.ini` and confirm 0 broken contracts after adding `render` to the layer list.
+
+Docs/tracker updates
+- Flip row description for 11.1 in the Phase 11 tracker to reference `render/*` modules once merged; status remains ⛔ until PR lands.
+- Append a quartet entry to `docs/DECISIONS.md` capturing baseline commands and the extraction boundaries; include anchors above.
+
+Risks & mitigations
+- Type churn on `GeometryPlan`: keep it in `src/screenshot.py` for now; only move shape in a later phase when consumers are ready.
+- Hidden dependencies on underscore helpers: wrappers with identical names and signatures avoid test churn; search for direct calls with Serena search before edits.
+- Import cycles: `render/*` must not import `src/screenshot.py`; keep helpers independent and rely only on stdlib and `src.datatypes` if needed.
+- Naming drift: preserve function semantics; add `__all__` in each new module to document surface.
+
+Conventional Commit subject
+- `refactor(render): extract pure screenshot helpers into render modules`
 
 ### Sub‑phase 11.2 — Analysis Split (`metrics.py`, `selection.py`, `cache_io.py`)
 
