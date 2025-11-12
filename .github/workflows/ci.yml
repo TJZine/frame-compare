@@ -24,7 +24,7 @@ jobs:
           path: ~/.cache/uv
           key: uv-${{ runner.os }}-${{ hashFiles('pyproject.toml', 'uv.lock') }}
       - name: Install dependencies
-        run: uv sync --group dev --frozen --python 3.13 --no-install-package vapoursynth
+        run: uv sync --group dev --extra preview --frozen --python 3.13 --no-install-package vapoursynth
       - name: Prime workspace config
         run: uv run --no-sync python frame_compare.py --root . --write-config
       - name: Diagnose workspace paths
@@ -65,7 +65,7 @@ jobs:
       - name: Ruff lint
         run: uv run --no-sync ruff check
       - name: Install import-linter
-        run: uv run --no-sync python -m pip install import-linter
+        run: uv pip install import-linter
       - name: Verify import contracts
         run: uv run --no-sync lint-imports --config importlinter.ini
   windows-smoke:
