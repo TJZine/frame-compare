@@ -421,6 +421,16 @@ Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 | Verification commands | ☑ | `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` (after installing the VSPreview extra), `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, and `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini` recorded in the 2025‑11‑12 Phase 11.5 DEC entry. |
 | Residual risks | ⚠️ | Shim removal is scheduled for 11.10; encourage new code to import from `src.frame_compare.*` directly to minimize churn later. |
 
+### Phase 11.6 – vs_core split by concerns (2025‑11‑12)
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| Module extraction | ☑ | `src/frame_compare/vs/{env,source,props,color,tonemap}.py` now own all VapourSynth helpers previously concentrated in `src/vs_core.py`. |
+| Compatibility shim | ☑ | `src/vs_core.py` (and `.pyi`) re-export every helper, proxy `_vs_module`, and forward targeted monkeypatches so existing tests continue working until 11.10 removes the shim. |
+| Layering/contracts | ☑ | `importlinter.ini` lists the new modules in the Runner→Core→Modules layer; DEC entry documents the change. |
+| Verification commands | ☑ | After installing the `preview` extra locally, `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, and `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini` ran clean (see Phase 11.6 DEC entry). |
+| Residual risks | ⚠️ | Shim removal scheduled for 11.10; encourage future edits to import from `src.frame_compare.vs.*` directly to reduce cleanup later. |
+
 ---
 
 ### Usage Notes

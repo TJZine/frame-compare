@@ -744,7 +744,7 @@ Goal: reduce remaining monoliths, harden subprocess/logging practices, and final
 | 11 | 11.3 Subprocess hardening |  | ☑ | `src/frame_compare/subproc.py::run_checked` now wraps FFmpeg/FFprobe/VSPreview calls from screenshot, audio_alignment, and vspreview; tests/logs updated on 2025‑11‑12. |
 | 11 | 11.4 Logging normalization |  | ☑ | Library modules now log via `logger`/reporter instead of `print()`, with CLI surfaces unchanged (2025‑11‑12). |
 | 11 | 11.5 Packaging cleanup + legacy removal |  | ☑ | Moved `src/{cli_layout,report,slowpics,config_template}.py` under `src/frame_compare/`, added shims, and removed `Legacy/comp.py` (2025‑11‑12). |
-| 11 | 11.6 vs_core split by concerns |  | ⛔ | Split `src/vs_core.py` into `src/frame_compare/vs/*` submodules. |
+| 11 | 11.6 vs_core split by concerns |  | ☑ | `src/frame_compare/vs/{env,source,props,color,tonemap}.py` host the VS helpers; `src/vs_core.py` is now a shim until 11.10 (2025‑11‑12). |
 | 11 | 11.7 Retry/backoff consolidation |  | ⛔ | Introduce `net.py` retry/HTTP client helpers; refactor network users. |
 | 11 | 11.8 Config docs generation |  | ⛔ | Script to generate config reference from `src/datatypes.py`. |
 | 11 | 11.9 CI + packaging checks |  | ⛔ | Update import‑linter, build wheel, validate artifacts. |
@@ -1166,6 +1166,8 @@ Detailed step list (anchors)
 
 Acceptance
 - Parity: all VS paths unchanged; tests (e.g., `tests/test_vs_core.py`, screenshot/selection/vspreview) pass; pyright/ruff clean; contracts kept.
+
+**2025-11-12 update:** Split `vs_core` into `src/frame_compare/vs/{env,source,props,color,tonemap}.py`, kept `src/vs_core.py` as a compatibility shim (plus `.pyi`) that proxies shared globals like `_vs_module`, `_compute_luma_bounds`, and `_tonemap_with_retries`, and updated `importlinter.ini` to include the new modules in the Runner→Core→Modules layer. After installing the `preview` extra locally, verification ran clean: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` (`289 passed, 1 skipped`), `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, and `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini`—see the 2025‑11‑12 Phase 11.6 DEC entry for logs.
 
 ### Sub‑phase 11.7 — Retry/Backoff Consolidation
 
