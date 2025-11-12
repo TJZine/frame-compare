@@ -739,7 +739,7 @@ Goal: reduce remaining monoliths, harden subprocess/logging practices, and final
 
 | Phase | Sub‑phase | Owner | Status | Notes |
 | --- | --- | --- | --- | --- |
-| 11 | 11.1 Render helpers extraction |  | ⛔ | Extract pure helpers from `src/screenshot.py` into `src/frame_compare/render/*`. |
+| 11 | 11.1 Render helpers extraction |  | ☑ | `src/frame_compare/render/{naming,overlay,encoders,geometry,errors}.py` host the pure helpers moved out of `src/screenshot.py`, with wrappers/tests + import-linter layering recorded on 2025‑11‑12. |
 | 11 | 11.2 Analysis split |  | ⛔ | Split `src/analysis.py` into `analysis/metrics.py`, `analysis/selection.py`, `analysis/cache_io.py`. |
 | 11 | 11.3 Subprocess hardening |  | ⛔ | Centralize subprocess calls; enforce safe argv + error mapping. |
 | 11 | 11.4 Logging normalization |  | ⛔ | Replace print() with logging in library modules; keep CLI formatting. |
@@ -843,6 +843,8 @@ Risks & mitigations
 
 Conventional Commit subject
 - `refactor(render): extract pure screenshot helpers into render modules`
+
+**2025-11-12 update:** Added the dedicated `src/frame_compare/render/` package (naming, overlay, encoders, geometry, errors) plus focused `tests/render/*` suites. `src/screenshot.py` now imports the helpers and exposes thin wrappers so existing tests keep their imports, while `render/overlay.py` exports overlay styles/state helpers and `render/geometry.py` owns subsampling/cropping math. `importlinter.ini` includes the new package in the modules layer, and docs/runner_refactor_checklist.md + this tracker were updated to describe the split. Verification logs (git status, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, `uv run --no-sync lint-imports --config importlinter.ini`) are captured in the 2025‑11‑12 Phase 11.1 entry in `docs/DECISIONS.md`.
 
 ### Sub‑phase 11.2 — Analysis Split (`metrics.py`, `selection.py`, `cache_io.py`)
 

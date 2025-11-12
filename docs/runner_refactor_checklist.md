@@ -370,6 +370,16 @@ Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 | Runner/CLI rewiring | ☑ | Runner + CLI import `tmdb_workflow` directly, while `frame_compare._COMPAT_EXPORTS` re-export `resolve_tmdb_workflow`/`TMDBLookupResult` for programmatic callers during the deprecation window. |
 | Tests/docs | ☑ | Tracker + DECISIONS entries recorded for Phases 10.1–10.2, with the slow.pics workflow tests now patching `tmdb_workflow` directly and docs referencing the shared module instead of `src.frame_compare.core`. |
 
+### Phase 11.1 – Render helpers extraction (2025‑11‑12)
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| Helper package extraction | ☑ | Created `src/frame_compare/render/{naming,overlay,encoders,geometry,errors}.py` so pure helpers migrate out of `src/screenshot.py` while keeping the same behavior and curated `__all__`. |
+| Wrappers & layering | ☑ | `src/screenshot.py` retains the private helper names as thin wrappers over the new modules, and `importlinter.ini` now lists `src.frame_compare.render` in the modules layer to enforce one-way deps. |
+| Focused tests | ☑ | Added `tests/render/test_{naming,overlay_text,encoders,geometry_helpers}.py` to cover label sanitizing, overlay composition, compression mapping, and geometry math without invoking VapourSynth. |
+| Verification commands | ☑ | `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, and `uv run --no-sync lint-imports --config importlinter.ini` ran clean; outputs logged in the 2025‑11‑12 Phase 11.1 DEC entry. |
+| Residual risks | ⚠️ | GeometryPlan remains defined in `src/screenshot.py` and CLI/tests still import the private wrapper names until the 11.10 shim cleanup; track follow-up rows before deleting the bridges. |
+
 ---
 
 ### Usage Notes
