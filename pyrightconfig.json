@@ -1,11 +1,11 @@
 {
   "typeCheckingMode": "standard",
   "include": ["src", "tests", "frame_compare.py", "typings"],
-  "strict": ["src/frame_compare"],
   "stubPath": "typings",
   "exclude": [".venv/**", "build/**", "dist/**", "**/__pycache__/**"],
   "venvPath": ".",
   "venv": ".venv",
+  "strict": ["src/frame_compare"],
   "executionEnvironments": [
     { "root": "src/frame_compare", "extraPaths": [".", "src", "typings"] },
     { "root": "src", "extraPaths": [".", "src", "typings"] },

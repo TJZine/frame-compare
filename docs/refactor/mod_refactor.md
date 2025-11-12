@@ -848,16 +848,69 @@ Conventional Commit subject
 
 ### Sub‑phase 11.2 — Analysis Split (`metrics.py`, `selection.py`, `cache_io.py`)
 
-Goal: separate metrics computation, selection strategies, and cache IO currently concentrated in `src/analysis.py`.
+Goal: separate metrics computation, selection strategies, and cache IO currently concentrated in `src/analysis.py`, keeping behavior and the public surface stable via a thin shim in `src/analysis.py` (removed in 11.10).
 
-Scope
-- Add `src/frame_compare/analysis/{metrics.py, selection.py, cache_io.py}`.
-- Migrate logic from `src/analysis.py` into the new modules.
-- Update imports in `runner.py` and other consumers.
-- Keep a thin shim in `src/analysis.py` for this session only (removed in 11.10).
+Scope & constraints
+- Add package `src/frame_compare/analysis/` with modules:
+  - `metrics.py` — frame rate detection, HDR probe, quantile/smoothing math, VapourSynth metric collection and fallback generator.
+  - `selection.py` — selection window resolution, selection hashing, selection heuristics and `select_frames` orchestration, selection detail JSON helpers.
+  - `cache_io.py` — metrics/selection cache read/write, cache fingerprinting, sidecar load/save, atomic JSON helpers.
+- Do not change behavior, logging text, or signatures. Keep `tests/test_analysis.py` unchanged.
+- Use absolute imports from `src.frame_compare.analysis` inside the shim to avoid ambiguity with `src/analysis.py`.
 
-Acceptance
-- Tests (including `tests/test_analysis.py`) pass unchanged; pyright/ruff clean.
+Detailed step list (per‑file; anchors/search)
+1) Scaffold package structure
+   - Add: `src/frame_compare/analysis/__init__.py`, `metrics.py`, `selection.py`, `cache_io.py`.
+   - `__init__.py` re‑exports curated public names: `FrameMetricsCacheInfo`, `SelectionDetail`, `compute_selection_window`, `selection_details_to_json`, `selection_hash_for_config`, `select_frames`, `probe_cached_metrics`, `write_selection_cache_file`, `dedupe`.
+
+2) Move metrics helpers to `analysis/metrics.py`
+   - Functions (anchors in `src/analysis.py`): `_quantile` (~371), `_frame_rate` (~1175), `_is_hdr_source` (~1258), `_collect_metrics_vapoursynth` (~1282, include internal helpers), `_generate_metrics_fallback` (~1518), `_smooth_motion` (~1548).
+
+3) Move selection logic to `analysis/selection.py`
+   - Types/helpers: `SelectionWindowSpec` (~90), `SelectionDetail` (~131) and `_SerializedSelectionDetail`, `_frame_to_timecode` (~216), `_coerce_seconds` (~433), `compute_selection_window` (~457), `selection_details_to_json` (~354), `_serialize_selection_details` (~289), `_deserialize_selection_details` (~306), `_format_selection_annotation` (~341), `selection_hash_for_config` (~579) + `_selection_fingerprint` (~549), `dedupe` (~1146).
+   - Orchestration: `select_frames` (~1571) refactored to call into `analysis.metrics` and `analysis.cache_io` for metric collection and persistence.
+
+4) Move cache IO to `analysis/cache_io.py`
+   - Dataclasses: `FrameMetricsCacheInfo` (~47), `CachedMetrics` (~62), `CacheLoadResult` (~81).
+   - Fingerprints/snapshots: `_threshold_snapshot` (~393), `_config_fingerprint` (~409) live here; import in `selection.py`.
+   - Read path: `probe_cached_metrics` (~585) and convenience loader (~720), plus coercers strictly needed for cache parsing (`_coerce_metric_series` (~220), `_coerce_int_list` (~186), `_coerce_selection_categories` (~200), `_coerce_optional_*` (~156–178)).
+   - File IO helpers: `_atomic_write_json` (~240), `_compute_file_sha1` (~268).
+   - Sidecar helpers: `_selection_sidecar_path` (~737), `_build_clip_inputs` (~755), `_selection_cache_key` (~784), `_selection_payload_from_inputs` (~800), `_build_selection_sidecar_payload` (~830), `_save_selection_sidecar` (~848), `write_selection_cache_file` (~927), `_load_selection_sidecar` (~985).
+   - Import `SelectionDetail` from `analysis.selection` only for typing/serialization; use `typing.TYPE_CHECKING` and string annotations to avoid cycles.
+
+5) Shim in `src/analysis.py`
+   - Replace implementations with delegates to the new package while preserving names used by tests:
+     - Public: `FrameMetricsCacheInfo`, `SelectionDetail`, `selection_details_to_json`, `compute_selection_window`, `dedupe`, `probe_cached_metrics`, `select_frames`, `selection_hash_for_config`, `write_selection_cache_file`.
+     - Private used by tests: `_quantile`.
+   - Keep module docstring and `logger` intact.
+
+6) Rewire internal imports
+   - `analysis.selection` imports `analysis.metrics` (`_quantile`, `_frame_rate`, `_smooth_motion`, `_generate_metrics_fallback`, `_collect_metrics_vapoursynth`, `_is_hdr_source`).
+   - `analysis.selection` imports `analysis.cache_io` (`probe_cached_metrics`, `_save_cached_metrics`, `_save_selection_sidecar`, `_load_selection_sidecar`).
+   - `analysis.cache_io` imports `analysis.selection.SelectionDetail` behind `TYPE_CHECKING`.
+
+7) Update import‑linter layering
+   - In `importlinter.ini` → `layers` list: append `src.frame_compare.analysis` to the third layer (module list after `src.frame_compare.core`).
+
+8) Tests
+   - Keep `tests/test_analysis.py` unchanged; the shim preserves imports and behavior.
+   - Optional: add `tests/analysis/` micro‑suites targeting `src.frame_compare.analysis` modules directly (not required for acceptance).
+
+Acceptance criteria & verification commands
+- Behavior parity: selection, windowing, HDR tonemap path, cache hit/miss identical; logging messages unchanged.
+- Commands:
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q` → all tests pass.
+  - `.venv/bin/ruff check` → no issues.
+  - `.venv/bin/pyright --warnings` → 0 errors/warnings. Fallbacks: `uv run --no-sync ruff check`, `npx pyright --warnings`.
+  - `uv run --no-sync lint-imports --config importlinter.ini` → 0 broken contracts; confirms new package in layer.
+
+Risks & mitigations
+- Import cycles: avoid by placing dataclasses where consumed (`SelectionDetail` in `selection.py`) and using `TYPE_CHECKING` in `cache_io`.
+- Hidden private dependencies: retain wrappers in the shim (e.g., `_quantile`) to keep tests stable.
+- Drift in floating‑point math: keep existing implementations unchanged; do not alter rounding or thresholds.
+
+Conventional Commit subject
+- `refactor(analysis): split selection, metrics, and cache IO into package`
 
 ### Sub‑phase 11.3 — Subprocess Hardening
 
