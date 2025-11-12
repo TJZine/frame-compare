@@ -731,22 +731,160 @@ Acceptance
 
 **2025-11-12 update:** `core.py` no longer imports or forwards TMDB helpers, `_COMPAT_EXPORTS` only exposes the curated names backed by `tmdb_workflow`, runner/tests patch `tmdb_workflow` directly, and README/config docs point at the workflow module. Verification recorded in `docs/DECISIONS.md` captured `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` (`273 passed, 1 skipped in 39.99 s`), `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, and `uv run --no-sync lint-imports --config importlinter.ini` with all contracts kept.
 
-## Post-phase Cleanup — Compatibility shim retirement
+## Phase 11 – Production Readiness Refactors (single‑session sub‑phases)
 
-Goal: ensure all temporary bridges (compat exports, wizard/VSPreview/TMDB shims, !_runner helpers that no longer need to bounce through _patch_core_helper and any other bridge code (if its still in use note this)) are removed once the refactor finishes.
+Goal: reduce remaining monoliths, harden subprocess/logging practices, and finalize packaging/layout for maintainability and safety. Each sub‑phase is designed to be completed in a single Codex session.
+
+### Progress Tracker (Phase 11)
+
+| Phase | Sub‑phase | Owner | Status | Notes |
+| --- | --- | --- | --- | --- |
+| 11 | 11.1 Render helpers extraction |  | ⛔ | Extract pure helpers from `src/screenshot.py` into `src/frame_compare/render/*`. |
+| 11 | 11.2 Analysis split |  | ⛔ | Split `src/analysis.py` into `analysis/metrics.py`, `analysis/selection.py`, `analysis/cache_io.py`. |
+| 11 | 11.3 Subprocess hardening |  | ⛔ | Centralize subprocess calls; enforce safe argv + error mapping. |
+| 11 | 11.4 Logging normalization |  | ⛔ | Replace print() with logging in library modules; keep CLI formatting. |
+| 11 | 11.5 Packaging cleanup + legacy removal |  | ⛔ | Move top‑level modules under `src/frame_compare/`; delete `Legacy/comp.py`. |
+| 11 | 11.6 vs_core split by concerns |  | ⛔ | Split `src/vs_core.py` into `src/frame_compare/vs/*` submodules. |
+| 11 | 11.7 Retry/backoff consolidation |  | ⛔ | Introduce `net.py` retry/HTTP client helpers; refactor network users. |
+| 11 | 11.8 Config docs generation |  | ⛔ | Script to generate config reference from `src/datatypes.py`. |
+| 11 | 11.9 CI + packaging checks |  | ⛔ | Update import‑linter, build wheel, validate artifacts. |
+| 11 | 11.10 Remove transitional shims |  | ⛔ | Delete temporary shims/bridges introduced in Phase 11. |
+
+### Sub‑phase 11.1 — Render Helpers Extraction (from `src/screenshot.py`)
+
+Goal: extract pure helpers (naming, geometry, overlay, encoders) into dedicated modules to shrink the screenshot monolith and enable focused tests.
 
 Scope
-- Audit `_COMPAT_EXPORTS`, wizard/VSPreview/TMDB helpers, and any other aliases marked “temporary” during Phases 1–10.
-- Confirm downstream automation/imports now rely on the extracted modules or curated exports.
+- Add package `src/frame_compare/render/` with modules: `naming.py`, `geometry.py`, `overlay.py`, `encoders.py`.
+- Move pure helper functions from `src/screenshot.py` into new modules (no behavior changes).
+- Update `src/screenshot.py` to import and use the new helpers.
+- Add unit tests for pure helpers (reusing/porting assertions from `tests/test_screenshot.py`).
+
+Acceptance
+- `pytest -q`, `ruff`, `pyright --warnings` clean; CLI output unchanged.
+
+### Sub‑phase 11.2 — Analysis Split (`metrics.py`, `selection.py`, `cache_io.py`)
+
+Goal: separate metrics computation, selection strategies, and cache IO currently concentrated in `src/analysis.py`.
+
+Scope
+- Add `src/frame_compare/analysis/{metrics.py, selection.py, cache_io.py}`.
+- Migrate logic from `src/analysis.py` into the new modules.
+- Update imports in `runner.py` and other consumers.
+- Keep a thin shim in `src/analysis.py` for this session only (removed in 11.10).
+
+Acceptance
+- Tests (including `tests/test_analysis.py`) pass unchanged; pyright/ruff clean.
+
+### Sub‑phase 11.3 — Subprocess Hardening
+
+Goal: centralize and harden all subprocess calls (FFmpeg/VSPreview) to enforce safe argv handling, timeouts, and consistent error mapping.
+
+Scope
+- Add `src/frame_compare/subproc.py` with: `run_checked(argv: list[str], *, cwd: Path | None = None, timeout: float | None = None, env: Mapping[str, str] | None = None) -> CompletedProcess` (no `shell=True`).
+- Refactor callers in `vspreview.py` and `screenshot.py` to use `run_checked`.
+
+Acceptance
+- VSPreview/screenshot tests pass; error messages remain user‑friendly; no shell usage.
+
+### Sub‑phase 11.4 — Logging Normalization
+
+Goal: remove print() from library modules and use `logging` consistently; keep CLI output via Rich/reporters.
+
+Scope
+- Replace print() across `src/frame_compare/*` with `logger = logging.getLogger(__name__)` calls.
+- Retain user‑facing messages in CLI/reporters.
+
+Acceptance
+- CLI output unchanged; tests pass; pyright/ruff clean.
+
+### Sub‑phase 11.5 — Packaging Cleanup + Remove Dead Legacy Code (grouped)
+
+Goal: reduce top‑level sprawl and delete dead code for clarity.
+
+Scope
+- Move remaining top‑level modules under `src/frame_compare/` where applicable (minimal churn).
+- Delete `Legacy/comp.py` after verifying no references.
+
+Acceptance
+- Tests/lint/typecheck pass; import‑linter contracts unaffected.
+
+### Sub‑phase 11.6 — vs_core Split by Concerns
+
+Goal: split `src/vs_core.py` (~2.4K LOC) into a subpackage for better isolation and testing.
+
+Scope
+- Add `src/frame_compare/vs/` with modules such as `source.py`, `tonemap.py`, `props.py` (exact split guided by code boundaries).
+- Move functions and update imports.
+- Keep a brief shim in `src/vs_core.py` for this session (remove in 11.10).
+
+Acceptance
+- VS tests (e.g., `tests/test_vs_core.py`) pass; behavior unchanged.
+
+### Sub‑phase 11.7 — Retry/Backoff Consolidation
+
+Goal: standardize HTTP retry/backoff and clients.
+
+Scope
+- Add `src/frame_compare/net.py` with helpers for httpx client/transport and retry rules.
+- Refactor TMDB/slow.pics to use shared helpers where appropriate.
+
+Acceptance
+- Network tests pass; error messages consistent; pyright/ruff clean.
+
+### Sub‑phase 11.8 — Config Docs Generation
+
+Goal: keep `docs/config_reference.md` synchronized with `src/datatypes.py`.
+
+Scope
+- Add a script (e.g., `tools/gen_config_docs.py`) to introspect dataclasses and output a table of sections/fields/defaults/types.
+- Run manually in this phase; wire into CI later if desired.
+
+Acceptance
+- Generated doc matches current defaults; reviewer sign‑off.
+
+### Sub‑phase 11.9 — CI & Packaging Checks
+
+Goal: ensure quality as modules split.
+
+Scope
+- Update import‑linter contracts for new packages (`render`, `analysis`, `vs`).
+- Build a wheel in CI and confirm packaged files (py.typed, data assets) are correct.
+
+Acceptance
+- CI green; wheel contents validated.
+
+### Sub‑phase 11.10 — Remove Transitional Shims (post‑Phase 11 cleanup)
+
+Goal: delete temporary shims/bridges introduced while splitting modules to minimize redundancy.
+
+Scope
+- Remove `src/analysis.py` shim re‑exports; update any tests/imports.
+- Remove any remaining bridges in `src/screenshot.py` after render helpers have been fully adopted.
+- Prune or repoint curated exports that referenced transitional names.
+- Remove `src/vs_core.py` shim aliases after consumers import from `src/frame_compare/vs/*`.
+
+Acceptance
+- `pytest -q`, `ruff`, `pyright --warnings` clean; no references to removed bridges remain.
+
+## Post-phase Cleanup — Compatibility shim/bridge retirement
+
+Goal: remove all temporary bridges and transitional shims left behind after Phases 9–11 (compat exports, wizard/VSPreview/TMDB shims, screenshot/analysis/vs_core shims, and any test-only bridges), so only the extracted modules and curated exports remain.
+
+Scope
+- Audit `_COMPAT_EXPORTS`, wizard/VSPreview/TMDB helpers, and any aliases marked “temporary” during Phases 9–11.
+- Remove Phase 11 bridges: `src/analysis.py` shim, any `src/screenshot.py` bridge calls replaced by `render/*`, and `src/vs_core.py` delegates once `src/frame_compare/vs/*` is fully adopted.
+- Confirm downstream automation/tests now rely on extracted modules or curated exports.
 Deliverables
 - Deletions of obsolete compatibility surfaces plus documentation updates (README/CHANGELOG, trackers, DEC).
 - Verification quartet demonstrating no remaining references to the removed shims.
 
 Acceptance
 - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings` all pass after the cleanup.
+- Import‑linter contracts remain kept for new packages (`render`, `analysis`, `vs`).
 - Trackers and DEC log explicitly note the removed names and replacement guidance.
   
-### Orchestrator Handoff Protocol (applies to Phases 9–10)
+### Orchestrator Handoff Protocol (applies to Phases 9–11)
 
 - Reviewer orchestrator prepares: scope, entry points, acceptance tests to watch, and risk notes per sub‑phase.
 - Coding agent executes the sub‑phase within a single session, requests approvals as needed, and updates DECISIONS/tracker entries.

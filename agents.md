@@ -46,18 +46,19 @@ Advisors analyze and propose diffs/checks. All execution follows CODEX.md.
 ## Global Defaults (Always On)
 - **Planning protocol = Sequential Thinking**: produce plans using a step-wise, explicitly reasoned checklist before proposing diffs.
 - **Docs lookup = context7**: pull short, dated snippets from official sources/best-practice docs for each claim. If unavailable, log the fallback.
-- **Search = ripgrep**: all evidence sweeps MUST use `ripgrep` first (respect repo ignores). If unavailable, log the fallback search method.
+- **Search = Serena first**: prefer Serena MCP search tools (`find_symbol`, `find_referencing_symbols`, `search_for_pattern`) for evidence sweeps; fall back to `ripgrep` when Serena is unavailable or insufficient. Respect repo ignores and log the fallback method used.
+- **Project orchestration = Serena MCP**: use Serena for structured planning (sequential-thinking tools), symbol-aware code understanding (`get_symbols_overview`, `find_symbol`), and project memory (`write_memory`/`list_memories`) during analysis. Advisors still propose diffs; Codex executes per CODEX.md. If Serena’s sequential-thinking tools are unavailable, fall back to the generic Sequential Thinking MCP before using general bullet outlines.
 - **Context lean**: Advisors remind Codex to follow CODEX’s Sequential Thinking Context Management rules (condense `process_thought` output, keep roughly the last 7–10 thoughts in working memory, and lean on MCP history for archives).
 - **Metadata accuracy**: Flag hallucinated Sequential Thinking metadata—`files_touched`, `tests_to_run`, `dependencies`, `risk_level`, `confidence_score`, etc. should stay empty/default unless there is real evidence.
 
 ## Standard Flow
-1) **Evidence sweep (ripgrep)** → enumerate where code/config/tests live. If `ripgrep` unavailable, record the fallback used.
+1) **Evidence sweep (Serena ➜ ripgrep)** → prefer Serena tools (`get_symbols_overview`, `find_symbol`, `find_referencing_symbols`, `search_for_pattern`) to enumerate where code/config/tests live. If Serena is unavailable or insufficient for the task, use `ripgrep` and record the fallback used.
 2) **Docs check (context7 ➜ MCP)** → start with Context7 (title + link + date). When Context7 lacks the needed source, call the Fetch MCP server via `mcp__fetch__fetch`, constrain `max_length` (default ≤ 20000 chars), and log URL, timestamp, format (HTML/JSON/Markdown/TXT), `start_index`, and chunk count in your response plus `docs/DECISIONS.md`. Only fetch publicly reachable URLs; escalate before touching authenticated or private targets.
-3) **Plan (Sequential Thinking)** → 3–7 steps, success checks, rollback notes; prompt Codex to summarize planning outputs per CODEX’s context-management guidance (no raw JSON, only recent thoughts retained) and ensure metadata fields are truthful or left empty.
+3) **Plan (Sequential Thinking)** → Switch Serena to `planning` mode for multi-step tasks, then use Serena’s `think_about_*` tools. If unavailable, fall back to the generic Sequential Thinking MCP; only then use a thorough bullet outline. Produce 3–7 steps, success checks, rollback notes; prompt Codex to summarize planning outputs per CODEX’s context-management guidance (no raw JSON, only recent thoughts retained) and ensure metadata fields are truthful or left empty.
    - Confirm the agent keeps logging Scoping → Research & Spike → Implementation → Testing → Review thoughts and leaves `next_thought_needed=true` until that Review entry is recorded; flag any run that flips it to `false` prematurely.
 4) **Proposed diffs** → file-by-file changes + tests (await approval).
 5) **Persist** → append decisions to `docs/DECISIONS.md`; update `CHANGELOG.md`. Before adding an entry, run `date -u +%Y-%m-%d` (or equivalent) and stamp the log with that exact value—never extrapolate future dates. When referencing MCP output, cite the URL + timestamp (from that command) and summarize any key snippets directly in the response so reviewers can replay the call without re-fetching.
-6) **Verify** → run `.venv/bin/pyright --warnings`, `.venv/bin/ruff check`, and `.venv/bin/pytest -q` before fallbacks. If the local binary is missing, install dev deps (`uv sync --all-extras --dev`) and document the fix. Only fall back to `uv run`/`npx` when the local command is unavailable, and record any sandbox/cache issues plus mitigations (for example `UV_CACHE_DIR=./.uv_cache`). When you must run `npx pyright --warnings`, request escalated permissions for that command even if prior steps were sandboxed.
+6) **Verify** → Advisors propose the exact verification commands and expected signals; Codex executes per CODEX.md. Prefer `.venv/bin/pyright --warnings`, `.venv/bin/ruff check`, and `.venv/bin/pytest -q` before fallbacks. If the local binary is missing, install dev deps (`uv sync --all-extras --dev`) and document the fix. Only fall back to `uv run`/`npx` when the local command is unavailable, and record any sandbox/cache issues plus mitigations (for example `UV_CACHE_DIR=./.uv_cache`). When you must run `npx pyright --warnings`, request escalated permissions for that command even if prior steps were sandboxed.
 7) **Commit subject** → finish every task report with a Conventional Commit-style subject line (e.g., `chore: update packaging excludes`). This is what the user pastes into `git commit -m`, so it must include a type and summary per commitlint rules.
 ## Repo Invariants (enforced)
 - Add/adjust tests with code changes; keep contracts and error boundaries explicit
@@ -65,11 +66,12 @@ Advisors analyze and propose diffs/checks. All execution follows CODEX.md.
 - Config from ENV/TOML → typed config object
 - Avoid N+1; caches documented; input validation and authZ for protected paths
 
-## Tooling Registry (Capabilities)
-- Code search (**required default: ripgrep**; fallback: IDE/LSP search, must log fallback)
+- Serena MCP (analysis-first): use `get_current_config`, `get_symbols_overview`, `find_symbol`, `find_referencing_symbols`, `search_for_pattern`, `think_about_*`, `list_dir`, `list_memories`, and `read_memory` to collect evidence. Advisors must not use editing tools (`insert_*`, `replace_symbol_body`)—propose diffs instead.
+- Sequential Thinking MCP (fallback): use `process_thought`, `generate_summary`, and related tools if Serena’s thinking tools are unavailable.
+- Code search (fallback): `ripgrep` when Serena is unavailable; otherwise prefer Serena’s symbol- and pattern-aware queries.
 - Docs lookup (**required default: context7/official docs**; fallback: project docs/README with explicit note)
 - External context MCP servers — Context7 stays first-line. Use Fetch MCP (`mcp__fetch__fetch`) for live docs and APIs (private-IP blocking + length limits per `/zcaceres/fetch-mcp`, 2025‑11‑10). For structured task decomposition, TaskFlow MCP enforces plan/approval phases and dependency tracking (`/pinkpixel-dev/taskflow-mcp`, 2025‑11‑10). For combined search + fetch, snf-mcp provides DuckDuckGo/Wikipedia search plus rate-limited HTML/Markdown retrieval (`/mseri/snf-mcp`, 2025‑11‑10). Record the server, tool name, key arguments, and cite the resulting snippet (URL + timestamp) every time.
-- Planning (**required default: sequential-thinking tool**; fallback: thorough bullet outline)
+- Planning (**required default: Serena sequential-thinking tools**; fallback: thorough bullet outline)
 - Logging/trace insertion (suggest exact file:line; fallback: print/console.log with labels)
 Guideline: If a preferred tool is unavailable (local or Cloud), degrade gracefully and state the fallback used.
 
@@ -77,3 +79,4 @@ Guideline: If a preferred tool is unavailable (local or Cloud), degrade graceful
 - Advisors provide analysis only. All execution/command runs follow CODEX.md.
 - MCP calls count as “analysis actions” but must be logged like commands: cite `source:<url>@<timestamp>` in findings, mention chunking/pagination, and mirror the metadata in `docs/DECISIONS.md`.
 - When in doubt, stop and request approval as per CODEX.md.
+ - Serena constraints: Advisors may call Serena analysis tools but must not perform editing operations; instead, include a minimal patch diff proposal.

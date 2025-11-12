@@ -6,6 +6,9 @@
   - `.venv/bin/pyright --warnings` (must run first; only fall back to `uv run pyright --warnings` or `npx pyright --warnings` if the local binary is unavailable. When using the `npx` fallback, request escalated permissions for that command.)
   - `.venv/bin/ruff check` (fallbacks: `ruff check`, `uv run ruff check`)
   - `.venv/bin/pytest -q` (unit/integration only; see Test Guardrails)
+  - Read-only repo inspection: `rg` (preferred), `sed`, `nl`, `head`, `tail` for ≤250 line chunks
+  - Serena MCP analysis calls: `get_current_config`, `get_symbols_overview`, `find_symbol`, `find_referencing_symbols`, `search_for_pattern`, `think_about_*` (editing calls still follow the diff-plan → approval flow)
+  - Serena mode changes: `switch_modes` (e.g., `planning`, `interactive`) are allowed when scoped to the active task’s needs
 - Autonomous changes allowed (no approval) **only if all are true**:
   - <= 300 changed lines total, no file moves/renames, no dependency/secret/CI changes,
   - confined to current feature scope (paths listed in the feature’s GUIDE.md),
@@ -27,13 +30,14 @@
 - Keep logging thoughts for each stage in that sequence—do not skip a phase unless you explicitly state why it does not apply for the task.
 
 ## Global Defaults (Enforced)
-1) **Planning = Sequential Thinking** (generate a stepwise plan before patches).
+1) **Planning = Sequential Thinking** (generate a stepwise plan before patches). Prefer Serena’s `think_about_*` tools; if unavailable, fall back to the generic Sequential Thinking MCP; only then use a thorough bullet outline.
 2) **Docs = context7 first** (cite official/best-practice; record date). If unavailable, log fallback.
-3) **Search = ripgrep first** (respect repo ignores). If unavailable, log fallback.
-4) **Verify** = run `.venv/bin/pyright --warnings`, `.venv/bin/ruff check`, `.venv/bin/pytest -q` (only fall back to `uv run`/`npx`/system binaries after attempting `uv sync --all-extras --dev` to install the local venv; any `npx pyright --warnings` fallback must be executed with escalated permissions enabled).
-5) **Output**: populate PR “Decision Minute” fields before proposing patches.
-6) **Commit Title**: every task response must include a Conventional Commit-style subject (for example, `feat: …`, `chore: …`) that can be copied directly into `git commit -m`. State it explicitly before the summary so users running commit hooks don’t have to invent one.
-7) **Log Dates Accurately**: when updating `docs/DECISIONS.md`, `CHANGELOG.md`, or similar logs, run `date -u +%Y-%m-%d` and use that exact stamp—do not future-date entries.
+3) **Search = Serena first** (prefer Serena MCP’s symbol/pattern search; fall back to ripgrep; respect repo ignores; log fallback).
+4) **Orchestration = Serena MCP** (prefer Serena for code awareness and symbol-safe operations; use `get_symbols_overview`/`find_symbol` before edits; propose diffs or use Serena editing ops only after approval).
+5) **Verify** = run `.venv/bin/pyright --warnings`, `.venv/bin/ruff check`, `.venv/bin/pytest -q` (only fall back to `uv run`/`npx`/system binaries after attempting `uv sync --all-extras --dev` to install the local venv; any `npx pyright --warnings` fallback must be executed with escalated permissions enabled).
+6) **Output**: populate PR “Decision Minute” fields before proposing patches.
+7) **Commit Title**: every task response must include a Conventional Commit-style subject (for example, `feat: …`, `chore: …`) that can be copied directly into `git commit -m`. State it explicitly before the summary so users running commit hooks don’t have to invent one.
+8) **Log Dates Accurately**: when updating `docs/DECISIONS.md`, `CHANGELOG.md`, or similar logs, run `date -u +%Y-%m-%d` and use that exact stamp—do not future-date entries.
 
 ## Always-Allowed Commands (details)
 Print each command before execution and capture exit code + duration. These checks may read/write their standard caches (`.venv/**`, `.uv_cache/**`, `~/.cache/uv/**`). If a host sandbox blocks `~/.cache/uv`, set `UV_CACHE_DIR=./.uv_cache` (already gitignored) and rerun the command.
@@ -52,8 +56,16 @@ ruff check
 pytest -q
 ```
 
+## Test Guardrails
+- No network or external services during tests by default.
+- Use `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` for reproducible local and CI runs.
+- Tests must not write outside the workspace; prefer tmp dirs/fixtures.
+- Randomized tests must set deterministic seeds and assert invariants, not incidental state.
+- Mark slow/integration suites; don’t run them under the always-allowed quick path.
+- Log any environment toggles used (e.g., `-p no:vsengine`) in DECISIONS with rationale.
+
 ### Always-logged MCP calls
-- Every Context7 or Fetch MCP invocation must log tool name, URL, format, `max_length`, `start_index`, chunk count, latency, and summarize the returned snippet (or quote the relevant portion) directly in your response.
+- Every Context7, Serena, or Fetch MCP invocation must log tool name, URL (if applicable), format, `max_length`, `start_index`, chunk count, latency, and summarize the returned snippet (or quote the relevant portion) directly in your response.
 - Respect server-side caps: Fetch MCP already enforces private-IP blocking and length filtering (`/zcaceres/fetch-mcp`, 2025‑11‑10); document any override (`DEFAULT_LIMIT`, pagination strategy) when you use it.
 - When using broader MCP servers (e.g., TaskFlow MCP for workflow planning or snf-mcp for DuckDuckGo/Wikipedia search), include the server ID and describe the resulting artifacts so reviewers can replay the call.
 
