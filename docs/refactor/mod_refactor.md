@@ -745,8 +745,8 @@ Goal: reduce remaining monoliths, harden subprocess/logging practices, and final
 | 11 | 11.4 Logging normalization |  | ☑ | Library modules now log via `logger`/reporter instead of `print()`, with CLI surfaces unchanged (2025‑11‑12). |
 | 11 | 11.5 Packaging cleanup + legacy removal |  | ☑ | Moved `src/{cli_layout,report,slowpics,config_template}.py` under `src/frame_compare/`, added shims, and removed `Legacy/comp.py` (2025‑11‑12). |
 | 11 | 11.6 vs_core split by concerns |  | ☑ | `src/frame_compare/vs/{env,source,props,color,tonemap}.py` host the VS helpers; `src/vs_core.py` is now a shim until 11.10 (2025‑11‑12). |
-| 11 | 11.7 Retry/backoff consolidation |  | ⛔ | Introduce `net.py` retry/HTTP client helpers; refactor network users. |
-| 11 | 11.8 Config docs generation |  | ⛔ | Script to generate config reference from `src/datatypes.py`. |
+| 11 | 11.7 Retry/backoff consolidation |  | ☑ | Added `src/frame_compare/net.py` centralizing retry/backoff helpers and rewired slow.pics + TMDB transports to consume the shared policy. |
+| 11 | 11.8 Config docs generation |  | ☑ | Added `tools/gen_config_docs.py`, committed `docs/_generated/config_tables.md`, and verified the `--check` sentinel to keep the reference aligned with `src/datatypes.py`. |
 | 11 | 11.9 CI + packaging checks |  | ⛔ | Update import‑linter, build wheel, validate artifacts. |
 | 11 | 11.10 Remove transitional shims |  | ⛔ | Delete temporary shims/bridges introduced in Phase 11. |
 
@@ -1171,14 +1171,63 @@ Acceptance
 
 ### Sub‑phase 11.7 — Retry/Backoff Consolidation
 
-Goal: standardize HTTP retry/backoff and clients.
+Source of truth for the coding agent: this section in `docs/refactor/mod_refactor.md` (Sub‑phase 11.7). Follow these steps rather than relying solely on the prompt.
 
-Scope
-- Add `src/frame_compare/net.py` with helpers for httpx client/transport and retry rules.
-- Refactor TMDB/slow.pics to use shared helpers where appropriate.
+Goal
+- Standardize network behavior (timeouts, retries, backoff, error mapping) across TMDB and slow.pics while preserving public behavior and existing test seams. Centralize common logic in `src/frame_compare/net.py` with light refactors in call sites.
 
-Acceptance
-- Network tests pass; error messages consistent; pyright/ruff clean.
+Scope & constraints
+- Add `src/frame_compare/net.py` containing:
+  - `build_urllib3_retry(total: int = 3, backoff_factor: float = 0.5, status_forcelist: set[int] | None = None, allowed_methods: set[str] | None = None) -> urllib3.util.Retry` — factory for a default Retry object (status_forcelist defaults to {429, 500, 502, 503, 504}; allowed_methods defaults to {"GET","POST"}).
+  - `default_requests_timeouts(connect: float = 10.0, read: float = 30.0) -> tuple[float, float]` — convenience for timeouts.
+  - `async def httpx_get_json_with_backoff(client: httpx.AsyncClient, path: str, params: dict[str, object], *, retries: int = 3, initial_backoff: float = 0.5, max_backoff: float = 4.0, retry_status: set[int] | None = None) -> httpx.Response` — standardized backoff loop honoring Retry-After header; defaults `retry_status` to {429, 500, 502, 503, 504}.
+  - `def redact_url_for_logs(url: str) -> str` — safe redaction for webhooks/URLs in logs.
+- Keep slow.pics session configuration using Requests + HTTPAdapter locally in `src/frame_compare/slowpics.py` to preserve tests that patch `slowpics.HTTPAdapter` and `requests.Session`. Use `net.build_urllib3_retry(...)` for the Retry object to centralize policy but leave adapter construction/mounts in slow.pics.
+- Keep TMDB’s transport injection (`http_transport`) intact; refactor its `_http_request` to call `net.httpx_get_json_with_backoff` to centralize policy.
+- Do not change user‑visible logs/messages or configuration names; timeouts remain the same as current defaults unless already configurable in datatypes.
+
+Detailed step list (anchors/search)
+1) Add `src/frame_compare/net.py`
+   - Implement helpers listed above with docstrings and full type annotations.
+   - Export `__all__ = ["build_urllib3_retry", "default_requests_timeouts", "httpx_get_json_with_backoff", "redact_url_for_logs"]`.
+
+2) Wire slow.pics to use shared Retry factory
+   - File: `src/frame_compare/slowpics.py`.
+   - Anchors:
+     - Imports: currently `from urllib3.util import Retry` (top of file). Replace this import with `from src.frame_compare.net import build_urllib3_retry` and use it to produce the Retry for `HTTPAdapter` (around where `HTTPAdapter` is constructed and mounted; see ~400+ in the file for adapter creation and mount).
+     - Keep `HTTPAdapter(...)` and `session.mount(...)` in slow.pics so tests that monkeypatch `slowpics.HTTPAdapter` and inspect mounts continue to work.
+     - Leave the manual webhook retry `_post_direct_webhook` logic intact; it is already a small exponential backoff.
+
+3) Wire TMDB to use shared backoff loop
+   - File: `src/tmdb.py`.
+   - Anchors:
+     - Replace the internal backoff loop in `_http_request` (~860–910, search for `async def _http_request`) with a call to `await net.httpx_get_json_with_backoff(client, path=path, params=params, retries=3, initial_backoff=0.5, max_backoff=4.0)`. Keep the local caching (`_CACHE`) and status handling exactly as before by returning JSON via `response.json()` and mapping 4xx to `TMDBResolutionError` with the same messages.
+     - When handling 4xx responses (>=400 and not in retry set), keep raising `TMDBResolutionError(f"TMDB request failed: HTTP {status}")` as today; do not change message strings.
+
+4) Import‑linter layering
+   - Add `src.frame_compare.net` to the third module layer under `Runner→Core→Modules layering` in `importlinter.ini` (same group where other `src.frame_compare.*` modules live). Ensure no back‑imports from `net` into CLI shim or `core`.
+
+5) Tests
+   - No test changes expected for slow.pics because we leave `HTTPAdapter` construction/mounts and `requests.Session` creation in the same module. Tests that monkeypatch `slowpics.requests.Session` and `slowpics.HTTPAdapter` will continue to work.
+   - TMDB tests should remain green: they patch `http_transport` or rely on deterministic `_http_request` behavior; using `net.httpx_get_json_with_backoff` must preserve status/backoff semantics and exceptions.
+
+Acceptance criteria & verification commands
+- Behavior parity: slow.pics upload and TMDB resolution flows behave identically on success and failure; existing logs/messages unchanged; webhook behavior unchanged.
+- Commands:
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q` → all tests pass.
+  - `.venv/bin/ruff check` → no issues.
+  - `.venv/bin/pyright --warnings` → 0 errors/warnings.
+  - `uv run --no-sync lint-imports --config importlinter.ini` → 0 broken contracts after adding `src.frame_compare.net` to the layer.
+
+**2025-11-12 update:** Delivered `src/frame_compare/net.py` with `build_urllib3_retry`, `default_requests_timeouts`, `httpx_get_json_with_backoff`, and `redact_url_for_logs`. Slow.pics now accepts the shared retry factory while keeping its `HTTPAdapter` mounts in-`slowpics.py`, TMDB `_http_request` defers to `net.httpx_get_json_with_backoff` while preserving the cache/error messages, and `importlinter.ini` now lists `src.frame_compare.net` in the Runner→Core→Modules layer. Verification (`PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, `uv run --no-sync lint-imports --config importlinter.ini`) all pass locally; the optional VSPreview extras are still required for touching certain slow.pics tests, so those remain gated. Residual risk: keep the slow.pics HTTPAdapter/session seams untouched so the existing monkeypatch-based tests continue to work.
+
+Risks & mitigations
+- Test seams: keeping `HTTPAdapter` and `requests.Session` references inside `slowpics.py` ensures existing monkeypatch patterns don’t break. Centralizing only the `Retry` factory avoids churn.
+- Divergent httpx behavior: ensure `httpx_get_json_with_backoff` mirrors the existing `_http_request` retry logic (status set + Retry-After). Keep the same retry counts and backoff ceilings.
+- Silent changes in timeouts: keep the same numeric defaults and configs; do not introduce new env or config flags in this sub‑phase.
+
+Conventional Commit subject
+- `refactor(net): centralize retry/backoff for TMDB and slow.pics`
 
 ### Sub‑phase 11.8 — Config Docs Generation
 
@@ -1188,8 +1237,13 @@ Scope
 - Add a script (e.g., `tools/gen_config_docs.py`) to introspect dataclasses and output a table of sections/fields/defaults/types.
 - Run manually in this phase; wire into CI later if desired.
 
+Implementation
+- `tools/gen_config_docs.py` introspects `src/datatypes.py` and writes `docs/_generated/config_tables.md`, with a `--check` mode for drift detection.
+
 Acceptance
-- Generated doc matches current defaults; reviewer sign‑off.
+- `python3 tools/gen_config_docs.py --check docs/_generated/config_tables.md` stays clean and reviewer sign-off.
+
+**2025-11-12 update:** `tools/gen_config_docs.py` now introspects the dataclasses in `src/datatypes.py`, writes `docs/_generated/config_tables.md`, and only rewrites the target file when `--out` is provided without `--check`, leaving the `--check` sentinel to detect drift without mutating the repo. The generated table is committed alongside the script, and the sentinel test (`python3 tools/gen_config_docs.py --check docs/_generated/config_tables.md`) is now part of the verification bundle. Additional verification commands completed successfully: `date -u +%Y-%m-%d`, `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, and `.venv/bin/pyright --warnings`. Residual risk: any change to `src/datatypes.py` requires rerunning the generator before committing so `docs/_generated/config_tables.md` stays synchronized; consider gating the regen in CI once the subprocess is reliable. Blockers: none discovered beyond the manual regen step for datatypes edits.
 
 ### Sub‑phase 11.9 — CI & Packaging Checks
 

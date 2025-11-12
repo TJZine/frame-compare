@@ -4,6 +4,15 @@ Supplemental reference material for [`README.md`](../README.md).
 Use these tables when you need to fine-tune behaviour beyond the
 quick-start configuration paths.
 
+Generated defaults (keys, types, and defaults) now live in
+[`docs/_generated/config_tables.md`](./_generated/config_tables.md) and
+serve as the source of truth for values. These tables are produced by
+`tools/gen_config_docs.py`; run `python3 tools/gen_config_docs.py --check
+docs/_generated/config_tables.md` whenever `src/datatypes.py` changes to
+confirm the generated markdown matches the code, and rerun the script
+without `--check` to update the committed table. This page remains
+human-edited to explain purpose, intent, and integration tips.
+
 ## CLI helpers
 
 - `frame-compare wizard` — interactive configuration assistant. Prompts for workspace root, input directory, slow.pics settings, audio alignment, and renderer preference. Provide `--preset <name>` when stdin is not a TTY to avoid blocking automation.
@@ -172,7 +181,7 @@ The bundled offline report mirrors slow.pics ergonomics and now includes:
 | Key | Purpose | Type | Default |
 | --- | --- | --- | --- |
 | `[paths].input_dir` | Default scan directory under the workspace root. | str | `"comparison_videos"` |
-| `[runtime].ram_limit_mb` | VapourSynth RAM ceiling. | int | `4000` |
+| `[runtime].ram_limit_mb` | VapourSynth RAM ceiling. | int | `8000` |
 | `[runtime].vapoursynth_python_paths` | Extra VapourSynth module paths. | list[str] | `[]` |
 | `[source].preferred` | Preferred source filter. | str | `"lsmas"` |
 | `VAPOURSYNTH_PYTHONPATH` | Environment module path. | str | *(unset)* |

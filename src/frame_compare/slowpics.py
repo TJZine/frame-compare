@@ -18,7 +18,6 @@ from urllib.parse import unquote, urlsplit
 
 import requests
 from requests.adapters import HTTPAdapter
-from urllib3.util import Retry
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from requests_toolbelt.multipart.encoder import MultipartEncoder
@@ -29,6 +28,7 @@ else:  # pragma: no cover - optional dependency in tests
         MultipartEncoder = None  # type: ignore
 
 from src.datatypes import SlowpicsConfig
+from src.frame_compare.net import build_urllib3_retry
 
 
 class SlowpicsAPIError(RuntimeError):
@@ -393,12 +393,10 @@ def _configure_slowpics_session(session: requests.Session, *, workers: Optional[
 
     effective_workers = workers if workers and workers > 0 else _DEFAULT_UPLOAD_CONCURRENCY
     pool_size = max(4, effective_workers)
-    retries = Retry(
-        total=3,
+    retries = build_urllib3_retry(
         backoff_factor=0.1,
-        status_forcelist=[502, 503, 504],
-        allowed_methods=frozenset({"GET", "POST"}),
-        raise_on_status=False,
+        status_forcelist={502, 503, 504},
+        allowed_methods={"GET", "POST"},
     )
     adapter = HTTPAdapter(
         max_retries=retries,

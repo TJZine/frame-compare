@@ -15,6 +15,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, cast
 import httpx
 
 from .datatypes import TMDBConfig
+from .frame_compare import net
 
 logger = logging.getLogger(__name__)
 
@@ -466,40 +467,34 @@ async def _http_request(
     if cached is not None:
         return cached
 
-    backoff = 0.5
-    last_error: Exception | None = None
-    for attempt in range(4):
-        try:
-            response = await client.get(path, params=params)
-        except httpx.RequestError as exc:  # pragma: no cover - rare network error
-            last_error = exc
-        else:
-            status = response.status_code
-            if status >= 500 or status == 429:
-                retry_after = response.headers.get("Retry-After")
-                try:
-                    delay = float(retry_after) if retry_after else backoff
-                except ValueError:
-                    delay = backoff
-                await asyncio.sleep(max(0.1, min(delay, 4.0)))
-                backoff = min(backoff * 2, 4.0)
-                continue
-            if status >= 400:
-                raise TMDBResolutionError(
-                    f"TMDB request failed for {path} (status={status}): {response.text[:200]}"
-                )
-            try:
-                payload_obj = response.json()
-            except ValueError as exc:  # pragma: no cover - unexpected
-                raise TMDBResolutionError("TMDB returned invalid JSON") from exc
-            payload = _ensure_dict(payload_obj, context=f"{path} response")
-            _CACHE.set(key, payload, ttl_seconds=cache_ttl)
-            return payload
-        await asyncio.sleep(backoff)
-        backoff = min(backoff * 2, 4.0)
-    if last_error:
-        raise TMDBResolutionError(f"TMDB request failed after retries: {last_error}")
-    raise TMDBResolutionError("TMDB request failed after retries")
+    try:
+        response = await net.httpx_get_json_with_backoff(
+            client,
+            path,
+            params,
+            retries=3,
+            initial_backoff=0.5,
+            max_backoff=4.0,
+            retry_status={429, 500, 502, 503, 504},
+            sleep=asyncio.sleep,
+        )
+    except httpx.RequestError as exc:  # pragma: no cover - rare network error
+        raise TMDBResolutionError(f"TMDB request failed after retries: {exc}") from exc
+    except net.BackoffError as exc:
+        raise TMDBResolutionError("TMDB request failed after retries") from exc
+
+    status = response.status_code
+    if status >= 400:
+        raise TMDBResolutionError(
+            f"TMDB request failed for {path} (status={status}): {response.text[:200]}"
+        )
+    try:
+        payload_obj = response.json()
+    except ValueError as exc:  # pragma: no cover - unexpected
+        raise TMDBResolutionError("TMDB returned invalid JSON") from exc
+    payload = _ensure_dict(payload_obj, context=f"{path} response")
+    _CACHE.set(key, payload, ttl_seconds=cache_ttl)
+    return payload
 
 
 def _ensure_dict(value: object, *, context: str) -> Dict[str, Any]:
