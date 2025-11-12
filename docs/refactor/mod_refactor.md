@@ -555,8 +555,9 @@ Goal: finish modularizing `src/frame_compare/core.py` by extracting remaining CL
 | 9 | 9.10 Public __all__ |  | ☑ | Added explicit `__all__` lists for the extracted modules (doctor/config_writer/presets/runtime_utils/selection) so wildcard imports mirror the curated exports; tracked in DECISIONS on 2025‑11‑11. |
 | 9 | 9.11 Type strictness ratchet |  | ☑ | `pyrightconfig.json` now enables `"strict": ["src/frame_compare"]`, and the resulting annotation/Optional fixes keep `.venv/bin/pyright --warnings` clean (see DECISIONS 2025‑11‑11). |
 | 9 | 9.12 Runner API docs |  | ☑ | Documented curated runner/doctor API usage, reference guide, and tracker/log updates. |
-| 10 | 10.1 TMDB workflow extraction |  | ⛔ | Pending extraction of TMDB helpers into `src/frame_compare/tmdb_workflow.py`; `core.py` still imports `_tmdb_module` directly. |
-| 10 | Compatibility cleanup |  | ⛔ | After Phases 9–10 land, audit `_COMPAT_EXPORTS`/shims and remove any temporary bridges before closing the refactor. |
+| 10 | 10.1 TMDB workflow extraction |  | ☑ | `src/frame_compare/tmdb_workflow.py` now hosts the resolver dataclass, prompts, and collection helper; CLI/runner import it directly and trackers/DEC log the verification quartet (2025‑11‑12). |
+| 10 | 10.2 TMDB shim removal |  | ☑ | `core.py` dropped the transitional TMDB forwarders, `_COMPAT_EXPORTS` no longer re-export `_resolve_tmdb_blocking`, and tests/docs patch `tmdb_workflow` directly (2025‑11‑12). |
+| 10 | Compatibility cleanup |  | ⛔ | Final audit of `_COMPAT_EXPORTS`, wizard/VSPreview shims, and import-linter ignores still pending post-Phase 10. |
 
 ---
 
@@ -720,9 +721,15 @@ Deliverables
 - Pruned or repointed entries in `frame_compare._COMPAT_EXPORTS`.
 - Any necessary test import updates.
 
+- [x] Remove TMDB shim exports from `core.py` and drop the `_resolve_tmdb_blocking` compatibility entry in `frame_compare._COMPAT_EXPORTS`.
+- [x] Update runner helpers/tests to patch `tmdb_workflow` directly plus refresh README, docs/config audits, and tracker notes to reference the shared module.
+- [x] Log DECISIONS/tracker updates for Phase 10.2 and rerun the quartet + `uv run --no-sync lint-imports --config importlinter.ini` (see 2025‑11‑12 entry).
+
 Acceptance
 - `pytest -q`, `ruff`, and `pyright --warnings` clean with no references to removed shims.
 - Docs updated in `docs/DECISIONS.md` (UTC) summarizing removed names and replacements.
+
+**2025-11-12 update:** `core.py` no longer imports or forwards TMDB helpers, `_COMPAT_EXPORTS` only exposes the curated names backed by `tmdb_workflow`, runner/tests patch `tmdb_workflow` directly, and README/config docs point at the workflow module. Verification recorded in `docs/DECISIONS.md` captured `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` (`273 passed, 1 skipped in 39.99 s`), `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, and `uv run --no-sync lint-imports --config importlinter.ini` with all contracts kept.
 
 ## Post-phase Cleanup — Compatibility shim retirement
 
@@ -790,7 +797,7 @@ Planned moves from `src/frame_compare/core.py` with start lines for reviewer nav
   - `_resolve_selection_windows` (src/frame_compare/core.py:1299)
   - `_log_selection_windows` (src/frame_compare/core.py:1353)
 
-- Moved to `src/frame_compare/tmdb_workflow.py` during Phase 10.1 (thin forwarders remain in `core` until Sub-phase 10.2 removes them)
+- Moved to `src/frame_compare/tmdb_workflow.py` during Phase 10.1; Phase 10.2 removed the transitional `core` forwarders so only the workflow module exposes these names.
   - `TMDBLookupResult` (src/frame_compare/core.py:671)
   - `_should_retry_tmdb_error` (src/frame_compare/core.py:681)
   - `_resolve_tmdb_blocking` (src/frame_compare/core.py:698)
@@ -818,6 +825,16 @@ Planned moves from `src/frame_compare/core.py` with start lines for reviewer nav
 - [x] Tests added/updated: Updated runner + slow.pics suites to patch `tmdb_workflow` and ensure TMDB prompts/resolution stubs hit the new module
 - [x] Risks noted: Transitional core shims still exist until Phase 10.2; need follow-up to delete shim exports once callers migrate
 - [x] Follow-ups for next session: Phase 10.2 cleanup (delete core shims, point tests directly at `tmdb_workflow`)
+
+## Session Checklist — 2025-11-12 (Phase 10.2)
+
+- [x] Phase/Sub-phase: `10 / 10.2`
+- [x] Modules/files touched: `src/frame_compare/core.py`, `frame_compare.py`, `tests/helpers/runner_env.py`, `tests/runner/test_slowpics_workflow.py`, `tests/runner/test_cli_entry.py`, `typings/frame_compare.pyi`, `README.md`, `docs/README_REFERENCE.md`, `docs/config_audit.md`, `docs/runner_refactor_checklist.md`, `docs/refactor/mod_refactor.md`, `docs/DECISIONS.md`
+- [x] Commands run: `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, `uv run --no-sync lint-imports --config importlinter.ini`
+- [x] Docs updated? (`runner_refactor_checklist`, `DECISIONS`, `CHANGELOG`?): Yes — README/reference/config audit, tracker tables, and DECISIONS entries captured the shim removal + verification results (CHANGELOG unchanged; API surface is stable).
+- [x] Tests added/updated: Runner slow.pics + CLI suites now invoke/patch `tmdb_workflow` directly; compat helper alias map trimmed accordingly.
+- [x] Risks noted: Final compatibility audit (wizard/VSPreview shims + `_COMPAT_EXPORTS` sweep) remains for the Post-phase cleanup row.
+- [x] Follow-ups for next session: Execute the broader compatibility cleanup and revisit import-linter ignores once the remaining shims are retired.
 
 ## Verification Commands Reference
 

@@ -205,7 +205,7 @@ Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 
 | Checklist Item | Status | Notes / Next Steps |
 | --- | --- | --- |
-| 1. TMDB async parity & retry strategy | ☑ | CLI and runner already share `core.resolve_tmdb_workflow` (async + manual overrides); parity verified with existing tests, no drift detected. |
+| 1. TMDB async parity & retry strategy | ☑ | CLI and runner already share `tmdb_workflow.resolve_workflow` (exported via `frame_compare.resolve_tmdb_workflow`) for async/manual flows; parity verified with existing tests, no drift detected. |
 | 2. Reporter injection adoption | ☑ | README + regression tests (`tests/test_frame_compare.py::test_runner_reporter_factory_overrides_default`) cover `reporter_factory`/`reporter` usage; quiet mode still swaps in `NullCliOutputManager`. |
 | 3. Quality gates rerun on networked host | ☑ | `npx pyright --warnings`, `.venv/bin/ruff check`, and `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` (258 passed in 7.21 s) recorded in `docs/DECISIONS.md`. |
 | Shared CLI/test fixtures (2025-11-11) | ✅ | Extracted `_CliRunnerEnv`, `_RecordingOutputManager`, JSON tail/display stubs, and `_patch_*` helpers into `tests/helpers/runner_env.py`, exposed `cli_runner_env`/`recording_output_manager`/`json_tail_stub` fixtures in `tests/conftest.py`, and repointed the runner + VSPreview suites to the shared helpers. Ruff/Pyright still flag the known import-order and `_VSPREVIEW_*` Final constant issues outside this change. |
@@ -366,9 +366,9 @@ Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 
 | Checklist Item | Status | Notes / Next Steps |
 | --- | --- | --- |
-| Module creation | ⛔ | `src/frame_compare/core.py:216-274` still imports `_tmdb_module` and exposes `_resolve_tmdb_blocking`, `resolve_tmdb_workflow`, `_prompt_manual_tmdb`, `_prompt_tmdb_confirmation`, and `_render_collection_name`; these need to move into `src/frame_compare/tmdb_workflow.py` per the plan. |
-| Runner/CLI rewiring | ⛔ | Runner and CLI continue to call the core shims; after extracting the workflow, they should import from the new module while `_COMPAT_EXPORTS`/core provide temporary aliases. |
-| Tests/docs | ⛔ | No DEC entry or tracker logs exist for Phase 10.1 yet; once the module extraction lands, update this checklist, `docs/refactor/mod_refactor.md`, and DEC with the verification quartet. |
+| Module creation | ☑ | `src/frame_compare/tmdb_workflow.py` now owns the TMDB dataclass, blocking resolver, prompts, and collection renderer; `core.py` no longer imports the module after the Phase 10.2 shim removal on 2025‑11‑12. |
+| Runner/CLI rewiring | ☑ | Runner + CLI import `tmdb_workflow` directly, while `frame_compare._COMPAT_EXPORTS` re-export `resolve_tmdb_workflow`/`TMDBLookupResult` for programmatic callers during the deprecation window. |
+| Tests/docs | ☑ | Tracker + DECISIONS entries recorded for Phases 10.1–10.2, with the slow.pics workflow tests now patching `tmdb_workflow` directly and docs referencing the shared module instead of `src.frame_compare.core`. |
 
 ---
 

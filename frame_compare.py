@@ -80,7 +80,6 @@ _COMPAT_EXPORTS: dict[str, object] = {
     "_apply_vspreview_manual_offsets": _core._apply_vspreview_manual_offsets,  # Deprecated: use frame_compare.vspreview.apply_manual_offsets
     "_write_vspreview_script": _core._write_vspreview_script,  # Deprecated: use frame_compare.vspreview.write_script
     "_validate_tonemap_overrides": _core._validate_tonemap_overrides,
-    "_resolve_tmdb_blocking": tmdb_workflow.resolve_blocking,
     "resolve_tmdb_workflow": tmdb_workflow.resolve_workflow,
     "TMDBLookupResult": tmdb_workflow.TMDBLookupResult,
     "render_collection_name": tmdb_workflow.render_collection_name,

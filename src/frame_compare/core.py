@@ -22,7 +22,6 @@ import src.frame_compare.alignment_runner as _alignment_runner_module
 import src.frame_compare.doctor as _doctor_module
 import src.frame_compare.planner as _planner_module
 import src.frame_compare.preflight as _preflight_constants
-import src.frame_compare.tmdb_workflow as _tmdb_module
 import src.frame_compare.vspreview as _vspreview_module
 import src.frame_compare.wizard as _wizard_module
 import src.screenshot as _screenshot_module
@@ -115,7 +114,6 @@ from src.slowpics import (
 from src.slowpics import (
     upload_comparison as _upload_comparison,
 )
-from src.tmdb import TMDBCandidate, TMDBResolution
 from src.tmdb import resolve_tmdb as _resolve_tmdb_public
 from src.vs_core import ClipInitError as _ClipInitError
 from src.vs_core import ClipProcessError as _ClipProcessError
@@ -211,27 +209,6 @@ abort_if_site_packages = _abort_if_site_packages_public
 _abort_if_site_packages = abort_if_site_packages
 
 
-
-
-TMDBLookupResult = _tmdb_module.TMDBLookupResult
-_resolve_tmdb_blocking = _tmdb_module.resolve_blocking
-resolve_tmdb_workflow = _tmdb_module.resolve_workflow
-_render_collection_name = _tmdb_module.render_collection_name
-render_collection_name = _tmdb_module.render_collection_name
-
-
-def _prompt_manual_tmdb(candidates: Sequence[TMDBCandidate]) -> tuple[str, str] | None:
-    """Prompt the user to choose a TMDB candidate when multiple matches exist."""
-    prompt = getattr(_tmdb_module, "_prompt_manual_tmdb")
-    return prompt(candidates)
-
-
-def _prompt_tmdb_confirmation(
-    resolution: TMDBResolution,
-) -> tuple[bool, tuple[str, str] | None]:
-    """Ask the user to confirm the TMDB result or supply a manual override."""
-    confirm = getattr(_tmdb_module, "_prompt_tmdb_confirmation")
-    return confirm(resolution)
 
 
 def _estimate_analysis_time(file: Path, cache_dir: Path | None) -> float:

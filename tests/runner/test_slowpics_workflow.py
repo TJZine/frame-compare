@@ -790,7 +790,7 @@ def test_resolve_tmdb_workflow_unattended_ambiguous(
 
     monkeypatch.setattr(tmdb_utils, "_prompt_manual_tmdb", _fail_prompt)
 
-    result = core_module.resolve_tmdb_workflow(
+    result = tmdb_utils.resolve_workflow(
         files=files,
         metadata=[{"label": "Example"}],
         tmdb_cfg=cfg,
@@ -827,7 +827,7 @@ def test_resolve_tmdb_workflow_manual_override(monkeypatch: pytest.MonkeyPatch) 
     manual_return = ("TV", "999")
     monkeypatch.setattr(tmdb_utils, "_prompt_manual_tmdb", lambda _: manual_return)
 
-    result = core_module.resolve_tmdb_workflow(
+    result = tmdb_utils.resolve_workflow(
         files=files,
         metadata=[{"label": "Example"}],
         tmdb_cfg=cfg,
@@ -863,7 +863,7 @@ def test_resolve_tmdb_blocking_retries_transient_errors(
     monkeypatch.setattr(core_module.time, "sleep", lambda _seconds: None)
 
     cfg = TMDBConfig(api_key="token")
-    result = core_module._resolve_tmdb_blocking(
+    result = tmdb_utils.resolve_blocking(
         file_name="Example.mkv",
         tmdb_cfg=cfg,
         year_hint=None,

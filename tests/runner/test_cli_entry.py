@@ -832,9 +832,9 @@ def test_runner_handles_existing_event_loop(tmp_path: Path, monkeypatch: pytest.
 
     tmdb_calls: list[dict[str, object]] = []
 
-    def fake_tmdb_workflow(**kwargs: object) -> core_module.TMDBLookupResult:
+    def fake_tmdb_workflow(**kwargs: object) -> tmdb_utils.TMDBLookupResult:
         tmdb_calls.append(kwargs)
-        return core_module.TMDBLookupResult(
+        return tmdb_utils.TMDBLookupResult(
             resolution=None,
             manual_override=None,
             error_message=None,

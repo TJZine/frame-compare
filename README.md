@@ -297,7 +297,7 @@ Frame Compare seeds `config/config.toml` from `src/data/config.toml.template`. L
 
 Environment variables: `FRAME_COMPARE_ROOT`, `FRAME_COMPARE_CONFIG`, `FRAME_COMPARE_TEMPLATE_PATH`, `FRAME_COMPARE_NO_WIZARD`, `VAPOURSYNTH_PYTHONPATH`.
 
-TMDB metadata lookups now flow through a shared workflow (`core.resolve_tmdb_workflow`) for both Click and programmatic runs. Ambiguous matches respect `[tmdb].unattended` (no prompts when true, warnings logged instead), manual identifiers entered at the prompt propagate through slow.pics/JSON tails, and `_resolve_tmdb_blocking` retries transient HTTP failures using `httpx.HTTPTransport(retries=...)` before surfacing an error.
+TMDB metadata lookups now flow through the shared workflow helper (`src.frame_compare.tmdb_workflow.resolve_workflow`, re-exported as `frame_compare.resolve_tmdb_workflow`) for both Click and programmatic runs. Ambiguous matches respect `[tmdb].unattended` (no prompts when true, warnings logged instead), manual identifiers entered at the prompt propagate through slow.pics/JSON tails, and `tmdb_workflow.resolve_blocking` retries transient HTTP failures using `httpx.HTTPTransport(retries=...)` before surfacing an error.
 
 ### Tonemap Quick Recipes
 

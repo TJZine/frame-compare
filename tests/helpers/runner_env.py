@@ -191,8 +191,6 @@ def _patch_core_helper(monkeypatch: pytest.MonkeyPatch, attr: str, value: object
     alias_map: dict[str, tuple[str, ...]] = {
         "prepare_preflight": ("_prepare_preflight",),
         "_prepare_preflight": ("prepare_preflight",),
-        "resolve_tmdb_workflow": ("resolve_workflow",),
-        "_resolve_tmdb_blocking": ("resolve_blocking",),
         "collect_path_diagnostics": ("_collect_path_diagnostics",),
         "_collect_path_diagnostics": ("collect_path_diagnostics",),
         "_parse_metadata": ("parse_metadata",),

@@ -100,18 +100,6 @@ def emit_doctor_results(
 main: Group
 
 
-def _resolve_tmdb_blocking(
-    *,
-    file_name: str,
-    tmdb_cfg: TMDBConfig,
-    year_hint: Optional[int],
-    imdb_id: Optional[str],
-    tvdb_id: Optional[str],
-    attempts: int = ...,
-    transport_retries: int = ...,
-) -> Optional[TMDBResolution]: ...
-
-
 def resolve_tmdb_workflow(
     *,
     files: Sequence[Path],
