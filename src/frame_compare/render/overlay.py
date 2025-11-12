@@ -24,7 +24,7 @@ __all__ = [
 ]
 
 if TYPE_CHECKING:
-    from src import vs_core
+    from src.frame_compare import vs as vs_core
     from src.screenshot import GeometryPlan
 
     TonemapInfo = vs_core.TonemapInfo

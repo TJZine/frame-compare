@@ -9,7 +9,7 @@ from typing import Any, Callable, Mapping, Optional, Tuple
 from .env import _SOURCE_PREFERENCE, ClipInitError, _get_vapoursynth_module  # pyright: ignore[reportPrivateUsage]
 from .props import _ensure_std_namespace  # pyright: ignore[reportPrivateUsage]
 
-logger = logging.getLogger("src.vs_core")
+logger = logging.getLogger("src.frame_compare.vs.source")
 _SOURCE_PLUGIN_FUNCS = {"lsmas": "LWLibavSource", "ffms2": "Source"}
 
 

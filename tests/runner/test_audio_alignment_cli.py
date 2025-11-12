@@ -16,7 +16,6 @@ from click.testing import CliRunner, Result
 import frame_compare
 import src.frame_compare.alignment_runner as alignment_runner_module
 import src.frame_compare.core as core_module
-from src.analysis import CacheLoadResult, FrameMetricsCacheInfo, SelectionDetail
 from src.audio_alignment import AlignmentMeasurement, AudioStreamInfo
 from src.datatypes import (
     AnalysisConfig,
@@ -25,6 +24,7 @@ from src.datatypes import (
     ScreenshotConfig,
 )
 from src.frame_compare import runner as runner_module
+from src.frame_compare.analysis import CacheLoadResult, FrameMetricsCacheInfo, SelectionDetail
 from src.frame_compare.cli_runtime import (
     NullCliOutputManager,
     _AudioAlignmentDisplayData,

@@ -254,7 +254,7 @@ for candidate in EXTRA_PATHS:
         sys.path.insert(0, candidate)
 
 import vapoursynth as vs
-from src import vs_core
+from src.frame_compare import vs as vs_core
 from src.datatypes import ColorConfig
 
 vs_core.configure(

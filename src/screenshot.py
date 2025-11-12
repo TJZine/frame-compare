@@ -22,6 +22,7 @@ from typing import (
 )
 
 from src.frame_compare import subproc as _subproc
+from src.frame_compare import vs as vs_core
 from src.frame_compare.render import encoders as _enc
 from src.frame_compare.render import geometry as _geo
 from src.frame_compare.render import naming as _naming
@@ -32,7 +33,6 @@ from src.frame_compare.render.errors import (
     ScreenshotWriterError,
 )
 
-from . import vs_core
 from .datatypes import (
     ColorConfig,
     ExportRange,

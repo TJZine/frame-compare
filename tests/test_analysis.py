@@ -7,8 +7,9 @@ from typing import Any, cast
 
 import pytest
 
-import src.analysis as analysis_mod
-from src.analysis import (
+import src.frame_compare.analysis as analysis_mod
+from src.datatypes import AnalysisConfig, ColorConfig
+from src.frame_compare.analysis import (
     FrameMetricsCacheInfo,
     SelectionDetail,
     _quantile,
@@ -20,7 +21,6 @@ from src.analysis import (
     selection_hash_for_config,
     write_selection_cache_file,
 )
-from src.datatypes import AnalysisConfig, ColorConfig
 
 
 class FakeClip:

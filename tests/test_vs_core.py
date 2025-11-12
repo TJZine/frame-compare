@@ -8,9 +8,10 @@ from typing import Any, Dict, List, Sequence
 
 import pytest
 
-from src import vs_core
 from src.datatypes import ColorConfig
-from src.vs_core import VerificationResult
+from src.frame_compare import vs as vs_core
+from src.frame_compare.vs import VerificationResult
+from src.frame_compare.vs import color as vs_color
 
 
 @pytest.fixture(autouse=True)
@@ -536,7 +537,10 @@ def _install_fake_vs(monkeypatch: Any, **overrides: int) -> Any:
     )
     attributes.update(overrides)
     fake_vs = types.SimpleNamespace(**attributes)
+    from src.frame_compare.vs import env as vs_env
+
     monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
+    monkeypatch.setattr(vs_env, "_vs_module", fake_vs, raising=False)
     monkeypatch.setattr(vs_core, "_vs_module", fake_vs, raising=False)
     return fake_vs
 
@@ -631,6 +635,7 @@ def test_normalise_color_metadata_infers_limited_via_signal(monkeypatch: Any) ->
     fake_vs = _install_fake_vs(monkeypatch)
     clip = _DummyClip(fake_vs, height=1080)
 
+    monkeypatch.setattr(vs_color, "_compute_luma_bounds", lambda _: (16.0, 234.0))
     monkeypatch.setattr(vs_core, "_compute_luma_bounds", lambda _: (16.0, 234.0))
 
     warnings: list[str] = []
@@ -650,6 +655,7 @@ def test_normalise_color_metadata_warns_for_mismatched_limited(monkeypatch: Any)
     fake_vs = _install_fake_vs(monkeypatch)
     clip = _DummyClip(fake_vs, height=1080)
 
+    monkeypatch.setattr(vs_color, "_compute_luma_bounds", lambda _: (0.0, 255.0))
     monkeypatch.setattr(vs_core, "_compute_luma_bounds", lambda _: (0.0, 255.0))
 
     warnings: list[str] = []

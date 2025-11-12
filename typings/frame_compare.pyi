@@ -9,7 +9,7 @@ import subprocess as subprocess
 import sys as sys
 from click.core import Group
 from rich.console import Console as Console
-from src import vs_core as vs_core
+from src.frame_compare import vs as vs_core
 from src.datatypes import TMDBConfig
 from src.frame_compare import cli_runtime as cli_runtime
 from src.frame_compare import core as core

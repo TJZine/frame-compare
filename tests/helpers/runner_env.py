@@ -25,7 +25,7 @@ import src.frame_compare.planner as planner_module
 import src.frame_compare.preflight as preflight_module
 import src.frame_compare.tmdb_workflow as tmdb_workflow_module
 import src.frame_compare.vspreview as vspreview_module
-from src.analysis import SelectionDetail
+from src.frame_compare import vs as vs_core_module
 from src.datatypes import (
     AnalysisConfig,
     AppConfig,
@@ -43,6 +43,7 @@ from src.datatypes import (
     TMDBConfig,
 )
 from src.frame_compare import runner as runner_module
+from src.frame_compare.analysis import SelectionDetail
 from src.frame_compare.cli_runtime import (
     AudioAlignmentJSON,
     CliOutputManager,
@@ -254,7 +255,7 @@ def _patch_core_helper(monkeypatch: pytest.MonkeyPatch, attr: str, value: object
 def _patch_vs_core(monkeypatch: pytest.MonkeyPatch, attr: str, value: object) -> None:
     """Patch VapourSynth helpers in both the shim module and the runner module."""
 
-    monkeypatch.setattr(frame_compare.vs_core, attr, value, raising=False)
+    monkeypatch.setattr(vs_core_module, attr, value, raising=False)
     monkeypatch.setattr(runner_module.vs_core, attr, value, raising=False)
 
 

@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from src.analysis import SelectionDetail
 from src.datatypes import ReportConfig
-from src.report import generate_html_report
+from src.frame_compare.analysis import SelectionDetail
+from src.frame_compare.report import generate_html_report
 
 
 def _touch(path: Path) -> None:

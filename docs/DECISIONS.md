@@ -55,6 +55,70 @@
   - `redact_url_for_logs` lives in `src/frame_compare/net.py:100` for future sensitive endpoints, while slow.pics keeps `_redact_webhook` in `src/frame_compare/slowpics.py:53` to retain the `\"webhook\"` fallback token in its logging.
   - Verification commands shared with Sub-phase 11.8 (pytest/ruff/pyright) also ran clean locally.
 
+- *2025-11-12:* Phase 11.10 — shim retirement. Deleted the remaining `src/{analysis,vs_core,slowpics,cli_layout,report,config_template}.py` bridges plus their `.pyi` stubs, repointed CLI/core/runtime/tests/docs to import from `src.frame_compare.*`, refreshed `frame_compare._COMPAT_EXPORTS`, and updated tracker docs (README reference, refactor log, DEC, CHANGELOG) with the new canonical imports.
+  - `date -u +%Y-%m-%d` → `2025-11-12`
+  - `git status -sb` →
+    ```
+    ## runner-refactor...origin/runner-refactor [ahead 5]
+     M CHANGELOG.md
+     M docs/DECISIONS.md
+     M docs/README_REFERENCE.md
+     M docs/config_audit.md
+     M docs/current_pipeline_trace.md
+     M docs/docs_inventory.md
+     M docs/refactor/mod_refactor.md
+     M docs/runner_refactor_checklist.md
+     M frame_compare.py
+     D src/analysis.py
+     D src/cli_layout.py
+     D src/cli_layout.pyi
+     D src/config_template.py
+     D src/config_template.pyi
+     M src/frame_compare/alignment_preview.py
+     M src/frame_compare/analysis/__init__.py
+     M src/frame_compare/analysis/metrics.py
+     M src/frame_compare/analysis/selection.py
+     M src/frame_compare/cache.py
+     M src/frame_compare/cli_runtime.py
+     M src/frame_compare/core.py
+     M src/frame_compare/preflight.py
+     M src/frame_compare/render/overlay.py
+     M src/frame_compare/runner.py
+     M src/frame_compare/selection.py
+     M src/frame_compare/vs/color.py
+     M src/frame_compare/vs/source.py
+     M src/frame_compare/vs/tonemap.py
+     M src/frame_compare/vspreview.py
+     D src/report.py
+     D src/report.pyi
+     M src/screenshot.py
+     D src/slowpics.py
+     D src/slowpics.pyi
+     D src/vs_core.py
+     D src/vs_core.pyi
+     M tests/cli/test_layout.py
+     M tests/helpers/runner_env.py
+     M tests/render/test_overlay_text.py
+     M tests/runner/test_audio_alignment_cli.py
+     M tests/runner/test_cli_entry.py
+     M tests/runner/test_slowpics_workflow.py
+     M tests/test_analysis.py
+     M tests/test_config.py
+     M tests/test_config_template.py
+     M tests/test_paths_preflight.py
+     M tests/test_report.py
+     M tests/test_screenshot.py
+     M tests/test_slowpics.py
+     M tests/test_vs_core.py
+     M typings/frame_compare.pyi
+    ```
+  - `UV_CACHE_DIR=.uv_cache PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run --no-sync python -m pytest -q` → `290 passed, 1 skipped in 40.03 s`
+  - `UV_CACHE_DIR=.uv_cache uv run --no-sync ruff check --fix && UV_CACHE_DIR=.uv_cache uv run --no-sync ruff check` → clean
+  - `UV_CACHE_DIR=.uv_cache uv run --no-sync npx pyright --warnings` (with sandbox escalation per policy) → clean
+  - `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini` → `Contracts: 3 kept, 0 broken`
+  - `UV_CACHE_DIR=.uv_cache uv run --no-sync python -m build` → **fails** (`pip` cannot download `wheel` in this sandbox: five retries, then “No matching distribution found for wheel”); `uv run --no-sync twine check dist/*` remains blocked until a cached artifact or mirror is available.
+  - `rg -n "from src\.(slowpics|cli_layout|report|config_template|vs_core)\b|import src\.(slowpics|cli_layout|report|config_template|vs_core)\b"` → no matches; `rg -n "\bsrc\.(vs_core|slowpics|report|cli_layout|config_template)\b"` → no matches. Logged the packaging failure for follow-up once network access is restored or wheel dependencies are cached locally.
+
 - *2025-11-12:* Phase 11.6 — split `vs_core` by concern per `docs/refactor/mod_refactor.md`. Added the `src/frame_compare/vs/` subpackage (`env`, `source`, `props`, `color`, `tonemap`) with verbatim moves from `src/vs_core.py`, wired intra-package imports with `TYPE_CHECKING` guards, and replaced `src/vs_core.py` with a compatibility shim plus `.pyi` stub that proxies `_vs_module`, `_compute_luma_bounds`, `_detect_rgb_color_range`, `_apply_post_gamma_levels`, `_tonemap_with_retries`, etc., so existing monkeypatches keep working until Sub-phase 11.10 removes it. Updated `importlinter.ini` to include `src.frame_compare.vs` (and its modules) in the Runner→Core→Modules layer. After installing the `preview` extra locally, verification (2025-11-12): `git status -sb` → `## runner-refactor...origin/runner-refactor [ahead 2]`; `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` → `289 passed, 1 skipped in 40.03 s`; `.venv/bin/ruff check` → `All checks passed!`; `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`; `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini` → `Contracts: 3 kept, 0 broken`.
 - *2025-11-12:* Phase 11.5 packaging cleanup — relocated `src/{cli_layout,report,slowpics,config_template}.py` (and their `.pyi` shims) into `src/frame_compare/`, updated the legacy modules to proxy the canonical module via `sys.modules[__name__] = _real_module` so monkeypatches hit the right globals, removed `Legacy/comp.py`, added `tests/__init__.py`, and appended the new modules to the Runner→Core→Modules layer in `importlinter.ini`. Added VSPreview extras locally (`uv pip install vspreview PySide6`) to satisfy the slow.pics tests. Verification (2025-11-12): `git status -sb` → `## runner-refactor...origin/runner-refactor [ahead 1]`; `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` → `289 passed, 1 skipped in 39.96 s`; `.venv/bin/ruff check` → `All checks passed!`; `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`; `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini` → `Contracts: 3 kept, 0 broken`. No external sources consulted.
 
@@ -76,7 +140,7 @@
    - screenshot: overlay debug prints (~1848–1854, ~1877–1882, ~1932–1937) gated by `FRAME_COMPARE_LOG_OVERLAY_RANGE`.
    - tmdb_workflow: interactive guidance prints (~215–221, ~233, ~245–247, ~261) to migrate to `click.echo` or reporter.
    Exclusions: VSPreview script `safe_print` and `print()` lines in the persisted script (covered by `tests/test_console_safety.py`). Verification gates: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, `uv run --no-sync lint-imports --config importlinter.ini`. No external sources used; anchors gathered via Serena search.
-- *2025-11-12:* Phase 11.5 planning — Packaging cleanup + legacy removal. Plan to relocate internal modules from `src/` to `src/frame_compare/` with thin shims left in place until 11.10; remove `Legacy/comp.py`. Moves: `src/cli_layout.py` → `src/frame_compare/cli_layout.py`, `src/report.py` → `src/frame_compare/report.py`, `src/slowpics.py` → `src/frame_compare/slowpics.py`, `src/config_template.py` → `src/frame_compare/config_template.py`. Shims at old paths re‑export `*` with `# type: ignore[F401,F403]`. Import‑linter layer to include `src.frame_compare.{cli_layout,report,slowpics,config_template}`. Exclusions for this sub‑phase: keep `src/datatypes.py`, `src/utils.py`, `src/tmdb.py`, `src/screenshot.py`, `src/vs_core.py`, and `src/analysis.py` shim. Anchors: file paths above and import sites in tests (`tests/cli/test_layout.py` imports `src.cli_layout`; `tests/test_report.py` imports `src.report`; `tests/test_slowpics.py` imports `src.slowpics`; `tests/test_config_template.py` imports `src.config_template`). Verification gates: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, and import‑linter after layer update. No external sources used; anchors gathered via Serena search.
+- *2025-11-12:* Phase 11.5 planning — Packaging cleanup + legacy removal. Plan to relocate internal modules from `src/` to `src/frame_compare/` with thin shims left in place until 11.10; remove `Legacy/comp.py`. Moves: `src/cli_layout.py` → `src/frame_compare/cli_layout.py`, `src/report.py` → `src/frame_compare/report.py`, `src/slowpics.py` → `src/frame_compare/slowpics.py`, `src/config_template.py` → `src/frame_compare/config_template.py`. Shims at old paths re‑export `*` with `# type: ignore[F401,F403]`. Import‑linter layer to include `src.frame_compare.{cli_layout,report,slowpics,config_template}`. Exclusions for this sub‑phase: keep `src/datatypes.py`, `src/utils.py`, `src/tmdb.py`, `src/screenshot.py`, `src/vs_core.py`, and `src/analysis.py` shim. Anchors: file paths above and import sites in tests (for example, `tests/cli/test_layout.py` still referenced the legacy `src` package path for cli_layout/report/slowpics/config_template). Verification gates: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, and import‑linter after layer update. No external sources used; anchors gathered via Serena search.
 - *2025-11-12:* Phase 11.6 planning — vs_core split by concerns. Plan to introduce `src/frame_compare/vs/{env,source,props,color,tonemap}.py` and a compatibility shim in `src/vs_core.py` that re-exports all used names (public and private helpers), to be removed in 11.10. Anchors recorded (src/vs_core.py): env/config (~21–28, ~229–360, ~326, ~1134), source/open/trim (plugin constants ~17–22; error classes ~41–76; `_set_source_preference` ~300; `_resolve_core` ~366; `_slice_clip` ~1056; `_extend_with_blank` ~1070; `_apply_fps_map` ~1090; `init_clip` ~1104), props/color extraction (mappings/labels ~138–227; `_describe_code` ~229; `_props_signal_hdr` ~736; `_coerce_prop` ~750; `_first_present` ~768; `_normalise_resolved_code` ~774; `_resolve_color_metadata` ~778; `_infer_frame_height` ~812; `_extract_frame_props` ~1186; `_snapshot_frame_props` ~1196), color normalization (`_resolve_configured_color_defaults` ~834; `_adjust_color_range_from_signal` ~1208; `normalise_color_metadata` ~1228; plus `_resolve_color_overrides`/`_guess_default_colourspace`), tonemap/verification (`TonemapInfo` ~92; `VerificationResult` ~121; `ColorDebugArtifacts` ~137; `TonemapSettings` ~150; `_parse_unexpected_kwarg` ~1872; `_call_tonemap_function` ~1898; `_apply_post_gamma_levels` ~1926; `_compute_verification` ~1969; `process_clip_for_screenshot` ~2010; `ClipProcessError`). Verification gates: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, `uv run --no-sync lint-imports --config importlinter.ini`. No external sources used; anchors gathered via Serena search.
  - *2025-11-12:* Phase 11.7 planning — Retry/backoff consolidation. Plan to add `src/frame_compare/net.py` with `build_urllib3_retry`, `default_requests_timeouts`, `httpx_get_json_with_backoff`, and `redact_url_for_logs`. Refactor slow.pics to build `urllib3.Retry` via `net.build_urllib3_retry` while keeping `HTTPAdapter` construction/mounting inside `src/frame_compare/slowpics.py` (tests patch `slowpics.HTTPAdapter` today). Refactor TMDB `_http_request` to delegate to `net.httpx_get_json_with_backoff`, preserving cache and error messages. Add `src.frame_compare.net` to the import-linter modules layer. Anchors: slow.pics adapter creation/mount (~400+), TMDB `_http_request` (~860–910). Verification gates: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, `uv run --no-sync lint-imports --config importlinter.ini`. No external sources used; anchors gathered via Serena search.
 - *2025-11-12:* Phase 11.1 render helpers extraction completion. `git status -sb` → `## runner-refactor...origin/runner-refactor [ahead 28]`; `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` → `289 passed, 1 skipped in 40.19 s`; `.venv/bin/ruff check` → `All checks passed!`; `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`; `uv run --no-sync lint-imports --config importlinter.ini` → `Contracts: 3 kept, 0 broken` (initial `uv` call hit a cache permission error and was re-run with elevated access). Added `src/frame_compare/render/{__init__,errors,encoders,geometry,naming,overlay}.py`, moved the pure helpers from `src/screenshot.py` with thin private wrappers, and updated `importlinter.ini` to include the new package in the modules layer. Created focussed suites under `tests/render/test_{naming,overlay_text,encoders,geometry_helpers}.py`, refreshed `docs/refactor/mod_refactor.md` (Phase 11 tracker + 11.1 notes), and added the Phase 11.1 checklist section to `docs/runner_refactor_checklist.md` alongside this DEC entry so the tracker + quartet remain in sync.

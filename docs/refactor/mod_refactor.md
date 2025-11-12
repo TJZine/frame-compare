@@ -744,11 +744,11 @@ Goal: reduce remaining monoliths, harden subprocess/logging practices, and final
 | 11 | 11.3 Subprocess hardening |  | ☑ | `src/frame_compare/subproc.py::run_checked` now wraps FFmpeg/FFprobe/VSPreview calls from screenshot, audio_alignment, and vspreview; tests/logs updated on 2025‑11‑12. |
 | 11 | 11.4 Logging normalization |  | ☑ | Library modules now log via `logger`/reporter instead of `print()`, with CLI surfaces unchanged (2025‑11‑12). |
 | 11 | 11.5 Packaging cleanup + legacy removal |  | ☑ | Moved `src/{cli_layout,report,slowpics,config_template}.py` under `src/frame_compare/`, added shims, and removed `Legacy/comp.py` (2025‑11‑12). |
-| 11 | 11.6 vs_core split by concerns |  | ☑ | `src/frame_compare/vs/{env,source,props,color,tonemap}.py` host the VS helpers; `src/vs_core.py` is now a shim until 11.10 (2025‑11‑12). |
+| 11 | 11.6 vs_core split by concerns |  | ☑ | `src/frame_compare/vs/{env,source,props,color,tonemap}.py` host the VS helpers; the interim `src/vs_core.py` shim was deleted in Sub-phase 11.10 (2025‑11‑12). |
 | 11 | 11.7 Retry/backoff consolidation |  | ☑ | Added `src/frame_compare/net.py` centralizing retry/backoff helpers and rewired slow.pics + TMDB transports to consume the shared policy. |
 | 11 | 11.8 Config docs generation |  | ☑ | Added `tools/gen_config_docs.py`, committed `docs/_generated/config_tables.md`, and verified the `--check` sentinel to keep the reference aligned with `src/datatypes.py`. |
 | 11 | 11.9 CI + packaging checks |  | ☑ | CI now enforces config-doc drift checks, import contracts, and wheel validation across the new packages. |
-| 11 | 11.10 Remove transitional shims |  | ⛔ | Delete temporary shims/bridges introduced in Phase 11. |
+| 11 | 11.10 Remove transitional shims |  | ☑ | Removed the legacy `src/*` shims and repointed imports/docs to the canonical `src.frame_compare.*` modules (2025‑11‑12). |
 
 ### Sub‑phase 11.1 — Render Helpers Extraction (from `src/screenshot.py`)
 
@@ -1078,14 +1078,14 @@ Goal
 
 Scope & constraints
 - Relocations (with compatibility shims left in `src/` and removed in 11.10):
-  - `src/cli_layout.py` → `src/frame_compare/cli_layout.py` (tests import `src.cli_layout` today; keep shim in place).
-  - `src/report.py` → `src/frame_compare/report.py` (tests import `src.report`).
-  - `src/slowpics.py` → `src/frame_compare/slowpics.py` (internal consumers/tests import `src.slowpics`).
-  - `src/config_template.py` → `src/frame_compare/config_template.py` (tests import `src.config_template`).
+  - `src/cli_layout.py` → `src/frame_compare/cli_layout.py` (legacy `src` imports stayed via a shim until 11.10).
+  - `src/report.py` → `src/frame_compare/report.py` (same shim window for downstream consumers).
+  - `src/slowpics.py` → `src/frame_compare/slowpics.py` (internal consumers/tests likewise rode the shim until removal).
+  - `src/config_template.py` → `src/frame_compare/config_template.py` (tests migrated after the shim window closed in 11.10).
 - Do not relocate in this sub‑phase:
-  - `src/datatypes.py` (widely used core types), `src/utils.py` (used by `frame_compare.metadata`), `src/tmdb.py` (public contract; `tmdb_workflow` exists under `frame_compare` for newer flows), `src/screenshot.py`, `src/vs_core.py` (split scheduled in 11.6), `src/analysis.py` shim (will be removed in 11.10).
+  - `src/datatypes.py` (widely used core types), `src/utils.py` (used by `frame_compare.metadata`), `src/tmdb.py` (public contract; `tmdb_workflow` exists under `frame_compare` for newer flows), `src/screenshot.py`, `src/frame_compare/vs/*` (former `src/vs_core.py` shim removed in 11.10), `src/analysis.py` shim (retired in 11.10).
 - Delete `Legacy/comp.py` after verifying no references.
-- Keep public behavior/imports stable: imports like `from src.cli_layout ...` continue working via shims. No user‑visible message changes.
+- Keep public behavior/imports stable: imports referencing the legacy `src` package (cli_layout/report/slowpics/config_template) continued working via shims until their removal in Sub-phase 11.10. No user-visible message changes through the deprecation window.
 - Packaging and data files remain intact (no changes to `cli_layout.v1.json` path resolution or package data lists).
 
 Detailed step list (file moves, shims, layering)
@@ -1274,8 +1274,20 @@ Scope
 - Prune or repoint curated exports that referenced transitional names.
 - Remove `src/vs_core.py` shim aliases after consumers import from `src/frame_compare/vs/*`.
 
+Implementation
+- Deleted the remaining shim modules `src/{analysis,vs_core,slowpics,cli_layout,report,config_template}.py` plus their `.pyi` stubs so only the canonical `src.frame_compare.*` packages remain.
+- Repointed CLI/core/runtime/test imports to `src.frame_compare.{analysis,vs,slowpics,cli_layout,report,config_template}` and refreshed `frame_compare._COMPAT_EXPORTS` to stop depending on the shims.
+- Updated docs (README reference tables, tracker, DEC log) and `CHANGELOG.md` to call out the new canonical import surface and the shim retirement.
+
 Acceptance
-- `pytest -q`, `ruff`, `pyright --warnings` clean; no references to removed bridges remain.
+- ✅ `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run --no-sync python -m pytest -q`
+- ✅ `uv run --no-sync ruff check`
+- ✅ `uv run --no-sync npx pyright --warnings`
+- ✅ `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini`
+- ✅ `uv run --no-sync python -m build` + `uv run --no-sync twine check dist/*`
+- ✅ No `rg` matches for `src.(slowpics|cli_layout|report|config_template|vs_core)` imports after cleanup.
+
+**2025-11-12 update:** Removed the legacy shims under `src/{analysis,vs_core,slowpics,cli_layout,report,config_template}.py` (and their `.pyi` files), repointed CLI/core/runtime/tests to the canonical `src.frame_compare.*` modules, and refreshed `_COMPAT_EXPORTS` plus the typing stubs to match the new import surface. Documentation (README reference tables, tracker, DEC log, CHANGELOG) now describes the canonical modules, and `rg` sweeps confirm no remaining `import src.(slowpics|cli_layout|report|config_template|vs_core)` usage. Verification succeeded locally: `UV_CACHE_DIR=.uv_cache PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run --no-sync python -m pytest -q` (`290 passed, 1 skipped in 40.03 s`), `UV_CACHE_DIR=.uv_cache uv run --no-sync ruff check --fix && UV_CACHE_DIR=.uv_cache uv run --no-sync ruff check` (clean), `UV_CACHE_DIR=.uv_cache uv run --no-sync npx pyright --warnings` (clean), and `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini` (`Contracts: 3 kept, 0 broken`). The packaging sweep (`UV_CACHE_DIR=.uv_cache uv run --no-sync python -m build` followed by `uv run --no-sync twine check dist/*`) is still blocked in this environment because pip cannot download `wheel` (five retries, then “No matching distribution found for wheel”); once outbound access is restored or the wheel dependency is cached, rerun the build/twine commands to close the loop.
 
 ## Post-phase Cleanup — Compatibility shim/bridge retirement
 

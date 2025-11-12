@@ -30,9 +30,9 @@ import src.frame_compare.presets as presets_lib
 import src.frame_compare.tmdb_workflow as tmdb_workflow
 import src.frame_compare.vspreview as _vspreview
 import src.frame_compare.wizard as _wizard
-from src import vs_core as _vs_core
 from src.config_loader import ConfigError, load_config
 from src.frame_compare import runner
+from src.frame_compare import vs as _vs_core
 from src.frame_compare.cli_runtime import JsonTail, ReportJSON, _ensure_slowpics_block
 from src.frame_compare.config_helpers import env_flag_enabled as _env_flag_enabled
 from src.frame_compare.core import (
@@ -48,7 +48,7 @@ from src.frame_compare.preflight import (
     resolve_subdir,
     resolve_workspace_root,
 )
-from src.slowpics import build_shortcut_filename
+from src.frame_compare.slowpics import build_shortcut_filename
 
 collect_doctor_checks = doctor_module.collect_checks
 

@@ -13,7 +13,6 @@ import click
 from rich.markup import escape
 
 from src.config_loader import ConfigError, load_config
-from src.config_template import copy_default_config
 from src.datatypes import (
     AnalysisConfig,
     AppConfig,
@@ -31,6 +30,7 @@ from src.datatypes import (
     TMDBConfig,
 )
 from src.frame_compare.cli_runtime import CLIAppError
+from src.frame_compare.config_template import copy_default_config
 
 from .config_helpers import env_flag_enabled
 

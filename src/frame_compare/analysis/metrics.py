@@ -8,8 +8,8 @@ import numbers
 import time
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
-from src import vs_core
 from src.datatypes import AnalysisConfig, ColorConfig
+from src.frame_compare import vs as vs_core
 
 
 def _quantile(sequence: Sequence[float], q: float) -> float:

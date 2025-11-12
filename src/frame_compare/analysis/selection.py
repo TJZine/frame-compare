@@ -13,8 +13,8 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Mapping, Optional, Protocol, Sequence, Tuple, TypedDict, cast
 
-from src import vs_core
 from src.datatypes import AnalysisConfig, AnalysisThresholdMode, ColorConfig
+from src.frame_compare import vs as vs_core
 
 from . import cache_io, metrics
 from .cache_io import (
@@ -58,21 +58,31 @@ logger = logging.getLogger("src.analysis")
 
 def _resolve_collect_metrics_vapoursynth() -> MetricsCollector:
     try:
-        from src import analysis as analysis_mod
+        from src.frame_compare import analysis as analysis_mod
 
         func = getattr(analysis_mod, "_collect_metrics_vapoursynth")
     except Exception:
-        func = metrics.collect_metrics_vapoursynth
+        try:
+            from src import analysis as analysis_mod  # pragma: no cover - legacy fallback
+
+            func = getattr(analysis_mod, "_collect_metrics_vapoursynth")
+        except Exception:
+            func = metrics.collect_metrics_vapoursynth
     return func
 
 
 def _resolve_generate_metrics_fallback() -> MetricsFallback:
     try:
-        from src import analysis as analysis_mod
+        from src.frame_compare import analysis as analysis_mod
 
         func = getattr(analysis_mod, "_generate_metrics_fallback")
     except Exception:
-        func = metrics.generate_metrics_fallback
+        try:
+            from src import analysis as analysis_mod  # pragma: no cover - legacy fallback
+
+            func = getattr(analysis_mod, "_generate_metrics_fallback")
+        except Exception:
+            func = metrics.generate_metrics_fallback
     return func
 
 

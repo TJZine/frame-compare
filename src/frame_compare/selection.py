@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING, Any, Final, List, Optional, Sequence, Tuple
 
 from rich.markup import escape
 
-from src import vs_core
-from src.analysis import SelectionWindowSpec, compute_selection_window
 from src.datatypes import AnalysisConfig, RuntimeConfig
+from src.frame_compare import vs as vs_core
+from src.frame_compare.analysis import SelectionWindowSpec, compute_selection_window
 from src.frame_compare.cli_runtime import CLIAppError
 
 logger = logging.getLogger(__name__)

@@ -3,8 +3,8 @@ from pathlib import Path
 import pytest
 
 from src.config_loader import ConfigError, load_config
-from src.config_template import copy_default_config
 from src.datatypes import OddGeometryPolicy, RGBDither
+from src.frame_compare.config_template import copy_default_config
 
 
 def _copy_default_config(tmp_path: Path) -> Path:

@@ -386,7 +386,7 @@ Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 | Checklist Item | Status | Notes / Next Steps |
 | --- | --- | --- |
 | Package extraction | ☑ | Introduced `src/frame_compare/analysis/{metrics,selection,cache_io}.py` plus `__init__.py` to host metrics collection, selection orchestration/detail serializers, and cache IO helpers formerly in `src/analysis.py`. |
-| Shim + imports | ☑ | `src/analysis.py` now only re-exports the legacy API (including `_collect_metrics_vapoursynth`, `_generate_metrics_fallback`, `_quantile`) so existing tests keep patching the same symbols; `selection.py`/`cache_io.py` use `TYPE_CHECKING` and lazy accessors to avoid import cycles. |
+| Shim + imports | ☑ | `src/analysis.py` temporarily re-exported the legacy API (including `_collect_metrics_vapoursynth`, `_generate_metrics_fallback`, `_quantile`) so existing tests kept patching the same symbols; `selection.py`/`cache_io.py` use `TYPE_CHECKING` and lazy accessors to avoid import cycles, and the shim was removed in Sub-phase 11.10. |
 | Layering + typing | ☑ | Added `src.frame_compare.analysis` to the Runner→Core→Modules import-linter layer and marked the new modules with `# pyright: standard` to keep strict typing elsewhere without rewriting the legacy helpers. |
 | Verification commands | ☑ | `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, and `uv run --no-sync lint-imports --config importlinter.ini` logged cleanly in the 2025‑11‑12 Phase 11.2 DEC entry. |
 | Residual risks | ⚠️ | Shim removal deferred to Phase 11.10; downstream callers still import from `src.analysis` today, so keep the bridge until the cleanup phase and document any new helpers added before then. |
@@ -416,20 +416,20 @@ Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 | Checklist Item | Status | Notes / Next Steps |
 | --- | --- | --- |
 | Module relocations | ☑ | Moved `src/{cli_layout,report,slowpics,config_template}.py` into `src/frame_compare/` (plus the `.pyi` facades) so core modules live under a single package. |
-| Compatibility shims | ☑ | Legacy modules now proxy the `src.frame_compare.*` modules via `sys.modules[__name__] = _real_module`, letting imports and monkeypatches hit the canonical definitions until 11.10 removes the shims. |
+| Compatibility shims | ☑ | Legacy modules proxied the `src.frame_compare.*` modules via `sys.modules[__name__] = _real_module`, letting imports and monkeypatches hit the canonical definitions until Sub-phase 11.10 removed the shims entirely. |
 | Legacy deletions | ☑ | Removed `Legacy/comp.py` and added `tests/__init__.py` to keep the repo-local package highest on `sys.path`. |
 | Verification commands | ☑ | `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` (after installing the VSPreview extra), `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, and `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini` recorded in the 2025‑11‑12 Phase 11.5 DEC entry. |
-| Residual risks | ⚠️ | Shim removal is scheduled for 11.10; encourage new code to import from `src.frame_compare.*` directly to minimize churn later. |
+| Residual risks | ⚠️ | Shim removal occurred in 11.10; continue importing from `src.frame_compare.*` directly to avoid reintroducing legacy paths. |
 
 ### Phase 11.6 – vs_core split by concerns (2025‑11‑12)
 
 | Checklist Item | Status | Notes / Next Steps |
 | --- | --- | --- |
 | Module extraction | ☑ | `src/frame_compare/vs/{env,source,props,color,tonemap}.py` now own all VapourSynth helpers previously concentrated in `src/vs_core.py`. |
-| Compatibility shim | ☑ | `src/vs_core.py` (and `.pyi`) re-export every helper, proxy `_vs_module`, and forward targeted monkeypatches so existing tests continue working until 11.10 removes the shim. |
+| Compatibility shim | ☑ | `src/vs_core.py` (and `.pyi`) re-exported every helper, proxied `_vs_module`, and forwarded targeted monkeypatches so existing tests continued working until the Sub-phase 11.10 cleanup removed the shim. |
 | Layering/contracts | ☑ | `importlinter.ini` lists the new modules in the Runner→Core→Modules layer; DEC entry documents the change. |
 | Verification commands | ☑ | After installing the `preview` extra locally, `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, and `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini` ran clean (see Phase 11.6 DEC entry). |
-| Residual risks | ⚠️ | Shim removal scheduled for 11.10; encourage future edits to import from `src.frame_compare.vs.*` directly to reduce cleanup later. |
+| Residual risks | ⚠️ | Shim removal completed in Sub-phase 11.10; continue importing from `src.frame_compare.vs.*` directly so no new compatibility surfaces are introduced. |
 
 ---
 
@@ -463,6 +463,16 @@ Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 | Packaging job | ☑ | Added a `packaging` CI job that installs `build`, `twine`, and `check-wheel-contents`, runs `uv run --no-sync python -m build`, validates metadata with `uv run --no-sync twine check dist/*`, asserts the wheel contains `src/frame_compare/py.typed` plus `data/config.toml.template` and report assets, and surfaces warning-level notices from `check-wheel-contents`. |
 | Local verification | ☑ | `uv run --no-sync python -m pytest -q`, `uv run --no-sync ruff check`, `uv run --no-sync pyright --warnings`, `uv run --no-sync python tools/gen_config_docs.py --check docs/_generated/config_tables.md`, and `uv run --no-sync lint-imports --config importlinter.ini` all ran (pytest requires the VSPreview extra; see DEC logs for the recorded dependency warning). |
 | Residual risks | ⚠️ | Local environments without VSPreview/PySide6 or outbound package access may need to skip the VSPreview runner test or rely on CI for import-linter installation; document the failure reason and rerun the quartet once the preview extra/network access returns. |
+
+### Phase 11.10 – Shim retirement (2025‑11‑12)
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| Shim deletions | ☑ | Removed `src/{analysis,vs_core,slowpics,cli_layout,report,config_template}.py` (and their `.pyi` files) so only the canonical `src.frame_compare.*` packages remain; `_COMPAT_EXPORTS`, typing stubs, and docs now reference the new modules directly. |
+| Import updates | ☑ | CLI entrypoint, runner, selection helpers, screenshot helpers, and tests now import from `src.frame_compare.*`; `rg` sweeps confirm no `import src.(slowpics|cli_layout|report|config_template|vs_core)` usage remains. |
+| Docs & changelog | ☑ | README reference tables, tracker entries, `docs/DECISIONS.md`, and `CHANGELOG.md` describe the canonical imports and call out the shim retirement. |
+| Verification | ☑ | `UV_CACHE_DIR=.uv_cache PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run --no-sync python -m pytest -q`, `UV_CACHE_DIR=.uv_cache uv run --no-sync ruff check --fix` (plus a clean rerun), `UV_CACHE_DIR=.uv_cache uv run --no-sync npx pyright --warnings`, and `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini` all pass. |
+| Packaging sweep | ⚠️ | `UV_CACHE_DIR=.uv_cache uv run --no-sync python -m build` still fails to download `wheel` (offline sandbox), so `uv run --no-sync twine check dist/*` remains blocked; rerun both commands once a mirror or cached artifacts are available. |
 
 ---
 

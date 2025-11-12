@@ -19,8 +19,8 @@ from src.frame_compare.cli_runtime import (
     CliOutputManagerProtocol,
     ClipPlan,
 )
+from src.frame_compare.vs import ClipProcessError
 from src.screenshot import ScreenshotError, generate_screenshots
-from src.vs_core import ClipProcessError
 
 from .preflight import resolve_subdir
 

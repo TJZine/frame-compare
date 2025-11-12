@@ -3,7 +3,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.progress import BarColumn, SpinnerColumn
 
-from src.cli_layout import CliLayoutRenderer, load_cli_layout
+from src.frame_compare.cli_layout import CliLayoutRenderer, load_cli_layout
 
 
 def _build_renderer() -> CliLayoutRenderer:

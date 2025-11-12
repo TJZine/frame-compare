@@ -18,7 +18,7 @@ from .props import (  # pyright: ignore[reportPrivateUsage]
     _resolve_color_metadata,  # pyright: ignore[reportPrivateUsage]
 )
 
-logger = logging.getLogger("src.vs_core")
+logger = logging.getLogger("src.frame_compare.vs.color")
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ...datatypes import ColorConfig

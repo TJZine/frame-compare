@@ -13,7 +13,6 @@ from click.testing import CliRunner, Result
 import frame_compare
 import src.frame_compare.core as core_module
 import src.frame_compare.tmdb_workflow as tmdb_utils
-from src.analysis import CacheLoadResult, FrameMetricsCacheInfo, SelectionDetail
 from src.datatypes import (
     AnalysisConfig,
     AppConfig,
@@ -31,6 +30,7 @@ from src.datatypes import (
     TMDBConfig,
 )
 from src.frame_compare import runner as runner_module
+from src.frame_compare.analysis import CacheLoadResult, FrameMetricsCacheInfo, SelectionDetail
 from src.tmdb import TMDBAmbiguityError, TMDBCandidate, TMDBResolution, TMDBResolutionError
 from tests.helpers.runner_env import (
     _CliRunnerEnv,

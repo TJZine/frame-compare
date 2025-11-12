@@ -1,6 +1,6 @@
 # Current Screenshot Pipeline Trace (2025-09-28)
 
-Scope: `frame_compare.py` + `src/screenshot.py` + `src/vs_core.py`.
+Scope: `frame_compare.py` + `src/screenshot.py` + `src/frame_compare/vs`.
 
 ## Stage summary (HDR path)
 | Stage | Variable | Callsite | Format | _Matrix | _Transfer | _Primaries | _ColorRange | _Tonemapped | Notes |

@@ -9,7 +9,7 @@ from click.testing import CliRunner
 import frame_compare
 import src.frame_compare.core as core_module
 import src.frame_compare.preflight as preflight_module
-from src.config_template import copy_default_config
+from src.frame_compare.config_template import copy_default_config
 
 
 def _block_mkdir(monkeypatch: pytest.MonkeyPatch, target: Path) -> None:

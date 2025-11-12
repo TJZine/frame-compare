@@ -163,7 +163,7 @@ Preset highlights:
 
 TMDB lookups reuse the same workflow for CLI and automation: `tmdb_workflow.resolve_blocking` retries transient HTTP failures via `httpx.HTTPTransport(retries=...)`, `tmdb_workflow.resolve_workflow` (exported via `frame_compare.resolve_tmdb_workflow`) prompts once per run, and `[tmdb].unattended=true` suppresses ambiguity prompts while logging a warning instead of blocking the process. Manual identifiers entered during the prompt (movie/##### or tv/#####) propagate into slow.pics metadata, layout data, and JSON tails.
 
-**Shortcut naming:** uploaded runs create a `.url` file using the resolved collection name (sanitised via `build_shortcut_filename` in `src/slowpics.py:148-164`).  
+**Shortcut naming:** uploaded runs create a `.url` file using the resolved collection name (sanitised via `build_shortcut_filename` in `src/frame_compare/slowpics.py:148-164`).  
 If the name collapses to an empty string, the CLI falls back to the canonical comparison key; otherwise repeated runs with the same collection name will refresh the same shortcut file—append a suffix in `[slowpics].collection_name` if you need per-run artifacts.
 
 ## HTML report viewer

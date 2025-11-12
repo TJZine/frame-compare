@@ -15,7 +15,7 @@ from .props import (  # pyright: ignore[reportPrivateUsage]
     _snapshot_frame_props,  # pyright: ignore[reportPrivateUsage]
 )
 
-logger = logging.getLogger("src.vs_core")
+logger = logging.getLogger("src.frame_compare.vs.tonemap")
 
 class ClipProcessError(RuntimeError):
     """Raised when screenshot preparation fails."""

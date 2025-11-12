@@ -25,26 +25,26 @@ import src.frame_compare.vspreview as _vspreview_module
 import src.frame_compare.wizard as _wizard_module
 import src.screenshot as _screenshot_module
 from src import audio_alignment as _audio_alignment_module
-from src import vs_core
-from src.analysis import (
+from src.config_loader import load_config as _load_config
+from src.frame_compare import vs as vs_core
+from src.frame_compare.analysis import (
     export_selection_metadata as _export_selection_metadata,  # noqa: F401
 )
-from src.analysis import (
+from src.frame_compare.analysis import (
     probe_cached_metrics as _probe_cached_metrics,  # noqa: F401
 )
-from src.analysis import (
+from src.frame_compare.analysis import (
     select_frames as _select_frames,  # noqa: F401  # type: ignore[reportUnknownVariableType]
 )
-from src.analysis import (
+from src.frame_compare.analysis import (
     selection_details_to_json as _selection_details_to_json,  # noqa: F401
 )
-from src.analysis import (
+from src.frame_compare.analysis import (
     selection_hash_for_config as _selection_hash_for_config,  # noqa: F401
 )
-from src.analysis import (
+from src.frame_compare.analysis import (
     write_selection_cache_file as _write_selection_cache_file,  # noqa: F401
 )
-from src.config_loader import load_config as _load_config
 from src.frame_compare.cli_runtime import (
     AudioAlignmentJSON as _AudioAlignmentJSON,  # noqa: F401 - re-exported for compatibility
 )
@@ -104,18 +104,18 @@ from src.frame_compare.preflight import (
 from src.frame_compare.preflight import (
     prepare_preflight as _prepare_preflight,
 )
-from src.slowpics import (
+from src.frame_compare.slowpics import (
     SlowpicsAPIError as _SlowpicsAPIError,
 )  # noqa: F401
-from src.slowpics import (
+from src.frame_compare.slowpics import (
     build_shortcut_filename as _build_shortcut_filename,
 )
-from src.slowpics import (
+from src.frame_compare.slowpics import (
     upload_comparison as _upload_comparison,
 )
+from src.frame_compare.vs import ClipInitError as _ClipInitError
+from src.frame_compare.vs import ClipProcessError as _ClipProcessError
 from src.tmdb import resolve_tmdb as _resolve_tmdb_public
-from src.vs_core import ClipInitError as _ClipInitError
-from src.vs_core import ClipProcessError as _ClipProcessError
 
 logger = logging.getLogger(__name__)
 

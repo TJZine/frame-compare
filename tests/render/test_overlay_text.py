@@ -7,9 +7,11 @@ from src.datatypes import ColorConfig
 from src.frame_compare.render import overlay
 
 if TYPE_CHECKING:
+    from src.frame_compare.vs import TonemapInfo
     from src.screenshot import GeometryPlan
 else:  # pragma: no cover - typing fallback
     GeometryPlan = Dict[str, Any]
+    TonemapInfo = Any
 
 
 def _make_plan() -> "GeometryPlan":
@@ -49,7 +51,7 @@ def test_compose_overlay_text_minimal_mode_includes_base_and_selection() -> None
 def test_compose_overlay_text_diagnostic_adds_mdl_line() -> None:
     cfg = ColorConfig()
     cfg.overlay_mode = "diagnostic"
-    tonemap = SimpleNamespace(applied=True)
+    tonemap = cast("TonemapInfo", SimpleNamespace(applied=True))
     props = {"MasteringDisplayLuminance": "0.001 1000"}
 
     text = overlay.compose_overlay_text(

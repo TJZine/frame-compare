@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional, Sequence
 
-from src.analysis import FrameMetricsCacheInfo
 from src.datatypes import AppConfig
+from src.frame_compare.analysis import FrameMetricsCacheInfo
 from src.frame_compare.cli_runtime import ClipPlan
 
 from .preflight import resolve_subdir

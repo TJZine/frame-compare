@@ -8,7 +8,7 @@ from typing import Any, List
 import pytest
 import requests
 
-from src import slowpics
+import src.frame_compare.slowpics as slowpics
 from src.datatypes import SlowpicsConfig
 
 

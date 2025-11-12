@@ -27,13 +27,14 @@ import src.frame_compare.media as media_utils
 import src.frame_compare.metadata as metadata_utils
 import src.frame_compare.planner as planner_utils
 import src.frame_compare.preflight as preflight_utils
+import src.frame_compare.report as html_report
 import src.frame_compare.runtime_utils as runtime_utils
 import src.frame_compare.selection as selection_utils
 import src.frame_compare.tmdb_workflow as tmdb_workflow
 import src.frame_compare.vspreview as vspreview_utils
-import src.report as html_report
-from src import vs_core
-from src.analysis import (
+from src.datatypes import AppConfig
+from src.frame_compare import vs as vs_core
+from src.frame_compare.analysis import (
     CacheLoadResult,
     SelectionDetail,
     export_selection_metadata,
@@ -43,11 +44,14 @@ from src.analysis import (
     selection_hash_for_config,
     write_selection_cache_file,
 )
-from src.datatypes import AppConfig
+from src.frame_compare.slowpics import (
+    SlowpicsAPIError,
+    build_shortcut_filename,
+    upload_comparison,
+)
+from src.frame_compare.vs import ClipInitError, ClipProcessError
 from src.screenshot import ScreenshotError, generate_screenshots
-from src.slowpics import SlowpicsAPIError, build_shortcut_filename, upload_comparison
 from src.tmdb import TMDBResolution
-from src.vs_core import ClipInitError, ClipProcessError
 
 from .cli_runtime import (
     CLIAppError,

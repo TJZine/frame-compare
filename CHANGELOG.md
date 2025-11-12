@@ -4,6 +4,7 @@ All notable user-visible updates will be documented in this file in reverse chro
 
 ## Unreleased
 
+- *2025-11-12:* refactor(shims): deleted the remaining `src/{analysis,vs_core,slowpics,cli_layout,report,config_template}.py` bridges (and `.pyi` stubs), repointed CLI/core/runtime/tests/docs to import from `src.frame_compare.*`, and pruned `frame_compare._COMPAT_EXPORTS` so only curated exports remain. Verification: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run --no-sync python -m pytest -q`, `UV_CACHE_DIR=.uv_cache uv run --no-sync ruff check --fix && ... ruff check`, `UV_CACHE_DIR=.uv_cache uv run --no-sync npx pyright --warnings`, `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini`. Attempted `UV_CACHE_DIR=.uv_cache uv run --no-sync python -m build`, but pip could not download `wheel` in this offline sandbox, so packaging verification (`uv run --no-sync twine check dist/*`) remains pending until network access is available.
 - ci: add packaging build + content verification; chore(imports): extend import contracts for new packages.
 
 - *2025-11-12:* docs(config): added `tools/gen_config_docs.py` with a `--check` mode to emit `docs/_generated/config_tables.md` directly from `src/datatypes.py`, wired in `tests/docs/test_config_docs_gen.py` as a sentinel, linked the new generated tables from `docs/README_REFERENCE.md`, and corrected the `[runtime].ram_limit_mb` default to `8000`.

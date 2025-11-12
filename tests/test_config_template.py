@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-import src.config_template as config_template
-from src.config_template import (
+import src.frame_compare.config_template as config_template
+from src.frame_compare.config_template import (
     TEMPLATE_ENV_VAR,
     _read_template_bytes,
     copy_default_config,
@@ -125,7 +125,7 @@ def test_copy_default_config_available_from_wheel(tmp_path: Path) -> None:
     script = (
         "from pathlib import Path\n"
         "import tempfile\n"
-        "from src.config_template import copy_default_config\n"
+        "from src.frame_compare.config_template import copy_default_config\n"
         "dest = Path(tempfile.mkdtemp()) / 'config.toml'\n"
         "copy_default_config(dest)\n"
         "print(dest.exists())\n"

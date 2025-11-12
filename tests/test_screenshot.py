@@ -9,7 +9,7 @@ from typing import Any, Dict, Mapping, Optional, Sequence, TypedDict, cast
 
 import pytest
 
-from src import screenshot, vs_core
+from src import screenshot
 from src.datatypes import (
     ColorConfig,
     ExportRange,
@@ -18,6 +18,7 @@ from src.datatypes import (
     ScreenshotConfig,
 )
 from src.frame_compare import subproc as fc_subproc
+from src.frame_compare import vs as vs_core
 from src.screenshot import GeometryPlan, _compute_requires_full_chroma
 
 _vapoursynth_available = importlib.util.find_spec("vapoursynth") is not None
