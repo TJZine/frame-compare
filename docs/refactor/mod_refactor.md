@@ -741,7 +741,7 @@ Goal: reduce remaining monoliths, harden subprocess/logging practices, and final
 | --- | --- | --- | --- | --- |
 | 11 | 11.1 Render helpers extraction |  | ☑ | `src/frame_compare/render/{naming,overlay,encoders,geometry,errors}.py` host the pure helpers moved out of `src/screenshot.py`, with wrappers/tests + import-linter layering recorded on 2025‑11‑12. |
 | 11 | 11.2 Analysis split |  | ☑ | Analysis helpers now live in `src/frame_compare/analysis/{metrics,selection,cache_io}.py` with `src/analysis.py` as a shim; DEC logs + tests recorded on 2025‑11‑12. |
-| 11 | 11.3 Subprocess hardening |  | ⛔ | Centralize subprocess calls; enforce safe argv + error mapping. |
+| 11 | 11.3 Subprocess hardening |  | ☑ | `src/frame_compare/subproc.py::run_checked` now wraps FFmpeg/FFprobe/VSPreview calls from screenshot, audio_alignment, and vspreview; tests/logs updated on 2025‑11‑12. |
 | 11 | 11.4 Logging normalization |  | ⛔ | Replace print() with logging in library modules; keep CLI formatting. |
 | 11 | 11.5 Packaging cleanup + legacy removal |  | ⛔ | Move top‑level modules under `src/frame_compare/`; delete `Legacy/comp.py`. |
 | 11 | 11.6 vs_core split by concerns |  | ⛔ | Split `src/vs_core.py` into `src/frame_compare/vs/*` submodules. |
@@ -984,18 +984,90 @@ Risks & mitigations
 Conventional Commit subject
 - `refactor(subproc): centralize subprocess calls and harden FFmpeg/VSPreview/ffprobe usage`
 
+**2025-11-12 update:** Introduced `src/frame_compare/subproc.py::run_checked` (argv-only, `shell=False`, safe stdio defaults, optional `check`) and refactored `src/screenshot.py`, `src/frame_compare/vspreview.py`, and `src/audio_alignment.py` to route FFmpeg/FFprobe/VSPreview invocations through the helper so timeout handling and error messages stayed identical while banning `shell=True`. `tests/test_screenshot.py` now monkeypatches `src.frame_compare.subproc.run_checked` in the timeout/filter-chain cases, and `importlinter.ini` lists `src.frame_compare.subproc` in the Runner→Core→Modules layer to keep contracts green. Verification commands (`git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini`) ran clean; see the 2025‑11‑12 Phase 11.3 entry in `docs/DECISIONS.md` for logs.
+
 **2025-11-12 update:** Introduced `src/frame_compare/subproc.py::run_checked` (shell=False, safe stdio defaults, optional `check`) and refactored `src/screenshot.py`, `src/frame_compare/vspreview.py`, and `src/audio_alignment.py` to call it so FFmpeg/FFprobe/VSPreview keep identical timeout/error messages while banning `shell=True`. Screenshot timeout/command-construction tests now patch `src.frame_compare.subproc.run_checked`, and `importlinter.ini`’s third layer lists the new module so contracts stay green. Verification commands (`git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, `uv run --no-sync lint-imports --config importlinter.ini`) ran clean; see the 2025-11-12 Phase 11.3 entry in `docs/DECISIONS.md` for logs.
 
 ### Sub‑phase 11.4 — Logging Normalization
 
-Goal: remove print() from library modules and use `logging` consistently; keep CLI output via Rich/reporters.
+Source of truth for the coding agent: this section in `docs/refactor/mod_refactor.md` (Sub‑phase 11.4). Follow these steps rather than relying solely on the prompt.
 
-Scope
-- Replace print() across `src/frame_compare/*` with `logger = logging.getLogger(__name__)` calls.
-- Retain user‑facing messages in CLI/reporters.
+Goal
+- Remove all direct `print()`/`rich.print()` calls from library modules and standardize on `logging` (module‑scoped `logger = logging.getLogger(__name__)`) or on the existing reporter interface where applicable. Preserve current user‑visible output and formatting at the CLI layer (Rich/console via `CliOutputManager`), and do not alter VSPreview script generation prints.
 
-Acceptance
-- CLI output unchanged; tests pass; pyright/ruff clean.
+Scope & constraints
+- Library modules to normalize (anchors below):
+  - `src/frame_compare/config_writer.py`: `_present_diff` prints.
+  - `src/frame_compare/runner.py`: exception trace and slow.pics upload prints.
+  - `src/frame_compare/core.py`: analyze‑file selection note.
+  - `src/frame_compare/selection.py`: imported `rich.print` and several prints; prefer reporter when available, else `logger`.
+  - `src/screenshot.py`: overlay debug prints gated by `FRAME_COMPARE_LOG_OVERLAY_RANGE`.
+  - `src/frame_compare/tmdb_workflow.py`: interactive guidance/validation prints; prefer `click.echo` or reporter.
+- Exclusions (do not change):
+  - VSPreview generated script content inside `src/frame_compare/vspreview.py` (the embedded `safe_print` function and `print()` lines within the persisted script). These are intentionally emitted to the user’s console and are covered by `tests/test_console_safety.py`.
+  - Any `reporter.console.print(...)` calls in CLI presentation modules (keep as is).
+- No behavior or message text changes visible to end users. For prints converted to logging, choose levels that map current intent (INFO for guidance, WARNING for warnings, DEBUG for developer diagnostics).
+- Maintain Pyright/Ruff cleanliness and import‑linter contracts.
+
+Detailed step list (per‑file; anchors/search)
+1) `src/frame_compare/config_writer.py`
+   - Anchors: ~211–227 (`_present_diff` uses `print(line)` and `print("No differences from the template.")`).
+   - Actions:
+     - Add (if missing) `logger = logging.getLogger(__name__)` at module top.
+     - Replace looped `print(line)` with `logger.info(line)` (or route through a passed reporter if available — no reporter exists here today, so INFO logging is acceptable).
+     - Replace the “No differences …” print with `logger.info` using the same text.
+
+2) `src/frame_compare/runner.py`
+   - Anchors: ~1255–1256 (prints frame selection trace), ~1722 (prints slow.pics upload note).
+   - Actions:
+     - Replace the two `print(...)` calls in the exception block with either `reporter.console.print(...)` (preferred, to preserve Rich markup) or `logger.error(...)` followed by including the rich_message already passed to `CLIAppError`. Keep the traceback visible to users in the same circumstances as today (leverage `reporter.console.print(tb)` in the exception path).
+     - Replace the slow.pics “Preparing …” `print(...)` with `reporter.console.print("[cyan]Preparing slow.pics upload...[/cyan]")` to keep formatting centralized under the reporter.
+
+3) `src/frame_compare/core.py`
+   - Anchor: ~265 (prints "Determining which file to analyze…").
+   - Actions:
+     - Replace `print(...)` with `logger.info(...)` using the same message text. If a `reporter` is available in the calling context, consider moving this user‑facing guidance up to the CLI/reporting layer in a later phase; for 11.4, logging is sufficient.
+
+4) `src/frame_compare/selection.py`
+   - Anchors: `from rich import print` at line ~8; prints at ~57 (indexing note fallback), ~171–177 (per‑clip window lines), ~187, ~193–195 (common window + collapsed note).
+   - Actions:
+     - Remove `from rich import print` and add `logger = logging.getLogger(__name__)`.
+     - For indexing note in `init_clips`, keep the existing reporter path; change the fallback `print(...)` to `logger.info("[CACHE] Indexing %s…", filename)`.
+     - For `log_selection_windows`, introduce an optional `reporter: CliOutputManagerProtocol | None = None` parameter (backward‑compatible default) and:
+       - If reporter is provided, use `reporter.console.print(...)` for each user‑visible line (preserving existing Rich markup).
+       - If reporter is None, log with `logger.info(...)` using unstyled text (e.g., strip markup or keep plain strings to avoid bracket styling in logs).
+     - Update imports/usages in callers (e.g., runner) to pass `reporter` if they call `log_selection_windows` (no current references were found; this change is safe and future‑proofs usage).
+
+5) `src/screenshot.py`
+   - Anchors: ~1848–1854, ~1877–1882, ~1932–1937 (overlay debug prints under `log_overlay`).
+   - Actions:
+     - Replace these `print(...)` calls with `logger.info(...)` retaining the same assembled message; keep the `flush=True` semantics by logging at INFO (no flush required for logging).
+
+6) `src/frame_compare/tmdb_workflow.py`
+   - Anchors: ~215–221, ~233, ~245–247, ~261 (interactive prompt guidance/error prints).
+   - Actions:
+     - Replace `print(...)` with `click.echo(...)` to keep CLI output under Click while avoiding raw `print`. Alternatively, if a reporter is available in upstream flows, route through `reporter.console.print(...)` (preserve Rich markup).
+
+7) Repository‑wide safeguard
+   - Add a short note in `docs/runner_refactor_checklist.md` clarifying: library modules should use `logging` or reporter calls; CLI shim/components may use `Rich`/`Click` output helpers; generated scripts are allowed to use `print()`.
+
+Acceptance criteria & verification commands
+- Behavior parity: CLI messages and formatting remain unchanged for end users; VSPreview script generation unaffected (tests under `tests/test_console_safety.py` still pass). Overlay debug output still available via logs when `FRAME_COMPARE_LOG_OVERLAY_RANGE` is set.
+- Tests:
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q` — all suites pass unchanged (notably screenshot, vspreview, selection, tmdb, runner).
+- Lint/type:
+  - `.venv/bin/ruff check` — no issues.
+  - `.venv/bin/pyright --warnings` — 0 errors/warnings.
+- Import contracts:
+  - `uv run --no-sync lint-imports --config importlinter.ini` — 0 broken contracts.
+
+Risks & mitigations
+- Reporter availability: when a reporter is not present in function signatures, prefer `logger` to avoid API churn. Where adding an optional reporter parameter provides better UX (e.g., `log_selection_windows`), keep a default `None` to maintain backward compatibility.
+- Rich markup in logs: avoid emitting Rich markup brackets to plain logs when a reporter is not available; use descriptive plain text or keep the bracketed strings if existing logs already use them for quick grepping.
+- VSPreview script prints: explicitly excluded from normalization to preserve console safety tests and user guidance.
+
+Conventional Commit subject
+- `refactor(logging): replace prints in libs with logger or reporter and preserve CLI formatting`
 
 ### Sub‑phase 11.5 — Packaging Cleanup + Remove Dead Legacy Code (grouped)
 

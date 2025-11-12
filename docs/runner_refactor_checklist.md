@@ -390,6 +390,16 @@ Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 | Verification commands | ☑ | `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, and `uv run --no-sync lint-imports --config importlinter.ini` logged cleanly in the 2025‑11‑12 Phase 11.2 DEC entry. |
 | Residual risks | ⚠️ | Shim removal deferred to Phase 11.10; downstream callers still import from `src.analysis` today, so keep the bridge until the cleanup phase and document any new helpers added before then. |
 
+### Phase 11.3 – Subprocess hardening (2025‑11‑12)
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| Helper module | ☑ | Added `src/frame_compare/subproc.py::run_checked` (argv-only, `shell=False`, safe stdio defaults, optional `check`) so FFmpeg/FFprobe/VSPreview callers share the same safeguards. |
+| Call site refactors | ☑ | `src/screenshot.py::_save_frame_with_ffmpeg`, `src/audio_alignment.py` (ffprobe/extract/fps), and `src/frame_compare/vspreview.py::launch` now call the helper, keeping timeout/error wording identical while removing direct `subprocess.run` usage. |
+| Tests + layering | ☑ | Screenshot timeout/filter-chain tests patch `src.frame_compare.subproc.run_checked`, and `importlinter.ini` lists `src.frame_compare.subproc` in the Runner→Core→Modules layer; DEC log captures the change. |
+| Verification commands | ☑ | `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini` rerun clean; recorded in the 2025‑11‑12 Phase 11.3 DEC entry. |
+| Residual risks | ⚠️ | Future subprocess users must route through `subproc.run_checked`; watch for any lingering `subprocess.run`/`check_output` usages outside CLI scripts and schedule follow-up cleanup if discovered. |
+
 ---
 
 ### Usage Notes
