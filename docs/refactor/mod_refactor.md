@@ -1069,16 +1069,70 @@ Risks & mitigations
 Conventional Commit subject
 - `refactor(logging): replace prints in libs with logger or reporter and preserve CLI formatting`
 
-### Sub‑phase 11.5 — Packaging Cleanup + Remove Dead Legacy Code (grouped)
+### Sub‑phase 11.5 — Packaging Cleanup + Legacy Removal (grouped)
 
-Goal: reduce top‑level sprawl and delete dead code for clarity.
+Source of truth for the coding agent: this section in `docs/refactor/mod_refactor.md` (Sub‑phase 11.5). Follow these steps rather than relying solely on the prompt.
 
-Scope
-- Move remaining top‑level modules under `src/frame_compare/` where applicable (minimal churn).
+Goal
+- Reduce top‑level module sprawl by relocating internal modules into the `src.frame_compare` package while preserving import compatibility via thin shims. Remove stale legacy code.
+
+Scope & constraints
+- Relocations (with compatibility shims left in `src/` and removed in 11.10):
+  - `src/cli_layout.py` → `src/frame_compare/cli_layout.py` (tests import `src.cli_layout` today; keep shim in place).
+  - `src/report.py` → `src/frame_compare/report.py` (tests import `src.report`).
+  - `src/slowpics.py` → `src/frame_compare/slowpics.py` (internal consumers/tests import `src.slowpics`).
+  - `src/config_template.py` → `src/frame_compare/config_template.py` (tests import `src.config_template`).
+- Do not relocate in this sub‑phase:
+  - `src/datatypes.py` (widely used core types), `src/utils.py` (used by `frame_compare.metadata`), `src/tmdb.py` (public contract; `tmdb_workflow` exists under `frame_compare` for newer flows), `src/screenshot.py`, `src/vs_core.py` (split scheduled in 11.6), `src/analysis.py` shim (will be removed in 11.10).
 - Delete `Legacy/comp.py` after verifying no references.
+- Keep public behavior/imports stable: imports like `from src.cli_layout ...` continue working via shims. No user‑visible message changes.
+- Packaging and data files remain intact (no changes to `cli_layout.v1.json` path resolution or package data lists).
 
-Acceptance
-- Tests/lint/typecheck pass; import‑linter contracts unaffected.
+Detailed step list (file moves, shims, layering)
+1) Move modules under `src/frame_compare/`
+   - Create the target modules by moving code verbatim:
+     - `src/cli_layout.py` → `src/frame_compare/cli_layout.py`
+     - `src/report.py` → `src/frame_compare/report.py`
+     - `src/slowpics.py` → `src/frame_compare/slowpics.py`
+     - `src/config_template.py` → `src/frame_compare/config_template.py`
+   - Do not change module content during the move (only imports that reference sibling modules might need path updates to absolute imports if any exist).
+
+2) Add compatibility shims at old locations (remove in 11.10)
+   - Replace the contents of each moved top‑level module with a shim that re‑exports everything:
+     - Example shim body:
+       - `from src.frame_compare.cli_layout import *  # type: ignore[F401,F403]\n` and, optionally, `__all__ = [name for name in dir() if not name.startswith('_')]`.
+   - These shims keep all existing imports in code/tests working without churn and will be removed in Sub‑phase 11.10.
+
+3) Update import‑linter layering
+   - In `importlinter.ini`, append the new modules to the third layer under the `Runner→Core→Modules layering` contract:
+     - `src.frame_compare.cli_layout`
+     - `src.frame_compare.report`
+     - `src.frame_compare.slowpics`
+     - `src.frame_compare.config_template`
+   - Ensure no back‑imports from these modules into `src.frame_compare.core` or the CLI shim.
+
+4) Remove legacy file
+   - Delete `Legacy/comp.py` after confirming no imports reference it (Serena search shows no references; MANIFEST already prunes `Legacy/`).
+
+5) Packaging review (no functional changes required)
+   - `pyproject.toml` currently packages `src`, `src.frame_compare`, and `data` with `include-package-data = true`. No changes needed for this move; both destinations are packaged.
+   - Confirm `MANIFEST.in` already excludes `Legacy/` (it does) and includes `src/frame_compare/py.typed`.
+
+Acceptance criteria & verification commands
+- Behavior parity: user‑facing paths and CLI outputs unchanged; tests continue to import `src.*` via shims. No import cycles introduced.
+- Commands:
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q` → all tests pass.
+  - `.venv/bin/ruff check` → no issues.
+  - `.venv/bin/pyright --warnings` → 0 errors/warnings (pay attention to shim star‑imports; add `# type: ignore` comments as noted).
+  - `uv run --no-sync lint-imports --config importlinter.ini` → 0 broken contracts after adding the new modules to the layer list.
+
+Risks & mitigations
+- Import churn: shims eliminate the need to update all import sites; schedule shim removal for 11.10 and create a PR note advising internal code to migrate to `src.frame_compare.*` imports before then.
+- Shadowing or name leakage via `*`: include `# type: ignore[F401,F403]` in shims to keep lint/type clean; optionally define `__all__` to be explicit.
+- Hidden runtime path assumptions: moving modules should not affect data file discovery; tests assert `cli_layout.v1.json` discovery via `frame_compare.__file__` remains valid.
+
+Conventional Commit subject
+- `refactor(packaging): move internal modules under frame_compare and remove legacy file`
 
 ### Sub‑phase 11.6 — vs_core Split by Concerns
 

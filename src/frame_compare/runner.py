@@ -1252,8 +1252,9 @@ def run(request: RunRequest) -> RunResult:
 
     except Exception as exc:
         tb = traceback.format_exc()
-        print("[red]Frame selection trace:[/red]")
-        print(tb)
+        reporter.console.print("[red]Frame selection trace:[/red]")
+        reporter.console.print(tb)
+        logger.error("Frame selection trace:\\n%s", tb)
         raise CLIAppError(
             f"Frame selection failed: {exc}",
             rich_message=f"[red]Frame selection failed:[/red] {exc}",
@@ -1719,7 +1720,7 @@ def run(request: RunRequest) -> RunResult:
     if cfg.slowpics.auto_upload:
         layout_data["slowpics"]["status"] = "preparing"
         reporter.update_values(layout_data)
-        print("[cyan]Preparing slow.pics upload...[/cyan]")
+        reporter.console.print("[cyan]Preparing slow.pics upload...[/cyan]")
         upload_total = len(image_paths)
         def _safe_size(path_str: str) -> int:
             """

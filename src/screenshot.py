@@ -1845,12 +1845,13 @@ def _save_frame_with_fpng(
     log_overlay = bool(os.getenv("FRAME_COMPARE_LOG_OVERLAY_RANGE"))
     if log_overlay:
         fmt_name = getattr(clip_format, "name", None)
-        print(
-            "[OVERLAY DEBUG] clip="
-            f"{_sanitize_for_log(label)} frame={frame_idx} stage=pre-overlay "
-            f"range={overlay_input_range} props_range={source_props_map.get('_ColorRange')} "
-            f"fmt={_sanitize_for_log(fmt_name)}",
-            flush=True,
+        logger.info(
+            "[OVERLAY DEBUG] clip=%s frame=%s stage=pre-overlay range=%s props_range=%s fmt=%s",
+            _sanitize_for_log(label),
+            frame_idx,
+            overlay_input_range,
+            source_props_map.get("_ColorRange"),
+            _sanitize_for_log(fmt_name),
         )
     converted_for_overlay = False
     if frame_info_allowed or (overlays_allowed and overlay_text):
@@ -1874,11 +1875,12 @@ def _save_frame_with_fpng(
                 )
                 if log_overlay:
                     fmt_name = getattr(getattr(render_clip, "format", None), "name", None)
-                    print(
-                        "[OVERLAY DEBUG] clip="
-                        f"{_sanitize_for_log(label)} frame={frame_idx} stage=normalized "
-                        f"range={overlay_input_range} fmt={_sanitize_for_log(fmt_name)}",
-                        flush=True,
+                    logger.info(
+                        "[OVERLAY DEBUG] clip=%s frame=%s stage=normalized range=%s fmt=%s",
+                        _sanitize_for_log(label),
+                        frame_idx,
+                        overlay_input_range,
+                        _sanitize_for_log(fmt_name),
                     )
             except Exception as exc:  # pragma: no cover - defensive
                 logger.debug("Failed to normalize overlay range for frame %s: %s", frame_idx, exc)
@@ -1929,11 +1931,12 @@ def _save_frame_with_fpng(
                 )
                 if log_overlay:
                     fmt_name = getattr(getattr(render_clip, "format", None), "name", None)
-                    print(
-                        "[OVERLAY DEBUG] clip="
-                        f"{_sanitize_for_log(label)} frame={frame_idx} stage=restored "
-                        f"range={output_color_range} fmt={_sanitize_for_log(fmt_name)}",
-                        flush=True,
+                    logger.info(
+                        "[OVERLAY DEBUG] clip=%s frame=%s stage=restored range=%s fmt=%s",
+                        _sanitize_for_log(label),
+                        frame_idx,
+                        output_color_range,
+                        _sanitize_for_log(fmt_name),
                     )
             except Exception as exc:  # pragma: no cover - defensive
                 logger.debug(

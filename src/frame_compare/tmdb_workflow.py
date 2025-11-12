@@ -8,11 +8,10 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from string import Template
-from typing import TYPE_CHECKING, Any, Mapping, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, Sequence, Tuple, cast
 
 import click
 import httpx
-from rich import print
 
 from src.datatypes import TMDBConfig
 from src.frame_compare.metadata import first_non_empty, parse_year_hint
@@ -50,6 +49,17 @@ class TMDBLookupResult:
     manual_override: Optional[Tuple[str, str]]
     error_message: Optional[str]
     ambiguous: bool
+
+
+StyleFunc = Callable[..., str]
+
+
+def _style(text: str, **kwargs: Any) -> str:
+    style_fn = getattr(click, "style", None)
+    if not callable(style_fn):
+        return text
+    style_callable = cast(StyleFunc, style_fn)
+    return style_callable(text, **kwargs)
 
 
 def render_collection_name(template_text: str, context: Mapping[str, Any]) -> str:
@@ -212,13 +222,12 @@ def _should_retry_tmdb_error(message: str) -> bool:
 
 def _prompt_manual_tmdb(candidates: Sequence[TMDBCandidate]) -> Optional[Tuple[str, str]]:
     """Prompt the user to choose a TMDB candidate when multiple matches exist."""
-    print("[yellow]TMDB search returned multiple plausible matches:[/yellow]")
+    click.echo(_style("TMDB search returned multiple plausible matches:", fg="yellow"))
     for cand in candidates:
         year = cand.year or "????"
-        print(
-            f"  • [cyan]{cand.category.lower()}/{cand.tmdb_id}[/cyan] "
-            f"{cand.title or '(unknown title)'} ({year}) score={cand.score:0.3f}"
-        )
+        category = _style(f"{cand.category.lower()}/{cand.tmdb_id}", fg="cyan")
+        title = cand.title or "(unknown title)"
+        click.echo(f"  • {category} {title} ({year}) score={cand.score:0.3f}")
     while True:
         response = click.prompt(
             "Enter TMDB id (movie/##### or tv/#####) or leave blank to skip",
@@ -230,7 +239,7 @@ def _prompt_manual_tmdb(candidates: Sequence[TMDBCandidate]) -> Optional[Tuple[s
         try:
             return parse_manual_id(response)
         except TMDBResolutionError as exc:
-            print(f"[red]Invalid TMDB identifier:[/red] {exc}")
+            click.echo(f"{_style('Invalid TMDB identifier:', fg='red')} {exc}")
 
 
 def _prompt_tmdb_confirmation(
@@ -241,10 +250,9 @@ def _prompt_tmdb_confirmation(
     year = resolution.year or "????"
     category = resolution.category.lower()
     link = f"https://www.themoviedb.org/{category}/{resolution.tmdb_id}"
-    print(
-        "[cyan]TMDB match found:[/cyan] "
-        f"{title} ({year}) -> [underline]{link}[/underline]"
-    )
+    header = _style("TMDB match found:", fg="cyan")
+    link_text = _style(link, underline=True)
+    click.echo(f"{header} {title} ({year}) -> {link_text}")
     while True:
         response = click.prompt(
             "Confirm TMDB match? [Y/n or enter movie/#####]",
@@ -258,7 +266,7 @@ def _prompt_tmdb_confirmation(
         try:
             manual = parse_manual_id(response)
         except TMDBResolutionError as exc:
-            print(f"[red]Invalid TMDB identifier:[/red] {exc}")
+            click.echo(f"{_style('Invalid TMDB identifier:', fg='red')} {exc}")
         else:
             return True, manual
 

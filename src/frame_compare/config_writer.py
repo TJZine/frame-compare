@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import difflib
+import logging
 import math
 import os
 import tempfile
@@ -12,9 +13,9 @@ from collections.abc import Mapping as MappingABC
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Tuple, cast
 
-from rich import print
-
 from src.frame_compare.preflight import PACKAGED_TEMPLATE_PATH
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "read_template_text",
@@ -222,6 +223,6 @@ def _present_diff(original: str, updated: str) -> None:
     )
     if diff:
         for line in diff:
-            print(line)
+            logger.info(line)
     else:
-        print("No differences from the template.")
+        logger.info("No differences from the template.")

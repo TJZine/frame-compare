@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, List, Optional, Sequence, Tuple
 
-from rich import print
 from rich.markup import escape
 
 from src import vs_core
 from src.analysis import SelectionWindowSpec, compute_selection_window
 from src.datatypes import AnalysisConfig, RuntimeConfig
 from src.frame_compare.cli_runtime import CLIAppError
+
+logger = logging.getLogger(__name__)
 
 __all__: Final = [
     "extract_clip_fps",
@@ -54,7 +56,7 @@ def init_clips(
         if reporter is not None:
             reporter.console.print(f"[dim][CACHE] Indexing {label}…[/]")
         else:
-            print(f"[CACHE] Indexing {filename}…")
+            logger.info("[CACHE] Indexing %s…", filename)
 
     cache_dir_str = str(cache_dir) if cache_dir is not None else None
 
@@ -163,18 +165,36 @@ def log_selection_windows(
     *,
     collapsed: bool,
     analyze_fps: float,
+    reporter: CliOutputManagerProtocol | None = None,
 ) -> None:
     """Log per-clip selection windows plus the common intersection summary."""
+
+    def _emit(markup: str, plain: str, *, warning: bool = False) -> None:
+        if reporter is not None:
+            reporter.console.print(markup)
+        else:
+            log_fn = logger.warning if warning else logger.info
+            log_fn(plain)
+
     for plan, spec in zip(plans, specs):
         raw_label = plan.metadata.get("label") or plan.path.name
-        label = escape((raw_label or plan.path.name).strip())
-        print(
-            f"[cyan]{label}[/]: Selecting frames within [start={spec.start_seconds:.2f}s, "
+        label_plain = (raw_label or plan.path.name).strip()
+        label_markup = escape(label_plain)
+        selection_markup = (
+            f"[cyan]{label_markup}[/]: Selecting frames within [start={spec.start_seconds:.2f}s, "
             f"end={spec.end_seconds:.2f}s] (frames [{spec.start_frame}, {spec.end_frame})) — "
             f"lead={spec.applied_lead_seconds:.2f}s, trail={spec.applied_trail_seconds:.2f}s"
         )
+        selection_plain = (
+            f"{label_plain}: Selecting frames within start={spec.start_seconds:.2f}s, "
+            f"end={spec.end_seconds:.2f}s (frames [{spec.start_frame}, {spec.end_frame})) — "
+            f"lead={spec.applied_lead_seconds:.2f}s, trail={spec.applied_trail_seconds:.2f}s"
+        )
+        _emit(selection_markup, selection_plain)
         for warning in spec.warnings:
-            print(f"[yellow]{label}[/]: {warning}")
+            warning_markup = f"[yellow]{label_markup}[/]: {warning}"
+            warning_plain = f"{label_plain}: {warning}"
+            _emit(warning_markup, warning_plain, warning=True)
 
     start_frame, end_frame = intersection
     if analyze_fps > 0 and end_frame > start_frame:
@@ -184,12 +204,21 @@ def log_selection_windows(
         start_seconds = float(start_frame)
         end_seconds = float(end_frame)
 
-    print(
+    common_markup = (
         f"[cyan]Common selection window[/]: frames [{start_frame}, {end_frame}) — "
         f"seconds [{start_seconds:.2f}s, {end_seconds:.2f}s)"
     )
+    common_plain = (
+        f"Common selection window: frames [{start_frame}, {end_frame}) — "
+        f"seconds [{start_seconds:.2f}s, {end_seconds:.2f}s)"
+    )
+    _emit(common_markup, common_plain)
 
     if collapsed:
-        print(
+        collapsed_markup = (
             "[yellow]Ignore lead/trail settings did not overlap across all sources; using fallback range.[/yellow]"
         )
+        collapsed_plain = (
+            "Ignore lead/trail settings did not overlap across all sources; using fallback range."
+        )
+        _emit(collapsed_markup, collapsed_plain, warning=True)

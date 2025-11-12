@@ -6,6 +6,7 @@ Each phase references the ten review areas agreed on for the final audit. Update
 > **Best-practice anchors**  
 > - Click recommends keeping `@click.group()` modules focused on wiring, with subcommands imported lazily when needed (see [Click docs on complex CLIs](https://github.com/pallets/click/blob/main/docs/complex.rst)).  
 > - Pyright strictness guidance (Pyright docs) requires complete annotations and explicit Optional handling.  
+> - Library modules emit user-facing text via module loggers or `CliOutputManager`/reporter consoles; only CLI presentation layers (and the generated VSPreview script) may call `print()` directly.  
 > Use these when deciding where code should live (runner module vs. CLI shim) and how types are defined.
 
 ---

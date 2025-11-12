@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any, Final, List, Mapping, MutableMapping, NoReturn, Optional, Sequence, Tuple, cast
 
 import click
-from rich import print
 from rich.console import Console as _Console  # noqa: F401
 from rich.progress import Progress as _Progress  # noqa: F401
 from rich.progress import ProgressColumn as _ProgressColumn
@@ -262,7 +261,7 @@ def _pick_analyze_file(
     target = (target or "").strip()
     if not target:
         # Legacy parity: default to the file with the smallest estimated read time.
-        print("[cyan]Determining which file to analyze...[/cyan]")
+        logger.info("Determining which file to analyze...")
         times = [(_estimate_analysis_time(file, cache_dir), idx) for idx, file in enumerate(files)]
         times.sort(key=lambda x: x[0])
         fastest_idx = times[0][1] if times else 0
