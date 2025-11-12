@@ -21,6 +21,7 @@ from typing import (
     cast,
 )
 
+from src.frame_compare import subproc as _subproc
 from src.frame_compare.render import encoders as _enc
 from src.frame_compare.render import geometry as _geo
 from src.frame_compare.render import naming as _naming
@@ -2146,12 +2147,13 @@ def _save_frame_with_ffmpeg(
         timeout_seconds = timeout_seconds_raw
 
     try:
-        process = subprocess.run(
+        process = _subproc.run_checked(
             cmd,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             timeout=timeout_seconds,
+            text=False,
         )
     except subprocess.TimeoutExpired as exc:
         duration = timeout_seconds if timeout_seconds is not None else 0.0

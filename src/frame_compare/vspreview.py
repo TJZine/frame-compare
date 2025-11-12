@@ -25,6 +25,7 @@ from rich.text import Text
 
 from src import audio_alignment
 from src.datatypes import AppConfig, ColorConfig
+from src.frame_compare import subproc
 from src.frame_compare.layout_utils import (
     normalise_vspreview_mode as _normalise_vspreview_mode,
 )
@@ -956,16 +957,25 @@ def launch(
         reporter.flags.get("debug")
     )
 
-    runner: ProcessRunner = process_runner or subprocess.run  # type: ignore[assignment]
+    runner: ProcessRunner = process_runner or subproc.run_checked  # type: ignore[assignment]
 
     try:
         if verbose_requested:
-            result = runner(command, env=env, check=False)
+            result = runner(
+                command,
+                env=env,
+                check=False,
+                stdin=None,
+                stdout=None,
+                stderr=None,
+                text=True,
+            )
         else:
             result = runner(
                 command,
                 env=env,
                 check=False,
+                stdin=None,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,

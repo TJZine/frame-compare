@@ -16,9 +16,6 @@
 languages:
 - python
 - markdown
-
-# the encoding used by text files in the project
-# For a list of possible encodings, see https://docs.python.org/3.11/library/codecs.html#standard-encodings
 encoding: "utf-8"
 
 # whether to use the project's gitignore file to ignore files
@@ -30,14 +27,10 @@ ignore_all_files_in_gitignore: true
 # Was previously called `ignored_dirs`, please update your config if you are using that.
 # Added (renamed) on 2025-04-07
 ignored_paths:
-  - tmp_runner_debug/**
-  - comparison_videos/**
-  - "**/*.mkv"
-  - "**/*.mp4"
-
-# whether the project is in read-only mode
-# If set to true, all editing tools will be disabled and attempts to use them will result in an error
-# Added on 2025-04-18
+- tmp_runner_debug/**
+- comparison_videos/**
+- "**/*.mkv"
+- "**/*.mp4"
 read_only: false
 
 # list of tool names to exclude. We recommend not excluding any tools, see the readme for more details.

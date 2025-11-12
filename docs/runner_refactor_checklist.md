@@ -380,6 +380,16 @@ Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 | Verification commands | ☑ | `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, and `uv run --no-sync lint-imports --config importlinter.ini` ran clean; outputs logged in the 2025‑11‑12 Phase 11.1 DEC entry. |
 | Residual risks | ⚠️ | GeometryPlan remains defined in `src/screenshot.py` and CLI/tests still import the private wrapper names until the 11.10 shim cleanup; track follow-up rows before deleting the bridges. |
 
+### Phase 11.2 – Analysis split (2025‑11‑12)
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| Package extraction | ☑ | Introduced `src/frame_compare/analysis/{metrics,selection,cache_io}.py` plus `__init__.py` to host metrics collection, selection orchestration/detail serializers, and cache IO helpers formerly in `src/analysis.py`. |
+| Shim + imports | ☑ | `src/analysis.py` now only re-exports the legacy API (including `_collect_metrics_vapoursynth`, `_generate_metrics_fallback`, `_quantile`) so existing tests keep patching the same symbols; `selection.py`/`cache_io.py` use `TYPE_CHECKING` and lazy accessors to avoid import cycles. |
+| Layering + typing | ☑ | Added `src.frame_compare.analysis` to the Runner→Core→Modules import-linter layer and marked the new modules with `# pyright: standard` to keep strict typing elsewhere without rewriting the legacy helpers. |
+| Verification commands | ☑ | `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, and `uv run --no-sync lint-imports --config importlinter.ini` logged cleanly in the 2025‑11‑12 Phase 11.2 DEC entry. |
+| Residual risks | ⚠️ | Shim removal deferred to Phase 11.10; downstream callers still import from `src.analysis` today, so keep the bridge until the cleanup phase and document any new helpers added before then. |
+
 ---
 
 ### Usage Notes

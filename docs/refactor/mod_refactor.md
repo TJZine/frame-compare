@@ -740,7 +740,7 @@ Goal: reduce remaining monoliths, harden subprocess/logging practices, and final
 | Phase | Sub‑phase | Owner | Status | Notes |
 | --- | --- | --- | --- | --- |
 | 11 | 11.1 Render helpers extraction |  | ☑ | `src/frame_compare/render/{naming,overlay,encoders,geometry,errors}.py` host the pure helpers moved out of `src/screenshot.py`, with wrappers/tests + import-linter layering recorded on 2025‑11‑12. |
-| 11 | 11.2 Analysis split |  | ⛔ | Split `src/analysis.py` into `analysis/metrics.py`, `analysis/selection.py`, `analysis/cache_io.py`. |
+| 11 | 11.2 Analysis split |  | ☑ | Analysis helpers now live in `src/frame_compare/analysis/{metrics,selection,cache_io}.py` with `src/analysis.py` as a shim; DEC logs + tests recorded on 2025‑11‑12. |
 | 11 | 11.3 Subprocess hardening |  | ⛔ | Centralize subprocess calls; enforce safe argv + error mapping. |
 | 11 | 11.4 Logging normalization |  | ⛔ | Replace print() with logging in library modules; keep CLI formatting. |
 | 11 | 11.5 Packaging cleanup + legacy removal |  | ⛔ | Move top‑level modules under `src/frame_compare/`; delete `Legacy/comp.py`. |
@@ -912,16 +912,79 @@ Risks & mitigations
 Conventional Commit subject
 - `refactor(analysis): split selection, metrics, and cache IO into package`
 
+**2025-11-12 update:** Added `src/frame_compare/analysis/{__init__,metrics,selection,cache_io}.py`, moved the quantile/metrics collectors, selection orchestration (including `SelectionDetail`, hashing, dedupe, and selection metadata serializers), and cache I/O helpers out of `src/analysis.py`, and kept the legacy module as a shim that re-exports the public API plus the `_collect_metrics_*` helpers the tests patch. `importlinter.ini` now includes `src.frame_compare.analysis` in the module layer so runner/core can safely depend on it, and the new modules declare `# pyright: standard` to avoid regressing strict checks elsewhere. Verification commands (`git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, `uv run --no-sync lint-imports --config importlinter.ini`) ran clean and are logged in the 2025‑11‑12 Phase 11.2 entry in `docs/DECISIONS.md`. Residual shims stay in `src/analysis.py` until Phase 11.10 removes them.
+
 ### Sub‑phase 11.3 — Subprocess Hardening
 
-Goal: centralize and harden all subprocess calls (FFmpeg/VSPreview) to enforce safe argv handling, timeouts, and consistent error mapping.
+Goal: centralize and harden all subprocess calls (FFmpeg/FFprobe/VSPreview) to enforce safe argv handling, consistent timeouts and output capture, and predictable error mapping. No behavior or messages visible to users should change.
 
-Scope
-- Add `src/frame_compare/subproc.py` with: `run_checked(argv: list[str], *, cwd: Path | None = None, timeout: float | None = None, env: Mapping[str, str] | None = None) -> CompletedProcess` (no `shell=True`).
-- Refactor callers in `vspreview.py` and `screenshot.py` to use `run_checked`.
+Scope & constraints
+- Add `src/frame_compare/subproc.py` exposing a single entrypoint with safe defaults:
+  - `run_checked(argv: Sequence[str], *, cwd: Path | str | None = None, env: Mapping[str, str] | None = None, timeout: float | None = None, stdin: object | None = subprocess.DEVNULL, stdout: object | None = subprocess.PIPE, stderr: object | None = subprocess.PIPE, text: bool = True, check: bool = False) -> subprocess.CompletedProcess[str]`.
+  - Always execute with `shell=False`. Document that callers must pass argv lists only.
+  - Propagate `subprocess.TimeoutExpired` as‑is; do not raise on non‑zero exit when `check=False` (keeps current calling patterns intact). When `check=True`, raise `subprocess.CalledProcessError` like `subprocess.run`.
+  - Log debug summaries of argv and truncated stderr/stdout when `check=True` raises (no secrets handled in our use cases; still avoid echoing full argv at INFO).
+- Refactor in‑repo callers to use `run_checked` with equivalent kwargs:
+  - `src/screenshot.py::_save_frame_with_ffmpeg` (lines ~2375–2520): replace direct `subprocess.run` with `subproc.run_checked` preserving `stdin=DEVNULL`, `stdout=DEVNULL`, `stderr=PIPE`, and `timeout` semantics; continue mapping `TimeoutExpired` → `ScreenshotWriterError` and non‑zero return code → `ScreenshotWriterError` with decoded stderr.
+  - `src/frame_compare/vspreview.py::launch` (lines ~959–998): default its `ProcessRunner` to `subproc.run_checked`; keep `check=False`. In verbose mode, allow inherited stdio by passing `stdout=None, stderr=None`; in non‑verbose mode capture both streams as text.
+  - `src/audio_alignment.py`:
+    - `probe_audio_streams` (lines ~119–167): replace `subprocess.check_output` with `subproc.run_checked([...], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, check=True)` and parse `result.stdout`.
+    - `_extract_audio` (lines ~206–245): replace `subprocess.run(..., check=True, stdout=PIPE, stderr=PIPE, text=True)` with `subproc.run_checked(..., check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)`; preserve error wrapping/messages.
+    - `_probe_fps` (lines ~292–323): replace `subprocess.check_output` with `subproc.run_checked([...], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, check=True)`; parse `result.stdout`.
+- No `shell=True` anywhere in library code after this change.
+- Preserve function signatures of public APIs and domain exceptions (`ScreenshotWriterError`, `AudioAlignmentError`).
 
-Acceptance
-- VSPreview/screenshot tests pass; error messages remain user‑friendly; no shell usage.
+Detailed step list (per‑file; anchors/search)
+1) Add `src/frame_compare/subproc.py`
+   - Implement `run_checked` with the signature above; call `subprocess.run` with `shell=False` and pass through provided stdio/timeout/env/cwd; return the `CompletedProcess`. When `check=True`, re‑raise `CalledProcessError` like `subprocess.run`.
+   - Module docstring: purpose + usage contract (argv list, no shell, defaults safe for CLI tools). Export `__all__ = ["run_checked"]`.
+
+2) Refactor `src/screenshot.py` ffmpeg writer
+   - At ~2375–2520: replace the `subprocess.run` block with `subproc.run_checked(cmd, stdin=DEVNULL, stdout=DEVNULL, stderr=PIPE, timeout=timeout_seconds, text=False, check=False)`.
+   - Keep existing try/except mapping:
+     - `except subprocess.TimeoutExpired as exc` → raise `ScreenshotWriterError(f"FFmpeg timed out after {duration:.1f}s for frame {frame_idx}")`.
+     - After call, if `process.returncode != 0`, decode stderr and raise `ScreenshotWriterError` (leave current wording unchanged).
+
+3) Refactor `src/frame_compare/vspreview.py` launcher
+   - Update `ProcessRunner` default at ~959 to `subproc.run_checked` instead of `subprocess.run`.
+   - Ensure non‑verbose path passes `stdout=PIPE, stderr=PIPE, text=True`; verbose path leaves them as inherited (`stdout=None, stderr=None`). Keep `check=False`.
+   - Keep the current exception handling (FileNotFoundError, OSError/SubprocessError/RuntimeError) and messages.
+
+4) Refactor `src/audio_alignment.py` tools
+   - `probe_audio_streams` (~140): switch to `subproc.run_checked(..., check=True, text=True)`; on `CalledProcessError` wrap into `AudioAlignmentError("ffprobe failed for {path.name}")`.
+   - `_extract_audio` (~221): switch to `subproc.run_checked(..., check=True, text=True)`; on `CalledProcessError` include stderr like current behavior.
+   - `_probe_fps` (~298): switch to `subproc.run_checked(..., check=True, text=True)`; parse stdout.
+
+5) Tests adjustments (surgical, to keep intent intact)
+   - `tests/test_screenshot.py`:
+     - test_save_frame_with_ffmpeg_honours_timeout (~1721): monkeypatch `src.frame_compare.subproc.run_checked` (instead of `screenshot.subprocess.run`) to a fake capturing kwargs and returning a `CompletedProcess`‑like object; assert `timeout` and that the assembled `cmd` includes `-nostdin`; drop direct assertions about `stdin/stdout/stderr` if not passed through; alternatively, ensure `_save_frame_with_ffmpeg` passes these through to `run_checked` so assertions remain valid.
+     - test_save_frame_with_ffmpeg_disables_timeout_when_zero (~1763): same monkeypatch target; assert `timeout` is None/absent.
+     - test_save_frame_with_ffmpeg_inserts_full_chroma_filters (~1806) and test_ffmpeg_expands_limited_range_when_exporting_full (~1861): monkeypatch `src.frame_compare.subproc.run_checked` to capture `cmd` only.
+     - test_save_frame_with_ffmpeg_raises_on_timeout (~1901): monkeypatch `src.frame_compare.subproc.run_checked` to raise `subprocess.TimeoutExpired` and assert `ScreenshotWriterError` message contains "timed out".
+   - `tests/test_vspreview.py` remains valid (still injects a `ProcessRunner` that returns a `CompletedProcess`). If needed, update type hints to accept our wrapper signature (it matches `subprocess.run`).
+   - Audio‑alignment tests do not assert subprocess semantics; no changes expected.
+
+6) Import‑linter layering
+   - Append `src.frame_compare.subproc` to the third layer in `importlinter.ini` under the `Runner→Core→Modules layering` contract to treat it as a consumable module. Confirm contracts remain 0 broken.
+
+Acceptance criteria & verification commands
+- Functional parity: screenshot ffmpeg writer still honors timeout zero/positive; VSPreview still launches and reports exit code; audio‑alignment still probes streams/fps and extracts audio with the same error messages.
+- Security: no `shell=True` anywhere under `src/` library code.
+- Commands:
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q` → all tests pass (with test updates above).
+  - `.venv/bin/ruff check` → no issues.
+  - `.venv/bin/pyright --warnings` → 0 errors/warnings.
+  - `uv run --no-sync lint-imports --config importlinter.ini` → 0 broken contracts; confirms `subproc` added to layer.
+
+Risks & mitigations
+- Test coupling to `subprocess.run` kwargs in screenshot tests: route these kwargs through `run_checked` so tests can continue asserting on `timeout`/stdio, or update tests to assert on command assembly and timeout only (less brittle). Prefer passing through kwargs to minimize churn.
+- Platform differences in env/stdio defaults: keep explicit `stdin=DEVNULL` and `text=True/False` as before to avoid hanging on tools that read stdin.
+- Error mapping drift: keep exception messages exactly as today; reuse decoded stderr in `ScreenshotWriterError`.
+
+Conventional Commit subject
+- `refactor(subproc): centralize subprocess calls and harden FFmpeg/VSPreview/ffprobe usage`
+
+**2025-11-12 update:** Introduced `src/frame_compare/subproc.py::run_checked` (shell=False, safe stdio defaults, optional `check`) and refactored `src/screenshot.py`, `src/frame_compare/vspreview.py`, and `src/audio_alignment.py` to call it so FFmpeg/FFprobe/VSPreview keep identical timeout/error messages while banning `shell=True`. Screenshot timeout/command-construction tests now patch `src.frame_compare.subproc.run_checked`, and `importlinter.ini`’s third layer lists the new module so contracts stay green. Verification commands (`git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`, `uv run --no-sync lint-imports --config importlinter.ini`) ran clean; see the 2025-11-12 Phase 11.3 entry in `docs/DECISIONS.md` for logs.
 
 ### Sub‑phase 11.4 — Logging Normalization
 

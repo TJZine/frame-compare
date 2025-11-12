@@ -17,6 +17,7 @@ from src.datatypes import (
     RGBDither,
     ScreenshotConfig,
 )
+from src.frame_compare import subproc as fc_subproc
 from src.screenshot import GeometryPlan, _compute_requires_full_chroma
 
 _vapoursynth_available = importlib.util.find_spec("vapoursynth") is not None
@@ -1718,7 +1719,7 @@ def test_save_frame_with_ffmpeg_honours_timeout(monkeypatch: pytest.MonkeyPatch,
         return _Result()
 
     monkeypatch.setattr(screenshot.shutil, "which", lambda _: "ffmpeg")
-    monkeypatch.setattr(screenshot.subprocess, "run", fake_run)
+    monkeypatch.setattr(fc_subproc, "run_checked", fake_run)
 
     screenshot._save_frame_with_ffmpeg(
         source="video.mkv",
@@ -1760,7 +1761,7 @@ def test_save_frame_with_ffmpeg_disables_timeout_when_zero(
         return _Result()
 
     monkeypatch.setattr(screenshot.shutil, "which", lambda _: "ffmpeg")
-    monkeypatch.setattr(screenshot.subprocess, "run", fake_run)
+    monkeypatch.setattr(fc_subproc, "run_checked", fake_run)
 
     screenshot._save_frame_with_ffmpeg(
         source="video.mkv",
@@ -1803,7 +1804,7 @@ def test_save_frame_with_ffmpeg_inserts_full_chroma_filters(
         return _Result()
 
     monkeypatch.setattr(screenshot.shutil, "which", lambda _: "ffmpeg")
-    monkeypatch.setattr(screenshot.subprocess, "run", fake_run)
+    monkeypatch.setattr(fc_subproc, "run_checked", fake_run)
 
     screenshot._save_frame_with_ffmpeg(
         source="video.mkv",
@@ -1858,7 +1859,7 @@ def test_ffmpeg_expands_limited_range_when_exporting_full(
         return _Result()
 
     monkeypatch.setattr(screenshot.shutil, "which", lambda _: "ffmpeg")
-    monkeypatch.setattr(screenshot.subprocess, "run", fake_run)
+    monkeypatch.setattr(fc_subproc, "run_checked", fake_run)
 
     screenshot._save_frame_with_ffmpeg(
         source="video.mkv",
@@ -1898,7 +1899,7 @@ def test_save_frame_with_ffmpeg_raises_on_timeout(monkeypatch: pytest.MonkeyPatc
         raise subprocess.TimeoutExpired(cmd=cmd_arg, timeout=timeout_value)
 
     monkeypatch.setattr(screenshot.shutil, "which", lambda _: "ffmpeg")
-    monkeypatch.setattr(screenshot.subprocess, "run", fake_run)
+    monkeypatch.setattr(fc_subproc, "run_checked", fake_run)
 
     with pytest.raises(screenshot.ScreenshotWriterError) as exc_info:
         screenshot._save_frame_with_ffmpeg(

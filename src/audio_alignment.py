@@ -17,6 +17,8 @@ from pathlib import Path
 from shutil import which
 from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple, cast
 
+from src.frame_compare import subproc as _subproc
+
 logger = logging.getLogger(__name__)
 
 
@@ -150,12 +152,18 @@ def probe_audio_streams(path: Path) -> List[AudioStreamInfo]:
     ]
 
     try:
-        output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL)
+        result = _subproc.run_checked(
+            cmd,
+            stderr=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            text=True,
+            check=True,
+        )
     except subprocess.CalledProcessError as exc:
         raise AudioAlignmentError(f"ffprobe failed for {path.name}") from exc
 
     try:
-        payload = json.loads(output.decode("utf-8", "ignore") or "{}")
+        payload = json.loads(result.stdout or "{}")
     except json.JSONDecodeError as exc:
         raise AudioAlignmentError(f"Unable to parse ffprobe output for {path.name}") from exc
 
@@ -230,7 +238,7 @@ def _extract_audio(
     ]
     completed: subprocess.CompletedProcess[str] | None = None
     try:
-        completed = subprocess.run(
+        completed = _subproc.run_checked(
             cmd,
             check=True,
             stdout=subprocess.PIPE,
@@ -330,7 +338,7 @@ def _cross_correlation(a, b) -> Tuple[int, float]:
 
 def _probe_fps(infile: Path) -> Optional[float]:
     try:
-        output = subprocess.check_output(
+        result = _subproc.run_checked(
             [
                 "ffprobe",
                 "-v",
@@ -344,10 +352,13 @@ def _probe_fps(infile: Path) -> Optional[float]:
                 str(infile),
             ],
             stderr=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            text=True,
+            check=True,
         )
     except subprocess.CalledProcessError:
         return None
-    text = output.decode("utf-8", "ignore").strip()
+    text = (result.stdout or "").strip()
     if not text:
         return None
     if "/" in text:
