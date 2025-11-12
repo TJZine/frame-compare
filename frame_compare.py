@@ -13,7 +13,7 @@ import webbrowser
 from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, Optional, cast
+from typing import Any, Callable, Dict, Iterable, MutableMapping, Optional, cast
 
 import click
 from rich import print
@@ -32,7 +32,7 @@ import src.frame_compare.wizard as _wizard
 from src import vs_core as _vs_core
 from src.config_loader import ConfigError, load_config
 from src.frame_compare import runner
-from src.frame_compare.cli_runtime import JsonTail, _ensure_slowpics_block
+from src.frame_compare.cli_runtime import JsonTail, ReportJSON, _ensure_slowpics_block
 from src.frame_compare.config_helpers import env_flag_enabled as _env_flag_enabled
 from src.frame_compare.core import (
     _DEFAULT_CONFIG_HELP,
@@ -390,13 +390,29 @@ def _run_cli_entry(
     elif isinstance(slowpics_block, dict):
         _ensure_slowpics_block(json_tail, cfg)
 
-    report_block = json_tail.get("report")
+    report_block_obj = json_tail.get("report")
+    if isinstance(report_block_obj, dict):
+        report_block = cast(ReportJSON, report_block_obj)
+    else:
+        report_block = cast(
+            ReportJSON,
+            {
+                "enabled": False,
+                "path": None,
+                "opened": False,
+                "open_after_generate": getattr(cfg.report, "open_after_generate", True),
+            },
+        )
+        json_tail["report"] = report_block
+    report_mapping = cast(MutableMapping[str, object], report_block)
     report_path = result.report_path
-    report_enabled_output = bool(report_block.get("enabled")) if isinstance(report_block, dict) else False
+    report_enabled_output = bool(report_mapping.get("enabled"))
     if report_enabled_output and report_path is not None:
         print(f"[✓] HTML report: {report_path}")
         opened_flag = False
-        open_after_generate = bool(report_block.get("open_after_generate", getattr(cfg.report, "open_after_generate", True)))
+        open_after_generate = bool(
+            report_mapping.get("open_after_generate", getattr(cfg.report, "open_after_generate", True))
+        )
         if open_after_generate:
             try:
                 opened_flag = bool(webbrowser.open(report_path.resolve().as_uri()))
@@ -405,17 +421,20 @@ def _run_cli_entry(
                 opened_flag = False
         report_block["path"] = str(report_path)
         report_block["opened"] = opened_flag
-        report_block["mode"] = report_block.get("mode") or getattr(cfg.report, "default_mode", "slider")
+        existing_mode = report_mapping.get("mode")
+        if isinstance(existing_mode, str) and existing_mode:
+            report_block["mode"] = existing_mode
+        else:
+            report_block["mode"] = getattr(cfg.report, "default_mode", "slider")
     elif report_enabled_output and report_path is None:
         print("[yellow]Warning:[/yellow] HTML report generation failed.")
         report_block["enabled"] = False
         report_block["path"] = None
         report_block["opened"] = False
     else:
-        if isinstance(report_block, dict):
-            report_block["enabled"] = False
-            report_block["path"] = None
-            report_block["opened"] = False
+        report_block["enabled"] = False
+        report_block["path"] = None
+        report_block["opened"] = False
 
     emit_json_tail_flag = True
     if hasattr(cfg, "cli"):

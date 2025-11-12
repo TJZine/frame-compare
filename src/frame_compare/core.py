@@ -1,10 +1,11 @@
 """CLI entry point and orchestration logic for frame comparison runs."""
+# pyright: reportUnusedFunction=false
 
 from __future__ import annotations
 
 import asyncio
 import datetime as _dt  # noqa: F401  (re-exported via frame_compare)
-import importlib.util  # noqa: F401  # Legacy tests monkeypatch core.importlib
+import importlib as _importlib
 import logging
 import math
 import threading
@@ -12,34 +13,14 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from string import Template
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Final,
-    List,
-    Mapping,
-    MutableMapping,
-    NoReturn,
-    Optional,
-    Protocol,
-    Sequence,
-    Tuple,
-)
+from typing import Any, Final, List, Mapping, MutableMapping, NoReturn, Optional, Sequence, Tuple, cast
 
 import click
 import httpx
 from rich import print
-from rich.console import Console  # noqa: F401
-from rich.progress import Progress, ProgressColumn  # noqa: F401
-
-from src import audio_alignment as _audio_alignment_module
-from src.config_loader import load_config as _load_config
-from src.datatypes import TMDBConfig
-
-if TYPE_CHECKING:
-    class _AsyncHTTPTransport(Protocol):
-        def __init__(self, retries: int = ...) -> None: ...
-        def close(self) -> None: ...
+from rich.console import Console as _Console  # noqa: F401
+from rich.progress import Progress as _Progress  # noqa: F401
+from rich.progress import ProgressColumn as _ProgressColumn
 
 import src.frame_compare.alignment_preview as _alignment_preview_module
 import src.frame_compare.alignment_runner as _alignment_runner_module
@@ -50,42 +31,96 @@ import src.frame_compare.preflight as _preflight_constants
 import src.frame_compare.vspreview as _vspreview_module
 import src.frame_compare.wizard as _wizard_module
 import src.screenshot as _screenshot_module
+from src import audio_alignment as _audio_alignment_module
 from src import vs_core
 from src.analysis import (
-    export_selection_metadata,  # noqa: F401
-    probe_cached_metrics,  # noqa: F401
-    select_frames,  # noqa: F401
-    selection_details_to_json,  # noqa: F401
-    selection_hash_for_config,  # noqa: F401
-    write_selection_cache_file,  # noqa: F401
+    export_selection_metadata as _export_selection_metadata,  # noqa: F401
+)
+from src.analysis import (
+    probe_cached_metrics as _probe_cached_metrics,  # noqa: F401
+)
+from src.analysis import (
+    select_frames as _select_frames,  # noqa: F401  # type: ignore[reportUnknownVariableType]
+)
+from src.analysis import (
+    selection_details_to_json as _selection_details_to_json,  # noqa: F401
+)
+from src.analysis import (
+    selection_hash_for_config as _selection_hash_for_config,  # noqa: F401
+)
+from src.analysis import (
+    write_selection_cache_file as _write_selection_cache_file,  # noqa: F401
+)
+from src.config_loader import load_config as _load_config
+from src.datatypes import TMDBConfig
+from src.frame_compare.cli_runtime import (
+    AudioAlignmentJSON as _AudioAlignmentJSON,  # noqa: F401 - re-exported for compatibility
 )
 from src.frame_compare.cli_runtime import (
-    AudioAlignmentJSON,  # noqa: F401 - re-exported for compatibility
-    CLIAppError,  # noqa: F401 - re-exported for compatibility
-    ClipRecord,  # noqa: F401 - re-exported for compatibility
-    JsonTail,  # noqa: F401 - re-exported for compatibility
-    ReportJSON,  # noqa: F401 - re-exported for compatibility
-    SlowpicsJSON,  # noqa: F401 - re-exported for compatibility
-    SlowpicsTitleBlock,  # noqa: F401 - re-exported for compatibility
-    SlowpicsTitleInputs,  # noqa: F401 - re-exported for compatibility
-    TrimClipEntry,  # noqa: F401 - re-exported for compatibility
-    TrimsJSON,  # noqa: F401 - re-exported for compatibility
-    TrimSummary,  # noqa: F401 - re-exported for compatibility
-    ViewerJSON,  # noqa: F401 - re-exported for compatibility
-    _ClipPlan,  # noqa: F401 - re-exported for compatibility
-    _coerce_str_mapping,
+    CLIAppError as _CLIAppError,  # noqa: F401 - re-exported for compatibility
+)
+from src.frame_compare.cli_runtime import (
+    ClipPlan,
+    coerce_str_mapping,
+)
+from src.frame_compare.cli_runtime import (
+    ClipRecord as _ClipRecord,  # noqa: F401 - re-exported for compatibility
+)
+from src.frame_compare.cli_runtime import (
+    JsonTail as _JsonTail,  # noqa: F401 - re-exported for compatibility
+)
+from src.frame_compare.cli_runtime import (
+    ReportJSON as _ReportJSON,  # noqa: F401 - re-exported for compatibility
+)
+from src.frame_compare.cli_runtime import (
+    SlowpicsJSON as _SlowpicsJSON,  # noqa: F401 - re-exported for compatibility
+)
+from src.frame_compare.cli_runtime import (
+    SlowpicsTitleBlock as _SlowpicsTitleBlock,  # noqa: F401 - re-exported for compatibility
+)
+from src.frame_compare.cli_runtime import (
+    SlowpicsTitleInputs as _SlowpicsTitleInputs,  # noqa: F401 - re-exported for compatibility
+)
+from src.frame_compare.cli_runtime import (
+    TrimClipEntry as _TrimClipEntry,  # noqa: F401 - re-exported for compatibility
+)
+from src.frame_compare.cli_runtime import (
+    TrimsJSON as _TrimsJSON,  # noqa: F401 - re-exported for compatibility
+)
+from src.frame_compare.cli_runtime import (
+    TrimSummary as _TrimSummary,  # noqa: F401 - re-exported for compatibility
+)
+from src.frame_compare.cli_runtime import (
+    ViewerJSON as _ViewerJSON,  # noqa: F401 - re-exported for compatibility
 )
 from src.frame_compare.preflight import (
-    PACKAGED_TEMPLATE_PATH,  # noqa: F401 - compatibility re-export
-    PROJECT_ROOT,  # noqa: F401 - compatibility re-export
-    PreflightResult,
-    collect_path_diagnostics,
-    prepare_preflight,
+    PACKAGED_TEMPLATE_PATH as _PACKAGED_TEMPLATE_PATH,  # noqa: F401 - compatibility re-export
 )
 from src.frame_compare.preflight import (
-    _abort_if_site_packages as _preflight_abort_if_site_packages,
+    PROJECT_ROOT as _PROJECT_ROOT,  # noqa: F401 - compatibility re-export
 )
-from src.slowpics import SlowpicsAPIError, build_shortcut_filename, upload_comparison  # noqa: F401
+from src.frame_compare.preflight import (
+    PreflightResult as _PreflightResult,
+)
+from src.frame_compare.preflight import abort_if_site_packages as _abort_if_site_packages_public
+from src.frame_compare.preflight import (
+    collect_path_diagnostics as _collect_path_diagnostics,
+)
+from src.frame_compare.preflight import (
+    fresh_app_config as _fresh_app_config_public,
+)
+from src.frame_compare.preflight import (
+    prepare_preflight as _prepare_preflight,
+)
+from src.slowpics import (
+    SlowpicsAPIError as _SlowpicsAPIError,
+)  # noqa: F401
+from src.slowpics import (
+    build_shortcut_filename as _build_shortcut_filename,
+)
+from src.slowpics import (
+    upload_comparison as _upload_comparison,
+)
 from src.tmdb import (
     TMDBAmbiguityError,  # noqa: F401
     TMDBCandidate,
@@ -94,7 +129,8 @@ from src.tmdb import (
     parse_manual_id,
     resolve_tmdb,  # noqa: F401
 )
-from src.vs_core import ClipInitError, ClipProcessError  # noqa: F401
+from src.vs_core import ClipInitError as _ClipInitError
+from src.vs_core import ClipProcessError as _ClipProcessError
 
 logger = logging.getLogger(__name__)
 
@@ -106,23 +142,62 @@ resolve_workspace_root = _preflight_constants.resolve_workspace_root
 
 ScreenshotError = _screenshot_module.ScreenshotError
 generate_screenshots = _screenshot_module.generate_screenshots
-_fresh_app_config = _preflight_constants._fresh_app_config
-_PathPreflightResult = PreflightResult
-_prepare_preflight = prepare_preflight
-_collect_path_diagnostics = collect_path_diagnostics
-_confirm_alignment_with_screenshots = _alignment_preview_module._confirm_alignment_with_screenshots
+fresh_app_config = _fresh_app_config_public
+_fresh_app_config = fresh_app_config
+confirm_alignment_with_screenshots = _alignment_preview_module.confirm_alignment_with_screenshots
+_confirm_alignment_with_screenshots = confirm_alignment_with_screenshots
 load_config = _load_config
 build_plans = _planner_module.build_plans
 _build_plans = _planner_module.build_plans
+_ClipPlan = ClipPlan
+_coerce_str_mapping = coerce_str_mapping
+datetime = _dt
+importlib = _importlib
+Console = _Console
+Progress = _Progress
+ProgressColumn = _ProgressColumn
+export_selection_metadata = cast(Any, _export_selection_metadata)
+probe_cached_metrics = cast(Any, _probe_cached_metrics)
+select_frames = cast(Any, _select_frames)
+selection_details_to_json = cast(Any, _selection_details_to_json)
+selection_hash_for_config = cast(Any, _selection_hash_for_config)
+write_selection_cache_file = cast(Any, _write_selection_cache_file)
+AudioAlignmentJSON = _AudioAlignmentJSON
+CLIAppError = _CLIAppError
+ClipRecord = _ClipRecord
+JsonTail = _JsonTail
+ReportJSON = _ReportJSON
+SlowpicsJSON = _SlowpicsJSON
+SlowpicsTitleBlock = _SlowpicsTitleBlock
+SlowpicsTitleInputs = _SlowpicsTitleInputs
+TrimClipEntry = _TrimClipEntry
+TrimsJSON = _TrimsJSON
+TrimSummary = _TrimSummary
+ViewerJSON = _ViewerJSON
+PACKAGED_TEMPLATE_PATH = _PACKAGED_TEMPLATE_PATH
+PROJECT_ROOT = _PROJECT_ROOT
+PreflightResult = _PreflightResult
+collect_path_diagnostics = _collect_path_diagnostics
+prepare_preflight = _prepare_preflight
+SlowpicsAPIError = _SlowpicsAPIError
+build_shortcut_filename = _build_shortcut_filename
+upload_comparison = _upload_comparison
+_PathPreflightResult = PreflightResult
+_collect_path_diagnostics = collect_path_diagnostics
+_prepare_preflight = prepare_preflight
 
 audio_alignment = _audio_alignment_module
-_AudioAlignmentSummary = _alignment_runner_module._AudioAlignmentSummary
-_AudioAlignmentDisplayData = _alignment_runner_module._AudioAlignmentDisplayData
-_AudioMeasurementDetail = _alignment_runner_module._AudioMeasurementDetail
+AudioAlignmentSummary = _alignment_runner_module.AudioAlignmentSummary
+AudioAlignmentDisplayData = _alignment_runner_module.AudioAlignmentDisplayData
+AudioMeasurementDetail = _alignment_runner_module.AudioMeasurementDetail
+_AudioAlignmentSummary = AudioAlignmentSummary
+_AudioAlignmentDisplayData = AudioAlignmentDisplayData
+_AudioMeasurementDetail = AudioMeasurementDetail
 apply_audio_alignment = _alignment_runner_module.apply_audio_alignment
 format_alignment_output = _alignment_runner_module.format_alignment_output
 _maybe_apply_audio_alignment = _alignment_runner_module.apply_audio_alignment
-_resolve_alignment_reference = _alignment_runner_module._resolve_alignment_reference
+resolve_alignment_reference = _alignment_runner_module.resolve_alignment_reference
+_resolve_alignment_reference = resolve_alignment_reference
 _prompt_vspreview_offsets = _vspreview_module.prompt_offsets
 _apply_vspreview_manual_offsets = _vspreview_module.apply_manual_offsets
 _write_vspreview_script = _vspreview_module.write_script
@@ -130,6 +205,8 @@ _launch_vspreview = _vspreview_module.launch
 _format_vspreview_manual_command = _vspreview_module.format_manual_command
 _VSPREVIEW_WINDOWS_INSTALL = _vspreview_module.VSPREVIEW_WINDOWS_INSTALL
 _VSPREVIEW_POSIX_INSTALL = _vspreview_module.VSPREVIEW_POSIX_INSTALL
+ClipInitError = _ClipInitError
+ClipProcessError = _ClipProcessError
 
 _DEFAULT_CONFIG_HELP: Final[str] = (
     "Optional explicit path to config.toml. When omitted, Frame Compare looks for "
@@ -139,18 +216,10 @@ _DEFAULT_CONFIG_HELP: Final[str] = (
 
 DoctorStatus = _doctor_module.DoctorStatus
 DoctorCheck = _doctor_module.DoctorCheck
-
-
-def _resolve_wizard_paths(root_override: str | None, config_override: str | None) -> tuple[Path, Path]:
-    """Backward-compatible shim that defers to the wizard module implementation."""
-
-    return _wizard_module.resolve_wizard_paths(root_override, config_override)
-
-
-def _abort_if_site_packages(path_map: Mapping[str, Path]) -> None:
-    """Backward-compatible shim that defers to the preflight helper."""
-
-    _preflight_abort_if_site_packages(path_map)
+resolve_wizard_paths = _wizard_module.resolve_wizard_paths
+_resolve_wizard_paths = resolve_wizard_paths
+abort_if_site_packages = _abort_if_site_packages_public
+_abort_if_site_packages = abort_if_site_packages
 
 
 
@@ -378,6 +447,9 @@ def _render_collection_name(template_text: str, context: Mapping[str, str]) -> s
         return template_text
 
 
+render_collection_name = _render_collection_name
+
+
 def _estimate_analysis_time(file: Path, cache_dir: Path | None) -> float:
     """Estimate time to read two small windows of frames via VapourSynth.
 
@@ -455,6 +527,9 @@ def _pick_analyze_file(
             return file
 
     return files[0]
+
+
+pick_analyze_file = _pick_analyze_file
 
 
 def _extract_clip_fps(clip: object) -> Tuple[int, int]:
@@ -853,3 +928,6 @@ def _validate_tonemap_overrides(overrides: MutableMapping[str, Any]) -> None:
     for boolean_key in ("visualize_lut", "show_clipping"):
         if boolean_key in overrides and not isinstance(overrides[boolean_key], bool):
             _bad(f"--tm-{boolean_key.replace('_', '-')} must be used without a value")
+
+
+validate_tonemap_overrides = _validate_tonemap_overrides

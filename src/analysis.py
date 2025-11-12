@@ -1569,7 +1569,7 @@ def _smooth_motion(values: List[tuple[int, float]], radius: int) -> List[tuple[i
 
 
 def select_frames(
-    clip,
+    clip: object,
     cfg: AnalysisConfig,
     files: List[str],
     file_under_analysis: str,

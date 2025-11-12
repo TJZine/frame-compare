@@ -326,6 +326,42 @@ Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 | Verification | ☑ | `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` (targeted CLI files + full suite), `.venv/bin/ruff check`, and `.venv/bin/pyright --warnings` captured in `docs/DECISIONS.md` (2025-11-11 Phase 9.9 entry). |
 | Residual risks | ☑ | Downstream scripts or CI filters referencing the pre-move `tests/test_cli_*.py` paths must update to `tests/cli/test_*.py`; this was noted in the trackers, and pytest’s package structure prevents duplicate-module imports. Phase 10 will continue with TMDB + wizard shim removals. |
 
+### Phase 9.10 – Public `__all__` contracts
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| Module exports | ☑ | Added explicit `__all__` declarations to the extracted modules (`src/frame_compare/selection.py`, `runtime_utils.py`, `config_writer.py`, `presets.py`, `doctor.py`) so wildcard imports only expose the curated helpers (e.g., `selection.__all__ = ["extract_clip_fps", "init_clips", "resolve_selection_windows", "log_selection_windows"]`). |
+| CLI/runner alignment | ☑ | Verified runner/CLI consumers import from the curated modules (no reliance on private names), and `_COMPAT_EXPORTS` simply exposes those helpers. |
+| Verification | ☑ | `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, and `.venv/bin/pyright --warnings` recorded in `docs/DECISIONS.md` (2025-11-11 Phase 9.10 entry). |
+| Residual risks | ☑ | Any downstream wildcard imports that expected private helpers will now receive only the documented surface; steer them to targeted imports if issues arise. |
+
+### Phase 9.11 – Pyright strict-mode ratchet
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| Strict configuration | ☑ | `pyrightconfig.json` now sets `"strict": ["src/frame_compare"]`, covering every extracted module while keeping the CLI shim under `standard` mode. |
+| Type clean-up | ☑ | Addressed the strict-mode fallout (runner reporter typing, VSPreview helpers, tonemap/media exports) so `.venv/bin/pyright --warnings` reports zero errors/warnings under the stricter settings. |
+| Verification | ☑ | Quartet logged in `docs/DECISIONS.md` (2025-11-11 Phase 9.11 entry) after the strict-mode cleanup, matching the repo’s current runs. |
+| Residual risks | ☑ | Future modules added under `src/frame_compare/` must meet strict requirements; document this expectation in upcoming phase previews. |
+
+### Phase 9.12 – Runner API docs + examples
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| README updates | ☑ | README now includes “Programmatic Runner API” and “Programmatic Doctor” sections showcasing `RunRequest`/`RunResult` usage, CLIAppError handling, and curated import/typing guidance for automation. |
+| Reference docs | ☑ | `docs/README_REFERENCE.md` gained an “API Reference” chapter summarizing runner, doctor, VSPreview, config writer/presets, preflight, selection/runtime helpers, and typing notes. |
+| Verification | ☑ | Docs-only pass; quartet (`git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`) captured in `docs/DECISIONS.md` (2025-11-12 Phase 9.12 entry). |
+| Residual risks | ☑ | Keep both docs in sync as new modules arrive (Phase 10 TMDB extraction, compatibility cleanup) to discourage imports from `src.*`. |
+
+### Post-phase cleanup – Compatibility shim retirement
+
+| Checklist Item | Status | Notes / Next Steps |
+| --- | --- | --- |
+| Inventory shims | ⛔ | Audit `_COMPAT_EXPORTS` and any lingering wizard/VSPreview/TMDB shims once Phase 10 lands to confirm which aliases remain strictly for backwards compatibility. |
+| Migration confirmation | ⛔ | Ensure downstream tools (CI scripts, automation, public APIs) consume the extracted modules; document the migration window in README/CHANGELOG before deleting the shims. |
+| Removal + verification | ⛔ | Delete obsolete compatibility exports, run the quartet, and log the removals in `docs/DECISIONS.md` with replacement guidance so future contributors know the final surfaces. |
+| Final doc pass | ⛔ | Update this checklist + tracker tables to mark compatibility cleanup complete, signalling the refactor’s closure. |
+
 ---
 
 ### Usage Notes

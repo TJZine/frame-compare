@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Dict, Sequence
 
 from src.datatypes import AppConfig
-from src.frame_compare.cli_runtime import _ClipPlan
+from src.frame_compare.cli_runtime import ClipPlan
 from src.frame_compare.metadata import match_override, normalise_override_mapping
 
 MetadataRecord = Dict[str, str]
@@ -16,7 +16,7 @@ def build_plans(
     files: Sequence[Path],
     metadata: Sequence[MetadataRecord],
     cfg: AppConfig,
-) -> list[_ClipPlan]:
+) -> list[ClipPlan]:
     """
     Construct clip plans with trim and FPS overrides applied.
 
@@ -26,17 +26,17 @@ def build_plans(
         cfg (AppConfig): Loaded configuration supplying override maps.
 
     Returns:
-        list[_ClipPlan]: Planned clips mirroring the provided order with overrides applied.
+        list[ClipPlan]: Planned clips mirroring the provided order with overrides applied.
     """
 
     trim_map = normalise_override_mapping(cfg.overrides.trim)
     trim_end_map = normalise_override_mapping(cfg.overrides.trim_end)
     fps_map = normalise_override_mapping(cfg.overrides.change_fps)
 
-    plans: list[_ClipPlan] = []
+    plans: list[ClipPlan] = []
     for idx, file in enumerate(files):
         meta = dict(metadata[idx])
-        plan = _ClipPlan(path=file, metadata=meta)
+        plan = ClipPlan(path=file, metadata=meta)
 
         trim_val = match_override(idx, file, meta, trim_map)
         if trim_val is not None:

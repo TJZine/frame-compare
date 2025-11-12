@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
-from typing import Any, Dict, Final, cast
+from typing import Any, Dict, Final
 
 import click
 
@@ -53,7 +53,7 @@ def load_preset_data(name: str) -> Dict[str, Any]:
     except OSError as exc:
         raise click.ClickException(f"Failed to read preset '{name}': {exc}") from exc
     try:
-        data = tomllib.loads(text.lstrip("\ufeff"))
+        data: Dict[str, Any] = tomllib.loads(text.lstrip("\ufeff"))
     except tomllib.TOMLDecodeError as exc:
         raise click.ClickException(f"Preset '{name}' is invalid TOML: {exc}") from exc
-    return cast(Dict[str, Any], data)
+    return data

@@ -14,16 +14,17 @@ from src.datatypes import AnalysisConfig, RuntimeConfig
 from src.frame_compare.cli_runtime import CLIAppError
 
 __all__: Final = [
+    "extract_clip_fps",
     "init_clips",
     "resolve_selection_windows",
     "log_selection_windows",
 ]
 
 if TYPE_CHECKING:
-    from src.frame_compare.cli_runtime import CliOutputManagerProtocol, _ClipPlan
+    from src.frame_compare.cli_runtime import CliOutputManagerProtocol, ClipPlan
 else:  # pragma: no cover - runtime-only fallback
     CliOutputManagerProtocol = Any  # type: ignore[assignment]
-    _ClipPlan = Any  # type: ignore[assignment]
+    ClipPlan = Any  # type: ignore[assignment]
 
 
 def _extract_clip_fps(clip: object) -> Tuple[int, int]:
@@ -35,8 +36,11 @@ def _extract_clip_fps(clip: object) -> Tuple[int, int]:
     return (24000, 1001)
 
 
+extract_clip_fps = _extract_clip_fps
+
+
 def init_clips(
-    plans: Sequence[_ClipPlan],
+    plans: Sequence[ClipPlan],
     runtime_cfg: RuntimeConfig,
     cache_dir: Path | None,
     *,
@@ -99,7 +103,7 @@ def init_clips(
 
 
 def resolve_selection_windows(
-    plans: Sequence[_ClipPlan],
+    plans: Sequence[ClipPlan],
     analysis_cfg: AnalysisConfig,
 ) -> tuple[List[SelectionWindowSpec], tuple[int, int], bool]:
     specs: List[SelectionWindowSpec] = []
@@ -153,7 +157,7 @@ def resolve_selection_windows(
 
 
 def log_selection_windows(
-    plans: Sequence[_ClipPlan],
+    plans: Sequence[ClipPlan],
     specs: Sequence[SelectionWindowSpec],
     intersection: tuple[int, int],
     *,

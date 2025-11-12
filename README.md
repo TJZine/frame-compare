@@ -30,7 +30,10 @@ Automated frame sampling, audio alignment, HDR tonemapping, and slow.pics upload
   - [Workspace \& Usage Essentials](#workspace--usage-essentials)
   - [Guided Setup \& Presets](#guided-setup--presets)
   - [Dependency Doctor](#dependency-doctor)
-  - [Programmatic Usage](#programmatic-usage)
+  - [Programmatic Runner API](#programmatic-runner-api)
+    - [Programmatic Doctor (dependency checks)](#programmatic-doctor-dependency-checks)
+    - [Import Paths and Typing](#import-paths-and-typing)
+    - [Quick Recipes](#quick-recipes)
   - [Advanced Guides \& Reference](#advanced-guides--reference)
     - [Configuration Highlights](#configuration-highlights)
     - [Tonemap Quick Recipes](#tonemap-quick-recipes)
@@ -159,74 +162,120 @@ Each comparison lives under `comparison_videos/<set>/` (configurable via `[paths
 
 `frame-compare doctor` runs fast, read-only diagnostics for VapourSynth, FFmpeg, audio extras, VSPreview tooling, slow.pics networking, clipboard helpers, and config writability. It always exits `0`, supports `--json`, and is automatically invoked by the wizard.
 
-## Programmatic Usage
+## Programmatic Runner API
 
-The Click CLI delegates to the shared runner in `src/frame_compare/runner.py`, so automation can bypass Click entirely:
+Automation should rely on the curated `frame_compare` surfaces (not `src.frame_compare.*`) so the CLI and runner stay aligned when new modules land. The public `runner`, `RunRequest`, `RunResult`, and `CLIAppError` shapes are stable anchors for headless workflows.
 
 ```python
 from pathlib import Path
-from rich.console import Console
 
-from frame_compare.runner import RunRequest, run
-from src.frame_compare.cli_runtime import CliOutputManager
-
-
-def build_reporter(request: RunRequest, layout_path: Path, console: Console) -> CliOutputManager:
-    return CliOutputManager(
-        quiet=request.quiet,
-        verbose=request.verbose,
-        no_color=request.no_color,
-        layout_path=layout_path,
-        console=console,
-    )
-
+from frame_compare import runner, RunRequest, RunResult, CLIAppError
 
 request = RunRequest(
-    config_path="config/config.toml",
-    input_dir="comparison_videos/demo",
-    root_override=".",
+    config_path=None,
+    input_dir="comparison_videos",
+    root_override=str(Path.cwd()),
+    audio_track_overrides=None,
     quiet=True,
-    reporter_factory=build_reporter,
+    verbose=False,
+    no_color=True,
+    report_enable_override=False,
+    skip_wizard=True,
+    debug_color=False,
+    tonemap_overrides=None,
 )
-
-result = run(request)
-print(result.files)
-print(result.json_tail)
+try:
+    result: RunResult = runner.run(request)
+    print(f"Out dir: {result.out_dir}")
+    print(f"Frames: {result.frames}")
+    print(f"Images: {len(result.image_paths)}")
+    if result.slowpics_url:
+        print(f"Slow.pics: {result.slowpics_url}")
+except CLIAppError as exc:
+    print(exc.rich_message)
 ```
 
-`RunResult` exposes rendered files, selected frame indices, resolved root, optional slow.pics URL, and HTML report path. Setting `quiet=True` swaps in a `NullCliOutputManager` so automation logs stay clean. The regression suite calls `runner.run` directly to keep CLI and programmatic behavior in sync.
+Set `skip_wizard=True` and `quiet=True` to keep automation non-interactive, then read `RunResult.files`, `frames`, `out_dir`, `image_paths`, `slowpics_url`, `json_tail`, and `report_path` for logging or dashboards.
 
-> [!NOTE]
-> VSPreview helpers now live under `frame_compare.vspreview` (`render_script`, `persist_script`, `write_script`, `launch`, `apply_manual_offsets`, `prompt_offsets`). Import that module when you need to generate scripts or replay manual offsets outside the CLI.
+### Programmatic Doctor (dependency checks)
 
-Already own a configured reporter? Pass it via `RunRequest.reporter` to skip the default Rich wiring. This is handy when you need to mirror output into JSON/metrics without losing the familiar CLI layout:
+The doctor workflow also exposes the logic behind `frame-compare doctor`. `collect_checks` returns structured `DoctorCheck` dictionaries plus helpful notes, and `emit_results` renders either the human-readable banner or JSON payload.
+
+```python
+from dataclasses import asdict
+from pathlib import Path
+
+from frame_compare import doctor, preflight
+
+pre = preflight.prepare_preflight(
+    cli_root=str(Path.cwd()),
+    config_override=None,
+    input_override=None,
+    ensure_config=False,
+    create_dirs=False,
+    create_media_dir=False,
+    allow_auto_wizard=False,
+    skip_auto_wizard=True,
+)
+checks, notes = doctor.collect_checks(pre.workspace_root, pre.config_path, asdict(pre.config))
+doctor.emit_results(
+    checks,
+    notes,
+    json_mode=False,
+    workspace_root=pre.workspace_root,
+    config_path=pre.config_path,
+)
+```
+
+The collected checks cover config writability plus the typical `config`, `vapoursynth`, `ffmpeg`, `audio`, `vspreview`, `slowpics`, and `pyperclip` probes.
+
+### Import Paths and Typing
+
+Always import curated helpers through `frame_compare` rather than reaching into `src.frame_compare.*`. The package ships `py.typed` inside `src/frame_compare/` and a top-level `typings/frame_compare.pyi` stub so Pyright (strict for `src/frame_compare` per `pyrightconfig.json`) understands the public contract.
+
+| Module | Curated exports |
+| --- | --- |
+| `runner` | `runner.run`, `RunRequest`, `RunResult` |
+| `doctor` | `doctor.collect_checks`, `doctor.emit_results` |
+| `vspreview` | `render_script`, `write_script`, `persist_script`, `resolve_command`, `launch`, `format_manual_command`, `apply_manual_offsets` |
+| `config_writer` | `read_template_text`, `load_template_config`, `render_config_text`, `write_config_file` |
+| `presets` | `PRESETS_DIR`, `PRESET_DESCRIPTIONS`, `list_preset_paths`, `load_preset_data` |
+| `preflight` | `prepare_preflight`, `resolve_workspace_root`, `collect_path_diagnostics` |
+| `selection` | `init_clips`, `resolve_selection_windows`, `log_selection_windows` |
+| `runtime_utils` | `format_seconds`, `format_clock`, `fps_to_float`, `fold_sequence`, `evaluate_rule_condition`, `build_legacy_summary_lines` |
+
+`CLIAppError` (from `frame_compare.core`) is the main user-facing exception; import it via `from frame_compare import CLIAppError`. Handle low-level clip failures by importing `ClipInitError`/`ClipProcessError` through `frame_compare.vs_core`.
+
+### Quick Recipes
+
+#### Apply a preset and write config.toml
 
 ```python
 from pathlib import Path
-from rich.console import Console
 
-from frame_compare.runner import RunRequest, run
-from src.frame_compare.cli_runtime import CliOutputManager
+from frame_compare import config_writer, presets
 
-
-layout_path = Path(__file__).resolve().with_name("cli_layout.v1.json")
-json_reporter = CliOutputManager(
-    quiet=False,
-    verbose=False,
-    no_color=False,
-    layout_path=layout_path,
-    console=Console(record=True),
-)
-
-run(
-    RunRequest(
-        config_path="config/config.toml",
-        reporter=json_reporter,
-    )
-)
+tmpl_text = config_writer.read_template_text()
+tmpl_cfg = config_writer.load_template_config()
+preset = presets.load_preset_data("quick-compare")
+final_cfg = {
+    **tmpl_cfg,
+    "screenshots": {**tmpl_cfg.get("screenshots", {}), "use_ffmpeg": True},
+}
+rendered = config_writer.render_config_text(tmpl_text, tmpl_cfg, final_cfg)
+config_writer.write_config_file(Path("./config/config.toml"), rendered)
 ```
 
-Need to override wizard prompts programmatically? Continue patching the compatibility shims that `frame_compare` re-exports. Both `resolve_wizard_paths` and `_resolve_wizard_paths` forward to `src.frame_compare.wizard`, so legacy automation that previously pointed at `frame_compare._resolve_wizard_paths` keeps working without reaching into `src.frame_compare.core`.
+#### List presets
+
+```python
+from frame_compare import presets
+
+for name, path in presets.list_preset_paths().items():
+    print(name, "→", path)
+```
+
+## Advanced Guides & Reference
 
 ## Advanced Guides & Reference
 

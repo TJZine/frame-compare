@@ -6,11 +6,13 @@ import logging
 import math
 import sys
 import time
+from collections.abc import Mapping as MappingABC
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
+    Any,
     ContextManager,
     Dict,
     List,
@@ -27,8 +29,8 @@ from src.datatypes import AppConfig
 from src.frame_compare import vspreview
 from src.frame_compare.cli_runtime import (
     CLIAppError,
-    _ClipPlan,
-    _ensure_audio_alignment_block,
+    ClipPlan,
+    ensure_audio_alignment_block,
 )
 from src.frame_compare.config_helpers import coerce_config_flag as _coerce_config_flag
 from src.frame_compare.layout_utils import plan_label as _plan_label
@@ -63,6 +65,22 @@ def _fps_to_float(value: tuple[int, int] | None) -> float:
     return float(numerator) / float(denominator)
 
 
+def _str_int_dict_factory() -> dict[str, int]:
+    return {}
+
+
+def _str_float_dict_factory() -> dict[str, float]:
+    return {}
+
+
+def _measurement_dict_factory() -> dict[str, "_AudioMeasurementDetail"]:
+    return {}
+
+
+def _str_list_factory() -> list[str]:
+    return []
+
+
 @dataclass
 class _AudioAlignmentSummary:
     """
@@ -72,18 +90,18 @@ class _AudioAlignmentSummary:
     offsets_path: Path
     reference_name: str
     measurements: Sequence["AlignmentMeasurement"]
-    applied_frames: Dict[str, int]
+    applied_frames: dict[str, int]
     baseline_shift: int
-    statuses: Dict[str, str]
-    reference_plan: _ClipPlan
-    final_adjustments: Dict[str, int]
-    swap_details: Dict[str, str]
-    suggested_frames: Dict[str, int] = field(default_factory=dict)
+    statuses: dict[str, str]
+    reference_plan: ClipPlan
+    final_adjustments: dict[str, int]
+    swap_details: dict[str, str]
+    suggested_frames: dict[str, int] = field(default_factory=_str_int_dict_factory)
     suggestion_mode: bool = False
-    manual_trim_starts: Dict[str, int] = field(default_factory=dict)
-    vspreview_manual_offsets: Dict[str, int] = field(default_factory=dict)
-    vspreview_manual_deltas: Dict[str, int] = field(default_factory=dict)
-    measured_offsets: Dict[str, "_AudioMeasurementDetail"] = field(default_factory=dict)
+    manual_trim_starts: dict[str, int] = field(default_factory=_str_int_dict_factory)
+    vspreview_manual_offsets: dict[str, int] = field(default_factory=_str_int_dict_factory)
+    vspreview_manual_deltas: dict[str, int] = field(default_factory=_str_int_dict_factory)
+    measured_offsets: dict[str, "_AudioMeasurementDetail"] = field(default_factory=_measurement_dict_factory)
 
 
 @dataclass
@@ -106,29 +124,34 @@ class _AudioAlignmentDisplayData:
     Pre-rendered data used to present audio alignment results in the CLI.
     """
 
-    stream_lines: List[str]
+    stream_lines: list[str]
     estimation_line: Optional[str]
-    offset_lines: List[str]
+    offset_lines: list[str]
     offsets_file_line: str
     json_reference_stream: Optional[str]
-    json_target_streams: Dict[str, str]
-    json_offsets_sec: Dict[str, float]
-    json_offsets_frames: Dict[str, int]
-    warnings: List[str]
-    preview_paths: List[str] = field(default_factory=list)
-    inspection_paths: List[str] = field(default_factory=list)
+    json_target_streams: dict[str, str]
+    json_offsets_sec: dict[str, float]
+    json_offsets_frames: dict[str, int]
+    warnings: list[str]
+    preview_paths: list[str] = field(default_factory=_str_list_factory)
+    inspection_paths: list[str] = field(default_factory=_str_list_factory)
     confirmation: Optional[str] = None
-    correlations: Dict[str, float] = field(default_factory=dict)
+    correlations: dict[str, float] = field(default_factory=_str_float_dict_factory)
     threshold: float = 0.0
-    manual_trim_lines: List[str] = field(default_factory=list)
-    measurements: Dict[str, _AudioMeasurementDetail] = field(default_factory=dict)
+    manual_trim_lines: list[str] = field(default_factory=_str_list_factory)
+    measurements: dict[str, _AudioMeasurementDetail] = field(default_factory=_measurement_dict_factory)
+
+
+AudioAlignmentSummary = _AudioAlignmentSummary
+AudioMeasurementDetail = _AudioMeasurementDetail
+AudioAlignmentDisplayData = _AudioAlignmentDisplayData
 
 
 def _resolve_alignment_reference(
-    plans: Sequence[_ClipPlan],
+    plans: Sequence[ClipPlan],
     analyze_path: Path,
     reference_hint: str,
-) -> _ClipPlan:
+) -> ClipPlan:
     """Choose the audio alignment reference plan using optional hint and fallbacks."""
     if not plans:
         raise CLIAppError("No clips available for alignment")
@@ -154,9 +177,11 @@ def _resolve_alignment_reference(
     return plans[0]
 
 
+resolve_alignment_reference = _resolve_alignment_reference
+
 
 def apply_audio_alignment(
-    plans: Sequence[_ClipPlan],
+    plans: Sequence[ClipPlan],
     cfg: AppConfig,
     analyze_path: Path,
     root: Path,
@@ -190,19 +215,17 @@ def apply_audio_alignment(
 
     vspreview_enabled = _coerce_config_flag(audio_cfg.use_vspreview)
 
-    reference_plan: _ClipPlan | None = None
+    reference_plan: ClipPlan | None = None
     if plans:
         reference_plan = _resolve_alignment_reference(plans, analyze_path, audio_cfg.reference)
 
     plan_labels: Dict[Path, str] = {plan.path: _plan_label(plan) for plan in plans}
-    plan_lookup: Dict[str, _ClipPlan] = {plan.path.name: plan for plan in plans}
+    plan_lookup: Dict[str, ClipPlan] = {plan.path.name: plan for plan in plans}
     name_to_label: Dict[str, str] = {plan.path.name: plan_labels[plan.path] for plan in plans}
 
-    existing_entries_cache: tuple[
-        str | None, Dict[str, Dict[str, object]]
-    ] | None = None
+    existing_entries_cache: tuple[str | None, Dict[str, Mapping[str, Any]]] | None = None
 
-    def _load_existing_entries() -> tuple[str | None, Dict[str, Dict[str, object]]]:
+    def _load_existing_entries() -> tuple[str | None, Dict[str, Mapping[str, Any]]]:
         nonlocal existing_entries_cache
         if existing_entries_cache is None:
             try:
@@ -214,14 +237,25 @@ def apply_audio_alignment(
                     f"Failed to read audio offsets file: {exc}",
                     rich_message=f"[red]Failed to read audio offsets file:[/red] {exc}",
                 ) from exc
+            normalized_entries: Dict[str, Mapping[str, Any]] = {}
+            if isinstance(existing_entries_raw, MappingABC):
+                raw_entries = cast(Mapping[Any, Any], existing_entries_raw)
+                for key_obj, value in raw_entries.items():
+                    if not isinstance(value, MappingABC):
+                        continue
+                    entry_mapping = cast(Mapping[Any, Any], value)
+                    normalized_entries[str(key_obj)] = {
+                        str(sub_key): sub_value for sub_key, sub_value in entry_mapping.items()
+                    }
+
             existing_entries_cache = (
                 reference_name,
-                cast(Dict[str, Dict[str, object]], existing_entries_raw),
+                normalized_entries,
             )
         return existing_entries_cache
 
     def _reuse_vspreview_manual_offsets_if_available(
-        reference: _ClipPlan | None,
+        reference: ClipPlan | None,
     ) -> _AudioAlignmentSummary | None:
         if not (vspreview_enabled and reference and plans):
             return None
@@ -236,11 +270,10 @@ def apply_audio_alignment(
         vspreview_reuse: Dict[str, int] = {}
         allowed_keys = {plan.path.name for plan in plans}
         for key, value in existing_entries.items():
-            if not isinstance(value, dict):
-                continue
-            status_obj = value.get("status")
-            note_obj = value.get("note")
-            frames_obj = value.get("frames")
+            entry = value
+            status_obj = entry.get("status")
+            note_obj = entry.get("note")
+            frames_obj = entry.get("frames")
             if not isinstance(status_obj, str) or not isinstance(frames_obj, (int, float)):
                 continue
             if status_obj.strip().lower() != "manual":
@@ -365,7 +398,7 @@ def apply_audio_alignment(
 
     def _estimate_frames_from_seconds(
         measurement: "AlignmentMeasurement",
-        plan_lookup: Mapping[str, _ClipPlan],
+        plan_lookup: Mapping[str, ClipPlan],
     ) -> Optional[int]:
         """Derive a frame delta from the available FPS hints when frames are missing."""
 
@@ -402,8 +435,8 @@ def apply_audio_alignment(
         return None
 
     def _maybe_reuse_cached_offsets(
-        reference: _ClipPlan,
-        candidate_targets: Sequence[_ClipPlan],
+        reference: ClipPlan,
+        candidate_targets: Sequence[ClipPlan],
     ) -> _AudioAlignmentSummary | None:
         if not prompt_reuse_offsets:
             return None
@@ -454,11 +487,12 @@ def apply_audio_alignment(
         reference_entry = existing_entries.get(reference.path.name)
         reference_manual_frames: int | None = None
         reference_manual_seconds: float | None = None
-        if isinstance(reference_entry, Mapping):
-            status_obj = reference_entry.get("status")
+        if reference_entry is not None:
+            entry = reference_entry
+            status_obj = entry.get("status")
             if isinstance(status_obj, str) and status_obj.strip().lower() == "manual":
-                reference_manual_frames = _get_int(reference_entry.get("frames"))
-                reference_manual_seconds = _get_float(reference_entry.get("seconds"))
+                reference_manual_frames = _get_int(entry.get("frames"))
+                reference_manual_seconds = _get_float(entry.get("seconds"))
                 if (
                     reference_manual_seconds is None
                     and reference_manual_frames is not None
@@ -473,7 +507,7 @@ def apply_audio_alignment(
         swap_details: Dict[str, str] = {}
         negative_offsets: Dict[str, bool] = {}
 
-        def _build_measurement(name: str, entry: Mapping[str, object]) -> "AlignmentMeasurement":
+        def _build_measurement(name: str, entry: Mapping[str, Any]) -> "AlignmentMeasurement":
             plan = plan_map[name]
             frames_val = _get_int(entry.get("frames")) if entry else None
             seconds_val = _get_float(entry.get("seconds")) if entry else None
@@ -576,7 +610,7 @@ def apply_audio_alignment(
             reasons: List[str] = []
             if measurement.error:
                 reasons.append(measurement.error)
-            if abs(measurement.offset_seconds) > audio_cfg.max_offset_seconds:
+            if measurement.offset_seconds is not None and abs(measurement.offset_seconds) > audio_cfg.max_offset_seconds:
                 reasons.append(
                     f"offset {measurement.offset_seconds:.3f}s exceeds limit {audio_cfg.max_offset_seconds:.3f}s"
                 )
@@ -747,7 +781,7 @@ def apply_audio_alignment(
 
     forced_streams: set[Path] = set()
 
-    def _match_audio_override(plan: _ClipPlan) -> Optional[int]:
+    def _match_audio_override(plan: ClipPlan) -> Optional[int]:
         """Return override index for *plan* when configured, otherwise ``None``."""
         value = _match_override(plans.index(plan), plan.path, plan.metadata, audio_track_overrides)
         if value is None:
@@ -829,12 +863,12 @@ def apply_audio_alignment(
         best = max(infos, key=_score_candidate)
         target_stream_indices[target.path] = best.index
 
-    def _describe_stream(plan: _ClipPlan, stream_idx: int) -> tuple[str, str]:
+    def _describe_stream(plan: ClipPlan, stream_idx: int) -> tuple[str, str]:
         """
         Builds a human-readable label and a concise descriptor for the chosen audio stream of a clip.
 
         Parameters:
-            plan (_ClipPlan): Clip plan whose path and label are used in the returned label.
+            plan (ClipPlan): Clip plan whose path and label are used in the returned label.
             stream_idx (int): Index of the audio stream to describe.
 
         Returns:
@@ -983,7 +1017,7 @@ def apply_audio_alignment(
                 seconds_value = float(measurement.offset_seconds)
             frames_value = int(measurement.frames) if measurement.frames is not None else None
             correlation_value: Optional[float]
-            if measurement.correlation is None or math.isnan(measurement.correlation):
+            if math.isnan(measurement.correlation):
                 correlation_value = None
             else:
                 correlation_value = float(measurement.correlation)
@@ -1202,6 +1236,8 @@ def apply_audio_alignment(
             existing_keys = {m.file.name for m in measurements}
 
             for measurement in swap_candidates:
+                if measurement.offset_seconds is None:
+                    continue
                 seconds = float(measurement.offset_seconds)
                 seconds_abs = abs(seconds)
                 target_name: str = measurement.file.name
@@ -1256,7 +1292,7 @@ def apply_audio_alignment(
             reasons: List[str] = []
             if measurement.error:
                 reasons.append(measurement.error)
-            if abs(measurement.offset_seconds) > audio_cfg.max_offset_seconds:
+            if measurement.offset_seconds is not None and abs(measurement.offset_seconds) > audio_cfg.max_offset_seconds:
                 reasons.append(
                     f"offset {measurement.offset_seconds:.3f}s exceeds limit {audio_cfg.max_offset_seconds:.3f}s"
                 )
@@ -1406,7 +1442,7 @@ def apply_audio_alignment(
 
 
 def format_alignment_output(
-    plans: Sequence[_ClipPlan],
+    plans: Sequence[ClipPlan],
     summary: _AudioAlignmentSummary | None,
     display: _AudioAlignmentDisplayData | None,
     *,
@@ -1421,9 +1457,9 @@ def format_alignment_output(
     Populate json_tail/audio layout data and optionally launch VSPreview.
     """
 
-    audio_block = _ensure_audio_alignment_block(json_tail)
+    audio_block = ensure_audio_alignment_block(json_tail)
 
-    vspreview_target_plan: _ClipPlan | None = None
+    vspreview_target_plan: ClipPlan | None = None
     vspreview_suggested_frames_value = 0
     vspreview_suggested_seconds_value = 0.0
     if summary is not None:

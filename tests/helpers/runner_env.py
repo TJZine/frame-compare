@@ -213,6 +213,8 @@ def _patch_core_helper(monkeypatch: pytest.MonkeyPatch, attr: str, value: object
         "_prompt_offsets": ("prompt_offsets",),
         "_prompt_vspreview_offsets": ("prompt_offsets",),
         "prompt_offsets": ("_prompt_offsets", "_prompt_vspreview_offsets"),
+        "_confirm_alignment_with_screenshots": ("confirm_alignment_with_screenshots",),
+        "confirm_alignment_with_screenshots": ("_confirm_alignment_with_screenshots",),
     }
     attrs_to_patch = (attr,) + alias_map.get(attr, tuple())
 

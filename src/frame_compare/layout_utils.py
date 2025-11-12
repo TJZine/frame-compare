@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Mapping, Optional
 from rich.markup import escape
 
 if TYPE_CHECKING:  # pragma: no cover
-    from src.frame_compare.cli_runtime import _ClipPlan
+    from src.frame_compare.cli_runtime import ClipPlan
 
 
 def color_text(text: str, style: Optional[str]) -> str:
@@ -33,7 +33,7 @@ def format_kv(
     return f"{color_text(label_text, label_style)}{sep}{color_text(value_text, value_style)}"
 
 
-def plan_label(plan: "_ClipPlan") -> str:
+def plan_label(plan: "ClipPlan") -> str:
     """Determine a user-facing label for a clip plan using metadata fallbacks."""
 
     metadata = plan.metadata
@@ -46,7 +46,7 @@ def plan_label(plan: "_ClipPlan") -> str:
     return plan.path.name
 
 
-def plan_label_parts(plan: "_ClipPlan") -> tuple[str, str]:
+def plan_label_parts(plan: "ClipPlan") -> tuple[str, str]:
     """Return the resolved label and canonical filename for a plan."""
 
     return plan_label(plan), plan.path.name

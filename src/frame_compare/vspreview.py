@@ -36,20 +36,20 @@ from src.frame_compare.preflight import PROJECT_ROOT, resolve_subdir
 if TYPE_CHECKING:  # pragma: no cover
     from src.audio_alignment import AlignmentMeasurement
     from src.frame_compare.alignment_runner import (
-        _AudioAlignmentDisplayData,
-        _AudioAlignmentSummary,
-        _AudioMeasurementDetail,
+        AudioAlignmentDisplayData,
+        AudioAlignmentSummary,
+        AudioMeasurementDetail,
     )
     from src.frame_compare.cli_runtime import (
         AudioAlignmentJSON,
         CliOutputManagerProtocol,
+        ClipPlan,
         JsonTail,
-        _ClipPlan,
     )
 else:  # pragma: no cover - runtime stubs avoid circular import
     CliOutputManagerProtocol = Any  # type: ignore[misc,assignment]
     JsonTail = Dict[str, Any]  # type: ignore[misc,assignment]
-    _ClipPlan = Any  # type: ignore[misc,assignment]
+    ClipPlan = Any  # type: ignore[misc,assignment]
     AlignmentMeasurement = Any  # type: ignore[misc,assignment]
     AudioAlignmentJSON = Dict[str, Any]  # type: ignore[misc,assignment]
 
@@ -76,20 +76,17 @@ def _fps_to_float(value: tuple[int, int] | None) -> float:
 
 
 def _coerce_str_mapping(mapping: Mapping[str, object] | MappingABC[str, object] | None) -> dict[str, object]:
-    from src.frame_compare.cli_runtime import _coerce_str_mapping as _impl
+    from src.frame_compare.cli_runtime import coerce_str_mapping as _impl
 
     return _impl(mapping)
 
 
 def _ensure_audio_alignment_block(json_tail: JsonTail) -> "AudioAlignmentJSON":
     from src.frame_compare.cli_runtime import (
-        AudioAlignmentJSON,
-    )
-    from src.frame_compare.cli_runtime import (
-        _ensure_audio_alignment_block as _impl,
+        ensure_audio_alignment_block as _impl,
     )
 
-    return cast(AudioAlignmentJSON, _impl(json_tail))
+    return _impl(json_tail)
 
 
 def format_manual_command(script_path: Path) -> str:
@@ -126,50 +123,9 @@ def _color_config_literal(color_cfg: ColorConfig) -> str:
     return f"ColorConfig(\n    {items}\n)"
 
 
-def _format_overlay_text(
-    label: str,
-    suggested_frames: int,
-    suggested_seconds: float,
-    applied_frames: int,
-) -> str:
-    applied_label = "baseline" if applied_frames == 0 else "seeded"
-    applied_value = "0" if applied_frames == 0 else f"{applied_frames:+d}"
-    seconds_value = f"{suggested_seconds:.3f}"
-    if seconds_value == "-0.000":
-        seconds_value = "0.000"
-    suggested_value = f"{suggested_frames:+d}"
-    return (
-        f"{label}: {suggested_value}f (~{seconds_value}s) • "
-        f"Preview applied: {applied_value}f ({applied_label}) • "
-        "(+ trims target / - pads reference)"
-    )
-
-
-def _maybe_apply_overlay(
-    clip: Any,
-    label: str,
-    suggested_frames: int,
-    suggested_seconds: float,
-    applied_frames: int,
-    *,
-    enabled: bool,
-) -> Any:
-    if not enabled:
-        return clip
-    try:
-        message = _format_overlay_text(label, suggested_frames, suggested_seconds, applied_frames)
-    except Exception:
-        message = "Suggested offset unavailable"
-    try:
-        return clip.text.Text(message, alignment=7)
-    except Exception as exc:  # pragma: no cover - VS API specific
-        logger.warning("Failed to draw overlay text for preview: %s", exc)
-        return clip
-
-
 def render_script(
-    plans: Sequence[_ClipPlan],
-    summary: "_AudioAlignmentSummary",
+    plans: Sequence[ClipPlan],
+    summary: "AudioAlignmentSummary",
     cfg: AppConfig,
     root: Path,
 ) -> str:
@@ -496,8 +452,8 @@ def persist_script(script_text: str, root: Path) -> Path:
 
 
 def write_script(
-    plans: Sequence[_ClipPlan],
-    summary: "_AudioAlignmentSummary",
+    plans: Sequence[ClipPlan],
+    summary: "AudioAlignmentSummary",
     cfg: AppConfig,
     root: Path,
 ) -> Path:
@@ -508,10 +464,10 @@ def write_script(
 
 
 def prompt_offsets(
-    plans: Sequence[_ClipPlan],
-    summary: "_AudioAlignmentSummary",
+    plans: Sequence[ClipPlan],
+    summary: "AudioAlignmentSummary",
     reporter: CliOutputManagerProtocol,
-    display: Optional["_AudioAlignmentDisplayData"],
+    display: Optional["AudioAlignmentDisplayData"],
 ) -> dict[str, int] | None:
     """Prompt the user for manual frame deltas after VSPreview inspection."""
 
@@ -560,19 +516,19 @@ def prompt_offsets(
     return offsets
 
 
-def _measurement_detail_cls() -> type["_AudioMeasurementDetail"]:
+def _measurement_detail_cls() -> type["AudioMeasurementDetail"]:
     from src.frame_compare import alignment_runner as alignment_runner_module
 
-    return alignment_runner_module._AudioMeasurementDetail
+    return alignment_runner_module.AudioMeasurementDetail
 
 
 def apply_manual_offsets(
-    plans: Sequence[_ClipPlan],
-    summary: "_AudioAlignmentSummary",
+    plans: Sequence[ClipPlan],
+    summary: "AudioAlignmentSummary",
     deltas: Mapping[str, int],
     reporter: CliOutputManagerProtocol,
     json_tail: JsonTail,
-    display: "_AudioAlignmentDisplayData | None",
+    display: "AudioAlignmentDisplayData | None",
 ) -> None:
     reference_plan = summary.reference_plan
     reference_name = reference_plan.path.name
@@ -590,7 +546,7 @@ def apply_manual_offsets(
     manual_lines: List[str] = []
 
     desired_map: Dict[str, int] = {}
-    target_adjustments: List[Tuple[_ClipPlan, int, int]] = []
+    target_adjustments: List[Tuple[ClipPlan, int, int]] = []
 
     unknown_deltas = sorted(set(deltas.keys()) - set(baseline_map.keys()))
     if unknown_deltas:
@@ -660,8 +616,6 @@ def apply_manual_offsets(
         reporter.line(ref_line)
 
     if display is not None:
-        if display.manual_trim_lines is None:
-            display.manual_trim_lines = []
         display.manual_trim_lines.extend(manual_lines)
         display.offset_lines = ["Audio offsets: VSPreview manual offsets applied"]
         display.offset_lines.extend(display.manual_trim_lines)
@@ -673,7 +627,7 @@ def apply_manual_offsets(
         )
 
     measurement_order = [plan.path.name for plan in plans]
-    plan_lookup: Dict[str, _ClipPlan] = {plan.path.name: plan for plan in plans}
+    plan_lookup: Dict[str, ClipPlan] = {plan.path.name: plan for plan in plans}
 
     measurements: List["AlignmentMeasurement"] = []
     existing_override_map: Dict[str, Dict[str, object]] = {}
@@ -714,18 +668,12 @@ def apply_manual_offsets(
     summary.vspreview_manual_deltas = dict(delta_map)
     summary.measurements = tuple(measurements)
 
-    existing_details = (
-        summary.measured_offsets if isinstance(summary.measured_offsets, dict) else {}
-    )
+    existing_details = summary.measured_offsets
     detail_cls = _measurement_detail_cls()
-    detail_map: Dict[str, "_AudioMeasurementDetail"] = {}
+    detail_map: Dict[str, "AudioMeasurementDetail"] = {}
     for measurement in measurements:
         clip_name = measurement.file.name
-        prev_detail = (
-            existing_details.get(clip_name)
-            if isinstance(existing_details, dict)
-            else None
-        )
+        prev_detail = existing_details.get(clip_name)
         plan = plan_lookup.get(clip_name)
         label = (
             prev_detail.label
@@ -735,9 +683,7 @@ def apply_manual_offsets(
         descriptor = prev_detail.stream if prev_detail else ""
         seconds_value = float(measurement.offset_seconds) if measurement.offset_seconds is not None else None
         frames_value = int(measurement.frames) if measurement.frames is not None else None
-        correlation_value = (
-            float(measurement.correlation) if measurement.correlation is not None else None
-        )
+        correlation_value = float(measurement.correlation)
         status_text = summary.statuses.get(clip_name, "manual")
         note_text = notes_map.get(clip_name)
         detail_map[clip_name] = detail_cls(
@@ -851,11 +797,17 @@ def _activate_missing_panel(
 ) -> None:
     manual_command = command_data.manual_command
     reason = command_data.missing_reason or "vspreview-missing"
-    vspreview_block = _coerce_str_mapping(reporter.values.get("vspreview"))
+    vspreview_values_obj = reporter.values.get("vspreview")
+    vspreview_mapping_input = (
+        cast(Mapping[str, object], vspreview_values_obj)
+        if isinstance(vspreview_values_obj, MappingABC)
+        else None
+    )
+    vspreview_block = _coerce_str_mapping(vspreview_mapping_input)
     missing_block_obj = vspreview_block.get("missing")
     missing_block: dict[str, object]
     if isinstance(missing_block_obj, MappingABC):
-        missing_block = _coerce_str_mapping(missing_block_obj)
+        missing_block = _coerce_str_mapping(cast(Mapping[str, object], missing_block_obj))
     else:
         missing_block = {
             "windows_install": VSPREVIEW_WINDOWS_INSTALL,
@@ -900,9 +852,9 @@ def _report_missing(
 
 
 def launch(
-    plans: Sequence[_ClipPlan],
-    summary: Optional["_AudioAlignmentSummary"],
-    display: Optional["_AudioAlignmentDisplayData"],
+    plans: Sequence[ClipPlan],
+    summary: Optional["AudioAlignmentSummary"],
+    display: Optional["AudioAlignmentDisplayData"],
     cfg: AppConfig,
     root: Path,
     reporter: CliOutputManagerProtocol,
@@ -935,13 +887,19 @@ def launch(
     )
 
     manual_command = format_manual_command(script_path)
-    vspreview_block = _coerce_str_mapping(reporter.values.get("vspreview"))
+    vspreview_values_obj = reporter.values.get("vspreview")
+    vspreview_mapping = (
+        cast(Mapping[str, object], vspreview_values_obj)
+        if isinstance(vspreview_values_obj, MappingABC)
+        else None
+    )
+    vspreview_block = _coerce_str_mapping(vspreview_mapping)
     vspreview_block["script_path"] = str(script_path)
     vspreview_block["script_command"] = manual_command
     missing_block_obj = vspreview_block.get("missing")
     missing_block: dict[str, object]
     if isinstance(missing_block_obj, MappingABC):
-        missing_block = _coerce_str_mapping(missing_block_obj)
+        missing_block = _coerce_str_mapping(cast(Mapping[str, object], missing_block_obj))
     else:
         missing_block = {
             "windows_install": VSPREVIEW_WINDOWS_INSTALL,

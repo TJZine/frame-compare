@@ -13,18 +13,18 @@ import click
 
 from src.datatypes import AppConfig
 from src.frame_compare.cli_runtime import (
+    AudioAlignmentDisplayData,
+    AudioAlignmentSummary,
     CLIAppError,
     CliOutputManagerProtocol,
-    _AudioAlignmentDisplayData,
-    _AudioAlignmentSummary,
-    _ClipPlan,
+    ClipPlan,
 )
 from src.screenshot import ScreenshotError, generate_screenshots
 from src.vs_core import ClipProcessError
 
-from .preflight import _resolve_workspace_subdir
+from .preflight import resolve_subdir
 
-__all__ = ["_confirm_alignment_with_screenshots"]
+__all__ = ["_confirm_alignment_with_screenshots", "confirm_alignment_with_screenshots"]
 
 
 def _pick_preview_frames(clip: object, count: int, seed: int) -> List[int]:
@@ -71,12 +71,12 @@ def _sample_random_frames(clip: object, count: int, seed: int, exclude: Sequence
 
 
 def _confirm_alignment_with_screenshots(
-    plans: Sequence[_ClipPlan],
-    summary: _AudioAlignmentSummary | None,
+    plans: Sequence[ClipPlan],
+    summary: AudioAlignmentSummary | None,
     cfg: AppConfig,
     root: Path,
     reporter: CliOutputManagerProtocol,
-    display: _AudioAlignmentDisplayData | None,
+    display: AudioAlignmentDisplayData | None,
 ) -> None:
     """
     Prompt the user to confirm audio alignment by generating preview screenshots.
@@ -102,7 +102,7 @@ def _confirm_alignment_with_screenshots(
         return
 
     timestamp = _dt.now().strftime("%Y%m%d-%H%M%S")
-    base_dir = _resolve_workspace_subdir(root, cfg.screenshots.directory_name, purpose="screenshots.directory_name")
+    base_dir = resolve_subdir(root, cfg.screenshots.directory_name, purpose="screenshots.directory_name")
     metadata = summary.reference_plan.metadata
     name_candidates = [
         metadata.get("label"),
@@ -200,6 +200,8 @@ def _confirm_alignment_with_screenshots(
             f"Alignment inspection failed: {exc}",
             rich_message=f"[red]Alignment inspection failed:[/red] {exc}",
         ) from exc
+
+
     if extra_paths:
         reporter.line(
             f"Additional inspection frames saved: {', '.join(str(path) for path in extra_paths)}"
@@ -225,3 +227,6 @@ def _confirm_alignment_with_screenshots(
             f"Edit {summary.offsets_path} and rerun."
         ),
     )
+
+
+confirm_alignment_with_screenshots = _confirm_alignment_with_screenshots

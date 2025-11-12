@@ -7,16 +7,16 @@ from typing import Optional, Sequence
 
 from src.analysis import FrameMetricsCacheInfo
 from src.datatypes import AppConfig
-from src.frame_compare.cli_runtime import _ClipPlan
+from src.frame_compare.cli_runtime import ClipPlan
 
-from .preflight import _resolve_workspace_subdir
+from .preflight import resolve_subdir
 
-__all__ = ["_build_cache_info"]
+__all__ = ["build_cache_info", "_build_cache_info"]
 
 
 def _build_cache_info(
     root: Path,
-    plans: Sequence[_ClipPlan],
+    plans: Sequence[ClipPlan],
     cfg: AppConfig,
     analyze_index: int,
 ) -> Optional[FrameMetricsCacheInfo]:
@@ -34,7 +34,7 @@ def _build_cache_info(
     if fps_den <= 0:
         fps_den = 1
 
-    cache_path = _resolve_workspace_subdir(
+    cache_path = resolve_subdir(
         root,
         cfg.analysis.frame_data_filename,
         purpose="analysis.frame_data_filename",
@@ -50,3 +50,13 @@ def _build_cache_info(
         fps_den=fps_den,
     )
 
+
+def build_cache_info(
+    root: Path,
+    plans: Sequence[ClipPlan],
+    cfg: AppConfig,
+    analyze_index: int,
+) -> Optional[FrameMetricsCacheInfo]:
+    """Public wrapper around the cache metadata builder."""
+
+    return _build_cache_info(root, plans, cfg, analyze_index)

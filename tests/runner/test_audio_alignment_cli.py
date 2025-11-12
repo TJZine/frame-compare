@@ -763,7 +763,8 @@ def test_launch_vspreview_baseline_mode_persists_manual_offsets(
 
     monkeypatch.setattr(frame_compare.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(frame_compare.shutil, "which", lambda _: None)
-    monkeypatch.setattr(core_module.importlib.util, "find_spec", lambda name: object())
+    importlib_module = cast(Any, core_module.importlib)
+    monkeypatch.setattr(importlib_module.util, "find_spec", lambda name: object())
     monkeypatch.setattr(
         frame_compare.subprocess,
         "run",
@@ -2186,6 +2187,8 @@ def test_run_cli_calls_alignment_confirmation(
             `console` attribute whose `print` method is a no-op to suppress output during tests.
             """
             self.console = types.SimpleNamespace(print=lambda *args, **kwargs: None)
+            self.flags: dict[str, object] = {}
+            self.values: dict[str, object] = {}
 
         def update_values(self, *_args, **_kwargs):
             """

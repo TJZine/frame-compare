@@ -14,8 +14,8 @@ import click
 
 from .cli_runtime import CLIAppError
 from .preflight import (
-    _abort_if_site_packages,
-    _is_writable_path,
+    abort_if_site_packages,
+    is_writable_path,
     resolve_subdir,
     resolve_workspace_root,
 )
@@ -43,7 +43,7 @@ def prompt_workspace_root(default_root: Path) -> Path:
         except CLIAppError as exc:
             click.echo(f"Error: {exc}")
             continue
-        if not _is_writable_path(candidate, for_file=False):
+        if not is_writable_path(candidate, for_file=False):
             click.echo(f"Workspace root '{candidate}' is not writable; choose another directory.")
             continue
         return candidate
@@ -157,10 +157,10 @@ def resolve_wizard_paths(root_override: str | None, config_override: str | None)
     else:
         config_dir = resolve_subdir(root, "config", purpose="config directory")
         config_path = config_dir / "config.toml"
-    _abort_if_site_packages({"workspace": root, "config": config_path})
-    if not _is_writable_path(root, for_file=False):
+    abort_if_site_packages({"workspace": root, "config": config_path})
+    if not is_writable_path(root, for_file=False):
         raise click.ClickException(f"Workspace root '{root}' is not writable.")
-    if not _is_writable_path(config_path, for_file=True):
+    if not is_writable_path(config_path, for_file=True):
         raise click.ClickException(
             f"Config path '{config_path}' is not writable; pass --config to select another location."
         )

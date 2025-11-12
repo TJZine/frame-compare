@@ -20,7 +20,6 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, cast
 from rich.console import Console
 from rich.markup import escape
 
-import src.frame_compare.alignment_preview as alignment_preview_utils
 import src.frame_compare.alignment_runner as alignment_runner
 import src.frame_compare.cache as cache_utils
 import src.frame_compare.core as core
@@ -53,6 +52,7 @@ from .cli_runtime import (
     CLIAppError,
     CliOutputManager,
     CliOutputManagerProtocol,
+    ClipPlan,
     ClipRecord,
     JsonTail,
     NullCliOutputManager,
@@ -60,9 +60,8 @@ from .cli_runtime import (
     SlowpicsTitleInputs,
     TrimClipEntry,
     TrimSummary,
-    _ClipPlan,
-    _coerce_str_mapping,
-    _ensure_slowpics_block,
+    coerce_str_mapping,
+    ensure_slowpics_block,
 )
 from .layout_utils import (
     color_text as _color_text,
@@ -164,7 +163,7 @@ def run(request: RunRequest) -> RunResult:
     )
     cfg = preflight.config
     if tonemap_overrides:
-        core._validate_tonemap_overrides(tonemap_overrides)
+        core.validate_tonemap_overrides(tonemap_overrides)
         color_cfg = getattr(cfg, "color", None)
         if color_cfg is not None:
             if "preset" in tonemap_overrides:
@@ -223,7 +222,7 @@ def run(request: RunRequest) -> RunResult:
             rich_message=f"[red]Input directory not found:[/red] {root}",
         )
 
-    out_dir = preflight_utils._resolve_workspace_subdir(
+    out_dir = preflight_utils.resolve_subdir(
         root,
         cfg.screenshots.directory_name,
         purpose="screenshots.directory_name",
@@ -247,17 +246,17 @@ def run(request: RunRequest) -> RunResult:
             created_out_dir_path = out_dir.resolve()
         except OSError:
             created_out_dir_path = out_dir
-    analysis_cache_path = preflight_utils._resolve_workspace_subdir(
+    analysis_cache_path = preflight_utils.resolve_subdir(
         root,
         cfg.analysis.frame_data_filename,
         purpose="analysis.frame_data_filename",
     )
-    offsets_path = preflight_utils._resolve_workspace_subdir(
+    offsets_path = preflight_utils.resolve_subdir(
         root,
         cfg.audio_alignment.offsets_filename,
         purpose="audio_alignment.offsets_filename",
     )
-    preflight_utils._abort_if_site_packages(
+    preflight_utils.abort_if_site_packages(
         {
             "config": config_location,
             "workspace_root": workspace_root,
@@ -487,7 +486,7 @@ def run(request: RunRequest) -> RunResult:
     )
 
     try:
-        files = media_utils._discover_media(root)
+        files = media_utils.discover_media(root)
     except OSError as exc:
         raise CLIAppError(
             f"Failed to list input directory: {exc}",
@@ -587,7 +586,7 @@ def run(request: RunRequest) -> RunResult:
     # destination title, while the suffix is only appended when we fall back to the resolved
     # base title (ResolvedTitle + optional Year). This mirrors the README contract.
     if collection_template:
-        rendered_collection = core._render_collection_name(collection_template, tmdb_context).strip()
+        rendered_collection = core.render_collection_name(collection_template, tmdb_context).strip()
         final_collection_name = rendered_collection or "Frame Comparison"
     else:
         derived_title = resolved_title_value or metadata_title or files[0].stem
@@ -728,7 +727,7 @@ def run(request: RunRequest) -> RunResult:
         collected_warnings.append(message)
 
     plans = planner_utils.build_plans(files, metadata, cfg)
-    analyze_path = core._pick_analyze_file(files, metadata, cfg.analysis.analyze_clip, cache_dir=root)
+    analyze_path = core.pick_analyze_file(files, metadata, cfg.analysis.analyze_clip, cache_dir=root)
 
     alignment_summary, alignment_display = alignment_runner.apply_audio_alignment(
         plans,
@@ -756,7 +755,7 @@ def run(request: RunRequest) -> RunResult:
         and cfg.audio_alignment.enable
         and not alignment_summary.suggestion_mode
     ):
-        alignment_preview_utils._confirm_alignment_with_screenshots(
+        core.confirm_alignment_with_screenshots(
             plans,
             alignment_summary,
             cfg,
@@ -845,7 +844,7 @@ def run(request: RunRequest) -> RunResult:
     selection_specs, frame_window, windows_collapsed = selection_utils.resolve_selection_windows(
         plans, cfg.analysis
     )
-    analyze_fps_num, analyze_fps_den = plans[analyze_index].effective_fps or core._extract_clip_fps(
+    analyze_fps_num, analyze_fps_den = plans[analyze_index].effective_fps or selection_utils.extract_clip_fps(
         analyze_clip
     )
     analyze_fps = analyze_fps_num / analyze_fps_den if analyze_fps_den else 0.0
@@ -878,7 +877,7 @@ def run(request: RunRequest) -> RunResult:
         message = "Ignore lead/trail settings did not overlap across all sources; using fallback range."
         collected_warnings.append(message)
 
-    cache_info = cache_utils._build_cache_info(root, plans, cfg, analyze_index)
+    cache_info = cache_utils.build_cache_info(root, plans, cfg, analyze_index)
 
     cache_filename = cfg.analysis.frame_data_filename
     cache_status = "disabled"
@@ -1002,7 +1001,7 @@ def run(request: RunRequest) -> RunResult:
     elif clip_records:
         reference_label = clip_records[0]["label"]
 
-    vspreview_target_plan: _ClipPlan | None = None
+    vspreview_target_plan: ClipPlan | None = None
     vspreview_suggested_frames_value = 0
     vspreview_suggested_seconds_value = 0.0
     if alignment_summary is not None:
@@ -1014,8 +1013,7 @@ def run(request: RunRequest) -> RunResult:
             vspreview_suggested_frames_value = int(
                 alignment_summary.suggested_frames.get(clip_key, 0)
             )
-            measured_offsets = alignment_summary.measured_offsets
-            detail = measured_offsets.get(clip_key) if isinstance(measured_offsets, dict) else None
+            detail = alignment_summary.measured_offsets.get(clip_key)
             if detail and detail.offset_seconds is not None:
                 vspreview_suggested_seconds_value = float(detail.offset_seconds)
             else:
@@ -1034,8 +1032,8 @@ def run(request: RunRequest) -> RunResult:
     elif len(clip_records) > 1:
         target_label = clip_records[1]["label"]
 
-    vspreview_block = _coerce_str_mapping(layout_data.get("vspreview"))
-    clips_block = _coerce_str_mapping(vspreview_block.get("clips"))
+    vspreview_block = coerce_str_mapping(layout_data.get("vspreview"))
+    clips_block = coerce_str_mapping(vspreview_block.get("clips"))
     clips_block["ref"] = {"label": reference_label}
     clips_block["tgt"] = {"label": target_label}
     vspreview_block["clips"] = clips_block
@@ -1045,10 +1043,10 @@ def run(request: RunRequest) -> RunResult:
     vspreview_block["suggested_seconds"] = vspreview_suggested_seconds_value
     existing_vspreview_obj = reporter.values.get("vspreview")
     if isinstance(existing_vspreview_obj, MappingABC):
-        existing_vspreview = _coerce_str_mapping(existing_vspreview_obj)
-        missing_existing_block = _coerce_str_mapping(existing_vspreview.get("missing"))
+        existing_vspreview = coerce_str_mapping(cast(Mapping[str, object], existing_vspreview_obj))
+        missing_existing_block = coerce_str_mapping(existing_vspreview.get("missing"))
         if missing_existing_block:
-            missing_layout_block = _coerce_str_mapping(vspreview_block.get("missing"))
+            missing_layout_block = coerce_str_mapping(vspreview_block.get("missing"))
             merged_missing_block = missing_layout_block.copy()
             merged_missing_block.update(missing_existing_block)
             vspreview_block["missing"] = merged_missing_block
@@ -1115,13 +1113,10 @@ def run(request: RunRequest) -> RunResult:
         json_tail["audio_alignment"]["confirmed"] = confirmation_value
     audio_alignment_view = copy.deepcopy(json_tail["audio_alignment"])
     audio_alignment_layout = cast(dict[str, object], audio_alignment_view)
-    offsets_sec_map_obj = _coerce_str_mapping(audio_alignment_layout.get("offsets_sec"))
-    offsets_frames_map_obj = _coerce_str_mapping(audio_alignment_layout.get("offsets_frames"))
-    correlations_attr: object = (
-        alignment_display.correlations if alignment_display else {}
-    )
-    if isinstance(correlations_attr, MappingABC):
-        correlations_map = dict(cast(Mapping[str, object], correlations_attr))
+    offsets_sec_map_obj = coerce_str_mapping(audio_alignment_layout.get("offsets_sec"))
+    offsets_frames_map_obj = coerce_str_mapping(audio_alignment_layout.get("offsets_frames"))
+    if alignment_display is not None:
+        correlations_map: dict[str, float] = dict(alignment_display.correlations)
     else:
         correlations_map = {}
     primary_label: str | None = None
@@ -1200,7 +1195,8 @@ def run(request: RunRequest) -> RunResult:
                     tuple[list[int], dict[int, str]], result
                 )
                 return frames_only, categories, {}
-            frames_only = list(result)
+            frames_iter = cast(Iterable[int], result)
+            frames_only = list(frames_iter)
             return frames_only, {frame: "Auto" for frame in frames_only}, {}
         frames_only = list(result)
         return frames_only, {frame: "Auto" for frame in frames_only}, {}
@@ -1293,7 +1289,7 @@ def run(request: RunRequest) -> RunResult:
             selection_details=selection_details,
         )
     if not cfg.analysis.save_frames_data:
-        compframes_path = preflight_utils._resolve_workspace_subdir(
+        compframes_path = preflight_utils.resolve_subdir(
             root,
             cfg.analysis.frame_data_filename,
             purpose="analysis.frame_data_filename",
@@ -1331,11 +1327,12 @@ def run(request: RunRequest) -> RunResult:
 
     preview_rule: dict[str, Any] = {}
     layout_obj = getattr(reporter, "layout", None)
-    folding_rules = getattr(layout_obj, "folding", None)
-    if isinstance(folding_rules, Mapping) and "frames_preview" in folding_rules:
-        candidate = folding_rules["frames_preview"]
-        if isinstance(candidate, Mapping):
-            preview_rule = dict(cast(Mapping[str, Any], candidate))
+    folding_rules_obj = getattr(layout_obj, "folding", None)
+    if isinstance(folding_rules_obj, Mapping):
+        folding_rules_map = cast(Mapping[str, object], folding_rules_obj)
+        frames_preview_obj = folding_rules_map.get("frames_preview")
+        if isinstance(frames_preview_obj, Mapping):
+            preview_rule = dict(cast(Mapping[str, Any], frames_preview_obj))
     head_raw: Any = preview_rule["head"] if "head" in preview_rule else None
     tail_raw: Any = preview_rule["tail"] if "tail" in preview_rule else None
     when_raw: Any = preview_rule["when"] if "when" in preview_rule else None
@@ -1643,31 +1640,38 @@ def run(request: RunRequest) -> RunResult:
     verify_threshold = float(cfg.color.verify_luma_threshold)
     if verification_records:
         max_entry = max(verification_records, key=lambda item: item["maximum"])
-        verify_summary = {
-            "count": len(verification_records),
-            "threshold": verify_threshold,
-            "delta": {
-                "max": float(max_entry["maximum"]),
-                "average": float(max_entry["average"]),
-                "frame": int(max_entry["frame"]),
-                "file": str(max_entry["file"]),
-                "auto_selected": bool(max_entry["auto_selected"]),
-            },
-            "entries": verification_records,
+        delta_summary: dict[str, object] = {
+            "max": float(max_entry["maximum"]),
+            "average": float(max_entry["average"]),
+            "frame": int(max_entry["frame"]),
+            "file": str(max_entry["file"]),
+            "auto_selected": bool(max_entry["auto_selected"]),
         }
+        verify_summary = cast(
+            dict[str, object],
+            {
+                "count": len(verification_records),
+                "threshold": verify_threshold,
+                "delta": delta_summary,
+                "entries": [dict(entry) for entry in verification_records],
+            },
+        )
     else:
-        verify_summary = {
-            "count": 0,
-            "threshold": verify_threshold,
-            "delta": {
-                "max": None,
-                "average": None,
-                "frame": None,
-                "file": None,
-                "auto_selected": None,
+        verify_summary = cast(
+            dict[str, object],
+            {
+                "count": 0,
+                "threshold": verify_threshold,
+                "delta": {
+                    "max": None,
+                    "average": None,
+                    "frame": None,
+                    "file": None,
+                    "auto_selected": None,
+                },
+                "entries": [],
             },
-            "entries": [],
-        }
+        )
 
     json_tail["verify"] = verify_summary
     layout_data["verify"] = verify_summary
@@ -1876,7 +1880,7 @@ def run(request: RunRequest) -> RunResult:
             ) from exc
 
     if slowpics_url:
-        slowpics_block = _ensure_slowpics_block(json_tail, cfg)
+        slowpics_block = ensure_slowpics_block(json_tail, cfg)
         slowpics_block["url"] = slowpics_url
         if cfg.slowpics.create_url_shortcut:
             shortcut_filename = build_shortcut_filename(
@@ -1887,22 +1891,20 @@ def run(request: RunRequest) -> RunResult:
             slowpics_block["shortcut_path"] = None
 
     report_index_path: Optional[Path] = None
-    report_block_existing = json_tail.get("report")
     report_defaults: ReportJSON = {
         "enabled": report_enabled,
         "path": None,
         "output_dir": cfg.report.output_dir,
         "open_after_generate": bool(getattr(cfg.report, "open_after_generate", True)),
     }
-    if isinstance(report_block_existing, dict):
-        report_block = cast(ReportJSON, report_block_existing)
-        report_block.update(report_defaults)
-    else:
-        report_block = cast(ReportJSON, report_defaults.copy())
-        json_tail["report"] = report_block
+    report_block = json_tail.setdefault(
+        "report",
+        cast(ReportJSON, report_defaults.copy()),
+    )
+    report_block.update(report_defaults)
     if report_enabled:
         try:
-            report_dir = preflight_utils._resolve_workspace_subdir(
+            report_dir = preflight_utils.resolve_subdir(
                 root,
                 cfg.report.output_dir,
                 purpose="report.output_dir",
@@ -1999,7 +2001,7 @@ def run(request: RunRequest) -> RunResult:
     layout_sections: list[dict[str, object]] = []
     for raw_section in raw_layout_sections:
         if isinstance(raw_section, Mapping):
-            layout_sections.append(_coerce_str_mapping(raw_section))
+            layout_sections.append(coerce_str_mapping(cast(Mapping[str, object], raw_section)))
 
     summary_lines: List[str] = []
     summary_section: dict[str, object] | None = None
@@ -2008,13 +2010,14 @@ def run(request: RunRequest) -> RunResult:
             summary_section = section_map
             break
     if summary_section is not None:
-        items = summary_section.get("items", [])
+        items_obj = summary_section.get("items", [])
         renderer = getattr(reporter, "renderer", None)
         render_fn = getattr(renderer, "render_template", None)
-        if isinstance(items, list):
-            for item in items:
-                if not isinstance(item, str):
+        if isinstance(items_obj, list):
+            for entry in cast(list[object], items_obj):
+                if not isinstance(entry, str):
                     continue
+                item = entry
                 if callable(render_fn):
                     rendered = render_fn(item, reporter.values, reporter.flags)
                 else:
@@ -2041,8 +2044,11 @@ def run(request: RunRequest) -> RunResult:
         if section_map.get("id") == "warnings":
             warnings_section = section_map
             break
-    fold_config_obj = warnings_section.get("fold_labels", {}) if warnings_section is not None else {}
-    fold_config = _coerce_str_mapping(fold_config_obj)
+    fold_config_source = warnings_section.get("fold_labels") if warnings_section is not None else None
+    if isinstance(fold_config_source, Mapping):
+        fold_config = coerce_str_mapping(cast(Mapping[str, object], fold_config_source))
+    else:
+        fold_config = {}
     fold_head = fold_config.get("head")
     fold_tail = fold_config.get("tail")
     fold_when = fold_config.get("when")

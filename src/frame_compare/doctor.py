@@ -7,11 +7,11 @@ import json
 import shutil
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Final, Literal, TypedDict
+from typing import Any, Final, Literal, TypedDict, cast
 
 import click
 
-from src.frame_compare.preflight import _is_writable_path
+from src.frame_compare.preflight import is_writable_path
 
 DoctorStatus = Literal["pass", "fail", "warn"]
 
@@ -35,13 +35,17 @@ _DOCTOR_STATUS_ICONS: Final[dict[DoctorStatus, str]] = {
 def _get_config_value(mapping: Mapping[str, Any], path: Sequence[str], default: Any = None) -> Any:
     """Return a nested configuration value from *mapping* using ``path`` segments."""
 
-    current: Any = mapping
+    sentinel = object()
+    current_value: Any = mapping
     for segment in path:
-        if isinstance(current, Mapping) and segment in current:
-            current = current[segment]
-        else:
+        if not isinstance(current_value, Mapping):
             return default
-    return current
+        current_mapping = cast(Mapping[str, Any], current_value)
+        next_value = current_mapping.get(segment, sentinel)
+        if next_value is sentinel:
+            return default
+        current_value = next_value
+    return current_value
 
 
 def collect_checks(
@@ -73,7 +77,7 @@ def collect_checks(
 
     checks: list[DoctorCheck] = []
 
-    config_writable = _is_writable_path(config_path, for_file=True)
+    config_writable = is_writable_path(config_path, for_file=True)
     config_label = "Config path writable"
     if root_issue:
         config_status: DoctorStatus = "fail"

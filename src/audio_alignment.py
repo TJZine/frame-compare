@@ -68,7 +68,7 @@ class AlignmentMeasurement:
     """Measurement details for a clip relative to the chosen reference."""
 
     file: Path
-    offset_seconds: float
+    offset_seconds: Optional[float]
     frames: Optional[int]
     correlation: float
     reference_fps: Optional[float]

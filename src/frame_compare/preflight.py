@@ -59,8 +59,11 @@ __all__ = [
     "_path_contains_site_packages",
     "_is_writable_path",
     "_abort_if_site_packages",
+    "is_writable_path",
+    "abort_if_site_packages",
     "_seed_default_config",
     "_fresh_app_config",
+    "fresh_app_config",
 ]
 
 
@@ -171,6 +174,9 @@ def _is_writable_path(path: Path, *, for_file: bool) -> bool:
     return os.access(probe, os.W_OK)
 
 
+is_writable_path = _is_writable_path
+
+
 def _abort_if_site_packages(path_map: Mapping[str, Path]) -> None:
     """Abort execution when any mapped path falls under site/dist-packages."""
 
@@ -186,6 +192,9 @@ def _abort_if_site_packages(path_map: Mapping[str, Path]) -> None:
                 code=2,
                 rich_message=f"[red]{escape(message)}[/red]",
             )
+
+
+abort_if_site_packages = _abort_if_site_packages
 
 
 @dataclass
@@ -284,6 +293,9 @@ def _fresh_app_config() -> AppConfig:
         audio_alignment=AudioAlignmentConfig(),
         report=ReportConfig(),
     )
+
+
+fresh_app_config = _fresh_app_config
 
 
 def prepare_preflight(

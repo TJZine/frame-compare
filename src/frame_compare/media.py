@@ -39,7 +39,7 @@ SUPPORTED_EXTS: Final[tuple[str, ...]] = (
     ".av1",
 )
 
-__all__ = ["SUPPORTED_EXTS", "_discover_media"]
+__all__ = ["SUPPORTED_EXTS", "discover_media", "_discover_media"]
 
 
 def _discover_media(root: Path) -> List[Path]:
@@ -47,3 +47,8 @@ def _discover_media(root: Path) -> List[Path]:
 
     return [p for p in os_sorted(root.iterdir()) if p.suffix.lower() in SUPPORTED_EXTS]
 
+
+def discover_media(root: Path) -> List[Path]:
+    """Public wrapper around the media discovery helper."""
+
+    return _discover_media(root)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+from collections.abc import Mapping as MappingABC
 from dataclasses import dataclass
 from pathlib import Path
 from typing import (
@@ -88,6 +89,8 @@ class _ClipPlan:
     alignment_frames: int = 0
     alignment_status: str = ""
 
+
+ClipPlan = _ClipPlan
 
 _OverrideValue = TypeVar("_OverrideValue")
 
@@ -213,31 +216,37 @@ class TrimSummary(TypedDict):
 def _coerce_str_mapping(value: object) -> dict[str, object]:
     """Return a shallow copy of *value* if it is a mapping with string-like keys."""
 
-    if isinstance(value, Mapping):
+    if isinstance(value, MappingABC):
+        source = cast(Mapping[Any, object], value)
         result: dict[str, object] = {}
-        for key, item in value.items():
-            key_str = key if isinstance(key, str) else str(key)
-            result[key_str] = item
+        for key, item in source.items():
+            result[str(key)] = item
         return result
     return {}
+
+
+coerce_str_mapping = _coerce_str_mapping
 
 
 def _ensure_audio_alignment_block(json_tail: JsonTail) -> AudioAlignmentJSON:
     """Ensure the audio alignment block exists and return a mutable mapping."""
 
-    block = json_tail.get("audio_alignment")
-    if isinstance(block, dict):
-        return cast(AudioAlignmentJSON, block)
-    new_block = cast(AudioAlignmentJSON, {})
-    json_tail["audio_alignment"] = new_block
-    return new_block
+    block = cast(Optional[AudioAlignmentJSON], json_tail.get("audio_alignment"))
+    if block is None:
+        new_block: AudioAlignmentJSON = {}
+        json_tail["audio_alignment"] = new_block
+        return new_block
+    return block
+
+
+ensure_audio_alignment_block = _ensure_audio_alignment_block
 
 
 def _ensure_slowpics_block(json_tail: JsonTail, cfg: "AppConfig") -> SlowpicsJSON:
     """Ensure that ``json_tail`` contains a slow.pics block and return it."""
 
-    block = json_tail.get("slowpics")
-    if not isinstance(block, dict):
+    block = cast(Optional[SlowpicsJSON], json_tail.get("slowpics"))
+    if block is None:
         block = SlowpicsJSON(
             enabled=bool(cfg.slowpics.auto_upload),
             title=SlowpicsTitleBlock(
@@ -256,15 +265,18 @@ def _ensure_slowpics_block(json_tail: JsonTail, cfg: "AppConfig") -> SlowpicsJSO
             remove_after_days=int(cfg.slowpics.remove_after_days),
         )
         json_tail["slowpics"] = block
-    else:
-        block = cast(SlowpicsJSON, block)
-        if "url" not in block:
-            block["url"] = None
-        if "shortcut_path" not in block:
-            block["shortcut_path"] = None
-        if "deleted_screens_dir" not in block:
-            block["deleted_screens_dir"] = False
-    return cast(SlowpicsJSON, block)
+        return block
+
+    existing_block: SlowpicsJSON = block
+    if "url" not in existing_block:
+        existing_block["url"] = None
+    if "shortcut_path" not in existing_block:
+        existing_block["shortcut_path"] = None
+    if "deleted_screens_dir" not in existing_block:
+        existing_block["deleted_screens_dir"] = False
+    return existing_block
+
+ensure_slowpics_block = _ensure_slowpics_block
 
 
 class CLIAppError(RuntimeError):
@@ -278,9 +290,12 @@ class CLIAppError(RuntimeError):
 
 from src.frame_compare import alignment_runner as _alignment_runner_module  # noqa: E402,I001
 
-_AudioAlignmentSummary = _alignment_runner_module._AudioAlignmentSummary
-_AudioMeasurementDetail = _alignment_runner_module._AudioMeasurementDetail
-_AudioAlignmentDisplayData = _alignment_runner_module._AudioAlignmentDisplayData
+AudioAlignmentSummary = _alignment_runner_module.AudioAlignmentSummary
+AudioMeasurementDetail = _alignment_runner_module.AudioMeasurementDetail
+AudioAlignmentDisplayData = _alignment_runner_module.AudioAlignmentDisplayData
+_AudioAlignmentSummary = AudioAlignmentSummary
+_AudioMeasurementDetail = AudioMeasurementDetail
+_AudioAlignmentDisplayData = AudioAlignmentDisplayData
 
 
 class CliOutputManagerProtocol(Protocol):
@@ -512,8 +527,15 @@ __all__ = [
     "_normalise_vspreview_mode",
     "_plan_label",
     "_plan_label_parts",
+    "AudioAlignmentDisplayData",
+    "AudioAlignmentSummary",
     "AudioAlignmentJSON",
+    "AudioMeasurementDetail",
+    "ClipPlan",
     "ClipRecord",
+    "coerce_str_mapping",
+    "ensure_audio_alignment_block",
+    "ensure_slowpics_block",
     "ReportJSON",
     "TrimClipEntry",
     "TrimSummary",

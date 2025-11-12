@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from typing import Any, Mapping, Sequence
 
-from src.frame_compare.cli_runtime import _coerce_str_mapping
+from src.frame_compare.cli_runtime import coerce_str_mapping
 
 
 def format_seconds(value: float) -> str:
@@ -121,14 +121,14 @@ def build_legacy_summary_lines(values: Mapping[str, Any], *, emit_json_tail: boo
     def _bool_text(value: Any) -> str:
         return "true" if bool(value) else "false"
 
-    clips = _coerce_str_mapping(values.get("clips"))
-    window = _coerce_str_mapping(values.get("window"))
-    analysis = _coerce_str_mapping(values.get("analysis"))
-    counts = _coerce_str_mapping(analysis.get("counts")) if analysis else {}
-    audio = _coerce_str_mapping(values.get("audio_alignment"))
-    render = _coerce_str_mapping(values.get("render"))
-    tonemap = _coerce_str_mapping(values.get("tonemap"))
-    cache = _coerce_str_mapping(values.get("cache"))
+    clips = coerce_str_mapping(values.get("clips"))
+    window = coerce_str_mapping(values.get("window"))
+    analysis = coerce_str_mapping(values.get("analysis"))
+    counts = coerce_str_mapping(analysis.get("counts")) if analysis else {}
+    audio = coerce_str_mapping(values.get("audio_alignment"))
+    render = coerce_str_mapping(values.get("render"))
+    tonemap = coerce_str_mapping(values.get("tonemap"))
+    cache = coerce_str_mapping(values.get("cache"))
 
     lines: list[str] = []
 

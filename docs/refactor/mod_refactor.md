@@ -552,9 +552,10 @@ Goal: finish modularizing `src/frame_compare/core.py` by extracting remaining CL
 | 9 | 9.7 Import contracts |  | ☑ | `importlinter.ini` enforces runner→core→modules layering plus module→CLI/core bans, and the lint job now installs + runs `lint-imports` (runner→core ignore documented). |
 | 9 | 9.8 Remove legacy shims |  | ☑ | Removed `core` doctor/config-writer/presets/metadata/selection shims and trimmed curated exports to point at the extracted modules directly. |
 | 9 | 9.9 Test layout finalization |  | ☑ | CLI suites now live in `tests/cli/` (package-ified to avoid duplicate module names), mirroring the runner layout. |
-| 9 | 9.10 Public __all__ |  | ☑ | `selection.py` now exposes only `init_clips`, `resolve_selection_windows`, `log_selection_windows` via `__all__`; tracker + DECISIONS stamped 2025‑11‑11. |
-| 9 | 9.11 Type strictness ratchet |  | ⛔ | Raise Pyright to strict for library modules (recommended). |
-| 9 | 9.12 Runner API docs |  | ⛔ | Document programmatic API usage and examples. |
+| 9 | 9.10 Public __all__ |  | ☑ | Added explicit `__all__` lists for the extracted modules (doctor/config_writer/presets/runtime_utils/selection) so wildcard imports mirror the curated exports; tracked in DECISIONS on 2025‑11‑11. |
+| 9 | 9.11 Type strictness ratchet |  | ☑ | `pyrightconfig.json` now enables `"strict": ["src/frame_compare"]`, and the resulting annotation/Optional fixes keep `.venv/bin/pyright --warnings` clean (see DECISIONS 2025‑11‑11). |
+| 9 | 9.12 Runner API docs |  | ☑ | Documented curated runner/doctor API usage, reference guide, and tracker/log updates. |
+| 10 | Compatibility cleanup |  | ⛔ | After Phases 9–10 land, audit `_COMPAT_EXPORTS`/shims and remove any temporary bridges before closing the refactor. |
 
 ---
 
@@ -646,6 +647,8 @@ Deliverables
 Acceptance
 - `ruff`/`pyright` clean; no import errors.
 
+**2025-11-11 update:** `__all__` declarations now live in `src/frame_compare/selection.py`, `runtime_utils.py`, `config_writer.py`, `presets.py`, and `doctor.py`, restricting wildcard imports to the intended helpers (e.g., `selection.__all__ = ["extract_clip_fps", "init_clips", "resolve_selection_windows", "log_selection_windows"]`). Runner/CLI callers import those public names directly, `_COMPAT_EXPORTS` mirrors them, and the verification quartet (`PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`) stayed clean as logged in DECISIONS.
+
 ## Sub‑phase 9.11 — Type Strictness Ratchet (recommended)
 
 Goal: increase type safety for library modules now that surfaces are stable.
@@ -663,6 +666,8 @@ Acceptance
 Risks & Mitigations
 - If strictness produces noisy false positives, scope it to the extracted modules first, then widen later.
 
+**2025-11-11 update:** `pyrightconfig.json` now enables `"strict": ["src/frame_compare"]`, covering all extracted modules while leaving the top-level CLI shim under standard mode. The resulting annotation/Optional fixes (runner reporter wiring, VSPreview helpers, tonemap/media exports) landed alongside a clean `.venv/bin/pyright --warnings`, `.venv/bin/ruff check`, and `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` run recorded in DECISIONS, so the stricter gate is fully enforced going forward.
+
 ## Sub‑phase 9.12 — Runner API Docs + Examples
 
 Goal: document the stable programmatic API and provide concise usage recipes.
@@ -678,6 +683,22 @@ Deliverables
 
 Acceptance
 - Examples run in a minimal snippet; no code changes needed.
+
+## Post-phase Cleanup — Compatibility shim retirement
+
+Goal: ensure all temporary bridges (compat exports, wizard/VSPreview/TMDB shims) are removed once the refactor finishes.
+
+Scope
+- Audit `_COMPAT_EXPORTS`, wizard/VSPreview/TMDB helpers, and any other aliases marked “temporary” during Phases 1–10.
+- Confirm downstream automation/imports now rely on the extracted modules or curated exports.
+
+Deliverables
+- Deletions of obsolete compatibility surfaces plus documentation updates (README/CHANGELOG, trackers, DEC).
+- Verification quartet demonstrating no remaining references to the removed shims.
+
+Acceptance
+- `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings` all pass after the cleanup.
+- Trackers and DEC log explicitly note the removed names and replacement guidance.
 
 
 ## Phase 10 – TMDB Workflow Extraction (stub)
@@ -770,6 +791,16 @@ Planned moves from `src/frame_compare/core.py` with start lines for reviewer nav
   - `_prompt_manual_tmdb` (src/frame_compare/core.py:830)
   - `_prompt_tmdb_confirmation` (src/frame_compare/core.py:853)
   - `_render_collection_name` (src/frame_compare/core.py:883)
+
+## Session Checklist — 2025-11-12 (Phase 9.12)
+
+- [x] Phase/Sub-phase: `9 / 9.12`
+- [x] Modules/files touched: `README.md`, `docs/README_REFERENCE.md`, `docs/refactor/mod_refactor.md`, `docs/DECISIONS.md`
+- [x] Commands run: `git status -sb`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings`
+- [x] Docs updated? (`runner_refactor_checklist`, `DECISIONS`, `CHANGELOG`?): README.md, docs/README_REFERENCE.md, docs/refactor/mod_refactor.md, docs/DECISIONS.md (CHANGELOG unchanged — docs only)
+- [x] Tests added/updated: No
+- [x] Risks noted: None (docs only)
+- [x] Follow-ups for next session: None
 
 ## Verification Commands Reference
 

@@ -10,7 +10,7 @@ import tempfile
 import tomllib
 from collections.abc import Mapping as MappingABC
 from pathlib import Path
-from typing import Any, Dict, Mapping, Tuple
+from typing import Any, Dict, List, Mapping, Tuple, cast
 
 from rich import print
 
@@ -21,6 +21,7 @@ __all__ = [
     "load_template_config",
     "render_config_text",
     "write_config_file",
+    "_present_diff",
 ]
 
 
@@ -41,14 +42,19 @@ def _deep_merge(dest: Dict[str, Any], src: Mapping[str, Any]) -> None:
     """Recursively merge ``src`` into ``dest`` in-place."""
 
     for key, value in src.items():
-        if isinstance(value, Mapping) and isinstance(dest.get(key), MappingABC):
-            existing = dest[key]
-            if not isinstance(existing, dict):
-                dest[key] = copy.deepcopy(value)
+        if isinstance(value, Mapping):
+            value_mapping = cast(Mapping[str, Any], value)
+            if isinstance(dest.get(key), MappingABC):
+                existing = dest[key]
+                if not isinstance(existing, dict):
+                    dest[key] = copy.deepcopy(value_mapping)
+                else:
+                    existing_dict = cast(Dict[str, Any], existing)
+                    _deep_merge(existing_dict, value_mapping)
+            elif key not in dest:
+                dest[key] = copy.deepcopy(value_mapping)
             else:
-                _deep_merge(existing, value)  # type: ignore[arg-type]
-        elif isinstance(value, Mapping) and key not in dest:
-            dest[key] = copy.deepcopy(value)
+                dest[key] = copy.deepcopy(value_mapping)
         else:
             dest[key] = copy.deepcopy(value)
 
@@ -60,7 +66,7 @@ def _diff_config(base: Mapping[str, Any], modified: Mapping[str, Any]) -> Dict[s
     for key, value in modified.items():
         base_value = base.get(key)
         if isinstance(value, Mapping) and isinstance(base_value, Mapping):
-            nested = _diff_config(base_value, value)
+            nested = _diff_config(cast(Mapping[str, Any], base_value), cast(Mapping[str, Any], value))
             if nested:
                 diff[key] = nested
         else:
@@ -84,7 +90,8 @@ def _format_toml_value(value: Any) -> str:
         escaped = value.replace("\\", "\\\\").replace('"', '\\"')
         return f'"{escaped}"'
     if isinstance(value, list):
-        return "[" + ", ".join(_format_toml_value(item) for item in value) + "]"
+        value_list = cast(List[Any], value)
+        return "[" + ", ".join(_format_toml_value(item) for item in value_list) + "]"
     if value is None:
         return '""'  # Represent None as empty string literal.
     raise ValueError(f"Unsupported TOML value type: {type(value)!r}")
@@ -98,7 +105,7 @@ def _flatten_overrides(overrides: Mapping[str, Any]) -> Dict[Tuple[str, ...], Di
     def _walk(mapping: Mapping[str, Any], prefix: Tuple[str, ...]) -> None:
         for key, value in mapping.items():
             if isinstance(value, Mapping):
-                _walk(value, prefix + (key,))
+                _walk(cast(Mapping[str, Any], value), prefix + (key,))
             else:
                 flattened.setdefault(prefix, {})[key] = value
 
@@ -152,7 +159,7 @@ def _apply_overrides_to_template(template_text: str, overrides: Mapping[str, Any
             identifier = (section, key)
             if identifier in applied:
                 continue
-            start, end = section_ranges.get(section, (len(lines), len(lines)))
+            _, end = section_ranges.get(section, (len(lines), len(lines)))
             formatted = _format_toml_value(value)
             insert_line = f"{key} = {formatted}"
             lines.insert(end, insert_line)
@@ -218,4 +225,3 @@ def _present_diff(original: str, updated: str) -> None:
             print(line)
     else:
         print("No differences from the template.")
-
