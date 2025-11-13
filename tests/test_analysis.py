@@ -189,6 +189,59 @@ def test_build_clip_inputs_hashes_when_opted_in(
     assert digest_calls == [clip_path]
 
 
+def test_build_clip_inputs_hashes_when_param_enabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    file_name = "clip.mkv"
+    clip_path = tmp_path / file_name
+    clip_path.write_bytes(b"data")
+    info = _make_cache_info(tmp_path, file_name)
+
+    digest_calls: list[Path] = []
+
+    def _capture_compute(path: Path, *, chunk_size: int = 1024 * 1024) -> str:
+        digest_calls.append(path)
+        return "param-digest"
+
+    monkeypatch.setattr(cache_io, "_compute_file_sha1", _capture_compute)
+    monkeypatch.delenv("FRAME_COMPARE_CACHE_HASH", raising=False)
+
+    clip_inputs = cache_io._build_clip_inputs(
+        info,
+        compute_sha1=True,
+        env_opt_in=False,
+    )
+
+    assert clip_inputs[0]["sha1"] == "param-digest"
+    assert digest_calls == [clip_path]
+
+
+def test_build_clip_inputs_from_paths_hashes_when_param_enabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    clip_path = tmp_path / "clip.mkv"
+    clip_path.write_bytes(b"data")
+
+    digest_calls: list[Path] = []
+
+    def _capture_compute(path: Path, *, chunk_size: int = 1024 * 1024) -> str:
+        digest_calls.append(path)
+        return "paths-digest"
+
+    monkeypatch.setattr(cache_io, "_compute_file_sha1", _capture_compute)
+    monkeypatch.setenv("FRAME_COMPARE_CACHE_HASH", "0")
+
+    clip_inputs = cache_io.build_clip_inputs_from_paths(
+        analyzed_file=clip_path.name,
+        clip_paths=[clip_path],
+        compute_sha1=True,
+        env_opt_in=False,
+    )
+
+    assert clip_inputs[0]["sha1"] == "paths-digest"
+    assert digest_calls == [clip_path.resolve()]
+
+
 def test_selection_sidecar_cache_key_stable_without_sha1(tmp_path: Path) -> None:
     file_name = "clip.mkv"
     clip_path = tmp_path / file_name
