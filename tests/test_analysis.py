@@ -9,6 +9,7 @@ import pytest
 
 import src.frame_compare.analysis as analysis_mod
 import src.frame_compare.analysis.cache_io as cache_io
+import src.frame_compare.cache as cache_module
 from src.datatypes import AnalysisConfig, ColorConfig
 from src.frame_compare.analysis import (
     FrameMetricsCacheInfo,
@@ -22,6 +23,9 @@ from src.frame_compare.analysis import (
     selection_hash_for_config,
     write_selection_cache_file,
 )
+from src.frame_compare.analysis.cache_io import ClipIdentity
+from src.frame_compare.cli_runtime import ClipPlan
+from tests.helpers.runner_env import _make_config
 
 
 class FakeClip:
@@ -242,6 +246,32 @@ def test_build_clip_inputs_from_paths_hashes_when_param_enabled(
     assert digest_calls == [clip_path.resolve()]
 
 
+def test_compare_clip_identities_requires_sha1_when_missing() -> None:
+    exp = ClipIdentity(
+        role="ref",
+        path="/a",
+        name="a",
+        size=None,
+        mtime=None,
+        sha1=None,
+    )
+    obs = ClipIdentity(
+        role="ref",
+        path="/a",
+        name="a",
+        size=None,
+        mtime=None,
+        sha1=None,
+    )
+    mismatch = cache_io._compare_clip_identities([exp], [obs], require_sha1=True)
+    assert mismatch == "inputs_sha1_mismatch"
+
+    exp2 = replace(exp, sha1="abc123")
+    obs2 = replace(obs, sha1=None)
+    mismatch = cache_io._compare_clip_identities([exp2], [obs2], require_sha1=True)
+    assert mismatch == "inputs_sha1_mismatch"
+
+
 def test_selection_sidecar_cache_key_stable_without_sha1(tmp_path: Path) -> None:
     file_name = "clip.mkv"
     clip_path = tmp_path / file_name
@@ -273,6 +303,49 @@ def test_selection_sidecar_cache_key_stable_without_sha1(tmp_path: Path) -> None
 
     assert cache_key_1 == cache_key_2
 
+
+
+def test_build_cache_info_skips_sha1_when_stat_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cfg = _make_config(tmp_path)
+    cfg.analysis.save_frames_data = True
+    missing_path = tmp_path / "missing.mkv"
+    plan = ClipPlan(path=missing_path, metadata={})
+
+    monkeypatch.setattr(cache_module, "cache_hash_env_requested", lambda: True)
+
+    def _fail_hash(_path: Path) -> str:
+        raise AssertionError("compute_file_sha1 should not be called when stat fails")
+
+    monkeypatch.setattr(cache_module, "compute_file_sha1", _fail_hash)
+
+    info = cache_module._build_cache_info(tmp_path, [plan], cfg, analyze_index=0)
+    assert info is not None
+    assert info.clips is not None
+    assert info.clips[0].sha1 is None
+
+
+def test_build_cache_info_handles_sha1_failures(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cfg = _make_config(tmp_path)
+    cfg.analysis.save_frames_data = True
+    clip_path = tmp_path / "clip.mkv"
+    clip_path.write_bytes(b"data")
+    plan = ClipPlan(path=clip_path, metadata={})
+
+    monkeypatch.setattr(cache_module, "cache_hash_env_requested", lambda: True)
+
+    def _raise_hash(_path: Path) -> str:
+        raise OSError("hash failure")
+
+    monkeypatch.setattr(cache_module, "compute_file_sha1", _raise_hash)
+
+    info = cache_module._build_cache_info(tmp_path, [plan], cfg, analyze_index=0)
+    assert info is not None
+    assert info.clips is not None
+    assert info.clips[0].sha1 is None
 
 
 def test_quantile_basic():

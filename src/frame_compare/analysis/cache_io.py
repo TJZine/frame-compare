@@ -658,8 +658,8 @@ def _compare_clip_identities(
             return "inputs_size_mismatch"
         if exp.mtime is not None and obs.mtime is not None and obs.mtime != exp.mtime:
             return "inputs_mtime_mismatch"
-        if require_sha1 and obs.sha1 is not None:
-            if exp.sha1 is None or obs.sha1 != exp.sha1:
+        if require_sha1:
+            if exp.sha1 is None or obs.sha1 is None or obs.sha1 != exp.sha1:
                 return "inputs_sha1_mismatch"
     return None
 

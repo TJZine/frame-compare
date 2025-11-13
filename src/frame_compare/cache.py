@@ -52,14 +52,21 @@ def _build_cache_info(
     analyzed_name = analyzed.path.name
     for idx, plan in enumerate(plans):
         resolved = plan.path.resolve()
+        stat_ok = True
         try:
             stat_result = resolved.stat()
             size = int(stat_result.st_size)
             mtime = _dt.datetime.fromtimestamp(stat_result.st_mtime, tz=_dt.timezone.utc).isoformat()
         except OSError:
+            stat_ok = False
             size = None
             mtime = None
-        sha1 = compute_file_sha1(resolved) if should_hash else None
+        sha1 = None
+        if should_hash and stat_ok:
+            try:
+                sha1 = compute_file_sha1(resolved)
+            except OSError:
+                sha1 = None
         clip_identities.append(
             ClipIdentity(
                 role=infer_clip_role(idx, plan.path.name, analyzed_name, total),

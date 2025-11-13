@@ -119,6 +119,22 @@
       ```
     - `.venv/bin/ruff check` → `All checks passed!`
     - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+  - Follow-up (require SHA1 when opted in, handle hashing failures safely):
+    - `date -u +%Y-%m-%d` → `2025-11-13`
+    - `git status -sb` →
+      ```
+      ## runner-refactor...origin/runner-refactor
+       M src/frame_compare/analysis/cache_io.py
+       M src/frame_compare/cache.py
+       M tests/test_analysis.py
+      ```
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_analysis.py -k sha1` →
+      ```
+      ....                                                                     [100%]
+      4 passed, 21 deselected in 0.04s
+      ```
+    - `.venv/bin/ruff check` → `All checks passed!`
+    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
   - Context: SHA1 digests remain available for diagnostics, but cache reuse continues to hinge on deterministic input names/configuration so payload compatibility is unaffected by the nullable digest field.
 
 - *2025-11-13:* Network policy hardening — centralized retry/timeout constants in `frame_compare/net.py`, added structured logging via `log_backoff_attempt`, threaded the callback through TMDB’s `_http_request`, and aligned slow.pics adapters/logs/tests with the shared policy while keeping the legacy upload endpoints. Redaction tests now cover userinfo/query edge cases, and slow.pics emits a final “upload complete” INFO that lists frames/workers.
