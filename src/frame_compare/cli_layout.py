@@ -1,5 +1,3 @@
-# pyright: standard
-
 """Data-driven CLI layout rendering utilities."""
 from __future__ import annotations
 
@@ -13,7 +11,7 @@ import textwrap
 from dataclasses import dataclass, field
 from itertools import zip_longest
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple, cast
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, SupportsInt, Tuple, cast
 
 from rich.console import Console
 from rich.progress import BarColumn, Progress, ProgressColumn, SpinnerColumn, Task, TextColumn
@@ -352,6 +350,20 @@ class _AnsiColorMapper:
 
         return ""
 
+def _empty_str_any_dict() -> Dict[str, Any]:
+    """Return a typed empty dict used for default factories."""
+
+    return {}
+
+
+def _coerce_int_option(value: object, *, field: str) -> int:
+    """Coerce layout numeric options to integers with helpful errors."""
+
+    try:
+        return int(cast(SupportsInt | str, value))
+    except (TypeError, ValueError):
+        raise CliLayoutError(f"{field} must be numeric") from None
+
 
 @dataclass
 class LayoutTheme:
@@ -359,7 +371,7 @@ class LayoutTheme:
     colors: Dict[str, str]
     symbols: Dict[str, str]
     units: Dict[str, Any]
-    options: Dict[str, Any] = field(default_factory=dict)
+    options: Dict[str, Any] = field(default_factory=_empty_str_any_dict)
 
 
 @dataclass
@@ -445,32 +457,39 @@ def load_cli_layout(path: Path) -> CliLayout:
     if not isinstance(raw, dict):
         raise CliLayoutError("Layout JSON must be an object")
 
-    raw = cast(dict[str, object], raw)
+    root = cast(Dict[str, object], raw)
 
-    _require_keys(raw, ("version", "theme", "layout", "sections", "folding", "json_tail"), context="layout root")
+    _require_keys(root, ("version", "theme", "layout", "sections", "folding", "json_tail"), context="layout root")
 
-    theme_raw = raw["theme"]
+    theme_raw = root["theme"]
     if not isinstance(theme_raw, dict):
         raise CliLayoutError("theme must be an object")
-    _require_keys(theme_raw, ("colors", "symbols", "units"), context="theme")
-    theme_dict: dict[str, object] = theme_raw
-    colors = theme_dict["colors"]
-    symbols = theme_dict["symbols"]
-    units = theme_dict["units"]
-    if not isinstance(colors, dict) or not isinstance(symbols, dict) or not isinstance(units, dict):
+    theme_dict = cast(Dict[str, object], theme_raw)
+    _require_keys(theme_dict, ("colors", "symbols", "units"), context="theme")
+    colors_obj = theme_dict["colors"]
+    symbols_obj = theme_dict["symbols"]
+    units_obj = theme_dict["units"]
+    if not isinstance(colors_obj, dict) or not isinstance(symbols_obj, dict) or not isinstance(units_obj, dict):
         raise CliLayoutError("theme colors/symbols/units must be objects")
-    theme_options: dict[str, object] = {}
+    colors_map = cast(Dict[str, object], colors_obj)
+    symbols_map = cast(Dict[str, object], symbols_obj)
+    units_map = cast(Dict[str, Any], units_obj)
+    colors: Dict[str, str] = {str(key): str(value) for key, value in colors_map.items()}
+    symbols: Dict[str, str] = {str(key): str(value) for key, value in symbols_map.items()}
+    units: Dict[str, Any] = units_map
+    theme_options: Dict[str, Any] = {}
     theme_options_raw = theme_dict.get("options")
     if theme_options_raw is not None:
         if not isinstance(theme_options_raw, dict):
             raise CliLayoutError("theme.options must be an object if provided")
-        theme_options = dict(theme_options_raw)
+        theme_options = cast(Dict[str, Any], theme_options_raw)
 
-    options_raw = raw["layout"]
+    options_raw = root["layout"]
     if not isinstance(options_raw, dict):
         raise CliLayoutError("layout options must be an object")
+    options_map = cast(Dict[str, object], options_raw)
     _require_keys(
-        options_raw,
+        options_map,
         (
             "two_column_min_cols",
             "blank_line_between_sections",
@@ -480,34 +499,43 @@ def load_cli_layout(path: Path) -> CliLayout:
         context="layout options",
     )
 
-    sections_raw = raw["sections"]
+    sections_raw = root["sections"]
     if not isinstance(sections_raw, list):
         raise CliLayoutError("sections must be a list")
-    for index, section in enumerate(sections_raw):
+    sections_raw_list = cast(List[object], sections_raw)
+    sections: List[Dict[str, Any]] = []
+    for index, section in enumerate(sections_raw_list):
         if not isinstance(section, dict):
             raise CliLayoutError(f"section[{index}] must be an object")
-        _require_keys(section, ("id", "type"), context=f"section[{index}]")
+        section_dict = cast(Dict[str, Any], section)
+        _require_keys(section_dict, ("id", "type"), context=f"section[{index}]")
+        sections.append(section_dict)
 
-    folding = raw["folding"]
-    if not isinstance(folding, dict):
+    folding_raw = root["folding"]
+    if not isinstance(folding_raw, dict):
         raise CliLayoutError("folding must be an object")
+    folding: Dict[str, Any] = cast(Dict[str, Any], folding_raw)
 
-    json_tail_raw = raw["json_tail"]
+    json_tail_raw = root["json_tail"]
     if not isinstance(json_tail_raw, dict):
         raise CliLayoutError("json_tail must be an object")
-    _require_keys(json_tail_raw, ("pretty_on_flag",), context="json_tail")
-    json_tail_dict = cast(dict[str, object], json_tail_raw)
+    json_tail_dict: Dict[str, object] = cast(Dict[str, object], json_tail_raw)
+    _require_keys(json_tail_dict, ("pretty_on_flag",), context="json_tail")
 
-    highlights_raw = raw.get("highlights", [])
+    highlights_raw = root.get("highlights", [])
     if not isinstance(highlights_raw, list):
         raise CliLayoutError("highlights must be a list when provided")
+    highlights_raw_list = cast(List[object], highlights_raw)
     highlights: list[HighlightRule] = []
-    for index, rule_raw in enumerate(highlights_raw):
+    for index, rule_raw in enumerate(highlights_raw_list):
         if not isinstance(rule_raw, dict):
             raise CliLayoutError(f"highlights[{index}] must be an object")
-        if not all(isinstance(key, str) for key in rule_raw):
-            raise CliLayoutError(f"highlights[{index}] must use string keys")
-        rule_dict = cast(dict[str, object], rule_raw)
+        normalized_rule: Dict[str, object] = {}
+        for key_obj, value in cast(Dict[object, object], rule_raw).items():
+            if not isinstance(key_obj, str):
+                raise CliLayoutError(f"highlights[{index}] must use string keys")
+            normalized_rule[key_obj] = value
+        rule_dict = normalized_rule
         when = str(rule_dict.get("when", "")).strip()
         rule_path = str(rule_dict.get("path", "")).strip()
         if not when or not rule_path:
@@ -533,7 +561,7 @@ def load_cli_layout(path: Path) -> CliLayout:
         )
 
     layout = CliLayout(
-        version=str(raw["version"]),
+        version=str(root["version"]),
         theme=LayoutTheme(
             colors=dict(colors),
             symbols=dict(symbols),
@@ -541,13 +569,15 @@ def load_cli_layout(path: Path) -> CliLayout:
             options=theme_options,
         ),
         options=LayoutOptions(
-            two_column_min_cols=int(options_raw["two_column_min_cols"]),
-            blank_line_between_sections=bool(options_raw["blank_line_between_sections"]),
-            path_ellipsis=str(options_raw["path_ellipsis"]),
-            truncate_right_label_min_cols=int(options_raw["truncate_right_label_min_cols"]),
+            two_column_min_cols=_coerce_int_option(options_map["two_column_min_cols"], field="two_column_min_cols"),
+            blank_line_between_sections=bool(options_map["blank_line_between_sections"]),
+            path_ellipsis=str(options_map["path_ellipsis"]),
+            truncate_right_label_min_cols=_coerce_int_option(
+                options_map["truncate_right_label_min_cols"], field="truncate_right_label_min_cols"
+            ),
         ),
-        sections=list(sections_raw),
-        folding=dict(folding),
+        sections=sections,
+        folding=folding,
         json_tail=JsonTailConfig(
             pretty_on_flag=str(json_tail_dict["pretty_on_flag"]),
             must_be_last=bool(json_tail_dict.get("must_be_last", True)),
@@ -603,16 +633,18 @@ class LayoutContext:
                 current = mapping_current.get(segment)
                 continue
             if isinstance(current, Sequence) and not isinstance(current, (str, bytes, bytearray)):
+                seq_current = cast(Sequence[object], current)
                 if segment.isdigit():
                     idx = int(segment)
-                    if 0 <= idx < len(current):
-                        current = current[idx]
+                    if 0 <= idx < len(seq_current):
+                        current = seq_current[idx]
                     else:
                         current = None
                     continue
+            current_obj = cast(object, current)
             if segment == "e":
-                return self._renderer.apply_path_ellipsis(str(current))
-            current = getattr(current, segment, None)
+                return self._renderer.apply_path_ellipsis(str(current_obj))
+            current = getattr(current_obj, segment, None)
         return current
 
 
@@ -687,7 +719,8 @@ class CliLayoutRenderer:
             blocks = section_data.get("blocks", [])
             if not isinstance(blocks, list):
                 continue
-            for block in blocks:
+            blocks_list = cast(List[object], blocks)
+            for block in blocks_list:
                 if not isinstance(block, Mapping):
                     continue
                 block_map = cast(Mapping[str, object], block)
@@ -1274,7 +1307,7 @@ class CliLayoutRenderer:
         else:
             self.console.print()
 
-    def apply_path_ellipsis(self, value: str, *, width: Optional[int] = None) -> str:
+    def apply_path_ellipsis(self, value: Optional[str], *, width: Optional[int] = None) -> str:
         """
         Shorten a path-like string with an ellipsis so it fits within the console width.
 
@@ -1796,7 +1829,8 @@ class CliLayoutRenderer:
             values (Mapping[str, Any]): Data values used when rendering the template.
             flags (Mapping[str, Any]): Flag values used when rendering the template.
         """
-        template = section.get("template", "")
+        template_obj = section.get("template")
+        template = str(template_obj) if template_obj is not None else ""
         text = self._prepare_output(self.render_template(template, values, flags))
         if text:
             self._write(text)
@@ -1818,7 +1852,12 @@ class CliLayoutRenderer:
         lines = section.get("lines", [])
         if not isinstance(lines, list):
             raise CliLayoutError("box.lines must be a list")
-        rendered_lines = [self._prepare_output(self.render_template(line, values, flags)) for line in lines]
+        rendered_lines: List[str] = []
+        lines_list = cast(List[object], lines)
+        for line_index, line in enumerate(lines_list):
+            if not isinstance(line, str):
+                raise CliLayoutError(f"box.lines[{line_index}] must be a string")
+            rendered_lines.append(self._prepare_output(self.render_template(line, values, flags)))
 
         title_plain = f" {title} " if title else ""
         title_visible = len(title_plain)
@@ -1856,7 +1895,16 @@ class CliLayoutRenderer:
         items = section.get("items", [])
         if not isinstance(items, list):
             raise CliLayoutError("list.items must be a list")
-        rendered_items = [self._prepare_output(self.render_template(item, values, flags)) for item in items if item]
+        rendered_items: List[str] = []
+        items_list = cast(List[object], items)
+        for item_index, item in enumerate(items_list):
+            if not isinstance(item, str):
+                raise CliLayoutError(f"list.items[{item_index}] must be a string")
+            if not item:
+                continue
+            rendered = self._prepare_output(self.render_template(item, values, flags))
+            if rendered:
+                rendered_items.append(rendered)
         if not rendered_items:
             return
 
@@ -1917,8 +1965,9 @@ class CliLayoutRenderer:
         blocks = section.get("blocks", [])
         if not isinstance(blocks, list):
             raise CliLayoutError("group.blocks must be a list")
+        blocks_list = cast(List[object], blocks)
         rendered_blocks: list[Tuple[Optional[str], list[str]]] = []
-        for block in blocks:
+        for index, block in enumerate(blocks_list):
             if not isinstance(block, Mapping):
                 continue
             block_map = cast(Mapping[str, object], block)
@@ -1937,7 +1986,10 @@ class CliLayoutRenderer:
             raw_lines = block_map.get("lines", [])
             if not isinstance(raw_lines, list):
                 continue
-            for line in raw_lines:
+            line_entries = cast(List[object], raw_lines)
+            for line_index, line in enumerate(line_entries):
+                if not isinstance(line, str):
+                    raise CliLayoutError(f"group.blocks[{index}].lines[{line_index}] must be a string")
                 rendered = self._prepare_output(self.render_template(line, values, flags))
                 if rendered:
                     lines.append(rendered)
@@ -2106,18 +2158,21 @@ class CliLayoutRenderer:
         For the section's "row_template", looks up an iterable of rows from the provided values using the section's "id", merges each row into the current values as the rendering context, renders and post-processes the template, and writes each non-empty rendered line to the console. Empty or falsy rendered results are skipped.
         """
         self._render_title_badge(section)
-        row_template = section.get("row_template", "")
+        row_template_obj = section.get("row_template")
+        row_template = str(row_template_obj) if row_template_obj is not None else ""
         section_id = section.get("id")
-        if not isinstance(section_id, str) or not isinstance(values, Mapping):
+        if not isinstance(section_id, str):
             return
         candidate_rows = values.get(section_id, [])
         if not isinstance(candidate_rows, Iterable):
             return
-        for row in candidate_rows:
+        rows_iter = cast(Iterable[object], candidate_rows)
+        for row in rows_iter:
             if not isinstance(row, Mapping):
                 continue
+            row_map = cast(Mapping[str, Any], row)
             context_values = dict(values)
-            context_values.update(row)
+            context_values.update(row_map)
             rendered = self._prepare_output(self.render_template(row_template, context_values, flags))
             if rendered:
                 self._write(rendered)
@@ -2149,6 +2204,33 @@ class CliLayoutRenderer:
 
         self._active_values = values
         self._active_flags = flags
+
+    def render_progress_column_label(self, progress_id: str, template: str, task: Task) -> str:
+        """
+        Render the right-side label for a progress column using the renderer's active context.
+
+        Parameters:
+            progress_id (str): Identifier of the progress block whose state should be referenced.
+            template (str): Template string used to render the label.
+            task (Task): Rich progress task providing live numeric values.
+
+        Returns:
+            str: The formatted label truncated when the console width falls below the configured threshold.
+        """
+        state = dict(self._progress_state.get(progress_id, {}))
+        state.setdefault("current", task.completed)
+        state.setdefault("total", task.total)
+        state.setdefault("percentage", task.percentage)
+        context_values = dict(self._active_values)
+        context_values.setdefault("progress", state)
+        rendered = self.render_template(template, context_values, self._active_flags)
+        prepared = self._prepare_output(rendered)
+        width = self._console_width()
+        min_cols = self.layout.options.truncate_right_label_min_cols
+        if width < min_cols:
+            parts = prepared.split(" | ")
+            prepared = parts[0]
+        return prepared
 
     def create_progress(self, progress_id: str, *, transient: bool = False) -> Progress:
         """
@@ -2235,20 +2317,7 @@ class _TemplateProgressColumn(ProgressColumn):
         Returns:
             str: The rendered and post-processed label string, truncated to a single segment if the console width is below the configured `truncate_right_label_min_cols`.
         """
-        state = dict(self.renderer._progress_state.get(self.progress_id, {}))
-        state.setdefault("current", task.completed)
-        state.setdefault("total", task.total)
-        state.setdefault("percentage", task.percentage)
-        context_values = dict(self.renderer._active_values)
-        context_values.setdefault("progress", state)
-        rendered = self.renderer.render_template(self.template, context_values, self.renderer._active_flags)
-        prepared = self.renderer._prepare_output(rendered)
-        width = self.renderer._console_width()
-        min_cols = self.renderer.layout.options.truncate_right_label_min_cols
-        if width < min_cols:
-            parts = prepared.split(" | ")
-            prepared = parts[0]
-        return prepared
+        return self.renderer.render_progress_column_label(self.progress_id, self.template, task)
 
 
 __all__ = [

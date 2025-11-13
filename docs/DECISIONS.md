@@ -2,6 +2,23 @@
 
 # Decisions Log
 
+- *2025-11-13:* chore(types): restored pyright strictness for `slowpics`, `analysis.cache_io`, and `cli_layout`.
+  - Problem: `cli_layout.py` relied on `# pyright: standard` to hide Unknown-heavy template handling, and `slowpics.py` used loosely typed MultipartEncoder imports that failed strict mode whenever `requests-toolbelt` was optional, undermining the Part 1 typing guarantees for cache/selection code.
+  - Decision: removed the downgrade, tightened MultipartEncoder typing with guarded imports and explicit Optional checks, validated every layout section/template/line/table entry before rendering, and exposed a renderer helper so progress columns no longer poke private attributes; cache modules already satisfied strict mode after the Part 1 snapshot refactor.
+  - Verification:
+    - `date -u +%Y-%m-%d` → `2025-11-13`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` →
+      ```
+      ........................................................................ [ 22%]
+      ........................................................................ [ 44%]
+      ...............................s........................................ [ 66%]
+      ........................................................................ [ 88%]
+      ......................................                                   [100%]
+      325 passed, 1 skipped in 28.48s
+      ```
+    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+    - `.venv/bin/ruff check` → `All checks passed!`
+
 - *2025-11-13:* fix(slowpics): shortcut creation is now best-effort with JSON telemetry for shortcut outcomes.
   - Problem: Uploads failed entirely when the `.url` shortcut could not be written, leaving users without the canonical slow.pics URL and no way to see why the shortcut was missing.
   - Decision: Wrap shortcut writes in `slowpics.upload_comparison()` with an OSError guard that warns but still returns the URL, and thread `shortcut_path`, `shortcut_written`, and `shortcut_error` through the runner/CLI JSON tail so reports/automation can describe failures. The CLI also emits a concise warning when it detects a missing shortcut.
@@ -484,3 +501,20 @@
   - document token‑efficient defaults (JSON, limit 3–5, threshold 0.6–0.7, `lang`), and
   - add a concise “Codanna + ST” workflow (Discovery → Plan → Thoughts → Validate/Commit).
   Historical references to Serena remain in CHANGELOG/DECISIONS for provenance; guidance docs no longer prescribe Serena. No external sources used.
+- *2025-11-13:* refactor(cache): metrics payloads now bundle clip identity snapshots (paths, sizes, mtimes, opt-in sha1) and the selection sidecar reads the same snapshot.
+  - Problem: caches could be reused across directories when filenames matched because only relative names were stored, and the selection sidecar re-probed the filesystem which reintroduced race conditions.
+  - Decision: introduce a frozen `ClipIdentity` dataclass populated by `_build_cache_info`, persist those records under a v2 cache payload with `inputs.clips`, gate sha1 generation behind the `FRAME_COMPARE_CACHE_HASH` env flag, and have the selection sidecar builder/loader reuse the precomputed snapshot instead of restatting.
+  - Impact: first runs invalidate v1 payloads (one-time recompute) but future runs avoid cross-folder reuse by comparing absolute paths plus size/mtime (and sha1 when opted in); selection reloads now avoid filesystem churn so frame picks align with cached metrics.
+  - Verification:
+    - `date -u +%Y-%m-%d` → `2025-11-13`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_cache_identity.py` →
+      ```
+      ....                                                                     [100%]
+      4 passed in 0.01s
+      ```
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_analysis.py::test_select_frames_uses_cache` →
+      ```
+      .                                                                        [100%]
+      1 passed in 0.01s
+      ```
+    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
