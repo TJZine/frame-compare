@@ -80,6 +80,9 @@ from .layout_utils import (
 from .layout_utils import (
     plan_label as _plan_label,
 )
+from .layout_utils import (
+    sanitize_console_text as _sanitize_console_text,
+)
 
 ReporterFactory = Callable[['RunRequest', Path, Console], CliOutputManagerProtocol]
 
@@ -396,6 +399,8 @@ def run(request: RunRequest) -> RunResult:
             },
             "url": None,
             "shortcut_path": None,
+            "shortcut_written": False,
+            "shortcut_error": None,
             "deleted_screens_dir": False,
             "is_public": bool(cfg.slowpics.is_public),
             "is_hentai": bool(cfg.slowpics.is_hentai),
@@ -519,6 +524,13 @@ def run(request: RunRequest) -> RunResult:
     slowpics_tmdb_disclosure_line: Optional[str] = None
     slowpics_verbose_tmdb_tag: Optional[str] = None
 
+    def _record_tmdb_note(raw_message: str) -> None:
+        """Capture TMDB warnings with console-safe text."""
+
+        safe_message = _sanitize_console_text(raw_message)
+        tmdb_notes.append(safe_message)
+        collected_warnings.append(safe_message)
+
     if tmdb_api_key_present:
         lookup = tmdb_workflow.resolve_workflow(
             files=files,
@@ -631,8 +643,14 @@ def run(request: RunRequest) -> RunResult:
         year_display = tmdb_context.get("Year") or ""
         lang_text = tmdb_resolution.original_language or "und"
         tmdb_identifier = f"{tmdb_resolution.category}/{tmdb_resolution.tmdb_id}"
-        title_segment = _color_text(escape(f'"{match_title} ({year_display})"'), "bright_white")
-        lang_segment = _format_kv("lang", lang_text, label_style="dim cyan", value_style="blue")
+        safe_match_title = _sanitize_console_text(match_title)
+        safe_year_display = _sanitize_console_text(year_display)
+        safe_lang_text = _sanitize_console_text(lang_text)
+        title_segment = _color_text(
+            escape(f'"{safe_match_title} ({safe_year_display})"'),
+            "bright_white",
+        )
+        lang_segment = _format_kv("lang", safe_lang_text, label_style="dim cyan", value_style="blue")
         reporter.verbose_line(
             "  ".join(
                 [
@@ -653,8 +671,9 @@ def run(request: RunRequest) -> RunResult:
             base_display = f"{match_title} ({year_display})"
         else:
             base_display = match_title or "(n/a)"
+        safe_base_display = _sanitize_console_text(base_display)
         slowpics_tmdb_disclosure_line = (
-            f'slow.pics title inputs: base="{escape(str(base_display))}"  '
+            f'slow.pics title inputs: base="{escape(safe_base_display)}"  '
             f'collection_suffix="{escape(str(suffix_literal))}"'
         )
         if tmdb_category and tmdb_id_value:
@@ -675,11 +694,14 @@ def run(request: RunRequest) -> RunResult:
         id_display = tmdb_id_value or cfg.slowpics.tmdb_id or ""
         lang_text = tmdb_language or tmdb_context.get("OriginalLanguage") or "und"
         identifier = f"{category_display}/{id_display}".strip("/")
+        safe_display_title = _sanitize_console_text(display_title)
+        safe_year_component = _sanitize_console_text(tmdb_context.get("Year") or "")
         title_segment = _color_text(
-            escape(f'"{display_title} ({tmdb_context.get("Year") or ""})"'),
+            escape(f'"{safe_display_title} ({safe_year_component})"'),
             "bright_white",
         )
-        lang_segment = _format_kv("lang", lang_text, label_style="dim cyan", value_style="blue")
+        safe_lang_text = _sanitize_console_text(lang_text)
+        lang_segment = _format_kv("lang", safe_lang_text, label_style="dim cyan", value_style="blue")
         reporter.verbose_line(
             "  ".join(
                 [
@@ -697,8 +719,9 @@ def run(request: RunRequest) -> RunResult:
                 base_display = f"{display_title} ({year_component})"
             else:
                 base_display = display_title or "(n/a)"
+        safe_base_display = _sanitize_console_text(base_display)
         slowpics_tmdb_disclosure_line = (
-            f'slow.pics title inputs: base="{escape(str(base_display))}"  '
+            f'slow.pics title inputs: base="{escape(safe_base_display)}"  '
             f'collection_suffix="{escape(str(suffix_literal))}"'
         )
         if category_display and id_display:
@@ -715,21 +738,17 @@ def run(request: RunRequest) -> RunResult:
         reporter.set_flag("tmdb_resolved", True)
     elif tmdb_api_key_present:
         if tmdb_error_message:
-            message = f"TMDB lookup failed: {tmdb_error_message}"
-            tmdb_notes.append(message)
-            collected_warnings.append(message)
+            _record_tmdb_note(f"TMDB lookup failed: {tmdb_error_message}")
         elif tmdb_ambiguous:
-            message = f"TMDB ambiguous results for {files[0].name}; continuing without metadata."
-            tmdb_notes.append(message)
-            collected_warnings.append(message)
+            _record_tmdb_note(
+                f"TMDB ambiguous results for {files[0].name}; continuing without metadata."
+            )
         else:
-            message = f"TMDB could not find a confident match for {files[0].name}."
-            tmdb_notes.append(message)
-            collected_warnings.append(message)
+            _record_tmdb_note(f"TMDB could not find a confident match for {files[0].name}.")
     elif not (cfg.slowpics.tmdb_id or "").strip():
-        message = "TMDB disabled: set [tmdb].api_key in config.toml to enable automatic matching."
-        tmdb_notes.append(message)
-        collected_warnings.append(message)
+        _record_tmdb_note(
+            "TMDB disabled: set [tmdb].api_key in config.toml to enable automatic matching."
+        )
 
     plans = planner_utils.build_plans(files, metadata, cfg)
     analyze_path = core.pick_analyze_file(files, metadata, cfg.analysis.analyze_clip, cache_dir=root)
@@ -911,19 +930,20 @@ def run(request: RunRequest) -> RunResult:
                 )
             else:
                 cache_status = "recomputed"
-                reason_code = probe_result.reason or probe_result.status
+                reason_code = probe_result.reason or probe_result.status or "unknown"
                 cache_reason = reason_code
-                human_reason = reason_code.replace("_", " ")
-                if probe_result.status in {"stale", "error"}:
-                    reporter.line(
-                        f"[yellow]Frame metrics cache {probe_result.status} "
-                        f"({escape(human_reason)}); recomputing…[/]"
-                    )
-                cache_progress_message = "Recomputing frame metrics…"
+                human_reason = reason_code.replace("_", " ").strip() or "unknown"
+                reporter.line(
+                    f"[yellow]Frame metrics cache {probe_result.status} "
+                    f"({escape(human_reason)}); recomputing…[/]"
+                )
+                cache_progress_message = f"Recomputing frame metrics ({human_reason})…"
         else:
             cache_status = "recomputed"
             cache_reason = "missing"
             cache_probe = CacheLoadResult(metrics=None, status="missing", reason="missing")
+            reporter.line("[yellow]Frame metrics cache missing; recomputing…[/]")
+            cache_progress_message = "Recomputing frame metrics (missing)…"
 
     json_tail["cache"] = {
         "file": cache_filename,
@@ -1888,13 +1908,30 @@ def run(request: RunRequest) -> RunResult:
     if slowpics_url:
         slowpics_block = ensure_slowpics_block(json_tail, cfg)
         slowpics_block["url"] = slowpics_url
+        shortcut_path_obj: Optional[Path] = None
+        shortcut_error: Optional[str] = None
         if cfg.slowpics.create_url_shortcut:
             shortcut_filename = build_shortcut_filename(
                 cfg.slowpics.collection_name, slowpics_url
             )
-            slowpics_block["shortcut_path"] = str(out_dir / shortcut_filename)
+            if shortcut_filename:
+                shortcut_path_obj = out_dir / shortcut_filename
+            else:
+                shortcut_error = "invalid_shortcut_name"
+        if shortcut_path_obj is not None:
+            slowpics_block["shortcut_path"] = str(shortcut_path_obj)
+            shortcut_written = shortcut_path_obj.exists()
         else:
             slowpics_block["shortcut_path"] = None
+            shortcut_written = False
+            if not cfg.slowpics.create_url_shortcut:
+                shortcut_error = "disabled"
+        if shortcut_written:
+            shortcut_error = None
+        elif shortcut_path_obj is not None and shortcut_error is None:
+            shortcut_error = "write_failed"
+        slowpics_block["shortcut_written"] = shortcut_written
+        slowpics_block["shortcut_error"] = shortcut_error
 
     report_index_path: Optional[Path] = None
     report_defaults: ReportJSON = {

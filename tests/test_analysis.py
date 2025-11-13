@@ -8,6 +8,8 @@ from typing import Any, cast
 import pytest
 
 import src.frame_compare.analysis as analysis_mod
+import src.frame_compare.analysis.cache_io as cache_io
+import src.frame_compare.cache as cache_module
 from src.datatypes import AnalysisConfig, ColorConfig
 from src.frame_compare.analysis import (
     FrameMetricsCacheInfo,
@@ -21,6 +23,9 @@ from src.frame_compare.analysis import (
     selection_hash_for_config,
     write_selection_cache_file,
 )
+from src.frame_compare.analysis.cache_io import ClipIdentity
+from src.frame_compare.cli_runtime import ClipPlan
+from tests.helpers.runner_env import _make_config
 
 
 class FakeClip:
@@ -136,6 +141,211 @@ def _seed_cached_metrics(tmp_path: Path) -> tuple[FrameMetricsCacheInfo, Analysi
     )
     return cache_info, cfg, selection_frames
 
+
+def _make_cache_info(tmp_path: Path, file_name: str) -> FrameMetricsCacheInfo:
+    return FrameMetricsCacheInfo(
+        path=tmp_path / "metrics.json",
+        files=[file_name],
+        analyzed_file=file_name,
+        release_group="",
+        trim_start=0,
+        trim_end=None,
+        fps_num=24,
+        fps_den=1,
+    )
+
+
+def test_build_clip_inputs_does_not_hash_by_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    file_name = "clip.mkv"
+    clip_path = tmp_path / file_name
+    clip_path.write_bytes(b"data")
+    info = _make_cache_info(tmp_path, file_name)
+
+    def _fail_compute(_path: Path, *, chunk_size: int = 1024 * 1024) -> str:
+        raise AssertionError("hash computation should not run on the fast path")
+
+    monkeypatch.setattr(cache_io, "_compute_file_sha1", _fail_compute)
+    clip_inputs = cache_io._build_clip_inputs(info)
+    assert clip_inputs[0]["sha1"] is None
+
+
+def test_build_clip_inputs_hashes_when_opted_in(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    file_name = "clip.mkv"
+    clip_path = tmp_path / file_name
+    clip_path.write_bytes(b"data")
+    info = _make_cache_info(tmp_path, file_name)
+
+    digest_calls: list[Path] = []
+
+    def _capture_compute(path: Path, *, chunk_size: int = 1024 * 1024) -> str:
+        digest_calls.append(path)
+        return "abc123"
+
+    monkeypatch.setattr(cache_io, "_compute_file_sha1", _capture_compute)
+    monkeypatch.setenv("FRAME_COMPARE_CACHE_HASH", "1")
+    clip_inputs = cache_io._build_clip_inputs(info)
+
+    assert clip_inputs[0]["sha1"] == "abc123"
+    assert digest_calls == [clip_path]
+
+
+def test_build_clip_inputs_hashes_when_param_enabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    file_name = "clip.mkv"
+    clip_path = tmp_path / file_name
+    clip_path.write_bytes(b"data")
+    info = _make_cache_info(tmp_path, file_name)
+
+    digest_calls: list[Path] = []
+
+    def _capture_compute(path: Path, *, chunk_size: int = 1024 * 1024) -> str:
+        digest_calls.append(path)
+        return "param-digest"
+
+    monkeypatch.setattr(cache_io, "_compute_file_sha1", _capture_compute)
+    monkeypatch.delenv("FRAME_COMPARE_CACHE_HASH", raising=False)
+
+    clip_inputs = cache_io._build_clip_inputs(
+        info,
+        compute_sha1=True,
+        env_opt_in=False,
+    )
+
+    assert clip_inputs[0]["sha1"] == "param-digest"
+    assert digest_calls == [clip_path]
+
+
+def test_build_clip_inputs_from_paths_hashes_when_param_enabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    clip_path = tmp_path / "clip.mkv"
+    clip_path.write_bytes(b"data")
+
+    digest_calls: list[Path] = []
+
+    def _capture_compute(path: Path, *, chunk_size: int = 1024 * 1024) -> str:
+        digest_calls.append(path)
+        return "paths-digest"
+
+    monkeypatch.setattr(cache_io, "_compute_file_sha1", _capture_compute)
+    monkeypatch.setenv("FRAME_COMPARE_CACHE_HASH", "0")
+
+    clip_inputs = cache_io.build_clip_inputs_from_paths(
+        analyzed_file=clip_path.name,
+        clip_paths=[clip_path],
+        compute_sha1=True,
+        env_opt_in=False,
+    )
+
+    assert clip_inputs[0]["sha1"] == "paths-digest"
+    assert digest_calls == [clip_path.resolve()]
+
+
+def test_compare_clip_identities_requires_sha1_when_missing() -> None:
+    exp = ClipIdentity(
+        role="ref",
+        path="/a",
+        name="a",
+        size=None,
+        mtime=None,
+        sha1=None,
+    )
+    obs = ClipIdentity(
+        role="ref",
+        path="/a",
+        name="a",
+        size=None,
+        mtime=None,
+        sha1=None,
+    )
+    mismatch = cache_io._compare_clip_identities([exp], [obs], require_sha1=True)
+    assert mismatch == "inputs_sha1_mismatch"
+
+    exp2 = replace(exp, sha1="abc123")
+    obs2 = replace(obs, sha1=None)
+    mismatch = cache_io._compare_clip_identities([exp2], [obs2], require_sha1=True)
+    assert mismatch == "inputs_sha1_mismatch"
+
+
+def test_selection_sidecar_cache_key_stable_without_sha1(tmp_path: Path) -> None:
+    file_name = "clip.mkv"
+    clip_path = tmp_path / file_name
+    clip_path.write_bytes(b"data")
+    info = _make_cache_info(tmp_path, file_name)
+    cfg = AnalysisConfig(
+        frame_count_dark=1,
+        frame_count_bright=1,
+        frame_count_motion=1,
+        random_frames=0,
+        user_frames=[],
+        downscale_height=0,
+        step=1,
+        analyze_in_sdr=False,
+    )
+
+    clip_inputs_1 = cache_io._build_clip_inputs(info)
+    clip_inputs_2 = cache_io._build_clip_inputs(info)
+    cache_key_1 = cache_io._selection_cache_key(
+        clip_inputs=clip_inputs_1,
+        cfg=cfg,
+        selection_source="select_frames.v1",
+    )
+    cache_key_2 = cache_io._selection_cache_key(
+        clip_inputs=clip_inputs_2,
+        cfg=cfg,
+        selection_source="select_frames.v1",
+    )
+
+    assert cache_key_1 == cache_key_2
+
+
+
+def test_build_cache_info_skips_sha1_when_stat_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cfg = _make_config(tmp_path)
+    cfg.analysis.save_frames_data = True
+    missing_path = tmp_path / "missing.mkv"
+    plan = ClipPlan(path=missing_path, metadata={})
+
+    monkeypatch.setattr(cache_module, "cache_hash_env_requested", lambda: True)
+
+    def _fail_hash(_path: Path) -> str:
+        raise AssertionError("compute_file_sha1 should not be called when stat fails")
+
+    monkeypatch.setattr(cache_module, "compute_file_sha1", _fail_hash)
+
+    info = cache_module._build_cache_info(tmp_path, [plan], cfg, analyze_index=0)
+    assert info is not None
+    assert info.clips is not None
+    assert info.clips[0].sha1 is None
+
+
+def test_build_cache_info_handles_sha1_failures(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    cfg = _make_config(tmp_path)
+    cfg.analysis.save_frames_data = True
+    clip_path = tmp_path / "clip.mkv"
+    clip_path.write_bytes(b"data")
+    plan = ClipPlan(path=clip_path, metadata={})
+
+    monkeypatch.setattr(cache_module, "cache_hash_env_requested", lambda: True)
+
+    def _raise_hash(_path: Path) -> str:
+        raise OSError("hash failure")
+
+    monkeypatch.setattr(cache_module, "compute_file_sha1", _raise_hash)
+
+    info = cache_module._build_cache_info(tmp_path, [plan], cfg, analyze_index=0)
+    assert info is not None
+    assert info.clips is not None
+    assert info.clips[0].sha1 is None
 
 
 def test_quantile_basic():

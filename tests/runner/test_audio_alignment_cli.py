@@ -57,6 +57,44 @@ from tests.helpers.runner_env import (
 pytestmark = pytest.mark.usefixtures("runner_vs_core_stub", "dummy_progress")  # type: ignore[attr-defined]
 
 
+def _setup_cli_analysis_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    cli_runner_env: _CliRunnerEnv,
+) -> tuple[Path, Path, Path]:
+    """Common runner patches for cache-observability tests."""
+
+    reference_path = cli_runner_env.media_root / "Ref.mkv"
+    target_path = cli_runner_env.media_root / "Target.mkv"
+    for file_path in (reference_path, target_path):
+        file_path.write_bytes(b"data")
+
+    cfg = cli_runner_env.cfg
+    cfg.analysis.frame_data_filename = "generated.compframes"
+    cfg.analysis.save_frames_data = True
+    cfg.audio_alignment.enable = False
+
+    files = [reference_path, target_path]
+    metadata = [
+        {"label": "Reference", "file_name": reference_path.name},
+        {"label": "Target", "file_name": target_path.name},
+    ]
+
+    _patch_core_helper(monkeypatch, "_discover_media", lambda _root: list(files))
+    _patch_core_helper(monkeypatch, "parse_metadata", lambda *_args: list(metadata))
+    _patch_core_helper(
+        monkeypatch,
+        "_pick_analyze_file",
+        lambda _files, _metadata, _target, **_kwargs: reference_path,
+    )
+
+    monkeypatch.setattr(runner_module, "write_selection_cache_file", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner_module, "export_selection_metadata", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner_module, "generate_screenshots", lambda *args, **kwargs: [])
+
+    cache_file = cli_runner_env.media_root / cfg.analysis.frame_data_filename
+    return reference_path, target_path, cache_file
+
+
 def test_audio_alignment_vspreview_constants_raise_when_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -491,6 +529,96 @@ def test_run_cli_reuses_vspreview_manual_offsets_when_alignment_disabled(
     assert result.json_tail["vspreview_mode"] == "baseline"
     assert result.json_tail["suggested_frames"] == 0
     assert result.json_tail["suggested_seconds"] == 0.0
+
+
+def test_run_cli_surfaces_cache_recompute_reason(
+    monkeypatch: pytest.MonkeyPatch,
+    cli_runner_env: _CliRunnerEnv,
+) -> None:
+    _, _, cache_file = _setup_cli_analysis_environment(monkeypatch, cli_runner_env)
+    cache_file.write_text("cache", encoding="utf-8")
+
+    reason_code = "config_mismatch"
+
+    def fake_probe(info: FrameMetricsCacheInfo, _analysis_cfg: AnalysisConfig) -> CacheLoadResult:
+        assert info.path == cache_file.resolve()
+        return CacheLoadResult(metrics=None, status="stale", reason=reason_code)
+
+    monkeypatch.setattr(runner_module, "probe_cached_metrics", fake_probe)
+
+    observed_probes: list[CacheLoadResult | None] = []
+
+    def fake_select(
+        *_args: object,
+        return_metadata: bool = False,
+        cache_probe: CacheLoadResult | None = None,
+        **_kwargs: object,
+    ):
+        observed_probes.append(cache_probe)
+        frames = [10, 20]
+        categories = {10: "Auto", 20: "Auto"}
+        if return_metadata:
+            return frames, categories, {}
+        return frames
+
+    monkeypatch.setattr(runner_module, "select_frames", fake_select)
+
+    result = frame_compare.run_cli(None, None)
+
+    assert observed_probes and observed_probes[0] is not None
+    assert observed_probes[0].status == "stale"
+    assert result.json_tail is not None
+    cache_json = _expect_mapping(result.json_tail["cache"])
+    assert cache_json["status"] == "recomputed"
+    assert cache_json["reason"] == reason_code
+    analysis_json = _expect_mapping(result.json_tail["analysis"])
+    assert analysis_json["cache_reused"] is False
+    progress_message = analysis_json.get("cache_progress_message", "")
+    assert "config mismatch" in progress_message.lower()
+    assert progress_message.startswith("Recomputing frame metrics")
+
+
+def test_run_cli_reports_missing_cache_reason(
+    monkeypatch: pytest.MonkeyPatch,
+    cli_runner_env: _CliRunnerEnv,
+) -> None:
+    _, _, cache_file = _setup_cli_analysis_environment(monkeypatch, cli_runner_env)
+
+    def _probe_unused(*_args: object, **_kwargs: object) -> CacheLoadResult:
+        raise AssertionError("probe_cached_metrics should not be called when cache file is missing")
+
+    monkeypatch.setattr(runner_module, "probe_cached_metrics", _probe_unused)
+
+    observed_probes: list[CacheLoadResult | None] = []
+
+    def fake_select(
+        *_args: object,
+        return_metadata: bool = False,
+        cache_probe: CacheLoadResult | None = None,
+        **_kwargs: object,
+    ):
+        observed_probes.append(cache_probe)
+        frames = [5, 15]
+        categories = {5: "Auto", 15: "Auto"}
+        if return_metadata:
+            return frames, categories, {}
+        return frames
+
+    monkeypatch.setattr(runner_module, "select_frames", fake_select)
+
+    result = frame_compare.run_cli(None, None)
+
+    assert observed_probes and observed_probes[0] is not None
+    assert observed_probes[0].status == "missing"
+    assert result.json_tail is not None
+    cache_json = _expect_mapping(result.json_tail["cache"])
+    assert cache_json["status"] == "recomputed"
+    assert cache_json["reason"] == "missing"
+    analysis_json = _expect_mapping(result.json_tail["analysis"])
+    assert analysis_json["cache_reused"] is False
+    progress_message = analysis_json.get("cache_progress_message", "")
+    assert "missing" in progress_message.lower()
+    assert progress_message.startswith("Recomputing frame metrics")
 
 def test_audio_alignment_vspreview_suggestion_mode(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -2,15 +2,19 @@ import asyncio
 from collections.abc import Iterator
 from typing import Dict, List
 
+import click
 import httpx
 import pytest
 from pytest import MonkeyPatch
 
 from src import tmdb as tmdb_module
+from src.frame_compare import tmdb_workflow
 from src.tmdb import (
     MOVIE,
     TV,
+    TMDBCandidate,
     TMDBConfig,
+    TMDBResolution,
     TMDBResolutionError,
     resolve_tmdb,
 )
@@ -408,3 +412,57 @@ def test_tmdb_backoff_and_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     assert sleep_calls  # backoff triggered at least once
     # Only two HTTP calls should have been made (429 + success); cache served the second resolve
     assert attempts["count"] == 1
+
+
+def test_prompt_manual_tmdb_sanitizes_titles(monkeypatch: MonkeyPatch) -> None:
+    candidate = TMDBCandidate(
+        category=MOVIE,
+        tmdb_id="12345",
+        title="\x1b[31mInjected\x1b[0m Title",
+        original_title=None,
+        year=2022,
+        score=0.5,
+        original_language="en",
+        reason="match",
+        used_filename_search=False,
+        payload={},
+    )
+    captured: list[str] = []
+
+    monkeypatch.setattr(click, "echo", lambda message, **kwargs: captured.append(str(message)))
+    monkeypatch.setattr(click, "prompt", lambda *args, **kwargs: "")
+
+    assert tmdb_workflow._prompt_manual_tmdb([candidate]) is None
+    candidate_line = next(
+        (line for line in captured if "score=" in line),
+        "",
+    )
+    assert "Injected Title" in candidate_line
+    assert "\x1b[31m" not in candidate_line
+
+
+def test_prompt_tmdb_confirmation_sanitizes_header(monkeypatch: MonkeyPatch) -> None:
+    candidate = TMDBCandidate(
+        category=MOVIE,
+        tmdb_id="67890",
+        title="\x1b[32mEvil\x1b[0m Match",
+        original_title=None,
+        year=1999,
+        score=0.9,
+        original_language="en",
+        reason="match",
+        used_filename_search=False,
+        payload={},
+    )
+    resolution = TMDBResolution(candidate=candidate, margin=0.1, source_query="test")
+    captured: list[str] = []
+
+    monkeypatch.setattr(click, "echo", lambda message, **kwargs: captured.append(str(message)))
+    monkeypatch.setattr(click, "prompt", lambda *args, **kwargs: "y")
+
+    accepted, override = tmdb_workflow._prompt_tmdb_confirmation(resolution)
+    assert accepted is True
+    assert override is None
+    header_line = captured[0] if captured else ""
+    assert "Evil Match" in header_line
+    assert "\x1b[32m" not in header_line

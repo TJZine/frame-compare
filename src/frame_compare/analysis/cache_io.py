@@ -1,4 +1,3 @@
-# pyright: standard
 """Cache I/O helpers for frame comparison analysis."""
 
 from __future__ import annotations
@@ -35,6 +34,9 @@ if TYPE_CHECKING:
 _SELECTION_METADATA_VERSION = "1"
 _SELECTION_SOURCE_ID = "select_frames.v1"
 _TIME_FORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
+_CACHE_HASH_ENV_FLAG = "FRAME_COMPARE_CACHE_HASH"
+_CACHE_HASH_ENV_FALSEY = {"", "0", "false", "no", "off"}
+_METRICS_PAYLOAD_VERSION = 2
 
 
 def _now_utc_iso() -> str:
@@ -48,9 +50,45 @@ def _selection_module():
     return selection_module
 
 
+def _cache_hash_env_requested() -> bool:
+    raw = os.environ.get(_CACHE_HASH_ENV_FLAG)
+    if raw is None:
+        return False
+    normalized = raw.strip().lower()
+    return normalized not in _CACHE_HASH_ENV_FALSEY
+
+
+@dataclass(frozen=True)
+class ClipIdentity:
+    """Snapshot of a clip participating in a cache entry."""
+
+    role: str
+    path: str
+    name: str
+    size: Optional[int]
+    mtime: Optional[str]
+    sha1: Optional[str]
+
+    def to_payload(self) -> Dict[str, object]:
+        """Serialize as a JSON-friendly dictionary."""
+
+        return {
+            "role": self.role,
+            "path": self.path,
+            "name": self.name,
+            "size": self.size,
+            "mtime": self.mtime,
+            "sha1": self.sha1,
+        }
+
+
 @dataclass(frozen=True)
 class FrameMetricsCacheInfo:
-    """Context needed to load/save cached frame metrics for analysis."""
+    """Context needed to load/save cached frame metrics for analysis.
+
+    ``clips`` carries precomputed :class:`ClipIdentity` entries so later cache
+    probes can avoid re-stat'ing inputs.
+    """
 
     path: Path
     files: Sequence[str]
@@ -60,6 +98,7 @@ class FrameMetricsCacheInfo:
     trim_end: Optional[int]
     fps_num: int
     fps_den: int
+    clips: Optional[List[ClipIdentity]] = None
 
 
 @dataclass
@@ -140,6 +179,26 @@ def _coerce_optional_str(value: object) -> Optional[str]:
         return stripped or None
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return str(value)
+    return None
+
+
+def _coerce_optional_int(value: object) -> Optional[int]:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return None
+        return int(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            return int(stripped)
+        except ValueError:
+            return None
     return None
 
 
@@ -300,12 +359,34 @@ def probe_cached_metrics(info: FrameMetricsCacheInfo, cfg: AnalysisConfig) -> Ca
     if data is None:
         return CacheLoadResult(metrics=None, status="error", reason="invalid_payload")
 
-    if data.get("version") != 1:
+    if data.get("version") != _METRICS_PAYLOAD_VERSION:
         return CacheLoadResult(metrics=None, status="stale", reason="version_mismatch")
+
+    inputs_section = _coerce_str_dict(data.get("inputs"))
+    if inputs_section is None:
+        return CacheLoadResult(metrics=None, status="stale", reason="inputs_missing")
+    clips_raw = inputs_section.get("clips")
+    if not isinstance(clips_raw, list):
+        return CacheLoadResult(metrics=None, status="stale", reason="inputs_missing")
+
+    observed_clips: List[ClipIdentity] = []
+    for entry in cast(List[object], clips_raw):
+        clip_identity = _clip_identity_from_payload(entry)
+        if clip_identity is None:
+            return CacheLoadResult(metrics=None, status="stale", reason="inputs_invalid")
+        observed_clips.append(clip_identity)
+
+    expected_clips = _clip_identities_from_info(info)
+    mismatch_reason = _compare_clip_identities(
+        expected_clips,
+        observed_clips,
+        require_sha1=_cache_hash_env_requested(),
+    )
+    if mismatch_reason:
+        return CacheLoadResult(metrics=None, status="stale", reason=mismatch_reason)
+
     if data.get("config_hash") != _config_fingerprint(cfg):
         return CacheLoadResult(metrics=None, status="stale", reason="config_mismatch")
-    if data.get("files") != list(info.files):
-        return CacheLoadResult(metrics=None, status="stale", reason="inputs_changed")
     if data.get("analyzed_file") != info.analyzed_file:
         return CacheLoadResult(metrics=None, status="stale", reason="analyzed_mismatch")
 
@@ -321,10 +402,14 @@ def probe_cached_metrics(info: FrameMetricsCacheInfo, cfg: AnalysisConfig) -> Ca
     fps_obj = data.get("fps")
     fps_values: List[int] = []
     if isinstance(fps_obj, (list, tuple)):
-        try:
-            fps_values = [int(part) for part in fps_obj]
-        except (TypeError, ValueError):
-            return CacheLoadResult(metrics=None, status="stale", reason="fps_invalid")
+        fps_candidate: List[int] = []
+        sequence_obj = cast(Sequence[SupportsInt | str], fps_obj)
+        for part in sequence_obj:
+            try:
+                fps_candidate.append(int(part))
+            except (TypeError, ValueError):
+                return CacheLoadResult(metrics=None, status="stale", reason="fps_invalid")
+        fps_values = fps_candidate
     if fps_values != [info.fps_num, info.fps_den]:
         return CacheLoadResult(metrics=None, status="stale", reason="fps_mismatch")
 
@@ -450,10 +535,59 @@ def _infer_clip_role(index: int, name: str, analyzed_file: str, total: int) -> s
     return f"aux{index}"
 
 
-def _build_clip_inputs(info: FrameMetricsCacheInfo) -> List[Dict[str, object]]:
+def _clip_snapshot_payloads(info: FrameMetricsCacheInfo) -> Optional[List[Dict[str, object]]]:
+    if info.clips is None or len(info.clips) != len(info.files):
+        return None
+    return [clip.to_payload() for clip in info.clips]
+
+
+def _clip_identity_from_payload(entry: object) -> Optional[ClipIdentity]:
+    entry_map = _coerce_str_dict(entry)
+    if entry_map is None:
+        return None
+    path_obj = entry_map.get("path")
+    name_obj = entry_map.get("name")
+    role_obj = entry_map.get("role")
+    if not isinstance(path_obj, str) or not isinstance(name_obj, str):
+        return None
+    role = str(role_obj) if isinstance(role_obj, str) else ""
+    size = _coerce_optional_int(entry_map.get("size"))
+    mtime_obj = entry_map.get("mtime")
+    if isinstance(mtime_obj, str):
+        mtime = mtime_obj or None
+    elif isinstance(mtime_obj, (int, float)) and not isinstance(mtime_obj, bool):
+        mtime = str(mtime_obj)
+    else:
+        mtime = None
+    sha1_obj = entry_map.get("sha1")
+    sha1 = None
+    if isinstance(sha1_obj, str):
+        sha1 = sha1_obj or None
+    return ClipIdentity(
+        role=role or "",
+        path=path_obj,
+        name=name_obj,
+        size=size,
+        mtime=mtime,
+        sha1=sha1,
+    )
+
+
+def _build_clip_inputs(
+    info: FrameMetricsCacheInfo,
+    *,
+    compute_sha1: bool = False,
+    env_opt_in: bool = True,
+) -> List[Dict[str, object]]:
+    snapshot = _clip_snapshot_payloads(info)
+    if snapshot is not None:
+        # Return a shallow copy so callers can mutate without affecting cache info.
+        return [dict(entry) for entry in snapshot]
+
     root = info.path.parent
     entries: List[Dict[str, object]] = []
     total = len(info.files)
+    should_hash = compute_sha1 or (env_opt_in and _cache_hash_env_requested())
     for idx, file_name in enumerate(info.files):
         candidate = Path(file_name)
         if not candidate.is_absolute():
@@ -465,7 +599,7 @@ def _build_clip_inputs(info: FrameMetricsCacheInfo) -> List[Dict[str, object]]:
         except OSError:
             size = None
             mtime = None
-        sha1 = _compute_file_sha1(candidate)
+        sha1 = _compute_file_sha1(candidate) if should_hash else None
         entries.append(
             {
                 "role": _infer_clip_role(idx, file_name, info.analyzed_file, total),
@@ -477,6 +611,57 @@ def _build_clip_inputs(info: FrameMetricsCacheInfo) -> List[Dict[str, object]]:
             }
         )
     return entries
+
+
+def _clip_identities_from_info(info: FrameMetricsCacheInfo) -> List[ClipIdentity]:
+    if info.clips is not None and len(info.clips) == len(info.files):
+        return list(info.clips)
+
+    computed = _build_clip_inputs(info)
+    total = len(info.files)
+    identities: List[ClipIdentity] = []
+    for idx, entry in enumerate(computed):
+        clip = _clip_identity_from_payload(entry)
+        if clip is None:
+            name = info.files[idx] if idx < total else str(entry.get("name", "clip"))
+            role = _infer_clip_role(idx, name, info.analyzed_file, total)
+            path_obj = entry.get("path")
+            path = str(path_obj) if isinstance(path_obj, str) else str(info.path.parent / name)
+            clip = ClipIdentity(
+                role=role,
+                path=path,
+                name=name,
+                size=None,
+                mtime=None,
+                sha1=None,
+            )
+        identities.append(clip)
+    return identities
+
+
+def _compare_clip_identities(
+    expected: Sequence[ClipIdentity],
+    observed: Sequence[ClipIdentity],
+    *,
+    require_sha1: bool,
+) -> Optional[str]:
+    if len(expected) != len(observed):
+        return "inputs_count_mismatch"
+    for exp, obs in zip(expected, observed):
+        if obs.path != exp.path:
+            return "inputs_path_mismatch"
+        if obs.name != exp.name:
+            return "inputs_name_mismatch"
+        if exp.role != obs.role:
+            return "inputs_role_mismatch"
+        if exp.size is not None and obs.size is not None and obs.size != exp.size:
+            return "inputs_size_mismatch"
+        if exp.mtime is not None and obs.mtime is not None and obs.mtime != exp.mtime:
+            return "inputs_mtime_mismatch"
+        if require_sha1:
+            if exp.sha1 is None or obs.sha1 is None or obs.sha1 != exp.sha1:
+                return "inputs_sha1_mismatch"
+    return None
 
 
 def _selection_cache_key(
@@ -532,7 +717,7 @@ def _build_selection_sidecar_payload(
     selection_frames: Sequence[int],
     selection_details: Mapping[int, SelectionDetail] | None,
 ) -> Dict[str, object]:
-    clip_inputs = _build_clip_inputs(info)
+    clip_inputs = _clip_snapshot_payloads(info) or _build_clip_inputs(info)
     return _selection_payload_from_inputs(
         clip_inputs,
         cfg,
@@ -571,10 +756,15 @@ def _save_selection_sidecar(
 
 
 def build_clip_inputs_from_paths(
-    analyzed_file: str, clip_paths: Sequence[Path]
+    analyzed_file: str,
+    clip_paths: Sequence[Path],
+    *,
+    compute_sha1: bool = False,
+    env_opt_in: bool = True,
 ) -> List[Dict[str, object]]:
     entries: List[Dict[str, object]] = []
     total = len(clip_paths)
+    should_hash = compute_sha1 or (env_opt_in and _cache_hash_env_requested())
     for idx, clip_path in enumerate(clip_paths):
         resolved = clip_path.resolve()
         try:
@@ -584,7 +774,7 @@ def build_clip_inputs_from_paths(
         except OSError:
             size = None
             mtime = None
-        sha1 = _compute_file_sha1(resolved)
+        sha1 = _compute_file_sha1(resolved) if should_hash else None
         entries.append(
             {
                 "role": _infer_clip_role(idx, resolved.name, analyzed_file, total),
@@ -711,7 +901,7 @@ def _load_selection_sidecar(
 
     inputs_section = _coerce_str_dict(data.get("inputs")) or {}
     clip_inputs = inputs_section.get("clips")
-    recomputed_inputs = _build_clip_inputs(info)
+    recomputed_inputs = _clip_snapshot_payloads(info) or _build_clip_inputs(info)
     if clip_inputs is not None:
         clip_names: List[object] = []
         if isinstance(clip_inputs, list):
@@ -776,8 +966,9 @@ def _save_cached_metrics(
     """
     selection_module = _selection_module()
     path = info.path
+    clip_inputs_payload = _build_clip_inputs(info)
     payload: Dict[str, object] = {
-        "version": 1,
+        "version": _METRICS_PAYLOAD_VERSION,
         "config_hash": _config_fingerprint(cfg),
         "files": list(info.files),
         "analyzed_file": info.analyzed_file,
@@ -787,6 +978,10 @@ def _save_cached_metrics(
         "fps": [info.fps_num, info.fps_den],
         "brightness": [(int(idx), float(val)) for idx, val in brightness],
         "motion": [(int(idx), float(val)) for idx, val in motion],
+        "inputs": {
+            "clips": clip_inputs_payload,
+            "analyzed_file": info.analyzed_file,
+        },
     }
     annotations: Dict[str, str] = {}
     if selection_hash is not None and selection_frames is not None:
@@ -852,6 +1047,8 @@ coerce_frame_index = _coerce_frame_index
 coerce_optional_float = _coerce_optional_float
 coerce_optional_str = _coerce_optional_str
 infer_clip_role = _infer_clip_role
+cache_hash_env_requested = _cache_hash_env_requested
+compute_file_sha1 = _compute_file_sha1
 threshold_snapshot = _threshold_snapshot
 config_fingerprint = _config_fingerprint
 selection_sidecar_path = _selection_sidecar_path

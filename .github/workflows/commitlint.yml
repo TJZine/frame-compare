@@ -28,7 +28,16 @@ jobs:
       # For pushes: check all commits in the push (not just "last")
       - name: Validate push commits (range)
         if: github.event_name == 'push'
-        run: npx commitlint --from ${{ github.event.before }} --to ${{ github.sha }} --verbose
+        run: |
+          set -euo pipefail
+          ZERO_SHA="0000000000000000000000000000000000000000"
+          RANGE_FROM="${{ github.event.before }}"
+          RANGE_TO="${{ github.sha }}"
+          if [ -z "$RANGE_FROM" ] || [ "$RANGE_FROM" = "$ZERO_SHA" ] || ! git rev-parse --verify "$RANGE_FROM" >/dev/null 2>&1; then
+            RANGE_FROM="$(git rev-list --max-parents=0 "$RANGE_TO" | head -n 1)"
+          fi
+          echo "Linting commits from $RANGE_FROM to $RANGE_TO"
+          npx commitlint --from "$RANGE_FROM" --to "$RANGE_TO" --verbose
 
       # For PRs: check only the commits in the PR diff
       - name: Validate PR commits (range)

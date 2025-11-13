@@ -2,6 +2,141 @@
 
 # Decisions Log
 
+- *2025-11-13:* chore(types): restored pyright strictness for `slowpics`, `analysis.cache_io`, and `cli_layout`.
+  - Problem: `cli_layout.py` relied on `# pyright: standard` to hide Unknown-heavy template handling, and `slowpics.py` used loosely typed MultipartEncoder imports that failed strict mode whenever `requests-toolbelt` was optional, undermining the Part 1 typing guarantees for cache/selection code.
+  - Decision: removed the downgrade, tightened MultipartEncoder typing with guarded imports and explicit Optional checks, validated every layout section/template/line/table entry before rendering, and exposed a renderer helper so progress columns no longer poke private attributes; cache modules already satisfied strict mode after the Part 1 snapshot refactor.
+  - Verification:
+    - `date -u +%Y-%m-%d` → `2025-11-13`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` →
+      ```
+      ........................................................................ [ 22%]
+      ........................................................................ [ 44%]
+      ...............................s........................................ [ 66%]
+      ........................................................................ [ 88%]
+      ......................................                                   [100%]
+      325 passed, 1 skipped in 28.48s
+      ```
+    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+    - `.venv/bin/ruff check` → `All checks passed!`
+
+- *2025-11-13:* fix(slowpics): shortcut creation is now best-effort with JSON telemetry for shortcut outcomes.
+  - Problem: Uploads failed entirely when the `.url` shortcut could not be written, leaving users without the canonical slow.pics URL and no way to see why the shortcut was missing.
+  - Decision: Wrap shortcut writes in `slowpics.upload_comparison()` with an OSError guard that warns but still returns the URL, and thread `shortcut_path`, `shortcut_written`, and `shortcut_error` through the runner/CLI JSON tail so reports/automation can describe failures. The CLI also emits a concise warning when it detects a missing shortcut.
+  - Impact: slow.pics uploads always deliver their URL even on read-only volumes; telemetry differentiates disabled shortcuts from write failures (`disabled`, `invalid_shortcut_name`, `write_failed`), and docs explain the behavior so UI layers can reflect it.
+  - Verification:
+    - `date -u +%Y-%m-%d` → `2025-11-13`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_slowpics.py -k failure` →
+      ```
+      .                                                                        [100%]
+      1 passed, 20 deselected in 0.03s
+      ```
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/runner/test_slowpics_workflow.py -k shortcut` →
+      ```
+      .                                                                        [100%]
+      1 passed, 11 deselected in 0.08s
+      ```
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_slowpics.py` →
+      ```
+      .....................                                                    [100%]
+      21 passed in 0.03s
+      ```
+
+- *2025-11-13:* dx(cache): cache recompute reasons are now surfaced in both CLI output and the JSON tail, and analysis logs include breadcrumbs for metrics/sidecar misses.
+  - Problem: When frame metrics were rebuilt, operators only saw “Recomputing frame metrics…” without the underlying reason (config mismatch, fps mismatch, etc.), making it hard to tell why reuse failed. Selection sidecar misses also lacked observability.
+  - Decision: Thread the probe reason into the progress message (`Recomputing frame metrics (<reason>)…`), emit a CLI line for missing caches, and log `[ANALYSIS] metrics cache miss: …` plus `[ANALYSIS] selection sidecar unavailable…` when applicable. JSON tail fields already carry `cache.reason`; now `analysis.cache_progress_message` mirrors the human-readable cause so UI and logs stay consistent.
+  - Verification:
+    - `date -u +%Y-%m-%d` → `2025-11-13`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/runner/test_audio_alignment_cli.py::test_run_cli_surfaces_cache_recompute_reason tests/runner/test_audio_alignment_cli.py::test_run_cli_reports_missing_cache_reason` →
+      ```
+      ..                                                                       [100%]
+      2 passed in 0.11s
+      ```
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` →
+      ```
+      319 passed, 1 skipped in 28.08s
+      ```
+    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+  - Context: This is a visibility-only change; reuse rules are unchanged. Sample reasons now shown to users: `config_mismatch`, `inputs_changed`, `fps_mismatch`, `trim_start_mismatch`, `trim_end_mismatch`, `release_group_mismatch`, `invalid_json`, `metric_type_error`, and `missing`.
+  - Follow-up (log breadcrumbs now include file/cache identifiers):
+    - `date -u +%Y-%m-%d` → `2025-11-13`
+    - `git status -sb` →
+      ```
+      ## runner-refactor...origin/runner-refactor [ahead 3]
+       M CHANGELOG.md
+       M docs/DECISIONS.md
+       M src/frame_compare/analysis/selection.py
+       M src/frame_compare/runner.py
+       M tests/runner/test_audio_alignment_cli.py
+      ```
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/runner/test_audio_alignment_cli.py::test_run_cli_surfaces_cache_recompute_reason tests/runner/test_audio_alignment_cli.py::test_run_cli_reports_missing_cache_reason` →
+      ```
+      ..                                                                       [100%]
+      2 passed in 0.04s
+      ```
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` →
+      ```
+      319 passed, 1 skipped in 28.08s
+      ```
+    - `.venv/bin/ruff check` → `All checks passed!`
+    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+
+- *2025-11-13:* perf(cache): cache writes no longer re-hash clip payloads by default, and cache metadata can now carry precomputed clip inputs.
+  - Problem: large media inputs forced `_build_clip_inputs` to read every byte when persisting selection caches, even though SHA1 digests are never consulted during reuse decisions (those keys rely on filenames, fps, config fingerprint, trims, and release group).
+  - Decision: gate hashing behind `compute_sha1`/`FRAME_COMPARE_CACHE_HASH` (default off), keep the `"sha1"` field present but nullable, and extend `FrameMetricsCacheInfo` with an optional `clips` field populated by `cache.build_cache_info` so later cache builders can reuse the stat metadata without re-touching disk. Operators can export `FRAME_COMPARE_CACHE_HASH=1` when they explicitly want digests in the payload.
+  - Alternatives considered: keep hashing enabled (too slow on multi-GB files) or defer clip precomputation to a later phase (implemented now so selection sidecars avoid redundant `stat()` calls the moment cache info is constructed).
+  - Verification:
+    - `date -u +%Y-%m-%d` → `2025-11-13`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_analysis.py -k "clip_inputs or selection_sidecar_cache_key_stable_without_sha1"` →
+      ```
+      ...                                                                      [100%]
+      3 passed, 17 deselected in 0.03s
+      ```
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_analysis.py::test_select_frames_uses_cache` →
+      ```
+      .                                                                        [100%]
+      1 passed in 0.01s
+      ```
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` →
+      ```
+      315 passed, 1 skipped in 28.07s
+      ```
+    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+  - Follow-up (compute_sha1 parameter coverage):
+    - `date -u +%Y-%m-%d` → `2025-11-13`
+    - `git status -sb` →
+      ```
+      ## runner-refactor...origin/runner-refactor [ahead 2]
+       M tests/test_analysis.py
+      ```
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_analysis.py -k clip_inputs` →
+      ```
+      ....                                                                     [100%]
+      4 passed, 18 deselected in 0.04s
+      ```
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` →
+      ```
+      317 passed, 1 skipped in 28.00s
+      ```
+    - `.venv/bin/ruff check` → `All checks passed!`
+    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+  - Follow-up (require SHA1 when opted in, handle hashing failures safely):
+    - `date -u +%Y-%m-%d` → `2025-11-13`
+    - `git status -sb` →
+      ```
+      ## runner-refactor...origin/runner-refactor
+       M src/frame_compare/analysis/cache_io.py
+       M src/frame_compare/cache.py
+       M tests/test_analysis.py
+      ```
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_analysis.py -k sha1` →
+      ```
+      ....                                                                     [100%]
+      4 passed, 21 deselected in 0.04s
+      ```
+    - `.venv/bin/ruff check` → `All checks passed!`
+    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+  - Context: SHA1 digests remain available for diagnostics, but cache reuse continues to hinge on deterministic input names/configuration so payload compatibility is unaffected by the nullable digest field.
+
 - *2025-11-13:* Network policy hardening — centralized retry/timeout constants in `frame_compare/net.py`, added structured logging via `log_backoff_attempt`, threaded the callback through TMDB’s `_http_request`, and aligned slow.pics adapters/logs/tests with the shared policy while keeping the legacy upload endpoints. Redaction tests now cover userinfo/query edge cases, and slow.pics emits a final “upload complete” INFO that lists frames/workers.
   - `date -u +%Y-%m-%d` → `2025-11-13`
   - `UV_CACHE_DIR=.uv_cache PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run --no-sync python -m pytest -q tests/net tests/test_slowpics.py -k 'backoff or redact or adapter'` →
@@ -37,6 +172,51 @@
   - `rg -n "from src\.(slowpics|cli_layout|report|config_template|vs_core)\b|import src\.(slowpics|cli_layout|report|config_template|vs_core)\b"` → *(no matches; exit status 1)*
   - `rg -n "\bfrom src import vs_core\b|\bsrc\.vs_core\b"` → *(no matches; exit status 1)*
   - `UV_CACHE_DIR=.uv_cache uv run --no-sync ruff check` → `All checks passed!`
+- *2025-11-13:* Console-output sanitization — TMDB titles printed in prompts and verbose logs now pass through `sanitize_console_text` so escape/control sequences are stripped before the terminal sees them, while the raw metadata remains untouched for matching/persistence. The runner also sanitizes verbose slow.pics inputs, and the shared helper enforces OWASP A07 (Cross-Site Scripting – Output Encoding) guidance for console output. Follow-up: TMDB warning/notes (`tmdb_notes` + `collected_warnings`) now record console-safe text before `reporter.verbose_line`/`reporter.warn`, eliminating the last ANSI/control-character path.
+  - `date -u +%Y-%m-%d` → `2025-11-13`
+  - `git status -sb` →
+    ```
+    ## runner-refactor...origin/runner-refactor [ahead 1]
+     M src/frame_compare/runner.py
+    ```
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_tmdb.py -k prompt` →
+    ```
+    ..                                                                       [100%]
+    2 passed, 10 deselected in 0.01s
+    ```
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_layout_utils.py` →
+    ```
+    ...                                                                      [100%]
+    3 passed in 0.01s
+    ```
+  - `.venv/bin/ruff check` → `All checks passed!`
+  - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+  - Reference: source:https://github.com/owasp/top10/blob/master/2017/he/0xa7-xss.md@2025-11-13T04:13:30Z — demonstrates how unsanitized input can be injected directly into HTML attributes, illustrating the need for output encoding that `sanitize_console_text` now enforces on console-bound TMDB strings.
+- *2025-11-13:* CI parity after renaming the default branch to `main` — `commitlint` now falls back to the repository’s root commit whenever GitHub reports the all-zero `before` SHA (first branch push), and `release-please` explicitly targets `main` so it no longer attempts to fetch manifests from a non-existent `legacy` branch.
+  - `date -u +%Y-%m-%d` → `2025-11-13`
+  - `git status -sb` →
+    ```
+    ## runner-refactor...origin/runner-refactor [ahead 1]
+     M .github/workflows/commitlint.yml
+     M .github/workflows/release-please.yml
+     M CHANGELOG.md
+     M docs/DECISIONS.md
+     M src/frame_compare/analysis/cache_io.py
+     M src/frame_compare/runner.py
+     M tests/test_analysis.py
+    ```
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_tmdb.py -k prompt` →
+    ```
+    ..                                                                       [100%]
+    2 passed, 10 deselected in 0.01s
+    ```
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_layout_utils.py` →
+    ```
+    ...                                                                      [100%]
+    3 passed in 0.01s
+    ```
+  - `.venv/bin/ruff check` → `All checks passed!`
+  - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
 - *2025-11-13:* API hardening plan locked in `docs/refactor/api_hardening.md`: added `frame_compare.__all__` + stub alignment for the curated names (run_cli/main, RunRequest/RunResult, CLIAppError/ScreenshotError, TMDB + preflight + doctor helpers, collect_path_diagnostics, vs_core alias), created smoke tests under `tests/api/` and net helper coverage under `tests/net/`, refreshed `docs/README_REFERENCE.md`, and documented the policy in DEC/CHANGELOG`. Verification: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/api tests/net` → `11 passed in 0.02s`; `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`; `.venv/bin/ruff check` → `All checks passed!`; `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini` → `Contracts: 3 kept, 0 broken`.
 
 - *2025-11-12:* Sub-phase 11.9 — CI & packaging checks. Extended the forbidden import-linter contracts so `src.frame_compare.render`, `src.frame_compare.analysis`, and `src.frame_compare.vs` cannot back-import the CLI shim or `src.frame_compare.core`, wired the lint workflow to run the config-doc generator `--check` step before enforcing `lint-imports`, and added a dedicated `packaging` GitHub job that builds artifacts, runs `twine check`, validates wheel contents, and surfaces warning-level notices from `check-wheel-contents`.
@@ -337,3 +517,20 @@
   - document token‑efficient defaults (JSON, limit 3–5, threshold 0.6–0.7, `lang`), and
   - add a concise “Codanna + ST” workflow (Discovery → Plan → Thoughts → Validate/Commit).
   Historical references to Serena remain in CHANGELOG/DECISIONS for provenance; guidance docs no longer prescribe Serena. No external sources used.
+- *2025-11-13:* refactor(cache): metrics payloads now bundle clip identity snapshots (paths, sizes, mtimes, opt-in sha1) and the selection sidecar reads the same snapshot.
+  - Problem: caches could be reused across directories when filenames matched because only relative names were stored, and the selection sidecar re-probed the filesystem which reintroduced race conditions.
+  - Decision: introduce a frozen `ClipIdentity` dataclass populated by `_build_cache_info`, persist those records under a v2 cache payload with `inputs.clips`, gate sha1 generation behind the `FRAME_COMPARE_CACHE_HASH` env flag, and have the selection sidecar builder/loader reuse the precomputed snapshot instead of restatting.
+  - Impact: first runs invalidate v1 payloads (one-time recompute) but future runs avoid cross-folder reuse by comparing absolute paths plus size/mtime (and sha1 when opted in); selection reloads now avoid filesystem churn so frame picks align with cached metrics.
+  - Verification:
+    - `date -u +%Y-%m-%d` → `2025-11-13`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_cache_identity.py` →
+      ```
+      ....                                                                     [100%]
+      4 passed in 0.01s
+      ```
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_analysis.py::test_select_frames_uses_cache` →
+      ```
+      .                                                                        [100%]
+      1 passed in 0.01s
+      ```
+    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`

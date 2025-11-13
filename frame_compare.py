@@ -311,6 +311,8 @@ def _run_cli_entry(
 
     slowpics_block = json_tail.get("slowpics")
     shortcut_path_str: Optional[str] = None
+    shortcut_written = False
+    shortcut_error: Optional[str] = None
     deleted_dir = False
     clipboard_hint = ""
 
@@ -329,16 +331,31 @@ def _run_cli_entry(
         else:
             clipboard_hint = " (copied to clipboard)"
 
+        if not cfg.slowpics.create_url_shortcut:
+            shortcut_error = "disabled"
         if cfg.slowpics.create_url_shortcut:
             shortcut_filename = build_shortcut_filename(cfg.slowpics.collection_name, slowpics_url)
             if shortcut_filename:
-                shortcut_path_str = str(out_dir / shortcut_filename)
+                shortcut_path = out_dir / shortcut_filename
+                shortcut_path_str = str(shortcut_path)
+                shortcut_written = shortcut_path.exists()
+                if not shortcut_written:
+                    shortcut_error = "write_failed"
+                else:
+                    shortcut_error = None
+            else:
+                shortcut_error = "invalid_shortcut_name"
 
         print("[✓] slow.pics: verifying & saving shortcut")
         url_line = f"slow.pics URL: {slowpics_url}{clipboard_hint}"
         print(url_line)
         if shortcut_path_str:
             print(f"Shortcut: {shortcut_path_str}")
+            if not shortcut_written:
+                print(
+                    "[yellow]Warning:[/yellow] Unable to create slow.pics URL shortcut; "
+                    "check permissions or disk space"
+                )
         else:
             print("Shortcut: (disabled)")
 
@@ -387,6 +404,8 @@ def _run_cli_entry(
         slowpics_block = _ensure_slowpics_block(json_tail, cfg)
         slowpics_block["url"] = slowpics_url
         slowpics_block["shortcut_path"] = shortcut_path_str
+        slowpics_block["shortcut_written"] = shortcut_written
+        slowpics_block["shortcut_error"] = None if shortcut_written else shortcut_error
         slowpics_block["deleted_screens_dir"] = deleted_dir
     elif isinstance(slowpics_block, dict):
         _ensure_slowpics_block(json_tail, cfg)

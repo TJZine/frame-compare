@@ -111,6 +111,8 @@ class SlowpicsJSON(TypedDict):
     title: SlowpicsTitleBlock
     url: Optional[str]
     shortcut_path: Optional[str]
+    shortcut_written: bool
+    shortcut_error: Optional[str]
     deleted_screens_dir: bool
     is_public: bool
     is_hentai: bool
@@ -259,6 +261,8 @@ def _ensure_slowpics_block(json_tail: JsonTail, cfg: "AppConfig") -> SlowpicsJSO
             ),
             url=None,
             shortcut_path=None,
+            shortcut_written=False,
+            shortcut_error=None,
             deleted_screens_dir=False,
             is_public=bool(cfg.slowpics.is_public),
             is_hentai=bool(cfg.slowpics.is_hentai),
@@ -272,6 +276,10 @@ def _ensure_slowpics_block(json_tail: JsonTail, cfg: "AppConfig") -> SlowpicsJSO
         existing_block["url"] = None
     if "shortcut_path" not in existing_block:
         existing_block["shortcut_path"] = None
+    if "shortcut_written" not in existing_block:
+        existing_block["shortcut_written"] = False
+    if "shortcut_error" not in existing_block:
+        existing_block["shortcut_error"] = None
     if "deleted_screens_dir" not in existing_block:
         existing_block["deleted_screens_dir"] = False
     return existing_block
