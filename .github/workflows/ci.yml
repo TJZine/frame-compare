@@ -122,8 +122,10 @@ jobs:
         with:
           path: ~/.cache/uv
           key: uv-${{ runner.os }}-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+      - name: Create venv
+        run: uv venv
       - name: Install packaging tooling
-        run: uv pip install --system build twine check-wheel-contents
+        run: uv pip install build twine check-wheel-contents
       - name: Build wheel and sdist
         run: uv run --no-sync python -m build
       - name: Validate metadata with twine
