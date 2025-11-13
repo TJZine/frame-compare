@@ -131,28 +131,21 @@ jobs:
       - name: Validate metadata with twine
         run: uv run --no-sync twine check dist/*
       - name: Validate wheel contents
-        run: |
-          uv run --no-sync python - <<'PY'
-          import glob
-          import sys
-          import zipfile
-
-          wheels = glob.glob('dist/*.whl')
-          if not wheels:
-              sys.exit('No wheel built.')
-          with zipfile.ZipFile(wheels[0]) as z:
-              names = set(z.namelist())
-          required = {
-              'src/frame_compare/py.typed',
-              'data/config.toml.template',
-              'data/report/index.html',
-              'data/report/app.css',
-              'data/report/app.js',
-          }
-          missing = sorted(name for name in required if name not in names)
-          if missing:
-              sys.exit(f'Missing expected files in wheel: {missing}')
-          print('Wheel contents OK')
-          PY
+        run: uv run --no-sync python tools/check_wheel_contents.py dist/*.whl
       - name: check-wheel-contents (warnings only)
         run: uv run --no-sync check-wheel-contents dist/*.whl || true
+  windows-build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install packaging tooling
+        run: python -m pip install --upgrade pip build twine
+      - name: Build wheel and sdist
+        run: python -m build
+      - name: Validate metadata with twine
+        run: python -m twine check dist/*
+      - name: Validate wheel contents
+        run: python tools/check_wheel_contents.py "dist/*.whl"

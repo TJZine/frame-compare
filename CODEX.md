@@ -21,12 +21,13 @@
   - executing tests that require network, external services, or non-ephemeral resources
 
 ### Sequential Thinking Context Management
+- Run Sequential Thinking through Serena’s planning mode whenever possible (`switch_modes planning` + `think_about_*`). Only fall back to the generic Sequential Thinking MCP if Serena’s planner is unavailable, and stop using the fallback as soon as Serena’s tools recover.
 - When calling `process_thought` or `generate_summary`, only echo a condensed digest in chat (stage, immediate next steps, blockers/alerts). Never dump the raw JSON payloads back to the user; the MCP log already preserves them.
 - Archive or truncate aged thoughts once they are logged—keep roughly the last 7–10 items in active memory (expand temporarily if needed) and rely on the MCP server for historical retrieval instead of reprinting prior entries.
 - Prefer the lighter summary path (short synopsis rather than full analytics) whenever detailed telemetry is not needed for the current decision; escalate to the verbose output only for debugging or reviewer requests.
 - Note in task reports when you have rotated context (e.g., “older Sequential Thinking context archived per guidelines”) so reviewers know why earlier thoughts are omitted.
 - When filling metadata (`files_touched`, `tests_to_run`, `dependencies`, `risk_level`, `confidence_score`, etc.), provide real values or leave the schema defaults/empty lists; never fabricate filenames, tests, or risk signals just to satisfy the shape.
-- Every `process_thought` call must set `next_thought_needed=true` until the final Review-stage thought is logged. Only flip it to `false` once the full Scoping → Research & Spike → Implementation → Testing → Review sequence is recorded so the orchestrator keeps the loop open.
+- Every `process_thought` call (whether via Serena or the fallback MCP) must set `next_thought_needed=true` until the final Review-stage thought is logged. Only flip it to `false` once the full Scoping → Research & Spike → Implementation → Testing → Review sequence is recorded so the orchestrator keeps the loop open.
 - Keep logging thoughts for each stage in that sequence—do not skip a phase unless you explicitly state why it does not apply for the task.
 
 ## Global Defaults (Enforced)

@@ -1292,6 +1292,8 @@ Acceptance
 
 ## Post-phase Cleanup — Compatibility shim/bridge retirement
 
+API hardening tracked in `docs/refactor/api_hardening.md`.
+
 Goal: remove all temporary bridges and transitional shims left behind after Phases 9–11 (compat exports, wizard/VSPreview/TMDB shims, screenshot/analysis/vs_core shims, and any test-only bridges), so only the extracted modules and curated exports remain.
 
 Scope

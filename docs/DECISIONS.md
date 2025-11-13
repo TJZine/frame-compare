@@ -2,6 +2,15 @@
 
 # Decisions Log
 
+- *2025-11-13:* Release & packaging polish — enriched `pyproject.toml` metadata (description, license stanza, keywords, classifiers, URLs, authors), added `tools/check_wheel_contents.py` plus CI hooks on Linux/Windows, aligned `release-please` config with `project.name`/manifest paths, and introduced `.github/workflows/publish.yml` for a TestPyPI dry-run publish backed by OIDC. The packaging workflow now reuses the helper script and a new `windows-build` job catches platform-specific wheel regressions.
+  - `date -u +%Y-%m-%d` → `2025-11-13`
+  - `UV_CACHE_DIR=.uv_cache uv run --no-sync python -m build` → fails because pip cannot reach PyPI to download the isolated `setuptools>=69` requirement (network-restricted sandbox); same limitation noted in prior packaging checks.
+  - `UV_CACHE_DIR=.uv_cache uv run --no-sync twine check dist/*` →
+    ```
+    Checking dist/frame_compare-0.0.1-py3-none-any.whl: PASSED
+    Checking dist/frame_compare-0.0.1.tar.gz: PASSED
+    ```
+
 - *2025-11-13:* Phase 11 cleanup follow-up — finalized the curated `frame_compare` export surface, synced `typings/frame_compare.pyi`, repointed the remaining tests/helpers/docs to `src.frame_compare.*`, and reiterated in the trackers that only the canonical modules (plus the curated exports) remain supported. Verified no shim imports remain, reran lint/type/test/import gates, and attempted the packaging build (still blocked offline) before checking the existing artifacts with Twine and a manual wheel audit.
   - `date -u +%Y-%m-%d` → `2025-11-13`
   - `git status -sb` →
@@ -18,12 +27,7 @@
   - `rg -n "from src\.(slowpics|cli_layout|report|config_template|vs_core)\b|import src\.(slowpics|cli_layout|report|config_template|vs_core)\b"` → *(no matches; exit status 1)*
   - `rg -n "\bfrom src import vs_core\b|\bsrc\.vs_core\b"` → *(no matches; exit status 1)*
   - `UV_CACHE_DIR=.uv_cache uv run --no-sync ruff check` → `All checks passed!`
-  - `UV_CACHE_DIR=.uv_cache uv run --no-sync npx pyright --warnings` → `0 errors, 0 warnings, 0 informations`
-  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 UV_CACHE_DIR=.uv_cache uv run --no-sync python -m pytest -q` → `290 passed, 1 skipped in 39.94s`
-  - `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini` → `Contracts: 3 kept, 0 broken`
-  - `UV_CACHE_DIR=.uv_cache uv run --no-sync python -m build` → succeeded after obtaining escalated permissions/network access
-  - `UV_CACHE_DIR=.uv_cache uv run --no-sync twine check dist/*` → passed with the usual long-description warnings
-  - `python3 - <<'PY' ...` (wheel sanity script) → confirmed `src/frame_compare/py.typed` plus `data/config.toml.template` and `data/report/{index.html,app.css,app.js}` are present in `dist/frame_compare-0.0.1-py3-none-any.whl`.
+- *2025-11-13:* API hardening plan locked in `docs/refactor/api_hardening.md`: added `frame_compare.__all__` + stub alignment for the curated names (run_cli/main, RunRequest/RunResult, CLIAppError/ScreenshotError, TMDB + preflight + doctor helpers, collect_path_diagnostics, vs_core alias), created smoke tests under `tests/api/` and net helper coverage under `tests/net/`, refreshed `docs/README_REFERENCE.md`, and documented the policy in DEC/CHANGELOG`. Verification: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/api tests/net` → `11 passed in 0.02s`; `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`; `.venv/bin/ruff check` → `All checks passed!`; `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini` → `Contracts: 3 kept, 0 broken`.
 
 - *2025-11-12:* Sub-phase 11.9 — CI & packaging checks. Extended the forbidden import-linter contracts so `src.frame_compare.render`, `src.frame_compare.analysis`, and `src.frame_compare.vs` cannot back-import the CLI shim or `src.frame_compare.core`, wired the lint workflow to run the config-doc generator `--check` step before enforcing `lint-imports`, and added a dedicated `packaging` GitHub job that builds artifacts, runs `twine check`, validates wheel contents, and surfaces warning-level notices from `check-wheel-contents`.
   - `date -u +%Y-%m-%d` → `2025-11-12`

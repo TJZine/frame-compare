@@ -45,6 +45,10 @@ from src.frame_compare.preflight import (
     resolve_subdir,
     resolve_workspace_root,
 )
+from src.frame_compare.preflight import (
+    collect_path_diagnostics as _collect_path_diagnostics,
+)
+from src.frame_compare.render.errors import ScreenshotError
 from src.frame_compare.slowpics import build_shortcut_filename
 
 collect_doctor_checks = doctor_module.collect_checks
@@ -80,12 +84,41 @@ _COMPAT_EXPORTS: dict[str, object] = {
     "render_collection_name": tmdb_workflow.render_collection_name,
     "resolve_tmdb_workflow": tmdb_workflow.resolve_workflow,
     "TMDBLookupResult": tmdb_workflow.TMDBLookupResult,
+    "ScreenshotError": ScreenshotError,
 }
 for _name, _value in _COMPAT_EXPORTS.items():
     globals()[_name] = _value
 
+resolve_tmdb_workflow = tmdb_workflow.resolve_workflow
+TMDBLookupResult = tmdb_workflow.TMDBLookupResult
+render_collection_name = tmdb_workflow.render_collection_name
+collect_path_diagnostics = _collect_path_diagnostics
+emit_doctor_results = doctor_module.emit_results
+DoctorCheck = doctor_module.DoctorCheck
+vs_core = _vs_core
+
 RunResult = runner.RunResult
 RunRequest = runner.RunRequest
+
+__all__ = (
+    "run_cli",
+    "main",
+    "RunRequest",
+    "RunResult",
+    "CLIAppError",
+    "ScreenshotError",
+    "resolve_tmdb_workflow",
+    "TMDBLookupResult",
+    "render_collection_name",
+    "prepare_preflight",
+    "resolve_workspace_root",
+    "PreflightResult",
+    "collect_path_diagnostics",
+    "collect_doctor_checks",
+    "emit_doctor_results",
+    "DoctorCheck",
+    "vs_core",
+)
 
 
 def run_cli(

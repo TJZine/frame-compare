@@ -225,38 +225,17 @@ Both the wizard and `docs/config_audit.md` highlight scenarios where suppressing
 
 ## API Reference
 
-Capitalize on the curated module exports instead of poking around in `src.frame_compare.*`. The README's [Programmatic Runner API](../README.md#programmatic-runner-api) section pairs short examples with these shapes.
+`frame_compare.__all__` documents the only names with a stability guarantee. Everything else under `src.frame_compare.*` stays importable for contributors but is explicitly unsupported for downstream consumers.
 
-### Runner
+1. `run_cli`, `main` (`frame_compare.py`) — CLI entrypoints delegating to the runner.
+2. `RunRequest`, `RunResult` (`src/frame_compare/runner.py`) — programmatic runner contract.
+3. `CLIAppError`, `ScreenshotError` (`src/frame_compare/cli_runtime.py`, `src/frame_compare/render/errors.py`) — user-facing error boundaries.
+4. `resolve_tmdb_workflow`, `TMDBLookupResult`, `render_collection_name` (`src/frame_compare/tmdb_workflow.py`) — TMDB helpers for metadata workflows.
+5. `prepare_preflight`, `resolve_workspace_root`, `PreflightResult`, `collect_path_diagnostics` (`src/frame_compare/preflight.py`) — workspace + diagnostics helpers.
+6. `collect_doctor_checks`, `emit_doctor_results`, `DoctorCheck` (`src/frame_compare/doctor.py`) — doctor workflow helpers.
+7. `vs_core` (`src/frame_compare/vs`) — VapourSynth helper alias exposing `ClipInitError`, `ClipProcessError`, `VerificationResult`, and related utilities.
 
-`RunRequest` describes the headless job configuration. Common fields include:
-
-- `config_path` — explicit config file path (falls back to `$FRAME_COMPARE_CONFIG` / `ROOT/config/config.toml` when `None`).
-- `input_dir` — workspace-relative override for `[paths].input_dir`.
-- `root_override` — workspace root (mirrors `--root`).
-- `report_enable_override` — force HTML report on/off regardless of `[report].enable`.
-- `skip_wizard` — suppress the config wizard (`--no-wizard`/`FRAME_COMPARE_NO_WIZARD=1`).
-- `tonemap_overrides` — ad-hoc tonemap tweaks layered on top of the `config`.
-
-`RunResult` is a dataclass with `files`, `frames`, `out_dir`, `out_dir_created`, `out_dir_created_path`, `root`, `config`, `image_paths`, `slowpics_url`, `json_tail`, and `report_path`.
-
-`runner.run(request)` executes the pipeline with the given `RunRequest` and yields `RunResult`.
-
-### Doctor
-
-`DoctorCheck` dictionaries include `id`, `label`, `status`, and `message`. Typical IDs cover the dependency list: `config`, `vapoursynth`, `ffmpeg`, `audio`, `vspreview`, `slowpics`, and `pyperclip`. `doctor.collect_checks(root, config_path, config_mapping)` returns `(checks, notes)` for that workspace, and `doctor.emit_results(checks, notes, json_mode, workspace_root, config_path)` renders either a text banner or JSON payload.
-
-### VSPreview helpers
-
-`frame_compare.vspreview` bundles optional tooling for manual review. `render_script(plans, summary, cfg, root)` writes the VapourSynth + clipboard helper script, `write_script`/`persist_script` store it on disk, `resolve_command`/`launch` run VSPreview, and `format_manual_command(script_path)` formats the CLI invocation. `apply_manual_offsets` patches clips according to manual VSPreview feedback.
-
-### Config writer & presets
-
-Use `config_writer.read_template_text()`/`load_template_config()` to pull the seeded template, `render_config_text(template_text, template_config, final_config)` to serialize overrides, and `write_config_file(path, rendered)` to atomically persist `config/config.toml`. `presets` exposes `PRESETS_DIR`, `PRESET_DESCRIPTIONS`, `list_preset_paths()`, and `load_preset_data(name)` for enumerating and merging curated presets.
-
-### Preflight
-
-`preflight.prepare_preflight` centralizes workspace resolution. Key keyword arguments cover `cli_root`, `config_override`, `input_override`, `ensure_config`, `create_dirs`, `create_media_dir`, `allow_auto_wizard`, and `skip_auto_wizard`. The returned `PreflightResult` includes `workspace_root`, `media_root`, `config_path`, `config`, `warnings`, and `legacy_config`. Complementary helpers `resolve_workspace_root(cli_root)` and `collect_path_diagnostics(...)` diagnose path errors before running the main pipeline.
+**Deprecation policy:** breaking removals are announced one minor release ahead via the changelog and release notes. Deprecated names raise `DeprecationWarning` for a full release cycle before removal. Stay on the curated list above to receive those warnings and predictable semantics.
 
 ### Selection & runtime utilities
 

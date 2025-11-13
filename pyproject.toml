@@ -5,7 +5,21 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "frame-compare"
 version = "0.0.1"
+description = "Frame comparison CLI and library"
 readme = "README.md"
+license = { file = "LICENSE" }
+keywords = ["video", "vapoursynth", "comparison", "screenshots", "hdr", "report"]
+authors = [
+    { name = "Tristan Zine", email = "tristan@users.noreply.github.com" },
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Typing :: Typed",
+]
 requires-python = ">=3.13,<3.14"
 dependencies = [
     "rich",
@@ -37,6 +51,11 @@ preview = [
 
 [project.scripts]
 frame-compare = "frame_compare:main"
+
+[project.urls]
+Homepage = "https://github.com/TJZine/frame-compare"
+Repository = "https://github.com/TJZine/frame-compare"
+Issues = "https://github.com/TJZine/frame-compare/issues"
 
 [dependency-groups]
 dev = [
