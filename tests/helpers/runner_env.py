@@ -357,6 +357,8 @@ def _make_json_tail_stub() -> JsonTail:
             },
             "url": None,
             "shortcut_path": None,
+            "shortcut_written": False,
+            "shortcut_error": None,
             "deleted_screens_dir": False,
             "is_public": False,
             "is_hentai": False,

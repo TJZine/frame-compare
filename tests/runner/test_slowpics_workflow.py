@@ -420,6 +420,106 @@ def test_cli_tmdb_resolution_populates_slowpics(
     assert slowpics_json["shortcut_path"].endswith("Resolved_Title_2023_MOVIE.url")
     assert slowpics_json["deleted_screens_dir"] is False
 
+
+def test_shortcut_write_failure_sets_json_tail(
+    monkeypatch: pytest.MonkeyPatch,
+    cli_runner_env: _CliRunnerEnv,
+) -> None:
+    first = cli_runner_env.media_root / "Alpha.mkv"
+    second = cli_runner_env.media_root / "Beta.mkv"
+    for file in (first, second):
+        file.write_bytes(b"data")
+
+    cfg = _make_config(cli_runner_env.media_root)
+    cfg.tmdb.api_key = "token"
+    cfg.slowpics.auto_upload = True
+    cfg.slowpics.collection_name = "Shortcut Failure"
+    cfg.slowpics.delete_screen_dir_after_upload = False
+    cfg.slowpics.create_url_shortcut = True
+    cfg.slowpics.open_in_browser = False
+
+    cli_runner_env.reinstall(cfg)
+
+    def fake_parse(name: str, **_: object) -> dict[str, str]:
+        return {
+            "label": name,
+            "release_group": "",
+            "file_name": name,
+            "title": "Alpha Title",
+            "year": "2022",
+            "anime_title": "",
+            "imdb_id": "",
+            "tvdb_id": "",
+        }
+
+    _patch_core_helper(monkeypatch, "parse_filename_metadata", fake_parse)
+
+    candidate = TMDBCandidate(
+        category="MOVIE",
+        tmdb_id="abc123",
+        title="Alpha Title",
+        original_title="Alpha Title",
+        year=2022,
+        score=0.9,
+        original_language="en",
+        reason="primary-title",
+        used_filename_search=True,
+        payload={"id": 123},
+    )
+    resolution = TMDBResolution(candidate=candidate, margin=0.5, source_query="Alpha Title")
+
+    async def fake_resolve(*_, **__):  # pragma: no cover - deterministic stub
+        return resolution
+
+    _patch_runner_module(monkeypatch, "resolve_tmdb", fake_resolve)
+    _patch_vs_core(monkeypatch, "set_ram_limit", lambda limit: None)
+    _patch_vs_core(
+        monkeypatch,
+        "init_clip",
+        lambda *_, **__: types.SimpleNamespace(width=1920, height=1080, fps_num=24000, fps_den=1001, num_frames=1200),
+    )
+    _patch_runner_module(monkeypatch, "select_frames", lambda *_, **__: [5, 15])
+
+    def fake_generate(
+        clips: list[types.SimpleNamespace],
+        frames: list[int],
+        files: list[str],
+        metadata: list[dict[str, object]],
+        out_dir: Path,
+        cfg_screens: ScreenshotConfig,
+        color_cfg: ColorConfig,
+        **_: object,
+    ) -> list[str]:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        return [str(out_dir / f"shot_{idx}.png") for idx, _ in enumerate(frames)]
+
+    _patch_runner_module(monkeypatch, "generate_screenshots", fake_generate)
+
+    def fake_upload(
+        image_paths: list[str],
+        screen_dir: Path,
+        cfg_slow: SlowpicsConfig,
+        **kwargs: object,
+    ) -> str:  # pragma: no cover - deterministic stub
+        assert image_paths
+        assert screen_dir.exists()
+        assert cfg_slow.collection_name == "Shortcut Failure"
+        return "https://slow.pics/c/writefail"
+
+    _patch_runner_module(monkeypatch, "upload_comparison", fake_upload)
+
+    result = frame_compare.run_cli(None, None)
+
+    assert result.json_tail is not None
+    slowpics_value = result.json_tail.get("slowpics")
+    assert slowpics_value is not None
+    slowpics_json = _expect_mapping(slowpics_value)
+    assert slowpics_json["url"] == "https://slow.pics/c/writefail"
+    assert isinstance(slowpics_json["shortcut_path"], str)
+    assert slowpics_json["shortcut_written"] is False
+    assert slowpics_json["shortcut_error"] == "write_failed"
+    assert not Path(slowpics_json["shortcut_path"]).exists()
+
 def test_cli_tmdb_resolution_sets_default_collection_name(
     monkeypatch: pytest.MonkeyPatch,
     cli_runner_env: _CliRunnerEnv,

@@ -194,6 +194,9 @@ Preset highlights:
 | `[tmdb].cache_ttl_seconds` | TMDB cache lifetime (seconds). | int | `86400` |
 <!-- markdownlint-restore -->
 
+The CLI attempts to save the `.url` shortcut for convenience, but failed writes (permissions, disk pressure, read-only shares) no longer
+abort uploads—the JSON tail reports `shortcut_written=false` together with a `shortcut_error` label so UIs can explain the outcome.
+
 TMDB lookups reuse the same workflow for CLI and automation: `tmdb_workflow.resolve_blocking` retries transient HTTP failures via `httpx.HTTPTransport(retries=...)`, `tmdb_workflow.resolve_workflow` (exported via `frame_compare.resolve_tmdb_workflow`) prompts once per run, and `[tmdb].unattended=true` suppresses ambiguity prompts while logging a warning instead of blocking the process. Manual identifiers entered during the prompt (movie/##### or tv/#####) propagate into slow.pics metadata, layout data, and JSON tails.
 
 Network policy: transient statuses {429, 500, 502, 503, 504} backoff; connect=10 s/read=per-upload with a 256 KiB/s baseline plus margin; pooled sessions sized to the worker count.

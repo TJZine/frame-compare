@@ -382,7 +382,15 @@ def _upload_comparison_legacy(
     if cfg.create_url_shortcut:
         shortcut_name = build_shortcut_filename(cfg.collection_name, canonical_url)
         shortcut_path = screen_dir / shortcut_name
-        shortcut_path.write_text(f"[InternetShortcut]\nURL={canonical_url}\n", encoding="utf-8")
+        try:
+            shortcut_path.write_text(f"[InternetShortcut]\nURL={canonical_url}\n", encoding="utf-8")
+            logger.info("Saved slow.pics shortcut: %s", shortcut_path)
+        except OSError as exc:
+            logger.warning(
+                "Failed to write slow.pics shortcut at %s: %s",
+                shortcut_path,
+                exc,
+            )
     session.close()
     return canonical_url
 

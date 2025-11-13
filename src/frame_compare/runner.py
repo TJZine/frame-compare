@@ -399,6 +399,8 @@ def run(request: RunRequest) -> RunResult:
             },
             "url": None,
             "shortcut_path": None,
+            "shortcut_written": False,
+            "shortcut_error": None,
             "deleted_screens_dir": False,
             "is_public": bool(cfg.slowpics.is_public),
             "is_hentai": bool(cfg.slowpics.is_hentai),
@@ -1906,13 +1908,30 @@ def run(request: RunRequest) -> RunResult:
     if slowpics_url:
         slowpics_block = ensure_slowpics_block(json_tail, cfg)
         slowpics_block["url"] = slowpics_url
+        shortcut_path_obj: Optional[Path] = None
+        shortcut_error: Optional[str] = None
         if cfg.slowpics.create_url_shortcut:
             shortcut_filename = build_shortcut_filename(
                 cfg.slowpics.collection_name, slowpics_url
             )
-            slowpics_block["shortcut_path"] = str(out_dir / shortcut_filename)
+            if shortcut_filename:
+                shortcut_path_obj = out_dir / shortcut_filename
+            else:
+                shortcut_error = "invalid_shortcut_name"
+        if shortcut_path_obj is not None:
+            slowpics_block["shortcut_path"] = str(shortcut_path_obj)
+            shortcut_written = shortcut_path_obj.exists()
         else:
             slowpics_block["shortcut_path"] = None
+            shortcut_written = False
+            if not cfg.slowpics.create_url_shortcut:
+                shortcut_error = "disabled"
+        if shortcut_written:
+            shortcut_error = None
+        elif shortcut_path_obj is not None and shortcut_error is None:
+            shortcut_error = "write_failed"
+        slowpics_block["shortcut_written"] = shortcut_written
+        slowpics_block["shortcut_error"] = shortcut_error
 
     report_index_path: Optional[Path] = None
     report_defaults: ReportJSON = {

@@ -547,6 +547,44 @@ def test_url_matches_creation_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert upload_fields["imageUuid"] == "img-from-response"
 
 
+def test_shortcut_write_failure_does_not_abort_upload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: LogCaptureFixture,
+) -> None:
+    cfg = SlowpicsConfig(create_url_shortcut=True)
+    image = _write_image(tmp_path, "123 - ClipA.png")
+
+    responses = [
+        FakeResponse(200),
+        FakeResponse(200, {"collectionUuid": "abc", "key": "def", "images": [["img1"]]}),
+        FakeResponse(200, text="OK"),
+    ]
+    _install_session(monkeypatch, responses)
+
+    original_write_text = Path.write_text
+
+    def failing_write_text(
+        self: Path,
+        data: str,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+    ) -> int:
+        if self.suffix.lower() == ".url":
+            raise OSError("disk full")
+        return original_write_text(self, data, encoding=encoding, errors=errors, newline=newline)
+
+    monkeypatch.setattr(Path, "write_text", failing_write_text)
+    caplog.set_level(logging.WARNING, logger="src.frame_compare.slowpics")
+
+    url = slowpics.upload_comparison([str(image)], tmp_path, cfg)
+
+    assert url == "https://slow.pics/c/def"
+    assert not list(tmp_path.glob("*.url"))
+    assert any("Failed to write slow.pics shortcut" in record.getMessage() for record in caplog.records)
+
+
 @pytest.mark.parametrize(
     ("collection_name", "canonical_url", "expected"),
     [

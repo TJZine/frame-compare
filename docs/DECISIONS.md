@@ -2,6 +2,28 @@
 
 # Decisions Log
 
+- *2025-11-13:* fix(slowpics): shortcut creation is now best-effort with JSON telemetry for shortcut outcomes.
+  - Problem: Uploads failed entirely when the `.url` shortcut could not be written, leaving users without the canonical slow.pics URL and no way to see why the shortcut was missing.
+  - Decision: Wrap shortcut writes in `slowpics.upload_comparison()` with an OSError guard that warns but still returns the URL, and thread `shortcut_path`, `shortcut_written`, and `shortcut_error` through the runner/CLI JSON tail so reports/automation can describe failures. The CLI also emits a concise warning when it detects a missing shortcut.
+  - Impact: slow.pics uploads always deliver their URL even on read-only volumes; telemetry differentiates disabled shortcuts from write failures (`disabled`, `invalid_shortcut_name`, `write_failed`), and docs explain the behavior so UI layers can reflect it.
+  - Verification:
+    - `date -u +%Y-%m-%d` → `2025-11-13`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_slowpics.py -k failure` →
+      ```
+      .                                                                        [100%]
+      1 passed, 20 deselected in 0.03s
+      ```
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/runner/test_slowpics_workflow.py -k shortcut` →
+      ```
+      .                                                                        [100%]
+      1 passed, 11 deselected in 0.08s
+      ```
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_slowpics.py` →
+      ```
+      .....................                                                    [100%]
+      21 passed in 0.03s
+      ```
+
 - *2025-11-13:* dx(cache): cache recompute reasons are now surfaced in both CLI output and the JSON tail, and analysis logs include breadcrumbs for metrics/sidecar misses.
   - Problem: When frame metrics were rebuilt, operators only saw “Recomputing frame metrics…” without the underlying reason (config mismatch, fps mismatch, etc.), making it hard to tell why reuse failed. Selection sidecar misses also lacked observability.
   - Decision: Thread the probe reason into the progress message (`Recomputing frame metrics (<reason>)…`), emit a CLI line for missing caches, and log `[ANALYSIS] metrics cache miss: …` plus `[ANALYSIS] selection sidecar unavailable…` when applicable. JSON tail fields already carry `cache.reason`; now `analysis.cache_progress_message` mirrors the human-readable cause so UI and logs stay consistent.
