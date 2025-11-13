@@ -469,10 +469,11 @@ Based on `docs/DECISIONS.md` entries from 2025‑11‑17 to 2025‑11‑18.
 | Checklist Item | Status | Notes / Next Steps |
 | --- | --- | --- |
 | Shim deletions | ☑ | Removed `src/{analysis,vs_core,slowpics,cli_layout,report,config_template}.py` (and their `.pyi` files) so only the canonical `src.frame_compare.*` packages remain; `_COMPAT_EXPORTS`, typing stubs, and docs now reference the new modules directly. |
+| API surface | ☑ | Codified that only `src/frame_compare/*` modules (plus the curated `frame_compare` exports) are supported import targets; downstream tooling should stop reaching for the deleted shim paths. |
 | Import updates | ☑ | CLI entrypoint, runner, selection helpers, screenshot helpers, and tests now import from `src.frame_compare.*`; `rg` sweeps confirm no `import src.(slowpics|cli_layout|report|config_template|vs_core)` usage remains. |
 | Docs & changelog | ☑ | README reference tables, tracker entries, `docs/DECISIONS.md`, and `CHANGELOG.md` describe the canonical imports and call out the shim retirement. |
 | Verification | ☑ | `UV_CACHE_DIR=.uv_cache PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run --no-sync python -m pytest -q`, `UV_CACHE_DIR=.uv_cache uv run --no-sync ruff check --fix` (plus a clean rerun), `UV_CACHE_DIR=.uv_cache uv run --no-sync npx pyright --warnings`, and `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini` all pass. |
-| Packaging sweep | ⚠️ | `UV_CACHE_DIR=.uv_cache uv run --no-sync python -m build` still fails to download `wheel` (offline sandbox), so `uv run --no-sync twine check dist/*` remains blocked; rerun both commands once a mirror or cached artifacts are available. |
+| Packaging sweep | ☑ | `UV_CACHE_DIR=.uv_cache uv run --no-sync python -m build` and `UV_CACHE_DIR=.uv_cache uv run --no-sync twine check dist/*` now pass after wiring the README metadata (twine reports no warnings). |
 
 ---
 

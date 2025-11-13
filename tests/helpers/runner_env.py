@@ -25,7 +25,6 @@ import src.frame_compare.planner as planner_module
 import src.frame_compare.preflight as preflight_module
 import src.frame_compare.tmdb_workflow as tmdb_workflow_module
 import src.frame_compare.vspreview as vspreview_module
-from src.frame_compare import vs as vs_core_module
 from src.datatypes import (
     AnalysisConfig,
     AppConfig,
@@ -43,6 +42,7 @@ from src.datatypes import (
     TMDBConfig,
 )
 from src.frame_compare import runner as runner_module
+from src.frame_compare import vs as vs_core_module
 from src.frame_compare.analysis import SelectionDetail
 from src.frame_compare.cli_runtime import (
     AudioAlignmentJSON,
@@ -561,11 +561,11 @@ def install_vs_core_stub(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _require_vspreview_constant(attr_name: str) -> str:
-    """Fetch a VSPreview constant from frame_compare and raise if it is missing."""
+    """Fetch a VSPreview constant from the module and raise if it is missing."""
 
-    value = getattr(frame_compare, attr_name, None)
+    value = getattr(vspreview_module, attr_name, None)
     if value is None:
-        raise RuntimeError(f"{attr_name} is not available on frame_compare")
+        raise RuntimeError(f"{attr_name} is not available on src.frame_compare.vspreview")
     return cast(str, value)
 
 
@@ -576,9 +576,9 @@ _VSPREVIEW_POSIX_INSTALL: Final[str] = _require_vspreview_constant("_VSPREVIEW_P
 def _format_vspreview_manual_command(script_path: Path) -> str:
     """Typed shim that returns the VSPreview manual command used by CLI tests."""
 
-    formatter = getattr(frame_compare, "_format_vspreview_manual_command", None)
+    formatter = getattr(vspreview_module, "_format_vspreview_manual_command", None)
     if formatter is None:
-        raise RuntimeError("_format_vspreview_manual_command is not available on frame_compare")
+        raise RuntimeError("_format_vspreview_manual_command is not available on src.frame_compare.vspreview")
     return formatter(script_path)
 
 

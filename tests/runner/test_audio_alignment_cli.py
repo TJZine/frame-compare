@@ -5,11 +5,15 @@ from __future__ import annotations
 import datetime as dt
 import importlib
 import json
+import shutil
+import subprocess
+import sys
 import types
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
+import click
 import pytest
 from click.testing import CliRunner, Result
 
@@ -60,8 +64,8 @@ def test_audio_alignment_vspreview_constants_raise_when_missing(
 
     import tests.helpers.runner_env as runner_env_module
 
-    monkeypatch.delattr(frame_compare, "_VSPREVIEW_WINDOWS_INSTALL", raising=False)
-    monkeypatch.delattr(frame_compare, "_VSPREVIEW_POSIX_INSTALL", raising=False)
+    monkeypatch.delattr(runner_env_module.vspreview_module, "_VSPREVIEW_WINDOWS_INSTALL", raising=False)
+    monkeypatch.delattr(runner_env_module.vspreview_module, "_VSPREVIEW_POSIX_INSTALL", raising=False)
 
     with pytest.raises(RuntimeError, match="_VSPREVIEW_WINDOWS_INSTALL"):
         importlib.reload(runner_env_module)
@@ -224,7 +228,7 @@ def test_audio_alignment_prompt_reuse_decline(tmp_path: Path, monkeypatch: pytes
         def isatty(self) -> bool:
             return True
 
-    monkeypatch.setattr(frame_compare.sys, "stdin", _TTY())
+    monkeypatch.setattr(sys, "stdin", _TTY())
 
     confirm_calls: dict[str, int] = {"count": 0}
 
@@ -232,7 +236,7 @@ def test_audio_alignment_prompt_reuse_decline(tmp_path: Path, monkeypatch: pytes
         confirm_calls["count"] += 1
         return False
 
-    monkeypatch.setattr(frame_compare.click, "confirm", _fake_confirm)
+    monkeypatch.setattr(click, "confirm", _fake_confirm)
 
     summary, display = core_module._maybe_apply_audio_alignment(
         [reference_plan, target_plan],
@@ -330,12 +334,12 @@ def test_audio_alignment_prompt_reuse_affirm(tmp_path: Path, monkeypatch: pytest
         def isatty(self) -> bool:
             return True
 
-    monkeypatch.setattr(frame_compare.sys, "stdin", _TTY())
+    monkeypatch.setattr(sys, "stdin", _TTY())
 
     def _confirm_true(*_args: object, **_kwargs: object) -> bool:
         return True
 
-    monkeypatch.setattr(frame_compare.click, "confirm", _confirm_true)
+    monkeypatch.setattr(click, "confirm", _confirm_true)
 
     summary, display = core_module._maybe_apply_audio_alignment(
         [reference_plan, target_plan],
@@ -627,7 +631,7 @@ def test_launch_vspreview_generates_script(
     json_tail = _make_json_tail_stub()
     audio_block = json_tail["audio_alignment"]
 
-    monkeypatch.setattr(frame_compare.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
     recorded_command: list[list[str]] = []
 
@@ -636,9 +640,9 @@ def test_launch_vspreview_generates_script(
             self.returncode = returncode
 
     vspreview_env(True)
-    monkeypatch.setattr(frame_compare.shutil, "which", lambda _: None)
+    monkeypatch.setattr(shutil, "which", lambda _: None)
     monkeypatch.setattr(
-        frame_compare.subprocess,
+        subprocess,
         "run",
         lambda cmd, env=None, check=False, **kwargs: recorded_command.append(list(cmd)) or _Result(0),
     )
@@ -700,7 +704,7 @@ def test_launch_vspreview_generates_script(
     assert "Preview applied: {applied}f ({status})" in script_text
     assert "preview applied=%+df" in script_text
     assert recorded_command, "VSPreview command should be invoked when interactive"
-    assert recorded_command[0][0] == frame_compare.sys.executable
+    assert recorded_command[0][0] == sys.executable
     assert recorded_command[0][-1] == str(script_path)
     assert audio_block.get("vspreview_invoked") is True
     assert audio_block.get("vspreview_exit_code") == 0
@@ -761,12 +765,12 @@ def test_launch_vspreview_baseline_mode_persists_manual_offsets(
     json_tail = _make_json_tail_stub()
     audio_block = json_tail["audio_alignment"]
 
-    monkeypatch.setattr(frame_compare.sys.stdin, "isatty", lambda: True)
-    monkeypatch.setattr(frame_compare.shutil, "which", lambda _: None)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(shutil, "which", lambda _: None)
     importlib_module = cast(Any, core_module.importlib)
     monkeypatch.setattr(importlib_module.util, "find_spec", lambda name: object())
     monkeypatch.setattr(
-        frame_compare.subprocess,
+        subprocess,
         "run",
         lambda cmd, env=None, check=False, **kwargs: types.SimpleNamespace(
             returncode=0,
@@ -913,8 +917,8 @@ def test_launch_vspreview_warns_when_command_missing(
         warnings=[],
     )
 
-    monkeypatch.setattr(frame_compare.sys.stdin, "isatty", lambda: True)
-    monkeypatch.setattr(frame_compare.shutil, "which", lambda _: None)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(shutil, "which", lambda _: None)
     vspreview_env(False)
 
     prompt_called: list[None] = []
@@ -952,7 +956,7 @@ def test_launch_vspreview_warns_when_command_missing(
     assert "VSPreview dependency missing" in normalized_output
     expected_windows_install = " ".join(_VSPREVIEW_WINDOWS_INSTALL.split())
     assert expected_windows_install in normalized_output
-    python_executable = frame_compare.sys.executable or "python"
+    python_executable = sys.executable or "python"
     assert python_executable in normalized_output
     assert "-m vspreview" in normalized_output
 
@@ -1976,7 +1980,7 @@ def test_confirm_alignment_reports_preview_paths(
         return paths
 
     _patch_runner_module(monkeypatch, "generate_screenshots", fake_generate)
-    monkeypatch.setattr(frame_compare.sys, "stdin", types.SimpleNamespace(isatty=lambda: False))
+    monkeypatch.setattr(sys, "stdin", types.SimpleNamespace(isatty=lambda: False))
 
     core_module._confirm_alignment_with_screenshots(
         plans,

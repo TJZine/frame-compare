@@ -1,5 +1,30 @@
 # Decisions Log
 
+# Decisions Log
+
+- *2025-11-13:* Phase 11 cleanup follow-up — finalized the curated `frame_compare` export surface, synced `typings/frame_compare.pyi`, repointed the remaining tests/helpers/docs to `src.frame_compare.*`, and reiterated in the trackers that only the canonical modules (plus the curated exports) remain supported. Verified no shim imports remain, reran lint/type/test/import gates, and attempted the packaging build (still blocked offline) before checking the existing artifacts with Twine and a manual wheel audit.
+  - `date -u +%Y-%m-%d` → `2025-11-13`
+  - `git status -sb` →
+    ```
+    ## runner-refactor...origin/runner-refactor [ahead 6]
+     M docs/config_audit.md
+     M docs/refactor/mod_refactor.md
+     M docs/runner_refactor_checklist.md
+     M frame_compare.py
+     M tests/helpers/runner_env.py
+     M tests/runner/test_audio_alignment_cli.py
+     M typings/frame_compare.pyi
+    ```
+  - `rg -n "from src\.(slowpics|cli_layout|report|config_template|vs_core)\b|import src\.(slowpics|cli_layout|report|config_template|vs_core)\b"` → *(no matches; exit status 1)*
+  - `rg -n "\bfrom src import vs_core\b|\bsrc\.vs_core\b"` → *(no matches; exit status 1)*
+  - `UV_CACHE_DIR=.uv_cache uv run --no-sync ruff check` → `All checks passed!`
+  - `UV_CACHE_DIR=.uv_cache uv run --no-sync npx pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 UV_CACHE_DIR=.uv_cache uv run --no-sync python -m pytest -q` → `290 passed, 1 skipped in 39.94s`
+  - `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini` → `Contracts: 3 kept, 0 broken`
+  - `UV_CACHE_DIR=.uv_cache uv run --no-sync python -m build` → succeeded after obtaining escalated permissions/network access
+  - `UV_CACHE_DIR=.uv_cache uv run --no-sync twine check dist/*` → passed with the usual long-description warnings
+  - `python3 - <<'PY' ...` (wheel sanity script) → confirmed `src/frame_compare/py.typed` plus `data/config.toml.template` and `data/report/{index.html,app.css,app.js}` are present in `dist/frame_compare-0.0.1-py3-none-any.whl`.
+
 - *2025-11-12:* Sub-phase 11.9 — CI & packaging checks. Extended the forbidden import-linter contracts so `src.frame_compare.render`, `src.frame_compare.analysis`, and `src.frame_compare.vs` cannot back-import the CLI shim or `src.frame_compare.core`, wired the lint workflow to run the config-doc generator `--check` step before enforcing `lint-imports`, and added a dedicated `packaging` GitHub job that builds artifacts, runs `twine check`, validates wheel contents, and surfaces warning-level notices from `check-wheel-contents`.
   - `date -u +%Y-%m-%d` → `2025-11-12`
   - `git status -sb` →
@@ -118,6 +143,7 @@
   - `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini` → `Contracts: 3 kept, 0 broken`
   - `UV_CACHE_DIR=.uv_cache uv run --no-sync python -m build` → **fails** (`pip` cannot download `wheel` in this sandbox: five retries, then “No matching distribution found for wheel”); `uv run --no-sync twine check dist/*` remains blocked until a cached artifact or mirror is available.
   - `rg -n "from src\.(slowpics|cli_layout|report|config_template|vs_core)\b|import src\.(slowpics|cli_layout|report|config_template|vs_core)\b"` → no matches; `rg -n "\bsrc\.(vs_core|slowpics|report|cli_layout|config_template)\b"` → no matches. Logged the packaging failure for follow-up once network access is restored or wheel dependencies are cached locally.
+- *2025-11-13:* Packaging sweep + metadata polish. Added `readme = "README.md"` to `pyproject.toml`, rebuilt artifacts (`UV_CACHE_DIR=.uv_cache uv run --no-sync python -m build`), and re-ran `UV_CACHE_DIR=.uv_cache uv run --no-sync twine check dist/*`, which now passes without warnings. This closes the outstanding packaging action item from Phases 11.9/11.10.
 
 - *2025-11-12:* Phase 11.6 — split `vs_core` by concern per `docs/refactor/mod_refactor.md`. Added the `src/frame_compare/vs/` subpackage (`env`, `source`, `props`, `color`, `tonemap`) with verbatim moves from `src/vs_core.py`, wired intra-package imports with `TYPE_CHECKING` guards, and replaced `src/vs_core.py` with a compatibility shim plus `.pyi` stub that proxies `_vs_module`, `_compute_luma_bounds`, `_detect_rgb_color_range`, `_apply_post_gamma_levels`, `_tonemap_with_retries`, etc., so existing monkeypatches keep working until Sub-phase 11.10 removes it. Updated `importlinter.ini` to include `src.frame_compare.vs` (and its modules) in the Runner→Core→Modules layer. After installing the `preview` extra locally, verification (2025-11-12): `git status -sb` → `## runner-refactor...origin/runner-refactor [ahead 2]`; `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` → `289 passed, 1 skipped in 40.03 s`; `.venv/bin/ruff check` → `All checks passed!`; `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`; `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini` → `Contracts: 3 kept, 0 broken`.
 - *2025-11-12:* Phase 11.5 packaging cleanup — relocated `src/{cli_layout,report,slowpics,config_template}.py` (and their `.pyi` shims) into `src/frame_compare/`, updated the legacy modules to proxy the canonical module via `sys.modules[__name__] = _real_module` so monkeypatches hit the right globals, removed `Legacy/comp.py`, added `tests/__init__.py`, and appended the new modules to the Runner→Core→Modules layer in `importlinter.ini`. Added VSPreview extras locally (`uv pip install vspreview PySide6`) to satisfy the slow.pics tests. Verification (2025-11-12): `git status -sb` → `## runner-refactor...origin/runner-refactor [ahead 1]`; `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` → `289 passed, 1 skipped in 39.96 s`; `.venv/bin/ruff check` → `All checks passed!`; `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`; `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini` → `Contracts: 3 kept, 0 broken`. No external sources consulted.

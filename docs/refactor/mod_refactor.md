@@ -1278,6 +1278,7 @@ Implementation
 - Deleted the remaining shim modules `src/{analysis,vs_core,slowpics,cli_layout,report,config_template}.py` plus their `.pyi` stubs so only the canonical `src.frame_compare.*` packages remain.
 - Repointed CLI/core/runtime/test imports to `src.frame_compare.{analysis,vs,slowpics,cli_layout,report,config_template}` and refreshed `frame_compare._COMPAT_EXPORTS` to stop depending on the shims.
 - Updated docs (README reference tables, tracker, DEC log) and `CHANGELOG.md` to call out the new canonical import surface and the shim retirement.
+- Added guidance that only `src/frame_compare/*` modules (or the curated `frame_compare` exports) constitute the supported API surface going forward; legacy `src/*.py` paths are no longer recognised.
 
 Acceptance
 - ✅ `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run --no-sync python -m pytest -q`
@@ -1305,7 +1306,9 @@ Acceptance
 - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`, `.venv/bin/ruff check`, `.venv/bin/pyright --warnings` all pass after the cleanup.
 - Import‑linter contracts remain kept for new packages (`render`, `analysis`, `vs`).
 - Trackers and DEC log explicitly note the removed names and replacement guidance.
-  
+
+**2025-11-13 update:** Completed the compatibility sweep by deleting every remaining `src/{analysis,vs_core,slowpics,cli_layout,report,config_template}.py` shim (and `.pyi`), repointing CLI/core/runtime/tests/docs to `src.frame_compare.*`, and pruning `_COMPAT_EXPORTS` and typing stubs so only the curated surface stays public. Verified via `rg -n "from src\.(slowpics|cli_layout|report|config_template|vs_core)\b|import src\.(slowpics|cli_layout|report|config_template|vs_core)\b"` (no matches) and `rg -n "\bsrc\.(vs_core|slowpics|report|cli_layout|config_template)\b"` (no matches). Local checks: `UV_CACHE_DIR=.uv_cache PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run --no-sync python -m pytest -q` (`290 passed, 1 skipped`), `UV_CACHE_DIR=.uv_cache uv run --no-sync ruff check --fix && UV_CACHE_DIR=.uv_cache uv run --no-sync ruff check`, `UV_CACHE_DIR=.uv_cache uv run --no-sync npx pyright --warnings`, and `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini` (contracts kept). Attempted `UV_CACHE_DIR=.uv_cache uv run --no-sync python -m build`, but pip still cannot download `wheel` in this sandbox (five retries, “No matching distribution found for wheel”), so `uv run --no-sync twine check dist/*` remains blocked; rerun the packaging pair once cached artifacts or outbound access are available.
+
 ### Orchestrator Handoff Protocol (applies to Phases 9–11)
 
 - Reviewer orchestrator prepares: scope, entry points, acceptance tests to watch, and risk notes per sub‑phase.
