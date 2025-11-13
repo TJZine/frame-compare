@@ -37,6 +37,19 @@
   - `rg -n "from src\.(slowpics|cli_layout|report|config_template|vs_core)\b|import src\.(slowpics|cli_layout|report|config_template|vs_core)\b"` → *(no matches; exit status 1)*
   - `rg -n "\bfrom src import vs_core\b|\bsrc\.vs_core\b"` → *(no matches; exit status 1)*
   - `UV_CACHE_DIR=.uv_cache uv run --no-sync ruff check` → `All checks passed!`
+- *2025-11-13:* Console-output sanitization — TMDB titles printed in prompts and verbose logs now pass through `sanitize_console_text` so escape/control sequences are stripped before the terminal sees them, while the raw metadata remains untouched for matching/persistence. The runner also sanitizes verbose slow.pics inputs, and the shared helper enforces OWASP A07 (Cross-Site Scripting – Output Encoding) guidance for console output.
+  - `date -u +%Y-%m-%d` → `2025-11-13`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_tmdb.py -k prompt` →
+    ```
+    ..                                                                       [100%]
+    2 passed, 10 deselected in 0.02s
+    ```
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_layout_utils.py` →
+    ```
+    ...                                                                      [100%]
+    3 passed in 0.01s
+    ```
+  - Reference: source:https://github.com/owasp/top10/blob/master/2017/he/0xa7-xss.md@2025-11-13T04:13:30Z — demonstrates how unsanitized input can be injected directly into HTML attributes, illustrating the need for output encoding that `sanitize_console_text` now enforces on console-bound TMDB strings.
 - *2025-11-13:* API hardening plan locked in `docs/refactor/api_hardening.md`: added `frame_compare.__all__` + stub alignment for the curated names (run_cli/main, RunRequest/RunResult, CLIAppError/ScreenshotError, TMDB + preflight + doctor helpers, collect_path_diagnostics, vs_core alias), created smoke tests under `tests/api/` and net helper coverage under `tests/net/`, refreshed `docs/README_REFERENCE.md`, and documented the policy in DEC/CHANGELOG`. Verification: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/api tests/net` → `11 passed in 0.02s`; `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`; `.venv/bin/ruff check` → `All checks passed!`; `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini` → `Contracts: 3 kept, 0 broken`.
 
 - *2025-11-12:* Sub-phase 11.9 — CI & packaging checks. Extended the forbidden import-linter contracts so `src.frame_compare.render`, `src.frame_compare.analysis`, and `src.frame_compare.vs` cannot back-import the CLI shim or `src.frame_compare.core`, wired the lint workflow to run the config-doc generator `--check` step before enforcing `lint-imports`, and added a dedicated `packaging` GitHub job that builds artifacts, runs `twine check`, validates wheel contents, and surfaces warning-level notices from `check-wheel-contents`.

@@ -80,6 +80,9 @@ from .layout_utils import (
 from .layout_utils import (
     plan_label as _plan_label,
 )
+from .layout_utils import (
+    sanitize_console_text as _sanitize_console_text,
+)
 
 ReporterFactory = Callable[['RunRequest', Path, Console], CliOutputManagerProtocol]
 
@@ -631,8 +634,14 @@ def run(request: RunRequest) -> RunResult:
         year_display = tmdb_context.get("Year") or ""
         lang_text = tmdb_resolution.original_language or "und"
         tmdb_identifier = f"{tmdb_resolution.category}/{tmdb_resolution.tmdb_id}"
-        title_segment = _color_text(escape(f'"{match_title} ({year_display})"'), "bright_white")
-        lang_segment = _format_kv("lang", lang_text, label_style="dim cyan", value_style="blue")
+        safe_match_title = _sanitize_console_text(match_title)
+        safe_year_display = _sanitize_console_text(year_display)
+        safe_lang_text = _sanitize_console_text(lang_text)
+        title_segment = _color_text(
+            escape(f'"{safe_match_title} ({safe_year_display})"'),
+            "bright_white",
+        )
+        lang_segment = _format_kv("lang", safe_lang_text, label_style="dim cyan", value_style="blue")
         reporter.verbose_line(
             "  ".join(
                 [
@@ -653,8 +662,9 @@ def run(request: RunRequest) -> RunResult:
             base_display = f"{match_title} ({year_display})"
         else:
             base_display = match_title or "(n/a)"
+        safe_base_display = _sanitize_console_text(base_display)
         slowpics_tmdb_disclosure_line = (
-            f'slow.pics title inputs: base="{escape(str(base_display))}"  '
+            f'slow.pics title inputs: base="{escape(safe_base_display)}"  '
             f'collection_suffix="{escape(str(suffix_literal))}"'
         )
         if tmdb_category and tmdb_id_value:
@@ -675,11 +685,14 @@ def run(request: RunRequest) -> RunResult:
         id_display = tmdb_id_value or cfg.slowpics.tmdb_id or ""
         lang_text = tmdb_language or tmdb_context.get("OriginalLanguage") or "und"
         identifier = f"{category_display}/{id_display}".strip("/")
+        safe_display_title = _sanitize_console_text(display_title)
+        safe_year_component = _sanitize_console_text(tmdb_context.get("Year") or "")
         title_segment = _color_text(
-            escape(f'"{display_title} ({tmdb_context.get("Year") or ""})"'),
+            escape(f'"{safe_display_title} ({safe_year_component})"'),
             "bright_white",
         )
-        lang_segment = _format_kv("lang", lang_text, label_style="dim cyan", value_style="blue")
+        safe_lang_text = _sanitize_console_text(lang_text)
+        lang_segment = _format_kv("lang", safe_lang_text, label_style="dim cyan", value_style="blue")
         reporter.verbose_line(
             "  ".join(
                 [
@@ -697,8 +710,9 @@ def run(request: RunRequest) -> RunResult:
                 base_display = f"{display_title} ({year_component})"
             else:
                 base_display = display_title or "(n/a)"
+        safe_base_display = _sanitize_console_text(base_display)
         slowpics_tmdb_disclosure_line = (
-            f'slow.pics title inputs: base="{escape(str(base_display))}"  '
+            f'slow.pics title inputs: base="{escape(safe_base_display)}"  '
             f'collection_suffix="{escape(str(suffix_literal))}"'
         )
         if category_display and id_display:

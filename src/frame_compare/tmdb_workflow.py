@@ -14,6 +14,7 @@ import click
 import httpx
 
 from src.datatypes import TMDBConfig
+from src.frame_compare.layout_utils import sanitize_console_text
 from src.frame_compare.metadata import first_non_empty, parse_year_hint
 from src.tmdb import (
     TMDBAmbiguityError,
@@ -227,7 +228,8 @@ def _prompt_manual_tmdb(candidates: Sequence[TMDBCandidate]) -> Optional[Tuple[s
         year = cand.year or "????"
         category = _style(f"{cand.category.lower()}/{cand.tmdb_id}", fg="cyan")
         title = cand.title or "(unknown title)"
-        click.echo(f"  • {category} {title} ({year}) score={cand.score:0.3f}")
+        safe_title = sanitize_console_text(title)
+        click.echo(f"  • {category} {safe_title} ({year}) score={cand.score:0.3f}")
     while True:
         response = click.prompt(
             "Enter TMDB id (movie/##### or tv/#####) or leave blank to skip",
@@ -252,7 +254,8 @@ def _prompt_tmdb_confirmation(
     link = f"https://www.themoviedb.org/{category}/{resolution.tmdb_id}"
     header = _style("TMDB match found:", fg="cyan")
     link_text = _style(link, underline=True)
-    click.echo(f"{header} {title} ({year}) -> {link_text}")
+    safe_title = sanitize_console_text(title)
+    click.echo(f"{header} {safe_title} ({year}) -> {link_text}")
     while True:
         response = click.prompt(
             "Confirm TMDB match? [Y/n or enter movie/#####]",
