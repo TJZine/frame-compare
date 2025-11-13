@@ -35,6 +35,8 @@ if TYPE_CHECKING:
 _SELECTION_METADATA_VERSION = "1"
 _SELECTION_SOURCE_ID = "select_frames.v1"
 _TIME_FORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
+_CACHE_HASH_ENV_FLAG = "FRAME_COMPARE_CACHE_HASH"
+_CACHE_HASH_ENV_FALSEY = {"", "0", "false", "no", "off"}
 
 
 def _now_utc_iso() -> str:
@@ -48,9 +50,22 @@ def _selection_module():
     return selection_module
 
 
+def _cache_hash_env_requested() -> bool:
+    raw = os.environ.get(_CACHE_HASH_ENV_FLAG)
+    if raw is None:
+        return False
+    normalized = raw.strip().lower()
+    return normalized not in _CACHE_HASH_ENV_FALSEY
+
+
 @dataclass(frozen=True)
 class FrameMetricsCacheInfo:
-    """Context needed to load/save cached frame metrics for analysis."""
+    """Context needed to load/save cached frame metrics for analysis.
+
+    When ``clips`` is provided, it contains precomputed clip input metadata
+    (role/path/name/size/mtime/sha1) so later cache builders can avoid
+    repeating filesystem probes.
+    """
 
     path: Path
     files: Sequence[str]
@@ -60,6 +75,7 @@ class FrameMetricsCacheInfo:
     trim_end: Optional[int]
     fps_num: int
     fps_den: int
+    clips: Optional[List[Dict[str, object]]] = None
 
 
 @dataclass
@@ -450,10 +466,20 @@ def _infer_clip_role(index: int, name: str, analyzed_file: str, total: int) -> s
     return f"aux{index}"
 
 
-def _build_clip_inputs(info: FrameMetricsCacheInfo) -> List[Dict[str, object]]:
+def _build_clip_inputs(
+    info: FrameMetricsCacheInfo,
+    *,
+    compute_sha1: bool = False,
+    env_opt_in: bool = True,
+) -> List[Dict[str, object]]:
+    if info.clips is not None and len(info.clips) == len(info.files):
+        # Return a shallow copy so callers can mutate without affecting cache info.
+        return [dict(entry) for entry in info.clips]
+
     root = info.path.parent
     entries: List[Dict[str, object]] = []
     total = len(info.files)
+    should_hash = compute_sha1 or (env_opt_in and _cache_hash_env_requested())
     for idx, file_name in enumerate(info.files):
         candidate = Path(file_name)
         if not candidate.is_absolute():
@@ -465,7 +491,7 @@ def _build_clip_inputs(info: FrameMetricsCacheInfo) -> List[Dict[str, object]]:
         except OSError:
             size = None
             mtime = None
-        sha1 = _compute_file_sha1(candidate)
+        sha1 = _compute_file_sha1(candidate) if should_hash else None
         entries.append(
             {
                 "role": _infer_clip_role(idx, file_name, info.analyzed_file, total),
@@ -571,10 +597,15 @@ def _save_selection_sidecar(
 
 
 def build_clip_inputs_from_paths(
-    analyzed_file: str, clip_paths: Sequence[Path]
+    analyzed_file: str,
+    clip_paths: Sequence[Path],
+    *,
+    compute_sha1: bool = False,
+    env_opt_in: bool = True,
 ) -> List[Dict[str, object]]:
     entries: List[Dict[str, object]] = []
     total = len(clip_paths)
+    should_hash = compute_sha1 or (env_opt_in and _cache_hash_env_requested())
     for idx, clip_path in enumerate(clip_paths):
         resolved = clip_path.resolve()
         try:
@@ -584,7 +615,7 @@ def build_clip_inputs_from_paths(
         except OSError:
             size = None
             mtime = None
-        sha1 = _compute_file_sha1(resolved)
+        sha1 = _compute_file_sha1(resolved) if should_hash else None
         entries.append(
             {
                 "role": _infer_clip_role(idx, resolved.name, analyzed_file, total),

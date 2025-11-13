@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from src.datatypes import AppConfig
-from src.frame_compare.analysis import FrameMetricsCacheInfo
+from src.frame_compare.analysis import FrameMetricsCacheInfo, build_clip_inputs_from_paths
 from src.frame_compare.cli_runtime import ClipPlan
 
 from .preflight import resolve_subdir
@@ -39,6 +39,10 @@ def _build_cache_info(
         cfg.analysis.frame_data_filename,
         purpose="analysis.frame_data_filename",
     )
+    clip_inputs = build_clip_inputs_from_paths(
+        analyzed_file=analyzed.path.name,
+        clip_paths=[plan.path for plan in plans],
+    )
     return FrameMetricsCacheInfo(
         path=cache_path,
         files=[plan.path.name for plan in plans],
@@ -48,6 +52,7 @@ def _build_cache_info(
         trim_end=analyzed.trim_end,
         fps_num=fps_num,
         fps_den=fps_den,
+        clips=clip_inputs,
     )
 
 

@@ -522,6 +522,13 @@ def run(request: RunRequest) -> RunResult:
     slowpics_tmdb_disclosure_line: Optional[str] = None
     slowpics_verbose_tmdb_tag: Optional[str] = None
 
+    def _record_tmdb_note(raw_message: str) -> None:
+        """Capture TMDB warnings with console-safe text."""
+
+        safe_message = _sanitize_console_text(raw_message)
+        tmdb_notes.append(safe_message)
+        collected_warnings.append(safe_message)
+
     if tmdb_api_key_present:
         lookup = tmdb_workflow.resolve_workflow(
             files=files,
@@ -729,21 +736,17 @@ def run(request: RunRequest) -> RunResult:
         reporter.set_flag("tmdb_resolved", True)
     elif tmdb_api_key_present:
         if tmdb_error_message:
-            message = f"TMDB lookup failed: {tmdb_error_message}"
-            tmdb_notes.append(message)
-            collected_warnings.append(message)
+            _record_tmdb_note(f"TMDB lookup failed: {tmdb_error_message}")
         elif tmdb_ambiguous:
-            message = f"TMDB ambiguous results for {files[0].name}; continuing without metadata."
-            tmdb_notes.append(message)
-            collected_warnings.append(message)
+            _record_tmdb_note(
+                f"TMDB ambiguous results for {files[0].name}; continuing without metadata."
+            )
         else:
-            message = f"TMDB could not find a confident match for {files[0].name}."
-            tmdb_notes.append(message)
-            collected_warnings.append(message)
+            _record_tmdb_note(f"TMDB could not find a confident match for {files[0].name}.")
     elif not (cfg.slowpics.tmdb_id or "").strip():
-        message = "TMDB disabled: set [tmdb].api_key in config.toml to enable automatic matching."
-        tmdb_notes.append(message)
-        collected_warnings.append(message)
+        _record_tmdb_note(
+            "TMDB disabled: set [tmdb].api_key in config.toml to enable automatic matching."
+        )
 
     plans = planner_utils.build_plans(files, metadata, cfg)
     analyze_path = core.pick_analyze_file(files, metadata, cfg.analysis.analyze_clip, cache_dir=root)

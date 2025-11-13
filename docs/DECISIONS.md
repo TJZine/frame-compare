@@ -2,6 +2,29 @@
 
 # Decisions Log
 
+- *2025-11-13:* perf(cache): cache writes no longer re-hash clip payloads by default, and cache metadata can now carry precomputed clip inputs.
+  - Problem: large media inputs forced `_build_clip_inputs` to read every byte when persisting selection caches, even though SHA1 digests are never consulted during reuse decisions (those keys rely on filenames, fps, config fingerprint, trims, and release group).
+  - Decision: gate hashing behind `compute_sha1`/`FRAME_COMPARE_CACHE_HASH` (default off), keep the `"sha1"` field present but nullable, and extend `FrameMetricsCacheInfo` with an optional `clips` field populated by `cache.build_cache_info` so later cache builders can reuse the stat metadata without re-touching disk. Operators can export `FRAME_COMPARE_CACHE_HASH=1` when they explicitly want digests in the payload.
+  - Alternatives considered: keep hashing enabled (too slow on multi-GB files) or defer clip precomputation to a later phase (implemented now so selection sidecars avoid redundant `stat()` calls the moment cache info is constructed).
+  - Verification:
+    - `date -u +%Y-%m-%d` → `2025-11-13`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_analysis.py -k "clip_inputs or selection_sidecar_cache_key_stable_without_sha1"` →
+      ```
+      ...                                                                      [100%]
+      3 passed, 17 deselected in 0.03s
+      ```
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_analysis.py::test_select_frames_uses_cache` →
+      ```
+      .                                                                        [100%]
+      1 passed in 0.01s
+      ```
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` →
+      ```
+      315 passed, 1 skipped in 28.07s
+      ```
+    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+  - Context: SHA1 digests remain available for diagnostics, but cache reuse continues to hinge on deterministic input names/configuration so payload compatibility is unaffected by the nullable digest field.
+
 - *2025-11-13:* Network policy hardening — centralized retry/timeout constants in `frame_compare/net.py`, added structured logging via `log_backoff_attempt`, threaded the callback through TMDB’s `_http_request`, and aligned slow.pics adapters/logs/tests with the shared policy while keeping the legacy upload endpoints. Redaction tests now cover userinfo/query edge cases, and slow.pics emits a final “upload complete” INFO that lists frames/workers.
   - `date -u +%Y-%m-%d` → `2025-11-13`
   - `UV_CACHE_DIR=.uv_cache PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run --no-sync python -m pytest -q tests/net tests/test_slowpics.py -k 'backoff or redact or adapter'` →
@@ -37,19 +60,51 @@
   - `rg -n "from src\.(slowpics|cli_layout|report|config_template|vs_core)\b|import src\.(slowpics|cli_layout|report|config_template|vs_core)\b"` → *(no matches; exit status 1)*
   - `rg -n "\bfrom src import vs_core\b|\bsrc\.vs_core\b"` → *(no matches; exit status 1)*
   - `UV_CACHE_DIR=.uv_cache uv run --no-sync ruff check` → `All checks passed!`
-- *2025-11-13:* Console-output sanitization — TMDB titles printed in prompts and verbose logs now pass through `sanitize_console_text` so escape/control sequences are stripped before the terminal sees them, while the raw metadata remains untouched for matching/persistence. The runner also sanitizes verbose slow.pics inputs, and the shared helper enforces OWASP A07 (Cross-Site Scripting – Output Encoding) guidance for console output.
+- *2025-11-13:* Console-output sanitization — TMDB titles printed in prompts and verbose logs now pass through `sanitize_console_text` so escape/control sequences are stripped before the terminal sees them, while the raw metadata remains untouched for matching/persistence. The runner also sanitizes verbose slow.pics inputs, and the shared helper enforces OWASP A07 (Cross-Site Scripting – Output Encoding) guidance for console output. Follow-up: TMDB warning/notes (`tmdb_notes` + `collected_warnings`) now record console-safe text before `reporter.verbose_line`/`reporter.warn`, eliminating the last ANSI/control-character path.
   - `date -u +%Y-%m-%d` → `2025-11-13`
+  - `git status -sb` →
+    ```
+    ## runner-refactor...origin/runner-refactor [ahead 1]
+     M src/frame_compare/runner.py
+    ```
   - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_tmdb.py -k prompt` →
     ```
     ..                                                                       [100%]
-    2 passed, 10 deselected in 0.02s
+    2 passed, 10 deselected in 0.01s
     ```
   - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_layout_utils.py` →
     ```
     ...                                                                      [100%]
     3 passed in 0.01s
     ```
+  - `.venv/bin/ruff check` → `All checks passed!`
+  - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
   - Reference: source:https://github.com/owasp/top10/blob/master/2017/he/0xa7-xss.md@2025-11-13T04:13:30Z — demonstrates how unsanitized input can be injected directly into HTML attributes, illustrating the need for output encoding that `sanitize_console_text` now enforces on console-bound TMDB strings.
+- *2025-11-13:* CI parity after renaming the default branch to `main` — `commitlint` now falls back to the repository’s root commit whenever GitHub reports the all-zero `before` SHA (first branch push), and `release-please` explicitly targets `main` so it no longer attempts to fetch manifests from a non-existent `legacy` branch.
+  - `date -u +%Y-%m-%d` → `2025-11-13`
+  - `git status -sb` →
+    ```
+    ## runner-refactor...origin/runner-refactor [ahead 1]
+     M .github/workflows/commitlint.yml
+     M .github/workflows/release-please.yml
+     M CHANGELOG.md
+     M docs/DECISIONS.md
+     M src/frame_compare/analysis/cache_io.py
+     M src/frame_compare/runner.py
+     M tests/test_analysis.py
+    ```
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_tmdb.py -k prompt` →
+    ```
+    ..                                                                       [100%]
+    2 passed, 10 deselected in 0.01s
+    ```
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_layout_utils.py` →
+    ```
+    ...                                                                      [100%]
+    3 passed in 0.01s
+    ```
+  - `.venv/bin/ruff check` → `All checks passed!`
+  - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
 - *2025-11-13:* API hardening plan locked in `docs/refactor/api_hardening.md`: added `frame_compare.__all__` + stub alignment for the curated names (run_cli/main, RunRequest/RunResult, CLIAppError/ScreenshotError, TMDB + preflight + doctor helpers, collect_path_diagnostics, vs_core alias), created smoke tests under `tests/api/` and net helper coverage under `tests/net/`, refreshed `docs/README_REFERENCE.md`, and documented the policy in DEC/CHANGELOG`. Verification: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/api tests/net` → `11 passed in 0.02s`; `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`; `.venv/bin/ruff check` → `All checks passed!`; `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini` → `Contracts: 3 kept, 0 broken`.
 
 - *2025-11-12:* Sub-phase 11.9 — CI & packaging checks. Extended the forbidden import-linter contracts so `src.frame_compare.render`, `src.frame_compare.analysis`, and `src.frame_compare.vs` cannot back-import the CLI shim or `src.frame_compare.core`, wired the lint workflow to run the config-doc generator `--check` step before enforcing `lint-imports`, and added a dedicated `packaging` GitHub job that builds artifacts, runs `twine check`, validates wheel contents, and surfaces warning-level notices from `check-wheel-contents`.

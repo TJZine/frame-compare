@@ -73,6 +73,11 @@ tail = json.loads(result.stdout.splitlines()[-1])
 | `[analysis].min_window_seconds` | Minimum usable footage window. | float | `5.0` |
 | `[analysis].frame_data_filename` | Metrics cache path. | str | `"generated.compframes"` |
 
+### Cache performance
+
+- Clip metadata stored in metrics caches only records file size and modification time by default to avoid large file reads.
+- Set `FRAME_COMPARE_CACHE_HASH=1` (or pass `compute_sha1=True` into the internal builders) when you explicitly need SHA1 digests in the payload for diagnostics.
+
 ### `[analysis.thresholds]`
 
 | Key | Purpose | Type | Default |

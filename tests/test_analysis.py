@@ -8,6 +8,7 @@ from typing import Any, cast
 import pytest
 
 import src.frame_compare.analysis as analysis_mod
+import src.frame_compare.analysis.cache_io as cache_io
 from src.datatypes import AnalysisConfig, ColorConfig
 from src.frame_compare.analysis import (
     FrameMetricsCacheInfo,
@@ -135,6 +136,89 @@ def _seed_cached_metrics(tmp_path: Path) -> tuple[FrameMetricsCacheInfo, Analysi
         selection_details=selection_details,
     )
     return cache_info, cfg, selection_frames
+
+
+def _make_cache_info(tmp_path: Path, file_name: str) -> FrameMetricsCacheInfo:
+    return FrameMetricsCacheInfo(
+        path=tmp_path / "metrics.json",
+        files=[file_name],
+        analyzed_file=file_name,
+        release_group="",
+        trim_start=0,
+        trim_end=None,
+        fps_num=24,
+        fps_den=1,
+    )
+
+
+def test_build_clip_inputs_does_not_hash_by_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    file_name = "clip.mkv"
+    clip_path = tmp_path / file_name
+    clip_path.write_bytes(b"data")
+    info = _make_cache_info(tmp_path, file_name)
+
+    def _fail_compute(_path: Path, *, chunk_size: int = 1024 * 1024) -> str:
+        raise AssertionError("hash computation should not run on the fast path")
+
+    monkeypatch.setattr(cache_io, "_compute_file_sha1", _fail_compute)
+    clip_inputs = cache_io._build_clip_inputs(info)
+    assert clip_inputs[0]["sha1"] is None
+
+
+def test_build_clip_inputs_hashes_when_opted_in(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    file_name = "clip.mkv"
+    clip_path = tmp_path / file_name
+    clip_path.write_bytes(b"data")
+    info = _make_cache_info(tmp_path, file_name)
+
+    digest_calls: list[Path] = []
+
+    def _capture_compute(path: Path, *, chunk_size: int = 1024 * 1024) -> str:
+        digest_calls.append(path)
+        return "abc123"
+
+    monkeypatch.setattr(cache_io, "_compute_file_sha1", _capture_compute)
+    monkeypatch.setenv("FRAME_COMPARE_CACHE_HASH", "1")
+    clip_inputs = cache_io._build_clip_inputs(info)
+
+    assert clip_inputs[0]["sha1"] == "abc123"
+    assert digest_calls == [clip_path]
+
+
+def test_selection_sidecar_cache_key_stable_without_sha1(tmp_path: Path) -> None:
+    file_name = "clip.mkv"
+    clip_path = tmp_path / file_name
+    clip_path.write_bytes(b"data")
+    info = _make_cache_info(tmp_path, file_name)
+    cfg = AnalysisConfig(
+        frame_count_dark=1,
+        frame_count_bright=1,
+        frame_count_motion=1,
+        random_frames=0,
+        user_frames=[],
+        downscale_height=0,
+        step=1,
+        analyze_in_sdr=False,
+    )
+
+    clip_inputs_1 = cache_io._build_clip_inputs(info)
+    clip_inputs_2 = cache_io._build_clip_inputs(info)
+    cache_key_1 = cache_io._selection_cache_key(
+        clip_inputs=clip_inputs_1,
+        cfg=cfg,
+        selection_source="select_frames.v1",
+    )
+    cache_key_2 = cache_io._selection_cache_key(
+        clip_inputs=clip_inputs_2,
+        cfg=cfg,
+        selection_source="select_frames.v1",
+    )
+
+    assert cache_key_1 == cache_key_2
 
 
 
