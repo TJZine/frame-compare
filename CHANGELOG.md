@@ -1,5 +1,97 @@
 # Changelog
 
+## [0.0.2](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.1...frame-compare-v0.0.2) (2025-11-13)
+
+
+### Features
+
+* audio alignment update ([271e4d5](https://github.com/TJZine/frame-compare/commit/271e4d55803b876d5a690709bf0c42ab22e6e77a))
+* centralize network retry/timeout policy and add backoff tests ([7fcf3e3](https://github.com/TJZine/frame-compare/commit/7fcf3e3c6ed479a92755547ea3d9859b5d6df425))
+* default config in repo directory ([#101](https://github.com/TJZine/frame-compare/issues/101)) ([eba6244](https://github.com/TJZine/frame-compare/commit/eba6244fab7b1b937dc64e78df518d13cb45b538))
+* define curated exports, align stubs, and add smoke tests ([c2449a1](https://github.com/TJZine/frame-compare/commit/c2449a17b7d248ee16161fe12dab6cf2352df29f))
+* expose advanced tonemap controls and CLI overrides for libplacebo ([ae5eb60](https://github.com/TJZine/frame-compare/commit/ae5eb60ba6a80276f779db8ee69e031b07cfdad2))
+* harden TMDB flow and document reporter injection ([49b19d7](https://github.com/TJZine/frame-compare/commit/49b19d75c9c26cd37209354fba9f7b5cfd6a4f7e))
+* HTML comparison report ([1be656a](https://github.com/TJZine/frame-compare/commit/1be656ab98e19a78c1a05fea8376afa3c83e00ad))
+* HTML Report Enhancements ([8f55404](https://github.com/TJZine/frame-compare/commit/8f55404e08fbdff33e572539170dfa283a132ee3))
+* HTTP Adapter + Retries ([6d3835b](https://github.com/TJZine/frame-compare/commit/6d3835b5fb992ec77c203bef0f9528bc73244df0))
+* lock workspace root and expose diagnostics helpers ([0c3e600](https://github.com/TJZine/frame-compare/commit/0c3e6006203904dc73fe0e7c22e68a9f1d5b8f19))
+* restore fpng screenshots and cli error layer ([#7](https://github.com/TJZine/frame-compare/issues/7)) ([b15b107](https://github.com/TJZine/frame-compare/commit/b15b107f277f18ea2ab99e5ec70080667e9a1199))
+* restore parity and expand regression coverage ([#4](https://github.com/TJZine/frame-compare/issues/4)) ([2c88cb5](https://github.com/TJZine/frame-compare/commit/2c88cb5fe3dbf523297b346928de147d00fdf967))
+* scaffold VSPreview manual alignment flow ([aaf09fa](https://github.com/TJZine/frame-compare/commit/aaf09fa0e735e07ff30b26a59323f914fa2f1ae2))
+* slowpics CLI improvements ([df5c9f8](https://github.com/TJZine/frame-compare/commit/df5c9f81da89cb5948faa84186b593b633653cd7))
+* Threaded slow.pics uploads implemented ([5dd492e](https://github.com/TJZine/frame-compare/commit/5dd492e2f880094762586d5bf5f9b256722849b6))
+* Tonemap  Update ([bdb718d](https://github.com/TJZine/frame-compare/commit/bdb718d6c00b0492efa18099ffcfb3a1b053c75d))
+* Tonemap  Update ([#144](https://github.com/TJZine/frame-compare/issues/144)) ([a72114a](https://github.com/TJZine/frame-compare/commit/a72114addc3fb049268019c43ac2412f0f982f42))
+
+
+### Bug Fixes
+
+* align ffmpeg screenshots with trim offsets ([e0faa43](https://github.com/TJZine/frame-compare/commit/e0faa431b0d8025a7755caaa8f85c4351bdcc6a3))
+* align httpx stub handler signature ([be3ddd7](https://github.com/TJZine/frame-compare/commit/be3ddd774f121967ecb670c441167813fa940054))
+* code review fixes ([d735d6a](https://github.com/TJZine/frame-compare/commit/d735d6a5be8c1ec4b643e17066de1e2cca505271))
+* code review fixes. ([e507e64](https://github.com/TJZine/frame-compare/commit/e507e644356113707025aea073ae260c225c1d5e))
+* normalize VSPreview reuse and tighten launch handling ([2f36158](https://github.com/TJZine/frame-compare/commit/2f361582108b32af98f89ee45cbe15c6585504e2))
+* persist VSPreview manual offsets as deltas ([9297bda](https://github.com/TJZine/frame-compare/commit/9297bdaf181baf20cf78100b9288ecae54b10b7a))
+* preserve audio alignment metadata ([1a20dbf](https://github.com/TJZine/frame-compare/commit/1a20dbf1a0160541a91ae3077206a358a47d1ef0))
+* sanitize TMDB titles to prevent escape-sequence injection (OWASP A07) ([f92975e](https://github.com/TJZine/frame-compare/commit/f92975e245d9536e1d51004dff83960f0b6c0384))
+* surface cache recompute reasons in CLI and logs ([25e5ccd](https://github.com/TJZine/frame-compare/commit/25e5ccdc34c713fbae0cd8e4df07d697ace68358))
+* tolerate slow.pics shortcut write failures and expose telemetry ([0ce6adc](https://github.com/TJZine/frame-compare/commit/0ce6adca0b02343530ac555ec91d937a883b2a58))
+* update commit tests to exclude autoloaded plugins ([3de0f08](https://github.com/TJZine/frame-compare/commit/3de0f081a740591433bd61abdb35a56114993f80))
+* whenever we re-range the clip for overlays we now reset the frame props to match the new range. See src/screenshot.py:1999-2067 for the normalisation step and src/screenshot.py:2076- ([60fd1ac](https://github.com/TJZine/frame-compare/commit/60fd1ac033dec318b6d36bd191b1d1e09ce7662e))
+
+
+### Performance
+
+* precompute clip inputs and document hash opt-in ([de21693](https://github.com/TJZine/frame-compare/commit/de21693f7338cfcdd65a15b35571605fbe6c08d4))
+
+
+### Refactors
+
+* analysis - split selection, metrics, and cache IO into package ([d60463c](https://github.com/TJZine/frame-compare/commit/d60463c949da380c5d7b8751c5173a58cfab054e))
+* centralize retry/backoff for TMDB and slow.pics ([c6e8c72](https://github.com/TJZine/frame-compare/commit/c6e8c721c5e166cd2da2091c9ce3c4730498dd6a))
+* centralize subprocess calls and harden FFmpeg/VSPreview/ffprobe usage ([abd9833](https://github.com/TJZine/frame-compare/commit/abd9833f65c0d460e758c5c7c82cfc4da6c16465))
+* extract config writer and presets modules ([9c265d5](https://github.com/TJZine/frame-compare/commit/9c265d58d9a7d0024a4ebaa6bf7446f9b6b75875))
+* extract doctor workflow module ([818980a](https://github.com/TJZine/frame-compare/commit/818980a3380052c172d8d7eaa942bde12cd7fd6f))
+* extract planner module for clip overrides ([35330ee](https://github.com/TJZine/frame-compare/commit/35330eeae61e2baef9502e3fc4e5ceab7775bb21))
+* extract pure screenshot helpers into render modules ([3d5dada](https://github.com/TJZine/frame-compare/commit/3d5dadad9042668885dac298301e7173b2c17781))
+* extract TMDB workflow to tmdb_workflow(phase 10.1) ([58bf390](https://github.com/TJZine/frame-compare/commit/58bf390f83ef7aad7c57d3ea23a483140134dc9c))
+* extract wizard module ([86b1b9e](https://github.com/TJZine/frame-compare/commit/86b1b9e7db1ffeb837b8e68adfee08159076ec32))
+* finish runner modularization and harden QA gates ([6059de5](https://github.com/TJZine/frame-compare/commit/6059de578998900666a6f1274f0c0dd539516dec))
+* further refactor fixes through phase 6.3 ([c141b16](https://github.com/TJZine/frame-compare/commit/c141b164a3366841b70ea99a9a8deb2a45408dd8))
+* harden workspace outputs and clean up typing ([ed5b2da](https://github.com/TJZine/frame-compare/commit/ed5b2da4f97cb376090ace342ef96388da72d33b))
+* logging normalization ([c4c8ea5](https://github.com/TJZine/frame-compare/commit/c4c8ea5f7ef88113dff0f75b68b9b0849feed82f))
+* move clip init + selection helpers to selection module(phase 9.4) ([4206fef](https://github.com/TJZine/frame-compare/commit/4206fef6847b45522f254da68246789f6a0f8580))
+* move internal modules under frame_compare ([c1510eb](https://github.com/TJZine/frame-compare/commit/c1510ebae79caae000584cdd19196380db92af74))
+* prune legacy exports and finalize module imports ([2c52200](https://github.com/TJZine/frame-compare/commit/2c5220092a6091cb66735648b47ea8c52d437739))
+* remove core shims and prune curated exports (phase 9.8) ([1d6d6d1](https://github.com/TJZine/frame-compare/commit/1d6d6d19c11e8fde41763695d0f607feef56e158))
+* remove TMDB legacy shims and update tests to tmdb_workflow (phase 10.2) ([666e5b0](https://github.com/TJZine/frame-compare/commit/666e5b0ccd2eb9237d83e7525200da6064d37351))
+* remove transitional shims and repoint imports(phase 11.10) ([90999f8](https://github.com/TJZine/frame-compare/commit/90999f8bf945e3a6de8a81ab91008a286ea4f21f))
+* split metadata helpers into module ([16c2a6a](https://github.com/TJZine/frame-compare/commit/16c2a6a522ae6afe9af23af398f2095f43864da4))
+* split vs_core into env, source, props, color, tonemap with shim ([e9257ac](https://github.com/TJZine/frame-compare/commit/e9257ac1668326b957f78d9395d56cb5fd688046))
+* through phase 6.3 ([3455df0](https://github.com/TJZine/frame-compare/commit/3455df0561ec92c5af3be8f5174b541dbe5da716))
+* unhook runner from core via metadata/runtime utils (phase 9.3) ([f8631e0](https://github.com/TJZine/frame-compare/commit/f8631e07a1d1504690e865c0687910f669e10388))
+
+
+### Documentation
+
+* audit reference materials ([#83](https://github.com/TJZine/frame-compare/issues/83)) ([c2b996f](https://github.com/TJZine/frame-compare/commit/c2b996f19df0510d9669cfaa5af16a62bf786f8e))
+* README refresh ([#82](https://github.com/TJZine/frame-compare/issues/82)) ([b1f213c](https://github.com/TJZine/frame-compare/commit/b1f213c2c5c1fb42303025d83c2e141e5f69948e))
+* record phase-5 runner QA and checklist updates ([9889ca7](https://github.com/TJZine/frame-compare/commit/9889ca70096773a2732413118f09b70aea9712fa))
+* record runner test layout and phase 8 checks ([36bb11a](https://github.com/TJZine/frame-compare/commit/36bb11ac97c41f300596d4ea844f986d96593681))
+* rewrite README ([#1](https://github.com/TJZine/frame-compare/issues/1)) ([78e4db7](https://github.com/TJZine/frame-compare/commit/78e4db7219d5a60b7645bc51eca820366e1769b4))
+* update progress docs ([bdeea61](https://github.com/TJZine/frame-compare/commit/bdeea6187c32ac5ac91fe6543298f042ccb5a112))
+* update readme ([d45a4e1](https://github.com/TJZine/frame-compare/commit/d45a4e108a6d4328f6fe10194ee4f0f17e2e712a))
+
+
+### CI
+
+* add packaging verification and extend import contracts ([c2e816f](https://github.com/TJZine/frame-compare/commit/c2e816fc3b9884ba47d0ba46e45902327b042b03))
+* create uv venv for packaging job ([fb1a652](https://github.com/TJZine/frame-compare/commit/fb1a65224bb7d64a6a1d86f9500d2fff761f7e93))
+* fix import-linter install and add preview extra ([59f0401](https://github.com/TJZine/frame-compare/commit/59f0401b5604f4251197d8eb1207abbb2ab607a1))
+* install packaging tools into system env for uv ([1f23506](https://github.com/TJZine/frame-compare/commit/1f23506eb6fdbf0d35c4c55f666715d4fac5c04b))
+
+## Changelog
+
 All notable user-visible updates will be documented in this file in reverse chronological order.
 
 ## Unreleased
