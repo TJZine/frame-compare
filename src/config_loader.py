@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import tomllib
 import warnings
@@ -427,6 +428,12 @@ def load_config(path: str) -> AppConfig:
     if pad_mode not in {"off", "on", "auto"}:
         raise ConfigError("screenshots.pad_to_canvas must be 'off', 'on', or 'auto'")
     app.screenshots.pad_to_canvas = pad_mode
+
+    if hasattr(app.screenshots, "center_pad") and app.screenshots.center_pad is False:
+        logging.warning(
+            "Config: [screenshots].center_pad is deprecated and ignored; padding is always centered."
+        )
+        app.screenshots.center_pad = True
 
     progress_style = str(app.cli.progress.style).strip().lower()
     if progress_style not in {"fill", "dot"}:

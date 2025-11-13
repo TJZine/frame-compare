@@ -2,6 +2,16 @@
 
 # Decisions Log
 
+- *2025-11-13:* Network policy hardening — centralized retry/timeout constants in `frame_compare/net.py`, added structured logging via `log_backoff_attempt`, threaded the callback through TMDB’s `_http_request`, and aligned slow.pics adapters/logs/tests with the shared policy while keeping the legacy upload endpoints. Redaction tests now cover userinfo/query edge cases, and slow.pics emits a final “upload complete” INFO that lists frames/workers.
+  - `date -u +%Y-%m-%d` → `2025-11-13`
+  - `UV_CACHE_DIR=.uv_cache PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run --no-sync python -m pytest -q tests/net tests/test_slowpics.py -k 'backoff or redact or adapter'` →
+    ```
+    11 passed, 20 deselected in 0.02s
+    ```
+  - `UV_CACHE_DIR=.uv_cache uv run --no-sync ruff check` → `All checks passed!`
+  - `UV_CACHE_DIR=.uv_cache uv run --no-sync npx pyright --warnings` → fails because npm cannot reach `registry.npmjs.org` in this sandbox (getaddrinfo ENOTFOUND); rerun with network/cache access.
+  - Reference: source:https://github.com/urllib3/urllib3/blob/main/docs/user-guide.rst@2025-11-13T02:15:40Z — documents urllib3’s default three retries/timeouts, reinforcing the centralized Retry policy applied here.
+
 - *2025-11-13:* Release & packaging polish — enriched `pyproject.toml` metadata (description, license stanza, keywords, classifiers, URLs, authors), added `tools/check_wheel_contents.py` plus CI hooks on Linux/Windows, aligned `release-please` config with `project.name`/manifest paths, and introduced `.github/workflows/publish.yml` for a TestPyPI dry-run publish backed by OIDC. The packaging workflow now reuses the helper script and a new `windows-build` job catches platform-specific wheel regressions.
   - `date -u +%Y-%m-%d` → `2025-11-13`
   - `UV_CACHE_DIR=.uv_cache uv run --no-sync python -m build` → fails because pip cannot reach PyPI to download the isolated `setuptools>=69` requirement (network-restricted sandbox); same limitation noted in prior packaging checks.
@@ -314,3 +324,16 @@
 - *2025-11-10:* Restored runner's audio-alignment hook to `core._maybe_apply_audio_alignment` so tests and downstream callers can continue stubbing the helper, then deep-copied the JSON tail's audio block before deriving the CLI layout view to keep manual trims/offsets isolated from UI mutations. (Superseded later the same day by the “Phase 4.1 alignment module finalization” entry once planner/runner tests were updated to stub the new module boundary.) Reference: Python 3.11 FAQ on `dict.copy()` shallow semantics (source:https://github.com/python/cpython/blob/v3.11.14/Doc/faq/programming.rst @2025-11-10).
 - *2025-11-10:* Locked pytest configuration to skip the third-party `vsengine` plugin (which otherwise instantiates an abstract `VapoursynthEnvironment` during collection) by adding `addopts = "-p no:vsengine"` under `[tool.pytest.ini_options]` in `pyproject.toml`. This makes plain `pytest`/VS Code discovery behave the same as our documented `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 …` command and unblocks commit hooks that run `pytest` without environment overrides.
 - *2025-11-12:* CI maintenance — updated `.github/workflows/ci.yml` so the Linux test job installs the `preview` extra (ensuring VSPreview/PySide6 exist for `tests/runner/test_audio_alignment_cli.py::test_launch_vspreview_generates_script`) and switched the lint job’s import-linter install step to `uv pip install import-linter` to avoid the missing `pip` module inside `.venv`. No local tests rerun (workflow-only change).
+- *2025-11-13:* Deprecated `[screenshots].center_pad` so padding is always centered, expanded README/README_REFERENCE/config_audit docs with the Slow.pics key list, screenshot semantics paragraph, JSON-tail snippet, CLI stability note, and config audit footnote (plus a matching template comment) while keeping `docs/_generated/config_tables.md` as the authoritative schema; `src/config_loader.py` now warns/coerces false values, geometry call sites force `True`, and `tests/screenshots/test_center_pad_deprecated.py` asserts the warning.
+  - `date -u +%Y-%m-%d` → `2025-11-13`
+  - `UV_CACHE_DIR=.uv_cache PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run --no-sync python -m pytest -q` → `307 passed, 1 skipped in 28.38s`
+  - `UV_CACHE_DIR=.uv_cache uv run --no-sync npx pyright --warnings` → fails: `npm` cannot reach `https://registry.npmjs.org/pyright` (getaddrinfo `ENOTFOUND` in the offline sandbox).
+  - `UV_CACHE_DIR=.uv_cache uv run --no-sync ruff check` → `All checks passed!`
+  - `UV_CACHE_DIR=.uv_cache uv run --no-sync lint-imports --config importlinter.ini` → `Contracts: 3 kept, 0 broken.`
+  - Source anchors used: `src/screenshot.py` lines 1369–1460; `src/frame_compare/slowpics.py` adapter/timeouts; `src/datatypes.py`: `ScreenshotConfig` and `SlowpicsConfig`.
+- *2025-11-13:* MCP stack update — Replace Serena with Codanna for discovery/context and pair Codanna with Sequential‑Thinking (ST) for structured thoughts while keeping the authoritative plan in Codex `update_plan`. Updated `CODEX.md` and `agents.md` to:
+  - remove Serena references and planning-mode mentions,
+  - add Codanna MCP server config and quickstart,
+  - document token‑efficient defaults (JSON, limit 3–5, threshold 0.6–0.7, `lang`), and
+  - add a concise “Codanna + ST” workflow (Discovery → Plan → Thoughts → Validate/Commit).
+  Historical references to Serena remain in CHANGELOG/DECISIONS for provenance; guidance docs no longer prescribe Serena. No external sources used.

@@ -44,17 +44,17 @@ Advisors analyze and propose diffs/checks. All execution follows CODEX.md.
     - Return: checklists, line-anchored findings, small diff plans, risk/mitigation notes.
   )
 ## Global Defaults (Always On)
-- **Planning protocol = Sequential Thinking**: use Serena’s `think_about_*` tools (or, if unavailable, the fallback Sequential Thinking MCP) to draft a concise plan before proposing diffs. Sequential Thinking is for planning only—once the plan is logged, resume normal Serena analysis without juggling duplicate planners.
+- **Planning = Codex plan + ST thoughts**: Keep the authoritative plan in Codex `update_plan`. Use Sequential‑Thinking MCP for structured thoughts per stage (not as the plan store).
 - **Docs lookup = context7**: pull short, dated snippets from official sources/best-practice docs for each claim. If unavailable, log the fallback.
-- **Search = Serena first**: prefer Serena MCP search tools (`find_symbol`, `find_referencing_symbols`, `search_for_pattern`) for evidence sweeps; fall back to `ripgrep` when Serena is unavailable or insufficient. Respect repo ignores and log the fallback method used.
-- **Project orchestration = Serena MCP**: use Serena for structured planning (sequential-thinking tools), symbol-aware code understanding (`get_symbols_overview`, `find_symbol`), and project memory (`write_memory`/`list_memories`) during analysis. Advisors still propose diffs; Codex executes per CODEX.md. If Serena’s sequential-thinking tools are unavailable, fall back to the generic Sequential Thinking MCP before using general bullet outlines.
+- **Search = Codanna first**: prefer Codanna MCP discovery tools (`semantic_search_docs`, `semantic_search_with_context`, `find_symbol`) for evidence sweeps; fall back to `ripgrep` when Codanna is unavailable or insufficient. Respect repo ignores and log the fallback method used.
+- **Discovery/Context = Codanna MCP**: use Codanna for symbol-aware context (`find_symbol`, `get_calls`, `find_callers`, `analyze_impact`) during analysis. Advisors still propose diffs; Codex executes per CODEX.md.
 - **Context lean**: Advisors remind Codex to follow CODEX’s Sequential Thinking Context Management rules (condense `process_thought` output, keep roughly the last 7–10 thoughts in working memory, and lean on MCP history for archives).
 - **Metadata accuracy**: Flag hallucinated Sequential Thinking metadata—`files_touched`, `tests_to_run`, `dependencies`, `risk_level`, `confidence_score`, etc. should stay empty/default unless there is real evidence.
 
 ## Standard Flow
-1) **Evidence sweep (Serena ➜ ripgrep)** → prefer Serena tools (`get_symbols_overview`, `find_symbol`, `find_referencing_symbols`, `search_for_pattern`) to enumerate where code/config/tests live. If Serena is unavailable or insufficient for the task, use `ripgrep` and record the fallback used.
+1) **Evidence sweep (Codanna ➜ ripgrep)** → prefer Codanna tools (`semantic_search_docs`, `semantic_search_with_context`, `find_symbol`, `get_calls`, `find_callers`, `analyze_impact`) to enumerate where code/config/tests live. If Codanna is unavailable or insufficient for the task, use `ripgrep` and record the fallback used.
 2) **Docs check (context7 ➜ MCP)** → start with Context7 (title + link + date). When Context7 lacks the needed source, call the Fetch MCP server via `mcp__fetch__fetch`, constrain `max_length` (default ≤ 20000 chars), and log URL, timestamp, format (HTML/JSON/Markdown/TXT), `start_index`, and chunk count in your response plus `docs/DECISIONS.md`. Only fetch publicly reachable URLs; escalate before touching authenticated or private targets.
-3) **Plan (Sequential Thinking)** → Switch Serena to `planning` mode for multi-step tasks, then call Serena’s `think_about_*` tools to capture the Scoping→Review thought loop. Only fall back to the generic Sequential Thinking MCP if Serena’s planner is down; otherwise avoid running two planners in parallel. Produce 3–7 steps, success checks, and rollback notes, then exit planning mode and continue with Serena’s regular analysis tools.
+3) **Plan (Codex + ST)** → Keep the plan in Codex via `update_plan`. Use Sequential‑Thinking MCP to capture Scoping→Review thoughts in short, structured entries. Produce 3–7 steps, success checks, and rollback notes. Do not use ST as a plan store.
    - Confirm the agent keeps logging Scoping → Research & Spike → Implementation → Testing → Review thoughts and leaves `next_thought_needed=true` until that Review entry is recorded; flag any run that flips it to `false` prematurely.
 4) **Proposed diffs** → file-by-file changes + tests (await approval).
 5) **Persist** → append decisions to `docs/DECISIONS.md`; update `CHANGELOG.md`. Before adding an entry, run `date -u +%Y-%m-%d` (or equivalent) and stamp the log with that exact value—never extrapolate future dates. When referencing MCP output, cite the URL + timestamp (from that command) and summarize any key snippets directly in the response so reviewers can replay the call without re-fetching.
@@ -66,12 +66,12 @@ Advisors analyze and propose diffs/checks. All execution follows CODEX.md.
 - Config from ENV/TOML → typed config object
 - Avoid N+1; caches documented; input validation and authZ for protected paths
 
-- Serena MCP (analysis-first): use `get_current_config`, `get_symbols_overview`, `find_symbol`, `find_referencing_symbols`, `search_for_pattern`, `think_about_*`, `list_dir`, `list_memories`, and `read_memory` to collect evidence. Advisors must not use editing tools (`insert_*`, `replace_symbol_body`)—propose diffs instead.
-- Sequential Thinking MCP (fallback): use `process_thought`, `generate_summary`, and related tools if Serena’s thinking tools are unavailable.
-- Code search (fallback): `ripgrep` when Serena is unavailable; otherwise prefer Serena’s symbol- and pattern-aware queries.
+- Codanna MCP (discovery/context): use `semantic_search_docs`, `semantic_search_with_context`, `find_symbol`, `get_calls`, `find_callers`, and `analyze_impact` to collect evidence and understand relationships. Advisors must not claim code-editing via Codanna—propose diffs instead.
+- Sequential‑Thinking MCP: use `process_thought`, `generate_summary`, and related tools to structure thinking (not the plan store).
+- Code search (fallback): `ripgrep` when Codanna is unavailable; otherwise prefer Codanna’s semantic/symbol queries.
 - Docs lookup (**required default: context7/official docs**; fallback: project docs/README with explicit note)
 - External context MCP servers — Context7 stays first-line. Use Fetch MCP (`mcp__fetch__fetch`) for live docs and APIs (private-IP blocking + length limits per `/zcaceres/fetch-mcp`, 2025‑11‑10). For structured task decomposition, TaskFlow MCP enforces plan/approval phases and dependency tracking (`/pinkpixel-dev/taskflow-mcp`, 2025‑11‑10). For combined search + fetch, snf-mcp provides DuckDuckGo/Wikipedia search plus rate-limited HTML/Markdown retrieval (`/mseri/snf-mcp`, 2025‑11‑10). Record the server, tool name, key arguments, and cite the resulting snippet (URL + timestamp) every time.
-- Planning (**required default: Serena sequential-thinking tools**; fallback: thorough bullet outline)
+- Planning (**required default: Codex `update_plan` + Sequential‑Thinking thoughts**; fallback: thorough bullet outline)
 - Logging/trace insertion (suggest exact file:line; fallback: print/console.log with labels)
 Guideline: If a preferred tool is unavailable (local or Cloud), degrade gracefully and state the fallback used.
 
@@ -79,4 +79,30 @@ Guideline: If a preferred tool is unavailable (local or Cloud), degrade graceful
 - Advisors provide analysis only. All execution/command runs follow CODEX.md.
 - MCP calls count as “analysis actions” but must be logged like commands: cite `source:<url>@<timestamp>` in findings, mention chunking/pagination, and mirror the metadata in `docs/DECISIONS.md`.
 - When in doubt, stop and request approval as per CODEX.md.
- - Serena constraints: Advisors may call Serena analysis tools but must not perform editing operations; instead, include a minimal patch diff proposal.
+ - Codanna constraints: Advisors may call Codanna discovery tools but must not claim editing operations; instead, include a minimal patch diff proposal.
+
+## Codanna + Sequential‑Thinking workflow
+- **Roles**
+  - **Codanna** provides discovery/context via semantic search, symbol lookups, and impact analysis.
+  - **Sequential‑Thinking MCP** records structured thoughts; keep entries short (stage + metadata) and obey `guidance.recommendedNextThoughtNeeded`.
+  - **Codex `update_plan`** is the authoritative plan; ST is not the planning store.
+- **Tool priority (Codanna)**
+  - **Tier 1**: `semantic_search_with_context`, `analyze_impact` (default limit=5, threshold≈0.5, omit `lang` unless noise is high; raise limit to 8–10 when ambiguity persists).
+  - **Tier 2**: `find_symbol`, `get_calls`, `find_callers` to confirm call chains and disambiguate symbols.
+  - **Tier 3**: `search_symbols`, `semantic_search_docs` for broader sweeps once Tier 1/2 context is captured.
+- **Accuracy-first defaults**
+  - **Discovery:** prefer `semantic_search_with_context`, summarize each key symbol, chain into `analyze_impact symbol_id:<ID>` before touching public/shared code, and broaden the query (lower threshold or raise limit) when context is weak.
+  - **Plan:** keep `update_plan` aligned with Codanna findings; add verification/rollback actions for high-risk items.
+  - **Thoughts:** include `stage`, `files_touched`, `dependencies`, `tests_to_run`, and `risk_level`; allow stage aliases (e.g., “Planning” → Implementation) and string inputs; keep `next_thought_needed=true` until tests pass and a Review thought is present, then honor `guidance.recommendedNextThoughtNeeded`.
+  - **Verification:** cross-check Codanna’s impacted files against the diff, ensure tests cover each high-risk scope, and prefer broader discovery rather than missing context.
+- **Workflow**
+  1. **Discovery (Codanna)** – run Tier 1 queries using the defaults above, chain into `analyze_impact`, and use Tier 2 lookups to trace usages; capture symbol_ids/results and summarize their implications.
+  2. **Plan (Codex)** – update steps via `update_plan`, referencing Codanna context and listing verification/rollback steps when risk warrants it.
+  3. **Thoughts (ST)** – log `process_thought` payloads with the required metadata, keeping them concise yet complete, and stop once `guidance.recommendedNextThoughtNeeded` is false after Review.
+  4. **Validate/Review** – execute tests, record outcomes, and conclude with a Review thought before closing.
+- **ST guidance**
+  - Stage aliases and stringified metadata are acceptable; keep entries focused on stage, files, tests, dependencies, and risk.
+  - Respect `guidance.recommendedNextThoughtNeeded`; stop issuing follow-ups once it flips to false after Review.
+- **Verification guidance**
+  - Cross-check impacted files from Codanna’s results against the actual diff; document how tests/rollbacks cover each high-risk area.
+  - When context is unclear, prefer broader discovery (lower threshold or higher limit) over assuming coverage.

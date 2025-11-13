@@ -467,6 +467,11 @@ async def _http_request(
     if cached is not None:
         return cached
 
+    redacted_host = net.redact_url_for_logs(str(getattr(client, "base_url", "")) or path)
+
+    async def _on_backoff(delay: float, attempt_index: int) -> None:
+        net.log_backoff_attempt(redacted_host, attempt_index, delay)
+
     try:
         response = await net.httpx_get_json_with_backoff(
             client,
@@ -475,8 +480,8 @@ async def _http_request(
             retries=3,
             initial_backoff=0.5,
             max_backoff=4.0,
-            retry_status={429, 500, 502, 503, 504},
             sleep=asyncio.sleep,
+            on_backoff=_on_backoff,
         )
     except httpx.RequestError as exc:  # pragma: no cover - rare network error
         raise TMDBResolutionError(f"TMDB request failed after retries: {exc}") from exc

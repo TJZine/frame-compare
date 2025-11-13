@@ -7,9 +7,11 @@ from typing import Any, List
 
 import pytest
 import requests
+from _pytest.logging import LogCaptureFixture
 
 import src.frame_compare.slowpics as slowpics
 from src.datatypes import SlowpicsConfig
+from src.frame_compare import net
 
 
 class FakeResponse(requests.Response):
@@ -195,7 +197,9 @@ def _write_image(tmp_path: Path, name: str) -> Path:
     return path
 
 
-def test_session_bootstrap_single_shot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_session_bootstrap_single_shot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: LogCaptureFixture
+) -> None:
     cfg = SlowpicsConfig()
     image = _write_image(tmp_path, "123 - ClipA.png")
 
@@ -214,6 +218,7 @@ def test_session_bootstrap_single_shot(tmp_path: Path, monkeypatch: pytest.Monke
             captured_adapter["pool_maxsize"] = pool_maxsize
 
     monkeypatch.setattr(slowpics, "HTTPAdapter", DummyAdapter)
+    caplog.set_level(logging.INFO, logger="src.frame_compare.slowpics")
 
     responses = [
         FakeResponse(200),
@@ -240,8 +245,12 @@ def test_session_bootstrap_single_shot(tmp_path: Path, monkeypatch: pytest.Monke
     assert session.mounts and session.mounts[0][0] == "https://"
     adapter_kwargs = captured_adapter
     assert adapter_kwargs["max_retries"].total == 3
+    assert adapter_kwargs["max_retries"].backoff_factor == pytest.approx(0.1)
+    assert adapter_kwargs["max_retries"].allowed_methods == net.ALLOWED_METHODS
+    assert adapter_kwargs["max_retries"].status_forcelist == net.RETRY_STATUS
     assert adapter_kwargs["pool_connections"] == 4
     assert adapter_kwargs["pool_maxsize"] == 4
+    assert any("slow.pics upload complete" in record.getMessage() for record in caplog.records)
 
 
 def test_missing_xsrf_token_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -3,7 +3,7 @@
 Central log for the end-to-end configuration review requested on 2025‑11‑18. Each section records the current understanding of the options, verification status, proposed trims/consolidations, and the decision the user approves (or rejects). Update this file whenever a category is reviewed so future sessions can resume quickly.
 
 ## Workflow Overview
-- **Source of truth:** the workspace config generated after first run, `src/config_loader.py`, `src/datatypes.py`, and the feature modules listed per category.
+- **Source of truth:** the workspace config generated after first run, `src/config_loader.py`, `src/datatypes.py`, and the feature modules listed per category. Defaults/types are additionally mirrored via the generated tables in `docs/_generated/config_tables.md` (kept in sync by `tools/gen_config_docs.py`).
 - **Validation hooks:** Loader invariants, tests under `tests/`, and any runtime guards exercised via `frame_compare.runner`.
 - **Decision protocol:** Summaries flow to the user category-by-category. No code/doc changes land until the user explicitly approves the recommendations for that category.
 - **References:** TOML structure and boolean typing follow the upstream spec (see `/toml-lang/toml` docs pulled via Context7 on 2025‑11‑18).
@@ -20,10 +20,10 @@ Central log for the end-to-end configuration review requested on 2025‑11‑18.
 | `[report]`          | Reviewed      | Findings logged below; awaiting next steps. |
 | `[tmdb]`            | Reviewed      | Findings logged below; awaiting next steps. |
 | `[naming]`          | Reviewed      | Findings logged below; awaiting next steps. |
-| `[cli]`             | Not started   | Pending. |
+| `[cli]`             | Reviewed      | Findings logged below; awaiting next steps. |
 | `[paths]`           | Reviewed      | Findings logged below; awaiting next steps. |
 | `[runtime]`         | Reviewed      | Findings logged below; awaiting next steps. |
-| `[source]`          | Not started   | Pending. |
+| `[source]`          | Reviewed      | Findings logged below; awaiting next steps. |
 | `[overrides]`       | Reviewed      | Findings logged below; awaiting next steps. |
 
 ---
@@ -88,6 +88,13 @@ VSPreview orchestration now lives under `src/frame_compare/vspreview.py`: `rende
 - **Renderer selection:** `use_ffmpeg` switches between VapourSynth and FFmpeg builders (`src/screenshot.py:2189-2610`). FFmpeg timeouts map through `_map_ffmpeg_compression`/`ffmpeg_timeout_seconds` and honour the doc’d “0 disables timeout” policy (see `CHANGELOG.md:47` and `docs/DECISIONS.md:42-43`). `compression_level` is constrained to a 0–2 tier and plumbed through every code path.
 - **Color/export range:** `rgb_dither` toggles the final RGB24 hop only (`docs/config_reference.md:18-27`). Export range defaults to `"full"` to match sRGB displays but can preserve limited-range outputs via the new `export_range` toggle; both VapourSynth and FFmpeg backends respect `_should_expand_to_full` (`src/screenshot.py:93-105`, `src/screenshot.py:2755-2765`).
 - **Paths and cleanup:** `screenshots.directory_name` is guarded by `_resolve_workspace_subdir` to prevent escaping the root (`src/frame_compare/core.py:4182-4190`). README warns against reusing shared directories, and the runner surfaces the resolved path in its JSON tail.
+
+**Deprecated/semantics.**
+- `[screenshots].center_pad` is ignored; padding is always centered.[^screenshots-deprecated]
+- “single_res > 0 sets desired canvas height; with upscale=false clips do not upscale (effective height = min(single_res, cropped_h)); with upscale=true clips scale to single_res.”
+- “With single_res = 0 and upscale=true, shorter clips upscale to the tallest cropped height; no downscaling occurs.”
+- “Padding (pad_to_canvas on/auto) applies within letterbox tolerance; padding is always centered.”
+- “Upscaling is bounded so width never exceeds the largest source width.”
 
 **Opportunities / open questions.**
 1. **FFmpeg-specific knobs exposed in config?** Operators occasionally need per-run overrides such as PNG quantiser settings (`-pred mixed`, `-compression_level`) or forcing atomic writes for network mounts. Today these are hardcoded inside `_build_ffmpeg_writer`; consider exposing an advanced `[screenshots.ffmpeg]` table for expert overrides (consistent with FFmpeg’s image2 muxer options like `atomic_writing`, `start_number`, or `update` per FFmpeg docs).
@@ -318,6 +325,104 @@ VSPreview orchestration now lives under `src/frame_compare/vspreview.py`: `rende
 
 **Opportunities.**
 1. **Docs coverage:** README/reference barely mention `[overrides]`. Add a table with examples (`trim = { "0" = 120, "encode.mkv" = -24 }`, `change_fps = { "clip" = [24000,1001], "1" = "set" }`) and explain lookup precedence.
+
+---
+
+## `[screenshots]` (reviewed 2025‑11‑19)
+
+**Feature surface.** `ScreenshotConfig` in `src/datatypes.py` defines PNG export behaviour and geometry knobs. Orchestration lives in `src/screenshot.py` with helpers split under `src/frame_compare/render/` (`geometry.py`, `encoders.py`, `overlay.py`, `naming.py`, and `errors.py`). The runner coordinates selection/tonemap/overlay and calls `generate_screenshots` (`src/frame_compare/runner.py`). Defaults and types are mirrored in `docs/_generated/config_tables.md`.
+
+Keys of note: `directory_name`, `add_frame_info`, `use_ffmpeg`, `compression_level`, `upscale`, `single_res`, `mod_crop`, `letterbox_pillarbox_aware`, `auto_letterbox_crop`, `pad_to_canvas`, `letterbox_px_tolerance`, `center_pad`, `ffmpeg_timeout_seconds`, `odd_geometry_policy`, `rgb_dither`, `export_range`.
+
+**Health check.**
+- Odd‑geometry handling is explicit via `odd_geometry_policy` (AUTO/force_full_chroma/subsamp_safe) and verified by tests that compare legacy vs modern pipeline outputs.
+- Export range (`full` vs `limited`) is applied at the last hop to RGB24; range lifting is covered by unit tests and cross‑checked in overlay/debug flows.
+- Overlay text and frame‑info rendering are assembled through `render/overlay.py`; tests assert formatting and label normalisation.
+- FFmpeg pathway adheres to `ffmpeg_timeout_seconds` per frame and avoids `shell=True` (centralised in `src/frame_compare/subproc.py`).
+
+**Opportunities.**
+1) Simplify upscale controls: treat `single_res > 0` as an explicit opt‑in that implies `upscale=True`; otherwise leave `single_res=0` and honour `upscale`. Document this precedence to reduce confusion.
+2) Consolidate letterbox knobs in docs: explain `letterbox_pillarbox_aware`, `auto_letterbox_crop`, and `letterbox_px_tolerance` together with examples. Consider a single high‑level preset switch in future (`auto_letterbox = off|detect|strict`).
+3) Clarify `pad_to_canvas` and `center_pad` interplay in docs; if centre alignment is the only supported mode today, consider demoting `center_pad` from the config or documenting that other modes are reserved.
+4) Add a reference table row for `compression_level` and explain FFmpeg vs VapourSynth backend nuances.
+
+**Risks / follow‑ups.**
+- Tighten doc examples for letterbox/canvas interactions; keep existing behaviour unchanged.
+- Consider adding a dry‑run mode to print planned crops/pads at INFO level for troubleshooting.
+
+---
+
+## `[color]` (reviewed 2025‑11‑19)
+
+**Feature surface.** `ColorConfig` in `src/datatypes.py` defines tonemap, verification, and overlay controls. Processing is implemented under `src/frame_compare/vs/` (`color.py`, `tonemap.py`, `props.py`, `env.py`), and the runner/CLI surface these through presets and overrides. Defaults are mirrored in `docs/_generated/config_tables.md` and described in `docs/hdr_tonemap_overview.md`.
+
+Highlights: `enable_tonemap`, `preset`, `tone_curve`, `dynamic_peak_detection`, `target_nits`, `dst_min_nits`, `knee_offset`, `dpd_preset`, `dpd_black_cutoff`, `smoothing_period`, `scene_threshold_low/high`, `percentile`, `contrast_recovery`, `metadata`, `use_dovi`, `visualize_lut`, `show_clipping`, `post_gamma_enable`, `post_gamma`. Verification controls include `verify_enabled`, `verify_frame`, `verify_auto`, `verify_*_seconds`, `verify_luma_threshold`.
+
+**Health check.**
+- Default preset values align with the reference tone curve; tests assert effective settings (`resolve_effective_tonemap`) and verification thresholds (`_compute_verification`).
+- Range inference and overrides (`normalise_color_metadata`) warn on mismatches and set frame props; tests exercise both limited/full signals and override precedence.
+- Debug hooks (`debug_color`) emit intermediate PNGs and overlay diagnostics to help track regressions.
+
+**Opportunities.**
+1) Documentation grouping: list verification keys together under a sub‑heading to improve discoverability.
+2) Preset audit: ensure every preset used in docs has complete settings listed (knee/percentile/contrast/smoothing/scene windows).
+3) Consider de‑emphasising rarely toggled knobs in quick‑reference (keep them in the full reference and generator output).
+
+**Risks / follow‑ups.**
+- Keep verification defaults conservative; changing them would require broad re‑baselines in tests.
+
+---
+
+## `[tmdb]` (reviewed 2025‑11‑19)
+
+**Feature surface.** `TMDBConfig` controls API key, unattended mode, confirmation prompts, category preference, cache limits, and anime parsing toggles. Async requests flow through `src/tmdb.py` and centralised backoff in `src/frame_compare/net.py`. Tests cover external‑ID matching and title heuristics.
+
+**Health check.**
+- Backoff/retry behaviour is bounded and redacted logging is available via `net.redact_url_for_logs`.
+- Caching reduces request volume; config exposes TTL and max entries.
+- Wizard and CLI integrate TMDB metadata into slow.pics titles and JSON tails when present.
+
+**Opportunities.**
+1) Clarify interplay between `unattended` and `confirm_matches` in docs; if both are needed, document precedence (e.g., `unattended=true` implies no prompts regardless of `confirm_matches`).
+2) Expand docs with examples for manual identifiers (`movie/12345`, `tv/6789`) and how they propagate to titles.
+3) Consider a CLI override (`--tmdb-category`) for ad‑hoc runs to avoid editing config.
+
+**Risks / follow‑ups.**
+- None proposed beyond doc clarity.
+
+---
+
+## `[naming]` (reviewed 2025‑11‑19)
+
+**Feature surface.** `NamingConfig` controls file‑name inference toggles used by planner/metadata helpers. Values: `always_full_filename`, `prefer_guessit`.
+
+**Health check.**
+- Defaults favour full filenames and `guessit` heuristics when available; tests under planner/runner cover label rendering in overlays and reports.
+
+**Opportunities.**
+1) If `prefer_guessit` is almost always desirable, consider making it an internal default and removing the switch from public docs (keep it in the config for compatibility for now).
+2) Add cookbook examples for how names feed slow.pics titles and report labels.
+
+**Risks / follow‑ups.**
+- Keep both toggles visible this cycle; demotion would be a doc‑only change first.
+
+---
+
+## `[cli]` (reviewed 2025‑11‑19)
+
+**Feature surface.** `CLIConfig` and `CLIProgressConfig` control JSON tail emission and progress presentation. The Click entry in `frame_compare.py` wires flags for diagnostics, report toggles, and tone‑mapping overrides. The runner returns `RunResult` with `json_tail` populated when enabled.
+
+**Health check.**
+- `emit_json_tail=true` by default provides structured metadata at the end of runs; tests assert presence/shape in runner CLI suites.
+- Progress style is plumbed through the CLI output manager; non‑critical and safe to change without breaking integrations.
+
+**Opportunities.**
+1) Document `emit_json_tail` usage with a short example of reading the tail from stdout and parsing with `json.loads`.
+2) Consider a `--no-json-tail` CLI flag if operators want to suppress the JSON block regardless of config.
+3) Snapshot a stable subset of CLI flags in tests to catch accidental churn (already covered under API hardening plan).
+
+**Risks / follow‑ups.**
+- Keep JSON tail on by default; changes would affect automation.
 2. **Wizard + diagnostics:** The wizard doesn’t surface overrides, and typos silently no-op. Consider prompts or doctor warnings for override keys that did not match any clip.
 3. **Additional override types:** Operators often ask for per-clip overlay toggles, color overrides, or render exclusions. Plan how to extend overrides (or introduce sibling sections) without bloating the schema.
 4. **Runtime feedback:** Add explicit log lines (“Applied trim override: clip=Foo +120f”) to reduce guesswork when overrides apply.
@@ -326,3 +431,5 @@ VSPreview orchestration now lives under `src/frame_compare/vspreview.py`: `rende
 - Document lookup rules and add wizard/doctor guidance for `[overrides]`.
 - Detect/report unused override entries.
 - Expand override capabilities (color/report toggles) carefully to avoid schema sprawl.
+
+[^screenshots-deprecated]: The autogenerated tables in [`docs/_generated/config_tables.md`](./_generated/config_tables.md) still list `[screenshots].center_pad`; treat this note as the active deprecation warning until the field is removed.

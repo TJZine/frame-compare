@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Iterable
 from urllib.parse import urlsplit
@@ -14,14 +15,30 @@ from urllib3.util import Retry
 
 __all__ = [
     "BackoffError",
+    "ALLOWED_METHODS",
+    "DEFAULT_CONNECT_TIMEOUT",
+    "DEFAULT_READ_TIMEOUT",
+    "RETRY_STATUS",
     "build_urllib3_retry",
     "default_requests_timeouts",
     "httpx_get_json_with_backoff",
+    "log_backoff_attempt",
     "redact_url_for_logs",
 ]
 
-_DEFAULT_STATUS_FORCELIST = frozenset({429, 500, 502, 503, 504})
-_DEFAULT_ALLOWED_METHODS = frozenset({"GET", "POST"})
+logger = logging.getLogger(__name__)
+
+RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
+"""HTTP status codes treated as transient and eligible for backoff."""
+
+ALLOWED_METHODS = frozenset({"GET", "POST"})
+"""Request methods that participate in retry logic."""
+
+DEFAULT_CONNECT_TIMEOUT = 10.0
+"""Standard connect timeout (seconds) for outbound HTTP calls."""
+
+DEFAULT_READ_TIMEOUT = 30.0
+"""Standard read timeout (seconds) for outbound HTTP calls."""
 
 
 class BackoffError(RuntimeError):
@@ -36,8 +53,8 @@ def build_urllib3_retry(
 ) -> Retry:
     """Return a configured urllib3 Retry object with project defaults."""
 
-    statuses = frozenset(status_forcelist) if status_forcelist else _DEFAULT_STATUS_FORCELIST
-    methods = frozenset(allowed_methods) if allowed_methods else _DEFAULT_ALLOWED_METHODS
+    statuses = frozenset(status_forcelist) if status_forcelist else RETRY_STATUS
+    methods = frozenset(allowed_methods) if allowed_methods else ALLOWED_METHODS
     return Retry(
         total=total,
         backoff_factor=backoff_factor,
@@ -47,10 +64,18 @@ def build_urllib3_retry(
     )
 
 
-def default_requests_timeouts(connect: float = 10.0, read: float = 30.0) -> tuple[float, float]:
+def default_requests_timeouts(
+    connect: float = DEFAULT_CONNECT_TIMEOUT, read: float = DEFAULT_READ_TIMEOUT
+) -> tuple[float, float]:
     """Return standard connect/read timeout values for Requests sessions."""
 
     return (float(connect), float(read))
+
+
+def log_backoff_attempt(host: str, attempt: int, delay: float) -> None:
+    """Emit a concise log entry describing the next retry window."""
+
+    logger.info("GET %s retry #%d scheduled in %.2f s", host, attempt, delay)
 
 
 async def httpx_get_json_with_backoff(
@@ -63,32 +88,47 @@ async def httpx_get_json_with_backoff(
     max_backoff: float = 4.0,
     retry_status: Iterable[int] | None = None,
     sleep: Callable[[float], Awaitable[None]] | None = None,
+    on_backoff: Callable[[float, int], Awaitable[None]] | None = None,
 ) -> httpx.Response:
     """Perform a GET request with exponential backoff for transient status codes."""
 
-    retry_codes = frozenset(retry_status) if retry_status else _DEFAULT_STATUS_FORCELIST
+    retry_codes = frozenset(retry_status) if retry_status else RETRY_STATUS
     backoff = max(0.1, initial_backoff)
     upper_backoff = max(0.1, max_backoff)
     sleep_impl = sleep or asyncio.sleep
     last_network_error: httpx.RequestError | None = None
     last_response: httpx.Response | None = None
+    max_attempts = max(0, retries) + 1
+    base_url = getattr(client, "base_url", "") or ""
+    host_label = redact_url_for_logs(str(base_url) or path)
 
-    for _ in range(max(0, retries) + 1):
+    for attempt_index in range(max_attempts):
         try:
             response = await client.get(path, params=params)
         except httpx.RequestError as exc:
             last_network_error = exc
             last_response = None
+            delay = backoff
         else:
             status = response.status_code
             if status in retry_codes:
                 last_response = response
-                await sleep_impl(_retry_delay_from_response(response, backoff, upper_backoff))
-                backoff = min(backoff * 2, upper_backoff)
-                continue
-            return response
+                delay = _retry_delay_from_response(response, backoff, upper_backoff)
+            else:
+                logger.info(
+                    "GET %s completed after %d attempt%s",
+                    host_label,
+                    attempt_index + 1,
+                    "" if attempt_index == 0 else "s",
+                )
+                return response
 
-        await sleep_impl(backoff)
+        if attempt_index >= max_attempts - 1:
+            break
+
+        if on_backoff is not None:
+            await on_backoff(delay, attempt_index + 1)
+        await sleep_impl(delay)
         backoff = min(backoff * 2, upper_backoff)
 
     if last_response is not None:
@@ -106,6 +146,8 @@ def redact_url_for_logs(url: str) -> str:
     except Exception:
         return "url"
     if parsed.netloc:
+        if parsed.hostname:
+            return parsed.hostname
         return parsed.netloc
     return parsed.path or "url"
 

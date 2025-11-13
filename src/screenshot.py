@@ -1384,7 +1384,6 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[Geometry
     pad_enabled = pad_mode in {"on", "auto"}
     pad_force = pad_mode == "on"
     pad_tolerance = max(0, int(getattr(cfg, "letterbox_px_tolerance", 0)))
-    center_pad = bool(getattr(cfg, "center_pad", True))
 
     target_heights: List[int] = []
 
@@ -1424,7 +1423,7 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[Geometry
             elif pad_enabled and target_h > cropped_h:
                 diff = target_h - cropped_h
                 if pad_force or diff <= pad_tolerance:
-                    add_top, add_bottom = _split_padding(diff, center_pad)
+                    add_top, add_bottom = _split_padding(diff, True)
                     pad_top += add_top
                     pad_bottom += add_bottom
 
@@ -1468,7 +1467,7 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[Geometry
             diff_h = target_h - current_h
             if diff_h > 0:
                 if pad_force or diff_h <= pad_tolerance:
-                    add_top, add_bottom = _split_padding(diff_h, center_pad)
+                    add_top, add_bottom = _split_padding(diff_h, True)
                     pad_top += add_top
                     pad_bottom += add_bottom
                 else:
@@ -1483,7 +1482,7 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[Geometry
             diff_w = canvas_width - current_w
             if diff_w > 0:
                 if pad_force or diff_w <= pad_tolerance:
-                    add_left, add_right = _split_padding(diff_w, center_pad)
+                    add_left, add_right = _split_padding(diff_w, True)
                     pad_left += add_left
                     pad_right += add_right
                 else:
@@ -1501,7 +1500,7 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[Geometry
             pad_right,
             pad_bottom,
             cfg.mod_crop,
-            center_pad,
+            True,
         )
 
         plan["pad"] = (pad_left, pad_top, pad_right, pad_bottom)
@@ -1559,7 +1558,7 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[Geometry
                     new_pad_right,
                     new_pad_bottom,
                     cfg.mod_crop,
-                    center_pad,
+                    True,
                 )
 
                 if (

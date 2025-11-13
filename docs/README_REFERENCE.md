@@ -40,6 +40,22 @@ Dependency check:
 ✅ Clipboard helper      — Clipboard helper optional when slow.pics auto-upload is disabled.
 ```
 
+### JSON tail
+
+The CLI emits a JSON diagnostics block at the end of every run when `[cli].emit_json_tail` (default true) is enabled; disable the toggle for automation logs that must stay minimal. Example consumer:
+
+```python
+import json
+import subprocess
+
+result = subprocess.run(
+    ["frame-compare", "compare", "--input", "comparison_videos"],
+    capture_output=True,
+    text=True,
+)
+tail = json.loads(result.stdout.splitlines()[-1])
+```
+
 ## Analysis settings
 
 <!-- markdownlint-disable MD013 -->
@@ -102,6 +118,7 @@ Dependency check:
 | `[screenshots].directory_name` | Output directory for PNGs. | str | `"screens"` |
 | `[screenshots].use_ffmpeg` | Prefer FFmpeg for captures. | bool | `false` |
 | `[screenshots].add_frame_info` | Overlay frame metadata. | bool | `true` |
+| `[screenshots].compression_level` | PNG compression tier (0 fastest/low, 2 slowest/high). | int | `1` |
 | `[screenshots].upscale` | Permit global upscaling. | bool | `true` |
 | `[screenshots].single_res` | Fixed output height (0 keeps source). | int | `0` |
 | `[screenshots].mod_crop` | Crop modulus. | int | `2` |
@@ -109,6 +126,9 @@ Dependency check:
 | `[screenshots].rgb_dither` | Dithering applied during final RGB24 conversion (FFmpeg path forces deterministic ordered when `"error_diffusion"` is requested). | str | `"error_diffusion"` |
 | `[screenshots].export_range` | Output range for PNGs (`"full"` expands limited SDR to full-range RGB; `"limited"` keeps video-range output). | str | `"full"` |
 | `[screenshots].auto_letterbox_crop` | Auto crop black bars. | bool | `false` |
+| `[screenshots].pad_to_canvas` | Apply padding within `letterbox_px_tolerance` when bars are detected; padding remains centered. | str | `"off"` |
+| `[screenshots].letterbox_px_tolerance` | Pixel budget for letterbox/pad detection when `pad_to_canvas` toggles. | int | `8` |
+| `[screenshots].center_pad` | Deprecated and ignored; padding is always centered. | bool | `true[^screenshots-deprecated]` |
 | `[screenshots].ffmpeg_timeout_seconds` | Per-frame FFmpeg timeout in seconds (must be >= 0; set 0 to disable). | float | `120.0` |
 | `[color].enable_tonemap` | HDR→SDR conversion toggle. | bool | `true` |
 | `[color].preset` | Tonemapping preset. | str | `"reference"` |
@@ -153,15 +173,25 @@ Preset highlights:
 | --- | --- | --- | --- |
 | `[slowpics].auto_upload` | Automatically upload runs. | bool | `false` |
 | `[slowpics].collection_name` | slow.pics collection label. | str | `""` |
+| `[slowpics].collection_suffix` | Optional suffix appended to the collection name for disambiguation. | str | `""` |
+| `[slowpics].is_hentai` | Mark uploads as hentai content on slow.pics. | bool | `false` |
+| `[slowpics].is_public` | Publish uploads as discoverable. | bool | `true` |
 | `[slowpics].tmdb_id` | TMDB identifier. | str | `""` |
+| `[slowpics].tmdb_category` | TMDB category hint (`movie` or `tv`). | str | `""` |
+| `[slowpics].remove_after_days` | Days before slow.pics deletes the upload (0 keeps forever). | int | `0` |
+| `[slowpics].webhook_url` | Notify this webhook when uploads finish. | str | `""` |
 | `[slowpics].open_in_browser` | Open slow.pics URLs locally. | bool | `true` |
+| `[slowpics].create_url_shortcut` | Create a `.url` shortcut pointing to the slow.pics page. | bool | `true` |
 | `[slowpics].delete_screen_dir_after_upload` | Remove PNGs after upload. | bool | `true` |
+| `[slowpics].image_upload_timeout_seconds` | Per-image HTTP timeout for uploads. | float | `180.0` |
 | `[tmdb].api_key` | Key needed for TMDB lookup. | str | `""` |
 | `[tmdb].enable_anime_parsing` | Anime-specific parsing toggle. | bool | `true` |
 | `[tmdb].cache_ttl_seconds` | TMDB cache lifetime (seconds). | int | `86400` |
 <!-- markdownlint-restore -->
 
 TMDB lookups reuse the same workflow for CLI and automation: `tmdb_workflow.resolve_blocking` retries transient HTTP failures via `httpx.HTTPTransport(retries=...)`, `tmdb_workflow.resolve_workflow` (exported via `frame_compare.resolve_tmdb_workflow`) prompts once per run, and `[tmdb].unattended=true` suppresses ambiguity prompts while logging a warning instead of blocking the process. Manual identifiers entered during the prompt (movie/##### or tv/#####) propagate into slow.pics metadata, layout data, and JSON tails.
+
+Network policy: transient statuses {429, 500, 502, 503, 504} backoff; connect=10 s/read=per-upload with a 256 KiB/s baseline plus margin; pooled sessions sized to the worker count.
 
 **Shortcut naming:** uploaded runs create a `.url` file using the resolved collection name (sanitised via `build_shortcut_filename` in `src/frame_compare/slowpics.py:148-164`).  
 If the name collapses to an empty string, the CLI falls back to the canonical comparison key; otherwise repeated runs with the same collection name will refresh the same shortcut file—append a suffix in `[slowpics].collection_name` if you need per-run artifacts.
@@ -205,6 +235,12 @@ These toggles control CLI output independent of per-run flags (`--quiet`, `--jso
 | `[cli.progress].style` | Pick progress renderer style (`"fill"` bar vs `"dot"` indicator). Invalid values fall back to `"fill"`. | str | `"fill"` |
 <!-- markdownlint-restore -->
 
+**Semantics.**
+- “single_res > 0 sets desired canvas height; with upscale=false clips do not upscale (effective height = min(single_res, cropped_h)); with upscale=true clips scale to single_res.”
+- “With single_res = 0 and upscale=true, shorter clips upscale to the tallest cropped height; no downscaling occurs.”
+- “Padding (pad_to_canvas on/auto) applies within letterbox tolerance; padding is always centered.”
+- “Upscaling is bounded so width never exceeds the largest source width.”
+
 Both the wizard and `docs/config_audit.md` highlight scenarios where suppressing the JSON tail or switching the progress style is helpful (for example, in automation harnesses with strict log parsers).
 
 ## CLI flags
@@ -222,6 +258,7 @@ Both the wizard and `docs/config_audit.md` highlight scenarios where suppressing
 | `--json-pretty` | Pretty-print the JSON tail. | `false` |
 <!-- markdownlint-restore -->
 > The CLI refuses workspace roots inside `site-packages`/`dist-packages`, seeds `ROOT/config/config.toml` when missing, validates writability before running, and blocks derived paths from escaping the workspace. Use `--diagnose-paths` to inspect the resolved locations.
+CLI flags are kept stable; `tests/runner/test_cli_entry.py` exercises a subset of these options so regressions in flag parsing surface quickly.
 
 ## API Reference
 
@@ -258,3 +295,5 @@ Per-clip trim and FPS adjustments. Keys match clip index, filename (with extensi
 <!-- markdownlint-restore -->
 
 See the `[overrides]` section of `docs/config_audit.md` for troubleshooting tips. Mis-typed keys are silently ignored, so prefer descriptive filenames or indices to ensure overrides apply.
+
+[^screenshots-deprecated]: The autogenerated tables in [`docs/_generated/config_tables.md`](./_generated/config_tables.md) still list `[screenshots].center_pad`; treat this note as the current deprecation warning until the key is removed.

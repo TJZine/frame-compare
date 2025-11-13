@@ -837,7 +837,7 @@ Docs/tracker updates
 
 Risks & mitigations
 - Type churn on `GeometryPlan`: keep it in `src/screenshot.py` for now; only move shape in a later phase when consumers are ready.
-- Hidden dependencies on underscore helpers: wrappers with identical names and signatures avoid test churn; search for direct calls with Serena search before edits.
+- Hidden dependencies on underscore helpers: wrappers with identical names and signatures avoid test churn; search for direct calls with Codanna search before edits.
 - Import cycles: `render/*` must not import `src/screenshot.py`; keep helpers independent and rely only on stdlib and `src.datatypes` if needed.
 - Naming drift: preserve function semantics; add `__all__` in each new module to document surface.
 
@@ -1112,7 +1112,7 @@ Detailed step list (file moves, shims, layering)
    - Ensure no back‑imports from these modules into `src.frame_compare.core` or the CLI shim.
 
 4) Remove legacy file
-   - Delete `Legacy/comp.py` after confirming no imports reference it (Serena search shows no references; MANIFEST already prunes `Legacy/`).
+   - Delete `Legacy/comp.py` after confirming no imports reference it (Codanna search shows no references; MANIFEST already prunes `Legacy/`).
 
 5) Packaging review (no functional changes required)
    - `pyproject.toml` currently packages `src`, `src.frame_compare`, and `data` with `include-package-data = true`. No changes needed for this move; both destinations are packaged.
@@ -1295,6 +1295,8 @@ Acceptance
 API hardening tracked in `docs/refactor/api_hardening.md`.
 
 Goal: remove all temporary bridges and transitional shims left behind after Phases 9–11 (compat exports, wizard/VSPreview/TMDB shims, screenshot/analysis/vs_core shims, and any test-only bridges), so only the extracted modules and curated exports remain.
+
+Post-phase note: Retry/timeout policy now lives in `frame_compare/net.py`; the slow.pics path keeps its legacy endpoints but reuses the centralized pooled-session + retry settings.
 
 Scope
 - Audit `_COMPAT_EXPORTS`, wizard/VSPreview/TMDB helpers, and any aliases marked “temporary” during Phases 9–11.

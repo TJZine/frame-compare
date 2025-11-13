@@ -28,7 +28,12 @@ else:  # pragma: no cover - optional dependency in tests
         MultipartEncoder = None  # type: ignore
 
 from src.datatypes import SlowpicsConfig
-from src.frame_compare.net import build_urllib3_retry
+from src.frame_compare.net import (
+    ALLOWED_METHODS,
+    DEFAULT_CONNECT_TIMEOUT,
+    RETRY_STATUS,
+    build_urllib3_retry,
+)
 
 
 class SlowpicsAPIError(RuntimeError):
@@ -38,7 +43,7 @@ class SlowpicsAPIError(RuntimeError):
 logger = logging.getLogger(__name__)
 
 
-_CONNECT_TIMEOUT_SECONDS = 10.0
+_CONNECT_TIMEOUT_SECONDS = DEFAULT_CONNECT_TIMEOUT
 _DEFAULT_UPLOAD_CONCURRENCY = 3
 _MIN_UPLOAD_THROUGHPUT_BYTES_PER_SEC = 256 * 1024  # 256 KiB/s baseline assumption
 _UPLOAD_TIMEOUT_MARGIN_SECONDS = 15.0
@@ -243,7 +248,7 @@ def _prepare_legacy_plan(image_files: List[str]) -> tuple[List[int], List[List[t
 
 
 def _compute_image_upload_timeout(cfg: SlowpicsConfig, size_bytes: int) -> tuple[float, float]:
-    """Return (connect, read) timeout tuple for a screenshot upload."""
+    """Return (connect, read) timeouts derived from a throughput floor plus margin."""
 
     base = max(float(cfg.image_upload_timeout_seconds), 1.0)
     if size_bytes <= 0:
@@ -395,8 +400,8 @@ def _configure_slowpics_session(session: requests.Session, *, workers: Optional[
     pool_size = max(4, effective_workers)
     retries = build_urllib3_retry(
         backoff_factor=0.1,
-        status_forcelist={502, 503, 504},
-        allowed_methods={"GET", "POST"},
+        status_forcelist=RETRY_STATUS,
+        allowed_methods=ALLOWED_METHODS,
     )
     adapter = HTTPAdapter(
         max_retries=retries,
@@ -405,6 +410,12 @@ def _configure_slowpics_session(session: requests.Session, *, workers: Optional[
     )
     session.mount("https://", adapter)
     session.mount("http://", adapter)
+    logger.info(
+        "slow.pics session configured: pool=%d retries=%d backoff=%.1f",
+        pool_size,
+        retries.total or 0,
+        retries.backoff_factor,
+    )
 
 
 def upload_comparison(
@@ -459,6 +470,12 @@ def upload_comparison(
             max_workers=max_workers,
         )
         logger.info("Slow.pics: %s", url)
+        logger.info(
+            "slow.pics upload complete: frames=%d workers=%d url=%s",
+            len(image_files),
+            expected_workers,
+            url,
+        )
         return url
     finally:
         bootstrap_session.close()

@@ -12,6 +12,9 @@ from src.frame_compare import net
         ("https://example.com/path?token=abc", "example.com"),
         ("https://example.com", "example.com"),
         ("/status/health", "/status/health"),
+        ("https://user:pass@example.com/secret", "example.com"),
+        ("ftp://uploads.slow.pics/resource", "uploads.slow.pics"),
+        ("", "url"),
     ],
 )
 def test_redact_url_for_logs(url: str, expected: str) -> None:

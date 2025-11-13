@@ -28,9 +28,15 @@ node_modules/
 .pnp.*      # Yarn PnP
 coverage/
 
+# Other tooling
+.codanna
+.codannaignore
+.fastembed_cache
+
 # Ignore User Config
 /config.toml
 /config/config.toml
+
 # OS
 .DS_Store
 Thumbs.db

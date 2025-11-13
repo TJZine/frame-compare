@@ -68,6 +68,7 @@ letterbox_pillarbox_aware = true
 auto_letterbox_crop = false
 pad_to_canvas = "off"
 letterbox_px_tolerance = 8
+# DEPRECATED: center_pad is ignored; padding is always centered (kept for backward compatibility)
 center_pad = true
 # Choose how odd-pixel trims/pads behave on subsampled SDR clips.
 odd_geometry_policy = "auto"
