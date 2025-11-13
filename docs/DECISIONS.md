@@ -2,6 +2,45 @@
 
 # Decisions Log
 
+- *2025-11-13:* dx(cache): cache recompute reasons are now surfaced in both CLI output and the JSON tail, and analysis logs include breadcrumbs for metrics/sidecar misses.
+  - Problem: When frame metrics were rebuilt, operators only saw “Recomputing frame metrics…” without the underlying reason (config mismatch, fps mismatch, etc.), making it hard to tell why reuse failed. Selection sidecar misses also lacked observability.
+  - Decision: Thread the probe reason into the progress message (`Recomputing frame metrics (<reason>)…`), emit a CLI line for missing caches, and log `[ANALYSIS] metrics cache miss: …` plus `[ANALYSIS] selection sidecar unavailable…` when applicable. JSON tail fields already carry `cache.reason`; now `analysis.cache_progress_message` mirrors the human-readable cause so UI and logs stay consistent.
+  - Verification:
+    - `date -u +%Y-%m-%d` → `2025-11-13`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/runner/test_audio_alignment_cli.py::test_run_cli_surfaces_cache_recompute_reason tests/runner/test_audio_alignment_cli.py::test_run_cli_reports_missing_cache_reason` →
+      ```
+      ..                                                                       [100%]
+      2 passed in 0.11s
+      ```
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` →
+      ```
+      319 passed, 1 skipped in 28.08s
+      ```
+    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+  - Context: This is a visibility-only change; reuse rules are unchanged. Sample reasons now shown to users: `config_mismatch`, `inputs_changed`, `fps_mismatch`, `trim_start_mismatch`, `trim_end_mismatch`, `release_group_mismatch`, `invalid_json`, `metric_type_error`, and `missing`.
+  - Follow-up (log breadcrumbs now include file/cache identifiers):
+    - `date -u +%Y-%m-%d` → `2025-11-13`
+    - `git status -sb` →
+      ```
+      ## runner-refactor...origin/runner-refactor [ahead 3]
+       M CHANGELOG.md
+       M docs/DECISIONS.md
+       M src/frame_compare/analysis/selection.py
+       M src/frame_compare/runner.py
+       M tests/runner/test_audio_alignment_cli.py
+      ```
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/runner/test_audio_alignment_cli.py::test_run_cli_surfaces_cache_recompute_reason tests/runner/test_audio_alignment_cli.py::test_run_cli_reports_missing_cache_reason` →
+      ```
+      ..                                                                       [100%]
+      2 passed in 0.04s
+      ```
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` →
+      ```
+      319 passed, 1 skipped in 28.08s
+      ```
+    - `.venv/bin/ruff check` → `All checks passed!`
+    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+
 - *2025-11-13:* perf(cache): cache writes no longer re-hash clip payloads by default, and cache metadata can now carry precomputed clip inputs.
   - Problem: large media inputs forced `_build_clip_inputs` to read every byte when persisting selection caches, even though SHA1 digests are never consulted during reuse decisions (those keys rely on filenames, fps, config fingerprint, trims, and release group).
   - Decision: gate hashing behind `compute_sha1`/`FRAME_COMPARE_CACHE_HASH` (default off), keep the `"sha1"` field present but nullable, and extend `FrameMetricsCacheInfo` with an optional `clips` field populated by `cache.build_cache_info` so later cache builders can reuse the stat metadata without re-touching disk. Operators can export `FRAME_COMPARE_CACHE_HASH=1` when they explicitly want digests in the payload.

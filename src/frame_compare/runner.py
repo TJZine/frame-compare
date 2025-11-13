@@ -928,19 +928,20 @@ def run(request: RunRequest) -> RunResult:
                 )
             else:
                 cache_status = "recomputed"
-                reason_code = probe_result.reason or probe_result.status
+                reason_code = probe_result.reason or probe_result.status or "unknown"
                 cache_reason = reason_code
-                human_reason = reason_code.replace("_", " ")
-                if probe_result.status in {"stale", "error"}:
-                    reporter.line(
-                        f"[yellow]Frame metrics cache {probe_result.status} "
-                        f"({escape(human_reason)}); recomputing…[/]"
-                    )
-                cache_progress_message = "Recomputing frame metrics…"
+                human_reason = reason_code.replace("_", " ").strip() or "unknown"
+                reporter.line(
+                    f"[yellow]Frame metrics cache {probe_result.status} "
+                    f"({escape(human_reason)}); recomputing…[/]"
+                )
+                cache_progress_message = f"Recomputing frame metrics ({human_reason})…"
         else:
             cache_status = "recomputed"
             cache_reason = "missing"
             cache_probe = CacheLoadResult(metrics=None, status="missing", reason="missing")
+            reporter.line("[yellow]Frame metrics cache missing; recomputing…[/]")
+            cache_progress_message = "Recomputing frame metrics (missing)…"
 
     json_tail["cache"] = {
         "file": cache_filename,

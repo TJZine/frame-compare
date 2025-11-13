@@ -4,6 +4,7 @@ All notable user-visible updates will be documented in this file in reverse chro
 
 ## Unreleased
 
+- *2025-11-13:* dx(cache): CLI + JSON tail now show the specific reason when frame metrics are recomputed (config mismatch, fps mismatch, missing, etc.), and analysis logs emit INFO breadcrumbs for metrics cache/selection sidecar misses to ease triage.
 - *2025-11-13:* perf(cache): `_build_clip_inputs`/`build_clip_inputs_from_paths` skip SHA1 hashing unless `compute_sha1=True` or `FRAME_COMPARE_CACHE_HASH` requests it, `FrameMetricsCacheInfo` carries an optional precomputed `clips` payload populated by `cache.build_cache_info`, and selection cache keys stay stable with nullable digests; new tests cover the fast path, opt-in hashing, and cache-key determinism.
 - *2025-11-13:* docs(mcp): replace Serena with Codanna across `CODEX.md`/`agents.md`, add Codanna MCP server config and quickstart, document token‑efficient defaults, and include a concise “Codanna + Sequential‑Thinking” workflow. Historical Serena mentions remain in logs for provenance.
 - *2025-11-13:* feat(net): centralize retry/timeout policy, add structured backoff logging, and cover httpx/slow.pics adapters with tests.

@@ -26,6 +26,7 @@ from .cache_io import (
     coerce_optional_str,
     infer_clip_role,
     probe_cached_metrics,
+    selection_sidecar_path,
 )
 
 
@@ -623,7 +624,12 @@ def select_frames(
                     detail = _ensure_detail(frame, label=label)
                     label_map[frame] = detail.label
                 return frames_sorted, label_map, selection_details
-            return frames_sorted
+                return frames_sorted
+        logger.info(
+            "[ANALYSIS] selection sidecar unavailable for %s (%s); recomputing selections",
+            file_under_analysis,
+            selection_sidecar_path(cache_info),
+        )
 
     cache_probe_local = cache_probe
     if cache_probe_local is None and cache_info is not None:
@@ -633,6 +639,14 @@ def select_frames(
         if cache_probe_local is not None and cache_probe_local.status == "reused"
         else None
     )
+    if cache_probe_local is not None and cache_probe_local.status != "reused":
+        cache_identifier = cache_info.path if cache_info is not None else "unknown cache"
+        logger.info(
+            "[ANALYSIS] metrics cache miss for %s (%s): %s",
+            file_under_analysis,
+            cache_identifier,
+            (cache_probe_local.reason or cache_probe_local.status),
+        )
 
     cached_selection: Optional[List[int]] = None
     cached_categories: Optional[Dict[int, str]] = None
