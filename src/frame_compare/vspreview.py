@@ -63,6 +63,7 @@ VSPREVIEW_POSIX_INSTALL: Final[str] = (
     "uv add frame-compare --extra preview  # fallback: uv add vspreview PySide6"
 )
 _VSPREVIEW_MANUAL_COMMAND_TEMPLATE: Final[str] = "{python} -m vspreview {script}"
+_MANUAL_OFFSET_FALLBACK_FPS: Final[tuple[int, int]] = (24000, 1001)
 
 ProcessRunner = Callable[..., subprocess.CompletedProcess[Any]]
 
@@ -74,6 +75,18 @@ def _fps_to_float(value: tuple[int, int] | None) -> float:
     if not denominator:
         return 0.0
     return float(numerator) / float(denominator)
+
+
+def _resolve_manual_offset_fps(plan: ClipPlan) -> tuple[int, int]:
+    """Return a usable FPS tuple for manual-offset reporting."""
+
+    fps_tuple = plan.effective_fps or plan.source_fps or plan.fps_override
+    if fps_tuple is None:
+        return _MANUAL_OFFSET_FALLBACK_FPS
+    num, den = fps_tuple
+    if not isinstance(num, int) or not isinstance(den, int) or den == 0:
+        return _MANUAL_OFFSET_FALLBACK_FPS
+    return int(num), int(den)
 
 
 def _coerce_str_mapping(mapping: Mapping[str, object] | MappingABC[str, object] | None) -> dict[str, object]:
@@ -621,11 +634,9 @@ def apply_manual_offsets(
         display.offset_lines = ["Audio offsets: VSPreview manual offsets applied"]
         display.offset_lines.extend(display.manual_trim_lines)
 
-    fps_lookup: Dict[str, Tuple[int, int] | None] = {}
+    fps_lookup: Dict[str, Tuple[int, int]] = {}
     for plan in plans:
-        fps_lookup[plan.path.name] = (
-            plan.effective_fps or plan.source_fps or plan.fps_override
-        )
+        fps_lookup[plan.path.name] = _resolve_manual_offset_fps(plan)
 
     measurement_order = [plan.path.name for plan in plans]
     plan_lookup: Dict[str, ClipPlan] = {plan.path.name: plan for plan in plans}
