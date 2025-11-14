@@ -84,7 +84,7 @@ def _resolve_manual_offset_fps(plan: ClipPlan) -> tuple[int, int]:
     if fps_tuple is None:
         return _MANUAL_OFFSET_FALLBACK_FPS
     num, den = fps_tuple
-    if not isinstance(num, int) or not isinstance(den, int) or den == 0:
+    if den == 0:
         return _MANUAL_OFFSET_FALLBACK_FPS
     return int(num), int(den)
 
@@ -583,41 +583,30 @@ def apply_manual_offsets(
     reference_delta_input = int(deltas.get(reference_name, 0))
     desired_map[reference_name] = reference_baseline + reference_delta_input
 
-    baseline_min = min(baseline_map.values()) if baseline_map else 0
-    desired_min = min(desired_map.values()) if desired_map else 0
-    baseline_floor = baseline_min if baseline_min < 0 else 0
-    desired_floor = desired_min if desired_min < 0 else 0
-    shift = 0
-    if desired_floor < baseline_floor:
-        shift = baseline_floor - desired_floor
-
     for plan, baseline_value, delta_value in target_adjustments:
         key = plan.path.name
         desired_value = desired_map[key]
-        updated = desired_value + shift
-        updated_int = int(updated)
-        safe_updated = max(0, updated_int)
-        plan.trim_start = safe_updated
+        updated_int = int(desired_value)
+        plan.trim_start = updated_int
         plan.has_trim_start_override = (
-            plan.has_trim_start_override or safe_updated != 0
+            plan.has_trim_start_override or updated_int != 0
         )
         manual_trim_starts[key] = updated_int
         applied_delta = updated_int - baseline_value
         delta_map[key] = applied_delta
         line = (
             f"VSPreview manual offset applied: {_plan_label(plan)} baseline {baseline_value}f "
-            f"{delta_value:+d}f → {int(updated)}f"
+            f"{delta_value:+d}f → {updated_int}f"
         )
         manual_lines.append(line)
         reporter.line(line)
 
-    adjusted_reference = desired_map[reference_name] + shift
+    adjusted_reference = desired_map[reference_name]
     adjusted_reference_int = int(adjusted_reference)
-    safe_adjusted_reference = max(0, adjusted_reference_int)
-    reference_plan.trim_start = safe_adjusted_reference
+    reference_plan.trim_start = adjusted_reference_int
     reference_plan.has_trim_start_override = (
         reference_plan.has_trim_start_override
-        or safe_adjusted_reference != int(reference_baseline)
+        or adjusted_reference_int != int(reference_baseline)
     )
     manual_trim_starts[reference_name] = adjusted_reference_int
     reference_delta = adjusted_reference_int - reference_baseline

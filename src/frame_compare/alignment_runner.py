@@ -299,7 +299,7 @@ def apply_audio_alignment(
                 continue
             delta_frames = int(vspreview_reuse[key])
             baseline_value = baseline_map.get(key, int(plan.trim_start))
-            applied_frames = max(0, baseline_value + delta_frames)
+            applied_frames = baseline_value + delta_frames
             plan.trim_start = applied_frames
             plan.has_trim_start_override = (
                 plan.has_trim_start_override or delta_frames != 0
