@@ -263,3 +263,44 @@ def test_apply_manual_offsets_updates_json_tail(tmp_path: Path) -> None:
     assert offsets_frames.get("Target A") == detail.frames
     warnings = reporter.get_warnings()
     assert any("not part of the current plan" in warning for warning in warnings)
+
+
+def test_apply_manual_offsets_populates_seconds_without_known_fps(tmp_path: Path) -> None:
+    """Manual offsets should fall back to a sane FPS when clips lack metadata."""
+
+    reporter = _RecordingOutputManager()
+    json_tail = _make_json_tail_stub()
+
+    reference = _ClipPlan(path=tmp_path / "Ref.mkv", metadata={"label": "Reference"})
+    target = _ClipPlan(path=tmp_path / "Target.mkv", metadata={"label": "Target"})
+    summary = alignment_runner_module._AudioAlignmentSummary(
+        offsets_path=tmp_path / "offsets.json",
+        reference_name=reference.path.name,
+        measurements=tuple(),
+        applied_frames={},
+        baseline_shift=0,
+        statuses={},
+        reference_plan=reference,
+        final_adjustments={},
+        swap_details={},
+        suggested_frames={},
+        suggestion_mode=True,
+        manual_trim_starts={},
+    )
+
+    vspreview_module.apply_manual_offsets(
+        [reference, target],
+        summary,
+        {target.path.name: 6},
+        reporter,
+        json_tail,
+        display=None,
+    )
+
+    detail = summary.measured_offsets[target.path.name]
+    assert detail.frames == 6
+    fallback_fps = 24000 / 1001
+    assert detail.offset_seconds == pytest.approx(6 / fallback_fps, rel=1e-6)
+    audio_block = json_tail["audio_alignment"]
+    offsets_sec = audio_block.get("offsets_sec", {})
+    assert offsets_sec["Target"] == pytest.approx(6 / fallback_fps, rel=1e-6)
