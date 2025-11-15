@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 __all__: Final = [
     "extract_clip_fps",
     "init_clips",
+    "probe_clip_metadata",
     "resolve_selection_windows",
     "log_selection_windows",
 ]
@@ -41,16 +42,9 @@ def _extract_clip_fps(clip: object) -> Tuple[int, int]:
 extract_clip_fps = _extract_clip_fps
 
 
-def init_clips(
-    plans: Sequence[ClipPlan],
-    runtime_cfg: RuntimeConfig,
-    cache_dir: Path | None,
-    *,
-    reporter: CliOutputManagerProtocol | None = None,
-) -> None:
-    """Initialise VapourSynth clips for each plan and capture source metadata."""
-    vs_core.set_ram_limit(runtime_cfg.ram_limit_mb)
-
+def _make_indexing_notifier(
+    reporter: CliOutputManagerProtocol | None,
+) -> Callable[[str], None]:
     def _indexing_note(filename: str) -> None:
         label = escape(filename)
         if reporter is not None:
@@ -58,16 +52,35 @@ def init_clips(
         else:
             logger.info("[CACHE] Indexing %s…", filename)
 
+    return _indexing_note
+
+
+def _capture_source_props_for_probe(target_plan: ClipPlan) -> Callable[[Mapping[str, Any]], None]:
+    def _store(props: Mapping[str, Any]) -> None:
+        if target_plan.source_frame_props is None:
+            target_plan.source_frame_props = dict(props)
+
+    return _store
+
+
+def probe_clip_metadata(
+    plans: Sequence[ClipPlan],
+    runtime_cfg: RuntimeConfig,
+    cache_dir: Path | None,
+    *,
+    reporter: CliOutputManagerProtocol | None = None,
+) -> None:
+    """Open each clip once to populate FPS, geometry, and HDR snapshot metadata."""
+
+    if not plans:
+        return
+
+    vs_core.set_ram_limit(runtime_cfg.ram_limit_mb)
     cache_dir_str = str(cache_dir) if cache_dir is not None else None
+    indexing_notifier = _make_indexing_notifier(reporter)
 
     reference_index = next((idx for idx, plan in enumerate(plans) if plan.use_as_reference), None)
     reference_fps: Optional[Tuple[int, int]] = None
-
-    def _capture_source_props(target_plan: ClipPlan) -> Callable[[Mapping[str, Any]], None]:
-        def _store(props: Mapping[str, Any]) -> None:
-            target_plan.source_frame_props = dict(props)
-
-        return _store
 
     if reference_index is not None:
         plan = plans[reference_index]
@@ -76,15 +89,92 @@ def init_clips(
             trim_start=plan.trim_start,
             trim_end=plan.trim_end,
             cache_dir=cache_dir_str,
-            indexing_notifier=_indexing_note,
-            frame_props_sink=_capture_source_props(plan),
+            indexing_notifier=indexing_notifier,
+            frame_props_sink=_capture_source_props_for_probe(plan),
         )
-        plan.clip = clip
+        fps_tuple = _extract_clip_fps(clip)
+        plan.effective_fps = fps_tuple
+        plan.source_fps = fps_tuple
+        plan.source_num_frames = int(getattr(clip, "num_frames", 0) or 0)
+        plan.source_width = int(getattr(clip, "width", 0) or 0)
+        plan.source_height = int(getattr(clip, "height", 0) or 0)
+        if plan.source_frame_props is None:
+            plan.source_frame_props = {}
+        reference_fps = fps_tuple
+
+    for idx, plan in enumerate(plans):
+        if idx == reference_index:
+            continue
+        fps_override = plan.fps_override
+        if fps_override is None and reference_fps is not None:
+            fps_override = reference_fps
+
+        clip = vs_core.init_clip(
+            str(plan.path),
+            trim_start=plan.trim_start,
+            trim_end=plan.trim_end,
+            fps_map=fps_override,
+            cache_dir=cache_dir_str,
+            indexing_notifier=indexing_notifier,
+            frame_props_sink=_capture_source_props_for_probe(plan),
+        )
+        plan.applied_fps = fps_override
         plan.effective_fps = _extract_clip_fps(clip)
         plan.source_fps = plan.effective_fps
         plan.source_num_frames = int(getattr(clip, "num_frames", 0) or 0)
         plan.source_width = int(getattr(clip, "width", 0) or 0)
         plan.source_height = int(getattr(clip, "height", 0) or 0)
+        if plan.source_frame_props is None:
+            plan.source_frame_props = {}
+
+
+def init_clips(
+    plans: Sequence[ClipPlan],
+    runtime_cfg: RuntimeConfig,
+    cache_dir: Path | None,
+    *,
+    reporter: CliOutputManagerProtocol | None = None,
+) -> None:
+    """Initialise VapourSynth clips and reuse previously probed metadata when possible."""
+
+    vs_core.set_ram_limit(runtime_cfg.ram_limit_mb)
+    cache_dir_str = str(cache_dir) if cache_dir is not None else None
+    indexing_notifier = _make_indexing_notifier(reporter)
+
+    reference_index = next((idx for idx, plan in enumerate(plans) if plan.use_as_reference), None)
+    reference_fps: Optional[Tuple[int, int]] = None
+
+    def _capture_source_props(target_plan: ClipPlan) -> Callable[[Mapping[str, Any]], None]:
+        def _store(props: Mapping[str, Any]) -> None:
+            if target_plan.source_frame_props is None:
+                target_plan.source_frame_props = dict(props)
+
+        return _store
+
+    if reference_index is not None:
+        plan = plans[reference_index]
+        source_props_hint = plan.source_frame_props if plan.source_frame_props else None
+        frame_props_sink = None if plan.source_frame_props is not None else _capture_source_props(plan)
+        clip = vs_core.init_clip(
+            str(plan.path),
+            trim_start=plan.trim_start,
+            trim_end=plan.trim_end,
+            cache_dir=cache_dir_str,
+            indexing_notifier=indexing_notifier,
+            frame_props_sink=frame_props_sink,
+            source_frame_props_hint=source_props_hint,
+        )
+        plan.clip = clip
+        if plan.effective_fps is None:
+            plan.effective_fps = _extract_clip_fps(clip)
+        if plan.source_fps is None:
+            plan.source_fps = plan.effective_fps
+        if plan.source_num_frames is None:
+            plan.source_num_frames = int(getattr(clip, "num_frames", 0) or 0)
+        if plan.source_width is None:
+            plan.source_width = int(getattr(clip, "width", 0) or 0)
+        if plan.source_height is None:
+            plan.source_height = int(getattr(clip, "height", 0) or 0)
         if plan.source_frame_props is None:
             plan.source_frame_props = {}
         reference_fps = plan.effective_fps
@@ -96,22 +186,31 @@ def init_clips(
         if fps_override is None and reference_fps is not None and idx != reference_index:
             fps_override = reference_fps
 
+        source_props_hint = plan.source_frame_props if plan.source_frame_props else None
+        frame_props_sink = None if plan.source_frame_props is not None else _capture_source_props(plan)
         clip = vs_core.init_clip(
             str(plan.path),
             trim_start=plan.trim_start,
             trim_end=plan.trim_end,
             fps_map=fps_override,
             cache_dir=cache_dir_str,
-            indexing_notifier=_indexing_note,
-            frame_props_sink=_capture_source_props(plan),
+            indexing_notifier=indexing_notifier,
+            frame_props_sink=frame_props_sink,
+            source_frame_props_hint=source_props_hint,
         )
         plan.clip = clip
-        plan.applied_fps = fps_override
-        plan.effective_fps = _extract_clip_fps(clip)
-        plan.source_fps = plan.effective_fps
-        plan.source_num_frames = int(getattr(clip, "num_frames", 0) or 0)
-        plan.source_width = int(getattr(clip, "width", 0) or 0)
-        plan.source_height = int(getattr(clip, "height", 0) or 0)
+        if plan.applied_fps is None:
+            plan.applied_fps = fps_override
+        if plan.effective_fps is None:
+            plan.effective_fps = _extract_clip_fps(clip)
+        if plan.source_fps is None:
+            plan.source_fps = plan.effective_fps
+        if plan.source_num_frames is None:
+            plan.source_num_frames = int(getattr(clip, "num_frames", 0) or 0)
+        if plan.source_width is None:
+            plan.source_width = int(getattr(clip, "width", 0) or 0)
+        if plan.source_height is None:
+            plan.source_height = int(getattr(clip, "height", 0) or 0)
         if plan.source_frame_props is None:
             plan.source_frame_props = {}
 

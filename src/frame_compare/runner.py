@@ -764,6 +764,14 @@ def run(request: RunRequest) -> RunResult:
     plans = planner_utils.build_plans(files, metadata, cfg)
     analyze_path = core.pick_analyze_file(files, metadata, cfg.analysis.analyze_clip, cache_dir=root)
 
+    try:
+        selection_utils.probe_clip_metadata(plans, cfg.runtime, root, reporter=reporter)
+    except ClipInitError as exc:
+        raise CLIAppError(
+            f"Failed to open clip: {exc}",
+            rich_message=f"[red]Failed to open clip:[/red] {exc}",
+        ) from exc
+
     alignment_summary, alignment_display = alignment_runner.apply_audio_alignment(
         plans,
         cfg,

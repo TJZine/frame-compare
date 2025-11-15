@@ -343,6 +343,7 @@ def apply_audio_alignment(
             baseline_value = baseline_map.get(key, int(plan.trim_start))
             applied_frames = baseline_value + delta_frames
             plan.trim_start = applied_frames
+            plan.source_num_frames = None
             plan.has_trim_start_override = (
                 plan.has_trim_start_override or delta_frames != 0
             )
@@ -747,6 +748,7 @@ def apply_audio_alignment(
             adjustment = int(desired - baseline)
             if adjustment:
                 plan.trim_start = plan.trim_start + adjustment
+                plan.source_num_frames = None
                 plan.alignment_frames = adjustment
                 plan.alignment_status = statuses.get(plan.path.name, "auto")
             else:
@@ -1423,6 +1425,7 @@ def apply_audio_alignment(
             adjustment = int(desired - baseline)
             if adjustment:
                 plan.trim_start = plan.trim_start + adjustment
+                plan.source_num_frames = None
                 plan.alignment_frames = adjustment
                 plan.alignment_status = statuses.get(plan.path.name, "auto")
             else:

@@ -607,6 +607,7 @@ def test_generate_screenshots_rehydrates_hdr_props_from_plans(tmp_path: Path, mo
         **kwargs: Any,
     ) -> types.SimpleNamespace:
         assert stored_source_props == stored_props
+        captured["processed_source_props"] = stored_source_props
         tonemap_info = vs_core.TonemapInfo(
             applied=True,
             tone_curve="bt.2390",
@@ -664,6 +665,7 @@ def test_generate_screenshots_rehydrates_hdr_props_from_plans(tmp_path: Path, mo
     assert created
     assert captured["overlay_text"] is not None
     assert "MDL" in captured["overlay_text"]
+    assert captured["processed_source_props"] == stored_props
 
 
 def test_plan_geometry_subsamp_safe_rebalance_aligns_modulus() -> None:

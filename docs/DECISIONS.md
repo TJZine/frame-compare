@@ -1,5 +1,19 @@
 # Decisions Log
 
+- *2025-11-15:* fix(alignment): refresh cached frame counts when trims shift mid-run.
+  - Problem: Audio alignment and VSPreview manual offsets now tweak `ClipPlan.trim_start` before `selection.init_clips()` runs, but `probe_clip_metadata()` had already filled `source_num_frames`, so later initialisation skipped recomputing geometry. JSON summaries and screenshot overlays kept the original frame totals even when plans dropped or gained frames.
+  - Decision: Whenever alignment/vspreview mutate `trim_start`, clear `plan.source_num_frames` so `selection.init_clips()` re-snapshots the trimmed clip. Regression coverage records each VapourSynth initialisation and asserts the CLI’s `clips` payload reflects the final trim applied to every file.
+  - Verification:
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest tests/runner/test_audio_alignment_cli.py -k block_and_json -q`
+
+- *2025-11-15:* fix(selection): pre-probe clip metadata for alignment and reuse HDR props snapshots.
+  - Problem: `apply_audio_alignment()` frequently lacked FPS/geometry metadata so `_estimate_frames_from_seconds()` returned `None`, while repeated calls to `vs_core.init_clip()` kept re-snapshotting HDR frame props (and blank-padding negative trims with fresh, potentially mismatched metadata).
+  - Decision: Added `probe_clip_metadata()` ahead of audio alignment so every `ClipPlan` has `effective_fps`, `applied_fps`, `source_fps`, `source_num_frames`, `source_width`, `source_height`, and `source_frame_props` populated before offsets are measured, and `selection.init_clips()` now reuses those cached values instead of clobbering them. `vs_core.init_clip()` accepts a `source_frame_props_hint` so `_extend_with_blank()` can reuse the previously captured HDR props when padding negative trims, aligning with VapourSynth's documented `getFrameProperties*` APIs for safe frame-prop reuse (source:https://github.com/vapoursynth/vapoursynth/blob/master/doc/api/vapoursynth4.h.rst@2025-11-15T20:43:28Z).
+  - Verification:
+    - `.venv/bin/pyright --warnings`
+    - `.venv/bin/ruff check`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`
+
 - *2025-11-15:* fix(audio): hydrate cached suggested offsets when reusing alignment files.
   - Problem: declining the recompute prompt reapplied cached trims but dropped any stored `suggested_frames`/`suggested_seconds`, so the CLI JSON tail and VSPreview overlay no longer showed the prior guidance (e.g., `+7f (~0.291s)`), defeating the cache reuse UX.
   - Decision: parse the cached `suggested_*` fields whenever `_maybe_reuse_cached_offsets()` or the reuse branch in `apply_audio_alignment()` iterate the offsets TOML, populate `summary.suggested_frames` plus `summary.measured_offsets` with those hints, and backstop the flow with a regression test that exercises the CLI formatter.

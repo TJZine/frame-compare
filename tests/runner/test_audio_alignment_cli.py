@@ -1763,6 +1763,8 @@ def test_audio_alignment_block_and_json(
     _patch_core_helper(monkeypatch, "parse_filename_metadata", fake_parse)
     _patch_vs_core(monkeypatch, "set_ram_limit", lambda limit: None)
 
+    init_calls: list[tuple[str, int]] = []
+
     def fake_init_clip(
         path: str | Path,
         *,
@@ -1791,13 +1793,21 @@ def test_audio_alignment_block_and_json(
                 - fps_den (int): Frame rate denominator (1001).
                 - num_frames (int): Total frame count (24000).
         """
+        base_frames = 24000
+        clip_name = Path(path).name
+        init_calls.append((clip_name, int(trim_start)))
+        trim_value = int(trim_start)
+        if trim_value >= 0:
+            frames_after_trim = max(base_frames - trim_value, 0)
+        else:
+            frames_after_trim = base_frames + abs(trim_value)
         return types.SimpleNamespace(
             path=Path(path),
             width=1920,
             height=1080,
             fps_num=24000,
             fps_den=1001,
-            num_frames=24000,
+            num_frames=frames_after_trim,
         )
 
     _patch_vs_core(monkeypatch, "init_clip", fake_init_clip)
@@ -1875,10 +1885,10 @@ def test_audio_alignment_block_and_json(
     measurement = AlignmentMeasurement(
         file=target_path,
         offset_seconds=0.1,
-        frames=3,
+        frames=None,
         correlation=0.93,
-        reference_fps=24.0,
-        target_fps=24.0,
+        reference_fps=None,
+        target_fps=None,
     )
 
     _patch_audio_alignment(monkeypatch, "measure_offsets", lambda *args, **kwargs: [measurement])
@@ -1935,12 +1945,13 @@ def test_audio_alignment_block_and_json(
     offsets_frames_map = _expect_mapping(audio_json["offsets_frames"])
     clip_key = "Clip B" if "Clip B" in offsets_sec_map else "Target"
     assert offsets_sec_map[clip_key] == pytest.approx(0.1)
-    assert offsets_frames_map[clip_key] == 3
+    assert offsets_frames_map[clip_key] == 2
     assert audio_json["preview_paths"] == []
     assert audio_json["confirmed"] == "auto"
     offset_lines = audio_json.get("offset_lines")
     assert isinstance(offset_lines, list) and offset_lines, "Expected offset_lines for cached alignment reuse"
     assert any("Clip B" in line for line in offset_lines)
+    assert not any("missing fps" in str(line).lower() for line in offset_lines)
     offset_lines_text = audio_json.get("offset_lines_text")
     assert isinstance(offset_lines_text, str) and "Clip B" in offset_lines_text
     stream_lines = audio_json.get("stream_lines")
@@ -1960,7 +1971,7 @@ def test_audio_alignment_block_and_json(
     assert pytest.approx(seconds_value) == 0.1
     frames_value = measurement_entry.get("frames")
     assert isinstance(frames_value, (int, float))
-    assert frames_value == 3
+    assert frames_value == 2
     correlation_value = measurement_entry.get("correlation")
     assert isinstance(correlation_value, (int, float))
     assert pytest.approx(correlation_value) == 0.93
@@ -1977,6 +1988,19 @@ def test_audio_alignment_block_and_json(
     assert tonemap_json["contrast_recovery"] == pytest.approx(0.3)
     assert "metadata_label" in tonemap_json
     assert "use_dovi_label" in tonemap_json
+
+    clips_payload = payload.get("clips")
+    assert isinstance(clips_payload, list) and len(clips_payload) >= 2
+    clip_map = {entry["label"]: entry for entry in clips_payload if isinstance(entry, dict)}
+    final_trim_by_file: dict[str, int] = {}
+    for file_name, trim_value in init_calls:
+        final_trim_by_file[file_name] = trim_value
+    label_to_file = {"Clip A": reference_path.name, "Clip B": target_path.name}
+    for label, file_name in label_to_file.items():
+        assert file_name in final_trim_by_file, f"Missing trim entry for {file_name}"
+        trim_value = final_trim_by_file[file_name]
+        expected_frames = max(24000 - trim_value, 0) if trim_value >= 0 else 24000 + abs(trim_value)
+        assert clip_map[label]["frames"] == expected_frames
 
 def test_audio_alignment_default_duration_avoids_zero_window(
     monkeypatch: pytest.MonkeyPatch,

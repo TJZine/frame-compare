@@ -919,6 +919,51 @@ def test_init_clip_preserves_mastering_metadata_on_padding(
     )
 
 
+def test_init_clip_reuses_source_props_hint_for_padding(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    fake_vs = _install_fake_vs(monkeypatch)
+    core = _PaddingCore(fake_vs)
+    clip = _PaddingTestClip(core, [{}])
+
+    monkeypatch.setattr(vs_source, "_open_clip_with_sources", lambda *args, **kwargs: clip)
+    snapshot_called = False
+
+    def fake_snapshot(_clip: Any) -> Mapping[str, Any]:
+        nonlocal snapshot_called
+        snapshot_called = True
+        return {"_Matrix": 1}
+
+    monkeypatch.setattr(vs_source, "_snapshot_frame_props", fake_snapshot)
+
+    collected: list[Mapping[str, Any]] = []
+
+    def fake_collect(frame_props: Mapping[str, Any]) -> Mapping[str, Any]:
+        collected.append(dict(frame_props))
+        return dict(frame_props)
+
+    monkeypatch.setattr(vs_source, "_collect_blank_extension_props", fake_collect)
+
+    captured_props: list[Mapping[str, Any]] = []
+
+    def capture_sink(props: Mapping[str, Any]) -> None:
+        captured_props.append(dict(props))
+
+    props_hint = {"_Matrix": 9, "_Transfer": 16}
+
+    vs_source.init_clip(
+        str(tmp_path / "sample.mkv"),
+        trim_start=-2,
+        core=core,
+        frame_props_sink=capture_sink,
+        source_frame_props_hint=props_hint,
+    )
+
+    assert collected and collected[0] == props_hint
+    assert captured_props and captured_props[0] == props_hint
+    assert snapshot_called is False
+
+
 def test_process_clip_tonemaps_with_mastering_metadata_only(monkeypatch: Any) -> None:
     fake_vs = _install_fake_vs(monkeypatch)
     setattr(fake_vs, "RGB48", object())

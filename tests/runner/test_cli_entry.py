@@ -270,7 +270,7 @@ def test_cli_applies_overrides_and_naming(
     assert "• Clips:" in result.output
     assert "Output frames (" in result.output
 
-    assert ram_limits == [cfg.runtime.ram_limit_mb]
+    assert ram_limits == [cfg.runtime.ram_limit_mb, cfg.runtime.ram_limit_mb]
 
     expected_cache_dir = str(cli_runner_env.media_root.resolve())
     assert len(init_calls) >= 2
