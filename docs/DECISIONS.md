@@ -1,6 +1,16 @@
 # Decisions Log
 
-# Decisions Log
+- *2025-11-15:* fix(audio): hydrate cached suggested offsets when reusing alignment files.
+  - Problem: declining the recompute prompt reapplied cached trims but dropped any stored `suggested_frames`/`suggested_seconds`, so the CLI JSON tail and VSPreview overlay no longer showed the prior guidance (e.g., `+7f (~0.291s)`), defeating the cache reuse UX.
+  - Decision: parse the cached `suggested_*` fields whenever `_maybe_reuse_cached_offsets()` or the reuse branch in `apply_audio_alignment()` iterate the offsets TOML, populate `summary.suggested_frames` plus `summary.measured_offsets` with those hints, and backstop the flow with a regression test that exercises the CLI formatter.
+  - Verification:
+    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+    - `.venv/bin/ruff check` → `All checks passed!`
+    - `.venv/bin/pytest -q tests/runner/test_audio_alignment_cli.py` →
+      ```
+      ..........................                                               [100%]
+      26 passed in 19.66s
+      ```
 
 - *2025-11-15:* fix(audio): derive VSPreview frame hints and keep negative manual trims.
   - Problem: Alignment summaries dropped negative `trim_start` overrides and emitted `0f` for suggested offsets whenever FPS metadata was missing, so the CLI/VSPreview overlay misreported `0f (~ -1.335s)` even when the measured seconds were non-zero.
@@ -568,3 +578,26 @@
     ......                                                                   [100%]
     78 passed in 0.10s
     ```
+- *2025-11-15:* Blank-prefix padding now preserves all HDR hints (matrix/primaries/transfer/color-range plus any MasteringDisplay*/ContentLightLevel* props) when `init_clip` prepends negative trims, ensuring `_props_signal_hdr` still sees the mastering metadata once tonemapping runs. `_collect_blank_extension_props` now filters frame props with `_is_hdr_prop`, consistent with VapourSynth’s documented ability to copy frame properties via `std.SetFrameProp`/`ModifyFrame` (source:https://github.com/vapoursynth/vapoursynth/blob/master/doc/functions/video/modifyframe.rst@2025-11-15T04:07:19Z).
+  - `date -u +%Y-%m-%d` → `2025-11-15`
+  - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+  - `.venv/bin/ruff check` → `All checks passed!`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_vs_core.py tests/test_screenshot.py` →
+    ```
+    ........................................................................ [ 90%]
+    ........                                                                 [100%]
+    80 passed in 0.11s
+    ```
+- *2025-11-15:* Persisted HDR frame props at source load and rehydrated them before tonemapping so padding/trimmed clips keep their original mastering metadata.
+  - Problem: `_snapshot_frame_props` was only consulted after trims/padding, so negative trims and blank extensions erased `_Matrix`/`_Transfer`/`MasteringDisplay*` hints and SDR overlays appeared even when true HDR metadata existed.
+  - Decision: `vs.source.init_clip` now snapshots props immediately after `_open_clip_with_sources` and stores them on `ClipPlan.source_frame_props`, `generate_screenshots` passes those dictionaries through to `process_clip_for_screenshot`, and `_apply_frame_props_dict` merges the stored props with current ones before colour normalisation so runtime overrides still win. This relies on VapourSynth’s documented ability to stamp metadata via `std.SetFrameProp` (source:https://github.com/vapoursynth/vapoursynth/blob/master/doc/functions/video/setframeprop.rst@2025-11-15T00:25:00Z).
+  - Impact: Screenshot overlays (notably diagnostic HDR lines) now show true mastering luminance even when plans pad negative trims, and TonemapInfo correctly marks HDR clips when only MasteringDisplay hints were present. Added regression tests in `tests/test_vs_core.py` and `tests/test_screenshot.py` to cover both the tonemap and screenshot paths.
+  - Verification:
+    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+    - `.venv/bin/ruff check` → `All checks passed!`
+    - `.venv/bin/pytest -q tests/test_vs_core.py tests/test_screenshot.py` →
+      ```
+      ........................................................................ [ 87%]
+      ..........                                                               [100%]
+      82 passed in 0.17s
+      ```

@@ -809,6 +809,10 @@ def run(request: RunRequest) -> RunResult:
     clips = [plan.clip for plan in plans]
     if any(clip is None for clip in clips):
         raise CLIAppError("Clip initialisation failed")
+    stored_props_seq = [
+        dict(plan.source_frame_props) if plan.source_frame_props is not None else None
+        for plan in plans
+    ]
 
     clip_records: List[ClipRecord] = []
     trim_details: List[TrimSummary] = []
@@ -1615,6 +1619,7 @@ def run(request: RunRequest) -> RunResult:
                     verification_sink=verification_records,
                     pivot_notifier=_notify_pivot,
                     debug_color=bool(getattr(cfg.color, "debug_color", False)),
+                    source_frame_props=stored_props_seq,
                 )
 
                 if processed < total_screens:
@@ -1659,6 +1664,7 @@ def run(request: RunRequest) -> RunResult:
                 verification_sink=verification_records,
                 pivot_notifier=_notify_pivot,
                 debug_color=bool(getattr(cfg.color, "debug_color", False)),
+                source_frame_props=stored_props_seq,
             )
     except ClipProcessError as exc:
         hint = "Run 'frame-compare doctor' for dependency diagnostics."

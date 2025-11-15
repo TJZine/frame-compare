@@ -286,7 +286,7 @@ def _infer_frame_height(clip: Any, props: Mapping[str, Any]) -> Optional[int]:
     return None
 
 
-def _apply_frame_props_dict(clip: Any, props: Mapping[str, int]) -> Any:
+def _apply_frame_props_dict(clip: Any, props: Mapping[str, Any]) -> Any:
     if not props:
         return clip
     std_ns = getattr(clip, "std", None)
