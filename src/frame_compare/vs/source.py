@@ -4,16 +4,30 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import Any, Callable, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 
 from .env import _SOURCE_PREFERENCE, ClipInitError, _get_vapoursynth_module  # pyright: ignore[reportPrivateUsage]
-from .props import _ensure_std_namespace  # pyright: ignore[reportPrivateUsage]
+from .props import (  # pyright: ignore[reportPrivateUsage]
+    _apply_frame_props_dict,  # pyright: ignore[reportPrivateUsage]
+    _ensure_std_namespace,  # pyright: ignore[reportPrivateUsage]
+    _snapshot_frame_props,  # pyright: ignore[reportPrivateUsage]
+)
 
 logger = logging.getLogger("src.frame_compare.vs.source")
 _SOURCE_PLUGIN_FUNCS = {"lsmas": "LWLibavSource", "ffms2": "Source"}
 
 
 _CACHE_SUFFIX = {"lsmas": ".lwi", "ffms2": ".ffindex"}
+_BLANK_CLONE_PROP_KEYS = (
+    "_Matrix",
+    "Matrix",
+    "_Primaries",
+    "Primaries",
+    "_Transfer",
+    "Transfer",
+    "_ColorRange",
+    "ColorRange",
+)
 
 
 class VSPluginError(ClipInitError):
@@ -277,7 +291,13 @@ def _slice_clip(clip: Any, *, start: Optional[int] = None, end: Optional[int] = 
     return clip
 
 
-def _extend_with_blank(clip: Any, core: Any, length: int) -> Any:
+def _extend_with_blank(
+    clip: Any,
+    core: Any,
+    length: int,
+    *,
+    frame_props: Mapping[str, Any] | None = None,
+) -> Any:
     std_ns = getattr(core, "std", None)
     if std_ns is None:
         raise ClipInitError("VapourSynth core missing std namespace for BlankClip")
@@ -286,6 +306,8 @@ def _extend_with_blank(clip: Any, core: Any, length: int) -> Any:
         raise ClipInitError("std.BlankClip is unavailable on the VapourSynth core")
     try:
         extension = blank_clip(clip, length=length)
+        if frame_props:
+            extension = _apply_frame_props_dict(extension, frame_props)
         return extension + clip
     except Exception as exc:  # pragma: no cover - defensive
         raise ClipInitError("Failed to prepend blank frames to clip") from exc
@@ -336,7 +358,13 @@ def init_clip(
         raise ClipInitError(f"Failed to open clip '{path}': {exc}") from exc
 
     if trim_start < 0:
-        clip = _extend_with_blank(clip, resolved_core, abs(int(trim_start)))
+        padding_props = _collect_blank_extension_props(_snapshot_frame_props(clip))
+        clip = _extend_with_blank(
+            clip,
+            resolved_core,
+            abs(int(trim_start)),
+            frame_props=padding_props if padding_props else None,
+        )
     elif trim_start > 0:
         clip = _slice_clip(clip, start=int(trim_start))
 
@@ -345,6 +373,14 @@ def init_clip(
     if fps_map is not None:
         clip = _apply_fps_map(clip, fps_map)
     return clip
+
+
+def _collect_blank_extension_props(frame_props: Mapping[str, Any]) -> Dict[str, Any]:
+    extracted: Dict[str, Any] = {}
+    for key in _BLANK_CLONE_PROP_KEYS:
+        if key in frame_props:
+            extracted[key] = frame_props[key]
+    return extracted
 
 __all__ = [
     "VSPluginError",

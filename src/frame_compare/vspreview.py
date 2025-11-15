@@ -26,6 +26,7 @@ from rich.text import Text
 from src import audio_alignment
 from src.datatypes import AppConfig, ColorConfig
 from src.frame_compare import subproc
+from src.frame_compare.alignment_helpers import derive_frame_hint
 from src.frame_compare.layout_utils import (
     normalise_vspreview_mode as _normalise_vspreview_mode,
 )
@@ -63,6 +64,7 @@ VSPREVIEW_POSIX_INSTALL: Final[str] = (
     "uv add frame-compare --extra preview  # fallback: uv add vspreview PySide6"
 )
 _VSPREVIEW_MANUAL_COMMAND_TEMPLATE: Final[str] = "{python} -m vspreview {script}"
+_MANUAL_OFFSET_FALLBACK_FPS: Final[tuple[int, int]] = (24000, 1001)
 
 ProcessRunner = Callable[..., subprocess.CompletedProcess[Any]]
 
@@ -74,6 +76,18 @@ def _fps_to_float(value: tuple[int, int] | None) -> float:
     if not denominator:
         return 0.0
     return float(numerator) / float(denominator)
+
+
+def _resolve_manual_offset_fps(plan: ClipPlan) -> tuple[int, int]:
+    """Return a usable FPS tuple for manual-offset reporting."""
+
+    fps_tuple = plan.effective_fps or plan.source_fps or plan.fps_override
+    if fps_tuple is None:
+        return _MANUAL_OFFSET_FALLBACK_FPS
+    num, den = fps_tuple
+    if den == 0:
+        return _MANUAL_OFFSET_FALLBACK_FPS
+    return int(num), int(den)
 
 
 def _coerce_str_mapping(mapping: Mapping[str, object] | MappingABC[str, object] | None) -> dict[str, object]:
@@ -165,7 +179,11 @@ def render_script(
             for plan in plans
         }
     else:
-        manual_trims = {_plan_label(plan): int(plan.trim_start) for plan in plans if plan.trim_start > 0}
+        manual_trims = {
+            _plan_label(plan): int(plan.trim_start)
+            for plan in plans
+            if plan.trim_start != 0
+        }
 
     reference_label = _plan_label(reference_plan)
     reference_trim_end = reference_plan.trim_end if reference_plan.trim_end is not None else None
@@ -189,7 +207,7 @@ def render_script(
         label = _plan_label(plan)
         trim_end_value = plan.trim_end if plan.trim_end is not None else None
         fps_override = tuple(plan.fps_override) if plan.fps_override else None
-        suggested_frames_value = int(summary.suggested_frames.get(plan.path.name, 0))
+        suggested_frames_value = derive_frame_hint(summary, plan.path.name)
         measurement_seconds = measurement_lookup.get(plan.path.name)
         suggested_seconds_value = 0.0
         if measurement_seconds is not None:
@@ -199,6 +217,14 @@ def render_script(
             f"baseline trim {manual_trim}f"
             if manual_trim
             else "no baseline trim"
+        )
+        applied_initial = (
+            suggested_frames_value if apply_seeded_offsets and suggested_frames_value is not None else 0
+        )
+        suggestion_comment = (
+            f"Suggested delta {suggested_frames_value:+d}f"
+            if suggested_frames_value is not None
+            else "Suggested delta n/a"
         )
         target_lines.append(
             textwrap.dedent(
@@ -213,12 +239,12 @@ def render_script(
                 }},"""
             ).rstrip()
         )
-        applied_initial = suggested_frames_value if apply_seeded_offsets else 0
         offset_lines.append(
-            f"    {label!r}: {applied_initial},  # Suggested delta {suggested_frames_value:+d}f"
+            f"    {label!r}: {applied_initial},  # {suggestion_comment}"
         )
+        frames_literal = "None" if suggested_frames_value is None else str(int(suggested_frames_value))
         suggestion_lines.append(
-            f"    {label!r}: ({suggested_frames_value}, {suggested_seconds_value!r}),"
+            f"    {label!r}: ({frames_literal}, {suggested_seconds_value!r}),"
         )
 
     targets_literal = "\n".join(target_lines) if target_lines else ""
@@ -357,9 +383,12 @@ def _format_overlay_text(label, suggested_frames, suggested_seconds, applied_fra
     seconds_value = f"{{suggested_seconds:.3f}}"
     if seconds_value == "-0.000":
         seconds_value = "0.000"
-    suggested_value = f"{{suggested_frames:+d}}"
+    if suggested_frames is None:
+        suggested_value = "n/a"
+    else:
+        suggested_value = f"{{suggested_frames:+d}}f"
     return (
-        "{{label}}: {{suggested}}f (~{{seconds}}s) • "
+        "{{label}}: {{suggested}} (~{{seconds}}s) • "
         "Preview applied: {{applied}}f ({{status}}) • "
         "(+ trims target / - pads reference)"
     ).format(
@@ -396,9 +425,11 @@ for label, info in TARGETS.items():
     target_clip = _load_clip(info)
     reference_clip, target_clip = _harmonise_fps(reference_clip, target_clip, label)
     offset_frames = int(OFFSET_MAP.get(label, 0))
-    suggested_entry = SUGGESTION_MAP.get(label, (0, 0.0))
-    suggested_frames = int(suggested_entry[0])
+    suggested_entry = SUGGESTION_MAP.get(label, (None, 0.0))
+    suggested_frames = suggested_entry[0]
     suggested_seconds = float(suggested_entry[1])
+    if suggested_frames is not None:
+        suggested_frames = int(suggested_frames)
     ref_view, tgt_view = _apply_offset(reference_clip, target_clip, offset_frames)
     ref_view = _maybe_apply_overlay(
         ref_view,
@@ -417,13 +448,16 @@ for label, info in TARGETS.items():
     ref_view.set_output(slot)
     tgt_view.set_output(slot + 1)
     applied_label = "baseline" if offset_frames == 0 else "seeded"
+    suggested_display = (
+        f"{{suggested_frames:+d}}f" if suggested_frames is not None else "n/a"
+    )
     safe_print(
-        "Target '%s': baseline trim=%sf (%s), suggested delta=%+df (~%+.3fs), preview applied=%+df (%s mode)"
+        "Target '%s': baseline trim=%sf (%s), suggested delta=%s (~%+.3fs), preview applied=%+df (%s mode)"
         % (
             label,
             info.get('manual_trim', 0),
             info.get('manual_trim_description', 'n/a'),
-            suggested_frames,
+            suggested_display,
             suggested_seconds,
             offset_frames,
             applied_label,
@@ -491,13 +525,15 @@ def prompt_offsets(
     for plan in targets:
         label = _plan_label(plan)
         baseline_value = baseline_map.get(plan.path.name, int(plan.trim_start))
-        suggested = summary.suggested_frames.get(plan.path.name)
+        suggested = derive_frame_hint(summary, plan.path.name)
         prompt_parts = [
             f"VSPreview offset for {label} relative to {reference_label}",
             f"baseline {baseline_value}f",
         ]
         if suggested is not None:
             prompt_parts.append(f"suggested {suggested:+d}f")
+        else:
+            prompt_parts.append("suggested n/a")
         prompt_message = " (".join([prompt_parts[0], ", ".join(prompt_parts[1:])]) + ")"
         try:
             delta = int(
@@ -570,41 +606,30 @@ def apply_manual_offsets(
     reference_delta_input = int(deltas.get(reference_name, 0))
     desired_map[reference_name] = reference_baseline + reference_delta_input
 
-    baseline_min = min(baseline_map.values()) if baseline_map else 0
-    desired_min = min(desired_map.values()) if desired_map else 0
-    baseline_floor = baseline_min if baseline_min < 0 else 0
-    desired_floor = desired_min if desired_min < 0 else 0
-    shift = 0
-    if desired_floor < baseline_floor:
-        shift = baseline_floor - desired_floor
-
     for plan, baseline_value, delta_value in target_adjustments:
         key = plan.path.name
         desired_value = desired_map[key]
-        updated = desired_value + shift
-        updated_int = int(updated)
-        safe_updated = max(0, updated_int)
-        plan.trim_start = safe_updated
+        updated_int = int(desired_value)
+        plan.trim_start = updated_int
         plan.has_trim_start_override = (
-            plan.has_trim_start_override or safe_updated != 0
+            plan.has_trim_start_override or updated_int != 0
         )
         manual_trim_starts[key] = updated_int
         applied_delta = updated_int - baseline_value
         delta_map[key] = applied_delta
         line = (
             f"VSPreview manual offset applied: {_plan_label(plan)} baseline {baseline_value}f "
-            f"{delta_value:+d}f → {int(updated)}f"
+            f"{delta_value:+d}f → {updated_int}f"
         )
         manual_lines.append(line)
         reporter.line(line)
 
-    adjusted_reference = desired_map[reference_name] + shift
+    adjusted_reference = desired_map[reference_name]
     adjusted_reference_int = int(adjusted_reference)
-    safe_adjusted_reference = max(0, adjusted_reference_int)
-    reference_plan.trim_start = safe_adjusted_reference
+    reference_plan.trim_start = adjusted_reference_int
     reference_plan.has_trim_start_override = (
         reference_plan.has_trim_start_override
-        or safe_adjusted_reference != int(reference_baseline)
+        or adjusted_reference_int != int(reference_baseline)
     )
     manual_trim_starts[reference_name] = adjusted_reference_int
     reference_delta = adjusted_reference_int - reference_baseline
@@ -621,11 +646,9 @@ def apply_manual_offsets(
         display.offset_lines = ["Audio offsets: VSPreview manual offsets applied"]
         display.offset_lines.extend(display.manual_trim_lines)
 
-    fps_lookup: Dict[str, Tuple[int, int] | None] = {}
+    fps_lookup: Dict[str, Tuple[int, int]] = {}
     for plan in plans:
-        fps_lookup[plan.path.name] = (
-            plan.effective_fps or plan.source_fps or plan.fps_override
-        )
+        fps_lookup[plan.path.name] = _resolve_manual_offset_fps(plan)
 
     measurement_order = [plan.path.name for plan in plans]
     plan_lookup: Dict[str, ClipPlan] = {plan.path.name: plan for plan in plans}

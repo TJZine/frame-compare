@@ -34,6 +34,7 @@ import src.frame_compare.tmdb_workflow as tmdb_workflow
 import src.frame_compare.vspreview as vspreview_utils
 from src.datatypes import AppConfig
 from src.frame_compare import vs as vs_core
+from src.frame_compare.alignment_helpers import derive_frame_hint
 from src.frame_compare.analysis import (
     CacheLoadResult,
     SelectionDetail,
@@ -124,6 +125,53 @@ class RunRequest:
 logger = logging.getLogger('frame_compare')
 
 
+def _apply_cli_tonemap_overrides(color_cfg: Any, overrides: Mapping[str, Any]) -> None:
+    if color_cfg is None or not overrides:
+        return
+    provided_raw = getattr(color_cfg, "_provided_keys", None)
+    provided: set[str]
+    if isinstance(provided_raw, set):
+        provided = set(cast(set[Any], provided_raw))
+    else:
+        provided = set()
+    updated: set[str] = set()
+
+    def _assign(field: str, converter: Callable[[Any], Any]) -> None:
+        if field in overrides:
+            setattr(color_cfg, field, converter(overrides[field]))
+            updated.add(field)
+
+    _assign("preset", lambda value: str(value))
+    _assign("tone_curve", lambda value: str(value))
+    _assign("target_nits", lambda value: float(value))
+    _assign("dst_min_nits", lambda value: float(value))
+    _assign("knee_offset", lambda value: float(value))
+    _assign("dpd_preset", lambda value: str(value))
+    _assign("dpd_black_cutoff", lambda value: float(value))
+    _assign("post_gamma", lambda value: float(value))
+    _assign("post_gamma_enable", lambda value: bool(value))
+    _assign("smoothing_period", lambda value: float(value))
+    _assign("scene_threshold_low", lambda value: float(value))
+    _assign("scene_threshold_high", lambda value: float(value))
+    _assign("percentile", lambda value: float(value))
+    _assign("contrast_recovery", lambda value: float(value))
+    if "metadata" in overrides:
+        color_cfg.metadata = overrides["metadata"]
+        updated.add("metadata")
+    if "use_dovi" in overrides:
+        color_cfg.use_dovi = overrides["use_dovi"]
+        updated.add("use_dovi")
+    _assign("visualize_lut", lambda value: bool(value))
+    _assign("show_clipping", lambda value: bool(value))
+
+    if updated:
+        provided.update(updated)
+        try:
+            setattr(color_cfg, "_provided_keys", provided)
+        except Exception:
+            pass
+
+
 def run(request: RunRequest) -> RunResult:
     """
     Orchestrate the CLI workflow.
@@ -172,44 +220,7 @@ def run(request: RunRequest) -> RunResult:
     cfg = preflight.config
     if tonemap_overrides:
         core.validate_tonemap_overrides(tonemap_overrides)
-        color_cfg = getattr(cfg, "color", None)
-        if color_cfg is not None:
-            if "preset" in tonemap_overrides:
-                color_cfg.preset = str(tonemap_overrides["preset"])
-            if "tone_curve" in tonemap_overrides:
-                color_cfg.tone_curve = str(tonemap_overrides["tone_curve"])
-            if "target_nits" in tonemap_overrides:
-                color_cfg.target_nits = float(tonemap_overrides["target_nits"])
-            if "dst_min_nits" in tonemap_overrides:
-                color_cfg.dst_min_nits = float(tonemap_overrides["dst_min_nits"])
-            if "knee_offset" in tonemap_overrides:
-                color_cfg.knee_offset = float(tonemap_overrides["knee_offset"])
-            if "dpd_preset" in tonemap_overrides:
-                color_cfg.dpd_preset = str(tonemap_overrides["dpd_preset"])
-            if "dpd_black_cutoff" in tonemap_overrides:
-                color_cfg.dpd_black_cutoff = float(tonemap_overrides["dpd_black_cutoff"])
-            if "post_gamma" in tonemap_overrides:
-                color_cfg.post_gamma = float(tonemap_overrides["post_gamma"])
-            if "post_gamma_enable" in tonemap_overrides:
-                color_cfg.post_gamma_enable = bool(tonemap_overrides["post_gamma_enable"])
-            if "smoothing_period" in tonemap_overrides:
-                color_cfg.smoothing_period = float(tonemap_overrides["smoothing_period"])
-            if "scene_threshold_low" in tonemap_overrides:
-                color_cfg.scene_threshold_low = float(tonemap_overrides["scene_threshold_low"])
-            if "scene_threshold_high" in tonemap_overrides:
-                color_cfg.scene_threshold_high = float(tonemap_overrides["scene_threshold_high"])
-            if "percentile" in tonemap_overrides:
-                color_cfg.percentile = float(tonemap_overrides["percentile"])
-            if "contrast_recovery" in tonemap_overrides:
-                color_cfg.contrast_recovery = float(tonemap_overrides["contrast_recovery"])
-            if "metadata" in tonemap_overrides:
-                color_cfg.metadata = tonemap_overrides["metadata"]
-            if "use_dovi" in tonemap_overrides:
-                color_cfg.use_dovi = tonemap_overrides["use_dovi"]
-            if "visualize_lut" in tonemap_overrides:
-                color_cfg.visualize_lut = bool(tonemap_overrides["visualize_lut"])
-            if "show_clipping" in tonemap_overrides:
-                color_cfg.show_clipping = bool(tonemap_overrides["show_clipping"])
+        _apply_cli_tonemap_overrides(getattr(cfg, "color", None), tonemap_overrides)
     if debug_color:
         try:
             setattr(cfg.color, "debug_color", True)
@@ -421,7 +432,7 @@ def run(request: RunRequest) -> RunResult:
         },
         "warnings": [],
         "vspreview_mode": vspreview_mode_value,
-        "suggested_frames": 0,
+        "suggested_frames": None,
         "suggested_seconds": 0.0,
         "vspreview_offer": None,
     }
@@ -444,7 +455,7 @@ def run(request: RunRequest) -> RunResult:
         "vspreview": {
             "mode": vspreview_mode_value,
             "mode_display": vspreview_mode_display,
-            "suggested_frames": 0,
+            "suggested_frames": None,
             "suggested_seconds": 0.0,
             "script_path": None,
             "script_command": "",
@@ -1027,7 +1038,7 @@ def run(request: RunRequest) -> RunResult:
         reference_label = clip_records[0]["label"]
 
     vspreview_target_plan: ClipPlan | None = None
-    vspreview_suggested_frames_value = 0
+    vspreview_suggested_frames_value: int | None = None
     vspreview_suggested_seconds_value = 0.0
     if alignment_summary is not None:
         for plan in plans:
@@ -1035,9 +1046,7 @@ def run(request: RunRequest) -> RunResult:
                 continue
             vspreview_target_plan = plan
             clip_key = plan.path.name
-            vspreview_suggested_frames_value = int(
-                alignment_summary.suggested_frames.get(clip_key, 0)
-            )
+            vspreview_suggested_frames_value = derive_frame_hint(alignment_summary, clip_key)
             detail = alignment_summary.measured_offsets.get(clip_key)
             if detail and detail.offset_seconds is not None:
                 vspreview_suggested_seconds_value = float(detail.offset_seconds)

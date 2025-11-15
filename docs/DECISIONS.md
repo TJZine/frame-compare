@@ -2,6 +2,30 @@
 
 # Decisions Log
 
+- *2025-11-15:* fix(audio): derive VSPreview frame hints and keep negative manual trims.
+  - Problem: Alignment summaries dropped negative `trim_start` overrides and emitted `0f` for suggested offsets whenever FPS metadata was missing, so the CLI/VSPreview overlay misreported `0f (~ -1.335s)` even when the measured seconds were non-zero.
+  - Decision: Added a shared `derive_frame_hint()` helper that converts the raw measurements into frame counts (falling back to “n/a” when no FPS exists), plumbed it through `alignment_runner`, `runner`, `vspreview.render_script()`, and the prompt helpers, and removed the zero-clamping logic so negative manual trims persist through summaries, manual maps, and CLI JSON. New regression tests cover the negative-trim path and the `n/a` suggestion rendering.
+  - Verification:
+    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+    - `.venv/bin/ruff check` → `All checks passed!`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/runner/test_audio_alignment_cli.py tests/test_vspreview.py` →
+      ```
+      .................................                                        [100%]
+      33 passed in 3.04s
+      ```
+- *2025-11-15:* fix(tonemap): preserve HDR metadata for negative trims, honor CLI overrides under presets, and restore path-based color overrides.
+  - Problem: Blank frames injected for negative trims lacked `_Transfer/_Primaries/_Matrix/_ColorRange` so HDR clips appeared SDR and skipped tonemapping; CLI tonemap overrides mutated config values but left `_provided_keys` untouched when presets were active, so libplacebo still read preset defaults; color overrides keyed by absolute/relative paths no longer matched because screenshot code now passed Path objects.
+  - Decision: Snapshot the source props before padding and stamp those values onto the blank prefix so HDR detection continues to see the metadata, update CLI override handling to funnel conversions through a helper that also merges the overridden field names into `_provided_keys`, and coerce override lookup keys to `str(file_name)` before comparing so Path entries match again. Added regression tests covering HDR tonemap application with padding, CLI overrides overriding preset target_nits, and Path-based overrides.
+  - Verification:
+    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+    - `.venv/bin/ruff check` → `All checks passed!`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_vs_core.py tests/test_screenshot.py tests/runner/test_cli_entry.py` →
+      ```
+      ........................................................................ [ 70%]
+      ..............................                                           [100%]
+      102 passed in 0.28s
+      ```
+
 - *2025-11-13:* chore(types): restored pyright strictness for `slowpics`, `analysis.cache_io`, and `cli_layout`.
   - Problem: `cli_layout.py` relied on `# pyright: standard` to hide Unknown-heavy template handling, and `slowpics.py` used loosely typed MultipartEncoder imports that failed strict mode whenever `requests-toolbelt` was optional, undermining the Part 1 typing guarantees for cache/selection code.
   - Decision: removed the downgrade, tightened MultipartEncoder typing with guarded imports and explicit Optional checks, validated every layout section/template/line/table entry before rendering, and exposed a renderer helper so progress columns no longer poke private attributes; cache modules already satisfied strict mode after the Part 1 snapshot refactor.
@@ -534,3 +558,13 @@
       1 passed in 0.01s
       ```
     - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+- *2025-11-15:* Relaxed HDR source detection and metadata backfill to stop clips with partial HDR props (e.g., only `_Transfer=16` or MDL/CLL stats) from being treated as SDR. `_props_signal_hdr` now treats any HDR primaries/transfer flag or mastering metadata as a usable signal, and `normalise_color_metadata` injects BT.2020/ST2084 defaults (preferring `ColorConfig.default_*_hd` when set) before calling `_apply_frame_props_dict` so libplacebo always receives primaries/matrix hints documented in VapourSynth’s `ModifyFrame` property API (source:https://github.com/vapoursynth/vapoursynth/blob/master/doc/functions/video/modifyframe.rst@2025-11-15T04:07:19Z). This keeps tonemapping engaged even when containers omit `_Primaries`.
+  - `date -u +%Y-%m-%d` → `2025-11-15`
+  - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+  - `.venv/bin/ruff check` → `All checks passed!`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_vs_core.py tests/test_screenshot.py` →
+    ```
+    ........................................................................ [ 92%]
+    ......                                                                   [100%]
+    78 passed in 0.10s
+    ```

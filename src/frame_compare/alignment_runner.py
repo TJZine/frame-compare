@@ -27,6 +27,7 @@ import click
 from src import audio_alignment
 from src.datatypes import AppConfig
 from src.frame_compare import vspreview
+from src.frame_compare.alignment_helpers import derive_frame_hint
 from src.frame_compare.cli_runtime import (
     CLIAppError,
     ClipPlan,
@@ -299,7 +300,7 @@ def apply_audio_alignment(
                 continue
             delta_frames = int(vspreview_reuse[key])
             baseline_value = baseline_map.get(key, int(plan.trim_start))
-            applied_frames = max(0, baseline_value + delta_frames)
+            applied_frames = baseline_value + delta_frames
             plan.trim_start = applied_frames
             plan.has_trim_start_override = (
                 plan.has_trim_start_override or delta_frames != 0
@@ -353,7 +354,7 @@ def apply_audio_alignment(
             manual_trim_starts = {
                 plan.path.name: int(plan.trim_start)
                 for plan in plans
-                if plan.trim_start > 0
+                if plan.trim_start != 0
             }
             if manual_trim_starts:
                 for plan in plans:
@@ -720,10 +721,8 @@ def apply_audio_alignment(
             if desired is None:
                 continue
             adjustment = int(desired - baseline)
-            if adjustment < 0:
-                adjustment = 0
             if adjustment:
-                plan.trim_start = max(0, plan.trim_start + adjustment)
+                plan.trim_start = plan.trim_start + adjustment
                 plan.alignment_frames = adjustment
                 plan.alignment_status = statuses.get(plan.path.name, "auto")
             else:
@@ -1327,7 +1326,7 @@ def apply_audio_alignment(
         manual_trim_starts: Dict[str, int] = {}
         if vspreview_enabled:
             for plan in plans:
-                if plan.has_trim_start_override and plan.trim_start > 0:
+                if plan.has_trim_start_override and plan.trim_start != 0:
                     manual_trim_starts[plan.path.name] = int(plan.trim_start)
                     label = plan_labels.get(plan.path, plan.path.name)
                     display_data.manual_trim_lines.append(
@@ -1388,10 +1387,8 @@ def apply_audio_alignment(
             if desired is None:
                 continue
             adjustment = int(desired - baseline)
-            if adjustment < 0:
-                adjustment = 0
             if adjustment:
-                plan.trim_start = max(0, plan.trim_start + adjustment)
+                plan.trim_start = plan.trim_start + adjustment
                 plan.alignment_frames = adjustment
                 plan.alignment_status = statuses.get(plan.path.name, "auto")
             else:
@@ -1460,7 +1457,7 @@ def format_alignment_output(
     audio_block = ensure_audio_alignment_block(json_tail)
 
     vspreview_target_plan: ClipPlan | None = None
-    vspreview_suggested_frames_value = 0
+    vspreview_suggested_frames_value: int | None = None
     vspreview_suggested_seconds_value = 0.0
     if summary is not None:
         for plan in plans:
@@ -1470,7 +1467,7 @@ def format_alignment_output(
             break
         if vspreview_target_plan is not None:
             clip_key = vspreview_target_plan.path.name
-            vspreview_suggested_frames_value = int(summary.suggested_frames.get(clip_key, 0))
+            vspreview_suggested_frames_value = derive_frame_hint(summary, clip_key)
             measurement_seconds: Optional[float] = None
             if summary.measured_offsets:
                 detail = summary.measured_offsets.get(clip_key)
@@ -1487,7 +1484,11 @@ def format_alignment_output(
                 vspreview_suggested_seconds_value = measurement_seconds
 
     json_tail["vspreview_mode"] = vspreview_mode
-    json_tail["suggested_frames"] = int(vspreview_suggested_frames_value)
+    json_tail["suggested_frames"] = (
+        int(vspreview_suggested_frames_value)
+        if vspreview_suggested_frames_value is not None
+        else None
+    )
     json_tail["suggested_seconds"] = float(round(vspreview_suggested_seconds_value, 6))
 
     vspreview_enabled_for_session = _coerce_config_flag(cfg.audio_alignment.use_vspreview)
