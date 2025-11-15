@@ -299,6 +299,105 @@ def test_audio_alignment_prompt_reuse_decline(tmp_path: Path, monkeypatch: pytes
     assert "corr=" in first_line
     assert "status=auto/applied" in first_line
 
+
+def test_audio_alignment_prompt_reuse_hydrates_suggestions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cached runs should hydrate prior suggested offsets into summaries and CLI telemetry."""
+
+    cfg = _make_config(tmp_path)
+    cfg.audio_alignment.enable = True
+    cfg.audio_alignment.prompt_reuse_offsets = True
+    cfg.audio_alignment.confirm_with_screenshots = False
+    cfg.audio_alignment.frame_offset_bias = 0
+
+    reference_path = tmp_path / "Ref.mkv"
+    target_path = tmp_path / "Target.mkv"
+    reference_path.write_bytes(b"ref")
+    target_path.write_bytes(b"tgt")
+
+    reference_plan = _ClipPlan(
+        path=reference_path,
+        metadata={"label": "Reference"},
+    )
+    target_plan = _ClipPlan(
+        path=target_path,
+        metadata={"label": "Target"},
+    )
+
+    cached_entry = {
+        "frames": 0,
+        "seconds": 0.0,
+        "correlation": 0.97,
+        "target_fps": 24.0,
+        "status": "auto",
+        "suggested_frames": 7,
+        "suggested_seconds": 0.291,
+    }
+
+    monkeypatch.setattr(
+        core_module.audio_alignment,
+        "load_offsets",
+        lambda _path: (reference_path.name, {target_path.name: dict(cached_entry)}),
+    )
+
+    def _fail_measure(*_args: object, **_kwargs: object) -> list[AlignmentMeasurement]:
+        raise AssertionError("measure_offsets should not run")
+
+    def _fail_update(*_args: object, **_kwargs: object) -> tuple[dict[str, int], dict[str, str]]:
+        raise AssertionError("update_offsets_file should not run")
+
+    _patch_audio_alignment(monkeypatch, "measure_offsets", _fail_measure)
+    _patch_audio_alignment(monkeypatch, "update_offsets_file", _fail_update)
+
+    class _TTY:
+        def isatty(self) -> bool:
+            return True
+
+    monkeypatch.setattr(sys, "stdin", _TTY())
+
+    confirm_calls: dict[str, int] = {"count": 0}
+
+    def _fake_confirm(*_args: object, **_kwargs: object) -> bool:
+        confirm_calls["count"] += 1
+        return False
+
+    monkeypatch.setattr(click, "confirm", _fake_confirm)
+
+    summary, display = core_module._maybe_apply_audio_alignment(
+        [reference_plan, target_plan],
+        cfg,
+        reference_path,
+        tmp_path,
+        {},
+        reporter=None,
+    )
+
+    assert confirm_calls["count"] == 1
+    assert summary is not None
+    assert display is not None
+    assert summary.suggested_frames[target_path.name] == 7
+    detail = summary.measured_offsets[target_path.name]
+    assert detail.frames == 7
+    assert detail.offset_seconds == pytest.approx(0.291, rel=1e-6)
+
+    json_tail = _make_json_tail_stub()
+    reporter = NullCliOutputManager(quiet=True, verbose=False, no_color=True)
+    alignment_runner_module.format_alignment_output(
+        [reference_plan, target_plan],
+        summary,
+        display,
+        cfg=cfg,
+        root=tmp_path,
+        reporter=reporter,
+        json_tail=json_tail,
+        vspreview_mode="baseline",
+        collected_warnings=[],
+    )
+    assert json_tail["suggested_frames"] == 7
+    assert json_tail["suggested_seconds"] == pytest.approx(0.291, rel=1e-6)
+
 def test_audio_alignment_prompt_reuse_affirm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Affirming the prompt (or skipping it) triggers fresh alignment."""
 

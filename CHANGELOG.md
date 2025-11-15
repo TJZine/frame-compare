@@ -4,6 +4,7 @@
 
 ### Bug Fixes
 
+* hydrate cached `suggested_frames`/`suggested_seconds` when reusing offsets files so CLI+VSPreview keep prior recommendations
 * restore audio offset hints in CLI/VSPreview when FPS metadata is missing and preserve negative manual trims across summaries/manual prompts
 * preserve HDR tonemapping for negative trims, honor CLI tonemap overrides even under presets, and restore path-based `color_overrides` matching
 * detect HDR clips when only one of `_Primaries`/`_Transfer` or MDL/CLL props are present and backfill BT.2020/ST2084 defaults so libplacebo receives primaries/matrix hints before tonemapping

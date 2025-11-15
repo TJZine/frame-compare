@@ -1,6 +1,16 @@
 # Decisions Log
 
-# Decisions Log
+- *2025-11-15:* fix(audio): hydrate cached suggested offsets when reusing alignment files.
+  - Problem: declining the recompute prompt reapplied cached trims but dropped any stored `suggested_frames`/`suggested_seconds`, so the CLI JSON tail and VSPreview overlay no longer showed the prior guidance (e.g., `+7f (~0.291s)`), defeating the cache reuse UX.
+  - Decision: parse the cached `suggested_*` fields whenever `_maybe_reuse_cached_offsets()` or the reuse branch in `apply_audio_alignment()` iterate the offsets TOML, populate `summary.suggested_frames` plus `summary.measured_offsets` with those hints, and backstop the flow with a regression test that exercises the CLI formatter.
+  - Verification:
+    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+    - `.venv/bin/ruff check` → `All checks passed!`
+    - `.venv/bin/pytest -q tests/runner/test_audio_alignment_cli.py` →
+      ```
+      ..........................                                               [100%]
+      26 passed in 19.66s
+      ```
 
 - *2025-11-15:* fix(audio): derive VSPreview frame hints and keep negative manual trims.
   - Problem: Alignment summaries dropped negative `trim_start` overrides and emitted `0f` for suggested offsets whenever FPS metadata was missing, so the CLI/VSPreview overlay misreported `0f (~ -1.335s)` even when the measured seconds were non-zero.
