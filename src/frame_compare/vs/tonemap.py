@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, cast
 from .color import _detect_rgb_color_range, normalise_color_metadata  # pyright: ignore[reportPrivateUsage]
 from .env import _get_vapoursynth_module  # pyright: ignore[reportPrivateUsage]
 from .props import (  # pyright: ignore[reportPrivateUsage]
+    _apply_frame_props_dict,  # pyright: ignore[reportPrivateUsage]
     _call_set_frame_prop,  # pyright: ignore[reportPrivateUsage]
     _ensure_std_namespace,  # pyright: ignore[reportPrivateUsage]
     _props_signal_hdr,  # pyright: ignore[reportPrivateUsage]
@@ -847,6 +848,7 @@ def process_clip_for_screenshot(
     logger_override: Optional[logging.Logger] = None,
     warning_sink: Optional[List[str]] = None,
     debug_color: bool = False,
+    stored_source_props: Optional[Mapping[str, Any]] = None,
 ) -> ClipProcessResult:
     """
     Prepare a VapourSynth clip for screenshot export by applying HDR->SDR tonemapping, optional overlay text, and optional verification against a naive SDR conversion.
@@ -859,6 +861,7 @@ def process_clip_for_screenshot(
         enable_verification (bool): Runtime override to enable or disable verification.
         logger_override (Optional[logging.Logger]): Logger to use instead of the module logger.
         warning_sink (Optional[List[str]]): Optional list to which the function will append human-readable warning messages produced during frame selection/verification.
+        stored_source_props (Optional[Mapping[str, Any]]): Cached pre-trim frame props from the source clip used to rehydrate HDR metadata before normalization.
 
     Returns:
         ClipProcessResult: Container with the processed clip, tonemap metadata (TonemapInfo), optional overlay text, optional verification results (VerificationResult), and a snapshot of source frame properties.
@@ -868,7 +871,13 @@ def process_clip_for_screenshot(
     """
 
     log = logger_override or logger
-    source_props = _snapshot_frame_props(clip)
+    base_props = _snapshot_frame_props(clip)
+    merged_props = dict(base_props)
+    if stored_source_props:
+        merged_props = dict(stored_source_props)
+        merged_props.update(base_props)
+        clip = _apply_frame_props_dict(clip, merged_props)
+    source_props = dict(merged_props)
     original_props = dict(source_props)
     clip, source_props, color_tuple = normalise_color_metadata(
         clip,

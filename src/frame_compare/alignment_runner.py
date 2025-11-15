@@ -509,8 +509,6 @@ def apply_audio_alignment(
         )
 
         plan_map = plan_lookup
-        suggestion_hints = _extract_suggestion_hints(existing_entries)
-
         reference_entry = existing_entries.get(reference.path.name)
         reference_manual_frames: int | None = None
         reference_manual_seconds: float | None = None
@@ -714,19 +712,13 @@ def apply_audio_alignment(
 
         suggested_frames: Dict[str, int] = {}
         for measurement in measurements:
-            clip_name = measurement.file.name
-            frames_value: Optional[int] = None
-            cached_hint = suggestion_hints.get(clip_name)
-            if cached_hint and cached_hint[0] is not None:
-                frames_value = int(cached_hint[0])
-            else:
-                frames_value = measurement.frames
-                if frames_value is None:
-                    frames_value = _estimate_frames_from_seconds(measurement, plan_map)
-                    if frames_value is not None:
-                        measurement.frames = frames_value
+            frames_value = measurement.frames
+            if frames_value is None:
+                frames_value = _estimate_frames_from_seconds(measurement, plan_map)
+                if frames_value is not None:
+                    measurement.frames = frames_value
             if frames_value is not None:
-                suggested_frames[clip_name] = int(frames_value)
+                suggested_frames[measurement.file.name] = int(frames_value)
 
         applied_frames: Dict[str, int] = {}
         statuses: Dict[str, str] = {}
@@ -793,7 +785,6 @@ def apply_audio_alignment(
             swap_map=swap_details,
             negative_notes=negative_override_notes,
         )
-        _apply_suggestion_hints_to_details(detail_map, suggestion_hints)
         summary.measured_offsets = detail_map
         _emit_measurement_lines(
             detail_map,

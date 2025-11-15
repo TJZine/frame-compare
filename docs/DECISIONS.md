@@ -588,3 +588,16 @@
     ........                                                                 [100%]
     80 passed in 0.11s
     ```
+- *2025-11-15:* Persisted HDR frame props at source load and rehydrated them before tonemapping so padding/trimmed clips keep their original mastering metadata.
+  - Problem: `_snapshot_frame_props` was only consulted after trims/padding, so negative trims and blank extensions erased `_Matrix`/`_Transfer`/`MasteringDisplay*` hints and SDR overlays appeared even when true HDR metadata existed.
+  - Decision: `vs.source.init_clip` now snapshots props immediately after `_open_clip_with_sources` and stores them on `ClipPlan.source_frame_props`, `generate_screenshots` passes those dictionaries through to `process_clip_for_screenshot`, and `_apply_frame_props_dict` merges the stored props with current ones before colour normalisation so runtime overrides still win. This relies on VapourSynth’s documented ability to stamp metadata via `std.SetFrameProp` (source:https://github.com/vapoursynth/vapoursynth/blob/master/doc/functions/video/setframeprop.rst@2025-11-15T00:25:00Z).
+  - Impact: Screenshot overlays (notably diagnostic HDR lines) now show true mastering luminance even when plans pad negative trims, and TonemapInfo correctly marks HDR clips when only MasteringDisplay hints were present. Added regression tests in `tests/test_vs_core.py` and `tests/test_screenshot.py` to cover both the tonemap and screenshot paths.
+  - Verification:
+    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+    - `.venv/bin/ruff check` → `All checks passed!`
+    - `.venv/bin/pytest -q tests/test_vs_core.py tests/test_screenshot.py` →
+      ```
+      ........................................................................ [ 87%]
+      ..........                                                               [100%]
+      82 passed in 0.17s
+      ```

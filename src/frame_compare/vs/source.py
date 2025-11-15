@@ -324,8 +324,14 @@ def init_clip(
     cache_dir: Optional[str | Path] = None,
     core: Optional[Any] = None,
     indexing_notifier: Optional[Callable[[str], None]] = None,
+    frame_props_sink: Optional[Callable[[Mapping[str, Any]], None]] = None,
 ) -> Any:
-    """Initialise a VapourSynth clip for subsequent processing."""
+    """
+    Initialise a VapourSynth clip for subsequent processing and optionally snapshot source frame props.
+
+    When ``frame_props_sink`` is provided it will be invoked exactly once with a dictionary of frame
+    properties captured before any trims or padding are applied so callers can persist HDR metadata.
+    """
 
     resolved_core = _resolve_core(core)
 
@@ -348,8 +354,18 @@ def init_clip(
     except Exception as exc:  # pragma: no cover - defensive
         raise ClipInitError(f"Failed to open clip '{path}': {exc}") from exc
 
+    try:
+        source_frame_props = dict(_snapshot_frame_props(clip))
+    except Exception:
+        source_frame_props = {}
+    if frame_props_sink is not None:
+        try:
+            frame_props_sink(dict(source_frame_props))
+        except Exception:
+            logger.debug("Failed to record source frame props for %s", path)
+
     if trim_start < 0:
-        padding_props = _collect_blank_extension_props(_snapshot_frame_props(clip))
+        padding_props = _collect_blank_extension_props(source_frame_props)
         clip = _extend_with_blank(
             clip,
             resolved_core,
