@@ -13,6 +13,18 @@
       .................................                                        [100%]
       33 passed in 3.04s
       ```
+- *2025-11-15:* fix(tonemap): preserve HDR metadata for negative trims, honor CLI overrides under presets, and restore path-based color overrides.
+  - Problem: Blank frames injected for negative trims lacked `_Transfer/_Primaries/_Matrix/_ColorRange` so HDR clips appeared SDR and skipped tonemapping; CLI tonemap overrides mutated config values but left `_provided_keys` untouched when presets were active, so libplacebo still read preset defaults; color overrides keyed by absolute/relative paths no longer matched because screenshot code now passed Path objects.
+  - Decision: Snapshot the source props before padding and stamp those values onto the blank prefix so HDR detection continues to see the metadata, update CLI override handling to funnel conversions through a helper that also merges the overridden field names into `_provided_keys`, and coerce override lookup keys to `str(file_name)` before comparing so Path entries match again. Added regression tests covering HDR tonemap application with padding, CLI overrides overriding preset target_nits, and Path-based overrides.
+  - Verification:
+    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+    - `.venv/bin/ruff check` → `All checks passed!`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_vs_core.py tests/test_screenshot.py tests/runner/test_cli_entry.py` →
+      ```
+      ........................................................................ [ 70%]
+      ..............................                                           [100%]
+      102 passed in 0.28s
+      ```
 
 - *2025-11-13:* chore(types): restored pyright strictness for `slowpics`, `analysis.cache_io`, and `cli_layout`.
   - Problem: `cli_layout.py` relied on `# pyright: standard` to hide Unknown-heavy template handling, and `slowpics.py` used loosely typed MultipartEncoder imports that failed strict mode whenever `requests-toolbelt` was optional, undermining the Part 1 typing guarantees for cache/selection code.

@@ -5,6 +5,7 @@
 ### Bug Fixes
 
 * restore audio offset hints in CLI/VSPreview when FPS metadata is missing and preserve negative manual trims across summaries/manual prompts
+* preserve HDR tonemapping for negative trims, honor CLI tonemap overrides even under presets, and restore path-based `color_overrides` matching
 
 ## [0.0.2](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.1...frame-compare-v0.0.2) (2025-11-13)
 

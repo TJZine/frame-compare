@@ -69,7 +69,7 @@ def _resolve_configured_color_defaults(
 
 def _resolve_color_overrides(
     color_cfg: "ColorConfig | None",
-    file_name: str | None,
+    file_name: str | Path | None,
 ) -> Dict[str, Optional[int]]:
     if color_cfg is None:
         return {}
@@ -78,9 +78,10 @@ def _resolve_color_overrides(
         return {}
 
     lookup_keys: List[str] = []
-    if file_name:
-        lookup_keys.append(file_name)
-        lookup_keys.append(Path(file_name).name)
+    normalized_name = str(file_name) if file_name else ""
+    if normalized_name:
+        lookup_keys.append(normalized_name)
+        lookup_keys.append(Path(normalized_name).name)
     lookup_keys.append("*")
 
     selected: Dict[str, Any] = {}
@@ -369,7 +370,7 @@ def _adjust_color_range_from_signal(
     *,
     color_range: Optional[int],
     warning_sink: Optional[List[str]],
-    file_name: str | None,
+    file_name: str | Path | None,
     range_inferred: bool,
     range_from_override: bool,
 ) -> Optional[int]:
@@ -419,7 +420,7 @@ def normalise_color_metadata(
     source_props: Mapping[str, Any] | None,
     *,
     color_cfg: "ColorConfig | None" = None,
-    file_name: str | None = None,
+    file_name: str | Path | None = None,
     warning_sink: Optional[List[str]] = None,
 ) -> tuple[
     Any,
