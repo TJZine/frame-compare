@@ -44,6 +44,7 @@ class FakeClip:
     def __init__(self, width: int, height: int):
         self.width = width
         self.height = height
+        self.num_frames = 0
 
 
 def _prepare_fake_vapoursynth_clip(
@@ -566,6 +567,103 @@ def test_generate_screenshots_debug_color_disables_overlays(tmp_path: Path, monk
     assert captured["overlay_text"] is None
     assert captured["frame_info_allowed"] is False
     assert captured["overlays_allowed"] is False
+
+
+def test_generate_screenshots_rehydrates_hdr_props_from_plans(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    clip = FakeClip(1920, 1080)
+    clip.num_frames = 10
+    stored_props = {
+        "_MasteringDisplayMinLuminance": 0.005,
+        "_MasteringDisplayMaxLuminance": 1500,
+    }
+    color_cfg = ColorConfig(overlay_mode="diagnostic")
+    cfg = ScreenshotConfig(directory_name="shots", use_ffmpeg=False)
+    captured: dict[str, Any] = {}
+
+    def fake_writer(
+        _clip: Any,
+        frame_idx: int,
+        crop: tuple[int, int, int, int],
+        scaled: tuple[int, int],
+        pad: tuple[int, int, int, int],
+        path: Path,
+        cfg: ScreenshotConfig,
+        label: str,
+        requested_frame: int,
+        selection_label: str | None = None,
+        *,
+        overlay_text: Optional[str] = None,
+        **kwargs: Any,
+    ) -> None:
+        captured["overlay_text"] = overlay_text
+        Path(path).write_text("img", encoding="utf-8")
+
+    def fake_process(
+        clip_in: Any,
+        file_name: str,
+        color_cfg: ColorConfig,
+        *,
+        stored_source_props: Mapping[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> types.SimpleNamespace:
+        assert stored_source_props == stored_props
+        tonemap_info = vs_core.TonemapInfo(
+            applied=True,
+            tone_curve="bt.2390",
+            dpd=0,
+            target_nits=100.0,
+            dst_min_nits=0.18,
+            src_csp_hint=None,
+            reason=None,
+        )
+        return types.SimpleNamespace(
+            clip=clip_in,
+            overlay_text=None,
+            verification=None,
+            tonemap=tonemap_info,
+            source_props=dict(stored_source_props or {}),
+        )
+
+    def fake_plan_geometry(clips: Sequence[Any], _cfg: ScreenshotConfig) -> list[GeometryPlan]:
+        plans: list[GeometryPlan] = []
+        for clip_obj in clips:
+            width = int(getattr(clip_obj, "width", clip.width))
+            height = int(getattr(clip_obj, "height", clip.height))
+            plans.append(
+                {
+                    "width": width,
+                    "height": height,
+                    "crop": (0, 0, 0, 0),
+                    "cropped_w": width,
+                    "cropped_h": height,
+                    "scaled": (width, height),
+                    "pad": (0, 0, 0, 0),
+                    "final": (width, height),
+                    "requires_full_chroma": False,
+                    "promotion_axes": "none",
+                }
+            )
+        return plans
+
+    monkeypatch.setattr(screenshot, "_save_frame_with_fpng", fake_writer)
+    monkeypatch.setattr(screenshot.vs_core, "process_clip_for_screenshot", fake_process)
+    monkeypatch.setattr(screenshot, "_plan_geometry", fake_plan_geometry)
+
+    created = screenshot.generate_screenshots(
+        [clip],
+        [0],
+        ["clip.mkv"],
+        [{"label": "HDR"}],
+        tmp_path,
+        cfg,
+        color_cfg,
+        trim_offsets=[-2],
+        source_frame_props=[stored_props],
+    )
+
+    assert created
+    assert captured["overlay_text"] is not None
+    assert "MDL" in captured["overlay_text"]
 
 
 def test_plan_geometry_subsamp_safe_rebalance_aligns_modulus() -> None:

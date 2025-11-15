@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Final, List, Mapping, Optional, Sequence, Tuple
 
 from rich.markup import escape
 
@@ -63,6 +63,12 @@ def init_clips(
     reference_index = next((idx for idx, plan in enumerate(plans) if plan.use_as_reference), None)
     reference_fps: Optional[Tuple[int, int]] = None
 
+    def _capture_source_props(target_plan: ClipPlan) -> Callable[[Mapping[str, Any]], None]:
+        def _store(props: Mapping[str, Any]) -> None:
+            target_plan.source_frame_props = dict(props)
+
+        return _store
+
     if reference_index is not None:
         plan = plans[reference_index]
         clip = vs_core.init_clip(
@@ -71,6 +77,7 @@ def init_clips(
             trim_end=plan.trim_end,
             cache_dir=cache_dir_str,
             indexing_notifier=_indexing_note,
+            frame_props_sink=_capture_source_props(plan),
         )
         plan.clip = clip
         plan.effective_fps = _extract_clip_fps(clip)
@@ -78,6 +85,8 @@ def init_clips(
         plan.source_num_frames = int(getattr(clip, "num_frames", 0) or 0)
         plan.source_width = int(getattr(clip, "width", 0) or 0)
         plan.source_height = int(getattr(clip, "height", 0) or 0)
+        if plan.source_frame_props is None:
+            plan.source_frame_props = {}
         reference_fps = plan.effective_fps
 
     for idx, plan in enumerate(plans):
@@ -94,6 +103,7 @@ def init_clips(
             fps_map=fps_override,
             cache_dir=cache_dir_str,
             indexing_notifier=_indexing_note,
+            frame_props_sink=_capture_source_props(plan),
         )
         plan.clip = clip
         plan.applied_fps = fps_override
@@ -102,6 +112,8 @@ def init_clips(
         plan.source_num_frames = int(getattr(clip, "num_frames", 0) or 0)
         plan.source_width = int(getattr(clip, "width", 0) or 0)
         plan.source_height = int(getattr(clip, "height", 0) or 0)
+        if plan.source_frame_props is None:
+            plan.source_frame_props = {}
 
 
 def resolve_selection_windows(

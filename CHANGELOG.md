@@ -16,9 +16,11 @@
 
 ### Bug Fixes
 
+* hydrate cached `suggested_frames`/`suggested_seconds` when reusing offsets files so CLI+VSPreview keep prior recommendations
 * restore audio offset hints in CLI/VSPreview when FPS metadata is missing and preserve negative manual trims across summaries/manual prompts
 * preserve HDR tonemapping for negative trims, honor CLI tonemap overrides even under presets, and restore path-based `color_overrides` matching
 * detect HDR clips when only one of `_Primaries`/`_Transfer` or MDL/CLL props are present and backfill BT.2020/ST2084 defaults so libplacebo receives primaries/matrix hints before tonemapping
+* preserve MasteringDisplay*/ContentLightLevel* metadata when padding negative trims so HDR detection survives blank-prefix extension
 
 ## [0.0.2](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.1...frame-compare-v0.0.2) (2025-11-13)
 
@@ -177,6 +179,7 @@ All notable user-visible updates will be documented in this file in reverse chro
 - *2025-10-29:* Clarified the CLI audio alignment panel output (stream summaries, cached reuse messaging, offsets file footer) and aligned documentation; slow.pics shortcut filenames now derive from the sanitised collection name with regression tests for edge cases; README and reference tables updated.
 - *2025-10-22:* Disabled slow.pics auto-upload by default, added an upfront CLI warning when it is enabled, aligned documentation with dataclass defaults, introduced a packaged `frame-compare` console entry point, and wired Ruff linting into CI (Pyright now blocks failures).
 - *2025-10-21:* Prevented VSPreview helper crashes on Windows `cp1252` consoles by sanitising printed arrows to ASCII, preferring UTF-8 output streams, adding regression coverage, and documenting the console behaviour.
+- *2025-11-15:* Preserved HDR frame props by snapshotting them at source load (`ClipPlan.source_frame_props`) and rehydrating them inside `process_clip_for_screenshot`/`generate_screenshots`, so even negatively trimmed clips retain `_Matrix`/`_Transfer`/MasteringDisplay hints and diagnostic overlays continue to show HDR metadata. Added regression tests covering tonemap rehydration and screenshot overlays.
 - *2025-10-20:* Hardened audio alignment's optional dependency handling by surfacing clear `AudioAlignmentError` messages when
   `numpy`, `librosa`, or `soundfile` fail during onset envelope calculation, and refreshed regression coverage for the failure
   path.

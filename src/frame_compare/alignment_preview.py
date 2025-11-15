@@ -118,6 +118,10 @@ def _confirm_alignment_with_screenshots(
     preview_dir = (base_dir / "audio_alignment" / preview_folder).resolve()
 
     initial_frames = _pick_preview_frames(reference_clip, 2, cfg.audio_alignment.random_seed)
+    source_props_seq = [
+        dict(plan.source_frame_props) if plan.source_frame_props is not None else None
+        for plan in plans
+    ]
 
     try:
         generated = generate_screenshots(
@@ -131,6 +135,7 @@ def _confirm_alignment_with_screenshots(
             trim_offsets=[plan.trim_start for plan in plans],
             pivot_notifier=_alignment_pivot_note,
             debug_color=bool(getattr(cfg.color, "debug_color", False)),
+            source_frame_props=source_props_seq,
         )
     except ClipProcessError as exc:
         hint = "Run 'frame-compare doctor' for dependency diagnostics."
@@ -188,6 +193,7 @@ def _confirm_alignment_with_screenshots(
             trim_offsets=[plan.trim_start for plan in plans],
             pivot_notifier=_alignment_pivot_note,
             debug_color=bool(getattr(cfg.color, "debug_color", False)),
+            source_frame_props=source_props_seq,
         )
     except ClipProcessError as exc:
         hint = "Run 'frame-compare doctor' for dependency diagnostics."

@@ -226,6 +226,47 @@ def apply_audio_alignment(
 
     existing_entries_cache: tuple[str | None, Dict[str, Mapping[str, Any]]] | None = None
 
+    def _safe_float(value: object) -> float | None:
+        if isinstance(value, (int, float)):
+            float_value = float(value)
+            if math.isnan(float_value):
+                return None
+            return float_value
+        return None
+
+    def _safe_int(value: object) -> int | None:
+        if isinstance(value, (int, float)):
+            float_value = float(value)
+            if math.isnan(float_value):
+                return None
+            return int(float_value)
+        return None
+
+    def _extract_suggestion_hints(
+        entries: Mapping[str, Mapping[str, Any]],
+    ) -> Dict[str, tuple[int | None, float | None]]:
+        hints: Dict[str, tuple[int | None, float | None]] = {}
+        for name, entry in entries.items():
+            frames_hint = _safe_int(entry.get("suggested_frames"))
+            seconds_hint = _safe_float(entry.get("suggested_seconds"))
+            if frames_hint is None and seconds_hint is None:
+                continue
+            hints[name] = (frames_hint, seconds_hint)
+        return hints
+
+    def _apply_suggestion_hints_to_details(
+        detail_map: Dict[str, _AudioMeasurementDetail],
+        hints: Mapping[str, tuple[int | None, float | None]],
+    ) -> None:
+        for clip_name, (frames_hint, seconds_hint) in hints.items():
+            detail = detail_map.get(clip_name)
+            if detail is None:
+                continue
+            if frames_hint is not None:
+                detail.frames = int(frames_hint)
+            if seconds_hint is not None:
+                detail.offset_seconds = float(seconds_hint)
+
     def _load_existing_entries() -> tuple[str | None, Dict[str, Mapping[str, Any]]]:
         nonlocal existing_entries_cache
         if existing_entries_cache is None:
@@ -468,23 +509,6 @@ def apply_audio_alignment(
         )
 
         plan_map = plan_lookup
-
-        def _get_float(value: object) -> float | None:
-            if isinstance(value, (int, float)):
-                float_value = float(value)
-                if math.isnan(float_value):
-                    return None
-                return float_value
-            return None
-
-        def _get_int(value: object) -> int | None:
-            if isinstance(value, (int, float)):
-                float_value = float(value)
-                if math.isnan(float_value):
-                    return None
-                return int(float_value)
-            return None
-
         reference_entry = existing_entries.get(reference.path.name)
         reference_manual_frames: int | None = None
         reference_manual_seconds: float | None = None
@@ -492,13 +516,13 @@ def apply_audio_alignment(
             entry = reference_entry
             status_obj = entry.get("status")
             if isinstance(status_obj, str) and status_obj.strip().lower() == "manual":
-                reference_manual_frames = _get_int(entry.get("frames"))
-                reference_manual_seconds = _get_float(entry.get("seconds"))
+                reference_manual_frames = _safe_int(entry.get("frames"))
+                reference_manual_seconds = _safe_float(entry.get("seconds"))
                 if (
                     reference_manual_seconds is None
                     and reference_manual_frames is not None
                 ):
-                    fps_guess = _get_float(reference_entry.get("target_fps")) or _get_float(
+                    fps_guess = _safe_float(reference_entry.get("target_fps")) or _safe_float(
                         reference_entry.get("reference_fps")
                     )
                     if fps_guess and fps_guess > 0:
@@ -510,10 +534,10 @@ def apply_audio_alignment(
 
         def _build_measurement(name: str, entry: Mapping[str, Any]) -> "AlignmentMeasurement":
             plan = plan_map[name]
-            frames_val = _get_int(entry.get("frames")) if entry else None
-            seconds_val = _get_float(entry.get("seconds")) if entry else None
-            target_fps = _get_float(entry.get("target_fps")) if entry else None
-            reference_fps = _get_float(entry.get("reference_fps")) if entry else None
+            frames_val = _safe_int(entry.get("frames")) if entry else None
+            seconds_val = _safe_float(entry.get("seconds")) if entry else None
+            target_fps = _safe_float(entry.get("target_fps")) if entry else None
+            reference_fps = _safe_float(entry.get("reference_fps")) if entry else None
             status_obj = entry.get("status") if entry else None
             is_manual = isinstance(status_obj, str) and status_obj.strip().lower() == "manual"
             if seconds_val is None and frames_val is not None:
@@ -529,7 +553,7 @@ def apply_audio_alignment(
                     fps_val = target_fps if target_fps and target_fps > 0 else reference_fps
                     if fps_val and fps_val > 0:
                         seconds_val = frames_val / fps_val
-            correlation_val = _get_float(entry.get("correlation")) if entry else None
+            correlation_val = _safe_float(entry.get("correlation")) if entry else None
             error_obj = entry.get("error") if entry else None
             error_val = str(error_obj).strip() if isinstance(error_obj, str) and error_obj.strip() else None
             measurement = audio_alignment.AlignmentMeasurement(
@@ -701,7 +725,7 @@ def apply_audio_alignment(
         for name, entry in existing_entries.items():
             if name not in plan_map:
                 continue
-            frames_val = _get_int(entry.get("frames")) if entry else None
+            frames_val = _safe_int(entry.get("frames")) if entry else None
             if frames_val is not None:
                 applied_frames[name] = frames_val
             status_obj = entry.get("status") if entry else None
@@ -1072,6 +1096,11 @@ def apply_audio_alignment(
     reused_cached = _maybe_reuse_cached_offsets(reference_plan, targets)
     if reused_cached is not None:
         summary = reused_cached
+        try:
+            _, existing_entries = _load_existing_entries()
+        except CLIAppError:
+            existing_entries = {}
+        suggestion_hints = _extract_suggestion_hints(existing_entries)
         detail_map: Dict[str, _AudioMeasurementDetail] = {}
         for plan in plans:
             key = plan.path.name
@@ -1092,6 +1121,11 @@ def apply_audio_alignment(
                 status=summary.statuses.get(key, "manual"),
                 applied=True,
             )
+        _apply_suggestion_hints_to_details(detail_map, suggestion_hints)
+        for name, (frames_hint, _seconds_hint) in suggestion_hints.items():
+            if frames_hint is None:
+                continue
+            summary.suggested_frames[name] = int(frames_hint)
         summary.measured_offsets = detail_map
         display_data.measurements = {
             detail.label: detail for detail in detail_map.values()

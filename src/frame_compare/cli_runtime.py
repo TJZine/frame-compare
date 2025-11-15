@@ -59,6 +59,7 @@ class _ClipPlan:
         fps_override (Optional[Tuple[int, int]]): Rational frame-rate override applied during processing.
         use_as_reference (bool): Whether the clip should drive alignment decisions.
         clip (Optional[object]): Lazily populated VapourSynth clip reference.
+        source_frame_props (Optional[Dict[str, Any]]): Snapshot of the source clip's frame props before any trims/padding.
         effective_fps (Optional[Tuple[int, int]]): Frame rate after alignment adjustments.
         applied_fps (Optional[Tuple[int, int]]): Frame rate enforced by user configuration.
         source_fps (Optional[Tuple[int, int]]): Native frame rate detected from the source file.
@@ -78,6 +79,7 @@ class _ClipPlan:
     fps_override: Optional[Tuple[int, int]] = None
     use_as_reference: bool = False
     clip: Optional[object] = None
+    source_frame_props: Optional[Dict[str, Any]] = None
     effective_fps: Optional[Tuple[int, int]] = None
     applied_fps: Optional[Tuple[int, int]] = None
     source_fps: Optional[Tuple[int, int]] = None

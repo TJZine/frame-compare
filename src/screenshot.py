@@ -2193,6 +2193,7 @@ def generate_screenshots(
     verification_sink: List[Dict[str, Any]] | None = None,
     pivot_notifier: Callable[[str], None] | None = None,
     debug_color: bool = False,
+    source_frame_props: Sequence[Mapping[str, Any] | None] | None = None,
 ) -> List[str]:
     """
     Render and save screenshots for the given frames from each input clip using the configured writers.
@@ -2208,6 +2209,7 @@ def generate_screenshots(
         cfg: ScreenshotConfig controlling writer selection, geometry and format options.
         color_cfg: ColorConfig controlling overlays, tonemapping and related color options.
         trim_offsets: Optional per-file trim start offsets; if None, treated as zeros. Must match length of files.
+        source_frame_props: Optional sequence mirroring ``files`` containing cached source frame props for each clip.
         progress_callback: Optional callable invoked with 1 for each saved file to indicate progress.
         frame_labels: Optional mapping from frame index to a user-visible selection label used in overlays and filenames.
         alignment_maps: Optional sequence of alignment mappers (one per clip) used to map source frame indices.
@@ -2231,6 +2233,8 @@ def generate_screenshots(
         trim_offsets = [0] * len(files)
     if len(trim_offsets) != len(files):
         raise ScreenshotError("trim_offsets and files must have matching lengths")
+    if source_frame_props is not None and len(source_frame_props) != len(files):
+        raise ScreenshotError("source_frame_props and files must have matching lengths")
 
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -2254,7 +2258,10 @@ def generate_screenshots(
     frame_info_allowed_default = bool(cfg.add_frame_info and not debug_enabled)
     overlays_allowed_default = not debug_enabled
 
-    for clip, file_path in zip(clips, files, strict=True):
+    for index, (clip, file_path) in enumerate(zip(clips, files, strict=True)):
+        stored_props = None
+        if source_frame_props is not None and index < len(source_frame_props):
+            stored_props = source_frame_props[index]
         result = vs_core.process_clip_for_screenshot(
             clip,
             file_path,
@@ -2264,6 +2271,7 @@ def generate_screenshots(
             logger_override=logger,
             warning_sink=warnings_sink,
             debug_color=debug_enabled,
+            stored_source_props=stored_props,
         )
         processed_results.append(result)
         overlay_states.append(_new_overlay_state())
