@@ -568,3 +568,13 @@
     ......                                                                   [100%]
     78 passed in 0.10s
     ```
+- *2025-11-15:* Blank-prefix padding now preserves all HDR hints (matrix/primaries/transfer/color-range plus any MasteringDisplay*/ContentLightLevel* props) when `init_clip` prepends negative trims, ensuring `_props_signal_hdr` still sees the mastering metadata once tonemapping runs. `_collect_blank_extension_props` now filters frame props with `_is_hdr_prop`, consistent with VapourSynth’s documented ability to copy frame properties via `std.SetFrameProp`/`ModifyFrame` (source:https://github.com/vapoursynth/vapoursynth/blob/master/doc/functions/video/modifyframe.rst@2025-11-15T04:07:19Z).
+  - `date -u +%Y-%m-%d` → `2025-11-15`
+  - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+  - `.venv/bin/ruff check` → `All checks passed!`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_vs_core.py tests/test_screenshot.py` →
+    ```
+    ........................................................................ [ 90%]
+    ........                                                                 [100%]
+    80 passed in 0.11s
+    ```

@@ -18,16 +18,7 @@ _SOURCE_PLUGIN_FUNCS = {"lsmas": "LWLibavSource", "ffms2": "Source"}
 
 
 _CACHE_SUFFIX = {"lsmas": ".lwi", "ffms2": ".ffindex"}
-_BLANK_CLONE_PROP_KEYS = (
-    "_Matrix",
-    "Matrix",
-    "_Primaries",
-    "Primaries",
-    "_Transfer",
-    "Transfer",
-    "_ColorRange",
-    "ColorRange",
-)
+_HDR_PROP_BASE_NAMES = {"matrix", "primaries", "transfer", "colorrange"}
 
 
 class VSPluginError(ClipInitError):
@@ -377,10 +368,17 @@ def init_clip(
 
 def _collect_blank_extension_props(frame_props: Mapping[str, Any]) -> Dict[str, Any]:
     extracted: Dict[str, Any] = {}
-    for key in _BLANK_CLONE_PROP_KEYS:
-        if key in frame_props:
-            extracted[key] = frame_props[key]
+    for key, value in frame_props.items():
+        if _is_hdr_prop(key):
+            extracted[key] = value
     return extracted
+
+
+def _is_hdr_prop(key: str) -> bool:
+    normalized = key.lstrip("_").lower()
+    if normalized in _HDR_PROP_BASE_NAMES:
+        return True
+    return normalized.startswith("masteringdisplay") or normalized.startswith("contentlightlevel")
 
 __all__ = [
     "VSPluginError",

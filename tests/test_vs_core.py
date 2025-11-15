@@ -892,3 +892,89 @@ def test_process_clip_tonemaps_after_negative_trim(monkeypatch: Any) -> None:
 
     assert result.tonemap.applied is True
     assert result.tonemap.reason is None
+
+
+def test_init_clip_preserves_mastering_metadata_on_padding(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    fake_vs = _install_fake_vs(monkeypatch)
+    core = _PaddingCore(fake_vs)
+    clip = _PaddingTestClip(core, [{}])
+
+    mastering_props = {"_MasteringDisplayMaxLuminance": 1500}
+    monkeypatch.setattr(vs_source, "_open_clip_with_sources", lambda *args, **kwargs: clip)
+    monkeypatch.setattr(vs_source, "_snapshot_frame_props", lambda _clip: dict(mastering_props))
+
+    padded_clip = vs_source.init_clip(
+        str(tmp_path / "sample.mkv"),
+        trim_start=-3,
+        core=core,
+    )
+
+    first_frame = padded_clip.get_frame(0)
+    assert (
+        first_frame.props["_MasteringDisplayMaxLuminance"]
+        == mastering_props["_MasteringDisplayMaxLuminance"]
+    )
+
+
+def test_process_clip_tonemaps_with_mastering_metadata_only(monkeypatch: Any) -> None:
+    fake_vs = _install_fake_vs(monkeypatch)
+    setattr(fake_vs, "RGB48", object())
+    setattr(fake_vs, "RGB24", object())
+    core = _PaddingCore(fake_vs)
+    hdr_props = {"_MasteringDisplayMaxLuminance": 2000}
+    clip = _PaddingTestClip(core, [dict(hdr_props)])
+
+    padding_props = vs_source._collect_blank_extension_props(hdr_props)
+    padded = vs_source._extend_with_blank(clip, core, length=2, frame_props=padding_props)
+
+    def _fake_normalise(
+        clip_obj: Any,
+        props: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> tuple[Any, Mapping[str, Any], tuple[Any, Any, Any, Any]]:
+        normalized_props = dict(props)
+        normalized_props.setdefault("_Matrix", 9)
+        normalized_props.setdefault("_Transfer", 16)
+        normalized_props.setdefault("_Primaries", 9)
+        normalized_props.setdefault("_ColorRange", int(getattr(fake_vs, "RANGE_LIMITED")))
+        return clip_obj, normalized_props, (
+            normalized_props.get("_Matrix"),
+            normalized_props.get("_Transfer"),
+            normalized_props.get("_Primaries"),
+            normalized_props.get("_ColorRange"),
+        )
+
+    monkeypatch.setattr(vs_tonemap, "normalise_color_metadata", _fake_normalise)
+    monkeypatch.setattr(vs_tonemap, "_normalize_rgb_props", lambda clip_obj, *args, **kwargs: clip_obj)
+    monkeypatch.setattr(vs_tonemap, "_deduce_src_csp_hint", lambda *args, **kwargs: "hdr_hint")
+    monkeypatch.setattr(vs_tonemap, "_tonemap_with_retries", lambda _core, rgb_clip, **kwargs: rgb_clip)
+    monkeypatch.setattr(
+        vs_tonemap,
+        "_detect_rgb_color_range",
+        lambda *args, **kwargs: (getattr(fake_vs, "RANGE_LIMITED"), "plane_stats"),
+    )
+    monkeypatch.setattr(
+        vs_tonemap,
+        "_apply_post_gamma_levels",
+        lambda _core, clip_obj, **kwargs: (clip_obj, False),
+    )
+
+    cfg = ColorConfig()
+    cfg.enable_tonemap = True
+    cfg.overlay_enabled = False
+    cfg.verify_enabled = False
+    cfg.strict = False
+
+    result = vs_core.process_clip_for_screenshot(
+        padded,
+        "hdr_md_only.mkv",
+        cfg,
+        enable_overlay=False,
+        enable_verification=False,
+    )
+
+    assert result.tonemap.applied is True
+    assert result.tonemap.reason is None
