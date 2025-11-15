@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.0.3](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.2...frame-compare-v0.0.3) (2025-11-15)
+
+
+### Bug Fixes
+
+* detect HDR clips with partial metadata ([763f3f5](https://github.com/TJZine/frame-compare/commit/763f3f5bd74083798860da6ddac5c46758cda98b))
+* restore audio offset hints in CLI and VSPreview ([68da62b](https://github.com/TJZine/frame-compare/commit/68da62b8f509a818c0c769c6d96effd6453cb8ba))
+* restore manual offset timing display ([1788306](https://github.com/TJZine/frame-compare/commit/17883068d4b3641d8771e383fc0ea4525e2108ed))
+* restore reliable HDR tonemapping ([0ed4527](https://github.com/TJZine/frame-compare/commit/0ed45279b0c56a78917b0e089675f685073548fd))
+* simplify manual offset fps guard ([3280043](https://github.com/TJZine/frame-compare/commit/32800434a986aaf984c52be496fbcdb35e3ea476))
+* simplify manual offset fps guard ([#154](https://github.com/TJZine/frame-compare/issues/154)) ([f61311e](https://github.com/TJZine/frame-compare/commit/f61311e8a9b6addcda103c7acf64a8546ee088d5))
+
 ## [Unreleased]
 
 ### Bug Fixes
