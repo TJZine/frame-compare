@@ -33,6 +33,7 @@ from src.datatypes import (
     TMDBConfig,
 )
 from src.frame_compare import runner as runner_module
+from src.frame_compare import vs as vs_core
 from src.frame_compare.analysis import CacheLoadResult, FrameMetricsCacheInfo, SelectionDetail
 from src.frame_compare.cli_runtime import CliOutputManager
 from tests.helpers.runner_env import (
@@ -126,6 +127,21 @@ def test_validate_tonemap_overrides_rejects_bad_preset() -> None:
 def test_validate_tonemap_overrides_rejects_bad_percentile() -> None:
     with pytest.raises(click.ClickException):
         core_module._validate_tonemap_overrides({"percentile": 120.0})
+
+
+def test_cli_tonemap_overrides_mark_provided_keys() -> None:
+    cfg = ColorConfig()
+    cfg.preset = "contrast"
+    setattr(cfg, "_provided_keys", {"preset"})
+
+    runner_module._apply_cli_tonemap_overrides(cfg, {"target_nits": 150.0})
+
+    provided = getattr(cfg, "_provided_keys", set())
+    assert "target_nits" in provided
+
+    settings = vs_core._resolve_tonemap_settings(cfg)
+    assert settings.preset == "contrast"
+    assert settings.target_nits == pytest.approx(150.0)
 
 def test_validate_tonemap_overrides_rejects_scene_range() -> None:
     with pytest.raises(click.ClickException):

@@ -191,7 +191,7 @@ class JsonTail(TypedDict):
     warnings: list[str]
     workspace: dict[str, object]
     vspreview_mode: Optional[str]
-    suggested_frames: int
+    suggested_frames: Optional[int]
     suggested_seconds: float
     vspreview_offer: Optional[dict[str, object]]
 

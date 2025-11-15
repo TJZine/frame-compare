@@ -386,7 +386,7 @@ def _make_json_tail_stub() -> JsonTail:
             "destination_label": "",
         },
         "vspreview_mode": None,
-        "suggested_frames": 0,
+        "suggested_frames": None,
         "suggested_seconds": 0.0,
         "vspreview_offer": None,
     }

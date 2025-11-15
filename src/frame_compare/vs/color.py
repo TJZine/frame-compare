@@ -69,7 +69,7 @@ def _resolve_configured_color_defaults(
 
 def _resolve_color_overrides(
     color_cfg: "ColorConfig | None",
-    file_name: str | None,
+    file_name: str | Path | None,
 ) -> Dict[str, Optional[int]]:
     if color_cfg is None:
         return {}
@@ -78,9 +78,10 @@ def _resolve_color_overrides(
         return {}
 
     lookup_keys: List[str] = []
-    if file_name:
-        lookup_keys.append(file_name)
-        lookup_keys.append(Path(file_name).name)
+    normalized_name = str(file_name) if file_name else ""
+    if normalized_name:
+        lookup_keys.append(normalized_name)
+        lookup_keys.append(Path(normalized_name).name)
     lookup_keys.append("*")
 
     selected: Dict[str, Any] = {}
@@ -369,7 +370,7 @@ def _adjust_color_range_from_signal(
     *,
     color_range: Optional[int],
     warning_sink: Optional[List[str]],
-    file_name: str | None,
+    file_name: str | Path | None,
     range_inferred: bool,
     range_from_override: bool,
 ) -> Optional[int]:
@@ -419,7 +420,7 @@ def normalise_color_metadata(
     source_props: Mapping[str, Any] | None,
     *,
     color_cfg: "ColorConfig | None" = None,
-    file_name: str | None = None,
+    file_name: str | Path | None = None,
     warning_sink: Optional[List[str]] = None,
 ) -> tuple[
     Any,
@@ -434,14 +435,24 @@ def normalise_color_metadata(
     overrides = _resolve_color_overrides(color_cfg, file_name)
     if "matrix" in overrides:
         matrix = overrides["matrix"]
+        if matrix is not None:
+            props["_Matrix"] = int(matrix)
     if "transfer" in overrides:
         transfer = overrides["transfer"]
+        if transfer is not None:
+            props["_Transfer"] = int(transfer)
     if "primaries" in overrides:
         primaries = overrides["primaries"]
+        if primaries is not None:
+            props["_Primaries"] = int(primaries)
     if "range" in overrides:
         color_range = overrides["range"]
+        if color_range is not None:
+            props["_ColorRange"] = int(color_range)
     range_from_override = "range" in overrides
     range_inferred = color_range is None and "range" not in overrides
+
+    hdr_detected = _props_signal_hdr(props)
 
     matrix, transfer, primaries, color_range = _guess_default_colourspace(
         clip,
@@ -461,6 +472,34 @@ def normalise_color_metadata(
         range_inferred=range_inferred,
         range_from_override=range_from_override,
     )
+
+    if hdr_detected:
+        vs_module = _get_vapoursynth_module()
+
+        def _coerce_hd_default(name: str, mapping: Mapping[str, int]) -> Optional[int]:
+            if color_cfg is None:
+                return None
+            value = getattr(color_cfg, name, None)
+            if value in (None, ""):
+                return None
+            return _coerce_prop(value, mapping)
+
+        if matrix is None:
+            matrix = _coerce_hd_default("default_matrix_hd", _MATRIX_NAME_TO_CODE)
+            if matrix is None:
+                matrix = int(
+                    getattr(
+                        vs_module,
+                        "MATRIX_BT2020_CL",
+                        getattr(vs_module, "MATRIX_BT2020_NCL", 9),
+                    )
+                )
+        if primaries is None:
+            primaries = _coerce_hd_default("default_primaries_hd", _PRIMARIES_NAME_TO_CODE)
+            if primaries is None:
+                primaries = int(getattr(vs_module, "PRIMARIES_BT2020", 9))
+        if transfer is None:
+            transfer = int(getattr(vs_module, "TRANSFER_ST2084", 16))
 
     update_props: Dict[str, int] = {}
     if matrix is not None:

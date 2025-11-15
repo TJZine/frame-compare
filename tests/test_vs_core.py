@@ -4,7 +4,8 @@ import sys
 import types
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any, Dict, List, Sequence
+from pathlib import Path
+from typing import Any, Dict, List, Mapping, Sequence
 
 import pytest
 
@@ -12,6 +13,8 @@ from src.datatypes import ColorConfig
 from src.frame_compare import vs as vs_core
 from src.frame_compare.vs import VerificationResult
 from src.frame_compare.vs import color as vs_color
+from src.frame_compare.vs import source as vs_source
+from src.frame_compare.vs import tonemap as vs_tonemap
 
 
 @pytest.fixture(autouse=True)
@@ -104,6 +107,24 @@ def test_resolve_tonemap_settings_uses_color_defaults() -> None:
     assert settings.scene_threshold_high == pytest.approx(2.4)
     assert settings.percentile == pytest.approx(99.995)
     assert settings.contrast_recovery == pytest.approx(0.3)
+
+
+def test_props_signal_hdr_accepts_transfer_only() -> None:
+    props = {"_Transfer": 16}
+
+    assert vs_core._props_signal_hdr(props) is True
+
+
+def test_props_signal_hdr_accepts_primaries_only() -> None:
+    props = {"_Primaries": 9}
+
+    assert vs_core._props_signal_hdr(props) is True
+
+
+def test_props_signal_hdr_detects_mastering_metadata() -> None:
+    props = {"_MasteringDisplayMaxLuminance": 1000}
+
+    assert vs_core._props_signal_hdr(props) is True
 
 
 class _FakeSampleType:
@@ -521,6 +542,91 @@ class _DummyClip:
         self.std = _DummyStd(self)
 
 
+class _PaddingTestFrame:
+    def __init__(self, props: Mapping[str, Any]) -> None:
+        self.props = dict(props)
+
+
+class _PaddingTestClip:
+    def __init__(
+        self,
+        core: "_PaddingCore",
+        frames: Sequence[Mapping[str, Any]],
+        *,
+        height: int = 1080,
+        fps_num: int = 24000,
+        fps_den: int = 1001,
+    ) -> None:
+        self.core = core
+        self.std = core.std
+        self.resize = core.resize
+        self.format = types.SimpleNamespace(color_family=getattr(core.vs_module, "YUV", object()))
+        self.height = height
+        self.fps_num = fps_num
+        self.fps_den = fps_den
+        self._frames = [_PaddingTestFrame(props) for props in frames]
+        self.num_frames = len(self._frames)
+
+    def _copy_frames(self) -> List[Mapping[str, Any]]:
+        return [dict(frame.props) for frame in self._frames]
+
+    def __add__(self, other: "_PaddingTestClip") -> "_PaddingTestClip":
+        return _PaddingTestClip(
+            self.core,
+            self._copy_frames() + other._copy_frames(),
+            height=self.height,
+            fps_num=self.fps_num,
+            fps_den=self.fps_den,
+        )
+
+    def get_frame(self, index: int) -> _PaddingTestFrame:
+        if not self._frames:
+            raise RuntimeError("clip has no frames")
+        idx = min(max(index, 0), len(self._frames) - 1)
+        return self._frames[idx]
+
+    def apply_frame_props(self, props: Mapping[str, Any]) -> None:
+        for frame in self._frames:
+            frame.props.update(props)
+
+
+class _PaddingStd:
+    def __init__(self, core: "_PaddingCore") -> None:
+        self._core = core
+
+    def BlankClip(self, clip: _PaddingTestClip, length: int) -> _PaddingTestClip:
+        return _PaddingTestClip(
+            self._core,
+            [{} for _ in range(length)],
+            height=clip.height,
+            fps_num=clip.fps_num,
+            fps_den=clip.fps_den,
+        )
+
+    def SetFrameProp(self, clip: _PaddingTestClip, **kwargs: Any) -> _PaddingTestClip:
+        clip.apply_frame_props(kwargs)
+        return clip
+
+    def SetFrameProps(self, clip: _PaddingTestClip, **kwargs: Any) -> _PaddingTestClip:
+        clip.apply_frame_props(kwargs)
+        return clip
+
+
+class _PaddingResize:
+    def Spline36(self, clip: _PaddingTestClip, **kwargs: Any) -> _PaddingTestClip:
+        return clip
+
+    def Point(self, clip: _PaddingTestClip, **kwargs: Any) -> _PaddingTestClip:
+        return clip
+
+
+class _PaddingCore:
+    def __init__(self, vs_module: Any) -> None:
+        self.vs_module = vs_module
+        self.std = _PaddingStd(self)
+        self.resize = _PaddingResize()
+
+
 def _install_fake_vs(monkeypatch: Any, **overrides: int) -> Any:
     yuv_family = object()
     attributes = dict(
@@ -528,10 +634,14 @@ def _install_fake_vs(monkeypatch: Any, **overrides: int) -> Any:
         RGB=object(),
         MATRIX_BT709=1,
         MATRIX_SMPTE170M=6,
+        MATRIX_BT2020_CL=9,
+        MATRIX_BT2020_NCL=9,
         PRIMARIES_BT709=1,
         PRIMARIES_SMPTE170M=6,
+        PRIMARIES_BT2020=9,
         TRANSFER_BT709=1,
         TRANSFER_SMPTE170M=6,
+        TRANSFER_ST2084=16,
         RANGE_LIMITED=1,
         RANGE_FULL=0,
     )
@@ -575,6 +685,32 @@ def test_normalise_color_metadata_infers_hd_defaults(monkeypatch: Any) -> None:
             "_ColorRange": int(fake_vs.RANGE_LIMITED),
         }
     ]
+
+
+def test_normalise_color_metadata_backfills_hdr_defaults(monkeypatch: Any) -> None:
+    fake_vs = _install_fake_vs(monkeypatch)
+    clip = _DummyClip(fake_vs, height=1080)
+
+    _, props, color_tuple = vs_core.normalise_color_metadata(
+        clip,
+        {"_Transfer": 16},
+        color_cfg=ColorConfig(),
+        file_name="hdr.mkv",
+    )
+
+    expected_matrix = int(
+        getattr(fake_vs, "MATRIX_BT2020_CL", getattr(fake_vs, "MATRIX_BT2020_NCL", 9))
+    )
+    assert color_tuple == (
+        expected_matrix,
+        16,
+        int(getattr(fake_vs, "PRIMARIES_BT2020")),
+        int(fake_vs.RANGE_LIMITED),
+    )
+    assert props["_Matrix"] == expected_matrix
+    assert props["_Transfer"] == 16
+    assert props["_Primaries"] == int(getattr(fake_vs, "PRIMARIES_BT2020"))
+    assert vs_core._props_signal_hdr(props) is True
 
 
 def test_normalise_color_metadata_infers_sd_defaults(monkeypatch: Any) -> None:
@@ -631,6 +767,38 @@ def test_normalise_color_metadata_honours_overrides(monkeypatch: Any) -> None:
     assert props["_ColorRange"] == 0
 
 
+def test_normalise_color_metadata_honours_path_overrides(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    fake_vs = _install_fake_vs(monkeypatch)
+    clip = _DummyClip(fake_vs, height=2160)
+    override_path = tmp_path / "shots" / "demo.mkv"
+    cfg = ColorConfig(
+        color_overrides={
+            str(override_path): {
+                "matrix": "bt2020",
+                "primaries": "bt2020",
+                "transfer": "st2084",
+                "range": "full",
+            }
+        }
+    )
+
+    _, props, color_tuple = vs_core.normalise_color_metadata(
+        clip,
+        {},
+        color_cfg=cfg,
+        file_name=override_path,
+    )
+
+    assert color_tuple == (9, 16, 9, 0)
+    assert props["_Matrix"] == 9
+    assert props["_Transfer"] == 16
+    assert props["_Primaries"] == 9
+    assert props["_ColorRange"] == 0
+
+
 def test_normalise_color_metadata_infers_limited_via_signal(monkeypatch: Any) -> None:
     fake_vs = _install_fake_vs(monkeypatch)
     clip = _DummyClip(fake_vs, height=1080)
@@ -670,3 +838,57 @@ def test_normalise_color_metadata_warns_for_mismatched_limited(monkeypatch: Any)
     # Range remains limited but a warning is emitted for the suspicious signal.
     assert props["_ColorRange"] == int(fake_vs.RANGE_LIMITED)
     assert warnings
+
+
+def test_process_clip_tonemaps_after_negative_trim(monkeypatch: Any) -> None:
+    fake_vs = _install_fake_vs(monkeypatch)
+    setattr(fake_vs, "RGB48", object())
+    setattr(fake_vs, "RGB24", object())
+    core = _PaddingCore(fake_vs)
+    hdr_props = {"_Matrix": 9, "_Primaries": 9, "_Transfer": 16, "_ColorRange": 1}
+    clip = _PaddingTestClip(core, [hdr_props])
+    padded = vs_source._extend_with_blank(clip, core, length=2, frame_props=hdr_props)
+
+    def _fake_normalise(
+        clip_obj: Any,
+        props: Mapping[str, Any],
+        **kwargs: Any,
+    ) -> tuple[Any, Mapping[str, Any], tuple[Any, Any, Any, Any]]:
+        return clip_obj, props, (
+            props.get("_Matrix"),
+            props.get("_Transfer"),
+            props.get("_Primaries"),
+            props.get("_ColorRange"),
+        )
+
+    monkeypatch.setattr(vs_tonemap, "normalise_color_metadata", _fake_normalise)
+    monkeypatch.setattr(vs_tonemap, "_normalize_rgb_props", lambda clip_obj, *args, **kwargs: clip_obj)
+    monkeypatch.setattr(vs_tonemap, "_deduce_src_csp_hint", lambda *args, **kwargs: "hdr_hint")
+    monkeypatch.setattr(vs_tonemap, "_tonemap_with_retries", lambda _core, rgb_clip, **kwargs: rgb_clip)
+    monkeypatch.setattr(
+        vs_tonemap,
+        "_detect_rgb_color_range",
+        lambda *args, **kwargs: (getattr(fake_vs, "RANGE_LIMITED"), "plane_stats"),
+    )
+    monkeypatch.setattr(
+        vs_tonemap,
+        "_apply_post_gamma_levels",
+        lambda _core, clip_obj, **kwargs: (clip_obj, False),
+    )
+
+    cfg = ColorConfig()
+    cfg.enable_tonemap = True
+    cfg.overlay_enabled = False
+    cfg.verify_enabled = False
+    cfg.strict = False
+
+    result = vs_core.process_clip_for_screenshot(
+        padded,
+        "hdr_pad.mkv",
+        cfg,
+        enable_overlay=False,
+        enable_verification=False,
+    )
+
+    assert result.tonemap.applied is True
+    assert result.tonemap.reason is None
