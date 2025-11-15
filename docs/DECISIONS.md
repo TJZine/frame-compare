@@ -558,3 +558,13 @@
       1 passed in 0.01s
       ```
     - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+- *2025-11-15:* Relaxed HDR source detection and metadata backfill to stop clips with partial HDR props (e.g., only `_Transfer=16` or MDL/CLL stats) from being treated as SDR. `_props_signal_hdr` now treats any HDR primaries/transfer flag or mastering metadata as a usable signal, and `normalise_color_metadata` injects BT.2020/ST2084 defaults (preferring `ColorConfig.default_*_hd` when set) before calling `_apply_frame_props_dict` so libplacebo always receives primaries/matrix hints documented in VapourSynth’s `ModifyFrame` property API (source:https://github.com/vapoursynth/vapoursynth/blob/master/doc/functions/video/modifyframe.rst@2025-11-15T04:07:19Z). This keeps tonemapping engaged even when containers omit `_Primaries`.
+  - `date -u +%Y-%m-%d` → `2025-11-15`
+  - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+  - `.venv/bin/ruff check` → `All checks passed!`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_vs_core.py tests/test_screenshot.py` →
+    ```
+    ........................................................................ [ 92%]
+    ......                                                                   [100%]
+    78 passed in 0.10s
+    ```

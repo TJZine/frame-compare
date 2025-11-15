@@ -187,9 +187,25 @@ def _snapshot_frame_props(clip: Any) -> Mapping[str, Any]:
 def _props_signal_hdr(props: Mapping[str, Any]) -> bool:
     primaries = props.get("_Primaries") or props.get("Primaries")
     transfer = props.get("_Transfer") or props.get("Transfer")
-    if not _value_matches(primaries, _HDR_PRIMARIES_NAMES, _HDR_PRIMARIES_CODES):
-        return False
-    return _value_matches(transfer, _HDR_TRANSFER_NAMES, _HDR_TRANSFER_CODES)
+
+    has_hdr_primaries = _value_matches(primaries, _HDR_PRIMARIES_NAMES, _HDR_PRIMARIES_CODES)
+    has_hdr_transfer = _value_matches(transfer, _HDR_TRANSFER_NAMES, _HDR_TRANSFER_CODES)
+
+    has_mastering_metadata = False
+    for key in props:
+        normalized = str(key).lstrip("_").lower()
+        if normalized.startswith("masteringdisplay") or normalized.startswith("contentlightlevel"):
+            has_mastering_metadata = True
+            break
+
+    if has_hdr_primaries and has_hdr_transfer:
+        return True
+
+    # Treat any HDR hint (single primaries/transfer flag or mastering metadata) as a partial signal.
+    # Previously both flags had to be present, which muted clips that only carried MDL/CLL stats.
+    if has_hdr_primaries or has_hdr_transfer or has_mastering_metadata:
+        return True
+    return False
 
 
 def _coerce_prop(value: Any, mapping: Mapping[str, int] | None = None) -> Optional[int]:

@@ -6,6 +6,7 @@
 
 * restore audio offset hints in CLI/VSPreview when FPS metadata is missing and preserve negative manual trims across summaries/manual prompts
 * preserve HDR tonemapping for negative trims, honor CLI tonemap overrides even under presets, and restore path-based `color_overrides` matching
+* detect HDR clips when only one of `_Primaries`/`_Transfer` or MDL/CLL props are present and backfill BT.2020/ST2084 defaults so libplacebo receives primaries/matrix hints before tonemapping
 
 ## [0.0.2](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.1...frame-compare-v0.0.2) (2025-11-13)
 

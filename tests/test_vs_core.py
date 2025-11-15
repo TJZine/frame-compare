@@ -109,6 +109,24 @@ def test_resolve_tonemap_settings_uses_color_defaults() -> None:
     assert settings.contrast_recovery == pytest.approx(0.3)
 
 
+def test_props_signal_hdr_accepts_transfer_only() -> None:
+    props = {"_Transfer": 16}
+
+    assert vs_core._props_signal_hdr(props) is True
+
+
+def test_props_signal_hdr_accepts_primaries_only() -> None:
+    props = {"_Primaries": 9}
+
+    assert vs_core._props_signal_hdr(props) is True
+
+
+def test_props_signal_hdr_detects_mastering_metadata() -> None:
+    props = {"_MasteringDisplayMaxLuminance": 1000}
+
+    assert vs_core._props_signal_hdr(props) is True
+
+
 class _FakeSampleType:
     def __init__(self, name: str, value: int) -> None:
         self.name = name
@@ -616,10 +634,14 @@ def _install_fake_vs(monkeypatch: Any, **overrides: int) -> Any:
         RGB=object(),
         MATRIX_BT709=1,
         MATRIX_SMPTE170M=6,
+        MATRIX_BT2020_CL=9,
+        MATRIX_BT2020_NCL=9,
         PRIMARIES_BT709=1,
         PRIMARIES_SMPTE170M=6,
+        PRIMARIES_BT2020=9,
         TRANSFER_BT709=1,
         TRANSFER_SMPTE170M=6,
+        TRANSFER_ST2084=16,
         RANGE_LIMITED=1,
         RANGE_FULL=0,
     )
@@ -663,6 +685,32 @@ def test_normalise_color_metadata_infers_hd_defaults(monkeypatch: Any) -> None:
             "_ColorRange": int(fake_vs.RANGE_LIMITED),
         }
     ]
+
+
+def test_normalise_color_metadata_backfills_hdr_defaults(monkeypatch: Any) -> None:
+    fake_vs = _install_fake_vs(monkeypatch)
+    clip = _DummyClip(fake_vs, height=1080)
+
+    _, props, color_tuple = vs_core.normalise_color_metadata(
+        clip,
+        {"_Transfer": 16},
+        color_cfg=ColorConfig(),
+        file_name="hdr.mkv",
+    )
+
+    expected_matrix = int(
+        getattr(fake_vs, "MATRIX_BT2020_CL", getattr(fake_vs, "MATRIX_BT2020_NCL", 9))
+    )
+    assert color_tuple == (
+        expected_matrix,
+        16,
+        int(getattr(fake_vs, "PRIMARIES_BT2020")),
+        int(fake_vs.RANGE_LIMITED),
+    )
+    assert props["_Matrix"] == expected_matrix
+    assert props["_Transfer"] == 16
+    assert props["_Primaries"] == int(getattr(fake_vs, "PRIMARIES_BT2020"))
+    assert vs_core._props_signal_hdr(props) is True
 
 
 def test_normalise_color_metadata_infers_sd_defaults(monkeypatch: Any) -> None:
