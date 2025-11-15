@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.4](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.3...frame-compare-v0.0.4) (2025-11-15)
+
+
+### Bug Fixes
+
+* preserve HDR metadata during negative trim padding ([#157](https://github.com/TJZine/frame-compare/issues/157)) ([6d3cf7b](https://github.com/TJZine/frame-compare/commit/6d3cf7b1bf67a8790820f2c7637255b3fcd33798))
+
 ## [0.0.3](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.2...frame-compare-v0.0.3) (2025-11-15)
 
 
