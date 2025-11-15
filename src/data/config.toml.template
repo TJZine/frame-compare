@@ -65,7 +65,8 @@ single_res = 0
 mod_crop = 2
 letterbox_pillarbox_aware = true
 # Estimate and crop out scope letterbox bars using aspect ratio heuristics.
-auto_letterbox_crop = false
+# Values: "off" (disabled), "basic" (post-aligned conservative), "strict" (legacy aggressive). Booleans map to off/strict.
+auto_letterbox_crop = "off"
 pad_to_canvas = "off"
 letterbox_px_tolerance = 8
 # DEPRECATED: center_pad is ignored; padding is always centered (kept for backward compatibility)

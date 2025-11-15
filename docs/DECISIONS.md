@@ -1,5 +1,13 @@
 # Decisions Log
 
+- *2025-11-15:* feat(screenshots): introduce explicit auto-letterbox modes and conservative heuristics.
+  - Problem: the boolean `[screenshots].auto_letterbox_crop` toggle made it impossible to switch between the legacy (aggressive) ratio heuristic and a more conservative workflow, and it hid the effective mode from JSON telemetry. Debugging false-positive crops (like 3840×2160 masters vs. 3600×2160 trims) required reading logs to infer how the planner interpreted the setting.
+  - Decision: Added an `AutoLetterboxCropMode` enum inspired by the standard library’s string-valued Enum guidance (source:https://github.com/python/cpython/blob/v3.11.14/Doc/howto/enum.rst@2025-11-15T18:20:24Z), changed `ScreenshotConfig.auto_letterbox_crop` to default to `"off"`, and normalised incoming config values so legacy booleans coerce to `"off"`/`"strict"`. `_plan_geometry` now resolves a mode upfront, exposes `_apply_letterbox_crop_strict` (legacy behaviour) and `_apply_letterbox_crop_basic` (post-aligned, conservative heuristic), and surfaces the resolved value in the runner’s JSON tail. Docs, the config template, and tables describe the new `off/basic/strict` modes, plus regression tests cover config coercion and both planner flows.
+  - Verification:
+    - `.venv/bin/pyright --warnings`
+    - `.venv/bin/ruff check`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`
+
 - *2025-11-15:* fix(alignment): refresh cached frame counts when trims shift mid-run.
   - Problem: Audio alignment and VSPreview manual offsets now tweak `ClipPlan.trim_start` before `selection.init_clips()` runs, but `probe_clip_metadata()` had already filled `source_num_frames`, so later initialisation skipped recomputing geometry. JSON summaries and screenshot overlays kept the original frame totals even when plans dropped or gained frames.
   - Decision: Whenever alignment/vspreview mutate `trim_start`, clear `plan.source_num_frames` so `selection.init_clips()` re-snapshots the trimmed clip. Regression coverage records each VapourSynth initialisation and asserts the CLI’s `clips` payload reflects the final trim applied to every file.

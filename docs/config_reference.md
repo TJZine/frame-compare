@@ -15,6 +15,16 @@ trade-offs.
 
 The policy has no effect on HDR content (the HDR→SDR pipeline continues to run in high-bit-depth RGB).
 
+## `[screenshots].auto_letterbox_crop`
+
+Auto letterbox cropping accepts `"off"`, `"basic"`, or `"strict"` (booleans still coerce to `"off"`/`"strict"` during
+config loading). Use `"off"` to preserve bars exactly as provided. `"basic"` reuses the post-aligned cropped width/height
+when running the ratio heuristic, so horizontally cropped clips no longer trick the detector into shaving the other
+sources vertically. `"strict"` applies the legacy behaviour unchanged: it analyses the raw source dimensions, uses the
+widest clip as the target ratio, and aggressively trims top/bottom bars on any clip that appears narrower even if the
+difference comes from prior horizontal crops. The planner normalises every value to one of these strings before
+rendering and surfaces the resolved mode in the CLI JSON tail for quick audits.
+
 ## `[screenshots].rgb_dither`
 
 Controls how the final 16-bit frame is quantised to RGB24.

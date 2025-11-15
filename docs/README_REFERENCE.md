@@ -130,7 +130,7 @@ tail = json.loads(result.stdout.splitlines()[-1])
 | `[screenshots].odd_geometry_policy` | Policy for odd-pixel trims/pads on subsampled SDR (auto, force, or subsamp-safe). | str | `"auto"` |
 | `[screenshots].rgb_dither` | Dithering applied during final RGB24 conversion (FFmpeg path forces deterministic ordered when `"error_diffusion"` is requested). | str | `"error_diffusion"` |
 | `[screenshots].export_range` | Output range for PNGs (`"full"` expands limited SDR to full-range RGB; `"limited"` keeps video-range output). | str | `"full"` |
-| `[screenshots].auto_letterbox_crop` | Auto crop black bars. | bool | `false` |
+| `[screenshots].auto_letterbox_crop` | Auto crop black bars: `"off"` disables, `"basic"` uses cropped geometry for conservative scope detection, `"strict"` keeps the legacy aggressive ratio heuristic. Booleans continue to coerce to `"off"`/`"strict"`. | str \| bool | `"off"` |
 | `[screenshots].pad_to_canvas` | Apply padding within `letterbox_px_tolerance` when bars are detected; padding remains centered. | str | `"off"` |
 | `[screenshots].letterbox_px_tolerance` | Pixel budget for letterbox/pad detection when `pad_to_canvas` toggles. | int | `8` |
 | `[screenshots].center_pad` | Deprecated and ignored; padding is always centered. | bool | `true[^screenshots-deprecated]` |

@@ -1415,6 +1415,7 @@ def run(request: RunRequest) -> RunResult:
         "upscale": bool(cfg.screenshots.upscale),
         "mod_crop": int(cfg.screenshots.mod_crop),
         "letterbox_pillarbox_aware": bool(cfg.screenshots.letterbox_pillarbox_aware),
+        "auto_letterbox_mode": str(getattr(cfg.screenshots, "auto_letterbox_crop", "off")),
         "pad_to_canvas": cfg.screenshots.pad_to_canvas,
         "center_pad": bool(cfg.screenshots.center_pad),
         "letterbox_px_tolerance": int(cfg.screenshots.letterbox_px_tolerance),

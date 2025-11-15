@@ -1315,6 +1315,51 @@ def test_auto_letterbox_crop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     assert captured[1]["pad"] == (0, 0, 0, 0)
 
 
+def test_auto_letterbox_basic_avoids_weird_scope_pair() -> None:
+    clips = [FakeClip(3840, 2160), FakeClip(3600, 2160)]
+    cfg = ScreenshotConfig(
+        upscale=True,
+        use_ffmpeg=False,
+        add_frame_info=False,
+        mod_crop=2,
+        letterbox_pillarbox_aware=True,
+        auto_letterbox_crop="basic",
+    )
+
+    plans = screenshot._plan_geometry(clips, cfg)
+    assert len(plans) == 2
+
+    wider, narrower = plans
+    assert wider["cropped_w"] == 3600
+    assert sum(wider["crop"][::2]) == 240
+    assert wider["crop"][1] == 0 and wider["crop"][3] == 0
+    assert narrower["crop"][1] == 0 and narrower["crop"][3] == 0
+    assert wider["cropped_h"] == 2160
+    assert narrower["cropped_h"] == 2160
+    assert wider["final"] == narrower["final"]
+
+
+def test_auto_letterbox_strict_preserves_legacy_scope_behavior() -> None:
+    clips = [FakeClip(3840, 2160), FakeClip(3600, 2160)]
+    cfg = ScreenshotConfig(
+        upscale=True,
+        use_ffmpeg=False,
+        add_frame_info=False,
+        mod_crop=2,
+        letterbox_pillarbox_aware=True,
+        auto_letterbox_crop="strict",
+    )
+
+    plans = screenshot._plan_geometry(clips, cfg)
+    assert len(plans) == 2
+
+    wider, narrower = plans
+    assert wider["crop"] == (120, 0, 120, 0)
+    assert wider["cropped_w"] == 3600
+    assert narrower["crop"][1] > 0 or narrower["crop"][3] > 0
+    assert narrower["cropped_h"] < 2160
+
+
 def test_pad_to_canvas_auto_handles_micro_bars(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     clips = [FakeClip(3840, 2152), FakeClip(1920, 1080)]
     cfg = ScreenshotConfig(

@@ -17,6 +17,7 @@ from .datatypes import (
     AnalysisThresholds,
     AppConfig,
     AudioAlignmentConfig,
+    AutoLetterboxCropMode,
     CLIConfig,
     ColorConfig,
     NamingConfig,
@@ -71,6 +72,29 @@ def _coerce_enum(value: Any, dotted_key: str, enum_type: type[Enum]) -> Enum:
                 return member
     raise ConfigError(
         f"{dotted_key} must be one of: {', '.join(str(member.value) for member in enum_type)}"
+    )
+
+
+def _normalise_auto_letterbox_mode(value: object, dotted_key: str) -> str:
+    """Return a canonical auto letterbox mode label."""
+
+    if isinstance(value, AutoLetterboxCropMode):
+        resolved = value.value
+    elif isinstance(value, bool):
+        return AutoLetterboxCropMode.STRICT.value if value else AutoLetterboxCropMode.OFF.value
+    elif value is None:
+        return AutoLetterboxCropMode.OFF.value
+    else:
+        resolved = str(value).strip().lower()
+
+    if resolved in {"", "off", "false"}:
+        return AutoLetterboxCropMode.OFF.value
+    if resolved == AutoLetterboxCropMode.BASIC.value:
+        return AutoLetterboxCropMode.BASIC.value
+    if resolved in {AutoLetterboxCropMode.STRICT.value, "true"}:
+        return AutoLetterboxCropMode.STRICT.value
+    raise ConfigError(
+        f"{dotted_key} must be 'off', 'basic', 'strict', true/false, or omitted."
     )
 
 
@@ -428,6 +452,10 @@ def load_config(path: str) -> AppConfig:
     if pad_mode not in {"off", "on", "auto"}:
         raise ConfigError("screenshots.pad_to_canvas must be 'off', 'on', or 'auto'")
     app.screenshots.pad_to_canvas = pad_mode
+    app.screenshots.auto_letterbox_crop = _normalise_auto_letterbox_mode(
+        getattr(app.screenshots, "auto_letterbox_crop", AutoLetterboxCropMode.OFF.value),
+        "[screenshots].auto_letterbox_crop",
+    )
 
     if hasattr(app.screenshots, "center_pad") and app.screenshots.center_pad is False:
         logging.warning(

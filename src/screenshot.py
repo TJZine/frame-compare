@@ -34,6 +34,7 @@ from src.frame_compare.render.errors import (
 )
 
 from .datatypes import (
+    AutoLetterboxCropMode,
     ColorConfig,
     ExportRange,
     OddGeometryPolicy,
@@ -1221,6 +1222,120 @@ def _plan_letterbox_offsets(
     )
 
 
+def _resolve_auto_letterbox_mode(value: object) -> str:
+    """Return the canonical auto-letterbox mode label."""
+
+    if isinstance(value, AutoLetterboxCropMode):
+        return value.value
+    if isinstance(value, bool):
+        return AutoLetterboxCropMode.STRICT.value if value else AutoLetterboxCropMode.OFF.value
+    raw = "" if value is None else str(value).strip().lower()
+    if raw in {"", "off", "false"}:
+        return AutoLetterboxCropMode.OFF.value
+    if raw == AutoLetterboxCropMode.BASIC.value:
+        return AutoLetterboxCropMode.BASIC.value
+    if raw in {AutoLetterboxCropMode.STRICT.value, "true"}:
+        return AutoLetterboxCropMode.STRICT.value
+    return AutoLetterboxCropMode.OFF.value
+
+
+def _apply_letterbox_crop_strict(plans: list[GeometryPlan], cfg: ScreenshotConfig) -> None:
+    """Apply the legacy auto letterbox heuristic to the supplied plans."""
+
+    try:
+        max_target_height = min(int(plan["cropped_h"]) for plan in plans)
+    except ValueError:
+        max_target_height = None
+    offsets = _plan_letterbox_offsets(
+        plans,
+        mod=cfg.mod_crop,
+        max_target_height=max_target_height,
+    )
+    for plan, (extra_top, extra_bottom) in zip(plans, offsets, strict=True):
+        if not (extra_top or extra_bottom):
+            continue
+        left, top, right, bottom = plan["crop"]
+        top += int(extra_top)
+        bottom += int(extra_bottom)
+        new_height = int(plan["height"]) - top - bottom
+        if new_height <= 0:
+            raise ScreenshotGeometryError("Letterbox detection removed all pixels")
+        plan["crop"] = (left, top, right, bottom)
+        plan["cropped_h"] = new_height
+        logger.info(
+            "[LETTERBOX] Cropping %s px top / %s px bottom for width=%s height=%s",
+            extra_top,
+            extra_bottom,
+            plan["width"],
+            plan["height"],
+        )
+
+
+def _apply_letterbox_crop_basic(plans: list[GeometryPlan], cfg: ScreenshotConfig) -> None:
+    """Apply the conservative cropped-geometry heuristic."""
+
+    synthetic: list[GeometryPlan] = []
+    for plan in plans:
+        cropped_w = int(plan["cropped_w"])
+        cropped_h = int(plan["cropped_h"])
+        synthetic_plan = cast(GeometryPlan, dict(plan))
+        synthetic_plan["width"] = cropped_w
+        synthetic_plan["height"] = cropped_h
+        synthetic_plan["crop"] = (0, 0, 0, 0)
+        synthetic_plan["cropped_w"] = cropped_w
+        synthetic_plan["cropped_h"] = cropped_h
+        synthetic_plan["scaled"] = (cropped_w, cropped_h)
+        synthetic_plan["pad"] = (0, 0, 0, 0)
+        synthetic_plan["final"] = (cropped_w, cropped_h)
+        synthetic_plan["requires_full_chroma"] = False
+        synthetic_plan["promotion_axes"] = "none"
+        synthetic.append(synthetic_plan)
+
+    if cfg.letterbox_pillarbox_aware:
+        _align_letterbox_pillarbox(synthetic)
+
+    for plan in synthetic:
+        plan["width"] = int(plan["cropped_w"])
+        plan["height"] = int(plan["cropped_h"])
+
+    try:
+        max_target_height = min(int(entry["cropped_h"]) for entry in synthetic)
+    except ValueError:
+        max_target_height = None
+
+    offsets = _plan_letterbox_offsets(
+        synthetic,
+        mod=cfg.mod_crop,
+        max_target_height=max_target_height,
+    )
+
+    if not offsets:
+        return
+    if not any(extra_top or extra_bottom for extra_top, extra_bottom in offsets):
+        return
+    if all(extra_top or extra_bottom for extra_top, extra_bottom in offsets):
+        return
+
+    for plan, (extra_top, extra_bottom) in zip(plans, offsets, strict=True):
+        if not (extra_top or extra_bottom):
+            continue
+        left, top, right, bottom = plan["crop"]
+        top += int(extra_top)
+        bottom += int(extra_bottom)
+        new_height = int(plan["height"]) - top - bottom
+        if new_height <= 0:
+            raise ScreenshotGeometryError("Letterbox detection removed all pixels")
+        plan["crop"] = (left, top, right, bottom)
+        plan["cropped_h"] = new_height
+        logger.info(
+            "[LETTERBOX] (basic) Cropping %s px top / %s px bottom for width=%s height=%s",
+            extra_top,
+            extra_bottom,
+            plan["width"],
+            plan["height"],
+        )
+
+
 def _split_padding(total: int, center: bool) -> tuple[int, int]:
     return _geo.split_padding(total, center)
 
@@ -1288,34 +1403,11 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[Geometry
             )
         )
 
-    if cfg.auto_letterbox_crop:
-        try:
-            max_target_height = min(int(plan["cropped_h"]) for plan in plans)
-        except ValueError:
-            max_target_height = None
-        offsets = _plan_letterbox_offsets(
-            plans,
-            mod=cfg.mod_crop,
-            max_target_height=max_target_height,
-        )
-        for plan, (extra_top, extra_bottom) in zip(plans, offsets, strict=True):
-            if not (extra_top or extra_bottom):
-                continue
-            left, top, right, bottom = plan["crop"]
-            top += int(extra_top)
-            bottom += int(extra_bottom)
-            new_height = int(plan["height"]) - top - bottom
-            if new_height <= 0:
-                raise ScreenshotGeometryError("Letterbox detection removed all pixels")
-            plan["crop"] = (left, top, right, bottom)
-            plan["cropped_h"] = new_height
-            logger.info(
-                "[LETTERBOX] Cropping %s px top / %s px bottom for width=%s height=%s",
-                extra_top,
-                extra_bottom,
-                plan["width"],
-                plan["height"],
-            )
+    mode = _resolve_auto_letterbox_mode(getattr(cfg, "auto_letterbox_crop", "off"))
+    if mode == AutoLetterboxCropMode.STRICT.value:
+        _apply_letterbox_crop_strict(plans, cfg)
+    elif mode == AutoLetterboxCropMode.BASIC.value:
+        _apply_letterbox_crop_basic(plans, cfg)
 
     if cfg.letterbox_pillarbox_aware:
         _align_letterbox_pillarbox(plans)
@@ -1617,7 +1709,7 @@ def _maybe_log_geometry_debug(plans: Sequence[GeometryPlan], cfg: ScreenshotConf
         bool(getattr(cfg, "upscale", False)),
         getattr(cfg, "single_res", 0),
         pad_mode,
-        bool(getattr(cfg, "auto_letterbox_crop", False)),
+        _resolve_auto_letterbox_mode(getattr(cfg, "auto_letterbox_crop", "off")),
         bool(getattr(cfg, "letterbox_pillarbox_aware", False)),
         getattr(cfg, "mod_crop", 0),
     )
