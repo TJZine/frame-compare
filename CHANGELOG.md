@@ -15,6 +15,7 @@
 * preserve MasteringDisplay*/ContentLightLevel* metadata when padding negative trims so HDR detection survives blank-prefix extension
 * pre-probe clip metadata so audio alignment derives frame counts and screenshots reuse cached HDR props without extra VapourSynth passes
 * refresh cached frame counts whenever audio alignment or VSPreview manual offsets shift trims so CLI summaries report the trimmed clip durations
+* reuse cached FPS metadata from the initial probe while measuring audio alignment so CLI and VSPreview frame deltas stay non-zero even when ffprobe omits `r_frame_rate`
 
 ## [0.0.2](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.1...frame-compare-v0.0.2) (2025-11-13)
 

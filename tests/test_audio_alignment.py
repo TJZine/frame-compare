@@ -272,3 +272,54 @@ def test_measure_offsets_wraps_onset_strength_failure(
     message = str(excinfo.value)
     assert "optional dependency" in message
     assert "dummy onset failure" in message
+
+
+def test_measure_offsets_prefers_cached_fps_hints(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """FPS hints supplied by the caller should bypass ffprobe and populate frame counts."""
+
+    reference = tmp_path / "ref.mp4"
+    target = tmp_path / "tgt.mp4"
+    for path in (reference, target):
+        path.write_bytes(b"0")
+
+    class _FakeAudioCtx:
+        def __enter__(self) -> Path:
+            return tmp_path / "dummy.wav"
+
+        def __exit__(self, exc_type, exc, tb) -> None:  # type: ignore[override]
+            return None
+
+    monkeypatch.setattr(aa, "ensure_external_tools", lambda: None)
+    monkeypatch.setattr(aa, "_temporary_audio", lambda *args, **kwargs: _FakeAudioCtx())
+    monkeypatch.setattr(aa, "_onset_envelope", lambda *args, **kwargs: ([0.1, 0.2, 0.3], 512))
+    monkeypatch.setattr(aa, "_cross_correlation", lambda *_args, **_kwargs: (11, 0.82))
+
+    def boom_probe(_path: Path) -> float:
+        raise AssertionError("fps probe should not run when hints are supplied")
+
+    monkeypatch.setattr(aa, "_probe_fps", boom_probe)
+
+    fps_hints = {
+        reference: (24000, 1001),
+        target: (60000, 1001),
+    }
+
+    measurements = aa.measure_offsets(
+        reference,
+        [target],
+        sample_rate=48000,
+        hop_length=512,
+        start_seconds=None,
+        duration_seconds=None,
+        fps_hints=fps_hints,
+    )
+
+    assert len(measurements) == 1
+    measurement = measurements[0]
+    seconds_per_onset = 512 / 48000
+    expected_seconds = 11 * seconds_per_onset
+    expected_target_fps = 60000 / 1001
+    assert measurement.target_fps == pytest.approx(expected_target_fps)
+    assert measurement.reference_fps == pytest.approx(24000 / 1001)
+    assert measurement.offset_seconds == pytest.approx(expected_seconds)
+    assert measurement.frames == int(round(expected_seconds * expected_target_fps))

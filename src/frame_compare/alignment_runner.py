@@ -82,6 +82,27 @@ def _str_list_factory() -> list[str]:
     return []
 
 
+def _plan_fps_map(plans: Sequence[ClipPlan]) -> dict[Path, tuple[int, int]]:
+    """Build a lookup with preferred FPS tuples for each plan."""
+
+    fps_map: dict[Path, tuple[int, int]] = {}
+    for plan in plans:
+        for candidate in (
+            plan.effective_fps,
+            plan.source_fps,
+            plan.applied_fps,
+            plan.fps_override,
+        ):
+            if candidate is None:
+                continue
+            _numerator, denominator = candidate
+            if not denominator:
+                continue
+            fps_map[plan.path] = candidate
+            break
+    return fps_map
+
+
 @dataclass
 class _AudioAlignmentSummary:
     """
@@ -223,6 +244,7 @@ def apply_audio_alignment(
     plan_labels: Dict[Path, str] = {plan.path: _plan_label(plan) for plan in plans}
     plan_lookup: Dict[str, ClipPlan] = {plan.path.name: plan for plan in plans}
     name_to_label: Dict[str, str] = {plan.path.name: plan_labels[plan.path] for plan in plans}
+    plan_fps_map = _plan_fps_map(plans)
 
     existing_entries_cache: tuple[str | None, Dict[str, Mapping[str, Any]]] | None = None
 
@@ -1210,6 +1232,7 @@ def apply_audio_alignment(
                 reference_stream=reference_stream_index,
                 target_streams=target_stream_indices,
                 progress_callback=_advance_audio,
+                fps_hints=plan_fps_map,
             )
 
         frame_bias = int(audio_cfg.frame_offset_bias or 0)
@@ -1244,6 +1267,11 @@ def apply_audio_alignment(
 
         for measurement in measurements:
             if measurement.frames is None:
+                if measurement.file not in plan_fps_map:
+                    logger.debug(
+                        "Audio alignment missing cached FPS for %s; deriving frames from seconds fallback",
+                        measurement.file.name,
+                    )
                 derived_frames = _estimate_frames_from_seconds(measurement, plan_lookup)
                 if derived_frames is not None:
                     measurement.frames = derived_frames

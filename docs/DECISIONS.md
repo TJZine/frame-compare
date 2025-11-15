@@ -45,6 +45,12 @@
       .................................                                        [100%]
       33 passed in 3.04s
       ```
+- *2025-11-15:* fix(audio): reuse cached FPS hints when measuring offsets.
+  - Problem: When ffprobe omitted `r_frame_rate`, `measure_offsets()` surfaced only seconds while summary/vspreview suggestions fell back to `0f`, even though we already captured usable FPS metadata during the initial probe.
+  - Decision: FFmpeg’s documentation notes that ffprobe surfaces stream metrics only when the container exposes them (source:https://ffmpeg.org/ffmpeg-all.html/index@2025-11-15T23:42:24Z), so we now build a per-plan FPS map (effective → source → applied → override), feed it into `audio_alignment.measure_offsets()`, and log whenever we must fall back to the seconds-based estimator so CLI/VSPreview immediately receive consistent frame deltas.
+  - Verification:
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest tests/test_audio_alignment.py::test_measure_offsets_prefers_cached_fps_hints tests/test_alignment_runner.py::test_plan_fps_map_prioritizes_available_metadata -q`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest tests/runner/test_audio_alignment_cli.py -k block_and_json -q`
 - *2025-11-15:* fix(tonemap): preserve HDR metadata for negative trims, honor CLI overrides under presets, and restore path-based color overrides.
   - Problem: Blank frames injected for negative trims lacked `_Transfer/_Primaries/_Matrix/_ColorRange` so HDR clips appeared SDR and skipped tonemapping; CLI tonemap overrides mutated config values but left `_provided_keys` untouched when presets were active, so libplacebo still read preset defaults; color overrides keyed by absolute/relative paths no longer matched because screenshot code now passed Path objects.
   - Decision: Snapshot the source props before padding and stamp those values onto the blank prefix so HDR detection continues to see the metadata, update CLI override handling to funnel conversions through a helper that also merges the overridden field names into `_provided_keys`, and coerce override lookup keys to `str(file_name)` before comparing so Path entries match again. Added regression tests covering HDR tonemap application with padding, CLI overrides overriding preset target_nits, and Path-based overrides.

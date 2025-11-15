@@ -20,7 +20,7 @@ from click.testing import CliRunner, Result
 import frame_compare
 import src.frame_compare.alignment_runner as alignment_runner_module
 import src.frame_compare.core as core_module
-from src.audio_alignment import AlignmentMeasurement, AudioStreamInfo
+from src.audio_alignment import AlignmentMeasurement, AudioStreamInfo, FpsHintMap
 from src.datatypes import (
     AnalysisConfig,
     AppConfig,
@@ -1891,7 +1891,32 @@ def test_audio_alignment_block_and_json(
         target_fps=None,
     )
 
-    _patch_audio_alignment(monkeypatch, "measure_offsets", lambda *args, **kwargs: [measurement])
+    captured_measure_kwargs: dict[str, object] = {}
+
+    def fake_measure(*args: object, **kwargs: object) -> list[AlignmentMeasurement]:
+        captured_measure_kwargs.update(kwargs)
+        fps_hints_obj = kwargs.get("fps_hints")
+        assert isinstance(fps_hints_obj, Mapping)
+        fps_hints = cast(FpsHintMap, fps_hints_obj)
+        cached_target_fps = fps_hints.get(target_path)
+        assert cached_target_fps is not None, "Expected cached FPS hint for target clip"
+        if isinstance(cached_target_fps, tuple):
+            fps_float = alignment_runner_module._fps_to_float(cached_target_fps)
+        else:
+            fps_float = float(cached_target_fps)
+        measurement.target_fps = fps_float
+        offset_seconds = float(measurement.offset_seconds or 0.0)
+        measurement.frames = int(round(offset_seconds * fps_float))
+        cached_ref_fps = fps_hints.get(reference_path)
+        if cached_ref_fps is not None:
+            measurement.reference_fps = (
+                alignment_runner_module._fps_to_float(cached_ref_fps)
+                if isinstance(cached_ref_fps, tuple)
+                else float(cached_ref_fps)
+            )
+        return [measurement]
+
+    _patch_audio_alignment(monkeypatch, "measure_offsets", fake_measure)
     _patch_audio_alignment(monkeypatch, "load_offsets", lambda *_args, **_kwargs: ({}, {}))
 
     def fake_update(
@@ -1926,6 +1951,10 @@ def test_audio_alignment_block_and_json(
 
     result: Result = runner.invoke(frame_compare.main, ["--no-color"], catch_exceptions=False)
     assert result.exit_code == 0
+    fps_hints = captured_measure_kwargs.get("fps_hints")
+    assert isinstance(fps_hints, Mapping)
+    assert reference_path in fps_hints
+    assert target_path in fps_hints
 
     output_lines: list[str] = result.output.splitlines()
     assert any("alignment.toml" in line for line in output_lines)
@@ -1946,6 +1975,8 @@ def test_audio_alignment_block_and_json(
     clip_key = "Clip B" if "Clip B" in offsets_sec_map else "Target"
     assert offsets_sec_map[clip_key] == pytest.approx(0.1)
     assert offsets_frames_map[clip_key] == 2
+    suggested_frames_map = _expect_mapping(audio_json.get("suggested_frames", {}))
+    assert suggested_frames_map.get(target_path.name) == 2
     assert audio_json["preview_paths"] == []
     assert audio_json["confirmed"] == "auto"
     offset_lines = audio_json.get("offset_lines")
