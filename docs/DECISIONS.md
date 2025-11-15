@@ -2,6 +2,18 @@
 
 # Decisions Log
 
+- *2025-11-15:* fix(audio): derive VSPreview frame hints and keep negative manual trims.
+  - Problem: Alignment summaries dropped negative `trim_start` overrides and emitted `0f` for suggested offsets whenever FPS metadata was missing, so the CLI/VSPreview overlay misreported `0f (~ -1.335s)` even when the measured seconds were non-zero.
+  - Decision: Added a shared `derive_frame_hint()` helper that converts the raw measurements into frame counts (falling back to “n/a” when no FPS exists), plumbed it through `alignment_runner`, `runner`, `vspreview.render_script()`, and the prompt helpers, and removed the zero-clamping logic so negative manual trims persist through summaries, manual maps, and CLI JSON. New regression tests cover the negative-trim path and the `n/a` suggestion rendering.
+  - Verification:
+    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+    - `.venv/bin/ruff check` → `All checks passed!`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/runner/test_audio_alignment_cli.py tests/test_vspreview.py` →
+      ```
+      .................................                                        [100%]
+      33 passed in 3.04s
+      ```
+
 - *2025-11-13:* chore(types): restored pyright strictness for `slowpics`, `analysis.cache_io`, and `cli_layout`.
   - Problem: `cli_layout.py` relied on `# pyright: standard` to hide Unknown-heavy template handling, and `slowpics.py` used loosely typed MultipartEncoder imports that failed strict mode whenever `requests-toolbelt` was optional, undermining the Part 1 typing guarantees for cache/selection code.
   - Decision: removed the downgrade, tightened MultipartEncoder typing with guarded imports and explicit Optional checks, validated every layout section/template/line/table entry before rendering, and exposed a renderer helper so progress columns no longer poke private attributes; cache modules already satisfied strict mode after the Part 1 snapshot refactor.

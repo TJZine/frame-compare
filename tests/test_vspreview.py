@@ -64,6 +64,22 @@ def test_render_script_includes_manual_trims(tmp_path: Path) -> None:
     assert "# Suggested delta +3f" in script
 
 
+def test_render_script_marks_missing_frame_hint(tmp_path: Path) -> None:
+    cfg = _make_config(tmp_path)
+    cfg.audio_alignment.use_vspreview = True
+
+    reference = _ClipPlan(path=tmp_path / "Ref.mkv", metadata={"label": "Ref"})
+    target = _ClipPlan(path=tmp_path / "Target.mkv", metadata={"label": "Target"})
+    plans = [reference, target]
+    summary = _make_summary(reference, target, tmp_path)
+    summary.suggested_frames = {}
+
+    script = vspreview_module.render_script(plans, summary, cfg, tmp_path)
+
+    assert "Suggested delta n/a" in script
+    assert "(None, 0.0)" in script
+
+
 def test_persist_vspreview_script_regenerates_filename(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """persist_script should avoid overwriting existing files with deterministic naming."""
 

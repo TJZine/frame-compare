@@ -34,6 +34,7 @@ import src.frame_compare.tmdb_workflow as tmdb_workflow
 import src.frame_compare.vspreview as vspreview_utils
 from src.datatypes import AppConfig
 from src.frame_compare import vs as vs_core
+from src.frame_compare.alignment_helpers import derive_frame_hint
 from src.frame_compare.analysis import (
     CacheLoadResult,
     SelectionDetail,
@@ -421,7 +422,7 @@ def run(request: RunRequest) -> RunResult:
         },
         "warnings": [],
         "vspreview_mode": vspreview_mode_value,
-        "suggested_frames": 0,
+        "suggested_frames": None,
         "suggested_seconds": 0.0,
         "vspreview_offer": None,
     }
@@ -444,7 +445,7 @@ def run(request: RunRequest) -> RunResult:
         "vspreview": {
             "mode": vspreview_mode_value,
             "mode_display": vspreview_mode_display,
-            "suggested_frames": 0,
+            "suggested_frames": None,
             "suggested_seconds": 0.0,
             "script_path": None,
             "script_command": "",
@@ -1027,7 +1028,7 @@ def run(request: RunRequest) -> RunResult:
         reference_label = clip_records[0]["label"]
 
     vspreview_target_plan: ClipPlan | None = None
-    vspreview_suggested_frames_value = 0
+    vspreview_suggested_frames_value: int | None = None
     vspreview_suggested_seconds_value = 0.0
     if alignment_summary is not None:
         for plan in plans:
@@ -1035,9 +1036,7 @@ def run(request: RunRequest) -> RunResult:
                 continue
             vspreview_target_plan = plan
             clip_key = plan.path.name
-            vspreview_suggested_frames_value = int(
-                alignment_summary.suggested_frames.get(clip_key, 0)
-            )
+            vspreview_suggested_frames_value = derive_frame_hint(alignment_summary, clip_key)
             detail = alignment_summary.measured_offsets.get(clip_key)
             if detail and detail.offset_seconds is not None:
                 vspreview_suggested_seconds_value = float(detail.offset_seconds)

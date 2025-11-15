@@ -530,7 +530,7 @@ def test_run_cli_reuses_vspreview_manual_offsets_when_alignment_disabled(
     analysis_json = _expect_mapping(result.json_tail["analysis"])
     assert analysis_json["cache_reused"] is True
     assert result.json_tail["vspreview_mode"] == "baseline"
-    assert result.json_tail["suggested_frames"] == 0
+    assert result.json_tail["suggested_frames"] is None
     assert result.json_tail["suggested_seconds"] == 0.0
 
 
@@ -831,7 +831,7 @@ def test_launch_vspreview_generates_script(
         "def _format_overlay_text(label, suggested_frames, suggested_seconds, applied_frames):"
         in script_text
     )
-    assert '"{label}: {suggested}f (~{seconds}s) • "' in script_text
+    assert '"{label}: {suggested} (~{seconds}s) • "' in script_text
     assert "Preview applied: {applied}f ({status})" in script_text
     assert "preview applied=%+df" in script_text
     assert recorded_command, "VSPreview command should be invoked when interactive"
@@ -1161,6 +1161,65 @@ def test_format_alignment_output_updates_json_tail(tmp_path: Path) -> None:
     assert offsets_frames.get("Target") == 3
     assert audio_block.get("suggestion_mode") is False
     assert collected_warnings == display.warnings
+
+
+def test_format_alignment_output_preserves_negative_manual_trim(tmp_path: Path) -> None:
+    cfg = _make_config(tmp_path)
+    cfg.audio_alignment.enable = True
+
+    reference_plan = _ClipPlan(path=tmp_path / "Ref.mkv", metadata={"label": "Reference"})
+    target_plan = _ClipPlan(path=tmp_path / "Target.mkv", metadata={"label": "Target"})
+    plans = [reference_plan, target_plan]
+
+    summary = _AudioAlignmentSummary(
+        offsets_path=tmp_path / "offsets.json",
+        reference_name=reference_plan.path.name,
+        measurements=tuple(),
+        applied_frames={},
+        baseline_shift=0,
+        statuses={},
+        reference_plan=reference_plan,
+        final_adjustments={},
+        swap_details={},
+        suggested_frames={},
+        suggestion_mode=False,
+        manual_trim_starts={target_plan.path.name: -6},
+    )
+
+    display = _AudioAlignmentDisplayData(
+        stream_lines=[],
+        estimation_line=None,
+        offset_lines=[],
+        offsets_file_line=f"Offsets file: {tmp_path / 'offsets.json'}",
+        json_reference_stream=None,
+        json_target_streams={},
+        json_offsets_sec={},
+        json_offsets_frames={},
+        warnings=[],
+        manual_trim_lines=[f"Existing manual trim: {target_plan.metadata['label']} → -6f"],
+    )
+
+    reporter = NullCliOutputManager(quiet=True, verbose=False, no_color=True)
+    json_tail = _make_json_tail_stub()
+
+    alignment_runner_module.format_alignment_output(
+        plans,
+        summary,
+        display,
+        cfg=cfg,
+        root=tmp_path,
+        reporter=reporter,
+        json_tail=json_tail,
+        vspreview_mode="baseline",
+        collected_warnings=None,
+    )
+
+    assert json_tail["suggested_frames"] is None
+    audio_block = json_tail["audio_alignment"]
+    manual_summary = audio_block.get("manual_trim_summary", [])
+    assert manual_summary == display.manual_trim_lines
+    manual_map = audio_block.get("manual_trim_starts", {})
+    assert manual_map[target_plan.path.name] == -6
 
 def test_vspreview_manual_offsets_positive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
