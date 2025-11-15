@@ -1595,7 +1595,66 @@ def _plan_geometry(clips: Sequence[Any], cfg: ScreenshotConfig) -> List[Geometry
         else:
             plan["promotion_axes"] = "none"
 
+    _maybe_log_geometry_debug(plans, cfg)
     return plans
+
+
+def _maybe_log_geometry_debug(plans: Sequence[GeometryPlan], cfg: ScreenshotConfig) -> None:
+    """Emit per-plan geometry diagnostics when FRAME_COMPARE_DEBUG_GEOMETRY is set."""
+
+    if not os.environ.get("FRAME_COMPARE_DEBUG_GEOMETRY"):
+        return
+
+    try:
+        pad_mode = str(getattr(cfg, "pad_to_canvas", "off")).strip().lower()
+    except Exception:
+        pad_mode = "?"
+
+    logger.info(
+        "[GEOMETRY DEBUG] clips=%s upscale=%s single_res=%s pad=%s "
+        "auto_letterbox=%s pillarbox_aware=%s mod_crop=%s",
+        len(plans),
+        bool(getattr(cfg, "upscale", False)),
+        getattr(cfg, "single_res", 0),
+        pad_mode,
+        bool(getattr(cfg, "auto_letterbox_crop", False)),
+        bool(getattr(cfg, "letterbox_pillarbox_aware", False)),
+        getattr(cfg, "mod_crop", 0),
+    )
+
+    for idx, plan in enumerate(plans):
+        try:
+            width = int(plan["width"])
+            height = int(plan["height"])
+            crop = tuple(plan["crop"])
+            cropped_w = int(plan["cropped_w"])
+            cropped_h = int(plan["cropped_h"])
+            scaled_w, scaled_h = plan["scaled"]
+            pad = tuple(plan["pad"])
+            final_w, final_h = plan["final"]
+        except Exception as exc:  # pragma: no cover - defensive logging path
+            logger.info(
+                "[GEOMETRY DEBUG] idx=%s error=%s plan=%r",
+                idx,
+                exc,
+                plan,
+            )
+            continue
+
+        logger.info(
+            "[GEOMETRY DEBUG] idx=%s src=%dx%d crop=%s cropped=%dx%d scaled=%dx%d pad=%s final=%dx%d",
+            idx,
+            width,
+            height,
+            crop,
+            cropped_w,
+            cropped_h,
+            int(scaled_w),
+            int(scaled_h),
+            pad,
+            int(final_w),
+            int(final_h),
+        )
 
 
 def _sanitise_label(label: str) -> str:
