@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.0.5](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.4...frame-compare-v0.0.5) (2025-11-16)
+
+
+### Features
+
+* add auto letterbox crop modes and docs ([e803098](https://github.com/TJZine/frame-compare/commit/e8030987322d9865c6cdc001c52f428b19e2d933))
+
+
+### Bug Fixes
+
+* add geometry debug info ([7c6ccae](https://github.com/TJZine/frame-compare/commit/7c6ccae2f6490f008d0369083dc013e85f8803e7))
+* audio alignment, clip metadata, and tonemapping bug fixes ([64ab9d7](https://github.com/TJZine/frame-compare/commit/64ab9d70a69391ed1029e8c3301c9371d7e421be))
+* **audio:** reuse cached FPS for alignment offsets ([9cafde7](https://github.com/TJZine/frame-compare/commit/9cafde7f428d03b2e66769967ffced42d5d682fb))
+* normalize letterbox telemetry and cached fps tests ([048cf6b](https://github.com/TJZine/frame-compare/commit/048cf6b6f62f296bb08d1b954aa578425ba90140))
+* pre-probe clip metadata for alignment and tonemapping ([ce830ed](https://github.com/TJZine/frame-compare/commit/ce830edd5d112c49ee4b806c411b6da2d57b7a4d))
+
+
+### Documentation
+
+* update changelog ([f10e096](https://github.com/TJZine/frame-compare/commit/f10e096e20e8c72037373d8391d786f542865bbb))
+* update config tables ([7155879](https://github.com/TJZine/frame-compare/commit/71558791bfa01ac6731c6fc883807819b0367dfa))
+
 ## [0.0.4](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.3...frame-compare-v0.0.4) (2025-11-15)
 
 
