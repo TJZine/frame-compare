@@ -23,6 +23,7 @@
 
 ### Bug Fixes
 
+* keep release-please commits passing commitlint by forcing `chore(ci): release…` pull-request titles
 * normalize runner auto letterbox telemetry, document accepted crop inputs, tighten FPS map ordering/logging, and extend cached FPS/metadata tests for probe reuse
 * hydrate cached `suggested_frames`/`suggested_seconds` when reusing offsets files so CLI+VSPreview keep prior recommendations
 * restore audio offset hints in CLI/VSPreview when FPS metadata is missing and preserve negative manual trims across summaries/manual prompts

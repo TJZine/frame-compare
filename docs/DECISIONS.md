@@ -637,3 +637,7 @@
       ..........                                                               [100%]
       82 passed in 0.17s
       ```
+- *2025-11-16:* chore(ci): align release-please scope with commitlint policy.
+  - Problem: release PR merges were titled `chore(main): release …` because release-please injects `${scope}` from the target branch name in its default pattern, and `main` is not in our allowed `scope-enum`, so commitlint failed on every release branch check.
+  - Decision: Set `pull-request-title-pattern` to `chore(ci): release${component} ${version}` in `.github/release-please-config.json`, forcing a `ci` scope that’s already permitted while keeping the rest of the template intact per the customization guidance (source:https://github.com/googleapis/release-please/blob/main/docs/customizing.md@2025-11-16T03:28:42Z).
+  - Verification: N/A (configuration-only change).
