@@ -65,6 +65,11 @@ def test_probe_clip_metadata_populates_fps_and_props(monkeypatch: pytest.MonkeyP
 
     assert ram_limits == [runtime.ram_limit_mb]
     assert len(init_calls) == len(plans)
+    assert init_calls == [
+        ("Reference.mkv", None),
+        ("TargetA.mkv", (24000, 1001)),
+        ("TargetB.mkv", (30000, 1001)),
+    ]
 
     reference_plan = plans[0]
     assert reference_plan.effective_fps == (24000, 1001)
@@ -87,8 +92,10 @@ def test_probe_clip_metadata_populates_fps_and_props(monkeypatch: pytest.MonkeyP
     assert override_plan.source_frame_props == props_by_name["TargetB.mkv"]
     ref_props = reference_plan.source_frame_props
     assert ref_props is not None
-    assert target_plan.source_frame_props is not None
-    assert override_plan.source_frame_props is not None
+    target_props = target_plan.source_frame_props
+    override_props = override_plan.source_frame_props
+    assert target_props is not None
+    assert override_props is not None
 
     # Mutate the stored props to confirm the capture helper honours existing dictionaries.
     ref_props["sentinel"] = True
@@ -100,3 +107,7 @@ def test_probe_clip_metadata_populates_fps_and_props(monkeypatch: pytest.MonkeyP
     assert len(init_calls) == len(plans) * 2
     assert ref_props["sentinel"] is True
     assert ref_props["_Matrix"] == 9
+    assert target_plan.source_frame_props is target_props
+    assert target_plan.source_frame_props == props_by_name["TargetA.mkv"]
+    assert override_plan.source_frame_props is override_props
+    assert override_plan.source_frame_props == props_by_name["TargetB.mkv"]

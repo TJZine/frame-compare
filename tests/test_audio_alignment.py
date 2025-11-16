@@ -294,10 +294,14 @@ def test_measure_offsets_prefers_cached_fps_hints(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(aa, "_onset_envelope", lambda *args, **kwargs: ([0.1, 0.2, 0.3], 512))
     monkeypatch.setattr(aa, "_cross_correlation", lambda *_args, **_kwargs: (11, 0.82))
 
-    def boom_probe(_path: Path) -> float:
-        raise AssertionError("fps probe should not run when hints are supplied")
+    probe_called = False
 
-    monkeypatch.setattr(aa, "_probe_fps", boom_probe)
+    def record_probe(_path: Path) -> float:
+        nonlocal probe_called
+        probe_called = True
+        return 24.0
+
+    monkeypatch.setattr(aa, "_probe_fps", record_probe)
 
     fps_hints = {
         reference: (24000, 1001),
@@ -323,3 +327,5 @@ def test_measure_offsets_prefers_cached_fps_hints(monkeypatch: pytest.MonkeyPatc
     assert measurement.reference_fps == pytest.approx(24000 / 1001)
     assert measurement.offset_seconds == pytest.approx(expected_seconds)
     assert measurement.frames == int(round(expected_seconds * expected_target_fps))
+    assert measurement.correlation == pytest.approx(0.82)
+    assert probe_called is False

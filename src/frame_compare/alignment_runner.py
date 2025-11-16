@@ -89,14 +89,14 @@ def _plan_fps_map(plans: Sequence[ClipPlan]) -> dict[Path, tuple[int, int]]:
     for plan in plans:
         for candidate in (
             plan.effective_fps,
-            plan.source_fps,
             plan.applied_fps,
+            plan.source_fps,
             plan.fps_override,
         ):
             if candidate is None:
                 continue
-            _numerator, denominator = candidate
-            if not denominator:
+            numerator, denominator = candidate
+            if numerator <= 0 or denominator <= 0:
                 continue
             fps_map[plan.path] = candidate
             break
@@ -1268,9 +1268,11 @@ def apply_audio_alignment(
         for measurement in measurements:
             if measurement.frames is None:
                 if measurement.file not in plan_fps_map:
+                    label = name_to_label.get(measurement.file.name, measurement.file.name)
                     logger.debug(
-                        "Audio alignment missing cached FPS for %s; deriving frames from seconds fallback",
+                        "Audio alignment missing cached FPS for %s (%s); deriving frames from seconds fallback",
                         measurement.file.name,
+                        label,
                     )
                 derived_frames = _estimate_frames_from_seconds(measurement, plan_lookup)
                 if derived_frames is not None:

@@ -111,6 +111,7 @@ def test_plan_fps_map_prioritizes_available_metadata(tmp_path: Path) -> None:
     plan_c = _ClipPlan(path=tmp_path / "C.mkv", metadata={})
     plan_d = _ClipPlan(path=tmp_path / "D.mkv", metadata={})
     plan_e = _ClipPlan(path=tmp_path / "E.mkv", metadata={})
+    plan_f = _ClipPlan(path=tmp_path / "F.mkv", metadata={})
 
     plan_a.effective_fps = (24000, 1001)
     plan_a.source_fps = (1, 0)  # invalid, should be ignored
@@ -119,11 +120,13 @@ def test_plan_fps_map_prioritizes_available_metadata(tmp_path: Path) -> None:
     plan_c.applied_fps = (25, 1)
     plan_c.fps_override = (26, 1)
     plan_d.fps_override = (27, 1)
-    plan_e.fps_override = (48, 0)  # invalid, should be skipped entirely
+    plan_e.fps_override = (48, 0)  # invalid denominator, should be skipped entirely
+    plan_f.fps_override = (0, 1000)  # invalid numerator, should be skipped entirely
 
-    fps_map = alignment_runner_module._plan_fps_map([plan_a, plan_b, plan_c, plan_d, plan_e])
+    fps_map = alignment_runner_module._plan_fps_map([plan_a, plan_b, plan_c, plan_d, plan_e, plan_f])
     assert fps_map[plan_a.path] == (24000, 1001)
-    assert fps_map[plan_b.path] == (30000, 1001)
+    assert fps_map[plan_b.path] == (24, 1)
     assert fps_map[plan_c.path] == (25, 1)
     assert fps_map[plan_d.path] == (27, 1)
     assert plan_e.path not in fps_map
+    assert plan_f.path not in fps_map

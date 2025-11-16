@@ -62,3 +62,13 @@ confirm that odd-geometry cases are handled intentionally. Duplicate pivot
 messages within a single CLI run are suppressed after the first emission so the
 console highlights each pivot scenario once even if the renderer retries the
 same frame set.
+
+## Auto letterbox heuristics
+
+When `[screenshots].auto_letterbox_crop` is enabled the planner gathers the post-geometry width/height for every clip,
+derives a target aspect ratio from the widest entry, and treats narrower clips as potential letterbox sources. Any
+vertical trim computed from that ratio is clamped so the resulting active height never exceeds the shortest clip in the
+set—strict mode applies this directly to the source dimensions while basic mode runs the comparison against
+post-aligned cropped geometry and only trims when it detects obvious bars. This dual-baseline approach means the widest
+clip defines the ratio, whereas the shortest clip defines the maximum allowable height after trimming, keeping the
+behaviour consistent with the legacy implementation while preventing excessive removal in mixed-scope comparisons.

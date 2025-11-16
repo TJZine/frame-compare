@@ -1242,6 +1242,9 @@ def _resolve_auto_letterbox_mode(value: object) -> str:
 def _apply_letterbox_crop_strict(plans: list[GeometryPlan], cfg: ScreenshotConfig) -> None:
     """Apply the legacy auto letterbox heuristic to the supplied plans."""
 
+    # Clamp auto-letterbox targets to the shortest active height across clips.
+    # This keeps all clips from retaining more vertical content than the smallest
+    # member of the set and matches the legacy behaviour before multi-mode support.
     try:
         max_target_height = min(int(plan["cropped_h"]) for plan in plans)
     except ValueError:
@@ -1298,6 +1301,8 @@ def _apply_letterbox_crop_basic(plans: list[GeometryPlan], cfg: ScreenshotConfig
         plan["width"] = int(plan["cropped_w"])
         plan["height"] = int(plan["cropped_h"])
 
+    # BASIC mode also clamps to the shortest effective (cropped) height so we
+    # don't over-normalise taller clips beyond what the smallest one can support.
     try:
         max_target_height = min(int(entry["cropped_h"]) for entry in synthetic)
     except ValueError:

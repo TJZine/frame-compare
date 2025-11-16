@@ -13,6 +13,7 @@ from collections import Counter
 from collections.abc import Mapping as MappingABC
 from contextlib import ExitStack
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, cast
@@ -1406,6 +1407,11 @@ def run(request: RunRequest) -> RunResult:
 
     writer_name = "ffmpeg" if cfg.screenshots.use_ffmpeg else "vs"
     overlay_mode_value = getattr(cfg.color, "overlay_mode", "minimal")
+    auto_letterbox_raw = getattr(cfg.screenshots, "auto_letterbox_crop", "off")
+    if isinstance(auto_letterbox_raw, Enum):
+        auto_letterbox_value = auto_letterbox_raw.value
+    else:
+        auto_letterbox_value = str(auto_letterbox_raw)
 
     json_tail["render"] = {
         "writer": writer_name,
@@ -1415,7 +1421,7 @@ def run(request: RunRequest) -> RunResult:
         "upscale": bool(cfg.screenshots.upscale),
         "mod_crop": int(cfg.screenshots.mod_crop),
         "letterbox_pillarbox_aware": bool(cfg.screenshots.letterbox_pillarbox_aware),
-        "auto_letterbox_mode": str(getattr(cfg.screenshots, "auto_letterbox_crop", "off")),
+        "auto_letterbox_mode": auto_letterbox_value,
         "pad_to_canvas": cfg.screenshots.pad_to_canvas,
         "center_pad": bool(cfg.screenshots.center_pad),
         "letterbox_px_tolerance": int(cfg.screenshots.letterbox_px_tolerance),

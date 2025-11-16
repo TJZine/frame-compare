@@ -8,6 +8,7 @@
 
 ### Bug Fixes
 
+* normalize runner auto letterbox telemetry, document accepted crop inputs, tighten FPS map ordering/logging, and extend cached FPS/metadata tests for probe reuse
 * hydrate cached `suggested_frames`/`suggested_seconds` when reusing offsets files so CLI+VSPreview keep prior recommendations
 * restore audio offset hints in CLI/VSPreview when FPS metadata is missing and preserve negative manual trims across summaries/manual prompts
 * preserve HDR tonemapping for negative trims, honor CLI tonemap overrides even under presets, and restore path-based `color_overrides` matching
