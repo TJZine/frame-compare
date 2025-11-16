@@ -70,7 +70,7 @@
 | `[screenshots].single_res` | int | `0` |
 | `[screenshots].mod_crop` | int | `2` |
 | `[screenshots].letterbox_pillarbox_aware` | bool | `true` |
-| `[screenshots].auto_letterbox_crop` | bool | `false` |
+| `[screenshots].auto_letterbox_crop` | str ("off"|"basic"|"strict")|str|bool | `"off"` |
 | `[screenshots].pad_to_canvas` | str | `"off"` |
 | `[screenshots].letterbox_px_tolerance` | int | `8` |
 | `[screenshots].center_pad` | bool | `true` |

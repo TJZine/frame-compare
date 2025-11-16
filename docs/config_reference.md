@@ -15,6 +15,22 @@ trade-offs.
 
 The policy has no effect on HDR content (the HDR→SDR pipeline continues to run in high-bit-depth RGB).
 
+## `[screenshots].auto_letterbox_crop`
+
+Accepted inputs are `"off"`, `"basic"`, `"strict"`, or booleans (`true`/`false`), and the planner treats them
+case-insensitively (booleans still coerce to `"off"`/`"strict"` during config loading). The planner derives a target
+aspect ratio from the widest clip in the set and treats narrower clips as candidates for letterbox removal. When it
+trims vertical bars to approximate that ratio, the total removal is clamped so the resulting active height never exceeds
+the shortest clip’s cropped height—no clip is allowed to keep more vertical content than the smallest member. The
+planner normalises every value to one of these strings before rendering and surfaces the resolved mode in the CLI JSON
+tail for quick audits.
+
+- `"off"`: preserve bars exactly as provided.
+- `"basic"`: reuse the post-aligned cropped width/height when running the ratio heuristic and only trim when at least one
+  clip clearly has bars, keeping the clamp conservative.
+- `"strict"`: apply the legacy aggressive heuristic to the raw source dimensions so every narrower clip is trimmed toward
+  the widest ratio, still respecting the shortest-height clamp to avoid over-removal.
+
 ## `[screenshots].rgb_dither`
 
 Controls how the final 16-bit frame is quantised to RGB24.

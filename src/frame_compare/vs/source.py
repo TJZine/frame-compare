@@ -325,12 +325,15 @@ def init_clip(
     core: Optional[Any] = None,
     indexing_notifier: Optional[Callable[[str], None]] = None,
     frame_props_sink: Optional[Callable[[Mapping[str, Any]], None]] = None,
+    source_frame_props_hint: Mapping[str, Any] | None = None,
 ) -> Any:
     """
     Initialise a VapourSynth clip for subsequent processing and optionally snapshot source frame props.
 
     When ``frame_props_sink`` is provided it will be invoked exactly once with a dictionary of frame
     properties captured before any trims or padding are applied so callers can persist HDR metadata.
+    ``source_frame_props_hint`` allows callers to reuse previously captured props (for example from an
+    earlier metadata probe) to avoid repeated frame snapshots.
     """
 
     resolved_core = _resolve_core(core)
@@ -355,7 +358,10 @@ def init_clip(
         raise ClipInitError(f"Failed to open clip '{path}': {exc}") from exc
 
     try:
-        source_frame_props = dict(_snapshot_frame_props(clip))
+        if source_frame_props_hint:
+            source_frame_props = dict(source_frame_props_hint)
+        else:
+            source_frame_props = dict(_snapshot_frame_props(clip))
     except Exception:
         source_frame_props = {}
     if frame_props_sink is not None:

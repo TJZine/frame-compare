@@ -188,6 +188,32 @@ preferred = "ffms2"
     assert app.cli.progress.style == "dot"
 
 
+@pytest.mark.parametrize(
+    ("value_snippet", "expected"),
+    [
+        ("true", "strict"),
+        ("false", "off"),
+        ("\"basic\"", "basic"),
+        ("\"STRICT\"", "strict"),
+        ("\"Off\"", "off"),
+    ],
+)
+def test_auto_letterbox_crop_normalisation(
+    tmp_path: Path, value_snippet: str, expected: str
+) -> None:
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text(f"[screenshots]\nauto_letterbox_crop = {value_snippet}\n", encoding="utf-8")
+    app = load_config(str(cfg_path))
+    assert app.screenshots.auto_letterbox_crop == expected
+
+
+def test_auto_letterbox_crop_invalid_value(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text("[screenshots]\nauto_letterbox_crop = \"aggressive\"\n", encoding="utf-8")
+    with pytest.raises(ConfigError):
+        load_config(str(cfg_path))
+
+
 def test_dynamic_peak_detection_override_disables_dpd_fields(tmp_path: Path) -> None:
     cfg_path = tmp_path / "config.toml.template"
     cfg_path.write_text(

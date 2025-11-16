@@ -607,6 +607,7 @@ def test_generate_screenshots_rehydrates_hdr_props_from_plans(tmp_path: Path, mo
         **kwargs: Any,
     ) -> types.SimpleNamespace:
         assert stored_source_props == stored_props
+        captured["processed_source_props"] = stored_source_props
         tonemap_info = vs_core.TonemapInfo(
             applied=True,
             tone_curve="bt.2390",
@@ -664,6 +665,7 @@ def test_generate_screenshots_rehydrates_hdr_props_from_plans(tmp_path: Path, mo
     assert created
     assert captured["overlay_text"] is not None
     assert "MDL" in captured["overlay_text"]
+    assert captured["processed_source_props"] == stored_props
 
 
 def test_plan_geometry_subsamp_safe_rebalance_aligns_modulus() -> None:
@@ -1311,6 +1313,51 @@ def test_auto_letterbox_crop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     assert captured[0]["pad"] == (0, 0, 0, 0)
     assert captured[1]["scaled"] == (3832, 1384)
     assert captured[1]["pad"] == (0, 0, 0, 0)
+
+
+def test_auto_letterbox_basic_avoids_weird_scope_pair() -> None:
+    clips = [FakeClip(3840, 2160), FakeClip(3600, 2160)]
+    cfg = ScreenshotConfig(
+        upscale=True,
+        use_ffmpeg=False,
+        add_frame_info=False,
+        mod_crop=2,
+        letterbox_pillarbox_aware=True,
+        auto_letterbox_crop="basic",
+    )
+
+    plans = screenshot._plan_geometry(clips, cfg)
+    assert len(plans) == 2
+
+    wider, narrower = plans
+    assert wider["cropped_w"] == 3600
+    assert sum(wider["crop"][::2]) == 240
+    assert wider["crop"][1] == 0 and wider["crop"][3] == 0
+    assert narrower["crop"][1] == 0 and narrower["crop"][3] == 0
+    assert wider["cropped_h"] == 2160
+    assert narrower["cropped_h"] == 2160
+    assert wider["final"] == narrower["final"]
+
+
+def test_auto_letterbox_strict_preserves_legacy_scope_behavior() -> None:
+    clips = [FakeClip(3840, 2160), FakeClip(3600, 2160)]
+    cfg = ScreenshotConfig(
+        upscale=True,
+        use_ffmpeg=False,
+        add_frame_info=False,
+        mod_crop=2,
+        letterbox_pillarbox_aware=True,
+        auto_letterbox_crop="strict",
+    )
+
+    plans = screenshot._plan_geometry(clips, cfg)
+    assert len(plans) == 2
+
+    wider, narrower = plans
+    assert wider["crop"] == (120, 0, 120, 0)
+    assert wider["cropped_w"] == 3600
+    assert narrower["crop"][1] > 0 or narrower["crop"][3] > 0
+    assert narrower["cropped_h"] < 2160
 
 
 def test_pad_to_canvas_auto_handles_micro_bars(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

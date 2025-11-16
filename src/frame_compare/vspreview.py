@@ -611,6 +611,7 @@ def apply_manual_offsets(
         desired_value = desired_map[key]
         updated_int = int(desired_value)
         plan.trim_start = updated_int
+        plan.source_num_frames = None
         plan.has_trim_start_override = (
             plan.has_trim_start_override or updated_int != 0
         )
@@ -627,6 +628,7 @@ def apply_manual_offsets(
     adjusted_reference = desired_map[reference_name]
     adjusted_reference_int = int(adjusted_reference)
     reference_plan.trim_start = adjusted_reference_int
+    reference_plan.source_num_frames = None
     reference_plan.has_trim_start_override = (
         reference_plan.has_trim_start_override
         or adjusted_reference_int != int(reference_baseline)

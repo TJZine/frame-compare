@@ -20,6 +20,8 @@ from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Seque
 from src.frame_compare import subproc as _subproc
 
 logger = logging.getLogger(__name__)
+FpsHint = float | tuple[int, int]
+FpsHintMap = Mapping[Path, FpsHint]
 
 
 def _to_int(value: object, default: int = 0) -> int:
@@ -377,6 +379,27 @@ def _probe_fps(infile: Path) -> Optional[float]:
         return None
 
 
+def _normalize_fps_hint(value: FpsHint | None) -> Optional[float]:
+    """Convert a cached FPS hint into a usable float."""
+
+    if value is None:
+        return None
+    if isinstance(value, tuple):
+        if len(value) != 2:
+            return None
+        numerator, denominator = value
+        if not denominator:
+            return None
+        return float(numerator) / float(denominator)
+    try:
+        fps_value = float(value)
+    except (TypeError, ValueError):
+        return None
+    if fps_value <= 0 or math.isnan(fps_value):
+        return None
+    return fps_value
+
+
 def measure_offsets(
     reference: Path,
     targets: Sequence[Path],
@@ -389,9 +412,20 @@ def measure_offsets(
     target_streams: Mapping[Path, int] | None = None,
     window_overrides: Mapping[Path, Tuple[Optional[float], Optional[float]]] | None = None,
     progress_callback: Callable[[int], None] | None = None,
+    fps_hints: FpsHintMap | None = None,
 ) -> List[AlignmentMeasurement]:
-    """Estimate relative audio offsets for *targets* against *reference*."""
+    """
+    Estimate relative audio offsets for *targets* against *reference*.
+
+    Cached FPS hints take precedence whenever provided; otherwise `_probe_fps()` is used.
+    """
     ensure_external_tools()
+
+    def _resolve_fps(path: Path) -> Optional[float]:
+        hint = _normalize_fps_hint(fps_hints.get(path)) if fps_hints is not None else None
+        if hint is not None:
+            return hint
+        return _probe_fps(path)
 
     ref_env: Optional[Any] = None
     hop: int
@@ -408,10 +442,10 @@ def measure_offsets(
         raise AudioAlignmentError(f"Failed to compute onset envelope for {reference.name}")
 
     results: List[AlignmentMeasurement] = []
-    reference_fps = _probe_fps(reference)
+    reference_fps = _resolve_fps(reference)
 
     for target in targets:
-        target_fps = _probe_fps(target)
+        target_fps = _resolve_fps(target)
         try:
             stream_idx = 0
             if target_streams is not None:

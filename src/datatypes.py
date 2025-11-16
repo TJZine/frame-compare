@@ -34,6 +34,14 @@ class AnalysisThresholdMode(str, Enum):
     FIXED_RANGE = "fixed_range"
 
 
+class AutoLetterboxCropMode(str, Enum):
+    """Auto letterbox cropping heuristics used during screenshot planning."""
+
+    OFF = "off"
+    BASIC = "basic"
+    STRICT = "strict"
+
+
 @dataclass
 class AnalysisThresholds:
     """Configuration values for dark/bright frame detection."""
@@ -85,7 +93,7 @@ class ScreenshotConfig:
     single_res: int = 0
     mod_crop: int = 2
     letterbox_pillarbox_aware: bool = True
-    auto_letterbox_crop: bool = False
+    auto_letterbox_crop: AutoLetterboxCropMode | str | bool = "off"
     pad_to_canvas: str = "off"
     letterbox_px_tolerance: int = 8
     center_pad: bool = True

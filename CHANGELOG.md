@@ -23,11 +23,16 @@
 
 ### Bug Fixes
 
+* keep release-please commits passing commitlint by forcing `chore(ci): release…` pull-request titles
+* normalize runner auto letterbox telemetry, document accepted crop inputs, tighten FPS map ordering/logging, and extend cached FPS/metadata tests for probe reuse
 * hydrate cached `suggested_frames`/`suggested_seconds` when reusing offsets files so CLI+VSPreview keep prior recommendations
 * restore audio offset hints in CLI/VSPreview when FPS metadata is missing and preserve negative manual trims across summaries/manual prompts
 * preserve HDR tonemapping for negative trims, honor CLI tonemap overrides even under presets, and restore path-based `color_overrides` matching
 * detect HDR clips when only one of `_Primaries`/`_Transfer` or MDL/CLL props are present and backfill BT.2020/ST2084 defaults so libplacebo receives primaries/matrix hints before tonemapping
 * preserve MasteringDisplay*/ContentLightLevel* metadata when padding negative trims so HDR detection survives blank-prefix extension
+* pre-probe clip metadata so audio alignment derives frame counts and screenshots reuse cached HDR props without extra VapourSynth passes
+* refresh cached frame counts whenever audio alignment or VSPreview manual offsets shift trims so CLI summaries report the trimmed clip durations
+* reuse cached FPS metadata from the initial probe while measuring audio alignment so CLI and VSPreview frame deltas stay non-zero even when ffprobe omits `r_frame_rate`
 
 ## [0.0.2](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.1...frame-compare-v0.0.2) (2025-11-13)
 
