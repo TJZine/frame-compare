@@ -1,7 +1,5 @@
 # Changelog
 
-## [Unreleased]
-
 ### Features
 
 * add explicit `auto_letterbox_crop` modes (`off`/`basic`/`strict`), normalise legacy booleans during config load, and expose the resolved mode in the geometry planner and CLI JSON tail
