@@ -344,6 +344,7 @@ def _tonemap_with_retries(
 
 
 _TONEMAP_PRESETS: Dict[str, Dict[str, float | str | bool]] = {
+    # NOTE: Keep these defaults in sync with the preset matrix in src/data/config.toml.template.
     "reference": {
         "tone_curve": "bt.2390",
         "target_nits": 100.0,

@@ -1,5 +1,13 @@
 # Decisions Log
 
+- *2025-11-16:* feat(tonemap): preserve preset semantics and document preset defaults.
+  - Problem: Color presets never applied when configs stored template-aligned values because `_sanitize_section()` recorded every raw key as "provided", blocking `_resolve_tonemap_settings()` from sourcing preset defaults. Users also had no reference chart tying presets to actual luminance/smoothing targets, making manual tweaks guesswork.
+  - Decision: Compare loader inputs against dataclass defaults (per CPython dataclass guidance, [source](https://github.com/python/cpython/blob/v3.11.14/Doc/library/dataclasses.rst) @ 2025-11-16T21:34:48Z) so `_provided_keys` only tracks genuine overrides, add regression tests spanning loader + VapourSynth tonemap resolution, annotate `_TONEMAP_PRESETS`, and mirror a preset matrix plus inline per-field comments in `src/data/config.toml.template`.
+  - Verification:
+    - `.venv/Scripts/pyright.exe --warnings`
+    - `.venv/Scripts/ruff.exe check`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/Scripts/pytest.exe -q tests/test_config_loader.py tests/test_vs_core.py tests/runner/test_cli_entry.py tests/test_screenshot.py`
+
 - *2025-11-16:* fix(runner): normalize auto-letterbox telemetry, cached FPS fallbacks, and metadata tests.
   - Problem: `docs/DECISIONS.md` still used bare `source:` notes, operators could not see accepted `auto_letterbox_crop` values without trawling history, the runner serialized enum representations into JSON when configs used `AutoLetterboxCropMode`, and `_plan_fps_map()` prioritized `source_fps` before `applied_fps`/`fps_override` so cached hints diverged from `_estimate_frames_from_seconds()`. Missing FPS cache entries also logged only filenames, while the audio-alignment tests skipped asserting correlation strength, `_probe_fps()` avoidance, and metadata probe init parameters/frame-prop reuse.
   - Decision: Converted every `source:` string to Markdown links, documented the accepted letterbox inputs/case-insensitive parsing, and updated the runner to unwrap enum `.value` for JSON consistency (per the CPython Enum HOWTO’s `.value` guidance, [source](https://github.com/python/cpython/blob/v3.11.14/Doc/howto/enum.rst) @ 2025-11-16T03:14:39Z). `_plan_fps_map()` now mirrors the estimator precedence (effective → applied → source → override), rejects non-positive tuples, and the fallback log includes each plan’s label for quick identification. Tests assert the cached correlation (≈0.82), confirm `_probe_fps()` stays unused, lock the metadata `init_clip` calls, and ensure frame-prop dictionaries persist across re-probes.
@@ -641,3 +649,7 @@
   - Problem: release PR merges were titled `chore(main): release …` because release-please injects `${scope}` from the target branch name in its default pattern, and `main` is not in our allowed `scope-enum`, so commitlint failed on every release branch check.
   - Decision: Set `pull-request-title-pattern` to `chore(ci): release${component} ${version}` in `.github/release-please-config.json`, forcing a `ci` scope that’s already permitted while keeping the rest of the template intact per the customization guidance (source:https://github.com/googleapis/release-please/blob/main/docs/customizing.md@2025-11-16T03:28:42Z).
   - Verification: N/A (configuration-only change).
+- *2025-11-16:* chore(devx): make Husky `npm test` cross-platform and document the pytest plugin toggle.
+  - Problem: Windows Husky runs failed because `npm test` set `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` using POSIX syntax, and there was no documented way to skip that flag on machines that rely on local pytest plugins while still enforcing it on macOS/Linux.
+  - Decision: Added `cross-env` (per usage guidance, source:https://github.com/kentcdodds/cross-env/blob/main/README.md@2025-11-16T17:12:54Z) and routed the `test` script through `tools/run_pytest.mjs`, which locates the per-venv pytest executable, forces `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` by default, and lets developers opt out by exporting `FC_SKIP_PYTEST_DISABLE=1`. Updated `agents.md`/`CODEX.md` so both Codex and advisors know how to flip the override on Windows.
+    - Verification: `npm test`

@@ -83,6 +83,22 @@ def test_resolve_effective_tonemap_uses_preset_defaults() -> None:
     assert resolved["show_clipping"] is False
 
 
+def test_resolve_effective_tonemap_keeps_manual_overrides() -> None:
+    cfg = ColorConfig()
+    cfg.preset = "filmic"
+    cfg.target_nits = 120.0
+    setattr(cfg, "_provided_keys", {"preset", "target_nits"})
+
+    resolved = vs_core.resolve_effective_tonemap(cfg)
+
+    assert resolved["preset"] == "filmic"
+    assert resolved["tone_curve"] == "bt.2446a"
+    assert resolved["target_nits"] == pytest.approx(120.0)
+    assert resolved["knee_offset"] == pytest.approx(0.58)
+    assert resolved["dpd_black_cutoff"] == pytest.approx(0.008)
+    assert resolved["contrast_recovery"] == pytest.approx(0.20)
+
+
 def test_resolve_tonemap_settings_uses_color_defaults() -> None:
     cfg = types.SimpleNamespace(
         preset="custom",

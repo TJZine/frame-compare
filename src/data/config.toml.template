@@ -1,4 +1,4 @@
-﻿# All user-editable settings live here.
+# All user-editable settings live here.
 
 [analysis]
 # Frame selection knobs. The legacy quantile, motion, and random heuristics are all exposed here.
@@ -81,34 +81,43 @@ export_range = "full"
 ffmpeg_timeout_seconds = 120.0
 
 [color]
-# HDR → SDR pipeline controls.
+# HDR -> SDR pipeline controls.
 # Presets:
-#   • reference          — bt.2390 with high-quality libplacebo defaults tuned for stills.
-#   • bt2390_spec        — bt.2390 adhering closely to spec targets with minimal enhancements.
-#   • filmic             — bt.2446a shoulder for softer roll-off and cinematic mids.
-#   • contrast           — bt.2390 with enhanced micro-contrast while keeping peaks in check.
-#   • spline             — smooth spline curve with modest lift across the range.
-#   • bright_lift        — bt.2390 tuned to brighten mids/highs without crushing blacks.
-#   • highlight_guard    — bt.2390 tuned to pull highlights down for difficult masters.
-# Override individual fields below when preset=\"custom\" or when layering manual tweaks.
+#   - reference          - bt.2390 with high-quality libplacebo defaults tuned for stills.
+#   - bt2390_spec        - bt.2390 adhering closely to spec targets with minimal enhancements.
+#   - filmic             - bt.2446a shoulder for softer roll-off and cinematic mids.
+#   - contrast           - bt.2390 with enhanced micro-contrast while keeping peaks in check.
+#   - spline             - smooth spline curve with modest lift across the range.
+#   - bright_lift        - bt.2390 tuned to brighten mids/highs without crushing blacks.
+#   - highlight_guard    - bt.2390 tuned to pull highlights down for difficult masters.
+# Preset defaults (selected fields):
+#   preset          tone_curve  target  dst_min  knee  dpd_cutoff  smooth  scene_low  scene_high  percentile  contrast
+#   reference       bt.2390     100.0   0.18     0.50  0.010       45.0    0.8        2.4         99.995      0.30
+#   filmic          bt.2446a    100.0   0.16     0.58  0.008       55.0    0.7        2.0         99.9        0.20
+#   contrast        bt.2390     110.0   0.15     0.42  0.008       30.0    0.8        2.2         99.99       0.45
+#   spline          spline      105.0   0.17     0.52  0.009       35.0    0.8        2.2         99.98       0.25
+#   bt2390_spec     bt.2390     100.0   0.18     0.50  0.000       25.0    0.9        3.0         100.0       0.05
+#   bright_lift     bt.2390     130.0   0.22     0.46  0.012       35.0    0.8        2.0         99.99       0.50
+#   highlight_guard bt.2390     90.0    0.16     0.55  0.008       50.0    0.9        3.0         99.9        0.15
+# Override individual fields below when preset="custom" or when layering manual tweaks.
 enable_tonemap = true
-preset = "reference"
-tone_curve = "bt.2390"
-dynamic_peak_detection = true
-target_nits = 100.0
-dst_min_nits = 0.18
-knee_offset = 0.50               # BT.2390 knee parameter (0-1); 0.50 matches the spec.
-dpd_preset = "high_quality"      # Dynamic peak detection preset: off, fast, balanced, high_quality
-dpd_black_cutoff = 0.01          # PQ fraction to ignore during DPD (0-0.05). Ignored when DPD is off.
-smoothing_period = 45.0          # IIR smoothing window (frames). Set 0 to disable smoothing.
-scene_threshold_low = 0.8        # Lower bound (in 1% PQ units) where smoothing relaxes on scene changes.
-scene_threshold_high = 2.4       # Upper bound for the smoothing disable window.
-percentile = 99.995              # Brightness percentile considered the scene peak (0-100).
-contrast_recovery = 0.3          # HDR high-frequency detail recovery (0 disables).
-metadata = "auto"                # Metadata source: auto|none|hdr10|hdr10+|luminance or 0-4.
-use_dovi = "auto"                # Dolby Vision metadata usage: auto|true|false.
-visualize_lut = false            # Visualise tone-mapping LUT instead of output frames.
-show_clipping = false            # Highlight clipped pixels during tonemapping.
+preset = "reference"             # Selects the preset row above (reference/filmic/contrast/spline/bt2390_spec/bright_lift/highlight_guard/custom)
+tone_curve = "bt.2390"           # ref:bt.2390 / filmic:bt.2446a / contrast:bt.2390 / spline:spline / bt2390_spec:bt.2390 / bright_lift:bt.2390 / highlight_guard:bt.2390
+dynamic_peak_detection = true    # All presets enable dynamic peak detection by default
+target_nits = 100.0              # ref:100.0 / filmic:100.0 / contrast:110.0 / spline:105.0 / bt2390_spec:100.0 / bright_lift:130.0 / highlight_guard:90.0
+dst_min_nits = 0.18              # ref:0.18 / filmic:0.16 / contrast:0.15 / spline:0.17 / bt2390_spec:0.18 / bright_lift:0.22 / highlight_guard:0.16
+knee_offset = 0.50               # ref:0.50 / filmic:0.58 / contrast:0.42 / spline:0.52 / bt2390_spec:0.50 / bright_lift:0.46 / highlight_guard:0.55 (BT.2390 knee 0-1)
+dpd_preset = "high_quality"      # All presets: high_quality (off, fast, balanced, high_quality)
+dpd_black_cutoff = 0.01          # ref:0.010 / filmic:0.008 / contrast:0.008 / spline:0.009 / bt2390_spec:0.000 / bright_lift:0.012 / highlight_guard:0.008 (0-0.05)
+smoothing_period = 45.0          # ref:45.0 / filmic:55.0 / contrast:30.0 / spline:35.0 / bt2390_spec:25.0 / bright_lift:35.0 / highlight_guard:50.0 (frames)
+scene_threshold_low = 0.8        # ref:0.8 / filmic:0.7 / contrast:0.8 / spline:0.8 / bt2390_spec:0.9 / bright_lift:0.8 / highlight_guard:0.9
+scene_threshold_high = 2.4       # ref:2.4 / filmic:2.0 / contrast:2.2 / spline:2.2 / bt2390_spec:3.0 / bright_lift:2.0 / highlight_guard:3.0
+percentile = 99.995              # ref:99.995 / filmic:99.9 / contrast:99.99 / spline:99.98 / bt2390_spec:100.0 / bright_lift:99.99 / highlight_guard:99.9
+contrast_recovery = 0.3          # ref:0.30 / filmic:0.20 / contrast:0.45 / spline:0.25 / bt2390_spec:0.05 / bright_lift:0.50 / highlight_guard:0.15
+metadata = "auto"                # Presets default to "auto" metadata (auto|none|hdr10|hdr10+|luminance or 0-4)
+use_dovi = "auto"                # Presets default to Dolby Vision metadata enabled; set auto|true|false
+visualize_lut = false            # Presets default to false; toggle when debugging LUTs
+show_clipping = false            # Presets default to false; toggle to highlight clipped pixels
 post_gamma_enable = false        # Optional limited-range gamma lift after tonemap (Levels min/max 16-235)
 post_gamma = 0.95                # Gamma factor when enabled (0.90-1.10). Stick near 1.0 to avoid haze.
 overlay_enabled = true
