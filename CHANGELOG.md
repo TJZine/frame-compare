@@ -21,6 +21,11 @@
 
 ## [Unreleased]
 
+### Features
+
+- *2025-11-17:* unify CLI rendering around cache-aware run snapshots, add `--from-cache-only`, `--no-cache`, and `--show-partial` flags, persist `.frame_compare.run.json`, and render cached sections consistently with live runs.
+- *2025-11-17:* harden snapshot hydration, mark corrupt cache files as misses, and persist per-section availability so `[RENDER]`/`[PUBLISH]` blocks honor `--show-partial`/`--show-missing`.
+
 ### Bug Fixes
 
 * keep release-please commits passing commitlint by forcing `chore(ci): release…` pull-request titles

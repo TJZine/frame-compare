@@ -46,6 +46,19 @@ from src.frame_compare.analysis import (
     selection_hash_for_config,
     write_selection_cache_file,
 )
+from src.frame_compare.result_snapshot import (
+    RenderOptions,
+    ResultSource,
+    RunResultSnapshot,
+    SectionAvailability,
+    SectionState,
+    build_snapshot,
+    load_snapshot,
+    render_run_result,
+    resolve_cli_version,
+    snapshot_path,
+    write_snapshot,
+)
 from src.frame_compare.slowpics import (
     SlowpicsAPIError,
     build_shortcut_filename,
@@ -102,6 +115,8 @@ class RunResult:
     slowpics_url: Optional[str] = None
     json_tail: JsonTail | None = None
     report_path: Optional[Path] = None
+    snapshot: RunResultSnapshot | None = None
+    snapshot_path: Optional[Path] = None
 
 
 @dataclass
@@ -121,6 +136,9 @@ class RunRequest:
     console: Console | None = None
     reporter: CliOutputManagerProtocol | None = None
     reporter_factory: ReporterFactory | None = None
+    from_cache_only: bool = False
+    force_cache_refresh: bool = False
+    show_partial_sections: bool = False
 
 
 logger = logging.getLogger('frame_compare')
@@ -266,6 +284,7 @@ def run(request: RunRequest) -> RunResult:
             created_out_dir_path = out_dir.resolve()
         except OSError:
             created_out_dir_path = out_dir
+    result_snapshot_path = snapshot_path(out_dir)
     analysis_cache_path = preflight_utils.resolve_subdir(
         root,
         cfg.analysis.frame_data_filename,
@@ -338,7 +357,51 @@ def run(request: RunRequest) -> RunResult:
                 progress_style = "fill"
     reporter.set_flag("progress_style", progress_style)
     reporter.set_flag("emit_json_tail", emit_json_tail_flag)
+    raw_layout_sections_obj = getattr(getattr(reporter, "layout", None), "sections", [])
+    layout_sections: list[Mapping[str, Any]] = []
+    if isinstance(raw_layout_sections_obj, list):
+        layout_sources = cast(list[Any], raw_layout_sections_obj)
+        for section_obj in layout_sources:
+            if isinstance(section_obj, Mapping):
+                layout_sections.append(cast(Mapping[str, Any], section_obj))
+    render_options = RenderOptions(show_partial=request.show_partial_sections)
     collected_warnings: List[str] = []
+    if request.from_cache_only:
+        cached_snapshot = load_snapshot(result_snapshot_path)
+        if cached_snapshot is None:
+            raise CLIAppError(
+                f"No cached run result found at {result_snapshot_path}",
+                rich_message=(
+                    "[red]Cached run unavailable.[/red] "
+                    f"Run without --from-cache-only or delete {result_snapshot_path}."
+                ),
+            )
+        cached_snapshot.source = ResultSource.CACHE
+        render_run_result(
+            snapshot=cached_snapshot,
+            reporter=reporter,
+            layout_sections=layout_sections,
+            options=render_options,
+        )
+        cached_tail = cast(JsonTail, cached_snapshot.json_tail) if cached_snapshot.json_tail else None
+        cached_report_path = (
+            Path(cached_snapshot.report_path) if cached_snapshot.report_path else None
+        )
+        return RunResult(
+            files=[Path(path) for path in cached_snapshot.files],
+            frames=list(cached_snapshot.frames),
+            out_dir=out_dir,
+            out_dir_created=False,
+            out_dir_created_path=None,
+            root=root,
+            config=cfg,
+            image_paths=list(cached_snapshot.image_paths),
+            slowpics_url=cached_snapshot.slowpics_url,
+            json_tail=cached_tail,
+            report_path=cached_report_path,
+            snapshot=cached_snapshot,
+            snapshot_path=result_snapshot_path,
+        )
     if bool(getattr(cfg.slowpics, "auto_upload", False)):
         auto_upload_warning = (
             "slow.pics auto-upload is enabled; confirm you trust the destination or disable "
@@ -941,7 +1004,13 @@ def run(request: RunRequest) -> RunResult:
         cache_reason = "no_cache_info"
     else:
         cache_path = cache_info.path
-        if cache_path.exists():
+        if request.force_cache_refresh:
+            cache_status = "recomputed"
+            cache_reason = "forced_refresh"
+            cache_probe = CacheLoadResult(metrics=None, status="missing", reason="forced_refresh")
+            reporter.line("[yellow]Ignoring cached frame metrics (--no-cache requested).[/]")
+            cache_progress_message = "Recomputing frame metrics (forced refresh)."
+        elif cache_path.exists():
             probe_result = probe_cached_metrics(cache_info, cfg.analysis)
             cache_probe = probe_result
             if probe_result.status == "reused":
@@ -1143,9 +1212,6 @@ def run(request: RunRequest) -> RunResult:
         layout_data["trims"]["tgt"] = _trim_entry(clip_records[1]["label"])
 
     reporter.update_values(layout_data)
-    reporter.render_sections(["vspreview_missing", "vspreview_info", "at_a_glance", "discover", "prepare"])
-    reporter.render_sections(["audio_align"])
-    reporter.render_sections(["analyze"])
     if tmdb_notes:
         for note in tmdb_notes:
             reporter.verbose_line(note)
@@ -1495,7 +1561,6 @@ def run(request: RunRequest) -> RunResult:
     layout_data["overlay"] = json_tail["overlay"]
 
     reporter.update_values(layout_data)
-    reporter.render_sections(["render"])
 
     verification_records: List[Dict[str, Any]] = []
 
@@ -1733,7 +1798,6 @@ def run(request: RunRequest) -> RunResult:
     layout_data["verify"] = verify_summary
 
     slowpics_url: Optional[str] = None
-    reporter.render_sections(["publish"])
     reporter.line(_color_text("slow.pics collection (preview):", "blue"))
     inputs_parts = [
         _format_kv(
@@ -1860,7 +1924,6 @@ def run(request: RunRequest) -> RunResult:
                     total=upload_total,
                     stats=initial_stats,
                 )
-                reporter.render_sections(["publish"])
                 with reporter.create_progress("upload_bar", transient=False) as upload_progress:
                     task_id = upload_progress.add_task(
                         "slow.pics upload",
@@ -2054,7 +2117,6 @@ def run(request: RunRequest) -> RunResult:
     json_tail["viewer"] = viewer_block
     layout_data["viewer"] = viewer_block
     reporter.update_values(layout_data)
-    reporter.render_sections(["at_a_glance"])
 
     result = RunResult(
         files=[plan.path for plan in plans],
@@ -2070,43 +2132,6 @@ def run(request: RunRequest) -> RunResult:
         report_path=report_index_path,
     )
 
-    raw_layout_sections = getattr(getattr(reporter, "layout", None), "sections", [])
-    layout_sections: list[dict[str, object]] = []
-    for raw_section in raw_layout_sections:
-        if isinstance(raw_section, Mapping):
-            layout_sections.append(coerce_str_mapping(cast(Mapping[str, object], raw_section)))
-
-    summary_lines: List[str] = []
-    summary_section: dict[str, object] | None = None
-    for section_map in layout_sections:
-        if section_map.get("id") == "summary":
-            summary_section = section_map
-            break
-    if summary_section is not None:
-        items_obj = summary_section.get("items", [])
-        renderer = getattr(reporter, "renderer", None)
-        render_fn = getattr(renderer, "render_template", None)
-        if isinstance(items_obj, list):
-            for entry in cast(list[object], items_obj):
-                if not isinstance(entry, str):
-                    continue
-                item = entry
-                if callable(render_fn):
-                    rendered = render_fn(item, reporter.values, reporter.flags)
-                else:
-                    rendered = item
-                if rendered:
-                    summary_lines.append(str(rendered))
-
-    if not summary_lines:
-        summary_lines = [
-            f"Files     : {len(result.files)}",
-            f"Frames    : {len(result.frames)} -> {result.frames}",
-            f"Output dir: {result.out_dir}",
-        ]
-        if result.slowpics_url:
-            summary_lines.append(f"Slow.pics : {result.slowpics_url}")
-
     for warning in collected_warnings:
         reporter.warn(warning)
 
@@ -2115,7 +2140,7 @@ def run(request: RunRequest) -> RunResult:
     warnings_section: dict[str, object] | None = None
     for section_map in layout_sections:
         if section_map.get("id") == "warnings":
-            warnings_section = section_map
+            warnings_section = dict(section_map)
             break
     fold_config_source = warnings_section.get("fold_labels") if warnings_section is not None else None
     if isinstance(fold_config_source, Mapping):
@@ -2152,21 +2177,83 @@ def run(request: RunRequest) -> RunResult:
 
     layout_data["warnings"] = warnings_data
     reporter.update_values(layout_data)
-    reporter.render_sections(["warnings"])
-    reporter.render_sections(["summary"])
 
-    has_summary_section = any(section.get("id") == "summary" for section in layout_sections)
-    compatibility_required = bool(
-        reporter.flags.get("compat.summary_fallback")
-        or reporter.flags.get("compatibility_mode")
-        or reporter.flags.get("legacy_summary_fallback")
+    section_states: Dict[str, SectionState] = {}
+    for section in layout_sections:
+        section_id_raw = section.get("id")
+        if not section_id_raw:
+            continue
+        section_id = str(section_id_raw).strip()
+        if not section_id:
+            continue
+        section_states[section_id] = SectionState(
+            availability=SectionAvailability.MISSING,
+            note=None,
+        )
+
+    def _mark_section(section_id: str, availability: SectionAvailability, note: str | None = None) -> None:
+        if section_id not in section_states:
+            return
+        section_states[section_id] = SectionState(availability=availability, note=note)
+
+    # Default every known section to FULL once layout data is populated so cache renders
+    # receive the same footprint as the live run. Sections with optional artifacts override
+    # this baseline below.
+    for section_id in list(section_states):
+        _mark_section(section_id, SectionAvailability.FULL)
+
+    # Render is only truly available when we produced screenshots.
+    if not result.image_paths:
+        _mark_section(
+            "render",
+            SectionAvailability.PARTIAL,
+            "Screenshots unavailable; rerun without cache to capture fresh images.",
+        )
+
+    # Publish tracks the slow.pics upload lifecycle. Document disabled/error states so cache-only
+    # renders can hide the section unless operators request --show-partial/--show-missing.
+    slowpics_view = cast(dict[str, Any], layout_data.get("slowpics", {}))
+    slowpics_status = str(slowpics_view.get("status") or "")
+    slowpics_auto_upload = bool(slowpics_view.get("auto_upload"))
+    if slowpics_status == "failed":
+        _mark_section(
+            "publish",
+            SectionAvailability.PARTIAL,
+            "slow.pics upload failed during the live run.",
+        )
+    elif not slowpics_auto_upload and not result.slowpics_url:
+        _mark_section(
+            "publish",
+            SectionAvailability.MISSING,
+            "slow.pics upload disabled for this configuration.",
+        )
+    snapshot = build_snapshot(
+        values=reporter.values,
+        flags=reporter.flags,
+        layout_sections=layout_sections,
+        section_states=section_states,
+        files=result.files,
+        frames=result.frames,
+        image_paths=result.image_paths,
+        slowpics_url=result.slowpics_url,
+        report_path=result.report_path,
+        warnings=warnings_list,
+        json_tail=result.json_tail,
+        source=ResultSource.LIVE,
+        cli_version=resolve_cli_version(),
     )
-
-    if not reporter.quiet and (compatibility_required or not has_summary_section):
-        summary_lines = runtime_utils.build_legacy_summary_lines(layout_data, emit_json_tail=emit_json_tail_flag)
-        reporter.section("Summary")
-        for line in summary_lines:
-            reporter.line(_color_text(line, "green"))
+    result.snapshot = snapshot
+    result.snapshot_path = result_snapshot_path
+    try:
+        write_snapshot(result_snapshot_path, snapshot)
+    except OSError:
+        logger.warning("Failed to persist run snapshot to %s", result_snapshot_path, exc_info=True)
+    render_run_result(
+        snapshot=snapshot,
+        reporter=reporter,
+        layout_sections=layout_sections,
+        options=render_options,
+    )
 
     return result
 
@@ -2185,6 +2272,9 @@ def run_cli(
     debug_color: bool = False,
     tonemap_overrides: Optional[Dict[str, Any]] = None,
     impl_module: ModuleType | None = None,
+    from_cache_only: bool = False,
+    force_cache_refresh: bool = False,
+    show_partial_sections: bool = False,
 ) -> RunResult:
     request = RunRequest(
         config_path=config_path,
@@ -2199,5 +2289,8 @@ def run_cli(
         debug_color=debug_color,
         tonemap_overrides=tonemap_overrides,
         impl_module=impl_module,
+        from_cache_only=from_cache_only,
+        force_cache_refresh=force_cache_refresh,
+        show_partial_sections=show_partial_sections,
     )
     return run(request)

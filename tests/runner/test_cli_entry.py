@@ -15,6 +15,7 @@ from rich.console import Console
 
 import frame_compare
 import src.frame_compare.core as core_module
+import src.frame_compare.preflight as preflight_utils
 import src.frame_compare.tmdb_workflow as tmdb_utils
 from src.datatypes import (
     AnalysisConfig,
@@ -36,6 +37,7 @@ from src.frame_compare import runner as runner_module
 from src.frame_compare import vs as vs_core
 from src.frame_compare.analysis import CacheLoadResult, FrameMetricsCacheInfo, SelectionDetail
 from src.frame_compare.cli_runtime import CliOutputManager
+from src.frame_compare.result_snapshot import ResultSource, snapshot_path
 from tests.helpers.runner_env import (
     _CliRunnerEnv,
     _make_config,
@@ -48,6 +50,51 @@ from tests.helpers.runner_env import (
 )
 
 pytestmark = pytest.mark.usefixtures("runner_vs_core_stub", "dummy_progress")  # type: ignore[attr-defined]
+
+
+def _write_sample_media(cli_runner_env: _CliRunnerEnv) -> tuple[Path, Path]:
+    """Create two placeholder media files for runner flows."""
+
+    first = cli_runner_env.media_root / "AAA - 01.mkv"
+    second = cli_runner_env.media_root / "BBB - 01.mkv"
+    first.write_bytes(b"A")
+    second.write_bytes(b"B")
+    return first, second
+
+
+def _install_minimal_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Patch selection and screenshot helpers for quick runner execution."""
+
+    def _fake_select(*_args: object, **_kwargs: object) -> tuple[list[int], dict[int, str], dict[int, SelectionDetail]]:
+        details = {
+            10: SelectionDetail(
+                frame_index=10,
+                label="Auto",
+                score=None,
+                source="auto",
+                timecode="00:00:10.000",
+            )
+        }
+        return [10], {10: "Auto"}, details
+
+    def _fake_generate(
+        clips: Sequence[object],
+        frames: Sequence[int],
+        files_for_run: Sequence[Path],
+        metadata_list: Sequence[Mapping[str, Any]],
+        out_dir: Path,
+        cfg_screens: ScreenshotConfig,
+        color_cfg: ColorConfig,
+        **kwargs: Any,
+    ) -> list[str]:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        shot = out_dir / "shot.png"
+        shot.write_text("data", encoding="utf-8")
+        return [str(shot)]
+
+    _patch_runner_module(monkeypatch, "select_frames", _fake_select)
+    _patch_runner_module(monkeypatch, "selection_details_to_json", _selection_details_to_json)
+    _patch_runner_module(monkeypatch, "generate_screenshots", _fake_generate)
 
 
 def test_runner_no_impl_attrs() -> None:
@@ -86,6 +133,21 @@ def test_run_cli_rejects_subpath_escape(
         frame_compare.run_cli(None, None)
 
     assert field in str(excinfo.value)
+
+
+def test_run_cli_requires_snapshot_for_cache_only(
+    cli_runner_env: _CliRunnerEnv,
+) -> None:
+    """from-cache-only mode fails fast when the snapshot file is missing."""
+
+    cfg = cli_runner_env.cfg
+    cli_runner_env.reinstall(cfg)
+    snapshot_file = snapshot_path(cli_runner_env.media_root / cfg.screenshots.directory_name)
+    if snapshot_file.exists():
+        snapshot_file.unlink()
+
+    with pytest.raises(core_module.CLIAppError):
+        frame_compare.run_cli(None, None, from_cache_only=True)
 
 def test_validate_tonemap_overrides_accepts_valid_values() -> None:
     core_module._validate_tonemap_overrides(
@@ -1004,3 +1066,90 @@ def test_run_cli_coalesces_duplicate_pivot_logs(
         "Full-chroma pivot active (YUV444P16)",
         "Full-chroma pivot resolved",
     ]
+
+
+def test_run_cli_from_cache_only_uses_snapshot(
+    cli_runner_env: _CliRunnerEnv,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Subsequent cache-only runs hydrate cached CLI output."""
+
+    cfg = _make_config(cli_runner_env.media_root)
+    cli_runner_env.reinstall(cfg)
+    _write_sample_media(cli_runner_env)
+
+    _install_minimal_pipeline(monkeypatch)
+
+    first_result = frame_compare.run_cli(None, None)
+    assert first_result.snapshot_path is not None and first_result.snapshot_path.exists()
+    cached_result = frame_compare.run_cli(None, None, from_cache_only=True)
+
+    assert cached_result.frames == first_result.frames
+    assert cached_result.image_paths == first_result.image_paths
+    assert cached_result.snapshot is not None
+    assert cached_result.snapshot.source is ResultSource.CACHE
+
+
+def test_run_cli_from_cache_only_rejects_corrupt_snapshot(
+    cli_runner_env: _CliRunnerEnv,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cache-only rehydration fails fast when the snapshot payload is invalid."""
+
+    cfg = _make_config(cli_runner_env.media_root)
+    cli_runner_env.reinstall(cfg)
+    _write_sample_media(cli_runner_env)
+    _install_minimal_pipeline(monkeypatch)
+
+    initial = frame_compare.run_cli(None, None)
+    assert initial.snapshot_path is not None
+    # Overwrite the snapshot with invalid schema to trigger graceful cache miss.
+    snapshot_file = initial.snapshot_path
+    snapshot_file.write_text('{"schema_version": "invalid", "created_at": 123}', encoding="utf-8")
+
+    with pytest.raises(core_module.CLIAppError, match="No cached run result found"):
+        frame_compare.run_cli(None, None, from_cache_only=True)
+
+
+def test_force_cache_refresh_skips_probe(
+    cli_runner_env: _CliRunnerEnv,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--no-cache bypasses cache probes and marks the cache reason."""
+
+    cfg = _make_config(cli_runner_env.media_root)
+    cfg.analysis.save_frames_data = True
+    cli_runner_env.reinstall(cfg)
+    _write_sample_media(cli_runner_env)
+    _install_minimal_pipeline(monkeypatch)
+
+    probe_called = {"value": False}
+
+    def fake_probe(*_args: object, **_kwargs: object) -> CacheLoadResult:
+        probe_called["value"] = True
+        return CacheLoadResult(metrics=None, status="reused", reason=None)
+
+    _patch_runner_module(monkeypatch, "probe_cached_metrics", fake_probe)
+    cache_file = preflight_utils.resolve_subdir(
+        cli_runner_env.media_root,
+        cfg.analysis.frame_data_filename,
+        purpose="analysis.frame_data_filename",
+    )
+    cache_file.write_text("{}", encoding="utf-8")
+
+    first_result = frame_compare.run_cli(None, None, force_cache_refresh=True)
+    assert not probe_called["value"]
+    assert first_result.json_tail is not None
+    assert first_result.json_tail["cache"]["reason"] == "forced_refresh"
+
+    probe_called["value"] = False
+    cli_runner_env.reinstall(cfg)
+    _write_sample_media(cli_runner_env)
+    cache_file = preflight_utils.resolve_subdir(
+        cli_runner_env.media_root,
+        cfg.analysis.frame_data_filename,
+        purpose="analysis.frame_data_filename",
+    )
+    cache_file.write_text("{}", encoding="utf-8")
+    frame_compare.run_cli(None, None)
+    assert probe_called["value"]

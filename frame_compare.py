@@ -134,6 +134,9 @@ def run_cli(
     skip_wizard: bool = False,
     debug_color: bool = False,
     tonemap_overrides: Optional[Dict[str, Any]] = None,
+    from_cache_only: bool = False,
+    force_cache_refresh: bool = False,
+    show_partial_sections: bool = False,
 ) -> RunResult:
     """Delegate to the shared runner module."""
     request = RunRequest(
@@ -149,6 +152,9 @@ def run_cli(
         debug_color=debug_color,
         tonemap_overrides=tonemap_overrides,
         impl_module=sys.modules.get(__name__),
+        from_cache_only=from_cache_only,
+        force_cache_refresh=force_cache_refresh,
+        show_partial_sections=show_partial_sections,
     )
     return runner.run(request)
 
@@ -163,6 +169,9 @@ def _run_cli_entry(
     verbose: bool,
     no_color: bool,
     json_pretty: bool,
+    no_cache: bool,
+    from_cache_only: bool,
+    show_partial: bool,
     diagnose_paths: bool,
     write_config: bool,
     skip_wizard: bool,
@@ -201,6 +210,8 @@ def _run_cli_entry(
         report_override = False
     else:
         report_override = None
+    if from_cache_only and no_cache:
+        raise click.ClickException("Cannot combine --from-cache-only with --no-cache.")
 
     if tm_gamma_disable and tm_gamma is not None:
         raise click.ClickException("Cannot use --tm-gamma-disable together with --tm-gamma.")
@@ -295,6 +306,9 @@ def _run_cli_entry(
             skip_wizard=skip_wizard,
             debug_color=debug_color,
             tonemap_overrides=tonemap_override or None,
+            from_cache_only=from_cache_only,
+            force_cache_refresh=no_cache,
+            show_partial_sections=show_partial,
         )
     except CLIAppError as exc:
         print(exc.rich_message)
@@ -316,7 +330,7 @@ def _run_cli_entry(
     deleted_dir = False
     clipboard_hint = ""
 
-    if slowpics_url:
+    if slowpics_url and not from_cache_only:
         if cfg.slowpics.open_in_browser:
             try:
                 webbrowser.open(slowpics_url)
@@ -496,6 +510,24 @@ def _run_cli_entry(
 @click.option("--no-color", is_flag=True, help="Disable ANSI colour output.")
 @click.option("--json-pretty", is_flag=True, help="Pretty-print the JSON tail output.")
 @click.option(
+    "--no-cache",
+    "no_cache",
+    is_flag=True,
+    help="Force recomputation even when cached analysis artifacts exist.",
+)
+@click.option(
+    "--from-cache-only",
+    "from_cache_only",
+    is_flag=True,
+    help="Render cached CLI output without recomputing; fails when no snapshot exists.",
+)
+@click.option(
+    "--show-partial",
+    "show_partial",
+    is_flag=True,
+    help="Display sections marked as partial when rendering cached runs.",
+)
+@click.option(
     "--diagnose-paths",
     is_flag=True,
     help="Print the resolved config/input/output paths as JSON and exit.",
@@ -620,6 +652,9 @@ def main(
     verbose: bool,
     no_color: bool,
     json_pretty: bool,
+    no_cache: bool,
+    from_cache_only: bool,
+    show_partial: bool,
     diagnose_paths: bool,
     write_config: bool,
     no_wizard: bool,
@@ -656,6 +691,9 @@ def main(
         "verbose": verbose,
         "no_color": no_color,
         "json_pretty": json_pretty,
+        "no_cache": no_cache,
+        "from_cache_only": from_cache_only,
+        "show_partial": show_partial,
         "diagnose_paths": diagnose_paths,
         "write_config": write_config,
         "skip_wizard": no_wizard,
@@ -704,6 +742,9 @@ def run_command(ctx: click.Context) -> None:
         verbose=bool(params.get("verbose", False)),
         no_color=bool(params.get("no_color", False)),
         json_pretty=bool(params.get("json_pretty", False)),
+        no_cache=bool(params.get("no_cache", False)),
+        from_cache_only=bool(params.get("from_cache_only", False)),
+        show_partial=bool(params.get("show_partial", False)),
         diagnose_paths=bool(params.get("diagnose_paths", False)),
         write_config=bool(params.get("write_config", False)),
         skip_wizard=bool(params.get("skip_wizard", False)),

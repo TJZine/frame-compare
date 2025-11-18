@@ -645,6 +645,14 @@
       ..........                                                               [100%]
       82 passed in 0.17s
       ```
+- *2025-11-17:* feat(cli cache pipeline): cached runs now emit a canonical `.frame_compare.run.json` snapshot plus a unified renderer so live and cached output share identical sections and semantics.
+  - Problem: Cached reruns reprinted partial sections, summary banners skipped entirely when the pipeline short-circuited, and there was no way to rehydrate CLI output without rerunning the full analysis.
+  - Decision: Introduced `result_snapshot.RunResultSnapshot` (JSON-safe layout/flag/section metadata), persisted it beside screenshots, and taught the runner to render sections exclusively through `render_run_result`. Added CLI flags: `--from-cache-only` (hydrate snapshot and exit), `--no-cache` (skip cache probes/force recompute with metadata), and `--show-partial` (surface cache-derived partial sections). Snapshot metadata includes availability markers so future cache reconstructions can hide sections cleanly.
+  - Verification:
+    - `Get-Date -AsUTC -Format 'yyyy-MM-dd'` → `2025-11-17`
+    - `.venv\Scripts\pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+    - `.venv\Scripts\ruff check` → `All checks passed!`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv\Scripts\pytest -q` → `361 passed in 21.73s`
 - *2025-11-16:* chore(ci): align release-please scope with commitlint policy.
   - Problem: release PR merges were titled `chore(main): release …` because release-please injects `${scope}` from the target branch name in its default pattern, and `main` is not in our allowed `scope-enum`, so commitlint failed on every release branch check.
   - Decision: Set `pull-request-title-pattern` to `chore(ci): release${component} ${version}` in `.github/release-please-config.json`, forcing a `ci` scope that’s already permitted while keeping the rest of the template intact per the customization guidance (source:https://github.com/googleapis/release-please/blob/main/docs/customizing.md@2025-11-16T03:28:42Z).
@@ -653,3 +661,10 @@
   - Problem: Windows Husky runs failed because `npm test` set `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` using POSIX syntax, and there was no documented way to skip that flag on machines that rely on local pytest plugins while still enforcing it on macOS/Linux.
   - Decision: Added `cross-env` (per usage guidance, source:https://github.com/kentcdodds/cross-env/blob/main/README.md@2025-11-16T17:12:54Z) and routed the `test` script through `tools/run_pytest.mjs`, which locates the per-venv pytest executable, forces `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` by default, and lets developers opt out by exporting `FC_SKIP_PYTEST_DISABLE=1`. Updated `agents.md`/`CODEX.md` so both Codex and advisors know how to flip the override on Windows.
     - Verification: `npm test`
+- *2025-11-17:* fix(snapshot): reject corrupt cache payloads and persist per-section availability so cached renders hide incomplete blocks by default.
+  - Problem: `RunResultSnapshot.from_json_dict()` trusted whatever JSON types landed in `created_at`, `sections`, or `json_tail`, so malformed cache files could crash cache-only runs. The runner also hard-coded every CLI section to `FULL`, so publishing/render sections still surfaced even when slow.pics uploads were disabled or screenshots never materialised.
+  - Decision: Added `SnapshotDecodeError` guards plus list coercion helpers to validate ISO timestamps and mapping types (per CPython’s `datetime.fromisoformat` requirements, [source](https://github.com/python/cpython/blob/v3.11.14/Doc/library/datetime.rst) @ 2025-11-17T16:50:00Z) and taught `load_snapshot()` to treat bad payloads as cache misses. Runner builds a `SectionState` map (default `MISSING`), marks success cases `FULL`, and downgrades `[RENDER]`/`[PUBLISH]` to `PARTIAL`/`MISSING` when screenshots are absent or slow.pics uploads are disabled—these notes propagate into snapshots so `--show-partial`/`--show-missing` actually control cached output. Added regression tests for corrupt cache files and snapshot-driven render toggles, and documented the new semantics in README/CHANGELOG.
+  - Verification:
+    - `.venv\Scripts\pyright --warnings`
+    - `.venv\Scripts\ruff check`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv\Scripts\pytest -q tests/runner/test_cli_entry.py tests/result_snapshot`
