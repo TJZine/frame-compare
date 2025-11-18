@@ -101,10 +101,11 @@ Use these commands to compare direct vs Click CLI behaviour for a given config:
   - [ ] `.venv/Scripts/ruff check`
   - [ ] `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/Scripts/pytest -q tests/runner/test_dovi_flags.py`
 
-> Notes:
-> - Date:
-> - Dev Agent:
-> - Short summary of scenarios tested and results.
+#### A2 Notes
+
+- Date:
+- Dev Agent:
+- Short summary of scenarios tested and results.
 
 ### A3. Review Notes (Review Agent)
 
@@ -115,14 +116,21 @@ Use these commands to compare direct vs Click CLI behaviour for a given config:
 - [ ] Confirmed no other `--tm-*` flags implicitly override config when not passed.
 - [ ] Documentation aligned (README/CHANGELOG/DECISIONS).
 
-> Findings:
-> -
-> Open questions:
-> -
-> Reviewer:
-> -
-> Date:
-> -
+#### A3 Findings
+
+-
+
+#### A3 Open Questions
+
+-
+
+#### A3 Reviewer
+
+-
+
+#### A3 Date
+
+-
 
 ---
 
@@ -181,25 +189,33 @@ Use these commands to compare direct vs Click CLI behaviour for a given config:
   - [ ] Tests updated/added.
   - [ ] Any decisions on intentional precedence.
 
-> Notes:
-> - Date:
-> - Dev Agent:
-> - Key changes & rationale:
+#### B3 Notes
+
+- Date:
+- Dev Agent:
+- Key changes & rationale:
 
 ### B4. Review Notes (Review Agent)
 
 - [ ] Verified behaviour against docs and expectations for each domain.
-- [ ] Confirmed no remaining “implicit override” patterns.
+- [ ] Confirmed no remaining "implicit override" patterns.
 - [ ] Suggested any follow-up tasks (if necessary).
 
-> Findings:
-> -
-> Follow-ups:
-> -
-> Reviewer:
-> -
-> Date:
-> -
+#### B4 Findings
+
+-
+
+#### B4 Follow-ups
+
+-
+
+#### B4 Reviewer
+
+-
+
+#### B4 Date
+
+-
 
 ---
 

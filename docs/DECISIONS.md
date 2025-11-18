@@ -694,3 +694,8 @@
       ........................................                                 [100%]
       40 passed in 0.51s
       ```
+- *2025-11-18:* docs(flag audit): converted the repeating Notes/Findings templates in `docs/refactor/flag_audit.md` from blockquoted headings into ATX `####` headings with per-track prefixes (e.g., "A3 Findings", "B4 Findings") to satisfy MD003/MD024 and retain the template prompts.
+  - Decision: Promote each Notes/Findings/Follow-ups/Reviewer/Date label beneath A2/A3/B3/B4 to real ATX headings and keep their placeholder bullet lists so contributors can still fill in per-track data without duplicate heading IDs.
+  - Impact: Markdownlint navigation panes no longer collide on duplicate headings, and the audit template renders consistently in docs sites.
+  - `Get-Date -AsUTC -Format 'yyyy-MM-dd'`  `2025-11-18`
+  - Verification: N/A (documentation-only change).
