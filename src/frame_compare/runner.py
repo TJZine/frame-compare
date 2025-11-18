@@ -393,6 +393,7 @@ def run(request: RunRequest) -> RunResult:
             setattr(cfg.color, "debug_color", True)
         except AttributeError:
             pass
+    debug_color_enabled = bool(getattr(cfg.color, "debug_color", False))
     report_enabled = (
         bool(report_enable_override)
         if report_enable_override is not None
@@ -1655,7 +1656,7 @@ def run(request: RunRequest) -> RunResult:
 
     total_screens = len(frames) * len(plans)
 
-    writer_name = "ffmpeg" if cfg.screenshots.use_ffmpeg else "vs"
+    writer_name = "ffmpeg" if (cfg.screenshots.use_ffmpeg and not debug_color_enabled) else "vs"
     overlay_mode_value = getattr(cfg.color, "overlay_mode", "minimal")
     auto_letterbox_raw = getattr(cfg.screenshots, "auto_letterbox_crop", "off")
     if isinstance(auto_letterbox_raw, Enum):
@@ -1918,7 +1919,7 @@ def run(request: RunRequest) -> RunResult:
                     warnings_sink=collected_warnings,
                     verification_sink=verification_records,
                     pivot_notifier=_notify_pivot,
-                    debug_color=bool(getattr(cfg.color, "debug_color", False)),
+                    debug_color=debug_color_enabled,
                     source_frame_props=stored_props_seq,
                 )
 
@@ -1963,7 +1964,7 @@ def run(request: RunRequest) -> RunResult:
                 warnings_sink=collected_warnings,
                 verification_sink=verification_records,
                 pivot_notifier=_notify_pivot,
-                debug_color=bool(getattr(cfg.color, "debug_color", False)),
+                debug_color=debug_color_enabled,
                 source_frame_props=stored_props_seq,
             )
     except ClipProcessError as exc:
