@@ -28,6 +28,7 @@
 - *2025-11-17:* harden snapshot hydration, mark corrupt cache files as misses, and persist per-section availability so `[RENDER]`/`[PUBLISH]` blocks honor `--show-partial`/`--show-missing`.
 - *2025-11-18:* finish the CLI cache UX by adding `--show-missing`/`--hide-missing`, plumbing `show_missing_sections` through the public API, broadening section-availability heuristics for viewer/report/audio/VSPreview blocks, and extending tests/docs/CHANGELOG to cover the new behavior.
 - *2025-11-18:* capture ClipProbeSnapshot metadata (fps, frame counts, geometry, HDR props) per clip, persist it to `cache_dir/probe/<hash>.json`, reuse probe-era clip handles inside `init_clips`, and add `runtime.force_reprobe` plus cache hit/miss logging with regression tests for probe/init reuse.
+- *2025-11-18:* extract `MetadataResolver` and `AlignmentWorkflow` services per Track A, wire runner orchestration through typed requests/responses, and add focused service unit tests to lock TMDB/alignment behavior.
 
 ### Bug Fixes
 

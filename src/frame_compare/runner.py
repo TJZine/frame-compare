@@ -19,22 +19,19 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, cast
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, cast
 
 from rich.console import Console
 from rich.markup import escape
 
-import src.frame_compare.alignment_runner as alignment_runner
 import src.frame_compare.cache as cache_utils
 import src.frame_compare.core as core
 import src.frame_compare.media as media_utils
 import src.frame_compare.metadata as metadata_utils
-import src.frame_compare.planner as planner_utils
 import src.frame_compare.preflight as preflight_utils
 import src.frame_compare.report as html_report
 import src.frame_compare.runtime_utils as runtime_utils
 import src.frame_compare.selection as selection_utils
-import src.frame_compare.tmdb_workflow as tmdb_workflow
 import src.frame_compare.vspreview as vspreview_utils
 from src.datatypes import AppConfig
 from src.frame_compare import vs as vs_core
@@ -50,8 +47,6 @@ from src.frame_compare.analysis import (
     write_selection_cache_file,
 )
 from src.frame_compare.env_flags import env_flag_enabled
-from src.frame_compare.render.naming import SAFE_LABEL_META_KEY
-from src.frame_compare.render.naming import sanitise_label as _render_sanitise_label
 from src.frame_compare.result_snapshot import (
     RenderOptions,
     ResultSource,
@@ -65,6 +60,12 @@ from src.frame_compare.result_snapshot import (
     snapshot_path,
     write_snapshot,
 )
+from src.frame_compare.services.alignment import AlignmentRequest
+from src.frame_compare.services.factory import (
+    build_alignment_workflow,
+    build_metadata_resolver,
+)
+from src.frame_compare.services.metadata import MetadataResolveRequest
 from src.frame_compare.slowpics import (
     SlowpicsAPIError,
     build_shortcut_filename,
@@ -72,7 +73,6 @@ from src.frame_compare.slowpics import (
 )
 from src.frame_compare.vs import ClipInitError, ClipProcessError
 from src.screenshot import ScreenshotError, generate_screenshots
-from src.tmdb import TMDBResolution
 
 from .cli_runtime import (
     CLIAppError,
@@ -83,7 +83,6 @@ from .cli_runtime import (
     JsonTail,
     NullCliOutputManager,
     ReportJSON,
-    SlowpicsTitleInputs,
     TrimClipEntry,
     TrimSummary,
     coerce_str_mapping,
@@ -93,7 +92,6 @@ from .layout_utils import color_text as _color_text
 from .layout_utils import format_kv as _format_kv
 from .layout_utils import normalise_vspreview_mode as _normalise_vspreview_mode
 from .layout_utils import plan_label as _plan_label
-from .layout_utils import sanitize_console_text as _sanitize_console_text
 
 DOVI_DEBUG_ENV_FLAG = "FRAME_COMPARE_DOVI_DEBUG"
 
@@ -115,19 +113,6 @@ def _emit_dovi_debug(payload: Mapping[str, Any]) -> None:
     print("[DOVI_DEBUG]", message, file=sys.stderr)
 
 ReporterFactory = Callable[['RunRequest', Path, Console], CliOutputManagerProtocol]
-
-
-def _assign_unique_safe_labels(plans: Sequence[ClipPlan]) -> None:
-    """Populate per-plan safe labels used for filenames and reports."""
-
-    counts: Dict[str, int] = {}
-    for plan in plans:
-        raw_label = plan.metadata.get("label") or plan.path.stem
-        base = _render_sanitise_label(raw_label)
-        occurrence = counts.get(base, 0) + 1
-        counts[base] = occurrence
-        safe_label = base if occurrence == 1 else f"{base}_{occurrence}"
-        plan.metadata[SAFE_LABEL_META_KEY] = safe_label
 
 
 @dataclass
@@ -588,6 +573,8 @@ def run(request: RunRequest) -> RunResult:
             snapshot=cached_snapshot,
             snapshot_path=result_snapshot_path,
         )
+    metadata_resolver = build_metadata_resolver()
+    alignment_workflow = build_alignment_workflow()
     if bool(getattr(cfg.slowpics, "auto_upload", False)):
         auto_upload_warning = (
             "slow.pics auto-upload is enabled; confirm you trust the destination or disable "
@@ -770,293 +757,41 @@ def run(request: RunRequest) -> RunResult:
             rich_message="[red]Need at least two video files to compare.[/red]",
         )
 
-    metadata = metadata_utils.parse_metadata(files, cfg.naming)
-    year_hint_raw = metadata_utils.first_non_empty(metadata, "year")
-    metadata_title = metadata_utils.first_non_empty(metadata, "title") or metadata_utils.first_non_empty(metadata, "anime_title")
-    tmdb_resolution: TMDBResolution | None = None
-    manual_tmdb: tuple[str, str] | None = None
-    tmdb_category: Optional[str] = None
-    tmdb_id_value: Optional[str] = None
-    tmdb_language: Optional[str] = None
-    tmdb_error_message: Optional[str] = None
-    tmdb_ambiguous = False
-    tmdb_api_key_present = bool(cfg.tmdb.api_key.strip())
-    tmdb_notes: List[str] = []
-    slowpics_tmdb_disclosure_line: Optional[str] = None
-    slowpics_verbose_tmdb_tag: Optional[str] = None
-
-    def _record_tmdb_note(raw_message: str) -> None:
-        """Capture TMDB warnings with console-safe text."""
-
-        safe_message = _sanitize_console_text(raw_message)
-        tmdb_notes.append(safe_message)
-        collected_warnings.append(safe_message)
-
-    if tmdb_api_key_present:
-        lookup = tmdb_workflow.resolve_workflow(
-            files=files,
-            metadata=metadata,
-            tmdb_cfg=cfg.tmdb,
-            year_hint_raw=year_hint_raw,
-        )
-        tmdb_resolution = lookup.resolution
-        manual_tmdb = lookup.manual_override
-        tmdb_error_message = lookup.error_message
-        tmdb_ambiguous = lookup.ambiguous
-
-    if tmdb_resolution is not None:
-        tmdb_category = tmdb_resolution.category
-        tmdb_id_value = tmdb_resolution.tmdb_id
-        tmdb_language = tmdb_resolution.original_language
-
-    if manual_tmdb:
-        tmdb_category, tmdb_id_value = manual_tmdb
-        tmdb_language = None
-        tmdb_resolution = None
-        logger.info("TMDB manual override selected: %s/%s", tmdb_category, tmdb_id_value)
-
-    if tmdb_error_message and tmdb_api_key_present:
-        logger.warning("TMDB lookup failed for %s: %s", files[0].name, tmdb_error_message)
-
-    tmdb_context: Dict[str, str] = {
-        "Title": metadata_title or ((metadata[0].get("label") or "") if metadata else ""),
-        "OriginalTitle": "",
-        "Year": year_hint_raw or "",
-        "TMDBId": tmdb_id_value or "",
-        "TMDBCategory": tmdb_category or "",
-        "OriginalLanguage": tmdb_language or "",
-        "Filename": files[0].stem,
-        "FileName": files[0].name,
-        "Label": (metadata[0].get("label") or files[0].name) if metadata else files[0].name,
-    }
-
-    if tmdb_resolution is not None:
-        if tmdb_resolution.title:
-            tmdb_context["Title"] = tmdb_resolution.title
-        if tmdb_resolution.original_title:
-            tmdb_context["OriginalTitle"] = tmdb_resolution.original_title
-        if tmdb_resolution.year is not None:
-            tmdb_context["Year"] = str(tmdb_resolution.year)
-        if tmdb_resolution.original_language:
-            tmdb_context["OriginalLanguage"] = tmdb_resolution.original_language
-        tmdb_category = tmdb_category or tmdb_resolution.category
-        tmdb_id_value = tmdb_id_value or tmdb_resolution.tmdb_id
-
-    if tmdb_id_value and not (cfg.slowpics.tmdb_id or "").strip():
-        cfg.slowpics.tmdb_id = str(tmdb_id_value)
-    if tmdb_category and not (getattr(cfg.slowpics, "tmdb_category", "") or "").strip():
-        cfg.slowpics.tmdb_category = tmdb_category
-
-    suffix_literal = getattr(cfg.slowpics, "collection_suffix", "") or ""
-    suffix = suffix_literal.strip()
-    template_raw = cfg.slowpics.collection_name or ""
-    collection_template = template_raw.strip()
-
-    resolved_title_value = (tmdb_context.get("Title") or "").strip()
-    resolved_year_value = (tmdb_context.get("Year") or "").strip()
-    resolved_base_title: Optional[str] = None
-    if resolved_title_value:
-        resolved_base_title = resolved_title_value
-        if resolved_year_value:
-            resolved_base_title = f"{resolved_title_value} ({resolved_year_value})"
-
-    # slow.pics title policy: an explicit collection_name template is treated as the exact
-    # destination title, while the suffix is only appended when we fall back to the resolved
-    # base title (ResolvedTitle + optional Year). This mirrors the README contract.
-    if collection_template:
-        rendered_collection = tmdb_workflow.render_collection_name(collection_template, tmdb_context).strip()
-        final_collection_name = rendered_collection or "Frame Comparison"
-    else:
-        derived_title = resolved_title_value or metadata_title or files[0].stem
-        derived_year = resolved_year_value
-        base_collection = (derived_title or "").strip()
-        if base_collection and derived_year:
-            base_collection = f"{base_collection} ({derived_year})"
-        final_collection_name = base_collection or "Frame Comparison"
-        if suffix:
-            final_collection_name = f"{final_collection_name} {suffix}" if final_collection_name else suffix
-
-    cfg.slowpics.collection_name = final_collection_name
-    slowpics_final_title = final_collection_name
-    slowpics_resolved_base = resolved_base_title
-    slowpics_title_inputs: SlowpicsTitleInputs = {
-        "resolved_base": slowpics_resolved_base,
-        "collection_name": cfg.slowpics.collection_name,
-        "collection_suffix": suffix_literal,
-    }
-    slowpics_inputs_json = json_tail["slowpics"]["title"]["inputs"]
-    slowpics_inputs_json["resolved_base"] = slowpics_title_inputs["resolved_base"]
-    slowpics_inputs_json["collection_name"] = slowpics_title_inputs["collection_name"]
-    slowpics_inputs_json["collection_suffix"] = slowpics_title_inputs["collection_suffix"]
-    json_tail["slowpics"]["title"]["final"] = slowpics_final_title
-    slowpics_layout_view = layout_data.get("slowpics", {})
-    slowpics_layout_view["collection_name"] = slowpics_final_title
-    slowpics_layout_view["auto_upload"] = bool(cfg.slowpics.auto_upload)
-    slowpics_layout_view.setdefault(
-        "status",
-        "pending" if cfg.slowpics.auto_upload else "disabled",
-    )
-    layout_data["slowpics"] = slowpics_layout_view
-    reporter.update_values(layout_data)
-
-    if tmdb_resolution is not None:
-        match_title = tmdb_resolution.title or tmdb_context.get("Title") or files[0].stem
-        year_display = tmdb_context.get("Year") or ""
-        lang_text = tmdb_resolution.original_language or "und"
-        tmdb_identifier = f"{tmdb_resolution.category}/{tmdb_resolution.tmdb_id}"
-        safe_match_title = _sanitize_console_text(match_title)
-        safe_year_display = _sanitize_console_text(year_display)
-        safe_lang_text = _sanitize_console_text(lang_text)
-        title_segment = _color_text(
-            escape(f'"{safe_match_title} ({safe_year_display})"'),
-            "bright_white",
-        )
-        lang_segment = _format_kv("lang", safe_lang_text, label_style="dim cyan", value_style="blue")
-        reporter.verbose_line(
-            "  ".join(
-                [
-                    _format_kv("TMDB", tmdb_identifier, label_style="cyan", value_style="bright_white"),
-                    title_segment,
-                    lang_segment,
-                ]
-            )
-        )
-        heuristic = (tmdb_resolution.candidate.reason or "match").replace("_", " ").replace("-", " ")
-        source = "filename" if tmdb_resolution.candidate.used_filename_search else "external id"
-        reporter.verbose_line(
-            f"TMDB match heuristics: source={source} heuristic={heuristic.strip()}"
-        )
-        if slowpics_resolved_base:
-            base_display = slowpics_resolved_base
-        elif match_title and year_display:
-            base_display = f"{match_title} ({year_display})"
-        else:
-            base_display = match_title or "(n/a)"
-        safe_base_display = _sanitize_console_text(base_display)
-        slowpics_tmdb_disclosure_line = (
-            f'slow.pics title inputs: base="{escape(safe_base_display)}"  '
-            f'collection_suffix="{escape(str(suffix_literal))}"'
-        )
-        if tmdb_category and tmdb_id_value:
-            slowpics_verbose_tmdb_tag = f"TMDB={tmdb_category}_{tmdb_id_value}"
-        layout_data["tmdb"].update(
-            {
-                "category": tmdb_resolution.category,
-                "id": tmdb_resolution.tmdb_id,
-                "title": match_title,
-                "year": year_display,
-                "lang": lang_text,
-            }
-        )
-        reporter.set_flag("tmdb_resolved", True)
-    elif manual_tmdb:
-        display_title = tmdb_context.get("Title") or files[0].stem
-        category_display = tmdb_category or cfg.slowpics.tmdb_category or ""
-        id_display = tmdb_id_value or cfg.slowpics.tmdb_id or ""
-        lang_text = tmdb_language or tmdb_context.get("OriginalLanguage") or "und"
-        identifier = f"{category_display}/{id_display}".strip("/")
-        safe_display_title = _sanitize_console_text(display_title)
-        safe_year_component = _sanitize_console_text(tmdb_context.get("Year") or "")
-        title_segment = _color_text(
-            escape(f'"{safe_display_title} ({safe_year_component})"'),
-            "bright_white",
-        )
-        safe_lang_text = _sanitize_console_text(lang_text)
-        lang_segment = _format_kv("lang", safe_lang_text, label_style="dim cyan", value_style="blue")
-        reporter.verbose_line(
-            "  ".join(
-                [
-                    _format_kv("TMDB", identifier, label_style="cyan", value_style="bright_white"),
-                    title_segment,
-                    lang_segment,
-                ]
-            )
-        )
-        if slowpics_resolved_base:
-            base_display = slowpics_resolved_base
-        else:
-            year_component = tmdb_context.get("Year") or ""
-            if display_title and year_component:
-                base_display = f"{display_title} ({year_component})"
-            else:
-                base_display = display_title or "(n/a)"
-        safe_base_display = _sanitize_console_text(base_display)
-        slowpics_tmdb_disclosure_line = (
-            f'slow.pics title inputs: base="{escape(safe_base_display)}"  '
-            f'collection_suffix="{escape(str(suffix_literal))}"'
-        )
-        if category_display and id_display:
-            slowpics_verbose_tmdb_tag = f"TMDB={category_display}_{id_display}"
-        layout_data["tmdb"].update(
-            {
-                "category": category_display,
-                "id": id_display,
-                "title": display_title,
-                "year": tmdb_context.get("Year") or "",
-                "lang": lang_text,
-            }
-        )
-        reporter.set_flag("tmdb_resolved", True)
-    elif tmdb_api_key_present:
-        if tmdb_error_message:
-            _record_tmdb_note(f"TMDB lookup failed: {tmdb_error_message}")
-        elif tmdb_ambiguous:
-            _record_tmdb_note(
-                f"TMDB ambiguous results for {files[0].name}; continuing without metadata."
-            )
-        else:
-            _record_tmdb_note(f"TMDB could not find a confident match for {files[0].name}.")
-    elif not (cfg.slowpics.tmdb_id or "").strip():
-        _record_tmdb_note(
-            "TMDB disabled: set [tmdb].api_key in config.toml to enable automatic matching."
-        )
-
-    plans = planner_utils.build_plans(files, metadata, cfg)
-    _assign_unique_safe_labels(plans)
-    analyze_path = core.pick_analyze_file(files, metadata, cfg.analysis.analyze_clip, cache_dir=root)
-
-    try:
-        selection_utils.probe_clip_metadata(plans, cfg.runtime, root, reporter=reporter)
-    except ClipInitError as exc:
-        raise CLIAppError(
-            f"Failed to open clip: {exc}",
-            rich_message=f"[red]Failed to open clip:[/red] {exc}",
-        ) from exc
-
-    alignment_summary, alignment_display = alignment_runner.apply_audio_alignment(
-        plans,
-        cfg,
-        analyze_path,
-        root,
-        audio_track_override_map,
-        reporter=reporter,
-    )
-    alignment_runner.format_alignment_output(
-        plans,
-        alignment_summary,
-        alignment_display,
+    metadata_request = MetadataResolveRequest(
         cfg=cfg,
         root=root,
+        files=files,
+        reporter=reporter,
+        json_tail=json_tail,
+        layout_data=layout_data,
+        collected_warnings=collected_warnings,
+    )
+    metadata_result = metadata_resolver.resolve(metadata_request)
+    plans = metadata_result.plans
+    metadata_title = metadata_result.metadata_title
+    analyze_path = metadata_result.analyze_path
+    slowpics_title_inputs = metadata_result.slowpics_title_inputs
+    slowpics_final_title = metadata_result.slowpics_final_title
+    slowpics_resolved_base = metadata_result.slowpics_resolved_base
+    slowpics_tmdb_disclosure_line = metadata_result.slowpics_tmdb_disclosure_line
+    slowpics_verbose_tmdb_tag = metadata_result.slowpics_verbose_tmdb_tag
+    tmdb_notes = metadata_result.tmdb_notes
+
+    alignment_request = AlignmentRequest(
+        plans=plans,
+        cfg=cfg,
+        root=root,
+        analyze_path=analyze_path,
+        audio_track_overrides=audio_track_override_map,
         reporter=reporter,
         json_tail=json_tail,
         vspreview_mode=vspreview_mode_value,
         collected_warnings=collected_warnings,
     )
-
-    if (
-        alignment_summary is not None
-        and alignment_display is not None
-        and cfg.audio_alignment.enable
-        and not alignment_summary.suggestion_mode
-    ):
-        core.confirm_alignment_with_screenshots(
-            plans,
-            alignment_summary,
-            cfg,
-            root,
-            reporter,
-            alignment_display,
-        )
+    alignment_result = alignment_workflow.run(alignment_request)
+    plans = alignment_result.plans
+    alignment_summary = alignment_result.summary
+    alignment_display = alignment_result.display
 
     try:
         selection_utils.init_clips(plans, cfg.runtime, root, reporter=reporter)
