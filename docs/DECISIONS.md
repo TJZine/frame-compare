@@ -1,5 +1,13 @@
 # Decisions Log
 
+- *2025-11-18:* feat(cache): define ClipProbeSnapshot contract, disk layout, and force-reprobe escape hatch.
+  - Problem: Each run reopened VapourSynth clips twice and frequently dropped `_Matrix`/`MasteringDisplay*` props between probe/init, so HDR tonemapping would break whenever cached metadata drifted. We lacked a regression checklist that spelled out the metadata fields (fps, frame counts, geometry, props, trims, tonemap hints) that must survive probing.
+  - Decision: catalogued the ClipPlan fields consumed by runners/tonemap/vspreview (effective/applied/source FPS, frame counts, width/height, trims, and the HDR prop set) and codified them inside a typed `ClipProbeSnapshot`. On every probe we now clone the prop dict before any trims padded, persist the full payload (including schema version + metadata digest) to `cache_dir/probe/<cache_key>.json`, and log tonemap-critical keys so regressions are obvious. `init_clips` reuses the live clip handles recorded on the snapshot, falls back to disk snapshots when bootstrapping a fresh process, and only reinitialises VapourSynth when trims/FPS overrides or the cache hash change. Added `RuntimeConfig.force_reprobe` so users can bypass reuse while debugging and wired structured cache summaries (`opened vs. reused vs. disk hits`). VapourSynth’s frame-prop lifetime rule (source:https://github.com/vapoursynth/vapoursynth/blob/master/doc/api/vapoursynth4.h.rst@2025-11-18T19:42:57Z via Context7) is cited here as the regression checklist anchor: once captured, the pre-trim props must survive through tonemapping.
+  - Verification:
+    - `.venv/bin/pyright --warnings`
+    - `.venv/bin/ruff check`
+    - `.venv/bin/pytest -q`
+
 - *2025-11-18:* chore(review): sign off Track B Phases 3–6 config + flag invariants.
   - Problem: The remaining domains in docs/refactor/flag_audit.md (Screenshots/Render through TMDB/Source/Runtime) still needed a review agent to confirm “config wins unless a CLI flag explicitly overrides” and to fill the Track B → B4 + Global Invariants sections before Phase 2 could close.
   - Decision: Compared each B3 checklist against the implemented behaviour in `frame_compare.py` and `src/frame_compare/runner.py` (writer selection, cache probes, audio-alignment JSON seeds, HTML report/slow.pics handling, path precedence, TMDB/runtime flags) plus the regression suites in `tests/runner/test_cli_entry.py`, `tests/runner/test_audio_alignment_cli.py`, and `tests/runner/test_dovi_flags.py`. Updated docs/refactor/flag_audit.md to capture per-domain findings, checked all Global Invariant checkboxes, and noted that README.md + CHANGELOG.md already describe the precedence rules.
