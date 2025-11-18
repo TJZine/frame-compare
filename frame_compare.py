@@ -12,7 +12,7 @@ import webbrowser
 from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, MutableMapping, Optional, cast
+from typing import Any, Callable, Dict, Iterable, MutableMapping, Optional, TypeVar, cast
 
 import click
 from click.core import ParameterSource
@@ -488,11 +488,15 @@ def _run_cli_entry(
         print(json_output)
 
 
-def _normalize_tm_toggle(ctx: click.Context, name: str, value: bool | None) -> bool | None:
-    """
-    Treat Click toggles as overrides only when explicitly provided on the command line.
+T = TypeVar("T")
 
-    Returning ``None`` defers to the underlying config so tri-state options stay intact.
+
+def _cli_override_value(ctx: click.Context, name: str, value: T | None) -> T | None:
+    """
+    Return ``value`` only when the corresponding CLI option originated from the command line.
+
+    Click's ``default_map`` and other implicit sources should defer to config defaults so the
+    runtime path mirrors ``frame_compare.run_cli`` unless the user explicitly passes a flag.
     """
 
     get_source = getattr(ctx, "get_parameter_source", None)
@@ -502,6 +506,19 @@ def _normalize_tm_toggle(ctx: click.Context, name: str, value: bool | None) -> b
     if source is ParameterSource.COMMANDLINE:
         return value
     return None
+
+
+def _cli_flag_value(ctx: click.Context, name: str, value: bool, *, default: bool) -> bool:
+    """
+    Return the flag value only when the user explicitly passed the option.
+
+    Click's ``default_map`` and env-provided values should not override config-driven defaults.
+    """
+
+    override = _cli_override_value(ctx, name, value)
+    if override is None:
+        return default
+    return bool(override)
 
 
 @click.group(invoke_without_command=True)
@@ -710,9 +727,47 @@ def main(
 ) -> None:
     """Command group entry point that dispatches to subcommands or the default run."""
 
-    tm_use_dovi = _normalize_tm_toggle(ctx, "tm_use_dovi", tm_use_dovi)
-    tm_visualize_lut = _normalize_tm_toggle(ctx, "tm_visualize_lut", tm_visualize_lut)
-    tm_show_clipping = _normalize_tm_toggle(ctx, "tm_show_clipping", tm_show_clipping)
+    root_path = _cli_override_value(ctx, "root_path", root_path)
+    config_path = _cli_override_value(ctx, "config_path", config_path)
+    input_dir = _cli_override_value(ctx, "input_dir", input_dir)
+    track_override = _cli_override_value(
+        ctx,
+        "audio_align_track_option",
+        audio_align_track_option if audio_align_track_option else None,
+    )
+    audio_align_track_option = tuple(track_override or ())
+    quiet = _cli_flag_value(ctx, "quiet", quiet, default=False)
+    verbose = _cli_flag_value(ctx, "verbose", verbose, default=False)
+    no_color = _cli_flag_value(ctx, "no_color", no_color, default=False)
+    json_pretty = _cli_flag_value(ctx, "json_pretty", json_pretty, default=False)
+    no_cache = _cli_flag_value(ctx, "no_cache", no_cache, default=False)
+    from_cache_only = _cli_flag_value(ctx, "from_cache_only", from_cache_only, default=False)
+    show_partial = _cli_flag_value(ctx, "show_partial", show_partial, default=False)
+    show_missing = _cli_flag_value(ctx, "show_missing", show_missing, default=True)
+    diagnose_paths = _cli_flag_value(ctx, "diagnose_paths", diagnose_paths, default=False)
+    write_config = _cli_flag_value(ctx, "write_config", write_config, default=False)
+    skip_wizard_flag = _cli_flag_value(ctx, "no_wizard", no_wizard, default=False)
+    html_report_enable = _cli_flag_value(ctx, "html_report_enable", html_report_enable, default=False)
+    html_report_disable = _cli_flag_value(ctx, "html_report_disable", html_report_disable, default=False)
+    debug_color = _cli_flag_value(ctx, "debug_color", debug_color, default=False)
+
+    tm_preset = _cli_override_value(ctx, "tm_preset", tm_preset)
+    tm_curve = _cli_override_value(ctx, "tm_curve", tm_curve)
+    tm_target = _cli_override_value(ctx, "tm_target", tm_target)
+    tm_dst_min = _cli_override_value(ctx, "tm_dst_min", tm_dst_min)
+    tm_knee = _cli_override_value(ctx, "tm_knee", tm_knee)
+    tm_dpd_preset = _cli_override_value(ctx, "tm_dpd_preset", tm_dpd_preset)
+    tm_dpd_black_cutoff = _cli_override_value(ctx, "tm_dpd_black_cutoff", tm_dpd_black_cutoff)
+    tm_gamma = _cli_override_value(ctx, "tm_gamma", tm_gamma)
+    tm_smoothing = _cli_override_value(ctx, "tm_smoothing", tm_smoothing)
+    tm_scene_low = _cli_override_value(ctx, "tm_scene_low", tm_scene_low)
+    tm_scene_high = _cli_override_value(ctx, "tm_scene_high", tm_scene_high)
+    tm_percentile = _cli_override_value(ctx, "tm_percentile", tm_percentile)
+    tm_contrast = _cli_override_value(ctx, "tm_contrast", tm_contrast)
+    tm_metadata = _cli_override_value(ctx, "tm_metadata", tm_metadata)
+    tm_use_dovi = _cli_override_value(ctx, "tm_use_dovi", tm_use_dovi)
+    tm_visualize_lut = _cli_override_value(ctx, "tm_visualize_lut", tm_visualize_lut)
+    tm_show_clipping = _cli_override_value(ctx, "tm_show_clipping", tm_show_clipping)
 
     params = {
         "root_path": root_path,
@@ -729,7 +784,7 @@ def main(
         "show_missing": show_missing,
         "diagnose_paths": diagnose_paths,
         "write_config": write_config,
-        "skip_wizard": no_wizard,
+        "skip_wizard": skip_wizard_flag,
         "html_report_enable": html_report_enable,
         "html_report_disable": html_report_disable,
         "debug_color": debug_color,

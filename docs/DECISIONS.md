@@ -1,5 +1,37 @@
 # Decisions Log
 
+- *2025-11-18:* chore(review): sign off Track B Phases 3–6 config + flag invariants.
+  - Problem: The remaining domains in docs/refactor/flag_audit.md (Screenshots/Render through TMDB/Source/Runtime) still needed a review agent to confirm “config wins unless a CLI flag explicitly overrides” and to fill the Track B → B4 + Global Invariants sections before Phase 2 could close.
+  - Decision: Compared each B3 checklist against the implemented behaviour in `frame_compare.py` and `src/frame_compare/runner.py` (writer selection, cache probes, audio-alignment JSON seeds, HTML report/slow.pics handling, path precedence, TMDB/runtime flags) plus the regression suites in `tests/runner/test_cli_entry.py`, `tests/runner/test_audio_alignment_cli.py`, and `tests/runner/test_dovi_flags.py`. Updated docs/refactor/flag_audit.md to capture per-domain findings, checked all Global Invariant checkboxes, and noted that README.md + CHANGELOG.md already describe the precedence rules.
+  - Verification:
+    - `./.venv/bin/pyright --warnings`
+    - `./.venv/bin/ruff check`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 ./.venv/bin/pytest -q tests/runner/test_cli_entry.py tests/runner/test_audio_alignment_cli.py tests/runner/test_dovi_flags.py`
+
+- *2025-11-18:* chore(audit): review Phase 1–2 config inventory and tonemap overrides.
+  - Problem: Phase 1 (schema/load/CLI inventory) and Phase 2 (color/tonemap/DoVi) fixes needed verification that docs, code, and CLI behaviour now align and that “flag not passed” truly preserves config values.
+  - Decision: Cross-checked the Track B inventory against `src/datatypes.py` and `src/frame_compare/preflight.py`, then validated `_cli_override_value()`/`_run_cli_entry()`/`runner.run()` so tonemap overrides only apply when Click reports `ParameterSource.COMMANDLINE`—per Click’s own guidance on `Context.get_parameter_source` (source:https://github.com/pallets/click/blob/main/docs/commands-and-groups.rst@2025-11-18T10:57:24Z via Context7). Recorded the review outcome in `docs/refactor/flag_audit.md` (A3/B4) and confirmed overlay/verify telemetry still mirrors config defaults in both entrypoints.
+  - Verification:
+    - `.venv/bin/pyright --warnings`
+    - `.venv/bin/ruff check`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/runner/test_dovi_flags.py`
+
+- *2025-11-18:* fix(cli): extend default-map guards beyond tonemap and keep render metadata honest under debug fallbacks.
+  - Problem: Even after the tonemap fixes, Click `default_map` values for path/cache/report/audio flags plus `--debug-color` still reached `_run_cli_entry()`, overriding config-driven behaviour and diverging `frame_compare.run_cli` from the Click CLI. Additionally, the JSON `render.writer` field stayed `ffmpeg` whenever `[screenshots].use_ffmpeg` was true, even though debug-color runs force VapourSynth rendering.
+  - Decision: Introduced `_cli_flag_value()` so boolean options honour Click’s documented parameter-source semantics (source:https://github.com/pallets/click/blob/main/docs/commands-and-groups.rst@2025-11-18T12:10:00Z via Context7) and wired it up for `--root/--config/--input`, cache toggles, HTML-report flags, audio-track overrides, and `--debug-color`. Updated `runner.py` to derive the render writer from both `[screenshots].use_ffmpeg` and the effective debug flag so JSON tails reflect the actual renderer. Logged the audit + verification steps in `docs/refactor/flag_audit.md` (Track B → B2/B3) and `CHANGELOG.md`.
+  - Verification:
+    - `./.venv/bin/pyright --warnings`
+    - `./.venv/bin/ruff check`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 ./.venv/bin/pytest -q tests/runner`
+
+- *2025-11-18:* fix(cli): ignore Click `default_map`/env-provided tonemap defaults unless the user passes a `--tm-*` flag.
+  - Problem: `CliRunner` populates Click defaults via `default_map`/environment, so `frame_compare.main` kept treating inherited values as CLI overrides and overwrote `[color]` config even when the user never opted in.
+  - Decision: Added `_cli_override_value()` so `_run_cli_entry()` only forwards tonemap overrides when `ctx.get_parameter_source(name)` reports `COMMANDLINE`, per the Click docs (source:https://github.com/pallets/click/blob/main/docs/commands-and-groups.rst@2025-11-18T08:28:30Z). Refreshed `tests/runner/test_dovi_flags.py` with new `CliRunner` width hints to keep Rich from wrapping JSON, plus coverage for `--tm-target`, default-map inheritance, and overlay/verify telemetry.
+  - Verification:
+    - `.venv\Scripts\pyright --warnings`
+    - `.venv\Scripts\ruff check`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv\Scripts\pytest -q tests/runner/test_dovi_flags.py`
+
 - *2025-11-18:* fix(cli): align DoVi toggle semantics between Click CLI and runner.
   - Problem: `frame_compare.run_cli()` preserved `[color].use_dovi`, but invoking `frame_compare.main` without any `--tm-*` flags still injected `tonemap_overrides={"use_dovi": false, ...}`, so Dolby Vision metadata was silently disabled, yielding darker screenshots and contradictory JSON tails.
   - Decision: Use Click's parameter-source inspection to only treat tri-state toggles as overrides when `ParameterSource.COMMANDLINE` reports an explicit flag (per the official guidance on `Context.get_parameter_source`, source:https://github.com/pallets/click/blob/main/docs/commands-and-groups.rst@2025-11-18T07:15:29Z). Added a `_normalize_tm_toggle()` helper to coalesce implicit defaults back to `None`, plus regression tests that pin default inheritance and explicit `--tm-use-dovi`/`--tm-no-dovi` behavior via the CLI runner harness.

@@ -72,6 +72,8 @@
 
 ### Bug Fixes
 
+* gate every non-`--tm-*` CLI override (paths/cache/report/audio/debug flags) on explicit command-line sources so `frame_compare.run_cli` and the Click entrypoint respect config precedence, and fix `json_tail.render.writer` so debug-color runs accurately report the VS fallback (tests/runner/test_cli_entry.py)
+* guard tonemap CLI overrides so Click `default_map`/env-provided values defer to config until a `--tm-*` flag is provided, and extend CLI regression tests for `--tm-target` plus overlay/verify telemetry
 * keep release-please commits passing commitlint by forcing `chore(ci): release…` pull-request titles
 * prevent the Click CLI from forcing Dolby Vision tonemapping off unless `--tm-use-dovi`/`--tm-no-dovi` is explicitly provided so CLI and direct runs agree
 * ensure tonemap presets override template defaults when configs match reference values and expose preset matrices/comments in `config.toml.template`
@@ -88,8 +90,10 @@
 
 ### Chores
 
+- *2025-11-18:* document the Phase 3–6 Track B flag/config review (Screenshots → TMDB domains), check off the Global Invariants in `docs/refactor/flag_audit.md`, and log the verification commands in `docs/DECISIONS.md`.
 - *2025-11-18:* add a `FRAME_COMPARE_DOVI_DEBUG` telemetry mode that emits JSON-formatted logs from both the runner and VapourSynth tonemap resolver so entrypoints can compare config roots, cache status, tonemap overrides, and brightness-affecting parameters when diagnosing DOVI drift.
 - *2025-11-18:* convert the docs/refactor/flag_audit.md template placeholders into ATX headings with per-track prefixes so markdownlint (MD003/MD024) passes and rendered navigation stays unique.
+- *2025-11-18:* document the Phase 1–2 config/tonemap audit review results in `docs/refactor/flag_audit.md` (A3/B4) and `docs/DECISIONS.md`, confirming Click CLI vs `frame_compare.run_cli` parity for DoVi and tonemap overrides.
 
 ## [0.0.2](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.1...frame-compare-v0.0.2) (2025-11-13)
 

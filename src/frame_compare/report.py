@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Sequence, TypedDict
 
 from src.datatypes import ReportConfig
+from src.frame_compare.render.naming import SAFE_LABEL_META_KEY
 
 from .analysis import SelectionDetail
 
@@ -154,10 +155,21 @@ def generate_html_report(
     document_title = raw_title.strip() or "Frame Compare Report"
 
     encode_entries: List[EncodeEntry] = []
-    seen_safe: set[str] = set()
     for plan in plans:
         label = str(plan.get("label") or "").strip() or str(plan.get("path") or "")
-        safe_label = _sanitise_label(label)
+        safe_label_source: Optional[str] = None
+        safe_label_value = plan.get(SAFE_LABEL_META_KEY)
+        if isinstance(safe_label_value, str) and safe_label_value.strip():
+            safe_label_source = safe_label_value
+        else:
+            metadata = plan.get("metadata")
+            if isinstance(metadata, Mapping):
+                embedded = metadata.get(SAFE_LABEL_META_KEY)
+                if isinstance(embedded, str) and embedded.strip():
+                    safe_label_source = embedded
+        if safe_label_source is None:
+            safe_label_source = label
+        safe_label = _sanitise_label(safe_label_source)
         source_path = plan.get("path")
         metadata = plan.get("metadata")
         entry: EncodeEntry = {
@@ -175,9 +187,6 @@ def generate_html_report(
             }
             if metadata_dict:
                 entry["metadata"] = metadata_dict
-        if safe_label in seen_safe:
-            continue
-        seen_safe.add(safe_label)
         encode_entries.append(entry)
 
     files_by_frame: Dict[int, Dict[str, str]] = {}
