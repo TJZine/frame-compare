@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.0.6](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.5...frame-compare-v0.0.6) (2025-11-18)
+
+
+### Features
+
+* CLI Rendering for cached results ([#161](https://github.com/TJZine/frame-compare/issues/161)) ([6061125](https://github.com/TJZine/frame-compare/commit/60611255fa496dfb4f6c623e78cc525f820c7728))
+* finalize CLI cache missing-section controls ([b70cea3](https://github.com/TJZine/frame-compare/commit/b70cea3554b27507d18da818032228a1aef962bf))
+* unify CLI rendering for cached results ([94c29ff](https://github.com/TJZine/frame-compare/commit/94c29ff4a822e6ac2ecff9f245f1cd67dd815b46))
+
+
+### Bug Fixes
+
+* let tonemap presets override default-matching config keys ([5de6c59](https://github.com/TJZine/frame-compare/commit/5de6c59f96425c957bbc302d573c5c85d26e665e))
+* prevent CLI from overriding DoVi by default ([4e50efa](https://github.com/TJZine/frame-compare/commit/4e50efa1104b63a7d5dbfe1bef434f5a93539aaa))
+
+
+### Documentation
+
+* convert flag audit headings to atx ([40719f6](https://github.com/TJZine/frame-compare/commit/40719f662b069c527fbca7e493a0ff624b604cf1))
+
 ## [0.0.5](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.4...frame-compare-v0.0.5) (2025-11-16)
 
 
