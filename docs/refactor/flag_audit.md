@@ -289,3 +289,86 @@ When closing a track or major sub-task, run:
 ## Open Issues / TODO
 
 - [ ] …
+
+---
+
+## Track C – Overlay Diagnostics Expansion
+
+> Scope: Enhance the overlay’s diagnostic mode with additional HDR/DV metadata (DoVi L2 summary, MaxCLL/MaxFALL, dynamic range labels, per-frame nit metrics, etc.).
+
+### C1. Discovery & Data Mapping (Phase 1)
+
+- [ ] Inventory existing metadata sources:
+  - [ ] DV metadata (L1/L2) in `metadata_utils` / `vs_core`.
+  - [ ] HDR mastering metadata (MaxCLL/MaxFALL) stored per clip.
+  - [ ] Dynamic range detection logs (`limited` vs `full`).
+  - [ ] Cached per-frame metrics (analysis caches, selection details).
+- [ ] Document overlay pipeline:
+  - [ ] Where `json_tail["overlay"]` is built (`runner.py`).
+  - [ ] How `overlay_text_template`/`overlay_mode` influence rendering.
+  - [ ] Where overlay text is rendered in screenshot pipeline.
+- [ ] Identify gating options:
+  - [ ] Existing diagnostic/`overlay_mode` toggles.
+  - [ ] Potential new config/CLI flags for expensive metrics (per-frame nits).
+- [ ] Record findings (files, fields, perf notes) below.
+
+> Notes (discovery summary):
+> - DV metadata source:
+> - HDR metadata source:
+> - Dynamic range detection:
+> - Cached per-frame metrics:
+> - Overlay template path:
+> - Gating strategy:
+
+### C2. Implementation Plan
+
+- [ ] DV diagnostics:
+  - [ ] Include `use_dovi_label` in overlay diagnostics context.
+  - [ ] Surface DV L2 summary (block info, brightness target) when available.
+- [ ] HDR metadata:
+  - [ ] Expose MaxCLL/MaxFALL per clip.
+  - [ ] Add dynamic range classification (limited/full) to overlay data.
+- [ ] Per-frame metrics (gated):
+  - [ ] Determine data availability (cached vs recompute).
+  - [ ] Add config/CLI toggle for expensive computations.
+  - [ ] Surface frame max/avg nits and DV RPI Level 1 stats when enabled.
+- [ ] Update overlay context:
+  - [ ] Extend `json_tail["overlay"]["diagnostics"]` with structured data.
+  - [ ] Provide default diagnostic template (multi-line) when `overlay_mode == "diagnostic"`.
+- [ ] Tests & docs:
+  - [ ] Add unit/integration tests covering new diagnostics.
+  - [ ] Update README + docs/DECISIONS.md describing diagnostic overlay features/perf costs.
+
+### C3. Implementation Notes (Dev Agent)
+
+- Work performed:
+  - [ ] DV diagnostics added.
+  - [ ] HDR metadata added.
+  - [ ] Per-frame metrics gated + added.
+  - [ ] Overlay template updated.
+  - [ ] Tests/docs updated.
+- Commands run:
+  - [ ] `.venv/Scripts/pyright --warnings`
+  - [ ] `.venv/Scripts/ruff check`
+  - [ ] `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/Scripts/pytest -q tests/runner/test_overlay_diagnostics.py`
+
+> Notes:
+> - Date:
+> - Dev Agent:
+> - Summary of metrics availability/gating decisions:
+
+### C4. Review Notes (Review Agent)
+
+- [ ] Verified overlay diagnostics show DV/HDR data when expected.
+- [ ] Confirmed per-frame metrics gating prevents regressions.
+- [ ] Tested CLI/config toggles for diagnostic overlay.
+- [ ] Docs accurately describe new behaviour and perf considerations.
+
+> Findings:
+> -
+> Follow-ups:
+> -
+> Reviewer:
+> -
+> Date:
+> -
