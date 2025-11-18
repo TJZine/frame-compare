@@ -508,6 +508,19 @@ def _cli_override_value(ctx: click.Context, name: str, value: T | None) -> T | N
     return None
 
 
+def _cli_flag_value(ctx: click.Context, name: str, value: bool, *, default: bool) -> bool:
+    """
+    Return the flag value only when the user explicitly passed the option.
+
+    Click's ``default_map`` and env-provided values should not override config-driven defaults.
+    """
+
+    override = _cli_override_value(ctx, name, value)
+    if override is None:
+        return default
+    return bool(override)
+
+
 @click.group(invoke_without_command=True)
 @click.option(
     "--root",
@@ -714,6 +727,30 @@ def main(
 ) -> None:
     """Command group entry point that dispatches to subcommands or the default run."""
 
+    root_path = _cli_override_value(ctx, "root_path", root_path)
+    config_path = _cli_override_value(ctx, "config_path", config_path)
+    input_dir = _cli_override_value(ctx, "input_dir", input_dir)
+    track_override = _cli_override_value(
+        ctx,
+        "audio_align_track_option",
+        audio_align_track_option if audio_align_track_option else None,
+    )
+    audio_align_track_option = tuple(track_override or ())
+    quiet = _cli_flag_value(ctx, "quiet", quiet, default=False)
+    verbose = _cli_flag_value(ctx, "verbose", verbose, default=False)
+    no_color = _cli_flag_value(ctx, "no_color", no_color, default=False)
+    json_pretty = _cli_flag_value(ctx, "json_pretty", json_pretty, default=False)
+    no_cache = _cli_flag_value(ctx, "no_cache", no_cache, default=False)
+    from_cache_only = _cli_flag_value(ctx, "from_cache_only", from_cache_only, default=False)
+    show_partial = _cli_flag_value(ctx, "show_partial", show_partial, default=False)
+    show_missing = _cli_flag_value(ctx, "show_missing", show_missing, default=True)
+    diagnose_paths = _cli_flag_value(ctx, "diagnose_paths", diagnose_paths, default=False)
+    write_config = _cli_flag_value(ctx, "write_config", write_config, default=False)
+    skip_wizard_flag = _cli_flag_value(ctx, "no_wizard", no_wizard, default=False)
+    html_report_enable = _cli_flag_value(ctx, "html_report_enable", html_report_enable, default=False)
+    html_report_disable = _cli_flag_value(ctx, "html_report_disable", html_report_disable, default=False)
+    debug_color = _cli_flag_value(ctx, "debug_color", debug_color, default=False)
+
     tm_preset = _cli_override_value(ctx, "tm_preset", tm_preset)
     tm_curve = _cli_override_value(ctx, "tm_curve", tm_curve)
     tm_target = _cli_override_value(ctx, "tm_target", tm_target)
@@ -747,7 +784,7 @@ def main(
         "show_missing": show_missing,
         "diagnose_paths": diagnose_paths,
         "write_config": write_config,
-        "skip_wizard": no_wizard,
+        "skip_wizard": skip_wizard_flag,
         "html_report_enable": html_report_enable,
         "html_report_disable": html_report_disable,
         "debug_color": debug_color,

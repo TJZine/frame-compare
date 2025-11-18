@@ -41,6 +41,7 @@ from src.frame_compare.result_snapshot import ResultSource, snapshot_path
 from tests.helpers.runner_env import (
     _CliRunnerEnv,
     _make_config,
+    _make_json_tail_stub,
     _make_runner_preflight,
     _patch_core_helper,
     _patch_load_config,
@@ -95,6 +96,36 @@ def _install_minimal_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_runner_module(monkeypatch, "select_frames", _fake_select)
     _patch_runner_module(monkeypatch, "selection_details_to_json", _selection_details_to_json)
     _patch_runner_module(monkeypatch, "generate_screenshots", _fake_generate)
+
+
+def _install_request_recorder(
+    monkeypatch: pytest.MonkeyPatch,
+    cli_runner_env: _CliRunnerEnv,
+) -> list[runner_module.RunRequest]:
+    """Capture RunRequest objects while returning a stub RunResult."""
+
+    recorded: list[runner_module.RunRequest] = []
+
+    def _fake_run(request: runner_module.RunRequest) -> runner_module.RunResult:
+        recorded.append(request)
+        cfg = cli_runner_env.cfg
+        out_dir = cli_runner_env.media_root / cfg.screenshots.directory_name
+        out_dir.mkdir(parents=True, exist_ok=True)
+        return runner_module.RunResult(
+            files=[],
+            frames=[],
+            out_dir=out_dir,
+            out_dir_created=False,
+            out_dir_created_path=None,
+            root=cli_runner_env.media_root,
+            config=cfg,
+            image_paths=[],
+            slowpics_url=None,
+            json_tail=_make_json_tail_stub(),
+        )
+
+    monkeypatch.setattr(runner_module, "run", _fake_run)
+    return recorded
 
 
 def test_runner_no_impl_attrs() -> None:
@@ -184,6 +215,254 @@ def test_cli_hide_missing_flag_propagates_to_runner(
     show_result = runner.invoke(frame_compare.main, [])
     assert show_result.exit_code == 0, show_result.output
     assert recorded[-1] is True
+
+
+def test_cli_cache_flags_ignore_default_map(
+    runner: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    cli_runner_env: _CliRunnerEnv,
+) -> None:
+    """Cache toggles only change behaviour when the user passes a CLI flag."""
+
+    cli_runner_env.reinstall()
+    recorded = _install_request_recorder(monkeypatch, cli_runner_env)
+
+    result = runner.invoke(
+        frame_compare.main,
+        ["--no-color"],
+        default_map={
+            "no_cache": True,
+            "from_cache_only": True,
+            "show_partial": True,
+            "show_missing": False,
+        },
+    )
+    assert result.exit_code == 0, result.output
+    assert recorded, "run() should have been invoked"
+    request = recorded[-1]
+    assert request.force_cache_refresh is False
+    assert request.from_cache_only is False
+    assert request.show_partial_sections is False
+    assert request.show_missing_sections is True
+
+
+def test_cli_cache_flags_follow_commandline(
+    runner: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    cli_runner_env: _CliRunnerEnv,
+) -> None:
+    """Explicit CLI flags still toggle cache and render behaviour."""
+
+    cli_runner_env.reinstall()
+    recorded = _install_request_recorder(monkeypatch, cli_runner_env)
+
+    no_cache_result = runner.invoke(
+        frame_compare.main,
+        ["--no-color", "--no-cache", "--show-partial", "--hide-missing"],
+    )
+    assert no_cache_result.exit_code == 0, no_cache_result.output
+    request = recorded[-1]
+    assert request.force_cache_refresh is True
+    assert request.show_partial_sections is True
+    assert request.show_missing_sections is False
+
+    cache_only_result = runner.invoke(
+        frame_compare.main,
+        ["--no-color", "--from-cache-only"],
+    )
+    assert cache_only_result.exit_code == 0, cache_only_result.output
+    request = recorded[-1]
+    assert request.from_cache_only is True
+
+
+def test_cli_html_report_flags_ignore_default_map(
+    runner: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    cli_runner_env: _CliRunnerEnv,
+) -> None:
+    """HTML report overrides require explicit user input."""
+
+    cli_runner_env.reinstall()
+    recorded = _install_request_recorder(monkeypatch, cli_runner_env)
+
+    result = runner.invoke(
+        frame_compare.main,
+        ["--no-color"],
+        default_map={
+            "html_report_enable": True,
+            "html_report_disable": True,
+        },
+    )
+    assert result.exit_code == 0, result.output
+    request = recorded[-1]
+    assert request.report_enable_override is None
+
+
+def test_cli_html_report_flags_follow_commandline(
+    runner: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    cli_runner_env: _CliRunnerEnv,
+) -> None:
+    """Ensure --html-report/--no-html-report still force overrides."""
+
+    cli_runner_env.reinstall()
+    recorded = _install_request_recorder(monkeypatch, cli_runner_env)
+
+    enable_result = runner.invoke(frame_compare.main, ["--no-color", "--html-report"])
+    assert enable_result.exit_code == 0, enable_result.output
+    assert recorded[-1].report_enable_override is True
+
+    disable_result = runner.invoke(frame_compare.main, ["--no-color", "--no-html-report"])
+    assert disable_result.exit_code == 0, disable_result.output
+    assert recorded[-1].report_enable_override is False
+
+
+def test_cli_input_override_requires_flag(
+    runner: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    cli_runner_env: _CliRunnerEnv,
+    tmp_path: Path,
+) -> None:
+    """Default maps for --input should not bypass config precedence."""
+
+    cli_runner_env.reinstall()
+    recorded = _install_request_recorder(monkeypatch, cli_runner_env)
+    default_input = str(tmp_path / "override_dir")
+
+    result = runner.invoke(
+        frame_compare.main,
+        ["--no-color"],
+        default_map={"input_dir": default_input, "root_path": str(tmp_path)},
+    )
+    assert result.exit_code == 0, result.output
+    request = recorded[-1]
+    assert request.input_dir is None
+    assert request.root_override is None
+
+
+def test_cli_input_flag_overrides_config(
+    runner: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    cli_runner_env: _CliRunnerEnv,
+    tmp_path: Path,
+) -> None:
+    """Explicit --input and --root flags continue to override config."""
+
+    cli_runner_env.reinstall()
+    recorded = _install_request_recorder(monkeypatch, cli_runner_env)
+    override_dir = tmp_path / "media"
+    override_dir.mkdir(parents=True, exist_ok=True)
+
+    result = runner.invoke(
+        frame_compare.main,
+        [
+            "--no-color",
+            "--root",
+            str(tmp_path),
+            "--input",
+            str(override_dir),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    request = recorded[-1]
+    assert request.root_override == str(tmp_path)
+    assert request.input_dir == str(override_dir)
+
+
+def test_cli_audio_align_track_requires_flag(
+    runner: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    cli_runner_env: _CliRunnerEnv,
+) -> None:
+    """Audio track overrides should remain empty unless passed on the CLI."""
+
+    cli_runner_env.reinstall()
+    recorded = _install_request_recorder(monkeypatch, cli_runner_env)
+
+    result = runner.invoke(
+        frame_compare.main,
+        ["--no-color"],
+        default_map={"audio_align_track_option": ("ref=1",)},
+    )
+    assert result.exit_code == 0, result.output
+    request = recorded[-1]
+    assert tuple(request.audio_track_overrides or ()) == ()
+
+    align_result = runner.invoke(
+        frame_compare.main,
+        ["--no-color", "--audio-align-track", "ref=2", "--audio-align-track", "tgt=4"],
+    )
+    assert align_result.exit_code == 0, align_result.output
+    request = recorded[-1]
+    assert tuple(request.audio_track_overrides or ()) == ("ref=2", "tgt=4")
+
+
+def test_cli_debug_color_requires_flag(
+    runner: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    cli_runner_env: _CliRunnerEnv,
+) -> None:
+    """The color debugging toggle should only activate with --debug-color."""
+
+    cli_runner_env.reinstall()
+    recorded = _install_request_recorder(monkeypatch, cli_runner_env)
+
+    result = runner.invoke(
+        frame_compare.main,
+        ["--no-color"],
+        default_map={"debug_color": True},
+    )
+    assert result.exit_code == 0, result.output
+    request = recorded[-1]
+    assert request.debug_color is False
+
+    debug_result = runner.invoke(frame_compare.main, ["--no-color", "--debug-color"])
+    assert debug_result.exit_code == 0, debug_result.output
+    request = recorded[-1]
+    assert request.debug_color is True
+
+
+def test_render_writer_matches_debug_color(
+    cli_runner_env: _CliRunnerEnv,
+    monkeypatch: pytest.MonkeyPatch,
+    runner: CliRunner,
+) -> None:
+    """JSON render metadata should reflect ffmpeg fallback decisions."""
+
+    cfg = _make_config(cli_runner_env.media_root)
+    cfg.screenshots.use_ffmpeg = True
+    cfg.color.debug_color = False
+    cli_runner_env.reinstall(cfg)
+    _install_minimal_pipeline(monkeypatch)
+    _write_sample_media(cli_runner_env)
+
+    direct = frame_compare.run_cli(None, None)
+    assert direct.json_tail is not None
+    assert direct.json_tail["render"]["writer"] == "ffmpeg"
+
+    debug_direct = frame_compare.run_cli(None, None, debug_color=True)
+    assert debug_direct.json_tail is not None
+    assert debug_direct.json_tail["render"]["writer"] == "vs"
+
+    actual_run = runner_module.run
+    captured: list[runner_module.RunResult] = []
+
+    def _wrapped(request: runner_module.RunRequest) -> runner_module.RunResult:
+        result = actual_run(request)
+        captured.append(result)
+        return result
+
+    monkeypatch.setattr(runner_module, "run", _wrapped)
+
+    cli_result = runner.invoke(
+        frame_compare.main,
+        ["--quiet", "--debug-color"],
+    )
+    assert cli_result.exit_code == 0, cli_result.output
+    assert captured, "CLI run should have produced a RunResult"
+    cli_tail = captured[-1].json_tail
+    assert cli_tail is not None
+    assert cli_tail["render"]["writer"] == "vs"
 
 def test_validate_tonemap_overrides_accepts_valid_values() -> None:
     core_module._validate_tonemap_overrides(

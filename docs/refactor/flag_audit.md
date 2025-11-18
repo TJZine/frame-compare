@@ -24,26 +24,26 @@
 
 ## Global Invariants (Target State)
 
-- [ ] Config + env + CLI precedence is well defined and documented.
-- [ ] "Flag not passed" means "no override"; config values still apply.
-- [ ] `frame_compare.run_cli` and `frame_compare.py` produce the same effective settings for the same config + flags.
-- [ ] All tri-state/boolean fields that can be set from CLI have explicit tests for:
+- [x] Config + env + CLI precedence is well defined and documented.
+- [x] "Flag not passed" means "no override"; config values still apply.
+- [x] `frame_compare.run_cli` and `frame_compare.py` produce the same effective settings for the same config + flags.
+- [x] All tri-state/boolean fields that can be set from CLI have explicit tests for:
   - [ ] No flags
   - [ ] Explicit enable flag
   - [ ] Explicit disable flag
 
 **Critical toggles to verify across config + CLI:**
 
-- [ ] `color.use_dovi` (DoVi)
-- [ ] `color.visualize_lut`
-- [ ] `color.show_clipping`
-- [ ] `screenshots.use_ffmpeg`
-- [ ] `analysis` enable / thresholds (where applicable)
-- [ ] `audio_alignment.enable` / `audio_alignment.use_vspreview`
-- [ ] `slowpics.auto_upload`
-- [ ] `report.enable`
-- [ ] `cli.emit_json_tail`
-- [ ] Cache flags: `--no-cache`, `--from-cache-only`, `--show-partial`, `--show-missing/--hide-missing`
+- [x] `color.use_dovi` (DoVi)
+- [x] `color.visualize_lut`
+- [x] `color.show_clipping`
+- [x] `screenshots.use_ffmpeg`
+- [x] `analysis` enable / thresholds (where applicable)
+- [x] `audio_alignment.enable` / `audio_alignment.use_vspreview`
+- [x] `slowpics.auto_upload`
+- [x] `report.enable`
+- [x] `cli.emit_json_tail`
+- [x] Cache flags: `--no-cache`, `--from-cache-only`, `--show-partial`, `--show-missing/--hide-missing`
 
 ---
 
@@ -124,28 +124,30 @@ Use these commands to compare direct vs Click CLI behaviour for a given config:
 
 ### A3. Review Notes (Review Agent)
 
-- [ ] Verified `frame_compare.run_cli` vs `frame_compare.py` behaviour for:
-  - [ ] DoVi on via config only.
-  - [ ] DoVi off via config only.
-  - [ ] Explicit `--tm-use-dovi` vs `--tm-no-dovi`.
-- [ ] Confirmed no other `--tm-*` flags implicitly override config when not passed.
-- [ ] Documentation aligned (README/CHANGELOG/DECISIONS).
+- [x] Verified `frame_compare.run_cli` vs `frame_compare.py` behaviour for:
+  - [x] DoVi on via config only.
+  - [x] DoVi off via config only.
+  - [x] Explicit `--tm-use-dovi` vs `--tm-no-dovi`.
+- [x] Confirmed no other `--tm-*` flags implicitly override config when not passed.
+- [x] Documentation aligned (README/CHANGELOG/DECISIONS).
 
 #### A3 Findings
 
--
+- `_cli_override_value()` gates all `--tm-*` overrides on Click `ParameterSource.COMMANDLINE`, so default_map/env values never override config when the user stays silent (`frame_compare.py:494-733`). Click’s docs confirm `Context.get_parameter_source()` only reports `COMMANDLINE` for explicit flags (source:https://github.com/pallets/click/blob/main/docs/commands-and-groups.rst@2025-11-18T10:57:24Z via Context7), which matches the behaviour under review.
+- `_apply_cli_tonemap_overrides()` only mutates keys present in `tonemap_overrides`, and `json_tail["tonemap"]`/`["overlay"]`/`["verify"]` reuse the config-backed values emitted by `vs_core.resolve_effective_tonemap` (`src/frame_compare/runner.py:290-333`, `1696-1781`, `1985-2018`). That keeps DoVi, overlay, and verify telemetry identical between direct `frame_compare.run_cli` and the Click CLI.
+- Regression tests cover “no flag vs `--tm-use-dovi/--tm-no-dovi`/`--tm-visualize-lut`/`--tm-show-clipping` plus overlay & verify parity), and they pass alongside static analysis: `.venv/bin/pyright --warnings`, `.venv/bin/ruff check`, and `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/runner/test_dovi_flags.py`.
 
 #### A3 Open Questions
 
--
+- None for Phase 1–2; later tracks (render/screenshots, analysis/cache, etc.) will be re-evaluated during Phase 3.
 
 #### A3 Reviewer
 
--
+- Codex review agent
 
 #### A3 Date
 
--
+- 2025-11-18
 
 ---
 
@@ -196,38 +198,38 @@ Use these commands to compare direct vs Click CLI behaviour for a given config:
 
 #### Screenshots / Render
 
-- [ ] Confirm `[screenshots]` fields: directory, writer, scaling, pad, compression, etc.
-- [ ] Map any CLI flags that touch screenshots.
-- [ ] Verify:
-  - [ ] No hidden defaults override config.
-  - [ ] JSON `render` block matches effective settings.
+- [x] Confirm `[screenshots]` fields: directory, writer, scaling, pad, compression, etc. (`src/datatypes.py:120-171` continues to mirror `cli_layout` render sections.)
+- [x] Map any CLI flags that touch screenshots. (No direct CLI flags today; `debug_color` w/ tonemap pipeline is the only writer-affecting toggle.)
+- [x] Verify:
+  - [x] No hidden defaults override config — runner now derives the render writer from both `cfg.screenshots.use_ffmpeg` **and** `cfg.color.debug_color`, so CLI `--debug-color` no longer forces a silent writer swap (`src/frame_compare/runner.py:1658-1679`).
+  - [x] JSON `render` block matches effective settings — added `tests/runner/test_cli_entry.py::test_render_writer_matches_debug_color` to exercise both `frame_compare.run_cli()` and the Click CLI with/without `--debug-color`.
 
 #### Analysis / Cache
 
-- [ ] Review `[analysis]` config.
-- [ ] Verify `--no-cache`, `--from-cache-only`, `--show-partial`, `--show-missing`:
-  - [ ] Only affect behaviour when explicitly passed.
-  - [ ] Match documentation.
+- [x] Review `[analysis]` config. (`src/datatypes.py:32-119` reconfirmed as source of truth for cache/save settings.)
+- [x] Verify `--no-cache`, `--from-cache-only`, `--show-partial`, `--show-missing`:
+  - [x] Only affect behaviour when explicitly passed — `_cli_flag_value()` now ignores Click `default_map` / env sources so `RunRequest.force_cache_refresh`, `from_cache_only`, and `RenderOptions` toggles only flip when the user provides a flag (`frame_compare.py:714-749`).
+  - [x] Match documentation — regression tests `tests/runner/test_cli_entry.py::test_cli_cache_flags_ignore_default_map` and `::test_cli_cache_flags_follow_commandline` assert both the default-map safety net and the explicit-flag path.
 
 #### Audio Alignment
 
-- [ ] Review `[audio_alignment]` config and overrides (manual trims, vspreview).
-- [ ] Verify CLI flags (e.g., `--audio-align-track`) don't reset config when absent.
+- [x] Review `[audio_alignment]` config and overrides (manual trims, vspreview). (`src/datatypes.py:222-256` + `src/frame_compare/runner.py:590-672` confirmed the config-driven JSON tail fields for enable + VSPreview flags.)
+- [x] Verify CLI flags (e.g., `--audio-align-track`) don't reset config when absent. Added `_cli_override_value` gating for multi-value `--audio-align-track` plus `tests/runner/test_cli_entry.py::test_cli_audio_align_track_requires_flag` to prove default_map values are ignored while explicit flags still propagate.
 
 #### Slowpics / Report / Viewer
 
-- [ ] Review `[slowpics]`, `[report]`, and viewer-related fields.
-- [ ] Verify override semantics for `--html-report`, `--no-html-report`, etc.
+- [x] Review `[slowpics]`, `[report]`, and viewer-related fields (`src/datatypes.py:180-220` + `src/frame_compare/runner.py:536-687`).
+- [x] Verify override semantics for `--html-report`, `--no-html-report`, etc. Gated both flags via `_cli_flag_value()` so config `[report].enable` remains authoritative unless the user passes an override, and covered with `tests/runner/test_cli_entry.py::test_cli_html_report_flags_ignore_default_map` + `::test_cli_html_report_flags_follow_commandline`. Slowpics auto-upload continues to rely solely on `cfg.slowpics.auto_upload`; CLI never injects overrides (`runner.py:536-584` warning path validated during manual trace).
 
 #### Paths / Root / Input
 
-- [ ] Verify precedence: `--root` / `FRAME_COMPARE_ROOT` / sentinel search.
-- [ ] Confirm `--config` / `FRAME_COMPARE_CONFIG` overrides and no surprise fallbacks.
+- [x] Verify precedence: `--root` / `FRAME_COMPARE_ROOT` / sentinel search. `_cli_override_value()` now drops CLI `default_map` values for `--root`, `--config`, and `--input` so preflight discovery continues to resolve root + config path from env/sentinel unless the user passes a flag (`frame_compare.py:700-732`). Tests `test_cli_input_override_requires_flag` / `test_cli_input_flag_overrides_config` exercise both default and explicit behaviour.
+- [x] Confirm `--config` / `FRAME_COMPARE_CONFIG` overrides and no surprise fallbacks. Manual trace (`src/frame_compare/preflight.py:215-411`) + request recorder demonstrate that config path/root overrides only flow through when `ctx.get_parameter_source()==COMMANDLINE`.
 
 #### TMDB / Source / Runtime / CLI
 
-- [ ] Review `[tmdb]`, `[source]`, `[runtime]`, `[cli]`, `[overrides]`.
-- [ ] Ensure fields like `cli.emit_json_tail`, runtime flags, etc., are only overridden intentionally.
+- [x] Review `[tmdb]`, `[source]`, `[runtime]`, `[cli]`, `[overrides]`.
+- [x] Ensure fields like `cli.emit_json_tail`, runtime flags, etc., are only overridden intentionally. Stitched `_cli_flag_value()` into `--debug-color` so the tonemap pipeline only flips into debug mode when asked, leaving `[color].debug_color` and `[cli].emit_json_tail` untouched by default maps or env. Regression tests `test_cli_debug_color_requires_flag` plus the render-writer assertions confirm both CLI entry points preserve config defaults while still honoring explicit flags.
 
 ### B3. Implementation Notes (Dev Agent)
 
@@ -244,28 +246,53 @@ Use these commands to compare direct vs Click CLI behaviour for a given config:
   - Documented every `AppConfig` section plus CLI flag/load-precedence mapping so Phase 3 can reference a single index (Track B → B1/B2).
   - Tightened CLI tonemap overrides to ignore `default_map`/implicit values, keeping control inside config/env for “flag not passed” cases.
   - Extended `tests/runner/test_dovi_flags.py` to pin `--tm-target` CLI overrides vs default-map behaviour and to assert overlay + verify telemetry stays config-driven in both CLI and direct-run entrypoints.
+  - Expanded `_cli_override_value` with `_cli_flag_value` and gated every remaining override-capable CLI flag (`--root/--config/--input`, cache toggles, HTML report, audio track, `--debug-color`) so Click `default_map`/env sources can't silently supersede config/preflight precedence (`frame_compare.py:700-757`). Backed by new tests in `tests/runner/test_cli_entry.py` (`test_cli_cache_flags_ignore_default_map`, `test_cli_html_report_flags_ignore_default_map`, `test_cli_input_override_requires_flag`, `test_cli_audio_align_track_requires_flag`, `test_cli_debug_color_requires_flag`).
+  - Synced render JSON metadata with the actual writer selected when color-debug mode disables ffmpeg (`runner.py:1658-1679`) and validated both entrypoints via `tests/runner/test_cli_entry.py::test_render_writer_matches_debug_color`.
+  - Commands executed for verification:
+    - `./.venv/bin/pyright --warnings`
+    - `./.venv/bin/ruff check`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 ./.venv/bin/pytest -q tests/runner`
 
 ### B4. Review Notes (Review Agent)
 
-- [ ] Verified behaviour against docs and expectations for each domain.
-- [ ] Confirmed no remaining "implicit override" patterns.
-- [ ] Suggested any follow-up tasks (if necessary).
+- [x] Verified behaviour against docs and expectations for each domain.
+- [x] Confirmed no remaining "implicit override" patterns.
+- [x] Suggested any follow-up tasks (if necessary).
 
 #### B4 Findings
 
--
+##### Screenshots / Render
+- Debug toggles now respect config-first precedence: `_cli_flag_value()` only forwards `--debug-color` when a user actually passes the flag, and `runner.run` derives the render writer from `[screenshots].use_ffmpeg` gated by the effective debug flag (`frame_compare.py:739-752`, `src/frame_compare/runner.py:360-420`, `:1659-1679`). `tests/runner/test_cli_entry.py::test_cli_debug_color_requires_flag` plus `::test_render_writer_matches_debug_color` cover both Click CLI sources and direct `frame_compare.run_cli`.
+
+##### Analysis / Cache
+- `--no-cache`, `--from-cache-only`, `--show-partial`, and `--show-missing/--hide-missing` only mutate `RunRequest` when a command-line flag is present (`frame_compare.py:739-747`). `tests/runner/test_cli_entry.py::test_cli_cache_flags_ignore_default_map` / `::follow_commandline` prove the guard rails, and `src/frame_compare/runner.py:500-580` / `:1120-1188` show the corresponding cache probe + recompute paths that honour those flags.
+
+##### Audio Alignment
+- CLI audio-track overrides require explicit `--audio-align-track` inputs, so config-defined trims and offsets remain intact unless the user opts in (`frame_compare.py:708-717`, `tests/runner/test_cli_entry.py::test_cli_audio_align_track_requires_flag`). JSON tail fields for `enable`, `use_vspreview`, preview/manual offsets, and VSPreview commands all come directly from config in `src/frame_compare/runner.py:592-630`, and `tests/runner/test_audio_alignment_cli.py` exercises both config-only and CLI-override scenarios (including vspreview scripts and manual trims).
+
+##### Slowpics / Report / Viewer
+- HTML report toggles only override config when `--html-report`/`--no-html-report` is supplied (`frame_compare.py:748-752`, `tests/runner/test_cli_entry.py::test_cli_html_report_flags_*`). Slowpics upload, shortcut, and cleanup workflows remain config-driven (`frame_compare.py:322-386`, `src/frame_compare/runner.py:640-720`) with no CLI surface, matching Track B’s expectations.
+
+##### Paths / Root / Input
+- Precedence order is CLI flag → env var → sentinel search inside `src/frame_compare/preflight.py:210-333`. `_cli_override_value()` prevents `default_map` values from masquerading as overrides for `--root`, `--config`, or `--input` (`frame_compare.py:703-708`), and `tests/runner/test_cli_entry.py::test_cli_input_override_requires_flag` / `::test_cli_input_flag_overrides_config` validate both cases.
+
+##### TMDB / Source / Runtime / CLI
+- CLI runtime toggles stop at `--quiet/--verbose/--json-pretty`; `[cli].emit_json_tail` and progress styles only respect config (`src/frame_compare/runner.py:500-520`), with `tests/runner/test_cli_entry.py::test_cli_disables_json_tail_output` confirming the Click CLI obeys config defaults. TMDB/source/runtime behaviour stays config-driven (`src/frame_compare/runner.py:700-990`), and no remaining CLI knobs silently mutate `[tmdb]`, `[source]`, or `[runtime]` settings.
+
+##### Cross-entrypoint consistency, docs, and verification
+- `tests/runner/test_dovi_flags.py` plus `tests/runner/test_cli_entry.py::test_render_writer_matches_debug_color` show `frame_compare.run_cli` and the Click CLI emitting identical tonemap/debug metadata for Phases 3–6 toggles. README cache/CLI sections (README.md:340-390) and `CHANGELOG.md` (“Unreleased → Features/Bug Fixes/Chores”) describe the precedence rules documented in Track B, so docs/tests now match code. Re-ran `.venv/bin/pyright --warnings`, `.venv/bin/ruff check`, and `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/runner/test_cli_entry.py tests/runner/test_audio_alignment_cli.py tests/runner/test_dovi_flags.py` to sign off on the behaviour.
 
 #### B4 Follow-ups
 
--
+- No open issues for Track B Phases 3–6; future work can focus on net-new flags or UX.
 
 #### B4 Reviewer
 
--
+- Codex review agent
 
 #### B4 Date
 
--
+- 2025-11-18
 
 ---
 
@@ -288,4 +315,4 @@ When closing a track or major sub-task, run:
 
 ## Open Issues / TODO
 
-- [ ] …
+- [ ] None (no outstanding Track B items after Phase 3–6 review)
