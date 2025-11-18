@@ -41,6 +41,7 @@ def run_cli(
     from_cache_only: bool = ...,
     force_cache_refresh: bool = ...,
     show_partial_sections: bool = ...,
+    show_missing_sections: bool = ...,
 ) -> RunResult: ...
 
 

@@ -251,10 +251,16 @@ class RenderOptions:
     """Toggle cached output presentation."""
 
     show_partial: bool = False
-    show_missing: bool = True
+    show_missing_sections: bool = True
     no_cache_hint: str = "--no-cache"
     partial_label: str = "(from cache, incomplete)"
     missing_label: str = "not available from cache; rerun for details"
+
+    @property
+    def show_missing(self) -> bool:
+        """Backwards-compatible alias for legacy callers."""
+
+        return self.show_missing_sections
 
 
 def snapshot_path(out_dir: Path) -> Path:
@@ -374,11 +380,11 @@ def render_run_result(
         section_id = str(section_id_raw)
         section_state = snapshot.sections.get(section_id)
         if section_state is None:
-            if options.show_missing:
+            if options.show_missing_sections:
                 _render_missing_section(reporter, section, options)
             continue
         if section_state.availability == SectionAvailability.MISSING:
-            if options.show_missing:
+            if options.show_missing_sections:
                 _render_missing_section(reporter, section, options, section_state.note)
             continue
         if section_state.availability == SectionAvailability.PARTIAL and not options.show_partial:

@@ -137,6 +137,7 @@ def run_cli(
     from_cache_only: bool = False,
     force_cache_refresh: bool = False,
     show_partial_sections: bool = False,
+    show_missing_sections: bool = True,
 ) -> RunResult:
     """Delegate to the shared runner module."""
     request = RunRequest(
@@ -155,6 +156,7 @@ def run_cli(
         from_cache_only=from_cache_only,
         force_cache_refresh=force_cache_refresh,
         show_partial_sections=show_partial_sections,
+        show_missing_sections=show_missing_sections,
     )
     return runner.run(request)
 
@@ -172,6 +174,7 @@ def _run_cli_entry(
     no_cache: bool,
     from_cache_only: bool,
     show_partial: bool,
+    show_missing: bool,
     diagnose_paths: bool,
     write_config: bool,
     skip_wizard: bool,
@@ -309,6 +312,7 @@ def _run_cli_entry(
             from_cache_only=from_cache_only,
             force_cache_refresh=no_cache,
             show_partial_sections=show_partial,
+            show_missing_sections=show_missing,
         )
     except CLIAppError as exc:
         print(exc.rich_message)
@@ -528,6 +532,12 @@ def _run_cli_entry(
     help="Display sections marked as partial when rendering cached runs.",
 )
 @click.option(
+    "--show-missing/--hide-missing",
+    "show_missing",
+    default=True,
+    help="Toggle placeholder blocks for sections the cache cannot reconstruct (e.g., viewer/report details).",
+)
+@click.option(
     "--diagnose-paths",
     is_flag=True,
     help="Print the resolved config/input/output paths as JSON and exit.",
@@ -655,6 +665,7 @@ def main(
     no_cache: bool,
     from_cache_only: bool,
     show_partial: bool,
+    show_missing: bool,
     diagnose_paths: bool,
     write_config: bool,
     no_wizard: bool,
@@ -694,6 +705,7 @@ def main(
         "no_cache": no_cache,
         "from_cache_only": from_cache_only,
         "show_partial": show_partial,
+        "show_missing": show_missing,
         "diagnose_paths": diagnose_paths,
         "write_config": write_config,
         "skip_wizard": no_wizard,
@@ -745,6 +757,7 @@ def run_command(ctx: click.Context) -> None:
         no_cache=bool(params.get("no_cache", False)),
         from_cache_only=bool(params.get("from_cache_only", False)),
         show_partial=bool(params.get("show_partial", False)),
+        show_missing=bool(params.get("show_missing", True)),
         diagnose_paths=bool(params.get("diagnose_paths", False)),
         write_config=bool(params.get("write_config", False)),
         skip_wizard=bool(params.get("skip_wizard", False)),

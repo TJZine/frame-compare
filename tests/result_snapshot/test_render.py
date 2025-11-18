@@ -101,7 +101,7 @@ def test_render_run_result_skips_partial_by_default() -> None:
         {"id": "partial", "title": "Partial"},
         {"id": "missing", "title": "Missing"},
     ]
-    options = RenderOptions(show_partial=False, show_missing=False)
+    options = RenderOptions(show_partial=False, show_missing_sections=False)
 
     render_run_result(snapshot=snapshot, reporter=reporter, layout_sections=layout_sections, options=options)
 
@@ -115,12 +115,28 @@ def test_render_run_result_respects_show_partial_flag() -> None:
     layout_sections = [
         {"id": "partial", "title": "Partial"},
     ]
-    options = RenderOptions(show_partial=True, show_missing=False)
+    options = RenderOptions(show_partial=True, show_missing_sections=False)
 
     render_run_result(snapshot=snapshot, reporter=reporter, layout_sections=layout_sections, options=options)
 
     assert reporter.rendered_sections == ["partial"]
     assert any("Partial" in title for title in reporter.section_titles)
+
+
+def test_render_run_result_hides_missing_sections_when_disabled() -> None:
+    reporter = RecordingReporter()
+    snapshot = _make_snapshot()
+    layout_sections = [
+        {"id": "full", "title": "Full"},
+        {"id": "missing", "title": "Missing"},
+    ]
+    options = RenderOptions(show_partial=False, show_missing_sections=False)
+
+    render_run_result(snapshot=snapshot, reporter=reporter, layout_sections=layout_sections, options=options)
+
+    assert reporter.rendered_sections == ["full"]
+    assert all(title != "Missing" for title in reporter.section_titles)
+    assert all("not available from cache" not in line for line in reporter.lines)
 
 
 def test_missing_sections_emit_hint_when_enabled() -> None:
@@ -129,7 +145,7 @@ def test_missing_sections_emit_hint_when_enabled() -> None:
     layout_sections = [
         {"id": "missing", "title": "Missing"},
     ]
-    options = RenderOptions(show_partial=False, show_missing=True, no_cache_hint="--rerun")
+    options = RenderOptions(show_partial=False, show_missing_sections=True, no_cache_hint="--rerun")
 
     render_run_result(snapshot=snapshot, reporter=reporter, layout_sections=layout_sections, options=options)
 

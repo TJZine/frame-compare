@@ -149,6 +149,42 @@ def test_run_cli_requires_snapshot_for_cache_only(
     with pytest.raises(core_module.CLIAppError):
         frame_compare.run_cli(None, None, from_cache_only=True)
 
+
+def test_cli_hide_missing_flag_propagates_to_runner(
+    runner: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    cli_runner_env: _CliRunnerEnv,
+) -> None:
+    """--hide-missing flips RunRequest.show_missing_sections to False."""
+
+    recorded: list[bool] = []
+
+    def _fake_run(request: runner_module.RunRequest) -> runner_module.RunResult:
+        recorded.append(request.show_missing_sections)
+        out_dir = cli_runner_env.media_root / cli_runner_env.cfg.screenshots.directory_name
+        out_dir.mkdir(parents=True, exist_ok=True)
+        return runner_module.RunResult(
+            files=[],
+            frames=[],
+            out_dir=out_dir,
+            out_dir_created=False,
+            out_dir_created_path=None,
+            root=cli_runner_env.media_root,
+            config=cli_runner_env.cfg,
+            image_paths=[],
+            json_tail=None,
+        )
+
+    monkeypatch.setattr(runner_module, "run", _fake_run)
+
+    hide_result = runner.invoke(frame_compare.main, ["--hide-missing"])
+    assert hide_result.exit_code == 0, hide_result.output
+    assert recorded and recorded[-1] is False
+
+    show_result = runner.invoke(frame_compare.main, [])
+    assert show_result.exit_code == 0, show_result.output
+    assert recorded[-1] is True
+
 def test_validate_tonemap_overrides_accepts_valid_values() -> None:
     core_module._validate_tonemap_overrides(
         {

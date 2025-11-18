@@ -663,8 +663,20 @@
     - Verification: `npm test`
 - *2025-11-17:* fix(snapshot): reject corrupt cache payloads and persist per-section availability so cached renders hide incomplete blocks by default.
   - Problem: `RunResultSnapshot.from_json_dict()` trusted whatever JSON types landed in `created_at`, `sections`, or `json_tail`, so malformed cache files could crash cache-only runs. The runner also hard-coded every CLI section to `FULL`, so publishing/render sections still surfaced even when slow.pics uploads were disabled or screenshots never materialised.
-  - Decision: Added `SnapshotDecodeError` guards plus list coercion helpers to validate ISO timestamps and mapping types (per CPython’s `datetime.fromisoformat` requirements, [source](https://github.com/python/cpython/blob/v3.11.14/Doc/library/datetime.rst) @ 2025-11-17T16:50:00Z) and taught `load_snapshot()` to treat bad payloads as cache misses. Runner builds a `SectionState` map (default `MISSING`), marks success cases `FULL`, and downgrades `[RENDER]`/`[PUBLISH]` to `PARTIAL`/`MISSING` when screenshots are absent or slow.pics uploads are disabled—these notes propagate into snapshots so `--show-partial`/`--show-missing` actually control cached output. Added regression tests for corrupt cache files and snapshot-driven render toggles, and documented the new semantics in README/CHANGELOG.
+  - Decision: Added `SnapshotDecodeError` guards plus list coercion helpers to validate ISO timestamps and mapping types (per CPython's `datetime.fromisoformat` requirements, [source](https://github.com/python/cpython/blob/v3.11.14/Doc/library/datetime.rst) @ 2025-11-17T16:50:00Z) and taught `load_snapshot()` to treat bad payloads as cache misses. Runner builds a `SectionState` map (default `MISSING`), marks success cases `FULL`, and downgrades `[RENDER]`/`[PUBLISH]` to `PARTIAL`/`MISSING` when screenshots are absent or slow.pics uploads are disabled-these notes propagate into snapshots so `--show-partial`/`--show-missing` actually control cached output. Added regression tests for corrupt cache files and snapshot-driven render toggles, and documented the new semantics in README/CHANGELOG.
   - Verification:
     - `.venv\Scripts\pyright --warnings`
     - `.venv\Scripts\ruff check`
     - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv\Scripts\pytest -q tests/runner/test_cli_entry.py tests/result_snapshot`
+- *2025-11-18:* feat(cli cache UX): expose `--show-missing/--hide-missing`, propagate `show_missing_sections` through the public API, and broaden section availability so cached runs only render viewer/report/audio/VSPreview blocks when data exists.
+  - Problem: The CLI always printed "(not available from cache…)" banners for sections marked `MISSING`, so operators couldn't suppress them when reviewing cache-only runs. Section availability metadata only covered `[RENDER]`/`[PUBLISH]`, so cached output spuriously rendered audio alignment, VSPreview, and viewer/report blocks even when HTML reports, offsets, or dependencies were absent.
+  - Decision: Added `show_missing_sections` to `RenderOptions`, `RunRequest`, `run_cli`, stubs, and the Click entry point, wiring paired `--show-missing/--hide-missing` flags (default on) through the CLI. Introduced `_apply_section_availability_overrides()` so the runner now marks viewer/report, audio alignment, VSPreview, and slow.pics sections as `MISSING`/`PARTIAL` based on cached metadata, then updated README/CHANGELOG/docs to explain the new flag and cache heuristics. Added regression tests for the renderer, CLI flag plumbing, and the availability helper.
+  - Verification:
+    - `Get-Date -AsUTC -Format 'yyyy-MM-dd'`  `2025-11-18`
+    - `.venv\Scripts\pyright --warnings`  `0 errors, 0 warnings, 0 informations`
+    - `.venv\Scripts\ruff check`  `All checks passed!`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv\Scripts\pytest -q tests/result_snapshot tests/runner/test_cli_entry.py tests/runner/test_section_availability.py` 
+      ```
+      ........................................                                 [100%]
+      40 passed in 0.51s
+      ```

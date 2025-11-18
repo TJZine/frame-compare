@@ -338,6 +338,7 @@ Fine-grained overrides (`smoothing_period`, `scene_threshold_*`, `percentile`, `
 | `--no-cache` | Ignore cached frame metrics and recompute selection data for this run |
 | `--from-cache-only` | Render the last `.frame_compare.run.json` snapshot and exit |
 | `--show-partial` | Display sections marked as partial when rendering cached runs |
+| `--show-missing` / `--hide-missing` | Show (default) or suppress banners for sections missing from cached runs |
 | `--quiet` / `--verbose` / `--no-color` / `--json-pretty` | Adjust console behavior |
 | `wizard`, `preset`, `doctor` | Subcommands for guided setup, presets, dependency checks |
 
@@ -348,10 +349,11 @@ Exit codes: `0` success, `2` preflight error, `3` runtime failure, `>3` module-s
 Every run emits a snapshot of the rendered layout (including JSON tail and warning metadata) to `<screenshots_dir>/.frame_compare.run.json`. Subsequent runs default to rendering sections from the live pipeline, but you can:
 
 - print cached output instantly with `--from-cache-only` (fails when the snapshot file is missing),
-- force a fresh recomputation by passing `--no-cache`, and
-- surface partial sections recovered from cache artifacts with `--show-partial`.
+- force a fresh recomputation by passing `--no-cache`,
+- surface partial sections recovered from cache artifacts with `--show-partial`, and
+- show/hide placeholder banners for missing sections with `--show-missing` (default) / `--hide-missing`.
 
-Each snapshot records whether a CLI section rendered fully, partially, or not at all. Optional sections such as `[RENDER]` and `[PUBLISH]` default to `missing` when screenshots or slow.pics uploads are unavailable; reruns can opt into those sections with `--show-partial`/`--show-missing`.
+Each snapshot records whether a CLI section rendered fully, partially, or not at all. Optional sections such as `[RENDER]`, `[PUBLISH]`, `[AUDIO ALIGN]`, and `[VSPREVIEW]` default to `missing` when screenshots, uploads, or preview metadata are unavailable; reruns can opt into those sections with `--show-partial`, while `--hide-missing` suppresses the warning banners entirely.
 
 Corrupt or truncated snapshots are treated as cache misses, so `--from-cache-only` aborts with the standard "No cached run result found" message rather than raising a decoder error.
 

@@ -139,10 +139,140 @@ class RunRequest:
     from_cache_only: bool = False
     force_cache_refresh: bool = False
     show_partial_sections: bool = False
+    show_missing_sections: bool = True
 
 
 logger = logging.getLogger('frame_compare')
 
+
+def _apply_section_availability_overrides(
+    section_states: Mapping[str, SectionState],
+    mark_section: Callable[[str, SectionAvailability, str | None], None],
+    *,
+    layout_data: Mapping[str, object],
+    result: RunResult,
+) -> None:
+    """Annotate optional sections so cached renders can hide missing content by default."""
+
+    def _mapping_for(key: str) -> dict[str, Any]:
+        raw_value = layout_data.get(key)
+        if isinstance(raw_value, MappingABC):
+            typed_value = cast(Mapping[str, Any], raw_value)
+            return {str(item_key): item_value for item_key, item_value in typed_value.items()}
+        return {}
+
+    if "render" in section_states and not result.image_paths:
+        mark_section(
+            "render",
+            SectionAvailability.PARTIAL,
+            "Screenshots unavailable; rerun without cache to capture fresh images.",
+        )
+
+    slowpics_view: dict[str, Any] = _mapping_for("slowpics")
+    slowpics_status = str(slowpics_view.get("status") or "")
+    slowpics_auto_upload = bool(slowpics_view.get("auto_upload"))
+    if "publish" in section_states:
+        # Publish tracks the slow.pics upload lifecycle.
+        if slowpics_status == "failed":
+            mark_section(
+                "publish",
+                SectionAvailability.PARTIAL,
+                "slow.pics upload failed during the live run.",
+            )
+        elif not slowpics_auto_upload and not result.slowpics_url:
+            mark_section(
+                "publish",
+                SectionAvailability.MISSING,
+                "slow.pics upload disabled for this configuration.",
+            )
+
+    report_block: dict[str, Any] = _mapping_for("report")
+    viewer_block: dict[str, Any] = _mapping_for("viewer")
+    audio_layout: dict[str, Any] = _mapping_for("audio_alignment")
+    vspreview_block: dict[str, Any] = _mapping_for("vspreview")
+
+    # Viewer/report sections only render when we have a destination (HTML report or slow.pics URL).
+    report_enabled = bool(report_block.get("enabled"))
+    report_path = result.report_path
+    if report_path is None:
+        report_path_value = report_block.get("path")
+        if isinstance(report_path_value, Path):
+            report_path = report_path_value
+        elif isinstance(report_path_value, str) and report_path_value:
+            report_path = Path(report_path_value)
+    if "report" in section_states:
+        if not report_enabled:
+            mark_section(
+                "report",
+                SectionAvailability.MISSING,
+                "HTML report disabled for this run.",
+            )
+        elif report_path is None:
+            mark_section(
+                "report",
+                SectionAvailability.PARTIAL,
+                "Report metadata exists but the generated files are unavailable from cache.",
+            )
+    viewer_mode = str(viewer_block.get("mode") or "")
+    viewer_destination = viewer_block.get("destination")
+    if "viewer" in section_states:
+        if viewer_mode == "none":
+            mark_section(
+                "viewer",
+                SectionAvailability.MISSING,
+                "Viewer output unavailable; rerun to generate an HTML report or slow.pics link.",
+            )
+        elif not viewer_destination:
+            mark_section(
+                "viewer",
+                SectionAvailability.PARTIAL,
+                "Viewer metadata present but destination details were not captured in the cache.",
+            )
+
+    # Audio alignment output depends on whether the feature is enabled and whether offsets were captured.
+    audio_enabled = bool(audio_layout.get("enabled"))
+    audio_offsets_present = bool(audio_layout.get("offsets_sec")) or bool(audio_layout.get("measurements"))
+    if "audio_align" in section_states:
+        if not audio_enabled:
+            mark_section(
+                "audio_align",
+                SectionAvailability.MISSING,
+                "Audio alignment disabled; enable it to populate this section.",
+            )
+        elif not audio_offsets_present:
+            mark_section(
+                "audio_align",
+                SectionAvailability.PARTIAL,
+                "Audio alignment metadata missing from cache; rerun to recompute offsets.",
+            )
+
+    # VSPreview info relies on the integration being enabled and available.
+    use_vspreview = bool(audio_layout.get("use_vspreview"))
+    missing_block_value = vspreview_block.get("missing")
+    missing_active = False
+    if isinstance(missing_block_value, MappingABC):
+        typed_missing = cast(Mapping[str, Any], missing_block_value)
+        missing_active = bool(typed_missing.get("active"))
+    if "vspreview_info" in section_states:
+        if not use_vspreview:
+            mark_section(
+                "vspreview_info",
+                SectionAvailability.MISSING,
+                "VSPreview integration disabled for this configuration.",
+            )
+        elif missing_active:
+            mark_section(
+                "vspreview_info",
+                SectionAvailability.PARTIAL,
+                "VSPreview dependencies missing; install them to surface preview guidance.",
+            )
+    if "vspreview_missing" in section_states and not missing_active:
+        # The dependency warning section should only render when VSPreview is actually missing.
+        mark_section(
+            "vspreview_missing",
+            SectionAvailability.MISSING,
+            "VSPreview dependencies detected; hide the dependency warning by default.",
+        )
 
 def _apply_cli_tonemap_overrides(color_cfg: Any, overrides: Mapping[str, Any]) -> None:
     if color_cfg is None or not overrides:
@@ -364,7 +494,10 @@ def run(request: RunRequest) -> RunResult:
         for section_obj in layout_sources:
             if isinstance(section_obj, Mapping):
                 layout_sections.append(cast(Mapping[str, Any], section_obj))
-    render_options = RenderOptions(show_partial=request.show_partial_sections)
+    render_options = RenderOptions(
+        show_partial=request.show_partial_sections,
+        show_missing_sections=request.show_missing_sections,
+    )
     collected_warnings: List[str] = []
     if request.from_cache_only:
         cached_snapshot = load_snapshot(result_snapshot_path)
@@ -2202,31 +2335,12 @@ def run(request: RunRequest) -> RunResult:
     for section_id in list(section_states):
         _mark_section(section_id, SectionAvailability.FULL)
 
-    # Render is only truly available when we produced screenshots.
-    if not result.image_paths:
-        _mark_section(
-            "render",
-            SectionAvailability.PARTIAL,
-            "Screenshots unavailable; rerun without cache to capture fresh images.",
-        )
-
-    # Publish tracks the slow.pics upload lifecycle. Document disabled/error states so cache-only
-    # renders can hide the section unless operators request --show-partial/--show-missing.
-    slowpics_view = cast(dict[str, Any], layout_data.get("slowpics", {}))
-    slowpics_status = str(slowpics_view.get("status") or "")
-    slowpics_auto_upload = bool(slowpics_view.get("auto_upload"))
-    if slowpics_status == "failed":
-        _mark_section(
-            "publish",
-            SectionAvailability.PARTIAL,
-            "slow.pics upload failed during the live run.",
-        )
-    elif not slowpics_auto_upload and not result.slowpics_url:
-        _mark_section(
-            "publish",
-            SectionAvailability.MISSING,
-            "slow.pics upload disabled for this configuration.",
-        )
+    _apply_section_availability_overrides(
+        section_states,
+        _mark_section,
+        layout_data=layout_data,
+        result=result,
+    )
     snapshot = build_snapshot(
         values=reporter.values,
         flags=reporter.flags,
@@ -2275,6 +2389,7 @@ def run_cli(
     from_cache_only: bool = False,
     force_cache_refresh: bool = False,
     show_partial_sections: bool = False,
+    show_missing_sections: bool = True,
 ) -> RunResult:
     request = RunRequest(
         config_path=config_path,
@@ -2292,5 +2407,6 @@ def run_cli(
         from_cache_only=from_cache_only,
         force_cache_refresh=force_cache_refresh,
         show_partial_sections=show_partial_sections,
+        show_missing_sections=show_missing_sections,
     )
     return run(request)
