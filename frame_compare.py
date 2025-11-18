@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, MutableMapping, Optional, cast
 
 import click
+from click.core import ParameterSource
 from rich import print
 from rich.console import Console as _Console
 
@@ -487,6 +488,22 @@ def _run_cli_entry(
         print(json_output)
 
 
+def _normalize_tm_toggle(ctx: click.Context, name: str, value: bool | None) -> bool | None:
+    """
+    Treat Click toggles as overrides only when explicitly provided on the command line.
+
+    Returning ``None`` defers to the underlying config so tri-state options stay intact.
+    """
+
+    get_source = getattr(ctx, "get_parameter_source", None)
+    if get_source is None or not callable(get_source):
+        return value
+    source = cast(Optional[ParameterSource], get_source(name))
+    if source is ParameterSource.COMMANDLINE:
+        return value
+    return None
+
+
 @click.group(invoke_without_command=True)
 @click.option(
     "--root",
@@ -692,6 +709,10 @@ def main(
     tm_show_clipping: bool | None,
 ) -> None:
     """Command group entry point that dispatches to subcommands or the default run."""
+
+    tm_use_dovi = _normalize_tm_toggle(ctx, "tm_use_dovi", tm_use_dovi)
+    tm_visualize_lut = _normalize_tm_toggle(ctx, "tm_visualize_lut", tm_visualize_lut)
+    tm_show_clipping = _normalize_tm_toggle(ctx, "tm_show_clipping", tm_show_clipping)
 
     params = {
         "root_path": root_path,

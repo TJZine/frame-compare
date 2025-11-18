@@ -215,8 +215,12 @@ class RunResultSnapshot:
             if not hasattr(json_tail_payload, "items"):
                 raise SnapshotDecodeError("json_tail must be a mapping when present")
             json_tail_map = cast(Mapping[str, Any], json_tail_payload)
-        values_map = cast(Mapping[str, Any], values_payload) if isinstance(values_payload, Mapping) else None
-        flags_map = cast(Mapping[str, Any], flags_payload) if isinstance(flags_payload, Mapping) else None
+        values_map = (
+            cast(Mapping[str, Any], values_payload) if isinstance(values_payload, MappingABC) else None
+        )
+        flags_map = (
+            cast(Mapping[str, Any], flags_payload) if isinstance(flags_payload, MappingABC) else None
+        )
         files_list = _coerce_str_list(cast(Sequence[Any], files_payload) if isinstance(files_payload, list) else None)
         frames_list = _coerce_int_list(
             cast(Sequence[Any], frames_payload) if isinstance(frames_payload, list) else None
@@ -342,7 +346,7 @@ def load_snapshot(path: Path) -> RunResultSnapshot | None:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    if not isinstance(payload, Mapping):
+    if not isinstance(payload, MappingABC):
         return None
     try:
         snapshot = RunResultSnapshot.from_json_dict(cast(Mapping[str, Any], payload))
@@ -425,7 +429,7 @@ def _coerce_json_value(value: Any) -> JsonValue:
         if isinstance(enum_value, (str, int, float, bool)):
             return enum_value
         return str(enum_value)
-    if isinstance(value, Mapping):
+    if isinstance(value, MappingABC):
         mapping_value = cast(Mapping[Any, Any], value)
         return {str(key): _coerce_json_value(inner) for key, inner in mapping_value.items()}
     if isinstance(value, (list, tuple, set)):

@@ -9,6 +9,8 @@ import sys
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Mapping, Optional, cast
 
+from src.frame_compare.env_flags import env_flag_enabled
+
 from .color import _detect_rgb_color_range, normalise_color_metadata  # pyright: ignore[reportPrivateUsage]
 from .env import _get_vapoursynth_module  # pyright: ignore[reportPrivateUsage]
 from .props import (  # pyright: ignore[reportPrivateUsage]
@@ -24,7 +26,7 @@ DOVI_DEBUG_ENV_FLAG = "FRAME_COMPARE_DOVI_DEBUG"
 
 
 def _emit_vs_dovi_debug(payload: Mapping[str, Any]) -> None:
-    if not os.environ.get(DOVI_DEBUG_ENV_FLAG):
+    if not env_flag_enabled(os.environ.get(DOVI_DEBUG_ENV_FLAG)):
         return
     try:
         message = json.dumps(dict(payload), default=str)

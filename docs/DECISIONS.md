@@ -1,8 +1,16 @@
 # Decisions Log
 
+- *2025-11-18:* fix(cli): align DoVi toggle semantics between Click CLI and runner.
+  - Problem: `frame_compare.run_cli()` preserved `[color].use_dovi`, but invoking `frame_compare.main` without any `--tm-*` flags still injected `tonemap_overrides={"use_dovi": false, ...}`, so Dolby Vision metadata was silently disabled, yielding darker screenshots and contradictory JSON tails.
+  - Decision: Use Click's parameter-source inspection to only treat tri-state toggles as overrides when `ParameterSource.COMMANDLINE` reports an explicit flag (per the official guidance on `Context.get_parameter_source`, source:https://github.com/pallets/click/blob/main/docs/commands-and-groups.rst@2025-11-18T07:15:29Z). Added a `_normalize_tm_toggle()` helper to coalesce implicit defaults back to `None`, plus regression tests that pin default inheritance and explicit `--tm-use-dovi`/`--tm-no-dovi` behavior via the CLI runner harness.
+  - Verification:
+    - `.venv\Scripts\pyright --warnings`
+    - `.venv\Scripts\ruff check`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv\Scripts\pytest -q tests/runner/test_dovi_flags.py`
+
 - *2025-11-18:* chore(debug): gate FRAME_COMPARE_DOVI_DEBUG instrumentation across runner + VS core to trace tonemap parity.
   - Problem: Direct `frame_compare.run_cli()` calls and the Click CLI disagreed on `tonemap.use_dovi`, PNG contrast, and cache reuse hints, leaving no shared telemetry to compare config roots, overrides, or VapourSynth tonemap resolution phases.
-  - Decision: Added a guarded `_emit_dovi_debug()` helper in the shared runner and VS tonemap module so setting `FRAME_COMPARE_DOVI_DEBUG=1` prints JSON diagnostics (per Python's logging HOWTO guidance for structured logging, [source](https://github.com/python/cpython/blob/v3.11.14/Doc/howto/logging.rst) @ 2025-11-18T01:30:00Z). Runner logs cover config/root resolution, CLI overrides, cache status, render writer metadata, tonemap JSON assembly, and label derivation; VS core logs capture the incoming color config and the resolved VapourSynth payload for cross-checking entrypoints.
+  - Decision: Added a guarded `_emit_dovi_debug()` helper in the shared runner and VS tonemap module so setting `FRAME_COMPARE_DOVI_DEBUG` to a truthy value (`1`/`true`/`yes`/`on`) prints JSON diagnostics while explicit falsey strings (`0`/`false`/`no`/`off`) keep telemetry disabled (per Python's logging HOWTO guidance for structured logging, [source](https://github.com/python/cpython/blob/v3.11.14/Doc/howto/logging.rst) @ 2025-11-18T01:30:00Z). Runner logs cover config/root resolution, CLI overrides, cache status, render writer metadata, tonemap JSON assembly, and label derivation; VS core logs capture the incoming color config and the resolved VapourSynth payload for cross-checking entrypoints.
   - Verification:
     - `uv run pyright --warnings`
 

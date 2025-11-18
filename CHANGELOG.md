@@ -6,6 +6,7 @@
 ### Bug Fixes
 
 * preserve HDR metadata during negative trim padding ([#157](https://github.com/TJZine/frame-compare/issues/157)) ([6d3cf7b](https://github.com/TJZine/frame-compare/commit/6d3cf7b1bf67a8790820f2c7637255b3fcd33798))
+* respect explicit falsey `FRAME_COMPARE_DOVI_DEBUG` values so telemetry stays disabled unless the flag is set to `1`/`true`
 
 ## [0.0.3](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.2...frame-compare-v0.0.3) (2025-11-15)
 
@@ -30,6 +31,7 @@
 ### Bug Fixes
 
 * keep release-please commits passing commitlint by forcing `chore(ci): release…` pull-request titles
+* prevent the Click CLI from forcing Dolby Vision tonemapping off unless `--tm-use-dovi`/`--tm-no-dovi` is explicitly provided so CLI and direct runs agree
 * ensure tonemap presets override template defaults when configs match reference values and expose preset matrices/comments in `config.toml.template`
 * normalize runner auto letterbox telemetry, document accepted crop inputs, tighten FPS map ordering/logging, and extend cached FPS/metadata tests for probe reuse
 * hydrate cached `suggested_frames`/`suggested_seconds` when reusing offsets files so CLI+VSPreview keep prior recommendations

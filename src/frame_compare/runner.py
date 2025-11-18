@@ -49,6 +49,7 @@ from src.frame_compare.analysis import (
     selection_hash_for_config,
     write_selection_cache_file,
 )
+from src.frame_compare.env_flags import env_flag_enabled
 from src.frame_compare.result_snapshot import (
     RenderOptions,
     ResultSource,
@@ -71,25 +72,6 @@ from src.frame_compare.vs import ClipInitError, ClipProcessError
 from src.screenshot import ScreenshotError, generate_screenshots
 from src.tmdb import TMDBResolution
 
-DOVI_DEBUG_ENV_FLAG = "FRAME_COMPARE_DOVI_DEBUG"
-
-
-def _safe_debug_default(value: Any) -> str:
-    if isinstance(value, Path):
-        return str(value)
-    return str(value)
-
-
-def _emit_dovi_debug(payload: Mapping[str, Any]) -> None:
-    if not os.environ.get(DOVI_DEBUG_ENV_FLAG):
-        return
-    try:
-        message = json.dumps(dict(payload), default=_safe_debug_default)
-    except Exception:
-        logging.getLogger(__name__).debug("Unable to serialize DOVI debug payload", exc_info=True)
-        return
-    print("[DOVI_DEBUG]", message, file=sys.stderr)
-
 from .cli_runtime import (
     CLIAppError,
     CliOutputManager,
@@ -105,21 +87,30 @@ from .cli_runtime import (
     coerce_str_mapping,
     ensure_slowpics_block,
 )
-from .layout_utils import (
-    color_text as _color_text,
-)
-from .layout_utils import (
-    format_kv as _format_kv,
-)
-from .layout_utils import (
-    normalise_vspreview_mode as _normalise_vspreview_mode,
-)
-from .layout_utils import (
-    plan_label as _plan_label,
-)
-from .layout_utils import (
-    sanitize_console_text as _sanitize_console_text,
-)
+from .layout_utils import color_text as _color_text
+from .layout_utils import format_kv as _format_kv
+from .layout_utils import normalise_vspreview_mode as _normalise_vspreview_mode
+from .layout_utils import plan_label as _plan_label
+from .layout_utils import sanitize_console_text as _sanitize_console_text
+
+DOVI_DEBUG_ENV_FLAG = "FRAME_COMPARE_DOVI_DEBUG"
+
+
+def _safe_debug_default(value: Any) -> str:
+    if isinstance(value, Path):
+        return str(value)
+    return str(value)
+
+
+def _emit_dovi_debug(payload: Mapping[str, Any]) -> None:
+    if not env_flag_enabled(os.environ.get(DOVI_DEBUG_ENV_FLAG)):
+        return
+    try:
+        message = json.dumps(dict(payload), default=_safe_debug_default)
+    except Exception:
+        logging.getLogger(__name__).debug("Unable to serialize DOVI debug payload", exc_info=True)
+        return
+    print("[DOVI_DEBUG]", message, file=sys.stderr)
 
 ReporterFactory = Callable[['RunRequest', Path, Console], CliOutputManagerProtocol]
 
