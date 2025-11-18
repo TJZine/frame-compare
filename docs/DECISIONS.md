@@ -1,5 +1,11 @@
 # Decisions Log
 
+- *2025-11-18:* chore(debug): gate FRAME_COMPARE_DOVI_DEBUG instrumentation across runner + VS core to trace tonemap parity.
+  - Problem: Direct `frame_compare.run_cli()` calls and the Click CLI disagreed on `tonemap.use_dovi`, PNG contrast, and cache reuse hints, leaving no shared telemetry to compare config roots, overrides, or VapourSynth tonemap resolution phases.
+  - Decision: Added a guarded `_emit_dovi_debug()` helper in the shared runner and VS tonemap module so setting `FRAME_COMPARE_DOVI_DEBUG=1` prints JSON diagnostics (per Python's logging HOWTO guidance for structured logging, [source](https://github.com/python/cpython/blob/v3.11.14/Doc/howto/logging.rst) @ 2025-11-18T01:30:00Z). Runner logs cover config/root resolution, CLI overrides, cache status, render writer metadata, tonemap JSON assembly, and label derivation; VS core logs capture the incoming color config and the resolved VapourSynth payload for cross-checking entrypoints.
+  - Verification:
+    - `uv run pyright --warnings`
+
 - *2025-11-16:* feat(tonemap): preserve preset semantics and document preset defaults.
   - Problem: Color presets never applied when configs stored template-aligned values because `_sanitize_section()` recorded every raw key as "provided", blocking `_resolve_tonemap_settings()` from sourcing preset defaults. Users also had no reference chart tying presets to actual luminance/smoothing targets, making manual tweaks guesswork.
   - Decision: Compare loader inputs against dataclass defaults (per CPython dataclass guidance, [source](https://github.com/python/cpython/blob/v3.11.14/Doc/library/dataclasses.rst) @ 2025-11-16T21:34:48Z) so `_provided_keys` only tracks genuine overrides, add regression tests spanning loader + VapourSynth tonemap resolution, annotate `_TONEMAP_PRESETS`, and mirror a preset matrix plus inline per-field comments in `src/data/config.toml.template`.

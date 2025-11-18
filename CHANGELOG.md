@@ -42,6 +42,10 @@
 * reuse cached FPS metadata from the initial probe while measuring audio alignment so CLI and VSPreview frame deltas stay non-zero even when ffprobe omits `r_frame_rate`
 * keep Husky `npm test` working on Windows by routing through `tools/run_pytest.mjs` (enforcing `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` by default with an `FC_SKIP_PYTEST_DISABLE=1` escape hatch)
 
+### Chores
+
+- *2025-11-18:* add a `FRAME_COMPARE_DOVI_DEBUG` telemetry mode that emits JSON-formatted logs from both the runner and VapourSynth tonemap resolver so entrypoints can compare config roots, cache status, tonemap overrides, and brightness-affecting parameters when diagnosing DOVI drift.
+
 ## [0.0.2](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.1...frame-compare-v0.0.2) (2025-11-13)
 
 

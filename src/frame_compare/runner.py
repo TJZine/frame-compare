@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import copy
 import importlib
+import json
 import logging
 import math
+import os
+import sys
 import threading
 import time
 import traceback
@@ -67,6 +70,25 @@ from src.frame_compare.slowpics import (
 from src.frame_compare.vs import ClipInitError, ClipProcessError
 from src.screenshot import ScreenshotError, generate_screenshots
 from src.tmdb import TMDBResolution
+
+DOVI_DEBUG_ENV_FLAG = "FRAME_COMPARE_DOVI_DEBUG"
+
+
+def _safe_debug_default(value: Any) -> str:
+    if isinstance(value, Path):
+        return str(value)
+    return str(value)
+
+
+def _emit_dovi_debug(payload: Mapping[str, Any]) -> None:
+    if not os.environ.get(DOVI_DEBUG_ENV_FLAG):
+        return
+    try:
+        message = json.dumps(dict(payload), default=_safe_debug_default)
+    except Exception:
+        logging.getLogger(__name__).debug("Unable to serialize DOVI debug payload", exc_info=True)
+        return
+    print("[DOVI_DEBUG]", message, file=sys.stderr)
 
 from .cli_runtime import (
     CLIAppError,
@@ -355,6 +377,9 @@ def run(request: RunRequest) -> RunResult:
     tonemap_overrides = request.tonemap_overrides
     impl = request.impl_module or importlib.import_module("frame_compare")
     module_file = Path(getattr(impl, '__file__', Path(__file__)))
+    entrypoint_name = (
+        getattr(request.impl_module, "__name__", "runner") if request.impl_module else "runner"
+    )
 
     preflight = preflight_utils.prepare_preflight(
         cli_root=root_override,
@@ -367,9 +392,11 @@ def run(request: RunRequest) -> RunResult:
         skip_auto_wizard=skip_wizard,
     )
     cfg = preflight.config
+    color_cfg = getattr(cfg, "color", None)
+    cfg_use_dovi_before = getattr(color_cfg, "use_dovi", None)
     if tonemap_overrides:
         core.validate_tonemap_overrides(tonemap_overrides)
-        _apply_cli_tonemap_overrides(getattr(cfg, "color", None), tonemap_overrides)
+        _apply_cli_tonemap_overrides(color_cfg, tonemap_overrides)
     if debug_color:
         try:
             setattr(cfg.color, "debug_color", True)
@@ -383,6 +410,25 @@ def run(request: RunRequest) -> RunResult:
     workspace_root = preflight.workspace_root
     root = preflight.media_root
     config_location = preflight.config_path
+    cfg_use_dovi_after = getattr(color_cfg, "use_dovi", None)
+    tonemap_override_keys = sorted(tonemap_overrides.keys()) if tonemap_overrides else []
+    _emit_dovi_debug(
+        {
+            "phase": "pre_vs_effective_tonemap",
+            "entrypoint": entrypoint_name,
+            "config_path": config_location,
+            "workspace_root": workspace_root,
+            "media_root": root,
+            "root_override": root_override,
+            "cfg_use_dovi_before": cfg_use_dovi_before,
+            "cfg_use_dovi_after": cfg_use_dovi_after,
+            "tonemap_override_keys": tonemap_override_keys,
+            "tonemap_override_has_use_dovi": bool(
+                tonemap_overrides and "use_dovi" in tonemap_overrides
+            ),
+            "tonemap_overrides": tonemap_overrides or {},
+        }
+    )
 
     if not root.exists():
         raise CLIAppError(
@@ -1241,6 +1287,20 @@ def run(request: RunRequest) -> RunResult:
         json_tail["analysis"]["cache_progress_message"] = cache_progress_message
 
     layout_data["analysis"] = dict(json_tail["analysis"])
+    _emit_dovi_debug(
+        {
+            "phase": "analysis_cache",
+            "entrypoint": entrypoint_name,
+            "cache_status": cache_status,
+            "cache_reason": cache_reason,
+            "cache_ready": bool(cache_ready),
+            "cache_probe_status": getattr(cache_probe, "status", None) if cache_probe else None,
+            "cache_probe_reason": getattr(cache_probe, "reason", None) if cache_probe else None,
+            "cache_file": cache_info.path if cache_info is not None else None,
+            "analysis_cache_path": analysis_cache_path,
+            "json_cache_reused": json_tail["analysis"]["cache_reused"],
+        }
+    )
     layout_data["clips"]["count"] = len(clip_records)
     layout_data["clips"]["items"] = clip_records
     layout_data["clips"]["ref"] = clip_records[0] if clip_records else {}
@@ -1628,6 +1688,20 @@ def run(request: RunRequest) -> RunResult:
         "ffmpeg_timeout_seconds": float(cfg.screenshots.ffmpeg_timeout_seconds),
     }
     layout_data["render"] = json_tail["render"]
+    _emit_dovi_debug(
+        {
+            "phase": "render_setup",
+            "entrypoint": entrypoint_name,
+            "writer": writer_name,
+            "total_screens": total_screens,
+            "analysis_cache_reused": json_tail.get("analysis", {}).get("cache_reused"),
+            "target_nits_cfg": float(getattr(cfg.color, "target_nits", 0.0)),
+            "contrast_recovery_cfg": float(getattr(cfg.color, "contrast_recovery", 0.0)),
+            "post_gamma_cfg": float(getattr(cfg.color, "post_gamma", 1.0)),
+            "post_gamma_enabled_cfg": bool(getattr(cfg.color, "post_gamma_enable", False)),
+            "use_dovi_cfg": getattr(cfg.color, "use_dovi", None),
+        }
+    )
     effective_tonemap = vs_core.resolve_effective_tonemap(cfg.color)
     json_tail["tonemap"] = {
         "preset": effective_tonemap.get("preset", cfg.color.preset),
@@ -1654,6 +1728,18 @@ def run(request: RunRequest) -> RunResult:
         "visualize_lut": bool(effective_tonemap.get("visualize_lut", getattr(cfg.color, "visualize_lut", False))),
         "show_clipping": bool(effective_tonemap.get("show_clipping", getattr(cfg.color, "show_clipping", False))),
     }
+    _emit_dovi_debug(
+        {
+            "phase": "build_json_tonemap",
+            "entrypoint": entrypoint_name,
+            "cfg_use_dovi": getattr(cfg.color, "use_dovi", None),
+            "effective_use_dovi": effective_tonemap.get("use_dovi"),
+            "json_use_dovi": json_tail["tonemap"]["use_dovi"],
+            "target_nits": json_tail["tonemap"]["target_nits"],
+            "contrast_recovery": json_tail["tonemap"]["contrast_recovery"],
+            "post_gamma": json_tail["tonemap"]["post_gamma"],
+        }
+    )
     metadata_code = json_tail["tonemap"]["metadata"]
     metadata_label_map = {
         0: "auto",
@@ -1685,6 +1771,16 @@ def run(request: RunRequest) -> RunResult:
     else:
         use_dovi_label = "on" if use_dovi_value else "off"
     json_tail["tonemap"]["use_dovi_label"] = use_dovi_label
+    _emit_dovi_debug(
+        {
+            "phase": "final_tonemap_labels",
+            "entrypoint": entrypoint_name,
+            "json_use_dovi": json_tail["tonemap"]["use_dovi"],
+            "json_use_dovi_label": json_tail["tonemap"]["use_dovi_label"],
+            "json_metadata": json_tail["tonemap"]["metadata"],
+            "json_metadata_label": json_tail["tonemap"]["metadata_label"],
+        }
+    )
     layout_data["tonemap"] = json_tail["tonemap"]
     json_tail["overlay"] = {
         "enabled": bool(cfg.color.overlay_enabled),
