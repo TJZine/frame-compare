@@ -30,6 +30,7 @@
 
 ### Bug Fixes
 
+* guard tonemap CLI overrides so Click `default_map`/env-provided values defer to config until a `--tm-*` flag is provided, and extend CLI regression tests for `--tm-target` plus overlay/verify telemetry
 * keep release-please commits passing commitlint by forcing `chore(ci): release…` pull-request titles
 * prevent the Click CLI from forcing Dolby Vision tonemapping off unless `--tm-use-dovi`/`--tm-no-dovi` is explicitly provided so CLI and direct runs agree
 * ensure tonemap presets override template defaults when configs match reference values and expose preset matrices/comments in `config.toml.template`

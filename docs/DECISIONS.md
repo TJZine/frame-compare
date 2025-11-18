@@ -1,5 +1,13 @@
 # Decisions Log
 
+- *2025-11-18:* fix(cli): ignore Click `default_map`/env-provided tonemap defaults unless the user passes a `--tm-*` flag.
+  - Problem: `CliRunner` populates Click defaults via `default_map`/environment, so `frame_compare.main` kept treating inherited values as CLI overrides and overwrote `[color]` config even when the user never opted in.
+  - Decision: Added `_cli_override_value()` so `_run_cli_entry()` only forwards tonemap overrides when `ctx.get_parameter_source(name)` reports `COMMANDLINE`, per the Click docs (source:https://github.com/pallets/click/blob/main/docs/commands-and-groups.rst@2025-11-18T08:28:30Z). Refreshed `tests/runner/test_dovi_flags.py` with new `CliRunner` width hints to keep Rich from wrapping JSON, plus coverage for `--tm-target`, default-map inheritance, and overlay/verify telemetry.
+  - Verification:
+    - `.venv\Scripts\pyright --warnings`
+    - `.venv\Scripts\ruff check`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv\Scripts\pytest -q tests/runner/test_dovi_flags.py`
+
 - *2025-11-18:* fix(cli): align DoVi toggle semantics between Click CLI and runner.
   - Problem: `frame_compare.run_cli()` preserved `[color].use_dovi`, but invoking `frame_compare.main` without any `--tm-*` flags still injected `tonemap_overrides={"use_dovi": false, ...}`, so Dolby Vision metadata was silently disabled, yielding darker screenshots and contradictory JSON tails.
   - Decision: Use Click's parameter-source inspection to only treat tri-state toggles as overrides when `ParameterSource.COMMANDLINE` reports an explicit flag (per the official guidance on `Context.get_parameter_source`, source:https://github.com/pallets/click/blob/main/docs/commands-and-groups.rst@2025-11-18T07:15:29Z). Added a `_normalize_tm_toggle()` helper to coalesce implicit defaults back to `None`, plus regression tests that pin default inheritance and explicit `--tm-use-dovi`/`--tm-no-dovi` behavior via the CLI runner harness.

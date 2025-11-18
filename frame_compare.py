@@ -12,7 +12,7 @@ import webbrowser
 from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, MutableMapping, Optional, cast
+from typing import Any, Callable, Dict, Iterable, MutableMapping, Optional, TypeVar, cast
 
 import click
 from click.core import ParameterSource
@@ -488,11 +488,15 @@ def _run_cli_entry(
         print(json_output)
 
 
-def _normalize_tm_toggle(ctx: click.Context, name: str, value: bool | None) -> bool | None:
-    """
-    Treat Click toggles as overrides only when explicitly provided on the command line.
+T = TypeVar("T")
 
-    Returning ``None`` defers to the underlying config so tri-state options stay intact.
+
+def _cli_override_value(ctx: click.Context, name: str, value: T | None) -> T | None:
+    """
+    Return ``value`` only when the corresponding CLI option originated from the command line.
+
+    Click's ``default_map`` and other implicit sources should defer to config defaults so the
+    runtime path mirrors ``frame_compare.run_cli`` unless the user explicitly passes a flag.
     """
 
     get_source = getattr(ctx, "get_parameter_source", None)
@@ -710,9 +714,23 @@ def main(
 ) -> None:
     """Command group entry point that dispatches to subcommands or the default run."""
 
-    tm_use_dovi = _normalize_tm_toggle(ctx, "tm_use_dovi", tm_use_dovi)
-    tm_visualize_lut = _normalize_tm_toggle(ctx, "tm_visualize_lut", tm_visualize_lut)
-    tm_show_clipping = _normalize_tm_toggle(ctx, "tm_show_clipping", tm_show_clipping)
+    tm_preset = _cli_override_value(ctx, "tm_preset", tm_preset)
+    tm_curve = _cli_override_value(ctx, "tm_curve", tm_curve)
+    tm_target = _cli_override_value(ctx, "tm_target", tm_target)
+    tm_dst_min = _cli_override_value(ctx, "tm_dst_min", tm_dst_min)
+    tm_knee = _cli_override_value(ctx, "tm_knee", tm_knee)
+    tm_dpd_preset = _cli_override_value(ctx, "tm_dpd_preset", tm_dpd_preset)
+    tm_dpd_black_cutoff = _cli_override_value(ctx, "tm_dpd_black_cutoff", tm_dpd_black_cutoff)
+    tm_gamma = _cli_override_value(ctx, "tm_gamma", tm_gamma)
+    tm_smoothing = _cli_override_value(ctx, "tm_smoothing", tm_smoothing)
+    tm_scene_low = _cli_override_value(ctx, "tm_scene_low", tm_scene_low)
+    tm_scene_high = _cli_override_value(ctx, "tm_scene_high", tm_scene_high)
+    tm_percentile = _cli_override_value(ctx, "tm_percentile", tm_percentile)
+    tm_contrast = _cli_override_value(ctx, "tm_contrast", tm_contrast)
+    tm_metadata = _cli_override_value(ctx, "tm_metadata", tm_metadata)
+    tm_use_dovi = _cli_override_value(ctx, "tm_use_dovi", tm_use_dovi)
+    tm_visualize_lut = _cli_override_value(ctx, "tm_visualize_lut", tm_visualize_lut)
+    tm_show_clipping = _cli_override_value(ctx, "tm_show_clipping", tm_show_clipping)
 
     params = {
         "root_path": root_path,
