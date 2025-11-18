@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.7](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.6...frame-compare-v0.0.7) (2025-11-18)
+
+
+### Bug Fixes
+
+* **cli:** gate non-tonemap overrides and sync render telemetry ([f896de8](https://github.com/TJZine/frame-compare/commit/f896de81182d2ae9563ad561d50e98e653a4cbf4))
+* guard tonemap CLI overrides from implicit defaults ([b49c873](https://github.com/TJZine/frame-compare/commit/b49c873d56fb87231827a4c372cfa4907c48b7e1))
+* guard tonemap CLI overrides from implicit defaults ([#163](https://github.com/TJZine/frame-compare/issues/163)) ([c1a7403](https://github.com/TJZine/frame-compare/commit/c1a7403f1f3b20c13f0d72c3a6f5738096e48ec9))
+* merge diverging docs ([30e00df](https://github.com/TJZine/frame-compare/commit/30e00df508867618bd042f53d9fa96662cbdca6e))
+* retain unique encodes in HTML report ([615ee2a](https://github.com/TJZine/frame-compare/commit/615ee2a80a8cdd5f825b366ae3b8ffa19dcdf7e9))
+
+
+### Documentation
+
+* update plan for overlay diagnostics update ([684fe13](https://github.com/TJZine/frame-compare/commit/684fe13fefadcf6166fca2aa8dabb98496b015c7))
+
 ## [0.0.6](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.5...frame-compare-v0.0.6) (2025-11-18)
 
 
