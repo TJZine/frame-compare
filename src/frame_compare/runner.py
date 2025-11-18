@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, cast
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, cast
 
 from rich.console import Console
 from rich.markup import escape
@@ -50,6 +50,8 @@ from src.frame_compare.analysis import (
     write_selection_cache_file,
 )
 from src.frame_compare.env_flags import env_flag_enabled
+from src.frame_compare.render.naming import SAFE_LABEL_META_KEY
+from src.frame_compare.render.naming import sanitise_label as _render_sanitise_label
 from src.frame_compare.result_snapshot import (
     RenderOptions,
     ResultSource,
@@ -113,6 +115,19 @@ def _emit_dovi_debug(payload: Mapping[str, Any]) -> None:
     print("[DOVI_DEBUG]", message, file=sys.stderr)
 
 ReporterFactory = Callable[['RunRequest', Path, Console], CliOutputManagerProtocol]
+
+
+def _assign_unique_safe_labels(plans: Sequence[ClipPlan]) -> None:
+    """Populate per-plan safe labels used for filenames and reports."""
+
+    counts: Dict[str, int] = {}
+    for plan in plans:
+        raw_label = plan.metadata.get("label") or plan.path.stem
+        base = _render_sanitise_label(raw_label)
+        occurrence = counts.get(base, 0) + 1
+        counts[base] = occurrence
+        safe_label = base if occurrence == 1 else f"{base}_{occurrence}"
+        plan.metadata[SAFE_LABEL_META_KEY] = safe_label
 
 
 @dataclass
@@ -997,6 +1012,7 @@ def run(request: RunRequest) -> RunResult:
         )
 
     plans = planner_utils.build_plans(files, metadata, cfg)
+    _assign_unique_safe_labels(plans)
     analyze_path = core.pick_analyze_file(files, metadata, cfg.analysis.analyze_clip, cache_dir=root)
 
     try:

@@ -5,8 +5,11 @@ import re
 from collections.abc import Mapping
 from pathlib import Path
 
+SAFE_LABEL_META_KEY = "_safe_label"
+
 __all__ = [
     "INVALID_LABEL_PATTERN",
+    "SAFE_LABEL_META_KEY",
     "derive_labels",
     "prepare_filename",
     "sanitise_label",
@@ -30,7 +33,11 @@ def derive_labels(source: str, metadata: Mapping[str, str]) -> tuple[str, str]:
     """Return the raw+cleaned labels for *source* using optional metadata."""
 
     raw = metadata.get("label") or Path(source).stem
-    cleaned = sanitise_label(raw)
+    override = metadata.get(SAFE_LABEL_META_KEY)
+    if isinstance(override, str) and override.strip():
+        cleaned = sanitise_label(override)
+    else:
+        cleaned = sanitise_label(raw)
     return raw.strip() or cleaned, cleaned
 
 
