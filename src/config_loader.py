@@ -128,7 +128,7 @@ def _sanitize_section(raw: dict[str, Any], name: str, cls):
         for name, field in cls_fields.items()
         if is_dataclass(field.type)
     }
-    provided_keys = set(raw.keys())
+    raw_keys = set(raw.keys())
     for key, value in raw.items():
         if key in bool_fields:
             cleaned[key] = _coerce_bool(value, f"{name}.{key}")
@@ -144,8 +144,31 @@ def _sanitize_section(raw: dict[str, Any], name: str, cls):
         instance = cls(**cleaned)
     except TypeError as exc:
         raise ConfigError(f"Invalid keys in [{name}]: {exc}") from exc
+    effective_provided: set[str]
+    if not raw_keys:
+        effective_provided = set()
+    else:
+        try:
+            default_instance = cls()
+        except TypeError:
+            # Some dataclasses expect arguments; keep legacy raw-key semantics.
+            effective_provided = set(raw_keys)
+        else:
+            effective_provided = set()
+            for field in fields(cls):
+                field_name = field.name
+                if field_name not in raw_keys:
+                    continue
+                try:
+                    current_value = getattr(instance, field_name)
+                    default_value = getattr(default_instance, field_name)
+                except Exception:
+                    effective_provided.add(field_name)
+                    continue
+                if not _values_match(current_value, default_value):
+                    effective_provided.add(field_name)
     try:
-        setattr(instance, "_provided_keys", provided_keys)
+        setattr(instance, "_provided_keys", effective_provided)
     except Exception:
         pass
     return instance

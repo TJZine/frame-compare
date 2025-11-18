@@ -10,7 +10,7 @@
   "scripts": {
     "lint": ".venv/bin/ruff check",
     "typecheck": ".venv/bin/pyright --warnings",
-    "test": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q",
+    "test": "cross-env-shell node tools/run_pytest.mjs",
     "prepare": "husky"
   },
   "repository": {
@@ -27,6 +27,7 @@
   "devDependencies": {
     "@commitlint/cli": "^20.1.0",
     "@commitlint/config-conventional": "^20.0.0",
+    "cross-env": "^10.1.0",
     "husky": "^9.1.7"
   }
 }

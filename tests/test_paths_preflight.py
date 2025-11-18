@@ -174,7 +174,9 @@ def test_collect_path_diagnostics_reports_expected_structure(tmp_path: Path) -> 
 
     assert report["workspace_root"] == str(root.resolve())
     assert report["media_root"].endswith("comparison_videos")
-    assert report["config_path"].endswith("config/config.toml")
+    config_path = Path(report["config_path"])
+    assert config_path.name == "config.toml"
+    assert config_path.parent.name == "config"
     assert report["config_exists"] is False
     assert set(report["writable"].keys()) == {
         "workspace_root",

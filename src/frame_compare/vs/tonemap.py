@@ -1,10 +1,15 @@
 """Tonemap processing, verification, and screenshot preparation."""
 from __future__ import annotations
 
+import json
 import logging
+import os
 import re
+import sys
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Mapping, Optional, cast
+
+from src.frame_compare.env_flags import env_flag_enabled
 
 from .color import _detect_rgb_color_range, normalise_color_metadata  # pyright: ignore[reportPrivateUsage]
 from .env import _get_vapoursynth_module  # pyright: ignore[reportPrivateUsage]
@@ -17,6 +22,18 @@ from .props import (  # pyright: ignore[reportPrivateUsage]
 )
 
 logger = logging.getLogger("src.frame_compare.vs.tonemap")
+DOVI_DEBUG_ENV_FLAG = "FRAME_COMPARE_DOVI_DEBUG"
+
+
+def _emit_vs_dovi_debug(payload: Mapping[str, Any]) -> None:
+    if not env_flag_enabled(os.environ.get(DOVI_DEBUG_ENV_FLAG)):
+        return
+    try:
+        message = json.dumps(dict(payload), default=str)
+    except Exception:
+        logger.debug("Unable to serialize VS tonemap debug payload", exc_info=True)
+        return
+    print("[DOVI_DEBUG]", message, file=sys.stderr)
 
 class ClipProcessError(RuntimeError):
     """Raised when screenshot preparation fails."""
@@ -344,6 +361,7 @@ def _tonemap_with_retries(
 
 
 _TONEMAP_PRESETS: Dict[str, Dict[str, float | str | bool]] = {
+    # NOTE: Keep these defaults in sync with the preset matrix in src/data/config.toml.template.
     "reference": {
         "tone_curve": "bt.2390",
         "target_nits": 100.0,
@@ -586,7 +604,7 @@ def resolve_effective_tonemap(cfg: Any) -> Dict[str, Any]:
     """Resolve the effective tonemap preset, curve, and luminance for ``cfg``."""
 
     settings = _resolve_tonemap_settings(cfg)
-    return {
+    resolved = {
         "preset": settings.preset,
         "tone_curve": settings.tone_curve,
         "target_nits": float(settings.target_nits),
@@ -605,6 +623,21 @@ def resolve_effective_tonemap(cfg: Any) -> Dict[str, Any]:
         "visualize_lut": bool(settings.visualize_lut),
         "show_clipping": bool(settings.show_clipping),
     }
+    _emit_vs_dovi_debug(
+        {
+            "phase": "vs_resolve_effective_tonemap",
+            "entrypoint": "vs_core",
+            "cfg_preset": getattr(cfg, "preset", None),
+            "cfg_tone_curve": getattr(cfg, "tone_curve", None),
+            "cfg_target_nits": getattr(cfg, "target_nits", None),
+            "cfg_use_dovi": getattr(cfg, "use_dovi", None),
+            "cfg_metadata": getattr(cfg, "metadata", None),
+            "resolved_use_dovi": resolved.get("use_dovi"),
+            "resolved_metadata": resolved.get("metadata"),
+            "resolved_target_nits": resolved.get("target_nits"),
+        }
+    )
+    return resolved
 
 
 def _format_overlay_text(

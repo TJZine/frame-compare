@@ -32,6 +32,8 @@ coverage/
 .codanna
 .codannaignore
 .fastembed_cache
+.serena
+frame_compare_debug.py
 
 # Ignore User Config
 /config.toml

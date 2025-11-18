@@ -38,6 +38,10 @@ def run_cli(
     skip_wizard: bool = ...,
     debug_color: bool = ...,
     tonemap_overrides: Optional[Mapping[str, Any]] = ...,
+    from_cache_only: bool = ...,
+    force_cache_refresh: bool = ...,
+    show_partial_sections: bool = ...,
+    show_missing_sections: bool = ...,
 ) -> RunResult: ...
 
 

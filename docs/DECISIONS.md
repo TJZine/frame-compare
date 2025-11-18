@@ -1,5 +1,27 @@
 # Decisions Log
 
+- *2025-11-18:* fix(cli): align DoVi toggle semantics between Click CLI and runner.
+  - Problem: `frame_compare.run_cli()` preserved `[color].use_dovi`, but invoking `frame_compare.main` without any `--tm-*` flags still injected `tonemap_overrides={"use_dovi": false, ...}`, so Dolby Vision metadata was silently disabled, yielding darker screenshots and contradictory JSON tails.
+  - Decision: Use Click's parameter-source inspection to only treat tri-state toggles as overrides when `ParameterSource.COMMANDLINE` reports an explicit flag (per the official guidance on `Context.get_parameter_source`, source:https://github.com/pallets/click/blob/main/docs/commands-and-groups.rst@2025-11-18T07:15:29Z). Added a `_normalize_tm_toggle()` helper to coalesce implicit defaults back to `None`, plus regression tests that pin default inheritance and explicit `--tm-use-dovi`/`--tm-no-dovi` behavior via the CLI runner harness.
+  - Verification:
+    - `.venv\Scripts\pyright --warnings`
+    - `.venv\Scripts\ruff check`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv\Scripts\pytest -q tests/runner/test_dovi_flags.py`
+
+- *2025-11-18:* chore(debug): gate FRAME_COMPARE_DOVI_DEBUG instrumentation across runner + VS core to trace tonemap parity.
+  - Problem: Direct `frame_compare.run_cli()` calls and the Click CLI disagreed on `tonemap.use_dovi`, PNG contrast, and cache reuse hints, leaving no shared telemetry to compare config roots, overrides, or VapourSynth tonemap resolution phases.
+  - Decision: Added a guarded `_emit_dovi_debug()` helper in the shared runner and VS tonemap module so setting `FRAME_COMPARE_DOVI_DEBUG` to a truthy value (`1`/`true`/`yes`/`on`) prints JSON diagnostics while explicit falsey strings (`0`/`false`/`no`/`off`) keep telemetry disabled (per Python's logging HOWTO guidance for structured logging, [source](https://github.com/python/cpython/blob/v3.11.14/Doc/howto/logging.rst) @ 2025-11-18T01:30:00Z). Runner logs cover config/root resolution, CLI overrides, cache status, render writer metadata, tonemap JSON assembly, and label derivation; VS core logs capture the incoming color config and the resolved VapourSynth payload for cross-checking entrypoints.
+  - Verification:
+    - `uv run pyright --warnings`
+
+- *2025-11-16:* feat(tonemap): preserve preset semantics and document preset defaults.
+  - Problem: Color presets never applied when configs stored template-aligned values because `_sanitize_section()` recorded every raw key as "provided", blocking `_resolve_tonemap_settings()` from sourcing preset defaults. Users also had no reference chart tying presets to actual luminance/smoothing targets, making manual tweaks guesswork.
+  - Decision: Compare loader inputs against dataclass defaults (per CPython dataclass guidance, [source](https://github.com/python/cpython/blob/v3.11.14/Doc/library/dataclasses.rst) @ 2025-11-16T21:34:48Z) so `_provided_keys` only tracks genuine overrides, add regression tests spanning loader + VapourSynth tonemap resolution, annotate `_TONEMAP_PRESETS`, and mirror a preset matrix plus inline per-field comments in `src/data/config.toml.template`.
+  - Verification:
+    - `.venv/Scripts/pyright.exe --warnings`
+    - `.venv/Scripts/ruff.exe check`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/Scripts/pytest.exe -q tests/test_config_loader.py tests/test_vs_core.py tests/runner/test_cli_entry.py tests/test_screenshot.py`
+
 - *2025-11-16:* fix(runner): normalize auto-letterbox telemetry, cached FPS fallbacks, and metadata tests.
   - Problem: `docs/DECISIONS.md` still used bare `source:` notes, operators could not see accepted `auto_letterbox_crop` values without trawling history, the runner serialized enum representations into JSON when configs used `AutoLetterboxCropMode`, and `_plan_fps_map()` prioritized `source_fps` before `applied_fps`/`fps_override` so cached hints diverged from `_estimate_frames_from_seconds()`. Missing FPS cache entries also logged only filenames, while the audio-alignment tests skipped asserting correlation strength, `_probe_fps()` avoidance, and metadata probe init parameters/frame-prop reuse.
   - Decision: Converted every `source:` string to Markdown links, documented the accepted letterbox inputs/case-insensitive parsing, and updated the runner to unwrap enum `.value` for JSON consistency (per the CPython Enum HOWTO’s `.value` guidance, [source](https://github.com/python/cpython/blob/v3.11.14/Doc/howto/enum.rst) @ 2025-11-16T03:14:39Z). `_plan_fps_map()` now mirrors the estimator precedence (effective → applied → source → override), rejects non-positive tuples, and the fallback log includes each plan’s label for quick identification. Tests assert the cached correlation (≈0.82), confirm `_probe_fps()` stays unused, lock the metadata `init_clip` calls, and ensure frame-prop dictionaries persist across re-probes.
@@ -637,7 +659,43 @@
       ..........                                                               [100%]
       82 passed in 0.17s
       ```
+- *2025-11-17:* feat(cli cache pipeline): cached runs now emit a canonical `.frame_compare.run.json` snapshot plus a unified renderer so live and cached output share identical sections and semantics.
+  - Problem: Cached reruns reprinted partial sections, summary banners skipped entirely when the pipeline short-circuited, and there was no way to rehydrate CLI output without rerunning the full analysis.
+  - Decision: Introduced `result_snapshot.RunResultSnapshot` (JSON-safe layout/flag/section metadata), persisted it beside screenshots, and taught the runner to render sections exclusively through `render_run_result`. Added CLI flags: `--from-cache-only` (hydrate snapshot and exit), `--no-cache` (skip cache probes/force recompute with metadata), and `--show-partial` (surface cache-derived partial sections). Snapshot metadata includes availability markers so future cache reconstructions can hide sections cleanly.
+  - Verification:
+    - `Get-Date -AsUTC -Format 'yyyy-MM-dd'` → `2025-11-17`
+    - `.venv\Scripts\pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+    - `.venv\Scripts\ruff check` → `All checks passed!`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv\Scripts\pytest -q` → `361 passed in 21.73s`
 - *2025-11-16:* chore(ci): align release-please scope with commitlint policy.
   - Problem: release PR merges were titled `chore(main): release …` because release-please injects `${scope}` from the target branch name in its default pattern, and `main` is not in our allowed `scope-enum`, so commitlint failed on every release branch check.
   - Decision: Set `pull-request-title-pattern` to `chore(ci): release${component} ${version}` in `.github/release-please-config.json`, forcing a `ci` scope that’s already permitted while keeping the rest of the template intact per the customization guidance (source:https://github.com/googleapis/release-please/blob/main/docs/customizing.md@2025-11-16T03:28:42Z).
   - Verification: N/A (configuration-only change).
+- *2025-11-16:* chore(devx): make Husky `npm test` cross-platform and document the pytest plugin toggle.
+  - Problem: Windows Husky runs failed because `npm test` set `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` using POSIX syntax, and there was no documented way to skip that flag on machines that rely on local pytest plugins while still enforcing it on macOS/Linux.
+  - Decision: Added `cross-env` (per usage guidance, source:https://github.com/kentcdodds/cross-env/blob/main/README.md@2025-11-16T17:12:54Z) and routed the `test` script through `tools/run_pytest.mjs`, which locates the per-venv pytest executable, forces `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` by default, and lets developers opt out by exporting `FC_SKIP_PYTEST_DISABLE=1`. Updated `agents.md`/`CODEX.md` so both Codex and advisors know how to flip the override on Windows.
+    - Verification: `npm test`
+- *2025-11-17:* fix(snapshot): reject corrupt cache payloads and persist per-section availability so cached renders hide incomplete blocks by default.
+  - Problem: `RunResultSnapshot.from_json_dict()` trusted whatever JSON types landed in `created_at`, `sections`, or `json_tail`, so malformed cache files could crash cache-only runs. The runner also hard-coded every CLI section to `FULL`, so publishing/render sections still surfaced even when slow.pics uploads were disabled or screenshots never materialised.
+  - Decision: Added `SnapshotDecodeError` guards plus list coercion helpers to validate ISO timestamps and mapping types (per CPython's `datetime.fromisoformat` requirements, [source](https://github.com/python/cpython/blob/v3.11.14/Doc/library/datetime.rst) @ 2025-11-17T16:50:00Z) and taught `load_snapshot()` to treat bad payloads as cache misses. Runner builds a `SectionState` map (default `MISSING`), marks success cases `FULL`, and downgrades `[RENDER]`/`[PUBLISH]` to `PARTIAL`/`MISSING` when screenshots are absent or slow.pics uploads are disabled-these notes propagate into snapshots so `--show-partial`/`--show-missing` actually control cached output. Added regression tests for corrupt cache files and snapshot-driven render toggles, and documented the new semantics in README/CHANGELOG.
+  - Verification:
+    - `.venv\Scripts\pyright --warnings`
+    - `.venv\Scripts\ruff check`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv\Scripts\pytest -q tests/runner/test_cli_entry.py tests/result_snapshot`
+- *2025-11-18:* feat(cli cache UX): expose `--show-missing/--hide-missing`, propagate `show_missing_sections` through the public API, and broaden section availability so cached runs only render viewer/report/audio/VSPreview blocks when data exists.
+  - Problem: The CLI always printed "(not available from cache…)" banners for sections marked `MISSING`, so operators couldn't suppress them when reviewing cache-only runs. Section availability metadata only covered `[RENDER]`/`[PUBLISH]`, so cached output spuriously rendered audio alignment, VSPreview, and viewer/report blocks even when HTML reports, offsets, or dependencies were absent.
+  - Decision: Added `show_missing_sections` to `RenderOptions`, `RunRequest`, `run_cli`, stubs, and the Click entry point, wiring paired `--show-missing/--hide-missing` flags (default on) through the CLI. Introduced `_apply_section_availability_overrides()` so the runner now marks viewer/report, audio alignment, VSPreview, and slow.pics sections as `MISSING`/`PARTIAL` based on cached metadata, then updated README/CHANGELOG/docs to explain the new flag and cache heuristics. Added regression tests for the renderer, CLI flag plumbing, and the availability helper.
+  - Verification:
+    - `Get-Date -AsUTC -Format 'yyyy-MM-dd'`  `2025-11-18`
+    - `.venv\Scripts\pyright --warnings`  `0 errors, 0 warnings, 0 informations`
+    - `.venv\Scripts\ruff check`  `All checks passed!`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv\Scripts\pytest -q tests/result_snapshot tests/runner/test_cli_entry.py tests/runner/test_section_availability.py` 
+      ```
+      ........................................                                 [100%]
+      40 passed in 0.51s
+      ```
+- *2025-11-18:* docs(flag audit): converted the repeating Notes/Findings templates in `docs/refactor/flag_audit.md` from blockquoted headings into ATX `####` headings with per-track prefixes (e.g., "A3 Findings", "B4 Findings") to satisfy MD003/MD024 and retain the template prompts.
+  - Decision: Promote each Notes/Findings/Follow-ups/Reviewer/Date label beneath A2/A3/B3/B4 to real ATX headings and keep their placeholder bullet lists so contributors can still fill in per-track data without duplicate heading IDs.
+  - Impact: Markdownlint navigation panes no longer collide on duplicate headings, and the audit template renders consistently in docs sites.
+  - `Get-Date -AsUTC -Format 'yyyy-MM-dd'`  `2025-11-18`
+  - Verification: N/A (documentation-only change).

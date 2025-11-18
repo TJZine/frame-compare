@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import copy
 import importlib
+import json
 import logging
 import math
+import os
+import sys
 import threading
 import time
 import traceback
@@ -46,6 +49,20 @@ from src.frame_compare.analysis import (
     selection_hash_for_config,
     write_selection_cache_file,
 )
+from src.frame_compare.env_flags import env_flag_enabled
+from src.frame_compare.result_snapshot import (
+    RenderOptions,
+    ResultSource,
+    RunResultSnapshot,
+    SectionAvailability,
+    SectionState,
+    build_snapshot,
+    load_snapshot,
+    render_run_result,
+    resolve_cli_version,
+    snapshot_path,
+    write_snapshot,
+)
 from src.frame_compare.slowpics import (
     SlowpicsAPIError,
     build_shortcut_filename,
@@ -70,21 +87,30 @@ from .cli_runtime import (
     coerce_str_mapping,
     ensure_slowpics_block,
 )
-from .layout_utils import (
-    color_text as _color_text,
-)
-from .layout_utils import (
-    format_kv as _format_kv,
-)
-from .layout_utils import (
-    normalise_vspreview_mode as _normalise_vspreview_mode,
-)
-from .layout_utils import (
-    plan_label as _plan_label,
-)
-from .layout_utils import (
-    sanitize_console_text as _sanitize_console_text,
-)
+from .layout_utils import color_text as _color_text
+from .layout_utils import format_kv as _format_kv
+from .layout_utils import normalise_vspreview_mode as _normalise_vspreview_mode
+from .layout_utils import plan_label as _plan_label
+from .layout_utils import sanitize_console_text as _sanitize_console_text
+
+DOVI_DEBUG_ENV_FLAG = "FRAME_COMPARE_DOVI_DEBUG"
+
+
+def _safe_debug_default(value: Any) -> str:
+    if isinstance(value, Path):
+        return str(value)
+    return str(value)
+
+
+def _emit_dovi_debug(payload: Mapping[str, Any]) -> None:
+    if not env_flag_enabled(os.environ.get(DOVI_DEBUG_ENV_FLAG)):
+        return
+    try:
+        message = json.dumps(dict(payload), default=_safe_debug_default)
+    except Exception:
+        logging.getLogger(__name__).debug("Unable to serialize DOVI debug payload", exc_info=True)
+        return
+    print("[DOVI_DEBUG]", message, file=sys.stderr)
 
 ReporterFactory = Callable[['RunRequest', Path, Console], CliOutputManagerProtocol]
 
@@ -102,6 +128,8 @@ class RunResult:
     slowpics_url: Optional[str] = None
     json_tail: JsonTail | None = None
     report_path: Optional[Path] = None
+    snapshot: RunResultSnapshot | None = None
+    snapshot_path: Optional[Path] = None
 
 
 @dataclass
@@ -121,10 +149,143 @@ class RunRequest:
     console: Console | None = None
     reporter: CliOutputManagerProtocol | None = None
     reporter_factory: ReporterFactory | None = None
+    from_cache_only: bool = False
+    force_cache_refresh: bool = False
+    show_partial_sections: bool = False
+    show_missing_sections: bool = True
 
 
 logger = logging.getLogger('frame_compare')
 
+
+def _apply_section_availability_overrides(
+    section_states: Mapping[str, SectionState],
+    mark_section: Callable[[str, SectionAvailability, str | None], None],
+    *,
+    layout_data: Mapping[str, object],
+    result: RunResult,
+) -> None:
+    """Annotate optional sections so cached renders can hide missing content by default."""
+
+    def _mapping_for(key: str) -> dict[str, Any]:
+        raw_value = layout_data.get(key)
+        if isinstance(raw_value, MappingABC):
+            typed_value = cast(Mapping[str, Any], raw_value)
+            return {str(item_key): item_value for item_key, item_value in typed_value.items()}
+        return {}
+
+    if "render" in section_states and not result.image_paths:
+        mark_section(
+            "render",
+            SectionAvailability.PARTIAL,
+            "Screenshots unavailable; rerun without cache to capture fresh images.",
+        )
+
+    slowpics_view: dict[str, Any] = _mapping_for("slowpics")
+    slowpics_status = str(slowpics_view.get("status") or "")
+    slowpics_auto_upload = bool(slowpics_view.get("auto_upload"))
+    if "publish" in section_states:
+        # Publish tracks the slow.pics upload lifecycle.
+        if slowpics_status == "failed":
+            mark_section(
+                "publish",
+                SectionAvailability.PARTIAL,
+                "slow.pics upload failed during the live run.",
+            )
+        elif not slowpics_auto_upload and not result.slowpics_url:
+            mark_section(
+                "publish",
+                SectionAvailability.MISSING,
+                "slow.pics upload disabled for this configuration.",
+            )
+
+    report_block: dict[str, Any] = _mapping_for("report")
+    viewer_block: dict[str, Any] = _mapping_for("viewer")
+    audio_layout: dict[str, Any] = _mapping_for("audio_alignment")
+    vspreview_block: dict[str, Any] = _mapping_for("vspreview")
+
+    # Viewer/report sections only render when we have a destination (HTML report or slow.pics URL).
+    report_enabled = bool(report_block.get("enabled"))
+    report_path = result.report_path
+    if report_path is None:
+        report_path_value = report_block.get("path")
+        if isinstance(report_path_value, Path):
+            report_path = report_path_value
+        elif isinstance(report_path_value, str) and report_path_value:
+            report_path = Path(report_path_value)
+    if "report" in section_states:
+        if not report_enabled:
+            mark_section(
+                "report",
+                SectionAvailability.MISSING,
+                "HTML report disabled for this run.",
+            )
+        elif report_path is None:
+            mark_section(
+                "report",
+                SectionAvailability.PARTIAL,
+                "Report metadata exists but the generated files are unavailable from cache.",
+            )
+    viewer_mode = str(viewer_block.get("mode") or "")
+    viewer_destination = viewer_block.get("destination")
+    if "viewer" in section_states:
+        if viewer_mode == "none":
+            mark_section(
+                "viewer",
+                SectionAvailability.MISSING,
+                "Viewer output unavailable; rerun to generate an HTML report or slow.pics link.",
+            )
+        elif not viewer_destination:
+            mark_section(
+                "viewer",
+                SectionAvailability.PARTIAL,
+                "Viewer metadata present but destination details were not captured in the cache.",
+            )
+
+    # Audio alignment output depends on whether the feature is enabled and whether offsets were captured.
+    audio_enabled = bool(audio_layout.get("enabled"))
+    audio_offsets_present = bool(audio_layout.get("offsets_sec")) or bool(audio_layout.get("measurements"))
+    if "audio_align" in section_states:
+        if not audio_enabled:
+            mark_section(
+                "audio_align",
+                SectionAvailability.MISSING,
+                "Audio alignment disabled; enable it to populate this section.",
+            )
+        elif not audio_offsets_present:
+            mark_section(
+                "audio_align",
+                SectionAvailability.PARTIAL,
+                "Audio alignment metadata missing from cache; rerun to recompute offsets.",
+            )
+
+    # VSPreview info relies on the integration being enabled and available.
+    use_vspreview = bool(audio_layout.get("use_vspreview"))
+    missing_block_value = vspreview_block.get("missing")
+    missing_active = False
+    if isinstance(missing_block_value, MappingABC):
+        typed_missing = cast(Mapping[str, Any], missing_block_value)
+        missing_active = bool(typed_missing.get("active"))
+    if "vspreview_info" in section_states:
+        if not use_vspreview:
+            mark_section(
+                "vspreview_info",
+                SectionAvailability.MISSING,
+                "VSPreview integration disabled for this configuration.",
+            )
+        elif missing_active:
+            mark_section(
+                "vspreview_info",
+                SectionAvailability.PARTIAL,
+                "VSPreview dependencies missing; install them to surface preview guidance.",
+            )
+    if "vspreview_missing" in section_states and not missing_active:
+        # The dependency warning section should only render when VSPreview is actually missing.
+        mark_section(
+            "vspreview_missing",
+            SectionAvailability.MISSING,
+            "VSPreview dependencies detected; hide the dependency warning by default.",
+        )
 
 def _apply_cli_tonemap_overrides(color_cfg: Any, overrides: Mapping[str, Any]) -> None:
     if color_cfg is None or not overrides:
@@ -207,6 +368,9 @@ def run(request: RunRequest) -> RunResult:
     tonemap_overrides = request.tonemap_overrides
     impl = request.impl_module or importlib.import_module("frame_compare")
     module_file = Path(getattr(impl, '__file__', Path(__file__)))
+    entrypoint_name = (
+        getattr(request.impl_module, "__name__", "runner") if request.impl_module else "runner"
+    )
 
     preflight = preflight_utils.prepare_preflight(
         cli_root=root_override,
@@ -219,9 +383,11 @@ def run(request: RunRequest) -> RunResult:
         skip_auto_wizard=skip_wizard,
     )
     cfg = preflight.config
+    color_cfg = getattr(cfg, "color", None)
+    cfg_use_dovi_before = getattr(color_cfg, "use_dovi", None)
     if tonemap_overrides:
         core.validate_tonemap_overrides(tonemap_overrides)
-        _apply_cli_tonemap_overrides(getattr(cfg, "color", None), tonemap_overrides)
+        _apply_cli_tonemap_overrides(color_cfg, tonemap_overrides)
     if debug_color:
         try:
             setattr(cfg.color, "debug_color", True)
@@ -235,6 +401,25 @@ def run(request: RunRequest) -> RunResult:
     workspace_root = preflight.workspace_root
     root = preflight.media_root
     config_location = preflight.config_path
+    cfg_use_dovi_after = getattr(color_cfg, "use_dovi", None)
+    tonemap_override_keys = sorted(tonemap_overrides.keys()) if tonemap_overrides else []
+    _emit_dovi_debug(
+        {
+            "phase": "pre_vs_effective_tonemap",
+            "entrypoint": entrypoint_name,
+            "config_path": config_location,
+            "workspace_root": workspace_root,
+            "media_root": root,
+            "root_override": root_override,
+            "cfg_use_dovi_before": cfg_use_dovi_before,
+            "cfg_use_dovi_after": cfg_use_dovi_after,
+            "tonemap_override_keys": tonemap_override_keys,
+            "tonemap_override_has_use_dovi": bool(
+                tonemap_overrides and "use_dovi" in tonemap_overrides
+            ),
+            "tonemap_overrides": tonemap_overrides or {},
+        }
+    )
 
     if not root.exists():
         raise CLIAppError(
@@ -266,6 +451,7 @@ def run(request: RunRequest) -> RunResult:
             created_out_dir_path = out_dir.resolve()
         except OSError:
             created_out_dir_path = out_dir
+    result_snapshot_path = snapshot_path(out_dir)
     analysis_cache_path = preflight_utils.resolve_subdir(
         root,
         cfg.analysis.frame_data_filename,
@@ -338,7 +524,54 @@ def run(request: RunRequest) -> RunResult:
                 progress_style = "fill"
     reporter.set_flag("progress_style", progress_style)
     reporter.set_flag("emit_json_tail", emit_json_tail_flag)
+    raw_layout_sections_obj = getattr(getattr(reporter, "layout", None), "sections", [])
+    layout_sections: list[Mapping[str, Any]] = []
+    if isinstance(raw_layout_sections_obj, list):
+        layout_sources = cast(list[Any], raw_layout_sections_obj)
+        for section_obj in layout_sources:
+            if isinstance(section_obj, Mapping):
+                layout_sections.append(cast(Mapping[str, Any], section_obj))
+    render_options = RenderOptions(
+        show_partial=request.show_partial_sections,
+        show_missing_sections=request.show_missing_sections,
+    )
     collected_warnings: List[str] = []
+    if request.from_cache_only:
+        cached_snapshot = load_snapshot(result_snapshot_path)
+        if cached_snapshot is None:
+            raise CLIAppError(
+                f"No cached run result found at {result_snapshot_path}",
+                rich_message=(
+                    "[red]Cached run unavailable.[/red] "
+                    f"Run without --from-cache-only or delete {result_snapshot_path}."
+                ),
+            )
+        cached_snapshot.source = ResultSource.CACHE
+        render_run_result(
+            snapshot=cached_snapshot,
+            reporter=reporter,
+            layout_sections=layout_sections,
+            options=render_options,
+        )
+        cached_tail = cast(JsonTail, cached_snapshot.json_tail) if cached_snapshot.json_tail else None
+        cached_report_path = (
+            Path(cached_snapshot.report_path) if cached_snapshot.report_path else None
+        )
+        return RunResult(
+            files=[Path(path) for path in cached_snapshot.files],
+            frames=list(cached_snapshot.frames),
+            out_dir=out_dir,
+            out_dir_created=False,
+            out_dir_created_path=None,
+            root=root,
+            config=cfg,
+            image_paths=list(cached_snapshot.image_paths),
+            slowpics_url=cached_snapshot.slowpics_url,
+            json_tail=cached_tail,
+            report_path=cached_report_path,
+            snapshot=cached_snapshot,
+            snapshot_path=result_snapshot_path,
+        )
     if bool(getattr(cfg.slowpics, "auto_upload", False)):
         auto_upload_warning = (
             "slow.pics auto-upload is enabled; confirm you trust the destination or disable "
@@ -941,7 +1174,13 @@ def run(request: RunRequest) -> RunResult:
         cache_reason = "no_cache_info"
     else:
         cache_path = cache_info.path
-        if cache_path.exists():
+        if request.force_cache_refresh:
+            cache_status = "recomputed"
+            cache_reason = "forced_refresh"
+            cache_probe = CacheLoadResult(metrics=None, status="missing", reason="forced_refresh")
+            reporter.line("[yellow]Ignoring cached frame metrics (--no-cache requested).[/]")
+            cache_progress_message = "Recomputing frame metrics (forced refresh)."
+        elif cache_path.exists():
             probe_result = probe_cached_metrics(cache_info, cfg.analysis)
             cache_probe = probe_result
             if probe_result.status == "reused":
@@ -1039,6 +1278,20 @@ def run(request: RunRequest) -> RunResult:
         json_tail["analysis"]["cache_progress_message"] = cache_progress_message
 
     layout_data["analysis"] = dict(json_tail["analysis"])
+    _emit_dovi_debug(
+        {
+            "phase": "analysis_cache",
+            "entrypoint": entrypoint_name,
+            "cache_status": cache_status,
+            "cache_reason": cache_reason,
+            "cache_ready": bool(cache_ready),
+            "cache_probe_status": getattr(cache_probe, "status", None) if cache_probe else None,
+            "cache_probe_reason": getattr(cache_probe, "reason", None) if cache_probe else None,
+            "cache_file": cache_info.path if cache_info is not None else None,
+            "analysis_cache_path": analysis_cache_path,
+            "json_cache_reused": json_tail["analysis"]["cache_reused"],
+        }
+    )
     layout_data["clips"]["count"] = len(clip_records)
     layout_data["clips"]["items"] = clip_records
     layout_data["clips"]["ref"] = clip_records[0] if clip_records else {}
@@ -1143,9 +1396,6 @@ def run(request: RunRequest) -> RunResult:
         layout_data["trims"]["tgt"] = _trim_entry(clip_records[1]["label"])
 
     reporter.update_values(layout_data)
-    reporter.render_sections(["vspreview_missing", "vspreview_info", "at_a_glance", "discover", "prepare"])
-    reporter.render_sections(["audio_align"])
-    reporter.render_sections(["analyze"])
     if tmdb_notes:
         for note in tmdb_notes:
             reporter.verbose_line(note)
@@ -1429,6 +1679,20 @@ def run(request: RunRequest) -> RunResult:
         "ffmpeg_timeout_seconds": float(cfg.screenshots.ffmpeg_timeout_seconds),
     }
     layout_data["render"] = json_tail["render"]
+    _emit_dovi_debug(
+        {
+            "phase": "render_setup",
+            "entrypoint": entrypoint_name,
+            "writer": writer_name,
+            "total_screens": total_screens,
+            "analysis_cache_reused": json_tail.get("analysis", {}).get("cache_reused"),
+            "target_nits_cfg": float(getattr(cfg.color, "target_nits", 0.0)),
+            "contrast_recovery_cfg": float(getattr(cfg.color, "contrast_recovery", 0.0)),
+            "post_gamma_cfg": float(getattr(cfg.color, "post_gamma", 1.0)),
+            "post_gamma_enabled_cfg": bool(getattr(cfg.color, "post_gamma_enable", False)),
+            "use_dovi_cfg": getattr(cfg.color, "use_dovi", None),
+        }
+    )
     effective_tonemap = vs_core.resolve_effective_tonemap(cfg.color)
     json_tail["tonemap"] = {
         "preset": effective_tonemap.get("preset", cfg.color.preset),
@@ -1455,6 +1719,18 @@ def run(request: RunRequest) -> RunResult:
         "visualize_lut": bool(effective_tonemap.get("visualize_lut", getattr(cfg.color, "visualize_lut", False))),
         "show_clipping": bool(effective_tonemap.get("show_clipping", getattr(cfg.color, "show_clipping", False))),
     }
+    _emit_dovi_debug(
+        {
+            "phase": "build_json_tonemap",
+            "entrypoint": entrypoint_name,
+            "cfg_use_dovi": getattr(cfg.color, "use_dovi", None),
+            "effective_use_dovi": effective_tonemap.get("use_dovi"),
+            "json_use_dovi": json_tail["tonemap"]["use_dovi"],
+            "target_nits": json_tail["tonemap"]["target_nits"],
+            "contrast_recovery": json_tail["tonemap"]["contrast_recovery"],
+            "post_gamma": json_tail["tonemap"]["post_gamma"],
+        }
+    )
     metadata_code = json_tail["tonemap"]["metadata"]
     metadata_label_map = {
         0: "auto",
@@ -1486,6 +1762,16 @@ def run(request: RunRequest) -> RunResult:
     else:
         use_dovi_label = "on" if use_dovi_value else "off"
     json_tail["tonemap"]["use_dovi_label"] = use_dovi_label
+    _emit_dovi_debug(
+        {
+            "phase": "final_tonemap_labels",
+            "entrypoint": entrypoint_name,
+            "json_use_dovi": json_tail["tonemap"]["use_dovi"],
+            "json_use_dovi_label": json_tail["tonemap"]["use_dovi_label"],
+            "json_metadata": json_tail["tonemap"]["metadata"],
+            "json_metadata_label": json_tail["tonemap"]["metadata_label"],
+        }
+    )
     layout_data["tonemap"] = json_tail["tonemap"]
     json_tail["overlay"] = {
         "enabled": bool(cfg.color.overlay_enabled),
@@ -1495,7 +1781,6 @@ def run(request: RunRequest) -> RunResult:
     layout_data["overlay"] = json_tail["overlay"]
 
     reporter.update_values(layout_data)
-    reporter.render_sections(["render"])
 
     verification_records: List[Dict[str, Any]] = []
 
@@ -1733,7 +2018,6 @@ def run(request: RunRequest) -> RunResult:
     layout_data["verify"] = verify_summary
 
     slowpics_url: Optional[str] = None
-    reporter.render_sections(["publish"])
     reporter.line(_color_text("slow.pics collection (preview):", "blue"))
     inputs_parts = [
         _format_kv(
@@ -1860,7 +2144,6 @@ def run(request: RunRequest) -> RunResult:
                     total=upload_total,
                     stats=initial_stats,
                 )
-                reporter.render_sections(["publish"])
                 with reporter.create_progress("upload_bar", transient=False) as upload_progress:
                     task_id = upload_progress.add_task(
                         "slow.pics upload",
@@ -2054,7 +2337,6 @@ def run(request: RunRequest) -> RunResult:
     json_tail["viewer"] = viewer_block
     layout_data["viewer"] = viewer_block
     reporter.update_values(layout_data)
-    reporter.render_sections(["at_a_glance"])
 
     result = RunResult(
         files=[plan.path for plan in plans],
@@ -2070,43 +2352,6 @@ def run(request: RunRequest) -> RunResult:
         report_path=report_index_path,
     )
 
-    raw_layout_sections = getattr(getattr(reporter, "layout", None), "sections", [])
-    layout_sections: list[dict[str, object]] = []
-    for raw_section in raw_layout_sections:
-        if isinstance(raw_section, Mapping):
-            layout_sections.append(coerce_str_mapping(cast(Mapping[str, object], raw_section)))
-
-    summary_lines: List[str] = []
-    summary_section: dict[str, object] | None = None
-    for section_map in layout_sections:
-        if section_map.get("id") == "summary":
-            summary_section = section_map
-            break
-    if summary_section is not None:
-        items_obj = summary_section.get("items", [])
-        renderer = getattr(reporter, "renderer", None)
-        render_fn = getattr(renderer, "render_template", None)
-        if isinstance(items_obj, list):
-            for entry in cast(list[object], items_obj):
-                if not isinstance(entry, str):
-                    continue
-                item = entry
-                if callable(render_fn):
-                    rendered = render_fn(item, reporter.values, reporter.flags)
-                else:
-                    rendered = item
-                if rendered:
-                    summary_lines.append(str(rendered))
-
-    if not summary_lines:
-        summary_lines = [
-            f"Files     : {len(result.files)}",
-            f"Frames    : {len(result.frames)} -> {result.frames}",
-            f"Output dir: {result.out_dir}",
-        ]
-        if result.slowpics_url:
-            summary_lines.append(f"Slow.pics : {result.slowpics_url}")
-
     for warning in collected_warnings:
         reporter.warn(warning)
 
@@ -2115,7 +2360,7 @@ def run(request: RunRequest) -> RunResult:
     warnings_section: dict[str, object] | None = None
     for section_map in layout_sections:
         if section_map.get("id") == "warnings":
-            warnings_section = section_map
+            warnings_section = dict(section_map)
             break
     fold_config_source = warnings_section.get("fold_labels") if warnings_section is not None else None
     if isinstance(fold_config_source, Mapping):
@@ -2152,21 +2397,64 @@ def run(request: RunRequest) -> RunResult:
 
     layout_data["warnings"] = warnings_data
     reporter.update_values(layout_data)
-    reporter.render_sections(["warnings"])
-    reporter.render_sections(["summary"])
 
-    has_summary_section = any(section.get("id") == "summary" for section in layout_sections)
-    compatibility_required = bool(
-        reporter.flags.get("compat.summary_fallback")
-        or reporter.flags.get("compatibility_mode")
-        or reporter.flags.get("legacy_summary_fallback")
+    section_states: Dict[str, SectionState] = {}
+    for section in layout_sections:
+        section_id_raw = section.get("id")
+        if not section_id_raw:
+            continue
+        section_id = str(section_id_raw).strip()
+        if not section_id:
+            continue
+        section_states[section_id] = SectionState(
+            availability=SectionAvailability.MISSING,
+            note=None,
+        )
+
+    def _mark_section(section_id: str, availability: SectionAvailability, note: str | None = None) -> None:
+        if section_id not in section_states:
+            return
+        section_states[section_id] = SectionState(availability=availability, note=note)
+
+    # Default every known section to FULL once layout data is populated so cache renders
+    # receive the same footprint as the live run. Sections with optional artifacts override
+    # this baseline below.
+    for section_id in list(section_states):
+        _mark_section(section_id, SectionAvailability.FULL)
+
+    _apply_section_availability_overrides(
+        section_states,
+        _mark_section,
+        layout_data=layout_data,
+        result=result,
     )
-
-    if not reporter.quiet and (compatibility_required or not has_summary_section):
-        summary_lines = runtime_utils.build_legacy_summary_lines(layout_data, emit_json_tail=emit_json_tail_flag)
-        reporter.section("Summary")
-        for line in summary_lines:
-            reporter.line(_color_text(line, "green"))
+    snapshot = build_snapshot(
+        values=reporter.values,
+        flags=reporter.flags,
+        layout_sections=layout_sections,
+        section_states=section_states,
+        files=result.files,
+        frames=result.frames,
+        image_paths=result.image_paths,
+        slowpics_url=result.slowpics_url,
+        report_path=result.report_path,
+        warnings=warnings_list,
+        json_tail=result.json_tail,
+        source=ResultSource.LIVE,
+        cli_version=resolve_cli_version(),
+    )
+    result.snapshot = snapshot
+    result.snapshot_path = result_snapshot_path
+    try:
+        write_snapshot(result_snapshot_path, snapshot)
+    except OSError:
+        logger.warning("Failed to persist run snapshot to %s", result_snapshot_path, exc_info=True)
+    render_run_result(
+        snapshot=snapshot,
+        reporter=reporter,
+        layout_sections=layout_sections,
+        options=render_options,
+    )
 
     return result
 
@@ -2185,6 +2473,10 @@ def run_cli(
     debug_color: bool = False,
     tonemap_overrides: Optional[Dict[str, Any]] = None,
     impl_module: ModuleType | None = None,
+    from_cache_only: bool = False,
+    force_cache_refresh: bool = False,
+    show_partial_sections: bool = False,
+    show_missing_sections: bool = True,
 ) -> RunResult:
     request = RunRequest(
         config_path=config_path,
@@ -2199,5 +2491,9 @@ def run_cli(
         debug_color=debug_color,
         tonemap_overrides=tonemap_overrides,
         impl_module=impl_module,
+        from_cache_only=from_cache_only,
+        force_cache_refresh=force_cache_refresh,
+        show_partial_sections=show_partial_sections,
+        show_missing_sections=show_missing_sections,
     )
     return run(request)
