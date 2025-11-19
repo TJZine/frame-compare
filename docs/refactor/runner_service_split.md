@@ -66,7 +66,7 @@
 - [x] Extract TMDB lookup, clip planning, metadata logging from runner; ensure CLI prompts remain injectable (interface for `CliOutputManagerProtocol` interactions).
 - [x] Add `src/frame_compare/services/alignment.py` housing `AlignmentWorkflow`; move audio alignment invocation + manual confirmation logic here.
 - [ ] Introduce shared DTOs (`RunContext`, `ClipInventory`, etc.) to avoid mutating `plans` directly within runner.
-- [ ] Log decisions/tests executed (pyright/ruff/pytest) for these modules.
+- [x] Log decisions/tests executed (pyright/ruff/pytest) for these modules.
 
 **Session module plan:**  
 - `src/frame_compare/services/metadata.py` will define:
@@ -86,10 +86,16 @@
 
 ### A3. Review Notes (Code Review Agent)
 
-- [ ] Verify dataclasses have full annotations (no `Any`) and pass Pyright strictness.
-- [ ] Confirm services have no hidden dependency on runner globals (e.g., module-level state).
-- [ ] Ensure TMDB prompt logic still honours unattended mode (cite regression tests).
-- [ ] List findings, open questions, and follow-up tasks.
+- [x] Verify dataclasses have full annotations (no `Any`) and pass Pyright strictness. `MetadataResolveRequest`, `MetadataResolveResult`, `AlignmentRequest`, and `AlignmentResult` all carry explicit field types, and `.venv/bin/pyright --warnings` (2025‑11‑18) reported `0 errors, 0 warnings`.
+- [x] Confirm services have no hidden dependency on runner globals (e.g., module-level state). Both services rely solely on injected protocols/factories; runner wiring now goes through `build_metadata_resolver()` / `build_alignment_workflow()`.
+- [x] Ensure TMDB prompt logic still honours unattended mode (cite regression tests). `tests/services/test_metadata.py::test_metadata_resolver_records_unattended_ambiguity` exercises the unattended branch and still surfaces the warning-only behaviour previously covered via runner tests.
+- [x] List findings, open questions, and follow-up tasks.
+  - Finding: `MetadataResolver` wraps `selection_utils.probe_clip_metadata` errors as `CLIAppError`, but the new unit suite never asserts this path—add a test that forces `ClipInitError` to guarantee the CLI still receives the sanitized message.
+  - Follow-up: Track B still needs the shared DTO layer (`RunContext`, `ClipInventory`, etc.) to eliminate runner-side plan mutation.
+  - Verification evidence captured this session:  
+    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings` (2025‑11‑18)  
+    - `.venv/bin/ruff check` → `All checks passed!` (2025‑11‑18)  
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` → `416 passed, 1 skipped` (2025‑11‑18)
 
 ---
 

@@ -3,8 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Sequence
 
+import pytest
+
 from src.datatypes import AppConfig, RuntimeConfig, TMDBConfig
-from src.frame_compare.cli_runtime import CliOutputManagerProtocol, ClipPlan
+from src.frame_compare.cli_runtime import CLIAppError, CliOutputManagerProtocol, ClipPlan
 from src.frame_compare.services.metadata import (
     FilesystemProbeProtocol,
     MetadataResolver,
@@ -13,6 +15,7 @@ from src.frame_compare.services.metadata import (
     TMDBClientProtocol,
 )
 from src.frame_compare.tmdb_workflow import TMDBLookupResult
+from src.frame_compare.vs import ClipInitError
 from src.tmdb import TMDBCandidate, TMDBResolution
 from tests.services.conftest import StubReporter, build_base_json_tail, build_service_config
 
@@ -31,6 +34,18 @@ class _StubProbe(FilesystemProbeProtocol):
         if self.calls is None:
             self.calls = []
         self.calls.append((plans, runtime_cfg, cache_dir))
+
+
+class _FailingProbe(FilesystemProbeProtocol):
+    def probe(
+        self,
+        plans: Sequence[ClipPlan],
+        runtime_cfg: RuntimeConfig,
+        cache_dir: Path | None,
+        *,
+        reporter: CliOutputManagerProtocol | None = None,
+    ) -> None:
+        raise ClipInitError("sentinel failure")
 
 
 class _StubTMDBClient(TMDBClientProtocol):
@@ -204,3 +219,37 @@ def test_metadata_resolver_records_tmdb_errors(tmp_path: Path) -> None:
 
     assert result.tmdb_notes[0].startswith("TMDB lookup failed")
     assert warnings == result.tmdb_notes
+
+
+def test_metadata_resolver_raises_cli_error_on_probe_failure(tmp_path: Path) -> None:
+    cfg = build_service_config(tmp_path)
+    reporter = StubReporter()
+    json_tail = build_base_json_tail(cfg)
+    layout_data: dict[str, Any] = {"slowpics": {}, "tmdb": {}}
+    files = [tmp_path / "Clip A.mkv", tmp_path / "Clip B.mkv"]
+    for file in files:
+        file.write_text("z")
+    tmdb_result = TMDBLookupResult(
+        resolution=None,
+        manual_override=None,
+        error_message=None,
+        ambiguous=False,
+    )
+    resolver = MetadataResolver(
+        tmdb_client=_StubTMDBClient(result=tmdb_result),
+        plan_builder=_make_plan_builder(),
+        analyze_picker=_identity_picker,
+        clip_probe=_FailingProbe(),
+    )
+    request = MetadataResolveRequest(
+        cfg=cfg,
+        root=tmp_path,
+        files=files,
+        reporter=reporter,
+        json_tail=json_tail,
+        layout_data=layout_data,
+        collected_warnings=[],
+    )
+
+    with pytest.raises(CLIAppError, match="Failed to open clip"):
+        resolver.resolve(request)
