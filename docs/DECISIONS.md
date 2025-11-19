@@ -5,8 +5,24 @@
   - Decision: Retargeted the refactor checklist to point at `src/datatypes.py`, coerced any report paths to strings before computing relative labels so both `destination` and `destination_label` stay JSON-safe, and refreshed the `probe_clip_metadata` docstring to mention cached snapshots plus the follow-up initialization performed by `init_clips`.
   - Verification:
     - `.venv/bin/pyright --warnings`
+- *2025-11-19:* ci(decision-minute): harden workflow_run context access for Decision Minute generation (source:https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow@2025-11-19).
+  - Problem: VS Code/GitHub Actions diagnostics flagged invalid context usage in `.github/workflows/decision-minute.yml` (`pull_requests[0]` without a guard and undeclared `steps.pr.outputs.*` fields), risking runtime errors when CI completed for non-merged PRs.
+  - Decision: Kept the job gated to successful pull_request workflow_run events, fetched the full PR via `actions/github-script` before proceeding, short-circuited with a notice and empty output when the PR is not merged, and funneled all metadata through the action's `result` output (parsed with `fromJson`) so downstream steps are guarded on actual data rather than implicit outputs.
+  - Verification: Not run (YAML/workflow-only change).
     - `.venv/bin/ruff check`
     - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`
+- *2025-11-19:* fix(net+slowpics+planner): enforce HTTPX timeouts, lock slow.pics progress, guard metadata mismatches.
+  - Problem: `httpx_get_json_with_backoff` never forwarded timeout settings, so retries could hang indefinitely; slow.pics publishers performed `sum(file_sizes[:uploaded])` on each callback without any locking (O(n) work plus data races); and `planner.build_plans` still crashed with `IndexError` when metadata entries lagged behind discovered files.
+  - Decision: Introduced `DEFAULT_HTTP_TIMEOUT` plus an explicit `timeout` parameter on `httpx_get_json_with_backoff`, plumbed it through TMDB `_http_request`/`_perform_search`/`_fetch_alias_titles`, and documented the default against HTTPX's timeout guidance (source:https://github.com/encode/httpx/blob/master/docs/advanced/timeouts.md@2025-11-19 via Context7). Added `UploadProgressTracker` (used by both the service-mode and legacy slow.pics publishers) so callbacks perform O(1) additions under a `threading.Lock`, refreshed `upload_comparison` docs to spell out the thread-safe contract, and extended `tests/runner/test_slowpics_workflow.py` with slice-guarding/perf and multi-threaded tracker tests. Finally, `planner.build_plans` now raises a `CLIAppError` listing the missing files instead of indexing past the metadata list, covered by a new regression test.
+  - Implementation Notes:
+    - Files touched: `src/frame_compare/net.py`, `src/tmdb.py`, `tests/net/test_httpx_backoff.py`, `tests/net/test_httpx_helpers.py`, `src/frame_compare/services/publishers.py`, `src/frame_compare/runner.py`, `src/frame_compare/slowpics.py`, `tests/runner/test_slowpics_workflow.py`, `src/frame_compare/planner.py`, `tests/test_planner.py`.
+    - Follow-ups: none.
+  - Verification:
+    - `.venv/bin/pyright --warnings`
+    - `.venv/bin/ruff check`
+    - `.venv/bin/pytest tests/net -q`
+    - `.venv/bin/pytest tests/runner/test_slowpics_workflow.py -k "progress or upload" -q`
+    - `.venv/bin/pytest tests/test_planner.py -q`
 - *2025-11-19:* fix(cli+cache): guard service-mode flags, metadata typing, and probe-cache parsing.
   - Problem: The CLI allowed users to pass `--service-mode` alongside `--legacy-runner` silently, RunContext assumed metadata dict values were `str`, and both the probe-cache loader and persistence path could still throw when cache keys or payload types drifted (plus `pick_analyze_file` indexed metadata without a bounds check).
   - Decision: Added explicit mutual exclusion for the two runner toggles plus a regression test, widened `RunContext.metadata` to `dict[str, Any]`, skipped metadata lookups when callers pass fewer entries than files, short-circuited cache persistence when a plan forgot to set `probe_cache_key`, and treated malformed JSON payloads as cache misses by wrapping `ClipProbeSnapshot` construction in a try/except.
@@ -793,3 +809,10 @@
   - Problem: Track C’s checklist still showed unchecked tasks with no Implementation/Review notes, operators couldn’t discover the `runner.enable_service_mode` flag outside the CLI, and `run()` never logged whether the publisher services or the legacy path executed, making flag validation difficult.
   - Decision: Filled in Track C planning/implementation/review sections (docs/refactor/runner_service_split.md) with concrete scope, dates, and verification evidence; documented `[runner].enable_service_mode` inside `src/data/config.toml.template` plus README’s CLI/config table; and taught `src/frame_compare/runner.py` to mark a `service_mode_enabled` reporter flag while logging/printing the active publishing mode for each run.
   - Verification: Leveraged the existing Track C command set (pyright/ruff/pytest recorded earlier on 2025-11-19); no code paths outside logging/docs changed and no additional execution was required.
+- *2025-11-19:* feat(diagnostics): extend overlay JSON with DV/HDR/range metadata and gated per-frame metrics.
+  - Problem: the diagnostic overlay roadmap (Track C) left `json_tail["overlay"]["diagnostics"]` empty beyond simple overlays, CLI flag coverage for per-frame metrics was missing, and tests/docs didn’t describe the new data contract.
+  - Decision: centralized the diagnostics helpers (DoVi/HDR/range/frame metrics) to avoid circular imports, taught the runner to always populate the diagnostics block (including gating metadata and per-clip HDR/dynamic-range summaries), added the `[diagnostics].per_frame_nits` config with CLI overrides, and refreshed README + flag audit guidance. New suites cover runner JSON output, CLI flag propagation, overlay text rendering, and the helper module itself.
+  - Verification:
+    - `.venv/bin/pyright --warnings`
+    - `.venv/bin/ruff check`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/runner/test_overlay_diagnostics.py tests/runner/test_cli_entry.py tests/runner/test_dovi_flags.py tests/render/test_overlay_text.py tests/frame_compare/test_diagnostics.py`

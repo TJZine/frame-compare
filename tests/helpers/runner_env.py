@@ -31,6 +31,7 @@ from src.datatypes import (
     AudioAlignmentConfig,
     CLIConfig,
     ColorConfig,
+    DiagnosticsConfig,
     NamingConfig,
     OverridesConfig,
     PathsConfig,
@@ -332,7 +333,23 @@ def _make_json_tail_stub() -> JsonTail:
         "analysis": {},
         "render": {},
         "tonemap": {},
-        "overlay": {},
+        "overlay": {
+            "enabled": True,
+            "template": "",
+            "mode": "minimal",
+            "diagnostics": {
+                "dv": {"enabled": None, "label": "auto"},
+                "frame_metrics": {
+                    "enabled": False,
+                    "per_frame": {},
+                    "gating": {
+                        "config": False,
+                        "cli_override": None,
+                        "overlay_mode": "minimal",
+                    },
+                },
+            },
+        },
         "verify": {
             "count": 0,
             "threshold": 0.0,
@@ -439,6 +456,7 @@ def _make_config(input_dir: Path) -> AppConfig:
         audio_alignment=AudioAlignmentConfig(enable=False),
         report=ReportConfig(enable=False),
         runner=RunnerConfig(),
+        diagnostics=DiagnosticsConfig(),
     )
 
 

@@ -252,6 +252,13 @@ class ReportConfig:
 
 
 @dataclass
+class DiagnosticsConfig:
+    """Diagnostic overlay computation controls."""
+
+    per_frame_nits: bool = False
+
+
+@dataclass
 class AudioAlignmentConfig:
     """Audio-based offset estimation to help align clips before analysis."""
 
@@ -300,3 +307,4 @@ class AppConfig:
     source: SourceConfig
     audio_alignment: AudioAlignmentConfig
     report: ReportConfig
+    diagnostics: DiagnosticsConfig

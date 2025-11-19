@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -184,7 +185,8 @@ class SlowpicsPublisher:
             upload_total = len(request.image_paths)
 
             file_sizes = [self._io.file_size(path) for path in request.image_paths] if upload_total else []
-            total_bytes = sum(file_sizes)
+            progress_tracker = UploadProgressTracker(file_sizes)
+            total_bytes = progress_tracker.total_bytes
             console_width = getattr(reporter.console.size, "width", 80) or 80
             stats_width_limit = max(24, console_width - 32)
 
@@ -213,21 +215,13 @@ class SlowpicsPublisher:
                 stats=_format_stats(0, 0, 0.0),
             )
 
-            start_time = time.perf_counter()
-            uploaded_files = 0
-            uploaded_bytes = 0
-
             def _advance_upload(count: int) -> None:
-                nonlocal uploaded_files, uploaded_bytes
-                uploaded_files += count
-                consumed = sum(file_sizes[:uploaded_files])
-                uploaded_bytes = min(consumed, total_bytes)
-                elapsed = max(time.perf_counter() - start_time, 1e-6)
+                files_done, bytes_done, elapsed = progress_tracker.advance(count)
                 reporter.update_progress_state(
                     "upload_bar",
-                    current=min(uploaded_files, upload_total),
+                    current=min(files_done, upload_total),
                     total=upload_total,
-                    stats=_format_stats(uploaded_files, uploaded_bytes, elapsed),
+                    stats=_format_stats(files_done, bytes_done, elapsed),
                 )
 
             try:
@@ -343,3 +337,26 @@ class ReportPublisher:
             report_block["path"] = None
 
         return ReportPublisherResult(report_path=report_index_path)
+class UploadProgressTracker:
+    """Track uploaded file/byte counts in a thread-safe manner."""
+
+    def __init__(self, file_sizes: Sequence[int]) -> None:
+        self._file_sizes = tuple(file_sizes)
+        self.total_files = len(self._file_sizes)
+        self.total_bytes = sum(self._file_sizes)
+        self._uploaded_files = 0
+        self._uploaded_bytes = 0
+        self._start_time = time.perf_counter()
+        self._lock = threading.Lock()
+
+    def advance(self, count: int) -> tuple[int, int, float]:
+        increment = max(count, 0)
+        with self._lock:
+            target = min(self._uploaded_files + increment, self.total_files)
+            while self._uploaded_files < target:
+                index = self._uploaded_files
+                size = self._file_sizes[index] if index < self.total_files else 0
+                self._uploaded_bytes = min(self._uploaded_bytes + size, self.total_bytes)
+                self._uploaded_files += 1
+            elapsed = max(time.perf_counter() - self._start_time, 1e-6)
+            return self._uploaded_files, self._uploaded_bytes, elapsed

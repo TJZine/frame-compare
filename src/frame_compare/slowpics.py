@@ -458,7 +458,9 @@ def upload_comparison(
         multiple worker threads. Callers should ensure the callback is thread-safe
         (for example, by using ``threading.Lock`` or other synchronization
         primitives) if they mutate shared state or emit UI updates inside the
-        callback.
+        callback. The CLI publishers use a dedicated lock-protected progress
+        tracker so file counts/byte totals stay consistent while worker threads
+        emit callbacks.
     """
 
     if not image_files:

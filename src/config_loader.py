@@ -20,6 +20,7 @@ from .datatypes import (
     AutoLetterboxCropMode,
     CLIConfig,
     ColorConfig,
+    DiagnosticsConfig,
     NamingConfig,
     OverridesConfig,
     PathsConfig,
@@ -429,6 +430,7 @@ def load_config(path: str) -> AppConfig:
             raw.get("audio_alignment", {}), "audio_alignment", AudioAlignmentConfig
         ),
         report=_sanitize_section(raw.get("report", {}), "report", ReportConfig),
+        diagnostics=_sanitize_section(raw.get("diagnostics", {}), "diagnostics", DiagnosticsConfig),
     )
 
     normalized_style = str(app.cli.progress.style).strip().lower()

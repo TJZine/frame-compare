@@ -23,6 +23,7 @@ from src.datatypes import (
     AudioAlignmentConfig,
     CLIConfig,
     ColorConfig,
+    DiagnosticsConfig,
     NamingConfig,
     OverridesConfig,
     PathsConfig,
@@ -52,6 +53,8 @@ from tests.helpers.runner_env import (
 )
 
 pytestmark = pytest.mark.usefixtures("runner_vs_core_stub", "dummy_progress")  # type: ignore[attr-defined]
+
+_CLI_JSON_ENV = {"COLUMNS": "200"}
 
 
 def _write_sample_media(cli_runner_env: _CliRunnerEnv) -> tuple[Path, Path]:
@@ -366,6 +369,44 @@ def test_cli_html_report_flags_follow_commandline(
     disable_result = runner.invoke(frame_compare.main, ["--no-color", "--no-html-report"])
     assert disable_result.exit_code == 0, disable_result.output
     assert recorded[-1].report_enable_override is False
+
+
+def test_cli_diagnostic_metrics_flag_sets_runrequest(
+    runner: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    cli_runner_env: _CliRunnerEnv,
+) -> None:
+    """--diagnostic-frame-metrics should flip RunRequest.diagnostic_frame_metrics to True."""
+
+    cli_runner_env.reinstall()
+    recorded = _install_request_recorder(monkeypatch, cli_runner_env)
+
+    result = runner.invoke(
+        frame_compare.main,
+        ["--no-color", "--json-pretty", "--diagnostic-frame-metrics"],
+        env=dict(_CLI_JSON_ENV),
+    )
+    assert result.exit_code == 0, result.output
+    assert recorded[-1].diagnostic_frame_metrics is True
+
+
+def test_cli_no_diagnostic_metrics_flag_sets_runrequest(
+    runner: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    cli_runner_env: _CliRunnerEnv,
+) -> None:
+    """--no-diagnostic-frame-metrics should override config to False."""
+
+    cli_runner_env.reinstall()
+    recorded = _install_request_recorder(monkeypatch, cli_runner_env)
+
+    result = runner.invoke(
+        frame_compare.main,
+        ["--no-color", "--json-pretty", "--no-diagnostic-frame-metrics"],
+        env=dict(_CLI_JSON_ENV),
+    )
+    assert result.exit_code == 0, result.output
+    assert recorded[-1].diagnostic_frame_metrics is False
 
 
 def test_cli_input_override_requires_flag(
@@ -910,6 +951,7 @@ def test_label_dedupe_preserves_short_labels(
         source=SourceConfig(),
         audio_alignment=AudioAlignmentConfig(enable=False),
         report=ReportConfig(enable=False),
+        diagnostics=DiagnosticsConfig(),
     )
 
     cli_runner_env.reinstall(cfg)

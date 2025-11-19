@@ -1030,10 +1030,22 @@ def test_compose_overlay_text_diagnostic_appends_required_lines() -> None:
         target_nits=100.0,
         dst_min_nits=0.18,
         src_csp_hint=None,
+        use_dovi=True,
     )
     props = {
         "_MasteringDisplayMinLuminance": 0.0001,
         "_MasteringDisplayMaxLuminance": 1000.0,
+        "DolbyVision_BlockIndex": 2,
+        "DolbyVision_BlockCount": 8,
+        "DolbyVision_TargetNits": 400.0,
+        "ContentLightLevelMax": 1200,
+        "MaxFALL": 400,
+        "_ColorRange": 1,
+    }
+    selection_detail = {
+        "diagnostics": {
+            "frame_metrics": {"avg_nits": 45.0, "max_nits": 50.0, "category": "Bright"}
+        }
     }
 
     composed = screenshot._compose_overlay_text(
@@ -1043,6 +1055,7 @@ def test_compose_overlay_text_diagnostic_appends_required_lines() -> None:
         selection_label="Dark",
         source_props=props,
         tonemap_info=tonemap_info,
+        selection_detail=selection_detail,
     )
 
     assert composed is not None
@@ -1050,7 +1063,11 @@ def test_compose_overlay_text_diagnostic_appends_required_lines() -> None:
     assert lines[0] == base_text
     assert lines[1] == "1920 × 1080 → 3840 × 2160  (original → target)"
     assert lines[2] == "MDL: min: 0.0001 cd/m², max: 1000.0 cd/m²"
-    assert lines[3] == "Frame Selection Type: Dark"
+    assert lines[3] == "HDR: MaxCLL 1200 / MaxFALL 400"
+    assert lines[4] == "DoVi: on L2 2/8 target 400 nits"
+    assert lines[5] == "Range: Limited"
+    assert lines[6] == "Frame Nits: avg 45 / max 50 (Bright)"
+    assert lines[7] == "Frame Selection Type: Dark"
 
 
 def test_compose_overlay_text_skips_hdr_details_for_sdr() -> None:

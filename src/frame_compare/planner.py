@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Dict, Sequence
 
 from src.datatypes import AppConfig
-from src.frame_compare.cli_runtime import ClipPlan
+from src.frame_compare.cli_runtime import CLIAppError, ClipPlan
 from src.frame_compare.metadata import match_override, normalise_override_mapping
 
 MetadataRecord = Dict[str, str]
@@ -32,6 +32,22 @@ def build_plans(
     trim_map = normalise_override_mapping(cfg.overrides.trim)
     trim_end_map = normalise_override_mapping(cfg.overrides.trim_end)
     fps_map = normalise_override_mapping(cfg.overrides.change_fps)
+
+    if len(metadata) < len(files):
+        missing = len(files) - len(metadata)
+        preview = ", ".join(str(path) for path in files[len(metadata) : len(metadata) + 3])
+        message = (
+            f"metadata entries missing for {missing} file(s); "
+            f"only provided {len(metadata)} entries for {len(files)} inputs"
+        )
+        raise CLIAppError(
+            message,
+            rich_message=(
+                "[red]metadata entries missing:[/red] provided "
+                f"{len(metadata)} entries for {len(files)} files. "
+                f"Add metadata for: {preview}"
+            ),
+        )
 
     plans: list[ClipPlan] = []
     for idx, file in enumerate(files):

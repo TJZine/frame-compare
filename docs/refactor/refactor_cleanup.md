@@ -129,3 +129,4 @@ You are “GuardRail,” a skeptical reviewer. You confirm the new default flow 
 - [ ] (Optional) Evaluate introducing a formal `RunResult` DTO for JSON tail to reduce mutation.
 - [ ] (Optional) Consider consolidating interface definitions (`TMDBClient`, `SlowpicsClient`, `PublisherIO`) into a shared module.
 - [ ] (Optional) Further integration tests to compare CLI output with golden files.
+- [ ] VSPreview overlay regression: `layout_data["vspreview"]` no longer shows alignment “suggested frame/seconds” offsets (always 0f / 0.000s). Restore the pre-refactor behaviour so manual alignment has actionable hints.
