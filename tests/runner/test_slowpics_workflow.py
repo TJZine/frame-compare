@@ -23,6 +23,7 @@ from src.datatypes import (
     OverridesConfig,
     PathsConfig,
     ReportConfig,
+    RunnerConfig,
     RuntimeConfig,
     ScreenshotConfig,
     SlowpicsConfig,
@@ -64,6 +65,7 @@ def test_cli_input_override_and_cleanup(
         analysis=AnalysisConfig(frame_count_dark=0, frame_count_bright=0, frame_count_motion=0, random_frames=0),
         screenshots=ScreenshotConfig(directory_name="screens", add_frame_info=False),
         cli=CLIConfig(),
+        runner=RunnerConfig(),
         color=ColorConfig(),
         slowpics=SlowpicsConfig(auto_upload=True, delete_screen_dir_after_upload=True, open_in_browser=False, create_url_shortcut=False),
         tmdb=TMDBConfig(),
@@ -139,7 +141,7 @@ def test_cli_input_override_and_cleanup(
 
     result: Result = runner.invoke(
         frame_compare.main,
-        ["--input", str(override_dir), "--no-color"],
+        ["--input", str(override_dir), "--no-color", "--legacy-runner"],
         catch_exceptions=False,
     )
 
@@ -273,6 +275,7 @@ def test_runner_auto_upload_cleans_screens_dir(tmp_path: Path, monkeypatch: pyte
     request = runner_module.RunRequest(
         config_path=str(preflight.config_path),
         root_override=str(workspace),
+        service_mode_override=False,
     )
     result = runner_module.run(request)
 
@@ -399,7 +402,7 @@ def test_cli_tmdb_resolution_populates_slowpics(
     _patch_runner_module(monkeypatch, "upload_comparison", fake_upload)
 
 
-    result = frame_compare.run_cli(None, None)
+    result = frame_compare.run_cli(None, None, service_mode_override=False)
 
     assert uploads
     _, _, upload_tmdb_id, upload_collection = uploads[0]
@@ -508,7 +511,7 @@ def test_shortcut_write_failure_sets_json_tail(
 
     _patch_runner_module(monkeypatch, "upload_comparison", fake_upload)
 
-    result = frame_compare.run_cli(None, None)
+    result = frame_compare.run_cli(None, None, service_mode_override=False)
 
     assert result.json_tail is not None
     slowpics_value = result.json_tail.get("slowpics")
@@ -583,7 +586,7 @@ def test_cli_tmdb_resolution_sets_default_collection_name(
     )
     _patch_runner_module(monkeypatch, "upload_comparison", lambda *args, **kwargs: "https://slow.pics/c/example")
 
-    result = frame_compare.run_cli(None, None)
+    result = frame_compare.run_cli(None, None, service_mode_override=False)
 
     assert result.config.slowpics.collection_name.startswith("Resolved Title (2023)")
     assert result.config.slowpics.tmdb_id == "12345"

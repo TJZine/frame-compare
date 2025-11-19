@@ -1,5 +1,51 @@
 # Decisions Log
 
+- *2025-11-19:* chore(docs+runner): correct `src/datatypes` references and normalize viewer metadata.
+  - Problem: `docs/refactor/refactor_cleanup.md` instructed readers to touch a non-existent `src/datatype` module, and `src/frame_compare/runner.py` could leak `pathlib.Path` instances into `json_tail["viewer"]`/`layout_data["viewer"]` causing serialization churn. The `probe_clip_metadata` docstring also implied every clip gets reopened even though the cache avoids that path now.
+  - Decision: Retargeted the refactor checklist to point at `src/datatypes.py`, coerced any report paths to strings before computing relative labels so both `destination` and `destination_label` stay JSON-safe, and refreshed the `probe_clip_metadata` docstring to mention cached snapshots plus the follow-up initialization performed by `init_clips`.
+  - Verification:
+    - `.venv/bin/pyright --warnings`
+    - `.venv/bin/ruff check`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`
+- *2025-11-19:* fix(cli+cache): guard service-mode flags, metadata typing, and probe-cache parsing.
+  - Problem: The CLI allowed users to pass `--service-mode` alongside `--legacy-runner` silently, RunContext assumed metadata dict values were `str`, and both the probe-cache loader and persistence path could still throw when cache keys or payload types drifted (plus `pick_analyze_file` indexed metadata without a bounds check).
+  - Decision: Added explicit mutual exclusion for the two runner toggles plus a regression test, widened `RunContext.metadata` to `dict[str, Any]`, skipped metadata lookups when callers pass fewer entries than files, short-circuited cache persistence when a plan forgot to set `probe_cache_key`, and treated malformed JSON payloads as cache misses by wrapping `ClipProbeSnapshot` construction in a try/except.
+  - Verification:
+    - `.venv/bin/pyright --warnings`
+    - `.venv/bin/ruff check`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`
+
+- *2025-11-19:* chore(config): regenerate config defaults docs and make clip-metadata tests independent of VapourSynth.
+  - Problem: CI lint failed because `docs/_generated/config_tables.md` lagged behind a new `RuntimeConfig.force_reprobe` option, and four tests in `tests/test_clip_metadata_probe.py` invoked the real `vs_core.set_ram_limit`, which tried to import VapourSynth and exploded on machines without the module.
+  - Decision: Rebuilt the generated config tables via `tools/gen_config_docs.py` so the runtime defaults section now lists `force_reprobe`, and introduced an autouse `pytest` fixture that stubs `selection_module.vs_core.set_ram_limit` to a no-op while still allowing individual tests to override it when they need to capture calls.
+  - Verification:
+    - `.venv/bin/pytest tests/test_clip_metadata_probe.py -q`
+    - `PYTHONPATH=$PWD/tmp_no_vs .venv/bin/pytest tests/test_clip_metadata_probe.py -q`
+
+- *2025-11-19:* feat(runner): finish service-mode publisher wiring and CLI overrides.
+  - Problem: The prior agent reverted the runner halfway through the publisher extraction, so `_publish_results`/`RunDependencies` were disconnected, CLI flags for `--service-mode`/`--legacy-runner` were undocumented, and pytest still patched `upload_comparison` even though the new services bypass that hook, causing real slow.pics uploads during tests.
+  - Decision: Restored the service-mode plumbing inside `src/frame_compare/runner.py`, tightened `RunDependencies` defaults for `ReportPublisher`/`SlowpicsPublisher`, added CLI coverage in `tests/runner/test_cli_entry.py`, and taught all slow.pics workflow tests to opt into legacy mode via `service_mode_override=False` or `--legacy-runner` so they keep using the legacy stub helpers. Updated `tests/services/test_publishers.py` to exercise the service classes directly, refreshed README + docs/refactor/runner_service_split.md + CHANGELOG to describe the flag, and recorded the rollout plus verification details here and in docs/DECISIONS.md.
+  - Verification:
+    - `.venv/bin/pyright --warnings` (0 errors, 0 warnings)
+    - `.venv/bin/ruff check` (All checks passed!)
+    - `.venv/bin/pytest -q` (428 passed, 1 skipped)
+
+- *2025-11-18:* refactor(services): extract MetadataResolver/AlignmentWorkflow for Track A (docs/refactor/runner_service_split.md).
+  - Problem: `src/frame_compare/runner.py` still embedded TMDB lookup, plan construction, clip probing, and audio-alignment wiring, preventing unit tests and violating the service-boundary plan recorded in docs/refactor/runner_service_split.md.
+  - Decision: Added `src/frame_compare/services/metadata.py`, `src/frame_compare/services/alignment.py`, and `src/frame_compare/services/factory.py` so the runner now issues typed `MetadataResolveRequest`/`AlignmentRequest` objects. MetadataResolver handles TMDB context, slow.pics title derivation, plan building, and clip probing through injectable adapters; AlignmentWorkflow wraps `alignment_runner.apply_audio_alignment`, `format_alignment_output`, and screenshot confirmation. Introduced service unit suites under `tests/services/` to verify TMDB happy-path/ambiguity/error flows and audio-alignment behaviors, and updated Track A Implementation Notes with the wiring/tests executed.
+  - Verification:
+    - `.venv/bin/pyright --warnings`
+    - `.venv/bin/ruff check`
+    - `.venv/bin/pytest -q`
+
+- *2025-11-18:* feat(cache): define ClipProbeSnapshot contract, disk layout, and force-reprobe escape hatch.
+  - Problem: Each run reopened VapourSynth clips twice and frequently dropped `_Matrix`/`MasteringDisplay*` props between probe/init, so HDR tonemapping would break whenever cached metadata drifted. We lacked a regression checklist that spelled out the metadata fields (fps, frame counts, geometry, props, trims, tonemap hints) that must survive probing.
+  - Decision: catalogued the ClipPlan fields consumed by runners/tonemap/vspreview (effective/applied/source FPS, frame counts, width/height, trims, and the HDR prop set) and codified them inside a typed `ClipProbeSnapshot`. On every probe we now clone the prop dict before any trims padded, persist the full payload (including schema version + metadata digest) to `cache_dir/probe/<cache_key>.json`, and log tonemap-critical keys so regressions are obvious. `init_clips` reuses the live clip handles recorded on the snapshot, falls back to disk snapshots when bootstrapping a fresh process, and only reinitialises VapourSynth when trims/FPS overrides or the cache hash change. Added `RuntimeConfig.force_reprobe` so users can bypass reuse while debugging and wired structured cache summaries (`opened vs. reused vs. disk hits`). VapourSynth’s frame-prop lifetime rule (source:https://github.com/vapoursynth/vapoursynth/blob/master/doc/api/vapoursynth4.h.rst@2025-11-18T19:42:57Z via Context7) is cited here as the regression checklist anchor: once captured, the pre-trim props must survive through tonemapping.
+  - Verification:
+    - `.venv/bin/pyright --warnings`
+    - `.venv/bin/ruff check`
+    - `.venv/bin/pytest -q`
+
 - *2025-11-18:* chore(review): sign off Track B Phases 3–6 config + flag invariants.
   - Problem: The remaining domains in docs/refactor/flag_audit.md (Screenshots/Render through TMDB/Source/Runtime) still needed a review agent to confirm “config wins unless a CLI flag explicitly overrides” and to fill the Track B → B4 + Global Invariants sections before Phase 2 could close.
   - Decision: Compared each B3 checklist against the implemented behaviour in `frame_compare.py` and `src/frame_compare/runner.py` (writer selection, cache probes, audio-alignment JSON seeds, HTML report/slow.pics handling, path precedence, TMDB/runtime flags) plus the regression suites in `tests/runner/test_cli_entry.py`, `tests/runner/test_audio_alignment_cli.py`, and `tests/runner/test_dovi_flags.py`. Updated docs/refactor/flag_audit.md to capture per-domain findings, checked all Global Invariant checkboxes, and noted that README.md + CHANGELOG.md already describe the precedence rules.
@@ -691,6 +737,18 @@
       ..........                                                               [100%]
       82 passed in 0.17s
       ```
+- *2025-11-18:* feat(runner DI): Introduced `RunDependencies`, `default_run_dependencies`, and `RunContext` so `runner.run` sequences services through explicit, testable layers (source:docs/refactor/runner_service_split.md@Track B).
+  - Problem: Runner instantiated services internally, so CLI shims/tests couldn’t inject doubles and state flowed through ad-hoc locals instead of a typed context.
+  - Decision: Added `RunDependencies`/`default_run_dependencies` to `src/frame_compare/runner.py`, updated `frame_compare.run_cli` to pass the bundle, and wrapped metadata/alignment data in `RunContext`. Added `tests/runner/test_runner_services.py` to assert service order, CLIAppError propagation, and reporter flag wiring; existing CLI/Dolby stubs now accept the `dependencies` kwarg.
+  - Verification:
+    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+    - `.venv/bin/ruff check` → `All checks passed!`
+    - `.venv/bin/pytest -q` → `421 passed, 1 skipped`
+- *2025-11-19:* chore(runner DI): Let `runner.run` construct default dependencies after preflight so service factories can see the real `cfg`, reporter, and cache paths (source:docs/refactor/runner_service_split.md@Track B B3).
+  - Problem: `frame_compare.run_cli` instantiated `default_run_dependencies()` before preflight, so MetadataResolver/AlignmentWorkflow never saw runtime context (feature flags, cache roots) even though `default_run_dependencies(cfg=..., reporter=..., cache_dir=...)` already accepted those parameters. Direct `runner.run` callers benefited from richer factories while the main CLI path did not.
+  - Decision: Removed the eager factory call from `frame_compare.run_cli`, letting `runner.run` invoke `default_run_dependencies` after it resolves configuration and reporter wiring. Updated `tests/test_frame_compare.py::test_run_cli_delegates_to_runner` to assert the shim now passes `dependencies=None`, recorded Track B review notes, and confirmed DI override hooks still work in `tests/runner/test_runner_services.py`.
+  - Verification:
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_frame_compare.py::test_run_cli_delegates_to_runner`
 - *2025-11-17:* feat(cli cache pipeline): cached runs now emit a canonical `.frame_compare.run.json` snapshot plus a unified renderer so live and cached output share identical sections and semantics.
   - Problem: Cached reruns reprinted partial sections, summary banners skipped entirely when the pipeline short-circuited, and there was no way to rehydrate CLI output without rerunning the full analysis.
   - Decision: Introduced `result_snapshot.RunResultSnapshot` (JSON-safe layout/flag/section metadata), persisted it beside screenshots, and taught the runner to render sections exclusively through `render_run_result`. Added CLI flags: `--from-cache-only` (hydrate snapshot and exit), `--no-cache` (skip cache probes/force recompute with metadata), and `--show-partial` (surface cache-derived partial sections). Snapshot metadata includes availability markers so future cache reconstructions can hide sections cleanly.
@@ -731,3 +789,7 @@
   - Impact: Markdownlint navigation panes no longer collide on duplicate headings, and the audit template renders consistently in docs sites.
   - `Get-Date -AsUTC -Format 'yyyy-MM-dd'`  `2025-11-18`
   - Verification: N/A (documentation-only change).
+- *2025-11-19:* chore(track-c): finalize publishing documentation, config flag docs, and runner observability.
+  - Problem: Track C’s checklist still showed unchecked tasks with no Implementation/Review notes, operators couldn’t discover the `runner.enable_service_mode` flag outside the CLI, and `run()` never logged whether the publisher services or the legacy path executed, making flag validation difficult.
+  - Decision: Filled in Track C planning/implementation/review sections (docs/refactor/runner_service_split.md) with concrete scope, dates, and verification evidence; documented `[runner].enable_service_mode` inside `src/data/config.toml.template` plus README’s CLI/config table; and taught `src/frame_compare/runner.py` to mark a `service_mode_enabled` reporter flag while logging/printing the active publishing mode for each run.
+  - Verification: Leveraged the existing Track C command set (pyright/ruff/pytest recorded earlier on 2025-11-19); no code paths outside logging/docs changed and no additional execution was required.

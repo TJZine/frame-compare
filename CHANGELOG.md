@@ -85,10 +85,17 @@
 - *2025-11-17:* unify CLI rendering around cache-aware run snapshots, add `--from-cache-only`, `--no-cache`, and `--show-partial` flags, persist `.frame_compare.run.json`, and render cached sections consistently with live runs.
 - *2025-11-17:* harden snapshot hydration, mark corrupt cache files as misses, and persist per-section availability so `[RENDER]`/`[PUBLISH]` blocks honor `--show-partial`/`--show-missing`.
 - *2025-11-18:* finish the CLI cache UX by adding `--show-missing`/`--hide-missing`, plumbing `show_missing_sections` through the public API, broadening section-availability heuristics for viewer/report/audio/VSPreview blocks, and extending tests/docs/CHANGELOG to cover the new behavior.
+- *2025-11-18:* capture ClipProbeSnapshot metadata (fps, frame counts, geometry, HDR props) per clip, persist it to `cache_dir/probe/<hash>.json`, reuse probe-era clip handles inside `init_clips`, and add `runtime.force_reprobe` plus cache hit/miss logging with regression tests for probe/init reuse.
+- *2025-11-18:* extract `MetadataResolver` and `AlignmentWorkflow` services per Track A, wire runner orchestration through typed requests/responses, and add focused service unit tests to lock TMDB/alignment behavior.
+- *2025-11-18:* wire the runner through `RunDependencies` + `RunContext`, add `default_run_dependencies()` for CLI/test injection, refresh CLI/Dolby stubs to accept the `dependencies` kwarg, and add `tests/runner/test_runner_services.py` to assert service order, error propagation, and reporter flag wiring.
+- *2025-11-19:* reintroduce the service-mode publisher pipeline with CLI overrides (`--service-mode`/`--legacy-runner`), wire RunDependencies to `ReportPublisher`/`SlowpicsPublisher`, and update runner/CLI/slow.pics tests plus docs for the new flag.
 
 ### Bug Fixes
 
+* prevent `--service-mode` and `--legacy-runner` from being used together, loosen `RunContext.metadata` typing, guard metadata indexing in `pick_analyze_file`, and treat malformed probe-cache payloads (missing cache keys, bad field types) as cache misses instead of hard errors
+* coerce local report viewer destinations/labels to strings before serializing cached run metadata, refresh the `probe_clip_metadata` docstring to describe cache reuse, and fix docs that referenced the non-existent `src/datatype` module
 * gate every non-`--tm-*` CLI override (paths/cache/report/audio/debug flags) on explicit command-line sources so `frame_compare.run_cli` and the Click entrypoint respect config precedence, and fix `json_tail.render.writer` so debug-color runs accurately report the VS fallback (tests/runner/test_cli_entry.py)
+* regenerate `docs/_generated/config_tables.md` via `tools/gen_config_docs.py` so the new `runtime.force_reprobe` default is documented, and add an autouse fixture in `tests/test_clip_metadata_probe.py` that stubs `vs_core.set_ram_limit` so the suite passes even when the VapourSynth module is unavailable
 * guard tonemap CLI overrides so Click `default_map`/env-provided values defer to config until a `--tm-*` flag is provided, and extend CLI regression tests for `--tm-target` plus overlay/verify telemetry
 * keep release-please commits passing commitlint by forcing `chore(ci): release…` pull-request titles
 * prevent the Click CLI from forcing Dolby Vision tonemapping off unless `--tm-use-dovi`/`--tm-no-dovi` is explicitly provided so CLI and direct runs agree
@@ -103,6 +110,7 @@
 * refresh cached frame counts whenever audio alignment or VSPreview manual offsets shift trims so CLI summaries report the trimmed clip durations
 * reuse cached FPS metadata from the initial probe while measuring audio alignment so CLI and VSPreview frame deltas stay non-zero even when ffprobe omits `r_frame_rate`
 * keep Husky `npm test` working on Windows by routing through `tools/run_pytest.mjs` (enforcing `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` by default with an `FC_SKIP_PYTEST_DISABLE=1` escape hatch)
+* *2025-11-19:* let `runner.run` build its default dependency bundle after configuration preflight so MetadataResolver/AlignmentWorkflow receive the real `cfg`, reporter, and cache paths; CLI shims now pass `dependencies=None` and targeted runner shim tests were updated accordingly.
 
 ### Chores
 
@@ -110,6 +118,7 @@
 - *2025-11-18:* add a `FRAME_COMPARE_DOVI_DEBUG` telemetry mode that emits JSON-formatted logs from both the runner and VapourSynth tonemap resolver so entrypoints can compare config roots, cache status, tonemap overrides, and brightness-affecting parameters when diagnosing DOVI drift.
 - *2025-11-18:* convert the docs/refactor/flag_audit.md template placeholders into ATX headings with per-track prefixes so markdownlint (MD003/MD024) passes and rendered navigation stays unique.
 - *2025-11-18:* document the Phase 1–2 config/tonemap audit review results in `docs/refactor/flag_audit.md` (A3/B4) and `docs/DECISIONS.md`, confirming Click CLI vs `frame_compare.run_cli` parity for DoVi and tonemap overrides.
+- *2025-11-19:* finalize Track C documentation (Implementation/Review notes), surface `[runner].enable_service_mode` in the config template/README, and log the active publishing mode inside `runner.run`.
 
 ## [0.0.2](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.1...frame-compare-v0.0.2) (2025-11-13)
 

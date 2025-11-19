@@ -207,6 +207,13 @@ class CLIConfig:
 
 
 @dataclass
+class RunnerConfig:
+    """Runner-specific service orchestration toggles."""
+
+    enable_service_mode: bool = True
+
+
+@dataclass
 class PathsConfig:
     """Filesystem paths configured by the user."""
 
@@ -219,6 +226,7 @@ class RuntimeConfig:
 
     ram_limit_mb: int = 8000
     vapoursynth_python_paths: List[str] = field(default_factory=list)
+    force_reprobe: bool = False
 
 
 @dataclass
@@ -281,6 +289,7 @@ class AppConfig:
     analysis: AnalysisConfig
     screenshots: ScreenshotConfig
     cli: CLIConfig
+    runner: RunnerConfig
     slowpics: SlowpicsConfig
     tmdb: TMDBConfig
     naming: NamingConfig

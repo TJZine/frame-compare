@@ -38,10 +38,17 @@ def test_run_cli_delegates_to_runner(monkeypatch: pytest.MonkeyPatch, tmp_path: 
         json_tail=None,
         report_path=None,
     )
-    captured: dict[str, runner_module.RunRequest] = {}
+    captured_request: runner_module.RunRequest | None = None
+    captured_dependencies: runner_module.RunDependencies | None = None
 
-    def _fake_run(request: runner_module.RunRequest) -> frame_compare.RunResult:
-        captured["request"] = request
+    def _fake_run(
+        request: runner_module.RunRequest,
+        *,
+        dependencies: runner_module.RunDependencies | None = None,
+    ) -> frame_compare.RunResult:
+        nonlocal captured_request, captured_dependencies
+        captured_request = request
+        captured_dependencies = dependencies
         return dummy_result
 
     monkeypatch.setattr(runner_module, "run", _fake_run)
@@ -60,7 +67,8 @@ def test_run_cli_delegates_to_runner(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     )
 
     assert result is dummy_result
-    request = captured["request"]
+    assert captured_request is not None
+    request = captured_request
     assert request.config_path == "config-path"
     assert request.input_dir == "input-dir"
     assert request.root_override == str(tmp_path)
@@ -72,3 +80,4 @@ def test_run_cli_delegates_to_runner(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert request.skip_wizard is True
     assert request.debug_color is True
     assert request.tonemap_overrides == {"preset": "reference"}
+    assert captured_dependencies is None

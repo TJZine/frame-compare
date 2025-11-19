@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import io
 from collections.abc import Mapping as MappingABC
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -46,6 +46,52 @@ if TYPE_CHECKING:  # pragma: no cover
     from src.datatypes import AppConfig
 
 
+def _default_props_dict() -> Dict[str, object]:
+    return {}
+
+
+@dataclass
+class ClipProbeSnapshot:
+    """
+    Serialized snapshot of clip metadata captured during the probe phase.
+
+    Attributes:
+        trim_start (int): Trim start applied when the snapshot was recorded.
+        trim_end (Optional[int]): Trim end applied when the snapshot was recorded.
+        fps_override (Optional[Tuple[int, int]]): User-supplied FPS override at probe time.
+        applied_fps (Optional[Tuple[int, int]]): FPS tuple actually supplied to VapourSynth.
+        effective_fps (Optional[Tuple[int, int]]): FPS reported back by the clip.
+        source_fps (Optional[Tuple[int, int]]): Native FPS reported by the source plugin.
+        source_num_frames (Optional[int]): Total number of frames reported for the trimmed clip.
+        source_width (Optional[int]): Clip width observed at probe time.
+        source_height (Optional[int]): Clip height observed at probe time.
+        source_frame_props (Dict[str, Any]): Snapshot of frame props preserved for tonemapping.
+        tonemap_prop_keys (Tuple[str, ...]): Sorted list of tonemapping-critical prop keys.
+        metadata_digest (str): Hash of the recorded metadata payload for quick change checks.
+        cache_key (Optional[str]): Stable cache key derived from file stats + trim/FPS inputs.
+        cache_path (Optional[Path]): Path to the persisted JSON payload, when available.
+        cached_at (Optional[str]): ISO8601 timestamp describing when the snapshot hit disk.
+        clip (Optional[object]): Live VapourSynth clip handle (never serialized) for reuse.
+    """
+
+    trim_start: int
+    trim_end: Optional[int]
+    fps_override: Optional[Tuple[int, int]]
+    applied_fps: Optional[Tuple[int, int]]
+    effective_fps: Optional[Tuple[int, int]]
+    source_fps: Optional[Tuple[int, int]]
+    source_num_frames: Optional[int]
+    source_width: Optional[int]
+    source_height: Optional[int]
+    source_frame_props: Dict[str, object] = field(default_factory=_default_props_dict)
+    tonemap_prop_keys: Tuple[str, ...] = field(default_factory=tuple)
+    metadata_digest: str = ""
+    cache_key: Optional[str] = None
+    cache_path: Optional[Path] = None
+    cached_at: Optional[str] = None
+    clip: Optional[object] = None
+
+
 @dataclass
 class _ClipPlan:
     """
@@ -70,6 +116,9 @@ class _ClipPlan:
         has_trim_end_override (bool): ``True`` when a manual trim end was supplied.
         alignment_frames (int): Number of frames trimmed during audio alignment.
         alignment_status (str): Human-friendly status describing the alignment result.
+        probe_snapshot (Optional[ClipProbeSnapshot]): Cached probe metadata for reuse.
+        probe_cache_key (Optional[str]): Cache key derived from file stats + trim/FPS inputs.
+        probe_cache_path (Optional[Path]): Location of the persisted probe snapshot, if any.
     """
 
     path: Path
@@ -79,7 +128,7 @@ class _ClipPlan:
     fps_override: Optional[Tuple[int, int]] = None
     use_as_reference: bool = False
     clip: Optional[object] = None
-    source_frame_props: Optional[Dict[str, Any]] = None
+    source_frame_props: Optional[Dict[str, object]] = None
     effective_fps: Optional[Tuple[int, int]] = None
     applied_fps: Optional[Tuple[int, int]] = None
     source_fps: Optional[Tuple[int, int]] = None
@@ -90,6 +139,9 @@ class _ClipPlan:
     has_trim_end_override: bool = False
     alignment_frames: int = 0
     alignment_status: str = ""
+    probe_snapshot: Optional[ClipProbeSnapshot] = None
+    probe_cache_key: Optional[str] = None
+    probe_cache_path: Optional[Path] = None
 
 
 ClipPlan = _ClipPlan

@@ -139,6 +139,7 @@ def run_cli(
     force_cache_refresh: bool = False,
     show_partial_sections: bool = False,
     show_missing_sections: bool = True,
+    service_mode_override: bool | None = None,
 ) -> RunResult:
     """Delegate to the shared runner module."""
     request = RunRequest(
@@ -158,6 +159,7 @@ def run_cli(
         force_cache_refresh=force_cache_refresh,
         show_partial_sections=show_partial_sections,
         show_missing_sections=show_missing_sections,
+        service_mode_override=service_mode_override,
     )
     return runner.run(request)
 
@@ -174,6 +176,7 @@ def _run_cli_entry(
     json_pretty: bool,
     no_cache: bool,
     from_cache_only: bool,
+    service_mode_override: bool | None,
     show_partial: bool,
     show_missing: bool,
     diagnose_paths: bool,
@@ -314,6 +317,7 @@ def _run_cli_entry(
             force_cache_refresh=no_cache,
             show_partial_sections=show_partial,
             show_missing_sections=show_missing,
+            service_mode_override=service_mode_override,
         )
     except CLIAppError as exc:
         print(exc.rich_message)
@@ -560,6 +564,20 @@ def _cli_flag_value(ctx: click.Context, name: str, value: bool, *, default: bool
     help="Render cached CLI output without recomputing; fails when no snapshot exists.",
 )
 @click.option(
+    "--service-mode",
+    "service_mode_flag",
+    is_flag=True,
+    default=False,
+    help="Force the runner to use the publisher services pipeline.",
+)
+@click.option(
+    "--legacy-runner",
+    "legacy_runner_flag",
+    is_flag=True,
+    default=False,
+    help="Disable publisher services and fall back to the legacy inline flow.",
+)
+@click.option(
     "--show-partial",
     "show_partial",
     is_flag=True,
@@ -698,6 +716,8 @@ def main(
     json_pretty: bool,
     no_cache: bool,
     from_cache_only: bool,
+    service_mode_flag: bool,
+    legacy_runner_flag: bool,
     show_partial: bool,
     show_missing: bool,
     diagnose_paths: bool,
@@ -750,6 +770,16 @@ def main(
     html_report_enable = _cli_flag_value(ctx, "html_report_enable", html_report_enable, default=False)
     html_report_disable = _cli_flag_value(ctx, "html_report_disable", html_report_disable, default=False)
     debug_color = _cli_flag_value(ctx, "debug_color", debug_color, default=False)
+    service_mode_selected = _cli_override_value(ctx, "service_mode_flag", service_mode_flag)
+    legacy_runner_selected = _cli_override_value(ctx, "legacy_runner_flag", legacy_runner_flag)
+    if service_mode_selected and legacy_runner_selected:
+        raise click.ClickException("Cannot use both --service-mode and --legacy-runner.")
+    if service_mode_selected:
+        service_mode_override = True
+    elif legacy_runner_selected:
+        service_mode_override = False
+    else:
+        service_mode_override = None
 
     tm_preset = _cli_override_value(ctx, "tm_preset", tm_preset)
     tm_curve = _cli_override_value(ctx, "tm_curve", tm_curve)
@@ -780,6 +810,7 @@ def main(
         "json_pretty": json_pretty,
         "no_cache": no_cache,
         "from_cache_only": from_cache_only,
+        "service_mode_override": service_mode_override,
         "show_partial": show_partial,
         "show_missing": show_missing,
         "diagnose_paths": diagnose_paths,
@@ -832,6 +863,7 @@ def run_command(ctx: click.Context) -> None:
         json_pretty=bool(params.get("json_pretty", False)),
         no_cache=bool(params.get("no_cache", False)),
         from_cache_only=bool(params.get("from_cache_only", False)),
+        service_mode_override=params.get("service_mode_override"),
         show_partial=bool(params.get("show_partial", False)),
         show_missing=bool(params.get("show_missing", True)),
         diagnose_paths=bool(params.get("diagnose_paths", False)),
