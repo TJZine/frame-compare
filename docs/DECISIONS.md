@@ -5,6 +5,10 @@
   - Decision: Retargeted the refactor checklist to point at `src/datatypes.py`, coerced any report paths to strings before computing relative labels so both `destination` and `destination_label` stay JSON-safe, and refreshed the `probe_clip_metadata` docstring to mention cached snapshots plus the follow-up initialization performed by `init_clips`.
   - Verification:
     - `.venv/bin/pyright --warnings`
+- *2025-11-19:* ci(decision-minute): harden workflow_run context access for Decision Minute generation (source:https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow@2025-11-19).
+  - Problem: VS Code/GitHub Actions diagnostics flagged invalid context usage in `.github/workflows/decision-minute.yml` (`pull_requests[0]` without a guard and undeclared `steps.pr.outputs.*` fields), risking runtime errors when CI completed for non-merged PRs.
+  - Decision: Kept the job gated to successful pull_request workflow_run events, fetched the full PR via `actions/github-script` before proceeding, short-circuited with a notice and empty output when the PR is not merged, and funneled all metadata through the action's `result` output (parsed with `fromJson`) so downstream steps are guarded on actual data rather than implicit outputs.
+  - Verification: Not run (YAML/workflow-only change).
     - `.venv/bin/ruff check`
     - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`
 - *2025-11-19:* fix(net+slowpics+planner): enforce HTTPX timeouts, lock slow.pics progress, guard metadata mismatches.

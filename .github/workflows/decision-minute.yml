@@ -1,23 +1,62 @@
 name: decision-minute
+permissions:
+  contents: write
 on:
-  pull_request:
-    types: [opened, edited, synchronize, reopened, closed]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
 
 jobs:
   extract-and-store:
-    if: github.event.pull_request.merged == true
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
+      - name: Load PR metadata
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.workflow_run.pull_requests?.[0];
+            if (!pr) {
+              core.setFailed('workflow_run payload missing pull request data');
+              return;
+            }
+
+            const fullPr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+            });
+
+            if (!fullPr.data.merged_at) {
+              core.notice(`PR #${pr.number} is not merged; skipping Decision Minute creation.`);
+              core.setOutput('result', '');
+              return;
+            }
+
+            const payload = {
+              number: fullPr.data.number,
+              title: fullPr.data.title ?? '',
+              body: fullPr.data.body ?? '',
+              merged_at: fullPr.data.merged_at ?? '',
+            };
+
+            core.setOutput('result', JSON.stringify(payload));
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+        with:
+          fetch-depth: 0
+          repository: ${{ github.repository }}
 
       - name: Write Decision Minute to docs/notes
+        if: ${{ steps.pr.outputs.result != '' }}
         shell: bash
         env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY:  ${{ github.event.pull_request.body }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_MERGED_AT: ${{ github.event.pull_request.merged_at }}
+          PR_TITLE: ${{ fromJson(steps.pr.outputs.result).title }}
+          PR_BODY:  ${{ fromJson(steps.pr.outputs.result).body }}
+          PR_NUMBER: ${{ fromJson(steps.pr.outputs.result).number }}
+          PR_MERGED_AT: ${{ fromJson(steps.pr.outputs.result).merged_at }}
         run: |
           mkdir -p docs/notes
           slug="$(echo "${PR_TITLE,,}" | tr -cd '[:alnum:]- ' | tr ' ' '-' | sed 's/--*/-/g')"
@@ -29,9 +68,11 @@ jobs:
           echo "${PR_BODY}" >> "$file"
 
       - name: Create PR with note
+        if: ${{ steps.pr.outputs.result != '' }}
         uses: peter-evans/create-pull-request@v6
         with:
-          commit-message: "docs(notes): add Decision Minute for PR #${{ github.event.pull_request.number }}"
-          title: "docs: add Decision Minute for PR #${{ github.event.pull_request.number }}"
+          commit-message: "docs(notes): add Decision Minute for PR #${{ fromJson(steps.pr.outputs.result).number }}"
+          title: "docs: add Decision Minute for PR #${{ fromJson(steps.pr.outputs.result).number }}"
           body: "Automated Decision Minute extracted from PR body."
-          branch: "docs/decision-minute-pr-${{ github.event.pull_request.number }}"
+          branch: "docs/decision-minute-pr-${{ fromJson(steps.pr.outputs.result).number }}"
+          token: ${{ secrets.BOT_PAT }}
