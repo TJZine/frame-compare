@@ -12,7 +12,7 @@ module.exports = {
       2, 'always',
       [
         'hdr','sdr','vs','cli','report','html','analysis','audio',
-        'tonemap','overlay','tmdb','geometry','color','ci','docs'
+        'tonemap','overlay','tmdb','geometry','color','ci','docs', 'diagnostics'
       ]
     ],
     'header-max-length': [2, 'always', 100],
