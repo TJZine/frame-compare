@@ -1893,20 +1893,20 @@ def run(request: RunRequest, *, dependencies: RunDependencies | None = None) -> 
     viewer_block = json_tail.get("viewer", {})
     viewer_mode = "slow_pics" if slowpics_url else "local_report" if report_block.get("enabled") and report_block.get("path") else "none"
     viewer_destination: Optional[str]
-    viewer_label = ""
+    viewer_label: str
     if viewer_mode == "slow_pics":
         viewer_destination = slowpics_url
-        viewer_label = slowpics_url or ""
     elif viewer_mode == "local_report":
-        viewer_destination = report_block.get("path")
-        viewer_label = viewer_destination or ""
-        if viewer_destination:
-            try:
-                viewer_label = str(Path(viewer_destination).resolve().relative_to(root.resolve()))
-            except ValueError:
-                viewer_label = viewer_destination
+        raw_path = report_block.get("path")
+        viewer_destination = str(raw_path) if raw_path is not None else None
     else:
         viewer_destination = None
+    viewer_label = viewer_destination or ""
+    if viewer_mode == "local_report" and viewer_destination:
+        try:
+            viewer_label = str(Path(viewer_destination).resolve().relative_to(root.resolve()))
+        except ValueError:
+            viewer_label = viewer_destination
     viewer_mode_display = {
         "slow_pics": "slow.pics",
         "local_report": "Local report",

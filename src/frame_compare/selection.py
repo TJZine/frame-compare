@@ -260,7 +260,13 @@ def probe_clip_metadata(
     *,
     reporter: CliOutputManagerProtocol | None = None,
 ) -> None:
-    """Open each clip once to populate FPS, geometry, and HDR snapshot metadata."""
+    """Populate FPS, geometry, and HDR snapshot metadata for each clip plan.
+
+    Cached probe snapshots from memory or disk are reused whenever possible so
+    clip files are only opened when a snapshot is missing or stale. Any plans
+    whose `plan.clip` objects remain uninitialized after this pass will be
+    populated by `init_clips` before downstream processing.
+    """
 
     if not plans:
         return

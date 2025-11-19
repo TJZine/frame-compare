@@ -1,5 +1,13 @@
 # Decisions Log
 
+- *2025-11-19:* chore(docs+runner): correct `src/datatypes` references and normalize viewer metadata.
+  - Problem: `docs/refactor/refactor_cleanup.md` instructed readers to touch a non-existent `src/datatype` module, and `src/frame_compare/runner.py` could leak `pathlib.Path` instances into `json_tail["viewer"]`/`layout_data["viewer"]` causing serialization churn. The `probe_clip_metadata` docstring also implied every clip gets reopened even though the cache avoids that path now.
+  - Decision: Retargeted the refactor checklist to point at `src/datatypes.py`, coerced any report paths to strings before computing relative labels so both `destination` and `destination_label` stay JSON-safe, and refreshed the `probe_clip_metadata` docstring to mention cached snapshots plus the follow-up initialization performed by `init_clips`.
+  - Verification:
+    - `.venv/bin/pyright --warnings`
+    - `.venv/bin/ruff check`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`
+
 - *2025-11-19:* chore(config): regenerate config defaults docs and make clip-metadata tests independent of VapourSynth.
   - Problem: CI lint failed because `docs/_generated/config_tables.md` lagged behind a new `RuntimeConfig.force_reprobe` option, and four tests in `tests/test_clip_metadata_probe.py` invoked the real `vs_core.set_ram_limit`, which tried to import VapourSynth and exploded on machines without the module.
   - Decision: Rebuilt the generated config tables via `tools/gen_config_docs.py` so the runtime defaults section now lists `force_reprobe`, and introduced an autouse `pytest` fixture that stubs `selection_module.vs_core.set_ram_limit` to a no-op while still allowing individual tests to override it when they need to capture calls.

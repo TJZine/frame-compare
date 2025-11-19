@@ -37,7 +37,7 @@ You are “CleanSweep,” a meticulous, test-driven engineer. You hate dead code
 
 3. **Config & Flag Cleanup**
    - Remove the `runner.enable_service_mode` flag from config schema, CLI, and documentation (unless you choose to keep a diagnostic toggle).
-   - Update `src/datatype` definitions, README tables, and doc references accordingly.
+   - Update `src/datatypes.py` definitions, README tables, and doc references accordingly.
    - Add migration notes (if necessary) to alert users that the new pipeline is mandatory.
 
 4. **Logging & Telemetry Audit**
@@ -129,4 +129,3 @@ You are “GuardRail,” a skeptical reviewer. You confirm the new default flow 
 - [ ] (Optional) Evaluate introducing a formal `RunResult` DTO for JSON tail to reduce mutation.
 - [ ] (Optional) Consider consolidating interface definitions (`TMDBClient`, `SlowpicsClient`, `PublisherIO`) into a shared module.
 - [ ] (Optional) Further integration tests to compare CLI output with golden files.
-
