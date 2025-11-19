@@ -182,6 +182,10 @@ prefer_guessit = true
 # Control CLI output behaviours.
 emit_json_tail = true
 
+[runner]
+# Toggle the publisher services pipeline; set false to default to the legacy inline publishers.
+enable_service_mode = true
+
 [cli.progress]
 # Progress bar appearance: "fill" for filled bar, "dot" for single indicator.
 style = "fill"

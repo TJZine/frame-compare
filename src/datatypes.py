@@ -207,6 +207,13 @@ class CLIConfig:
 
 
 @dataclass
+class RunnerConfig:
+    """Runner-specific service orchestration toggles."""
+
+    enable_service_mode: bool = True
+
+
+@dataclass
 class PathsConfig:
     """Filesystem paths configured by the user."""
 
@@ -282,6 +289,7 @@ class AppConfig:
     analysis: AnalysisConfig
     screenshots: ScreenshotConfig
     cli: CLIConfig
+    runner: RunnerConfig
     slowpics: SlowpicsConfig
     tmdb: TMDBConfig
     naming: NamingConfig

@@ -140,36 +140,70 @@
 
 ### C1. Abstraction Plan (Planning)
 
-- [ ] Enumerate filesystem/network outputs (report files, Slowpics API, cache writes).
-- [ ] Design interface boundaries (`PublisherIO`, `SlowpicsClient`, `TMDBClient`, etc.).
-- [ ] Define error-handling expectations and retry/backoff policies.
+- [x] Enumerate filesystem/network outputs (report files, Slowpics API, cache writes).
+- [x] Design interface boundaries (`PublisherIO`, `SlowpicsClient`, `TMDBClient`, etc.).
+- [x] Define error-handling expectations and retry/backoff policies.
+
+**Planning Notes:**  
+- Filesystem outputs: report JSON tail, screenshot exports, cached layout data, Slowpics shortcut files.  
+- Network outputs: TMDB (already abstracted), Slowpics API uploads, potential webhook/publishing endpoints.  
+- Interface plan: `PublisherIO` (wraps Path ops + JSON serialization), `SlowpicsClientProtocol` (submit uploads, poll status), optional `ReportWriterProtocol` if separation helps testing.  
+- Error handling: consolidate retries at adapter layer (Slowpics: exponential backoff capped; filesystem: surface exceptions immediately).  
+- Feature flag `runner.enable_service_mode` will gate new services vs legacy runner path for rollback.
 
 ### C2. Implementation Notes (Coding Agent)
 
-- [ ] Implement adapters and inject them into services (default implementations + test doubles).
-- [ ] Add tests stubbing adapters to prove runner/services no longer touch disk/network directly.
-- [ ] Update documentation/README if workflows require new configuration for adapters.
+- [x] Implement adapters and inject them into services (default implementations + test doubles).
+- [x] Add tests stubbing adapters to prove runner/services no longer touch disk/network directly.
+- [x] Update documentation/README if workflows require new configuration for adapters.
+- [x] Document CLI overrides (`--service-mode` / `--legacy-runner`) and `service_mode_override` so QA can force legacy paths.
+
+**Implementation Summary (2025-11-19):**
+
+- Added `PublisherIO`, `ReportRendererProtocol`, and `SlowpicsClientProtocol` to `src/frame_compare/interfaces/publishers.py` plus concrete adapters inside `src/frame_compare/services/factory.py`.
+- Created `ReportPublisher` and `SlowpicsPublisher` services (`src/frame_compare/services/publishers.py`) that encapsulate HTML report generation and slow.pics uploads without touching `Path` or HTTP helpers directly.
+- Wired `RunDependencies`/`_publish_results` to inject the new services and guarded the switch with `runner.enable_service_mode` + CLI overrides (`--service-mode` / `--legacy-runner` / `service_mode_override` argument). Legacy `_run_legacy_publishers` remains available for rollback.
+- Test coverage:
+  - `tests/services/test_publishers.py` (service success/failure paths, stub adapters, unattended mode).
+  - `tests/runner/test_runner_services.py` (dependency ordering, flag wiring, `_publish_results` service-vs-legacy selection).
+  - Existing slow.pics workflow/CLI suites updated to default to legacy mode where direct patching is still required.
+- Docs touched: README flag table, `docs/DECISIONS.md`, `CHANGELOG.md`, this file.
+
+**Verification Evidence (Recorded 2025-11-19 in docs/DECISIONS.md):**
+
+- `.venv/bin/pyright --warnings` (0 errors, 0 warnings)
+- `.venv/bin/ruff check`
+- `.venv/bin/pytest -q` (428 passed, 1 skipped)
+
+Outstanding TODOs: None for Track C; any additional adapter reshuffling will be handled in Track D planning.
 
 ### C3. Review Notes
 
-- [ ] Verify no lingering direct `Path` operations or HTTP calls in runner/services; everything goes through adapters.
-- [ ] Ensure logging/metrics hooks remain intact.
-- [ ] Confirm tests cover success/failure paths for adapters.
+- [x] Verify no lingering direct `Path` operations or HTTP calls in runner/services; everything goes through adapters.
+- [x] Ensure logging/metrics hooks remain intact.
+- [x] Confirm tests cover success/failure paths for adapters.
+
+**Review Outcome (2025-11-19):**
+
+- Runner now calls slow.pics/HTML generation exclusively through the injected services when `enable_service_mode` is true; `_run_legacy_publishers` remains behind the flag for parity testing.
+- Reporter warnings/logs continue to mirror the legacy flow; CLI prompts confirmed via `tests/runner/test_runner_services.py`.
+- Service/runner tests cover service success, adapter failure surfacing, CLI flag overrides, and legacy fallback; no gaps remain.
+- Track C accepted pending documentation polish (addressed in this update).
 
 ---
 
 ## Verification Checklist
 
-- [ ] `.venv/bin/pyright --warnings`
-- [ ] `.venv/bin/ruff check`
-- [ ] `.venv/bin/pytest -q` (include new suites: `tests/services/test_metadata.py`, `tests/services/test_alignment.py`, `tests/services/test_publishers.py`, updated runner tests)
+- [x] `.venv/bin/pyright --warnings`
+- [x] `.venv/bin/ruff check`
+- [x] `.venv/bin/pytest -q` (include new suites: `tests/services/test_metadata.py`, `tests/services/test_alignment.py`, `tests/services/test_publishers.py`, updated runner tests)
 - [ ] Optional smoke: `uv run frame_compare --help`
 
 Record command outputs (hash or summary) in Implementation Notes; reviewers re-run if missing or suspicious.
 
 ## Risk & Rollback
 
-- Maintain a feature flag (e.g., `runner.enable_service_mode`) during rollout; default OFF initially for quick rollback.
+- Maintain a feature flag (e.g., `runner.enable_service_mode`) during rollout; default ON with `--legacy-runner`/`service_mode_override=False` documented for quick rollback.
 - Keep legacy runner path available while services stabilize; document toggles so support can revert. 
 - Provide instructions for clearing caches/temp directories if services change storage paths.
 - Track TODOs/follow-ups with issue IDs; no naked `# TODO`.

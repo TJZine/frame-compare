@@ -11,6 +11,14 @@ from .metadata import (
     MetadataResolveResult,
     TMDBClientProtocol,
 )
+from .publishers import (
+    ReportPublisher,
+    ReportPublisherRequest,
+    ReportPublisherResult,
+    SlowpicsPublisher,
+    SlowpicsPublisherRequest,
+    SlowpicsPublisherResult,
+)
 
 __all__ = [
     "AlignmentRequest",
@@ -22,4 +30,10 @@ __all__ = [
     "MetadataResolveResult",
     "MetadataResolver",
     "TMDBClientProtocol",
+    "ReportPublisher",
+    "ReportPublisherRequest",
+    "ReportPublisherResult",
+    "SlowpicsPublisher",
+    "SlowpicsPublisherRequest",
+    "SlowpicsPublisherResult",
 ]

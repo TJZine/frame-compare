@@ -1,5 +1,13 @@
 # Decisions Log
 
+- *2025-11-19:* feat(runner): finish service-mode publisher wiring and CLI overrides.
+  - Problem: The prior agent reverted the runner halfway through the publisher extraction, so `_publish_results`/`RunDependencies` were disconnected, CLI flags for `--service-mode`/`--legacy-runner` were undocumented, and pytest still patched `upload_comparison` even though the new services bypass that hook, causing real slow.pics uploads during tests.
+  - Decision: Restored the service-mode plumbing inside `src/frame_compare/runner.py`, tightened `RunDependencies` defaults for `ReportPublisher`/`SlowpicsPublisher`, added CLI coverage in `tests/runner/test_cli_entry.py`, and taught all slow.pics workflow tests to opt into legacy mode via `service_mode_override=False` or `--legacy-runner` so they keep using the legacy stub helpers. Updated `tests/services/test_publishers.py` to exercise the service classes directly, refreshed README + docs/refactor/runner_service_split.md + CHANGELOG to describe the flag, and recorded the rollout plus verification details here and in docs/DECISIONS.md.
+  - Verification:
+    - `.venv/bin/pyright --warnings` (0 errors, 0 warnings)
+    - `.venv/bin/ruff check` (All checks passed!)
+    - `.venv/bin/pytest -q` (428 passed, 1 skipped)
+
 - *2025-11-18:* refactor(services): extract MetadataResolver/AlignmentWorkflow for Track A (docs/refactor/runner_service_split.md).
   - Problem: `src/frame_compare/runner.py` still embedded TMDB lookup, plan construction, clip probing, and audio-alignment wiring, preventing unit tests and violating the service-boundary plan recorded in docs/refactor/runner_service_split.md.
   - Decision: Added `src/frame_compare/services/metadata.py`, `src/frame_compare/services/alignment.py`, and `src/frame_compare/services/factory.py` so the runner now issues typed `MetadataResolveRequest`/`AlignmentRequest` objects. MetadataResolver handles TMDB context, slow.pics title derivation, plan building, and clip probing through injectable adapters; AlignmentWorkflow wraps `alignment_runner.apply_audio_alignment`, `format_alignment_output`, and screenshot confirmation. Introduced service unit suites under `tests/services/` to verify TMDB happy-path/ambiguity/error flows and audio-alignment behaviors, and updated Track A Implementation Notes with the wiring/tests executed.
@@ -759,3 +767,7 @@
   - Impact: Markdownlint navigation panes no longer collide on duplicate headings, and the audit template renders consistently in docs sites.
   - `Get-Date -AsUTC -Format 'yyyy-MM-dd'`  `2025-11-18`
   - Verification: N/A (documentation-only change).
+- *2025-11-19:* chore(track-c): finalize publishing documentation, config flag docs, and runner observability.
+  - Problem: Track C’s checklist still showed unchecked tasks with no Implementation/Review notes, operators couldn’t discover the `runner.enable_service_mode` flag outside the CLI, and `run()` never logged whether the publisher services or the legacy path executed, making flag validation difficult.
+  - Decision: Filled in Track C planning/implementation/review sections (docs/refactor/runner_service_split.md) with concrete scope, dates, and verification evidence; documented `[runner].enable_service_mode` inside `src/data/config.toml.template` plus README’s CLI/config table; and taught `src/frame_compare/runner.py` to mark a `service_mode_enabled` reporter flag while logging/printing the active publishing mode for each run.
+  - Verification: Leveraged the existing Track C command set (pyright/ruff/pytest recorded earlier on 2025-11-19); no code paths outside logging/docs changed and no additional execution was required.

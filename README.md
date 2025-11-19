@@ -337,6 +337,8 @@ Fine-grained overrides (`smoothing_period`, `scene_threshold_*`, `percentile`, `
 | `--diagnose-paths` | Print JSON diagnostics |
 | `--no-cache` | Ignore cached frame metrics and recompute selection data for this run |
 | `--from-cache-only` | Render the last `.frame_compare.run.json` snapshot and exit |
+| `--service-mode` / `--legacy-runner` | Force the publisher services pipeline on or off for the current run |
+| `[runner].enable_service_mode` | Default `true`. Set `false` in `config.toml` to keep the legacy inline publishers until the services finish burn-in (CLI flags still override per run). |
 | `--show-partial` | Display sections marked as partial when rendering cached runs |
 | `--show-missing` / `--hide-missing` | Show (default) or suppress banners for sections missing from cached runs |
 | `--quiet` / `--verbose` / `--no-color` / `--json-pretty` | Adjust console behavior |

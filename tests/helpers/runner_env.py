@@ -35,6 +35,7 @@ from src.datatypes import (
     OverridesConfig,
     PathsConfig,
     ReportConfig,
+    RunnerConfig,
     RuntimeConfig,
     ScreenshotConfig,
     SlowpicsConfig,
@@ -437,6 +438,7 @@ def _make_config(input_dir: Path) -> AppConfig:
         source=SourceConfig(preferred="lsmas"),
         audio_alignment=AudioAlignmentConfig(enable=False),
         report=ReportConfig(enable=False),
+        runner=RunnerConfig(),
     )
 
 

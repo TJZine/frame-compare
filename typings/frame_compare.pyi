@@ -42,6 +42,7 @@ def run_cli(
     force_cache_refresh: bool = ...,
     show_partial_sections: bool = ...,
     show_missing_sections: bool = ...,
+    service_mode_override: Optional[bool] = ...,
 ) -> RunResult: ...
 
 

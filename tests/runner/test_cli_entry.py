@@ -27,6 +27,7 @@ from src.datatypes import (
     OverridesConfig,
     PathsConfig,
     ReportConfig,
+    RunnerConfig,
     RuntimeConfig,
     ScreenshotConfig,
     SlowpicsConfig,
@@ -223,6 +224,33 @@ def test_cli_hide_missing_flag_propagates_to_runner(
     show_result = runner.invoke(frame_compare.main, [])
     assert show_result.exit_code == 0, show_result.output
     assert recorded[-1] is True
+
+
+def test_cli_service_mode_flags_override_runner(
+    runner: CliRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    cli_runner_env: _CliRunnerEnv,
+) -> None:
+    """--legacy-runner and --service-mode should drive RunRequest overrides."""
+
+    cli_runner_env.reinstall()
+    recorded = _install_request_recorder(monkeypatch, cli_runner_env)
+
+    legacy_result = runner.invoke(
+        frame_compare.main,
+        ["--legacy-runner"],
+        catch_exceptions=False,
+    )
+    assert legacy_result.exit_code == 0, legacy_result.output
+    assert recorded and recorded[-1].service_mode_override is False
+
+    service_result = runner.invoke(
+        frame_compare.main,
+        ["--service-mode"],
+        catch_exceptions=False,
+    )
+    assert service_result.exit_code == 0, service_result.output
+    assert recorded[-1].service_mode_override is True
 
 
 def test_cli_cache_flags_ignore_default_map(
@@ -856,6 +884,7 @@ def test_label_dedupe_preserves_short_labels(
         analysis=AnalysisConfig(frame_count_dark=0, frame_count_bright=0, frame_count_motion=0, random_frames=0),
         screenshots=ScreenshotConfig(directory_name="screens", add_frame_info=False),
         cli=CLIConfig(),
+        runner=RunnerConfig(),
         color=ColorConfig(),
         slowpics=SlowpicsConfig(auto_upload=False),
         tmdb=TMDBConfig(),

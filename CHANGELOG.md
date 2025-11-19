@@ -30,6 +30,7 @@
 - *2025-11-18:* capture ClipProbeSnapshot metadata (fps, frame counts, geometry, HDR props) per clip, persist it to `cache_dir/probe/<hash>.json`, reuse probe-era clip handles inside `init_clips`, and add `runtime.force_reprobe` plus cache hit/miss logging with regression tests for probe/init reuse.
 - *2025-11-18:* extract `MetadataResolver` and `AlignmentWorkflow` services per Track A, wire runner orchestration through typed requests/responses, and add focused service unit tests to lock TMDB/alignment behavior.
 - *2025-11-18:* wire the runner through `RunDependencies` + `RunContext`, add `default_run_dependencies()` for CLI/test injection, refresh CLI/Dolby stubs to accept the `dependencies` kwarg, and add `tests/runner/test_runner_services.py` to assert service order, error propagation, and reporter flag wiring.
+- *2025-11-19:* reintroduce the service-mode publisher pipeline with CLI overrides (`--service-mode`/`--legacy-runner`), wire RunDependencies to `ReportPublisher`/`SlowpicsPublisher`, and update runner/CLI/slow.pics tests plus docs for the new flag.
 
 ### Bug Fixes
 
@@ -56,6 +57,7 @@
 - *2025-11-18:* add a `FRAME_COMPARE_DOVI_DEBUG` telemetry mode that emits JSON-formatted logs from both the runner and VapourSynth tonemap resolver so entrypoints can compare config roots, cache status, tonemap overrides, and brightness-affecting parameters when diagnosing DOVI drift.
 - *2025-11-18:* convert the docs/refactor/flag_audit.md template placeholders into ATX headings with per-track prefixes so markdownlint (MD003/MD024) passes and rendered navigation stays unique.
 - *2025-11-18:* document the Phase 1–2 config/tonemap audit review results in `docs/refactor/flag_audit.md` (A3/B4) and `docs/DECISIONS.md`, confirming Click CLI vs `frame_compare.run_cli` parity for DoVi and tonemap overrides.
+- *2025-11-19:* finalize Track C documentation (Implementation/Review notes), surface `[runner].enable_service_mode` in the config template/README, and log the active publishing mode inside `runner.run`.
 
 ## [0.0.2](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.1...frame-compare-v0.0.2) (2025-11-13)
 

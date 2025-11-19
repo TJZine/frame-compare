@@ -139,6 +139,7 @@ def run_cli(
     force_cache_refresh: bool = False,
     show_partial_sections: bool = False,
     show_missing_sections: bool = True,
+    service_mode_override: bool | None = None,
 ) -> RunResult:
     """Delegate to the shared runner module."""
     request = RunRequest(
@@ -158,6 +159,7 @@ def run_cli(
         force_cache_refresh=force_cache_refresh,
         show_partial_sections=show_partial_sections,
         show_missing_sections=show_missing_sections,
+        service_mode_override=service_mode_override,
     )
     return runner.run(request)
 
@@ -174,6 +176,7 @@ def _run_cli_entry(
     json_pretty: bool,
     no_cache: bool,
     from_cache_only: bool,
+    service_mode_override: bool | None,
     show_partial: bool,
     show_missing: bool,
     diagnose_paths: bool,
@@ -314,6 +317,7 @@ def _run_cli_entry(
             force_cache_refresh=no_cache,
             show_partial_sections=show_partial,
             show_missing_sections=show_missing,
+            service_mode_override=service_mode_override,
         )
     except CLIAppError as exc:
         print(exc.rich_message)
@@ -560,6 +564,19 @@ def _cli_flag_value(ctx: click.Context, name: str, value: bool, *, default: bool
     help="Render cached CLI output without recomputing; fails when no snapshot exists.",
 )
 @click.option(
+    "--service-mode",
+    "service_mode_override",
+    flag_value=True,
+    default=None,
+    help="Force the runner to use the publisher services pipeline.",
+)
+@click.option(
+    "--legacy-runner",
+    "service_mode_override",
+    flag_value=False,
+    help="Disable publisher services and fall back to the legacy inline flow.",
+)
+@click.option(
     "--show-partial",
     "show_partial",
     is_flag=True,
@@ -698,6 +715,7 @@ def main(
     json_pretty: bool,
     no_cache: bool,
     from_cache_only: bool,
+    service_mode_override: bool | None,
     show_partial: bool,
     show_missing: bool,
     diagnose_paths: bool,
@@ -780,6 +798,7 @@ def main(
         "json_pretty": json_pretty,
         "no_cache": no_cache,
         "from_cache_only": from_cache_only,
+        "service_mode_override": service_mode_override,
         "show_partial": show_partial,
         "show_missing": show_missing,
         "diagnose_paths": diagnose_paths,
@@ -832,6 +851,7 @@ def run_command(ctx: click.Context) -> None:
         json_pretty=bool(params.get("json_pretty", False)),
         no_cache=bool(params.get("no_cache", False)),
         from_cache_only=bool(params.get("from_cache_only", False)),
+        service_mode_override=params.get("service_mode_override"),
         show_partial=bool(params.get("show_partial", False)),
         show_missing=bool(params.get("show_missing", True)),
         diagnose_paths=bool(params.get("diagnose_paths", False)),
