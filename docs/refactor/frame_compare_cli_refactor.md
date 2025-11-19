@@ -95,22 +95,19 @@ These should remain true at the end of **every phase** (unless explicitly noted)
 ### 3.1 Current key modules
 
 - `frame_compare.py`
-  - Contains:
-    - Click CLI wiring via `@click.group` `main` (invokes `_run_cli_entry` when no subcommand) plus subcommands: `run` (explicit passthrough to `_run_cli_entry`), `doctor` (dependency/config diagnostics with optional `--json`), `wizard` (interactive config creation), and `preset` group with `list`/`apply`.
-    - Root-level options gated by `_cli_override_value`/`_cli_flag_value` so Click `default_map`/env sources never override config unless the flag was passed: `--root/--config/--input`, `--audio-align-track` (multiple), quiet/verbose/color/json-pretty, cache flags (`--no-cache`, `--from-cache-only`, `--show-partial`, `--show-missing/--hide-missing`), service-mode vs legacy runner (mutually exclusive, sets `service_mode_override`), HTML report toggles, `--diagnose-paths`, `--write-config`, `--no-wizard`, `--debug-color`, diagnostic frame metrics (flag pair), and tonemap overrides via `--tm-*` (preset/curve/target/dst-min/knee/dpd preset/black-cutoff/gamma & disable/smoothing/scene thresholds/percentile/contrast/metadata/use-dovi/visualize-lut/show-clipping`).
-    - `_run_cli_entry` builds `RunRequest`, validates incompatible flags (e.g., `--html-report` vs `--no-html-report`, gamma vs gamma-disable), handles write-config/diagnose-paths short-circuiting, invokes `run_cli`, then manages slow.pics shortcut/browser/clipboard plus JSON/report tail emission.
-    - CLI helper functions `_cli_override_value` (ParameterSource guard) and `_cli_flag_value` (boolean guard), plus `_execute_wizard_session` shared by the `wizard` command for preset/interactive config creation.
-    - Public surface: `run_cli` shim to `runner.run`; curated `__all__` (asserted in `tests/api/test_public_surface.py`) exposing `run_cli`, `main`, `RunRequest`, `RunResult`, `CLIAppError`, `ScreenshotError`, `resolve_tmdb_workflow`, `TMDBLookupResult`, `render_collection_name`, `prepare_preflight`, `resolve_workspace_root`, `PreflightResult`, `collect_path_diagnostics`, `collect_doctor_checks`, `emit_doctor_results`, `DoctorCheck`, `vs_core`; `_COMPAT_EXPORTS` additionally attach modules/helpers (cli_runtime, core, config_writer, presets, preflight, tmdb_workflow, vspreview, collect_doctor_checks/emit_doctor_results, wizard prompts, Console, CliOutputManager, NullCliOutputManager, render helpers, ScreenshotError, etc.).
-    - Entry points: console_script `frame-compare = "frame_compare:main"` (`pyproject.toml`) and `if __name__ == "__main__": main()`; `python -m frame_compare` today resolves to this module.
-
-- `src/frame_compare/cli_utils.py`
-  - Proto helper module already contains `_cli_override_value`/`_cli_flag_value` mirrored from `frame_compare.py` with `__all__` set, but the Click wiring still calls the inline versions (not imported).
+  - Thin public shim: exports the curated `__all__` (`run_cli`, `main`, `RunRequest`, `RunResult`, `CLIAppError`, `ScreenshotError`, `resolve_tmdb_workflow`, `TMDBLookupResult`, `render_collection_name`, `prepare_preflight`, `resolve_workspace_root`, `PreflightResult`, `collect_path_diagnostics`, `collect_doctor_checks`, `emit_doctor_results`, `DoctorCheck`, `vs_core`) plus `_COMPAT_EXPORTS` forwarding helper modules and wizard helpers used by tests (`load_config`, `_execute_wizard_session`, etc.).
+  - Delegates CLI entry to `src.frame_compare.cli_entry.main` (also aliased as `cli`); no Click decorators remain in this module.
+  - Entry points remain `frame-compare = "frame_compare:main"` and `python -m frame_compare` via the shim.
 
 - `src/frame_compare/cli_entry.py`
-  - Proto CLI entry module (68 lines) with imports and `__all__ = ("cli", "main", "run_cli", ...)` but no click decorators/logic; currently unused by entry points/tests and should be reconciled in later phases rather than left divergent.
+  - Owns the Click CLI wiring: `@click.group` `main` with default execution into `_run_cli_entry` plus subcommands `run`, `doctor`, `wizard`, and `preset` (`list`/`apply`).
+  - All options/flags (paths, cache, audio, report, wizard, debug, diagnostic metrics, tonemap `--tm-*`, etc.) use `_cli_override_value` / `_cli_flag_value` to gate command-line sources; `_run_cli_entry` builds `RunRequest`, enforces mutual exclusivity, and handles slow.pics/report/wizard flows.
+
+- `src/frame_compare/cli_utils.py`
+  - Houses `_cli_override_value` and `_cli_flag_value` used by `cli_entry` for ParameterSource-aware overrides.
 
 - `tests/helpers/runner_env.py`
-  - Contains `_patch_core_helper` (patches both `frame_compare.*` and `runner_module.*` helpers like `prepare_preflight`/`_collect_path_diagnostics`/`parse_metadata`/`_write_vspreview_script`/`resolve_subdir`/`apply_audio_alignment`/`launch`/`prompt_offsets`, etc.) plus other runner/VS/audio patchers. Assumes these attribute names remain reachable on the `frame_compare` shim and runner modules, so relocations require shims.
+  - Contains `_patch_core_helper` (patches `frame_compare.*` and `runner_module.*` helpers like `prepare_preflight`/`_collect_path_diagnostics`/`parse_metadata`/`_write_vspreview_script`/`resolve_subdir`/`apply_audio_alignment`/`launch`/`prompt_offsets`, etc.) plus other runner/VS/audio patchers. Assumes these attribute names remain reachable on the `frame_compare` shim and runner modules, so relocations require shims.
 
 ### 3.2 Target layout (end state)
 
@@ -277,7 +274,10 @@ Notes:
 
 - Migrated `_cli_override_value` and `_cli_flag_value` into `src/frame_compare/cli_utils.py`, aligning the implementations and typing with the live `frame_compare` versions; `frame_compare.py` now imports them to keep the names reachable and behavior identical.
 - No test imports required changes; `frame_compare` continues to expose the helper names via module globals for compatibility.
-- Tooling runs: `.venv/bin/pyright --warnings` and `.venv/bin/ruff check` still report pre-existing unused-import/private-name issues in the proto `src/frame_compare/cli_entry.py` stub (not touched in this phase). `.venv/bin/pytest -q` passed (444 passed, 1 skipped).
+- Tooling runs (2025-11-19):
+  - `.venv/bin/pyright --warnings` → 0 errors, 0 warnings, 0 informations.
+  - `.venv/bin/ruff check` → All checks passed.
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` → 444 passed, 1 skipped.
 
 ### 6.6 Review Notes (Review Agent)
 
@@ -294,8 +294,8 @@ Notes:
 
 ## 7. Phase 2 – Extract CLI Wiring into `cli_entry`
 
-Status: `not-started` | `in-progress` | `completed`  
-Owner: _fill in_  
+Status: `completed`  
+Owner: Codex (Phase 2 CLI wiring)  
 Related PR(s): _fill in_
 
 ### 7.1 Scope
@@ -319,36 +319,40 @@ Related PR(s): _fill in_
 
 ### 7.4 Checklist
 
-- [ ] Create `frame_compare/cli_entry.py` (path adjusted to repo layout).
-- [ ] Move Click decorators, group, and subcommands from `frame_compare.py` to `cli_entry.py`.
-- [ ] Ensure options/flags, defaults, and help text are unchanged.
-- [ ] Implement canonical CLI entry in `cli_entry`:
-  - [ ] `def main(...)` or `def cli(...)` matching current `frame_compare.main` semantics (return code, exit behavior).
-- [ ] In `frame_compare.py`:
-  - [ ] Remove moved Click wiring.
-  - [ ] Import the entry function from `cli_entry`.
-  - [ ] Re-implement `frame_compare.main` as a thin delegation to `cli_entry`’s entry point.
-- [ ] Ensure orchestrating business logic stays in appropriate modules (not duplicated across `frame_compare.py` and `cli_entry.py`).
-- [ ] Update tests:
-  - [ ] Tests may call `frame_compare.main` (shim) or `frame_compare.cli_entry.main` explicitly.
-  - [ ] No test should depend on CLI wiring staying inside `frame_compare.py`.
-- [ ] Run:
-  - [ ] `.venv/bin/pyright --warnings`
-  - [ ] `.venv/bin/ruff check`
-  - [ ] `.venv/bin/pytest -q`
+- [x] Create `frame_compare/cli_entry.py` (path adjusted to repo layout).
+- [x] Move Click decorators, group, and subcommands from `frame_compare.py` to `cli_entry.py`.
+- [x] Ensure options/flags, defaults, and help text are unchanged.
+- [x] Implement canonical CLI entry in `cli_entry`:
+  - [x] `def main(...)` or `def cli(...)` matching current `frame_compare.main` semantics (return code, exit behavior).
+- [x] In `frame_compare.py`:
+  - [x] Remove moved Click wiring.
+  - [x] Import the entry function from `cli_entry`.
+  - [x] Re-implement `frame_compare.main` as a thin delegation to `cli_entry`’s entry point.
+- [x] Ensure orchestrating business logic stays in appropriate modules (not duplicated across `frame_compare.py` and `cli_entry.py`).
+- [x] Update tests:
+  - [x] Tests may call `frame_compare.main` (shim) or `frame_compare.cli_entry.main` explicitly.
+  - [x] No test should depend on CLI wiring staying inside `frame_compare.py`.
+- [x] Run:
+  - [x] `.venv/bin/pyright --warnings`
+  - [x] `.venv/bin/ruff check`
+  - [x] `.venv/bin/pytest -q`
 - [ ] Optional smoke check:
   - [ ] `python -m frame_compare --help` (if supported today).
 
 ### 7.5 Implementation Notes (Dev Agent)
 
-- Date: _YYYY-MM-DD_  
-- Dev Agent: _name / persona_
+- Date: 2025-11-19  
+- Dev Agent: Codex (Phase 2 CLI wiring)
 
 Notes:
 
-- Summary of moved commands and any minor reshuffling.
-- Any subtle behavior issues encountered and fixed.
-- How `main` semantics were preserved.
+- Added `src/frame_compare/cli_entry.py` with the full Click group, `run`/`doctor`/`wizard`/`preset` subcommands, and the `_run_cli_entry` / `_execute_wizard_session` helpers; kept option surfaces and semantics identical by lifting wiring verbatim.
+- `frame_compare.main` now delegates to `cli_entry.main` while preserving the public API; `frame_compare` re-exports `load_config` and `_execute_wizard_session` to satisfy existing monkeypatches in tests and preflight auto-wizard expectations.
+- Wizard flows now respect patched `frame_compare.sys.stdin` proxies by resolving stdin from the shim module before checking `isatty`, matching the prior behavior relied on by `tests/cli/test_wizard.py`.
+- Tooling runs (2025-11-19):
+  - `.venv/bin/pyright --warnings` → 0 errors.
+  - `.venv/bin/ruff check` → All checks passed.
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` → 444 passed, 1 skipped.
 
 ### 7.6 Review Notes (Review Agent)
 

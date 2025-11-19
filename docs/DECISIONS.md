@@ -1,5 +1,10 @@
 # Decisions Log
 
+- *2025-11-19:* chore(cli+docs): gate `--tm-gamma-disable` on command-line sources and refresh Phase 2 snapshot.
+  - Problem: `tm_gamma_disable` in `cli_entry.main` flowed straight into `_run_cli_entry`, so Click `default_map`/env values could disable post-gamma without an explicit flag. The Architecture Snapshot in `docs/refactor/frame_compare_cli_refactor.md` still claimed Click wiring lived in `frame_compare.py`, conflicting with the completed Phase 2 move.
+  - Decision: Wrap `tm_gamma_disable` with `_cli_flag_value(..., default=False)` to preserve config-first tonemap semantics and updated the Architecture Snapshot to reflect `cli_entry` owning wiring with `frame_compare.py` as a delegating shim.
+  - Verification: Not yet rerun (changes are wiring/doc only); rerun `.venv/bin/pyright --warnings`, `.venv/bin/ruff check`, `.venv/bin/pytest -q` next.
+
 - *2025-11-19:* chore(docs+runner): correct `src/datatypes` references and normalize viewer metadata.
   - Problem: `docs/refactor/refactor_cleanup.md` instructed readers to touch a non-existent `src/datatype` module, and `src/frame_compare/runner.py` could leak `pathlib.Path` instances into `json_tail["viewer"]`/`layout_data["viewer"]` causing serialization churn. The `probe_clip_metadata` docstring also implied every clip gets reopened even though the cache avoids that path now.
   - Decision: Retargeted the refactor checklist to point at `src/datatypes.py`, coerced any report paths to strings before computing relative labels so both `destination` and `destination_label` stay JSON-safe, and refreshed the `probe_clip_metadata` docstring to mention cached snapshots plus the follow-up initialization performed by `init_clips`.
