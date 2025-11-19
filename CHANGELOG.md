@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.0.8](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.7...frame-compare-v0.0.8) (2025-11-19)
+
+
+### Features
+
+* restore service-mode publisher wiring and tests ([5ebf836](https://github.com/TJZine/frame-compare/commit/5ebf836ac9926ef466d5f0e49602379f5ba7ffc4))
+* wire runner DI through RunDependencies and add runner service tests ([4430770](https://github.com/TJZine/frame-compare/commit/4430770ca2c0027af5c510ede017094992901c57))
+
+
+### Bug Fixes
+
+* harden CLI flags and probe cacheso ([d515031](https://github.com/TJZine/frame-compare/commit/d515031929a50bd6e2da5c4da07766e90fe42d26))
+
+
+### Refactors
+
+* extract metadata/alignment services ([08385fa](https://github.com/TJZine/frame-compare/commit/08385fa7412cf97a333762b81b2ac9ec9d36d19e))
+* extract metadata/alignment services ([#165](https://github.com/TJZine/frame-compare/issues/165)) ([2972ec1](https://github.com/TJZine/frame-compare/commit/2972ec195e0f188afd25ae5613dbe1e5903c4bf1))
+
 ## [0.0.7](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.6...frame-compare-v0.0.7) (2025-11-18)
 
 
