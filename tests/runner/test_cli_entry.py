@@ -253,6 +253,21 @@ def test_cli_service_mode_flags_override_runner(
     assert recorded[-1].service_mode_override is True
 
 
+def test_cli_service_mode_flag_conflict(
+    runner: CliRunner,
+    cli_runner_env: _CliRunnerEnv,
+) -> None:
+    """Passing both service toggles should raise a ClickException."""
+
+    cli_runner_env.reinstall()
+    result = runner.invoke(
+        frame_compare.main,
+        ["--service-mode", "--legacy-runner"],
+    )
+    assert result.exit_code != 0
+    assert "Cannot use both --service-mode and --legacy-runner" in result.output
+
+
 def test_cli_cache_flags_ignore_default_map(
     runner: CliRunner,
     monkeypatch: pytest.MonkeyPatch,

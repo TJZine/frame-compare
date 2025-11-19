@@ -72,14 +72,16 @@ def pick_analyze_file(
         if 0 <= idx < len(files):
             return files[idx]
 
+    metadata_len = len(metadata)
     for idx, file in enumerate(files):
         if file.name.lower() == target_lower or file.stem.lower() == target_lower:
             return file
-        meta = metadata[idx]
-        for key in ("label", "release_group", "anime_title", "file_name"):
-            value = str(meta.get(key) or "")
-            if value and value.lower() == target_lower:
-                return file
+        meta = metadata[idx] if idx < metadata_len else None
+        if meta:
+            for key in ("label", "release_group", "anime_title", "file_name"):
+                value = str(meta.get(key) or "")
+                if value and value.lower() == target_lower:
+                    return file
         if target_lower == str(idx):
             return file
 

@@ -7,6 +7,13 @@
     - `.venv/bin/pyright --warnings`
     - `.venv/bin/ruff check`
     - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`
+- *2025-11-19:* fix(cli+cache): guard service-mode flags, metadata typing, and probe-cache parsing.
+  - Problem: The CLI allowed users to pass `--service-mode` alongside `--legacy-runner` silently, RunContext assumed metadata dict values were `str`, and both the probe-cache loader and persistence path could still throw when cache keys or payload types drifted (plus `pick_analyze_file` indexed metadata without a bounds check).
+  - Decision: Added explicit mutual exclusion for the two runner toggles plus a regression test, widened `RunContext.metadata` to `dict[str, Any]`, skipped metadata lookups when callers pass fewer entries than files, short-circuited cache persistence when a plan forgot to set `probe_cache_key`, and treated malformed JSON payloads as cache misses by wrapping `ClipProbeSnapshot` construction in a try/except.
+  - Verification:
+    - `.venv/bin/pyright --warnings`
+    - `.venv/bin/ruff check`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`
 
 - *2025-11-19:* chore(config): regenerate config defaults docs and make clip-metadata tests independent of VapourSynth.
   - Problem: CI lint failed because `docs/_generated/config_tables.md` lagged behind a new `RuntimeConfig.force_reprobe` option, and four tests in `tests/test_clip_metadata_probe.py` invoked the real `vs_core.set_ram_limit`, which tried to import VapourSynth and exploded on machines without the module.

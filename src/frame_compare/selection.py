@@ -192,6 +192,8 @@ def _initialise_clip_and_snapshot(
     plan.probe_snapshot = snapshot
     wrote = False
     if cache_root is not None and persist_snapshot:
+        if not snapshot.cache_key:
+            raise ValueError("Cannot persist probe snapshot without cache key")
         cache_path, wrote = persist_probe_snapshot(cache_root, snapshot)
         snapshot.cache_path = cache_path
     return snapshot, wrote

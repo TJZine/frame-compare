@@ -34,6 +34,7 @@
 
 ### Bug Fixes
 
+* prevent `--service-mode` and `--legacy-runner` from being used together, loosen `RunContext.metadata` typing, guard metadata indexing in `pick_analyze_file`, and treat malformed probe-cache payloads (missing cache keys, bad field types) as cache misses instead of hard errors
 * coerce local report viewer destinations/labels to strings before serializing cached run metadata, refresh the `probe_clip_metadata` docstring to describe cache reuse, and fix docs that referenced the non-existent `src/datatype` module
 * gate every non-`--tm-*` CLI override (paths/cache/report/audio/debug flags) on explicit command-line sources so `frame_compare.run_cli` and the Click entrypoint respect config precedence, and fix `json_tail.render.writer` so debug-color runs accurately report the VS fallback (tests/runner/test_cli_entry.py)
 * regenerate `docs/_generated/config_tables.md` via `tools/gen_config_docs.py` so the new `runtime.force_reprobe` default is documented, and add an autouse fixture in `tests/test_clip_metadata_probe.py` that stubs `vs_core.set_ram_limit` so the suite passes even when the VapourSynth module is unavailable

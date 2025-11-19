@@ -181,7 +181,7 @@ class RunContext:
     """Aggregated state shared across service boundaries."""
 
     plans: list[ClipPlan]
-    metadata: list[dict[str, str]]
+    metadata: list[dict[str, Any]]
     json_tail: JsonTail
     layout_data: MutableMapping[str, Any]
     metadata_title: str | None

@@ -159,23 +159,26 @@ def load_probe_snapshot(cache_root: Path, cache_key: str) -> Optional[ClipProbeS
         return None
     if data.get("schema_version") != _PROBE_CACHE_SCHEMA_VERSION:
         return None
-    snapshot = ClipProbeSnapshot(
-        trim_start=int(data.get("trim_start", 0)),
-        trim_end=int(data["trim_end"]) if data.get("trim_end") is not None else None,
-        fps_override=_list_to_tuple(data.get("fps_override")),
-        applied_fps=_list_to_tuple(data.get("applied_fps")),
-        effective_fps=_list_to_tuple(data.get("effective_fps")),
-        source_fps=_list_to_tuple(data.get("source_fps")),
-        source_num_frames=int(data["source_num_frames"]) if data.get("source_num_frames") is not None else None,
-        source_width=int(data["source_width"]) if data.get("source_width") is not None else None,
-        source_height=int(data["source_height"]) if data.get("source_height") is not None else None,
-        source_frame_props=dict(data.get("source_frame_props") or {}),
-        tonemap_prop_keys=tuple(data.get("tonemap_prop_keys") or ()),
-        metadata_digest=str(data.get("metadata_digest") or ""),
-        cache_key=cache_key,
-        cache_path=cache_path,
-        cached_at=str(data.get("cached_at") or ""),
-    )
+    try:
+        snapshot = ClipProbeSnapshot(
+            trim_start=int(data.get("trim_start", 0)),
+            trim_end=int(data["trim_end"]) if data.get("trim_end") is not None else None,
+            fps_override=_list_to_tuple(data.get("fps_override")),
+            applied_fps=_list_to_tuple(data.get("applied_fps")),
+            effective_fps=_list_to_tuple(data.get("effective_fps")),
+            source_fps=_list_to_tuple(data.get("source_fps")),
+            source_num_frames=int(data["source_num_frames"]) if data.get("source_num_frames") is not None else None,
+            source_width=int(data["source_width"]) if data.get("source_width") is not None else None,
+            source_height=int(data["source_height"]) if data.get("source_height") is not None else None,
+            source_frame_props=dict(data.get("source_frame_props") or {}),
+            tonemap_prop_keys=tuple(data.get("tonemap_prop_keys") or ()),
+            metadata_digest=str(data.get("metadata_digest") or ""),
+            cache_key=cache_key,
+            cache_path=cache_path,
+            cached_at=str(data.get("cached_at") or ""),
+        )
+    except Exception:
+        return None
     return snapshot
 
 
