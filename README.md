@@ -341,6 +341,7 @@ Fine-grained overrides (`smoothing_period`, `scene_threshold_*`, `percentile`, `
 | `[runner].enable_service_mode` | Default `true`. Set `false` in `config.toml` to keep the legacy inline publishers until the services finish burn-in (CLI flags still override per run). |
 | `--show-partial` | Display sections marked as partial when rendering cached runs |
 | `--show-missing` / `--hide-missing` | Show (default) or suppress banners for sections missing from cached runs |
+| `--diagnostic-frame-metrics` / `--no-diagnostic-frame-metrics` | Override `[diagnostics].per_frame_nits` for the current run to enable or block per-frame nit estimates inside diagnostic overlays. |
 | `--quiet` / `--verbose` / `--no-color` / `--json-pretty` | Adjust console behavior |
 | `wizard`, `preset`, `doctor` | Subcommands for guided setup, presets, dependency checks |
 
@@ -360,6 +361,17 @@ Each snapshot records whether a CLI section rendered fully, partially, or not at
 Corrupt or truncated snapshots are treated as cache misses, so `--from-cache-only` aborts with the standard "No cached run result found" message rather than raising a decoder error.
 
 Cached runs display a banner letting operators know when the output comes from disk and how to force a fresh pass. Legacy cache files are treated as missing, so older workspaces fall back to live runs unless you rerun once to seed the snapshot.
+
+#### Diagnostic overlay metrics
+
+The `[diagnostics]` section in `config.toml` gates opt-in overlay work that can increase render time. Currently the single flag is:
+
+```toml
+[diagnostics]
+per_frame_nits = false
+```
+
+When `per_frame_nits` is `true` and `[color].overlay_mode = "diagnostic"`, the runner converts each selection score into a per-frame brightness estimate, adds a `Frame Nits:` line to the overlay, and records the data under `json_tail["overlay"]["diagnostics"]["frame_metrics"]`. Operators can toggle the behaviour without editing config by passing `--diagnostic-frame-metrics` / `--no-diagnostic-frame-metrics` on the CLI. The diagnostics block also captures Dolby Vision (DoVi) L2 metadata, HDR mastering info (MaxCLL/MaxFALL), and the detected color range so downstream consumers can safely ignore missing fields.
 
 ### Examples
 

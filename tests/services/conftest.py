@@ -12,6 +12,7 @@ from src.datatypes import (
     AudioAlignmentConfig,
     CLIConfig,
     ColorConfig,
+    DiagnosticsConfig,
     NamingConfig,
     OverridesConfig,
     PathsConfig,
@@ -100,6 +101,7 @@ def build_service_config(root: Path) -> AppConfig:
         audio_alignment=AudioAlignmentConfig(enable=False),
         report=ReportConfig(enable=False),
         runner=RunnerConfig(),
+        diagnostics=DiagnosticsConfig(),
     )
 
 

@@ -45,6 +45,12 @@ from src.frame_compare.analysis import (
     selection_hash_for_config,
     write_selection_cache_file,
 )
+from src.frame_compare.diagnostics import (
+    build_frame_metric_entry,
+    classify_color_range,
+    extract_dovi_metadata,
+    extract_hdr_metadata,
+)
 from src.frame_compare.env_flags import env_flag_enabled
 from src.frame_compare.result_snapshot import (
     RenderOptions,
@@ -164,6 +170,7 @@ class RunRequest:
     show_partial_sections: bool = False
     show_missing_sections: bool = True
     service_mode_override: bool | None = None
+    diagnostic_frame_metrics: bool | None = None
 
 
 @dataclass(slots=True)
@@ -911,7 +918,7 @@ def run(request: RunRequest, *, dependencies: RunDependencies | None = None) -> 
 
     clip_records: List[ClipRecord] = []
     trim_details: List[TrimSummary] = []
-    for plan in plans:
+    for idx, plan in enumerate(plans):
         label = (plan.metadata.get("label") or plan.path.name).strip()
         frames_total = int(plan.source_num_frames or getattr(plan.clip, "num_frames", 0) or 0)
         width = int(plan.source_width or getattr(plan.clip, "width", 0) or 0)
@@ -931,18 +938,24 @@ def run(request: RunRequest, *, dependencies: RunDependencies | None = None) -> 
                 "path": str(plan.path),
             }
         )
-        json_tail["clips"].append(
-            {
-                "label": label,
-                "width": width,
-                "height": height,
-                "fps": fps_float,
-                "frames": frames_total,
-                "duration_s": duration_seconds,
-                "duration_tc": runtime_utils.format_seconds(duration_seconds),
-                "path": str(plan.path),
-            }
-        )
+        clip_entry: dict[str, Any] = {
+            "label": label,
+            "width": width,
+            "height": height,
+            "fps": fps_float,
+            "frames": frames_total,
+            "duration_s": duration_seconds,
+            "duration_tc": runtime_utils.format_seconds(duration_seconds),
+            "path": str(plan.path),
+        }
+        props_snapshot = stored_props_seq[idx] or {}
+        hdr_meta = extract_hdr_metadata(props_snapshot)
+        if any(value is not None for value in hdr_meta.values()):
+            clip_entry["hdr_metadata"] = {k: v for k, v in hdr_meta.items() if v is not None}
+        range_label = classify_color_range(props_snapshot)
+        if range_label:
+            clip_entry["dynamic_range"] = {"label": range_label, "source": "frame_props"}
+        json_tail["clips"].append(clip_entry)
 
         lead_frames = max(0, int(plan.trim_start))
         lead_seconds = lead_frames / fps_float if fps_float > 0 else 0.0
@@ -1419,7 +1432,7 @@ def run(request: RunRequest, *, dependencies: RunDependencies | None = None) -> 
     clip_paths = [plan.path for plan in plans]
     selection_sidecar_dir = cache_info.path.parent if cache_info is not None else root
     selection_sidecar_path = selection_sidecar_dir / "generated.selection.v1.json"
-    selection_overlay_details = {
+    selection_overlay_details: dict[int, dict[str, Any]] = {
         frame: {
             "label": detail.label,
             "timecode": detail.timecode,
@@ -1632,6 +1645,68 @@ def run(request: RunRequest, *, dependencies: RunDependencies | None = None) -> 
         "mode": overlay_mode_value,
     }
     layout_data["overlay"] = json_tail["overlay"]
+
+    diagnostics_cfg = getattr(cfg, "diagnostics", None)
+    per_frame_config_enabled = bool(getattr(diagnostics_cfg, "per_frame_nits", False))
+    per_frame_override = request.diagnostic_frame_metrics
+    per_frame_requested = per_frame_override if per_frame_override is not None else per_frame_config_enabled
+    per_frame_enabled = bool(per_frame_requested and overlay_mode_value == "diagnostic")
+
+    tonemap_block = json_tail["tonemap"]
+    tonemap_target_value = tonemap_block.get("target_nits")
+    if isinstance(tonemap_target_value, (int, float)):
+        tonemap_target = float(tonemap_target_value)
+    else:
+        tonemap_target = float(getattr(cfg.color, "target_nits", 0.0))
+    per_frame_metrics: dict[int, dict[str, Any]] = {}
+    if per_frame_enabled:
+        for frame_idx, detail in selection_details.items():
+            entry = build_frame_metric_entry(
+                frame_idx,
+                detail.score,
+                detail.label,
+                target_nits=tonemap_target,
+            )
+            if entry is not None:
+                per_frame_metrics[frame_idx] = entry
+
+    for frame_idx, overlay_detail in selection_overlay_details.items():
+        metric_entry = per_frame_metrics.get(frame_idx)
+        if metric_entry is None:
+            continue
+        diagnostics_block = overlay_detail.setdefault("diagnostics", {})
+        diagnostics_block["frame_metrics"] = metric_entry
+
+    analyze_props = stored_props_seq[analyze_index] or {}
+    dovi_meta = extract_dovi_metadata(analyze_props)
+    hdr_meta = extract_hdr_metadata(analyze_props)
+    range_label = classify_color_range(analyze_props)
+    frame_metrics_json = {str(frame): entry for frame, entry in per_frame_metrics.items()}
+    dv_summary = {k: v for k, v in dovi_meta.items() if v is not None}
+    dv_block: dict[str, Any] = {
+        "label": json_tail["tonemap"].get("use_dovi_label"),
+        "enabled": json_tail["tonemap"].get("use_dovi"),
+    }
+    if dv_summary:
+        dv_block["l2_summary"] = dv_summary
+    hdr_summary = {k: v for k, v in hdr_meta.items() if v is not None}
+    overlay_diag: dict[str, Any] = {
+        "dv": dv_block,
+        "frame_metrics": {
+            "enabled": per_frame_enabled,
+            "per_frame": frame_metrics_json,
+            "gating": {
+                "config": per_frame_config_enabled,
+                "cli_override": per_frame_override,
+                "overlay_mode": overlay_mode_value,
+            },
+        },
+    }
+    if hdr_summary:
+        overlay_diag["hdr"] = hdr_summary
+    if range_label:
+        overlay_diag["dynamic_range"] = {"label": range_label, "source": "frame_props"}
+    json_tail["overlay"]["diagnostics"] = overlay_diag
 
     reporter.update_values(layout_data)
 

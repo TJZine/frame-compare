@@ -140,6 +140,7 @@ def run_cli(
     show_partial_sections: bool = False,
     show_missing_sections: bool = True,
     service_mode_override: bool | None = None,
+    diagnostic_frame_metrics: bool | None = None,
 ) -> RunResult:
     """Delegate to the shared runner module."""
     request = RunRequest(
@@ -160,6 +161,7 @@ def run_cli(
         show_partial_sections=show_partial_sections,
         show_missing_sections=show_missing_sections,
         service_mode_override=service_mode_override,
+        diagnostic_frame_metrics=diagnostic_frame_metrics,
     )
     return runner.run(request)
 
@@ -185,6 +187,7 @@ def _run_cli_entry(
     html_report_enable: bool,
     html_report_disable: bool,
     debug_color: bool,
+    diagnostic_frame_metrics: bool | None,
     tm_preset: str | None,
     tm_curve: str | None,
     tm_target: float | None,
@@ -318,6 +321,7 @@ def _run_cli_entry(
             show_partial_sections=show_partial,
             show_missing_sections=show_missing,
             service_mode_override=service_mode_override,
+            diagnostic_frame_metrics=diagnostic_frame_metrics,
         )
     except CLIAppError as exc:
         print(exc.rich_message)
@@ -621,6 +625,19 @@ def _cli_flag_value(ctx: click.Context, name: str, value: bool, *, default: bool
     is_flag=True,
     help="Enable colour pipeline debugging (logs plane stats, dumps intermediate PNGs).",
 )
+@click.option(
+    "--diagnostic-frame-metrics",
+    "diagnostic_frame_metrics",
+    flag_value=True,
+    default=None,
+    help="Enable per-frame diagnostic metric overlay for this run regardless of config.",
+)
+@click.option(
+    "--no-diagnostic-frame-metrics",
+    "diagnostic_frame_metrics",
+    flag_value=False,
+    help="Disable per-frame diagnostic metric overlay regardless of config.",
+)
 @click.option("--tm-preset", "tm_preset", default=None, help="Override [color].preset for this run.")
 @click.option("--tm-curve", "tm_curve", default=None, help="Override [color].tone_curve for this run.")
 @click.option("--tm-target", "tm_target", type=float, default=None, help="Override [color].target_nits for this run.")
@@ -726,6 +743,7 @@ def main(
     html_report_enable: bool,
     html_report_disable: bool,
     debug_color: bool,
+    diagnostic_frame_metrics: bool | None,
     tm_preset: str | None,
     tm_curve: str | None,
     tm_target: float | None,
@@ -770,6 +788,11 @@ def main(
     html_report_enable = _cli_flag_value(ctx, "html_report_enable", html_report_enable, default=False)
     html_report_disable = _cli_flag_value(ctx, "html_report_disable", html_report_disable, default=False)
     debug_color = _cli_flag_value(ctx, "debug_color", debug_color, default=False)
+    diagnostic_frame_metrics = _cli_override_value(
+        ctx,
+        "diagnostic_frame_metrics",
+        diagnostic_frame_metrics,
+    )
     service_mode_selected = _cli_override_value(ctx, "service_mode_flag", service_mode_flag)
     legacy_runner_selected = _cli_override_value(ctx, "legacy_runner_flag", legacy_runner_flag)
     if service_mode_selected and legacy_runner_selected:
@@ -819,6 +842,7 @@ def main(
         "html_report_enable": html_report_enable,
         "html_report_disable": html_report_disable,
         "debug_color": debug_color,
+        "diagnostic_frame_metrics": diagnostic_frame_metrics,
         "tm_preset": tm_preset,
         "tm_curve": tm_curve,
         "tm_target": tm_target,
@@ -872,6 +896,7 @@ def run_command(ctx: click.Context) -> None:
         html_report_enable=bool(params.get("html_report_enable", False)),
         html_report_disable=bool(params.get("html_report_disable", False)),
         debug_color=bool(params.get("debug_color", False)),
+        diagnostic_frame_metrics=params.get("diagnostic_frame_metrics"),
         tm_preset=params.get("tm_preset"),
         tm_curve=params.get("tm_curve"),
         tm_target=params.get("tm_target"),

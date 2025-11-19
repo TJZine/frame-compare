@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import re
-from collections.abc import Mapping, MutableMapping, Sequence
+from collections.abc import Mapping, MutableMapping
 from typing import TYPE_CHECKING, Any, List, Optional, cast
 
 from src.datatypes import ColorConfig
+from src.frame_compare import diagnostics as _diagnostics
 from src.frame_compare.layout_utils import format_resolution_summary
 
 __all__ = [
@@ -57,6 +57,10 @@ OVERLAY_STYLE = (
     '"0,0,0,0,100,100,0,0,1,2,0,7,10,10,70,1"'
 )
 
+extract_mastering_display_luminance = _diagnostics.extract_mastering_display_luminance
+format_luminance_value = _diagnostics.format_luminance_value
+format_mastering_display_line = _diagnostics.format_mastering_display_line
+
 
 def new_overlay_state() -> OverlayState:
     """Create a mutable overlay state container."""
@@ -104,95 +108,6 @@ def format_selection_line(selection_label: Optional[str]) -> str:
     return f"Frame Selection Type: {normalize_selection_label(selection_label)}"
 
 
-def _coerce_luminance_values(value: Any) -> List[float]:
-    if value is None:
-        return []
-    if isinstance(value, (int, float)):
-        return [float(value)]
-    if isinstance(value, bytes):
-        try:
-            value = value.decode("utf-8", "ignore")
-        except Exception:
-            return []
-    if isinstance(value, str):
-        matches = re.findall(r"[-+]?\d+(?:\.\d+)?", value)
-        return [float(match) for match in matches]
-    if isinstance(value, (list, tuple)):
-        iterable = cast(Sequence[Any], value)
-        results: List[float] = []
-        for item in iterable:
-            results.extend(_coerce_luminance_values(item))
-        return results
-    return []
-
-
-def extract_mastering_display_luminance(props: Mapping[str, Any]) -> tuple[Optional[float], Optional[float]]:
-    """Extract mastering display min/max luminance pairs from frame props."""
-
-    min_keys = (
-        "_MasteringDisplayMinLuminance",
-        "MasteringDisplayMinLuminance",
-        "MasteringDisplayLuminanceMin",
-    )
-    max_keys = (
-        "_MasteringDisplayMaxLuminance",
-        "MasteringDisplayMaxLuminance",
-        "MasteringDisplayLuminanceMax",
-    )
-
-    min_value: Optional[float] = None
-    max_value: Optional[float] = None
-
-    for key in min_keys:
-        if key in props:
-            values = _coerce_luminance_values(props.get(key))
-            if values:
-                min_value = values[0]
-                break
-    for key in max_keys:
-        if key in props:
-            values = _coerce_luminance_values(props.get(key))
-            if values:
-                max_value = values[0]
-                break
-
-    if min_value is None or max_value is None:
-        combined_keys = ("_MasteringDisplayLuminance", "MasteringDisplayLuminance")
-        for key in combined_keys:
-            values = _coerce_luminance_values(props.get(key))
-            if len(values) >= 2:
-                if min_value is None:
-                    min_value = min(values)
-                if max_value is None:
-                    max_value = max(values)
-                break
-
-    return min_value, max_value
-
-
-def format_luminance_value(value: float) -> str:
-    """Format luminance values with context-aware precision."""
-
-    if value < 1.0:
-        text = f"{value:.4f}"
-        if "." in text:
-            text = text.rstrip("0").rstrip(".")
-        return text or "0"
-    return f"{value:.1f}"
-
-
-def format_mastering_display_line(props: Mapping[str, Any]) -> str:
-    """Return a human readable mastering display summary line."""
-
-    min_value, max_value = extract_mastering_display_luminance(props)
-    if min_value is None or max_value is None:
-        return "MDL: Insufficient data"
-    return (
-        f"MDL: min: {format_luminance_value(min_value)} cd/m², "
-        f"max: {format_luminance_value(max_value)} cd/m²"
-    )
-
-
 def compose_overlay_text(
     base_text: Optional[str],
     color_cfg: ColorConfig,
@@ -225,5 +140,45 @@ def compose_overlay_text(
     include_hdr_details = bool(tonemap_info and getattr(tonemap_info, "applied", False))
     if include_hdr_details:
         lines.append(format_mastering_display_line(source_props))
+    hdr_line = _diagnostics.format_hdr_line(_diagnostics.extract_hdr_metadata(source_props))
+    if hdr_line:
+        lines.append(hdr_line)
+    dovi_line = _diagnostics.format_dovi_line(_resolve_dovi_label(tonemap_info), _diagnostics.extract_dovi_metadata(source_props))
+    if dovi_line:
+        lines.append(dovi_line)
+    range_line = _diagnostics.format_dynamic_range_line(_diagnostics.classify_color_range(source_props))
+    if range_line:
+        lines.append(range_line)
+    frame_metrics_entry = _extract_frame_metrics(selection_detail)
+    metrics_line = _diagnostics.format_frame_metrics_line(frame_metrics_entry)
+    if metrics_line:
+        lines.append(metrics_line)
     lines.append(format_selection_line(selection_label))
     return "\n".join(lines)
+
+
+def _resolve_dovi_label(tonemap_info: TonemapInfo | None) -> str | None:
+    if tonemap_info is None:
+        return None
+    value = getattr(tonemap_info, "use_dovi", None)
+    if isinstance(value, bool):
+        return "on" if value else "off"
+    if value is None:
+        return "auto"
+    if isinstance(value, str):
+        text = value.strip()
+        return text or "auto"
+    return None
+
+
+def _extract_frame_metrics(selection_detail: Optional[Mapping[str, Any]]) -> Mapping[str, Any] | None:
+    if not isinstance(selection_detail, Mapping):
+        return None
+    diagnostics_obj = selection_detail.get("diagnostics")
+    if not isinstance(diagnostics_obj, Mapping):
+        return None
+    diagnostics_block = cast(Mapping[str, Any], diagnostics_obj)
+    entry = diagnostics_block.get("frame_metrics")
+    if isinstance(entry, Mapping):
+        return cast(Mapping[str, Any], entry)
+    return None

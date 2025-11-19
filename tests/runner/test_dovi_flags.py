@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, cast
 
 import pytest
 from click.testing import CliRunner
@@ -73,6 +73,21 @@ def _install_stubbed_runner(
             "Tonemapping Algorithm: bt.2390",
         )
         overlay_block["mode"] = getattr(color_cfg, "overlay_mode", "minimal")
+        overlay_block["diagnostics"] = {
+            "dv": {
+                "enabled": override_value,
+                "label": tonemap_block.get("use_dovi_label", "auto"),
+            },
+            "frame_metrics": {
+                "enabled": False,
+                "per_frame": {},
+                "gating": {
+                    "config": False,
+                    "cli_override": None,
+                    "overlay_mode": overlay_block["mode"],
+                },
+            },
+        }
         verify_block = json_tail.setdefault("verify", {})
         verify_block["threshold"] = float(getattr(color_cfg, "verify_luma_threshold", 0.1))
         cache_block = json_tail.setdefault("cache", {})
@@ -353,13 +368,13 @@ def test_cli_overlay_and_verify_blocks_follow_config(
 
     direct_result = frame_compare.run_cli(None, None)
     assert direct_result.json_tail is not None
-    overlay_direct = direct_result.json_tail["overlay"]
+    overlay_direct = cast(Dict[str, Any], direct_result.json_tail["overlay"])
     verify_direct = direct_result.json_tail["verify"]
-    assert overlay_direct == {
-        "enabled": False,
-        "template": "Overlay {tone_curve}",
-        "mode": "diagnostic",
-    }
+    assert overlay_direct["enabled"] is False
+    assert overlay_direct["template"] == "Overlay {tone_curve}"
+    assert overlay_direct["mode"] == "diagnostic"
+    diagnostics_block = cast(Dict[str, Any], overlay_direct["diagnostics"])
+    assert diagnostics_block["frame_metrics"]["enabled"] is False
     assert verify_direct["threshold"] == pytest.approx(0.42)
 
     cli_result = runner.invoke(
@@ -369,5 +384,10 @@ def test_cli_overlay_and_verify_blocks_follow_config(
     )
     assert cli_result.exit_code == 0, cli_result.output
     cli_tail = _extract_json_tail(cli_result.output)
-    assert cli_tail["overlay"] == overlay_direct
+    cli_overlay = cast(Dict[str, Any], cli_tail["overlay"])
+    assert cli_overlay["enabled"] is False
+    assert cli_overlay["template"] == "Overlay {tone_curve}"
+    assert cli_overlay["mode"] == "diagnostic"
+    cli_diag = cast(Dict[str, Any], cli_overlay["diagnostics"])
+    assert cli_diag["frame_metrics"]["enabled"] is False
     assert cli_tail["verify"]["threshold"] == pytest.approx(0.42)

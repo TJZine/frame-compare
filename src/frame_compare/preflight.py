@@ -19,6 +19,7 @@ from src.datatypes import (
     AudioAlignmentConfig,
     CLIConfig,
     ColorConfig,
+    DiagnosticsConfig,
     NamingConfig,
     OverridesConfig,
     PathsConfig,
@@ -294,6 +295,7 @@ def _fresh_app_config() -> AppConfig:
         source=SourceConfig(),
         audio_alignment=AudioAlignmentConfig(),
         report=ReportConfig(),
+        diagnostics=DiagnosticsConfig(),
     )
 
 

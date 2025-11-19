@@ -133,6 +133,10 @@ verify_luma_threshold = 0.10
 strict = false
 debug_color = false          # Enable colour pipeline debug logging and intermediate frame dumps
 
+[diagnostics]
+# Controls opt-in diagnostic computations that may add overhead to render runs.
+per_frame_nits = false  # Compute per-frame nit estimates (diagnostic overlay only) when true.
+
 [slowpics]
 # Auto-upload settings. Disabled by default to avoid unintentional sharing; opt in explicitly.
 auto_upload = false

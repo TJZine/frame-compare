@@ -793,3 +793,10 @@
   - Problem: Track C’s checklist still showed unchecked tasks with no Implementation/Review notes, operators couldn’t discover the `runner.enable_service_mode` flag outside the CLI, and `run()` never logged whether the publisher services or the legacy path executed, making flag validation difficult.
   - Decision: Filled in Track C planning/implementation/review sections (docs/refactor/runner_service_split.md) with concrete scope, dates, and verification evidence; documented `[runner].enable_service_mode` inside `src/data/config.toml.template` plus README’s CLI/config table; and taught `src/frame_compare/runner.py` to mark a `service_mode_enabled` reporter flag while logging/printing the active publishing mode for each run.
   - Verification: Leveraged the existing Track C command set (pyright/ruff/pytest recorded earlier on 2025-11-19); no code paths outside logging/docs changed and no additional execution was required.
+- *2025-11-19:* feat(diagnostics): extend overlay JSON with DV/HDR/range metadata and gated per-frame metrics.
+  - Problem: the diagnostic overlay roadmap (Track C) left `json_tail["overlay"]["diagnostics"]` empty beyond simple overlays, CLI flag coverage for per-frame metrics was missing, and tests/docs didn’t describe the new data contract.
+  - Decision: centralized the diagnostics helpers (DoVi/HDR/range/frame metrics) to avoid circular imports, taught the runner to always populate the diagnostics block (including gating metadata and per-clip HDR/dynamic-range summaries), added the `[diagnostics].per_frame_nits` config with CLI overrides, and refreshed README + flag audit guidance. New suites cover runner JSON output, CLI flag propagation, overlay text rendering, and the helper module itself.
+  - Verification:
+    - `.venv/bin/pyright --warnings`
+    - `.venv/bin/ruff check`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/runner/test_overlay_diagnostics.py tests/runner/test_cli_entry.py tests/runner/test_dovi_flags.py tests/render/test_overlay_text.py tests/frame_compare/test_diagnostics.py`

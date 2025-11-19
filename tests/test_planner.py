@@ -11,6 +11,7 @@ from src.datatypes import (
     AudioAlignmentConfig,
     CLIConfig,
     ColorConfig,
+    DiagnosticsConfig,
     NamingConfig,
     OverridesConfig,
     PathsConfig,
@@ -58,6 +59,7 @@ def _make_config(
         source=SourceConfig(preferred="lsmas"),
         audio_alignment=AudioAlignmentConfig(enable=False),
         report=ReportConfig(enable=False),
+        diagnostics=DiagnosticsConfig(),
     )
 
 

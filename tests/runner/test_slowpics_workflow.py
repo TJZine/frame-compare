@@ -19,6 +19,7 @@ from src.datatypes import (
     AudioAlignmentConfig,
     CLIConfig,
     ColorConfig,
+    DiagnosticsConfig,
     NamingConfig,
     OverridesConfig,
     PathsConfig,
@@ -76,6 +77,7 @@ def test_cli_input_override_and_cleanup(
         source=SourceConfig(),
         audio_alignment=AudioAlignmentConfig(enable=False),
         report=ReportConfig(enable=False),
+        diagnostics=DiagnosticsConfig(),
     )
 
     _patch_load_config(monkeypatch, cfg)

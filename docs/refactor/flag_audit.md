@@ -325,27 +325,27 @@ When closing a track or major sub-task, run:
 
 ### C1. Discovery & Data Mapping (Phase 1)
 
-- [ ] Inventory existing metadata sources:
-  - [ ] DV metadata (L1/L2) in `metadata_utils` / `vs_core`.
-  - [ ] HDR mastering metadata (MaxCLL/MaxFALL) stored per clip.
-  - [ ] Dynamic range detection logs (`limited` vs `full`).
-  - [ ] Cached per-frame metrics (analysis caches, selection details).
-- [ ] Document overlay pipeline:
-  - [ ] Where `json_tail["overlay"]` is built (`runner.py`).
-  - [ ] How `overlay_text_template`/`overlay_mode` influence rendering.
-  - [ ] Where overlay text is rendered in screenshot pipeline.
-- [ ] Identify gating options:
-  - [ ] Existing diagnostic/`overlay_mode` toggles.
-  - [ ] Potential new config/CLI flags for expensive metrics (per-frame nits).
-- [ ] Record findings (files, fields, perf notes) below.
+- [x] Inventory existing metadata sources:
+  - [x] DV metadata (L1/L2) in `metadata_utils` / `vs_core`.
+  - [x] HDR mastering metadata (MaxCLL/MaxFALL) stored per clip.
+  - [x] Dynamic range detection logs (`limited` vs `full`).
+  - [x] Cached per-frame metrics (analysis caches, selection details).
+- [x] Document overlay pipeline:
+  - [x] Where `json_tail["overlay"]` is built (`runner.py`).
+  - [x] How `overlay_text_template`/`overlay_mode` influence rendering.
+  - [x] Where overlay text is rendered in screenshot pipeline.
+- [x] Identify gating options:
+  - [x] Existing diagnostic/`overlay_mode` toggles.
+  - [x] Potential new config/CLI flags for expensive metrics (per-frame nits).
+- [x] Record findings (files, fields, perf notes) below.
 
 > Notes (discovery summary):
-> - DV metadata source:
-> - HDR metadata source:
-> - Dynamic range detection:
-> - Cached per-frame metrics:
-> - Overlay template path:
-> - Gating strategy:
+> - DV metadata source: `ClipPlan.source_frame_props` captures raw VapourSynth props during probe (`src/frame_compare/cli_runtime.py:118-155`) and `_capture_source_props_for_probe()` pushes them into cached plans before `vs_core.process_clip_for_screenshot` merges them back (`src/frame_compare/selection.py:67-104`, `src/frame_compare/vs/tonemap.py:892-939`). Any Dolby Vision RPU/L2 frame props surfaced by the source plugins therefore survive into overlay diagnostics without re-reading media. VapourSynth frame props are explicitly preserved via `ClipToProp`/`FrameProps` semantics (source:https://github.com/vapoursynth/vapoursynth/blob/master/doc/functions/video/cliptoprop.rst@2025-11-19).
+> - HDR metadata source: `vs.source._is_hdr_prop()` and `_collect_blank_extension_props()` persist `MasteringDisplay*` and `ContentLightLevel*` props per clip (`src/frame_compare/vs/source.py:360-411`), which `render/overlay.extract_mastering_display_luminance()` consumes to calculate MaxCLL/MaxFALL lines inside diagnostic overlays (`src/frame_compare/render/overlay.py:72-150`).
+> - Dynamic range detection: `vs/color._detect_rgb_color_range()` samples plane stats to classify limited/full (`src/frame_compare/vs/color.py:223-322`), and `vs/tonemap.process_clip_for_screenshot()` stores the decision on `TonemapInfo.range_detection`/`output_color_range` for later telemetry (`src/frame_compare/vs/tonemap.py:940-1184`).
+> - Cached per-frame metrics: `analysis/selection.py` builds brightness/motion tuples and injects the numeric score + selection note into `SelectionDetail` records, which are persisted via `analysis/cache_io.save_cached_metrics()` and exposed through `json_tail["analysis"]["selection_details"]` (`src/frame_compare/analysis/selection.py:599-930`, `src/frame_compare/runner.py:1354-1476`, `src/frame_compare/analysis/cache_io.py:867-1020`). Those values are the only readily available per-frame metrics without replaying VapourSynth.
+> - Overlay template path: `runner.py` writes `json_tail["overlay"]` immediately after tonemap metadata resolution (`src/frame_compare/runner.py:1544-1640`), `vs/tonemap._format_overlay_text()` formats the base template (`src/frame_compare/vs/tonemap.py:624-705`), and `screenshot._compose_overlay_text()`/`render/overlay.compose_overlay_text()` append diagnostic text before `_save_frame_with_fpng/_save_frame_with_ffmpeg` render it onto the frame (`src/screenshot.py:215-285,2525-2665`, `src/frame_compare/render/overlay.py:79-138`).
+> - Gating strategy: `[color].overlay_enabled`, `[color].overlay_mode`, and `[color].debug_color/strict` already guard overlay work (`src/datatypes.py:100-152`, `src/frame_compare/runner.py:1512-1543`). Per-frame diagnostics will hang off a new `[diagnostics]` config/CLI flag so expensive metric/math runs are opt-in while default modes remain unchanged.
 
 ### C2. Implementation Plan
 
@@ -369,20 +369,21 @@ When closing a track or major sub-task, run:
 ### C3. Implementation Notes (Dev Agent)
 
 - Work performed:
-  - [ ] DV diagnostics added.
-  - [ ] HDR metadata added.
-  - [ ] Per-frame metrics gated + added.
-  - [ ] Overlay template updated.
-  - [ ] Tests/docs updated.
+  - [x] DV diagnostics added.
+  - [x] HDR metadata added.
+  - [x] Per-frame metrics gated + added.
+  - [x] Overlay template updated.
+  - [x] Tests/docs updated.
 - Commands run:
-  - [ ] `.venv/Scripts/pyright --warnings`
-  - [ ] `.venv/Scripts/ruff check`
-  - [ ] `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/Scripts/pytest -q tests/runner/test_overlay_diagnostics.py`
+  - [x] `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+  - [x] `.venv/bin/ruff check` → `All checks passed!`
+  - [x] `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/runner/test_overlay_diagnostics.py tests/runner/test_cli_entry.py tests/runner/test_dovi_flags.py tests/render/test_overlay_text.py tests/frame_compare/test_diagnostics.py` → `66 passed in 0.43s`
 
 > Notes:
-> - Date:
-> - Dev Agent:
-> - Summary of metrics availability/gating decisions:
+> - Date: 2025-11-19
+> - Dev Agent: OverlaySleuth
+> - Summary of metrics availability/gating decisions: `[diagnostics].per_frame_nits` now gates the per-frame nit estimator and surfaces its state (config + CLI override + overlay_mode) inside `json_tail["overlay"]["diagnostics"]["frame_metrics"]["gating"]`. Dolby Vision (label + L2 summary), HDR mastering metadata (MDL/MaxCLL/MaxFALL), and color-range detection all populate `json_tail["overlay"]["diagnostics"]` with optional blocks so downstream consumers can tolerate missing fields. CLI `--diagnostic-frame-metrics/--no-diagnostic-frame-metrics` toggles the same gating at runtime, and diagnostic overlays only render `Frame Nits:` when the gating conditions pass.
+- Known regression: VSPreview overlay “suggested frame/seconds” hints remain stuck at 0f/0.000 s since the runner refactor. Add to backlog and restore the original behaviour so manual alignment users regain guidance.
 
 ### C4. Review Notes (Review Agent)
 
