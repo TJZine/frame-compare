@@ -13,7 +13,7 @@ This document outlines a future initiative to ship first-class type hints for Fr
 - API hardening and modularization are largely in place:
   - `docs/refactor/api_hardening.md` defines the curated public surface (`run_cli`, `main`, `RunRequest`, `RunResult`, `CLIAppError`, `ScreenshotError`, TMDB helpers, preflight helpers, doctor helpers, `vs_core`).
   - `docs/refactor/mod_refactor.md` and `docs/refactor/runner_service_split.md` have completed the main CLI/core/runner modularization phases.
-  - `src/frame_compare/compat.py` now centralises legacy/compat exports via `COMPAT_EXPORTS` and `apply_compat_exports`, including doctor shims (`collect_doctor_checks`, `emit_doctor_results`) and CLI helpers (`_cli_override_value`, `_cli_flag_value`).
+- `src/frame_compare/compat.py` now centralises legacy/compat exports via `_COMPAT_EXPORTS` and `apply_compat_exports`, including doctor shims (`collect_doctor_checks`, `emit_doctor_results`) and CLI helpers (`_cli_override_value`, `_cli_flag_value`).
 - CLI architecture refactor is planned and tracked separately:
   - `docs/refactor/frame_compare_cli_refactor.md` describes how CLI wiring and helpers are split into `cli_entry` and `cli_utils` with `frame_compare.py` as a thin shim.
 - **Prerequisite for starting this typing refactor**:
