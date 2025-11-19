@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.0.9](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.8...frame-compare-v0.0.9) (2025-11-19)
+
+
+### Features
+
+* **diagnostics:** wire overlay JSON tail, CLI gating, and docs ([8e6a260](https://github.com/TJZine/frame-compare/commit/8e6a260e68547a6e04c868a9d19b3e12cede1319))
+* **diagnostics:** wire overlay JSON tail, CLI gating, and docs ([#167](https://github.com/TJZine/frame-compare/issues/167)) ([ed0ff97](https://github.com/TJZine/frame-compare/commit/ed0ff9757fddc14fa793b35cedf0079c6f8ee37f))
+
+
+### Bug Fixes
+
+* enforce HTTP timeouts, slow.pics locking, and planner guard ([a76e637](https://github.com/TJZine/frame-compare/commit/a76e637e2f0be3ace5c2a6fa4061a1f06b8caae5))
+* update commitlint scope tags ([bebddfa](https://github.com/TJZine/frame-compare/commit/bebddfa40d5d7186a660fa650eafedd8b831f5d0))
+
 ## [0.0.8](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.7...frame-compare-v0.0.8) (2025-11-19)
 
 
