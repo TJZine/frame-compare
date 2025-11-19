@@ -78,6 +78,7 @@ from src.frame_compare.services.publishers import (
     ReportPublisherRequest,
     SlowpicsPublisher,
     SlowpicsPublisherRequest,
+    UploadProgressTracker,
 )
 from src.frame_compare.slowpics import (
     SlowpicsAPIError,
@@ -2187,7 +2188,8 @@ def _run_legacy_publishers(
                 return 0
 
         file_sizes = [_safe_size(path) for path in image_paths] if upload_total else []
-        total_bytes = sum(file_sizes)
+        progress_tracker = UploadProgressTracker(file_sizes)
+        total_bytes = progress_tracker.total_bytes
         console_width = getattr(reporter.console.size, "width", 80) or 80
         stats_width_limit = max(24, console_width - 32)
 
@@ -2215,21 +2217,13 @@ def _run_legacy_publishers(
             total=upload_total,
             stats=_format_stats(0, 0, 0.0),
         )
-        start_time = time.perf_counter()
-        uploaded_files = 0
-        uploaded_bytes = 0
-
         def advance_upload(count: int) -> None:
-            nonlocal uploaded_files, uploaded_bytes
-            uploaded_files += count
-            consumed = sum(file_sizes[:uploaded_files])
-            uploaded_bytes = min(consumed, total_bytes)
-            elapsed = max(time.perf_counter() - start_time, 1e-6)
+            files_done, bytes_done, elapsed = progress_tracker.advance(count)
             reporter.update_progress_state(
                 "upload_bar",
-                current=min(uploaded_files, upload_total),
+                current=min(files_done, upload_total),
                 total=upload_total,
-                stats=_format_stats(uploaded_files, uploaded_bytes, elapsed),
+                stats=_format_stats(files_done, bytes_done, elapsed),
             )
 
         try:

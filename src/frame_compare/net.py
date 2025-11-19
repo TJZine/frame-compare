@@ -17,6 +17,7 @@ __all__ = [
     "BackoffError",
     "ALLOWED_METHODS",
     "DEFAULT_CONNECT_TIMEOUT",
+    "DEFAULT_HTTP_TIMEOUT",
     "DEFAULT_READ_TIMEOUT",
     "RETRY_STATUS",
     "build_urllib3_retry",
@@ -39,6 +40,13 @@ DEFAULT_CONNECT_TIMEOUT = 10.0
 
 DEFAULT_READ_TIMEOUT = 30.0
 """Standard read timeout (seconds) for outbound HTTP calls."""
+
+DEFAULT_HTTP_TIMEOUT = httpx.Timeout(
+    DEFAULT_READ_TIMEOUT,
+    connect=DEFAULT_CONNECT_TIMEOUT,
+    read=DEFAULT_READ_TIMEOUT,
+)
+"""Default per-request timeout matching the project connect/read guidelines."""
 
 
 class BackoffError(RuntimeError):
@@ -89,8 +97,14 @@ async def httpx_get_json_with_backoff(
     retry_status: Iterable[int] | None = None,
     sleep: Callable[[float], Awaitable[None]] | None = None,
     on_backoff: Callable[[float, int], Awaitable[None]] | None = None,
+    timeout: float | httpx.Timeout | None = None,
 ) -> httpx.Response:
-    """Perform a GET request with exponential backoff for transient status codes."""
+    """Perform a GET request with exponential backoff for transient status codes.
+
+    Timeouts default to :data:`DEFAULT_HTTP_TIMEOUT` so requests cannot hang
+    indefinitely (see HTTPX's timeout guidance:
+    https://github.com/encode/httpx/blob/master/docs/advanced/timeouts.md).
+    """
 
     retry_codes = frozenset(retry_status) if retry_status else RETRY_STATUS
     backoff = max(0.1, initial_backoff)
@@ -101,10 +115,11 @@ async def httpx_get_json_with_backoff(
     max_attempts = max(0, retries) + 1
     base_url = getattr(client, "base_url", "") or ""
     host_label = redact_url_for_logs(str(base_url) or path)
+    effective_timeout = timeout if timeout is not None else DEFAULT_HTTP_TIMEOUT
 
     for attempt_index in range(max_attempts):
         try:
-            response = await client.get(path, params=params)
+            response = await client.get(path, params=params, timeout=effective_timeout)
         except httpx.RequestError as exc:
             last_network_error = exc
             last_response = None

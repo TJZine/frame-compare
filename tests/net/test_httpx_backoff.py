@@ -18,7 +18,12 @@ class StubAsyncClient:
         self.calls = 0
         self.base_url = base_url
 
-    async def get(self, path: str, params: dict[str, object]) -> httpx.Response:
+    async def get(
+        self,
+        path: str,
+        params: dict[str, object],
+        timeout: float | httpx.Timeout | None = None,
+    ) -> httpx.Response:
         self.calls += 1
         response = self._responses.pop(0)
         return response

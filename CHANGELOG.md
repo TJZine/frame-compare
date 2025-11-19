@@ -34,6 +34,7 @@
 
 ### Bug Fixes
 
+- *2025-11-19:* enforce default HTTPX timeouts for TMDB requests, switch slow.pics publishers to a lock-protected O(1) byte accumulator, and raise a CLI error when planner metadata trails the discovered files.
 * prevent `--service-mode` and `--legacy-runner` from being used together, loosen `RunContext.metadata` typing, guard metadata indexing in `pick_analyze_file`, and treat malformed probe-cache payloads (missing cache keys, bad field types) as cache misses instead of hard errors
 * coerce local report viewer destinations/labels to strings before serializing cached run metadata, refresh the `probe_clip_metadata` docstring to describe cache reuse, and fix docs that referenced the non-existent `src/datatype` module
 * gate every non-`--tm-*` CLI override (paths/cache/report/audio/debug flags) on explicit command-line sources so `frame_compare.run_cli` and the Click entrypoint respect config precedence, and fix `json_tail.render.writer` so debug-color runs accurately report the VS fallback (tests/runner/test_cli_entry.py)

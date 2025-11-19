@@ -7,6 +7,18 @@
     - `.venv/bin/pyright --warnings`
     - `.venv/bin/ruff check`
     - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`
+- *2025-11-19:* fix(net+slowpics+planner): enforce HTTPX timeouts, lock slow.pics progress, guard metadata mismatches.
+  - Problem: `httpx_get_json_with_backoff` never forwarded timeout settings, so retries could hang indefinitely; slow.pics publishers performed `sum(file_sizes[:uploaded])` on each callback without any locking (O(n) work plus data races); and `planner.build_plans` still crashed with `IndexError` when metadata entries lagged behind discovered files.
+  - Decision: Introduced `DEFAULT_HTTP_TIMEOUT` plus an explicit `timeout` parameter on `httpx_get_json_with_backoff`, plumbed it through TMDB `_http_request`/`_perform_search`/`_fetch_alias_titles`, and documented the default against HTTPX's timeout guidance (source:https://github.com/encode/httpx/blob/master/docs/advanced/timeouts.md@2025-11-19 via Context7). Added `UploadProgressTracker` (used by both the service-mode and legacy slow.pics publishers) so callbacks perform O(1) additions under a `threading.Lock`, refreshed `upload_comparison` docs to spell out the thread-safe contract, and extended `tests/runner/test_slowpics_workflow.py` with slice-guarding/perf and multi-threaded tracker tests. Finally, `planner.build_plans` now raises a `CLIAppError` listing the missing files instead of indexing past the metadata list, covered by a new regression test.
+  - Implementation Notes:
+    - Files touched: `src/frame_compare/net.py`, `src/tmdb.py`, `tests/net/test_httpx_backoff.py`, `tests/net/test_httpx_helpers.py`, `src/frame_compare/services/publishers.py`, `src/frame_compare/runner.py`, `src/frame_compare/slowpics.py`, `tests/runner/test_slowpics_workflow.py`, `src/frame_compare/planner.py`, `tests/test_planner.py`.
+    - Follow-ups: none.
+  - Verification:
+    - `.venv/bin/pyright --warnings`
+    - `.venv/bin/ruff check`
+    - `.venv/bin/pytest tests/net -q`
+    - `.venv/bin/pytest tests/runner/test_slowpics_workflow.py -k "progress or upload" -q`
+    - `.venv/bin/pytest tests/test_planner.py -q`
 - *2025-11-19:* fix(cli+cache): guard service-mode flags, metadata typing, and probe-cache parsing.
   - Problem: The CLI allowed users to pass `--service-mode` alongside `--legacy-runner` silently, RunContext assumed metadata dict values were `str`, and both the probe-cache loader and persistence path could still throw when cache keys or payload types drifted (plus `pick_analyze_file` indexed metadata without a bounds check).
   - Decision: Added explicit mutual exclusion for the two runner toggles plus a regression test, widened `RunContext.metadata` to `dict[str, Any]`, skipped metadata lookups when callers pass fewer entries than files, short-circuited cache persistence when a plan forgot to set `probe_cache_key`, and treated malformed JSON payloads as cache misses by wrapping `ClipProbeSnapshot` construction in a try/except.

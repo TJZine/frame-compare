@@ -461,6 +461,7 @@ async def _http_request(
     cache_ttl: int,
     path: str,
     params: Dict[str, Any],
+    timeout: float | httpx.Timeout | None = None,
 ) -> Dict[str, Any]:
     key = (path, tuple(sorted(params.items())))
     cached = _CACHE.get(key, cache_ttl)
@@ -472,6 +473,8 @@ async def _http_request(
     async def _on_backoff(delay: float, attempt_index: int) -> None:
         net.log_backoff_attempt(redacted_host, attempt_index, delay)
 
+    effective_timeout = timeout if timeout is not None else net.DEFAULT_HTTP_TIMEOUT
+
     try:
         response = await net.httpx_get_json_with_backoff(
             client,
@@ -482,6 +485,7 @@ async def _http_request(
             max_backoff=4.0,
             sleep=asyncio.sleep,
             on_backoff=_on_backoff,
+            timeout=effective_timeout,
         )
     except httpx.RequestError as exc:  # pragma: no cover - rare network error
         raise TMDBResolutionError(f"TMDB request failed after retries: {exc}") from exc
@@ -589,6 +593,7 @@ async def _fetch_alias_titles(
     category: str,
     tmdb_id: str,
     cache_ttl: int,
+    timeout: float | httpx.Timeout | None = None,
 ) -> List[str]:
     """Return alternative titles for a TMDB movie or TV entry."""
 
@@ -602,7 +607,13 @@ async def _fetch_alias_titles(
         path = f"tv/{tmdb_id}/alternative_titles"
         key = "results"
 
-    payload = await _http_request(client, cache_ttl=cache_ttl, path=path, params={})
+    payload = await _http_request(
+        client,
+        cache_ttl=cache_ttl,
+        path=path,
+        params={},
+        timeout=timeout,
+    )
     titles: List[str] = []
     for entry in _dict_entries(payload.get(key)):
         title = entry.get("title")
@@ -702,6 +713,7 @@ async def _perform_search(
     *,
     plan: _QueryPlan,
     cache_ttl: int,
+    timeout: float | httpx.Timeout | None = None,
 ) -> List[Dict[str, Any]]:
     params: Dict[str, Any] = {
         "query": plan.query,
@@ -717,6 +729,7 @@ async def _perform_search(
         cache_ttl=cache_ttl,
         path="search/movie" if plan.category == MOVIE else "search/tv",
         params=params,
+        timeout=timeout,
     )
     return _dict_entries(payload.get("results"))
 
@@ -836,7 +849,12 @@ async def resolve_tmdb(
 
     query_norms = _normalized_variants(cleaned_title)
 
-    timeout = httpx.Timeout(10.0, connect=10.0, read=10.0, write=10.0)
+    timeout = httpx.Timeout(
+        net.DEFAULT_READ_TIMEOUT,
+        connect=net.DEFAULT_CONNECT_TIMEOUT,
+        read=net.DEFAULT_READ_TIMEOUT,
+        write=net.DEFAULT_CONNECT_TIMEOUT,
+    )
     params = {"api_key": config.api_key}
     async with httpx.AsyncClient(
         base_url=_BASE_URL,
@@ -850,6 +868,7 @@ async def resolve_tmdb(
                 cache_ttl=config.cache_ttl_seconds,
                 path=f"find/{imdb_lookup}",
                 params={"external_source": "imdb_id"},
+                timeout=timeout,
             )
             candidate = _best_external_candidate(
                 payload,
@@ -875,6 +894,7 @@ async def resolve_tmdb(
                 cache_ttl=config.cache_ttl_seconds,
                 path=f"find/{tvdb_lookup}",
                 params={"external_source": "tvdb_id"},
+                timeout=timeout,
             )
             candidate = _best_external_candidate(
                 payload,
@@ -910,6 +930,7 @@ async def resolve_tmdb(
                 client,
                 plan=plan,
                 cache_ttl=config.cache_ttl_seconds,
+                timeout=timeout,
             )
             candidates = _extract_best_candidate(
                 results=results,
@@ -968,6 +989,7 @@ async def resolve_tmdb(
                         category=candidate.category,
                         tmdb_id=candidate.tmdb_id,
                         cache_ttl=config.cache_ttl_seconds,
+                        timeout=timeout,
                     )
                 except TMDBResolutionError:
                     continue

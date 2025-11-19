@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import types
 from collections.abc import Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
+from typing import Any, SupportsIndex, cast, overload
 
 import pytest
 from click.testing import CliRunner, Result
@@ -33,6 +34,7 @@ from src.datatypes import (
 )
 from src.frame_compare import runner as runner_module
 from src.frame_compare.analysis import CacheLoadResult, FrameMetricsCacheInfo, SelectionDetail
+from src.frame_compare.services.publishers import UploadProgressTracker
 from src.tmdb import TMDBAmbiguityError, TMDBCandidate, TMDBResolution, TMDBResolutionError
 from tests.helpers.runner_env import (
     _CliRunnerEnv,
@@ -978,3 +980,44 @@ def test_resolve_tmdb_blocking_retries_transient_errors(
 
     assert isinstance(result, TMDBResolution)
     assert attempts["count"] == 2
+
+
+class _SliceRecordingSequence:
+    def __init__(self, values: Sequence[int]) -> None:
+        self._values = tuple(values)
+        self.slice_accesses = 0
+
+    @overload
+    def __getitem__(self, index: SupportsIndex, /) -> int: ...
+
+    @overload
+    def __getitem__(self, index: slice, /) -> Sequence[int]: ...
+
+    def __getitem__(self, index: SupportsIndex | slice, /) -> Sequence[int] | int:
+        if isinstance(index, slice):
+            self.slice_accesses += 1
+            raise AssertionError("Upload tracker should not slice file sizes")
+        return self._values[int(index)]
+
+    def __len__(self) -> int:
+        return len(self._values)
+
+
+def test_upload_progress_tracker_avoids_slicing() -> None:
+    sizes = _SliceRecordingSequence([10, 20, 30])
+    tracker = UploadProgressTracker(cast(Sequence[int], sizes))
+
+    files_bytes = [tracker.advance(1)[:2] for _ in range(len(sizes))]
+
+    assert sizes.slice_accesses == 0
+    assert files_bytes == [(1, 10), (2, 30), (3, 60)]
+
+
+def test_upload_progress_tracker_is_thread_safe() -> None:
+    tracker = UploadProgressTracker([5, 7, 9, 11])
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = [executor.submit(tracker.advance, 1) for _ in range(4)]
+
+    results = sorted((files, bytes_done) for files, bytes_done, _ in (future.result() for future in futures))
+    assert results == [(1, 5), (2, 12), (3, 21), (4, 32)]

@@ -24,6 +24,7 @@ from src.datatypes import (
     TMDBConfig,
 )
 from src.frame_compare import planner
+from src.frame_compare.cli_runtime import CLIAppError
 
 
 def _make_config(
@@ -96,3 +97,14 @@ def test_build_plans_rejects_unsupported_fps_override(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError):
         planner.build_plans(files, metadata, cfg)
+
+
+def test_build_plans_rejects_missing_metadata(tmp_path: Path) -> None:
+    files = [tmp_path / "Alpha.mkv", tmp_path / "Beta.mkv"]
+    metadata = [{"label": "Alpha"}]
+    cfg = _make_config()
+
+    with pytest.raises(CLIAppError) as excinfo:
+        planner.build_plans(files, metadata, cfg)
+
+    assert "metadata entries missing" in str(excinfo.value)
