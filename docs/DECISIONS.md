@@ -1,5 +1,12 @@
 # Decisions Log
 
+- *2025-11-19:* refactor(cli cleanup): finalize `frame_compare` CLI split with `cli_entry`/`cli_utils` wiring, keep `frame_compare.py` as thin shim, and align logs/docs.
+  - Problem: Phase 4 required confirming no dead code remained after the CLI extraction and updating documentation/decision logs to match the final module boundaries without changing behavior.
+  - Decision: Confirmed no unused imports or dead helpers in `frame_compare.py`, `src/frame_compare/cli_entry.py`, and `src/frame_compare/cli_utils.py`; validated `tests/helpers/runner_env.py` still patches the expected shim/runner symbols; refreshed the refactor checklist plus changelog to describe the stable shim/wiring layout.
+  - Verification (2025-11-19 UTC):
+    - `.venv/bin/pyright --warnings`
+    - `.venv/bin/ruff check`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` (444 passed, 1 skipped)
 - *2025-11-19:* chore(cli+docs): gate `--tm-gamma-disable` on command-line sources and refresh Phase 2 snapshot.
   - Problem: `tm_gamma_disable` in `cli_entry.main` flowed straight into `_run_cli_entry`, so Click `default_map`/env values could disable post-gamma without an explicit flag. The Architecture Snapshot in `docs/refactor/frame_compare_cli_refactor.md` still claimed Click wiring lived in `frame_compare.py`, conflicting with the completed Phase 2 move.
   - Decision: Wrap `tm_gamma_disable` with `_cli_flag_value(..., default=False)` to preserve config-first tonemap semantics and updated the Architecture Snapshot to reflect `cli_entry` owning wiring with `frame_compare.py` as a delegating shim.

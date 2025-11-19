@@ -59,6 +59,7 @@
 
 ### Chores
 
+- *2025-11-19:* refactor/internal: finalize the CLI split by keeping `frame_compare.py` as a thin shim delegating to `src/frame_compare/cli_entry.py`/`cli_utils.py`; no user-visible behavior changes expected.
 - *2025-11-18:* document the Phase 3–6 Track B flag/config review (Screenshots → TMDB domains), check off the Global Invariants in `docs/refactor/flag_audit.md`, and log the verification commands in `docs/DECISIONS.md`.
 - *2025-11-18:* add a `FRAME_COMPARE_DOVI_DEBUG` telemetry mode that emits JSON-formatted logs from both the runner and VapourSynth tonemap resolver so entrypoints can compare config roots, cache status, tonemap overrides, and brightness-affecting parameters when diagnosing DOVI drift.
 - *2025-11-18:* convert the docs/refactor/flag_audit.md template placeholders into ATX headings with per-track prefixes so markdownlint (MD003/MD024) passes and rendered navigation stays unique.

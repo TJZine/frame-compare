@@ -2,8 +2,8 @@
 
 > Source of truth for the ongoing refactor of CLI wiring, helpers, and public surface related to `frame_compare.py`.
 
-Status: `in-progress`  
-Owner(s): Codex (Phase 0 mapping)  
+Status: `completed`  
+Owner(s): Codex (Phase 0 mapping; Phase 4 cleanup)  
 Last Updated: 2025-11-19 (UTC)
 
 ---
@@ -62,29 +62,29 @@ This structure is still manageable but makes it easier to:
 
 These should remain true at the end of **every phase** (unless explicitly noted), and must be re‑verified at the end of the refactor.
 
-- [ ] **CLI behavior** remains unchanged:
-  - [ ] All existing commands and subcommands still exist with the same names.
-  - [ ] Options/flags, defaults, and help text are unchanged unless tests/docs were updated intentionally.
-  - [ ] Exit codes and error behavior (for tested paths) are unchanged.
+- [x] **CLI behavior** remains unchanged:
+  - [x] All existing commands and subcommands still exist with the same names.
+  - [x] Options/flags, defaults, and help text are unchanged unless tests/docs were updated intentionally.
+  - [x] Exit codes and error behavior (for tested paths) are unchanged.
 
-- [ ] **Public API** remains compatible:
-  - [ ] `from frame_compare import main` (and any current public imports) still works.
-  - [ ] Any symbols used by tests or documented as public are still importable from the same paths, or via shims.
+- [x] **Public API** remains compatible:
+  - [x] `from frame_compare import main` (and any current public imports) still works.
+  - [x] Any symbols used by tests or documented as public are still importable from the same paths, or via shims.
 
-- [ ] **Entry points** are stable:
-  - [ ] Console script entry points in `pyproject.toml` (or equivalent) are unchanged and still resolve successfully.
-  - [ ] Running `python -m frame_compare` (if supported today) continues to work.
+- [x] **Entry points** are stable:
+  - [x] Console script entry points in `pyproject.toml` (or equivalent) are unchanged and still resolve successfully.
+  - [x] Running `python -m frame_compare` (if supported today) continues to work.
 
-- [ ] **Type and style guarantees** hold:
-  - [ ] New/changed functions have full type annotations.
-  - [ ] `Optional[...]` usage is guarded (no unsafe `reportOptionalMemberAccess` patterns).
-  - [ ] No new `Any` leaks without strong justification.
-  - [ ] Code passes `ruff` or is no worse than baseline.
+- [x] **Type and style guarantees** hold:
+  - [x] New/changed functions have full type annotations.
+  - [x] `Optional[...]` usage is guarded (no unsafe `reportOptionalMemberAccess` patterns).
+  - [x] No new `Any` leaks without strong justification.
+  - [x] Code passes `ruff` or is no worse than baseline.
 
-- [ ] **Testing and tooling** remain green:
-  - [ ] Key CLI tests continue to pass.
-  - [ ] `.venv/bin/pyright --warnings` is clean or improved.
-  - [ ] `.venv/bin/pytest -q` is clean or improved.
+- [x] **Testing and tooling** remain green:
+  - [x] Key CLI tests continue to pass.
+  - [x] `.venv/bin/pyright --warnings` is clean or improved.
+  - [x] `.venv/bin/pytest -q` is clean or improved.
 
 ---
 
@@ -445,9 +445,9 @@ Notes:
 
 ## 9. Phase 4 – Cleanup, Docs, and Final Verification
 
-Status: `not-started` | `in-progress` | `completed`  
-Owner: _fill in_  
-Related PR(s): _fill in_
+Status: `completed`  
+Owner: Codex (Phase 4 cleanup)  
+Related PR(s): n/a
 
 ### 9.1 Scope
 
@@ -468,32 +468,38 @@ Related PR(s): _fill in_
 
 ### 9.4 Checklist
 
-- [ ] Remove unused imports and dead code from:
-  - [ ] `frame_compare.py`
-  - [ ] `cli_entry.py`
-  - [ ] `cli_utils.py`
-- [ ] Verify test helpers in `tests/helpers/runner_env.py`:
-  - [ ] Patching logic for `frame_compare.*` still works.
-- [ ] Update `docs/DECISIONS.md`:
-  - [ ] Add entry for the CLI refactor, with date from `date -u +%Y-%m-%d`.
-  - [ ] Include short rationale and architecture summary.
-- [ ] Update `CHANGELOG.md`:
-  - [ ] Note internal refactor (no user-visible behavior change).
-- [ ] Run final:
-  - [ ] `.venv/bin/pyright --warnings`
-  - [ ] `.venv/bin/ruff check`
-  - [ ] `.venv/bin/pytest -q`
-- [ ] Confirm all **Global Invariants** (Section 2) are satisfied.
+- [x] Remove unused imports and dead code from:
+  - [x] `frame_compare.py`
+  - [x] `cli_entry.py`
+  - [x] `cli_utils.py`
+- [x] Verify test helpers in `tests/helpers/runner_env.py`:
+  - [x] Patching logic for `frame_compare.*` still works.
+- [x] Update `docs/DECISIONS.md`:
+  - [x] Add entry for the CLI refactor, with date from `date -u +%Y-%m-%d`.
+  - [x] Include short rationale and architecture summary.
+- [x] Update `CHANGELOG.md`:
+  - [x] Note internal refactor (no user-visible behavior change).
+- [x] Run final:
+  - [x] `.venv/bin/pyright --warnings`
+  - [x] `.venv/bin/ruff check`
+  - [x] `.venv/bin/pytest -q`
+- [x] Confirm all **Global Invariants** (Section 2) are satisfied.
 
 ### 9.5 Implementation Notes (Dev Agent)
 
-- Date: _YYYY-MM-DD_  
-- Dev Agent: _name / persona_
+- Date: 2025-11-19  
+- Dev Agent: Codex (Phase 4 cleanup)
 
 Notes:
 
-- Summary of cleanup performed.
-- Final verification commands and outcomes.
+- Swept `frame_compare.py`, `src/frame_compare/cli_entry.py`, and `src/frame_compare/cli_utils.py` for unused imports/dead code; wiring already clean after Phases 1–3, so no removals needed.
+- Verified `tests/helpers/runner_env.py` patch targets remain valid against the shim + compat exports and runner modules; no changes required.
+- Synced docs (`docs/DECISIONS.md`, `CHANGELOG.md`) to describe the final CLI split and note the behavior-preserving refactor.
+- Commands run (UTC):
+  - `.venv/bin/pyright --warnings` → 0 errors, 0 warnings
+  - `.venv/bin/ruff check` → clean
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` → 444 passed, 1 skipped
+- Remaining issues: none surfaced during cleanup; open questions retained below for future follow-up.
 
 ### 9.6 Review Notes (Review Agent)
 
@@ -515,4 +521,4 @@ Use this section to capture cross‑phase decisions and follow‑ups.
 - [ ] Are CLI helpers intended to remain publicly accessible, or should we introduce a dedicated test-facing API and mark helpers as internal?
 - [ ] Are there external integrations (outside this repo) that import `frame_compare.main` or other internals in undocumented ways?
 - [ ] Should we add dedicated tests that call both `frame_compare.main` and `cli_entry.main` to guard future refactors?
-- [ ] Phase 2 should reconcile the proto `src/frame_compare/cli_entry.py` stub (currently triggering unused import/private name warnings) with the live CLI wiring to avoid lint noise and drift.
+- [x] Phase 2 should reconcile the proto `src/frame_compare/cli_entry.py` stub (currently triggering unused import/private name warnings) with the live CLI wiring to avoid lint noise and drift. (Resolved: `cli_entry` now owns the live Click wiring and lints are clean.)
