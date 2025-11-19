@@ -27,7 +27,11 @@ def _install_stubbed_runner(
 
     captured: List[runner_module.RunRequest] = []
 
-    def _fake_run(request: runner_module.RunRequest) -> runner_module.RunResult:
+    def _fake_run(
+        request: runner_module.RunRequest,
+        *,
+        dependencies: runner_module.RunDependencies | None = None,
+    ) -> runner_module.RunResult:
         captured.append(request)
         cfg = cli_runner_env.cfg
         overrides = request.tonemap_overrides or {}

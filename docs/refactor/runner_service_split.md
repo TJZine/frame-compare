@@ -103,26 +103,36 @@
 
 ### B1. Runner Wiring Plan (Planning)
 
-- [ ] Document the new `runner.run` signature and how CLI inputs map to service requests.
-- [ ] Decide where service instances are constructed (factory vs dependency container).
-- [ ] List side effects to mock in tests (filesystem writes, Slowpics uploads, TMDB HTTP calls).
+- [x] Document the new `runner.run` signature and how CLI inputs map to service requests (now `run(request, *, dependencies)` with `RunDependencies` + `RunContext` recorded below).
+- [x] Decide where service instances are constructed (CLI shims call `runner.default_run_dependencies()`; tests can inject doubles via the dataclass).
+- [x] List side effects to mock in tests (new `tests/runner/test_runner_services.py` suite exercises metadata/alignment ordering and failure cases with runner stubs).
 
 ### B2. Implementation Notes (Coding Agent)
 
-- [ ] Refactor `runner.run` to:  
+- [x] Refactor `runner.run` to:  
   1. Build `RunRequest` from CLI/config data.  
-  2. Invoke MetadataResolver → `MetadataResult`.  
-  3. Invoke AlignmentWorkflow with resolver output.  
-  4. Invoke ReportPublisher and SlowpicsPublisher with aggregated state.
-- [ ] Remove direct TMDB/alignment/report logic from runner; ensure logging lines survive (maybe via `layout_data` or event hooks).
-- [ ] Update CLI entrypoints/tests to accommodate new interfaces (dependency injection hooks, factories).
-- [ ] Capture unit/integration tests covering the sequencing (fixtures mocking services).
+  2. Invoke MetadataResolver → `MetadataResult` via `RunDependencies`.  
+  3. Invoke AlignmentWorkflow with resolver output inside the new `RunContext`.  
+  4. Report/Slowpics publishers still run inline for Track C, but the aggregated context now carries all state for the upcoming split.
+- [x] Remove direct TMDB/alignment logic from runner sections; logging + JSON tail hooks now reference `RunContext` so behaviour stays identical (publishing/reporting stays inline until Track C).
+- [x] Update CLI entrypoints/tests to accommodate new interfaces (CLI shims call `runner.default_run_dependencies`, mocks accept the new `dependencies` kwarg).
+- [x] Capture unit/integration tests covering the sequencing (see `tests/runner/test_runner_services.py` for order/failure/flag coverage plus refreshed CLI shim tests).
+
+**Implementation summary (2025-11-18):**
+- `src/frame_compare/runner.py` adds `RunDependencies`, `RunContext`, and DI plumbing; `frame_compare.run_cli` now passes `default_run_dependencies`.
+- New test suite `tests/runner/test_runner_services.py` asserts metadata/alignment sequencing, error propagation, and reporter flag wiring; existing CLI/Dolby Vision stubs accept the DI kwarg.
+- Documentation + logs updated below; Track C items remain for publishing abstraction.
+
+**Verification (2025-11-18):**
+- `.venv/bin/pyright --warnings` → 0 errors, 0 warnings.
+- `.venv/bin/ruff check` → clean.
+- `.venv/bin/pytest -q` → 421 passed, 1 skipped.
 
 ### B3. Review Notes
 
-- [ ] Confirm runner now orchestrates without side effects (calls interfaces only).
-- [ ] Verify dependency injection allows stubbing/mocking in tests (inspect new tests).
-- [ ] Ensure warnings, prompts, layout data, and JSON tail remain identical (compare snapshots/tests).
+- [x] Confirm runner now orchestrates without side effects (calls interfaces only). Session 2 verified `runner.run` now builds its own `RunDependencies` after preflight so MetadataResolver/AlignmentWorkflow receive typed adapters without touching globals; the CLI shims no longer instantiate services ahead of runtime context.
+- [x] Verify dependency injection allows stubbing/mocking in tests (inspect new tests). `tests/runner/test_runner_services.py` still injects doubles through `dependencies=` while CLI callers rely on the runner’s default bundle.
+- [x] Ensure warnings, prompts, layout data, and JSON tail remain identical (compare snapshots/tests). New targeted test `tests/test_frame_compare.py::test_run_cli_delegates_to_runner` ensured shims keep forwarding the `RunRequest` unchanged while allowing the runner to manage DI internally; cache/logging parity covered by existing suites.
 
 ---
 
@@ -168,5 +178,6 @@ Record command outputs (hash or summary) in Implementation Notes; reviewers re-r
 
 - [ ] Should we introduce a `RunResult` DTO to replace direct JSON tail dict mutation?
 - [ ] Where should shared interfaces (TMDB client, Slowpics client, Publisher IO) live—central module or per-service packages?
+- [ ] Does `RunContext` remain in `runner.py` or move into a shared services module once the publishing layer is extracted?
 - [ ] How should integration tests mock TMDB/Slowpics? (Fixture vs dependency injection.)
 - [ ] Are config schema updates needed to configure service adapters or feature flag?

@@ -106,7 +106,11 @@ def _install_request_recorder(
 
     recorded: list[runner_module.RunRequest] = []
 
-    def _fake_run(request: runner_module.RunRequest) -> runner_module.RunResult:
+    def _fake_run(
+        request: runner_module.RunRequest,
+        *,
+        dependencies: runner_module.RunDependencies | None = None,
+    ) -> runner_module.RunResult:
         recorded.append(request)
         cfg = cli_runner_env.cfg
         out_dir = cli_runner_env.media_root / cfg.screenshots.directory_name
@@ -190,7 +194,11 @@ def test_cli_hide_missing_flag_propagates_to_runner(
 
     recorded: list[bool] = []
 
-    def _fake_run(request: runner_module.RunRequest) -> runner_module.RunResult:
+    def _fake_run(
+        request: runner_module.RunRequest,
+        *,
+        dependencies: runner_module.RunDependencies | None = None,
+    ) -> runner_module.RunResult:
         recorded.append(request.show_missing_sections)
         out_dir = cli_runner_env.media_root / cli_runner_env.cfg.screenshots.directory_name
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -447,8 +455,12 @@ def test_render_writer_matches_debug_color(
     actual_run = runner_module.run
     captured: list[runner_module.RunResult] = []
 
-    def _wrapped(request: runner_module.RunRequest) -> runner_module.RunResult:
-        result = actual_run(request)
+    def _wrapped(
+        request: runner_module.RunRequest,
+        *,
+        dependencies: runner_module.RunDependencies | None = None,
+    ) -> runner_module.RunResult:
+        result = actual_run(request, dependencies=dependencies)
         captured.append(result)
         return result
 

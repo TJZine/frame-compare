@@ -707,6 +707,18 @@
       ..........                                                               [100%]
       82 passed in 0.17s
       ```
+- *2025-11-18:* feat(runner DI): Introduced `RunDependencies`, `default_run_dependencies`, and `RunContext` so `runner.run` sequences services through explicit, testable layers (source:docs/refactor/runner_service_split.md@Track B).
+  - Problem: Runner instantiated services internally, so CLI shims/tests couldn’t inject doubles and state flowed through ad-hoc locals instead of a typed context.
+  - Decision: Added `RunDependencies`/`default_run_dependencies` to `src/frame_compare/runner.py`, updated `frame_compare.run_cli` to pass the bundle, and wrapped metadata/alignment data in `RunContext`. Added `tests/runner/test_runner_services.py` to assert service order, CLIAppError propagation, and reporter flag wiring; existing CLI/Dolby stubs now accept the `dependencies` kwarg.
+  - Verification:
+    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+    - `.venv/bin/ruff check` → `All checks passed!`
+    - `.venv/bin/pytest -q` → `421 passed, 1 skipped`
+- *2025-11-19:* chore(runner DI): Let `runner.run` construct default dependencies after preflight so service factories can see the real `cfg`, reporter, and cache paths (source:docs/refactor/runner_service_split.md@Track B B3).
+  - Problem: `frame_compare.run_cli` instantiated `default_run_dependencies()` before preflight, so MetadataResolver/AlignmentWorkflow never saw runtime context (feature flags, cache roots) even though `default_run_dependencies(cfg=..., reporter=..., cache_dir=...)` already accepted those parameters. Direct `runner.run` callers benefited from richer factories while the main CLI path did not.
+  - Decision: Removed the eager factory call from `frame_compare.run_cli`, letting `runner.run` invoke `default_run_dependencies` after it resolves configuration and reporter wiring. Updated `tests/test_frame_compare.py::test_run_cli_delegates_to_runner` to assert the shim now passes `dependencies=None`, recorded Track B review notes, and confirmed DI override hooks still work in `tests/runner/test_runner_services.py`.
+  - Verification:
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_frame_compare.py::test_run_cli_delegates_to_runner`
 - *2025-11-17:* feat(cli cache pipeline): cached runs now emit a canonical `.frame_compare.run.json` snapshot plus a unified renderer so live and cached output share identical sections and semantics.
   - Problem: Cached reruns reprinted partial sections, summary banners skipped entirely when the pipeline short-circuited, and there was no way to rehydrate CLI output without rerunning the full analysis.
   - Decision: Introduced `result_snapshot.RunResultSnapshot` (JSON-safe layout/flag/section metadata), persisted it beside screenshots, and taught the runner to render sections exclusively through `render_run_result`. Added CLI flags: `--from-cache-only` (hydrate snapshot and exit), `--no-cache` (skip cache probes/force recompute with metadata), and `--show-partial` (surface cache-derived partial sections). Snapshot metadata includes availability markers so future cache reconstructions can hide sections cleanly.

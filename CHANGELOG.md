@@ -29,6 +29,7 @@
 - *2025-11-18:* finish the CLI cache UX by adding `--show-missing`/`--hide-missing`, plumbing `show_missing_sections` through the public API, broadening section-availability heuristics for viewer/report/audio/VSPreview blocks, and extending tests/docs/CHANGELOG to cover the new behavior.
 - *2025-11-18:* capture ClipProbeSnapshot metadata (fps, frame counts, geometry, HDR props) per clip, persist it to `cache_dir/probe/<hash>.json`, reuse probe-era clip handles inside `init_clips`, and add `runtime.force_reprobe` plus cache hit/miss logging with regression tests for probe/init reuse.
 - *2025-11-18:* extract `MetadataResolver` and `AlignmentWorkflow` services per Track A, wire runner orchestration through typed requests/responses, and add focused service unit tests to lock TMDB/alignment behavior.
+- *2025-11-18:* wire the runner through `RunDependencies` + `RunContext`, add `default_run_dependencies()` for CLI/test injection, refresh CLI/Dolby stubs to accept the `dependencies` kwarg, and add `tests/runner/test_runner_services.py` to assert service order, error propagation, and reporter flag wiring.
 
 ### Bug Fixes
 
@@ -47,6 +48,7 @@
 * refresh cached frame counts whenever audio alignment or VSPreview manual offsets shift trims so CLI summaries report the trimmed clip durations
 * reuse cached FPS metadata from the initial probe while measuring audio alignment so CLI and VSPreview frame deltas stay non-zero even when ffprobe omits `r_frame_rate`
 * keep Husky `npm test` working on Windows by routing through `tools/run_pytest.mjs` (enforcing `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` by default with an `FC_SKIP_PYTEST_DISABLE=1` escape hatch)
+* *2025-11-19:* let `runner.run` build its default dependency bundle after configuration preflight so MetadataResolver/AlignmentWorkflow receive the real `cfg`, reporter, and cache paths; CLI shims now pass `dependencies=None` and targeted runner shim tests were updated accordingly.
 
 ### Chores
 

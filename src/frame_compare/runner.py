@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, cast
+from typing import Any, Callable, Dict, Iterable, List, Mapping, MutableMapping, Optional, cast
 
 from rich.console import Console
 from rich.markup import escape
@@ -60,12 +60,12 @@ from src.frame_compare.result_snapshot import (
     snapshot_path,
     write_snapshot,
 )
-from src.frame_compare.services.alignment import AlignmentRequest
+from src.frame_compare.services.alignment import AlignmentRequest, AlignmentResult, AlignmentWorkflow
 from src.frame_compare.services.factory import (
     build_alignment_workflow,
     build_metadata_resolver,
 )
-from src.frame_compare.services.metadata import MetadataResolveRequest
+from src.frame_compare.services.metadata import MetadataResolver, MetadataResolveRequest
 from src.frame_compare.slowpics import (
     SlowpicsAPIError,
     build_shortcut_filename,
@@ -75,6 +75,8 @@ from src.frame_compare.vs import ClipInitError, ClipProcessError
 from src.screenshot import ScreenshotError, generate_screenshots
 
 from .cli_runtime import (
+    AudioAlignmentDisplayData,
+    AudioAlignmentSummary,
     CLIAppError,
     CliOutputManager,
     CliOutputManagerProtocol,
@@ -83,6 +85,7 @@ from .cli_runtime import (
     JsonTail,
     NullCliOutputManager,
     ReportJSON,
+    SlowpicsTitleInputs,
     TrimClipEntry,
     TrimSummary,
     coerce_str_mapping,
@@ -153,6 +156,63 @@ class RunRequest:
     force_cache_refresh: bool = False
     show_partial_sections: bool = False
     show_missing_sections: bool = True
+
+
+@dataclass(slots=True)
+class RunDependencies:
+    """Container describing the service instances required by the runner."""
+
+    metadata_resolver: MetadataResolver
+    alignment_workflow: AlignmentWorkflow
+
+
+@dataclass(slots=True)
+class RunContext:
+    """Aggregated state shared across service boundaries."""
+
+    plans: list[ClipPlan]
+    metadata: list[dict[str, str]]
+    json_tail: JsonTail
+    layout_data: MutableMapping[str, Any]
+    metadata_title: str | None
+    analyze_path: Path
+    slowpics_title_inputs: SlowpicsTitleInputs
+    slowpics_final_title: str
+    slowpics_resolved_base: str | None
+    slowpics_tmdb_disclosure_line: str | None
+    slowpics_verbose_tmdb_tag: str | None
+    tmdb_notes: list[str]
+    alignment_summary: AudioAlignmentSummary | None = None
+    alignment_display: AudioAlignmentDisplayData | None = None
+
+    def update_alignment(self, result: AlignmentResult) -> None:
+        """Persist alignment outputs in the shared run context."""
+
+        self.plans = result.plans
+        self.alignment_summary = result.summary
+        self.alignment_display = result.display
+
+
+def default_run_dependencies(
+    *,
+    cfg: AppConfig | None = None,
+    reporter: CliOutputManagerProtocol | None = None,
+    cache_dir: Path | None = None,
+    metadata_resolver: MetadataResolver | None = None,
+    alignment_workflow: AlignmentWorkflow | None = None,
+) -> RunDependencies:
+    """
+    Build the default service bundle used by :func:`run`.
+
+    The cfg/reporter/cache_dir parameters are accepted for future adapter wiring;
+    callers may omit them when defaults suffice but tests can inject overrides.
+    """
+
+    del cfg, reporter, cache_dir  # Reserved for future dependency wiring.
+    return RunDependencies(
+        metadata_resolver=metadata_resolver or build_metadata_resolver(),
+        alignment_workflow=alignment_workflow or build_alignment_workflow(),
+    )
 
 
 logger = logging.getLogger('frame_compare')
@@ -334,7 +394,7 @@ def _apply_cli_tonemap_overrides(color_cfg: Any, overrides: Mapping[str, Any]) -
             pass
 
 
-def run(request: RunRequest) -> RunResult:
+def run(request: RunRequest, *, dependencies: RunDependencies | None = None) -> RunResult:
     """
     Orchestrate the CLI workflow.
 
@@ -348,6 +408,7 @@ def run(request: RunRequest) -> RunResult:
         no_color (bool): Disable colored output when True.
         report_enable_override (Optional[bool]): Optional override for HTML report generation toggle.
         tonemap_overrides (Optional[Dict[str, Any]]): Optional overrides for tone-mapping parameters supplied via CLI.
+        dependencies (RunDependencies | None): Optional bundle of service instances for dependency injection/testing.
 
     Returns:
         RunResult: Aggregated result including processed files, selected frames, output directory, resolved root directory, configuration used, generated image paths, optional slow.pics URL, and a JSON-tail dictionary with detailed metadata and diagnostics.
@@ -573,8 +634,13 @@ def run(request: RunRequest) -> RunResult:
             snapshot=cached_snapshot,
             snapshot_path=result_snapshot_path,
         )
-    metadata_resolver = build_metadata_resolver()
-    alignment_workflow = build_alignment_workflow()
+    service_deps = dependencies or default_run_dependencies(
+        cfg=cfg,
+        reporter=reporter,
+        cache_dir=root,
+    )
+    metadata_resolver = service_deps.metadata_resolver
+    alignment_workflow = service_deps.alignment_workflow
     if bool(getattr(cfg.slowpics, "auto_upload", False)):
         auto_upload_warning = (
             "slow.pics auto-upload is enabled; confirm you trust the destination or disable "
@@ -767,21 +833,28 @@ def run(request: RunRequest) -> RunResult:
         collected_warnings=collected_warnings,
     )
     metadata_result = metadata_resolver.resolve(metadata_request)
-    plans = metadata_result.plans
-    metadata_title = metadata_result.metadata_title
-    analyze_path = metadata_result.analyze_path
-    slowpics_title_inputs = metadata_result.slowpics_title_inputs
-    slowpics_final_title = metadata_result.slowpics_final_title
-    slowpics_resolved_base = metadata_result.slowpics_resolved_base
-    slowpics_tmdb_disclosure_line = metadata_result.slowpics_tmdb_disclosure_line
-    slowpics_verbose_tmdb_tag = metadata_result.slowpics_verbose_tmdb_tag
-    tmdb_notes = metadata_result.tmdb_notes
+    context = RunContext(
+        plans=list(metadata_result.plans),
+        metadata=list(metadata_result.metadata),
+        json_tail=json_tail,
+        layout_data=layout_data,
+        metadata_title=metadata_result.metadata_title,
+        analyze_path=metadata_result.analyze_path,
+        slowpics_title_inputs=metadata_result.slowpics_title_inputs,
+        slowpics_final_title=metadata_result.slowpics_final_title,
+        slowpics_resolved_base=metadata_result.slowpics_resolved_base,
+        slowpics_tmdb_disclosure_line=metadata_result.slowpics_tmdb_disclosure_line,
+        slowpics_verbose_tmdb_tag=metadata_result.slowpics_verbose_tmdb_tag,
+        tmdb_notes=list(metadata_result.tmdb_notes),
+    )
+    analyze_path = context.analyze_path
+    plans = context.plans
 
     alignment_request = AlignmentRequest(
         plans=plans,
         cfg=cfg,
         root=root,
-        analyze_path=analyze_path,
+        analyze_path=context.analyze_path,
         audio_track_overrides=audio_track_override_map,
         reporter=reporter,
         json_tail=json_tail,
@@ -789,9 +862,10 @@ def run(request: RunRequest) -> RunResult:
         collected_warnings=collected_warnings,
     )
     alignment_result = alignment_workflow.run(alignment_request)
-    plans = alignment_result.plans
-    alignment_summary = alignment_result.summary
-    alignment_display = alignment_result.display
+    context.update_alignment(alignment_result)
+    plans = context.plans
+    alignment_summary = context.alignment_summary
+    alignment_display = context.alignment_display
 
     try:
         selection_utils.init_clips(plans, cfg.runtime, root, reporter=reporter)
@@ -1148,11 +1222,11 @@ def run(request: RunRequest) -> RunResult:
         layout_data["trims"]["tgt"] = _trim_entry(clip_records[1]["label"])
 
     reporter.update_values(layout_data)
-    if tmdb_notes:
-        for note in tmdb_notes:
+    if context.tmdb_notes:
+        for note in context.tmdb_notes:
             reporter.verbose_line(note)
-    if slowpics_tmdb_disclosure_line:
-        reporter.verbose_line(slowpics_tmdb_disclosure_line)
+    if context.slowpics_tmdb_disclosure_line:
+        reporter.verbose_line(context.slowpics_tmdb_disclosure_line)
 
     if alignment_display is not None:
         json_tail["audio_alignment"]["preview_paths"] = alignment_display.preview_paths
@@ -1771,6 +1845,7 @@ def run(request: RunRequest) -> RunResult:
 
     slowpics_url: Optional[str] = None
     reporter.line(_color_text("slow.pics collection (preview):", "blue"))
+    slowpics_title_inputs = context.slowpics_title_inputs
     inputs_parts = [
         _format_kv(
             "collection_name",
@@ -1786,7 +1861,7 @@ def run(request: RunRequest) -> RunResult:
         ),
     ]
     reporter.line("  " + "  ".join(inputs_parts))
-    resolved_display = slowpics_resolved_base or "(n/a)"
+    resolved_display = context.slowpics_resolved_base or "(n/a)"
     reporter.line(
         "  "
         + _format_kv(
@@ -1800,13 +1875,13 @@ def run(request: RunRequest) -> RunResult:
         "  "
         + _format_kv(
             "final",
-            f'"{slowpics_final_title}"',
+            f'"{context.slowpics_final_title}"',
             label_style="dim blue",
             value_style="bold bright_white",
         )
     )
-    if slowpics_verbose_tmdb_tag:
-        reporter.verbose_line(f"  {escape(slowpics_verbose_tmdb_tag)}")
+    if context.slowpics_verbose_tmdb_tag:
+        reporter.verbose_line(f"  {escape(context.slowpics_verbose_tmdb_tag)}")
     if cfg.slowpics.auto_upload:
         layout_data["slowpics"]["status"] = "preparing"
         reporter.update_values(layout_data)
@@ -2032,7 +2107,7 @@ def run(request: RunRequest) -> RunResult:
                 selection_details=selection_details,
                 image_paths=image_paths,
                 plans=plan_payload,
-                metadata_title=metadata_title,
+                metadata_title=context.metadata_title,
                 include_metadata=str(getattr(cfg.report, "include_metadata", "minimal")),
                 slowpics_url=slowpics_url,
             )
