@@ -12,10 +12,9 @@ import webbrowser
 from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, MutableMapping, Optional, TypeVar, cast
+from typing import Any, Callable, Dict, Iterable, MutableMapping, Optional, cast
 
 import click
-from click.core import ParameterSource
 from rich import print
 from rich.console import Console as _Console
 
@@ -32,6 +31,7 @@ from src.config_loader import ConfigError, load_config
 from src.frame_compare import runner
 from src.frame_compare import vs as _vs_core
 from src.frame_compare.cli_runtime import JsonTail, ReportJSON, _ensure_slowpics_block
+from src.frame_compare.cli_utils import _cli_flag_value, _cli_override_value
 from src.frame_compare.config_helpers import env_flag_enabled as _env_flag_enabled
 from src.frame_compare.core import (
     _DEFAULT_CONFIG_HELP,
@@ -494,40 +494,6 @@ def _run_cli_entry(
         else:
             json_output = json.dumps(json_tail, separators=(",", ":"))
         print(json_output)
-
-
-T = TypeVar("T")
-
-
-def _cli_override_value(ctx: click.Context, name: str, value: T | None) -> T | None:
-    """
-    Return ``value`` only when the corresponding CLI option originated from the command line.
-
-    Click's ``default_map`` and other implicit sources should defer to config defaults so the
-    runtime path mirrors ``frame_compare.run_cli`` unless the user explicitly passes a flag.
-    """
-
-    get_source = getattr(ctx, "get_parameter_source", None)
-    if get_source is None or not callable(get_source):
-        return value
-    source = cast(Optional[ParameterSource], get_source(name))
-    if source is ParameterSource.COMMANDLINE:
-        return value
-    return None
-
-
-def _cli_flag_value(ctx: click.Context, name: str, value: bool, *, default: bool) -> bool:
-    """
-    Return the flag value only when the user explicitly passed the option.
-
-    Click's ``default_map`` and env-provided values should not override config-driven defaults.
-    """
-
-    override = _cli_override_value(ctx, name, value)
-    if override is None:
-        return default
-    return bool(override)
-
 
 @click.group(invoke_without_command=True)
 @click.option(
