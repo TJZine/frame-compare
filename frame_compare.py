@@ -1,24 +1,16 @@
-"""CLI entry point and orchestration logic for frame comparison runs."""
+"""Public shim exposing the frame_compare CLI and library surface."""
 
 from __future__ import annotations
 
 import sys
 from typing import Any, Callable, Dict, Iterable, Optional, cast
 
-from rich.console import Console as _Console
-
 import src.frame_compare.cli_entry as _cli_entry
-import src.frame_compare.cli_runtime as _cli_runtime
-import src.frame_compare.cli_utils as _cli_utils
-import src.frame_compare.config_writer as config_writer
+import src.frame_compare.compat as _compat
 import src.frame_compare.core as _core
 import src.frame_compare.doctor as doctor_module
 import src.frame_compare.preflight as _preflight
-import src.frame_compare.presets as presets_lib
 import src.frame_compare.tmdb_workflow as tmdb_workflow
-import src.frame_compare.vspreview as _vspreview
-import src.frame_compare.wizard as _wizard
-from src.config_loader import ConfigError, load_config
 from src.frame_compare import runner
 from src.frame_compare import vs as _vs_core
 from src.frame_compare.render.errors import ScreenshotError
@@ -30,47 +22,6 @@ resolve_workspace_root = _preflight.resolve_workspace_root
 PreflightResult = _preflight.PreflightResult
 CLIAppError = _core.CLIAppError
 
-
-# Legacy compatibility surface: enumerate the few core helpers we still expose.
-_COMPAT_EXPORTS: dict[str, object] = {
-    "_cli_override_value": _cli_utils._cli_override_value,
-    "_cli_flag_value": _cli_utils._cli_flag_value,
-    "cli_runtime": _cli_runtime,
-    "core": _core,
-    "config_writer": config_writer,
-    "presets": presets_lib,
-    "preflight": _preflight,
-    "tmdb_workflow": tmdb_workflow,
-    "vspreview": _vspreview,
-    "vs_core": _vs_core,
-    "collect_doctor_checks": collect_doctor_checks,
-    "emit_doctor_results": doctor_module.emit_results,
-    "DoctorCheck": doctor_module.DoctorCheck,
-    "Console": _Console,
-    "CliOutputManager": _cli_runtime.CliOutputManager,
-    "NullCliOutputManager": _cli_runtime.NullCliOutputManager,
-    "collect_path_diagnostics": _preflight.collect_path_diagnostics,
-    "prepare_preflight": _preflight.prepare_preflight,
-    "resolve_workspace_root": _preflight.resolve_workspace_root,
-    "resolve_subdir": _preflight.resolve_subdir,
-    "run_wizard_prompts": _wizard.run_wizard_prompts,
-    "resolve_wizard_paths": _wizard.resolve_wizard_paths,
-    "prompt_workspace_root": _wizard.prompt_workspace_root,
-    "prompt_input_directory": _wizard.prompt_input_directory,
-    "prompt_slowpics_options": _wizard.prompt_slowpics_options,
-    "prompt_audio_alignment_option": _wizard.prompt_audio_alignment_option,
-    "prompt_renderer_preference": _wizard.prompt_renderer_preference,
-    "load_config": load_config,
-    "_execute_wizard_session": _cli_entry._execute_wizard_session,
-    "ConfigError": ConfigError,
-    "render_collection_name": tmdb_workflow.render_collection_name,
-    "resolve_tmdb_workflow": tmdb_workflow.resolve_workflow,
-    "TMDBLookupResult": tmdb_workflow.TMDBLookupResult,
-    "ScreenshotError": ScreenshotError,
-}
-for _name, _value in _COMPAT_EXPORTS.items():
-    globals()[_name] = _value
-
 resolve_tmdb_workflow = tmdb_workflow.resolve_workflow
 TMDBLookupResult = tmdb_workflow.TMDBLookupResult
 render_collection_name = tmdb_workflow.render_collection_name
@@ -80,6 +31,11 @@ vs_core = _vs_core
 
 RunResult = runner.RunResult
 RunRequest = runner.RunRequest
+
+# Preserve legacy compatibility mapping for callers that still access it directly.
+_COMPAT_EXPORTS = _compat.COMPAT_EXPORTS
+# Populate legacy compatibility surface while keeping the shim thin.
+_compat.apply_compat_exports(globals())
 
 __all__ = (
     "run_cli",

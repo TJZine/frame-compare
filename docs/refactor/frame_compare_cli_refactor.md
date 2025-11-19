@@ -98,6 +98,8 @@ These should remain true at the end of **every phase** (unless explicitly noted)
   - Thin public shim: exports the curated `__all__` (`run_cli`, `main`, `RunRequest`, `RunResult`, `CLIAppError`, `ScreenshotError`, `resolve_tmdb_workflow`, `TMDBLookupResult`, `render_collection_name`, `prepare_preflight`, `resolve_workspace_root`, `PreflightResult`, `collect_path_diagnostics`, `collect_doctor_checks`, `emit_doctor_results`, `DoctorCheck`, `vs_core`) plus `_COMPAT_EXPORTS` forwarding helper modules and wizard helpers used by tests (`load_config`, `_execute_wizard_session`, etc.).
   - Delegates CLI entry to `src.frame_compare.cli_entry.main` (also aliased as `cli`); no Click decorators remain in this module.
   - Entry points remain `frame-compare = "frame_compare:main"` and `python -m frame_compare` via the shim.
+- `src/frame_compare/compat.py`
+  - Owns the `_COMPAT_EXPORTS` mapping and `apply_compat_exports` helper that `frame_compare.py` uses to keep legacy CLI/test-facing names reachable while the shim stays minimal.
 
 - `src/frame_compare/cli_entry.py`
   - Owns the Click CLI wiring: `@click.group` `main` with default execution into `_run_cli_entry` plus subcommands `run`, `doctor`, `wizard`, and `preset` (`list`/`apply`).
@@ -369,8 +371,8 @@ Notes:
 
 ## 8. Phase 3 – Make `frame_compare.py` a Thin Shim
 
-Status: `not-started` | `in-progress` | `completed`  
-Owner: _fill in_  
+Status: `completed`  
+Owner: Codex (Phase 3 thin shim)  
 Related PR(s): _fill in_
 
 ### 8.1 Scope
@@ -394,34 +396,39 @@ Related PR(s): _fill in_
 
 ### 8.4 Checklist
 
-- [ ] Review `frame_compare.py` for any remaining CLI-only logic.
-- [ ] Move remaining CLI bits to:
-  - [ ] `cli_entry` (wiring, options, command implementation).
-  - [ ] `cli_utils` (reusable CLI helpers).
-- [ ] Ensure `frame_compare.py`:
-  - [ ] Exposes `main` delegating to `cli_entry`’s entry point.
-  - [ ] Exposes any public library functions/classes as before.
-- [ ] Verify `__init__.py`:
-  - [ ] Imports from `frame_compare` still resolve.
-  - [ ] No unintended removal of public names.
-- [ ] Check `pyproject.toml` (or equivalent):
-  - [ ] Console scripts still reference `frame_compare:main` (or current entry).
-  - [ ] They resolve to the new underlying CLI entry.
-- [ ] Ensure tests that import from `frame_compare` still pass.
-- [ ] Run:
-  - [ ] `.venv/bin/pyright --warnings`
-  - [ ] `.venv/bin/ruff check`
-  - [ ] `.venv/bin/pytest -q`
+- [x] Review `frame_compare.py` for any remaining CLI-only logic.
+- [x] Move remaining CLI bits to:
+  - [x] `cli_entry` (wiring, options, command implementation).
+  - [x] `cli_utils` (reusable CLI helpers).
+- [x] Ensure `frame_compare.py`:
+  - [x] Exposes `main` delegating to `cli_entry`’s entry point.
+  - [x] Exposes any public library functions/classes as before.
+- [x] Verify `__init__.py`:
+  - [x] Imports from `frame_compare` still resolve.
+  - [x] No unintended removal of public names.
+- [x] Check `pyproject.toml` (or equivalent):
+  - [x] Console scripts still reference `frame_compare:main` (or current entry).
+  - [x] They resolve to the new underlying CLI entry.
+- [x] Ensure tests that import from `frame_compare` still pass.
+- [x] Run:
+  - [x] `.venv/bin/pyright --warnings`
+  - [x] `.venv/bin/ruff check`
+  - [x] `.venv/bin/pytest -q`
 
 ### 8.5 Implementation Notes (Dev Agent)
 
-- Date: _YYYY-MM-DD_  
-- Dev Agent: _name / persona_
+- Date: 2025-11-19  
+- Dev Agent: Codex (Phase 3 thin shim)
 
 Notes:
 
-- What remained in `frame_compare.py` and why.
-- Any small cleanups or name changes required for clarity.
+- Introduced `src/frame_compare/compat.py` to host `_COMPAT_EXPORTS` and `apply_compat_exports`, keeping legacy CLI/test-facing names intact while letting `frame_compare.py` stay a public shim.
+- Simplified `frame_compare.py` to delegate `main` to `cli_entry.main`, retain `run_cli`, re-alias the public exports, and expose `_COMPAT_EXPORTS` from the compat module for backward compatibility.
+- Entry points and `frame_compare/__init__.py` remain unchanged; console scripts still target `frame_compare:main`.
+- Commands run (2025-11-19 UTC):
+  - `.venv/bin/pyright --warnings` → clean.
+  - `.venv/bin/ruff check` → clean.
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` → 444 passed, 1 skipped.
 
 ### 8.6 Review Notes (Review Agent)
 
