@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
+import src.frame_compare.alignment_preview as alignment_preview
 import src.frame_compare.alignment_runner as alignment_runner
-import src.frame_compare.core as core
 import src.frame_compare.planner as planner_utils
 import src.frame_compare.preflight as preflight_utils
 import src.frame_compare.report as html_report
@@ -14,6 +14,7 @@ import src.frame_compare.selection as selection_utils
 import src.frame_compare.tmdb_workflow as tmdb_workflow
 from src.datatypes import ReportConfig, RuntimeConfig, SlowpicsConfig, TMDBConfig
 from src.frame_compare.analysis import SelectionDetail
+from src.frame_compare.analyze_target import pick_analyze_file
 from src.frame_compare.cli_runtime import ClipPlan
 from src.frame_compare.interfaces import (
     PublisherIO,
@@ -86,7 +87,7 @@ def build_metadata_resolver() -> MetadataResolver:
     return MetadataResolver(
         tmdb_client=_TMDBWorkflowClient(),
         plan_builder=plan_builder,
-        analyze_picker=core.pick_analyze_file,
+        analyze_picker=pick_analyze_file,
         clip_probe=_ClipProbeAdapter(),
     )
 
@@ -97,7 +98,7 @@ def build_alignment_workflow() -> AlignmentWorkflow:
     return AlignmentWorkflow(
         apply_alignment=alignment_runner.apply_audio_alignment,
         format_output=alignment_runner.format_alignment_output,
-        confirm_alignment=core.confirm_alignment_with_screenshots,
+        confirm_alignment=alignment_preview.confirm_alignment_with_screenshots,
     )
 
 

@@ -7,8 +7,7 @@ import datetime as _dt  # noqa: F401  (re-exported via frame_compare)
 import importlib as _importlib
 import logging
 import math
-import time
-from pathlib import Path
+import time as _time
 from typing import Any, Final, List, Mapping, MutableMapping, NoReturn, Optional, Sequence, Tuple, cast
 
 import click
@@ -26,7 +25,6 @@ import src.frame_compare.wizard as _wizard_module
 import src.screenshot as _screenshot_module
 from src import audio_alignment as _audio_alignment_module
 from src.config_loader import load_config as _load_config
-from src.frame_compare import vs as vs_core
 from src.frame_compare.analysis import (
     export_selection_metadata as _export_selection_metadata,  # noqa: F401
 )
@@ -45,6 +43,7 @@ from src.frame_compare.analysis import (
 from src.frame_compare.analysis import (
     write_selection_cache_file as _write_selection_cache_file,  # noqa: F401
 )
+from src.frame_compare.analyze_target import pick_analyze_file as _pick_analyze_file
 from src.frame_compare.cli_runtime import (
     AudioAlignmentJSON as _AudioAlignmentJSON,  # noqa: F401 - re-exported for compatibility
 )
@@ -136,7 +135,9 @@ build_plans = _planner_module.build_plans
 _build_plans = _planner_module.build_plans
 _ClipPlan = ClipPlan
 _coerce_str_mapping = coerce_str_mapping
+pick_analyze_file = _pick_analyze_file
 datetime = _dt
+time = _time
 importlib = _importlib
 Console = _Console
 Progress = _Progress
@@ -206,91 +207,6 @@ resolve_wizard_paths = _wizard_module.resolve_wizard_paths
 _resolve_wizard_paths = resolve_wizard_paths
 abort_if_site_packages = _abort_if_site_packages_public
 _abort_if_site_packages = abort_if_site_packages
-
-
-
-
-def _estimate_analysis_time(file: Path, cache_dir: Path | None) -> float:
-    """Estimate time to read two small windows of frames via VapourSynth.
-
-    Mirrors the legacy heuristic: read ~15 frames around 1/3 and 2/3 into the clip,
-    average the elapsed time. Returns +inf on failure so slower/unreadable clips are avoided.
-    """
-    try:
-        clip = vs_core.init_clip(str(file), cache_dir=str(cache_dir) if cache_dir else None)
-    except Exception:
-        return float("inf")
-
-    try:
-        total = getattr(clip, "num_frames", 0)
-        if not isinstance(total, int) or total <= 1:
-            return float("inf")
-        read_len = 15
-        # safeguard when the clip is very short
-        while (total // 3) + 1 < read_len and read_len > 1:
-            read_len -= 1
-
-        stats = clip.std.PlaneStats()
-
-        def _read_window(base: int) -> float:
-            start = max(0, min(base, max(0, total - 1)))
-            t0 = time.perf_counter()
-            for j in range(read_len):
-                idx = min(start + j, max(0, total - 1))
-                frame = stats.get_frame(idx)
-                del frame
-            return time.perf_counter() - t0
-
-        t1 = _read_window(total // 3)
-        t2 = _read_window((2 * total) // 3)
-        return (t1 + t2) / 2.0
-    except Exception:
-        return float("inf")
-
-
-def _pick_analyze_file(
-    files: Sequence[Path],
-    metadata: Sequence[Mapping[str, str]],
-    target: str | None,
-    *,
-    cache_dir: Path | None = None,
-) -> Path:
-    """Resolve the clip to analyse, honouring user targets and heuristics."""
-    if not files:
-        raise ValueError("No files to analyze")
-    target = (target or "").strip()
-    if not target:
-        # Legacy parity: default to the file with the smallest estimated read time.
-        logger.info("Determining which file to analyze...")
-        times = [(_estimate_analysis_time(file, cache_dir), idx) for idx, file in enumerate(files)]
-        times.sort(key=lambda x: x[0])
-        fastest_idx = times[0][1] if times else 0
-        return files[fastest_idx]
-
-    target_lower = target.lower()
-
-    # Allow numeric index selection
-    if target.isdigit():
-        idx = int(target)
-        if 0 <= idx < len(files):
-            return files[idx]
-
-    for idx, file in enumerate(files):
-        if file.name.lower() == target_lower or file.stem.lower() == target_lower:
-            return file
-        meta = metadata[idx]
-        for key in ("label", "release_group", "anime_title", "file_name"):
-            value = str(meta.get(key) or "")
-            if value and value.lower() == target_lower:
-                return file
-        if target_lower == str(idx):
-            return file
-
-    return files[0]
-
-
-pick_analyze_file = _pick_analyze_file
-
 
 def _extract_clip_fps(clip: object) -> Tuple[int, int]:
     """Return (fps_num, fps_den) from *clip*, defaulting to 24000/1001 when missing."""
