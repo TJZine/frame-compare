@@ -10,6 +10,16 @@ from src.frame_compare import selection as selection_module
 from src.frame_compare.cli_runtime import ClipPlan
 
 
+@pytest.fixture(autouse=True)
+def _stub_vs_ram_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure tests never import VapourSynth just to set cache limits."""
+
+    def _noop(limit_mb: int, *, core: object | None = None) -> None:
+        return None
+
+    monkeypatch.setattr(selection_module.vs_core, "set_ram_limit", _noop)
+
+
 def _make_plan(path: Path, *, reference: bool = False, fps_override: tuple[int, int] | None = None) -> ClipPlan:
     return ClipPlan(path=path, metadata={"label": path.stem}, use_as_reference=reference, fps_override=fps_override)
 

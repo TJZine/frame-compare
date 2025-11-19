@@ -35,6 +35,7 @@
 ### Bug Fixes
 
 * gate every non-`--tm-*` CLI override (paths/cache/report/audio/debug flags) on explicit command-line sources so `frame_compare.run_cli` and the Click entrypoint respect config precedence, and fix `json_tail.render.writer` so debug-color runs accurately report the VS fallback (tests/runner/test_cli_entry.py)
+* regenerate `docs/_generated/config_tables.md` via `tools/gen_config_docs.py` so the new `runtime.force_reprobe` default is documented, and add an autouse fixture in `tests/test_clip_metadata_probe.py` that stubs `vs_core.set_ram_limit` so the suite passes even when the VapourSynth module is unavailable
 * guard tonemap CLI overrides so Click `default_map`/env-provided values defer to config until a `--tm-*` flag is provided, and extend CLI regression tests for `--tm-target` plus overlay/verify telemetry
 * keep release-please commits passing commitlint by forcing `chore(ci): release…` pull-request titles
 * prevent the Click CLI from forcing Dolby Vision tonemapping off unless `--tm-use-dovi`/`--tm-no-dovi` is explicitly provided so CLI and direct runs agree

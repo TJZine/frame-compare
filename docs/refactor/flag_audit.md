@@ -386,16 +386,18 @@ When closing a track or major sub-task, run:
 
 ### C4. Review Notes (Review Agent)
 
-- [ ] Verified overlay diagnostics show DV/HDR data when expected.
-- [ ] Confirmed per-frame metrics gating prevents regressions.
-- [ ] Tested CLI/config toggles for diagnostic overlay.
-- [ ] Docs accurately describe new behaviour and perf considerations.
-
-> Findings:
-> -
-> Follow-ups:
-> -
-> Reviewer:
-> -
-> Date:
-> -
+- Persona: **MetaSentinel**, skeptical reviewer. Confirms diagnostics and gating match plan, replays verification commands if evidence missing, records findings with file:line references.
+- Tasks:
+  - [ ] Review docs (`docs/refactor/flag_audit.md` Track C, `docs/DECISIONS.md`, README) to ensure overlays described accurately and Implementation Notes (C3) are filled.
+  - [ ] Inspect code changes (runner overlay construction, metadata extraction, overlay templates) verifying DV/HDR/per-frame data populates `json_tail["overlay"]["diagnostics"]` and is gated properly.
+  - [ ] Confirm config/CLI toggles (diagnostic mode, per-frame metric flag) behave as documented; run targeted tests if necessary.
+  - [ ] Check tests cover DV/HDR inclusion, gating, template fallbacks; rerun `.venv/bin/pyright --warnings`, `.venv/bin/ruff check`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/runner/test_overlay_diagnostics.py` if coding agent didn’t capture logs.
+  - [ ] Record findings (with severity + file:line) and note follow-ups (e.g., missing docs, additional tests).
+- Findings:
+- Follow-ups:
+- Commands re-run:
+  - [ ] `.venv/bin/pyright --warnings`
+  - [ ] `.venv/bin/ruff check`
+  - [ ] `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/runner/test_overlay_diagnostics.py`
+- Reviewer:
+- Date:

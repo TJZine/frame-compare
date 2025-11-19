@@ -1,5 +1,12 @@
 # Decisions Log
 
+- *2025-11-19:* chore(config): regenerate config defaults docs and make clip-metadata tests independent of VapourSynth.
+  - Problem: CI lint failed because `docs/_generated/config_tables.md` lagged behind a new `RuntimeConfig.force_reprobe` option, and four tests in `tests/test_clip_metadata_probe.py` invoked the real `vs_core.set_ram_limit`, which tried to import VapourSynth and exploded on machines without the module.
+  - Decision: Rebuilt the generated config tables via `tools/gen_config_docs.py` so the runtime defaults section now lists `force_reprobe`, and introduced an autouse `pytest` fixture that stubs `selection_module.vs_core.set_ram_limit` to a no-op while still allowing individual tests to override it when they need to capture calls.
+  - Verification:
+    - `.venv/bin/pytest tests/test_clip_metadata_probe.py -q`
+    - `PYTHONPATH=$PWD/tmp_no_vs .venv/bin/pytest tests/test_clip_metadata_probe.py -q`
+
 - *2025-11-19:* feat(runner): finish service-mode publisher wiring and CLI overrides.
   - Problem: The prior agent reverted the runner halfway through the publisher extraction, so `_publish_results`/`RunDependencies` were disconnected, CLI flags for `--service-mode`/`--legacy-runner` were undocumented, and pytest still patched `upload_comparison` even though the new services bypass that hook, causing real slow.pics uploads during tests.
   - Decision: Restored the service-mode plumbing inside `src/frame_compare/runner.py`, tightened `RunDependencies` defaults for `ReportPublisher`/`SlowpicsPublisher`, added CLI coverage in `tests/runner/test_cli_entry.py`, and taught all slow.pics workflow tests to opt into legacy mode via `service_mode_override=False` or `--legacy-runner` so they keep using the legacy stub helpers. Updated `tests/services/test_publishers.py` to exercise the service classes directly, refreshed README + docs/refactor/runner_service_split.md + CHANGELOG to describe the flag, and recorded the rollout plus verification details here and in docs/DECISIONS.md.

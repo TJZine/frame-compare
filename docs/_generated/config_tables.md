@@ -174,6 +174,7 @@
 | --- | --- | --- |
 | `[runtime].ram_limit_mb` | int | `8000` |
 | `[runtime].vapoursynth_python_paths` | list[str] | `[]` |
+| `[runtime].force_reprobe` | bool | `false` |
 
 ## [cli] defaults
 
