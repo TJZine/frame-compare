@@ -484,7 +484,7 @@ Distributed under the [MIT License](LICENSE). Frame Compare builds upon FFmpeg, 
 ### Support
 
 - Works on Linux and Windows (64-bit). Ensure FFmpeg is on `PATH` and VapourSynth is installed when using the primary renderer. macOS support is currently paused pending fixes in the upstream VapourSynth/L-SMASH toolchain.
-- Additional docs: [docs/audio_alignment_pipeline.md](docs/audio_alignment_pipeline.md), [docs/geometry_pipeline.md](docs/geometry_pipeline.md), [docs/hdr_tonemap_overview.md](docs/hdr_tonemap_overview.md), [docs/context_summary.md](docs/context_summary.md).
+- Additional docs: [docs/README_REFERENCE.md](docs/README_REFERENCE.md) (canonical flags/JSON tails), [docs/audio_alignment_pipeline.md](docs/audio_alignment_pipeline.md), [docs/geometry_pipeline.md](docs/geometry_pipeline.md), [docs/hdr_tonemap_overview.md](docs/hdr_tonemap_overview.md).
 - File issues or feature requests via GitHub; report sensitive bugs privately.
 
 ### Future Updates
