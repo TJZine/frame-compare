@@ -234,41 +234,30 @@ def test_cli_service_mode_flags_override_runner(
     monkeypatch: pytest.MonkeyPatch,
     cli_runner_env: _CliRunnerEnv,
 ) -> None:
-    """--legacy-runner and --service-mode should drive RunRequest overrides."""
+    """Service-mode overrides are retired; default runs leave the override unset."""
 
     cli_runner_env.reinstall()
     recorded = _install_request_recorder(monkeypatch, cli_runner_env)
 
-    legacy_result = runner.invoke(
+    result = runner.invoke(
         frame_compare.main,
-        ["--legacy-runner"],
+        [],
         catch_exceptions=False,
     )
-    assert legacy_result.exit_code == 0, legacy_result.output
-    assert recorded and recorded[-1].service_mode_override is False
-
-    service_result = runner.invoke(
-        frame_compare.main,
-        ["--service-mode"],
-        catch_exceptions=False,
-    )
-    assert service_result.exit_code == 0, service_result.output
-    assert recorded[-1].service_mode_override is True
+    assert result.exit_code == 0, result.output
+    assert recorded and recorded[-1].service_mode_override is None
 
 
 def test_cli_service_mode_flag_conflict(
     runner: CliRunner,
     cli_runner_env: _CliRunnerEnv,
 ) -> None:
-    """Passing both service toggles should raise a ClickException."""
+    """Legacy runner flags should no longer be accepted."""
 
     cli_runner_env.reinstall()
-    result = runner.invoke(
-        frame_compare.main,
-        ["--service-mode", "--legacy-runner"],
-    )
+    result = runner.invoke(frame_compare.main, ["--legacy-runner"])
     assert result.exit_code != 0
-    assert "Cannot use both --service-mode and --legacy-runner" in result.output
+    assert "No such option" in result.output
 
 
 def test_cli_cache_flags_ignore_default_map(

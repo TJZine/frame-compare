@@ -60,7 +60,7 @@ def _run_cli_entry(
     json_pretty: bool,
     no_cache: bool,
     from_cache_only: bool,
-    service_mode_override: bool | None,
+    service_mode_override: bool | None = None,
     show_partial: bool,
     show_missing: bool,
     diagnose_paths: bool,
@@ -493,20 +493,6 @@ def _execute_wizard_session(
     help="Render cached CLI output without recomputing; fails when no snapshot exists.",
 )
 @click.option(
-    "--service-mode",
-    "service_mode_flag",
-    is_flag=True,
-    default=False,
-    help="Force the runner to use the publisher services pipeline.",
-)
-@click.option(
-    "--legacy-runner",
-    "legacy_runner_flag",
-    is_flag=True,
-    default=False,
-    help="Disable publisher services and fall back to the legacy inline flow.",
-)
-@click.option(
     "--show-partial",
     "show_partial",
     is_flag=True,
@@ -658,8 +644,6 @@ def main(
     json_pretty: bool,
     no_cache: bool,
     from_cache_only: bool,
-    service_mode_flag: bool,
-    legacy_runner_flag: bool,
     show_partial: bool,
     show_missing: bool,
     diagnose_paths: bool,
@@ -718,16 +702,7 @@ def main(
         "diagnostic_frame_metrics",
         diagnostic_frame_metrics,
     )
-    service_mode_selected = _cli_override_value(ctx, "service_mode_flag", service_mode_flag)
-    legacy_runner_selected = _cli_override_value(ctx, "legacy_runner_flag", legacy_runner_flag)
-    if service_mode_selected and legacy_runner_selected:
-        raise click.ClickException("Cannot use both --service-mode and --legacy-runner.")
-    if service_mode_selected:
-        service_mode_override = True
-    elif legacy_runner_selected:
-        service_mode_override = False
-    else:
-        service_mode_override = None
+    service_mode_override = None
 
     tm_preset = _cli_override_value(ctx, "tm_preset", tm_preset)
     tm_curve = _cli_override_value(ctx, "tm_curve", tm_curve)

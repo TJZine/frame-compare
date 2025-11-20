@@ -149,7 +149,7 @@
 - Network outputs: TMDB (already abstracted), Slowpics API uploads, potential webhook/publishing endpoints.  
 - Interface plan: `PublisherIO` (wraps Path ops + JSON serialization), `SlowpicsClientProtocol` (submit uploads, poll status), optional `ReportWriterProtocol` if separation helps testing.  
 - Error handling: consolidate retries at adapter layer (Slowpics: exponential backoff capped; filesystem: surface exceptions immediately).  
-- Feature flag `runner.enable_service_mode` will gate new services vs legacy runner path for rollback.
+- Update (2025-11-19): service-mode publishers are now the only supported path; the legacy runner flag is retired and only surfaces warnings when requested.
 
 ### C2. Implementation Notes (Coding Agent)
 
@@ -162,7 +162,7 @@
 
 - Added `PublisherIO`, `ReportRendererProtocol`, and `SlowpicsClientProtocol` to `src/frame_compare/interfaces/publishers.py` plus concrete adapters inside `src/frame_compare/services/factory.py`.
 - Created `ReportPublisher` and `SlowpicsPublisher` services (`src/frame_compare/services/publishers.py`) that encapsulate HTML report generation and slow.pics uploads without touching `Path` or HTTP helpers directly.
-- Wired `RunDependencies`/`_publish_results` to inject the new services and guarded the switch with `runner.enable_service_mode` + CLI overrides (`--service-mode` / `--legacy-runner` / `service_mode_override` argument). Legacy `_run_legacy_publishers` remains available for rollback.
+- Wired `RunDependencies`/`_publish_results` to inject the new services; legacy `_run_legacy_publishers` has since been removed and `service_mode_override` now only records warnings when callers request the retired path.
 - Test coverage:
   - `tests/services/test_publishers.py` (service success/failure paths, stub adapters, unattended mode).
   - `tests/runner/test_runner_services.py` (dependency ordering, flag wiring, `_publish_results` service-vs-legacy selection).
@@ -185,7 +185,7 @@ Outstanding TODOs: None for Track C; any additional adapter reshuffling will b
 
 **Review Outcome (2025-11-19):**
 
-- Runner now calls slow.pics/HTML generation exclusively through the injected services when `enable_service_mode` is true; `_run_legacy_publishers` remains behind the flag for parity testing.
+- Runner now calls slow.pics/HTML generation exclusively through the injected services; the legacy path is removed and legacy requests only emit warnings.
 - Reporter warnings/logs continue to mirror the legacy flow; CLI prompts confirmed via `tests/runner/test_runner_services.py`.
 - Service/runner tests cover service success, adapter failure surfacing, CLI flag overrides, and legacy fallback; no gaps remain.
 - Track C accepted pending documentation polish (addressed in this update).
@@ -203,8 +203,8 @@ Record command outputs (hash or summary) in Implementation Notes; reviewers re-r
 
 ## Risk & Rollback
 
-- Maintain a feature flag (e.g., `runner.enable_service_mode`) during rollout; default ON with `--legacy-runner`/`service_mode_override=False` documented for quick rollback.
-- Keep legacy runner path available while services stabilize; document toggles so support can revert. 
+- Service-mode flag retired after the Phase 1 cleanup; rollback would require reverting the cleanup commit rather than toggling config.
+- Legacy runner path removed; only warnings remain when callers request it. 
 - Provide instructions for clearing caches/temp directories if services change storage paths.
 - Track TODOs/follow-ups with issue IDs; no naked `# TODO`.
 

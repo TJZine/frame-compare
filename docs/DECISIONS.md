@@ -1,5 +1,13 @@
 # Decisions Log
 
+- *2025-11-20:* refactor(runner): retire legacy runner flag and path (Phase 1).
+  - Problem: Legacy inline publishers still existed behind `runner.enable_service_mode` and CLI toggles, exposing an unsupported path and complicating the service-mode default.
+  - Decision: Removed `_run_legacy_publishers` and made `_publish_results` service-only, emitting warnings when configs or overrides request legacy mode; removed CLI `--service-mode`/`--legacy-runner` options; deprecated `[runner].enable_service_mode` in the template while keeping the dataclass for compatibility; updated slow.pics/runner/CLI tests to assume service-mode baseline and refreshed README/refactor docs plus CHANGELOG.
+  - Verification (2025-11-20 UTC):
+    - `.venv/bin/pyright --warnings` (0 errors)
+    - `.venv/bin/ruff check`
+    - `.venv/bin/pytest -q` (444 passed, 1 skipped)
+
 - *2025-11-19:* refactor(cli cleanup): finalize `frame_compare` CLI split with `cli_entry`/`cli_utils` wiring, keep `frame_compare.py` as thin shim, and align logs/docs.
   - Problem: Phase 4 required confirming no dead code remained after the CLI extraction and updating documentation/decision logs to match the final module boundaries without changing behavior.
   - Decision: Confirmed no unused imports or dead helpers in `frame_compare.py`, `src/frame_compare/cli_entry.py`, and `src/frame_compare/cli_utils.py`; validated `tests/helpers/runner_env.py` still patches the expected shim/runner symbols; refreshed the refactor checklist plus changelog to describe the stable shim/wiring layout.

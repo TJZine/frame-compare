@@ -28,7 +28,6 @@ import src.frame_compare.core as core
 import src.frame_compare.media as media_utils
 import src.frame_compare.metadata as metadata_utils
 import src.frame_compare.preflight as preflight_utils
-import src.frame_compare.report as html_report
 import src.frame_compare.runtime_utils as runtime_utils
 import src.frame_compare.selection as selection_utils
 import src.frame_compare.vspreview as vspreview_utils
@@ -78,12 +77,6 @@ from src.frame_compare.services.publishers import (
     ReportPublisherRequest,
     SlowpicsPublisher,
     SlowpicsPublisherRequest,
-    UploadProgressTracker,
-)
-from src.frame_compare.slowpics import (
-    SlowpicsAPIError,
-    build_shortcut_filename,
-    upload_comparison,
 )
 from src.frame_compare.vs import ClipInitError, ClipProcessError
 from src.screenshot import ScreenshotError, generate_screenshots
@@ -98,15 +91,11 @@ from .cli_runtime import (
     ClipRecord,
     JsonTail,
     NullCliOutputManager,
-    ReportJSON,
     SlowpicsTitleInputs,
     TrimClipEntry,
     TrimSummary,
     coerce_str_mapping,
-    ensure_slowpics_block,
 )
-from .layout_utils import color_text as _color_text
-from .layout_utils import format_kv as _format_kv
 from .layout_utils import normalise_vspreview_mode as _normalise_vspreview_mode
 from .layout_utils import plan_label as _plan_label
 
@@ -483,12 +472,11 @@ def run(request: RunRequest, *, dependencies: RunDependencies | None = None) -> 
         else bool(getattr(cfg.report, "enable", False))
     )
     runner_cfg = getattr(cfg, "runner", None)
-    cfg_service_mode = True if runner_cfg is None else bool(getattr(runner_cfg, "enable_service_mode", True))
-    service_mode_enabled = (
-        bool(request.service_mode_override)
-        if request.service_mode_override is not None
-        else cfg_service_mode
+    legacy_requested = (
+        request.service_mode_override is False
+        or (runner_cfg is not None and bool(getattr(runner_cfg, "enable_service_mode", True)) is False)
     )
+    service_mode_enabled = True
     workspace_root = preflight.workspace_root
     root = preflight.media_root
     config_location = preflight.config_path
@@ -616,7 +604,9 @@ def run(request: RunRequest, *, dependencies: RunDependencies | None = None) -> 
     reporter.set_flag("progress_style", progress_style)
     reporter.set_flag("emit_json_tail", emit_json_tail_flag)
     reporter.set_flag("service_mode_enabled", service_mode_enabled)
-    publishing_mode = "publisher services" if service_mode_enabled else "legacy inline publishers"
+    publishing_mode = "publisher services"
+    if legacy_requested:
+        publishing_mode += " (legacy runner path retired; legacy override ignored)"
     logger.info("Publishing mode: %s", publishing_mode)
     reporter.verbose_line(f"[runner] Publishing mode: {publishing_mode}")
     raw_layout_sections_obj = getattr(getattr(reporter, "layout", None), "sections", [])
@@ -631,6 +621,13 @@ def run(request: RunRequest, *, dependencies: RunDependencies | None = None) -> 
         show_missing_sections=request.show_missing_sections,
     )
     collected_warnings: List[str] = []
+    if legacy_requested:
+        legacy_warning = (
+            "Legacy runner path has been retired; using the service-mode pipeline even when legacy was requested."
+        )
+        collected_warnings.append(legacy_warning)
+        reporter.warn(legacy_warning)
+        logger.warning(legacy_warning)
     if request.from_cache_only:
         cached_snapshot = load_snapshot(result_snapshot_path)
         if cached_snapshot is None:
@@ -1947,7 +1944,6 @@ def run(request: RunRequest, *, dependencies: RunDependencies | None = None) -> 
     layout_data["verify"] = verify_summary
 
     slowpics_url, report_index_path = _publish_results(
-        service_mode_enabled=service_mode_enabled,
         context=context,
         reporter=reporter,
         cfg=cfg,
@@ -2120,222 +2116,8 @@ def run(request: RunRequest, *, dependencies: RunDependencies | None = None) -> 
 
     return result
 
-def _run_legacy_publishers(
-    *,
-    context: RunContext,
-    reporter: CliOutputManagerProtocol,
-    cfg: AppConfig,
-    layout_data: MutableMapping[str, Any],
-    json_tail: JsonTail,
-    image_paths: List[str],
-    out_dir: Path,
-    collected_warnings: List[str],
-    report_enabled: bool,
-    root: Path,
-    plans: List[ClipPlan],
-    frames: List[int],
-    selection_details: Mapping[int, SelectionDetail],
-) -> tuple[Optional[str], Optional[Path]]:
-    slowpics_url: Optional[str] = None
-    reporter.line(_color_text("slow.pics collection (preview):", "blue"))
-    slowpics_title_inputs = context.slowpics_title_inputs
-    inputs_parts = [
-        _format_kv(
-            "collection_name",
-            slowpics_title_inputs["collection_name"],
-            label_style="dim blue",
-            value_style="bright_white",
-        ),
-        _format_kv(
-            "collection_suffix",
-            slowpics_title_inputs["collection_suffix"],
-            label_style="dim blue",
-            value_style="bright_white",
-        ),
-    ]
-    reporter.line("  " + "  ".join(inputs_parts))
-    resolved_display = context.slowpics_resolved_base or "(n/a)"
-    reporter.line(
-        "  "
-        + _format_kv(
-            "resolved_base",
-            resolved_display,
-            label_style="dim blue",
-            value_style="bright_white",
-        )
-    )
-    reporter.line(
-        "  "
-        + _format_kv(
-            "final",
-            f'"{context.slowpics_final_title}"',
-            label_style="dim blue",
-            value_style="bold bright_white",
-        )
-    )
-    if context.slowpics_verbose_tmdb_tag:
-        reporter.verbose_line(f"  {escape(context.slowpics_verbose_tmdb_tag)}")
-    if cfg.slowpics.auto_upload:
-        layout_data["slowpics"]["status"] = "preparing"
-        reporter.update_values(layout_data)
-        reporter.console.print("[cyan]Preparing slow.pics upload...[/cyan]")
-        upload_total = len(image_paths)
-
-        def _safe_size(path_str: str) -> int:
-            try:
-                return Path(path_str).stat().st_size
-            except OSError:
-                return 0
-
-        file_sizes = [_safe_size(path) for path in image_paths] if upload_total else []
-        progress_tracker = UploadProgressTracker(file_sizes)
-        total_bytes = progress_tracker.total_bytes
-        console_width = getattr(reporter.console.size, "width", 80) or 80
-        stats_width_limit = max(24, console_width - 32)
-
-        def _format_duration(seconds: Optional[float]) -> str:
-            if seconds is None or not math.isfinite(seconds):
-                return "--:--"
-            total = max(0, int(seconds + 0.5))
-            hours, remainder = divmod(total, 3600)
-            minutes, secs = divmod(remainder, 60)
-            if hours:
-                return f"{hours:d}:{minutes:02d}:{secs:02d}"
-            return f"{minutes:02d}:{secs:02d}"
-
-        def _format_stats(files_done: int, bytes_done: int, elapsed: float) -> str:
-            speed_bps = bytes_done / elapsed if elapsed > 0 else 0.0
-            mbps = speed_bps / (1024 * 1024)
-            remaining_bytes = max(total_bytes - bytes_done, 0)
-            eta_seconds = (remaining_bytes / speed_bps) if speed_bps > 0 else None
-            stats = f"{mbps:5.2f} MiB/s | ETA {_format_duration(eta_seconds)} | Elapsed {_format_duration(elapsed)}"
-            return stats if len(stats) <= stats_width_limit else stats[: stats_width_limit - 3] + "..."
-
-        reporter.update_progress_state(
-            "upload_bar",
-            current=0,
-            total=upload_total,
-            stats=_format_stats(0, 0, 0.0),
-        )
-        def advance_upload(count: int) -> None:
-            files_done, bytes_done, elapsed = progress_tracker.advance(count)
-            reporter.update_progress_state(
-                "upload_bar",
-                current=min(files_done, upload_total),
-                total=upload_total,
-                stats=_format_stats(files_done, bytes_done, elapsed),
-            )
-
-        try:
-            slowpics_url = upload_comparison(
-                image_paths,
-                out_dir,
-                cfg.slowpics,
-                progress_callback=advance_upload,
-            )
-        except SlowpicsAPIError as exc:
-            layout_data["slowpics"]["status"] = "failed"
-            reporter.update_values(layout_data)
-            raise CLIAppError(
-                f"slow.pics upload failed: {exc}",
-                rich_message=f"[red]slow.pics upload failed:[/red] {exc}",
-            ) from exc
-        else:
-            layout_data["slowpics"]["status"] = "completed"
-            reporter.update_values(layout_data)
-            reporter.line(_color_text(f"[✓] slow.pics: uploading {upload_total} images", "green"))
-            reporter.line(_color_text("[✓] slow.pics: assembling collection", "green"))
-
-    if slowpics_url:
-        slowpics_block = ensure_slowpics_block(json_tail, cfg)
-        slowpics_block["url"] = slowpics_url
-        shortcut_path_obj: Optional[Path] = None
-        shortcut_error: Optional[str] = None
-        if cfg.slowpics.create_url_shortcut:
-            shortcut_filename = build_shortcut_filename(
-                cfg.slowpics.collection_name, slowpics_url
-            )
-            if shortcut_filename:
-                shortcut_path_obj = out_dir / shortcut_filename
-            else:
-                shortcut_error = "invalid_shortcut_name"
-        if shortcut_path_obj is not None:
-            slowpics_block["shortcut_path"] = str(shortcut_path_obj)
-            shortcut_written = shortcut_path_obj.exists()
-        else:
-            slowpics_block["shortcut_path"] = None
-            shortcut_written = False
-            if not cfg.slowpics.create_url_shortcut:
-                shortcut_error = "disabled"
-        if shortcut_written:
-            shortcut_error = None
-        elif shortcut_path_obj is not None and shortcut_error is None:
-            shortcut_error = "write_failed"
-        slowpics_block["shortcut_written"] = shortcut_written
-        slowpics_block["shortcut_error"] = shortcut_error
-
-    report_index_path: Optional[Path] = None
-    report_defaults: ReportJSON = {
-        "enabled": report_enabled,
-        "path": None,
-        "output_dir": cfg.report.output_dir,
-        "open_after_generate": bool(getattr(cfg.report, "open_after_generate", True)),
-    }
-    report_block = json_tail.setdefault(
-        "report",
-        cast(ReportJSON, report_defaults.copy()),
-    )
-    report_block.update(report_defaults)
-    if report_enabled:
-        try:
-            report_dir = preflight_utils.resolve_subdir(
-                root,
-                cfg.report.output_dir,
-                purpose="report.output_dir",
-            )
-            plan_payload = [
-                {
-                    "label": _plan_label(plan),
-                    "metadata": dict(plan.metadata),
-                    "path": plan.path,
-                }
-                for plan in plans
-            ]
-            report_index_path = html_report.generate_html_report(
-                report_dir=report_dir,
-                report_cfg=cfg.report,
-                frames=list(frames),
-                selection_details=selection_details,
-                image_paths=image_paths,
-                plans=plan_payload,
-                metadata_title=context.metadata_title,
-                include_metadata=str(getattr(cfg.report, "include_metadata", "minimal")),
-                slowpics_url=slowpics_url,
-            )
-        except CLIAppError as exc:
-            message = f"HTML report generation failed: {exc}"
-            reporter.warn(message)
-            collected_warnings.append(message)
-            report_block["enabled"] = False
-            report_block["path"] = None
-        except Exception as exc:  # pragma: no cover - defensive
-            message = f"HTML report generation failed: {exc}"
-            reporter.warn(message)
-            collected_warnings.append(message)
-            report_block["enabled"] = False
-            report_block["path"] = None
-        else:
-            report_block["enabled"] = True
-            report_block["path"] = str(report_index_path)
-    else:
-        report_block["enabled"] = False
-        report_block["path"] = None
-
-    return slowpics_url, report_index_path
-
 def _publish_results(
     *,
-    service_mode_enabled: bool,
     context: RunContext,
     reporter: CliOutputManagerProtocol,
     cfg: AppConfig,
@@ -2352,57 +2134,40 @@ def _publish_results(
     report_publisher: ReportPublisher,
     slowpics_publisher: SlowpicsPublisher,
 ) -> tuple[Optional[str], Optional[Path]]:
-    """Publish run artifacts via services or the legacy path."""
+    """Publish run artifacts via service-mode publishers."""
 
-    if service_mode_enabled:
-        slowpics_request = SlowpicsPublisherRequest(
-            reporter=reporter,
-            json_tail=json_tail,
-            layout_data=layout_data,
-            title_inputs=context.slowpics_title_inputs,
-            final_title=context.slowpics_final_title,
-            resolved_base=context.slowpics_resolved_base,
-            tmdb_disclosure_line=context.slowpics_tmdb_disclosure_line,
-            verbose_tmdb_tag=context.slowpics_verbose_tmdb_tag,
-            image_paths=list(image_paths),
-            out_dir=out_dir,
-            config=cfg.slowpics,
-        )
-        slowpics_result = slowpics_publisher.publish(slowpics_request)
-        slowpics_url = slowpics_result.url
-        report_request = ReportPublisherRequest(
-            reporter=reporter,
-            json_tail=json_tail,
-            layout_data=layout_data,
-            report_enabled=report_enabled,
-            root=root,
-            plans=plans,
-            frames=list(frames),
-            selection_details=selection_details,
-            image_paths=list(image_paths),
-            metadata_title=context.metadata_title,
-            slowpics_url=slowpics_url,
-            config=cfg.report,
-            collected_warnings=collected_warnings,
-        )
-        report_result = report_publisher.publish(report_request)
-        return slowpics_url, report_result.report_path
-
-    return _run_legacy_publishers(
-        context=context,
+    slowpics_request = SlowpicsPublisherRequest(
         reporter=reporter,
-        cfg=cfg,
-        layout_data=layout_data,
         json_tail=json_tail,
-        image_paths=image_paths,
+        layout_data=layout_data,
+        title_inputs=context.slowpics_title_inputs,
+        final_title=context.slowpics_final_title,
+        resolved_base=context.slowpics_resolved_base,
+        tmdb_disclosure_line=context.slowpics_tmdb_disclosure_line,
+        verbose_tmdb_tag=context.slowpics_verbose_tmdb_tag,
+        image_paths=list(image_paths),
         out_dir=out_dir,
-        collected_warnings=collected_warnings,
+        config=cfg.slowpics,
+    )
+    slowpics_result = slowpics_publisher.publish(slowpics_request)
+    slowpics_url = slowpics_result.url
+    report_request = ReportPublisherRequest(
+        reporter=reporter,
+        json_tail=json_tail,
+        layout_data=layout_data,
         report_enabled=report_enabled,
         root=root,
         plans=plans,
-        frames=frames,
+        frames=list(frames),
         selection_details=selection_details,
+        image_paths=list(image_paths),
+        metadata_title=context.metadata_title,
+        slowpics_url=slowpics_url,
+        config=cfg.report,
+        collected_warnings=collected_warnings,
     )
+    report_result = report_publisher.publish(report_request)
+    return slowpics_url, report_result.report_path
 
 
 def run_cli(

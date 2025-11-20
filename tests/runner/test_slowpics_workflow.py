@@ -34,6 +34,7 @@ from src.datatypes import (
 )
 from src.frame_compare import runner as runner_module
 from src.frame_compare.analysis import CacheLoadResult, FrameMetricsCacheInfo, SelectionDetail
+from src.frame_compare.interfaces import PublisherIO, ReportRendererProtocol, SlowpicsClientProtocol
 from src.frame_compare.services.publishers import UploadProgressTracker
 from src.tmdb import TMDBAmbiguityError, TMDBCandidate, TMDBResolution, TMDBResolutionError
 from tests.helpers.runner_env import (
@@ -49,6 +50,123 @@ from tests.helpers.runner_env import (
 )
 
 pytestmark = pytest.mark.usefixtures("runner_vs_core_stub", "dummy_progress")  # type: ignore[attr-defined]
+
+
+class _PublisherIOStub(PublisherIO):
+    def file_size(self, path: str | Path) -> int:
+        try:
+            return Path(path).stat().st_size
+        except OSError:
+            return 0
+
+    def path_exists(self, path: Path) -> bool:
+        try:
+            return Path(path).exists()
+        except OSError:
+            return False
+
+    def resolve_report_dir(self, root: Path, relative: str, *, purpose: str) -> Path:  # noqa: ARG002
+        resolved = root / relative
+        resolved.mkdir(parents=True, exist_ok=True)
+        return resolved
+
+
+class _StubReportRenderer(ReportRendererProtocol):
+    def __init__(self, report_name: str = "index.html") -> None:
+        self.report_name = report_name
+
+    def generate(  # type: ignore[override]
+        self,
+        *,
+        report_dir: Path,
+        report_cfg: ReportConfig,  # noqa: ARG002
+        frames,
+        selection_details,
+        image_paths,
+        plans,
+        metadata_title,
+        include_metadata,
+        slowpics_url,
+    ) -> Path:
+        return report_dir / self.report_name
+
+
+class _SlowpicsClientStub(SlowpicsClientProtocol):
+    def __init__(self, upload_fn: Any) -> None:
+        self.upload_fn = upload_fn
+        self.calls: list[tuple[list[str], Path, SlowpicsConfig]] = []
+
+    def upload(  # type: ignore[override]
+        self,
+        image_paths,
+        out_dir: Path,
+        cfg: SlowpicsConfig,
+        *,
+        progress_callback=None,
+    ) -> str:
+        paths_list = list(image_paths)
+        self.calls.append((paths_list, out_dir, cfg))
+        return self.upload_fn(paths_list, out_dir, cfg, progress_callback=progress_callback)
+
+
+def _install_publisher_stubs(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    slowpics_upload: Any = None,
+    slowpics_url: str = "https://slow.pics/test",
+) -> tuple[list[runner_module.SlowpicsPublisherRequest], list[runner_module.ReportPublisherRequest]]:
+    """
+    Replace default publishers with stubs that record requests and avoid real IO.
+    """
+
+    io_stub = _PublisherIOStub()
+    slowpics_requests: list[runner_module.SlowpicsPublisherRequest] = []
+    report_requests: list[runner_module.ReportPublisherRequest] = []
+
+    def _upload_with_progress(
+        image_paths: list[str],
+        out_dir: Path,
+        cfg: SlowpicsConfig,
+        *,
+        progress_callback: Any = None,
+    ) -> str:
+        if progress_callback is not None:
+            progress_callback(len(image_paths))
+        if slowpics_upload is not None:
+            return cast(str, slowpics_upload(image_paths, out_dir, cfg, progress_callback=progress_callback))
+        return slowpics_url
+
+    slowpics_publisher = runner_module.SlowpicsPublisher(
+        client=_SlowpicsClientStub(_upload_with_progress),
+        io=io_stub,
+    )
+    original_slowpics_publish = slowpics_publisher.publish
+
+    def _record_slowpics(request: runner_module.SlowpicsPublisherRequest):
+        slowpics_requests.append(request)
+        return original_slowpics_publish(request)
+
+    slowpics_publisher.publish = _record_slowpics  # type: ignore[assignment]
+
+    report_publisher = runner_module.ReportPublisher(renderer=_StubReportRenderer(), io=io_stub)
+    original_report_publish = report_publisher.publish
+
+    def _record_report(request: runner_module.ReportPublisherRequest):
+        report_requests.append(request)
+        return original_report_publish(request)
+
+    report_publisher.publish = _record_report  # type: ignore[assignment]
+
+    base_deps = runner_module.default_run_dependencies()
+    dependencies = runner_module.RunDependencies(
+        metadata_resolver=base_deps.metadata_resolver,
+        alignment_workflow=base_deps.alignment_workflow,
+        report_publisher=report_publisher,
+        slowpics_publisher=slowpics_publisher,
+    )
+    monkeypatch.setattr(runner_module, "default_run_dependencies", lambda **kwargs: dependencies)
+
+    return slowpics_requests, report_requests
 
 
 def test_cli_input_override_and_cleanup(
@@ -136,16 +254,19 @@ def test_cli_input_override_and_cleanup(
         image_paths: list[str],
         screen_dir: Path,
         cfg_slow: SlowpicsConfig,
-        **kwargs: object,
+        *,
+        progress_callback: Any = None,
     ) -> str:
+        if progress_callback is not None:
+            progress_callback(len(image_paths))
         uploads.append((image_paths, screen_dir))
         return "https://slow.pics/c/abc/def"
 
-    _patch_runner_module(monkeypatch, "upload_comparison", fake_upload)
+    _install_publisher_stubs(monkeypatch, slowpics_upload=fake_upload)
 
     result: Result = runner.invoke(
         frame_compare.main,
-        ["--input", str(override_dir), "--no-color", "--legacy-runner"],
+        ["--input", str(override_dir), "--no-color"],
         catch_exceptions=False,
     )
 
@@ -268,18 +389,24 @@ def test_runner_auto_upload_cleans_screens_dir(tmp_path: Path, monkeypatch: pyte
 
     uploads: list[tuple[list[str], Path]] = []
 
-    def fake_upload(image_paths, screen_dir, cfg_slow, **kwargs):
+    def fake_upload(
+        image_paths: list[str],
+        screen_dir: Path,
+        cfg_slow: SlowpicsConfig,
+        *,
+        progress_callback: Any = None,
+    ) -> str:
+        if progress_callback is not None:
+            progress_callback(len(image_paths))
         uploads.append((list(image_paths), screen_dir))
         return "https://slow.pics/test"
 
-    monkeypatch.setattr(runner_module, "upload_comparison", fake_upload)
-    monkeypatch.setattr(runner_module, "build_shortcut_filename", lambda *_: "slowpics.url")
+    _install_publisher_stubs(monkeypatch, slowpics_upload=fake_upload)
 
     monkeypatch.setattr(runner_module, "impl", frame_compare, raising=False)
     request = runner_module.RunRequest(
         config_path=str(preflight.config_path),
         root_override=str(workspace),
-        service_mode_override=False,
     )
     result = runner_module.run(request)
 
@@ -398,15 +525,17 @@ def test_cli_tmdb_resolution_populates_slowpics(
         image_paths: list[str],
         screen_dir: Path,
         cfg_slow: SlowpicsConfig,
-        **kwargs: object,
+        *,
+        progress_callback: Any = None,
     ) -> str:
+        if progress_callback is not None:
+            progress_callback(len(image_paths))
         uploads.append((list(image_paths), screen_dir, cfg_slow.tmdb_id, cfg_slow.collection_name))
         return "https://slow.pics/c/example"
 
-    _patch_runner_module(monkeypatch, "upload_comparison", fake_upload)
+    _install_publisher_stubs(monkeypatch, slowpics_upload=fake_upload)
 
-
-    result = frame_compare.run_cli(None, None, service_mode_override=False)
+    result = frame_compare.run_cli(None, None)
 
     assert uploads
     _, _, upload_tmdb_id, upload_collection = uploads[0]
@@ -506,16 +635,19 @@ def test_shortcut_write_failure_sets_json_tail(
         image_paths: list[str],
         screen_dir: Path,
         cfg_slow: SlowpicsConfig,
-        **kwargs: object,
+        *,
+        progress_callback: Any = None,
     ) -> str:  # pragma: no cover - deterministic stub
+        if progress_callback is not None:
+            progress_callback(len(image_paths))
         assert image_paths
         assert screen_dir.exists()
         assert cfg_slow.collection_name == "Shortcut Failure"
         return "https://slow.pics/c/writefail"
 
-    _patch_runner_module(monkeypatch, "upload_comparison", fake_upload)
+    _install_publisher_stubs(monkeypatch, slowpics_upload=fake_upload)
 
-    result = frame_compare.run_cli(None, None, service_mode_override=False)
+    result = frame_compare.run_cli(None, None)
 
     assert result.json_tail is not None
     slowpics_value = result.json_tail.get("slowpics")
@@ -588,9 +720,13 @@ def test_cli_tmdb_resolution_sets_default_collection_name(
         "generate_screenshots",
         lambda *args, **kwargs: [str(cli_runner_env.media_root / "shot.png")],
     )
-    _patch_runner_module(monkeypatch, "upload_comparison", lambda *args, **kwargs: "https://slow.pics/c/example")
 
-    result = frame_compare.run_cli(None, None, service_mode_override=False)
+    _install_publisher_stubs(
+        monkeypatch,
+        slowpics_upload=lambda image_paths, screen_dir, cfg_slow, progress_callback=None: "https://slow.pics/c/example",
+    )
+
+    result = frame_compare.run_cli(None, None)
 
     assert result.config.slowpics.collection_name.startswith("Resolved Title (2023)")
     assert result.config.slowpics.tmdb_id == "12345"

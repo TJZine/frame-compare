@@ -337,8 +337,8 @@ Fine-grained overrides (`smoothing_period`, `scene_threshold_*`, `percentile`, `
 | `--diagnose-paths` | Print JSON diagnostics |
 | `--no-cache` | Ignore cached frame metrics and recompute selection data for this run |
 | `--from-cache-only` | Render the last `.frame_compare.run.json` snapshot and exit |
-| `--service-mode` / `--legacy-runner` | Force the publisher services pipeline on or off for the current run |
-| `[runner].enable_service_mode` | Default `true`. Set `false` in `config.toml` to keep the legacy inline publishers until the services finish burn-in (CLI flags still override per run). |
+| (legacy runner flags removed) | Service-mode publishers are always used; the legacy inline path has been retired. |
+| `[runner].enable_service_mode` | Deprecated compatibility toggle. Service-mode remains enabled even if this setting is present. |
 | `--show-partial` | Display sections marked as partial when rendering cached runs |
 | `--show-missing` / `--hide-missing` | Show (default) or suppress banners for sections missing from cached runs |
 | `--diagnostic-frame-metrics` / `--no-diagnostic-frame-metrics` | Override `[diagnostics].per_frame_nits` for the current run to enable or block per-frame nit estimates inside diagnostic overlays. |

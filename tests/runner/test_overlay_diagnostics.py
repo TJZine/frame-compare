@@ -222,7 +222,6 @@ def _prepare_config(workspace: Path, media_root: Path, *, per_frame_nits: bool) 
     cfg.diagnostics.per_frame_nits = per_frame_nits
     cfg.slowpics.auto_upload = False
     cfg.report.enable = False
-    cfg.runner.enable_service_mode = False
     preflight = _make_runner_preflight(workspace, media_root, cfg)
     return cfg, preflight.config_path
 
@@ -250,7 +249,6 @@ def _common_setup(
         config_path=str(config_path),
         root_override=str(workspace),
         diagnostic_frame_metrics=cli_override,
-        service_mode_override=False,
     )
     return request, deps, metadata_result
 
