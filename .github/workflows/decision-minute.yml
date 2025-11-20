@@ -32,31 +32,28 @@ jobs:
 
             if (!fullPr.data.merged_at) {
               core.notice(`PR #${pr.number} is not merged; skipping Decision Minute creation.`);
-              core.setOutput('result', '');
+              core.setOutput('should_run', '');
               return;
             }
 
-            const payload = {
-              number: fullPr.data.number,
-              title: fullPr.data.title ?? '',
-              body: fullPr.data.body ?? '',
-              merged_at: fullPr.data.merged_at ?? '',
-            };
-
-            core.setOutput('result', JSON.stringify(payload));
+            core.setOutput('should_run', 'true');
+            core.setOutput('number', String(fullPr.data.number));
+            core.setOutput('title', fullPr.data.title ?? '');
+            core.setOutput('body', fullPr.data.body ?? '');
+            core.setOutput('merged_at', fullPr.data.merged_at ?? '');
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           repository: ${{ github.repository }}
 
       - name: Write Decision Minute to docs/notes
-        if: ${{ steps.pr.outputs.result != '' }}
+        if: ${{ steps.pr.outputs.should_run != '' }}
         shell: bash
         env:
-          PR_TITLE: ${{ fromJson(steps.pr.outputs.result).title }}
-          PR_BODY:  ${{ fromJson(steps.pr.outputs.result).body }}
-          PR_NUMBER: ${{ fromJson(steps.pr.outputs.result).number }}
-          PR_MERGED_AT: ${{ fromJson(steps.pr.outputs.result).merged_at }}
+          PR_TITLE: ${{ steps.pr.outputs.title }}
+          PR_BODY:  ${{ steps.pr.outputs.body }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          PR_MERGED_AT: ${{ steps.pr.outputs.merged_at }}
         run: |
           mkdir -p docs/notes
           slug="$(echo "${PR_TITLE,,}" | tr -cd '[:alnum:]- ' | tr ' ' '-' | sed 's/--*/-/g')"
@@ -68,11 +65,11 @@ jobs:
           echo "${PR_BODY}" >> "$file"
 
       - name: Create PR with note
-        if: ${{ steps.pr.outputs.result != '' }}
+        if: ${{ steps.pr.outputs.should_run != '' }}
         uses: peter-evans/create-pull-request@v6
         with:
-          commit-message: "docs(notes): add Decision Minute for PR #${{ fromJson(steps.pr.outputs.result).number }}"
-          title: "docs: add Decision Minute for PR #${{ fromJson(steps.pr.outputs.result).number }}"
+          commit-message: "docs(notes): add Decision Minute for PR #${{ steps.pr.outputs.number }}"
+          title: "docs: add Decision Minute for PR #${{ steps.pr.outputs.number }}"
           body: "Automated Decision Minute extracted from PR body."
-          branch: "docs/decision-minute-pr-${{ fromJson(steps.pr.outputs.result).number }}"
+          branch: "docs/decision-minute-pr-${{ steps.pr.outputs.number }}"
           token: ${{ secrets.BOT_PAT }}
