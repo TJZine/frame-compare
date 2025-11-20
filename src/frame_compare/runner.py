@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Callable, Dict, Iterable, List, Mapping, MutableMapping, Optional, cast
+from typing import Any, Callable, Dict, Iterable, List, Mapping, MutableMapping, Optional, Union, cast
 
 from rich.console import Console
 from rich.markup import escape
@@ -1168,26 +1168,43 @@ def run(request: RunRequest, *, dependencies: RunDependencies | None = None) -> 
         reference_label = clip_records[0]["label"]
 
     vspreview_target_plan: ClipPlan | None = None
+    tail_suggested_frames: object | None = json_tail.get("suggested_frames")
+    tail_suggested_seconds: object | None = json_tail.get("suggested_seconds")
+
     vspreview_suggested_frames_value: int | None = None
+    if tail_suggested_frames is not None:
+        try:
+            vspreview_suggested_frames_value = int(cast(Union[int, float, str], tail_suggested_frames))
+        except (TypeError, ValueError):
+            vspreview_suggested_frames_value = None
     vspreview_suggested_seconds_value = 0.0
+    tail_seconds_provided = True
+    try:
+        vspreview_suggested_seconds_value = float(cast(Union[int, float, str], tail_suggested_seconds))
+    except (TypeError, ValueError):
+        tail_seconds_provided = False
+        vspreview_suggested_seconds_value = 0.0
+
     if alignment_summary is not None:
         for plan in plans:
             if plan is alignment_summary.reference_plan:
                 continue
             vspreview_target_plan = plan
             clip_key = plan.path.name
-            vspreview_suggested_frames_value = derive_frame_hint(alignment_summary, clip_key)
-            detail = alignment_summary.measured_offsets.get(clip_key)
-            if detail and detail.offset_seconds is not None:
-                vspreview_suggested_seconds_value = float(detail.offset_seconds)
-            else:
-                measurement_lookup = {
-                    measurement.file.name: measurement
-                    for measurement in alignment_summary.measurements
-                }
-                measurement = measurement_lookup.get(clip_key)
-                if measurement and measurement.offset_seconds is not None:
-                    vspreview_suggested_seconds_value = float(measurement.offset_seconds)
+            if vspreview_suggested_frames_value is None:
+                vspreview_suggested_frames_value = derive_frame_hint(alignment_summary, clip_key)
+            if not tail_seconds_provided:
+                detail = alignment_summary.measured_offsets.get(clip_key)
+                if detail and detail.offset_seconds is not None:
+                    vspreview_suggested_seconds_value = float(detail.offset_seconds)
+                else:
+                    measurement_lookup = {
+                        measurement.file.name: measurement
+                        for measurement in alignment_summary.measurements
+                    }
+                    measurement = measurement_lookup.get(clip_key)
+                    if measurement and measurement.offset_seconds is not None:
+                        vspreview_suggested_seconds_value = float(measurement.offset_seconds)
             break
 
     target_label = ""

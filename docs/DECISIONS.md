@@ -1,5 +1,13 @@
 # Decisions Log
 
+- *2025-11-20:* fix(vspreview overlay): map JSON-tail suggestions into layout data and restore CLI hints (Phase 3).
+  - Problem: `layout_data["vspreview"]` rendered `0f / 0.000s` suggested offsets even when audio alignment produced non-zero hints, leaving manual alignment prompts without guidance.
+  - Decision: Treat `json_tail["suggested_frames"]`/`json_tail["suggested_seconds"]` as the source for layout hints, falling back to alignment summaries only when tail hints are missing; added a regression to ensure VSPreview layout surfaces non-zero suggestions from the tail.
+  - Verification (2025-11-20 UTC):
+    - `.venv/bin/pyright --warnings` (0 errors)
+    - `.venv/bin/ruff check`
+    - `.venv/bin/pytest -q` (445 passed, 1 skipped)
+
 - *2025-11-20:* refactor(runner): retire legacy runner flag and path (Phase 1).
   - Problem: Legacy inline publishers still existed behind `runner.enable_service_mode` and CLI toggles, exposing an unsupported path and complicating the service-mode default.
   - Decision: Removed `_run_legacy_publishers` and made `_publish_results` service-only, emitting warnings when configs or overrides request legacy mode; removed CLI `--service-mode`/`--legacy-runner` options; deprecated `[runner].enable_service_mode` in the template while keeping the dataclass for compatibility; updated slow.pics/runner/CLI tests to assume service-mode baseline and refreshed README/refactor docs plus CHANGELOG.

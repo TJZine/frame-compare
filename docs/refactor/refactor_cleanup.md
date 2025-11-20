@@ -195,6 +195,21 @@ You are “CleanSweep,” a meticulous, test-driven engineer. You hate dead code
   - Updated tests to assume service-mode baseline (`tests/runner/test_runner_services.py`, `tests/runner/test_slowpics_workflow.py`, `tests/runner/test_cli_entry.py`) and refreshed docs (README, refactor docs) plus CHANGELOG/DECISIONS entries.
   - Verification: `.venv/bin/pyright --warnings` (0 errors), `.venv/bin/ruff check` (clean), `.venv/bin/pytest -q` (444 passed, 1 skipped).
 
+#### Phase 3 – VSPreview overlay regression
+
+- Tasks completed:
+  - [x] Restored VSPreview overlay hints by sourcing `layout_data["vspreview"].suggested_frames` / `suggested_seconds` from the JSON tail (alignment_runner output) with alignment-summary fallback only when tail hints are absent.
+  - [x] Added regression coverage for layout propagation (`tests/runner/test_overlay_diagnostics.py::test_runner_layout_preserves_vspreview_suggestions_from_json_tail`).
+- Commands run:
+  - [x] `.venv/bin/pyright --warnings` (0 errors)
+  - [x] `.venv/bin/ruff check`
+  - [x] `.venv/bin/pytest -q` (445 passed, 1 skipped)
+- Date: 2025-11-20
+- Agent: CleanSweep (Codex)
+- Summary:
+  - layout data now mirrors the JSON tail’s VSPreview suggestions so CLI overlays display non-zero alignment hints again; manual alignment prompts regain actionable frame/seconds offsets.
+  - Regression test exercises a stub alignment workflow that seeds JSON-tail hints and asserts layout propagation to guard against future drops.
+
 ---
 
 ## Review Agent Plan (GuardRail)
@@ -251,4 +266,4 @@ You are “GuardRail,” a skeptical reviewer. You confirm the new default flow 
 - [ ] (Optional) Evaluate introducing a formal `RunResult` DTO for JSON tail to reduce mutation.
 - [ ] (Optional) Consider consolidating interface definitions (`TMDBClient`, `SlowpicsClient`, `PublisherIO`) into a shared module.
 - [ ] (Optional) Further integration tests to compare CLI output with golden files.
-- [ ] VSPreview overlay regression: `layout_data["vspreview"]` no longer shows alignment “suggested frame/seconds” offsets (always 0f / 0.000s). Restore the pre-refactor behaviour so manual alignment has actionable hints.
+- [x] VSPreview overlay regression: `layout_data["vspreview"]` no longer shows alignment “suggested frame/seconds” offsets (always 0f / 0.000s). Restore the pre-refactor behaviour so manual alignment has actionable hints. (Resolved 2025-11-20; layout now sources hints from the JSON tail.)
