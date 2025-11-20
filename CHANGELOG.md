@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.0.11](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.10...frame-compare-v0.0.11) (2025-11-20)
+
+
+### Features
+
+* enrich diagnostic overlay with per-frame HDR and DoVi stats ([f32bdfb](https://github.com/TJZine/frame-compare/commit/f32bdfb186322c805912afd23718b4e13ab578b6))
+
+
+### Bug Fixes
+
+* restore vspreview overlay hints ([1a885c7](https://github.com/TJZine/frame-compare/commit/1a885c78dc5957e2457690e4ed81af7ea8945dda))
+
+
+### Refactors
+
+* retire legacy runner flag and path ([627286e](https://github.com/TJZine/frame-compare/commit/627286e748c92cbfb74ca62d3238a5eb0ee68a62))
+* retire legacy runner flag and path ([#171](https://github.com/TJZine/frame-compare/issues/171)) ([036e21b](https://github.com/TJZine/frame-compare/commit/036e21b439783ca800e15d81143cbf7eb3443256))
+
+
+### Documentation
+
+* trim legacy plans and noisy logs from documentation ([b3de50d](https://github.com/TJZine/frame-compare/commit/b3de50d36ec2f71d7f5c3a29c0511b442ba44d46))
+
 ## [0.0.10](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.9...frame-compare-v0.0.10) (2025-11-20)
 
 
