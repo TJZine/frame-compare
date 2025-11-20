@@ -34,10 +34,15 @@ Automated frame sampling, audio alignment, HDR tonemapping, and slow.pics upload
     - [Programmatic Doctor (dependency checks)](#programmatic-doctor-dependency-checks)
     - [Import Paths and Typing](#import-paths-and-typing)
     - [Quick Recipes](#quick-recipes)
+      - [Apply a preset and write config.toml](#apply-a-preset-and-write-configtoml)
+      - [List presets](#list-presets)
   - [Advanced Guides \& Reference](#advanced-guides--reference)
+  - [Advanced Guides \& Reference](#advanced-guides--reference-1)
     - [Configuration Highlights](#configuration-highlights)
     - [Tonemap Quick Recipes](#tonemap-quick-recipes)
     - [CLI Reference](#cli-reference)
+      - [Cached output behavior](#cached-output-behavior)
+      - [Diagnostic overlay metrics](#diagnostic-overlay-metrics)
     - [Examples](#examples)
       - [VSPreview manual alignment assistant](#vspreview-manual-alignment-assistant)
       - [Path diagnostics before heavy runs](#path-diagnostics-before-heavy-runs)
@@ -50,6 +55,7 @@ Automated frame sampling, audio alignment, HDR tonemapping, and slow.pics upload
     - [Versioning](#versioning)
     - [Context Management](#context-management)
     - [Contributing](#contributing)
+      - [Runner test fixtures \& layout](#runner-test-fixtures--layout)
     - [License](#license)
     - [Support](#support)
     - [Future Updates](#future-updates)
@@ -289,7 +295,7 @@ Frame Compare seeds `config/config.toml` from `src/data/config.toml.template`. L
 | `[analysis]` | Frame quotas, randomness, cache filename | `generated.compframes` reused when hashes match |
 | `[screenshots]` | Renderer choice, geometry policy, dithering | Set `use_ffmpeg=true` to bypass VapourSynth |
 | `[color]` | Tonemap presets, BT.2390 knee, DPD presets, gamma lift | Override via `--tm-*` flags |
-| `[audio_alignment]` | Correlation settings, VSPreview hooks, offsets file | `confirm_with_screenshots` toggles preview pause |
+| `[audio_alignment]` | Correlation settings, VSPreview hooks, offsets file | Auto-confirms alignment previews; VSPreview hooks optional |
 | `[slowpics]` | Auto upload, visibility, cleanup, webhook, timeout | Disabled by default |
 | `[report]` | Offline HTML report toggle, output dir, default mode | Modes: slider, overlay, difference, blink |
 | `[runtime]` | VapourSynth RAM guard, module search paths | Prevents runaway scripts |
@@ -337,8 +343,6 @@ Fine-grained overrides (`smoothing_period`, `scene_threshold_*`, `percentile`, `
 | `--diagnose-paths` | Print JSON diagnostics |
 | `--no-cache` | Ignore cached frame metrics and recompute selection data for this run |
 | `--from-cache-only` | Render the last `.frame_compare.run.json` snapshot and exit |
-| (legacy runner flags removed) | Service-mode publishers are always used; the legacy inline path has been retired. |
-| `[runner].enable_service_mode` | Deprecated compatibility toggle. Service-mode remains enabled even if this setting is present. |
 | `--show-partial` | Display sections marked as partial when rendering cached runs |
 | `--show-missing` / `--hide-missing` | Show (default) or suppress banners for sections missing from cached runs |
 | `--diagnostic-frame-metrics` / `--no-diagnostic-frame-metrics` | Override `[diagnostics].per_frame_nits` for the current run to enable or block per-frame nit estimates inside diagnostic overlays. |
@@ -381,7 +385,6 @@ When `per_frame_nits` is `true` and `[color].overlay_mode = "diagnostic"`, the r
    [audio_alignment]
    enable = true
    use_vspreview = true
-   confirm_with_screenshots = false
    ```
 2. Install extras: `uv pip install vspreview PySide6`
 3. Run interactively: `uv run python -m frame_compare --root /workspace`

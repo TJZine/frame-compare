@@ -27,21 +27,19 @@ Key options live under `[audio_alignment]` in `config.toml`. Defaults and intent
 | `correlation_threshold` | Minimum normalized correlation strength before declaring success. | `0.55` |
 | `max_offset_seconds` | Absolute cap for auto-applied offsets. | `12.0` |
 | `offsets_filename` | Relative path of the persisted offsets TOML. | `generated.audio_offsets.toml` |
-| `confirm_with_screenshots` | Whether to pause for preview confirmation. | `true` |
 | `prompt_reuse_offsets` | Prompt before recomputing cached offsets; declining reuses the saved values. | `false` |
-| `random_seed` | Seed for preview and inspection frame sampling. | `2025` |
-| `frame_offset_bias` | Integer bias nudging suggested frame counts toward/away from zero. | `1` |
+| `random_seed` | Seed reserved for deterministic preview helpers. | `2025` |
 
 ## Workflow
 1. **Reference & target selection** – `_resolve_alignment_reference` honors the config hint, CLI-provided filename/index, or falls back to the first clip. Remaining clips become targets. Existing manual trims are summarised using each plan's display label so operators can immediately see which clip the baseline applies to. 【F:src/frame_compare/alignment_runner.py†L157-L205】
 2. **Audio stream discovery** – `ffprobe` metadata identifies candidate streams. Forced CLI overrides (`--audio-align-track label=index`) take precedence, then the scoring heuristic prefers default language, channel count, and forced flags. 【F:src/frame_compare/alignment_runner.py†L667-L809】
 3. **Waveform extraction & onset envelopes** – `measure_offsets` extracts mono WAV snippets for the reference and each target using consistent sample-rate resampling, computes onset envelopes, and cross-correlates them to estimate lags. FPS probes translate seconds into frame counts when possible. 【F:src/audio_alignment.py†L291-L398】
-4. **Bias & negative offset handling** – `frame_offset_bias` nudges computed frame counts either toward zero (positive values) or away from zero (negative values). When only one target clip exists, negative offsets are applied to the reference clip instead, with explanatory notes recorded. 【F:src/frame_compare/alignment_runner.py†L1074-L1208】
+4. **Negative offset handling** – When only one target clip exists, negative offsets are applied to the reference clip instead, with explanatory notes recorded. 【F:src/frame_compare/alignment_runner.py†L1074-L1208】
 5. **Result vetting** – Offsets exceeding `max_offset_seconds`, correlation scores below threshold, missing FPS data, or extraction errors mark the measurement as manual-only. The CLI surfaces warnings and skips automatic trim adjustments for those clips. 【F:src/frame_compare/alignment_runner.py†L1209-L1338】
 6. **Offsets file update** – `update_offsets_file` merges measurements into the TOML sidecar, preserving prior manual edits and recording suggested values, correlation strength, and any override notes. 【F:src/audio_alignment.py†L433-L504】
 7. **Applying trims** – After writing the file, `alignment_runner.apply_audio_alignment` shifts each plan’s trim start by the selected frame offset, normalizes baselines so no clip starts before frame zero, and records the applied frame counts and statuses for the CLI layout. 【F:src/frame_compare/alignment_runner.py†L1339-L1509】
 8. **CLI output & JSON tail** – The reporter prints stream selections, estimated offsets, and any warnings. The JSON tail captures reference/target descriptors, per-label offsets, correlation threshold, preview paths, and confirmation state for downstream tooling. 【F:src/frame_compare/alignment_runner.py†L2143-L2290】
-9. **Visual confirmation (optional)** – When enabled, `_confirm_alignment_with_screenshots` renders preview frames, waits for an interactive confirmation, and escalates to additional samples plus manual editing if the user declines. Non-interactive sessions auto-confirm but log a warning. 【F:frame_compare.py†L1478-L1565】
+9. **Visual confirmation** – `_confirm_alignment_with_screenshots` now auto-confirms when a display context exists, avoiding interactive prompts while preserving the final confirmation marker. 【F:frame_compare.py†L1478-L1565】
 
 ## Offsets file format
 `update_offsets_file` produces a TOML document with a `meta` block and one `[offsets."Clip.mkv"]` table per measurement. Manual edits marked with `status = "manual"` are preserved on subsequent runs; when a user changes `frames` without matching `suggested_frames`, the entry remains locked to manual status. Negative offsets re-applied to the opposite clip emit a `note` explaining the swap. 【F:src/audio_alignment.py†L433-L504】
@@ -66,7 +64,6 @@ status = "auto"
    ```toml
    [audio_alignment]
    enable = true
-   confirm_with_screenshots = false
    max_offset_seconds = 5.0
    offsets_filename = "generated.audio_offsets.toml"
    ```
@@ -131,7 +128,7 @@ uv run --with .[preview] -- python -m vspreview path/to/vspreview_*.py
 - Missing dependencies or binary failures bubble up as `AudioAlignmentError`, aborting the alignment phase while leaving the rest of the run intact. 【F:src/audio_alignment.py†L66-L204】【F:frame_compare.py†L1429-L1433】
 - Measurements that exceed `max_offset_seconds`, fall below `correlation_threshold`, or lack FPS information require manual review; the CLI and offsets file flag them as manual and do not adjust trims. 【F:frame_compare.py†L1306-L1349】
 - Non-interactive sessions auto-confirm preview prompts but emit a warning so you remember to review the generated screenshots later. 【F:frame_compare.py†L1532-L1540】
-- When `confirm_with_screenshots` is true and you decline the preview, the tool renders additional inspection frames and raises a `CLIAppError` instructing you to edit the offsets file before retrying. 【F:frame_compare.py†L1549-L1565】
+- Alignment confirmation is automatic and no longer triggers screenshot prompts. 【F:frame_compare.py†L1478-L1565】
 
 ## Related
 - `README.md` → “Auto-align mismatched sources” quick start for user-facing guidance.

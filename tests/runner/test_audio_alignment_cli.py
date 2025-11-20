@@ -35,7 +35,6 @@ from src.frame_compare.cli_runtime import (
     _AudioAlignmentSummary,
     _ClipPlan,
 )
-from src.screenshot import ScreenshotError
 from tests.helpers.runner_env import (
     _VSPREVIEW_WINDOWS_INSTALL,
     DummyProgress,
@@ -223,8 +222,6 @@ def test_audio_alignment_prompt_reuse_decline(tmp_path: Path, monkeypatch: pytes
     cfg = _make_config(tmp_path)
     cfg.audio_alignment.enable = True
     cfg.audio_alignment.prompt_reuse_offsets = True
-    cfg.audio_alignment.confirm_with_screenshots = False
-    cfg.audio_alignment.frame_offset_bias = 0
 
     reference_path = tmp_path / "Ref.mkv"
     target_path = tmp_path / "Target.mkv"
@@ -309,8 +306,6 @@ def test_audio_alignment_prompt_reuse_hydrates_suggestions(
     cfg = _make_config(tmp_path)
     cfg.audio_alignment.enable = True
     cfg.audio_alignment.prompt_reuse_offsets = True
-    cfg.audio_alignment.confirm_with_screenshots = False
-    cfg.audio_alignment.frame_offset_bias = 0
 
     reference_path = tmp_path / "Ref.mkv"
     target_path = tmp_path / "Target.mkv"
@@ -404,8 +399,6 @@ def test_audio_alignment_prompt_reuse_affirm(tmp_path: Path, monkeypatch: pytest
     cfg = _make_config(tmp_path)
     cfg.audio_alignment.enable = True
     cfg.audio_alignment.prompt_reuse_offsets = True
-    cfg.audio_alignment.confirm_with_screenshots = False
-    cfg.audio_alignment.frame_offset_bias = 0
 
     reference_path = tmp_path / "Ref.mkv"
     target_path = tmp_path / "Target.mkv"
@@ -735,8 +728,6 @@ def test_audio_alignment_vspreview_suggestion_mode(
     cfg = _make_config(tmp_path)
     cfg.audio_alignment.enable = True
     cfg.audio_alignment.use_vspreview = True
-    cfg.audio_alignment.confirm_with_screenshots = False
-    cfg.audio_alignment.frame_offset_bias = 0
 
     reference_plan = _ClipPlan(
         path=reference_path,
@@ -1037,15 +1028,14 @@ def test_launch_vspreview_baseline_mode_persists_manual_offsets(
     assert delta_json[target_path.name] == 3
 
 
-def test_vspreview_suggestions_ignore_frame_bias(
+def test_vspreview_suggestions_use_measured_frames(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """VSPreview hints should reflect measured offsets even when a frame bias is configured."""
+    """VSPreview hints should reflect measured offsets without adjustment."""
 
     cfg = _make_config(tmp_path)
     cfg.audio_alignment.enable = True
     cfg.audio_alignment.use_vspreview = True
-    cfg.audio_alignment.frame_offset_bias = 3
 
     reference_path = tmp_path / "Ref.mkv"
     target_path = tmp_path / "Target.mkv"
@@ -1804,10 +1794,8 @@ def test_audio_alignment_block_and_json(
 
     cfg = _make_config(cli_runner_env.media_root)
     cfg.audio_alignment.enable = True
-    cfg.audio_alignment.confirm_with_screenshots = False
     cfg.audio_alignment.max_offset_seconds = 5.0
     cfg.audio_alignment.offsets_filename = "alignment.toml"
-    cfg.audio_alignment.frame_offset_bias = 0
     cfg.audio_alignment.start_seconds = 0.25
     cfg.audio_alignment.duration_seconds = 1.5
     cfg.color.overlay_mode = "diagnostic"
@@ -2120,7 +2108,6 @@ def test_audio_alignment_default_duration_avoids_zero_window(
 
     cfg = _make_config(cli_runner_env.media_root)
     cfg.audio_alignment.enable = True
-    cfg.audio_alignment.confirm_with_screenshots = False
     cfg.audio_alignment.max_offset_seconds = 5.0
     cfg.audio_alignment.start_seconds = None
     cfg.audio_alignment.duration_seconds = None
@@ -2299,14 +2286,13 @@ def _build_alignment_context(
 
     Returns:
         tuple: A 4-tuple containing:
-            - cfg: AppConfig with audio alignment and confirmation-with-screenshots enabled.
+            - cfg: AppConfig with audio alignment enabled.
             - plans: List containing the reference and target ClipPlan objects for the two sample clips.
             - summary: AudioAlignmentSummary prepopulated for the reference clip.
             - display: AudioAlignmentDisplayData initialized with empty/placeholder display values.
     """
     cfg = _make_config(tmp_path)
     cfg.audio_alignment.enable = True
-    cfg.audio_alignment.confirm_with_screenshots = True
 
     reference_clip = types.SimpleNamespace(
         width=1920,
@@ -2369,87 +2355,32 @@ def _build_alignment_context(
 
     return cfg, [reference_plan, target_plan], summary, display
 
-def test_confirm_alignment_reports_preview_paths(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_confirm_alignment_reports_preview_paths(tmp_path: Path) -> None:
     cfg, plans, summary, display = _build_alignment_context(tmp_path)
-
-    reporter = _RecordingOutputManager()
-    generated_paths: list[Path] = []
-
-    def fake_generate(*args: object, **_kwargs: object) -> list[Path]:
-        """
-        Test helper that simulates screenshot generation for tests.
-
-        This function expects its fifth positional argument (args[4]) to be a pathlib.Path for an output directory; it ensures that directory exists, records two synthetic shot paths by appending them to the module-level list `generated_paths`, and returns the two Path objects.
-
-        Parameters:
-            *args: Positional arguments where the fifth element (args[4]) is the output directory Path.
-            **_kwargs: Ignored.
-
-        Returns:
-            list[pathlib.Path]: A list containing two shot Path objects (shot_0.png and shot_1.png) inside the output directory.
-        """
-        out_dir = cast(Path, args[4])
-        out_dir.mkdir(parents=True, exist_ok=True)
-        paths = [out_dir / "shot_0.png", out_dir / "shot_1.png"]
-        generated_paths.extend(paths)
-        return paths
-
-    _patch_runner_module(monkeypatch, "generate_screenshots", fake_generate)
-    monkeypatch.setattr(sys, "stdin", types.SimpleNamespace(isatty=lambda: False))
 
     core_module._confirm_alignment_with_screenshots(
         plans,
         summary,
         cfg,
         tmp_path,
-        reporter,
+        _RecordingOutputManager(),
         display,
     )
 
-    expected_paths = [str(path) for path in generated_paths]
-    assert display.preview_paths == expected_paths
-    assert any("Preview saved:" in line for line in reporter.lines)
-
-def test_confirm_alignment_raises_cli_error_on_screenshot_failure(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    cfg, plans, summary, display = _build_alignment_context(tmp_path)
-
-    def fake_generate(*_args: object, **_kwargs: object) -> list[Path]:
-        """
-        A stub screenshot-generation function that always fails.
-
-        Raises:
-            ScreenshotError: Always raised with the message "boom".
-        """
-        raise ScreenshotError("boom")
-
-    _patch_runner_module(monkeypatch, "generate_screenshots", fake_generate)
-
-    with pytest.raises(core_module.CLIAppError, match="Alignment preview failed"):
-        core_module._confirm_alignment_with_screenshots(
-            plans,
-            summary,
-            cfg,
-            tmp_path,
-            _RecordingOutputManager(),
-            display,
-        )
+    assert display.preview_paths == []
+    assert display.confirmation == "auto"
 
 def test_run_cli_calls_alignment_confirmation(
     monkeypatch: pytest.MonkeyPatch,
     cli_runner_env: _CliRunnerEnv,
 ) -> None:
     """
-    Verifies that running the CLI triggers the audio-alignment confirmation flow when screenshot confirmation is enabled.
+    Verifies that running the CLI triggers the audio-alignment confirmation hook.
 
-    Sets up a configuration enabling audio alignment with screenshot confirmation, creates two dummy media files, and monkeypatches discovery, metadata parsing, plan building, selection, and alignment application. Replaces the confirmation function with one that records its arguments and raises a sentinel exception so the test can assert the confirmation was invoked with the expected parameters.
+    Sets up a configuration enabling audio alignment, creates two dummy media files, and monkeypatches discovery, metadata parsing, plan building, selection, and alignment application. Replaces the confirmation function with one that records its arguments and raises a sentinel exception so the test can assert the confirmation was invoked with the expected parameters.
     """
     cfg = _make_config(cli_runner_env.media_root)
     cfg.audio_alignment.enable = True
-    cfg.audio_alignment.confirm_with_screenshots = True
 
     cli_runner_env.reinstall(cfg)
 

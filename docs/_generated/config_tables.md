@@ -54,9 +54,7 @@
 | `[audio_alignment].correlation_threshold` | float | `0.55` |
 | `[audio_alignment].max_offset_seconds` | float | `12.0` |
 | `[audio_alignment].offsets_filename` | str | `"generated.audio_offsets.toml"` |
-| `[audio_alignment].confirm_with_screenshots` | bool | `true` |
 | `[audio_alignment].random_seed` | int | `2025` |
-| `[audio_alignment].frame_offset_bias` | int | `1` |
 
 ## Screenshot rendering
 

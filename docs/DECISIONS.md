@@ -753,3 +753,7 @@
   - Problem: `frame_offset_bias` nudged measured offsets toward zero even in VSPreview suggestion mode, so 1‑frame hints collapsed to `0f / 0.000s` and the overlay offered no guidance.
   - Decision: Skip applying the frame bias while preparing VSPreview suggestions and add regression coverage to lock the behaviour.
   - Verification: `.venv/bin/pytest tests/runner/test_audio_alignment_cli.py::test_vspreview_suggestions_ignore_frame_bias`
+- *2025-11-20:* chore(audio-alignment): remove `frame_offset_bias` and `confirm_with_screenshots` config flags as obsolete.
+  - Problem: The bias flag still risked collapsing small VSPreview hints, and screenshot confirmation adds interactive friction with no remaining consumers.
+  - Decision: Dropped both fields from the config schema/template/docs, simplified confirmation to auto-approve without screenshot prompts, removed bias application in the alignment runner, and updated tests to reflect the streamlined flow.
+  - Verification: `.venv/bin/pyright --warnings`; `.venv/bin/ruff check`; `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q`
