@@ -1,5 +1,4 @@
 """VSPreview script rendering, persistence, and launch helpers."""
-
 from __future__ import annotations
 
 import datetime as _dt
@@ -33,7 +32,16 @@ from src.frame_compare.layout_utils import (
 from src.frame_compare.layout_utils import (
     plan_label as _plan_label,
 )
-from src.frame_compare.preflight import PROJECT_ROOT, resolve_subdir
+
+PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
+
+
+def resolve_subdir(root: Path, relative: str, *, purpose: str, allow_absolute: bool = False) -> Path:
+    """Delegate to preflight.resolve_subdir without creating an import cycle."""
+
+    from src.frame_compare import preflight as _preflight
+
+    return _preflight.resolve_subdir(root, relative, purpose=purpose, allow_absolute=allow_absolute)
 
 if TYPE_CHECKING:  # pragma: no cover
     from src.audio_alignment import AlignmentMeasurement
@@ -472,7 +480,10 @@ safe_print("Edit OFFSET_MAP values and press Ctrl+R in VSPreview to reload the s
 def persist_script(script_text: str, root: Path) -> Path:
     """Persist the generated VSPreview script under ROOT/vspreview/."""
 
-    script_dir = resolve_subdir(root, "vspreview", purpose="vspreview workspace")
+    # Late import to avoid module import cycles during CLI startup.
+    from src.frame_compare import preflight as _preflight
+
+    script_dir = _preflight.resolve_subdir(root, "vspreview", purpose="vspreview workspace")
     script_dir.mkdir(parents=True, exist_ok=True)
     timestamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     script_path = script_dir / f"vspreview_{timestamp}_{uuid.uuid4().hex[:8]}.py"

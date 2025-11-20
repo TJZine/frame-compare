@@ -36,7 +36,14 @@ from src.frame_compare.cli_runtime import (
 from src.frame_compare.config_helpers import coerce_config_flag as _coerce_config_flag
 from src.frame_compare.layout_utils import plan_label as _plan_label
 from src.frame_compare.metadata import match_override as _match_override
-from src.frame_compare.preflight import resolve_subdir
+
+
+def resolve_subdir(root: Path, relative: str, *, purpose: str, allow_absolute: bool = False) -> Path:
+    """Delegate to preflight.resolve_subdir without creating an import cycle."""
+
+    from src.frame_compare import preflight as _preflight
+
+    return _preflight.resolve_subdir(root, relative, purpose=purpose, allow_absolute=allow_absolute)
 
 if TYPE_CHECKING:
     from src.audio_alignment import AlignmentMeasurement, AudioStreamInfo

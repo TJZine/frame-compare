@@ -127,6 +127,7 @@
 
 - *2025-11-19:* harden the Decision Minute workflow by fetching PR metadata via the API, skipping unmerged runs, and reading data from the github-script `result` output to avoid invalid contexts when CI completes.
 - *2025-11-19:* enforce default HTTPX timeouts for TMDB requests, switch slow.pics publishers to a lock-protected O(1) byte accumulator, and raise a CLI error when planner metadata trails the discovered files.
+- *2025-11-19:* gate `--tm-gamma-disable` on explicit CLI use (protecting config defaults from env/default_map values) and refresh the CLI refactor doc to show `cli_entry` owns wiring after Phase 2.
 * prevent `--service-mode` and `--legacy-runner` from being used together, loosen `RunContext.metadata` typing, guard metadata indexing in `pick_analyze_file`, and treat malformed probe-cache payloads (missing cache keys, bad field types) as cache misses instead of hard errors
 * coerce local report viewer destinations/labels to strings before serializing cached run metadata, refresh the `probe_clip_metadata` docstring to describe cache reuse, and fix docs that referenced the non-existent `src/datatype` module
 * gate every non-`--tm-*` CLI override (paths/cache/report/audio/debug flags) on explicit command-line sources so `frame_compare.run_cli` and the Click entrypoint respect config precedence, and fix `json_tail.render.writer` so debug-color runs accurately report the VS fallback (tests/runner/test_cli_entry.py)
@@ -149,6 +150,7 @@
 
 ### Chores
 
+- *2025-11-19:* refactor/internal: finalize the CLI split by keeping `frame_compare.py` as a thin shim delegating to `src/frame_compare/cli_entry.py`/`cli_utils.py`; no user-visible behavior changes expected.
 - *2025-11-18:* document the Phase 3–6 Track B flag/config review (Screenshots → TMDB domains), check off the Global Invariants in `docs/refactor/flag_audit.md`, and log the verification commands in `docs/DECISIONS.md`.
 - *2025-11-18:* add a `FRAME_COMPARE_DOVI_DEBUG` telemetry mode that emits JSON-formatted logs from both the runner and VapourSynth tonemap resolver so entrypoints can compare config roots, cache status, tonemap overrides, and brightness-affecting parameters when diagnosing DOVI drift.
 - *2025-11-18:* convert the docs/refactor/flag_audit.md template placeholders into ATX headings with per-track prefixes so markdownlint (MD003/MD024) passes and rendered navigation stays unique.

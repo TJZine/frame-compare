@@ -22,7 +22,42 @@
 
 You are “CleanSweep,” a meticulous, test-driven engineer. You hate dead code, enforce typed boundaries, keep documentation up to date, and never regress logging. You follow the plan exactly, capture every command (`.venv/bin/pyright --warnings`, `.venv/bin/ruff check`, `.venv/bin/pytest -q`), and document each change in this file and `docs/DECISIONS.md`. No TODOs without follow-up IDs.
 
-### Tasks
+### Phase 1 – Legacy Runner Removal & Flag Cleanup (This Session)
+
+> Scope: Tasks 1–3 below (discovery/checklist alignment, legacy runner removal, config & flag cleanup). Tasks 4–6 are reserved for a follow-up stabilization session.
+
+#### Phase 1 Scope & Invariants
+
+- Scope (allowed changes for this session):
+  - Runner/runner-services wiring related to legacy vs service-mode paths.
+  - Removal or deprecation of legacy runner branches (`_run_legacy_publishers` or equivalents) once service mode is safe as the default.
+  - Config/CLI flags and datatypes that control legacy vs service-mode behaviour.
+  - Tests that assert legacy behaviour or toggle the legacy runner flag.
+- Out of scope (must not change in this session):
+  - Business behaviour of TMDB lookup, alignment math, or report formats.
+  - Logging payloads and JSON tail structure beyond what’s required to remove legacy conditionals.
+  - CLI UX flows other than removing legacy-only options or wiring them as diagnostics.
+- Invariants that must hold at all times:
+  - Public CLI entry points (`frame_compare` CLI and any documented Python entry points) continue to work as before for service-mode users.
+  - The new service-based pipeline remains the default code path; any legacy path is either removed or clearly diagnostic-only.
+  - `.venv/bin/pyright --warnings`, `.venv/bin/ruff check`, `.venv/bin/pytest -q` pass (or any failures are documented with follow-up IDs and not caused by this change).
+  - No new global state or cross-module imports that would violate the runner service split design in `docs/refactor/runner_service_split.md`.
+
+#### Phase 1 Entry Criteria
+
+- Track A–C in `docs/refactor/runner_service_split.md` show completed implementation and review notes.
+- The current default execution path uses the service-mode pipeline guarded by `runner.enable_service_mode` (or equivalent) and passes the existing test suite.
+- There is a clear rollback strategy: reintroducing or re-enabling the legacy path should be possible via `git revert` of this session’s changes.
+
+#### Phase 1 Exit Criteria
+
+- Legacy runner branches and helpers are removed or confined to clearly diagnostic-only code paths, with no references from normal CLI/config flows.
+- The `runner.enable_service_mode` flag no longer gates the main runner behaviour (either removed or demoted to a diagnostic toggle, as decided in this session).
+- Config schema, CLI options, and datatypes accurately reflect the new baseline (service mode as the only supported path for normal use).
+- All modified tests pass locally (`pytest`), and pyright/ruff are green for touched modules.
+- This doc, `docs/DECISIONS.md`, and `CHANGELOG.md` are updated to describe what was done in Phase 1 and what remains for later phases.
+
+### Tasks (Overall Cleanup)
 
 1. **Discovery & Checklist Alignment**
    - Re-read `docs/refactor/runner_service_split.md` and confirm Track A–C show completed implementation/review notes.

@@ -43,6 +43,7 @@ def run_cli(
     show_partial_sections: bool = ...,
     show_missing_sections: bool = ...,
     service_mode_override: Optional[bool] = ...,
+    diagnostic_frame_metrics: Optional[bool] = ...,
 ) -> RunResult: ...
 
 

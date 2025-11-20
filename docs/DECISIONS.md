@@ -1,5 +1,24 @@
 # Decisions Log
 
+- *2025-11-19:* refactor(cli cleanup): finalize `frame_compare` CLI split with `cli_entry`/`cli_utils` wiring, keep `frame_compare.py` as thin shim, and align logs/docs.
+  - Problem: Phase 4 required confirming no dead code remained after the CLI extraction and updating documentation/decision logs to match the final module boundaries without changing behavior.
+  - Decision: Confirmed no unused imports or dead helpers in `frame_compare.py`, `src/frame_compare/cli_entry.py`, and `src/frame_compare/cli_utils.py`; validated `tests/helpers/runner_env.py` still patches the expected shim/runner symbols; refreshed the refactor checklist plus changelog to describe the stable shim/wiring layout.
+  - Verification (2025-11-19 UTC):
+    - `.venv/bin/pyright --warnings`
+    - `.venv/bin/ruff check`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` (444 passed, 1 skipped)
+- *2025-11-19:* chore(cli+docs): gate `--tm-gamma-disable` on command-line sources and refresh Phase 2 snapshot.
+  - Problem: `tm_gamma_disable` in `cli_entry.main` flowed straight into `_run_cli_entry`, so Click `default_map`/env values could disable post-gamma without an explicit flag. The Architecture Snapshot in `docs/refactor/frame_compare_cli_refactor.md` still claimed Click wiring lived in `frame_compare.py`, conflicting with the completed Phase 2 move.
+  - Decision: Wrap `tm_gamma_disable` with `_cli_flag_value(..., default=False)` to preserve config-first tonemap semantics and updated the Architecture Snapshot to reflect `cli_entry` owning wiring with `frame_compare.py` as a delegating shim.
+  - Verification: Not yet rerun (changes are wiring/doc only); rerun `.venv/bin/pyright --warnings`, `.venv/bin/ruff check`, `.venv/bin/pytest -q` next.
+- *2025-11-19:* refactor(cli shim): move compatibility exports into `src/frame_compare/compat.py` so `frame_compare.py` stays a thin delegating surface (source:internal Phase 3 plan @ docs/refactor/frame_compare_cli_refactor.md).
+  - Problem: `frame_compare.py` still hosted the `_COMPAT_EXPORTS` map and direct imports of CLI helper modules, making the shim carry CLI-specific baggage.
+  - Decision: Added `src/frame_compare/compat.py` with `_COMPAT_EXPORTS` and `apply_compat_exports`, updated `frame_compare.py` to import the compat map, expose it for callers, and keep `main` delegating to `cli_entry.main` while leaving `run_cli` untouched.
+  - Verification (2025-11-19 UTC):
+    - `.venv/bin/pyright --warnings`
+    - `.venv/bin/ruff check`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` (444 passed, 1 skipped)
+
 - *2025-11-19:* chore(docs+runner): correct `src/datatypes` references and normalize viewer metadata.
   - Problem: `docs/refactor/refactor_cleanup.md` instructed readers to touch a non-existent `src/datatype` module, and `src/frame_compare/runner.py` could leak `pathlib.Path` instances into `json_tail["viewer"]`/`layout_data["viewer"]` causing serialization churn. The `probe_clip_metadata` docstring also implied every clip gets reopened even though the cache avoids that path now.
   - Decision: Retargeted the refactor checklist to point at `src/datatypes.py`, coerced any report paths to strings before computing relative labels so both `destination` and `destination_label` stay JSON-safe, and refreshed the `probe_clip_metadata` docstring to mention cached snapshots plus the follow-up initialization performed by `init_clips`.
