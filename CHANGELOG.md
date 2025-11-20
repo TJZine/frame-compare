@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.0.10](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.9...frame-compare-v0.0.10) (2025-11-20)
+
+
+### Bug Fixes
+
+* break preflight alignment_runner init cycle by lazy resolve_subdir ([fe0742c](https://github.com/TJZine/frame-compare/commit/fe0742cf8fd03f825e9cc618db3111efdfd43655))
+* resolve preflight/vspreview circular import ([b10ef38](https://github.com/TJZine/frame-compare/commit/b10ef38e88300861adc4e25f1cc5f733551869c0))
+
+
+### Refactors
+
+* extract frame_compare CLI helpers into cli_utils ([b707127](https://github.com/TJZine/frame-compare/commit/b707127b72d0068df710205a46425ae0412c9a22))
+* extract frame_compare CLI helpers into cli_utils ([#169](https://github.com/TJZine/frame-compare/issues/169)) ([4ba6a93](https://github.com/TJZine/frame-compare/commit/4ba6a931c76dbf6c23c4a7e78c195e739651d99e))
+* extract frame_compare CLI wiring into cli_entry ([2d0237b](https://github.com/TJZine/frame-compare/commit/2d0237b112ed3013fa4c3a5919db8bf97282ee55))
+* finalize frame_compare CLI cleanup and docs ([18ee281](https://github.com/TJZine/frame-compare/commit/18ee2814c621eeae359324103161a29cc67e1b53))
+* move frame_compare compat exports into dedicated shim ([ee76224](https://github.com/TJZine/frame-compare/commit/ee762244167b6bf38a7513f825145fd9ce84f776))
+
+
+### Documentation
+
+* correct compat exports reference ([258f54d](https://github.com/TJZine/frame-compare/commit/258f54d51dd8c93a4e157999b17133da99da42a4))
+
+
+### CI
+
+* harden decision-minute workflow outputs ([d59a261](https://github.com/TJZine/frame-compare/commit/d59a261779041fd7af1395cecff742e008c389e7))
+
 ## [0.0.9](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.8...frame-compare-v0.0.9) (2025-11-19)
 
 
