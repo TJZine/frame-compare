@@ -749,3 +749,7 @@
     - `.venv/bin/pyright --warnings`
     - `.venv/bin/ruff check`
     - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/frame_compare/test_diagnostics.py tests/render/test_overlay_text.py tests/runner/test_overlay_diagnostics.py tests/runner/test_dovi_flags.py tests/test_screenshot.py`
+- *2025-11-20:* fix(vspreview suggestions): keep VSPreview overlay hints intact when a frame bias is configured.
+  - Problem: `frame_offset_bias` nudged measured offsets toward zero even in VSPreview suggestion mode, so 1‑frame hints collapsed to `0f / 0.000s` and the overlay offered no guidance.
+  - Decision: Skip applying the frame bias while preparing VSPreview suggestions and add regression coverage to lock the behaviour.
+  - Verification: `.venv/bin/pytest tests/runner/test_audio_alignment_cli.py::test_vspreview_suggestions_ignore_frame_bias`

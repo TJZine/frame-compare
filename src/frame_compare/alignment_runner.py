@@ -1242,7 +1242,7 @@ def apply_audio_alignment(
                 fps_hints=plan_fps_map,
             )
 
-        frame_bias = int(audio_cfg.frame_offset_bias or 0)
+        frame_bias = 0 if vspreview_enabled else int(audio_cfg.frame_offset_bias or 0)
         if frame_bias != 0:
             adjust_toward_zero = frame_bias > 0
             bias_magnitude = abs(frame_bias)

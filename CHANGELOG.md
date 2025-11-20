@@ -10,6 +10,7 @@
 
 ### Bug Fixes
 
+* keep VSPreview suggestion overlays from zeroing out when `frame_offset_bias` is set, ensuring small measured offsets still display before manual alignment
 * restore vspreview overlay hints ([1a885c7](https://github.com/TJZine/frame-compare/commit/1a885c78dc5957e2457690e4ed81af7ea8945dda))
 
 

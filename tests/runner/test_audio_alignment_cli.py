@@ -1036,6 +1036,76 @@ def test_launch_vspreview_baseline_mode_persists_manual_offsets(
     delta_json = cast(dict[str, int], audio_block.get("vspreview_manual_deltas", {}))
     assert delta_json[target_path.name] == 3
 
+
+def test_vspreview_suggestions_ignore_frame_bias(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """VSPreview hints should reflect measured offsets even when a frame bias is configured."""
+
+    cfg = _make_config(tmp_path)
+    cfg.audio_alignment.enable = True
+    cfg.audio_alignment.use_vspreview = True
+    cfg.audio_alignment.frame_offset_bias = 3
+
+    reference_path = tmp_path / "Ref.mkv"
+    target_path = tmp_path / "Target.mkv"
+    reference_path.write_bytes(b"ref")
+    target_path.write_bytes(b"tgt")
+
+    reference_plan = _ClipPlan(
+        path=reference_path,
+        metadata={"label": "Reference"},
+    )
+    target_plan = _ClipPlan(
+        path=target_path,
+        metadata={"label": "Target"},
+    )
+    plans = [reference_plan, target_plan]
+
+    measurement = AlignmentMeasurement(
+        file=target_path,
+        offset_seconds=0.0417,
+        frames=1,
+        correlation=0.92,
+        reference_fps=24.0,
+        target_fps=24.0,
+    )
+    stream_info = AudioStreamInfo(
+        index=0,
+        language="eng",
+        codec_name="aac",
+        channels=2,
+        channel_layout="stereo",
+        sample_rate=48000,
+        bitrate=128_000,
+        is_default=True,
+        is_forced=False,
+    )
+
+    _patch_audio_alignment(
+        monkeypatch,
+        "measure_offsets",
+        lambda *_args, **_kwargs: [measurement],
+    )
+    _patch_audio_alignment(monkeypatch, "probe_audio_streams", lambda _path: [stream_info])
+
+    summary, _display = alignment_runner_module.apply_audio_alignment(
+        plans,
+        cfg,
+        analyze_path=tmp_path,
+        root=tmp_path,
+        audio_track_overrides={},
+        reporter=None,
+    )
+
+    assert summary is not None, "alignment summary should be available for VSPreview suggestions"
+
+    assert summary.suggested_frames[target_path.name] == 1
+    detail = summary.measured_offsets[target_path.name]
+    assert detail.frames == 1
+    assert detail.offset_seconds == pytest.approx(measurement.offset_seconds, rel=1e-6)
+
+
 def test_write_vspreview_script_generates_unique_filenames_same_second(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
