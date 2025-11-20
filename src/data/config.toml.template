@@ -187,8 +187,8 @@ prefer_guessit = true
 emit_json_tail = true
 
 [runner]
-# Toggle the publisher services pipeline; set false to default to the legacy inline publishers.
-enable_service_mode = true
+# Service-mode publishers are always enabled; legacy inline runners have been retired.
+# enable_service_mode is retained for compatibility with older configs but is ignored.
 
 [cli.progress]
 # Progress bar appearance: "fill" for filled bar, "dot" for single indicator.

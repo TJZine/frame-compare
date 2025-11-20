@@ -337,8 +337,8 @@ Fine-grained overrides (`smoothing_period`, `scene_threshold_*`, `percentile`, `
 | `--diagnose-paths` | Print JSON diagnostics |
 | `--no-cache` | Ignore cached frame metrics and recompute selection data for this run |
 | `--from-cache-only` | Render the last `.frame_compare.run.json` snapshot and exit |
-| `--service-mode` / `--legacy-runner` | Force the publisher services pipeline on or off for the current run |
-| `[runner].enable_service_mode` | Default `true`. Set `false` in `config.toml` to keep the legacy inline publishers until the services finish burn-in (CLI flags still override per run). |
+| (legacy runner flags removed) | Service-mode publishers are always used; the legacy inline path has been retired. |
+| `[runner].enable_service_mode` | Deprecated compatibility toggle. Service-mode remains enabled even if this setting is present. |
 | `--show-partial` | Display sections marked as partial when rendering cached runs |
 | `--show-missing` / `--hide-missing` | Show (default) or suppress banners for sections missing from cached runs |
 | `--diagnostic-frame-metrics` / `--no-diagnostic-frame-metrics` | Override `[diagnostics].per_frame_nits` for the current run to enable or block per-frame nit estimates inside diagnostic overlays. |
@@ -371,7 +371,7 @@ The `[diagnostics]` section in `config.toml` gates opt-in overlay work that can 
 per_frame_nits = false
 ```
 
-When `per_frame_nits` is `true` and `[color].overlay_mode = "diagnostic"`, the runner converts each selection score into a per-frame brightness estimate, adds a `Frame Nits:` line to the overlay, and records the data under `json_tail["overlay"]["diagnostics"]["frame_metrics"]`. Operators can toggle the behaviour without editing config by passing `--diagnostic-frame-metrics` / `--no-diagnostic-frame-metrics` on the CLI. The diagnostics block also captures Dolby Vision (DoVi) L2 metadata, HDR mastering info (MaxCLL/MaxFALL), and the detected color range so downstream consumers can safely ignore missing fields.
+When `per_frame_nits` is `true` and `[color].overlay_mode = "diagnostic"`, the runner converts each selection score into a per-frame brightness estimate, adds a `Measurement MAX/AVG:` line to the overlay, and records the data under `json_tail["overlay"]["diagnostics"]["frame_metrics"]`. Operators can toggle the behaviour without editing config by passing `--diagnostic-frame-metrics` / `--no-diagnostic-frame-metrics` on the CLI. The diagnostics block also captures Dolby Vision (DoVi) metadata, HDR mastering info (MaxCLL/MaxFALL), and the detected color range so downstream consumers can safely ignore missing fields.
 
 ### Examples
 
@@ -484,7 +484,7 @@ Distributed under the [MIT License](LICENSE). Frame Compare builds upon FFmpeg, 
 ### Support
 
 - Works on Linux and Windows (64-bit). Ensure FFmpeg is on `PATH` and VapourSynth is installed when using the primary renderer. macOS support is currently paused pending fixes in the upstream VapourSynth/L-SMASH toolchain.
-- Additional docs: [docs/audio_alignment_pipeline.md](docs/audio_alignment_pipeline.md), [docs/geometry_pipeline.md](docs/geometry_pipeline.md), [docs/hdr_tonemap_overview.md](docs/hdr_tonemap_overview.md), [docs/context_summary.md](docs/context_summary.md).
+- Additional docs: [docs/README_REFERENCE.md](docs/README_REFERENCE.md) (canonical flags/JSON tails), [docs/audio_alignment_pipeline.md](docs/audio_alignment_pipeline.md), [docs/geometry_pipeline.md](docs/geometry_pipeline.md), [docs/hdr_tonemap_overview.md](docs/hdr_tonemap_overview.md).
 - File issues or feature requests via GitHub; report sensitive bugs privately.
 
 ### Future Updates

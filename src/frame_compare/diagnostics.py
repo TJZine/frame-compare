@@ -230,6 +230,7 @@ def format_dovi_line(label: str | None, metadata: Mapping[str, Any]) -> str | No
     """Return a DoVi summary line for diagnostic overlays."""
 
     parts: list[str] = []
+    metadata_present = any(value is not None for value in metadata.values())
     if label:
         parts.append(f"DoVi: {label}")
     block_index = metadata.get("block_index")
@@ -245,9 +246,29 @@ def format_dovi_line(label: str | None, metadata: Mapping[str, Any]) -> str | No
     target_label = _format_nits(target if isinstance(target, (int, float)) else None)
     if target_label:
         parts.append(f"target {target_label} nits")
+    if not metadata_present and label:
+        parts.append("(no DV metadata)")
     if not parts:
         return None
     return " ".join(parts)
+
+
+def format_dovi_l1_line(metadata: Mapping[str, Any]) -> str | None:
+    """Render DV RPU Level 1 per-frame brightness stats when available."""
+
+    average = metadata.get("l1_average")
+    maximum = metadata.get("l1_maximum")
+    avg_label = _format_nits(float(average)) if isinstance(average, (int, float)) else None
+    max_label = _format_nits(float(maximum)) if isinstance(maximum, (int, float)) else None
+    if not avg_label and not max_label:
+        return None
+    parts: list[str] = []
+    if max_label:
+        parts.append(f"{max_label}nits")
+    if avg_label:
+        parts.append(f"{avg_label}nits")
+    descriptor = "MAX/AVG" if max_label and avg_label else "MAX" if max_label else "AVG"
+    return f"DV RPU Level 1 {descriptor}: {' / '.join(parts)}"
 
 
 def format_hdr_line(metadata: Mapping[str, Any]) -> str | None:
@@ -310,15 +331,16 @@ def format_frame_metrics_line(entry: Mapping[str, Any] | None) -> str | None:
         return None
     avg_label = _format_nits(float(avg)) if isinstance(avg, (int, float)) else None
     max_label = _format_nits(float(max_value)) if isinstance(max_value, (int, float)) else None
-    parts: list[str] = []
-    if avg_label:
-        parts.append(f"avg {avg_label}")
+    values: list[str] = []
     if max_label:
-        parts.append(f"max {max_label}")
-    if not parts:
+        values.append(f"{max_label}nits")
+    if avg_label:
+        values.append(f"{avg_label}nits")
+    if not values:
         return None
     suffix = ""
     category = entry.get("category")
     if isinstance(category, str) and category.strip():
         suffix = f" ({category.strip()})"
-    return f"Frame Nits: {' / '.join(parts)}{suffix}"
+    descriptor = "MAX/AVG" if max_label and avg_label else "MAX" if max_label else "AVG"
+    return f"Measurement {descriptor}: {' / '.join(values)}{suffix}"

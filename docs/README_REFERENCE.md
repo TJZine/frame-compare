@@ -2,7 +2,10 @@
 
 Supplemental reference material for [`README.md`](../README.md).
 Use these tables when you need to fine-tune behaviour beyond the
-quick-start configuration paths.
+quick-start configuration paths. For deep dives, see
+`docs/audio_alignment_pipeline.md` (alignment) and
+`docs/hdr_tonemap_overview.md`/`docs/geometry_pipeline.md`
+(pipeline narratives).
 
 Generated defaults (keys, types, and defaults) now live in
 [`docs/_generated/config_tables.md`](./_generated/config_tables.md) and

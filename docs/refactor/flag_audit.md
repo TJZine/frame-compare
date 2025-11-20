@@ -382,7 +382,7 @@ When closing a track or major sub-task, run:
 > Notes:
 > - Date: 2025-11-19
 > - Dev Agent: OverlaySleuth
-> - Summary of metrics availability/gating decisions: `[diagnostics].per_frame_nits` now gates the per-frame nit estimator and surfaces its state (config + CLI override + overlay_mode) inside `json_tail["overlay"]["diagnostics"]["frame_metrics"]["gating"]`. Dolby Vision (label + L2 summary), HDR mastering metadata (MDL/MaxCLL/MaxFALL), and color-range detection all populate `json_tail["overlay"]["diagnostics"]` with optional blocks so downstream consumers can tolerate missing fields. CLI `--diagnostic-frame-metrics/--no-diagnostic-frame-metrics` toggles the same gating at runtime, and diagnostic overlays only render `Frame Nits:` when the gating conditions pass.
+> - Summary of metrics availability/gating decisions: `[diagnostics].per_frame_nits` now gates the per-frame nit estimator and surfaces its state (config + CLI override + overlay_mode) inside `json_tail["overlay"]["diagnostics"]["frame_metrics"]["gating"]`. Dolby Vision (label + L2 summary), HDR mastering metadata (MDL/MaxCLL/MaxFALL), and color-range detection all populate `json_tail["overlay"]["diagnostics"]` with optional blocks so downstream consumers can tolerate missing fields. CLI `--diagnostic-frame-metrics/--no-diagnostic-frame-metrics` toggles the same gating at runtime, and diagnostic overlays only render the per-frame measurement line when the gating conditions pass.
 - Known regression: VSPreview overlay “suggested frame/seconds” hints remain stuck at 0f/0.000 s since the runner refactor. Add to backlog and restore the original behaviour so manual alignment users regain guidance.
 
 ### C4. Review Notes (Review Agent)

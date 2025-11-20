@@ -208,7 +208,7 @@ class CLIConfig:
 
 @dataclass
 class RunnerConfig:
-    """Runner-specific service orchestration toggles."""
+    """Runner-specific toggles kept for legacy compatibility."""
 
     enable_service_mode: bool = True
 

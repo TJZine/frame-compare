@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import types
 from pathlib import Path
-from typing import Any, Dict, List, cast
+from typing import Any, Dict, List, Optional, cast
 
 import pytest
 
@@ -35,11 +35,22 @@ class _StubMetadataResolver:
 
 
 class _StubAlignmentWorkflow:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        suggested_frames: Optional[int] = None,
+        suggested_seconds: Optional[float] = None,
+    ) -> None:
         self.request: AlignmentRequest | None = None
+        self._suggested_frames = suggested_frames
+        self._suggested_seconds = suggested_seconds
 
     def run(self, request: AlignmentRequest) -> AlignmentResult:
         self.request = request
+        if self._suggested_frames is not None:
+            request.json_tail["suggested_frames"] = self._suggested_frames
+        if self._suggested_seconds is not None:
+            request.json_tail["suggested_seconds"] = self._suggested_seconds
         return AlignmentResult(plans=list(request.plans), summary=None, display=None)
 
 
@@ -53,9 +64,13 @@ class _NullSlowpicsPublisher:
         return types.SimpleNamespace(url=None)
 
 
-def _build_dependencies(result: MetadataResolveResult) -> tuple[runner_module.RunDependencies, _StubMetadataResolver, _StubAlignmentWorkflow]:
+def _build_dependencies(
+    result: MetadataResolveResult,
+    *,
+    alignment_workflow: _StubAlignmentWorkflow | None = None,
+) -> tuple[runner_module.RunDependencies, _StubMetadataResolver, _StubAlignmentWorkflow]:
     resolver = _StubMetadataResolver(result)
-    workflow = _StubAlignmentWorkflow()
+    workflow = alignment_workflow or _StubAlignmentWorkflow()
     deps = runner_module.RunDependencies(
         metadata_resolver=cast(runner_module.MetadataResolver, resolver),
         alignment_workflow=cast(runner_module.AlignmentWorkflow, workflow),
@@ -81,6 +96,8 @@ def _make_plans(files: List[Path]) -> List[ClipPlan]:
         "DolbyVision_Block_Index": 3,
         "DolbyVision_Block_Total": 7,
         "DolbyVision_Target_Nits": "700",
+        "DolbyVision_L1_Average": 0.12,
+        "DolbyVision_L1_Maximum": 0.52,
         "_colorrange": 0,
     }
     plans = [
@@ -222,7 +239,6 @@ def _prepare_config(workspace: Path, media_root: Path, *, per_frame_nits: bool) 
     cfg.diagnostics.per_frame_nits = per_frame_nits
     cfg.slowpics.auto_upload = False
     cfg.report.enable = False
-    cfg.runner.enable_service_mode = False
     preflight = _make_runner_preflight(workspace, media_root, cfg)
     return cfg, preflight.config_path
 
@@ -233,6 +249,8 @@ def _common_setup(
     *,
     per_frame_nits: bool,
     cli_override: bool | None,
+    alignment_workflow: _StubAlignmentWorkflow | None = None,
+    reporter: runner_module.CliOutputManager | None = None,
 ) -> tuple[runner_module.RunRequest, runner_module.RunDependencies, MetadataResolveResult]:
     workspace = tmp_path / "workspace"
     media_root = workspace / "media"
@@ -242,7 +260,7 @@ def _common_setup(
     _patch_core_helper(monkeypatch, "prepare_preflight", lambda **_kwargs: preflight)
     monkeypatch.setattr(runner_module.media_utils, "discover_media", lambda _root: list(files))
     metadata_result = _make_metadata_result(files)
-    deps, _, _ = _build_dependencies(metadata_result)
+    deps, _, _ = _build_dependencies(metadata_result, alignment_workflow=alignment_workflow)
     _install_analysis_stubs(monkeypatch, score=0.6)
     _install_render_stubs(monkeypatch, out_dir=media_root / cfg.screenshots.directory_name)
 
@@ -250,7 +268,7 @@ def _common_setup(
         config_path=str(config_path),
         root_override=str(workspace),
         diagnostic_frame_metrics=cli_override,
-        service_mode_override=False,
+        reporter=reporter,
     )
     return request, deps, metadata_result
 
@@ -266,7 +284,11 @@ def test_runner_emits_overlay_diagnostics_when_enabled(tmp_path: Path, monkeypat
     dv_block = cast(Dict[str, Any], overlay_diag["dv"])
     assert dv_block["enabled"] is True
     assert dv_block["label"] == "on"
+    assert dv_block["metadata_present"] is True
+    assert dv_block["has_l1_stats"] is True
     assert dv_block["l2_summary"]["block_index"] == 3
+    assert dv_block["l2_summary"]["l1_average"] == pytest.approx(0.12)
+    assert dv_block["l2_summary"]["l1_maximum"] == pytest.approx(0.52)
     hdr_block = cast(Dict[str, Any], overlay_diag["hdr"])
     assert hdr_block["max_cll"] == 850.0
     assert hdr_block["max_fall"] == 350.0
@@ -285,6 +307,21 @@ def test_runner_emits_overlay_diagnostics_when_enabled(tmp_path: Path, monkeypat
     assert clip_entry["dynamic_range"]["label"] == "full"
 
 
+def test_runner_marks_missing_dv_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    request, deps, metadata_result = _common_setup(tmp_path, monkeypatch, per_frame_nits=True, cli_override=None)
+    metadata_result.plans[0].source_frame_props = {}
+
+    result = runner_module.run(request, dependencies=deps)
+
+    assert result.json_tail is not None
+    tail_overlay = cast(Dict[str, Any], result.json_tail["overlay"])
+    overlay_diag = cast(Dict[str, Any], tail_overlay["diagnostics"])
+    dv_block = cast(Dict[str, Any], overlay_diag["dv"])
+    assert dv_block["metadata_present"] is False
+    assert dv_block["has_l1_stats"] is False
+    assert "l2_summary" not in dv_block
+
+
 def test_cli_override_disables_frame_metrics(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     request, deps, _ = _common_setup(tmp_path, monkeypatch, per_frame_nits=True, cli_override=False)
 
@@ -297,3 +334,28 @@ def test_cli_override_disables_frame_metrics(tmp_path: Path, monkeypatch: pytest
     assert frame_metrics["enabled"] is False
     assert cast(Dict[str, Any], frame_metrics["per_frame"]) == {}
     assert frame_metrics["gating"]["cli_override"] is False
+
+
+def test_runner_layout_preserves_vspreview_suggestions_from_json_tail(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    recording_output_manager: runner_module.CliOutputManager,
+) -> None:
+    workflow = _StubAlignmentWorkflow(suggested_frames=5, suggested_seconds=0.25)
+    request, deps, _ = _common_setup(
+        tmp_path,
+        monkeypatch,
+        per_frame_nits=False,
+        cli_override=None,
+        alignment_workflow=workflow,
+        reporter=recording_output_manager,
+    )
+
+    result = runner_module.run(request, dependencies=deps)
+
+    assert result.json_tail is not None
+    assert result.json_tail["suggested_frames"] == 5
+    assert result.json_tail["suggested_seconds"] == pytest.approx(0.25, rel=1e-6)
+    vspreview_layout = cast(Dict[str, Any], recording_output_manager.values.get("vspreview"))
+    assert vspreview_layout["suggested_frames"] == 5
+    assert vspreview_layout["suggested_seconds"] == pytest.approx(0.25, rel=1e-6)

@@ -1066,7 +1066,7 @@ def test_compose_overlay_text_diagnostic_appends_required_lines() -> None:
     assert lines[3] == "HDR: MaxCLL 1200 / MaxFALL 400"
     assert lines[4] == "DoVi: on L2 2/8 target 400 nits"
     assert lines[5] == "Range: Limited"
-    assert lines[6] == "Frame Nits: avg 45 / max 50 (Bright)"
+    assert lines[6] == "Measurement MAX/AVG: 50nits / 45nits (Bright)"
     assert lines[7] == "Frame Selection Type: Dark"
 
 

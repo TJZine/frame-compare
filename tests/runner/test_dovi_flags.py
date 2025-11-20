@@ -77,6 +77,8 @@ def _install_stubbed_runner(
             "dv": {
                 "enabled": override_value,
                 "label": tonemap_block.get("use_dovi_label", "auto"),
+                "metadata_present": False,
+                "has_l1_stats": False,
             },
             "frame_metrics": {
                 "enabled": False,

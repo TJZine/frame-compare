@@ -143,9 +143,13 @@ def compose_overlay_text(
     hdr_line = _diagnostics.format_hdr_line(_diagnostics.extract_hdr_metadata(source_props))
     if hdr_line:
         lines.append(hdr_line)
-    dovi_line = _diagnostics.format_dovi_line(_resolve_dovi_label(tonemap_info), _diagnostics.extract_dovi_metadata(source_props))
+    dovi_metadata = _diagnostics.extract_dovi_metadata(source_props)
+    dovi_line = _diagnostics.format_dovi_line(_resolve_dovi_label(tonemap_info), dovi_metadata)
     if dovi_line:
         lines.append(dovi_line)
+    dovi_l1_line = _diagnostics.format_dovi_l1_line(dovi_metadata)
+    if dovi_l1_line:
+        lines.append(dovi_l1_line)
     range_line = _diagnostics.format_dynamic_range_line(_diagnostics.classify_color_range(source_props))
     if range_line:
         lines.append(range_line)

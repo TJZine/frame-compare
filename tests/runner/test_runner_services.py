@@ -201,6 +201,39 @@ def test_runner_calls_services_in_order(
     assert list(alignment_workflow.last_request.plans) == list(metadata_result.plans)
 
 
+def test_runner_warns_when_legacy_requested(
+    monkeypatch: pytest.MonkeyPatch,
+    cli_runner_env: Any,
+    recording_output_manager: runner_module.CliOutputManager,
+) -> None:
+    """Legacy toggles should be ignored but surfaced as warnings."""
+
+    files = _write_media(cli_runner_env)
+    monkeypatch.setattr(runner_module.media_utils, "discover_media", lambda _root: list(files))
+    metadata_result = _make_metadata_result(files)
+    alignment_result = AlignmentResult(plans=list(metadata_result.plans), summary=None, display=None)
+    call_order: list[str] = []
+    metadata_resolver = _RecordingMetadataResolver(metadata_result, call_order)
+    alignment_workflow = _RecordingAlignmentWorkflow(alignment_result, call_order)
+
+    def _stop(*_args: object, **_kwargs: object) -> None:
+        raise SentinelError("halt after alignment")
+
+    monkeypatch.setattr(runner_module.selection_utils, "init_clips", _stop)
+    dependencies = _build_dependencies(metadata_resolver, alignment_workflow)
+    request = runner_module.RunRequest(
+        config_path=str(cli_runner_env.config_path),
+        reporter=recording_output_manager,
+        service_mode_override=False,
+    )
+
+    with pytest.raises(SentinelError):
+        runner_module.run(request, dependencies=dependencies)
+
+    warnings = recording_output_manager.iter_warnings()
+    assert any("Legacy runner path has been retired" in warning for warning in warnings)
+
+
 def test_metadata_error_propagates(
     monkeypatch: pytest.MonkeyPatch,
     cli_runner_env: Any,
@@ -285,14 +318,13 @@ def _build_context(tmp_path: Path) -> tuple[runner_module.RunContext, JsonTail, 
     return context, json_tail, layout_data, cfg
 
 
-def test_publish_results_uses_services_when_enabled(tmp_path: Path) -> None:
+def test_publish_results_uses_services(tmp_path: Path) -> None:
     context, json_tail, layout_data, cfg = _build_context(tmp_path)
     reporter = StubReporter()
     report_publisher = _StubReportPublisher()
     slowpics_publisher = _StubSlowpicsPublisher()
 
     slowpics_url, report_path = runner_module._publish_results(
-        service_mode_enabled=True,
         context=context,
         reporter=reporter,
         cfg=cfg,
@@ -314,47 +346,6 @@ def test_publish_results_uses_services_when_enabled(tmp_path: Path) -> None:
     assert slowpics_publisher.call_count == 1
     assert slowpics_url == "https://slow.pics/c/test"
     assert report_path is None
-
-
-def test_publish_results_uses_legacy_path_when_disabled(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    context, json_tail, layout_data, cfg = _build_context(tmp_path)
-    reporter = StubReporter()
-    report_publisher = _StubReportPublisher()
-    slowpics_publisher = _StubSlowpicsPublisher()
-    legacy_calls: list[tuple[int, int]] = []
-
-    def _fake_legacy(**kwargs: Any) -> tuple[str, Path]:
-        legacy_calls.append((len(kwargs.get("image_paths", [])), len(kwargs.get("frames", []))))
-        return "https://slow.pics/c/legacy", tmp_path / "report" / "index.html"
-
-    monkeypatch.setattr(runner_module, "_run_legacy_publishers", _fake_legacy)
-
-    slowpics_url, report_path = runner_module._publish_results(
-        service_mode_enabled=False,
-        context=context,
-        reporter=reporter,
-        cfg=cfg,
-        layout_data=layout_data,
-        json_tail=json_tail,
-        image_paths=["img-a.png"],
-        out_dir=tmp_path,
-        collected_warnings=[],
-        report_enabled=True,
-        root=tmp_path,
-        plans=list(context.plans),
-        frames=[1, 2],
-        selection_details={},
-        report_publisher=report_publisher,
-        slowpics_publisher=slowpics_publisher,
-    )
-
-    assert legacy_calls == [(1, 2)]
-    assert slowpics_url == "https://slow.pics/c/legacy"
-    assert report_path == tmp_path / "report" / "index.html"
-    assert report_publisher.call_count == 0
-    assert slowpics_publisher.call_count == 0
 
 
 def test_reporter_flags_initialized_with_service_context(

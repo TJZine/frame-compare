@@ -142,6 +142,7 @@
 
 ### Features
 
+- *2025-11-20:* retire the legacy runner path, remove CLI/config service-mode toggles, warn when legacy mode is requested, and make the publisher services pipeline the only supported path.
 - *2025-11-17:* unify CLI rendering around cache-aware run snapshots, add `--from-cache-only`, `--no-cache`, and `--show-partial` flags, persist `.frame_compare.run.json`, and render cached sections consistently with live runs.
 - *2025-11-17:* harden snapshot hydration, mark corrupt cache files as misses, and persist per-section availability so `[RENDER]`/`[PUBLISH]` blocks honor `--show-partial`/`--show-missing`.
 - *2025-11-18:* finish the CLI cache UX by adding `--show-missing`/`--hide-missing`, plumbing `show_missing_sections` through the public API, broadening section-availability heuristics for viewer/report/audio/VSPreview blocks, and extending tests/docs/CHANGELOG to cover the new behavior.
@@ -152,6 +153,7 @@
 
 ### Bug Fixes
 
+- *2025-11-20:* restore VSPreview overlay hints by sourcing layout `suggested_frames`/`suggested_seconds` from the JSON tail and adding a regression test for CLI layout propagation.
 - *2025-11-19:* harden the Decision Minute workflow by fetching PR metadata via the API, skipping unmerged runs, and reading data from the github-script `result` output to avoid invalid contexts when CI completes.
 - *2025-11-19:* enforce default HTTPX timeouts for TMDB requests, switch slow.pics publishers to a lock-protected O(1) byte accumulator, and raise a CLI error when planner metadata trails the discovered files.
 - *2025-11-19:* gate `--tm-gamma-disable` on explicit CLI use (protecting config defaults from env/default_map values) and refresh the CLI refactor doc to show `cli_entry` owns wiring after Phase 2.
@@ -177,6 +179,7 @@
 
 ### Chores
 
+- *2025-11-20:* docs: trimmed noisy DECISIONS logs, converted runner/CLI refactor docs into summaries, refreshed README references, and updated the docs inventory.
 - *2025-11-19:* refactor/internal: finalize the CLI split by keeping `frame_compare.py` as a thin shim delegating to `src/frame_compare/cli_entry.py`/`cli_utils.py`; no user-visible behavior changes expected.
 - *2025-11-18:* document the Phase 3–6 Track B flag/config review (Screenshots → TMDB domains), check off the Global Invariants in `docs/refactor/flag_audit.md`, and log the verification commands in `docs/DECISIONS.md`.
 - *2025-11-18:* add a `FRAME_COMPARE_DOVI_DEBUG` telemetry mode that emits JSON-formatted logs from both the runner and VapourSynth tonemap resolver so entrypoints can compare config roots, cache status, tonemap overrides, and brightness-affecting parameters when diagnosing DOVI drift.

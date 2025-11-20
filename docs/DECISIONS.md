@@ -1,5 +1,21 @@
 # Decisions Log
 
+- *2025-11-20:* fix(vspreview overlay): map JSON-tail suggestions into layout data and restore CLI hints (Phase 3).
+  - Problem: `layout_data["vspreview"]` rendered `0f / 0.000s` suggested offsets even when audio alignment produced non-zero hints, leaving manual alignment prompts without guidance.
+  - Decision: Treat `json_tail["suggested_frames"]`/`json_tail["suggested_seconds"]` as the source for layout hints, falling back to alignment summaries only when tail hints are missing; added a regression to ensure VSPreview layout surfaces non-zero suggestions from the tail.
+  - Verification (2025-11-20 UTC):
+    - `.venv/bin/pyright --warnings` (0 errors)
+    - `.venv/bin/ruff check`
+    - `.venv/bin/pytest -q` (445 passed, 1 skipped)
+
+- *2025-11-20:* refactor(runner): retire legacy runner flag and path (Phase 1).
+  - Problem: Legacy inline publishers still existed behind `runner.enable_service_mode` and CLI toggles, exposing an unsupported path and complicating the service-mode default.
+  - Decision: Removed `_run_legacy_publishers` and made `_publish_results` service-only, emitting warnings when configs or overrides request legacy mode; removed CLI `--service-mode`/`--legacy-runner` options; deprecated `[runner].enable_service_mode` in the template while keeping the dataclass for compatibility; updated slow.pics/runner/CLI tests to assume service-mode baseline and refreshed README/refactor docs plus CHANGELOG.
+  - Verification (2025-11-20 UTC):
+    - `.venv/bin/pyright --warnings` (0 errors)
+    - `.venv/bin/ruff check`
+    - `.venv/bin/pytest -q` (444 passed, 1 skipped)
+
 - *2025-11-19:* refactor(cli cleanup): finalize `frame_compare` CLI split with `cli_entry`/`cli_utils` wiring, keep `frame_compare.py` as thin shim, and align logs/docs.
   - Problem: Phase 4 required confirming no dead code remained after the CLI extraction and updating documentation/decision logs to match the final module boundaries without changing behavior.
   - Decision: Confirmed no unused imports or dead helpers in `frame_compare.py`, `src/frame_compare/cli_entry.py`, and `src/frame_compare/cli_utils.py`; validated `tests/helpers/runner_env.py` still patches the expected shim/runner symbols; refreshed the refactor checklist plus changelog to describe the stable shim/wiring layout.
@@ -168,80 +184,31 @@
 - *2025-11-15:* fix(audio): hydrate cached suggested offsets when reusing alignment files.
   - Problem: declining the recompute prompt reapplied cached trims but dropped any stored `suggested_frames`/`suggested_seconds`, so the CLI JSON tail and VSPreview overlay no longer showed the prior guidance (e.g., `+7f (~0.291s)`), defeating the cache reuse UX.
   - Decision: parse the cached `suggested_*` fields whenever `_maybe_reuse_cached_offsets()` or the reuse branch in `apply_audio_alignment()` iterate the offsets TOML, populate `summary.suggested_frames` plus `summary.measured_offsets` with those hints, and backstop the flow with a regression test that exercises the CLI formatter.
-  - Verification:
-    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
-    - `.venv/bin/ruff check` → `All checks passed!`
-    - `.venv/bin/pytest -q tests/runner/test_audio_alignment_cli.py` →
-      ```
-      ..........................                                               [100%]
-      26 passed in 19.66s
-      ```
+  - Evidence: `.venv/bin/pyright --warnings`, `.venv/bin/ruff check`, `.venv/bin/pytest -q tests/runner/test_audio_alignment_cli.py` (all passed)
 
 - *2025-11-15:* fix(audio): derive VSPreview frame hints and keep negative manual trims.
   - Problem: Alignment summaries dropped negative `trim_start` overrides and emitted `0f` for suggested offsets whenever FPS metadata was missing, so the CLI/VSPreview overlay misreported `0f (~ -1.335s)` even when the measured seconds were non-zero.
   - Decision: Added a shared `derive_frame_hint()` helper that converts the raw measurements into frame counts (falling back to “n/a” when no FPS exists), plumbed it through `alignment_runner`, `runner`, `vspreview.render_script()`, and the prompt helpers, and removed the zero-clamping logic so negative manual trims persist through summaries, manual maps, and CLI JSON. New regression tests cover the negative-trim path and the `n/a` suggestion rendering.
-  - Verification:
-    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
-    - `.venv/bin/ruff check` → `All checks passed!`
-    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/runner/test_audio_alignment_cli.py tests/test_vspreview.py` →
-      ```
-      .................................                                        [100%]
-      33 passed in 3.04s
-      ```
+  - Evidence: `.venv/bin/pyright --warnings`, `.venv/bin/ruff check`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/runner/test_audio_alignment_cli.py tests/test_vspreview.py` (all passed)
 - *2025-11-15:* fix(audio): reuse cached FPS hints when measuring offsets.
   - Problem: When ffprobe omitted `r_frame_rate`, `measure_offsets()` surfaced only seconds while summary/vspreview suggestions fell back to `0f`, even though we already captured usable FPS metadata during the initial probe.
   - Decision: FFmpeg’s documentation notes that ffprobe surfaces stream metrics only when the container exposes them ([source](https://ffmpeg.org/ffmpeg-all.html/index@2025-11-15T23:42:24Z)), so we now build a per-plan FPS map (effective → source → applied → override), feed it into `audio_alignment.measure_offsets()`, and log whenever we must fall back to the seconds-based estimator so CLI/VSPreview immediately receive consistent frame deltas.
-  - Verification:
-    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest tests/test_audio_alignment.py::test_measure_offsets_prefers_cached_fps_hints tests/test_alignment_runner.py::test_plan_fps_map_prioritizes_available_metadata -q`
-    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest tests/runner/test_audio_alignment_cli.py -k block_and_json -q`
+  - Evidence: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest tests/test_audio_alignment.py::test_measure_offsets_prefers_cached_fps_hints tests/test_alignment_runner.py::test_plan_fps_map_prioritizes_available_metadata -q`; `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest tests/runner/test_audio_alignment_cli.py -k block_and_json -q`
 - *2025-11-15:* fix(tonemap): preserve HDR metadata for negative trims, honor CLI overrides under presets, and restore path-based color overrides.
   - Problem: Blank frames injected for negative trims lacked `_Transfer/_Primaries/_Matrix/_ColorRange` so HDR clips appeared SDR and skipped tonemapping; CLI tonemap overrides mutated config values but left `_provided_keys` untouched when presets were active, so libplacebo still read preset defaults; color overrides keyed by absolute/relative paths no longer matched because screenshot code now passed Path objects.
   - Decision: Snapshot the source props before padding and stamp those values onto the blank prefix so HDR detection continues to see the metadata, update CLI override handling to funnel conversions through a helper that also merges the overridden field names into `_provided_keys`, and coerce override lookup keys to `str(file_name)` before comparing so Path entries match again. Added regression tests covering HDR tonemap application with padding, CLI overrides overriding preset target_nits, and Path-based overrides.
-  - Verification:
-    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
-    - `.venv/bin/ruff check` → `All checks passed!`
-    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_vs_core.py tests/test_screenshot.py tests/runner/test_cli_entry.py` →
-      ```
-      ........................................................................ [ 70%]
-      ..............................                                           [100%]
-      102 passed in 0.28s
-      ```
+  - Evidence: `.venv/bin/pyright --warnings`, `.venv/bin/ruff check`, `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_vs_core.py tests/test_screenshot.py tests/runner/test_cli_entry.py` (all passed)
 
 - *2025-11-13:* chore(types): restored pyright strictness for `slowpics`, `analysis.cache_io`, and `cli_layout`.
   - Problem: `cli_layout.py` relied on `# pyright: standard` to hide Unknown-heavy template handling, and `slowpics.py` used loosely typed MultipartEncoder imports that failed strict mode whenever `requests-toolbelt` was optional, undermining the Part 1 typing guarantees for cache/selection code.
   - Decision: removed the downgrade, tightened MultipartEncoder typing with guarded imports and explicit Optional checks, validated every layout section/template/line/table entry before rendering, and exposed a renderer helper so progress columns no longer poke private attributes; cache modules already satisfied strict mode after the Part 1 snapshot refactor.
-  - Verification:
-    - `date -u +%Y-%m-%d` → `2025-11-13`
-    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` →
-      ```
-      ........................................................................ [ 22%]
-      ........................................................................ [ 44%]
-      ...............................s........................................ [ 66%]
-      ........................................................................ [ 88%]
-      ......................................                                   [100%]
-      325 passed, 1 skipped in 28.48s
-      ```
-    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
-    - `.venv/bin/ruff check` → `All checks passed!`
+  - Evidence: `date -u +%Y-%m-%d` → `2025-11-13`; `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` (325 passed, 1 skipped); `.venv/bin/pyright --warnings` and `.venv/bin/ruff check` clean
 
 - *2025-11-13:* fix(slowpics): shortcut creation is now best-effort with JSON telemetry for shortcut outcomes.
   - Problem: Uploads failed entirely when the `.url` shortcut could not be written, leaving users without the canonical slow.pics URL and no way to see why the shortcut was missing.
   - Decision: Wrap shortcut writes in `slowpics.upload_comparison()` with an OSError guard that warns but still returns the URL, and thread `shortcut_path`, `shortcut_written`, and `shortcut_error` through the runner/CLI JSON tail so reports/automation can describe failures. The CLI also emits a concise warning when it detects a missing shortcut.
   - Impact: slow.pics uploads always deliver their URL even on read-only volumes; telemetry differentiates disabled shortcuts from write failures (`disabled`, `invalid_shortcut_name`, `write_failed`), and docs explain the behavior so UI layers can reflect it.
-  - Verification:
-    - `date -u +%Y-%m-%d` → `2025-11-13`
-    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_slowpics.py -k failure` →
-      ```
-      .                                                                        [100%]
-      1 passed, 20 deselected in 0.03s
-      ```
-    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/runner/test_slowpics_workflow.py -k shortcut` →
-      ```
-      .                                                                        [100%]
-      1 passed, 11 deselected in 0.08s
-      ```
-    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_slowpics.py` →
-      ```
+  - Evidence: `date -u +%Y-%m-%d` → `2025-11-13`; `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_slowpics.py -k failure`; `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/runner/test_slowpics_workflow.py -k shortcut`; `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_slowpics.py` (all passed)
       .....................                                                    [100%]
       21 passed in 0.03s
       ```
@@ -289,77 +256,17 @@
   - Problem: large media inputs forced `_build_clip_inputs` to read every byte when persisting selection caches, even though SHA1 digests are never consulted during reuse decisions (those keys rely on filenames, fps, config fingerprint, trims, and release group).
   - Decision: gate hashing behind `compute_sha1`/`FRAME_COMPARE_CACHE_HASH` (default off), keep the `"sha1"` field present but nullable, and extend `FrameMetricsCacheInfo` with an optional `clips` field populated by `cache.build_cache_info` so later cache builders can reuse the stat metadata without re-touching disk. Operators can export `FRAME_COMPARE_CACHE_HASH=1` when they explicitly want digests in the payload.
   - Alternatives considered: keep hashing enabled (too slow on multi-GB files) or defer clip precomputation to a later phase (implemented now so selection sidecars avoid redundant `stat()` calls the moment cache info is constructed).
-  - Verification:
-    - `date -u +%Y-%m-%d` → `2025-11-13`
-    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_analysis.py -k "clip_inputs or selection_sidecar_cache_key_stable_without_sha1"` →
-      ```
-      ...                                                                      [100%]
-      3 passed, 17 deselected in 0.03s
-      ```
-    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_analysis.py::test_select_frames_uses_cache` →
-      ```
-      .                                                                        [100%]
-      1 passed in 0.01s
-      ```
-    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` →
-      ```
-      315 passed, 1 skipped in 28.07s
-      ```
-    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
-  - Follow-up (compute_sha1 parameter coverage):
-    - `date -u +%Y-%m-%d` → `2025-11-13`
-    - `git status -sb` →
-      ```
-      ## runner-refactor...origin/runner-refactor [ahead 2]
-       M tests/test_analysis.py
-      ```
-    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_analysis.py -k clip_inputs` →
-      ```
-      ....                                                                     [100%]
-      4 passed, 18 deselected in 0.04s
-      ```
-    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q` →
-      ```
-      317 passed, 1 skipped in 28.00s
-      ```
-    - `.venv/bin/ruff check` → `All checks passed!`
-    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
-  - Follow-up (require SHA1 when opted in, handle hashing failures safely):
-    - `date -u +%Y-%m-%d` → `2025-11-13`
-    - `git status -sb` →
-      ```
-      ## runner-refactor...origin/runner-refactor
-       M src/frame_compare/analysis/cache_io.py
-       M src/frame_compare/cache.py
-       M tests/test_analysis.py
-      ```
-    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_analysis.py -k sha1` →
-      ```
-      ....                                                                     [100%]
-      4 passed, 21 deselected in 0.04s
-      ```
-    - `.venv/bin/ruff check` → `All checks passed!`
-    - `.venv/bin/pyright --warnings` → `0 errors, 0 warnings, 0 informations`
+  - Evidence: `date -u +%Y-%m-%d` → `2025-11-13`; `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_analysis.py -k "clip_inputs or selection_sidecar_cache_key_stable_without_sha1"`; `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_analysis.py::test_select_frames_uses_cache`; full suite clean (315 passed, 1 skipped); `.venv/bin/pyright --warnings`
+  - Follow-up (compute_sha1 parameter coverage): `date -u +%Y-%m-%d` → `2025-11-13`; `git status -sb` captured ahead-of-branch state; `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_analysis.py -k clip_inputs`; full suite clean (317 passed, 1 skipped); `.venv/bin/ruff check`; `.venv/bin/pyright --warnings`
+  - Follow-up (require SHA1 when opted in, handle hashing failures safely): `date -u +%Y-%m-%d` → `2025-11-13`; `git status -sb` recorded touched files; `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/test_analysis.py -k sha1`; `.venv/bin/ruff check`; `.venv/bin/pyright --warnings`
   - Context: SHA1 digests remain available for diagnostics, but cache reuse continues to hinge on deterministic input names/configuration so payload compatibility is unaffected by the nullable digest field.
 
 - *2025-11-13:* Network policy hardening — centralized retry/timeout constants in `frame_compare/net.py`, added structured logging via `log_backoff_attempt`, threaded the callback through TMDB’s `_http_request`, and aligned slow.pics adapters/logs/tests with the shared policy while keeping the legacy upload endpoints. Redaction tests now cover userinfo/query edge cases, and slow.pics emits a final “upload complete” INFO that lists frames/workers.
-  - `date -u +%Y-%m-%d` → `2025-11-13`
-  - `UV_CACHE_DIR=.uv_cache PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run --no-sync python -m pytest -q tests/net tests/test_slowpics.py -k 'backoff or redact or adapter'` →
-    ```
-    11 passed, 20 deselected in 0.02s
-    ```
-  - `UV_CACHE_DIR=.uv_cache uv run --no-sync ruff check` → `All checks passed!`
-  - `UV_CACHE_DIR=.uv_cache uv run --no-sync npx pyright --warnings` → fails because npm cannot reach `registry.npmjs.org` in this sandbox (getaddrinfo ENOTFOUND); rerun with network/cache access.
+  - Evidence: `date -u +%Y-%m-%d` → `2025-11-13`; `UV_CACHE_DIR=.uv_cache PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run --no-sync python -m pytest -q tests/net tests/test_slowpics.py -k 'backoff or redact or adapter'`; `UV_CACHE_DIR=.uv_cache uv run --no-sync ruff check`; `UV_CACHE_DIR=.uv_cache uv run --no-sync npx pyright --warnings` (blocked offline; rerun with network access)
   - Reference: [source](https://github.com/urllib3/urllib3/blob/main/docs/user-guide.rst@2025-11-13T02:15:40Z) — documents urllib3’s default three retries/timeouts, reinforcing the centralized Retry policy applied here.
 
 - *2025-11-13:* Release & packaging polish — enriched `pyproject.toml` metadata (description, license stanza, keywords, classifiers, URLs, authors), added `tools/check_wheel_contents.py` plus CI hooks on Linux/Windows, aligned `release-please` config with `project.name`/manifest paths, and introduced `.github/workflows/publish.yml` for a TestPyPI dry-run publish backed by OIDC. The packaging workflow now reuses the helper script and a new `windows-build` job catches platform-specific wheel regressions.
-  - `date -u +%Y-%m-%d` → `2025-11-13`
-  - `UV_CACHE_DIR=.uv_cache uv run --no-sync python -m build` → fails because pip cannot reach PyPI to download the isolated `setuptools>=69` requirement (network-restricted sandbox); same limitation noted in prior packaging checks.
-  - `UV_CACHE_DIR=.uv_cache uv run --no-sync twine check dist/*` →
-    ```
-    Checking dist/frame_compare-0.0.1-py3-none-any.whl: PASSED
-    Checking dist/frame_compare-0.0.1.tar.gz: PASSED
-    ```
+  - Evidence: `date -u +%Y-%m-%d` → `2025-11-13`; `UV_CACHE_DIR=.uv_cache uv run --no-sync python -m build` (offline failure fetching isolated `setuptools`); `UV_CACHE_DIR=.uv_cache uv run --no-sync twine check dist/*` (wheel + sdist passed)
 
 - *2025-11-13:* Phase 11 cleanup follow-up — finalized the curated `frame_compare` export surface, synced `typings/frame_compare.pyi`, repointed the remaining tests/helpers/docs to `src.frame_compare.*`, and reiterated in the trackers that only the canonical modules (plus the curated exports) remain supported. Verified no shim imports remain, reran lint/type/test/import gates, and attempted the packaging build (still blocked offline) before checking the existing artifacts with Twine and a manual wheel audit.
   - `date -u +%Y-%m-%d` → `2025-11-13`
@@ -835,3 +742,10 @@
     - `.venv/bin/pyright --warnings`
     - `.venv/bin/ruff check`
     - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/runner/test_overlay_diagnostics.py tests/runner/test_cli_entry.py tests/runner/test_dovi_flags.py tests/render/test_overlay_text.py tests/frame_compare/test_diagnostics.py`
+- *2025-11-20:* feat(overlay diagnostics): surface per-frame measurement and DV RPU L1 stats plus metadata flags.
+  - Problem: diagnostic overlays only echoed clip-level HDR/DoVi targets and config intent; per-frame brightness reused a single “Frame Nits” label and DV metadata presence (including Level 1 stats) was opaque to downstream consumers.
+  - Decision: reformatted per-frame metrics as `Measurement MAX/AVG`, added a DV RPU Level 1 MAX/AVG line when L1 data is in frame props, and marked DoVi overlays lacking metadata with a clarifying suffix. Runner diagnostics now publish `metadata_present` and `has_l1_stats` flags alongside the DV summary. Updated tests/docs to match the new overlay text.
+  - Verification:
+    - `.venv/bin/pyright --warnings`
+    - `.venv/bin/ruff check`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/frame_compare/test_diagnostics.py tests/render/test_overlay_text.py tests/runner/test_overlay_diagnostics.py tests/runner/test_dovi_flags.py tests/test_screenshot.py`
