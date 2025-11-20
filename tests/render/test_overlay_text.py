@@ -85,6 +85,8 @@ def test_compose_overlay_text_includes_diagnostics_details() -> None:
         "DolbyVision_Block_Index": 2,
         "DolbyVision_Block_Total": 10,
         "DolbyVision_Target_Nits": "800",
+        "DolbyVision_L1_Average": 12.5,
+        "DolbyVision_L1_Maximum": 450,
         "_colorrange": 1,
     }
     selection_detail = {
@@ -110,8 +112,9 @@ def test_compose_overlay_text_includes_diagnostics_details() -> None:
     lines = text.splitlines()
     assert any(line.startswith("HDR:") for line in lines)
     assert any(line.startswith("DoVi:") for line in lines)
+    assert any("DV RPU Level 1" in line for line in lines)
     assert any("Range: Limited" in line for line in lines)
-    assert any("Frame Nits:" in line and "highlight" in line for line in lines)
+    assert any("Measurement MAX/AVG:" in line and "highlight" in line for line in lines)
 
 
 def test_compose_overlay_text_skips_frame_metrics_without_entry() -> None:
@@ -130,7 +133,7 @@ def test_compose_overlay_text_skips_frame_metrics_without_entry() -> None:
         selection_detail={"diagnostics": {}},
     )
     assert text is not None
-    assert "Frame Nits:" not in text
+    assert "Measurement MAX/AVG:" not in text
 
 
 def test_overlay_warning_helpers_record_messages() -> None:

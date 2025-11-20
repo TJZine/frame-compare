@@ -96,6 +96,8 @@ def _make_plans(files: List[Path]) -> List[ClipPlan]:
         "DolbyVision_Block_Index": 3,
         "DolbyVision_Block_Total": 7,
         "DolbyVision_Target_Nits": "700",
+        "DolbyVision_L1_Average": 0.12,
+        "DolbyVision_L1_Maximum": 0.52,
         "_colorrange": 0,
     }
     plans = [
@@ -282,7 +284,11 @@ def test_runner_emits_overlay_diagnostics_when_enabled(tmp_path: Path, monkeypat
     dv_block = cast(Dict[str, Any], overlay_diag["dv"])
     assert dv_block["enabled"] is True
     assert dv_block["label"] == "on"
+    assert dv_block["metadata_present"] is True
+    assert dv_block["has_l1_stats"] is True
     assert dv_block["l2_summary"]["block_index"] == 3
+    assert dv_block["l2_summary"]["l1_average"] == pytest.approx(0.12)
+    assert dv_block["l2_summary"]["l1_maximum"] == pytest.approx(0.52)
     hdr_block = cast(Dict[str, Any], overlay_diag["hdr"])
     assert hdr_block["max_cll"] == 850.0
     assert hdr_block["max_fall"] == 350.0
@@ -299,6 +305,21 @@ def test_runner_emits_overlay_diagnostics_when_enabled(tmp_path: Path, monkeypat
     clip_entry = clips_block[0]
     assert clip_entry["hdr_metadata"]["max_cll"] == 850.0
     assert clip_entry["dynamic_range"]["label"] == "full"
+
+
+def test_runner_marks_missing_dv_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    request, deps, metadata_result = _common_setup(tmp_path, monkeypatch, per_frame_nits=True, cli_override=None)
+    metadata_result.plans[0].source_frame_props = {}
+
+    result = runner_module.run(request, dependencies=deps)
+
+    assert result.json_tail is not None
+    tail_overlay = cast(Dict[str, Any], result.json_tail["overlay"])
+    overlay_diag = cast(Dict[str, Any], tail_overlay["diagnostics"])
+    dv_block = cast(Dict[str, Any], overlay_diag["dv"])
+    assert dv_block["metadata_present"] is False
+    assert dv_block["has_l1_stats"] is False
+    assert "l2_summary" not in dv_block
 
 
 def test_cli_override_disables_frame_metrics(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

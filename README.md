@@ -371,7 +371,7 @@ The `[diagnostics]` section in `config.toml` gates opt-in overlay work that can 
 per_frame_nits = false
 ```
 
-When `per_frame_nits` is `true` and `[color].overlay_mode = "diagnostic"`, the runner converts each selection score into a per-frame brightness estimate, adds a `Frame Nits:` line to the overlay, and records the data under `json_tail["overlay"]["diagnostics"]["frame_metrics"]`. Operators can toggle the behaviour without editing config by passing `--diagnostic-frame-metrics` / `--no-diagnostic-frame-metrics` on the CLI. The diagnostics block also captures Dolby Vision (DoVi) L2 metadata, HDR mastering info (MaxCLL/MaxFALL), and the detected color range so downstream consumers can safely ignore missing fields.
+When `per_frame_nits` is `true` and `[color].overlay_mode = "diagnostic"`, the runner converts each selection score into a per-frame brightness estimate, adds a `Measurement MAX/AVG:` line to the overlay, and records the data under `json_tail["overlay"]["diagnostics"]["frame_metrics"]`. Operators can toggle the behaviour without editing config by passing `--diagnostic-frame-metrics` / `--no-diagnostic-frame-metrics` on the CLI. The diagnostics block also captures Dolby Vision (DoVi) metadata, HDR mastering info (MaxCLL/MaxFALL), and the detected color range so downstream consumers can safely ignore missing fields.
 
 ### Examples
 

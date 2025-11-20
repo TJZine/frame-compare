@@ -43,7 +43,7 @@ def test_format_frame_metrics_line_includes_category() -> None:
         "category": "bright",
     }
     line = diag.format_frame_metrics_line(entry)
-    assert line == "Frame Nits: avg 120 / max 160 (bright)"
+    assert line == "Measurement MAX/AVG: 160nits / 120nits (bright)"
 
 
 def test_build_frame_metric_entry_clamps_scores() -> None:
@@ -52,3 +52,17 @@ def test_build_frame_metric_entry_clamps_scores() -> None:
     assert entry["frame"] == 5
     assert entry["avg_nits"] == pytest.approx(500.0)
     assert entry["max_nits"] == pytest.approx(500.0)
+
+
+def test_format_dovi_l1_line_renders_stats() -> None:
+    metadata = {
+        "l1_average": 23.4,
+        "l1_maximum": 715,
+    }
+    line = diag.format_dovi_l1_line(metadata)
+    assert line == "DV RPU Level 1 MAX/AVG: 715nits / 23.4nits"
+
+
+def test_format_dovi_line_marks_missing_metadata() -> None:
+    line = diag.format_dovi_line("auto", {})
+    assert line == "DoVi: auto (no DV metadata)"

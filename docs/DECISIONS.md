@@ -851,3 +851,10 @@
     - `.venv/bin/pyright --warnings`
     - `.venv/bin/ruff check`
     - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/runner/test_overlay_diagnostics.py tests/runner/test_cli_entry.py tests/runner/test_dovi_flags.py tests/render/test_overlay_text.py tests/frame_compare/test_diagnostics.py`
+- *2025-11-20:* feat(overlay diagnostics): surface per-frame measurement and DV RPU L1 stats plus metadata flags.
+  - Problem: diagnostic overlays only echoed clip-level HDR/DoVi targets and config intent; per-frame brightness reused a single “Frame Nits” label and DV metadata presence (including Level 1 stats) was opaque to downstream consumers.
+  - Decision: reformatted per-frame metrics as `Measurement MAX/AVG`, added a DV RPU Level 1 MAX/AVG line when L1 data is in frame props, and marked DoVi overlays lacking metadata with a clarifying suffix. Runner diagnostics now publish `metadata_present` and `has_l1_stats` flags alongside the DV summary. Updated tests/docs to match the new overlay text.
+  - Verification:
+    - `.venv/bin/pyright --warnings`
+    - `.venv/bin/ruff check`
+    - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest -q tests/frame_compare/test_diagnostics.py tests/render/test_overlay_text.py tests/runner/test_overlay_diagnostics.py tests/runner/test_dovi_flags.py tests/test_screenshot.py`

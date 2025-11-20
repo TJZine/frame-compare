@@ -1698,9 +1698,13 @@ def run(request: RunRequest, *, dependencies: RunDependencies | None = None) -> 
     range_label = classify_color_range(analyze_props)
     frame_metrics_json = {str(frame): entry for frame, entry in per_frame_metrics.items()}
     dv_summary = {k: v for k, v in dovi_meta.items() if v is not None}
+    metadata_present = bool(dv_summary)
+    has_l1_stats = any(key in dv_summary for key in ("l1_average", "l1_maximum"))
     dv_block: dict[str, Any] = {
         "label": json_tail["tonemap"].get("use_dovi_label"),
         "enabled": json_tail["tonemap"].get("use_dovi"),
+        "metadata_present": metadata_present,
+        "has_l1_stats": has_l1_stats,
     }
     if dv_summary:
         dv_block["l2_summary"] = dv_summary
