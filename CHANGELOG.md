@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.12](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.11...frame-compare-v0.0.12) (2025-11-21)
+
+
+### Bug Fixes
+
+* keep vspreview suggestions when frame bias is set ([3a0b253](https://github.com/TJZine/frame-compare/commit/3a0b253c5d83f1717c838a7138de44b924e1c3a8))
+
 ## [0.0.11](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.10...frame-compare-v0.0.11) (2025-11-20)
 
 
