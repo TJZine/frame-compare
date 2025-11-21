@@ -1242,36 +1242,6 @@ def apply_audio_alignment(
                 fps_hints=plan_fps_map,
             )
 
-        frame_bias = int(audio_cfg.frame_offset_bias or 0)
-        if frame_bias != 0:
-            adjust_toward_zero = frame_bias > 0
-            bias_magnitude = abs(frame_bias)
-
-            for measurement in measurements:
-                frames_val = measurement.frames
-                if frames_val is None or frames_val == 0:
-                    continue
-
-                sign = 1 if frames_val > 0 else -1
-                magnitude = abs(frames_val)
-
-                if adjust_toward_zero:
-                    shift = min(bias_magnitude, magnitude)
-                    adjusted_magnitude = max(0, magnitude - shift)
-                else:
-                    adjusted_magnitude = magnitude + bias_magnitude
-
-                if adjusted_magnitude == magnitude:
-                    continue
-
-                new_frames = sign * adjusted_magnitude
-                measurement.frames = new_frames
-
-                if measurement.target_fps and measurement.target_fps > 0:
-                    measurement.offset_seconds = new_frames / measurement.target_fps
-                elif measurement.reference_fps and measurement.reference_fps > 0:
-                    measurement.offset_seconds = new_frames / measurement.reference_fps
-
         for measurement in measurements:
             if measurement.frames is None:
                 if measurement.file not in plan_fps_map:
