@@ -439,6 +439,7 @@ for label, info in TARGETS.items():
     if suggested_frames is not None:
         suggested_frames = int(suggested_frames)
     ref_view, tgt_view = _apply_offset(reference_clip, target_clip, offset_frames)
+    ref_view = _maybe_apply_overlay(
         ref_view,
         REFERENCE['label'],
         None,
