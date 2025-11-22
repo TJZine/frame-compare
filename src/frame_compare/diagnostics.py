@@ -143,17 +143,23 @@ def _matches_all(text: str, needles: tuple[str, ...]) -> bool:
     return all(needle in text for needle in needles)
 
 
-def extract_dovi_metadata(props: Mapping[str, Any]) -> dict[str, float | int | None]:
+def extract_dovi_metadata(props: Mapping[str, Any]) -> dict[str, float | int | bool | None]:
     """Return Dolby Vision metadata extracted from frame props when available."""
 
-    result: dict[str, float | int | None] = {
+    result: dict[str, float | int | bool | None] = {
         "block_index": None,
         "block_total": None,
         "target_nits": None,
         "l1_average": None,
         "l1_maximum": None,
+        "rpu_present": None,
     }
     for key, value in props.items():
+        # Check for raw RPU blob first (exact match or common variants)
+        if key in ("DolbyVisionRPU", "_DolbyVisionRPU", "DolbyVisionRPU_b", "_DolbyVisionRPU_b"):
+            result["rpu_present"] = True
+            continue
+
         normalized = _normalize_key(key)
         if not normalized or not _has_dovi_hint(normalized):
             continue
@@ -230,24 +236,34 @@ def format_dovi_line(label: str | None, metadata: Mapping[str, Any]) -> str | No
     """Return a DoVi summary line for diagnostic overlays."""
 
     parts: list[str] = []
-    metadata_present = any(value is not None for value in metadata.values())
+    # Check for L1 metadata presence (excluding the rpu_present flag itself)
+    l1_keys = {"block_index", "block_total", "target_nits", "l1_average", "l1_maximum"}
+    l1_present = any(value is not None for key, value in metadata.items() if key in l1_keys)
+    rpu_present = bool(metadata.get("rpu_present"))
+
     if label:
         parts.append(f"DoVi: {label}")
-    block_index = metadata.get("block_index")
-    block_total = metadata.get("block_total")
-    if isinstance(block_index, int) and block_index >= 0:
-        if isinstance(block_total, int) and block_total > 0:
-            parts.append(f"L2 {block_index}/{block_total}")
-        else:
-            parts.append(f"L2 block {block_index}")
-    elif isinstance(block_total, int) and block_total > 0:
-        parts.append(f"L2 blocks={block_total}")
-    target = metadata.get("target_nits")
-    target_label = _format_nits(target if isinstance(target, (int, float)) else None)
-    if target_label:
-        parts.append(f"target {target_label} nits")
-    if not metadata_present and label:
+
+    if l1_present:
+        block_index = metadata.get("block_index")
+        block_total = metadata.get("block_total")
+        if isinstance(block_index, int) and block_index >= 0:
+            if isinstance(block_total, int) and block_total > 0:
+                parts.append(f"L2 {block_index}/{block_total}")
+            else:
+                parts.append(f"L2 block {block_index}")
+        elif isinstance(block_total, int) and block_total > 0:
+            parts.append(f"L2 blocks={block_total}")
+        target = metadata.get("target_nits")
+        target_label = _format_nits(target if isinstance(target, (int, float)) else None)
+        if target_label:
+            parts.append(f"target {target_label} nits")
+
+    if rpu_present:
+        parts.append("(RPU present)")
+    elif not l1_present and label:
         parts.append("(no DV metadata)")
+
     if not parts:
         return None
     return " ".join(parts)
