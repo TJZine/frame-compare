@@ -605,6 +605,7 @@ def apply_manual_offsets(
         reporter.warn(message)
         logger.warning(message)
 
+    # 1. Calculate all desired absolute trim positions (un-normalized)
     for plan in targets:
         key = plan.path.name
         baseline_value = baseline_map.get(key, int(plan.trim_start))
@@ -617,27 +618,49 @@ def apply_manual_offsets(
     reference_delta_input = int(deltas.get(reference_name, 0))
     desired_map[reference_name] = reference_baseline + reference_delta_input
 
+    # 2. Normalize to ensure no negative trims (avoid padding)
+    # Find the most negative desired trim and shift everyone up so the minimum is 0.
+    min_desired = min(desired_map.values()) if desired_map else 0
+    shift = -min_desired if min_desired < 0 else 0
+
+    if shift > 0:
+        logger.info(f"[VSPREVIEW] Found negative desired trim {min_desired}, applying global shift of {shift}f.")
+
+    # 3. Apply normalized trims
     for plan, baseline_value, delta_value in target_adjustments:
         key = plan.path.name
         desired_value = desired_map[key]
-        updated_int = int(desired_value)
+        # Apply shift
+        updated_int = int(desired_value + shift)
+
         plan.trim_start = updated_int
         plan.source_num_frames = None
         plan.has_trim_start_override = (
             plan.has_trim_start_override or updated_int != 0
         )
         manual_trim_starts[key] = updated_int
+
+        # The delta we report is the *effective* change from the original baseline
+        # But wait, if we shift, we change the absolute trim.
+        # The "offset" (relative to reference) should be preserved.
+        # If we shift both ref and target by +361, their relative difference is same.
+        # So we record the *final* trim as the "applied" value?
+        # alignment_runner uses: adjustment = desired - baseline
+        # Here: applied_delta = updated_int - baseline_value
         applied_delta = updated_int - baseline_value
         delta_map[key] = applied_delta
+
         line = (
             f"VSPreview manual offset applied: {_plan_label(plan)} baseline {baseline_value}f "
-            f"{delta_value:+d}f → {updated_int}f"
+            f"{delta_value:+d}f (shift {shift:+d}f) → {updated_int}f"
         )
         manual_lines.append(line)
         reporter.line(line)
 
     adjusted_reference = desired_map[reference_name]
-    adjusted_reference_int = int(adjusted_reference)
+    # Apply shift to reference too
+    adjusted_reference_int = int(adjusted_reference + shift)
+
     reference_plan.trim_start = adjusted_reference_int
     reference_plan.source_num_frames = None
     reference_plan.has_trim_start_override = (
@@ -647,9 +670,11 @@ def apply_manual_offsets(
     manual_trim_starts[reference_name] = adjusted_reference_int
     reference_delta = adjusted_reference_int - reference_baseline
     delta_map[reference_name] = reference_delta
+
     if reference_delta != 0:
         ref_line = (
-            f"VSPreview reference adjustment: {_plan_label(reference_plan)} baseline {reference_baseline}f → {int(adjusted_reference)}f"
+            f"VSPreview reference adjustment: {_plan_label(reference_plan)} baseline {reference_baseline}f "
+            f"+ shift {shift:+d}f → {adjusted_reference_int}f"
         )
         manual_lines.append(ref_line)
         reporter.line(ref_line)

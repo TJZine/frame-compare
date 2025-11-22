@@ -1348,16 +1348,12 @@ def apply_audio_alignment(
         baseline = min(final_map.values()) if final_map else 0
         baseline_shift = int(-baseline) if baseline < 0 else 0
 
-        logger.info(f"[ALIGN CALC] Final map: {final_map}")
-        logger.info(f"[ALIGN CALC] Baseline: {baseline}, Shift: {baseline_shift}")
-
         final_adjustments: Dict[str, int] = {}
         for plan in plans:
             desired = final_map.get(plan.path.name)
             if desired is None:
                 continue
             adjustment = int(desired - baseline)
-            logger.info(f"[ALIGN CALC] Plan {plan.path.name}: Desired {desired}, Adjustment {adjustment}")
 
             if adjustment:
                 plan.trim_start = plan.trim_start + adjustment
