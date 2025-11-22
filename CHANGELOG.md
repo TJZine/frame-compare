@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.0.13](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.12...frame-compare-v0.0.13) (2025-11-22)
+
+
+### Bug Fixes
+
+* correct vspreview overlay offsets ([15d94f5](https://github.com/TJZine/frame-compare/commit/15d94f5bebe080e3c60925e4f19a59669e977104))
+* correct vspreview overlay offsets ([#175](https://github.com/TJZine/frame-compare/issues/175)) ([5123e6a](https://github.com/TJZine/frame-compare/commit/5123e6a0f0ffa14d229559e505abce16be7830b6))
+* ensure vspreview reference overlay shows baseline status ([d4f2190](https://github.com/TJZine/frame-compare/commit/d4f2190e20906adac7bd99a87a3eec61874c3382))
+* repair vspreview overlay indentation ([5a113b8](https://github.com/TJZine/frame-compare/commit/5a113b8454d97776dfe025d605aab0605b37a250))
+
 ## [0.0.12](https://github.com/TJZine/frame-compare/compare/frame-compare-v0.0.11...frame-compare-v0.0.12) (2025-11-21)
 
 
