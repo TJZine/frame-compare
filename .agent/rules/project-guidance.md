@@ -34,3 +34,10 @@ You have access to specialized MCP tools. You must use them in this specific ord
 - **Write/Edit:**
   - **Small Changes (<300 lines):** Auto-approved if tests pass.
   - **Risky Changes:** Explicit approval required for `.github/workflows`, `Dockerfile`, auth logic, or secrets.
+
+## 4. Verification Policy
+- **Verify** = run `.venv/bin/pyright --warnings`, `.venv/bin/ruff check`, `.venv/bin/pytest -q` (only fall back to `uv run`/`npx`/system binaries after attempting `uv sync --all-extras --dev` to install the local venv; any `npx pyright --warnings` fallback must be executed with escalated permissions enabled). The `npm test`/Husky hook path now invokes `tools/run_pytest.mjs`, which sets `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` by default; export `FC_SKIP_PYTEST_DISABLE=1` on machines (e.g., Windows) that must keep plugin autoloading enabled.
+
+**Output**: populate PR “Decision Minute” fields before proposing patches.
+
+**Commit Title**: every task response must include a Conventional Commit-style subject (for example, `feat: …`, `chore: …`) that can be copied directly into `git commit -m`. State it explicitly before the summary so users running commit hooks don’t have to invent one.
