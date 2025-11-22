@@ -23,6 +23,7 @@ def test_apply_audio_alignment_derives_frames_from_seconds(
     cfg = _make_config(tmp_path)
     cfg.audio_alignment.enable = True
     cfg.audio_alignment.use_vspreview = False
+    cfg.audio_alignment.max_offset_seconds = 100.0
 
     reference = _ClipPlan(path=tmp_path / "Ref.mkv", metadata={"label": "Reference"})
     target = _ClipPlan(path=tmp_path / "Target.mkv", metadata={"label": "Target"})

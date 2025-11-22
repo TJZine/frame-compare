@@ -398,7 +398,7 @@ def _format_overlay_text(label, suggested_frames, suggested_seconds, applied_fra
     return (
         "{{label}}: {{suggested}} (~{{seconds}}s) • "
         "Preview applied: {{applied}}f ({{status}}) • "
-        "(+ trims target / - pads reference)"
+        "(+ trims target / - trims reference)"
     ).format(
         label=label,
         suggested=suggested_value,
@@ -442,9 +442,9 @@ for label, info in TARGETS.items():
     ref_view = _maybe_apply_overlay(
         ref_view,
         REFERENCE['label'],
-        suggested_frames,
-        suggested_seconds,
-        offset_frames,
+        None,
+        0.0,
+        0,
     )
     tgt_view = _maybe_apply_overlay(
         tgt_view,

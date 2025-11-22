@@ -1255,79 +1255,25 @@ def apply_audio_alignment(
                 if derived_frames is not None:
                     measurement.frames = derived_frames
 
+        suggested_frames: Dict[str, int] = {}
+        for measurement in measurements:
+            frames_value = measurement.frames
+            if frames_value is None:
+                frames_value = _estimate_frames_from_seconds(measurement, plan_lookup)
+                if frames_value is not None:
+                    measurement.frames = frames_value
+            if frames_value is not None:
+                suggested_frames[measurement.file.name] = int(frames_value)
+
         negative_override_notes.clear()
         swap_details: Dict[str, str] = {}
-        swap_candidates: List["AlignmentMeasurement"] = []
-        swap_enabled = len(targets) == 1
-
         for measurement in measurements:
             if measurement.frames is not None and measurement.frames < 0:
-                if swap_enabled:
-                    swap_candidates.append(measurement)
-                    continue
-                measurement.frames = abs(int(measurement.frames))
                 file_key = measurement.file.name
                 negative_offsets[file_key] = True
                 negative_override_notes[file_key] = (
                     "Suggested negative offset applied to the opposite clip for trim-first behaviour."
                 )
-
-        if swap_enabled and swap_candidates:
-            additional_measurements: List["AlignmentMeasurement"] = []
-            reference_name: str = reference_plan.path.name
-            existing_keys = {m.file.name for m in measurements}
-
-            for measurement in swap_candidates:
-                if measurement.offset_seconds is None:
-                    continue
-                seconds = float(measurement.offset_seconds)
-                seconds_abs = abs(seconds)
-                target_name: str = measurement.file.name
-
-                original_frames = None
-                if measurement.frames is not None:
-                    original_frames = abs(int(measurement.frames))
-
-                reference_frames = None
-                if measurement.reference_fps and measurement.reference_fps > 0:
-                    reference_frames = int(round(seconds_abs * measurement.reference_fps))
-
-                measurement.frames = 0
-                measurement.offset_seconds = 0.0
-
-                def _describe(frames: Optional[int], seconds_val: float) -> str:
-                    parts: List[str] = []
-                    if frames is not None:
-                        parts.append(f"{frames} frame(s)")
-                    if not math.isnan(seconds_val):
-                        parts.append(f"{seconds_val:.3f}s")
-                    return " / ".join(parts) if parts else "0.000s"
-
-                measured_desc = _describe(original_frames, seconds_abs)
-                applied_desc = _describe(reference_frames, seconds_abs)
-                note = (
-                    f"Measured negative offset on {target_name}: {measured_desc}; "
-                    f"applied to {reference_name} as +{applied_desc}."
-                )
-                negative_override_notes[target_name] = note
-                negative_override_notes[reference_name] = note
-                swap_details[target_name] = note
-                swap_details[reference_name] = note
-
-                if reference_name not in existing_keys:
-                    additional_measurements.append(
-                        audio_alignment.AlignmentMeasurement(
-                            file=reference_plan.path,
-                            offset_seconds=seconds_abs,
-                            frames=reference_frames,
-                            correlation=measurement.correlation,
-                            reference_fps=measurement.reference_fps,
-                            target_fps=measurement.reference_fps,
-                        )
-                    )
-                    existing_keys.add(reference_name)
-
-            measurements.extend(additional_measurements)
 
         raw_warning_messages: List[str] = []
         for measurement in measurements:
@@ -1356,15 +1302,7 @@ def apply_audio_alignment(
         for warning_message in dict.fromkeys(raw_warning_messages):
             _warn(warning_message)
 
-        suggested_frames: Dict[str, int] = {}
-        for measurement in measurements:
-            frames_value = measurement.frames
-            if frames_value is None:
-                frames_value = _estimate_frames_from_seconds(measurement, plan_lookup)
-                if frames_value is not None:
-                    measurement.frames = frames_value
-            if frames_value is not None:
-                suggested_frames[measurement.file.name] = int(frames_value)
+
 
         manual_trim_starts: Dict[str, int] = {}
         if vspreview_enabled:
