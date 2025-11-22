@@ -606,14 +606,17 @@ def test_run_cli_reuses_vspreview_manual_offsets_when_alignment_disabled(
 
     assert init_calls, "Clips should be initialised with trims applied"
     trims_by_path = {Path(path).name: trim for path, trim in init_calls}
-    assert trims_by_path[target_path.name] == 8
-    assert trims_by_path[reference_path.name] == -3
+    # Normalized trims: min is -3, so shift is +3.
+    # Target: 8 + 3 = 11
+    # Reference: -3 + 3 = 0
+    assert trims_by_path[target_path.name] == 11
+    assert trims_by_path[reference_path.name] == 0
     assert cache_probes and cache_probes[0].path == cache_file.resolve()
     assert result.json_tail is not None
     audio_json = _expect_mapping(result.json_tail["audio_alignment"])
     manual_map = cast(dict[str, int], audio_json.get("manual_trim_starts", {}))
-    assert manual_map[target_path.name] == 8
-    assert manual_map[reference_path.name] == -3
+    assert manual_map[target_path.name] == 11
+    assert manual_map[reference_path.name] == 0
     offsets_frames = _expect_mapping(audio_json.get("offsets_frames", {}))
     assert offsets_frames.get("Target") == 8
     assert offsets_frames.get("Reference") == -3

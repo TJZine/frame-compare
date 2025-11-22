@@ -358,38 +358,24 @@ def apply_audio_alignment(
         if not vspreview_reuse:
             return None
 
-        if display_data.manual_trim_lines:
-            display_data.manual_trim_lines.clear()
-        label_map = {plan.path.name: plan_labels.get(plan.path, plan.path.name) for plan in plans}
-        baseline_map = {plan.path.name: int(plan.trim_start) for plan in plans}
-        manual_trim_starts: Dict[str, int] = {}
-        delta_map: Dict[str, int] = {}
-        for plan in plans:
-            key = plan.path.name
-            if key not in vspreview_reuse:
-                continue
-            delta_frames = int(vspreview_reuse[key])
-            baseline_value = baseline_map.get(key, int(plan.trim_start))
-            applied_frames = baseline_value + delta_frames
-            plan.trim_start = applied_frames
-            plan.source_num_frames = None
-            plan.has_trim_start_override = (
-                plan.has_trim_start_override or delta_frames != 0
-            )
-            manual_trim_starts[key] = applied_frames
-            delta_map[key] = delta_frames
-            label = label_map.get(key, key)
-            display_data.manual_trim_lines.append(
-                f"VSPreview manual trim reused: {label} baseline {baseline_value}f {delta_frames:+d}f → {applied_frames}f"
-            )
+        # Logic extracted to _apply_manual_offsets_logic for testability
+        # Logic extracted to _apply_manual_offsets_logic for testability
+        delta_map, manual_trim_starts = _apply_manual_offsets_logic(
+            plans=plans,
+            vspreview_reuse=vspreview_reuse,
+            display_data=display_data,
+            plan_labels=plan_labels,
+        )
 
-        if not manual_trim_starts:
+        if not display_data.manual_trim_lines:
             return None
+
 
         display_data.offset_lines = ["Audio offsets: VSPreview manual offsets applied"]
         if display_data.manual_trim_lines:
             display_data.offset_lines.extend(display_data.manual_trim_lines)
 
+        label_map = {plan.path.name: plan_labels.get(plan.path, plan.path.name) for plan in plans}
         display_data.json_offsets_frames = {
             label_map.get(key, key): int(value)
             for key, value in delta_map.items()
@@ -1577,9 +1563,74 @@ def format_alignment_output(
     )
     if (
         summary is not None
-        and summary.vspreview_manual_offsets
         and summary.reference_plan.path.name in summary.vspreview_manual_offsets
     ):
         audio_block["vspreview_reference_trim"] = int(
             summary.vspreview_manual_offsets[summary.reference_plan.path.name]
         )
+
+
+def _apply_manual_offsets_logic(
+    plans: Sequence[ClipPlan],
+    vspreview_reuse: Dict[str, int],
+    display_data: _AudioAlignmentDisplayData,
+    plan_labels: Dict[Path, str],
+) -> tuple[Dict[str, int], Dict[str, int]]:
+    """
+    Apply manual offsets from VSPreview history, normalizing to avoid negative trims (padding).
+    Extracted for testability.
+
+    Returns:
+        tuple[Dict[str, int], Dict[str, int]]: (delta_map, manual_trim_starts)
+    """
+    if display_data.manual_trim_lines:
+        display_data.manual_trim_lines.clear()
+    label_map = {plan.path.name: plan_labels.get(plan.path, plan.path.name) for plan in plans}
+    baseline_map = {plan.path.name: int(plan.trim_start) for plan in plans}
+    delta_map: Dict[str, int] = {}
+    manual_trim_starts: Dict[str, int] = {}
+
+    # 1. Calculate proposed trims for all plans
+    proposed_trims: Dict[str, int] = {}
+    for plan in plans:
+        key = plan.path.name
+        baseline = baseline_map.get(key, int(plan.trim_start))
+        delta = int(vspreview_reuse.get(key, 0))
+        proposed_trims[key] = baseline + delta
+        if key in vspreview_reuse:
+            delta_map[key] = delta
+
+    # 2. Normalize to ensure no negative trims (avoid padding)
+    min_trim = min(proposed_trims.values()) if proposed_trims else 0
+    shift = -min_trim if min_trim < 0 else 0
+
+    # 3. Apply normalized trims
+    for plan in plans:
+        key = plan.path.name
+        original_trim = int(plan.trim_start)
+        new_trim = proposed_trims[key] + shift
+
+        if new_trim != original_trim:
+            plan.trim_start = new_trim
+            plan.source_num_frames = None
+            plan.has_trim_start_override = True
+
+        manual_trim_starts[key] = new_trim
+
+        # Only log if there was a delta or a shift
+        if key in vspreview_reuse or shift > 0:
+            label = label_map.get(key, key)
+            baseline = baseline_map.get(key, 0)
+            delta = delta_map.get(key, 0)
+
+            parts = [f"VSPreview manual trim reused: {label}"]
+            parts.append(f"baseline {baseline}f")
+            if delta != 0:
+                parts.append(f"{delta:+d}f offset")
+            if shift > 0:
+                parts.append(f"+{shift}f shift")
+            parts.append(f"→ {new_trim}f")
+
+            display_data.manual_trim_lines.append(" ".join(parts))
+
+    return delta_map, manual_trim_starts
