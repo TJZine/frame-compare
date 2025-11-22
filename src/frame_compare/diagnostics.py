@@ -169,7 +169,8 @@ def extract_dovi_metadata(props: Mapping[str, Any]) -> dict[str, float | int | b
     has_rpu_blob = any(k in ("DolbyVisionRPU", "_DolbyVisionRPU", "DolbyVisionRPU_b", "_DolbyVisionRPU_b") for k in props)
     if has_rpu_blob:
         # Log ALL keys to help identify the correct L1 metadata keys
-        logger.debug("DoVi props present; all_keys=%s", list(props.keys()))
+        # Using warning level to ensure it appears in standard output
+        logger.warning("DoVi props present; all_keys=%s", list(props.keys()))
 
     for key, value in props.items():
         # Check for raw RPU blob first (exact match or common variants)
