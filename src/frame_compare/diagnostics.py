@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Mapping, Sequence
 from typing import Any, cast
+
+logger = logging.getLogger(__name__)
 
 
 def _normalize_key(key: object) -> str:
@@ -135,8 +138,8 @@ def format_mastering_display_line(props: Mapping[str, Any]) -> str:
     )
 
 
-def _has_dovi_hint(normalized: str) -> bool:
-    return "dovi" in normalized or "dolbyvision" in normalized or "dolby" in normalized
+def _has_dovi_hint(key: str) -> bool:
+    return "dolby" in key or "dovi" in key or "rpu" in key or "l1" in key
 
 
 def _matches_all(text: str, needles: tuple[str, ...]) -> bool:
@@ -144,16 +147,30 @@ def _matches_all(text: str, needles: tuple[str, ...]) -> bool:
 
 
 def extract_dovi_metadata(props: Mapping[str, Any]) -> dict[str, float | int | bool | None]:
-    """Return Dolby Vision metadata extracted from frame props when available."""
+    """
+    Extract Dolby Vision metadata from frame properties.
 
+    Returns a dict with keys:
+        - rpu_present (bool)
+        - l1_average (float | None)
+        - l1_maximum (float | None)
+        - ... other fields ...
+    """
     result: dict[str, float | int | bool | None] = {
+        "rpu_present": None,
+        "l1_average": None,
+        "l1_maximum": None,
         "block_index": None,
         "block_total": None,
         "target_nits": None,
-        "l1_average": None,
-        "l1_maximum": None,
-        "rpu_present": None,
     }
+
+    # Debug: Log keys if RPU is present to help diagnose missing L1 stats
+    has_rpu_blob = any(k in ("DolbyVisionRPU", "_DolbyVisionRPU", "DolbyVisionRPU_b", "_DolbyVisionRPU_b") for k in props)
+    if has_rpu_blob:
+        dovi_keys = [k for k in props.keys() if "dolby" in k.lower() or "dovi" in k.lower() or "l1" in k.lower()]
+        logger.debug("DoVi props present; keys=%s", dovi_keys)
+
     for key, value in props.items():
         # Check for raw RPU blob first (exact match or common variants)
         if key in ("DolbyVisionRPU", "_DolbyVisionRPU", "DolbyVisionRPU_b", "_DolbyVisionRPU_b"):

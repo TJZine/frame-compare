@@ -1600,9 +1600,18 @@ def _apply_manual_offsets_logic(
         if key in vspreview_reuse:
             delta_map[key] = delta
 
+    logger.info(f"[ALIGN DEBUG] Raw manual offsets (vspreview_reuse): {vspreview_reuse}")
+    logger.info(f"[ALIGN DEBUG] Baseline trims: {baseline_map}")
+    logger.info(f"[ALIGN DEBUG] Proposed trims before normalization: {proposed_trims}")
+
     # 2. Normalize to ensure no negative trims (avoid padding)
     min_trim = min(proposed_trims.values()) if proposed_trims else 0
     shift = -min_trim if min_trim < 0 else 0
+
+    if shift > 0:
+        logger.info(f"[ALIGN DEBUG] Found negative proposed trim {min_trim}, applying global shift of {shift}f.")
+    else:
+        logger.info("[ALIGN DEBUG] No negative proposed trims found, no global shift applied.")
 
     # 3. Apply normalized trims
     for plan in plans:

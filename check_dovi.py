@@ -1,4 +1,5 @@
 import vapoursynth as vs
+
 core = vs.core
 try:
     print(f"vs-dovi available: {hasattr(core, 'dovi')}")
