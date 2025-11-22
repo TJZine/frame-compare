@@ -385,6 +385,8 @@ def init_clip(
         clip = _slice_clip(clip, end=int(trim_end))
     if fps_map is not None:
         clip = _apply_fps_map(clip, fps_map)
+
+    clip = _maybe_inject_dovi_metadata(clip, resolved_core)
     return clip
 
 
@@ -401,6 +403,45 @@ def _is_hdr_prop(key: str) -> bool:
     if normalized in _HDR_PROP_BASE_NAMES:
         return True
     return normalized.startswith("masteringdisplay") or normalized.startswith("contentlightlevel")
+
+
+def _maybe_inject_dovi_metadata(clip: Any, core: Any) -> Any:
+    """
+    Attempt to inject Dolby Vision metadata using the vs-dovi plugin if available.
+
+    This is a best-effort operation. If the plugin is missing or the clip doesn't
+    contain RPU data, the original clip is returned unmodified.
+    """
+    dovi = getattr(core, "dovi", None)
+    if dovi is None:
+        return clip
+
+    # Check for RPU presence in the first frame to avoid unnecessary processing
+    try:
+        props = clip.get_frame(0).props
+    except Exception:
+        return clip
+
+    has_rpu = False
+    for key in props:
+        if key in ("DolbyVisionRPU", "_DolbyVisionRPU", "DolbyVisionRPU_b", "_DolbyVisionRPU_b"):
+            has_rpu = True
+            break
+
+    if not has_rpu:
+        return clip
+
+    dolby_vision = getattr(dovi, "DolbyVision", None)
+    if not callable(dolby_vision):
+        return clip
+
+    try:
+        # map=True ensures the RPU is parsed and props are attached to the frame
+        return dolby_vision(clip, map=True)
+    except Exception as exc:
+        logger.debug("Failed to inject DoVi metadata: %s", exc)
+        return clip
+
 
 __all__ = [
     "VSPluginError",
