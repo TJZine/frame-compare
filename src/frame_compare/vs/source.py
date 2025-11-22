@@ -417,22 +417,6 @@ def _maybe_inject_dovi_metadata(clip: Any, core: Any) -> Any:
         logger.debug("vs-dovi plugin not found")
         return clip
 
-    # Check for RPU presence in the first frame to avoid unnecessary processing
-    try:
-        props = clip.get_frame(0).props
-    except Exception:
-        return clip
-
-    has_rpu = False
-    for key in props:
-        if key in ("DolbyVisionRPU", "_DolbyVisionRPU", "DolbyVisionRPU_b", "_DolbyVisionRPU_b"):
-            has_rpu = True
-            break
-
-    if not has_rpu:
-        logger.debug("No RPU found in first frame")
-        return clip
-
     dolby_vision = getattr(dovi, "DolbyVision", None)
     if not callable(dolby_vision):
         logger.debug("core.dovi.DolbyVision is not callable")

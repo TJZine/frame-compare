@@ -1585,7 +1585,7 @@ def _apply_manual_offsets_logic(
     """
     if display_data.manual_trim_lines:
         display_data.manual_trim_lines.clear()
-    label_map = {plan.path.name: plan_labels.get(plan.path, plan.path.name) for plan in plans}
+
     baseline_map = {plan.path.name: int(plan.trim_start) for plan in plans}
     delta_map: Dict[str, int] = {}
     manual_trim_starts: Dict[str, int] = {}
@@ -1605,40 +1605,60 @@ def _apply_manual_offsets_logic(
     logger.info(f"[ALIGN DEBUG] Proposed trims before normalization: {proposed_trims}")
 
     # 2. Normalize to ensure no negative trims (avoid padding)
-    min_trim = min(proposed_trims.values()) if proposed_trims else 0
-    shift = -min_trim if min_trim < 0 else 0
+    # We want to convert offsets (delays) into trims (cuts).
+    # If offset is negative (e.g. -361), it means the clip starts 361 frames EARLY (relative to baseline).
+    # To align, we want to shift everything so the earliest start becomes 0.
+    # min_offset = -361. shift = +361.
+    # Kira (-361): -361 + 361 = 0.
+    # CtrlHD (0): 0 + 361 = 361.
+    # Result: Kira trim 0, CtrlHD trim 361.
+    # This trims CtrlHD (the one that started later/had extra content? No, wait).
+    # If Kira is -361, it means Kira is "left" of zero.
+    # If we shift everything right by 361...
+    # Kira becomes 0. CtrlHD becomes 361.
+    # So we trim CtrlHD by 361 frames.
+    # This matches the user's request: "the -361 should trim the CTRLHD video".
+    min_offset = min(proposed_trims.values()) if proposed_trims else 0
+    shift = -min_offset if min_offset < 0 else 0
 
     if shift > 0:
-        logger.info(f"[ALIGN DEBUG] Found negative proposed trim {min_trim}, applying global shift of {shift}f.")
+        logger.info(f"[ALIGN DEBUG] Found negative proposed trim {min_offset}, applying global shift of {shift}f.")
     else:
         logger.info("[ALIGN DEBUG] No negative proposed trims found, no global shift applied.")
+
+    logger.info(f"[ALIGN DEBUG] Normalizing with shift={shift}")
 
     # 3. Apply normalized trims
     for plan in plans:
         key = plan.path.name
-        original_trim = int(plan.trim_start)
-        new_trim = proposed_trims[key] + shift
+        if key in proposed_trims:
+            raw_offset = proposed_trims[key]
+            # Calculate normalized trim
+            normalized_trim = raw_offset + shift
 
-        if new_trim != original_trim:
-            plan.trim_start = new_trim
-            plan.source_num_frames = None
-            plan.has_trim_start_override = True
+            # Apply to plan
+            # Note: We SET the new absolute trim_start (normalized_trim includes the baseline)
+            original_trim = int(plan.trim_start)
+            if normalized_trim != original_trim:
+                plan.trim_start = normalized_trim
+                plan.source_num_frames = None
+                plan.has_trim_start_override = True
 
-        manual_trim_starts[key] = new_trim
+            manual_trim_starts[key] = int(plan.trim_start)
 
-        # Only log if there was a delta or a shift
-        if key in vspreview_reuse or shift > 0:
-            label = label_map.get(key, key)
+
             baseline = baseline_map.get(key, 0)
             delta = delta_map.get(key, 0)
 
-            parts = [f"VSPreview manual trim reused: {label}"]
+            parts: List[str] = []
             parts.append(f"baseline {baseline}f")
             if delta != 0:
                 parts.append(f"{delta:+d}f offset")
             if shift > 0:
                 parts.append(f"+{shift}f shift")
-            parts.append(f"→ {new_trim}f")
+            parts.append(f"→ {int(plan.trim_start)}f")
+
+            logger.info(f"[ALIGN DEBUG] Applied trim to {key}: raw={raw_offset} + shift={shift} -> {normalized_trim}. Final trim_start={plan.trim_start}")
 
             display_data.manual_trim_lines.append(" ".join(parts))
 
