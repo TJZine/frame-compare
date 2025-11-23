@@ -56,7 +56,12 @@ class DoviToolService:
         if cache_path.exists():
             try:
                 with open(cache_path, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                    cached_data = json.load(f)
+                    logger.warning("Found cached dovi info at %s with %d frames", cache_path, len(cached_data))
+                    if cached_data:
+                        logger.warning("Cached data first frame keys: %s", cached_data[0].keys())
+                    # Temporarily disable cache return to force fresh run for debugging
+                    # return cached_data
             except Exception as e:
                 logger.warning("Failed to load cached dovi info: %s", e)
 
