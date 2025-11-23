@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, cast
 
@@ -58,27 +60,31 @@ class DoviToolService:
             except Exception as e:
                 logger.warning("Failed to load cached dovi info: %s", e)
 
+        rpu_bin = None
+        json_out = None
+
         try:
-            # Run dovi_tool info -f json -i <file>
-            # Note: dovi_tool info might output a lot of data.
-            # We need to capture stdout.
-            cmd = [str(self.binary_path), "info", "-f", "json", "-i", str(file_path)]
-            logger.info("Running dovi_tool: %s", " ".join(cmd))
+            # Step 1: Extract RPU binary
+            # dovi_tool extract-rpu -i <video> -o <temp.bin>
+            fd_bin, rpu_bin = tempfile.mkstemp(suffix=".bin")
+            os.close(fd_bin)
 
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=True
-            )
+            cmd_extract = [str(self.binary_path), "extract-rpu", "-i", str(file_path), "-o", rpu_bin]
+            logger.info("Running dovi_tool extract-rpu: %s", " ".join(cmd_extract))
+            subprocess.run(cmd_extract, check=True, capture_output=True, text=True)
 
-            data = json.loads(result.stdout)
+            # Step 2: Export RPU to JSON
+            # dovi_tool export -i <temp.bin> -d all=<temp.json>
+            fd_json, json_out = tempfile.mkstemp(suffix=".json")
+            os.close(fd_json)
 
-            # Parse the JSON to extract what we need (L1 avg/max)
-            # The structure of dovi_tool JSON output needs to be handled.
-            # Assuming it returns a list of frames or a structure containing frames.
-            # We'll need to inspect the output structure.
-            # For now, let's assume 'frames' key or root list.
+            cmd_export = [str(self.binary_path), "export", "-i", rpu_bin, "-d", f"all={json_out}"]
+            logger.info("Running dovi_tool export: %s", " ".join(cmd_export))
+            subprocess.run(cmd_export, check=True, capture_output=True, text=True)
+
+            # Step 3: Parse JSON
+            with open(json_out, "r", encoding="utf-8") as f:
+                data = json.load(f)
 
             frames_metadata = self._parse_dovi_json(data)
 
@@ -100,6 +106,18 @@ class DoviToolService:
         except Exception as e:
             logger.warning("Unexpected error running dovi_tool: %s", e)
             return []
+        finally:
+            # Cleanup temp files
+            if rpu_bin and os.path.exists(rpu_bin):
+                try:
+                    os.remove(rpu_bin)
+                except OSError:
+                    pass
+            if json_out and os.path.exists(json_out):
+                try:
+                    os.remove(json_out)
+                except OSError:
+                    pass
 
     def _pq_to_nits(self, pq_val: int | float) -> float:
         """
