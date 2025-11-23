@@ -414,16 +414,16 @@ def _maybe_inject_dovi_metadata(clip: Any, core: Any) -> Any:
     """
     dovi = getattr(core, "dovi", None)
     if dovi is None:
-        logger.debug("vs-dovi plugin not found")
+        logger.warning("vs-dovi plugin not found in core")
         return clip
 
     dolby_vision = getattr(dovi, "DolbyVision", None)
     if not callable(dolby_vision):
-        logger.debug("core.dovi.DolbyVision is not callable")
+        logger.warning("core.dovi.DolbyVision is not callable")
         return clip
 
     try:
-        logger.info("Injecting DoVi metadata using vs-dovi")
+        logger.warning("Injecting DoVi metadata using vs-dovi (map=True)")
         # map=True ensures the RPU is parsed and props are attached to the frame
         return dolby_vision(clip, map=True)
     except Exception as exc:
