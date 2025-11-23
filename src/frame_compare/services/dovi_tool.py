@@ -56,12 +56,7 @@ class DoviToolService:
         if cache_path.exists():
             try:
                 with open(cache_path, "r", encoding="utf-8") as f:
-                    cached_data = json.load(f)
-                    logger.warning("Found cached dovi info at %s with %d frames", cache_path, len(cached_data))
-                    if cached_data:
-                        logger.warning("Cached data first frame keys: %s", cached_data[0].keys())
-                    # Temporarily disable cache return to force fresh run for debugging
-                    # return cached_data
+                    return json.load(f)
             except Exception as e:
                 logger.warning("Failed to load cached dovi info: %s", e)
 
@@ -169,30 +164,26 @@ class DoviToolService:
             frames = data_dict.get("frames", [])
         else:
             frames = data
-            
+
         if not isinstance(frames, list):
-            logger.warning("dovi_tool output 'frames' is not a list: %s", type(frames))
+            logger.warning("dovi_tool output 'frames' is not a list")
             return []
-            
+
         frame_list = cast(List[Any], frames)
-        if frame_list:
-            logger.warning("dovi_tool first frame keys: %s", frame_list[0].keys() if isinstance(frame_list[0], dict) else "Not a dict")
-            if isinstance(frame_list[0], dict):
-                rpu = frame_list[0].get("rpu", {})
-                logger.warning("dovi_tool first frame RPU keys: %s", rpu.keys() if isinstance(rpu, dict) else "Not a dict")
-                if isinstance(rpu, dict):
-                    vdr = rpu.get("vdr_dm_data", {})
-                    logger.warning("dovi_tool first frame VDR keys: %s", vdr.keys() if isinstance(vdr, dict) else "Not a dict")
-                    if isinstance(vdr, dict):
-                        l1 = vdr.get("level1", {})
-                        logger.warning("dovi_tool first frame L1 keys: %s", l1.keys() if isinstance(l1, dict) else "Not a dict")
 
         for frame in frame_list:
             if not isinstance(frame, dict):
                 continue
             stats: Dict[str, Any] = {}
-            rpu = cast(Dict[str, Any], frame.get("rpu", {})) # pyright: ignore[reportUnknownMemberType]
-            vdr_dm = cast(Dict[str, Any], rpu.get("vdr_dm_data", {})) # pyright: ignore[reportUnknownMemberType]
+
+            # Check for vdr_dm_data directly (new dovi_tool structure)
+            vdr_dm = cast(Dict[str, Any], frame.get("vdr_dm_data", {})) # pyright: ignore[reportUnknownMemberType]
+
+            # Fallback: Check for rpu -> vdr_dm_data (old structure?)
+            if not vdr_dm:
+                rpu = cast(Dict[str, Any], frame.get("rpu", {})) # pyright: ignore[reportUnknownMemberType]
+                vdr_dm = cast(Dict[str, Any], rpu.get("vdr_dm_data", {})) # pyright: ignore[reportUnknownMemberType]
+
             l1 = cast(Dict[str, Any], vdr_dm.get("level1", {})) # pyright: ignore[reportUnknownMemberType]
 
             if "min_pq" in l1:
