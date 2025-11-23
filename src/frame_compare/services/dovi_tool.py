@@ -56,7 +56,9 @@ class DoviToolService:
         if cache_path.exists():
             try:
                 with open(cache_path, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                    cached_data = json.load(f)
+                    logger.warning("Found cached dovi info at %s with %d frames", cache_path, len(cached_data))
+                    # return cached_data # FORCE FRESH RUN
             except Exception as e:
                 logger.warning("Failed to load cached dovi info: %s", e)
 
@@ -87,6 +89,11 @@ class DoviToolService:
                 data = json.load(f)
 
             frames_metadata = self._parse_dovi_json(data)
+
+            if frames_metadata:
+                logger.warning("Extracted metadata for %d frames. First frame: %s", len(frames_metadata), frames_metadata[0])
+            else:
+                logger.warning("Extracted metadata is empty!")
 
             # Save to cache
             try:
@@ -170,8 +177,10 @@ class DoviToolService:
             return []
 
         frame_list = cast(List[Any], frames)
+        if frame_list:
+             logger.warning("Parsing %d frames. First frame keys: %s", len(frame_list), frame_list[0].keys() if isinstance(frame_list[0], dict) else "Not a dict")
 
-        for frame in frame_list:
+        for i, frame in enumerate(frame_list):
             if not isinstance(frame, dict):
                 continue
             stats: Dict[str, Any] = {}
@@ -184,7 +193,16 @@ class DoviToolService:
                 rpu = cast(Dict[str, Any], frame.get("rpu", {})) # pyright: ignore[reportUnknownMemberType]
                 vdr_dm = cast(Dict[str, Any], rpu.get("vdr_dm_data", {})) # pyright: ignore[reportUnknownMemberType]
 
+            if i == 0:
+                 logger.warning("Frame 0 vdr_dm keys: %s", vdr_dm.keys() if isinstance(vdr_dm, dict) else "None")
+
             l1 = cast(Dict[str, Any], vdr_dm.get("level1", {})) # pyright: ignore[reportUnknownMemberType]
+
+            if i == 0:
+                 logger.warning("Frame 0 l1 keys: %s", l1.keys() if isinstance(l1, dict) else "None")
+
+            if not isinstance(l1, dict):
+                continue
 
             if "min_pq" in l1:
                 val = l1["min_pq"]
