@@ -164,11 +164,23 @@ class DoviToolService:
             frames = data_dict.get("frames", [])
         else:
             frames = data
-
+            
         if not isinstance(frames, list):
+            logger.warning("dovi_tool output 'frames' is not a list: %s", type(frames))
             return []
-
+            
         frame_list = cast(List[Any], frames)
+        if frame_list:
+            logger.info("dovi_tool first frame keys: %s", frame_list[0].keys() if isinstance(frame_list[0], dict) else "Not a dict")
+            if isinstance(frame_list[0], dict):
+                rpu = frame_list[0].get("rpu", {})
+                logger.info("dovi_tool first frame RPU keys: %s", rpu.keys() if isinstance(rpu, dict) else "Not a dict")
+                if isinstance(rpu, dict):
+                    vdr = rpu.get("vdr_dm_data", {})
+                    logger.info("dovi_tool first frame VDR keys: %s", vdr.keys() if isinstance(vdr, dict) else "Not a dict")
+                    if isinstance(vdr, dict):
+                        l1 = vdr.get("level1", {})
+                        logger.info("dovi_tool first frame L1 keys: %s", l1.keys() if isinstance(l1, dict) else "Not a dict")
 
         for frame in frame_list:
             if not isinstance(frame, dict):
