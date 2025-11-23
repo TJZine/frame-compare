@@ -386,7 +386,7 @@ def init_clip(
     if fps_map is not None:
         clip = _apply_fps_map(clip, fps_map)
 
-    clip = _maybe_inject_dovi_metadata(clip, resolved_core)
+    clip = _maybe_inject_dovi_metadata(clip, resolved_core, str(path_obj), trim_start)
     return clip
 
 
@@ -405,27 +405,46 @@ def _is_hdr_prop(key: str) -> bool:
     return normalized.startswith("masteringdisplay") or normalized.startswith("contentlightlevel")
 
 
-def _maybe_inject_dovi_metadata(clip: Any, core: Any) -> Any:
+def _maybe_inject_dovi_metadata(clip: Any, core: Any, file_path: str, trim_start: int) -> Any:
     """
-    Attempt to inject Dolby Vision metadata using the vs-dovi plugin if available.
-
-    This is a best-effort operation. If the plugin is missing or the clip doesn't
-    contain RPU data, the original clip is returned unmodified.
+    Attempt to inject Dolby Vision metadata using dovi_tool.
     """
-    dovi = getattr(core, "dovi", None)
-    if dovi is None:
-        logger.warning("vs-dovi plugin not found in core")
-        return clip
+    from src.frame_compare.services.dovi_tool import dovi_tool
 
-    dolby_vision = getattr(dovi, "DolbyVision", None)
-    if not callable(dolby_vision):
-        logger.warning("core.dovi.DolbyVision is not callable")
+    if not dovi_tool.is_available():
         return clip
 
     try:
-        logger.warning("Injecting DoVi metadata using vs-dovi (map=True)")
-        # map=True ensures the RPU is parsed and props are attached to the frame
-        return dolby_vision(clip, map=True)
+        metadata = dovi_tool.extract_rpu_metadata(Path(file_path))
+        if not metadata:
+            return clip
+
+        logger.info("Injecting DoVi metadata from dovi_tool (%d frames)", len(metadata))
+
+        def _inject_props(n: int, f: Any) -> Any:
+            # Calculate original source frame index
+            if trim_start > 0:
+                source_idx = n + trim_start
+            elif trim_start < 0:
+                source_idx = n - abs(trim_start)
+            else:
+                source_idx = n
+
+            if 0 <= source_idx < len(metadata):
+                data = metadata[source_idx]
+                fout = f.copy()
+                if "l1_avg_nits" in data:
+                    fout.props["DolbyVision_L1_Average"] = float(data["l1_avg_nits"])
+                if "l1_max_nits" in data:
+                    fout.props["DolbyVision_L1_Maximum"] = float(data["l1_max_nits"])
+                # Also inject RPU present flag if not already there, to trigger overlay
+                if "DolbyVisionRPU" not in fout.props:
+                     fout.props["DolbyVisionRPU"] = b"1" # Dummy blob to signal presence
+                return fout
+            return f
+
+        return core.std.ModifyFrame(clip, clip, _inject_props)
+
     except Exception as exc:
         logger.warning("Failed to inject DoVi metadata: %s", exc)
         return clip
