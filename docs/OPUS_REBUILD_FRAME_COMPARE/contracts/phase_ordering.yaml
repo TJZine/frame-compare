@@ -1,0 +1,190 @@
+# Phase Ordering Contract
+# Canonical source for pipeline phase execution order.
+# All phases execute in this order when enabled.
+#
+# Contract version: 1.0
+# Authority: This file is the SSOT for phase ordering.
+# Generator: N/A (documentation reference)
+
+version: "1.0"
+
+# Support policy:
+# - Additive phases: Add to end of phases list
+# - Breaking changes: Bump version, update all consumers
+
+phases:
+  - name: preflight
+    order: 1
+    description: "Validate configuration and resolve workspace paths"
+    skip_condition: null  # Always runs
+    inputs:
+      - config_path
+      - workspace_root
+      - env
+    outputs:
+      - ConfigSchema
+      - WorkspacePaths
+      - clip_list
+    failure_mode: fatal
+    error_codes:
+      - FC-1001  # CONFIG_NOT_FOUND
+      - FC-1002  # CONFIG_PARSE_ERROR
+      - FC-1003  # CONFIG_VALIDATION_ERROR
+      - FC-3006  # DIR_NOT_FOUND
+      - FC-3001  # NO_VIDEOS_FOUND
+      - FC-3009  # PATH_ESCAPES_ROOT
+
+  - name: load_sources
+    order: 2
+    description: "Open video sources via VapourSynth or FFmpeg probe"
+    skip_condition: null  # Always runs
+    inputs:
+      - clip_paths
+      - vs_availability
+      - ffmpeg_availability
+    outputs:
+      - SourceInfo[]
+    failure_mode: fatal
+    error_codes:
+      - FC-2001  # VAPOURSYNTH_NOT_FOUND
+      - FC-2003  # PLUGIN_NOT_FOUND
+      - FC-2005  # FFMPEG_NOT_FOUND
+      - FC-4015  # SOURCE_LOAD_ERROR
+
+  - name: frame_plan
+    order: 3
+    description: "Generate deterministic frame selection plan"
+    skip_condition: null  # Always runs
+    inputs:
+      - num_frames
+      - frame_count
+      - seed
+      - skip_analysis
+    outputs:
+      - FramePlan
+    failure_mode: fatal
+    error_codes:
+      - FC-3004  # INSUFFICIENT_FRAMES
+    notes: |
+      FramePlan.frames is ALWAYS a concrete list[int].
+      Render phase MUST NOT reselect frames.
+
+  - name: analyze
+    order: 4
+    description: "Calculate quality metrics and refine frame selection"
+    skip_condition: "--skip-analysis"
+    inputs:
+      - clips_vs
+      - analysis_config
+    outputs:
+      - MetricsResult
+      - frame_selection
+    failure_mode: fatal
+    error_codes:
+      - FC-4002  # METRICS_CALCULATION_ERROR
+      - FC-4012  # SELECTION_ERROR
+
+  - name: render
+    order: 5
+    description: "Extract frames and save as screenshots"
+    skip_condition: null  # Always runs
+    inputs:
+      - FramePlan
+      - renderer_choice
+      - overlay_mode
+    outputs:
+      - screenshot_paths[]
+    failure_mode: fatal
+    error_codes:
+      - FC-2005  # FFMPEG_NOT_FOUND
+      - FC-2006  # FFMPEG_ERROR
+      - FC-4004  # RENDER_ERROR
+      - FC-4014  # OVERLAY_ERROR
+
+  - name: metadata
+    order: 6
+    description: "Extract metadata from filenames and lookup on TMDB"
+    skip_condition: "--skip-metadata OR tmdb.enabled == false"
+    inputs:
+      - title_guess
+      - tmdb_api_key
+    outputs:
+      - TmdbMetadata | null
+    failure_mode: warn  # Never fails the entire run
+    error_codes:
+      - FC-5005  # TMDB_ERROR
+      - FC-5006  # TMDB_RATE_LIMITED
+    notes: |
+      Metadata failure is warn-only.
+      Downstream phases (publish, report) must handle null metadata.
+
+  - name: dovi
+    order: 7
+    description: "Extract Dolby Vision RPU metadata if available"
+    skip_condition: "--skip-dovi OR dovi.enable == false"
+    inputs:
+      - video_paths
+      - dovi_tool_path
+    outputs:
+      - DoviMetadata | null
+    failure_mode: warn  # Skips gracefully if dovi_tool missing
+    error_codes:
+      - FC-2007  # DOVI_TOOL_NOT_FOUND
+      - FC-4018  # DOVI_ERROR
+
+  - name: publish
+    order: 8
+    description: "Upload screenshots to slow.pics"
+    skip_condition: "--no-upload OR slowpics.auto_upload == false"
+    inputs:
+      - screenshot_dir
+      - metadata  # Optional, uses fallback title if null
+      - slowpics_config
+    outputs:
+      - slowpics_url
+    failure_mode: fatal
+    error_codes:
+      - FC-5010  # HTTPS_REQUIRED
+      - FC-5011  # HOST_NOT_ALLOWED
+      - FC-5002  # SLOWPICS_ERROR
+      - FC-5003  # SLOWPICS_RATE_LIMITED
+      - FC-5004  # SLOWPICS_UNAVAILABLE
+
+  - name: report
+    order: 9
+    description: "Generate offline HTML comparison report"
+    skip_condition: "report.enable == false"
+    inputs:
+      - screenshots
+      - urls  # Optional, from publish phase
+      - metadata  # Optional, from metadata phase
+    outputs:
+      - report_path
+    failure_mode: warn  # Report failure is non-fatal
+    error_codes:
+      - FC-4017  # REPORT_ERROR
+
+# Data handoff contracts
+# These define stable interfaces between phases
+handoffs:
+  frame_plan_to_render:
+    source: frame_plan
+    target: render
+    contract: |
+      FramePlan.frames is always a concrete list[int].
+      Render MUST NOT reselect frames.
+      Render receives FramePlan directly, not via analyze.
+    
+  metadata_to_publish:
+    source: metadata
+    target: publish
+    contract: |
+      Publish accepts TmdbMetadata | None.
+      If None, uses fallback title from first filename.
+    
+  metadata_to_report:
+    source: metadata
+    target: report
+    contract: |
+      Report accepts TmdbMetadata | None.
+      If None, omits TMDB poster/title from report.
