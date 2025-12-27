@@ -1,0 +1,15 @@
+.DS_Store
+
+# Local tool caches / indexes
+.codanna/
+.mcp_sequential_thinking/
+.fastembed_cache
+.uv_cache/
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+
+# Editor
+.vscode/
