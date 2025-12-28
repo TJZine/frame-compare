@@ -144,6 +144,7 @@ RUN apt-get update && \
         ffmpeg \
         libxxhash0 \
         wget \
+        which \
         && \
     rm -rf /var/lib/apt/lists/*
 

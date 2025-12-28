@@ -28,6 +28,9 @@ This revision adds runtime packages required for DevContainer server bootstrap.
 - `Dockerfile` — Install `wget` and `ca-certificates` in the runtime image.
 - `CHANGELOG.md` — Note runtime dependency update for DevContainer bootstrap.
 - `docs/DECISIONS.md` — Record decision for runtime `wget`/`ca-certificates`.
+- `docs/OPUS_REBUILD_FRAME_COMPARE/05-implementation/cli-flags-canonical.md` — Regenerated contract view output.
+- `docs/OPUS_REBUILD_FRAME_COMPARE/05-implementation/error-codes.md` — Regenerated contract view output.
+- `docs/OPUS_REBUILD_FRAME_COMPARE/scaffold/src/frame_compare/cli/_generated.py` — Regenerated contract view output.
 
 ## Implementation Notes
 

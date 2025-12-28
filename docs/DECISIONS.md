@@ -277,3 +277,13 @@
 **Decision:** Install `wget` and `ca-certificates` in the runtime stage of the Dockerfile.
 
 **Rationale:** Ensures DevContainer server bootstrap can download the remote binary over HTTPS on first start.
+
+---
+
+### DevContainer bootstrap requires `which`
+
+**Context:** The DevContainer installer script uses `which wget` to detect the downloader; Debian slim does not include `which` by default, so the script fails even when `wget` is installed.
+
+**Decision:** Install `which` in the runtime stage of the Dockerfile.
+
+**Rationale:** Allows the DevContainer bootstrap script to detect `wget` and proceed with server installation.
