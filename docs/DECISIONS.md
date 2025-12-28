@@ -267,3 +267,13 @@
 **Decision:** Use `VAPOURSYNTH_CONF_PATH` with a temporary `vapoursynth.conf` that points `UserPluginDir` and `SystemPluginDir` to nonexistent paths for the negative test.
 
 **Rationale:** VapourSynth autoloading uses `vapoursynth.conf` (Linux) to select plugin directories; overriding the config file reliably isolates plugin discovery. Source: https://raw.githubusercontent.com/vapoursynth/vapoursynth/master/doc/installation.rst @ 2025-12-28T05:35:59Z (text/plain, max_length=20000, start_index=0, single chunk).
+
+---
+
+### DevContainer bootstrap requires wget
+
+**Context:** The DevContainer remote server installer downloads a binary using `wget`, but the runtime image did not include it, causing DevContainer startup to fail.
+
+**Decision:** Install `wget` and `ca-certificates` in the runtime stage of the Dockerfile.
+
+**Rationale:** Ensures DevContainer server bootstrap can download the remote binary over HTTPS on first start.

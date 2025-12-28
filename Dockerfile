@@ -140,8 +140,10 @@ FROM python:3.13.1-slim-bookworm AS runtime
 # Use ffmpeg meta-package for AV libs to avoid version-specific package names
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
+        ca-certificates \
         ffmpeg \
         libxxhash0 \
+        wget \
         && \
     rm -rf /var/lib/apt/lists/*
 
