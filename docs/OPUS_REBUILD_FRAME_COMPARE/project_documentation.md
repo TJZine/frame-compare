@@ -27,27 +27,27 @@ graph TD
     subgraph "CLI Layer"
         A[frame_compare.py] --> B[cli_entry.py]
     end
-    
+
     subgraph "Orchestration Layer"
         B --> C[runner.py]
         C --> D[WorkflowCoordinator]
         D --> E[phases/]
     end
-    
+
     subgraph "Service Layer"
         E --> F[alignment.py]
         E --> G[metadata.py]
         E --> H[publishers.py]
         E --> I[dovi_tool.py]
     end
-    
+
     subgraph "Core Domain"
         F --> J[analysis/]
         G --> K[vs/]
         H --> L[render/]
         I --> M[screenshot/]
     end
-    
+
     subgraph "Infrastructure"
         J --> N[VapourSynth]
         K --> N

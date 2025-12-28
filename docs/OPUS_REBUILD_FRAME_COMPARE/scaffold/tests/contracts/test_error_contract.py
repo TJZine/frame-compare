@@ -49,9 +49,9 @@ class TestErrorCodesContract:
             expected_name = data["errors"][code]["name"]
             actual_name = error_cls.NAME
 
-            assert actual_name == expected_name, (
-                f"{code}: expected NAME={expected_name!r}, got {actual_name!r}"
-            )
+            assert (
+                actual_name == expected_name
+            ), f"{code}: expected NAME={expected_name!r}, got {actual_name!r}"
 
     def test_registered_error_exit_codes_match(self) -> None:
         """Error EXIT_CODE classvars match yaml."""
@@ -66,9 +66,9 @@ class TestErrorCodesContract:
             expected_exit = data["errors"][code]["exit_code"]
             actual_exit = error_cls.EXIT_CODE
 
-            assert actual_exit == expected_exit, (
-                f"{code}: expected EXIT_CODE={expected_exit}, got {actual_exit}"
-            )
+            assert (
+                actual_exit == expected_exit
+            ), f"{code}: expected EXIT_CODE={expected_exit}, got {actual_exit}"
 
     def test_security_errors_registered(self) -> None:
         """FC-5010 and FC-5011 are registered (v11 requirement)."""

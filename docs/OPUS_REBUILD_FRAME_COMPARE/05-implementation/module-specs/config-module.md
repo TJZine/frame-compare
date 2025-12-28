@@ -1,7 +1,7 @@
 # Config Module Implementation Spec
 
-> **Module:** `frame_compare.config`  
-> **Version:** 1.0  
+> **Module:** `frame_compare.config`
+> **Version:** 1.0
 > **Priority:** P0
 
 ---
@@ -48,7 +48,7 @@ from pathlib import Path
 
 class ConfigSchema(BaseSettings):
     """Root configuration schema."""
-    
+
     model_config = SettingsConfigDict(
         env_prefix="FRAME_COMPARE_",
         env_nested_delimiter="__",
@@ -78,7 +78,7 @@ class ConfigSchema(BaseSettings):
             TomlConfigSettingsSource(settings_cls),
             file_secret_settings,
         )
-    
+
     paths: PathsConfig = Field(default_factory=PathsConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     audio_alignment: AudioAlignmentConfig = Field(default_factory=AudioAlignmentConfig)
@@ -159,7 +159,7 @@ class ReportConfig(BaseModel):
     default_mode: ViewerMode = ViewerMode.SLIDER
     include_filmstrip: bool = True
     embed_images: bool = False
-    
+
     @field_validator("output_dir", mode="before")
     @classmethod
     def normalize_empty_string(cls, v: str | None) -> str | None:
@@ -170,7 +170,7 @@ class ReportConfig(BaseModel):
 
 class DoviConfig(BaseModel):
     """Dolby Vision handling configuration.
-    
+
     This is the canonical definition. The services/dovi.py module
     imports DoviConfig from here. TOML/ENV values are strings;
     Pydantic converts to Path.
@@ -260,20 +260,20 @@ def load_config(
 ) -> ConfigSchema:
     """
     Load configuration from TOML file with overrides.
-    
+
     Priority (highest to lowest):
     1. Explicit overrides dict
     2. Environment variables (FRAME_COMPARE_*)
     3. TOML file values
     4. Default values
-    
+
     Args:
         config_path: Path to TOML file, or None for defaults
         overrides: Optional overrides dict
-        
+
     Returns:
         Validated ConfigSchema
-        
+
     Raises:
         ConfigNotFoundError: If path specified but file missing
         ConfigParseError: If TOML syntax invalid
@@ -380,7 +380,7 @@ def apply_cli_overrides(
 ) -> ConfigSchema:
     """
     Apply CLI arguments as config overrides.
-    
+
     Creates a new ConfigSchema with overrides applied.
     """
 ```
@@ -514,7 +514,7 @@ def test_load_default_config():
 def test_load_from_toml(tmp_path):
     toml_file = tmp_path / "config.toml"
     toml_file.write_text('[analysis]\nframe_count = 20')
-    
+
     config = load_config(toml_file)
     assert config.analysis.frame_count == 20
 

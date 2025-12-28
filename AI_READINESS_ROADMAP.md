@@ -1,21 +1,21 @@
 # AI Readiness Score: 10/10 ✅
 
-> **Current Score:** 10/10  
-> **Generated:** 2025-12-21  
+> **Current Score:** 10/10
+> **Generated:** 2025-12-21
 > **Last Updated:** 2025-12-27 08:32 UTC
-> **Sources:**  
+> **Sources:**
 >
-> - `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md`  
-> - `docs/OPUS_REBUILD_FRAME_COMPARE/agent-prompts/01-planning-agent.md`  
-> - `docs/OPUS_REBUILD_FRAME_COMPARE/agent-prompts/02-plan-review-agent.md`  
-> - `docs/OPUS_REBUILD_FRAME_COMPARE/agent-prompts/03-coding-agent.md`  
-> - `docs/OPUS_REBUILD_FRAME_COMPARE/agent-prompts/04-verification-agent.md`  
-> - `docs/OPUS_REBUILD_FRAME_COMPARE/agent-prompts/05-review-agent.md`  
-> - `.agent-workflow/README.md`  
-> - `.agent-workflow/runs/README.md`  
-> - `.agent-workflow/index.md`  
-> - `docs/OPUS_REBUILD_FRAME_COMPARE/contracts/readiness_gates.json` (gate commands SSOT)  
-> - `scripts/update_ai_readiness_roadmap.py` (sync gate table)  
+> - `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md`
+> - `docs/OPUS_REBUILD_FRAME_COMPARE/agent-prompts/01-planning-agent.md`
+> - `docs/OPUS_REBUILD_FRAME_COMPARE/agent-prompts/02-plan-review-agent.md`
+> - `docs/OPUS_REBUILD_FRAME_COMPARE/agent-prompts/03-coding-agent.md`
+> - `docs/OPUS_REBUILD_FRAME_COMPARE/agent-prompts/04-verification-agent.md`
+> - `docs/OPUS_REBUILD_FRAME_COMPARE/agent-prompts/05-review-agent.md`
+> - `.agent-workflow/README.md`
+> - `.agent-workflow/runs/README.md`
+> - `.agent-workflow/index.md`
+> - `docs/OPUS_REBUILD_FRAME_COMPARE/contracts/readiness_gates.json` (gate commands SSOT)
+> - `scripts/update_ai_readiness_roadmap.py` (sync gate table)
 > - *(Historical context)* `docs/OPUS_REBUILD_FRAME_COMPARE/15-plan-review-report.md`, `docs/OPUS_REBUILD_FRAME_COMPARE/16-ai-readiness-roadmap-review.md`
 
 ---

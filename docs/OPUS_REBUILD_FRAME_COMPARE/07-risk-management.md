@@ -1,6 +1,6 @@
 # Risk Management
 
-> **Module:** Planning  
+> **Module:** Planning
 > **Version:** 1.0
 
 ---
@@ -45,11 +45,11 @@
 High    │               TR-005, TR-006  TR-001
 Prob    │               PR-001          PR-002
 ────────┼───────────────────────────────────────────
-Medium  │ ER-002        TR-002, TR-004  
-Prob    │ PR-003        PR-004          
+Medium  │ ER-002        TR-002, TR-004
+Prob    │ PR-003        PR-004
 ────────┼───────────────────────────────────────────
 Low     │ ER-001        TR-003
-Prob    │ ER-003        
+Prob    │ ER-003
 ```
 
 ---
@@ -58,7 +58,7 @@ Prob    │ ER-003
 
 ### TR-001: VapourSynth Container Build Fails
 
-**Severity:** Critical  
+**Severity:** Critical
 **Mitigation:**
 
 1. Use multi-stage build with cached base image
@@ -73,7 +73,7 @@ Prob    │ ER-003
 
 ### TR-002: libplacebo API Changes
 
-**Severity:** High  
+**Severity:** High
 **Mitigation:**
 
 1. Pin libplacebo version in container
@@ -87,7 +87,7 @@ Prob    │ ER-003
 
 ### TR-003: slow.pics API Deprecation
 
-**Severity:** Medium  
+**Severity:** Medium
 **Mitigation:**
 
 1. Adapter pattern for publishing interface
@@ -101,7 +101,7 @@ Prob    │ ER-003
 
 ### PR-002: Feature Parity Gaps
 
-**Severity:** High  
+**Severity:** High
 **Mitigation:**
 
 1. Create feature matrix early (Phase 0)
@@ -115,7 +115,7 @@ Prob    │ ER-003
 
 ### TR-005: Performance Regression
 
-**Severity:** Medium  
+**Severity:** Medium
 **Mitigation:**
 
 1. Establish baseline benchmarks

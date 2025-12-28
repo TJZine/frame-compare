@@ -1,6 +1,6 @@
 # Operational Runbooks
 
-> **Module:** Operations  
+> **Module:** Operations
 > **Version:** 1.0
 
 ---

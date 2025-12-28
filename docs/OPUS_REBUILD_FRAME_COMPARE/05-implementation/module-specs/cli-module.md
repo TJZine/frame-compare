@@ -1,7 +1,7 @@
 # CLI & Orchestration Module Implementation Spec
 
-> **Module:** `frame_compare.cli`, `frame_compare.runner`  
-> **Version:** 1.0  
+> **Module:** `frame_compare.cli`, `frame_compare.runner`
+> **Version:** 1.0
 > **Priority:** P0
 
 ---
@@ -240,7 +240,7 @@ class RunResult:
 @dataclass
 class RunContext:
     """Runtime context for a run.
-    
+
     Note: Import types from:
     - WorkspacePaths from frame_compare.utils.types
     - RunMetrics from frame_compare.utils.types
@@ -264,7 +264,7 @@ def run(
 ) -> RunResult:
     """
     Execute the comparison pipeline.
-    
+
     Phases:
     1. Preflight - Validate config, find videos
     2. Analysis - Calculate/load metrics, select frames
@@ -272,11 +272,11 @@ def run(
     4. Rendering - Generate screenshots
     5. Publishing - Upload to slow.pics (optional)
     6. Reporting - Generate HTML report (optional)
-    
+
     Args:
         request: Run configuration
         dependencies: Optional injected dependencies
-        
+
     Returns:
         RunResult with success status and outputs
     """
@@ -296,7 +296,7 @@ from frame_compare.vs import VSLoader  # Import from vs module
 
 class FFmpegRunner(Protocol):
     """Protocol for running FFmpeg commands."""
-    
+
     def extract_frame(
         self,
         video: Path,
@@ -305,7 +305,7 @@ class FFmpegRunner(Protocol):
     ) -> None:
         """Extract a single frame as PNG."""
         ...  # pseudocode: run ffmpeg -ss {time} -i {video} -vframes 1 {output}
-    
+
     def probe_hdr(self, video: Path) -> HDRMetadata | None:
         """Probe video for HDR metadata."""
         ...  # pseudocode: run ffprobe and parse color_primaries/transfer/matrix
@@ -321,7 +321,7 @@ class DefaultFFmpegRunner:
 @dataclass
 class RunDependencies:
     """Injectable dependencies for testability.
-    
+
     Note on http_client lifecycle:
     - If provided, caller owns lifecycle (must call aclose())
     - If None, runner creates client with `async with httpx.AsyncClient()`
@@ -332,10 +332,10 @@ class RunDependencies:
     http_client: httpx.AsyncClient | None = None
     progress: ProgressReporter | None = None
     clock: Callable[[], datetime] = field(default=datetime.now)
-    
+
     def get_vs_loader(self) -> VSLoader:
         return self.vs_loader or DefaultVSLoader()
-    
+
     def get_ffmpeg_runner(self) -> FFmpegRunner:
         return self.ffmpeg_runner or DefaultFFmpegRunner()
 ```
@@ -349,7 +349,7 @@ class RunDependencies:
 ```python
 class WorkflowCoordinator:
     """Coordinates the comparison pipeline."""
-    
+
     def __init__(
         self,
         context: RunContext,
@@ -358,11 +358,11 @@ class WorkflowCoordinator:
         self.context = context
         self.deps = dependencies
         self.phases: list[Phase] = []
-    
+
     def register_phase(self, phase: Phase) -> None:
         """Register a pipeline phase."""
         self.phases.append(phase)
-    
+
     async def execute(self) -> RunResult:
         """Execute all registered phases in order."""
         for phase in self.phases:
@@ -378,9 +378,9 @@ class WorkflowCoordinator:
 ```python
 class Phase(Protocol):
     """Protocol for pipeline phases."""
-    
+
     name: str
-    
+
     async def execute(self, context: RunContext) -> None:
         """Execute the phase."""
         ...  # pseudocode: implement phase-specific logic
@@ -422,17 +422,17 @@ def prepare_preflight(
 ) -> tuple[ConfigSchema, WorkspacePaths]:
     """
     Validate configuration and resolve paths.
-    
+
     Steps:
     1. Resolve workspace root
     2. Load configuration file
     3. Validate configuration
     4. Resolve all paths
     5. Verify input directory exists
-    
+
     Returns:
         Tuple of (config, workspace_paths)
-        
+
     Raises:
         ConfigError: If configuration invalid
         InputError: If input directory missing
@@ -443,7 +443,7 @@ def resolve_workspace_root(
 ) -> Path:
     """
     Resolve workspace root directory.
-    
+
     Priority:
     1. Explicit --root argument
     2. FRAME_COMPARE_ROOT environment variable
@@ -456,7 +456,7 @@ def find_videos(
 ) -> list[Path]:
     """
     Find video files in input directory.
-    
+
     Raises:
         NoVideosFoundError: If no videos found
     """
@@ -573,7 +573,7 @@ from frame_compare.errors import (
 def handle_error(error: Exception) -> int:
     """
     Convert exception to exit code and display message.
-    
+
     Maps:
     - ConfigError -> ExitCode.CONFIG_ERROR
     - DependencyError -> ExitCode.DEPENDENCY_ERROR

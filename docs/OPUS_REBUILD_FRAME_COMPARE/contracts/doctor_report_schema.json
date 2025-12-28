@@ -77,7 +77,7 @@
                         "string",
                         "null"
                     ],
-                    "description": "Actual VS plugin namespace found (e.g., 'lw', 'placebo', 'ffms2')"
+                    "description": "Actual VS plugin namespace found (e.g., 'lsmas', 'placebo', 'ffms2')"
                 },
                 "expected_namespace": {
                     "type": [

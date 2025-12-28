@@ -1,6 +1,6 @@
 # Feature Parity Matrix
 
-> **Module:** Reference  
+> **Module:** Reference
 > **Version:** 1.0
 
 ---
@@ -126,7 +126,7 @@ This document maps all features from Frame Compare v0.0.14 to their v2.0 equival
 | lsmas | ✅ Required | ✅ Required | Video loading |
 | libplacebo | ✅ Required | ✅ Required | Tonemapping |
 | vstools | ✅ Optional | ✅ Optional | Helpers |
-| vs-placebo | ✅ Optional | ❌ Removed | Now built-in |
+| vs-placebo | ✅ Optional | ✅ Optional | Baseline uses it to provide `core.placebo` |
 
 ---
 
@@ -138,7 +138,7 @@ This document maps all features from Frame Compare v0.0.14 to their v2.0 equival
 | Cache format | Low | Cache regenerated automatically |
 | CLI framework | None | Core commands unchanged (additive: `preset` subcommands) |
 | Python version | Medium | Upgrade to 3.13+ |
-| Plugin changes | Low | vs-placebo no longer needed |
+| Plugin changes | Low | vs-placebo remains optional; baseline currently includes it for libplacebo (`core.placebo`) |
 
 ---
 

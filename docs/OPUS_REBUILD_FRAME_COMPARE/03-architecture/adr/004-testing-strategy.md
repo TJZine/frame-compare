@@ -91,7 +91,7 @@ def dummy_progress():
 [importlinter:contract:layers]
 name = Core must not import CLI
 type = layers
-layers = 
+layers =
     cli_layer
     orchestration_layer
     service_layer

@@ -34,6 +34,7 @@ class WorkspacePaths:
         config_dir: Config and presets directory
         config_file: Path to config.toml (or None if using defaults)
     """
+
     root: Path
     input_dir: Path
     screenshots_dir: Path
@@ -66,6 +67,7 @@ class RunMetrics:
         frame_count: Total frames rendered
         cache_hit: Whether analysis cache was used
     """
+
     start_time: datetime = field(default_factory=datetime.now)
     phase_timings: dict[str, float] = field(default_factory=dict)
     video_count: int = 0

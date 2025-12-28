@@ -51,4 +51,3 @@ Adopt the following defaults across the v2 codebase:
 
 - Internal JSON-like payloads should use a structured alias (e.g., `JSONValue`) instead of `Any`.
 - Type checking should be enforced in CI as a hard gate.
-

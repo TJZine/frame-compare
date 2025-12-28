@@ -52,9 +52,9 @@ class TestUploadSecurityPolicy:
         """ALLOWED_HOSTS cannot be modified at runtime."""
         from frame_compare.utils.http import ALLOWED_HOSTS
 
-        assert isinstance(ALLOWED_HOSTS, frozenset), (
-            "ALLOWED_HOSTS should be frozenset for immutability"
-        )
+        assert isinstance(
+            ALLOWED_HOSTS, frozenset
+        ), "ALLOWED_HOSTS should be frozenset for immutability"
 
     def test_error_inheritance(self) -> None:
         """Security errors inherit from NetworkError."""

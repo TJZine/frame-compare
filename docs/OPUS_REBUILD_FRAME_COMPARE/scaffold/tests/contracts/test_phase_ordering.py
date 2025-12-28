@@ -2,6 +2,7 @@
 
 Verifies that contracts/phase_ordering.yaml exists and has valid structure.
 """
+
 from pathlib import Path
 
 import pytest
@@ -19,9 +20,7 @@ class TestPhaseOrderingContract:
 
     def test_contract_file_exists(self) -> None:
         """phase_ordering.yaml must exist in contracts directory."""
-        assert PHASE_ORDERING_PATH.exists(), (
-            f"Missing contract file: {PHASE_ORDERING_PATH}"
-        )
+        assert PHASE_ORDERING_PATH.exists(), f"Missing contract file: {PHASE_ORDERING_PATH}"
 
     def test_contract_is_valid_yaml(self) -> None:
         """Contract file must be valid YAML."""
@@ -63,8 +62,15 @@ class TestPhaseOrderingContract:
         data = yaml.safe_load(PHASE_ORDERING_PATH.read_text())
 
         expected_phases = {
-            "preflight", "load_sources", "frame_plan", "analyze",
-            "render", "metadata", "dovi", "publish", "report"
+            "preflight",
+            "load_sources",
+            "frame_plan",
+            "analyze",
+            "render",
+            "metadata",
+            "dovi",
+            "publish",
+            "report",
         }
         actual_phases = {p["name"] for p in data["phases"]}
 

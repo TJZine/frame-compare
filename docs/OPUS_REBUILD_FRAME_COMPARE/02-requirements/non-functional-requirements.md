@@ -1,6 +1,6 @@
 # Non-Functional Requirements
 
-> **Module:** Requirements Specification  
+> **Module:** Requirements Specification
 > **Version:** 1.0
 
 ---

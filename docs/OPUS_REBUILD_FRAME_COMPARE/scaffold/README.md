@@ -1,6 +1,6 @@
 # Code Scaffold Package
 
-> **Purpose:** Ready-to-use starter files for Phase 0  
+> **Purpose:** Ready-to-use starter files for Phase 0
 > **Usage:** Copy these files to your project root to bootstrap Frame Compare 2.0
 
 ---

@@ -17,6 +17,7 @@ Each test includes:
 
 These tests correspond to the Mode Matrix in 15-plan-review-report.md:L542-551
 """
+
 from pathlib import Path
 
 import pytest
@@ -125,9 +126,7 @@ class TestFullPipeline:
     """
 
     @pytest.mark.skip(reason="Awaiting full pipeline implementation")
-    def test_full_pipeline_all_outputs(
-        self, sample_workspace: Path, mock_services: None
-    ) -> None:
+    def test_full_pipeline_all_outputs(self, sample_workspace: Path, mock_services: None) -> None:
         """Full pipeline produces all outputs."""
         # Arrange: full workspace with all dependencies mocked
         # Act: run(RunRequest())
@@ -164,9 +163,7 @@ class TestMetadataEnabled:
     """
 
     @pytest.mark.skip(reason="Awaiting full pipeline implementation")
-    def test_metadata_enriches_report(
-        self, sample_workspace: Path, mock_tmdb: None
-    ) -> None:
+    def test_metadata_enriches_report(self, sample_workspace: Path, mock_tmdb: None) -> None:
         """TMDB metadata appears in final report."""
         # Arrange: workspace, TMDB mock returns movie info
         # Act: run(RunRequest())
@@ -196,9 +193,7 @@ class TestDoviEnabled:
     """
 
     @pytest.mark.skip(reason="Awaiting full pipeline implementation")
-    def test_dovi_extracts_rpu(
-        self, sample_workspace_with_dv: Path
-    ) -> None:
+    def test_dovi_extracts_rpu(self, sample_workspace_with_dv: Path) -> None:
         """Dovi phase extracts RPU metadata from DV content."""
         # Arrange: workspace with Dolby Vision video
         # Act: run(RunRequest())
@@ -206,9 +201,7 @@ class TestDoviEnabled:
         pass
 
     @pytest.mark.skip(reason="Awaiting full pipeline implementation")
-    def test_dovi_skip_on_non_dv(
-        self, sample_workspace: Path
-    ) -> None:
+    def test_dovi_skip_on_non_dv(self, sample_workspace: Path) -> None:
         """Dovi phase skips gracefully for non-DV content."""
         # Arrange: workspace with SDR/HDR10 video (no DV)
         # Act: run(RunRequest())

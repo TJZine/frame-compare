@@ -16,6 +16,7 @@ Exit codes:
     0: All references valid
     1: Missing references found
 """
+
 import argparse
 import re
 import sys

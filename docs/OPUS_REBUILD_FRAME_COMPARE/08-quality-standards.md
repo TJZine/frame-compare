@@ -1,6 +1,6 @@
 # Quality Standards
 
-> **Module:** Quality Assurance  
+> **Module:** Quality Assurance
 > **Version:** 1.0
 
 ---
@@ -110,20 +110,20 @@ def calculate_metrics(
 ) -> FrameMetrics:
     """
     Calculate frame metrics for video clips.
-    
+
     Computes luminance and motion scores for each frame,
     using cached values when available.
-    
+
     Args:
         clips: Video clips to analyze.
         config: Analysis configuration parameters.
-        
+
     Returns:
         FrameMetrics containing luminance and motion arrays.
-        
+
     Raises:
         AnalysisError: If video cannot be analyzed.
-        
+
     Example:
         >>> metrics = calculate_metrics(clips, config)
         >>> len(metrics.luminance)

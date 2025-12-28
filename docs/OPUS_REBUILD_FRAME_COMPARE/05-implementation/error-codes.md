@@ -1,6 +1,6 @@
 # Error Code Reference
 
-> **Module:** Reference  
+> **Module:** Reference
 > **Version:** 1.0
 
 > [!NOTE]

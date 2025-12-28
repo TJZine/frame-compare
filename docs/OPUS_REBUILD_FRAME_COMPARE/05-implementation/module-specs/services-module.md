@@ -1,7 +1,7 @@
 # Services Module Implementation Spec
 
-> **Module:** `frame_compare.services`  
-> **Version:** 1.0  
+> **Module:** `frame_compare.services`
+> **Version:** 1.0
 > **Priority:** P0
 
 ---
@@ -74,7 +74,7 @@ async def align_clips(
 ) -> list[AlignmentResult]:
     """
     Align comparison clips to reference using audio cross-correlation.
-    
+
     Algorithm:
     1. Extract audio from all clips (via FFmpeg)
     2. Resample to common sample_rate
@@ -83,17 +83,17 @@ async def align_clips(
        b. Find correlation peak
        c. Convert sample offset to frame offset
     4. Cache results
-    
+
     Args:
         reference: Reference video file
         comparisons: List of comparison video files
         config: Alignment configuration
         cache_dir: Directory for cached offsets
         progress: Optional progress reporter
-        
+
     Returns:
         List of AlignmentResult for each comparison
-        
+
     Raises:
         AudioAlignmentError: If alignment fails
     """
@@ -117,10 +117,10 @@ def save_offsets_cache(
 def _extract_audio(video_path: Path, sample_rate: int) -> np.ndarray:
     """
     Extract audio using FFmpeg.
-    
+
     Command:
     ffmpeg -i {video} -vn -ac 1 -ar {sample_rate} -f f32le -
-    
+
     Returns mono float32 audio samples.
     """
 
@@ -130,9 +130,9 @@ def _cross_correlate(
 ) -> tuple[int, float]:
     """
     Find offset using cross-correlation.
-    
+
     Returns: (sample_offset, correlation_score)
-    
+
     Algorithm:
     1. correlation = np.correlate(reference, comparison, mode='full')
     2. peak_idx = np.argmax(correlation)
@@ -167,7 +167,7 @@ class ParsedMetadata:
     release_group: str | None = None
     source: str | None = None  # BluRay, WEB-DL, etc.
     resolution: str | None = None
-    
+
 @dataclass(frozen=True)
 class TmdbMetadata:
     """Metadata from TMDB API."""
@@ -178,7 +178,7 @@ class TmdbMetadata:
     media_type: str  # "movie" | "tv"
     poster_url: str | None = None
     backdrop_url: str | None = None
-    
+
 @dataclass(frozen=True)
 class MetadataConfig:
     """Configuration for metadata service."""
@@ -193,14 +193,14 @@ class MetadataConfig:
 def parse_filename(filename: str) -> ParsedMetadata:
     """
     Extract metadata from filename using GuessIt + Anitopy.
-    
+
     Priority:
     1. Try GuessIt for western media
     2. Fall back to Anitopy for anime
-    
+
     Args:
         filename: Video filename (not full path)
-        
+
     Returns:
         ParsedMetadata with extracted fields
     """
@@ -211,14 +211,14 @@ async def lookup_tmdb(
 ) -> TmdbMetadata | None:
     """
     Look up media on TMDB.
-    
+
     Args:
         parsed: Metadata from filename parsing
         config: TMDB configuration
-        
+
     Returns:
         TmdbMetadata if found, None otherwise
-        
+
     Raises:
         TmdbError: If API call fails
     """
@@ -230,7 +230,7 @@ async def resolve_metadata(
 ) -> TmdbMetadata | None:
     """
     Full metadata resolution workflow.
-    
+
     Steps:
     1. Parse first filename
     2. Search TMDB
@@ -269,30 +269,30 @@ async def publish_to_slowpics(
 ) -> PublishResult:
     """
     Upload screenshots to slow.pics.
-    
+
     Steps:
     1. Collect all PNG files from directory
     2. Read files and prepare multipart upload
     3. POST to slow.pics API with retry
     4. Parse response for comparison URL
     5. Optionally delete local files
-    
+
     Args:
         screenshot_dir: Directory containing screenshots
         config: Upload configuration
         metadata: Optional metadata for title
         progress: Optional progress reporter
-        
+
     Returns:
         PublishResult with URL
-        
+
     Raises:
         SlowpicsError: If upload fails after retries
     """
 
 class SlowpicsPublisher:
     """Async publisher with connection pooling."""
-    
+
     def __init__(self, config: SlowpicsConfig):
         self.config = config
         # Use distinct timeouts: fast connection, slow upload
@@ -303,14 +303,14 @@ class SlowpicsPublisher:
                 write=config.timeout_seconds,  # Upload time
             )
         )
-    
+
     async def upload(
         self,
         files: list[Path],
         title: str | None = None,
     ) -> str:
         """Upload files and return comparison URL."""
-    
+
     async def close(self) -> None:
         """Close HTTP client."""
 ```
@@ -326,7 +326,7 @@ async def _prepare_upload(
     visibility: str,
 ) -> dict:
     """Prepare multipart form data for upload."""
-    
+
 async def _upload_with_retry(
     client: httpx.AsyncClient,
     data: dict,
@@ -382,26 +382,26 @@ from frame_compare.config import DoviConfig
 ```python
 class DoviToolService:
     """Service wrapper for dovi_tool CLI to extract L1 metadata.
-    
+
     Implements caching to avoid re-running expensive extraction.
     Uses subprocess with shell=False for security.
     """
-    
+
     def __init__(self, config: DoviConfig | None = None) -> None:
         self.config = config or DoviConfig()
         self.binary_path = self._resolve_binary()
-    
+
     def is_available(self) -> bool:
         """Check if dovi_tool binary is available."""
         return self.binary_path is not None and self.binary_path.exists()
-    
+
     def extract_rpu_metadata(
         self,
         video_path: Path,
     ) -> list[dict[str, JSONValue]]:
         """
         Extract RPU metadata from video using dovi_tool.
-        
+
         Algorithm:
         1. Check cache (.dovi_info.json) for existing metadata
         2. If cache miss:
@@ -411,36 +411,36 @@ class DoviToolService:
            d. Convert PQ values to nits using ST2084 EOTF
            e. Save to cache
         3. Return list of per-frame stats dicts
-        
+
         Args:
             video_path: Path to video file (Dolby Vision stream)
-            
+
         Returns:
             List of dicts with l1_min_nits, l1_max_nits, l1_avg_nits, etc.
             Empty list if no Dolby Vision data or extraction fails.
-            
+
         Security:
             Uses subprocess with shell=False
             Treats video_path as untrusted input
         """
-    
+
     def _resolve_binary(self) -> Path | None:
         """Resolve platform-specific dovi_tool binary path.
-        
+
         Search order:
         1. config.dovi_tool_path if specified
         2. tools/dovi_tool.exe (Windows) or tools/dovi_tool (Unix)
         3. PATH lookup
         """
-    
+
     def _pq_to_nits(self, pq_val: int | float) -> float:
         """Convert PQ value (0-4095 or 0-1) to nits using ST2084 EOTF."""
-    
+
     def _parse_dovi_json(
         self, data: dict[str, object]
     ) -> list[dict[str, float | int | str | None]]:
         """Parse raw JSON from dovi_tool into simplified frame stats.
-        
+
         Handles multiple dovi_tool output formats:
         - Direct level1 in vdr_dm_data
         - cmv29_metadata.ext_metadata_blocks (v2.9)
@@ -464,7 +464,7 @@ C3 = 2392.0 / 4096.0 * 32.0
 def _pq_to_nits(pq_val: int | float) -> float:
     """
     Convert PQ value to nits.
-    
+
     Formula: L = ((max[(N^(1/m2) - c1) / (c2 - c3 * N^(1/m2)), 0])^(1/m1)) * 10000
     """
     val = float(pq_val)
@@ -472,13 +472,13 @@ def _pq_to_nits(pq_val: int | float) -> float:
         val = val / 4095.0
     if val <= 0.0:
         return 0.0
-    
+
     pow_val = val ** (1.0 / M2)
     num = max(pow_val - C1, 0.0)
     den = C2 - C3 * pow_val
     if den == 0:
         return 10000.0
-    
+
     linear_val = (num / den) ** (1.0 / M1)
     return linear_val * 10000.0
 ```
@@ -518,7 +518,7 @@ class ClipInfo:
     fps: float
     hdr: bool
     label: str | None = None  # Custom label for comparison
-    
+
 @dataclass(frozen=True)
 class ReportConfig:
     """Configuration for HTML report generation."""
@@ -526,7 +526,7 @@ class ReportConfig:
     output_dir: Path | None = None
     default_mode: str = "slider"  # slider, overlay, diff, blink
     include_filmstrip: bool = True
-    
+
 @dataclass(frozen=True)
 class ReportData:
     """Data for report generation."""
@@ -546,18 +546,18 @@ def generate_report(
 ) -> Path:
     """
     Generate offline HTML comparison report.
-    
+
     Steps:
     1. Load report template
     2. Embed screenshots as base64 or relative paths
     3. Generate JavaScript for viewer modes
     4. Write HTML file
-    
+
     Args:
         data: Report content data
         config: Report configuration
         output_path: Optional output path override
-        
+
     Returns:
         Path to generated report
     """

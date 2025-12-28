@@ -1,6 +1,6 @@
 # Requirements Traceability Matrix
 
-> **Module:** Reference  
+> **Module:** Reference
 > **Purpose:** Link v0.0.14 features to module specs and validation tests
 
 ---

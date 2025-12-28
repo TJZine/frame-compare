@@ -1,6 +1,6 @@
 # Testing Strategy
 
-> **Module:** Implementation  
+> **Module:** Implementation
 > **Version:** 1.0
 
 ---
@@ -62,10 +62,10 @@ from frame_compare.analysis.metrics import calculate_luminance
 def test_calculate_luminance_returns_normalized_values():
     # Arrange
     frames = [np.zeros((100, 100), dtype=np.uint8)]
-    
+
     # Act
     result = calculate_luminance(frames)
-    
+
     # Assert
     assert result == [0.0]
 
@@ -102,10 +102,10 @@ from frame_compare.analysis import calculate_metrics, select_frames
 def test_analysis_pipeline_end_to_end(sample_video_clip):
     # Calculate metrics
     metrics = calculate_metrics(sample_video_clip)
-    
+
     # Select frames
     selection = select_frames(metrics, frame_count=10, seed=42)
-    
+
     # Verify
     assert len(selection.frames) == 10
     assert selection.breakdown.quantile_count > 0
@@ -143,7 +143,7 @@ def test_cli_run_produces_screenshots(tmp_path, sample_videos):
         "--root", str(tmp_path),
         "--no-upload",
     ])
-    
+
     assert result.exit_code == 0
     screenshots = list((tmp_path / "screenshots").glob("*.png"))
     assert len(screenshots) > 0
@@ -170,9 +170,9 @@ import pytest
 @pytest.mark.vs_required
 def test_tonemap_hdr_to_sdr(hdr_test_clip):
     from frame_compare.vs.tonemap import tonemap
-    
+
     result = tonemap(hdr_test_clip, preset="reference")
-    
+
     # Verify output is SDR
     assert result.get_frame(0).props["_ColorRange"] == 0
 ```
@@ -215,7 +215,7 @@ anyio_mode = "auto"
 >
 > ```python
 > import pytest
-> 
+>
 > @pytest.mark.anyio
 > async def test_upload_async():
 >     async with httpx.AsyncClient() as client:
@@ -334,9 +334,9 @@ def test_run_uses_injected_vs_loader(mock_vs_loader):
         progress=NullProgress(),
         clock=lambda: datetime(2024, 1, 1),
     )
-    
+
     result = run(request, dependencies=deps)
-    
+
     mock_vs_loader.load.assert_called_once()
 ```
 
@@ -397,10 +397,10 @@ show_missing = true
     needs: test
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Build container
         run: docker build -t frame-compare:test .
-      
+
       - name: Run E2E tests
         run: |
           docker run --rm \
@@ -457,7 +457,7 @@ def test_selection_breakdown_json(snapshot: SnapshotAssertion):
         motion_count=2,
         random_count=5,
     )
-    
+
     assert breakdown.to_json() == snapshot
 ```
 
@@ -476,12 +476,12 @@ def test_metrics_calculation_performance(benchmark, large_video):
     result = benchmark(calculate_metrics, large_video)
     assert result is not None
 
-@pytest.mark.slow  
+@pytest.mark.slow
 def test_selection_1000_frames_under_100ms(benchmark):
     metrics = generate_mock_metrics(1000)
-    
+
     result = benchmark(select_frames, metrics, frame_count=50)
-    
+
     assert benchmark.stats.median < 0.1  # 100ms
 ```
 
@@ -492,7 +492,7 @@ def test_selection_1000_frames_under_100ms(benchmark):
 def test_large_video_memory_usage(memory_profile):
     # Process 10GB video
     result = process_large_video(Path("fixtures/large.mkv"))
-    
+
     # Should not exceed 2GB RAM
     assert memory_profile.peak_mb < 2048
 ```

@@ -102,6 +102,69 @@
 
 ---
 
+## 2025-12-28 — Phase 0.5 Container Build Decisions
+
+### zimg Build Source: Pinned GitHub Tarball
+
+**Context:** Docker build could not reliably fetch `zimg` from the incorrect GitHub repo and Bookworm lacks zimg 3.0.5.
+
+**Decision:** Build `zimg` from the official `sekrit-twc/zimg` release tarball and verify with SHA-256.
+
+**Rationale:**
+- Avoids unstable Debian Sid packages
+- Ensures reproducible builds via pinned tarball + checksum
+- Uses the correct upstream repository
+
+---
+
+### Cython Install: pip for Python 3.13
+
+**Context:** VapourSynth R73 requires Cython; Debian Bookworm's `cython3` may not be Python 3.13 compatible.
+
+**Decision:** Install Cython via `python -m pip` with a pinned major version range.
+
+**Rationale:**
+- Ensures compatibility with Python 3.13
+- Aligns with upstream Cython install guidance (pip-based install)
+
+---
+
+### L-SMASH-Works Pin: Tag `20230716`
+
+**Context:** The prior commit SHA was no longer present in the upstream repository, causing Docker builds to fail.
+
+**Decision:** Pin L-SMASH-Works to the published `20230716` tag.
+
+**Rationale:**
+- Tag is immutable and resolves the missing commit error
+- Keeps the build reproducible with a stable upstream reference
+
+---
+
+### L-SMASH Build: Source Tarball
+
+**Context:** Debian Bookworm does not provide `liblsmash-dev`, which is required by L-SMASH-Works.
+
+**Decision:** Build L-SMASH from the official GitHub tarball and verify with SHA-256.
+
+**Rationale:**
+- Avoids missing Debian packages
+- Keeps L-SMASH-Works build reproducible with a pinned source release
+
+---
+
+### L-SMASH-Works ARM Guard: SSE2 Include
+
+**Context:** The L-SMASH-Works `VapourSynth/video_output.c` unconditionally includes `<emmintrin.h>`, which fails on ARM builds.
+
+**Decision:** Patch the source during the Docker build to guard the SSE2 header include on x86 only.
+
+**Rationale:**
+- Allows ARM (aarch64) builds to proceed
+- Keeps x86 SSE2 functionality intact
+
+---
+
 ## 2025-12-28 — Phase 0.4 CI/CD Decisions
 
 ### CI Runner: ubuntu-latest
@@ -140,3 +203,67 @@
 - Parallel execution reduces total CI time
 - Independent failures are immediately visible
 - `ci-pass` job provides single status check for branch protection
+
+---
+
+## 2025-12-28 — Phase 0.5 Container Build Decisions
+
+### libplacebo build dependencies (Jinja2 + Vulkan headers)
+
+**Context:** libplacebo's shader preprocessing uses Debian's `python3` and expects Jinja2, and its Vulkan stub compilation still includes Vulkan headers even when Vulkan is disabled.
+
+**Decision:** Install `python3-jinja2` and `libvulkan-dev` in the builder stage.
+
+**Rationale:** Ensures libplacebo builds reliably on Bookworm without enabling Vulkan runtime support.
+
+---
+
+### vs-placebo submodules
+
+**Context:** vs-placebo depends on the `libp2p` submodule for builds.
+
+**Decision:** Clone vs-placebo with `--recurse-submodules --shallow-submodules` and pin commit `14083805df08cd478539c15464a7183da2c0032e`.
+
+**Rationale:** Ensures the required submodules are present while keeping the clone deterministic and small.
+
+---
+
+### ffms2 pin for FFmpeg 5
+
+**Context:** ffms2 2.40 fails to link on FFmpeg 5, and ffms2 master requires FFmpeg 6/7; Bookworm provides FFmpeg 5.
+
+**Decision:** Pin ffms2 to commit `45673149e9a2f5586855ad472e3059084eaa36b1` (const-safe decoder lookup, FFmpeg 5 compatible).
+
+**Rationale:** Builds cleanly with Debian Bookworm FFmpeg packages without introducing a source-built FFmpeg.
+
+---
+
+### OPUS Docs Sync: Baseline References
+
+**Context:** Several OPUS rebuild documents referenced `Dockerfile.baseline`, but the repo’s baseline container is implemented as the repo-root `Dockerfile`. The same docs also contained drifted pins (ffms2 v2.40, L-SMASH-Works @ master, Ubuntu/deadsnakes assumptions) that no longer match the baseline.
+
+**Decision:** Treat the repo-root `Dockerfile` as the canonical baseline reference and update OPUS docs (ADR/system design/deployment/vs-module/feature-parity/plan-review report) to match the actual baseline pins and build approach.
+
+**Rationale:**
+- Prevents agent confusion during Phase 0 verification and subsequent VS/plugin work
+- Keeps the baseline SSOT consistent across workflow artifacts and OPUS specs
+
+---
+
+### L-SMASH Works namespace verification
+
+**Context:** The baseline container exposes L-SMASH Works under the `lsmas` namespace, while earlier docs and verification snippets checked `lw`.
+
+**Decision:** Update verification guidance and module specs to prefer `lsmas` with a legacy `lw` fallback.
+
+**Rationale:** Aligns the documented checks with the actual baseline image while keeping compatibility with older namespace aliases.
+
+---
+
+### Negative plugin check uses vapoursynth.conf
+
+**Context:** Setting `VAPOURSYNTH_PLUGIN_PATH` did not prevent autoloading in the container, so the negative plugin test could still pass unexpectedly.
+
+**Decision:** Use `VAPOURSYNTH_CONF_PATH` with a temporary `vapoursynth.conf` that points `UserPluginDir` and `SystemPluginDir` to nonexistent paths for the negative test.
+
+**Rationale:** VapourSynth autoloading uses `vapoursynth.conf` (Linux) to select plugin directories; overriding the config file reliably isolates plugin discovery. Source: https://raw.githubusercontent.com/vapoursynth/vapoursynth/master/doc/installation.rst @ 2025-12-28T05:35:59Z (text/plain, max_length=20000, start_index=0, single chunk).

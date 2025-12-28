@@ -19,4 +19,3 @@ app = typer.Typer(
 def run() -> None:
     """Execute the comparison pipeline (implemented in later phases)."""
     raise typer.Exit(code=0)
-

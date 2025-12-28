@@ -31,6 +31,7 @@ class FramePlan:
         seed: Random seed used for selection
         num_frames: Total frames in source video
     """
+
     frames: list[int]
     method: Literal["analysis", "uniform_seeded"]
     seed: int
@@ -81,9 +82,7 @@ def select_uniform_seeded_frames(
         raise ValueError(f"count must be positive, got {count}")
     if count > num_frames:
         # FC-3004: INSUFFICIENT_FRAMES
-        raise ValueError(
-            f"Cannot select {count} frames from video with only {num_frames} frames"
-        )
+        raise ValueError(f"Cannot select {count} frames from video with only {num_frames} frames")
 
     frames: list[int] = []
 
@@ -120,9 +119,7 @@ def create_uniform_seeded_plan(
     Returns:
         FramePlan with method="uniform_seeded" and concrete frame indices
     """
-    frames = select_uniform_seeded_frames(
-        num_frames=num_frames, count=count, seed=seed
-    )
+    frames = select_uniform_seeded_frames(num_frames=num_frames, count=count, seed=seed)
     return FramePlan(
         frames=frames,
         method="uniform_seeded",

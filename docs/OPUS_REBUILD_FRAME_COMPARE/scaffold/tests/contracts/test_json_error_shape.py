@@ -13,6 +13,7 @@ import pytest
 
 try:
     import jsonschema
+
     HAS_JSONSCHEMA = True
 except ImportError:
     HAS_JSONSCHEMA = False
@@ -60,9 +61,9 @@ class TestJsonErrorShape:
         )
 
         pattern = r"^FC-[0-9]{4}$"
-        assert re.match(pattern, ctx.to_dict()["code"]), (
-            f"Code does not match FC-XXXX pattern: {ctx.code}"
-        )
+        assert re.match(
+            pattern, ctx.to_dict()["code"]
+        ), f"Code does not match FC-XXXX pattern: {ctx.code}"
 
     def test_error_context_name_format(self) -> None:
         """Error names are SCREAMING_SNAKE_CASE."""
@@ -77,9 +78,9 @@ class TestJsonErrorShape:
         )
 
         pattern = r"^[A-Z][A-Z0-9_]*$"
-        assert re.match(pattern, ctx.to_dict()["name"]), (
-            f"Name not SCREAMING_SNAKE_CASE: {ctx.name}"
-        )
+        assert re.match(
+            pattern, ctx.to_dict()["name"]
+        ), f"Name not SCREAMING_SNAKE_CASE: {ctx.name}"
 
     def test_error_context_optional_fields(self) -> None:
         """Optional fields only present when set."""

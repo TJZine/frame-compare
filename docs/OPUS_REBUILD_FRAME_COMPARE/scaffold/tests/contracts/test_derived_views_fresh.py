@@ -23,9 +23,7 @@ class TestDerivedViewsFresh:
 
     def test_generator_script_exists(self) -> None:
         """Generator script exists at expected location."""
-        assert GENERATOR_SCRIPT.exists(), (
-            f"Generator script not found: {GENERATOR_SCRIPT}"
-        )
+        assert GENERATOR_SCRIPT.exists(), f"Generator script not found: {GENERATOR_SCRIPT}"
 
     def test_generated_files_fresh(self) -> None:
         """All generated files match current generation (--check passes)."""

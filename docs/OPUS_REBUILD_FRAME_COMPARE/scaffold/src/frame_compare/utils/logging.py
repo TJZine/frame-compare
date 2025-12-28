@@ -12,18 +12,21 @@ from collections.abc import Mapping
 import structlog
 
 # Keys that should be redacted in log output
-SENSITIVE_KEYS = frozenset({
-    "api_key",
-    "apikey",
-    "password",
-    "token",
-    "secret",
-    "authorization",
-    "auth",
-    "bearer",
-    "credential",
-    "credentials",
-})
+SENSITIVE_KEYS = frozenset(
+    {
+        "api_key",
+        "apikey",
+        "password",
+        "token",
+        "secret",
+        "authorization",
+        "auth",
+        "bearer",
+        "credential",
+        "credentials",
+    }
+)
+
 
 def _redact_value(value: object) -> object:
     if isinstance(value, Mapping):

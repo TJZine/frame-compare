@@ -1,6 +1,6 @@
 # API Design Specification
 
-> **Module:** Architecture  
+> **Module:** Architecture
 > **Version:** 1.0
 
 > [!NOTE]
@@ -105,31 +105,31 @@ from frame_compare import config_writer, presets
 @dataclass(frozen=True)
 class RunRequest:
     """Configuration for a comparison run."""
-    
+
     root: Path
     """Workspace root directory."""
-    
+
     config_path: Path | None = None
     """Optional override for config file location."""
-    
+
     input_dir: Path | None = None
     """Optional override for input directory."""
-    
+
     no_cache: bool = False
     """If True, ignore cached metrics."""
-    
+
     from_cache_only: bool = False
     """If True, use only cached snapshot."""
-    
+
     tm_preset: str | None = None
     """Optional tonemap preset override."""
-    
+
     tm_target_nits: int | None = None
     """Optional target nits override."""
-    
+
     quiet: bool = False
     """Suppress non-essential output."""
-    
+
     verbose: bool = False
     """Enable debug logging."""
 ```
@@ -140,31 +140,31 @@ class RunRequest:
 @dataclass(frozen=True)
 class RunResult:
     """Result of a comparison run."""
-    
+
     success: bool
     """Whether the run completed successfully."""
-    
+
     screenshot_dir: Path | None
     """Directory containing screenshots, if generated."""
-    
+
     slowpics_url: str | None
     """URL to slow.pics comparison, if uploaded."""
-    
+
     report_path: Path | None
     """Path to HTML report, if generated."""
-    
+
     frame_count: int
     """Number of frames processed."""
-    
+
     clips_processed: int
     """Number of video clips processed."""
-    
+
     duration_seconds: float
     """Total processing time."""
-    
+
     cache_hit: bool
     """Whether cached metrics were used."""
-    
+
     errors: list[str]
     """Non-fatal errors encountered."""
 ```
@@ -254,19 +254,19 @@ for result in results:
 @dataclass
 class RunDependencies:
     """Injectable dependencies for testability."""
-    
+
     vs_loader: VSLoader
     """VapourSynth video loading."""
-    
+
     ffmpeg_runner: FFmpegRunner
     """FFmpeg command execution."""
-    
+
     http_client: httpx.AsyncClient
     """HTTP client for API calls."""
-    
+
     progress: ProgressReporter
     """Progress bar/output."""
-    
+
     clock: Callable[[], datetime]
     """Time provider (for testing)."""
 ```
@@ -302,12 +302,12 @@ class ColorConfig(BaseModel):
 
 class ConfigSchema(BaseSettings):
     """Root configuration schema.
-    
+
     Note: Uses pydantic-settings (BaseSettings) for:
     - TOML file loading
     - Environment variable overrides (FRAME_COMPARE_ prefix)
     - CLI argument overrides
-    
+
     See config-module.md for full implementation details.
     """
     paths: PathsConfig = PathsConfig()

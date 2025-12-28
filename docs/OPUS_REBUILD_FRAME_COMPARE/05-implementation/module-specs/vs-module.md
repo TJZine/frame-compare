@@ -1,7 +1,7 @@
 # VapourSynth Module Implementation Spec
 
-> **Module:** `frame_compare.vs`  
-> **Version:** 1.0  
+> **Module:** `frame_compare.vs`
+> **Version:** 1.0
 > **Priority:** P0
 
 ---
@@ -41,27 +41,27 @@ from typing import Protocol
 
 class VSLoader(Protocol):
     """Protocol for loading VapourSynth clips."""
-    
+
     def load(self, path: Path) -> SourceInfo:
         """Load a video source, returning clip and metadata."""
         ...  # pseudocode: protocol method, see DefaultVSLoader below
-    
+
     def ensure_core(self) -> vs.Core:
         """Get or create a VapourSynth core."""
         ...  # pseudocode: protocol method, see DefaultVSLoader below
 
 class DefaultVSLoader:
     """Default VapourSynth loader implementation using LWLibavSource."""
-    
+
     _core: vs.Core | None = None  # Singleton pattern
-    
+
     def load(self, path: Path) -> SourceInfo:
         core = self.ensure_core()
         return load_source(path, core)
-    
+
     def ensure_core(self) -> vs.Core:
         """Get or create a VapourSynth core (singleton).
-        
+
         Note: VapourSynth cores are expensive to create. This method
         caches the core at class level, reusing it across all load()
         calls within a process. This is the expected pattern.
@@ -84,19 +84,23 @@ class DefaultVSLoader:
 ```python
 def detect_plugins(core: vs.Core) -> dict[str, bool]:
     """Detect available VapourSynth plugins.
-    
+
     Returns dict of plugin_name -> is_available.
     """
     return {
         # L-SMASH Works (lsmas) - source loading
-        "lsmas": hasattr(core, 'lw') and hasattr(core.lw, 'LWLibavSource'),
-        
+        "lsmas": (
+            hasattr(core, 'lsmas') and hasattr(core.lsmas, 'LWLibavSource')
+        ) or (
+            hasattr(core, 'lw') and hasattr(core.lw, 'LWLibavSource')
+        ),
+
         # libplacebo - tonemapping
         "libplacebo": hasattr(core, 'placebo') and hasattr(core.placebo, 'Tonemap'),
-        
+
         # BestSource (fallback loader)
         "bestsource": hasattr(core, 'bs') and hasattr(core.bs, 'VideoSource'),
-        
+
         # ffms2 (alternative loader)
         "ffms2": hasattr(core, 'ffms2') and hasattr(core.ffms2, 'Source'),
     }
@@ -111,7 +115,7 @@ def require_plugin(core: vs.Core, plugin: str) -> None:
 
 | Plugin | Namespace | Detection | Required For |
 |:-------|:----------|:----------|:-------------|
-| lsmas | `core.lw.LWLibavSource` | `hasattr(core, 'lw')` | Video source loading |
+| lsmas | `core.lsmas.LWLibavSource` (alias `core.lw.LWLibavSource`) | `hasattr(core, 'lsmas')` (fallback `lw`) | Video source loading |
 | libplacebo | `core.placebo.Tonemap` | `hasattr(core, 'placebo')` | HDR tonemapping |
 | bestsource | `core.bs.VideoSource` | `hasattr(core, 'bs')` | Fallback source |
 | ffms2 | `core.ffms2.Source` | `hasattr(core, 'ffms2')` | Alternative source |
@@ -123,10 +127,11 @@ def require_plugin(core: vs.Core, plugin: str) -> None:
 > **Baseline Reference:**
 >
 > - VapourSynth: R73
-> - L-SMASH Works: `HomeOfAviSynthPlusEvolution/L-SMASH-Works@master` → namespace `lw`
-> - libplacebo: `haasn/libplacebo` (headless build) → namespace `placebo`
-> - ffms2: v2.40 → namespace `ffms2`
-> - bestsource: R8 → namespace `bs`
+> - L-SMASH Works: `HomeOfAviSynthPlusEvolution/L-SMASH-Works@20230716` → namespace `lsmas` (alias `lw` in some builds)
+> - libplacebo: `haasn/libplacebo@v7.349.0` (headless build) → namespace `placebo` (provided via vs-placebo)
+> - vs-placebo: `Lypheo/vs-placebo@14083805df08cd478539c15464a7183da2c0032e` → namespace `placebo`
+> - ffms2: `FFMS/ffms2@45673149e9a2f5586855ad472e3059084eaa36b1` → namespace `ffms2`
+> - bestsource: optional (not part of the baseline image) → namespace `bs`
 >
 > Run `frame-compare doctor --json` to see discovered namespaces on your system.
 > See [deployment.md](../../../06-operations/deployment.md#baseline-verification-environment) for baseline setup.
@@ -148,7 +153,7 @@ class SourceInfo:
     frame_props: Mapping[str, object]
     is_hdr: bool
     hdr_metadata: HDRMetadata | None
-    
+
 @dataclass
 class HDRMetadata:
     mastering_display: str | None
@@ -165,7 +170,7 @@ class HDRMetadata:
 @dataclass
 class TonemapSettings:
     """Resolved tonemap settings for VS operations.
-    
+
     Note: Field names align with ColorConfig in config-module.md.
     """
     enabled: bool = True
@@ -187,10 +192,10 @@ class TonemapSettings:
 def ensure_vs_environment() -> vs.Core:
     """
     Initialize VapourSynth core with plugins.
-    
+
     Returns:
         Configured vs.Core instance
-        
+
     Raises:
         VapourSynthError: If VS not available
     """
@@ -208,17 +213,17 @@ def load_source(
 ) -> SourceInfo:
     """
     Load video source with automatic format detection.
-    
+
     Uses LWLibavSource for most formats.
     Extracts HDR metadata from first frame.
-    
+
     Args:
         path: Video file path
         core: Optional VS core (creates if not provided)
-        
+
     Returns:
         SourceInfo with clip and metadata
-        
+
     Raises:
         SourceLoadError: If file cannot be loaded
     """
@@ -241,17 +246,17 @@ def apply_tonemap(
 ) -> vs.VideoNode:
     """
     Apply HDR to SDR tonemapping.
-    
+
     Uses libplacebo for tone curve application.
-    
+
     Args:
         clip: HDR video clip
         settings: Tonemap configuration
         hdr_metadata: Source HDR metadata (detected if not provided)
-        
+
     Returns:
         SDR video clip
-        
+
     Raises:
         TonemapError: If tonemapping fails
     """
@@ -284,7 +289,7 @@ def get_preset_settings(preset: str) -> TonemapSettings:
 def _detect_hdr(frame_props: dict) -> tuple[bool, HDRMetadata | None]:
     """
     Detect HDR from frame properties.
-    
+
     Checks:
     - _ColorRange (1 = limited)
     - _Transfer (16 = PQ, 18 = HLG)
@@ -304,7 +309,7 @@ def _apply_libplacebo(
 ) -> vs.VideoNode:
     """
     Apply libplacebo tonemapping.
-    
+
     Pipeline:
     1. Convert to floating point RGB
     2. Apply vs.placebo.Tonemap()
@@ -322,7 +327,7 @@ def _fallback_tonemap(
 ) -> vs.VideoNode:
     """
     Simple fallback when libplacebo unavailable.
-    
+
     Uses basic Reinhard curve via core.std operations.
     Quality is degraded but functional.
     """

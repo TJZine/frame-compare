@@ -8,33 +8,30 @@ import pytest
 # MARKERS
 # =============================================================================
 
+
 def pytest_configure(config):
     """Register custom markers."""
     config.addinivalue_line(
         "markers", "tier_a: marks tests runnable without VapourSynth or network"
     )
-    config.addinivalue_line(
-        "markers", "vs_required: marks tests that require VapourSynth"
-    )
+    config.addinivalue_line("markers", "vs_required: marks tests that require VapourSynth")
     config.addinivalue_line(
         "markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')"
     )
-    config.addinivalue_line(
-        "markers", "e2e: marks end-to-end tests"
-    )
-    config.addinivalue_line(
-        "markers", "tier_b: marks tests that require VapourSynth or network"
-    )
+    config.addinivalue_line("markers", "e2e: marks end-to-end tests")
+    config.addinivalue_line("markers", "tier_b: marks tests that require VapourSynth or network")
 
 
 # =============================================================================
 # SKIP CONDITIONS
 # =============================================================================
 
+
 def vapoursynth_available() -> bool:
     """Check if VapourSynth is available."""
     try:
         import vapoursynth  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -52,6 +49,7 @@ def pytest_collection_modifyitems(config, items):
 # =============================================================================
 # FIXTURES
 # =============================================================================
+
 
 @pytest.fixture
 def tmp_workspace(tmp_path: Path) -> Path:
@@ -96,6 +94,7 @@ def fixtures_dir() -> Path:
 # MOCK FIXTURES
 # =============================================================================
 
+
 @pytest.fixture
 def mock_vs(mocker):
     """Mock VapourSynth module."""
@@ -122,6 +121,7 @@ def mock_ffmpeg(mocker):
 # =============================================================================
 # UTILITY FUNCTIONS FOR TESTS
 # =============================================================================
+
 
 def create_dummy_video(path: Path, frames: int = 100) -> None:
     """Create a dummy video file for testing.

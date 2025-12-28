@@ -1,7 +1,7 @@
 # Frame Compare 2.0 — Multi-Agent Implementation Workflow
 
-> **Version:** 2.0  
-> **Last Updated:** 2025-12-27  
+> **Version:** 2.0
+> **Last Updated:** 2025-12-27
 > **Purpose:** Orchestrate 5 AI agents with human oversight for systematic project implementation
 
 ---
@@ -472,7 +472,7 @@ The Plan Review gate exists to ensure the Coding Agent (Gemini) can implement wi
    .venv/bin/ruff check .
    .venv/bin/pytest --cov
    UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini  # Import contract check
-   
+
    # Contract and traceability gates (must pass before PR)
    UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_contract_views.py --check
    UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_traceability.py --check
@@ -819,7 +819,7 @@ Confirm Plan Review Report shows `Verdict: APPROVED`. If not, STOP.
    .venv/bin/ruff check .
    .venv/bin/pytest --cov
 	   UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini
-   
+
    # Contract and traceability gates
    UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_contract_views.py --check
    UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_traceability.py --check
@@ -1020,7 +1020,7 @@ CODING AGENT (Gemini 3.0) receives:
 
 CODING AGENT produces:
   - Source code files
-  - Test files  
+  - Test files
   - .agent-workflow/runs/<RUN_ID>/impl-vN.md
 ```
 
@@ -1236,7 +1236,7 @@ This plan does NOT cover:
 def function_name(arg: Type) -> ReturnType:
     """
     [Docstring]
-    
+
     Algorithm:
     1. [Step 1]
     2. [Step 2]

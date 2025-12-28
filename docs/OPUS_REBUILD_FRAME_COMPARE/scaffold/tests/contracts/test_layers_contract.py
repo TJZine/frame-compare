@@ -71,18 +71,18 @@ class TestLayersContract:
         layers = extract_layers_from_pyproject(PYPROJECT_TOML)
 
         # errors should be last (lowest layer)
-        assert any("errors" in layer for layer in layers[-2:]), (
-            "frame_compare.errors should be at or near bottom of layers"
-        )
+        assert any(
+            "errors" in layer for layer in layers[-2:]
+        ), "frame_compare.errors should be at or near bottom of layers"
 
     def test_cli_entry_is_top_module(self) -> None:
         """cli_entry is at the top of the layer stack."""
         layers = extract_layers_from_pyproject(PYPROJECT_TOML)
 
         # cli_entry should be first (highest layer)
-        assert any("cli_entry" in layer for layer in layers[:2]), (
-            "frame_compare.cli_entry should be at or near top of layers"
-        )
+        assert any(
+            "cli_entry" in layer for layer in layers[:2]
+        ), "frame_compare.cli_entry should be at or near top of layers"
 
     def test_vs_below_domain_modules(self) -> None:
         """vs module is below analysis/render/services."""
@@ -98,9 +98,9 @@ class TestLayersContract:
                 domain_index = i
 
         if vs_index is not None and domain_index is not None:
-            assert vs_index > domain_index, (
-                "vs should be below domain modules (analysis, render, services)"
-            )
+            assert (
+                vs_index > domain_index
+            ), "vs should be below domain modules (analysis, render, services)"
 
     def test_dependency_graph_matches_pyproject(self) -> None:
         """dependency-graph.md layers block matches pyproject.toml."""

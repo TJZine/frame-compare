@@ -40,13 +40,15 @@ class ShellMetacharacterError(InputError):
     """Shell metacharacter detected in subprocess argument (FC-3010)."""
 
     def __init__(self, arg: str, char: str) -> None:
-        super().__init__(ErrorContext(
-            code="FC-3010",
-            name="INVALID_SUBPROCESS_ARG",
-            message=f"Invalid character in argument: {arg}",
-            details={"argument": arg[:100], "character": char},
-            hint="Remove shell metacharacters from the argument",
-        ))
+        super().__init__(
+            ErrorContext(
+                code="FC-3010",
+                name="INVALID_SUBPROCESS_ARG",
+                message=f"Invalid character in argument: {arg}",
+                details={"argument": arg[:100], "character": char},
+                hint="Remove shell metacharacters from the argument",
+            )
+        )
 
 
 class ControlCharacterError(InputError):
@@ -54,13 +56,15 @@ class ControlCharacterError(InputError):
 
     def __init__(self, arg: str, char_repr: str) -> None:
         arg_display = _escape_control_chars(arg[:100])
-        super().__init__(ErrorContext(
-            code="FC-3011",
-            name="CONTROL_CHAR_IN_ARG",
-            message=f"Control character in argument: {arg_display}",
-            details={"argument": arg_display, "character": char_repr},
-            hint="Remove control characters from the argument",
-        ))
+        super().__init__(
+            ErrorContext(
+                code="FC-3011",
+                name="CONTROL_CHAR_IN_ARG",
+                message=f"Control character in argument: {arg_display}",
+                details={"argument": arg_display, "character": char_repr},
+                hint="Remove control characters from the argument",
+            )
+        )
 
 
 def sanitize_arg(arg: str) -> str:

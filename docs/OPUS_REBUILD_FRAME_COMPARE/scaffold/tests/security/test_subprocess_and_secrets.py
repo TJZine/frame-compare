@@ -44,9 +44,9 @@ class TestSubprocessSanitization:
         """Control characters in arguments must raise InputError(FC-3011)."""
         dangerous_inputs = [
             "file\x00.mkv",  # null byte
-            "file\n.mkv",   # newline
-            "file\r.mkv",   # carriage return
-            "file\t.mkv",   # tab (may be allowed depending on policy)
+            "file\n.mkv",  # newline
+            "file\r.mkv",  # carriage return
+            "file\t.mkv",  # tab (may be allowed depending on policy)
         ]
 
         for dangerous in dangerous_inputs:

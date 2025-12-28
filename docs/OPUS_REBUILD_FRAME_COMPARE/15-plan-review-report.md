@@ -4,9 +4,9 @@
 > This file is **historical** (preserved for context only) and is **not** part of the 5-agent run-directory workflow.
 > Canonical readiness/workflow/prompt sources: `AI_READINESS_ROADMAP.md`, `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md`, `docs/OPUS_REBUILD_FRAME_COMPARE/agent-prompts/`.
 
-**Date:** 2025-12-20  
-**Reviewer:** Codex CLI (Principal Engineer / Test Architect)  
-**Model:** GPT-5.2  
+**Date:** 2025-12-20
+**Reviewer:** Codex CLI (Principal Engineer / Test Architect)
+**Model:** GPT-5.2
 **Overall Assessment:** NEEDS REVISION
 
 ---
@@ -88,7 +88,7 @@ The plan has a strong contract-driven spine (canonical YAML/JSON + generator + s
 
 ### Remaining “Broader” Gaps (Full Pipeline Readiness)
 
-- ~~VS plugin detection spec is internally contradictory~~ ✅ Resolved: Detection tied to `Dockerfile.baseline` (R73); `doctor --json` includes `discovered_namespace`.
+- ~~VS plugin detection spec is internally contradictory~~ ✅ Resolved: Detection tied to repo-root `Dockerfile` baseline (R73); `doctor --json` includes `discovered_namespace`.
 - ~~Network/service lifecycle is underspecified~~ ✅ Resolved: `cli-module.md:L325-334` documents ownership; `async-semantics.md:L214-255` defines cleanup.
 - Public-facing specs still contain `Any` and placeholders (`...`), which blocks “AI implement from spec without questions” (`docs/OPUS_REBUILD_FRAME_COMPARE/05-implementation/module-specs/errors-module.md:37`, `docs/OPUS_REBUILD_FRAME_COMPARE/05-implementation/module-specs/cli-module.md:148`).
 - ~~Security invariants are "planned"~~ ✅ Resolved: Tier-A tests for path containment, subprocess, SSRF, secrets redaction.
@@ -190,8 +190,8 @@ This removes “verified but varies” ambiguity by specifying an ordered probe 
 
 Probe in order and record the discovered namespace:
 
-1. `core.lw.LWLibavSource` (common)
-2. `core.lsmas.LWLibavSource` (alias)
+1. `core.lsmas.LWLibavSource` (baseline)
+2. `core.lw.LWLibavSource` (legacy alias)
 3. `core.bs.VideoSource` (BestSource fallback)
 4. `core.ffms2.Source` (ffms2 fallback)
 
@@ -561,8 +561,8 @@ The traceability matrix exists but currently reads as an aspiration: it referenc
 
 | Plugin/Tool | Required For | Detection | Fallback | Error Code | Status |
 |:------------|:-------------|:----------|:---------|:-----------|:-------|
-| lsmas (LWLibavSource) | Source loading | `hasattr(core, 'lw') and hasattr(core.lw, 'LWLibavSource')` (`vs-module.md:L92`) | bestsource/ffms2/FFmpeg | FC-2003/FC-4015 | ✅ (pinned in `Dockerfile.baseline`) |
-| libplacebo | Tonemap | `hasattr(core, 'placebo')` (`vs-module.md:L95`) | Reinhard fallback | FC-2003/FC-4003 | ✅ (pinned in `Dockerfile.baseline`) |
+| lsmas (LWLibavSource) | Source loading | `hasattr(core, 'lsmas') and hasattr(core.lsmas, 'LWLibavSource')` (`vs-module.md:L92`) | bestsource/ffms2/FFmpeg | FC-2003/FC-4015 | ✅ (pinned in `Dockerfile`) |
+| libplacebo | Tonemap | `hasattr(core, 'placebo')` (`vs-module.md:L95`) | Reinhard fallback | FC-2003/FC-4003 | ✅ (pinned in `Dockerfile`) |
 | dovi_tool | DV | `shutil.which("dovi_tool")` | Skip DV | FC-2007 | ✅ (baseline docs specify version) |
 
 ---
@@ -607,7 +607,7 @@ The traceability matrix exists but currently reads as an aspiration: it referenc
 
 | Check | Status | Notes |
 |:------|:------:|:------|
-| Docker/DevContainer accurate | ✅ | `Dockerfile.baseline` pins R73 + plugins; `deployment.md` section 8 ties doctor output to baseline. |
+| Docker/DevContainer accurate | ✅ | `Dockerfile` pins R73 + plugins; `deployment.md` section 8 ties doctor output to baseline. |
 | Doctor/preflight complete | ✅ | `contracts/doctor_report_schema.json` defines output; `error_codes.yaml` maps failures. |
 | Scaffold copyable | ✅ | Guarded by a Tier‑A `git ls-files` artifact test; runtime caches can exist locally but are not tracked (`docs/OPUS_REBUILD_FRAME_COMPARE/scaffold/tests/contracts/test_scaffold_cleanliness.py:62`). |
 | Verification commands sufficient | ✅ | Workflow docs specify `pyright/ruff/pytest` and generator `--check` (`docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md`). |
@@ -623,7 +623,7 @@ The traceability matrix exists but currently reads as an aspiration: it referenc
 | errors | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ✅ (`JSONValue` used per L39-41) |
 | utils | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ✅ (`Never` imported per L143) |
 | config | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ✅ (pydantic-settings precedence per L67-80) |
-| vs | ✅ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ (detection tied to `Dockerfile.baseline`) |
+| vs | ✅ | ⚠️ | ⚠️ | ⚠️ | ✅ | ✅ (detection tied to `Dockerfile`) |
 | analysis | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ✅ (`FramePlan` contract exists for skip-analysis) |
 | render | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ✅ (FFmpeg uses `run_subprocess` per L231) |
 | services | ✅ | ✅ | ⚠️ | ⚠️ | ✅ | ✅ (SSRF policy exists; Tier-A tests cover upload) |
@@ -645,7 +645,7 @@ The traceability matrix exists but currently reads as an aspiration: it referenc
 | Contract enforcement | 8/10 | Canonical contracts + generator + scaffold Tier‑A tests + CI freshness check. |
 | Anti-churn scalability | 7/10 | Central contracts + strict sentinel replacement + dual-authority guard. |
 | Modularity / skippability | 8/10 | All 9 phases specified + E2E stubs created in `phase_ordering.yaml` with skip conditions. |
-| VapourSynth correctness | 8/10 | Baseline pinned in `Dockerfile.baseline`; deployment.md ties doctor to baseline. |
+| VapourSynth correctness | 8/10 | Baseline pinned in `Dockerfile`; deployment.md ties doctor to baseline. |
 | Security coverage | 8/10 | Tier-A tests exist for path containment, subprocess safety, upload policy. |
 
 ---

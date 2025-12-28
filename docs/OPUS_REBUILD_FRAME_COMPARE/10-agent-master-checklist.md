@@ -1,7 +1,7 @@
 # Frame Compare 2.0 — AI Agent Master Implementation Checklist
 
-> **Version:** 1.0  
-> **Last Updated:** 2025-12-20  
+> **Version:** 1.0
+> **Last Updated:** 2025-12-20
 > **Purpose:** Best practice tracking for AI coding agents across implementation sessions
 
 ---
@@ -62,7 +62,7 @@ frame-compare/
   - [x] Dev: `pytest`, `pytest-mock`, `pyright`, `ruff`, `structlog`
 - [x] Configure Pyright in strict mode (2025-12-28)
 - [x] Configure Ruff with rules: `E`, `F`, `I`, `W`, `UP` (2025-12-28)
-- [ ] Setup pre-commit hooks (optional but recommended)
+- [x] Setup pre-commit hooks (optional but recommended) (2025-12-28)
 - [x] Verify: `uv sync` completes successfully (2025-12-28)
 
 ### 0.4 CI/CD Pipeline
@@ -76,12 +76,12 @@ frame-compare/
 
 ### 0.5 Container Setup
 
-- [ ] Create multi-stage `Dockerfile`
-- [ ] Build VapourSynth R72+ in container
-- [ ] Install libplacebo with software rasterization
-- [ ] Create `docker-compose.yml`
-- [ ] Create `.devcontainer/devcontainer.json`
-- [ ] Verify: `docker compose build` succeeds
+- [x] Create multi-stage `Dockerfile` (2025-12-28)
+- [x] Build VapourSynth R73 in container (2025-12-28)
+- [x] Install libplacebo with software rasterization (2025-12-28)
+- [x] Create `docker-compose.yml` (2025-12-28)
+- [x] Create `.devcontainer/devcontainer.json` (2025-12-28)
+- [x] Verify: `docker compose build` succeeds (2025-12-28)
 - [ ] Verify: DevContainer opens in VS Code
 
 ### Phase 0 Quality Gate ✓

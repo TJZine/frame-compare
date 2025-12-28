@@ -1,6 +1,6 @@
 # Business Requirements
 
-> **Module:** Requirements Specification  
+> **Module:** Requirements Specification
 > **Version:** 1.0
 
 ---
@@ -12,7 +12,7 @@
 Frame Compare is a Python CLI tool serving the video encoding and quality control community. It automates the tedious process of:
 
 - Selecting representative frames from video sources
-- Aligning multiple encodes via audio cross-correlation  
+- Aligning multiple encodes via audio cross-correlation
 - Rendering comparison screenshots with HDR tonemapping
 - Publishing to comparison hosting services
 

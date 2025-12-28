@@ -41,13 +41,15 @@ def get_all_fields_from_schema(schema: dict, prefix: str = "") -> set[str]:
 
 
 # Invariant section names that must always exist (stable IDs)
-REQUIRED_SECTIONS = frozenset({
-    "paths",
-    "analysis",
-    "color",
-    "slowpics",
-    "logging",
-})
+REQUIRED_SECTIONS = frozenset(
+    {
+        "paths",
+        "analysis",
+        "color",
+        "slowpics",
+        "logging",
+    }
+)
 
 
 @pytest.mark.tier_a
@@ -77,12 +79,10 @@ class TestConfigSchemaContract:
 
         for section_name in REQUIRED_SECTIONS:
             section = schema["properties"].get(section_name, {})
-            assert section.get("type") == "object", (
-                f"Section '{section_name}' should be type 'object'"
-            )
-            assert "properties" in section, (
-                f"Section '{section_name}' should have 'properties'"
-            )
+            assert (
+                section.get("type") == "object"
+            ), f"Section '{section_name}' should be type 'object'"
+            assert "properties" in section, f"Section '{section_name}' should have 'properties'"
 
     def test_schema_has_meaningful_content(self) -> None:
         """Schema has non-trivial field inventory (>10 fields minimum)."""

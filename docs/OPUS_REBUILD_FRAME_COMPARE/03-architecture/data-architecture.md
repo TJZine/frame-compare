@@ -1,6 +1,6 @@
 # Data Architecture
 
-> **Module:** Architecture  
+> **Module:** Architecture
 > **Version:** 1.0
 
 ---
@@ -25,13 +25,13 @@ Description: User configuration merged from file, env, CLI
 Sections:
   # NOTE: Canonical field names are defined in config-module.md.
   # This is a reference view; implementation MUST follow config-module.md.
-  
+
   paths:
     input_dir: str            # Video source directory (relative to root)
     screenshots_dir: str      # Screenshot output directory
     generated_dir: str        # Cache and generated files
     config_dir: str           # Config and presets directory
-    
+
   analysis:
     frame_count: int          # Frames to select [1-100, default 10]
     random_seed: int          # Deterministic seed (default 42)
@@ -39,21 +39,21 @@ Sections:
     save_frames_data: bool    # Persist selection metadata
     dark_quantile: float      # 0.0-0.5 (default 0.05)
     bright_quantile: float    # 0.5-1.0 (default 0.95)
-    
+
   audio_alignment:
     enable: bool              # Enable audio sync
     sample_rate: int          # Audio sample rate [4000-48000]
     max_offset_seconds: float # Maximum search offset
     use_vspreview: bool       # Interactive confirmation
     cache_results: bool       # Cache alignment results
-    
+
   screenshots:
     use_ffmpeg: bool          # Force FFmpeg renderer
     directory_name: str       # Output subdirectory
     overlay_mode: enum        # minimal, standard, diagnostic, none
     include_frame_number: bool
     png_compression: int      # [0-9]
-    
+
   color:
     enable_tonemap: bool
     preset: str               # Tonemap preset name
@@ -61,37 +61,37 @@ Sections:
     tone_curve: str           # bt2390|spline|reinhard|mobius|linear
     gamma_lift: bool
     contrast_recovery: float  # [0.0-1.0]
-    
+
   slowpics:
     auto_upload: bool         # Upload automatically
     visibility: enum          # public, unlisted, private
     delete_after_upload: bool
     timeout_seconds: float
     max_retries: int
-    
+
   tmdb:
     api_key: str | None       # TMDB API key
     enabled: bool
     unattended: bool          # Skip prompts
     timeout_seconds: float
-    
+
   report:
     enable: bool              # Generate HTML report
     output_dir: str | None    # None = use screenshots_dir
     default_mode: enum        # slider, overlay, diff, blink
     include_filmstrip: bool
     embed_images: bool
-    
+
   dovi:
     enable: bool
     dovi_tool_path: Path | None
     cache_results: bool
-    
+
   diagnostics:
     per_frame_nits: bool
     show_hdr_info: bool
     frame_timing: bool
-    
+
   logging:
     level: str                # DEBUG|INFO|WARNING|ERROR
     format: str               # json|console
@@ -119,7 +119,7 @@ Fields:
   trim_start: int             # Start frame trim (audio offset)
   trim_end: int | None        # End frame trim
   source_frame_props: dict    # HDR metadata from frame 0
-  
+
 Relationships:
   - Part of ClipPlan[] list in RunContext
   - Referenced by FrameSelection
@@ -143,7 +143,7 @@ Fields:
     frame_count: int
     config_fingerprint: str   # Config hash for invalidation
     clips: list[ClipIdentity]
-    
+
 ClipIdentity:
   path: str                   # Absolute path
   size: int                   # File size bytes
@@ -277,13 +277,13 @@ Frame Metrics:
     - Config fingerprint changes
     - File identity changes (path, size, mtime)
     - Force --no-cache flag
-    
+
 Audio Offsets:
   Invalidate when:
     - Reference file changes
     - Explicit recompute request
     - Manual --no-cache flag
-    
+
 Clip Probes:
   Invalidate when:
     - File mtime changes
@@ -313,7 +313,7 @@ def load_cache(path: Path) -> CacheLoadResult:
   "version": "2.0.0",
   "timestamp": "2025-12-16T08:00:00Z",
   "success": true,
-  
+
   "clips": [
     {
       "label": "Source",
@@ -325,13 +325,13 @@ def load_cache(path: Path) -> CacheLoadResult:
       "trim_applied": 0
     }
   ],
-  
+
   "frames": {
     "selected": [100, 500, 1000, 2000, 5000],
     "mode": "mixed",
     "seed": 42
   },
-  
+
   "alignment": {
     "enabled": true,
     "reference": "Source",
@@ -339,25 +339,25 @@ def load_cache(path: Path) -> CacheLoadResult:
       "Encode_A": {"frames": 3, "seconds": 0.125, "correlation": 0.92}
     }
   },
-  
+
   "tonemap": {
     "enabled": true,
     "preset": "reference",
     "target_nits": 203,
     "source_peak": 1000
   },
-  
+
   "screenshots": {
     "count": 15,
     "directory": "/path/to/screenshots",
     "renderer": "vapoursynth"
   },
-  
+
   "publish": {
     "slowpics_url": "https://slow.pics/c/abc123",
     "shortcut_created": true
   },
-  
+
   "cache": {
     "metrics_reused": true,
     "alignment_reused": true,
@@ -399,12 +399,12 @@ def compute_config_fingerprint(config: AnalysisConfig) -> str:
 def migrate_config(raw: dict) -> tuple[dict, list[str]]:
     """Migrate deprecated config keys, return warnings"""
     warnings = []
-    
+
     # Example: skip_head_seconds → ignore_head_seconds
     if "skip_head_seconds" in raw.get("analysis", {}):
         warnings.append("'skip_head_seconds' is deprecated, use 'ignore_head_seconds'")
         raw["analysis"]["ignore_head_seconds"] = raw["analysis"].pop("skip_head_seconds")
-    
+
     return raw, warnings
 ```
 
@@ -418,23 +418,23 @@ def migrate_config(raw: dict) -> tuple[dict, list[str]]:
 @dataclass
 class RunContext:
     """Carries state through pipeline phases"""
-    
+
     # Config
     config: RuntimeConfig
     workspace_root: Path
-    
+
     # Pipeline state
     plans: list[ClipPlan]
     alignment: AlignmentResult | None
     selection: FrameSelection | None
-    
+
     # Outputs
     screenshots: list[Path]
     slowpics_url: str | None
-    
+
     # Metadata
     metadata: dict[str, JSONValue]  # JSON-safe structured data
-    
+
     # Services
     reporter: CLIOutputManager
 ```
@@ -450,7 +450,7 @@ stateDiagram-v2
     Selected --> Rendered: Screenshot generation
     Rendered --> Published: Upload to slow.pics
     Published --> [*]: Complete
-    
+
     Aligned --> Selected: Skip if disabled
     Rendered --> [*]: Skip publish
 ```

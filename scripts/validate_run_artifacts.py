@@ -26,7 +26,9 @@ RUN_ID_PATTERN = re.compile(
     r"^(?P<date>\d{4}-\d{2}-\d{2})__(?P<kind>p\d+-\d+(?:-\d+)*|meta)__(?P<slug>[a-z0-9][a-z0-9-]*)$"
 )
 
-ARTIFACT_PATTERN = re.compile(r"^(?P<stage>plan|plan-review|impl|verify|review)-v(?P<version>\d+)\.md$")
+ARTIFACT_PATTERN = re.compile(
+    r"^(?P<stage>plan|plan-review|impl|verify|review)-v(?P<version>\d+)\.md$"
+)
 
 NEXT_HEADER = "## NEXT AGENT PROMPT (COPY/PASTE)"
 
@@ -135,7 +137,9 @@ def _extract_next_block(text: str, path: Path) -> str:
     return text[idx:]
 
 
-def _validate_next_block_placeholders(next_block: str, *, allow_new_run_id: bool, path: Path) -> None:
+def _validate_next_block_placeholders(
+    next_block: str, *, allow_new_run_id: bool, path: Path
+) -> None:
     for snippet in FORBIDDEN_PLACEHOLDER_SNIPPETS:
         if snippet in next_block:
             _fail(f"{path}: NEXT block contains placeholder token: {snippet!r}")
@@ -178,18 +182,24 @@ def validate_artifact(path: Path, run_id: str) -> None:
     fm = _parse_frontmatter(text, path)
 
     if fm.run_id != run_id:
-        _fail(f"{path}: frontmatter RUN_ID {fm.run_id!r} does not match directory RUN_ID {run_id!r}")
+        _fail(
+            f"{path}: frontmatter RUN_ID {fm.run_id!r} does not match directory RUN_ID {run_id!r}"
+        )
     validate_run_id_format(fm.run_id)
 
     if fm.version != expected_version:
-        _fail(f"{path}: frontmatter VERSION {fm.version!r} does not match filename VERSION {expected_version!r}")
+        _fail(
+            f"{path}: frontmatter VERSION {fm.version!r} does not match filename VERSION {expected_version!r}"
+        )
 
     next_block = _extract_next_block(text, path)
     _validate_next_block_placeholders(next_block, allow_new_run_id=allow_new_run_id, path=path)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Validate run artifacts under .agent-workflow/runs/<RUN_ID>/")
+    parser = argparse.ArgumentParser(
+        description="Validate run artifacts under .agent-workflow/runs/<RUN_ID>/"
+    )
     parser.add_argument(
         "run_dir",
         type=Path,
@@ -216,7 +226,9 @@ def main() -> int:
         validate_artifact(artifact, run_id)
 
     if not had_any_expected:
-        _fail(f"{run_dir}: no stage artifacts found matching (plan|plan-review|impl|verify|review)-vN.md")
+        _fail(
+            f"{run_dir}: no stage artifacts found matching (plan|plan-review|impl|verify|review)-vN.md"
+        )
 
     print(f"OK: Run artifacts valid for {run_id}")
     return 0

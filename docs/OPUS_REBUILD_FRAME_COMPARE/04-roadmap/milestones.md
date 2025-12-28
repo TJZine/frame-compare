@@ -1,6 +1,6 @@
 # Milestones
 
-> **Module:** Roadmap  
+> **Module:** Roadmap
 > **Version:** 1.0
 
 ---
@@ -13,7 +13,7 @@ Each milestone represents a significant, demonstrable achievement with clear ver
 
 ## M0: Project Scaffolding Complete
 
-**Target:** End of Phase 0  
+**Target:** End of Phase 0
 **Theme:** Development environment ready
 
 ### Verification Criteria
@@ -36,7 +36,7 @@ Each milestone represents a significant, demonstrable achievement with clear ver
 
 ## M1: First Frame Rendered
 
-**Target:** Week 2 of Phase 1  
+**Target:** Week 2 of Phase 1
 **Theme:** Core rendering pipeline working
 
 ### Verification Criteria
@@ -58,7 +58,7 @@ Each milestone represents a significant, demonstrable achievement with clear ver
 
 ## M2: Automated Frame Selection
 
-**Target:** End of Phase 1  
+**Target:** End of Phase 1
 **Theme:** Analysis pipeline complete
 
 ### Verification Criteria
@@ -80,7 +80,7 @@ Each milestone represents a significant, demonstrable achievement with clear ver
 
 ## M3: Audio Alignment Working
 
-**Target:** Week 1 of Phase 2  
+**Target:** Week 1 of Phase 2
 **Theme:** Multi-clip synchronization
 
 ### Verification Criteria
@@ -102,7 +102,7 @@ Each milestone represents a significant, demonstrable achievement with clear ver
 
 ## M4: slow.pics Integration
 
-**Target:** End of Phase 2  
+**Target:** End of Phase 2
 **Theme:** Publishing workflow
 
 ### Verification Criteria
@@ -124,7 +124,7 @@ Each milestone represents a significant, demonstrable achievement with clear ver
 
 ## M5: CLI Feature Complete
 
-**Target:** End of Phase 3  
+**Target:** End of Phase 3
 **Theme:** User interface ready
 
 ### Verification Criteria
@@ -147,7 +147,7 @@ Each milestone represents a significant, demonstrable achievement with clear ver
 
 ## M6: Container Deployment Ready
 
-**Target:** End of Phase 4  
+**Target:** End of Phase 4
 **Theme:** Zero-config deployment
 
 ### Verification Criteria
@@ -170,7 +170,7 @@ Each milestone represents a significant, demonstrable achievement with clear ver
 
 ## M7: v2.0.0 Release
 
-**Target:** End of Phase 5  
+**Target:** End of Phase 5
 **Theme:** Production launch
 
 ### Verification Criteria
@@ -197,7 +197,7 @@ Each milestone represents a significant, demonstrable achievement with clear ver
 ```mermaid
 timeline
     title Frame Compare 2.0 Milestones
-    
+
     Phase 0 : M0 Scaffolding
     Phase 1 : M1 First Frame
             : M2 Frame Selection

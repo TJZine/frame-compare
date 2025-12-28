@@ -10,6 +10,7 @@ from typing import TypedDict
 
 class CLIFlagInfo(TypedDict):
     """Type-safe CLI flag metadata."""
+
     long: str
     short: str | None
     type: str
@@ -58,7 +59,15 @@ CLI_FLAGS: dict[str, CLIFlagInfo] = {
         "default": None,
         "config_key": "color.preset",
         "help": "Tonemap preset (defers to config)",
-        "choices": ["reference", "filmic", "contrast", "bt2390_spec", "spline", "bright_lift", "highlight_guard"],
+        "choices": [
+            "reference",
+            "filmic",
+            "contrast",
+            "bt2390_spec",
+            "spline",
+            "bright_lift",
+            "highlight_guard",
+        ],
         "envvar": None,
     },
     "FLAG_TM_TARGET": {

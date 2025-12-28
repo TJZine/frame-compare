@@ -2,6 +2,7 @@
 
 Verifies that all path operations stay within allowed workspace boundaries.
 """
+
 from pathlib import Path
 
 import pytest

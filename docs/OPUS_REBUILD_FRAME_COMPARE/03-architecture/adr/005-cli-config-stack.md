@@ -70,7 +70,7 @@ class AnalysisConfig(BaseSettings):
         env_prefix="FRAME_COMPARE_ANALYSIS_",
         toml_file="config.toml",
     )
-    
+
     frame_count: int = Field(default=10, ge=3, le=100)
     random_seed: int = Field(default=42)
     mode: SelectionMode = Field(default=SelectionMode.MIXED)
@@ -110,7 +110,7 @@ E = TypeVar("E")
 class Ok(Generic[T]):
     value: T
 
-@dataclass  
+@dataclass
 class Err(Generic[E]):
     error: E
 

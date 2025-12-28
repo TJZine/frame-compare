@@ -264,10 +264,10 @@ log.info("frame_processed", frame=42, luminance=0.523)
 def test_calculate_luminance_white_frame():
     # Arrange
     frames = [np.full((100, 100), 255, dtype=np.uint8)]
-    
+
     # Act
     result = calculate_luminance(frames)
-    
+
     # Assert
     assert result == [1.0]
 ```

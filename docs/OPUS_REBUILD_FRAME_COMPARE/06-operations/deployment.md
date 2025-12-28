@@ -1,6 +1,6 @@
 # Deployment Guide
 
-> **Module:** Operations  
+> **Module:** Operations
 > **Version:** 1.0
 
 ---
@@ -190,9 +190,9 @@ visibility = "unlisted"
 frame-compare doctor
 
 # Output:
-# ✓ VapourSynth R72 detected
+# ✓ VapourSynth R73 detected
 # ✓ libplacebo loaded
-# ✓ FFmpeg 6.0 available
+# ✓ FFmpeg available
 # ✓ Config directory exists
 # ⚠ VSPreview not installed (optional)
 ```
@@ -216,17 +216,20 @@ All "verified" claims in module specs (see [vs-module.md](../05-implementation/m
 | Component | Version | Source | Namespace |
 |:----------|:--------|:-------|:----------|
 | VapourSynth | R73 | github.com/vapoursynth/vapoursynth | — |
-| L-SMASH Works | HomeOfAviSynthPlusEvolution fork | github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works | `lw` |
-| ffms2 | v2.40 | github.com/FFMS/ffms2 | `ffms2` |
-| bestsource | R8 | github.com/vapoursynth/bestsource | `bs` |
-| Python | 3.13 | deadsnakes PPA | — |
-| FFmpeg | 6.1+ | Ubuntu 24.04 packages | — |
+| zimg | `release-3.0.5` | github.com/sekrit-twc/zimg | — |
+| L-SMASH | `v2.14.5` | github.com/l-smash/l-smash | — |
+| L-SMASH Works | `20230716` | github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works | `lsmas` (alias `lw`) |
+| libplacebo | `v7.349.0` | github.com/haasn/libplacebo | `placebo` |
+| vs-placebo | `14083805df08cd478539c15464a7183da2c0032e` | github.com/Lypheo/vs-placebo | `placebo` |
+| ffms2 | `45673149e9a2f5586855ad472e3059084eaa36b1` | github.com/FFMS/ffms2 | `ffms2` |
+| Python | 3.13.1 | Docker base image (`python:3.13.1-slim-bookworm`) | — |
+| FFmpeg | Debian Bookworm (FFmpeg 5.x) | Debian Bookworm packages | — |
 
 ### 8.2 Building the Baseline Image
 
 ```bash
 # Build from project root
-docker build -f Dockerfile.baseline -t frame-compare-baseline .
+docker build -t frame-compare-baseline .
 
 # Verify labels
 docker inspect frame-compare-baseline --format '{{json .Config.Labels}}' | jq
@@ -244,7 +247,7 @@ import vapoursynth as vs
 core = vs.core
 plugins = {p.namespace: p.name for p in core.plugins()}
 print('Discovered namespaces:', list(plugins.keys()))
-assert 'lw' in plugins, 'L-SMASH Works (lw) not found'
+assert 'lsmas' in plugins, 'L-SMASH Works (lsmas) not found'
 print('Baseline OK')
 "
 ```
@@ -257,8 +260,8 @@ The `doctor --json` output includes `discovered_namespace` for each plugin check
 {
   "id": "lsmash",
   "status": "pass",
-  "discovered_namespace": "lw",
-  "expected_namespace": "lw",
+  "discovered_namespace": "lsmas",
+  "expected_namespace": "lsmas",
   "install_hint": null
 }
 ```

@@ -44,12 +44,14 @@ class TestFrameCompareError:
 
     def test_error_properties(self):
         """Error exposes context properties."""
-        error = FrameCompareError(ErrorContext(
-            code="FC-0001",
-            name="TEST_ERROR",
-            message="Test error",
-            hint="Do something",
-        ))
+        error = FrameCompareError(
+            ErrorContext(
+                code="FC-0001",
+                name="TEST_ERROR",
+                message="Test error",
+                hint="Do something",
+            )
+        )
 
         assert error.code == "FC-0001"
         assert error.name == "TEST_ERROR"
@@ -120,4 +122,3 @@ class TestErrorContextSerialization:
 
         assert result["hint"] == "Try this"
         assert result["details"] == {"key": "value"}
-

@@ -3,6 +3,7 @@
 Verifies that subprocess arguments are properly validated to prevent
 shell injection and control character attacks.
 """
+
 import pytest
 
 pytestmark = pytest.mark.tier_a

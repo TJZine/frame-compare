@@ -31,14 +31,14 @@ import anyio
 class SlowpicsClient:
     def __init__(self):
         self._client: httpx.AsyncClient | None = None
-    
+
     async def __aenter__(self):
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(30.0, connect=10.0),
             limits=httpx.Limits(max_connections=10),
         )
         return self
-    
+
     async def upload_images(
         self,
         images: list[Path],
@@ -79,7 +79,7 @@ def publish_comparison(screenshots: list[Path]) -> str:
     async def _publish():
         async with SlowpicsClient() as client:
             return await client.upload_images(screenshots, title)
-    
+
     return run_network_operations(_publish())
 ```
 

@@ -22,9 +22,7 @@ class TestScaffoldCleanliness:
     def test_gitignore_exists(self) -> None:
         """Scaffold has a .gitignore file."""
         gitignore_path = SCAFFOLD_DIR / ".gitignore"
-        assert gitignore_path.exists(), (
-            f"Missing .gitignore in scaffold: {SCAFFOLD_DIR}"
-        )
+        assert gitignore_path.exists(), f"Missing .gitignore in scaffold: {SCAFFOLD_DIR}"
 
     def test_gitignore_excludes_venv(self) -> None:
         """Scaffold .gitignore excludes virtual environments."""
@@ -33,9 +31,9 @@ class TestScaffoldCleanliness:
             pytest.skip(".gitignore does not exist")
 
         content = gitignore_path.read_text()
-        assert ".venv" in content or "venv/" in content, (
-            ".gitignore should exclude virtual environments"
-        )
+        assert (
+            ".venv" in content or "venv/" in content
+        ), ".gitignore should exclude virtual environments"
 
     def test_gitignore_excludes_pycache(self) -> None:
         """Scaffold .gitignore excludes __pycache__."""
@@ -44,9 +42,9 @@ class TestScaffoldCleanliness:
             pytest.skip(".gitignore does not exist")
 
         content = gitignore_path.read_text()
-        assert "__pycache__" in content or "*.pyc" in content, (
-            ".gitignore should exclude __pycache__ or *.pyc"
-        )
+        assert (
+            "__pycache__" in content or "*.pyc" in content
+        ), ".gitignore should exclude __pycache__ or *.pyc"
 
     def test_gitignore_excludes_pytest_cache(self) -> None:
         """Scaffold .gitignore excludes pytest cache."""
@@ -55,9 +53,7 @@ class TestScaffoldCleanliness:
             pytest.skip(".gitignore does not exist")
 
         content = gitignore_path.read_text()
-        assert ".pytest_cache" in content, (
-            ".gitignore should exclude .pytest_cache"
-        )
+        assert ".pytest_cache" in content, ".gitignore should exclude .pytest_cache"
 
     def test_no_tracked_artifacts(self) -> None:
         """No build artifacts are tracked in git under scaffold.
@@ -95,10 +91,7 @@ class TestScaffoldCleanliness:
             ".mypy_cache",
         ]
 
-        artifacts = [
-            f for f in tracked_files
-            if any(p in f for p in artifact_patterns)
-        ]
+        artifacts = [f for f in tracked_files if any(p in f for p in artifact_patterns)]
 
         assert not artifacts, (
             f"Build artifacts tracked in git under scaffold: {artifacts}\\n"

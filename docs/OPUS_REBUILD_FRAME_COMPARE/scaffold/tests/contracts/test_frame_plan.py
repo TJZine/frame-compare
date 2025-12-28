@@ -95,17 +95,13 @@ class TestCreateUniformSeededPlan:
 
     def test_creates_plan_with_uniform_seeded_method(self) -> None:
         """Plan uses uniform_seeded method."""
-        plan = create_uniform_seeded_plan(
-            num_frames=240, count=5, seed=42
-        )
+        plan = create_uniform_seeded_plan(num_frames=240, count=5, seed=42)
         assert plan.method == "uniform_seeded"
         assert plan.frames == [12, 59, 115, 151, 233]
 
     def test_frames_always_populated(self) -> None:
         """FramePlan.frames is NEVER empty (contract requirement)."""
-        plan = create_uniform_seeded_plan(
-            num_frames=100, count=5, seed=42
-        )
+        plan = create_uniform_seeded_plan(num_frames=100, count=5, seed=42)
         assert len(plan.frames) == 5
         assert all(isinstance(f, int) for f in plan.frames)
 
@@ -114,4 +110,3 @@ class TestCreateUniformSeededPlan:
         plan = FramePlan(frames=[1, 2, 3], method="uniform_seeded", seed=42, num_frames=100)
         with pytest.raises(AttributeError):
             plan.frames = [4, 5, 6]  # type: ignore[misc]
-

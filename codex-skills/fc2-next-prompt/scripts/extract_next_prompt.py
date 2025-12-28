@@ -9,7 +9,9 @@ NEXT_HEADER = "## NEXT AGENT PROMPT (COPY/PASTE)"
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Print the NEXT AGENT PROMPT block from a run artifact.")
+    parser = argparse.ArgumentParser(
+        description="Print the NEXT AGENT PROMPT block from a run artifact."
+    )
     parser.add_argument("artifact_path", type=Path, help="Path to an artifact .md file")
     args = parser.parse_args()
 

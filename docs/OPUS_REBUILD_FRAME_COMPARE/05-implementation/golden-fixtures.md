@@ -1,6 +1,6 @@
 # Golden Test Fixtures
 
-> **Module:** Reference  
+> **Module:** Reference
 > **Purpose:** Define deterministic test fixtures for regression verification
 
 ---
@@ -113,7 +113,7 @@ def golden_pq_video() -> Path:
 def test_e2e_golden_pipeline(golden_pq_video, tmp_path):
     """
     Full pipeline test against golden fixture.
-    
+
     Validates:
     - Frame count matches
     - Selection reproducible with seed
@@ -124,7 +124,7 @@ def test_e2e_golden_pipeline(golden_pq_video, tmp_path):
         frame_count=5,
         random_seed=42,
     ))
-    
+
     assert result.success
     assert len(result.frames) == 5
     assert result.frames == [12, 48, 96, 144, 192]  # Reproducible with seed
@@ -142,7 +142,7 @@ golden-tests:
     - uses: actions/checkout@v4
       with:
         lfs: true  # Fetch video fixtures
-    
+
     - name: Run golden tests
       run: pytest tests/golden/ -v --tb=short
 ```

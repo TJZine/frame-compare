@@ -26,10 +26,20 @@ type JSONValue = str | int | float | bool | None | list["JSONValue"] | dict[str,
 type ErrorDetails = Mapping[str, JSONValue]
 
 # Keys that should be redacted when serializing errors
-SENSITIVE_KEYS = frozenset({
-    "api_key", "apikey", "password", "token", "secret",
-    "authorization", "auth", "bearer", "credential", "credentials",
-})
+SENSITIVE_KEYS = frozenset(
+    {
+        "api_key",
+        "apikey",
+        "password",
+        "token",
+        "secret",
+        "authorization",
+        "auth",
+        "bearer",
+        "credential",
+        "credentials",
+    }
+)
 
 
 def _deep_redact(value: JSONValue, key: str | None = None) -> JSONValue:
@@ -65,6 +75,7 @@ class ErrorContext:
         hint: Optional actionable hint for resolution
         cause: Optional underlying exception
     """
+
     code: str
     name: str
     message: str
@@ -155,6 +166,7 @@ class FrameCompareError(Exception):
 # Configuration Errors (FC-1xxx)
 # =============================================================================
 
+
 class ConfigError(FrameCompareError):
     """Base class for configuration errors."""
 
@@ -163,26 +175,30 @@ class ConfigNotFoundError(ConfigError):
     """Configuration file not found."""
 
     def __init__(self, path: str) -> None:
-        super().__init__(ErrorContext(
-            code="FC-1001",
-            name="CONFIG_NOT_FOUND",
-            message=f"Configuration file not found: {path}",
-            details={"path": path},
-            hint="Run 'frame-compare wizard' or create config/config.toml",
-        ))
+        super().__init__(
+            ErrorContext(
+                code="FC-1001",
+                name="CONFIG_NOT_FOUND",
+                message=f"Configuration file not found: {path}",
+                details={"path": path},
+                hint="Run 'frame-compare wizard' or create config/config.toml",
+            )
+        )
 
 
 class ConfigParseError(ConfigError):
     """Configuration file parsing failed."""
 
     def __init__(self, path: str, error: str) -> None:
-        super().__init__(ErrorContext(
-            code="FC-1002",
-            name="CONFIG_PARSE_ERROR",
-            message=f"Failed to parse {path}: {error}",
-            details={"path": path, "error": error},
-            hint="Check TOML syntax at the indicated line",
-        ))
+        super().__init__(
+            ErrorContext(
+                code="FC-1002",
+                name="CONFIG_PARSE_ERROR",
+                message=f"Failed to parse {path}: {error}",
+                details={"path": path, "error": error},
+                hint="Check TOML syntax at the indicated line",
+            )
+        )
 
 
 class ConfigValidationError(ConfigError):
@@ -190,18 +206,21 @@ class ConfigValidationError(ConfigError):
 
     def __init__(self, errors: list[dict[str, JSONValue]]) -> None:
         fields = [str(e.get("loc", ["unknown"])[-1]) for e in errors]
-        super().__init__(ErrorContext(
-            code="FC-1003",
-            name="CONFIG_VALIDATION_ERROR",
-            message=f"Invalid configuration: {', '.join(fields)}",
-            details={"errors": errors},
-            hint="Check field types and constraints",
-        ))
+        super().__init__(
+            ErrorContext(
+                code="FC-1003",
+                name="CONFIG_VALIDATION_ERROR",
+                message=f"Invalid configuration: {', '.join(fields)}",
+                details={"errors": errors},
+                hint="Check field types and constraints",
+            )
+        )
 
 
 # =============================================================================
 # Dependency Errors (FC-2xxx)
 # =============================================================================
+
 
 class DependencyError(FrameCompareError):
     """Base class for dependency errors."""
@@ -211,68 +230,79 @@ class VapourSynthNotFoundError(DependencyError):
     """VapourSynth not installed or importable."""
 
     def __init__(self, message: str = "VapourSynth not installed") -> None:
-        super().__init__(ErrorContext(
-            code="FC-2001",
-            name="VAPOURSYNTH_NOT_FOUND",
-            message=message,
-            hint="Use Docker deployment or install VapourSynth R72+",
-        ))
+        super().__init__(
+            ErrorContext(
+                code="FC-2001",
+                name="VAPOURSYNTH_NOT_FOUND",
+                message=message,
+                hint="Use Docker deployment or install VapourSynth R72+",
+            )
+        )
 
 
 class VapourSynthError(DependencyError):
     """VapourSynth runtime error."""
 
     def __init__(self, details: str) -> None:
-        super().__init__(ErrorContext(
-            code="FC-2002",
-            name="VAPOURSYNTH_ERROR",
-            message=f"VapourSynth error: {details}",
-            details={"details": details},
-            hint="Run 'frame-compare doctor' for diagnostics",
-        ))
+        super().__init__(
+            ErrorContext(
+                code="FC-2002",
+                name="VAPOURSYNTH_ERROR",
+                message=f"VapourSynth error: {details}",
+                details={"details": details},
+                hint="Run 'frame-compare doctor' for diagnostics",
+            )
+        )
 
 
 class PluginNotFoundError(DependencyError):
     """VapourSynth plugin not found."""
 
     def __init__(self, plugin: str) -> None:
-        super().__init__(ErrorContext(
-            code="FC-2003",
-            name="PLUGIN_NOT_FOUND",
-            message=f"VapourSynth plugin not found: {plugin}",
-            details={"plugin": plugin},
-            hint=f"Install {plugin} or use Docker deployment",
-        ))
+        super().__init__(
+            ErrorContext(
+                code="FC-2003",
+                name="PLUGIN_NOT_FOUND",
+                message=f"VapourSynth plugin not found: {plugin}",
+                details={"plugin": plugin},
+                hint=f"Install {plugin} or use Docker deployment",
+            )
+        )
 
 
 class FFmpegNotFoundError(DependencyError):
     """FFmpeg not found in PATH."""
 
     def __init__(self, message: str = "FFmpeg not found in PATH") -> None:
-        super().__init__(ErrorContext(
-            code="FC-2005",
-            name="FFMPEG_NOT_FOUND",
-            message=message,
-            hint="Install FFmpeg 6.0+",
-        ))
+        super().__init__(
+            ErrorContext(
+                code="FC-2005",
+                name="FFMPEG_NOT_FOUND",
+                message=message,
+                hint="Install FFmpeg 6.0+",
+            )
+        )
 
 
 class FFmpegError(DependencyError):
     """FFmpeg runtime error."""
 
     def __init__(self, details: str) -> None:
-        super().__init__(ErrorContext(
-            code="FC-2006",
-            name="FFMPEG_ERROR",
-            message=f"FFmpeg error: {details}",
-            details={"details": details},
-            hint="Check FFmpeg output for details",
-        ))
+        super().__init__(
+            ErrorContext(
+                code="FC-2006",
+                name="FFMPEG_ERROR",
+                message=f"FFmpeg error: {details}",
+                details={"details": details},
+                hint="Check FFmpeg output for details",
+            )
+        )
 
 
 # =============================================================================
 # Input Errors (FC-3xxx)
 # =============================================================================
+
 
 class InputError(FrameCompareError):
     """Base class for input errors."""
@@ -282,26 +312,30 @@ class NoVideosFoundError(InputError):
     """No video files found in input directory."""
 
     def __init__(self, path: str, patterns: list[str] | None = None) -> None:
-        super().__init__(ErrorContext(
-            code="FC-3001",
-            name="NO_VIDEOS_FOUND",
-            message=f"No video files found in {path}",
-            details={"path": path, "patterns": patterns or ["*.mkv", "*.mp4"]},
-            hint="Place *.mkv, *.mp4 files in the input directory",
-        ))
+        super().__init__(
+            ErrorContext(
+                code="FC-3001",
+                name="NO_VIDEOS_FOUND",
+                message=f"No video files found in {path}",
+                details={"path": path, "patterns": patterns or ["*.mkv", "*.mp4"]},
+                hint="Place *.mkv, *.mp4 files in the input directory",
+            )
+        )
 
 
 class VideoOpenError(InputError):
     """Failed to open video file."""
 
     def __init__(self, path: str, reason: str | None = None) -> None:
-        super().__init__(ErrorContext(
-            code="FC-3002",
-            name="VIDEO_OPEN_ERROR",
-            message=f"Failed to open video: {path}",
-            details={"path": path, "reason": reason},
-            hint="Check file path and format",
-        ))
+        super().__init__(
+            ErrorContext(
+                code="FC-3002",
+                name="VIDEO_OPEN_ERROR",
+                message=f"Failed to open video: {path}",
+                details={"path": path, "reason": reason},
+                hint="Check file path and format",
+            )
+        )
 
 
 class InvalidPathError(InputError):
@@ -313,13 +347,15 @@ class InvalidPathError(InputError):
     _REGISTER: ClassVar[bool] = True
 
     def __init__(self, path: str, reason: str | None = None) -> None:
-        super().__init__(ErrorContext(
-            code=self.CODE,
-            name=self.NAME,
-            message=f"Invalid path: {path}",
-            details={"path": path[:100], "reason": reason},
-            hint="Remove invalid characters (null bytes, control chars) from path",
-        ))
+        super().__init__(
+            ErrorContext(
+                code=self.CODE,
+                name=self.NAME,
+                message=f"Invalid path: {path}",
+                details={"path": path[:100], "reason": reason},
+                hint="Remove invalid characters (null bytes, control chars) from path",
+            )
+        )
 
 
 class PathEscapesRootError(InputError):
@@ -331,18 +367,21 @@ class PathEscapesRootError(InputError):
     _REGISTER: ClassVar[bool] = True
 
     def __init__(self, candidate: str, root: str | None = None) -> None:
-        super().__init__(ErrorContext(
-            code=self.CODE,
-            name=self.NAME,
-            message=f"Path '{candidate}' escapes workspace root",
-            details={"candidate": candidate, "root": root},
-            hint="Use relative paths within workspace",
-        ))
+        super().__init__(
+            ErrorContext(
+                code=self.CODE,
+                name=self.NAME,
+                message=f"Path '{candidate}' escapes workspace root",
+                details={"candidate": candidate, "root": root},
+                hint="Use relative paths within workspace",
+            )
+        )
 
 
 # =============================================================================
 # Processing Errors (FC-4xxx)
 # =============================================================================
+
 
 class ProcessingError(FrameCompareError):
     """Base class for processing errors."""
@@ -352,44 +391,51 @@ class FrameExtractionError(ProcessingError):
     """Failed to extract frame from video."""
 
     def __init__(self, clip: str, frame: int, reason: str | None = None) -> None:
-        super().__init__(ErrorContext(
-            code="FC-4001",
-            name="FRAME_EXTRACTION_ERROR",
-            message=f"Failed to extract frame {frame} from {clip}",
-            details={"clip": clip, "frame": frame, "reason": reason},
-            hint="Check video integrity",
-        ))
+        super().__init__(
+            ErrorContext(
+                code="FC-4001",
+                name="FRAME_EXTRACTION_ERROR",
+                message=f"Failed to extract frame {frame} from {clip}",
+                details={"clip": clip, "frame": frame, "reason": reason},
+                hint="Check video integrity",
+            )
+        )
 
 
 class TonemapError(ProcessingError):
     """Tonemapping failed."""
 
     def __init__(self, reason: str) -> None:
-        super().__init__(ErrorContext(
-            code="FC-4003",
-            name="TONEMAP_ERROR",
-            message=f"Tonemapping failed: {reason}",
-            details={"reason": reason},
-            hint="Try different preset or disable tonemapping",
-        ))
+        super().__init__(
+            ErrorContext(
+                code="FC-4003",
+                name="TONEMAP_ERROR",
+                message=f"Tonemapping failed: {reason}",
+                details={"reason": reason},
+                hint="Try different preset or disable tonemapping",
+            )
+        )
 
 
 class AudioAlignmentError(ProcessingError):
     """Audio alignment failed."""
 
     def __init__(self, reason: str) -> None:
-        super().__init__(ErrorContext(
-            code="FC-4005",
-            name="AUDIO_ALIGNMENT_ERROR",
-            message=f"Audio alignment failed: {reason}",
-            details={"reason": reason},
-            hint="Try manual alignment or disable audio alignment",
-        ))
+        super().__init__(
+            ErrorContext(
+                code="FC-4005",
+                name="AUDIO_ALIGNMENT_ERROR",
+                message=f"Audio alignment failed: {reason}",
+                details={"reason": reason},
+                hint="Try manual alignment or disable audio alignment",
+            )
+        )
 
 
 # =============================================================================
 # Network Errors (FC-5xxx)
 # =============================================================================
+
 
 class NetworkError(FrameCompareError):
     """Base class for network errors."""
@@ -399,13 +445,15 @@ class SlowpicsError(NetworkError):
     """slow.pics upload failed."""
 
     def __init__(self, reason: str) -> None:
-        super().__init__(ErrorContext(
-            code="FC-5002",
-            name="SLOWPICS_ERROR",
-            message=f"slow.pics upload failed: {reason}",
-            details={"reason": reason},
-            hint="Try again or use --no-upload",
-        ))
+        super().__init__(
+            ErrorContext(
+                code="FC-5002",
+                name="SLOWPICS_ERROR",
+                message=f"slow.pics upload failed: {reason}",
+                details={"reason": reason},
+                hint="Try again or use --no-upload",
+            )
+        )
 
 
 class TmdbError(NetworkError):
@@ -415,29 +463,34 @@ class TmdbError(NetworkError):
         # Sanitize reason to avoid leaking API keys in error messages
         # Replace anything that looks like an API key with [REDACTED]
         import re
+
         # Pattern: key=<value> or token=<value> with 16+ alnum chars
         pattern = r"(?i)(key|token|api_key|apikey)[=:]\s*['\"']?[-a-zA-Z0-9_]{16,}['\"']?"
         sanitized = re.sub(pattern, r"\1=[REDACTED]", reason)
-        super().__init__(ErrorContext(
-            code="FC-5005",
-            name="TMDB_ERROR",
-            message=f"TMDB API error: {sanitized}",
-            details={"reason": sanitized},
-            hint="Check API key or use --skip-metadata",
-        ))
+        super().__init__(
+            ErrorContext(
+                code="FC-5005",
+                name="TMDB_ERROR",
+                message=f"TMDB API error: {sanitized}",
+                details={"reason": sanitized},
+                hint="Check API key or use --skip-metadata",
+            )
+        )
 
 
 class NetworkTimeoutError(NetworkError):
     """Network request timed out."""
 
     def __init__(self, service: str, timeout: float) -> None:
-        super().__init__(ErrorContext(
-            code="FC-5007",
-            name="NETWORK_TIMEOUT",
-            message=f"Request to {service} timed out after {timeout}s",
-            details={"service": service, "timeout": timeout},
-            hint="Check connection or increase timeout",
-        ))
+        super().__init__(
+            ErrorContext(
+                code="FC-5007",
+                name="NETWORK_TIMEOUT",
+                message=f"Request to {service} timed out after {timeout}s",
+                details={"service": service, "timeout": timeout},
+                hint="Check connection or increase timeout",
+            )
+        )
 
 
 class HttpsRequiredError(NetworkError):
@@ -449,13 +502,15 @@ class HttpsRequiredError(NetworkError):
     _REGISTER: ClassVar[bool] = True
 
     def __init__(self, url: str) -> None:
-        super().__init__(ErrorContext(
-            code=self.CODE,
-            name=self.NAME,
-            message="HTTPS required for external requests",
-            details={"url": url},
-            hint="External URLs must use https:// scheme",
-        ))
+        super().__init__(
+            ErrorContext(
+                code=self.CODE,
+                name=self.NAME,
+                message="HTTPS required for external requests",
+                details={"url": url},
+                hint="External URLs must use https:// scheme",
+            )
+        )
 
 
 class HostNotAllowedError(NetworkError):
@@ -467,30 +522,35 @@ class HostNotAllowedError(NetworkError):
     _REGISTER: ClassVar[bool] = True
 
     def __init__(self, host: str) -> None:
-        super().__init__(ErrorContext(
-            code=self.CODE,
-            name=self.NAME,
-            message=f"Request blocked to unauthorized host: {host}",
-            details={"host": host},
-            hint="Only slow.pics and api.themoviedb.org are allowed",
-        ))
+        super().__init__(
+            ErrorContext(
+                code=self.CODE,
+                name=self.NAME,
+                message=f"Request blocked to unauthorized host: {host}",
+                details={"host": host},
+                hint="Only slow.pics and api.themoviedb.org are allowed",
+            )
+        )
 
 
 # =============================================================================
 # Internal Errors (FC-9xxx)
 # =============================================================================
 
+
 class InternalError(FrameCompareError):
     """Internal error - likely a bug."""
 
     def __init__(self, details: str) -> None:
-        super().__init__(ErrorContext(
-            code="FC-9001",
-            name="INTERNAL_ERROR",
-            message=f"Internal error: {details}",
-            details={"error": details},
-            hint="Please report this bug",
-        ))
+        super().__init__(
+            ErrorContext(
+                code="FC-9001",
+                name="INTERNAL_ERROR",
+                message=f"Internal error: {details}",
+                details={"error": details},
+                hint="Please report this bug",
+            )
+        )
 
 
 # =============================================================================

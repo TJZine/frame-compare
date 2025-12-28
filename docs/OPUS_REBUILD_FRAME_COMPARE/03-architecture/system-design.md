@@ -1,6 +1,6 @@
 # System Architecture Design
 
-> **Module:** Architecture  
+> **Module:** Architecture
 > **Version:** 1.0
 
 ---
@@ -14,16 +14,16 @@ Frame Compare 2.0 implements a **Layered Pipeline Architecture** with clear sepa
 ```mermaid
 C4Context
     title System Context - Frame Compare 2.0
-    
+
     Person(user, "End User", "Fansub/QC team, encoder, archivist")
     Person(automation, "Automation", "CI/CD pipeline, scripts")
-    
+
     System(fc, "Frame Compare", "Video comparison CLI tool")
-    
+
     System_Ext(slowpics, "slow.pics", "Comparison hosting")
     System_Ext(tmdb, "TMDB", "Media metadata API")
     System_Ext(filesystem, "File System", "Video files, config, cache")
-    
+
     Rel(user, fc, "Uses via CLI")
     Rel(automation, fc, "Invokes programmatically")
     Rel(fc, slowpics, "Uploads comparisons", "HTTPS")
@@ -36,9 +36,9 @@ C4Context
 ```mermaid
 C4Container
     title Container Diagram - Frame Compare 2.0
-    
+
     Person(user, "User")
-    
+
     Container_Boundary(fc, "Frame Compare") {
         Container(cli, "CLI Application", "Python/Typer", "Command-line interface")
         Container(runner, "Runner/Orchestrator", "Python", "Pipeline coordination")
@@ -46,15 +46,15 @@ C4Container
         Container(domain, "Core Domain", "Python", "Frame analysis, rendering")
         Container(infra, "Infrastructure", "Python", "External adapters")
     }
-    
+
     ContainerDb(cache, "Cache Files", "JSON/TOML", "Metrics, offsets, snapshots")
     ContainerDb(config, "Configuration", "TOML", "User settings")
-    
+
     System_Ext(vs, "VapourSynth", "Video processing")
     System_Ext(ffmpeg, "FFmpeg", "Fallback renderer")
     System_Ext(slowpics, "slow.pics API", "Comparison hosting")
     System_Ext(tmdb, "TMDB API", "Metadata")
-    
+
     Rel(user, cli, "Executes commands")
     Rel(cli, runner, "Delegates to")
     Rel(runner, services, "Coordinates")
@@ -118,7 +118,7 @@ class RunRequest:
     quiet: bool
     # ... additional options
 
-@dataclass  
+@dataclass
 class RunResult:
     success: bool
     screenshots: list[Path]
@@ -158,9 +158,9 @@ class RunDependencies:
 ```python
 class AlignmentWorkflow:
     """Audio alignment service with injectable dependencies"""
-    
+
     def apply(
-        self, 
+        self,
         plans: list[ClipPlan],
         config: AudioAlignmentConfig,
         reporter: CLIOutputManager
@@ -246,24 +246,24 @@ sequenceDiagram
     participant Alignment
     participant Screenshot
     participant Publisher
-    
+
     User->>CLI: frame-compare run
     CLI->>Runner: RunRequest
     Runner->>Analysis: discover_files()
     Analysis-->>Runner: ClipPlan[]
-    
+
     Runner->>Alignment: apply_alignment(plans)
     Alignment-->>Runner: AlignmentResult
-    
+
     Runner->>Analysis: select_frames(metrics)
     Analysis-->>Runner: FrameSelection
-    
+
     Runner->>Screenshot: render(plans, frames)
     Screenshot-->>Runner: Screenshot[]
-    
+
     Runner->>Publisher: upload(screenshots)
     Publisher-->>Runner: URL
-    
+
     Runner-->>CLI: RunResult
     CLI-->>User: Exit 0 + Output
 ```
@@ -338,14 +338,14 @@ def get_tonemap_settings(preset: str, overrides: dict) -> TonemapSettings:
 ```python
 class TMDBAdapter:
     """Adapts TMDB API to domain interface"""
-    
+
     def resolve(self, query: str) -> MediaMetadata | None:
         # HTTP call, response parsing, error handling
         ...
 
 class SlowpicsAdapter:
     """Adapts slow.pics API to domain interface"""
-    
+
     def publish(self, comparison: Comparison) -> str:
         # Multipart upload, retry logic
         ...
@@ -362,31 +362,31 @@ graph TB
         CE[cli_entry.py]
         CU[cli_utils.py]
     end
-    
+
     subgraph Orch["Orchestration"]
         RUN[runner.py]
         SNAP[result_snapshot.py]
     end
-    
+
     subgraph Services["Services"]
         ALIGN[alignment.py]
         META[metadata.py]
         PUB[publishers.py]
     end
-    
+
     subgraph Domain["Core Domain"]
         ANAL[analysis/]
         VS[vs/]
         REND[render/]
     end
-    
+
     subgraph Infra["Infrastructure"]
         SLOW[slow.pics API]
         TMDB[TMDB API]
         FFMPEG[FFmpeg/FFprobe]
         DOVI[dovi_tool]
     end
-    
+
     FC --> CE
     CE --> RUN
     RUN --> ALIGN
@@ -399,7 +399,7 @@ graph TB
     META --> TMDB
     ALIGN --> FFMPEG
     VS --> DOVI
-    
+
     %% Forbidden directions (enforced by import-linter)
     %% Domain -x-> CLI
     %% Services -x-> CLI
@@ -461,11 +461,11 @@ graph TB
 
 ```dockerfile
 # Multi-stage build
-FROM python:3.13-slim AS builder
-# Install build dependencies
-# Build VapourSynth + plugins
+FROM python:3.13.1-slim-bookworm AS builder
+# NOTE: The repo-root `Dockerfile` is the authoritative baseline for exact pins and build steps.
+# Build VapourSynth + plugins from pinned sources (zimg, L-SMASH, L-SMASH-Works, libplacebo, vs-placebo, ffms2).
 
-FROM python:3.13-slim AS runtime
+FROM python:3.13.1-slim-bookworm AS runtime
 # Copy built artifacts
 # Install Python package
 ENTRYPOINT ["frame-compare"]

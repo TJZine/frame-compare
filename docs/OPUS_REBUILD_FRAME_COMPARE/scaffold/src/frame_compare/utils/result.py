@@ -32,6 +32,7 @@ class Ok[T]:
     Attributes:
         value: The success value
     """
+
     value: T
 
     def is_ok(self) -> bool:
@@ -62,6 +63,7 @@ class Err[E]:
     Attributes:
         error: The error value
     """
+
     error: E
 
     def is_ok(self) -> bool:

@@ -1,6 +1,6 @@
 # Configuration Reference
 
-> **Module:** Reference  
+> **Module:** Reference
 > **Version:** 1.0
 
 ---

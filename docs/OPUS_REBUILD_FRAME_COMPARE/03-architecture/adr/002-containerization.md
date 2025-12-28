@@ -82,17 +82,19 @@ Provide:
 
 ```dockerfile
 # Stage 1: Build VapourSynth + plugins
-FROM python:3.13-slim AS builder
-RUN apt-get update && apt-get install -y \
-    build-essential meson ninja-build \
-    libvulkan-dev libplacebo-dev
-# Build VapourSynth from source
-# Build plugins
+FROM python:3.13.1-slim-bookworm AS builder
+# NOTE: This is illustrative. The repo-root `Dockerfile` is the authoritative baseline for exact pins and build steps.
+# - Install Bookworm build deps (includes curl/ca-certificates/python3-jinja2/libvulkan-dev)
+# - Build zimg + L-SMASH from pinned tarballs (SHA-256 verified)
+# - Build VapourSynth R73
+# - Build L-SMASH-Works (tag 20230716; ARM SSE2 guard)
+# - Build libplacebo (v7.349.0; headless flags)
+# - Build vs-placebo (commit + submodules)
+# - Build ffms2 (FFmpeg 5-compatible commit)
 
 # Stage 2: Runtime
-FROM python:3.13-slim AS runtime
-COPY --from=builder /usr/local/lib/vapoursynth /usr/local/lib/vapoursynth
-RUN pip install frame-compare
+FROM python:3.13.1-slim-bookworm AS runtime
+# Install runtime deps (ffmpeg + libxxhash0) and copy built libs/plugins from builder
 ENTRYPOINT ["frame-compare"]
 ```
 

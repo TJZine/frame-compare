@@ -1,8 +1,8 @@
 # Frame Compare 2.0 — Project Recreation Master Plan
 
-> **Document Version:** 1.0  
-> **Last Updated:** 2025-12-27  
-> **Status:** Planning Phase  
+> **Document Version:** 1.0
+> **Last Updated:** 2025-12-27
+> **Status:** Planning Phase
 
 ---
 

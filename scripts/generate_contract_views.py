@@ -83,9 +83,7 @@ def replace_sentinel_block(content: str, marker: str, new_block: str) -> str:
     replacement = rf"\1\n{new_block}\n\2"
     result, count = pattern.subn(replacement, content)
     if count != 1:
-        raise ValueError(
-            f"Missing or duplicate sentinel block: {marker} (replacements={count})"
-        )
+        raise ValueError(f"Missing or duplicate sentinel block: {marker} (replacements={count})")
     return result
 
 
@@ -132,13 +130,15 @@ def generate_cli_flags_md() -> str:
             f"{default_str} | {config_key} | {flag['help']} |"
         )
 
-    lines.extend([
-        "",
-        "---",
-        "",
-        f"*Generated from version {data['version']}*",
-        "",
-    ])
+    lines.extend(
+        [
+            "",
+            "---",
+            "",
+            f"*Generated from version {data['version']}*",
+            "",
+        ]
+    )
 
     return "\n".join(lines)
 
@@ -215,10 +215,12 @@ def generate_cli_flags_py() -> str:
 
         lines.append("    },")
 
-    lines.extend([
-        "}",
-        "",
-    ])
+    lines.extend(
+        [
+            "}",
+            "",
+        ]
+    )
 
     return "\n".join(lines)
 
@@ -269,45 +271,46 @@ def generate_error_codes_md() -> str:
     section_num = 2
     for cat_id, (cat_name, _) in categories.items():
         cat_errors = {
-            code: err for code, err in data["errors"].items()
-            if code.startswith(f"FC-{cat_id}")
+            code: err for code, err in data["errors"].items() if code.startswith(f"FC-{cat_id}")
         }
 
         if not cat_errors:
             continue
 
-        lines.extend([
-            f"## {section_num}. {cat_name}",
-            "",
-            "| Code | Name | Message | Hint |",
-            "|------|------|---------|------|",
-        ])
+        lines.extend(
+            [
+                f"## {section_num}. {cat_name}",
+                "",
+                "| Code | Name | Message | Hint |",
+                "|------|------|---------|------|",
+            ]
+        )
 
         for code in sorted(cat_errors.keys()):
             err = cat_errors[code]
-            lines.append(
-                f"| {code} | {err['name']} | {err['message_template']} | {err['hint']} |"
-            )
+            lines.append(f"| {code} | {err['name']} | {err['message_template']} | {err['hint']} |")
 
         lines.extend(["", "---", ""])
         section_num += 1
 
     # Exit codes table
-    lines.extend([
-        f"## {section_num}. Exit Codes",
-        "",
-        "| Exit Code | Meaning | Error Categories |",
-        "|-----------|---------|------------------|",
-        "| 0 | Success | - |",
-        "| 1 | General/Internal Error | FC-9xxx |",
-        "| 2 | Configuration Error | FC-1xxx |",
-        "| 3 | Dependency Error | FC-2xxx |",
-        "| 4 | Input Error | FC-3xxx |",
-        "| 5 | Processing Error | FC-4xxx |",
-        "| 6 | Network Error | FC-5xxx |",
-        "| 130 | Interrupted (Ctrl+C) | - |",
-        "",
-    ])
+    lines.extend(
+        [
+            f"## {section_num}. Exit Codes",
+            "",
+            "| Exit Code | Meaning | Error Categories |",
+            "|-----------|---------|------------------|",
+            "| 0 | Success | - |",
+            "| 1 | General/Internal Error | FC-9xxx |",
+            "| 2 | Configuration Error | FC-1xxx |",
+            "| 3 | Dependency Error | FC-2xxx |",
+            "| 4 | Input Error | FC-3xxx |",
+            "| 5 | Processing Error | FC-4xxx |",
+            "| 6 | Network Error | FC-5xxx |",
+            "| 130 | Interrupted (Ctrl+C) | - |",
+            "",
+        ]
+    )
 
     return "\n".join(lines)
 
@@ -376,19 +379,21 @@ def generate_importlinter_block() -> str:
     for layer in layers:
         lines.append(f'    "{layer}",')
 
-    lines.extend([
-        "]",
-        "",
-        "[[tool.importlinter.contracts]]",
-        'name = "No circular dependencies"',
-        'type = "independence"',
-        "modules = [",
-        '    "frame_compare.analysis",',
-        '    "frame_compare.render",',
-        '    "frame_compare.services",',
-        "]",
-        "```",
-    ])
+    lines.extend(
+        [
+            "]",
+            "",
+            "[[tool.importlinter.contracts]]",
+            'name = "No circular dependencies"',
+            'type = "independence"',
+            "modules = [",
+            '    "frame_compare.analysis",',
+            '    "frame_compare.render",',
+            '    "frame_compare.services",',
+            "]",
+            "```",
+        ]
+    )
 
     return "\n".join(lines)
 

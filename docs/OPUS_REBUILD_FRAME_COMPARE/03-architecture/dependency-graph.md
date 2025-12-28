@@ -1,6 +1,6 @@
 # Module Dependency Graph
 
-> **Module:** Architecture  
+> **Module:** Architecture
 > **Version:** 1.0
 
 ---

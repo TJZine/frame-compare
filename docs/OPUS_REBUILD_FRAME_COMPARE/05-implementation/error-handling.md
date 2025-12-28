@@ -1,6 +1,6 @@
 # Error Handling Specification
 
-> **Module:** Implementation  
+> **Module:** Implementation
 > **Version:** 1.0
 
 ---
@@ -54,15 +54,15 @@ class ErrorContext:
 
 class FrameCompareError(Exception):
     """Base exception for all Frame Compare errors."""
-    
+
     def __init__(self, context: ErrorContext):
         self.context = context
         super().__init__(context.message)
-    
+
     @property
     def code(self) -> str:
         return self.context.code
-    
+
     @property
     def hint(self) -> str | None:
         return self.context.hint
@@ -171,7 +171,7 @@ FrameCompareError (base)
 
 class ConfigNotFoundError(ConfigError):
     """Configuration file not found."""
-    
+
     def __init__(self, path: Path):
         super().__init__(ErrorContext(
             code="FC-1001",
@@ -183,7 +183,7 @@ class ConfigNotFoundError(ConfigError):
 
 class NoVideosFoundError(InputError):
     """No video files found in input directory."""
-    
+
     def __init__(self, input_dir: Path, patterns: list[str]):
         super().__init__(ErrorContext(
             code="FC-3001",
@@ -218,13 +218,13 @@ E = TypeVar("E")
 class Ok(Generic[T]):
     """Success result."""
     value: T
-    
+
     def is_ok(self) -> bool:
         return True
-    
+
     def is_err(self) -> bool:
         return False
-    
+
     def unwrap(self) -> T:
         return self.value
 
@@ -232,13 +232,13 @@ class Ok(Generic[T]):
 class Err(Generic[E]):
     """Error result."""
     error: E
-    
+
     def is_ok(self) -> bool:
         return False
-    
+
     def is_err(self) -> bool:
         return True
-    
+
     def unwrap(self) -> Never:
         raise ValueError(f"Called unwrap on Err: {self.error}")
 
@@ -254,7 +254,7 @@ def load_video(path: Path) -> Result[VideoClip, str]:
     """Load a video file, returning Result instead of raising."""
     if not path.exists():
         return Err(f"File not found: {path}")
-    
+
     try:
         clip = vs.core.lsmas.LWLibavSource(str(path))
         return Ok(clip)
@@ -285,12 +285,12 @@ console = Console(stderr=True)
 
 def handle_error(error: FrameCompareError) -> int:
     """Convert exception to user-friendly output and exit code."""
-    
+
     console.print(f"[red]Error[/red] [{error.code} {error.name}]: {error.context.message}")
-    
+
     if error.hint:
         console.print(f"[yellow]Hint:[/yellow] {error.hint}")
-    
+
     # Map error types to exit codes
     exit_codes = {
         ConfigError: 2,
@@ -300,11 +300,11 @@ def handle_error(error: FrameCompareError) -> int:
         NetworkError: 6,
         InternalError: 1,
     }
-    
+
     for error_type, code in exit_codes.items():
         if isinstance(error, error_type):
             return code
-    
+
     return 1
 
 def run():
@@ -332,7 +332,7 @@ import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 class SlowpicsPublisher:
-    
+
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
     async def upload(self, screenshots: list[Path]) -> str:
         """Upload screenshots with retry logic."""
@@ -363,15 +363,15 @@ def select_frames(
     seed: int,
 ) -> Result[FrameSelection, SelectionError]:
     """Select frames, returning Result for graceful handling."""
-    
+
     if count > len(metrics.frames):
         return Err(SelectionError(
             code="INSUFFICIENT_FRAMES",
             message=f"Requested {count} frames but only {len(metrics.frames)} available",
         ))
-    
+
     # ... selection logic ...
-    
+
     return Ok(FrameSelection(...))
 ```
 
@@ -421,7 +421,7 @@ def run_with_correlation():
     """Wrap each run with a correlation ID."""
     run_id = str(uuid.uuid4())[:8]
     correlation_id.set(run_id)
-    
+
     log.info("run_started", run_id=run_id)
     try:
         result = execute_run()
@@ -454,12 +454,12 @@ console = Console()
 
 def show_error(error: FrameCompareError):
     """Display error with rich formatting."""
-    
+
     content = f"[red bold]{error.code}[/red bold]\n\n{error.context.message}"
-    
+
     if error.hint:
         content += f"\n\n[yellow]Hint:[/yellow] {error.hint}"
-    
+
     console.print(Panel(
         content,
         title="[red]Error[/red]",

@@ -1,7 +1,7 @@
 # Render Module Implementation Spec
 
-> **Module:** `frame_compare.render`  
-> **Version:** 1.0  
+> **Module:** `frame_compare.render`
+> **Version:** 1.0
 > **Priority:** P0
 
 ---
@@ -67,7 +67,7 @@ class RenderRequest:
     output_path: Path
     overlay: OverlayConfig | None
     encoder_settings: EncoderSettings
-    
+
 @dataclass
 class EncoderSettings:
     format: str = "png"
@@ -106,14 +106,14 @@ def render_frame(
 ) -> Path:
     """
     Render a single frame to image file.
-    
+
     Args:
         request: Render configuration
         renderer: "vapoursynth", "ffmpeg", or "auto"
-        
+
     Returns:
         Path to rendered image
-        
+
     Raises:
         RenderError: If rendering fails
     """
@@ -125,7 +125,7 @@ def render_batch(
 ) -> list[Path]:
     """
     Render multiple frames with progress reporting.
-    
+
     Progress integration:
     - Call reporter.start_phase("Rendering", len(requests)) before loop
     - Call reporter.set_description(f"Frame {req.frame_number}") for current frame
@@ -166,7 +166,7 @@ def apply_overlay(
 ) -> PIL.Image:
     """
     Apply text overlay to image.
-    
+
     Renders semi-transparent background with text.
     """
 ```
@@ -181,7 +181,7 @@ def generate_screenshot_name(
 ) -> str:
     """
     Generate consistent screenshot filename.
-    
+
     Format: {label}_{frame:05d}.{ext}
     Example: "Source_00100.png"
     """
@@ -209,7 +209,7 @@ def _render_vs(
 ) -> None:
     """
     Render frame via VapourSynth.
-    
+
     Pipeline:
     1. Get frame from clip: clip.get_frame(frame)
     2. Convert to numpy array
@@ -230,15 +230,15 @@ def _render_ffmpeg(
 ) -> None:
     """
     Render frame via FFmpeg.
-    
+
     Security: Uses run_subprocess() which enforces shell=False per FC-3010/3011.
     All arguments are passed as a list, never interpolated into a shell command.
-    
+
     Command (as list):
     ["ffmpeg", "-ss", time, "-i", input, "-vframes", "1", "-q:v", "1", output]
-    
+
     Uses time-based seeking for efficiency.
-    
+
     FFmpeg Frame Seeking Policy:
     - fps is probed via ffprobe if not provided
     - For VFR content: use avg_frame_rate from ffprobe, log warning
@@ -247,11 +247,11 @@ def _render_ffmpeg(
     - Errors: FC-2006 (FFMPEG_ERROR), FC-4015 (SOURCE_LOAD_ERROR)
     """
     from frame_compare.utils.subproc import run_subprocess
-    
+
     # Calculate seek time (fps should be probed via ffprobe in real impl)
     fps = settings.fps or _probe_fps(video_path)  # FC-2006 if probe fails
     seek_time = f"{frame / fps:.3f}"
-    
+
     run_subprocess(
         ["ffmpeg", "-ss", seek_time, "-i", str(video_path),
          "-vframes", "1", "-q:v", "1", str(output)],
@@ -268,11 +268,11 @@ def _render_overlay(
 ) -> PIL.Image:
     """
     Composite overlay onto image.
-    
+
     Layers:
     1. Semi-transparent background rectangle
     2. Text with shadow for readability
-    
+
     Text content by mode:
     - minimal: "{label}"
     - standard: "{label} | Frame {frame} | {resolution}"

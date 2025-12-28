@@ -1,6 +1,6 @@
 # Performance Baselines
 
-> **Module:** Testing  
+> **Module:** Testing
 > **Version:** 1.0
 
 ---
@@ -81,15 +81,15 @@ from statistics import mean, stdev
 class BenchmarkResult:
     name: str
     samples: list[float]
-    
+
     @property
     def mean_ms(self) -> float:
         return mean(self.samples) * 1000
-    
+
     @property
     def stdev_ms(self) -> float:
         return stdev(self.samples) * 1000 if len(self.samples) > 1 else 0
-    
+
     @property
     def status(self) -> str:
         # Compare against targets
@@ -127,7 +127,7 @@ def run_all_benchmarks():
         benchmark("frame_selection", lambda: select_frames(metrics, config)),
         benchmark("cache_read", lambda: load_cached_metrics(cache_dir, key)),
     ]
-    
+
     print("\n=== Performance Benchmark Results ===\n")
     for r in results:
         print(f"{r.name:30} {r.mean_ms:8.2f}ms ± {r.stdev_ms:.2f}ms  {r.status}")
@@ -164,13 +164,13 @@ def measure_run_memory():
 def track_memory():
     """Track memory allocations."""
     tracemalloc.start()
-    
+
     # Run pipeline
     result = run(request)
-    
+
     current, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
-    
+
     print(f"Current: {current / 1024 / 1024:.2f} MB")
     print(f"Peak: {peak / 1024 / 1024:.2f} MB")
 ```
@@ -197,20 +197,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup
         run: uv sync --extra bench
-      
+
       - name: Download test videos
         run: |
           curl -o tests/fixtures/short_test.mkv $VIDEO_URL
-      
+
       - name: Run benchmarks
         run: uv run --no-sync python tests/perf/benchmark.py
-      
+
       - name: Check for regressions
         run: uv run --no-sync python tests/perf/check_regression.py
-      
+
       - name: Upload results
         uses: actions/upload-artifact@v4
         with:
@@ -231,20 +231,20 @@ def check_regression():
     """Compare against baseline and fail if regression detected."""
     current = load_results("benchmark-results.json")
     baseline = load_results("baseline.json")
-    
+
     regressions = []
     for name, result in current.items():
         if name in baseline:
             ratio = result["mean"] / baseline[name]["mean"]
             if ratio > REGRESSION_THRESHOLD:
                 regressions.append((name, ratio))
-    
+
     if regressions:
         print("❌ Performance regressions detected:")
         for name, ratio in regressions:
             print(f"  {name}: {ratio:.2f}x slower")
         sys.exit(1)
-    
+
     print("✅ No performance regressions")
 ```
 
@@ -280,6 +280,6 @@ async def optimized_pipeline():
     # Audio alignment and metadata lookup can run in parallel
     alignment_task = asyncio.create_task(align_clips(...))
     metadata_task = asyncio.create_task(lookup_tmdb(...))
-    
+
     alignment, metadata = await asyncio.gather(alignment_task, metadata_task)
 ```

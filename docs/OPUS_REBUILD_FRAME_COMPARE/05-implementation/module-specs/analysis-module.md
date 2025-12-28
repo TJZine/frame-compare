@@ -1,7 +1,7 @@
 # Analysis Module Implementation Spec
 
-> **Module:** `frame_compare.analysis`  
-> **Version:** 1.0  
+> **Module:** `frame_compare.analysis`
+> **Version:** 1.0
 > **Priority:** P0
 
 ---
@@ -56,7 +56,7 @@ class FrameMetrics:
     luminance: list[float]    # Per-frame Y channel mean
     motion: list[float]       # Per-frame difference score
     metadata: MetricsMetadata
-    
+
 @dataclass
 class MetricsMetadata:
     frame_count: int
@@ -64,7 +64,7 @@ class MetricsMetadata:
     config_fingerprint: str   # For cache invalidation
     clips: list[ClipIdentity]
     version: int = 2          # Schema version (default last)
-    
+
 @dataclass
 class ClipIdentity:
     path: str
@@ -83,8 +83,8 @@ class FrameSelection:
     mode: SelectionMode
     seed: int
     breakdown: SelectionBreakdown
-    
-@dataclass  
+
+@dataclass
 class SelectionBreakdown:
     quantile_dark: list[int]
     quantile_bright: list[int]
@@ -98,7 +98,7 @@ class SelectionBreakdown:
 @dataclass
 class CacheLoadResult:
     """Result of attempting to load metrics from cache.
-    
+
     Attributes:
         success: Whether cache was successfully loaded
         metrics: Loaded metrics if successful, None otherwise
@@ -124,18 +124,18 @@ def calculate_metrics(
 ) -> FrameMetrics:
     """
     Calculate frame metrics for the given clips.
-    
+
     Uses cached values if valid cache exists and config matches.
-    
+
     Args:
         video_paths: Video file paths (first entry is the reference clip)
         config: Analysis configuration
         cache_dir: Directory for cache files (typically `paths.generated_dir`)
         reporter: Optional progress reporter
-        
+
     Returns:
         FrameMetrics with luminance and motion arrays
-        
+
     Raises:
         AnalysisError: If video cannot be analyzed
     """
@@ -150,45 +150,45 @@ def select_frames(
 ) -> FrameSelection:
     """
     Select representative frames based on metrics.
-    
+
     Selection Algorithms by Mode:
-    
+
     - **quantile**: Selects frames at luminance percentiles
       - Darkest frames: 0th, 10th, 20th percentiles
       - Brightest frames: 80th, 90th, 100th percentiles
       - Divides frame_count evenly between dark/bright
-      
+
     - **motion**: Selects high-motion frames
       - Sort frames by motion score descending
       - Take top frame_count with minimum gap of 5 frames
-      
+
     - **random**: Seeded reproducible random selection
       - Uses config.random_seed for reproducibility
       - Applies minimum gap of 5 frames between selections
-      
+
     - **mixed**: Combination allocation (DEFAULT)
       - 40% quantile (luminance extremes)
       - 40% motion (high-action scenes)
       - 20% random (variety)
       - Example: frame_count=10 -> 4 quantile + 4 motion + 2 random
-    
+
     Duplicate Handling:
     - If motion/random selects frame already chosen by quantile, skip to next candidate
     - Final selection guaranteed to have frame_count unique frames
     - If insufficient candidates after deduplication, raises SelectionError
-    
+
     save_frames_data Behavior:
     - If True: Write FrameSelection to {cache_dir}/frame_selection.json
     - Contains: frame_numbers, mode, seed, selection_reason per frame
     - Used for reproducibility and debugging
-    
+
     Args:
         metrics: Calculated frame metrics
         config: Selection configuration
-        
+
     Returns:
         FrameSelection with chosen frame numbers and metadata
-        
+
     Raises:
         SelectionError: If insufficient valid candidates for selection
     """
@@ -204,7 +204,7 @@ def load_cached_metrics(
 ) -> CacheLoadResult:
     """
     Attempt to load metrics from cache.
-    
+
     Returns:
         CacheLoadResult with success status and data or reason
     """
@@ -229,7 +229,7 @@ def _calculate_luminance(
 ) -> list[float]:
     """
     Calculate Y channel mean for each frame.
-    
+
     Algorithm:
     1. Convert to YUV if needed
     2. reporter.start_phase("luminance", frame_count) if reporter
@@ -239,7 +239,7 @@ def _calculate_luminance(
        c. Normalize to 0-1 range
        d. reporter.advance() if reporter
     4. reporter.complete_phase() if reporter
-    
+
     Progress integration:
     - Call start_phase("Calculating luminance", clip.num_frames) before loop
     - Call advance(1) after processing each frame
@@ -253,7 +253,7 @@ def _calculate_luminance(
 def _calculate_motion(clip: vs.VideoNode) -> list[float]:
     """
     Calculate frame-to-frame difference scores.
-    
+
     Algorithm:
     1. For each frame pair (N, N+1):
        a. Calculate absolute difference
@@ -274,7 +274,7 @@ def _select_by_quantile(
 ) -> tuple[list[int], list[int]]:
     """
     Select frames at luminance quantiles.
-    
+
     Algorithm:
     1. Calculate percentile thresholds
     2. Find frames below dark threshold
@@ -288,7 +288,7 @@ def _select_by_motion(
 ) -> list[int]:
     """
     Select frames with high motion scores.
-    
+
     Algorithm:
     1. Sort frames by motion score (descending)
     2. Take top N frames
@@ -303,7 +303,7 @@ def _select_random(
 ) -> list[int]:
     """
     Select random frames with seed.
-    
+
     Algorithm:
     1. Initialize RNG with seed
     2. Generate candidate frames
@@ -327,7 +327,7 @@ def compute_cache_key(
 ) -> str:
     """
     Generate cache key from clip identities and config.
-    
+
     Components:
     - Clip paths, sizes, mtimes (reference + comparisons)
     - Config fingerprint (frame_count, mode, thresholds)

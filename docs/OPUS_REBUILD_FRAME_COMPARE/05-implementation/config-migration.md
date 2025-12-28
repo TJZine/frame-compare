@@ -1,6 +1,6 @@
 # Config Migration (v0.0.14 → v2.0)
 
-> **Module:** Reference  
+> **Module:** Reference
 > **Purpose:** Define migration behavior for configuration files
 
 ---
@@ -77,7 +77,7 @@ When running in a TTY with ambiguous input:
 | v1 config detected | "Migrate config to v2 format? [Y/n]" |
 | Missing required field | "Enter value for 'paths.input_dir':" |
 
-**Non-interactive mode** (CI/scripts):  
+**Non-interactive mode** (CI/scripts):
 Set `FRAME_COMPARE_NONINTERACTIVE=1` to auto-accept defaults or fail.
 
 > [!NOTE]
@@ -98,22 +98,22 @@ Set `FRAME_COMPARE_NONINTERACTIVE=1` to auto-accept defaults or fail.
 def migrate_config(raw: dict[str, JSONValue]) -> tuple[dict[str, JSONValue], list[str]]:
     """
     Migrate v1 config to v2 format.
-    
+
     Returns:
         (migrated_config, warnings_list)
-        
+
     Raises:
         ConfigValidationError: On irreconcilable conflicts
     """
     warnings = []
     migrated = {}
-    
+
     # 1. Detect version
     if not any(key in raw for key in ["paths", "analysis", "color"]):
         # Flat v1 format detected
         warnings.append("Auto-migrating v1 config format to v2")
         raw = _nest_v1_keys(raw)
-    
+
     # 2. Apply deprecated key mappings
     # 3. Validate no conflicts
     # 4. Return migrated + warnings

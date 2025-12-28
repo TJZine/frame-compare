@@ -33,8 +33,7 @@ class TestCLIFlagsContract:
         data = load_yaml_safe(CONTRACTS_DIR / "cli_flags.yaml")
 
         assert len(CLI_FLAGS) == len(data["flags"]), (
-            f"CLI_FLAGS has {len(CLI_FLAGS)} flags, "
-            f"yaml has {len(data['flags'])} flags"
+            f"CLI_FLAGS has {len(CLI_FLAGS)} flags, " f"yaml has {len(data['flags'])} flags"
         )
 
     def test_all_yaml_flags_present(self) -> None:
@@ -58,9 +57,9 @@ class TestCLIFlagsContract:
             expected_long = flag["long"]
             actual_long = CLI_FLAGS[flag_id]["long"]
 
-            assert actual_long == expected_long, (
-                f"{flag_id}: expected long={expected_long!r}, got {actual_long!r}"
-            )
+            assert (
+                actual_long == expected_long
+            ), f"{flag_id}: expected long={expected_long!r}, got {actual_long!r}"
 
     def test_flag_type_matches(self) -> None:
         """Type of each flag matches yaml."""
@@ -73,9 +72,9 @@ class TestCLIFlagsContract:
             expected_type = flag["type"]
             actual_type = CLI_FLAGS[flag_id]["type"]
 
-            assert actual_type == expected_type, (
-                f"{flag_id}: expected type={expected_type!r}, got {actual_type!r}"
-            )
+            assert (
+                actual_type == expected_type
+            ), f"{flag_id}: expected type={expected_type!r}, got {actual_type!r}"
 
     def test_flag_has_help_text(self) -> None:
         """All flags must have help text."""

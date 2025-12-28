@@ -87,4 +87,3 @@ Address all items marked FAIL in the plan review. Create a revised plan.
 
 ## Output
 Write file: .agent-workflow/runs/2025-12-27__p0-4__ci-pipeline/plan-v3.md
-

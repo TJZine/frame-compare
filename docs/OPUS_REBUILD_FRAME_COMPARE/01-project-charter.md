@@ -156,17 +156,17 @@ Code Standards:
     Tool: black
     Line Length: 100
     Target: py313
-    
+
   Linting:
     Tool: ruff
     Rules: [E, F, I, W]
     Ignore: [E501]
-    
+
   Type Checking:
     Tool: pyright
     Mode: strict
     Marker: py.typed
-    
+
   Import Contracts:
     Tool: import-linter
     Layers: [CLI, Runner, Core, Modules]
@@ -184,11 +184,11 @@ Testing:
     - unit: Fast isolated tests
     - slow: Long-running tests
     - network: Requires network access
-    
+
   Coverage:
     Minimum: 80%
     Critical Paths: 95%
-    
+
   Fixtures:
     Location: tests/conftest.py, tests/helpers/
     Patterns: Factory functions, DI mocks

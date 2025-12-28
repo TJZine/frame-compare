@@ -17,4 +17,3 @@ __all__ = [
     "create_uniform_seeded_plan",
     "select_uniform_seeded_frames",
 ]
-

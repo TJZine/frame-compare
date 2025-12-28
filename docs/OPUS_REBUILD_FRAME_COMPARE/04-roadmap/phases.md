@@ -1,6 +1,6 @@
 # Implementation Phases
 
-> **Module:** Roadmap  
+> **Module:** Roadmap
 > **Version:** 1.0
 
 ---
@@ -11,22 +11,22 @@
 gantt
     title Frame Compare 2.0 Rebuild Phases
     dateFormat  YYYY-MM-DD
-    
+
     section Phase 0
     Foundation & Scaffolding    :p0, 2025-01-01, 14d
-    
+
     section Phase 1
     Core Pipeline               :p1, after p0, 21d
-    
+
     section Phase 2
     Integration & Services      :p2, after p1, 14d
-    
+
     section Phase 3
     CLI & UX                    :p3, after p2, 10d
-    
+
     section Phase 4
     Containerization            :p4, after p3, 7d
-    
+
     section Phase 5
     Polish & Launch             :p5, after p4, 7d
 ```
@@ -35,7 +35,7 @@ gantt
 
 ## Phase 0: Foundation & Scaffolding
 
-**Duration:** 2 weeks  
+**Duration:** 2 weeks
 **Goal:** Establish project structure, tooling, and development environment
 
 ### Deliverables
@@ -68,7 +68,7 @@ gantt
 
 ## Phase 1: Core Pipeline
 
-**Duration:** 3 weeks  
+**Duration:** 3 weeks
 **Goal:** Implement core domain modules with tests
 
 ### Week 1: Analysis Module
@@ -111,7 +111,7 @@ gantt
 
 ## Phase 2: Integration & Services
 
-**Duration:** 2 weeks  
+**Duration:** 2 weeks
 **Goal:** Implement services and external integrations
 
 ### Week 1: Audio Alignment
@@ -145,7 +145,7 @@ gantt
 
 ## Phase 3: CLI & User Experience
 
-**Duration:** 1.5 weeks  
+**Duration:** 1.5 weeks
 **Goal:** Complete CLI interface and configuration system
 
 ### Tasks
@@ -171,7 +171,7 @@ gantt
 
 ## Phase 4: Containerization
 
-**Duration:** 1 week  
+**Duration:** 1 week
 **Goal:** Production Docker image and DevContainer
 
 ### Tasks
@@ -196,7 +196,7 @@ gantt
 
 ## Phase 5: Polish & Launch
 
-**Duration:** 1 week  
+**Duration:** 1 week
 **Goal:** Documentation, final testing, release
 
 ### Tasks
@@ -230,7 +230,7 @@ graph LR
     P2 --> P3[Phase 3: CLI]
     P3 --> P4[Phase 4: Container]
     P4 --> P5[Phase 5: Launch]
-    
+
     P0 -.->|DevContainer| P4
     P1 -.->|VS Tests| P4
 ```

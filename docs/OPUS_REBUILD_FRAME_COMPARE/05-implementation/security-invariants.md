@@ -1,6 +1,6 @@
 # Security Invariants
 
-> **Module:** Reference  
+> **Module:** Reference
 > **Purpose:** Define security constraints for AI agent implementation
 
 ---
@@ -15,7 +15,7 @@ All file operations MUST be contained within the workspace root:
 def validate_path_containment(candidate: Path, root: Path) -> Path:
     """
     Ensure path does not escape workspace root.
-    
+
     Raises:
         PathEscapesRootError(FC-3009): If path escapes root
     """
@@ -69,9 +69,9 @@ Before passing to subprocess:
 def sanitize_subprocess_arg(arg: str | Path) -> str:
     """Validate argument is safe for subprocess."""
     from frame_compare.errors import InputError, ErrorContext
-    
+
     s = str(arg)
-    
+
     # Reject shell metacharacters
     if any(c in s for c in [';', '|', '&', '$', '`', '\n', '\r']):
         raise InputError(ErrorContext(
@@ -80,7 +80,7 @@ def sanitize_subprocess_arg(arg: str | Path) -> str:
             message=f"Invalid character in argument: {s!r}",
             hint="Remove shell metacharacters from the argument",
         ))
-    
+
     # Reject control characters
     if any(ord(c) < 32 for c in s):
         raise InputError(ErrorContext(
@@ -89,7 +89,7 @@ def sanitize_subprocess_arg(arg: str | Path) -> str:
             message=f"Control character in argument: {s!r}",
             hint="Remove control characters from the argument",
         ))
-    
+
     return s
 ```
 
@@ -123,16 +123,16 @@ ALLOWED_HOSTS = frozenset({"slow.pics", "api.themoviedb.org"})
 
 def validate_external_url(url: str) -> None:
     """Ensure URL is to an allowed host.
-    
+
     Raises:
         HttpsRequiredError (FC-5010): If URL is not HTTPS
         HostNotAllowedError (FC-5011): If host not in allowlist
     """
     parsed = urlparse(url)
-    
+
     if parsed.scheme != "https":
         raise HttpsRequiredError(url)  # FC-5010
-    
+
     if parsed.hostname not in ALLOWED_HOSTS:
         raise HostNotAllowedError(parsed.hostname or "unknown")  # FC-5011
 ```
@@ -212,7 +212,7 @@ def redact_secrets(text: str) -> str:
 Clear sensitive environment variables before spawning:
 
 ```python
-safe_env = {k: v for k, v in os.environ.items() 
+safe_env = {k: v for k, v in os.environ.items()
             if not k.startswith(("FRAME_COMPARE_", "TMDB_"))}
 subprocess.run(cmd, env=safe_env)
 ```

@@ -1,6 +1,6 @@
 # Monitoring & Observability
 
-> **Module:** Operations  
+> **Module:** Operations
 > **Version:** 1.0
 
 ---
@@ -79,19 +79,19 @@ def configure_logging(
     file: Path | None = None,
 ) -> None:
     """Configure structured logging."""
-    
+
     processors = [
         structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,
         structlog.processors.TimeStamper(fmt="iso"),
         structlog.processors.StackInfoRenderer(),
     ]
-    
+
     if format == "json":
         processors.append(structlog.processors.JSONRenderer())
     else:
         processors.append(structlog.dev.ConsoleRenderer())
-    
+
     structlog.configure(
         processors=processors,
         wrapper_class=structlog.make_filtering_bound_logger(level),
@@ -145,14 +145,14 @@ from contextlib import contextmanager
 @dataclass
 class Metrics:
     """Simple metrics collection."""
-    
+
     counters: dict[str, int] = field(default_factory=dict)
     timers: dict[str, list[float]] = field(default_factory=dict)
-    
+
     def inc(self, name: str, value: int = 1) -> None:
         """Increment a counter."""
         self.counters[name] = self.counters.get(name, 0) + value
-    
+
     @contextmanager
     def timer(self, name: str):
         """Time a block of code."""
@@ -164,7 +164,7 @@ class Metrics:
             if name not in self.timers:
                 self.timers[name] = []
             self.timers[name].append(duration)
-    
+
     def to_dict(self) -> dict:
         """Export metrics."""
         return {
@@ -193,7 +193,7 @@ def process_frame(frame) -> None:
     with metrics.timer("frame_processing"):
         # ... processing ...
         pass
-    
+
     metrics.inc("frames_processed")
 ```
 
@@ -264,7 +264,7 @@ class Span:
     run_id: str
     start_time: float
     end_time: float | None = None
-    
+
     @property
     def duration_ms(self) -> float:
         if self.end_time is None:

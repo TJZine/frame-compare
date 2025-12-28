@@ -1,7 +1,7 @@
 # Orchestration Module Implementation Spec
 
-> **Module:** `frame_compare.orchestration`  
-> **Version:** 1.0  
+> **Module:** `frame_compare.orchestration`
+> **Version:** 1.0
 > **Priority:** P0
 
 ---
@@ -77,7 +77,7 @@ class DoctorCheck:
     category: str  # "core", "optional", "network"
     check_fn: Callable[[], CheckResult]
 
-@dataclass(frozen=True)  
+@dataclass(frozen=True)
 class CheckResult:
     """Result of a diagnostic check."""
     passed: bool
@@ -105,20 +105,20 @@ from typing import Protocol
 # Canonical definition in utils/progress.py
 class ProgressReporter(Protocol):
     """Protocol for progress reporting.
-    
+
     Note: For logging, use structlog from utils.logging, not this protocol.
     The progress reporter is strictly for visual progress updates.
     """
-    
+
     def start_phase(self, name: str, total: int) -> None:
         """Start a new phase with expected total steps."""
-        
+
     def set_description(self, description: str) -> None:
         """Update current operation description."""
-        
+
     def advance(self, delta: int = 1) -> None:
         """Advance progress by delta steps."""
-        
+
     def complete_phase(self) -> None:
         """Mark current phase as complete."""
 
@@ -170,17 +170,17 @@ def prepare_preflight(
 ) -> PreflightResult:
     """
     Validate configuration and resolve workspace paths.
-    
+
     Steps:
     1. Resolve workspace root (explicit, cwd, or search upward)
     2. Load configuration file (explicit path or discovery)
     3. Validate configuration schema
     4. Resolve all paths (input_dir, screenshots_dir, etc.)
     5. Verify input directory exists and contains videos
-    
+
     Returns:
         PreflightResult with config and workspace
-        
+
     Raises:
         ConfigError: Configuration invalid
         InputError: Input directory missing or empty
@@ -193,12 +193,12 @@ def prepare_preflight(
 def collect_checks() -> list[DoctorCheck]:
     """
     Collect all diagnostic checks.
-    
+
     Categories:
     - core: Python version, VapourSynth, required plugins
     - optional: FFmpeg, dovi_tool, VSPreview
     - network: slow.pics reachability, TMDB API key
-    
+
     Returns:
         List of check definitions
     """
@@ -209,11 +209,11 @@ def run_doctor(
 ) -> DoctorReport:
     """
     Execute diagnostic checks and report results.
-    
+
     Args:
         checks: Specific checks to run (default: all)
         reporter: Progress reporter for output
-        
+
     Returns:
         DoctorReport with all check results
     """
@@ -228,7 +228,7 @@ async def execute_run(
 ) -> RunResult:
     """
     Execute a complete comparison run.
-    
+
     Phases (see contracts/phase_ordering.yaml for canonical ordering):
     1. Preflight - Validate config, resolve paths
     2. LoadSources - Open video sources via VapourSynth/FFmpeg
@@ -239,14 +239,14 @@ async def execute_run(
     7. Dovi - Dolby Vision extraction (skippable, warn-only)
     8. Publish - Upload to slow.pics (skippable)
     9. Report - Generate HTML report (skippable, warn-only)
-    
+
     Args:
         request: Run configuration
         deps: Injectable dependencies (for testing)
-        
+
     Returns:
         RunResult with outputs and metrics
-        
+
     Raises:
         FrameCompareError: Any fatal phase fails
     """
@@ -262,7 +262,7 @@ async def execute_run(
 def resolve_workspace(root: Path | None) -> Path:
     """
     Resolve workspace root directory.
-    
+
     Priority:
     1. Explicit root parameter
     2. Current working directory if config.toml exists
@@ -273,7 +273,7 @@ def resolve_workspace(root: Path | None) -> Path:
 def resolve_paths(config: ConfigSchema, root: Path) -> WorkspacePaths:
     """
     Resolve all workspace paths from config.
-    
+
     Applies:
     - Path expansion (~/, env vars)
     - Relative path resolution from root
@@ -291,7 +291,7 @@ async def execute_phases(
 ) -> None:
     """
     Execute phases in sequence with error handling.
-    
+
     For each phase:
     1. Check skip_condition
     2. Set status to RUNNING
@@ -311,12 +311,12 @@ async def run_context(
 ) -> AsyncIterator[RunContext]:
     """
     Manage resources for a run.
-    
+
     Creates:
     - httpx.AsyncClient (if deps.http_client is None)
     - VapourSynth core
     - Temp directories
-    
+
     Ensures cleanup on exit.
     """
 ```

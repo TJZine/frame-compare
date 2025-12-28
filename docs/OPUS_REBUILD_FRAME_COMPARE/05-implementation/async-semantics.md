@@ -1,6 +1,6 @@
 # Async Semantics (Cancellation, Timeout, Retry)
 
-> **Module:** Reference  
+> **Module:** Reference
 > **Purpose:** Define async behavior for external services
 
 ---
@@ -71,12 +71,12 @@ def map_error_to_exit_code(error: FrameCompareError) -> int:
 ```python
 async def run_with_cancellation(request: RunRequest) -> RunResult:
     """Run with graceful cancellation support."""
-    
+
     def handle_sigint(sig, frame):
         raise KeyboardInterrupt("User cancelled")
-    
+
     signal.signal(signal.SIGINT, handle_sigint)
-    
+
     try:
         return await execute_run(request)
     except KeyboardInterrupt:
@@ -103,17 +103,17 @@ async def run_with_cancellation(request: RunRequest) -> RunResult:
 ```python
 async def upload_to_slowpics(images: list[bytes]) -> SlowpicsResponse:
     """Upload with rate limit handling."""
-    
+
     for attempt in range(config.max_attempts):
         try:
             response = await client.post(SLOWPICS_URL, ...)
-            
+
             if response.status_code == 429:
                 retry_after = int(response.headers.get("Retry-After", 60))
                 raise SlowpicsRateLimitedError(retry_after=retry_after)
-            
+
             return parse_response(response)
-            
+
         except SlowpicsRateLimitedError as e:
             if attempt < config.max_attempts - 1:
                 await asyncio.sleep(e.retry_after)
@@ -140,7 +140,7 @@ TMDB lookup is optional metadata enrichment:
 ```python
 async def enrich_metadata(info: VideoInfo) -> VideoInfo:
     """Add TMDB metadata if available."""
-    
+
     try:
         tmdb_data = await lookup_tmdb(info.title, info.year)
         return info.with_tmdb(tmdb_data)
@@ -175,7 +175,7 @@ async def enrich_metadata(info: VideoInfo) -> VideoInfo:
 @asynccontextmanager
 async def service_context() -> AsyncIterator[Services]:
     """Manage async service lifecycle.
-    
+
     This is the ONLY place where httpx.AsyncClient is created.
     Services receive it via dependency injection.
     """
@@ -195,17 +195,17 @@ Services accept the client as a constructor parameter:
 ```python
 class SlowpicsPublisher:
     """Async publisher using injected HTTP client."""
-    
+
     def __init__(self, config: SlowpicsConfig, client: httpx.AsyncClient):
         """Initialize with injected client.
-        
+
         Args:
             config: Upload configuration
             client: HTTP client (managed by orchestration, NOT owned)
         """
         self.config = config
         self._client = client  # Injected, not owned
-    
+
     # No close() method - client is managed externally
 ```
 

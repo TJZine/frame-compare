@@ -1,8 +1,8 @@
 # Frame Compare 2.0 — AI Readiness Roadmap Review Report
 
-**Date:** 2025-12-21  
-**Reviewer:** Codex (Principal Engineer / Test Architect)  
-**Model:** GPT-5.2  
+**Date:** 2025-12-21
+**Reviewer:** Codex (Principal Engineer / Test Architect)
+**Model:** GPT-5.2
 **Overall Assessment:** NEEDS REVISION
 
 > [!IMPORTANT]
@@ -201,7 +201,7 @@ Typer guidance (official docs):
 | Screenshots-only | FramePlan → Render | VS or FFmpeg | PNGs | Analysis skipped; deterministic uniform seeded selection | FC-200x/FC-4004 |
 | Upload-enabled | Render → Publish | Network | URL | SSRF allowlist enforced | FC-5010/FC-5011 |
 
-**Screenshots-Only Viable:** ✅ (algorithm + contract tests exist: `docs/OPUS_REBUILD_FRAME_COMPARE/scaffold/src/frame_compare/analysis/frame_plan.py:50`)  
+**Screenshots-Only Viable:** ✅ (algorithm + contract tests exist: `docs/OPUS_REBUILD_FRAME_COMPARE/scaffold/src/frame_compare/analysis/frame_plan.py:50`)
 **Skip Semantics Explicit:** ⚠️ (full pipeline mode matrix still requires E2E acceptance tests; current E2E suite is skipped stubs: `docs/OPUS_REBUILD_FRAME_COMPARE/scaffold/tests/e2e/test_pipeline_modes.py:37`)
 
 ---
@@ -210,7 +210,7 @@ Typer guidance (official docs):
 
 | Plugin | Required For | Detection | Fallback | Error Code | Status |
 |:-------|:-------------|:----------|:---------|:-----------|:-------|
-| lsmas (`lw`) | Source loading | `core.lw.LWLibavSource` | FFmpeg | FC-2003 | ✅ spec’d |
+| lsmas (`lsmas`) | Source loading | `core.lsmas.LWLibavSource` | FFmpeg | FC-2003 | ✅ spec’d |
 | libplacebo | Tonemapping | `core.placebo.Tonemap` | basic | FC-2003/FC-2004 | ✅ spec’d |
 
 Status is “spec’d”, but still needs a smoke-test in the pinned baseline to be 10/10 ready.

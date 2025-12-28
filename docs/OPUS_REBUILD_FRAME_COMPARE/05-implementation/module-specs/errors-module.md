@@ -1,7 +1,7 @@
 # Errors Module Implementation Spec
 
-> **Module:** `frame_compare.errors`  
-> **Version:** 1.0  
+> **Module:** `frame_compare.errors`
+> **Version:** 1.0
 > **Priority:** P0 (Foundation)
 
 ---
@@ -43,7 +43,7 @@ ErrorDetails: TypeAlias = dict[str, JSONValue]
 @dataclass(frozen=True, slots=True)
 class ErrorContext:
     """Structured error information for consistent error handling.
-    
+
     Attributes:
         code: Machine-readable error code (e.g., "FC-1001")
         name: Short error name (e.g., "CONFIG_NOT_FOUND")
@@ -51,7 +51,7 @@ class ErrorContext:
         details: Optional structured data for debugging/logging
         hint: Optional recovery suggestion for the user
         cause: Optional underlying exception that caused this error
-    
+
     Note: This is the canonical definition. The scaffold `errors.py`
     provides a reference implementation that aligns with this spec.
     """
@@ -61,7 +61,7 @@ class ErrorContext:
     details: ErrorDetails | None = None
     hint: str | None = None
     cause: BaseException | None = None
-    
+
     def to_dict(self) -> dict[str, JSONValue]:
         """Convert to JSON-serializable dictionary."""
         result: dict[str, JSONValue] = {
@@ -81,37 +81,37 @@ class ErrorContext:
 ```python
 class FrameCompareError(Exception):
     """Base exception for all Frame Compare errors.
-    
+
     All subclasses MUST provide an ErrorContext with a valid FC-xxxx code.
     This enables structured logging, consistent exit codes, and user-friendly
     error messages.
     """
-    
+
     def __init__(self, context: ErrorContext) -> None:
         self.context = context
         super().__init__(context.message)
-    
+
     @property
     def code(self) -> str:
         """Machine-readable error code."""
         return self.context.code
-    
+
     @property
     def name(self) -> str:
         """Short error name."""
         return self.context.name
-    
+
     @property
     def hint(self) -> str | None:
         """Recovery suggestion."""
         return self.context.hint
-    
+
     def __str__(self) -> str:
         base = f"[{self.code}] {self.context.message}"
         if self.hint:
             base += f"\nHint: {self.hint}"
         return base
-    
+
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.context!r})"
 ```
@@ -128,7 +128,7 @@ class ConfigError(FrameCompareError):
 
 class ConfigNotFoundError(ConfigError):
     """Config file not found (FC-1001)."""
-    
+
     def __init__(self, path: Path) -> None:
         super().__init__(ErrorContext(
             code="FC-1001",
@@ -141,7 +141,7 @@ class ConfigNotFoundError(ConfigError):
 
 class ConfigParseError(ConfigError):
     """TOML parsing failed (FC-1002)."""
-    
+
     def __init__(self, path: Path, details: str) -> None:
         super().__init__(ErrorContext(
             code="FC-1002",
@@ -154,7 +154,7 @@ class ConfigParseError(ConfigError):
 
 class ConfigValidationError(ConfigError):
     """Config validation failed (FC-1003)."""
-    
+
     def __init__(self, errors: list[dict[str, JSONValue]]) -> None:
         fields = [str(e.get("loc", ["unknown"])[-1]) for e in errors]
         super().__init__(ErrorContext(
@@ -168,7 +168,7 @@ class ConfigValidationError(ConfigError):
 
 class PresetNotFoundError(ConfigError):
     """Preset not found (FC-1004)."""
-    
+
     def __init__(self, name: str) -> None:
         super().__init__(ErrorContext(
             code="FC-1004",
@@ -181,7 +181,7 @@ class PresetNotFoundError(ConfigError):
 
 class PresetInvalidError(ConfigError):
     """Invalid preset file (FC-1005)."""
-    
+
     def __init__(self, path: Path, details: str) -> None:
         super().__init__(ErrorContext(
             code="FC-1005",
@@ -201,7 +201,7 @@ class DependencyError(FrameCompareError):
 
 class VapourSynthNotFoundError(DependencyError):
     """VapourSynth not installed (FC-2001)."""
-    
+
     def __init__(self) -> None:
         super().__init__(ErrorContext(
             code="FC-2001",
@@ -212,7 +212,7 @@ class VapourSynthNotFoundError(DependencyError):
 
 class VapourSynthError(DependencyError):
     """VapourSynth runtime error (FC-2002)."""
-    
+
     def __init__(self, details: str) -> None:
         super().__init__(ErrorContext(
             code="FC-2002",
@@ -224,7 +224,7 @@ class VapourSynthError(DependencyError):
 
 class PluginNotFoundError(DependencyError):
     """VapourSynth plugin not found (FC-2003)."""
-    
+
     def __init__(self, plugin: str) -> None:
         super().__init__(ErrorContext(
             code="FC-2003",
@@ -237,7 +237,7 @@ class PluginNotFoundError(DependencyError):
 
 class LibplaceboError(DependencyError):
     """libplacebo error (FC-2004)."""
-    
+
     def __init__(self, details: str) -> None:
         super().__init__(ErrorContext(
             code="FC-2004",
@@ -249,7 +249,7 @@ class LibplaceboError(DependencyError):
 
 class FFmpegNotFoundError(DependencyError):
     """FFmpeg not found (FC-2005)."""
-    
+
     def __init__(self) -> None:
         super().__init__(ErrorContext(
             code="FC-2005",
@@ -260,7 +260,7 @@ class FFmpegNotFoundError(DependencyError):
 
 class FFmpegError(DependencyError):
     """FFmpeg error (FC-2006)."""
-    
+
     def __init__(self, details: str, returncode: int | None = None) -> None:
         super().__init__(ErrorContext(
             code="FC-2006",
@@ -272,7 +272,7 @@ class FFmpegError(DependencyError):
 
 class DoviToolNotFoundError(DependencyError):
     """dovi_tool not found (FC-2007)."""
-    
+
     def __init__(self) -> None:
         super().__init__(ErrorContext(
             code="FC-2007",
@@ -283,7 +283,7 @@ class DoviToolNotFoundError(DependencyError):
 
 class PythonVersionError(DependencyError):
     """Python version not supported (FC-2010)."""
-    
+
     def __init__(self, version: str) -> None:
         super().__init__(ErrorContext(
             code="FC-2010",
@@ -302,7 +302,7 @@ class InputError(FrameCompareError):
 
 class NoVideosFoundError(InputError):
     """No videos found (FC-3001)."""
-    
+
     def __init__(self, path: Path, patterns: list[str] | None = None) -> None:
         super().__init__(ErrorContext(
             code="FC-3001",
@@ -315,7 +315,7 @@ class NoVideosFoundError(InputError):
 
 class VideoOpenError(InputError):
     """Failed to open video (FC-3002)."""
-    
+
     def __init__(self, path: Path, reason: str | None = None) -> None:
         msg = f"Failed to open video: {path}"
         if reason:
@@ -331,7 +331,7 @@ class VideoOpenError(InputError):
 
 class VideoCorruptError(InputError):
     """Video file appears corrupt (FC-3003)."""
-    
+
     def __init__(self, path: Path) -> None:
         super().__init__(ErrorContext(
             code="FC-3003",
@@ -344,7 +344,7 @@ class VideoCorruptError(InputError):
 
 class InsufficientFramesError(InputError):
     """Video has insufficient frames (FC-3004)."""
-    
+
     def __init__(self, path: Path, count: int, required: int) -> None:
         super().__init__(ErrorContext(
             code="FC-3004",
@@ -357,7 +357,7 @@ class InsufficientFramesError(InputError):
 
 class IncompatibleVideosError(InputError):
     """Videos have incompatible properties (FC-3005)."""
-    
+
     def __init__(self, details: str) -> None:
         super().__init__(ErrorContext(
             code="FC-3005",
@@ -369,7 +369,7 @@ class IncompatibleVideosError(InputError):
 
 class DirectoryNotFoundError(InputError):
     """Directory not found (FC-3006)."""
-    
+
     def __init__(self, path: Path) -> None:
         super().__init__(ErrorContext(
             code="FC-3006",
@@ -382,7 +382,7 @@ class DirectoryNotFoundError(InputError):
 
 class DirectoryNotWritableError(InputError):
     """Cannot write to directory (FC-3007)."""
-    
+
     def __init__(self, path: Path) -> None:
         super().__init__(ErrorContext(
             code="FC-3007",
@@ -395,7 +395,7 @@ class DirectoryNotWritableError(InputError):
 
 class FileTooLargeError(InputError):
     """File exceeds size limit (FC-3008)."""
-    
+
     def __init__(self, path: Path, size: int, limit: int) -> None:
         super().__init__(ErrorContext(
             code="FC-3008",
@@ -408,7 +408,7 @@ class FileTooLargeError(InputError):
 
 class PathEscapesRootError(InputError):
     """Path escapes workspace root (FC-3009)."""
-    
+
     def __init__(self, root: Path, candidate: Path) -> None:
         super().__init__(ErrorContext(
             code="FC-3009",
@@ -429,7 +429,7 @@ class ProcessingError(FrameCompareError):
 
 class FrameExtractionError(ProcessingError):
     """Failed to extract frame (FC-4001)."""
-    
+
     def __init__(self, frame: int, clip: str | Path) -> None:
         super().__init__(ErrorContext(
             code="FC-4001",
@@ -441,7 +441,7 @@ class FrameExtractionError(ProcessingError):
 
 class TonemapError(ProcessingError):
     """Tonemapping failed (FC-4003)."""
-    
+
     def __init__(self, details: str) -> None:
         super().__init__(ErrorContext(
             code="FC-4003",
@@ -453,7 +453,7 @@ class TonemapError(ProcessingError):
 
 class AudioAlignmentError(ProcessingError):
     """Audio alignment failed (FC-4005)."""
-    
+
     def __init__(self, details: str) -> None:
         super().__init__(ErrorContext(
             code="FC-4005",
@@ -465,7 +465,7 @@ class AudioAlignmentError(ProcessingError):
 
 class CacheCorruptionError(ProcessingError):
     """Cache file corrupt (FC-4006)."""
-    
+
     def __init__(self, path: Path) -> None:
         super().__init__(ErrorContext(
             code="FC-4006",
@@ -478,7 +478,7 @@ class CacheCorruptionError(ProcessingError):
 
 class MetricsCalculationError(ProcessingError):
     """Failed to calculate metrics (FC-4002)."""
-    
+
     def __init__(self, details: str) -> None:
         super().__init__(ErrorContext(
             code="FC-4002",
@@ -490,7 +490,7 @@ class MetricsCalculationError(ProcessingError):
 
 class RenderError(ProcessingError):
     """Screenshot rendering failed (FC-4004)."""
-    
+
     def __init__(self, details: str | None = None) -> None:
         msg = "Screenshot rendering failed"
         if details:
@@ -505,7 +505,7 @@ class RenderError(ProcessingError):
 
 class CacheVersionMismatchError(ProcessingError):
     """Cache version mismatch (FC-4007)."""
-    
+
     def __init__(self, expected: str, found: str) -> None:
         super().__init__(ErrorContext(
             code="FC-4007",
@@ -517,7 +517,7 @@ class CacheVersionMismatchError(ProcessingError):
 
 class MemoryError_(ProcessingError):
     """Out of memory during processing (FC-4010)."""
-    
+
     def __init__(self) -> None:
         super().__init__(ErrorContext(
             code="FC-4010",
@@ -528,7 +528,7 @@ class MemoryError_(ProcessingError):
 
 class TimeoutError_(ProcessingError):
     """Processing timed out (FC-4011)."""
-    
+
     def __init__(self, operation: str, timeout: float) -> None:
         super().__init__(ErrorContext(
             code="FC-4011",
@@ -550,7 +550,7 @@ class AnalysisError(ProcessingError):
 
 class SelectionError(AnalysisError):
     """Frame selection failed (FC-4012)."""
-    
+
     def __init__(self, reason: str, requested: int, available: int) -> None:
         super().__init__(ErrorContext(
             code="FC-4012",
@@ -560,10 +560,10 @@ class SelectionError(AnalysisError):
             details={"requested": requested, "available": available},
         ))
 
-# Render module errors  
+# Render module errors
 class EncodingError(RenderError):
     """Failed to encode image (FC-4013)."""
-    
+
     def __init__(self, output_path: Path, details: str) -> None:
         super().__init__(ErrorContext(
             code="FC-4013",
@@ -575,7 +575,7 @@ class EncodingError(RenderError):
 
 class OverlayError(RenderError):
     """Failed to apply overlay (FC-4014)."""
-    
+
     def __init__(self, details: str) -> None:
         super().__init__(ErrorContext(
             code="FC-4014",
@@ -588,7 +588,7 @@ class OverlayError(RenderError):
 # VS module errors
 class SourceLoadError(ProcessingError):
     """Failed to load video source (FC-4015)."""
-    
+
     def __init__(self, path: Path, details: str) -> None:
         super().__init__(ErrorContext(
             code="FC-4015",
@@ -608,7 +608,7 @@ class ServiceError(FrameCompareError):
 
 class MetadataError(ServiceError):
     """Metadata extraction/lookup failed (FC-4016)."""
-    
+
     def __init__(self, details: str) -> None:
         super().__init__(ErrorContext(
             code="FC-4016",
@@ -623,7 +623,7 @@ class PublishError(ServiceError):
 
 class ReportError(ServiceError):
     """Report generation failed (FC-4017)."""
-    
+
     def __init__(self, details: str) -> None:
         super().__init__(ErrorContext(
             code="FC-4017",
@@ -635,7 +635,7 @@ class ReportError(ServiceError):
 
 class DoviError(ServiceError):
     """Dolby Vision extraction failed (FC-4018)."""
-    
+
     def __init__(self, path: Path, details: str) -> None:
         super().__init__(ErrorContext(
             code="FC-4018",
@@ -654,7 +654,7 @@ class NetworkError(FrameCompareError):
 
 class SlowpicsError(NetworkError):
     """slow.pics upload failed (FC-5002)."""
-    
+
     def __init__(self, details: str) -> None:
         super().__init__(ErrorContext(
             code="FC-5002",
@@ -666,7 +666,7 @@ class SlowpicsError(NetworkError):
 
 class TmdbError(NetworkError):
     """TMDB API error (FC-5005)."""
-    
+
     def __init__(self, details: str) -> None:
         super().__init__(ErrorContext(
             code="FC-5005",
@@ -678,7 +678,7 @@ class TmdbError(NetworkError):
 
 class NetworkTimeoutError(NetworkError):
     """Request timed out (FC-5007)."""
-    
+
     def __init__(self, service: str, timeout: float) -> None:
         super().__init__(ErrorContext(
             code="FC-5007",
@@ -690,7 +690,7 @@ class NetworkTimeoutError(NetworkError):
 
 class NetworkUnreachableError(NetworkError):
     """Network unreachable (FC-5001)."""
-    
+
     def __init__(self) -> None:
         super().__init__(ErrorContext(
             code="FC-5001",
@@ -701,7 +701,7 @@ class NetworkUnreachableError(NetworkError):
 
 class SlowpicsRateLimitedError(NetworkError):
     """slow.pics rate limited (FC-5003)."""
-    
+
     def __init__(self, retry_after: int | None = None) -> None:
         super().__init__(ErrorContext(
             code="FC-5003",
@@ -713,7 +713,7 @@ class SlowpicsRateLimitedError(NetworkError):
 
 class SlowpicsUnavailableError(NetworkError):
     """slow.pics service unavailable (FC-5004)."""
-    
+
     def __init__(self) -> None:
         super().__init__(ErrorContext(
             code="FC-5004",
@@ -724,7 +724,7 @@ class SlowpicsUnavailableError(NetworkError):
 
 class TmdbRateLimitedError(NetworkError):
     """TMDB rate limited (FC-5006)."""
-    
+
     def __init__(self, retry_after: int | None = None) -> None:
         super().__init__(ErrorContext(
             code="FC-5006",
@@ -736,7 +736,7 @@ class TmdbRateLimitedError(NetworkError):
 
 class SSLError(NetworkError):
     """SSL certificate error (FC-5008)."""
-    
+
     def __init__(self, details: str) -> None:
         super().__init__(ErrorContext(
             code="FC-5008",
@@ -755,7 +755,7 @@ class InternalError(FrameCompareError):
 
 class GenericInternalError(InternalError):
     """Internal error (FC-9001)."""
-    
+
     def __init__(self, details: str) -> None:
         super().__init__(ErrorContext(
             code="FC-9001",
@@ -767,7 +767,7 @@ class GenericInternalError(InternalError):
 
 class AssertionError_(InternalError):
     """Assertion failed (FC-9002)."""
-    
+
     def __init__(self, details: str) -> None:
         super().__init__(ErrorContext(
             code="FC-9002",
@@ -779,7 +779,7 @@ class AssertionError_(InternalError):
 
 class UnexpectedStateError(InternalError):
     """Unexpected state (FC-9003)."""
-    
+
     def __init__(self, details: str) -> None:
         super().__init__(ErrorContext(
             code="FC-9003",
@@ -831,12 +831,12 @@ def get_exit_code(error: FrameCompareError) -> ExitCode:
 ```python
 def format_error_console(error: FrameCompareError, *, verbose: bool = False) -> str:
     """Format error for console output.
-    
+
     Example output:
         ✗ Error [FC-3001]: No video files found in comparison_videos
-        
+
           Hint: Place *.mkv, *.mp4 files in the input directory
-          
+
           For more details, run with --verbose
     """
     lines = [f"✗ Error [{error.code}]: {error.context.message}"]

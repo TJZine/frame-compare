@@ -16,11 +16,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent
 DEFAULT_GATES_PATH = (
-    PROJECT_ROOT
-    / "docs"
-    / "OPUS_REBUILD_FRAME_COMPARE"
-    / "contracts"
-    / "readiness_gates.json"
+    PROJECT_ROOT / "docs" / "OPUS_REBUILD_FRAME_COMPARE" / "contracts" / "readiness_gates.json"
 )
 ROADMAP_PATH = PROJECT_ROOT / "AI_READINESS_ROADMAP.md"
 
@@ -109,9 +105,7 @@ def render_table(gates: list[ReadinessGate], *, checked_at: str, existing_block:
     lines.append("|:-----|:--------|:------:|:-------------------|")
     for gate in gates:
         status = existing_statuses.get(gate.name, "✅")
-        lines.append(
-            f"| {gate.name} | `{gate.display_command()}` | {status} | {checked_at} |"
-        )
+        lines.append(f"| {gate.name} | `{gate.display_command()}` | {status} | {checked_at} |")
     return "\n".join(lines) + "\n"
 
 

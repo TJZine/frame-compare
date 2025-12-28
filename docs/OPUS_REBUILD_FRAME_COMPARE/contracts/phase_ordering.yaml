@@ -174,14 +174,14 @@ handoffs:
       FramePlan.frames is always a concrete list[int].
       Render MUST NOT reselect frames.
       Render receives FramePlan directly, not via analyze.
-    
+
   metadata_to_publish:
     source: metadata
     target: publish
     contract: |
       Publish accepts TmdbMetadata | None.
       If None, uses fallback title from first filename.
-    
+
   metadata_to_report:
     source: metadata
     target: report

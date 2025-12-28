@@ -1,6 +1,6 @@
 # Sprint Planning Templates
 
-> **Module:** Roadmap  
+> **Module:** Roadmap
 > **Version:** 1.0
 
 ---
@@ -29,25 +29,25 @@ STORY-XXX:
   Type: [Feature | Bug | Chore | Spike]
   Priority: [P0 | P1 | P2]
   Points: [1 | 2 | 3 | 5 | 8 | 13]
-  
+
   User Story: |
     As a [user type]
     I want [capability]
     So that [benefit]
-  
+
   Acceptance Criteria:
     - GIVEN [context] WHEN [action] THEN [result]
     - GIVEN [context] WHEN [action] THEN [result]
-  
+
   Tasks:
     - [ ] TASK-001: [Technical task] (Xh)
     - [ ] TASK-002: [Technical task] (Xh)
     - [ ] TASK-003: [Write tests] (Xh)
     - [ ] TASK-004: [Update docs] (Xh)
-  
+
   Dependencies:
     - [STORY-XXX]
-  
+
   Notes: |
     [Additional context, edge cases, technical notes]
 ```
@@ -120,12 +120,12 @@ Stories:
     Type: Chore
     Priority: P0
     Points: 3
-    
+
     Acceptance Criteria:
       - GIVEN new clone WHEN `uv sync` runs THEN dependencies install
       - GIVEN project WHEN `.venv/bin/pyright --warnings` runs THEN 0 errors
       - GIVEN project WHEN `.venv/bin/pytest -q` runs THEN empty suite passes
-    
+
     Tasks:
       - [ ] Create directory structure (1h)
       - [ ] Configure pyproject.toml (2h)
@@ -137,11 +137,11 @@ Stories:
     Type: Chore
     Priority: P0
     Points: 2
-    
+
     Acceptance Criteria:
       - GIVEN push to main WHEN CI runs THEN lint + type + test stages execute
       - GIVEN failed lint WHEN CI runs THEN build fails with clear error
-    
+
     Tasks:
       - [ ] Create CI workflow file (2h)
       - [ ] Configure matrix for Python 3.13 (1h)
@@ -152,12 +152,12 @@ Stories:
     Type: Chore
     Priority: P0
     Points: 5
-    
+
     Acceptance Criteria:
       - GIVEN Dockerfile WHEN `docker build` runs THEN image builds
       - GIVEN VS Code WHEN "Reopen in Container" THEN dev environment ready
       - GIVEN container WHEN VapourSynth imported THEN R72+ available
-    
+
     Tasks:
       - [ ] Create multi-stage Dockerfile (3h)
       - [ ] Build VapourSynth in container (4h)
@@ -179,17 +179,17 @@ Stories:
     Type: Feature
     Priority: P0
     Points: 5
-    
+
     User Story: |
       As a user
       I want frame metrics calculated automatically
       So that representative frames are selected
-    
+
     Acceptance Criteria:
       - GIVEN video clip WHEN metrics calculated THEN luminance values normalized [0,1]
       - GIVEN two identical videos WHEN metrics calculated THEN results identical
       - GIVEN progress callback WHEN processing THEN progress reported
-    
+
     Tasks:
       - [ ] Create types.py with FrameMetrics (2h)
       - [ ] Implement luminance calculation (3h)
@@ -202,17 +202,17 @@ Stories:
     Type: Feature
     Priority: P0
     Points: 5
-    
+
     User Story: |
       As a user
       I want frames selected by luminance, motion, and random
       So that I get representative samples
-    
+
     Acceptance Criteria:
       - GIVEN same seed WHEN selection runs twice THEN same frames selected
       - GIVEN N frames requested WHEN selection runs THEN exactly N unique frames returned
       - GIVEN selection breakdown WHEN inspected THEN shows quantile/motion/random counts
-    
+
     Tasks:
       - [ ] Implement quantile selection (3h)
       - [ ] Implement motion selection (3h)
@@ -225,17 +225,17 @@ Stories:
     Type: Feature
     Priority: P0
     Points: 3
-    
+
     User Story: |
       As a user
       I want metrics cached
       So that subsequent runs are faster
-    
+
     Acceptance Criteria:
       - GIVEN first run WHEN metrics computed THEN cache file created
       - GIVEN second run WHEN config unchanged THEN cache hit
       - GIVEN config changed WHEN run THEN cache miss, recomputed
-    
+
     Tasks:
       - [ ] Implement cache key computation (2h)
       - [ ] Implement cache read/write (3h)

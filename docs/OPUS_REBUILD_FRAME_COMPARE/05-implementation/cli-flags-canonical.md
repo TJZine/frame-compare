@@ -1,6 +1,6 @@
 # CLI Flags — Single Source of Truth
 
-> **Module:** Reference  
+> **Module:** Reference
 > **Purpose:** Canonical CLI flag definitions to sync docs/specs/tests
 
 > [!NOTE]

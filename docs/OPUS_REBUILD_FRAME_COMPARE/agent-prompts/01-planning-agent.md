@@ -197,7 +197,7 @@ Use `v1` for a new run. If you are revising the plan after Plan Review feedback,
 
 When producing a revised plan `plan-v(N+1).md` after a Plan Review verdict of CHANGES REQUIRED:
 
-1. **Copy-forward first:** Start from the previous plan file (`plan-vN.md`) and edit it in-place into a new file (`plan-v(N+1).md`).
+1. **Copy-forward first:** Copy the previous plan file (`plan-vN.md`) into a new file (`plan-v(N+1).md`) and edit the new file (never modify `plan-vN.md` in place).
 2. **Minimal delta:** Change only what the Plan Review Report required. Do not “rewrite for style”.
 3. **Self-contained:** The revised plan must stand on its own (no “see plan-vN for details” dependencies).
 4. **Add a change summary:** At the top of the plan body (after frontmatter), add:
