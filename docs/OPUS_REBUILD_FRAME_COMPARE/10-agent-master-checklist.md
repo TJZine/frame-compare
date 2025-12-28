@@ -22,10 +22,10 @@
 
 ### 0.1 Repository Setup
 
-- [ ] Clone repository or create new project directory
-- [ ] Initialize Git with `.gitignore` for Python
+- [x] Clone repository or create new project directory (2025-12-28)
+- [x] Initialize Git with `.gitignore` for Python (2025-12-28)
 - [ ] Create branch protection rules (main requires PR)
-- [ ] Setup `pyproject.toml` with build system
+- [x] Setup `pyproject.toml` with build system (2025-12-28)
 
 ### 0.2 Project Structure
 
@@ -49,30 +49,30 @@ frame-compare/
 └── Dockerfile
 ```
 
-- [ ] Create `src/frame_compare/` directory structure
-- [ ] Add `py.typed` marker file
-- [ ] Create `__init__.py` with version export
-- [ ] Create `tests/` directory with `conftest.py`
+- [x] Create `src/frame_compare/` directory structure (2025-12-28)
+- [x] Add `py.typed` marker file (2025-12-28)
+- [x] Create `__init__.py` with version export (2025-12-28)
+- [x] Create `tests/` directory with `conftest.py` (2025-12-28)
 - [ ] Add initial `README.md`
 
 ### 0.3 Development Tooling
 
-- [ ] Configure `pyproject.toml` dependencies:
-  - [ ] Runtime: `typer`, `rich`, `numpy`, `httpx`, `pydantic` (TOML via stdlib `tomllib`)
-  - [ ] Dev: `pytest`, `pytest-mock`, `pyright`, `ruff`, `structlog`
-- [ ] Configure Pyright in strict mode
-- [ ] Configure Ruff with rules: `E`, `F`, `I`, `W`, `UP`
+- [x] Configure `pyproject.toml` dependencies: (2025-12-28)
+  - [x] Runtime: `typer`, `rich`, `numpy`, `httpx`, `pydantic` (TOML via stdlib `tomllib`)
+  - [x] Dev: `pytest`, `pytest-mock`, `pyright`, `ruff`, `structlog`
+- [x] Configure Pyright in strict mode (2025-12-28)
+- [x] Configure Ruff with rules: `E`, `F`, `I`, `W`, `UP` (2025-12-28)
 - [ ] Setup pre-commit hooks (optional but recommended)
-- [ ] Verify: `uv sync` completes successfully
+- [x] Verify: `uv sync` completes successfully (2025-12-28)
 
 ### 0.4 CI/CD Pipeline
 
-- [ ] Create `.github/workflows/ci.yml`:
-  - [ ] Lint stage (Ruff)
-  - [ ] Type check stage (Pyright)
-  - [ ] Test stage (pytest)
-  - [ ] Python 3.13 matrix
-- [ ] Verify CI passes on push
+- [x] Create `.github/workflows/ci.yml`: (2025-12-28)
+  - [x] Lint stage (Ruff)
+  - [x] Type check stage (Pyright)
+  - [x] Test stage (pytest)
+  - [x] Python 3.13 matrix
+- [x] Verify CI passes on push (2025-12-28)
 
 ### 0.5 Container Setup
 

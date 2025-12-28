@@ -15,7 +15,6 @@ import re
 import sys
 from pathlib import Path
 
-
 _FORBIDDEN_TOOLING = re.compile(r"\buv run (pyright|ruff|pytest)\b")
 
 

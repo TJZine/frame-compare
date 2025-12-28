@@ -193,6 +193,17 @@ Write file to:
 
 Use `v1` for a new run. If you are revising the plan after Plan Review feedback, increment `N` (`v2`, `v3`, ...).
 
+## Plan Revision Discipline (Required)
+
+When producing a revised plan `plan-v(N+1).md` after a Plan Review verdict of CHANGES REQUIRED:
+
+1. **Copy-forward first:** Start from the previous plan file (`plan-vN.md`) and edit it in-place into a new file (`plan-v(N+1).md`).
+2. **Minimal delta:** Change only what the Plan Review Report required. Do not “rewrite for style”.
+3. **Self-contained:** The revised plan must stand on its own (no “see plan-vN for details” dependencies).
+4. **Add a change summary:** At the top of the plan body (after frontmatter), add:
+   - `## Changes Since plan-vN`
+   - Bullet list of every change, ideally mapped to the Plan Review “Concrete Edits Required” items.
+
 Do not print the full file contents. Confirm the path and summarize what was written.
 
 ---

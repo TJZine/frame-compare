@@ -196,6 +196,15 @@ Implementation Agent Decision Points Remaining: NONE
 - Are all edge cases explicitly handled or explicitly out-of-scope? If not, FAIL.
 - Is there exactly one way to interpret each requirement? If not, FAIL.
 
+### Revision Discipline (If Reviewing plan-vN where N > 1)
+
+If this is a revised plan after CHANGES REQUIRED:
+
+- Require the plan to be produced as `plan-vN.md` (new file) rather than editing an existing plan in place.
+- Require a `## Changes Since plan-v(N-1)` section listing all changes made.
+- Confirm every item in the previous plan-review report’s “Concrete Edits Required” is addressed.
+- Reject “style rewrites” that introduce churn without improving determinism.
+
 ---
 
 ## Save Your Report

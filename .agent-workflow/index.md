@@ -7,6 +7,8 @@
 
 | RUN_ID | Target | Date | Verdict | Artifacts |
 |--------|--------|------|---------|-----------|
+| 2025-12-27__p0-1__repo-foundation | Phase 0 → Items 0.1-0.3 | 2025-12-28 | APPROVED | [plan](runs/2025-12-27__p0-1__repo-foundation/plan-v4.md) / [plan-review](runs/2025-12-27__p0-1__repo-foundation/plan-review-v4.md) / [impl](runs/2025-12-27__p0-1__repo-foundation/impl-v1.md) / [verify](runs/2025-12-27__p0-1__repo-foundation/verify-v1.md) / [review](runs/2025-12-27__p0-1__repo-foundation/review-v1.md) |
+| 2025-12-27__p0-4__ci-pipeline | Phase 0 → Item 0.4 | 2025-12-28 | APPROVED | [plan](runs/2025-12-27__p0-4__ci-pipeline/plan-v4.md) / [plan-review](runs/2025-12-27__p0-4__ci-pipeline/plan-review-v4.md) / [impl](runs/2025-12-27__p0-4__ci-pipeline/impl-v1.md) / [verify](runs/2025-12-27__p0-4__ci-pipeline/verify-v1.md) / [review](runs/2025-12-27__p0-4__ci-pipeline/review-v1.md) |
 <!-- Verification Agent: Append new entries here -->
 
 ## Legend
@@ -28,6 +30,7 @@ After all verification gates pass, append a new row with `PENDING_REVIEW` and li
 ### Step 2: Review Agent (finalize)
 
 After writing `review-vN.md`, update the same row:
+
 - Replace `PENDING_REVIEW` with the final verdict (`APPROVED` / `CHANGES_REQUIRED` / `DESIGN_ISSUE`)
 - Add/update the `[review](...)` link
 
