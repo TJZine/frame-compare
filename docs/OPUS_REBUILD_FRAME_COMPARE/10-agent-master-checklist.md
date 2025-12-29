@@ -177,13 +177,13 @@ frame-compare/
 
 **Reference:** `05-implementation/module-specs/analysis-module.md`
 
-- [ ] Create `src/frame_compare/analysis/types.py`
-- [ ] Define `ClipIdentity` (path, hash, frame_count)
-- [ ] Define `FrameMetrics` (luminance, motion arrays)
-- [ ] Define `MetricsMetadata` (version, timestamp, config_hash)
-- [ ] Define `SelectionMode` enum (QUANTILE, MOTION, RANDOM)
-- [ ] Define `SelectionBreakdown` (counts per mode)
-- [ ] Define `FrameSelection` (frames, breakdown)
+- [x] Create `src/frame_compare/analysis/types.py`
+- [x] Define `ClipIdentity` (path, hash, frame_count)
+- [x] Define `FrameMetrics` (luminance, motion arrays)
+- [x] Define `MetricsMetadata` (version, timestamp, config_hash)
+- [x] Define `SelectionMode` enum (QUANTILE, MOTION, RANDOM)
+- [x] Define `SelectionBreakdown` (counts per mode)
+- [x] Define `FrameSelection` (frames, breakdown)
 
 ### 2.2 Metrics Calculation
 

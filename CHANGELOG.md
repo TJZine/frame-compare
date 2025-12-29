@@ -22,6 +22,7 @@ This project follows Conventional Commits and is intended to be released via Rel
 - Correlation ID tracking for run tracing (`new_run_id`, `get_run_id`)
 - CLI foundation commands: `run` (full signature), `wizard`, `doctor`, `preset` (list/apply/save) stubs.
 - `handle_error` utility mapping FrameCompareError to exit codes.
+- Analysis module types: `ClipIdentity`, `MetricsMetadata`, `FrameMetrics`, `SelectionBreakdown`, `FrameSelection`, `CacheLoadResult`
 
 
 ### Changed

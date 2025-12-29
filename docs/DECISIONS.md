@@ -419,3 +419,11 @@ Apply a **review fix budget** (at most one direct CHANGES REQUIRED cycle per run
 - Ensures consistent exit codes via the Error Handling module.
 - Provides a stable interface for subsequent phases to hook into.
 - Prevents "CLI sprawl" by defining the full surface area upfront.
+
+---
+
+## 2025-12-29__p2-1__analysis-types
+
+- **Scope:** Analysis module types
+- **SSOT edits:** analysis-module.md updated to `@dataclass(frozen=True, slots=True)`
+- **Import layers:** Added `frame_compare.analysis` after `cli_entry`

@@ -50,14 +50,14 @@ src/frame_compare/analysis/
 ### 2.1 FrameMetrics
 
 ```python
-@dataclass
+@dataclass(frozen=True, slots=True)
 class FrameMetrics:
     """Analysis results for a video clip"""
     luminance: list[float]    # Per-frame Y channel mean
     motion: list[float]       # Per-frame difference score
     metadata: MetricsMetadata
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class MetricsMetadata:
     frame_count: int
     fps: Fraction
@@ -65,7 +65,7 @@ class MetricsMetadata:
     clips: list[ClipIdentity]
     version: int = 2          # Schema version (default last)
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class ClipIdentity:
     path: str
     size: int
@@ -73,10 +73,16 @@ class ClipIdentity:
     sha1: str | None = None
 ```
 
+**Example construction:**
+
+```python
+clip = ClipIdentity(path="video.mkv", size=1024, mtime=1704067200.0)
+```
+
 ### 2.2 FrameSelection
 
 ```python
-@dataclass
+@dataclass(frozen=True, slots=True)
 class FrameSelection:
     """Selected frame numbers with reasoning"""
     frames: list[int]
@@ -84,7 +90,7 @@ class FrameSelection:
     seed: int
     breakdown: SelectionBreakdown
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class SelectionBreakdown:
     quantile_dark: list[int]
     quantile_bright: list[int]
@@ -95,7 +101,7 @@ class SelectionBreakdown:
 ### 2.3 CacheLoadResult
 
 ```python
-@dataclass
+@dataclass(frozen=True, slots=True)
 class CacheLoadResult:
     """Result of attempting to load metrics from cache.
 
