@@ -91,7 +91,7 @@ frame-compare/
 - [x] `.venv/bin/ruff check .` shows 0 errors (2025-12-28)
 - [x] `.venv/bin/pytest` runs (empty suite OK) (2025-12-28)
 - [ ] CI workflow passes
-- [ ] Docker container builds
+- [x] Docker container builds
 
 ---
 
