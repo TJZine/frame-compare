@@ -46,7 +46,7 @@ src/frame_compare/
 ### 2.1 Command Structure
 
 ```python
-# Using Typer for type-hint-native CLI
+"""CLI commands using Typer for type-hint-native interface."""
 
 import typer
 from pathlib import Path
@@ -162,22 +162,24 @@ def doctor(
     """Check system dependencies."""
     ...  # pseudocode: run collect_checks() and format_results()
 
-@app.group()
-def preset() -> None:
-    """Manage configuration presets."""
-    ...  # pseudocode: Typer group container, no implementation needed
+preset_app = typer.Typer(
+    name="preset",
+    help="Manage configuration presets.",
+    no_args_is_help=True,
+)
+app.add_typer(preset_app, name="preset")
 
-@preset.command("list")
+@preset_app.command("list")
 def preset_list() -> None:
     """List available presets."""
     ...  # pseudocode: scan presets directory and print table
 
-@preset.command("apply")
+@preset_app.command("apply")
 def preset_apply(name: str) -> None:
     """Apply a preset to configuration."""
     ...  # pseudocode: merge preset into current config and emit warnings
 
-@preset.command("save")
+@preset_app.command("save")
 def preset_save(name: str) -> None:
     """Save current configuration as preset."""
     ...  # pseudocode: dump current config to presets/{name}.toml

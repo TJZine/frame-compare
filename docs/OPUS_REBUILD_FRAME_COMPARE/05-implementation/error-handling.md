@@ -276,36 +276,23 @@ match load_video(path):
 ### 4.1 CLI Layer
 
 ```python
-# src/frame_compare/cli_entry.py
+"""CLI layer error handling - src/frame_compare/cli_entry.py"""
 
 import typer
 from rich.console import Console
+from frame_compare.errors import FrameCompareError, get_exit_code
 
 console = Console(stderr=True)
 
 def handle_error(error: FrameCompareError) -> int:
     """Convert exception to user-friendly output and exit code."""
 
-    console.print(f"[red]Error[/red] [{error.code} {error.name}]: {error.context.message}")
+    console.print(f"[red]Error[/red] [{error.code}]: {error.context.message}")
 
     if error.hint:
         console.print(f"[yellow]Hint:[/yellow] {error.hint}")
 
-    # Map error types to exit codes
-    exit_codes = {
-        ConfigError: 2,
-        DependencyError: 3,
-        InputError: 4,
-        ProcessingError: 5,
-        NetworkError: 6,
-        InternalError: 1,
-    }
-
-    for error_type, code in exit_codes.items():
-        if isinstance(error, error_type):
-            return code
-
-    return 1
+    return int(get_exit_code(error))
 
 def run():
     try:

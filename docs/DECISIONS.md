@@ -399,3 +399,23 @@ Apply a **review fix budget** (at most one direct CHANGES REQUIRED cycle per run
 - Establishes logging patterns early for subsequent phases.
 - Avoids implementing unused code (other utils).
 - Updates SSOT Section 4.3 to include `bind_contextvars` for proper correlation ID propagation.
+
+---
+
+## 2025-12-29 — Phase 1.4 CLI Foundation
+
+### CLI Command Structure: Typer Stubs
+
+**Context:** Phase 1.4 establishes the CLI entry point and command structure without implementing full logic.
+
+**Decision:**
+- Implement `run`, `wizard`, `doctor`, and `preset` commands as Typer stubs in `cli_entry.py`.
+- Define full argument signatures for `run` and `doctor` now (per SSOT) to lock in the API contract.
+- Use `FrameCompareError` and `get_exit_code` for standard error handling in `handle_error`.
+- Defer business logic implementation to future phases.
+
+**Rationale:**
+- Validates CLI ergonomics and help output early.
+- Ensures consistent exit codes via the Error Handling module.
+- Provides a stable interface for subsequent phases to hook into.
+- Prevents "CLI sprawl" by defining the full surface area upfront.

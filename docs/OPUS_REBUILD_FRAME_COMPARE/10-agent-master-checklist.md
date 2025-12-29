@@ -150,15 +150,15 @@ frame-compare/
 
 **Reference:** `03-architecture/api-design.md` (Section 2)
 
-- [ ] Create `src/frame_compare/cli_entry.py`
-- [ ] Implement Typer app + commands
-- [ ] Add global options: `--root`, `--config`, `--quiet`, `--verbose`
-- [ ] Implement `run` command (stub)
-- [ ] Implement `wizard` command (stub)
-- [ ] Implement `doctor` command (stub)
-- [ ] Implement `preset` command group (stub)
-- [ ] Map exceptions to exit codes
-- [ ] Write CLI integration tests
+- [x] Create `src/frame_compare/cli_entry.py`
+- [x] Implement Typer app + commands
+- [x] Add global options: `--root`, `--config`, `--quiet`, `--verbose`
+- [x] Implement `run` command (stub)
+- [x] Implement `wizard` command (stub)
+- [x] Implement `doctor` command (stub)
+- [x] Implement `preset` command group (stub)
+- [x] Map exceptions to exit codes
+- [x] Write CLI integration tests
 
 ### Phase 1 Quality Gate ✓
 

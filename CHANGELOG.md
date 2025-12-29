@@ -20,6 +20,8 @@ This project follows Conventional Commits and is intended to be released via Rel
 - `format_error_console()` and `format_error_json()` formatting utilities
 - Structured logging infrastructure with structlog (json/console formats)
 - Correlation ID tracking for run tracing (`new_run_id`, `get_run_id`)
+- CLI foundation commands: `run` (full signature), `wizard`, `doctor`, `preset` (list/apply/save) stubs.
+- `handle_error` utility mapping FrameCompareError to exit codes.
 
 
 ### Changed
