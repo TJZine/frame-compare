@@ -27,3 +27,14 @@ def tmp_workspace(tmp_path: Path) -> Generator[Path]:
     (tmp_path / "config").mkdir()
     (tmp_path / "generated").mkdir()
     yield tmp_path
+
+
+# ─── VapourSynth Stubs ─────────────────────────────────────
+
+
+@pytest.fixture
+def mock_vs(mocker):
+    """Mock VapourSynth for unit tests."""
+    mock = mocker.MagicMock()
+    mocker.patch.dict("sys.modules", {"vapoursynth": mock})
+    return mock

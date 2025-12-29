@@ -17,7 +17,7 @@ description: Use when changing config schema, config templates, or CLI flags so 
 - `UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_contract_views.py --check`
 - `UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_traceability.py --check`
 - CI config docs check equivalent:
-  - `uv run --no-sync python tools/gen_config_docs.py --check docs/_generated/config_tables.md`
+  - `UV_CACHE_DIR=./.uv_cache uv run --no-sync python tools/gen_config_docs.py --check docs/_generated/config_tables.md`
 
 ## Guardrails
 

@@ -28,6 +28,8 @@ Minimize the human operator role to: **confirm** → **paste NEXT** → **repeat
    - Coding must not begin unless Plan Review is APPROVED and includes `Implementation Agent Decision Points Remaining: NONE`.
 5. **Validation is STOP-grade.**
    - After writing/updating any artifact, validate per `11-agent-workflow.md` (STOP on failure).
+6. **Contract freshness hygiene.**
+   - Coding must run `UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_contract_views.py --check` (regen if needed) before handing off to Verification.
 
 ## Low-Touch Orchestration Template (what to ask the human for)
 

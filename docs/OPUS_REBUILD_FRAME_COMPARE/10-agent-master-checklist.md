@@ -240,11 +240,11 @@ frame-compare/
 
 **Reference:** `05-implementation/module-specs/vs-module.md`
 
-- [ ] Create `src/frame_compare/vs/env.py`
-- [ ] Implement `init_vapoursynth() -> vs.Core`
-- [ ] Handle VapourSynth not available gracefully
-- [ ] Configure cache size
-- [ ] Add `@pytest.mark.vs_required` marker
+- [x] Create `src/frame_compare/vs/env.py` (2025-12-29)
+- [x] Implement `init_vapoursynth() -> vs.Core` (2025-12-29)
+- [x] Handle VapourSynth not available gracefully (2025-12-29)
+- [x] Configure cache size (2025-12-29)
+- [x] Add `@pytest.mark.vs_required` marker (2025-12-29)
 
 ### 3.2 Video Loading
 

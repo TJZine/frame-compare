@@ -25,6 +25,7 @@ This project follows Conventional Commits and is intended to be released via Rel
 - Analysis module types: `ClipIdentity`, `MetricsMetadata`, `FrameMetrics`, `SelectionBreakdown`, `FrameSelection`, `CacheLoadResult`
 - Analysis module frame selection algorithms: quantile, motion, and random modes with minimum gap enforcement.
 - Analysis module cache I/O: deterministic cache key generation, metrics persistence (JSON Schema v2), and failure-resilient cache loading.
+- VapourSynth module foundation (`frame_compare.vs`) with environment detection, plugin checks, and `VSLoader` protocol.
 
 
 ### Changed

@@ -197,11 +197,12 @@ def ensure_vs_environment() -> vs.Core:
         Configured vs.Core instance
 
     Raises:
-        VapourSynthError: If VS not available
+        VapourSynthNotFoundError: If vapoursynth import fails (FC-2001)
+        VapourSynthError: If VS core initialization fails (FC-2002)
     """
 
 def is_vapoursynth_available() -> bool:
-    """Check if VapourSynth is usable."""
+    """Check if VapourSynth is usable (import + core creation)."""
 ```
 
 ### 3.2 Source Loading
@@ -344,13 +345,15 @@ def _fallback_tonemap(
 
 | Error Class | Code | Usage |
 |-------------|------|-------|
-| `VapourSynthError` | FC-2xxx | Base for VS errors |
+| `VapourSynthNotFoundError` | FC-2001 | VapourSynth module not installed |
+| `VapourSynthError` | FC-2002 | VS core initialization failed |
 | `PluginNotFoundError` | FC-2003 | Required plugin not available |
 | `SourceLoadError` | FC-4015 | Failed to load video source |
 | `TonemapError` | FC-4003 | Tonemapping operation failed |
 
 ```python
 from frame_compare.errors import (
+    VapourSynthNotFoundError,
     VapourSynthError,
     PluginNotFoundError,
     SourceLoadError,

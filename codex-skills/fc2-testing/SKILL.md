@@ -11,6 +11,14 @@ description: Use when adding or refactoring tests for Frame Compare to keep them
 - Anti-churn: prefer narrow unit tests, contract-based assertions, and stable fixtures.
 - Match verification evidence expectations in run artifacts.
 
+## Deterministic test vectors (SSOT)
+
+When a test needs example values (paths, strings, numbers), use the canonical policy in:
+
+- `docs/OPUS_REBUILD_FRAME_COMPARE/05-implementation/testing-strategy.md` → **1.3 Deterministic Test Vector Policy (SSOT)**
+
+This avoids bloating plans with large per-case constructor-arg lists.
+
 ## Quick verification (Command Canon)
 
 - Tooling (preferred):

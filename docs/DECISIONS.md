@@ -497,3 +497,23 @@ Apply a **review fix budget** (at most one direct CHANGES REQUIRED cycle per run
 **Rationale:**
 - Cache misses should not crash the application; they should trigger fallback to recomputation.
 - Save failures are more critical as they indicate storage issues that may affect other parts of the run (e.g., screenshots).
+
+---
+
+## 2025-12-29 — Phase 3.1 VS Environment
+
+### Minimal Vertical Slice
+
+**Context:** Phase 2.2 needs VapourSynth for frame processing, but full loading/tonemapping logic (Phase 3.2+) is complex.
+
+**Decision:** Implement a minimal `frame_compare.vs` module covering only environment setup, plugin detection, and a typed `VSLoader` protocol stub.
+
+**Rationale:**
+- Unblocks Phase 2.2 immediately.
+- Establishes the correct abstraction layer (`VSLoader`) so other modules don't couple to implementation details.
+- Validates the environment foundation before building complex logic on top.
+
+**Run:** 2025-12-29__p3-1__vs-environment
+**SSOT edits:** Updated `vs-module.md` sections 3.1 and 6 to clarify error classes
+**Out-of-scope:** Full source loading, tonemapping, color ops (Phase 3.2+)
+**DefaultVSLoader.load():** Raises `SourceLoadError` (FC-4015) until Phase 3.2

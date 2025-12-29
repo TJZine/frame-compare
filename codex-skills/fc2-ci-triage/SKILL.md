@@ -24,6 +24,8 @@ description: Use when a Frame Compare 2.0 CI run fails and you need a determinis
    - Repo-script gates:
      - `UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_contract_views.py --check`
      - `UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_traceability.py --check`
+   - Plan artifact hygiene (if a plan was revised in this run):
+     - `UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_spec_anchors.py .agent-workflow/runs/<RUN_ID>/plan-vN.md`
 3. Create a fix plan that changes only what the failing command requires (no drive-by refactors).
 4. Re-run:
    - the failing command first
