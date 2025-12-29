@@ -34,6 +34,41 @@
 | Integration | Some | <1s | Module interactions |
 | E2E | Few | <30s | Full CLI workflows |
 
+### 1.3 Deterministic Test Vector Policy (SSOT)
+
+When tests need “example” values (paths, strings, numbers), use this policy to avoid ad-hoc choices and flaky assertions.
+Plans may reference this section instead of enumerating hundreds of constructor argument examples.
+
+**Canonical example values**
+
+- `details: str` → `"example details"`
+- `reason: str` → `"example reason"`
+- `plugin: str` → `"example_plugin"`
+- `version: str` → `"0.0.0"`
+- `service: str` → `"example_service"`
+- `count: int` → `10`
+- `required: int` → `20`
+- `requested: int` → `5`
+- `available: int` → `3`
+- `retry_after: int | None` → `10`
+- `timeout: float` → `1.0`
+- `patterns: list[str] | None` → `["*.mkv", "*.mp4"]`
+
+**Paths**
+
+- Prefer `tmp_path` for any `Path` argument:
+  - Input-like path: `tmp_path / "video.mkv"`
+  - Output-like path: `tmp_path / "output.png"`
+  - Config-like path: `tmp_path / "config.toml"`
+- For “root/candidate” pairs (path traversal / containment errors):
+  - `root = tmp_path`
+  - `candidate = tmp_path / ".." / "escape" / "video.mkv"` (do not normalize; keep it explicit)
+
+**Deterministic assertions**
+
+- Avoid asserting the full string form of a platform-dependent path; assert on `.name` or `in str(error)` for a stable filename substring.
+- Avoid assertions that depend on dict ordering in formatted output; compare structured data (e.g., parsed JSON) or assert presence of specific key substrings.
+
 ---
 
 ## 2. Test Types

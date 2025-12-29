@@ -122,19 +122,19 @@ frame-compare/
 
 **Reference:** `05-implementation/error-handling.md`
 
-- [ ] Create `src/frame_compare/errors.py`
-- [ ] Implement `ErrorContext` dataclass
-- [ ] Implement `FrameCompareError` base class
-- [ ] Implement exception hierarchy:
-  - [ ] `ConfigError` (+ subtypes)
-  - [ ] `DependencyError` (+ subtypes)
-  - [ ] `InputError` (+ subtypes)
-  - [ ] `ProcessingError` (+ subtypes)
-  - [ ] `NetworkError` (+ subtypes)
-  - [ ] `InternalError`
+- [x] Create `src/frame_compare/errors.py` (2025-12-29)
+- [x] Implement `ErrorContext` dataclass (2025-12-29)
+- [x] Implement `FrameCompareError` base class (2025-12-29)
+- [x] Implement exception hierarchy: (2025-12-29)
+  - [x] `ConfigError` (+ subtypes)
+  - [x] `DependencyError` (+ subtypes)
+  - [x] `InputError` (+ subtypes)
+  - [x] `ProcessingError` (+ subtypes)
+  - [x] `NetworkError` (+ subtypes)
+  - [x] `InternalError`
 - [ ] Implement `Result[T, E]` pattern (optional)
-- [ ] Write unit tests for error handling
-- [ ] Verify all exceptions have error codes and hints
+- [x] Write unit tests for error handling (2025-12-29)
+- [x] Verify all exceptions have error codes and hints (2025-12-29)
 
 ### 1.3 Logging Infrastructure
 

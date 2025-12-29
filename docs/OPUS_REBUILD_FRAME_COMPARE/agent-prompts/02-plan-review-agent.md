@@ -67,6 +67,11 @@ The plan is not the SSOT for behavior/signatures. The plan must:
 6. **Verification-complete** — Exact commands to run and what "pass" looks like
 7. **Decision-minimizing** — Implementation agent should not choose algorithms, file layouts, or naming
 
+> [!IMPORTANT]
+> **Docs prose is not an implementation decision.**
+> The plan must list required documentation updates (e.g., `docs/DECISIONS.md`, `CHANGELOG.md`) and the **facts that must be recorded**,
+> but do not fail the plan solely because it doesn’t provide the exact final wording of a doc entry.
+
 ---
 
 ## Mandatory Checklist
@@ -231,6 +236,33 @@ If a required detail is **not** present in the anchored SSOT section(s), you mus
 
 Do **not** request “paste more code into the plan” as the primary fix.
 
+When you require an SSOT update, you MUST make it mechanically actionable:
+
+- Name the exact SSOT file path(s) to edit.
+- Name the exact heading(s) under which the edit must land (verbatim heading text).
+- Specify the minimal content to add/change (1–5 bullets; no long prose).
+- Require the revised plan to stay concise and re-anchor to the updated SSOT.
+
+Also FAIL the plan if any Spec Anchors are not verbatim headings that would pass:
+
+- `UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_spec_anchors.py .agent-workflow/runs/<RUN_ID>/plan-vN.md`
+
+### Large Parametric Tests (Avoid “Arg-List Thrash”)
+
+If the plan proposes a large parametric test (e.g., dozens of exception classes), do not force the plan to include an exhaustive
+constructor-args list if that would bloat the plan and create churn.
+
+Instead, require one of:
+
+1. **SSOT test-vector policy anchor:** The plan anchors to an SSOT section that defines deterministic example values for common types
+   (e.g., `Path` via `tmp_path`, sentinel strings, numeric constants). Then the plan only needs to list:
+   - the complete list of cases/classes (or FC codes) being covered, and
+   - the required assertions (e.g., `.code`, `.hint` non-empty, `.context.to_dict()` shape).
+2. **Per-case args list:** If no SSOT policy exists and arguments cannot be derived deterministically, then require the plan to enumerate
+   the args (or require an SSOT update adding the policy).
+
+If deterministic example values are missing, the correct fix is **Update SSOT spec first** (do not “decide inside the plan”).
+
 ### Iteration Cap (Stop Condition)
 
 If you are reviewing `plan-v4` (or higher) for the same RUN_ID:
@@ -257,6 +289,79 @@ Do not print the full file contents. Confirm the path and summarize your verdict
 
 > [!IMPORTANT]
 > You MUST append a `## NEXT AGENT PROMPT (COPY/PASTE)` block at the end of your plan-review artifact.
+
+The NEXT block must be concrete (no placeholders for the current run) and must route correctly based on your verdict:
+
+- If verdict is **CHANGES REQUIRED** and you demanded **SSOT updates**, the NEXT block MUST instruct the Planning Agent to update the SSOT file(s) first (not “fix in plan”).
+- If verdict is **CHANGES REQUIRED** with plan-only edits, the NEXT block routes to Planning for `plan-v(N+1).md`.
+- If verdict is **APPROVED**, the NEXT block routes to Coding.
+
+### Required NEXT block templates
+
+**A) CHANGES REQUIRED (SSOT update required)**
+
+```markdown
+## NEXT AGENT PROMPT (COPY/PASTE)
+
+You are the Planning Agent for Frame Compare 2.0.
+
+## RUN_ID
+<RUN_ID>
+
+## Blocking SSOT Updates Required (Do this first)
+Edit file: <spec_path>
+- Under heading: "<exact heading text>" add/change:
+  - <minimal bullet 1>
+  - <minimal bullet 2>
+
+## Then Revise the Plan (do not fix in-plan)
+Read file: .agent-workflow/runs/<RUN_ID>/plan-review-v<N>.md
+Read file: .agent-workflow/runs/<RUN_ID>/plan-v<N>.md
+Write file: .agent-workflow/runs/<RUN_ID>/plan-v<N+1>.md
+
+## Hard Rules
+- Spec Anchors must copy/paste exact SSOT headings (must pass `validate_spec_anchors.py`).
+- Do not add missing SSOT requirements into the plan; update SSOT and re-anchor.
+```
+
+**B) CHANGES REQUIRED (plan-only)**
+
+```markdown
+## NEXT AGENT PROMPT (COPY/PASTE)
+
+You are the Planning Agent for Frame Compare 2.0.
+
+## RUN_ID
+<RUN_ID>
+
+## Revision Required
+Read file: .agent-workflow/runs/<RUN_ID>/plan-review-v<N>.md
+Read file: .agent-workflow/runs/<RUN_ID>/plan-v<N>.md
+Write file: .agent-workflow/runs/<RUN_ID>/plan-v<N+1>.md
+
+## Hard Rules
+- Spec Anchors must copy/paste exact SSOT headings (must pass `validate_spec_anchors.py`).
+```
+
+**C) APPROVED**
+
+```markdown
+## NEXT AGENT PROMPT (COPY/PASTE)
+
+You are the Coding Agent for Frame Compare 2.0.
+
+## RUN_ID
+<RUN_ID>
+
+## Approved Plan
+Read file: .agent-workflow/runs/<RUN_ID>/plan-v<N>.md
+
+## Plan Review Approval
+Read file: .agent-workflow/runs/<RUN_ID>/plan-review-v<N>.md
+
+## Your Task
+Implement the plan exactly. Do not make design decisions; if something is missing from SSOT, STOP and return CHANGES REQUIRED in `review-vN.md`.
+```
 
 The block content depends on your **verdict**.
 

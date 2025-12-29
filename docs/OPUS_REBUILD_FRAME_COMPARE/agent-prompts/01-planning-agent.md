@@ -138,6 +138,21 @@ Only include a code block here if the SSOT spec is missing an essential detail a
 - `test_[scenario]` — [What it tests]
 - `test_[negative_case]` — [What failure it tests]
 
+### 3. `docs/DECISIONS.md` (MODIFY)
+
+**Purpose:** Append a run decision entry (repo persistence).
+
+**Required facts to record (bullets; do not prewrite exact prose):**
+- RUN_ID + artifact versions (plan/plan-review/impl/verify/review)
+- Scope clarifications and explicit out-of-scope items
+- SSOT edits made this run (or “none”)
+- Any contract/SSOT drift decisions (if applicable)
+- Verification gates run + pass/fail
+
+### 4. `CHANGELOG.md` (MODIFY)
+
+**Purpose:** Add a short entry for user-visible changes (or workflow/spec guardrail changes).
+
 ## Acceptance Criteria
 
 - [ ] GIVEN [context] WHEN [action] THEN [result]
@@ -171,6 +186,10 @@ Follow `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md` → **Command Cano
 4. **Reference specs** — Point to source documentation
 5. **Think ahead** — Note dependencies and blockers
 6. **Leave no decisions** — Coding Agent should not choose algorithms, naming, or file layouts
+
+### Docs Updates (Avoid Prose Churn)
+
+For `docs/DECISIONS.md` / `CHANGELOG.md`, the plan should specify **what must be recorded** (facts/schema), not the exact final wording.
 
 ---
 
@@ -206,6 +225,34 @@ For every file you ask the Coding Agent to create/modify, include a **Spec Ancho
 For every function you list in “Functions to implement”, include the **expected public signature** on one line and wrap it in backticks (for example: `parse_config(path: Path) -> Config`). This lets Plan Review mechanically verify signature coverage without requiring large pasted code blocks.
 
 If you cannot provide a concrete spec anchor for a planned change, the plan is not ready: STOP and return a revised plan with smaller scope or explicit SSOT coverage.
+
+If the plan includes a large parametric test (many cases/classes), add a Spec Anchor to:
+
+- `docs/OPUS_REBUILD_FRAME_COMPARE/05-implementation/testing-strategy.md`:
+  - Section: “1.3 Deterministic Test Vector Policy (SSOT)”
+
+Then list the complete set of cases/classes/codes and the assertions, but do not bloat the plan with a huge per-case constructor-args table.
+
+### SSOT Update Discipline (Hard Requirement)
+
+If Plan Review (or you) identifies a missing/ambiguous required detail in the anchored SSOT sections (signature, error code contract, edge-case behavior, determinism rule):
+
+- **Do not “fix it in the plan.”** The plan is not the SSOT.
+- **Update the SSOT spec first** (edit the spec doc under `docs/OPUS_REBUILD_FRAME_COMPARE/**`) so the behavior/signature is explicit and reviewable.
+- Then revise `plan-vN.md` to reference the corrected SSOT heading(s) and keep the plan concise.
+
+If you believe Plan Review is wrong and the SSOT is already sufficient, do not override the reviewer inside the plan. STOP and escalate with the specific SSOT heading and quote that resolves the ambiguity.
+
+### Spec Anchor Exactness (Must Pass `validate_spec_anchors.py`)
+
+Every `Section:` entry must contain the **exact heading text** from the SSOT spec file (copy/paste verbatim), including any suffixes (for example: `— Exit Code 3`).
+
+Allowed:
+
+- `Section: "3.2 Dependency Errors (FC-2xxx) — Exit Code 3"`
+- `Section: “5. Error Formatting Utilities”`
+
+Avoid adding commentary inside the quoted heading. Put commentary (if needed) outside the quotes.
 
 ---
 

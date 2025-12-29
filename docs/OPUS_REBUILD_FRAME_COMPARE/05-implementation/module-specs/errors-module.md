@@ -619,7 +619,13 @@ class MetadataError(ServiceError):
         ))
 
 class PublishError(ServiceError):
-    """Publishing failed (FC-5xxx)."""
+    """Marker base for publishing errors. Never instantiated directly.
+
+    Concrete publish errors use NetworkError subclasses:
+    - SlowpicsError (FC-5002)
+    - SlowpicsRateLimitedError (FC-5003)
+    - SlowpicsUnavailableError (FC-5004)
+    """
 
 class ReportError(ServiceError):
     """Report generation failed (FC-4017)."""

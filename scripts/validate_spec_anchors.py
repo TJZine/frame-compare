@@ -23,7 +23,7 @@ _MD_HEADING = re.compile(r"^(?P<hashes>#{1,6})\s+(?P<title>.+?)\s*$")
 _BULLET = re.compile(r"^(?P<indent>\s*)-\s+(?P<body>.+?)\s*$")
 
 _SECTION_LINE = re.compile(
-    r"^Section:\s*(?P<quoted>.+?)\s*$",
+    r"^Section:\s*(?P<body>.+?)\s*$",
     flags=re.IGNORECASE,
 )
 
@@ -51,6 +51,18 @@ def _read_text(path: Path) -> str:
     except OSError as exc:
         _fail(f"failed to read {path}: {exc}")
         raise  # unreachable
+
+
+def _extract_section_heading(section_body: str) -> str:
+    text = section_body.strip()
+    for open_quote, close_quote in (('"', '"'), ("“", "”"), ("'", "'")):
+        if open_quote not in text:
+            continue
+        remainder = text.split(open_quote, 1)[1]
+        if close_quote not in remainder:
+            continue
+        return remainder.split(close_quote, 1)[0].strip()
+    return text.strip("“”\"'")
 
 
 def _extract_spec_anchors(plan_text: str, *, plan_path: Path) -> list[SpecAnchor]:
@@ -108,9 +120,7 @@ def _extract_spec_anchors(plan_text: str, *, plan_path: Path) -> list[SpecAnchor
 
         section = _SECTION_LINE.match(body)
         if section:
-            raw_heading = section.group("quoted").strip()
-            # Strip surrounding quotes (straight or curly).
-            raw_heading = raw_heading.strip("“”\"'")
+            raw_heading = _extract_section_heading(section.group("body"))
             if raw_heading:
                 current_headings.append(raw_heading)
 

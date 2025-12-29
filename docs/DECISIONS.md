@@ -343,3 +343,23 @@ Apply a **review fix budget** (at most one direct CHANGES REQUIRED cycle per run
 **Decision:** Add `import-linter` to the `dev` dependency group in `pyproject.toml`.
 
 **Rationale:** Ensures developers can run import contract checks locally without relying solely on CI.
+
+---
+
+### Plan Review should not gate on docs prose or huge arg lists
+
+**Context:** Plan Review iterations were failing on non-essential “decisions” like the exact `docs/DECISIONS.md` entry wording, and on bloated per-case constructor argument lists for large parametric tests.
+
+**Decision:** Treat documentation updates as schema/facts requirements (not exact prose), and allow large parametric tests to reference an SSOT “Deterministic Test Vector Policy” instead of enumerating exhaustive constructor args in the plan.
+
+**Rationale:** Preserves “Coding Agent makes zero decisions” while reducing plan churn and token/line bloat.
+
+---
+
+## 2025-12-29: Error Handling Slice Scope (Phase 1.2)
+
+**Decision:** Phase 1.2 implements only error classes defined in `errors-module.md` sections 3.2–3.6 and helpers in sections 4–5.
+
+**Rationale:** Contract `error_codes.yaml` contains reserved codes (FC-1006, FC-3010, FC-3011, FC-3012, FC-5010, FC-5011) without corresponding SSOT class definitions. These are deferred to avoid SSOT drift.
+
+**Impact:** Future runs may add these classes when SSOT is updated with concrete signatures.
