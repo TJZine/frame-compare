@@ -143,6 +143,7 @@ RUN apt-get update && \
         ca-certificates \
         ffmpeg \
         libxxhash0 \
+        procps \
         wget \
         which \
         && \

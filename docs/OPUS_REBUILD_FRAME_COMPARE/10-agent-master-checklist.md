@@ -82,14 +82,14 @@ frame-compare/
 - [x] Create `docker-compose.yml` (2025-12-28)
 - [x] Create `.devcontainer/devcontainer.json` (2025-12-28)
 - [x] Verify: `docker compose build` succeeds (2025-12-28)
-- [ ] Verify: DevContainer opens in VS Code
+- [x] Verify: DevContainer opens in VS Code (2025-12-28)
 
 ### Phase 0 Quality Gate ✓
 
-- [ ] `uv sync` completes
-- [ ] `.venv/bin/pyright --warnings` shows 0 errors
-- [ ] `.venv/bin/ruff check .` shows 0 errors
-- [ ] `.venv/bin/pytest` runs (empty suite OK)
+- [x] `uv sync` completes (2025-12-28)
+- [x] `.venv/bin/pyright --warnings` shows 0 errors (2025-12-28)
+- [x] `.venv/bin/ruff check .` shows 0 errors (2025-12-28)
+- [x] `.venv/bin/pytest` runs (empty suite OK) (2025-12-28)
 - [ ] CI workflow passes
 - [ ] Docker container builds
 

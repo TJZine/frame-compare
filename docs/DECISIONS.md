@@ -287,3 +287,23 @@
 **Decision:** Install `which` in the runtime stage of the Dockerfile.
 
 **Rationale:** Allows the DevContainer bootstrap script to detect `wget` and proceed with server installation.
+
+---
+
+### DevContainer bootstrap requires `ps`
+
+**Context:** The DevContainer installer script checks for a running server process using `ps`, but Debian slim does not include it by default, causing the install to fail.
+
+**Decision:** Install `procps` in the runtime stage of the Dockerfile.
+
+**Rationale:** Provides `ps` so the DevContainer bootstrap script can verify server process state.
+
+---
+
+### Add `import-linter` to dev dependencies
+
+**Context:** Local verification requires running `lint-imports`, but the tool was not available in the dev environment.
+
+**Decision:** Add `import-linter` to the `dev` dependency group in `pyproject.toml`.
+
+**Rationale:** Ensures developers can run import contract checks locally without relying solely on CI.

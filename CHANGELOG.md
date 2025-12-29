@@ -13,6 +13,7 @@ This project follows Conventional Commits and is intended to be released via Rel
 - CLI entry point with `version` command.
 - PEP 561 `py.typed` marker for typed package support.
 - Dev dependency `pyyaml` for local contract view checks.
+- Dev dependency `import-linter` for running `lint-imports` locally.
 
 ### Changed
 
@@ -21,5 +22,6 @@ This project follows Conventional Commits and is intended to be released via Rel
 - Docker build adds `python3-jinja2` and `libvulkan-dev` to satisfy libplacebo tooling requirements, pins vs-placebo to a commit with submodules, and pins ffms2 to a FFmpeg 5-compatible commit.
 - Docker runtime image installs `wget` and `ca-certificates` to support DevContainer server bootstrap.
 - Docker runtime image installs `which` so the DevContainer bootstrap can detect `wget`.
+- Docker runtime image installs `procps` to provide `ps` for DevContainer bootstrap.
 - OPUS rebuild docs synced to the container baseline (`Dockerfile`) and updated to match current Bookworm/pin assumptions (deployment/system design/ADR/vs-module/feature parity).
 - Documentation updates L-SMASH Works verification to prefer the `lsmas` namespace with a legacy `lw` fallback.
