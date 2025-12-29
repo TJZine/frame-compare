@@ -133,12 +133,33 @@ Follow the plan's algorithm descriptions. Include docstrings.
 
 For each function, write tests immediately. Don't batch tests at the end.
 
-### 4. Verify Continuously
+### 4. Verify Continuously (Local Sanity Only)
 
-Run Pyright and Ruff after each file. Fix issues before moving on.
+Run Pyright and Ruff after each file if available. Fix issues before moving on.
 
 > [!IMPORTANT]
 > Do NOT update the master checklist. The Verification Agent will do this after validating your work.
+
+### 5. Contract View Freshness (Required Hygiene)
+
+> [!IMPORTANT]
+> Verification will run the contract freshness gate and will bounce the run if derived outputs are stale.
+> To prevent churn, you must ensure derived contract views are up-to-date before handing off.
+
+Run:
+
+```bash
+UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_contract_views.py --check
+```
+
+If it fails, fix it by regenerating (do not hand-edit derived outputs):
+
+```bash
+UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_contract_views.py
+UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_contract_views.py --check
+```
+
+Record in `impl-vN.md` whether regeneration occurred and which files changed.
 
 ---
 

@@ -337,6 +337,9 @@ If either command fails: **STOP** and fix the artifact(s) before advancing to th
 
 - If any verification gate fails: **STOP** and loop (Coding → Verification) until green.
 - If contracts change, the contract loop is mandatory; do not manually edit derived outputs.
+- If contract derived outputs are stale, the Coding Agent must regenerate them before Verification handoff:
+  - `UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_contract_views.py --check`
+  - If failing: `UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_contract_views.py` then re-run `--check`
 
 ## Agent Definitions
 

@@ -1,5 +1,6 @@
 """Analysis module for frame-compare."""
 
+from frame_compare.analysis.selection import select_frames
 from frame_compare.analysis.types import (
     CacheLoadResult,
     ClipIdentity,
@@ -16,4 +17,5 @@ __all__ = [
     "FrameSelection",
     "MetricsMetadata",
     "SelectionBreakdown",
+    "select_frames",
 ]

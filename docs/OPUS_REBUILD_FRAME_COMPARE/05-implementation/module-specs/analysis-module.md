@@ -157,48 +157,57 @@ def select_frames(
     """
     Select representative frames based on metrics.
 
+    Constants:
+        MIN_GAP: int = 5  # Minimum frame distance between selections
+
     Selection Algorithms by Mode:
 
-    - **quantile**: Selects frames at luminance percentiles
-      - Darkest frames: 0th, 10th, 20th percentiles
-      - Brightest frames: 80th, 90th, 100th percentiles
-      - Divides frame_count evenly between dark/bright
+    - **QUANTILE**: Selects frames at luminance extremes
+      - dark_count = count // 2
+      - bright_count = count - dark_count
+      - Sort frame indices by luminance ascending
+      - Take dark_count from start, bright_count from end
 
-    - **motion**: Selects high-motion frames
+    - **MOTION**: Selects high-motion frames
       - Sort frames by motion score descending
-      - Take top frame_count with minimum gap of 5 frames
+      - Greedily select top frames respecting MIN_GAP from already-selected
+      - Take up to frame_count frames
 
-    - **random**: Seeded reproducible random selection
-      - Uses config.random_seed for reproducibility
-      - Applies minimum gap of 5 frames between selections
+    - **RANDOM**: Seeded reproducible random selection
+      - RNG: random.Random(config.random_seed)
+      - Shuffle all frame indices, greedily pick respecting MIN_GAP + exclude set
 
-    - **mixed**: Combination allocation (DEFAULT)
-      - 40% quantile (luminance extremes)
-      - 40% motion (high-action scenes)
-      - 20% random (variety)
-      - Example: frame_count=10 -> 4 quantile + 4 motion + 2 random
+    - **MIXED**: Combination allocation (DEFAULT)
+      - quantile_count = frame_count * 40 // 100
+      - motion_count = frame_count * 40 // 100
+      - random_count = frame_count - quantile_count - motion_count
+      - Selection order: quantile first, then motion (excludes quantile), then random (excludes both)
+      - Each phase respects MIN_GAP and deduplication
 
     Duplicate Handling:
-    - If motion/random selects frame already chosen by quantile, skip to next candidate
-    - Final selection guaranteed to have frame_count unique frames
-    - If insufficient candidates after deduplication, raises SelectionError
+      - maintain exclude: set[int] accumulating selected frames
+      - motion/random phases skip frames in exclude
+      - MIN_GAP enforced per-phase: candidate valid if abs(candidate - any_selected) >= MIN_GAP
 
-    save_frames_data Behavior:
-    - If True: Write FrameSelection to {cache_dir}/frame_selection.json
-    - Contains: frame_numbers, mode, seed, selection_reason per frame
-    - Used for reproducibility and debugging
+    Error Handling:
+      - If insufficient candidates after deduplication, raise:
+        SelectionError(reason="insufficient_candidates", requested=config.frame_count, found=len(selected))
+      - Empty metrics (frame_count=0 in metadata): raise SelectionError with reason="empty_metrics"
 
     Args:
         metrics: Calculated frame metrics
-        config: Selection configuration
+        config: Selection configuration (frame_count >= 1 enforced by schema)
 
     Returns:
-        FrameSelection with chosen frame numbers and metadata
+        FrameSelection with sorted frame list and breakdown
 
     Raises:
         SelectionError: If insufficient valid candidates for selection
     """
 ```
+
+> [!NOTE]
+> **save_frames_data** persistence is handled in cache_io phase (Phase 2.4), not in this function.
 
 ### 3.3 Cache Operations
 
@@ -273,48 +282,81 @@ def _calculate_motion(clip: vs.VideoNode) -> list[float]:
 
 ```python
 def _select_by_quantile(
-    luminance: list[float],
+    luminance: Sequence[float],
     count: int,
-    dark_quantile: float,
-    bright_quantile: float,
 ) -> tuple[list[int], list[int]]:
     """
-    Select frames at luminance quantiles.
+    Select frames at luminance extremes.
+
+    Args:
+        luminance: Per-frame luminance values (0.0-1.0)
+        count: Total frames to select
+
+    Returns:
+        (dark_indices, bright_indices) as sorted lists
 
     Algorithm:
-    1. Calculate percentile thresholds
-    2. Find frames below dark threshold
-    3. Find frames above bright threshold
-    4. Take count/2 from each end
+        n = len(luminance)
+        dark_count = count // 2
+        bright_count = count - dark_count
+        # Sort frame indices by luminance ascending
+        sorted_indices = sorted(range(n), key=lambda i: luminance[i])
+        dark_indices = sorted_indices[:dark_count]
+        bright_indices = sorted_indices[-(bright_count):]
+        return (sorted(dark_indices), sorted(bright_indices))
     """
 
 def _select_by_motion(
-    motion: list[float],
+    motion: Sequence[float],
     count: int,
+    exclude: set[int],
+    min_gap: int,
 ) -> list[int]:
     """
     Select frames with high motion scores.
 
+    Args:
+        motion: Per-frame motion scores
+        count: Number of frames to select
+        exclude: Frame indices already selected (skip these)
+        min_gap: Minimum distance from any already-selected frame
+
+    Returns:
+        List of selected frame indices (sorted ascending)
+
     Algorithm:
-    1. Sort frames by motion score (descending)
-    2. Take top N frames
-    3. Resort by frame number
+        1. Create list of (index, score) for indices not in exclude
+        2. Sort by score descending
+        3. Greedily pick top candidates where abs(idx - any_selected) >= min_gap
+        4. Return sorted list of selected indices
     """
 
 def _select_random(
-    frame_count: int,
+    total_frames: int,
     count: int,
     seed: int,
     exclude: set[int],
+    min_gap: int,
 ) -> list[int]:
     """
-    Select random frames with seed.
+    Select random frames with seeded RNG.
+
+    Args:
+        total_frames: Total number of frames in source
+        count: Number of frames to select
+        seed: RNG seed for reproducibility
+        exclude: Frame indices already selected (skip these)
+        min_gap: Minimum distance from any already-selected frame
+
+    Returns:
+        List of selected frame indices (sorted ascending)
 
     Algorithm:
-    1. Initialize RNG with seed
-    2. Generate candidate frames
-    3. Exclude already-selected frames
-    4. Return sorted list
+        1. rng = random.Random(seed)
+        2. candidates = [i for i in range(total_frames) if i not in exclude]
+        3. rng.shuffle(candidates)
+        4. Greedily pick from shuffled list respecting min_gap
+        5. Return sorted list of selected indices
     """
 ```
 

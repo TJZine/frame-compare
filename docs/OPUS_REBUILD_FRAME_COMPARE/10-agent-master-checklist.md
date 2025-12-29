@@ -197,14 +197,14 @@ frame-compare/
 
 ### 2.3 Frame Selection
 
-- [ ] Create `src/frame_compare/analysis/selection.py`
-- [ ] Implement `select_frames(metrics, count, seed) -> FrameSelection`
-- [ ] Implement `_select_by_quantile(metrics, n) -> list[int]`
-- [ ] Implement `_select_by_motion(metrics, n) -> list[int]`
-- [ ] Implement `_select_random(count, n, seed) -> list[int]`
-- [ ] Verify determinism with same seed
-- [ ] Write unit tests
-- [ ] Write property-based tests (always returns n unique frames)
+- [x] Create `src/frame_compare/analysis/selection.py`
+- [x] Implement `select_frames(metrics, count, seed) -> FrameSelection`
+- [x] Implement `_select_by_quantile(metrics, n) -> list[int]`
+- [x] Implement `_select_by_motion(metrics, n) -> list[int]`
+- [x] Implement `_select_random(count, n, seed) -> list[int]`
+- [x] Verify determinism with same seed
+- [x] Write unit tests
+- [x] Write property-based tests (always returns n unique frames)
 
 ### 2.4 Caching
 

@@ -114,6 +114,35 @@ To prevent endless loops:
 
 - Allow at most **one** “Implementation Defect” fix cycle per run at Review stage. If the run returns to Review again and still fails for new reasons, escalate as **DESIGN ISSUE** (scope/spec ambiguity) unless the additional issue is clearly an unrelated one-liner.
 
+### 0. Mandatory Code Review (Not Just Gates)
+
+> [!IMPORTANT]
+> Do not APPROVE based only on “gates passed”.
+> You must read the implemented code and compare it to the plan + SSOT.
+
+#### 0.1 Establish the review set (must be concrete)
+
+From `impl-vN.md`, collect the exact file paths under “Files Changed (Exact Paths)”.
+
+From `plan-vN.md`, collect the planned “Files to Create/Modify”.
+
+**Rule:** If `impl-vN.md` changed files not listed in the plan, treat this as:
+
+- **DESIGN ISSUE** if it changes scope/public API/architecture or adds new modules/files beyond the plan contract.
+- **CHANGES REQUIRED** only if it is a clearly-contained “Implementation Defect” fix and the review report documents why it was necessary.
+
+#### 0.2 Read the code (required)
+
+Read every file in the review set (source + tests + touched docs that affect behavior/SSOT/contract views).
+
+Minimum required reading (even for small changes):
+
+- All `src/frame_compare/**` files changed
+- All `tests/**` files changed
+- Any SSOT specs referenced by `## Spec Anchors (SSOT)` in the plan (at least the anchored sections)
+
+Record the exact reviewed file list in `review-vN.md` under “Files Reviewed”.
+
 ### 0. Finalize Run Index (Required)
 
 Update `.agent-workflow/index.md` for this `RUN_ID`:
@@ -123,16 +152,13 @@ Update `.agent-workflow/index.md` for this `RUN_ID`:
 
 ### 1. Verify Quality Checks
 
-Run all verification commands:
+Confirm the Verification Agent ran the canonical gates and that the outputs in `verify-vN.md` indicate success.
+
+If the verification evidence is missing, incomplete, or suspicious, require re-verification (do not “fill in” missing logs).
+
+Optional spot-check (fast, recommended when changes touch contracts/views):
 
 ```bash
-# Quality gates (should already pass from Verification Agent)
-.venv/bin/pyright --warnings src/frame_compare/[module]
-.venv/bin/ruff check src/frame_compare/[module]
-.venv/bin/pytest -v tests/[module]
-.venv/bin/pytest --cov --cov-report=term-missing
-
-# Contract gates (verify Verification Agent ran these)
 UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_contract_views.py --check
 UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_traceability.py --check
 ```
@@ -142,7 +168,7 @@ UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_traceability.p
 **Correctness**
 
 - [ ] Implements all acceptance criteria
-- [ ] Algorithms match the SSOT spec sections referenced by `## Spec Anchors (SSOT)` in the plan
+- [ ] Algorithms match the SSOT spec sections referenced by `## Spec Anchors (SSOT)` in the plan (cite the anchor headings you checked)
 - [ ] Edge cases handled
 - [ ] No logic errors
 
@@ -182,6 +208,7 @@ UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_traceability.p
 - [ ] No hardcoded secrets
 - [ ] Input validation present
 - [ ] Safe error messages (no sensitive data)
+- [ ] If the slice touches file paths / subprocess / network: confirm the relevant security invariants are followed (or explicitly N/A)
 
 **Performance**
 
@@ -368,9 +395,12 @@ Coverage: XX%
 
 ### Trust But Verify
 
-- Run the tests yourself
-- Check edge cases manually
-- Verify acceptance criteria
+- Prefer trusting the Verification Agent’s gate runs, but never skip reading the code.
+- Verify acceptance criteria against the implementation (not just “tests exist”).
+- When something is ambiguous, route correctly:
+  - bug → CHANGES REQUIRED (Coding loop)
+  - missing/unclear SSOT requirement → Spec Drift (SSOT update + re-verify)
+  - design change → DESIGN ISSUE (Planning + Plan Review)
 
 ---
 

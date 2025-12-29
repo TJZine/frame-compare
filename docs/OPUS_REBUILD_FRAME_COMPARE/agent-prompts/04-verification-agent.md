@@ -83,6 +83,10 @@ UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini
 # Contract and traceability gates
 UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_contract_views.py --check
 UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_traceability.py --check
+
+> [!NOTE]
+> The Coding Agent is required to run the contract freshness check (and regenerate if needed) before handoff.
+> If `generate_contract_views.py --check` fails here, treat it as a Coding hygiene failure and return to Coding with the required regen commands.
 ```
 
 > [!IMPORTANT]

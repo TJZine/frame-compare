@@ -376,6 +376,16 @@ Apply a **review fix budget** (at most one direct CHANGES REQUIRED cycle per run
 
 ---
 
+### Coding Agent performs contract-view freshness hygiene before handoff
+
+**Context:** Verification frequently encountered stale derived contract views (`generate_contract_views.py --check` failing), causing unnecessary bounce-backs to Coding for a purely mechanical regeneration step.
+
+**Decision:** Require the Coding Agent to run the contract freshness check at the end of implementation and regenerate derived outputs if the check fails, then re-run `--check` before handing off to Verification.
+
+**Rationale:** Eliminates avoidable churn without weakening the Verification gate (Verification still re-checks freshness).
+
+---
+
 ## 2025-12-29: Error Handling Slice Scope (Phase 1.2)
 
 **Decision:** Phase 1.2 implements only error classes defined in `errors-module.md` sections 3.2–3.6 and helpers in sections 4–5.
@@ -427,3 +437,13 @@ Apply a **review fix budget** (at most one direct CHANGES REQUIRED cycle per run
 - **Scope:** Analysis module types
 - **SSOT edits:** analysis-module.md updated to `@dataclass(frozen=True, slots=True)`
 - **Import layers:** Added `frame_compare.analysis` after `cli_entry`
+
+---
+
+## 2025-12-29__p2-3__frame-selection
+
+- **Scope:** Analysis module frame selection algorithms
+- **Algorithms:** Implemented quantile, motion, and random selection with `MIN_GAP=5`
+- **Determinism:** Used `random.Random(seed)` for reproducible random selection
+- **Deduplication:** Ensured unique frames in final selection
+- **Error Handling:** Implemented `SelectionError` (FC-4012) for empty metrics and insufficient candidates
