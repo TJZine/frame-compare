@@ -89,13 +89,13 @@ def dummy_progress():
 ```ini
 # importlinter.ini
 [importlinter:contract:layers]
-name = Core must not import CLI
+name = Layered Architecture
 type = layers
 layers =
-    cli_layer
-    orchestration_layer
-    service_layer
-    domain_layer
+    frame_compare.cli_entry
+    frame_compare.config
+    frame_compare.utils
+    frame_compare.errors
 ```
 
 ## Consequences

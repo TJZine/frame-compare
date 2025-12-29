@@ -18,6 +18,8 @@ This project follows Conventional Commits and is intended to be released via Rel
 - `ExitCode` enum for CLI exit code mapping
 - `get_exit_code()` helper function
 - `format_error_console()` and `format_error_json()` formatting utilities
+- Structured logging infrastructure with structlog (json/console formats)
+- Correlation ID tracking for run tracing (`new_run_id`, `get_run_id`)
 
 
 ### Changed

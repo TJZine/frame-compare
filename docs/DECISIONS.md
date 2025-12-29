@@ -363,3 +363,19 @@ Apply a **review fix budget** (at most one direct CHANGES REQUIRED cycle per run
 **Rationale:** Contract `error_codes.yaml` contains reserved codes (FC-1006, FC-3010, FC-3011, FC-3012, FC-5010, FC-5011) without corresponding SSOT class definitions. These are deferred to avoid SSOT drift.
 
 **Impact:** Future runs may add these classes when SSOT is updated with concrete signatures.
+
+---
+
+## 2025-12-29: Logging Infrastructure (Phase 1.3)
+
+### Implementation Scope: logging.py only
+
+**Context:** Phase 1.3 focuses on structured logging and correlation IDs.
+
+**Decision:** Implement only `src/frame_compare/utils/logging.py` (structlog config, `new_run_id`, `get_run_id`) and minimal `__init__.py`. Defer other `utils` modules.
+
+**Rationale:**
+- Keeps the change atomic and verifiable.
+- Establishes logging patterns early for subsequent phases.
+- Avoids implementing unused code (other utils).
+- Updates SSOT Section 4.3 to include `bind_contextvars` for proper correlation ID propagation.

@@ -98,6 +98,10 @@ This repo uses a **two-lane** command convention to avoid `uv run` sync surprise
 **Import contracts (`lint-imports`)**: CI installs `import-linter` explicitly; run it via:
 `UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini`
 
+**Import contract SSOT:** `importlinter.ini` in the repo root.
+
+**Maintenance rule:** If a run introduces a new top-level module under `src/frame_compare/` (or changes allowed import directions), the plan MUST include an `importlinter.ini` update in the same run. If the SSOT contract is unclear, treat it as a spec gap and return to Planning/Plan Review (do not “patch around” imports).
+
 If `.venv/bin/*` is unavailable, bootstrap once (offline-friendly):
 `uv sync --group dev --frozen` and then use `UV_CACHE_DIR=./.uv_cache uv run <tool> ...` as the fallback.
 

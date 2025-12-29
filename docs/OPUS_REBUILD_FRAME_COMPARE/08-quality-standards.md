@@ -51,16 +51,20 @@ typeCheckingMode = "strict"
 root_package = frame_compare
 
 [importlinter:contract:layers]
-name = Layered architecture
+name = Layered Architecture
 type = layers
 layers =
-    cli_layer
-    orchestration_layer
-    service_layer
-    domain_layer
+    frame_compare.cli_entry
+    frame_compare.config
+    frame_compare.utils
+    frame_compare.errors
 ```
 
-**Enforcement:** CI check, blocking
+**SSOT:** `importlinter.ini` in the repo root.
+
+**Enforcement:** CI check (`lint-imports`), blocking.
+
+**Maintenance rule:** If you add a new top-level module under `src/frame_compare/` or change allowed import directions, update `importlinter.ini` in the same run and ensure `lint-imports` passes.
 
 ---
 

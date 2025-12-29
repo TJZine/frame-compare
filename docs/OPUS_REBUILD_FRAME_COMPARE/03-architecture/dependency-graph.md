@@ -283,4 +283,4 @@ When implementing a module:
 1. **Check dependencies first** — Make sure all upstream modules exist
 2. **Start with types** — Define types.py before implementation
 3. **Follow layer rules** — Never import from upper layers
-4. **Run import-linter** — `uv run lint-imports` after each module
+4. **Run import-linter** — `UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini`

@@ -140,11 +140,11 @@ frame-compare/
 
 **Reference:** `06-operations/monitoring.md`
 
-- [ ] Create `src/frame_compare/logging.py`
-- [ ] Configure structlog with JSON output
-- [ ] Implement correlation ID tracking
+- [x] Create `src/frame_compare/utils/logging.py` (2025-12-29)
+- [x] Configure structlog with JSON output (2025-12-29)
+- [x] Implement correlation ID tracking (2025-12-29)
 - [ ] Create logger per module
-- [ ] Write tests for log output format
+- [x] Write tests for log output format (2025-12-29)
 
 ### 1.4 CLI Foundation
 
