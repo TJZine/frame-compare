@@ -248,11 +248,11 @@ frame-compare/
 
 ### 3.2 Video Loading
 
-- [ ] Create `src/frame_compare/vs/source.py`
-- [ ] Implement `load_video(path) -> Result[VideoNode, str]`
-- [ ] Support formats: `.mkv`, `.mp4`, `.avi`, `.m2ts`, `.ts`
-- [ ] Use lsmas for loading
-- [ ] Extract clip properties (fps, frame_count, resolution)
+- [x] Create `src/frame_compare/vs/source.py` (2025-12-29)
+- [x] Implement `load_video(path) -> Result[VideoNode, str]` (2025-12-29)
+- [x] Support formats: `.mkv`, `.mp4`, `.avi`, `.m2ts`, `.ts` (2025-12-29)
+- [x] Use lsmas for loading (2025-12-29)
+- [x] Extract clip properties (fps, frame_count, resolution) (2025-12-29)
 
 ### 3.3 Frame Properties
 

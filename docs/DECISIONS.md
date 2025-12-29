@@ -386,6 +386,16 @@ Apply a **review fix budget** (at most one direct CHANGES REQUIRED cycle per run
 
 ---
 
+### Review Agent provides a single-line commit subject for the full checklist item
+
+**Context:** Review reports included phase-local notes but lacked a consistent, single-line commit subject summarizing the entire checklist item/run.
+
+**Decision:** Require the Review Agent to output a Conventional Commit-style subject that describes the full checklist item (not just review work) in the Review Summary.
+
+**Rationale:** Keeps final commits consistent and scannable across runs.
+
+---
+
 ## 2025-12-29: Error Handling Slice Scope (Phase 1.2)
 
 **Decision:** Phase 1.2 implements only error classes defined in `errors-module.md` sections 3.2–3.6 and helpers in sections 4–5.
@@ -517,3 +527,36 @@ Apply a **review fix budget** (at most one direct CHANGES REQUIRED cycle per run
 **SSOT edits:** Updated `vs-module.md` sections 3.1 and 6 to clarify error classes
 **Out-of-scope:** Full source loading, tonemapping, color ops (Phase 3.2+)
 **DefaultVSLoader.load():** Raises `SourceLoadError` (FC-4015) until Phase 3.2
+
+---
+
+## 2025-12-29 — Phase 3.2 Video Loading
+
+**Run:** 2025-12-29__p3-2__video-loading
+**Scope:** Video source loading via lsmas, HDR detection, DefaultVSLoader completion
+**SSOT edits:** Added raise contract, apply_trim semantics, HDR field mapping
+**Design:** lsmas/lw namespace selection per SSOT 1.4, end-inclusive trim
+
+### Loader Selection Policy (lsmas vs lw)
+
+**Context:** VapourSynth L-SMASH Works plugin can appear under `core.lsmas` or `core.lw` namespaces depending on build/installation.
+
+**Decision:** Always check for `LWLibavSource` function on the namespace object itself (e.g., `hasattr(core.lsmas, "LWLibavSource")`), prioritizing `lsmas` then falling back to `lw`.
+
+**Rationale:** Namespace existence alone (e.g., `hasattr(core, "lsmas")`) is insufficient to guarantee the function is available. This pattern ensures robust plugin usage across different environment configurations.
+
+### HDR Detection Rules
+
+**Context:** Need deterministic logic for identifying HDR sources from VapourSynth frame properties.
+
+**Decision:** Detect HDR when `_Transfer` is 16 (PQ) or 18 (HLG), AND `_Primaries` is 9 (BT.2020).
+
+**Rationale:** Matches standard UHD Blu-ray and broadcast HDR signaling conventions.
+
+### Trim Slicing Semantics
+
+**Context:** `apply_trim` needs to handle frame ranges consistently.
+
+**Decision:** Use inclusive `end` frame semantics (frames `[start, end]` are included).
+
+**Rationale:** Aligns with standard video editing tool expectations (e.g., "frames 100 to 200" should include 101 frames). Internally uses `clip[start : end + 1]` to map to VapourSynth's exclusive-right slicing.

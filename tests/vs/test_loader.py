@@ -1,16 +1,23 @@
 """Tests for VapourSynth loader."""
 
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
-import pytest
-
-from frame_compare.errors import SourceLoadError
 from frame_compare.vs.loader import DefaultVSLoader
 
 
-def test_default_vs_loader_load_raises_source_load_error(tmp_path: Path) -> None:
-    """Verify DefaultVSLoader.load raises SourceLoadError."""
+def test_default_vs_loader_load_calls_load_source(tmp_path: Path) -> None:
+    """Verify DefaultVSLoader.load delegates to load_source."""
     loader = DefaultVSLoader()
-    with pytest.raises(SourceLoadError) as exc:
-        loader.load(tmp_path / "video.mkv")
-    assert exc.value.code == "FC-4015"
+    path = tmp_path / "video.mkv"
+
+    with (
+        patch("frame_compare.vs.source.load_source") as mock_load,
+        patch.object(loader, "ensure_core") as mock_ensure,
+    ):
+        mock_core = MagicMock()
+        mock_ensure.return_value = mock_core
+
+        loader.load(path)
+
+        mock_load.assert_called_once_with(path, mock_core)

@@ -7,6 +7,7 @@ from frame_compare.vs.env import (
     require_plugin,
 )
 from frame_compare.vs.loader import DefaultVSLoader, VSLoader
+from frame_compare.vs.source import apply_trim, load_source
 from frame_compare.vs.types import HDRMetadata, SourceInfo, TonemapSettings
 
 __all__ = [
@@ -19,4 +20,6 @@ __all__ = [
     "ensure_vs_environment",
     "detect_plugins",
     "require_plugin",
+    "load_source",
+    "apply_trim",
 ]

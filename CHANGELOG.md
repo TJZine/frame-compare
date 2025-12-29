@@ -26,6 +26,9 @@ This project follows Conventional Commits and is intended to be released via Rel
 - Analysis module frame selection algorithms: quantile, motion, and random modes with minimum gap enforcement.
 - Analysis module cache I/O: deterministic cache key generation, metrics persistence (JSON Schema v2), and failure-resilient cache loading.
 - VapourSynth module foundation (`frame_compare.vs`) with environment detection, plugin checks, and `VSLoader` protocol.
+- Video source loading (`load_source`) with LWLibavSource support.
+- HDR detection from frame properties (PQ, HLG, BT.2020).
+- Frame trimming with inclusive end semantics.
 
 
 ### Changed
@@ -37,6 +40,7 @@ This project follows Conventional Commits and is intended to be released via Rel
 - Import-linter configuration is treated as SSOT in `importlinter.ini`; docs/workflow updated to match real module paths and require updating `importlinter.ini` whenever new top-level modules are introduced.
 - Coding Agent prompt tightened to stop at `impl-vN.md` handoff (no Verification/Review role bleed).
 - Coding Agent required to run contract-view freshness check (and regenerate if needed) before handing off to Verification to prevent stale-contract churn.
+- Review Agent now outputs a single-line Conventional Commit subject summarizing the full checklist item/run.
 - Docker build now compiles `zimg` and `l-smash` from official release tarballs with checksum verification, installs Cython via pip for Python 3.13 compatibility, pins L-SMASH-Works to a published tag, and guards SSE2 headers for ARM builds.
 - Docker build adds `python3-jinja2` and `libvulkan-dev` to satisfy libplacebo tooling requirements, pins vs-placebo to a commit with submodules, and pins ffms2 to a FFmpeg 5-compatible commit.
 - Docker runtime image installs `wget` and `ca-certificates` to support DevContainer server bootstrap.

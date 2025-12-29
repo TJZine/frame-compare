@@ -267,6 +267,10 @@ OUTPUTS:
 **Reviewer:** Review Agent
 **Date:** YYYY-MM-DD
 **Files Reviewed:** [Count]
+**Commit Subject:** `feat(scope): implement Phase X Item Y — [short outcome]`
+
+> [!NOTE]
+> The commit subject must summarize the **entire checklist item** (the full run), not just the review phase.
 
 ## Process Gates
 - [x] Plan was approved by Plan Review Agent

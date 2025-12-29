@@ -226,7 +226,12 @@ def load_source(
         SourceInfo with clip and metadata
 
     Raises:
-        SourceLoadError: If file cannot be loaded
+        PluginNotFoundError: If lsmas plugin is not available (FC-2003, propagates)
+        SourceLoadError: If file cannot be opened or is corrupt (FC-4015)
+
+    Note:
+        PluginNotFoundError is NOT wrapped; it propagates directly to allow
+        callers to distinguish missing dependency from corrupt file.
     """
 
 def apply_trim(
@@ -234,7 +239,21 @@ def apply_trim(
     start: int,
     end: int | None = None,
 ) -> vs.VideoNode:
-    """Apply frame trim to clip."""
+    """Apply frame trim to clip.
+
+    Args:
+        source: Source info containing clip
+        start: First frame to include (0-indexed, inclusive)
+        end: Last frame to include (0-indexed, inclusive).
+             If None, trims to end of clip (num_frames - 1).
+
+    Returns:
+        Trimmed clip with frames [start, end] inclusive.
+
+    Implementation:
+        Uses `source.clip[start:end+1]` (VS slice is exclusive on right).
+        If end is None: `source.clip[start:]`
+    """
 ```
 
 ### 3.3 Tonemapping
@@ -287,16 +306,34 @@ def get_preset_settings(preset: str) -> TonemapSettings:
 ### 5.1 HDR Detection
 
 ```python
-def _detect_hdr(frame_props: dict) -> tuple[bool, HDRMetadata | None]:
+def _detect_hdr(frame_props: Mapping[str, object]) -> tuple[bool, HDRMetadata | None]:
     """
-    Detect HDR from frame properties.
+    Detect HDR from frame properties and extract metadata.
 
-    Checks:
-    - _ColorRange (1 = limited)
-    - _Transfer (16 = PQ, 18 = HLG)
-    - _Primaries (9 = BT.2020)
-    - MasteringDisplayPrimaries
-    - ContentLightLevelMax
+    HDR Detection Rules:
+        is_hdr = True if _Transfer in (16, 18) AND _Primaries == 9
+        - _Transfer == 16: PQ (Perceptual Quantizer)
+        - _Transfer == 18: HLG (Hybrid Log-Gamma)
+        - _Primaries == 9: BT.2020
+
+    HDRMetadata Field Mapping:
+        | HDRMetadata field    | frame_props key             | Type     | Default   |
+        |----------------------|-----------------------------|----------|-----------|
+        | mastering_display    | MasteringDisplayPrimaries   | str      | None      |
+        | max_cll              | ContentLightLevelMax        | int      | None      |
+        | max_fall             | ContentLightLevelAverage    | int      | None      |
+        | color_primaries      | _Primaries                  | int      | 2 (unspec)|
+        | transfer             | _Transfer                   | int      | 2 (unspec)|
+        | matrix               | _Matrix                     | int      | 2 (unspec)|
+
+    Type Coercion:
+        - int fields: int(value) if value is not None, else default
+        - str fields: str(value) if value is not None, else None
+
+    Returns:
+        (is_hdr, hdr_metadata) where:
+        - is_hdr is True only if HDR detection criteria are met
+        - hdr_metadata is HDRMetadata if is_hdr is True, else None
     """
 ```
 
