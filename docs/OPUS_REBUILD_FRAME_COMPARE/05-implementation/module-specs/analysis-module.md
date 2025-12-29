@@ -133,6 +133,23 @@ def calculate_metrics(
 
     Uses cached values if valid cache exists and config matches.
 
+    Clip Selection:
+        Metrics are computed for the REFERENCE clip only: `video_paths[0]`.
+        Other paths in `video_paths` are used for ClipIdentity population
+        but not analyzed (comparison clips share the reference metrics).
+
+    MetricsMetadata Population:
+        - frame_count: reference clip's num_frames
+        - fps: reference clip's fps (Fraction)
+        - config_fingerprint: equals the fingerprint passed to load_cached_metrics
+          and written as `fingerprint` key in cache file
+        - clips: list of ClipIdentity for all video_paths (reference + comparisons)
+        - version: CACHE_VERSION constant
+
+    Cache Invariant:
+        MetricsMetadata.config_fingerprint == cache file's `fingerprint` field.
+        This is computed via compute_cache_key(video_paths, config).
+
     Args:
         video_paths: Video file paths (first entry is the reference clip)
         config: Analysis configuration
@@ -143,7 +160,11 @@ def calculate_metrics(
         FrameMetrics with luminance and motion arrays
 
     Raises:
-        AnalysisError: If video cannot be analyzed
+        MetricsCalculationError (FC-4002): If frame extraction or metric
+            computation fails (wraps underlying VS/numpy errors), OR if
+            reference clip has 0 frames.
+        PluginNotFoundError (FC-2003): If VapourSynth lsmas plugin unavailable.
+        SourceLoadError (FC-4015): If video file cannot be loaded.
     """
 ```
 
@@ -255,20 +276,38 @@ def _calculate_luminance(
     """
     Calculate Y channel mean for each frame.
 
-    Algorithm:
-    1. Convert to YUV if needed
-    2. reporter.start_phase("luminance", frame_count) if reporter
-    3. For each frame:
-       a. Get Y plane
-       b. Calculate mean value
-       c. Normalize to 0-1 range
-       d. reporter.advance() if reporter
-    4. reporter.complete_phase() if reporter
+    Format Handling:
+        - If clip.format.color_family != vs.YUV, convert first:
+          `clip = clip.resize.Bicubic(format=vs.YUV420P8)`
+        - Supported: Any YUV format (8-bit to 16-bit integer, or float)
+
+    Frame Plane Extraction:
+        For each frame n:
+        1. frame = clip.get_frame(n)
+        2. arr = np.asarray(frame[0])  # Y plane (index 0)
+        3. mean_val = float(np.mean(arr))
+
+    Normalization (deterministic):
+        - Integer formats: max_value = (1 << clip.format.bits_per_sample) - 1
+          luminance[n] = mean_val / max_value
+        - Float formats (clip.format.sample_type == vs.FLOAT):
+          luminance[n] = mean_val  # Already 0.0-1.0 range
+
+    Output:
+        len(luminance) == clip.num_frames
+        All values in range [0.0, 1.0]
 
     Progress integration:
-    - Call start_phase("Calculating luminance", clip.num_frames) before loop
-    - Call advance(1) after processing each frame
-    - Call complete_phase() after loop completes
+        - Call reporter.start_phase("Calculating luminance", clip.num_frames) before loop
+        - Call reporter.advance(1) after processing each frame
+        - Call reporter.complete_phase() after loop completes
+
+    Empty Clip Handling:
+        If clip.num_frames == 0, raise MetricsCalculationError (FC-4002)
+        immediately before any progress callbacks. No values are returned.
+
+    Raises:
+        MetricsCalculationError: If frame access fails or clip has 0 frames.
     """
 ```
 
@@ -279,12 +318,37 @@ def _calculate_motion(clip: vs.VideoNode) -> list[float]:
     """
     Calculate frame-to-frame difference scores.
 
+    Format Handling:
+        Same as _calculate_luminance: convert to YUV if needed.
+
+    Frame Plane Extraction:
+        Uses same API as luminance: np.asarray(frame[0]) for Y plane.
+
     Algorithm:
-    1. For each frame pair (N, N+1):
-       a. Calculate absolute difference
-       b. Sum difference values
-       c. Normalize by frame size
-    2. First frame motion = 0
+        motion = [0.0] * clip.num_frames  # Pre-allocate
+        motion[0] = 0.0  # First frame has no predecessor
+
+        For n in range(1, clip.num_frames):
+            prev_arr = np.asarray(clip.get_frame(n-1)[0])
+            curr_arr = np.asarray(clip.get_frame(n)[0])
+            diff = np.abs(curr_arr.astype(np.float32) - prev_arr.astype(np.float32))
+            motion[n] = float(np.sum(diff)) / (width * height * max_value)
+
+    Normalization (deterministic):
+        - width, height = clip.width, clip.height
+        - max_value: same bit-depth rule as luminance
+        - Output range: [0.0, 1.0] where 1.0 = every pixel changed by max_value
+
+    Output:
+        len(motion) == clip.num_frames
+        motion[0] == 0.0 (invariant)
+
+    Empty Clip Handling:
+        If clip.num_frames == 0, raise MetricsCalculationError (FC-4002)
+        immediately. No values are returned.
+
+    Raises:
+        MetricsCalculationError: If frame access fails or clip has 0 frames.
     """
 ```
 

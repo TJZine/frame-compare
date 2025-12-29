@@ -187,13 +187,13 @@ frame-compare/
 
 ### 2.2 Metrics Calculation
 
-- [ ] Create `src/frame_compare/analysis/metrics.py`
-- [ ] Implement `calculate_metrics(clip, progress) -> FrameMetrics`
-- [ ] Implement `_calculate_luminance(frames) -> list[float]`
-- [ ] Implement `_calculate_motion(frames) -> list[float]`
-- [ ] Add progress reporting callbacks
-- [ ] Write unit tests with mock frames
-- [ ] Write edge case tests (empty, single frame)
+- [x] Create `src/frame_compare/analysis/metrics.py` (2025-12-29)
+- [x] Implement `calculate_metrics(clip, progress) -> FrameMetrics` (2025-12-29)
+- [x] Implement `_calculate_luminance(frames) -> list[float]` (2025-12-29)
+- [x] Implement `_calculate_motion(frames) -> list[float]` (2025-12-29)
+- [x] Add progress reporting callbacks (2025-12-29)
+- [x] Write unit tests with mock frames (2025-12-29)
+- [x] Write edge case tests (empty, single frame) (2025-12-29)
 
 ### 2.3 Frame Selection
 

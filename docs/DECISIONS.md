@@ -551,3 +551,30 @@ Apply a **review fix budget** (at most one direct CHANGES REQUIRED cycle per run
 - Centralizes color property extraction logic.
 - Maintains consistency with `load_source()` by using frame 0.
 - Provides a clean, typed interface for subsequent tonemapping and color operations.
+
+---
+
+## 2025-12-29 — Phase 2.2 Metrics Calculation
+
+**Run:** 2025-12-29__p2-2__metrics-calculation
+**Artifact versions:** plan-v1, plan-review-v1, plan-v2, plan-review-v2, plan-v3
+**Scope:** calculate_metrics, _calculate_luminance, _calculate_motion
+**SSOT edits:** Updated sections 3.1, 4.1, 4.2 (deterministic specs + empty clip handling)
+**Out-of-scope:** __init__.py exports (Phase 2.5)
+
+### Per-frame Metrics Calculation
+
+**Context:** The Analysis module requires luminance and motion scores for frame selection.
+
+**Decision:**
+- Implement `calculate_metrics()` to compute Y-channel mean (luminance) and frame-to-frame difference (motion).
+- Only analyze the reference clip (`video_paths[0]`); other clips share these metrics for selection.
+- Use `np.asarray(frame[0])` for deterministic Y-plane extraction across formats.
+- Normalize results to `[0.0, 1.0]` range based on bit-depth (int) or range (float).
+- Set `motion[0]` to `0.0` as an invariant.
+- Raise `MetricsCalculationError` (FC-4002) for empty clips or frame access failures.
+
+**Rationale:**
+- Normalization ensures selection algorithms work consistently across different bit-depths and formats.
+- Analyzing only the reference clip optimizes performance while maintaining comparison alignment.
+- Structured error handling with FC-4002 provides clear failure signals for processing issues.
