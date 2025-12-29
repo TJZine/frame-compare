@@ -63,12 +63,20 @@ This section is a **human-readable** guide for running the canonical file-based 
   - `.agent-workflow/runs/<RUN_ID>/plan-review-vN.md` exists
   - Verdict is **APPROVED**
   - `Implementation Agent Decision Points Remaining: NONE`
+- Plans must include `## Spec Anchors (SSOT)` pointing to exact spec headings for behavior/signatures; plans list one-line signatures for planned public functions.
 - If Plan Review verdict is **CHANGES REQUIRED**:
   - Planning writes `plan-v(N+1).md`, then Plan Review repeats (`plan-review-v(N+1).md`)
 - If Review verdict is **CHANGES REQUIRED**:
   - Coding writes `impl-v(N+1).md`, then Verification repeats (`verify-v(N+1).md`), then Review repeats
 - If Review verdict is **DESIGN ISSUE**:
   - Return to Planning (`plan-v(N+1).md`) and re-run Plan Review
+
+### SSOT Drift Rule (Hard Gate)
+
+If Review finds that implementation behavior/signatures drift from the SSOT spec:
+
+- Do **not** approve.
+- Require SSOT spec update + re-verification in the same run; if intended behavior changes, return to Planning + Plan Review.
 
 ### Minimal Commands (Operator Sanity Checks)
 
@@ -89,6 +97,7 @@ UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini
 # Repo-script gates (always --no-sync):
 UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_contract_views.py --check
 UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_traceability.py --check
+UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_spec_anchors.py .agent-workflow/runs/<RUN_ID>/plan-v<N>.md
 ```
 
 ### Artifact/Index Policy (So You Don’t Have to Remember)

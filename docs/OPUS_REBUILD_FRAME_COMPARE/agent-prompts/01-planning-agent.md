@@ -111,6 +111,12 @@ If YES:
 - **Freshness gate:** `UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_contract_views.py --check`
 - **Traceability gate:** `UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_traceability.py --check`
 
+## Spec Anchors (SSOT)
+
+- `docs/OPUS_REBUILD_FRAME_COMPARE/05-implementation/module-specs/[module]-module.md`:
+  - Section: “[exact heading name]”
+  - Section: “[exact heading name]”
+
 ## Files to Create/Modify
 
 ### 1. `src/frame_compare/[module]/[file].py`
@@ -119,14 +125,11 @@ If YES:
 **Types to define:**
 - `TypeName` — [Description]
 
-**Functions to implement:**
-```python
-def function_name(arg: Type) -> ReturnType:
-    """[Docstring]"""
-    # Implementation notes:
-    # 1. [Step 1]
-    # 2. [Step 2]
-```
+**Functions to implement (spec-anchored):**
+
+- `function_name(arg: Type) -> ReturnType` — signature + behavior defined in **Spec Anchors (SSOT)** above
+
+Only include a code block here if the SSOT spec is missing an essential detail and you are explicitly planning to update the SSOT spec first.
 
 ### 2. `tests/[module]/test_[file].py`
 
@@ -162,12 +165,47 @@ Follow `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md` → **Command Cano
 
 ## Guidelines
 
-1. **Be specific** — Include code templates for complex logic
+1. **Be specific** — Put complex code templates in SSOT specs; keep the plan concise
 2. **Keep scope small** — One focused feature per plan
 3. **Define edge cases** — Coding Agent shouldn't have to guess
 4. **Reference specs** — Point to source documentation
 5. **Think ahead** — Note dependencies and blockers
 6. **Leave no decisions** — Coding Agent should not choose algorithms, naming, or file layouts
+
+---
+
+## Anti-Churn Plan Format (Required)
+
+The plan must be implementation-ready without bloating into a re-print of the module spec. The Coding Agent gets determinism from:
+
+1) the approved plan (execution checklist), and
+2) the SSOT spec/contract sections you reference (behavior + signatures).
+
+### Hard Budgets
+
+- **Line budget:** Target ≤ **350 lines** for `plan-vN.md`. If you exceed this, reduce scope or split into sub-slices.
+- **Code blocks:** Do not paste large code blocks. If you feel you need > ~50 lines of code template, that is usually a **spec gap** — reference (or update) the SSOT spec instead.
+- **File count:** If the plan touches “too many files” to stay crisp, split the run into smaller sub-slices.
+
+### Required Section: Spec Anchors (SSOT)
+
+In the plan body (after `## Changes Since ...` and before “Files to Create/Modify”), include:
+
+```markdown
+## Spec Anchors (SSOT)
+
+- `docs/OPUS_REBUILD_FRAME_COMPARE/.../some-spec.md`:
+  - Section: “<exact heading name>”
+  - Section: “<exact heading name>”
+```
+
+For every file you ask the Coding Agent to create/modify, include a **Spec Anchor** pointing to the exact SSOT location that defines:
+- public signatures/types, and
+- required behavior + edge cases.
+
+For every function you list in “Functions to implement”, include the **expected public signature** on one line and wrap it in backticks (for example: `parse_config(path: Path) -> Config`). This lets Plan Review mechanically verify signature coverage without requiring large pasted code blocks.
+
+If you cannot provide a concrete spec anchor for a planned change, the plan is not ready: STOP and return a revised plan with smaller scope or explicit SSOT coverage.
 
 ---
 
@@ -203,6 +241,14 @@ When producing a revised plan `plan-v(N+1).md` after a Plan Review verdict of CH
 4. **Add a change summary:** At the top of the plan body (after frontmatter), add:
    - `## Changes Since plan-vN`
    - Bullet list of every change, ideally mapped to the Plan Review “Concrete Edits Required” items.
+
+## Iteration Cap (Stop Condition)
+
+If this plan is still not APPROVED after **two** revision cycles (i.e., you are about to write `plan-v4` or higher):
+
+- Treat this as a **spec gap or scope problem**, not “keep rewriting the plan”.
+- Reduce the scope into a smaller sub-slice OR return to the SSOT spec to remove ambiguity first.
+- The goal is **< 2 iterations per run** (see workflow metrics).
 
 Do not print the full file contents. Confirm the path and summarize what was written.
 

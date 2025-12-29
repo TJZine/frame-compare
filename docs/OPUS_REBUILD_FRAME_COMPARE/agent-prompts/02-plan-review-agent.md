@@ -50,6 +50,13 @@ Validate that the Planning Agent's implementation plan is "implementation-ready"
 
 The plan must be **implementation-ready**: the Coding Agent should be able to execute it with zero design decisions.
 
+### SSOT Anchoring Rule (Hard Requirement)
+
+The plan is not the SSOT for behavior/signatures. The plan must:
+
+- include `## Spec Anchors (SSOT)` with the exact SSOT doc headings that define required behavior + signatures, and
+- list every planned public function with a one-line signature wrapped in backticks (e.g., `load_config(path: Path) -> AppConfig`) so coverage is mechanically checkable.
+
 ### The Plan Must Be
 
 1. **Complete** — All files listed, including `__init__` exports, test locations, fixtures, doc updates
@@ -72,7 +79,7 @@ Run through this checklist and report each item as **PASS** or **FAIL**:
 | 2 | **Dependencies** | All imports, layers, and required prior modules identified |
 | 3 | **File List** | Complete and minimal; no ambiguous "and related files" |
 | 4 | **Contract Impact** | Section present with YES/NO; if YES, regen commands and gates included |
-| 5 | **Types Complete** | All public function signatures with full type hints; no TBD |
+| 5 | **Types Complete** | All planned public signatures listed (one-line, backticked) and covered by Spec Anchors; no TBD |
 | 6 | **Tests Complete** | Exact test names, what they assert, negative cases, determinism requirements |
 | 7 | **Verification Complete** | Exact commands and explicit pass criteria |
 | 8 | **Decision-Minimizing** | No algorithm, layout, or naming choices left to Coding Agent |
@@ -204,6 +211,33 @@ If this is a revised plan after CHANGES REQUIRED:
 - Require a `## Changes Since plan-v(N-1)` section listing all changes made.
 - Confirm every item in the previous plan-review report’s “Concrete Edits Required” is addressed.
 - Reject “style rewrites” that introduce churn without improving determinism.
+
+### Anti-Churn Gates (Required)
+
+The goal is “Coding Agent makes zero decisions” **without** repeatedly reprinting specs in each plan revision.
+
+FAIL the plan (CHANGES REQUIRED) if any of the following are true:
+
+- The plan is missing a `## Spec Anchors (SSOT)` section that points to the exact SSOT doc headings defining behavior + signatures.
+- The plan lists functions to implement without one-line signatures (the Coding Agent would have to infer the public API).
+- Planned file changes do not cite a concrete spec anchor (the Coding Agent would have to infer intent).
+- The plan is excessively long (rule of thumb: **> 350 lines**) without a clear justification and without being split into sub-slices.
+
+### SSOT Coverage Check (Required)
+
+If a required detail is **not** present in the anchored SSOT section(s), you must return **CHANGES REQUIRED** with a concrete edit of the form:
+
+- **Update SSOT spec first:** add the missing signature/behavior/edge-case detail under the referenced heading(s), then update the plan to reference the corrected SSOT section(s).
+
+Do **not** request “paste more code into the plan” as the primary fix.
+
+### Iteration Cap (Stop Condition)
+
+If you are reviewing `plan-v4` (or higher) for the same RUN_ID:
+
+- Treat this as a **spec gap or scope problem**.
+- Require scope reduction into smaller sub-slices and/or explicit SSOT clarifications (instead of continuing to request broad plan rewrites).
+- Keep “Concrete Edits Required” surgical; avoid changes that churn unrelated sections.
 
 ---
 

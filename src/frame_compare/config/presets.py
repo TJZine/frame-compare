@@ -1,0 +1,107 @@
+"""Preset management for Frame Compare configuration."""
+
+from __future__ import annotations
+
+import tomllib
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
+
+import tomli_w
+from pydantic import ValidationError
+
+from frame_compare.errors import (
+    ConfigValidationError,
+    PresetInvalidError,
+    PresetNotFoundError,
+    normalize_pydantic_errors,
+)
+
+if TYPE_CHECKING:
+    from frame_compare.config.schema import ConfigSchema
+
+DEFAULT_PRESETS_DIR = Path("config/presets")
+
+
+def list_presets(presets_dir: Path | None = None) -> list[str]:
+    """List available preset names (sorted alphabetically)."""
+    directory = presets_dir or DEFAULT_PRESETS_DIR
+    if not directory.exists():
+        return []
+    return sorted(p.stem for p in directory.glob("*.toml"))
+
+
+def load_preset(name: str, presets_dir: Path | None = None) -> dict[str, object]:
+    """Load preset data by name."""
+    directory = presets_dir or DEFAULT_PRESETS_DIR
+    preset_path = directory / f"{name}.toml"
+
+    if not preset_path.exists():
+        raise PresetNotFoundError(name)
+
+    try:
+        return tomllib.loads(preset_path.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as exc:
+        raise PresetInvalidError(preset_path, str(exc)) from exc
+
+
+def save_preset(
+    name: str,
+    config: ConfigSchema,
+    presets_dir: Path | None = None,
+) -> Path:
+    """Save current config as preset.
+
+    Uses tomli-w for TOML serialization. Output order is stable
+    (follows Pydantic model field declaration order).
+
+    None values are excluded because TOML has no null representation.
+    When a preset is loaded and applied, Pydantic will use defaults
+    for any missing optional fields.
+    """
+    directory = presets_dir or DEFAULT_PRESETS_DIR
+    directory.mkdir(parents=True, exist_ok=True)
+
+    preset_path = directory / f"{name}.toml"
+
+    # exclude_none=True: TOML has no null; omitted keys use defaults when loaded
+    data = config.model_dump(mode="json", exclude_none=True)
+    toml_text = tomli_w.dumps(data)
+    preset_path.write_text(toml_text, encoding="utf-8")
+
+    return preset_path
+
+
+def apply_preset(config: ConfigSchema, preset_name: str) -> ConfigSchema:
+    """Apply preset overrides to config.
+
+    Loads preset from DEFAULT_PRESETS_DIR (config/presets relative to CWD).
+    Loaded preset data is merged with the config. Missing optional
+    keys (excluded due to None) are filled with schema defaults
+    during validation.
+    """
+    from frame_compare.config.schema import ConfigSchema
+
+    preset_data = load_preset(preset_name)
+    base_dict = config.model_dump()
+    merged = _deep_merge(base_dict, preset_data)
+
+    try:
+        return ConfigSchema.model_validate(cast(Any, merged))
+    except ValidationError as exc:
+        normalized = normalize_pydantic_errors(cast(Any, exc.errors()))
+        raise ConfigValidationError(normalized) from exc
+
+
+def _deep_merge(base: dict[str, object], updates: dict[str, object]) -> dict[str, object]:
+    """Deep merge two dicts. Updates take precedence."""
+    result: dict[str, object] = dict(base)
+    for key, value in updates.items():
+        base_value = result.get(key)
+        if isinstance(base_value, dict) and isinstance(value, dict):
+            result[key] = _deep_merge(
+                cast(dict[str, object], base_value),
+                cast(dict[str, object], value),
+            )
+        else:
+            result[key] = value
+    return result

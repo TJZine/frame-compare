@@ -101,22 +101,22 @@ frame-compare/
 
 **Reference:** `03-architecture/api-design.md` (Section 4)
 
-- [ ] Create `src/frame_compare/config/`
-- [ ] Define Pydantic models:
-  - [ ] `PathsConfig`
-  - [ ] `AnalysisConfig`
-  - [ ] `ColorConfig`
-  - [ ] `ScreenshotsConfig`
-  - [ ] `SlowpicsConfig`
-  - [ ] `TmdbConfig`
-  - [ ] `AudioAlignmentConfig`
-  - [ ] `ReportConfig`
-  - [ ] `ConfigSchema` (root)
-- [ ] Implement `load_config(path: Path) -> ConfigSchema`
-- [ ] Implement environment variable overrides
-- [ ] Write unit tests for config loading
-- [ ] Write validation tests
-- [ ] Verify Pyright passes
+- [x] Create `src/frame_compare/config/` (2025-12-29)
+- [x] Define Pydantic models: (2025-12-29)
+  - [x] `PathsConfig`
+  - [x] `AnalysisConfig`
+  - [x] `ColorConfig`
+  - [x] `ScreenshotsConfig`
+  - [x] `SlowpicsConfig`
+  - [x] `TmdbConfig`
+  - [x] `AudioAlignmentConfig`
+  - [x] `ReportConfig`
+  - [x] `ConfigSchema` (root)
+- [x] Implement `load_config(path: Path) -> ConfigSchema` (2025-12-29)
+- [x] Implement environment variable overrides (2025-12-29)
+- [x] Write unit tests for config loading (2025-12-29)
+- [x] Write validation tests (2025-12-29)
+- [x] Verify Pyright passes (2025-12-29)
 
 ### 1.2 Error Handling
 

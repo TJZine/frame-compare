@@ -137,6 +137,7 @@ RUN_ID = YYYY-MM-DD__meta__<short_slug>
 ```bash
 UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_run_id.py --check-exists <RUN_ID>
 UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_run_artifacts.py .agent-workflow/runs/<RUN_ID>
+UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_spec_anchors.py .agent-workflow/runs/<RUN_ID>/plan-v<N>.md
 ```
 
 If either command fails: **STOP** and fix the run directory artifacts before proceeding.
@@ -310,9 +311,13 @@ After writing or updating any artifact under `.agent-workflow/runs/<RUN_ID>/`, v
 ```bash
 UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_run_id.py --check-exists <RUN_ID>
 UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_run_artifacts.py .agent-workflow/runs/<RUN_ID>
+UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_spec_anchors.py .agent-workflow/runs/<RUN_ID>/plan-v<N>.md
 ```
 
 If either command fails: **STOP** and fix the artifact(s) before advancing to the next agent.
+
+> [!NOTE]
+> The `validate_spec_anchors.py` gate is required for **new plans and any revised plan** (`plan-vN.md` you write after this policy was introduced). Older historical runs may not contain Spec Anchors/signature bullets and may fail this check if retroactively applied.
 
 ### Cross-Agent Preconditions (No-Guessing)
 
@@ -393,7 +398,7 @@ If either command fails: **STOP** and fix the artifact(s) before advancing to th
 | 2 | Dependencies | All imports, layers, prior modules identified |
 | 3 | File List | Complete and minimal; no ambiguous references |
 | 4 | Contract Impact | YES/NO section present; regen commands if YES |
-| 5 | Types Complete | All public function signatures with full types |
+| 5 | Types Complete | All planned public signatures listed (one-line, backticked) and covered by Spec Anchors |
 | 6 | Tests Complete | Exact test names, assertions, negative cases |
 | 7 | Verification Complete | Exact commands and pass criteria |
 | 8 | Decision-Minimizing | No algorithm/layout/naming left to Coding Agent |
@@ -683,7 +688,7 @@ Validate the plan is implementation-ready using the 9-point checklist:
 | 2 | Dependencies | All imports, layers, prior modules identified |
 | 3 | File List | Complete and minimal; no ambiguous references |
 | 4 | Contract Impact | YES/NO section present; regen commands if YES |
-| 5 | Types Complete | All public function signatures with full types |
+| 5 | Types Complete | All planned public signatures listed (one-line, backticked) and covered by Spec Anchors |
 | 6 | Tests Complete | Exact test names, assertions, negative cases |
 | 7 | Verification Complete | Exact commands and pass criteria |
 | 8 | Decision-Minimizing | No algorithm/layout/naming left to Coding Agent |
@@ -952,6 +957,7 @@ Status: COMPLETED ✅
 | Verification fails | Return to Coding Agent with error |
 | Review finds bugs | Return to Coding Agent with specific fixes |
 | Review finds design issue | Return to Planning Agent for revised plan |
+| Review finds SSOT drift (spec ≠ implementation) | Do not APPROVE. Require SSOT spec update and re-verify; if it changes intended behavior, return to Planning + Plan Review |
 | Agent hits context limit | Split the task - do half now, half next iteration |
 | You're unsure about agent output | Re-run with more specific questions |
 
@@ -996,6 +1002,8 @@ PLANNING AGENT (Opus 4.5) receives:
 PLANNING AGENT produces:
   - .agent-workflow/runs/<RUN_ID>/plan-vN.md
   - Scoped to exactly ONE checklist item
+  - Includes `## Spec Anchors (SSOT)` with exact SSOT headings
+  - Lists planned public functions as one-line signatures wrapped in backticks
 ```
 
 ### Phase 2: Plan Review
@@ -1008,6 +1016,7 @@ PLAN REVIEW AGENT (GPT 5.2 High) receives:
 PLAN REVIEW AGENT produces:
   - .agent-workflow/runs/<RUN_ID>/plan-review-vN.md
   - Verdict: APPROVED or CHANGES REQUIRED
+  - Rejects missing Spec Anchors / missing one-line signatures / SSOT gaps
 ```
 
 ### Phase 3: Implementation
@@ -1022,6 +1031,7 @@ CODING AGENT produces:
   - Source code files
   - Test files
   - .agent-workflow/runs/<RUN_ID>/impl-vN.md
+  - Updates SSOT specs when the plan requires behavior/signature changes (no silent drift)
 ```
 
 ### Phase 4: Verification
@@ -1037,6 +1047,7 @@ VERIFICATION AGENT produces:
   - Updated master checklist: docs/OPUS_REBUILD_FRAME_COMPARE/10-agent-master-checklist.md
   - Updated run index: .agent-workflow/index.md
   - .agent-workflow/runs/<RUN_ID>/verify-vN.md
+  - Includes `scripts/validate_spec_anchors.py` output for the approved plan
 ```
 
 ### Phase 5: Review
@@ -1051,6 +1062,16 @@ REVIEW AGENT (GPT 5.2 High) receives:
 REVIEW AGENT produces:
   - .agent-workflow/runs/<RUN_ID>/review-vN.md with VERDICT
 ```
+
+**Review Authority (Routing Rule):**
+
+- **Implementation defects** → return to Coding Agent (`impl-v(N+1)` → `verify-v(N+1)` → `review-v(N+1)`).
+- **SSOT drift** (spec and implementation disagree) → do not APPROVE until SSOT is updated and re-verified; if it changes intended behavior, return to Planning + Plan Review.
+- **Design issues** → return to Planning + Plan Review.
+
+**Review Fix Budget (Stop Thrash):**
+
+- Allow at most **one** direct-fix cycle per run at Review stage. If the run returns to Review again and still fails for new reasons, treat it as a scope/spec issue unless it is clearly an unrelated one-liner.
 
 ---
 
@@ -1081,9 +1102,10 @@ AMBIGUITY FOUND:
 
 **Protocol:**
 
-1. **Classify** — Determine if bug is:
-   - **Isolated:** Affects single function/file → Coding Agent fixes
-   - **Systemic:** Affects multiple components → Reset to last known-good state
+1. **Classify** — Determine if the issue is:
+   - **Implementation defect:** Safe local fix → return to Coding Agent (`impl-v(N+1)` loop)
+   - **SSOT drift:** Spec and implementation disagree → require SSOT update + re-verify (or return to Planning if intent changes)
+   - **Design issue:** Requires new decisions → return to Planning + Plan Review
 2. **Reset** — For systemic bugs (**Human Orchestrator only; explicit approval required; prefer non-destructive actions**):
 
    ```bash
@@ -1214,6 +1236,12 @@ If YES:
 - **Freshness gate:** `UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_contract_views.py --check`
 - **Traceability gate:** `UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_traceability.py --check`
 
+## Spec Anchors (SSOT)
+
+- `docs/OPUS_REBUILD_FRAME_COMPARE/05-implementation/module-specs/[module]-module.md`:
+  - Section: “[exact heading name]”
+  - Section: “[exact heading name]”
+
 ## Scope
 This plan covers:
 - [ ] [Specific item 1]
@@ -1231,17 +1259,9 @@ This plan does NOT cover:
 **Types to define:**
 - `TypeName` — [Description]
 
-**Functions to implement:**
-```python
-def function_name(arg: Type) -> ReturnType:
-    """
-    [Docstring]
+**Functions to implement (spec-anchored):**
 
-    Algorithm:
-    1. [Step 1]
-    2. [Step 2]
-    """
-```
+- `function_name(arg: Type) -> ReturnType` — signature + behavior defined in **Spec Anchors (SSOT)** above
 
 **Key implementation notes:**
 
@@ -1646,9 +1666,36 @@ Write file: .agent-workflow/runs/<RUN_ID>/review-vN.md
 ### For Planning Agent
 
 1. Be specific — vague plans lead to implementation drift
-2. Include code templates for complex logic
+2. Include code templates for complex logic in SSOT specs (keep plans concise)
 3. Define edge cases explicitly
 4. Keep scope small — one focused feature per plan
+
+### Plan Size & Churn Guardrails (Required)
+
+To keep the workflow sustainable across many subphases and prevent “token bloat” loops:
+
+1. **Plans are execution checklists, not spec reprints.** Put exhaustive behavior/signature detail in the SSOT module specs and contracts; plans should reference them.
+2. **Hard budget:** target ≤ **350 lines** for `plan-vN.md`. If a plan exceeds this, Plan Review must require scope reduction into sub-slices.
+3. **Required:** Each plan must include `## Spec Anchors (SSOT)` listing the exact doc headings the Coding Agent must follow for each file change.
+4. **Iteration cap:** If a run reaches `plan-v4` or higher, treat it as a **spec gap/scope problem** and STOP “rewrite the plan” churn; split the work or clarify SSOT first.
+
+### SSOT Drift Policy (Required)
+
+To keep the Coding Agent deterministic (and avoid “plan becomes the spec”), enforce:
+
+1. **Spec is authoritative for behavior/signatures.** Plans must reference SSOT sections via `## Spec Anchors (SSOT)` and list one-line signatures (wrapped in backticks) for planned public functions.
+2. **No silent drift:** If implementation changes behavior or public signatures, the corresponding SSOT spec section must be updated in the same run (or the change must be explicitly scoped out and re-planned).
+3. **Review enforcement:** If Review discovers behavior/signature drift against SSOT, the verdict must not be APPROVED until SSOT is corrected and the run is re-verified.
+
+### Allowed Changes by Phase (Hard Rule)
+
+| Phase | May Edit | Must Not Edit |
+|------:|----------|---------------|
+| Planning | SSOT specs/contracts (when required), plan artifact | Implementation code/tests |
+| Plan Review | Plan review report only | Plans/specs/contracts/code/tests |
+| Coding | Only files listed in the approved plan (plus explicitly planned SSOT updates) | Master checklist, run index |
+| Verification | Master checklist + run index + verify report | Implementation code/specs/contracts |
+| Review | Review report + run index finalization | Plans/specs/contracts/code/tests (request changes via verdict + routing) |
 
 ### For Coding Agent
 

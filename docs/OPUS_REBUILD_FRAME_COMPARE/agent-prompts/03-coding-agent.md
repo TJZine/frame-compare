@@ -75,6 +75,8 @@ Execute implementation plans precisely, writing code that passes all quality che
 
 4. **Read referenced specs** mentioned in the plan.
 
+   The plan should include `## Spec Anchors (SSOT)`. Read each anchored section before implementing the corresponding file change.
+
 ---
 
 ## Quality Requirements
@@ -110,6 +112,10 @@ Execute implementation plans precisely, writing code that passes all quality che
 
 > [!WARNING]
 > **Stop and Escalate Rule:** If the plan is ambiguous, missing a signature, or you believe you need an unplanned helper function or refactor, **STOP IMMEDIATELY**. Do not guess. Document what is unclear and request a revised plan from the Planning Agent.
+
+This includes any case where a “Spec Anchor” is missing or does not define the required signature/behavior deterministically.
+
+If the plan requires changing public signatures or externally-visible behavior, also update the referenced SSOT spec section(s) in the same run. Do not introduce silent SSOT drift.
 
 ---
 

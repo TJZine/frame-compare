@@ -55,6 +55,13 @@ Each run produces a directory with 5 stage artifacts (each stage may be revised 
 5. If Review identifies a design issue:
    - Return to Planning + Plan Review for `plan-v(N+1).md` and `plan-review-v(N+1).md` (then Coding/Verification/Review repeat)
 
+### Plan Size Guardrails (Required)
+
+- Plans must include `## Spec Anchors (SSOT)` that point to exact SSOT doc headings for each planned file change.
+- Plans list one-line public function signatures wrapped in backticks (e.g., `` `load_config(path: Path) -> AppConfig` ``) for every planned function.
+- Target ≤ **350 lines** for `plan-vN.md`; if a plan exceeds this, split into smaller sub-slices instead of iterating endlessly.
+- If a run reaches `plan-v4` or higher, treat it as a spec/scope problem (STOP and clarify SSOT or split the run).
+
 ### Required Headers
 
 Every artifact file must begin with:
@@ -78,7 +85,10 @@ Validate a RUN_ID and the artifacts written for that run:
 ```bash
 UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_run_id.py --check-exists <RUN_ID>
 UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_run_artifacts.py .agent-workflow/runs/<RUN_ID>
+UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_spec_anchors.py .agent-workflow/runs/<RUN_ID>/plan-v<N>.md
 ```
+
+> `validate_spec_anchors.py` is required for new plans and revised plans going forward; older runs may not contain Spec Anchors/signature bullets.
 
 > [!IMPORTANT]
 > `scripts/validate_run_artifacts.py` enforces that NEXT blocks contain **no placeholders** for the current run,

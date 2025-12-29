@@ -18,6 +18,8 @@ This project follows Conventional Commits and is intended to be released via Rel
 ### Changed
 
 - Planning/Plan Review prompts: require copy-forward plan revisions and a `## Changes Since plan-vN` summary to reduce churn during plan iteration.
+- Planning/Plan Review/Coding/Review prompts + workflow docs: added SSOT anchoring guardrails (Spec Anchors + one-line signatures + SSOT drift gate), anti-churn line budget + iteration cap, and Review routing rules (implementation defect vs spec drift vs design issue).
+- Verification workflow adds `scripts/validate_spec_anchors.py` as a STOP gate for plan/spec consistency.
 - Docker build now compiles `zimg` and `l-smash` from official release tarballs with checksum verification, installs Cython via pip for Python 3.13 compatibility, pins L-SMASH-Works to a published tag, and guards SSE2 headers for ARM builds.
 - Docker build adds `python3-jinja2` and `libvulkan-dev` to satisfy libplacebo tooling requirements, pins vs-placebo to a commit with submodules, and pins ffms2 to a FFmpeg 5-compatible commit.
 - Docker runtime image installs `wget` and `ca-certificates` to support DevContainer server bootstrap.

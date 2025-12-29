@@ -81,6 +81,39 @@ Review the Coding Agent's work, verify quality gates, and approve or request cha
 
 ## Review Process
 
+### Review Authority & Routing (Required)
+
+Your job is to keep the run moving **without** weakening SSOT/Plan Review gates. Classify every finding into exactly one bucket:
+
+#### A) Implementation Defect (fix via Coding loop)
+
+Safe, local correctness issues that do not change intended design or public API.
+
+- Examples: missing import, wrong path, failing test, type error, lint/format, minor refactor that preserves public API.
+- Routing: return **CHANGES REQUIRED** and send back to the Coding Agent for `impl-v(N+1)` → `verify-v(N+1)` → `review-v(N+1)`.
+
+#### B) Spec Drift (SSOT must be updated)
+
+Implementation and SSOT disagree, or SSOT is missing an essential detail discovered during integration.
+
+- Examples: behavior differs from the referenced spec heading; a required edge case is not specified; signatures differ from the spec.
+- Routing:
+  - If the fix is a **pure documentation correction** that does not change intended behavior (SSOT simply lagged), require the SSOT update and a re-verify before approval.
+  - If it changes intended behavior or introduces new decisions, treat as **DESIGN ISSUE** and return to Planning + Plan Review.
+
+#### C) Design Issue (return to Planning + Plan Review)
+
+Any change that would require making/altering design decisions or re-scoping the run.
+
+- Examples: new abstraction, renaming public API, changing error code contracts, changing security invariants, changing phase ordering, adding new files beyond plan scope.
+- Routing: verdict **DESIGN ISSUE** with concrete plan/spec changes required; Planning + Plan Review must rerun.
+
+### Review Fix Budget (Stop Thrash)
+
+To prevent endless loops:
+
+- Allow at most **one** “Implementation Defect” fix cycle per run at Review stage. If the run returns to Review again and still fails for new reasons, escalate as **DESIGN ISSUE** (scope/spec ambiguity) unless the additional issue is clearly an unrelated one-liner.
+
 ### 0. Finalize Run Index (Required)
 
 Update `.agent-workflow/index.md` for this `RUN_ID`:
@@ -109,7 +142,7 @@ UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_traceability.p
 **Correctness**
 
 - [ ] Implements all acceptance criteria
-- [ ] Algorithms match spec
+- [ ] Algorithms match the SSOT spec sections referenced by `## Spec Anchors (SSOT)` in the plan
 - [ ] Edge cases handled
 - [ ] No logic errors
 
@@ -139,6 +172,11 @@ UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_traceability.p
 - [ ] Complex logic has comments
 - [ ] Module has description
 
+**SSOT Drift (Hard Gate)**
+
+- [ ] SSOT spec matches implementation for behavior + public signatures
+- [ ] If behavior/signatures changed, SSOT was updated in this run (or explicitly scoped out and re-planned)
+
 **Security**
 
 - [ ] No hardcoded secrets
@@ -162,9 +200,9 @@ All checks pass. Implementation is correct and follows standards.
 
 ### CHANGES REQUIRED 🔄
 
-Issues found that can be fixed by Coding Agent.
+Issues found that can be fixed without changing the plan’s intended design.
 → List specific changes needed.
-→ Coding Agent fixes and re-submits.
+→ Prefer returning to the **Coding Agent** (`impl-v(N+1)` → `verify-v(N+1)` → `review-v(N+1)`), not to Planning.
 
 ### DESIGN ISSUE ⚠️
 

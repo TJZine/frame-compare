@@ -71,6 +71,9 @@ Validate the Coding Agent's work, ensure all documentation is complete, run cont
 ### 2. Run Full Verification Suite
 
 ```bash
+# Plan/spec consistency gate (STOP if this fails)
+UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_spec_anchors.py .agent-workflow/runs/<RUN_ID>/plan-v<N>.md
+
 # Quality gates
 .venv/bin/pyright --warnings
 .venv/bin/ruff check .
@@ -159,6 +162,10 @@ OUTPUTS:
 - [x] Implementation matches plan exactly
 - [ ] Deviations: [List any if present]
 
+### SSOT Drift Check (Hard Gate)
+- [x] `scripts/validate_spec_anchors.py` passed for the approved plan
+- [x] No behavior/signature drift vs anchored SSOT sections detected
+
 ### Documentation Check
 - [x] All public functions have docstrings
 - [x] Type hints complete
@@ -168,6 +175,9 @@ OUTPUTS:
 
 ### Quality Gates
 ```text
+$ UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_spec_anchors.py .agent-workflow/runs/<RUN_ID>/plan-v<N>.md
+OK: Spec Anchors valid for .agent-workflow/runs/<RUN_ID>/plan-v<N>.md
+
 $ .venv/bin/pyright --warnings
 0 errors
 

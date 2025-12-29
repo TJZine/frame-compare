@@ -250,6 +250,42 @@
 
 ---
 
+## 2025-12-29 — Workflow Anti-Churn Decisions
+
+### Plan Bloat Control: Spec Anchors + Line Budget
+
+**Context:** Planning/Plan Review was producing 800–1300+ line plans and multiple revisions per run, forcing frequent fresh sessions and creating churn without improving implementation determinism.
+
+**Decision:** Treat plans as execution checklists and require:
+- a `## Spec Anchors (SSOT)` section that points to exact spec headings for behavior + signatures, and
+- one-line **public function signatures** in the plan for every listed function (so Plan Review can mechanically check coverage), and
+- a practical line budget (target ≤ 350 lines) with scope-splitting when exceeded, and
+- an iteration cap (treat `plan-v4+` as a spec/scope problem instead of continuing rewrites).
+
+**Rationale:**
+- Keeps Coding Agent deterministic (via plan + SSOT specs) without duplicating large templates in every revision
+- Reduces operator overhead and “refresh session” frequency
+- Enforces the workflow metric target of < 2 iterations per run
+
+**Enforcement:**
+- `scripts/validate_spec_anchors.py` validates that the plan’s Spec Anchors exist and that planned function names are present in the anchored SSOT sections.
+- Verification must run this as a STOP gate before handoff.
+
+### Review Authority: Fix Bugs, Not Requirements
+
+**Context:** Review often finds issues late. Sending everything back to Planning increases churn and can cause rework.
+
+**Decision:** Classify Review findings into:
+- **Implementation defects** → fix via Coding loop (`impl-v(N+1)` → `verify-v(N+1)` → `review-v(N+1)`)
+- **SSOT drift** → require SSOT update + re-verify; if it changes intended behavior, return to Planning + Plan Review
+- **Design issues** → return to Planning + Plan Review
+
+Apply a **review fix budget** (at most one direct CHANGES REQUIRED cycle per run unless it’s a trivial one-liner) to prevent thrash.
+
+**Rationale:** Preserves Plan Review/SSOT authority while keeping runs moving and preventing endless late-stage loops.
+
+---
+
 ### L-SMASH Works namespace verification
 
 **Context:** The baseline container exposes L-SMASH Works under the `lsmas` namespace, while earlier docs and verification snippets checked `lw`.
