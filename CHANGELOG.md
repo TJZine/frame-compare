@@ -23,6 +23,8 @@ This project follows Conventional Commits and is intended to be released via Rel
 - CLI foundation commands: `run` (full signature), `wizard`, `doctor`, `preset` (list/apply/save) stubs.
 - `handle_error` utility mapping FrameCompareError to exit codes.
 - Analysis module types: `ClipIdentity`, `MetricsMetadata`, `FrameMetrics`, `SelectionBreakdown`, `FrameSelection`, `CacheLoadResult`
+- Analysis module frame selection algorithms: quantile, motion, and random modes with minimum gap enforcement.
+- Analysis module cache I/O: deterministic cache key generation, metrics persistence (JSON Schema v2), and failure-resilient cache loading.
 
 
 ### Changed

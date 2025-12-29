@@ -447,3 +447,53 @@ Apply a **review fix budget** (at most one direct CHANGES REQUIRED cycle per run
 - **Determinism:** Used `random.Random(seed)` for reproducible random selection
 - **Deduplication:** Ensured unique frames in final selection
 - **Error Handling:** Implemented `SelectionError` (FC-4012) for empty metrics and insufficient candidates
+
+---
+
+## 2025-12-29 — Phase 2.4 Cache I/O
+
+### Cache Key Determinism: Path-Size-Mtime Fingerprint
+
+**Context:** The Analysis module requires a robust way to determine if cached metrics are still valid for the input video files and configuration.
+
+**Decision:**
+- Use SHA256 fingerprint of sorted `(path, size, mtime)` tuples for all input videos.
+- Include `frame_count`, `selection_mode`, `random_seed`, `dark_quantile`, and `bright_quantile` from `AnalysisConfig` in the fingerprint.
+- Include `CACHE_VERSION` in the fingerprint to force recomputation on schema changes.
+
+**Rationale:**
+- Sorting paths ensures determinism across different argument orders.
+- Size and mtime are standard filesystem heuristics for change detection.
+- Including config fields prevents using stale metrics when the analysis parameters change.
+- Versioning the key prevents JSON parsing errors during cache migration.
+
+---
+
+### Cache Schema: JSON-based `compframes` v2
+
+**Context:** Analysis results need to be persisted to disk for performance.
+
+**Decision:**
+- Use JSON serialization for `cache.compframes` file.
+- Implement Schema v2 with top-level keys: `version`, `fingerprint`, `luminance`, `motion`, and `metadata`.
+- Serialize `Fraction` (FPS) as `"numerator/denominator"` string.
+
+**Rationale:**
+- JSON is human-readable and easy to debug.
+- Explicit schema version allows for safe future migrations.
+- Fingerprint at top-level allows for fast rejection without parsing full metadata/arrays.
+- Fraction-as-string avoids floating-point precision issues in framerate representation.
+
+---
+
+### Cache I/O Policy: Suppress Errors on Load, Propagate on Save
+
+**Context:** Need clear failure modes for cache operations.
+
+**Decision:**
+- `load_cached_metrics`: Never raises; returns `CacheLoadResult` with failure reasons (`not_found`, `corrupted`, `version_mismatch`, `fingerprint_mismatch`).
+- `save_metrics_cache`: Propagates `OSError` if filesystem writes fail.
+
+**Rationale:**
+- Cache misses should not crash the application; they should trigger fallback to recomputation.
+- Save failures are more critical as they indicate storage issues that may affect other parts of the run (e.g., screenshots).

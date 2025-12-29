@@ -208,14 +208,14 @@ frame-compare/
 
 ### 2.4 Caching
 
-- [ ] Create `src/frame_compare/analysis/cache_io.py`
-- [ ] Implement `compute_cache_key(clip, config) -> str`
-- [ ] Implement `load_cached_metrics(path) -> FrameMetrics | None`
-- [ ] Implement `save_metrics_cache(path, metrics)`
-- [ ] Handle cache versioning
-- [ ] Handle cache invalidation
-- [ ] Write cache round-trip tests
-- [ ] Write invalidation tests
+- [x] Create `src/frame_compare/analysis/cache_io.py` (2025-12-29)
+- [x] Implement `compute_cache_key(clip, config) -> str` (2025-12-29)
+- [x] Implement `load_cached_metrics(path) -> FrameMetrics | None` (2025-12-29)
+- [x] Implement `save_metrics_cache(path, metrics)` (2025-12-29)
+- [x] Handle cache versioning (2025-12-29)
+- [x] Handle cache invalidation (2025-12-29)
+- [x] Write cache round-trip tests (2025-12-29)
+- [x] Write invalidation tests (2025-12-29)
 
 ### 2.5 Module Integration
 

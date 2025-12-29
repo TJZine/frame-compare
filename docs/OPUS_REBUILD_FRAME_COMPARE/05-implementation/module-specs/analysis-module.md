@@ -220,6 +220,16 @@ def load_cached_metrics(
     """
     Attempt to load metrics from cache.
 
+    Parameters:
+        clips: Reserved for future validation; currently ignored.
+              Fingerprint is authoritative; do not recompute from clips.
+
+    Failure mapping:
+        - Cache file not found → CacheLoadResult(success=False, reason="not_found")
+        - Invalid JSON or missing required keys → CacheLoadResult(success=False, reason="corrupted")
+        - version != CACHE_VERSION → CacheLoadResult(success=False, reason="version_mismatch")
+        - fingerprint mismatch → CacheLoadResult(success=False, reason="fingerprint_mismatch")
+
     Returns:
         CacheLoadResult with success status and data or reason
     """
@@ -383,7 +393,34 @@ def compute_cache_key(
     """
 ```
 
-### 5.2 Invalidation Rules
+### 5.2 Cache File Schema (v2)
+
+**Required top-level keys:**
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `version` | int | Schema version (must be 2) |
+| `fingerprint` | str | Config fingerprint for invalidation |
+| `luminance` | list[float] | Per-frame luminance values |
+| `motion` | list[float] | Per-frame motion scores |
+| `metadata` | object | MetricsMetadata object |
+
+**Required `metadata` keys:**
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `frame_count` | int | Total frames analyzed |
+| `fps` | str | Frame rate as `str(Fraction)`, e.g. `"24/1"` |
+| `config_fingerprint` | str | Config hash for validation |
+| `clips` | list[object] | ClipIdentity objects |
+| `version` | int | Metadata schema version |
+
+**`fps` serialization:**
+
+- Serialize: `str(Fraction)` → `"24/1"` or `"30000/1001"`
+- Deserialize: `Fraction(fps_str)` → `Fraction(24, 1)`
+
+### 5.3 Invalidation Rules
 
 | Trigger | Action |
 |---------|--------|
