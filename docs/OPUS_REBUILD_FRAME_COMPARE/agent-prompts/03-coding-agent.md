@@ -12,6 +12,14 @@ Execute implementation plans precisely, writing code that passes all quality che
 
 ---
 
+## Role Boundary (Do Not Act As Verification/Review)
+
+> [!IMPORTANT]
+> You are **not** the Verification Agent and **not** the Review Agent.
+>
+> After you finish implementing the approved plan and write `.agent-workflow/runs/<RUN_ID>/impl-vN.md`, you must **STOP**.
+> Do not write `verify-vN.md` or `review-vN.md`, do not update the master checklist, and do not declare the run “approved”.
+
 ## ⛔ Precondition Gate
 
 > [!CAUTION]
@@ -81,17 +89,9 @@ Execute implementation plans precisely, writing code that passes all quality che
 
 ## Quality Requirements
 
-**Every file you create must pass:**
+Your implementation must be able to pass the Verification Agent’s suite (pyright/ruff/pytest/lint-imports + contract gates as applicable).
 
-```bash
-# After each file:
-.venv/bin/pyright --warnings path/to/file.py  # 0 errors
-.venv/bin/ruff check path/to/file.py  # 0 errors
-
-# After all implementation:
-.venv/bin/pytest -v tests/[module]  # All pass
-.venv/bin/pytest --cov  # > 80% coverage
-```
+If you can run local checks while coding, do so to catch obvious issues early — but the Verification Agent is responsible for running the canonical gate commands and recording the outputs.
 
 ---
 
@@ -105,7 +105,7 @@ Execute implementation plans precisely, writing code that passes all quality che
 3. **Do NOT update the master checklist** — That is the Verification Agent's responsibility
 4. **Do NOT edit derived/generated files** — See specific list below
 5. **Do NOT invent error codes** — Use only FC-xxxx from the canonical registry
-6. **Run verification after EVERY file** — Pyright and Ruff must pass before moving on
+6. **Run local sanity checks if available** — but do not act as Verification; do not write `verify-vN.md`
 7. **Use the exact types from the plan** — Do not substitute or "simplify" type definitions
 8. **Include ALL docstrings** — Every public function must have a docstring
 9. **Test as you go** — Write tests alongside implementation, not at the end
@@ -179,34 +179,14 @@ OUTPUTS:
 ## Implementation Notes
 [Deviations from plan (should be NONE), decisions made, challenges]
 
-## Verification Evidence
+## Local Sanity Checks (Optional)
 
-### Pyright Output
-```text
-$ .venv/bin/pyright --warnings src/frame_compare/[module]
-[PASTE ACTUAL OUTPUT HERE]
-```
+If you ran local checks, list the commands and whether they exited 0. Do not paste long logs here; the Verification Agent will capture full outputs.
 
-### Ruff Output
-
-```text
-$ .venv/bin/ruff check src/frame_compare/[module]
-[PASTE ACTUAL OUTPUT HERE]
-```
-
-### Test Output
-
-```text
-$ .venv/bin/pytest -v tests/[module]
-[PASTE ACTUAL OUTPUT HERE - must show test names and results]
-```
-
-### Coverage Output
-
-```text
-$ .venv/bin/pytest --cov
-[PASTE ACTUAL OUTPUT HERE - must show coverage percentage]
-```
+- `.venv/bin/pyright --warnings ...` — [exit 0 / not run]
+- `.venv/bin/ruff check ...` — [exit 0 / not run]
+- `.venv/bin/pytest ...` — [exit 0 / not run]
+- `UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini` — [exit 0 / not run]
 
 ## Checklist Item Implemented
 >
@@ -220,7 +200,7 @@ $ .venv/bin/pytest --cov
 
 ## Ready for Verification
 
-All files created per plan. Verification evidence pasted above.
+All files created per plan. Ready for Verification Agent gate run.
 
 ```
 

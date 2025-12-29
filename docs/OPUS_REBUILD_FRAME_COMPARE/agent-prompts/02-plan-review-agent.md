@@ -96,6 +96,7 @@ Run through this checklist and report each item as **PASS** or **FAIL**:
 - **Failure Modes:** What happens on missing VS / missing deps / invalid config (if relevant to slice)
 - **Derived Outputs:** Explicitly list generated outputs that must not be edited; regen commands if needed
 - **Rollback Guidance:** If implementation deviates, stop and return to Planning (plan fix), not ad-hoc patching
+- **Import Contracts:** If the plan adds a new top-level module under `src/frame_compare/` (or changes allowed import directions), it must include an `importlinter.ini` update (SSOT) and keep `lint-imports` as a must-pass verification gate.
 
 ---
 

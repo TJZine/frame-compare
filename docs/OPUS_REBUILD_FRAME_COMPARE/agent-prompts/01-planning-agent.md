@@ -153,6 +153,10 @@ Only include a code block here if the SSOT spec is missing an essential detail a
 
 **Purpose:** Add a short entry for user-visible changes (or workflow/spec guardrail changes).
 
+### (Conditional) `importlinter.ini` (MODIFY)
+
+If this run introduces a new top-level module under `src/frame_compare/` (or changes allowed import directions), the plan MUST include an update to `importlinter.ini` so `lint-imports` remains a deterministic, blocking gate.
+
 ## Acceptance Criteria
 
 - [ ] GIVEN [context] WHEN [action] THEN [result]

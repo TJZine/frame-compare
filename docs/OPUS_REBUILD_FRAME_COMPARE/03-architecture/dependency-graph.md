@@ -239,8 +239,9 @@ The critical path is **6 sequential dependencies**.
 ## 7. import-linter Configuration
 
 > [!NOTE]
-> This block is synced from `scaffold/pyproject.toml`.
-> Run `python scripts/generate_contract_views.py` to regenerate.
+> This block is synced from `scaffold/pyproject.toml` (end-state target).
+> **Enforcement SSOT:** repo-root `importlinter.ini` (what `lint-imports --config importlinter.ini` actually checks).
+> Regenerate this doc block via: `UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_contract_views.py`
 
 <!-- BEGIN GENERATED:importlinter -->
 ```toml

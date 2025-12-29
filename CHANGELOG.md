@@ -28,6 +28,8 @@ This project follows Conventional Commits and is intended to be released via Rel
 - Planning/Plan Review/Coding/Review prompts + workflow docs: added SSOT anchoring guardrails (Spec Anchors + one-line signatures + SSOT drift gate), anti-churn line budget + iteration cap, and Review routing rules (implementation defect vs spec drift vs design issue).
 - Verification workflow adds `scripts/validate_spec_anchors.py` as a STOP gate for plan/spec consistency.
 - Planning/Plan Review prompts: do not gate plan approval on exact `docs/DECISIONS.md` prose; allow large parametric tests to anchor to the SSOT deterministic test vector policy instead of listing exhaustive constructor args.
+- Import-linter configuration is treated as SSOT in `importlinter.ini`; docs/workflow updated to match real module paths and require updating `importlinter.ini` whenever new top-level modules are introduced.
+- Coding Agent prompt tightened to stop at `impl-vN.md` handoff (no Verification/Review role bleed).
 - Docker build now compiles `zimg` and `l-smash` from official release tarballs with checksum verification, installs Cython via pip for Python 3.13 compatibility, pins L-SMASH-Works to a published tag, and guards SSE2 headers for ARM builds.
 - Docker build adds `python3-jinja2` and `libvulkan-dev` to satisfy libplacebo tooling requirements, pins vs-placebo to a commit with submodules, and pins ffms2 to a FFmpeg 5-compatible commit.
 - Docker runtime image installs `wget` and `ca-certificates` to support DevContainer server bootstrap.

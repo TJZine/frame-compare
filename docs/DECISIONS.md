@@ -356,6 +356,26 @@ Apply a **review fix budget** (at most one direct CHANGES REQUIRED cycle per run
 
 ---
 
+### Import-linter contracts are maintained in `importlinter.ini`
+
+**Context:** Import-linter examples in docs drifted into placeholders (`cli_layer`, `domain_layer`) that don’t match the real package structure, and the workflow didn’t clearly state when `importlinter.ini` must be updated.
+
+**Decision:** Treat `importlinter.ini` (repo root) as the SSOT for import contracts; update docs/examples to match current `src/frame_compare/*` modules; require Planning/Plan Review to include an `importlinter.ini` update in any run that introduces a new top-level module or changes allowed import directions.
+
+**Rationale:** Keeps `lint-imports` as a deterministic, blocking gate and prevents architecture drift from silently accumulating.
+
+---
+
+### Coding Agent must stop at implementation handoff
+
+**Context:** Some coding-model runs attempted to continue into Verification/Review behaviors after writing the implementation artifact, blurring role boundaries.
+
+**Decision:** Explicitly prohibit the Coding Agent from writing `verify-vN.md` / `review-vN.md` or declaring approval; it must stop after writing `impl-vN.md` and the NEXT handoff.
+
+**Rationale:** Keeps gate evidence and approvals centralized in Verification/Review artifacts and reduces accidental “double agent” behavior.
+
+---
+
 ## 2025-12-29: Error Handling Slice Scope (Phase 1.2)
 
 **Decision:** Phase 1.2 implements only error classes defined in `errors-module.md` sections 3.2–3.6 and helpers in sections 4–5.
