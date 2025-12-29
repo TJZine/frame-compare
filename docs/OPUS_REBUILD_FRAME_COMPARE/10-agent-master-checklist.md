@@ -256,12 +256,12 @@ frame-compare/
 
 ### 3.3 Frame Properties
 
-- [ ] Create `src/frame_compare/vs/props.py`
-- [ ] Implement `get_color_props(frame) -> ColorProps`
-- [ ] Implement `is_hdr(clip) -> bool`
-- [ ] Detect PQ (_Transfer == 16)
-- [ ] Detect HLG (_Transfer == 18)
-- [ ] Detect BT.2020 primaries
+- [x] Create `src/frame_compare/vs/props.py` (2025-12-29)
+- [x] Implement `get_color_props(frame) -> ColorProps` (2025-12-29)
+- [x] Implement `is_hdr(clip) -> bool` (2025-12-29)
+- [x] Detect PQ (_Transfer == 16) (2025-12-29)
+- [x] Detect HLG (_Transfer == 18) (2025-12-29)
+- [x] Detect BT.2020 primaries (2025-12-29)
 
 ### 3.4 Color Operations
 

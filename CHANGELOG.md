@@ -29,6 +29,9 @@ This project follows Conventional Commits and is intended to be released via Rel
 - Video source loading (`load_source`) with LWLibavSource support.
 - HDR detection from frame properties (PQ, HLG, BT.2020).
 - Frame trimming with inclusive end semantics.
+- `ColorProps` type for color space properties.
+- `get_color_props()` function to extract color properties from clip.
+- `is_hdr()` function to detect HDR clips.
 
 
 ### Changed

@@ -182,6 +182,33 @@ class TonemapSettings:
     gamma_lift: bool = False
 ```
 
+### 2.3 ColorProps
+
+```python
+@dataclass
+class ColorProps:
+    """Color space properties extracted from frame.
+
+    All fields use VapourSynth integer constants.
+    Defaults to 2 (unspecified) for missing properties.
+    """
+    primaries: int    # _Primaries (e.g., 1=BT.709, 9=BT.2020)
+    transfer: int     # _Transfer (e.g., 1=BT.709, 16=PQ, 18=HLG)
+    matrix: int       # _Matrix (e.g., 1=BT.709, 9=BT.2020nc)
+    color_range: int  # _ColorRange (0=full, 1=limited)
+```
+
+**ColorProps Field Mapping (SSOT):**
+
+| ColorProps field | frame_props key | Type | Default |
+|------------------|-----------------|------|---------|
+| `primaries`      | `_Primaries`    | int  | 2       |
+| `transfer`       | `_Transfer`     | int  | 2       |
+| `matrix`         | `_Matrix`       | int  | 2       |
+| `color_range`    | `_ColorRange`   | int  | 0       |
+
+**Type Coercion:** `int(value)` if value is not None, else default.
+
 ---
 
 ## 3. Public API
@@ -283,6 +310,47 @@ def apply_tonemap(
 
 def get_preset_settings(preset: str) -> TonemapSettings:
     """Get settings for named preset."""
+```
+
+### 3.4 Frame Properties
+
+```python
+def get_color_props(clip: vs.VideoNode) -> ColorProps:
+    """
+    Extract color space properties from frame 0.
+
+    Args:
+        clip: VapourSynth clip to extract properties from
+
+    Returns:
+        ColorProps with primaries, transfer, matrix, color_range
+
+    Note:
+        Always reads frame 0 for consistency with load_source().
+        Missing properties default per ColorProps Field Mapping table.
+    """
+
+def is_hdr(clip: vs.VideoNode) -> bool:
+    """
+    Determine if clip is HDR based on frame 0 properties.
+
+    HDR Detection Rule:
+        is_hdr = _Transfer in (16, 18) AND _Primaries == 9
+
+    Where:
+        - _Transfer == 16: PQ (Perceptual Quantizer)
+        - _Transfer == 18: HLG (Hybrid Log-Gamma)
+        - _Primaries == 9: BT.2020
+
+    Args:
+        clip: VapourSynth clip to check
+
+    Returns:
+        True if clip is HDR (PQ or HLG with BT.2020 primaries)
+
+    Note:
+        Uses frame 0 properties. Consistent with _detect_hdr() in source.py.
+    """
 ```
 
 ---

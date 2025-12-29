@@ -49,3 +49,17 @@ class TonemapSettings:
     source_peak: int | None = None
     contrast_recovery: float = 0.0
     gamma_lift: bool = False
+
+
+@dataclass
+class ColorProps:
+    """Color space properties extracted from frame.
+
+    All fields use VapourSynth integer constants.
+    Defaults to 2 (unspecified) for missing properties.
+    """
+
+    primaries: int  # _Primaries (e.g., 1=BT.709, 9=BT.2020)
+    transfer: int  # _Transfer (e.g., 1=BT.709, 16=PQ, 18=HLG)
+    matrix: int  # _Matrix (e.g., 1=BT.709, 9=BT.2020nc)
+    color_range: int  # _ColorRange (0=full, 1=limited)

@@ -530,33 +530,24 @@ Apply a **review fix budget** (at most one direct CHANGES REQUIRED cycle per run
 
 ---
 
-## 2025-12-29 — Phase 3.2 Video Loading
+## 2025-12-29 — Phase 3.3 Frame Properties
 
-**Run:** 2025-12-29__p3-2__video-loading
-**Scope:** Video source loading via lsmas, HDR detection, DefaultVSLoader completion
-**SSOT edits:** Added raise contract, apply_trim semantics, HDR field mapping
-**Design:** lsmas/lw namespace selection per SSOT 1.4, end-inclusive trim
+**Run:** 2025-12-29__p3-3__frame-properties
+**Artifact versions:** plan-v1
+**Scope:** ColorProps type + get_color_props/is_hdr public API
+**SSOT edits:** Added sections 2.3 and 3.4 to vs-module.md
+**Out-of-scope:** _detect_hdr refactoring (left in source.py)
 
-### Loader Selection Policy (lsmas vs lw)
+### Frame Property Extraction
 
-**Context:** VapourSynth L-SMASH Works plugin can appear under `core.lsmas` or `core.lw` namespaces depending on build/installation.
+**Context:** The application needs a consistent way to extract color space information and detect HDR status from VapourSynth clips independently of the initial loading step.
 
-**Decision:** Always check for `LWLibavSource` function on the namespace object itself (e.g., `hasattr(core.lsmas, "LWLibavSource")`), prioritizing `lsmas` then falling back to `lw`.
+**Decision:**
+- Implement `get_color_props(clip)` to extract primaries, transfer, matrix, and range from frame 0.
+- Implement `is_hdr(clip)` using the BT.2020 + PQ/HLG detection rule.
+- Define `ColorProps` dataclass to hold these values with standard defaults (2/unspecified).
 
-**Rationale:** Namespace existence alone (e.g., `hasattr(core, "lsmas")`) is insufficient to guarantee the function is available. This pattern ensures robust plugin usage across different environment configurations.
-
-### HDR Detection Rules
-
-**Context:** Need deterministic logic for identifying HDR sources from VapourSynth frame properties.
-
-**Decision:** Detect HDR when `_Transfer` is 16 (PQ) or 18 (HLG), AND `_Primaries` is 9 (BT.2020).
-
-**Rationale:** Matches standard UHD Blu-ray and broadcast HDR signaling conventions.
-
-### Trim Slicing Semantics
-
-**Context:** `apply_trim` needs to handle frame ranges consistently.
-
-**Decision:** Use inclusive `end` frame semantics (frames `[start, end]` are included).
-
-**Rationale:** Aligns with standard video editing tool expectations (e.g., "frames 100 to 200" should include 101 frames). Internally uses `clip[start : end + 1]` to map to VapourSynth's exclusive-right slicing.
+**Rationale:**
+- Centralizes color property extraction logic.
+- Maintains consistency with `load_source()` by using frame 0.
+- Provides a clean, typed interface for subsequent tonemapping and color operations.
