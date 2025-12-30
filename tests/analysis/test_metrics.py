@@ -285,3 +285,63 @@ def test_calculate_metrics_propagates_source_load_error(mock_load, mock_loader_c
     with pytest.raises(SourceLoadError) as exc:
         calculate_metrics(video_paths, AnalysisConfig(), tmp_path)
     assert exc.value.code == "FC-4015"
+
+
+def test_no_toplevel_vapoursynth_import() -> None:
+    """Verify vapoursynth is only imported inside TYPE_CHECKING or functions.
+
+    Per SSOT: Import-Time VapourSynth Dependency (SSOT)
+    - No top-level 'import vapoursynth' outside TYPE_CHECKING blocks
+    - TYPE_CHECKING blocks are explicitly allowed
+    """
+    import ast
+    from pathlib import Path
+
+    metrics_path = (
+        Path(__file__).parent.parent.parent / "src" / "frame_compare" / "analysis" / "metrics.py"
+    )
+    source = metrics_path.read_text()
+    tree = ast.parse(source)
+
+    def is_type_checking_guard(node: ast.If) -> bool:
+        """Check if an If node is 'if TYPE_CHECKING:' or 'if typing.TYPE_CHECKING:'."""
+        test = node.test
+        # Handle: if TYPE_CHECKING:
+        if isinstance(test, ast.Name) and test.id == "TYPE_CHECKING":
+            return True
+        # Handle: if typing.TYPE_CHECKING:
+        return isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
+
+    def has_vapoursynth_import(nodes: list[ast.stmt]) -> tuple[bool, int]:
+        """Check if any node is a vapoursynth import. Returns (found, lineno)."""
+        for node in nodes:
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == "vapoursynth":
+                        return (True, node.lineno)
+            if isinstance(node, ast.ImportFrom) and node.module == "vapoursynth":
+                return (True, node.lineno)
+        return (False, 0)
+
+    for node in ast.iter_child_nodes(tree):
+        # Direct top-level import vapoursynth -> FAIL
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                assert (
+                    alias.name != "vapoursynth"
+                ), f"Top-level 'import vapoursynth' at line {node.lineno}"
+        # Direct top-level from vapoursynth import ... -> FAIL
+        if isinstance(node, ast.ImportFrom) and node.module == "vapoursynth":
+            raise AssertionError(f"Top-level 'from vapoursynth import' at line {node.lineno}")
+        # Top-level If block
+        if isinstance(node, ast.If):
+            if is_type_checking_guard(node):
+                # TYPE_CHECKING block: vapoursynth imports ALLOWED
+                continue
+            else:
+                # Other if block: vapoursynth imports NOT allowed
+                found, lineno = has_vapoursynth_import(node.body)
+                if found:
+                    raise AssertionError(
+                        f"vapoursynth import in non-TYPE_CHECKING if block at line {lineno}"
+                    )

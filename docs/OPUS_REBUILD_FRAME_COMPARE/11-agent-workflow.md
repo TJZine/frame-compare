@@ -477,7 +477,8 @@ The Plan Review gate exists to ensure the Coding Agent (Gemini) can implement wi
 2. **Doc Completion** — Ensure all docstrings, type hints, and comments are present
 3. **Checklist Update** — Mark completed items in `10-agent-master-checklist.md`
 4. **Handoff Creation** — Create the comprehensive handoff for Review Agent
-5. **Run Full Verification Suite:**
+5. **Phase Gates (when closing a phase)** — If the run completes the last item in a phase, run the phase gate(s) listed in the master checklist and mark the phase gate row(s) complete with recorded outputs in `verify-vN.md`
+6. **Run Full Verification Suite:**
 
    ```bash
    .venv/bin/pyright --warnings  # Full project

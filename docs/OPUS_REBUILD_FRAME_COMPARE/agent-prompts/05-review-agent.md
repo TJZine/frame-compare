@@ -74,6 +74,7 @@ Review the Coding Agent's work, verify quality gates, and approve or request cha
 - [ ] Plan Review Report exists with `Verdict: APPROVED`
 - [ ] Verification handoff includes all gate outputs (pyright, ruff, pytest, lint-imports, contract gates)
 - [ ] RUN_ID matches across all artifacts
+- [ ] If the run closes a phase, the master checklist includes the phase gate row(s) marked complete with recorded outputs in `verify-vN.md`
 
 **If any precondition fails, STOP and escalate.**
 

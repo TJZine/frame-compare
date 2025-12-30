@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
-import vapoursynth as vs  # type: ignore
 
 from frame_compare.analysis.cache_io import (
     CACHE_VERSION,
@@ -23,6 +22,8 @@ from frame_compare.vs.loader import DefaultVSLoader
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    import vapoursynth as vs  # type: ignore
 
     from frame_compare.config.schema import AnalysisConfig
 
@@ -133,6 +134,8 @@ def _calculate_luminance(
     Returns:
         List of per-frame luminance values (0.0-1.0)
     """
+    import vapoursynth as vs  # type: ignore
+
     if clip.num_frames == 0:
         raise MetricsCalculationError("Empty clip")
 
@@ -178,6 +181,8 @@ def _calculate_motion(clip: vs.VideoNode) -> list[float]:
     Returns:
         List of per-frame motion scores (0.0-1.0)
     """
+    import vapoursynth as vs  # type: ignore
+
     if clip.num_frames == 0:
         raise MetricsCalculationError("Empty clip")
 

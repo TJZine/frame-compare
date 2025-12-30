@@ -45,6 +45,7 @@ This project follows Conventional Commits and is intended to be released via Rel
 - Coding Agent prompt tightened to stop at `impl-vN.md` handoff (no Verification/Review role bleed).
 - Coding Agent required to run contract-view freshness check (and regenerate if needed) before handing off to Verification to prevent stale-contract churn.
 - Review Agent now outputs a single-line Conventional Commit subject summarizing the full checklist item/run.
+- Verification/Review flow now enforces phase gate updates only when the last item in a phase is completed.
 - Docker build now compiles `zimg` and `l-smash` from official release tarballs with checksum verification, installs Cython via pip for Python 3.13 compatibility, pins L-SMASH-Works to a published tag, and guards SSE2 headers for ARM builds.
 - Docker build adds `python3-jinja2` and `libvulkan-dev` to satisfy libplacebo tooling requirements, pins vs-placebo to a commit with submodules, and pins ffms2 to a FFmpeg 5-compatible commit.
 - Docker runtime image installs `wget` and `ca-certificates` to support DevContainer server bootstrap.
@@ -52,3 +53,5 @@ This project follows Conventional Commits and is intended to be released via Rel
 - Docker runtime image installs `procps` to provide `ps` for DevContainer bootstrap.
 - OPUS rebuild docs synced to the container baseline (`Dockerfile`) and updated to match current Bookworm/pin assumptions (deployment/system design/ADR/vs-module/feature parity).
 - Documentation updates L-SMASH Works verification to prefer the `lsmas` namespace with a legacy `lw` fallback.
+- Completed Analysis module public API exports (`calculate_metrics`).
+- Refactored metrics module to use lazy VapourSynth imports for non-VS environments.

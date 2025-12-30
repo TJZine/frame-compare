@@ -106,6 +106,16 @@ docs/OPUS_REBUILD_FRAME_COMPARE/10-agent-master-checklist.md
 
 Use `[x]` for completed items. Include the date of completion.
 
+#### Phase Gate Enforcement (If Closing a Phase)
+
+If this run completes the **last unchecked item** in a phase:
+
+- Run the phase gate(s) listed in `docs/OPUS_REBUILD_FRAME_COMPARE/10-agent-master-checklist.md`.
+- Update the **phase gate row(s)** in the master checklist in the same run.
+- Record the phase gate command output in `verify-vN.md`.
+
+If you are **not** closing a phase, do not touch phase gate rows.
+
 ### 4. Update Run Index
 
 Append entry to:

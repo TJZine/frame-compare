@@ -162,12 +162,12 @@ frame-compare/
 
 ### Phase 1 Quality Gate ✓
 
-- [ ] Config loads and validates TOML
-- [ ] Errors have codes, messages, hints
-- [ ] Logs output structured JSON
-- [ ] CLI responds to basic commands
-- [ ] Pyright shows 0 errors
-- [ ] Test coverage > 80%
+- [x] Config loads and validates TOML (2025-12-29)
+- [x] Errors have codes, messages, hints (2025-12-29)
+- [x] Logs output structured JSON (2025-12-29)
+- [x] CLI responds to basic commands (2025-12-29)
+- [x] Pyright shows 0 errors (2025-12-29)
+- [x] Test coverage > 80% (94.34%) (2025-12-29)
 
 ---
 
@@ -219,9 +219,9 @@ frame-compare/
 
 ### 2.5 Module Integration
 
-- [ ] Create `src/frame_compare/analysis/__init__.py`
-- [ ] Export public API: `calculate_metrics`, `select_frames`, types
-- [ ] Verify import contracts (no cross-layer imports)
+- [x] Create `src/frame_compare/analysis/__init__.py` (2025-12-29)
+- [x] Export public API: `calculate_metrics`, `select_frames`, types (2025-12-29)
+- [x] Verify import contracts (no cross-layer imports) (2025-12-29)
 
 ### Phase 2 Quality Gate ✓
 

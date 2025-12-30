@@ -396,6 +396,16 @@ Apply a **review fix budget** (at most one direct CHANGES REQUIRED cycle per run
 
 ---
 
+### Phase gate rows are updated at phase boundaries
+
+**Context:** Phase gate rows in the master checklist were being skipped because there was no explicit rule for when to run them.
+
+**Decision:** Verification must run phase gate commands and update the phase gate rows only when the run closes the last unchecked item in a phase; otherwise leave phase gate rows untouched.
+
+**Rationale:** Ensures phase gates are checked once per phase (not per item) and makes the timing deterministic.
+
+---
+
 ## 2025-12-29: Error Handling Slice Scope (Phase 1.2)
 
 **Decision:** Phase 1.2 implements only error classes defined in `errors-module.md` sections 3.2–3.6 and helpers in sections 4–5.
@@ -578,3 +588,13 @@ Apply a **review fix budget** (at most one direct CHANGES REQUIRED cycle per run
 - Normalization ensures selection algorithms work consistently across different bit-depths and formats.
 - Analyzing only the reference clip optimizes performance while maintaining comparison alignment.
 - Structured error handling with FC-4002 provides clear failure signals for processing issues.
+
+---
+
+## 2025-12-29 — Phase 2.5 Analysis Integration
+
+**Run:** 2025-12-29__p2-5__analysis-integration
+**Artifact versions:** plan-v5
+**Scope:** Added `calculate_metrics` export; refactored to lazy VS imports per SSOT
+**SSOT edits:** Added "Import-Time VapourSynth Dependency (SSOT)" section to `analysis-module.md`
+**Verification gates:** pass

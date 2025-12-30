@@ -43,6 +43,22 @@ src/frame_compare/analysis/
 > [!NOTE]
 > **`SelectionMode`** is canonically defined in `frame_compare.config` and imported from there.
 
+#### Import-Time VapourSynth Dependency (SSOT)
+
+The `frame_compare.analysis` module **MUST** be importable when `vapoursynth` is not installed. This enables:
+
+- Test collection on systems without VapourSynth
+- Type checking without runtime dependency
+- Import of types/cache utilities without video processing
+
+**Implementation rules:**
+
+1. Do **not** import `vapoursynth` at module import time (top-level)
+2. Use `TYPE_CHECKING` blocks for type hints referencing `vs.VideoNode`
+3. Import `vapoursynth` inside functions that require it (e.g., `_calculate_luminance`, `_calculate_motion`)
+
+**Verification:** A deterministic `ast`-based test must confirm no top-level `import vapoursynth` statements exist outside `if TYPE_CHECKING:` blocks.
+
 ---
 
 ## 2. Key Types
