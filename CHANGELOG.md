@@ -36,6 +36,8 @@ This project follows Conventional Commits and is intended to be released via Rel
 - Deterministic color metadata inference and conversion logic (`vs/color.py`).
 - `to_rgb24()` utility for high-quality screenshot export with range expansion.
 - Opt-in performance timing logs via `FRAME_COMPARE_PERF=1` spans.
+- HDR tonemapping (`apply_tonemap`) with 7 presets (BT.2390, Spline, Reinhard).
+- libplacebo integration for high-quality tonemapping with automatic Reinhard fallback.
 
 
 ### Changed

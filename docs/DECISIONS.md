@@ -626,3 +626,21 @@ Apply a **review fix budget** (at most one direct CHANGES REQUIRED cycle per run
 - Zero overhead in default operation (disabled)
 - Provides high-resolution `elapsed_ms` for heavy pipeline sections
 - Leaf-safe utility (no business logic dependencies)
+
+---
+
+## 2025-12-30 — Phase 3.5 HDR Tonemapping
+
+### libplacebo with Silent Reinhard Fallback
+
+**Context:** HDR tonemapping requires high-quality curves (BT.2390, Spline) via `libplacebo`, but this plugin may be missing or fail on some systems (e.g., restricted containers).
+
+**Decision:**
+- Prefer `libplacebo` when detected.
+- Silently fall back to a simple Reinhard global tonemap implementation via `std.Expr` if `libplacebo` is missing.
+- Unify RGBS conversion and post-processing (contrast recovery, gamma lift) logic across both paths to ensure consistent output properties.
+
+**Rationale:**
+- Ensures the application remains functional (producing a viewable image) even without optional dependencies.
+- Deterministic behavior: Fallback is automatic and silent (no warnings spamming stderr).
+- Consistent post-processing ensures user tweaks like gamma lift work regardless of the backend.

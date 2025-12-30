@@ -272,14 +272,12 @@ frame-compare/
 
 ### 3.5 Tonemapping
 
-- [ ] Create `src/frame_compare/vs/tonemap.py`
-- [ ] Define `TONEMAP_PRESETS` dict
-- [ ] Implement `tonemap(clip, preset, **overrides) -> VideoNode`
-- [ ] Implement BT.2390 curve
-- [ ] Implement Spline curve
-- [ ] Implement Reinhard curve
-- [ ] Handle missing libplacebo gracefully
-- [ ] Write tests for each preset
+- [x] Create `src/frame_compare/vs/tonemap.py` (2025-12-30)
+- [x] Implement `tonemap(clip, preset, **overrides)` (2025-12-30)
+- [x] Implement supported presets (reference, hable, mobius, reinhard) (2025-12-30)
+- [x] Handle libplacebo presence/absence (2025-12-30)
+- [x] Handle missing libplacebo gracefully (2025-12-30)
+- [x] Write tests for each preset (2025-12-30)
 
 ### 3.6 Module Integration
 

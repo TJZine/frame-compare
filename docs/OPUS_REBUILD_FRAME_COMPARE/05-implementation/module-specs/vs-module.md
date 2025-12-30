@@ -285,6 +285,13 @@ def apply_trim(
 
 ### 3.3 Tonemapping
 
+**Behavioral Requirements (SSOT):**
+
+1. **`settings.enabled == False`:** Return `clip` unchanged (no-op). Do not raise an error.
+2. **Core acquisition:** `core = clip.std.core` — this is the exact expression. If it fails (AttributeError), propagate the exception directly (do not wrap in TonemapError).
+3. **Missing libplacebo rule:** If libplacebo plugin is unavailable, use fallback tonemapping (see Section 5.3). Do NOT raise an error or warning; fallback is silent and deterministic.
+4. **Unknown preset:** `get_preset_settings()` raises `TonemapError(FC-4003)` with hint listing valid preset names.
+
 ```python
 def apply_tonemap(
     clip: vs.VideoNode,
@@ -294,22 +301,35 @@ def apply_tonemap(
     """
     Apply HDR to SDR tonemapping.
 
-    Uses libplacebo for tone curve application.
+    Uses libplacebo for tone curve application when available;
+    falls back to Reinhard curve otherwise.
 
     Args:
         clip: HDR video clip
         settings: Tonemap configuration
-        hdr_metadata: Source HDR metadata (detected if not provided)
+        hdr_metadata: Source HDR metadata (extracted from frame 0 if not provided)
 
     Returns:
-        SDR video clip
+        SDR video clip (unchanged if settings.enabled is False)
 
     Raises:
-        TonemapError: If tonemapping fails
+        TonemapError (FC-4003): If tonemapping operation fails
     """
 
 def get_preset_settings(preset: str) -> TonemapSettings:
-    """Get settings for named preset."""
+    """
+    Get settings for named preset.
+
+    Args:
+        preset: Preset name (one of: reference, filmic, contrast,
+                bt2390_spec, spline, bright_lift, highlight_guard)
+
+    Returns:
+        TonemapSettings with preset-specific values
+
+    Raises:
+        TonemapError (FC-4003): If preset name is not recognized
+    """
 ```
 
 ### 3.4 Frame Properties
@@ -466,6 +486,22 @@ def to_rgb24(
 | `bright_lift` | bt2390 | 250 | Lifted shadows |
 | `highlight_guard` | spline | 180 | Preserve highlights |
 
+**Preset Resolution Rules (SSOT):**
+
+Each preset resolves to a complete `TonemapSettings` as follows:
+
+| Field | Rule |
+|-------|------|
+| `enabled` | Always `True` |
+| `preset` | Set to the preset name |
+| `tone_curve` | Per table above |
+| `target_nits` | Per table above |
+| `source_peak` | `None` (auto-detect from `hdr_metadata.max_cll` or default 1000) |
+| `contrast_recovery` | `0.0` (default) |
+| `gamma_lift` | Per table: `True` for `bright_lift`, `False` for all others |
+
+**Preset field immutability:** Fields not listed in the table above MUST remain at their default values. Presets are complete and immutable; callers may override individual fields after calling `get_preset_settings()` if needed.
+
 ---
 
 ## 5. Implementation Details
@@ -506,6 +542,47 @@ def _detect_hdr(frame_props: Mapping[str, object]) -> tuple[bool, HDRMetadata | 
 
 ### 5.2 libplacebo Integration
 
+**TonemapSettings → placebo.Tonemap Mapping (SSOT):**
+
+| TonemapSettings field | placebo.Tonemap kwarg | Value Mapping |
+|-----------------------|----------------------|---------------|
+| `tone_curve` | `tone_mapping_function` | `"bt2390"` → `2`, `"spline"` → `1`, `"reinhard"` → `4` |
+| `target_nits` | `dst_max` | Passed directly as int |
+| `source_peak` | `src_max` | If `None`, use `hdr_metadata.max_cll` or `1000` |
+| `contrast_recovery` | — | Post-processing (see below); not a placebo kwarg |
+| `gamma_lift` | — | Post-processing (see below); not a placebo kwarg |
+
+**Unsupported `tone_curve` handling:** If `settings.tone_curve` is not in the mapping table (`bt2390`, `spline`, `reinhard`), raise `TonemapError(FC-4003)` with hint: `"Unsupported tone curve '{value}'. Supported: bt2390, spline, reinhard."`
+
+**RGBS Conversion Rule (SSOT — shared by libplacebo and fallback):**
+
+```python
+# Exact conversion call (import vs.RGBS from vapoursynth)
+if clip.format.id != vs.RGBS:
+    clip = clip.resize.Bicubic(format=vs.RGBS, matrix_in_s="709")
+# If already RGBS: no-op (do not reconvert)
+```
+
+- **Failure mode:** If `resize.Bicubic` raises, wrap in `TonemapError(FC-4003)` with message `"Failed to convert to RGBS: {original_error}"`.
+
+**hdr_metadata handling:**
+
+- If `hdr_metadata` is `None`: extract from `clip.get_frame(0).props` using `_detect_hdr()`.
+- Use `hdr_metadata.max_cll` for `src_max` when `settings.source_peak` is `None`.
+- If both are `None`, default `src_max` to `1000` nits.
+
+**Post-processing (SSOT — shared by libplacebo and fallback):**
+
+- **`contrast_recovery > 0.0`:** Apply `std.Expr` with clamped expression:
+
+  ```python
+  factor = 1 + contrast_recovery
+  expr = f"x 0.5 - {factor} * 0.5 + 0 max 1 min"
+  clip = clip.std.Expr(expr=[expr, expr, expr])
+  ```
+
+- **`gamma_lift == True`:** Apply `clip.std.Levels(gamma=0.9)`
+
 ```python
 def _apply_libplacebo(
     clip: vs.VideoNode,
@@ -516,25 +593,84 @@ def _apply_libplacebo(
     Apply libplacebo tonemapping.
 
     Pipeline:
-    1. Convert to floating point RGB
-    2. Apply vs.placebo.Tonemap()
-    3. Apply optional post-processing
-    4. Convert to output format
+    1. Convert to RGBS if not already (see RGBS Conversion Rule)
+    2. Apply core.placebo.Tonemap() with mapped kwargs
+    3. Apply contrast_recovery post-processing if > 0.0 (see Post-processing)
+    4. Apply gamma_lift post-processing if True (see Post-processing)
+    5. Return RGBS clip (caller converts to output format)
+
+    Args:
+        clip: Input HDR clip (YUV or RGB)
+        settings: Tonemap settings with mapped values
+        core: VapourSynth core (obtained via clip.std.core)
+
+    Returns:
+        Tonemapped RGBS clip
+
+    Raises:
+        TonemapError (FC-4003): If conversion or tonemap fails
     """
 ```
 
 ### 5.3 Fallback Handling
 
+**Fallback Algorithm (SSOT):**
+
+When libplacebo is unavailable, apply a simple Reinhard global tonemap:
+
+1. **RGBS Conversion:** Use exact same RGBS Conversion Rule as Section 5.2 (no divergence).
+2. **Formula:** Reinhard global tonemap with normalization:
+
+   ```
+   output = (x / peak) / (1 + (x / peak)) * norm
+   ```
+
+   Where:
+   - `x` = input pixel value (linear light)
+   - `peak` = `settings.source_peak` or `hdr_metadata.max_cll` or `1000`
+   - `norm` = `target_nits / peak` (normalizes output to SDR range)
+3. **Exact `std.Expr` expression:** (substituting constants at runtime)
+
+   ```python
+   expr = f"x {peak} / dup 1 + / {target_nits} {peak} / * 0 max 1 min"
+   clip = clip.std.Expr(expr=[expr, expr, expr])
+   ```
+
+   Where `{peak}` and `{target_nits}` are float literals substituted before call.
+4. **Clamping:** Output MUST be clamped to `[0, 1]` via `0 max 1 min` in the expression.
+5. **Post-processing:** Use exact same Post-processing rules as Section 5.2 (no divergence).
+
+**Output expectations:** Caller is responsible for final format conversion (e.g., to RGB24). Fallback returns RGBS.
+
 ```python
 def _fallback_tonemap(
     clip: vs.VideoNode,
     settings: TonemapSettings,
+    hdr_metadata: HDRMetadata | None,
 ) -> vs.VideoNode:
     """
     Simple fallback when libplacebo unavailable.
 
-    Uses basic Reinhard curve via core.std operations.
+    Uses Reinhard global tonemap via std.Expr.
     Quality is degraded but functional.
+
+    Pipeline:
+    1. Ensure clip is RGBS (convert if needed)
+    2. Apply Reinhard formula via std.Expr
+    3. Apply contrast_recovery if > 0.0
+    4. Apply gamma_lift if True
+    5. Return RGBS clip
+
+    Args:
+        clip: Input HDR clip
+        settings: Tonemap settings
+        hdr_metadata: HDR metadata for source peak
+
+    Returns:
+        Tonemapped RGBS clip
+
+    Raises:
+        TonemapError: If std.Expr fails
     """
 ```
 

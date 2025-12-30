@@ -510,13 +510,13 @@ class MetricsCalculationError(ProcessingError):
 class TonemapError(ProcessingError):
     """Tonemapping failure (FC-4003)."""
 
-    def __init__(self, reason: str) -> None:
+    def __init__(self, reason: str, hint: str | None = None) -> None:
         super().__init__(
             ErrorContext(
                 code="FC-4003",
                 name="TONEMAP_ERROR",
                 message=f"Tonemapping failed: {reason}",
-                hint="Check libplacebo support or config",
+                hint=hint or "Check libplacebo support or config",
                 details={"reason": reason},
             )
         )
