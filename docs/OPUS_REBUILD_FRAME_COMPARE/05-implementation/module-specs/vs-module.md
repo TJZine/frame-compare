@@ -749,7 +749,9 @@ The following MUST be exported from `__init__.py` for use by other modules:
 - `load_source`, `apply_trim` (functions)
 - `get_color_props`, `is_hdr` (functions)
 - `infer_color_props`, `apply_color_props`, `expand_limited_rgb_to_full`, `to_rgb24` (functions)
-- `tonemap` (function; implemented in Phase 3.5)
+- `tonemap(clip: vs.VideoNode, settings: TonemapSettings, hdr_metadata: HDRMetadata | None = None) -> vs.VideoNode` (alias of `apply_tonemap`)
+- `apply_tonemap` (function; exported)
+- `get_preset_settings` (function; exported)
 
 ## Key Requirements
 - Use LWLibavSource for file loading

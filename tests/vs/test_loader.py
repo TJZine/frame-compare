@@ -1,7 +1,12 @@
 """Tests for VapourSynth loader."""
 
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+# Mock vapoursynth BEFORE importing module under test (VS missing in CI)
+if "vapoursynth" not in sys.modules:
+    sys.modules["vapoursynth"] = MagicMock()
 
 from frame_compare.vs.loader import DefaultVSLoader
 

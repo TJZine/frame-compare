@@ -1,8 +1,14 @@
+import sys
 from collections.abc import Mapping
 from fractions import Fraction
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
+
+# Mock vapoursynth BEFORE importing module under test (VS missing in CI)
+if "vapoursynth" not in sys.modules:
+    sys.modules["vapoursynth"] = MagicMock()
 
 from frame_compare.errors import PluginNotFoundError, SourceLoadError
 from frame_compare.vs.source import apply_trim, load_source

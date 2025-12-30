@@ -38,6 +38,9 @@ This project follows Conventional Commits and is intended to be released via Rel
 - Opt-in performance timing logs via `FRAME_COMPARE_PERF=1` spans.
 - HDR tonemapping (`apply_tonemap`) with 7 presets (BT.2390, Spline, Reinhard).
 - libplacebo integration for high-quality tonemapping with automatic Reinhard fallback.
+- VapourSynth module integration (`frame_compare.vs` exports).
+- Public API alias `tonemap` for convenience.
+- Real VapourSynth integration smoke tests (`test_integration.py`).
 
 
 ### Changed

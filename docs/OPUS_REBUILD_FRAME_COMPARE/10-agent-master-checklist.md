@@ -281,9 +281,9 @@ frame-compare/
 
 ### 3.6 Module Integration
 
-- [ ] Create `src/frame_compare/vs/__init__.py`
-- [ ] Export public API
-- [ ] Mark VapourSynth tests appropriately
+- [x] Create `src/frame_compare/vs/__init__.py` (2025-12-30)
+- [x] Export public API (2025-12-30)
+- [x] Mark VapourSynth tests appropriately (2025-12-30)
 
 ### Phase 3 Quality Gate ✓
 
