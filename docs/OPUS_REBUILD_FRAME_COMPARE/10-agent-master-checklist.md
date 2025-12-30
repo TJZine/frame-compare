@@ -287,12 +287,12 @@ frame-compare/
 
 ### Phase 3 Quality Gate ✓
 
-- [ ] Videos load correctly
-- [ ] HDR detection accurate
-- [ ] All presets produce output
-- [ ] Fallback works when libplacebo missing
-- [ ] Pyright shows 0 errors
-- [ ] Tests pass (with `vs_required` skipped if no VS)
+- [x] Videos load correctly (2025-12-30)
+- [x] HDR detection accurate (2025-12-30)
+- [x] All presets produce output (2025-12-30)
+- [x] Fallback works when libplacebo missing (2025-12-30)
+- [x] Pyright shows 0 errors (2025-12-30)
+- [x] Tests pass (with `vs_required` skipped if no VS) (2025-12-30)
 
 ---
 

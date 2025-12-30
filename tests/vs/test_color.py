@@ -2,18 +2,7 @@
 
 from __future__ import annotations
 
-import sys
 from unittest.mock import MagicMock, patch
-
-# Mock vapoursynth BEFORE importing module under test to avoid ImportError
-# if the environment lacks VapourSynth (common in CI/containers).
-if "vapoursynth" not in sys.modules:
-    mock_vs = MagicMock()
-    # Mock constants needed for infer_color_props
-    mock_vs.MATRIX_BT2020_CL = 10
-    mock_vs.MATRIX_BT2020_NCL = 9
-    mock_vs.RGB24 = 0
-    sys.modules["vapoursynth"] = mock_vs
 
 from frame_compare.vs.color import (
     apply_color_props,

@@ -2,12 +2,7 @@
 
 from __future__ import annotations
 
-import sys
 from unittest.mock import MagicMock
-
-# Mock vapoursynth BEFORE importing module under test (VS missing in CI)
-if "vapoursynth" not in sys.modules:
-    sys.modules["vapoursynth"] = MagicMock()
 
 from frame_compare.vs.props import get_color_props, is_hdr
 

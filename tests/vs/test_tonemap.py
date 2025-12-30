@@ -1,16 +1,18 @@
 """Tests for tonemapping module."""
 
+import importlib.util
 import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Mock vapoursynth BEFORE importing module under test
-mock_vs = MagicMock()
-mock_vs.VideoNode = MagicMock
-mock_vs.Core = MagicMock
-mock_vs.RGBS = 0
-sys.modules["vapoursynth"] = mock_vs
+# Mock vapoursynth only when it is not installed, to allow safe import.
+if importlib.util.find_spec("vapoursynth") is None:
+    mock_vs = MagicMock()
+    mock_vs.VideoNode = MagicMock
+    mock_vs.Core = MagicMock
+    mock_vs.RGBS = 0
+    sys.modules["vapoursynth"] = mock_vs
 
 # Now import module under test
 import vapoursynth as vs  # noqa: E402, I001
