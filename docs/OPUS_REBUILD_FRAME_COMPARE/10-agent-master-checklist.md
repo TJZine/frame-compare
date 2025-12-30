@@ -225,12 +225,12 @@ frame-compare/
 
 ### Phase 2 Quality Gate ✓
 
-- [ ] Metrics calculate correctly
-- [ ] Selection is deterministic
-- [ ] Cache hit/miss works
-- [ ] All tests pass
-- [ ] Pyright shows 0 errors
-- [ ] Test coverage > 85%
+- [x] Metrics calculate correctly (2025-12-29)
+- [x] Selection is deterministic (2025-12-29)
+- [x] Cache hit/miss works (2025-12-29)
+- [x] All tests pass (2025-12-29)
+- [x] Pyright shows 0 errors (2025-12-29)
+- [x] Test coverage > 85% (91.51%) (2025-12-29)
 
 ---
 
