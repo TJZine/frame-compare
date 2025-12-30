@@ -29,7 +29,7 @@
 
 ### 0.2 Project Structure
 
-```
+```text
 frame-compare/
 ├── src/frame_compare/
 │   ├── __init__.py
@@ -265,10 +265,10 @@ frame-compare/
 
 ### 3.4 Color Operations
 
-- [ ] Create `src/frame_compare/vs/color.py`
-- [ ] Implement color space conversions
-- [ ] Handle BT.709, BT.2020
-- [ ] Handle limited/full range
+- [x] Create `src/frame_compare/vs/color.py` (2025-12-29)
+- [x] Implement color space conversions (2025-12-29)
+- [x] Handle BT.709, BT.2020 (2025-12-29)
+- [x] Handle limited/full range (2025-12-29)
 
 ### 3.5 Tonemapping
 

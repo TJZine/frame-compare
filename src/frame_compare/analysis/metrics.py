@@ -18,6 +18,7 @@ from frame_compare.errors import (
     PluginNotFoundError,
     SourceLoadError,
 )
+from frame_compare.utils.perf import perf_span
 from frame_compare.vs.loader import DefaultVSLoader
 
 if TYPE_CHECKING:
@@ -101,8 +102,10 @@ def calculate_metrics(
     if clip.num_frames == 0:
         raise MetricsCalculationError("Reference clip has 0 frames")
 
-    luminance = _calculate_luminance(clip, reporter)
-    motion = _calculate_motion(clip)
+    total_frames = int(clip.num_frames)  # type: ignore[arg-type]
+    with perf_span("analysis.calculate_metrics", frames=total_frames):
+        luminance = _calculate_luminance(clip, reporter)
+        motion = _calculate_motion(clip)
 
     metrics = FrameMetrics(
         luminance=luminance,
@@ -139,36 +142,40 @@ def _calculate_luminance(
     if clip.num_frames == 0:
         raise MetricsCalculationError("Empty clip")
 
-    # Format handling: convert to YUV if needed
-    if clip.format.color_family != vs.YUV:  # type: ignore
-        clip = clip.resize.Bicubic(format=vs.YUV420P8)  # type: ignore
+    total_frames = int(clip.num_frames)  # type: ignore[arg-type]
+    with perf_span("analysis.luminance", frames=total_frames):
+        # Format handling: convert to YUV if needed
+        if clip.format.color_family != vs.YUV:  # type: ignore
+            clip = clip.resize.Bicubic(format=vs.YUV420P8)  # type: ignore
 
-    max_value: float = (
-        1.0
-        if clip.format.sample_type == vs.FLOAT  # type: ignore
-        else float((1 << clip.format.bits_per_sample) - 1)  # type: ignore
-    )
+        max_value: float = (
+            1.0
+            if clip.format.sample_type == vs.FLOAT  # type: ignore
+            else float((1 << clip.format.bits_per_sample) - 1)  # type: ignore
+        )
 
-    if reporter:
-        reporter.start_phase("Calculating luminance", clip.num_frames)  # type: ignore
-
-    luminance: list[float] = []
-    try:
-        for n in range(clip.num_frames):  # type: ignore
-            frame = clip.get_frame(n)  # type: ignore
-            arr = np.asarray(frame[0])  # type: ignore
-            mean_val = float(np.mean(arr))  # type: ignore
-            luminance.append(mean_val / max_value)
-            if reporter:
-                reporter.advance(1)
-    except Exception as e:
-        # Re-raise with FC-4002 context
-        raise MetricsCalculationError(f"Frame access failed at frame {len(luminance)}: {e}") from e
-    finally:
         if reporter:
-            reporter.complete_phase()
+            reporter.start_phase("Calculating luminance", clip.num_frames)  # type: ignore
 
-    return luminance
+        luminance: list[float] = []
+        try:
+            for n in range(clip.num_frames):  # type: ignore
+                frame = clip.get_frame(n)  # type: ignore
+                arr = np.asarray(frame[0])  # type: ignore
+                mean_val = float(np.mean(arr))  # type: ignore
+                luminance.append(mean_val / max_value)
+                if reporter:
+                    reporter.advance(1)
+        except Exception as e:
+            # Re-raise with FC-4002 context
+            raise MetricsCalculationError(
+                f"Frame access failed at frame {len(luminance)}: {e}"
+            ) from e
+        finally:
+            if reporter:
+                reporter.complete_phase()
+
+        return luminance
 
 
 def _calculate_motion(clip: vs.VideoNode) -> list[float]:
@@ -186,29 +193,31 @@ def _calculate_motion(clip: vs.VideoNode) -> list[float]:
     if clip.num_frames == 0:
         raise MetricsCalculationError("Empty clip")
 
-    # Format handling: convert to YUV if needed
-    if clip.format.color_family != vs.YUV:  # type: ignore
-        clip = clip.resize.Bicubic(format=vs.YUV420P8)  # type: ignore
+    total_frames = int(clip.num_frames)  # type: ignore[arg-type]
+    with perf_span("analysis.motion", frames=total_frames):
+        # Format handling: convert to YUV if needed
+        if clip.format.color_family != vs.YUV:  # type: ignore
+            clip = clip.resize.Bicubic(format=vs.YUV420P8)  # type: ignore
 
-    width, height = clip.width, clip.height  # type: ignore
-    max_value: float = (
-        1.0
-        if clip.format.sample_type == vs.FLOAT  # type: ignore
-        else float((1 << clip.format.bits_per_sample) - 1)  # type: ignore
-    )
-    norm_factor = float(width * height) * max_value  # type: ignore
+        width, height = clip.width, clip.height  # type: ignore
+        max_value: float = (
+            1.0
+            if clip.format.sample_type == vs.FLOAT  # type: ignore
+            else float((1 << clip.format.bits_per_sample) - 1)  # type: ignore
+        )
+        norm_factor = float(width * height) * max_value  # type: ignore
 
-    motion = [0.0] * clip.num_frames  # type: ignore
-    try:
-        for n in range(1, clip.num_frames):  # type: ignore
-            prev_frame = clip.get_frame(n - 1)  # type: ignore
-            curr_frame = clip.get_frame(n)  # type: ignore
-            prev_arr = np.asarray(prev_frame[0]).astype(np.float32)  # type: ignore
-            curr_arr = np.asarray(curr_frame[0]).astype(np.float32)  # type: ignore
-            diff = np.abs(curr_arr - prev_arr)
-            motion[n] = float(np.sum(diff)) / norm_factor  # type: ignore
-    except Exception as e:
-        # Re-raise with FC-4002 context
-        raise MetricsCalculationError(f"Frame access failed during motion analysis: {e}") from e
+        motion = [0.0] * clip.num_frames  # type: ignore
+        try:
+            for n in range(1, clip.num_frames):  # type: ignore
+                prev_frame = clip.get_frame(n - 1)  # type: ignore
+                curr_frame = clip.get_frame(n)  # type: ignore
+                prev_arr = np.asarray(prev_frame[0]).astype(np.float32)  # type: ignore
+                curr_arr = np.asarray(curr_frame[0]).astype(np.float32)  # type: ignore
+                diff = np.abs(curr_arr - prev_arr)
+                motion[n] = float(np.sum(diff)) / norm_factor  # type: ignore
+        except Exception as e:
+            # Re-raise with FC-4002 context
+            raise MetricsCalculationError(f"Frame access failed during motion analysis: {e}") from e
 
-    return motion  # type: ignore
+        return motion  # type: ignore

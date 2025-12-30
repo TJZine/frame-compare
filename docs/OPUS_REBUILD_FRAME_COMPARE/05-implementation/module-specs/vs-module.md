@@ -190,7 +190,7 @@ class ColorProps:
     """Color space properties extracted from frame.
 
     All fields use VapourSynth integer constants.
-    Defaults to 2 (unspecified) for missing properties.
+    Defaults per the ColorProps Field Mapping table.
     """
     primaries: int    # _Primaries (e.g., 1=BT.709, 9=BT.2020)
     transfer: int     # _Transfer (e.g., 1=BT.709, 16=PQ, 18=HLG)
@@ -205,7 +205,7 @@ class ColorProps:
 | `primaries`      | `_Primaries`    | int  | 2       |
 | `transfer`       | `_Transfer`     | int  | 2       |
 | `matrix`         | `_Matrix`       | int  | 2       |
-| `color_range`    | `_ColorRange`   | int  | 0       |
+| `color_range`    | `_ColorRange`   | int  | 1       |
 
 **Type Coercion:** `int(value)` if value is not None, else default.
 
@@ -350,6 +350,105 @@ def is_hdr(clip: vs.VideoNode) -> bool:
 
     Note:
         Uses frame 0 properties. Consistent with _detect_hdr() in source.py.
+    """
+```
+
+### 3.5 Color Operations
+
+**Range constants (SSOT):**
+
+- `_ColorRange == 0` → full range
+- `_ColorRange == 1` → limited range
+
+```python
+def infer_color_props(clip: vs.VideoNode, props: ColorProps) -> ColorProps:
+    """
+    Resolve missing/unspecified color properties for downstream conversions.
+
+    Unspecified handling:
+        - For matrix/transfer/primaries: treat value 2 as missing ("unspecified").
+        - For color_range: treat value 2 as missing; missing defaults to limited (1) per ColorProps Field Mapping.
+
+    Inference rules (deterministic):
+        1) HDR signal backfill:
+           - If props.transfer in (16, 18):
+             - If primaries missing/unspecified, set primaries=9 (BT.2020).
+             - If matrix missing/unspecified, set matrix to BT.2020
+               (prefer MATRIX_BT2020_CL, else MATRIX_BT2020_NCL, else 9).
+           - If props.primaries == 9:
+             - If matrix missing/unspecified, set matrix to BT.2020
+               (prefer MATRIX_BT2020_CL, else MATRIX_BT2020_NCL, else 9).
+             - Does not infer transfer when missing.
+        2) SDR backfill by height:
+           - If clip.height <= 576: set matrix/transfer/primaries to 6 (SMPTE170M) when missing.
+           - If clip.height >= 577 (or height is unavailable): set matrix/transfer/primaries to 1 (BT.709) when missing.
+        3) color_range is preserved (0 full / 1 limited).
+
+    Returns:
+        Resolved ColorProps suitable for resize matrix_in/transfer_in/primaries_in/range_in.
+
+    Raises:
+        Exception: Propagates VapourSynth/resize errors (no new FC error type in this layer).
+    """
+
+def apply_color_props(clip: vs.VideoNode, props: ColorProps) -> vs.VideoNode:
+    """
+    Apply color properties to all frames via std.SetFrameProps.
+
+    Sets:
+        _Matrix, _Transfer, _Primaries, _ColorRange
+
+    Raises:
+        Exception: Propagates VapourSynth std errors (no new FC error type in this layer).
+    """
+
+def expand_limited_rgb_to_full(clip: vs.VideoNode) -> vs.VideoNode:
+    """
+    Expand limited-range integer RGB to full range.
+
+    For integer RGB:
+        min_in=16*(2**(bits-8)), max_in=235*(2**(bits-8))
+        min_out=0, max_out=(2**bits)-1
+        planes=[0, 1, 2]
+
+    For float RGB:
+        No-op.
+
+    Raises:
+        Exception: Propagates VapourSynth std errors (no new FC error type in this layer).
+    """
+
+def to_rgb24(
+    clip: vs.VideoNode,
+    *,
+    props: ColorProps,
+    output_range: int = 0,
+    expand_to_full: bool = True,
+    dither_type: str = "error_diffusion",
+) -> vs.VideoNode:
+    """
+    Convert clip to RGB24 for screenshot rendering.
+
+    Conversion:
+        Uses clip.resize.Point with:
+        - format=vs.RGB24
+        - range=output_range
+        - dither_type=dither_type
+        - matrix_in/transfer_in/primaries_in from inferred props when not 2 (unspecified)
+        - range_in from inferred props (always passed; 0 full / 1 limited)
+
+    Range expansion:
+        If expand_to_full is True AND output_range == 0 AND inferred input range == 1,
+        expand via expand_limited_rgb_to_full().
+
+    Output props:
+        After conversion (and optional expansion), apply:
+        - _Matrix=0 (RGB)
+        - _ColorRange=output_range
+        - _Transfer and _Primaries set from inferred props when not 2 (unspecified)
+
+    Raises:
+        Exception: Propagates VapourSynth/resize errors (no new FC error type in this layer).
     """
 ```
 
@@ -509,8 +608,12 @@ This module handles video source loading, HDR detection, and tonemapping.
 The following MUST be exported from `__init__.py` for use by other modules:
 - `VSLoader` (Protocol)
 - `DefaultVSLoader` (implementation)
-- `SourceInfo`, `HDRMetadata`, `TonemapSettings` (types)
-- `ensure_vs_environment`, `load_source`, `tonemap` (functions)
+- `SourceInfo`, `HDRMetadata`, `TonemapSettings`, `ColorProps` (types)
+- `is_vapoursynth_available`, `ensure_vs_environment`, `detect_plugins`, `require_plugin` (functions)
+- `load_source`, `apply_trim` (functions)
+- `get_color_props`, `is_hdr` (functions)
+- `infer_color_props`, `apply_color_props`, `expand_limited_rgb_to_full`, `to_rgb24` (functions)
+- `tonemap` (function; implemented in Phase 3.5)
 
 ## Key Requirements
 - Use LWLibavSource for file loading

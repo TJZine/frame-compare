@@ -79,7 +79,7 @@ The plan is not the SSOT for behavior/signatures. The plan must:
 Run through this checklist and report each item as **PASS** or **FAIL**:
 
 | # | Check | Criteria |
-|---|-------|----------|
+| :--- | :------- | :---------- |
 | 1 | **Scope** | Exactly one checklist item (or explicit sub-slice); clear out-of-scope section |
 | 2 | **Dependencies** | All imports, layers, and required prior modules identified |
 | 3 | **File List** | Complete and minimal; no ambiguous "and related files" |
@@ -299,7 +299,7 @@ The NEXT block must be concrete (no placeholders for the current run) and must r
 
 ### Required NEXT block templates
 
-**A) CHANGES REQUIRED (SSOT update required)**
+#### A) CHANGES REQUIRED (SSOT update required)
 
 ```markdown
 ## NEXT AGENT PROMPT (COPY/PASTE)
@@ -325,7 +325,7 @@ Write file: .agent-workflow/runs/<RUN_ID>/plan-v<N+1>.md
 - Do not add missing SSOT requirements into the plan; update SSOT and re-anchor.
 ```
 
-**B) CHANGES REQUIRED (plan-only)**
+#### B) CHANGES REQUIRED (plan-only)
 
 ```markdown
 ## NEXT AGENT PROMPT (COPY/PASTE)
@@ -344,7 +344,7 @@ Write file: .agent-workflow/runs/<RUN_ID>/plan-v<N+1>.md
 - Spec Anchors must copy/paste exact SSOT headings (must pass `validate_spec_anchors.py`).
 ```
 
-**C) APPROVED**
+#### C) APPROVED
 
 ```markdown
 ## NEXT AGENT PROMPT (COPY/PASTE)

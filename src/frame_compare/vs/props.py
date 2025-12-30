@@ -31,7 +31,7 @@ def get_color_props(clip: vs.VideoNode) -> ColorProps:
         primaries=int(props.get("_Primaries", 2)),  # type: ignore
         transfer=int(props.get("_Transfer", 2)),  # type: ignore
         matrix=int(props.get("_Matrix", 2)),  # type: ignore
-        color_range=int(props.get("_ColorRange", 0)),  # type: ignore
+        color_range=int(props.get("_ColorRange", 1)),  # type: ignore
     )
 
 

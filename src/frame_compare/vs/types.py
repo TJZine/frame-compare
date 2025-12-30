@@ -56,7 +56,7 @@ class ColorProps:
     """Color space properties extracted from frame.
 
     All fields use VapourSynth integer constants.
-    Defaults to 2 (unspecified) for missing properties.
+    Defaults to 2 (unspecified) for primaries/transfer/matrix and 1 (limited) for range.
     """
 
     primaries: int  # _Primaries (e.g., 1=BT.709, 9=BT.2020)

@@ -33,10 +33,14 @@ This project follows Conventional Commits and is intended to be released via Rel
 - `ColorProps` type for color space properties.
 - `get_color_props()` function to extract color properties from clip.
 - `is_hdr()` function to detect HDR clips.
+- Deterministic color metadata inference and conversion logic (`vs/color.py`).
+- `to_rgb24()` utility for high-quality screenshot export with range expansion.
+- Opt-in performance timing logs via `FRAME_COMPARE_PERF=1` spans.
 
 
 ### Changed
 
+- `ColorProps` range default aligned with SSOT (missing or unspecified `_ColorRange` defaults to limited/1).
 - Planning/Plan Review prompts: require copy-forward plan revisions and a `## Changes Since plan-vN` summary to reduce churn during plan iteration.
 - Planning/Plan Review/Coding/Review prompts + workflow docs: added SSOT anchoring guardrails (Spec Anchors + one-line signatures + SSOT drift gate), anti-churn line budget + iteration cap, and Review routing rules (implementation defect vs spec drift vs design issue).
 - Verification workflow adds `scripts/validate_spec_anchors.py` as a STOP gate for plan/spec consistency.
@@ -46,6 +50,7 @@ This project follows Conventional Commits and is intended to be released via Rel
 - Coding Agent required to run contract-view freshness check (and regenerate if needed) before handing off to Verification to prevent stale-contract churn.
 - Review Agent now outputs a single-line Conventional Commit subject summarizing the full checklist item/run.
 - Verification/Review flow now enforces phase gate updates only when the last item in a phase is completed.
+- VS module SSOT defines Phase 3.4 color operations API (BT.709/BT.2020 + limited/full handling) and clarifies missing `_ColorRange` defaults.
 - Docker build now compiles `zimg` and `l-smash` from official release tarballs with checksum verification, installs Cython via pip for Python 3.13 compatibility, pins L-SMASH-Works to a published tag, and guards SSE2 headers for ARM builds.
 - Docker build adds `python3-jinja2` and `libvulkan-dev` to satisfy libplacebo tooling requirements, pins vs-placebo to a commit with submodules, and pins ffms2 to a FFmpeg 5-compatible commit.
 - Docker runtime image installs `wget` and `ca-certificates` to support DevContainer server bootstrap.

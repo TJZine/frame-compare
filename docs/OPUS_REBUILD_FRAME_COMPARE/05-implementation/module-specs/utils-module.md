@@ -37,6 +37,7 @@ src/frame_compare/utils/
 ├── result.py        # Ok/Err/Result
 ├── types.py         # WorkspacePaths, RunMetrics
 ├── logging.py       # structlog configuration + correlation IDs
+├── perf.py          # Opt-in performance timing spans
 ├── progress.py      # ProgressReporter protocol + implementations
 ├── paths.py         # Workspace-safe path helpers
 └── subproc.py       # subprocess wrapper (shell=False)
@@ -258,6 +259,24 @@ class RichProgressReporter:
     def set_description(self, desc: str) -> None:
         if self._current_task is not None:
             self._progress.update(self._current_task, description=desc)
+
+### 4.3 Performance Instrumentation (Opt-in)
+
+```python
+def is_perf_enabled() -> bool:
+    """Return True when perf timing logs are enabled."""
+
+@contextmanager
+def perf_span(name: str, **fields: object) -> Iterator[None]:
+    """
+    Record a timing span if enabled.
+
+    Enabled via environment variable:
+      - FRAME_COMPARE_PERF in {"1","true","yes","on"} (case-insensitive)
+
+    Logs a 'perf' event with 'elapsed_ms' float and optional fields.
+    """
+```
 
     def complete_phase(self) -> None:
         if self._current_task is not None:

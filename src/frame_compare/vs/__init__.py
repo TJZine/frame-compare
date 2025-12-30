@@ -1,5 +1,11 @@
 """VapourSynth module for frame-compare."""
 
+from frame_compare.vs.color import (
+    apply_color_props,
+    expand_limited_rgb_to_full,
+    infer_color_props,
+    to_rgb24,
+)
 from frame_compare.vs.env import (
     detect_plugins,
     ensure_vs_environment,
@@ -26,4 +32,8 @@ __all__ = [
     "apply_trim",
     "get_color_props",
     "is_hdr",
+    "infer_color_props",
+    "apply_color_props",
+    "expand_limited_rgb_to_full",
+    "to_rgb24",
 ]

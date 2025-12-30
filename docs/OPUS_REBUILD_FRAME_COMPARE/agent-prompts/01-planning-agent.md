@@ -25,7 +25,7 @@ Transform blueprint specifications into focused, scoped implementation plans for
 
 1. **Propose a RUN_ID** in the first 5 lines of your response:
 
-   ```
+   ```text
    PROPOSED RUN_ID: YYYY-MM-DD__p<phase>-<item>__<short_slug>
    Example: 2025-12-25__p1-1-1__config-module
    ```
@@ -73,7 +73,7 @@ Transform blueprint specifications into focused, scoped implementation plans for
 
 Produce an **Implementation Plan** following this template:
 
-```markdown
+````markdown
 ---
 RUN_ID: <RUN_ID>
 VERSION: vN
@@ -178,7 +178,7 @@ Follow `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md` → **Command Cano
 - [Gotchas, tips, important patterns to follow]
 - [Any algorithm details fully specified — no decisions left for Coding Agent]
 
-```
+````
 
 ---
 
@@ -223,6 +223,7 @@ In the plan body (after `## Changes Since ...` and before “Files to Create/Mod
 ```
 
 For every file you ask the Coding Agent to create/modify, include a **Spec Anchor** pointing to the exact SSOT location that defines:
+
 - public signatures/types, and
 - required behavior + edge cases.
 

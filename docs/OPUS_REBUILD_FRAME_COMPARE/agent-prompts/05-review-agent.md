@@ -166,52 +166,52 @@ UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_traceability.p
 
 ### 2. Code Review Checklist
 
-**Correctness**
+#### Correctness
 
 - [ ] Implements all acceptance criteria
 - [ ] Algorithms match the SSOT spec sections referenced by `## Spec Anchors (SSOT)` in the plan (cite the anchor headings you checked)
 - [ ] Edge cases handled
 - [ ] No logic errors
 
-**Type Safety**
+#### Type Safety
 
 - [ ] All functions have type hints
 - [ ] Pyright passes in strict mode
 - [ ] Complex types are well-defined
 
-**Error Handling**
+#### Error Handling
 
 - [ ] Follows error hierarchy from `error-handling.md`
 - [ ] Errors have FC-xxxx codes and hints
 - [ ] No bare `except:` clauses
 - [ ] Errors logged appropriately
 
-**Testing**
+#### Testing
 
 - [ ] Unit tests cover main paths
 - [ ] Edge cases tested
 - [ ] Tests are deterministic
 - [ ] Coverage > 80%
 
-**Documentation**
+#### Documentation
 
 - [ ] Public functions have docstrings
 - [ ] Complex logic has comments
 - [ ] Module has description
 
-**SSOT Drift (Hard Gate)**
+#### SSOT Drift (Hard Gate)
 
 - [ ] SSOT spec matches implementation for behavior + public signatures
 - [ ] If behavior/signatures changed, SSOT was updated in this run (or explicitly scoped out and re-planned)
 
-**Security**
+#### Security
 
 - [ ] No hardcoded secrets
 - [ ] Input validation present
 - [ ] Safe error messages (no sensitive data)
 - [ ] If the slice touches file paths / subprocess / network: confirm the relevant security invariants are followed (or explicitly N/A)
 
-**Performance**
+#### Performance
 
 - [ ] No obvious O(n²) when O(n) possible
 - [ ] Large data handled efficiently
@@ -245,7 +245,7 @@ Fundamental problem requiring plan revision.
 
 Produce a **Review Report** following this template:
 
-```markdown
+````markdown
 ---
 RUN_ID: <RUN_ID>
 VERSION: vN
@@ -374,7 +374,7 @@ Coverage: XX%
 - Problem: [Description]
 - Suggestion: [How to fix design]
 
-```
+````
 
 ---
 
@@ -448,14 +448,14 @@ The block content depends on your **verdict**.
 
 Provide orchestrator instructions and a stub for the next run:
 
-```markdown
+````markdown
 ## NEXT AGENT PROMPT (COPY/PASTE)
 
 ### ✅ Run Complete: [INSERT ACTUAL RUN_ID]
 
 **Orchestrator Actions:**
 1. Commit the changes:
-   ```bash
+    ```bash
    git add -A
    git commit -m "feat([module]): implement [item name]" \
      -m "Run: [INSERT ACTUAL RUN_ID]" \
@@ -477,20 +477,23 @@ NEW_RUN_ID
 (ORCHESTRATOR: replace `NEW_RUN_ID` with the next run’s confirmed RUN_ID before running the Planning Agent)
 
 ## Target
+
 Pick the next unchecked checklist item (Planning Agent will read the checklist).
 
 ## Context Files to Read
+
 1. Read file: docs/OPUS_REBUILD_FRAME_COMPARE/10-agent-master-checklist.md
 2. Read file: docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md
 
 ## Your Task
+
 Pick the next unchecked checklist item and create a detailed Implementation Plan.
 
 ## Output
 
 Write file: .agent-workflow/runs/NEW_RUN_ID/plan-v1.md
 
-```
+````
 
 ---
 

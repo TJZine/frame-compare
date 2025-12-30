@@ -140,7 +140,7 @@ Entry format:
 
 Produce a **Verification Handoff** following this template:
 
-```markdown
+````markdown
 ---
 RUN_ID: <RUN_ID>
 VERSION: vN
@@ -232,7 +232,7 @@ $ UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_traceability
 
 All verification gates passed. Handoff to Review Agent.
 
-```
+````
 
 ---
 
@@ -251,7 +251,7 @@ All verification gates passed. Handoff to Review Agent.
 
 Return to Coding Agent with specific errors:
 
-```markdown
+````markdown
 ## Verification Failed: [Feature Name]
 
 **RUN_ID:** <RUN_ID>
@@ -265,11 +265,11 @@ Return to Coding Agent with specific errors:
 
 Return to Coding Agent for fixes.
 
-```
+````
 
 ### If Contract Gates Fail
 
-```markdown
+````markdown
 ## Contract Gate Failed: [Feature Name]
 
 **RUN_ID:** <RUN_ID>
@@ -285,7 +285,7 @@ Return to Coding Agent for fixes.
 - If traceability on requirements: Must fix before proceeding
 - Otherwise: Document in handoff, link follow-up task
 
-```
+````
 
 ---
 

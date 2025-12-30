@@ -555,7 +555,7 @@ Apply a **review fix budget** (at most one direct CHANGES REQUIRED cycle per run
 **Decision:**
 - Implement `get_color_props(clip)` to extract primaries, transfer, matrix, and range from frame 0.
 - Implement `is_hdr(clip)` using the BT.2020 + PQ/HLG detection rule.
-- Define `ColorProps` dataclass to hold these values with standard defaults (2/unspecified).
+- Define `ColorProps` dataclass to hold these values with standard defaults (2/unspecified for primaries/transfer/matrix; limited range default for missing `_ColorRange`).
 
 **Rationale:**
 - Centralizes color property extraction logic.
@@ -598,3 +598,31 @@ Apply a **review fix budget** (at most one direct CHANGES REQUIRED cycle per run
 **Scope:** Added `calculate_metrics` export; refactored to lazy VS imports per SSOT
 **SSOT edits:** Added "Import-Time VapourSynth Dependency (SSOT)" section to `analysis-module.md`
 **Verification gates:** pass
+
+---
+
+## 2025-12-30 — Phase 3.4 Color Operations + Perf Spans
+
+### Color Range Default: Missing → Limited (1)
+
+**Context:** Older encodes and common YUV sources often lack explicit `_ColorRange` metadata.
+
+**Decision:** Treat missing or unspecified (2) `_ColorRange` as limited range (1) in `ColorProps`.
+
+**Rationale:**
+- Aligns with standard YUV/broadcast defaults
+- Prevents "crushed blacks" that would occur if incorrectly assuming full range
+- Matches legacy 1.x behavior for common sources
+
+---
+
+### Performance Instrumentation: Opt-in Spans
+
+**Context:** Heavy loops in analysis and rendering need timing data for optimization, but constant logging adds overhead.
+
+**Decision:** Implement an opt-in `perf_span` utility enabled via `FRAME_COMPARE_PERF=1`.
+
+**Rationale:**
+- Zero overhead in default operation (disabled)
+- Provides high-resolution `elapsed_ms` for heavy pipeline sections
+- Leaf-safe utility (no business logic dependencies)

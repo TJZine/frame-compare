@@ -8,7 +8,7 @@ from frame_compare.vs.props import get_color_props, is_hdr
 
 
 def test_get_color_props_returns_colorprops_with_defaults():
-    """Verify defaults (2, 2, 2, 0) when props missing."""
+    """Verify defaults (2, 2, 2, 1) when props missing."""
     clip = MagicMock()
     # Mock frame 0 props as empty dict
     clip.get_frame.return_value.props = {}
@@ -17,7 +17,7 @@ def test_get_color_props_returns_colorprops_with_defaults():
     assert props.primaries == 2
     assert props.transfer == 2
     assert props.matrix == 2
-    assert props.color_range == 0
+    assert props.color_range == 1
 
 
 def test_get_color_props_extracts_all_fields():
@@ -49,7 +49,7 @@ def test_get_color_props_partial_props_uses_defaults():
     assert props.primaries == 9
     assert props.transfer == 16
     assert props.matrix == 2
-    assert props.color_range == 0
+    assert props.color_range == 1
 
 
 def test_is_hdr_pq_bt2020_returns_true():
