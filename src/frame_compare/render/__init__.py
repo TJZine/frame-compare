@@ -7,6 +7,7 @@ from frame_compare.render.naming import (
     generate_screenshot_name,
     generate_screenshot_path,
 )
+from frame_compare.render.overlay import apply_overlay
 from frame_compare.render.types import (
     EncoderSettings,
     OverlayConfig,
@@ -28,4 +29,5 @@ __all__ = [
     "ensure_mod2",
     "generate_screenshot_name",
     "generate_screenshot_path",
+    "apply_overlay",
 ]

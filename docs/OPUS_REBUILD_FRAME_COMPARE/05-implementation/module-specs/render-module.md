@@ -240,6 +240,31 @@ def apply_overlay(
     """
 ```
 
+#### 3.2.1 `apply_overlay` Behavior
+
+**Algorithm:**
+
+1. Convert input to `PIL.Image.Image` if numpy array is provided.
+2. Generate text string based on `config.mode`:
+   - `MINIMAL`: `"{label}"`
+   - `STANDARD`: `"{label} | Frame {frame_number:05d} | {width}x{height}"`
+   - `DIAGNOSTIC`: `"{label} | Frame {frame_number:05d} | {width}x{height} | {hdr_info or 'SDR'}"`
+3. Load font from `config.font_path` with size `config.font_size`. If `font_path` is `None`, use PIL default font.
+4. Measure text bounding box to determine overlay dimensions.
+5. Calculate overlay position using `calculate_overlay_position(image.size, (text_width + padding*2, text_height + padding*2), config.position)`.
+6. Draw semi-transparent background rectangle (RGBA: 0, 0, 0, 180) at calculated position.
+7. Draw text with shadow (1px offset, black) then white foreground.
+8. Return composited image as `PIL.Image.Image`.
+
+**Constants:**
+
+- `padding: int = 8` (pixels around text inside background)
+
+**Invalid inputs:**
+
+- Input image is `None`: raise `ValueError("image must not be None")`.
+- `config.mode` not in `OverlayMode`: raise `ValueError("invalid overlay mode")`.
+
 ### 3.3 Naming
 
 ```python

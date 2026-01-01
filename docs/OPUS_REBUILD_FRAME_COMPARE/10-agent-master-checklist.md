@@ -325,12 +325,12 @@ frame-compare/
 
 ### 4.4 Overlay
 
-- [ ] Create `src/frame_compare/render/overlay.py`
-- [ ] Implement text overlay rendering
-- [ ] Support overlay modes
-- [ ] Include frame number, label, resolution
-- [ ] Include HDR metadata in diagnostic mode
-- [ ] Write overlay tests
+- [x] Create `src/frame_compare/render/overlay.py` (2026-01-01)
+- [x] Implement text overlay rendering (2026-01-01)
+- [x] Support overlay modes (2026-01-01)
+- [x] Include frame number, label, resolution (2026-01-01)
+- [x] Include HDR metadata in diagnostic mode (2026-01-01)
+- [x] Write overlay tests (2026-01-01)
 
 ### 4.5 Encoders
 

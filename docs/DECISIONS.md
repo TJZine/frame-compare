@@ -80,3 +80,16 @@
 - Ensures consistent and safe filenames across platforms.
 - Sanitizes user-provided labels to prevent invalid path characters.
 - Deterministic padding (5 digits) ensures correct lexical sorting.
+
+## 2026-01-01 — Phase 4.4 Render Overlay
+
+### Dependencies
+
+**Context:** Render module requires image processing capabilities for overlays.
+
+**Decision:** Added `pillow>=10.0.0` as a runtime dependency.
+
+**Rationale:**
+- Standard Python imaging library.
+- Provides necessary text rendering and composition features.
+- Version 10.0.0+ ensures modern API availability (e.g., `ImageFont.load_default(size=...)`).

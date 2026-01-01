@@ -8,6 +8,7 @@ This project follows Conventional Commits and is intended to be released via Rel
 
 ### Added
 
+- `render.overlay` module with text overlay rendering and `pillow` dependency
 - `render.naming` module with screenshot name generation and label sanitization
 - `render.geometry` module with dimension calculation and overlay positioning utilities
 - Added `frame_compare.render` module with type definitions
