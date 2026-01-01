@@ -101,9 +101,9 @@ If you can run local checks while coding, do so to catch obvious issues early �
 > The Coding Agent must follow these constraints **exactly**. Violations will be caught in Verification.
 
 1. **Follow the plan EXACTLY** — No additions, no omissions, no "improvements"
-2. **Only modify files listed in the plan** — If you believe a new file is needed, STOP and escalate
+2. **Only modify files listed in the plan** — If you believe a new file is needed, STOP and escalate. Exception: auto-generated contract views produced by `python scripts/generate_contract_views.py` when the freshness gate requires regeneration; list these in the Implementation Report as generated outputs.
 3. **Do NOT update the master checklist** — That is the Verification Agent's responsibility
-4. **Do NOT edit derived/generated files** — See specific list below
+4. **Do NOT edit derived/generated files manually** — Use the generator only; see specific list below
 5. **Do NOT invent error codes** — Use only FC-xxxx from the canonical registry
 6. **Run local sanity checks if available** — but do not act as Verification; do not write `verify-vN.md`
 7. **Use the exact types from the plan** — Do not substitute or "simplify" type definitions

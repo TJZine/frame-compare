@@ -132,6 +132,8 @@ From `plan-vN.md`, collect the planned “Files to Create/Modify”.
 - **DESIGN ISSUE** if it changes scope/public API/architecture or adds new modules/files beyond the plan contract.
 - **CHANGES REQUIRED** only if it is a clearly-contained “Implementation Defect” fix and the review report documents why it was necessary.
 
+**Exception (auto-generated contract views):** If the only out-of-plan changes are generated artifacts produced by `python scripts/generate_contract_views.py` (for example: `docs/OPUS_REBUILD_FRAME_COMPARE/05-implementation/*.md`, `docs/OPUS_REBUILD_FRAME_COMPARE/scaffold/src/frame_compare/cli/_generated.py`) and Verification confirms contract freshness, do **not** fail the review solely for these diffs. Instead, note them as non-blocking and confirm they are generator-produced (no manual edits).
+
 #### 0.2 Read the code (required)
 
 Read every file in the review set (source + tests + touched docs that affect behavior/SSOT/contract views).

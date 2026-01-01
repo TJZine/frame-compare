@@ -56,6 +56,16 @@ The algorithm partitions frames into bins and selects one frame per bin using a 
 
 ## 2. Key Types
 
+### 2.0 OverlayMode
+
+```python
+class OverlayMode(str, Enum):
+    """Overlay verbosity level."""
+    MINIMAL = "minimal"      # Label only
+    STANDARD = "standard"    # Label + frame + resolution
+    DIAGNOSTIC = "diagnostic" # Standard + HDR info
+```
+
 ### 2.1 RenderRequest
 
 ```python
@@ -75,6 +85,21 @@ class EncoderSettings:
     bit_depth: int = 8
 ```
 
+**Example construction:**
+
+```python
+settings = EncoderSettings()
+settings = EncoderSettings(format="png", compression=9, bit_depth=16)
+
+request = RenderRequest(
+    clip=Path("video.mkv"),
+    frame_number=0,
+    output_path=Path("frame_00000.png"),
+    overlay=None,
+    encoder_settings=EncoderSettings(),
+)
+```
+
 ### 2.2 OverlayConfig
 
 ```python
@@ -89,8 +114,52 @@ class OverlayConfig:
     font_size: int = 24
     position: str = "top-left"  # top-left, top-right, bottom-left, bottom-right
 
-# Renderer type alias
 Renderer = Literal["vapoursynth", "ffmpeg", "auto"]
+```
+
+**Example construction:**
+
+```python
+overlay = OverlayConfig(
+    mode=OverlayMode.STANDARD,
+    label="Reference",
+    frame_number=100,
+    resolution=(1920, 1080),
+    hdr_info=None,
+    font_path=None,
+)
+
+overlay = OverlayConfig(
+    mode=OverlayMode.DIAGNOSTIC,
+    label="Encode",
+    frame_number=100,
+    resolution=(3840, 2160),
+    hdr_info="PQ / BT.2020",
+    font_path=Path("/fonts/mono.ttf"),
+    font_size=32,
+    position="bottom-right",
+)
+```
+
+### 2.3 ScreenshotResult
+
+```python
+@dataclass(frozen=True)
+class ScreenshotResult:
+    """Result of a batch screenshot operation."""
+    label: str              # Video label
+    paths: list[Path]       # List of generated screenshot paths
+    frame_count: int        # Number of frames rendered
+```
+
+**Example construction:**
+
+```python
+result = ScreenshotResult(
+    label="Reference",
+    paths=[Path("Reference_00100.png"), Path("Reference_00200.png")],
+    frame_count=2,
+)
 ```
 
 ---

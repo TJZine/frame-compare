@@ -8,6 +8,11 @@ This project follows Conventional Commits and is intended to be released via Rel
 
 ### Added
 
+- Added `frame_compare.render` module with type definitions
+
+### Changed
+
+- Workflow: allow auto-generated contract view diffs from `generate_contract_views.py` without blocking review when freshness is verified.
 - **CI/CD Pipeline:** GitHub Actions workflow with Ruff linting, Pyright type checking, and pytest stages.
 - **Phase 0 Foundation:** Project scaffolding with `pyproject.toml`, `src/frame_compare/` structure, and development tooling (Pyright strict, Ruff, pytest).
 - CLI entry point with `version` command.

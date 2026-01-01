@@ -1701,7 +1701,7 @@ To keep the Coding Agent deterministic (and avoid “plan becomes the spec”), 
 |------:|----------|---------------|
 | Planning | SSOT specs/contracts (when required), plan artifact | Implementation code/tests |
 | Plan Review | Plan review report only | Plans/specs/contracts/code/tests |
-| Coding | Only files listed in the approved plan (plus explicitly planned SSOT updates) | Master checklist, run index |
+| Coding | Only files listed in the approved plan (plus explicitly planned SSOT updates). Exception: auto-generated contract views produced by `python scripts/generate_contract_views.py` when freshness requires regeneration; these must be noted in the Implementation Report as generated outputs. | Master checklist, run index |
 | Verification | Master checklist + run index + verify report | Implementation code/specs/contracts |
 | Review | Review report + run index finalization | Plans/specs/contracts/code/tests (request changes via verdict + routing) |
 
@@ -1718,6 +1718,7 @@ To keep the Coding Agent deterministic (and avoid “plan becomes the spec”), 
 2. Focus on correctness and maintainability
 3. Distinguish critical vs minor issues
 4. Provide actionable fix suggestions
+5. Do not fail a review solely for auto-generated contract view diffs if verification confirms freshness and no behavior changes are implied
 
 ---
 

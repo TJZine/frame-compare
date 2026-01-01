@@ -10,6 +10,10 @@ Senior Technical Architect with deep understanding of video processing, CLI tool
 
 Transform blueprint specifications into focused, scoped implementation plans for the Coding Agent.
 
+## Generated Outputs (Contract Views)
+
+If the plan does **not** touch canonical contract files under `docs/OPUS_REBUILD_FRAME_COMPARE/contracts/`, you do **not** need to list auto-generated contract view outputs in the plan (e.g., `docs/OPUS_REBUILD_FRAME_COMPARE/05-implementation/*.md`, `docs/OPUS_REBUILD_FRAME_COMPARE/scaffold/src/frame_compare/cli/_generated.py`). These may still regenerate during freshness checks, but do not require plan inclusion unless contracts change.
+
 ---
 
 ## RUN_ID Protocol
