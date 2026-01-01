@@ -3,6 +3,10 @@ from frame_compare.render.geometry import (
     calculate_overlay_position,
     ensure_mod2,
 )
+from frame_compare.render.naming import (
+    generate_screenshot_name,
+    generate_screenshot_path,
+)
 from frame_compare.render.types import (
     EncoderSettings,
     OverlayConfig,
@@ -22,4 +26,6 @@ __all__ = [
     "calculate_dimensions",
     "calculate_overlay_position",
     "ensure_mod2",
+    "generate_screenshot_name",
+    "generate_screenshot_path",
 ]

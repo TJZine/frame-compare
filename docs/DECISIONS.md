@@ -67,3 +67,16 @@
 - Ensures compatibility with video encoding (mod2).
 - Defines deterministic clamp and rounding behavior.
 - Auto-crop deferred to later phase to avoid premature VS integration dependency.
+
+## 2026-01-01 — Phase 4.3 Render Naming
+
+### Scope
+
+**Context:** Implementing screenshot naming utilities.
+
+**Decision:** Created `render.naming` module with `generate_screenshot_name` and `generate_screenshot_path`. SSOT updated with Sections 3.3.1–3.3.2 to define deterministic sanitization and formatting.
+
+**Rationale:**
+- Ensures consistent and safe filenames across platforms.
+- Sanitizes user-provided labels to prevent invalid path characters.
+- Deterministic padding (5 digits) ensures correct lexical sorting.

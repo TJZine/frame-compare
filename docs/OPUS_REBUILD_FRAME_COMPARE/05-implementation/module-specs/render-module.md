@@ -263,6 +263,32 @@ def generate_screenshot_path(
     """Generate full output path."""
 ```
 
+#### 3.3.1 `generate_screenshot_name` Behavior
+
+**Algorithm:**
+
+1. Sanitize `label`: replace any character not in `[A-Za-z0-9_-]` with `_`.
+2. Collapse consecutive underscores to a single underscore.
+3. Strip leading/trailing underscores.
+4. If sanitized label is empty, use `"unnamed"`.
+5. Format: `f"{sanitized_label}_{frame_number:05d}.{extension}"`.
+
+**Invalid inputs:**
+
+- `frame_number < 0`: raise `ValueError("frame_number must be non-negative")`.
+- `extension` is empty string: raise `ValueError("extension must not be empty")`.
+
+#### 3.3.2 `generate_screenshot_path` Behavior
+
+**Algorithm:**
+
+1. Call `generate_screenshot_name(label, frame_number)` to get filename.
+2. Return `output_dir / filename`.
+
+**Invalid inputs:**
+
+- Same as `generate_screenshot_name`.
+
 ---
 
 ## 4. Implementation Details

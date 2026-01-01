@@ -317,11 +317,11 @@ frame-compare/
 
 ### 4.3 Naming
 
-- [ ] Create `src/frame_compare/render/naming.py`
-- [ ] Implement `generate_screenshot_name(label, frame) -> str`
-- [ ] Sanitize label (replace non-alphanumeric)
-- [ ] Format: `{label}_{frame:05d}.png`
-- [ ] Write naming tests
+- [x] Create `src/frame_compare/render/naming.py` (2026-01-01)
+- [x] Implement `generate_screenshot_name(label, frame) -> str` (2026-01-01)
+- [x] Sanitize label (replace non-alphanumeric) (2026-01-01)
+- [x] Format: `{label}_{frame:05d}.png` (2026-01-01)
+- [x] Write naming tests (2026-01-01)
 
 ### 4.4 Overlay
 
