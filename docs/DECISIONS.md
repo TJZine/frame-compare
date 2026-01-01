@@ -93,3 +93,25 @@
 - Standard Python imaging library.
 - Provides necessary text rendering and composition features.
 - Version 10.0.0+ ensures modern API availability (e.g., `ImageFont.load_default(size=...)`).
+
+## 2026-01-01 — Phase 4.5 Render Encoders
+
+### Dispatch Logic
+
+**Context:** Need to support both VapourSynth and FFmpeg rendering backends efficiently.
+
+**Decision:** Implemented dual-path dispatch in `render_frame` based on input type (`vs.VideoNode` vs `Path`) and explicit renderer preference.
+
+**Rationale:**
+- Allows specialized handling for each backend (direct VS extraction vs FFmpeg subprocess).
+- Wraps internal errors (FFmpeg failures, VS exceptions) into `RenderError` for consistent public API surface.
+
+### Secure Subprocess
+
+**Context:** FFmpeg interaction requires shell command execution.
+
+**Decision:** Created `utils.subproc.run_subprocess` to enforce `shell=False`, `check=True`, and timeouts.
+
+**Rationale:**
+- Mitigates shell injection risks.
+- Provides unified error handling (`CalledProcessError`, `TimeoutExpired`) for all external tools.

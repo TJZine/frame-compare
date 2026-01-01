@@ -1,3 +1,4 @@
+from frame_compare.render.encoders import render_frame
 from frame_compare.render.geometry import (
     calculate_dimensions,
     calculate_overlay_position,
@@ -30,4 +31,5 @@ __all__ = [
     "generate_screenshot_name",
     "generate_screenshot_path",
     "apply_overlay",
+    "render_frame",
 ]

@@ -334,11 +334,11 @@ frame-compare/
 
 ### 4.5 Encoders
 
-- [ ] Create `src/frame_compare/render/encoders.py`
-- [ ] Implement VapourSynth PNG encoder
-- [ ] Implement FFmpeg PNG encoder (fallback)
-- [ ] Abstract behind common interface
-- [ ] Write encoder tests
+- [x] Create `src/frame_compare/render/encoders.py` (2026-01-01)
+- [x] Implement VapourSynth PNG encoder (2026-01-01)
+- [x] Implement FFmpeg PNG encoder (fallback) (2026-01-01)
+- [x] Abstract behind common interface (2026-01-01)
+- [x] Write encoder tests (2026-01-01)
 
 ### 4.6 Orchestrator
 

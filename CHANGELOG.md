@@ -8,6 +8,8 @@ This project follows Conventional Commits and is intended to be released via Rel
 
 ### Added
 
+- `render.encoders` module with VapourSynth and FFmpeg frame extraction strategies
+- `utils.subproc` module for secure subprocess execution
 - `render.overlay` module with text overlay rendering and `pillow` dependency
 - `render.naming` module with screenshot name generation and label sanitization
 - `render.geometry` module with dimension calculation and overlay positioning utilities

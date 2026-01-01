@@ -185,6 +185,15 @@ def render_frame(
 
     Raises:
         RenderError: If rendering fails
+        FrameExtractionError: If renderer requires vs.VideoNode but Path usage detected (or vice versa)
+
+    Behavior:
+    - Dispatch based on `renderer` and `request.clip` type:
+      - `vapoursynth`: Requires `vs.VideoNode`; calls `_render_vs`. Raises `FrameExtractionError` if `request.clip` is Path.
+      - `ffmpeg`: Requires `Path`; calls `_render_ffmpeg`. Raises `FrameExtractionError` if `request.clip` is VideoNode.
+      - `auto`: Inspects `request.clip`. If `vs.VideoNode` → `_render_vs`. If `Path` → `_render_ffmpeg`.
+    - Overlay Integration:
+      - If `request.overlay` is not None, `apply_overlay` is called before final save in both render paths.
     """
 
 def render_batch(
@@ -335,6 +344,7 @@ def _render_vs(
     2. Convert to numpy array
     3. Apply color conversion if needed
     4. Encode to PNG via PIL or cv2
+    5. Save image to output path
     """
 ```
 
@@ -360,23 +370,30 @@ def _render_ffmpeg(
     Uses time-based seeking for efficiency.
 
     FFmpeg Frame Seeking Policy:
-    - fps is probed via ffprobe if not provided
+    - fps is probed via ffprobe (required); never inferred
     - For VFR content: use avg_frame_rate from ffprobe, log warning
-    - Seek time = frame / fps (3 decimal places precision)
-    - Rounding: floor for consistency with VS frame indexing
-    - Errors: FC-2006 (FFMPEG_ERROR), FC-4015 (SOURCE_LOAD_ERROR)
+    - Seek time calculation (deterministic):
+      `seek_seconds = floor((frame / fps) * 1000) / 1000` (e.g. 4.170s)
+    - Errors:
+      - `FileNotFoundError` (missing binary) → `FFmpegNotFoundError (FC-2005)`
+      - `subprocess.CalledProcessError` (exit!=0) → `FFmpegError (FC-2006)` details from stderr
+      - `subprocess.CalledProcessError` (ffprobe fail) → `SourceLoadError (FC-4015)`
+    - **Note:** `render_frame()` wraps these dependency errors into `RenderError (FC-4004)` (or `FrameExtractionError`) to maintain a clean public API contract. The original cause is preserved in `DEBUG` logs.
     """
-    from frame_compare.utils.subproc import run_subprocess
 
-    # Calculate seek time (fps should be probed via ffprobe in real impl)
-    fps = settings.fps or _probe_fps(video_path)  # FC-2006 if probe fails
-    seek_time = f"{frame / fps:.3f}"
+def _probe_fps(video_path: Path) -> float:
+    """
+    Probe video FPS using ffprobe.
 
-    run_subprocess(
-        ["ffmpeg", "-ss", seek_time, "-i", str(video_path),
-         "-vframes", "1", "-q:v", "1", str(output)],
-        timeout_seconds=timeout,
-    )
+    Steps:
+    1. Run ffprobe to get r_frame_rate.
+    2. Parse num/den format.
+    3. Return float.
+
+    Raises:
+        SourceLoadError: If probe fails or output is invalid.
+        FFmpegNotFoundError: If ffprobe is missing.
+    """
 ```
 
 ### 4.3 Overlay Rendering
@@ -483,6 +500,9 @@ def ensure_mod2(width: int, height: int) -> tuple[int, int]:
 | `FrameExtractionError` | FC-4001 | Failed to extract frame |
 | `EncodingError` | FC-4013 | Failed to encode image |
 | `OverlayError` | FC-4014 | Failed to apply overlay |
+| `FFmpegNotFoundError` | FC-2005 | FFmpeg binary missing (internal) |
+| `FFmpegError` | FC-2006 | FFmpeg process failed (internal) |
+| `SourceLoadError` | FC-4015 | Failed to probe/load video (internal) |
 
 ```python
 from frame_compare.errors import (

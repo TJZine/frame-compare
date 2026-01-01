@@ -323,6 +323,7 @@ class LogProgressReporter:
 
     def complete_phase(self) -> None:
         self._log.info("phase_completed", phase=self._name)
+
 ```
 
 ### 4.3 Logging + Correlation IDs
@@ -468,27 +469,18 @@ def run_subprocess(
         CompletedProcess with stdout/stderr as bytes
 
     Raises:
-        DependencyError: If check=True and process returns non-zero
+        FileNotFoundError: If command executable not found
         subprocess.TimeoutExpired: On timeout
+        subprocess.CalledProcessError: If check=True and process returns non-zero
     """
-    try:
-        result = subprocess.run(
-            argv,
-            shell=False,
-            capture_output=True,
-            timeout=timeout_seconds,
-            cwd=cwd,
-        )
-    except FileNotFoundError:
-        cmd = argv[0] if argv else "unknown"
-        raise DependencyError(f"Command not found: {cmd}")
-
-    if check and result.returncode != 0:
-        cmd = argv[0] if argv else "unknown"
-        stderr_text = result.stderr.decode("utf-8", errors="replace")[:500]
-        raise DependencyError(f"{cmd} failed: {stderr_text}")
-
-    return result
+    return subprocess.run(
+        argv,
+        shell=False,
+        capture_output=True,
+        timeout=timeout_seconds,
+        cwd=cwd,
+        check=check,
+    )
 ```
 
 ---
