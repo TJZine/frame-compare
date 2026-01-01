@@ -302,18 +302,18 @@ frame-compare/
 
 **Reference:** `05-implementation/module-specs/render-module.md`
 
-- [ ] Create `src/frame_compare/render/types.py`
-- [ ] Define `OverlayMode` enum (MINIMAL, STANDARD, DIAGNOSTIC)
-- [ ] Define `RenderConfig`
-- [ ] Define `ScreenshotResult`
+- [x] Create `src/frame_compare/render/types.py` (2026-01-01)
+- [x] Define `OverlayMode` enum (MINIMAL, STANDARD, DIAGNOSTIC) (2026-01-01)
+- [x] Define `RenderConfig` (2026-01-01)
+- [x] Define `ScreenshotResult` (2026-01-01)
 
 ### 4.2 Geometry
 
-- [ ] Create `src/frame_compare/render/geometry.py`
-- [ ] Implement aspect ratio calculation
-- [ ] Implement auto-crop detection
-- [ ] Implement mod-2 padding
-- [ ] Write geometry tests
+- [x] Create `src/frame_compare/render/geometry.py` (2026-01-01)
+- [x] Implement aspect ratio calculation (2026-01-01)
+- [x] Implement auto-crop detection (2026-01-01)
+- [x] Implement mod-2 padding (2026-01-01)
+- [x] Write geometry tests (2026-01-01)
 
 ### 4.3 Naming
 

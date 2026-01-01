@@ -369,7 +369,53 @@ def calculate_overlay_position(
     margin: int = 10,
 ) -> tuple[int, int]:
     """Calculate overlay top-left corner."""
+
+def ensure_mod2(width: int, height: int) -> tuple[int, int]:
+    """Round dimensions up to nearest even values for video encoding compatibility."""
 ```
+
+### 5.1 `calculate_dimensions` Behavior
+
+**Algorithm:**
+
+1. If both `max_width` and `max_height` are `None`, return `(source_width, source_height)`.
+2. Compute aspect ratio: `ratio = source_width / source_height`.
+3. If only `max_width` is set: `new_width = min(source_width, max_width)`, `new_height = int(new_width / ratio)`.
+4. If only `max_height` is set: `new_height = min(source_height, max_height)`, `new_width = int(new_height * ratio)`.
+5. If both are set: compute width-constrained and height-constrained sizes; pick the one that fits within *both* constraints.
+6. Round down (truncate) to integer; never exceed constraints.
+
+**Invalid inputs:**
+
+- `source_width <= 0` or `source_height <= 0`: raise `ValueError("source dimensions must be positive")`.
+- `max_width <= 0` or `max_height <= 0` (when not `None`): raise `ValueError("max dimensions must be positive")`.
+
+### 5.2 `calculate_overlay_position` Behavior
+
+**Valid positions:** `{"top-left", "top-right", "bottom-left", "bottom-right"}`.
+
+**Algorithm:**
+
+- `top-left`: `(margin, margin)`
+- `top-right`: `(image_width - overlay_width - margin, margin)`
+- `bottom-left`: `(margin, image_height - overlay_height - margin)`
+- `bottom-right`: `(image_width - overlay_width - margin, image_height - overlay_height - margin)`
+
+**Invalid inputs:**
+
+- `position not in {"top-left", "top-right", "bottom-left", "bottom-right"}`: raise `ValueError(f"invalid position: {position}")`.
+- `image_size` or `overlay_size` contains non-positive values: raise `ValueError("dimensions must be positive")`.
+- Overlay + margin exceeds image dimensions: clamp coordinates to 0 (overlay anchored to edge).
+
+### 5.3 `ensure_mod2` Behavior
+
+**Algorithm:**
+
+- Round each dimension up to the nearest even number: `(width + width % 2, height + height % 2)`.
+
+**Invalid inputs:**
+
+- `width <= 0` or `height <= 0`: raise `ValueError("dimensions must be positive")`.
 
 ---
 

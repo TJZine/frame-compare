@@ -53,3 +53,17 @@
 **Rationale:**
 - Keeps contract freshness gates enforceable without unnecessary re-planning.
 - Preserves review focus on functional and API-affecting changes.
+
+## 2026-01-01 — Phase 4.2 Render Geometry
+
+### Scope
+
+**Context:** Implementing geometry utilities for the Render module.
+
+**Decision:** Created `render.geometry` module with `calculate_dimensions`, `calculate_overlay_position`, and `ensure_mod2`. SSOT updated with Sections 5.1–5.3 to define deterministic behavior.
+
+**Rationale:**
+- Centralizes dimension and position calculations.
+- Ensures compatibility with video encoding (mod2).
+- Defines deterministic clamp and rounding behavior.
+- Auto-crop deferred to later phase to avoid premature VS integration dependency.

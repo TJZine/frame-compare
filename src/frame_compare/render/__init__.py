@@ -1,3 +1,8 @@
+from frame_compare.render.geometry import (
+    calculate_dimensions,
+    calculate_overlay_position,
+    ensure_mod2,
+)
 from frame_compare.render.types import (
     EncoderSettings,
     OverlayConfig,
@@ -14,4 +19,7 @@ __all__ = [
     "Renderer",
     "RenderRequest",
     "ScreenshotResult",
+    "calculate_dimensions",
+    "calculate_overlay_position",
+    "ensure_mod2",
 ]
