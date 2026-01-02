@@ -342,11 +342,11 @@ frame-compare/
 
 ### 4.6 Orchestrator
 
-- [ ] Create `src/frame_compare/render/orchestrator.py`
-- [ ] Implement `render_screenshots(clips, frames, config) -> list[Path]`
-- [ ] Coordinate encoder selection
-- [ ] Apply overlays
-- [ ] Report progress
+- [x] Create `src/frame_compare/render/orchestrator.py` (2026-01-01)
+- [x] Implement `render_screenshots(clips, frames, config) -> list[Path]` (2026-01-01)
+- [x] Coordinate encoder selection (2026-01-01)
+- [x] Apply overlays (2026-01-01)
+- [x] Report progress (2026-01-01)
 - [ ] Write integration tests
 
 ### Phase 4 Quality Gate ✓

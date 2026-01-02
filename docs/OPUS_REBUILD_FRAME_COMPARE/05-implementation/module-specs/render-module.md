@@ -162,6 +162,17 @@ result = ScreenshotResult(
 )
 ```
 
+### 2.4 ProgressReporter
+
+```python
+class ProgressReporter(Protocol):
+    """Protocol for reporting progress."""
+    def start_phase(self, name: str, total: int) -> None: ...
+    def set_description(self, text: str) -> None: ...
+    def advance(self, count: int = 1) -> None: ...
+    def complete_phase(self) -> None: ...
+```
+
 ---
 
 ## 3. Public API
@@ -196,6 +207,7 @@ def render_frame(
       - If `request.overlay` is not None, `apply_overlay` is called before final save in both render paths.
     """
 
+```python
 def render_batch(
     requests: list[RenderRequest],
     parallelism: int = 1,
@@ -203,6 +215,9 @@ def render_batch(
 ) -> list[Path]:
     """
     Render multiple frames with progress reporting.
+
+    ordering contract: Result list matches input `requests` order.
+    exception contract: Fail-fast. Raises first encountered exception immediately; subsequent tasks may be cancelled or awaited but not started.
 
     Progress integration:
     - Call reporter.start_phase("Rendering", len(requests)) before loop
@@ -223,15 +238,33 @@ def render_screenshots(
     """
     Render the full screenshot set for multiple clips and frames.
 
+    Determinism:
+    - Process clips in provided list order.
+    - Process frames in provided list order (ascending or otherwise).
+    - Result dict keys strictly match input clips' resolved labels.
+
+    Overlay Policy:
+    - If `overlay_mode` is MINIMAL/STANDARD/DIAGNOSTIC:
+      - Construct `OverlayConfig` for each request.
+      - For VideoNode clips: use `clip.width`, `clip.height`.
+      - For Path clips: use `(0, 0)` for resolution (unless probed).
+    - If `overlay_mode` is None (conceptually, though enum implies always set):
+      - Pass `overlay=None`.
+
+    Loading Strategy (Auto/VS):
+    - If `renderer="vapoursynth"` or `"auto"`, attempt to load clip using `frame_compare.vs.loader.DefaultVSLoader`.
+    - If loading fails and renderer="auto", fallback to FFmpeg Path-based rendering (log warning; no exception raised).
+    - If renderer="vapoursynth" and loading fails:
+      - Propagate `VapourSynthNotFoundError (FC-2001)` if vapoursynth module is missing.
+      - Propagate `PluginNotFoundError (FC-2003)` if required VS plugin is missing.
+      - Propagate `SourceLoadError (FC-4015)` if loader fails (e.g. invalid script).
+      - Wrap any other exception into `RenderError (FC-4004)` with original exception as `__cause__`.
+
     Responsibilities:
     - Resolve labels for naming/overlays
     - Generate `RenderRequest`s for every (clip, frame) pair
     - Delegate actual rendering to `render_batch`
     - Return a mapping of label -> rendered image paths
-
-    Notes:
-    - This orchestration lives in `render/orchestrator.py` to keep `runner` thin.
-    - The caller is responsible for applying audio offsets/trims at the VS layer.
     """
 ```
 

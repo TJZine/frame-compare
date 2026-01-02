@@ -149,7 +149,7 @@ Only include a code block here if the SSOT spec is missing an essential detail a
 **Required facts to record (bullets; do not prewrite exact prose):**
 - RUN_ID + artifact versions (plan/plan-review/impl/verify/review)
 - Scope clarifications and explicit out-of-scope items
-- SSOT edits made this run (or “none”)
+- SSOT edits made this run (or “none”), including: spec file path(s) + exact heading(s) changed + 1–3 bullets describing the decision
 - Any contract/SSOT drift decisions (if applicable)
 - Verification gates run + pass/fail
 

@@ -389,6 +389,8 @@ If either command fails: **STOP** and fix the artifact(s) before advancing to th
 2. Verify all files, types, tests, and verification commands are specified
 3. Ensure no decision points remain for the Coding Agent
 4. Produce a Plan Review Report with APPROVED or CHANGES REQUIRED verdict
+5. If the plan is blocked only by **mechanical** issues (validator/formatting/artifact wiring), apply **Mechanical Auto-Fix Mode** (below) to correct the plan artifact and re-run the plan gate checks without requiring another Planning round
+6. If the Planning Agent updated SSOT/specs during the Plan Review loop, perform an **SSOT Decision Audit** (below) to validate that those spec changes are correct, implementable, and aligned with project best practices
 
 **Documents to Read (in order):**
 
@@ -423,6 +425,61 @@ If either command fails: **STOP** and fix the artifact(s) before advancing to th
 The Plan Review gate exists to ensure the Coding Agent (Gemini) can implement without making any design decisions. Skipping this gate defeats the purpose of the contract-first workflow.
 
 **Policy:** Never bypass. Every plan must pass Plan Review before implementation begins.
+
+---
+
+### Mechanical Auto-Fix Mode (Plan Review)
+
+This workflow allows the Plan Review Agent to **write a corrected plan revision** when the plan is “almost approved” and the remaining issues are purely mechanical. This saves orchestration cycles and tokens while preserving the contract-first intent.
+
+> [!IMPORTANT]
+> Mechanical Auto-Fix is **not a bypass**. The plan still must pass Plan Review gates, and the Plan Review Agent must only apply **semantics-preserving** edits.
+
+**Preconditions (all required):**
+
+- **No SSOT/spec/contract changes required** to approve.
+- Remaining FAILs are **mechanical only** (see allowlist).
+- After applying the fix, all 9 checklist items must PASS and “Decision Points Remaining” must be **NONE**.
+
+**Allowed mechanical fixes (allowlist):**
+
+- Plan formatting changes required by stop-gates (e.g., converting signatures into the `- \`...\`` bullet form so `scripts/validate_spec_anchors.py` passes).
+- Artifact wiring fixes that do not change behavior (NEXT prompt paths/versions, output filenames, frontmatter fields).
+- Adding missing workflow-mandated verification lines that are already SSOT/workflow-required (e.g., `lint-imports`) **when it does not change scope**.
+- Adding an explicit out-of-scope section when scope is already clear and unchanged.
+
+**Disallowed fixes (must return CHANGES REQUIRED):**
+
+- Any change that alters runtime behavior, algorithms, public API, error mapping, or file layout.
+- Any fix that requires editing SSOT specs/contracts (those must go back to Planning).
+- Adding new features/tests beyond what the plan already intended (except purely mechanical reconciliation of omissions).
+
+**Output rules (to avoid churn):**
+
+1. Write a new plan artifact: `.agent-workflow/runs/<RUN_ID>/plan-v(N+1).md` (do not edit in place).
+2. Include `## Changes Since plan-vN` and list the mechanical edits.
+3. Re-run the plan stop-gates (especially `scripts/validate_spec_anchors.py`) and only then write:
+   - `.agent-workflow/runs/<RUN_ID>/plan-review-v(N+1).md` with `Verdict: APPROVED`
+4. The Plan Review Report must explicitly state it applied Mechanical Auto-Fix Mode and list what changed.
+
+---
+
+### SSOT Decision Audit (Plan Review)
+
+If the Planning Agent changes SSOT/specs during the Plan Review loop, the Plan Review Agent must treat those spec edits as part of what is being reviewed.
+
+**Required actions:**
+
+1. Identify SSOT files/headings changed (from the plan’s “Changes Since …” section and Spec Anchors).
+2. Read the updated SSOT sections and validate they are:
+   - **Correct and implementable** (no undefined names, no contradictory requirements)
+   - **Consistent with repo best practices** (typed errors at module boundaries, deterministic ordering rules, no hidden external deps in unit tests, import-layer constraints)
+   - **Compatible with existing code patterns** (error taxonomy in `frame_compare.errors`, VS loader entrypoints, etc.)
+3. If the SSOT edit is unsound or introduces drift, return **CHANGES REQUIRED** and require the SSOT to be corrected first (do not “paper over” in the plan).
+
+The Plan Review Report should include an explicit section:
+
+- `SSOT Update Audit: OK` or `SSOT Update Audit: Issue` with concrete required edits.
 
 ---
 
@@ -1025,6 +1082,10 @@ PLAN REVIEW AGENT produces:
   - .agent-workflow/runs/<RUN_ID>/plan-review-vN.md
   - Verdict: APPROVED or CHANGES REQUIRED
   - Rejects missing Spec Anchors / missing one-line signatures / SSOT gaps
+  - If SSOT/spec was updated during the loop, includes an SSOT Decision Audit in the Plan Review Report
+  - If only mechanical issues remain and no SSOT edits are needed, may apply Mechanical Auto-Fix Mode by writing:
+    - .agent-workflow/runs/<RUN_ID>/plan-v(N+1).md (mechanical-only edits)
+    - .agent-workflow/runs/<RUN_ID>/plan-review-v(N+1).md (APPROVED)
 ```
 
 ### Phase 3: Implementation
@@ -1335,6 +1396,7 @@ This plan does NOT cover:
 - Failure Modes: [OK / Issue description]
 - Derived Outputs: [OK / Issue description]
 - Rollback Guidance: [OK / Issue description]
+- SSOT Update Audit (if SSOT changed this loop): [OK / Issue description]
 
 ## Implementation Agent Decision Points Remaining
 

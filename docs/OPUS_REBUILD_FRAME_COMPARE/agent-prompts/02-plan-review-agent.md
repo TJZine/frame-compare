@@ -97,6 +97,7 @@ Run through this checklist and report each item as **PASS** or **FAIL**:
 - **Derived Outputs:** Explicitly list generated outputs that must not be edited; regen commands if needed
 - **Rollback Guidance:** If implementation deviates, stop and return to Planning (plan fix), not ad-hoc patching
 - **Import Contracts:** If the plan adds a new top-level module under `src/frame_compare/` (or changes allowed import directions), it must include an `importlinter.ini` update (SSOT) and keep `lint-imports` as a must-pass verification gate.
+- **SSOT Decision Audit (Required when SSOT changed):** If the Planning Agent updated any SSOT/spec docs during this plan-review loop, you must audit those changes for correctness and project best practice (typed errors, determinism, import layering, no hidden external deps in unit tests). If unsound, return CHANGES REQUIRED and require SSOT correction.
 
 ---
 
@@ -164,6 +165,7 @@ OUTPUTS:
 - Failure Modes: [OK / Issue description]
 - Derived Outputs: [OK / Issue description]
 - Rollback Guidance: [OK / Issue description]
+- SSOT Update Audit (if SSOT changed this loop): [OK / Issue description]
 
 ## Implementation Agent Decision Points Remaining
 
@@ -190,6 +192,42 @@ Implementation Agent Decision Points Remaining: NONE
 ---
 
 ## Guidelines
+
+### Mechanical Auto-Fix Mode (Token Saver, Semantics-Preserving Only)
+
+When a plan is “almost approved” and the remaining issues are purely mechanical (validator/formatting/artifact wiring), you may skip an extra Planning round by applying a **mechanical-only** fix yourself.
+
+**Allowed only if all are true:**
+
+- No SSOT/spec/contract updates are required to approve.
+- Remaining issues are mechanical and do not change behavior/signatures/algorithms.
+
+**Allowed mechanical fixes (examples):**
+
+- Convert planned function signatures into the exact bullet form required by `validate_spec_anchors.py` (e.g., `- \`render_batch(...)\``).
+- Fix plan/report frontmatter, NEXT prompt paths/versions, or other artifact wiring.
+- Add a missing workflow-required verification command (e.g., `lint-imports`) if it is an omission and does not change scope.
+
+**Disallowed:**
+
+- Any change that affects runtime behavior, public API surface, error mapping, algorithm choices, file layout, or tests beyond what the plan already intended.
+- Any SSOT/spec/contract edits.
+
+**If you apply Mechanical Auto-Fix:**
+
+1. Write `.agent-workflow/runs/<RUN_ID>/plan-v(N+1).md` (do not edit in place).
+2. Include `## Changes Since plan-vN` listing the mechanical edits.
+3. Then write `.agent-workflow/runs/<RUN_ID>/plan-review-v(N+1).md` with `Verdict: APPROVED` and clearly state that Mechanical Auto-Fix Mode was used.
+
+### SSOT Decision Audit (Required When Planning Updated SSOT)
+
+If the Planning Agent updated SSOT/spec docs during this run (often noted in `## Changes Since ...`), you must:
+
+1. Read the updated SSOT sections (exact headings).
+2. Verify the changes are:
+   - Implementable (no undefined names, no contradictions)
+   - Best-practice aligned for this repo (typed errors at module boundaries, deterministic output rules, unit tests do not require external binaries/network by default, import layering respected)
+3. If any SSOT decision is unsound, return CHANGES REQUIRED and specify exact SSOT edits required (file + heading + minimal bullets).
 
 ### Be Thorough But Actionable
 

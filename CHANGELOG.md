@@ -8,6 +8,8 @@ This project follows Conventional Commits and is intended to be released via Rel
 
 ### Added
 
+- `render.orchestrator` module for high-level batch rendering and screenshot orchestration
+- `ProgressReporter` Protocol for unified progress reporting
 - `render.encoders` module with VapourSynth and FFmpeg frame extraction strategies
 - `utils.subproc` module for secure subprocess execution
 - `render.overlay` module with text overlay rendering and `pillow` dependency
@@ -18,6 +20,7 @@ This project follows Conventional Commits and is intended to be released via Rel
 ### Changed
 
 - Workflow: allow auto-generated contract view diffs from `generate_contract_views.py` without blocking review when freshness is verified.
+- Workflow: Plan Review may apply mechanical auto-fixes to plans (format/wiring only) and must audit SSOT/spec changes for correctness before approval.
 - **CI/CD Pipeline:** GitHub Actions workflow with Ruff linting, Pyright type checking, and pytest stages.
 - **Phase 0 Foundation:** Project scaffolding with `pyproject.toml`, `src/frame_compare/` structure, and development tooling (Pyright strict, Ruff, pytest).
 - CLI entry point with `version` command.

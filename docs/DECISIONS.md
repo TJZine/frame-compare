@@ -115,3 +115,38 @@
 **Rationale:**
 - Mitigates shell injection risks.
 - Provides unified error handling (`CalledProcessError`, `TimeoutExpired`) for all external tools.
+
+## 2026-01-01 — Phase 4.6 Render Orchestrator
+
+## 2026-01-01 — Workflow: Plan Review Mechanical Auto-Fix + SSOT Decision Audit
+
+### Mechanical Auto-Fix Mode
+
+**Context:** Plan iterations can get stuck on purely mechanical issues (validator formatting, NEXT prompt wiring) that require an entire additional Planning round even though no behavioral decisions remain.
+
+**Decision:** Allow the Plan Review Agent to apply a tightly-scoped “Mechanical Auto-Fix Mode” that writes a corrected `plan-v(N+1).md` and an APPROVED `plan-review-v(N+1).md` when (and only when) the remaining issues are semantics-preserving and no SSOT/spec changes are required.
+
+**Rationale:**
+- Reduces iteration churn and token usage.
+- Preserves the “no bypass” Plan Review gate (the plan must still pass stop-gates like `validate_spec_anchors.py`).
+
+### SSOT Decision Audit
+
+**Context:** When Planning updates SSOT/specs to resolve ambiguity, those changes can accidentally introduce unsound decisions (raw exceptions, nondeterministic behavior, undefined names) unless reviewed explicitly.
+
+**Decision:** Require the Plan Review Agent to audit SSOT/spec changes made during the loop for correctness, implementability, and project best practices before approving a plan.
+
+**Rationale:**
+- Prevents spec drift and enforces typed-error, determinism, and layering policies at module boundaries.
+- Ensures Planning’s “fill spec gaps” decisions are reviewed with the same rigor as code changes.
+
+### Scope
+**Run ID:** 2026-01-01__p4-6__orchestrator
+**Context:** High-level orchestration for batch rendering.
+**Decision:** Implemented `render_batch` with fail-fast parallel execution using bounded submission and `render_screenshots` with graceful VS-to-FFmpeg fallback.
+
+**Rationale:**
+- Fail-fast semantics prevent resource waste on doomed batches.
+- Bounded submission in `render_batch` ensures predictable resource usage.
+- `render_screenshots` provides a convenient API for common multi-clip, multi-frame tasks.
+- VS-to-FFmpeg fallback ensures high-level tasks succeed even if the specialized VS toolchain is unavailable or fails to load a specific source (when `renderer="auto"`).

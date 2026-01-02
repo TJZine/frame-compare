@@ -8,6 +8,11 @@ from frame_compare.render.naming import (
     generate_screenshot_name,
     generate_screenshot_path,
 )
+from frame_compare.render.orchestrator import (
+    ProgressReporter,
+    render_batch,
+    render_screenshots,
+)
 from frame_compare.render.overlay import apply_overlay
 from frame_compare.render.types import (
     EncoderSettings,
@@ -32,4 +37,7 @@ __all__ = [
     "generate_screenshot_path",
     "apply_overlay",
     "render_frame",
+    "render_batch",
+    "render_screenshots",
+    "ProgressReporter",
 ]
