@@ -428,10 +428,15 @@ from frame_compare.config import SlowpicsConfig
 
 ### 4.2 Public API
 
+> [!IMPORTANT]
+> Per [async-semantics.md](../async-semantics.md) Section 7 "Golden Rule": Publishers
+> MUST NOT create their own `httpx.AsyncClient`. The client is injected and not owned.
+
 ```python
 async def publish_to_slowpics(
     screenshot_dir: Path,
     config: SlowpicsConfig,
+    client: httpx.AsyncClient,
     metadata: TmdbMetadata | None = None,
     progress: ProgressReporter | None = None,
 ) -> PublishResult:
@@ -439,15 +444,26 @@ async def publish_to_slowpics(
     Upload screenshots to slow.pics.
 
     Steps:
-    1. Collect all PNG files from directory
+    1. Collect all PNG files from directory (sorted by name for determinism)
     2. Read files and prepare multipart upload
     3. POST to slow.pics API with retry
     4. Parse response for comparison URL
-    5. Optionally delete local files
+    5. Delete local files if config.delete_after_upload is True and upload succeeded
+
+    Title selection:
+    - If metadata is provided: use metadata.title
+    - Otherwise: use screenshot_dir.name
+
+    Deletion semantics:
+    - If config.delete_after_upload is True:
+      - Delete PNG files ONLY after successful upload + URL parse
+      - NEVER delete on any error or exception
+      - Uses the same sorted file list as upload for determinism
 
     Args:
         screenshot_dir: Directory containing screenshots
         config: Upload configuration
+        client: HTTP client (injected, not owned)
         metadata: Optional metadata for title
         progress: Optional progress reporter
 
@@ -455,22 +471,26 @@ async def publish_to_slowpics(
         PublishResult with URL
 
     Raises:
-        SlowpicsError: If upload fails after retries
+        SlowpicsError: If upload fails after retries, or no PNG files found
+        SlowpicsRateLimitedError: If rate limited (HTTP 429) after retries
+        SlowpicsUnavailableError: If service unavailable (HTTP 5xx) after retries
     """
 
 class SlowpicsPublisher:
-    """Async publisher with connection pooling."""
+    """Async publisher using injected HTTP client.
 
-    def __init__(self, config: SlowpicsConfig):
+    The client is managed by orchestration, NOT owned by this class.
+    """
+
+    def __init__(self, config: SlowpicsConfig, client: httpx.AsyncClient):
+        """Initialize with injected client.
+
+        Args:
+            config: Upload configuration
+            client: HTTP client (managed by orchestration, NOT owned)
+        """
         self.config = config
-        # Use distinct timeouts: fast connection, slow upload
-        self.client = httpx.AsyncClient(
-            timeout=httpx.Timeout(
-                connect=10.0,  # Connection establishment
-                read=config.timeout_seconds,  # Response wait
-                write=config.timeout_seconds,  # Upload time
-            )
-        )
+        self._client = client  # Injected, not owned
 
     async def upload(
         self,
@@ -479,11 +499,31 @@ class SlowpicsPublisher:
     ) -> str:
         """Upload files and return comparison URL."""
 
-    async def close(self) -> None:
-        """Close HTTP client."""
+    # No close() method - client is managed externally
 ```
 
 ### 4.3 Implementation Details
+
+#### Retry Configuration
+
+Retry with exponential backoff (per [async-semantics.md](../async-semantics.md) Section 2):
+
+- `max_attempts = config.max_retries` (default 3)
+- `initial_delay = 1.0` seconds
+- `max_delay = 30.0` seconds
+- `exponential_base = 2.0`
+- `jitter_factor = 0.1` (±10% randomization)
+
+Jitter formula: `delay * (1.0 + random.uniform(-jitter_factor, jitter_factor))`
+
+#### Retryable vs Fail-Fast Errors
+
+| HTTP Status | Behavior |
+|-------------|----------|
+| 429 (Rate Limited) | Retry with `Retry-After` header (default 60s) |
+| 5xx (Server Error) | Retry with exponential backoff |
+| 4xx (Client Error, except 429) | Fail immediately (no retry) |
+| Timeout | Retry with exponential backoff |
 
 ```python
 SLOWPICS_UPLOAD_URL = "https://slow.pics/api/comparison"
@@ -499,6 +539,7 @@ async def _upload_with_retry(
     client: httpx.AsyncClient,
     data: dict,
     max_retries: int,
+    timeout_seconds: float,
 ) -> httpx.Response:
     """Upload with exponential backoff retry."""
 ```

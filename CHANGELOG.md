@@ -7,8 +7,13 @@ This project follows Conventional Commits and is intended to be released via Rel
 ## Unreleased
 
 ### Added
-
-- Metadata service (`services.metadata`) for filename parsing and TMDB lookup.
+- **Publishers Service:**
+  - `SlowpicsPublisher` for uploading screenshots to slow.pics.
+  - Automatic retry logic with exponential backoff and jitter.
+  - Rate limit handling (HTTP 429).
+  - Configurable visibility (public/unlisted/private).
+  - Optional deletion of local files after successful upload.
+- **Metadata Service:**
 - Filename parsing strategy using `guessit` and `anitopy` with anime/western priority heuristics.
 - TMDB API client with API key validation, rate limit handling, and result mapping.
 - Interactive metadata resolution workflow (`resolve_metadata`) with optional user selection callback.

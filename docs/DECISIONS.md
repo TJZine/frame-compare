@@ -261,3 +261,15 @@
 - `2.1.1` is the current latest stable version.
 - Resolves the dependency conflict that blocked `uv sync`.
 - `2.1.1` provides the required functionality for Phase 5.2.
+
+
+## 2026-01-02: Implement Publishers Service (slow.pics)
+
+- **Context:** Added `SlowpicsPublisher` for uploading comparison screenshots.
+- **Decision:**
+  - Use `httpx` for async HTTP client, injected from outside.
+  - Implement exponential backoff with jitter for retries.
+  - Handle rate limits (429) and server errors (5xx) with specific exceptions.
+  - Support `delete_after_upload` only on success (never on error).
+  - Use `Visibility` enum for public/unlisted/private settings.
+- **Status:** Implemented in `src/frame_compare/services/publishers.py`.

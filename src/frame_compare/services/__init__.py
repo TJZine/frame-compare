@@ -1,5 +1,20 @@
-"""Services for Frame Compare 2.0."""
+"""Services module."""
 
+from frame_compare.services.publishers import (
+    PublishResult as PublishResult,
+)
+from frame_compare.services.publishers import (
+    SlowpicsPublisher as SlowpicsPublisher,
+)
+from frame_compare.services.publishers import (
+    publish_to_slowpics as publish_to_slowpics,
+)
+
+__all__ = [
+    "PublishResult",
+    "SlowpicsPublisher",
+    "publish_to_slowpics",
+]
 from frame_compare.services.alignment import (
     align_clips,
     load_cached_offsets,

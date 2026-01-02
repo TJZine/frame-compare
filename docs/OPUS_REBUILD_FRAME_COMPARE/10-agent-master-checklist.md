@@ -383,13 +383,13 @@ frame-compare/
 
 ### 5.3 Publishers
 
-- [ ] Create `src/frame_compare/services/publishers.py`
-- [ ] Implement `SlowpicsPublisher`:
-  - [ ] Upload with retry logic
-  - [ ] Return comparison URL
-  - [ ] Handle errors gracefully
-- [ ] Implement local-only mode
-- [ ] Write publisher tests (mocked network)
+- [x] Create `src/frame_compare/services/publishers.py` (2026-01-02)
+- [x] Implement `SlowpicsPublisher`: (2026-01-02)
+  - [x] Upload with retry logic
+  - [x] Return comparison URL
+  - [x] Handle errors gracefully
+- [x] Implement local-only mode (2026-01-02)
+- [x] Write publisher tests (mocked network) (2026-01-02)
 
 ### 5.4 Report Generator
 
@@ -407,6 +407,7 @@ frame-compare/
 - [ ] HTML report generates
 - [ ] All services have error recovery
 - [ ] Test coverage > 80%
+- [ ] Docker verification passes (real deps, zero skips): `bash tools/verify_docker_integration.sh`
 
 ---
 
@@ -451,6 +452,7 @@ frame-compare/
 - [ ] `frame-compare doctor` checks dependencies
 - [ ] All CLI options work
 - [ ] Exit codes correct
+- [ ] Docker verification passes (real deps, zero skips): `bash tools/verify_docker_integration.sh`
 - [ ] E2E tests pass
 
 ---
