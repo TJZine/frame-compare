@@ -227,22 +227,37 @@
 - Reduces back-and-forth for avoidable mechanical failures.
 - Keeps Verification focused on compliance, traceability, and phase-gate enforcement rather than first-pass lint/type fixes.
 
-## 2026-01-02 — Workflow: Token-Efficient `AGENTS.md`
+## 2026-01-02 — Phase 5.2 Metadata Service
 
-### Scope
+### Filename Parsing Strategy
 
-**Context:** IDE agents consume `AGENTS.md` directly; large, redundant content increases token cost and causes drift against SSOT workflow/spec docs.
+**Context:** Need to support both western and anime filename formats.
 
-**Decision:** Replaced `AGENTS.md` with a concise, high-signal guide that:
-
-- points to SSOT docs (`CODEX.md`, workflow docs, contracts, `pyproject.toml`, `importlinter.ini`)
-- defines hard STOP conditions and command canon
-- states project-wide Python typing + determinism constraints
+**Decision:** Implemented a dual-parser strategy in `parse_filename` using `guessit` (western) and `anitopy` (anime), with a priority heuristic based on bracketed groups.
 
 **Rationale:**
-- Reduces prompt bloat and drift.
-- Keeps authoritative behavior/signatures in SSOT specs and workflow templates, not in agent bootstraps.
+- Anime filenames often use bracketed groups (e.g., `[Group] Title - 01`) which `anitopy` handles better.
+- Western filenames (e.g., `Movie.Name.2024`) are better handled by `guessit`.
+- Fallback to the alternate parser and finally to the filename stem ensures a title is always returned.
 
-### Follow-up
+### TMDB Search vs. Lookup
 
-**Update:** Added the detailed Codanna + Sequential‑Thinking workflow section back into `AGENTS.md` because some IDE agents do not read `CODEX.md`.
+**Context:** The spec defines `lookup_tmdb` as returning a single result, but `resolve_metadata` requires multiple results for interactive selection.
+
+**Decision:** Implemented an internal `_search_tmdb` helper that returns a `list[TmdbMetadata]`. `lookup_tmdb` returns the first element, while `resolve_metadata` uses the full list.
+
+**Rationale:**
+- Preserves the public API signatures specified in the plan/SSOT.
+- Fulfills the requirement for interactive selection in the full resolution workflow.
+- Avoids signature drift in `async-semantics.md` examples.
+
+### Dependency Adjustments
+
+**Context:** `anitopy 2.2.0` (as specified in the plan) is not yet available as a stable release on PyPI.
+
+**Decision:** Used `anitopy>=2.1.1` in `pyproject.toml`.
+
+**Rationale:**
+- `2.1.1` is the current latest stable version.
+- Resolves the dependency conflict that blocked `uv sync`.
+- `2.1.1` provides the required functionality for Phase 5.2.

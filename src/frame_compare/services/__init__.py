@@ -5,7 +5,14 @@ from frame_compare.services.alignment import (
     load_cached_offsets,
     save_offsets_cache,
 )
-from frame_compare.services.types import AlignmentConfig, AlignmentResult
+from frame_compare.services.metadata import lookup_tmdb, parse_filename, resolve_metadata
+from frame_compare.services.types import (
+    AlignmentConfig,
+    AlignmentResult,
+    MetadataConfig,
+    ParsedMetadata,
+    TmdbMetadata,
+)
 
 __all__ = [
     "AlignmentResult",
@@ -13,4 +20,10 @@ __all__ = [
     "align_clips",
     "load_cached_offsets",
     "save_offsets_cache",
+    "lookup_tmdb",
+    "parse_filename",
+    "resolve_metadata",
+    "MetadataConfig",
+    "ParsedMetadata",
+    "TmdbMetadata",
 ]

@@ -6,6 +6,8 @@
 .fastembed_cache
 .uv_cache/
 .venv/
+.agent/
+AGENTS.md
 
 # Python
 __pycache__/

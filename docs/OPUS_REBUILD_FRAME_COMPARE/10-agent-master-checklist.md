@@ -374,12 +374,12 @@ frame-compare/
 
 ### 5.2 Metadata Service
 
-- [ ] Create `src/frame_compare/services/metadata.py`
-- [ ] Implement GuessIt parsing
-- [ ] Implement Anitopy parsing
-- [ ] Implement TMDB lookup
-- [ ] Handle unattended mode (if this means how to handle naming if we dont have the legacy code we should look at it before implementing this)
-- [ ] Write metadata tests
+- [x] Create `src/frame_compare/services/metadata.py` (2026-01-02)
+- [x] Implement GuessIt parsing (2026-01-02)
+- [x] Implement Anitopy parsing (2026-01-02)
+- [x] Implement TMDB lookup (2026-01-02)
+- [x] Handle unattended mode (2026-01-02)
+- [x] Write metadata tests (2026-01-02)
 
 ### 5.3 Publishers
 
@@ -433,7 +433,7 @@ frame-compare/
 
 - [ ] Complete `run` command implementation
 - [ ] Complete `wizard` command
-- [ ] Complete `doctor` command
+- [ ] Complete `doctor` command (is this still relevant with our all in one docker setup?)
 - [ ] Complete `preset` commands
 - [ ] Add all CLI options documented in api-design.md
 

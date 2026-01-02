@@ -302,43 +302,77 @@ class MetadataConfig:
 
 ### 3.2 Public API
 
+> [!IMPORTANT]
+> Per [async-semantics.md](../async-semantics.md) Section 7 "Golden Rule": these functions
+> MUST NOT create their own `httpx.AsyncClient`. The client is injected and not owned.
+
 ```python
 def parse_filename(filename: str) -> ParsedMetadata:
     """
     Extract metadata from filename using GuessIt + Anitopy.
 
-    Priority:
-    1. Try GuessIt for western media
-    2. Fall back to Anitopy for anime
+    Parser selection:
+    1. If filename starts with '[' (bracketed group), use Anitopy first
+    2. Otherwise, try GuessIt for western media
+    3. If primary parser returns no title, try the alternate parser
+
+    Fallback behavior:
+    - If both parsers fail to extract a title, use the filename stem
+      (filename without extension) as the title
+    - All other fields default to None when not extracted
+
+    Normalization:
+    - Title separators (., _, -) are normalized to spaces
+    - Leading/trailing whitespace is stripped from title
+
+    Source representation:
+    - The `source` field value is returned verbatim from the parser
+      (e.g., "Blu-ray", "WEB-DL", "HDTV") — no normalization applied
+    - Tests should assert against parser output format, not normalized forms
+
+    Exception handling:
+    - All parser calls are wrapped in try/except
+    - If a parser raises any exception, treat it as "no result" and try fallback
+    - This function NEVER raises exceptions — always returns a ParsedMetadata
 
     Args:
         filename: Video filename (not full path)
 
     Returns:
-        ParsedMetadata with extracted fields
+        ParsedMetadata with extracted fields (always returns, never raises)
     """
+
 
 async def lookup_tmdb(
     parsed: ParsedMetadata,
     config: MetadataConfig,
+    client: httpx.AsyncClient,
 ) -> TmdbMetadata | None:
     """
     Look up media on TMDB.
 
+    Preconditions:
+    - If config.api_key is None, return None without making a request
+    - If config.api_key is not a valid 32-character hex string, raise
+      TmdbError with message containing "Invalid API key format"
+
     Args:
         parsed: Metadata from filename parsing
         config: TMDB configuration
+        client: HTTP client (injected, not owned)
 
     Returns:
         TmdbMetadata if found, None otherwise
 
     Raises:
-        TmdbError: If API call fails
+        TmdbError: If API key is invalid format, or API call fails
+        TmdbRateLimitedError: If rate limited (HTTP 429)
     """
 
 async def resolve_metadata(
     filenames: list[str],
     config: MetadataConfig,
+    client: httpx.AsyncClient,
     prompt_callback: Callable[[list[TmdbMetadata]], int] | None = None,
 ) -> TmdbMetadata | None:
     """
@@ -349,6 +383,27 @@ async def resolve_metadata(
     2. Search TMDB
     3. If multiple results and not unattended, call prompt_callback
     4. Return selected metadata
+
+    Selection behavior:
+    - If no results: return None
+    - If single result or config.unattended=True: return first result
+    - If multiple results and prompt_callback is None: return first result (index 0)
+    - If multiple results and prompt_callback provided: call it and use returned index
+    - If prompt_callback returns an invalid index (< 0 or >= len(results)):
+      raise MetadataError with message containing "invalid selection index"
+
+    Args:
+        filenames: List of filenames to try parsing
+        config: TMDB configuration
+        client: HTTP client (injected, not owned)
+        prompt_callback: Optional callback for interactive selection
+
+    Returns:
+        TmdbMetadata if found and selected, None otherwise
+
+    Raises:
+        MetadataError: If prompt_callback returns invalid index
+        TmdbError: If TMDB lookup fails
     """
 ```
 

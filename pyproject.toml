@@ -32,6 +32,8 @@ dependencies = [
     "anyio>=4.7.0",
     "tomli-w>=1.0.0",
     "pillow>=10.0.0",
+    "guessit>=3.8.0",
+    "anitopy>=2.1.1",
 ]
 
 [project.scripts]

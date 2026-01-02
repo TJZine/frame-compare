@@ -8,6 +8,10 @@ This project follows Conventional Commits and is intended to be released via Rel
 
 ### Added
 
+- Metadata service (`services.metadata`) for filename parsing and TMDB lookup.
+- Filename parsing strategy using `guessit` and `anitopy` with anime/western priority heuristics.
+- TMDB API client with API key validation, rate limit handling, and result mapping.
+- Interactive metadata resolution workflow (`resolve_metadata`) with optional user selection callback.
 - Audio alignment service (`services.alignment`) for synchronization of comparison clips to reference.
 - `ProgressReporter` Protocol and implementations (`RichProgressReporter`, `LogProgressReporter`) in `utils.progress`.
 - `render.orchestrator` module for high-level batch rendering and screenshot orchestration
