@@ -714,36 +714,36 @@ class DoviToolNotFoundError(DependencyError):
 
 ## 6. Report Service
 
+> [!NOTE]
+> **Full specification:** See [report-viewer-spec.md](../report-viewer-spec.md) for comprehensive
+> documentation of the HTML report viewer including visual design, viewer modes, keyboard shortcuts,
+> accessibility requirements, and generation algorithm.
+
 ### 6.1 Types
 
 ```python
 @dataclass(frozen=True)
 class ClipInfo:
     """Information about a video clip for report generation."""
-    name: str           # Display name (filename or title)
-    path: Path          # Source video path
-    frame_count: int
-    resolution: tuple[int, int]
-    fps: float
-    hdr: bool
-    label: str | None = None  # Custom label for comparison
-
-@dataclass(frozen=True)
-class ReportConfig:
-    """Configuration for HTML report generation."""
-    enable: bool = True
-    output_dir: Path | None = None
-    default_mode: str = "slider"  # slider, overlay, diff, blink
-    include_filmstrip: bool = True
+    name: str              # Display name (filename or title)
+    path: Path             # Source video path
+    frame_count: int       # Total frames in source
+    resolution: tuple[int, int]  # (width, height)
+    fps: float             # Frames per second
+    hdr: bool              # True if HDR source
+    label: str | None = None     # Short label for UI (e.g., "REF", "ENC")
 
 @dataclass(frozen=True)
 class ReportData:
     """Data for report generation."""
-    clips: list[ClipInfo]
-    frames: list[int]
-    screenshots: dict[str, list[Path]]  # clip_name -> [screenshot_paths]
-    metadata: TmdbMetadata | None = None
+    clips: list[ClipInfo]                    # At least 2 clips for comparison
+    frames: list[int]                        # Selected frame numbers
+    screenshots: dict[str, list[Path]]       # clip_name → [frame_paths] in order
+    metadata: TmdbMetadata | None = None     # Optional TMDB info
+    slowpics_url: str | None = None          # Link if uploaded
 ```
+
+> **Note:** `ReportConfig` is defined in `frame_compare.config.schema` (see [config-module.md](config-module.md) Section 2.2).
 
 ### 6.2 Public API
 
@@ -756,21 +756,51 @@ def generate_report(
     """
     Generate offline HTML comparison report.
 
-    Steps:
-    1. Load report template
-    2. Embed screenshots as base64 or relative paths
-    3. Generate JavaScript for viewer modes
-    4. Write HTML file
+    Algorithm:
+    1. Validate input (clips/screenshots not empty, at least 2 clips)
+    2. Determine output path (output_path > config.output_dir > screenshots parent)
+    3. Prepare images (base64 or relative paths per config.embed_images)
+    4. Generate HTML with embedded CSS and JavaScript
+    5. Write file and return path
 
     Args:
         data: Report content data
-        config: Report configuration
+        config: Report configuration (from frame_compare.config)
         output_path: Optional output path override
 
     Returns:
         Path to generated report
+
+    Raises:
+        ReportError: If validation fails or file write fails
+
+    See report-viewer-spec.md Section 11 for detailed algorithm.
     """
 ```
+
+### 6.3 Viewer Modes
+
+The generated report supports four comparison modes:
+
+| Mode | Behavior | CSS/JS Pattern |
+|:-----|:---------|:---------------|
+| Slider | Draggable divider reveals left/right | `clip-path: inset()` |
+| Overlay | Single image cycling | Visibility toggle |
+| Difference | Pixel difference highlight | `mix-blend-mode: difference` |
+| Blink | Auto-toggle at 700ms | `setInterval` |
+
+See [report-viewer-spec.md](../report-viewer-spec.md) Section 4 for full implementation details.
+
+### 6.4 Keyboard Shortcuts
+
+| Key | Action |
+|:----|:-------|
+| `←` / `→` | Previous / Next frame |
+| `↑` / `↓` | Cycle encodes |
+| `S` / `O` / `D` / `B` | Switch mode |
+| `R` | Reset zoom |
+
+See [report-viewer-spec.md](../report-viewer-spec.md) Section 6 for full keyboard reference.
 
 ---
 

@@ -273,3 +273,39 @@
   - Support `delete_after_upload` only on success (never on error).
   - Use `Visibility` enum for public/unlisted/private settings.
 - **Status:** Implemented in `src/frame_compare/services/publishers.py`.
+
+## 2026-01-02 — Phase 5.4 Report Service
+
+### Report Viewer Spec
+
+**Context:** Need a portable, offline-friendly, and modern report viewer.
+
+**Decision:** Created `report-viewer-spec.md` as SSOT for the HTML generator.
+
+**Rationale:**
+- Defines four modes (Slider, Overlay, Diff, Blink) for comprehensive comparison.
+- Specifies dark theme (`#0f1115` background) and accessible controls.
+- Embeds data as JSON for single-file portability.
+- Uses vanilla JS/CSS for minimal overhead (<30KB overhead).
+
+### Report Generator Implementation
+
+**Context:** Implementing the generator logic.
+
+**Decision:** Implemented `frame_compare.services.report` following `report-viewer-spec.md`.
+
+**Rationale:**
+- Strict validation of input data (clips, frames, screenshots) prevents broken reports.
+- Deterministic output path fallback (first clip/frame parent).
+- Base64 embedding support for true portability.
+- Strict type checking (Pyright strict) and rigorous testing (31 tests).
+
+### Scope
+
+**Run ID:** 2026-01-02__p5-4__report-service
+**Context:** Phase 5.4 Report Generator.
+**Decision:** Implemented `generate_report` with full viewer spec compliance.
+
+**Rationale:**
+- Delivers MVP viewer with all core features (modes, zoom, filmstrip, shortcuts).
+- Defers advanced features (full zoom/pan, categories) to future phases to maintain velocity.

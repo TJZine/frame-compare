@@ -7,6 +7,13 @@ This project follows Conventional Commits and is intended to be released via Rel
 ## Unreleased
 
 ### Added
+- **Report Generator:**
+  - HTML comparison report generator with Slider, Overlay, Difference, and Blink modes.
+  - Dark theme with modern styling.
+  - Filmstrip thumbnail navigation.
+  - Keyboard shortcuts (←/→ frames, ↑/↓ encodes, S/O/D/B modes).
+  - Basic zoom controls (25%-200%).
+  - Accessibility features (ARIA labels, keyboard navigation).
 - **Publishers Service:**
   - `SlowpicsPublisher` for uploading screenshots to slow.pics.
   - Automatic retry logic with exponential backoff and jitter.

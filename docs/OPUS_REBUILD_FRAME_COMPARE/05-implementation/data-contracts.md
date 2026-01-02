@@ -70,6 +70,11 @@ class FrameSelectionV2:
 
 ## 3. Report HTML Structure
 
+> [!IMPORTANT]
+> **This v2 contract is future / not implemented in Phase 5.4.**
+> Phase 5.4's report HTML structure is defined in
+> [`report-viewer-spec.md`](report-viewer-spec.md) (version `"1.0"`, filename `report.html`).
+
 **Location**: `{output_dir}/comparison_report.html`
 **Format**: Self-contained HTML5
 **Version**: 2.0
@@ -94,6 +99,11 @@ class FrameSelectionV2:
 ---
 
 ## 4. Report JSON Payload
+
+> [!IMPORTANT]
+> **This v2 contract is future / not implemented in Phase 5.4.**
+> Phase 5.4's embedded JSON payload shape is defined in
+> [`report-viewer-spec.md`](report-viewer-spec.md) (Section 2.2 `EmbeddedData`, version `"1.0"`).
 
 **Embedded in**: HTML report `#report-data`
 **Standalone**: `{output_dir}/comparison_report.json`
