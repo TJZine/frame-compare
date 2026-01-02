@@ -39,7 +39,8 @@ Frame Compare helps you produce consistent, reviewable comparisons between encod
 
 If you want the spec-driven rebuild plan and workflow, start here:
 - `docs/OPUS_REBUILD_FRAME_COMPARE/00-executive-summary.md`
-- `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md`
+- `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow-quick.md` (read first)
+- `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md` (canonical SSOT)
 
 ---
 
@@ -95,7 +96,9 @@ uv sync --group dev --frozen
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -U pip
-python -m pip install -e ".[dev]"
+python -m pip install -e .
+# Dev tools (this repo uses uv dependency groups; pip does not install them automatically)
+python -m pip install pytest pytest-cov ruff pyright
 ```
 
 ---
@@ -155,6 +158,14 @@ UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_traceability.p
 .venv/bin/pyright --warnings
 .venv/bin/ruff check .
 .venv/bin/pytest -q
+```
+
+### Docker integration (real deps)
+
+For “real external deps work” verification (VapourSynth + FFmpeg), run:
+
+```bash
+bash tools/verify_docker_integration.sh
 ```
 
 ### Run-directory hygiene (optional workflow enforcement)

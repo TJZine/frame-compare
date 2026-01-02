@@ -73,13 +73,15 @@ Execute implementation plans precisely, writing code that passes all quality che
 
    Verify APPROVED status.
 
-3. **Read the workflow document:**
+3. **Read the workflow quick reference:**
 
    ```text
-   Read file: docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md
+   Read file: docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow-quick.md
    ```
 
-   Understand the run directory convention and your output requirements.
+   Understand the run directory convention, command canon, and your output requirements.
+
+   > For templates or full appendices, refer to: `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md`
 
 4. **Read referenced specs** mentioned in the plan.
 

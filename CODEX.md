@@ -147,7 +147,7 @@ pytest -q
 
 ## Local Toolchain Expectations
 
-- Bootstrap the virtualenv via `uv sync --group dev --frozen` (preferred; matches CI) or `python -m venv .venv && .venv/bin/pip install -e .[dev]` so `.venv/bin/pyright`, Ruff, and Pytest are always available offline.
+- Bootstrap the virtualenv via `uv sync --group dev --frozen` (preferred; matches CI). If using pip, install the project editable plus dev tools explicitly (pip does not install uv dependency groups): `python -m venv .venv && .venv/bin/pip install -e . && .venv/bin/pip install pytest pytest-cov ruff pyright`.
 - Activate `.venv` (or prefix commands with `.venv/bin/`) before running checks to ensure everyone uses the same binaries.
 - When falling back to `uv run`, set `UV_CACHE_DIR` to a workspace path (for example `./.uv_cache`) if the default cache path is sandboxed.
 
@@ -158,6 +158,7 @@ pytest -q
 ## Tests & Quality Gates
 
 - Each code change must add/adjust **unit/integration** tests to satisfy acceptance criteria.
+- If acceptance criteria require **real external deps** (VapourSynth + FFmpeg), run `bash tools/verify_docker_integration.sh` and require **zero skips** as part of verification.
 - **Security**: validate inputs, enforce authZ, avoid secret leakage; run `/deep-review` before merge.
 
 ## CI & Workflows

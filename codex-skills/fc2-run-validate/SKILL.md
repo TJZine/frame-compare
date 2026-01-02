@@ -8,7 +8,8 @@ description: Use when validating a Frame Compare 2.0 run directory after an agen
 ## Canonical Rules
 
 - Run directory + artifact rules live in:
-  - `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md`
+  - `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow-quick.md` (read first — curated quick reference)
+  - `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md` (full SSOT)
   - `.agent-workflow/runs/README.md`
 - Validators:
   - `scripts/validate_run_id.py`

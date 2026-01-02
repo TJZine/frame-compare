@@ -56,13 +56,15 @@ Review the Coding Agent's work, verify quality gates, and approve or request cha
 
    **If not APPROVED, STOP and escalate.**
 
-7. **Read the workflow document:**
+7. **Read the workflow quick reference:**
 
    ```text
-   Read file: docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md
+   Read file: docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow-quick.md
    ```
 
-   Understand your output requirements and verdict options.
+   Understand command canon, STOP conditions, and SSOT decision requirements.
+
+   > For output templates and full verdict options, refer to: `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md`
 
 ---
 
@@ -484,8 +486,9 @@ Pick the next unchecked checklist item (Planning Agent will read the checklist).
 
 ## Context Files to Read
 
-1. Read file: docs/OPUS_REBUILD_FRAME_COMPARE/10-agent-master-checklist.md
-2. Read file: docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md
+1. Read file: docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow-quick.md
+2. Read file: docs/OPUS_REBUILD_FRAME_COMPARE/10-agent-master-checklist.md
+3. Read file: docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md (for templates only)
 
 ## Your Task
 

@@ -2,6 +2,7 @@
 
 > [!NOTE]
 > This file is a one-off meta-task prompt captured for reference. Canonical workflow and readiness truth live in:
+>
 > - `AI_READINESS_ROADMAP.md`
 > - `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md`
 > - `docs/OPUS_REBUILD_FRAME_COMPARE/agent-prompts/`
@@ -30,31 +31,32 @@
   1) `CODEX.md` — guardrails + approval policy
   2) `AI_READINESS_ROADMAP.md` (root) — authoritative gate table + “10/10” claim
   3) `docs/OPUS_REBUILD_FRAME_COMPARE/16-ai-readiness-roadmap-review.md` — historical review context
-  4) `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md` — canonical workflow
+  4) `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow-quick.md` — curated quick reference (read first for workflow)
+  5) `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md` — canonical SSOT for templates/appendices
      - Must include `## Workflow Consistency Checklist (STOP/VALIDATE)` (required artifact validation commands + STOP rules)
-  4.5) Gate SSOT + generator (canonical for gate commands):
+  5.5) Gate SSOT + generator (canonical for gate commands):
      - `docs/OPUS_REBUILD_FRAME_COMPARE/contracts/readiness_gates.json`
      - `scripts/update_ai_readiness_roadmap.py`
-  5) Agent prompts (must match workflow):
+  6) Agent prompts (must match workflow):
      - `docs/OPUS_REBUILD_FRAME_COMPARE/agent-prompts/01-planning-agent.md`
      - `docs/OPUS_REBUILD_FRAME_COMPARE/agent-prompts/02-plan-review-agent.md`
      - `docs/OPUS_REBUILD_FRAME_COMPARE/agent-prompts/03-coding-agent.md`
      - `docs/OPUS_REBUILD_FRAME_COMPARE/agent-prompts/04-verification-agent.md`
      - `docs/OPUS_REBUILD_FRAME_COMPARE/agent-prompts/05-review-agent.md`
-  6) File-based run system (canonical if present):
+  7) File-based run system (canonical if present):
      - `.agent-workflow/README.md`
      - `.agent-workflow/runs/README.md`
      - `.agent-workflow/index.md`
      - `.agent-workflow/current-state.json`
      - `.agent-workflow/runs/`
-  7) (If present) Any gate helpers:
+  8) (If present) Any gate helpers:
      - `scripts/check-all-gates.sh` (or equivalent)
      - `scripts/reverify_ai_readiness.sh` (or equivalent)
      - `scripts/validate_run_id.py` (or equivalent)
      - `scripts/validate_run_artifacts.py` (or equivalent)
      - `scripts/lint_command_canon.py` (or equivalent)
      - (Optional convenience) `codex-skills/fc2-run-validate/` and `codex-skills/fc2-next-prompt/`
-  8) Logs to update:
+  9) Logs to update:
      - `docs/DECISIONS.md`
      - `CHANGELOG.md`
 
@@ -179,14 +181,14 @@
      If helpers do not exist, do not create them during audit unless requested; instead add them as High-ROI
   suggestions.
 
-  ## B) Workflow + Run-System Integration Audit (no code execution required; cite file:line)
+## B) Workflow + Run-System Integration Audit (no code execution required; cite file:line)
 
   Perform a line-anchored audit for all sections below.
 
 ### B1) Workflow consistency
 
 - Verify workflow doc is internally consistent:
-    - agent count, names, step numbers, “Last Updated” date, stop conditions
+  - agent count, names, step numbers, “Last Updated” date, stop conditions
 - Verify workflow doc includes `## Command Canon (SSOT)` and it matches repo conventions:
   - Tooling uses `.venv/bin/*` by default (`pyright/ruff/pytest`)
   - Repo scripts/gates use `UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/...`

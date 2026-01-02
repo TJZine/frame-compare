@@ -6,6 +6,13 @@
 
 ---
 
+> [!TIP]
+> **Read first → [`11-agent-workflow-quick.md`](11-agent-workflow-quick.md)**
+>
+> A curated ~200-line operational subset for quick agent onboarding. This canonical doc remains the SSOT for templates, appendices, and full orchestration details.
+
+---
+
 ## Overview
 
 This document defines a **5-agent sequential workflow** with human orchestration for implementing Frame Compare 2.0. Each agent has a specific model and role, with explicit handoff points for human review.
@@ -419,6 +426,12 @@ If either command fails: **STOP** and fix the artifact(s) before advancing to th
 
 ### When Plan Review is Mandatory
 
+### Docker Verification Gate (Real External Deps)
+
+If a plan’s acceptance criteria require **real** external deps (for example VapourSynth + FFmpeg) and local runs may skip, the plan MUST include a Docker verification command and require **zero skips**:
+
+- Canonical command: `bash tools/verify_docker_integration.sh`
+
 > [!IMPORTANT]
 > **Plan Review is mandatory** for all implementation work. There is no bypass.
 
@@ -547,6 +560,11 @@ The Plan Review Report should include an explicit section:
    UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_contract_views.py --check
    UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_traceability.py --check
    ```
+
+7. **Docker verification (when required by plan):**
+   - If the plan’s acceptance criteria require **real external deps** (VapourSynth + FFmpeg), run:
+     - `bash tools/verify_docker_integration.sh`
+   - Include the command output in `verify-vN.md` and treat any skip inside Docker as a failure.
 
 **Output:** `.agent-workflow/runs/<RUN_ID>/verify-vN.md` (verification handoff; see Template 3 below)
 
@@ -815,12 +833,12 @@ If not approved, STOP and escalate.
    - Create the file with specified types/functions
    - Add proper docstrings
    - Write the corresponding test file
-		   - Run verification:
-		     ```bash
-		     .venv/bin/pyright --warnings src/frame_compare/<module>/
-		     .venv/bin/ruff check src/frame_compare/<module>/
-		     .venv/bin/pytest -v tests/<module>/
-		     ```
+     - Run verification:
+       ```bash
+       .venv/bin/pyright --warnings src/frame_compare/<module>/
+       .venv/bin/ruff check src/frame_compare/<module>/
+       .venv/bin/pytest -v tests/<module>/
+       ```
 4. Write file: `.agent-workflow/runs/<RUN_ID>/impl-vN.md` with:
    - Required headers (RUN_ID, VERSION, TARGET, INPUTS, OUTPUTS)
    - Exact paths changed
@@ -888,23 +906,23 @@ Confirm Plan Review Report shows `Verdict: APPROVED`. If not, STOP.
    .venv/bin/pyright --warnings
    .venv/bin/ruff check .
    .venv/bin/pytest --cov
-	   UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini
+    UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini
 
    # Contract and traceability gates
    UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_contract_views.py --check
    UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_traceability.py --check
    ```
 
-3. **Update Checklist:**
+1. **Update Checklist:**
    Mark completed items in `docs/OPUS_REBUILD_FRAME_COMPARE/10-agent-master-checklist.md`
 
-4. **Update Run Index:**
+2. **Update Run Index:**
    Append a `PENDING_REVIEW` row to `.agent-workflow/index.md` with:
    - RUN_ID, target, date, verdict (`PENDING_REVIEW`)
    - Links to artifacts that exist at this stage: `plan`, `plan-review`, `impl`, `verify`
    - (Review Agent will later replace `PENDING_REVIEW` with final verdict and add the `review` link)
 
-5. **Write Verification Report:**
+3. **Write Verification Report:**
    Write file: `.agent-workflow/runs/<RUN_ID>/verify-vN.md` with:
    - Required headers (RUN_ID, VERSION, TARGET, INPUTS, OUTPUTS)
    - Verification command outputs
@@ -1235,18 +1253,18 @@ DEPENDENCY BLOCKED:
    - Lint error → Ruff/formatter fix needed
 2. **Local Reproduce** — Run failing command locally:
 
-		   ```bash
-		   .venv/bin/pyright --warnings src/
-		   .venv/bin/pytest -x tests/
-		   .venv/bin/ruff check src/
-		   ```
+     ```bash
+     .venv/bin/pyright --warnings src/
+     .venv/bin/pytest -x tests/
+     .venv/bin/ruff check src/
+     ```
 
 3. **Fix** — Apply minimal fix targeting only the failure
 4. **Verify** — Run full verification suite locally before pushing:
 
-		   ```bash
-		   .venv/bin/pyright --warnings src/ && .venv/bin/pytest tests/ && .venv/bin/ruff check src/
-		   ```
+     ```bash
+     .venv/bin/pyright --warnings src/ && .venv/bin/pytest tests/ && .venv/bin/ruff check src/
+     ```
 
 ```text
 CI FAILURE:
@@ -1354,6 +1372,14 @@ This plan does NOT cover:
 .venv/bin/pyright --warnings src/frame_compare/[module]
 .venv/bin/ruff check src/frame_compare/[module]
 .venv/bin/pytest -v tests/[module]
+```
+
+### Docker Verification (Real External Deps)
+
+If the plan’s acceptance criteria require **real** external dependencies (for example, VapourSynth + FFmpeg) and local runs may skip, include a Docker verification step and make it a must-pass gate:
+
+```bash
+bash tools/verify_docker_integration.sh
 ```
 
 ## Notes for Coding Agent

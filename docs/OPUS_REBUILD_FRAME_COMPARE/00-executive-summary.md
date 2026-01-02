@@ -38,9 +38,10 @@ Success Criteria:
 
 ## Human Operator Workflow (5-Agent Run Loop)
 
-This section is a **human-readable** guide for running the canonical file-based workflow. The authoritative source is:
+This section is a **human-readable** guide for running the canonical file-based workflow. Read in order:
 
-- `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md`
+1. `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow-quick.md` — curated quick reference (read first)
+2. `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md` — canonical SSOT for templates and appendices
 
 ### What You Do Every Run
 
@@ -441,8 +442,9 @@ docs/OPUS_REBUILD_FRAME_COMPARE/
 ## 6) Start implementing (your role)
 
   Even with “auto-orchestration” prompts, you have two options each run:
-  - Minimal: tell the Planning Agent to pick the next unchecked item from `docs/OPUS_REBUILD_FRAME_COMPARE/10-agent-master-checklist.md` and propose a RUN_ID; you only confirm the RUN_ID.
-  - Directed: provide “Target: Phase X → Item Y” when you want to override checklist selection.
+
+- Minimal: tell the Planning Agent to pick the next unchecked item from `docs/OPUS_REBUILD_FRAME_COMPARE/10-agent-master-checklist.md` and propose a RUN_ID; you only confirm the RUN_ID.
+- Directed: provide “Target: Phase X → Item Y” when you want to override checklist selection.
 
   If you want, tell me whether you’re promoting all of scaffold/ (including its .github/workflows/ci.yml) or just the
   Python package + tests, and I’ll give you a precise “copy list” tailored to that choice.

@@ -48,13 +48,15 @@ Validate the Coding Agent's work, ensure all documentation is complete, run cont
 
    **If not APPROVED, STOP and escalate.**
 
-6. **Read the workflow document:**
+6. **Read the workflow quick reference:**
 
    ```text
-   Read file: docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md
+   Read file: docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow-quick.md
    ```
 
-   Understand the Contract-First Loop and verification requirements.
+   Understand command canon, STOP conditions, and verification requirements.
+
+   > For Contract-First Loop details and templates, refer to: `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md`
 
 ---
 

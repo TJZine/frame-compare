@@ -52,13 +52,15 @@ If the plan does **not** touch canonical contract files under `docs/OPUS_REBUILD
 
    Find the next unchecked item in the current phase.
 
-2. **Read the workflow document:**
+2. **Read the workflow quick reference:**
 
    ```text
-   Read file: docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md
+   Read file: docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow-quick.md
    ```
 
-   Understand the run directory convention and handoff process.
+   Understand the run directory convention, command canon, and STOP conditions.
+
+   > For templates or full appendices, refer to the canonical doc: `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md`
 
 3. **Read the relevant module spec:**
 
@@ -167,7 +169,7 @@ If this run introduces a new top-level module under `src/frame_compare/` (or cha
 
 ## Verification Commands
 
-Follow `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md` → **Command Canon (SSOT)**.
+Follow `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow-quick.md` → **Command Canon** (canonical SSOT remains `11-agent-workflow.md`).
 
 ```bash
 .venv/bin/pyright --warnings src/frame_compare/[module]
@@ -337,8 +339,9 @@ You are the Plan Review Agent for Frame Compare 2.0.
 Read file: .agent-workflow/runs/[INSERT ACTUAL RUN_ID]/plan-v[N].md
 
 ## Context Files to Read
-1. Read file: docs/OPUS_REBUILD_FRAME_COMPARE/05-implementation/module-specs/[module]-module.md
-2. Read file: docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md
+1. Read file: docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow-quick.md
+2. Read file: docs/OPUS_REBUILD_FRAME_COMPARE/05-implementation/module-specs/[module]-module.md
+3. Read file: docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md (for templates only)
 
 ## Your Task
 Validate the plan using the 9-point checklist. Produce a Plan Review Report.
@@ -361,8 +364,9 @@ You are the Plan Review Agent for Frame Compare 2.0.
 Read file: .agent-workflow/runs/2025-12-25__p1-1-1__config-module/plan-v1.md
 
 ## Context Files to Read
-1. Read file: docs/OPUS_REBUILD_FRAME_COMPARE/05-implementation/module-specs/config-module.md
-2. Read file: docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md
+1. Read file: docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow-quick.md
+2. Read file: docs/OPUS_REBUILD_FRAME_COMPARE/05-implementation/module-specs/config-module.md
+3. Read file: docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md (for templates only)
 
 ## Your Task
 Validate the plan using the 9-point checklist. Produce a Plan Review Report.

@@ -16,12 +16,15 @@ This project follows Conventional Commits and is intended to be released via Rel
 - `render.naming` module with screenshot name generation and label sanitization
 - `render.geometry` module with dimension calculation and overlay positioning utilities
 - Added `frame_compare.render` module with type definitions
+- Phase 4 (Render Module) complete: types, geometry, naming, overlay, encoders, orchestrator with integration tests
+- Docker integration verification gate: `tools/verify_docker_integration.sh` + `frame-compare-test` Compose service (real VS+FFmpeg, zero skips)
 
 ### Changed
 
 - Workflow: allow auto-generated contract view diffs from `generate_contract_views.py` without blocking review when freshness is verified.
 - Workflow: Plan Review may apply mechanical auto-fixes to plans (format/wiring only) and must audit SSOT/spec changes for correctness before approval.
 - **CI/CD Pipeline:** GitHub Actions workflow with Ruff linting, Pyright type checking, and pytest stages.
+- **CI/CD Pipeline:** Add Docker integration workflow for VS+FFmpeg integration tests on relevant PR changes.
 - **Phase 0 Foundation:** Project scaffolding with `pyproject.toml`, `src/frame_compare/` structure, and development tooling (Pyright strict, Ruff, pytest).
 - CLI entry point with `version` command.
 - PEP 561 `py.typed` marker for typed package support.

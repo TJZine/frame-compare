@@ -26,13 +26,15 @@ Validate that the Planning Agent's implementation plan is "implementation-ready"
 
    (Start with v1 unless orchestrator specifies a higher version)
 
-3. **Read the workflow document:**
+3. **Read the workflow quick reference:**
 
    ```text
-   Read file: docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md
+   Read file: docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow-quick.md
    ```
 
-   Understand the Contract-First Loop and quality gates.
+   Understand command canon, STOP conditions, and Mechanical Auto-Fix Mode.
+
+   > For Contract-First Loop details and templates, refer to: `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md`
 
 4. **Read the relevant module spec:**
 

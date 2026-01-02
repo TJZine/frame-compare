@@ -5,7 +5,8 @@
 > **Last Updated:** 2025-12-27 08:32 UTC
 > **Sources:**
 >
-> - `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md`
+> - `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow-quick.md` (read first — curated quick reference)
+> - `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md` (canonical SSOT for templates/appendices)
 > - `docs/OPUS_REBUILD_FRAME_COMPARE/agent-prompts/01-planning-agent.md`
 > - `docs/OPUS_REBUILD_FRAME_COMPARE/agent-prompts/02-plan-review-agent.md`
 > - `docs/OPUS_REBUILD_FRAME_COMPARE/agent-prompts/03-coding-agent.md`

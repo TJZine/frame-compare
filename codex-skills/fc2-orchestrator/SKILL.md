@@ -11,7 +11,8 @@ Minimize the human operator role to: **confirm** → **paste NEXT** → **repeat
 
 ## Canonical Sources (read-only)
 
-- `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md`
+- `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow-quick.md` (read first — curated quick reference)
+- `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md` (canonical SSOT for templates/appendices)
 - `docs/OPUS_REBUILD_FRAME_COMPARE/agent-prompts/`
 - `docs/OPUS_REBUILD_FRAME_COMPARE/10-agent-master-checklist.md`
 - `.agent-workflow/index.md`

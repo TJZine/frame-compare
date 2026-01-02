@@ -150,3 +150,36 @@
 - Bounded submission in `render_batch` ensures predictable resource usage.
 - `render_screenshots` provides a convenient API for common multi-clip, multi-frame tasks.
 - VS-to-FFmpeg fallback ensures high-level tasks succeed even if the specialized VS toolchain is unavailable or fails to load a specific source (when `renderer="auto"`).
+
+## 2026-01-02 — Phase 4 Integration Tests & Quality Gate
+
+### Scope
+**Run ID:** 2026-01-01__p4-integ__render-integration-tests
+**Artifact versions:** plan-v3 + plan-review-v3 + impl-v1 + verify-v1 + review-v1 (as written)
+**Context:** Integration testing and quality gating for the Render module.
+**Decision:** Implemented integration tests covering FFmpeg, VapourSynth (conditional), and Orchestrator. Verified all Phase 4 quality gates including Docker-based validation.
+
+**Rationale:**
+- Ensures end-to-end functionality of the render pipeline.
+- Validates fallback mechanisms and renderer isolation.
+- `mock_video_path` using FFmpeg guarantees deterministic input for tests.
+- Docker verification ensures the VapourSynth toolchain works in its target runtime environment.
+- Explicit out-of-scope: E2E CLI (Phase 6), Performance benchmarks (Phase 7).
+- Verification gates: All passed.
+
+## 2026-01-02 — Workflow: Docker Integration Verification Gate
+
+### Scope
+
+**Context:** Local developer environments and CI can lack VapourSynth/FFmpeg; passing tests via mocks/conditional skips is not sufficient for “real deps work” phase gates.
+
+**Decision:** Standardize a single Docker-based integration verification gate and wire it into workflow docs:
+
+- `tools/verify_docker_integration.sh` runs `pytest -m "integration or vs_required" tests/integration/` inside the Docker image and fails if any tests are skipped.
+- `docker-compose.yml` adds `frame-compare-test` for running tests against real deps with the repo bind-mounted at `/home/framecompare/frame-compare`.
+- `Dockerfile` installs `pytest` in the image so Docker verification does not require ad-hoc installs at runtime.
+- `.github/workflows/docker-integration.yml` runs the same “zero skips” gate on relevant PR changes.
+
+**Rationale:**
+- Preserves fast, skip-tolerant local runs while guaranteeing a deterministic “real deps” verification path.
+- Removes command drift (entrypoint/working_dir mismatch) by providing one canonical script.

@@ -8,7 +8,8 @@ description: Use when auditing or refreshing Frame Compare 2.0 AI readiness (run
 ## Canonical Sources (SSOT)
 
 - `AI_READINESS_ROADMAP.md`
-- `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md`
+- `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow-quick.md` (read first — curated quick reference)
+- `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md` (canonical SSOT for templates/appendices)
 - `docs/OPUS_REBUILD_FRAME_COMPARE/contracts/readiness_gates.json`
 - `scripts/update_ai_readiness_roadmap.py`
 

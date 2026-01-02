@@ -347,16 +347,17 @@ frame-compare/
 - [x] Coordinate encoder selection (2026-01-01)
 - [x] Apply overlays (2026-01-01)
 - [x] Report progress (2026-01-01)
-- [ ] Write integration tests
+- [x] Write integration tests (2026-01-02)
 
 ### Phase 4 Quality Gate ✓
 
-- [ ] VS and FFmpeg renderers work
-- [ ] Overlays render correctly
-- [ ] PNG output valid
-- [ ] Naming convention followed
-- [ ] Pyright shows 0 errors
-- [ ] Test coverage > 80%
+- [x] VS and FFmpeg renderers work
+- [x] Overlays render correctly
+- [x] PNG output valid
+- [x] Naming convention followed
+- [x] Docker verification passes (real deps, zero skips): `bash tools/verify_docker_integration.sh`
+- [x] Pyright shows 0 errors
+- [x] Test coverage > 80%
 
 ---
 

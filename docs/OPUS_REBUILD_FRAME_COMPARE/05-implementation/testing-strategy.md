@@ -196,6 +196,14 @@ def test_cli_run_produces_screenshots(tmp_path, sample_videos):
 - Slower due to video processing
 - Use small test clips
 
+**Quality gate rule (real deps):**
+
+If a phase quality gate requires “VapourSynth works” (not just “skips cleanly”), run the integration tests in Docker (where VS + FFmpeg are installed) and require **zero skips**:
+
+```bash
+bash tools/verify_docker_integration.sh
+```
+
 **Example:**
 
 ```python

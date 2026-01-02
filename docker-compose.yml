@@ -19,6 +19,20 @@ services:
     stdin_open: true
     tty: true
 
+  # Test service that bind-mounts the repo so changes are picked up without rebuilds.
+  # Use this for integration tests that require real VS + FFmpeg deps.
+  frame-compare-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: frame-compare:dev
+    volumes:
+      - .:/home/framecompare/frame-compare
+    working_dir: /home/framecompare/frame-compare
+    environment:
+      - VAPOURSYNTH_PLUGIN_PATH=/usr/local/lib/vapoursynth
+    entrypoint: ["/bin/bash"]
+
   # Production-like service (uses default ENTRYPOINT)
   frame-compare-run:
     build:
