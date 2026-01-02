@@ -74,7 +74,7 @@ RUN_ID = YYYY-MM-DD__meta__<short_slug>
 ├── plan-review-v1.md
 ├── plan-review-v2.md  (if revision required)
 ├── impl-v1.md
-├── impl-v2.md         (if review requires changes)
+├── impl-v2.md         (if review requires changes, or verification applies Ruff auto-fix)
 ├── verify-v1.md
 ├── verify-v2.md       (if re-verification required)
 ├── review-v1.md
@@ -86,8 +86,9 @@ RUN_ID = YYYY-MM-DD__meta__<short_slug>
 1. **Start at `v1`** for all artifacts
 2. **If Plan Review requires changes:** Planning Agent emits `plan-v(N+1).md`, Plan Review Agent emits `plan-review-v(N+1).md`
 3. **If Review requires changes:** Coding Agent emits `impl-v(N+1).md`, Verification emits `verify-v(N+1).md`, Review emits `review-v(N+1).md`
-4. **If Review identifies DESIGN ISSUE:** Return to Planning + Plan Review for `plan-v(N+1).md`
-5. **Artifact versions are explicit** — no “latest”, no guessing; the orchestrator provides exact `vN` to read/write
+4. **If Verification applies Ruff auto-fix (narrow exception):** Verification may emit `impl-v(N+1).md` documenting the mechanical edits, then continue verification against that new `impl-v(N+1).md`
+5. **If Review identifies DESIGN ISSUE:** Return to Planning + Plan Review for `plan-v(N+1).md`
+6. **Artifact versions are explicit** — no “latest”, no guessing; the orchestrator provides exact `vN` to read/write (except Verification may bump `impl-v(N+1)` if it applies Ruff auto-fix)
 
 ### NEXT AGENT PROMPT Block (Required)
 
@@ -119,6 +120,17 @@ After writing or updating any artifact under `.agent-workflow/runs/<RUN_ID>/`, r
 | Plan Review shows Decision Points Remaining ≠ NONE | **Coding Agent must not run** |
 | RUN_ID mismatch detected | **STOP** — escalate immediately |
 | Any verification gate fails | **Verification must not advance** |
+
+---
+
+## 4.5. Artifact Ownership (Who Updates What)
+
+- **Verification Agent** updates `docs/OPUS_REBUILD_FRAME_COMPARE/10-agent-master-checklist.md`
+- **Verification Agent** appends `.agent-workflow/index.md` with `PENDING_REVIEW` row
+- **Review Agent** finalizes `.agent-workflow/index.md` row (replaces verdict, adds review link)
+- **Coding Agent** must NOT touch checklist or index
+- **All agents** write artifacts to `.agent-workflow/runs/<RUN_ID>/` only
+- **Orchestrator** confirms RUN_ID and pastes NEXT blocks
 
 ---
 

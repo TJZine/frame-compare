@@ -8,7 +8,8 @@ description: Use when implementing or reviewing security-sensitive code in Frame
 ## Canonical references
 
 - Error codes registry (SSOT): `docs/OPUS_REBUILD_FRAME_COMPARE/contracts/error_codes.yaml`
-- Workflow STOP rules: `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md`
+- Workflow STOP rules (read first): `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow-quick.md`
+- Full workflow SSOT: `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md`
 
 ## Security invariants checklist
 

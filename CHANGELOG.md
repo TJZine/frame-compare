@@ -8,6 +8,8 @@ This project follows Conventional Commits and is intended to be released via Rel
 
 ### Added
 
+- Audio alignment service (`services.alignment`) for synchronization of comparison clips to reference.
+- `ProgressReporter` Protocol and implementations (`RichProgressReporter`, `LogProgressReporter`) in `utils.progress`.
 - `render.orchestrator` module for high-level batch rendering and screenshot orchestration
 - `ProgressReporter` Protocol for unified progress reporting
 - `render.encoders` module with VapourSynth and FFmpeg frame extraction strategies
@@ -22,6 +24,8 @@ This project follows Conventional Commits and is intended to be released via Rel
 ### Changed
 
 - Workflow: allow auto-generated contract view diffs from `generate_contract_views.py` without blocking review when freshness is verified.
+- Workflow: Coding Agent must run the full local gate suite (pyright/ruff/pytest/import-linter + contract freshness check) before handing off `impl-vN.md` to Verification.
+- Workflow: Verification Agent may apply Ruff auto-fixes (`ruff check --fix` + `ruff format`, no `--unsafe-fixes`) when Ruff is the only failing quality gate, and must record changes via `impl-v(N+1).md`.
 - Workflow: Plan Review may apply mechanical auto-fixes to plans (format/wiring only) and must audit SSOT/spec changes for correctness before approval.
 - **CI/CD Pipeline:** GitHub Actions workflow with Ruff linting, Pyright type checking, and pytest stages.
 - **CI/CD Pipeline:** Add Docker integration workflow for VS+FFmpeg integration tests on relevant PR changes.

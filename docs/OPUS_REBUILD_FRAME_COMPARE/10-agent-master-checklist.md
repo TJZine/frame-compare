@@ -365,12 +365,12 @@ frame-compare/
 
 ### 5.1 Audio Alignment
 
-- [ ] Create `src/frame_compare/services/alignment.py`
-- [ ] Implement audio extraction (via FFmpeg)
-- [ ] Implement cross-correlation alignment
-- [ ] Calculate frame offsets
-- [ ] Cache offsets in `generated/audio_offsets.toml`
-- [ ] Write alignment tests
+- [x] Create `src/frame_compare/services/alignment.py` (2026-01-02)
+- [x] Implement audio extraction (via FFmpeg) (2026-01-02)
+- [x] Implement cross-correlation alignment (2026-01-02)
+- [x] Calculate frame offsets (2026-01-02)
+- [x] Cache offsets in `generated/audio_offsets.toml` (2026-01-02)
+- [x] Write alignment tests (2026-01-02)
 
 ### 5.2 Metadata Service
 
@@ -378,7 +378,7 @@ frame-compare/
 - [ ] Implement GuessIt parsing
 - [ ] Implement Anitopy parsing
 - [ ] Implement TMDB lookup
-- [ ] Handle unattended mode
+- [ ] Handle unattended mode (if this means how to handle naming if we dont have the legacy code we should look at it before implementing this)
 - [ ] Write metadata tests
 
 ### 5.3 Publishers

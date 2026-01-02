@@ -98,6 +98,25 @@ UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_traceability.p
 >
 > - Traceability validation is a **BLOCKER** if it fails. Fix before proceeding.
 
+### 2.1 Ruff Mechanical Auto-Fix (Allowed, Narrow Exception)
+
+If the only failing quality gate is **Ruff**, you may apply a **mechanical, semantics-preserving** fix instead of returning to the Coding Agent.
+
+**Hard constraints:**
+
+- Allowed tools: `.venv/bin/ruff check --fix` and `.venv/bin/ruff format` only (no `--unsafe-fixes`).
+- Scope: Only files that Ruff reports as failing for this run (do not “clean up” unrelated files).
+- If Ruff failures are in files that were *not* touched by this run (per `impl-v<M>.md`), do **not** auto-fix; return to Coding for a scope decision.
+
+**Required traceability (must do all):**
+
+1. Record the original Ruff output in `verify-vN.md`.
+2. Run:
+   - `.venv/bin/ruff check <failing_paths...> --fix`
+   - `.venv/bin/ruff format <failing_paths...>`
+3. Re-run **all** quality gates (pyright/ruff/pytest/import-linter) before proceeding.
+4. If any files changed due to the auto-fix, write a new implementation report `impl-v(M+1).md` describing the mechanical edits (and update `verify-vN.md` to reference that implementation report as its input).
+
 ### 3. Update Master Checklist
 
 Mark completed items in:
@@ -251,7 +270,14 @@ All verification gates passed. Handoff to Review Agent.
 
 ### If Quality Gates Fail
 
-Return to Coding Agent with specific errors:
+#### Case A: Ruff gate failed
+
+- Attempt the **Ruff Mechanical Auto-Fix** flow above first.
+- If Ruff still fails after the auto-fix attempt (or the failure is out-of-scope), return to Coding Agent with the remaining errors.
+
+#### Case B: Any other quality gate failed
+
+Return to Coding Agent with specific errors (do not attempt local fixes):
 
 ````markdown
 ## Verification Failed: [Feature Name]
@@ -381,7 +407,7 @@ Include the appropriate remediation prompt:
 ```markdown
 ## NEXT AGENT PROMPT (COPY/PASTE)
 
-### If Quality Gate Failed (pyright/ruff/pytest/lint-imports):
+### If Quality Gate Failed (pyright/pytest/lint-imports), or Ruff still fails after auto-fix:
 
 You are the Coding Agent for Frame Compare 2.0.
 

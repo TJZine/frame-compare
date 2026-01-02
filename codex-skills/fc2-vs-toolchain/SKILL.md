@@ -13,7 +13,8 @@ description: Use when working on VapourSynth-related code (vs module, plugin det
 ## References
 
 - Module specs: `docs/OPUS_REBUILD_FRAME_COMPARE/05-implementation/module-specs/vs-module.md`
-- Workflow gate expectations: `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md`
+- Workflow (read first): `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow-quick.md`
+- Full workflow SSOT: `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md`
 
 ## Checklist
 

@@ -22,4 +22,5 @@ description: Use when changing FC-2.0 canonical contracts (docs/OPUS_REBUILD_FRA
 
 ## When in doubt
 
-Open and follow: `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md` → Contract-First Loop + Command Canon.
+Read `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow-quick.md` first (curated quick reference).
+For full Contract-First Loop + Command Canon details: `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md`.

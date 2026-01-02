@@ -9,7 +9,8 @@ description: Use when a Frame Compare 2.0 CI run fails and you need a determinis
 
 - `CODEX.md` (approvals + command preferences)
 - `.github/workflows/ci.yml` (actual CI command lines)
-- `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md` → **Command Canon (SSOT)**
+- `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow-quick.md` → **Command Canon (read first)**
+- `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md` → full SSOT for templates/appendices
 
 ## Triage Workflow (minimal churn)
 

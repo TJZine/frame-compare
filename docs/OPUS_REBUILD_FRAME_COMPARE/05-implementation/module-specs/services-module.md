@@ -64,6 +64,8 @@ class AlignmentConfig:
 
 ### 2.2 Public API
 
+> **ProgressReporter** is imported from `frame_compare.utils.progress` (see [utils-module.md](utils-module.md) Section 4.2).
+
 ```python
 async def align_clips(
     reference: Path,
@@ -92,17 +94,61 @@ async def align_clips(
         progress: Optional progress reporter
 
     Returns:
-        List of AlignmentResult for each comparison
+        List of AlignmentResult for each comparison, in the same order
+        as the input `comparisons` list.
+
+    Output ordering:
+        The returned list[AlignmentResult] maintains 1:1 correspondence
+        with `comparisons`: result[i] corresponds to comparisons[i].
+
+    Cache behavior (when config.cache_results is True):
+        - Full cache hit: If all requested keys are present in cache,
+          return cached results without calling ffprobe/ffmpeg.
+        - Partial hit: Compute only missing comparisons, then return
+          combined results in `comparisons` order.
+        - Cache miss: Compute all comparisons and cache results.
 
     Raises:
-        AudioAlignmentError: If alignment fails
+        FFmpegNotFoundError: FFmpeg binary not found in PATH
+        FFmpegError: FFmpeg extraction failed (non-zero exit)
+        AudioAlignmentError: Alignment failed due to empty audio,
+            zero-norm signals, or cross-correlation failure
+        CacheCorruptionError: Cache file exists but is not valid TOML
+        CacheVersionMismatchError: Cache version does not match CACHE_VERSION
     """
 
 def load_cached_offsets(
     cache_dir: Path,
     clips: list[Path],
 ) -> dict[str, AlignmentResult] | None:
-    """Load previously calculated offsets from cache."""
+    """Load previously calculated offsets from cache.
+
+    Args:
+        cache_dir: Directory containing audio_offsets.toml
+        clips: List of clip paths where clips[0] is the reference clip
+               and clips[1:] are comparison clips
+
+    Clip ordering:
+        - clips[0]: reference clip
+        - clips[1:]: comparison clips
+
+    Matching semantics:
+        Only keys matching `f"{clips[0].stem}:{comparison.stem}"` where
+        `comparison` is each element in `clips[1:]` are considered "requested".
+        Extra entries in the cache file are ignored.
+
+    Returns:
+        - None: cache file does not exist
+        - {}: cache file exists and is valid, but no requested keys found
+        - dict: requested keys that were found, mapped to AlignmentResult
+
+    Cache key format: `f"{reference.stem}:{comparison.stem}"`
+
+    Behavior on error:
+        - File missing: return None (cache miss)
+        - TOML parse failure: raise CacheCorruptionError
+        - Version mismatch: raise CacheVersionMismatchError
+    """
 
 def save_offsets_cache(
     cache_dir: Path,
@@ -113,6 +159,27 @@ def save_offsets_cache(
 
 ### 2.3 Implementation Details
 
+#### FPS Sourcing
+
+`align_clips` obtains FPS from the reference video using FFprobe (via `frame_compare.utils.subproc.run_subprocess`). This avoids importing `frame_compare.render` or `frame_compare.vs`.
+
+```python
+def _probe_fps(video_path: Path) -> Fraction:
+    """Probe video FPS using FFprobe.
+
+    Command: ffprobe -v quiet -select_streams v:0 -show_entries stream=r_frame_rate -of csv=p=0 {video}
+
+    Returns:
+        Fraction representing frames per second (e.g., Fraction(24000, 1001))
+
+    Raises:
+        FFmpegNotFoundError: ffprobe not found
+        FFmpegError: ffprobe failed
+    """
+```
+
+#### Audio Extraction
+
 ```python
 def _extract_audio(video_path: Path, sample_rate: int) -> np.ndarray:
     """
@@ -121,9 +188,18 @@ def _extract_audio(video_path: Path, sample_rate: int) -> np.ndarray:
     Command:
     ffmpeg -i {video} -vn -ac 1 -ar {sample_rate} -f f32le -
 
-    Returns mono float32 audio samples.
-    """
+    Returns mono float32 audio samples as np.ndarray.
 
+    Raises:
+        FFmpegNotFoundError: ffmpeg binary not found
+        FFmpegError: ffmpeg exited non-zero
+        AudioAlignmentError: audio track empty (reason: "empty audio track in {video_path.name}")
+    """
+```
+
+#### Cross-Correlation
+
+```python
 def _cross_correlate(
     reference: np.ndarray,
     comparison: np.ndarray,
@@ -136,10 +212,22 @@ def _cross_correlate(
     Algorithm:
     1. correlation = np.correlate(reference, comparison, mode='full')
     2. peak_idx = np.argmax(correlation)
-    3. offset = peak_idx - len(reference) + 1
-    4. score = correlation[peak_idx] / (norm(ref) * norm(comp))
-    """
+    3. offset = len(reference) - 1 - peak_idx
+    4. norm_ref = np.linalg.norm(reference)
+    5. norm_comp = np.linalg.norm(comparison)
+    6. If norm_ref == 0 or norm_comp == 0:
+       raise AudioAlignmentError("zero-norm audio signal prevents correlation")
+    7. score = correlation[peak_idx] / (norm_ref * norm_comp)
 
+    Offset sign convention:
+    - Positive offset: comparison audio starts AFTER reference
+    - Negative offset: comparison audio starts BEFORE reference
+    """
+```
+
+#### Frame Conversion
+
+```python
 def _samples_to_frames(
     sample_offset: int,
     sample_rate: int,
@@ -149,6 +237,31 @@ def _samples_to_frames(
     time_offset = sample_offset / sample_rate
     return round(time_offset * float(fps))
 ```
+
+#### Cache Schema
+
+Cache file: `{cache_dir}/audio_offsets.toml`
+
+```toml
+# Cache schema version (required)
+version = "1"
+
+# Entries keyed by "{reference_stem}:{comparison_stem}"
+["reference:comparison_a"]
+reference_clip = "reference.mkv"
+comparison_clip = "comparison_a.mkv"
+frame_offset = 42
+time_offset_seconds = 1.751
+correlation_score = 0.987
+method = "cross_correlation"
+
+["reference:comparison_b"]
+# ... additional entries
+```
+
+- **CACHE_VERSION** = `"1"` (string, for future schema migrations)
+- **Key format**: `f"{reference.stem}:{comparison.stem}"`
+- If `version` field is missing or does not match `CACHE_VERSION`, raise `CacheVersionMismatchError`
 
 ---
 

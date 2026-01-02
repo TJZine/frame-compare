@@ -167,6 +167,20 @@
 - Explicit out-of-scope: E2E CLI (Phase 6), Performance benchmarks (Phase 7).
 - Verification gates: All passed.
 
+## 2026-01-02 — Phase 5.1 Audio Alignment
+
+### Scope
+**Run ID:** 2026-01-01__p5-1__audio-alignment
+**Context:** Implementing audio alignment service for clip synchronization.
+**Decision:** Created `services.alignment` module with `align_clips`, `load_cached_offsets`, and `save_offsets_cache`. Implemented `utils.progress` with `RichProgressReporter`, `LogProgressReporter`, and `NullProgressReporter`. Updated `importlinter.ini` with correct layered architecture.
+
+**Rationale:**
+- Cross-correlation provides frame-accurate synchronization for similar clips.
+- `ProgressReporter` protocol allows decoupled progress tracking for CLI and logs.
+- Caching avoids redundant expensive audio extraction/correlation.
+- Deterministic ordering of results preserves correspondence with input list.
+- Import contracts enforced via updated `importlinter.ini` to maintain domain independence.
+
 ## 2026-01-02 — Workflow: Docker Integration Verification Gate
 
 ### Scope
@@ -183,3 +197,32 @@
 **Rationale:**
 - Preserves fast, skip-tolerant local runs while guaranteeing a deterministic “real deps” verification path.
 - Removes command drift (entrypoint/working_dir mismatch) by providing one canonical script.
+
+## 2026-01-02 — Workflow: Verification Ruff Auto-Fix (Narrow Exception)
+
+### Scope
+
+**Context:** Some runs fail verification solely due to Ruff lint/format issues that are safe to auto-fix, causing unnecessary Coding ↔ Verification bounce.
+
+**Decision:** Allow the Verification Agent to apply a **narrow, mechanical** Ruff auto-fix when Ruff is the only failing quality gate:
+
+- Allowed commands: `ruff check --fix` and `ruff format` (no `--unsafe-fixes`)
+- Scope: only files that Ruff reports as failing for the current run
+- Traceability: if files change, Verification must emit a new `impl-v(N+1).md` documenting the mechanical edits and re-run all quality gates before handoff
+
+**Rationale:**
+- Reduces churn for purely mechanical lint fixes.
+- Keeps the “Contract-First” and SSOT drift gates intact (no spec/contract edits in Verification).
+- Maintains auditability by versioning the implementation artifact when verification makes changes.
+
+## 2026-01-02 — Workflow: Coding Pre-Handoff Gate Run (Required)
+
+### Scope
+
+**Context:** Verification churn is often caused by basic type/lint/test failures that the Coding Agent could have caught with a full local gate run before handoff.
+
+**Decision:** Require the Coding Agent to run the full local gate suite (pyright/ruff/pytest/import-linter + contract freshness check) before declaring `impl-vN.md` ready for Verification.
+
+**Rationale:**
+- Reduces back-and-forth for avoidable mechanical failures.
+- Keeps Verification focused on compliance, traceability, and phase-gate enforcement rather than first-pass lint/type fixes.

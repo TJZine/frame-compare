@@ -115,6 +115,28 @@ REQUIRED_CHECKS: list[Check] = [
         pattern=r"zero\s+skip|Zero\s+skip|0\s+skip",
         description="Docker verification: zero skips expectation",
     ),
+    # 5b. Run artifact validators (required commands)
+    Check(
+        name="cmd_validate_run_id",
+        pattern=r"UV_CACHE_DIR=\./\.uv_cache\s+uv\s+run\s+--no-sync\s+python\s+scripts/validate_run_id\.py\s+--check-exists\s+<RUN_ID>",
+        description="Command canon: UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_run_id.py --check-exists <RUN_ID>",
+    ),
+    Check(
+        name="cmd_validate_run_artifacts",
+        pattern=r"UV_CACHE_DIR=\./\.uv_cache\s+uv\s+run\s+--no-sync\s+python\s+scripts/validate_run_artifacts\.py\s+\.agent-workflow/runs/<RUN_ID>",
+        description="Command canon: UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_run_artifacts.py .agent-workflow/runs/<RUN_ID>",
+    ),
+    Check(
+        name="cmd_validate_spec_anchors",
+        pattern=r"UV_CACHE_DIR=\./\.uv_cache\s+uv\s+run\s+--no-sync\s+python\s+scripts/validate_spec_anchors\.py\s+\.agent-workflow/runs/<RUN_ID>/plan-v<N>\.md",
+        description="Command canon: UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_spec_anchors.py .agent-workflow/runs/<RUN_ID>/plan-v<N>.md",
+    ),
+    # 5c. Artifact header requirement
+    Check(
+        name="artifact_header_requirement",
+        pattern=r"Artifact Header.*Required|frontmatter.*RUN_ID.*VERSION.*TARGET.*INPUTS.*OUTPUTS",
+        description="Artifact Header (frontmatter) requirement",
+    ),
     # 6. Mechanical Auto-Fix summary
     Check(
         name="mechanical_autofix",
@@ -167,10 +189,10 @@ def main() -> int:
     failed = validate_quick_doc(quick_doc)
 
     if not failed:
-        print("✅ All required content present in quick doc")
+        print("OK: All required content present in quick doc")
         return 0
 
-    print("\n❌ Missing required content:", file=sys.stderr)
+    print("\nERROR: Missing required content:", file=sys.stderr)
     for check in failed:
         print(f"  - {check.name}: {check.description}", file=sys.stderr)
 

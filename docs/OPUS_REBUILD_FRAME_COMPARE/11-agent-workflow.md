@@ -9,7 +9,7 @@
 > [!TIP]
 > **Read first → [`11-agent-workflow-quick.md`](11-agent-workflow-quick.md)**
 >
-> A curated ~200-line operational subset for quick agent onboarding. This canonical doc remains the SSOT for templates, appendices, and full orchestration details.
+> A curated ~250-line operational subset for quick agent onboarding. This canonical doc remains the SSOT for templates, appendices, and full orchestration details.
 
 ---
 
@@ -164,7 +164,7 @@ All artifacts are stored under `.agent-workflow/runs/<RUN_ID>/`:
 ├── plan-review-v1.md
 ├── plan-review-v2.md  (if revision required)
 ├── impl-v1.md
-├── impl-v2.md         (if review/verification requires changes)
+├── impl-v2.md         (if review requires changes, or verification applies Ruff auto-fix)
 ├── verify-v1.md
 ├── verify-v2.md        (if re-verification required)
 ├── review-v1.md
@@ -182,9 +182,12 @@ All artifacts are stored under `.agent-workflow/runs/<RUN_ID>/`:
    - Coding Agent emits `impl-v(N+1).md`
    - Verification Agent emits `verify-v(N+1).md`
    - Review Agent emits `review-v(N+1).md`
-4. **If Review identifies a design issue (DESIGN_ISSUE):**
+4. **If Verification applies Ruff auto-fix (narrow exception):**
+   - Verification Agent may emit `impl-v(N+1).md` documenting the mechanical Ruff changes
+   - Verification Agent then continues verification against that new `impl-v(N+1).md`
+5. **If Review identifies a design issue (DESIGN_ISSUE):**
    - Return to Planning + Plan Review for `plan-v(N+1).md` and `plan-review-v(N+1).md` (then Coding/Verification/Review repeat)
-5. **Cross-artifact references must name exact inputs:**
+6. **Cross-artifact references must name exact inputs:**
    - `impl-vN.md` must state which `plan-vM.md` + `plan-review-vM.md` it implemented
    - `verify-vN.md` must state which `impl-vK.md` it verified
    - `review-vN.md` must state which `verify-vK.md` it reviewed
@@ -1790,7 +1793,7 @@ To keep the Coding Agent deterministic (and avoid “plan becomes the spec”), 
 | Planning | SSOT specs/contracts (when required), plan artifact | Implementation code/tests |
 | Plan Review | Plan review report only | Plans/specs/contracts/code/tests |
 | Coding | Only files listed in the approved plan (plus explicitly planned SSOT updates). Exception: auto-generated contract views produced by `python scripts/generate_contract_views.py` when freshness requires regeneration; these must be noted in the Implementation Report as generated outputs. | Master checklist, run index |
-| Verification | Master checklist + run index + verify report | Implementation code/specs/contracts |
+| Verification | Master checklist + run index + verify report. Exception: may apply Ruff auto-fixes (`ruff check --fix` + `ruff format`) limited to files failing Ruff for this run, and must write `impl-v(N+1).md` documenting the mechanical edits and re-run all quality gates. | SSOT specs/contracts; non-run-scope code changes; any behavior/API changes |
 | Review | Review report + run index finalization | Plans/specs/contracts/code/tests (request changes via verdict + routing) |
 
 ### For Coding Agent

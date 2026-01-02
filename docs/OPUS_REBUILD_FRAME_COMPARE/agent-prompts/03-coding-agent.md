@@ -163,6 +163,29 @@ UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_contract_views
 
 Record in `impl-vN.md` whether regeneration occurred and which files changed.
 
+### 6. Pre-Handoff Quality Gates (Required Hygiene)
+
+> [!IMPORTANT]
+> Verification will run the full gate suite and record canonical outputs, but you must run the same gates before handoff to avoid churn.
+
+If `.venv/bin/*` is missing, bootstrap once (offline-friendly):
+
+```bash
+uv sync --group dev --frozen
+```
+
+Then run **all** of the following before writing “Ready for Verification” in `impl-vN.md`:
+
+```bash
+.venv/bin/pyright --warnings
+.venv/bin/ruff check .
+.venv/bin/pytest -q
+UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini
+UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_contract_views.py --check
+```
+
+If any command fails: fix the issue before handoff (do not delegate basic lint/type/test failures to Verification).
+
 ---
 
 ## Your Output
@@ -204,12 +227,13 @@ OUTPUTS:
 
 ## Local Sanity Checks (Optional)
 
-If you ran local checks, list the commands and whether they exited 0. Do not paste long logs here; the Verification Agent will capture full outputs.
+List the commands you ran and whether they exited 0. Do not paste long logs here; the Verification Agent will capture full outputs.
 
 - `.venv/bin/pyright --warnings ...` — [exit 0 / not run]
 - `.venv/bin/ruff check ...` — [exit 0 / not run]
 - `.venv/bin/pytest ...` — [exit 0 / not run]
 - `UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini` — [exit 0 / not run]
+- `UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_contract_views.py --check` — [exit 0 / not run]
 
 ## Checklist Item Implemented
 >

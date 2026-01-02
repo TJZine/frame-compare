@@ -2,17 +2,8 @@
 
 ## Execution & Approvals
 
-- Default: **diff-plan → approval → patches**. Advisors never execute.
-- **Always-allowed checks (no extra approval)** — assume permission is granted:
-  - `.venv/bin/pyright --warnings` (must run first; only fall back to `uv run pyright --warnings` or `npx pyright --warnings` if the local binary is unavailable. When using the `npx` fallback, request escalated permissions for that command.)
-  - `.venv/bin/ruff check` (fallbacks: `ruff check`, `uv run ruff check`)
-  - `.venv/bin/pytest -q` (unit/integration only; see Test Guardrails)
-  - Read-only repo inspection: `rg` (preferred), `sed`, `nl`, `head`, `tail` for ≤250 line chunks
-  - Codanna MCP discovery/analysis calls: `semantic_search_docs`, `search_documents`, `semantic_search_with_context`, `find_symbol`, `get_calls`, `find_callers`, `analyze_impact` (Codanna is discovery/context-only; editing still follows the diff-plan → approval flow)
-- Autonomous changes allowed (no approval) **only if all are true**:
-  - <= 300 changed lines total, no file moves/renames, no dependency/secret/CI changes,
-  - confined to current feature scope (paths listed in the feature’s GUIDE.md),
-  - adds/updates tests for the touched code, and all tests still pass.
+- Read-only repo inspection: `rg` (preferred), `sed`, `nl`, `head`, `tail` for ≤250 line chunks
+- Codanna MCP discovery/analysis calls: `semantic_search_docs`, `search_documents`, `semantic_search_with_context`, `find_symbol`, `get_calls`, `find_callers`, `analyze_impact` (Codanna is discovery/context-only; editing still follows the diff-plan → approval flow)
 - **MCP tools**: Context7 and Fetch MCP calls against public URLs with `max_length ≤ 20000` (≈20 KB) and recorded metadata (URL, timestamp, format, chunk count) are pre-approved. Any authenticated target, pagination burst (>5 sequential chunks), or private-network URL still requires explicit approval before execution.
 - **Always require approval** if touching:
   - `.github/workflows/**`, `package.json`/`requirements.txt`, lockfiles, `Dockerfile`,
@@ -24,7 +15,9 @@
 
 - Plan of record lives in Codex via `update_plan`. Use Sequential‑Thinking MCP to capture structured thoughts across
   Scoping → Research & Spike → Implementation → Testing → Review.
-- Before Codanna analysis, call `codanna_prompt` to frame impact/call‑graph questions and risks.
+- Before making non-trivial changes in shared/public code, use Codanna for impact framing:
+  - Start with `semantic_search_with_context` to locate the right symbols and context.
+  - Then run `analyze_impact` on the relevant `symbol_id` to enumerate callers, type usage, and composition.
 - When calling `process_thought`, include `thought_number`, `total_thoughts`, and `next_thought_needed` when known.
   If any are omitted, the server will infer sensible defaults; do not retry just to backfill fields. Do not pass
   arbitrary extra fields; if the bridge requires a wrapper, use `kwargs` or `legacy_kwargs` with JSON only.
@@ -52,7 +45,7 @@
 2) **Docs = context7 first** (cite official/best-practice; record date). If unavailable, log fallback.
 3) **Search = Codanna first** (prefer Codanna MCP’s semantic/symbol search; use `search_documents` for indexed docs; fall back to ripgrep; respect repo ignores; log fallback).
 4) **Discovery/Context = Codanna MCP** (use `semantic_search_docs`/`semantic_search_with_context` to shortlist; `search_documents` for indexed docs; `find_symbol`/`get_calls`/`find_callers` for precision; `analyze_impact` before risky changes). Codanna is not an editor.
-5) **Verify** = run `.venv/bin/pyright --warnings`, `.venv/bin/ruff check`, `.venv/bin/pytest -q` (only fall back to `uv run`/`npx`/system binaries after attempting `uv sync --group dev --frozen` to install the local venv; any `npx pyright --warnings` fallback must be executed with escalated permissions enabled). The `npm test`/Husky hook path now invokes `tools/run_pytest.mjs`, which sets `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` by default; export `FC_SKIP_PYTEST_DISABLE=1` on machines (e.g., Windows) that must keep plugin autoloading enabled.
+5) **Verify** = run `.venv/bin/pyright --warnings`, `.venv/bin/ruff check .`, `.venv/bin/pytest -q` (only fall back to `uv run`/`npx`/system binaries after attempting `uv sync --group dev --frozen` to install the local venv; prefer `UV_CACHE_DIR=./.uv_cache uv run --no-sync ...` to avoid network sync; any `npx pyright --warnings` fallback must be executed with escalated permissions enabled). The `npm test`/Husky hook path now invokes `tools/run_pytest.mjs`, which sets `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` by default; export `FC_SKIP_PYTEST_DISABLE=1` on machines (e.g., Windows) that must keep plugin autoloading enabled.
 6) **Output**: populate PR “Decision Minute” fields before proposing patches.
 7) **Commit Title**: every task response must include a Conventional Commit-style subject (for example, `feat: …`, `chore: …`) that can be copied directly into `git commit -m`. State it explicitly before the summary so users running commit hooks don’t have to invent one.
 8) **Log Dates Accurately**: when updating `docs/DECISIONS.md`, `CHANGELOG.md`, or similar logs, run `date -u +%Y-%m-%d` and use that exact stamp—do not future-date entries.
@@ -64,24 +57,19 @@ Print each command before execution and capture exit code + duration. These chec
 ```bash
 # Primary (repo-local virtualenv)
 .venv/bin/pyright --warnings
-.venv/bin/ruff check
+.venv/bin/ruff check .
 .venv/bin/pytest -q
 
 # Fallbacks (auto-detected if the above fail)
-uv run pyright --warnings
+UV_CACHE_DIR=./.uv_cache uv run --no-sync pyright --warnings
 # Request escalated permissions when running this fallback:
 npx pyright --warnings
-ruff check
+ruff check .
 pytest -q
 ```
 
 ## Test Guardrails
 
-- No network or external services during tests by default.
-- Use `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` for reproducible local and CI runs.
-- Tests must not write outside the workspace; prefer tmp dirs/fixtures.
-- Randomized tests must set deterministic seeds and assert invariants, not incidental state.
-- Mark slow/integration suites; don’t run them under the always-allowed quick path.
 - Log any environment toggles used (e.g., `-p no:vsengine`) in DECISIONS with rationale.
 
 ### Always-logged MCP calls
@@ -89,22 +77,6 @@ pytest -q
 - Every Context7, Codanna, or Fetch MCP invocation must log tool name, URL (if applicable), format, `max_length`, `start_index`, chunk count, latency, and summarize the returned snippet (or quote the relevant portion) directly in your response.
 - Respect server-side caps: Fetch MCP already enforces private-IP blocking and length filtering (`/zcaceres/fetch-mcp`, 2025‑11‑10); document any override (`DEFAULT_LIMIT`, pagination strategy) when you use it.
 - When using broader MCP servers (e.g., TaskFlow MCP for workflow planning or snf-mcp for DuckDuckGo/Wikipedia search), include the server ID and describe the resulting artifacts so reviewers can replay the call.
-
-## Escalation Playbook
-
-1. If an allowed command/tool fails because of sandbox, missing permissions, or blocked cache paths, immediately rerun it with `with_escalated_permissions=true` and a one-sentence justification (e.g., “Need unsandboxed pyright to read node_modules”).
-2. If the rerun still fails, capture the full stderr/exit code in your response and note the mitigation attempted (cache dir override, `uv sync`, etc.).
-3. Never abandon a required check silently—either secure approval, provide the failure log, or propose an alternative verification path (e.g., `uv run pyright`) before moving on.
-
-### Test Guardrails (for always-allowed pytest)
-
-- **No external services**: skip DB/services unless ephemeral/mocked.
-- **Filesystem scope**: writes must stay under repo temp dirs (pytest tmp_path). Fail closed if outside.
-
-## Advisory Flow
-
-- **Use ripgrep** for the evidence sweep and any searching (fallback must be logged).
-- **Follow AGENTS.md §Standard Flow**; planning must use sequential thinking.
 
 ## Type Safety & Pylance/Pyright Quality Gates
 
@@ -119,31 +91,11 @@ pytest -q
   - Avoid dynamic attributes; prefer `@dataclass`/`TypedDict`/`Protocol` for shape.
   - Keep public APIs stable; document invariants in docstrings.
 
-**Gates (pre-merge)**
-
-1) **Diff plan** → approval → **patch** (no auto-exec).
-2) Before asking to merge, the assistant MUST:
-   - Propose running: `.venv/bin/pyright --warnings` first; only if the local binary fails or is missing should you fall back to `npx pyright --warnings`, and that fallback must be issued with escalated permissions requested up front.
-   - Report **zero errors** and **<= N warnings** (N defaults to 10; justify any above).
-   - If errors occur, propose minimal diffs to fix them and re-check.
-3) **Suppressions policy**
-   - `# type: ignore[...]` allowed only with a one-line justification above and a follow-up ticket.
-   - Prefer stubs/`TypedDict`/`Protocol` over blanket `Any`.
-4) **Config is source of truth**: the repo’s `pyrightconfig.json` (or `[tool.pyright]`) governs analysis; do not override via editor-only settings.
-
 **Reviewer checklist (assistant must confirm)**
 
 - No new `Any` leaks, unknown members, or unchecked Optional access.
 - Library calls typed (stubs present or `useLibraryCodeForTypes` suffices).
 - Tests cover the typed contract (positive + None/edge cases).
-
-## Sandbox & Network
-
-- Local sandbox: `workspace-write` except for testing; **no network** unless explicitly approved (If Cloud: follow environment defaults).
-- Always print commands before running; never run package scripts or migrations without approval.
-- Tool caches required by the approved checks (`.venv/**`, `.uv_cache/**`, `~/.cache/uv/**`) are allowed. If a host blocks `~/.cache/uv`, set `UV_CACHE_DIR=./.uv_cache` and rerun.
-- MCP fetch/context7 calls are permitted without extra approval because the servers enforce private-IP blocking, HTTP status validation, and chunked length limits (per `/zcaceres/fetch-mcp`, 2025‑11‑10). Still log URLs/timestamps and stop if a request would hit authenticated resources or violate robots/security policies.
-- **Checks exception:** pyright/ruff/pytest (under Test Guardrails) may run without extra approval as long as they respect the guardrails above.
 
 ## Local Toolchain Expectations
 
