@@ -226,3 +226,23 @@
 **Rationale:**
 - Reduces back-and-forth for avoidable mechanical failures.
 - Keeps Verification focused on compliance, traceability, and phase-gate enforcement rather than first-pass lint/type fixes.
+
+## 2026-01-02 — Workflow: Token-Efficient `AGENTS.md`
+
+### Scope
+
+**Context:** IDE agents consume `AGENTS.md` directly; large, redundant content increases token cost and causes drift against SSOT workflow/spec docs.
+
+**Decision:** Replaced `AGENTS.md` with a concise, high-signal guide that:
+
+- points to SSOT docs (`CODEX.md`, workflow docs, contracts, `pyproject.toml`, `importlinter.ini`)
+- defines hard STOP conditions and command canon
+- states project-wide Python typing + determinism constraints
+
+**Rationale:**
+- Reduces prompt bloat and drift.
+- Keeps authoritative behavior/signatures in SSOT specs and workflow templates, not in agent bootstraps.
+
+### Follow-up
+
+**Update:** Added the detailed Codanna + Sequential‑Thinking workflow section back into `AGENTS.md` because some IDE agents do not read `CODEX.md`.

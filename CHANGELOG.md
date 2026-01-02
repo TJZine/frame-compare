@@ -27,6 +27,7 @@ This project follows Conventional Commits and is intended to be released via Rel
 - Workflow: Coding Agent must run the full local gate suite (pyright/ruff/pytest/import-linter + contract freshness check) before handing off `impl-vN.md` to Verification.
 - Workflow: Verification Agent may apply Ruff auto-fixes (`ruff check --fix` + `ruff format`, no `--unsafe-fixes`) when Ruff is the only failing quality gate, and must record changes via `impl-v(N+1).md`.
 - Workflow: Plan Review may apply mechanical auto-fixes to plans (format/wiring only) and must audit SSOT/spec changes for correctness before approval.
+- Workflow: replaced `AGENTS.md` with a token-efficient SSOT pointer + command canon for IDE agents.
 - **CI/CD Pipeline:** GitHub Actions workflow with Ruff linting, Pyright type checking, and pytest stages.
 - **CI/CD Pipeline:** Add Docker integration workflow for VS+FFmpeg integration tests on relevant PR changes.
 - **Phase 0 Foundation:** Project scaffolding with `pyproject.toml`, `src/frame_compare/` structure, and development tooling (Pyright strict, Ruff, pytest).
