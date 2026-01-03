@@ -444,23 +444,12 @@ frame-compare/
 - [x] Requirements traceability does not reference non-existent tests
 - [x] Specs contain no ellipsis placeholders and no non-normative language in requirements ("should/may/etc.")
 
-### 5.5.3 Implementation Phase Pointers (Next Work)
-
-The following are **future implementation items** that will be tracked in Phase 6:
-
-- [ ] Implement tonemap integration in `render/orchestrator.py` (per render-module.md §1.4)
-- [ ] Implement `analysis/frame_plan.py` (per frame-plan-module.md)
-- [ ] Implement `vspreview/` package (per vspreview-module.md) — Optional, can defer
-- [ ] Implement `orchestration/` package (per orchestration-module.md §4.3)
-- [ ] Wire `config.color.enable_tonemap` to runtime consumer
-- [ ] Wire `config.audio_alignment.use_vspreview` to runtime consumer
-
 ### Phase 5.5 Quality Gate ✓
 
 - [x] All SSOT specs created/updated
 - [x] No TBD sections in new specs
 - [x] Traceability drift fixed
-- [x] Checklist updated with implementation pointers
+- [x] Checklist updated with Phase 6 structure
 
 ---
 
