@@ -336,3 +336,20 @@
 6. RGB->RGB resize must omit `matrix_in_s` to avoid VapourSynth errors.
 7. Docker test runner forces lavapipe selection via `VK_ICD_FILENAMES` for deterministic headless Vulkan.
 8. Added `pytest-mock` to Docker image to support `mocker` fixture.
+
+## 2026-01-03 — Distribution: Windows Portable Bundle Baseline
+
+**Context:** Avoid Docker Desktop GPU/Vulkan limitations for Windows users and ship a tested native distribution path in tandem with the phased rebuild.
+
+**Decisions:**
+1. Supported OS: **Windows 10 + 11**
+2. Supported architecture baseline: **x86_64 (amd64) only**
+3. Packaging strategy: **pinned portable folder** with an **embedded Python runtime** (not PyInstaller) to reduce native DLL/plugin loading risk.
+4. Bundled baseline is the only supported/CI-tested environment; users may **bring their own VapourSynth** best-effort.
+5. Tonemapping is capability-driven: **GPU/libplacebo optional**, deterministic **fallback must always work**.
+
+**SSOT:**
+- `docs/OPUS_REBUILD_FRAME_COMPARE/07-windows-portable-bundle/00-overview.md`
+- `docs/OPUS_REBUILD_FRAME_COMPARE/07-windows-portable-bundle/01-bundle-spec.md`
+- `docs/OPUS_REBUILD_FRAME_COMPARE/07-windows-portable-bundle/02-support-matrix.md`
+- `docs/OPUS_REBUILD_FRAME_COMPARE/07-windows-portable-bundle/03-user-interview.md`

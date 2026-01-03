@@ -54,6 +54,195 @@ The algorithm partitions frames into bins and selects one frame per bin using a 
 
 - If video has fewer frames than `frame_count`: raise `InsufficientFramesError(FC-3004)`
 
+### 1.4 HDR Tonemap Wiring (Auto-Tonemap for HDR → SDR)
+
+> [!IMPORTANT]
+> When an HDR source is detected and tonemapping is enabled, the render pipeline MUST apply tonemapping
+> before frame extraction. This ensures SDR screenshots are produced for fair visual comparisons.
+
+**Canonical Reference:**
+
+- Tonemap implementation: [vs-module.md §3.3](vs-module.md#33-tonemapping)
+- Settings resolution: [vs-module.md §4](vs-module.md#4-tonemap-presets)
+
+#### 1.4.1 Gating Rule (Deterministic)
+
+Tonemapping is applied if and only if **ALL** of the following conditions are true:
+
+```python
+def should_tonemap(source_info: SourceInfo, config: ConfigSchema) -> bool:
+    """Determine if tonemap should be applied.
+
+    Args:
+        source_info: Loaded source metadata from VSLoader
+        config: Resolved configuration
+
+    Returns:
+        True if tonemap should be applied
+    """
+    return (
+        source_info.is_hdr                    # Source is HDR (PQ/HLG + BT.2020)
+        and config.color.enable_tonemap       # User has not disabled tonemapping
+    )
+```
+
+**Gating inputs:**
+
+| Input | Source | Type | Description |
+|:------|:-------|:-----|:------------|
+| `source_info.is_hdr` | `vs.SourceInfo` after load | `bool` | True if `_Transfer in (16, 18) AND _Primaries == 9` |
+| `config.color.enable_tonemap` | Config schema | `bool` | Default `True`; user override via config or `--no-tonemap` flag |
+
+#### 1.4.2 Settings Resolution
+
+When tonemapping is triggered, resolve `TonemapSettings` using this priority order:
+
+1. **CLI overrides** (`--tm-preset`, `--tm-target`, `--tm-curve`) → highest priority
+2. **Config file** (`config.color.preset`, `config.color.target_nits`, etc.)
+3. **Preset defaults** via `get_preset_settings(preset_name)`
+
+```python
+def resolve_tonemap_settings(config: ConfigSchema, cli_overrides: dict | None = None) -> TonemapSettings:
+    """Resolve tonemap settings from config and CLI overrides.
+
+    Args:
+        config: Resolved configuration
+        cli_overrides: Optional CLI flag overrides (tm_preset, tm_target, tm_curve)
+
+    Returns:
+        Complete TonemapSettings ready for apply_tonemap()
+    """
+    # Start with preset
+    preset_name = (cli_overrides or {}).get("tm_preset") or config.color.preset or "reference"
+    settings = get_preset_settings(preset_name)
+
+    # Apply config overrides
+    if config.color.target_nits is not None:
+        settings = replace(settings, target_nits=config.color.target_nits)
+    if config.color.tone_curve is not None:
+        settings = replace(settings, tone_curve=config.color.tone_curve)
+
+    # Apply CLI overrides (highest priority)
+    if cli_overrides:
+        if cli_overrides.get("tm_target") is not None:
+            settings = replace(settings, target_nits=cli_overrides["tm_target"])
+        if cli_overrides.get("tm_curve") is not None:
+            settings = replace(settings, tone_curve=cli_overrides["tm_curve"])
+
+    return settings
+```
+
+#### 1.4.3 Integration Point
+
+Tonemapping is applied **after loading, before any frame extraction or encoding**.
+
+**Pipeline position:**
+
+```
+Load Source → Detect HDR → Apply Tonemap (if gated) → Extract Frames → Apply Overlay → Encode PNG
+```
+
+**Exact integration in `render_screenshots`:**
+
+```python
+def render_screenshots(
+    clips: list[Path],
+    frames: list[int],
+    output_dir: Path,
+    config: ConfigSchema,  # ADDED: config required for tonemap gating
+    # ... other args
+) -> dict[str, list[Path]]:
+    for clip_path in clips:
+        source_info = loader.load(clip_path)
+        clip = source_info.clip
+
+        # === TONEMAP INTEGRATION POINT ===
+        if should_tonemap(source_info, config):
+            settings = resolve_tonemap_settings(config)
+            clip = apply_tonemap(clip, settings, source_info.hdr_metadata)
+            # Mark that tonemap was applied for overlay
+            tonemapped = True
+        else:
+            tonemapped = False
+
+        # Continue with frame extraction using (possibly tonemapped) clip
+        for frame in frames:
+            # ... render frame from clip
+```
+
+#### 1.4.4 Failure Policy
+
+**HDR source + tonemap required + VS unavailable:**
+
+> [!CAUTION]
+> If an HDR source requires tonemapping but VapourSynth is not available,
+> the renderer MUST fail fast. Do NOT silently fall back to FFmpeg for HDR sources
+> as this produces incorrect SDR conversions.
+
+| Scenario | Renderer | Behavior |
+|:---------|:---------|:---------|
+| HDR source, `enable_tonemap=True`, VS available | vapoursynth/auto | Apply tonemap, render |
+| HDR source, `enable_tonemap=True`, VS unavailable | auto | Raise `RenderError(FC-4004)` with hint |
+| HDR source, `enable_tonemap=True`, VS unavailable | ffmpeg | Raise `RenderError(FC-4004)` with hint |
+| HDR source, `enable_tonemap=False` | any | Render without tonemap (user accepts wrong colors) |
+| SDR source | any | No tonemap, render normally |
+
+**Exception specification:**
+
+```python
+raise RenderError(
+    code="FC-4004",
+    message="Cannot tonemap HDR source: VapourSynth is required but not available",
+    hint="Install VapourSynth with libplacebo, or set enable_tonemap=false to skip tonemapping (not recommended for accurate comparisons)",
+)
+```
+
+**Tonemap function failure:**
+
+If `apply_tonemap()` raises `TonemapError`, propagate it to the caller. Do not catch and continue.
+
+#### 1.4.5 Determinism Guarantee
+
+Given identical inputs, tonemapping MUST produce identical outputs:
+
+- Same `SourceInfo` (same file, same frame props)
+- Same `TonemapSettings` (same preset, nits, curve)
+- Same VapourSynth environment (same libplacebo version)
+
+**Testing assertion:**
+
+```python
+def test_tonemap_determinism():
+    clip1 = apply_tonemap(source.clip, settings)
+    clip2 = apply_tonemap(source.clip, settings)
+    # Frame N from clip1 == Frame N from clip2 (byte-identical)
+```
+
+#### 1.4.6 Overlay/HDR Info Policy
+
+When rendering overlays, the `OverlayConfig.hdr_info` field MUST reflect the source and tonemap state:
+
+| Scenario | `hdr_info` Value |
+|:---------|:-----------------|
+| HDR source, tonemapped | `"HDR (tonemapped: {preset}, {target_nits} nits)"` |
+| HDR source, tonemap disabled | `"HDR (native, no tonemap)"` |
+| SDR source | `None` or `"SDR"` |
+
+**Format string (SSOT):**
+
+```python
+if source_info.is_hdr and tonemapped:
+    hdr_info = f"HDR (tonemapped: {settings.preset}, {settings.target_nits} nits)"
+elif source_info.is_hdr:
+    hdr_info = "HDR (native, no tonemap)"
+else:
+    hdr_info = None  # or "SDR" in DIAGNOSTIC mode
+```
+
+This information appears in `DIAGNOSTIC` overlay mode only.
+
+---
+
 ## 2. Key Types
 
 ### 2.0 OverlayMode

@@ -6,15 +6,25 @@
 
 ---
 
+## 0. Decisions (Resolved)
+
+- Supported OS range: **Windows 10 + 11**
+- Supported architecture baseline: **x86_64 (amd64) only**
+- Packaging strategy: **Pinned portable folder with embedded Python runtime** (not PyInstaller)
+- BYO VapourSynth: **Allowed best-effort**; only the pinned bundle baseline is supported/CI-tested
+- GPU expectation: **GPU optional; fallback must always work**
+
+---
+
 ## 1. Required Decisions (Blocking)
 
 1. **Supported OS range**
    - Windows 11 only, or Windows 10+11?
 2. **Architecture**
-   - x86_64 only, or x86_64 + ARM64?
+    - x86_64 only, or x86_64 + ARM64?
 3. **Packaging strategy (choose one)**
-   - A) Embeddable Python distribution + preinstalled dependencies
-   - B) PyInstaller single EXE (risk: DLL/plugin loading complexity)
+    - A) Embeddable Python distribution + preinstalled dependencies
+    - B) PyInstaller single EXE (risk: DLL/plugin loading complexity)
 4. **Bundled baseline vs BYO**
    - Baseline only, or baseline + best-effort BYO VS (recommended: both)
 5. **GPU expectation**

@@ -22,3 +22,5 @@
 - The portable bundle must work without Docker.
 - The Docker integration gate must validate “real deps work” and accept fallback tonemap when Vulkan device is unavailable.
 - GPU/libplacebo success can be enforced only in environments where a Vulkan device is expected (Linux GPU runners), via an explicit opt-in switch (e.g. env var).
+
+**Windows baseline scope:** Windows 10/11 x86_64 (amd64) only.

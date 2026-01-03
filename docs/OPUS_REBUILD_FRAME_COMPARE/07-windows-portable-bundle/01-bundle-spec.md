@@ -31,7 +31,7 @@ frame-compare-portable/
 ├── app/
 │   └── ... (python package + dependencies)
 ├── python/
-│   └── ... (runtime python distribution, strategy defined per release)
+│   └── ... (embedded Python runtime distribution; pinned per release)
 ├── vs/
 │   ├── core/                (VapourSynth runtime components)
 │   └── plugins/             (VapourSynth plugins: lsmas, placebo, ffms2, etc.)

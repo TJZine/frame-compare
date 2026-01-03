@@ -221,6 +221,69 @@ def run_doctor(
 
 ### 4.3 Run Coordination
 
+#### 4.3.1 Request Types
+
+```python
+@dataclass(frozen=True)
+class RunRequest:
+    """Complete configuration for a comparison run.
+
+    All fields map to CLI flags or config file sections.
+    See cli-module.md for CLI flag → config mappings.
+    """
+    # Core paths
+    root: Path
+    config_path: Path | None = None
+    input_dir: Path | None = None
+
+    # Cache behavior
+    no_cache: bool = False           # --no-cache
+    from_cache_only: bool = False    # --from-cache-only
+
+    # Skip flags
+    skip_analysis: bool = False      # --skip-analysis
+    skip_metadata: bool = False      # --skip-metadata
+    skip_dovi: bool = False          # --skip-dovi
+    no_upload: bool = False          # --no-upload
+
+    # Tonemap overrides (highest priority)
+    tm_preset: str | None = None     # --tm-preset
+    tm_target_nits: int | None = None  # --tm-target
+    tm_curve: str | None = None      # --tm-curve
+
+    # Frame selection overrides
+    frame_count: int | None = None   # --frame-count
+    seed: str | None = None          # --seed
+
+    # Output behavior
+    overlay_mode: str | None = None  # --overlay
+    no_color: bool = False           # --no-color
+    quiet: bool = False              # --quiet
+    verbose: bool = False            # --verbose
+    json_output: bool = False        # --json
+```
+
+#### 4.3.2 Result Types
+
+```python
+@dataclass(frozen=True)
+class RunResult:
+    """Complete result from a comparison run."""
+    success: bool
+    screenshot_dir: Path | None = None
+    slowpics_url: str | None = None
+    report_path: Path | None = None
+    frame_count: int = 0
+    clips_processed: int = 0
+    duration_seconds: float = 0.0
+    cache_hit: bool = False
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    phase_timings: dict[str, float] = field(default_factory=dict)
+```
+
+#### 4.3.3 Execute Function
+
 ```python
 async def execute_run(
     request: RunRequest,
@@ -229,28 +292,129 @@ async def execute_run(
     """
     Execute a complete comparison run.
 
-    Phases (see contracts/phase_ordering.yaml for canonical ordering):
-    1. Preflight - Validate config, resolve paths
-    2. LoadSources - Open video sources via VapourSynth/FFmpeg
-    3. FramePlan - Generate deterministic frame selection
-    4. Analyze - Calculate metrics, refine selection (skippable)
-    5. Render - Extract frames and save screenshots
-    6. Metadata - TMDB lookup (skippable, warn-only)
-    7. Dovi - Dolby Vision extraction (skippable, warn-only)
-    8. Publish - Upload to slow.pics (skippable)
-    9. Report - Generate HTML report (skippable, warn-only)
+    This is the primary entry point for the comparison pipeline.
+    All phases execute in sequence; failures stop execution.
 
     Args:
-        request: Run configuration
+        request: Run configuration (from CLI or programmatic call)
         deps: Injectable dependencies (for testing)
 
     Returns:
-        RunResult with outputs and metrics
+        RunResult with success status, outputs, and timing metrics
 
     Raises:
-        FrameCompareError: Any fatal phase fails
+        FrameCompareError: Fatal error in any required phase
     """
 ```
+
+#### 4.3.4 Phase Ordering (SSOT)
+
+Phases execute in this exact order:
+
+| Phase | Name | Required | Skip Condition | Failure Policy |
+|:------|:-----|:---------|:---------------|:---------------|
+| 1 | Preflight | ✓ Required | — | Fail fast |
+| 2 | LoadSources | ✓ Required | — | Fail fast |
+| 3 | FramePlan | ✓ Required | — | Fail fast |
+| 4 | Analyze | Optional | `--skip-analysis` | Warn only |
+| 5 | Align | Optional | No audio tracks | Warn only |
+| 6 | Tonemap | Optional | SDR source or `enable_tonemap=False` | Fail fast (HDR) |
+| 7 | Render | ✓ Required | — | Fail fast |
+| 8 | Metadata | Optional | `--skip-metadata` | Warn only |
+| 9 | Dovi | Optional | `--skip-dovi` | Warn only |
+| 10 | Publish | Optional | `--no-upload` | Warn only |
+| 11 | Report | Optional | `--no-report` | Warn only |
+
+**Phase skip semantics:**
+
+- **Skippable phases:** Log skip reason, set status to `SKIPPED`, continue
+- **Warn-only failures:** Log warning, set status to `WARN`, continue
+- **Fail-fast failures:** Raise exception, stop pipeline, return `RunResult(success=False)`
+
+> [!NOTE]
+> **Tonemap phase skip/fail conditions:**
+>
+> - **Skipped** if `source_info.is_hdr == False` OR `config.color.enable_tonemap == False` → status `SKIPPED`, no exception
+> - **Fail-fast** if `source_info.is_hdr == True` AND `config.color.enable_tonemap == True` AND VapourSynth unavailable → raise `RenderError(FC-4004)`
+
+#### 4.3.5 CLI Flags → Config Overrides Mapping
+
+| CLI Flag | Config Path | Override Behavior |
+|:---------|:------------|:------------------|
+| `--tm-preset` | `color.preset` | Replace if set |
+| `--tm-target` | `color.target_nits` | Replace if set |
+| `--tm-curve` | `color.tone_curve` | Replace if set |
+| `--frame-count` | `analysis.frame_count` | Replace if set |
+| `--seed` | `analysis.random_seed` | Replace if set |
+| `--overlay` | `screenshots.overlay_mode` | Replace if set |
+| `--no-cache` | — | `RunRequest.no_cache = True` |
+| `--skip-analysis` | — | `RunRequest.skip_analysis = True` |
+| `--no-upload` | `slowpics.auto_upload` | `auto_upload = False` |
+
+**Override priority (SSOT):**
+
+1. CLI flags (highest)
+2. Config file
+3. Built-in defaults (lowest)
+
+#### 4.3.6 Input Discovery Rules
+
+```python
+def discover_inputs(
+    input_dir: Path,
+    patterns: list[str] = ["*.mkv", "*.mp4", "*.avi", "*.m2ts", "*.ts"],
+) -> list[Path]:
+    """
+    Discover video files in input directory.
+
+    Algorithm:
+    1. Glob for all matching patterns
+    2. Sort by filename (lexicographic, case-insensitive)
+    3. Return sorted list
+
+    Stable ordering guarantee:
+        Same directory contents → same order, always.
+
+    Labeling:
+        First video is "Reference", subsequent are "Encode 1", "Encode 2", etc.
+        Labels can be overridden via config.overrides or filename patterns.
+
+    Raises:
+        NoVideosFoundError (FC-3002): If no videos match patterns
+    """
+```
+
+#### 4.3.7 Output Directory Layout
+
+```text
+{root}/
+├── config/                    # Configuration
+│   └── config.toml
+├── comparison_videos/         # Input (default)
+│   └── my-set/
+│       ├── source.mkv
+│       └── encode.mkv
+├── screens/                   # Output screenshots
+│   └── my-set/
+│       ├── Reference_00100.png
+│       ├── Reference_00500.png
+│       ├── Encode_00100.png
+│       └── Encode_00500.png
+├── generated/                 # Cache and generated files
+│   ├── my-set.compframes      # Metrics cache
+│   ├── audio_offsets.toml     # Alignment cache
+│   └── manual_overrides.toml  # VSPreview overrides
+└── reports/                   # HTML reports
+    └── my-set.html
+```
+
+**Cache interactions:**
+
+| Cache File | Read On | Write On | Invalidation |
+|:-----------|:--------|:---------|:-------------|
+| `{name}.compframes` | Analyze phase start | Analyze phase end | `--no-cache` or config change |
+| `audio_offsets.toml` | Align phase start | Align phase end | `--no-cache` or file change |
+| `manual_overrides.toml` | Always | VSPreview session | Manual deletion only |
 
 ---
 

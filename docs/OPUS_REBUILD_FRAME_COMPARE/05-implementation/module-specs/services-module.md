@@ -54,7 +54,11 @@ class AlignmentResult:
 
 @dataclass(frozen=True)
 class AlignmentConfig:
-    """Configuration for audio alignment."""
+    """Configuration for audio alignment.
+
+    Note: When `use_vspreview=True`, see vspreview-module.md for
+    interactive verification workflow.
+    """
     enable: bool = True
     sample_rate: int = 8000     # Hz, lower = faster
     max_offset_seconds: float = 30.0

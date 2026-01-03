@@ -413,47 +413,208 @@ frame-compare/
 
 ---
 
+## Phase 5.5: Parity Closure (Pre-Runner Spec Work)
+
+> [!NOTE]
+> This sub-phase closes known legacy feature gaps at the SSOT level before Runner implementation.
+> All items below are **spec-only** — implementation happens in Phase 6.
+
+**Reference:** [feature-parity-delta.md](05-implementation/feature-parity-delta.md)
+
+### 5.5.1 SSOT Spec Deliverables
+
+- [x] Create `feature-parity-delta.md` — Truth table mapping legacy → 2.0 (2026-01-03)
+- [x] Update `render-module.md` §1.4 — HDR Tonemap Wiring spec (2026-01-03)
+- [x] Create `frame-plan-module.md` — Deterministic skip-analysis frame selection (2026-01-03)
+- [x] Create `vspreview-module.md` — Optional manual alignment verification (2026-01-03)
+- [x] Update `orchestration-module.md` §4.3 — Minimal runner API surface (2026-01-03)
+- [x] Update `requirements-traceability.md` — Fix E2E test drift (mark as PLANNED) (2026-01-03)
+- [x] Update `services-module.md` — Add VSPreview integration reference (2026-01-03)
+- [x] Update this checklist — Add Parity Closure phase (2026-01-03)
+
+### 5.5.2 Acceptance Criteria (Spec Quality)
+
+- [x] All new specs have explicit function signatures (one-line, backticked)
+- [x] All new specs have explicit error behavior and error codes
+- [x] All new specs have determinism notes where relevant
+- [x] Tonemap wiring spec includes exact gating rule, integration point, failure policy
+- [x] FramePlan spec includes exact algorithm with blake2s hash
+- [x] VSPreview spec includes optional dependency handling and cache schema
+- [x] Orchestration spec includes phase ordering table and CLI→config mappings
+- [x] Requirements traceability does not reference non-existent tests
+
+### 5.5.3 Implementation Phase Pointers (Next Work)
+
+The following are **future implementation items** that will be tracked in Phase 6:
+
+- [ ] Implement tonemap integration in `render/orchestrator.py` (per render-module.md §1.4)
+- [ ] Implement `analysis/frame_plan.py` (per frame-plan-module.md)
+- [ ] Implement `vspreview/` package (per vspreview-module.md) — Optional, can defer
+- [ ] Implement `orchestration/` package (per orchestration-module.md §4.3)
+- [ ] Wire `config.color.enable_tonemap` to runtime consumer
+- [ ] Wire `config.audio_alignment.use_vspreview` to runtime consumer
+
+### Phase 5.5 Quality Gate ✓
+
+- [x] All SSOT specs created/updated
+- [x] No TBD sections in new specs
+- [x] Traceability drift fixed
+- [x] Checklist updated with implementation pointers
+
+---
+
 ## Phase 6: CLI & Orchestration
 
-### 6.1 Runner
+> [!NOTE]
+> This phase implements the orchestration layer and integrates all prior modules.
+> **SSOT References:**
+>
+> - `05-implementation/module-specs/orchestration-module.md`
+> - `05-implementation/module-specs/cli-module.md`
+> - `05-implementation/module-specs/frame-plan-module.md`
+> - `05-implementation/module-specs/vspreview-module.md`
+> - `05-implementation/module-specs/render-module.md` §1.4 (Tonemap Wiring)
 
-- [ ] Create `src/frame_compare/runner.py`
-- [ ] Implement `run(request: RunRequest) -> RunResult`
-- [ ] Implement `RunRequest` dataclass
-- [ ] Implement `RunResult` dataclass
-- [ ] Implement `RunDependencies` for DI
-- [ ] Coordinate all phases:
-  - [ ] Load config
-  - [ ] Find videos
-  - [ ] Calculate/load metrics
-  - [ ] Select frames
-  - [ ] Align audio (optional)
-  - [ ] Render screenshots
-  - [ ] Upload (optional)
-  - [ ] Generate report (optional)
+### 6.1 Orchestration Package Structure
 
-### 6.2 CLI Commands
+**Reference:** `05-implementation/module-specs/orchestration-module.md`
+
+- [ ] Create `src/frame_compare/orchestration/__init__.py`
+- [ ] Create `src/frame_compare/orchestration/preflight.py`
+- [ ] Create `src/frame_compare/orchestration/doctor.py`
+- [ ] Create `src/frame_compare/orchestration/progress.py`
+- [ ] Create `src/frame_compare/orchestration/phases.py`
+- [ ] Update `importlinter.ini` for orchestration layer contracts
+
+### 6.2 Preflight & Doctor
+
+- [ ] Implement `PreflightResult` dataclass per spec §4.1
+- [ ] Implement `prepare_preflight(root, config_path) -> PreflightResult`
+- [ ] Implement `DoctorCheck`, `CheckResult`, `DoctorReport` types per spec §4.2
+- [ ] Implement `run_doctor(deps) -> DoctorReport`
+- [ ] Write unit tests for preflight path resolution
+- [ ] Write unit tests for doctor checks
+
+### 6.3 Progress Reporting
+
+- [ ] Implement `ProgressReporter` protocol per spec §4.2.3
+- [ ] Implement `RichProgressReporter` for CLI
+- [ ] Implement `JsonProgressReporter` for --json mode
+- [ ] Implement `NullProgressReporter` for quiet mode
+- [ ] Write progress reporter tests
+
+### 6.4 FramePlan Module
+
+**Reference:** `05-implementation/module-specs/frame-plan-module.md`
+
+- [ ] Create `src/frame_compare/analysis/frame_plan.py`
+- [ ] Implement `FramePlan` dataclass with invariants
+- [ ] Implement `select_uniform_seeded_frames(num_frames, count, seed) -> list[int]`
+  - [ ] Bin partitioning algorithm per spec §4
+  - [ ] blake2s hash selection per spec §4
+  - [ ] Default seed handling (None/"" → "frame-compare-default")
+- [ ] Implement `create_frame_plan(clip_infos, config) -> FramePlan`
+- [ ] Raise `InsufficientFramesError` when count > num_frames
+- [ ] Verify determinism across Python sessions (subprocess test)
+- [ ] Write unit tests per spec §8.1:
+  - [ ] `test_select_uniform_seeded_frames_deterministic`
+  - [ ] `test_select_uniform_seeded_frames_cross_session`
+  - [ ] `test_select_uniform_seeded_frames_single_frame`
+  - [ ] `test_select_uniform_seeded_frames_all_frames`
+  - [ ] `test_select_uniform_seeded_frames_count_exceeds_available`
+  - [ ] `test_select_uniform_seeded_frames_zero_count`
+  - [ ] `test_create_frame_plan_uses_default_seed_when_none`
+  - [ ] `test_create_frame_plan_uses_default_seed_when_empty`
+- [ ] Update `analysis/__init__.py` exports
+
+### 6.5 Tonemap Wiring
+
+**Reference:** `05-implementation/module-specs/render-module.md` §1.4
+
+- [ ] Update `render/orchestrator.py` with tonemap integration
+- [ ] Implement `should_tonemap(source_info, config) -> bool` gating rule
+- [ ] Implement `resolve_tonemap_settings(config, cli_overrides) -> TonemapSettings`
+- [ ] Wire `config.color.enable_tonemap` to runtime consumer
+- [ ] Add tonemap call between load and frame extraction in `render_screenshots`
+- [ ] Implement fail-fast `RenderError(FC-4004)` for HDR + tonemap required + VS unavailable
+- [ ] Propagate `TonemapError` on `apply_tonemap()` failure
+- [ ] Write integration tests:
+  - [ ] `test_render_hdr_with_tonemap_applies_correctly`
+  - [ ] `test_render_hdr_fails_without_vs_when_tonemap_required`
+  - [ ] `test_render_sdr_skips_tonemap`
+  - [ ] `test_render_hdr_skips_tonemap_when_disabled`
+
+### 6.6 VSPreview Integration (Optional)
+
+**Reference:** `05-implementation/module-specs/vspreview-module.md`
+
+- [ ] Create `src/frame_compare/vspreview/__init__.py`
+- [ ] Create `src/frame_compare/vspreview/overrides.py`
+- [ ] Implement `is_vspreview_available() -> bool`
+- [ ] Implement `launch_alignment_verification(ref_clip, cmp_clip, offset)`
+- [ ] Implement `load_manual_overrides(cache_dir) -> dict[str, ManualOverride]`
+- [ ] Implement `save_manual_override(cache_dir, ref_label, cmp_label, offset)`
+- [ ] Wire `config.audio_alignment.use_vspreview` to runtime consumer
+- [ ] Write unit tests per spec §8.1:
+  - [ ] `test_is_vspreview_available_returns_true_when_importable`
+  - [ ] `test_is_vspreview_available_returns_false_when_missing`
+  - [ ] `test_load_manual_overrides_parses_valid_toml`
+  - [ ] `test_load_manual_overrides_returns_empty_dict_on_missing_file`
+  - [ ] `test_load_manual_overrides_returns_empty_dict_on_parse_error`
+  - [ ] `test_save_manual_override_creates_file_if_missing`
+  - [ ] `test_save_manual_override_merges_with_existing`
+  - [ ] `test_manual_override_takes_precedence_over_computed`
+- [ ] Update `importlinter.ini` for vspreview module
+
+### 6.7 Runner & Phase Orchestration
+
+**Reference:** `05-implementation/module-specs/orchestration-module.md` §4.3
+
+- [ ] Create `src/frame_compare/runner.py` at package root
+- [ ] Implement `RunRequest` dataclass per spec
+- [ ] Implement `RunResult` dataclass per spec
+- [ ] Implement `RunDependencies` for dependency injection
+- [ ] Implement `run(request, deps) -> RunResult` entry point
+- [ ] Implement `execute_run(config, preflight) -> RunResult` in orchestration/
+- [ ] Implement phase orchestration per spec §4.3.4:
+  - [ ] Phase 1: Preflight
+  - [ ] Phase 2: LoadSources
+  - [ ] Phase 3: FramePlan (uses 6.4)
+  - [ ] Phase 4: Analyze (or skip per --skip-analysis)
+  - [ ] Phase 5: Align
+  - [ ] Phase 6: Tonemap (uses 6.5)
+  - [ ] Phase 7: Render
+  - [ ] Phase 8: Metadata
+  - [ ] Phase 9: Dovi
+  - [ ] Phase 10: Publish
+  - [ ] Phase 11: Report
+- [ ] Implement CLI flag → config override mapping per spec §4.3.5
+- [ ] Implement input discovery rules per spec §4.3.6
+- [ ] Write phase orchestration tests
+
+### 6.8 CLI Commands
+
+**Reference:** `05-implementation/module-specs/cli-module.md`
 
 - [ ] Complete `run` command implementation
-- [ ] Complete `wizard` command
-- [ ] Complete `doctor` command (is this still relevant with our all in one docker setup?)
-- [ ] Complete `preset` commands
-- [ ] Add all CLI options documented in api-design.md
-
-### 6.3 Preflight
-
-- [ ] Create `src/frame_compare/preflight.py`
-- [ ] Implement path resolution
-- [ ] Implement config loading
-- [ ] Implement dependency validation
+- [ ] Complete `wizard` command (interactive config)
+- [ ] Complete `doctor` command (dependency check)
+- [ ] Complete `preset` subcommands (list, apply, save)
+- [ ] Implement all CLI options documented in api-design.md
+- [ ] Implement `ExitCode` enum per spec §3.2
+- [ ] Implement error-to-exit-code mapping per spec §3.3
+- [ ] Write CLI integration tests
 
 ### Phase 6 Quality Gate ✓
 
 - [ ] `frame-compare run` executes full pipeline
 - [ ] `frame-compare wizard` configures interactively
 - [ ] `frame-compare doctor` checks dependencies
-- [ ] All CLI options work
-- [ ] Exit codes correct
+- [ ] All CLI options work per api-design.md
+- [ ] Exit codes match `ExitCode` enum
+- [ ] FramePlan determinism verified (subprocess test passes)
+- [ ] Tonemap wiring integration tests pass
+- [ ] VSPreview unit tests pass (or skipped if deferred)
 - [ ] Docker verification passes (real deps, zero skips): `bash tools/verify_docker_integration.sh`
 - [ ] E2E tests pass
 
@@ -490,6 +651,51 @@ frame-compare/
 - [ ] Ruff: 0 errors
 - [ ] Docker image builds and runs
 - [ ] Documentation complete
+
+---
+
+## Phase 8: Distribution — Windows Portable Bundle (Parallel Track)
+
+**SSOT:** `docs/OPUS_REBUILD_FRAME_COMPARE/07-windows-portable-bundle/`
+
+### 8.1 Spec + Decisions
+
+- [ ] Confirm supported Windows versions (Windows 10 + 11)
+- [ ] Confirm supported architectures (baseline x64; ARM64 best-effort or deferred)
+- [ ] Confirm packaging strategy (embedded Python bundle vs PyInstaller)
+- [ ] Record baseline distribution decisions in `docs/DECISIONS.md`
+- [ ] Finalize SSOT bundle layout + env rules:
+  - [ ] `07-windows-portable-bundle/01-bundle-spec.md`
+  - [ ] `07-windows-portable-bundle/02-support-matrix.md`
+
+### 8.2 Pinned Artifact Set (Baseline)
+
+- [ ] Define `manifest.json` schema (versions + sha256 + license notes)
+- [ ] Pin and source Windows artifacts for baseline bundle:
+  - [ ] VapourSynth runtime (Windows)
+  - [ ] Plugins: L-SMASH Works, vs-placebo, ffms2 (as applicable)
+  - [ ] FFmpeg (Windows)
+
+### 8.3 Bundle Assembly + Launch
+
+- [ ] Add Windows bundle assembly scripts (PowerShell)
+- [ ] Add bundle launcher(s) that set PATH + `VAPOURSYNTH_PLUGIN_PATH` deterministically
+- [ ] Ensure `frame-compare doctor --json` runs in the portable bundle
+
+### 8.4 Windows CI + Smoke Verification
+
+- [ ] Add Windows CI job to assemble portable bundle artifact
+- [ ] Add Windows smoke checks:
+  - [ ] `frame-compare doctor --json` exits 0
+  - [ ] VS clip creation works
+  - [ ] Tonemap does not raise (fallback allowed)
+- [ ] Optional: Linux GPU CI job (or manual run) that sets `FRAME_COMPARE_REQUIRE_LIBPLACEBO=1`
+
+### Phase 8 Quality Gate ✓
+
+- [ ] Portable bundle assembles deterministically from pinned artifacts
+- [ ] Windows CI smoke checks pass
+- [ ] Documentation published: install/run instructions + support matrix
 
 ---
 

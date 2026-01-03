@@ -15,6 +15,12 @@ Provide a **tested, pinned Windows portable bundle** for Frame Compare 2.0 that:
 - Supports HDR→SDR tonemapping via libplacebo **when available**, and uses deterministic fallback otherwise.
 - Allows users to bring their own VapourSynth install (best-effort), while only the bundle baseline is supported/CI-tested.
 
+**Baseline target:** Windows 10/11 x86_64 (amd64) portable folder with embedded Python runtime.
+
+Execution playbook:
+
+- `docs/OPUS_REBUILD_FRAME_COMPARE/07-windows-portable-bundle/05-agent-playbook.md`
+
 ---
 
 ## 2. Key Principles
