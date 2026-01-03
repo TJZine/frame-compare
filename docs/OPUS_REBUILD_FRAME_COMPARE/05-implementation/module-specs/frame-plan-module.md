@@ -23,7 +23,7 @@ The FramePlan module provides deterministic frame selection for the `--skip-anal
 src/frame_compare/analysis/
 ├── frame_plan.py       # FramePlan implementation (this spec)
 ├── selection.py        # Metric-based selection (existing)
-└── ...
+└── (other existing analysis modules)
 ```
 
 ---
@@ -46,7 +46,7 @@ class FramePlan:
     frames: list[int]      # Selected frame indices, sorted ascending
     num_frames: int        # Total frames in source video
     count: int             # Requested frame count
-    seed: str              # Seed used for selection
+    seed: int              # Seed used for selection (see §6.4)
     method: str = "uniform_seeded"  # Selection method identifier
 ```
 
@@ -57,7 +57,7 @@ plan = FramePlan(
     frames=[100, 500, 900, 1300, 1700],
     num_frames=2000,
     count=5,
-    seed="my-comparison",
+    seed=42,
 )
 ```
 
@@ -71,7 +71,7 @@ plan = FramePlan(
 def select_uniform_seeded_frames(
     num_frames: int,
     count: int,
-    seed: str,
+    seed: int,
 ) -> FramePlan:
     """
     Select frames using deterministic uniform distribution.
@@ -85,7 +85,7 @@ def select_uniform_seeded_frames(
     Args:
         num_frames: Total frames in video (exclusive upper bound)
         count: Number of frames to select
-        seed: String seed for reproducibility
+        seed: Integer seed for reproducibility (see §6.4)
 
     Returns:
         FramePlan with exactly `count` frames
@@ -104,7 +104,7 @@ def select_uniform_seeded_frames(
 def create_frame_plan(
     num_frames: int,
     count: int,
-    seed: str | None = None,
+    seed: int | None = None,
 ) -> FramePlan:
     """
     Create a FramePlan with optional auto-generated seed.
@@ -112,7 +112,7 @@ def create_frame_plan(
     Args:
         num_frames: Total frames in video
         count: Number of frames to select
-        seed: Optional seed; if None, uses "frame-compare-default"
+        seed: Optional seed; if None, uses the SSOT default seed (42)
 
     Returns:
         FramePlan from select_uniform_seeded_frames()
@@ -143,13 +143,13 @@ For each bin, select one frame using blake2s hash:
 ```python
 import hashlib
 
-def _select_from_bin(bin_start: int, bin_end: int, seed: str, bin_index: int) -> int:
+def _select_from_bin(bin_start: int, bin_end: int, seed: int, bin_index: int) -> int:
     """Select one frame from a bin using blake2s hash.
 
     Args:
         bin_start: Inclusive start of bin
         bin_end: Exclusive end of bin
-        seed: User-provided seed string
+        seed: User-provided seed integer
         bin_index: Index of this bin (0-based)
 
     Returns:
@@ -176,7 +176,7 @@ def _select_from_bin(bin_start: int, bin_end: int, seed: str, bin_index: int) ->
 def select_uniform_seeded_frames(
     num_frames: int,
     count: int,
-    seed: str,
+    seed: int,
 ) -> FramePlan:
     """Select frames using deterministic uniform distribution."""
     from frame_compare.errors import InsufficientFramesError
@@ -210,7 +210,7 @@ def select_uniform_seeded_frames(
         frame = _select_from_bin(bin_start, bin_end, seed, i)
         frames.append(frame)
 
-    # Sort for stable output (should already be sorted due to bin ordering)
+    # Sort for stable output (required by contract)
     frames.sort()
 
     return FramePlan(
@@ -278,9 +278,10 @@ All frame indices in `frames` are unique. No duplicates.
 
 | Seed Value | Behavior |
 |:-----------|:---------|
-| Non-empty string | Use directly |
-| Empty string `""` | Use `"frame-compare-default"` |
-| `None` (via helper) | Use `"frame-compare-default"` |
+| `seed` is an integer | Use directly |
+| `None` (via helper) | Use `42` |
+
+**SSOT default seed:** `42` (must remain consistent with `ConfigSchema.analysis.random_seed`).
 
 ---
 
@@ -324,8 +325,9 @@ else:
 | `test_select_uniform_seeded_frames_all_frames` | count=num_frames | All indices 0 to n-1 |
 | `test_select_uniform_seeded_frames_count_exceeds_available` | 10 frames from 5-frame video | InsufficientFramesError |
 | `test_select_uniform_seeded_frames_zero_count` | count=0 | Empty list |
-| `test_create_frame_plan_uses_default_seed_when_none` | seed=None | Uses "frame-compare-default" |
-| `test_create_frame_plan_uses_default_seed_when_empty` | seed="" | Uses "frame-compare-default" |
+| `test_create_frame_plan_uses_default_seed_when_none` | seed=None | Uses 42 |
+
+**Note (seed type):** `seed` is an `int | None` in this module. There is no valid “empty string” seed input at the type boundary; seed parsing/validation (if ever needed) belongs in CLI/config loading, not in `frame_plan`.
 
 ### 8.2 Property-Based Tests
 
@@ -335,7 +337,7 @@ from hypothesis import given, strategies as st
 @given(
     num_frames=st.integers(min_value=1, max_value=10000),
     count=st.integers(min_value=0, max_value=100),
-    seed=st.text(min_size=0, max_size=50),
+    seed=st.integers(min_value=0, max_value=2**31 - 1),
 )
 def test_frame_plan_invariants(num_frames, count, seed):
     if count > num_frames:

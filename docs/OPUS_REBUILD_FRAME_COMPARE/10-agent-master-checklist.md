@@ -442,6 +442,7 @@ frame-compare/
 - [x] VSPreview spec includes optional dependency handling and cache schema
 - [x] Orchestration spec includes phase ordering table and CLI→config mappings
 - [x] Requirements traceability does not reference non-existent tests
+- [x] Specs contain no ellipsis placeholders and no non-normative language in requirements ("should/may/etc.")
 
 ### 5.5.3 Implementation Phase Pointers (Next Work)
 
@@ -488,6 +489,8 @@ The following are **future implementation items** that will be tracked in Phase 
 
 ### 6.2 Preflight & Doctor
 
+**Reference:** `05-implementation/module-specs/orchestration-module.md` §4.1, §4.2
+
 - [ ] Implement `PreflightResult` dataclass per spec §4.1
 - [ ] Implement `prepare_preflight(root, config_path) -> PreflightResult`
 - [ ] Implement `DoctorCheck`, `CheckResult`, `DoctorReport` types per spec §4.2
@@ -497,10 +500,13 @@ The following are **future implementation items** that will be tracked in Phase 
 
 ### 6.3 Progress Reporting
 
-- [ ] Implement `ProgressReporter` protocol per spec §4.2.3
-- [ ] Implement `RichProgressReporter` for CLI
-- [ ] Implement `JsonProgressReporter` for --json mode
-- [ ] Implement `NullProgressReporter` for quiet mode
+**Reference:** `05-implementation/module-specs/orchestration-module.md` §3.3
+
+- [ ] Use canonical `ProgressReporter` protocol from `frame_compare.utils.progress`
+- [ ] Use `RichProgressReporter` for interactive CLI (TTY)
+- [ ] Use `LogProgressReporter` for `--json` / non-interactive modes (no JSON-lines reporter required yet)
+- [ ] Use `NullProgressReporter` for quiet mode
+- [ ] Implement reporter selection logic in orchestration (mode → reporter)
 - [ ] Write progress reporter tests
 
 ### 6.4 FramePlan Module
@@ -509,11 +515,11 @@ The following are **future implementation items** that will be tracked in Phase 
 
 - [ ] Create `src/frame_compare/analysis/frame_plan.py`
 - [ ] Implement `FramePlan` dataclass with invariants
-- [ ] Implement `select_uniform_seeded_frames(num_frames, count, seed) -> list[int]`
+- [ ] Implement `select_uniform_seeded_frames(num_frames, count, seed) -> FramePlan`
   - [ ] Bin partitioning algorithm per spec §4
   - [ ] blake2s hash selection per spec §4
-  - [ ] Default seed handling (None/"" → "frame-compare-default")
-- [ ] Implement `create_frame_plan(clip_infos, config) -> FramePlan`
+  - [ ] Default seed handling (seed is `None` → `42`)
+- [ ] Implement `create_frame_plan(num_frames, count, seed=None) -> FramePlan`
 - [ ] Raise `InsufficientFramesError` when count > num_frames
 - [ ] Verify determinism across Python sessions (subprocess test)
 - [ ] Write unit tests per spec §8.1:
@@ -524,7 +530,6 @@ The following are **future implementation items** that will be tracked in Phase 
   - [ ] `test_select_uniform_seeded_frames_count_exceeds_available`
   - [ ] `test_select_uniform_seeded_frames_zero_count`
   - [ ] `test_create_frame_plan_uses_default_seed_when_none`
-  - [ ] `test_create_frame_plan_uses_default_seed_when_empty`
 - [ ] Update `analysis/__init__.py` exports
 
 ### 6.5 Tonemap Wiring
@@ -539,10 +544,10 @@ The following are **future implementation items** that will be tracked in Phase 
 - [ ] Implement fail-fast `RenderError(FC-4004)` for HDR + tonemap required + VS unavailable
 - [ ] Propagate `TonemapError` on `apply_tonemap()` failure
 - [ ] Write integration tests:
-  - [ ] `test_render_hdr_with_tonemap_applies_correctly`
-  - [ ] `test_render_hdr_fails_without_vs_when_tonemap_required`
-  - [ ] `test_render_sdr_skips_tonemap`
-  - [ ] `test_render_hdr_skips_tonemap_when_disabled`
+  - [ ] `test_hdr_enable_tonemap_requires_vs_when_renderer_auto`
+  - [ ] `test_hdr_enable_tonemap_requires_vs_when_renderer_ffmpeg`
+  - [ ] `test_hdr_disable_tonemap_allows_ffmpeg_when_vs_missing`
+  - [ ] `test_sdr_allows_ffmpeg_fallback_when_vs_missing`
 
 ### 6.6 VSPreview Integration (Optional)
 
@@ -561,8 +566,10 @@ The following are **future implementation items** that will be tracked in Phase 
   - [ ] `test_load_manual_overrides_parses_valid_toml`
   - [ ] `test_load_manual_overrides_returns_empty_dict_on_missing_file`
   - [ ] `test_load_manual_overrides_returns_empty_dict_on_parse_error`
+  - [ ] `test_load_manual_overrides_returns_empty_dict_on_version_mismatch`
   - [ ] `test_save_manual_override_creates_file_if_missing`
   - [ ] `test_save_manual_override_merges_with_existing`
+  - [ ] `test_save_manual_override_overwrites_same_key`
   - [ ] `test_manual_override_takes_precedence_over_computed`
 - [ ] Update `importlinter.ini` for vspreview module
 
@@ -582,12 +589,11 @@ The following are **future implementation items** that will be tracked in Phase 
   - [ ] Phase 3: FramePlan (uses 6.4)
   - [ ] Phase 4: Analyze (or skip per --skip-analysis)
   - [ ] Phase 5: Align
-  - [ ] Phase 6: Tonemap (uses 6.5)
-  - [ ] Phase 7: Render
-  - [ ] Phase 8: Metadata
-  - [ ] Phase 9: Dovi
-  - [ ] Phase 10: Publish
-  - [ ] Phase 11: Report
+  - [ ] Phase 6: Render (includes tonemap gating/wiring from 6.5; not a standalone phase)
+  - [ ] Phase 7: Metadata
+  - [ ] Phase 8: Dovi
+  - [ ] Phase 9: Publish
+  - [ ] Phase 10: Report
 - [ ] Implement CLI flag → config override mapping per spec §4.3.5
 - [ ] Implement input discovery rules per spec §4.3.6
 - [ ] Write phase orchestration tests

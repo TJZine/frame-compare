@@ -97,7 +97,7 @@ class DoctorReport:
 
 > [!NOTE]
 > The `ProgressReporter` protocol is canonically defined in `frame_compare.utils.progress`.
-> This module provides orchestration-specific reporters that implement that protocol.
+> Orchestration code MUST use that canonical protocol and MUST NOT redefine it.
 
 ```python
 from typing import Protocol
@@ -122,31 +122,26 @@ class ProgressReporter(Protocol):
     def complete_phase(self) -> None:
         """Mark current phase as complete."""
 
-# Orchestration-specific implementations
-class RichProgressReporter:
-    """Rich-based terminal progress reporter."""
-    ...
-
-class QuietProgressReporter:
-    """Minimal progress reporter for --quiet mode."""
-    ...
-
-class JSONProgressReporter:
-    """JSON-lines progress reporter for --json mode."""
-    ...
+# Orchestration module MUST use the canonical implementations in `frame_compare.utils.progress`:
+# - `RichProgressReporter` (TTY output)
+# - `NullProgressReporter` (quiet mode)
+# - `LogProgressReporter` (non-interactive / non-TTY)
+#
+# A JSON-lines progress reporter is PLANNED; do not reference it as required until it exists.
 ```
 
 ### 3.4 Phase Types
 
 ```python
-from enum import Enum, auto
+from enum import Enum
 
-class PhaseStatus(Enum):
-    PENDING = auto()
-    RUNNING = auto()
-    COMPLETED = auto()
-    SKIPPED = auto()
-    FAILED = auto()
+class PhaseStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    SKIPPED = "skipped"
+    WARNED = "warned"
+    FAILED = "failed"
 
 @dataclass
 class Phase:
@@ -175,7 +170,7 @@ def prepare_preflight(
     1. Resolve workspace root (explicit, cwd, or search upward)
     2. Load configuration file (explicit path or discovery)
     3. Validate configuration schema
-    4. Resolve all paths (input_dir, screenshots_dir, etc.)
+    4. Resolve all workspace paths declared in `ConfigSchema.paths`
     5. Verify input directory exists and contains videos
 
     Returns:
@@ -253,7 +248,7 @@ class RunRequest:
 
     # Frame selection overrides
     frame_count: int | None = None   # --frame-count
-    seed: str | None = None          # --seed
+    seed: int | None = None          # --seed
 
     # Output behavior
     overlay_mode: str | None = None  # --overlay
@@ -318,24 +313,27 @@ Phases execute in this exact order:
 | 3 | FramePlan | ✓ Required | — | Fail fast |
 | 4 | Analyze | Optional | `--skip-analysis` | Warn only |
 | 5 | Align | Optional | No audio tracks | Warn only |
-| 6 | Tonemap | Optional | SDR source or `enable_tonemap=False` | Fail fast (HDR) |
-| 7 | Render | ✓ Required | — | Fail fast |
-| 8 | Metadata | Optional | `--skip-metadata` | Warn only |
-| 9 | Dovi | Optional | `--skip-dovi` | Warn only |
-| 10 | Publish | Optional | `--no-upload` | Warn only |
-| 11 | Report | Optional | `--no-report` | Warn only |
+| 6 | Render | ✓ Required | — | Fail fast |
+| 7 | Metadata | Optional | `--skip-metadata` | Warn only |
+| 8 | Dovi | Optional | `--skip-dovi` | Warn only |
+| 9 | Publish | Optional | `--no-upload` | Warn only |
+| 10 | Report | Optional | `config.report.enable == False` | Warn only |
 
 **Phase skip semantics:**
 
 - **Skippable phases:** Log skip reason, set status to `SKIPPED`, continue
-- **Warn-only failures:** Log warning, set status to `WARN`, continue
+- **Warn-only failures:** Log warning, set status to `WARNED`, continue
 - **Fail-fast failures:** Raise exception, stop pipeline, return `RunResult(success=False)`
 
 > [!NOTE]
 > **Tonemap phase skip/fail conditions:**
 >
-> - **Skipped** if `source_info.is_hdr == False` OR `config.color.enable_tonemap == False` → status `SKIPPED`, no exception
-> - **Fail-fast** if `source_info.is_hdr == True` AND `config.color.enable_tonemap == True` AND VapourSynth unavailable → raise `RenderError(FC-4004)`
+> Tonemapping is not a separate orchestration phase. It is part of the render pipeline and MUST be applied once per clip
+> after load and before any frame extraction (see `render-module.md` §1.4).
+>
+> - If `source_info.is_hdr == False` OR `config.color.enable_tonemap == False`: tonemap is bypassed inside render.
+> - If `source_info.is_hdr == True` AND `config.color.enable_tonemap == True` AND VapourSynth is unavailable: render MUST
+>   fail fast with `RenderError(FC-4004)` (no silent FFmpeg fallback producing un-tonemapped outputs).
 
 #### 4.3.5 CLI Flags → Config Overrides Mapping
 
@@ -376,8 +374,8 @@ def discover_inputs(
         Same directory contents → same order, always.
 
     Labeling:
-        First video is "Reference", subsequent are "Encode 1", "Encode 2", etc.
-        Labels can be overridden via config.overrides or filename patterns.
+        First video is "Reference", subsequent are "Encode 1", "Encode 2", ... "Encode N".
+        Label overrides via configuration are DEFERRED until a canonical `ConfigSchema` section exists.
 
     Raises:
         NoVideosFoundError (FC-3002): If no videos match patterns

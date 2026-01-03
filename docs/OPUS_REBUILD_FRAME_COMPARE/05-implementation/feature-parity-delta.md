@@ -38,8 +38,8 @@ This document identifies the feature parity gaps between legacy Frame Compare (v
 | F-008 | slow.pics Upload | ✅ Implemented | [services-module.md §4.2](module-specs/services-module.md#42-public-api) | `services/publishers.py` | `tests/services/test_publishers.py` |
 | F-009 | TMDB Metadata | ✅ Implemented | [services-module.md §3.2](module-specs/services-module.md#32-public-api) | `services/metadata.py` | `tests/services/test_metadata.py` |
 | F-010 | HTML Report | ✅ Implemented | [services-module.md §6.2](module-specs/services-module.md#62-public-api) | `services/report.py` | `tests/services/test_report.py` |
-| F-011 | Metrics Caching | ✅ Implemented | [analysis-module.md §5](module-specs/analysis-module.md#5-cache-strategy) | `analysis/cache_io.py` | `tests/analysis/test_cache.py` |
-| F-012 | CLI Interface | ⚠️ Partial | [cli-module.md §2.1](module-specs/cli-module.md#21-command-structure) | `cli_entry.py` | `tests/test_cli.py` |
+| F-011 | Metrics Caching | ✅ Implemented | [analysis-module.md §5](module-specs/analysis-module.md#5-cache-strategy) | `analysis/cache_io.py` | `tests/analysis/test_cache_io.py` |
+| F-012 | CLI Interface | ⚠️ Partial | [cli-module.md §2.1](module-specs/cli-module.md#21-command-structure) | `cli_entry.py` | `tests/cli/test_cli_commands.py` |
 | F-013 | Config Loading | ✅ Implemented | [config-module.md §3](module-specs/config-module.md#3-public-api) | `config/loader.py` | `tests/config/test_loader.py` |
 
 ### 2.2 Missing Integration Features (GAP Details)
@@ -63,7 +63,7 @@ This document identifies the feature parity gaps between legacy Frame Compare (v
 | **Legacy Behavior** | `orchestration/coordinator.py` + `phases/` directory manage full pipeline |
 | **2.0 Current State** | `src/frame_compare/orchestration/` directory **does not exist** |
 | **SSOT State** | `orchestration-module.md` spec exists but no implementation |
-| **CLI State** | `cli_entry.py` prints `"[stub] ... Not yet implemented"` for run/wizard/doctor/preset |
+| **CLI State** | `cli_entry.py` prints `"[stub] <command>: Not yet implemented"` for run/wizard/doctor/preset |
 | **Blocking** | Cannot run end-to-end without orchestration layer |
 | **Fix Required** | Complete orchestration-module.md spec with minimal API surface, then implement |
 
@@ -88,7 +88,7 @@ This document identifies the feature parity gaps between legacy Frame Compare (v
 | **Legacy Behavior** | `--skip-analysis` uses seeded uniform sampling for frame selection |
 | **2.0 Current State** | render-module.md references "FramePlan contract" but no module spec exists |
 | **SSOT State** | Placeholder reference in render-module.md §1.3 with no backing spec |
-| **Code State** | `analysis/frame_plan.py` referenced in scaffold but may not be current |
+| **Code State** | Scaffold references are non-authoritative; SSOT is `frame-plan-module.md` and target implementation path is `src/frame_compare/analysis/frame_plan.py`. |
 | **Blocking** | Cannot implement `--skip-analysis` without deterministic algorithm spec |
 | **Fix Required** | Create frame-plan-module.md with exact algorithm |
 
@@ -99,10 +99,54 @@ This document identifies the feature parity gaps between legacy Frame Compare (v
 | Aspect | Details |
 |:-------|:--------|
 | **Legacy Behavior** | Full pipeline tests in `tests/` |
-| **2.0 Current State** | `find tests/ -name "test_e2e*"` returns 0 results |
+| **2.0 Current State** | E2E coverage exists but is minimal (e.g., CLI version); full pipeline E2E remains PLANNED. |
 | **Traceability Claim** | requirements-traceability.md §4 lists test names that do not exist |
 | **Blocking** | Verification only — not blocking implementation |
 | **Fix Required** | Update requirements-traceability.md to mark tests as PLANNED |
+
+---
+
+#### GAP-006: Analysis Lead/Trailer Ignore Window
+
+| Aspect | Details |
+|:-------|:--------|
+| **Legacy Behavior** | Frame selection can skip intro/outro via config (e.g., `ignore_lead_seconds`). |
+| **2.0 Current State** | No corresponding config key or algorithm contract present in 2.0 SSOT for selection boundaries. |
+| **Blocking** | Optional for Runner MVP; impacts parity and determinism for selection modes. |
+| **Fix Required** | Mark as DEFERRED (define config keys + boundary rules) or DE-SCOPED (explicitly state not supported). |
+
+---
+
+#### GAP-007: Per-File Overrides (Trim/FPS)
+
+| Aspect | Details |
+|:-------|:--------|
+| **Legacy Behavior** | Users can define per-file overrides for trim and FPS in `[overrides]`. |
+| **2.0 Current State** | `ConfigSchema` does not define an `overrides` section; orchestration specs must not reference `config.overrides`. |
+| **Blocking** | Optional for Runner MVP; current spec-to-code alignment requires correction. |
+| **Fix Required** | Remove `config.overrides` references from specs and track overrides as DEFERRED with a planned schema/spec anchor. |
+
+---
+
+#### GAP-008: Tonemap QA/Strictness Policy
+
+| Aspect | Details |
+|:-------|:--------|
+| **Legacy Behavior** | Tonemap flow includes verification/stamping; strict mode can abort on overlay/verification failures. |
+| **2.0 Current State** | Tonemap wiring + VS-missing fail-fast policy is specified; strictness/verification/stamping parity is not defined. |
+| **Blocking** | Optional for Runner MVP; must be explicitly DEFERRED/DE-SCOPED to avoid implementer guesses. |
+| **Fix Required** | Add an explicit SSOT decision for strictness/verification (scope + module anchor). |
+
+---
+
+#### GAP-009: Run Snapshot / Last-Run State Artifact
+
+| Aspect | Details |
+|:-------|:--------|
+| **Legacy Behavior** | Persists a last-run snapshot (e.g., `.frame_compare.run.json`). |
+| **2.0 Current State** | No SSOT contract for a run snapshot artifact. |
+| **Blocking** | Optional for Runner MVP; impacts reproducibility/debugging parity. |
+| **Fix Required** | Mark as DEFERRED with planned artifact path + schema, or explicitly DE-SCOPED. |
 
 ---
 
@@ -121,7 +165,7 @@ This document identifies the feature parity gaps between legacy Frame Compare (v
 ### 4.1 Orchestration Gap
 
 - **Spec:** `docs/OPUS_REBUILD_FRAME_COMPARE/05-implementation/module-specs/orchestration-module.md`
-- **Expected Code:** `src/frame_compare/orchestration/` (coordinator.py, phases.py, etc.)
+- **Expected Code:** `src/frame_compare/orchestration/` (coordinator.py, phases.py, runner.py, doctor.py, preflight.py)
 - **Actual:** Directory does not exist
 
 ### 4.2 FramePlan Gap
@@ -133,26 +177,15 @@ This document identifies the feature parity gaps between legacy Frame Compare (v
 ### 4.3 Tonemap Integration Gap
 
 - **Spec:** vs-module.md defines `apply_tonemap()` signature
-- **Expected Caller:** `render/orchestrator.py` should call tonemap before rendering HDR clips
+- **Required Caller:** `src/frame_compare/render/orchestrator.py::render_screenshots()` MUST apply tonemap once per clip (after load, before any frame extraction) when gated by HDR detection and `config.color.enable_tonemap`.
 - **Actual:** `grep -r "apply_tonemap" src/frame_compare/render/` returns 0 results
 
 ---
 
 ## 5. Traceability Drift Summary
 
-The following test names in `requirements-traceability.md` §4 do not exist in `tests/`:
-
-| Claimed Test | Status |
-|:-------------|:-------|
-| `test_e2e_load_hdr` | MISSING |
-| `test_e2e_tonemap_presets` | MISSING |
-| `test_e2e_selection` | MISSING |
-| `test_e2e_render_overlay` | MISSING |
-| `test_e2e_publish` | MISSING |
-| `test_e2e_report` | MISSING |
-| `test_e2e_golden_pipeline` | MISSING |
-
-**Action Required:** Update traceability doc to mark as `PLANNED` with target file paths.
+`requirements-traceability.md` now marks pipeline E2E tests as **PLANNED** with target file paths and marker policy.
+No further traceability action is required in this parity-closure phase.
 
 ---
 

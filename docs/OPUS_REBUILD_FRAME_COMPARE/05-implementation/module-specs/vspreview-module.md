@@ -126,11 +126,12 @@ def launch_alignment_verification(
         None if user cancelled or timeout
 
     Raises:
-        VSPreviewNotFoundError: If vspreview cannot be launched
-        VSPreviewError: If launch or communication fails
+        VSPreviewNotFoundError: If vspreview is not importable/launchable when this function is invoked
+        VSPreviewError: If launch or communication fails after vspreview is available
 
     Note:
         This function blocks until user interaction completes or timeout.
+        Callers MUST treat VSPreview failures as warn-only and continue with the computed/cached offset (see §6.2).
     """
 ```
 
@@ -298,9 +299,9 @@ def check_vspreview() -> CheckResult:
 |:----------------|:--------------------|:---------|
 | `False` | Any | Skip VSPreview entirely |
 | `True` | `True` | Launch verification |
-| `True` | `False` | Log warning, skip verification, continue with computed offset |
+| `True` | `False` | Log warning, skip verification, continue with computed/cached offset |
 
-**No hard failure:** If user requests VSPreview but it's missing, log warning and continue. This is a convenience feature, not a required dependency.
+**No hard failure:** If user requests VSPreview but it is not available, the alignment service MUST log a warning and continue. This module MUST NOT be required for Runner MVP.
 
 ```python
 if config.use_vspreview and not is_vspreview_available():
@@ -308,7 +309,7 @@ if config.use_vspreview and not is_vspreview_available():
         "vspreview_not_available",
         hint="Install vspreview for interactive alignment verification",
     )
-    # Continue with computed alignment
+    # Continue with computed/cached alignment
 ```
 
 ---
@@ -349,30 +350,20 @@ Given the same cached manual overrides:
 
 ### 8.2 Pytest Markers
 
-```python
-# In conftest.py
-import pytest
+VSPreview does not have a dedicated marker in this repo. Tests MUST use existing markers from `pyproject.toml`:
 
-def pytest_configure(config):
-    config.addinivalue_line(
-        "markers", "vspreview_required: test requires VSPreview installation"
-    )
-
-# Usage in tests
-@pytest.mark.vspreview_required
-def test_launch_vspreview():
-    """This test requires VSPreview and a display."""
-    ...
-```
+- `@pytest.mark.integration` for integration-level tests
+- `@pytest.mark.e2e` for end-to-end tests
+- `@pytest.mark.skip` for interactive/manual tests (always skipped by default)
 
 ### 8.3 Integration Tests (Optional, Marker-Gated)
 
 ```python
-@pytest.mark.vspreview_required
+@pytest.mark.integration
 @pytest.mark.skip(reason="Requires interactive display")
 def test_vspreview_integration():
     """Manual integration test - run interactively."""
-    ...
+    raise NotImplementedError("Manual/interactive test placeholder")
 ```
 
 ---
@@ -390,13 +381,7 @@ def test_vspreview_integration():
 | `VSPreviewError` | FC-4019 | VSPreview launch/communication failure |
 
 ```python
-from frame_compare.errors import DependencyError, ServiceError
-
-class VSPreviewNotFoundError(DependencyError):
-    """VSPreview is not installed (FC-2008)."""
-
-class VSPreviewError(ServiceError):
-    """VSPreview operation failed (FC-4019)."""
+from frame_compare.errors import VSPreviewError, VSPreviewNotFoundError
 ```
 
 ---

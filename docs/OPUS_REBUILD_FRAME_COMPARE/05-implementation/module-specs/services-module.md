@@ -82,13 +82,15 @@ async def align_clips(
     Align comparison clips to reference using audio cross-correlation.
 
     Algorithm:
+    0. Load persisted manual overrides (if enabled; see §2.4)
     1. Extract audio from all clips (via FFmpeg)
     2. Resample to common sample_rate
     3. For each comparison:
-       a. Cross-correlate with reference
-       b. Find correlation peak
+       a. Resolve offset source with deterministic precedence (see §2.4)
+       b. If computing: cross-correlate with reference and find correlation peak
        c. Convert sample offset to frame offset
-    4. Cache results
+       d. Optionally offer VSPreview verification (warn-only; see §2.4)
+    4. Cache computed results (not manual overrides)
 
     Args:
         reference: Reference video file
@@ -118,6 +120,42 @@ async def align_clips(
         AudioAlignmentError: Alignment failed due to empty audio,
             zero-norm signals, or cross-correlation failure
         CacheCorruptionError: Cache file exists but is not valid TOML
+
+---
+
+### 2.4 VSPreview Integration and Manual Overrides (Deterministic Contract)
+
+This section defines the interaction contract between `frame_compare.services.alignment` and the optional
+`frame_compare.vspreview` module.
+
+**Manual override persistence:**
+
+- Cache file: `{cache_dir}/manual_overrides.toml`
+- Key format: `"{reference_stem}:{comparison_stem}"` where stems are `Path(path).stem`
+- When a manual override is persisted, it MUST be applied in all future runs until the file entry is deleted.
+- If `manual_overrides.toml` is missing, corrupt, or has a schema/version mismatch, the loader MUST log a warning and
+  return an empty override mapping (no hard failure).
+
+**Deterministic precedence (highest to lowest):**
+
+1. **Manual override** from `{cache_dir}/manual_overrides.toml` (if present for the clip pair)
+2. **Cached computed offset** from `{cache_dir}/audio_offsets.toml` (if cache enabled and entry present)
+3. **Newly computed offset** from cross-correlation (computed during the current run)
+
+**VSPreview invocation rules:**
+
+- If `AlignmentConfig.use_vspreview == False`: VSPreview MUST NOT be used.
+- If `AlignmentConfig.use_vspreview == True` and VSPreview is available:
+  - The service MAY launch an interactive verification session after computing an offset.
+  - If the user confirms/adjusts the offset, the service MUST persist it to `manual_overrides.toml` and set
+    `AlignmentResult.method = "manual"`.
+- If `AlignmentConfig.use_vspreview == True` and VSPreview is not available:
+  - The service MUST log a warning and continue without raising.
+
+**Error policy (warn-only):**
+
+- Any VSPreview-related errors (`VSPreviewNotFoundError`, `VSPreviewError`, timeouts, user cancellation) MUST be
+  treated as warn-only by the alignment service. The service MUST continue using the computed/cached offset.
         CacheVersionMismatchError: Cache version does not match CACHE_VERSION
     """
 
@@ -260,7 +298,7 @@ correlation_score = 0.987
 method = "cross_correlation"
 
 ["reference:comparison_b"]
-# ... additional entries
+# Additional entries are allowed; unknown keys MUST be ignored by loaders.
 ```
 
 - **CACHE_VERSION** = `"1"` (string, for future schema migrations)
@@ -282,7 +320,7 @@ class ParsedMetadata:
     season: int | None = None
     episode: int | None = None
     release_group: str | None = None
-    source: str | None = None  # BluRay, WEB-DL, etc.
+    source: str | None = None  # Example values: "Blu-ray", "WEB-DL", "HDTV"
     resolution: str | None = None
 
 @dataclass(frozen=True)
@@ -332,7 +370,7 @@ def parse_filename(filename: str) -> ParsedMetadata:
     Source representation:
     - The `source` field value is returned verbatim from the parser
       (e.g., "Blu-ray", "WEB-DL", "HDTV") — no normalization applied
-    - Tests should assert against parser output format, not normalized forms
+    - Tests MUST assert against parser output format, not normalized forms
 
     Exception handling:
     - All parser calls are wrapped in try/except
@@ -629,7 +667,7 @@ class DoviToolService:
             video_path: Path to video file (Dolby Vision stream)
 
         Returns:
-            List of dicts with l1_min_nits, l1_max_nits, l1_avg_nits, etc.
+            List of dicts with keys such as l1_min_nits, l1_max_nits, l1_avg_nits.
             Empty list if no Dolby Vision data or extraction fails.
 
         Security:
@@ -812,7 +850,7 @@ See [report-viewer-spec.md](../report-viewer-spec.md) Section 6 for full keyboar
 
 > [!NOTE]
 > All error classes are defined centrally in `frame_compare.errors` (see [errors-module.md](errors-module.md)).
-> This module should import and use these classes, not define its own.
+> This module MUST import and use these classes, not define its own.
 
 **Error classes used by this module:**
 

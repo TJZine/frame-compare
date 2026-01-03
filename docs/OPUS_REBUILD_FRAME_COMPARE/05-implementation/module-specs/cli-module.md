@@ -145,12 +145,21 @@ def run(
     ),
 ) -> None:
     """Execute the comparison pipeline."""
-    ...  # pseudocode: implementation builds RunRequest and calls runner.run()
+    # REQUIRED STEPS (normative):
+    # 1. Build a RunRequest from CLI args (no implicit defaults beyond Typer defaults).
+    # 2. Call `frame_compare.runner.run(request, dependencies=None) -> RunResult`.
+    # 3. If a `FrameCompareError` is raised, map to exit code via `handle_error()` and exit.
+    # 4. If `RunResult.success` is False, exit with `ExitCode.PROCESSING_ERROR`.
+    raise NotImplementedError
 
 @app.command()
 def wizard() -> None:
     """Interactive configuration setup."""
-    ...  # pseudocode: prompt user for config options using rich.prompt
+    # REQUIRED STEPS (normative):
+    # 1. Prompt user for minimal config inputs (paths + core options).
+    # 2. Write config to `{root}/config/config.toml` and exit 0.
+    # This command is PLANNED; do not implement partially.
+    raise NotImplementedError
 
 @app.command()
 def doctor(
@@ -160,7 +169,12 @@ def doctor(
     ),
 ) -> None:
     """Check system dependencies."""
-    ...  # pseudocode: run collect_checks() and format_results()
+    # REQUIRED STEPS (normative):
+    # 1. Call `frame_compare.orchestration.run_doctor(checks=None, reporter=None) -> DoctorReport`.
+    # 2. If `--json` is set, print machine-readable JSON.
+    # 3. Otherwise, print a human-readable report.
+    # 4. Exit 0 unless a critical dependency is missing (then ExitCode.DEPENDENCY_ERROR).
+    raise NotImplementedError
 
 preset_app = typer.Typer(
     name="preset",
@@ -172,17 +186,27 @@ app.add_typer(preset_app, name="preset")
 @preset_app.command("list")
 def preset_list() -> None:
     """List available presets."""
-    ...  # pseudocode: scan presets directory and print table
+    # REQUIRED STEPS (normative):
+    # 1. List preset files from the canonical presets directory (SSOT path).
+    # 2. Print them in deterministic order (lexicographic, case-insensitive).
+    raise NotImplementedError
 
 @preset_app.command("apply")
 def preset_apply(name: str) -> None:
     """Apply a preset to configuration."""
-    ...  # pseudocode: merge preset into current config and emit warnings
+    # REQUIRED STEPS (normative):
+    # 1. Load the named preset.
+    # 2. Merge into current config using deterministic precedence rules.
+    # 3. Write updated config and exit 0.
+    raise NotImplementedError
 
 @preset_app.command("save")
 def preset_save(name: str) -> None:
     """Save current configuration as preset."""
-    ...  # pseudocode: dump current config to presets/{name}.toml
+    # REQUIRED STEPS (normative):
+    # 1. Load current config.
+    # 2. Write to presets/{name}.toml with stable key ordering.
+    raise NotImplementedError
 ```
 
 ### 2.2 Exit Codes
@@ -222,6 +246,11 @@ class RunRequest:
     skip_dovi: bool = False
     tm_preset: str | None = None
     tm_target_nits: int | None = None
+    tm_curve: str | None = None
+    frame_count: int | None = None
+    seed: int | None = None
+    overlay_mode: str | None = None
+    json_output: bool = False
     no_color: bool = False
     quiet: bool = False
     verbose: bool = False
@@ -238,6 +267,8 @@ class RunResult:
     duration_seconds: float = 0.0
     cache_hit: bool = False
     errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    phase_timings: dict[str, float] = field(default_factory=dict)
 
 @dataclass
 class RunContext:
@@ -269,11 +300,15 @@ def run(
 
     Phases:
     1. Preflight - Validate config, find videos
-    2. Analysis - Calculate/load metrics, select frames
-    3. Alignment - Align audio (optional)
-    4. Rendering - Generate screenshots
-    5. Publishing - Upload to slow.pics (optional)
-    6. Reporting - Generate HTML report (optional)
+    2. LoadSources - Load video sources and detect HDR
+    3. FramePlan - Select frames (metric-based or skip-analysis)
+    4. Analyze - Calculate/load metrics (optional; skipped when request.skip_analysis)
+    5. Align - Align audio (optional)
+    6. Render - Generate screenshots (includes tonemap gating per render-module.md §1.4)
+    7. Metadata - Extract metadata (optional; skipped when request.skip_metadata)
+    8. Dovi - Extract Dolby Vision info (optional; skipped when request.skip_dovi)
+    9. Publish - Upload to slow.pics (optional; skipped when request.no_upload)
+    10. Report - Generate HTML report (optional; gated by config.report.enable)
 
     Args:
         request: Run configuration
@@ -306,15 +341,19 @@ class FFmpegRunner(Protocol):
         output: Path,
     ) -> None:
         """Extract a single frame as PNG."""
-        ...  # pseudocode: run ffmpeg -ss {time} -i {video} -vframes 1 {output}
+        raise NotImplementedError
 
     def probe_hdr(self, video: Path) -> HDRMetadata | None:
         """Probe video for HDR metadata."""
-        ...  # pseudocode: run ffprobe and parse color_primaries/transfer/matrix
+        raise NotImplementedError
 
 class DefaultFFmpegRunner:
     """Default FFmpeg runner implementation."""
-    ...  # pseudocode: implement FFmpegRunner protocol methods
+    # Default implementation MUST:
+    # - raise FFmpegNotFoundError if ffmpeg/ffprobe is missing
+    # - raise FFmpegError on non-zero exit
+    # - never perform silent HDR->SDR conversion when tonemap is required
+    pass
 ```
 
 ### 3.4 RunDependencies
@@ -385,7 +424,7 @@ class Phase(Protocol):
 
     async def execute(self, context: RunContext) -> None:
         """Execute the phase."""
-        ...  # pseudocode: implement phase-specific logic
+        raise NotImplementedError
 
 class PreflightPhase(Phase):
     """Validate configuration and find videos."""
@@ -560,7 +599,7 @@ def create_reporter(quiet: bool, verbose: bool) -> ProgressReporter:
 
 > [!NOTE]
 > There is no separate `CLIError` class. CLI-layer errors use existing error classes
-> (`ConfigError`, `InputError`, etc.). The exit code is determined by the error category.
+> (`ConfigError`, `InputError`, `DependencyError`, `ProcessingError`, `NetworkError`). The exit code is determined by the error category.
 
 ```python
 from frame_compare.errors import (

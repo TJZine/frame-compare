@@ -39,10 +39,10 @@ src/frame_compare/render/
 
 The `FramePlan` contract and `select_uniform_seeded_frames()` algorithm are defined in:
 
-- Contract: `contracts/phase_ordering.yaml` (frame_plan phase)
-- Implementation: `scaffold/src/frame_compare/analysis/frame_plan.py`
+- Spec: `frame-plan-module.md` §4 (Algorithm Specification)
+- Target implementation path: `src/frame_compare/analysis/frame_plan.py`
 
-The algorithm partitions frames into bins and selects one frame per bin using a blake2s hash for reproducibility. See the scaffold implementation for locked reference outputs.
+The algorithm partitions frames into bins and selects one frame per bin using a blake2s hash for reproducibility.
 
 **Key Properties:**
 
@@ -71,14 +71,14 @@ Tonemapping is applied if and only if **ALL** of the following conditions are tr
 
 ```python
 def should_tonemap(source_info: SourceInfo, config: ConfigSchema) -> bool:
-    """Determine if tonemap should be applied.
+    """Determine if tonemap MUST be applied.
 
     Args:
         source_info: Loaded source metadata from VSLoader
         config: Resolved configuration
 
     Returns:
-        True if tonemap should be applied
+        True if tonemap MUST be applied
     """
     return (
         source_info.is_hdr                    # Source is HDR (PQ/HLG + BT.2020)
@@ -91,14 +91,14 @@ def should_tonemap(source_info: SourceInfo, config: ConfigSchema) -> bool:
 | Input | Source | Type | Description |
 |:------|:-------|:-----|:------------|
 | `source_info.is_hdr` | `vs.SourceInfo` after load | `bool` | True if `_Transfer in (16, 18) AND _Primaries == 9` |
-| `config.color.enable_tonemap` | Config schema | `bool` | Default `True`; user override via config or `--no-tonemap` flag |
+| `config.color.enable_tonemap` | Config schema | `bool` | Default `True`; user override via config (CLI override supported once Phase 6 wiring consumes CLI flags) |
 
 #### 1.4.2 Settings Resolution
 
 When tonemapping is triggered, resolve `TonemapSettings` using this priority order:
 
 1. **CLI overrides** (`--tm-preset`, `--tm-target`, `--tm-curve`) → highest priority
-2. **Config file** (`config.color.preset`, `config.color.target_nits`, etc.)
+2. **Config file** (`config.color.preset`, `config.color.target_nits`, `config.color.tone_curve`)
 3. **Preset defaults** via `get_preset_settings(preset_name)`
 
 ```python
@@ -150,9 +150,13 @@ def render_screenshots(
     frames: list[int],
     output_dir: Path,
     config: ConfigSchema,  # ADDED: config required for tonemap gating
-    # ... other args
+    label_map: dict[Path, str] | None = None,
+    renderer: Renderer = "auto",
+    overlay_mode: OverlayMode = OverlayMode.STANDARD,
+    reporter: ProgressReporter | None = None,
 ) -> dict[str, list[Path]]:
     for clip_path in clips:
+        label = (label_map or {}).get(clip_path, clip_path.stem)
         source_info = loader.load(clip_path)
         clip = source_info.clip
 
@@ -167,7 +171,22 @@ def render_screenshots(
 
         # Continue with frame extraction using (possibly tonemapped) clip
         for frame in frames:
-            # ... render frame from clip
+            overlay = OverlayConfig(
+                mode=overlay_mode,
+                label=label,
+                frame_number=frame,
+                resolution=(source_info.width, source_info.height),
+                hdr_info=hdr_info,
+                font_path=None,
+            )
+            request = RenderRequest(
+                clip=clip,
+                frame_number=frame,
+                output_path=generate_screenshot_path(output_dir, label, frame),
+                overlay=overlay,
+                encoder_settings=EncoderSettings(),
+            )
+            render_frame(request)
 ```
 
 #### 1.4.4 Failure Policy
@@ -182,6 +201,7 @@ def render_screenshots(
 | Scenario | Renderer | Behavior |
 |:---------|:---------|:---------|
 | HDR source, `enable_tonemap=True`, VS available | vapoursynth/auto | Apply tonemap, render |
+| HDR source, `enable_tonemap=True`, VS available but libplacebo missing/unusable | vapoursynth/auto | Apply tonemap via fallback path inside `apply_tonemap()`, render |
 | HDR source, `enable_tonemap=True`, VS unavailable | auto | Raise `RenderError(FC-4004)` with hint |
 | HDR source, `enable_tonemap=True`, VS unavailable | ffmpeg | Raise `RenderError(FC-4004)` with hint |
 | HDR source, `enable_tonemap=False` | any | Render without tonemap (user accepts wrong colors) |
@@ -199,7 +219,9 @@ raise RenderError(
 
 **Tonemap function failure:**
 
-If `apply_tonemap()` raises `TonemapError`, propagate it to the caller. Do not catch and continue.
+- If `apply_tonemap()` raises `TonemapError`, propagate it to the caller. Do not catch and continue.
+- If libplacebo is unavailable or fails at runtime, `apply_tonemap()` MUST use its deterministic fallback algorithm
+  (no silent bypass of tonemap for HDR sources when tonemap is required).
 
 #### 1.4.5 Determinism Guarantee
 
@@ -213,6 +235,7 @@ Given identical inputs, tonemapping MUST produce identical outputs:
 
 ```python
 def test_tonemap_determinism():
+    # Marker policy: this test MUST be gated with @pytest.mark.vs_required
     clip1 = apply_tonemap(source.clip, settings)
     clip2 = apply_tonemap(source.clip, settings)
     # Frame N from clip1 == Frame N from clip2 (byte-identical)
@@ -356,10 +379,17 @@ result = ScreenshotResult(
 ```python
 class ProgressReporter(Protocol):
     """Protocol for reporting progress."""
-    def start_phase(self, name: str, total: int) -> None: ...
-    def set_description(self, text: str) -> None: ...
-    def advance(self, count: int = 1) -> None: ...
-    def complete_phase(self) -> None: ...
+    def start_phase(self, name: str, total: int) -> None:
+        raise NotImplementedError
+
+    def set_description(self, text: str) -> None:
+        raise NotImplementedError
+
+    def advance(self, count: int = 1) -> None:
+        raise NotImplementedError
+
+    def complete_phase(self) -> None:
+        raise NotImplementedError
 ```
 
 ---
@@ -406,7 +436,7 @@ def render_batch(
     Render multiple frames with progress reporting.
 
     ordering contract: Result list matches input `requests` order.
-    exception contract: Fail-fast. Raises first encountered exception immediately; subsequent tasks may be cancelled or awaited but not started.
+    exception contract: Fail-fast. Raises the first encountered exception immediately; no new tasks MUST be started after the first exception is observed.
 
     Progress integration:
     - Call reporter.start_phase("Rendering", len(requests)) before loop
@@ -741,19 +771,24 @@ from frame_compare.errors import (
 
 ### 7.1 Unit Tests
 
-| Test Case | Input | Expected |
-|-----------|-------|----------|
-| Filename generation | "Source", 100 | "Source_00100.png" |
-| Overlay position | top-left | (margin, margin) |
-| Dimension calculation | 4K input | Within limits |
+All unit tests MUST be pure-Python and MUST NOT require VapourSynth, FFmpeg, or network.
+
+| Test | Validates |
+|---|---|
+| `tests/render/test_naming.py` | Deterministic naming (`{label}_{frame:05d}.png`) |
+| `tests/render/test_geometry.py` | Deterministic geometry helpers |
+| `tests/render/test_overlay.py` | Overlay layout and text composition (no VS required) |
 
 ### 7.2 Integration Tests
 
-| Test Case | Input | Expected |
-|-----------|-------|----------|
-| VS render | Sample clip | PNG file created |
-| FFmpeg render | Video file | PNG file created |
-| Overlay application | Image + config | Overlay visible |
+Integration tests MUST be explicitly marker-gated.
+
+| Test | Marker(s) | Validates |
+|---|---|---|
+| PLANNED: `tests/render/test_tonemap_wiring.py::test_hdr_enable_tonemap_requires_vs_when_renderer_auto` | `@pytest.mark.vs_required` | HDR + enable_tonemap=True + VS missing → fail fast (`RenderError(FC-4004)`) |
+| PLANNED: `tests/render/test_tonemap_wiring.py::test_hdr_enable_tonemap_requires_vs_when_renderer_ffmpeg` | `@pytest.mark.vs_required` | HDR + enable_tonemap=True + renderer="ffmpeg" → fail fast (`RenderError(FC-4004)`) |
+| PLANNED: `tests/render/test_tonemap_wiring.py::test_hdr_disable_tonemap_allows_ffmpeg_when_vs_missing` | `@pytest.mark.integration` | HDR + enable_tonemap=False + VS missing → FFmpeg path allowed |
+| PLANNED: `tests/render/test_tonemap_wiring.py::test_sdr_allows_ffmpeg_fallback_when_vs_missing` | `@pytest.mark.integration` | SDR source + VS missing → renderer="auto" falls back to FFmpeg |
 
 ---
 
@@ -776,7 +811,7 @@ This module extracts frames from video and saves as PNG images.
 
 ## Key Requirements
 - VapourSynth primary renderer
-- FFmpeg fallback when VS unavailable
+- FFmpeg fallback is allowed only when tonemap is not required (SDR source or `enable_tonemap=false`)
 - PNG output with configurable compression
 - Overlay modes: minimal, standard, diagnostic
 - Consistent naming: {label}_{frame:05d}.png
