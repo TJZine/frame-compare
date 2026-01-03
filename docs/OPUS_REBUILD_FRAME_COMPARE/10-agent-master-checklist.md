@@ -469,12 +469,12 @@ frame-compare/
 
 **Reference:** `05-implementation/module-specs/orchestration-module.md`
 
-- [ ] Create `src/frame_compare/orchestration/__init__.py`
-- [ ] Create `src/frame_compare/orchestration/preflight.py`
-- [ ] Create `src/frame_compare/orchestration/doctor.py`
-- [ ] Create `src/frame_compare/orchestration/progress.py`
-- [ ] Create `src/frame_compare/orchestration/phases.py`
-- [ ] Update `importlinter.ini` for orchestration layer contracts
+- [x] Create `src/frame_compare/orchestration/__init__.py` (2026-01-03)
+- [x] Create `src/frame_compare/orchestration/preflight.py` (2026-01-03)
+- [x] Create `src/frame_compare/orchestration/doctor.py` (2026-01-03)
+- [x] Create `src/frame_compare/orchestration/progress.py` (2026-01-03)
+- [x] Create `src/frame_compare/orchestration/phases.py` (2026-01-03)
+- [x] Update `importlinter.ini` for orchestration layer contracts (2026-01-03)
 
 ### 6.2 Preflight & Doctor
 

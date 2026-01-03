@@ -7,6 +7,7 @@
 **Decision:** Alias `apply_tonemap` as `tonemap` in `src/frame_compare/vs/__init__.py`.
 
 **Rationale:**
+
 - Satisfies the SSOT requirement.
 - Provides a shorter, convenient name for the primary public API.
 
@@ -17,6 +18,7 @@
 **Decision:** Add `test_integration.py` with `@pytest.mark.vs_required` marker.
 
 **Rationale:**
+
 - Allows running smoke tests in environments with VapourSynth installed.
 - Skips gracefully in environments without VapourSynth (e.g., some CI jobs or local dev without deps).
 
@@ -29,6 +31,7 @@
 **Decision:** Created `frame_compare.render` module with central type definitions (`OverlayMode`, `EncoderSettings`, `RenderRequest`, `OverlayConfig`, `ScreenshotResult`) and import contracts.
 
 **Rationale:**
+
 - Establishes the data structures for Phase 4 (Rendering).
 - `OverlayConfig` and `RenderRequest` decouple rendering from configuration.
 - Import contracts prevent dependency cycles with `analysis`.
@@ -40,6 +43,7 @@
 **Decision:** Added example construction snippets to `render-module.md`.
 
 **Rationale:**
+
 - Allows `validate_spec_anchors.py` to mechanically verify that the SSOT examples match the implemented code.
 
 ## 2026-01-01 — Workflow: Generated Contract Views
@@ -51,6 +55,7 @@
 **Decision:** Allow auto-generated contract view diffs produced by `python scripts/generate_contract_views.py` as a documented exception to plan scoping and review blocking, provided Verification confirms freshness and the Coding Agent notes the generated outputs in the Implementation Report.
 
 **Rationale:**
+
 - Keeps contract freshness gates enforceable without unnecessary re-planning.
 - Preserves review focus on functional and API-affecting changes.
 
@@ -63,6 +68,7 @@
 **Decision:** Created `render.geometry` module with `calculate_dimensions`, `calculate_overlay_position`, and `ensure_mod2`. SSOT updated with Sections 5.1–5.3 to define deterministic behavior.
 
 **Rationale:**
+
 - Centralizes dimension and position calculations.
 - Ensures compatibility with video encoding (mod2).
 - Defines deterministic clamp and rounding behavior.
@@ -77,6 +83,7 @@
 **Decision:** Created `render.naming` module with `generate_screenshot_name` and `generate_screenshot_path`. SSOT updated with Sections 3.3.1–3.3.2 to define deterministic sanitization and formatting.
 
 **Rationale:**
+
 - Ensures consistent and safe filenames across platforms.
 - Sanitizes user-provided labels to prevent invalid path characters.
 - Deterministic padding (5 digits) ensures correct lexical sorting.
@@ -90,6 +97,7 @@
 **Decision:** Added `pillow>=10.0.0` as a runtime dependency.
 
 **Rationale:**
+
 - Standard Python imaging library.
 - Provides necessary text rendering and composition features.
 - Version 10.0.0+ ensures modern API availability (e.g., `ImageFont.load_default(size=...)`).
@@ -103,6 +111,7 @@
 **Decision:** Implemented dual-path dispatch in `render_frame` based on input type (`vs.VideoNode` vs `Path`) and explicit renderer preference.
 
 **Rationale:**
+
 - Allows specialized handling for each backend (direct VS extraction vs FFmpeg subprocess).
 - Wraps internal errors (FFmpeg failures, VS exceptions) into `RenderError` for consistent public API surface.
 
@@ -113,6 +122,7 @@
 **Decision:** Created `utils.subproc.run_subprocess` to enforce `shell=False`, `check=True`, and timeouts.
 
 **Rationale:**
+
 - Mitigates shell injection risks.
 - Provides unified error handling (`CalledProcessError`, `TimeoutExpired`) for all external tools.
 
@@ -127,6 +137,7 @@
 **Decision:** Allow the Plan Review Agent to apply a tightly-scoped “Mechanical Auto-Fix Mode” that writes a corrected `plan-v(N+1).md` and an APPROVED `plan-review-v(N+1).md` when (and only when) the remaining issues are semantics-preserving and no SSOT/spec changes are required.
 
 **Rationale:**
+
 - Reduces iteration churn and token usage.
 - Preserves the “no bypass” Plan Review gate (the plan must still pass stop-gates like `validate_spec_anchors.py`).
 
@@ -137,15 +148,18 @@
 **Decision:** Require the Plan Review Agent to audit SSOT/spec changes made during the loop for correctness, implementability, and project best practices before approving a plan.
 
 **Rationale:**
+
 - Prevents spec drift and enforces typed-error, determinism, and layering policies at module boundaries.
 - Ensures Planning’s “fill spec gaps” decisions are reviewed with the same rigor as code changes.
 
 ### Scope
+
 **Run ID:** 2026-01-01__p4-6__orchestrator
 **Context:** High-level orchestration for batch rendering.
 **Decision:** Implemented `render_batch` with fail-fast parallel execution using bounded submission and `render_screenshots` with graceful VS-to-FFmpeg fallback.
 
 **Rationale:**
+
 - Fail-fast semantics prevent resource waste on doomed batches.
 - Bounded submission in `render_batch` ensures predictable resource usage.
 - `render_screenshots` provides a convenient API for common multi-clip, multi-frame tasks.
@@ -154,12 +168,14 @@
 ## 2026-01-02 — Phase 4 Integration Tests & Quality Gate
 
 ### Scope
+
 **Run ID:** 2026-01-01__p4-integ__render-integration-tests
 **Artifact versions:** plan-v3 + plan-review-v3 + impl-v1 + verify-v1 + review-v1 (as written)
 **Context:** Integration testing and quality gating for the Render module.
 **Decision:** Implemented integration tests covering FFmpeg, VapourSynth (conditional), and Orchestrator. Verified all Phase 4 quality gates including Docker-based validation.
 
 **Rationale:**
+
 - Ensures end-to-end functionality of the render pipeline.
 - Validates fallback mechanisms and renderer isolation.
 - `mock_video_path` using FFmpeg guarantees deterministic input for tests.
@@ -170,11 +186,13 @@
 ## 2026-01-02 — Phase 5.1 Audio Alignment
 
 ### Scope
+
 **Run ID:** 2026-01-01__p5-1__audio-alignment
 **Context:** Implementing audio alignment service for clip synchronization.
 **Decision:** Created `services.alignment` module with `align_clips`, `load_cached_offsets`, and `save_offsets_cache`. Implemented `utils.progress` with `RichProgressReporter`, `LogProgressReporter`, and `NullProgressReporter`. Updated `importlinter.ini` with correct layered architecture.
 
 **Rationale:**
+
 - Cross-correlation provides frame-accurate synchronization for similar clips.
 - `ProgressReporter` protocol allows decoupled progress tracking for CLI and logs.
 - Caching avoids redundant expensive audio extraction/correlation.
@@ -195,6 +213,7 @@
 - `.github/workflows/docker-integration.yml` runs the same “zero skips” gate on relevant PR changes.
 
 **Rationale:**
+
 - Preserves fast, skip-tolerant local runs while guaranteeing a deterministic “real deps” verification path.
 - Removes command drift (entrypoint/working_dir mismatch) by providing one canonical script.
 
@@ -211,6 +230,7 @@
 - Traceability: if files change, Verification must emit a new `impl-v(N+1).md` documenting the mechanical edits and re-run all quality gates before handoff
 
 **Rationale:**
+
 - Reduces churn for purely mechanical lint fixes.
 - Keeps the “Contract-First” and SSOT drift gates intact (no spec/contract edits in Verification).
 - Maintains auditability by versioning the implementation artifact when verification makes changes.
@@ -224,6 +244,7 @@
 **Decision:** Require the Coding Agent to run the full local gate suite (pyright/ruff/pytest/import-linter + contract freshness check) before declaring `impl-vN.md` ready for Verification.
 
 **Rationale:**
+
 - Reduces back-and-forth for avoidable mechanical failures.
 - Keeps Verification focused on compliance, traceability, and phase-gate enforcement rather than first-pass lint/type fixes.
 
@@ -236,6 +257,7 @@
 **Decision:** Implemented a dual-parser strategy in `parse_filename` using `guessit` (western) and `anitopy` (anime), with a priority heuristic based on bracketed groups.
 
 **Rationale:**
+
 - Anime filenames often use bracketed groups (e.g., `[Group] Title - 01`) which `anitopy` handles better.
 - Western filenames (e.g., `Movie.Name.2024`) are better handled by `guessit`.
 - Fallback to the alternate parser and finally to the filename stem ensures a title is always returned.
@@ -247,6 +269,7 @@
 **Decision:** Implemented an internal `_search_tmdb` helper that returns a `list[TmdbMetadata]`. `lookup_tmdb` returns the first element, while `resolve_metadata` uses the full list.
 
 **Rationale:**
+
 - Preserves the public API signatures specified in the plan/SSOT.
 - Fulfills the requirement for interactive selection in the full resolution workflow.
 - Avoids signature drift in `async-semantics.md` examples.
@@ -258,10 +281,10 @@
 **Decision:** Used `anitopy>=2.1.1` in `pyproject.toml`.
 
 **Rationale:**
+
 - `2.1.1` is the current latest stable version.
 - Resolves the dependency conflict that blocked `uv sync`.
 - `2.1.1` provides the required functionality for Phase 5.2.
-
 
 ## 2026-01-02: Implement Publishers Service (slow.pics)
 
@@ -283,6 +306,7 @@
 **Decision:** Created `report-viewer-spec.md` as SSOT for the HTML generator.
 
 **Rationale:**
+
 - Defines four modes (Slider, Overlay, Diff, Blink) for comprehensive comparison.
 - Specifies dark theme (`#0f1115` background) and accessible controls.
 - Embeds data as JSON for single-file portability.
@@ -295,6 +319,7 @@
 **Decision:** Implemented `frame_compare.services.report` following `report-viewer-spec.md`.
 
 **Rationale:**
+
 - Strict validation of input data (clips, frames, screenshots) prevents broken reports.
 - Deterministic output path fallback (first clip/frame parent).
 - Base64 embedding support for true portability.
@@ -307,6 +332,7 @@
 **Decision:** Implemented `generate_report` with full viewer spec compliance.
 
 **Rationale:**
+
 - Delivers MVP viewer with all core features (modes, zoom, filmstrip, shortcuts).
 - Defers advanced features (full zoom/pan, categories) to future phases to maintain velocity.
 
@@ -320,6 +346,7 @@
 **Decision:** Resolved blockers identified in `verify-v1.md` including contract freshness, PIL deprecation warnings, macOS test collection errors, and incomplete Docker integration coverage.
 
 **Rationale:**
+
 - **Contract Freshness:** Regenerated stale views to ensure SSOT consistency.
 - **PIL Compatibility:** Replaced `Image.getdata()` with a version-safe approach to avoid `DeprecationWarning` becoming a blocker in Docker.
 - **VapourSynth Guards:** Implemented `_vs_needs_mock` and `_vs_spec_available` helpers (spec-anchored in `testing-strategy.md`) to handle `ValueError` from `find_spec` on macOS with partial installs.
@@ -328,6 +355,7 @@
 ### 2026-01-02__meta__p5-quality-gate
 
 **Key Decisions:**
+
 1. libplacebo requires 16-bit input (RGB48)
 2. Dockerfile enables Vulkan via Mesa lavapipe
 3. Keep `-Dopengl=disabled` for headless libplacebo
@@ -342,6 +370,7 @@
 **Context:** Avoid Docker Desktop GPU/Vulkan limitations for Windows users and ship a tested native distribution path in tandem with the phased rebuild.
 
 **Decisions:**
+
 1. Supported OS: **Windows 10 + 11**
 2. Supported architecture baseline: **x86_64 (amd64) only**
 3. Packaging strategy: **pinned portable folder** with an **embedded Python runtime** (not PyInstaller) to reduce native DLL/plugin loading risk.
@@ -349,7 +378,39 @@
 5. Tonemapping is capability-driven: **GPU/libplacebo optional**, deterministic **fallback must always work**.
 
 **SSOT:**
+
 - `docs/OPUS_REBUILD_FRAME_COMPARE/07-windows-portable-bundle/00-overview.md`
 - `docs/OPUS_REBUILD_FRAME_COMPARE/07-windows-portable-bundle/01-bundle-spec.md`
 - `docs/OPUS_REBUILD_FRAME_COMPARE/07-windows-portable-bundle/02-support-matrix.md`
 - `docs/OPUS_REBUILD_FRAME_COMPARE/07-windows-portable-bundle/03-user-interview.md`
+
+## 2026-01-03 — Phase 6.1 Orchestration Package Scaffold
+
+### Scope
+
+**Run ID:** 2026-01-03__p6-1__orchestration-package-structure
+**Artifact versions:** plan-v2 + plan-review-v2 + impl-v1 + verify-v1 + review-v1
+**Context:** Scaffold the orchestration package structure for Phase 6.
+**Decision:** Created `frame_compare.orchestration` package with scaffold modules (`__init__.py`, `preflight.py`, `doctor.py`, `progress.py`, `phases.py`). Updated `importlinter.ini` to add `frame_compare.orchestration` as a first-class layer between `cli_entry` and domain modules.
+
+**Rationale:**
+
+- Establishes the package structure for workflow coordination before implementing behavior.
+- Scaffold modules are side-effect free with docstrings only (no public API until Phase 6.2).
+- Import contract update ensures `lint-imports` validates the new layer immediately.
+- Deferred: `frame_compare.runner` layer (file does not exist yet), all public types/functions.
+
+**Verification Gates:**
+
+- pyright: PASS (0 errors, 0 warnings)
+- ruff: PASS (all checks passed)
+- pytest: PASS (416 passed, 2 skipped; coverage 90.17% > 80%)
+- lint-imports: PASS (2 contracts kept, 0 broken)
+- generate_contract_views --check: PASS (all derived files up-to-date)
+- validate_traceability --check: PRE-EXISTING FAILURE (not related to this run; scaffold-only, contracts untouched)
+
+**Out-of-scope:**
+
+- Implementing `prepare_preflight`, `run_doctor`, phase execution, async runner
+- Defining orchestration types (`PreflightResult`, `DoctorCheck`, `DoctorReport`, etc.)
+- Creating `coordinator.py`, `context.py`, `runner.py` (later Phase 6 slices)

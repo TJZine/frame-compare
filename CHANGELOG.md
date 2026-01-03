@@ -7,6 +7,8 @@ This project follows Conventional Commits and is intended to be released via Rel
 ## Unreleased
 
 ### Added
+
+- **Orchestration Package Scaffold:** Created `frame_compare.orchestration` package structure (Phase 6.1). Includes scaffold modules for `preflight`, `doctor`, `progress`, and `phases`. Updated import-linter contract.
 - **Report Generator:**
   - HTML comparison report generator with Slider, Overlay, Difference, and Blink modes.
   - Dark theme with modern styling.
@@ -79,7 +81,6 @@ This project follows Conventional Commits and is intended to be released via Rel
 - Public API alias `tonemap` for convenience.
 - Real VapourSynth integration smoke tests (`test_integration.py`).
 
-
 ### Changed
 
 - `ColorProps` range default aligned with SSOT (missing or unspecified `_ColorRange` defaults to limited/1).
@@ -104,6 +105,7 @@ This project follows Conventional Commits and is intended to be released via Rel
 - Refactored metrics module to use lazy VapourSynth imports for non-VS environments.
 
 ### Fixed
+
 - Docker integration tests now include VS-required tests from `tests/vs/`
 - Fixed PIL deprecation warning causing test failure in Docker
 - Fixed test collection failure on macOS with partial VapourSynth install
