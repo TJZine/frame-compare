@@ -8,6 +8,7 @@ from frame_compare.utils.progress import (
     ProgressReporter,
     RichProgressReporter,
 )
+from frame_compare.utils.types import WorkspacePaths
 
 __all__ = [
     "configure_logging",
@@ -19,4 +20,5 @@ __all__ = [
     "NullProgressReporter",
     "RichProgressReporter",
     "LogProgressReporter",
+    "WorkspacePaths",
 ]

@@ -334,14 +334,16 @@ class InputError(FrameCompareError):
 class NoVideosFoundError(InputError):
     """No video files found in directory (FC-3001)."""
 
-    def __init__(self, directory: Path) -> None:
+    def __init__(self, path: Path, patterns: list[str] | None = None) -> None:
+        self.path = path
+        self.patterns: list[str] = patterns or []
         super().__init__(
             ErrorContext(
                 code="FC-3001",
                 name="NO_VIDEOS_FOUND",
-                message=f"No video files found in: {directory}",
+                message=f"No video files found in: {path}",
                 hint="Check directory path or file extensions",
-                details={"directory": str(directory)},
+                details={"path": str(path), "patterns": cast(JSONValue, self.patterns)},
             )
         )
 

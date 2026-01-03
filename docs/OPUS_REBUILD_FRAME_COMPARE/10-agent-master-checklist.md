@@ -480,12 +480,12 @@ frame-compare/
 
 **Reference:** `05-implementation/module-specs/orchestration-module.md` §4.1, §4.2
 
-- [ ] Implement `PreflightResult` dataclass per spec §4.1
-- [ ] Implement `prepare_preflight(root, config_path) -> PreflightResult`
-- [ ] Implement `DoctorCheck`, `CheckResult`, `DoctorReport` types per spec §4.2
-- [ ] Implement `run_doctor(deps) -> DoctorReport`
-- [ ] Write unit tests for preflight path resolution
-- [ ] Write unit tests for doctor checks
+- [x] Implement `PreflightResult` dataclass per spec §4.1 (2026-01-03)
+- [x] Implement `prepare_preflight(root, config_path) -> PreflightResult` (2026-01-03)
+- [x] Implement `DoctorCheck`, `CheckResult`, `DoctorReport` types per spec §4.2 (2026-01-03)
+- [x] Implement `run_doctor(deps) -> DoctorReport` (2026-01-03)
+- [x] Write unit tests for preflight path resolution (2026-01-03)
+- [x] Write unit tests for doctor checks (2026-01-03)
 
 ### 6.3 Progress Reporting
 
@@ -538,7 +538,7 @@ frame-compare/
   - [ ] `test_hdr_disable_tonemap_allows_ffmpeg_when_vs_missing`
   - [ ] `test_sdr_allows_ffmpeg_fallback_when_vs_missing`
 
-### 6.6 VSPreview Integration (Optional)
+### 6.6 VSPreview Integration (Optional Config option (will this work in the docker version?))
 
 **Reference:** `05-implementation/module-specs/vspreview-module.md`
 

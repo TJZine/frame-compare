@@ -414,3 +414,34 @@
 - Implementing `prepare_preflight`, `run_doctor`, phase execution, async runner
 - Defining orchestration types (`PreflightResult`, `DoctorCheck`, `DoctorReport`, etc.)
 - Creating `coordinator.py`, `context.py`, `runner.py` (later Phase 6 slices)
+
+## 2026-01-03 — Phase 6.2 Preflight and Doctor Implementation
+
+### Scope
+
+**Run ID:** 2026-01-03__p6-2__preflight-doctor
+**Artifact versions:** plan-v4 + plan-review-v4 + impl-v1 + impl-v2 + verify-v2 + review-v1 + impl-v3
+**Context:** Implement preflight validation and doctor diagnostics for orchestration.
+
+**Decision:** Implemented:
+
+- `prepare_preflight(root, config_path) -> PreflightResult` for workspace resolution, config loading, and input discovery
+- `resolve_workspace(root) -> Path` with 4-priority discovery (explicit, cwd, upward, fallback)
+- `resolve_paths(config, root) -> WorkspacePaths` per SSOT §5.1 (2-arg signature)
+- `collect_checks() -> list[DoctorCheck]` with 8 deterministic checks in SSOT order
+- `run_doctor(checks, reporter) -> DoctorReport` with progress reporter integration
+- `WorkspacePaths` dataclass in `utils/types.py` per SSOT
+- Updated `NoVideosFoundError` with `patterns` parameter for introspection
+
+**SSOT Clarifications (from plan-v4 loop):**
+
+- Confirmed workspace discovery sentinel: `config/config.toml`
+- Confirmed input patterns and case-insensitive lexicographic ordering
+- Confirmed doctor check ordering and critical_failures semantics
+
+**Out-of-scope:**
+
+- Full runner (`execute_run`, `RunResult`, `RunRequest`)
+- Phase orchestration (`phases.py` implementation)
+- CLI integration
+- Deprecated config warnings

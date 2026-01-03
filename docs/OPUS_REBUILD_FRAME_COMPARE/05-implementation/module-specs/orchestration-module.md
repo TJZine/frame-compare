@@ -214,6 +214,32 @@ def run_doctor(
     """
 ```
 
+#### 4.2.1 Check List (Deterministic)
+
+`collect_checks()` MUST return checks in this exact order (stable list and stable `DoctorCheck.name` strings):
+
+1. `python_version` (core)
+2. `vapoursynth` (core)
+3. `lsmas` (core)
+4. `ffmpeg` (optional)
+5. `dovi_tool` (optional)
+6. `vspreview` (optional)
+7. `slowpics` (network)
+8. `tmdb_api_key` (network)
+
+#### 4.2.2 slow.pics Reachability Probe
+
+The `slowpics` network check MUST use:
+
+- URL: `https://slow.pics/`
+- Method: `HEAD`
+- Timeout: `5.0` seconds
+
+Pass/Fail semantics:
+
+- Pass if the request completes and the HTTP status is `< 400`.
+- Fail (passed=False) if the request errors (timeout/connection/etc.) or returns status `>= 400`.
+
 ### 4.3 Run Coordination
 
 #### 4.3.1 Request Types
@@ -378,7 +404,7 @@ def discover_inputs(
         Label overrides via configuration are DEFERRED until a canonical `ConfigSchema` section exists.
 
     Raises:
-        NoVideosFoundError (FC-3002): If no videos match patterns
+        NoVideosFoundError (FC-3001): If no videos match patterns
     """
 ```
 
@@ -427,8 +453,8 @@ def resolve_workspace(root: Path | None) -> Path:
 
     Priority:
     1. Explicit root parameter
-    2. Current working directory if config.toml exists
-    3. Search upward for config.toml
+    2. Current working directory if config/config.toml exists
+    3. Search upward for config/config.toml
     4. Current working directory (fallback)
     """
 

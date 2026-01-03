@@ -8,6 +8,10 @@ This project follows Conventional Commits and is intended to be released via Rel
 
 ### Added
 
+- **Preflight Validation:** `prepare_preflight()` for workspace resolution, config loading, and input discovery with `PreflightResult` type (Phase 6.2).
+- **Doctor Diagnostics:** `run_doctor()` for environment validation with deterministic check ordering and `DoctorReport` type (Phase 6.2).
+- **WorkspacePaths Type:** `WorkspacePaths` dataclass in `frame_compare.utils` for resolved paths (Phase 6.2).
+- **NoVideosFoundError Enhancement:** Added `patterns` parameter for deterministic error introspection (Phase 6.2).
 - **Orchestration Package Scaffold:** Created `frame_compare.orchestration` package structure (Phase 6.1). Includes scaffold modules for `preflight`, `doctor`, `progress`, and `phases`. Updated import-linter contract.
 - **Report Generator:**
   - HTML comparison report generator with Slider, Overlay, Difference, and Blink modes.
