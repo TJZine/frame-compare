@@ -288,9 +288,10 @@ def apply_trim(
 **Behavioral Requirements (SSOT):**
 
 1. **`settings.enabled == False`:** Return `clip` unchanged (no-op). Do not raise an error.
-2. **Core acquisition:** `core = clip.std.core` — this is the exact expression. If it fails (AttributeError), propagate the exception directly (do not wrap in TonemapError).
+2. **Core acquisition:** `core = vs.core` — use the vapoursynth module-level core singleton. Do NOT use `clip.std.core` (deprecated and unreliable).
 3. **Missing libplacebo rule:** If libplacebo plugin is unavailable, use fallback tonemapping (see Section 5.3). Do NOT raise an error or warning; fallback is silent and deterministic.
-4. **Unknown preset:** `get_preset_settings()` raises `TonemapError(FC-4003)` with hint listing valid preset names.
+4. **Runtime libplacebo failure rule:** If libplacebo is present but `core.placebo.Tonemap` fails at runtime due to constraints (Vulkan/context/bit-depth), fall back to `_fallback_tonemap` instead of raising `TonemapError`. Log the failure at DEBUG level.
+5. **Unknown preset:** `get_preset_settings()` raises `TonemapError(FC-4003)` with hint listing valid preset names.
 
 ```python
 def apply_tonemap(
@@ -554,13 +555,36 @@ def _detect_hdr(frame_props: Mapping[str, object]) -> tuple[bool, HDRMetadata | 
 
 **Unsupported `tone_curve` handling:** If `settings.tone_curve` is not in the mapping table (`bt2390`, `spline`, `reinhard`), raise `TonemapError(FC-4003)` with hint: `"Unsupported tone curve '{value}'. Supported: bt2390, spline, reinhard."`
 
-**RGBS Conversion Rule (SSOT — shared by libplacebo and fallback):**
+**libplacebo Input Format Rule (SSOT — legacy-aligned):**
+
+libplacebo requires 16-bit integer input. Before calling `core.placebo.Tonemap`, convert to RGB48:
 
 ```python
-# Exact conversion call (import vs.RGBS from vapoursynth)
-if clip.format.id != vs.RGBS:
-    clip = clip.resize.Bicubic(format=vs.RGBS, matrix_in_s="709")
-# If already RGBS: no-op (do not reconvert)
+    # Exact conversion call for libplacebo path
+    if clip.format.bits_per_sample != 16 or clip.format.color_family != vs.RGB:
+        if clip.format.color_family == vs.RGB:
+            clip = clip.resize.Bicubic(format=vs.RGB48)
+        else:
+            clip = clip.resize.Bicubic(format=vs.RGB48, matrix_in_s="709")
+```
+
+- **Failure mode:** If `resize.Bicubic` raises, wrap in `TonemapError(FC-4003)` with message `"Failed to convert to RGB48: {original_error}"`.
+- **Post-tonemap conversion (optional):** After `core.placebo.Tonemap`, convert back to RGBS (32-bit float) for consistent post-processing and return value:
+
+```python
+    # Convert libplacebo output back to RGBS for post-processing
+    clip = clip.resize.Point(format=vs.RGBS)
+```
+
+**Fallback RGBS Conversion Rule (SSOT — used by _fallback_tonemap only):**
+
+```python
+    # Exact conversion call for fallback path (RGBS is fine for std.Expr)
+    if clip.format.id != vs.RGBS:
+        if clip.format.color_family == vs.RGB:
+            clip = clip.resize.Bicubic(format=vs.RGBS)
+        else:
+            clip = clip.resize.Bicubic(format=vs.RGBS, matrix_in_s="709")
 ```
 
 - **Failure mode:** If `resize.Bicubic` raises, wrap in `TonemapError(FC-4003)` with message `"Failed to convert to RGBS: {original_error}"`.
@@ -588,37 +612,55 @@ def _apply_libplacebo(
     clip: vs.VideoNode,
     settings: TonemapSettings,
     core: vs.Core,
-) -> vs.VideoNode:
+    hdr_metadata: HDRMetadata | None = None,
+) -> vs.VideoNode | None:
     """
     Apply libplacebo tonemapping.
 
     Pipeline:
-    1. Convert to RGBS if not already (see RGBS Conversion Rule)
+    1. Convert to RGB48 if not already (see libplacebo Input Format Rule)
     2. Apply core.placebo.Tonemap() with mapped kwargs
-    3. Apply contrast_recovery post-processing if > 0.0 (see Post-processing)
-    4. Apply gamma_lift post-processing if True (see Post-processing)
-    5. Return RGBS clip (caller converts to output format)
+    3. Convert back to RGBS for post-processing
+    4. Apply contrast_recovery post-processing if > 0.0 (see Post-processing)
+    5. Apply gamma_lift post-processing if True (see Post-processing)
+    6. Return RGBS clip (caller converts to output format)
+
+    Runtime Failure Handling:
+        If core.placebo.Tonemap() raises due to Vulkan/context/bit-depth constraints:
+        - Do NOT raise TonemapError
+        - Log failure at DEBUG level
+        - Return None to signal caller to use _fallback_tonemap
 
     Args:
         clip: Input HDR clip (YUV or RGB)
         settings: Tonemap settings with mapped values
-        core: VapourSynth core (obtained via clip.std.core)
+        core: VapourSynth core (obtained via vs.core)
+        hdr_metadata: HDR metadata for source peak (optional; extracted if None)
 
     Returns:
-        Tonemapped RGBS clip
+        Tonemapped RGBS clip on success, or None on runtime failure
+        (to signal fallback). Conversion/preset errors still raise TonemapError.
 
     Raises:
-        TonemapError (FC-4003): If conversion or tonemap fails
+        TonemapError (FC-4003): If format conversion fails or preset is invalid
     """
+
 ```
 
 ### 5.3 Fallback Handling
+
+**Fallback Trigger Conditions (SSOT):**
+
+Use `_fallback_tonemap` when:
+
+1. libplacebo plugin is not detected (`detect_plugins(core)["libplacebo"] == False`)
+2. `_apply_libplacebo` returns `None` (runtime failure due to Vulkan/context/bit-depth)
 
 **Fallback Algorithm (SSOT):**
 
 When libplacebo is unavailable, apply a simple Reinhard global tonemap:
 
-1. **RGBS Conversion:** Use exact same RGBS Conversion Rule as Section 5.2 (no divergence).
+1. **RGBS Conversion:** Use Fallback RGBS Conversion Rule from Section 5.2.
 2. **Formula:** Reinhard global tonemap with normalization:
 
    ```

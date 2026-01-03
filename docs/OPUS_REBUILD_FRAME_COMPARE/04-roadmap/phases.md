@@ -248,3 +248,20 @@ graph LR
 | Phase 4 | 1 | Docker, DevOps |
 | Phase 5 | 1 | Documentation, testing |
 | **Total** | **10.5** | |
+
+---
+
+## Parallel Track: Windows Portable Bundle (Distribution)
+
+This track runs **in tandem** with the core rebuild so Windows users can have a tested native distribution at launch.
+
+SSOT:
+
+- `docs/OPUS_REBUILD_FRAME_COMPARE/07-windows-portable-bundle/00-overview.md`
+- `docs/OPUS_REBUILD_FRAME_COMPARE/07-windows-portable-bundle/01-bundle-spec.md`
+- `docs/OPUS_REBUILD_FRAME_COMPARE/07-windows-portable-bundle/03-user-interview.md`
+
+Milestone expectations:
+
+- After “real deps” stabilize (Docker gate is green): lock the Windows baseline artifact list (versions + hashes).
+- Before release: Windows CI smoke checks for the portable bundle are green.

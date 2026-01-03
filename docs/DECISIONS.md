@@ -309,3 +309,30 @@
 **Rationale:**
 - Delivers MVP viewer with all core features (modes, zoom, filmstrip, shortcuts).
 - Defers advanced features (full zoom/pan, categories) to future phases to maintain velocity.
+
+## 2026-01-03 — Meta: Phase 5 Quality Gate Fixes
+
+### Scope
+
+**Run ID:** 2026-01-02__meta__p5-quality-gate
+**Artifact versions:** plan-v1 through plan-v5, verify-v1, impl-v1
+**Context:** Unblocking Phase 5 Quality Gate.
+**Decision:** Resolved blockers identified in `verify-v1.md` including contract freshness, PIL deprecation warnings, macOS test collection errors, and incomplete Docker integration coverage.
+
+**Rationale:**
+- **Contract Freshness:** Regenerated stale views to ensure SSOT consistency.
+- **PIL Compatibility:** Replaced `Image.getdata()` with a version-safe approach to avoid `DeprecationWarning` becoming a blocker in Docker.
+- **VapourSynth Guards:** Implemented `_vs_needs_mock` and `_vs_spec_available` helpers (spec-anchored in `testing-strategy.md`) to handle `ValueError` from `find_spec` on macOS with partial installs.
+- **Docker Coverage:** Included `tests/vs/` in the Docker integration suite to ensure real VapourSynth dependencies are verified with “zero skips”.
+
+### 2026-01-02__meta__p5-quality-gate
+
+**Key Decisions:**
+1. libplacebo requires 16-bit input (RGB48)
+2. Dockerfile enables Vulkan via Mesa lavapipe
+3. Keep `-Dopengl=disabled` for headless libplacebo
+4. Runtime fallback: `_apply_libplacebo` returns `None` on failure
+5. Docker gate must prove tonemap works without raising; libplacebo success is optional and can be required via `FRAME_COMPARE_REQUIRE_LIBPLACEBO=1`
+6. RGB->RGB resize must omit `matrix_in_s` to avoid VapourSynth errors.
+7. Docker test runner forces lavapipe selection via `VK_ICD_FILENAMES` for deterministic headless Vulkan.
+8. Added `pytest-mock` to Docker image to support `mocker` fixture.

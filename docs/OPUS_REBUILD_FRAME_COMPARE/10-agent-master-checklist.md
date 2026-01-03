@@ -403,13 +403,13 @@ frame-compare/
 
 ### Phase 5 Quality Gate ✓
 
-- [ ] Audio alignment calculates offsets
-- [ ] Metadata parses filenames
-- [ ] slow.pics uploads work
-- [ ] HTML report generates
-- [ ] All services have error recovery
-- [ ] Docker verification passes (real deps, zero skips): `bash tools/verify_docker_integration.sh`
-- [ ] Test coverage > 80% and ALL tests pass
+- [x] Audio alignment calculates offsets (2026-01-02)
+- [x] Metadata parses filenames (2026-01-02)
+- [x] slow.pics uploads work (2026-01-02)
+- [x] HTML report generates (2026-01-02)
+- [x] All services have error recovery (2026-01-02)
+- [x] Docker verification passes (real deps, zero skips): `bash tools/verify_docker_integration.sh` (2026-01-02)
+- [x] Test coverage > 80% and ALL tests pass (2026-01-02)
 
 ---
 

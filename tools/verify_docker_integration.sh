@@ -10,7 +10,10 @@ Fails if any tests are skipped (the “real deps work” gate).
 
 Defaults:
   --service frame-compare-test
-  Runs: pytest -v -m "integration or vs_required" tests/integration/
+  Runs: pytest -v tests/integration/ tests/vs/
+
+Environment:
+  FRAME_COMPARE_REQUIRE_LIBPLACEBO=1  Require libplacebo tonemap to succeed (intended for Linux GPU runners).
 
 Options:
   --service NAME   Docker Compose service to run (default: frame-compare-test)
@@ -80,6 +83,18 @@ trap cleanup EXIT
 docker_cmd=(
   docker compose run
   --rm
+)
+
+docker_env_args=()
+if [[ "${FRAME_COMPARE_REQUIRE_LIBPLACEBO:-}" == "1" ]]; then
+  docker_env_args+=(-e FRAME_COMPARE_REQUIRE_LIBPLACEBO=1)
+fi
+
+if [[ "${#docker_env_args[@]}" -gt 0 ]]; then
+  docker_cmd+=("${docker_env_args[@]}")
+fi
+
+docker_cmd+=(
   "$service"
   -c
 )
@@ -87,8 +102,13 @@ docker_cmd=(
 # Note: keep this robust even if the image doesn't include pytest yet.
 container_cmd=$(
   cat <<'EOF'
+export LIBGL_ALWAYS_SOFTWARE=1
+icd="$(ls /usr/share/vulkan/icd.d/lvp_icd.*.json 2>/dev/null | head -n 1 || true)"
+if [[ -n "$icd" ]]; then
+  export VK_ICD_FILENAMES="$icd"
+fi
 python -c "import pytest" >/dev/null 2>&1 || python -m pip install --user -q pytest &&
-python -m pytest -v -m "integration or vs_required" tests/integration/
+python -m pytest -v tests/integration/ tests/vs/
 EOF
 )
 

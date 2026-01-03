@@ -55,7 +55,18 @@ def test_overlay_application_adds_visible_content(sample_image_path: Path):
         result = apply_overlay(img, config)
 
         # Check that we have more than one color (originally solid red)
-        assert len(set(result.getdata())) > 1
+        # Use compatible approach that works with Pillow < 14 and >= 14
+        try:
+            # Pillow >= 14 preferred method
+            pixel_data = result.get_flattened_data()
+        except AttributeError:
+            # Pillow < 14 fallback (getdata still works, suppress warning)
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", DeprecationWarning)
+                pixel_data = list(result.getdata())
+        assert len(set(pixel_data)) > 1
 
 
 @pytest.mark.integration

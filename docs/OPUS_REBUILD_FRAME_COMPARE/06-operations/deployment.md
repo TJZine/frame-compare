@@ -13,6 +13,7 @@
 |--------|-------------|-------------|----------|
 | Docker Compose | Beginner | Included | Most users |
 | Docker CLI | Beginner | Included | Single-command runs |
+| Windows Portable Bundle | Beginner | Included | Windows users who want native performance |
 | pip + Manual VS | Advanced | Manual | Custom setups |
 | DevContainer | Developer | Included | Contributors |
 
@@ -123,6 +124,18 @@ pip install "frame-compare[vspreview,clipboard]"
 ```bash
 frame-compare doctor
 ```
+
+---
+
+## 4.5 Windows Portable Bundle (Recommended for Windows)
+
+The Windows portable bundle provides a **pinned, tested baseline** (VapourSynth + plugins + FFmpeg) without Docker.
+
+SSOT:
+
+- `docs/OPUS_REBUILD_FRAME_COMPARE/07-windows-portable-bundle/00-overview.md`
+- `docs/OPUS_REBUILD_FRAME_COMPARE/07-windows-portable-bundle/01-bundle-spec.md`
+- `docs/OPUS_REBUILD_FRAME_COMPARE/07-windows-portable-bundle/02-support-matrix.md`
 
 ---
 

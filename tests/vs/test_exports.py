@@ -4,9 +4,20 @@ import importlib.util
 import sys
 from unittest.mock import MagicMock
 
+
 # Mock vapoursynth if not installed, to allow import of frame_compare.vs
-if importlib.util.find_spec("vapoursynth") is None:
+def _vs_spec_available() -> bool:
+    try:
+        return importlib.util.find_spec("vapoursynth") is not None
+    except ValueError:
+        return False
+
+
+if not _vs_spec_available() and "vapoursynth" not in sys.modules:
     mock_vs = MagicMock()
+    # Mock RGBS constant used at runtime in tonemap.py
+    mock_vs.RGBS = 0
+    sys.modules["vapoursynth"] = mock_vs
     # Mock RGBS constant used at runtime in tonemap.py
     mock_vs.RGBS = 0
     sys.modules["vapoursynth"] = mock_vs

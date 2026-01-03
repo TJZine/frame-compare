@@ -44,7 +44,10 @@ def _to_rgbs(clip: vs.VideoNode) -> vs.VideoNode:
     """Convert clip to RGBS if needed."""
     try:
         if clip.format.id != vs.RGBS:  # type: ignore
-            return clip.resize.Bicubic(format=vs.RGBS, matrix_in_s="709")  # type: ignore
+            if clip.format.color_family == vs.RGB:  # type: ignore
+                return clip.resize.Bicubic(format=vs.RGBS)  # type: ignore
+            else:
+                return clip.resize.Bicubic(format=vs.RGBS, matrix_in_s="709")  # type: ignore
         return clip
     except Exception as e:
         raise TonemapError(
@@ -77,7 +80,7 @@ def _apply_libplacebo(
     settings: TonemapSettings,
     core: vs.Core,
     hdr_metadata: HDRMetadata | None = None,
-) -> vs.VideoNode:
+) -> vs.VideoNode | None:
     """Apply tonemapping using libplacebo."""
     if settings.tone_curve not in _TONE_CURVE_MAP:
         raise TonemapError(
@@ -85,7 +88,15 @@ def _apply_libplacebo(
             hint="Supported: bt2390, spline, reinhard",
         )
 
-    clip = _to_rgbs(clip)
+    # Exact conversion call for libplacebo path
+    try:
+        if clip.format.bits_per_sample != 16 or clip.format.color_family != vs.RGB:  # type: ignore
+            if clip.format.color_family == vs.RGB:  # type: ignore
+                clip = clip.resize.Bicubic(format=vs.RGB48)  # type: ignore
+            else:
+                clip = clip.resize.Bicubic(format=vs.RGB48, matrix_in_s="709")  # type: ignore
+    except Exception as e:
+        raise TonemapError(reason=f"Failed to convert to RGB48: {e}") from e
 
     if hdr_metadata is None:
         props = dict(clip.get_frame(0).props)
@@ -104,10 +115,14 @@ def _apply_libplacebo(
             tone_mapping_function=_TONE_CURVE_MAP[settings.tone_curve],
         )
     except Exception as e:
-        raise TonemapError(
-            reason=f"libplacebo tonemap failed: {e}",
-            hint="Check libplacebo plugin version",
-        ) from e
+        # Runtime failure (Vulkan/context/bit-depth) — signal fallback
+        import logging
+
+        logging.getLogger(__name__).debug(f"libplacebo runtime failure, falling back: {e}")
+        return None
+
+    # Convert libplacebo output back to RGBS for post-processing (runs on SUCCESS only)
+    clip = clip.resize.Point(format=vs.RGBS)  # type: ignore
 
     return _apply_post_processing(clip, settings)
 
@@ -162,11 +177,13 @@ def apply_tonemap(
     if not settings.enabled:
         return clip
 
-    core = clip.std.core  # May raise AttributeError, let it propagate
+    core = vs.core
 
     plugins = detect_plugins(core)
 
     if plugins.get("libplacebo", False):
-        return _apply_libplacebo(clip, settings, core, hdr_metadata)
-    else:
-        return _fallback_tonemap(clip, settings, hdr_metadata)
+        result = _apply_libplacebo(clip, settings, core, hdr_metadata)
+        if result is not None:
+            return result
+        # libplacebo failed at runtime, fall through to fallback
+    return _fallback_tonemap(clip, settings, hdr_metadata)

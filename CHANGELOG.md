@@ -102,3 +102,16 @@ This project follows Conventional Commits and is intended to be released via Rel
 - Documentation updates L-SMASH Works verification to prefer the `lsmas` namespace with a legacy `lw` fallback.
 - Completed Analysis module public API exports (`calculate_metrics`).
 - Refactored metrics module to use lazy VapourSynth imports for non-VS environments.
+
+### Fixed
+- Docker integration tests now include VS-required tests from `tests/vs/`
+- Fixed PIL deprecation warning causing test failure in Docker
+- Fixed test collection failure on macOS with partial VapourSynth install
+- Fixed libplacebo tonemapping in Docker (16-bit input conversion)
+- Fixed `vs.core` access pattern in tonemap module
+- Enabled Vulkan in Docker image for libplacebo (Mesa lavapipe)
+- Added runtime fallback when libplacebo fails
+- Added Docker tonemap integration test; libplacebo success is optional (can be required via `FRAME_COMPARE_REQUIRE_LIBPLACEBO=1`)
+- Fixed RGB->RGB conversion error in tonemap module (removed invalid `matrix_in_s` for RGB inputs)
+- Fixed Docker test runner to force deterministic lavapipe selection for Vulkan
+- Added missing `pytest-mock` dependency to Docker image

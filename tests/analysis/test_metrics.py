@@ -9,13 +9,26 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
+
+def _vs_spec_available() -> bool:
+    import importlib.util
+
+    try:
+        return importlib.util.find_spec("vapoursynth") is not None
+    except ValueError:
+        return False
+
+
 # Create a mock vapoursynth module before importing metrics
-vs_mock = MagicMock()
-vs_mock.YUV = 1
-vs_mock.GRAY = 2
-vs_mock.INTEGER = 0
-vs_mock.FLOAT = 1
-sys.modules["vapoursynth"] = vs_mock
+if not _vs_spec_available() and "vapoursynth" not in sys.modules:
+    vs_mock = MagicMock()
+    vs_mock.YUV = 1
+    vs_mock.GRAY = 2
+    vs_mock.INTEGER = 0
+    vs_mock.FLOAT = 1
+    sys.modules["vapoursynth"] = vs_mock
+else:
+    import vapoursynth as vs_mock  # type: ignore
 
 from frame_compare.analysis.metrics import (  # noqa: E402
     ProgressReporter,

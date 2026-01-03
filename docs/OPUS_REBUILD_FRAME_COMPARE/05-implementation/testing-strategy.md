@@ -204,6 +204,14 @@ If a phase quality gate requires “VapourSynth works” (not just “skips clea
 bash tools/verify_docker_integration.sh
 ```
 
+**Docker Desktop Vulkan note (macOS/Windows hosts):**
+
+In Docker Desktop environments, a usable Vulkan device may not be available even when `libplacebo`/`vs-placebo` is installed. In these cases, tests MUST accept the tonemap runtime fallback path (no error) rather than requiring libplacebo device initialization to succeed.
+
+To explicitly require libplacebo to succeed (intended for Linux GPU runners), set:
+
+- `FRAME_COMPARE_REQUIRE_LIBPLACEBO=1`
+
 **Example:**
 
 ```python
@@ -312,6 +320,36 @@ def dummy_progress():
     """No-op progress reporter."""
     from frame_compare.utils.progress import NullProgress
     return NullProgress()
+```
+
+#### VapourSynth Availability Guards
+
+When VapourSynth is partially installed (e.g., stub package on macOS), `importlib.util.find_spec("vapoursynth")` may raise `ValueError` instead of returning `None`. Use these guard functions to safely check availability during test collection:
+
+```python
+def _vs_needs_mock() -> bool:
+    """Check if vapoursynth needs to be mocked for test collection.
+
+    Used in tests/conftest.py to decide whether to install a global mock.
+    """
+    if "vapoursynth" in sys.modules:
+        return False
+    try:
+        return importlib.util.find_spec("vapoursynth") is None
+    except ValueError:
+        # Raised when vapoursynth.__spec__ is not set (partial install)
+        return True
+
+def _vs_spec_available() -> bool:
+    """Check if vapoursynth module spec is available.
+
+    Used in tests/vs/test_exports.py and tests/vs/test_tonemap.py
+    to avoid find_spec raising ValueError.
+    """
+    try:
+        return importlib.util.find_spec("vapoursynth") is not None
+    except ValueError:
+        return False
 ```
 
 ### 3.3 Fixtures Directory

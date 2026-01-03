@@ -6,9 +6,21 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+
 # Mock vapoursynth only when it is not installed, to allow safe import.
-if importlib.util.find_spec("vapoursynth") is None:
+def _vs_spec_available() -> bool:
+    try:
+        return importlib.util.find_spec("vapoursynth") is not None
+    except ValueError:
+        return False
+
+
+if not _vs_spec_available() and "vapoursynth" not in sys.modules:
     mock_vs = MagicMock()
+    mock_vs.VideoNode = MagicMock
+    mock_vs.Core = MagicMock
+    mock_vs.RGBS = 0
+    sys.modules["vapoursynth"] = mock_vs
     mock_vs.VideoNode = MagicMock
     mock_vs.Core = MagicMock
     mock_vs.RGBS = 0
@@ -73,16 +85,14 @@ def test_apply_tonemap_uses_libplacebo_when_available(mock_fallback, mock_libpla
     """Verify libplacebo path is chosen when plugin is available."""
     mock_detect.return_value = {"libplacebo": True}
     mock_clip = MagicMock()
-    # Ensure core property access works
-    mock_core = MagicMock()
-    mock_clip.std.core = mock_core
+    # Ensure vs.core is used
+    with patch("vapoursynth.core", MagicMock()) as mock_core:
+        settings = TonemapSettings(enabled=True)
 
-    settings = TonemapSettings(enabled=True)
+        apply_tonemap(mock_clip, settings)
 
-    apply_tonemap(mock_clip, settings)
-
-    mock_libplacebo.assert_called_once_with(mock_clip, settings, mock_core, None)
-    mock_fallback.assert_not_called()
+        mock_libplacebo.assert_called_once_with(mock_clip, settings, mock_core, None)
+        mock_fallback.assert_not_called()
 
 
 @patch("frame_compare.vs.tonemap.detect_plugins")
@@ -94,7 +104,6 @@ def test_apply_tonemap_uses_fallback_when_libplacebo_missing(
     """Verify fallback path is chosen when plugin is missing."""
     mock_detect.return_value = {"libplacebo": False}
     mock_clip = MagicMock()
-    mock_clip.std.core = MagicMock()
 
     settings = TonemapSettings(enabled=True)
 
@@ -105,11 +114,31 @@ def test_apply_tonemap_uses_fallback_when_libplacebo_missing(
 
 
 @patch("frame_compare.vs.tonemap.detect_plugins")
+@patch("frame_compare.vs.tonemap._apply_libplacebo")
+@patch("frame_compare.vs.tonemap._fallback_tonemap")
+def test_apply_tonemap_falls_back_on_libplacebo_runtime_failure(
+    mock_fallback, mock_libplacebo, mock_detect
+):
+    """Verify runtime failure in libplacebo triggers fallback."""
+    mock_detect.return_value = {"libplacebo": True}
+    mock_libplacebo.return_value = None  # Signals runtime failure
+    mock_fallback.return_value = MagicMock()
+
+    mock_clip = MagicMock()
+    settings = TonemapSettings(enabled=True)
+
+    result = apply_tonemap(mock_clip, settings)
+
+    mock_libplacebo.assert_called_once()
+    mock_fallback.assert_called_once()
+    assert result is mock_fallback.return_value
+
+
+@patch("frame_compare.vs.tonemap.detect_plugins")
 def test_apply_tonemap_unsupported_tone_curve_raises_error(mock_detect):
     """Verify unsupported tone curve raises error in libplacebo path."""
     mock_detect.return_value = {"libplacebo": True}
     mock_clip = MagicMock()
-    mock_clip.std.core = MagicMock()
     settings = TonemapSettings(enabled=True, tone_curve="invalid")
 
     with pytest.raises(TonemapError) as exc:
@@ -117,26 +146,6 @@ def test_apply_tonemap_unsupported_tone_curve_raises_error(mock_detect):
 
     assert exc.value.context.code == "FC-4003"
     assert "bt2390, spline, reinhard" in exc.value.context.hint
-
-
-@patch("frame_compare.vs.tonemap.detect_plugins")
-def test_apply_tonemap_wraps_exception_in_tonemap_error(mock_detect):
-    """Verify exceptions are wrapped in TonemapError."""
-    mock_detect.return_value = {"libplacebo": True}
-    mock_clip = MagicMock()
-    mock_clip.std.core = MagicMock()
-    mock_clip.format.id = vs.RGBS  # Avoid resize call
-
-    # Simulate libplacebo failure
-    mock_clip.std.core.placebo.Tonemap.side_effect = RuntimeError("Simulated failure")
-
-    settings = TonemapSettings(enabled=True, tone_curve="bt2390")
-
-    with pytest.raises(TonemapError) as exc:
-        apply_tonemap(mock_clip, settings)
-
-    assert exc.value.context.code == "FC-4003"
-    assert "Simulated failure" in str(exc.value.__cause__)
 
 
 @pytest.mark.parametrize(
@@ -197,8 +206,6 @@ def test_apply_tonemap_detects_metadata_when_missing_libplacebo(mock_detect, moc
     mock_detect.return_value = {"libplacebo": True}
 
     mock_clip = MagicMock()
-    mock_core = MagicMock()
-    mock_clip.std.core = mock_core
     mock_clip.format.id = vs.RGBS
 
     # Mock _detect_hdr return
@@ -208,15 +215,16 @@ def test_apply_tonemap_detects_metadata_when_missing_libplacebo(mock_detect, moc
 
     settings = TonemapSettings(enabled=True, tone_curve="bt2390")
 
-    apply_tonemap(mock_clip, settings, hdr_metadata=None)
+    with patch("vapoursynth.core", MagicMock()) as mock_core:
+        apply_tonemap(mock_clip, settings, hdr_metadata=None)
 
-    # Verify _detect_hdr called
-    mock_detect_hdr.assert_called_once()
+        # Verify _detect_hdr called
+        mock_detect_hdr.assert_called_once()
 
-    # Verify max_cll was used in placebo call (src_max)
-    mock_core.placebo.Tonemap.assert_called_once()
-    _, kwargs = mock_core.placebo.Tonemap.call_args
-    assert kwargs["src_max"] == 1234
+        # Verify max_cll was used in placebo call (src_max)
+        mock_core.placebo.Tonemap.assert_called_once()
+        _, kwargs = mock_core.placebo.Tonemap.call_args
+        assert kwargs["src_max"] == 1234
 
 
 @patch("frame_compare.vs.tonemap._detect_hdr")

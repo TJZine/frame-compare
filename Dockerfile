@@ -23,6 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake \
     curl \
     git \
+    glslang-tools \
     liblzma-dev \
     libtool \
     libvulkan-dev \
@@ -103,7 +104,7 @@ RUN git clone --depth 1 --branch "${LIBPLACEBO_REF}" \
     https://github.com/haasn/libplacebo.git && \
     cd libplacebo && \
     meson setup build \
-        -Dvulkan=disabled \
+        -Dvulkan=enabled \
         -Dopengl=disabled \
         -Dshaderc=disabled \
         -Ddemos=false && \
@@ -142,7 +143,9 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ca-certificates \
         ffmpeg \
+        libvulkan1 \
         libxxhash0 \
+        mesa-vulkan-drivers \
         procps \
         wget \
         which \
@@ -184,7 +187,7 @@ WORKDIR /home/framecompare/frame-compare
 
 # Install Python dependencies
 RUN pip install --no-cache-dir --user -e . && \
-    pip install --no-cache-dir --user "pytest>=8.3.0"
+    pip install --no-cache-dir --user "pytest>=8.3.0" "pytest-mock>=3.14.0"
 
 # Add user bin to PATH
 ENV PATH="/home/framecompare/.local/bin:${PATH}"
