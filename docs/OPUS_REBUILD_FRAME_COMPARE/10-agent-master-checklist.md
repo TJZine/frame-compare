@@ -570,7 +570,7 @@ frame-compare/
 **Reference:** `05-implementation/module-specs/orchestration-module.md` §4.4.4
 
 - [ ] Create `src/frame_compare/runner.py` at package root
-- [ ] Create `src/frame_compare/orchestration/context.py` and define `ClipState` / `RunContext` per spec §3.5
+- [x] Create `src/frame_compare/orchestration/context.py` and define `ClipState` / `RunContext` per spec §3.5 (2026-01-04)
 - [ ] Implement probe snapshot cache (`generated/clip_probe.toml`) per spec §3.5 (deterministic keying, stable TOML)
 - [ ] Preserve HDR/DoVi props in `ClipProbeSnapshot` per spec §3.5 (portable primitives only; record `tonemap_prop_keys`)
 - [ ] Implement consolidated FPS report per spec §5.4 (after LoadSources and after Align)
@@ -595,7 +595,7 @@ frame-compare/
 - [ ] Implement CLI flag → config override mapping per spec §4.4.5
 - [ ] Implement input discovery rules per spec §4.4.6
 - [ ] Write unit tests for `ClipState` and probe cache:
-  - [ ] `tests/orchestration/test_context.py::test_clip_state_effective_num_frames_clamps_and_never_negative`
+  - [x] `tests/orchestration/test_context.py::test_clip_state_effective_num_frames_clamps_and_never_negative` (2026-01-04)
   - [ ] `tests/orchestration/test_probe_cache.py::test_compute_probe_cache_key_stable_for_same_fingerprint`
   - [ ] `tests/orchestration/test_probe_cache.py::test_probe_cache_round_trip_toml`
   - [ ] `tests/orchestration/test_probe_cache.py::test_probe_cache_invalidates_on_fingerprint_change`
