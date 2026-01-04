@@ -12,6 +12,8 @@ from frame_compare.render.orchestrator import (
     ProgressReporter,
     render_batch,
     render_screenshots,
+    resolve_tonemap_settings,
+    should_tonemap,
 )
 from frame_compare.render.overlay import apply_overlay
 from frame_compare.render.types import (
@@ -40,4 +42,6 @@ __all__ = [
     "render_batch",
     "render_screenshots",
     "ProgressReporter",
+    "should_tonemap",
+    "resolve_tonemap_settings",
 ]

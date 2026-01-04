@@ -8,6 +8,7 @@ This project follows Conventional Commits and is intended to be released via Rel
 
 ### Added
 
+- **Tonemap Wiring:** Added `should_tonemap`, `resolve_tonemap_settings`, and `probe_is_hdr_ffprobe` helpers. Modified `render_screenshots` to require `config: ConfigSchema` and enforce HDR+tonemap fallback policy (Phase 6.5).
 - FramePlan module (`frame_compare.analysis.frame_plan`) for deterministic frame selection (`--skip-analysis`).
 - `select_reporter()` function for CLI output mode → progress reporter mapping (Phase 6.3).
 - **Preflight Validation:** `prepare_preflight()` for workspace resolution, config loading, and input discovery with `PreflightResult` type (Phase 6.2).

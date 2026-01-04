@@ -510,3 +510,56 @@
 - Unit Tests: 100% pass (10 tests).
 - Property Tests: Validated invariants with Hypothesis.
 - Lint/Types: Clean (0 errors).
+
+## 2026-01-04 — Phase 6.5 Tonemap Wiring
+
+### Scope
+
+**Run ID:** 2026-01-04__p6-5__tonemap-wiring
+**Artifact versions:** plan-v3 + plan-review-v3 + impl-v1 + impl-v2 + impl-v3 + verify-v2 + review-v1
+**Context:** Integrate tonemap gating logic into the rendering pipeline.
+
+**Decision:** Implemented tonemap wiring with deterministic fallback policy:
+
+- Modified `render_screenshots` to accept `config: ConfigSchema` parameter
+- Added `should_tonemap(source_info, config)` gating function
+- Added `resolve_tonemap_settings(config, cli_overrides)` for settings resolution
+- Added `probe_is_hdr_ffprobe(path)` (internal only; not public API) for HDR detection when VS unavailable
+- Implemented deterministic fallback: HDR + tonemap_enabled + VS_missing → fail-fast (FC-2001)
+- SDR or tonemap_disabled → FFmpeg fallback allowed
+
+**SSOT Edits (this run):**
+
+- `render-module.md` §1.4.1: Added parsing rules + failure behavior for `probe_is_hdr_ffprobe(path: Path) -> bool`
+- `render-module.md` §1.4.4: VS-missing tonemap-required uses `VapourSynthNotFoundError (FC-2001)`
+- `render-module.md` §3.1: Updated `render_screenshots(...)` signature + loading strategy notes
+- `render-module.md` §7.2: Updated markers and expected exceptions for VS-missing tonemap-required cases
+
+**Contract Alignment Decision:**
+
+VS-missing tonemap-required scenario uses `VapourSynthNotFoundError (FC-2001)`. No custom error code (FC-4004) introduced.
+
+**Probe Determinism Decision:**
+
+Probe failures disallow FFmpeg fallback when `enable_tonemap=True`. The probe exception is propagated; no silent fallback to incorrect SDR output.
+
+**Out-of-scope:**
+
+- CLI flag overrides (`--tm-preset`, `--tm-target`, `--tm-curve`) — Phase 6.7+
+- VSPreview integration (Phase 6.6)
+- FramePlan integration (Phase 6.4)
+
+**Rationale:**
+
+- **Determinism:** ffprobe-based HDR detection uses normalized color_transfer/color_primaries with conservative defaults.
+- **Fail-Fast Policy:** Prevents silent quality degradation for HDR sources requiring tonemapping.
+- **Layering:** Tonemap gating is orthogonal to the apply_tonemap VS implementation.
+
+**Verification Gates:**
+
+- pyright: PASS (0 errors)
+- ruff: PASS (all checks)
+- pytest: PASS (476 passed, 2 skipped, coverage 87.98%)
+- lint-imports: PASS (2 contracts kept)
+- generate_contract_views --check: PASS
+- validate_traceability --check: PASS

@@ -93,6 +93,54 @@ def should_tonemap(source_info: SourceInfo, config: ConfigSchema) -> bool:
 | `source_info.is_hdr` | `vs.SourceInfo` after load | `bool` | True if `_Transfer in (16, 18) AND _Primaries == 9` |
 | `config.color.enable_tonemap` | Config schema | `bool` | Default `True`; user override via config (CLI override supported once Phase 6 wiring consumes CLI flags) |
 
+**HDR detection when VS is unavailable (required for deterministic gating):**
+
+`render_screenshots(...)` may need to decide whether FFmpeg rendering is allowed when VS is not available or not used.
+Because `SourceInfo.is_hdr` is unavailable in that case, the module MUST use a deterministic non-VS HDR probe.
+
+Deterministic rule (SSOT):
+
+- Treat a source as HDR if and only if **both** are true:
+  - `color_transfer in {"smpte2084", "arib-std-b67"}` (PQ or HLG)
+  - `color_primaries == "bt2020"`
+
+Probe implementation shape:
+
+```python
+def probe_is_hdr_ffprobe(path: Path) -> bool:
+    """Determine HDR using ffprobe stream metadata (no VS required)."""
+    ...
+```
+
+**FFprobe parsing rules (SSOT):**
+
+- Stream selection: video stream `v:0` only.
+- JSON fields:
+  - `streams[0].color_transfer` (string)
+  - `streams[0].color_primaries` (string)
+- ffprobe command shape:
+  - `ffprobe -v error -select_streams v:0 -show_entries stream=color_transfer,color_primaries -of json <path>`
+
+**Normalization:**
+
+- Lowercase both values (`.lower().strip()`).
+
+**Return policy (missing/unknown metadata):**
+
+- If `streams` is missing/empty/not a list: return `True` (treat as HDR; conservative).
+- If either field is missing/empty/unknown: return `True` (treat as HDR; conservative).
+
+**Exceptions (ffprobe execution / parse failures):**
+
+- If `ffprobe` is not found: raise `FFmpegNotFoundError (FC-2005)`.
+- If `ffprobe` returns non-zero, JSON parsing fails, or output does not decode to UTF-8 JSON: raise `SourceLoadError (FC-4015)` with `path` and a short reason string.
+
+**Effect on `render_screenshots` fallback when `config.color.enable_tonemap` is True:**
+
+- If `probe_is_hdr_ffprobe(...)` returns `True`: no FFmpeg rendering is allowed; treat as “tonemap required”.
+- If `probe_is_hdr_ffprobe(...)` returns `False`: FFmpeg rendering is allowed.
+- If `probe_is_hdr_ffprobe(...)` raises: no FFmpeg rendering is allowed; propagate the exception (do not fall back).
+
 #### 1.4.2 Settings Resolution
 
 When tonemapping is triggered, resolve `TonemapSettings` using this priority order:
@@ -202,19 +250,17 @@ def render_screenshots(
 |:---------|:---------|:---------|
 | HDR source, `enable_tonemap=True`, VS available | vapoursynth/auto | Apply tonemap, render |
 | HDR source, `enable_tonemap=True`, VS available but libplacebo missing/unusable | vapoursynth/auto | Apply tonemap via fallback path inside `apply_tonemap()`, render |
-| HDR source, `enable_tonemap=True`, VS unavailable | auto | Raise `RenderError(FC-4004)` with hint |
-| HDR source, `enable_tonemap=True`, VS unavailable | ffmpeg | Raise `RenderError(FC-4004)` with hint |
+| HDR source, `enable_tonemap=True`, VS unavailable | auto | Raise `VapourSynthNotFoundError(FC-2001)` (no fallback) |
+| HDR source, `enable_tonemap=True`, VS unavailable | ffmpeg | Raise `VapourSynthNotFoundError(FC-2001)` (no fallback) |
 | HDR source, `enable_tonemap=False` | any | Render without tonemap (user accepts wrong colors) |
 | SDR source | any | No tonemap, render normally |
 
 **Exception specification:**
 
 ```python
-raise RenderError(
-    code="FC-4004",
-    message="Cannot tonemap HDR source: VapourSynth is required but not available",
-    hint="Install VapourSynth with libplacebo, or set enable_tonemap=false to skip tonemapping (not recommended for accurate comparisons)",
-)
+from frame_compare.errors import VapourSynthNotFoundError
+
+raise VapourSynthNotFoundError()
 ```
 
 **Tonemap function failure:**
@@ -449,6 +495,7 @@ def render_screenshots(
     clips: list[Path],
     frames: list[int],
     output_dir: Path,
+    config: ConfigSchema,
     label_map: dict[Path, str] | None = None,
     renderer: Renderer = "auto",
     overlay_mode: OverlayMode = OverlayMode.STANDARD,
@@ -472,7 +519,18 @@ def render_screenshots(
 
     Loading Strategy (Auto/VS):
     - If `renderer="vapoursynth"` or `"auto"`, attempt to load clip using `frame_compare.vs.loader.DefaultVSLoader`.
-    - If loading fails and renderer="auto", fallback to FFmpeg Path-based rendering (log warning; no exception raised).
+    - If loading fails and renderer="auto" and `config.color.enable_tonemap` is True:
+      - Determine HDR using `probe_is_hdr_ffprobe(path)` (see §1.4.1).
+      - If HDR: re-raise the original VS failure (no fallback).
+      - If SDR: fallback to FFmpeg Path-based rendering (log warning; no exception raised).
+      - If the probe raises: propagate the probe exception (no fallback).
+    - If loading fails and renderer="auto" and `config.color.enable_tonemap` is False:
+      - Fallback to FFmpeg Path-based rendering (log warning; no exception raised).
+    - If `renderer="ffmpeg"` and `config.color.enable_tonemap` is True:
+      - Determine HDR using `probe_is_hdr_ffprobe(path)` (see §1.4.1).
+      - If HDR: raise `VapourSynthNotFoundError (FC-2001)` (tonemap required; no FFmpeg path).
+      - If SDR: proceed with FFmpeg Path-based rendering.
+      - If the probe raises: propagate the probe exception (no FFmpeg path).
     - If renderer="vapoursynth" and loading fails:
       - Propagate `VapourSynthNotFoundError (FC-2001)` if vapoursynth module is missing.
       - Propagate `PluginNotFoundError (FC-2003)` if required VS plugin is missing.
@@ -785,8 +843,8 @@ Integration tests MUST be explicitly marker-gated.
 
 | Test | Marker(s) | Validates |
 |---|---|---|
-| PLANNED: `tests/render/test_tonemap_wiring.py::test_hdr_enable_tonemap_requires_vs_when_renderer_auto` | `@pytest.mark.vs_required` | HDR + enable_tonemap=True + VS missing → fail fast (`RenderError(FC-4004)`) |
-| PLANNED: `tests/render/test_tonemap_wiring.py::test_hdr_enable_tonemap_requires_vs_when_renderer_ffmpeg` | `@pytest.mark.vs_required` | HDR + enable_tonemap=True + renderer="ffmpeg" → fail fast (`RenderError(FC-4004)`) |
+| PLANNED: `tests/render/test_tonemap_wiring.py::test_hdr_enable_tonemap_requires_vs_when_renderer_auto` | `@pytest.mark.integration` | HDR + enable_tonemap=True + VS missing → fail fast (`VapourSynthNotFoundError(FC-2001)`) |
+| PLANNED: `tests/render/test_tonemap_wiring.py::test_hdr_enable_tonemap_requires_vs_when_renderer_ffmpeg` | `@pytest.mark.integration` | HDR + enable_tonemap=True + renderer="ffmpeg" + VS missing → fail fast (`VapourSynthNotFoundError(FC-2001)`) |
 | PLANNED: `tests/render/test_tonemap_wiring.py::test_hdr_disable_tonemap_allows_ffmpeg_when_vs_missing` | `@pytest.mark.integration` | HDR + enable_tonemap=False + VS missing → FFmpeg path allowed |
 | PLANNED: `tests/render/test_tonemap_wiring.py::test_sdr_allows_ffmpeg_fallback_when_vs_missing` | `@pytest.mark.integration` | SDR source + VS missing → renderer="auto" falls back to FFmpeg |
 

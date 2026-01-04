@@ -526,18 +526,18 @@ frame-compare/
 
 **Reference:** `05-implementation/module-specs/render-module.md` §1.4
 
-- [ ] Update `render/orchestrator.py` with tonemap integration
-- [ ] Implement `should_tonemap(source_info, config) -> bool` gating rule
-- [ ] Implement `resolve_tonemap_settings(config, cli_overrides) -> TonemapSettings`
-- [ ] Wire `config.color.enable_tonemap` to runtime consumer
-- [ ] Add tonemap call between load and frame extraction in `render_screenshots`
-- [ ] Implement fail-fast `RenderError(FC-4004)` for HDR + tonemap required + VS unavailable
-- [ ] Propagate `TonemapError` on `apply_tonemap()` failure
-- [ ] Write integration tests:
-  - [ ] `test_hdr_enable_tonemap_requires_vs_when_renderer_auto`
-  - [ ] `test_hdr_enable_tonemap_requires_vs_when_renderer_ffmpeg`
-  - [ ] `test_hdr_disable_tonemap_allows_ffmpeg_when_vs_missing`
-  - [ ] `test_sdr_allows_ffmpeg_fallback_when_vs_missing`
+- [x] Update `render/orchestrator.py` with tonemap integration (2026-01-04)
+- [x] Implement `should_tonemap(source_info, config) -> bool` gating rule (2026-01-04)
+- [x] Implement `resolve_tonemap_settings(config, cli_overrides) -> TonemapSettings` (2026-01-04)
+- [x] Wire `config.color.enable_tonemap` to runtime consumer (2026-01-04)
+- [x] Add tonemap call between load and frame extraction in `render_screenshots` (2026-01-04)
+- [x] Implement fail-fast `RenderError(FC-4004)` for HDR + tonemap required + VS unavailable (2026-01-04)
+- [x] Propagate `TonemapError` on `apply_tonemap()` failure (2026-01-04)
+- [x] Write integration tests: (2026-01-04)
+  - [x] `test_hdr_enable_tonemap_requires_vs_when_renderer_auto`
+  - [x] `test_hdr_enable_tonemap_requires_vs_when_renderer_ffmpeg`
+  - [x] `test_hdr_disable_tonemap_allows_ffmpeg_when_vs_missing`
+  - [x] `test_sdr_allows_ffmpeg_fallback_when_vs_missing`
 
 ### 6.6 VSPreview Integration (Optional Config Option)
 
