@@ -563,3 +563,44 @@ Probe failures disallow FFmpeg fallback when `enable_tonemap=True`. The probe ex
 - lint-imports: PASS (2 contracts kept)
 - generate_contract_views --check: PASS
 - validate_traceability --check: PASS
+
+## 2026-01-04 — Phase 6.6 VSPreview Integration
+
+### Scope
+
+**Run ID:** 2026-01-04__p6-6-1__vspreview-integration
+**Artifact versions:** plan-v3 + plan-review-v3 + impl-v1
+**Context:** Implement VSPreview integration module for optional interactive alignment verification.
+
+**Decision:** Implemented `frame_compare.vspreview` module with:
+
+- `VSPreviewConfig` dataclass for session configuration
+- `ManualOverride` dataclass for user-provided alignment overrides
+- `is_vspreview_available()` for dependency detection (exec in PATH or importable + Qt backend)
+- `launch_alignment_verification_session()` for script generation and launch
+- `load_manual_overrides()` and `save_manual_override()` for TOML-based override persistence
+- `VSPreviewNotFoundError` (FC-2008) and `VSPreviewError` (FC-4019) error types
+- Integration with `services.alignment` for manual override precedence
+- Doctor check update to use `is_vspreview_available()`
+
+**Layer Architecture Decision:**
+
+Placed `frame_compare.vspreview` on a dedicated layer BELOW `frame_compare.services` (and the other domain modules) as specified in plan-v3. This is required because import-linter's `|` separator denotes **independent siblings** that cannot import each other. Placing vspreview on a separate lower layer allows services to import from vspreview while maintaining the existing domain independence between analysis/render/services.
+
+**Manual Override Precedence:**
+
+Implemented deterministic precedence in `align_clips`: manual override > cached > computed. Manual overrides produce `AlignmentResult` with `method="manual"` and `correlation_score=1.0`, and are NOT written to `audio_offsets.toml` (cache separation).
+
+**Out-of-scope:**
+
+- Runner/orchestration pipeline wiring for vspreview launch
+- Interactive CLI prompt workflow for offset confirmation
+- JSON output payload shaping for `vspreview_offer`
+- Integration tests requiring external binaries/display
+
+**Verification Gates:**
+
+- pyright: PASS (0 errors, 0 warnings)
+- ruff: PASS (all checks)
+- pytest: PASS (all pass, 2 skipped)
+- lint-imports: PASS (2 contracts kept)

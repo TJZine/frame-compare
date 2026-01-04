@@ -143,6 +143,19 @@ This section defines the interaction contract between `frame_compare.services.al
 2. **Cached computed offset** from `{cache_dir}/audio_offsets.toml` (if cache enabled and entry present)
 3. **Newly computed offset** from cross-correlation (computed during the current run)
 
+**Manual override `AlignmentResult` construction (method="manual"):**
+
+When a manual override exists for key `"{reference.stem}:{comparison.stem}"`, the services layer MUST construct an
+`AlignmentResult` with the following deterministic field mapping:
+
+- `reference_clip`: `reference.name` (filename, including extension)
+- `comparison_clip`: `comparison.name` (filename, including extension)
+- `frame_offset`: the manual override’s signed **comparison-relative-to-reference** frame offset
+- `time_offset_seconds`: `frame_offset / float(fps_reference)` where `fps_reference` is the probed reference FPS
+  (FFprobe via `_probe_fps(reference)`; computed once per `align_clips()` call when needed)
+- `correlation_score`: `1.0` (explicit constant; correlation is not applicable to manual offsets)
+- `method`: `"manual"`
+
 **Offset semantics (relative, signed):**
 
 - Offsets are stored and reasoned about as **comparison-relative-to-reference** frame offsets.

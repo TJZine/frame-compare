@@ -180,16 +180,24 @@ def _check_dovi_tool() -> CheckResult:
 
 
 def _check_vspreview() -> CheckResult:
-    """Check VSPreview is available."""
-    try:
-        # VSPreview may not be installed; this is optional
-        __import__("vspreview")
-        return CheckResult(passed=True, message="VSPreview available")
-    except ImportError:
+    """Check VSPreview is available.
+
+    Uses frame_compare.vspreview.is_vspreview_available() for consistent detection.
+    Per vspreview spec §6.1, this is an optional check that reports passed=True
+    even when VSPreview is missing (non-failing).
+    """
+    from frame_compare.vspreview import is_vspreview_available
+
+    if is_vspreview_available():
         return CheckResult(
-            passed=False,
-            message="VSPreview not found",
-            hint="Install vspreview for interactive alignment verification",
+            passed=True,
+            message="VSPreview is available for interactive alignment",
+        )
+    else:
+        return CheckResult(
+            passed=True,  # Not a failure, just optional per spec §6.1
+            message="VSPreview not installed (optional for manual alignment)",
+            hint="Install with: pip install vspreview",
         )
 
 

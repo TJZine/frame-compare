@@ -309,6 +309,20 @@ class DoviToolNotFoundError(DependencyError):
         )
 
 
+class VSPreviewNotFoundError(DependencyError):
+    """VSPreview not found (FC-2008)."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            ErrorContext(
+                code="FC-2008",
+                name="VSPREVIEW_NOT_FOUND",
+                message="VSPreview not installed",
+                hint="Install vspreview (and a Qt backend) for interactive alignment verification",
+            )
+        )
+
+
 class PythonVersionError(DependencyError):
     """Unsupported Python version (FC-2010)."""
 
@@ -713,6 +727,21 @@ class DoviError(ProcessingError):
                 message=f"Dolby Vision error for {path}: {reason}",
                 hint="Check RPU validity or dovi_tool version",
                 details={"path": str(path), "reason": reason},
+            )
+        )
+
+
+class VSPreviewError(ProcessingError):
+    """VSPreview failed to launch or run (FC-4019)."""
+
+    def __init__(self, details: str) -> None:
+        super().__init__(
+            ErrorContext(
+                code="FC-4019",
+                name="VSPREVIEW_ERROR",
+                message=f"VSPreview error: {details}",
+                hint="Install a Qt backend (PySide6/PyQt5) and ensure a GUI backend is available",
+                details={"error": details},
             )
         )
 

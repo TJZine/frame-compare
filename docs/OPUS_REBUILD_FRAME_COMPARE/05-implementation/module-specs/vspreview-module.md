@@ -114,6 +114,8 @@ def launch_alignment_verification_session(
     3. Overlay labels + suggested offsets per clip (see §3.2.1).
     4. Launch VSPreview (same interpreter) via `sys.executable -m vspreview {script}`.
     5. Return the on-disk script path for debugging/replay.
+    6. If `config.enabled` is `False`, the function MUST still generate and persist the script and return its path,
+       but MUST NOT attempt to launch VSPreview and MUST NOT raise VSPreviewNotFoundError/VSPreviewError.
 
     Args:
         reference: Path to reference video
@@ -180,6 +182,9 @@ The VSPreview session is driven by a generated Python script. This script MUST b
 
 - Directory: `{cache_dir}/vspreview_sessions/` (created if missing)
 - Filename: `vspreview_{reference_stem}_{timestamp}.py` (UTC timestamp)
+  - `timestamp` format: `YYYYMMDDTHHMMSSZ` (UTC, seconds precision)
+  - The timestamp MUST appear in the filename only; it MUST NOT appear in the script body so that script content
+    remains byte-identical for the same inputs.
 
 **Script MUST include:**
 

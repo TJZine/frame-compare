@@ -543,27 +543,27 @@ frame-compare/
 
 **Reference:** `05-implementation/module-specs/vspreview-module.md`
 
-- [ ] Create `src/frame_compare/vspreview/__init__.py`
-- [ ] Create `src/frame_compare/vspreview/adapter.py`
-- [ ] Create `src/frame_compare/vspreview/overrides.py`
-- [ ] Implement `is_vspreview_available() -> bool`
-- [ ] Implement `launch_alignment_verification_session(reference, comparisons, suggested_offsets_by_key, cache_dir, config) -> Path`
-- [ ] Implement `load_manual_overrides(cache_dir) -> dict[str, ManualOverride]`
-- [ ] Implement `save_manual_override(cache_dir, override) -> None`
-- [ ] Wire `config.audio_alignment.use_vspreview` to runtime consumer
-- [ ] Wire `config.audio_alignment.force_interactive` and `--force-interactive-alignment` to runtime consumer
-- [ ] Write unit tests per spec §8.1:
-  - [ ] `test_is_vspreview_available_returns_true_when_importable`
-  - [ ] `test_is_vspreview_available_returns_false_when_missing`
-  - [ ] `test_load_manual_overrides_parses_valid_toml`
-  - [ ] `test_load_manual_overrides_returns_empty_dict_on_missing_file`
-  - [ ] `test_load_manual_overrides_returns_empty_dict_on_parse_error`
-  - [ ] `test_load_manual_overrides_returns_empty_dict_on_version_mismatch`
-  - [ ] `test_save_manual_override_creates_file_if_missing`
-  - [ ] `test_save_manual_override_merges_with_existing`
-  - [ ] `test_save_manual_override_overwrites_same_key`
-  - [ ] `test_manual_override_takes_precedence_over_computed`
-- [ ] Update `importlinter.ini` for vspreview module
+- [x] Create `src/frame_compare/vspreview/__init__.py` (2026-01-04)
+- [x] Create `src/frame_compare/vspreview/adapter.py` (2026-01-04)
+- [x] Create `src/frame_compare/vspreview/overrides.py` (2026-01-04)
+- [x] Implement `is_vspreview_available() -> bool` (2026-01-04)
+- [x] Implement `launch_alignment_verification_session(reference, comparisons, suggested_offsets_by_key, cache_dir, config) -> Path` (2026-01-04)
+- [x] Implement `load_manual_overrides(cache_dir) -> dict[str, ManualOverride]` (2026-01-04)
+- [x] Implement `save_manual_override(cache_dir, override) -> None` (2026-01-04)
+- [x] Wire `config.audio_alignment.use_vspreview` to runtime consumer (2026-01-04)
+- [x] Wire `config.audio_alignment.force_interactive` and `--force-interactive-alignment` to runtime consumer (2026-01-04)
+- [x] Write unit tests per spec §8.1: (2026-01-04)
+  - [x] `test_is_vspreview_available_returns_true_when_importable`
+  - [x] `test_is_vspreview_available_returns_false_when_missing`
+  - [x] `test_load_manual_overrides_parses_valid_toml`
+  - [x] `test_load_manual_overrides_returns_empty_dict_on_missing_file`
+  - [x] `test_load_manual_overrides_returns_empty_dict_on_parse_error`
+  - [x] `test_load_manual_overrides_returns_empty_dict_on_version_mismatch`
+  - [x] `test_save_manual_override_creates_file_if_missing`
+  - [x] `test_save_manual_override_merges_with_existing`
+  - [x] `test_save_manual_override_overwrites_same_key`
+  - [x] `test_manual_override_takes_precedence_over_computed`
+- [x] Update `importlinter.ini` for vspreview module (2026-01-04)
 
 ### 6.7 Runner & Phase Orchestration
 

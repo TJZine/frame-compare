@@ -40,11 +40,35 @@ async def align_clips(
         progress.start_phase("Audio Alignment", total=len(comparisons))
 
     results_map: dict[str, AlignmentResult] = {}
-    requested_comparisons = comparisons
 
-    # 1. Check cache
-    if config.cache_results:
-        cached = load_cached_offsets(cache_dir, [reference] + comparisons)
+    # 0. Load manual overrides (highest precedence per §2.4)
+    from frame_compare.vspreview import load_manual_overrides
+
+    manual_overrides = load_manual_overrides(cache_dir)
+    fps_reference: Fraction | None = None  # Lazy probe, only when needed
+
+    for comp in comparisons:
+        key = f"{reference.stem}:{comp.stem}"
+        if key in manual_overrides:
+            override = manual_overrides[key]
+            # Need FPS for time_offset_seconds calculation
+            if fps_reference is None:
+                fps_reference = _probe_fps(reference)
+            results_map[key] = AlignmentResult(
+                reference_clip=reference.name,
+                comparison_clip=comp.name,
+                frame_offset=override.frame_offset,
+                time_offset_seconds=override.frame_offset / float(fps_reference),
+                correlation_score=1.0,  # Explicit constant per §2.4
+                method="manual",
+            )
+
+    # 1. Check cache for non-manual entries
+    requested_comparisons = [
+        c for c in comparisons if f"{reference.stem}:{c.stem}" not in results_map
+    ]
+    if config.cache_results and requested_comparisons:
+        cached = load_cached_offsets(cache_dir, [reference] + requested_comparisons)
         if cached is not None:
             results_map.update(cached)
             # Find what is still missing
@@ -52,7 +76,7 @@ async def align_clips(
                 c for c in comparisons if f"{reference.stem}:{c.stem}" not in results_map
             ]
 
-    # If everything is cached, return early
+    # If everything is resolved (manual + cached), return early
     if not requested_comparisons:
         if progress:
             progress.complete_phase()
@@ -60,7 +84,8 @@ async def align_clips(
 
     # 2. Compute missing
     try:
-        fps = _probe_fps(reference)
+        if fps_reference is None:
+            fps_reference = _probe_fps(reference)
         ref_audio = _extract_audio(reference, config.sample_rate)
 
         for comp in requested_comparisons:
@@ -70,7 +95,7 @@ async def align_clips(
             comp_audio = _extract_audio(comp, config.sample_rate)
             sample_offset, score = _cross_correlate(ref_audio, comp_audio)
 
-            frame_offset = _samples_to_frames(sample_offset, config.sample_rate, fps)
+            frame_offset = _samples_to_frames(sample_offset, config.sample_rate, fps_reference)
             time_offset = sample_offset / config.sample_rate
 
             res = AlignmentResult(
@@ -86,11 +111,16 @@ async def align_clips(
             if progress:
                 progress.advance()
 
-        # 3. Save cache if needed
+        # 3. Save cache if needed (only computed results, not manual)
         if config.cache_results:
-            # We save all results we have for this reference:comparison set
-            all_results = [results_map[f"{reference.stem}:{c.stem}"] for c in comparisons]
-            save_offsets_cache(cache_dir, all_results)
+            # Save only the computed results (method != "manual")
+            computed_results = [
+                results_map[f"{reference.stem}:{c.stem}"]
+                for c in comparisons
+                if results_map[f"{reference.stem}:{c.stem}"].method != "manual"
+            ]
+            if computed_results:
+                save_offsets_cache(cache_dir, computed_results)
 
     finally:
         if progress:
