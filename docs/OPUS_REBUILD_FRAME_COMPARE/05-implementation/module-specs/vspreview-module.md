@@ -95,45 +95,152 @@ def is_vspreview_available() -> bool:
     """
 ```
 
-### 3.2 Launch for Verification
+### 3.2 Launch Session for Verification (All Comparisons)
 
 ```python
-def launch_alignment_verification(
+def launch_alignment_verification_session(
     reference: Path,
-    comparison: Path,
-    computed_offset: int,
+    comparisons: list[Path],
+    suggested_offsets_by_key: dict[str, int],
+    cache_dir: Path,
     config: VSPreviewConfig,
-) -> ManualOverride | None:
+) -> Path:
     """
-    Launch VSPreview for user to verify/adjust alignment.
+    Launch a single VSPreview session for the full comparison set.
 
     Behavior:
-    1. Generate temporary VPY script loading both clips
-    2. Apply computed_offset to comparison clip
-    3. Launch VSPreview with script
-    4. Wait for user interaction (confirm/adjust/cancel)
-    5. Capture final offset from user
-    6. Return ManualOverride or None if cancelled
+    1. Generate a self-contained Python script that loads the reference clip and all comparisons.
+    2. Apply FPS harmonization so that all clips scrub at the reference FPS (see §3.2.2).
+    3. Overlay labels + suggested offsets per clip (see §3.2.1).
+    4. Launch VSPreview (same interpreter) via `sys.executable -m vspreview {script}`.
+    5. Return the on-disk script path for debugging/replay.
 
     Args:
         reference: Path to reference video
-        comparison: Path to comparison video
-        computed_offset: Computed frame offset from align_clips
+        comparisons: Paths to comparison videos
+        suggested_offsets_by_key: Signed relative offsets keyed by "{ref_stem}:{comp_stem}"
+        cache_dir: Directory used for generated artifacts (script output lives under `{cache_dir}/vspreview_sessions/`)
         config: VSPreview configuration
 
     Returns:
-        ManualOverride if user confirmed/adjusted
-        None if user cancelled or timeout
+        Path to the generated script on disk
 
     Raises:
         VSPreviewNotFoundError: If vspreview is not importable/launchable when this function is invoked
-        VSPreviewError: If launch or communication fails after vspreview is available
+        VSPreviewError: If launch fails after vspreview is available
 
     Note:
-        This function blocks until user interaction completes or timeout.
-        Callers MUST treat VSPreview failures as warn-only and continue with the computed/cached offset (see §6.2).
+        VSPreview does not provide a stable programmatic API for reading user “dragged” offsets back out of the GUI.
+        This module does NOT capture offsets from VSPreview.
+
+        Confirmation is performed by the CLI after VSPreview exits: the user is prompted per comparison clip with a
+        default value of the suggested signed frame offset, then `ManualOverride` entries are persisted.
     """
 ```
+
+#### 3.2.1 Overlay + Confirmation Contract (Required)
+
+The verification session MUST make it easy for a user to identify which clip they are adjusting and what offset is being proposed.
+
+**Overlay requirements (script):**
+
+- Reference overlay MUST include the reference clip filename (or stem) and a stable label:
+  - Example: `REF: {reference.name}`
+- Each comparison overlay MUST include the comparison clip filename (or stem) and a stable label:
+  - Example: `CMP: {comparison.name}`
+- The proposed offset MUST be displayed per comparison:
+  - Example: `Suggested offset: {suggested_offset} frames`
+- The sign convention MUST be displayed to prevent user confusion:
+  - Example: `+N = comparison starts AFTER reference; -N = comparison starts BEFORE reference`
+  - Note: negative values are valid at the *relative offset* boundary; the pipeline applies a trim-first
+    normalization step so that no clip is ever padded with blank frames (see services-module.md §2.5).
+
+**User confirmation (terminal prompt, CLI-owned):**
+
+- After VSPreview exits, the CLI MUST obtain an explicit confirmation per comparison clip.
+- The prompt MUST default to the suggested signed offset.
+- If the user accepts the default without changing it, the CLI MUST persist `ManualOverride(confirmed=True)`.
+- If the user changes the offset, the CLI MUST persist `ManualOverride(confirmed=False)` with the adjusted `frame_offset`.
+- If the user cancels the prompt step, the CLI MUST NOT persist anything for that clip.
+
+**Persistence boundary (manual-only):**
+
+- This module MUST NOT write to `audio_offsets.toml`. It only persists manual values via `save_manual_override()` to `manual_overrides.toml`.
+- Manual values are stored as signed **comparison-relative-to-reference** frame offsets (may be negative).
+
+#### 3.2.2 Script Generation Requirements (Legacy-Proven)
+
+The VSPreview session is driven by a generated Python script. This script MUST be:
+
+- **Self-contained**: no CLI argument parsing inside the script; embed state via dictionary literals.
+- **Deterministic**: same inputs → byte-identical script content (except the output filename timestamp).
+- **Debuggable**: written to disk so an operator can re-run it directly.
+
+**Output location:**
+
+- Directory: `{cache_dir}/vspreview_sessions/` (created if missing)
+- Filename: `vspreview_{reference_stem}_{timestamp}.py` (UTC timestamp)
+
+**Script MUST include:**
+
+- A short header comment that states:
+  - sign convention (`+ trims comparison`, `- trims reference` in preview)
+  - that operator-confirmed offsets are **signed relative offsets**
+  - that the pipeline will apply trim-first normalization (no padding)
+- A `safe_print()` helper and UTF-8 `stdout`/`stderr` reconfigure best-effort block.
+- An explicit `sys.path` bootstrap that makes imports work in “run from repo” mode:
+  - Insert (in order): `PROJECT_ROOT`, `PROJECT_ROOT/src`, `WORKSPACE_ROOT`.
+  - The script MUST NOT rely on the working directory being the project root.
+- A stable, explicit `REFERENCE` dict and `TARGETS` mapping keyed by label.
+- A stable `suggested_offsets_by_key` mapping keyed by `"{ref_stem}:{comp_stem}"`.
+- A stable per-label `OFFSET_MAP` that the operator may edit (debugging convenience).
+
+**Slot layout (operator UX):**
+
+- Reference is repeated on even-numbered slots: 0, 2, 4, ...
+- Comparisons are placed on odd-numbered slots: 1, 3, 5, ...
+
+**FPS harmonization (preview-only):**
+
+- VSPreview comparisons MUST scrub at a consistent FPS.
+- The script MUST apply `AssumeFPS` (or equivalent) so that each comparison clip has the same FPS as the reference.
+- This is for preview ergonomics; it does not change persisted offsets.
+
+**Encoding safety:**
+
+- The script SHOULD attempt `sys.stdout.reconfigure(encoding="utf-8", errors="replace")` to avoid Windows console crashes.
+
+**Overlay resilience:**
+
+- Overlay application MUST be best-effort: if the overlay/text plugin is missing, the script must continue without overlays and print a warning.
+
+#### 3.2.3 Launch + Telemetry Contract (Fragility Hardened)
+
+VSPreview is optional and frequently fails due to missing GUI backends. The orchestration layer MUST surface actionable diagnostics.
+
+**Launch requirements:**
+
+- Only launch when `stdin` is a TTY.
+- Always print:
+  - the generated script path,
+  - the exact copy/paste command used to launch VSPreview.
+- If VSPreview exits non-zero:
+  - warn and continue (do not fail the run),
+  - suggest re-running with a verbose mode to capture stdout/stderr.
+
+**Missing reason codes (SSOT):**
+
+- `vspreview-executable-missing` — no `vspreview` binary and no importable module
+- `vspreview-module-missing` — `vspreview` module not importable
+- `vspreview-backend-missing` — `vspreview` module importable, but `PySide6`/`PyQt5` missing
+
+**JSON output (when `--json`):**
+
+- The CLI SHOULD include a `vspreview_offer` object that contains:
+  - `vspreview_offered: bool`
+  - `reason: str` (one of the missing reason codes or empty string)
+  - `script_path: str | null`
+  - `command: str`
 
 ### 3.3 Override Persistence
 
@@ -172,52 +279,16 @@ def save_manual_override(
 
 ### 4.1 Alignment Flow with VSPreview
 
-```python
-# In services/alignment.py align_clips()
+This module is an adapter: it launches the VSPreview UI, but it does not compute offsets and does not capture
+GUI interactions programmatically.
 
-async def align_clips(
-    reference: Path,
-    comparisons: list[Path],
-    config: AlignmentConfig,
-    cache_dir: Path,
-    progress: ProgressReporter | None = None,
-) -> list[AlignmentResult]:
-    results: list[AlignmentResult] = []
+High-level orchestration flow:
 
-    for comparison in comparisons:
-        # Check for existing manual override first
-        manual_overrides = load_manual_overrides(cache_dir)
-        key = f"{reference.stem}:{comparison.stem}"
-
-        if key in manual_overrides:
-            # Use persisted manual override
-            override = manual_overrides[key]
-            result = AlignmentResult(
-                reference_clip=str(reference),
-                comparison_clip=str(comparison),
-                frame_offset=override.frame_offset,
-                time_offset_seconds=offset_to_seconds(override.frame_offset, fps),
-                correlation_score=1.0,  # Manual = full confidence
-                method="manual",
-            )
-        else:
-            # Compute alignment programmatically
-            result = await _compute_alignment(reference, comparison, config)
-
-            # Optionally verify with VSPreview
-            if config.use_vspreview and is_vspreview_available():
-                vspreview_config = VSPreviewConfig(enabled=True)
-                override = launch_alignment_verification(
-                    reference, comparison, result.frame_offset, vspreview_config
-                )
-                if override is not None:
-                    save_manual_override(cache_dir, override)
-                    result = replace(result, frame_offset=override.frame_offset, method="manual")
-
-        results.append(result)
-
-    return results
-```
+1. Compute or load **suggested signed relative offsets** via `frame_compare.services.alignment.align_clips()`.
+2. If `use_vspreview=True` and at least one comparison lacks a manual override (or `force_interactive=True`):
+   - Launch a single VSPreview session for the full set via `launch_alignment_verification_session(...)`.
+   - Prompt the user per comparison clip for the final signed relative offset (CLI-owned).
+   - Persist `ManualOverride` entries via `save_manual_override(...)`.
 
 ### 4.2 Merge Semantics
 
@@ -226,8 +297,8 @@ When a manual override exists:
 | Priority | Source | Behavior |
 |:---------|:-------|:---------|
 | 1 (Highest) | `manual_overrides.toml` | Always used if present |
-| 2 | Computed alignment | Used if no manual override |
-| 3 | Cached alignment | Used if cache hit and no manual override |
+| 2 | Cached computed alignment (`audio_offsets.toml`) | Used if no manual override |
+| 3 | Newly computed alignment (cross-correlation) | Used if no manual override and cache miss |
 
 **Key rule:** Manual overrides ALWAYS take precedence. Users can delete `manual_overrides.toml` to revert to computed values.
 
@@ -311,6 +382,30 @@ if config.use_vspreview and not is_vspreview_available():
     )
     # Continue with computed/cached alignment
 ```
+
+### 6.3 Command Resolution + Missing Reasons (Operator-Friendly)
+
+VSPreview launch is fragile across platforms. The orchestration layer MUST surface clear missing-reason codes and a
+copy/paste command for operators.
+
+**Command resolution priority:**
+
+1. If `vspreview` executable exists in `PATH`: run `vspreview {script_path}`
+2. Else if `python -m vspreview` is available (module importable) AND a Qt backend is importable (`PySide6` or `PyQt5`):
+   run `{sys.executable} -m vspreview {script_path}`
+3. Otherwise: treat VSPreview as unavailable.
+
+**Missing reason codes (SSOT):**
+
+- `vspreview-executable-missing` — no `vspreview` binary and no importable module
+- `vspreview-module-missing` — `vspreview` module not importable
+- `vspreview-backend-missing` — `vspreview` module importable, but `PySide6`/`PyQt5` missing
+
+**Operator message requirements:**
+
+- Print the generated script path on disk
+- Print a copy/paste launch command matching the internal resolution
+- If missing, print install hints for the operator’s platform and the missing reason code
 
 ---
 
@@ -409,7 +504,7 @@ This module provides interactive alignment verification as a convenience feature
 
 ## Testing
 - Unit tests MUST NOT require VSPreview or display
-- Use `@pytest.mark.vspreview_required` for GUI tests
+- GUI/manual tests MUST be `@pytest.mark.skip` (and optionally `@pytest.mark.integration`)
 - Mock all VSPreview interactions in unit tests
 
 ## Acceptance Criteria

@@ -18,6 +18,7 @@ from frame_compare.orchestration.preflight import (
     resolve_paths,
     resolve_workspace,
 )
+from frame_compare.orchestration.progress import select_reporter
 
 __all__ = [
     # Preflight
@@ -32,4 +33,6 @@ __all__ = [
     "DoctorReport",
     "collect_checks",
     "run_doctor",
+    # Progress
+    "select_reporter",
 ]

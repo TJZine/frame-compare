@@ -119,6 +119,10 @@ def run(
         False, "--skip-dovi",
         help="Skip Dolby Vision extraction",
     ),
+    force_interactive_alignment: bool = typer.Option(
+        False, "--force-interactive-alignment",
+        help="Recompute audio offsets and re-run interactive VSPreview confirmation for each comparison clip",
+    ),
     json_output: bool = typer.Option(
         False, "--json",
         help="Output results as JSON",
@@ -147,6 +151,9 @@ def run(
     """Execute the comparison pipeline."""
     # REQUIRED STEPS (normative):
     # 1. Build a RunRequest from CLI args (no implicit defaults beyond Typer defaults).
+    # 1.1 If `--force-interactive-alignment` is set, it MUST enable interactive alignment:
+    #     - Set `audio_alignment.use_vspreview = True` (even if config disabled it)
+    #     - Set `audio_alignment.force_interactive = True`
     # 2. Call `frame_compare.runner.run(request, dependencies=None) -> RunResult`.
     # 3. If a `FrameCompareError` is raised, map to exit code via `handle_error()` and exit.
     # 4. If `RunResult.success` is False, exit with `ExitCode.PROCESSING_ERROR`.

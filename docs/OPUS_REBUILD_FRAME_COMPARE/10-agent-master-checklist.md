@@ -491,12 +491,12 @@ frame-compare/
 
 **Reference:** `05-implementation/module-specs/orchestration-module.md` §3.3
 
-- [ ] Use canonical `ProgressReporter` protocol from `frame_compare.utils.progress`
-- [ ] Use `RichProgressReporter` for interactive CLI (TTY)
-- [ ] Use `LogProgressReporter` for `--json` / non-interactive modes (no JSON-lines reporter required yet)
-- [ ] Use `NullProgressReporter` for quiet mode
-- [ ] Implement reporter selection logic in orchestration (mode → reporter)
-- [ ] Write progress reporter tests
+- [x] Use canonical `ProgressReporter` protocol from `frame_compare.utils.progress` (2026-01-03)
+- [x] Use `RichProgressReporter` for interactive CLI (TTY) (2026-01-03)
+- [x] Use `LogProgressReporter` for `--json` / non-interactive modes (no JSON-lines reporter required yet) (2026-01-03)
+- [x] Use `NullProgressReporter` for quiet mode (2026-01-03)
+- [x] Implement reporter selection logic in orchestration (mode → reporter) (2026-01-03)
+- [x] Write progress reporter tests (2026-01-03)
 
 ### 6.4 FramePlan Module
 
@@ -519,6 +519,7 @@ frame-compare/
   - [ ] `test_select_uniform_seeded_frames_count_exceeds_available`
   - [ ] `test_select_uniform_seeded_frames_zero_count`
   - [ ] `test_create_frame_plan_uses_default_seed_when_none`
+  - [ ] `test_create_frame_plan_uses_default_seed_when_omitted`
 - [ ] Update `analysis/__init__.py` exports
 
 ### 6.5 Tonemap Wiring
@@ -538,17 +539,19 @@ frame-compare/
   - [ ] `test_hdr_disable_tonemap_allows_ffmpeg_when_vs_missing`
   - [ ] `test_sdr_allows_ffmpeg_fallback_when_vs_missing`
 
-### 6.6 VSPreview Integration (Optional Config option (will this work in the docker version?))
+### 6.6 VSPreview Integration (Optional Config Option)
 
 **Reference:** `05-implementation/module-specs/vspreview-module.md`
 
 - [ ] Create `src/frame_compare/vspreview/__init__.py`
+- [ ] Create `src/frame_compare/vspreview/adapter.py`
 - [ ] Create `src/frame_compare/vspreview/overrides.py`
 - [ ] Implement `is_vspreview_available() -> bool`
-- [ ] Implement `launch_alignment_verification(ref_clip, cmp_clip, offset)`
+- [ ] Implement `launch_alignment_verification_session(reference, comparisons, suggested_offsets_by_key, cache_dir, config) -> Path`
 - [ ] Implement `load_manual_overrides(cache_dir) -> dict[str, ManualOverride]`
-- [ ] Implement `save_manual_override(cache_dir, ref_label, cmp_label, offset)`
+- [ ] Implement `save_manual_override(cache_dir, override) -> None`
 - [ ] Wire `config.audio_alignment.use_vspreview` to runtime consumer
+- [ ] Wire `config.audio_alignment.force_interactive` and `--force-interactive-alignment` to runtime consumer
 - [ ] Write unit tests per spec §8.1:
   - [ ] `test_is_vspreview_available_returns_true_when_importable`
   - [ ] `test_is_vspreview_available_returns_false_when_missing`
@@ -564,15 +567,16 @@ frame-compare/
 
 ### 6.7 Runner & Phase Orchestration
 
-**Reference:** `05-implementation/module-specs/orchestration-module.md` §4.3
+**Reference:** `05-implementation/module-specs/orchestration-module.md` §4.4.4
 
 - [ ] Create `src/frame_compare/runner.py` at package root
+- [ ] Create `src/frame_compare/orchestration/context.py` and define `ClipState` / `RunContext` per spec §3.5
 - [ ] Implement `RunRequest` dataclass per spec
 - [ ] Implement `RunResult` dataclass per spec
 - [ ] Implement `RunDependencies` for dependency injection
 - [ ] Implement `run(request, deps) -> RunResult` entry point
 - [ ] Implement `execute_run(config, preflight) -> RunResult` in orchestration/
-- [ ] Implement phase orchestration per spec §4.3.4:
+- [ ] Implement phase orchestration per spec §4.4.4:
   - [ ] Phase 1: Preflight
   - [ ] Phase 2: LoadSources
   - [ ] Phase 3: FramePlan (uses 6.4)
@@ -583,8 +587,8 @@ frame-compare/
   - [ ] Phase 8: Dovi
   - [ ] Phase 9: Publish
   - [ ] Phase 10: Report
-- [ ] Implement CLI flag → config override mapping per spec §4.3.5
-- [ ] Implement input discovery rules per spec §4.3.6
+- [ ] Implement CLI flag → config override mapping per spec §4.4.5
+- [ ] Implement input discovery rules per spec §4.4.6
 - [ ] Write phase orchestration tests
 
 ### 6.8 CLI Commands

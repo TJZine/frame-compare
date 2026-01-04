@@ -28,6 +28,7 @@
 | audio_alignment | sample_rate | integer | 8000 |
 | audio_alignment | max_offset_seconds | number | 30.0 |
 | audio_alignment | use_vspreview | boolean | false |
+| audio_alignment | force_interactive | boolean | false |
 | audio_alignment | cache_results | boolean | true |
 | screenshots | use_ffmpeg | boolean | false |
 | screenshots | directory_name | string | "screenshots" |

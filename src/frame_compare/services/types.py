@@ -23,6 +23,7 @@ class AlignmentConfig:
     sample_rate: int = 8000
     max_offset_seconds: float = 30.0
     use_vspreview: bool = False
+    force_interactive: bool = False
     cache_results: bool = True
 
 

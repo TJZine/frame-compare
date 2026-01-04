@@ -445,3 +445,20 @@
 - Phase orchestration (`phases.py` implementation)
 - CLI integration
 - Deprecated config warnings
+
+## 2026-01-03 — Phase 6.3 Progress Reporting
+
+### Scope
+
+**Run ID:** 2026-01-03__p6-3__progress-reporting
+**Artifact versions:** plan-v2 + plan-review-v2 + impl-v1 + verify-v1 + review-v2
+**Context:** Orchestration-level progress reporter selection logic.
+
+**Decision:** Implemented `select_reporter` factory function in `frame_compare.orchestration.progress`.
+
+**Rationale:**
+
+- Centralizes reporter selection based on CLI flags (`quiet`, `json_output`, `force_tty`) and environment (`sys.stdout.isatty`).
+- Enforces precedence rules (quiet > json > tty) deterministically.
+- `force_tty` parameter enables explicit overrides for testing and piped scenarios.
+- Returns abstract `ProgressReporter` protocol to decouple orchestration from concrete implementations.

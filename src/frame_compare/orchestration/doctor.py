@@ -189,7 +189,7 @@ def _check_vspreview() -> CheckResult:
         return CheckResult(
             passed=False,
             message="VSPreview not found",
-            hint="Install vspreview for interactive frame selection",
+            hint="Install vspreview for interactive alignment verification",
         )
 
 

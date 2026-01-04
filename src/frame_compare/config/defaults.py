@@ -23,6 +23,7 @@ enable = true
 sample_rate = 8000
 max_offset_seconds = 30.0
 use_vspreview = false
+force_interactive = false
 cache_results = true
 
 [screenshots]

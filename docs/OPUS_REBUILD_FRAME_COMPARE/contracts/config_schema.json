@@ -94,6 +94,10 @@
                     "type": "boolean",
                     "default": false
                 },
+                "force_interactive": {
+                    "type": "boolean",
+                    "default": false
+                },
                 "cache_results": {
                     "type": "boolean",
                     "default": true

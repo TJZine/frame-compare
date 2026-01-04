@@ -4,6 +4,14 @@
 > **Purpose:** Link v0.0.14 features to module specs and validation tests
 > **Last Updated:** 2026-01-03
 
+> [!TIP]
+> **How to update the matrix without breaking validation:**
+>
+> - Only references in backticks are validated by `scripts/validate_traceability.py`.
+> - Use full module spec filenames (e.g. `frame-plan-module.md`).
+> - For tests, use `tests/.../file.py` or `tests/.../file.py::test_func`.
+> - Prefix planned artifacts with `PLANNED:` on the same line before the backtick.
+
 ---
 
 ## 1. Core Features → Module Specs → Tests
@@ -68,13 +76,13 @@
 | Scenario | Status | Target File | Pytest Marker | Validates |
 |:---------|:-------|:------------|:--------------|:----------|
 | CLI version command | ✅ Implemented | `tests/e2e/test_cli_version.py` | `@pytest.mark.e2e` | F-012 |
-| Load HDR video | PLANNED | `tests/e2e/test_load_hdr.py` | `@pytest.mark.e2e` | F-001, F-002 |
-| Tonemap all presets | PLANNED | `tests/e2e/test_tonemap_presets.py` | `@pytest.mark.e2e`, `@pytest.mark.vs_required` | F-003, F-004 |
-| Select frames (all modes) | PLANNED | `tests/e2e/test_selection.py` | `@pytest.mark.e2e` | F-005 |
-| Render with overlay | PLANNED | `tests/e2e/test_render_overlay.py` | `@pytest.mark.e2e`, `@pytest.mark.vs_required` | F-006 |
-| Upload to slow.pics | PLANNED | `tests/e2e/test_publish.py` | `@pytest.mark.e2e`, `@pytest.mark.network` | F-008 |
-| Generate report | PLANNED | `tests/e2e/test_report.py` | `@pytest.mark.e2e` | F-010 |
-| Full pipeline | PLANNED | `tests/e2e/test_golden_pipeline.py` | `@pytest.mark.e2e`, `@pytest.mark.slow` | ALL |
+| Load HDR video | PLANNED | PLANNED: `tests/e2e/test_load_hdr.py` | `@pytest.mark.e2e` | F-001, F-002 |
+| Tonemap all presets | PLANNED | PLANNED: `tests/e2e/test_tonemap_presets.py` | `@pytest.mark.e2e`, `@pytest.mark.vs_required` | F-003, F-004 |
+| Select frames (all modes) | PLANNED | PLANNED: `tests/e2e/test_selection.py` | `@pytest.mark.e2e` | F-005 |
+| Render with overlay | PLANNED | PLANNED: `tests/e2e/test_render_overlay.py` | `@pytest.mark.e2e`, `@pytest.mark.vs_required` | F-006 |
+| Upload to slow.pics | PLANNED | PLANNED: `tests/e2e/test_publish.py` | `@pytest.mark.e2e`, `@pytest.mark.network` | F-008 |
+| Generate report | PLANNED | PLANNED: `tests/e2e/test_report.py` | `@pytest.mark.e2e` | F-010 |
+| Full pipeline | PLANNED | PLANNED: `tests/e2e/test_golden_pipeline.py` | `@pytest.mark.e2e`, `@pytest.mark.slow` | ALL |
 
 **E2E Test Marker Policy:**
 

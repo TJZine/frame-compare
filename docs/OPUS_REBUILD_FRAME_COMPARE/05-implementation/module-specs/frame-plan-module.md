@@ -326,6 +326,7 @@ else:
 | `test_select_uniform_seeded_frames_count_exceeds_available` | 10 frames from 5-frame video | InsufficientFramesError |
 | `test_select_uniform_seeded_frames_zero_count` | count=0 | Empty list |
 | `test_create_frame_plan_uses_default_seed_when_none` | seed=None | Uses 42 |
+| `test_create_frame_plan_uses_default_seed_when_omitted` | seed omitted (default arg) | Uses 42 |
 
 **Note (seed type):** `seed` is an `int | None` in this module. There is no valid “empty string” seed input at the type boundary; seed parsing/validation (if ever needed) belongs in CLI/config loading, not in `frame_plan`.
 

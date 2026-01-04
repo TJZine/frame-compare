@@ -63,6 +63,7 @@ class AlignmentConfig:
     sample_rate: int = 8000     # Hz, lower = faster
     max_offset_seconds: float = 30.0
     use_vspreview: bool = False
+    force_interactive: bool = False
     cache_results: bool = True
 ```
 
@@ -142,20 +143,93 @@ This section defines the interaction contract between `frame_compare.services.al
 2. **Cached computed offset** from `{cache_dir}/audio_offsets.toml` (if cache enabled and entry present)
 3. **Newly computed offset** from cross-correlation (computed during the current run)
 
-**VSPreview invocation rules:**
+**Offset semantics (relative, signed):**
 
-- If `AlignmentConfig.use_vspreview == False`: VSPreview MUST NOT be used.
+- Offsets are stored and reasoned about as **comparison-relative-to-reference** frame offsets.
+- The `frame_offset` value is allowed to be **negative**:
+  - `frame_offset > 0`: comparison starts **after** reference (comparison needs trimming)
+  - `frame_offset < 0`: comparison starts **before** reference (would require padding if applied directly)
+
+**Trim-first invariant (no padding):**
+
+- The system MUST NOT “pad” a clip to realize a negative offset (no blank-frame insertion).
+- Instead, the pipeline MUST normalize offsets into **positive-only applied trims** by shifting the global baseline
+  (see §2.5).
+
+**VSPreview invocation rules (orchestration-owned):**
+
+VSPreview is an interactive operator workflow. The services layer computes offsets; orchestration/CLI owns UI:
+
+- If `AlignmentConfig.use_vspreview == False`: orchestration MUST NOT launch VSPreview.
 - If `AlignmentConfig.use_vspreview == True` and VSPreview is available:
-  - The service MAY launch an interactive verification session after computing an offset.
-  - If the user confirms/adjusts the offset, the service MUST persist it to `manual_overrides.toml` and set
-    `AlignmentResult.method = "manual"`.
+  - If `AlignmentConfig.force_interactive == True`, the pipeline MUST:
+    - recompute audio alignment offsets for all comparisons (ignore `audio_offsets.toml` for the suggested values),
+    - launch a single VSPreview session for the full comparison set (`frame_compare.vspreview`),
+    - prompt the user per comparison clip to confirm/adjust the signed frame offset (defaulting to the suggested value),
+    - and persist the confirmed values to `manual_overrides.toml` (overwriting any prior manual overrides for the same keys).
+  - Otherwise, if at least one comparison clip lacks a manual override, the pipeline SHOULD:
+    - launch a single VSPreview session for the full comparison set,
+    - prompt and persist manual overrides for the missing keys only.
 - If `AlignmentConfig.use_vspreview == True` and VSPreview is not available:
-  - The service MUST log a warning and continue without raising.
+  - orchestration MUST log a warning and continue without raising.
+
+**Non-interactive safety (TTY requirement):**
+
+- If `stdin` is not a TTY (CI, piped execution), orchestration MUST NOT attempt to launch VSPreview and MUST NOT prompt.
+- In this case, the pipeline MUST continue using the suggested offsets (manual overrides if present, else cached, else computed),
+  and SHOULD emit a warning that includes the on-disk script path (if generated) and a copy/paste launch command.
 
 **Error policy (warn-only):**
 
-- Any VSPreview-related errors (`VSPreviewNotFoundError`, `VSPreviewError`, timeouts, user cancellation) MUST be
-  treated as warn-only by the alignment service. The service MUST continue using the computed/cached offset.
+- Any VSPreview-related errors (`VSPreviewNotFoundError`, `VSPreviewError`, user cancellation) MUST be
+  treated as warn-only by orchestration. The pipeline MUST continue using the computed/cached offset.
+
+**Cache separation (manual-only):**
+
+- Manual overrides MUST be persisted only in `manual_overrides.toml`.
+- `audio_offsets.toml` MUST remain a cache of programmatically-computed results (cross-correlation), not manual entries.
+
+---
+
+### 2.5 Trim-First Normalization (Positive-Only Applied Trims) (SSOT)
+
+To avoid padding (blank frames) and the downstream complexity it introduces (HDR metadata gaps, black-frame overlays,
+audio drift confusion), the pipeline uses a **trim-first** policy:
+
+- Persist and display **relative offsets** (`comparison_relative_to_reference`) which may be negative.
+- Apply only **non-negative trim starts** per clip at runtime.
+
+**Normalization algorithm:**
+
+1. Define a signed relative position map in frames:
+   - `pos[reference] = 0`
+   - `pos[comparison_i] = frame_offset_i` (may be negative)
+2. Compute `baseline = min(pos.values())`.
+3. Compute `shift = -baseline` if `baseline < 0`, else `0`.
+4. Apply `trim_start_frames[clip] = pos[clip] + shift` for every clip.
+
+**Guarantees:**
+
+- `trim_start_frames[clip] >= 0` for all clips
+- Relative alignment is preserved:
+  - `(trim_start_frames[comparison] - trim_start_frames[reference]) == frame_offset`
+
+**Planned helper signature (used by orchestration layer):**
+
+```python
+def normalize_trim_starts_trim_first(
+    reference: Path,
+    comparisons: list[Path],
+    offsets_by_key: dict[str, int],
+) -> dict[Path, int]:
+    """Compute per-clip trim_start_frames >= 0 from signed relative offsets."""
+```
+
+**UI/UX requirement:**
+
+- VSPreview overlays and CLI prompts MUST show the signed **relative** offset (what the user is confirming).
+- The normalization step MUST be treated as an internal implementation detail; it must not change the meaning of
+  stored manual overrides.
         CacheVersionMismatchError: Cache version does not match CACHE_VERSION
     """
 

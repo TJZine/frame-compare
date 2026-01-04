@@ -152,6 +152,138 @@ class Phase:
     status: PhaseStatus = PhaseStatus.PENDING
 ```
 
+### 3.5 Runtime Context Types (SSOT)
+
+The orchestration layer MUST maintain a canonical, per-clip state object (2.0 analogue of legacy `ClipPlan`) so that
+all phases consume the same view of:
+
+- input identity + labels
+- probe snapshot metadata (fps/frames/HDR, etc.)
+- trim/alignment state (including trim-first normalization invariants)
+- hydrated render sources (VS clip, ffmpeg fallback decisions)
+
+This prevents drift where individual modules invent their own partial “clip model”.
+
+```python
+from dataclasses import dataclass, field, replace
+from fractions import Fraction
+from pathlib import Path
+from typing import Any
+
+from frame_compare.vs.types import HDRMetadata
+
+
+@dataclass(frozen=True)
+class ClipFingerprint:
+    """Stable fingerprint for cache invalidation.
+
+    This is intentionally simple to compute without opening VS.
+    """
+
+    path: Path
+    size_bytes: int
+    mtime_ns: int
+
+
+@dataclass(frozen=True)
+class ClipProbeSnapshot:
+    """Cached, expensive-to-derive metadata about a clip (pre-trim).
+
+    Invariants:
+    - `num_frames` and `fps` refer to the untrimmed source.
+    - HDR detection uses *untrimmed* frame props (frame 0 snapshot).
+    """
+
+    fingerprint: ClipFingerprint
+    width: int
+    height: int
+    num_frames: int
+    fps: Fraction
+    is_hdr: bool
+    hdr_metadata: HDRMetadata | None = None
+    source_frame_props: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ClipTrimState:
+    """Effective temporal window for a clip in frames (applied trims only).
+
+    `trim_start_frames` MUST be non-negative (trim-first invariant).
+    """
+
+    trim_start_frames: int = 0
+    trim_end_frame_inclusive: int | None = None
+
+
+@dataclass(frozen=True)
+class ClipAlignmentState:
+    """Alignment state expressed in signed, comparison-relative-to-reference offsets."""
+
+    reference_stem: str
+    comparison_stem: str
+    relative_offset_frames: int
+    source: str  # "manual" | "cached" | "computed"
+
+
+@dataclass(frozen=True)
+class ClipState:
+    """Canonical per-clip state across orchestration phases (legacy ClipPlan analogue)."""
+
+    path: Path
+    label: str
+    probe: ClipProbeSnapshot
+
+    # FPS hierarchy (SSOT):
+    # - source_fps: from probe
+    # - forced_fps: user override (optional; may be added later)
+    # - effective_fps: forced if set else source_fps
+    source_fps: Fraction
+    effective_fps: Fraction
+
+    trim: ClipTrimState = field(default_factory=ClipTrimState)
+    alignment: ClipAlignmentState | None = None
+
+    def with_trim(self, *, trim_start_frames: int, trim_end_frame_inclusive: int | None) -> "ClipState":
+        """Return a new ClipState with updated trim window (never mutates in place)."""
+        if trim_start_frames < 0:
+            raise ValueError("trim_start_frames must be >= 0 (trim-first invariant)")
+        return replace(
+            self,
+            trim=ClipTrimState(
+                trim_start_frames=trim_start_frames,
+                trim_end_frame_inclusive=trim_end_frame_inclusive,
+            ),
+        )
+
+
+@dataclass
+class RunContext:
+    """Runtime context shared across phases.
+
+    Note: This object may carry non-deterministic resources (http clients, VS core),
+    but per-clip state SHOULD remain immutable (`ClipState`).
+    """
+
+    config: ConfigSchema
+    workspace: WorkspacePaths
+    reference: ClipState
+    comparisons: list[ClipState]
+    reporter: ProgressReporter | None = None
+```
+
+**ClipState invariants (must hold at all times):**
+
+- `ClipState.probe` describes the *untrimmed* source.
+- `ClipState.trim.trim_start_frames >= 0` (no padding invariant).
+- All signed alignment offsets are stored as “comparison relative to reference”, but applied trims are computed via
+  the trim-first normalization algorithm (services-module.md §2.5).
+
+**Probe caching (SSOT):**
+
+- The orchestration layer SHOULD persist `ClipProbeSnapshot` to disk to avoid repeated expensive probing on reruns.
+- Cache entries MUST be invalidated when `ClipFingerprint` changes.
+- Cache write/read MUST be deterministic (stable key ordering).
+
 ---
 
 ## 4. Public API
@@ -240,9 +372,54 @@ Pass/Fail semantics:
 - Pass if the request completes and the HTTP status is `< 400`.
 - Fail (passed=False) if the request errors (timeout/connection/etc.) or returns status `>= 400`.
 
-### 4.3 Run Coordination
+### 4.3 Progress Reporter Selection
 
-#### 4.3.1 Request Types
+```python
+def select_reporter(
+    quiet: bool = False,
+    json_output: bool = False,
+    force_tty: bool | None = None,
+) -> ProgressReporter:
+    """
+    Select the appropriate ProgressReporter based on output mode.
+
+    Selection algorithm (priority order):
+    1. If quiet=True: return NullProgressReporter()
+    2. If json_output=True: return LogProgressReporter()
+    3. If force_tty is not None:
+       - If force_tty=True: return RichProgressReporter()
+       - If force_tty=False: return LogProgressReporter()
+    4. Else detect TTY via sys.stdout.isatty():
+       - If TTY: return RichProgressReporter()
+       - Else: return LogProgressReporter()
+
+    Args:
+        quiet: Suppress all progress output (--quiet flag)
+        json_output: Machine-readable output mode (--json flag)
+        force_tty: Override TTY detection (for testing or explicit control)
+
+    Returns:
+        ProgressReporter instance matching the output mode
+    """
+```
+
+#### 4.3.1 Progress Reporter Tests
+
+| Test Case | Input | Expected |
+|-----------|-------|----------|
+| `test_select_reporter_quiet_returns_null()` | `quiet=True` | `NullProgressReporter` |
+| `test_select_reporter_json_returns_log()` | `json_output=True` | `LogProgressReporter` |
+| `test_select_reporter_force_tty_true_returns_rich()` | `force_tty=True` | `RichProgressReporter` |
+| `test_select_reporter_force_tty_false_returns_log()` | `force_tty=False` | `LogProgressReporter` |
+| `test_select_reporter_tty_detection_interactive(monkeypatch)` | `sys.stdout.isatty()=True` | `RichProgressReporter` |
+| `test_select_reporter_tty_detection_non_interactive(monkeypatch)` | `sys.stdout.isatty()=False` | `LogProgressReporter` |
+| `test_select_reporter_quiet_takes_precedence_over_json()` | `quiet=True, json_output=True` | `NullProgressReporter` |
+| `test_select_reporter_quiet_takes_precedence_over_force_tty()` | `quiet=True, force_tty=True` | `NullProgressReporter` |
+| `test_select_reporter_json_takes_precedence_over_force_tty()` | `json_output=True, force_tty=True` | `LogProgressReporter` |
+
+### 4.4 Run Coordination
+
+#### 4.4.1 Request Types
 
 ```python
 @dataclass(frozen=True)
@@ -284,7 +461,7 @@ class RunRequest:
     json_output: bool = False        # --json
 ```
 
-#### 4.3.2 Result Types
+#### 4.4.2 Result Types
 
 ```python
 @dataclass(frozen=True)
@@ -303,7 +480,7 @@ class RunResult:
     phase_timings: dict[str, float] = field(default_factory=dict)
 ```
 
-#### 4.3.3 Execute Function
+#### 4.4.3 Execute Function
 
 ```python
 async def execute_run(
@@ -328,7 +505,7 @@ async def execute_run(
     """
 ```
 
-#### 4.3.4 Phase Ordering (SSOT)
+#### 4.4.4 Phase Ordering (SSOT)
 
 Phases execute in this exact order:
 
@@ -361,7 +538,14 @@ Phases execute in this exact order:
 > - If `source_info.is_hdr == True` AND `config.color.enable_tonemap == True` AND VapourSynth is unavailable: render MUST
 >   fail fast with `RenderError(FC-4004)` (no silent FFmpeg fallback producing un-tonemapped outputs).
 
-#### 4.3.5 CLI Flags → Config Overrides Mapping
+> [!NOTE]
+> **Align phase trim-first invariant (no padding):**
+>
+> Audio alignment offsets are stored and confirmed as signed **comparison-relative-to-reference** frame offsets.
+> The pipeline MUST NOT pad any clip to realize a negative offset. Instead, it MUST normalize signed relative offsets
+> into per-clip non-negative `trim_start_frames` by shifting the global baseline (services-module.md §2.5).
+
+#### 4.4.5 CLI Flags → Config Overrides Mapping
 
 | CLI Flag | Config Path | Override Behavior |
 |:---------|:------------|:------------------|
@@ -373,6 +557,7 @@ Phases execute in this exact order:
 | `--overlay` | `screenshots.overlay_mode` | Replace if set |
 | `--no-cache` | — | `RunRequest.no_cache = True` |
 | `--skip-analysis` | — | `RunRequest.skip_analysis = True` |
+| `--force-interactive-alignment` | `audio_alignment.force_interactive` | Replace if set (and MUST imply `audio_alignment.use_vspreview = True`) |
 | `--no-upload` | `slowpics.auto_upload` | `auto_upload = False` |
 
 **Override priority (SSOT):**
@@ -381,7 +566,7 @@ Phases execute in this exact order:
 2. Config file
 3. Built-in defaults (lowest)
 
-#### 4.3.6 Input Discovery Rules
+#### 4.4.6 Input Discovery Rules
 
 ```python
 def discover_inputs(
@@ -408,7 +593,7 @@ def discover_inputs(
     """
 ```
 
-#### 4.3.7 Output Directory Layout
+#### 4.4.7 Output Directory Layout
 
 ```text
 {root}/
@@ -426,8 +611,11 @@ def discover_inputs(
 │       └── Encode_00500.png
 ├── generated/                 # Cache and generated files
 │   ├── my-set.compframes      # Metrics cache
+│   ├── clip_probe.toml        # Probe snapshot cache (fps/frames/HDR)
 │   ├── audio_offsets.toml     # Alignment cache
-│   └── manual_overrides.toml  # VSPreview overrides
+│   ├── manual_overrides.toml  # VSPreview overrides
+│   └── vspreview_sessions/    # Debug-only generated scripts (optional)
+│       └── vspreview_Reference_20260104T120000Z.py
 └── reports/                   # HTML reports
     └── my-set.html
 ```
@@ -437,8 +625,10 @@ def discover_inputs(
 | Cache File | Read On | Write On | Invalidation |
 |:-----------|:--------|:---------|:-------------|
 | `{name}.compframes` | Analyze phase start | Analyze phase end | `--no-cache` or config change |
+| `clip_probe.toml` | LoadSources phase start | LoadSources phase end | file change |
 | `audio_offsets.toml` | Align phase start | Align phase end | `--no-cache` or file change |
 | `manual_overrides.toml` | Always | VSPreview session | Manual deletion only |
+| `vspreview_sessions/*` | — | VSPreview session | Manual deletion only |
 
 ---
 
