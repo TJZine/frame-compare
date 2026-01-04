@@ -49,7 +49,7 @@ A ground-up rebuild that:
 |---------|-------------|--------|
 | Frame Selection | Luminance quantiles, motion scoring, seeded random | `analysis/` |
 | HDR Tonemapping | libplacebo presets, BT.2390, Dolby Vision | `vs/tonemap.py` |
-| Audio Alignment | Cross-correlation with DTW, per-clip offsets | `alignment.py` |
+| Audio Alignment | Cross-correlation (DTW deferred), per-clip offsets | `alignment.py` |
 | Screenshot Rendering | VapourSynth primary, FFmpeg fallback | `screenshot/`, `render/` |
 | slow.pics Publishing | Upload with retry, shortcut creation | `publishers.py` |
 | CLI Interface | Typer-based (`run`, `wizard`, `doctor`, `preset`) | `cli_entry.py` |
@@ -228,7 +228,7 @@ Testing:
 | **Tonemapping** | Converting HDR content to SDR for display |
 | **slow.pics** | Image comparison hosting service |
 | **TMDB** | The Movie Database — metadata source |
-| **DTW** | Dynamic Time Warping — audio alignment algorithm |
+| **DTW** | Dynamic Time Warping — legacy/optional audio alignment algorithm (deferred in 2.0 MVP) |
 | **Fansub** | Fan-produced subtitles for media |
 | **QC** | Quality Control — verification of encoding quality |
 

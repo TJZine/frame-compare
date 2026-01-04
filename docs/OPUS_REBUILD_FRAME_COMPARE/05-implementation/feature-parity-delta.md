@@ -61,8 +61,8 @@ This document identifies the feature parity gaps between legacy Frame Compare (v
 | Aspect | Details |
 |:-------|:--------|
 | **Legacy Behavior** | `orchestration/coordinator.py` + `phases/` directory manage full pipeline |
-| **2.0 Current State** | `src/frame_compare/orchestration/` directory **does not exist** |
-| **SSOT State** | `orchestration-module.md` spec exists but no implementation |
+| **2.0 Current State** | `src/frame_compare/orchestration/` exists and implements preflight/doctor/progress; runner/phases execution remains incomplete |
+| **SSOT State** | `orchestration-module.md` spec exists and includes `ClipState`/probe cache; remaining Phase 6.7–6.8 work is tracked in the master checklist |
 | **CLI State** | `cli_entry.py` prints `"[stub] <command>: Not yet implemented"` for run/wizard/doctor/preset |
 | **Blocking** | Cannot run end-to-end without orchestration layer |
 | **Fix Required** | Complete orchestration-module.md spec with minimal API surface, then implement |
@@ -75,7 +75,7 @@ This document identifies the feature parity gaps between legacy Frame Compare (v
 |:-------|:--------|
 | **Legacy Behavior** | Interactive `vspreview` mode lets user verify/adjust audio sync, manual offsets persist |
 | **2.0 Current State** | `use_vspreview: bool` exists in config and `AlignmentConfig` but is not consumed |
-| **SSOT State** | services-module.md mentions `use_vspreview` config but no interaction contract defined |
+| **SSOT State** | `vspreview-module.md` + `services-module.md` define the interaction contract; implementation remains pending |
 | **Blocking** | Optional feature — can launch Runner without this |
 | **Fix Required** | Create vspreview-module.md spec, update services-module.md with interaction contract |
 
@@ -86,8 +86,8 @@ This document identifies the feature parity gaps between legacy Frame Compare (v
 | Aspect | Details |
 |:-------|:--------|
 | **Legacy Behavior** | `--skip-analysis` uses seeded uniform sampling for frame selection |
-| **2.0 Current State** | render-module.md references "FramePlan contract" but no module spec exists |
-| **SSOT State** | Placeholder reference in render-module.md §1.3 with no backing spec |
+| **2.0 Current State** | FramePlan is specified but not implemented (`src/frame_compare/analysis/frame_plan.py` missing) |
+| **SSOT State** | `frame-plan-module.md` exists with exact algorithm + tests |
 | **Code State** | Scaffold references are non-authoritative; SSOT is `frame-plan-module.md` and target implementation path is `src/frame_compare/analysis/frame_plan.py`. |
 | **Blocking** | Cannot implement `--skip-analysis` without deterministic algorithm spec |
 | **Fix Required** | Create frame-plan-module.md with exact algorithm |

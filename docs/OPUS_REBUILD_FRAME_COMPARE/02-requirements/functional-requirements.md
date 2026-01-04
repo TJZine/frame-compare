@@ -203,7 +203,7 @@ Processing:
   2. Compute cross-correlation via FFT
   3. Find correlation peak
   4. Convert sample offset to time
-  5. Apply dynamic time warping if needed
+  5. DTW is deferred in 2.0 MVP (global offset only)
 Output:
   - Offset in seconds (positive = comparison ahead)
   - Correlation confidence score

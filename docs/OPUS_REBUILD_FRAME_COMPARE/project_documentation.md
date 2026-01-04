@@ -124,7 +124,7 @@ graph TD
 
 **Location:** `src/frame_compare/services/alignment.py`, `alignment/`
 
-- Cross-correlation with dynamic time warping
+- Cross-correlation (global offset; DTW is deferred)
 - Per-clip offset calculation
 - Interactive VSPreview confirmation (optional)
 - Cached offsets in `generated.audio_offsets.toml`

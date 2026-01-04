@@ -204,8 +204,8 @@ class ClipProbeSnapshot:
     is_hdr: bool
     hdr_metadata: HDRMetadata | None = None
 
-    # Minimal, portable prop snapshot for HDR/tonemap parity.
-    # Keys SHOULD include mastering display / content light level values if present.
+    # Minimal, portable prop snapshot for HDR/tonemap/Dolby Vision parity.
+    # Keys SHOULD include mastering display / content light level / HDR colorspace values if present.
     preserved_frame_props: dict[str, str | int | float] = field(default_factory=dict)
     tonemap_prop_keys: tuple[str, ...] = field(default_factory=tuple)
 
@@ -249,6 +249,19 @@ class ClipState:
     trim: ClipTrimState = field(default_factory=ClipTrimState)
     alignment: ClipAlignmentState | None = None
 
+    def effective_num_frames(self) -> int:
+        """Return effective frame count after applied trims.
+
+        This MUST be used as the frame domain for FramePlan and rendering decisions.
+        """
+        end_inclusive = (
+            self.trim.trim_end_frame_inclusive
+            if self.trim.trim_end_frame_inclusive is not None
+            else self.probe.num_frames - 1
+        )
+        available = max(0, min(end_inclusive, self.probe.num_frames - 1) - self.trim.trim_start_frames + 1)
+        return int(available)
+
     def with_trim(self, *, trim_start_frames: int, trim_end_frame_inclusive: int | None) -> "ClipState":
         """Return a new ClipState with updated trim window (never mutates in place)."""
         if trim_start_frames < 0:
@@ -283,6 +296,7 @@ class RunContext:
 - `ClipState.trim.trim_start_frames >= 0` (no padding invariant).
 - All signed alignment offsets are stored as “comparison relative to reference”, but applied trims are computed via
   the trim-first normalization algorithm (services-module.md §2.5).
+- `ClipState.effective_num_frames()` MUST reflect the applied trims without requiring a re-probe.
 
 **Probe caching (SSOT):**
 
@@ -327,12 +341,34 @@ When probing, record a list of “tonemap-related” prop keys to help downstrea
 if later trimming/filtering strips some props. This is a parity feature from legacy ClipPlan.
 
 - Normalize prop keys to lower-case and strip leading underscores.
-- Include keys whose normalized base name matches:
+- Include keys whose normalized base name matches HDR colorspace primitives:
+  - `matrix`, `primaries`, `transfer`, `colorrange`
+- Include keys whose normalized base name matches mastering/content light level primitives:
   - `masteringdisplayprimaries`, `masteringdisplayluminance`
   - `contentlightlevelmax`, `contentlightlevelaverage`
 - Additionally include any keys with a normalized prefix of:
   - `masteringdisplay`
   - `contentlightlevel`
+  - `dolbyvision` (all Dolby Vision metadata keys)
+
+**Dolby Vision metadata preservation (SSOT):**
+
+If Dolby Vision metadata is present (even in partial form), preserve it in `preserved_frame_props` and include the
+corresponding prop keys in `tonemap_prop_keys`.
+
+Common keys (legacy-informed; not exhaustive):
+
+- `DolbyVision_L1_Average`, `DolbyVision_L1_Maximum`
+- `DolbyVision_L2_TargetNits`
+- `DolbyVision_L5_Left`, `DolbyVision_L5_Right`, `DolbyVision_L5_Top`, `DolbyVision_L5_Bottom`
+- `DolbyVision_L6_MaxCLL`, `DolbyVision_L6_MaxFALL`
+- `DolbyVisionRPU` (a sentinel/blob-like flag; do not persist the blob, only persist a boolean presence indicator)
+
+Downstream policy:
+
+- The render pipeline SHOULD prefer `ClipProbeSnapshot.is_hdr` / `hdr_metadata` for gating decisions (stable pre-trim),
+  and use `preserved_frame_props`/`tonemap_prop_keys` to re-inject metadata only when a downstream step detects props
+  have been stripped.
 
 ---
 
@@ -729,6 +765,21 @@ async def execute_phases(
     """
 ```
 
+### 5.4 FPS Diagnostics (Operator-Facing, Consolidated)
+
+Legacy systems accumulate “FPS hell” via multiple FPS concepts. To reduce operator confusion, orchestration SHOULD
+emit a single consolidated FPS report after LoadSources and after Align:
+
+Per clip:
+
+- `source_fps`: from probe snapshot (what the file reports / what the loader detected)
+- `effective_fps`: what will be used for frame-to-seconds conversion and render timing
+- `fps_divergent`: boolean (`effective_fps != source_fps`)
+- `note`: optional string (e.g., `"comparison inherited reference fps for preview"` or `"fps derived fallback"`).
+
+This report SHOULD be printed in human-readable form when not in `--json` mode, and SHOULD be included as a structured
+block in JSON output.
+
 ### 5.3 Resource Management
 
 ```python
@@ -785,6 +836,11 @@ from frame_compare.errors import (
 | Preflight missing config | Empty dir | ConfigNotFoundError |
 | Doctor all pass | Full environment | DoctorReport(all_passed=True) |
 | Phase skip | Condition met | Status.SKIPPED |
+| ClipState effective num_frames | trim_start/trim_end combos | Clamped non-negative count |
+| Probe cache key stability | same fingerprint | identical cache key |
+| Probe cache invalidation | fingerprint change | cache miss |
+| Preserved props TOML safety | mixed prop types | only primitives persisted |
+| FPS report divergence | source!=effective | flagged as divergent |
 
 ### 7.2 Integration Tests
 
@@ -792,6 +848,14 @@ from frame_compare.errors import (
 |-----------|-------|----------|
 | Full run | Sample videos | RunResult(success=True) |
 | Run with missing VS | No VapourSynth | DependencyError |
+| LoadSources probe cache | Sample videos | clip_probe.toml written and reused |
+| Preserved HDR props | HDR sample | tonemap/HDR props preserved pre-trim |
+
+### 7.3 Docker Integration Gate (Zero Skips)
+
+All integration tests that require real VapourSynth/FFmpeg MUST be runnable in Docker with **zero skips**:
+
+`bash tools/verify_docker_integration.sh`
 
 ---
 

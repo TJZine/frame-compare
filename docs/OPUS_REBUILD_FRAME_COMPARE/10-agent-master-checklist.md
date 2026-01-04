@@ -571,6 +571,9 @@ frame-compare/
 
 - [ ] Create `src/frame_compare/runner.py` at package root
 - [ ] Create `src/frame_compare/orchestration/context.py` and define `ClipState` / `RunContext` per spec §3.5
+- [ ] Implement probe snapshot cache (`generated/clip_probe.toml`) per spec §3.5 (deterministic keying, stable TOML)
+- [ ] Preserve HDR/DoVi props in `ClipProbeSnapshot` per spec §3.5 (portable primitives only; record `tonemap_prop_keys`)
+- [ ] Implement consolidated FPS report per spec §5.4 (after LoadSources and after Align)
 - [ ] Implement `RunRequest` dataclass per spec
 - [ ] Implement `RunResult` dataclass per spec
 - [ ] Implement `RunDependencies` for dependency injection
@@ -579,6 +582,8 @@ frame-compare/
 - [ ] Implement phase orchestration per spec §4.4.4:
   - [ ] Phase 1: Preflight
   - [ ] Phase 2: LoadSources
+    - [ ] Build `ClipState` list (reference + comparisons) from discovered inputs
+    - [ ] Load probe snapshots from `clip_probe.toml` when valid; probe and persist when missing/stale
   - [ ] Phase 3: FramePlan (uses 6.4)
   - [ ] Phase 4: Analyze (or skip per --skip-analysis)
   - [ ] Phase 5: Align
@@ -589,6 +594,17 @@ frame-compare/
   - [ ] Phase 10: Report
 - [ ] Implement CLI flag → config override mapping per spec §4.4.5
 - [ ] Implement input discovery rules per spec §4.4.6
+- [ ] Write unit tests for `ClipState` and probe cache:
+  - [ ] `tests/orchestration/test_context.py::test_clip_state_effective_num_frames_clamps_and_never_negative`
+  - [ ] `tests/orchestration/test_probe_cache.py::test_compute_probe_cache_key_stable_for_same_fingerprint`
+  - [ ] `tests/orchestration/test_probe_cache.py::test_probe_cache_round_trip_toml`
+  - [ ] `tests/orchestration/test_probe_cache.py::test_probe_cache_invalidates_on_fingerprint_change`
+  - [ ] `tests/orchestration/test_probe_cache.py::test_preserved_frame_props_are_toml_safe_primitives_only`
+  - [ ] `tests/orchestration/test_fps_report.py::test_fps_report_marks_divergence`
+- [ ] Write integration tests (Docker, real deps; zero skips):
+  - [ ] `tests/integration/test_loadsources_probe_cache.py::test_loadsources_writes_clip_probe_cache_file`
+  - [ ] `tests/integration/test_loadsources_probe_cache.py::test_loadsources_reuses_clip_probe_cache_file`
+  - [ ] Verify in Docker: `bash tools/verify_docker_integration.sh`
 - [ ] Write phase orchestration tests
 
 ### 6.8 CLI Commands
