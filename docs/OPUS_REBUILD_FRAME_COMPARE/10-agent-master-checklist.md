@@ -539,7 +539,7 @@ frame-compare/
   - [x] `test_hdr_disable_tonemap_allows_ffmpeg_when_vs_missing`
   - [x] `test_sdr_allows_ffmpeg_fallback_when_vs_missing`
 
-### 6.6 VSPreview Integration (Optional Config Option)
+### 6.6 VSPreview Integration
 
 **Reference:** `05-implementation/module-specs/vspreview-module.md`
 
