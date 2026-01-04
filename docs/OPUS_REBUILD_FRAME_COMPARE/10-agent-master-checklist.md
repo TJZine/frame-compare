@@ -596,9 +596,9 @@ frame-compare/
 - [ ] Implement input discovery rules per spec §4.4.6
 - [ ] Write unit tests for `ClipState` and probe cache:
   - [x] `tests/orchestration/test_context.py::test_clip_state_effective_num_frames_clamps_and_never_negative` (2026-01-04)
-  - [ ] `tests/orchestration/test_probe_cache.py::test_compute_probe_cache_key_stable_for_same_fingerprint`
+  - [x] `tests/orchestration/test_probe_cache.py::test_compute_probe_cache_key_stable_for_same_fingerprint` (2026-01-04)
   - [ ] `tests/orchestration/test_probe_cache.py::test_probe_cache_round_trip_toml`
-  - [ ] `tests/orchestration/test_probe_cache.py::test_probe_cache_invalidates_on_fingerprint_change`
+  - [x] `tests/orchestration/test_probe_cache.py::test_probe_cache_invalidates_on_fingerprint_change` (2026-01-04)
   - [ ] `tests/orchestration/test_probe_cache.py::test_preserved_frame_props_are_toml_safe_primitives_only`
   - [ ] `tests/orchestration/test_fps_report.py::test_fps_report_marks_divergence`
 - [ ] Write integration tests (Docker, real deps; zero skips):

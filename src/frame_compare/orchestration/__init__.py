@@ -26,6 +26,7 @@ from frame_compare.orchestration.preflight import (
     resolve_paths,
     resolve_workspace,
 )
+from frame_compare.orchestration.probe_cache import compute_probe_cache_key
 from frame_compare.orchestration.progress import select_reporter
 
 __all__ = [
@@ -48,6 +49,8 @@ __all__ = [
     "DoctorReport",
     "collect_checks",
     "run_doctor",
+    # Probe Cache
+    "compute_probe_cache_key",
     # Progress
     "select_reporter",
 ]
