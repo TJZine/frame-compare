@@ -8,6 +8,7 @@ This project follows Conventional Commits and is intended to be released via Rel
 
 ### Added
 
+- FramePlan module (`frame_compare.analysis.frame_plan`) for deterministic frame selection (`--skip-analysis`).
 - `select_reporter()` function for CLI output mode → progress reporter mapping (Phase 6.3).
 - **Preflight Validation:** `prepare_preflight()` for workspace resolution, config loading, and input discovery with `PreflightResult` type (Phase 6.2).
 - **Doctor Diagnostics:** `run_doctor()` for environment validation with deterministic check ordering and `DoctorReport` type (Phase 6.2).

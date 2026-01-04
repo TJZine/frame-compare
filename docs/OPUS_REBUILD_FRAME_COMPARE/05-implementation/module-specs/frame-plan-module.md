@@ -144,7 +144,7 @@ bins = [
     (int(i * bin_size), int((i + 1) * bin_size))
     for i in range(count)
 ]
-# Each bin is [start, end) range
+ # Each bin is [start, end) range
 ```
 
 ### 4.2 Frame Selection Per Bin
@@ -190,13 +190,15 @@ def select_uniform_seeded_frames(
     seed: int,
 ) -> FramePlan:
     """Select frames using deterministic uniform distribution."""
+    from pathlib import Path
     from frame_compare.errors import InsufficientFramesError
 
     # Validate
     if count > num_frames:
         raise InsufficientFramesError(
-            count=count,
-            available=num_frames,
+            path=Path("<frame-plan>"),
+            count=num_frames,
+            required=count,
         )
 
     if count == 0:
@@ -246,15 +248,17 @@ def select_uniform_seeded_frames(
 | `InsufficientFramesError` | FC-3004 | count > num_frames |
 
 ```python
+from pathlib import Path
 from frame_compare.errors import InsufficientFramesError
 
-# Raised when requested count exceeds available frames
+ # Raised when requested count exceeds available frames
 raise InsufficientFramesError(
-    count=10,
-    available=5,
+    path=Path("<frame-plan>"),
+    count=5,
+    required=10,
 )
-# Message: "Requested 10 frames but video only has 5"
-# Hint: "Reduce frame_count or use a longer video"
+ # Message: "Video has 5 frames, need at least 10"
+ # Hint: "Use a longer video or reduce frame_count"
 ```
 
 ---
@@ -301,7 +305,7 @@ All frame indices in `frames` are unique. No duplicates.
 The render module uses FramePlan when `--skip-analysis` is specified:
 
 ```python
-# In orchestration or render phase
+ # In orchestration or render phase
 if config.skip_analysis:
     from frame_compare.analysis.frame_plan import create_frame_plan
 
@@ -374,7 +378,7 @@ No special markers required. All tests are pure Python, no VS/Docker needed.
 ## 9. AI Agent Implementation Prompt
 
 ```markdown
-# Task: Implement FramePlan Module
+ # Task: Implement FramePlan Module
 
 ## Context
 Implement the deterministic frame selection module for Frame Compare 2.0.

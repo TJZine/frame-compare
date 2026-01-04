@@ -381,17 +381,17 @@ class VideoCorruptError(InputError):
 class InsufficientFramesError(InputError):
     """Video too short for requested frames (FC-3004)."""
 
-    def __init__(self, path: Path, requested: int, available: int) -> None:
+    def __init__(self, path: Path, count: int, required: int) -> None:
         super().__init__(
             ErrorContext(
                 code="FC-3004",
                 name="INSUFFICIENT_FRAMES",
-                message=f"Not enough frames in {path} (requested {requested}, has {available})",
-                hint="Reduce frame count or use longer video",
+                message=f"Video has {count} frames, need at least {required}",
+                hint="Use a longer video or reduce frame_count",
                 details={
                     "path": str(path),
-                    "requested": requested,
-                    "available": available,
+                    "count": count,
+                    "required": required,
                 },
             )
         )

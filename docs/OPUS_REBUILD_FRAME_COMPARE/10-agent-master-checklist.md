@@ -502,25 +502,25 @@ frame-compare/
 
 **Reference:** `05-implementation/module-specs/frame-plan-module.md`
 
-- [ ] Create `src/frame_compare/analysis/frame_plan.py`
-- [ ] Implement `FramePlan` dataclass with invariants
-- [ ] Implement `select_uniform_seeded_frames(num_frames, count, seed) -> FramePlan`
-  - [ ] Bin partitioning algorithm per spec §4
-  - [ ] blake2s hash selection per spec §4
-  - [ ] Default seed handling (seed is `None` → `42`)
-- [ ] Implement `create_frame_plan(num_frames, count, seed=None) -> FramePlan`
-- [ ] Raise `InsufficientFramesError` when count > num_frames
-- [ ] Verify determinism across Python sessions (subprocess test)
-- [ ] Write unit tests per spec §8.1:
-  - [ ] `test_select_uniform_seeded_frames_deterministic`
-  - [ ] `test_select_uniform_seeded_frames_cross_session`
-  - [ ] `test_select_uniform_seeded_frames_single_frame`
-  - [ ] `test_select_uniform_seeded_frames_all_frames`
-  - [ ] `test_select_uniform_seeded_frames_count_exceeds_available`
-  - [ ] `test_select_uniform_seeded_frames_zero_count`
-  - [ ] `test_create_frame_plan_uses_default_seed_when_none`
-  - [ ] `test_create_frame_plan_uses_default_seed_when_omitted`
-- [ ] Update `analysis/__init__.py` exports
+- [x] Create `src/frame_compare/analysis/frame_plan.py` (2026-01-04)
+- [x] Implement `FramePlan` dataclass with invariants (2026-01-04)
+- [x] Implement `select_uniform_seeded_frames(num_frames, count, seed) -> FramePlan` (2026-01-04)
+  - [x] Bin partitioning algorithm per spec §4
+  - [x] blake2s hash selection per spec §4
+  - [x] Default seed handling (seed is `None` → `42`)
+- [x] Implement `create_frame_plan(num_frames, count, seed=None) -> FramePlan` (2026-01-04)
+- [x] Raise `InsufficientFramesError` when count > num_frames (2026-01-04)
+- [x] Verify determinism across Python sessions (subprocess test) (2026-01-04)
+- [x] Write unit tests per spec §8.1: (2026-01-04)
+  - [x] `test_select_uniform_seeded_frames_deterministic`
+  - [x] `test_select_uniform_seeded_frames_cross_session`
+  - [x] `test_select_uniform_seeded_frames_single_frame`
+  - [x] `test_select_uniform_seeded_frames_all_frames`
+  - [x] `test_select_uniform_seeded_frames_count_exceeds_available`
+  - [x] `test_select_uniform_seeded_frames_zero_count`
+  - [x] `test_create_frame_plan_uses_default_seed_when_none`
+  - [x] `test_create_frame_plan_uses_default_seed_when_omitted`
+- [x] Update `analysis/__init__.py` exports (2026-01-04)
 
 ### 6.5 Tonemap Wiring
 

@@ -462,3 +462,51 @@
 - Enforces precedence rules (quiet > json > tty) deterministically.
 - `force_tty` parameter enables explicit overrides for testing and piped scenarios.
 - Returns abstract `ProgressReporter` protocol to decouple orchestration from concrete implementations.
+
+## 2026-01-04 — Phase 6.4 FramePlan Module
+
+### Scope
+
+**Run ID:** 2026-01-04__p6-4__frame-plan-module
+**Artifact versions:** plan-v3 + plan-review-v3 + impl-v1
+**Context:** Implement FramePlan module for deterministic frame selection (`--skip-analysis`).
+
+**Decision:** Implemented `FramePlan` dataclass and `select_uniform_seeded_frames` algorithm.
+
+**Rationale:**
+
+- **Determinism:** Used `hashlib.blake2s(digest_size=8)` and seeded bin selection to guarantee cross-session determinism.
+- **SSOT Alignment:** Updated `InsufficientFramesError` to match canonical spec (3-arg constructor: `path, count, required`).
+- **Safety:** Implemented lazy imports in `analysis/__init__.py` to ensure `FramePlan` is testable without VapourSynth/Docker availability, adhering to strict isolation requirements.
+- **Invariants:** Validated sorted, unique, and bounded properties via property-based testing (Hypothesis added to dev dependencies).
+
+**Verification Gates:**
+
+- Spec Anchors: Validated.
+- Unit Tests: 100% pass (9 tests).
+- Property Tests: Validated invariants with Hypothesis.
+- Lint/Types: Clean (0 errors).
+
+## 2026-01-04 — Phase 6.4 FramePlan Module
+
+### Scope
+
+**Run ID:** 2026-01-04__p6-4__frame-plan-module
+**Artifact versions:** plan-v3 + plan-review-v3 + impl-v1 + verify-v1 + review-v1 + impl-v2
+**Context:** Implement FramePlan module for deterministic frame selection (`--skip-analysis`).
+
+**Decision:** Implemented `FramePlan` dataclass and `select_uniform_seeded_frames` algorithm.
+
+**Rationale:**
+
+- **Determinism:** Used `hashlib.blake2s(digest_size=8)` and seeded bin selection to guarantee cross-session determinism.
+- **SSOT Alignment:** Updated `InsufficientFramesError` to match canonical spec (3-arg constructor: `path, count, required`).
+- **Safety:** Implemented lazy imports in `analysis/__init__.py` to ensure `FramePlan` is testable without VapourSynth/Docker availability, adhering to strict isolation requirements.
+- **Invariants:** Validated sorted, unique, and bounded properties via property-based testing (Hypothesis added to dev dependencies).
+
+**Verification Gates:**
+
+- Spec Anchors: Validated.
+- Unit Tests: 100% pass (10 tests).
+- Property Tests: Validated invariants with Hypothesis.
+- Lint/Types: Clean (0 errors).

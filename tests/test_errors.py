@@ -129,6 +129,23 @@ def test_exception_class_contract(error_class, args, expected_code):
     assert "message" in ctx_dict
 
 
+def test_insufficient_frames_error_details_shape():
+    """Verify FC-3004 payload shape uses correct count/required keys."""
+    path = Path("/video.mkv")
+    count = 5
+    required = 10
+
+    error = InsufficientFramesError(path, count, required)
+
+    assert error.code == "FC-3004"
+    details = error.context.details
+    assert details is not None
+    assert set(details.keys()) == {"path", "count", "required"}
+    assert details["path"] == str(path)
+    assert details["count"] == count
+    assert details["required"] == required
+
+
 def test_exit_code_enum_values():
     assert ExitCode.SUCCESS == 0
     assert ExitCode.GENERAL_ERROR == 1
