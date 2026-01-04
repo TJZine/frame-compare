@@ -212,7 +212,6 @@ The plan must be implementation-ready without bloating into a re-print of the mo
 
 ### Hard Budgets
 
-- **Line budget:** Target ≤ **555 lines** for `plan-vN.md`. If you exceed this, reduce scope or split into sub-slices.
 - **Code blocks:** Do not paste large code blocks. If you feel you need > ~50 lines of code template, that is usually a **spec gap** — reference (or update) the SSOT spec instead.
 - **File count:** If the plan touches “too many files” to stay crisp, split the run into smaller sub-slices.
 
