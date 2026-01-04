@@ -192,6 +192,8 @@ class ClipProbeSnapshot:
     Invariants:
     - `num_frames` and `fps` refer to the untrimmed source.
     - HDR detection uses *untrimmed* frame props (frame 0 snapshot).
+    - Persisted props are a *filtered subset* needed for downstream correctness.
+      Do not attempt to persist arbitrary VapourSynth prop types.
     """
 
     fingerprint: ClipFingerprint
@@ -201,7 +203,11 @@ class ClipProbeSnapshot:
     fps: Fraction
     is_hdr: bool
     hdr_metadata: HDRMetadata | None = None
-    source_frame_props: dict[str, Any] = field(default_factory=dict)
+
+    # Minimal, portable prop snapshot for HDR/tonemap parity.
+    # Keys SHOULD include mastering display / content light level values if present.
+    preserved_frame_props: dict[str, str | int | float] = field(default_factory=dict)
+    tonemap_prop_keys: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -283,6 +289,50 @@ class RunContext:
 - The orchestration layer SHOULD persist `ClipProbeSnapshot` to disk to avoid repeated expensive probing on reruns.
 - Cache entries MUST be invalidated when `ClipFingerprint` changes.
 - Cache write/read MUST be deterministic (stable key ordering).
+
+**Probe cache keying (SSOT, legacy-informed):**
+
+Legacy implementations often included mutable trim state in probe cache keys because the “probe” was performed on the
+already-trimmed graph. In 2.0, `ClipProbeSnapshot` is explicitly **pre-trim**, so trim changes MUST NOT invalidate the
+probe cache.
+
+Compute a deterministic cache key from the immutable fingerprint only:
+
+```python
+def compute_probe_cache_key(fingerprint: ClipFingerprint) -> str:
+    """Return a stable key for clip probe cache entries."""
+    payload = {
+        "path": str(fingerprint.path),
+        "size_bytes": fingerprint.size_bytes,
+        "mtime_ns": fingerprint.mtime_ns,
+        "schema_version": 1,
+    }
+    # json.dumps(..., sort_keys=True, separators=(",", ":"))
+    # then blake2s hex digest of UTF-8 bytes
+```
+
+**Probe cache format (SSOT):**
+
+- File: `{workspace.generated_dir}/clip_probe.toml`
+- Top-level keys:
+  - `version = "1"`
+  - `["<probe_cache_key>"]` tables for each clip
+- Each entry MUST store: path, size_bytes, mtime_ns, width, height, num_frames, fps_num, fps_den, is_hdr
+- If HDR, store: mastering_display, max_cll, max_fall (and any other fields needed by `HDRMetadata`)
+- `preserved_frame_props` MUST be limited to JSON/TOML-safe primitives (`str|int|float`)
+
+**Tonemap prop key preservation (SSOT):**
+
+When probing, record a list of “tonemap-related” prop keys to help downstream overlay/debug output remain stable even
+if later trimming/filtering strips some props. This is a parity feature from legacy ClipPlan.
+
+- Normalize prop keys to lower-case and strip leading underscores.
+- Include keys whose normalized base name matches:
+  - `masteringdisplayprimaries`, `masteringdisplayluminance`
+  - `contentlightlevelmax`, `contentlightlevelaverage`
+- Additionally include any keys with a normalized prefix of:
+  - `masteringdisplay`
+  - `contentlightlevel`
 
 ---
 

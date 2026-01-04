@@ -17,6 +17,17 @@ The FramePlan module provides deterministic frame selection for the `--skip-anal
 - Support the `--skip-analysis` CLI flag
 - Produce identical output given identical inputs
 
+### 1.2 Frame Domain (SSOT)
+
+`num_frames` MUST refer to the **effective** frame domain that the render phase will operate on.
+
+- Frame selection happens after applied trims are established (including trim-first normalization; no padding).
+- In practice, `num_frames` SHOULD be derived from orchestration `ClipState` (or equivalent run context), not from
+  raw source metadata.
+
+This prevents a class of drift bugs where frames are selected against an untrimmed domain but rendered against a
+trimmed domain.
+
 ### 1.2 Module Structure
 
 ```text
