@@ -410,6 +410,47 @@ if later trimming/filtering strips some props. This is a parity feature from leg
   - `contentlightlevel`
   - `dolbyvision` (all Dolby Vision metadata keys)
 
+#### 3.5.2 Tonemap Prop Key Selection Helpers (SSOT)
+
+The orchestration layer MUST implement deterministic helper functions to:
+
+1) Normalize prop keys (for matching only), and
+2) Select the full set of “tonemap-related” original prop keys from a frame-props mapping.
+
+These helpers MUST be pure (no I/O) and unit-testable without VapourSynth.
+
+```python
+from collections.abc import Mapping
+
+def normalize_probe_prop_key(key: str) -> str:
+    """Normalize a VapourSynth prop key for matching.
+
+    Rules:
+        - Strip all leading underscores.
+        - Lower-case.
+
+    Examples:
+        "_Transfer" -> "transfer"
+        "__Matrix" -> "matrix"
+        "DolbyVision_L6_MaxCLL" -> "dolbyvision_l6_maxcll"
+    """
+
+def compute_tonemap_prop_keys(frame_props: Mapping[str, object]) -> tuple[str, ...]:
+    """Return a deterministic, ordered tuple of tonemap-related original prop keys.
+
+    Selection (include key if any match):
+        - normalized key equals one of:
+          {"matrix","primaries","transfer","colorrange",
+           "masteringdisplayprimaries","masteringdisplayluminance",
+           "contentlightlevelmax","contentlightlevelaverage"}
+        - normalized key starts with one of:
+          {"masteringdisplay","contentlightlevel","dolbyvision"}
+
+    Ordering (deterministic):
+        - Sort selected keys by `(normalize_probe_prop_key(key), key)` and return as a tuple.
+    """
+```
+
 **Dolby Vision metadata preservation (SSOT):**
 
 If Dolby Vision metadata is present (even in partial form), preserve it in `preserved_frame_props` and include the
@@ -428,6 +469,28 @@ Downstream policy:
 - The render pipeline SHOULD prefer `ClipProbeSnapshot.is_hdr` / `hdr_metadata` for gating decisions (stable pre-trim),
   and use `preserved_frame_props`/`tonemap_prop_keys` to re-inject metadata only when a downstream step detects props
   have been stripped.
+
+#### 3.5.3 Preserved Frame Props Extraction Helpers (SSOT)
+
+To support parity and avoid leaking non-portable VapourSynth prop types into cache, the orchestration layer MUST
+persist a filtered subset of frame props as TOML-safe primitives.
+
+```python
+from collections.abc import Mapping
+
+def compute_preserved_frame_props(frame_props: Mapping[str, object]) -> dict[str, str | int | float]:
+    """Return TOML-safe, tonemap-relevant props extracted from a frame-props mapping.
+
+    Selection:
+        - Start from `compute_tonemap_prop_keys(frame_props)`.
+        - Include only values that are TOML-safe primitives (`str|int|float`), except:
+          - If any key normalizes to "dolbyvisionrpu", persist that key with value `1`
+            (presence indicator; do not persist the blob/bytes).
+
+    Output determinism:
+        - Return a dict populated in sorted key order (lexicographic by original key).
+    """
+```
 
 ---
 

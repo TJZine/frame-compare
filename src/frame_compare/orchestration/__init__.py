@@ -27,6 +27,11 @@ from frame_compare.orchestration.preflight import (
     resolve_workspace,
 )
 from frame_compare.orchestration.probe_cache import compute_probe_cache_key
+from frame_compare.orchestration.probe_props import (
+    compute_preserved_frame_props,
+    compute_tonemap_prop_keys,
+    normalize_probe_prop_key,
+)
 from frame_compare.orchestration.progress import select_reporter
 
 __all__ = [
@@ -51,6 +56,10 @@ __all__ = [
     "run_doctor",
     # Probe Cache
     "compute_probe_cache_key",
+    # Probe Props
+    "normalize_probe_prop_key",
+    "compute_tonemap_prop_keys",
+    "compute_preserved_frame_props",
     # Progress
     "select_reporter",
 ]
