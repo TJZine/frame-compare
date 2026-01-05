@@ -1,0 +1,39 @@
+{
+  "name": "Frame Compare Dev",
+  "build": {
+    "dockerfile": "../Dockerfile",
+    "context": "..",
+    "target": "runtime"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "charliermarsh.ruff",
+        "tamasfe.even-better-toml"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.analysis.typeCheckingMode": "strict",
+        "editor.formatOnSave": true,
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff"
+        }
+      }
+    }
+  },
+  "containerEnv": {
+    "VAPOURSYNTH_PLUGIN_PATH": "/usr/local/lib/vapoursynth"
+  },
+  "mounts": [
+    "source=${localWorkspaceFolder}/comparison_videos,target=/workspace/comparison_videos,type=bind,readonly",
+    "source=${localWorkspaceFolder}/config,target=/workspace/config,type=bind,readonly",
+    "source=${localWorkspaceFolder}/screenshots,target=/workspace/screenshots,type=bind",
+    "source=${localWorkspaceFolder}/generated,target=/workspace/generated,type=bind"
+  ],
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace/frame-compare,type=bind",
+  "workspaceFolder": "/workspace/frame-compare",
+  "postCreateCommand": "pip install -e '.[dev]'",
+  "remoteUser": "framecompare"
+}

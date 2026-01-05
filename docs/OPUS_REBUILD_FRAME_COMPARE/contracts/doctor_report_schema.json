@@ -1,0 +1,115 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Doctor Report Schema",
+    "description": "Schema for frame-compare doctor --json output. Verified against R73 baseline.",
+    "type": "object",
+    "required": [
+        "success",
+        "doctor"
+    ],
+    "properties": {
+        "success": {
+            "type": "boolean",
+            "description": "True if all critical (core) checks passed"
+        },
+        "doctor": {
+            "type": "object",
+            "required": [
+                "baseline_version",
+                "checks"
+            ],
+            "properties": {
+                "baseline_version": {
+                    "type": "string",
+                    "description": "VapourSynth version this doctor schema was designed for",
+                    "const": "R73"
+                },
+                "checks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/$defs/check"
+                    }
+                }
+            }
+        }
+    },
+    "$defs": {
+        "check": {
+            "type": "object",
+            "required": [
+                "id",
+                "category",
+                "status"
+            ],
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "Unique check identifier",
+                    "examples": [
+                        "vapoursynth",
+                        "lsmash",
+                        "ffmpeg",
+                        "slowpics"
+                    ]
+                },
+                "category": {
+                    "enum": [
+                        "core",
+                        "optional",
+                        "network"
+                    ],
+                    "description": "Check category for prioritization. core=required, optional=nice-to-have, network=connectivity"
+                },
+                "status": {
+                    "enum": [
+                        "pass",
+                        "fail",
+                        "skip"
+                    ],
+                    "description": "Check result"
+                },
+                "message": {
+                    "type": "string",
+                    "description": "Human-readable status message"
+                },
+                "discovered_namespace": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "description": "Actual VS plugin namespace found (e.g., 'lsmas', 'placebo', 'ffms2')"
+                },
+                "expected_namespace": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "description": "Expected namespace per R73 baseline (for comparison)"
+                },
+                "version": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "description": "Discovered version string if available"
+                },
+                "install_hint": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "description": "Actionable hint for fixing failures",
+                    "examples": [
+                        "Use 'docker run frame-compare-baseline' for verified environment",
+                        "Install VapourSynth R72+ from https://github.com/vapoursynth/vapoursynth"
+                    ]
+                },
+                "details": {
+                    "type": "object",
+                    "description": "Additional structured data (paths, config values, etc.)",
+                    "additionalProperties": true
+                }
+            }
+        }
+    }
+}

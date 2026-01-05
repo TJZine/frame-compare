@@ -1,0 +1,25 @@
+"""E2E tests for CLI version command."""
+
+from __future__ import annotations
+
+import pytest
+from typer.testing import CliRunner
+
+from frame_compare.cli_entry import app
+
+
+@pytest.mark.e2e
+def test_cli_version_command_exits_zero() -> None:
+    """GIVEN the CLI app WHEN 'version' is invoked THEN exit code is 0."""
+    runner = CliRunner()
+    result = runner.invoke(app, ["version"])
+    assert result.exit_code == 0
+
+
+@pytest.mark.e2e
+def test_cli_version_command_outputs_version_string() -> None:
+    """GIVEN the CLI app WHEN 'version' is invoked THEN output is 'frame-compare 0.1.0'."""
+    runner = CliRunner()
+    result = runner.invoke(app, ["version"])
+    # Typer's echo adds a newline; strip for comparison
+    assert result.output.strip() == "frame-compare 0.1.0"

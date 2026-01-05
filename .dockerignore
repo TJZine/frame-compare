@@ -1,0 +1,46 @@
+# Version control
+.git
+.gitignore
+
+# Python artifacts
+__pycache__
+*.py[cod]
+*.pyo
+.pytest_cache
+.mypy_cache
+.ruff_cache
+*.egg-info
+dist
+build
+.eggs
+
+# Virtual environments
+.venv
+venv
+env
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Test artifacts
+.coverage
+htmlcov
+.tox
+
+# Docker
+.docker
+
+# Agent workflow artifacts
+.agent-workflow
+
+# Documentation (not needed in image)
+docs
+
+# Local config (bind-mounted at runtime)
+config
+comparison_videos
+screenshots
+generated

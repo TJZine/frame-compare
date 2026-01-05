@@ -1,0 +1,58 @@
+.DS_Store
+
+# Local tool caches / indexes
+.codanna/
+.mcp_sequential_thinking/
+.fastembed_cache
+.uv_cache/
+.venv/
+.agent/
+.hypothesis/
+AGENTS.md
+
+# Python
+__pycache__/
+*.pyc
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Virtual environments
+venv/
+ENV/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Type checking
+.pyright/
+.mypy_cache/
+
+# OS
+Thumbs.db

@@ -1,0 +1,141 @@
+from fractions import Fraction
+
+import pytest
+
+from frame_compare.analysis.selection import select_frames
+from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
+from frame_compare.config import AnalysisConfig, SelectionMode
+from frame_compare.errors import SelectionError
+
+
+def make_metrics(luminance: list[float], motion: list[float]) -> FrameMetrics:
+    return FrameMetrics(
+        luminance=luminance,
+        motion=motion,
+        metadata=MetricsMetadata(
+            frame_count=len(luminance),
+            fps=Fraction(24),
+            config_fingerprint="fp",
+            clips=[ClipIdentity(path="video.mkv", size=1, mtime=1.0, sha1=None)],
+            version=2,
+        ),
+    )
+
+
+def make_config(
+    *, frame_count: int, selection_mode: SelectionMode, random_seed: int = 42
+) -> AnalysisConfig:
+    return AnalysisConfig(
+        frame_count=frame_count, selection_mode=selection_mode, random_seed=random_seed
+    )
+
+
+LUMINANCE_100 = [i / 100.0 for i in range(100)]
+MOTION_100 = [1.0 if i in {50, 60, 70, 80, 90} else 0.1 for i in range(100)]
+
+
+def test_quantile_mode_returns_luminance_extremes():
+    metrics = make_metrics(LUMINANCE_100, MOTION_100)
+    config = make_config(frame_count=10, selection_mode=SelectionMode.QUANTILE)
+    result = select_frames(metrics, config)
+    assert result.frames == [0, 1, 2, 3, 4, 95, 96, 97, 98, 99]
+    assert list(result.breakdown.quantile_dark) == [0, 1, 2, 3, 4]
+    assert list(result.breakdown.quantile_bright) == [95, 96, 97, 98, 99]
+
+
+def test_motion_mode_returns_high_motion():
+    metrics = make_metrics(LUMINANCE_100, MOTION_100)
+    config = make_config(frame_count=5, selection_mode=SelectionMode.MOTION)
+    result = select_frames(metrics, config)
+    assert result.frames == [50, 60, 70, 80, 90]
+
+
+def test_random_mode_same_seed_deterministic():
+    metrics = make_metrics(LUMINANCE_100, MOTION_100)
+    config = make_config(frame_count=10, selection_mode=SelectionMode.RANDOM, random_seed=42)
+    result1 = select_frames(metrics, config)
+    result2 = select_frames(metrics, config)
+    assert result1.frames == result2.frames
+
+
+def test_random_mode_different_seed_exact_outputs():
+    metrics = make_metrics(LUMINANCE_100, MOTION_100)
+
+    config42 = make_config(frame_count=10, selection_mode=SelectionMode.RANDOM, random_seed=42)
+    result42 = select_frames(metrics, config42)
+    # Expected values for seed 42 based on plan
+    assert result42.frames == [1, 9, 15, 42, 50, 55, 65, 70, 78, 91]
+
+    config123 = make_config(frame_count=10, selection_mode=SelectionMode.RANDOM, random_seed=123)
+    result123 = select_frames(metrics, config123)
+    # Expected values for seed 123 based on plan
+    assert result123.frames == [1, 7, 24, 29, 44, 50, 63, 75, 87, 93]
+
+
+def test_mixed_mode_allocation():
+    metrics = make_metrics(LUMINANCE_100, MOTION_100)
+    config = make_config(frame_count=10, selection_mode=SelectionMode.MIXED)
+    result = select_frames(metrics, config)
+    # Allocation: 40% Quantile (4 frames: 2 dark, 2 bright), 40% Motion (4 frames), 20% Random (2 frames)
+    assert len(result.breakdown.quantile_dark) == 2
+    assert len(result.breakdown.quantile_bright) == 2
+    assert len(result.breakdown.motion) == 4
+    assert len(result.breakdown.random) == 2
+    assert len(result.frames) == 10
+
+
+def test_deduplication_skips_already_selected():
+    # Force overlap: peaks at 0 and 99
+    lum = [0.0 if i == 0 else (1.0 if i == 99 else 0.5) for i in range(100)]
+    mot = [1.0 if i in {0, 99, 10, 20, 30, 40} else 0.1 for i in range(100)]
+    metrics = make_metrics(lum, mot)
+    # Mode Mixed: 2 dark (0, 1), 2 bright (98, 99)
+    # Motion wants peaks: 0, 99, 10, 20, 30, 40. But 0 and 99 are taken.
+    config = make_config(frame_count=10, selection_mode=SelectionMode.MIXED)
+    result = select_frames(metrics, config)
+    assert len(result.frames) == 10
+    # Final frames should be unique
+    assert len(set(result.frames)) == 10
+
+
+def test_insufficient_candidates_raises():
+    # Only 5 frames available, but 10 requested
+    metrics = make_metrics([0.1] * 5, [0.1] * 5)
+    config = make_config(frame_count=10, selection_mode=SelectionMode.QUANTILE, random_seed=42)
+    with pytest.raises(SelectionError) as exc:
+        select_frames(metrics, config)
+    assert exc.value.code == "FC-4012"
+    assert exc.value.context.details == {
+        "reason": "insufficient_candidates",
+        "requested": 10,
+        "found": 5,
+    }
+
+
+def test_empty_metrics_raises():
+    metrics = make_metrics([], [])
+    config = make_config(frame_count=10, selection_mode=SelectionMode.QUANTILE, random_seed=42)
+    with pytest.raises(SelectionError) as exc:
+        select_frames(metrics, config)
+    assert exc.value.code == "FC-4012"
+    assert exc.value.context.details == {"reason": "empty_metrics", "requested": 10, "found": 0}
+
+
+def test_motion_selection_respects_min_gap():
+    metrics = make_metrics(LUMINANCE_100, MOTION_100)
+    config = make_config(frame_count=5, selection_mode=SelectionMode.MOTION)
+    result = select_frames(metrics, config)
+    frames = result.frames
+    for i in range(len(frames)):
+        for j in range(i + 1, len(frames)):
+            assert abs(frames[i] - frames[j]) >= 5
+
+
+def test_random_selection_respects_min_gap():
+    metrics = make_metrics(LUMINANCE_100, MOTION_100)
+    config = make_config(frame_count=10, selection_mode=SelectionMode.RANDOM)
+    result = select_frames(metrics, config)
+    frames = result.frames
+    for i in range(len(frames)):
+        for j in range(i + 1, len(frames)):
+            assert abs(frames[i] - frames[j]) >= 5
