@@ -571,7 +571,7 @@ frame-compare/
 
 - [ ] Create `src/frame_compare/runner.py` at package root
 - [x] Create `src/frame_compare/orchestration/context.py` and define `ClipState` / `RunContext` per spec §3.5 (2026-01-04)
-- [ ] Implement probe snapshot cache (`generated/clip_probe.toml`) per spec §3.5 (deterministic keying, stable TOML)
+- [x] Implement probe snapshot cache (`generated/clip_probe.toml`) per spec §3.5 (deterministic keying, stable TOML) (2026-01-04)
 - [ ] Preserve HDR/DoVi props in `ClipProbeSnapshot` per spec §3.5 (portable primitives only; record `tonemap_prop_keys`)
 - [ ] Implement consolidated FPS report per spec §5.4 (after LoadSources and after Align)
 - [ ] Implement `RunRequest` dataclass per spec
@@ -597,9 +597,9 @@ frame-compare/
 - [ ] Write unit tests for `ClipState` and probe cache:
   - [x] `tests/orchestration/test_context.py::test_clip_state_effective_num_frames_clamps_and_never_negative` (2026-01-04)
   - [x] `tests/orchestration/test_probe_cache.py::test_compute_probe_cache_key_stable_for_same_fingerprint` (2026-01-04)
-  - [ ] `tests/orchestration/test_probe_cache.py::test_probe_cache_round_trip_toml`
+  - [x] `tests/orchestration/test_probe_cache.py::test_probe_cache_round_trip_toml` (2026-01-04)
   - [x] `tests/orchestration/test_probe_cache.py::test_probe_cache_invalidates_on_fingerprint_change` (2026-01-04)
-  - [ ] `tests/orchestration/test_probe_cache.py::test_preserved_frame_props_are_toml_safe_primitives_only`
+  - [x] `tests/orchestration/test_probe_cache.py::test_preserved_frame_props_are_toml_safe_primitives_only` (2026-01-04)
   - [ ] `tests/orchestration/test_fps_report.py::test_fps_report_marks_divergence`
 - [ ] Write integration tests (Docker, real deps; zero skips):
   - [ ] `tests/integration/test_loadsources_probe_cache.py::test_loadsources_writes_clip_probe_cache_file`

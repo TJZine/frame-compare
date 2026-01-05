@@ -325,15 +325,74 @@ def compute_probe_cache_key(fingerprint: ClipFingerprint) -> str:
     # then blake2s hex digest of UTF-8 bytes
 ```
 
+#### 3.5.1 Probe Cache I/O Helpers (SSOT)
+
+Probe caching is file-backed in `{workspace.generated_dir}/clip_probe.toml`, but I/O must be isolated behind helpers
+so it is unit-testable and deterministic.
+
+```python
+from collections.abc import Mapping
+from pathlib import Path
+
+def load_clip_probe_cache(cache_path: Path) -> dict[str, ClipProbeSnapshot]:
+    """Load the probe snapshot cache file.
+
+    Args:
+        cache_path: Full path to `{workspace.generated_dir}/clip_probe.toml`.
+
+    Returns:
+        Mapping of `{probe_cache_key}` -> `ClipProbeSnapshot`.
+
+        - If file is missing: return empty dict.
+        - If TOML parse fails: return empty dict (warn-only).
+        - If `version` is missing or not `"1"`: return empty dict (warn-only).
+
+    Forward-compat:
+        - Unknown fields inside an entry MUST be ignored by the loader.
+        - Entries missing required fields MUST be ignored by the loader.
+    """
+
+def save_clip_probe_cache(
+    cache_path: Path,
+    entries_by_key: Mapping[str, ClipProbeSnapshot],
+) -> None:
+    """Write the probe snapshot cache file deterministically.
+
+    Determinism requirements:
+        - Write `version = "1"` first.
+        - Write entry tables in sorted key order (lexicographic).
+        - Within each entry, emit fields in stable order (schema order below).
+        - Persist `Fraction` as `fps_num`/`fps_den` integer fields.
+
+    Notes:
+        - This helper MUST create parent directories if missing.
+        - This helper MUST fully overwrite `cache_path` (no in-place merging).
+        - If `snapshot.is_hdr` is True but `snapshot.hdr_metadata` is None, this helper MUST raise `ValueError`
+          (programming error; violates cache schema requirements).
+        - This helper MUST sanitize `preserved_frame_props` at the persistence boundary by dropping any keys whose
+          values are not TOML-safe primitives (`str|int|float`). Dropped keys SHOULD be logged (warn-only).
+    """
+```
+
 **Probe cache format (SSOT):**
 
 - File: `{workspace.generated_dir}/clip_probe.toml`
 - Top-level keys:
   - `version = "1"`
   - `["<probe_cache_key>"]` tables for each clip
-- Each entry MUST store: path, size_bytes, mtime_ns, width, height, num_frames, fps_num, fps_den, is_hdr
-- If HDR, store: mastering_display, max_cll, max_fall (and any other fields needed by `HDRMetadata`)
-- `preserved_frame_props` MUST be limited to JSON/TOML-safe primitives (`str|int|float`)
+- Each entry MUST store:
+  - `path` (string), `size_bytes` (int), `mtime_ns` (int)
+  - `width` (int), `height` (int), `num_frames` (int)
+  - `fps_num` (int), `fps_den` (int)
+  - `is_hdr` (bool)
+  - `tonemap_prop_keys` (list[str]) — may be empty
+  - `preserved_frame_props` (dict[str, str|int|float]) — may be empty
+- HDR metadata persistence:
+  - When `is_hdr == true`, the entry MUST include an `hdr_metadata` table with keys matching `HDRMetadata`:
+    - `mastering_display` (str|None), `max_cll` (int|None), `max_fall` (int|None)
+    - `color_primaries` (int), `transfer` (int), `matrix` (int)
+  - When `is_hdr == false`, the entry MUST omit `hdr_metadata`.
+- `preserved_frame_props` MUST be limited to TOML-safe primitives (`str|int|float`) only.
 
 **Tonemap prop key preservation (SSOT):**
 
