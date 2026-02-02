@@ -28,13 +28,14 @@ The Orchestration module coordinates the end-to-end comparison workflow, managin
 ```text
 src/frame_compare/orchestration/
 ├── __init__.py          # Public exports
-├── coordinator.py       # Main run coordination
+├── coordinator.py       # Main run coordination + execute_run()
 ├── preflight.py         # Pre-run validation
 ├── doctor.py            # Diagnostic checks
 ├── phases.py            # Phase definitions
 ├── progress.py          # Progress reporter implementations
 ├── context.py           # Runtime context
-└── runner.py            # Async run execution
+├── probe_cache.py       # Clip probe snapshot cache I/O + keying
+└── probe_props.py       # Clip probe prop preservation helpers
 ```
 
 ---
@@ -713,6 +714,9 @@ async def execute_run(
     """
 ```
 
+> **Implementation location (SSOT):** `src/frame_compare/orchestration/coordinator.py` owns `execute_run(...)` and
+> orchestrates phases via `phases.py` with `RunContext` from `context.py`.
+
 #### 4.4.4 Phase Ordering (SSOT)
 
 Phases execute in this exact order:
@@ -996,7 +1000,9 @@ This module coordinates preflight, doctor, and run execution.
 3. `src/frame_compare/orchestration/doctor.py` - Diagnostics
 4. `src/frame_compare/orchestration/phases.py` - Phase definitions
 5. `src/frame_compare/orchestration/progress.py` - Reporters
-6. `src/frame_compare/orchestration/runner.py` - Run execution
+6. `src/frame_compare/orchestration/coordinator.py` - Run execution (`execute_run`)
+7. `src/frame_compare/orchestration/probe_cache.py` - Probe snapshot cache helpers
+8. `src/frame_compare/orchestration/probe_props.py` - Probe prop preservation helpers
 
 ## Key Requirements
 - Preflight validates config and resolves paths

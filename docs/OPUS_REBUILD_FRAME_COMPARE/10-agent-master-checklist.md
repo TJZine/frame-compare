@@ -132,9 +132,9 @@ frame-compare/
   - [x] `ProcessingError` (+ subtypes)
   - [x] `NetworkError` (+ subtypes)
   - [x] `InternalError`
-- [ ] Implement `Result[T, E]` pattern (optional)
 - [x] Write unit tests for error handling (2025-12-29)
 - [x] Verify all exceptions have error codes and hints (2025-12-29)
+- [ ] Implement `Result[T, E]` pattern (optional)
 
 ### 1.3 Logging Infrastructure
 
@@ -143,7 +143,6 @@ frame-compare/
 - [x] Create `src/frame_compare/utils/logging.py` (2025-12-29)
 - [x] Configure structlog with JSON output (2025-12-29)
 - [x] Implement correlation ID tracking (2025-12-29)
-- [x] Create logger per module (NEEDS CHECKED IN FINAL REVIEW)
 - [x] Write tests for log output format (2025-12-29)
 
 ### 1.4 CLI Foundation
@@ -569,16 +568,15 @@ frame-compare/
 
 **Reference:** `05-implementation/module-specs/orchestration-module.md` §4.4.4
 
-- [ ] Create `src/frame_compare/runner.py` at package root
 - [x] Create `src/frame_compare/orchestration/context.py` and define `ClipState` / `RunContext` per spec §3.5 (2026-01-04)
 - [x] Implement probe snapshot cache (`generated/clip_probe.toml`) per spec §3.5 (deterministic keying, stable TOML) (2026-01-04)
 - [x] Preserve HDR/DoVi props in `ClipProbeSnapshot` per spec §3.5 (portable primitives only; record `tonemap_prop_keys`) (2026-01-05)
-- [ ] Implement consolidated FPS report per spec §5.4 (after LoadSources and after Align)
 - [ ] Implement `RunRequest` dataclass per spec
 - [ ] Implement `RunResult` dataclass per spec
 - [ ] Implement `RunDependencies` for dependency injection
-- [ ] Implement `run(request, deps) -> RunResult` entry point
-- [ ] Implement `execute_run(config, preflight) -> RunResult` in orchestration/
+- [ ] Create `src/frame_compare/runner.py` at package root (see `cli-module.md` §1.2)
+- [ ] Implement `run(request, dependencies=None) -> RunResult` entry point in `src/frame_compare/runner.py` (see `cli-module.md` §2.1)
+- [ ] Implement `async execute_run(request, deps=None) -> RunResult` in `src/frame_compare/orchestration/coordinator.py` (see `orchestration-module.md` §4.4.3)
 - [ ] Implement phase orchestration per spec §4.4.4:
   - [ ] Phase 1: Preflight
   - [ ] Phase 2: LoadSources
@@ -592,8 +590,7 @@ frame-compare/
   - [ ] Phase 8: Dovi
   - [ ] Phase 9: Publish
   - [ ] Phase 10: Report
-- [ ] Implement CLI flag → config override mapping per spec §4.4.5
-- [ ] Implement input discovery rules per spec §4.4.6
+- [ ] Implement consolidated FPS report per spec §5.4 (after LoadSources and after Align)
 - [ ] Write unit tests for `ClipState` and probe cache:
   - [x] `tests/orchestration/test_context.py::test_clip_state_effective_num_frames_clamps_and_never_negative` (2026-01-04)
   - [x] `tests/orchestration/test_probe_cache.py::test_compute_probe_cache_key_stable_for_same_fingerprint` (2026-01-04)
@@ -612,6 +609,8 @@ frame-compare/
 **Reference:** `05-implementation/module-specs/cli-module.md`
 
 - [ ] Complete `run` command implementation
+- [ ] Implement CLI flag → config override mapping per orchestration spec §4.4.5
+- [ ] Implement input discovery rules per orchestration spec §4.4.6
 - [ ] Complete `wizard` command (interactive config)
 - [ ] Complete `doctor` command (dependency check)
 - [ ] Complete `preset` subcommands (list, apply, save)
@@ -650,6 +649,7 @@ frame-compare/
 - [ ] Verify coverage > 80%
 - [ ] Fix any Pyright errors
 - [ ] Fix any Ruff errors
+- [ ] Ensure each `frame_compare.*` module has a consistent module-level logger pattern (final implementation review)
 - [ ] Performance testing
 
 ### 7.3 Container Finalization

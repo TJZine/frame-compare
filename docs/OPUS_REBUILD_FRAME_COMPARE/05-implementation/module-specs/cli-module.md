@@ -31,11 +31,13 @@ src/frame_compare/
 ├── runner.py              # High-level run() entry point
 └── orchestration/         # All workflow coordination
     ├── __init__.py        # Public exports
-    ├── coordinator.py     # Workflow coordinator
+    ├── coordinator.py     # Workflow coordinator + execute_run()
     ├── preflight.py       # Pre-run validation
     ├── doctor.py          # Diagnostic checks
     ├── phases.py          # Pipeline phases
     ├── context.py         # Runtime context
+    ├── probe_cache.py     # Clip probe snapshot cache I/O + keying
+    ├── probe_props.py     # Clip probe prop preservation helpers
     └── progress.py        # Progress reporter implementations
 ```
 
@@ -687,12 +689,15 @@ Implement the CLI entry point and pipeline orchestration for Frame Compare 2.0.
 ## Files to Create
 1. `src/frame_compare/cli_entry.py` - Typer CLI commands
 2. `src/frame_compare/runner.py` - Pipeline runner
-3. `src/frame_compare/preflight.py` - Preflight validation
-4. `src/frame_compare/doctor.py` - Dependency diagnostics
-5. `src/frame_compare/orchestration/__init__.py`
-6. `src/frame_compare/orchestration/coordinator.py`
-7. `src/frame_compare/orchestration/phases.py`
-8. `src/frame_compare/orchestration/context.py`
+3. `src/frame_compare/orchestration/__init__.py`
+4. `src/frame_compare/orchestration/coordinator.py` - Workflow coordinator + `execute_run()`
+5. `src/frame_compare/orchestration/preflight.py` - Preflight validation
+6. `src/frame_compare/orchestration/doctor.py` - Dependency diagnostics
+7. `src/frame_compare/orchestration/phases.py` - Phase definitions
+8. `src/frame_compare/orchestration/context.py` - Runtime context
+9. `src/frame_compare/orchestration/progress.py` - Progress reporter implementations
+10. `src/frame_compare/orchestration/probe_cache.py` - Probe snapshot cache helpers
+11. `src/frame_compare/orchestration/probe_props.py` - Probe prop preservation helpers
 
 ## Key Requirements
 - Typer for CLI (not Click)

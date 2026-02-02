@@ -62,7 +62,7 @@ graph TD
 
 | Layer | Key Modules | Responsibility |
 |-------|-------------|----------------|
-| **CLI** | `frame_compare.py`, `cli_entry.py` | Click wiring, argument parsing, entry points |
+| **CLI** | `frame_compare.py`, `cli_entry.py` | Typer wiring, argument parsing, entry points |
 | **Orchestration** | `runner.py`, `orchestration/coordinator.py`, `phases/` | Pipeline coordination, state management |
 | **Service** | `alignment.py`, `metadata.py`, `publishers.py`, `dovi_tool.py` | Domain services (audio, metadata, publishing) |
 | **Core Domain** | `analysis/`, `vs/`, `render/`, `screenshot/` | Frame selection, VapourSynth processing, rendering |

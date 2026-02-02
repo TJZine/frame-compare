@@ -514,6 +514,11 @@ def main(argv: list[str]) -> int:
         "--dry-run", action="store_true", help="Print commands; do not invoke Codex or validators."
     )
     parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Do not prompt to confirm the proposed RUN_ID (useful for unattended automation).",
+    )
+    parser.add_argument(
         "--include-phase0", action="store_true", help="Allow Phase 0 checklist selection."
     )
     parser.add_argument(
@@ -526,6 +531,57 @@ def main(argv: list[str]) -> int:
         "--max-review-revisions", type=int, default=2, help="Max code review revision cycles."
     )
     args = parser.parse_args(argv)
+
+    # Fail fast if the checklist ordering would mislead automated selection.
+    _run(["python3", "scripts/validate_master_checklist_order.py"], cwd=REPO_ROOT, dry_run=False)
+
+    if not args.dry_run:
+        # Keep derived contract views fresh before starting automation to avoid unrelated gate failures mid-run.
+        # If stale, regenerate deterministically via the canonical script.
+        env = {"UV_CACHE_DIR": "./.uv_cache"}
+        try:
+            _run(
+                [
+                    "uv",
+                    "run",
+                    "--no-sync",
+                    "python",
+                    "scripts/generate_contract_views.py",
+                    "--check",
+                ],
+                cwd=REPO_ROOT,
+                env=env,
+                capture=True,
+                dry_run=False,
+            )
+        except subprocess.CalledProcessError:
+            _run(
+                ["uv", "run", "--no-sync", "python", "scripts/generate_contract_views.py"],
+                cwd=REPO_ROOT,
+                env=env,
+                dry_run=False,
+            )
+            _run(
+                [
+                    "uv",
+                    "run",
+                    "--no-sync",
+                    "python",
+                    "scripts/generate_contract_views.py",
+                    "--check",
+                ],
+                cwd=REPO_ROOT,
+                env=env,
+                dry_run=False,
+            )
+
+        # Traceability failures are not safe to auto-fix here; stop early if broken.
+        _run(
+            ["uv", "run", "--no-sync", "python", "scripts/validate_traceability.py", "--check"],
+            cwd=REPO_ROOT,
+            env=env,
+            dry_run=False,
+        )
 
     action = _load_next_action(
         include_phase0=args.include_phase0,
@@ -556,6 +612,21 @@ def main(argv: list[str]) -> int:
     run_id = action.run_id
     if not run_id:
         raise RuntimeError(f"Unexpected action payload: {action.action}")
+
+    if not args.dry_run and not args.yes:
+        target = action.target or "<unknown target>"
+        section = action.checklist_section_title or "<unknown section>"
+        task = action.first_unchecked_task or "<unknown task>"
+        print("Proposed next run:")
+        print(f"- RUN_ID: {run_id}")
+        print(f"- Target: {target}")
+        print(f"- Section: {section}")
+        print(f"- First task: {task}")
+        expected = f"CONFIRM RUN_ID: {run_id}"
+        response = input(f"\nType exactly: {expected}\n> ").strip()
+        if response != expected:
+            print("STOP: RUN_ID not confirmed.")
+            return 2
 
     run_dir = RUNS_DIR / run_id
     if not args.dry_run:
