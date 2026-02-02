@@ -9,6 +9,8 @@ description: Use when running or streamlining the Frame Compare 2.0 5-agent run 
 
 Minimize the human operator role to: **confirm** → **paste NEXT** → **repeat**.
 
+If you want to reduce (or eliminate) manual NEXT copy/paste by using **local collab subagents** with per-role model/effort, use `fc2-collab-autopilot` instead.
+
 ## Canonical Sources (read-only)
 
 - `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow-quick.md` (read first — curated quick reference)

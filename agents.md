@@ -12,6 +12,13 @@ Keep it short and actionable; do not reprint SSOT specs or workflow templates he
 - Import layering SSOT: `importlinter.ini`
 - Tooling config SSOT: `pyproject.toml` (`[tool.pyright]`, `[tool.ruff]`, pytest markers)
 
+## Codex Collab Setup (Repo Defaults)
+
+- Codex team config: `.codex/config.toml` (includes FC-2.0 role profiles for per-agent model + reasoning effort)
+- Codex skills: `.codex/skills/` (symlinks into `codex-skills/` for compatibility)
+- Subagent autopilot: `fc2-collab-autopilot` (run FC-2.0 end-to-end with local subagents + strict STOP gates)
+- Full automation entrypoint: `python3 scripts/fc2_autopilot.py`
+
 ## STOP Conditions (Hard)
 
 - Required input artifact missing → STOP (do not guess versions or “latest”).

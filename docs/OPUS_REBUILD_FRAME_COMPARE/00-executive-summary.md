@@ -127,6 +127,7 @@ Goal: your day-to-day operation is “confirm the current step is complete, then
 If you want more “operator-as-confirmation” behavior, install and use the repo’s Codex skills:
 
 - `codex-skills/fc2-orchestrator/SKILL.md` (run-loop orchestration + NEXT handoffs)
+- `codex-skills/fc2-collab-autopilot/SKILL.md` (local subagent autopilot + per-role model/effort profiles)
 - `codex-skills/fc2-readiness-audit/SKILL.md` (readiness gate audit + timestamp/log updates)
 - `codex-skills/fc2-run-validate/SKILL.md` (validate a run directory after each artifact write)
 - `codex-skills/fc2-next-prompt/SKILL.md` (extract the NEXT block from an artifact for copy/paste)

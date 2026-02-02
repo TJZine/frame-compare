@@ -1,0 +1,30 @@
+# Repo-scoped Codex Team Config for Frame Compare 2.0
+#
+# This file is intentionally minimal:
+# - Top-level defaults are safe for day-to-day coding.
+# - FC2 workflow roles use explicit CLI profiles to pin model + reasoning effort.
+#
+# See: https://developers.openai.com/codex/config
+
+model = "gpt-5.2-codex"
+model_reasoning_effort = "medium"
+
+# Keep interactive safety defaults unless a user explicitly opts in.
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+
+[profiles.fc2_planning]
+model = "gpt-5.2"
+model_reasoning_effort = "high"
+
+[profiles.fc2_plan_review]
+model = "gpt-5.2"
+model_reasoning_effort = "high"
+
+[profiles.fc2_coding]
+model = "gpt-5.2-codex"
+model_reasoning_effort = "medium"
+
+[profiles.fc2_verify_review]
+model = "gpt-5.2-codex"
+model_reasoning_effort = "high"
