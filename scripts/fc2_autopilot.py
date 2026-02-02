@@ -149,29 +149,33 @@ def _artifact_path(run_id: str, stage: str, version: int) -> Path:
 
 def _validate_run_artifacts(run_id: str, *, dry_run: bool) -> None:
     env = {"UV_CACHE_DIR": "./.uv_cache"}
-    _run(
-        [
-            "uv",
-            "run",
-            "--no-sync",
-            "python",
-            "scripts/validate_run_artifacts.py",
-            str(RUNS_DIR / run_id),
-        ],
-        cwd=REPO_ROOT,
-        env=env,
-        dry_run=dry_run,
-    )
+    cmd = [
+        "uv",
+        "run",
+        "--no-sync",
+        "python",
+        "scripts/validate_run_artifacts.py",
+        str(RUNS_DIR / run_id),
+    ]
+    if dry_run:
+        _run(cmd, cwd=REPO_ROOT, env=env, dry_run=True)
+        return
+    try:
+        _run(cmd, cwd=REPO_ROOT, env=env, capture=True, dry_run=False)
+    except subprocess.CalledProcessError as e:
+        raise GateFailure(command=cmd, stdout=e.stdout or "", stderr=e.stderr or "") from e
 
 
 def _validate_spec_anchors(plan_path: Path, *, dry_run: bool) -> None:
     env = {"UV_CACHE_DIR": "./.uv_cache"}
-    _run(
-        ["uv", "run", "--no-sync", "python", "scripts/validate_spec_anchors.py", str(plan_path)],
-        cwd=REPO_ROOT,
-        env=env,
-        dry_run=dry_run,
-    )
+    cmd = ["uv", "run", "--no-sync", "python", "scripts/validate_spec_anchors.py", str(plan_path)]
+    if dry_run:
+        _run(cmd, cwd=REPO_ROOT, env=env, dry_run=True)
+        return
+    try:
+        _run(cmd, cwd=REPO_ROOT, env=env, capture=True, dry_run=False)
+    except subprocess.CalledProcessError as e:
+        raise GateFailure(command=cmd, stdout=e.stdout or "", stderr=e.stderr or "") from e
 
 
 def _run_quality_gates(*, dry_run: bool) -> None:
@@ -312,12 +316,16 @@ def _planning_prompt(
     run_id: str, *, plan_path: Path, prev_plan: Path | None, prev_plan_review: Path | None
 ) -> str:
     extra_inputs = ""
-    if prev_plan is not None and prev_plan_review is not None:
+    if prev_plan is not None or prev_plan_review is not None:
+        prev_lines: list[str] = []
+        if prev_plan is not None:
+            prev_lines.append(f"- Previous plan: {prev_plan}")
+        if prev_plan_review is not None:
+            prev_lines.append(f"- Previous plan review: {prev_plan_review}")
         extra_inputs = textwrap.dedent(
             f"""
             ## Prior Iteration Inputs (Plan Revision)
-            - Previous plan: {prev_plan}
-            - Previous plan review: {prev_plan_review}
+            {"\n".join(prev_lines)}
             """
         ).strip()
 
@@ -348,6 +356,11 @@ def _planning_prompt(
         - Use the canonical YAML frontmatter header and required sections.
         - Include concrete file list and verification commands.
         - End with a correct NEXT block for the Plan Review Agent (with concrete version numbers).
+        - IMPORTANT: `scripts/validate_spec_anchors.py` treats any bullet of the form `- `...`` as a planned
+          signature if the backticked text contains parentheses. Use that exact bullet+backtick pattern ONLY
+          for real callable signatures in the plan's "Functions to implement" section.
+          Do NOT use backticked bullets for decorators (e.g. `@dataclass(...)`) or test assertions
+          (e.g. `request.root == Path(\"x\")`); put those in plain text or fenced code blocks instead.
 
         {extra_inputs}
         """
@@ -697,6 +710,7 @@ def main(argv: list[str]) -> int:
 
     # Planning <-> Plan Review loop.
     approved_plan_version: int | None = None
+    last_plan_gate_failure: str | None = None
     for _ in range(args.max_plan_revisions):
         plan_v = _next_version(run_dir, PLAN_STAGE)
         plan_path = _artifact_path(run_id, PLAN_STAGE, plan_v)
@@ -710,6 +724,11 @@ def main(argv: list[str]) -> int:
                 plan_path=plan_path,
                 prev_plan=prev_plan if prev_plan and prev_plan.exists() else None,
                 prev_plan_review=prev_pr if prev_pr and prev_pr.exists() else None,
+            )
+            + (
+                "\n\n## Previous Planning Gate Failure (Autopilot)\n" + last_plan_gate_failure
+                if last_plan_gate_failure
+                else ""
             ),
             dry_run=args.dry_run,
         )
@@ -717,8 +736,14 @@ def main(argv: list[str]) -> int:
         if not args.dry_run:
             if not plan_path.exists():
                 raise RuntimeError(f"Planning did not produce {plan_path}")
-            _validate_run_artifacts(run_id, dry_run=args.dry_run)
-            _validate_spec_anchors(plan_path, dry_run=args.dry_run)
+            try:
+                _validate_run_artifacts(run_id, dry_run=args.dry_run)
+                _validate_spec_anchors(plan_path, dry_run=args.dry_run)
+            except GateFailure as e:
+                # This is an expected STOP gate for invalid plan wiring (anchors/templates).
+                last_plan_gate_failure = e.format_for_prompt()
+                print(f"PLAN VALIDATION FAILED for {run_id}; retrying planning in next revision.")
+                continue
 
         plan_review_path = _artifact_path(run_id, PLAN_REVIEW_STAGE, plan_v)
         prev_plan_review = (
@@ -740,7 +765,14 @@ def main(argv: list[str]) -> int:
         if not args.dry_run:
             if not plan_review_path.exists():
                 raise RuntimeError(f"Plan Review did not produce {plan_review_path}")
-            _validate_run_artifacts(run_id, dry_run=args.dry_run)
+            try:
+                _validate_run_artifacts(run_id, dry_run=args.dry_run)
+            except GateFailure as e:
+                last_plan_gate_failure = e.format_for_prompt()
+                print(
+                    f"PLAN REVIEW ARTIFACT VALIDATION FAILED for {run_id}; retrying planning in next revision."
+                )
+                continue
             verdict, dp = _parse_plan_review_gate(plan_review_path)
             if verdict == "APPROVED" and dp == "NONE":
                 approved_plan_version = plan_v
@@ -771,7 +803,14 @@ def main(argv: list[str]) -> int:
         if not args.dry_run:
             if not impl_path.exists():
                 raise RuntimeError(f"Coding did not produce {impl_path}")
-            _validate_run_artifacts(run_id, dry_run=args.dry_run)
+            try:
+                _validate_run_artifacts(run_id, dry_run=args.dry_run)
+            except GateFailure as e:
+                last_gate_failure = e.format_for_prompt()
+                print(
+                    f"IMPL ARTIFACT VALIDATION FAILED for {run_id}; retrying coding in next revision."
+                )
+                continue
             try:
                 _run_quality_gates(dry_run=args.dry_run)
             except GateFailure as e:
@@ -796,7 +835,13 @@ def main(argv: list[str]) -> int:
         )
 
         if not args.dry_run:
-            _validate_run_artifacts(run_id, dry_run=args.dry_run)
+            try:
+                _validate_run_artifacts(run_id, dry_run=args.dry_run)
+            except GateFailure as e:
+                raise RuntimeError(
+                    "Verify/Review wrote invalid run artifacts; rerun verify/review for this impl revision."
+                    f"\n\n{e.format_for_prompt()}"
+                ) from e
             try:
                 _run_quality_gates(dry_run=args.dry_run)
             except GateFailure as e:

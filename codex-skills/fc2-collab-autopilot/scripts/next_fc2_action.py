@@ -312,6 +312,79 @@ def find_next_section(sections: Iterable[ChecklistSection]) -> ChecklistSection 
     return None
 
 
+@dataclasses.dataclass(frozen=True)
+class ParsedRunId:
+    date: dt.date
+    phase: int
+    item: int
+    slice: int
+    slug: str
+
+
+_RUN_ID_RE = re.compile(
+    r"^(?P<date>\d{4}-\d{2}-\d{2})__p(?P<phase>\d+)-(?P<item>\d+)(?:-(?P<slice>\d+))?__(?P<slug>.+)$"
+)
+
+
+def parse_run_id(run_id: str) -> ParsedRunId | None:
+    m = _RUN_ID_RE.fullmatch(run_id)
+    if not m:
+        return None
+    try:
+        parsed_date = dt.date.fromisoformat(m.group("date"))
+    except ValueError:
+        return None
+    slice_text = m.group("slice")
+    return ParsedRunId(
+        date=parsed_date,
+        phase=int(m.group("phase")),
+        item=int(m.group("item")),
+        slice=int(slice_text) if slice_text is not None else 1,
+        slug=m.group("slug"),
+    )
+
+
+def find_latest_unindexed_in_progress_run(
+    *, phase: int, item: int, indexed_run_ids: set[str]
+) -> str | None:
+    """
+    Best-effort recovery: if a prior automation attempt created a run directory
+    but never made it into the index (e.g. failed during planning), prefer
+    resuming that run rather than creating a new RUN_ID.
+    """
+
+    if not RUNS_DIR.exists():
+        return None
+
+    candidates: list[tuple[ParsedRunId, str]] = []
+    for entry in RUNS_DIR.iterdir():
+        if not entry.is_dir():
+            continue
+        run_id = entry.name
+        if run_id in indexed_run_ids:
+            continue
+        parsed = parse_run_id(run_id)
+        if parsed is None:
+            continue
+        if parsed.phase != phase or parsed.item != item:
+            continue
+        # Consider it "in progress" if it has any plan artifact.
+        if not any(entry.glob("plan-v*.md")):
+            continue
+
+        latest_review = find_latest_review(run_id)
+        if latest_review is not None and parse_review_verdict(latest_review) == "APPROVED":
+            # Completed run should normally be in the index; avoid resuming it implicitly.
+            continue
+
+        candidates.append((parsed, run_id))
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda t: (t[0].date, t[0].slice, t[0].slug))
+    return candidates[-1][1]
+
+
 def main(argv: list[str]) -> int:
     as_json = "--json" in argv
     include_phase0 = "--include-phase0" in argv
@@ -324,6 +397,7 @@ def main(argv: list[str]) -> int:
         raise FileNotFoundError(f"Missing index: {INDEX_PATH}")
 
     index_rows = parse_index_rows(INDEX_PATH)
+    indexed_run_ids = {r.run_id for r in index_rows}
 
     pending = [r for r in index_rows if r.verdict == "PENDING_REVIEW"]
     if pending:
@@ -408,6 +482,32 @@ def main(argv: list[str]) -> int:
 
     next_task = next_section.preferred_unchecked_task
     assert next_task is not None
+
+    # If there's an in-progress run directory for this checklist item that never reached
+    # the index (common when a STOP gate trips during planning), resume it.
+    resume_run_id = find_latest_unindexed_in_progress_run(
+        phase=next_section.phase, item=next_section.item, indexed_run_ids=indexed_run_ids
+    )
+    if resume_run_id is not None:
+        payload = {
+            "action": "resume_unindexed_run",
+            "run_id": resume_run_id,
+            "target": f"Phase {next_section.phase} → Item {next_section.item_key}",
+            "checklist_section_title": next_section.title,
+            "first_unchecked_task": next_task,
+            "hint": "Found an in-progress run directory for this checklist item that is not in the index (likely stopped during planning). Resume it rather than creating a new RUN_ID.",
+            "paths": {
+                "checklist": str(CHECKLIST_PATH),
+                "index": str(INDEX_PATH),
+                "runs_dir": str(RUNS_DIR),
+            },
+        }
+        if as_json:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            print(f"ACTION: resume_unindexed_run\nRUN_ID: {resume_run_id}")
+        return 0
+
     run_id = propose_run_id(
         phase=next_section.phase,
         item=next_section.item,
