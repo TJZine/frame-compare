@@ -1,12 +1,12 @@
 # FC2 Codex App-Server Autopilot Playbook
 
 This document is a **0-decision-point** implementation plan and reusable playbook for migrating an existing
-“multi-role automation controller” (Planning → Plan Review → Coding → Verification/Review) from `codex exec`
+\"multi-role automation controller\" (Planning -> Plan Review -> Coding -> Verification/Review) from `codex exec`
 (fresh processes, no persistent role context) to **`codex app-server`** (persistent threads per role, streamed events).
 
 Primary objectives:
 1. Preserve FC2 STOP rules and artifact contracts.
-2. Keep **role context persistent** across iterations (Planning ↔ Plan Review loops).
+2. Keep **role context persistent** across iterations (Planning <-> Plan Review loops).
 3. Make automation status observable via streamed app-server events.
 4. Keep rollback easy: the existing `codex exec` automation remains available until app-server is proven stable.
 
@@ -46,11 +46,17 @@ Rationale:
 
 1. The server rejects any request before initialization:
 send `initialize`, then send the `initialized` notification, then proceed.
+Repeated `initialize` calls return an error (the controller must treat that as a bug and STOP).
 2. All communication is JSONL over stdio using JSON-RPC 2.0 semantics, but without the `"jsonrpc":"2.0"` field.
 3. The controller MUST read stdout continuously to avoid deadlocks and to surface streamed progress.
 4. The controller MUST treat `turn/completed` as the only authoritative end-of-turn signal.
 5. The controller MUST handle:
 `thread/started`, `turn/started`, `item/*`, `turn/diff/updated`, `turn/completed`.
+6. The controller MUST handle server-initiated approval flow:
+when the server requests approval for a command or file change, the client must respond (accept/decline) or the run will stall.
+The safest initial implementation is interactive prompting (print the requested action + ask for Y/N) and a default of decline on EOF/timeout.
+7. The controller MUST restate hard constraints on every turn:
+do not rely on thread memory to preserve allowed/disallowed writes. Every `turn/start` input must include the same "Allowed Writes" and "Disallowed Writes" lists the FC2 role prompt would include in `codex exec`.
 
 ### Minimal JSONL Examples (Copy/Paste Shapes)
 
@@ -125,9 +131,9 @@ Resolved app-server config (`.agent-workflow/runs/<RUN_ID>/appserver-config.json
 Event log (`.agent-workflow/runs/<RUN_ID>/appserver-events.jsonl`):
 
 ```jsonl
-{"ts":"2026-02-02T12:00:00Z","direction":"in","payload":{"method":"turn/started","params":{"turnId":"turn_123"}}}
-{"ts":"2026-02-02T12:00:01Z","direction":"in","payload":{"method":"turn/diff/updated","params":{"delta":"..."}}}
-{"ts":"2026-02-02T12:00:10Z","direction":"in","payload":{"method":"turn/completed","params":{"turnId":"turn_123","status":"completed"}}}
+{"ts":"2026-02-02T12:00:00Z","direction":"in","payload":{"method":"turn/started","params":{"turn":{"id":"turn_123","status":"inProgress"}}}}
+{"ts":"2026-02-02T12:00:01Z","direction":"in","payload":{"method":"turn/diff/updated","params":{"threadId":"thr_123","turnId":"turn_123","diff":"..."}}}
+{"ts":"2026-02-02T12:00:10Z","direction":"in","payload":{"method":"turn/completed","params":{"turn":{"id":"turn_123","status":"completed"}}}}
 ```
 
 ---
@@ -144,15 +150,38 @@ load `.agent-workflow/runs/<RUN_ID>/appserver_threads.json`.
 If missing, create all role threads with `thread/start` and write the mapping.
 If present, resume the role thread with `thread/resume`.
 4. Start the turn:
-send `turn/start` with `threadId`, `cwd`, and pinned `{model, effort}` for that role.
+send `turn/start` with:
+`threadId`, `cwd`, pinned `{model, effort}` for that role, and a role prompt that includes:
+the exact RUN_ID, the exact artifact version (`plan-vN`, `plan-review-vN`, etc.), and absolute output paths.
+The controller computes `vN` deterministically and the agent must never guess "latest".
 5. Stream and log:
 append all inbound events to `appserver-events.jsonl`.
 6. Wait for completion:
 return only after receiving `turn/completed` for the active turn id.
 7. Enforce hard STOPs:
-if `turn/completed.status` is not `completed`, STOP immediately with the server error payload.
+if `turn.status` from `turn/completed` is not `completed`, STOP immediately with the server error payload.
 
 The controller MUST NOT attempt to infer completion from partial `turn/diff/updated` output.
+
+### Approval Handling (Deterministic)
+
+If the app-server asks for approval, the controller MUST:
+1. Print a single-line banner indicating an approval is required (include role + RUN_ID).
+2. Print the command/file-change summary provided by the server.
+3. Prompt the operator with a strict input:
+`APPROVE (y/N):`
+4. If the operator types `y`, respond with approval.
+5. Any other input, EOF, or timeout is treated as decline.
+6. After decline, STOP and exit non-zero (so the operator can rerun with different config/policies if desired).
+
+Implementation note:
+approval requests may arrive as:
+1. Notifications in the `item/*` stream describing what needs approval (for display).
+2. Server-initiated JSON-RPC requests (messages with `id` + `method`) that require a response (for unblocking the run).
+The client must handle both.
+
+When responding to a server-initiated approval request, the controller MUST send a JSON-RPC response:
+`{ "id": <same id>, "result": { "decision": "accept" } }` or `{ "id": <same id>, "result": { "decision": "decline" } }`.
 
 ## Implementation Plan (0 Decision Points)
 
@@ -169,6 +198,7 @@ call `model/list` and assert the required models exist.
 Call `config/read` and STOP if the resolved config does not match the expected baseline:
 `sandbox_mode="workspace-write"` and `approval_policy="on-request"`.
 Record the full resolved config to `.agent-workflow/runs/<RUN_ID>/appserver-config.json`.
+If the resolved config does not reflect the repo's `.codex/` settings, STOP and fix project trust/config layering before continuing.
 
 Acceptance criteria:
 the schema directory exists and is committed, and the recorded Codex version matches the schema folder name.
@@ -191,6 +221,10 @@ turn id, final status, error payload (if any), and selected item outputs (agent 
 7. Implement deterministic capture for debugging:
 write every JSON line read from server stdout to `.agent-workflow/runs/<RUN_ID>/appserver-events.jsonl`
 when a RUN_ID is active.
+8. Implement request-id generation:
+use a single monotonically increasing integer counter for JSON-RPC request `id` values, and never reuse an id within a process.
+9. Implement server-initiated request handling:
+if a message arrives with both `id` and `method` (and no `result`/`error`), treat it as a server request and respond.
 
 Acceptance criteria:
 the client can:
@@ -243,11 +277,13 @@ start one `codex app-server` subprocess at process start.
 print the active role, RUN_ID, turn id, and final status from `turn/completed`.
 5. Preserve existing STOP behavior:
 if a plan validator fails, the controller routes back to Planning with the gate failure text included.
-6. Preserve existing “confirm run id” behavior:
+6. Preserve existing "confirm run id" behavior:
 before any non-dry-run work starts, the operator must type `CONFIRM RUN_ID: <RUN_ID>` exactly unless `--yes`.
 7. Avoid ambiguous policy mapping:
 do not attempt to translate `.codex/config.toml` approval/sandbox values into app-server `approvalPolicy` or `sandboxPolicy` values.
 Instead, rely on `config/read` for visibility and only override `model`, `effort`, `cwd`, and `summary` per turn.
+8. Do not run gates inside Codex:
+continue to run validators and quality gates as local subprocess calls from the controller, and pass failures back into the next Coding/Planning turn as text.
 
 Acceptance criteria:
 `python3 scripts/fc2_autopilot.py --engine app-server --dry-run` prints the same run selection and steps as today.
@@ -258,7 +294,7 @@ Implement the following STOP and routing policy with no exceptions:
 
 1. If `initialize` fails: STOP with a single error line and exit non-zero.
 2. If any `thread/resume` fails: STOP and print the missing thread id + RUN_ID.
-3. If `turn/completed.status` is `failed`: STOP and print the server error payload.
+3. If `turn.status` from `turn/completed` is `failed`: STOP and print the server error payload.
 4. If run-artifact validation fails: route back to the role that wrote the artifact.
 5. If spec-anchor validation fails: route back to Planning (plan must be fixed).
 6. If quality gates fail after coding: route back to Coding and include the formatted gate failure.
@@ -277,7 +313,9 @@ Mitigation: always run a dedicated reader thread and enforce timeouts on `wait_f
 Mitigation: set `model` and `effort` on every `turn/start` unconditionally.
 4. Risk: the server emits large diffs causing slow rendering or memory growth.
 Mitigation: store raw events to `appserver-events.jsonl`, and print only summarized progress to console.
-5. Risk: two controller processes race and corrupt the worktree or artifacts.
+5. Risk: the controller misses a server `error` notification and waits forever.
+Mitigation: treat any `error` notification as a STOP and unblock any waiting turn (fail fast).
+6. Risk: two controller processes race and corrupt the worktree or artifacts.
 Mitigation: enforce `.agent-workflow/.autopilot.lock`.
 
 ### Step 6: Verification Checklist (Must Pass Before Default Flip)
@@ -295,7 +333,7 @@ Run all commands (from repo root):
 `UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_contract_views.py --check`
 `UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_traceability.py --check`
 3. App-server smoke test (new):
-run the controller on a trivial “documentation-only” RUN_ID and confirm:
+run the controller on a trivial "documentation-only" RUN_ID and confirm:
 threads are created, a turn completes, and the process shuts down cleanly.
 4. FC2 end-to-end (new):
 run one real checklist slice through APPROVED using `--engine app-server`.
@@ -345,7 +383,7 @@ file presence, allowed writes per role, and any SSOT anchor policy.
 
 ### D. Acceptance Criteria (Minimal)
 
-1. Smoke test: initialize → thread/start → turn/start → turn/completed.
+1. Smoke test: initialize -> thread/start -> turn/start -> turn/completed.
 2. Real run: one full workflow completes with artifacts and gates passing.
 3. Resume test: rerun controller and confirm role context is preserved.
 
