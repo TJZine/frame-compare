@@ -10,6 +10,8 @@ from typing import Protocol
 
 import httpx
 
+from frame_compare.orchestration.preflight import prepare_preflight
+from frame_compare.orchestration.progress import select_reporter
 from frame_compare.utils.progress import ProgressReporter
 from frame_compare.vs.loader import DefaultVSLoader, VSLoader
 from frame_compare.vs.types import HDRMetadata
@@ -132,3 +134,46 @@ class RunDependencies:
         if self.ffmpeg_runner is None:
             self.ffmpeg_runner = DefaultFFmpegRunner()
         return self.ffmpeg_runner
+
+
+async def execute_run(request: RunRequest, deps: RunDependencies | None = None) -> RunResult:
+    """Execute a run request asynchronously.
+
+    Raises:
+        FrameCompareError: Any preflight validation errors are propagated.
+    """
+    if deps is None:
+        deps = RunDependencies()
+
+    if deps.progress is None:
+        deps.progress = select_reporter(
+            quiet=request.quiet,
+            json_output=request.json_output,
+        )
+
+    async def _execute_with_deps() -> RunResult:
+        run_start = deps.clock()
+        preflight_start = deps.clock()
+        preflight = prepare_preflight(
+            root=request.root,
+            config_path=request.config_path,
+        )
+        preflight_end = deps.clock()
+        run_end = preflight_end
+
+        preflight_seconds = (preflight_end - preflight_start).total_seconds()
+        duration_seconds = (run_end - run_start).total_seconds()
+
+        return RunResult(
+            success=True,
+            duration_seconds=duration_seconds,
+            phase_timings={"preflight": preflight_seconds},
+            warnings=preflight.warnings,
+        )
+
+    if deps.http_client is not None:
+        return await _execute_with_deps()
+
+    async with httpx.AsyncClient() as http_client:
+        deps.http_client = http_client
+        return await _execute_with_deps()
