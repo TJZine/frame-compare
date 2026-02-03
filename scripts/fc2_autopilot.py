@@ -299,6 +299,7 @@ def _extract_spec_anchor_paths(plan_path: Path) -> list[Path]:
 
 
 _ARTIFACT_ERROR_RE = re.compile(r"ERROR:\s+(?P<path>[^:]+):")
+_STALE_CONTRACT_RE = re.compile(r"^STALE:\s+(?P<path>.+?)\s+differs from generated$", re.MULTILINE)
 
 
 def _extract_artifact_error_path(stderr: str, *, run_dir: Path) -> Path | None:
@@ -317,6 +318,47 @@ def _extract_artifact_error_path(stderr: str, *, run_dir: Path) -> Path | None:
     if candidate.suffix != ".md":
         return None
     return candidate
+
+
+def _extract_stale_contract_paths(stdout: str) -> list[Path]:
+    paths: list[Path] = []
+    for match in _STALE_CONTRACT_RE.finditer(stdout):
+        raw = match.group("path").strip()
+        if not raw:
+            continue
+        path = (REPO_ROOT / raw).resolve()
+        if path.exists():
+            paths.append(path)
+    return paths
+
+
+def _format_coding_next_block(
+    *, run_id: str, impl_path: Path, plan_path: Path, plan_review_path: Path
+) -> str:
+    return textwrap.dedent(
+        f"""
+        ## NEXT AGENT PROMPT (COPY/PASTE)
+
+        You are the Verification Agent for Frame Compare 2.0.
+
+        ## RUN_ID
+        {run_id}
+
+        ## Files to Read
+        1. Read file: {impl_path}
+        2. Read file: {plan_path}
+        3. Read file: {plan_review_path}
+
+        ## Your Task
+        1. Verify implementation matches the plan
+        2. Run the full verification suite
+        3. Update the master checklist
+        4. Update the run index
+
+        ## Output
+        Write file: {impl_path.with_name("verify-" + impl_path.name.removeprefix("impl-"))}
+        """
+    ).strip()
 
 
 def _latest_stage_path(run_id: str, stage: str) -> Path | None:
@@ -611,12 +653,15 @@ def _coding_prompt(
         - If any gate fails, fix the issue and re-run the failing gate(s) until they pass.
           Then re-run the full gate suite to confirm all gates are green before finishing.
           Do not stop after a failing gate without attempting to fix it.
+        - If `generate_contract_views.py --check` reports STALE outputs, run:
+          `UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_contract_views.py`
+          to regenerate, then re-run the full gate suite. Include any regenerated files in OUTPUTS.
         - For any additional `uv run` commands, prefix with `UV_CACHE_DIR=./.uv_cache` to avoid sandbox approval prompts.
         - Do NOT request scope expansion or permission to edit files outside Allowed Writes.
           If a gate fails in an out-of-scope file, record the failure in {impl_path} and stop after re-running the gate
           to confirm it still fails.
         - Always include the required "## NEXT AGENT PROMPT (COPY/PASTE)" block at the end of {impl_path}
-          with concrete RUN_ID + version values (no placeholders).
+          with concrete RUN_ID + version values (no placeholders like `TBD`).
         - Record commands + outcomes in {impl_path}.
         - End {impl_path} with a correct NEXT block for Verification.
 
@@ -1214,6 +1259,30 @@ def main(argv: list[str]) -> int:
                         _run_quality_gates(dry_run=args.dry_run)
                     except GateFailure as e:
                         last_gate_failure = e.format_for_prompt()
+                        if e.command[:5] == [
+                            "uv",
+                            "run",
+                            "--no-sync",
+                            "python",
+                            "scripts/generate_contract_views.py",
+                        ]:
+                            stale_paths = _extract_stale_contract_paths(e.stdout or "")
+                            if stale_paths:
+                                for path in stale_paths:
+                                    if path not in extra_coding_writes:
+                                        extra_coding_writes.append(path)
+                                rel_paths = "\n".join(
+                                    f"- {path.relative_to(REPO_ROOT)}" for path in stale_paths
+                                )
+                                repair_note = (
+                                    "Contract view check reported stale generated files. "
+                                    "Run the regeneration command:\n"
+                                    "  UV_CACHE_DIR=./.uv_cache uv run --no-sync python "
+                                    "scripts/generate_contract_views.py\n"
+                                    "Then re-run the full gate suite. The following files are allowed to update "
+                                    "as generated outputs; include them in OUTPUTS:\n"
+                                    f"{rel_paths}"
+                                )
                         print(
                             f"GATES FAILED after coding for {run_id}; retrying coding in next revision."
                         )
