@@ -298,6 +298,27 @@ def _extract_spec_anchor_paths(plan_path: Path) -> list[Path]:
     return paths
 
 
+_ARTIFACT_ERROR_RE = re.compile(r"ERROR:\s+(?P<path>[^:]+):")
+
+
+def _extract_artifact_error_path(stderr: str, *, run_dir: Path) -> Path | None:
+    match = _ARTIFACT_ERROR_RE.search(stderr)
+    if not match:
+        return None
+    candidate = Path(match.group("path"))
+    try:
+        candidate = candidate.resolve()
+    except FileNotFoundError:
+        return None
+    try:
+        candidate.relative_to(run_dir.resolve())
+    except ValueError:
+        return None
+    if candidate.suffix != ".md":
+        return None
+    return candidate
+
+
 def _latest_stage_path(run_id: str, stage: str) -> Path | None:
     run_dir = RUNS_DIR / run_id
     latest = _find_latest_version(run_dir, stage)
@@ -512,7 +533,32 @@ def _plan_review_prompt(
     ).strip()
 
 
-def _coding_prompt(run_id: str, *, plan_path: Path, plan_review_path: Path, impl_path: Path) -> str:
+def _coding_prompt(
+    run_id: str,
+    *,
+    plan_path: Path,
+    plan_review_path: Path,
+    impl_path: Path,
+    extra_allowed_writes: list[Path] | None = None,
+    repair_note: str | None = None,
+) -> str:
+    allowed_writes: list[str] = [
+        "- Code and tests required by the plan",
+        f"- {impl_path}",
+    ]
+    if extra_allowed_writes:
+        for path in extra_allowed_writes:
+            allowed_writes.append(f"- {path}")
+
+    repair_guidance = ""
+    if repair_note:
+        repair_guidance = textwrap.dedent(
+            f"""
+            ## Artifact Repair (Autopilot)
+            {repair_note}
+            """
+        ).strip()
+
     return textwrap.dedent(
         f"""
         Treat this prompt as complete and authoritative. Do not rely on any prior thread/session context.
@@ -533,8 +579,7 @@ def _coding_prompt(run_id: str, *, plan_path: Path, plan_review_path: Path, impl
         - {plan_review_path}
 
         ## Allowed Writes (Hard)
-        - Code and tests required by the plan
-        - {impl_path}
+        {"\n".join(allowed_writes)}
 
         ## Disallowed Writes (Hard)
         - .agent-workflow/index.md
@@ -542,12 +587,40 @@ def _coding_prompt(run_id: str, *, plan_path: Path, plan_review_path: Path, impl
 
         ## Your Task
         Implement EXACTLY what the plan specifies.
+        - Start by writing {impl_path} with correct YAML frontmatter and a placeholder section for commands/results.
+          Update the file as you run commands so the artifact always exists on disk.
+        - The impl artifact MUST include YAML frontmatter with an `INPUTS` list that includes at least:
+          - {plan_path}
+          - {plan_review_path}
+          - {impl_path} (as an OUTPUT entry)
+        - Use this exact frontmatter shape (update VERSION as needed):
+        ```yaml
+        ---
+        RUN_ID: {run_id}
+        VERSION: v1
+        TARGET: {action_target_line(run_id)}
+        INPUTS:
+          - {plan_path}
+          - {plan_review_path}
+        OUTPUTS:
+          - {impl_path}
+        ---
+        ```
         - You MUST run the full local quality gates below and ensure they all pass before finishing:
         {_format_quality_gates_for_prompt()}
+        - If any gate fails, fix the issue and re-run the failing gate(s) until they pass.
+          Then re-run the full gate suite to confirm all gates are green before finishing.
+          Do not stop after a failing gate without attempting to fix it.
         - For any additional `uv run` commands, prefix with `UV_CACHE_DIR=./.uv_cache` to avoid sandbox approval prompts.
-        - Hard rule: Do NOT write the "## NEXT AGENT PROMPT (COPY/PASTE)" block until all gates pass.
+        - Do NOT request scope expansion or permission to edit files outside Allowed Writes.
+          If a gate fails in an out-of-scope file, record the failure in {impl_path} and stop after re-running the gate
+          to confirm it still fails.
+        - Always include the required "## NEXT AGENT PROMPT (COPY/PASTE)" block at the end of {impl_path}
+          with concrete RUN_ID + version values (no placeholders).
         - Record commands + outcomes in {impl_path}.
         - End {impl_path} with a correct NEXT block for Verification.
+
+        {repair_guidance}
         """
     ).strip()
 
@@ -585,6 +658,7 @@ def _verify_review_prompt(
         4. Write review report: {review_path}
         5. Finalize the same index row with final verdict + review link: {INDEX_PATH}
         6. Ensure {review_path} ends with the required "## NEXT AGENT PROMPT (COPY/PASTE)" block.
+        7. Ensure {verify_path} ends with the required "## NEXT AGENT PROMPT (COPY/PASTE)" block for Review.
 
         ## Allowed Writes
         - {verify_path}
@@ -601,7 +675,8 @@ def _verify_review_prompt(
            - For any `uv run` command, prefix with `UV_CACHE_DIR=./.uv_cache` to avoid sandbox approval prompts.
         2. If gates pass, update checklist and append index row with PENDING_REVIEW.
         3. Perform review and write {review_path} with final verdict. Include the required NEXT block at the end.
-        4. Finalize index row (replace PENDING_REVIEW with final verdict and add review link).
+        4. Ensure {verify_path} includes a Review NEXT block before finishing.
+        5. Finalize index row (replace PENDING_REVIEW with final verdict and add review link).
         """
     ).strip()
 
@@ -703,6 +778,12 @@ def main(argv: list[str]) -> int:
     )
     parser.add_argument(
         "--max-review-revisions", type=int, default=2, help="Max code review revision cycles."
+    )
+    parser.add_argument(
+        "--max-coding-revisions",
+        type=int,
+        default=4,
+        help="Max coding retries before a verify/review cycle begins.",
     )
     parser.add_argument(
         "--engine",
@@ -1062,45 +1143,87 @@ def main(argv: list[str]) -> int:
         # Coding + verify/review cycles.
         last_gate_failure: str | None = None
         for _ in range(args.max_review_revisions):
-            impl_v = _next_version(run_dir, IMPL_STAGE)
-            impl_path = _artifact_path(run_id, IMPL_STAGE, impl_v)
-            _run_turn(
-                engine,
-                role=ROLE_CODING,
-                message=_coding_prompt(
-                    run_id,
-                    plan_path=plan_path,
-                    plan_review_path=plan_review_path,
-                    impl_path=impl_path,
-                )
-                + (
-                    "\n\n## Previous Gate Failure (Autopilot)\n" + last_gate_failure
-                    if last_gate_failure
-                    else ""
-                ),
-            )
+            coding_attempts = 0
+            impl_v: int | None = None
+            impl_path: Path | None = None
+            extra_coding_writes: list[Path] = []
+            repair_note: str | None = None
 
-            if not args.dry_run:
-                if not impl_path.exists():
-                    raise AutopilotStopError(f"STOP: coding did not produce {impl_path}")
-                try:
-                    _validate_run_artifacts(run_id, dry_run=args.dry_run)
-                except GateFailure as e:
-                    last_gate_failure = e.format_for_prompt()
-                    print(
-                        f"IMPL ARTIFACT VALIDATION FAILED for {run_id}; retrying coding in next revision."
+            while True:
+                if coding_attempts >= args.max_coding_revisions:
+                    raise AutopilotStopError(
+                        "STOP: exceeded max coding revision cycles without producing a "
+                        "valid impl artifact."
                     )
-                    print(last_gate_failure)
-                    continue
-                try:
-                    _run_quality_gates(dry_run=args.dry_run)
-                except GateFailure as e:
-                    last_gate_failure = e.format_for_prompt()
-                    print(
-                        f"GATES FAILED after coding for {run_id}; retrying coding in next revision."
+                coding_attempts += 1
+                impl_v = _next_version(run_dir, IMPL_STAGE)
+                impl_path = _artifact_path(run_id, IMPL_STAGE, impl_v)
+
+                _run_turn(
+                    engine,
+                    role=ROLE_CODING,
+                    message=_coding_prompt(
+                        run_id,
+                        plan_path=plan_path,
+                        plan_review_path=plan_review_path,
+                        impl_path=impl_path,
+                        extra_allowed_writes=extra_coding_writes if extra_coding_writes else None,
+                        repair_note=repair_note,
                     )
-                    print(last_gate_failure)
-                    continue
+                    + (
+                        "\n\n## Previous Gate Failure (Autopilot)\n" + last_gate_failure
+                        if last_gate_failure
+                        else ""
+                    ),
+                )
+
+                if not args.dry_run:
+                    if not impl_path.exists():
+                        last_gate_failure = (
+                            "STOP: coding did not produce the required impl artifact. "
+                            f"You MUST write {impl_path} with correct frontmatter and a NEXT block."
+                        )
+                        print(last_gate_failure)
+                        continue
+                    try:
+                        _validate_run_artifacts(run_id, dry_run=args.dry_run)
+                        extra_coding_writes = []
+                        repair_note = None
+                    except GateFailure as e:
+                        last_gate_failure = e.format_for_prompt()
+                        artifact_path = _extract_artifact_error_path(e.stderr, run_dir=run_dir)
+                        if artifact_path and artifact_path != impl_path:
+                            if artifact_path not in extra_coding_writes:
+                                extra_coding_writes.append(artifact_path)
+                            rel_path = artifact_path.relative_to(REPO_ROOT)
+                            repair_note = (
+                                "The run artifact validator failed due to an older artifact. "
+                                "You are allowed to edit the following file to repair its YAML "
+                                "frontmatter / NEXT block without changing substantive content:\n"
+                                f"- {rel_path}\n"
+                                "Fix the missing frontmatter entries (RUN_ID, VERSION, TARGET, INPUTS, OUTPUTS) "
+                                "or required NEXT block as needed, then re-run the gates."
+                            )
+                        print(
+                            f"IMPL ARTIFACT VALIDATION FAILED for {run_id}; "
+                            "retrying coding in next revision."
+                        )
+                        print(last_gate_failure)
+                        continue
+                    try:
+                        _run_quality_gates(dry_run=args.dry_run)
+                    except GateFailure as e:
+                        last_gate_failure = e.format_for_prompt()
+                        print(
+                            f"GATES FAILED after coding for {run_id}; retrying coding in next revision."
+                        )
+                        print(last_gate_failure)
+                        continue
+
+                break
+
+            assert impl_v is not None
+            assert impl_path is not None
 
             verify_path = _artifact_path(run_id, VERIFY_STAGE, impl_v)
             review_path = _artifact_path(run_id, REVIEW_STAGE, impl_v)

@@ -574,7 +574,7 @@ frame-compare/
 - [x] Implement `RunRequest` dataclass per spec (2026-02-02)
 - [x] Implement `RunResult` dataclass per spec (2026-02-03)
 - [x] Implement `RunDependencies` for dependency injection (2026-02-03)
-- [ ] Create `src/frame_compare/runner.py` at package root (see `cli-module.md` §1.2)
+- [x] Create `src/frame_compare/runner.py` at package root (see `cli-module.md` §1.2) (2026-02-03)
 - [ ] Implement `run(request, dependencies=None) -> RunResult` entry point in `src/frame_compare/runner.py` (see `cli-module.md` §2.1)
 - [ ] Implement `async execute_run(request, deps=None) -> RunResult` in `src/frame_compare/orchestration/coordinator.py` (see `orchestration-module.md` §4.4.3)
 - [ ] Implement phase orchestration per spec §4.4.4:
