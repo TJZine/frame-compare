@@ -81,6 +81,33 @@ class RunAction:
 
 
 @dataclasses.dataclass(frozen=True)
+class ChecklistTask:
+    text: str
+    checked: bool
+    optional: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class ChecklistSection:
+    phase: int
+    item: int
+    title: str
+    tasks: list[ChecklistTask]
+
+    @property
+    def item_key(self) -> str:
+        return f"{self.phase}.{self.item}"
+
+
+@dataclasses.dataclass(frozen=True)
+class BundleSelection:
+    phase: int
+    item: int
+    title: str
+    tasks: list[str]
+
+
+@dataclasses.dataclass(frozen=True)
 class GateFailure(Exception):
     command: list[str]
     stdout: str
@@ -146,6 +173,157 @@ def _read_text(path: Path) -> str:
 
 def _write_text(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
+
+
+def _is_optional_task(task_text: str) -> bool:
+    t = task_text.lower()
+    return "(optional" in t or t.startswith("optional:")
+
+
+def _parse_checklist_sections(path: Path) -> list[ChecklistSection]:
+    header_re = re.compile(r"^###\s+(\d+)\.(\d+)\s+(.*)$")
+    checkbox_re = re.compile(r"^-\s+\[(?P<state>[ xX])\]\s+(?P<task>.*)$")
+
+    sections: list[ChecklistSection] = []
+    cur_phase: int | None = None
+    cur_item: int | None = None
+    cur_title: str | None = None
+    cur_tasks: list[ChecklistTask] = []
+
+    def flush() -> None:
+        nonlocal cur_phase, cur_item, cur_title, cur_tasks
+        if cur_phase is None or cur_item is None or cur_title is None:
+            return
+        sections.append(
+            ChecklistSection(
+                phase=cur_phase,
+                item=cur_item,
+                title=cur_title,
+                tasks=cur_tasks,
+            )
+        )
+        cur_phase = None
+        cur_item = None
+        cur_title = None
+        cur_tasks = []
+
+    for raw in _read_text(path).splitlines():
+        m_header = header_re.match(raw)
+        if m_header:
+            flush()
+            cur_phase = int(m_header.group(1))
+            cur_item = int(m_header.group(2))
+            cur_title = m_header.group(3).strip()
+            continue
+
+        if cur_phase is None:
+            continue
+
+        m_cb = checkbox_re.match(raw)
+        if not m_cb:
+            continue
+
+        checked = m_cb.group("state") in ("x", "X")
+        task_text = m_cb.group("task").strip()
+        cur_tasks.append(
+            ChecklistTask(
+                text=task_text,
+                checked=checked,
+                optional=_is_optional_task(task_text),
+            )
+        )
+
+    flush()
+    return sections
+
+
+def _parse_bundle_prefix(prefix: str) -> tuple[int, int]:
+    if "." not in prefix:
+        raise AutopilotStopError(
+            f"STOP: invalid --bundle-prefix {prefix!r}; expected format like '7.1'."
+        )
+    phase_text, item_text = prefix.split(".", 1)
+    if not phase_text.isdigit() or not item_text.isdigit():
+        raise AutopilotStopError(
+            f"STOP: invalid --bundle-prefix {prefix!r}; expected numeric format like '7.1'."
+        )
+    return int(phase_text), int(item_text)
+
+
+def _select_bundle_by_prefix(
+    *,
+    prefix: str,
+    count: int,
+    include_optional: bool,
+) -> BundleSelection:
+    phase, item = _parse_bundle_prefix(prefix)
+    sections = _parse_checklist_sections(CHECKLIST_PATH)
+    section = next((s for s in sections if s.phase == phase and s.item == item), None)
+    if section is None:
+        raise AutopilotStopError(f"STOP: no checklist section found for prefix {prefix!r}.")
+
+    candidates = [
+        t.text for t in section.tasks if not t.checked and (include_optional or not t.optional)
+    ]
+    if count < 2:
+        raise AutopilotStopError("STOP: --bundle-count must be at least 2 for bundling.")
+    if len(candidates) < count:
+        raise AutopilotStopError(
+            "STOP: not enough unchecked tasks to satisfy bundle request "
+            f"({len(candidates)} available, {count} requested) for {prefix}."
+        )
+    return BundleSelection(phase=phase, item=item, title=section.title, tasks=candidates[:count])
+
+
+def _select_bundle_by_items(
+    *,
+    items: list[str],
+    include_optional: bool,
+) -> BundleSelection:
+    if len(items) < 2:
+        raise AutopilotStopError("STOP: --bundle-items must include at least 2 tasks.")
+    sections = _parse_checklist_sections(CHECKLIST_PATH)
+    lookup: list[tuple[ChecklistSection, ChecklistTask]] = []
+    for s in sections:
+        for t in s.tasks:
+            lookup.append((s, t))
+
+    selected: list[tuple[ChecklistSection, ChecklistTask]] = []
+    for item_text in items:
+        matches = [(s, t) for s, t in lookup if t.text == item_text]
+        if not matches:
+            raise AutopilotStopError(f"STOP: bundle item not found in checklist: {item_text!r}")
+        if len(matches) > 1:
+            raise AutopilotStopError(
+                f"STOP: bundle item is ambiguous (appears multiple times): {item_text!r}"
+            )
+        section, task = matches[0]
+        if task.checked:
+            raise AutopilotStopError(
+                f"STOP: bundle item already checked in checklist: {item_text!r}"
+            )
+        if task.optional and not include_optional:
+            raise AutopilotStopError(
+                "STOP: bundle item is marked optional but --include-optional not set: "
+                f"{item_text!r}"
+            )
+        selected.append((section, task))
+
+    section_keys = {(s.phase, s.item) for s, _ in selected}
+    if len(section_keys) != 1:
+        raise AutopilotStopError(
+            "STOP: bundled items span multiple checklist sections; bundle must stay within "
+            "a single section (e.g., 7.1)."
+        )
+
+    section = selected[0][0]
+    ordered = [t.text for t in section.tasks if any(t.text == sel[1].text for sel in selected)]
+    return BundleSelection(
+        phase=section.phase,
+        item=section.item,
+        title=section.title,
+        tasks=ordered,
+    )
 
 
 def _find_latest_version(run_dir: Path, stage: str) -> int | None:
@@ -332,35 +510,6 @@ def _extract_stale_contract_paths(stdout: str) -> list[Path]:
     return paths
 
 
-def _format_coding_next_block(
-    *, run_id: str, impl_path: Path, plan_path: Path, plan_review_path: Path
-) -> str:
-    return textwrap.dedent(
-        f"""
-        ## NEXT AGENT PROMPT (COPY/PASTE)
-
-        You are the Verification Agent for Frame Compare 2.0.
-
-        ## RUN_ID
-        {run_id}
-
-        ## Files to Read
-        1. Read file: {impl_path}
-        2. Read file: {plan_path}
-        3. Read file: {plan_review_path}
-
-        ## Your Task
-        1. Verify implementation matches the plan
-        2. Run the full verification suite
-        3. Update the master checklist
-        4. Update the run index
-
-        ## Output
-        Write file: {impl_path.with_name("verify-" + impl_path.name.removeprefix("impl-"))}
-        """
-    ).strip()
-
-
 def _latest_stage_path(run_id: str, stage: str) -> Path | None:
     run_dir = RUNS_DIR / run_id
     latest = _find_latest_version(run_dir, stage)
@@ -368,6 +517,97 @@ def _latest_stage_path(run_id: str, stage: str) -> Path | None:
         return None
     p = _artifact_path(run_id, stage, latest)
     return p if p.exists() else None
+
+
+def _slugify(text: str) -> str:
+    text = text.strip().lower()
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    text = re.sub(r"-{2,}", "-", text).strip("-")
+    return text or "task"
+
+
+def _derive_slug(task_text: str) -> str:
+    backticked = re.findall(r"`([^`]+)`", task_text)
+    for token in backticked:
+        base = os.path.basename(token)
+        if base.endswith(".py"):
+            return _slugify(base[:-3])
+        if base:
+            return _slugify(base)[:48]
+    stop = {
+        "create",
+        "implement",
+        "complete",
+        "write",
+        "update",
+        "wire",
+        "verify",
+        "add",
+        "run",
+        "tests",
+        "test",
+        "unit",
+        "integration",
+        "per",
+        "spec",
+        "and",
+        "or",
+        "the",
+        "a",
+        "an",
+        "to",
+        "for",
+        "of",
+        "in",
+        "at",
+    }
+    words = [w for w in re.split(r"\s+", re.sub(r"[`.,:;()]", " ", task_text)) if w]
+    picked: list[str] = []
+    for w in words:
+        wl = w.lower()
+        if wl in stop:
+            continue
+        picked.append(wl)
+        if len(picked) >= 5:
+            break
+    return _slugify("-".join(picked))[:48]
+
+
+def _next_slice_number(phase: int, item: int, runs_dir: Path) -> int | None:
+    sliced = re.compile(rf"^\d{{4}}-\d{{2}}-\d{{2}}__p{phase}-{item}-(\d+)__")
+    unsliced = re.compile(rf"^\d{{4}}-\d{{2}}-\d{{2}}__p{phase}-{item}__")
+
+    max_n: int | None = None
+    seen_unsliced = False
+
+    if not runs_dir.exists():
+        return None
+
+    for entry in runs_dir.iterdir():
+        name = entry.name
+        m_s = sliced.match(name)
+        if m_s:
+            n = int(m_s.group(1))
+            max_n = n if max_n is None else max(max_n, n)
+            continue
+        if unsliced.match(name):
+            seen_unsliced = True
+
+    if max_n is not None:
+        return max_n + 1
+    if seen_unsliced:
+        return 2
+    return None
+
+
+def _propose_run_id(phase: int, item: int, task_text: str, runs_dir: Path) -> str:
+    today = time.strftime("%Y-%m-%d", time.localtime())
+    slug = _derive_slug(task_text)
+    next_slice = _next_slice_number(phase=phase, item=item, runs_dir=runs_dir)
+    if next_slice is None:
+        return f"{today}__p{phase}-{item}__{slug}"
+    return f"{today}__p{phase}-{item}-{next_slice}__{slug}"
 
 
 def _load_next_action(*, include_phase0: bool, include_optional: bool, dry_run: bool) -> RunAction:
@@ -489,6 +729,8 @@ def _planning_prompt(
             """
         ).strip()
 
+    bundle_section = _bundle_prompt_section(run_id)
+
     return textwrap.dedent(
         f"""
         Treat this prompt as complete and authoritative. Do not rely on any prior thread/session context.
@@ -514,6 +756,7 @@ def _planning_prompt(
         - Any code under src/ or tests/
 
         {spec_guidance}
+        {bundle_section}
 
         ## Your Task
         Write the plan artifact at {plan_path}.
@@ -537,6 +780,7 @@ def _plan_review_prompt(
     extra_inputs = ""
     if prev_plan_review is not None:
         extra_inputs = f"\n## Prior Plan Review\n- {prev_plan_review}\n"
+    bundle_section = _bundle_prompt_section(run_id)
     return textwrap.dedent(
         f"""
         Treat this prompt as complete and authoritative. Do not rely on any prior thread/session context.
@@ -562,6 +806,8 @@ def _plan_review_prompt(
 
         ## Disallowed Writes (Hard)
         - Any other files
+
+        {bundle_section}
 
         ## Your Task
         Review the plan. If and only if it is ready, set:
@@ -601,6 +847,8 @@ def _coding_prompt(
             """
         ).strip()
 
+    bundle_section = _bundle_prompt_section(run_id)
+
     return textwrap.dedent(
         f"""
         Treat this prompt as complete and authoritative. Do not rely on any prior thread/session context.
@@ -626,6 +874,8 @@ def _coding_prompt(
         ## Disallowed Writes (Hard)
         - .agent-workflow/index.md
         - docs/OPUS_REBUILD_FRAME_COMPARE/10-agent-master-checklist.md
+
+        {bundle_section}
 
         ## Your Task
         Implement EXACTLY what the plan specifies.
@@ -679,6 +929,7 @@ def _verify_review_prompt(
     verify_path: Path,
     review_path: Path,
 ) -> str:
+    bundle_section = _bundle_prompt_section(run_id)
     return textwrap.dedent(
         f"""
         Treat this prompt as complete and authoritative. Do not rely on any prior thread/session context.
@@ -715,6 +966,8 @@ def _verify_review_prompt(
         - Do not change code/tests. If any gate fails, STOP and report it in {verify_path}.
           The controller will route back to Coding for fixes.
 
+        {bundle_section}
+
         ## Your Task (Order is Mandatory)
         1. Run the full gate suite (pyright/ruff/pytest/import-linter/contracts/traceability) and record results in {verify_path}.
            - For any `uv run` command, prefix with `UV_CACHE_DIR=./.uv_cache` to avoid sandbox approval prompts.
@@ -722,16 +975,31 @@ def _verify_review_prompt(
         3. Perform review and write {review_path} with final verdict. Include the required NEXT block at the end.
         4. Ensure {verify_path} includes a Review NEXT block before finishing.
         5. Finalize index row (replace PENDING_REVIEW with final verdict and add review link).
+        6. If this is a bundled run, mark ALL bundled checklist items complete.
         """
     ).strip()
 
 
 _RUN_ID_TARGET_CACHE: dict[str, str] = {}
+_RUN_ID_BUNDLE_TASKS: dict[str, list[str]] = {}
 
 
 def action_target_line(run_id: str) -> str:
     # The controller populates this cache for the active run (best-effort).
     return _RUN_ID_TARGET_CACHE.get(run_id, "<unknown; controller did not provide target context>")
+
+
+def _bundle_prompt_section(run_id: str) -> str:
+    tasks = _RUN_ID_BUNDLE_TASKS.get(run_id)
+    if not tasks:
+        return ""
+    lines = "\n".join(f"- {task}" for task in tasks)
+    return textwrap.dedent(
+        f"""
+        ## Bundled Checklist Items (Complete All)
+        {lines}
+        """
+    ).strip()
 
 
 def _ensure_index_finalized(run_id: str) -> None:
@@ -817,6 +1085,22 @@ def main(argv: list[str]) -> int:
     )
     parser.add_argument(
         "--include-optional", action="store_true", help="Allow optional-only task selection."
+    )
+    parser.add_argument(
+        "--bundle-prefix",
+        type=str,
+        help="Bundle multiple unchecked checklist tasks within a section (e.g., '7.1').",
+    )
+    parser.add_argument(
+        "--bundle-count",
+        type=int,
+        default=0,
+        help="Number of tasks to include when using --bundle-prefix (must be >=2).",
+    )
+    parser.add_argument(
+        "--bundle-items",
+        type=str,
+        help="Explicit checklist task texts to bundle, separated by '|'.",
     )
     parser.add_argument(
         "--max-plan-revisions", type=int, default=4, help="Max plan<->plan-review iterations."
@@ -934,11 +1218,18 @@ def main(argv: list[str]) -> int:
         dry_run=args.dry_run,
     )
 
+    if args.bundle_prefix and args.bundle_items:
+        raise AutopilotStopError(
+            "STOP: use only one of --bundle-prefix or --bundle-items at a time."
+        )
+
     if action.action == "dry_run":
         print("ACTION: dry_run (no next-action available)")
         return 0
 
     if action.action == "done":
+        if args.bundle_prefix or args.bundle_items:
+            raise AutopilotStopError("STOP: checklist appears complete; bundling cannot proceed.")
         print("No work to do (checklist appears complete).")
         return 0
 
@@ -954,6 +1245,46 @@ def main(argv: list[str]) -> int:
         print(f"Repaired stale PENDING_REVIEW row for {action.run_id}. Re-run autopilot.")
         return 0
 
+    bundle_selection: BundleSelection | None = None
+    if args.bundle_prefix:
+        if action.action == "resume_unindexed_run":
+            raise AutopilotStopError(
+                "STOP: bundling requested, but an unindexed in-progress run exists. "
+                "Resolve or remove the in-progress run before bundling."
+            )
+        bundle_selection = _select_bundle_by_prefix(
+            prefix=args.bundle_prefix,
+            count=args.bundle_count,
+            include_optional=args.include_optional,
+        )
+    elif args.bundle_items:
+        if action.action == "resume_unindexed_run":
+            raise AutopilotStopError(
+                "STOP: bundling requested, but an unindexed in-progress run exists. "
+                "Resolve or remove the in-progress run before bundling."
+            )
+        items = [item.strip() for item in args.bundle_items.split("|") if item.strip()]
+        bundle_selection = _select_bundle_by_items(
+            items=items,
+            include_optional=args.include_optional,
+        )
+
+    if bundle_selection is not None:
+        run_id = _propose_run_id(
+            phase=bundle_selection.phase,
+            item=bundle_selection.item,
+            task_text=bundle_selection.tasks[0],
+            runs_dir=RUNS_DIR,
+        )
+        action = RunAction(
+            action="start_new_run",
+            run_id=run_id,
+            hint="bundle",
+            target=f"Phase {bundle_selection.phase} → Item {bundle_selection.item} (Bundled)",
+            checklist_section_title=bundle_selection.title,
+            first_unchecked_task=bundle_selection.tasks[0],
+        )
+
     run_id = action.run_id
     if not run_id:
         raise AutopilotStopError(f"STOP: unexpected action payload: {action.action}")
@@ -967,6 +1298,9 @@ def main(argv: list[str]) -> int:
         print(f"- Target: {target}")
         print(f"- Section: {section}")
         print(f"- First task: {task}")
+        if bundle_selection is not None:
+            for bundle_task in bundle_selection.tasks:
+                print(f"- Bundled task: {bundle_task}")
         expected = f"CONFIRM RUN_ID: {run_id}"
         response = input(f"\nType exactly: {expected}\n> ").strip()
         if response != expected:
@@ -988,6 +1322,12 @@ def main(argv: list[str]) -> int:
                 if p
             ]
             _RUN_ID_TARGET_CACHE[run_id] = " — ".join(parts)
+        if bundle_selection is not None:
+            _RUN_ID_BUNDLE_TASKS[run_id] = bundle_selection.tasks
+            if run_id in _RUN_ID_TARGET_CACHE:
+                _RUN_ID_TARGET_CACHE[run_id] = (
+                    _RUN_ID_TARGET_CACHE[run_id] + f" — Bundled {len(bundle_selection.tasks)} tasks"
+                )
         # In dry-run mode we don't have artifacts to parse, so just show the
         # intended v1 command sequence and exit.
         plan_path = _artifact_path(run_id, PLAN_STAGE, 1)
@@ -1046,6 +1386,12 @@ def main(argv: list[str]) -> int:
             if p
         ]
         _RUN_ID_TARGET_CACHE[run_id] = " — ".join(parts)
+    if bundle_selection is not None:
+        _RUN_ID_BUNDLE_TASKS[run_id] = bundle_selection.tasks
+        if run_id in _RUN_ID_TARGET_CACHE:
+            _RUN_ID_TARGET_CACHE[run_id] = (
+                _RUN_ID_TARGET_CACHE[run_id] + f" — Bundled {len(bundle_selection.tasks)} tasks"
+            )
 
     engine: AutopilotEngine | None = None
     lock: AutopilotLock | None = None

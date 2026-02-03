@@ -577,19 +577,19 @@ frame-compare/
 - [x] Create `src/frame_compare/runner.py` at package root (see `cli-module.md` §1.2) (2026-02-03)
 - [x] Implement `run(request, dependencies=None) -> RunResult` entry point in `src/frame_compare/runner.py` (see `cli-module.md` §2.1) (2026-02-03)
 - [x] Implement `async execute_run(request, deps=None) -> RunResult` in `src/frame_compare/orchestration/coordinator.py` (see `orchestration-module.md` §4.4.3) (2026-02-03)
-- [ ] Implement phase orchestration per spec §4.4.4:
-  - [ ] Phase 1: Preflight
-  - [ ] Phase 2: LoadSources
-    - [ ] Build `ClipState` list (reference + comparisons) from discovered inputs
-    - [ ] Load probe snapshots from `clip_probe.toml` when valid; probe and persist when missing/stale
-  - [ ] Phase 3: FramePlan (uses 6.4)
-  - [ ] Phase 4: Analyze (or skip per --skip-analysis)
-  - [ ] Phase 5: Align
-  - [ ] Phase 6: Render (includes tonemap gating/wiring from 6.5; not a standalone phase)
-  - [ ] Phase 7: Metadata
-  - [ ] Phase 8: Dovi
-  - [ ] Phase 9: Publish
-  - [ ] Phase 10: Report
+- [x] Implement phase orchestration per spec §4.4.4: (2026-02-03)
+  - [x] Phase 1: Preflight (2026-02-03)
+  - [x] Phase 2: LoadSources (2026-02-03)
+    - [x] Build `ClipState` list (reference + comparisons) from discovered inputs (2026-02-03)
+    - [x] Load probe snapshots from `clip_probe.toml` when valid; probe and persist when missing/stale (2026-02-03)
+  - [x] Phase 3: FramePlan (uses 6.4) (2026-02-03)
+  - [x] Phase 4: Analyze (or skip per --skip-analysis) (2026-02-03)
+  - [x] Phase 5: Align (2026-02-03)
+  - [x] Phase 6: Render (includes tonemap gating/wiring from 6.5; not a standalone phase) (2026-02-03)
+  - [x] Phase 7: Metadata (2026-02-03)
+  - [x] Phase 8: Dovi (2026-02-03)
+  - [x] Phase 9: Publish (2026-02-03)
+  - [x] Phase 10: Report (2026-02-03)
 - [ ] Implement consolidated FPS report per spec §5.4 (after LoadSources and after Align)
 - [ ] Write unit tests for `ClipState` and probe cache:
   - [x] `tests/orchestration/test_context.py::test_clip_state_effective_num_frames_clamps_and_never_negative` (2026-01-04)
@@ -602,7 +602,7 @@ frame-compare/
   - [ ] `tests/integration/test_loadsources_probe_cache.py::test_loadsources_writes_clip_probe_cache_file`
   - [ ] `tests/integration/test_loadsources_probe_cache.py::test_loadsources_reuses_clip_probe_cache_file`
   - [ ] Verify in Docker: `bash tools/verify_docker_integration.sh`
-- [ ] Write phase orchestration tests
+- [x] Write phase orchestration tests (2026-02-03)
 
 ### 6.8 CLI Commands
 

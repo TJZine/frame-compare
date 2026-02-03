@@ -10,7 +10,24 @@ from typing import Protocol
 
 import httpx
 
-from frame_compare.orchestration.preflight import prepare_preflight
+from frame_compare.config import ConfigSchema
+from frame_compare.orchestration.context import (
+    ClipFingerprint,
+    ClipProbeSnapshot,
+    ClipState,
+    RunContext,
+)
+from frame_compare.orchestration.phases import Phase, execute_phases
+from frame_compare.orchestration.preflight import discover_inputs, prepare_preflight
+from frame_compare.orchestration.probe_cache import (
+    compute_probe_cache_key,
+    load_clip_probe_cache,
+    save_clip_probe_cache,
+)
+from frame_compare.orchestration.probe_props import (
+    compute_preserved_frame_props,
+    compute_tonemap_prop_keys,
+)
 from frame_compare.orchestration.progress import select_reporter
 from frame_compare.utils.progress import ProgressReporter
 from frame_compare.vs.loader import DefaultVSLoader, VSLoader
@@ -63,6 +80,9 @@ def _empty_str_list() -> list[str]:
 
 def _empty_phase_timings() -> dict[str, float]:
     return {}
+
+
+_VIDEO_PATTERNS: list[str] = ["*.mkv", "*.mp4", "*.avi", "*.m2ts", "*.ts"]
 
 
 @dataclass(frozen=True)
@@ -153,21 +173,142 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
 
     async def _execute_with_deps() -> RunResult:
         run_start = deps.clock()
+        phase_timings: dict[str, float] = {}
+        reporter = deps.progress
+        if reporter is None:
+            raise RuntimeError("Progress reporter must be initialized before execution.")
+
         preflight_start = deps.clock()
         preflight = prepare_preflight(
             root=request.root,
             config_path=request.config_path,
         )
         preflight_end = deps.clock()
-        run_end = preflight_end
 
-        preflight_seconds = (preflight_end - preflight_start).total_seconds()
+        phase_timings["preflight"] = (preflight_end - preflight_start).total_seconds()
+
+        load_sources_start = deps.clock()
+        workspace = preflight.workspace
+        input_videos = discover_inputs(workspace.input_dir, _VIDEO_PATTERNS)
+        cache_path = workspace.generated_dir / "clip_probe.toml"
+        cached_entries = load_clip_probe_cache(cache_path)
+        entries_by_key: dict[str, ClipProbeSnapshot] = dict(cached_entries)
+        clips: list[ClipState] = []
+
+        for index, path in enumerate(input_videos):
+            stats = path.stat()
+            fingerprint = ClipFingerprint(
+                path=path,
+                size_bytes=stats.st_size,
+                mtime_ns=stats.st_mtime_ns,
+            )
+            cache_key = compute_probe_cache_key(fingerprint)
+            snapshot = entries_by_key.get(cache_key)
+            if snapshot is None:
+                source_info = deps.get_vs_loader().load(path)
+                tonemap_prop_keys = compute_tonemap_prop_keys(source_info.frame_props)
+                preserved_props = compute_preserved_frame_props(source_info.frame_props)
+                snapshot = ClipProbeSnapshot(
+                    fingerprint=fingerprint,
+                    width=source_info.width,
+                    height=source_info.height,
+                    num_frames=source_info.num_frames,
+                    fps=source_info.fps,
+                    is_hdr=source_info.is_hdr,
+                    hdr_metadata=source_info.hdr_metadata,
+                    preserved_frame_props=preserved_props,
+                    tonemap_prop_keys=tonemap_prop_keys,
+                )
+                entries_by_key[cache_key] = snapshot
+
+            label = "Reference" if index == 0 else f"Encode {index}"
+            clips.append(
+                ClipState(
+                    path=path,
+                    label=label,
+                    probe=snapshot,
+                    source_fps=snapshot.fps,
+                    effective_fps=snapshot.fps,
+                )
+            )
+
+        save_clip_probe_cache(cache_path, entries_by_key)
+
+        if not clips:
+            raise ValueError("No input videos discovered after preflight.")
+
+        reference = clips[0]
+        comparisons = clips[1:]
+        context = RunContext(
+            config=preflight.config,
+            workspace=workspace,
+            reference=reference,
+            comparisons=comparisons,
+            reporter=reporter,
+        )
+        load_sources_end = deps.clock()
+        phase_timings["load_sources"] = (load_sources_end - load_sources_start).total_seconds()
+
+        phase_timings.update(
+            {
+                "frame_plan": 0.0,
+                "analyze": 0.0,
+                "align": 0.0,
+                "render": 0.0,
+                "metadata": 0.0,
+                "dovi": 0.0,
+                "publish": 0.0,
+                "report": 0.0,
+            }
+        )
+
+        def _timed_phase(
+            name: str,
+            timing_key: str,
+            skip_condition: Callable[[ConfigSchema], bool] | None,
+        ) -> Phase:
+            async def _execute(_: RunContext) -> None:
+                start = deps.clock()
+                end = deps.clock()
+                phase_timings[timing_key] = (end - start).total_seconds()
+
+            return Phase(name=name, execute=_execute, skip_condition=skip_condition)
+
+        phases = [
+            _timed_phase("frame_plan", "frame_plan", None),
+            _timed_phase(
+                "analyze",
+                "analyze",
+                lambda config: request.skip_analysis,
+            ),
+            _timed_phase(
+                "align",
+                "align",
+                lambda config: not config.audio_alignment.enable,
+            ),
+            _timed_phase("render", "render", None),
+            _timed_phase(
+                "metadata",
+                "metadata",
+                lambda config: request.skip_metadata,
+            ),
+            _timed_phase("dovi", "dovi", lambda config: request.skip_dovi),
+            _timed_phase("publish", "publish", lambda config: request.no_upload),
+            _timed_phase(
+                "report",
+                "report",
+                lambda config: not config.report.enable,
+            ),
+        ]
+
+        await execute_phases(phases, context, reporter)
+        run_end = deps.clock()
         duration_seconds = (run_end - run_start).total_seconds()
 
         return RunResult(
             success=True,
             duration_seconds=duration_seconds,
-            phase_timings={"preflight": preflight_seconds},
+            phase_timings=phase_timings,
             warnings=preflight.warnings,
         )
 
