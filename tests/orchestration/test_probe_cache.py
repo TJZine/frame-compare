@@ -129,6 +129,16 @@ def test_load_clip_probe_cache_returns_empty_dict_on_version_mismatch(tmp_path: 
     assert cache == {}
 
 
+def test_load_clip_probe_cache_returns_empty_dict_on_missing_version(tmp_path: Path):
+    """Missing version -> empty dict."""
+    f = tmp_path / "missing_version.toml"
+    with f.open("wb") as out:
+        tomli_w.dump({"foo": {}}, out)
+
+    cache = load_clip_probe_cache(f)
+    assert cache == {}
+
+
 def test_load_clip_probe_cache_ignores_unknown_fields_and_skips_invalid_entries(tmp_path: Path):
     """Robustness test for partial validity."""
     f = tmp_path / "mixed.toml"
@@ -193,6 +203,29 @@ def test_save_clip_probe_cache_creates_parent_directories(
     save_clip_probe_cache(nested_path, {key: sample_snapshot})
 
     assert nested_path.exists()
+
+
+def test_save_clip_probe_cache_writes_version_first_and_keys_sorted(
+    tmp_path: Path, sample_snapshot: ClipProbeSnapshot
+):
+    """Version header must be first and table keys must be sorted."""
+    f = tmp_path / "ordering.toml"
+
+    key_a = "a_key"
+    key_b = "b_key"
+
+    entries = {
+        key_b: sample_snapshot,
+        key_a: sample_snapshot,
+    }
+
+    save_clip_probe_cache(f, entries)
+
+    contents = f.read_text(encoding="utf-8")
+    lines = [line for line in contents.splitlines() if line.strip()]
+
+    assert lines[0].startswith('version = "1"')
+    assert contents.index(f"[{key_a}]") < contents.index(f"[{key_b}]")
 
 
 # ============================================================================

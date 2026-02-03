@@ -17,6 +17,10 @@ from frame_compare.orchestration.context import (
     ClipState,
     RunContext,
 )
+from frame_compare.orchestration.fps_report import (
+    build_consolidated_fps_report,
+    emit_consolidated_fps_report,
+)
 from frame_compare.orchestration.phases import Phase, execute_phases
 from frame_compare.orchestration.preflight import discover_inputs, prepare_preflight
 from frame_compare.orchestration.probe_cache import (
@@ -246,6 +250,12 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             comparisons=comparisons,
             reporter=reporter,
         )
+        emit_consolidated_fps_report(
+            stage="after_load_sources",
+            clips=build_consolidated_fps_report(reference, comparisons),
+            json_output=request.json_output,
+            quiet=request.quiet,
+        )
         load_sources_end = deps.clock()
         phase_timings["load_sources"] = (load_sources_end - load_sources_start).total_seconds()
 
@@ -274,7 +284,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
 
             return Phase(name=name, execute=_execute, skip_condition=skip_condition)
 
-        phases = [
+        phases_before_align = [
             _timed_phase("frame_plan", "frame_plan", None),
             _timed_phase(
                 "analyze",
@@ -286,6 +296,9 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
                 "align",
                 lambda config: not config.audio_alignment.enable,
             ),
+        ]
+
+        phases_after_align = [
             _timed_phase("render", "render", None),
             _timed_phase(
                 "metadata",
@@ -301,7 +314,14 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             ),
         ]
 
-        await execute_phases(phases, context, reporter)
+        await execute_phases(phases_before_align, context, reporter)
+        emit_consolidated_fps_report(
+            stage="after_align",
+            clips=build_consolidated_fps_report(context.reference, context.comparisons),
+            json_output=request.json_output,
+            quiet=request.quiet,
+        )
+        await execute_phases(phases_after_align, context, reporter)
         run_end = deps.clock()
         duration_seconds = (run_end - run_start).total_seconds()
 

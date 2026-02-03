@@ -906,6 +906,29 @@ Per clip:
 This report SHOULD be printed in human-readable form when not in `--json` mode, and SHOULD be included as a structured
 block in JSON output.
 
+#### 5.4.1 Consolidated FPS Report Helpers (SSOT)
+
+**Implementation location (SSOT):** `src/frame_compare/orchestration/fps_report.py`
+
+Orchestration MUST implement pure, deterministic helpers to build and emit the consolidated FPS report.
+
+```python
+from collections.abc import Sequence
+
+from frame_compare.orchestration.context import ClipState
+
+def build_consolidated_fps_report(reference: ClipState, comparisons: Sequence[ClipState]) -> tuple[FpsReportClip, ...]:
+    """Return a deterministic, ordered per-clip FPS report (reference first, then comparisons)."""
+
+def emit_consolidated_fps_report(*, stage: str, clips: Sequence[FpsReportClip], json_output: bool, quiet: bool) -> None:
+    """Emit the consolidated FPS report in JSON or human-readable form (quiet suppresses all output)."""
+```
+
+**Stage values (SSOT):**
+
+- `after_load_sources`
+- `after_align`
+
 ### 5.3 Resource Management
 
 ```python

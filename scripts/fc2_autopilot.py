@@ -101,10 +101,12 @@ class ChecklistSection:
 
 @dataclasses.dataclass(frozen=True)
 class BundleSelection:
-    phase: int
-    item: int
-    title: str
+    section_title: str
     tasks: list[str]
+    phase: int | None = None
+    item: int | None = None
+    phase_label: str | None = None
+    is_quality_gate: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -250,6 +252,70 @@ def _parse_bundle_prefix(prefix: str) -> tuple[int, int]:
     return int(phase_text), int(item_text)
 
 
+@dataclasses.dataclass(frozen=True)
+class NamedSection:
+    header: str
+    tasks: list[ChecklistTask]
+
+
+def _parse_named_sections(path: Path) -> list[NamedSection]:
+    header_re = re.compile(r"^###\s+(.*)$")
+    checkbox_re = re.compile(r"^-\s+\[(?P<state>[ xX])\]\s+(?P<task>.*)$")
+
+    sections: list[NamedSection] = []
+    current_header: str | None = None
+    current_tasks: list[ChecklistTask] = []
+
+    def flush() -> None:
+        nonlocal current_header, current_tasks
+        if current_header is None:
+            return
+        sections.append(NamedSection(header=current_header, tasks=current_tasks))
+        current_header = None
+        current_tasks = []
+
+    for raw in _read_text(path).splitlines():
+        m_header = header_re.match(raw)
+        if m_header:
+            flush()
+            current_header = m_header.group(1).strip()
+            continue
+
+        if current_header is None:
+            continue
+
+        m_cb = checkbox_re.match(raw)
+        if not m_cb:
+            continue
+
+        checked = m_cb.group("state") in ("x", "X")
+        task_text = m_cb.group("task").strip()
+        current_tasks.append(
+            ChecklistTask(
+                text=task_text,
+                checked=checked,
+                optional=_is_optional_task(task_text),
+            )
+        )
+
+    flush()
+    return sections
+
+
+def _parse_phase_label_from_title(title: str) -> str | None:
+    match = re.match(r"^Phase\s+(\d+(?:\.\d+)?)\b", title)
+    if not match:
+        return None
+    return match.group(1)
+
+
+def _parse_numeric_section_from_header(header: str) -> tuple[int, int] | None:
+    match = re.match(r"^(?P<phase>\d+)\.(?P<item>\d+)\s+", header)
+    if not match:
+        return None
+    return int(match.group("phase")), int(match.group("item"))
+
+
 def _select_bundle_by_prefix(
     *,
     prefix: str,
@@ -265,6 +331,8 @@ def _select_bundle_by_prefix(
     candidates = [
         t.text for t in section.tasks if not t.checked and (include_optional or not t.optional)
     ]
+    if count == 0:
+        count = len(candidates)
     if count < 2:
         raise AutopilotStopError("STOP: --bundle-count must be at least 2 for bundling.")
     if len(candidates) < count:
@@ -272,7 +340,49 @@ def _select_bundle_by_prefix(
             "STOP: not enough unchecked tasks to satisfy bundle request "
             f"({len(candidates)} available, {count} requested) for {prefix}."
         )
-    return BundleSelection(phase=phase, item=item, title=section.title, tasks=candidates[:count])
+    return BundleSelection(
+        section_title=section.title,
+        tasks=candidates[:count],
+        phase=phase,
+        item=item,
+        phase_label=str(phase),
+        is_quality_gate=False,
+    )
+
+
+def _select_bundle_by_title(
+    *,
+    title: str,
+    count: int,
+    include_optional: bool,
+) -> BundleSelection:
+    sections = _parse_named_sections(CHECKLIST_PATH)
+    section = next((s for s in sections if s.header == title), None)
+    if section is None:
+        raise AutopilotStopError(f"STOP: no checklist section found titled {title!r}.")
+    candidates = [
+        t.text for t in section.tasks if not t.checked and (include_optional or not t.optional)
+    ]
+    if count == 0:
+        count = len(candidates)
+    if count < 2:
+        raise AutopilotStopError("STOP: --bundle-count must be at least 2 for bundling.")
+    if len(candidates) < count:
+        raise AutopilotStopError(
+            "STOP: not enough unchecked tasks to satisfy bundle request "
+            f"({len(candidates)} available, {count} requested) for {title!r}."
+        )
+    numeric = _parse_numeric_section_from_header(title)
+    phase_label = _parse_phase_label_from_title(title)
+    is_quality_gate = "Quality Gate" in title
+    return BundleSelection(
+        section_title=title,
+        tasks=candidates[:count],
+        phase=numeric[0] if numeric else None,
+        item=numeric[1] if numeric else None,
+        phase_label=phase_label,
+        is_quality_gate=is_quality_gate,
+    )
 
 
 def _select_bundle_by_items(
@@ -282,13 +392,13 @@ def _select_bundle_by_items(
 ) -> BundleSelection:
     if len(items) < 2:
         raise AutopilotStopError("STOP: --bundle-items must include at least 2 tasks.")
-    sections = _parse_checklist_sections(CHECKLIST_PATH)
-    lookup: list[tuple[ChecklistSection, ChecklistTask]] = []
+    sections = _parse_named_sections(CHECKLIST_PATH)
+    lookup: list[tuple[NamedSection, ChecklistTask]] = []
     for s in sections:
         for t in s.tasks:
             lookup.append((s, t))
 
-    selected: list[tuple[ChecklistSection, ChecklistTask]] = []
+    selected: list[tuple[NamedSection, ChecklistTask]] = []
     for item_text in items:
         matches = [(s, t) for s, t in lookup if t.text == item_text]
         if not matches:
@@ -309,8 +419,8 @@ def _select_bundle_by_items(
             )
         selected.append((section, task))
 
-    section_keys = {(s.phase, s.item) for s, _ in selected}
-    if len(section_keys) != 1:
+    section_headers = {s.header for s, _ in selected}
+    if len(section_headers) != 1:
         raise AutopilotStopError(
             "STOP: bundled items span multiple checklist sections; bundle must stay within "
             "a single section (e.g., 7.1)."
@@ -318,11 +428,16 @@ def _select_bundle_by_items(
 
     section = selected[0][0]
     ordered = [t.text for t in section.tasks if any(t.text == sel[1].text for sel in selected)]
+    numeric = _parse_numeric_section_from_header(section.header)
+    phase_label = _parse_phase_label_from_title(section.header)
+    is_quality_gate = "Quality Gate" in section.header
     return BundleSelection(
-        phase=section.phase,
-        item=section.item,
-        title=section.title,
+        section_title=section.header,
         tasks=ordered,
+        phase=numeric[0] if numeric else None,
+        item=numeric[1] if numeric else None,
+        phase_label=phase_label,
+        is_quality_gate=is_quality_gate,
     )
 
 
@@ -608,6 +723,25 @@ def _propose_run_id(phase: int, item: int, task_text: str, runs_dir: Path) -> st
     if next_slice is None:
         return f"{today}__p{phase}-{item}__{slug}"
     return f"{today}__p{phase}-{item}-{next_slice}__{slug}"
+
+
+def _propose_bundle_run_id(selection: BundleSelection) -> str:
+    today = time.strftime("%Y-%m-%d", time.localtime())
+    if selection.is_quality_gate:
+        if selection.phase_label:
+            slug = f"p{selection.phase_label}-quality-gate".replace(".", "-")
+        else:
+            slug = _slugify(selection.section_title)
+        return f"{today}__meta__{slug}"
+    if selection.phase is not None and selection.item is not None:
+        return _propose_run_id(
+            phase=selection.phase,
+            item=selection.item,
+            task_text=selection.tasks[0],
+            runs_dir=RUNS_DIR,
+        )
+    slug = _slugify(selection.section_title)
+    return f"{today}__meta__{slug}"
 
 
 def _load_next_action(*, include_phase0: bool, include_optional: bool, dry_run: bool) -> RunAction:
@@ -1103,6 +1237,11 @@ def main(argv: list[str]) -> int:
         help="Explicit checklist task texts to bundle, separated by '|'.",
     )
     parser.add_argument(
+        "--bundle-title",
+        type=str,
+        help="Bundle tasks under an exact checklist header title (e.g., 'Phase 6 Quality Gate ✓').",
+    )
+    parser.add_argument(
         "--max-plan-revisions", type=int, default=4, help="Max plan<->plan-review iterations."
     )
     parser.add_argument(
@@ -1218,9 +1357,12 @@ def main(argv: list[str]) -> int:
         dry_run=args.dry_run,
     )
 
-    if args.bundle_prefix and args.bundle_items:
+    bundle_mode_flags = [
+        flag for flag in [args.bundle_prefix, args.bundle_items, args.bundle_title] if flag
+    ]
+    if len(bundle_mode_flags) > 1:
         raise AutopilotStopError(
-            "STOP: use only one of --bundle-prefix or --bundle-items at a time."
+            "STOP: use only one of --bundle-prefix, --bundle-items, or --bundle-title at a time."
         )
 
     if action.action == "dry_run":
@@ -1268,20 +1410,33 @@ def main(argv: list[str]) -> int:
             items=items,
             include_optional=args.include_optional,
         )
+    elif args.bundle_title:
+        if action.action == "resume_unindexed_run":
+            raise AutopilotStopError(
+                "STOP: bundling requested, but an unindexed in-progress run exists. "
+                "Resolve or remove the in-progress run before bundling."
+            )
+        bundle_selection = _select_bundle_by_title(
+            title=args.bundle_title,
+            count=args.bundle_count,
+            include_optional=args.include_optional,
+        )
 
     if bundle_selection is not None:
-        run_id = _propose_run_id(
-            phase=bundle_selection.phase,
-            item=bundle_selection.item,
-            task_text=bundle_selection.tasks[0],
-            runs_dir=RUNS_DIR,
-        )
+        run_id = _propose_bundle_run_id(bundle_selection)
+        if bundle_selection.phase is not None and bundle_selection.item is not None:
+            target = (
+                f"Phase {bundle_selection.phase} → Item "
+                f"{bundle_selection.phase}.{bundle_selection.item} (Bundled)"
+            )
+        else:
+            target = f"{bundle_selection.section_title} (Bundled)"
         action = RunAction(
             action="start_new_run",
             run_id=run_id,
             hint="bundle",
-            target=f"Phase {bundle_selection.phase} → Item {bundle_selection.item} (Bundled)",
-            checklist_section_title=bundle_selection.title,
+            target=target,
+            checklist_section_title=bundle_selection.section_title,
             first_unchecked_task=bundle_selection.tasks[0],
         )
 

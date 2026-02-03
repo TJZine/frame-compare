@@ -11,6 +11,7 @@ import httpx
 import pytest
 
 from frame_compare.errors import ConfigNotFoundError
+from frame_compare.orchestration import coordinator
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.vs.types import SourceInfo
 
@@ -132,3 +133,32 @@ def test_execute_run_creates_and_closes_http_client_when_missing(
 
     assert isinstance(deps.http_client, httpx.AsyncClient)
     assert deps.http_client.is_closed is True
+
+
+def test_execute_run_emits_fps_report_after_load_sources_and_after_align(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FPS report is emitted after LoadSources and after Align, even if Align is skipped."""
+    _create_config(tmp_path)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "source.mkv", "comp.mkv")
+
+    request = RunRequest(
+        root=tmp_path,
+        skip_analysis=True,
+        skip_metadata=True,
+        skip_dovi=True,
+        no_upload=True,
+    )
+    deps = RunDependencies(vs_loader=FakeVSLoader())
+
+    calls: list[str] = []
+
+    def _record_emit(*, stage: str, **_kwargs: Any) -> None:
+        calls.append(stage)
+
+    monkeypatch.setattr(coordinator, "emit_consolidated_fps_report", _record_emit)
+
+    asyncio.run(execute_run(request, deps=deps))
+
+    assert calls == ["after_load_sources", "after_align"]
