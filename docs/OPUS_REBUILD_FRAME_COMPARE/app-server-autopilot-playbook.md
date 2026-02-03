@@ -57,6 +57,9 @@ when the server requests approval for a command or file change, the client must 
 The safest initial implementation is interactive prompting (print the requested action + ask for Y/N) and a default of decline on EOF/timeout.
 7. The controller MUST restate hard constraints on every turn:
 do not rely on thread memory to preserve allowed/disallowed writes. Every `turn/start` input must include the same "Allowed Writes" and "Disallowed Writes" lists the FC2 role prompt would include in `codex exec`.
+8. The controller MUST include prior failure context when looping:
+when routing back to Planning/Coding due to a validator/gate failure, append a section to the next role prompt:
+`## Previous Gate Failure (Autopilot)` followed by the exact stdout/stderr captured by the controller.
 
 ### Minimal JSONL Examples (Copy/Paste Shapes)
 
@@ -154,6 +157,8 @@ send `turn/start` with:
 `threadId`, `cwd`, pinned `{model, effort}` for that role, and a role prompt that includes:
 the exact RUN_ID, the exact artifact version (`plan-vN`, `plan-review-vN`, etc.), and absolute output paths.
 The controller computes `vN` deterministically and the agent must never guess "latest".
+Every role turn prompt MUST start with:
+`Treat this prompt as complete and authoritative. Do not rely on any prior thread/session context.`
 5. Stream and log:
 append all inbound events to `appserver-events.jsonl`.
 6. Wait for completion:
@@ -189,9 +194,10 @@ When responding to a server-initiated approval request, the controller MUST send
 
 1. Confirm Codex is installed and usable from the repo:
 run `codex --version`.
-2. Generate and commit a schema bundle pinned to the local Codex version:
+2. Generate a schema bundle pinned to the local Codex version (local-only; do not commit):
 run `codex app-server generate-json-schema --out .codex/schemas/app-server/<CODEX_VERSION>/`.
-3. Add a single README note in the schema directory:
+Ensure `.gitignore` contains `.codex/schemas/`.
+3. (Optional but recommended) Add a short README note locally in the schema directory:
 the schema must be regenerated whenever Codex is upgraded.
 4. Add an app-server preflight check to the controller:
 call `model/list` and assert the required models exist.
@@ -201,7 +207,7 @@ Record the full resolved config to `.agent-workflow/runs/<RUN_ID>/appserver-conf
 If the resolved config does not reflect the repo's `.codex/` settings, STOP and fix project trust/config layering before continuing.
 
 Acceptance criteria:
-the schema directory exists and is committed, and the recorded Codex version matches the schema folder name.
+the schema directory exists locally, is ignored by git, and the recorded Codex version matches the schema folder name.
 
 ### Step 1: Add an App-Server Client Library (Python, stdio JSONL)
 

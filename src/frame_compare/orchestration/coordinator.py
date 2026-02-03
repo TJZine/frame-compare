@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -44,3 +44,33 @@ class RunRequest:
     quiet: bool = False
     verbose: bool = False
     json_output: bool = False
+
+
+def _empty_str_list() -> list[str]:
+    return []
+
+
+def _empty_phase_timings() -> dict[str, float]:
+    return {}
+
+
+@dataclass(frozen=True)
+class RunResult:
+    """Complete result from a comparison run."""
+
+    # Outputs
+    success: bool
+    screenshot_dir: Path | None = None
+    slowpics_url: str | None = None
+    report_path: Path | None = None
+
+    # Metrics
+    frame_count: int = 0
+    clips_processed: int = 0
+    duration_seconds: float = 0.0
+    cache_hit: bool = False
+
+    # Diagnostics
+    errors: list[str] = field(default_factory=_empty_str_list)
+    warnings: list[str] = field(default_factory=_empty_str_list)
+    phase_timings: dict[str, float] = field(default_factory=_empty_phase_timings)

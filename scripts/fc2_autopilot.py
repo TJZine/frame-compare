@@ -28,13 +28,28 @@ import re
 import subprocess
 import sys
 import textwrap
+import time
+from contextlib import suppress
 from pathlib import Path
+
+from fc2_autopilot_engine import (
+    ROLE_CODING,
+    ROLE_PLAN_REVIEW,
+    ROLE_PLANNING,
+    ROLE_POLICY,
+    ROLE_VERIFY_REVIEW,
+    AppServerEngine,
+    AutopilotEngine,
+    AutopilotStopError,
+    ExecEngine,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUNS_DIR = REPO_ROOT / ".agent-workflow" / "runs"
 INDEX_PATH = REPO_ROOT / ".agent-workflow" / "index.md"
 CHECKLIST_PATH = REPO_ROOT / "docs/OPUS_REBUILD_FRAME_COMPARE/10-agent-master-checklist.md"
 NEXT_ACTION_SCRIPT = REPO_ROOT / "codex-skills/fc2-collab-autopilot/scripts/next_fc2_action.py"
+LOCK_PATH = REPO_ROOT / ".agent-workflow" / ".autopilot.lock"
 
 
 PLAN_STAGE = "plan"
@@ -42,6 +57,15 @@ PLAN_REVIEW_STAGE = "plan-review"
 IMPL_STAGE = "impl"
 VERIFY_STAGE = "verify"
 REVIEW_STAGE = "review"
+
+QUALITY_GATES_COMMANDS: list[list[str]] = [
+    [".venv/bin/pyright", "--warnings"],
+    [".venv/bin/ruff", "check", "."],
+    [".venv/bin/pytest", "-q"],
+    ["uv", "run", "--no-sync", "lint-imports", "--config", "importlinter.ini"],
+    ["uv", "run", "--no-sync", "python", "scripts/generate_contract_views.py", "--check"],
+    ["uv", "run", "--no-sync", "python", "scripts/validate_traceability.py", "--check"],
+]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -72,10 +96,10 @@ class GateFailure(Exception):
             {cmd}
 
             stdout:
-            {out or '<empty>'}
+            {out or "<empty>"}
 
             stderr:
-            {err or '<empty>'}
+            {err or "<empty>"}
             """
         ).strip()
 
@@ -180,16 +204,7 @@ def _validate_spec_anchors(plan_path: Path, *, dry_run: bool) -> None:
 
 def _run_quality_gates(*, dry_run: bool) -> None:
     env = {"UV_CACHE_DIR": "./.uv_cache"}
-    commands: list[list[str]] = [
-        [".venv/bin/pyright", "--warnings"],
-        [".venv/bin/ruff", "check", "."],
-        [".venv/bin/pytest", "-q"],
-        ["uv", "run", "--no-sync", "lint-imports", "--config", "importlinter.ini"],
-        ["uv", "run", "--no-sync", "python", "scripts/generate_contract_views.py", "--check"],
-        ["uv", "run", "--no-sync", "python", "scripts/validate_traceability.py", "--check"],
-    ]
-
-    for cmd in commands:
+    for cmd in QUALITY_GATES_COMMANDS:
         if dry_run:
             _run(cmd, cwd=REPO_ROOT, env=env, dry_run=True)
             continue
@@ -202,16 +217,25 @@ def _run_quality_gates(*, dry_run: bool) -> None:
         _ = proc
 
 
+def _format_quality_gates_for_prompt() -> str:
+    lines: list[str] = []
+    for cmd in QUALITY_GATES_COMMANDS:
+        lines.append(" ".join(_shlex_quote(a) for a in cmd))
+    # Use a fenced block so we don't accidentally create confusing nested bullets.
+    return "```bash\n" + "\n".join(lines) + "\n```"
+
+
 def _parse_plan_review_gate(plan_review_path: Path) -> tuple[str | None, str | None]:
     verdict: str | None = None
     dp: str | None = None
     for raw in _read_text(plan_review_path).splitlines():
-        m_v = re.fullmatch(r"##\s+Verdict:\s+([A-Z_]+)\s*", raw.strip())
+        stripped = raw.strip()
+        m_v = re.match(r"##\s+Verdict:\s+([A-Z_]+)", stripped)
         if m_v:
             verdict = m_v.group(1)
         if "Implementation Agent Decision Points Remaining:" in raw:
             _, _, rest = raw.partition(":")
-            dp = rest.strip() or None
+            dp = _normalize_decision_points(rest)
     return verdict, dp
 
 
@@ -221,6 +245,54 @@ def _parse_review_verdict(review_path: Path) -> str | None:
         if m:
             return m.group(1)
     return None
+
+
+def _normalize_decision_points(raw: str) -> str | None:
+    value = raw.strip()
+    if not value:
+        return None
+    # Strip common markdown emphasis/backticks and trailing punctuation.
+    value = re.sub(r"[`*_]", "", value)
+    value = value.strip().rstrip(".").strip()
+    if not value:
+        return None
+    return value.upper()
+
+
+def _extract_spec_anchor_paths(plan_path: Path) -> list[Path]:
+    header = "## Spec Anchors (SSOT)"
+    lines = _read_text(plan_path).splitlines()
+    try:
+        start_idx = lines.index(header)
+    except ValueError:
+        return []
+
+    anchor_lines: list[str] = []
+    for line in lines[start_idx + 1 :]:
+        if line.startswith("## "):
+            break
+        anchor_lines.append(line.rstrip("\n"))
+
+    paths: list[Path] = []
+    for raw_line in anchor_lines:
+        line = raw_line.rstrip()
+        if not line.strip():
+            continue
+        if not line.lstrip().startswith("- "):
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent != 0:
+            continue
+        body = line.lstrip()[2:].strip()
+        if body.startswith("`") and "`" in body[1:]:
+            body = body.split("`", 2)[1]
+        body = body.removesuffix(":").strip()
+        if not body:
+            continue
+        path = (REPO_ROOT / body).resolve()
+        paths.append(path)
+
+    return paths
 
 
 def _latest_stage_path(run_id: str, stage: str) -> Path | None:
@@ -261,7 +333,7 @@ def _repair_stale_pending_review(run_id: str, latest_review: Path, *, dry_run: b
 
     verdict = _parse_review_verdict(latest_review)
     if verdict is None:
-        raise RuntimeError(f"Could not parse verdict from {latest_review}")
+        raise AutopilotStopError(f"STOP: could not parse verdict from {latest_review}")
 
     rel_review = latest_review.relative_to(REPO_ROOT)
 
@@ -313,8 +385,30 @@ def _codex_exec(profile: str, message: str, *, dry_run: bool) -> None:
 
 
 def _planning_prompt(
-    run_id: str, *, plan_path: Path, prev_plan: Path | None, prev_plan_review: Path | None
+    run_id: str,
+    *,
+    plan_path: Path,
+    prev_plan: Path | None,
+    prev_plan_review: Path | None,
+    extra_allowed_writes: list[Path] | None,
+    allow_spec_edits: bool,
 ) -> str:
+    allowed_writes: list[str] = [f"- {plan_path}"]
+    if extra_allowed_writes:
+        for path in extra_allowed_writes:
+            allowed_writes.append(f"- {path}")
+
+    spec_guidance = ""
+    if allow_spec_edits:
+        spec_guidance = textwrap.dedent(
+            """
+            ## Spec Fix Guidance (Use Only If Needed)
+            The previous plan failed spec-anchor validation. You MAY edit the anchored spec files listed
+            in Allowed Writes to resolve missing headings/signatures. Keep changes minimal, align with the
+            original intent, and follow best practices. If a spec change is not required, do not edit specs.
+            """
+        ).strip()
+
     extra_inputs = ""
     if prev_plan is not None or prev_plan_review is not None:
         prev_lines: list[str] = []
@@ -331,6 +425,8 @@ def _planning_prompt(
 
     return textwrap.dedent(
         f"""
+        Treat this prompt as complete and authoritative. Do not rely on any prior thread/session context.
+
         You are the Planning Agent for Frame Compare 2.0.
 
         You MUST follow FC2 STOP rules and templates from:
@@ -344,12 +440,14 @@ def _planning_prompt(
         {action_target_line(run_id)}
 
         ## Allowed Writes (Hard)
-        - {plan_path}
+        {"\n".join(allowed_writes)}
 
         ## Disallowed Writes (Hard)
         - .agent-workflow/index.md
         - docs/OPUS_REBUILD_FRAME_COMPARE/10-agent-master-checklist.md
         - Any code under src/ or tests/
+
+        {spec_guidance}
 
         ## Your Task
         Write the plan artifact at {plan_path}.
@@ -375,6 +473,8 @@ def _plan_review_prompt(
         extra_inputs = f"\n## Prior Plan Review\n- {prev_plan_review}\n"
     return textwrap.dedent(
         f"""
+        Treat this prompt as complete and authoritative. Do not rely on any prior thread/session context.
+
         You are the Plan Review Agent for Frame Compare 2.0.
 
         You MUST follow FC2 STOP rules and templates from:
@@ -412,6 +512,8 @@ def _plan_review_prompt(
 def _coding_prompt(run_id: str, *, plan_path: Path, plan_review_path: Path, impl_path: Path) -> str:
     return textwrap.dedent(
         f"""
+        Treat this prompt as complete and authoritative. Do not rely on any prior thread/session context.
+
         You are the Coding Agent for Frame Compare 2.0.
 
         ## RUN_ID
@@ -437,7 +539,9 @@ def _coding_prompt(run_id: str, *, plan_path: Path, plan_review_path: Path, impl
 
         ## Your Task
         Implement EXACTLY what the plan specifies.
-        - Run the local quality gates listed in AGENTS.md before finishing.
+        - You MUST run the full local quality gates below and ensure they all pass before finishing:
+        {_format_quality_gates_for_prompt()}
+        - Hard rule: Do NOT write the "## NEXT AGENT PROMPT (COPY/PASTE)" block until all gates pass.
         - Record commands + outcomes in {impl_path}.
         - End {impl_path} with a correct NEXT block for Verification.
         """
@@ -455,6 +559,8 @@ def _verify_review_prompt(
 ) -> str:
     return textwrap.dedent(
         f"""
+        Treat this prompt as complete and authoritative. Do not rely on any prior thread/session context.
+
         You are the Verification + Review Agent for Frame Compare 2.0.
 
         ## RUN_ID
@@ -508,15 +614,64 @@ def _ensure_index_finalized(run_id: str) -> None:
         if not line.startswith(f"| {run_id} "):
             continue
         if "| PENDING_REVIEW |" in line:
-            raise RuntimeError(f"Index row still PENDING_REVIEW for {run_id}")
+            raise AutopilotStopError(f"STOP: index row still PENDING_REVIEW for {run_id}")
         if "[review](" not in line:
-            raise RuntimeError(f"Index row missing review link for {run_id}")
+            raise AutopilotStopError(f"STOP: index row missing review link for {run_id}")
         return
-    raise RuntimeError(f"Index row not found for {run_id}")
+    raise AutopilotStopError(f"STOP: index row not found for {run_id}")
 
 
 def _find_latest_review_path(run_id: str) -> Path | None:
     return _latest_stage_path(run_id, REVIEW_STAGE)
+
+
+@dataclasses.dataclass(frozen=True)
+class AutopilotLock:
+    path: Path
+    fd: int
+
+    def release(self) -> None:
+        with suppress(OSError):
+            os.close(self.fd)
+        with suppress(OSError):
+            self.path.unlink()
+
+
+def _acquire_autopilot_lock(path: Path) -> AutopilotLock:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError as exc:
+        raise AutopilotStopError(f"STOP: autopilot lock already held at {path}") from exc
+    payload = f"pid={os.getpid()} started={int(time.time())}\n"
+    os.write(fd, payload.encode("utf-8"))
+    return AutopilotLock(path=path, fd=fd)
+
+
+def _run_turn(engine: AutopilotEngine, *, role: str, message: str) -> None:
+    policy = ROLE_POLICY[role]
+    engine.run_turn(role=role, message=message, model=policy.model, effort=policy.effort)
+
+
+def _resume_from_artifacts(run_id: str, *, run_dir: Path) -> int | None:
+    latest_pr = _find_latest_version(run_dir, PLAN_REVIEW_STAGE)
+    if latest_pr is None:
+        return None
+    plan_review_path = _artifact_path(run_id, PLAN_REVIEW_STAGE, latest_pr)
+    if not plan_review_path.exists():
+        return None
+    verdict, dp = _parse_plan_review_gate(plan_review_path)
+    print(
+        "Resume check: latest plan review "
+        f"{plan_review_path} verdict={verdict or '<missing>'} dp={dp or '<missing>'}"
+    )
+    if verdict != "APPROVED" or dp != "NONE":
+        return None
+    plan_path = _artifact_path(run_id, PLAN_STAGE, latest_pr)
+    if not plan_path.exists():
+        return None
+    print(f"Resume: using approved plan review {plan_review_path} with plan {plan_path}")
+    return latest_pr
 
 
 def main(argv: list[str]) -> int:
@@ -543,10 +698,47 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--max-review-revisions", type=int, default=2, help="Max code review revision cycles."
     )
+    parser.add_argument(
+        "--engine",
+        choices=["exec", "app-server"],
+        default="exec",
+        help="Execution engine to use (exec or app-server).",
+    )
+    parser.add_argument(
+        "--allow-planning-spec-edits",
+        action="store_true",
+        default=True,
+        help="Allow Planning to edit spec anchors and SSOT spec files when spec validation fails.",
+    )
+    parser.add_argument(
+        "--no-allow-planning-spec-edits",
+        action="store_false",
+        dest="allow_planning_spec_edits",
+        help="Disable Planning edits to spec anchors/SSOT files.",
+    )
+    parser.add_argument(
+        "--resume-from-artifacts",
+        action="store_true",
+        default=True,
+        help="Resume from the latest approved plan review when possible.",
+    )
+    parser.add_argument(
+        "--no-resume-from-artifacts",
+        action="store_false",
+        dest="resume_from_artifacts",
+        help="Disable resume-from-artifacts behavior (always start from Planning).",
+    )
     args = parser.parse_args(argv)
 
     # Fail fast if the checklist ordering would mislead automated selection.
-    _run(["python3", "scripts/validate_master_checklist_order.py"], cwd=REPO_ROOT, dry_run=False)
+    try:
+        _run(
+            ["python3", "scripts/validate_master_checklist_order.py"],
+            cwd=REPO_ROOT,
+            dry_run=False,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise AutopilotStopError("STOP: master checklist order validation failed.") from exc
 
     if not args.dry_run:
         # Keep derived contract views fresh before starting automation to avoid unrelated gate failures mid-run.
@@ -574,27 +766,35 @@ def main(argv: list[str]) -> int:
                 env=env,
                 dry_run=False,
             )
+            try:
+                _run(
+                    [
+                        "uv",
+                        "run",
+                        "--no-sync",
+                        "python",
+                        "scripts/generate_contract_views.py",
+                        "--check",
+                    ],
+                    cwd=REPO_ROOT,
+                    env=env,
+                    dry_run=False,
+                )
+            except subprocess.CalledProcessError as exc:
+                raise AutopilotStopError(
+                    "STOP: contract view generation check failed after regeneration."
+                ) from exc
+
+        # Traceability failures are not safe to auto-fix here; stop early if broken.
+        try:
             _run(
-                [
-                    "uv",
-                    "run",
-                    "--no-sync",
-                    "python",
-                    "scripts/generate_contract_views.py",
-                    "--check",
-                ],
+                ["uv", "run", "--no-sync", "python", "scripts/validate_traceability.py", "--check"],
                 cwd=REPO_ROOT,
                 env=env,
                 dry_run=False,
             )
-
-        # Traceability failures are not safe to auto-fix here; stop early if broken.
-        _run(
-            ["uv", "run", "--no-sync", "python", "scripts/validate_traceability.py", "--check"],
-            cwd=REPO_ROOT,
-            env=env,
-            dry_run=False,
-        )
+        except subprocess.CalledProcessError as exc:
+            raise AutopilotStopError("STOP: traceability validation failed.") from exc
 
     action = _load_next_action(
         include_phase0=args.include_phase0,
@@ -624,7 +824,7 @@ def main(argv: list[str]) -> int:
 
     run_id = action.run_id
     if not run_id:
-        raise RuntimeError(f"Unexpected action payload: {action.action}")
+        raise AutopilotStopError(f"STOP: unexpected action payload: {action.action}")
 
     if not args.dry_run and not args.yes:
         target = action.target or "<unknown target>"
@@ -666,7 +866,14 @@ def main(argv: list[str]) -> int:
 
         _codex_exec(
             "fc2_planning",
-            _planning_prompt(run_id, plan_path=plan_path, prev_plan=None, prev_plan_review=None),
+            _planning_prompt(
+                run_id,
+                plan_path=plan_path,
+                prev_plan=None,
+                prev_plan_review=None,
+                extra_allowed_writes=None,
+                allow_spec_edits=False,
+            ),
             dry_run=True,
         )
         _codex_exec(
@@ -708,171 +915,256 @@ def main(argv: list[str]) -> int:
         ]
         _RUN_ID_TARGET_CACHE[run_id] = " — ".join(parts)
 
-    # Planning <-> Plan Review loop.
-    approved_plan_version: int | None = None
-    last_plan_gate_failure: str | None = None
-    for _ in range(args.max_plan_revisions):
-        plan_v = _next_version(run_dir, PLAN_STAGE)
-        plan_path = _artifact_path(run_id, PLAN_STAGE, plan_v)
-        prev_plan = _artifact_path(run_id, PLAN_STAGE, plan_v - 1) if plan_v > 1 else None
-        prev_pr = _artifact_path(run_id, PLAN_REVIEW_STAGE, plan_v - 1) if plan_v > 1 else None
-
-        _codex_exec(
-            "fc2_planning",
-            _planning_prompt(
-                run_id,
-                plan_path=plan_path,
-                prev_plan=prev_plan if prev_plan and prev_plan.exists() else None,
-                prev_plan_review=prev_pr if prev_pr and prev_pr.exists() else None,
+    engine: AutopilotEngine | None = None
+    lock: AutopilotLock | None = None
+    try:
+        if args.engine == "app-server":
+            lock = _acquire_autopilot_lock(LOCK_PATH)
+            engine = AppServerEngine(
+                repo_root=REPO_ROOT,
+                run_id=run_id,
+                run_dir=run_dir,
+                event_log_path=run_dir / "appserver-events.jsonl",
+                threads_path=run_dir / "appserver_threads.json",
+                config_path=run_dir / "appserver-config.json",
             )
-            + (
-                "\n\n## Previous Planning Gate Failure (Autopilot)\n" + last_plan_gate_failure
-                if last_plan_gate_failure
-                else ""
-            ),
-            dry_run=args.dry_run,
-        )
+        else:
+            engine = ExecEngine(repo_root=REPO_ROOT)
 
-        if not args.dry_run:
-            if not plan_path.exists():
-                raise RuntimeError(f"Planning did not produce {plan_path}")
-            try:
-                _validate_run_artifacts(run_id, dry_run=args.dry_run)
-                _validate_spec_anchors(plan_path, dry_run=args.dry_run)
-            except GateFailure as e:
-                # This is an expected STOP gate for invalid plan wiring (anchors/templates).
-                last_plan_gate_failure = e.format_for_prompt()
-                print(f"PLAN VALIDATION FAILED for {run_id}; retrying planning in next revision.")
-                continue
-
-        plan_review_path = _artifact_path(run_id, PLAN_REVIEW_STAGE, plan_v)
-        prev_plan_review = (
-            _artifact_path(run_id, PLAN_REVIEW_STAGE, plan_v - 1) if plan_v > 1 else None
-        )
-        _codex_exec(
-            "fc2_plan_review",
-            _plan_review_prompt(
-                run_id,
-                plan_path=plan_path,
-                plan_review_path=plan_review_path,
-                prev_plan_review=prev_plan_review
-                if prev_plan_review and prev_plan_review.exists()
-                else None,
-            ),
-            dry_run=args.dry_run,
-        )
-
-        if not args.dry_run:
-            if not plan_review_path.exists():
-                raise RuntimeError(f"Plan Review did not produce {plan_review_path}")
-            try:
-                _validate_run_artifacts(run_id, dry_run=args.dry_run)
-            except GateFailure as e:
-                last_plan_gate_failure = e.format_for_prompt()
-                print(
-                    f"PLAN REVIEW ARTIFACT VALIDATION FAILED for {run_id}; retrying planning in next revision."
-                )
-                continue
-            verdict, dp = _parse_plan_review_gate(plan_review_path)
-            if verdict == "APPROVED" and dp == "NONE":
-                approved_plan_version = plan_v
-                break
-
-    if approved_plan_version is None:
-        raise RuntimeError(
-            "Plan did not reach APPROVED + Decision Points Remaining = NONE within iteration cap."
-        )
-
-    plan_path = _artifact_path(run_id, PLAN_STAGE, approved_plan_version)
-    plan_review_path = _artifact_path(run_id, PLAN_REVIEW_STAGE, approved_plan_version)
-
-    # Coding + verify/review cycles.
-    last_gate_failure: str | None = None
-    for _ in range(args.max_review_revisions):
-        impl_v = _next_version(run_dir, IMPL_STAGE)
-        impl_path = _artifact_path(run_id, IMPL_STAGE, impl_v)
-        _codex_exec(
-            "fc2_coding",
-            _coding_prompt(
-                run_id, plan_path=plan_path, plan_review_path=plan_review_path, impl_path=impl_path
-            )
-            + ("\n\n## Previous Gate Failure\n" + last_gate_failure if last_gate_failure else ""),
-            dry_run=args.dry_run,
-        )
-
-        if not args.dry_run:
-            if not impl_path.exists():
-                raise RuntimeError(f"Coding did not produce {impl_path}")
-            try:
-                _validate_run_artifacts(run_id, dry_run=args.dry_run)
-            except GateFailure as e:
-                last_gate_failure = e.format_for_prompt()
-                print(
-                    f"IMPL ARTIFACT VALIDATION FAILED for {run_id}; retrying coding in next revision."
-                )
-                continue
-            try:
-                _run_quality_gates(dry_run=args.dry_run)
-            except GateFailure as e:
-                last_gate_failure = e.format_for_prompt()
-                print(f"GATES FAILED after coding for {run_id}; retrying coding in next revision.")
-                continue
-
-        verify_path = _artifact_path(run_id, VERIFY_STAGE, impl_v)
-        review_path = _artifact_path(run_id, REVIEW_STAGE, impl_v)
-
-        _codex_exec(
-            "fc2_verify_review",
-            _verify_review_prompt(
-                run_id,
-                plan_path=plan_path,
-                plan_review_path=plan_review_path,
-                impl_path=impl_path,
-                verify_path=verify_path,
-                review_path=review_path,
-            ),
-            dry_run=args.dry_run,
-        )
-
-        if not args.dry_run:
-            try:
-                _validate_run_artifacts(run_id, dry_run=args.dry_run)
-            except GateFailure as e:
-                raise RuntimeError(
-                    "Verify/Review wrote invalid run artifacts; rerun verify/review for this impl revision."
-                    f"\n\n{e.format_for_prompt()}"
-                ) from e
-            try:
-                _run_quality_gates(dry_run=args.dry_run)
-            except GateFailure as e:
-                last_gate_failure = e.format_for_prompt()
-                print(
-                    f"GATES FAILED after verify/review for {run_id}; retrying coding in next revision."
-                )
-                continue
-            _ensure_index_finalized(run_id)
-
+        approved_plan_version: int | None = None
+        if args.resume_from_artifacts and not args.dry_run:
             latest_review = _find_latest_review_path(run_id)
-            if latest_review is None:
-                raise RuntimeError("Review artifact missing after verify+review.")
-            verdict = _parse_review_verdict(latest_review)
-            if verdict == "APPROVED":
-                print(f"RUN COMPLETE: {run_id} (APPROVED)")
-                return 0
-            if verdict == "CHANGES_REQUIRED":
-                print(f"Review verdict CHANGES_REQUIRED for {run_id}; continuing revision cycle.")
-                last_gate_failure = None
-                continue
-            if verdict == "DESIGN_ISSUE":
-                raise RuntimeError(
-                    f"Review verdict DESIGN_ISSUE for {run_id}; return to Planning/Plan Review."
+            if latest_review is not None:
+                verdict = _parse_review_verdict(latest_review)
+                if verdict == "APPROVED":
+                    print(f"RUN COMPLETE: {run_id} (APPROVED)")
+                    return 0
+                if verdict == "DESIGN_ISSUE":
+                    raise AutopilotStopError(
+                        f"STOP: review verdict DESIGN_ISSUE for {run_id}; return to Planning/Plan Review."
+                    )
+            approved_plan_version = _resume_from_artifacts(run_id, run_dir=run_dir)
+
+        # Planning <-> Plan Review loop.
+        if approved_plan_version is None:
+            last_plan_gate_failure: str | None = None
+            last_plan_spec_paths: list[Path] = []
+            allow_spec_edits_next: bool = False
+            for _ in range(args.max_plan_revisions):
+                plan_v = _next_version(run_dir, PLAN_STAGE)
+                plan_path = _artifact_path(run_id, PLAN_STAGE, plan_v)
+                prev_plan = _artifact_path(run_id, PLAN_STAGE, plan_v - 1) if plan_v > 1 else None
+                prev_pr = (
+                    _artifact_path(run_id, PLAN_REVIEW_STAGE, plan_v - 1) if plan_v > 1 else None
                 )
 
-        # Dry-run: do a single cycle.
-        break
+                _run_turn(
+                    engine,
+                    role=ROLE_PLANNING,
+                    message=_planning_prompt(
+                        run_id,
+                        plan_path=plan_path,
+                        prev_plan=prev_plan if prev_plan and prev_plan.exists() else None,
+                        prev_plan_review=prev_pr if prev_pr and prev_pr.exists() else None,
+                        extra_allowed_writes=last_plan_spec_paths
+                        if allow_spec_edits_next
+                        else None,
+                        allow_spec_edits=allow_spec_edits_next,
+                    )
+                    + (
+                        "\n\n## Previous Gate Failure (Autopilot)\n" + last_plan_gate_failure
+                        if last_plan_gate_failure
+                        else ""
+                    ),
+                )
 
-    raise RuntimeError("Exceeded max review revision cycles without reaching APPROVED.")
+                if not args.dry_run:
+                    if not plan_path.exists():
+                        raise AutopilotStopError(f"STOP: planning did not produce {plan_path}")
+                    try:
+                        _validate_run_artifacts(run_id, dry_run=args.dry_run)
+                        _validate_spec_anchors(plan_path, dry_run=args.dry_run)
+                    except GateFailure as e:
+                        # This is an expected STOP gate for invalid plan wiring (anchors/templates).
+                        last_plan_gate_failure = e.format_for_prompt()
+                        allow_spec_edits_next = False
+                        last_plan_spec_paths = []
+                        if args.allow_planning_spec_edits and any(
+                            "validate_spec_anchors.py" in part for part in e.command
+                        ):
+                            allow_spec_edits_next = True
+                            last_plan_spec_paths = _extract_spec_anchor_paths(plan_path)
+                        print(
+                            f"PLAN VALIDATION FAILED for {run_id}; retrying planning in next revision."
+                        )
+                        print(last_plan_gate_failure)
+                        continue
+
+                plan_review_path = _artifact_path(run_id, PLAN_REVIEW_STAGE, plan_v)
+                prev_plan_review = (
+                    _artifact_path(run_id, PLAN_REVIEW_STAGE, plan_v - 1) if plan_v > 1 else None
+                )
+                _run_turn(
+                    engine,
+                    role=ROLE_PLAN_REVIEW,
+                    message=_plan_review_prompt(
+                        run_id,
+                        plan_path=plan_path,
+                        plan_review_path=plan_review_path,
+                        prev_plan_review=prev_plan_review
+                        if prev_plan_review and prev_plan_review.exists()
+                        else None,
+                    ),
+                )
+
+                if not args.dry_run:
+                    if not plan_review_path.exists():
+                        raise AutopilotStopError(
+                            f"STOP: plan review did not produce {plan_review_path}"
+                        )
+                    try:
+                        _validate_run_artifacts(run_id, dry_run=args.dry_run)
+                    except GateFailure as e:
+                        last_plan_gate_failure = e.format_for_prompt()
+                        allow_spec_edits_next = False
+                        last_plan_spec_paths = []
+                        print(
+                            "PLAN REVIEW ARTIFACT VALIDATION FAILED for "
+                            f"{run_id}; retrying planning in next revision."
+                        )
+                        print(last_plan_gate_failure)
+                        continue
+                    verdict, dp = _parse_plan_review_gate(plan_review_path)
+                    print(
+                        "Plan Review parsed: verdict="
+                        f"{verdict or '<missing>'} dp={dp or '<missing>'} "
+                        f"(from {plan_review_path})"
+                    )
+                    if verdict == "APPROVED" and dp == "NONE":
+                        approved_plan_version = plan_v
+                        break
+
+            if approved_plan_version is None:
+                raise AutopilotStopError(
+                    "STOP: plan did not reach APPROVED + Decision Points Remaining = NONE "
+                    "within iteration cap."
+                )
+
+        plan_path = _artifact_path(run_id, PLAN_STAGE, approved_plan_version)
+        plan_review_path = _artifact_path(run_id, PLAN_REVIEW_STAGE, approved_plan_version)
+
+        # Coding + verify/review cycles.
+        last_gate_failure: str | None = None
+        for _ in range(args.max_review_revisions):
+            impl_v = _next_version(run_dir, IMPL_STAGE)
+            impl_path = _artifact_path(run_id, IMPL_STAGE, impl_v)
+            _run_turn(
+                engine,
+                role=ROLE_CODING,
+                message=_coding_prompt(
+                    run_id,
+                    plan_path=plan_path,
+                    plan_review_path=plan_review_path,
+                    impl_path=impl_path,
+                )
+                + (
+                    "\n\n## Previous Gate Failure (Autopilot)\n" + last_gate_failure
+                    if last_gate_failure
+                    else ""
+                ),
+            )
+
+            if not args.dry_run:
+                if not impl_path.exists():
+                    raise AutopilotStopError(f"STOP: coding did not produce {impl_path}")
+                try:
+                    _validate_run_artifacts(run_id, dry_run=args.dry_run)
+                except GateFailure as e:
+                    last_gate_failure = e.format_for_prompt()
+                    print(
+                        f"IMPL ARTIFACT VALIDATION FAILED for {run_id}; retrying coding in next revision."
+                    )
+                    print(last_gate_failure)
+                    continue
+                try:
+                    _run_quality_gates(dry_run=args.dry_run)
+                except GateFailure as e:
+                    last_gate_failure = e.format_for_prompt()
+                    print(
+                        f"GATES FAILED after coding for {run_id}; retrying coding in next revision."
+                    )
+                    print(last_gate_failure)
+                    continue
+
+            verify_path = _artifact_path(run_id, VERIFY_STAGE, impl_v)
+            review_path = _artifact_path(run_id, REVIEW_STAGE, impl_v)
+
+            _run_turn(
+                engine,
+                role=ROLE_VERIFY_REVIEW,
+                message=_verify_review_prompt(
+                    run_id,
+                    plan_path=plan_path,
+                    plan_review_path=plan_review_path,
+                    impl_path=impl_path,
+                    verify_path=verify_path,
+                    review_path=review_path,
+                ),
+            )
+
+            if not args.dry_run:
+                try:
+                    _validate_run_artifacts(run_id, dry_run=args.dry_run)
+                except GateFailure as e:
+                    raise AutopilotStopError(
+                        "STOP: verify/review wrote invalid run artifacts; rerun verify/review "
+                        "for this impl revision.\n\n" + e.format_for_prompt()
+                    ) from e
+                try:
+                    _run_quality_gates(dry_run=args.dry_run)
+                except GateFailure as e:
+                    last_gate_failure = e.format_for_prompt()
+                    print(
+                        f"GATES FAILED after verify/review for {run_id}; retrying coding in next revision."
+                    )
+                    print(last_gate_failure)
+                    continue
+                _ensure_index_finalized(run_id)
+
+                latest_review = _find_latest_review_path(run_id)
+                if latest_review is None:
+                    raise AutopilotStopError("STOP: review artifact missing after verify+review.")
+                verdict = _parse_review_verdict(latest_review)
+                if verdict == "APPROVED":
+                    print(f"RUN COMPLETE: {run_id} (APPROVED)")
+                    return 0
+                if verdict == "CHANGES_REQUIRED":
+                    print(
+                        f"Review verdict CHANGES_REQUIRED for {run_id}; continuing revision cycle."
+                    )
+                    last_gate_failure = None
+                    continue
+                if verdict == "DESIGN_ISSUE":
+                    raise AutopilotStopError(
+                        f"STOP: review verdict DESIGN_ISSUE for {run_id}; return to Planning/Plan Review."
+                    )
+
+            # Dry-run: do a single cycle.
+            break
+
+        raise AutopilotStopError(
+            "STOP: exceeded max review revision cycles without reaching APPROVED."
+        )
+    finally:
+        if engine is not None:
+            engine.close()
+        if lock is not None:
+            lock.release()
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1:]))
+    try:
+        raise SystemExit(main(sys.argv[1:]))
+    except AutopilotStopError as exc:
+        print(str(exc))
+        raise SystemExit(2) from None

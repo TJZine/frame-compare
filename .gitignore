@@ -4,11 +4,18 @@
 .codanna/
 .mcp_sequential_thinking/
 .fastembed_cache
+.codex/schemas/
 .uv_cache/
 .venv/
 .agent/
 .hypothesis/
 AGENTS.md
+
+# FC2 app-server runtime (ephemeral)
+.agent-workflow/.autopilot.lock
+.agent-workflow/runs/**/appserver-events.jsonl
+.agent-workflow/runs/**/appserver-config.json
+.agent-workflow/runs/**/appserver_threads.json
 
 # Python
 __pycache__/

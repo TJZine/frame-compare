@@ -572,7 +572,7 @@ frame-compare/
 - [x] Implement probe snapshot cache (`generated/clip_probe.toml`) per spec §3.5 (deterministic keying, stable TOML) (2026-01-04)
 - [x] Preserve HDR/DoVi props in `ClipProbeSnapshot` per spec §3.5 (portable primitives only; record `tonemap_prop_keys`) (2026-01-05)
 - [x] Implement `RunRequest` dataclass per spec (2026-02-02)
-- [ ] Implement `RunResult` dataclass per spec
+- [x] Implement `RunResult` dataclass per spec (2026-02-03)
 - [ ] Implement `RunDependencies` for dependency injection
 - [ ] Create `src/frame_compare/runner.py` at package root (see `cli-module.md` §1.2)
 - [ ] Implement `run(request, dependencies=None) -> RunResult` entry point in `src/frame_compare/runner.py` (see `cli-module.md` §2.1)
