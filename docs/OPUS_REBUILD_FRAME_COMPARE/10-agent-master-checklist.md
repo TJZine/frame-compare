@@ -573,7 +573,7 @@ frame-compare/
 - [x] Preserve HDR/DoVi props in `ClipProbeSnapshot` per spec §3.5 (portable primitives only; record `tonemap_prop_keys`) (2026-01-05)
 - [x] Implement `RunRequest` dataclass per spec (2026-02-02)
 - [x] Implement `RunResult` dataclass per spec (2026-02-03)
-- [ ] Implement `RunDependencies` for dependency injection
+- [x] Implement `RunDependencies` for dependency injection (2026-02-03)
 - [ ] Create `src/frame_compare/runner.py` at package root (see `cli-module.md` §1.2)
 - [ ] Implement `run(request, dependencies=None) -> RunResult` entry point in `src/frame_compare/runner.py` (see `cli-module.md` §2.1)
 - [ ] Implement `async execute_run(request, deps=None) -> RunResult` in `src/frame_compare/orchestration/coordinator.py` (see `orchestration-module.md` §4.4.3)

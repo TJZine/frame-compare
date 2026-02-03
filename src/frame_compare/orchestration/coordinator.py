@@ -2,8 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
+from typing import Protocol
+
+import httpx
+
+from frame_compare.utils.progress import ProgressReporter
+from frame_compare.vs.loader import DefaultVSLoader, VSLoader
+from frame_compare.vs.types import HDRMetadata
 
 
 @dataclass(frozen=True)
@@ -74,3 +83,52 @@ class RunResult:
     errors: list[str] = field(default_factory=_empty_str_list)
     warnings: list[str] = field(default_factory=_empty_str_list)
     phase_timings: dict[str, float] = field(default_factory=_empty_phase_timings)
+
+
+class FFmpegRunner(Protocol):
+    """Protocol for FFmpeg-based frame extraction and probing."""
+
+    def extract_frame(self, video: Path, frame_num: int, output: Path) -> None:
+        """Extract a single frame from the given video into the output path."""
+        ...
+
+    def probe_hdr(self, video: Path) -> HDRMetadata | None:
+        """Probe HDR metadata for a video, returning None if unavailable."""
+        ...
+
+
+class DefaultFFmpegRunner:
+    """Stub FFmpeg runner for dependency injection in this slice."""
+
+    def extract_frame(self, video: Path, frame_num: int, output: Path) -> None:
+        raise NotImplementedError(
+            "DefaultFFmpegRunner is a stub in Phase 6.7; inject a runner to use FFmpeg."
+        )
+
+    def probe_hdr(self, video: Path) -> HDRMetadata | None:
+        raise NotImplementedError(
+            "DefaultFFmpegRunner is a stub in Phase 6.7; inject a runner to use FFmpeg."
+        )
+
+
+@dataclass
+class RunDependencies:
+    """Dependency injection container for run orchestration."""
+
+    vs_loader: VSLoader | None = None
+    ffmpeg_runner: FFmpegRunner | None = None
+    http_client: httpx.AsyncClient | None = None
+    progress: ProgressReporter | None = None
+    clock: Callable[[], datetime] = field(default=datetime.now)
+
+    def get_vs_loader(self) -> VSLoader:
+        """Return the injected VS loader or create the default lazily."""
+        if self.vs_loader is None:
+            self.vs_loader = DefaultVSLoader()
+        return self.vs_loader
+
+    def get_ffmpeg_runner(self) -> FFmpegRunner:
+        """Return the injected FFmpeg runner or create the default lazily."""
+        if self.ffmpeg_runner is None:
+            self.ffmpeg_runner = DefaultFFmpegRunner()
+        return self.ffmpeg_runner

@@ -8,6 +8,7 @@ This project follows Conventional Commits and is intended to be released via Rel
 
 ### Added
 
+- **Run Dependencies:** Added `RunDependencies` DI container with lazy default VS/FFmpeg providers (stub-only FFmpeg runner) and orchestration export (Phase 6.7).
 - **Tonemap Wiring:** Added `should_tonemap`, `resolve_tonemap_settings`, and `probe_is_hdr_ffprobe` helpers. Modified `render_screenshots` to require `config: ConfigSchema` and enforce HDR+tonemap fallback policy (Phase 6.5).
 - **VSPreview Integration:** Added `frame_compare.vspreview` module with `is_vspreview_available`, `launch_alignment_verification_session`, `load_manual_overrides`, `save_manual_override`, `ManualOverride`, `VSPreviewConfig`, `VSPreviewNotFoundError` (FC-2008), and `VSPreviewError` (FC-4019). Integrated manual override precedence in `align_clips` (Phase 6.6).
 - FramePlan module (`frame_compare.analysis.frame_plan`) for deterministic frame selection (`--skip-analysis`).

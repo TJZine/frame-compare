@@ -463,6 +463,18 @@
 - `force_tty` parameter enables explicit overrides for testing and piped scenarios.
 - Returns abstract `ProgressReporter` protocol to decouple orchestration from concrete implementations.
 
+## 2026-02-03 — Phase 6.7 RunDependencies (Dependency Injection)
+
+### Scope
+
+**Run ID:** 2026-02-02__p6-7-7__rundependencies
+**Artifact versions:** plan-v3 + plan-review-v3 + impl-v1
+**Context:** Implement `RunDependencies` as the dependency injection container for run orchestration.
+
+**Decision:** `DefaultFFmpegRunner` is a stub in this slice (raises `NotImplementedError`).
+
+**Decision:** `RunDependencies` is exported via `frame_compare.orchestration` until `frame_compare.runner` is introduced.
+
 ## 2026-01-04 — Phase 6.4 FramePlan Module
 
 ### Scope

@@ -220,7 +220,10 @@ def _run_quality_gates(*, dry_run: bool) -> None:
 def _format_quality_gates_for_prompt() -> str:
     lines: list[str] = []
     for cmd in QUALITY_GATES_COMMANDS:
-        lines.append(" ".join(_shlex_quote(a) for a in cmd))
+        rendered = " ".join(_shlex_quote(a) for a in cmd)
+        if cmd[:2] == ["uv", "run"]:
+            rendered = f"UV_CACHE_DIR=./.uv_cache {rendered}"
+        lines.append(rendered)
     # Use a fenced block so we don't accidentally create confusing nested bullets.
     return "```bash\n" + "\n".join(lines) + "\n```"
 
@@ -541,6 +544,7 @@ def _coding_prompt(run_id: str, *, plan_path: Path, plan_review_path: Path, impl
         Implement EXACTLY what the plan specifies.
         - You MUST run the full local quality gates below and ensure they all pass before finishing:
         {_format_quality_gates_for_prompt()}
+        - For any additional `uv run` commands, prefix with `UV_CACHE_DIR=./.uv_cache` to avoid sandbox approval prompts.
         - Hard rule: Do NOT write the "## NEXT AGENT PROMPT (COPY/PASTE)" block until all gates pass.
         - Record commands + outcomes in {impl_path}.
         - End {impl_path} with a correct NEXT block for Verification.
@@ -580,6 +584,7 @@ def _verify_review_prompt(
         3. Append index row (PENDING_REVIEW) after verification: {INDEX_PATH}
         4. Write review report: {review_path}
         5. Finalize the same index row with final verdict + review link: {INDEX_PATH}
+        6. Ensure {review_path} ends with the required "## NEXT AGENT PROMPT (COPY/PASTE)" block.
 
         ## Allowed Writes
         - {verify_path}
@@ -593,8 +598,9 @@ def _verify_review_prompt(
 
         ## Your Task (Order is Mandatory)
         1. Run the full gate suite (pyright/ruff/pytest/import-linter/contracts/traceability) and record results in {verify_path}.
+           - For any `uv run` command, prefix with `UV_CACHE_DIR=./.uv_cache` to avoid sandbox approval prompts.
         2. If gates pass, update checklist and append index row with PENDING_REVIEW.
-        3. Perform review and write {review_path} with final verdict.
+        3. Perform review and write {review_path} with final verdict. Include the required NEXT block at the end.
         4. Finalize index row (replace PENDING_REVIEW with final verdict and add review link).
         """
     ).strip()

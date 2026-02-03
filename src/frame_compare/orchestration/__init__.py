@@ -12,7 +12,7 @@ from frame_compare.orchestration.context import (
     ClipTrimState,
     RunContext,
 )
-from frame_compare.orchestration.coordinator import RunRequest, RunResult
+from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, RunResult
 from frame_compare.orchestration.doctor import (
     CheckResult,
     DoctorCheck,
@@ -44,6 +44,7 @@ __all__ = [
     "ClipTrimState",
     "RunContext",
     # Coordinator
+    "RunDependencies",
     "RunRequest",
     "RunResult",
     # Preflight
