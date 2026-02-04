@@ -99,7 +99,7 @@ def generate_cli_flags_md() -> str:
     lines = [
         "# CLI Flags — Single Source of Truth",
         "",
-        "> **Module:** Reference  ",
+        "> **Module:** Reference",
         "> **Purpose:** Canonical CLI flag definitions to sync docs/specs/tests",
         "",
         "> [!NOTE]",
@@ -232,7 +232,7 @@ def generate_error_codes_md() -> str:
     lines = [
         "# Error Code Reference",
         "",
-        "> **Module:** Reference  ",
+        "> **Module:** Reference",
         "> **Version:** 1.0",
         "",
         "> [!NOTE]",

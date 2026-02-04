@@ -155,6 +155,7 @@ def discover_inputs(input_dir: Path, patterns: list[str] | None = None) -> list[
 def prepare_preflight(
     root: Path | None = None,
     config_path: Path | None = None,
+    overrides: dict[str, object] | None = None,
 ) -> PreflightResult:
     """Validate configuration and resolve workspace paths.
 
@@ -168,6 +169,7 @@ def prepare_preflight(
     Args:
         root: Optional explicit workspace root
         config_path: Optional explicit config file path
+        overrides: Optional config overrides applied before path resolution
 
     Returns:
         PreflightResult with config and workspace
@@ -194,7 +196,7 @@ def prepare_preflight(
             raise ConfigNotFoundError(resolved_config_path)
 
     # Step 3: Load and validate config
-    config = load_config(resolved_config_path)
+    config = load_config(resolved_config_path, overrides=overrides)
 
     # Step 4: Resolve all paths (use internal helper preserving exact config_file)
     workspace = _resolve_paths_with_config_file(config, resolved_root, resolved_config_path)

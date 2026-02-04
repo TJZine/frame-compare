@@ -230,3 +230,16 @@ class TestPreparePreflight:
         result = prepare_preflight(config_path=config_file)
 
         assert result.workspace.config_file == config_file.resolve()
+
+    def test_prepare_preflight_overrides_input_dir_before_validation(self, tmp_path: Path) -> None:
+        """Overrides input_dir before validating directory existence."""
+        _create_config(tmp_path)
+        override_dir = tmp_path / "override_videos"
+        _create_video_files(override_dir, "override.mkv")
+
+        result = prepare_preflight(
+            root=tmp_path,
+            overrides={"paths": {"input_dir": "override_videos"}},
+        )
+
+        assert result.workspace.input_dir == override_dir.resolve()

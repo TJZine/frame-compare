@@ -53,6 +53,7 @@ def run(request: RunRequest, dependencies: RunDependencies | None = None) -> Run
         effective_deps.progress = select_reporter(
             quiet=request.quiet,
             json_output=request.json_output,
+            no_color=request.no_color,
         )
 
     execute_fn = cast(

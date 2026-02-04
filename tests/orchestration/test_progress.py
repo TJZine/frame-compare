@@ -66,3 +66,9 @@ def test_select_reporter_json_takes_precedence_over_force_tty():
     """json_output=True should win over force_tty=True."""
     reporter = select_reporter(json_output=True, force_tty=True)
     assert isinstance(reporter, LogProgressReporter)
+
+
+def test_select_reporter_no_color_returns_log():
+    """no_color=True should return LogProgressReporter."""
+    reporter = select_reporter(no_color=True)
+    assert isinstance(reporter, LogProgressReporter)

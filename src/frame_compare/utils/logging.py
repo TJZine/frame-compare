@@ -1,11 +1,21 @@
 import logging
+import sys
 from contextvars import ContextVar
 from pathlib import Path
+from typing import TextIO, cast
 from uuid import uuid4
 
 import structlog
 
 _run_id: ContextVar[str] = ContextVar("run_id", default="")
+
+
+class _StderrProxy:
+    def write(self, message: str) -> int:
+        return sys.stderr.write(message)
+
+    def flush(self) -> None:
+        sys.stderr.flush()
 
 
 def new_run_id() -> str:
@@ -60,7 +70,9 @@ def configure_logging(
     else:
         processors.append(structlog.dev.ConsoleRenderer())
 
+    stderr_proxy = cast(TextIO, _StderrProxy())
     structlog.configure(
         processors=processors,
         wrapper_class=structlog.make_filtering_bound_logger(level_num),
+        logger_factory=structlog.PrintLoggerFactory(file=stderr_proxy),
     )

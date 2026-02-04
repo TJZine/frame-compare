@@ -7,11 +7,20 @@ from _pytest.monkeypatch import MonkeyPatch
 from typer.testing import CliRunner
 
 from frame_compare.cli_entry import app
+from frame_compare.errors import ConfigNotFoundError, format_error_json, get_exit_code
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
 from frame_compare.orchestration.doctor import CheckResult, DoctorCheck, DoctorReport
 from frame_compare.utils.progress import ProgressReporter
 
 runner = CliRunner()
+
+MINIMAL_CONFIG = """\
+[paths]
+input_dir = "comparison_videos"
+screenshots_dir = "screenshots"
+generated_dir = "generated"
+config_dir = "config"
+"""
 
 
 def test_app_help_lists_all_commands():
@@ -119,6 +128,20 @@ def test_run_builds_run_request_from_cli_args(monkeypatch: MonkeyPatch) -> None:
     assert request.tm_target_nits == 203
     assert request.overlay_mode == "diagnostic"
     assert request.force_interactive_alignment is True
+
+
+def test_run_builds_run_request_with_input_dir(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, RunRequest] = {}
+
+    def _run(request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        captured["request"] = request
+        return RunResult(success=True)
+
+    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+
+    result = runner.invoke(app, ["run", "--input", "custom_inputs"])
+    assert result.exit_code == 0
+    assert captured["request"].input_dir == Path("custom_inputs")
 
 
 def _run_wizard_and_assert_config() -> None:
@@ -272,18 +295,257 @@ def test_doctor_stub_text(monkeypatch: MonkeyPatch) -> None:
 
 
 def test_preset_list_stub():
-    result = runner.invoke(app, ["preset", "list"])
-    assert result.exit_code == 0
-    assert "[stub] preset list: Not yet implemented" in result.stdout
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        presets_dir = root / "config" / "presets"
+        presets_dir.mkdir(parents=True, exist_ok=True)
+        (presets_dir / "Zebra.toml").write_text('[paths]\ninput_dir = "a"')
+        (presets_dir / "alpha.toml").write_text('[paths]\ninput_dir = "b"')
+
+        result = runner.invoke(app, ["preset", "list", "--root", str(root)])
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == ["alpha", "Zebra"]
 
 
 def test_preset_apply_stub():
-    result = runner.invoke(app, ["preset", "apply", "test"])
-    assert result.exit_code == 0
-    assert "[stub] preset apply: Not yet implemented" in result.stdout
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        config_path = root / "config" / "config.toml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(MINIMAL_CONFIG)
+        presets_dir = root / "config" / "presets"
+        presets_dir.mkdir(parents=True, exist_ok=True)
+        (presets_dir / "boost.toml").write_text(
+            "[analysis]\nframe_count = 12\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            app,
+            ["preset", "apply", "boost", "--root", str(root), "--config", "config/config.toml"],
+        )
+        assert result.exit_code == 0
+        data = tomllib.loads(config_path.read_text(encoding="utf-8"))
+        assert data["analysis"]["frame_count"] == 12
 
 
 def test_preset_save_stub():
-    result = runner.invoke(app, ["preset", "save", "test"])
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        config_path = root / "config" / "config.toml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(MINIMAL_CONFIG)
+
+        result = runner.invoke(
+            app,
+            ["preset", "save", "demo", "--root", str(root), "--config", "config/config.toml"],
+        )
+        assert result.exit_code == 0
+        preset_path = root / "config" / "presets" / "demo.toml"
+        assert preset_path.exists()
+
+
+def test_preset_list_prints_names_sorted_case_insensitive() -> None:
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        presets_dir = root / "config" / "presets"
+        presets_dir.mkdir(parents=True, exist_ok=True)
+        (presets_dir / "Bravo.toml").write_text('[paths]\ninput_dir = "a"')
+        (presets_dir / "alpha.toml").write_text('[paths]\ninput_dir = "b"')
+        (presets_dir / "charlie.toml").write_text('[paths]\ninput_dir = "c"')
+
+        result = runner.invoke(app, ["preset", "list", "--root", str(root)])
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == ["alpha", "Bravo", "charlie"]
+
+
+def test_preset_save_respects_root_and_config_writes_preset_file() -> None:
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        config_path = root / "configs" / "config.toml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(MINIMAL_CONFIG)
+
+        result = runner.invoke(
+            app,
+            ["preset", "save", "sample", "--root", str(root), "--config", "configs/config.toml"],
+        )
+        assert result.exit_code == 0
+        preset_path = root / "config" / "presets" / "sample.toml"
+        assert preset_path.exists()
+
+
+def test_preset_apply_respects_root_and_config_updates_config_file() -> None:
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        config_path = root / "configs" / "config.toml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(MINIMAL_CONFIG)
+        presets_dir = root / "config" / "presets"
+        presets_dir.mkdir(parents=True, exist_ok=True)
+        (presets_dir / "boost.toml").write_text(
+            "[analysis]\nframe_count = 22\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            app,
+            ["preset", "apply", "boost", "--root", str(root), "--config", "configs/config.toml"],
+        )
+        assert result.exit_code == 0
+        data = tomllib.loads(config_path.read_text(encoding="utf-8"))
+        assert data["analysis"]["frame_count"] == 22
+
+
+def test_run_write_config_respects_root_and_config_and_does_not_invoke_runner(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise AssertionError("runner.run should not be invoked for --write-config")
+
+    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        config_path = root / "configs" / "config.toml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(MINIMAL_CONFIG)
+
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--write-config",
+                "--root",
+                str(root),
+                "--config",
+                "configs/config.toml",
+                "--frame-count",
+                "17",
+            ],
+        )
+        assert result.exit_code == 0
+        data = tomllib.loads(config_path.read_text(encoding="utf-8"))
+        assert data["analysis"]["frame_count"] == 17
+
+
+def test_run_diagnose_paths_outputs_pinned_json_schema_and_does_not_invoke_runner(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise AssertionError("runner.run should not be invoked for --diagnose-paths")
+
+    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        config_path = root / "config" / "config.toml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(MINIMAL_CONFIG)
+
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--diagnose-paths",
+                "--root",
+                str(root),
+                "--config",
+                "config/config.toml",
+                "--input",
+                "inputs",
+            ],
+        )
+        assert result.exit_code == 0
+        payload = json.loads(result.stdout)
+        assert set(payload.keys()) == {"cache", "config", "input", "output", "root"}
+        assert payload["root"] == str(root.resolve())
+        assert payload["config"] == str(config_path.resolve())
+        assert payload["input"] == str((root / "inputs").resolve())
+        assert payload["output"] == str((root / "screenshots").resolve())
+        assert payload["cache"] == str((root / "generated").resolve())
+
+
+def test_run_json_outputs_pinned_success_schema_and_stdout_is_pure_json(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        return RunResult(
+            success=True,
+            screenshot_dir=Path("shots"),
+            slowpics_url="https://slow.pics/abc",
+            report_path=Path("report.html"),
+            frame_count=12,
+            clips_processed=2,
+            duration_seconds=1.25,
+            cache_hit=True,
+            errors=[],
+        )
+
+    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+
+    result = runner.invoke(app, ["run", "--json"])
     assert result.exit_code == 0
-    assert "[stub] preset save: Not yet implemented" in result.stdout
+    payload = json.loads(result.stdout)
+    assert payload == {
+        "cache_hit": True,
+        "clips_processed": 2,
+        "duration_seconds": 1.25,
+        "errors": [],
+        "frame_count": 12,
+        "report_path": "report.html",
+        "screenshots_dir": "shots",
+        "slowpics_url": "https://slow.pics/abc",
+        "success": True,
+    }
+
+
+def test_run_json_outputs_error_schema_and_exit_code(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise ConfigNotFoundError(Path("missing.toml"))
+
+    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+
+    result = runner.invoke(app, ["run", "--json"])
+    assert result.exit_code == int(get_exit_code(ConfigNotFoundError(Path("missing.toml"))))
+    payload = json.loads(result.stdout)
+    expected = format_error_json(ConfigNotFoundError(Path("missing.toml")))
+    assert payload == expected
+
+
+def test_run_no_color_error_output_has_no_rich_markup(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise ConfigNotFoundError(Path("missing.toml"))
+
+    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+
+    result = runner.invoke(app, ["run", "--no-color"])
+    assert result.exit_code == int(get_exit_code(ConfigNotFoundError(Path("missing.toml"))))
+    assert "[red]" not in result.stderr
+    assert "[yellow]" not in result.stderr
+
+
+def test_run_verbose_calls_configure_logging_debug(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, str] = {}
+
+    def _configure_logging(*, level: str, format: str) -> None:
+        captured["level"] = level
+        captured["format"] = format
+
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        return RunResult(success=True)
+
+    monkeypatch.setattr("frame_compare.cli_entry.configure_logging", _configure_logging)
+    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+
+    result = runner.invoke(app, ["run", "--verbose"])
+    assert result.exit_code == 0
+    assert captured["level"] == "DEBUG"
+
+    result = runner.invoke(app, ["run", "--quiet"])
+    assert result.exit_code == 0
+    assert captured["level"] == "WARNING"

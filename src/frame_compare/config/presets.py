@@ -23,11 +23,12 @@ DEFAULT_PRESETS_DIR = Path("config/presets")
 
 
 def list_presets(presets_dir: Path | None = None) -> list[str]:
-    """List available preset names (sorted alphabetically)."""
+    """List available preset names (sorted case-insensitive)."""
     directory = presets_dir or DEFAULT_PRESETS_DIR
     if not directory.exists():
         return []
-    return sorted(p.stem for p in directory.glob("*.toml"))
+    names = [p.stem for p in directory.glob("*.toml")]
+    return sorted(names, key=lambda name: (name.lower(), name))
 
 
 def load_preset(name: str, presets_dir: Path | None = None) -> dict[str, object]:
@@ -39,9 +40,10 @@ def load_preset(name: str, presets_dir: Path | None = None) -> dict[str, object]
         raise PresetNotFoundError(name)
 
     try:
-        return tomllib.loads(preset_path.read_text(encoding="utf-8"))
+        payload = tomllib.loads(preset_path.read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError as exc:
         raise PresetInvalidError(preset_path, str(exc)) from exc
+    return payload
 
 
 def save_preset(
@@ -71,7 +73,11 @@ def save_preset(
     return preset_path
 
 
-def apply_preset(config: ConfigSchema, preset_name: str) -> ConfigSchema:
+def apply_preset(
+    config: ConfigSchema,
+    preset_name: str,
+    presets_dir: Path | None = None,
+) -> ConfigSchema:
     """Apply preset overrides to config.
 
     Loads preset from DEFAULT_PRESETS_DIR (config/presets relative to CWD).
@@ -81,7 +87,7 @@ def apply_preset(config: ConfigSchema, preset_name: str) -> ConfigSchema:
     """
     from frame_compare.config.schema import ConfigSchema
 
-    preset_data = load_preset(preset_name)
+    preset_data = load_preset(preset_name, presets_dir=presets_dir)
     base_dict = config.model_dump()
     merged = _deep_merge(base_dict, preset_data)
 

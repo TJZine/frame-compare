@@ -12,10 +12,28 @@ import typer
 from rich.console import Console
 
 from frame_compare import runner
-from frame_compare.config import ConfigSchema, Visibility, get_default_config
-from frame_compare.errors import ExitCode, FrameCompareError, JSONValue, get_exit_code
+from frame_compare.config import (
+    ConfigSchema,
+    Visibility,
+    apply_cli_overrides,
+    apply_preset,
+    get_default_config,
+    list_presets,
+    load_config,
+    save_preset,
+)
+from frame_compare.errors import (
+    ExitCode,
+    FrameCompareError,
+    JSONValue,
+    format_error_console,
+    format_error_json,
+    get_exit_code,
+)
 from frame_compare.orchestration import DoctorReport, run_doctor
 from frame_compare.orchestration.coordinator import RunRequest
+from frame_compare.orchestration.preflight import resolve_paths
+from frame_compare.utils.logging import configure_logging
 
 app = typer.Typer(
     name="frame-compare",
@@ -62,9 +80,46 @@ def run(
     quiet: bool = typer.Option(False, "--quiet", "-q"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
+    resolved_root, config_path = _resolve_root_and_config(root, config)
+    log_level = "WARNING" if quiet else ("DEBUG" if verbose else "INFO")
+    log_format = "json" if json_output else "console"
+    configure_logging(level=log_level, format=log_format)
+
+    cli_args: dict[str, object] = {
+        "tm_preset": tm_preset,
+        "tm_target": tm_target,
+        "tm_curve": tm_curve,
+        "frame_count": frame_count,
+        "seed": seed,
+        "overlay": overlay,
+        "no_upload": no_upload,
+        "force_interactive_alignment": force_interactive_alignment,
+        "input": str(input_dir) if input_dir is not None else None,
+    }
+
+    if write_config:
+        config_data = load_config(config_path)
+        config_override = apply_cli_overrides(config_data, cli_args=cli_args)
+        _write_config_to(config_path, config_override)
+        return
+
+    if diagnose_paths:
+        config_data = load_config(config_path)
+        config_override = apply_cli_overrides(config_data, cli_args=cli_args)
+        workspace = resolve_paths(config_override, resolved_root)
+        payload = {
+            "root": str(resolved_root),
+            "config": str(config_path),
+            "input": str(workspace.input_dir),
+            "output": str(workspace.screenshots_dir),
+            "cache": str(workspace.generated_dir),
+        }
+        typer.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+        return
+
     request = RunRequest(
-        root=root,
-        config_path=config,
+        root=resolved_root,
+        config_path=config_path,
         input_dir=input_dir,
         no_cache=no_cache,
         from_cache_only=from_cache_only,
@@ -88,9 +143,26 @@ def run(
     try:
         result = runner.run(request, dependencies=None)
     except FrameCompareError as error:
-        raise typer.Exit(code=handle_error(error)) from error
+        if json_output:
+            typer.echo(json.dumps(format_error_json(error), sort_keys=True, separators=(",", ":")))
+            raise typer.Exit(code=int(get_exit_code(error))) from error
+        raise typer.Exit(code=handle_error(error, no_color=no_color, verbose=verbose)) from error
     except KeyboardInterrupt:
         raise typer.Exit(code=130) from None
+
+    if json_output:
+        payload = {
+            "success": result.success,
+            "screenshots_dir": str(result.screenshot_dir) if result.screenshot_dir else None,
+            "slowpics_url": result.slowpics_url,
+            "report_path": str(result.report_path) if result.report_path else None,
+            "frame_count": result.frame_count,
+            "clips_processed": result.clips_processed,
+            "duration_seconds": result.duration_seconds,
+            "cache_hit": result.cache_hit,
+            "errors": list(result.errors),
+        }
+        typer.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
 
     if not result.success:
         raise typer.Exit(code=5)
@@ -151,25 +223,48 @@ app.add_typer(preset_app, name="preset")
 
 
 @preset_app.command("list")
-def preset_list() -> None:
-    typer.echo("[stub] preset list: Not yet implemented")
+def preset_list(
+    root: Path = typer.Option(".", "--root", "-r"),
+    config: Path | None = typer.Option(None, "--config", "-c"),
+) -> None:
+    resolved_root, _ = _resolve_root_and_config(root, config)
+    presets_dir = resolved_root / "config" / "presets"
+    for name in list_presets(presets_dir=presets_dir):
+        typer.echo(name)
 
 
 @preset_app.command("apply")
-def preset_apply(name: str) -> None:
-    typer.echo("[stub] preset apply: Not yet implemented")
+def preset_apply(
+    name: str,
+    root: Path = typer.Option(".", "--root", "-r"),
+    config: Path | None = typer.Option(None, "--config", "-c"),
+) -> None:
+    resolved_root, config_path = _resolve_root_and_config(root, config)
+    presets_dir = resolved_root / "config" / "presets"
+    config_data = load_config(config_path)
+    updated = apply_preset(config_data, name, presets_dir=presets_dir)
+    _write_config_to(config_path, updated)
 
 
 @preset_app.command("save")
-def preset_save(name: str) -> None:
-    typer.echo("[stub] preset save: Not yet implemented")
+def preset_save(
+    name: str,
+    root: Path = typer.Option(".", "--root", "-r"),
+    config: Path | None = typer.Option(None, "--config", "-c"),
+) -> None:
+    resolved_root, config_path = _resolve_root_and_config(root, config)
+    presets_dir = resolved_root / "config" / "presets"
+    config_data = load_config(config_path)
+    save_preset(name, config_data, presets_dir=presets_dir)
 
 
-def handle_error(error: FrameCompareError) -> int:
+def handle_error(error: FrameCompareError, *, no_color: bool, verbose: bool) -> int:
+    message = format_error_console(error, verbose=verbose)
+    if no_color:
+        typer.echo(message, err=True)
+        return int(get_exit_code(error))
     console = Console(stderr=True)
-    console.print(f"[red]Error[/red] [{error.code}]: {error.context.message}")
-    if error.hint:
-        console.print(f"[yellow]Hint:[/yellow] {error.hint}")
+    console.print(message)
     return int(get_exit_code(error))
 
 
@@ -258,6 +353,26 @@ def _doctor_report_json(report: DoctorReport) -> dict[str, JSONValue]:
         "doctor": doctor_payload,
     }
     return payload
+
+
+def _resolve_root_and_config(root: Path, config: Path | None) -> tuple[Path, Path]:
+    resolved_root = Path(root).resolve()
+    if config is not None:
+        config_path = Path(config)
+        if not config_path.is_absolute():
+            config_path = (resolved_root / config_path).resolve()
+        else:
+            config_path = config_path.resolve()
+    else:
+        config_path = (resolved_root / "config" / "config.toml").resolve()
+    return resolved_root, config_path
+
+
+def _write_config_to(path: Path, config: ConfigSchema) -> None:
+    data = config.model_dump(mode="json", exclude_none=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    toml_text = tomli_w.dumps(data)
+    path.write_text(toml_text, encoding="utf-8")
 
 
 def _prepare_toml_payload(data: dict[str, object]) -> dict[str, object]:

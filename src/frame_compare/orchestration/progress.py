@@ -18,6 +18,7 @@ from frame_compare.utils.progress import (
 def select_reporter(
     quiet: bool = False,
     json_output: bool = False,
+    no_color: bool = False,
     force_tty: bool | None = None,
 ) -> ProgressReporter:
     """Select the appropriate progress reporter based on CLI flags and environment.
@@ -25,16 +26,18 @@ def select_reporter(
     Selection Priority:
     1. quiet=True -> NullProgressReporter
     2. json_output=True -> LogProgressReporter
-    3. force_tty is not None:
+    3. no_color=True -> LogProgressReporter
+    4. force_tty is not None:
        - True -> RichProgressReporter
        - False -> LogProgressReporter
-    4. TTY detection (sys.stdout.isatty()):
+    5. TTY detection (sys.stdout.isatty()):
        - Interactive -> RichProgressReporter
        - Non-interactive -> LogProgressReporter
 
     Args:
         quiet: If True, suppress all progress output.
         json_output: If True, use structured logging instead of interactive bars.
+        no_color: If True, avoid Rich progress output.
         force_tty: Override TTY detection. None = auto-detect.
 
     Returns:
@@ -44,6 +47,9 @@ def select_reporter(
         return NullProgressReporter()
 
     if json_output:
+        return LogProgressReporter()
+
+    if no_color:
         return LogProgressReporter()
 
     if force_tty is not None:

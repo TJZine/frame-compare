@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -10,7 +11,14 @@ from typing import Protocol
 
 import httpx
 
+from frame_compare.analysis import cache_io
 from frame_compare.config import ConfigSchema, apply_cli_overrides
+from frame_compare.errors import (
+    AudioAlignmentError,
+    CacheCorruptionError,
+    CacheVersionMismatchError,
+    MetricsCalculationError,
+)
 from frame_compare.orchestration.context import (
     ClipFingerprint,
     ClipProbeSnapshot,
@@ -33,9 +41,12 @@ from frame_compare.orchestration.probe_props import (
     compute_tonemap_prop_keys,
 )
 from frame_compare.orchestration.progress import select_reporter
+from frame_compare.services.alignment import CACHE_FILE_NAME, load_cached_offsets
 from frame_compare.utils.progress import ProgressReporter
+from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.loader import DefaultVSLoader, VSLoader
 from frame_compare.vs.types import HDRMetadata
+from frame_compare.vspreview import load_manual_overrides
 
 
 @dataclass(frozen=True)
@@ -85,6 +96,35 @@ def _empty_str_list() -> list[str]:
 
 def _empty_phase_timings() -> dict[str, float]:
     return {}
+
+
+def _build_preflight_overrides(request: RunRequest) -> dict[str, object] | None:
+    overrides: dict[str, object] = {}
+    if request.input_dir is not None:
+        overrides["paths"] = {"input_dir": str(request.input_dir)}
+    return overrides or None
+
+
+def _remove_cached_metrics(workspace: WorkspacePaths) -> None:
+    analysis_cache_path = workspace.cache_dir / cache_io.CACHE_FILENAME
+    if analysis_cache_path.exists():
+        analysis_cache_path.unlink()
+    audio_cache_path = workspace.generated_dir / CACHE_FILE_NAME
+    if audio_cache_path.exists():
+        audio_cache_path.unlink()
+
+
+def _resolve_cache_version(cache_path: Path) -> str | None:
+    try:
+        data = cache_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    try:
+        payload = json.loads(data)
+    except json.JSONDecodeError:
+        return None
+    version = payload.get("version")
+    return str(version) if version is not None else None
 
 
 @dataclass(frozen=True)
@@ -171,6 +211,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         deps.progress = select_reporter(
             quiet=request.quiet,
             json_output=request.json_output,
+            no_color=request.no_color,
         )
 
     async def _execute_with_deps() -> RunResult:
@@ -181,9 +222,15 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             raise RuntimeError("Progress reporter must be initialized before execution.")
 
         preflight_start = deps.clock()
+        if request.no_cache and request.from_cache_only:
+            raise MetricsCalculationError(
+                "Flags --no-cache and --from-cache-only are mutually exclusive."
+            )
+
         preflight = prepare_preflight(
             root=request.root,
             config_path=request.config_path,
+            overrides=_build_preflight_overrides(request),
         )
         preflight_end = deps.clock()
 
@@ -200,9 +247,44 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             "overlay": request.overlay_mode,
             "no_upload": request.no_upload,
             "force_interactive_alignment": request.force_interactive_alignment,
+            "input": str(request.input_dir) if request.input_dir is not None else None,
         }
         config = apply_cli_overrides(preflight.config, cli_args=cli_args)
         input_videos = discover_inputs(workspace.input_dir)
+
+        if request.no_cache:
+            _remove_cached_metrics(workspace)
+
+        if request.from_cache_only and not request.skip_analysis:
+            fingerprint = cache_io.compute_cache_key(input_videos, config.analysis)
+            cache_result = cache_io.load_cached_metrics(workspace.cache_dir, fingerprint, clips=[])
+            if not cache_result.success:
+                cache_path = workspace.cache_dir / cache_io.CACHE_FILENAME
+                if cache_result.reason == "corrupted":
+                    raise CacheCorruptionError(cache_path)
+                if cache_result.reason == "version_mismatch":
+                    found = _resolve_cache_version(cache_path) or "unknown"
+                    raise CacheVersionMismatchError(found, str(cache_io.CACHE_VERSION))
+                raise MetricsCalculationError(
+                    f"Cached metrics missing or mismatched ({cache_result.reason})."
+                )
+
+        if request.from_cache_only and config.audio_alignment.enable and len(input_videos) > 1:
+            reference = input_videos[0]
+            comparisons = input_videos[1:]
+            manual_overrides = load_manual_overrides(workspace.generated_dir)
+            cached_offsets = (
+                load_cached_offsets(workspace.generated_dir, [reference] + comparisons) or {}
+            )
+            missing: list[str] = []
+            for comp in comparisons:
+                key = f"{reference.stem}:{comp.stem}"
+                if key in manual_overrides or key in cached_offsets:
+                    continue
+                missing.append(key)
+            if missing:
+                message = "Missing cached audio alignment offsets for: " + ", ".join(missing)
+                raise AudioAlignmentError(message)
         cache_path = workspace.generated_dir / "clip_probe.toml"
         cached_entries = load_clip_probe_cache(cache_path)
         entries_by_key: dict[str, ClipProbeSnapshot] = dict(cached_entries)
