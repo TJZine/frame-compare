@@ -83,8 +83,11 @@ root = "src"
 root = "tests"
 reportMissingParameterType = false
 reportUnknownParameterType = false
+reportUnknownArgumentType = false
+reportUnknownLambdaType = false
 reportUnknownMemberType = false
 reportUnknownVariableType = false
+reportInvalidTypeForm = false
 reportPrivateUsage = false
 
 # ─── Ruff ──────────────────────────────────────────────────────────────────────
