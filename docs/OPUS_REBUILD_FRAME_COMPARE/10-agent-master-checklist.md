@@ -602,9 +602,9 @@ frame-compare/
   - [x] `tests/orchestration/test_probe_cache.py::test_load_clip_probe_cache_returns_empty_dict_on_missing_version` (2026-02-03)
   - [x] `tests/orchestration/test_probe_cache.py::test_save_clip_probe_cache_writes_version_first_and_keys_sorted` (2026-02-03)
 - [ ] Write integration tests (Docker, real deps; zero skips):
-  - [ ] `tests/integration/test_loadsources_probe_cache.py::test_loadsources_writes_clip_probe_cache_file`
-  - [ ] `tests/integration/test_loadsources_probe_cache.py::test_loadsources_reuses_clip_probe_cache_file`
-  - [ ] Verify in Docker: `bash tools/verify_docker_integration.sh`
+  - [x] `tests/integration/test_loadsources_probe_cache.py::test_loadsources_writes_clip_probe_cache_file` (2026-02-04)
+  - [x] `tests/integration/test_loadsources_probe_cache.py::test_loadsources_reuses_clip_probe_cache_file` (2026-02-04)
+  - [x] Verify in Docker: `bash tools/verify_docker_integration.sh`
 
 ### 6.8 CLI Commands
 
