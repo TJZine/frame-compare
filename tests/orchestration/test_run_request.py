@@ -27,6 +27,7 @@ def test_run_request_defaults() -> None:
     assert request.skip_metadata is False
     assert request.skip_dovi is False
     assert request.no_upload is False
+    assert request.force_interactive_alignment is False
     assert request.no_color is False
     assert request.quiet is False
     assert request.verbose is False

@@ -130,22 +130,26 @@ def _resolve_paths_with_config_file(
     )
 
 
-def discover_inputs(input_dir: Path, patterns: list[str]) -> list[Path]:
+def discover_inputs(input_dir: Path, patterns: list[str] | None = None) -> list[Path]:
     """Discover video files in input directory.
 
     Args:
         input_dir: Directory to search
-        patterns: Glob patterns to match
+        patterns: Glob patterns to match (defaults to module patterns if None)
 
     Returns:
         Sorted list of video file paths (case-insensitive lexicographic by filename)
     """
+    effective_patterns = _VIDEO_PATTERNS if patterns is None else patterns
     videos: list[Path] = []
-    for pattern in patterns:
+    for pattern in effective_patterns:
         videos.extend(input_dir.glob(pattern))
 
     # Stable ordering: case-insensitive lexicographic sort by filename
-    return sorted(videos, key=lambda p: p.name.lower())
+    ordered = sorted(videos, key=lambda p: p.name.lower())
+    if not ordered:
+        raise NoVideosFoundError(input_dir.resolve(), patterns=effective_patterns)
+    return ordered
 
 
 def prepare_preflight(
@@ -199,9 +203,7 @@ def prepare_preflight(
     if not workspace.input_dir.exists():
         raise DirectoryNotFoundError(workspace.input_dir)
 
-    videos = discover_inputs(workspace.input_dir, _VIDEO_PATTERNS)
-    if not videos:
-        raise NoVideosFoundError(workspace.input_dir, patterns=_VIDEO_PATTERNS)
+    discover_inputs(workspace.input_dir)
 
     return PreflightResult(
         config=config,

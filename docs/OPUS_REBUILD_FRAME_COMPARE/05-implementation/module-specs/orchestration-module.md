@@ -652,6 +652,7 @@ class RunRequest:
     skip_metadata: bool = False      # --skip-metadata
     skip_dovi: bool = False          # --skip-dovi
     no_upload: bool = False          # --no-upload
+    force_interactive_alignment: bool = False  # --force-interactive-alignment
 
     # Tonemap overrides (highest priority)
     tm_preset: str | None = None     # --tm-preset
@@ -783,12 +784,14 @@ Phases execute in this exact order:
 ```python
 def discover_inputs(
     input_dir: Path,
-    patterns: list[str] = ["*.mkv", "*.mp4", "*.avi", "*.m2ts", "*.ts"],
+    patterns: list[str] | None = None,
 ) -> list[Path]:
     """
     Discover video files in input directory.
 
     Algorithm:
+    0. If patterns is None, use default patterns:
+       ["*.mkv", "*.mp4", "*.avi", "*.m2ts", "*.ts"]
     1. Glob for all matching patterns
     2. Sort by filename (lexicographic, case-insensitive)
     3. Return sorted list

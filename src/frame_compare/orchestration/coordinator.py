@@ -10,7 +10,7 @@ from typing import Protocol
 
 import httpx
 
-from frame_compare.config import ConfigSchema
+from frame_compare.config import ConfigSchema, apply_cli_overrides
 from frame_compare.orchestration.context import (
     ClipFingerprint,
     ClipProbeSnapshot,
@@ -60,6 +60,7 @@ class RunRequest:
     skip_metadata: bool = False
     skip_dovi: bool = False
     no_upload: bool = False
+    force_interactive_alignment: bool = False
 
     # Tonemap overrides (highest priority)
     tm_preset: str | None = None
@@ -84,9 +85,6 @@ def _empty_str_list() -> list[str]:
 
 def _empty_phase_timings() -> dict[str, float]:
     return {}
-
-
-_VIDEO_PATTERNS: list[str] = ["*.mkv", "*.mp4", "*.avi", "*.m2ts", "*.ts"]
 
 
 @dataclass(frozen=True)
@@ -193,7 +191,18 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
 
         load_sources_start = deps.clock()
         workspace = preflight.workspace
-        input_videos = discover_inputs(workspace.input_dir, _VIDEO_PATTERNS)
+        cli_args: dict[str, object] = {
+            "tm_preset": request.tm_preset,
+            "tm_target": request.tm_target_nits,
+            "tm_curve": request.tm_curve,
+            "frame_count": request.frame_count,
+            "seed": request.seed,
+            "overlay": request.overlay_mode,
+            "no_upload": request.no_upload,
+            "force_interactive_alignment": request.force_interactive_alignment,
+        }
+        config = apply_cli_overrides(preflight.config, cli_args=cli_args)
+        input_videos = discover_inputs(workspace.input_dir)
         cache_path = workspace.generated_dir / "clip_probe.toml"
         cached_entries = load_clip_probe_cache(cache_path)
         entries_by_key: dict[str, ClipProbeSnapshot] = dict(cached_entries)
@@ -238,13 +247,10 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
 
         save_clip_probe_cache(cache_path, entries_by_key)
 
-        if not clips:
-            raise ValueError("No input videos discovered after preflight.")
-
         reference = clips[0]
         comparisons = clips[1:]
         context = RunContext(
-            config=preflight.config,
+            config=config,
             workspace=workspace,
             reference=reference,
             comparisons=comparisons,

@@ -253,6 +253,7 @@ class RunRequest:
     skip_analysis: bool = False
     skip_metadata: bool = False
     skip_dovi: bool = False
+    force_interactive_alignment: bool = False
     tm_preset: str | None = None
     tm_target_nits: int | None = None
     tm_curve: str | None = None
@@ -296,6 +297,13 @@ class RunContext:
     metrics: RunMetrics
     log: structlog.BoundLogger
 ```
+
+**Interactive alignment implication (SSOT):**
+
+When `RunRequest.force_interactive_alignment` is `True`, CLI overrides MUST ensure:
+
+- `audio_alignment.force_interactive = True`
+- `audio_alignment.use_vspreview = True`
 
 ### 3.2 Public API
 

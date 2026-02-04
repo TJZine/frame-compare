@@ -240,4 +240,14 @@ CLI_FLAGS: dict[str, CLIFlagInfo] = {
         "choices": None,
         "envvar": None,
     },
+    "FLAG_FORCE_INTERACTIVE_ALIGNMENT": {
+        "long": "--force-interactive-alignment",
+        "short": None,
+        "type": "bool",
+        "default": False,
+        "config_key": "audio_alignment.force_interactive",
+        "help": "Force interactive alignment (implies audio_alignment.use_vspreview = true)",
+        "choices": None,
+        "envvar": None,
+    },
 }

@@ -149,6 +149,18 @@ class TestDiscoverInputs:
         assert result[0].name == "A.mkv"
         assert result[1].name == "b.mkv"
 
+    def test_discover_inputs_empty_raises_no_videos_found_error_preserves_patterns(
+        self, tmp_path: Path
+    ) -> None:
+        """Given no matching files → raises NoVideosFoundError with default patterns."""
+        with pytest.raises(NoVideosFoundError) as exc_info:
+            discover_inputs(tmp_path)
+
+        error = exc_info.value
+        assert error.code == "FC-3001"
+        assert error.path == tmp_path.resolve()
+        assert error.patterns == ["*.mkv", "*.mp4", "*.avi", "*.m2ts", "*.ts"]
+
 
 class TestPreparePreflight:
     """Tests for prepare_preflight function."""

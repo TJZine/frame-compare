@@ -162,3 +162,60 @@ def test_execute_run_emits_fps_report_after_load_sources_and_after_align(
     asyncio.run(execute_run(request, deps=deps))
 
     assert calls == ["after_load_sources", "after_align"]
+
+
+def test_execute_run_applies_cli_overrides_before_phase_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CLI overrides are applied to config before phase execution begins."""
+    config_content = """\
+[paths]
+input_dir = "comparison_videos"
+screenshots_dir = "screenshots"
+generated_dir = "generated"
+config_dir = "config"
+
+[audio_alignment]
+enable = false
+force_interactive = false
+use_vspreview = false
+
+[report]
+enable = false
+"""
+    _create_config(tmp_path, content=config_content)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "source.mkv", "comp.mkv")
+
+    request = RunRequest(
+        root=tmp_path,
+        tm_preset="filmic",
+        tm_target_nits=203,
+        overlay_mode="diagnostic",
+        seed=123,
+        no_upload=True,
+        force_interactive_alignment=True,
+        skip_analysis=True,
+        skip_metadata=True,
+        skip_dovi=True,
+    )
+    deps = RunDependencies(vs_loader=FakeVSLoader())
+
+    captured: dict[str, object] = {}
+
+    async def _capture_execute_phases(_phases, context, _reporter):
+        if "config" not in captured:
+            captured["config"] = context.config
+
+    monkeypatch.setattr(coordinator, "execute_phases", _capture_execute_phases)
+
+    asyncio.run(execute_run(request, deps=deps))
+
+    config = captured["config"]
+    assert config.color.preset == "filmic"
+    assert config.color.target_nits == 203
+    assert config.screenshots.overlay_mode == "diagnostic"
+    assert config.analysis.random_seed == 123
+    assert config.slowpics.auto_upload is False
+    assert config.audio_alignment.force_interactive is True
+    assert config.audio_alignment.use_vspreview is True

@@ -45,3 +45,26 @@ def test_apply_cli_overrides_ignores_unknown_keys() -> None:
 
     new_config = apply_cli_overrides(config, cli_args)
     assert new_config == config
+
+
+def test_apply_cli_overrides_seed_maps_to_analysis_random_seed() -> None:
+    """Test that seed maps to analysis.random_seed."""
+    config = get_default_config()
+    cli_args: dict[str, Any] = {"seed": 123}
+
+    new_config = apply_cli_overrides(config, cli_args)
+
+    assert new_config.analysis.random_seed == 123
+
+
+def test_apply_cli_overrides_force_interactive_alignment_sets_force_and_use_vspreview() -> None:
+    """Test force_interactive_alignment implies use_vspreview."""
+    config = get_default_config()
+    assert config.audio_alignment.force_interactive is False
+    assert config.audio_alignment.use_vspreview is False
+
+    cli_args: dict[str, Any] = {"force_interactive_alignment": True}
+    new_config = apply_cli_overrides(config, cli_args)
+
+    assert new_config.audio_alignment.force_interactive is True
+    assert new_config.audio_alignment.use_vspreview is True

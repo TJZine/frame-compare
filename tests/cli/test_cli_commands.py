@@ -36,6 +36,7 @@ def test_run_help_shows_all_options():
         "--skip-analysis",
         "--skip-metadata",
         "--skip-dovi",
+        "--force-interactive-alignment",
         "--json",
         "--no-color",
         "--write-config",
@@ -51,10 +52,62 @@ def test_run_help_shows_all_options():
         assert opt in result.stdout
 
 
-def test_run_stub_executes():
+def test_run_exits_zero_when_runner_returns_success(monkeypatch):
+    def _run(_request, dependencies=None):
+        return type("RunResult", (), {"success": True})()
+
+    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+
     result = runner.invoke(app, ["run"])
     assert result.exit_code == 0
-    assert "[stub] run: Not yet implemented" in result.stdout
+
+
+def test_run_stub_executes(monkeypatch):
+    def _run(_request, dependencies=None):
+        return type("RunResult", (), {"success": True})()
+
+    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+
+    result = runner.invoke(app, ["run"])
+    assert result.exit_code == 0
+
+
+def test_run_exits_processing_error_when_runner_returns_unsuccessful(monkeypatch):
+    def _run(_request, dependencies=None):
+        return type("RunResult", (), {"success": False})()
+
+    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+
+    result = runner.invoke(app, ["run"])
+    assert result.exit_code == 5
+
+
+def test_run_builds_run_request_from_cli_args(monkeypatch):
+    captured = {}
+
+    def _run(request, dependencies=None):
+        captured["request"] = request
+        return type("RunResult", (), {"success": True})()
+
+    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "--tm-target",
+            "203",
+            "--overlay",
+            "diagnostic",
+            "--force-interactive-alignment",
+        ],
+    )
+    assert result.exit_code == 0
+
+    request = captured["request"]
+    assert request.tm_target_nits == 203
+    assert request.overlay_mode == "diagnostic"
+    assert request.force_interactive_alignment is True
 
 
 def test_wizard_stub():

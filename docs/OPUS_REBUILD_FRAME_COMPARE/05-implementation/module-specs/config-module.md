@@ -349,31 +349,32 @@ The config module should document which of these are honored directly vs injecte
 ### 4.1 Override Mapping
 
 ```python
-# Map CLI flags to config paths
-# Note: Flags marked with "# Direct" are handled directly by the CLI layer
-# and don't map to config keys. They're documented here for completeness.
+ # Map CLI flags to config paths
+ # Note: Flags marked with "# Direct" are handled directly by the CLI layer
+ # and don't map to config keys. They're documented here for completeness.
 CLI_OVERRIDE_MAP: dict[str, str] = {
-    # Analysis settings
+     # Analysis settings
     "tm_preset": "color.preset",
     "tm_target": "color.target_nits",
     "tm_curve": "color.tone_curve",
     "frame_count": "analysis.frame_count",
-    "random_seed": "analysis.random_seed",
-    # Screenshot settings
+    "seed": "analysis.random_seed",
+    "force_interactive_alignment": "audio_alignment.force_interactive",
+     # Screenshot settings
     "overlay": "screenshots.overlay_mode",
-    # Publishing settings
+     # Publishing settings
     "no_upload": "slowpics.auto_upload",  # Inverted: True = False
-    # Paths (override workspace resolution, not stored in config)
+     # Paths (override workspace resolution, not stored in config)
     "input": "paths.input_dir",  # Direct path override
     "output": "report.output_dir",  # Direct path override
 }
 
-# Flags handled directly by CLI (not config overrides)
-# - --quiet: Sets logging.level = "WARNING", captured in RunRequest
-# - --verbose: Sets logging.level = "DEBUG", captured in RunRequest
-# - --json: Sets output format, captured in RunRequest
-# - --no-color: Disables rich output, captured in RunRequest
-# - --version, --help: CLI-only flags
+ # Flags handled directly by CLI (not config overrides)
+ # - --quiet: Sets logging.level = "WARNING", captured in RunRequest
+ # - --verbose: Sets logging.level = "DEBUG", captured in RunRequest
+ # - --json: Sets output format, captured in RunRequest
+ # - --no-color: Disables rich output, captured in RunRequest
+ # - --version, --help: CLI-only flags
 
 def apply_cli_overrides(
     config: ConfigSchema,
@@ -385,6 +386,12 @@ def apply_cli_overrides(
     Creates a new ConfigSchema with overrides applied.
     """
 ```
+
+**Required implication (SSOT):**
+
+If `force_interactive_alignment` is enabled by CLI override application, it MUST also set:
+
+- `audio_alignment.use_vspreview = True`
 
 ---
 

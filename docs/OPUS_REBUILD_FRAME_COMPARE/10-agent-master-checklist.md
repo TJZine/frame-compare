@@ -610,9 +610,9 @@ frame-compare/
 
 **Reference:** `05-implementation/module-specs/cli-module.md`
 
-- [ ] Complete `run` command implementation
-- [ ] Implement CLI flag → config override mapping per orchestration spec §4.4.5
-- [ ] Implement input discovery rules per orchestration spec §4.4.6
+- [x] Complete `run` command implementation (2026-02-04)
+- [x] Implement CLI flag → config override mapping per orchestration spec §4.4.5 (2026-02-04)
+- [x] Implement input discovery rules per orchestration spec §4.4.6 (2026-02-04)
 - [ ] Complete `wizard` command (interactive config)
 - [ ] Complete `doctor` command (dependency check)
 - [ ] Complete `preset` subcommands (list, apply, save)

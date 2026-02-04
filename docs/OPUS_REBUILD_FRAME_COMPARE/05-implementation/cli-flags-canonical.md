@@ -34,6 +34,7 @@
 | FLAG_NO_COLOR | --no-color | - | bool | False | - | Disable colors |
 | FLAG_SKIP_METADATA | --skip-metadata | - | bool | False | - | Skip TMDB metadata lookup |
 | FLAG_SKIP_DOVI | --skip-dovi | - | bool | False | - | Skip Dolby Vision extraction |
+| FLAG_FORCE_INTERACTIVE_ALIGNMENT | --force-interactive-alignment | - | bool | False | audio_alignment.force_interactive | Force interactive alignment (implies audio_alignment.use_vspreview = true) |
 
 ---
 

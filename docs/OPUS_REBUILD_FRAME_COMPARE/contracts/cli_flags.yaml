@@ -230,3 +230,13 @@ flags:
     help: "Skip Dolby Vision extraction"
     choices: null
     envvar: null
+
+  - id: FLAG_FORCE_INTERACTIVE_ALIGNMENT
+    long: "--force-interactive-alignment"
+    short: null
+    type: bool
+    default: false
+    config_key: audio_alignment.force_interactive
+    help: "Force interactive alignment (implies audio_alignment.use_vspreview = true)"
+    choices: null
+    envvar: null

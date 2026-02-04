@@ -6,7 +6,9 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
+from frame_compare import runner
 from frame_compare.errors import FrameCompareError, get_exit_code
+from frame_compare.orchestration.coordinator import RunRequest
 
 app = typer.Typer(
     name="frame-compare",
@@ -45,6 +47,7 @@ def run(
     skip_analysis: bool = typer.Option(False, "--skip-analysis"),
     skip_metadata: bool = typer.Option(False, "--skip-metadata"),
     skip_dovi: bool = typer.Option(False, "--skip-dovi"),
+    force_interactive_alignment: bool = typer.Option(False, "--force-interactive-alignment"),
     json_output: bool = typer.Option(False, "--json"),
     no_color: bool = typer.Option(False, "--no-color"),
     write_config: bool = typer.Option(False, "--write-config"),
@@ -52,7 +55,38 @@ def run(
     quiet: bool = typer.Option(False, "--quiet", "-q"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
-    typer.echo("[stub] run: Not yet implemented")
+    request = RunRequest(
+        root=root,
+        config_path=config,
+        input_dir=input_dir,
+        no_cache=no_cache,
+        from_cache_only=from_cache_only,
+        no_upload=no_upload,
+        tm_preset=tm_preset,
+        tm_target_nits=tm_target,
+        tm_curve=tm_curve,
+        frame_count=frame_count,
+        seed=seed,
+        overlay_mode=overlay,
+        skip_analysis=skip_analysis,
+        skip_metadata=skip_metadata,
+        skip_dovi=skip_dovi,
+        force_interactive_alignment=force_interactive_alignment,
+        json_output=json_output,
+        no_color=no_color,
+        quiet=quiet,
+        verbose=verbose,
+    )
+
+    try:
+        result = runner.run(request, dependencies=None)
+    except FrameCompareError as error:
+        raise typer.Exit(code=handle_error(error)) from error
+    except KeyboardInterrupt:
+        raise typer.Exit(code=130) from None
+
+    if not result.success:
+        raise typer.Exit(code=5)
 
 
 @app.command()

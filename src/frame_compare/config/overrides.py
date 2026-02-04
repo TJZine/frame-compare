@@ -16,9 +16,10 @@ CLI_OVERRIDE_MAP: dict[str, str] = {
     "tm_target": "color.target_nits",
     "tm_curve": "color.tone_curve",
     "frame_count": "analysis.frame_count",
-    "random_seed": "analysis.random_seed",
+    "seed": "analysis.random_seed",
     "overlay": "screenshots.overlay_mode",
     "no_upload": "slowpics.auto_upload",
+    "force_interactive_alignment": "audio_alignment.force_interactive",
     "input": "paths.input_dir",
     "output": "report.output_dir",
 }
@@ -43,6 +44,9 @@ def apply_cli_overrides(
             value = not value
 
         _set_nested(overrides, config_path, value)
+
+    if cli_args.get("force_interactive_alignment") is True:
+        _set_nested(overrides, "audio_alignment.use_vspreview", True)
 
     if not overrides:
         return config
