@@ -613,8 +613,8 @@ frame-compare/
 - [x] Complete `run` command implementation (2026-02-04)
 - [x] Implement CLI flag → config override mapping per orchestration spec §4.4.5 (2026-02-04)
 - [x] Implement input discovery rules per orchestration spec §4.4.6 (2026-02-04)
-- [ ] Complete `wizard` command (interactive config)
-- [ ] Complete `doctor` command (dependency check)
+- [x] Complete `wizard` command (interactive config) (2026-02-04)
+- [x] Complete `doctor` command (dependency check) (2026-02-04)
 - [ ] Complete `preset` subcommands (list, apply, save)
 - [ ] Implement all CLI options documented in api-design.md
 - [ ] Implement `ExitCode` enum per spec §3.2

@@ -76,6 +76,17 @@ reportUnusedImport = true
 reportUnusedVariable = true
 reportPrivateUsage = true
 
+[[tool.pyright.executionEnvironments]]
+root = "src"
+
+[[tool.pyright.executionEnvironments]]
+root = "tests"
+reportMissingParameterType = false
+reportUnknownParameterType = false
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportPrivateUsage = false
+
 # ─── Ruff ──────────────────────────────────────────────────────────────────────
 [tool.ruff]
 target-version = "py313"
