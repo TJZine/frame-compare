@@ -14,6 +14,7 @@ Param(
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+$PSNativeCommandUseErrorActionPreference = $true
 
 function Ensure-Directory([string]$Path) {
   if (!(Test-Path -LiteralPath $Path)) {
@@ -70,6 +71,12 @@ function Assert-Sha256([string]$FilePath, [string]$ExpectedHex) {
   $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $FilePath).Hash.ToLowerInvariant()
   if ($hash -ne $ExpectedHex.ToLowerInvariant()) {
     throw "SHA256 mismatch for $FilePath`nExpected: $ExpectedHex`nActual:   $hash"
+  }
+}
+
+function Assert-LastExitCode([string]$CommandLabel) {
+  if ($LASTEXITCODE -ne 0) {
+    throw "$CommandLabel failed with exit code $LASTEXITCODE"
   }
 }
 
@@ -235,12 +242,19 @@ function Install-PythonDeps([string]$BundleRoot, [string]$VsCoreRoot) {
   try {
     # Export pinned, hashed requirements from uv.lock (exclude project itself; we run from app/src via PYTHONPATH).
     uv export --frozen --no-dev --no-emit-project --format requirements.txt --output-file $reqFile | Out-Null
+    Assert-LastExitCode -CommandLabel "uv export"
   } finally {
     Pop-Location
   }
 
   # Install project dependencies into app/site-packages.
   uv pip install --reinstall --strict --exact --require-hashes --only-binary :all: --python-version 3.13 --python-platform windows --target $sitePackages -r $reqFile
+  Assert-LastExitCode -CommandLabel "uv pip install requirements"
+  $tomliWModule = Join-Path $sitePackages "tomli_w"
+  $tomliWDistInfo = @(Get-ChildItem -LiteralPath $sitePackages -Filter "tomli_w-*.dist-info" -Directory -ErrorAction SilentlyContinue)
+  if (!(Test-Path -LiteralPath $tomliWModule) -and $tomliWDistInfo.Count -eq 0) {
+    throw "tomli_w was not installed into bundle site-packages: $sitePackages"
+  }
 
   # Install VapourSynth python module from the pinned VS portable distribution (no PyPI dependency).
   $wheelDir = Join-Path $VsCoreRoot "wheel"
@@ -250,6 +264,7 @@ function Install-PythonDeps([string]$BundleRoot, [string]$VsCoreRoot) {
   }
   $vsWheel = $vsWheelCandidates[0].FullName
   uv pip install --only-binary :all: --target $sitePackages $vsWheel
+  Assert-LastExitCode -CommandLabel "uv pip install vapoursynth wheel"
 }
 
 function Assert-BundleRuntime([string]$BundleRoot) {
@@ -264,6 +279,7 @@ function Assert-BundleRuntime([string]$BundleRoot) {
   $env:PATH = "$BundleRoot\\python;$BundleRoot\\vs\\core;$BundleRoot\\vs\\plugins;$BundleRoot\\ffmpeg;$env:PATH"
 
   & $python -c "import tomli_w; import typer; import rich; import frame_compare.cli_entry"
+  Assert-LastExitCode -CommandLabel "bundle runtime import validation"
 }
 
 function Copy-Licenses([string]$BundleRoot, [pscustomobject[]]$Artifacts) {
