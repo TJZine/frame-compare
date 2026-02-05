@@ -213,12 +213,14 @@ def test_format_error_console_basic():
 
 
 def test_format_error_console_verbose_with_details():
-    error = CacheCorruptionError(Path("/cache"))
+    cache_path = Path("/cache")
+    error = CacheCorruptionError(cache_path)
     output = format_error_console(error, verbose=True)
     assert f"✗ Error [{error.code}]:" in output
     assert "Details:" in output
     assert "'path'" in output or "path" in output
-    assert "/cache" in output
+    # Path string formatting is platform-dependent (POSIX: "/cache", Windows: "\\cache").
+    assert str(cache_path) in output
 
 
 def test_format_error_console_non_verbose_with_details():

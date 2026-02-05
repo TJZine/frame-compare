@@ -6,9 +6,11 @@ from __future__ import annotations
 import base64
 import html
 import json
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 from urllib.parse import urlparse
 
 from frame_compare.config.schema import ReportConfig
@@ -175,8 +177,6 @@ def generate_report(
 
 def os_path_relpath(path: Path, start: Path) -> str:
     """Wrapper for os.path.relpath to handle Path objects."""
-    import os
-
     return os.path.relpath(path, start)
 
 
@@ -858,8 +858,6 @@ def _build_html(data: dict[str, object], include_filmstrip: bool = True) -> str:
     # Note: We trust the data structure matches spec, but for Pyright strictness
     # we would need deeper typing. For now, we assume the dict structure is correct.
     # To satisfy strict mode without massive TypedDict definitions, we cast where needed.
-    from typing import cast
-
     title = cast(str, data["title"])
     generated_at = cast(str, data["generated_at"])
     stats = cast(dict[str, int], data["stats"])

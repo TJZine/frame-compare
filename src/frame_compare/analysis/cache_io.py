@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from frame_compare.config.schema import AnalysisConfig
 
 CACHE_FILENAME: str = "cache.compframes"
-CACHE_VERSION: int = 2
+CACHE_VERSION: int = 3
 
 
 def compute_cache_key(video_paths: list[Path], config: AnalysisConfig) -> str:
@@ -35,7 +35,7 @@ def compute_cache_key(video_paths: list[Path], config: AnalysisConfig) -> str:
     h = hashlib.sha256()
     for p in sorted(video_paths, key=str):
         stat = p.stat()
-        h.update(f"{p}|{stat.st_size}|{stat.st_mtime}".encode())
+        h.update(f"{p}|{stat.st_size}|{stat.st_mtime_ns}".encode())
     h.update(
         f"{config.frame_count}|{config.selection_mode.value}|{config.random_seed}|"
         f"{config.dark_quantile}|{config.bright_quantile}".encode()

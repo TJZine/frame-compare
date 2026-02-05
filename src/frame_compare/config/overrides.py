@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import ValidationError
 
+from frame_compare.config.utils import deep_merge
 from frame_compare.errors import ConfigValidationError, normalize_pydantic_errors
 
 if TYPE_CHECKING:
@@ -64,7 +65,7 @@ def apply_cli_overrides(
         return config
 
     base_dict = config.model_dump()
-    merged = _deep_merge(base_dict, overrides)
+    merged = deep_merge(base_dict, overrides)
 
     try:
         # Cast merged dict to Any to satisfy static type checkers on kwargs unpacking
@@ -87,18 +88,3 @@ def _set_nested(d: dict[str, object], path: str, value: object) -> None:
             next_level = current[key]
         current = cast(dict[str, object], next_level)
     current[keys[-1]] = value
-
-
-def _deep_merge(base: dict[str, object], updates: dict[str, object]) -> dict[str, object]:
-    """Deep merge two dicts. Updates take precedence."""
-    result: dict[str, object] = dict(base)
-    for key, value in updates.items():
-        base_value = result.get(key)
-        if isinstance(base_value, dict) and isinstance(value, dict):
-            result[key] = _deep_merge(
-                cast(dict[str, object], base_value),
-                cast(dict[str, object], value),
-            )
-        else:
-            result[key] = value
-    return result

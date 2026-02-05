@@ -109,6 +109,7 @@ frame-compare/
 ### 3.4 Technology Stack Deep Dive
 
 #### Runtime Dependencies (Critical)
+
 | Dependency | Purpose | Criticality |
 | :--- | :--- | :--- |
 | `vapoursynth` | Core video processing, resizing, tonemapping. | **CRITICAL** |

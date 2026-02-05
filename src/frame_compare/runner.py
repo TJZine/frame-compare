@@ -56,11 +56,6 @@ def run(request: RunRequest, dependencies: RunDependencies | None = None) -> Run
             no_color=request.no_color,
         )
 
-    execute_fn = cast(
-        Callable[[RunRequest, RunDependencies], Awaitable[RunResult]],
-        execute_run,
-    )
-
     async def _run_with_client() -> RunResult:
         if effective_deps.http_client is not None:
             return await execute_fn(request, effective_deps)
@@ -68,5 +63,10 @@ def run(request: RunRequest, dependencies: RunDependencies | None = None) -> Run
         async with httpx.AsyncClient() as http_client:
             effective_deps.http_client = http_client
             return await execute_fn(request, effective_deps)
+
+    execute_fn = cast(
+        Callable[[RunRequest, RunDependencies], Awaitable[RunResult]],
+        execute_run,
+    )
 
     return asyncio.run(_run_with_client())

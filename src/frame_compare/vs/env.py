@@ -41,7 +41,7 @@ def ensure_vs_environment() -> vs.Core:
     try:
         return vs_module.core
     except Exception as e:
-        raise VapourSynthError("Failed to initialize VapourSynth core") from e
+        raise VapourSynthError(f"Failed to initialize VapourSynth core: {e}") from e
 
 
 def detect_plugins(core: vs.Core) -> dict[str, bool]:

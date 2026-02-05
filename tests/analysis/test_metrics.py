@@ -29,7 +29,9 @@ if not _vs_spec_available() and "vapoursynth" not in sys.modules:
     vs_mock.FLOAT = 1
     sys.modules["vapoursynth"] = vs_mock
 else:
-    import vapoursynth as vs_mock  # type: ignore
+    import vapoursynth as vs_module  # type: ignore
+
+    vs_mock = vs_module
 
 from frame_compare.analysis.metrics import (  # noqa: E402
     ProgressReporter,

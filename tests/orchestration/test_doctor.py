@@ -115,12 +115,9 @@ class TestCheckLsmas:
 
     def test_check_lsmas_plugin_fails_when_missing(self) -> None:
         """Mock missing plugin → check fails."""
-        mock_core = MagicMock(spec=[])
+        mock_core = object()
         mock_vs = MagicMock()
         mock_vs.core = mock_core
-
-        del mock_core.lsmas
-        del mock_core.lw
 
         checks = collect_checks()
         lsmas_check = next(c for c in checks if c.name == "lsmas")
@@ -142,6 +139,21 @@ class TestCheckLsmas:
 
         assert report.all_passed is False
         assert "lsmas" in report.critical_failures
+
+
+def test_run_doctor_survives_raising_check() -> None:
+    def _boom() -> CheckResult:
+        raise RuntimeError("boom")
+
+    checks = [DoctorCheck(name="boom", category="optional", check_fn=_boom)]
+
+    report = run_doctor(checks=checks)
+
+    assert len(report.checks) == 1
+    _, result = report.checks[0]
+    assert result.passed is False
+    assert "boom check raised" in result.message
+    assert result.details["exception_type"] == "RuntimeError"
 
 
 class TestCheckSlowpics:

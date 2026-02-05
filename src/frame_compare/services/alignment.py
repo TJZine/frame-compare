@@ -209,7 +209,7 @@ def save_offsets_cache(
         try:
             with cache_path.open("rb") as f:
                 data.update(tomllib.load(f))
-        except (tomllib.TOMLDecodeError, Exception):
+        except tomllib.TOMLDecodeError:
             # If corrupt, we'll just overwrite
             pass
 

@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     import vapoursynth as vs  # type: ignore
 
 
-@dataclass
+@dataclass(frozen=True)
 class HDRMetadata:
     """HDR metadata extracted from source."""
 
@@ -51,7 +51,7 @@ class TonemapSettings:
     gamma_lift: bool = False
 
 
-@dataclass
+@dataclass(frozen=True)
 class ColorProps:
     """Color space properties extracted from frame.
 

@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, cast
 import tomli_w
 from pydantic import ValidationError
 
+from frame_compare.config.utils import deep_merge
 from frame_compare.errors import (
     ConfigValidationError,
     PresetInvalidError,
@@ -100,25 +101,10 @@ def apply_preset(
 
     preset_data = load_preset(preset_name, presets_dir=presets_dir)
     base_dict = config.model_dump()
-    merged = _deep_merge(base_dict, preset_data)
+    merged = deep_merge(base_dict, preset_data)
 
     try:
         return ConfigSchema.model_validate(cast(Any, merged))
     except ValidationError as exc:
         normalized = normalize_pydantic_errors(cast(Any, exc.errors()))
         raise ConfigValidationError(normalized) from exc
-
-
-def _deep_merge(base: dict[str, object], updates: dict[str, object]) -> dict[str, object]:
-    """Deep merge two dicts. Updates take precedence."""
-    result: dict[str, object] = dict(base)
-    for key, value in updates.items():
-        base_value = result.get(key)
-        if isinstance(base_value, dict) and isinstance(value, dict):
-            result[key] = _deep_merge(
-                cast(dict[str, object], base_value),
-                cast(dict[str, object], value),
-            )
-        else:
-            result[key] = value
-    return result

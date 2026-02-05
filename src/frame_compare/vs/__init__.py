@@ -16,8 +16,9 @@ from frame_compare.vs.loader import DefaultVSLoader, VSLoader
 from frame_compare.vs.props import get_color_props, is_hdr
 from frame_compare.vs.source import apply_trim, load_source
 from frame_compare.vs.tonemap import apply_tonemap, get_preset_settings
-from frame_compare.vs.tonemap import apply_tonemap as tonemap
 from frame_compare.vs.types import ColorProps, HDRMetadata, SourceInfo, TonemapSettings
+
+tonemap = apply_tonemap
 
 __all__ = [
     "VSLoader",

@@ -56,10 +56,5 @@ def is_hdr(clip: vs.VideoNode) -> bool:
     Note:
         Uses frame 0 properties. Consistent with _detect_hdr() in source.py.
     """
-    frame = clip.get_frame(0)  # type: ignore
-    props = frame.props  # type: ignore
-
-    transfer = int(props.get("_Transfer", 2))  # type: ignore
-    primaries = int(props.get("_Primaries", 2))  # type: ignore
-
-    return transfer in (16, 18) and primaries == 9
+    props = get_color_props(clip)
+    return props.transfer in (16, 18) and props.primaries == 9

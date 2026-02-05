@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from typer.testing import CliRunner
 
+from frame_compare import __version__
 from frame_compare.cli_entry import app
 
 
@@ -18,11 +19,11 @@ def test_cli_version_command_exits_zero() -> None:
 
 @pytest.mark.e2e
 def test_cli_version_command_outputs_version_string() -> None:
-    """GIVEN the CLI app WHEN 'version' is invoked THEN output is 'frame-compare 0.1.0'."""
+    """GIVEN the CLI app WHEN 'version' is invoked THEN output matches package version."""
     runner = CliRunner()
     result = runner.invoke(app, ["version"])
     # Typer's echo adds a newline; strip for comparison
-    assert result.output.strip() == "frame-compare 0.1.0"
+    assert result.output.strip() == f"frame-compare {__version__}"
 
 
 @pytest.mark.e2e

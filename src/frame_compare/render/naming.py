@@ -31,6 +31,7 @@ def generate_screenshot_name(label: str, frame_number: int, extension: str = "pn
     """
     if frame_number < 0:
         raise ValueError("frame_number must be non-negative")
+    extension = extension.lstrip(".")
     if not extension:
         raise ValueError("extension must not be empty")
 

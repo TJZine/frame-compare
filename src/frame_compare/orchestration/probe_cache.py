@@ -157,11 +157,24 @@ def save_clip_probe_cache(
         # We perform runtime validation to ensure only TOML-safe primitives are persisted,
         # even if the in-memory type hint was bypassed.
         safe_props: dict[str, str | int | float] = {}
+        dropped_props: dict[str, str] = {}
+        dropped_count = 0
         for k, v in snapshot.preserved_frame_props.items():
             # Use cast to Any to avoid "Unnecessary isinstance" warning while being defensive
             if isinstance(cast(Any, v), str | int | float):
                 safe_props[k] = v
+            else:
+                dropped_count += 1
+                if len(dropped_props) < 10:
+                    dropped_props[k] = type(v).__name__
         entry["preserved_frame_props"] = safe_props
+        if dropped_count:
+            log.warning(
+                "probe_cache_props_dropped",
+                cache_key=key,
+                dropped_count=dropped_count,
+                dropped_props=dropped_props,
+            )
 
         # Per SSOT §3.5.1: is_hdr=true → nested hdr_metadata table; is_hdr=false → omit
         if snapshot.is_hdr and snapshot.hdr_metadata:

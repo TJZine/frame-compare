@@ -2,7 +2,7 @@ from fractions import Fraction
 
 import pytest
 
-from frame_compare.analysis.selection import select_frames
+from frame_compare.analysis.selection import MIN_GAP, select_frames
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.config import AnalysisConfig, SelectionMode
 from frame_compare.errors import SelectionError
@@ -76,6 +76,7 @@ def test_random_mode_different_seed_exact_outputs():
 
     config42 = make_config(frame_count=10, selection_mode=SelectionMode.RANDOM, random_seed=42)
     result42 = select_frames(metrics, config42)
+    # Golden values for deterministic selection; update only with policy changes.
     # Expected values for seed 42 based on plan
     assert result42.frames == [1, 9, 15, 42, 50, 55, 65, 70, 78, 91]
 
@@ -141,7 +142,7 @@ def test_motion_selection_respects_min_gap():
     frames = result.frames
     for i in range(len(frames)):
         for j in range(i + 1, len(frames)):
-            assert abs(frames[i] - frames[j]) >= 5
+            assert abs(frames[i] - frames[j]) >= MIN_GAP
 
 
 def test_random_selection_respects_min_gap():
@@ -151,4 +152,4 @@ def test_random_selection_respects_min_gap():
     frames = result.frames
     for i in range(len(frames)):
         for j in range(i + 1, len(frames)):
-            assert abs(frames[i] - frames[j]) >= 5
+            assert abs(frames[i] - frames[j]) >= MIN_GAP

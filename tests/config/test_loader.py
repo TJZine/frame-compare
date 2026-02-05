@@ -107,6 +107,14 @@ def test_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     assert config.analysis.frame_count == 30
 
 
+def test_env_override_empty_string_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Empty-string env var should raise ConfigValidationError."""
+    monkeypatch.setenv("FRAME_COMPARE_ANALYSIS__FRAME_COUNT", "")
+
+    with pytest.raises(ConfigValidationError):
+        load_config_from_env()
+
+
 def test_cli_override_takes_precedence(tmp_path: Path) -> None:
     """Test that CLI overrides take precedence over file."""
     config_file = tmp_path / "config.toml"
@@ -122,6 +130,16 @@ def test_cli_override_takes_precedence(tmp_path: Path) -> None:
     config = load_config(config_path=config_file, overrides=overrides)
 
     assert config.analysis.frame_count == 50
+
+
+def test_load_config_none_path_with_empty_overrides_returns_config() -> None:
+    config = load_config(config_path=None, overrides={})
+    assert config.analysis.frame_count == 10
+
+
+def test_empty_overrides_leave_defaults_intact() -> None:
+    config = load_config(overrides={})
+    assert config.analysis.frame_count == 10
 
 
 def test_precedence_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

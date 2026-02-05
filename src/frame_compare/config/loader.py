@@ -15,6 +15,7 @@ from pydantic_settings import (
 )
 
 from frame_compare.config.schema import ConfigSchema
+from frame_compare.config.utils import deep_merge
 from frame_compare.errors import (
     ConfigNotFoundError,
     ConfigParseError,
@@ -32,7 +33,7 @@ def load_config(
         raise ConfigNotFoundError(config_path)
 
     alias_overrides = _resolve_env_aliases()
-    merged_overrides = _deep_merge(alias_overrides, overrides or {})
+    merged_overrides = deep_merge(alias_overrides, overrides or {})
 
     settings_cls: type[ConfigSchema]
     if config_path is None:
@@ -121,6 +122,7 @@ def _resolve_env_aliases() -> dict[str, object]:
     """Resolve special env var aliases to nested override dict."""
     overrides: dict[str, object] = {}
 
+    # Legacy alias is applied only when canonical nested env var is unset.
     if "TMDB_API_KEY" in os.environ and "FRAME_COMPARE_TMDB__API_KEY" not in os.environ:
         overrides["tmdb"] = {"api_key": os.environ["TMDB_API_KEY"]}
 
@@ -128,18 +130,3 @@ def _resolve_env_aliases() -> dict[str, object]:
         overrides["logging"] = {"level": os.environ["FRAME_COMPARE_LOG_LEVEL"]}
 
     return overrides
-
-
-def _deep_merge(base: dict[str, object], updates: dict[str, object]) -> dict[str, object]:
-    """Deep merge two dicts. Updates take precedence over base."""
-    result: dict[str, object] = dict(base)
-    for key, value in updates.items():
-        base_value = result.get(key)
-        if isinstance(base_value, dict) and isinstance(value, dict):
-            result[key] = _deep_merge(
-                cast(dict[str, object], base_value),
-                cast(dict[str, object], value),
-            )
-        else:
-            result[key] = value
-    return result

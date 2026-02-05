@@ -315,7 +315,17 @@ def run_doctor(
     critical_failures: list[str] = []
 
     for check in checks:
-        result = check.check_fn()
+        try:
+            result = check.check_fn()
+        except Exception as e:
+            result = CheckResult(
+                passed=False,
+                message=f"{check.name} check raised: {e}",
+                details={
+                    "exception_type": type(e).__name__,
+                    "exception": str(e),
+                },
+            )
         results.append((check, result))
 
         # Track core category failures as critical

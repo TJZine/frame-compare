@@ -124,7 +124,7 @@ behaviour while exposing operators in the `[color]` section for future overrides
 
 - **`src/frame_compare/vs/color.py:240-327`** — `_detect_rgb_color_range(core, clip, *, log, label, max_samples) -> tuple[Optional[int], Optional[str]]`
   - Purpose: Sample RGB plane stats to classify range as limited or full.
-  - Notes: Uses `std.PlaneStats()` on RGB clip, samples multiple frame indices, classifies based on 8-bit normalized min/max thresholds (limited ≤247, full spans both ends).
+  - Notes: Uses `std.PlaneStats()` on RGB clip, samples multiple frame indices, classifies based on 8-bit normalised min/max thresholds (limited ≤247, full spans both ends).
 
 ### Property Helpers
 
@@ -245,7 +245,7 @@ def _normalise_resolved_code(value: Optional[int]) -> Optional[int]:
     return code
 ```
 
-**Rule**: VapourSynth code 2 ("unspecified") is normalized to `None`, triggering default inference.
+**Rule**: VapourSynth code 2 ("unspecified") is normalised to `None`, triggering default inference.
 
 **Evidence** for screenshot fallback: `src/frame_compare/screenshot/helpers.py:340-362`
 
@@ -345,7 +345,7 @@ def _apply_frame_props_dict(clip: Any, props: Mapping[str, Any]) -> Any:
 
 ### Loading / Probing
 
-- **Not found**: No explicit color conversion during source loading. Color metadata is read via `snapshot_frame_props()` and normalized via `normalise_color_metadata()` at rendering time.
+- **Not found**: No explicit color conversion during source loading. Color metadata is read via `snapshot_frame_props()` and normalised via `normalise_color_metadata()` at rendering time.
 
 ### Analysis Metrics
 

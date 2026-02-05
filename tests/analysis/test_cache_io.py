@@ -6,6 +6,7 @@ from fractions import Fraction
 from pathlib import Path
 
 from frame_compare.analysis.cache_io import (
+    CACHE_VERSION,
     compute_cache_key,
     load_cached_metrics,
     save_metrics_cache,
@@ -188,7 +189,7 @@ def test_load_fingerprint_mismatch(tmp_path: Path) -> None:
     cache_file.write_text(
         json.dumps(
             {
-                "version": 2,
+                "version": CACHE_VERSION,
                 "fingerprint": "fp1",
                 "luminance": [],
                 "motion": [],
@@ -222,7 +223,7 @@ def test_save_creates_directory(tmp_path: Path) -> None:
 
 
 def test_save_writes_required_keys(tmp_path: Path) -> None:
-    """Cache file JSON has all required keys + version == 2."""
+    """Cache file JSON has all required keys + version == CACHE_VERSION."""
     metadata = MetricsMetadata(
         frame_count=10,
         fps=Fraction(24000, 1001),
@@ -235,7 +236,7 @@ def test_save_writes_required_keys(tmp_path: Path) -> None:
     with (tmp_path / "cache.compframes").open("r") as f:
         data = json.load(f)
 
-    assert data["version"] == 2
+    assert data["version"] == CACHE_VERSION
     assert "fingerprint" in data
     assert "luminance" in data
     assert "motion" in data
@@ -251,7 +252,7 @@ def test_load_missing_key_returns_corrupted(tmp_path: Path) -> None:
     cache_file.write_text(
         json.dumps(
             {
-                "version": 2,
+                "version": CACHE_VERSION,
                 "fingerprint": "fp",
                 "motion": [],
                 "metadata": {
