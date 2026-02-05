@@ -191,3 +191,9 @@ def test_probe_fps_failure(mock_run_subprocess):
     mock_run_subprocess.return_value.stdout = b"invalid"
     with pytest.raises(SourceLoadError):
         _probe_fps(Path("test.mp4"))
+
+
+def test_probe_fps_zero_denominator_raises_source_load_error(mock_run_subprocess):
+    mock_run_subprocess.return_value.stdout = b"0/0\n"
+    with pytest.raises(SourceLoadError, match="Invalid avg_frame_rate"):
+        _probe_fps(Path("test.mp4"))

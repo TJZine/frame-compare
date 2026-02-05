@@ -72,6 +72,9 @@ def calculate_metrics(
         PluginNotFoundError (FC-2003): If VapourSynth lsmas plugin unavailable.
         SourceLoadError (FC-4015): If video file cannot be loaded.
     """
+    if not video_paths:
+        raise MetricsCalculationError("No input video paths provided")
+
     fingerprint = compute_cache_key(video_paths, config)
 
     # Attempt to load from cache

@@ -132,7 +132,7 @@ class TestResolvePaths:
         result = resolve_paths(config, tmp_path)
 
         # The env var should be expanded
-        assert result.input_dir == Path(test_root) / "in"
+        assert result.input_dir == (Path(test_root) / "in").resolve()
 
 
 class TestDiscoverInputs:
@@ -148,6 +148,11 @@ class TestDiscoverInputs:
         assert len(result) == 2
         assert result[0].name == "A.mkv"
         assert result[1].name == "b.mkv"
+
+    def test_discover_inputs_matches_extensions_case_insensitive(self, tmp_path: Path) -> None:
+        _create_video_files(tmp_path, "VIDEO.MKV")
+        result = discover_inputs(tmp_path, ["*.mkv"])
+        assert [p.name for p in result] == ["VIDEO.MKV"]
 
     def test_discover_inputs_empty_raises_no_videos_found_error_preserves_patterns(
         self, tmp_path: Path

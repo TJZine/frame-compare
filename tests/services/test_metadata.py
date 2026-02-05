@@ -61,6 +61,22 @@ MOCK_TMDB_MULTI = {
     ]
 }
 
+MOCK_TMDB_MULTI_WITH_PERSON = {
+    "results": [
+        {
+            "id": 1,
+            "title": "Result 1",
+            "release_date": "2020-01-01",
+            "media_type": "movie",
+        },
+        {
+            "id": 999,
+            "name": "Some Actor",
+            "media_type": "person",
+        },
+    ]
+}
+
 # ─── Filename Parsing Tests ───────────────────────────────────────────────────
 
 
@@ -148,6 +164,22 @@ async def test_lookup_tmdb_returns_metadata(
     assert (
         result.poster_url == "https://image.tmdb.org/t/p/original/pB8BM7pdSp6B6Ih7QZ4DrQ3PmJK.jpg"
     )
+
+
+@pytest.mark.anyio
+async def test_lookup_tmdb_skips_person_results(
+    respx_mock: respx.MockRouter, async_client: httpx.AsyncClient
+) -> None:
+    respx_mock.get(url__startswith="https://api.themoviedb.org/3/search/multi").mock(
+        return_value=httpx.Response(200, json=MOCK_TMDB_MULTI_WITH_PERSON)
+    )
+    parsed = ParsedMetadata(title="Fight Club", year=1999)
+    config = MetadataConfig(api_key="a" * 32)
+
+    result = await lookup_tmdb(parsed, config, async_client)
+
+    assert result is not None
+    assert result.media_type in {"movie", "tv"}
 
 
 @pytest.mark.anyio

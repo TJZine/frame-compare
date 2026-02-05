@@ -53,6 +53,9 @@ async def execute_phases(
     for phase in phases:
         if phase.skip_condition is not None and phase.skip_condition(context.config):
             phase.status = PhaseStatus.SKIPPED
+            reporter.start_phase(phase.name, total=1)
+            reporter.set_description("Skipped")
+            reporter.complete_phase()
             continue
 
         phase.status = PhaseStatus.RUNNING

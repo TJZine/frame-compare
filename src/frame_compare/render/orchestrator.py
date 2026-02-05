@@ -88,6 +88,8 @@ def resolve_tonemap_settings(
     # Apply config overrides (config values always have defaults; direct access)
     settings = replace(settings, target_nits=config.color.target_nits)
     settings = replace(settings, tone_curve=config.color.tone_curve.value)
+    settings = replace(settings, gamma_lift=config.color.gamma_lift)
+    settings = replace(settings, contrast_recovery=config.color.contrast_recovery)
 
     # Apply CLI overrides (highest priority)
     if cli_overrides:

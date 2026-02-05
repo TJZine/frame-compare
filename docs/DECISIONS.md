@@ -271,7 +271,7 @@
 **Rationale:**
 
 - Preserves the public API signatures specified in the plan/SSOT.
-- Fulfills the requirement for interactive selection in the full resolution workflow.
+- Fulfills the requirement for interactive selection in the full-resolution workflow.
 - Avoids signature drift in `async-semantics.md` examples.
 
 ### Dependency Adjustments

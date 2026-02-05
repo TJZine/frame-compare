@@ -39,13 +39,11 @@ def load_source(path: Path, core: vs.Core | None = None) -> SourceInfo:
 
     try:
         clip = loader.LWLibavSource(str(path))
+        frame = clip.get_frame(0)
+        fps = Fraction(clip.fps.numerator, clip.fps.denominator)
+        is_hdr, hdr_metadata = _detect_hdr(dict(frame.props))
     except Exception as e:
         raise SourceLoadError(path, str(e)) from e
-
-    # Extract properties
-    frame = clip.get_frame(0)
-    fps = Fraction(clip.fps.numerator, clip.fps.denominator)
-    is_hdr, hdr_metadata = _detect_hdr(dict(frame.props))
 
     return SourceInfo(
         clip=clip,

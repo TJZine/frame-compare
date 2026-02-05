@@ -38,13 +38,16 @@ from frame_compare.utils.logging import configure_logging
 app = typer.Typer(
     name="frame-compare",
     help="Video frame comparison tool with tonemapping and slow.pics integration.",
-    no_args_is_help=True,
+    no_args_is_help=False,
 )
 
 
-@app.callback()
-def main() -> None:
+@app.callback(invoke_without_command=True)
+def main(ctx: typer.Context) -> None:
     """Video frame comparison tool."""
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
 
 
 @app.command()
@@ -97,50 +100,50 @@ def run(
         "input": str(input_dir) if input_dir is not None else None,
     }
 
-    if write_config:
-        config_data = load_config(config_path)
-        config_override = apply_cli_overrides(config_data, cli_args=cli_args)
-        _write_config_to(config_path, config_override)
-        return
-
-    if diagnose_paths:
-        config_data = load_config(config_path)
-        config_override = apply_cli_overrides(config_data, cli_args=cli_args)
-        workspace = resolve_paths(config_override, resolved_root)
-        payload = {
-            "root": str(resolved_root),
-            "config": str(config_path),
-            "input": str(workspace.input_dir),
-            "output": str(workspace.screenshots_dir),
-            "cache": str(workspace.generated_dir),
-        }
-        typer.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
-        return
-
-    request = RunRequest(
-        root=resolved_root,
-        config_path=config_path,
-        input_dir=input_dir,
-        no_cache=no_cache,
-        from_cache_only=from_cache_only,
-        no_upload=no_upload,
-        tm_preset=tm_preset,
-        tm_target_nits=tm_target,
-        tm_curve=tm_curve,
-        frame_count=frame_count,
-        seed=seed,
-        overlay_mode=overlay,
-        skip_analysis=skip_analysis,
-        skip_metadata=skip_metadata,
-        skip_dovi=skip_dovi,
-        force_interactive_alignment=force_interactive_alignment,
-        json_output=json_output,
-        no_color=no_color,
-        quiet=quiet,
-        verbose=verbose,
-    )
-
     try:
+        if write_config:
+            config_data = load_config(config_path)
+            config_override = apply_cli_overrides(config_data, cli_args=cli_args)
+            _write_config_to(config_path, config_override)
+            return
+
+        if diagnose_paths:
+            config_data = load_config(config_path)
+            config_override = apply_cli_overrides(config_data, cli_args=cli_args)
+            workspace = resolve_paths(config_override, resolved_root)
+            payload = {
+                "root": str(resolved_root),
+                "config": str(config_path),
+                "input": str(workspace.input_dir),
+                "output": str(workspace.screenshots_dir),
+                "cache": str(workspace.generated_dir),
+            }
+            typer.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+            return
+
+        request = RunRequest(
+            root=resolved_root,
+            config_path=config_path,
+            input_dir=input_dir,
+            no_cache=no_cache,
+            from_cache_only=from_cache_only,
+            no_upload=no_upload,
+            tm_preset=tm_preset,
+            tm_target_nits=tm_target,
+            tm_curve=tm_curve,
+            frame_count=frame_count,
+            seed=seed,
+            overlay_mode=overlay,
+            skip_analysis=skip_analysis,
+            skip_metadata=skip_metadata,
+            skip_dovi=skip_dovi,
+            force_interactive_alignment=force_interactive_alignment,
+            json_output=json_output,
+            no_color=no_color,
+            quiet=quiet,
+            verbose=verbose,
+        )
+
         result = runner.run(request, dependencies=None)
     except FrameCompareError as error:
         if json_output:
@@ -227,10 +230,13 @@ def preset_list(
     root: Path = typer.Option(".", "--root", "-r"),
     config: Path | None = typer.Option(None, "--config", "-c"),
 ) -> None:
-    resolved_root, _ = _resolve_root_and_config(root, config)
-    presets_dir = resolved_root / "config" / "presets"
-    for name in list_presets(presets_dir=presets_dir):
-        typer.echo(name)
+    try:
+        resolved_root, _ = _resolve_root_and_config(root, config)
+        presets_dir = resolved_root / "config" / "presets"
+        for name in list_presets(presets_dir=presets_dir):
+            typer.echo(name)
+    except FrameCompareError as error:
+        raise typer.Exit(code=handle_error(error, no_color=True, verbose=False)) from error
 
 
 @preset_app.command("apply")
@@ -239,11 +245,14 @@ def preset_apply(
     root: Path = typer.Option(".", "--root", "-r"),
     config: Path | None = typer.Option(None, "--config", "-c"),
 ) -> None:
-    resolved_root, config_path = _resolve_root_and_config(root, config)
-    presets_dir = resolved_root / "config" / "presets"
-    config_data = load_config(config_path)
-    updated = apply_preset(config_data, name, presets_dir=presets_dir)
-    _write_config_to(config_path, updated)
+    try:
+        resolved_root, config_path = _resolve_root_and_config(root, config)
+        presets_dir = resolved_root / "config" / "presets"
+        config_data = load_config(config_path)
+        updated = apply_preset(config_data, name, presets_dir=presets_dir)
+        _write_config_to(config_path, updated)
+    except FrameCompareError as error:
+        raise typer.Exit(code=handle_error(error, no_color=True, verbose=False)) from error
 
 
 @preset_app.command("save")
@@ -252,10 +261,13 @@ def preset_save(
     root: Path = typer.Option(".", "--root", "-r"),
     config: Path | None = typer.Option(None, "--config", "-c"),
 ) -> None:
-    resolved_root, config_path = _resolve_root_and_config(root, config)
-    presets_dir = resolved_root / "config" / "presets"
-    config_data = load_config(config_path)
-    save_preset(name, config_data, presets_dir=presets_dir)
+    try:
+        resolved_root, config_path = _resolve_root_and_config(root, config)
+        presets_dir = resolved_root / "config" / "presets"
+        config_data = load_config(config_path)
+        save_preset(name, config_data, presets_dir=presets_dir)
+    except FrameCompareError as error:
+        raise typer.Exit(code=handle_error(error, no_color=True, verbose=False)) from error
 
 
 def handle_error(error: Exception, *, no_color: bool, verbose: bool) -> int:

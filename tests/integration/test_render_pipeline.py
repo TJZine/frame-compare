@@ -92,3 +92,8 @@ def test_render_batch_ordering_contract(mock_video_path: Path, integration_outpu
         assert results[i].exists()
         with Image.open(results[i]) as img:
             assert img.format == "PNG"
+
+
+@pytest.mark.integration
+def test_render_batch_empty_requests_returns_empty() -> None:
+    assert render_batch([]) == []

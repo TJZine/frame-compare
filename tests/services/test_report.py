@@ -116,7 +116,7 @@ def test_generate_report_single_clip_raises(
 
 def test_generate_report_empty_frames_raises(report_data: ReportData) -> None:
     data = ReportData(report_data.clips, [], report_data.screenshots)
-    with pytest.raises(ReportError, match="no screenshots provided"):
+    with pytest.raises(ReportError, match="no frames provided"):
         generate_report(data, ReportConfig())
 
 
@@ -130,7 +130,7 @@ def test_generate_report_missing_clip_key_raises(report_data: ReportData) -> Non
     bad_screens = report_data.screenshots.copy()
     del bad_screens["clip1"]
     data = ReportData(report_data.clips, report_data.frames, bad_screens)
-    with pytest.raises(ReportError, match="no screenshots provided"):
+    with pytest.raises(ReportError, match="no screenshots for clip: clip1"):
         generate_report(data, ReportConfig())
 
 
@@ -138,7 +138,7 @@ def test_generate_report_empty_clip_list_raises(report_data: ReportData) -> None
     bad_screens = report_data.screenshots.copy()
     bad_screens["clip1"] = []
     data = ReportData(report_data.clips, report_data.frames, bad_screens)
-    with pytest.raises(ReportError, match="no screenshots provided"):
+    with pytest.raises(ReportError, match="no screenshots for clip: clip1"):
         generate_report(data, ReportConfig())
 
 
@@ -146,7 +146,7 @@ def test_generate_report_length_mismatch_raises(report_data: ReportData) -> None
     bad_screens = report_data.screenshots.copy()
     bad_screens["clip1"] = bad_screens["clip1"][:-1]  # Remove one
     data = ReportData(report_data.clips, report_data.frames, bad_screens)
-    with pytest.raises(ReportError, match="no screenshots provided"):
+    with pytest.raises(ReportError, match="screenshot count mismatch for clip1"):
         generate_report(data, ReportConfig())
 
 
@@ -217,6 +217,63 @@ def test_generate_report_filmstrip_included(report_data: ReportData, tmp_path: P
     out_path = generate_report(report_data, config)
     content = out_path.read_text(encoding="utf-8")
     assert 'class="rv-filmstrip"' in content
+
+
+def test_generate_report_escapes_dynamic_html_and_hardens_json_script_tag(tmp_path: Path) -> None:
+    clips = [
+        ClipInfo(
+            name="clip1",
+            path=tmp_path / "clip1.mkv",
+            frame_count=100,
+            resolution=(1920, 1080),
+            fps=24.0,
+            hdr=False,
+            label="<b>REF</b>",
+        ),
+        ClipInfo(
+            name="clip2",
+            path=tmp_path / "clip2.mkv",
+            frame_count=100,
+            resolution=(1920, 1080),
+            fps=24.0,
+            hdr=False,
+            label='ENC"></option><script>alert(2)</script>',
+        ),
+    ]
+
+    screenshots: dict[str, list[Path]] = {}
+    for clip in clips:
+        p = tmp_path / "screens" / clip.name / "0.png"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"fake_png_data")
+        screenshots[clip.name] = [p]
+
+    title = "</script><script>alert(1)</script>"
+    report_data = ReportData(
+        clips=clips,
+        frames=[10],
+        screenshots=screenshots,
+        metadata=TmdbMetadata(
+            tmdb_id=1,
+            title=title,
+            original_title="x",
+            year=2023,
+            media_type="movie",
+        ),
+        slowpics_url="https://slow.pics/c/12345",
+    )
+
+    out_path = generate_report(report_data, ReportConfig(output_dir=str(tmp_path)))
+    content = out_path.read_text(encoding="utf-8")
+
+    # Title and labels should be escaped in HTML.
+    assert "</script><script>alert(1)</script>" not in content
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in content
+    assert "&lt;b&gt;REF&lt;/b&gt;" in content
+    assert "&lt;script&gt;alert(2)&lt;/script&gt;" in content
+
+    # Embedded JSON should not contain raw '<' / '</script>' sequences.
+    assert "\\u003c/script\\u003e\\u003cscript\\u003ealert(1)\\u003c/script\\u003e" in content
 
 
 def test_generate_report_filmstrip_excluded(report_data: ReportData, tmp_path: Path) -> None:

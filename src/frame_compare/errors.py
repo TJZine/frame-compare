@@ -6,6 +6,7 @@ Error Codes:
     FC-1003: CONFIG_VALIDATION_ERROR
     FC-1004: PRESET_NOT_FOUND
     FC-1005: PRESET_INVALID
+    FC-1006: PRESET_NAME_INVALID
 """
 
 from __future__ import annotations
@@ -198,6 +199,22 @@ class PresetInvalidError(ConfigError):
             )
         )
         self.path = path
+
+
+class PresetNameInvalidError(ConfigError):
+    """Preset name is invalid (FC-1006)."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            ErrorContext(
+                code="FC-1006",
+                name="PRESET_NAME_INVALID",
+                message=f"Invalid preset name: {name}",
+                hint="Use only letters, numbers, '_' and '-'",
+                details={"preset_name": name},
+            )
+        )
+        self.preset_name = name
 
 
 # ─── 3.2 Dependency Errors (FC-2xxx) ───────────────────────────────────────────

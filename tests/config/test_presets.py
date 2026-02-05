@@ -10,7 +10,7 @@ from frame_compare.config.presets import (
     load_preset,
     save_preset,
 )
-from frame_compare.errors import PresetInvalidError, PresetNotFoundError
+from frame_compare.errors import PresetInvalidError, PresetNameInvalidError, PresetNotFoundError
 
 
 def test_list_presets_empty_dir(tmp_path: Path) -> None:
@@ -48,6 +48,16 @@ def test_load_preset_not_found_raises(tmp_path: Path) -> None:
     assert "Preset not found" in str(exc.value)
 
 
+def test_load_preset_rejects_path_traversal(tmp_path: Path) -> None:
+    with pytest.raises(PresetNameInvalidError):
+        load_preset("../escape", presets_dir=tmp_path)
+
+
+def test_load_preset_rejects_empty_name(tmp_path: Path) -> None:
+    with pytest.raises(PresetNameInvalidError):
+        load_preset("", presets_dir=tmp_path)
+
+
 def test_preset_invalid_toml_raises_parse_error(tmp_path: Path) -> None:
     """Test that invalid TOML preset raises PresetInvalidError."""
     (tmp_path / "bad.toml").write_text("invalid = [", encoding="utf-8")
@@ -65,6 +75,14 @@ def test_save_preset_creates_file(tmp_path: Path) -> None:
     save_preset("my_preset", config, presets_dir=tmp_path)
 
     assert (tmp_path / "my_preset.toml").exists()
+
+
+def test_save_preset_rejects_empty_name(tmp_path: Path) -> None:
+    from frame_compare.config.loader import get_default_config
+
+    config = get_default_config()
+    with pytest.raises(PresetNameInvalidError):
+        save_preset("", config, presets_dir=tmp_path)
 
 
 def test_save_preset_roundtrip(tmp_path: Path) -> None:
@@ -135,6 +153,14 @@ def test_apply_preset_merges_values(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
     assert new_config.analysis.frame_count == 50
     assert new_config.paths.input_dir == "comparison_videos"  # Unchanged
+
+
+def test_apply_preset_rejects_empty_name(tmp_path: Path) -> None:
+    from frame_compare.config.loader import get_default_config
+
+    config = get_default_config()
+    with pytest.raises(PresetNameInvalidError):
+        apply_preset(config, "", presets_dir=tmp_path)
 
 
 def test_save_preset_deterministic_output(tmp_path: Path) -> None:

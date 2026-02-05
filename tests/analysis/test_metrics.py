@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from fractions import Fraction
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -204,6 +205,14 @@ def test_calculate_metrics_uses_cache_on_hit(mock_key, mock_load, tmp_path):
     mock_load.assert_called_once()
 
 
+def test_calculate_metrics_empty_video_paths_raises_fc4002(tmp_path: Path) -> None:
+    from frame_compare.config.schema import AnalysisConfig
+    from frame_compare.errors import MetricsCalculationError
+
+    with pytest.raises(MetricsCalculationError, match="No input video paths provided"):
+        calculate_metrics([], AnalysisConfig(), tmp_path)
+
+
 @patch("frame_compare.analysis.metrics.save_metrics_cache")
 @patch("frame_compare.analysis.metrics._calculate_motion")
 @patch("frame_compare.analysis.metrics._calculate_luminance")
@@ -340,9 +349,9 @@ def test_no_toplevel_vapoursynth_import() -> None:
         # Direct top-level import vapoursynth -> FAIL
         if isinstance(node, ast.Import):
             for alias in node.names:
-                assert (
-                    alias.name != "vapoursynth"
-                ), f"Top-level 'import vapoursynth' at line {node.lineno}"
+                assert alias.name != "vapoursynth", (
+                    f"Top-level 'import vapoursynth' at line {node.lineno}"
+                )
         # Direct top-level from vapoursynth import ... -> FAIL
         if isinstance(node, ast.ImportFrom) and node.module == "vapoursynth":
             raise AssertionError(f"Top-level 'from vapoursynth import' at line {node.lineno}")

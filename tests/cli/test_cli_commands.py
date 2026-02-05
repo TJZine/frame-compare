@@ -30,6 +30,14 @@ config_dir = "config"
 """
 
 
+def _write_minimal_config(root: Path) -> Path:
+    config_dir = root / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_path = config_dir / "config.toml"
+    config_path.write_text(MINIMAL_CONFIG, encoding="utf-8")
+    return config_path
+
+
 def test_app_help_lists_all_commands():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
@@ -243,6 +251,46 @@ def test_doctor_json_conforms_to_schema_shape(monkeypatch: MonkeyPatch) -> None:
     assert second["status"] == "fail"
     assert second["install_hint"] == "install ffmpeg"
     assert "details" in second
+
+
+def test_preset_apply_missing_preset_exits_with_error_code() -> None:
+    with runner.isolated_filesystem():
+        root = Path(".")
+        config_path = _write_minimal_config(root)
+        result = runner.invoke(
+            app,
+            [
+                "preset",
+                "apply",
+                "missing",
+                "--root",
+                str(root),
+                "--config",
+                str(config_path),
+            ],
+        )
+        assert result.exit_code == 2
+        assert "FC-1004" in result.output
+
+
+def test_preset_apply_invalid_name_exits_with_error_code() -> None:
+    with runner.isolated_filesystem():
+        root = Path(".")
+        config_path = _write_minimal_config(root)
+        result = runner.invoke(
+            app,
+            [
+                "preset",
+                "apply",
+                "../escape",
+                "--root",
+                str(root),
+                "--config",
+                str(config_path),
+            ],
+        )
+        assert result.exit_code == 2
+        assert "FC-1006" in result.output
 
 
 def test_doctor_exit_code_is_3_on_core_failure(monkeypatch: MonkeyPatch) -> None:

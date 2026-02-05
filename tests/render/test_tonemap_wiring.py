@@ -57,6 +57,8 @@ def test_resolve_tonemap_settings_applies_config_overrides() -> None:
             preset="filmic",
             target_nits=250,
             tone_curve="spline",
+            gamma_lift=True,
+            contrast_recovery=0.25,
         )
     )
 
@@ -77,6 +79,8 @@ def test_resolve_tonemap_settings_applies_config_overrides() -> None:
         # Verify config overrides were applied
         assert settings.target_nits == 250
         assert settings.tone_curve == "spline"
+        assert settings.gamma_lift is True
+        assert settings.contrast_recovery == 0.25
 
 
 # ─── Probe Failure Determinism Tests ───────────────────────────────────────────

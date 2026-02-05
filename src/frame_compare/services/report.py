@@ -4,10 +4,12 @@ from __future__ import annotations
 
 # ruff: noqa: W291, W293
 import base64
+import html
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 from frame_compare.config.schema import ReportConfig
 from frame_compare.errors import ReportError
@@ -62,17 +64,20 @@ def generate_report(
     if len(data.clips) < 2:
         raise ReportError("at least 2 clips required for comparison")
     if len(data.frames) == 0:
-        raise ReportError("no screenshots provided")
+        raise ReportError("no frames provided")
     if len(data.screenshots) == 0:
         raise ReportError("no screenshots provided")
 
     for clip in data.clips:
         if clip.name not in data.screenshots:
-            raise ReportError("no screenshots provided")
+            raise ReportError(f"no screenshots for clip: {clip.name}")
         if len(data.screenshots[clip.name]) == 0:
-            raise ReportError("no screenshots provided")
+            raise ReportError(f"no screenshots for clip: {clip.name}")
         if len(data.screenshots[clip.name]) != len(data.frames):
-            raise ReportError("no screenshots provided")
+            raise ReportError(
+                f"screenshot count mismatch for {clip.name}: "
+                f"expected {len(data.frames)}, got {len(data.screenshots[clip.name])}"
+            )
 
     # 2. DETERMINE OUTPUT PATH
     final_output_path: Path
@@ -175,9 +180,39 @@ def os_path_relpath(path: Path, start: Path) -> str:
     return os.path.relpath(path, start)
 
 
+def _esc_text(value: object) -> str:
+    """Escape dynamic text for safe HTML interpolation."""
+    return html.escape(str(value), quote=False)
+
+
+def _esc_attr(value: object) -> str:
+    """Escape dynamic values for safe HTML attribute interpolation."""
+    return html.escape(str(value), quote=True)
+
+
+def _safe_http_href(url: str | None) -> str | None:
+    """Return an escaped http(s) URL suitable for href, else None."""
+    if not url:
+        return None
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    return _esc_attr(url)
+
+
+def _json_for_script_tag(data: dict[str, object]) -> str:
+    """Serialize JSON safely for embedding inside a <script> tag.
+
+    Escapes characters that can terminate the script tag or trigger HTML parsing.
+    """
+    raw = json.dumps(data)
+    # Prevent </script> and other HTML parsing hazards inside the script element.
+    return raw.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+
+
 def _build_html(data: dict[str, object], include_filmstrip: bool = True) -> str:
     """Construct the full HTML string."""
-    json_str = json.dumps(data)
+    json_str = _json_for_script_tag(data)
 
     # CSS Content based on Spec Section 3
     css = """
@@ -831,43 +866,65 @@ def _build_html(data: dict[str, object], include_filmstrip: bool = True) -> str:
     slowpics_url = cast(str | None, data.get("slowpics_url"))
     frames = cast(list[dict[str, object]], data["frames"])
     clips = cast(list[dict[str, object]], data["clips"])
+    safe_href = _safe_http_href(slowpics_url)
 
     return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{title} - Frame Compare Report</title>
-    <style>{css}</style>
-</head>
-<body>
-    <header class="rv-header">
-        <div>
-            <div class="rv-title">{title}</div>
-            <div class="rv-meta">Generated {generated_at} • {stats['frame_count']} frames • {stats['clip_count']} clips</div>
-        </div>
-        <div>
-            {f'<a href="{slowpics_url}" target="_blank" class="rv-link">View on slow.pics ↗</a>' if slowpics_url else ''}
-        </div>
-    </header>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>{_esc_text(title)} - Frame Compare Report</title>
+        <style>{css}</style>
+    </head>
+    <body>
+        <header class="rv-header">
+            <div>
+                <div class="rv-title">{_esc_text(title)}</div>
+                <div class="rv-meta">Generated {_esc_text(generated_at)} • {
+        stats["frame_count"]
+    } frames • {stats["clip_count"]} clips</div>
+            </div>
+            <div>
+                {
+        f'<a href="{safe_href}" target="_blank" rel="noopener noreferrer" class="rv-link">View on slow.pics ↗</a>'
+        if safe_href
+        else ""
+    }
+            </div>
+        </header>
 
     <div class="rv-controls" role="toolbar" aria-label="Viewer controls">
         <div class="rv-control-group">
-            <button id="btn-prev" aria-label="Previous frame">←</button>
-            <select id="frame-select" aria-label="Select frame">
-                {"".join(f'<option value="{i}">Frame {f["number"]}</option>' for i, f in enumerate(frames))}
-            </select>
-            <button id="btn-next" aria-label="Next frame">→</button>
-        </div>
+                <button id="btn-prev" aria-label="Previous frame">←</button>
+                <select id="frame-select" aria-label="Select frame">
+                    {
+        "".join(
+            f'<option value="{_esc_attr(i)}">Frame {_esc_text(f["number"])}</option>'
+            for i, f in enumerate(frames)
+        )
+    }
+                </select>
+                <button id="btn-next" aria-label="Next frame">→</button>
+            </div>
 
-        <div class="rv-control-group">
-            <select id="left-select" aria-label="Left clip">
-                {"".join(f'<option value="{i}">{c["label"]}</option>' for i, c in enumerate(clips))}
-            </select>
-            <select id="right-select" aria-label="Right clip">
-                {"".join(f'<option value="{i}" {"selected" if i==1 else ""}>{c["label"]}</option>' for i, c in enumerate(clips))}
-            </select>
-        </div>
+            <div class="rv-control-group">
+                <select id="left-select" aria-label="Left clip">
+                    {
+        "".join(
+            f'<option value="{_esc_attr(i)}">{_esc_text(c["label"])}</option>'
+            for i, c in enumerate(clips)
+        )
+    }
+                </select>
+                <select id="right-select" aria-label="Right clip">
+                    {
+        "".join(
+            f'<option value="{_esc_attr(i)}" {"selected" if i == 1 else ""}>{_esc_text(c["label"])}</option>'
+            for i, c in enumerate(clips)
+        )
+    }
+                </select>
+            </div>
 
         <div class="rv-control-group" role="radiogroup" aria-label="View mode">
             <button data-mode="slider" class="active" role="radio" aria-checked="true" aria-label="Slider mode" title="Slider (S)">⊟</button>
@@ -923,16 +980,25 @@ def _build_html(data: dict[str, object], include_filmstrip: bool = True) -> str:
         </div>
     </div>
 
-    {f'''
-    <nav class="rv-filmstrip" role="navigation" aria-label="Frame thumbnails">
-        {"".join(f"""
-        <button class="rv-filmstrip-item" data-idx="{i}" aria-label="Frame {f["number"]}">
-            <img src="{cast(list[dict[str, object]], f["images"])[0]["src"]}" loading="lazy" alt="{cast(str, clips[0]["label"])} - Frame {f["number"]}">
-            <span class="rv-filmstrip-label">{f["number"]}</span>
-        </button>
-        """ for i, f in enumerate(frames))}
-    </nav>
-    ''' if include_filmstrip else ''}
+        {
+        f'''
+        <nav class="rv-filmstrip" role="navigation" aria-label="Frame thumbnails">
+            {
+            "".join(
+                f"""
+            <button class="rv-filmstrip-item" data-idx="{_esc_attr(i)}" aria-label="Frame {_esc_attr(f["number"])}">
+                <img src="{_esc_attr(cast(list[dict[str, object]], f["images"])[0]["src"])}" loading="lazy" alt="{_esc_attr(cast(str, clips[0]["label"]))} - Frame {_esc_attr(f["number"])}">
+                <span class="rv-filmstrip-label">{_esc_text(f["number"])}</span>
+            </button>
+            """
+                for i, f in enumerate(frames)
+            )
+        }
+        </nav>
+        '''
+        if include_filmstrip
+        else ""
+    }
 
     <footer class="rv-footer">
         <div>Frame Compare v{REPORT_VERSION}</div>

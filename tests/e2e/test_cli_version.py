@@ -23,3 +23,11 @@ def test_cli_version_command_outputs_version_string() -> None:
     result = runner.invoke(app, ["version"])
     # Typer's echo adds a newline; strip for comparison
     assert result.output.strip() == "frame-compare 0.1.0"
+
+
+@pytest.mark.e2e
+def test_cli_no_args_shows_help() -> None:
+    runner = CliRunner()
+    result = runner.invoke(app, [])
+    assert result.exit_code == 0
+    assert "Usage:" in result.output

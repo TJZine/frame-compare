@@ -32,33 +32,13 @@ def calculate_dimensions(
     if max_width is None and max_height is None:
         return (source_width, source_height)
 
-    ratio = source_width / source_height
+    width_scale = (max_width / source_width) if max_width is not None else 1.0
+    height_scale = (max_height / source_height) if max_height is not None else 1.0
+    scale = min(1.0, width_scale, height_scale)
 
-    if max_width is not None and max_height is None:
-        new_width = min(source_width, max_width)
-        return (new_width, int(new_width / ratio))
-
-    if max_height is not None and max_width is None:
-        new_height = min(source_height, max_height)
-        return (int(new_height * ratio), new_height)
-
-    # Both are set
-    if max_width is not None and max_height is not None:
-        # Option 1: Constrain by width
-        w_width = min(source_width, max_width)
-        w_height = int(w_width / ratio)
-
-        # Option 2: Constrain by height
-        h_height = min(source_height, max_height)
-        h_width = int(h_height * ratio)
-
-        # Pick the one that fits within both
-        if w_width <= max_width and w_height <= max_height:
-            return (w_width, w_height)
-        return (h_width, h_height)
-
-    # Fallback for type safety, though logically unreachable
-    return (source_width, source_height)
+    new_width = max(1, int(source_width * scale))
+    new_height = max(1, int(source_height * scale))
+    return (new_width, new_height)
 
 
 def calculate_overlay_position(
@@ -89,6 +69,8 @@ def calculate_overlay_position(
     valid_positions = {"top-left", "top-right", "bottom-left", "bottom-right"}
     if position not in valid_positions:
         raise ValueError(f"invalid position: {position}")
+    if margin < 0:
+        raise ValueError("margin must be >= 0")
 
     img_w, img_h = image_size
     ovr_w, ovr_h = overlay_size

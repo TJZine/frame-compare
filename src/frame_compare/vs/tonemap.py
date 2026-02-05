@@ -47,7 +47,16 @@ def _to_rgbs(clip: vs.VideoNode) -> vs.VideoNode:
             if clip.format.color_family == vs.RGB:  # type: ignore
                 return clip.resize.Bicubic(format=vs.RGBS)  # type: ignore
             else:
-                return clip.resize.Bicubic(format=vs.RGBS, matrix_in_s="709")  # type: ignore
+                props = dict(clip.get_frame(0).props)
+                matrix_prop = props.get("_Matrix")
+                matrix_in_s: str | None = None
+                if matrix_prop is None:
+                    is_hdr, _ = _detect_hdr(props)
+                    matrix_in_s = "2020ncl" if is_hdr else "709"
+
+                if matrix_in_s is None:
+                    return clip.resize.Bicubic(format=vs.RGBS)  # type: ignore
+                return clip.resize.Bicubic(format=vs.RGBS, matrix_in_s=matrix_in_s)  # type: ignore
         return clip
     except Exception as e:
         raise TonemapError(
@@ -88,19 +97,42 @@ def _apply_libplacebo(
             hint="Supported: bt2390, spline, reinhard",
         )
 
+    props: dict[str, object] | None = None
+    detected_is_hdr: bool | None = None
+    detected_hdr_metadata: HDRMetadata | None = None
+
+    def _ensure_hdr_detection() -> None:
+        nonlocal props, detected_is_hdr, detected_hdr_metadata
+        if detected_is_hdr is not None:
+            return
+        if props is None:
+            props = dict(clip.get_frame(0).props)
+        detected_is_hdr, detected_hdr_metadata = _detect_hdr(props)
+
+    if hdr_metadata is None:
+        _ensure_hdr_detection()
+        hdr_metadata = detected_hdr_metadata
+
     # Exact conversion call for libplacebo path
     try:
         if clip.format.bits_per_sample != 16 or clip.format.color_family != vs.RGB:  # type: ignore
             if clip.format.color_family == vs.RGB:  # type: ignore
                 clip = clip.resize.Bicubic(format=vs.RGB48)  # type: ignore
             else:
-                clip = clip.resize.Bicubic(format=vs.RGB48, matrix_in_s="709")  # type: ignore
+                if props is None:
+                    props = dict(clip.get_frame(0).props)
+                matrix_prop = props.get("_Matrix")
+                matrix_in_s: str | None = None
+                if matrix_prop is None:
+                    _ensure_hdr_detection()
+                    matrix_in_s = "2020ncl" if detected_is_hdr else "709"
+
+                if matrix_in_s is None:
+                    clip = clip.resize.Bicubic(format=vs.RGB48)  # type: ignore
+                else:
+                    clip = clip.resize.Bicubic(format=vs.RGB48, matrix_in_s=matrix_in_s)  # type: ignore
     except Exception as e:
         raise TonemapError(reason=f"Failed to convert to RGB48: {e}") from e
-
-    if hdr_metadata is None:
-        props = dict(clip.get_frame(0).props)
-        _, hdr_metadata = _detect_hdr(props)
 
     src_max = settings.source_peak
     if src_max is None:

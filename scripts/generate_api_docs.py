@@ -358,6 +358,18 @@ def _generate_markdown(
             out_lines.append("")
 
         for export in sorted(module.exports, key=lambda s: (s.lower(), s)):
+            export_node = module.symbols.get(export)
+            alias_target: str | None = None
+            if (
+                isinstance(export_node, ast.ImportFrom)
+                and export_node.module is not None
+                and len(export_node.names) == 1
+            ):
+                imported = export_node.names[0]
+                if imported.asname == export and imported.name != export:
+                    # Example: from x import foo as bar  (export == "bar", target == "foo")
+                    alias_target = imported.name
+
             resolved = _resolve_symbol(
                 project_root=project_root,
                 module=module,
@@ -371,14 +383,21 @@ def _generate_markdown(
 
             if resolved.kind == "function":
                 assert isinstance(resolved.node, (ast.FunctionDef, ast.AsyncFunctionDef))
-                out_lines.append(f"`{_render_signature(resolved.node)}`")
+                signature = _render_signature(resolved.node)
+                if signature.startswith(f"{resolved.node.name}(") and export != resolved.node.name:
+                    signature = signature.replace(f"{resolved.node.name}(", f"{export}(", 1)
+                out_lines.append(f"`{signature}`")
                 out_lines.append("")
-                doc = _first_paragraph(ast.get_docstring(resolved.node) or "")
-                if not doc:
-                    missing_docstrings.append(export)
-                else:
-                    out_lines.append(doc)
+                if alias_target is not None:
+                    out_lines.append(f"Alias of `{alias_target}`.")
                     out_lines.append("")
+                else:
+                    doc = _first_paragraph(ast.get_docstring(resolved.node) or "")
+                    if not doc:
+                        missing_docstrings.append(export)
+                    else:
+                        out_lines.append(doc)
+                        out_lines.append("")
             elif resolved.kind == "class":
                 out_lines.append(f"`{export}`")
                 out_lines.append("")

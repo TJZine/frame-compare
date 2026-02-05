@@ -199,6 +199,8 @@ async def _search_tmdb(
 
     for item in results_raw:
         media_type = str(item.get("media_type", "movie"))
+        if media_type not in {"movie", "tv"}:
+            continue
 
         # Year extraction
         year_str = ""

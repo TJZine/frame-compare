@@ -151,6 +151,7 @@ def launch_alignment_verification_session(
             check=False,
             capture_output=True,
             text=True,
+            timeout=config.timeout_seconds,
         )
 
         if result.returncode != 0:
@@ -167,10 +168,12 @@ def launch_alignment_verification_session(
                 f"{result.stderr[:200] if result.stderr else 'no stderr'}"
             )
 
+    except subprocess.TimeoutExpired as e:
+        raise VSPreviewError(f"VSPreview timed out after {config.timeout_seconds}s") from e
     except FileNotFoundError as e:
         raise VSPreviewError(f"Failed to launch VSPreview: {e}") from e
     except Exception as e:
-        if isinstance(e, VSPreviewError | VSPreviewNotFoundError):
+        if isinstance(e, (VSPreviewError, VSPreviewNotFoundError)):
             raise
         raise VSPreviewError(f"Unexpected error launching VSPreview: {e}") from e
 

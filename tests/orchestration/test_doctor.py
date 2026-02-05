@@ -61,16 +61,8 @@ class TestCheckVapoursynth:
         checks = collect_checks()
         vs_check = next(c for c in checks if c.name == "vapoursynth")
 
-        with patch.dict(sys.modules, {"vapoursynth": None}):
-            original = sys.modules.get("vapoursynth")
-            if "vapoursynth" in sys.modules:
-                del sys.modules["vapoursynth"]
-
-            with patch("builtins.__import__", side_effect=ImportError("No module")):
-                result = vs_check.check_fn()
-
-            if original is not None:
-                sys.modules["vapoursynth"] = original
+        with patch("builtins.__import__", side_effect=ImportError("No module")):
+            result = vs_check.check_fn()
 
         assert result.passed is False
         assert "not found" in result.message

@@ -116,6 +116,54 @@ def test_execute_phases_skips_when_skip_condition_true(tmp_path: Path) -> None:
     assert phases[1].status is PhaseStatus.COMPLETED
 
 
+def test_execute_phases_reports_skipped_phase_lifecycle(tmp_path: Path) -> None:
+    context = _make_context(tmp_path)
+
+    class SpyReporter:
+        def __init__(self) -> None:
+            self.start_phase_calls: list[tuple[str, int]] = []
+            self.set_description_calls: list[str] = []
+            self.complete_phase_calls: list[None] = []
+            self.advance_calls: list[int] = []
+
+        def start_phase(self, name: str, total: int) -> None:
+            self.start_phase_calls.append((name, total))
+
+        def advance(self, amount: int = 1) -> None:
+            self.advance_calls.append(amount)
+
+        def set_description(self, desc: str) -> None:
+            self.set_description_calls.append(desc)
+
+        def complete_phase(self) -> None:
+            self.complete_phase_calls.append(None)
+
+    reporter = SpyReporter()
+
+    async def phase_skip(_: RunContext) -> None:
+        return None
+
+    async def phase_next(_: RunContext) -> None:
+        return None
+
+    phases = [
+        Phase(
+            name="skip",
+            execute=phase_skip,
+            skip_condition=lambda config: True,
+        ),
+        Phase(name="next", execute=phase_next),
+    ]
+
+    asyncio.run(execute_phases(phases, context, reporter))
+
+    assert reporter.start_phase_calls == [("skip", 1), ("next", 1)]
+    assert reporter.set_description_calls == ["Skipped"]
+    assert len(reporter.complete_phase_calls) == 2
+    assert phases[0].status is PhaseStatus.SKIPPED
+    assert phases[1].status is PhaseStatus.COMPLETED
+
+
 def test_execute_phases_warn_only_failure_marks_warned_and_continues(
     tmp_path: Path,
 ) -> None:
@@ -175,3 +223,10 @@ def test_execute_phases_fail_fast_failure_marks_failed_and_raises(
     assert executed == ["fail"]
     assert phases[0].status is PhaseStatus.FAILED
     assert phases[1].status is PhaseStatus.PENDING
+
+
+def test_execute_phases_empty_list_noop(tmp_path: Path) -> None:
+    context = _make_context(tmp_path)
+    reporter = NullProgressReporter()
+
+    asyncio.run(execute_phases([], context, reporter))

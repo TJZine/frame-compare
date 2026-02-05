@@ -155,13 +155,26 @@ def _probe_fps(video_path: Path) -> float:
         if not fps_str:
             raise SourceLoadError(video_path, "Empty output from ffprobe")
 
+        fps: float
         if "/" in fps_str:
-            num, den = fps_str.split("/")
-            return float(num) / float(den)
-        return float(fps_str)
+            parts = fps_str.split("/", maxsplit=1)
+            if len(parts) != 2:
+                raise SourceLoadError(video_path, f"Invalid avg_frame_rate: {fps_str!r}")
+            num_str, den_str = parts
+            num = float(num_str)
+            den = float(den_str)
+            if den == 0.0:
+                raise SourceLoadError(video_path, f"Invalid avg_frame_rate: {fps_str!r}")
+            fps = num / den
+        else:
+            fps = float(fps_str)
+
+        if not math.isfinite(fps) or fps <= 0.0:
+            raise SourceLoadError(video_path, f"Invalid FPS from ffprobe: {fps_str!r}")
+        return fps
     except FileNotFoundError as e:
         raise FFmpegNotFoundError() from e
-    except (ValueError, subprocess.CalledProcessError) as e:
+    except (ValueError, subprocess.CalledProcessError, ZeroDivisionError) as e:
         raise SourceLoadError(video_path, f"Failed to probe FPS: {e}") from e
 
 
@@ -203,11 +216,10 @@ def _apply_overlay_to_file(path: Path, config: OverlayConfig) -> None:
     """Helper to apply overlay to an existing image file."""
     try:
         with Image.open(path) as img:
-            # Force load so we can close file
             img.load()
+            base = img.copy()
 
-        # Apply overlay
-        result = apply_overlay(img, config)
+        result = apply_overlay(base, config)
 
         # Save back
         result.save(path, format="PNG")

@@ -1,0 +1,322 @@
+Param(
+  [Parameter(Mandatory = $false)]
+  [string]$ManifestPath = (Join-Path $PSScriptRoot "manifest.windows-x64.json"),
+
+  [Parameter(Mandatory = $false)]
+  [string]$OutDir = (Join-Path $PWD "dist\\frame-compare-portable-win-x64"),
+
+  [Parameter(Mandatory = $false)]
+  [string]$CacheDir = (Join-Path $PWD ".portable_cache"),
+
+  [Parameter(Mandatory = $false)]
+  [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\\..")).Path
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+function Ensure-Directory([string]$Path) {
+  if (!(Test-Path -LiteralPath $Path)) {
+    New-Item -ItemType Directory -Path $Path | Out-Null
+  }
+}
+
+function Get-Manifest() {
+  if (!(Test-Path -LiteralPath $ManifestPath)) {
+    throw "Manifest not found: $ManifestPath"
+  }
+  return (Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json)
+}
+
+function Assert-Sha256([string]$FilePath, [string]$ExpectedHex) {
+  $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $FilePath).Hash.ToLowerInvariant()
+  if ($hash -ne $ExpectedHex.ToLowerInvariant()) {
+    throw "SHA256 mismatch for $FilePath`nExpected: $ExpectedHex`nActual:   $hash"
+  }
+}
+
+function Download-Artifact([pscustomobject]$Artifact) {
+  $url = [string]$Artifact.url
+  $sha256 = [string]$Artifact.sha256
+  $id = [string]$Artifact.id
+
+  $fileName = Split-Path -Leaf $url
+  $dest = Join-Path $CacheDir $fileName
+
+  if (Test-Path -LiteralPath $dest) {
+    Assert-Sha256 -FilePath $dest -ExpectedHex $sha256
+    return $dest
+  }
+
+  Write-Host "Downloading $id -> $fileName"
+  Invoke-WebRequest -Uri $url -OutFile $dest | Out-Null
+  Assert-Sha256 -FilePath $dest -ExpectedHex $sha256
+  return $dest
+}
+
+function Expand-Zip([string]$ZipPath, [string]$Destination) {
+  if (Test-Path -LiteralPath $Destination) {
+    Remove-Item -Recurse -Force -LiteralPath $Destination
+  }
+  Ensure-Directory -Path $Destination
+  Expand-Archive -LiteralPath $ZipPath -DestinationPath $Destination -Force
+}
+
+function Install-Artifact([string]$BundleRoot, [pscustomobject]$Artifact, [string]$DownloadedPath) {
+  $install = $Artifact.install
+  if ($null -eq $install) {
+    throw "Artifact is missing install mapping: $($Artifact.id)"
+  }
+
+  $type = [string]$install.type
+  $destRel = [string]$install.destination
+  if ($destRel -eq "") {
+    throw "Artifact install.destination is empty: $($Artifact.id)"
+  }
+  $dest = Join-Path $BundleRoot $destRel
+
+  if ($type -eq "extract") {
+    $stripPrefix = [string]$install.strip_prefix
+    if ($stripPrefix -ne "") {
+      $tmp = Join-Path $CacheDir ("tmp_extract_" + [string]$Artifact.id)
+      Expand-Zip -ZipPath $DownloadedPath -Destination $tmp
+      $stripPrefixNorm = ($stripPrefix -replace "/", "\\").TrimEnd("\\")
+      $prefixPath = Join-Path $tmp $stripPrefixNorm
+      if (!(Test-Path -LiteralPath $prefixPath)) {
+        throw "strip_prefix path not found after extraction: $stripPrefix (artifact $($Artifact.id))"
+      }
+      Ensure-Directory -Path $dest
+      Copy-Item -Recurse -Force -LiteralPath (Join-Path $prefixPath "*") -Destination $dest
+      Remove-Item -Recurse -Force -LiteralPath $tmp
+    } else {
+      Expand-Zip -ZipPath $DownloadedPath -Destination $dest
+    }
+    return
+  }
+
+  if ($type -eq "copy_file") {
+    $sourcePath = [string]$install.source_path
+    if ($sourcePath -eq "") {
+      throw "Artifact install.source_path is required for copy_file: $($Artifact.id)"
+    }
+    $tmp = Join-Path $CacheDir ("tmp_extract_" + [string]$Artifact.id)
+    Expand-Zip -ZipPath $DownloadedPath -Destination $tmp
+    $sourcePathNorm = ($sourcePath -replace "/", "\\").TrimStart("\\")
+    $src = Join-Path $tmp $sourcePathNorm
+    if (!(Test-Path -LiteralPath $src)) {
+      throw "Expected file not found in archive: $sourcePath (artifact $($Artifact.id))"
+    }
+    Ensure-Directory -Path (Split-Path -Parent $dest)
+    Copy-Item -Force -LiteralPath $src -Destination $dest
+    Remove-Item -Recurse -Force -LiteralPath $tmp
+    return
+  }
+
+  throw "Unknown install.type '$type' for artifact $($Artifact.id)"
+}
+
+function Write-LauncherFiles([string]$BundleRoot) {
+  $ps1Path = Join-Path $BundleRoot "frame-compare.ps1"
+  $cmdPath = Join-Path $BundleRoot "frame-compare.cmd"
+
+  $ps1 = @'
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$bundleRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$python = Join-Path $bundleRoot "python\\python.exe"
+
+if (!(Test-Path -LiteralPath $python)) {
+  throw "Embedded python not found: $python"
+}
+
+$env:PYTHONUTF8 = "1"
+$env:PYTHONPATH = "$bundleRoot\\app\\src;$bundleRoot\\app\\site-packages"
+$env:VAPOURSYNTH_PLUGIN_PATH = "$bundleRoot\\vs\\plugins"
+$env:PATH = "$bundleRoot\\python;$bundleRoot\\vs\\core;$bundleRoot\\vs\\plugins;$bundleRoot\\ffmpeg;$env:PATH"
+
+& $python -m frame_compare.cli_entry @args
+exit $LASTEXITCODE
+'@
+
+  $cmd = @'
+@echo off
+setlocal
+set SCRIPT_DIR=%~dp0
+powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%frame-compare.ps1" %*
+exit /b %ERRORLEVEL%
+'@
+
+  Set-Content -LiteralPath $ps1Path -Value $ps1 -Encoding UTF8
+  Set-Content -LiteralPath $cmdPath -Value $cmd -Encoding ASCII
+}
+
+function Copy-RepoApp([string]$BundleRoot) {
+  $appRoot = Join-Path $BundleRoot "app"
+  $srcRoot = Join-Path $appRoot "src"
+  $sitePackages = Join-Path $appRoot "site-packages"
+
+  Ensure-Directory -Path $appRoot
+  Ensure-Directory -Path $srcRoot
+  Ensure-Directory -Path $sitePackages
+
+  $pkgSrc = Join-Path $RepoRoot "src\\frame_compare"
+  if (!(Test-Path -LiteralPath $pkgSrc)) {
+    throw "Repo package not found: $pkgSrc"
+  }
+  Copy-Item -Recurse -Force -LiteralPath $pkgSrc -Destination (Join-Path $srcRoot "frame_compare")
+}
+
+function Configure-EmbeddedPython([string]$BundleRoot) {
+  $pythonDir = Join-Path $BundleRoot "python"
+  $pth = Join-Path $pythonDir "python313._pth"
+  if (!(Test-Path -LiteralPath $pth)) {
+    throw "Expected embedded Python ._pth file not found: $pth"
+  }
+
+  # The embeddable distribution uses python313._pth to define sys.path and typically ignores
+  # PYTHONPATH/environment. Make the bundle self-contained by pinning the app paths here.
+  $lines = @(
+    "python313.zip",
+    ".",
+    "..\\app\\site-packages",
+    "..\\app\\src",
+    "import site"
+  )
+  $content = ($lines -join "`r`n") + "`r`n"
+  Set-Content -LiteralPath $pth -Value $content -Encoding ASCII
+}
+
+function Install-PythonDeps([string]$BundleRoot, [string]$VsCoreRoot) {
+  if (!(Get-Command uv -ErrorAction SilentlyContinue)) {
+    throw "uv is required on PATH to build the portable bundle."
+  }
+
+  $appRoot = Join-Path $BundleRoot "app"
+  $sitePackages = Join-Path $appRoot "site-packages"
+  $reqFile = Join-Path $BundleRoot "requirements.lock.txt"
+
+  Push-Location $RepoRoot
+  try {
+    # Export pinned, hashed requirements from uv.lock (exclude project itself; we run from app/src via PYTHONPATH).
+    uv export --frozen --no-dev --no-emit-project --format requirements.txt --output-file $reqFile | Out-Null
+  } finally {
+    Pop-Location
+  }
+
+  # Install project dependencies into app/site-packages.
+  uv pip install --require-hashes --only-binary :all: --target $sitePackages -r $reqFile
+
+  # Install VapourSynth python module from the pinned VS portable distribution (no PyPI dependency).
+  $vsWheel = Join-Path $VsCoreRoot "wheel\\vapoursynth-73-cp312-abi3-win_amd64.whl"
+  if (!(Test-Path -LiteralPath $vsWheel)) {
+    throw "VapourSynth wheel not found in VS portable archive: $vsWheel"
+  }
+  uv pip install --only-binary :all: --target $sitePackages $vsWheel
+}
+
+function Copy-Licenses([string]$BundleRoot, [pscustomobject[]]$Artifacts) {
+  $licensesDir = Join-Path $BundleRoot "licenses"
+  Ensure-Directory -Path $licensesDir
+
+  # Project license
+  Copy-Item -Force -LiteralPath (Join-Path $RepoRoot "LICENSE") -Destination (Join-Path $licensesDir "frame-compare-LICENSE.txt")
+
+  foreach ($artifact in $Artifacts) {
+    $id = [string]$artifact.id
+    $url = [string]$artifact.url
+    $fileName = Split-Path -Leaf $url
+    $licenseUrl = [string]$artifact.license.url
+    $spdx = [string]$artifact.license.spdx
+
+    if ($fileName -like "*.zip") {
+      # Best-effort: copy LICENSE.txt if present in the zip.
+      if ($id -like "ffmpeg-*") {
+        $ffmpegLicense = Join-Path $BundleRoot "ffmpeg\\LICENSE.txt"
+        if (Test-Path -LiteralPath $ffmpegLicense) {
+          Copy-Item -Force -LiteralPath $ffmpegLicense -Destination (Join-Path $licensesDir "ffmpeg-LICENSE.txt")
+        }
+      }
+      if ($id -eq "python-embed-amd64") {
+        $pyLicense = Join-Path $BundleRoot "python\\LICENSE.txt"
+        if (Test-Path -LiteralPath $pyLicense) {
+          Copy-Item -Force -LiteralPath $pyLicense -Destination (Join-Path $licensesDir "python-LICENSE.txt")
+        }
+      }
+    }
+
+    # Download license text for artifacts that don't ship one in their zip.
+    if ($id -eq "vapoursynth-portable-r73" -or $id -eq "vs-plugin-lsmas-vA.3j" -or $id -eq "vs-plugin-vs-placebo-1.4.4") {
+      $dest = Join-Path $licensesDir ("{0}-{1}.txt" -f $id, $spdx)
+      Write-Host "Fetching license for $id ($spdx)"
+      Invoke-WebRequest -Uri $licenseUrl -OutFile $dest | Out-Null
+    }
+  }
+}
+
+function Consolidate-VapourSynthPlugins([string]$BundleRoot) {
+  $vsCore = Join-Path $BundleRoot "vs\\core"
+  $vsPlugins = Join-Path $BundleRoot "vs\\plugins"
+  Ensure-Directory -Path $vsPlugins
+
+  # Consolidate core plugins into the normative plugin directory.
+  $corePluginsDir = Join-Path $vsCore "vs-coreplugins"
+  $pluginsDir = Join-Path $vsCore "vs-plugins"
+
+  foreach ($dir in @($corePluginsDir, $pluginsDir)) {
+    if (Test-Path -LiteralPath $dir) {
+      Get-ChildItem -LiteralPath $dir -Filter "*.dll" | ForEach-Object {
+        Copy-Item -Force -LiteralPath $_.FullName -Destination (Join-Path $vsPlugins $_.Name)
+      }
+    }
+  }
+
+  # Remove original plugin directories from vs/core after consolidation.
+  if (Test-Path -LiteralPath $corePluginsDir) { Remove-Item -Recurse -Force -LiteralPath $corePluginsDir }
+  if (Test-Path -LiteralPath $pluginsDir) { Remove-Item -Recurse -Force -LiteralPath $pluginsDir }
+}
+
+function Main() {
+  Ensure-Directory -Path $CacheDir
+  if (Test-Path -LiteralPath $OutDir) {
+    Remove-Item -Recurse -Force -LiteralPath $OutDir
+  }
+  Ensure-Directory -Path $OutDir
+
+  $manifest = Get-Manifest
+  $artifacts = @($manifest.artifacts)
+
+  $downloaded = @{}
+  foreach ($artifact in $artifacts) {
+    $path = Download-Artifact -Artifact $artifact
+    $downloaded[[string]$artifact.id] = $path
+  }
+
+  # Copy pin manifest into the bundle root.
+  Copy-Item -Force -LiteralPath $ManifestPath -Destination (Join-Path $OutDir "manifest.json")
+
+  # Install artifacts per manifest mapping.
+  foreach ($artifact in $artifacts) {
+    $id = [string]$artifact.id
+    $path = $downloaded[$id]
+    Install-Artifact -BundleRoot $OutDir -Artifact $artifact -DownloadedPath $path
+  }
+
+  # Post-process VS portable layout to match SSOT plugin directory.
+  Consolidate-VapourSynthPlugins -BundleRoot $OutDir
+
+  # Layout: app/
+  Copy-RepoApp -BundleRoot $OutDir
+  Install-PythonDeps -BundleRoot $OutDir -VsCoreRoot (Join-Path $OutDir "vs\\core")
+  Configure-EmbeddedPython -BundleRoot $OutDir
+
+  # Launchers
+  Write-LauncherFiles -BundleRoot $OutDir
+
+  # Licenses
+  Copy-Licenses -BundleRoot $OutDir -Artifacts $artifacts
+
+  Write-Host "OK: portable bundle assembled at $OutDir"
+}
+
+Main

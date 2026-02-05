@@ -79,7 +79,7 @@ Uses CSS blend modes to highlight pixel differences between images.
 
 ### 2.4 Blink Mode
 
-Alternates between left and right images at 700ms intervals.
+Alternates between left and right images at 700 ms intervals.
 
 **Behavior:**
 
@@ -207,7 +207,7 @@ Dark mode with accent highlights:
 
 ### 7.2 Layout
 
-```
+```text
 ┌─────────────────────────────────────────────────┐
 │ Header: Title, Subtitle, slow.pics link         │
 ├─────────────────────────────────────────────────┤

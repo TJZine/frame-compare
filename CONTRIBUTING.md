@@ -215,16 +215,17 @@ bash tools/verify_docker_integration.sh
 
 Releases are automated from `main` using [Release Please](https://github.com/googleapis/release-please).
 
-### Bootstrap (first release)
+### How it works (no manual tagging)
 
-For the initial release after the rebuild PR merges:
+- On every push to `main`, the Release Please workflow opens or updates a PR like `chore(release): v0.1.1`.
+- Merging that PR publishes the GitHub Release and tag (e.g. `v0.1.1`).
+- If the repo has Auto-merge enabled, the workflow attempts to set the release PR to auto-merge once required checks pass.
 
-```bash
-git tag -a v0.1.0 -m "v0.1.0"
-git push origin v0.1.0
-```
+### CI on release PRs (recommended)
 
-After that, Release Please opens PRs like `chore(release): v0.1.1` based on merged PR titles.
+GitHub does not trigger other workflows from PRs created using the default `GITHUB_TOKEN`. To ensure CI runs on the
+Release Please PR, add a `RELEASE_PLEASE_TOKEN` repo secret (a fine-scoped PAT or GitHub App token with permissions to
+open PRs and create releases). The workflow falls back to `GITHUB_TOKEN` if the secret is not set.
 
 ---
 

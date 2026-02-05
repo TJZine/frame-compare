@@ -217,6 +217,22 @@ def test_load_cached_offsets_version_mismatch_raises(tmp_path: Path):
         load_cached_offsets(tmp_path, [Path("ref.mkv")])
 
 
+def test_load_cached_offsets_malformed_entry_raises_cache_corruption(tmp_path: Path):
+    cache_file = tmp_path / "audio_offsets.toml"
+    data = {
+        "version": "1",
+        "ref:comp_a": {
+            # missing required keys like frame_offset
+            "reference_clip": "ref.mkv",
+        },
+    }
+    with cache_file.open("wb") as f:
+        f.write(tomli_w.dumps(data).encode("utf-8"))
+
+    with pytest.raises(CacheCorruptionError):
+        load_cached_offsets(tmp_path, [Path("ref.mkv"), Path("comp_a.mkv")])
+
+
 def test_save_offsets_cache_writes_toml(tmp_path: Path):
     """Test saving offsets to cache."""
     res = [

@@ -43,6 +43,19 @@ def test_quantile_mode_returns_luminance_extremes():
     assert list(result.breakdown.quantile_bright) == [95, 96, 97, 98, 99]
 
 
+def test_quantile_thresholds_affect_selection_when_pool_is_larger_than_needed():
+    metrics = make_metrics(LUMINANCE_100, MOTION_100)
+    config = make_config(frame_count=10, selection_mode=SelectionMode.QUANTILE)
+    config.dark_quantile = 0.2
+    config.bright_quantile = 0.8
+    result = select_frames(metrics, config)
+
+    # With larger quantile pools, we should sample across the pool rather than
+    # always picking the absolute extremes.
+    assert max(result.breakdown.quantile_dark) > 4
+    assert min(result.breakdown.quantile_bright) < 95
+
+
 def test_motion_mode_returns_high_motion():
     metrics = make_metrics(LUMINANCE_100, MOTION_100)
     config = make_config(frame_count=5, selection_mode=SelectionMode.MOTION)

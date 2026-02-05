@@ -818,9 +818,9 @@ Convert clip to RGB24 for screenshot rendering.
 
 ### tonemap
 
-`apply_tonemap(clip: vs.VideoNode, settings: TonemapSettings, hdr_metadata: HDRMetadata | None = None) -> vs.VideoNode`
+`tonemap(clip: vs.VideoNode, settings: TonemapSettings, hdr_metadata: HDRMetadata | None = None) -> vs.VideoNode`
 
-Apply HDR to SDR tonemapping.
+Alias of `apply_tonemap`.
 
 ### TonemapSettings
 

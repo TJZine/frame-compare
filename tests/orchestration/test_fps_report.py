@@ -44,6 +44,16 @@ def test_build_consolidated_fps_report_orders_reference_then_comparisons() -> No
     assert report[2].label == "Encode 2"
 
 
+def test_build_consolidated_fps_report_with_empty_comparisons_returns_reference_only() -> None:
+    reference = _make_clip_state("ref.mkv", "Reference", Fraction(24, 1), Fraction(24, 1))
+
+    report = build_consolidated_fps_report(reference, [])
+
+    assert len(report) == 1
+    assert report[0].label == "Reference"
+    assert report[0].path == reference.path
+
+
 def test_build_consolidated_fps_report_flags_divergence_when_effective_fps_differs() -> None:
     reference = _make_clip_state("ref.mkv", "Reference", Fraction(24, 1), Fraction(24, 1))
     comp = _make_clip_state("a.mkv", "Encode 1", Fraction(24, 1), Fraction(30000, 1001))

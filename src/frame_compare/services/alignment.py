@@ -3,6 +3,7 @@
 import tomllib
 from fractions import Fraction
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import tomli_w
@@ -141,7 +142,7 @@ def load_cached_offsets(
 
     try:
         with cache_path.open("rb") as f:
-            data = tomllib.load(f)
+            data = cast(dict[str, object], tomllib.load(f))
     except tomllib.TOMLDecodeError:
         raise CacheCorruptionError(cache_path) from None
 
@@ -156,14 +157,40 @@ def load_cached_offsets(
         key = f"{reference.stem}:{comp.stem}"
         if key in data:
             entry = data[key]
-            results[key] = AlignmentResult(
-                reference_clip=entry["reference_clip"],
-                comparison_clip=entry["comparison_clip"],
-                frame_offset=entry["frame_offset"],
-                time_offset_seconds=entry["time_offset_seconds"],
-                correlation_score=entry["correlation_score"],
-                method=entry["method"],
-            )
+            if not isinstance(entry, dict):
+                raise CacheCorruptionError(cache_path)
+            entry_dict = cast(dict[str, object], entry)
+            try:
+                reference_clip = entry_dict["reference_clip"]
+                comparison_clip = entry_dict["comparison_clip"]
+                frame_offset = entry_dict["frame_offset"]
+                time_offset_seconds = entry_dict["time_offset_seconds"]
+                correlation_score = entry_dict["correlation_score"]
+                method = entry_dict["method"]
+
+                if not isinstance(reference_clip, str):
+                    raise TypeError("reference_clip must be str")
+                if not isinstance(comparison_clip, str):
+                    raise TypeError("comparison_clip must be str")
+                if not isinstance(frame_offset, int):
+                    raise TypeError("frame_offset must be int")
+                if not isinstance(time_offset_seconds, int | float):
+                    raise TypeError("time_offset_seconds must be number")
+                if not isinstance(correlation_score, int | float):
+                    raise TypeError("correlation_score must be number")
+                if not isinstance(method, str):
+                    raise TypeError("method must be str")
+
+                results[key] = AlignmentResult(
+                    reference_clip=reference_clip,
+                    comparison_clip=comparison_clip,
+                    frame_offset=frame_offset,
+                    time_offset_seconds=float(time_offset_seconds),
+                    correlation_score=float(correlation_score),
+                    method=method,
+                )
+            except (KeyError, TypeError, ValueError) as e:
+                raise CacheCorruptionError(cache_path) from e
 
     return results
 

@@ -113,7 +113,7 @@ RUN git clone --depth 1 --branch "${LIBPLACEBO_REF}" \
     ldconfig
 
 # Build vs-placebo plugin (pinned to commit SHA)
-RUN git clone --depth 1 --recurse-submodules --shallow-submodules \
+RUN git clone --recurse-submodules --shallow-submodules \
     https://github.com/Lypheo/vs-placebo.git && \
     cd vs-placebo && \
     git checkout "${VS_PLACEBO_REF}" && \
@@ -165,7 +165,7 @@ COPY --from=builder /usr/local/lib/libzimg*.so* /usr/local/lib/
 COPY --from=builder /usr/local/lib/liblsmash*.so* /usr/local/lib/
 
 # Copy libplacebo from builder (Debian multiarch install path)
-COPY --from=builder /usr/local/lib/aarch64-linux-gnu/libplacebo*.so* /usr/local/lib/
+COPY --from=builder /usr/local/lib/*-linux-gnu/libplacebo*.so* /usr/local/lib/
 
 # Copy ffms2 libraries (VS plugin auto-loaded from vapoursynth/)
 COPY --from=builder /usr/local/lib/libffms2*.so* /usr/local/lib/

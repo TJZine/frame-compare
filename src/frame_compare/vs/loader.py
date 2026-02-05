@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, ClassVar, Protocol
 
 from frame_compare.vs.env import ensure_vs_environment
 from frame_compare.vs.types import SourceInfo
@@ -27,12 +27,13 @@ class VSLoader(Protocol):
 class DefaultVSLoader:
     """Default VapourSynth loader implementation using LWLibavSource."""
 
-    _core: vs.Core | None = None  # Singleton pattern
+    _core: ClassVar[vs.Core | None] = None  # Singleton pattern
 
     def ensure_core(self) -> vs.Core:
-        if self._core is None:
-            self._core = ensure_vs_environment()
-        return self._core
+        cls = type(self)
+        if cls._core is None:
+            cls._core = ensure_vs_environment()
+        return cls._core
 
     def load(self, path: Path) -> SourceInfo:
         from frame_compare.vs.source import load_source

@@ -84,3 +84,11 @@ def test_apply_cli_overrides_force_interactive_alignment_sets_force_and_use_vspr
 
     assert new_config.audio_alignment.force_interactive is True
     assert new_config.audio_alignment.use_vspreview is True
+
+
+def test_apply_cli_overrides_empty_dict_returns_original_config() -> None:
+    """Test that empty CLI args return the original config unchanged."""
+    config = get_default_config()
+    new_config = apply_cli_overrides(config, {})
+
+    assert new_config == config

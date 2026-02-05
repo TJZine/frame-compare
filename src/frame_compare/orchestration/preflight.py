@@ -79,7 +79,7 @@ def _resolve_path(path_str: str, root: Path) -> Path:
     expanded = os.path.expandvars(path_str)
     path = Path(expanded)
     if path.is_absolute():
-        return path
+        return path.resolve()
     return (root / path).resolve()
 
 
@@ -140,10 +140,23 @@ def discover_inputs(input_dir: Path, patterns: list[str] | None = None) -> list[
     Returns:
         Sorted list of video file paths (case-insensitive lexicographic by filename)
     """
+    import fnmatch
+
     effective_patterns = _VIDEO_PATTERNS if patterns is None else patterns
+    normalized_patterns = [pattern.lower() for pattern in effective_patterns]
+    recursive = any("/" in pattern or "**" in pattern for pattern in effective_patterns)
+
+    candidates = input_dir.rglob("*") if recursive else input_dir.iterdir()
     videos: list[Path] = []
-    for pattern in effective_patterns:
-        videos.extend(input_dir.glob(pattern))
+    for path in candidates:
+        if not path.is_file():
+            continue
+        if recursive:
+            candidate = path.relative_to(input_dir).as_posix().lower()
+        else:
+            candidate = path.name.lower()
+        if any(fnmatch.fnmatch(candidate, pattern) for pattern in normalized_patterns):
+            videos.append(path)
 
     # Stable ordering: case-insensitive lexicographic sort by filename
     ordered = sorted(videos, key=lambda p: p.name.lower())

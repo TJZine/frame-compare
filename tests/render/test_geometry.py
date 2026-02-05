@@ -49,6 +49,10 @@ def test_calculate_dimensions_invalid_max_raises():
         calculate_dimensions(100, 100, max_width=-1)
 
 
+def test_calculate_dimensions_never_returns_zero_dimensions():
+    assert calculate_dimensions(1, 1000, max_width=None, max_height=1) == (1, 1)
+
+
 def test_overlay_position_top_left():
     assert calculate_overlay_position(
         image_size=(1920, 1080), overlay_size=(200, 50), position="top-left", margin=10
@@ -99,6 +103,13 @@ def test_overlay_position_invalid_dims_raises():
     with pytest.raises(ValueError, match="dimensions must be positive"):
         calculate_overlay_position(
             image_size=(0, 100), overlay_size=(10, 10), position="top-left", margin=10
+        )
+
+
+def test_overlay_position_negative_margin_raises():
+    with pytest.raises(ValueError, match="margin must be >= 0"):
+        calculate_overlay_position(
+            image_size=(1920, 1080), overlay_size=(100, 50), position="top-left", margin=-1
         )
 
 

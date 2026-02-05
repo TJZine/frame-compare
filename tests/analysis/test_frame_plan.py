@@ -90,6 +90,13 @@ def test_select_uniform_seeded_frames_zero_count() -> None:
     assert plan.count == 0
 
 
+def test_select_uniform_seeded_frames_negative_inputs_raise() -> None:
+    with pytest.raises(ValueError, match="num_frames must be >= 0"):
+        select_uniform_seeded_frames(-1, 0, 42)
+    with pytest.raises(ValueError, match="count must be >= 0"):
+        select_uniform_seeded_frames(10, -1, 42)
+
+
 def test_create_frame_plan_uses_default_seed_when_none() -> None:
     """seed=None -> Uses 42."""
     plan = create_frame_plan(100, 5, None)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -12,6 +13,7 @@ from pydantic import ValidationError
 from frame_compare.errors import (
     ConfigValidationError,
     PresetInvalidError,
+    PresetNameInvalidError,
     PresetNotFoundError,
     normalize_pydantic_errors,
 )
@@ -20,6 +22,13 @@ if TYPE_CHECKING:
     from frame_compare.config.schema import ConfigSchema
 
 DEFAULT_PRESETS_DIR = Path("config/presets")
+
+_PRESET_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _validate_preset_name(name: str) -> None:
+    if not name or not _PRESET_NAME_RE.fullmatch(name):
+        raise PresetNameInvalidError(name)
 
 
 def list_presets(presets_dir: Path | None = None) -> list[str]:
@@ -33,6 +42,7 @@ def list_presets(presets_dir: Path | None = None) -> list[str]:
 
 def load_preset(name: str, presets_dir: Path | None = None) -> dict[str, object]:
     """Load preset data by name."""
+    _validate_preset_name(name)
     directory = presets_dir or DEFAULT_PRESETS_DIR
     preset_path = directory / f"{name}.toml"
 
@@ -60,6 +70,7 @@ def save_preset(
     When a preset is loaded and applied, Pydantic will use defaults
     for any missing optional fields.
     """
+    _validate_preset_name(name)
     directory = presets_dir or DEFAULT_PRESETS_DIR
     directory.mkdir(parents=True, exist_ok=True)
 

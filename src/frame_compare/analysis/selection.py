@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import random
 from collections.abc import Sequence
 
@@ -37,7 +38,12 @@ def select_frames(metrics: FrameMetrics, config: AnalysisConfig) -> FrameSelecti
     breakdown = SelectionBreakdown()
 
     if mode == SelectionMode.QUANTILE:
-        dark, bright = _select_by_quantile(metrics.luminance, requested_count)
+        dark, bright = _select_by_quantile(
+            metrics.luminance,
+            requested_count,
+            dark_quantile=config.dark_quantile,
+            bright_quantile=config.bright_quantile,
+        )
         breakdown = SelectionBreakdown(quantile_dark=dark, quantile_bright=bright)
         selected_set.update(dark)
         selected_set.update(bright)
@@ -61,7 +67,12 @@ def select_frames(metrics: FrameMetrics, config: AnalysisConfig) -> FrameSelecti
         motion_n = int(requested_count * 0.4)
         random_n = requested_count - quantile_n - motion_n
 
-        dark, bright = _select_by_quantile(metrics.luminance, quantile_n)
+        dark, bright = _select_by_quantile(
+            metrics.luminance,
+            quantile_n,
+            dark_quantile=config.dark_quantile,
+            bright_quantile=config.bright_quantile,
+        )
         selected_set.update(dark)
         selected_set.update(bright)
 
@@ -95,16 +106,75 @@ def select_frames(metrics: FrameMetrics, config: AnalysisConfig) -> FrameSelecti
     )
 
 
-def _select_by_quantile(luminance: Sequence[float], count: int) -> tuple[list[int], list[int]]:
-    """Select frames based on luminance extremes."""
+def _select_by_quantile(
+    luminance: Sequence[float],
+    count: int,
+    *,
+    dark_quantile: float,
+    bright_quantile: float,
+) -> tuple[list[int], list[int]]:
+    """Select frames based on luminance extremes bounded by configured quantiles.
+
+    `dark_quantile` and `bright_quantile` define rank cutoffs (not luminance values):
+    - Dark candidates are the lowest `int(N * dark_quantile)` frames by luminance.
+    - Bright candidates are the highest frames starting at rank `int(N * bright_quantile)`.
+
+    When the candidate pool is larger than needed, selections are evenly sampled
+    across the pool to make the quantile thresholds meaningful.
+    """
+    if count <= 0:
+        return ([], [])
+
     half = count // 2
-    # Enumerate and sort by luminance
+    dark_needed = half
+    bright_needed = count - half
+
     indexed = sorted(enumerate(luminance), key=lambda x: x[1])
+    n = len(indexed)
 
-    dark = sorted([idx for idx, _ in indexed[:half]])
-    bright = sorted([idx for idx, _ in indexed[-(count - half) :]])
+    if n == 0:
+        return ([], [])
 
-    return dark, bright
+    dark_cut = max(1, int(n * dark_quantile))
+    bright_cut = int(n * bright_quantile)
+    if bright_cut >= n:
+        bright_cut = n - 1
+
+    dark_pool = [idx for idx, _ in indexed[:dark_cut]]
+    bright_pool = [idx for idx, _ in indexed[bright_cut:]]
+
+    # Ensure pools can satisfy requested counts.
+    if len(dark_pool) < dark_needed:
+        dark_pool = [idx for idx, _ in indexed[:dark_needed]]
+    if len(bright_pool) < bright_needed:
+        bright_pool = [idx for idx, _ in indexed[-bright_needed:]]
+
+    dark = sorted(_sample_evenly(dark_pool, dark_needed))
+    bright = sorted(_sample_evenly(bright_pool, bright_needed))
+    return (dark, bright)
+
+
+def _sample_evenly(items: Sequence[int], count: int) -> list[int]:
+    """Select `count` items evenly across an ordered sequence."""
+    if count <= 0:
+        return []
+    if len(items) <= count:
+        return list(items)
+    if count == 1:
+        return [items[0]]
+
+    last = len(items) - 1
+    positions: list[int] = []
+    for i in range(count):
+        raw = i * last / (count - 1)
+        pos = int(math.floor(raw + 0.5))  # round-half-up
+        if positions:
+            pos = max(pos, positions[-1] + 1)
+        remaining = count - i - 1
+        pos = min(pos, last - remaining)
+        positions.append(pos)
+
+    return [items[p] for p in positions]
 
 
 def _select_by_motion(

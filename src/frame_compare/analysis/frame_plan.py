@@ -84,6 +84,10 @@ def select_uniform_seeded_frames(
 ) -> FramePlan:
     """Select frames using deterministic uniform distribution."""
     # Validate
+    if num_frames < 0:
+        raise ValueError("num_frames must be >= 0")
+    if count < 0:
+        raise ValueError("count must be >= 0")
     if count > num_frames:
         raise InsufficientFramesError(
             path=Path("<frame-plan>"),
