@@ -29,3 +29,6 @@ def test_handle_error_returns_exit_codes():
 
     # Internal -> 1
     assert handle_error(GenericInternalError("fail"), no_color=True, verbose=False) == 1
+
+    # Non FrameCompareError -> 1
+    assert handle_error(ValueError("nope"), no_color=True, verbose=False) == 1

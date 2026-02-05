@@ -186,6 +186,21 @@ def test_get_exit_code_unknown():
     assert get_exit_code(error) == ExitCode.GENERAL_ERROR
 
 
+@pytest.mark.parametrize(
+    "code,expected",
+    [
+        ("FC-1000", ExitCode.CONFIG_ERROR),
+        ("FC-2000", ExitCode.DEPENDENCY_ERROR),
+        ("FC-3000", ExitCode.INPUT_ERROR),
+        ("FC-4000", ExitCode.PROCESSING_ERROR),
+        ("FC-5000", ExitCode.NETWORK_ERROR),
+    ],
+)
+def test_get_exit_code_maps_by_error_code_prefix_for_generic_error(code, expected):
+    error = FrameCompareError(ErrorContext(code=code, name="GENERIC", message="test"))
+    assert get_exit_code(error) == expected
+
+
 def test_format_error_console_basic():
     error = VapourSynthNotFoundError()
     output = format_error_console(error)

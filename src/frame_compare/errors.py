@@ -949,16 +949,19 @@ class ExitCode(IntEnum):
 
 def get_exit_code(error: FrameCompareError) -> ExitCode:
     """Map exception to exit code."""
-    if isinstance(error, ConfigError):
-        return ExitCode.CONFIG_ERROR
-    if isinstance(error, DependencyError):
-        return ExitCode.DEPENDENCY_ERROR
-    if isinstance(error, InputError):
-        return ExitCode.INPUT_ERROR
-    if isinstance(error, ProcessingError):
-        return ExitCode.PROCESSING_ERROR
-    if isinstance(error, NetworkError):
-        return ExitCode.NETWORK_ERROR
+    code = error.code
+    if code.startswith("FC-"):
+        category = code.split("-", 1)[1][:1]
+        if category == "1":
+            return ExitCode.CONFIG_ERROR
+        if category == "2":
+            return ExitCode.DEPENDENCY_ERROR
+        if category == "3":
+            return ExitCode.INPUT_ERROR
+        if category == "4":
+            return ExitCode.PROCESSING_ERROR
+        if category == "5":
+            return ExitCode.NETWORK_ERROR
     # InternalError and unknown FrameCompareErrors map to 1
     return ExitCode.GENERAL_ERROR
 

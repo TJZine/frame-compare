@@ -7,7 +7,14 @@ from _pytest.monkeypatch import MonkeyPatch
 from typer.testing import CliRunner
 
 from frame_compare.cli_entry import app
-from frame_compare.errors import ConfigNotFoundError, format_error_json, get_exit_code
+from frame_compare.errors import (
+    ConfigNotFoundError,
+    ErrorContext,
+    ExitCode,
+    FrameCompareError,
+    format_error_json,
+    get_exit_code,
+)
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
 from frame_compare.orchestration.doctor import CheckResult, DoctorCheck, DoctorReport
 from frame_compare.utils.progress import ProgressReporter
@@ -513,6 +520,34 @@ def test_run_json_outputs_error_schema_and_exit_code(
     payload = json.loads(result.stdout)
     expected = format_error_json(ConfigNotFoundError(Path("missing.toml")))
     assert payload == expected
+
+
+def test_run_exit_code_maps_by_error_category_prefix_in_json_mode(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    error = FrameCompareError(
+        ErrorContext(code="FC-3001", name="GENERIC_INPUT", message="bad input")
+    )
+
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise error
+
+    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+
+    result = runner.invoke(app, ["run", "--json"])
+    assert result.exit_code == int(ExitCode.INPUT_ERROR)
+    payload = json.loads(result.stdout)
+    assert payload == format_error_json(error)
+
+
+def test_run_exit_code_is_130_on_keyboard_interrupt(monkeypatch: MonkeyPatch) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+
+    result = runner.invoke(app, ["run"])
+    assert result.exit_code == int(ExitCode.INTERRUPTED)
 
 
 def test_run_no_color_error_output_has_no_rich_markup(

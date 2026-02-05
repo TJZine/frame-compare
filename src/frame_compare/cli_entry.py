@@ -148,7 +148,7 @@ def run(
             raise typer.Exit(code=int(get_exit_code(error))) from error
         raise typer.Exit(code=handle_error(error, no_color=no_color, verbose=verbose)) from error
     except KeyboardInterrupt:
-        raise typer.Exit(code=130) from None
+        raise typer.Exit(code=int(ExitCode.INTERRUPTED)) from None
 
     if json_output:
         payload = {
@@ -165,7 +165,7 @@ def run(
         typer.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
 
     if not result.success:
-        raise typer.Exit(code=5)
+        raise typer.Exit(code=int(ExitCode.PROCESSING_ERROR))
 
 
 @app.command()
@@ -258,14 +258,22 @@ def preset_save(
     save_preset(name, config_data, presets_dir=presets_dir)
 
 
-def handle_error(error: FrameCompareError, *, no_color: bool, verbose: bool) -> int:
-    message = format_error_console(error, verbose=verbose)
-    if no_color:
-        typer.echo(message, err=True)
+def handle_error(error: Exception, *, no_color: bool, verbose: bool) -> int:
+    """Render errors to stderr and return exit code.
+
+    Raises:
+        None.
+    """
+    if isinstance(error, FrameCompareError):
+        message = format_error_console(error, verbose=verbose)
+        if no_color:
+            typer.echo(message, err=True)
+        else:
+            console = Console(stderr=True)
+            console.print(message)
         return int(get_exit_code(error))
-    console = Console(stderr=True)
-    console.print(message)
-    return int(get_exit_code(error))
+    typer.echo("Unexpected error: please report this bug.", err=True)
+    return int(ExitCode.GENERAL_ERROR)
 
 
 def _prompt_input_dir(default: str) -> str:

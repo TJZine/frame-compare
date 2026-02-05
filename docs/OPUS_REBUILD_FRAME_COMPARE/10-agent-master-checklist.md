@@ -617,9 +617,9 @@ frame-compare/
 - [x] Complete `doctor` command (dependency check) (2026-02-04)
 - [x] Complete `preset` subcommands (list, apply, save) (2026-02-04)
 - [x] Implement all CLI options documented in api-design.md (2026-02-04)
-- [ ] Implement `ExitCode` enum per spec §3.2
-- [ ] Implement error-to-exit-code mapping per spec §3.3
-- [ ] Write CLI integration tests
+- [x] Implement `ExitCode` enum per spec §3.2 (2026-02-04)
+- [x] Implement error-to-exit-code mapping per spec §3.3 (2026-02-04)
+- [x] Write CLI integration tests (2026-02-04)
 
 ### Phase 6 Quality Gate ✓
 
