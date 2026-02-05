@@ -278,7 +278,7 @@ function Assert-BundleRuntime([string]$BundleRoot) {
   $env:VAPOURSYNTH_PLUGIN_PATH = "$BundleRoot\\vs\\plugins"
   $env:PATH = "$BundleRoot\\python;$BundleRoot\\vs\\core;$BundleRoot\\vs\\plugins;$BundleRoot\\ffmpeg;$env:PATH"
 
-  & $python -c "import tomli_w; import typer; import rich; import frame_compare.cli_entry"
+  & $python -c "import tomli_w; import typer; import rich; import frame_compare"
   Assert-LastExitCode -CommandLabel "bundle runtime import validation"
 }
 
