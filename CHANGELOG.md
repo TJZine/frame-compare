@@ -48,14 +48,6 @@ This project follows Conventional Commits and is intended to be released via Rel
 - Added `frame_compare.render` module with type definitions
 - Phase 4 (Render Module) complete: types, geometry, naming, overlay, encoders, orchestrator with integration tests
 - Docker integration verification gate: `tools/verify_docker_integration.sh` + `frame-compare-test` Compose service (real VS+FFmpeg, zero skips)
-
-### Changed
-
-- Workflow: allow auto-generated contract view diffs from `generate_contract_views.py` without blocking review when freshness is verified.
-- Workflow: Coding Agent must run the full local gate suite (pyright/ruff/pytest/import-linter + contract freshness check) before handing off `impl-vN.md` to Verification.
-- Workflow: Verification Agent may apply Ruff auto-fixes (`ruff check --fix` + `ruff format`, no `--unsafe-fixes`) when Ruff is the only failing quality gate, and must record changes via `impl-v(N+1).md`.
-- Workflow: Plan Review may apply mechanical auto-fixes to plans (format/wiring only) and must audit SSOT/spec changes for correctness before approval.
-- Workflow: replaced `AGENTS.md` with a token-efficient SSOT pointer + command canon for IDE agents.
 - **CI/CD Pipeline:** GitHub Actions workflow with Ruff linting, Pyright type checking, and pytest stages.
 - **CI/CD Pipeline:** Add Docker integration workflow for VS+FFmpeg integration tests on relevant PR changes.
 - **Phase 0 Foundation:** Project scaffolding with `pyproject.toml`, `src/frame_compare/` structure, and development tooling (Pyright strict, Ruff, pytest).
@@ -93,6 +85,11 @@ This project follows Conventional Commits and is intended to be released via Rel
 
 ### Changed
 
+- Workflow: allow auto-generated contract view diffs from `generate_contract_views.py` without blocking review when freshness is verified.
+- Workflow: Coding Agent must run the full local gate suite (pyright/ruff/pytest/import-linter + contract freshness check) before handing off `impl-vN.md` to Verification.
+- Workflow: Verification Agent may apply Ruff auto-fixes (`ruff check --fix` + `ruff format`, no `--unsafe-fixes`) when Ruff is the only failing quality gate, and must record changes via `impl-v(N+1).md`.
+- Workflow: Plan Review may apply mechanical auto-fixes to plans (format/wiring only) and must audit SSOT/spec changes for correctness before approval.
+- Workflow: replaced `AGENTS.md` with a token-efficient SSOT pointer + command canon for IDE agents.
 - `ColorProps` range default aligned with SSOT (missing or unspecified `_ColorRange` defaults to limited/1).
 - Planning/Plan Review prompts: require copy-forward plan revisions and a `## Changes Since plan-vN` summary to reduce churn during plan iteration.
 - Planning/Plan Review/Coding/Review prompts + workflow docs: added SSOT anchoring guardrails (Spec Anchors + one-line signatures + SSOT drift gate), anti-churn line budget + iteration cap, and Review routing rules (implementation defect vs spec drift vs design issue).

@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from frame_compare.config.schema import ConfigSchema
     from frame_compare.vs.types import SourceInfo, TonemapSettings
 
-log = structlog.get_logger(__name__)
+log = structlog.get_logger()
 
 
 @runtime_checkable
@@ -332,9 +332,7 @@ def render_screenshots(
                     settings = resolve_tonemap_settings(config)
                     loaded_clip = apply_tonemap(loaded_clip, settings, source_info.hdr_metadata)
                     # Mark that tonemap was applied for overlay (§1.4.6)
-                    hdr_info = (
-                        f"HDR (tonemapped: {settings.preset}, " f"{settings.target_nits} nits)"
-                    )
+                    hdr_info = f"HDR (tonemapped: {settings.preset}, {settings.target_nits} nits)"
                 elif source_info.is_hdr:
                     # HDR source, tonemap disabled (§1.4.6)
                     hdr_info = "HDR (native, no tonemap)"

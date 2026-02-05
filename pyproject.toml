@@ -3,17 +3,17 @@ name = "frame-compare"
 version = "0.1.0"
 description = "Video frame comparison tool with tonemapping and slow.pics integration"
 readme = "README.md"
-license = { text = "MIT" }
+license = { text = "Apache-2.0" }
 requires-python = ">=3.13"
 authors = [
-    { name = "Tristan", email = "tristan@example.com" }
+    { name = "Tristan", email = "zine96@proton.me" }
 ]
 keywords = ["video", "comparison", "vapoursynth", "tonemapping", "hdr"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: End Users/Desktop",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.13",

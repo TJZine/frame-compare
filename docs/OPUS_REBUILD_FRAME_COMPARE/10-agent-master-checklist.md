@@ -647,27 +647,30 @@ frame-compare/
 
 ### 7.2 Quality Assurance
 
-- [ ] Run full test suite
-- [ ] Verify coverage > 80%
-- [ ] Fix any Pyright errors
-- [ ] Fix any Ruff errors
-- [ ] Ensure each `frame_compare.*` module has a consistent module-level logger pattern (final implementation review)
-- [ ] Performance testing
+- [x] Run full test suite
+- [x] Verify coverage > 80%
+- [x] Fix any Pyright errors
+- [x] Fix any Ruff errors
+- [x] Ensure each `frame_compare.*` module has a consistent module-level logger pattern (final implementation review)
+- [x] Performance testing
 
 ### 7.3 Container Finalization
 
-- [ ] Optimize Dockerfile layers
-- [ ] Test Docker deployment end-to-end
-- [ ] Publish to ghcr.io (if applicable)
+- [x] Optimize Dockerfile layers
+- [x] Test Docker deployment end-to-end
 
 ### Phase 7 Quality Gate ✓
 
-- [ ] All tests pass
-- [ ] Coverage > 80%
-- [ ] Pyright: 0 errors
-- [ ] Ruff: 0 errors
-- [ ] Docker image builds and runs
-- [ ] Documentation complete
+- [x] All tests pass
+- [x] Coverage > 80%
+- [x] Pyright: 0 errors
+- [x] Ruff: 0 errors
+- [x] Docker image builds and runs
+- [x] Documentation complete
+
+### 7.4 Publish to ghcr.io (if applicable)
+
+- [ ] Publish to ghcr.io — BLOCKED: requires authenticated `docker login ghcr.io` / token with `write:packages`
 
 ---
 
