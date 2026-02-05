@@ -28,6 +28,17 @@ function Get-Manifest() {
   return (Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json)
 }
 
+function Get-OptionalStringProperty([object]$Object, [string]$Name) {
+  if ($null -eq $Object) {
+    return ""
+  }
+  $prop = $Object.PSObject.Properties[$Name]
+  if ($null -eq $prop -or $null -eq $prop.Value) {
+    return ""
+  }
+  return [string]$prop.Value
+}
+
 function Assert-Sha256([string]$FilePath, [string]$ExpectedHex) {
   $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $FilePath).Hash.ToLowerInvariant()
   if ($hash -ne $ExpectedHex.ToLowerInvariant()) {
@@ -76,7 +87,7 @@ function Install-Artifact([string]$BundleRoot, [pscustomobject]$Artifact, [strin
   $dest = Join-Path $BundleRoot $destRel
 
   if ($type -eq "extract") {
-    $stripPrefix = [string]$install.strip_prefix
+    $stripPrefix = Get-OptionalStringProperty -Object $install -Name "strip_prefix"
     if ($stripPrefix -ne "") {
       $tmp = Join-Path $CacheDir ("tmp_extract_" + [string]$Artifact.id)
       Expand-Zip -ZipPath $DownloadedPath -Destination $tmp
