@@ -1,4 +1,5 @@
 import json
+import re
 import tomllib
 from pathlib import Path
 
@@ -20,6 +21,13 @@ from frame_compare.orchestration.doctor import CheckResult, DoctorCheck, DoctorR
 from frame_compare.utils.progress import ProgressReporter
 
 runner = CliRunner()
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+
+def _normalize_cli_output(text: str) -> str:
+    """Normalize styled CLI output for stable assertions across platforms."""
+    return ANSI_ESCAPE_RE.sub("", text)
+
 
 MINIMAL_CONFIG = """\
 [paths]
@@ -40,12 +48,13 @@ def _write_minimal_config(root: Path) -> Path:
 
 def test_app_help_lists_all_commands():
     result = runner.invoke(app, ["--help"])
+    output = _normalize_cli_output(result.stdout)
     assert result.exit_code == 0
-    assert "run" in result.stdout
-    assert "wizard" in result.stdout
-    assert "doctor" in result.stdout
-    assert "preset" in result.stdout
-    assert "version" in result.stdout
+    assert "run" in output
+    assert "wizard" in output
+    assert "doctor" in output
+    assert "preset" in output
+    assert "version" in output
 
 
 def test_run_help_shows_all_options():
@@ -80,9 +89,10 @@ def test_run_help_shows_all_options():
         "-v",
     ]
     result = runner.invoke(app, ["run", "--help"])
+    output = _normalize_cli_output(result.stdout)
     assert result.exit_code == 0
     for opt in REQUIRED_RUN_OPTIONS:
-        assert opt in result.stdout
+        assert opt in output
 
 
 def test_run_exits_zero_when_runner_returns_success(monkeypatch: MonkeyPatch) -> None:
