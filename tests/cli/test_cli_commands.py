@@ -47,7 +47,13 @@ def _write_minimal_config(root: Path) -> Path:
 
 
 def test_app_help_lists_all_commands():
-    result = runner.invoke(app, ["--help"])
+    result = runner.invoke(
+        app,
+        ["--help"],
+        color=False,
+        terminal_width=200,
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
     output = _normalize_cli_output(result.stdout)
     assert result.exit_code == 0
     assert "run" in output
@@ -88,7 +94,13 @@ def test_run_help_shows_all_options():
         "--verbose",
         "-v",
     ]
-    result = runner.invoke(app, ["run", "--help"])
+    result = runner.invoke(
+        app,
+        ["run", "--help"],
+        color=False,
+        terminal_width=200,
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
     output = _normalize_cli_output(result.stdout)
     assert result.exit_code == 0
     for opt in REQUIRED_RUN_OPTIONS:
