@@ -25,6 +25,12 @@ CLI_OVERRIDE_MAP: dict[str, str] = {
 }
 
 _INVERTED_FLAGS: frozenset[str] = frozenset({"no_upload"})
+_FLAG_ONLY_OVERRIDES: frozenset[str] = frozenset(
+    {
+        "no_upload",
+        "force_interactive_alignment",
+    }
+)
 
 
 def apply_cli_overrides(
@@ -37,6 +43,12 @@ def apply_cli_overrides(
     overrides: dict[str, object] = {}
     for cli_name, config_path in CLI_OVERRIDE_MAP.items():
         if cli_name not in cli_args or cli_args[cli_name] is None:
+            continue
+
+        # Flag-style booleans (default False) must not clobber config when omitted.
+        # Since Typer provides False even when not explicitly passed, treat only
+        # an explicit True as an override for these options.
+        if cli_name in _FLAG_ONLY_OVERRIDES and cli_args[cli_name] is not True:
             continue
 
         value = cli_args[cli_name]

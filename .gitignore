@@ -19,6 +19,9 @@ CODEX.md
 .agent-workflow/runs/**/appserver-config.json
 .agent-workflow/runs/**/appserver_threads.json
 
+# Local config (may contain secrets)
+config/config.toml
+
 # Python
 __pycache__/
 *.pyc

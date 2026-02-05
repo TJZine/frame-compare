@@ -32,6 +32,20 @@ class PublishResult:
     upload_duration_seconds: float
 
 
+@dataclass(frozen=True)
+class _SlowpicsUploadRequest:
+    """Prepared slow.pics multipart payload for httpx.
+
+    Notes:
+        This uses `data=` + `files=` to send multipart form data. Images are read into
+        memory up-front for simplicity and determinism; if screenshots become large,
+        this can be swapped to streaming file handles (with careful lifetime mgmt).
+    """
+
+    data: dict[str, str]
+    files: list[tuple[str, tuple[str, bytes, str]]]
+
+
 class SlowpicsPublisher:
     """Handles uploading screenshots to slow.pics."""
 
@@ -63,7 +77,7 @@ class SlowpicsPublisher:
 
         # Prepare payload
         visibility = self.config.visibility.value  # "public", "unlisted", etc.
-        data = await self._prepare_upload(files, title, visibility)
+        request = await self._prepare_upload(files, title, visibility)
         log.info(
             "slowpics_upload_start",
             file_count=len(files),
@@ -75,7 +89,7 @@ class SlowpicsPublisher:
             # Upload with retry
             response = await self._upload_with_retry(
                 self._client,
-                data,
+                request,
                 self.config.max_retries,
                 self.config.timeout_seconds,
             )
@@ -101,70 +115,27 @@ class SlowpicsPublisher:
 
     async def _prepare_upload(
         self, files: list[Path], title: str | None, visibility: str
-    ) -> dict[str, object]:
-        """Prepare the multipart upload payload."""
-        # Note: In a real implementation with multipart/form-data, we'd handle
-        # file opening differently. However, slow.pics API expects a JSON-like
-        # structure or multipart where keys matter.
-        # Based on typical usage, we construct the request.
-        # BUT, since we need to send files, we can't just return a dict for JSON.
-        # We need to structure this for httpx's files/data parameters.
-        # Wait, the plan says:
-        # "async def _prepare_upload(files: list[Path], title: str | None, visibility: str) -> dict"
-        # And "_upload_with_retry(client: httpx.AsyncClient, data: dict, ...)"
-        #
-        # Re-reading the plan/SSOT:
-        # The plan abstractly says "data: dict".
-        # However, for file uploads, we usually need `files` and `data`.
-        # I will assume `_prepare_upload` returns the keyword arguments for `client.post`.
-        # OR, I'll stick to the signature but make it return the kwargs dictionary.
-
-        # Let's look at how slow.pics expects data. Usually it's multipart/form-data.
-        # fields: 'collectionName', 'public' (true/false or string?), 'optimize' (true/false)
-        # files: 'images[]'
-
-        # Implementation Detail:
-        # To match the plan's signature `-> dict`, I will return a dict that contains
-        # arguments suitable for `client.post(..., **data)`.
-        # But wait, the plan says `_upload_with_retry(..., data: dict, ...)`
-        # This implies `data` is the payload.
-
-        # Let's adjust slightly to be practical:
-        # I will make `_prepare_upload` read the files into memory (they are screenshots, usually small enough)
-        # or prepare open file handles.
-        # Since I cannot easily pass open file handles around in a simple dict without management,
-        # I will read them into memory.
-
+    ) -> _SlowpicsUploadRequest:
+        """Prepare the slow.pics multipart payload for upload."""
         file_list: list[tuple[str, tuple[str, bytes, str]]] = []
         for f in files:
-            # We must use the filename as the key or part of the tuple
-            # httpx format: ('field_name', ('filename', file_content, 'content_type'))
-            # slow.pics expects 'images' field.
             content = f.read_bytes()
             file_list.append(("images", (f.name, content, "image/png")))
 
-        # If visibility is passed as a string value from the config:
-        # 'public' -> public=true
-        # 'unlisted' -> public=false
-        # 'private' -> public=false?
-
-        form_data = {
+        form_data: dict[str, str] = {
             "collectionName": title or "Comparison",
             "optimize": "true",
             "lossy": "true",
         }
 
-        if visibility == "public":
-            form_data["public"] = "true"
-        else:
-            form_data["public"] = "false"
+        form_data["public"] = "true" if visibility == "public" else "false"
 
-        return {"files": file_list, "data": form_data}
+        return _SlowpicsUploadRequest(files=file_list, data=form_data)
 
     async def _upload_with_retry(
         self,
         client: httpx.AsyncClient,
-        kwargs: dict[str, object],
+        request: _SlowpicsUploadRequest,
         max_retries: int,
         timeout_seconds: float,
     ) -> httpx.Response:
@@ -180,7 +151,8 @@ class SlowpicsPublisher:
                 response = await client.post(
                     SLOWPICS_UPLOAD_URL,
                     timeout=timeout_seconds,
-                    **kwargs,  # type: ignore
+                    data=request.data,
+                    files=request.files,
                 )
 
                 if response.is_success:

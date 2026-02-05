@@ -29,6 +29,22 @@ def test_apply_cli_overrides_inverts_no_upload() -> None:
     assert new_config.slowpics.auto_upload is False
 
 
+def test_apply_cli_overrides_does_not_override_false_flag_defaults() -> None:
+    """Flag-style booleans default False and must not override config when omitted."""
+    config = get_default_config()
+    config.slowpics.auto_upload = False
+    config.audio_alignment.force_interactive = True
+
+    cli_args: dict[str, Any] = {
+        "no_upload": False,
+        "force_interactive_alignment": False,
+    }
+    new_config = apply_cli_overrides(config, cli_args)
+
+    assert new_config.slowpics.auto_upload is False
+    assert new_config.audio_alignment.force_interactive is True
+
+
 def test_apply_cli_overrides_ignores_none_values() -> None:
     """Test that None values in CLI args are ignored."""
     config = get_default_config()

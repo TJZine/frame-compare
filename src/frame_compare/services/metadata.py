@@ -183,12 +183,16 @@ async def _search_tmdb(
 
     except httpx.TimeoutException as e:
         raise TmdbError("Request timed out") from e
+    except httpx.RequestError as e:
+        # Avoid including the request URL (which can contain the API key) in error messages.
+        raise TmdbError("Request failed") from e
     except httpx.HTTPStatusError as e:
-        raise TmdbError(f"HTTP error occurred: {e}") from e
+        raise TmdbError(f"HTTP error occurred: {e.response.status_code}") from e
     except Exception as e:
         if isinstance(e, TmdbError | TmdbRateLimitedError):
             raise
-        raise TmdbError(f"Unexpected error during TMDB lookup: {e}") from e
+        # Avoid leaking request details (e.g., query params) via exception stringification.
+        raise TmdbError("Unexpected error during TMDB lookup") from e
 
     results_raw = cast(list[dict[str, Any]], data.get("results", []))
     mapped_results: list[TmdbMetadata] = []

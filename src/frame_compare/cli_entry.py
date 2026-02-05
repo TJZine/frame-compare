@@ -390,8 +390,8 @@ def _prepare_toml_payload(data: dict[str, object]) -> dict[str, object]:
     if isinstance(tmdb_section_raw, dict):
         tmdb_section = cast(dict[str, object], tmdb_section_raw)
     api_key = tmdb_section.get("api_key")
-    if api_key is None:
-        tmdb_section["api_key"] = ""
+    if api_key is None or api_key == "":
+        tmdb_section.pop("api_key", None)
     paths_section: dict[str, object] = {}
     slowpics_section: dict[str, object] = {}
     paths_raw = data.get("paths")

@@ -384,6 +384,24 @@
 - `docs/OPUS_REBUILD_FRAME_COMPARE/07-windows-portable-bundle/02-support-matrix.md`
 - `docs/OPUS_REBUILD_FRAME_COMPARE/07-windows-portable-bundle/03-user-interview.md`
 
+## 2026-02-05 — Phase 8.2: Windows Portable Bundle Pinned Artifacts (Baseline v1)
+
+**Context:** Phase 8 distribution requires deterministic, pinned external artifacts (URLs + sha256 + license references). “Latest” pointers are not acceptable.
+
+**Decisions:**
+
+1. Baseline target remains: Windows 10/11 x64 only (ARM64 best-effort deferred).
+2. VapourSynth baseline remains pinned to `R73` to match the Docker “real deps” baseline.
+3. FFmpeg shipped in the portable bundle MUST be **LGPL-only**; users may bring their own FFmpeg best-effort for advanced codecs/features.
+4. Pin strategy: prefer upstream pinned binaries; record exact URL + sha256 + license references in-repo.
+5. Baseline plugins: ship `lsmas` (required by current loader) + `vs-placebo` (optional tonemap plugin); exclude `ffms2` from baseline until the project commits to a loader fallback that needs it and its binary license implications are explicitly handled.
+
+**SSOT / Evidence:**
+
+- Pins manifest: `tools/windows_portable/manifest.windows-x64.json`
+- Pins schema: `tools/windows_portable/manifest.schema.json`
+- Session report (hash evidence): `docs/OPUS_REBUILD_FRAME_COMPARE/phase-8-8.2-pins-report-2026-02-05.md`
+
 ## 2026-01-03 — Phase 6.1 Orchestration Package Scaffold
 
 ### Scope
