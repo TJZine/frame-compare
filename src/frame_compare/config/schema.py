@@ -19,6 +19,8 @@ from pydantic_settings import (
 
 
 class SelectionMode(str, Enum):
+    """Frame selection strategy for choosing representative comparison frames."""
+
     QUANTILE = "quantile"
     MOTION = "motion"
     RANDOM = "random"
@@ -26,6 +28,8 @@ class SelectionMode(str, Enum):
 
 
 class OverlayMode(str, Enum):
+    """Overlay verbosity level for rendered screenshots."""
+
     MINIMAL = "minimal"
     STANDARD = "standard"
     DIAGNOSTIC = "diagnostic"
@@ -33,6 +37,8 @@ class OverlayMode(str, Enum):
 
 
 class TonemapPreset(str, Enum):
+    """Named tonemap preset applied when tonemapping HDR to SDR."""
+
     REFERENCE = "reference"
     FILMIC = "filmic"
     CONTRAST = "contrast"
@@ -43,6 +49,8 @@ class TonemapPreset(str, Enum):
 
 
 class ToneCurve(str, Enum):
+    """Tone curve algorithm used by the tonemap implementation."""
+
     BT2390 = "bt2390"
     SPLINE = "spline"
     REINHARD = "reinhard"
@@ -51,12 +59,16 @@ class ToneCurve(str, Enum):
 
 
 class Visibility(str, Enum):
+    """slow.pics gallery visibility setting."""
+
     PUBLIC = "public"
     UNLISTED = "unlisted"
     PRIVATE = "private"
 
 
 class ViewerMode(str, Enum):
+    """Default comparison viewer mode for generated HTML reports."""
+
     SLIDER = "slider"
     OVERLAY = "overlay"
     DIFF = "diff"
@@ -73,6 +85,8 @@ class LogLevel(str, Enum):
 
 
 class LogFormat(str, Enum):
+    """Logging output format."""
+
     JSON = "json"
     CONSOLE = "console"
 
@@ -81,6 +95,8 @@ class LogFormat(str, Enum):
 
 
 class PathsConfig(BaseModel):
+    """Filesystem paths relative to the workspace root."""
+
     input_dir: str = "comparison_videos"
     screenshots_dir: str = "screenshots"
     generated_dir: str = "generated"
@@ -88,6 +104,8 @@ class PathsConfig(BaseModel):
 
 
 class AnalysisConfig(BaseModel):
+    """Frame selection and analysis settings."""
+
     frame_count: int = Field(default=10, ge=1, le=100)
     random_seed: int = 42
     save_frames_data: bool = True
@@ -97,6 +115,8 @@ class AnalysisConfig(BaseModel):
 
 
 class AudioAlignmentConfig(BaseModel):
+    """Audio alignment and interactive alignment configuration."""
+
     enable: bool = True
     sample_rate: int = Field(default=8000, ge=4000, le=48000)
     max_offset_seconds: float = Field(default=30.0, ge=1.0)
@@ -106,6 +126,8 @@ class AudioAlignmentConfig(BaseModel):
 
 
 class ScreenshotsConfig(BaseModel):
+    """Screenshot rendering settings (encoder choice, overlays, compression)."""
+
     use_ffmpeg: bool = False
     directory_name: str = "screenshots"
     overlay_mode: OverlayMode = OverlayMode.STANDARD
@@ -115,6 +137,8 @@ class ScreenshotsConfig(BaseModel):
 
 
 class ColorConfig(BaseModel):
+    """Tonemapping configuration for HDR sources."""
+
     enable_tonemap: bool = True
     preset: TonemapPreset = TonemapPreset.REFERENCE
     target_nits: int = Field(default=203, ge=100, le=1000)
@@ -124,6 +148,8 @@ class ColorConfig(BaseModel):
 
 
 class SlowpicsConfig(BaseModel):
+    """slow.pics upload configuration and retry policy."""
+
     auto_upload: bool = True
     visibility: Visibility = Visibility.UNLISTED
     delete_after_upload: bool = False
@@ -132,6 +158,8 @@ class SlowpicsConfig(BaseModel):
 
 
 class TmdbConfig(BaseModel):
+    """TMDB metadata lookup configuration."""
+
     api_key: str | None = None
     enabled: bool = True
     unattended: bool = False
@@ -139,6 +167,8 @@ class TmdbConfig(BaseModel):
 
 
 class ReportConfig(BaseModel):
+    """HTML report generation configuration."""
+
     enable: bool = True
     output_dir: str | None = None
     default_mode: ViewerMode = ViewerMode.SLIDER
@@ -155,18 +185,24 @@ class ReportConfig(BaseModel):
 
 
 class DoviConfig(BaseModel):
+    """Dolby Vision metadata extraction configuration."""
+
     enable: bool = True
     dovi_tool_path: Path | None = None
     cache_results: bool = True
 
 
 class DiagnosticsConfig(BaseModel):
+    """Optional diagnostic outputs for development and debugging."""
+
     per_frame_nits: bool = False
     show_hdr_info: bool = False
     frame_timing: bool = False
 
 
 class LoggingConfig(BaseModel):
+    """Logging configuration (level, format, optional file path)."""
+
     level: LogLevel = LogLevel.INFO
     format: LogFormat = LogFormat.CONSOLE
     file: str | None = None

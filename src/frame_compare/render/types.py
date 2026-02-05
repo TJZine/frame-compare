@@ -19,6 +19,8 @@ class OverlayMode(str, Enum):
 
 @dataclass
 class EncoderSettings:
+    """Encoder settings for screenshot output files."""
+
     format: str = "png"
     compression: int = 6  # PNG compression 0-9
     bit_depth: int = 8
@@ -26,6 +28,8 @@ class EncoderSettings:
 
 @dataclass
 class OverlayConfig:
+    """Overlay rendering configuration for a single output frame."""
+
     mode: OverlayMode  # minimal, standard, diagnostic
     label: str  # Video label
     frame_number: int
