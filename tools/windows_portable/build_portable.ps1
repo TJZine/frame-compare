@@ -201,15 +201,18 @@ function Copy-RepoApp([string]$BundleRoot) {
 
 function Configure-EmbeddedPython([string]$BundleRoot) {
   $pythonDir = Join-Path $BundleRoot "python"
-  $pth = Join-Path $pythonDir "python313._pth"
-  if (!(Test-Path -LiteralPath $pth)) {
-    throw "Expected embedded Python ._pth file not found: $pth"
+  $pthCandidates = @(Get-ChildItem -LiteralPath $pythonDir -Filter "python*._pth" -File)
+  if ($pthCandidates.Count -ne 1) {
+    throw "Expected exactly one embedded Python ._pth file in $pythonDir, found $($pthCandidates.Count)"
   }
+  $pth = $pthCandidates[0].FullName
+  $pthBase = [System.IO.Path]::GetFileNameWithoutExtension($pthCandidates[0].Name)
+  $pythonZip = "$pthBase.zip"
 
   # The embeddable distribution uses python313._pth to define sys.path and typically ignores
   # PYTHONPATH/environment. Make the bundle self-contained by pinning the app paths here.
   $lines = @(
-    "python313.zip",
+    $pythonZip,
     ".",
     "..\\app\\site-packages",
     "..\\app\\src",
@@ -237,14 +240,30 @@ function Install-PythonDeps([string]$BundleRoot, [string]$VsCoreRoot) {
   }
 
   # Install project dependencies into app/site-packages.
-  uv pip install --require-hashes --only-binary :all: --target $sitePackages -r $reqFile
+  uv pip install --reinstall --strict --exact --require-hashes --only-binary :all: --python-version 3.13 --python-platform windows --target $sitePackages -r $reqFile
 
   # Install VapourSynth python module from the pinned VS portable distribution (no PyPI dependency).
-  $vsWheel = Join-Path $VsCoreRoot "wheel\\vapoursynth-73-cp312-abi3-win_amd64.whl"
-  if (!(Test-Path -LiteralPath $vsWheel)) {
-    throw "VapourSynth wheel not found in VS portable archive: $vsWheel"
+  $wheelDir = Join-Path $VsCoreRoot "wheel"
+  $vsWheelCandidates = @(Get-ChildItem -LiteralPath $wheelDir -Filter "vapoursynth-*-abi3-win_amd64.whl" -File)
+  if ($vsWheelCandidates.Count -ne 1) {
+    throw "Expected exactly one VapourSynth wheel in $wheelDir, found $($vsWheelCandidates.Count)"
   }
+  $vsWheel = $vsWheelCandidates[0].FullName
   uv pip install --only-binary :all: --target $sitePackages $vsWheel
+}
+
+function Assert-BundleRuntime([string]$BundleRoot) {
+  $python = Join-Path $BundleRoot "python\\python.exe"
+  if (!(Test-Path -LiteralPath $python)) {
+    throw "Embedded python not found for runtime validation: $python"
+  }
+
+  $env:PYTHONUTF8 = "1"
+  $env:PYTHONPATH = "$BundleRoot\\app\\src;$BundleRoot\\app\\site-packages"
+  $env:VAPOURSYNTH_PLUGIN_PATH = "$BundleRoot\\vs\\plugins"
+  $env:PATH = "$BundleRoot\\python;$BundleRoot\\vs\\core;$BundleRoot\\vs\\plugins;$BundleRoot\\ffmpeg;$env:PATH"
+
+  & $python -c "import tomli_w; import typer; import rich; import frame_compare.cli_entry"
 }
 
 function Copy-Licenses([string]$BundleRoot, [pscustomobject[]]$Artifacts) {
@@ -342,6 +361,7 @@ function Main() {
   Copy-RepoApp -BundleRoot $OutDir
   Install-PythonDeps -BundleRoot $OutDir -VsCoreRoot (Join-Path $OutDir "vs\\core")
   Configure-EmbeddedPython -BundleRoot $OutDir
+  Assert-BundleRuntime -BundleRoot $OutDir
 
   # Launchers
   Write-LauncherFiles -BundleRoot $OutDir
