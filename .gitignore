@@ -10,6 +10,8 @@
 .agent/
 .hypothesis/
 AGENTS.md
+CODEX.md
+.codannaignore
 
 # FC2 app-server runtime (ephemeral)
 .agent-workflow/.autopilot.lock
