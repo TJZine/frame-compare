@@ -248,7 +248,7 @@ function Install-PythonDeps([string]$BundleRoot, [string]$VsCoreRoot) {
   }
 
   # Install project dependencies into app/site-packages.
-  uv pip install --reinstall --strict --exact --require-hashes --only-binary :all: --python-version 3.13 --python-platform windows --target $sitePackages -r $reqFile
+  uv pip install --reinstall --strict --exact --require-hashes --python-version 3.13 --python-platform windows --target $sitePackages -r $reqFile
   Assert-LastExitCode -CommandLabel "uv pip install requirements"
   $tomliWModule = Join-Path $sitePackages "tomli_w"
   $tomliWDistInfo = @(Get-ChildItem -LiteralPath $sitePackages -Filter "tomli_w-*.dist-info" -Directory -ErrorAction SilentlyContinue)
