@@ -39,6 +39,33 @@ function Get-OptionalStringProperty([object]$Object, [string]$Name) {
   return [string]$prop.Value
 }
 
+function Get-OptionalProperty([object]$Object, [string]$Name) {
+  if ($null -eq $Object) {
+    return $null
+  }
+  $prop = $Object.PSObject.Properties[$Name]
+  if ($null -eq $prop) {
+    return $null
+  }
+  return $prop.Value
+}
+
+function Get-RequiredStringProperty([object]$Object, [string]$Name, [string]$Context) {
+  $value = Get-OptionalStringProperty -Object $Object -Name $Name
+  if ($value -eq "") {
+    throw "$Context is missing required property '$Name'"
+  }
+  return $value
+}
+
+function Get-RequiredProperty([object]$Object, [string]$Name, [string]$Context) {
+  $value = Get-OptionalProperty -Object $Object -Name $Name
+  if ($null -eq $value) {
+    throw "$Context is missing required property '$Name'"
+  }
+  return $value
+}
+
 function Assert-Sha256([string]$FilePath, [string]$ExpectedHex) {
   $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $FilePath).Hash.ToLowerInvariant()
   if ($hash -ne $ExpectedHex.ToLowerInvariant()) {
@@ -47,9 +74,9 @@ function Assert-Sha256([string]$FilePath, [string]$ExpectedHex) {
 }
 
 function Download-Artifact([pscustomobject]$Artifact) {
-  $url = [string]$Artifact.url
-  $sha256 = [string]$Artifact.sha256
-  $id = [string]$Artifact.id
+  $id = Get-RequiredStringProperty -Object $Artifact -Name "id" -Context "artifact"
+  $url = Get-RequiredStringProperty -Object $Artifact -Name "url" -Context "artifact '$id'"
+  $sha256 = Get-RequiredStringProperty -Object $Artifact -Name "sha256" -Context "artifact '$id'"
 
   $fileName = Split-Path -Leaf $url
   $dest = Join-Path $CacheDir $fileName
@@ -74,30 +101,27 @@ function Expand-Zip([string]$ZipPath, [string]$Destination) {
 }
 
 function Install-Artifact([string]$BundleRoot, [pscustomobject]$Artifact, [string]$DownloadedPath) {
-  $install = $Artifact.install
-  if ($null -eq $install) {
-    throw "Artifact is missing install mapping: $($Artifact.id)"
-  }
+  $artifactId = Get-RequiredStringProperty -Object $Artifact -Name "id" -Context "artifact"
+  $install = Get-RequiredProperty -Object $Artifact -Name "install" -Context "artifact '$artifactId'"
 
-  $type = [string]$install.type
-  $destRel = [string]$install.destination
-  if ($destRel -eq "") {
-    throw "Artifact install.destination is empty: $($Artifact.id)"
-  }
+  $type = Get-RequiredStringProperty -Object $install -Name "type" -Context "artifact '$artifactId' install"
+  $destRel = Get-RequiredStringProperty -Object $install -Name "destination" -Context "artifact '$artifactId' install"
   $dest = Join-Path $BundleRoot $destRel
 
   if ($type -eq "extract") {
     $stripPrefix = Get-OptionalStringProperty -Object $install -Name "strip_prefix"
     if ($stripPrefix -ne "") {
-      $tmp = Join-Path $CacheDir ("tmp_extract_" + [string]$Artifact.id)
+      $tmp = Join-Path $CacheDir ("tmp_extract_" + $artifactId)
       Expand-Zip -ZipPath $DownloadedPath -Destination $tmp
       $stripPrefixNorm = ($stripPrefix -replace "/", "\\").TrimEnd("\\")
       $prefixPath = Join-Path $tmp $stripPrefixNorm
       if (!(Test-Path -LiteralPath $prefixPath)) {
-        throw "strip_prefix path not found after extraction: $stripPrefix (artifact $($Artifact.id))"
+        throw "strip_prefix path not found after extraction: $stripPrefix (artifact $artifactId)"
       }
       Ensure-Directory -Path $dest
-      Copy-Item -Recurse -Force -LiteralPath (Join-Path $prefixPath "*") -Destination $dest
+      Get-ChildItem -LiteralPath $prefixPath -Force | ForEach-Object {
+        Copy-Item -Recurse -Force -LiteralPath $_.FullName -Destination $dest
+      }
       Remove-Item -Recurse -Force -LiteralPath $tmp
     } else {
       Expand-Zip -ZipPath $DownloadedPath -Destination $dest
@@ -106,16 +130,13 @@ function Install-Artifact([string]$BundleRoot, [pscustomobject]$Artifact, [strin
   }
 
   if ($type -eq "copy_file") {
-    $sourcePath = [string]$install.source_path
-    if ($sourcePath -eq "") {
-      throw "Artifact install.source_path is required for copy_file: $($Artifact.id)"
-    }
-    $tmp = Join-Path $CacheDir ("tmp_extract_" + [string]$Artifact.id)
+    $sourcePath = Get-RequiredStringProperty -Object $install -Name "source_path" -Context "artifact '$artifactId' install"
+    $tmp = Join-Path $CacheDir ("tmp_extract_" + $artifactId)
     Expand-Zip -ZipPath $DownloadedPath -Destination $tmp
     $sourcePathNorm = ($sourcePath -replace "/", "\\").TrimStart("\\")
     $src = Join-Path $tmp $sourcePathNorm
     if (!(Test-Path -LiteralPath $src)) {
-      throw "Expected file not found in archive: $sourcePath (artifact $($Artifact.id))"
+      throw "Expected file not found in archive: $sourcePath (artifact $artifactId)"
     }
     Ensure-Directory -Path (Split-Path -Parent $dest)
     Copy-Item -Force -LiteralPath $src -Destination $dest
@@ -123,7 +144,7 @@ function Install-Artifact([string]$BundleRoot, [pscustomobject]$Artifact, [strin
     return
   }
 
-  throw "Unknown install.type '$type' for artifact $($Artifact.id)"
+  throw "Unknown install.type '$type' for artifact $artifactId"
 }
 
 function Write-LauncherFiles([string]$BundleRoot) {
@@ -234,11 +255,12 @@ function Copy-Licenses([string]$BundleRoot, [pscustomobject[]]$Artifacts) {
   Copy-Item -Force -LiteralPath (Join-Path $RepoRoot "LICENSE") -Destination (Join-Path $licensesDir "frame-compare-LICENSE.txt")
 
   foreach ($artifact in $Artifacts) {
-    $id = [string]$artifact.id
-    $url = [string]$artifact.url
+    $id = Get-RequiredStringProperty -Object $artifact -Name "id" -Context "artifact"
+    $url = Get-RequiredStringProperty -Object $artifact -Name "url" -Context "artifact '$id'"
     $fileName = Split-Path -Leaf $url
-    $licenseUrl = [string]$artifact.license.url
-    $spdx = [string]$artifact.license.spdx
+    $license = Get-RequiredProperty -Object $artifact -Name "license" -Context "artifact '$id'"
+    $licenseUrl = Get-RequiredStringProperty -Object $license -Name "url" -Context "artifact '$id' license"
+    $spdx = Get-RequiredStringProperty -Object $license -Name "spdx" -Context "artifact '$id' license"
 
     if ($fileName -like "*.zip") {
       # Best-effort: copy LICENSE.txt if present in the zip.
@@ -295,12 +317,12 @@ function Main() {
   Ensure-Directory -Path $OutDir
 
   $manifest = Get-Manifest
-  $artifacts = @($manifest.artifacts)
+  $artifacts = @(Get-RequiredProperty -Object $manifest -Name "artifacts" -Context "manifest")
 
   $downloaded = @{}
   foreach ($artifact in $artifacts) {
     $path = Download-Artifact -Artifact $artifact
-    $downloaded[[string]$artifact.id] = $path
+    $downloaded[(Get-RequiredStringProperty -Object $artifact -Name "id" -Context "artifact")] = $path
   }
 
   # Copy pin manifest into the bundle root.
@@ -308,7 +330,7 @@ function Main() {
 
   # Install artifacts per manifest mapping.
   foreach ($artifact in $artifacts) {
-    $id = [string]$artifact.id
+    $id = Get-RequiredStringProperty -Object $artifact -Name "id" -Context "artifact"
     $path = $downloaded[$id]
     Install-Artifact -BundleRoot $OutDir -Artifact $artifact -DownloadedPath $path
   }
