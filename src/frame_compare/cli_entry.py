@@ -5,13 +5,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import tomli_w
 import typer
 from rich.console import Console
 
-from frame_compare import runner
 from frame_compare.config import (
     ConfigSchema,
     Visibility,
@@ -30,10 +29,34 @@ from frame_compare.errors import (
     format_error_json,
     get_exit_code,
 )
-from frame_compare.orchestration import DoctorReport, run_doctor
-from frame_compare.orchestration.coordinator import RunRequest
-from frame_compare.orchestration.preflight import resolve_paths
 from frame_compare.utils.logging import configure_logging
+
+if TYPE_CHECKING:
+    from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, RunResult
+    from frame_compare.orchestration.doctor import DoctorCheck, DoctorReport
+    from frame_compare.utils.progress import ProgressReporter
+
+
+class _RunnerProxy:
+    """Lazy runner proxy to avoid importing VS-dependent modules at CLI import time."""
+
+    def run(self, request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        from frame_compare import runner as runtime_runner
+
+        return runtime_runner.run(request, dependencies=dependencies)
+
+
+runner = _RunnerProxy()
+
+
+def run_doctor(
+    checks: list[DoctorCheck] | None = None, reporter: ProgressReporter | None = None
+) -> DoctorReport:
+    """Lazy doctor entry point to keep CLI import VS-independent."""
+    from frame_compare.orchestration.doctor import run_doctor as runtime_run_doctor
+
+    return runtime_run_doctor(checks=checks, reporter=reporter)
+
 
 app = typer.Typer(
     name="frame-compare",
@@ -83,6 +106,8 @@ def run(
     quiet: bool = typer.Option(False, "--quiet", "-q"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
+    from frame_compare.orchestration.coordinator import RunRequest
+
     resolved_root, config_path = _resolve_root_and_config(root, config)
     log_level = "WARNING" if quiet else ("DEBUG" if verbose else "INFO")
     log_format = "json" if json_output else "console"
@@ -108,6 +133,8 @@ def run(
             return
 
         if diagnose_paths:
+            from frame_compare.orchestration.preflight import resolve_paths
+
             config_data = load_config(config_path)
             config_override = apply_cli_overrides(config_data, cli_args=cli_args)
             workspace = resolve_paths(config_override, resolved_root)
