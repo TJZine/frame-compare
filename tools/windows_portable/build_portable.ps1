@@ -173,14 +173,20 @@ $env:PYTHONUTF8 = "1"
 $env:PYTHONPATH = "$bundleRoot\\app\\src;$bundleRoot\\app\\site-packages"
 $env:VAPOURSYNTH_PLUGIN_PATH = "$bundleRoot\\vs\\plugins"
 $vsCore = Join-Path $bundleRoot "vs\\core"
+$ffmpegRoot = Join-Path $bundleRoot "ffmpeg"
 $pathEntries = @(
   (Join-Path $bundleRoot "python"),
   $vsCore,
   (Join-Path $bundleRoot "vs\\plugins"),
-  (Join-Path $bundleRoot "ffmpeg")
+  $ffmpegRoot
 )
 if (Test-Path -LiteralPath $vsCore) {
-  Get-ChildItem -LiteralPath $vsCore -Directory | ForEach-Object {
+  Get-ChildItem -LiteralPath $vsCore -Directory -Recurse | ForEach-Object {
+    $pathEntries += $_.FullName
+  }
+}
+if (Test-Path -LiteralPath $ffmpegRoot) {
+  Get-ChildItem -LiteralPath $ffmpegRoot -Directory -Recurse | ForEach-Object {
     $pathEntries += $_.FullName
   }
 }
