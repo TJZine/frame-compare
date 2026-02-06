@@ -174,12 +174,24 @@ $env:PYTHONPATH = "$bundleRoot\\app\\src;$bundleRoot\\app\\site-packages"
 $env:VAPOURSYNTH_PLUGIN_PATH = "$bundleRoot\\vs\\plugins"
 $vsCore = Join-Path $bundleRoot "vs\\core"
 $ffmpegRoot = Join-Path $bundleRoot "ffmpeg"
+$vsRuntimeCandidates = @()
+if (Test-Path -LiteralPath $vsCore) {
+  $vsRuntimeCandidates = @(Get-ChildItem -LiteralPath $vsCore -Filter "VSScript.dll" -File -Recurse)
+}
+$vsRuntimeDir = $null
+if ($vsRuntimeCandidates.Count -gt 0) {
+  $vsRuntimeDir = Split-Path -Parent $vsRuntimeCandidates[0].FullName
+  $env:VAPOURSYNTH_HOME = $vsRuntimeDir
+}
 $pathEntries = @(
   (Join-Path $bundleRoot "python"),
   $vsCore,
   (Join-Path $bundleRoot "vs\\plugins"),
   $ffmpegRoot
 )
+if ($null -ne $vsRuntimeDir -and $vsRuntimeDir -ne "") {
+  $pathEntries = @($vsRuntimeDir) + $pathEntries
+}
 if (Test-Path -LiteralPath $vsCore) {
   Get-ChildItem -LiteralPath $vsCore -Directory -Recurse | ForEach-Object {
     $pathEntries += $_.FullName
