@@ -7,6 +7,7 @@ VSPreview application for interactive alignment verification.
 from __future__ import annotations
 
 import importlib.util
+import json
 import shutil
 import subprocess
 import sys
@@ -240,20 +241,20 @@ def _build_script_content(
     # Build targets dict with stable ordering (sorted by comparison path stem)
     targets_lines: list[str] = []
     for comp in sorted(comparisons, key=lambda p: p.stem):
-        targets_lines.append(f'    "{comp.stem}": r"{comp}",')
+        targets_lines.append(f"    {json.dumps(comp.stem)}: {json.dumps(str(comp))},")
 
     # Build suggested offsets with stable ordering
     offset_lines: list[str] = []
     for key in sorted(suggested_offsets_by_key.keys()):
         offset = suggested_offsets_by_key[key]
-        offset_lines.append(f'    "{key}": {offset},')
+        offset_lines.append(f"    {json.dumps(key)}: {int(offset)},")
 
     # Build per-label offset map for operator convenience
     offset_map_lines: list[str] = []
     for comp in sorted(comparisons, key=lambda p: p.stem):
         key = f"{reference.stem}:{comp.stem}"
         offset = suggested_offsets_by_key.get(key, 0)
-        offset_map_lines.append(f'    "{comp.stem}": {offset},')
+        offset_map_lines.append(f"    {json.dumps(comp.stem)}: {int(offset)},")
 
     script = f'''\
 #!/usr/bin/env python3
@@ -301,8 +302,8 @@ def safe_print(*args, **kwargs):
 
 # ─── Clip Data ────────────────────────────────────────────────────────────────
 REFERENCE = {{
-    "label": "{reference.stem}",
-    "path": r"{reference}",
+    "label": {json.dumps(reference.stem)},
+    "path": {json.dumps(str(reference))},
 }}
 
 TARGETS = {{

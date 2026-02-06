@@ -12,7 +12,11 @@ from pathlib import Path
 import pytest
 
 from frame_compare.errors import VSPreviewError
-from frame_compare.vspreview.adapter import VSPreviewConfig, launch_alignment_verification_session
+from frame_compare.vspreview.adapter import (
+    VSPreviewConfig,
+    _build_script_content,
+    launch_alignment_verification_session,
+)
 
 
 def test_launch_alignment_verification_session_respects_timeout(
@@ -40,3 +44,20 @@ def test_launch_alignment_verification_session_respects_timeout(
             cache_dir=tmp_path,
             config=cfg,
         )
+
+
+def test_build_script_content_escapes_path_literals() -> None:
+    """Generated script should remain valid Python for hostile filenames."""
+    reference = Path('/tmp/ref"x.mkv')
+    comparisons = [Path('/tmp/bad"\nprint(123)\n#.mkv')]
+
+    script = _build_script_content(
+        reference=reference,
+        comparisons=comparisons,
+        suggested_offsets_by_key={},
+    )
+
+    compile(script, "<vspreview>", "exec")
+    assert '"label": "ref"x"' not in script
+    assert '"\nprint(123)\n#' not in script
+    assert "\\nprint(123)\\n" in script

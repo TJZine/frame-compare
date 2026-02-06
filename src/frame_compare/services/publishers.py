@@ -2,9 +2,11 @@
 
 import asyncio
 import random
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from time import monotonic
+from typing import BinaryIO
 
 import httpx
 import structlog
@@ -37,13 +39,13 @@ class _SlowpicsUploadRequest:
     """Prepared slow.pics multipart payload for httpx.
 
     Notes:
-        This uses `data=` + `files=` to send multipart form data. Images are read into
-        memory up-front for simplicity and determinism; if screenshots become large,
-        this can be swapped to streaming file handles (with careful lifetime mgmt).
+        This uses `data=` + `files=` to send multipart form data. Image paths are
+        persisted here, and file handles are opened per-attempt during upload so retry
+        logic can stream fresh handles without retaining image bytes in memory.
     """
 
     data: dict[str, str]
-    files: list[tuple[str, tuple[str, bytes, str]]]
+    file_paths: list[Path]
 
 
 class SlowpicsPublisher:
@@ -77,7 +79,7 @@ class SlowpicsPublisher:
 
         # Prepare payload
         visibility = self.config.visibility.value  # "public", "unlisted", etc.
-        request = await self._prepare_upload(files, title, visibility)
+        request = self._prepare_upload(files, title, visibility)
         log.info(
             "slowpics_upload_start",
             file_count=len(files),
@@ -113,15 +115,10 @@ class SlowpicsPublisher:
                 raise
             raise SlowpicsError(f"Upload failed: {e}") from e
 
-    async def _prepare_upload(
+    def _prepare_upload(
         self, files: list[Path], title: str | None, visibility: str
     ) -> _SlowpicsUploadRequest:
         """Prepare the slow.pics multipart payload for upload."""
-        file_list: list[tuple[str, tuple[str, bytes, str]]] = []
-        for f in files:
-            content = f.read_bytes()
-            file_list.append(("images", (f.name, content, "image/png")))
-
         form_data: dict[str, str] = {
             "collectionName": title or "Comparison",
             "optimize": "true",
@@ -130,7 +127,7 @@ class SlowpicsPublisher:
 
         form_data["public"] = "true" if visibility == "public" else "false"
 
-        return _SlowpicsUploadRequest(files=file_list, data=form_data)
+        return _SlowpicsUploadRequest(file_paths=list(files), data=form_data)
 
     async def _upload_with_retry(
         self,
@@ -148,12 +145,22 @@ class SlowpicsPublisher:
         while True:
             attempt += 1
             try:
-                response = await client.post(
-                    SLOWPICS_UPLOAD_URL,
-                    timeout=timeout_seconds,
-                    data=request.data,
-                    files=request.files,
-                )
+                # Stream files per-attempt to avoid keeping all PNG bytes in memory and
+                # to ensure retries always read fresh file handles.
+                with ExitStack() as stack:
+                    multipart_files: list[tuple[str, tuple[str, BinaryIO, str]]] = []
+                    for file_path in request.file_paths:
+                        file_handle = stack.enter_context(file_path.open("rb"))
+                        multipart_files.append(
+                            ("images", (file_path.name, file_handle, "image/png"))
+                        )
+
+                    response = await client.post(
+                        SLOWPICS_UPLOAD_URL,
+                        timeout=timeout_seconds,
+                        data=request.data,
+                        files=multipart_files,
+                    )
 
                 if response.is_success:
                     return response

@@ -359,46 +359,65 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
                 "report": 0.0,
             }
         )
+        phase_warnings: set[str] = set()
 
         def _timed_phase(
             name: str,
             timing_key: str,
             skip_condition: Callable[[ConfigSchema], bool] | None,
+            *,
+            noop_reason: str,
         ) -> Phase:
             async def _execute(_: RunContext) -> None:
                 start = deps.clock()
+                phase_warnings.add(f"{name}: {noop_reason}")
                 end = deps.clock()
                 phase_timings[timing_key] = (end - start).total_seconds()
 
             return Phase(name=name, execute=_execute, skip_condition=skip_condition)
 
+        scaffold_reason = "instrumentation-only phase; executor not wired in coordinator"
         phases_before_align = [
-            _timed_phase("frame_plan", "frame_plan", None),
+            _timed_phase("frame_plan", "frame_plan", None, noop_reason=scaffold_reason),
             _timed_phase(
                 "analyze",
                 "analyze",
                 lambda config: request.skip_analysis,
+                noop_reason=scaffold_reason,
             ),
             _timed_phase(
                 "align",
                 "align",
                 lambda config: not config.audio_alignment.enable,
+                noop_reason=scaffold_reason,
             ),
         ]
 
         phases_after_align = [
-            _timed_phase("render", "render", None),
+            _timed_phase("render", "render", None, noop_reason=scaffold_reason),
             _timed_phase(
                 "metadata",
                 "metadata",
                 lambda config: request.skip_metadata,
+                noop_reason=scaffold_reason,
             ),
-            _timed_phase("dovi", "dovi", lambda config: request.skip_dovi),
-            _timed_phase("publish", "publish", lambda config: request.no_upload),
+            _timed_phase(
+                "dovi",
+                "dovi",
+                lambda config: request.skip_dovi,
+                noop_reason=scaffold_reason,
+            ),
+            _timed_phase(
+                "publish",
+                "publish",
+                lambda config: request.no_upload,
+                noop_reason=scaffold_reason,
+            ),
             _timed_phase(
                 "report",
                 "report",
                 lambda config: not config.report.enable,
+                noop_reason=scaffold_reason,
             ),
         ]
 
@@ -417,7 +436,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             success=True,
             duration_seconds=duration_seconds,
             phase_timings=phase_timings,
-            warnings=preflight.warnings,
+            warnings=[*preflight.warnings, *sorted(phase_warnings)],
         )
 
     if deps.http_client is not None:
