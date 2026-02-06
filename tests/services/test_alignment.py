@@ -124,6 +124,21 @@ def test_probe_fps_integer(mock_run: MagicMock):
 
 
 @patch("frame_compare.services.alignment.run_subprocess")
+def test_probe_fps_empty_output_preserves_ffmpeg_error(mock_run: MagicMock):
+    """Empty ffprobe output should preserve the original FFmpegError details."""
+    proc = MagicMock()
+    proc.stdout = b""
+    proc.returncode = 7
+    mock_run.return_value = proc
+
+    with pytest.raises(FFmpegError) as exc_info:
+        _probe_fps(Path("test.mkv"))
+    assert exc_info.value.context.details is not None
+    assert exc_info.value.context.details.get("returncode") == 7
+    assert "ffprobe returned empty output" in str(exc_info.value.context.details.get("stderr", ""))
+
+
+@patch("frame_compare.services.alignment.run_subprocess")
 def test_probe_fps_not_found_raises(mock_run: MagicMock):
     """Test probing FPS when ffprobe is missing."""
     mock_run.side_effect = FileNotFoundError()
@@ -217,6 +232,15 @@ def test_cross_correlate_respects_max_offset_window():
     offset, _ = _cross_correlate(reference, comparison, max_offset_samples=1)
 
     assert abs(offset) <= 1
+
+
+def test_cross_correlate_empty_signal_raises() -> None:
+    """Empty signals must fail fast with a clear alignment error."""
+    ref = np.array([], dtype=np.float32)
+    comp = np.ones(10, dtype=np.float32)
+
+    with pytest.raises(AudioAlignmentError, match="empty audio signal"):
+        _cross_correlate(ref, comp)
 
 
 def test_load_cached_offsets_missing_returns_none(tmp_path: Path):

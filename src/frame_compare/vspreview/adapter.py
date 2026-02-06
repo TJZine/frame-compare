@@ -156,7 +156,7 @@ def launch_alignment_verification_session(
         )
 
         if result.returncode != 0:
-            # Per spec §3.2.3: warn and continue, do not fail the run
+            # Emit warning telemetry before surfacing a launch failure.
             log.warning(
                 "vspreview_non_zero_exit",
                 returncode=result.returncode,

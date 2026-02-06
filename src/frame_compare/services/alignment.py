@@ -262,6 +262,8 @@ def _probe_fps(video_path: Path) -> Fraction:
     except subprocess.TimeoutExpired as e:
         raise FFmpegError("ffprobe timed out", 124) from e
     except Exception as e:
+        if isinstance(e, FFmpegError):
+            raise
         if isinstance(e, FFmpegNotFoundError):
             raise
         if isinstance(e, subprocess.CalledProcessError):

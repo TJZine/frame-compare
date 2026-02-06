@@ -45,7 +45,18 @@ jobs:
         shell: pwsh
         run: |
           $bundle = (Resolve-Path "dist/frame-compare-portable-win-x64").Path
-          & "$bundle/frame-compare.ps1" doctor --json
+          $output = & "$bundle/frame-compare.ps1" doctor --json 2>&1
+          $exitCode = $LASTEXITCODE
+          $knownNoise = "Core plugin autoloading failed. Installation is broken!"
+          foreach ($line in $output) {
+            if ($line -eq $knownNoise) {
+              continue
+            }
+            Write-Host $line
+          }
+          if ($exitCode -ne 0) {
+            exit $exitCode
+          }
 
       - name: "Smoke: VS clip + tonemap does not raise"
         shell: pwsh
