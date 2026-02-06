@@ -1,5 +1,6 @@
 """Audio alignment service using cross-correlation."""
 
+import subprocess
 import tomllib
 from fractions import Fraction
 from pathlib import Path
@@ -21,6 +22,8 @@ from frame_compare.utils.subproc import run_subprocess
 
 CACHE_VERSION = "1"
 CACHE_FILE_NAME = "audio_offsets.toml"
+_FFPROBE_TIMEOUT_SECONDS = 15.0
+_FFMPEG_AUDIO_TIMEOUT_SECONDS = 120.0
 
 
 async def align_clips(
@@ -94,7 +97,12 @@ async def align_clips(
                 progress.set_description(f"Aligning {comp.name}")
 
             comp_audio = _extract_audio(comp, config.sample_rate)
-            sample_offset, score = _cross_correlate(ref_audio, comp_audio)
+            max_offset_samples = int(config.max_offset_seconds * config.sample_rate)
+            sample_offset, score = _cross_correlate(
+                ref_audio,
+                comp_audio,
+                max_offset_samples=max_offset_samples,
+            )
 
             frame_offset = _samples_to_frames(sample_offset, config.sample_rate, fps_reference)
             time_offset = sample_offset / config.sample_rate
@@ -244,20 +252,21 @@ def _probe_fps(video_path: Path) -> Fraction:
         str(video_path),
     ]
     try:
-        proc = run_subprocess(argv)
+        proc = run_subprocess(argv, timeout_seconds=_FFPROBE_TIMEOUT_SECONDS)
         output = proc.stdout.decode("utf-8").strip()
         if not output:
             raise FFmpegError("ffprobe returned empty output", proc.returncode)
         return Fraction(output)
     except FileNotFoundError:
         raise FFmpegNotFoundError() from None
+    except subprocess.TimeoutExpired as e:
+        raise FFmpegError("ffprobe timed out", 124) from e
     except Exception as e:
+        if isinstance(e, FFmpegError):
+            raise
         if isinstance(e, FFmpegNotFoundError):
             raise
-        # run_subprocess raises CalledProcessError if check=True
-        from subprocess import CalledProcessError
-
-        if isinstance(e, CalledProcessError):
+        if isinstance(e, subprocess.CalledProcessError):
             raise FFmpegError(e.stderr.decode("utf-8"), e.returncode) from e
         raise FFmpegError(str(e), 1) from e
 
@@ -280,15 +289,16 @@ def _extract_audio(video_path: Path, sample_rate: int) -> np.ndarray:
     ]
 
     try:
-        proc = run_subprocess(argv)
+        proc = run_subprocess(argv, timeout_seconds=_FFMPEG_AUDIO_TIMEOUT_SECONDS)
 
     except FileNotFoundError:
         raise FFmpegNotFoundError() from None
 
-    except Exception as e:
-        from subprocess import CalledProcessError
+    except subprocess.TimeoutExpired as e:
+        raise FFmpegError("ffmpeg audio extraction timed out", 124) from e
 
-        if isinstance(e, CalledProcessError):
+    except Exception as e:
+        if isinstance(e, subprocess.CalledProcessError):
             raise FFmpegError(e.stderr.decode("utf-8"), e.returncode) from e
 
         raise FFmpegError(str(e), 1) from e
@@ -302,16 +312,39 @@ def _extract_audio(video_path: Path, sample_rate: int) -> np.ndarray:
 def _cross_correlate(
     reference: np.ndarray,
     comparison: np.ndarray,
+    max_offset_samples: int | None = None,
 ) -> tuple[int, float]:
     """Find offset using cross-correlation."""
+    if reference.size == 0 or comparison.size == 0:
+        raise AudioAlignmentError("empty audio signal prevents correlation")
 
-    correlation = np.correlate(reference, comparison, mode="full")
+    # FFT-based cross-correlation is substantially cheaper than direct O(n^2) correlation
+    # for long clips and keeps deterministic results.
+    correlation_size = reference.size + comparison.size - 1
+    fft_size = 1 << (correlation_size - 1).bit_length()
 
-    peak_idx = int(np.argmax(correlation))
+    reference_fft = np.fft.rfft(reference, fft_size)
+    comparison_fft = np.fft.rfft(comparison, fft_size)
+    correlation_raw = np.fft.irfft(reference_fft * np.conj(comparison_fft), fft_size)
+    correlation = np.concatenate(
+        (
+            correlation_raw[-(comparison.size - 1) :],
+            correlation_raw[: reference.size],
+        )
+    )
 
-    # offset = peak_idx - len(reference) + 1  # This gave flipped signs in tests
+    if max_offset_samples is not None:
+        bounded = max(0, max_offset_samples)
+        center = reference.size - 1
+        start_idx = max(0, center - bounded)
+        end_idx = min(correlation.size, center + bounded + 1)
+        if start_idx >= end_idx:
+            raise AudioAlignmentError("max_offset_seconds produced an empty search window")
+        peak_idx = int(np.argmax(correlation[start_idx:end_idx])) + start_idx
+    else:
+        peak_idx = int(np.argmax(correlation))
 
-    offset = len(reference) - 1 - peak_idx
+    offset = reference.size - 1 - peak_idx
 
     norm_ref = np.linalg.norm(reference)
 

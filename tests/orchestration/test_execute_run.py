@@ -94,7 +94,12 @@ def test_execute_run_returns_success_and_records_preflight_timing(
     result = asyncio.run(execute_run(request, deps=deps))
 
     assert result.success is True
-    assert result.warnings == []
+    assert "frame_plan: instrumentation-only phase; executor not wired in coordinator" in (
+        result.warnings
+    )
+    assert (
+        "render: instrumentation-only phase; executor not wired in coordinator" in result.warnings
+    )
     assert result.duration_seconds >= 0.0
     expected_keys = {
         "preflight",

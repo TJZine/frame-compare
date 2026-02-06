@@ -98,6 +98,21 @@ def test_probe_fps_fraction(mock_run: MagicMock):
     mock_run.return_value.stdout = b"24000/1001\n"
     res = _probe_fps(Path("test.mkv"))
     assert res == Fraction(24000, 1001)
+    mock_run.assert_called_once_with(
+        [
+            "ffprobe",
+            "-v",
+            "quiet",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=r_frame_rate",
+            "-of",
+            "csv=p=0",
+            "test.mkv",
+        ],
+        timeout_seconds=15.0,
+    )
 
 
 @patch("frame_compare.services.alignment.run_subprocess")
@@ -106,6 +121,21 @@ def test_probe_fps_integer(mock_run: MagicMock):
     mock_run.return_value.stdout = b"24\n"
     res = _probe_fps(Path("test.mkv"))
     assert res == Fraction(24, 1)
+
+
+@patch("frame_compare.services.alignment.run_subprocess")
+def test_probe_fps_empty_output_preserves_ffmpeg_error(mock_run: MagicMock):
+    """Empty ffprobe output should preserve the original FFmpegError details."""
+    proc = MagicMock()
+    proc.stdout = b""
+    proc.returncode = 7
+    mock_run.return_value = proc
+
+    with pytest.raises(FFmpegError) as exc_info:
+        _probe_fps(Path("test.mkv"))
+    assert exc_info.value.context.details is not None
+    assert exc_info.value.context.details.get("returncode") == 7
+    assert "ffprobe returned empty output" in str(exc_info.value.context.details.get("stderr", ""))
 
 
 @patch("frame_compare.services.alignment.run_subprocess")
@@ -135,6 +165,19 @@ def test_extract_audio_ffmpeg_not_found(mock_run: MagicMock):
 
 
 @patch("frame_compare.services.alignment.run_subprocess")
+def test_probe_fps_timeout_raises(mock_run: MagicMock):
+    """Test probing FPS timeout surfaces as FFmpegError."""
+    from subprocess import TimeoutExpired
+
+    mock_run.side_effect = TimeoutExpired(cmd=["ffprobe"], timeout=15.0)
+    with pytest.raises(FFmpegError) as exc_info:
+        _probe_fps(Path("test.mkv"))
+    assert exc_info.value.context.details is not None
+    assert exc_info.value.context.details.get("returncode") == 124
+    assert "timed out" in str(exc_info.value.context.details.get("stderr", ""))
+
+
+@patch("frame_compare.services.alignment.run_subprocess")
 def test_extract_audio_ffmpeg_fails(mock_run: MagicMock):
     """Test audio extraction when ffmpeg fails."""
     from subprocess import CalledProcessError
@@ -145,11 +188,59 @@ def test_extract_audio_ffmpeg_fails(mock_run: MagicMock):
 
 
 @patch("frame_compare.services.alignment.run_subprocess")
+def test_extract_audio_timeout_raises(mock_run: MagicMock):
+    """Test audio extraction timeout surfaces as FFmpegError."""
+    from subprocess import TimeoutExpired
+
+    mock_run.side_effect = TimeoutExpired(cmd=["ffmpeg"], timeout=120.0)
+    with pytest.raises(FFmpegError) as exc_info:
+        _extract_audio(Path("test.mkv"), 8000)
+    assert exc_info.value.context.details is not None
+    assert exc_info.value.context.details.get("returncode") == 124
+    assert "timed out" in str(exc_info.value.context.details.get("stderr", ""))
+
+
+@patch("frame_compare.services.alignment.run_subprocess")
 def test_extract_audio_empty_raises(mock_run: MagicMock):
     """Test audio extraction when output is empty."""
     mock_run.return_value.stdout = b""
     with pytest.raises(AudioAlignmentError, match="empty audio"):
         _extract_audio(Path("test.mkv"), 8000)
+    mock_run.assert_called_once_with(
+        [
+            "ffmpeg",
+            "-i",
+            "test.mkv",
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            "8000",
+            "-f",
+            "f32le",
+            "-",
+        ],
+        timeout_seconds=120.0,
+    )
+
+
+def test_cross_correlate_respects_max_offset_window():
+    """Bounded offset search should not select peaks outside the configured window."""
+    reference = np.array([0, 0, 1, 2, 3, 0, 0], dtype=np.float32)
+    comparison = np.array([0, 0, 0, 0, 1, 2, 3], dtype=np.float32)
+
+    offset, _ = _cross_correlate(reference, comparison, max_offset_samples=1)
+
+    assert abs(offset) <= 1
+
+
+def test_cross_correlate_empty_signal_raises() -> None:
+    """Empty signals must fail fast with a clear alignment error."""
+    ref = np.array([], dtype=np.float32)
+    comp = np.ones(10, dtype=np.float32)
+
+    with pytest.raises(AudioAlignmentError, match="empty audio signal"):
+        _cross_correlate(ref, comp)
 
 
 def test_load_cached_offsets_missing_returns_none(tmp_path: Path):
