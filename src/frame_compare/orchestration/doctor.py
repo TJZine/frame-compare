@@ -141,6 +141,47 @@ def _import_vapoursynth() -> ModuleType:
         return __import__("vapoursynth")
 
 
+def _candidate_lsmas_plugin_paths() -> list[str]:
+    """Return candidate absolute paths for libvslsmashsource.dll."""
+    candidates: list[str] = []
+    plugin_env = os.environ.get("VAPOURSYNTH_PLUGIN_PATH", "")
+    if plugin_env:
+        for plugin_dir in plugin_env.split(os.pathsep):
+            if plugin_dir:
+                candidates.append(os.path.join(plugin_dir, "libvslsmashsource.dll"))
+
+    python_dir = os.path.dirname(sys.executable)
+    bundle_root = os.path.dirname(python_dir)
+    candidates.append(os.path.join(bundle_root, "vs", "plugins", "libvslsmashsource.dll"))
+
+    seen: set[str] = set()
+    unique_candidates: list[str] = []
+    for candidate in candidates:
+        normalized = os.path.normcase(os.path.normpath(candidate))
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        unique_candidates.append(candidate)
+    return unique_candidates
+
+
+def _try_load_lsmas_plugin(core: object) -> str | None:
+    """Try loading the bundled lsmas plugin and return loaded path, if any."""
+    std_ns = getattr(core, "std", None)
+    if std_ns is None:
+        return None
+    load_plugin = getattr(std_ns, "LoadPlugin", None)
+    if not callable(load_plugin):
+        return None
+
+    for plugin_path in _candidate_lsmas_plugin_paths():
+        if not os.path.isfile(plugin_path):
+            continue
+        load_plugin(path=plugin_path)
+        return plugin_path
+    return None
+
+
 def _check_python_version() -> CheckResult:
     """Check Python version is >= 3.13 per ADR-001."""
     version = sys.version_info
@@ -183,6 +224,15 @@ def _check_lsmas() -> CheckResult:
                 passed=True,
                 message=f"L-SMASH-Works plugin available ({namespace})",
                 details={"namespace": namespace},
+            )
+
+        loaded_path = _try_load_lsmas_plugin(core)
+        if loaded_path and (hasattr(core, "lsmas") or hasattr(core, "lw")):
+            namespace = "lsmas" if hasattr(core, "lsmas") else "lw"
+            return CheckResult(
+                passed=True,
+                message=f"L-SMASH-Works plugin available ({namespace})",
+                details={"namespace": namespace, "plugin_path": loaded_path},
             )
         return CheckResult(
             passed=False,

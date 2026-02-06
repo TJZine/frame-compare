@@ -152,6 +152,39 @@ class TestCheckLsmas:
 
         assert result.passed is False
 
+    def test_check_lsmas_plugin_fallback_loads_from_plugin_path(self) -> None:
+        """If autoload misses lsmas, fallback LoadPlugin path should recover."""
+        class _Core:
+            pass
+
+        class _Std:
+            pass
+
+        mock_core = _Core()
+        mock_std = _Std()
+
+        def _load_plugin(*, path: str) -> None:
+            setattr(mock_core, "lsmas", MagicMock())
+
+        setattr(mock_std, "LoadPlugin", _load_plugin)
+        setattr(mock_core, "std", mock_std)
+        mock_vs = MagicMock()
+        mock_vs.core = mock_core
+
+        checks = collect_checks()
+        lsmas_check = next(c for c in checks if c.name == "lsmas")
+
+        with patch.dict(sys.modules, {"vapoursynth": mock_vs}):
+            with patch(
+                "frame_compare.orchestration.doctor._candidate_lsmas_plugin_paths",
+                return_value=["C:/bundle/vs/plugins/libvslsmashsource.dll"],
+            ):
+                with patch("os.path.isfile", return_value=True):
+                    result = lsmas_check.check_fn()
+
+        assert result.passed is True
+        assert result.details.get("plugin_path") == "C:/bundle/vs/plugins/libvslsmashsource.dll"
+
     def test_check_lsmas_failure_included_in_critical_failures(self) -> None:
         """Mock lsmas core failure → DoctorReport.critical_failures includes 'lsmas'."""
         lsmas_check = DoctorCheck(
