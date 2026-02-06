@@ -1,0 +1,42 @@
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release_please:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run release-please
+        id: release
+        uses: googleapis/release-please-action@16a9c90856f42705d54a6fda1823352bdc62cf38 # v4.4.0
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      - name: Enable auto-merge for release PR (best-effort)
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          RELEASE_PLEASE_PR: ${{ steps.release.outputs.pr }}
+        run: |
+          if [ -z "$RELEASE_PLEASE_PR" ]; then
+            echo "release-please reported prs_created=true but did not provide steps.release.outputs.pr"
+            exit 0
+          fi
+
+          pr_number="$(printf '%s' "$RELEASE_PLEASE_PR" | jq -r '.number // empty')"
+          if [ -z "$pr_number" ]; then
+            echo "Could not parse PR number from steps.release.outputs.pr"
+            printf '%s\n' "$RELEASE_PLEASE_PR"
+            exit 0
+          fi
+
+          gh pr merge "$pr_number" --auto --merge --delete-branch

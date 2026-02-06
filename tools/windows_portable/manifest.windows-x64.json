@@ -1,0 +1,99 @@
+{
+  "manifest_version": 1,
+  "bundle": {
+    "platform": "windows",
+    "arch": "x64",
+    "vs_ref": "R73",
+    "python_version": "3.13.1",
+    "ffmpeg_policy": "lgpl-only",
+    "notes": "Baseline bundle pins for deterministic Windows portable distribution. Users may BYO newer deps best-effort."
+  },
+  "artifacts": [
+    {
+      "id": "python-embed-amd64",
+      "name": "Python embeddable package (amd64)",
+      "version": "3.13.1",
+      "url": "https://www.python.org/ftp/python/3.13.1/python-3.13.1-embed-amd64.zip",
+      "sha256": "7b7923ff0183a8b8fca90f6047184b419b108cb437f75fc1c002f9d2f8bcec16",
+      "bytes": 10847803,
+      "license": {
+        "spdx": "Python-2.0",
+        "url": "https://docs.python.org/3/license.html"
+      },
+      "install": {
+        "type": "extract",
+        "destination": "python"
+      }
+    },
+    {
+      "id": "vapoursynth-portable-r73",
+      "name": "VapourSynth 64-bit portable",
+      "version": "R73",
+      "url": "https://github.com/vapoursynth/vapoursynth/releases/download/R73/VapourSynth64-Portable-R73.zip",
+      "sha256": "3326f10d0fdcdec45649a474cbc9810795ab3da422634d0f134bca6089afbb91",
+      "bytes": 13580181,
+      "license": {
+        "spdx": "LGPL-2.1-or-later",
+        "url": "https://raw.githubusercontent.com/vapoursynth/vapoursynth/master/COPYING.LESSER"
+      },
+      "install": {
+        "type": "extract",
+        "destination": "vs/core"
+      },
+      "notes": "Archive includes vs-coreplugins/ and vs-plugins/ at the top level. Assembly scripts should map them into the SSOT layout vs/core and vs/plugins."
+    },
+    {
+      "id": "vs-plugin-lsmas-vA.3j",
+      "name": "L-SMASH Works (VapourSynth plugin)",
+      "version": "vA.3j",
+      "url": "https://github.com/AkarinVS/L-SMASH-Works/releases/download/vA.3j/release-x86_64-cachedir-cwd.zip",
+      "sha256": "7bb449f960c8071819994f802b3f175bf1593315b6b2bca89d68739d5af46047",
+      "bytes": 8223503,
+      "license": {
+        "spdx": "ISC AND LGPL-2.1-or-later",
+        "url": "https://raw.githubusercontent.com/AkarinVS/L-SMASH-Works/master/VapourSynth/LICENSE"
+      },
+      "install": {
+        "type": "copy_file",
+        "source_path": "libvslsmashsource.dll",
+        "destination": "vs/plugins/libvslsmashsource.dll"
+      }
+    },
+    {
+      "id": "vs-plugin-vs-placebo-1.4.4",
+      "name": "vs-placebo (VapourSynth plugin)",
+      "version": "1.4.4",
+      "url": "https://github.com/Lypheo/vs-placebo/releases/download/1.4.4/libvs_placebo-1.4.4.zip",
+      "sha256": "81302071eacd0fce5f85cfb3a2267b78e825e179a87b1d5567818f3a057ca6b6",
+      "bytes": 4097183,
+      "license": {
+        "spdx": "LGPL-2.1-or-later",
+        "url": "https://raw.githubusercontent.com/Lypheo/vs-placebo/master/COPYING"
+      },
+      "install": {
+        "type": "copy_file",
+        "source_path": "libvs_placebo.dll",
+        "destination": "vs/plugins/libvs_placebo.dll"
+      }
+    },
+    {
+      "id": "ffmpeg-btbn-win64-lgpl-7.1-2026-02-04",
+      "name": "FFmpeg (BtbN build, win64, LGPL-only)",
+      "version": "n7.1.3-39-g1a501728ed (autobuild-2026-02-04-14-23)",
+      "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-02-04-14-23/ffmpeg-n7.1.3-39-g1a501728ed-win64-lgpl-7.1.zip",
+      "sha256": "6dcf7e7126eec312213dd26b8a02f40a53f42dbe477236275df4f854c576cc35",
+      "bytes": 137350575,
+      "license": {
+        "spdx": "LGPL-2.1-or-later",
+        "url": "https://ffmpeg.org/legal.html",
+        "notes": "The archive includes a LICENSE.txt file; distribute it with the bundle."
+      },
+      "install": {
+        "type": "extract",
+        "destination": "ffmpeg",
+        "strip_prefix": "ffmpeg-n7.1.3-39-g1a501728ed-win64-lgpl-7.1/"
+      }
+    }
+  ],
+  "notes": "Deliberately excludes ffms2 from the baseline bundle: it is not required by the current loader path (lsmas is required), and ffms2 binary licensing can depend on how FFmpeg is built."
+}

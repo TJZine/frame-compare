@@ -1,0 +1,118 @@
+name: windows-portable
+
+on:
+  pull_request:
+  workflow_dispatch:
+  release:
+    types: [published, prereleased]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'release' && format('refs/tags/{0}', github.event.release.tag_name) || github.ref }}
+
+      - name: Setup Python 3.13.1
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13.1"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dev dependencies (frozen)
+        run: uv sync --group dev --frozen
+
+      - name: Unit tests (mocked VS)
+        run: uv run --no-sync pytest -q
+
+      - name: Build portable bundle
+        shell: pwsh
+        run: |
+          $out = "dist/frame-compare-portable-win-x64"
+          pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/build_portable.ps1 `
+            -ManifestPath tools/windows_portable/manifest.windows-x64.json `
+            -OutDir $out `
+            -CacheDir ".portable_cache"
+
+      - name: "Smoke: doctor --json"
+        shell: pwsh
+        run: |
+          $bundle = (Resolve-Path "dist/frame-compare-portable-win-x64").Path
+          & "$bundle/frame-compare.ps1" doctor --json
+
+      - name: "Smoke: VS clip + tonemap does not raise"
+        shell: pwsh
+        run: |
+          $bundle = (Resolve-Path "dist/frame-compare-portable-win-x64").Path
+          $env:PYTHONUTF8 = "1"
+          $env:PYTHONPATH = "$bundle/app/src;$bundle/app/site-packages"
+          $env:VAPOURSYNTH_PLUGIN_PATH = "$bundle/vs/plugins"
+          $vsCore = "$bundle/vs/core"
+          $ffmpegRoot = "$bundle/ffmpeg"
+          $vsRuntimeCandidates = @()
+          if (Test-Path -LiteralPath $vsCore) {
+            $vsRuntimeCandidates = @(Get-ChildItem -LiteralPath $vsCore -Filter "VSScript.dll" -File -Recurse)
+          }
+          $vsRuntimeDir = $null
+          if ($vsRuntimeCandidates.Count -gt 0) {
+            $vsRuntimeDir = Split-Path -Parent $vsRuntimeCandidates[0].FullName
+            $env:VAPOURSYNTH_HOME = $vsRuntimeDir
+          }
+          $pathEntries = @(
+            "$bundle/python",
+            $vsCore,
+            "$bundle/vs/plugins",
+            $ffmpegRoot
+          )
+          if ($null -ne $vsRuntimeDir -and $vsRuntimeDir -ne "") {
+            $pathEntries = @($vsRuntimeDir) + $pathEntries
+          }
+          if (Test-Path -LiteralPath $vsCore) {
+            Get-ChildItem -LiteralPath $vsCore -Directory -Recurse | ForEach-Object {
+              $pathEntries += $_.FullName
+            }
+          }
+          if (Test-Path -LiteralPath $ffmpegRoot) {
+            Get-ChildItem -LiteralPath $ffmpegRoot -Directory -Recurse | ForEach-Object {
+              $pathEntries += $_.FullName
+            }
+          }
+          $env:PATH = (($pathEntries -join ";") + ";" + $env:PATH)
+
+          & "$bundle/python/python.exe" -c "import vapoursynth as vs; from frame_compare.vs.tonemap import apply_tonemap; from frame_compare.vs.types import TonemapSettings; core = vs.core; clip = core.std.BlankClip(width=16, height=16, length=1, format=vs.RGBS); out = apply_tonemap(clip, TonemapSettings(enabled=True)); _ = out.get_frame(0); print('OK')"
+
+      - name: Package zip
+        shell: pwsh
+        run: |
+          $bundle = "dist/frame-compare-portable-win-x64"
+          $zip = "dist/frame-compare-portable-win-x64.zip"
+          if (Test-Path $zip) { Remove-Item -Force $zip }
+          Compress-Archive -Path "$bundle/*" -DestinationPath $zip
+          $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+          Set-Content -Path "$zip.sha256" -Value "$hash  $(Split-Path -Leaf $zip)" -Encoding ASCII
+
+      - name: Upload artifact (PR / manual)
+        if: github.event_name != 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: frame-compare-portable-win-x64
+          path: |
+            dist/frame-compare-portable-win-x64.zip
+            dist/frame-compare-portable-win-x64.zip.sha256
+
+      - name: Upload release asset (release)
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          prerelease: ${{ github.event.release.prerelease || contains(github.event.release.tag_name, '-rc') }}
+          files: |
+            dist/frame-compare-portable-win-x64.zip
+            dist/frame-compare-portable-win-x64.zip.sha256

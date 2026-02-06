@@ -1,0 +1,769 @@
+--progress is a global compose flag, better use `docker compose --progress xx build ...
+time="2025-12-28T00:18:35-05:00" level=warning msg="/Users/tristan/software/frame-compare/docker-compose.yml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion"
+#1 [internal] load local bake definitions
+#1 reading from stdin 1.04kB done
+#1 DONE 0.0s
+
+#2 [frame-compare-run internal] load build definition from Dockerfile
+#2 transferring dockerfile: 7.59kB done
+#2 DONE 0.0s
+
+#3 [frame-compare-run internal] load metadata for docker.io/library/python:3.13.1-slim-bookworm
+#3 DONE 0.0s
+
+#4 [frame-compare-run internal] load .dockerignore
+#4 transferring context: 498B done
+#4 DONE 0.0s
+
+#5 [frame-compare-run builder  1/11] FROM docker.io/library/python:3.13.1-slim-bookworm
+#5 DONE 0.0s
+
+#6 [frame-compare builder  2/11] RUN apt-get update && apt-get install -y --no-install-recommends     autoconf     automake     build-essential     ca-certificates     cmake     curl     git     liblzma-dev     libtool     libvulkan-dev     libxxhash-dev     meson     nasm     ninja-build     pkg-config     python3-dev     python3-jinja2     zlib1g-dev     libavcodec-dev     libavformat-dev     libavutil-dev     libswscale-dev     libswresample-dev     && rm -rf /var/lib/apt/lists/*
+#6 CACHED
+
+#7 [frame-compare builder  4/11] WORKDIR /build
+#7 CACHED
+
+#8 [frame-compare builder  5/11] RUN curl -fsSL "https://github.com/sekrit-twc/zimg/archive/refs/tags/release-3.0.5.tar.gz"         -o zimg.tar.gz &&     echo "a9a0226bf85e0d83c41a8ebe4e3e690e1348682f6a2a7838f1b8cbff1b799bcf  zimg.tar.gz" | sha256sum -c - &&     tar -xzf zimg.tar.gz &&     cd "zimg-release-3.0.5" &&     ./autogen.sh &&     ./configure --prefix=/usr/local &&     make -j"$(nproc)" &&     make install &&     ldconfig &&     cd /build &&     rm -rf "zimg-release-3.0.5" zimg.tar.gz
+#8 CACHED
+
+#9 [frame-compare builder  6/11] RUN git clone --depth 1 --branch "R73"     https://github.com/vapoursynth/vapoursynth.git &&     cd vapoursynth &&     ./autogen.sh &&     ./configure --prefix=/usr/local &&     make -j"$(nproc)" &&     make install &&     ldconfig
+#9 CACHED
+
+#10 [frame-compare builder  7/11] RUN LSMASH_DIR="l-smash-2.14.5" &&     curl -fsSL "https://github.com/l-smash/l-smash/archive/refs/tags/v2.14.5.tar.gz"         -o l-smash.tar.gz &&     echo "e6f7c31de684f4b89ee27e5cd6262bf96f2a5b117ba938d2d606cf6220f05935  l-smash.tar.gz" | sha256sum -c - &&     tar -xzf l-smash.tar.gz &&     cd "${LSMASH_DIR}" &&     ./configure --prefix=/usr/local --disable-static &&     make -j"$(nproc)" &&     make install &&     ldconfig &&     cd /build &&     rm -rf "${LSMASH_DIR}" l-smash.tar.gz
+#10 CACHED
+
+#11 [frame-compare builder  9/11] RUN git clone --depth 1 --branch "v7.349.0"     https://github.com/haasn/libplacebo.git &&     cd libplacebo &&     meson setup build         -Dvulkan=disabled         -Dopengl=disabled         -Dshaderc=disabled         -Ddemos=false &&     ninja -C build &&     ninja -C build install &&     ldconfig
+#11 CACHED
+
+#12 [frame-compare builder  3/11] RUN python -m pip install --no-cache-dir "cython>=3.0,<4"
+#12 CACHED
+
+#13 [frame-compare builder  8/11] RUN git clone --depth 1 --branch "20230716"     https://github.com/HomeOfAviSynthPlusEvolution/L-SMASH-Works.git &&     cd L-SMASH-Works &&     perl -0777 -i -pe 's/#include <emmintrin.h>/#if defined(__SSE2__) || defined(__x86_64__) || defined(__i386__)\n#include <emmintrin.h>\n#endif/' VapourSynth/video_output.c &&     perl -0777 -i -pe 's/(static inline __m128i _MM_PACKUS_EPI32[\s\S]*?\n}\n)/#if defined(__SSE2__) || defined(__x86_64__) || defined(__i386__)\n$1#endif\n/' VapourSynth/video_output.c &&     perl -0777 -i -pe 's/(\n\s*if\( vshp->input_pixel_format == AV_PIX_FMT_P010LE[\s\S]*?\n\s*else\n)(\s*sws_scale\([^;]+\);)/\n#if defined(__SSE2__) || defined(__x86_64__) || defined(__i386__)$1$2\n#else\n$2\n#endif/s' VapourSynth/video_output.c &&     cd VapourSynth &&     meson setup build &&     ninja -C build &&     mkdir -p /usr/local/lib/vapoursynth &&     cp build/libvslsmashsource.so /usr/local/lib/vapoursynth/
+#13 CACHED
+
+#14 [frame-compare builder 10/11] RUN git clone --depth 1 --recurse-submodules --shallow-submodules     https://github.com/Lypheo/vs-placebo.git &&     cd vs-placebo &&     git checkout "14083805df08cd478539c15464a7183da2c0032e" &&     meson setup build &&     ninja -C build &&     cp build/libvs_placebo.so /usr/local/lib/vapoursynth/
+#14 CACHED
+
+#15 [frame-compare-run internal] load build context
+#15 transferring context: 31.63kB 0.0s done
+#15 DONE 0.0s
+
+#16 [frame-compare builder 11/11] RUN git clone https://github.com/FFMS/ffms2.git &&     cd ffms2 &&     git checkout "45673149e9a2f5586855ad472e3059084eaa36b1" &&     ./autogen.sh &&     ./configure --prefix=/usr/local &&     make -j"$(nproc)" &&     make install &&     ldconfig &&     cp src/core/.libs/libffms2.so /usr/local/lib/vapoursynth/
+#16 0.100 Cloning into 'ffms2'...
+#16 0.749 Note: switching to '45673149e9a2f5586855ad472e3059084eaa36b1'.
+#16 0.749
+#16 0.749 You are in 'detached HEAD' state. You can look around, make experimental
+#16 0.749 changes and commit them, and you can discard any commits you make in this
+#16 0.749 state without impacting any branches by switching back to a branch.
+#16 0.749
+#16 0.749 If you want to create a new branch to retain commits you create, you may
+#16 0.749 do so (now or later) by using -c with the switch command. Example:
+#16 0.749
+#16 0.749   git switch -c <new-branch-name>
+#16 0.749
+#16 0.749 Or undo this operation with:
+#16 0.749
+#16 0.749   git switch -
+#16 0.749
+#16 0.749 Turn off this advice by setting config variable advice.detachedHead to false
+#16 0.749
+#16 0.749 HEAD is now at 4567314 Use auto for AVCodec
+#16 0.750 Running autoreconf...
+#16 0.776 autoreconf: export WARNINGS=
+#16 0.777 autoreconf: Entering directory '.'
+#16 0.777 autoreconf: configure.ac: not using Gettext
+#16 1.780 autoreconf: running: aclocal --force -I m4
+#16 2.276 autoreconf: configure.ac: tracing
+#16 2.506 autoreconf: running: libtoolize --copy --force
+#16 2.540 libtoolize: putting auxiliary files in '.'.
+#16 2.540 libtoolize: copying file './ltmain.sh'
+#16 2.552 libtoolize: putting macros in AC_CONFIG_MACRO_DIRS, 'm4'.
+#16 2.552 libtoolize: copying file 'm4/libtool.m4'
+#16 2.563 libtoolize: copying file 'm4/ltoptions.m4'
+#16 2.575 libtoolize: copying file 'm4/ltsugar.m4'
+#16 2.588 libtoolize: copying file 'm4/ltversion.m4'
+#16 2.601 libtoolize: copying file 'm4/lt~obsolete.m4'
+#16 2.614 autoreconf: configure.ac: not using Intltool
+#16 2.614 autoreconf: configure.ac: not using Gtkdoc
+#16 2.614 autoreconf: running: aclocal --force -I m4
+#16 3.116 autoreconf: running: /usr/bin/autoconf --force
+#16 3.315 configure.ac:13: warning: The macro `AC_HELP_STRING' is obsolete.
+#16 3.315 configure.ac:13: You should run autoupdate.
+#16 3.315 ./lib/autoconf/general.m4:204: AC_HELP_STRING is expanded from...
+#16 3.315 ./lib/autoconf/general.m4:1534: AC_ARG_ENABLE is expanded from...
+#16 3.315 configure.ac:13: the top level
+#16 3.315 configure.ac:36: warning: The macro `AC_HELP_STRING' is obsolete.
+#16 3.315 configure.ac:36: You should run autoupdate.
+#16 3.315 ./lib/autoconf/general.m4:204: AC_HELP_STRING is expanded from...
+#16 3.315 ./lib/autoconf/general.m4:1534: AC_ARG_ENABLE is expanded from...
+#16 3.315 configure.ac:36: the top level
+#16 3.315 configure.ac:61: warning: The macro `AC_PROG_LIBTOOL' is obsolete.
+#16 3.315 configure.ac:61: You should run autoupdate.
+#16 3.315 m4/libtool.m4:100: AC_PROG_LIBTOOL is expanded from...
+#16 3.315 configure.ac:61: the top level
+#16 3.390 autoreconf: running: /usr/bin/autoheader --force
+#16 3.616 autoreconf: running: automake --add-missing --copy --force-missing
+#16 3.751 configure.ac:47: installing './compile'
+#16 3.752 configure.ac:52: installing './config.guess'
+#16 3.753 configure.ac:52: installing './config.sub'
+#16 3.754 configure.ac:5: installing './install-sh'
+#16 3.755 configure.ac:5: installing './missing'
+#16 3.765 Makefile.am: installing './depcomp'
+#16 3.784 autoreconf: Leaving directory '.'
+#16 3.786 Running configure...
+#16 3.826 checking for a BSD-compatible install... /usr/bin/install -c
+#16 3.830 checking whether build environment is sane... yes
+#16 3.836 checking for a race-free mkdir -p... /usr/bin/mkdir -p
+#16 3.837 checking for gawk... no
+#16 3.837 checking for mawk... mawk
+#16 3.837 checking whether make sets $(MAKE)... yes
+#16 3.843 checking whether make supports nested variables... yes
+#16 3.846 checking whether make supports nested variables... (cached) yes
+#16 3.846 checking whether to enable maintainer-specific portions of Makefiles... no
+#16 3.846 checking if debug build is enabled... no
+#16 3.847 no
+#16 3.847 checking for gcc... gcc
+#16 3.860 checking whether the C compiler works... yes
+#16 3.881 checking for C compiler default output file name... a.out
+#16 3.882 checking for suffix of executables...
+#16 3.903 checking whether we are cross compiling... no
+#16 3.928 checking for suffix of object files... o
+#16 3.942 checking whether the compiler supports GNU C... yes
+#16 3.953 checking whether gcc accepts -g... yes
+#16 3.965 checking for gcc option to enable C11 features... none needed
+#16 3.993 checking whether gcc understands -c and -o together... yes
+#16 4.015 checking whether make supports the include directive... yes (GNU style)
+#16 4.019 checking dependency style of gcc... gcc3
+#16 4.036 checking for g++... g++
+#16 4.046 checking whether the compiler supports GNU C++... yes
+#16 4.058 checking whether g++ accepts -g... yes
+#16 4.070 checking for g++ option to enable C++11 features... none needed
+#16 4.107 checking dependency style of g++... gcc3
+#16 4.125 checking whether ln -s works... yes
+#16 4.127 checking build system type... aarch64-unknown-linux-gnu
+#16 4.149 checking host system type... aarch64-unknown-linux-gnu
+#16 4.150 checking how to print strings... printf
+#16 4.151 checking for a sed that does not truncate output... /usr/bin/sed
+#16 4.154 checking for grep that handles long lines and -e... /usr/bin/grep
+#16 4.155 checking for egrep... /usr/bin/grep -E
+#16 4.156 checking for fgrep... /usr/bin/grep -F
+#16 4.157 checking for ld used by gcc... /usr/bin/ld
+#16 4.160 checking if the linker (/usr/bin/ld) is GNU ld... yes
+#16 4.161 checking for BSD- or MS-compatible name lister (nm)... /usr/bin/nm -B
+#16 4.162 checking the name lister (/usr/bin/nm -B) interface... BSD nm
+#16 4.174 checking the maximum length of command line arguments... 1572864
+#16 4.178 checking how to convert aarch64-unknown-linux-gnu file names to aarch64-unknown-linux-gnu format... func_convert_file_noop
+#16 4.178 checking how to convert aarch64-unknown-linux-gnu file names to toolchain format... func_convert_file_noop
+#16 4.178 checking for /usr/bin/ld option to reload object files... -r
+#16 4.178 checking for file... file
+#16 4.178 checking for objdump... objdump
+#16 4.179 checking how to recognize dependent libraries... pass_all
+#16 4.179 checking for dlltool... no
+#16 4.180 checking how to associate runtime and link libraries... printf %s\n
+#16 4.180 checking for ar... ar
+#16 4.180 checking for archiver @FILE support... @
+#16 4.195 checking for strip... strip
+#16 4.195 checking for ranlib... ranlib
+#16 4.196 checking command to parse /usr/bin/nm -B output from gcc object... ok
+#16 4.233 checking for sysroot... no
+#16 4.233 checking for a working dd... /usr/bin/dd
+#16 4.235 checking how to truncate binary pipes... /usr/bin/dd bs=4096 count=1
+#16 4.238 checking for mt... no
+#16 4.238 checking if : is a manifest tool... no
+#16 4.241 checking for stdio.h... yes
+#16 4.252 checking for stdlib.h... yes
+#16 4.265 checking for string.h... yes
+#16 4.278 checking for inttypes.h... yes
+#16 4.291 checking for stdint.h... yes
+#16 4.305 checking for strings.h... yes
+#16 4.320 checking for sys/stat.h... yes
+#16 4.336 checking for sys/types.h... yes
+#16 4.352 checking for unistd.h... yes
+#16 4.366 checking for dlfcn.h... yes
+#16 4.381 checking for objdir... .libs
+#16 4.416 checking if gcc supports -fno-rtti -fno-exceptions... no
+#16 4.428 checking for gcc option to produce PIC... -fPIC -DPIC
+#16 4.428 checking if gcc PIC flag -fPIC -DPIC works... yes
+#16 4.439 checking if gcc static flag -static works... yes
+#16 4.473 checking if gcc supports -c -o file.o... yes
+#16 4.487 checking if gcc supports -c -o file.o... (cached) yes
+#16 4.487 checking whether the gcc linker (/usr/bin/ld) supports shared libraries... yes
+#16 4.493 checking whether -lc should be explicitly linked in... no
+#16 4.507 checking dynamic linker characteristics... GNU/Linux ld.so
+#16 4.538 checking how to hardcode library paths into programs... immediate
+#16 4.538 checking whether stripping libraries is possible... yes
+#16 4.539 checking if libtool supports shared libraries... yes
+#16 4.539 checking whether to build shared libraries... yes
+#16 4.539 checking whether to build static libraries... no
+#16 4.541 checking how to run the C++ preprocessor... g++ -E
+#16 4.618 checking for ld used by g++... /usr/bin/ld
+#16 4.619 checking if the linker (/usr/bin/ld) is GNU ld... yes
+#16 4.623 checking whether the g++ linker (/usr/bin/ld) supports shared libraries... yes
+#16 4.663 checking for g++ option to produce PIC... -fPIC -DPIC
+#16 4.663 checking if g++ PIC flag -fPIC -DPIC works... yes
+#16 4.675 checking if g++ static flag -static works... yes
+#16 4.710 checking if g++ supports -c -o file.o... yes
+#16 4.727 checking if g++ supports -c -o file.o... (cached) yes
+#16 4.727 checking whether the g++ linker (/usr/bin/ld) supports shared libraries... yes
+#16 4.727 checking dynamic linker characteristics... (cached) GNU/Linux ld.so
+#16 4.730 checking how to hardcode library paths into programs... immediate
+#16 4.735 checking for zlib.h... yes
+#16 4.752 checking for inflateEnd in -lz... yes
+#16 4.775 checking for pkg-config... /usr/bin/pkg-config
+#16 4.776 checking pkg-config is at least version 0.22... yes
+#16 4.776 checking for libavformat >= 53.20.0 libavcodec >= 53.24.0 libswscale >= 0.7.0 libavutil >= 51.21.0 libswresample >= 1.0.0... yes
+#16 4.782 checking whether FFmpeg works... yes
+#16 4.915 checking whether -Wl,-Bsymbolic is needed... no
+#16 4.966 checking that generated files are newer than configure... done
+#16 4.966 configure: creating ./config.status
+#16 5.258 config.status: creating Makefile
+#16 5.264 config.status: creating ffms2.pc
+#16 5.270 config.status: creating src/config/config.h
+#16 5.276 config.status: executing depfiles commands
+#16 5.306 config.status: executing libtool commands
+#16 5.372 checking for a BSD-compatible install... /usr/bin/install -c
+#16 5.376 checking whether build environment is sane... yes
+#16 5.381 checking for a race-free mkdir -p... /usr/bin/mkdir -p
+#16 5.382 checking for gawk... no
+#16 5.383 checking for mawk... mawk
+#16 5.383 checking whether make sets $(MAKE)... yes
+#16 5.388 checking whether make supports nested variables... yes
+#16 5.392 checking whether make supports nested variables... (cached) yes
+#16 5.393 checking whether to enable maintainer-specific portions of Makefiles... no
+#16 5.393 checking if debug build is enabled... no
+#16 5.393 no
+#16 5.393 checking for gcc... gcc
+#16 5.406 checking whether the C compiler works... yes
+#16 5.427 checking for C compiler default output file name... a.out
+#16 5.428 checking for suffix of executables...
+#16 5.451 checking whether we are cross compiling... no
+#16 5.475 checking for suffix of object files... o
+#16 5.489 checking whether the compiler supports GNU C... yes
+#16 5.501 checking whether gcc accepts -g... yes
+#16 5.513 checking for gcc option to enable C11 features... none needed
+#16 5.543 checking whether gcc understands -c and -o together... yes
+#16 5.566 checking whether make supports the include directive... yes (GNU style)
+#16 5.571 checking dependency style of gcc... gcc3
+#16 5.590 checking for g++... g++
+#16 5.602 checking whether the compiler supports GNU C++... yes
+#16 5.615 checking whether g++ accepts -g... yes
+#16 5.629 checking for g++ option to enable C++11 features... none needed
+#16 5.668 checking dependency style of g++... gcc3
+#16 5.686 checking whether ln -s works... yes
+#16 5.689 checking build system type... aarch64-unknown-linux-gnu
+#16 5.711 checking host system type... aarch64-unknown-linux-gnu
+#16 5.712 checking how to print strings... printf
+#16 5.714 checking for a sed that does not truncate output... /usr/bin/sed
+#16 5.716 checking for grep that handles long lines and -e... /usr/bin/grep
+#16 5.717 checking for egrep... /usr/bin/grep -E
+#16 5.718 checking for fgrep... /usr/bin/grep -F
+#16 5.719 checking for ld used by gcc... /usr/bin/ld
+#16 5.721 checking if the linker (/usr/bin/ld) is GNU ld... yes
+#16 5.723 checking for BSD- or MS-compatible name lister (nm)... /usr/bin/nm -B
+#16 5.725 checking the name lister (/usr/bin/nm -B) interface... BSD nm
+#16 5.737 checking the maximum length of command line arguments... 1572864
+#16 5.741 checking how to convert aarch64-unknown-linux-gnu file names to aarch64-unknown-linux-gnu format... func_convert_file_noop
+#16 5.741 checking how to convert aarch64-unknown-linux-gnu file names to toolchain format... func_convert_file_noop
+#16 5.741 checking for /usr/bin/ld option to reload object files... -r
+#16 5.741 checking for file... file
+#16 5.742 checking for objdump... objdump
+#16 5.742 checking how to recognize dependent libraries... pass_all
+#16 5.742 checking for dlltool... no
+#16 5.742 checking how to associate runtime and link libraries... printf %s\n
+#16 5.743 checking for ar... ar
+#16 5.743 checking for archiver @FILE support... @
+#16 5.759 checking for strip... strip
+#16 5.759 checking for ranlib... ranlib
+#16 5.759 checking command to parse /usr/bin/nm -B output from gcc object... ok
+#16 5.799 checking for sysroot... no
+#16 5.799 checking for a working dd... /usr/bin/dd
+#16 5.801 checking how to truncate binary pipes... /usr/bin/dd bs=4096 count=1
+#16 5.804 checking for mt... no
+#16 5.804 checking if : is a manifest tool... no
+#16 5.806 checking for stdio.h... yes
+#16 5.817 checking for stdlib.h... yes
+#16 5.830 checking for string.h... yes
+#16 5.844 checking for inttypes.h... yes
+#16 5.857 checking for stdint.h... yes
+#16 5.872 checking for strings.h... yes
+#16 5.886 checking for sys/stat.h... yes
+#16 5.901 checking for sys/types.h... yes
+#16 5.916 checking for unistd.h... yes
+#16 5.931 checking for dlfcn.h... yes
+#16 5.946 checking for objdir... .libs
+#16 5.981 checking if gcc supports -fno-rtti -fno-exceptions... no
+#16 5.992 checking for gcc option to produce PIC... -fPIC -DPIC
+#16 5.992 checking if gcc PIC flag -fPIC -DPIC works... yes
+#16 6.003 checking if gcc static flag -static works... yes
+#16 6.036 checking if gcc supports -c -o file.o... yes
+#16 6.051 checking if gcc supports -c -o file.o... (cached) yes
+#16 6.051 checking whether the gcc linker (/usr/bin/ld) supports shared libraries... yes
+#16 6.056 checking whether -lc should be explicitly linked in... no
+#16 6.070 checking dynamic linker characteristics... GNU/Linux ld.so
+#16 6.099 checking how to hardcode library paths into programs... immediate
+#16 6.099 checking whether stripping libraries is possible... yes
+#16 6.101 checking if libtool supports shared libraries... yes
+#16 6.101 checking whether to build shared libraries... yes
+#16 6.101 checking whether to build static libraries... no
+#16 6.103 checking how to run the C++ preprocessor... g++ -E
+#16 6.177 checking for ld used by g++... /usr/bin/ld
+#16 6.178 checking if the linker (/usr/bin/ld) is GNU ld... yes
+#16 6.182 checking whether the g++ linker (/usr/bin/ld) supports shared libraries... yes
+#16 6.220 checking for g++ option to produce PIC... -fPIC -DPIC
+#16 6.220 checking if g++ PIC flag -fPIC -DPIC works... yes
+#16 6.233 checking if g++ static flag -static works... yes
+#16 6.268 checking if g++ supports -c -o file.o... yes
+#16 6.284 checking if g++ supports -c -o file.o... (cached) yes
+#16 6.284 checking whether the g++ linker (/usr/bin/ld) supports shared libraries... yes
+#16 6.284 checking dynamic linker characteristics... (cached) GNU/Linux ld.so
+#16 6.286 checking how to hardcode library paths into programs... immediate
+#16 6.292 checking for zlib.h... yes
+#16 6.308 checking for inflateEnd in -lz... yes
+#16 6.331 checking for pkg-config... /usr/bin/pkg-config
+#16 6.331 checking pkg-config is at least version 0.22... yes
+#16 6.332 checking for libavformat >= 53.20.0 libavcodec >= 53.24.0 libswscale >= 0.7.0 libavutil >= 51.21.0 libswresample >= 1.0.0... yes
+#16 6.338 checking whether FFmpeg works... yes
+#16 6.463 checking whether -Wl,-Bsymbolic is needed... no
+#16 6.513 checking that generated files are newer than configure... done
+#16 6.513 configure: creating ./config.status
+#16 6.806 config.status: creating Makefile
+#16 6.812 config.status: creating ffms2.pc
+#16 6.818 config.status: creating src/config/config.h
+#16 6.821 config.status: src/config/config.h is unchanged
+#16 6.823 config.status: executing depfiles commands
+#16 6.831 config.status: executing libtool commands
+#16 6.861   CXX      src/index/ffmsindex.o
+#16 6.861   CXX      src/core/audiosource.lo
+#16 6.862   CXX      src/core/ffms.lo
+#16 6.862   CXX      src/core/filehandle.lo
+#16 6.862   CXX      src/core/track.lo
+#16 6.862   CXX      src/core/indexing.lo
+#16 6.862   CXX      src/core/utils.lo
+#16 6.863   CXX      src/core/videoutils.lo
+#16 6.863   CXX      src/core/videosource.lo
+#16 6.864   CXX      src/core/zipfile.lo
+#16 7.060 In file included from src/core/audiosource.h:24,
+#16 7.060                  from src/core/audiosource.cpp:21:
+#16 7.060 src/core/utils.h:101:10: warning: unnecessary parentheses in declaration of 'ptr' [-Wparentheses]
+#16 7.060   101 |         T(FFMS_Struct::*ptr);
+#16 7.060       |          ^~~~~~~~~~~~~~~~~~~
+#16 7.060 src/core/utils.h:101:10: note: remove parentheses
+#16 7.060   101 |         T(FFMS_Struct::*ptr);
+#16 7.060       |          ^~~~~~~~~~~~~~~~~~~
+#16 7.060       |          -                 -
+#16 7.076 In file included from src/core/track.cpp:23:
+#16 7.076 src/core/utils.h:101:10: warning: unnecessary parentheses in declaration of 'ptr' [-Wparentheses]
+#16 7.076   101 |         T(FFMS_Struct::*ptr);
+#16 7.076       |          ^~~~~~~~~~~~~~~~~~~
+#16 7.077 src/core/utils.h:101:10: note: remove parentheses
+#16 7.077   101 |         T(FFMS_Struct::*ptr);
+#16 7.077       |          ^~~~~~~~~~~~~~~~~~~
+#16 7.077       |          -                 -
+#16 7.082 In file included from src/core/indexing.h:24,
+#16 7.082                  from src/core/indexing.cpp:21:
+#16 7.082 src/core/utils.h:101:10: warning: unnecessary parentheses in declaration of 'ptr' [-Wparentheses]
+#16 7.082   101 |         T(FFMS_Struct::*ptr);
+#16 7.082       |          ^~~~~~~~~~~~~~~~~~~
+#16 7.082 src/core/utils.h:101:10: note: remove parentheses
+#16 7.082   101 |         T(FFMS_Struct::*ptr);
+#16 7.082       |          ^~~~~~~~~~~~~~~~~~~
+#16 7.082       |          -                 -
+#16 7.085 In file included from src/core/audiosource.h:24,
+#16 7.085                  from src/core/ffms.cpp:23:
+#16 7.085 src/core/utils.h:101:10: warning: unnecessary parentheses in declaration of 'ptr' [-Wparentheses]
+#16 7.085   101 |         T(FFMS_Struct::*ptr);
+#16 7.085       |          ^~~~~~~~~~~~~~~~~~~
+#16 7.087 src/core/utils.h:101:10: note: remove parentheses
+#16 7.087   101 |         T(FFMS_Struct::*ptr);
+#16 7.087       |          ^~~~~~~~~~~~~~~~~~~
+#16 7.087       |          -                 -
+#16 7.093 In file included from src/core/filehandle.cpp:23:
+#16 7.093 src/core/utils.h:101:10: warning: unnecessary parentheses in declaration of 'ptr' [-Wparentheses]
+#16 7.093   101 |         T(FFMS_Struct::*ptr);
+#16 7.093       |          ^~~~~~~~~~~~~~~~~~~
+#16 7.093 src/core/utils.h:101:10: note: remove parentheses
+#16 7.093   101 |         T(FFMS_Struct::*ptr);
+#16 7.093       |          ^~~~~~~~~~~~~~~~~~~
+#16 7.093       |          -                 -
+#16 7.102 In file included from src/core/zipfile.cpp:27:
+#16 7.102 src/core/utils.h:101:10: warning: unnecessary parentheses in declaration of 'ptr' [-Wparentheses]
+#16 7.102   101 |         T(FFMS_Struct::*ptr);
+#16 7.102       |          ^~~~~~~~~~~~~~~~~~~
+#16 7.102 src/core/utils.h:101:10: note: remove parentheses
+#16 7.102   101 |         T(FFMS_Struct::*ptr);
+#16 7.102       |          ^~~~~~~~~~~~~~~~~~~
+#16 7.102       |          -                 -
+#16 7.102 In file included from src/core/utils.cpp:25:
+#16 7.102 src/core/utils.h:101:10: warning: unnecessary parentheses in declaration of 'ptr' [-Wparentheses]
+#16 7.102   101 |         T(FFMS_Struct::*ptr);
+#16 7.102       |          ^~~~~~~~~~~~~~~~~~~
+#16 7.102 src/core/utils.h:101:10: note: remove parentheses
+#16 7.102   101 |         T(FFMS_Struct::*ptr);
+#16 7.102       |          ^~~~~~~~~~~~~~~~~~~
+#16 7.102       |          -                 -
+#16 7.135   CXX      src/vapoursynth/vapoursource.lo
+#16 7.137 In file included from src/core/videosource.h:37,
+#16 7.137                  from src/core/videosource.cpp:21:
+#16 7.137 src/core/utils.h:101:10: warning: unnecessary parentheses in declaration of 'ptr' [-Wparentheses]
+#16 7.137   101 |         T(FFMS_Struct::*ptr);
+#16 7.137       |          ^~~~~~~~~~~~~~~~~~~
+#16 7.137 src/core/utils.h:101:10: note: remove parentheses
+#16 7.137   101 |         T(FFMS_Struct::*ptr);
+#16 7.137       |          ^~~~~~~~~~~~~~~~~~~
+#16 7.137       |          -                 -
+#16 7.149 src/core/audiosource.cpp: In member function 'void FFMS_AudioSource::SetOutputFormat(const FFMS_ResampleOptions&)':
+#16 7.149 src/core/audiosource.cpp:209:128: warning: 'int av_get_channel_layout_nb_channels(uint64_t)' is deprecated [-Wdeprecated-declarations]
+#16 7.149   209 |     BytesPerSample = av_get_bytes_per_sample(static_cast<AVSampleFormat>(opt.SampleFormat)) * av_get_channel_layout_nb_channels(opt.ChannelLayout);
+#16 7.149       |                                                                                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~
+#16 7.149 In file included from /usr/include/aarch64-linux-gnu/libavutil/opt.h:32,
+#16 7.149                  from src/core/utils.h:28:
+#16 7.149 /usr/include/aarch64-linux-gnu/libavutil/channel_layout.h:449:5: note: declared here
+#16 7.149   449 | int av_get_channel_layout_nb_channels(uint64_t channel_layout);
+#16 7.149       |     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#16 7.150 src/core/audiosource.cpp:225:30: warning: 'int av_opt_set_channel_layout(void*, const char*, int64_t, int)' is deprecated [-Wdeprecated-declarations]
+#16 7.150   225 |     av_opt_set_channel_layout(newContext.get(), "out_channel_layout", opt.ChannelLayout, 0);
+#16 7.150       |     ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#16 7.150 /usr/include/aarch64-linux-gnu/libavutil/opt.h:702:5: note: declared here
+#16 7.150   702 | int av_opt_set_channel_layout(void *obj, const char *name, int64_t ch_layout, int search_flags);
+#16 7.150       |     ^~~~~~~~~~~~~~~~~~~~~~~~~
+#16 7.181 src/core/utils.cpp: In function 'void FillAP(FFMS_AudioProperties&, AVCodecContext*, FFMS_Track&)':
+#16 7.181 src/core/utils.cpp:68:24: warning: 'AVCodecContext::channels' is deprecated [-Wdeprecated-declarations]
+#16 7.181    68 |     AP.Channels = CTX->channels;
+#16 7.181       |                        ^~~~~~~~
+#16 7.182 In file included from src/core/utils.h:30:
+#16 7.182 /usr/include/aarch64-linux-gnu/libavcodec/avcodec.h:1006:9: note: declared here
+#16 7.182  1006 |     int channels;
+#16 7.182       |         ^~~~~~~~
+#16 7.182 src/core/utils.cpp:68:24: warning: 'AVCodecContext::channels' is deprecated [-Wdeprecated-declarations]
+#16 7.182    68 |     AP.Channels = CTX->channels;
+#16 7.182       |                        ^~~~~~~~
+#16 7.182 /usr/include/aarch64-linux-gnu/libavcodec/avcodec.h:1006:9: note: declared here
+#16 7.182  1006 |     int channels;
+#16 7.182       |         ^~~~~~~~
+#16 7.182 src/core/utils.cpp:68:24: warning: 'AVCodecContext::channels' is deprecated [-Wdeprecated-declarations]
+#16 7.182    68 |     AP.Channels = CTX->channels;
+#16 7.182       |                        ^~~~~~~~
+#16 7.182 /usr/include/aarch64-linux-gnu/libavcodec/avcodec.h:1006:9: note: declared here
+#16 7.182  1006 |     int channels;
+#16 7.182       |         ^~~~~~~~
+#16 7.182 src/core/utils.cpp:69:29: warning: 'AVCodecContext::channel_layout' is deprecated [-Wdeprecated-declarations]
+#16 7.182    69 |     AP.ChannelLayout = CTX->channel_layout;
+#16 7.182       |                             ^~~~~~~~~~~~~~
+#16 7.182 /usr/include/aarch64-linux-gnu/libavcodec/avcodec.h:1060:14: note: declared here
+#16 7.182  1060 |     uint64_t channel_layout;
+#16 7.182       |              ^~~~~~~~~~~~~~
+#16 7.182 src/core/utils.cpp:69:29: warning: 'AVCodecContext::channel_layout' is deprecated [-Wdeprecated-declarations]
+#16 7.182    69 |     AP.ChannelLayout = CTX->channel_layout;
+#16 7.182       |                             ^~~~~~~~~~~~~~
+#16 7.182 /usr/include/aarch64-linux-gnu/libavcodec/avcodec.h:1060:14: note: declared here
+#16 7.182  1060 |     uint64_t channel_layout;
+#16 7.182       |              ^~~~~~~~~~~~~~
+#16 7.182 src/core/utils.cpp:69:29: warning: 'AVCodecContext::channel_layout' is deprecated [-Wdeprecated-declarations]
+#16 7.182    69 |     AP.ChannelLayout = CTX->channel_layout;
+#16 7.182       |                             ^~~~~~~~~~~~~~
+#16 7.182 /usr/include/aarch64-linux-gnu/libavcodec/avcodec.h:1060:14: note: declared here
+#16 7.182  1060 |     uint64_t channel_layout;
+#16 7.182       |              ^~~~~~~~~~~~~~
+#16 7.182 src/core/utils.cpp:79:57: warning: 'int64_t av_get_default_channel_layout(int)' is deprecated [-Wdeprecated-declarations]
+#16 7.182    79 |         AP.ChannelLayout = av_get_default_channel_layout(AP.Channels);
+#16 7.182       |                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~
+#16 7.182 In file included from src/core/utils.cpp:22:
+#16 7.182 /usr/include/aarch64-linux-gnu/libavutil/channel_layout.h:457:9: note: declared here
+#16 7.182   457 | int64_t av_get_default_channel_layout(int nb_channels);
+#16 7.182       |         ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#16 7.208 src/core/indexing.cpp: In member function 'void FFMS_Indexer::CheckAudioProperties(int, AVCodecContext*)':
+#16 7.208 src/core/indexing.cpp:308:32: warning: 'AVCodecContext::channels' is deprecated [-Wdeprecated-declarations]
+#16 7.208   308 |         AP.Channels = Context->channels;
+#16 7.208       |                                ^~~~~~~~
+#16 7.208 In file included from src/core/utils.h:30:
+#16 7.208 /usr/include/aarch64-linux-gnu/libavcodec/avcodec.h:1006:9: note: declared here
+#16 7.208  1006 |     int channels;
+#16 7.208       |         ^~~~~~~~
+#16 7.208 src/core/indexing.cpp:308:32: warning: 'AVCodecContext::channels' is deprecated [-Wdeprecated-declarations]
+#16 7.208   308 |         AP.Channels = Context->channels;
+#16 7.208       |                                ^~~~~~~~
+#16 7.208 /usr/include/aarch64-linux-gnu/libavcodec/avcodec.h:1006:9: note: declared here
+#16 7.208  1006 |     int channels;
+#16 7.208       |         ^~~~~~~~
+#16 7.208 src/core/indexing.cpp:308:32: warning: 'AVCodecContext::channels' is deprecated [-Wdeprecated-declarations]
+#16 7.208   308 |         AP.Channels = Context->channels;
+#16 7.208       |                                ^~~~~~~~
+#16 7.208 /usr/include/aarch64-linux-gnu/libavcodec/avcodec.h:1006:9: note: declared here
+#16 7.208  1006 |     int channels;
+#16 7.208       |         ^~~~~~~~
+#16 7.208 src/core/indexing.cpp:311:41: warning: 'AVCodecContext::channels' is deprecated [-Wdeprecated-declarations]
+#16 7.208   311 |         it->second.Channels != Context->channels) {
+#16 7.208       |                                         ^~~~~~~~
+#16 7.208 /usr/include/aarch64-linux-gnu/libavcodec/avcodec.h:1006:9: note: declared here
+#16 7.208  1006 |     int channels;
+#16 7.208       |         ^~~~~~~~
+#16 7.208 src/core/indexing.cpp:311:41: warning: 'AVCodecContext::channels' is deprecated [-Wdeprecated-declarations]
+#16 7.208   311 |         it->second.Channels != Context->channels) {
+#16 7.208       |                                         ^~~~~~~~
+#16 7.208 /usr/include/aarch64-linux-gnu/libavcodec/avcodec.h:1006:9: note: declared here
+#16 7.208  1006 |     int channels;
+#16 7.208       |         ^~~~~~~~
+#16 7.208 src/core/indexing.cpp:311:41: warning: 'AVCodecContext::channels' is deprecated [-Wdeprecated-declarations]
+#16 7.208   311 |         it->second.Channels != Context->channels) {
+#16 7.208       |                                         ^~~~~~~~
+#16 7.208 /usr/include/aarch64-linux-gnu/libavcodec/avcodec.h:1006:9: note: declared here
+#16 7.208  1006 |     int channels;
+#16 7.208       |         ^~~~~~~~
+#16 7.208 src/core/indexing.cpp:315:75: warning: 'AVCodecContext::channels' is deprecated [-Wdeprecated-declarations]
+#16 7.208   315 |             << " Channels: " << it->second.Channels << " -> " << Context->channels << ";"
+#16 7.208       |                                                                           ^~~~~~~~
+#16 7.208 /usr/include/aarch64-linux-gnu/libavcodec/avcodec.h:1006:9: note: declared here
+#16 7.208  1006 |     int channels;
+#16 7.208       |         ^~~~~~~~
+#16 7.208 src/core/indexing.cpp:315:75: warning: 'AVCodecContext::channels' is deprecated [-Wdeprecated-declarations]
+#16 7.208   315 |             << " Channels: " << it->second.Channels << " -> " << Context->channels << ";"
+#16 7.208       |                                                                           ^~~~~~~~
+#16 7.208 /usr/include/aarch64-linux-gnu/libavcodec/avcodec.h:1006:9: note: declared here
+#16 7.208  1006 |     int channels;
+#16 7.208       |         ^~~~~~~~
+#16 7.208 src/core/indexing.cpp:315:75: warning: 'AVCodecContext::channels' is deprecated [-Wdeprecated-declarations]
+#16 7.208   315 |             << " Channels: " << it->second.Channels << " -> " << Context->channels << ";"
+#16 7.208       |                                                                           ^~~~~~~~
+#16 7.208 /usr/include/aarch64-linux-gnu/libavcodec/avcodec.h:1006:9: note: declared here
+#16 7.208  1006 |     int channels;
+#16 7.208       |         ^~~~~~~~
+#16 7.216   CXX      src/vapoursynth/vapoursynth.lo
+#16 7.349 In file included from src/vapoursynth/vapoursource.cpp:22:
+#16 7.349 src/vapoursynth/../core/utils.h:101:10: warning: unnecessary parentheses in declaration of 'ptr' [-Wparentheses]
+#16 7.349   101 |         T(FFMS_Struct::*ptr);
+#16 7.349       |          ^~~~~~~~~~~~~~~~~~~
+#16 7.349 src/vapoursynth/../core/utils.h:101:10: note: remove parentheses
+#16 7.349   101 |         T(FFMS_Struct::*ptr);
+#16 7.349       |          ^~~~~~~~~~~~~~~~~~~
+#16 7.349       |          -                 -
+#16 7.411 In file included from src/vapoursynth/vapoursynth.cpp:24:
+#16 7.411 src/vapoursynth/../core/utils.h:101:10: warning: unnecessary parentheses in declaration of 'ptr' [-Wparentheses]
+#16 7.411   101 |         T(FFMS_Struct::*ptr);
+#16 7.411       |          ^~~~~~~~~~~~~~~~~~~
+#16 7.411 src/vapoursynth/../core/utils.h:101:10: note: remove parentheses
+#16 7.411   101 |         T(FFMS_Struct::*ptr);
+#16 7.411       |          ^~~~~~~~~~~~~~~~~~~
+#16 7.411       |          -                 -
+#16 7.698   CXXLD    src/core/libffms2.la
+#16 7.816   CXXLD    src/index/ffmsindex
+#16 7.994 make[1]: Entering directory '/build/ffms2'
+#16 8.003  /usr/bin/mkdir -p '/usr/local/lib'
+#16 8.004  /bin/bash ./libtool   --mode=install /usr/bin/install -c   src/core/libffms2.la '/usr/local/lib'
+#16 8.022 libtool: install: /usr/bin/install -c src/core/.libs/libffms2.so.4.0.0 /usr/local/lib/libffms2.so.4.0.0
+#16 8.029 libtool: install: (cd /usr/local/lib && { ln -s -f libffms2.so.4.0.0 libffms2.so.4 || { rm -f libffms2.so.4 && ln -s libffms2.so.4.0.0 libffms2.so.4; }; })
+#16 8.031 libtool: install: (cd /usr/local/lib && { ln -s -f libffms2.so.4.0.0 libffms2.so || { rm -f libffms2.so && ln -s libffms2.so.4.0.0 libffms2.so; }; })
+#16 8.034 libtool: install: /usr/bin/install -c src/core/.libs/libffms2.lai /usr/local/lib/libffms2.la
+#16 8.054 libtool: finish: PATH="/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/sbin" ldconfig -n /usr/local/lib
+#16 8.055 ----------------------------------------------------------------------
+#16 8.055 Libraries have been installed in:
+#16 8.055    /usr/local/lib
+#16 8.055
+#16 8.055 If you ever happen to want to link against installed libraries
+#16 8.055 in a given directory, LIBDIR, you must either use libtool, and
+#16 8.055 specify the full pathname of the library, or use the '-LLIBDIR'
+#16 8.055 flag during linking and do at least one of the following:
+#16 8.055    - add LIBDIR to the 'LD_LIBRARY_PATH' environment variable
+#16 8.055      during execution
+#16 8.055    - add LIBDIR to the 'LD_RUN_PATH' environment variable
+#16 8.055      during linking
+#16 8.055    - use the '-Wl,-rpath -Wl,LIBDIR' linker flag
+#16 8.055    - have your system administrator add LIBDIR to '/etc/ld.so.conf'
+#16 8.055
+#16 8.055 See any operating system documentation about shared libraries for
+#16 8.055 more information, such as the ld(1) and ld.so(8) manual pages.
+#16 8.055 ----------------------------------------------------------------------
+#16 8.056  /usr/bin/mkdir -p '/usr/local/bin'
+#16 8.057   /bin/bash ./libtool   --mode=install /usr/bin/install -c src/index/ffmsindex '/usr/local/bin'
+#16 8.080 libtool: install: /usr/bin/install -c src/index/.libs/ffmsindex /usr/local/bin/ffmsindex
+#16 8.082  /usr/bin/mkdir -p '/usr/local/share/doc/ffms2'
+#16 8.084  /usr/bin/install -c -m 644 doc/ffms2-api.md doc/ffms2-changelog.md '/usr/local/share/doc/ffms2'
+#16 8.085  /usr/bin/mkdir -p '/usr/local/include'
+#16 8.087  /usr/bin/install -c -m 644 ./include/ffms.h ./include/ffmscompat.h '/usr/local/include'
+#16 8.088  /usr/bin/mkdir -p '/usr/local/lib/pkgconfig'
+#16 8.090  /usr/bin/install -c -m 644 ffms2.pc '/usr/local/lib/pkgconfig'
+#16 8.091 make[1]: Leaving directory '/build/ffms2'
+#16 DONE 8.1s
+
+#17 [frame-compare-run runtime  2/16] RUN apt-get update &&     apt-get install -y --no-install-recommends         ffmpeg         libxxhash0         &&     rm -rf /var/lib/apt/lists/*
+#17 CACHED
+
+#18 [frame-compare-run runtime  3/16] COPY --from=builder /usr/local/lib/libvapoursynth*.so* /usr/local/lib/
+#18 CACHED
+
+#17 [frame-compare runtime  2/16] RUN apt-get update &&     apt-get install -y --no-install-recommends         ffmpeg         libxxhash0         &&     rm -rf /var/lib/apt/lists/*
+#17 CACHED
+
+#18 [frame-compare runtime  3/16] COPY --from=builder /usr/local/lib/libvapoursynth*.so* /usr/local/lib/
+#18 CACHED
+
+#19 [frame-compare-run runtime  4/16] COPY --from=builder /usr/local/lib/vapoursynth/ /usr/local/lib/vapoursynth/
+#19 DONE 0.0s
+
+#20 [frame-compare-run runtime  5/16] COPY --from=builder /usr/local/lib/python3.13/site-packages/vapoursynth* /usr/local/lib/python3.13/site-packages/
+#20 DONE 0.0s
+
+#21 [frame-compare runtime  6/16] COPY --from=builder /usr/local/include/vapoursynth/ /usr/local/include/vapoursynth/
+#21 DONE 0.0s
+
+#22 [frame-compare-run runtime  7/16] COPY --from=builder /usr/local/lib/libzimg*.so* /usr/local/lib/
+#22 DONE 0.0s
+
+#23 [frame-compare-run runtime  8/16] COPY --from=builder /usr/local/lib/liblsmash*.so* /usr/local/lib/
+#23 DONE 0.0s
+
+#24 [frame-compare runtime  9/16] COPY --from=builder /usr/local/lib/aarch64-linux-gnu/libplacebo*.so* /usr/local/lib/
+#24 DONE 0.0s
+
+#25 [frame-compare-run runtime 10/16] COPY --from=builder /usr/local/lib/libffms2*.so* /usr/local/lib/
+#25 DONE 0.0s
+
+#26 [frame-compare-run runtime 11/16] RUN ldconfig
+#26 0.089 ldconfig: /usr/local/lib/libvapoursynth-script.so.0 is not a symbolic link
+#26 0.089
+#26 0.089 ldconfig: /usr/local/lib/libzimg.so.2 is not a symbolic link
+#26 0.089
+#26 0.089 ldconfig: /usr/local/lib/libffms2.so.4 is not a symbolic link
+#26 0.089
+#26 DONE 0.1s
+
+#27 [frame-compare runtime 12/16] RUN useradd --create-home --shell /bin/bash framecompare
+#27 DONE 0.1s
+
+#28 [frame-compare-run runtime 13/16] WORKDIR /home/framecompare
+#28 DONE 0.0s
+
+#29 [frame-compare-run runtime 14/16] COPY --chown=framecompare:framecompare . /home/framecompare/frame-compare/
+#29 DONE 0.0s
+
+#30 [frame-compare runtime 15/16] WORKDIR /home/framecompare/frame-compare
+#30 DONE 0.0s
+
+#31 [frame-compare-run runtime 16/16] RUN pip install --no-cache-dir --user -e .
+#31 0.935 Obtaining file:///home/framecompare/frame-compare
+#31 0.937   Installing build dependencies: started
+#31 2.371   Installing build dependencies: finished with status 'done'
+#31 2.372   Checking if build backend supports build_editable: started
+#31 2.480   Checking if build backend supports build_editable: finished with status 'done'
+#31 2.481   Getting requirements to build editable: started
+#31 2.692   Getting requirements to build editable: finished with status 'done'
+#31 2.693   Installing backend dependencies: started
+#31 3.771   Installing backend dependencies: finished with status 'done'
+#31 3.771   Preparing editable metadata (pyproject.toml): started
+#31 4.086   Preparing editable metadata (pyproject.toml): finished with status 'done'
+#31 4.162 Collecting anyio>=4.7.0 (from frame-compare==0.1.0)
+#31 4.222   Downloading anyio-4.12.0-py3-none-any.whl.metadata (4.3 kB)
+#31 4.255 Collecting httpx>=0.28.0 (from frame-compare==0.1.0)
+#31 4.271   Downloading httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+#31 4.437 Collecting numpy>=2.2.0 (from frame-compare==0.1.0)
+#31 4.450   Downloading numpy-2.4.0-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl.metadata (6.6 kB)
+#31 4.473 Collecting pydantic-settings>=2.7.0 (from frame-compare==0.1.0)
+#31 4.487   Downloading pydantic_settings-2.12.0-py3-none-any.whl.metadata (3.4 kB)
+#31 4.575 Collecting pydantic>=2.10.0 (from frame-compare==0.1.0)
+#31 4.589   Downloading pydantic-2.12.5-py3-none-any.whl.metadata (90 kB)
+#31 4.651 Collecting rich>=13.9.0 (from frame-compare==0.1.0)
+#31 4.666   Downloading rich-14.2.0-py3-none-any.whl.metadata (18 kB)
+#31 4.686 Collecting structlog>=24.4.0 (from frame-compare==0.1.0)
+#31 4.701   Downloading structlog-25.5.0-py3-none-any.whl.metadata (9.5 kB)
+#31 4.727 Collecting typer>=0.15.0 (from frame-compare==0.1.0)
+#31 4.742   Downloading typer-0.21.0-py3-none-any.whl.metadata (16 kB)
+#31 4.761 Collecting idna>=2.8 (from anyio>=4.7.0->frame-compare==0.1.0)
+#31 4.772   Downloading idna-3.11-py3-none-any.whl.metadata (8.4 kB)
+#31 4.793 Collecting certifi (from httpx>=0.28.0->frame-compare==0.1.0)
+#31 4.805   Downloading certifi-2025.11.12-py3-none-any.whl.metadata (2.5 kB)
+#31 4.831 Collecting httpcore==1.* (from httpx>=0.28.0->frame-compare==0.1.0)
+#31 4.844   Downloading httpcore-1.0.9-py3-none-any.whl.metadata (21 kB)
+#31 4.862 Collecting h11>=0.16 (from httpcore==1.*->httpx>=0.28.0->frame-compare==0.1.0)
+#31 4.877   Downloading h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+#31 4.897 Collecting annotated-types>=0.6.0 (from pydantic>=2.10.0->frame-compare==0.1.0)
+#31 4.909   Downloading annotated_types-0.7.0-py3-none-any.whl.metadata (15 kB)
+#31 5.323 Collecting pydantic-core==2.41.5 (from pydantic>=2.10.0->frame-compare==0.1.0)
+#31 5.338   Downloading pydantic_core-2.41.5-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl.metadata (7.3 kB)
+#31 5.360 Collecting typing-extensions>=4.14.1 (from pydantic>=2.10.0->frame-compare==0.1.0)
+#31 5.373   Downloading typing_extensions-4.15.0-py3-none-any.whl.metadata (3.3 kB)
+#31 5.390 Collecting typing-inspection>=0.4.2 (from pydantic>=2.10.0->frame-compare==0.1.0)
+#31 5.405   Downloading typing_inspection-0.4.2-py3-none-any.whl.metadata (2.6 kB)
+#31 5.431 Collecting python-dotenv>=0.21.0 (from pydantic-settings>=2.7.0->frame-compare==0.1.0)
+#31 5.445   Downloading python_dotenv-1.2.1-py3-none-any.whl.metadata (25 kB)
+#31 5.467 Collecting markdown-it-py>=2.2.0 (from rich>=13.9.0->frame-compare==0.1.0)
+#31 5.481   Downloading markdown_it_py-4.0.0-py3-none-any.whl.metadata (7.3 kB)
+#31 5.510 Collecting pygments<3.0.0,>=2.13.0 (from rich>=13.9.0->frame-compare==0.1.0)
+#31 5.524   Downloading pygments-2.19.2-py3-none-any.whl.metadata (2.5 kB)
+#31 5.552 Collecting click>=8.0.0 (from typer>=0.15.0->frame-compare==0.1.0)
+#31 5.564   Downloading click-8.3.1-py3-none-any.whl.metadata (2.6 kB)
+#31 5.587 Collecting shellingham>=1.3.0 (from typer>=0.15.0->frame-compare==0.1.0)
+#31 5.601   Downloading shellingham-1.5.4-py2.py3-none-any.whl.metadata (3.5 kB)
+#31 5.621 Collecting mdurl~=0.1 (from markdown-it-py>=2.2.0->rich>=13.9.0->frame-compare==0.1.0)
+#31 5.633   Downloading mdurl-0.1.2-py3-none-any.whl.metadata (1.6 kB)
+#31 5.653 Downloading anyio-4.12.0-py3-none-any.whl (113 kB)
+#31 5.669 Downloading httpx-0.28.1-py3-none-any.whl (73 kB)
+#31 5.685 Downloading httpcore-1.0.9-py3-none-any.whl (78 kB)
+#31 5.698 Downloading numpy-2.4.0-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl (14.4 MB)
+#31 6.032    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 14.4/14.4 MB 45.4 MB/s eta 0:00:00
+#31 6.047 Downloading pydantic-2.12.5-py3-none-any.whl (463 kB)
+#31 6.076 Downloading pydantic_core-2.41.5-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl (1.9 MB)
+#31 6.109    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.9/1.9 MB 53.4 MB/s eta 0:00:00
+#31 6.121 Downloading pydantic_settings-2.12.0-py3-none-any.whl (51 kB)
+#31 6.132 Downloading rich-14.2.0-py3-none-any.whl (243 kB)
+#31 6.151 Downloading structlog-25.5.0-py3-none-any.whl (72 kB)
+#31 6.167 Downloading typer-0.21.0-py3-none-any.whl (47 kB)
+#31 6.185 Downloading annotated_types-0.7.0-py3-none-any.whl (13 kB)
+#31 6.200 Downloading click-8.3.1-py3-none-any.whl (108 kB)
+#31 6.214 Downloading idna-3.11-py3-none-any.whl (71 kB)
+#31 6.231 Downloading markdown_it_py-4.0.0-py3-none-any.whl (87 kB)
+#31 6.251 Downloading pygments-2.19.2-py3-none-any.whl (1.2 MB)
+#31 6.270    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 56.1 MB/s eta 0:00:00
+#31 6.288 Downloading python_dotenv-1.2.1-py3-none-any.whl (21 kB)
+#31 6.306 Downloading shellingham-1.5.4-py2.py3-none-any.whl (9.8 kB)
+#31 6.319 Downloading typing_extensions-4.15.0-py3-none-any.whl (44 kB)
+#31 6.336 Downloading typing_inspection-0.4.2-py3-none-any.whl (14 kB)
+#31 6.351 Downloading certifi-2025.11.12-py3-none-any.whl (159 kB)
+#31 6.366 Downloading h11-0.16.0-py3-none-any.whl (37 kB)
+#31 6.383 Downloading mdurl-0.1.2-py3-none-any.whl (10.0 kB)
+#31 6.416 Building wheels for collected packages: frame-compare
+#31 6.417   Building editable for frame-compare (pyproject.toml): started
+#31 6.532   Building editable for frame-compare (pyproject.toml): finished with status 'done'
+#31 6.532   Created wheel for frame-compare: filename=frame_compare-0.1.0-py3-none-any.whl size=4132 sha256=c2e1d5f291f01942d8df02e8e6277b4c301ab34ef483c80fb6ec47e21de9be29
+#31 6.532   Stored in directory: /tmp/pip-ephem-wheel-cache-ktr1pq5v/wheels/e3/9d/ae/2b4c7875ced965f9e2b97d4606866b00aea8c0512f7741413d
+#31 6.533 Successfully built frame-compare
+#31 6.557 Installing collected packages: typing-extensions, structlog, shellingham, python-dotenv, pygments, numpy, mdurl, idna, h11, click, certifi, annotated-types, typing-inspection, pydantic-core, markdown-it-py, httpcore, anyio, rich, pydantic, httpx, typer, pydantic-settings, frame-compare
+#31 6.622   WARNING: The script dotenv is installed in '/home/framecompare/.local/bin' which is not on PATH.
+#31 6.622   Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
+#31 7.054   WARNING: The script pygmentize is installed in '/home/framecompare/.local/bin' which is not on PATH.
+#31 7.054   Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
+#31 8.406   WARNING: The scripts f2py and numpy-config are installed in '/home/framecompare/.local/bin' which is not on PATH.
+#31 8.406   Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
+#31 8.600   WARNING: The script markdown-it is installed in '/home/framecompare/.local/bin' which is not on PATH.
+#31 8.600   Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
+#31 9.079   WARNING: The script httpx is installed in '/home/framecompare/.local/bin' which is not on PATH.
+#31 9.079   Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
+#31 9.103   WARNING: The script typer is installed in '/home/framecompare/.local/bin' which is not on PATH.
+#31 9.103   Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
+#31 9.135   WARNING: The script frame-compare is installed in '/home/framecompare/.local/bin' which is not on PATH.
+#31 9.135   Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
+#31 9.138 Successfully installed annotated-types-0.7.0 anyio-4.12.0 certifi-2025.11.12 click-8.3.1 frame-compare-0.1.0 h11-0.16.0 httpcore-1.0.9 httpx-0.28.1 idna-3.11 markdown-it-py-4.0.0 mdurl-0.1.2 numpy-2.4.0 pydantic-2.12.5 pydantic-core-2.41.5 pydantic-settings-2.12.0 pygments-2.19.2 python-dotenv-1.2.1 rich-14.2.0 shellingham-1.5.4 structlog-25.5.0 typer-0.21.0 typing-extensions-4.15.0 typing-inspection-0.4.2
+#31 9.261
+#31 9.261 [notice] A new release of pip is available: 24.3.1 -> 25.3
+#31 9.261 [notice] To update, run: pip install --upgrade pip
+#31 DONE 9.5s
+
+#32 [frame-compare] exporting to image
+#32 exporting layers
+#32 exporting layers 0.2s done
+#32 writing image sha256:8ae407ccef79e023bd081fb67af45269b80c9db17a3e52713f490bcb20623a5c done
+#32 naming to docker.io/library/frame-compare:dev done
+#32 DONE 0.3s
+
+#33 [frame-compare-run] exporting to image
+#33 exporting layers 0.2s done
+#33 writing image sha256:059e351a2ef66103e6e5845e18c8576f5255fe668b844e74ea5d5bedf9ec9452 done
+#33 naming to docker.io/library/frame-compare:dev done
+#33 DONE 0.2s
+
+#34 [frame-compare-run] resolving provenance for metadata file
+#34 DONE 0.0s
+
+#35 [frame-compare] resolving provenance for metadata file
+#35 DONE 0.0s
+ frame-compare:dev  Built
+ frame-compare:dev  Built
