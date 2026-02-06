@@ -172,7 +172,19 @@ if (!(Test-Path -LiteralPath $python)) {
 $env:PYTHONUTF8 = "1"
 $env:PYTHONPATH = "$bundleRoot\\app\\src;$bundleRoot\\app\\site-packages"
 $env:VAPOURSYNTH_PLUGIN_PATH = "$bundleRoot\\vs\\plugins"
-$env:PATH = "$bundleRoot\\python;$bundleRoot\\vs\\core;$bundleRoot\\vs\\plugins;$bundleRoot\\ffmpeg;$env:PATH"
+$vsCore = Join-Path $bundleRoot "vs\\core"
+$pathEntries = @(
+  (Join-Path $bundleRoot "python"),
+  $vsCore,
+  (Join-Path $bundleRoot "vs\\plugins"),
+  (Join-Path $bundleRoot "ffmpeg")
+)
+if (Test-Path -LiteralPath $vsCore) {
+  Get-ChildItem -LiteralPath $vsCore -Directory | ForEach-Object {
+    $pathEntries += $_.FullName
+  }
+}
+$env:PATH = (($pathEntries -join ";") + ";" + $env:PATH)
 
 & $python -m frame_compare.cli_entry @args
 exit $LASTEXITCODE

@@ -45,7 +45,7 @@ jobs:
         shell: pwsh
         run: |
           $bundle = (Resolve-Path "dist/frame-compare-portable-win-x64").Path
-          & "$bundle/frame-compare.ps1" doctor --json | Out-Null
+          & "$bundle/frame-compare.ps1" doctor --json
 
       - name: "Smoke: VS clip + tonemap does not raise"
         shell: pwsh
@@ -54,7 +54,19 @@ jobs:
           $env:PYTHONUTF8 = "1"
           $env:PYTHONPATH = "$bundle/app/src;$bundle/app/site-packages"
           $env:VAPOURSYNTH_PLUGIN_PATH = "$bundle/vs/plugins"
-          $env:PATH = "$bundle/python;$bundle/vs/core;$bundle/vs/plugins;$bundle/ffmpeg;$env:PATH"
+          $vsCore = "$bundle/vs/core"
+          $pathEntries = @(
+            "$bundle/python",
+            $vsCore,
+            "$bundle/vs/plugins",
+            "$bundle/ffmpeg"
+          )
+          if (Test-Path -LiteralPath $vsCore) {
+            Get-ChildItem -LiteralPath $vsCore -Directory | ForEach-Object {
+              $pathEntries += $_.FullName
+            }
+          }
+          $env:PATH = (($pathEntries -join ";") + ";" + $env:PATH)
 
           & "$bundle/python/python.exe" -c "import vapoursynth as vs; from frame_compare.vs.tonemap import apply_tonemap; from frame_compare.vs.types import TonemapSettings; core = vs.core; clip = core.std.BlankClip(width=16, height=16, length=1, format=vs.RGBS); out = apply_tonemap(clip, TonemapSettings(enabled=True)); _ = out.get_frame(0); print('OK')"
 
