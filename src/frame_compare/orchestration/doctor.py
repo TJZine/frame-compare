@@ -11,6 +11,7 @@ import shutil
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from types import ModuleType
 from typing import TYPE_CHECKING
 
 import httpx
@@ -32,6 +33,9 @@ _CHECK_ORDER: list[tuple[str, str]] = [
     ("slowpics", "network"),
     ("tmdb_api_key", "network"),
 ]
+
+_REGISTERED_WINDOWS_DLL_DIRS: set[str] = set()
+_WINDOWS_DLL_HANDLES: list[object] = []
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +88,59 @@ class DoctorReport:
 # ─── Check Implementations ────────────────────────────────────────────────────
 
 
+def _register_windows_dll_dirs() -> None:
+    """Register candidate DLL directories for bundled Windows runtime imports.
+
+    Python 3.8+ on Windows can require explicit DLL directory registration for
+    extension-module dependencies. This keeps VapourSynth imports working in the
+    portable bundle layout where runtime DLLs live under ``vs/core``.
+    """
+    if os.name != "nt" or not hasattr(os, "add_dll_directory"):
+        return
+
+    candidates: list[str] = []
+    env_home = os.environ.get("VAPOURSYNTH_HOME")
+    if env_home:
+        candidates.append(env_home)
+
+    python_dir = os.path.dirname(sys.executable)
+    bundle_root = os.path.dirname(python_dir)
+    vs_core = os.path.join(bundle_root, "vs", "core")
+    if os.path.isdir(vs_core):
+        candidates.append(vs_core)
+        for root, dirs, _ in os.walk(vs_core):
+            for dirname in dirs:
+                candidates.append(os.path.join(root, dirname))
+
+    app_site_packages = os.path.join(bundle_root, "app", "site-packages")
+    nested_site_packages = os.path.join(app_site_packages, "Lib", "site-packages")
+    for site_dir in (app_site_packages, nested_site_packages):
+        if os.path.isdir(site_dir):
+            candidates.append(site_dir)
+
+    for candidate in candidates:
+        if not candidate or not os.path.isdir(candidate):
+            continue
+        normalized = os.path.normcase(os.path.normpath(candidate))
+        if normalized in _REGISTERED_WINDOWS_DLL_DIRS:
+            continue
+        try:
+            handle = os.add_dll_directory(candidate)
+        except (OSError, FileNotFoundError):
+            continue
+        _WINDOWS_DLL_HANDLES.append(handle)
+        _REGISTERED_WINDOWS_DLL_DIRS.add(normalized)
+
+
+def _import_vapoursynth() -> ModuleType:
+    """Import VapourSynth, falling back to runtime-path registration on failure."""
+    try:
+        return __import__("vapoursynth")
+    except ImportError:
+        _register_windows_dll_dirs()
+        return __import__("vapoursynth")
+
+
 def _check_python_version() -> CheckResult:
     """Check Python version is >= 3.13 per ADR-001."""
     version = sys.version_info
@@ -104,7 +161,7 @@ def _check_python_version() -> CheckResult:
 def _check_vapoursynth() -> CheckResult:
     """Check VapourSynth is available."""
     try:
-        __import__("vapoursynth")
+        _import_vapoursynth()
         return CheckResult(passed=True, message="VapourSynth available")
     except ImportError:
         return CheckResult(
@@ -117,8 +174,7 @@ def _check_vapoursynth() -> CheckResult:
 def _check_lsmas() -> CheckResult:
     """Check L-SMASH-Works plugin is available."""
     try:
-        import vapoursynth as vs
-
+        vs = _import_vapoursynth()
         core = vs.core
         # Check for lsmas namespace (preferred) or lw (legacy)
         if hasattr(core, "lsmas") or hasattr(core, "lw"):

@@ -67,6 +67,31 @@ class TestCheckVapoursynth:
         assert result.passed is False
         assert "not found" in result.message
 
+    def test_check_vapoursynth_registers_runtime_dirs_before_import(self) -> None:
+        """Ensure runtime DLL path registration runs as an import fallback."""
+        checks = collect_checks()
+        vs_check = next(c for c in checks if c.name == "vapoursynth")
+
+        original_import = __import__
+        mock_vs = MagicMock()
+        vs_attempts = {"count": 0}
+
+        def _fake_import(name: str, *args: object, **kwargs: object) -> object:
+            if name == "vapoursynth":
+                vs_attempts["count"] += 1
+                if vs_attempts["count"] == 1:
+                    raise ImportError("missing runtime DLL")
+                return mock_vs
+            return original_import(name, *args, **kwargs)
+
+        with patch("frame_compare.orchestration.doctor._register_windows_dll_dirs") as register_dirs:
+            with patch("builtins.__import__", side_effect=_fake_import):
+                result = vs_check.check_fn()
+
+        register_dirs.assert_called_once()
+        assert vs_attempts["count"] == 2
+        assert result.passed is True
+
 
 class TestCheckFFmpeg:
     """Tests for ffmpeg check via run_doctor."""

@@ -295,6 +295,17 @@ function Install-PythonDeps([string]$BundleRoot, [string]$VsCoreRoot) {
   $vsWheel = $vsWheelCandidates[0].FullName
   uv pip install --only-binary :all: --target $sitePackages $vsWheel
   Assert-LastExitCode -CommandLabel "uv pip install vapoursynth wheel"
+
+  # Some wheel layouts place vapoursynth.dll under Lib/site-packages; normalize it
+  # beside vapoursynth.pyd so default Windows DLL lookup resolves it reliably.
+  $vsDllRoot = Join-Path $sitePackages "vapoursynth.dll"
+  $vsDllNested = Join-Path $sitePackages "Lib\\site-packages\\vapoursynth.dll"
+  if ((Test-Path -LiteralPath $vsDllNested) -and !(Test-Path -LiteralPath $vsDllRoot)) {
+    Copy-Item -Force -LiteralPath $vsDllNested -Destination $vsDllRoot
+  }
+  if (!(Test-Path -LiteralPath $vsDllRoot) -and !(Test-Path -LiteralPath $vsDllNested)) {
+    throw "vapoursynth.dll not found after wheel install in $sitePackages"
+  }
 }
 
 function Assert-BundleRuntime([string]$BundleRoot) {
