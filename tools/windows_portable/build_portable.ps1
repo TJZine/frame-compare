@@ -367,6 +367,7 @@ function Consolidate-VapourSynthPlugins([string]$BundleRoot) {
   $vsCore = Join-Path $BundleRoot "vs\\core"
   $vsPlugins = Join-Path $BundleRoot "vs\\plugins"
   Ensure-Directory -Path $vsPlugins
+  $blockedPluginNames = @("AvsCompat.dll")
 
   # Consolidate core plugins into the normative plugin directory.
   $corePluginsDir = Join-Path $vsCore "vs-coreplugins"
@@ -375,6 +376,9 @@ function Consolidate-VapourSynthPlugins([string]$BundleRoot) {
   foreach ($dir in @($corePluginsDir, $pluginsDir)) {
     if (Test-Path -LiteralPath $dir) {
       Get-ChildItem -LiteralPath $dir -Filter "*.dll" | ForEach-Object {
+        if ($blockedPluginNames -contains $_.Name) {
+          return
+        }
         Copy-Item -Force -LiteralPath $_.FullName -Destination (Join-Path $vsPlugins $_.Name)
       }
     }

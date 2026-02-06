@@ -68,3 +68,4 @@ htmlcov/
 
 # OS
 Thumbs.db
+.portable_cache/
