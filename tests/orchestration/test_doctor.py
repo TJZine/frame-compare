@@ -84,9 +84,11 @@ class TestCheckVapoursynth:
                 return mock_vs
             return original_import(name, *args, **kwargs)
 
-        with patch("frame_compare.orchestration.doctor._register_windows_dll_dirs") as register_dirs:
-            with patch("builtins.__import__", side_effect=_fake_import):
-                result = vs_check.check_fn()
+        with (
+            patch("frame_compare.orchestration.doctor._register_windows_dll_dirs") as register_dirs,
+            patch("builtins.__import__", side_effect=_fake_import),
+        ):
+            result = vs_check.check_fn()
 
         register_dirs.assert_called_once()
         assert vs_attempts["count"] == 2
@@ -154,6 +156,7 @@ class TestCheckLsmas:
 
     def test_check_lsmas_plugin_fallback_loads_from_plugin_path(self) -> None:
         """If autoload misses lsmas, fallback LoadPlugin path should recover."""
+
         class _Core:
             pass
 
@@ -164,23 +167,25 @@ class TestCheckLsmas:
         mock_std = _Std()
 
         def _load_plugin(*, path: str) -> None:
-            setattr(mock_core, "lsmas", MagicMock())
+            mock_core.lsmas = MagicMock()
 
-        setattr(mock_std, "LoadPlugin", _load_plugin)
-        setattr(mock_core, "std", mock_std)
+        mock_std.LoadPlugin = _load_plugin
+        mock_core.std = mock_std
         mock_vs = MagicMock()
         mock_vs.core = mock_core
 
         checks = collect_checks()
         lsmas_check = next(c for c in checks if c.name == "lsmas")
 
-        with patch.dict(sys.modules, {"vapoursynth": mock_vs}):
-            with patch(
+        with (
+            patch.dict(sys.modules, {"vapoursynth": mock_vs}),
+            patch(
                 "frame_compare.orchestration.doctor._candidate_lsmas_plugin_paths",
                 return_value=["C:/bundle/vs/plugins/libvslsmashsource.dll"],
-            ):
-                with patch("os.path.isfile", return_value=True):
-                    result = lsmas_check.check_fn()
+            ),
+            patch("os.path.isfile", return_value=True),
+        ):
+            result = lsmas_check.check_fn()
 
         assert result.passed is True
         assert result.details.get("plugin_path") == "C:/bundle/vs/plugins/libvslsmashsource.dll"
