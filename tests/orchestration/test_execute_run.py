@@ -12,17 +12,19 @@ import httpx
 import pytest
 
 from frame_compare.analysis import cache_io
-from frame_compare.config import load_config
+from frame_compare.config import ConfigSchema, load_config
 from frame_compare.errors import (
     CacheCorruptionError,
     CacheVersionMismatchError,
     ConfigNotFoundError,
     MetricsCalculationError,
+    TonemapRequiresVapourSynthError,
 )
 from frame_compare.orchestration import coordinator
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.services.alignment import CACHE_FILE_NAME
-from frame_compare.vs.types import SourceInfo
+from frame_compare.services.types import AlignmentResult
+from frame_compare.vs.types import HDRMetadata, SourceInfo
 
 # Minimal valid TOML config content
 MINIMAL_CONFIG = """\
@@ -34,6 +36,9 @@ config_dir = "config"
 
 [audio_alignment]
 enable = false
+
+[screenshots]
+use_ffmpeg = true
 
 [report]
 enable = false
@@ -74,6 +79,41 @@ class FakeVSLoader:
         raise RuntimeError("ensure_core should not be called in tests")
 
 
+class FakeHDRVSLoader(FakeVSLoader):
+    def load(self, path: Path) -> SourceInfo:
+        return SourceInfo(
+            clip=cast(Any, object()),
+            width=1920,
+            height=1080,
+            num_frames=100,
+            fps=Fraction(24, 1),
+            format=cast(Any, object()),
+            frame_props={},
+            is_hdr=True,
+            hdr_metadata=HDRMetadata(
+                mastering_display="G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1)",
+                max_cll=1000,
+                max_fall=400,
+                color_primaries=9,
+                transfer=16,
+                matrix=9,
+            ),
+        )
+
+
+class FakeFFmpegRunner:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int, str]] = []
+
+    def extract_frame(self, video: Path, frame_num: int, output: Path) -> None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(f"{video.name}:{frame_num}".encode())
+        self.calls.append((video.name, frame_num, output.name))
+
+    def probe_hdr(self, video: Path):  # type: ignore[override]
+        return None
+
+
 def test_execute_run_returns_success_and_records_preflight_timing(
     tmp_path: Path,
 ) -> None:
@@ -89,17 +129,15 @@ def test_execute_run_returns_success_and_records_preflight_timing(
         skip_dovi=True,
         no_upload=True,
     )
-    deps = RunDependencies(vs_loader=FakeVSLoader())
+    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
     result = asyncio.run(execute_run(request, deps=deps))
 
     assert result.success is True
-    assert "frame_plan: instrumentation-only phase; executor not wired in coordinator" in (
-        result.warnings
-    )
-    assert (
-        "render: instrumentation-only phase; executor not wired in coordinator" in result.warnings
-    )
+    assert result.warnings == []
+    assert result.screenshot_dir == (tmp_path / "screenshots").resolve()
+    assert result.frame_count == 10
+    assert result.clips_processed == 1
     assert result.duration_seconds >= 0.0
     expected_keys = {
         "preflight",
@@ -124,6 +162,26 @@ def test_execute_run_returns_success_and_records_preflight_timing(
     assert result.phase_timings["report"] == 0.0
 
 
+def test_execute_run_ffmpeg_render_rejects_hdr_when_tonemap_enabled(
+    tmp_path: Path,
+) -> None:
+    _create_config(tmp_path)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "source.mkv")
+
+    request = RunRequest(
+        root=tmp_path,
+        skip_analysis=True,
+        skip_metadata=True,
+        skip_dovi=True,
+        no_upload=True,
+    )
+    deps = RunDependencies(vs_loader=FakeHDRVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+
+    with pytest.raises(TonemapRequiresVapourSynthError):
+        asyncio.run(execute_run(request, deps=deps))
+
+
 def test_execute_run_propagates_config_not_found_error(tmp_path: Path) -> None:
     """Given missing config → preflight error is raised."""
     request = RunRequest(root=tmp_path)
@@ -141,7 +199,11 @@ def test_execute_run_creates_and_closes_http_client_when_missing(
     _create_video_files(input_dir, "source.mkv")
 
     request = RunRequest(root=tmp_path, quiet=True)
-    deps = RunDependencies(http_client=None, vs_loader=FakeVSLoader())
+    deps = RunDependencies(
+        http_client=None,
+        vs_loader=FakeVSLoader(),
+        ffmpeg_runner=FakeFFmpegRunner(),
+    )
 
     asyncio.run(execute_run(request, deps=deps))
 
@@ -164,7 +226,7 @@ def test_execute_run_emits_fps_report_after_load_sources_and_after_align(
         skip_dovi=True,
         no_upload=True,
     )
-    deps = RunDependencies(vs_loader=FakeVSLoader())
+    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
     calls: list[str] = []
 
@@ -213,7 +275,7 @@ enable = false
         skip_metadata=True,
         skip_dovi=True,
     )
-    deps = RunDependencies(vs_loader=FakeVSLoader())
+    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
     captured: dict[str, object] = {}
 
@@ -225,7 +287,7 @@ enable = false
 
     asyncio.run(execute_run(request, deps=deps))
 
-    config = captured["config"]
+    config = cast(ConfigSchema, captured["config"])
     assert config.color.preset == "filmic"
     assert config.color.target_nits == 203
     assert config.screenshots.overlay_mode == "diagnostic"
@@ -259,7 +321,7 @@ def test_execute_run_no_cache_deletes_metrics_cache_and_offsets_cache(
         skip_dovi=True,
         no_upload=True,
     )
-    deps = RunDependencies(vs_loader=FakeVSLoader())
+    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
     asyncio.run(execute_run(request, deps=deps))
 
@@ -359,3 +421,73 @@ def test_execute_run_from_cache_only_fails_when_metrics_cache_version_mismatch(
 
     with pytest.raises(CacheVersionMismatchError):
         asyncio.run(execute_run(request, deps=deps))
+
+
+def test_execute_run_align_applies_trim_first_frame_mapping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_content = """\
+[paths]
+input_dir = "comparison_videos"
+screenshots_dir = "screenshots"
+generated_dir = "generated"
+config_dir = "config"
+
+[audio_alignment]
+enable = true
+
+[screenshots]
+use_ffmpeg = true
+
+[report]
+enable = false
+"""
+    _create_config(tmp_path, content=config_content)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "a_ref.mkv", "b_comp1.mkv", "c_comp2.mkv")
+
+    async def _fake_align_clips(reference, comparisons, config, cache_dir, progress=None):
+        del config, cache_dir, progress
+        return [
+            AlignmentResult(
+                reference_clip=reference.name,
+                comparison_clip=comparisons[0].name,
+                frame_offset=1,
+                time_offset_seconds=0.041,
+                correlation_score=0.9,
+                method="cross_correlation",
+            ),
+            AlignmentResult(
+                reference_clip=reference.name,
+                comparison_clip=comparisons[1].name,
+                frame_offset=-1,
+                time_offset_seconds=-0.041,
+                correlation_score=0.9,
+                method="cross_correlation",
+            ),
+        ]
+
+    monkeypatch.setattr(coordinator, "align_clips", _fake_align_clips)
+
+    ffmpeg = FakeFFmpegRunner()
+    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=ffmpeg)
+    request = RunRequest(
+        root=tmp_path,
+        frame_count=3,
+        skip_analysis=True,
+        skip_metadata=True,
+        skip_dovi=True,
+        no_upload=True,
+    )
+
+    result = asyncio.run(execute_run(request, deps=deps))
+    assert result.success is True
+    assert result.frame_count == 3
+
+    by_video: dict[str, list[int]] = {}
+    for video_name, frame_num, _ in ffmpeg.calls:
+        by_video.setdefault(video_name, []).append(frame_num)
+
+    assert by_video["a_ref.mkv"] == [5, 50, 97]
+    assert by_video["b_comp1.mkv"] == [4, 49, 96]
+    assert by_video["c_comp2.mkv"] == [6, 51, 98]

@@ -555,19 +555,19 @@
 - Added `should_tonemap(source_info, config)` gating function
 - Added `resolve_tonemap_settings(config, cli_overrides)` for settings resolution
 - Added `probe_is_hdr_ffprobe(path)` (internal only; not public API) for HDR detection when VS unavailable
-- Implemented deterministic fallback: HDR + tonemap_enabled + VS_missing → fail-fast (FC-2001)
+- Implemented deterministic fallback: HDR + tonemap_enabled + VS_missing → fail-fast (FC-2001 at the time; FFmpeg-only gating later refined to FC-2009)
 - SDR or tonemap_disabled → FFmpeg fallback allowed
 
 **SSOT Edits (this run):**
 
 - `render-module.md` §1.4.1: Added parsing rules + failure behavior for `probe_is_hdr_ffprobe(path: Path) -> bool`
-- `render-module.md` §1.4.4: VS-missing tonemap-required uses `VapourSynthNotFoundError (FC-2001)`
+- `render-module.md` §1.4.4: VS-missing tonemap-required uses `VapourSynthNotFoundError (FC-2001)` for auto-render fallback path semantics
 - `render-module.md` §3.1: Updated `render_screenshots(...)` signature + loading strategy notes
-- `render-module.md` §7.2: Updated markers and expected exceptions for VS-missing tonemap-required cases
+- `render-module.md` §7.2: Updated markers and expected exceptions for VS-missing tonemap-required cases (later refined for FFmpeg-only gating)
 
 **Contract Alignment Decision:**
 
-VS-missing tonemap-required scenario uses `VapourSynthNotFoundError (FC-2001)`. No custom error code (FC-4004) introduced.
+VS-missing tonemap-required auto-render fallback uses `VapourSynthNotFoundError (FC-2001)`. This was later refined for FFmpeg-only gating with `TonemapRequiresVapourSynthError (FC-2009)`.
 
 **Probe Determinism Decision:**
 
@@ -634,3 +634,22 @@ Implemented deterministic precedence in `align_clips`: manual override > cached 
 - ruff: PASS (all checks)
 - pytest: PASS (all pass, 2 skipped)
 - lint-imports: PASS (2 contracts kept)
+
+## 2026-02-07 — Tonemap Gating Error Refinement
+
+### Scope
+
+**Context:** FFmpeg-only screenshot paths were using `VapourSynthNotFoundError (FC-2001)` for HDR+tonemap gating failures, which conflated policy enforcement with dependency discovery.
+
+**Decision:** Introduced `TonemapRequiresVapourSynthError (FC-2009)` and switched FFmpeg-only gating sites to raise it.
+
+**Updated Call Sites:**
+
+- `frame_compare.render.orchestrator.render_screenshots(..., renderer="ffmpeg")` HDR+tonemap-required guard
+- `frame_compare.orchestration.coordinator._run_render_phase` `screenshots.use_ffmpeg=true` guard
+
+**Rationale:**
+
+- Improves error semantics for operator-facing diagnostics.
+- Preserves dependency-category exit mapping (`FC-2xxx` → exit code 3) without changing CLI behavior.
+- Keeps auto-render fallback behavior unchanged (it still re-raises the original VS load failure cause).

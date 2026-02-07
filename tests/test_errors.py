@@ -53,6 +53,7 @@ from frame_compare.errors import (
     TmdbError,
     TmdbRateLimitedError,
     TonemapError,
+    TonemapRequiresVapourSynthError,
     UnexpectedStateError,
     VapourSynthError,
     VapourSynthNotFoundError,
@@ -75,6 +76,7 @@ from frame_compare.errors import (
         (FFmpegNotFoundError, (), "FC-2005"),
         (FFmpegError, ("test", 1), "FC-2006"),
         (DoviToolNotFoundError, (), "FC-2007"),
+        (TonemapRequiresVapourSynthError, (), "FC-2009"),
         (PythonVersionError, ("3.11",), "FC-2010"),
         # InputError (FC-3xxx)
         (NoVideosFoundError, (Path("/test"),), "FC-3001"),

@@ -289,7 +289,7 @@ def render_screenshots(
         Dict mapping label -> list of rendered screenshot paths
 
     Raises:
-        VapourSynthNotFoundError: If HDR + enable_tonemap=True + VS unavailable
+        TonemapRequiresVapourSynthError: If HDR + enable_tonemap=True on FFmpeg-only path
         PluginNotFoundError: If required VS plugin is missing (renderer=vapoursynth)
         SourceLoadError: If source loading fails (renderer=vapoursynth)
         FFmpegNotFoundError: If ffprobe is missing for HDR probe
@@ -299,6 +299,7 @@ def render_screenshots(
         PluginNotFoundError,
         RenderError,
         SourceLoadError,
+        TonemapRequiresVapourSynthError,
         VapourSynthNotFoundError,
     )
     from frame_compare.vs.tonemap import apply_tonemap
@@ -369,7 +370,7 @@ def render_screenshots(
                     raise  # Propagate probe exception
 
                 if is_hdr:
-                    # HDR + tonemap required + VS unavailable → re-raise
+                    # HDR + tonemap required in auto mode + VS unavailable → re-raise original VS failure.
                     log.debug(
                         "hdr_tonemap_required_no_fallback",
                         path=str(clip_path),
@@ -406,8 +407,8 @@ def render_screenshots(
                 raise  # Propagate probe exception
 
             if is_hdr:
-                # HDR + tonemap required → VS required (FC-2001)
-                raise VapourSynthNotFoundError()
+                # HDR + tonemap required → FFmpeg-only path is invalid.
+                raise TonemapRequiresVapourSynthError()
 
         for frame in frames:
             output_path = generate_screenshot_path(output_dir, label, frame)

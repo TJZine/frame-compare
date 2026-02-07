@@ -12,7 +12,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from frame_compare.config.schema import ColorConfig, ConfigSchema
-from frame_compare.errors import SourceLoadError, VapourSynthNotFoundError
+from frame_compare.errors import (
+    SourceLoadError,
+    TonemapRequiresVapourSynthError,
+    VapourSynthNotFoundError,
+)
 from frame_compare.render.orchestrator import (
     render_screenshots,
     resolve_tonemap_settings,
@@ -137,16 +141,16 @@ def test_hdr_enable_tonemap_requires_vs_when_renderer_auto(tmp_path: Path) -> No
 
 @pytest.mark.integration
 def test_hdr_enable_tonemap_requires_vs_when_renderer_ffmpeg(tmp_path: Path) -> None:
-    """HDR + enable_tonemap=True + renderer=ffmpeg → raises VapourSynthNotFoundError."""
+    """HDR + enable_tonemap=True + renderer=ffmpeg → raises dedicated tonemap gating error."""
     clips = [Path("hdr_video.mkv")]
     frames = [0]
     enable_tonemap_config = ConfigSchema(color=ColorConfig(enable_tonemap=True))
 
     with (
         patch("frame_compare.render.orchestrator.probe_is_hdr_ffprobe", return_value=True),
-        pytest.raises(VapourSynthNotFoundError),
+        pytest.raises(TonemapRequiresVapourSynthError),
     ):
-        # Should raise VS not found (tonemap required, no FFmpeg path for HDR)
+        # Should raise explicit tonemap-gating error (no FFmpeg path for HDR+tonemap).
         render_screenshots(clips, frames, tmp_path, enable_tonemap_config, renderer="ffmpeg")
 
 

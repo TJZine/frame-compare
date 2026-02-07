@@ -2,24 +2,31 @@
 
 from __future__ import annotations
 
+import inspect
 import json
-from collections.abc import Callable
-from dataclasses import dataclass, field
+import math
+import subprocess
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
 import httpx
 
-from frame_compare.analysis import cache_io
+from frame_compare.analysis import cache_io, calculate_metrics, create_frame_plan, select_frames
 from frame_compare.config import ConfigSchema, apply_cli_overrides
 from frame_compare.errors import (
     AudioAlignmentError,
     CacheCorruptionError,
     CacheVersionMismatchError,
+    FFmpegError,
+    FFmpegNotFoundError,
     MetricsCalculationError,
+    TonemapRequiresVapourSynthError,
 )
 from frame_compare.orchestration.context import (
+    ClipAlignmentState,
     ClipFingerprint,
     ClipProbeSnapshot,
     ClipState,
@@ -41,8 +48,16 @@ from frame_compare.orchestration.probe_props import (
     compute_tonemap_prop_keys,
 )
 from frame_compare.orchestration.progress import select_reporter
-from frame_compare.services.alignment import CACHE_FILE_NAME, load_cached_offsets
+from frame_compare.render.naming import generate_screenshot_path
+from frame_compare.render.orchestrator import render_screenshots
+from frame_compare.render.types import OverlayMode as RenderOverlayMode
+from frame_compare.services.alignment import CACHE_FILE_NAME, align_clips, load_cached_offsets
+from frame_compare.services.metadata import resolve_metadata
+from frame_compare.services.publishers import publish_to_slowpics
+from frame_compare.services.report import ClipInfo, ReportData, generate_report
+from frame_compare.services.types import AlignmentConfig, MetadataConfig, TmdbMetadata
 from frame_compare.utils.progress import ProgressReporter
+from frame_compare.utils.subproc import run_subprocess
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.loader import DefaultVSLoader, VSLoader
 from frame_compare.vs.types import HDRMetadata
@@ -162,16 +177,135 @@ class FFmpegRunner(Protocol):
 
 
 class DefaultFFmpegRunner:
-    """Stub FFmpeg runner for dependency injection in this slice."""
+    """Default FFmpeg runner for dependency injection in orchestration."""
+
+    _FFPROBE_TIMEOUT_SECONDS = 15.0
+    _FFMPEG_TIMEOUT_SECONDS = 30.0
+
+    def _probe_fps(self, video: Path) -> float:
+        argv = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=avg_frame_rate",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(video),
+        ]
+        try:
+            proc = run_subprocess(argv, timeout_seconds=self._FFPROBE_TIMEOUT_SECONDS)
+        except FileNotFoundError as exc:
+            raise FFmpegNotFoundError() from exc
+        except subprocess.TimeoutExpired as exc:
+            raise FFmpegError("ffprobe timed out while probing fps", 124) from exc
+        except subprocess.CalledProcessError as exc:
+            raise FFmpegError(exc.stderr.decode(errors="replace"), exc.returncode) from exc
+
+        raw = proc.stdout.decode("utf-8", errors="replace").strip()
+        if not raw:
+            raise FFmpegError("ffprobe returned empty avg_frame_rate", proc.returncode)
+
+        try:
+            if "/" in raw:
+                num, den = raw.split("/", maxsplit=1)
+                num_f = float(num)
+                den_f = float(den)
+                if den_f == 0.0:
+                    raise ValueError("zero denominator")
+                fps = num_f / den_f
+            else:
+                fps = float(raw)
+        except ValueError as exc:
+            raise FFmpegError(f"invalid avg_frame_rate value: {raw!r}", proc.returncode) from exc
+
+        if not math.isfinite(fps) or fps <= 0.0:
+            raise FFmpegError(f"invalid probed fps value: {raw!r}", proc.returncode)
+        return fps
 
     def extract_frame(self, video: Path, frame_num: int, output: Path) -> None:
-        raise NotImplementedError(
-            "DefaultFFmpegRunner is a stub in Phase 6.7; inject a runner to use FFmpeg."
-        )
+        fps = self._probe_fps(video)
+        seek_time = f"{math.floor((frame_num / fps) * 1000) / 1000:.3f}"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        argv = [
+            "ffmpeg",
+            "-y",
+            "-ss",
+            seek_time,
+            "-i",
+            str(video),
+            "-vframes",
+            "1",
+            "-q:v",
+            "1",
+            str(output),
+        ]
+        try:
+            run_subprocess(argv, timeout_seconds=self._FFMPEG_TIMEOUT_SECONDS)
+        except FileNotFoundError as exc:
+            raise FFmpegNotFoundError() from exc
+        except subprocess.TimeoutExpired as exc:
+            raise FFmpegError("ffmpeg timed out while extracting frame", 124) from exc
+        except subprocess.CalledProcessError as exc:
+            raise FFmpegError(exc.stderr.decode(errors="replace"), exc.returncode) from exc
 
     def probe_hdr(self, video: Path) -> HDRMetadata | None:
-        raise NotImplementedError(
-            "DefaultFFmpegRunner is a stub in Phase 6.7; inject a runner to use FFmpeg."
+        argv = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=color_transfer,color_primaries,color_space",
+            "-of",
+            "json",
+            str(video),
+        ]
+        try:
+            proc = run_subprocess(argv, timeout_seconds=self._FFPROBE_TIMEOUT_SECONDS)
+        except FileNotFoundError as exc:
+            raise FFmpegNotFoundError() from exc
+        except subprocess.TimeoutExpired as exc:
+            raise FFmpegError("ffprobe timed out while probing hdr", 124) from exc
+        except subprocess.CalledProcessError as exc:
+            raise FFmpegError(exc.stderr.decode(errors="replace"), exc.returncode) from exc
+
+        try:
+            payload = cast(
+                dict[str, object], json.loads(proc.stdout.decode("utf-8", errors="replace"))
+            )
+        except json.JSONDecodeError as exc:
+            raise FFmpegError("ffprobe returned invalid json", proc.returncode) from exc
+
+        streams_obj = payload.get("streams")
+        if not isinstance(streams_obj, list) or not streams_obj:
+            return None
+        streams = cast(list[object], streams_obj)
+        stream_obj = streams[0]
+        if not isinstance(stream_obj, dict):
+            return None
+        stream = cast(dict[str, object], stream_obj)
+
+        transfer_raw = str(stream.get("color_transfer", "")).lower().strip()
+        primaries_raw = str(stream.get("color_primaries", "")).lower().strip()
+        matrix_raw = str(stream.get("color_space", "")).lower().strip()
+        is_hdr = transfer_raw in {"smpte2084", "arib-std-b67"} and primaries_raw == "bt2020"
+        if not is_hdr:
+            return None
+
+        primaries_map = {"bt709": 1, "bt2020": 9}
+        transfer_map = {"bt709": 1, "smpte2084": 16, "arib-std-b67": 18}
+        matrix_map = {"bt709": 1, "bt2020nc": 9, "bt2020c": 10}
+        return HDRMetadata(
+            mastering_display=None,
+            max_cll=None,
+            max_fall=None,
+            color_primaries=primaries_map.get(primaries_raw, 2),
+            transfer=transfer_map.get(transfer_raw, 2),
+            matrix=matrix_map.get(matrix_raw, 2),
         )
 
 
@@ -360,66 +494,158 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             }
         )
         phase_warnings: set[str] = set()
+        selected_frames: list[int] = []
+        metrics_cache_hit = False
+        resolved_metadata: TmdbMetadata | None = None
+        screenshots_by_label: dict[str, list[Path]] = {}
+        slowpics_url: str | None = None
+        report_path: Path | None = None
+        screenshot_dir: Path | None = None
 
         def _timed_phase(
             name: str,
             timing_key: str,
             skip_condition: Callable[[ConfigSchema], bool] | None,
+            executor: Callable[[RunContext], None | Awaitable[None]],
             *,
-            noop_reason: str,
+            warn_only: bool = False,
         ) -> Phase:
-            async def _execute(_: RunContext) -> None:
+            async def _execute(ctx: RunContext) -> None:
                 start = deps.clock()
-                phase_warnings.add(f"{name}: {noop_reason}")
-                end = deps.clock()
-                phase_timings[timing_key] = (end - start).total_seconds()
+                try:
+                    maybe_awaitable = executor(ctx)
+                    if inspect.isawaitable(maybe_awaitable):
+                        await maybe_awaitable
+                except Exception as exc:
+                    if warn_only:
+                        phase_warnings.add(f"{name}: {exc}")
+                        raise
+                    raise
+                finally:
+                    end = deps.clock()
+                    phase_timings[timing_key] = (end - start).total_seconds()
 
             return Phase(name=name, execute=_execute, skip_condition=skip_condition)
 
-        scaffold_reason = "instrumentation-only phase; executor not wired in coordinator"
         phases_before_align = [
-            _timed_phase("frame_plan", "frame_plan", None, noop_reason=scaffold_reason),
+            _timed_phase(
+                "frame_plan",
+                "frame_plan",
+                None,
+                lambda ctx: selected_frames.extend(
+                    create_frame_plan(
+                        num_frames=ctx.reference.effective_num_frames(),
+                        count=ctx.config.analysis.frame_count,
+                        seed=ctx.config.analysis.random_seed,
+                    ).frames
+                ),
+            ),
             _timed_phase(
                 "analyze",
                 "analyze",
                 lambda config: request.skip_analysis,
-                noop_reason=scaffold_reason,
+                lambda ctx: _run_analyze_phase(
+                    ctx=ctx,
+                    input_videos=input_videos,
+                    workspace=workspace,
+                    selected_frames=selected_frames,
+                    metrics_cache_hit_out=lambda hit: _set_metrics_cache_hit(hit),
+                ),
+                warn_only=True,
             ),
             _timed_phase(
                 "align",
                 "align",
                 lambda config: not config.audio_alignment.enable,
-                noop_reason=scaffold_reason,
+                lambda ctx: _run_align_phase(ctx, selected_frames=selected_frames),
+                warn_only=True,
             ),
         ]
 
         phases_after_align = [
-            _timed_phase("render", "render", None, noop_reason=scaffold_reason),
+            _timed_phase(
+                "render",
+                "render",
+                None,
+                lambda ctx: _run_render_phase(
+                    ctx=ctx,
+                    frames=selected_frames,
+                    runner=deps.get_ffmpeg_runner(),
+                    screenshots_out=lambda value: _set_screenshots(value),
+                    screenshot_dir_out=lambda value: _set_screenshot_dir(value),
+                ),
+            ),
             _timed_phase(
                 "metadata",
                 "metadata",
                 lambda config: request.skip_metadata,
-                noop_reason=scaffold_reason,
+                lambda ctx: _run_metadata_phase(
+                    ctx=ctx,
+                    client=deps.http_client,
+                    metadata_out=lambda value: _set_metadata(value),
+                ),
+                warn_only=True,
             ),
             _timed_phase(
                 "dovi",
                 "dovi",
                 lambda config: request.skip_dovi,
-                noop_reason=scaffold_reason,
+                lambda _ctx: phase_warnings.add(
+                    "dovi: DOVI processing is not implemented yet; continuing without Dolby Vision extraction."
+                ),
+                warn_only=True,
             ),
             _timed_phase(
                 "publish",
                 "publish",
                 lambda config: request.no_upload,
-                noop_reason=scaffold_reason,
+                lambda ctx: _run_publish_phase(
+                    ctx=ctx,
+                    client=deps.http_client,
+                    metadata=resolved_metadata,
+                    slowpics_url_out=lambda value: _set_slowpics_url(value),
+                ),
+                warn_only=True,
             ),
             _timed_phase(
                 "report",
                 "report",
                 lambda config: not config.report.enable,
-                noop_reason=scaffold_reason,
+                lambda ctx: _run_report_phase(
+                    ctx=ctx,
+                    frames=selected_frames,
+                    screenshots=screenshots_by_label,
+                    metadata=resolved_metadata,
+                    slowpics_url=slowpics_url,
+                    report_path_out=lambda value: _set_report_path(value),
+                ),
+                warn_only=True,
             ),
         ]
+
+        def _set_metrics_cache_hit(value: bool) -> None:
+            nonlocal metrics_cache_hit
+            metrics_cache_hit = value
+
+        def _set_metadata(value: TmdbMetadata | None) -> None:
+            nonlocal resolved_metadata
+            resolved_metadata = value
+
+        def _set_screenshots(value: dict[str, list[Path]]) -> None:
+            nonlocal screenshots_by_label
+            screenshots_by_label = value
+
+        def _set_slowpics_url(value: str | None) -> None:
+            nonlocal slowpics_url
+            slowpics_url = value
+
+        def _set_report_path(value: Path | None) -> None:
+            nonlocal report_path
+            report_path = value
+
+        def _set_screenshot_dir(value: Path | None) -> None:
+            nonlocal screenshot_dir
+            screenshot_dir = value
 
         await execute_phases(phases_before_align, context, reporter)
         emit_consolidated_fps_report(
@@ -434,7 +660,13 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
 
         return RunResult(
             success=True,
+            screenshot_dir=screenshot_dir,
+            slowpics_url=slowpics_url,
+            report_path=report_path,
+            frame_count=len(selected_frames),
+            clips_processed=1 + len(context.comparisons),
             duration_seconds=duration_seconds,
+            cache_hit=metrics_cache_hit,
             phase_timings=phase_timings,
             warnings=[*preflight.warnings, *sorted(phase_warnings)],
         )
@@ -445,3 +677,323 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
     async with httpx.AsyncClient() as http_client:
         deps.http_client = http_client
         return await _execute_with_deps()
+
+
+def _run_analyze_phase(
+    *,
+    ctx: RunContext,
+    input_videos: list[Path],
+    workspace: WorkspacePaths,
+    selected_frames: list[int],
+    metrics_cache_hit_out: Callable[[bool], None],
+) -> None:
+    fingerprint = cache_io.compute_cache_key(input_videos, ctx.config.analysis)
+    cache_result = cache_io.load_cached_metrics(workspace.cache_dir, fingerprint, clips=[])
+    metrics_cache_hit_out(cache_result.success and cache_result.metrics is not None)
+    metrics = calculate_metrics(
+        video_paths=input_videos,
+        config=ctx.config.analysis,
+        cache_dir=workspace.cache_dir,
+        reporter=None,
+    )
+    selection = select_frames(metrics=metrics, config=ctx.config.analysis)
+    selected_frames[:] = selection.frames
+
+
+async def _run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> None:
+    if not ctx.comparisons:
+        return
+    alignment_config = AlignmentConfig(
+        enable=ctx.config.audio_alignment.enable,
+        sample_rate=ctx.config.audio_alignment.sample_rate,
+        max_offset_seconds=ctx.config.audio_alignment.max_offset_seconds,
+        use_vspreview=ctx.config.audio_alignment.use_vspreview,
+        force_interactive=ctx.config.audio_alignment.force_interactive,
+        cache_results=ctx.config.audio_alignment.cache_results,
+    )
+    results = await align_clips(
+        reference=ctx.reference.path,
+        comparisons=[comp.path for comp in ctx.comparisons],
+        config=alignment_config,
+        cache_dir=ctx.workspace.generated_dir,
+        progress=None,
+    )
+
+    def _source_from_method(method: str) -> str:
+        if method == "manual":
+            return "manual"
+        if method == "cross_correlation":
+            return "computed"
+        return "cached"
+
+    updated_comparisons: list[ClipState] = []
+    for comparison, result in zip(ctx.comparisons, results, strict=True):
+        updated_comparisons.append(
+            replace(
+                comparison,
+                alignment=ClipAlignmentState(
+                    reference_stem=Path(result.reference_clip).stem,
+                    comparison_stem=Path(result.comparison_clip).stem,
+                    relative_offset_frames=result.frame_offset,
+                    source=_source_from_method(result.method),
+                ),
+            )
+        )
+    ctx.reference, ctx.comparisons = _apply_alignment_trims(
+        reference=ctx.reference,
+        comparisons=updated_comparisons,
+    )
+    selected_frames[:] = _normalize_selected_frames_for_trimmed_domain(
+        selected_frames=selected_frames,
+        reference=ctx.reference,
+        comparisons=ctx.comparisons,
+        requested_count=ctx.config.analysis.frame_count,
+        seed=ctx.config.analysis.random_seed,
+    )
+
+
+def _run_render_phase(
+    *,
+    ctx: RunContext,
+    frames: list[int],
+    runner: FFmpegRunner,
+    screenshots_out: Callable[[dict[str, list[Path]]], None],
+    screenshot_dir_out: Callable[[Path | None], None],
+) -> None:
+    clips_state = [ctx.reference, *ctx.comparisons]
+    label_map = {clip.path: clip.label for clip in clips_state}
+    output_dir = ctx.workspace.screenshots_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Keep FFmpeg-only extraction aligned with render.orchestrator tonemap gating:
+    # HDR + tonemap enabled cannot use the FFmpeg-only path.
+    if (
+        ctx.config.screenshots.use_ffmpeg
+        and ctx.config.color.enable_tonemap
+        and any(clip.probe.is_hdr for clip in clips_state)
+    ):
+        raise TonemapRequiresVapourSynthError()
+
+    if ctx.config.screenshots.use_ffmpeg:
+        rendered: dict[str, list[Path]] = {}
+        for clip in clips_state:
+            paths: list[Path] = []
+            for aligned_frame in frames:
+                source_frame = _map_aligned_to_source_frame(clip=clip, aligned_frame=aligned_frame)
+                output = generate_screenshot_path(output_dir, clip.label, aligned_frame)
+                runner.extract_frame(clip.path, source_frame, output)
+                paths.append(output)
+            rendered[clip.label] = paths
+        screenshots_out(rendered)
+        screenshot_dir_out(output_dir)
+        return
+
+    overlay_mode = RenderOverlayMode(ctx.config.screenshots.overlay_mode.value)
+    rendered: dict[str, list[Path]] = {}
+    for clip in clips_state:
+        source_frames = [
+            _map_aligned_to_source_frame(clip=clip, aligned_frame=aligned_frame)
+            for aligned_frame in frames
+        ]
+        rendered_for_clip = render_screenshots(
+            clips=[clip.path],
+            frames=source_frames,
+            output_dir=output_dir,
+            config=ctx.config,
+            label_map=label_map,
+            renderer="auto",
+            overlay_mode=overlay_mode,
+            reporter=None,
+        )
+        clip_paths: list[Path] = []
+        for aligned_frame, rendered_path in zip(frames, rendered_for_clip[clip.label], strict=True):
+            target_path = generate_screenshot_path(output_dir, clip.label, aligned_frame)
+            if rendered_path != target_path:
+                rendered_path.replace(target_path)
+            clip_paths.append(target_path)
+        rendered[clip.label] = clip_paths
+    screenshots_out(rendered)
+    screenshot_dir_out(output_dir)
+
+
+async def _run_metadata_phase(
+    *,
+    ctx: RunContext,
+    client: httpx.AsyncClient | None,
+    metadata_out: Callable[[TmdbMetadata | None], None],
+) -> None:
+    if client is None or not ctx.config.tmdb.enabled:
+        metadata_out(None)
+        return
+    metadata = await resolve_metadata(
+        filenames=[ctx.reference.path.name],
+        config=MetadataConfig(
+            api_key=ctx.config.tmdb.api_key,
+            unattended=ctx.config.tmdb.unattended,
+            timeout_seconds=ctx.config.tmdb.timeout_seconds,
+        ),
+        client=client,
+    )
+    metadata_out(metadata)
+
+
+async def _run_publish_phase(
+    *,
+    ctx: RunContext,
+    client: httpx.AsyncClient | None,
+    metadata: TmdbMetadata | None,
+    slowpics_url_out: Callable[[str | None], None],
+) -> None:
+    if client is None:
+        slowpics_url_out(None)
+        return
+    result = await publish_to_slowpics(
+        screenshot_dir=ctx.workspace.screenshots_dir,
+        config=ctx.config.slowpics,
+        client=client,
+        metadata=metadata,
+        progress=None,
+    )
+    slowpics_url_out(result.url)
+
+
+def _run_report_phase(
+    *,
+    ctx: RunContext,
+    frames: list[int],
+    screenshots: dict[str, list[Path]],
+    metadata: TmdbMetadata | None,
+    slowpics_url: str | None,
+    report_path_out: Callable[[Path | None], None],
+) -> None:
+    if not screenshots:
+        report_path_out(None)
+        return
+
+    clips = [ctx.reference, *ctx.comparisons]
+    clip_info = [
+        ClipInfo(
+            name=clip.label,
+            path=clip.path,
+            frame_count=clip.probe.num_frames,
+            resolution=(clip.probe.width, clip.probe.height),
+            fps=float(clip.effective_fps),
+            hdr=clip.probe.is_hdr,
+            label=clip.label,
+        )
+        for clip in clips
+    ]
+    report_data = ReportData(
+        clips=clip_info,
+        frames=frames,
+        screenshots=screenshots,
+        metadata=metadata,
+        slowpics_url=slowpics_url,
+    )
+    report_path = generate_report(report_data, ctx.config.report)
+    report_path_out(report_path)
+
+
+def _apply_alignment_trims(
+    *,
+    reference: ClipState,
+    comparisons: list[ClipState],
+) -> tuple[ClipState, list[ClipState]]:
+    offsets = [
+        comparison.alignment.relative_offset_frames
+        for comparison in comparisons
+        if comparison.alignment is not None
+    ]
+    if not offsets:
+        return reference, comparisons
+
+    baseline = max(0, max(offsets))
+    trimmed_reference = reference.with_trim(
+        trim_start_frames=baseline,
+        trim_end_frame_inclusive=None,
+    )
+    trimmed_comparisons: list[ClipState] = []
+    for comparison in comparisons:
+        if comparison.alignment is None:
+            relative_offset = 0
+        else:
+            relative_offset = comparison.alignment.relative_offset_frames
+        trim_start = baseline - relative_offset
+        trimmed_comparisons.append(
+            comparison.with_trim(
+                trim_start_frames=trim_start,
+                trim_end_frame_inclusive=None,
+            )
+        )
+
+    common_length = min(
+        [
+            trimmed_reference.effective_num_frames(),
+            *[c.effective_num_frames() for c in trimmed_comparisons],
+        ]
+    )
+    if common_length <= 0:
+        raise AudioAlignmentError("No overlapping frames after alignment normalization.")
+
+    trimmed_reference = trimmed_reference.with_trim(
+        trim_start_frames=trimmed_reference.trim.trim_start_frames,
+        trim_end_frame_inclusive=trimmed_reference.trim.trim_start_frames + common_length - 1,
+    )
+    equalized_comparisons: list[ClipState] = []
+    for comparison in trimmed_comparisons:
+        equalized_comparisons.append(
+            comparison.with_trim(
+                trim_start_frames=comparison.trim.trim_start_frames,
+                trim_end_frame_inclusive=comparison.trim.trim_start_frames + common_length - 1,
+            )
+        )
+
+    return trimmed_reference, equalized_comparisons
+
+
+def _normalize_selected_frames_for_trimmed_domain(
+    *,
+    selected_frames: list[int],
+    reference: ClipState,
+    comparisons: list[ClipState],
+    requested_count: int,
+    seed: int,
+) -> list[int]:
+    common_length = min(
+        [
+            reference.effective_num_frames(),
+            *[comparison.effective_num_frames() for comparison in comparisons],
+        ]
+    )
+    if common_length <= 0:
+        raise AudioAlignmentError("No overlapping frames remain after alignment.")
+
+    reference_start = reference.trim.trim_start_frames
+    reference_end_exclusive = reference_start + common_length
+    normalized_frames = sorted(
+        {
+            frame - reference_start
+            for frame in selected_frames
+            if reference_start <= frame < reference_end_exclusive
+        }
+    )
+    target_count = min(requested_count, common_length)
+    if target_count <= 0:
+        return []
+    if len(normalized_frames) < target_count:
+        return create_frame_plan(num_frames=common_length, count=target_count, seed=seed).frames
+    return normalized_frames[:target_count]
+
+
+def _map_aligned_to_source_frame(*, clip: ClipState, aligned_frame: int) -> int:
+    source_frame = clip.trim.trim_start_frames + aligned_frame
+    trim_end = (
+        clip.trim.trim_end_frame_inclusive
+        if clip.trim.trim_end_frame_inclusive is not None
+        else clip.probe.num_frames - 1
+    )
+    if source_frame > trim_end:
+        raise AudioAlignmentError(
+            f"Aligned frame {aligned_frame} exceeds trimmed domain for {clip.path.name}."
+        )
+    return source_frame

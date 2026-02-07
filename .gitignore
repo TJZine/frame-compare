@@ -69,3 +69,4 @@ htmlcov/
 # OS
 Thumbs.db
 .portable_cache/
+comparison_videos/**

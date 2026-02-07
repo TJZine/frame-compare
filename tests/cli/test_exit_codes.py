@@ -7,6 +7,7 @@ from frame_compare.errors import (
     GenericInternalError,
     NoVideosFoundError,
     SlowpicsError,
+    TonemapRequiresVapourSynthError,
     VapourSynthNotFoundError,
 )
 
@@ -17,6 +18,7 @@ def test_handle_error_returns_exit_codes():
 
     # Dependency -> 3
     assert handle_error(VapourSynthNotFoundError(), no_color=True, verbose=False) == 3
+    assert handle_error(TonemapRequiresVapourSynthError(), no_color=True, verbose=False) == 3
 
     # Input -> 4
     assert handle_error(NoVideosFoundError(Path("/x")), no_color=True, verbose=False) == 4
