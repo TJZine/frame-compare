@@ -18,7 +18,7 @@ from frame_compare.errors import (
     CacheVersionMismatchError,
     ConfigNotFoundError,
     MetricsCalculationError,
-    VapourSynthNotFoundError,
+    TonemapRequiresVapourSynthError,
 )
 from frame_compare.orchestration import coordinator
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
@@ -178,7 +178,7 @@ def test_execute_run_ffmpeg_render_rejects_hdr_when_tonemap_enabled(
     )
     deps = RunDependencies(vs_loader=FakeHDRVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
 
-    with pytest.raises(VapourSynthNotFoundError):
+    with pytest.raises(TonemapRequiresVapourSynthError):
         asyncio.run(execute_run(request, deps=deps))
 
 

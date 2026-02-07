@@ -23,7 +23,7 @@ from frame_compare.errors import (
     FFmpegError,
     FFmpegNotFoundError,
     MetricsCalculationError,
-    VapourSynthNotFoundError,
+    TonemapRequiresVapourSynthError,
 )
 from frame_compare.orchestration.context import (
     ClipAlignmentState,
@@ -772,7 +772,7 @@ def _run_render_phase(
         and ctx.config.color.enable_tonemap
         and any(clip.probe.is_hdr for clip in clips_state)
     ):
-        raise VapourSynthNotFoundError()
+        raise TonemapRequiresVapourSynthError()
 
     if ctx.config.screenshots.use_ffmpeg:
         rendered: dict[str, list[Path]] = {}

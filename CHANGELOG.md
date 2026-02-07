@@ -11,6 +11,7 @@ This project follows Conventional Commits and is intended to be released via Rel
 - **Run Dependencies:** Added `RunDependencies` DI container with lazy default VS/FFmpeg providers (stub-only FFmpeg runner) and orchestration export (Phase 6.7).
 - **Tonemap Wiring:** Added `should_tonemap`, `resolve_tonemap_settings`, and `probe_is_hdr_ffprobe` helpers. Modified `render_screenshots` to require `config: ConfigSchema` and enforce HDR+tonemap fallback policy (Phase 6.5).
 - **VSPreview Integration:** Added `frame_compare.vspreview` module with `is_vspreview_available`, `launch_alignment_verification_session`, `load_manual_overrides`, `save_manual_override`, `ManualOverride`, `VSPreviewConfig`, `VSPreviewNotFoundError` (FC-2008), and `VSPreviewError` (FC-4019). Integrated manual override precedence in `align_clips` (Phase 6.6).
+- **Tonemap Gating Error:** Added `TonemapRequiresVapourSynthError` (FC-2009) for explicit HDR+tonemap renderer-gating failures.
 - **Documentation:** Expanded `README.md` with Docker-first usage examples (`wizard`, `doctor`, `run`) and added deterministic API documentation generation (`scripts/generate_api_docs.py` → `docs/api.md`) with unit tests.
 - FramePlan module (`frame_compare.analysis.frame_plan`) for deterministic frame selection (`--skip-analysis`).
 - `select_reporter()` function for CLI output mode → progress reporter mapping (Phase 6.3).
@@ -114,6 +115,7 @@ This project follows Conventional Commits and is intended to be released via Rel
 ### Fixed
 
 - Docker integration tests now include VS-required tests from `tests/vs/`
+- Fixed FFmpeg render paths to raise `TonemapRequiresVapourSynthError` (FC-2009) for HDR+tonemap-required frames, preventing silent untonemapped outputs.
 - Fixed PIL deprecation warning causing test failure in Docker
 - Fixed test collection failure on macOS with partial VapourSynth install
 - Fixed libplacebo tonemapping in Docker (16-bit input conversion)
