@@ -119,6 +119,23 @@ pip install -e .
 pip install pytest pytest-cov ruff pyright
 ```
 
+### Windows Portable (No Docker)
+
+Casual users (recommended):
+
+```powershell
+# 1) Download the release zip
+# 2) Extract it
+# 3) From the extracted folder:
+.\install.cmd
+```
+
+From source (one command build + install):
+
+```powershell
+.\tools\windows_portable\install-from-source.cmd
+```
+
 ---
 
 ## Quick Start

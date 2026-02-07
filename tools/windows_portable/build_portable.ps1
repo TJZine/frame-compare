@@ -220,6 +220,28 @@ exit /b %ERRORLEVEL%
   Set-Content -LiteralPath $cmdPath -Value $cmd -Encoding ASCII
 }
 
+function Copy-InstallerFiles([string]$BundleRoot) {
+  $sourceDir = $PSScriptRoot
+  $shimSource = Join-Path $sourceDir "shim"
+  $shimDest = Join-Path $BundleRoot "shim"
+
+  foreach ($file in @("install.ps1", "uninstall.ps1", "install.cmd", "uninstall.cmd", "README.txt")) {
+    $src = Join-Path $sourceDir $file
+    if (!(Test-Path -LiteralPath $src)) {
+      throw "Installer file not found: $src"
+    }
+    Copy-Item -Force -LiteralPath $src -Destination (Join-Path $BundleRoot $file)
+  }
+
+  if (!(Test-Path -LiteralPath $shimSource)) {
+    throw "Shim directory not found: $shimSource"
+  }
+  if (Test-Path -LiteralPath $shimDest) {
+    Remove-Item -Recurse -Force -LiteralPath $shimDest
+  }
+  Copy-Item -Recurse -Force -LiteralPath $shimSource -Destination $shimDest
+}
+
 function Copy-RepoApp([string]$BundleRoot) {
   $appRoot = Join-Path $BundleRoot "app"
   $srcRoot = Join-Path $appRoot "src"
@@ -426,6 +448,7 @@ function Main() {
 
   # Launchers
   Write-LauncherFiles -BundleRoot $OutDir
+  Copy-InstallerFiles -BundleRoot $OutDir
 
   # Licenses
   Copy-Licenses -BundleRoot $OutDir -Artifacts $artifacts
