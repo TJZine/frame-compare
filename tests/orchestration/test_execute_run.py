@@ -18,12 +18,13 @@ from frame_compare.errors import (
     CacheVersionMismatchError,
     ConfigNotFoundError,
     MetricsCalculationError,
+    VapourSynthNotFoundError,
 )
 from frame_compare.orchestration import coordinator
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.services.alignment import CACHE_FILE_NAME
 from frame_compare.services.types import AlignmentResult
-from frame_compare.vs.types import SourceInfo
+from frame_compare.vs.types import HDRMetadata, SourceInfo
 
 # Minimal valid TOML config content
 MINIMAL_CONFIG = """\
@@ -76,6 +77,28 @@ class FakeVSLoader:
 
     def ensure_core(self):  # type: ignore[override]
         raise RuntimeError("ensure_core should not be called in tests")
+
+
+class FakeHDRVSLoader(FakeVSLoader):
+    def load(self, path: Path) -> SourceInfo:
+        return SourceInfo(
+            clip=cast(Any, object()),
+            width=1920,
+            height=1080,
+            num_frames=100,
+            fps=Fraction(24, 1),
+            format=cast(Any, object()),
+            frame_props={},
+            is_hdr=True,
+            hdr_metadata=HDRMetadata(
+                mastering_display="G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1)",
+                max_cll=1000,
+                max_fall=400,
+                color_primaries=9,
+                transfer=16,
+                matrix=9,
+            ),
+        )
 
 
 class FakeFFmpegRunner:
@@ -137,6 +160,26 @@ def test_execute_run_returns_success_and_records_preflight_timing(
     assert result.phase_timings["dovi"] == 0.0
     assert result.phase_timings["publish"] == 0.0
     assert result.phase_timings["report"] == 0.0
+
+
+def test_execute_run_ffmpeg_render_rejects_hdr_when_tonemap_enabled(
+    tmp_path: Path,
+) -> None:
+    _create_config(tmp_path)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "source.mkv")
+
+    request = RunRequest(
+        root=tmp_path,
+        skip_analysis=True,
+        skip_metadata=True,
+        skip_dovi=True,
+        no_upload=True,
+    )
+    deps = RunDependencies(vs_loader=FakeHDRVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+
+    with pytest.raises(VapourSynthNotFoundError):
+        asyncio.run(execute_run(request, deps=deps))
 
 
 def test_execute_run_propagates_config_not_found_error(tmp_path: Path) -> None:

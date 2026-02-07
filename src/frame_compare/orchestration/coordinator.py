@@ -23,6 +23,7 @@ from frame_compare.errors import (
     FFmpegError,
     FFmpegNotFoundError,
     MetricsCalculationError,
+    VapourSynthNotFoundError,
 )
 from frame_compare.orchestration.context import (
     ClipAlignmentState,
@@ -763,6 +764,15 @@ def _run_render_phase(
     label_map = {clip.path: clip.label for clip in clips_state}
     output_dir = ctx.workspace.screenshots_dir
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Keep FFmpeg-only extraction aligned with render.orchestrator tonemap gating:
+    # HDR + tonemap enabled cannot use the FFmpeg-only path.
+    if (
+        ctx.config.screenshots.use_ffmpeg
+        and ctx.config.color.enable_tonemap
+        and any(clip.probe.is_hdr for clip in clips_state)
+    ):
+        raise VapourSynthNotFoundError()
 
     if ctx.config.screenshots.use_ffmpeg:
         rendered: dict[str, list[Path]] = {}
