@@ -24,6 +24,7 @@ screenshots/
 
 # Local config (may contain secrets)
 config/*
+!config/.gitkeep
 
 # Python
 __pycache__/
