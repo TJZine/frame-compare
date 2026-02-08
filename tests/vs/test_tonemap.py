@@ -281,8 +281,19 @@ def test_apply_tonemap_detects_metadata_when_missing_fallback(mock_detect, mock_
     # Verify _detect_hdr called
     mock_detect_hdr.assert_called_once()
 
-    # Verify max_cll was used in expression
+    # Verify max_cll was used in expression (via computed scale factor)
     mock_clip.std.Expr.assert_called_once()
     call_args = mock_clip.std.Expr.call_args
-    # Check that 5678 is in the expression string
-    assert "5678" in call_args.kwargs["expr"][0]
+    # The expression uses scale = max_cll / target_nits, not raw max_cll
+    # With max_cll=5678 and default target_nits=203: scale ≈ 27.97
+    expected_scale = 5678 / 203
+    expr_string = call_args.kwargs["expr"][0]
+    # Extract the numeric scale from the expression (first number after "x ")
+    import re
+
+    match = re.search(r"x\s+([\d.]+)", expr_string)
+    assert match, f"Could not find scale in expression: {expr_string}"
+    actual_scale = float(match.group(1))
+    assert abs(actual_scale - expected_scale) < 0.01, (
+        f"Scale mismatch: expected ~{expected_scale:.2f}, got {actual_scale}"
+    )
