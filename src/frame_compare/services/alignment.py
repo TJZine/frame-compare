@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import cast
 
 import numpy as np
+import structlog
 import tomli_w
 
 from frame_compare.errors import (
@@ -17,6 +18,7 @@ from frame_compare.errors import (
     CacheVersionMismatchError,
     FFmpegError,
     FFmpegNotFoundError,
+    VSPreviewError,
 )
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.utils.progress import ProgressReporter
@@ -31,6 +33,8 @@ CACHE_VERSION = "1"
 CACHE_FILE_NAME = "audio_offsets.toml"
 _FFPROBE_TIMEOUT_SECONDS = 15.0
 _FFMPEG_AUDIO_TIMEOUT_SECONDS = 120.0
+
+log = structlog.get_logger()
 
 
 def _build_offsets_map(
@@ -79,13 +83,23 @@ def _maybe_launch_vspreview(
         progress.set_description("Alignment verification")
 
     try:
-        launch_alignment_verification_session(
-            reference=reference,
-            comparisons=comparisons,
-            suggested_offsets_by_key=offsets_by_key,
-            cache_dir=cache_dir,
-            config=VSPreviewConfig(enabled=should_launch),
-        )
+        try:
+            launch_alignment_verification_session(
+                reference=reference,
+                comparisons=comparisons,
+                suggested_offsets_by_key=offsets_by_key,
+                cache_dir=cache_dir,
+                config=VSPreviewConfig(enabled=should_launch),
+            )
+        except VSPreviewError as exc:
+            if config.force_interactive:
+                raise
+            log.warning(
+                "vspreview_optional_launch_failed",
+                error=str(exc),
+                force_interactive=config.force_interactive,
+                use_vspreview=config.use_vspreview,
+            )
     finally:
         if progress:
             progress.advance(1)

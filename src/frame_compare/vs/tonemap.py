@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import structlog
 import vapoursynth as vs
 
@@ -73,23 +75,48 @@ def _normalize_rgb_props(
     return clip.std.SetFrameProps(**kwargs)
 
 
+def _validate_target_nits(settings: TonemapSettings) -> int:
+    """Validate and return target nits used by tonemap operations."""
+    target_nits = settings.target_nits
+    if target_nits <= 0:
+        raise TonemapError(
+            reason=f"Invalid target_nits: {target_nits}. target_nits must be > 0",
+            hint="Set color.target_nits to a positive value",
+        )
+    return target_nits
+
+
+def _convert_non_rgb_with_matrix_hint(
+    clip: vs.VideoNode,
+    *,
+    target_format: int,
+    props: dict[str, object] | None = None,
+    detected_is_hdr: bool | None = None,
+) -> vs.VideoNode:
+    """Convert non-RGB clips to RGB target format with deterministic matrix fallback."""
+    if props is None:
+        props = dict(clip.get_frame(0).props)
+
+    matrix_prop = props.get("_Matrix")
+    matrix_in_s: str | None = None
+    if matrix_prop is None:
+        if detected_is_hdr is None:
+            detected_is_hdr, _ = _detect_hdr(props)
+        matrix_in_s = "2020ncl" if detected_is_hdr else "709"
+
+    if matrix_in_s is None:
+        return clip.resize.Bicubic(format=target_format)  # type: ignore[attr-defined]
+    return clip.resize.Bicubic(format=target_format, matrix_in_s=matrix_in_s)  # type: ignore[attr-defined]
+
+
 def _to_rgbs(clip: vs.VideoNode) -> vs.VideoNode:
     """Convert clip to RGBS if needed."""
     try:
         if clip.format.id != vs.RGBS:  # type: ignore
             if clip.format.color_family == vs.RGB:  # type: ignore
                 return clip.resize.Bicubic(format=vs.RGBS)  # type: ignore
-            else:
-                props = dict(clip.get_frame(0).props)
-                matrix_prop = props.get("_Matrix")
-                matrix_in_s: str | None = None
-                if matrix_prop is None:
-                    is_hdr, _ = _detect_hdr(props)
-                    matrix_in_s = "2020ncl" if is_hdr else "709"
-
-                if matrix_in_s is None:
-                    return clip.resize.Bicubic(format=vs.RGBS)  # type: ignore
-                return clip.resize.Bicubic(format=vs.RGBS, matrix_in_s=matrix_in_s)  # type: ignore
+            rgbs_format = cast(int, vs.RGBS)  # type: ignore[attr-defined]
+            return _convert_non_rgb_with_matrix_hint(clip, target_format=rgbs_format)
         return clip
     except Exception as e:
         raise TonemapError(
@@ -124,6 +151,8 @@ def _apply_libplacebo(
     hdr_metadata: HDRMetadata | None = None,
 ) -> vs.VideoNode | None:
     """Apply tonemapping using libplacebo."""
+    target_nits = _validate_target_nits(settings)
+
     if settings.tone_curve not in _TONE_CURVE_MAP:
         raise TonemapError(
             reason=f"Unsupported tone curve '{settings.tone_curve}'",
@@ -162,16 +191,15 @@ def _apply_libplacebo(
             else:
                 if props is None:
                     props = dict(clip.get_frame(0).props)
-                matrix_prop = props.get("_Matrix")
-                matrix_in_s: str | None = None
-                if matrix_prop is None:
+                if detected_is_hdr is None:
                     _ensure_hdr_detection()
-                    matrix_in_s = "2020ncl" if detected_is_hdr else "709"
-
-                if matrix_in_s is None:
-                    clip = clip.resize.Bicubic(format=vs.RGB48)  # type: ignore
-                else:
-                    clip = clip.resize.Bicubic(format=vs.RGB48, matrix_in_s=matrix_in_s)  # type: ignore
+                rgb48_format = cast(int, vs.RGB48)  # type: ignore[attr-defined]
+                clip = _convert_non_rgb_with_matrix_hint(
+                    clip,
+                    target_format=rgb48_format,
+                    props=props,
+                    detected_is_hdr=detected_is_hdr,
+                )
     except Exception as e:
         raise TonemapError(reason=f"Failed to convert to RGB48: {e}") from e
 
@@ -188,7 +216,7 @@ def _apply_libplacebo(
         src_csp = _deduce_src_csp_hint(transfer, primaries)
         tm_kwargs: dict[str, object] = {
             "src_max": src_max,
-            "dst_max": settings.target_nits,
+            "dst_max": target_nits,
             "tone_mapping_function": _TONE_CURVE_MAP[settings.tone_curve],
             # SDR output targeting BT.709 (legacy default).
             "dst_csp": 0,
@@ -203,7 +231,7 @@ def _apply_libplacebo(
             primaries=primaries,
             src_csp=src_csp,
             src_max=src_max,
-            dst_max=settings.target_nits,
+            dst_max=target_nits,
             tone_curve=settings.tone_curve,
         )
 
@@ -211,11 +239,7 @@ def _apply_libplacebo(
         try:
             clip = core.placebo.Tonemap(clip, **tm_kwargs)  # type: ignore[misc]
         except TypeError as e:
-            # Compatibility retry: some vs-placebo builds may not support all kwargs.
-            msg = str(e)
-            if "unexpected keyword" not in msg:
-                raise
-
+            # Compatibility retry: some vs-placebo builds may not support extra kwargs.
             minimal_kwargs: dict[str, object] = {
                 "src_max": tm_kwargs["src_max"],
                 "dst_max": tm_kwargs["dst_max"],
@@ -226,11 +250,13 @@ def _apply_libplacebo(
 
             log.debug(
                 "libplacebo_tonemap_retry_dropped_kwargs",
-                error=msg,
+                error=str(e),
                 dropped=sorted(set(tm_kwargs.keys()) - set(minimal_kwargs.keys())),
             )
             clip = core.placebo.Tonemap(clip, **minimal_kwargs)  # type: ignore[misc]
     except Exception as e:
+        if isinstance(e, TonemapError | AttributeError | KeyError | AssertionError):
+            raise
         # Runtime failure (Vulkan/context/bit-depth) — signal fallback
         log.warning(
             "libplacebo_tonemap_runtime_failure_falling_back",
@@ -250,6 +276,7 @@ def _fallback_tonemap(
     hdr_metadata: HDRMetadata | None = None,
 ) -> vs.VideoNode:
     """Fallback tonemapping using a scaled Reinhard-style curve via std.Expr."""
+    target_nits = _validate_target_nits(settings)
     clip = _to_rgbs(clip)
 
     if hdr_metadata is None:
@@ -259,8 +286,6 @@ def _fallback_tonemap(
     peak = settings.source_peak
     if peak is None:
         peak = hdr_metadata.max_cll if hdr_metadata and hdr_metadata.max_cll else 1000
-
-    target_nits = settings.target_nits
 
     try:
         # Heuristic fallback when libplacebo is unavailable or fails at runtime.
@@ -305,6 +330,7 @@ def apply_tonemap(
     """Apply HDR to SDR tonemapping."""
     if not settings.enabled:
         return clip
+    _validate_target_nits(settings)
 
     core = vs.core
 

@@ -675,14 +675,16 @@ async def test_align_clips_force_interactive_launches_when_vspreview_available(
 
 
 @pytest.mark.anyio
+@patch("frame_compare.services.alignment.log.warning")
 @patch("frame_compare.services.alignment.launch_alignment_verification_session")
 @patch("frame_compare.services.alignment.is_vspreview_available")
-async def test_align_clips_propagates_vspreview_errors(
+async def test_align_clips_vspreview_errors_are_warning_only_when_not_forced(
     mock_is_available: MagicMock,
     mock_launch: MagicMock,
+    mock_warn: MagicMock,
     tmp_path: Path,
 ) -> None:
-    """Adapter launch failures should propagate to caller."""
+    """Adapter launch failures are warning-only for optional VSPreview mode."""
     ref = tmp_path / "ref.mkv"
     comp = tmp_path / "comp.mkv"
     ref.touch()
@@ -707,5 +709,53 @@ async def test_align_clips_propagates_vspreview_errors(
     mock_launch.side_effect = VSPreviewError("adapter failure")
 
     config = AlignmentConfig(enable=True, use_vspreview=True, cache_results=True)
+    results = await align_clips(ref, [comp], config, tmp_path)
+
+    assert len(results) == 1
+    assert results[0].frame_offset == 1
+    mock_warn.assert_called_once()
+    _, kwargs = mock_warn.call_args
+    assert "VSPreview error: adapter failure" in kwargs["error"]
+    assert kwargs["force_interactive"] is False
+
+
+@pytest.mark.anyio
+@patch("frame_compare.services.alignment.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment.is_vspreview_available")
+async def test_align_clips_vspreview_errors_raise_when_force_interactive(
+    mock_is_available: MagicMock,
+    mock_launch: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """Adapter launch failures should fail-fast in force-interactive mode."""
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    ref.touch()
+    comp.touch()
+
+    cache_file = tmp_path / "audio_offsets.toml"
+    data = {
+        "version": "1",
+        "ref:comp": {
+            "reference_clip": "ref.mkv",
+            "comparison_clip": "comp.mkv",
+            "frame_offset": 1,
+            "time_offset_seconds": 0.042,
+            "correlation_score": 0.91,
+            "method": "cross_correlation",
+        },
+    }
+    with cache_file.open("wb") as f:
+        f.write(tomli_w.dumps(data).encode("utf-8"))
+
+    mock_is_available.return_value = True
+    mock_launch.side_effect = VSPreviewError("adapter failure")
+
+    config = AlignmentConfig(
+        enable=True,
+        use_vspreview=False,
+        force_interactive=True,
+        cache_results=True,
+    )
     with pytest.raises(VSPreviewError, match="adapter failure"):
         await align_clips(ref, [comp], config, tmp_path)

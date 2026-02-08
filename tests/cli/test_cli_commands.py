@@ -1,13 +1,15 @@
 import json
 import re
 import tomllib
+import webbrowser
 from pathlib import Path
+from types import SimpleNamespace
 
 import typer
 from _pytest.monkeypatch import MonkeyPatch
 from typer.testing import CliRunner
 
-from frame_compare.cli_entry import app
+from frame_compare.cli_entry import _maybe_open_report, app
 from frame_compare.errors import (
     ConfigNotFoundError,
     ErrorContext,
@@ -125,6 +127,32 @@ def test_run_stub_executes(monkeypatch: MonkeyPatch) -> None:
 
     result = runner.invoke(app, ["run"])
     assert result.exit_code == 0
+
+
+def test_maybe_open_report_swallows_webbrowser_error(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr("frame_compare.cli_entry.os", SimpleNamespace(name="posix"))
+    monkeypatch.setattr(
+        "frame_compare.cli_entry.webbrowser.open",
+        lambda _uri: (_ for _ in ()).throw(webbrowser.Error("no browser")),
+    )
+
+    _maybe_open_report(Path("report.html"))
+
+
+def test_maybe_open_report_keeps_startfile_path_on_windows(monkeypatch: MonkeyPatch) -> None:
+    called: dict[str, str] = {}
+    fake_os = SimpleNamespace(
+        name="nt",
+        startfile=lambda value: called.setdefault("path", value),
+    )
+    monkeypatch.setattr("frame_compare.cli_entry.os", fake_os)
+    monkeypatch.setattr(
+        "frame_compare.cli_entry.webbrowser.open",
+        lambda _uri: (_ for _ in ()).throw(AssertionError("webbrowser.open should not be called")),
+    )
+
+    _maybe_open_report(Path("report.html"))
+    assert called["path"] == "report.html"
 
 
 def test_run_exits_processing_error_when_runner_returns_unsuccessful(

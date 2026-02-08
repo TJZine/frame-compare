@@ -258,6 +258,56 @@ def test_apply_tonemap_passes_src_csp_hint_for_hdr10(mock_detect):
         assert kwargs["dst_prim"] == 1
 
 
+@patch("frame_compare.vs.tonemap.detect_plugins")
+def test_apply_tonemap_rejects_non_positive_target_nits_before_processing(mock_detect):
+    """Invalid target_nits should fail early with explicit validation error."""
+    mock_detect.return_value = {"libplacebo": True}
+    mock_clip = MagicMock()
+    settings = TonemapSettings(enabled=True, tone_curve="bt2390", target_nits=0)
+
+    with pytest.raises(TonemapError, match="target_nits must be > 0"):
+        apply_tonemap(mock_clip, settings)
+
+
+@patch("frame_compare.vs.tonemap.detect_plugins")
+def test_apply_tonemap_rejects_non_positive_target_nits_for_fallback_path(mock_detect):
+    """Validation should run before selecting libplacebo/fallback path."""
+    mock_detect.return_value = {"libplacebo": False}
+    mock_clip = MagicMock()
+    settings = TonemapSettings(enabled=True, tone_curve="reinhard", target_nits=-5)
+
+    with pytest.raises(TonemapError, match="target_nits must be > 0"):
+        apply_tonemap(mock_clip, settings)
+
+
+@patch("frame_compare.vs.tonemap.detect_plugins")
+def test_apply_tonemap_retries_minimal_kwargs_on_any_typeerror(mock_detect):
+    """Compatibility retry should not depend on exact TypeError message text."""
+    mock_detect.return_value = {"libplacebo": True}
+    mock_clip = MagicMock()
+    mock_clip.format.bits_per_sample = 16
+    mock_clip.format.color_family = vs.RGB
+    mock_clip.std.SetFrameProps = MagicMock(return_value=mock_clip)
+    mock_clip.resize.Point = MagicMock(return_value=mock_clip)
+
+    settings = TonemapSettings(enabled=True, tone_curve="bt2390", target_nits=203)
+    with patch("vapoursynth.core", MagicMock()) as mock_core:
+        mock_core.placebo.Tonemap.side_effect = [
+            TypeError("libplacebo signature mismatch"),
+            mock_clip,
+        ]
+
+        result = apply_tonemap(mock_clip, settings)
+
+        assert result is mock_clip
+        assert mock_core.placebo.Tonemap.call_count == 2
+        first_call = mock_core.placebo.Tonemap.call_args_list[0]
+        second_call = mock_core.placebo.Tonemap.call_args_list[1]
+        assert "dst_csp" in first_call.kwargs
+        assert "dst_csp" not in second_call.kwargs
+        assert "dst_prim" not in second_call.kwargs
+
+
 @patch("frame_compare.vs.tonemap._detect_hdr")
 @patch("frame_compare.vs.tonemap.detect_plugins")
 def test_apply_tonemap_detects_metadata_when_missing_fallback(mock_detect, mock_detect_hdr):

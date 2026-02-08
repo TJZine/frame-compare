@@ -86,7 +86,7 @@ def _maybe_open_report(report_path: Path) -> None:
 
     try:
         webbrowser.open(report_path.resolve().as_uri())
-    except OSError:
+    except (OSError, webbrowser.Error):
         return
 
 
