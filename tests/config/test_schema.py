@@ -75,6 +75,12 @@ def test_report_output_dir_empty_string_to_none() -> None:
     assert config.output_dir is None
 
 
+def test_report_auto_open_default_true() -> None:
+    """Report should auto-open by default in interactive CLI runs."""
+    config = ReportConfig()
+    assert config.auto_open is True
+
+
 def test_nested_model_defaults() -> None:
     """Test that root config initializes nested models with defaults."""
     config = ConfigSchema()

@@ -449,3 +449,46 @@ async def test_align_clips_partial_cache_hit_computes_only_missing_and_preserves
     assert ref in called_paths
     assert comp_b in called_paths
     assert comp_a not in called_paths
+
+
+@pytest.mark.anyio
+@patch("frame_compare.services.alignment.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment.is_vspreview_available")
+@patch("frame_compare.services.alignment._probe_fps")
+@patch("frame_compare.services.alignment._extract_audio")
+@patch("frame_compare.services.alignment._cross_correlate")
+async def test_align_clips_launches_vspreview_when_enabled(
+    mock_corr: MagicMock,
+    mock_extract: MagicMock,
+    mock_probe: MagicMock,
+    mock_is_available: MagicMock,
+    mock_launch: MagicMock,
+    tmp_path: Path,
+):
+    """When configured, align_clips should generate/launch a VSPreview verification session."""
+    ref = tmp_path / "ref.mkv"
+    comp_a = tmp_path / "comp_a.mkv"
+    comp_b = tmp_path / "comp_b.mkv"
+    ref.touch()
+    comp_a.touch()
+    comp_b.touch()
+
+    mock_probe.return_value = Fraction(24, 1)
+
+    def extract_side_effect(path: Path, sr: int) -> np.ndarray:
+        return np.ones(10, dtype=np.float32)
+
+    mock_extract.side_effect = extract_side_effect
+    mock_corr.return_value = (0, 0.99)
+    mock_is_available.return_value = True
+    mock_launch.return_value = tmp_path / "vspreview_script.py"
+
+    config = AlignmentConfig(enable=True, use_vspreview=True, cache_results=False)
+    await align_clips(ref, [comp_a, comp_b], config, tmp_path)
+
+    assert mock_launch.call_count == 1
+    _, kwargs = mock_launch.call_args
+    assert kwargs["reference"] == ref
+    assert kwargs["comparisons"] == [comp_a, comp_b]
+    suggested = kwargs["suggested_offsets_by_key"]
+    assert suggested == {"ref:comp_a": 0, "ref:comp_b": 0}

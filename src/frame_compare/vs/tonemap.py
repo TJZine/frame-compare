@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import structlog
 import vapoursynth as vs
 
 from frame_compare.errors import TonemapError
 from frame_compare.vs.env import detect_plugins
 from frame_compare.vs.source import _detect_hdr  # pyright: ignore[reportPrivateUsage]
 from frame_compare.vs.types import HDRMetadata, TonemapSettings
+
+log = structlog.get_logger()
 
 # Private constants
 _TONE_CURVE_MAP = {"bt2390": 2, "spline": 1, "reinhard": 4}
@@ -38,6 +41,36 @@ _TONEMAP_PRESETS: dict[str, TonemapSettings] = {
         gamma_lift=False,
     ),
 }
+
+
+def _deduce_src_csp_hint(transfer: int | None, primaries: int | None) -> int | None:
+    """Return vs-placebo `src_csp` hint based on HDR signaling.
+
+    This mirrors the legacy behavior documented in `docs/archive/legacy_tonemap_info.md`.
+    """
+    if transfer == 16 and primaries == 9:
+        return 1  # PQ + BT.2020 → HDR10
+    if transfer == 18 and primaries == 9:
+        return 2  # HLG + BT.2020 → HLG
+    return None
+
+
+def _normalize_rgb_props(
+    clip: vs.VideoNode, *, transfer: int | None, primaries: int | None
+) -> vs.VideoNode:
+    """Normalize RGB clip props before libplacebo tonemapping.
+
+    Sets:
+        _Matrix=0 (RGB), _ColorRange=0 (full)
+    Preserves (when provided):
+        _Transfer, _Primaries
+    """
+    kwargs: dict[str, int] = {"_Matrix": 0, "_ColorRange": 0}
+    if transfer is not None:
+        kwargs["_Transfer"] = int(transfer)
+    if primaries is not None:
+        kwargs["_Primaries"] = int(primaries)
+    return clip.std.SetFrameProps(**kwargs)
 
 
 def _to_rgbs(clip: vs.VideoNode) -> vs.VideoNode:
@@ -112,6 +145,12 @@ def _apply_libplacebo(
     if hdr_metadata is None:
         _ensure_hdr_detection()
         hdr_metadata = detected_hdr_metadata
+    transfer_raw: object | None = getattr(hdr_metadata, "transfer", None) if hdr_metadata is not None else None
+    primaries_raw: object | None = (
+        getattr(hdr_metadata, "color_primaries", None) if hdr_metadata is not None else None
+    )
+    transfer: int | None = int(transfer_raw) if isinstance(transfer_raw, int) else None
+    primaries: int | None = int(primaries_raw) if isinstance(primaries_raw, int) else None
 
     # Exact conversion call for libplacebo path
     try:
@@ -134,23 +173,67 @@ def _apply_libplacebo(
     except Exception as e:
         raise TonemapError(reason=f"Failed to convert to RGB48: {e}") from e
 
+    try:
+        clip = _normalize_rgb_props(clip, transfer=transfer, primaries=primaries)
+    except Exception as e:
+        raise TonemapError(reason=f"Failed to normalize RGB props for tonemap: {e}") from e
+
     src_max = settings.source_peak
     if src_max is None:
         src_max = hdr_metadata.max_cll if hdr_metadata and hdr_metadata.max_cll else 1000
 
     try:
-        # We need to type ignore because VS plugin properties are dynamic
-        clip = core.placebo.Tonemap(  # type: ignore
-            clip,
+        src_csp = _deduce_src_csp_hint(transfer, primaries)
+        tm_kwargs: dict[str, object] = {
+            "src_max": src_max,
+            "dst_max": settings.target_nits,
+            "tone_mapping_function": _TONE_CURVE_MAP[settings.tone_curve],
+            # SDR output targeting BT.709 (legacy default).
+            "dst_csp": 0,
+            "dst_prim": 1,
+        }
+        if src_csp is not None:
+            tm_kwargs["src_csp"] = src_csp
+
+        log.debug(
+            "libplacebo_tonemap_call",
+            transfer=transfer,
+            primaries=primaries,
+            src_csp=src_csp,
             src_max=src_max,
             dst_max=settings.target_nits,
-            tone_mapping_function=_TONE_CURVE_MAP[settings.tone_curve],
+            tone_curve=settings.tone_curve,
         )
+
+        # We need to type ignore because VS plugin properties are dynamic.
+        try:
+            clip = core.placebo.Tonemap(clip, **tm_kwargs)  # type: ignore[misc]
+        except TypeError as e:
+            # Compatibility retry: some vs-placebo builds may not support all kwargs.
+            msg = str(e)
+            if "unexpected keyword" not in msg:
+                raise
+
+            minimal_kwargs: dict[str, object] = {
+                "src_max": tm_kwargs["src_max"],
+                "dst_max": tm_kwargs["dst_max"],
+                "tone_mapping_function": tm_kwargs["tone_mapping_function"],
+            }
+            if "src_csp" in tm_kwargs:
+                minimal_kwargs["src_csp"] = tm_kwargs["src_csp"]
+
+            log.debug(
+                "libplacebo_tonemap_retry_dropped_kwargs",
+                error=msg,
+                dropped=sorted(set(tm_kwargs.keys()) - set(minimal_kwargs.keys())),
+            )
+            clip = core.placebo.Tonemap(clip, **minimal_kwargs)  # type: ignore[misc]
     except Exception as e:
         # Runtime failure (Vulkan/context/bit-depth) — signal fallback
-        import logging
-
-        logging.getLogger(__name__).debug(f"libplacebo runtime failure, falling back: {e}")
+        log.warning(
+            "libplacebo_tonemap_runtime_failure_falling_back",
+            error=f"{type(e).__name__}: {e}",
+        )
         return None
 
     # Convert libplacebo output back to RGBS for post-processing (runs on SUCCESS only)
@@ -178,8 +261,20 @@ def _fallback_tonemap(
     target_nits = settings.target_nits
 
     try:
-        # Reinhard: output = (x / peak) / (1 + (x / peak)) * norm
-        expr = f"x {peak} / dup 1 + / {target_nits} {peak} / * 0 max 1 min"
+        # Heuristic fallback when libplacebo is unavailable or fails at runtime.
+        #
+        # Notes:
+        # - VS float RGB clips are typically normalized, and we want to avoid producing
+        #   near-zero output (black screenshots). We therefore operate on a relative
+        #   scale and normalize roughly around the configured target nits.
+        #
+        # Define:
+        #   x_rel = x * (peak / target_nits)
+        #   y = 2 * x_rel / (1 + x_rel)
+        # which maps x_rel=1 → y≈1 (after the 2x), and compresses highlights.
+        scale = float(peak) / float(target_nits)
+        scale_s = f"{scale:.10g}"
+        expr = f"x {scale_s} * dup 1 + / 2 * 0 max 1 min"
         clip = clip.std.Expr(expr=[expr, expr, expr])
     except Exception as e:
         raise TonemapError(

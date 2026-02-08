@@ -30,7 +30,7 @@ if not _vs_spec_available() and "vapoursynth" not in sys.modules:
 import vapoursynth as vs  # noqa: E402, I001
 from frame_compare.errors import TonemapError  # noqa: E402, I001
 from frame_compare.vs.tonemap import apply_tonemap, get_preset_settings  # noqa: E402, I001
-from frame_compare.vs.types import TonemapSettings  # noqa: E402, I001
+from frame_compare.vs.types import HDRMetadata, TonemapSettings  # noqa: E402, I001
 
 
 def test_get_preset_settings_returns_valid_settings():
@@ -225,6 +225,37 @@ def test_apply_tonemap_detects_metadata_when_missing_libplacebo(mock_detect, moc
         mock_core.placebo.Tonemap.assert_called_once()
         _, kwargs = mock_core.placebo.Tonemap.call_args
         assert kwargs["src_max"] == 1234
+
+
+@patch("frame_compare.vs.tonemap.detect_plugins")
+def test_apply_tonemap_passes_src_csp_hint_for_hdr10(mock_detect):
+    """Verify HDR10 metadata yields src_csp hint and SDR output defaults."""
+    mock_detect.return_value = {"libplacebo": True}
+
+    mock_clip = MagicMock()
+    mock_clip.format.bits_per_sample = 16
+    mock_clip.format.color_family = vs.RGB
+    mock_clip.std.SetFrameProps = MagicMock(return_value=mock_clip)
+    mock_clip.resize.Point = MagicMock(return_value=mock_clip)
+
+    hdr_metadata = HDRMetadata(
+        mastering_display=None,
+        max_cll=1000,
+        max_fall=400,
+        color_primaries=9,
+        transfer=16,
+        matrix=9,
+    )
+
+    settings = TonemapSettings(enabled=True, tone_curve="bt2390", target_nits=203)
+
+    with patch("vapoursynth.core", MagicMock()) as mock_core:
+        apply_tonemap(mock_clip, settings, hdr_metadata=hdr_metadata)
+
+        _, kwargs = mock_core.placebo.Tonemap.call_args
+        assert kwargs["src_csp"] == 1
+        assert kwargs["dst_csp"] == 0
+        assert kwargs["dst_prim"] == 1
 
 
 @patch("frame_compare.vs.tonemap._detect_hdr")

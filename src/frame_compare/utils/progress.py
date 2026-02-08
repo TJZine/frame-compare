@@ -71,12 +71,17 @@ class RichProgressReporter:
             console=None,  # Use default console (stderr)
         )
         self._task_id: TaskID | None = None
+        self._task_stack: list[TaskID] = []
+        self._task_totals: dict[TaskID, int] = {}
 
     def start_phase(self, name: str, total: int) -> None:
         """Start a new phase with a rich progress bar."""
         if not self._progress.live.is_started:
             self._progress.start()
+        if self._task_id is not None:
+            self._task_stack.append(self._task_id)
         self._task_id = self._progress.add_task(name, total=total)
+        self._task_totals[self._task_id] = total
 
     def advance(self, amount: int = 1) -> None:
         """Advance the rich progress bar."""
@@ -91,13 +96,18 @@ class RichProgressReporter:
     def complete_phase(self) -> None:
         """Complete the current phase and stop progress if all tasks done."""
         if self._task_id is not None:
-            self._progress.update(
-                self._task_id, completed=self._progress.tasks[self._task_id].total
-            )
+            total = self._task_totals.get(self._task_id)
+            if total is not None:
+                self._progress.update(self._task_id, completed=total)
+            self._progress.remove_task(self._task_id)
+            self._task_totals.pop(self._task_id, None)
             self._task_id = None
 
-        # Check if all tasks are complete to stop the progress display
-        if all(task.finished for task in self._progress.tasks):
+        if self._task_stack:
+            self._task_id = self._task_stack.pop()
+            return
+
+        if self._progress.live.is_started:
             self._progress.stop()
 
 

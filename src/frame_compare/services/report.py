@@ -318,9 +318,21 @@ def _build_html(data: dict[str, object], include_filmstrip: bool = True) -> str:
 
     .rv-canvas {
         position: relative;
+        display: inline-block;
         transform-origin: center center;
         transform: scale(var(--zoom-level, 1));
         box-shadow: 0 0 20px rgba(0,0,0,0.5);
+    }
+
+    /* The sizer image establishes canvas dimensions (layers are absolutely positioned). */
+    .rv-sizer {
+        display: block;
+        max-width: 96vw;
+        max-height: 100%;
+        width: auto;
+        height: auto;
+        opacity: 0;
+        pointer-events: none;
     }
 
     .rv-image {
@@ -518,6 +530,7 @@ def _build_html(data: dict[str, object], include_filmstrip: bool = True) -> str:
                     this.dom = {
                         stage: document.querySelector('.rv-viewer-stage'),
                         canvas: document.querySelector('.rv-canvas'),
+                        sizerImg: document.querySelector('.rv-sizer'),
                         leftLayer: document.querySelector('.rv-left'),
                         rightLayer: document.querySelector('.rv-right'),
                         divider: document.querySelector('.rv-divider'),
@@ -801,6 +814,9 @@ def _build_html(data: dict[str, object], include_filmstrip: bool = True) -> str:
                     }
 
                     if (this.dom.leftImg.getAttribute('src') !== leftSrc) {
+                        if (this.dom.sizerImg && this.dom.sizerImg.getAttribute('src') !== leftSrc) {
+                            this.dom.sizerImg.src = leftSrc;
+                        }
                         this.dom.leftImg.src = leftSrc;
                         // Alt text update
                         const clipName = (this.state.mode === 'overlay' || this.state.mode === 'blink')
@@ -946,6 +962,7 @@ def _build_html(data: dict[str, object], include_filmstrip: bool = True) -> str:
 
     <div class="rv-viewer-stage rv-mode-slider" role="img" aria-label="Comparison viewer">
         <div class="rv-canvas">
+            <img src="" alt="" class="rv-sizer" aria-hidden="true">
             <div class="rv-layer rv-left">
                 <img src="" alt="" class="rv-image">
                 <div id="label-left" class="rv-overlay-label"></div>

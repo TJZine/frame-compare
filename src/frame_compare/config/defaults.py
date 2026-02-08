@@ -61,6 +61,7 @@ enable = true
 default_mode = "slider"
 include_filmstrip = true
 embed_images = false
+auto_open = true
 
 [dovi]
 enable = true

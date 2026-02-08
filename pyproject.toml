@@ -95,6 +95,7 @@ reportPrivateUsage = false
 target-version = "py313"
 line-length = 100
 src = ["src", "tests"]
+extend-exclude = [".tmp"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP", "B", "SIM", "C4"]

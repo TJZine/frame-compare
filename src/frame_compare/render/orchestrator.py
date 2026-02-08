@@ -210,7 +210,11 @@ def render_batch(
         if parallelism <= 1:
             for i, req in enumerate(requests):
                 if reporter:
-                    reporter.set_description(f"Frame {req.frame_number}")
+                    label = req.overlay.label if req.overlay is not None else None
+                    desc = (
+                        f"{label} — Frame {req.frame_number}" if label else f"Frame {req.frame_number}"
+                    )
+                    reporter.set_description(desc)
                 results[i] = render_frame(req)
                 if reporter:
                     reporter.advance(1)
@@ -232,7 +236,17 @@ def render_batch(
                         try:
                             results[idx] = f.result()
                             if reporter:
-                                reporter.set_description(f"Frame {requests[idx].frame_number}")
+                                label = (
+                                    requests[idx].overlay.label
+                                    if requests[idx].overlay is not None
+                                    else None
+                                )
+                                desc = (
+                                    f"{label} — Frame {requests[idx].frame_number}"
+                                    if label
+                                    else f"Frame {requests[idx].frame_number}"
+                                )
+                                reporter.set_description(desc)
                                 reporter.advance(1)
 
                             # Submit next if no exception yet
@@ -350,7 +364,7 @@ def render_screenshots(
                 vs_load_failure = exc
             except Exception as e:
                 if renderer == "vapoursynth":
-                    raise RenderError() from e
+                    raise RenderError(reason=f"{type(e).__name__}: {e}") from e
                 vs_load_failure = e
 
         # === DETERMINISTIC FALLBACK LOGIC (§1.4.1, §1.4.4) ===

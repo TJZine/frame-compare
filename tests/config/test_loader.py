@@ -57,6 +57,15 @@ def test_toml_syntax_error_raises(tmp_path: Path) -> None:
     assert "Failed to parse" in str(exc.value)
 
 
+def test_toml_with_utf8_bom_is_accepted(tmp_path: Path) -> None:
+    """UTF-8 BOM-prefixed TOML should load (common on Windows)."""
+    config_file = tmp_path / "bom.toml"
+    config_file.write_bytes(b"\xef\xbb\xbf[analysis]\nframe_count = 20\n")
+
+    config = load_config(config_path=config_file)
+    assert config.analysis.frame_count == 20
+
+
 def test_validation_error_raises(tmp_path: Path) -> None:
     """Test that invalid config values raise ConfigValidationError."""
     config_file = tmp_path / "invalid.toml"

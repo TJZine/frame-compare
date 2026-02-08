@@ -171,6 +171,7 @@ if (!(Test-Path -LiteralPath $python)) {
 
 $env:PYTHONUTF8 = "1"
 $env:PYTHONPATH = "$bundleRoot\\app\\src;$bundleRoot\\app\\site-packages"
+$env:VAPOURSYNTH_CONF_PATH = "$bundleRoot\\vs\\core\\portable.vs"
 $env:VAPOURSYNTH_PLUGIN_PATH = "$bundleRoot\\vs\\plugins"
 $vsCore = Join-Path $bundleRoot "vs\\core"
 $ffmpegRoot = Join-Path $bundleRoot "ffmpeg"

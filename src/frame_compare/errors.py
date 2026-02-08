@@ -572,13 +572,20 @@ class TonemapError(ProcessingError):
 class RenderError(ProcessingError):
     """Composition/image encoding failure (FC-4004)."""
 
-    def __init__(self) -> None:
+    def __init__(self, reason: str | None = None, details: ErrorDetails | None = None) -> None:
+        message = "Final render composition failed"
+        if reason:
+            message = f"{message}: {reason}"
         super().__init__(
             ErrorContext(
                 code="FC-4004",
                 name="RENDER_ERROR",
-                message="Final render composition failed",
-                hint="Check memory usage or output path",
+                message=message,
+                hint=(
+                    "Check clip pixel format/bit depth compatibility (screenshots require RGB24/RGBA8) "
+                    "and verify the output path is writable"
+                ),
+                details=details,
             )
         )
 

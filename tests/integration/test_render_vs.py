@@ -37,3 +37,38 @@ def test_vs_render_creates_valid_png(tmp_path: Path):
 
     with Image.open(output_path) as img:
         assert img.format == "PNG"
+
+
+@pytest.mark.integration
+@pytest.mark.vs_required
+def test_vs_render_converts_rgbs_to_png(tmp_path: Path):
+    """Verify VapourSynth renderer converts float RGBS clips for PNG output."""
+    core = vs.core
+    # Float RGB uses normalized 0..1 values.
+    clip = core.std.BlankClip(
+        width=32,
+        height=32,
+        length=1,
+        format=vs.RGBS,
+        color=[0.25, 0.5, 0.75],
+    )
+
+    output_path = tmp_path / "vs_frame_rgbs.png"
+    request = RenderRequest(
+        clip=clip,
+        frame_number=0,
+        output_path=output_path,
+        overlay=None,
+        encoder_settings=EncoderSettings(),
+    )
+
+    result = render_frame(request, renderer="vapoursynth")
+
+    assert result == output_path
+    assert output_path.exists()
+
+    with Image.open(output_path) as img:
+        assert img.format == "PNG"
+        extrema = img.getextrema()
+        assert extrema is not None
+        assert all(channel_max > 0 for _, channel_max in extrema)

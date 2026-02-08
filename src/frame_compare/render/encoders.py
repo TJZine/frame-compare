@@ -5,15 +5,17 @@ from __future__ import annotations
 import math
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 from PIL import Image
 
 from frame_compare.errors import (
     EncodingError,
+    ErrorDetails,
     FFmpegError,
     FFmpegNotFoundError,
+    FrameCompareError,
     FrameExtractionError,
     OverlayError,
     RenderError,
@@ -91,10 +93,60 @@ def render_frame(request: RenderRequest, renderer: Renderer = "auto") -> Path:
 
     except FrameExtractionError:
         raise
+    except RenderError:
+        raise
     except Exception as e:
-        raise RenderError() from e
+        reason: str
+        if isinstance(e, FrameCompareError):
+            reason = e.context.message
+        else:
+            reason = f"{type(e).__name__}: {e}"
+
+        details: ErrorDetails = {
+            "renderer": renderer,
+            "frame": request.frame_number,
+            "output_path": str(request.output_path),
+        }
+        if use_vs:
+            node = cast("vs.VideoNode", clip)
+            fmt = cast(Any, getattr(node, "format", None))
+            if fmt is not None:
+                details |= {
+                    "clip_format": str(getattr(fmt, "name", "")),
+                    "color_family": int(getattr(fmt, "color_family", 0)),
+                    "sample_type": int(getattr(fmt, "sample_type", 0)),
+                    "bits_per_sample": int(getattr(fmt, "bits_per_sample", 0)),
+                    "num_planes": int(getattr(fmt, "num_planes", 0)),
+                }
+        else:
+            details["clip"] = str(clip)
+
+        raise RenderError(reason=reason, details=details) from e
 
     return request.output_path
+
+
+def _clip_to_rgb24_for_pillow(clip: vs.VideoNode) -> vs.VideoNode:
+    """Convert a VapourSynth clip to RGB24 for Pillow encoding.
+
+    Pillow's `Image.fromarray()` expects an integer pixel format for RGB/RGBA images.
+    The VS pipeline frequently yields YUV (integer) or RGBS (float) depending on
+    source format and tonemapping. Normalizing here keeps the encoder robust.
+    """
+    import vapoursynth as vs  # type: ignore[import-untyped]
+
+    fmt = cast(Any, getattr(clip, "format", None))
+    if fmt is None:
+        # Variable format clip: best-effort conversion via resize (will fail if unsupported).
+        return clip.resize.Bicubic(format=vs.RGB24)  # type: ignore[attr-defined]
+
+    if fmt.id == vs.RGB24:  # type: ignore[attr-defined]
+        return clip
+
+    if fmt.color_family != vs.RGB:  # type: ignore[attr-defined]
+        return clip.resize.Bicubic(format=vs.RGB24)  # type: ignore[attr-defined]
+
+    return clip.resize.Point(format=vs.RGB24)  # type: ignore[attr-defined]
 
 
 def _render_vs(
@@ -106,6 +158,8 @@ def _render_vs(
 ) -> None:
     """Render frame via VapourSynth."""
     try:
+        clip = _clip_to_rgb24_for_pillow(clip)
+
         # 1. Get frame
         vs_frame = clip.get_frame(frame)
 
@@ -131,7 +185,7 @@ def _render_vs(
     except (EncodingError, OverlayError):
         raise
     except Exception as e:
-        raise EncodingError(output, f"VapourSynth render failed: {e}") from e
+        raise EncodingError(output, f"VapourSynth render failed: {type(e).__name__}: {e}") from e
 
 
 def _probe_fps(video_path: Path) -> float:

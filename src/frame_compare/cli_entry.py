@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import json
 import os
+import sys
+import webbrowser
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -70,6 +72,22 @@ app = typer.Typer(
     help="Video frame comparison tool with tonemapping and slow.pics integration.",
     no_args_is_help=False,
 )
+
+
+def _maybe_open_report(report_path: Path) -> None:
+    """Best-effort open of a generated HTML report in the default browser."""
+    try:
+        if os.name == "nt" and hasattr(os, "startfile"):
+            os.startfile(str(report_path))  # type: ignore[attr-defined]
+            return
+    except OSError:
+        # Fall back to webbrowser below.
+        pass
+
+    try:
+        webbrowser.open(report_path.resolve().as_uri())
+    except OSError:
+        return
 
 
 @app.callback(invoke_without_command=True)
@@ -203,6 +221,21 @@ def run(
 
     if not result.success:
         raise typer.Exit(code=int(ExitCode.PROCESSING_ERROR))
+
+    if (
+        result.report_path is not None
+        and not json_output
+        and not quiet
+        and sys.stdout.isatty()
+    ):
+        try:
+            cfg = load_config(config_path)
+            cfg = apply_cli_overrides(cfg, cli_args=cli_args)
+        except FrameCompareError:
+            cfg = None
+
+        if cfg is None or cfg.report.auto_open:
+            _maybe_open_report(result.report_path)
 
 
 @app.command()

@@ -1,5 +1,7 @@
 """Audio alignment service using cross-correlation."""
 
+from __future__ import annotations
+
 import subprocess
 import tomllib
 from fractions import Fraction
@@ -19,11 +21,66 @@ from frame_compare.errors import (
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.utils.progress import ProgressReporter
 from frame_compare.utils.subproc import run_subprocess
+from frame_compare.vspreview.adapter import (
+    VSPreviewConfig,
+    is_vspreview_available,
+    launch_alignment_verification_session,
+)
 
 CACHE_VERSION = "1"
 CACHE_FILE_NAME = "audio_offsets.toml"
 _FFPROBE_TIMEOUT_SECONDS = 15.0
 _FFMPEG_AUDIO_TIMEOUT_SECONDS = 120.0
+
+
+def _maybe_launch_vspreview(
+    *,
+    reference: Path,
+    comparisons: list[Path],
+    offsets_by_key: dict[str, int],
+    cache_dir: Path,
+    config: AlignmentConfig,
+    progress: ProgressReporter | None,
+) -> None:
+    """Best-effort VSPreview alignment verification.
+
+    This is intended for interactive verification/inspection only. Actual offsets
+    used by the pipeline are still sourced from:
+      1) manual overrides (highest precedence)
+      2) cached offsets
+      3) computed offsets (cross-correlation)
+    """
+    if not (config.use_vspreview or config.force_interactive):
+        return
+
+    available = is_vspreview_available()
+    should_launch = bool(config.force_interactive or (config.use_vspreview and available))
+
+    if config.use_vspreview and not available:
+        # Keep this non-fatal: we still generate the script for manual replay.
+        # The adapter will log `vspreview_script_generated` for visibility.
+        pass
+
+    if progress:
+        progress.start_phase("VSPreview", total=1)
+        progress.set_description("Alignment verification")
+
+    try:
+        launch_alignment_verification_session(
+            reference=reference,
+            comparisons=comparisons,
+            suggested_offsets_by_key=offsets_by_key,
+            cache_dir=cache_dir,
+            config=VSPreviewConfig(enabled=should_launch),
+        )
+        if config.force_interactive and not should_launch:
+            raise AudioAlignmentError(
+                "Interactive alignment requested but VSPreview is not available."
+            )
+    finally:
+        if progress:
+            progress.advance(1)
+            progress.complete_phase()
 
 
 async def align_clips(
@@ -134,6 +191,20 @@ async def align_clips(
     finally:
         if progress:
             progress.complete_phase()
+
+    offsets_by_key: dict[str, int] = {}
+    for comp in comparisons:
+        key = f"{reference.stem}:{comp.stem}"
+        res = results_map.get(key)
+        offsets_by_key[key] = 0 if res is None else int(res.frame_offset)
+    _maybe_launch_vspreview(
+        reference=reference,
+        comparisons=comparisons,
+        offsets_by_key=offsets_by_key,
+        cache_dir=cache_dir,
+        config=config,
+        progress=progress,
+    )
 
     # Return results in the same order as input comparisons
     return [results_map[f"{reference.stem}:{c.stem}"] for c in comparisons]
