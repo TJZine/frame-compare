@@ -313,3 +313,47 @@ def test_hdr_metadata_persisted_as_nested_table(tmp_path: Path, hdr_snapshot: Cl
     assert hdr_table["matrix"] == 9
     assert hdr_table["max_cll"] == 1000
     assert hdr_table["max_fall"] == 400
+
+
+def test_hdr_metadata_with_optional_fields_none_is_toml_serializable(tmp_path: Path):
+    """Regression test: TOML writer must never see None values (tomli_w cannot serialize None)."""
+    fp = ClipFingerprint(Path("hdr_optional_none.mkv"), 1, 1)
+    snapshot = ClipProbeSnapshot(
+        fingerprint=fp,
+        width=3840,
+        height=2160,
+        num_frames=1,
+        fps=Fraction(24, 1),
+        is_hdr=True,
+        hdr_metadata=HDRMetadata(
+            mastering_display=None,
+            max_cll=None,
+            max_fall=None,
+            color_primaries=2,
+            transfer=2,
+            matrix=2,
+        ),
+        preserved_frame_props={},
+        tonemap_prop_keys=(),
+    )
+
+    f = tmp_path / "hdr_optional_none.toml"
+    key = compute_probe_cache_key(snapshot.fingerprint)
+    save_clip_probe_cache(f, {key: snapshot})
+
+    with f.open("rb") as fh:
+        raw_data = tomllib.load(fh)
+
+    hdr_table = cast(dict[str, Any], raw_data[key]["hdr_metadata"])
+    assert hdr_table["color_primaries"] == 2
+    assert hdr_table["transfer"] == 2
+    assert hdr_table["matrix"] == 2
+    assert "mastering_display" not in hdr_table
+    assert "max_cll" not in hdr_table
+    assert "max_fall" not in hdr_table
+
+    loaded = load_clip_probe_cache(f)[key]
+    assert loaded.hdr_metadata is not None
+    assert loaded.hdr_metadata.mastering_display is None
+    assert loaded.hdr_metadata.max_cll is None
+    assert loaded.hdr_metadata.max_fall is None

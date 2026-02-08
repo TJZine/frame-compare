@@ -12,6 +12,9 @@
 AGENTS.md
 CODEX.md
 .codannaignore
+report/
+screens/
+screenshots/
 
 # FC2 app-server runtime (ephemeral)
 .agent-workflow/.autopilot.lock
@@ -20,7 +23,8 @@ CODEX.md
 .agent-workflow/runs/**/appserver_threads.json
 
 # Local config (may contain secrets)
-config/config.toml
+config/*
+!config/.gitkeep
 
 # Python
 __pycache__/
@@ -57,6 +61,7 @@ ENV/
 
 # Testing
 .pytest_cache/
+pytest-cache-files-*/
 .coverage
 htmlcov/
 .tox/
@@ -70,3 +75,4 @@ htmlcov/
 Thumbs.db
 .portable_cache/
 comparison_videos/**
+generated/

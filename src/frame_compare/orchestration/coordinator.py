@@ -57,6 +57,7 @@ from frame_compare.services.publishers import publish_to_slowpics
 from frame_compare.services.report import ClipInfo, ReportData, generate_report
 from frame_compare.services.types import AlignmentConfig, MetadataConfig, TmdbMetadata
 from frame_compare.utils.progress import ProgressReporter
+from frame_compare.utils.run_folder import derive_run_folder_name, get_existing_run_folders
 from frame_compare.utils.subproc import run_subprocess
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.loader import DefaultVSLoader, VSLoader
@@ -140,6 +141,15 @@ def _resolve_cache_version(cache_path: Path) -> str | None:
         return None
     version = payload.get("version")
     return str(version) if version is not None else None
+
+
+def _build_metadata_config(config: ConfigSchema) -> MetadataConfig:
+    """Build metadata service config from run config."""
+    return MetadataConfig(
+        api_key=config.tmdb.api_key,
+        unattended=config.tmdb.unattended,
+        timeout_seconds=config.tmdb.timeout_seconds,
+    )
 
 
 @dataclass(frozen=True)
@@ -385,6 +395,36 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         }
         config = apply_cli_overrides(preflight.config, cli_args=cli_args)
         input_videos = discover_inputs(workspace.input_dir)
+        phase_warnings: set[str] = set()
+        resolved_metadata: TmdbMetadata | None = None
+        metadata_prefetched = False
+
+        # Resolve run folder before any cache/probe path access so all phases use the same workspace.
+        if config.paths.use_run_folders:
+            if deps.http_client is not None and config.tmdb.enabled and not request.skip_metadata:
+                # Mark prefetch attempt as final for this run. If lookup fails, we keep the
+                # folder naming path resilient and skip a second metadata-phase retry.
+                metadata_prefetched = True
+                try:
+                    resolved_metadata = await resolve_metadata(
+                        filenames=[input_videos[0].name],
+                        config=_build_metadata_config(config),
+                        client=deps.http_client,
+                    )
+                except Exception as exc:
+                    # Metadata lookup is optional; keep run folder naming resilient.
+                    phase_warnings.add(f"metadata: {exc}")
+                    resolved_metadata = None
+
+            filenames = [video.name for video in input_videos]
+            existing = get_existing_run_folders(workspace.input_dir)
+            run_folder_name = derive_run_folder_name(
+                filenames=filenames,
+                tmdb_metadata=resolved_metadata,
+                existing_folders=existing,
+            )
+            run_dir = workspace.input_dir / run_folder_name
+            workspace = workspace.with_run_dir(run_dir)
 
         if request.no_cache:
             _remove_cached_metrics(workspace)
@@ -465,6 +505,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
 
         reference = clips[0]
         comparisons = clips[1:]
+
         context = RunContext(
             config=config,
             workspace=workspace,
@@ -493,10 +534,8 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
                 "report": 0.0,
             }
         )
-        phase_warnings: set[str] = set()
         selected_frames: list[int] = []
         metrics_cache_hit = False
-        resolved_metadata: TmdbMetadata | None = None
         screenshots_by_label: dict[str, list[Path]] = {}
         slowpics_url: str | None = None
         report_path: Path | None = None
@@ -582,6 +621,8 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
                 lambda ctx: _run_metadata_phase(
                     ctx=ctx,
                     client=deps.http_client,
+                    prefetched_metadata=resolved_metadata,
+                    metadata_prefetched=metadata_prefetched,
                     metadata_out=lambda value: _set_metadata(value),
                 ),
                 warn_only=True,
@@ -694,7 +735,7 @@ def _run_analyze_phase(
         video_paths=input_videos,
         config=ctx.config.analysis,
         cache_dir=workspace.cache_dir,
-        reporter=None,
+        reporter=ctx.reporter,
     )
     selection = select_frames(metrics=metrics, config=ctx.config.analysis)
     selected_frames[:] = selection.frames
@@ -716,7 +757,7 @@ async def _run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> No
         comparisons=[comp.path for comp in ctx.comparisons],
         config=alignment_config,
         cache_dir=ctx.workspace.generated_dir,
-        progress=None,
+        progress=ctx.reporter,
     )
 
     def _source_from_method(method: str) -> str:
@@ -803,7 +844,7 @@ def _run_render_phase(
             label_map=label_map,
             renderer="auto",
             overlay_mode=overlay_mode,
-            reporter=None,
+            reporter=ctx.reporter,
         )
         clip_paths: list[Path] = []
         for aligned_frame, rendered_path in zip(frames, rendered_for_clip[clip.label], strict=True):
@@ -820,18 +861,20 @@ async def _run_metadata_phase(
     *,
     ctx: RunContext,
     client: httpx.AsyncClient | None,
+    prefetched_metadata: TmdbMetadata | None,
+    metadata_prefetched: bool,
     metadata_out: Callable[[TmdbMetadata | None], None],
 ) -> None:
+    if metadata_prefetched:
+        metadata_out(prefetched_metadata)
+        return
+
     if client is None or not ctx.config.tmdb.enabled:
         metadata_out(None)
         return
     metadata = await resolve_metadata(
         filenames=[ctx.reference.path.name],
-        config=MetadataConfig(
-            api_key=ctx.config.tmdb.api_key,
-            unattended=ctx.config.tmdb.unattended,
-            timeout_seconds=ctx.config.tmdb.timeout_seconds,
-        ),
+        config=_build_metadata_config(ctx.config),
         client=client,
     )
     metadata_out(metadata)
@@ -852,7 +895,7 @@ async def _run_publish_phase(
         config=ctx.config.slowpics,
         client=client,
         metadata=metadata,
-        progress=None,
+        progress=ctx.reporter,
     )
     slowpics_url_out(result.url)
 

@@ -177,16 +177,22 @@ def save_clip_probe_cache(
             )
 
         # Per SSOT §3.5.1: is_hdr=true → nested hdr_metadata table; is_hdr=false → omit
+        # TOML doesn't support None values, so we only include non-None fields
         if snapshot.is_hdr and snapshot.hdr_metadata:
             md = snapshot.hdr_metadata
-            entry["hdr_metadata"] = {
-                "mastering_display": md.mastering_display,
-                "max_cll": md.max_cll,
-                "max_fall": md.max_fall,
+            hdr_dict: dict[str, Any] = {
                 "color_primaries": md.color_primaries,
                 "transfer": md.transfer,
                 "matrix": md.matrix,
             }
+            # Only add optional fields if they are not None
+            if md.mastering_display is not None:
+                hdr_dict["mastering_display"] = md.mastering_display
+            if md.max_cll is not None:
+                hdr_dict["max_cll"] = md.max_cll
+            if md.max_fall is not None:
+                hdr_dict["max_fall"] = md.max_fall
+            entry["hdr_metadata"] = hdr_dict
 
         output[key] = entry
 

@@ -4,10 +4,19 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
+import webbrowser
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import tomli_w
+
+# Typer's Rich help renderer reads TERMINAL_WIDTH only at import-time.
+# Defaulting it prevents long option names from being ellipsized in help output
+# (and keeps CLI help stable under Click's test runner).
+os.environ.setdefault("TERMINAL_WIDTH", "200")
+
 import typer
 from rich.console import Console
 
@@ -63,6 +72,22 @@ app = typer.Typer(
     help="Video frame comparison tool with tonemapping and slow.pics integration.",
     no_args_is_help=False,
 )
+
+
+def _maybe_open_report(report_path: Path) -> None:
+    """Best-effort open of a generated HTML report in the default browser."""
+    try:
+        if os.name == "nt" and hasattr(os, "startfile"):
+            os.startfile(str(report_path))  # type: ignore[attr-defined]
+            return
+    except OSError:
+        # Fall back to webbrowser below.
+        pass
+
+    try:
+        webbrowser.open(report_path.resolve().as_uri())
+    except (OSError, webbrowser.Error):
+        return
 
 
 @app.callback(invoke_without_command=True)
@@ -124,19 +149,23 @@ def run(
         "force_interactive_alignment": force_interactive_alignment,
         "input": str(input_dir) if input_dir is not None else None,
     }
+    resolved_config: ConfigSchema | None = None
+
+    def _load_effective_config() -> ConfigSchema:
+        nonlocal resolved_config
+        if resolved_config is None:
+            resolved_config = apply_cli_overrides(load_config(config_path), cli_args=cli_args)
+        return resolved_config
 
     try:
         if write_config:
-            config_data = load_config(config_path)
-            config_override = apply_cli_overrides(config_data, cli_args=cli_args)
-            _write_config_to(config_path, config_override)
+            _write_config_to(config_path, _load_effective_config())
             return
 
         if diagnose_paths:
             from frame_compare.orchestration.preflight import resolve_paths
 
-            config_data = load_config(config_path)
-            config_override = apply_cli_overrides(config_data, cli_args=cli_args)
+            config_override = _load_effective_config()
             workspace = resolve_paths(config_override, resolved_root)
             payload = {
                 "root": str(resolved_root),
@@ -196,6 +225,17 @@ def run(
 
     if not result.success:
         raise typer.Exit(code=int(ExitCode.PROCESSING_ERROR))
+
+    if result.report_path is not None and not json_output and not quiet and sys.stdout.isatty():
+        try:
+            cfg = _load_effective_config()
+        except FrameCompareError:
+            # Default to opening when config cannot be reloaded so successful runs
+            # still surface the generated report in interactive sessions.
+            cfg = None
+
+        if cfg is None or cfg.report.auto_open:
+            _maybe_open_report(result.report_path)
 
 
 @app.command()

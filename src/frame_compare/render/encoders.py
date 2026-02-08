@@ -5,15 +5,17 @@ from __future__ import annotations
 import math
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 from PIL import Image
 
 from frame_compare.errors import (
     EncodingError,
+    ErrorDetails,
     FFmpegError,
     FFmpegNotFoundError,
+    FrameCompareError,
     FrameExtractionError,
     OverlayError,
     RenderError,
@@ -27,6 +29,17 @@ if TYPE_CHECKING:
     import vapoursynth as vs  # type: ignore[import-untyped]
 
     from frame_compare.render.types import OverlayConfig
+
+_MATRIX_TO_ZIMG: dict[int, str] = {
+    1: "709",
+    4: "fcc",
+    5: "470bg",
+    6: "170m",
+    7: "240m",
+    8: "ycgco",
+    9: "2020ncl",
+    10: "2020cl",
+}
 
 
 def render_frame(request: RenderRequest, renderer: Renderer = "auto") -> Path:
@@ -89,12 +102,90 @@ def render_frame(request: RenderRequest, renderer: Renderer = "auto") -> Path:
             if request.overlay is not None:
                 _apply_overlay_to_file(request.output_path, request.overlay)
 
-    except FrameExtractionError:
+    except (FrameExtractionError, RenderError, SourceLoadError):
         raise
     except Exception as e:
-        raise RenderError() from e
+        reason: str
+        if isinstance(e, FrameCompareError):
+            reason = e.context.message
+        else:
+            reason = f"{type(e).__name__}: {e}"
+
+        details: ErrorDetails = {
+            "renderer": renderer,
+            "frame": request.frame_number,
+            "output_path": str(request.output_path),
+        }
+        if use_vs:
+            node = cast("vs.VideoNode", clip)
+            fmt = cast(Any, getattr(node, "format", None))
+            if fmt is not None:
+                details |= {
+                    "clip_format": str(getattr(fmt, "name", "")),
+                    "color_family": int(getattr(fmt, "color_family", 0)),
+                    "sample_type": int(getattr(fmt, "sample_type", 0)),
+                    "bits_per_sample": int(getattr(fmt, "bits_per_sample", 0)),
+                    "num_planes": int(getattr(fmt, "num_planes", 0)),
+                }
+        else:
+            details["clip"] = str(clip)
+
+        raise RenderError(reason=reason, details=details) from e
 
     return request.output_path
+
+
+def _resolve_matrix_in_s(clip: vs.VideoNode) -> str:
+    """Resolve matrix_in_s for YUV->RGB conversion with robust fallbacks.
+
+    Priority:
+    1. _Matrix frame prop mapping when recognized
+    2. HDR heuristic (_Transfer in {16,18} and _Primaries == 9) -> 2020ncl
+    3. SDR default -> 709
+    """
+    # Read canonical color props from frame 0. VapourSynth usually caches hot frames,
+    # so this metadata probe is typically low overhead relative to full rendering.
+    props = cast(dict[str, object], dict(clip.get_frame(0).props))
+    matrix_prop = props.get("_Matrix")
+    if isinstance(matrix_prop, int):
+        mapped = _MATRIX_TO_ZIMG.get(matrix_prop)
+        if mapped is not None:
+            return mapped
+
+    transfer_prop = props.get("_Transfer")
+    primaries_prop = props.get("_Primaries")
+    is_hdr = (
+        isinstance(transfer_prop, int)
+        and transfer_prop in {16, 18}
+        and isinstance(primaries_prop, int)
+        and primaries_prop == 9
+    )
+    return "2020ncl" if is_hdr else "709"
+
+
+def _clip_to_rgb24_for_pillow(clip: vs.VideoNode) -> vs.VideoNode:
+    """Convert a VapourSynth clip to RGB24 for Pillow encoding.
+
+    Pillow's `Image.fromarray()` expects an integer pixel format for RGB/RGBA images.
+    The VS pipeline frequently yields YUV (integer) or RGBS (float) depending on
+    source format and tonemapping. Normalizing here keeps the encoder robust.
+    """
+    import vapoursynth as vs  # type: ignore[import-untyped]
+
+    fmt = cast(Any, getattr(clip, "format", None))
+    if fmt is None:
+        matrix_in_s = _resolve_matrix_in_s(clip)
+        # Variable format clip: best-effort conversion via resize (will fail if unsupported).
+        return clip.resize.Bicubic(format=vs.RGB24, matrix_in_s=matrix_in_s)  # type: ignore[attr-defined]
+
+    if fmt.id == vs.RGB24:  # type: ignore[attr-defined]
+        return clip
+
+    if fmt.color_family != vs.RGB:  # type: ignore[attr-defined]
+        matrix_in_s = _resolve_matrix_in_s(clip)
+        return clip.resize.Bicubic(format=vs.RGB24, matrix_in_s=matrix_in_s)  # type: ignore[attr-defined]
+
+    return clip.resize.Point(format=vs.RGB24)  # type: ignore[attr-defined]
 
 
 def _render_vs(
@@ -106,6 +197,8 @@ def _render_vs(
 ) -> None:
     """Render frame via VapourSynth."""
     try:
+        clip = _clip_to_rgb24_for_pillow(clip)
+
         # 1. Get frame
         vs_frame = clip.get_frame(frame)
 
@@ -131,7 +224,7 @@ def _render_vs(
     except (EncodingError, OverlayError):
         raise
     except Exception as e:
-        raise EncodingError(output, f"VapourSynth render failed: {e}") from e
+        raise EncodingError(output, f"VapourSynth render failed: {type(e).__name__}: {e}") from e
 
 
 def _probe_fps(video_path: Path) -> float:

@@ -171,6 +171,7 @@ if (!(Test-Path -LiteralPath $python)) {
 
 $env:PYTHONUTF8 = "1"
 $env:PYTHONPATH = "$bundleRoot\\app\\src;$bundleRoot\\app\\site-packages"
+$env:VAPOURSYNTH_CONF_PATH = "$bundleRoot\\vs\\core\\portable.vs"
 $env:VAPOURSYNTH_PLUGIN_PATH = "$bundleRoot\\vs\\plugins"
 $vsCore = Join-Path $bundleRoot "vs\\core"
 $ffmpegRoot = Join-Path $bundleRoot "ffmpeg"
@@ -218,6 +219,28 @@ exit /b %ERRORLEVEL%
 
   Set-Content -LiteralPath $ps1Path -Value $ps1 -Encoding UTF8
   Set-Content -LiteralPath $cmdPath -Value $cmd -Encoding ASCII
+}
+
+function Copy-InstallerFiles([string]$BundleRoot) {
+  $sourceDir = $PSScriptRoot
+  $shimSource = Join-Path $sourceDir "shim"
+  $shimDest = Join-Path $BundleRoot "shim"
+
+  foreach ($file in @("install.ps1", "uninstall.ps1", "install.cmd", "uninstall.cmd", "README.txt")) {
+    $src = Join-Path $sourceDir $file
+    if (!(Test-Path -LiteralPath $src)) {
+      throw "Installer file not found: $src"
+    }
+    Copy-Item -Force -LiteralPath $src -Destination (Join-Path $BundleRoot $file)
+  }
+
+  if (!(Test-Path -LiteralPath $shimSource)) {
+    throw "Shim directory not found: $shimSource"
+  }
+  if (Test-Path -LiteralPath $shimDest) {
+    Remove-Item -Recurse -Force -LiteralPath $shimDest
+  }
+  Copy-Item -Recurse -Force -LiteralPath $shimSource -Destination $shimDest
 }
 
 function Copy-RepoApp([string]$BundleRoot) {
@@ -426,6 +449,7 @@ function Main() {
 
   # Launchers
   Write-LauncherFiles -BundleRoot $OutDir
+  Copy-InstallerFiles -BundleRoot $OutDir
 
   # Licenses
   Copy-Licenses -BundleRoot $OutDir -Artifacts $artifacts

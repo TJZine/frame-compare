@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import tomllib
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import (
@@ -16,6 +18,19 @@ from pydantic_settings import (
 # ─── Enums ─────────────────────────────────────────────────────────────────────
 # Most enums use lowercase string values (Pydantic accepts lowercase only).
 # Exception: LogLevel uses uppercase values per standard Python logging convention.
+
+
+class _TomlConfigSettingsSourceNoBOM(TomlConfigSettingsSource):
+    """TOML settings source that accepts UTF-8 BOM-prefixed files.
+
+    Python's built-in `tomllib.load()` rejects UTF-8 BOM at the start of the file
+    (common on Windows). We decode with 'utf-8-sig' and parse via `tomllib.loads()`.
+    """
+
+    def _read_file(self, file_path: Path) -> dict[str, Any]:
+        raw = file_path.read_bytes()
+        text = raw.decode("utf-8-sig")
+        return tomllib.loads(text)
 
 
 class SelectionMode(str, Enum):
@@ -101,6 +116,7 @@ class PathsConfig(BaseModel):
     screenshots_dir: str = "screenshots"
     generated_dir: str = "generated"
     config_dir: str = "config"
+    use_run_folders: bool = True
 
 
 class AnalysisConfig(BaseModel):
@@ -174,6 +190,7 @@ class ReportConfig(BaseModel):
     default_mode: ViewerMode = ViewerMode.SLIDER
     include_filmstrip: bool = True
     embed_images: bool = False
+    auto_open: bool = True
 
     @field_validator("output_dir", mode="before")
     @classmethod
@@ -240,7 +257,7 @@ class ConfigSchema(BaseSettings):
         return (
             init_settings,
             env_settings,
-            TomlConfigSettingsSource(settings_cls),
+            _TomlConfigSettingsSourceNoBOM(settings_cls),
             file_secret_settings,
         )
 

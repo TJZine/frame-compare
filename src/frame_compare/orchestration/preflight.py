@@ -106,6 +106,7 @@ def resolve_paths(config: ConfigSchema, root: Path) -> WorkspacePaths:
     return WorkspacePaths(
         root=resolved_root,
         input_dir=_resolve_path(paths.input_dir, resolved_root),
+        run_dir=None,  # Legacy mode: run folder disabled
         screenshots_dir=_resolve_path(paths.screenshots_dir, resolved_root),
         generated_dir=_resolve_path(paths.generated_dir, resolved_root),
         config_dir=config_dir,
@@ -123,6 +124,7 @@ def _resolve_paths_with_config_file(
     return WorkspacePaths(
         root=resolved_root,
         input_dir=_resolve_path(paths.input_dir, resolved_root),
+        run_dir=None,  # Legacy mode: run folder disabled
         screenshots_dir=_resolve_path(paths.screenshots_dir, resolved_root),
         generated_dir=_resolve_path(paths.generated_dir, resolved_root),
         config_dir=_resolve_path(paths.config_dir, resolved_root),

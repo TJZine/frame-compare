@@ -9,6 +9,7 @@ input_dir = "comparison_videos"
 screenshots_dir = "screenshots"
 generated_dir = "generated"
 config_dir = "config"
+use_run_folders = true
 
 [analysis]
 frame_count = 10
@@ -61,6 +62,7 @@ enable = true
 default_mode = "slider"
 include_filmstrip = true
 embed_images = false
+auto_open = true
 
 [dovi]
 enable = true

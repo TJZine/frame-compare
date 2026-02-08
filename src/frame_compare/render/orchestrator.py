@@ -36,12 +36,12 @@ class ProgressReporter(Protocol):
         """Start a new progress phase."""
         ...
 
-    def set_description(self, description: str) -> None:
+    def set_description(self, desc: str) -> None:
         """Set current task description."""
         ...
 
-    def advance(self, n: int = 1) -> None:
-        """Advance progress by n units."""
+    def advance(self, amount: int = 1) -> None:
+        """Advance progress by amount units."""
         ...
 
     def complete_phase(self) -> None:
@@ -181,6 +181,12 @@ def probe_is_hdr_ffprobe(path: Path) -> bool:
     return is_hdr_transfer and is_bt2020_primaries
 
 
+def _render_description(request: RenderRequest) -> str:
+    """Build a consistent progress description for a render request."""
+    label = request.overlay.label if request.overlay is not None else None
+    return f"{label} — Frame {request.frame_number}" if label else f"Frame {request.frame_number}"
+
+
 def render_batch(
     requests: list[RenderRequest], parallelism: int = 1, reporter: ProgressReporter | None = None
 ) -> list[Path]:
@@ -210,7 +216,7 @@ def render_batch(
         if parallelism <= 1:
             for i, req in enumerate(requests):
                 if reporter:
-                    reporter.set_description(f"Frame {req.frame_number}")
+                    reporter.set_description(_render_description(req))
                 results[i] = render_frame(req)
                 if reporter:
                     reporter.advance(1)
@@ -232,7 +238,7 @@ def render_batch(
                         try:
                             results[idx] = f.result()
                             if reporter:
-                                reporter.set_description(f"Frame {requests[idx].frame_number}")
+                                reporter.set_description(_render_description(requests[idx]))
                                 reporter.advance(1)
 
                             # Submit next if no exception yet
@@ -350,7 +356,7 @@ def render_screenshots(
                 vs_load_failure = exc
             except Exception as e:
                 if renderer == "vapoursynth":
-                    raise RenderError() from e
+                    raise RenderError(reason=f"{type(e).__name__}: {e}") from e
                 vs_load_failure = e
 
         # === DETERMINISTIC FALLBACK LOGIC (§1.4.1, §1.4.4) ===

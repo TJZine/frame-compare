@@ -30,7 +30,7 @@ if not _vs_spec_available() and "vapoursynth" not in sys.modules:
 import vapoursynth as vs  # noqa: E402, I001
 from frame_compare.errors import TonemapError  # noqa: E402, I001
 from frame_compare.vs.tonemap import apply_tonemap, get_preset_settings  # noqa: E402, I001
-from frame_compare.vs.types import TonemapSettings  # noqa: E402, I001
+from frame_compare.vs.types import HDRMetadata, TonemapSettings  # noqa: E402, I001
 
 
 def test_get_preset_settings_returns_valid_settings():
@@ -227,6 +227,87 @@ def test_apply_tonemap_detects_metadata_when_missing_libplacebo(mock_detect, moc
         assert kwargs["src_max"] == 1234
 
 
+@patch("frame_compare.vs.tonemap.detect_plugins")
+def test_apply_tonemap_passes_src_csp_hint_for_hdr10(mock_detect):
+    """Verify HDR10 metadata yields src_csp hint and SDR output defaults."""
+    mock_detect.return_value = {"libplacebo": True}
+
+    mock_clip = MagicMock()
+    mock_clip.format.bits_per_sample = 16
+    mock_clip.format.color_family = vs.RGB
+    mock_clip.std.SetFrameProps = MagicMock(return_value=mock_clip)
+    mock_clip.resize.Point = MagicMock(return_value=mock_clip)
+
+    hdr_metadata = HDRMetadata(
+        mastering_display=None,
+        max_cll=1000,
+        max_fall=400,
+        color_primaries=9,
+        transfer=16,
+        matrix=9,
+    )
+
+    settings = TonemapSettings(enabled=True, tone_curve="bt2390", target_nits=203)
+
+    with patch("vapoursynth.core", MagicMock()) as mock_core:
+        apply_tonemap(mock_clip, settings, hdr_metadata=hdr_metadata)
+
+        _, kwargs = mock_core.placebo.Tonemap.call_args
+        assert kwargs["src_csp"] == 1
+        assert kwargs["dst_csp"] == 0
+        assert kwargs["dst_prim"] == 1
+
+
+@patch("frame_compare.vs.tonemap.detect_plugins")
+def test_apply_tonemap_rejects_non_positive_target_nits_before_processing(mock_detect):
+    """Invalid target_nits should fail early with explicit validation error."""
+    mock_detect.return_value = {"libplacebo": True}
+    mock_clip = MagicMock()
+    settings = TonemapSettings(enabled=True, tone_curve="bt2390", target_nits=0)
+
+    with pytest.raises(TonemapError, match="target_nits must be > 0"):
+        apply_tonemap(mock_clip, settings)
+
+
+@patch("frame_compare.vs.tonemap.detect_plugins")
+def test_apply_tonemap_rejects_non_positive_target_nits_for_fallback_path(mock_detect):
+    """Validation should run before selecting libplacebo/fallback path."""
+    mock_detect.return_value = {"libplacebo": False}
+    mock_clip = MagicMock()
+    settings = TonemapSettings(enabled=True, tone_curve="reinhard", target_nits=-5)
+
+    with pytest.raises(TonemapError, match="target_nits must be > 0"):
+        apply_tonemap(mock_clip, settings)
+
+
+@patch("frame_compare.vs.tonemap.detect_plugins")
+def test_apply_tonemap_retries_minimal_kwargs_on_any_typeerror(mock_detect):
+    """Compatibility retry should not depend on exact TypeError message text."""
+    mock_detect.return_value = {"libplacebo": True}
+    mock_clip = MagicMock()
+    mock_clip.format.bits_per_sample = 16
+    mock_clip.format.color_family = vs.RGB
+    mock_clip.std.SetFrameProps = MagicMock(return_value=mock_clip)
+    mock_clip.resize.Point = MagicMock(return_value=mock_clip)
+
+    settings = TonemapSettings(enabled=True, tone_curve="bt2390", target_nits=203)
+    with patch("vapoursynth.core", MagicMock()) as mock_core:
+        mock_core.placebo.Tonemap.side_effect = [
+            TypeError("libplacebo signature mismatch"),
+            mock_clip,
+        ]
+
+        result = apply_tonemap(mock_clip, settings)
+
+        assert result is mock_clip
+        assert mock_core.placebo.Tonemap.call_count == 2
+        first_call = mock_core.placebo.Tonemap.call_args_list[0]
+        second_call = mock_core.placebo.Tonemap.call_args_list[1]
+        assert "dst_csp" in first_call.kwargs
+        assert "dst_csp" not in second_call.kwargs
+        assert "dst_prim" not in second_call.kwargs
+
+
 @patch("frame_compare.vs.tonemap._detect_hdr")
 @patch("frame_compare.vs.tonemap.detect_plugins")
 def test_apply_tonemap_detects_metadata_when_missing_fallback(mock_detect, mock_detect_hdr):
@@ -250,8 +331,19 @@ def test_apply_tonemap_detects_metadata_when_missing_fallback(mock_detect, mock_
     # Verify _detect_hdr called
     mock_detect_hdr.assert_called_once()
 
-    # Verify max_cll was used in expression
+    # Verify max_cll was used in expression (via computed scale factor)
     mock_clip.std.Expr.assert_called_once()
     call_args = mock_clip.std.Expr.call_args
-    # Check that 5678 is in the expression string
-    assert "5678" in call_args.kwargs["expr"][0]
+    # The expression uses scale = max_cll / target_nits, not raw max_cll
+    # With max_cll=5678 and default target_nits=203: scale ≈ 27.97
+    expected_scale = 5678 / 203
+    expr_string = call_args.kwargs["expr"][0]
+    # Extract the numeric scale from the expression (first number after "x ")
+    import re
+
+    match = re.search(r"x\s+([\d.]+)", expr_string)
+    assert match, f"Could not find scale in expression: {expr_string}"
+    actual_scale = float(match.group(1))
+    assert abs(actual_scale - expected_scale) < 0.01, (
+        f"Scale mismatch: expected ~{expected_scale:.2f}, got {actual_scale}"
+    )

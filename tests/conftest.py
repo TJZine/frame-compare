@@ -14,6 +14,25 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
 
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """Best-effort cleanup of pytest temp cache dirs in the repo root.
+
+    Pytest's cache provider uses temporary directories named like
+    `pytest-cache-files-*` and normally deletes them. If a run is interrupted
+    or the OS denies cleanup, they can be left behind and clutter the repo.
+    """
+    root = Path(str(session.config.rootpath))
+    for path in root.glob("pytest-cache-files-*"):
+        try:
+            # shutil import is local to keep import-time overhead minimal.
+            import shutil
+
+            shutil.rmtree(path, ignore_errors=True)
+        except Exception:
+            # Never fail the test session because cleanup couldn't run.
+            pass
+
+
 # ─── Global Mocks (Run at import time for collection) ──────────────────────────
 
 
