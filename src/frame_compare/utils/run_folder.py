@@ -54,9 +54,11 @@ def sanitize_folder_name(name: str) -> str:
 
 
 def find_common_metadata(filenames: list[str]) -> tuple[str | None, int | None]:
-    """Find title/year that appears in all parsed filenames.
+    """Find title/year shared by all non-empty parsed values.
 
-    Parses each filename and finds metadata values that match across all files.
+    Parses each filename and finds metadata values that match across available
+    parsed fields. Missing/empty fields are ignored to keep graceful fallback
+    behavior for partially parseable filenames.
 
     Args:
         filenames: List of video filenames to compare
@@ -75,12 +77,12 @@ def find_common_metadata(filenames: list[str]) -> tuple[str | None, int | None]:
         pm = parsed_results[0]
         return pm.title if pm.title else None, pm.year
 
-    # Find common title (case-insensitive comparison)
+    # Find common title (case-insensitive comparison across non-empty titles)
     titles = [p.title.lower().strip() for p in parsed_results if p.title]
     common_title: str | None = None
     if titles and len(set(titles)) == 1:
-        # All titles match - use the first one's original casing
-        common_title = parsed_results[0].title
+        # All non-empty titles match - preserve original casing from first contributor.
+        common_title = next(p.title for p in parsed_results if p.title)
 
     # Find common year
     years = [p.year for p in parsed_results if p.year is not None]

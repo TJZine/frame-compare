@@ -3,7 +3,7 @@
 from pathlib import Path
 from unittest.mock import patch
 
-from frame_compare.services.types import TmdbMetadata
+from frame_compare.services.types import ParsedMetadata, TmdbMetadata
 from frame_compare.utils.run_folder import (
     _combine_filename_stems,
     derive_run_folder_name,
@@ -89,18 +89,35 @@ def test_find_common_metadata_empty_list() -> None:
     assert year is None
 
 
+def test_find_common_metadata_preserves_non_empty_title_when_first_is_empty(monkeypatch) -> None:
+    responses = iter(
+        [
+            ParsedMetadata(title="", year=2024),
+            ParsedMetadata(title="Movie Name", year=2024),
+            ParsedMetadata(title="Movie Name", year=2024),
+        ]
+    )
+    monkeypatch.setattr(
+        "frame_compare.utils.run_folder.parse_filename",
+        lambda _filename: next(responses),
+    )
+    title, year = find_common_metadata(["a.mkv", "b.mkv", "c.mkv"])
+    assert title == "Movie Name"
+    assert year == 2024
+
+
 # ─── _combine_filename_stems Tests ────────────────────────────────────────────
 
 
 def test_combine_filename_stems_deduplicates() -> None:
     result = _combine_filename_stems(
         [
-            "Movie.2024.WEB-DL.mkv",
-            "Movie.2024.BluRay.mkv",
+            "Movie.2024.mkv",
+            "Movie.2024.mp4",
         ]
     )
-    # Should not repeat "Movie 2024"
-    assert result.count("+") <= 1
+    # Identical stems should collapse to a single entry.
+    assert "+" not in result
 
 
 def test_combine_filename_stems_limits_to_two() -> None:
@@ -112,7 +129,7 @@ def test_combine_filename_stems_limits_to_two() -> None:
             "Movie4.mkv",
         ]
     )
-    assert "+2 more" in result or "+" in result
+    assert "+2 more" in result
 
 
 def test_combine_filename_stems_empty_list() -> None:

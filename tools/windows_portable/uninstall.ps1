@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-function Normalize-PathEntry([string]$PathEntry) {
+function ConvertTo-NormalizedPathEntry([string]$PathEntry) {
   if ([string]::IsNullOrWhiteSpace($PathEntry)) {
     return ""
   }
@@ -17,10 +17,10 @@ if (-not [string]::IsNullOrWhiteSpace($userPath)) {
   $entries = @($userPath -split ";" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 }
 
-$normalizedBinDir = Normalize-PathEntry -PathEntry $binDir
+$normalizedBinDir = ConvertTo-NormalizedPathEntry -PathEntry $binDir
 $filtered = @()
 foreach ($entry in $entries) {
-  if ((Normalize-PathEntry -PathEntry $entry) -ne $normalizedBinDir) {
+  if ((ConvertTo-NormalizedPathEntry -PathEntry $entry) -ne $normalizedBinDir) {
     $filtered += $entry
   }
 }

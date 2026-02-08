@@ -181,6 +181,12 @@ def probe_is_hdr_ffprobe(path: Path) -> bool:
     return is_hdr_transfer and is_bt2020_primaries
 
 
+def _render_description(request: RenderRequest) -> str:
+    """Build a consistent progress description for a render request."""
+    label = request.overlay.label if request.overlay is not None else None
+    return f"{label} — Frame {request.frame_number}" if label else f"Frame {request.frame_number}"
+
+
 def render_batch(
     requests: list[RenderRequest], parallelism: int = 1, reporter: ProgressReporter | None = None
 ) -> list[Path]:
@@ -210,11 +216,7 @@ def render_batch(
         if parallelism <= 1:
             for i, req in enumerate(requests):
                 if reporter:
-                    label = req.overlay.label if req.overlay is not None else None
-                    desc = (
-                        f"{label} — Frame {req.frame_number}" if label else f"Frame {req.frame_number}"
-                    )
-                    reporter.set_description(desc)
+                    reporter.set_description(_render_description(req))
                 results[i] = render_frame(req)
                 if reporter:
                     reporter.advance(1)
@@ -236,17 +238,7 @@ def render_batch(
                         try:
                             results[idx] = f.result()
                             if reporter:
-                                label = (
-                                    requests[idx].overlay.label
-                                    if requests[idx].overlay is not None
-                                    else None
-                                )
-                                desc = (
-                                    f"{label} — Frame {requests[idx].frame_number}"
-                                    if label
-                                    else f"Frame {requests[idx].frame_number}"
-                                )
-                                reporter.set_description(desc)
+                                reporter.set_description(_render_description(requests[idx]))
                                 reporter.advance(1)
 
                             # Submit next if no exception yet

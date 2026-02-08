@@ -33,6 +33,21 @@ _FFPROBE_TIMEOUT_SECONDS = 15.0
 _FFMPEG_AUDIO_TIMEOUT_SECONDS = 120.0
 
 
+def _build_offsets_map(
+    *,
+    reference: Path,
+    comparisons: list[Path],
+    results_map: dict[str, AlignmentResult],
+) -> dict[str, int]:
+    """Build stable `{reference:comparison -> frame_offset}` map for VSPreview."""
+    offsets_by_key: dict[str, int] = {}
+    for comp in comparisons:
+        key = f"{reference.stem}:{comp.stem}"
+        res = results_map.get(key)
+        offsets_by_key[key] = 0 if res is None else int(res.frame_offset)
+    return offsets_by_key
+
+
 def _maybe_launch_vspreview(
     *,
     reference: Path,
@@ -131,11 +146,11 @@ async def align_clips(
                 c for c in comparisons if f"{reference.stem}:{c.stem}" not in results_map
             ]
 
-    offsets_by_key: dict[str, int] = {}
-    for comp in comparisons:
-        key = f"{reference.stem}:{comp.stem}"
-        res = results_map.get(key)
-        offsets_by_key[key] = 0 if res is None else int(res.frame_offset)
+    offsets_by_key = _build_offsets_map(
+        reference=reference,
+        comparisons=comparisons,
+        results_map=results_map,
+    )
 
     # If everything is resolved (manual + cached), return early
     if not requested_comparisons:
@@ -200,10 +215,11 @@ async def align_clips(
         if progress:
             progress.complete_phase()
 
-    for comp in comparisons:
-        key = f"{reference.stem}:{comp.stem}"
-        res = results_map.get(key)
-        offsets_by_key[key] = 0 if res is None else int(res.frame_offset)
+    offsets_by_key = _build_offsets_map(
+        reference=reference,
+        comparisons=comparisons,
+        results_map=results_map,
+    )
     _maybe_launch_vspreview(
         reference=reference,
         comparisons=comparisons,

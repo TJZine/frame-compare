@@ -184,6 +184,21 @@ def test_error_wrapping(mock_render_ffmpeg):
     assert isinstance(excinfo.value.__cause__, FFmpegNotFoundError)
 
 
+def test_render_frame_reraises_source_load_error(mock_render_ffmpeg):
+    mock_render_ffmpeg.side_effect = SourceLoadError(Path("test.mp4"), "ffprobe failed")
+
+    request = RenderRequest(
+        clip=Path("test.mp4"),
+        frame_number=100,
+        output_path=Path("out.png"),
+        overlay=None,
+        encoder_settings=EncoderSettings(),
+    )
+
+    with pytest.raises(SourceLoadError, match="ffprobe failed"):
+        render_frame(request, renderer="ffmpeg")
+
+
 def test_probe_fps_logic(mock_run_subprocess):
     mock_run_subprocess.return_value.stdout = b"24000/1001\n"
     fps = _probe_fps(Path("test.mp4"))
@@ -272,3 +287,39 @@ def test_clip_to_rgb24_for_pillow_uses_matrix_prop_mapping(monkeypatch) -> None:
 
     assert result == "bicubic"
     assert clip.resize.calls[0][1]["matrix_in_s"] == "470bg"
+
+
+def test_clip_to_rgb24_for_pillow_variable_format(monkeypatch) -> None:
+    fake_vs = SimpleNamespace(RGB24=1, RGB=2)
+    monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
+
+    clip = _FakeClip(fmt=None, props={})
+    result = _clip_to_rgb24_for_pillow(clip)  # type: ignore[arg-type]
+
+    assert result == "bicubic"
+    assert clip.resize.calls[0][0] == "Bicubic"
+    assert clip.resize.calls[0][1]["matrix_in_s"] == "709"
+
+
+def test_clip_to_rgb24_for_pillow_already_rgb24_passthrough(monkeypatch) -> None:
+    fake_vs = SimpleNamespace(RGB24=1, RGB=2)
+    monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
+
+    fmt = SimpleNamespace(id=1, color_family=2)
+    clip = _FakeClip(fmt=fmt, props={"_Matrix": 5})
+    result = _clip_to_rgb24_for_pillow(clip)  # type: ignore[arg-type]
+
+    assert result is clip
+    assert clip.resize.calls == []
+
+
+def test_clip_to_rgb24_for_pillow_rgb_non_24_uses_point(monkeypatch) -> None:
+    fake_vs = SimpleNamespace(RGB24=1, RGB=2)
+    monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
+
+    fmt = SimpleNamespace(id=999, color_family=2)
+    clip = _FakeClip(fmt=fmt, props={})
+    result = _clip_to_rgb24_for_pillow(clip)  # type: ignore[arg-type]
+
+    assert result == "point"
+    assert clip.resize.calls[0][0] == "Point"

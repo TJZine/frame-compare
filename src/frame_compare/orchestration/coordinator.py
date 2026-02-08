@@ -402,6 +402,8 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         # Resolve run folder before any cache/probe path access so all phases use the same workspace.
         if config.paths.use_run_folders:
             if deps.http_client is not None and config.tmdb.enabled and not request.skip_metadata:
+                # Mark prefetch attempt as final for this run. If lookup fails, we keep the
+                # folder naming path resilient and skip a second metadata-phase retry.
                 metadata_prefetched = True
                 try:
                     resolved_metadata = await resolve_metadata(

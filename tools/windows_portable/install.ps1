@@ -1,13 +1,13 @@
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-function Ensure-Directory([string]$Path) {
+function Initialize-Directory([string]$Path) {
   if (!(Test-Path -LiteralPath $Path)) {
     New-Item -ItemType Directory -Path $Path | Out-Null
   }
 }
 
-function Normalize-PathEntry([string]$PathEntry) {
+function ConvertTo-NormalizedPathEntry([string]$PathEntry) {
   if ([string]::IsNullOrWhiteSpace($PathEntry)) {
     return ""
   }
@@ -33,9 +33,9 @@ $stateDir = Join-Path $installRoot "state"
 $configPath = Join-Path $stateDir "config.json"
 $configTmpPath = Join-Path $stateDir "config.json.tmp"
 
-Ensure-Directory -Path $installRoot
-Ensure-Directory -Path $binDir
-Ensure-Directory -Path $stateDir
+Initialize-Directory -Path $installRoot
+Initialize-Directory -Path $binDir
+Initialize-Directory -Path $stateDir
 
 Copy-Item -LiteralPath $shimPs1Source -Destination (Join-Path $binDir "frame-compare.ps1") -Force
 Copy-Item -LiteralPath $shimCmdSource -Destination (Join-Path $binDir "frame-compare.cmd") -Force
@@ -55,10 +55,10 @@ if (-not [string]::IsNullOrWhiteSpace($userPath)) {
   $entries = @($userPath -split ";" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 }
 
-$normalizedBinDir = Normalize-PathEntry -PathEntry $binDir
+$normalizedBinDir = ConvertTo-NormalizedPathEntry -PathEntry $binDir
 $hasEntry = $false
 foreach ($entry in $entries) {
-  if ((Normalize-PathEntry -PathEntry $entry) -eq $normalizedBinDir) {
+  if ((ConvertTo-NormalizedPathEntry -PathEntry $entry) -eq $normalizedBinDir) {
     $hasEntry = $true
     break
   }

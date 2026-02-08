@@ -149,19 +149,23 @@ def run(
         "force_interactive_alignment": force_interactive_alignment,
         "input": str(input_dir) if input_dir is not None else None,
     }
+    resolved_config: ConfigSchema | None = None
+
+    def _load_effective_config() -> ConfigSchema:
+        nonlocal resolved_config
+        if resolved_config is None:
+            resolved_config = apply_cli_overrides(load_config(config_path), cli_args=cli_args)
+        return resolved_config
 
     try:
         if write_config:
-            config_data = load_config(config_path)
-            config_override = apply_cli_overrides(config_data, cli_args=cli_args)
-            _write_config_to(config_path, config_override)
+            _write_config_to(config_path, _load_effective_config())
             return
 
         if diagnose_paths:
             from frame_compare.orchestration.preflight import resolve_paths
 
-            config_data = load_config(config_path)
-            config_override = apply_cli_overrides(config_data, cli_args=cli_args)
+            config_override = _load_effective_config()
             workspace = resolve_paths(config_override, resolved_root)
             payload = {
                 "root": str(resolved_root),
@@ -222,16 +226,12 @@ def run(
     if not result.success:
         raise typer.Exit(code=int(ExitCode.PROCESSING_ERROR))
 
-    if (
-        result.report_path is not None
-        and not json_output
-        and not quiet
-        and sys.stdout.isatty()
-    ):
+    if result.report_path is not None and not json_output and not quiet and sys.stdout.isatty():
         try:
-            cfg = load_config(config_path)
-            cfg = apply_cli_overrides(cfg, cli_args=cli_args)
+            cfg = _load_effective_config()
         except FrameCompareError:
+            # Default to opening when config cannot be reloaded so successful runs
+            # still surface the generated report in interactive sessions.
             cfg = None
 
         if cfg is None or cfg.report.auto_open:

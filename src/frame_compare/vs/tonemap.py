@@ -145,12 +145,14 @@ def _apply_libplacebo(
     if hdr_metadata is None:
         _ensure_hdr_detection()
         hdr_metadata = detected_hdr_metadata
-    transfer_raw: object | None = getattr(hdr_metadata, "transfer", None) if hdr_metadata is not None else None
+    transfer_raw: object | None = (
+        getattr(hdr_metadata, "transfer", None) if hdr_metadata is not None else None
+    )
     primaries_raw: object | None = (
         getattr(hdr_metadata, "color_primaries", None) if hdr_metadata is not None else None
     )
-    transfer: int | None = int(transfer_raw) if isinstance(transfer_raw, int) else None
-    primaries: int | None = int(primaries_raw) if isinstance(primaries_raw, int) else None
+    transfer: int | None = transfer_raw if isinstance(transfer_raw, int) else None
+    primaries: int | None = primaries_raw if isinstance(primaries_raw, int) else None
 
     # Exact conversion call for libplacebo path
     try:
@@ -219,8 +221,8 @@ def _apply_libplacebo(
                 "dst_max": tm_kwargs["dst_max"],
                 "tone_mapping_function": tm_kwargs["tone_mapping_function"],
             }
-            if "src_csp" in tm_kwargs:
-                minimal_kwargs["src_csp"] = tm_kwargs["src_csp"]
+            # Keep the retry minimal for broad compatibility across placebo builds.
+            # In practice `src_csp` is the most likely optional kwarg to be unsupported.
 
             log.debug(
                 "libplacebo_tonemap_retry_dropped_kwargs",
@@ -247,7 +249,7 @@ def _fallback_tonemap(
     settings: TonemapSettings,
     hdr_metadata: HDRMetadata | None = None,
 ) -> vs.VideoNode:
-    """Fallback tonemapping using Reinhard formula via std.Expr."""
+    """Fallback tonemapping using a scaled Reinhard-style curve via std.Expr."""
     clip = _to_rgbs(clip)
 
     if hdr_metadata is None:
