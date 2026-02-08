@@ -3,7 +3,7 @@ Set-StrictMode -Version Latest
 
 $shimDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $installRoot = Split-Path -Parent $shimDir
-$configPath = Join-Path $installRoot "state\\config.json"
+$configPath = Join-Path (Join-Path $installRoot "state") "config.json"
 
 if (!(Test-Path -LiteralPath $configPath)) {
   Write-Error "Config not found: $configPath`nRun install.cmd from the portable bundle."

@@ -1,5 +1,7 @@
 import subprocess
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -10,7 +12,12 @@ from frame_compare.errors import (
     RenderError,
     SourceLoadError,
 )
-from frame_compare.render.encoders import _probe_fps, _render_ffmpeg, render_frame
+from frame_compare.render.encoders import (
+    _clip_to_rgb24_for_pillow,
+    _probe_fps,
+    _render_ffmpeg,
+    render_frame,
+)
 from frame_compare.render.types import EncoderSettings, OverlayConfig, OverlayMode, RenderRequest
 
 
@@ -197,3 +204,71 @@ def test_probe_fps_zero_denominator_raises_source_load_error(mock_run_subprocess
     mock_run_subprocess.return_value.stdout = b"0/0\n"
     with pytest.raises(SourceLoadError, match="Invalid avg_frame_rate"):
         _probe_fps(Path("test.mp4"))
+
+
+class _FakeResize:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    def Bicubic(self, **kwargs: object) -> str:  # noqa: N802
+        self.calls.append(("Bicubic", dict(kwargs)))
+        return "bicubic"
+
+    def Point(self, **kwargs: object) -> str:  # noqa: N802
+        self.calls.append(("Point", dict(kwargs)))
+        return "point"
+
+
+class _FakeFrame:
+    def __init__(self, props: dict[str, object]) -> None:
+        self.props = props
+
+
+class _FakeClip:
+    def __init__(self, *, fmt: object | None, props: dict[str, object]) -> None:
+        self.format = fmt
+        self.resize = _FakeResize()
+        self._frame = _FakeFrame(props)
+
+    def get_frame(self, _index: int) -> _FakeFrame:
+        return self._frame
+
+
+def test_clip_to_rgb24_for_pillow_uses_709_when_matrix_missing(monkeypatch) -> None:
+    fake_vs = SimpleNamespace(RGB24=1, RGB=2)
+    monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
+
+    fmt = SimpleNamespace(id=999, color_family=3)
+    clip = _FakeClip(fmt=fmt, props={})
+
+    result = _clip_to_rgb24_for_pillow(clip)  # type: ignore[arg-type]
+
+    assert result == "bicubic"
+    assert clip.resize.calls[0][0] == "Bicubic"
+    assert clip.resize.calls[0][1]["matrix_in_s"] == "709"
+
+
+def test_clip_to_rgb24_for_pillow_uses_hdr_fallback_when_matrix_missing(monkeypatch) -> None:
+    fake_vs = SimpleNamespace(RGB24=1, RGB=2)
+    monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
+
+    fmt = SimpleNamespace(id=999, color_family=3)
+    clip = _FakeClip(fmt=fmt, props={"_Transfer": 16, "_Primaries": 9})
+
+    result = _clip_to_rgb24_for_pillow(clip)  # type: ignore[arg-type]
+
+    assert result == "bicubic"
+    assert clip.resize.calls[0][1]["matrix_in_s"] == "2020ncl"
+
+
+def test_clip_to_rgb24_for_pillow_uses_matrix_prop_mapping(monkeypatch) -> None:
+    fake_vs = SimpleNamespace(RGB24=1, RGB=2)
+    monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
+
+    fmt = SimpleNamespace(id=999, color_family=3)
+    clip = _FakeClip(fmt=fmt, props={"_Matrix": 5})
+
+    result = _clip_to_rgb24_for_pillow(clip)  # type: ignore[arg-type]
+
+    assert result == "bicubic"
+    assert clip.resize.calls[0][1]["matrix_in_s"] == "470bg"

@@ -30,6 +30,17 @@ if TYPE_CHECKING:
 
     from frame_compare.render.types import OverlayConfig
 
+_MATRIX_TO_ZIMG: dict[int, str] = {
+    1: "709",
+    4: "fcc",
+    5: "470bg",
+    6: "170m",
+    7: "240m",
+    8: "ycgco",
+    9: "2020ncl",
+    10: "2020cl",
+}
+
 
 def render_frame(request: RenderRequest, renderer: Renderer = "auto") -> Path:
     """
@@ -126,6 +137,32 @@ def render_frame(request: RenderRequest, renderer: Renderer = "auto") -> Path:
     return request.output_path
 
 
+def _resolve_matrix_in_s(clip: vs.VideoNode) -> str:
+    """Resolve matrix_in_s for YUV->RGB conversion with robust fallbacks.
+
+    Priority:
+    1. _Matrix frame prop mapping when recognized
+    2. HDR heuristic (_Transfer in {16,18} and _Primaries == 9) -> 2020ncl
+    3. SDR default -> 709
+    """
+    props = cast(dict[str, object], dict(clip.get_frame(0).props))
+    matrix_prop = props.get("_Matrix")
+    if isinstance(matrix_prop, int):
+        mapped = _MATRIX_TO_ZIMG.get(matrix_prop)
+        if mapped is not None:
+            return mapped
+
+    transfer_prop = props.get("_Transfer")
+    primaries_prop = props.get("_Primaries")
+    is_hdr = (
+        isinstance(transfer_prop, int)
+        and transfer_prop in {16, 18}
+        and isinstance(primaries_prop, int)
+        and primaries_prop == 9
+    )
+    return "2020ncl" if is_hdr else "709"
+
+
 def _clip_to_rgb24_for_pillow(clip: vs.VideoNode) -> vs.VideoNode:
     """Convert a VapourSynth clip to RGB24 for Pillow encoding.
 
@@ -137,14 +174,16 @@ def _clip_to_rgb24_for_pillow(clip: vs.VideoNode) -> vs.VideoNode:
 
     fmt = cast(Any, getattr(clip, "format", None))
     if fmt is None:
+        matrix_in_s = _resolve_matrix_in_s(clip)
         # Variable format clip: best-effort conversion via resize (will fail if unsupported).
-        return clip.resize.Bicubic(format=vs.RGB24)  # type: ignore[attr-defined]
+        return clip.resize.Bicubic(format=vs.RGB24, matrix_in_s=matrix_in_s)  # type: ignore[attr-defined]
 
     if fmt.id == vs.RGB24:  # type: ignore[attr-defined]
         return clip
 
     if fmt.color_family != vs.RGB:  # type: ignore[attr-defined]
-        return clip.resize.Bicubic(format=vs.RGB24)  # type: ignore[attr-defined]
+        matrix_in_s = _resolve_matrix_in_s(clip)
+        return clip.resize.Bicubic(format=vs.RGB24, matrix_in_s=matrix_in_s)  # type: ignore[attr-defined]
 
     return clip.resize.Point(format=vs.RGB24)  # type: ignore[attr-defined]
 

@@ -8,7 +8,7 @@ function Normalize-PathEntry([string]$PathEntry) {
   return $PathEntry.Trim().Trim('"').TrimEnd('\').ToLowerInvariant()
 }
 
-$installRoot = Join-Path $env:LOCALAPPDATA "Programs\\FrameCompare"
+$installRoot = Join-Path (Join-Path $env:LOCALAPPDATA "Programs") "FrameCompare"
 $binDir = Join-Path $installRoot "bin"
 
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")

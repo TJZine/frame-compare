@@ -962,7 +962,7 @@ def _build_html(data: dict[str, object], include_filmstrip: bool = True) -> str:
 
     <div class="rv-viewer-stage rv-mode-slider" role="img" aria-label="Comparison viewer">
         <div class="rv-canvas">
-            <img src="" alt="" class="rv-sizer" aria-hidden="true">
+            <img src="data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=" alt="" class="rv-sizer" aria-hidden="true">
             <div class="rv-layer rv-left">
                 <img src="" alt="" class="rv-image">
                 <div id="label-left" class="rv-overlay-label"></div>

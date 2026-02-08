@@ -54,12 +54,10 @@ def _maybe_launch_vspreview(
         return
 
     available = is_vspreview_available()
-    should_launch = bool(config.force_interactive or (config.use_vspreview and available))
+    if config.force_interactive and not available:
+        raise AudioAlignmentError("Interactive alignment requested but VSPreview is not available.")
 
-    if config.use_vspreview and not available:
-        # Keep this non-fatal: we still generate the script for manual replay.
-        # The adapter will log `vspreview_script_generated` for visibility.
-        pass
+    should_launch = bool((config.use_vspreview or config.force_interactive) and available)
 
     if progress:
         progress.start_phase("VSPreview", total=1)
@@ -73,10 +71,6 @@ def _maybe_launch_vspreview(
             cache_dir=cache_dir,
             config=VSPreviewConfig(enabled=should_launch),
         )
-        if config.force_interactive and not should_launch:
-            raise AudioAlignmentError(
-                "Interactive alignment requested but VSPreview is not available."
-            )
     finally:
         if progress:
             progress.advance(1)
@@ -137,10 +131,24 @@ async def align_clips(
                 c for c in comparisons if f"{reference.stem}:{c.stem}" not in results_map
             ]
 
+    offsets_by_key: dict[str, int] = {}
+    for comp in comparisons:
+        key = f"{reference.stem}:{comp.stem}"
+        res = results_map.get(key)
+        offsets_by_key[key] = 0 if res is None else int(res.frame_offset)
+
     # If everything is resolved (manual + cached), return early
     if not requested_comparisons:
         if progress:
             progress.complete_phase()
+        _maybe_launch_vspreview(
+            reference=reference,
+            comparisons=comparisons,
+            offsets_by_key=offsets_by_key,
+            cache_dir=cache_dir,
+            config=config,
+            progress=progress,
+        )
         return [results_map[f"{reference.stem}:{c.stem}"] for c in comparisons]
 
     # 2. Compute missing
@@ -192,7 +200,6 @@ async def align_clips(
         if progress:
             progress.complete_phase()
 
-    offsets_by_key: dict[str, int] = {}
     for comp in comparisons:
         key = f"{reference.stem}:{comp.stem}"
         res = results_map.get(key)

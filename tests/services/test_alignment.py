@@ -492,3 +492,135 @@ async def test_align_clips_launches_vspreview_when_enabled(
     assert kwargs["comparisons"] == [comp_a, comp_b]
     suggested = kwargs["suggested_offsets_by_key"]
     assert suggested == {"ref:comp_a": 0, "ref:comp_b": 0}
+
+
+@pytest.mark.anyio
+@patch("frame_compare.services.alignment.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment.is_vspreview_available")
+@patch("frame_compare.services.alignment._probe_fps")
+@patch("frame_compare.services.alignment._extract_audio")
+async def test_align_clips_full_cache_hit_still_launches_vspreview_when_enabled(
+    mock_extract: MagicMock,
+    mock_probe: MagicMock,
+    mock_is_available: MagicMock,
+    mock_launch: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """Cached/manual-only runs should still build/launch VSPreview verification."""
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    ref.touch()
+    comp.touch()
+
+    cache_file = tmp_path / "audio_offsets.toml"
+    data = {
+        "version": "1",
+        "ref:comp": {
+            "reference_clip": "ref.mkv",
+            "comparison_clip": "comp.mkv",
+            "frame_offset": 12,
+            "time_offset_seconds": 0.5,
+            "correlation_score": 0.95,
+            "method": "cross_correlation",
+        },
+    }
+    with cache_file.open("wb") as f:
+        f.write(tomli_w.dumps(data).encode("utf-8"))
+
+    mock_probe.side_effect = AssertionError("should not be called")
+    mock_extract.side_effect = AssertionError("should not be called")
+    mock_is_available.return_value = True
+    mock_launch.return_value = tmp_path / "vspreview_script.py"
+
+    config = AlignmentConfig(enable=True, use_vspreview=True, cache_results=True)
+    results = await align_clips(ref, [comp], config, tmp_path)
+
+    assert len(results) == 1
+    assert results[0].frame_offset == 12
+    assert mock_launch.call_count == 1
+    _, kwargs = mock_launch.call_args
+    assert kwargs["suggested_offsets_by_key"] == {"ref:comp": 12}
+    assert kwargs["config"].enabled is True
+
+
+@pytest.mark.anyio
+@patch("frame_compare.services.alignment.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment.is_vspreview_available")
+async def test_align_clips_force_interactive_raises_when_vspreview_unavailable(
+    mock_is_available: MagicMock,
+    mock_launch: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """Force-interactive mode must fail fast if VSPreview is unavailable."""
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    ref.touch()
+    comp.touch()
+
+    cache_file = tmp_path / "audio_offsets.toml"
+    data = {
+        "version": "1",
+        "ref:comp": {
+            "reference_clip": "ref.mkv",
+            "comparison_clip": "comp.mkv",
+            "frame_offset": 2,
+            "time_offset_seconds": 0.083,
+            "correlation_score": 0.98,
+            "method": "cross_correlation",
+        },
+    }
+    with cache_file.open("wb") as f:
+        f.write(tomli_w.dumps(data).encode("utf-8"))
+
+    mock_is_available.return_value = False
+
+    config = AlignmentConfig(
+        enable=True,
+        use_vspreview=True,
+        force_interactive=True,
+        cache_results=True,
+    )
+    with pytest.raises(AudioAlignmentError, match="Interactive alignment requested"):
+        await align_clips(ref, [comp], config, tmp_path)
+
+    mock_launch.assert_not_called()
+
+
+@pytest.mark.anyio
+@patch("frame_compare.services.alignment.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment.is_vspreview_available")
+async def test_align_clips_vspreview_unavailable_generates_script_without_launch(
+    mock_is_available: MagicMock,
+    mock_launch: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """When optional VSPreview is unavailable, adapter should be called with enabled=False."""
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    ref.touch()
+    comp.touch()
+
+    cache_file = tmp_path / "audio_offsets.toml"
+    data = {
+        "version": "1",
+        "ref:comp": {
+            "reference_clip": "ref.mkv",
+            "comparison_clip": "comp.mkv",
+            "frame_offset": 7,
+            "time_offset_seconds": 0.292,
+            "correlation_score": 0.96,
+            "method": "cross_correlation",
+        },
+    }
+    with cache_file.open("wb") as f:
+        f.write(tomli_w.dumps(data).encode("utf-8"))
+
+    mock_is_available.return_value = False
+    mock_launch.return_value = tmp_path / "vspreview_script.py"
+
+    config = AlignmentConfig(enable=True, use_vspreview=True, cache_results=True)
+    await align_clips(ref, [comp], config, tmp_path)
+
+    assert mock_launch.call_count == 1
+    _, kwargs = mock_launch.call_args
+    assert kwargs["config"].enabled is False

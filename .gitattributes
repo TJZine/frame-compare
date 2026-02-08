@@ -1,0 +1,5 @@
+# Enforce Windows line endings for portable install scripts.
+tools/windows_portable/*.cmd text eol=crlf
+tools/windows_portable/shim/*.cmd text eol=crlf
+tools/windows_portable/*.ps1 text eol=crlf
+tools/windows_portable/shim/*.ps1 text eol=crlf

@@ -6,9 +6,6 @@ Keep it short and actionable; do not reprint SSOT specs or workflow templates he
 ## SSOT Pointers (Read These, Don’t Re-Invent)
 
 - Guardrails + approvals: `CODEX.md`
-- Canonical multi-agent workflow + templates (SSOT): `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md`
-- Workflow quick reference (preferred first read): `docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow-quick.md`
-- Canonical contracts (SSOT): `docs/OPUS_REBUILD_FRAME_COMPARE/contracts/`
 - Import layering SSOT: `importlinter.ini`
 - Tooling config SSOT: `pyproject.toml` (`[tool.pyright]`, `[tool.ruff]`, pytest markers)
 
@@ -18,15 +15,6 @@ Keep it short and actionable; do not reprint SSOT specs or workflow templates he
 - Codex skills: `.codex/skills/` (symlinks into `codex-skills/` for compatibility)
 - Subagent autopilot: `fc2-collab-autopilot` (run FC-2.0 end-to-end with local subagents + strict STOP gates)
 - Full automation entrypoint: `python3 scripts/fc2_autopilot.py`
-
-## STOP Conditions (Hard)
-
-- Required input artifact missing → STOP (do not guess versions or “latest”).
-- Plan Review verdict ≠ `APPROVED` or Decision Points Remaining ≠ `NONE` → STOP (Coding must not proceed).
-- Plan/spec anchor validation fails → STOP and fix wiring:
-  - `UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_spec_anchors.py .agent-workflow/runs/<RUN_ID>/plan-vN.md`
-- Contract freshness gate fails → STOP and regenerate via script (never hand-edit derived views):
-  - `UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_contract_views.py`
 
 ## Command Canon (Use These Exact Commands)
 
@@ -45,11 +33,6 @@ Quality gates:
 UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini
 ```
 
-Contract + traceability gates:
-
-```bash
-UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_contract_views.py --check
-UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_traceability.py --check
 ```
 
 ## Python Constraints (Project-Wide)

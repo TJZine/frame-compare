@@ -44,7 +44,11 @@ def sanitize_folder_name(name: str) -> str:
     # Limit length (Windows MAX_PATH considerations)
     max_len = 100
     if len(sanitized) > max_len:
-        sanitized = sanitized[:max_len].rstrip(". ")
+        truncated = sanitized[:max_len]
+        sanitized = truncated.rstrip(". ")
+        if not sanitized:
+            fallback = truncated.replace(".", "").replace(" ", "")
+            sanitized = fallback if fallback else "unnamed_run"
 
     return sanitized
 
@@ -180,7 +184,12 @@ def derive_run_folder_name(
     if existing_folders:
         existing_lower = {f.lower() for f in existing_folders}
         if folder_name.lower() in existing_lower:
-            folder_name = f"{folder_name}_{_format_timestamp()}"
+            ts = _format_timestamp()
+            max_len = 100
+            allowed = max_len - (len(ts) + 1)
+            if allowed < 1:
+                allowed = 1
+            folder_name = f"{folder_name[:allowed]}_{ts}"
 
     return folder_name
 
@@ -197,6 +206,8 @@ def get_existing_run_folders(input_dir: Path) -> list[str]:
         List of existing folder names
     """
     if not input_dir.exists():
+        return []
+    if not input_dir.is_dir():
         return []
 
     return [p.name for p in input_dir.iterdir() if p.is_dir()]

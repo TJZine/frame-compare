@@ -3,8 +3,6 @@
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from frame_compare.services.types import TmdbMetadata
 from frame_compare.utils.run_folder import (
     _combine_filename_stems,
@@ -13,7 +11,6 @@ from frame_compare.utils.run_folder import (
     get_existing_run_folders,
     sanitize_folder_name,
 )
-
 
 # ─── sanitize_folder_name Tests ───────────────────────────────────────────────
 
@@ -47,6 +44,13 @@ def test_sanitize_folder_name_limits_length() -> None:
     assert len(result) <= 100
 
 
+def test_sanitize_folder_name_truncation_never_returns_empty() -> None:
+    long_name = "." * 150
+    result = sanitize_folder_name(long_name)
+    assert result != ""
+    assert result == "unnamed_run"
+
+
 # ─── find_common_metadata Tests ───────────────────────────────────────────────
 
 
@@ -57,19 +61,23 @@ def test_find_common_metadata_single_file() -> None:
 
 
 def test_find_common_metadata_matching_titles() -> None:
-    title, year = find_common_metadata([
-        "Movie.Name.2024.WEB-DL.1080p.mkv",
-        "Movie.Name.2024.BluRay.2160p.mkv",
-    ])
+    title, year = find_common_metadata(
+        [
+            "Movie.Name.2024.WEB-DL.1080p.mkv",
+            "Movie.Name.2024.BluRay.2160p.mkv",
+        ]
+    )
     assert title == "Movie Name"
     assert year == 2024
 
 
 def test_find_common_metadata_different_titles() -> None:
-    title, year = find_common_metadata([
-        "Movie.A.2024.mkv",
-        "Movie.B.2024.mkv",
-    ])
+    title, year = find_common_metadata(
+        [
+            "Movie.A.2024.mkv",
+            "Movie.B.2024.mkv",
+        ]
+    )
     # Titles don't match, but year might
     assert title is None
     assert year == 2024
@@ -85,21 +93,25 @@ def test_find_common_metadata_empty_list() -> None:
 
 
 def test_combine_filename_stems_deduplicates() -> None:
-    result = _combine_filename_stems([
-        "Movie.2024.WEB-DL.mkv",
-        "Movie.2024.BluRay.mkv",
-    ])
+    result = _combine_filename_stems(
+        [
+            "Movie.2024.WEB-DL.mkv",
+            "Movie.2024.BluRay.mkv",
+        ]
+    )
     # Should not repeat "Movie 2024"
     assert result.count("+") <= 1
 
 
 def test_combine_filename_stems_limits_to_two() -> None:
-    result = _combine_filename_stems([
-        "Movie1.mkv",
-        "Movie2.mkv",
-        "Movie3.mkv",
-        "Movie4.mkv",
-    ])
+    result = _combine_filename_stems(
+        [
+            "Movie1.mkv",
+            "Movie2.mkv",
+            "Movie3.mkv",
+            "Movie4.mkv",
+        ]
+    )
     assert "+2 more" in result or "+" in result
 
 
@@ -155,6 +167,25 @@ def test_derive_run_folder_name_handles_collision() -> None:
     assert "_" in result  # Timestamp separator
 
 
+def test_derive_run_folder_name_collision_respects_max_length() -> None:
+    long_title = "A" * 100
+    tmdb = TmdbMetadata(
+        tmdb_id=1,
+        title=long_title,
+        original_title=long_title,
+        year=0,
+        media_type="movie",
+    )
+    with patch("frame_compare.utils.run_folder._format_timestamp", return_value="20260208-020749"):
+        result = derive_run_folder_name(
+            filenames=["source.mkv"],
+            tmdb_metadata=tmdb,
+            existing_folders=[long_title],
+        )
+    assert len(result) <= 100
+    assert result.endswith("_20260208-020749")
+
+
 def test_derive_run_folder_name_no_collision() -> None:
     result = derive_run_folder_name(
         filenames=["Fight.Club.1999.mkv"],
@@ -189,4 +220,11 @@ def test_get_existing_run_folders_returns_directories_only(tmp_path: Path) -> No
 
 def test_get_existing_run_folders_nonexistent_dir() -> None:
     result = get_existing_run_folders(Path("/nonexistent/path"))
+    assert result == []
+
+
+def test_get_existing_run_folders_existing_file_returns_empty(tmp_path: Path) -> None:
+    path = tmp_path / "not_a_dir"
+    path.write_text("x", encoding="utf-8")
+    result = get_existing_run_folders(path)
     assert result == []
