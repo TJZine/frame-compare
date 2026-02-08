@@ -30,13 +30,17 @@ if TYPE_CHECKING:
 
 
 class ProgressReporter(Protocol):
-    """Protocol for reporting analysis progress."""
+    """Protocol for reporting analysis progress.
+
+    Note: Method signatures intentionally match the canonical orchestration
+    progress protocol in `frame_compare.utils.progress`.
+    """
 
     def start_phase(self, name: str, total: int) -> None:
         """Start a new progress phase."""
         ...
 
-    def advance(self, count: int = 1) -> None:
+    def advance(self, amount: int = 1) -> None:
         """Advance progress."""
         ...
 

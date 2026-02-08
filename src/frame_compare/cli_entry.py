@@ -4,10 +4,17 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import tomli_w
+
+# Typer's Rich help renderer reads TERMINAL_WIDTH only at import-time.
+# Defaulting it prevents long option names from being ellipsized in help output
+# (and keeps CLI help stable under Click's test runner).
+os.environ.setdefault("TERMINAL_WIDTH", "200")
+
 import typer
 from rich.console import Console
 

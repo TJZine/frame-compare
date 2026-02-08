@@ -20,7 +20,7 @@ CODEX.md
 .agent-workflow/runs/**/appserver_threads.json
 
 # Local config (may contain secrets)
-config/config.toml
+config/*
 
 # Python
 __pycache__/
@@ -57,6 +57,7 @@ ENV/
 
 # Testing
 .pytest_cache/
+pytest-cache-files-*/
 .coverage
 htmlcov/
 .tox/
@@ -70,3 +71,4 @@ htmlcov/
 Thumbs.db
 .portable_cache/
 comparison_videos/**
+generated/

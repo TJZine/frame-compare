@@ -694,7 +694,7 @@ def _run_analyze_phase(
         video_paths=input_videos,
         config=ctx.config.analysis,
         cache_dir=workspace.cache_dir,
-        reporter=None,
+        reporter=ctx.reporter,
     )
     selection = select_frames(metrics=metrics, config=ctx.config.analysis)
     selected_frames[:] = selection.frames
@@ -716,7 +716,7 @@ async def _run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> No
         comparisons=[comp.path for comp in ctx.comparisons],
         config=alignment_config,
         cache_dir=ctx.workspace.generated_dir,
-        progress=None,
+        progress=ctx.reporter,
     )
 
     def _source_from_method(method: str) -> str:
@@ -803,7 +803,7 @@ def _run_render_phase(
             label_map=label_map,
             renderer="auto",
             overlay_mode=overlay_mode,
-            reporter=None,
+            reporter=ctx.reporter,
         )
         clip_paths: list[Path] = []
         for aligned_frame, rendered_path in zip(frames, rendered_for_clip[clip.label], strict=True):
@@ -852,7 +852,7 @@ async def _run_publish_phase(
         config=ctx.config.slowpics,
         client=client,
         metadata=metadata,
-        progress=None,
+        progress=ctx.reporter,
     )
     slowpics_url_out(result.url)
 

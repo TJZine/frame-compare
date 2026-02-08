@@ -36,12 +36,12 @@ class ProgressReporter(Protocol):
         """Start a new progress phase."""
         ...
 
-    def set_description(self, description: str) -> None:
+    def set_description(self, desc: str) -> None:
         """Set current task description."""
         ...
 
-    def advance(self, n: int = 1) -> None:
-        """Advance progress by n units."""
+    def advance(self, amount: int = 1) -> None:
+        """Advance progress by amount units."""
         ...
 
     def complete_phase(self) -> None:
