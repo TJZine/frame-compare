@@ -23,6 +23,7 @@ def _make_context(tmp_path: Path) -> RunContext:
     workspace = WorkspacePaths(
         root=tmp_path,
         input_dir=tmp_path / "input",
+        run_dir=None,
         screenshots_dir=tmp_path / "screens",
         generated_dir=tmp_path / "generated",
         config_dir=tmp_path / "config",

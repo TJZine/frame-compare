@@ -116,6 +116,7 @@ class PathsConfig(BaseModel):
     screenshots_dir: str = "screenshots"
     generated_dir: str = "generated"
     config_dir: str = "config"
+    use_run_folders: bool = True
 
 
 class AnalysisConfig(BaseModel):

@@ -57,6 +57,7 @@ from frame_compare.services.publishers import publish_to_slowpics
 from frame_compare.services.report import ClipInfo, ReportData, generate_report
 from frame_compare.services.types import AlignmentConfig, MetadataConfig, TmdbMetadata
 from frame_compare.utils.progress import ProgressReporter
+from frame_compare.utils.run_folder import derive_run_folder_name, get_existing_run_folders
 from frame_compare.utils.subproc import run_subprocess
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.loader import DefaultVSLoader, VSLoader
@@ -465,6 +466,20 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
 
         reference = clips[0]
         comparisons = clips[1:]
+
+        # ─── Run Folder Setup ─────────────────────────────────────────────────────
+        # If enabled, derive run folder name from video metadata and update paths
+        if config.paths.use_run_folders:
+            filenames = [v.name for v in input_videos]
+            existing = get_existing_run_folders(workspace.input_dir)
+            run_folder_name = derive_run_folder_name(
+                filenames=filenames,
+                tmdb_metadata=None,  # TMDB lookup happens later; use guessit/fallback
+                existing_folders=existing,
+            )
+            run_dir = workspace.input_dir / run_folder_name
+            workspace = workspace.with_run_dir(run_dir)
+
         context = RunContext(
             config=config,
             workspace=workspace,
