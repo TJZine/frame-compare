@@ -48,6 +48,25 @@ def _write_minimal_config(root: Path) -> Path:
     return config_path
 
 
+def _invoke_run_with_minimal_workspace(
+    args: list[str],
+    *,
+    color: bool | None = None,
+    terminal_width: int | None = None,
+    env: dict[str, str] | None = None,
+) -> typer.testing.Result:
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        config_path = _write_minimal_config(root)
+        return runner.invoke(
+            app,
+            ["run", "--root", str(root), "--config", str(config_path.relative_to(root)), *args],
+            color=color,
+            terminal_width=terminal_width,
+            env=env,
+        )
+
+
 def test_app_help_lists_all_commands():
     result = runner.invoke(
         app,
@@ -115,8 +134,109 @@ def test_run_exits_zero_when_runner_returns_success(monkeypatch: MonkeyPatch) ->
 
     monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
 
-    result = runner.invoke(app, ["run"])
+    result = _invoke_run_with_minimal_workspace([])
     assert result.exit_code == 0
+
+
+def test_run_default_prints_at_a_glance_and_result_summary(monkeypatch: MonkeyPatch) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        return RunResult(
+            success=True,
+            screenshot_dir=Path("screenshots").resolve(),
+            slowpics_url=None,
+            report_path=None,
+        )
+
+    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        config_path = _write_minimal_config(root)
+
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--root",
+                str(root),
+                "--config",
+                str(config_path.relative_to(root)),
+            ],
+            color=False,
+            terminal_width=200,
+            env={"NO_COLOR": "1", "TERM": "dumb"},
+        )
+        assert result.exit_code == 0
+        output = _normalize_cli_output(result.stdout)
+        assert "At-a-Glance" in output
+        assert "Result" in output
+        assert "root" in output
+        assert "config" in output
+        assert "input" in output
+        assert "screenshots" in output
+
+
+def test_run_quiet_suppresses_at_a_glance_but_keeps_minimal_summary(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        return RunResult(success=True, screenshot_dir=Path("screenshots").resolve())
+
+    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        config_path = _write_minimal_config(root)
+
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--root",
+                str(root),
+                "--config",
+                str(config_path.relative_to(root)),
+                "--quiet",
+            ],
+            color=False,
+            terminal_width=200,
+            env={"NO_COLOR": "1", "TERM": "dumb"},
+        )
+        assert result.exit_code == 0
+        output = _normalize_cli_output(result.stdout)
+        assert "At-a-Glance" not in output
+        assert output.splitlines()[-1].startswith("Screenshots:")
+
+
+def test_run_json_outputs_json_only(monkeypatch: MonkeyPatch) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        return RunResult(success=True, screenshot_dir=Path("screenshots").resolve())
+
+    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        config_path = _write_minimal_config(root)
+
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--root",
+                str(root),
+                "--config",
+                str(config_path.relative_to(root)),
+                "--json",
+            ],
+            color=False,
+            terminal_width=200,
+            env={"NO_COLOR": "1", "TERM": "dumb"},
+        )
+        assert result.exit_code == 0
+        payload = json.loads(result.stdout)
+        assert payload["success"] is True
+        assert "At-a-Glance" not in result.stdout
+        assert "Screenshots:" not in result.stdout
 
 
 def test_run_stub_executes(monkeypatch: MonkeyPatch) -> None:
@@ -125,7 +245,7 @@ def test_run_stub_executes(monkeypatch: MonkeyPatch) -> None:
 
     monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
 
-    result = runner.invoke(app, ["run"])
+    result = _invoke_run_with_minimal_workspace([])
     assert result.exit_code == 0
 
 
@@ -163,7 +283,7 @@ def test_run_exits_processing_error_when_runner_returns_unsuccessful(
 
     monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
 
-    result = runner.invoke(app, ["run"])
+    result = _invoke_run_with_minimal_workspace([])
     assert result.exit_code == 5
 
 
@@ -176,16 +296,14 @@ def test_run_builds_run_request_from_cli_args(monkeypatch: MonkeyPatch) -> None:
 
     monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
 
-    result = runner.invoke(
-        app,
+    result = _invoke_run_with_minimal_workspace(
         [
-            "run",
             "--tm-target",
             "203",
             "--overlay",
             "diagnostic",
             "--force-interactive-alignment",
-        ],
+        ]
     )
     assert result.exit_code == 0
 
@@ -204,7 +322,7 @@ def test_run_builds_run_request_with_input_dir(monkeypatch: MonkeyPatch) -> None
 
     monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
 
-    result = runner.invoke(app, ["run", "--input", "custom_inputs"])
+    result = _invoke_run_with_minimal_workspace(["--input", "custom_inputs"])
     assert result.exit_code == 0
     assert captured["request"].input_dir == Path("custom_inputs")
 
@@ -644,7 +762,7 @@ def test_run_exit_code_is_130_on_keyboard_interrupt(monkeypatch: MonkeyPatch) ->
 
     monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
 
-    result = runner.invoke(app, ["run"])
+    result = _invoke_run_with_minimal_workspace([])
     assert result.exit_code == int(ExitCode.INTERRUPTED)
 
 
@@ -656,7 +774,7 @@ def test_run_no_color_error_output_has_no_rich_markup(
 
     monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
 
-    result = runner.invoke(app, ["run", "--no-color"])
+    result = _invoke_run_with_minimal_workspace(["--no-color"])
     assert result.exit_code == int(get_exit_code(ConfigNotFoundError(Path("missing.toml"))))
     assert "[red]" not in result.stderr
     assert "[yellow]" not in result.stderr
@@ -675,10 +793,10 @@ def test_run_verbose_calls_configure_logging_debug(monkeypatch: MonkeyPatch) -> 
     monkeypatch.setattr("frame_compare.cli_entry.configure_logging", _configure_logging)
     monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
 
-    result = runner.invoke(app, ["run", "--verbose"])
+    result = _invoke_run_with_minimal_workspace(["--verbose"])
     assert result.exit_code == 0
     assert captured["level"] == "DEBUG"
 
-    result = runner.invoke(app, ["run", "--quiet"])
+    result = _invoke_run_with_minimal_workspace(["--quiet"])
     assert result.exit_code == 0
     assert captured["level"] == "WARNING"
