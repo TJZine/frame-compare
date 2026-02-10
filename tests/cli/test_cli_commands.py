@@ -174,6 +174,17 @@ def test_run_default_prints_at_a_glance_and_result_summary(monkeypatch: MonkeyPa
         assert "config" in output
         assert "input" in output
         assert "screenshots" in output
+        assert "tonemap.preset" in output
+        assert "reference" in output
+        assert "tonemap.target_nits" in output
+        assert "203" in output
+        assert "tonemap.curve" in output
+        assert "bt2390" in output
+        assert "slow.pics.auto_upload" in output
+        assert "slow.pics.visibility" in output
+        assert "unlisted" in output
+        assert "report.enabled" in output
+        assert "report.auto_open" in output
 
 
 def test_run_quiet_suppresses_at_a_glance_but_keeps_minimal_summary(
@@ -247,6 +258,20 @@ def test_run_stub_executes(monkeypatch: MonkeyPatch) -> None:
 
     result = _invoke_run_with_minimal_workspace([])
     assert result.exit_code == 0
+
+
+def test_run_env_no_color_sets_request_no_color(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, RunRequest] = {}
+
+    def _run(request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        captured["request"] = request
+        return RunResult(success=True)
+
+    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace([], env={"NO_COLOR": "1", "TERM": "dumb"})
+    assert result.exit_code == 0
+    assert captured["request"].no_color is True
 
 
 def test_maybe_open_report_swallows_webbrowser_error(monkeypatch: MonkeyPatch) -> None:

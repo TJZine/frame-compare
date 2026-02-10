@@ -12,6 +12,10 @@ if TYPE_CHECKING:
     from frame_compare.orchestration.coordinator import RunRequest, RunResult
 
 
+def _fmt_bool(value: bool) -> str:
+    return "true" if value else "false"
+
+
 def _kv_table(*, rows: list[tuple[str, str]]) -> Table:
     table = Table(show_header=False, box=None, pad_edge=False)
     table.add_column("key", style="bold", no_wrap=True)
@@ -39,9 +43,17 @@ def print_at_a_glance(
             "selection",
             f"{config.analysis.selection_mode.value}, n={config.analysis.frame_count}, seed={config.analysis.random_seed}",
         ),
-        ("tonemap", "enabled" if config.color.enable_tonemap else "disabled"),
+        ("tonemap.enabled", _fmt_bool(config.color.enable_tonemap)),
+        ("tonemap.preset", config.color.preset.value),
+        ("tonemap.target_nits", str(config.color.target_nits)),
+        ("tonemap.curve", config.color.tone_curve.value),
         ("renderer", "ffmpeg" if config.screenshots.use_ffmpeg else "vapoursynth"),
         ("overlay", str(config.screenshots.overlay_mode.value)),
+        ("slow.pics.auto_upload", _fmt_bool(config.slowpics.auto_upload)),
+        ("slow.pics.visibility", config.slowpics.visibility.value),
+        ("slow.pics.delete_after_upload", _fmt_bool(config.slowpics.delete_after_upload)),
+        ("report.enabled", _fmt_bool(config.report.enable)),
+        ("report.auto_open", _fmt_bool(config.report.auto_open)),
         ("upload", "disabled" if request.no_upload else "enabled"),
     ]
     console.print(Panel(_kv_table(rows=rows), title="At-a-Glance"))

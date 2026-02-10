@@ -201,7 +201,7 @@ def run(
             skip_dovi=skip_dovi,
             force_interactive_alignment=force_interactive_alignment,
             json_output=json_output,
-            no_color=no_color,
+            no_color=effective_no_color,
             quiet=quiet,
             verbose=verbose,
         )
