@@ -3,6 +3,10 @@ import pytest
 from PIL import Image, ImageDraw
 
 from frame_compare.render.overlay import apply_overlay
+from frame_compare.render.overlay_text import (
+    compose_frame_info_lines,
+    compose_overlay_text_lines,
+)
 from frame_compare.render.types import OverlayConfig, OverlayMode
 
 
@@ -82,6 +86,8 @@ def test_apply_overlay_standard_mode(captured_draw_calls):
         mode=OverlayMode.STANDARD,
         label="Ref",
         frame_number=100,
+        display_frame_number=12,
+        num_frames=100,
         resolution=(1920, 1080),
         hdr_info=None,
         font_path=None,
@@ -97,12 +103,30 @@ def test_apply_overlay_standard_mode(captured_draw_calls):
     (xy2, text2, kwargs2) = captured_draw_calls["multiline_text"][1]
 
     assert xy1 == (10, 10)
-    assert text1 == "Ref"
+    assert text1 == "\n".join(
+        compose_frame_info_lines(
+            mode=OverlayMode.STANDARD,
+            label="Ref",
+            display_frame_number=12,
+            num_frames=100,
+            picture_type=None,
+            selection_label=None,
+        )
+    )
     assert kwargs1["stroke_width"] == 2
     assert kwargs1["stroke_fill"] == (0, 0, 0, 255)
 
     assert xy2 == (10, 140)
-    assert text2 == "Frame 00100\n1920x1080"
+    assert text2 == "\n".join(
+        compose_overlay_text_lines(
+            mode=OverlayMode.STANDARD,
+            base_text=None,
+            width=1920,
+            height=1080,
+            selection_type=None,
+            diagnostic_lines=[],
+        )
+    )
     assert kwargs2["stroke_width"] == 2
     assert kwargs2["stroke_fill"] == (0, 0, 0, 255)
 
@@ -112,6 +136,8 @@ def test_apply_overlay_standard_includes_selection_label_when_present(captured_d
         mode=OverlayMode.STANDARD,
         label="Ref",
         frame_number=100,
+        display_frame_number=12,
+        num_frames=100,
         resolution=(1920, 1080),
         hdr_info=None,
         font_path=None,
@@ -122,8 +148,29 @@ def test_apply_overlay_standard_includes_selection_label_when_present(captured_d
     apply_overlay(img, config)
 
     assert len(captured_draw_calls["multiline_text"]) == 2
+    _, text1, _ = captured_draw_calls["multiline_text"][0]
+    assert text1 == "\n".join(
+        compose_frame_info_lines(
+            mode=OverlayMode.STANDARD,
+            label="Ref",
+            display_frame_number=12,
+            num_frames=100,
+            picture_type=None,
+            selection_label="Dark",
+        )
+    )
+
     _, text2, _ = captured_draw_calls["multiline_text"][1]
-    assert text2 == "Frame 00100\n1920x1080\nFrame Selection Type: Dark"
+    assert text2 == "\n".join(
+        compose_overlay_text_lines(
+            mode=OverlayMode.STANDARD,
+            base_text=None,
+            width=1920,
+            height=1080,
+            selection_type="Dark",
+            diagnostic_lines=[],
+        )
+    )
 
 
 def test_apply_overlay_diagnostic_with_hdr(captured_draw_calls):
@@ -131,6 +178,8 @@ def test_apply_overlay_diagnostic_with_hdr(captured_draw_calls):
         mode=OverlayMode.DIAGNOSTIC,
         label="Encode",
         frame_number=200,
+        display_frame_number=20,
+        num_frames=100,
         resolution=(3840, 2160),
         hdr_info="PQ / BT.2020",
         font_path=None,
@@ -140,8 +189,29 @@ def test_apply_overlay_diagnostic_with_hdr(captured_draw_calls):
     apply_overlay(img, config)
 
     assert len(captured_draw_calls["multiline_text"]) == 2
+    _, text1, _ = captured_draw_calls["multiline_text"][0]
+    assert text1 == "\n".join(
+        compose_frame_info_lines(
+            mode=OverlayMode.DIAGNOSTIC,
+            label="Encode",
+            display_frame_number=20,
+            num_frames=100,
+            picture_type=None,
+            selection_label=None,
+        )
+    )
+
     _, text2, _ = captured_draw_calls["multiline_text"][1]
-    assert text2 == "Frame 00200\n3840x2160\nPQ / BT.2020"
+    assert text2 == "\n".join(
+        compose_overlay_text_lines(
+            mode=OverlayMode.DIAGNOSTIC,
+            base_text=None,
+            width=3840,
+            height=2160,
+            selection_type=None,
+            diagnostic_lines=["PQ / BT.2020"],
+        )
+    )
 
 
 def test_apply_overlay_diagnostic_sdr(captured_draw_calls):
@@ -149,6 +219,8 @@ def test_apply_overlay_diagnostic_sdr(captured_draw_calls):
         mode=OverlayMode.DIAGNOSTIC,
         label="SDR_Test",
         frame_number=50,
+        display_frame_number=5,
+        num_frames=10,
         resolution=(1280, 720),
         hdr_info=None,
         font_path=None,
@@ -159,7 +231,16 @@ def test_apply_overlay_diagnostic_sdr(captured_draw_calls):
 
     assert len(captured_draw_calls["multiline_text"]) == 2
     _, text2, _ = captured_draw_calls["multiline_text"][1]
-    assert text2.endswith("\nSDR")
+    assert text2 == "\n".join(
+        compose_overlay_text_lines(
+            mode=OverlayMode.DIAGNOSTIC,
+            base_text=None,
+            width=1280,
+            height=720,
+            selection_type=None,
+            diagnostic_lines=[],
+        )
+    )
 
 
 def test_apply_overlay_returns_pil_image():

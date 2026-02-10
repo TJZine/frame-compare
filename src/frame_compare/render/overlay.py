@@ -3,6 +3,10 @@
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
+from frame_compare.render.overlay_text import (
+    compose_frame_info_lines,
+    compose_overlay_text_lines,
+)
 from frame_compare.render.types import OverlayConfig, OverlayMode
 
 
@@ -56,32 +60,49 @@ def apply_overlay(
     stroke_fill = (0, 0, 0, 255)
     stroke_width = 2
 
-    draw.multiline_text(
-        label_pos,
-        config.label,
-        font=font,
-        fill=fill,
-        stroke_width=stroke_width,
-        stroke_fill=stroke_fill,
-    )
-    if config.mode == OverlayMode.MINIMAL:
-        return canvas
-
     display_frame_number = (
         config.display_frame_number
         if config.display_frame_number is not None
         else config.frame_number
     )
     w, h = config.resolution
-    details_lines = [f"Frame {display_frame_number:05d}", f"{w}x{h}"]
-    if config.mode == OverlayMode.DIAGNOSTIC:
-        details_lines.append(config.hdr_info or "SDR")
-    if config.selection_label:
-        details_lines.append(f"Frame Selection Type: {config.selection_label}")
+
+    frame_info_lines = compose_frame_info_lines(
+        mode=config.mode,
+        label=config.label,
+        display_frame_number=display_frame_number,
+        num_frames=config.num_frames,
+        picture_type=config.picture_type,
+        selection_label=config.selection_label,
+    )
+    if frame_info_lines:
+        draw.multiline_text(
+            label_pos,
+            "\n".join(frame_info_lines),
+            font=font,
+            fill=fill,
+            stroke_width=stroke_width,
+            stroke_fill=stroke_fill,
+        )
+    if config.mode == OverlayMode.MINIMAL:
+        return canvas
+
+    diagnostic_lines: list[str] = []
+    if config.mode == OverlayMode.DIAGNOSTIC and config.hdr_info:
+        diagnostic_lines = [config.hdr_info]
+
+    overlay_lines = compose_overlay_text_lines(
+        mode=config.mode,
+        base_text=None,
+        width=w,
+        height=h,
+        selection_type=config.selection_label,
+        diagnostic_lines=diagnostic_lines,
+    )
 
     draw.multiline_text(
         details_pos,
-        "\n".join(details_lines),
+        "\n".join(overlay_lines),
         font=font,
         fill=fill,
         stroke_width=stroke_width,
