@@ -837,7 +837,10 @@ def _run_render_phase(
     if ctx.config.screenshots.use_ffmpeg:
         overlay_mode = RenderOverlayMode(ctx.config.screenshots.overlay_mode.value)
         selection_labels = [
-            selection_label_for_frame(aligned_frame, ctx.selection_breakdown)
+            selection_label_for_frame(
+                _map_aligned_to_source_frame(clip=ctx.reference, aligned_frame=aligned_frame),
+                ctx.selection_breakdown,
+            )
             for aligned_frame in frames
         ]
         rendered: dict[str, list[Path]] = {}
@@ -869,7 +872,10 @@ def _run_render_phase(
     overlay_mode = RenderOverlayMode(ctx.config.screenshots.overlay_mode.value)
     rendered: dict[str, list[Path]] = {}
     selection_labels = [
-        selection_label_for_frame(aligned_frame, ctx.selection_breakdown)
+        selection_label_for_frame(
+            _map_aligned_to_source_frame(clip=ctx.reference, aligned_frame=aligned_frame),
+            ctx.selection_breakdown,
+        )
         for aligned_frame in frames
     ]
     for clip in clips_state:
