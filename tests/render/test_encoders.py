@@ -129,6 +129,21 @@ def test_render_frame_overlay_integration_ffmpeg(mock_render_ffmpeg, mock_apply_
     mock_apply_overlay_file.assert_called_once()
 
 
+def test_render_frame_overlay_none_mode_is_strict_noop_on_ffmpeg(
+    mock_render_ffmpeg, mock_apply_overlay_file
+):
+    request = RenderRequest(
+        clip=Path("test.mp4"),
+        frame_number=100,
+        output_path=Path("out.png"),
+        overlay=OverlayConfig(OverlayMode.NONE, "Label", 100, (1920, 1080), None, None),
+        encoder_settings=EncoderSettings(),
+    )
+    render_frame(request, renderer="ffmpeg")
+    mock_render_ffmpeg.assert_called_once()
+    mock_apply_overlay_file.assert_not_called()
+
+
 def test_ffmpeg_seek_calculation(mock_run_subprocess):
     # Setup probe response: 24000/1001 fps
     mock_run_subprocess.return_value.stdout = b"24000/1001\n"

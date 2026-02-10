@@ -431,17 +431,19 @@ def render_screenshots(
             output_path = generate_screenshot_path(output_dir, label, output_frame)
             selection_label = selection_labels[idx] if selection_labels is not None else None
 
-            overlay = OverlayConfig(
-                mode=overlay_mode,
-                label=label,
-                frame_number=frame,
-                display_frame_number=output_frame,
-                num_frames=source_info.num_frames if source_info is not None else None,
-                selection_label=selection_label,
-                resolution=resolution,
-                hdr_info=hdr_info,
-                font_path=None,
-            )
+            overlay: OverlayConfig | None = None
+            if overlay_mode != OverlayMode.NONE:
+                overlay = OverlayConfig(
+                    mode=overlay_mode,
+                    label=label,
+                    frame_number=frame,
+                    display_frame_number=output_frame,
+                    num_frames=source_info.num_frames if source_info is not None else None,
+                    selection_label=selection_label,
+                    resolution=resolution,
+                    hdr_info=hdr_info,
+                    font_path=None,
+                )
 
             req = RenderRequest(
                 clip=loaded_clip,
