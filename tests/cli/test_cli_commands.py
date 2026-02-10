@@ -780,6 +780,23 @@ def test_run_no_color_error_output_has_no_rich_markup(
     assert "[yellow]" not in result.stderr
 
 
+def test_run_env_no_color_error_output_has_no_rich_markup(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise ConfigNotFoundError(Path("missing.toml"))
+
+    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace(
+        [],
+        env={"NO_COLOR": "1", "TERM": "dumb"},
+    )
+    assert result.exit_code == int(get_exit_code(ConfigNotFoundError(Path("missing.toml"))))
+    assert "[red]" not in result.stderr
+    assert "[yellow]" not in result.stderr
+
+
 def test_run_verbose_calls_configure_logging_debug(monkeypatch: MonkeyPatch) -> None:
     captured: dict[str, str] = {}
 

@@ -135,9 +135,10 @@ def run(
     from frame_compare.orchestration.coordinator import RunRequest
 
     resolved_root, config_path = _resolve_root_and_config(root, config)
+    effective_no_color = no_color or bool(os.environ.get("NO_COLOR"))
     console = Console(
         stderr=False,
-        no_color=no_color or bool(os.environ.get("NO_COLOR")),
+        no_color=effective_no_color,
     )
     log_level = "WARNING" if quiet else ("DEBUG" if verbose else "INFO")
     log_format = "json" if json_output else "console"
@@ -219,7 +220,9 @@ def run(
         if json_output:
             typer.echo(json.dumps(format_error_json(error), sort_keys=True, separators=(",", ":")))
             raise typer.Exit(code=int(get_exit_code(error))) from error
-        raise typer.Exit(code=handle_error(error, no_color=no_color, verbose=verbose)) from error
+        raise typer.Exit(
+            code=handle_error(error, no_color=effective_no_color, verbose=verbose)
+        ) from error
     except KeyboardInterrupt:
         raise typer.Exit(code=int(ExitCode.INTERRUPTED)) from None
 
