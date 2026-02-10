@@ -1,6 +1,3 @@
-$ErrorActionPreference = "Stop"
-Set-StrictMode -Version Latest
-
 Param(
   [Parameter(Mandatory = $false)]
   [string]$ManifestPath = (Join-Path $PSScriptRoot "manifest.windows-x64.json"),
@@ -15,6 +12,9 @@ Param(
   [switch]$SkipSync
 )
 
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
 function Assert-LastExitCode([string]$Label) {
   if ($LASTEXITCODE -ne 0) {
     throw "$Label failed with exit code $LASTEXITCODE"
@@ -28,7 +28,7 @@ function Resolve-FullPath([string]$PathValue, [string]$BaseDir) {
   return [System.IO.Path]::GetFullPath((Join-Path $BaseDir $PathValue))
 }
 
-if (-not $IsWindows) {
+if ([System.Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) {
   throw "install-from-source.ps1 is supported on Windows only."
 }
 
