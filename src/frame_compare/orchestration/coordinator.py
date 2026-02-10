@@ -801,6 +801,9 @@ def _run_render_phase(
     screenshots_out: Callable[[dict[str, list[Path]]], None],
     screenshot_dir_out: Callable[[Path | None], None],
 ) -> None:
+    from frame_compare.render.encoders import apply_overlay_to_file
+    from frame_compare.render.types import OverlayConfig
+
     clips_state = [ctx.reference, *ctx.comparisons]
     label_map = {clip.path: clip.label for clip in clips_state}
     output_dir = ctx.workspace.screenshots_dir
@@ -816,6 +819,7 @@ def _run_render_phase(
         raise TonemapRequiresVapourSynthError()
 
     if ctx.config.screenshots.use_ffmpeg:
+        overlay_mode = RenderOverlayMode(ctx.config.screenshots.overlay_mode.value)
         rendered: dict[str, list[Path]] = {}
         for clip in clips_state:
             paths: list[Path] = []
@@ -823,6 +827,18 @@ def _run_render_phase(
                 source_frame = _map_aligned_to_source_frame(clip=clip, aligned_frame=aligned_frame)
                 output = generate_screenshot_path(output_dir, clip.label, aligned_frame)
                 runner.extract_frame(clip.path, source_frame, output)
+                if overlay_mode != RenderOverlayMode.NONE:
+                    overlay = OverlayConfig(
+                        mode=overlay_mode,
+                        label=clip.label,
+                        frame_number=source_frame,
+                        resolution=(clip.probe.width, clip.probe.height),
+                        hdr_info="HDR" if clip.probe.is_hdr else None,
+                        font_path=None,
+                        display_frame_number=aligned_frame,
+                        num_frames=clip.probe.num_frames,
+                    )
+                    apply_overlay_to_file(output, overlay)
                 paths.append(output)
             rendered[clip.label] = paths
         screenshots_out(rendered)
