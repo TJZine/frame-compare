@@ -55,9 +55,9 @@ from frame_compare.services.alignment import CACHE_FILE_NAME, align_clips, load_
 from frame_compare.services.metadata import resolve_metadata
 from frame_compare.services.publishers import publish_to_slowpics
 from frame_compare.services.report import ClipInfo, ReportData, generate_report
+from frame_compare.services.run_folder import derive_run_folder_name, get_existing_run_folders
 from frame_compare.services.types import AlignmentConfig, MetadataConfig, TmdbMetadata
 from frame_compare.utils.progress import ProgressReporter
-from frame_compare.utils.run_folder import derive_run_folder_name, get_existing_run_folders
 from frame_compare.utils.subproc import run_subprocess
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.loader import DefaultVSLoader, VSLoader
