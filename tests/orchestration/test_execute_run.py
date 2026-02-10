@@ -10,6 +10,7 @@ from typing import Any, cast
 
 import httpx
 import pytest
+from PIL import Image
 
 from frame_compare.analysis import cache_io
 from frame_compare.config import ConfigSchema, load_config
@@ -126,7 +127,7 @@ class FakeFFmpegRunner:
 
     def extract_frame(self, video: Path, frame_num: int, output: Path) -> None:
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_bytes(f"{video.name}:{frame_num}".encode())
+        Image.new("RGB", (10, 10), color=(0, 0, 0)).save(output, format="PNG")
         self.calls.append((video.name, frame_num, output.name))
 
     def probe_hdr(self, video: Path):  # type: ignore[override]

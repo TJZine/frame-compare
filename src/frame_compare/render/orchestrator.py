@@ -272,15 +272,15 @@ def render_batch(
 def render_screenshots(
     clips: list[Path],
     frames: list[int],
-    *,
-    output_frames: list[int] | None = None,
-    selection_labels: list[str | None] | None = None,
     output_dir: Path,
     config: ConfigSchema,
     label_map: dict[Path, str] | None = None,
     renderer: Renderer = "auto",
     overlay_mode: OverlayMode = OverlayMode.STANDARD,
     reporter: ProgressReporter | None = None,
+    *,
+    output_frames: list[int] | None = None,
+    selection_labels: list[str | None] | None = None,
 ) -> dict[str, list[Path]]:
     """Render multiple frames from multiple clips.
 
