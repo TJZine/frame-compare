@@ -37,6 +37,10 @@ class OverlayConfig:
     resolution: tuple[int, int]
     hdr_info: str | None
     font_path: Path | None
+    display_frame_number: int | None = None
+    num_frames: int | None = None
+    picture_type: str | None = None
+    selection_label: str | None = None
     font_size: int = 24
     position: str = "top-left"  # top-left, top-right, bottom-left, bottom-right
 

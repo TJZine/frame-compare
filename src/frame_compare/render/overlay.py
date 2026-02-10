@@ -67,8 +67,13 @@ def apply_overlay(
     if config.mode == OverlayMode.MINIMAL:
         return canvas
 
+    display_frame_number = (
+        config.display_frame_number
+        if config.display_frame_number is not None
+        else config.frame_number
+    )
     w, h = config.resolution
-    details_lines = [f"Frame {config.frame_number:05d}", f"{w}x{h}"]
+    details_lines = [f"Frame {display_frame_number:05d}", f"{w}x{h}"]
     if config.mode == OverlayMode.DIAGNOSTIC:
         details_lines.append(config.hdr_info or "SDR")
 

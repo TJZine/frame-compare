@@ -272,6 +272,8 @@ def render_batch(
 def render_screenshots(
     clips: list[Path],
     frames: list[int],
+    *,
+    output_frames: list[int] | None = None,
     output_dir: Path,
     config: ConfigSchema,
     label_map: dict[Path, str] | None = None,
@@ -284,6 +286,7 @@ def render_screenshots(
     Args:
         clips: List of video paths
         frames: List of frame indices to render
+        output_frames: Optional list of frame indices used for output filenames and overlay display.
         output_dir: Base output directory
         config: Resolved configuration (required for tonemap gating)
         label_map: Optional mapping of Path -> label string
@@ -308,10 +311,12 @@ def render_screenshots(
         TonemapRequiresVapourSynthError,
         VapourSynthNotFoundError,
     )
-    from frame_compare.vs.tonemap import apply_tonemap
 
     label_map = label_map or {}
     all_requests: list[RenderRequest] = []
+
+    if output_frames is not None and len(output_frames) != len(frames):
+        raise ValueError("output_frames must have the same length as frames")
 
     # Store labels in order to preserve clip ordering in result dict
     ordered_labels: list[str] = []
@@ -338,6 +343,8 @@ def render_screenshots(
 
                 # === TONEMAP INTEGRATION POINT (§1.4.3) ===
                 if should_tonemap(source_info, config):
+                    from frame_compare.vs.tonemap import apply_tonemap
+
                     settings = resolve_tonemap_settings(config)
                     loaded_clip = apply_tonemap(loaded_clip, settings, source_info.hdr_metadata)
                     # Mark that tonemap was applied for overlay (§1.4.6)
@@ -416,13 +423,16 @@ def render_screenshots(
                 # HDR + tonemap required → FFmpeg-only path is invalid.
                 raise TonemapRequiresVapourSynthError()
 
-        for frame in frames:
-            output_path = generate_screenshot_path(output_dir, label, frame)
+        for idx, frame in enumerate(frames):
+            output_frame = output_frames[idx] if output_frames is not None else frame
+            output_path = generate_screenshot_path(output_dir, label, output_frame)
 
             overlay = OverlayConfig(
                 mode=overlay_mode,
                 label=label,
                 frame_number=frame,
+                display_frame_number=output_frame,
+                num_frames=source_info.num_frames if source_info is not None else None,
                 resolution=resolution,
                 hdr_info=hdr_info,
                 font_path=None,

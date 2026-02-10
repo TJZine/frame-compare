@@ -839,6 +839,7 @@ def _run_render_phase(
         rendered_for_clip = render_screenshots(
             clips=[clip.path],
             frames=source_frames,
+            output_frames=frames,
             output_dir=output_dir,
             config=ctx.config,
             label_map=label_map,
@@ -846,13 +847,7 @@ def _run_render_phase(
             overlay_mode=overlay_mode,
             reporter=ctx.reporter,
         )
-        clip_paths: list[Path] = []
-        for aligned_frame, rendered_path in zip(frames, rendered_for_clip[clip.label], strict=True):
-            target_path = generate_screenshot_path(output_dir, clip.label, aligned_frame)
-            if rendered_path != target_path:
-                rendered_path.replace(target_path)
-            clip_paths.append(target_path)
-        rendered[clip.label] = clip_paths
+        rendered[clip.label] = rendered_for_clip[clip.label]
     screenshots_out(rendered)
     screenshot_dir_out(output_dir)
 
