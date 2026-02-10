@@ -15,6 +15,7 @@ class OverlayMode(str, Enum):
     MINIMAL = "minimal"  # Label only
     STANDARD = "standard"  # Label + frame + resolution
     DIAGNOSTIC = "diagnostic"  # Standard + HDR info
+    NONE = "none"  # No overlay drawn
 
 
 @dataclass

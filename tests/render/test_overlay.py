@@ -62,6 +62,27 @@ def test_apply_overlay_minimal_mode(mock_geometry, captured_draw_calls):
     assert not any("|" in t for t in texts)
 
 
+def test_apply_overlay_none_mode_is_noop(mock_geometry, captured_draw_calls):
+    config = OverlayConfig(
+        mode=OverlayMode.NONE,
+        label="NoOverlay",
+        frame_number=100,
+        resolution=(1920, 1080),
+        hdr_info=None,
+        font_path=None,
+    )
+    img = Image.new("RGB", (100, 100), color=(1, 2, 3))
+    before = img.tobytes()
+
+    result = apply_overlay(img, config)
+
+    assert result.mode == img.mode
+    assert result.size == img.size
+    assert result.tobytes() == before
+    assert captured_draw_calls["text"] == []
+    assert captured_draw_calls["rectangle"] == []
+
+
 def test_apply_overlay_standard_mode(mock_geometry, captured_draw_calls):
     config = OverlayConfig(
         mode=OverlayMode.STANDARD,

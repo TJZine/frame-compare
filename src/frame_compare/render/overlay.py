@@ -30,6 +30,10 @@ def apply_overlay(
     if not isinstance(config.mode, OverlayMode):  # type: ignore
         raise ValueError("invalid overlay mode")
 
+    # No overlay drawn.
+    if config.mode == OverlayMode.NONE:
+        return Image.fromarray(image) if isinstance(image, np.ndarray) else image
+
     # 1. Convert input to PIL.Image.Image if numpy array
     pil_image = Image.fromarray(image) if isinstance(image, np.ndarray) else image
 
