@@ -76,6 +76,8 @@ def apply_overlay(
     details_lines = [f"Frame {display_frame_number:05d}", f"{w}x{h}"]
     if config.mode == OverlayMode.DIAGNOSTIC:
         details_lines.append(config.hdr_info or "SDR")
+    if config.selection_label:
+        details_lines.append(f"Frame Selection Type: {config.selection_label}")
 
     draw.multiline_text(
         details_pos,

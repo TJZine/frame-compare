@@ -107,6 +107,25 @@ def test_apply_overlay_standard_mode(captured_draw_calls):
     assert kwargs2["stroke_fill"] == (0, 0, 0, 255)
 
 
+def test_apply_overlay_standard_includes_selection_label_when_present(captured_draw_calls):
+    config = OverlayConfig(
+        mode=OverlayMode.STANDARD,
+        label="Ref",
+        frame_number=100,
+        resolution=(1920, 1080),
+        hdr_info=None,
+        font_path=None,
+        selection_label="Dark",
+    )
+    img = Image.new("RGB", (100, 100))
+
+    apply_overlay(img, config)
+
+    assert len(captured_draw_calls["multiline_text"]) == 2
+    _, text2, _ = captured_draw_calls["multiline_text"][1]
+    assert text2 == "Frame 00100\n1920x1080\nFrame Selection Type: Dark"
+
+
 def test_apply_overlay_diagnostic_with_hdr(captured_draw_calls):
     config = OverlayConfig(
         mode=OverlayMode.DIAGNOSTIC,

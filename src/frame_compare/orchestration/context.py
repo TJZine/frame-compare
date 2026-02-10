@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from frame_compare.vs.types import HDRMetadata
 
 if TYPE_CHECKING:
+    from frame_compare.analysis.types import SelectionBreakdown
     from frame_compare.config.schema import ConfigSchema
     from frame_compare.utils.progress import ProgressReporter
     from frame_compare.utils.types import WorkspacePaths
@@ -139,3 +140,4 @@ class RunContext:
     reference: ClipState
     comparisons: list[ClipState]
     reporter: ProgressReporter | None = None
+    selection_breakdown: SelectionBreakdown | None = None

@@ -274,6 +274,7 @@ def render_screenshots(
     frames: list[int],
     *,
     output_frames: list[int] | None = None,
+    selection_labels: list[str | None] | None = None,
     output_dir: Path,
     config: ConfigSchema,
     label_map: dict[Path, str] | None = None,
@@ -317,6 +318,8 @@ def render_screenshots(
 
     if output_frames is not None and len(output_frames) != len(frames):
         raise ValueError("output_frames must have the same length as frames")
+    if selection_labels is not None and len(selection_labels) != len(frames):
+        raise ValueError("selection_labels must have the same length as frames")
 
     # Store labels in order to preserve clip ordering in result dict
     ordered_labels: list[str] = []
@@ -426,6 +429,7 @@ def render_screenshots(
         for idx, frame in enumerate(frames):
             output_frame = output_frames[idx] if output_frames is not None else frame
             output_path = generate_screenshot_path(output_dir, label, output_frame)
+            selection_label = selection_labels[idx] if selection_labels is not None else None
 
             overlay = OverlayConfig(
                 mode=overlay_mode,
@@ -433,6 +437,7 @@ def render_screenshots(
                 frame_number=frame,
                 display_frame_number=output_frame,
                 num_frames=source_info.num_frames if source_info is not None else None,
+                selection_label=selection_label,
                 resolution=resolution,
                 hdr_info=hdr_info,
                 font_path=None,
