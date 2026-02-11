@@ -1,0 +1,115 @@
+from __future__ import annotations
+
+from fractions import Fraction
+from pathlib import Path
+from typing import Any, cast
+
+import pytest
+
+from frame_compare.config import ConfigSchema
+from frame_compare.orchestration.context import (
+    ClipFingerprint,
+    ClipProbeSnapshot,
+    ClipState,
+    RunContext,
+)
+from frame_compare.orchestration.coordinator import _run_render_phase
+from frame_compare.utils.types import WorkspacePaths
+from frame_compare.vs.types import SourceInfo
+
+
+class FakeVSLoader:
+    def load(self, _path: Path) -> SourceInfo:
+        return SourceInfo(
+            clip=cast(Any, object()),
+            width=1920,
+            height=1080,
+            num_frames=100,
+            fps=Fraction(24, 1),
+            format=cast(Any, object()),
+            frame_props={},
+            is_hdr=False,
+            hdr_metadata=None,
+        )
+
+    def ensure_core(self):  # type: ignore[override]
+        raise RuntimeError("ensure_core should not be called in tests")
+
+
+class FakeFFmpegRunner:
+    def extract_frame(self, _video: Path, _frame_num: int, _output: Path) -> None:
+        raise AssertionError("FFmpeg extraction path is not exercised in this test")
+
+    def probe_hdr(self, _video: Path):  # type: ignore[override]
+        return None
+
+
+def test_overlay_display_frame_number_matches_aligned_output_filename(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: list[object] = []
+    screenshot_dir_box: list[Path | None] = [None]
+
+    def _fake_render_frame(request: object) -> Path:
+        captured.append(request)
+        return cast(Any, request).output_path
+
+    monkeypatch.setattr("frame_compare.render.orchestrator.render_frame", _fake_render_frame)
+    monkeypatch.setattr("frame_compare.vs.loader.DefaultVSLoader", FakeVSLoader)
+
+    config = ConfigSchema()
+
+    workspace = WorkspacePaths(
+        root=tmp_path.resolve(),
+        input_dir=(tmp_path / "comparison_videos").resolve(),
+        run_dir=None,
+        screenshots_dir=(tmp_path / "screenshots").resolve(),
+        generated_dir=(tmp_path / "generated").resolve(),
+        config_dir=(tmp_path / "config").resolve(),
+        config_file=None,
+    )
+
+    fingerprint = ClipFingerprint(Path("ref.mkv"), 1, 1)
+    probe = ClipProbeSnapshot(
+        fingerprint=fingerprint,
+        width=1920,
+        height=1080,
+        num_frames=200,
+        fps=Fraction(24, 1),
+        is_hdr=False,
+    )
+    reference = ClipState(
+        path=Path("ref.mkv"),
+        label="Reference",
+        probe=probe,
+        source_fps=probe.fps,
+        effective_fps=probe.fps,
+    ).with_trim(trim_start_frames=10, trim_end_frame_inclusive=None)
+
+    ctx = RunContext(
+        config=config,
+        workspace=workspace,
+        reference=reference,
+        comparisons=[],
+        reporter=None,
+    )
+
+    screenshots: dict[str, list[Path]] = {}
+
+    _run_render_phase(
+        ctx=ctx,
+        frames=[10],
+        runner=FakeFFmpegRunner(),
+        screenshots_out=lambda value: screenshots.update(value),
+        screenshot_dir_out=lambda value: screenshot_dir_box.__setitem__(0, value),
+    )
+
+    assert screenshot_dir_box[0] == workspace.screenshots_dir
+    assert "Reference" in screenshots
+    assert screenshots["Reference"][0].name.endswith("_00010.png")
+
+    req = cast(Any, captured[0])
+    assert req.frame_number == 20
+    assert req.output_path.name.endswith("_00010.png")
+    assert req.overlay is not None
+    assert req.overlay.display_frame_number == 10

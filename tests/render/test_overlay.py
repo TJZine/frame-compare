@@ -3,47 +3,40 @@ import pytest
 from PIL import Image, ImageDraw
 
 from frame_compare.render.overlay import apply_overlay
+from frame_compare.render.overlay_text import (
+    compose_frame_info_lines,
+    compose_overlay_text_lines,
+)
 from frame_compare.render.types import OverlayConfig, OverlayMode
-
-# Mock calculate_overlay_position to return fixed coordinates
-# This ensures we don't depend on geometry logic implementation details here
-MOCK_POS = (100, 200)
-
-
-@pytest.fixture
-def mock_geometry(monkeypatch):
-    monkeypatch.setattr(
-        "frame_compare.render.overlay.calculate_overlay_position",
-        lambda *args, **kwargs: MOCK_POS,
-    )
 
 
 @pytest.fixture
 def captured_draw_calls(monkeypatch):
     """
-    Monkeypatch ImageDraw.text and ImageDraw.rectangle to capture calls.
-    Returns a list of calls.
+    Monkeypatch ImageDraw.multiline_text and ImageDraw.rectangle to capture calls.
     """
-    calls = {"text": [], "rectangle": []}
+    calls: dict[str, list[object]] = {"multiline_text": [], "rectangle": [], "text": []}
 
-    original_text = ImageDraw.ImageDraw.text
-    original_rectangle = ImageDraw.ImageDraw.rectangle
-
-    def mock_text(self, xy, text, *args, **kwargs):
-        calls["text"].append((xy, text))
-        return original_text(self, xy, text, *args, **kwargs)
+    def mock_multiline_text(self, xy, text, *args, **kwargs):
+        calls["multiline_text"].append((xy, text, kwargs))
+        return None
 
     def mock_rectangle(self, xy, *args, **kwargs):
         calls["rectangle"].append(xy)
-        return original_rectangle(self, xy, *args, **kwargs)
+        return None
 
-    monkeypatch.setattr(ImageDraw.ImageDraw, "text", mock_text)
+    def mock_text(self, xy, text, *args, **kwargs):
+        calls["text"].append((xy, text, kwargs))
+        raise AssertionError("apply_overlay must use multiline_text (not text)")
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "multiline_text", mock_multiline_text)
     monkeypatch.setattr(ImageDraw.ImageDraw, "rectangle", mock_rectangle)
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", mock_text)
 
     return calls
 
 
-def test_apply_overlay_minimal_mode(mock_geometry, captured_draw_calls):
+def test_apply_overlay_minimal_mode(captured_draw_calls):
     config = OverlayConfig(
         mode=OverlayMode.MINIMAL,
         label="Source",
@@ -56,17 +49,45 @@ def test_apply_overlay_minimal_mode(mock_geometry, captured_draw_calls):
 
     apply_overlay(img, config)
 
-    texts = [call[1] for call in captured_draw_calls["text"]]
-    assert any("Source" in t for t in texts)
-    # Ensure minimal mode doesn't contain extra info
-    assert not any("|" in t for t in texts)
+    assert captured_draw_calls["rectangle"] == []
+    assert len(captured_draw_calls["multiline_text"]) == 1
+
+    xy, text, kwargs = captured_draw_calls["multiline_text"][0]
+    assert xy == (10, 10)
+    assert text == "Source"
+    assert kwargs["stroke_width"] == 2
+    assert kwargs["stroke_fill"] == (0, 0, 0, 255)
 
 
-def test_apply_overlay_standard_mode(mock_geometry, captured_draw_calls):
+def test_apply_overlay_none_mode_is_noop(captured_draw_calls):
+    config = OverlayConfig(
+        mode=OverlayMode.NONE,
+        label="NoOverlay",
+        frame_number=100,
+        resolution=(1920, 1080),
+        hdr_info=None,
+        font_path=None,
+    )
+    img = Image.new("RGB", (100, 100), color=(1, 2, 3))
+    before = img.tobytes()
+
+    result = apply_overlay(img, config)
+
+    assert result.mode == img.mode
+    assert result.size == img.size
+    assert result.tobytes() == before
+    assert captured_draw_calls["multiline_text"] == []
+    assert captured_draw_calls["rectangle"] == []
+    assert captured_draw_calls["text"] == []
+
+
+def test_apply_overlay_standard_mode(captured_draw_calls):
     config = OverlayConfig(
         mode=OverlayMode.STANDARD,
         label="Ref",
         frame_number=100,
+        display_frame_number=12,
+        num_frames=100,
         resolution=(1920, 1080),
         hdr_info=None,
         font_path=None,
@@ -75,16 +96,90 @@ def test_apply_overlay_standard_mode(mock_geometry, captured_draw_calls):
 
     apply_overlay(img, config)
 
-    texts = [call[1] for call in captured_draw_calls["text"]]
-    expected = "Ref | Frame 00100 | 1920x1080"
-    assert any(t == expected for t in texts)
+    assert captured_draw_calls["rectangle"] == []
+    assert len(captured_draw_calls["multiline_text"]) == 2
+
+    (xy1, text1, kwargs1) = captured_draw_calls["multiline_text"][0]
+    (xy2, text2, kwargs2) = captured_draw_calls["multiline_text"][1]
+
+    assert xy1 == (10, 10)
+    assert text1 == "\n".join(
+        compose_frame_info_lines(
+            mode=OverlayMode.STANDARD,
+            label="Ref",
+            display_frame_number=12,
+            num_frames=100,
+            picture_type=None,
+            selection_label=None,
+        )
+    )
+    assert kwargs1["stroke_width"] == 2
+    assert kwargs1["stroke_fill"] == (0, 0, 0, 255)
+
+    assert xy2 == (10, 140)
+    assert text2 == "\n".join(
+        compose_overlay_text_lines(
+            mode=OverlayMode.STANDARD,
+            base_text=None,
+            width=1920,
+            height=1080,
+            selection_type=None,
+            diagnostic_lines=[],
+        )
+    )
+    assert kwargs2["stroke_width"] == 2
+    assert kwargs2["stroke_fill"] == (0, 0, 0, 255)
 
 
-def test_apply_overlay_diagnostic_with_hdr(mock_geometry, captured_draw_calls):
+def test_apply_overlay_standard_includes_selection_label_when_present(captured_draw_calls):
+    config = OverlayConfig(
+        mode=OverlayMode.STANDARD,
+        label="Ref",
+        frame_number=100,
+        display_frame_number=12,
+        num_frames=100,
+        resolution=(1920, 1080),
+        hdr_info=None,
+        font_path=None,
+        selection_label="Dark",
+    )
+    img = Image.new("RGB", (100, 100))
+
+    apply_overlay(img, config)
+
+    assert len(captured_draw_calls["multiline_text"]) == 2
+    _, text1, _ = captured_draw_calls["multiline_text"][0]
+    assert text1 == "\n".join(
+        compose_frame_info_lines(
+            mode=OverlayMode.STANDARD,
+            label="Ref",
+            display_frame_number=12,
+            num_frames=100,
+            picture_type=None,
+            selection_label="Dark",
+        )
+    )
+
+    _, text2, _ = captured_draw_calls["multiline_text"][1]
+    assert text2 == "\n".join(
+        compose_overlay_text_lines(
+            mode=OverlayMode.STANDARD,
+            base_text=None,
+            width=1920,
+            height=1080,
+            selection_type="Dark",
+            diagnostic_lines=[],
+        )
+    )
+
+
+def test_apply_overlay_diagnostic_with_hdr(captured_draw_calls):
     config = OverlayConfig(
         mode=OverlayMode.DIAGNOSTIC,
         label="Encode",
         frame_number=200,
+        display_frame_number=20,
+        num_frames=100,
         resolution=(3840, 2160),
         hdr_info="PQ / BT.2020",
         font_path=None,
@@ -93,15 +188,39 @@ def test_apply_overlay_diagnostic_with_hdr(mock_geometry, captured_draw_calls):
 
     apply_overlay(img, config)
 
-    texts = [call[1] for call in captured_draw_calls["text"]]
-    assert any("PQ / BT.2020" in t for t in texts)
+    assert len(captured_draw_calls["multiline_text"]) == 2
+    _, text1, _ = captured_draw_calls["multiline_text"][0]
+    assert text1 == "\n".join(
+        compose_frame_info_lines(
+            mode=OverlayMode.DIAGNOSTIC,
+            label="Encode",
+            display_frame_number=20,
+            num_frames=100,
+            picture_type=None,
+            selection_label=None,
+        )
+    )
+
+    _, text2, _ = captured_draw_calls["multiline_text"][1]
+    assert text2 == "\n".join(
+        compose_overlay_text_lines(
+            mode=OverlayMode.DIAGNOSTIC,
+            base_text=None,
+            width=3840,
+            height=2160,
+            selection_type=None,
+            diagnostic_lines=["PQ / BT.2020"],
+        )
+    )
 
 
-def test_apply_overlay_diagnostic_sdr(mock_geometry, captured_draw_calls):
+def test_apply_overlay_diagnostic_sdr(captured_draw_calls):
     config = OverlayConfig(
         mode=OverlayMode.DIAGNOSTIC,
         label="SDR_Test",
         frame_number=50,
+        display_frame_number=5,
+        num_frames=10,
         resolution=(1280, 720),
         hdr_info=None,
         font_path=None,
@@ -110,11 +229,21 @@ def test_apply_overlay_diagnostic_sdr(mock_geometry, captured_draw_calls):
 
     apply_overlay(img, config)
 
-    texts = [call[1] for call in captured_draw_calls["text"]]
-    assert any("SDR" in t for t in texts)
+    assert len(captured_draw_calls["multiline_text"]) == 2
+    _, text2, _ = captured_draw_calls["multiline_text"][1]
+    assert text2 == "\n".join(
+        compose_overlay_text_lines(
+            mode=OverlayMode.DIAGNOSTIC,
+            base_text=None,
+            width=1280,
+            height=720,
+            selection_type=None,
+            diagnostic_lines=[],
+        )
+    )
 
 
-def test_apply_overlay_returns_pil_image(mock_geometry):
+def test_apply_overlay_returns_pil_image():
     config = OverlayConfig(
         mode=OverlayMode.MINIMAL,
         label="Test",
@@ -128,7 +257,7 @@ def test_apply_overlay_returns_pil_image(mock_geometry):
     assert isinstance(result, Image.Image)
 
 
-def test_apply_overlay_accepts_numpy(mock_geometry):
+def test_apply_overlay_accepts_numpy():
     config = OverlayConfig(
         mode=OverlayMode.MINIMAL,
         label="Test",
@@ -169,47 +298,3 @@ def test_apply_overlay_invalid_mode_raises():
     img = Image.new("RGB", (100, 100))
     with pytest.raises(ValueError, match="invalid overlay mode"):
         apply_overlay(img, config)
-
-
-def test_apply_overlay_calls_position_function(monkeypatch):
-    # We want to verify arguments passed to calculate_overlay_position
-    captured_args = []
-
-    def mock_calc(image_size, overlay_size, position):
-        captured_args.append((image_size, overlay_size, position))
-        return (0, 0)
-
-    monkeypatch.setattr(
-        "frame_compare.render.overlay.calculate_overlay_position",
-        mock_calc,
-    )
-
-    config = OverlayConfig(
-        mode=OverlayMode.MINIMAL,
-        label="PosTest",
-        frame_number=1,
-        resolution=(100, 100),
-        hdr_info=None,
-        font_path=None,
-        position="bottom-right",
-    )
-    img = Image.new("RGB", (100, 100))
-    apply_overlay(img, config)
-
-    assert len(captured_args) == 1
-    assert captured_args[0][2] == "bottom-right"
-
-
-def test_apply_overlay_draws_rectangle(mock_geometry, captured_draw_calls):
-    config = OverlayConfig(
-        mode=OverlayMode.MINIMAL,
-        label="RectTest",
-        frame_number=1,
-        resolution=(100, 100),
-        hdr_info=None,
-        font_path=None,
-    )
-    img = Image.new("RGB", (100, 100))
-    apply_overlay(img, config)
-
-    assert len(captured_draw_calls["rectangle"]) >= 1

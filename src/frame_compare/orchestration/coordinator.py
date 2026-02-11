@@ -15,6 +15,7 @@ from typing import Protocol, cast
 import httpx
 
 from frame_compare.analysis import cache_io, calculate_metrics, create_frame_plan, select_frames
+from frame_compare.analysis.types import SelectionBreakdown
 from frame_compare.config import ConfigSchema, apply_cli_overrides
 from frame_compare.errors import (
     AudioAlignmentError,
@@ -739,6 +740,21 @@ def _run_analyze_phase(
     )
     selection = select_frames(metrics=metrics, config=ctx.config.analysis)
     selected_frames[:] = selection.frames
+    ctx.selection_breakdown = selection.breakdown
+
+
+def selection_label_for_frame(frame: int, breakdown: SelectionBreakdown | None) -> str | None:
+    if breakdown is None:
+        return None
+    if frame in breakdown.quantile_dark:
+        return "Dark"
+    if frame in breakdown.quantile_bright:
+        return "Bright"
+    if frame in breakdown.motion:
+        return "Motion"
+    if frame in breakdown.random:
+        return "Random"
+    return None
 
 
 async def _run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> None:
@@ -801,6 +817,9 @@ def _run_render_phase(
     screenshots_out: Callable[[dict[str, list[Path]]], None],
     screenshot_dir_out: Callable[[Path | None], None],
 ) -> None:
+    from frame_compare.render.encoders import apply_overlay_to_file
+    from frame_compare.render.types import OverlayConfig
+
     clips_state = [ctx.reference, *ctx.comparisons]
     label_map = {clip.path: clip.label for clip in clips_state}
     output_dir = ctx.workspace.screenshots_dir
@@ -816,13 +835,34 @@ def _run_render_phase(
         raise TonemapRequiresVapourSynthError()
 
     if ctx.config.screenshots.use_ffmpeg:
+        overlay_mode = RenderOverlayMode(ctx.config.screenshots.overlay_mode.value)
+        selection_labels = [
+            selection_label_for_frame(
+                _map_aligned_to_source_frame(clip=ctx.reference, aligned_frame=aligned_frame),
+                ctx.selection_breakdown,
+            )
+            for aligned_frame in frames
+        ]
         rendered: dict[str, list[Path]] = {}
         for clip in clips_state:
             paths: list[Path] = []
-            for aligned_frame in frames:
+            for idx, aligned_frame in enumerate(frames):
                 source_frame = _map_aligned_to_source_frame(clip=clip, aligned_frame=aligned_frame)
                 output = generate_screenshot_path(output_dir, clip.label, aligned_frame)
                 runner.extract_frame(clip.path, source_frame, output)
+                if overlay_mode != RenderOverlayMode.NONE:
+                    overlay = OverlayConfig(
+                        mode=overlay_mode,
+                        label=clip.label,
+                        frame_number=source_frame,
+                        resolution=(clip.probe.width, clip.probe.height),
+                        hdr_info="HDR" if clip.probe.is_hdr else None,
+                        font_path=None,
+                        display_frame_number=aligned_frame,
+                        num_frames=clip.probe.num_frames,
+                        selection_label=selection_labels[idx],
+                    )
+                    apply_overlay_to_file(output, overlay)
                 paths.append(output)
             rendered[clip.label] = paths
         screenshots_out(rendered)
@@ -831,6 +871,13 @@ def _run_render_phase(
 
     overlay_mode = RenderOverlayMode(ctx.config.screenshots.overlay_mode.value)
     rendered: dict[str, list[Path]] = {}
+    selection_labels = [
+        selection_label_for_frame(
+            _map_aligned_to_source_frame(clip=ctx.reference, aligned_frame=aligned_frame),
+            ctx.selection_breakdown,
+        )
+        for aligned_frame in frames
+    ]
     for clip in clips_state:
         source_frames = [
             _map_aligned_to_source_frame(clip=clip, aligned_frame=aligned_frame)
@@ -839,6 +886,8 @@ def _run_render_phase(
         rendered_for_clip = render_screenshots(
             clips=[clip.path],
             frames=source_frames,
+            output_frames=frames,
+            selection_labels=selection_labels,
             output_dir=output_dir,
             config=ctx.config,
             label_map=label_map,
@@ -846,13 +895,7 @@ def _run_render_phase(
             overlay_mode=overlay_mode,
             reporter=ctx.reporter,
         )
-        clip_paths: list[Path] = []
-        for aligned_frame, rendered_path in zip(frames, rendered_for_clip[clip.label], strict=True):
-            target_path = generate_screenshot_path(output_dir, clip.label, aligned_frame)
-            if rendered_path != target_path:
-                rendered_path.replace(target_path)
-            clip_paths.append(target_path)
-        rendered[clip.label] = clip_paths
+        rendered[clip.label] = rendered_for_clip[clip.label]
     screenshots_out(rendered)
     screenshot_dir_out(output_dir)
 

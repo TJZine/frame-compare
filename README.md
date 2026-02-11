@@ -209,6 +209,11 @@ Local invocations may require optional dependencies (notably VapourSynth). For r
 bash tools/verify_docker_integration.sh
 ```
 
+### Overlays
+
+- `screenshots.overlay_mode`: `none|minimal|standard|diagnostic`
+- Overlay font rendering uses system/default fonts today; appearance can vary by OS.
+
 ### Readiness Gates
 
 ```bash
