@@ -21,6 +21,12 @@ def captured_draw_calls(monkeypatch):
         calls["multiline_text"].append((xy, text, kwargs))
         return None
 
+    def mock_multiline_textbbox(self, xy, text, *args, **kwargs):
+        lines = str(text).splitlines() if text else [""]
+        height = len(lines) * 20
+        x, y = xy
+        return (x, y, x + 200, y + height)
+
     def mock_rectangle(self, xy, *args, **kwargs):
         calls["rectangle"].append(xy)
         return None
@@ -30,6 +36,7 @@ def captured_draw_calls(monkeypatch):
         raise AssertionError("apply_overlay must use multiline_text (not text)")
 
     monkeypatch.setattr(ImageDraw.ImageDraw, "multiline_text", mock_multiline_text)
+    monkeypatch.setattr(ImageDraw.ImageDraw, "multiline_textbbox", mock_multiline_textbbox)
     monkeypatch.setattr(ImageDraw.ImageDraw, "rectangle", mock_rectangle)
     monkeypatch.setattr(ImageDraw.ImageDraw, "text", mock_text)
 
@@ -116,7 +123,9 @@ def test_apply_overlay_standard_mode(captured_draw_calls):
     assert kwargs1["stroke_width"] == 2
     assert kwargs1["stroke_fill"] == (0, 0, 0, 255)
 
-    assert xy2 == (10, 140)
+    expected_frame_info_lines = text1.splitlines()
+    expected_frame_info_height = len(expected_frame_info_lines) * 20
+    assert xy2 == (10, 10 + expected_frame_info_height + 10)
     assert text2 == "\n".join(
         compose_overlay_text_lines(
             mode=OverlayMode.STANDARD,

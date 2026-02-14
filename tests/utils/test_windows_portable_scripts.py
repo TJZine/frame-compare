@@ -12,20 +12,30 @@ def _first_significant_line(text: str) -> str:
     return ""
 
 
+def test_first_significant_line_returns_empty_for_blank_or_comment_only() -> None:
+    assert _first_significant_line("") == ""
+    assert _first_significant_line("# comment\n# another") == ""
+    assert _first_significant_line("\n\n\n") == ""
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
 def test_install_from_source_param_block_is_first_statement() -> None:
-    script_path = Path("tools/windows_portable/install-from-source.ps1")
+    script_path = _repo_root() / "tools" / "windows_portable" / "install-from-source.ps1"
     script_text = script_path.read_text(encoding="utf-8")
     assert _first_significant_line(script_text).startswith("Param(")
 
 
 def test_install_from_source_avoids_pscore_only_windows_variable() -> None:
-    script_path = Path("tools/windows_portable/install-from-source.ps1")
+    script_path = _repo_root() / "tools" / "windows_portable" / "install-from-source.ps1"
     script_text = script_path.read_text(encoding="utf-8")
     assert "$IsWindows" not in script_text
 
 
 def test_root_install_cmd_exists_and_calls_install_ps1() -> None:
-    path = Path("install.cmd")
+    path = _repo_root() / "install.cmd"
     assert path.exists()
     text = path.read_text(encoding="utf-8").lower()
     assert "powershell" in text
@@ -36,7 +46,7 @@ def test_root_install_cmd_exists_and_calls_install_ps1() -> None:
 
 
 def test_root_install_ps1_exists_and_delegates_to_install_from_source() -> None:
-    path = Path("install.ps1")
+    path = _repo_root() / "install.ps1"
     assert path.exists()
     text = path.read_text(encoding="utf-8")
     assert _first_significant_line(text).startswith("Param(")
@@ -45,7 +55,7 @@ def test_root_install_ps1_exists_and_delegates_to_install_from_source() -> None:
 
 
 def test_install_from_source_mentions_uv_auto_install() -> None:
-    script_path = Path("tools/windows_portable/install-from-source.ps1")
+    script_path = _repo_root() / "tools" / "windows_portable" / "install-from-source.ps1"
     text = script_path.read_text(encoding="utf-8").lower()
     assert "winget" in text
     assert "pip" in text
@@ -56,7 +66,7 @@ def test_install_from_source_mentions_uv_auto_install() -> None:
 
 
 def test_install_from_source_uv_install_order_is_deterministic() -> None:
-    script_path = Path("tools/windows_portable/install-from-source.ps1")
+    script_path = _repo_root() / "tools" / "windows_portable" / "install-from-source.ps1"
     text = script_path.read_text(encoding="utf-8").lower()
 
     # The plan requires winget first, then pip as fallback.
@@ -70,17 +80,23 @@ def test_install_from_source_uv_install_order_is_deterministic() -> None:
 
 
 def test_windows_portable_workflow_does_not_flatten_zip_contents() -> None:
-    wf = Path(".github/workflows/windows-portable.yml").read_text(encoding="utf-8")
+    wf = (_repo_root() / ".github" / "workflows" / "windows-portable.yml").read_text(
+        encoding="utf-8"
+    )
     assert 'Compress-Archive -Path "$bundle/*"' not in wf
 
 
 def test_windows_portable_workflow_zips_bundle_folder() -> None:
-    wf = Path(".github/workflows/windows-portable.yml").read_text(encoding="utf-8")
+    wf = (_repo_root() / ".github" / "workflows" / "windows-portable.yml").read_text(
+        encoding="utf-8"
+    )
     assert "Compress-Archive -Path $bundle -DestinationPath $zip" in wf
 
 
 def test_windows_portable_workflow_verifies_zip_required_entries() -> None:
-    wf = Path(".github/workflows/windows-portable.yml").read_text(encoding="utf-8")
+    wf = (_repo_root() / ".github" / "workflows" / "windows-portable.yml").read_text(
+        encoding="utf-8"
+    )
     required = [
         "frame-compare-portable-win-x64/install.cmd",
         "frame-compare-portable-win-x64/install.ps1",

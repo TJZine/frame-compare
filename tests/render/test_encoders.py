@@ -16,6 +16,7 @@ from frame_compare.render.encoders import (
     _clip_to_rgb24_for_pillow,
     _probe_fps,
     _render_ffmpeg,
+    apply_overlay_to_file,
     render_frame,
 )
 from frame_compare.render.types import EncoderSettings, OverlayConfig, OverlayMode, RenderRequest
@@ -127,6 +128,16 @@ def test_render_frame_overlay_integration_ffmpeg(mock_render_ffmpeg, mock_apply_
     render_frame(request, renderer="ffmpeg")
     mock_render_ffmpeg.assert_called_once()
     mock_apply_overlay_file.assert_called_once()
+
+
+def test_apply_overlay_to_file_none_mode_is_noop(monkeypatch) -> None:
+    overlay = OverlayConfig(OverlayMode.NONE, "Label", 100, (1920, 1080), None, None)
+
+    def _should_not_call(_path: Path, _config: OverlayConfig) -> None:
+        raise AssertionError("_apply_overlay_to_file should not be called for NONE mode")
+
+    monkeypatch.setattr("frame_compare.render.encoders._apply_overlay_to_file", _should_not_call)
+    apply_overlay_to_file(Path("does-not-matter.png"), overlay)
 
 
 def test_render_frame_overlay_none_mode_is_strict_noop_on_ffmpeg(

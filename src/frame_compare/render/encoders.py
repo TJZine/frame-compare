@@ -331,4 +331,6 @@ def apply_overlay_to_file(path: Path, overlay: OverlayConfig) -> None:
     Raises:
         OverlayError: If the overlay cannot be applied.
     """
+    if overlay.mode == OverlayMode.NONE:
+        return
     _apply_overlay_to_file(path, overlay)

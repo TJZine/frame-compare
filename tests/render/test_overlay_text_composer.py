@@ -58,3 +58,102 @@ def test_compose_overlay_text_lines_diagnostic_appends_lines_before_selection_ty
     assert "MDL: ..." in lines
     assert "HDR: ..." in lines
     assert lines[-1] == "Frame Selection Type: Bright"
+
+
+def test_compose_frame_info_lines_none_mode_returns_empty() -> None:
+    assert (
+        compose_frame_info_lines(
+            mode=OverlayMode.NONE,
+            label="Ref",
+            display_frame_number=12,
+            num_frames=100,
+            picture_type="I",
+            selection_label="Dark",
+        )
+        == []
+    )
+
+
+def test_compose_frame_info_lines_label_none_falls_back_to_clip() -> None:
+    lines = compose_frame_info_lines(
+        mode=OverlayMode.MINIMAL,
+        label=None,
+        display_frame_number=12,
+        num_frames=100,
+        picture_type=None,
+        selection_label=None,
+    )
+    assert lines == ["Clip"]
+
+
+def test_compose_frame_info_lines_num_frames_none_omits_total() -> None:
+    lines = compose_frame_info_lines(
+        mode=OverlayMode.STANDARD,
+        label="Ref",
+        display_frame_number=12,
+        num_frames=None,
+        picture_type=None,
+        selection_label=None,
+    )
+    assert lines[0] == "Frame 12"
+
+
+def test_compose_frame_info_lines_selection_label_none_omits_selection_line() -> None:
+    lines = compose_frame_info_lines(
+        mode=OverlayMode.STANDARD,
+        label="Ref",
+        display_frame_number=12,
+        num_frames=100,
+        picture_type="I",
+        selection_label=None,
+    )
+    assert all(not line.startswith("Selection:") for line in lines)
+
+
+def test_compose_overlay_text_lines_none_and_minimal_return_empty() -> None:
+    assert (
+        compose_overlay_text_lines(
+            mode=OverlayMode.NONE,
+            base_text=None,
+            width=1920,
+            height=1080,
+            selection_type="Dark",
+            diagnostic_lines=[],
+        )
+        == []
+    )
+    assert (
+        compose_overlay_text_lines(
+            mode=OverlayMode.MINIMAL,
+            base_text=None,
+            width=1920,
+            height=1080,
+            selection_type="Dark",
+            diagnostic_lines=[],
+        )
+        == []
+    )
+
+
+def test_compose_overlay_text_lines_selection_type_none_renders_unknown() -> None:
+    lines = compose_overlay_text_lines(
+        mode=OverlayMode.STANDARD,
+        base_text=None,
+        width=1920,
+        height=1080,
+        selection_type=None,
+        diagnostic_lines=[],
+    )
+    assert lines[-1] == "Frame Selection Type: (unknown)"
+
+
+def test_compose_overlay_text_lines_unknown_resolution_omits_resolution_line() -> None:
+    lines = compose_overlay_text_lines(
+        mode=OverlayMode.STANDARD,
+        base_text=None,
+        width=0,
+        height=0,
+        selection_type="Dark",
+        diagnostic_lines=[],
+    )
+    assert lines == ["Frame Selection Type: Dark"]

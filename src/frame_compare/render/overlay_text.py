@@ -70,7 +70,8 @@ def compose_overlay_text_lines(
     if base_text:
         lines.append(base_text)
 
-    lines.append(f"{width} × {height}  (native)")
+    if width > 0 and height > 0:
+        lines.append(f"{width} × {height}  (native)")
 
     if mode == OverlayMode.DIAGNOSTIC:
         lines.extend(diagnostic_lines)

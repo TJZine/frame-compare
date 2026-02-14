@@ -1,4 +1,6 @@
 # Enforce Windows line endings for portable install scripts.
+install.cmd text eol=crlf
+install.ps1 text eol=crlf
 tools/windows_portable/*.cmd text eol=crlf
 tools/windows_portable/shim/*.cmd text eol=crlf
 tools/windows_portable/*.ps1 text eol=crlf

@@ -28,6 +28,42 @@ function Resolve-FullPath([string]$PathValue, [string]$BaseDir) {
   return [System.IO.Path]::GetFullPath((Join-Path $BaseDir $PathValue))
 }
 
+function Update-ProcessPathFromRegistry() {
+  $machine = [Environment]::GetEnvironmentVariable("Path", "Machine")
+  $user = [Environment]::GetEnvironmentVariable("Path", "User")
+  if ($null -eq $machine) { $machine = "" }
+  if ($null -eq $user) { $user = "" }
+  $env:Path = @($machine, $user) -join ";"
+}
+
+function Add-ToProcessPathIfMissing([string]$CandidateDir) {
+  if ([string]::IsNullOrWhiteSpace($CandidateDir)) {
+    return
+  }
+  if (!(Test-Path -LiteralPath $CandidateDir)) {
+    return
+  }
+  if ($env:Path -like "*$CandidateDir*") {
+    return
+  }
+  $env:Path = "$CandidateDir;$env:Path"
+}
+
+function Get-UserScriptsDir([string]$PythonExe) {
+  try {
+    $scripts = & $PythonExe -c "import sysconfig; print(sysconfig.get_path('scripts', scheme='nt_user'))"
+    if ($LASTEXITCODE -ne 0) {
+      return $null
+    }
+    if ([string]::IsNullOrWhiteSpace($scripts)) {
+      return $null
+    }
+    return $scripts.Trim()
+  } catch {
+    return $null
+  }
+}
+
 function Ensure-UvOnPath() {
   if (Get-Command uv -ErrorAction SilentlyContinue) {
     return
@@ -45,9 +81,12 @@ function Ensure-UvOnPath() {
 
     foreach ($wingetId in $wingetIds) {
       Write-Host "Attempting uv install via winget id '$wingetId'..."
-      & winget install --id $wingetId -e --source winget
+      & winget install --id $wingetId -e --source winget --accept-source-agreements --accept-package-agreements
       if ($LASTEXITCODE -eq 0) {
         Write-Host "winget install succeeded with id '$wingetId'."
+        Update-ProcessPathFromRegistry
+        $wingetLinks = Join-Path $env:LOCALAPPDATA "Microsoft\\WinGet\\Links"
+        Add-ToProcessPathIfMissing -CandidateDir $wingetLinks
         break
       }
       Write-Host "winget install failed for id '$wingetId' (exit code $LASTEXITCODE)."
@@ -62,6 +101,9 @@ function Ensure-UvOnPath() {
       & py -m pip install --user uv
       if ($LASTEXITCODE -eq 0) {
         Write-Host "pip install via py succeeded."
+        Update-ProcessPathFromRegistry
+        $userScripts = Get-UserScriptsDir -PythonExe "py"
+        Add-ToProcessPathIfMissing -CandidateDir $userScripts
       } else {
         Write-Host "pip install via py failed (exit code $LASTEXITCODE)."
       }
@@ -70,6 +112,9 @@ function Ensure-UvOnPath() {
       & python -m pip install --user uv
       if ($LASTEXITCODE -eq 0) {
         Write-Host "pip install via python succeeded."
+        Update-ProcessPathFromRegistry
+        $userScripts = Get-UserScriptsDir -PythonExe "python"
+        Add-ToProcessPathIfMissing -CandidateDir $userScripts
       } else {
         Write-Host "pip install via python failed (exit code $LASTEXITCODE)."
       }

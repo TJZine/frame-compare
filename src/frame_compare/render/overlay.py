@@ -20,8 +20,12 @@ def apply_overlay(
     Legacy-style behavior:
     - NONE: no-op (return image unchanged; numpy inputs are converted to PIL without drawing).
     - MINIMAL: label-only block at (10, 10).
-    - STANDARD/DIAGNOSTIC: two blocks at (10, 10) and (10, 140).
+    - STANDARD/DIAGNOSTIC: frame-info block at (10, 10) and overlay-text block below it.
     - No background box; outlined white text (black stroke) via multiline_text.
+
+    Return value:
+    - NONE preserves the input image mode (true no-op).
+    - Other modes return an RGBA image.
     """
     # Runtime check for None, even if types say no
     if image is None:  # type: ignore
@@ -45,16 +49,13 @@ def apply_overlay(
     # 2. Load font
     font_size = config.font_size
     if config.font_path:
-        try:
-            font = ImageFont.truetype(str(config.font_path), size=font_size)
-        except OSError:
-            raise
+        font = ImageFont.truetype(str(config.font_path), size=font_size)
     else:
         font = ImageFont.load_default(size=font_size)
 
     # 3. Draw legacy-style overlay blocks (outlined text, no background box).
     label_pos = (10, 10)
-    details_pos = (10, 140)
+    block_gap_px = 10
 
     fill = (255, 255, 255, 255)
     stroke_fill = (0, 0, 0, 255)
@@ -75,15 +76,28 @@ def apply_overlay(
         picture_type=config.picture_type,
         selection_label=config.selection_label,
     )
+    details_y = 140
     if frame_info_lines:
+        frame_text = "\n".join(frame_info_lines)
         draw.multiline_text(
             label_pos,
-            "\n".join(frame_info_lines),
+            frame_text,
             font=font,
             fill=fill,
             stroke_width=stroke_width,
             stroke_fill=stroke_fill,
         )
+        try:
+            bbox = draw.multiline_textbbox(
+                label_pos,
+                frame_text,
+                font=font,
+                stroke_width=stroke_width,
+            )
+        except Exception:
+            bbox = None
+        if bbox is not None:
+            details_y = int(bbox[3]) + block_gap_px
     if config.mode == OverlayMode.MINIMAL:
         return canvas
 
@@ -100,6 +114,7 @@ def apply_overlay(
         diagnostic_lines=diagnostic_lines,
     )
 
+    details_pos = (10, details_y)
     draw.multiline_text(
         details_pos,
         "\n".join(overlay_lines),

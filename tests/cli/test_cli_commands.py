@@ -128,6 +128,33 @@ def test_run_help_shows_all_options():
         assert opt in output
 
 
+def test_run_respects_no_color_env_var_presence_even_if_empty(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeConsole:
+        def __init__(self, *, stderr: bool, no_color: bool) -> None:
+            captured["stderr"] = stderr
+            captured["no_color"] = no_color
+
+        def print(self, *_args: object, **_kwargs: object) -> None:
+            return
+
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        return RunResult(success=True, screenshot_dir=Path("screenshots").resolve())
+
+    monkeypatch.setattr("frame_compare.cli_entry.Console", FakeConsole)
+    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace(
+        ["--quiet"],
+        color=False,
+        terminal_width=200,
+        env={"NO_COLOR": "", "TERM": "dumb"},
+    )
+    assert result.exit_code == 0
+    assert captured["no_color"] is True
+
+
 def test_run_exits_zero_when_runner_returns_success(monkeypatch: MonkeyPatch) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         return RunResult(success=True)

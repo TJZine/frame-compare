@@ -135,7 +135,7 @@ def run(
     from frame_compare.orchestration.coordinator import RunRequest
 
     resolved_root, config_path = _resolve_root_and_config(root, config)
-    effective_no_color = no_color or bool(os.environ.get("NO_COLOR"))
+    effective_no_color = no_color or ("NO_COLOR" in os.environ)
     console = Console(
         stderr=False,
         no_color=effective_no_color,

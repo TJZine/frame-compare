@@ -21,9 +21,16 @@
 
 ## Troubleshooting: uv install failure
 
-If `uv` is still not available on `PATH`, run one of these commands and then re-run `.\install.cmd`:
+If `uv` is still not available on `PATH`, choose **one** option below (do not run both), then re-run `.\install.cmd`:
+
+**Option A (winget):**
 
 ```powershell
 winget install --id astral-sh.uv -e --source winget
+```
+
+**Option B (pip --user):**
+
+```powershell
 py -m pip install --user uv
 ```
