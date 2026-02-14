@@ -16,6 +16,7 @@ def test_overlay_mode_values() -> None:
         OverlayMode.MINIMAL,
         OverlayMode.STANDARD,
         OverlayMode.DIAGNOSTIC,
+        OverlayMode.NONE,
     }
 
 
@@ -23,6 +24,7 @@ def test_overlay_mode_string_values() -> None:
     assert OverlayMode.MINIMAL.value == "minimal"
     assert OverlayMode.STANDARD.value == "standard"
     assert OverlayMode.DIAGNOSTIC.value == "diagnostic"
+    assert OverlayMode.NONE.value == "none"
 
 
 def test_encoder_settings_defaults() -> None:

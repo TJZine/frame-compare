@@ -105,9 +105,38 @@ jobs:
           $bundle = "dist/frame-compare-portable-win-x64"
           $zip = "dist/frame-compare-portable-win-x64.zip"
           if (Test-Path $zip) { Remove-Item -Force $zip }
-          Compress-Archive -Path "$bundle/*" -DestinationPath $zip
+          Compress-Archive -Path $bundle -DestinationPath $zip
           $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
           Set-Content -Path "$zip.sha256" -Value "$hash  $(Split-Path -Leaf $zip)" -Encoding ASCII
+
+      - name: Verify zip layout
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zipPath = (Resolve-Path "dist/frame-compare-portable-win-x64.zip").Path
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+          try {
+            $entries = @($zip.Entries | ForEach-Object { $_.FullName })
+          } finally {
+            $zip.Dispose()
+          }
+
+          $required = @(
+            "frame-compare-portable-win-x64/install.cmd",
+            "frame-compare-portable-win-x64/install.ps1",
+            "frame-compare-portable-win-x64/frame-compare.ps1",
+            "frame-compare-portable-win-x64/shim/frame-compare.cmd"
+          )
+          foreach ($r in $required) {
+            if ($entries -notcontains $r) {
+              throw "Missing zip entry: $r"
+            }
+          }
+          foreach ($e in $entries) {
+            if (-not $e.StartsWith("frame-compare-portable-win-x64/")) {
+              throw "Non-folder-contained entry: $e"
+            }
+          }
 
       - name: Upload artifact (PR / manual)
         if: github.event_name != 'release'

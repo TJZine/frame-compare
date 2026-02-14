@@ -20,6 +20,7 @@ os.environ.setdefault("TERMINAL_WIDTH", "200")
 import typer
 from rich.console import Console
 
+from frame_compare.cli_output import print_at_a_glance, print_result_summary
 from frame_compare.config import (
     ConfigSchema,
     Visibility,
@@ -134,6 +135,11 @@ def run(
     from frame_compare.orchestration.coordinator import RunRequest
 
     resolved_root, config_path = _resolve_root_and_config(root, config)
+    effective_no_color = no_color or ("NO_COLOR" in os.environ)
+    console = Console(
+        stderr=False,
+        no_color=effective_no_color,
+    )
     log_level = "WARNING" if quiet else ("DEBUG" if verbose else "INFO")
     log_format = "json" if json_output else "console"
     configure_logging(level=log_level, format=log_format)
@@ -195,17 +201,28 @@ def run(
             skip_dovi=skip_dovi,
             force_interactive_alignment=force_interactive_alignment,
             json_output=json_output,
-            no_color=no_color,
+            no_color=effective_no_color,
             quiet=quiet,
             verbose=verbose,
         )
+
+        if not json_output and not quiet:
+            print_at_a_glance(
+                console,
+                request=request,
+                config=_load_effective_config(),
+                root=resolved_root,
+                config_path=config_path,
+            )
 
         result = runner.run(request, dependencies=None)
     except FrameCompareError as error:
         if json_output:
             typer.echo(json.dumps(format_error_json(error), sort_keys=True, separators=(",", ":")))
             raise typer.Exit(code=int(get_exit_code(error))) from error
-        raise typer.Exit(code=handle_error(error, no_color=no_color, verbose=verbose)) from error
+        raise typer.Exit(
+            code=handle_error(error, no_color=effective_no_color, verbose=verbose)
+        ) from error
     except KeyboardInterrupt:
         raise typer.Exit(code=int(ExitCode.INTERRUPTED)) from None
 
@@ -222,9 +239,14 @@ def run(
             "errors": list(result.errors),
         }
         typer.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+        if not result.success:
+            raise typer.Exit(code=int(ExitCode.PROCESSING_ERROR))
+        return
 
     if not result.success:
         raise typer.Exit(code=int(ExitCode.PROCESSING_ERROR))
+
+    print_result_summary(console, result=result, quiet=quiet)
 
     if result.report_path is not None and not json_output and not quiet and sys.stdout.isatty():
         try:

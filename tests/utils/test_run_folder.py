@@ -3,14 +3,14 @@
 from pathlib import Path
 from unittest.mock import patch
 
-from frame_compare.services.types import ParsedMetadata, TmdbMetadata
-from frame_compare.utils.run_folder import (
+from frame_compare.services.run_folder import (
     _combine_filename_stems,
     derive_run_folder_name,
     find_common_metadata,
     get_existing_run_folders,
     sanitize_folder_name,
 )
+from frame_compare.services.types import ParsedMetadata, TmdbMetadata
 
 # ─── sanitize_folder_name Tests ───────────────────────────────────────────────
 
@@ -98,7 +98,7 @@ def test_find_common_metadata_preserves_non_empty_title_when_first_is_empty(monk
         ]
     )
     monkeypatch.setattr(
-        "frame_compare.utils.run_folder.parse_filename",
+        "frame_compare.services.run_folder.parse_filename",
         lambda _filename: next(responses),
     )
     title, year = find_common_metadata(["a.mkv", "b.mkv", "c.mkv"])
@@ -193,7 +193,9 @@ def test_derive_run_folder_name_collision_respects_max_length() -> None:
         year=0,
         media_type="movie",
     )
-    with patch("frame_compare.utils.run_folder._format_timestamp", return_value="20260208-020749"):
+    with patch(
+        "frame_compare.services.run_folder._format_timestamp", return_value="20260208-020749"
+    ):
         result = derive_run_folder_name(
             filenames=["source.mkv"],
             tmdb_metadata=tmdb,
@@ -214,7 +216,9 @@ def test_derive_run_folder_name_no_collision() -> None:
 
 
 def test_derive_run_folder_name_empty_filenames() -> None:
-    with patch("frame_compare.utils.run_folder._format_timestamp", return_value="20260208-020749"):
+    with patch(
+        "frame_compare.services.run_folder._format_timestamp", return_value="20260208-020749"
+    ):
         result = derive_run_folder_name(filenames=[])
     assert result == "unnamed_run_20260208-020749"
 

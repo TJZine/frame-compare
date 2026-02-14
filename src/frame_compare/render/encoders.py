@@ -22,7 +22,7 @@ from frame_compare.errors import (
     SourceLoadError,
 )
 from frame_compare.render.overlay import apply_overlay
-from frame_compare.render.types import EncoderSettings, Renderer, RenderRequest
+from frame_compare.render.types import EncoderSettings, OverlayMode, Renderer, RenderRequest
 from frame_compare.utils.subproc import run_subprocess
 
 if TYPE_CHECKING:
@@ -99,8 +99,8 @@ def render_frame(request: RenderRequest, renderer: Renderer = "auto") -> Path:
             )
 
             # Overlay Integration for FFmpeg
-            if request.overlay is not None:
-                _apply_overlay_to_file(request.output_path, request.overlay)
+            if request.overlay is not None and request.overlay.mode != OverlayMode.NONE:
+                apply_overlay_to_file(request.output_path, request.overlay)
 
     except (FrameExtractionError, RenderError, SourceLoadError):
         raise
@@ -319,3 +319,18 @@ def _apply_overlay_to_file(path: Path, config: OverlayConfig) -> None:
 
     except Exception as e:
         raise OverlayError(f"Failed to apply overlay to {path}: {e}") from e
+
+
+def apply_overlay_to_file(path: Path, overlay: OverlayConfig) -> None:
+    """Apply an overlay to an existing image file in place.
+
+    Args:
+        path: Path to an existing image file (PNG expected).
+        overlay: Overlay rendering configuration.
+
+    Raises:
+        OverlayError: If the overlay cannot be applied.
+    """
+    if overlay.mode == OverlayMode.NONE:
+        return
+    _apply_overlay_to_file(path, overlay)
