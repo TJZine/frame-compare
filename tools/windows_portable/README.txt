@@ -18,6 +18,13 @@ NOTES:
       %LOCALAPPDATA%\Programs\FrameCompare\state\config.toml
   - To override config for a run, pass:
       frame-compare run --config <path-to-config.toml>
+  - Bundle defaults include empty:
+      .\config\
+      .\comparison_videos\
+    Put config at .\config\config.toml and source clips under .\comparison_videos\.
+  - For source builds (`tools\windows_portable\install-from-source.cmd`), use:
+      .\dist\frame-compare-portable-win-x64\
+    as the bundle root (not the repository root).
   - If the bundle is moved, run `install.cmd` again from the new location.
 
 QUICK START:

@@ -154,3 +154,39 @@ def test_windows_portable_installer_initializes_state_config_toml() -> None:
         in installer
     )
     assert "[paths]" in installer
+
+
+def test_windows_portable_build_creates_default_workspace_directories() -> None:
+    build_script = (_repo_root() / "tools" / "windows_portable" / "build_portable.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert '$bundleConfigDir = Join-Path $OutDir "config"' in build_script
+    assert '$bundleInputDir = Join-Path $OutDir "comparison_videos"' in build_script
+    assert "Ensure-Directory -Path $bundleConfigDir" in build_script
+    assert "Ensure-Directory -Path $bundleInputDir" in build_script
+
+
+def test_windows_portable_docs_describe_default_workspace_directories() -> None:
+    readme = (_repo_root() / "README.md").read_text(encoding="utf-8")
+    portable_readme = (_repo_root() / "tools" / "windows_portable" / "README.txt").read_text(
+        encoding="utf-8"
+    )
+    assert "config/ and comparison_videos/ directories in the bundle root" in readme
+    assert "comparison_videos" in portable_readme
+
+
+def test_windows_portable_workflow_verifies_workspace_directories() -> None:
+    workflow = (_repo_root() / ".github" / "workflows" / "windows-portable.yml").read_text(
+        encoding="utf-8"
+    )
+    assert '$bundleConfigDir = Join-Path $bundle "config"' in workflow
+    assert '$bundleInputDir = Join-Path $bundle "comparison_videos"' in workflow
+    assert "Test-Path -LiteralPath $bundleConfigDir -PathType Container" in workflow
+    assert "Test-Path -LiteralPath $bundleInputDir -PathType Container" in workflow
+    assert 'throw "Missing default workspace directory in bundle:' in workflow
+
+
+def test_windows_portable_docs_disambiguate_source_bundle_root() -> None:
+    readme = (_repo_root() / "README.md").read_text(encoding="utf-8")
+    assert "dist/frame-compare-portable-win-x64" in readme
+    assert "not the repository root" in readme

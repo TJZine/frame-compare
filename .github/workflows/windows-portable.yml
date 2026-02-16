@@ -41,6 +41,20 @@ jobs:
             -OutDir $out `
             -CacheDir ".portable_cache"
 
+      - name: Verify bundle workspace directories
+        shell: pwsh
+        run: |
+          $bundle = (Resolve-Path "dist/frame-compare-portable-win-x64").Path
+          $bundleConfigDir = Join-Path $bundle "config"
+          $bundleInputDir = Join-Path $bundle "comparison_videos"
+
+          if (!(Test-Path -LiteralPath $bundleConfigDir -PathType Container)) {
+            throw "Missing default workspace directory in bundle: $bundleConfigDir"
+          }
+          if (!(Test-Path -LiteralPath $bundleInputDir -PathType Container)) {
+            throw "Missing default workspace directory in bundle: $bundleInputDir"
+          }
+
       - name: "Smoke: doctor --json"
         shell: pwsh
         run: |
@@ -136,6 +150,26 @@ jobs:
             if (-not $e.StartsWith("frame-compare-portable-win-x64/")) {
               throw "Non-folder-contained entry: $e"
             }
+          }
+
+      - name: Verify extracted zip workspace directories
+        shell: pwsh
+        run: |
+          $zip = (Resolve-Path "dist/frame-compare-portable-win-x64.zip").Path
+          $extractRoot = Join-Path "dist" "zip_extract_check"
+          if (Test-Path -LiteralPath $extractRoot) {
+            Remove-Item -Recurse -Force -LiteralPath $extractRoot
+          }
+          Expand-Archive -LiteralPath $zip -DestinationPath $extractRoot -Force
+
+          $bundle = Join-Path $extractRoot "frame-compare-portable-win-x64"
+          $bundleConfigDir = Join-Path $bundle "config"
+          $bundleInputDir = Join-Path $bundle "comparison_videos"
+          if (!(Test-Path -LiteralPath $bundleConfigDir -PathType Container)) {
+            throw "Missing default workspace directory in extracted zip: $bundleConfigDir"
+          }
+          if (!(Test-Path -LiteralPath $bundleInputDir -PathType Container)) {
+            throw "Missing default workspace directory in extracted zip: $bundleInputDir"
           }
 
       - name: Upload artifact (PR / manual)
