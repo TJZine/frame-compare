@@ -421,6 +421,8 @@ def test_wizard_writer_writes_to_explicit_config_path(tmp_path: Path) -> None:
     text = destination.read_text(encoding="utf-8")
     assert "[paths]" in text
     assert 'input_dir = "comparison_videos"' in text
+    data = tomllib.loads(text)
+    assert "api_key" not in data.get("tmdb", {})
 
 
 def test_wizard_cancel_exits_130_and_writes_nothing(monkeypatch: MonkeyPatch) -> None:
@@ -433,6 +435,24 @@ def test_wizard_cancel_exits_130_and_writes_nothing(monkeypatch: MonkeyPatch) ->
         result = runner.invoke(app, ["wizard"])
         assert result.exit_code == 130
         assert not (Path("config") / "config.toml").exists()
+
+
+def test_wizard_root_validates_relative_input_dir_against_root() -> None:
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        (root / "inputs").mkdir(parents=True)
+
+        result = runner.invoke(
+            app,
+            ["wizard", "--root", str(root)],
+            input="inputs\ny\nprivate\ny\nabc123\n",
+        )
+        assert result.exit_code == 0
+
+        config_path = root / "config" / "config.toml"
+        assert config_path.exists()
+        data = tomllib.loads(config_path.read_text(encoding="utf-8"))
+        assert data["paths"]["input_dir"] == "inputs"
 
 
 def test_doctor_json_conforms_to_schema_shape(monkeypatch: MonkeyPatch) -> None:
