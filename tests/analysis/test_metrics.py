@@ -166,6 +166,15 @@ def test_calculate_motion_output_length_equals_num_frames():
     assert len(motion) == 10
 
 
+def test_calculate_motion_calls_progress_reporter(mock_reporter):
+    frames = [np.zeros((10, 10), dtype=np.uint8) for _ in range(5)]
+    clip = MockClip(frames)
+    _calculate_motion(clip, reporter=mock_reporter)  # type: ignore
+    mock_reporter.start_phase.assert_called_once_with("Calculating motion", 4)
+    assert mock_reporter.advance.call_count == 4
+    mock_reporter.complete_phase.assert_called_once()
+
+
 def test_calculate_luminance_empty_clip_raises_error():
     clip = MockClip([])
     with pytest.raises(MetricsCalculationError, match="Empty clip"):
@@ -248,7 +257,7 @@ def test_calculate_metrics_computes_on_cache_miss(
     assert len(result.luminance) == 10
     assert len(result.motion) == 10
     mock_lum.assert_called_once_with(mock_clip, None)
-    mock_mot.assert_called_once_with(mock_clip)
+    mock_mot.assert_called_once_with(mock_clip, reporter=None)
     mock_save.assert_called_once()
 
 

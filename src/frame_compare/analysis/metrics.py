@@ -44,6 +44,10 @@ class ProgressReporter(Protocol):
         """Advance progress."""
         ...
 
+    def set_description(self, desc: str) -> None:
+        """Set the description for the current phase."""
+        ...
+
     def complete_phase(self) -> None:
         """Complete the current phase."""
         ...
@@ -93,6 +97,9 @@ def calculate_metrics(
 
     cache_result = load_cached_metrics(cache_dir, fingerprint, clips)
     if cache_result.success and cache_result.metrics:
+        if reporter:
+            reporter.set_description("Cache hit")
+            reporter.advance(2)
         return cache_result.metrics
 
     # Cache miss or invalid - compute metrics for reference clip only
@@ -112,7 +119,9 @@ def calculate_metrics(
     total_frames = int(clip.num_frames)  # type: ignore[arg-type]
     with perf_span("analysis.calculate_metrics", frames=total_frames):
         luminance = _calculate_luminance(clip, reporter)
-        motion = _calculate_motion(clip)
+        if reporter:
+            reporter.advance(1)
+        motion = _calculate_motion(clip, reporter=reporter)
 
     metrics = FrameMetrics(
         luminance=luminance,
@@ -126,7 +135,17 @@ def calculate_metrics(
         ),
     )
 
-    save_metrics_cache(metrics, cache_dir)
+    if reporter:
+        reporter.start_phase("Saving analysis cache", total=1)
+    try:
+        save_metrics_cache(metrics, cache_dir)
+    finally:
+        if reporter:
+            reporter.advance(1)
+            reporter.complete_phase()
+
+    if reporter:
+        reporter.advance(1)
     return metrics
 
 
@@ -185,7 +204,10 @@ def _calculate_luminance(
         return luminance
 
 
-def _calculate_motion(clip: vs.VideoNode) -> list[float]:
+def _calculate_motion(
+    clip: vs.VideoNode,
+    reporter: ProgressReporter | None = None,
+) -> list[float]:
     """
     Calculate frame-to-frame difference scores.
 
@@ -214,6 +236,9 @@ def _calculate_motion(clip: vs.VideoNode) -> list[float]:
         )
         norm_factor = float(width * height) * max_value  # type: ignore
 
+        if reporter:
+            reporter.start_phase("Calculating motion", max(1, total_frames - 1))
+
         motion = [0.0] * clip.num_frames  # type: ignore
         try:
             for n in range(1, clip.num_frames):  # type: ignore
@@ -223,8 +248,13 @@ def _calculate_motion(clip: vs.VideoNode) -> list[float]:
                 curr_arr = np.asarray(curr_frame[0]).astype(np.float32)  # type: ignore
                 diff = np.abs(curr_arr - prev_arr)
                 motion[n] = float(np.sum(diff)) / norm_factor  # type: ignore
+                if reporter:
+                    reporter.advance(1)
         except Exception as e:
             # Re-raise with FC-4002 context
             raise MetricsCalculationError(f"Frame access failed during motion analysis: {e}") from e
+        finally:
+            if reporter:
+                reporter.complete_phase()
 
         return motion  # type: ignore
