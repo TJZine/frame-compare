@@ -462,6 +462,13 @@ function Main() {
   Write-LauncherFiles -BundleRoot $OutDir
   Copy-InstallerFiles -BundleRoot $OutDir
 
+  # Create default workspace directories in the bundle so users can drop in
+  # config and sources without passing explicit paths.
+  $bundleConfigDir = Join-Path $OutDir "config"
+  $bundleInputDir = Join-Path $OutDir "comparison_videos"
+  Ensure-Directory -Path $bundleConfigDir
+  Ensure-Directory -Path $bundleInputDir
+
   # Licenses
   Copy-Licenses -BundleRoot $OutDir -Artifacts $artifacts
 

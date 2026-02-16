@@ -267,10 +267,10 @@ def wizard(
 ) -> None:
     """Interactive configuration wizard."""
     defaults = get_default_config()
-    _, config_path = _resolve_root_and_config(root, config)
+    resolved_root, config_path = _resolve_root_and_config(root, config)
 
     try:
-        input_dir = _prompt_input_dir(defaults.paths.input_dir)
+        input_dir = _prompt_input_dir(defaults.paths.input_dir, base_dir=resolved_root)
         auto_upload = typer.confirm(
             "Enable slow.pics auto-upload?",
             default=defaults.slowpics.auto_upload,
@@ -381,13 +381,13 @@ def handle_error(error: Exception, *, no_color: bool, verbose: bool) -> int:
     return int(ExitCode.GENERAL_ERROR)
 
 
-def _prompt_input_dir(default: str) -> str:
+def _prompt_input_dir(default: str, *, base_dir: Path) -> str:
     """Prompt for input directory and validate existence."""
     while True:
         value = typer.prompt("Input directory", default=default)
         path = Path(value)
         if not path.is_absolute():
-            path = Path(".") / path
+            path = base_dir / path
         if path.exists() and path.is_dir():
             return value
         typer.echo("Input directory does not exist or is not a directory.")
@@ -491,7 +491,7 @@ def _prepare_toml_payload(data: dict[str, object]) -> dict[str, object]:
     tmdb_section_raw = data.get("tmdb")
     tmdb_section: dict[str, object] = {}
     if isinstance(tmdb_section_raw, dict):
-        tmdb_section = cast(dict[str, object], tmdb_section_raw)
+        tmdb_section = dict(cast(dict[str, object], tmdb_section_raw))
     api_key = tmdb_section.get("api_key")
     if api_key is None or api_key == "":
         tmdb_section.pop("api_key", None)

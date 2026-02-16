@@ -72,7 +72,7 @@ function Test-ArgsContainConfigFlag([string[]]$ArgsValues) {
   return $false
 }
 
-function Insert-ArgsAtIndex([string[]]$ArgsValues, [int]$Index, [string[]]$InsertValues) {
+function Add-ArgsAtIndex([string[]]$ArgsValues, [int]$Index, [string[]]$InsertValues) {
   if ($Index -le 0) {
     return @($InsertValues + $ArgsValues)
   }
@@ -127,7 +127,7 @@ if (Test-Path -LiteralPath $stateConfigToml) {
   if (-not $hasExplicitConfigFlag) {
     $injectIndex = Get-ConfigInjectionIndex -ArgsValues $forwardArgs
     if ($injectIndex -ge 0) {
-      $forwardArgs = Insert-ArgsAtIndex -ArgsValues $forwardArgs -Index $injectIndex -InsertValues @("--config", $stateConfigToml)
+      $forwardArgs = Add-ArgsAtIndex -ArgsValues $forwardArgs -Index $injectIndex -InsertValues @("--config", $stateConfigToml)
     }
   }
 }
