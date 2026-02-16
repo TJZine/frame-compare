@@ -36,8 +36,7 @@ Frame Compare handles local video files and optional network operations. Key sec
 
 For implementation details, see:
 
-- [Quality Standards](docs/OPUS_REBUILD_FRAME_COMPARE/08-quality-standards.md)
-- [Error Codes](docs/OPUS_REBUILD_FRAME_COMPARE/05-implementation/error-codes.md)
+- [Decisions](docs/DECISIONS.md)
 
 ## Security-Related Error Codes
 
