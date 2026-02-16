@@ -405,8 +405,22 @@ def test_wizard_writes_valid_config_toml():
     _run_wizard_and_assert_config()
 
 
-def test_wizard_stub():
-    _run_wizard_and_assert_config()
+def test_wizard_writer_writes_to_explicit_config_path(tmp_path: Path) -> None:
+    from frame_compare.cli_entry import _write_wizard_config_payload
+
+    destination = tmp_path / "custom" / "config.toml"
+    payload = {
+        "paths": {"input_dir": "comparison_videos"},
+        "slowpics": {"auto_upload": False},
+        "tmdb": {"api_key": None},
+    }
+
+    _write_wizard_config_payload(destination, payload)
+
+    assert destination.exists()
+    text = destination.read_text(encoding="utf-8")
+    assert "[paths]" in text
+    assert 'input_dir = "comparison_videos"' in text
 
 
 def test_wizard_cancel_exits_130_and_writes_nothing(monkeypatch: MonkeyPatch) -> None:

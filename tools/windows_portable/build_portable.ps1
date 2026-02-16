@@ -205,8 +205,19 @@ if (Test-Path -LiteralPath $ffmpegRoot) {
 }
 $env:PATH = (($pathEntries -join ";") + ";" + $env:PATH)
 
-& $python -m frame_compare.cli_entry @args
-exit $LASTEXITCODE
+$exitCode = 0
+Push-Location $bundleRoot
+try {
+  & $python -m frame_compare.cli_entry @args
+  if ($null -eq $LASTEXITCODE) {
+    $exitCode = 1
+  } else {
+    $exitCode = $LASTEXITCODE
+  }
+} finally {
+  Pop-Location
+}
+exit $exitCode
 '@
 
   $cmd = @'

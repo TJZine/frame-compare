@@ -261,9 +261,13 @@ def run(
 
 
 @app.command()
-def wizard() -> None:
+def wizard(
+    root: Path = typer.Option(".", "--root", "-r"),
+    config: Path | None = typer.Option(None, "--config", "-c"),
+) -> None:
     """Interactive configuration wizard."""
     defaults = get_default_config()
+    _, config_path = _resolve_root_and_config(root, config)
 
     try:
         input_dir = _prompt_input_dir(defaults.paths.input_dir)
@@ -293,7 +297,7 @@ def wizard() -> None:
         tmdb_api_key=tmdb_value,
     )
     _validate_config(config_data)
-    _write_config(config_data)
+    _write_wizard_config_payload(config_path, config_data)
 
 
 @app.command()
@@ -428,11 +432,9 @@ def _validate_config(data: dict[str, object]) -> None:
     ConfigSchema.model_validate(data)
 
 
-def _write_config(data: dict[str, object]) -> None:
-    """Write config/config.toml with minimal sections."""
-    config_dir = Path("config")
-    config_dir.mkdir(parents=True, exist_ok=True)
-    config_path = config_dir / "config.toml"
+def _write_wizard_config_payload(config_path: Path, data: dict[str, object]) -> None:
+    """Write wizard config payload to the provided destination."""
+    config_path.parent.mkdir(parents=True, exist_ok=True)
     toml_text = tomli_w.dumps(_prepare_toml_payload(data))
     config_path.write_text(toml_text, encoding="utf-8")
 

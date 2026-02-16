@@ -105,3 +105,52 @@ def test_windows_portable_workflow_verifies_zip_required_entries() -> None:
     ]
     for entry in required:
         assert entry in wf
+
+
+def test_windows_portable_shim_runs_bundle_launcher_from_bundle_root() -> None:
+    shim = (_repo_root() / "tools" / "windows_portable" / "shim" / "frame-compare.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert "Push-Location $bundlePath" in shim
+    assert "Pop-Location" in shim
+
+
+def test_windows_portable_bundle_launcher_sets_cwd_to_bundle_root() -> None:
+    build_script = (_repo_root() / "tools" / "windows_portable" / "build_portable.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert "Push-Location $bundleRoot" in build_script
+    assert "Pop-Location" in build_script
+
+
+def test_windows_portable_shim_injects_state_config_when_missing_explicit_config() -> None:
+    shim = (_repo_root() / "tools" / "windows_portable" / "shim" / "frame-compare.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert '$stateDir = Join-Path $installRoot "state"' in shim
+    assert '$stateConfigToml = Join-Path $stateDir "config.toml"' in shim
+    assert "Test-ArgsContainConfigFlag" in shim
+    assert "Get-ConfigInjectionIndex" in shim
+    assert "Insert-ArgsAtIndex" in shim
+    assert '$command -eq "run" -or $command -eq "wizard"' in shim
+    assert '$command -eq "preset"' in shim
+    assert '$subcommand -eq "list" -or $subcommand -eq "apply" -or $subcommand -eq "save"' in shim
+    assert '$arg.StartsWith("--config=")' in shim
+    assert '$arg.StartsWith("-c")' in shim
+    assert "& $bundleLauncher @forwardArgs" in shim
+    assert "@extraArgs @args" not in shim
+
+
+def test_windows_portable_installer_initializes_state_config_toml() -> None:
+    installer = (_repo_root() / "tools" / "windows_portable" / "install.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert '$portableConfigToml = Join-Path $stateDir "config.toml"' in installer
+    assert (
+        '$bundleConfigToml = Join-Path (Join-Path $bundleRoot "config") "config.toml"' in installer
+    )
+    assert (
+        "Copy-Item -LiteralPath $bundleConfigToml -Destination $portableConfigToml -Force"
+        in installer
+    )
+    assert "[paths]" in installer

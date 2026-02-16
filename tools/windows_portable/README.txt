@@ -14,6 +14,10 @@ NOTES:
       %LOCALAPPDATA%\Programs\FrameCompare\bin
   - Shim state/config is stored under:
       %LOCALAPPDATA%\Programs\FrameCompare\state\config.json
+  - Default portable config is stored at:
+      %LOCALAPPDATA%\Programs\FrameCompare\state\config.toml
+  - To override config for a run, pass:
+      frame-compare run --config <path-to-config.toml>
   - If the bundle is moved, run `install.cmd` again from the new location.
 
 QUICK START:

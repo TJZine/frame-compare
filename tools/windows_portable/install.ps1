@@ -49,6 +49,23 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText($configTmpPath, $config, $utf8NoBom)
 Move-Item -LiteralPath $configTmpPath -Destination $configPath -Force
 
+$portableConfigToml = Join-Path $stateDir "config.toml"
+if (!(Test-Path -LiteralPath $portableConfigToml)) {
+  $bundleConfigToml = Join-Path (Join-Path $bundleRoot "config") "config.toml"
+  if (Test-Path -LiteralPath $bundleConfigToml) {
+    Copy-Item -LiteralPath $bundleConfigToml -Destination $portableConfigToml -Force
+  } else {
+    $defaultPortableConfigToml = @"
+[paths]
+input_dir = "comparison_videos"
+screenshots_dir = "screenshots"
+generated_dir = "generated"
+config_dir = "config"
+"@
+    [System.IO.File]::WriteAllText($portableConfigToml, $defaultPortableConfigToml, $utf8NoBom)
+  }
+}
+
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 $entries = @()
 if (-not [string]::IsNullOrWhiteSpace($userPath)) {
