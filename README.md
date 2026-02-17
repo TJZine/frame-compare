@@ -174,7 +174,7 @@ docker run --rm -it \
 
 > [!NOTE]
 > The wizard writes `config/config.toml` (gitignored) and may include secrets (e.g., a TMDB API key). Prefer setting
-> TMDB keys via `FRAME_COMPARE_TMDB__API_KEY` (or legacy `TMDB_API_KEY`) instead of committing them to disk.
+> TMDB keys via `FRAME_COMPARE_TMDB__API_KEY` instead of committing them to disk.
 
 ### 4. Run the pipeline
 

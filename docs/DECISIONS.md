@@ -653,3 +653,30 @@ Implemented deterministic precedence in `align_clips`: manual override > cached 
 - Improves error semantics for operator-facing diagnostics.
 - Preserves dependency-category exit mapping (`FC-2xxx` → exit code 3) without changing CLI behavior.
 - Keeps auto-render fallback behavior unchanged (it still re-raises the original VS load failure cause).
+
+## 2026-02-17 — Remove Legacy Env Alias Support
+
+### Scope
+
+**Context:** Configuration loading and doctor diagnostics accepted both canonical and legacy env-var names for TMDB and logging.
+
+**Decision:** Remove support for legacy aliases and require canonical nested env vars only.
+
+**Breaking Changes:**
+
+- Removed `TMDB_API_KEY` alias support; canonical key is `FRAME_COMPARE_TMDB__API_KEY`.
+- Removed `FRAME_COMPARE_LOG_LEVEL` alias support; canonical key is `FRAME_COMPARE_LOGGING__LEVEL`.
+
+**Migration Examples:**
+
+- Before (no longer supported):
+  - `export TMDB_API_KEY="..."`
+  - `export FRAME_COMPARE_LOG_LEVEL="DEBUG"`
+- After (required):
+  - `export FRAME_COMPARE_TMDB__API_KEY="..."`
+  - `export FRAME_COMPARE_LOGGING__LEVEL="DEBUG"`
+
+**Rationale:**
+
+- Reduces hidden configuration paths and precedence ambiguity.
+- Makes runtime/doctor behavior explicit and easier to maintain.

@@ -176,15 +176,15 @@ def test_precedence_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_tmdb_api_key_legacy_alias_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test legacy TMDB_API_KEY alias."""
+    """Legacy TMDB_API_KEY alias is no longer supported."""
     monkeypatch.setenv("TMDB_API_KEY", "legacy_key")
 
     config = load_config()
-    assert config.tmdb.api_key == "legacy_key"
+    assert config.tmdb.api_key is None
 
 
 def test_tmdb_api_key_nested_var_takes_precedence(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test nested TMDB var takes precedence over legacy alias."""
+    """Canonical TMDB nested var is used when both vars are set."""
     monkeypatch.setenv("TMDB_API_KEY", "legacy_key")
     monkeypatch.setenv("FRAME_COMPARE_TMDB__API_KEY", "new_key")
 
@@ -193,8 +193,8 @@ def test_tmdb_api_key_nested_var_takes_precedence(monkeypatch: pytest.MonkeyPatc
 
 
 def test_log_level_legacy_alias_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test legacy FRAME_COMPARE_LOG_LEVEL alias."""
+    """Legacy FRAME_COMPARE_LOG_LEVEL alias is no longer supported."""
     monkeypatch.setenv("FRAME_COMPARE_LOG_LEVEL", "DEBUG")
 
     config = load_config()
-    assert config.logging.level == "DEBUG"
+    assert config.logging.level == "INFO"

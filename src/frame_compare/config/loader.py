@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import tomllib
 from pathlib import Path
 from typing import Any, cast
@@ -15,7 +14,6 @@ from pydantic_settings import (
 )
 
 from frame_compare.config.schema import ConfigSchema
-from frame_compare.config.utils import deep_merge
 from frame_compare.errors import (
     ConfigNotFoundError,
     ConfigParseError,
@@ -32,8 +30,7 @@ def load_config(
     if config_path is not None and not config_path.exists():
         raise ConfigNotFoundError(config_path)
 
-    alias_overrides = _resolve_env_aliases()
-    merged_overrides = deep_merge(alias_overrides, overrides or {})
+    merged_overrides = overrides or {}
 
     settings_cls: type[ConfigSchema]
     if config_path is None:
@@ -85,10 +82,8 @@ def load_config_from_env() -> ConfigSchema:
         ) -> tuple[PydanticBaseSettingsSource, ...]:
             return (init_settings, env_settings)
 
-    alias_overrides = _resolve_env_aliases()
-
     try:
-        return _EnvOnlySchema(**cast(Any, alias_overrides))
+        return _EnvOnlySchema()
     except ValidationError as exc:
         normalized = normalize_pydantic_errors(cast(Any, exc.errors()))
         raise ConfigValidationError(normalized) from exc
@@ -116,17 +111,3 @@ def get_default_config() -> ConfigSchema:
             return (init_settings,)
 
     return _DefaultsOnlySchema()
-
-
-def _resolve_env_aliases() -> dict[str, object]:
-    """Resolve special env var aliases to nested override dict."""
-    overrides: dict[str, object] = {}
-
-    # Legacy alias is applied only when canonical nested env var is unset.
-    if "TMDB_API_KEY" in os.environ and "FRAME_COMPARE_TMDB__API_KEY" not in os.environ:
-        overrides["tmdb"] = {"api_key": os.environ["TMDB_API_KEY"]}
-
-    if "FRAME_COMPARE_LOG_LEVEL" in os.environ and "FRAME_COMPARE_LOGGING__LEVEL" not in os.environ:
-        overrides["logging"] = {"level": os.environ["FRAME_COMPARE_LOG_LEVEL"]}
-
-    return overrides
