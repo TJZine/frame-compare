@@ -14,19 +14,13 @@ from frame_compare.vs.env import (
 )
 
 
-def make_mock_core(
-    *, lsmas: bool = False, libplacebo: bool = False, bestsource: bool = False, ffms2: bool = False
-) -> SimpleNamespace:
+def make_mock_core(*, lsmas: bool = False, libplacebo: bool = False) -> SimpleNamespace:
     """Create a mock VS core with specified plugins."""
     core = SimpleNamespace()
     if lsmas:
         core.lsmas = SimpleNamespace(LWLibavSource=lambda: None)
     if libplacebo:
         core.placebo = SimpleNamespace(Tonemap=lambda: None)
-    if bestsource:
-        core.bs = SimpleNamespace(VideoSource=lambda: None)
-    if ffms2:
-        core.ffms2 = SimpleNamespace(Source=lambda: None)
     return core
 
 
@@ -62,19 +56,19 @@ def test_ensure_vs_environment_core_failure_raises_vs_error(mocker) -> None:
 
 def test_detect_plugins_all_present() -> None:
     """Verify all plugins detected when present."""
-    core = make_mock_core(lsmas=True, libplacebo=True, bestsource=True, ffms2=True)
+    core = make_mock_core(lsmas=True, libplacebo=True)
     # Cast to MagicMock/Core for typing if needed, or rely on duck typing
     plugins = detect_plugins(core)  # type: ignore
+    assert set(plugins.keys()) == {"lsmas", "libplacebo"}
     assert plugins["lsmas"] is True
     assert plugins["libplacebo"] is True
-    assert plugins["bestsource"] is True
-    assert plugins["ffms2"] is True
 
 
 def test_detect_plugins_none_present() -> None:
     """Verify no plugins detected when missing."""
     core = make_mock_core()
     plugins = detect_plugins(core)  # type: ignore
+    assert set(plugins.keys()) == {"lsmas", "libplacebo"}
     assert all(not v for v in plugins.values())
 
 
