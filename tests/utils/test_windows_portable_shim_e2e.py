@@ -184,6 +184,27 @@ def test_windows_portable_shim_non_numeric_schema_version_returns_15(
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("schema_version", [0, 2])
+def test_windows_portable_shim_unsupported_numeric_schema_version_returns_15(
+    tmp_path: Path, repo_root: Path, schema_version: int
+) -> None:
+    exe = _powershell_exe()
+    if exe is None:
+        pytest.skip("pwsh/powershell not available")
+
+    _, shim_path, state_dir, bundle_dir = _setup_install_layout(
+        tmp_path=tmp_path, repo_root=repo_root
+    )
+    _write_valid_config_json(
+        state_dir=state_dir, bundle_dir=bundle_dir, schema_version=schema_version
+    )
+    proc = _run_shim(
+        exe=exe, shim_path=shim_path, env=os.environ.copy(), args=["preset", "apply", "boost"]
+    )
+    assert proc.returncode == 15, f"stdout:\n{proc.stdout}\n\nstderr:\n{proc.stderr}"
+
+
+@pytest.mark.integration
 def test_windows_portable_shim_missing_bundle_launcher_returns_14(
     tmp_path: Path, repo_root: Path
 ) -> None:
@@ -239,5 +260,6 @@ def test_windows_portable_shim_missing_state_config_toml_skips_injection(
 
     forwarded = args_file.read_text(encoding="utf-8-sig").rstrip("\r\n")
     parts = forwarded.split("|")
+    assert len(parts) == 3
     assert parts[:3] == ["preset", "apply", "boost"]
     assert "--config" not in parts
