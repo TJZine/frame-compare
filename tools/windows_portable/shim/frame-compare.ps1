@@ -6,7 +6,9 @@ function Test-ArgsContainConfigFlag([string[]]$ArgsValues) {
     if ($arg.StartsWith("--config=")) {
       return $true
     }
-    if ($arg.StartsWith("-c") -and $arg.Length -gt 2) {
+    # Match compact "-cVALUE" only when it looks path-like to avoid false positives
+    # such as "-cache". We accept typical path markers: "=", ".", "/", "\", ":".
+    if ($arg -match '^-c(=|.*[\\/:.].*)') {
       return $true
     }
   }

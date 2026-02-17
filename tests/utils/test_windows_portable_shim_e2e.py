@@ -107,11 +107,11 @@ def test_windows_portable_shim_preset_apply_injection_e2e(tmp_path: Path, repo_r
     )
     assert proc2.returncode == 0, f"stdout:\n{proc2.stdout}\n\nstderr:\n{proc2.stderr}"
 
-    forwarded = args_file.read_text(encoding="utf-8-sig")
+    forwarded = args_file.read_text(encoding="utf-8-sig").rstrip("\r\n")
     parts = forwarded.split("|")
     assert parts[:2] == ["preset", "apply"]
     assert parts[2:4] == ["--config", str(state_config_toml)]
     assert parts[4] == "boost"
 
-    recorded_cwd = cwd_file.read_text(encoding="utf-8").strip()
+    recorded_cwd = cwd_file.read_text(encoding="utf-8-sig").strip()
     assert Path(recorded_cwd).resolve() == bundle_dir.resolve()

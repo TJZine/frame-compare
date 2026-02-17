@@ -134,7 +134,7 @@ def test_windows_portable_shim_injects_state_config_when_missing_explicit_config
     assert re.search(r"\$command\s*-eq\s*\"preset\"", shim)
     assert re.search(r"\$subcommand\s*-eq\s*\"list\".*\"apply\".*\"save\"", shim, re.DOTALL)
     assert re.search(r"\$arg\.StartsWith\(\"--config=\"\)", shim)
-    assert re.search(r"\$arg\.StartsWith\(\"-c\"\)", shim)
+    assert re.search(r"\$arg\s*-match\s*'\^-c", shim)
     assert re.search(r"&\s*\$bundleLauncher\s+@forwardArgs", shim)
     assert "@extraArgs @args" not in shim
 
