@@ -3,7 +3,6 @@ import logging
 import sys
 from collections.abc import Iterable
 from contextvars import ContextVar
-from pathlib import Path
 from types import TracebackType
 from typing import Any, BinaryIO, TextIO
 from uuid import uuid4
@@ -175,7 +174,6 @@ def get_run_id() -> str:
 def configure_logging(
     level: str = "INFO",
     log_format: str = "console",
-    log_file: Path | None = None,
     **kwargs: object,
 ) -> None:
     """Configure structlog with either console or JSON output.
@@ -185,7 +183,6 @@ def configure_logging(
                Case-insensitive. Unknown values fall back to INFO.
         log_format: "console" for human-readable, "json" for structured.
                Unknown values fall back to "console".
-        log_file: Optional file path for logging output (not yet implemented).
 
     Notes:
         - Level filtering uses stdlib logging level constants (10, 20, 30, 40, 50).
@@ -202,7 +199,6 @@ def configure_logging(
     if kwargs:
         unexpected = ", ".join(sorted(kwargs.keys()))
         raise TypeError(f"Unexpected keyword arguments: {unexpected}")
-    # TODO: File handler implementation deferred
     # Map level string to logging constant; fallback to INFO for unknown
     level_num = getattr(logging, level.upper(), logging.INFO)
 
