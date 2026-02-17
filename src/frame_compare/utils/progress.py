@@ -153,3 +153,4 @@ class LogProgressReporter:
         self._name = ""
         self._total = 0
         self._current = 0
+        self._last_logged_milestone = 0

@@ -422,7 +422,7 @@ def test_wizard_writer_writes_to_explicit_config_path(tmp_path: Path) -> None:
     assert "[paths]" in text
     assert 'input_dir = "comparison_videos"' in text
     data = tomllib.loads(text)
-    assert "api_key" not in data.get("tmdb", {})
+    assert "tmdb" not in data
 
 
 def test_wizard_cancel_exits_130_and_writes_nothing(monkeypatch: MonkeyPatch) -> None:
@@ -490,6 +490,7 @@ def test_prepare_toml_payload_copies_paths_and_slowpics_sections() -> None:
     assert prepared["slowpics"] == slowpics
     assert prepared["paths"] is not paths
     assert prepared["slowpics"] is not slowpics
+    assert "tmdb" not in prepared
 
 
 def test_doctor_json_conforms_to_schema_shape(monkeypatch: MonkeyPatch) -> None:

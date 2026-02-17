@@ -503,11 +503,13 @@ def _prepare_toml_payload(data: dict[str, object]) -> dict[str, object]:
         paths_section = dict(cast(dict[str, object], paths_raw))
     if isinstance(slowpics_raw, dict):
         slowpics_section = dict(cast(dict[str, object], slowpics_raw))
-    return {
+    payload: dict[str, object] = {
         "paths": paths_section,
         "slowpics": slowpics_section,
-        "tmdb": tmdb_section,
     }
+    if tmdb_section:
+        payload["tmdb"] = tmdb_section
+    return payload
 
 
 def _print_doctor_report(report: DoctorReport) -> None:

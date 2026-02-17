@@ -9,21 +9,17 @@ from pathlib import Path
 import pytest
 
 
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
-
-
 def _powershell_exe() -> str | None:
     return shutil.which("pwsh") or shutil.which("powershell")
 
 
 @pytest.mark.integration
-def test_windows_portable_shim_preset_apply_injection_e2e(tmp_path: Path) -> None:
+def test_windows_portable_shim_preset_apply_injection_e2e(tmp_path: Path, repo_root: Path) -> None:
     exe = _powershell_exe()
     if exe is None:
         pytest.skip("pwsh/powershell not available")
 
-    repo_shim = _repo_root() / "tools" / "windows_portable" / "shim" / "frame-compare.ps1"
+    repo_shim = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare.ps1"
     install_root = tmp_path / "install"
     shim_dir = install_root / "shim"
     state_dir = install_root / "state"
@@ -92,7 +88,7 @@ def test_windows_portable_shim_preset_apply_injection_e2e(tmp_path: Path) -> Non
     env = os.environ.copy()
     env["FC_TEST_ARGS_FILE"] = str(args_file)
     env["FC_TEST_CWD_FILE"] = str(cwd_file)
-    subprocess.run(
+    proc2 = subprocess.run(
         [
             exe,
             "-NoProfile",
@@ -105,12 +101,13 @@ def test_windows_portable_shim_preset_apply_injection_e2e(tmp_path: Path) -> Non
             "boost",
         ],
         env=env,
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
     )
+    assert proc2.returncode == 0, f"stdout:\n{proc2.stdout}\n\nstderr:\n{proc2.stderr}"
 
-    forwarded = args_file.read_text(encoding="utf-8")
+    forwarded = args_file.read_text(encoding="utf-8-sig")
     parts = forwarded.split("|")
     assert parts[:2] == ["preset", "apply"]
     assert parts[2:4] == ["--config", str(state_config_toml)]

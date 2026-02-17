@@ -35,6 +35,10 @@ def test_log_progress_reporter_smoke():
     reporter.advance(25)  # 50%
     reporter.set_description("desc")
     reporter.complete_phase()
+    assert reporter._name == ""  # noqa: SLF001
+    assert reporter._total == 0  # noqa: SLF001
+    assert reporter._current == 0  # noqa: SLF001
+    assert reporter._last_logged_milestone == 0  # noqa: SLF001
 
 
 def test_log_progress_reporter_supports_nested_phases():
