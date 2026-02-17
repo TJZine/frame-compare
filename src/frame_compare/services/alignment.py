@@ -74,6 +74,13 @@ def _maybe_launch_vspreview(
         return
 
     available = is_vspreview_available()
+    if config.use_vspreview and not available and not config.force_interactive:
+        log.warning(
+            "vspreview_unavailable",
+            hint="Install vspreview (and a Qt backend) to enable interactive alignment verification",
+            use_vspreview=config.use_vspreview,
+            force_interactive=config.force_interactive,
+        )
     if config.force_interactive and not available:
         raise AudioAlignmentError("Interactive alignment requested but VSPreview is not available.")
 

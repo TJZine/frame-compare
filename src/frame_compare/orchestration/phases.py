@@ -10,9 +10,13 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import Enum
 
+import structlog
+
 from frame_compare.config import ConfigSchema
 from frame_compare.orchestration.context import RunContext
 from frame_compare.utils.progress import ProgressReporter
+
+log = structlog.get_logger()
 
 
 class PhaseStatus(str, Enum):
@@ -63,11 +67,17 @@ async def execute_phases(
         reporter.start_phase(phase.name, total=phase.progress_total)
         try:
             await phase.execute(context)
-        except Exception:
+        except Exception as exc:
             if phase.skip_condition is None:
                 phase.status = PhaseStatus.FAILED
                 raise
             phase.status = PhaseStatus.WARNED
+            log.warning(
+                "phase_warned",
+                phase=phase.name,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
         else:
             phase.status = PhaseStatus.COMPLETED
             reporter.advance(1)
