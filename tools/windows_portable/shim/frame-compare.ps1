@@ -95,7 +95,13 @@ function Invoke-FrameCompareShim([object[]]$ArgsValues) {
   $schemaVersion = 0
   $schemaProp = $config.PSObject.Properties["schema_version"]
   if ($null -ne $schemaProp -and $null -ne $schemaProp.Value) {
-    $schemaVersion = [int]$schemaProp.Value
+    $rawSchemaVersion = [string]$schemaProp.Value
+    $parsedSchemaVersion = 0
+    if (-not [int]::TryParse($rawSchemaVersion, [ref]$parsedSchemaVersion)) {
+      Write-Error -ErrorAction Continue "Unsupported config schema version '$rawSchemaVersion' in $configPath`nRun install.cmd from the portable bundle."
+      return 15
+    }
+    $schemaVersion = $parsedSchemaVersion
   }
   if ($schemaVersion -ne 1) {
     Write-Error -ErrorAction Continue "Unsupported config schema version '$schemaVersion' in $configPath`nRun install.cmd from the portable bundle."
