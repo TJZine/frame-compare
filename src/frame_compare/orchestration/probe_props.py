@@ -2,10 +2,6 @@
 
 Pure, deterministic functions for selecting tonemap-related prop keys
 and extracting TOML-safe preserved props from VapourSynth frame-props mappings.
-
-SSOT: docs/OPUS_REBUILD_FRAME_COMPARE/05-implementation/module-specs/orchestration-module.md
-  - Section 3.5.2: Tonemap Prop Key Selection Helpers
-  - Section 3.5.3: Preserved Frame Props Extraction Helpers
 """
 
 from collections.abc import Mapping

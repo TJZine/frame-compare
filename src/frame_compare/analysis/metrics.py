@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 import numpy as np
+import structlog
 
 from frame_compare.analysis.cache_io import (
     CACHE_VERSION,
@@ -19,6 +20,7 @@ from frame_compare.errors import (
     SourceLoadError,
 )
 from frame_compare.utils.perf import perf_span
+from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.vs.loader import DefaultVSLoader
 
 if TYPE_CHECKING:
@@ -29,24 +31,14 @@ if TYPE_CHECKING:
     from frame_compare.config.schema import AnalysisConfig
 
 
-class ProgressReporter(Protocol):
-    """Protocol for reporting analysis progress.
+log = structlog.get_logger()
 
-    Note: Method signatures intentionally match the canonical orchestration
-    progress protocol in `frame_compare.utils.progress`.
-    """
-
-    def start_phase(self, name: str, total: int) -> None:
-        """Start a new progress phase."""
-        ...
-
-    def advance(self, amount: int = 1) -> None:
-        """Advance progress."""
-        ...
-
-    def complete_phase(self) -> None:
-        """Complete the current phase."""
-        ...
+# Orchestration "analyze" phase progress total.
+# Contract:
+# - `execute_phases()` advances the phase by 1 on successful completion.
+# - `calculate_metrics()` advances the remaining steps (total - 1) on cache hit,
+#   and advances twice (after luminance + after cache-save attempt) on cache miss.
+ANALYZE_PROGRESS_TOTAL = 3
 
 
 def calculate_metrics(
@@ -93,6 +85,9 @@ def calculate_metrics(
 
     cache_result = load_cached_metrics(cache_dir, fingerprint, clips)
     if cache_result.success and cache_result.metrics:
+        if reporter:
+            reporter.set_description("Cache hit")
+            reporter.advance(ANALYZE_PROGRESS_TOTAL - 1)
         return cache_result.metrics
 
     # Cache miss or invalid - compute metrics for reference clip only
@@ -112,7 +107,9 @@ def calculate_metrics(
     total_frames = int(clip.num_frames)  # type: ignore[arg-type]
     with perf_span("analysis.calculate_metrics", frames=total_frames):
         luminance = _calculate_luminance(clip, reporter)
-        motion = _calculate_motion(clip)
+        if reporter:
+            reporter.advance(1)
+        motion = _calculate_motion(clip, reporter=reporter)
 
     metrics = FrameMetrics(
         luminance=luminance,
@@ -126,7 +123,21 @@ def calculate_metrics(
         ),
     )
 
-    save_metrics_cache(metrics, cache_dir)
+    if reporter:
+        reporter.start_phase("Saving analysis cache", total=1)
+    try:
+        save_metrics_cache(metrics, cache_dir)
+    except Exception as e:
+        if reporter:
+            reporter.set_description(f"Cache save failed: {e}")
+        log.warning("analysis_cache_save_failed", error=str(e), exc_info=True)
+    finally:
+        if reporter:
+            reporter.advance(1)
+            reporter.complete_phase()
+
+    if reporter:
+        reporter.advance(1)
     return metrics
 
 
@@ -185,12 +196,16 @@ def _calculate_luminance(
         return luminance
 
 
-def _calculate_motion(clip: vs.VideoNode) -> list[float]:
+def _calculate_motion(
+    clip: vs.VideoNode,
+    reporter: ProgressReporter | None = None,
+) -> list[float]:
     """
     Calculate frame-to-frame difference scores.
 
     Args:
         clip: VapourSynth clip to analyze
+        reporter: Optional progress reporter to receive progress updates during motion calculation.
 
     Returns:
         List of per-frame motion scores (0.0-1.0)
@@ -214,6 +229,9 @@ def _calculate_motion(clip: vs.VideoNode) -> list[float]:
         )
         norm_factor = float(width * height) * max_value  # type: ignore
 
+        if reporter:
+            reporter.start_phase("Calculating motion", max(1, total_frames - 1))
+
         motion = [0.0] * clip.num_frames  # type: ignore
         try:
             for n in range(1, clip.num_frames):  # type: ignore
@@ -223,8 +241,13 @@ def _calculate_motion(clip: vs.VideoNode) -> list[float]:
                 curr_arr = np.asarray(curr_frame[0]).astype(np.float32)  # type: ignore
                 diff = np.abs(curr_arr - prev_arr)
                 motion[n] = float(np.sum(diff)) / norm_factor  # type: ignore
+                if reporter:
+                    reporter.advance(1)
         except Exception as e:
             # Re-raise with FC-4002 context
             raise MetricsCalculationError(f"Frame access failed during motion analysis: {e}") from e
+        finally:
+            if reporter:
+                reporter.complete_phase()
 
         return motion  # type: ignore

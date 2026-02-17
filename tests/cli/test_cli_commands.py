@@ -405,8 +405,24 @@ def test_wizard_writes_valid_config_toml():
     _run_wizard_and_assert_config()
 
 
-def test_wizard_stub():
-    _run_wizard_and_assert_config()
+def test_wizard_writer_writes_to_explicit_config_path(tmp_path: Path) -> None:
+    from frame_compare.cli_entry import _write_wizard_config_payload
+
+    destination = tmp_path / "custom" / "config.toml"
+    payload = {
+        "paths": {"input_dir": "comparison_videos"},
+        "slowpics": {"auto_upload": False},
+        "tmdb": {"api_key": None},
+    }
+
+    _write_wizard_config_payload(destination, payload)
+
+    assert destination.exists()
+    text = destination.read_text(encoding="utf-8")
+    assert "[paths]" in text
+    assert 'input_dir = "comparison_videos"' in text
+    data = tomllib.loads(text)
+    assert "tmdb" not in data
 
 
 def test_wizard_cancel_exits_130_and_writes_nothing(monkeypatch: MonkeyPatch) -> None:
@@ -419,6 +435,62 @@ def test_wizard_cancel_exits_130_and_writes_nothing(monkeypatch: MonkeyPatch) ->
         result = runner.invoke(app, ["wizard"])
         assert result.exit_code == 130
         assert not (Path("config") / "config.toml").exists()
+
+
+def test_wizard_root_validates_relative_input_dir_against_root() -> None:
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        (root / "inputs").mkdir(parents=True)
+
+        result = runner.invoke(
+            app,
+            ["wizard", "--root", str(root)],
+            input="inputs\ny\nprivate\ny\nabc123\n",
+        )
+        assert result.exit_code == 0
+
+        config_path = root / "config" / "config.toml"
+        assert config_path.exists()
+        data = tomllib.loads(config_path.read_text(encoding="utf-8"))
+        assert data["paths"]["input_dir"] == "inputs"
+
+
+def test_wizard_root_reprompts_on_missing_input_dir() -> None:
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        root.mkdir()
+        (root / "inputs").mkdir(parents=True)
+
+        result = runner.invoke(
+            app,
+            ["wizard", "--root", str(root)],
+            input="missing\ninputs\ny\nprivate\ny\nabc123\n",
+        )
+        assert result.exit_code == 0
+
+        config_path = root / "config" / "config.toml"
+        assert config_path.exists()
+        data = tomllib.loads(config_path.read_text(encoding="utf-8"))
+        assert data["paths"]["input_dir"] == "inputs"
+
+
+def test_prepare_toml_payload_copies_paths_and_slowpics_sections() -> None:
+    from frame_compare.cli_entry import _prepare_toml_payload
+
+    paths = {"input_dir": "inputs"}
+    slowpics = {"auto_upload": True}
+    payload: dict[str, object] = {
+        "paths": paths,
+        "slowpics": slowpics,
+        "tmdb": {"api_key": ""},
+    }
+
+    prepared = _prepare_toml_payload(payload)
+    assert prepared["paths"] == paths
+    assert prepared["slowpics"] == slowpics
+    assert prepared["paths"] is not paths
+    assert prepared["slowpics"] is not slowpics
+    assert "tmdb" not in prepared
 
 
 def test_doctor_json_conforms_to_schema_shape(monkeypatch: MonkeyPatch) -> None:

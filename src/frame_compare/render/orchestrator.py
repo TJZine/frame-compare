@@ -5,7 +5,7 @@ import subprocess
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
+from typing import TYPE_CHECKING, cast
 
 import structlog
 
@@ -18,6 +18,7 @@ from frame_compare.render.types import (
     Renderer,
     RenderRequest,
 )
+from frame_compare.utils.progress_protocol import ProgressReporter
 
 if TYPE_CHECKING:
     import vapoursynth as vs  # type: ignore[import-untyped]
@@ -26,27 +27,6 @@ if TYPE_CHECKING:
     from frame_compare.vs.types import SourceInfo, TonemapSettings
 
 log = structlog.get_logger()
-
-
-@runtime_checkable
-class ProgressReporter(Protocol):
-    """Protocol for reporting rendering progress."""
-
-    def start_phase(self, name: str, total: int) -> None:
-        """Start a new progress phase."""
-        ...
-
-    def set_description(self, desc: str) -> None:
-        """Set current task description."""
-        ...
-
-    def advance(self, amount: int = 1) -> None:
-        """Advance progress by amount units."""
-        ...
-
-    def complete_phase(self) -> None:
-        """Finish current progress phase."""
-        ...
 
 
 # ─── Tonemap Helper Functions (SSOT: render-module.md §1.4) ────────────────────

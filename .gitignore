@@ -15,7 +15,8 @@ CODEX.md
 report/
 screens/
 screenshots/
-docs/plans/
+CODE_REVIEW_CONTEXT.md
+
 
 # FC2 app-server runtime (ephemeral)
 .agent-workflow/.autopilot.lock

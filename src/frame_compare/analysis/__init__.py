@@ -24,10 +24,11 @@ from frame_compare.analysis.types import (
 )
 
 if typing.TYPE_CHECKING:
-    from frame_compare.analysis.metrics import calculate_metrics
+    from frame_compare.analysis.metrics import ANALYZE_PROGRESS_TOTAL, calculate_metrics
     from frame_compare.analysis.selection import select_frames
 
 __all__ = [
+    "ANALYZE_PROGRESS_TOTAL",
     "CacheLoadResult",
     "ClipIdentity",
     "FrameMetrics",
@@ -46,6 +47,11 @@ __all__ = [
 
 
 def __getattr__(name: str):
+    if name == "ANALYZE_PROGRESS_TOTAL":
+        from frame_compare.analysis.metrics import ANALYZE_PROGRESS_TOTAL
+
+        return ANALYZE_PROGRESS_TOTAL
+
     if name == "calculate_metrics":
         from frame_compare.analysis.metrics import calculate_metrics
 

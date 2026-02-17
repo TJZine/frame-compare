@@ -37,6 +37,7 @@ class Phase:
     name: str
     execute: PhaseExecute
     skip_condition: PhaseSkipCondition | None = None
+    progress_total: int = 1
     status: PhaseStatus = PhaseStatus.PENDING
 
 
@@ -53,13 +54,13 @@ async def execute_phases(
     for phase in phases:
         if phase.skip_condition is not None and phase.skip_condition(context.config):
             phase.status = PhaseStatus.SKIPPED
-            reporter.start_phase(phase.name, total=1)
+            reporter.start_phase(phase.name, total=phase.progress_total)
             reporter.set_description("Skipped")
             reporter.complete_phase()
             continue
 
         phase.status = PhaseStatus.RUNNING
-        reporter.start_phase(phase.name, total=1)
+        reporter.start_phase(phase.name, total=phase.progress_total)
         try:
             await phase.execute(context)
         except Exception:

@@ -205,8 +205,19 @@ if (Test-Path -LiteralPath $ffmpegRoot) {
 }
 $env:PATH = (($pathEntries -join ";") + ";" + $env:PATH)
 
-& $python -m frame_compare.cli_entry @args
-exit $LASTEXITCODE
+$exitCode = 0
+Push-Location $bundleRoot
+try {
+  & $python -m frame_compare.cli_entry @args
+  if ($null -eq $LASTEXITCODE) {
+    $exitCode = 1
+  } else {
+    $exitCode = $LASTEXITCODE
+  }
+} finally {
+  Pop-Location
+}
+exit $exitCode
 '@
 
   $cmd = @'
@@ -450,6 +461,13 @@ function Main() {
   # Launchers
   Write-LauncherFiles -BundleRoot $OutDir
   Copy-InstallerFiles -BundleRoot $OutDir
+
+  # Create default workspace directories in the bundle so users can drop in
+  # config and sources without passing explicit paths.
+  $bundleConfigDir = Join-Path $OutDir "config"
+  $bundleInputDir = Join-Path $OutDir "comparison_videos"
+  Ensure-Directory -Path $bundleConfigDir
+  Ensure-Directory -Path $bundleInputDir
 
   # Licenses
   Copy-Licenses -BundleRoot $OutDir -Artifacts $artifacts

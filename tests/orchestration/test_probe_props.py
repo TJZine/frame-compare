@@ -1,9 +1,4 @@
-"""Tests for probe prop key selection and preservation helpers.
-
-SSOT: docs/OPUS_REBUILD_FRAME_COMPARE/05-implementation/module-specs/orchestration-module.md
-  - Section 3.5.2: Tonemap Prop Key Selection Helpers
-  - Section 3.5.3: Preserved Frame Props Extraction Helpers
-"""
+"""Tests for probe prop key selection and preservation helpers."""
 
 from frame_compare.orchestration.probe_props import (
     compute_preserved_frame_props,

@@ -261,12 +261,16 @@ def run(
 
 
 @app.command()
-def wizard() -> None:
+def wizard(
+    root: Path = typer.Option(".", "--root", "-r"),
+    config: Path | None = typer.Option(None, "--config", "-c"),
+) -> None:
     """Interactive configuration wizard."""
     defaults = get_default_config()
+    resolved_root, config_path = _resolve_root_and_config(root, config)
 
     try:
-        input_dir = _prompt_input_dir(defaults.paths.input_dir)
+        input_dir = _prompt_input_dir(defaults.paths.input_dir, base_dir=resolved_root)
         auto_upload = typer.confirm(
             "Enable slow.pics auto-upload?",
             default=defaults.slowpics.auto_upload,
@@ -293,7 +297,7 @@ def wizard() -> None:
         tmdb_api_key=tmdb_value,
     )
     _validate_config(config_data)
-    _write_config(config_data)
+    _write_wizard_config_payload(config_path, config_data)
 
 
 @app.command()
@@ -377,13 +381,13 @@ def handle_error(error: Exception, *, no_color: bool, verbose: bool) -> int:
     return int(ExitCode.GENERAL_ERROR)
 
 
-def _prompt_input_dir(default: str) -> str:
+def _prompt_input_dir(default: str, *, base_dir: Path) -> str:
     """Prompt for input directory and validate existence."""
     while True:
         value = typer.prompt("Input directory", default=default)
         path = Path(value)
         if not path.is_absolute():
-            path = Path(".") / path
+            path = base_dir / path
         if path.exists() and path.is_dir():
             return value
         typer.echo("Input directory does not exist or is not a directory.")
@@ -428,11 +432,9 @@ def _validate_config(data: dict[str, object]) -> None:
     ConfigSchema.model_validate(data)
 
 
-def _write_config(data: dict[str, object]) -> None:
-    """Write config/config.toml with minimal sections."""
-    config_dir = Path("config")
-    config_dir.mkdir(parents=True, exist_ok=True)
-    config_path = config_dir / "config.toml"
+def _write_wizard_config_payload(config_path: Path, data: dict[str, object]) -> None:
+    """Write wizard config payload to the provided destination."""
+    config_path.parent.mkdir(parents=True, exist_ok=True)
     toml_text = tomli_w.dumps(_prepare_toml_payload(data))
     config_path.write_text(toml_text, encoding="utf-8")
 
@@ -489,7 +491,7 @@ def _prepare_toml_payload(data: dict[str, object]) -> dict[str, object]:
     tmdb_section_raw = data.get("tmdb")
     tmdb_section: dict[str, object] = {}
     if isinstance(tmdb_section_raw, dict):
-        tmdb_section = cast(dict[str, object], tmdb_section_raw)
+        tmdb_section = dict(cast(dict[str, object], tmdb_section_raw))
     api_key = tmdb_section.get("api_key")
     if api_key is None or api_key == "":
         tmdb_section.pop("api_key", None)
@@ -498,14 +500,16 @@ def _prepare_toml_payload(data: dict[str, object]) -> dict[str, object]:
     paths_raw = data.get("paths")
     slowpics_raw = data.get("slowpics")
     if isinstance(paths_raw, dict):
-        paths_section = cast(dict[str, object], paths_raw)
+        paths_section = dict(cast(dict[str, object], paths_raw))
     if isinstance(slowpics_raw, dict):
-        slowpics_section = cast(dict[str, object], slowpics_raw)
-    return {
+        slowpics_section = dict(cast(dict[str, object], slowpics_raw))
+    payload: dict[str, object] = {
         "paths": paths_section,
         "slowpics": slowpics_section,
-        "tmdb": tmdb_section,
     }
+    if tmdb_section:
+        payload["tmdb"] = tmdb_section
+    return payload
 
 
 def _print_doctor_report(report: DoctorReport) -> None:

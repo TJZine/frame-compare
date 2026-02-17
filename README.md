@@ -68,11 +68,9 @@ Frame Compare is designed so the same inputs produce the same outputs:
 
 ### 📋 Contract-First Documentation
 
-Canonical truth is stored as YAML/JSON contracts, with generated derived views:
+Canonical truth is stored as YAML/JSON contracts:
 
-- **Canonical**: [`docs/OPUS_REBUILD_FRAME_COMPARE/contracts/`](docs/OPUS_REBUILD_FRAME_COMPARE/contracts/)
 - **Derived views generator**: [`scripts/generate_contract_views.py`](scripts/generate_contract_views.py)
-- **Readiness gate SSOT**: [`docs/OPUS_REBUILD_FRAME_COMPARE/contracts/readiness_gates.json`](docs/OPUS_REBUILD_FRAME_COMPARE/contracts/readiness_gates.json)
 
 ### 🔄 Workflow Discipline (Optional)
 
@@ -80,8 +78,6 @@ This repo includes an operator-minimal, file-based run system for phased impleme
 
 - Run artifacts live under `.agent-workflow/runs/<RUN_ID>/`
 - Each artifact ends with a `## NEXT AGENT PROMPT (COPY/PASTE)` block for deterministic handoffs
-
-See: [`docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md`](docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md)
 
 ---
 
@@ -137,6 +133,10 @@ From cloned repo:
 # 2) From the repo root:
 .\install.cmd
 ```
+
+Source installs and portable bundle builds create empty config/ and comparison_videos/ directories in the bundle root. Put an existing `config.toml` at `config/config.toml`, and drop input clips under `comparison_videos/` if you want to use defaults without passing explicit `--config` or `--input` paths.
+
+When using `.\tools\windows_portable\install-from-source.cmd`, the bundle root is `dist/frame-compare-portable-win-x64` (not the repository root). Put your config at `dist/frame-compare-portable-win-x64/config/config.toml` and videos under `dist/frame-compare-portable-win-x64/comparison_videos/`.
 
 Advanced/legacy:
 
@@ -232,16 +232,8 @@ bash scripts/reverify_ai_readiness.sh --update-roadmap
 
 | Document | Description |
 | -------- | ----------- |
-| [Executive Summary](docs/OPUS_REBUILD_FRAME_COMPARE/00-executive-summary.md) | Project overview and objectives |
-| [Agent Workflow](docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow.md) | Multi-agent workflow (SSOT) |
-| [Quick Reference](docs/OPUS_REBUILD_FRAME_COMPARE/11-agent-workflow-quick.md) | Workflow quick reference |
-| [Master Checklist](docs/OPUS_REBUILD_FRAME_COMPARE/10-agent-master-checklist.md) | Implementation tracking |
 | [API Reference](docs/api.md) | Generated API documentation |
-
-### 📜 Contracts (SSOT)
-
-- [`docs/OPUS_REBUILD_FRAME_COMPARE/contracts/README.md`](docs/OPUS_REBUILD_FRAME_COMPARE/contracts/README.md)
-- [`docs/OPUS_REBUILD_FRAME_COMPARE/contracts/readiness_gates.json`](docs/OPUS_REBUILD_FRAME_COMPARE/contracts/readiness_gates.json)
+| [Decisions](docs/DECISIONS.md) | Architectural and design decisions |
 
 ---
 

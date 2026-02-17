@@ -67,6 +67,12 @@ if _vs_needs_mock():
 
 
 @pytest.fixture
+def repo_root() -> Path:
+    """Return repository root directory."""
+    return Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture
 def sample_video_path() -> Path:
     """Path to test video file (placeholder)."""
     return Path(__file__).parent / "fixtures" / "sample.mkv"

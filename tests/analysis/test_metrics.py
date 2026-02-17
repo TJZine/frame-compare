@@ -166,6 +166,15 @@ def test_calculate_motion_output_length_equals_num_frames():
     assert len(motion) == 10
 
 
+def test_calculate_motion_calls_progress_reporter(mock_reporter):
+    frames = [np.zeros((10, 10), dtype=np.uint8) for _ in range(5)]
+    clip = MockClip(frames)
+    _calculate_motion(clip, reporter=mock_reporter)  # type: ignore
+    mock_reporter.start_phase.assert_called_once_with("Calculating motion", 4)
+    assert mock_reporter.advance.call_count == 4
+    mock_reporter.complete_phase.assert_called_once()
+
+
 def test_calculate_luminance_empty_clip_raises_error():
     clip = MockClip([])
     with pytest.raises(MetricsCalculationError, match="Empty clip"):
@@ -248,8 +257,49 @@ def test_calculate_metrics_computes_on_cache_miss(
     assert len(result.luminance) == 10
     assert len(result.motion) == 10
     mock_lum.assert_called_once_with(mock_clip, None)
-    mock_mot.assert_called_once_with(mock_clip)
+    mock_mot.assert_called_once_with(mock_clip, reporter=None)
     mock_save.assert_called_once()
+
+
+@patch("frame_compare.analysis.metrics.save_metrics_cache")
+@patch("frame_compare.analysis.metrics._calculate_motion")
+@patch("frame_compare.analysis.metrics._calculate_luminance")
+@patch("frame_compare.analysis.metrics.DefaultVSLoader")
+@patch("frame_compare.analysis.metrics.load_cached_metrics")
+@patch("frame_compare.analysis.metrics.compute_cache_key")
+def test_calculate_metrics_cache_save_is_best_effort(
+    mock_key, mock_load, mock_loader_cls, mock_lum, mock_mot, mock_save, tmp_path
+):
+    mock_key.return_value = "fp"
+    mock_load.return_value = MagicMock(success=False)
+
+    mock_loader = mock_loader_cls.return_value
+    mock_source = MagicMock()
+    mock_loader.load.return_value = mock_source
+    mock_clip = MagicMock()
+    mock_clip.num_frames = 10
+    mock_source.clip = mock_clip
+    mock_source.fps = Fraction(24, 1)
+
+    mock_lum.return_value = [0.1] * 10
+    mock_motion_vals = [0.0] + [0.1] * 9
+    mock_mot.return_value = mock_motion_vals
+    mock_save.side_effect = RuntimeError("disk full")
+
+    video_paths = [tmp_path / "v1.mkv"]
+    video_paths[0].write_bytes(b"")
+    config = AnalysisConfig()
+    reporter = MagicMock(spec=ProgressReporter)
+
+    result = calculate_metrics(video_paths, config, tmp_path, reporter=reporter)
+
+    assert isinstance(result, FrameMetrics)
+    assert len(result.luminance) == 10
+    assert len(result.motion) == 10
+    reporter.start_phase.assert_called_with("Saving analysis cache", total=1)
+    reporter.complete_phase.assert_called_once()
+    assert reporter.advance.call_count >= 1
+    reporter.set_description.assert_called()
 
 
 @patch("frame_compare.analysis.metrics._calculate_motion")

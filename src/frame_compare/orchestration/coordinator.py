@@ -14,7 +14,13 @@ from typing import Protocol, cast
 
 import httpx
 
-from frame_compare.analysis import cache_io, calculate_metrics, create_frame_plan, select_frames
+from frame_compare.analysis import (
+    ANALYZE_PROGRESS_TOTAL,
+    cache_io,
+    calculate_metrics,
+    create_frame_plan,
+    select_frames,
+)
 from frame_compare.analysis.types import SelectionBreakdown
 from frame_compare.config import ConfigSchema, apply_cli_overrides
 from frame_compare.errors import (
@@ -549,6 +555,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             executor: Callable[[RunContext], None | Awaitable[None]],
             *,
             warn_only: bool = False,
+            progress_total: int = 1,
         ) -> Phase:
             async def _execute(ctx: RunContext) -> None:
                 start = deps.clock()
@@ -565,7 +572,12 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
                     end = deps.clock()
                     phase_timings[timing_key] = (end - start).total_seconds()
 
-            return Phase(name=name, execute=_execute, skip_condition=skip_condition)
+            return Phase(
+                name=name,
+                execute=_execute,
+                skip_condition=skip_condition,
+                progress_total=progress_total,
+            )
 
         phases_before_align = [
             _timed_phase(
@@ -592,6 +604,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
                     metrics_cache_hit_out=lambda hit: _set_metrics_cache_hit(hit),
                 ),
                 warn_only=True,
+                progress_total=ANALYZE_PROGRESS_TOTAL,
             ),
             _timed_phase(
                 "align",
