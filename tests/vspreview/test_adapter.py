@@ -15,6 +15,7 @@ from frame_compare.errors import VSPreviewError
 from frame_compare.vspreview.adapter import (
     VSPreviewConfig,
     _build_script_content,
+    _generate_vspreview_script,
     launch_alignment_verification_session,
 )
 
@@ -61,3 +62,25 @@ def test_build_script_content_escapes_path_literals() -> None:
     assert '"label": "ref"x"' not in script
     assert '"\nprint(123)\n#' not in script
     assert "\\nprint(123)\\n" in script
+
+
+def test_generate_vspreview_script_uses_atomic_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[Path] = []
+
+    def _fake_write(path: Path, content: str, *, encoding: str = "utf-8") -> None:
+        calls.append(path)
+        path.write_text(content, encoding=encoding)
+
+    monkeypatch.setattr("frame_compare.vspreview.adapter.write_text_atomic", _fake_write)
+
+    script_path = _generate_vspreview_script(
+        reference=Path("ref.mkv"),
+        comparisons=[Path("a.mkv")],
+        suggested_offsets_by_key={},
+        cache_dir=tmp_path,
+    )
+
+    assert calls == [script_path]
+    assert script_path.exists()

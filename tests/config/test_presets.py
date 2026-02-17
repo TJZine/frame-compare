@@ -77,6 +77,23 @@ def test_save_preset_creates_file(tmp_path: Path) -> None:
     assert (tmp_path / "my_preset.toml").exists()
 
 
+def test_save_preset_uses_atomic_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from frame_compare.config.loader import get_default_config
+
+    calls: list[Path] = []
+
+    def _fake_write(path: Path, content: str, *, encoding: str = "utf-8") -> None:
+        calls.append(path)
+        path.write_text(content, encoding=encoding)
+
+    monkeypatch.setattr("frame_compare.config.presets.write_text_atomic", _fake_write)
+
+    config = get_default_config()
+    saved = save_preset("atomic", config, presets_dir=tmp_path)
+
+    assert calls == [saved]
+
+
 def test_save_preset_rejects_empty_name(tmp_path: Path) -> None:
     from frame_compare.config.loader import get_default_config
 

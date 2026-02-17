@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -33,6 +34,17 @@ def print_at_a_glance(
     root: Path,
     config_path: Path,
 ) -> None:
+    vspreview_available: bool | None = None
+    if config.audio_alignment.use_vspreview or config.audio_alignment.force_interactive:
+        try:
+            from frame_compare.vspreview import is_vspreview_available
+
+            vspreview_available = is_vspreview_available()
+        except Exception:
+            vspreview_available = None
+
+    ffmpeg_available = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
+
     rows: list[tuple[str, str]] = [
         ("root", str(root)),
         ("config", str(config_path)),
@@ -43,6 +55,10 @@ def print_at_a_glance(
             "selection",
             f"{config.analysis.selection_mode.value}, n={config.analysis.frame_count}, seed={config.analysis.random_seed}",
         ),
+        ("audio_alignment.enabled", _fmt_bool(config.audio_alignment.enable)),
+        ("audio_alignment.ffmpeg_available", _fmt_bool(ffmpeg_available)),
+        ("audio_alignment.use_vspreview", _fmt_bool(config.audio_alignment.use_vspreview)),
+        ("audio_alignment.force_interactive", _fmt_bool(config.audio_alignment.force_interactive)),
         ("tonemap.enabled", _fmt_bool(config.color.enable_tonemap)),
         ("tonemap.preset", config.color.preset.value),
         ("tonemap.target_nits", str(config.color.target_nits)),
@@ -56,6 +72,8 @@ def print_at_a_glance(
         ("report.auto_open", _fmt_bool(config.report.auto_open)),
         ("upload", "disabled" if request.no_upload else "enabled"),
     ]
+    if vspreview_available is not None:
+        rows.append(("vspreview.available", _fmt_bool(vspreview_available)))
     console.print(Panel(_kv_table(rows=rows), title="At-a-Glance"))
 
 
@@ -78,3 +96,12 @@ def print_result_summary(console: Console, *, result: RunResult, quiet: bool) ->
         rows.append(("status", "success"))
 
     console.print(Panel(_kv_table(rows=rows), title="Result"))
+
+    if result.warnings and not quiet:
+        max_lines = 8
+        visible = result.warnings[:max_lines]
+        remaining = len(result.warnings) - len(visible)
+        warning_text = "\n".join(f"- {w}" for w in visible)
+        if remaining > 0:
+            warning_text += f"\n- ... ({remaining} more)"
+        console.print(Panel(warning_text, title="Warnings", expand=False))

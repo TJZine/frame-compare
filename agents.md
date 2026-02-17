@@ -52,6 +52,13 @@ UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini
 - Use pytest markers for opt-in tests (see `pyproject.toml` markers such as `vs_required`, `integration`, `network`).
 - If a test would invoke external tools, stub/mock at the module boundary or gate behind a marker.
 
+## Pre-MVP Compatibility Policy (Default)
+
+- Project phase is pre-MVP with zero production users; optimize for clarity and single-path code.
+- Do **not** add legacy, fallback, compatibility, dual-read, dual-write, adapter/shim, or version-bridge code unless explicitly requested.
+- Prefer replacing old behavior in-place and removing obsolete paths in the same change when safe.
+- If compatibility work is explicitly requested, document scope, rationale, and planned removal criteria in the run artifacts before implementation.
+
 ## Run Artifacts (Workflow Summary)
 
 - All run artifacts live under `.agent-workflow/runs/<RUN_ID>/` (see SSOT workflow docs for exact templates).

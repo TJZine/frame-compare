@@ -5,6 +5,8 @@ from __future__ import annotations
 import sys
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from frame_compare.orchestration.doctor import (
     CheckResult,
     DoctorCheck,
@@ -281,6 +283,25 @@ class TestCollectChecks:
         assert checks[0].category == "core"
         assert checks[-1].name == "tmdb_api_key"
         assert checks[-1].category == "network"
+
+
+def test_check_tmdb_api_key_requires_canonical(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TMDB check should only pass when canonical env var is set."""
+    tmdb_check = next(c for c in collect_checks() if c.name == "tmdb_api_key")
+
+    monkeypatch.delenv("TMDB_API_KEY", raising=False)
+    monkeypatch.delenv("FRAME_COMPARE_TMDB__API_KEY", raising=False)
+    assert tmdb_check.check_fn().passed is False
+
+    monkeypatch.setenv("TMDB_API_KEY", "legacy_key")
+    legacy_result = tmdb_check.check_fn()
+    assert legacy_result.passed is False
+    assert legacy_result.hint is not None
+    assert "FRAME_COMPARE_TMDB__API_KEY" in legacy_result.hint
+    assert "legacy" in legacy_result.hint.lower()
+
+    monkeypatch.setenv("FRAME_COMPARE_TMDB__API_KEY", "new_key")
+    assert tmdb_check.check_fn().passed is True
 
 
 class TestRunDoctor:

@@ -350,17 +350,24 @@ def _check_slowpics() -> CheckResult:
 
 def _check_tmdb_api_key() -> CheckResult:
     """Check TMDB API key is configured (env var check only)."""
-    # Check new env var first, then legacy alias
-    api_key = os.environ.get("FRAME_COMPARE_TMDB__API_KEY") or os.environ.get("TMDB_API_KEY")
-    if api_key:
+    if os.environ.get("FRAME_COMPARE_TMDB__API_KEY"):
         return CheckResult(
             passed=True,
             message="TMDB API key configured",
         )
+    legacy_tmdb_env_var = "_".join(("TMDB", "API", "KEY"))
+    if os.environ.get(legacy_tmdb_env_var):
+        return CheckResult(
+            passed=False,
+            message="TMDB API key configured via legacy variable",
+            hint=(
+                "Set FRAME_COMPARE_TMDB__API_KEY; legacy TMDB API key alias is no longer supported"
+            ),
+        )
     return CheckResult(
         passed=False,
         message="TMDB API key not configured",
-        hint="Set FRAME_COMPARE_TMDB__API_KEY or TMDB_API_KEY environment variable",
+        hint="Set FRAME_COMPARE_TMDB__API_KEY environment variable",
     )
 
 

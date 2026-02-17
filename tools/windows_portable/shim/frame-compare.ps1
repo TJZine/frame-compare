@@ -68,6 +68,12 @@ function Invoke-FrameCompareShim([object[]]$ArgsValues) {
   $ErrorActionPreference = "Stop"
   Set-StrictMode -Version Latest
 
+  if ($null -eq $ArgsValues) {
+    $ArgsValues = @()
+  } else {
+    $ArgsValues = @($ArgsValues)
+  }
+
   $shimDir = $PSScriptRoot
   if ([string]::IsNullOrWhiteSpace($shimDir)) {
     $shimDir = Split-Path -Parent $PSCommandPath

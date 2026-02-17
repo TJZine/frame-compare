@@ -69,8 +69,6 @@ class ToneCurve(str, Enum):
     BT2390 = "bt2390"
     SPLINE = "spline"
     REINHARD = "reinhard"
-    MOBIUS = "mobius"
-    LINEAR = "linear"
 
 
 class Visibility(str, Enum):

@@ -16,6 +16,7 @@ report/
 screens/
 screenshots/
 CODE_REVIEW_CONTEXT.md
+.desloppify/
 
 
 # FC2 app-server runtime (ephemeral)

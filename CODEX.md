@@ -49,6 +49,8 @@
 6) **Output**: populate PR “Decision Minute” fields before proposing patches.
 7) **Commit Title**: every task response must include a Conventional Commit-style subject (for example, `feat: …`, `chore: …`) that can be copied directly into `git commit -m`. State it explicitly before the summary so users running commit hooks don’t have to invent one.
 8) **Log Dates Accurately**: when updating `docs/DECISIONS.md`, `CHANGELOG.md`, or similar logs, run `date -u +%Y-%m-%d` and use that exact stamp—do not future-date entries.
+9) **Pre-MVP Simplicity First**: do not add legacy/fallback/compatibility paths, shims/adapters, dual-read or dual-write logic, or version-bridge code unless the user explicitly requests backward compatibility for that task.
+10) **Compatibility Exception Bar**: when compatibility is explicitly requested, document scope, why it is required now, and concrete removal criteria in the task plan/run artifacts before patching.
 
 ## Always-Allowed Commands (details)
 

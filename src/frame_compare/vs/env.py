@@ -55,10 +55,6 @@ def detect_plugins(core: vs.Core) -> dict[str, bool]:
         or (hasattr(core, "lw") and hasattr(core.lw, "LWLibavSource")),
         # libplacebo - tonemapping
         "libplacebo": hasattr(core, "placebo") and hasattr(core.placebo, "Tonemap"),
-        # BestSource (fallback loader)
-        "bestsource": hasattr(core, "bs") and hasattr(core.bs, "VideoSource"),
-        # ffms2 (alternative loader)
-        "ffms2": hasattr(core, "ffms2") and hasattr(core.ffms2, "Source"),
     }
 
 

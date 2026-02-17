@@ -1,4 +1,5 @@
 import re
+from pathlib import Path
 
 import pytest
 import structlog
@@ -93,3 +94,8 @@ def test_configure_logging_unknown_level_falls_back_to_info():
     )
     assert log.debug("test") is None  # filtered
     assert log.info("test") is not None  # allowed
+
+
+def test_configure_logging_rejects_log_file_param() -> None:
+    with pytest.raises(TypeError):
+        configure_logging(log_file=Path("x.log"))

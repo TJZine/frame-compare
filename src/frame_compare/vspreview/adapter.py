@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 import structlog
 
 from frame_compare.errors import VSPreviewError, VSPreviewNotFoundError
+from frame_compare.utils.atomic_write import write_text_atomic
 
 if TYPE_CHECKING:
     pass
@@ -125,12 +126,18 @@ def launch_alignment_verification_session(
         )
         return script_path
 
-    # TTY gating: If stdin is not a TTY, do not launch
-    if not sys.stdin.isatty():
+    # TTY gating: VSPreview is interactive; avoid launching in non-interactive contexts.
+    stdin_tty = sys.stdin.isatty()
+    stdout_tty = sys.stdout.isatty()
+    stderr_tty = sys.stderr.isatty()
+    if not (stdin_tty or stdout_tty or stderr_tty):
         log.warning(
             "vspreview_no_tty",
-            hint="Cannot launch VSPreview without a TTY",
+            hint="Cannot launch VSPreview without an interactive terminal (TTY)",
             script_path=str(script_path),
+            stdin_tty=stdin_tty,
+            stdout_tty=stdout_tty,
+            stderr_tty=stderr_tty,
         )
         return script_path
 
@@ -225,7 +232,7 @@ def _generate_vspreview_script(
         suggested_offsets_by_key=suggested_offsets_by_key,
     )
 
-    script_path.write_text(script_content, encoding="utf-8")
+    write_text_atomic(script_path, script_content, encoding="utf-8")
     return script_path
 
 
