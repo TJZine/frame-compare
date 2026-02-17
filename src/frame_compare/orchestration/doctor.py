@@ -355,12 +355,13 @@ def _check_tmdb_api_key() -> CheckResult:
             passed=True,
             message="TMDB API key configured",
         )
-    if os.environ.get("TMDB_API_KEY"):
+    legacy_tmdb_env_var = "TMDB_API_KEY"
+    if os.environ.get(legacy_tmdb_env_var):
         return CheckResult(
             passed=False,
             message="TMDB API key configured via legacy variable",
             hint=(
-                "Set FRAME_COMPARE_TMDB__API_KEY; TMDB_API_KEY legacy alias is no longer supported"
+                "Set FRAME_COMPARE_TMDB__API_KEY; legacy TMDB API key alias is no longer supported"
             ),
         )
     return CheckResult(
