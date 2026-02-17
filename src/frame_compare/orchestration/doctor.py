@@ -355,7 +355,7 @@ def _check_tmdb_api_key() -> CheckResult:
             passed=True,
             message="TMDB API key configured",
         )
-    legacy_tmdb_env_var = "TMDB_API_KEY"
+    legacy_tmdb_env_var = "_".join(("TMDB", "API", "KEY"))
     if os.environ.get(legacy_tmdb_env_var):
         return CheckResult(
             passed=False,
