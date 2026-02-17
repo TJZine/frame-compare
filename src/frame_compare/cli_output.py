@@ -59,21 +59,25 @@ def print_at_a_glance(
         ("audio_alignment.ffmpeg_available", _fmt_bool(ffmpeg_available)),
         ("audio_alignment.use_vspreview", _fmt_bool(config.audio_alignment.use_vspreview)),
         ("audio_alignment.force_interactive", _fmt_bool(config.audio_alignment.force_interactive)),
-        ("tonemap.enabled", _fmt_bool(config.color.enable_tonemap)),
-        ("tonemap.preset", config.color.preset.value),
-        ("tonemap.target_nits", str(config.color.target_nits)),
-        ("tonemap.curve", config.color.tone_curve.value),
-        ("renderer", "ffmpeg" if config.screenshots.use_ffmpeg else "vapoursynth"),
-        ("overlay", str(config.screenshots.overlay_mode.value)),
-        ("slow.pics.auto_upload", _fmt_bool(config.slowpics.auto_upload)),
-        ("slow.pics.visibility", config.slowpics.visibility.value),
-        ("slow.pics.delete_after_upload", _fmt_bool(config.slowpics.delete_after_upload)),
-        ("report.enabled", _fmt_bool(config.report.enable)),
-        ("report.auto_open", _fmt_bool(config.report.auto_open)),
-        ("upload", "disabled" if request.no_upload else "enabled"),
     ]
     if vspreview_available is not None:
         rows.append(("vspreview.available", _fmt_bool(vspreview_available)))
+    rows.extend(
+        [
+            ("tonemap.enabled", _fmt_bool(config.color.enable_tonemap)),
+            ("tonemap.preset", config.color.preset.value),
+            ("tonemap.target_nits", str(config.color.target_nits)),
+            ("tonemap.curve", config.color.tone_curve.value),
+            ("renderer", "ffmpeg" if config.screenshots.use_ffmpeg else "vapoursynth"),
+            ("overlay", str(config.screenshots.overlay_mode.value)),
+            ("slow.pics.auto_upload", _fmt_bool(config.slowpics.auto_upload)),
+            ("slow.pics.visibility", config.slowpics.visibility.value),
+            ("slow.pics.delete_after_upload", _fmt_bool(config.slowpics.delete_after_upload)),
+            ("report.enabled", _fmt_bool(config.report.enable)),
+            ("report.auto_open", _fmt_bool(config.report.auto_open)),
+            ("upload", "disabled" if request.no_upload else "enabled"),
+        ]
+    )
     console.print(Panel(_kv_table(rows=rows), title="At-a-Glance"))
 
 
@@ -97,7 +101,7 @@ def print_result_summary(console: Console, *, result: RunResult, quiet: bool) ->
 
     console.print(Panel(_kv_table(rows=rows), title="Result"))
 
-    if result.warnings and not quiet:
+    if result.warnings:
         max_lines = 8
         visible = result.warnings[:max_lines]
         remaining = len(result.warnings) - len(visible)

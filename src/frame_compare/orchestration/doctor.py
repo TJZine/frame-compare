@@ -303,7 +303,7 @@ def _check_vspreview() -> CheckResult:
         return CheckResult(
             passed=True,  # Not a failure, just optional per spec §6.1
             message="VSPreview not installed (optional for manual alignment)",
-            hint="Install with: pip install vspreview",
+            hint="Install with: pip install vspreview PySide6 (or: pip install vspreview PyQt5)",
         )
 
 

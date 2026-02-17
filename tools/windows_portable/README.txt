@@ -32,5 +32,14 @@ QUICK START:
   frame-compare doctor
   frame-compare run
 
+OPTIONAL (Interactive Audio Alignment / VSPreview):
+  This portable bundle does NOT include VSPreview. If you set:
+    [audio_alignment]
+    use_vspreview = true
+  you must install VSPreview separately (and a Qt backend) so `vspreview` is available.
+  Recommended:
+    pip install vspreview PySide6
+  (or: pip install vspreview PyQt5)
+
 DOCUMENTATION:
   https://github.com/TJZine/frame-compare

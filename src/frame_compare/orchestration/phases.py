@@ -77,6 +77,7 @@ async def execute_phases(
                 phase=phase.name,
                 error_type=type(exc).__name__,
                 error=str(exc),
+                exc_info=exc,
             )
         else:
             phase.status = PhaseStatus.COMPLETED

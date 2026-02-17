@@ -27,7 +27,7 @@ Never skip scores. The user tracks progress through them.
 
 ## 2. Core Loop
 
-```
+```text
 scan → follow the tool's strategy → fix or wontfix → rescan
 ```
 

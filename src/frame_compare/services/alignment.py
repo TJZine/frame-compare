@@ -133,6 +133,20 @@ async def align_clips(
 
     results_map: dict[str, AlignmentResult] = {}
 
+    stems_to_paths: dict[str, list[Path]] = {}
+    for comp in comparisons:
+        stems_to_paths.setdefault(comp.stem, []).append(comp)
+    duplicate_stems = {stem: paths for stem, paths in stems_to_paths.items() if len(paths) > 1}
+    if duplicate_stems:
+        formatted = ", ".join(
+            f"{stem}: {[p.name for p in paths]}"
+            for stem, paths in sorted(duplicate_stems.items(), key=lambda item: item[0])
+        )
+        raise AudioAlignmentError(
+            "Duplicate comparison clip stems detected (alignment keys use filename stems). "
+            f"Rename clips to be unique. Duplicates: {formatted}"
+        )
+
     # 0. Load manual overrides (highest precedence per §2.4)
     from frame_compare.vspreview import load_manual_overrides
 
@@ -325,7 +339,6 @@ def save_offsets_cache(
 ) -> None:
     """Persist alignment results to cache."""
     cache_path = cache_dir / CACHE_FILE_NAME
-    cache_dir.mkdir(parents=True, exist_ok=True)
 
     # Load existing cache to preserve other entries
     data: dict[str, object] = {"version": CACHE_VERSION}
@@ -337,8 +350,10 @@ def save_offsets_cache(
             log.warning(
                 "audio_offsets_cache_corrupt_on_write",
                 path=str(cache_path),
+                cache_version=CACHE_VERSION,
+                action="overwrite_cache_and_discard_prior_entries",
                 error=str(exc),
-                exc_info=True,
+                exc_info=exc,
             )
 
     # Update with new results
