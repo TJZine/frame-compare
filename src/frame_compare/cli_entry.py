@@ -500,9 +500,9 @@ def _prepare_toml_payload(data: dict[str, object]) -> dict[str, object]:
     paths_raw = data.get("paths")
     slowpics_raw = data.get("slowpics")
     if isinstance(paths_raw, dict):
-        paths_section = cast(dict[str, object], paths_raw)
+        paths_section = dict(cast(dict[str, object], paths_raw))
     if isinstance(slowpics_raw, dict):
-        slowpics_section = cast(dict[str, object], slowpics_raw)
+        slowpics_section = dict(cast(dict[str, object], slowpics_raw))
     return {
         "paths": paths_section,
         "slowpics": slowpics_section,

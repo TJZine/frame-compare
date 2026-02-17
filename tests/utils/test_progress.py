@@ -35,3 +35,27 @@ def test_log_progress_reporter_smoke():
     reporter.advance(25)  # 50%
     reporter.set_description("desc")
     reporter.complete_phase()
+
+
+def test_log_progress_reporter_supports_nested_phases():
+    """Nested phases should restore parent context on completion."""
+    reporter = LogProgressReporter()
+    reporter.start_phase("outer", 100)
+    reporter.advance(10)
+
+    reporter.start_phase("inner", 1)
+    reporter.advance(1)
+    reporter.complete_phase()
+
+    assert reporter._name == "outer"  # noqa: SLF001
+    assert reporter._total == 100  # noqa: SLF001
+    assert reporter._current == 10  # noqa: SLF001
+
+
+def test_progress_reporter_protocol_is_single_source() -> None:
+    from frame_compare.analysis import metrics as metrics_module
+    from frame_compare.utils import progress as progress_module
+    from frame_compare.utils import progress_protocol
+
+    assert progress_module.ProgressReporter is progress_protocol.ProgressReporter
+    assert metrics_module.ProgressReporter is progress_protocol.ProgressReporter

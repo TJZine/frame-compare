@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 import numpy as np
+import structlog
 
 from frame_compare.analysis.cache_io import (
     CACHE_VERSION,
@@ -19,6 +20,7 @@ from frame_compare.errors import (
     SourceLoadError,
 )
 from frame_compare.utils.perf import perf_span
+from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.vs.loader import DefaultVSLoader
 
 if TYPE_CHECKING:
@@ -29,28 +31,14 @@ if TYPE_CHECKING:
     from frame_compare.config.schema import AnalysisConfig
 
 
-class ProgressReporter(Protocol):
-    """Protocol for reporting analysis progress.
+log = structlog.get_logger()
 
-    Note: Method signatures intentionally match the canonical orchestration
-    progress protocol in `frame_compare.utils.progress`.
-    """
-
-    def start_phase(self, name: str, total: int) -> None:
-        """Start a new progress phase."""
-        ...
-
-    def advance(self, amount: int = 1) -> None:
-        """Advance progress."""
-        ...
-
-    def set_description(self, desc: str) -> None:
-        """Set the description for the current phase."""
-        ...
-
-    def complete_phase(self) -> None:
-        """Complete the current phase."""
-        ...
+# Orchestration "analyze" phase progress total.
+# Contract:
+# - `execute_phases()` advances the phase by 1 on successful completion.
+# - `calculate_metrics()` advances the remaining steps (total - 1) on cache hit,
+#   and advances twice (after luminance + after cache-save attempt) on cache miss.
+ANALYZE_PROGRESS_TOTAL = 3
 
 
 def calculate_metrics(
@@ -99,7 +87,7 @@ def calculate_metrics(
     if cache_result.success and cache_result.metrics:
         if reporter:
             reporter.set_description("Cache hit")
-            reporter.advance(2)
+            reporter.advance(ANALYZE_PROGRESS_TOTAL - 1)
         return cache_result.metrics
 
     # Cache miss or invalid - compute metrics for reference clip only
@@ -139,6 +127,10 @@ def calculate_metrics(
         reporter.start_phase("Saving analysis cache", total=1)
     try:
         save_metrics_cache(metrics, cache_dir)
+    except Exception as e:
+        if reporter:
+            reporter.set_description(f"Cache save failed: {e}")
+        log.warning("analysis_cache_save_failed", error=str(e), exc_info=True)
     finally:
         if reporter:
             reporter.advance(1)
@@ -213,6 +205,7 @@ def _calculate_motion(
 
     Args:
         clip: VapourSynth clip to analyze
+        reporter: Optional progress reporter to receive progress updates during motion calculation.
 
     Returns:
         List of per-frame motion scores (0.0-1.0)

@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -126,18 +127,34 @@ def test_windows_portable_bundle_launcher_sets_cwd_to_bundle_root() -> None:
 def test_windows_portable_shim_injects_state_config_when_missing_explicit_config() -> None:
     shim_path = _repo_root() / "tools" / "windows_portable" / "shim" / "frame-compare.ps1"
     shim = _read_text_or_fail(shim_path)
-    assert '$stateDir = Join-Path $installRoot "state"' in shim
-    assert '$stateConfigToml = Join-Path $stateDir "config.toml"' in shim
-    assert "Test-ArgsContainConfigFlag" in shim
-    assert "Get-ConfigInjectionIndex" in shim
-    assert "Add-ArgsAtIndex" in shim
-    assert '$command -eq "run" -or $command -eq "wizard"' in shim
-    assert '$command -eq "preset"' in shim
-    assert '$subcommand -eq "list" -or $subcommand -eq "apply" -or $subcommand -eq "save"' in shim
-    assert '$arg.StartsWith("--config=")' in shim
-    assert '$arg.StartsWith("-c")' in shim
-    assert "& $bundleLauncher @forwardArgs" in shim
+    assert re.search(r"\$stateDir\s*=\s*Join-Path\s+\$installRoot\s+\"state\"", shim)
+    assert re.search(r"\$stateConfigToml\s*=\s*Join-Path\s+\$stateDir\s+\"config\.toml\"", shim)
+    assert re.search(r"function\s+Test-ArgsContainConfigFlag\b", shim)
+    assert re.search(r"function\s+Get-ConfigInjectionIndex\b", shim)
+    assert re.search(r"function\s+Add-ArgsAtIndex\b", shim)
+    assert re.search(r"\$command\s*-eq\s*\"run\".*\$command\s*-eq\s*\"wizard\"", shim)
+    assert re.search(r"\$command\s*-eq\s*\"preset\"", shim)
+    assert re.search(r"\$subcommand\s*-eq\s*\"list\".*\"apply\".*\"save\"", shim)
+    assert re.search(r"\$arg\.StartsWith\(\"--config=\"\)", shim)
+    assert re.search(r"\$arg\.StartsWith\(\"-c\"\)", shim)
+    assert re.search(r"&\s*\$bundleLauncher\s+@forwardArgs", shim)
     assert "@extraArgs @args" not in shim
+
+
+def test_windows_portable_shim_preset_apply_injects_config_before_positional() -> None:
+    """Get-ConfigInjectionIndex should inject after `preset apply` and before positional args."""
+    shim_path = _repo_root() / "tools" / "windows_portable" / "shim" / "frame-compare.ps1"
+    shim = _read_text_or_fail(shim_path)
+    assert re.search(r"\$subcommand\s*-eq\s*\"apply\"", shim)
+    assert re.search(r"return\s+\$subcommandIndex\s*\+\s*1", shim)
+
+
+def test_windows_portable_shim_supports_dot_sourcing_without_execution() -> None:
+    shim_path = _repo_root() / "tools" / "windows_portable" / "shim" / "frame-compare.ps1"
+    shim = _read_text_or_fail(shim_path)
+    assert re.search(r'\$MyInvocation\.InvocationName\s*-ne\s*"\."', shim) or re.search(
+        r"\$MyInvocation\.InvocationName\s*-ne\s*'\.'", shim
+    )
 
 
 def test_windows_portable_installer_initializes_state_config_toml() -> None:

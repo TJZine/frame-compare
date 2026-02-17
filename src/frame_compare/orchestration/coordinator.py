@@ -14,7 +14,13 @@ from typing import Protocol, cast
 
 import httpx
 
-from frame_compare.analysis import cache_io, calculate_metrics, create_frame_plan, select_frames
+from frame_compare.analysis import (
+    ANALYZE_PROGRESS_TOTAL,
+    cache_io,
+    calculate_metrics,
+    create_frame_plan,
+    select_frames,
+)
 from frame_compare.analysis.types import SelectionBreakdown
 from frame_compare.config import ConfigSchema, apply_cli_overrides
 from frame_compare.errors import (
@@ -598,7 +604,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
                     metrics_cache_hit_out=lambda hit: _set_metrics_cache_hit(hit),
                 ),
                 warn_only=True,
-                progress_total=3,
+                progress_total=ANALYZE_PROGRESS_TOTAL,
             ),
             _timed_phase(
                 "align",
