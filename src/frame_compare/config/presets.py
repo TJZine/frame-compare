@@ -18,6 +18,7 @@ from frame_compare.errors import (
     PresetNotFoundError,
     normalize_pydantic_errors,
 )
+from frame_compare.utils.atomic_write import write_text_atomic
 
 if TYPE_CHECKING:
     from frame_compare.config.schema import ConfigSchema
@@ -80,7 +81,7 @@ def save_preset(
     # exclude_none=True: TOML has no null; omitted keys use defaults when loaded
     data = config.model_dump(mode="json", exclude_none=True)
     toml_text = tomli_w.dumps(data)
-    preset_path.write_text(toml_text, encoding="utf-8")
+    write_text_atomic(preset_path, toml_text, encoding="utf-8")
 
     return preset_path
 

@@ -21,6 +21,7 @@ from frame_compare.errors import (
     VSPreviewError,
 )
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
+from frame_compare.utils.atomic_write import write_bytes_atomic
 from frame_compare.utils.progress import ProgressReporter
 from frame_compare.utils.subproc import run_subprocess
 from frame_compare.vspreview.adapter import (
@@ -325,9 +326,13 @@ def save_offsets_cache(
         try:
             with cache_path.open("rb") as f:
                 data.update(tomllib.load(f))
-        except tomllib.TOMLDecodeError:
-            # If corrupt, we'll just overwrite
-            pass
+        except tomllib.TOMLDecodeError as exc:
+            log.warning(
+                "audio_offsets_cache_corrupt_on_write",
+                path=str(cache_path),
+                error=str(exc),
+                exc_info=True,
+            )
 
     # Update with new results
     for res in results:
@@ -341,8 +346,7 @@ def save_offsets_cache(
             "method": res.method,
         }
 
-    with cache_path.open("wb") as f:
-        f.write(tomli_w.dumps(data).encode("utf-8"))
+    write_bytes_atomic(cache_path, tomli_w.dumps(data).encode("utf-8"))
 
 
 def _probe_fps(video_path: Path) -> Fraction:

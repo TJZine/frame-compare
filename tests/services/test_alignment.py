@@ -345,6 +345,62 @@ def test_save_offsets_cache_writes_toml(tmp_path: Path):
     assert '["ref:comp"]' in content
 
 
+def test_save_offsets_cache_logs_corrupt_existing_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache_file = tmp_path / "audio_offsets.toml"
+    cache_file.write_text("not valid toml", encoding="utf-8")
+
+    warnings: list[tuple[str, dict[str, object]]] = []
+
+    def _warning(event: str, **kwargs: object) -> None:
+        warnings.append((event, dict(kwargs)))
+
+    monkeypatch.setattr("frame_compare.services.alignment.log.warning", _warning)
+
+    save_offsets_cache(
+        tmp_path,
+        [
+            AlignmentResult(
+                reference_clip="ref.mkv",
+                comparison_clip="comp.mkv",
+                frame_offset=1,
+                time_offset_seconds=0.04,
+                correlation_score=0.9,
+                method="cross_correlation",
+            )
+        ],
+    )
+
+    assert any(event == "audio_offsets_cache_corrupt_on_write" for event, _ in warnings)
+
+
+def test_save_offsets_cache_uses_atomic_bytes_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    res = [
+        AlignmentResult(
+            reference_clip="ref.mkv",
+            comparison_clip="comp.mkv",
+            frame_offset=10,
+            time_offset_seconds=0.4,
+            correlation_score=0.9,
+            method="cross_correlation",
+        )
+    ]
+
+    calls: list[Path] = []
+
+    def _fake_write(path: Path, content: bytes) -> None:
+        calls.append(path)
+        path.write_bytes(content)
+
+    monkeypatch.setattr("frame_compare.services.alignment.write_bytes_atomic", _fake_write)
+
+    save_offsets_cache(tmp_path, res)
+    assert calls == [tmp_path / "audio_offsets.toml"]
+
+
 @pytest.mark.anyio
 @patch("frame_compare.services.alignment._probe_fps")
 @patch("frame_compare.services.alignment._extract_audio")

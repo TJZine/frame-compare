@@ -327,6 +327,43 @@ def test_maybe_open_report_keeps_startfile_path_on_windows(monkeypatch: MonkeyPa
     assert called["path"] == "report.html"
 
 
+def test_maybe_open_report_falls_back_to_webbrowser_when_startfile_fails(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    called: dict[str, str] = {}
+
+    def _raise_startfile(_value: str) -> None:
+        raise OSError("boom")
+
+    fake_os = SimpleNamespace(name="nt", startfile=_raise_startfile)
+    monkeypatch.setattr("frame_compare.cli_entry.os", fake_os)
+    monkeypatch.setattr(
+        "frame_compare.cli_entry.webbrowser.open",
+        lambda uri: called.setdefault("uri", uri),
+    )
+
+    _maybe_open_report(Path("report.html"))
+
+    assert called["uri"].startswith("file:")
+
+
+def test_wizard_writer_uses_atomic_write(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    from frame_compare.cli_entry import _write_wizard_config_payload
+
+    calls: list[Path] = []
+
+    def _fake_write(path: Path, content: str, *, encoding: str = "utf-8") -> None:
+        calls.append(path)
+        path.write_text(content, encoding=encoding)
+
+    monkeypatch.setattr("frame_compare.cli_entry.write_text_atomic", _fake_write)
+
+    destination = tmp_path / "config" / "config.toml"
+    _write_wizard_config_payload(destination, {"paths": {}, "slowpics": {}})
+
+    assert calls == [destination]
+
+
 def test_run_exits_processing_error_when_runner_returns_unsuccessful(
     monkeypatch: MonkeyPatch,
 ) -> None:

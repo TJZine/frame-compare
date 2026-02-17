@@ -39,6 +39,7 @@ from frame_compare.errors import (
     format_error_json,
     get_exit_code,
 )
+from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.utils.logging import configure_logging
 
 if TYPE_CHECKING:
@@ -77,13 +78,16 @@ app = typer.Typer(
 
 def _maybe_open_report(report_path: Path) -> None:
     """Best-effort open of a generated HTML report in the default browser."""
-    try:
-        if os.name == "nt" and hasattr(os, "startfile"):
+    if os.name == "nt" and hasattr(os, "startfile"):
+        try:
             os.startfile(str(report_path))  # type: ignore[attr-defined]
             return
-    except OSError:
-        # Fall back to webbrowser below.
-        pass
+        except OSError:
+            try:
+                webbrowser.open(report_path.resolve().as_uri())
+            except (OSError, webbrowser.Error):
+                return
+            return
 
     try:
         webbrowser.open(report_path.resolve().as_uri())
@@ -436,7 +440,7 @@ def _write_wizard_config_payload(config_path: Path, data: dict[str, object]) -> 
     """Write wizard config payload to the provided destination."""
     config_path.parent.mkdir(parents=True, exist_ok=True)
     toml_text = tomli_w.dumps(_prepare_toml_payload(data))
-    config_path.write_text(toml_text, encoding="utf-8")
+    write_text_atomic(config_path, toml_text, encoding="utf-8")
 
 
 def _doctor_report_json(report: DoctorReport) -> dict[str, JSONValue]:
@@ -483,7 +487,7 @@ def _write_config_to(path: Path, config: ConfigSchema) -> None:
     data = config.model_dump(mode="json", exclude_none=True)
     path.parent.mkdir(parents=True, exist_ok=True)
     toml_text = tomli_w.dumps(data)
-    path.write_text(toml_text, encoding="utf-8")
+    write_text_atomic(path, toml_text, encoding="utf-8")
 
 
 def _prepare_toml_payload(data: dict[str, object]) -> dict[str, object]:

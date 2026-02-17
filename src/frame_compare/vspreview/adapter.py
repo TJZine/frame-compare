@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 import structlog
 
 from frame_compare.errors import VSPreviewError, VSPreviewNotFoundError
+from frame_compare.utils.atomic_write import write_text_atomic
 
 if TYPE_CHECKING:
     pass
@@ -225,7 +226,7 @@ def _generate_vspreview_script(
         suggested_offsets_by_key=suggested_offsets_by_key,
     )
 
-    script_path.write_text(script_content, encoding="utf-8")
+    write_text_atomic(script_path, script_content, encoding="utf-8")
     return script_path
 
 
