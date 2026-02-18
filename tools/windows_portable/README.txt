@@ -38,7 +38,7 @@ OPTIONAL (Interactive Audio Alignment / VSPreview):
     use_vspreview = true
   interactive alignment can run out of the box.
   For source installs, install optional deps:
-    uv sync --group dev --extra vspreview
+    uv sync --group dev --extra vspreview --frozen
   or:
     pip install -e ".[vspreview]"
 

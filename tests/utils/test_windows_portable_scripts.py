@@ -1,3 +1,4 @@
+import json
 import re
 from pathlib import Path
 
@@ -199,7 +200,7 @@ def test_pyproject_defines_vspreview_optional_dependency(repo_root: Path) -> Non
     assert "[project.optional-dependencies]" in pyproject
     assert re.search(r"vspreview\s*=\s*\[", pyproject)
     assert re.search(r'"vspreview"', pyproject)
-    assert re.search(r'"PySide6"', pyproject)
+    assert re.search(r'"PySide6([^"]*)"', pyproject)
 
 
 def test_windows_portable_build_exports_vspreview_extra(repo_root: Path) -> None:
@@ -267,3 +268,64 @@ def test_windows_portable_docs_disambiguate_source_bundle_root(repo_root: Path) 
     assert "includes VSPreview + PySide6" in readme
     assert "frame-compare-update apply" in readme
     assert "frame-compare-update apply" in portable_readme
+
+
+def test_windows_portable_docs_use_frozen_uv_sync_for_vspreview_extra(repo_root: Path) -> None:
+    readme_path = repo_root / "README.md"
+    portable_readme_path = repo_root / "tools" / "windows_portable" / "README.txt"
+    readme = _read_text_or_fail(readme_path)
+    portable_readme = _read_text_or_fail(portable_readme_path)
+    assert "uv sync --group dev --extra vspreview --frozen" in readme
+    assert "uv sync --group dev --extra vspreview --frozen" in portable_readme
+
+
+def test_windows_portable_update_manifest_schema_disallows_empty_from_app_version_max(
+    repo_root: Path,
+) -> None:
+    schema_path = repo_root / "tools" / "windows_portable" / "update_manifest.schema.json"
+    schema = json.loads(_read_text_or_fail(schema_path))
+    props = schema["properties"]
+    max_schema = props["from_app_version_max"]
+    assert "oneOf" in max_schema
+    branches = max_schema["oneOf"]
+    assert any(branch.get("type") == "null" for branch in branches)
+    assert any(
+        branch.get("type") == "string" and branch.get("minLength") == 1 for branch in branches
+    )
+
+
+def test_windows_portable_workflow_validates_update_public_key_on_release(repo_root: Path) -> None:
+    workflow_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
+    workflow = _read_text_or_fail(workflow_path)
+    assert "Validate update public key" in workflow
+    assert "tools/windows_portable/update_public_key.xml" in workflow.replace("\\", "/")
+
+
+def test_windows_portable_updater_compares_app_versions_as_versions(repo_root: Path) -> None:
+    updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
+    updater = _read_text_or_fail(updater_path)
+    assert "function Test-StringInRange" in updater
+    assert "System.Version" in updater
+
+
+def test_windows_portable_updater_handles_stale_update_locks(repo_root: Path) -> None:
+    updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
+    updater = _read_text_or_fail(updater_path)
+    assert "function Acquire-UpdateLock" in updater
+    assert "LastWriteTimeUtc" in updater
+    assert "FromHours" in updater or "FromMinutes" in updater
+
+
+def test_windows_portable_updater_always_clears_rsa_in_signature_verification(
+    repo_root: Path,
+) -> None:
+    updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
+    updater = _read_text_or_fail(updater_path)
+    signature_fn = re.search(
+        r"function\s+Verify-ManifestSignature\([\s\S]*?\n\}",
+        updater,
+        flags=re.MULTILINE,
+    )
+    assert signature_fn is not None
+    assert re.search(r"\bfinally\b", signature_fn.group(0))
+    assert re.search(r"\$rsa\.Clear\(\)", signature_fn.group(0))

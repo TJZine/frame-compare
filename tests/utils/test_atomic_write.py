@@ -22,6 +22,16 @@ def test_write_text_atomic_writes_empty(tmp_path: Path) -> None:
     assert target.read_text(encoding="utf-8") == ""
 
 
+def test_write_text_atomic_rejects_none_and_cleans_up(tmp_path: Path) -> None:
+    target = tmp_path / "out.txt"
+
+    with pytest.raises(TypeError):
+        write_text_atomic(target, None, encoding="utf-8")  # type: ignore[arg-type]
+
+    assert not target.exists()
+    assert list(tmp_path.glob(".out.txt.*")) == []
+
+
 def test_write_bytes_atomic_creates_parent_dirs(tmp_path: Path) -> None:
     target = tmp_path / "nested" / "data.bin"
 
@@ -36,6 +46,16 @@ def test_write_bytes_atomic_writes_empty(tmp_path: Path) -> None:
     write_bytes_atomic(target, b"")
 
     assert target.read_bytes() == b""
+
+
+def test_write_bytes_atomic_rejects_none_and_cleans_up(tmp_path: Path) -> None:
+    target = tmp_path / "out.bin"
+
+    with pytest.raises(TypeError):
+        write_bytes_atomic(target, None)  # type: ignore[arg-type]
+
+    assert not target.exists()
+    assert list(tmp_path.glob(".out.bin.*")) == []
 
 
 def test_write_text_atomic_does_not_replace_target_on_os_replace_failure(

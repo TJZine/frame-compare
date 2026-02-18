@@ -32,6 +32,13 @@ jobs:
       - name: Unit tests (mocked VS)
         run: uv run --no-sync pytest -q
 
+      - name: Validate update public key
+        if: github.event_name == 'release'
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/validate_update_public_key.ps1 `
+            -PublicKeyPath tools/windows_portable/update_public_key.xml
+
       - name: Build portable bundle
         shell: pwsh
         run: |

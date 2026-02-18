@@ -16,6 +16,8 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 $PSNativeCommandUseErrorActionPreference = $true
 
+. (Join-Path $PSScriptRoot "version_utils.ps1")
+
 function Ensure-Directory([string]$Path) {
   if (!(Test-Path -LiteralPath $Path)) {
     New-Item -ItemType Directory -Path $Path | Out-Null
@@ -382,19 +384,6 @@ function Install-PythonDeps([string]$BundleRoot, [string]$VsCoreRoot) {
   }
 }
 
-function Get-AppVersionFromSource([string]$RepoRootPath) {
-  $initPy = Join-Path $RepoRootPath "src\\frame_compare\\__init__.py"
-  if (!(Test-Path -LiteralPath $initPy)) {
-    throw "Version source file not found: $initPy"
-  }
-  $content = Get-Content -LiteralPath $initPy -Raw
-  $match = [regex]::Match($content, '__version__\s*=\s*"([^"]+)"')
-  if (!$match.Success) {
-    throw "Could not parse __version__ from $initPy"
-  }
-  return $match.Groups[1].Value
-}
-
 function Write-BundleInfo([string]$BundleRoot, [string]$AppVersion) {
   $requirementsLockPath = Join-Path $BundleRoot "requirements.lock.txt"
   if (!(Test-Path -LiteralPath $requirementsLockPath)) {
@@ -447,8 +436,8 @@ function Copy-PythonDistLicenses([string]$SitePackages, [string]$LicensesPythonD
   $distInfoDirs = @(Get-ChildItem -LiteralPath $SitePackages -Directory -Filter "*.dist-info" -ErrorAction SilentlyContinue)
   foreach ($distInfo in $distInfoDirs) {
     foreach ($pattern in $licensePatterns) {
-      $matches = @(Get-ChildItem -LiteralPath $distInfo.FullName -File -Filter $pattern -ErrorAction SilentlyContinue)
-      foreach ($match in $matches) {
+      $licenseFiles = @(Get-ChildItem -LiteralPath $distInfo.FullName -File -Filter $pattern -ErrorAction SilentlyContinue)
+      foreach ($match in $licenseFiles) {
         $destName = "{0}__{1}" -f $distInfo.Name, $match.Name
         Copy-Item -Force -LiteralPath $match.FullName -Destination (Join-Path $LicensesPythonDir $destName)
       }

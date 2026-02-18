@@ -200,19 +200,9 @@ def test_log_level_legacy_alias_env_var(monkeypatch: pytest.MonkeyPatch) -> None
     assert config.logging.level == "INFO"
 
 
-def test_tone_curve_mobius_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FRAME_COMPARE_COLOR__TONE_CURVE", "mobius")
-
-    with pytest.raises(ConfigValidationError) as excinfo:
-        load_config_from_env()
-    assert any(
-        isinstance(loc, list) and any(str(part).lower() == "tone_curve" for part in loc)
-        for loc in (err.get("loc") for err in excinfo.value.validation_errors)
-    )
-
-
-def test_tone_curve_linear_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("FRAME_COMPARE_COLOR__TONE_CURVE", "linear")
+@pytest.mark.parametrize("value", ["mobius", "linear"])
+def test_tone_curve_is_rejected(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
+    monkeypatch.setenv("FRAME_COMPARE_COLOR__TONE_CURVE", value)
 
     with pytest.raises(ConfigValidationError) as excinfo:
         load_config_from_env()

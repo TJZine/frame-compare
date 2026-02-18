@@ -147,7 +147,7 @@ Advanced/legacy:
 > [!NOTE]
 > The Windows portable **full bundle includes VSPreview + PySide6**.
 > For source-based installs, install optional dependencies with:
-> - `uv sync --group dev --extra vspreview`
+> - `uv sync --group dev --extra vspreview --frozen`
 > - or `pip install -e ".[vspreview]"`
 > Then run `frame-compare doctor` to confirm interactive alignment dependencies are available.
 

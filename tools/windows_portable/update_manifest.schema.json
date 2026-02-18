@@ -34,9 +34,14 @@
       "minLength": 1
     },
     "from_app_version_max": {
-      "type": [
-        "string",
-        "null"
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "expected_requirements_lock_sha256": {

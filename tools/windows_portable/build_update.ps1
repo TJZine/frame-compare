@@ -16,6 +16,8 @@ $PSNativeCommandUseErrorActionPreference = $true
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
+. (Join-Path $PSScriptRoot "version_utils.ps1")
+
 function Ensure-Directory([string]$Path) {
   if (!(Test-Path -LiteralPath $Path)) {
     New-Item -ItemType Directory -Path $Path | Out-Null
@@ -29,19 +31,6 @@ function Write-Utf8NoBomFile([string]$Path, [string]$Content) {
 
 function ConvertTo-PortablePath([string]$PathValue) {
   return ($PathValue -replace "\\", "/")
-}
-
-function Get-AppVersion([string]$RepoRootPath) {
-  $initPy = Join-Path $RepoRootPath "src\\frame_compare\\__init__.py"
-  if (!(Test-Path -LiteralPath $initPy)) {
-    throw "Version source file not found: $initPy"
-  }
-  $content = Get-Content -LiteralPath $initPy -Raw
-  $match = [regex]::Match($content, '__version__\s*=\s*"([^"]+)"')
-  if (!$match.Success) {
-    throw "Could not parse __version__ from $initPy"
-  }
-  return $match.Groups[1].Value
 }
 
 function Get-FromVersionMin([string]$VersionText) {
@@ -129,7 +118,7 @@ try {
     throw "No files found under src/frame_compare; refusing to create empty update."
   }
 
-  $toAppVersion = Get-AppVersion -RepoRootPath $resolvedRepoRoot
+  $toAppVersion = Get-AppVersionFromSource -RepoRootPath $resolvedRepoRoot
   $fromAppVersionMin = Get-FromVersionMin -VersionText $toAppVersion
   $requirementsFingerprint = Get-ExpectedRequirementsFingerprint -ResolvedBundleDir $resolvedBundleDir
 

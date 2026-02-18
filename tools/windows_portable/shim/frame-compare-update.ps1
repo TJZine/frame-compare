@@ -162,17 +162,41 @@ function Invoke-WithRetry([scriptblock]$Action, [string]$Label) {
 function Acquire-UpdateLock([string]$BundlePath) {
   $lockPath = Join-Path $BundlePath "app\\.update_lock"
   Ensure-Directory -Path (Split-Path -Parent $lockPath)
-  try {
-    $stream = [System.IO.File]::Open($lockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
-    $bytes = [System.Text.Encoding]::ASCII.GetBytes(([DateTime]::UtcNow.ToString("o")))
-    $stream.Write($bytes, 0, $bytes.Length)
-    $stream.Flush()
-    return [ordered]@{
-      lock_path = $lockPath
-      stream = $stream
+  $staleAfter = [TimeSpan]::FromHours(1)
+  for ($attempt = 1; $attempt -le 2; $attempt++) {
+    try {
+      $stream = [System.IO.File]::Open($lockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+      $bytes = [System.Text.Encoding]::ASCII.GetBytes(([DateTime]::UtcNow.ToString("o")))
+      $stream.Write($bytes, 0, $bytes.Length)
+      $stream.Flush()
+      return [ordered]@{
+        lock_path = $lockPath
+        stream = $stream
+      }
+    } catch {
+      if ($attempt -eq 1 -and (Test-Path -LiteralPath $lockPath)) {
+        $existing = $null
+        try {
+          $existing = Get-Item -LiteralPath $lockPath -ErrorAction Stop
+        } catch {
+          $existing = $null
+        }
+        if ($null -ne $existing) {
+          $age = ([DateTime]::UtcNow - $existing.LastWriteTimeUtc)
+          if ($age -gt $staleAfter) {
+            $ageMinutes = [int][Math]::Round($age.TotalMinutes)
+            Write-Host "WARNING: Stale update lock detected ($ageMinutes min); removing: $lockPath"
+            try {
+              Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
+            } catch {
+              # Ignore and fall through to the generic lock error.
+            }
+            continue
+          }
+        }
+      }
+      throw "Another update appears to be running (lock exists): $lockPath"
     }
-  } catch {
-    throw "Another update appears to be running (lock exists): $lockPath"
   }
 }
 
@@ -311,25 +335,39 @@ function Verify-ManifestSignature(
   } catch {
     return $false
   }
+  $rsa = $null
   try {
     $keyXml = Get-Content -LiteralPath $PublicKeyPath -Raw
     $rsa = New-Object System.Security.Cryptography.RSACryptoServiceProvider
     $rsa.PersistKeyInCsp = $false
     $rsa.FromXmlString($keyXml)
-    $isValid = $rsa.VerifyData($ManifestBytes, "SHA256", $signatureBytes)
-    $rsa.Clear()
-    return $isValid
+    return $rsa.VerifyData($ManifestBytes, "SHA256", $signatureBytes)
   } catch {
     return $false
+  } finally {
+    if ($null -ne $rsa) {
+      try { $rsa.Clear() } catch { }
+      try { $rsa.Dispose() } catch { }
+    }
   }
 }
 
 function Test-StringInRange([string]$Value, [string]$Min, [string]$Max) {
-  if ($Value -lt $Min) {
+  if ([string]::IsNullOrWhiteSpace($Value) -or [string]::IsNullOrWhiteSpace($Min)) {
     return $false
   }
-  if (![string]::IsNullOrWhiteSpace($Max) -and $Value -gt $Max) {
+  try { $valueVersion = [System.Version]::Parse($Value) } catch { return $false }
+  try { $minVersion = [System.Version]::Parse($Min) } catch { return $false }
+
+  if ($valueVersion.CompareTo($minVersion) -lt 0) {
     return $false
+  }
+
+  if (![string]::IsNullOrWhiteSpace($Max)) {
+    try { $maxVersion = [System.Version]::Parse($Max) } catch { return $false }
+    if ($valueVersion.CompareTo($maxVersion) -gt 0) {
+      return $false
+    }
   }
   return $true
 }
