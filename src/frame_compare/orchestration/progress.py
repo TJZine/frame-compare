@@ -22,7 +22,7 @@ def _stream_is_tty(stream: object) -> bool:
         return False
     try:
         return bool(isatty())
-    except OSError:
+    except (ValueError, OSError):
         return False
 
 

@@ -88,7 +88,7 @@ if ([string]::IsNullOrWhiteSpace($keyPath)) {
       throw "Missing SIGNING_KEY_XML_PATH and input is redirected."
     }
   } catch {
-    throw "Missing SIGNING_KEY_XML_PATH and input cannot be read interactively."
+    throw "Missing SIGNING_KEY_XML_PATH and input cannot be read interactively: $($_.Exception.Message)"
   }
   $keyPath = (Read-Host "Path to private signing key XML (SIGNING_KEY_XML_PATH)")
 }

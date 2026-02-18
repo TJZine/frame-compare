@@ -368,6 +368,17 @@ def test_windows_portable_build_update_add_file_to_zip_opens_entry_before_source
     assert entry_open_idx < source_open_idx
 
 
+def test_windows_portable_build_update_manifest_entries_use_mutable_list(repo_root: Path) -> None:
+    build_path = repo_root / "tools" / "windows_portable" / "build_update.ps1"
+    build_script = _read_text_or_fail(build_path)
+    # NOTE: This extraction assumes the function-closing "}" is unindented (column 0).
+    # Re-indenting closing braces in the PowerShell script will break this match.
+    fn = re.search(r"function\s+New-ManifestFiles\b[\s\S]*?\n\}", build_script, flags=re.DOTALL)
+    assert fn is not None
+    assert "System.Collections.Generic.List[object]" in fn.group(0)
+    assert re.search(r"\$entries\.Add\(", fn.group(0))
+
+
 def test_windows_portable_build_update_hashes_staged_payload_files(repo_root: Path) -> None:
     build_path = repo_root / "tools" / "windows_portable" / "build_update.ps1"
     build_script = _read_text_or_fail(build_path)
@@ -492,6 +503,27 @@ def test_windows_portable_updater_isolates_rename_recovery_cleanup_steps(repo_ro
     )
 
 
+def test_windows_portable_updater_extract_zip_entry_disposes_streams_safely(
+    repo_root: Path,
+) -> None:
+    updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
+    updater = _read_text_or_fail(updater_path)
+    # NOTE: This extraction assumes the function-closing "}" is unindented (column 0).
+    # Re-indenting closing braces in the PowerShell script will break this match.
+    invoke_apply = re.search(
+        r"function\s+Invoke-ApplyUpdate\b[\s\S]*?\n\}", updater, flags=re.DOTALL
+    )
+    assert invoke_apply is not None
+    body = invoke_apply.group(0)
+    assert "$stream = $entry.Open()" in body
+    assert "$out = $null" in body
+    assert re.search(r"try\s*\{\s*\$out = \[System\.IO\.File\]::Open\(", body, flags=re.DOTALL)
+    assert re.search(r"if \(\$null -ne \$out\)\s*\{\s*\$out\.Dispose\(\)", body, flags=re.DOTALL)
+    assert re.search(
+        r"if \(\$null -ne \$stream\)\s*\{\s*\$stream\.Dispose\(\)", body, flags=re.DOTALL
+    )
+
+
 def test_windows_portable_sign_update_write_string_entry_disposes_writer(
     repo_root: Path,
 ) -> None:
@@ -517,3 +549,12 @@ def test_windows_portable_sign_update_disposes_rsa_in_finally(repo_root: Path) -
     assert rsa_cleanup is not None
     assert re.search(r"\$rsa\.Clear\(\)", rsa_cleanup.group(0))
     assert re.search(r"\$rsa\.Dispose\(\)", rsa_cleanup.group(0))
+
+
+def test_windows_portable_sign_update_preserves_console_detection_error_context(
+    repo_root: Path,
+) -> None:
+    sign_path = repo_root / "tools" / "windows_portable" / "sign_update.ps1"
+    sign_script = _read_text_or_fail(sign_path)
+    assert "input cannot be read interactively" in sign_script
+    assert "$_.Exception.Message" in sign_script

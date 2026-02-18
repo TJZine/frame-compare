@@ -516,13 +516,22 @@ function Invoke-ApplyUpdate([string]$BundlePath, [string]$UpdateZipPath) {
       $entry = $zipEntryMap[$entryName]
       $outPath = Get-SafeChildPath -Root $tempRoot -RelativePath $entryName -Context "zip extraction path"
       Ensure-Directory -Path (Split-Path -Parent $outPath)
-      $stream = $entry.Open()
-      $out = [System.IO.File]::Open($outPath, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+      $stream = $null
+      $out = $null
       try {
-        $stream.CopyTo($out)
+        $stream = $entry.Open()
+        try {
+          $out = [System.IO.File]::Open($outPath, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+          $stream.CopyTo($out)
+        } finally {
+          if ($null -ne $out) {
+            $out.Dispose()
+          }
+        }
       } finally {
-        $out.Dispose()
-        $stream.Dispose()
+        if ($null -ne $stream) {
+          $stream.Dispose()
+        }
       }
     }
 

@@ -59,7 +59,7 @@ function Get-ExpectedRequirementsFingerprint([string]$ResolvedBundleDir) {
 }
 
 function New-ManifestFiles([string]$SourceRoot, [string]$PayloadRoot) {
-  $entries = @()
+  $entries = New-Object 'System.Collections.Generic.List[object]'
   $sourcePrefix = $SourceRoot.TrimEnd("\")
   foreach ($sourceFile in (Get-ChildItem -LiteralPath $sourcePrefix -Recurse -File | Sort-Object FullName)) {
     $relative = $sourceFile.FullName.Substring($sourcePrefix.Length + 1)
@@ -70,13 +70,14 @@ function New-ManifestFiles([string]$SourceRoot, [string]$PayloadRoot) {
     Copy-Item -LiteralPath $sourceFile.FullName -Destination $destFile -Force
     $destInfo = Get-Item -LiteralPath $destFile
     $destHash = (Get-FileHash -LiteralPath $destFile -Algorithm SHA256).Hash.ToLowerInvariant()
-    $entries += [ordered]@{
+    $entryRecord = [ordered]@{
       path = $manifestPath
       sha256 = $destHash
       bytes = [int64]$destInfo.Length
     }
+    [void]$entries.Add($entryRecord)
   }
-  return @($entries | Sort-Object { $_["path"] })
+  return @($entries.ToArray() | Sort-Object { $_["path"] })
 }
 
 function Add-FileToZip(
