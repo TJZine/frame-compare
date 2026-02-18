@@ -85,13 +85,19 @@ function Add-FileToZip(
   [string]$EntryName
 ) {
   $entry = $Zip.CreateEntry($EntryName, [System.IO.Compression.CompressionLevel]::Optimal)
-  $sourceStream = [System.IO.File]::OpenRead($SourceFile)
-  $entryStream = $entry.Open()
+  $entryStream = $null
+  $sourceStream = $null
   try {
+    $entryStream = $entry.Open()
+    $sourceStream = [System.IO.File]::OpenRead($SourceFile)
     $sourceStream.CopyTo($entryStream)
   } finally {
-    $entryStream.Dispose()
-    $sourceStream.Dispose()
+    if ($null -ne $entryStream) {
+      $entryStream.Dispose()
+    }
+    if ($null -ne $sourceStream) {
+      $sourceStream.Dispose()
+    }
   }
 }
 

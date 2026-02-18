@@ -326,6 +326,8 @@ def test_windows_portable_updater_always_clears_rsa_in_signature_verification(
 ) -> None:
     updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
     updater = _read_text_or_fail(updater_path)
+    # NOTE: This extraction assumes the function-closing "}" is unindented (column 0).
+    # Re-indenting closing braces in the PowerShell script will break this match.
     signature_fn = re.search(
         r"function\s+Verify-ManifestSignature\b[\s\S]*?\n\}",
         updater,
@@ -341,15 +343,36 @@ def test_windows_portable_build_update_validates_normalized_from_app_version_min
 ) -> None:
     build_path = repo_root / "tools" / "windows_portable" / "build_update.ps1"
     build_script = _read_text_or_fail(build_path)
+    # NOTE: This extraction assumes the function-closing "}" is unindented (column 0).
+    # Re-indenting closing braces in the PowerShell script will break this match.
     fn = re.search(r"function\s+Get-FromVersionMin\b[\s\S]*?\n\}", build_script, flags=re.DOTALL)
     assert fn is not None
     assert re.search(r"\bthrow\b", fn.group(0))
-    assert re.search(r"\bTest-StringInRange\b", fn.group(0))
+    assert re.search(r"\[regex\]::Match\(", fn.group(0))
+
+
+def test_windows_portable_build_update_add_file_to_zip_opens_entry_before_source(
+    repo_root: Path,
+) -> None:
+    build_path = repo_root / "tools" / "windows_portable" / "build_update.ps1"
+    build_script = _read_text_or_fail(build_path)
+    # NOTE: This extraction assumes the function-closing "}" is unindented (column 0).
+    # Re-indenting closing braces in the PowerShell script will break this match.
+    fn = re.search(r"function\s+Add-FileToZip\b[\s\S]*?\n\}", build_script, flags=re.DOTALL)
+    assert fn is not None
+    function_text = fn.group(0)
+    entry_open_idx = function_text.find("$entry.Open()")
+    source_open_idx = function_text.find("OpenRead($SourceFile)")
+    assert entry_open_idx >= 0
+    assert source_open_idx >= 0
+    assert entry_open_idx < source_open_idx
 
 
 def test_windows_portable_build_update_hashes_staged_payload_files(repo_root: Path) -> None:
     build_path = repo_root / "tools" / "windows_portable" / "build_update.ps1"
     build_script = _read_text_or_fail(build_path)
+    # NOTE: This extraction assumes the function-closing "}" is unindented (column 0).
+    # Re-indenting closing braces in the PowerShell script will break this match.
     fn = re.search(r"function\s+New-ManifestFiles\b[\s\S]*?\n\}", build_script, flags=re.DOTALL)
     assert fn is not None
     assert re.search(
@@ -424,6 +447,8 @@ def test_windows_portable_updater_warns_when_installed_version_missing(repo_root
 def test_windows_portable_updater_finally_does_not_mask_exception(repo_root: Path) -> None:
     updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
     updater = _read_text_or_fail(updater_path)
+    # NOTE: This extraction assumes the function-closing "}" is unindented (column 0).
+    # Re-indenting closing braces in the PowerShell script will break this match.
     invoke_apply = re.search(
         r"function\s+Invoke-ApplyUpdate\b[\s\S]*?\n\}", updater, flags=re.DOTALL
     )
@@ -433,12 +458,62 @@ def test_windows_portable_updater_finally_does_not_mask_exception(repo_root: Pat
     assert "Write-Warning" in invoke_apply.group(0)
 
 
-def test_windows_portable_sign_update_write_string_entry_always_disposes_stream(
+def test_windows_portable_updater_isolates_rename_recovery_cleanup_steps(repo_root: Path) -> None:
+    updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
+    updater = _read_text_or_fail(updater_path)
+    # NOTE: This extraction assumes the function-closing "}" is unindented (column 0).
+    # Re-indenting closing braces in the PowerShell script will break this match.
+    invoke_apply = re.search(
+        r"function\s+Invoke-ApplyUpdate\b[\s\S]*?\n\}", updater, flags=re.DOTALL
+    )
+    assert invoke_apply is not None
+    body = invoke_apply.group(0)
+    assert "Rename failed; restoring original installation." in body
+    assert "Cleanup step failed" in body
+    assert re.search(
+        r"try\s*\{\s*if \(Test-Path -LiteralPath \$targetDir\)\s*\{[\s\S]*?Remove partial target after rename failure",
+        body,
+        flags=re.DOTALL,
+    )
+    assert re.search(
+        r"try\s*\{\s*if \(Test-Path -LiteralPath \$newDir\)\s*\{[\s\S]*?Remove \.new after rename failure",
+        body,
+        flags=re.DOTALL,
+    )
+    assert re.search(
+        r"if \(Test-Path -LiteralPath \$oldDir\)\s*\{\s*try\s*\{[\s\S]*?Restore \.old after rename failure",
+        body,
+        flags=re.DOTALL,
+    )
+    assert re.search(
+        r"try\s*\{[\s\S]*?Restore-FromBackup\s+-BackupDir\s+\$backupDir\s+-TargetDir\s+\$targetDir",
+        body,
+        flags=re.DOTALL,
+    )
+
+
+def test_windows_portable_sign_update_write_string_entry_disposes_writer(
     repo_root: Path,
 ) -> None:
     sign_path = repo_root / "tools" / "windows_portable" / "sign_update.ps1"
     sign_script = _read_text_or_fail(sign_path)
+    # NOTE: This extraction assumes the function-closing "}" is unindented (column 0).
+    # Re-indenting closing braces in the PowerShell script will break this match.
     fn = re.search(r"function\s+Write-StringEntry\b[\s\S]*?\n\}", sign_script, flags=re.DOTALL)
     assert fn is not None
     assert "finally" in fn.group(0)
-    assert re.search(r"\$stream\.Dispose\(\)", fn.group(0))
+    assert re.search(r"\$writer\.Dispose\(\)", fn.group(0))
+    assert not re.search(r"\$stream\.Dispose\(\)", fn.group(0))
+
+
+def test_windows_portable_sign_update_disposes_rsa_in_finally(repo_root: Path) -> None:
+    sign_path = repo_root / "tools" / "windows_portable" / "sign_update.ps1"
+    sign_script = _read_text_or_fail(sign_path)
+    rsa_cleanup = re.search(
+        r"if\s*\(\$null -ne \$rsa\)\s*\{[\s\S]*?\}",
+        sign_script,
+        flags=re.DOTALL,
+    )
+    assert rsa_cleanup is not None
+    assert re.search(r"\$rsa\.Clear\(\)", rsa_cleanup.group(0))
+    assert re.search(r"\$rsa\.Dispose\(\)", rsa_cleanup.group(0))

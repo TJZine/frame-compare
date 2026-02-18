@@ -46,8 +46,19 @@ def test_select_reporter_tty_detection_interactive(monkeypatch: pytest.MonkeyPat
 def test_select_reporter_tty_detection_non_interactive(monkeypatch: pytest.MonkeyPatch):
     """Auto-detection in non-TTY should return LogProgressReporter."""
     monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
     reporter = select_reporter()
     assert isinstance(reporter, LogProgressReporter)
+
+
+def test_select_reporter_uses_stderr_tty_when_stdout_is_not_tty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Auto-detection should use Rich when stderr is interactive."""
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
+    reporter = select_reporter()
+    assert isinstance(reporter, RichProgressReporter)
 
 
 def test_select_reporter_quiet_takes_precedence_over_json():

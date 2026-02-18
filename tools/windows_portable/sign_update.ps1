@@ -58,15 +58,11 @@ function Write-StringEntry(
   }
   $entry = $Zip.CreateEntry($EntryPath, [System.IO.Compression.CompressionLevel]::Optimal)
   $stream = $entry.Open()
+  $writer = New-Object System.IO.StreamWriter($stream, (New-Object System.Text.UTF8Encoding($false)))
   try {
-    $writer = New-Object System.IO.StreamWriter($stream, (New-Object System.Text.UTF8Encoding($false)))
-    try {
-      $writer.Write($Content)
-    } finally {
-      $writer.Dispose()
-    }
+    $writer.Write($Content)
   } finally {
-    $stream.Dispose()
+    $writer.Dispose()
   }
 }
 
@@ -146,5 +142,6 @@ try {
   }
   if ($null -ne $rsa) {
     $rsa.Clear()
+    $rsa.Dispose()
   }
 }

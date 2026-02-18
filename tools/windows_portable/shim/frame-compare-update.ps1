@@ -623,19 +623,47 @@ function Invoke-ApplyUpdate([string]$BundlePath, [string]$UpdateZipPath) {
       Invoke-WithRetry -Label "Rename current frame_compare to .old" -Action { Move-Item -LiteralPath $targetDir -Destination $oldDir -Force }
       Invoke-WithRetry -Label "Rename .new into place" -Action { Move-Item -LiteralPath $newDir -Destination $targetDir -Force }
     } catch {
+      $renameError = $_
       Write-Host "Rename failed; restoring original installation."
-      if (Test-Path -LiteralPath $targetDir) {
-        Invoke-WithRetry -Label "Remove partial target after rename failure" -Action { Remove-Item -LiteralPath $targetDir -Recurse -Force }
+      try {
+        if (Test-Path -LiteralPath $targetDir) {
+          Invoke-WithRetry -Label "Remove partial target after rename failure" -Action { Remove-Item -LiteralPath $targetDir -Recurse -Force }
+        }
+      } catch {
+        Write-Warning "Cleanup step failed (remove partial target after rename failure): $($_.Exception.Message)"
       }
-      if (Test-Path -LiteralPath $newDir) {
-        Invoke-WithRetry -Label "Remove .new after rename failure" -Action { Remove-Item -LiteralPath $newDir -Recurse -Force }
+
+      try {
+        if (Test-Path -LiteralPath $newDir) {
+          Invoke-WithRetry -Label "Remove .new after rename failure" -Action { Remove-Item -LiteralPath $newDir -Recurse -Force }
+        }
+      } catch {
+        Write-Warning "Cleanup step failed (remove .new after rename failure): $($_.Exception.Message)"
       }
+
+      $restoredFromOld = $false
       if (Test-Path -LiteralPath $oldDir) {
-        Invoke-WithRetry -Label "Restore .old after rename failure" -Action { Move-Item -LiteralPath $oldDir -Destination $targetDir -Force }
-      } elseif (![string]::IsNullOrWhiteSpace($backupDir) -and (Test-Path -LiteralPath $backupDir)) {
-        Restore-FromBackup -BackupDir $backupDir -TargetDir $targetDir
+        try {
+          Invoke-WithRetry -Label "Restore .old after rename failure" -Action { Move-Item -LiteralPath $oldDir -Destination $targetDir -Force }
+          $restoredFromOld = $true
+        } catch {
+          Write-Warning "Cleanup step failed (restore .old after rename failure): $($_.Exception.Message)"
+        }
       }
-      throw
+
+      if (
+        -not $restoredFromOld -and
+        ![string]::IsNullOrWhiteSpace($backupDir) -and
+        (Test-Path -LiteralPath $backupDir)
+      ) {
+        try {
+          Restore-FromBackup -BackupDir $backupDir -TargetDir $targetDir
+        } catch {
+          Write-Warning "Cleanup step failed (restore backup after rename failure): $($_.Exception.Message)"
+        }
+      }
+
+      throw $renameError
     }
 
     try {
