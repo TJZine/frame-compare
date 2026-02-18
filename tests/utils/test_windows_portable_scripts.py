@@ -344,7 +344,38 @@ def test_windows_portable_build_update_validates_normalized_from_app_version_min
     fn = re.search(r"function\s+Get-FromVersionMin\b[\s\S]*?\n\}", build_script, flags=re.DOTALL)
     assert fn is not None
     assert re.search(r"\bthrow\b", fn.group(0))
-    assert "Test-StringInRange" in fn.group(0)
+    assert re.search(r"\bTest-StringInRange\b", fn.group(0))
+
+
+def test_windows_portable_build_update_hashes_staged_payload_files(repo_root: Path) -> None:
+    build_path = repo_root / "tools" / "windows_portable" / "build_update.ps1"
+    build_script = _read_text_or_fail(build_path)
+    fn = re.search(r"function\s+New-ManifestFiles\b[\s\S]*?\n\}", build_script, flags=re.DOTALL)
+    assert fn is not None
+    assert re.search(
+        r"Copy-Item\s+-LiteralPath\s+\$sourceFile\.FullName\s+-Destination\s+\$destFile",
+        fn.group(0),
+    )
+    assert re.search(r"Get-FileHash\s+-LiteralPath\s+\$destFile\s+-Algorithm\s+SHA256", fn.group(0))
+
+
+def test_windows_portable_build_portable_updater_launcher_fails_closed_without_exit_code(
+    repo_root: Path,
+) -> None:
+    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
+    build_script = _read_text_or_fail(build_path)
+    assert "& $updater @args" in build_script
+    assert "if ($null -eq $LASTEXITCODE) {" in build_script
+    assert "exit 1" in build_script
+    assert "if ($?)" not in build_script
+
+
+def test_windows_portable_readme_release_signing_header_has_no_leading_space(
+    repo_root: Path,
+) -> None:
+    portable_readme_path = repo_root / "tools" / "windows_portable" / "README.txt"
+    portable_readme = _read_text_or_fail(portable_readme_path)
+    assert "\nRELEASE SIGNING (Maintainers):" in portable_readme
 
 
 def test_windows_portable_sign_update_avoids_private_key_path_cli_argument(repo_root: Path) -> None:
@@ -380,3 +411,34 @@ def test_windows_portable_build_copies_dist_info_licenses_when_present(repo_root
     assert (
         re.search(r"dist-info\\\\licenses", build_script) or "dist-info\\licenses" in build_script
     )
+
+
+def test_windows_portable_updater_warns_when_installed_version_missing(repo_root: Path) -> None:
+    updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
+    updater = _read_text_or_fail(updater_path)
+    assert "Get-BundleAppVersion" in updater
+    assert "Write-Warning" in updater
+    assert "skipping version range check" in updater.lower()
+
+
+def test_windows_portable_updater_finally_does_not_mask_exception(repo_root: Path) -> None:
+    updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
+    updater = _read_text_or_fail(updater_path)
+    invoke_apply = re.search(
+        r"function\s+Invoke-ApplyUpdate\b[\s\S]*?\n\}", updater, flags=re.DOTALL
+    )
+    assert invoke_apply is not None
+    assert "finally" in invoke_apply.group(0)
+    assert re.search(r"try\s*\{\s*Release-UpdateLock", invoke_apply.group(0))
+    assert "Write-Warning" in invoke_apply.group(0)
+
+
+def test_windows_portable_sign_update_write_string_entry_always_disposes_stream(
+    repo_root: Path,
+) -> None:
+    sign_path = repo_root / "tools" / "windows_portable" / "sign_update.ps1"
+    sign_script = _read_text_or_fail(sign_path)
+    fn = re.search(r"function\s+Write-StringEntry\b[\s\S]*?\n\}", sign_script, flags=re.DOTALL)
+    assert fn is not None
+    assert "finally" in fn.group(0)
+    assert re.search(r"\$stream\.Dispose\(\)", fn.group(0))

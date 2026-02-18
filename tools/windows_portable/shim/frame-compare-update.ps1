@@ -471,10 +471,10 @@ function Invoke-ApplyUpdate([string]$BundlePath, [string]$UpdateZipPath) {
     $fromVersionMin = Get-RequiredStringProperty -Object $manifest -Name "from_app_version_min" -Context "manifest"
     $fromVersionMax = Get-OptionalStringProperty -Object $manifest -Name "from_app_version_max"
     $installedVersion = Get-BundleAppVersion -BundlePath $BundlePath
-    if (![string]::IsNullOrWhiteSpace($installedVersion)) {
-      if (!(Test-StringInRange -Value $installedVersion -Min $fromVersionMin -Max $fromVersionMax)) {
-        throw "Installed app version '$installedVersion' is outside supported range [$fromVersionMin, $fromVersionMax]."
-      }
+    if ([string]::IsNullOrWhiteSpace($installedVersion)) {
+      Write-Warning "Installed version could not be determined; skipping version range check. Manifest range=[$fromVersionMin, $fromVersionMax]."
+    } elseif (!(Test-StringInRange -Value $installedVersion -Min $fromVersionMin -Max $fromVersionMax)) {
+      throw "Installed app version '$installedVersion' is outside supported range [$fromVersionMin, $fromVersionMax]."
     }
 
     $filesProp = $manifest.PSObject.Properties["files"]
@@ -672,9 +672,17 @@ function Invoke-ApplyUpdate([string]$BundlePath, [string]$UpdateZipPath) {
       $zip.Dispose()
     }
     if (Test-Path -LiteralPath $tempRoot) {
-      Remove-Item -LiteralPath $tempRoot -Recurse -Force
+      try {
+        Remove-Item -LiteralPath $tempRoot -Recurse -Force
+      } catch {
+        Write-Warning "Failed to remove temporary update directory: $tempRoot ($($_.Exception.Message))"
+      }
     }
-    Release-UpdateLock -LockInfo $lockInfo
+    try {
+      Release-UpdateLock -LockInfo $lockInfo
+    } catch {
+      Write-Warning "Failed to release update lock: $($_.Exception.Message)"
+    }
   }
 }
 

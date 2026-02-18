@@ -57,7 +57,7 @@ UPDATING (Code-Only Update Package):
     - Unsafe apply paths require explicit typed confirmation.
     - Non-interactive sessions fail safely instead of prompting.
 
- RELEASE SIGNING (Maintainers):
+RELEASE SIGNING (Maintainers):
   One-time key generation (private key must stay out-of-repo):
     - Generate RSA keypair (PKCS#1/SHA256 compatible with PowerShell 5.1).
     - Commit only the public key XML at:

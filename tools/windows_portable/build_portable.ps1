@@ -249,7 +249,6 @@ if (!(Test-Path -LiteralPath $updater)) {
 
 & $updater @args
 if ($null -eq $LASTEXITCODE) {
-  if ($?) { exit 0 }
   exit 1
 }
 exit $LASTEXITCODE

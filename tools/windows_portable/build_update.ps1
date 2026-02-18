@@ -68,10 +68,12 @@ function New-ManifestFiles([string]$SourceRoot, [string]$PayloadRoot) {
     $destFile = Join-Path $PayloadRoot $relative
     Ensure-Directory -Path (Split-Path -Parent $destFile)
     Copy-Item -LiteralPath $sourceFile.FullName -Destination $destFile -Force
+    $destInfo = Get-Item -LiteralPath $destFile
+    $destHash = (Get-FileHash -LiteralPath $destFile -Algorithm SHA256).Hash.ToLowerInvariant()
     $entries += [ordered]@{
       path = $manifestPath
-      sha256 = (Get-FileHash -LiteralPath $sourceFile.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-      bytes = [int64]$sourceFile.Length
+      sha256 = $destHash
+      bytes = [int64]$destInfo.Length
     }
   }
   return @($entries | Sort-Object { $_["path"] })
