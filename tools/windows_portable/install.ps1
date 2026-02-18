@@ -23,7 +23,16 @@ if (!(Test-Path -LiteralPath $bundleLauncher)) {
 $shimSource = Join-Path $bundleRoot "shim"
 $shimPs1Source = Join-Path $shimSource "frame-compare.ps1"
 $shimCmdSource = Join-Path $shimSource "frame-compare.cmd"
-if (!(Test-Path -LiteralPath $shimPs1Source) -or !(Test-Path -LiteralPath $shimCmdSource)) {
+$updateShimPs1Source = Join-Path $shimSource "frame-compare-update.ps1"
+$updateShimCmdSource = Join-Path $shimSource "frame-compare-update.cmd"
+$updatePublicKeySource = Join-Path $shimSource "update_public_key.xml"
+if (
+  !(Test-Path -LiteralPath $shimPs1Source) -or
+  !(Test-Path -LiteralPath $shimCmdSource) -or
+  !(Test-Path -LiteralPath $updateShimPs1Source) -or
+  !(Test-Path -LiteralPath $updateShimCmdSource) -or
+  !(Test-Path -LiteralPath $updatePublicKeySource)
+) {
   throw "Shim files are missing under: $shimSource"
 }
 
@@ -39,6 +48,9 @@ Initialize-Directory -Path $stateDir
 
 Copy-Item -LiteralPath $shimPs1Source -Destination (Join-Path $binDir "frame-compare.ps1") -Force
 Copy-Item -LiteralPath $shimCmdSource -Destination (Join-Path $binDir "frame-compare.cmd") -Force
+Copy-Item -LiteralPath $updateShimPs1Source -Destination (Join-Path $binDir "frame-compare-update.ps1") -Force
+Copy-Item -LiteralPath $updateShimCmdSource -Destination (Join-Path $binDir "frame-compare-update.cmd") -Force
+Copy-Item -LiteralPath $updatePublicKeySource -Destination (Join-Path $binDir "update_public_key.xml") -Force
 
 $config = @{
   schema_version = 1
@@ -93,3 +105,4 @@ if (-not $hasEntry) {
 Write-Host ""
 Write-Host "Installed Frame Compare shim."
 Write-Host "Open a new terminal, then run: frame-compare --help"
+Write-Host "Updater command: frame-compare-update --help"

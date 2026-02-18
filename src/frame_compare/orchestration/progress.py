@@ -15,6 +15,17 @@ from frame_compare.utils.progress import (
 )
 
 
+def _stream_is_tty(stream: object) -> bool:
+    """Return True when a stream behaves like an interactive TTY."""
+    isatty = getattr(stream, "isatty", None)
+    if not callable(isatty):
+        return False
+    try:
+        return bool(isatty())
+    except (ValueError, OSError):
+        return False
+
+
 def select_reporter(
     quiet: bool = False,
     json_output: bool = False,
@@ -30,7 +41,7 @@ def select_reporter(
     4. force_tty is not None:
        - True -> RichProgressReporter
        - False -> LogProgressReporter
-    5. TTY detection (sys.stdout.isatty()):
+    5. TTY detection (sys.stdout/sys.stderr isatty):
        - Interactive -> RichProgressReporter
        - Non-interactive -> LogProgressReporter
 
@@ -57,7 +68,7 @@ def select_reporter(
             return RichProgressReporter()
         return LogProgressReporter()
 
-    if sys.stdout.isatty():
+    if _stream_is_tty(sys.stdout) or _stream_is_tty(sys.stderr):
         return RichProgressReporter()
 
     return LogProgressReporter()

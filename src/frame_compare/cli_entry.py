@@ -3,6 +3,7 @@
 # ruff: noqa: B008
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sys
@@ -83,10 +84,8 @@ def _maybe_open_report(report_path: Path) -> None:
             os.startfile(str(report_path))  # type: ignore[attr-defined]
             return
         except OSError:
-            try:
+            with contextlib.suppress(OSError, webbrowser.Error):
                 webbrowser.open(report_path.resolve().as_uri())
-            except (OSError, webbrowser.Error):
-                return
             return
 
     try:

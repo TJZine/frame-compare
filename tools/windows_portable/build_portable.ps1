@@ -16,6 +16,8 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 $PSNativeCommandUseErrorActionPreference = $true
 
+. (Join-Path $PSScriptRoot "version_utils.ps1")
+
 function Ensure-Directory([string]$Path) {
   if (!(Test-Path -LiteralPath $Path)) {
     New-Item -ItemType Directory -Path $Path | Out-Null
@@ -157,6 +159,8 @@ function Install-Artifact([string]$BundleRoot, [pscustomobject]$Artifact, [strin
 function Write-LauncherFiles([string]$BundleRoot) {
   $ps1Path = Join-Path $BundleRoot "frame-compare.ps1"
   $cmdPath = Join-Path $BundleRoot "frame-compare.cmd"
+  $updatePs1Path = Join-Path $BundleRoot "frame-compare-update.ps1"
+  $updateCmdPath = Join-Path $BundleRoot "frame-compare-update.cmd"
 
   $ps1 = @'
 $ErrorActionPreference = "Stop"
@@ -175,6 +179,7 @@ $env:VAPOURSYNTH_CONF_PATH = "$bundleRoot\\vs\\core\\portable.vs"
 $env:VAPOURSYNTH_PLUGIN_PATH = "$bundleRoot\\vs\\plugins"
 $vsCore = Join-Path $bundleRoot "vs\\core"
 $ffmpegRoot = Join-Path $bundleRoot "ffmpeg"
+$qtBin = Join-Path $bundleRoot "app\\site-packages\\PySide6\\Qt\\bin"
 $vsRuntimeCandidates = @()
 if (Test-Path -LiteralPath $vsCore) {
   $vsRuntimeCandidates = @(Get-ChildItem -LiteralPath $vsCore -Filter "VSScript.dll" -File -Recurse)
@@ -190,6 +195,9 @@ $pathEntries = @(
   (Join-Path $bundleRoot "vs\\plugins"),
   $ffmpegRoot
 )
+if (Test-Path -LiteralPath $qtBin) {
+  $pathEntries = @($qtBin) + $pathEntries
+}
 if ($null -ne $vsRuntimeDir -and $vsRuntimeDir -ne "") {
   $pathEntries = @($vsRuntimeDir) + $pathEntries
 }
@@ -228,14 +236,43 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%frame-compare.p
 exit /b %ERRORLEVEL%
 '@
 
+  $updatePs1 = @'
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$bundleRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$updater = Join-Path $bundleRoot "shim\\frame-compare-update.ps1"
+
+if (!(Test-Path -LiteralPath $updater)) {
+  throw "Updater shim not found: $updater"
+}
+
+& $updater @args
+if ($null -eq $LASTEXITCODE) {
+  exit 1
+}
+exit $LASTEXITCODE
+'@
+
+  $updateCmd = @'
+@echo off
+setlocal
+set SCRIPT_DIR=%~dp0
+powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%frame-compare-update.ps1" %*
+exit /b %ERRORLEVEL%
+'@
+
   Set-Content -LiteralPath $ps1Path -Value $ps1 -Encoding UTF8
   Set-Content -LiteralPath $cmdPath -Value $cmd -Encoding ASCII
+  Set-Content -LiteralPath $updatePs1Path -Value $updatePs1 -Encoding UTF8
+  Set-Content -LiteralPath $updateCmdPath -Value $updateCmd -Encoding ASCII
 }
 
 function Copy-InstallerFiles([string]$BundleRoot) {
   $sourceDir = $PSScriptRoot
   $shimSource = Join-Path $sourceDir "shim"
   $shimDest = Join-Path $BundleRoot "shim"
+  $publicKeySource = Join-Path $sourceDir "update_public_key.xml"
 
   foreach ($file in @("install.ps1", "uninstall.ps1", "install.cmd", "uninstall.cmd", "README.txt")) {
     $src = Join-Path $sourceDir $file
@@ -248,10 +285,14 @@ function Copy-InstallerFiles([string]$BundleRoot) {
   if (!(Test-Path -LiteralPath $shimSource)) {
     throw "Shim directory not found: $shimSource"
   }
+  if (!(Test-Path -LiteralPath $publicKeySource)) {
+    throw "Update public key not found: $publicKeySource"
+  }
   if (Test-Path -LiteralPath $shimDest) {
     Remove-Item -Recurse -Force -LiteralPath $shimDest
   }
   Copy-Item -Recurse -Force -LiteralPath $shimSource -Destination $shimDest
+  Copy-Item -Force -LiteralPath $publicKeySource -Destination (Join-Path $shimDest "update_public_key.xml")
 }
 
 function Copy-RepoApp([string]$BundleRoot) {
@@ -305,7 +346,7 @@ function Install-PythonDeps([string]$BundleRoot, [string]$VsCoreRoot) {
   Push-Location $RepoRoot
   try {
     # Export pinned, hashed requirements from uv.lock (exclude project itself; we run from app/src via PYTHONPATH).
-    uv export --frozen --no-dev --no-emit-project --format requirements.txt --output-file $reqFile | Out-Null
+    uv export --frozen --no-dev --no-emit-project --extra vspreview --format requirements.txt --output-file $reqFile | Out-Null
     Assert-LastExitCode -CommandLabel "uv export"
   } finally {
     Pop-Location
@@ -342,6 +383,27 @@ function Install-PythonDeps([string]$BundleRoot, [string]$VsCoreRoot) {
   }
 }
 
+function Write-BundleInfo([string]$BundleRoot, [string]$AppVersion) {
+  $requirementsLockPath = Join-Path $BundleRoot "requirements.lock.txt"
+  if (!(Test-Path -LiteralPath $requirementsLockPath)) {
+    throw "requirements.lock.txt not found for bundle info: $requirementsLockPath"
+  }
+
+  $requirementsLockSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $requirementsLockPath).Hash.ToLowerInvariant()
+  $bundleInfo = [ordered]@{
+    schema_version = 1
+    bundle_kind = "full"
+    app_version = $AppVersion
+    requirements_lock_sha256 = $requirementsLockSha256
+    manifest_version = 1
+    platform = "windows-x64"
+  }
+  $bundleInfoPath = Join-Path $BundleRoot "bundle_info.json"
+  $bundleInfoJson = $bundleInfo | ConvertTo-Json
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($bundleInfoPath, ($bundleInfoJson + "`n"), $utf8NoBom)
+}
+
 function Assert-BundleRuntime([string]$BundleRoot) {
   $python = Join-Path $BundleRoot "python\\python.exe"
   if (!(Test-Path -LiteralPath $python)) {
@@ -351,18 +413,65 @@ function Assert-BundleRuntime([string]$BundleRoot) {
   $env:PYTHONUTF8 = "1"
   $env:PYTHONPATH = "$BundleRoot\\app\\src;$BundleRoot\\app\\site-packages"
   $env:VAPOURSYNTH_PLUGIN_PATH = "$BundleRoot\\vs\\plugins"
-  $env:PATH = "$BundleRoot\\python;$BundleRoot\\vs\\core;$BundleRoot\\vs\\plugins;$BundleRoot\\ffmpeg;$env:PATH"
+  $pathEntries = @(
+    "$BundleRoot\\python",
+    "$BundleRoot\\vs\\core",
+    "$BundleRoot\\vs\\plugins",
+    "$BundleRoot\\ffmpeg"
+  )
+  $qtBin = Join-Path $BundleRoot "app\\site-packages\\PySide6\\Qt\\bin"
+  if (Test-Path -LiteralPath $qtBin) {
+    $pathEntries = @($qtBin) + $pathEntries
+  }
+  $env:PATH = (($pathEntries -join ";") + ";" + $env:PATH)
 
-  & $python -c "import tomli_w; import typer; import rich; import frame_compare"
+  & $python -c "import tomli_w; import typer; import rich; import vspreview; import PySide6; import frame_compare"
   Assert-LastExitCode -CommandLabel "bundle runtime import validation"
+}
+
+function Copy-PythonDistLicenses([string]$SitePackages, [string]$LicensesPythonDir) {
+  Ensure-Directory -Path $LicensesPythonDir
+  $licensePatterns = @("LICENSE*", "COPYING*")
+  $distInfoDirs = @(Get-ChildItem -LiteralPath $SitePackages -Directory -Filter "*.dist-info" -ErrorAction SilentlyContinue)
+  foreach ($distInfo in $distInfoDirs) {
+    # Some wheels ship license texts under *.dist-info\licenses (not just LICENSE* at dist-info root).
+    foreach ($pattern in $licensePatterns) {
+      $licenseFiles = @(Get-ChildItem -LiteralPath $distInfo.FullName -File -Filter $pattern -ErrorAction SilentlyContinue)
+      foreach ($match in $licenseFiles) {
+        $destName = "{0}__{1}" -f $distInfo.Name, $match.Name
+        Copy-Item -Force -LiteralPath $match.FullName -Destination (Join-Path $LicensesPythonDir $destName)
+      }
+    }
+
+    $distInfoLicenses = Join-Path $distInfo.FullName "licenses"
+    if (Test-Path -LiteralPath $distInfoLicenses -PathType Container) {
+      $destDir = Join-Path $LicensesPythonDir ("{0}__licenses" -f $distInfo.Name)
+      Copy-Item -Recurse -Force -LiteralPath $distInfoLicenses -Destination $destDir
+    }
+  }
+
+  $qtLicenses = Join-Path $SitePackages "PySide6\\Qt\\licenses"
+  if (Test-Path -LiteralPath $qtLicenses) {
+    Copy-Item -Recurse -Force -LiteralPath $qtLicenses -Destination (Join-Path $LicensesPythonDir "PySide6-Qt-licenses")
+  }
 }
 
 function Copy-Licenses([string]$BundleRoot, [pscustomobject[]]$Artifacts) {
   $licensesDir = Join-Path $BundleRoot "licenses"
   Ensure-Directory -Path $licensesDir
+  $pythonLicensesDir = Join-Path $licensesDir "python"
+  Ensure-Directory -Path $pythonLicensesDir
 
   # Project license
   Copy-Item -Force -LiteralPath (Join-Path $RepoRoot "LICENSE") -Destination (Join-Path $licensesDir "frame-compare-LICENSE.txt")
+  Copy-PythonDistLicenses -SitePackages (Join-Path $BundleRoot "app\\site-packages") -LicensesPythonDir $pythonLicensesDir
+
+  $sourceUrls = @(
+    "Qt source: https://download.qt.io/official_releases/qt/",
+    "FFmpeg source: https://ffmpeg.org/download.html",
+    "VapourSynth source: https://github.com/vapoursynth/vapoursynth"
+  )
+  Set-Content -LiteralPath (Join-Path $licensesDir "SOURCE_URLS.txt") -Value ($sourceUrls -join "`r`n") -Encoding ASCII
 
   foreach ($artifact in $Artifacts) {
     $id = Get-RequiredStringProperty -Object $artifact -Name "id" -Context "artifact"
@@ -455,6 +564,7 @@ function Main() {
   # Layout: app/
   Copy-RepoApp -BundleRoot $OutDir
   Install-PythonDeps -BundleRoot $OutDir -VsCoreRoot (Join-Path $OutDir "vs\\core")
+  Write-BundleInfo -BundleRoot $OutDir -AppVersion (Get-AppVersionFromSource -RepoRootPath $RepoRoot)
   Configure-EmbeddedPython -BundleRoot $OutDir
   Assert-BundleRuntime -BundleRoot $OutDir
 

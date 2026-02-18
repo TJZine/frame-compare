@@ -32,6 +32,13 @@ jobs:
       - name: Unit tests (mocked VS)
         run: uv run --no-sync pytest -q
 
+      - name: Validate update public key
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/validate_update_public_key.ps1 `
+            -PublicKeyPath tools/windows_portable/update_public_key.xml
+
       - name: Build portable bundle
         shell: pwsh
         run: |
@@ -139,7 +146,11 @@ jobs:
             "frame-compare-portable-win-x64/install.cmd",
             "frame-compare-portable-win-x64/install.ps1",
             "frame-compare-portable-win-x64/frame-compare.ps1",
-            "frame-compare-portable-win-x64/shim/frame-compare.cmd"
+            "frame-compare-portable-win-x64/frame-compare-update.cmd",
+            "frame-compare-portable-win-x64/frame-compare-update.ps1",
+            "frame-compare-portable-win-x64/shim/frame-compare.cmd",
+            "frame-compare-portable-win-x64/shim/frame-compare-update.cmd",
+            "frame-compare-portable-win-x64/shim/frame-compare-update.ps1"
           )
           foreach ($r in $required) {
             if ($entries -notcontains $r) {

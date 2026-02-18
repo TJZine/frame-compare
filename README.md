@@ -144,6 +144,31 @@ Advanced/legacy:
 .\tools\windows_portable\install-from-source.cmd
 ```
 
+> [!NOTE]
+> The Windows portable **full bundle includes VSPreview + PySide6**.
+> For source-based installs, install optional dependencies with:
+> - `uv sync --group dev --extra vspreview --frozen`
+> - or `pip install -e ".[vspreview]"`
+> Then run `frame-compare doctor` to confirm interactive alignment dependencies are available.
+
+#### Updating a Portable Install
+
+Apply a code-only update zip:
+
+```powershell
+frame-compare-update apply .\frame-compare-update-win-x64-0.1.1.zip
+```
+
+The updater is offline-first and verifies signature + file hashes before applying changes.
+If dependency fingerprints do not match, the default action is cancel; unsafe apply requires explicit confirmation.
+You can inspect/update backups with:
+
+```powershell
+frame-compare-update list-backups
+frame-compare-update rollback <backup-id>
+frame-compare-update purge-backups --keep 5
+```
+
 ---
 
 ## Quick Start

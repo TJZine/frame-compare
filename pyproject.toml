@@ -36,6 +36,12 @@ dependencies = [
     "anitopy>=2.1.1",
 ]
 
+[project.optional-dependencies]
+vspreview = [
+    "vspreview",
+    "PySide6>=6.4",
+]
+
 [project.scripts]
 frame-compare = "frame_compare.cli_entry:app"
 

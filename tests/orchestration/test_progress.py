@@ -46,6 +46,57 @@ def test_select_reporter_tty_detection_interactive(monkeypatch: pytest.MonkeyPat
 def test_select_reporter_tty_detection_non_interactive(monkeypatch: pytest.MonkeyPatch):
     """Auto-detection in non-TTY should return LogProgressReporter."""
     monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: False)
+    reporter = select_reporter()
+    assert isinstance(reporter, LogProgressReporter)
+
+
+def test_select_reporter_uses_stderr_tty_when_stdout_is_not_tty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Auto-detection should use Rich when stderr is interactive."""
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
+    reporter = select_reporter()
+    assert isinstance(reporter, RichProgressReporter)
+
+
+def test_select_reporter_tty_detection_no_isatty_attr(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Auto-detection without isatty attributes should return LogProgressReporter."""
+
+    class _NoIsatty:
+        pass
+
+    monkeypatch.setattr(sys, "stdout", _NoIsatty())
+    monkeypatch.setattr(sys, "stderr", _NoIsatty())
+    reporter = select_reporter()
+    assert isinstance(reporter, LogProgressReporter)
+
+
+def test_select_reporter_tty_detection_isatty_raises_oserror(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Auto-detection should treat OSError from isatty as non-interactive."""
+
+    def _raise_oserror() -> bool:
+        raise OSError("stream is unavailable")
+
+    monkeypatch.setattr(sys.stdout, "isatty", _raise_oserror)
+    monkeypatch.setattr(sys.stderr, "isatty", _raise_oserror)
+    reporter = select_reporter()
+    assert isinstance(reporter, LogProgressReporter)
+
+
+def test_select_reporter_tty_detection_isatty_raises_valueerror(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Auto-detection should treat ValueError from isatty as non-interactive."""
+
+    def _raise_value_error() -> bool:
+        raise ValueError("I/O operation on closed file")
+
+    monkeypatch.setattr(sys.stdout, "isatty", _raise_value_error)
+    monkeypatch.setattr(sys.stderr, "isatty", _raise_value_error)
     reporter = select_reporter()
     assert isinstance(reporter, LogProgressReporter)
 
