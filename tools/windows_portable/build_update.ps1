@@ -36,7 +36,7 @@ function ConvertTo-PortablePath([string]$PathValue) {
 function Get-FromVersionMin([string]$VersionText) {
   $match = [regex]::Match($VersionText, '^(\d+)\.(\d+)')
   if (!$match.Success) {
-    return $VersionText
+    throw "Unparseable app version '$VersionText' (expected at least 'MAJOR.MINOR'). Refusing to write from_app_version_min because Test-StringInRange uses [System.Version]::Parse."
   }
   return "{0}.{1}.0" -f $match.Groups[1].Value, $match.Groups[2].Value
 }

@@ -619,8 +619,24 @@ function Invoke-ApplyUpdate([string]$BundlePath, [string]$UpdateZipPath) {
     Copy-Item -LiteralPath $targetDir -Destination $backupDir -Recurse -Force
 
     Copy-DirectoryContents -SourceDir $payloadDir -DestinationDir $newDir
-    Invoke-WithRetry -Label "Rename current frame_compare to .old" -Action { Move-Item -LiteralPath $targetDir -Destination $oldDir -Force }
-    Invoke-WithRetry -Label "Rename .new into place" -Action { Move-Item -LiteralPath $newDir -Destination $targetDir -Force }
+    try {
+      Invoke-WithRetry -Label "Rename current frame_compare to .old" -Action { Move-Item -LiteralPath $targetDir -Destination $oldDir -Force }
+      Invoke-WithRetry -Label "Rename .new into place" -Action { Move-Item -LiteralPath $newDir -Destination $targetDir -Force }
+    } catch {
+      Write-Host "Rename failed; restoring original installation."
+      if (Test-Path -LiteralPath $targetDir) {
+        Invoke-WithRetry -Label "Remove partial target after rename failure" -Action { Remove-Item -LiteralPath $targetDir -Recurse -Force }
+      }
+      if (Test-Path -LiteralPath $newDir) {
+        Invoke-WithRetry -Label "Remove .new after rename failure" -Action { Remove-Item -LiteralPath $newDir -Recurse -Force }
+      }
+      if (Test-Path -LiteralPath $oldDir) {
+        Invoke-WithRetry -Label "Restore .old after rename failure" -Action { Move-Item -LiteralPath $oldDir -Destination $targetDir -Force }
+      } elseif (![string]::IsNullOrWhiteSpace($backupDir) -and (Test-Path -LiteralPath $backupDir)) {
+        Restore-FromBackup -BackupDir $backupDir -TargetDir $targetDir
+      }
+      throw
+    }
 
     try {
       $targetVersion = Get-PayloadVersionFromManifest -Manifest $manifest

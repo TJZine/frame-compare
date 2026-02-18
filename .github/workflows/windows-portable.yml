@@ -33,7 +33,7 @@ jobs:
         run: uv run --no-sync pytest -q
 
       - name: Validate update public key
-        if: github.event_name == 'release'
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
         shell: pwsh
         run: |
           pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/validate_update_public_key.ps1 `

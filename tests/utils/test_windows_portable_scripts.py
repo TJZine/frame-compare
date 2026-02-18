@@ -199,7 +199,7 @@ def test_pyproject_defines_vspreview_optional_dependency(repo_root: Path) -> Non
     pyproject = _read_text_or_fail(pyproject_path)
     assert "[project.optional-dependencies]" in pyproject
     assert re.search(r"vspreview\s*=\s*\[", pyproject)
-    assert re.search(r'"vspreview"', pyproject)
+    assert re.search(r'"vspreview([^"]*)"', pyproject)
     assert re.search(r'"PySide6([^"]*)"', pyproject)
 
 
@@ -284,10 +284,12 @@ def test_windows_portable_update_manifest_schema_disallows_empty_from_app_versio
 ) -> None:
     schema_path = repo_root / "tools" / "windows_portable" / "update_manifest.schema.json"
     schema = json.loads(_read_text_or_fail(schema_path))
-    props = schema["properties"]
-    max_schema = props["from_app_version_max"]
-    assert "oneOf" in max_schema
-    branches = max_schema["oneOf"]
+    assert schema.get("properties") is not None
+    props = schema.get("properties", {})
+    assert props.get("from_app_version_max") is not None
+    max_schema = props.get("from_app_version_max", {})
+    assert max_schema.get("oneOf") is not None
+    branches = max_schema.get("oneOf", [])
     assert any(branch.get("type") == "null" for branch in branches)
     assert any(
         branch.get("type") == "string" and branch.get("minLength") == 1 for branch in branches
@@ -299,6 +301,9 @@ def test_windows_portable_workflow_validates_update_public_key_on_release(repo_r
     workflow = _read_text_or_fail(workflow_path)
     assert "Validate update public key" in workflow
     assert "tools/windows_portable/update_public_key.xml" in workflow.replace("\\", "/")
+    assert (
+        "if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'" in workflow
+    )
 
 
 def test_windows_portable_updater_compares_app_versions_as_versions(repo_root: Path) -> None:
@@ -322,10 +327,56 @@ def test_windows_portable_updater_always_clears_rsa_in_signature_verification(
     updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
     updater = _read_text_or_fail(updater_path)
     signature_fn = re.search(
-        r"function\s+Verify-ManifestSignature\([\s\S]*?\n\}",
+        r"function\s+Verify-ManifestSignature\b[\s\S]*?\n\}",
         updater,
-        flags=re.MULTILINE,
+        flags=re.DOTALL,
     )
     assert signature_fn is not None
     assert re.search(r"\bfinally\b", signature_fn.group(0))
     assert re.search(r"\$rsa\.Clear\(\)", signature_fn.group(0))
+
+
+def test_windows_portable_build_update_validates_normalized_from_app_version_min(
+    repo_root: Path,
+) -> None:
+    build_path = repo_root / "tools" / "windows_portable" / "build_update.ps1"
+    build_script = _read_text_or_fail(build_path)
+    fn = re.search(r"function\s+Get-FromVersionMin\b[\s\S]*?\n\}", build_script, flags=re.DOTALL)
+    assert fn is not None
+    assert re.search(r"\bthrow\b", fn.group(0))
+    assert "Test-StringInRange" in fn.group(0)
+
+
+def test_windows_portable_sign_update_avoids_private_key_path_cli_argument(repo_root: Path) -> None:
+    sign_path = repo_root / "tools" / "windows_portable" / "sign_update.ps1"
+    sign_script = _read_text_or_fail(sign_path)
+    assert "PrivateKeyXml" not in sign_script
+    assert "SIGNING_KEY_XML_PATH" in sign_script
+    assert "Read-Host" in sign_script
+    assert "UserInteractive" in sign_script
+    assert "IsInputRedirected" in sign_script
+
+
+def test_windows_portable_docs_do_not_show_private_key_path_on_command_line(
+    repo_root: Path,
+) -> None:
+    portable_readme_path = repo_root / "tools" / "windows_portable" / "README.txt"
+    portable_readme = _read_text_or_fail(portable_readme_path)
+    assert "-PrivateKeyXml" not in portable_readme
+    assert "SIGNING_KEY_XML_PATH" in portable_readme
+
+
+def test_windows_portable_updater_restores_original_on_rename_failure(repo_root: Path) -> None:
+    updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
+    updater = _read_text_or_fail(updater_path)
+    assert "Rename current frame_compare to .old" in updater
+    assert "Rename .new into place" in updater
+    assert "Restore .old after rename failure" in updater or "Rename failed; restoring" in updater
+
+
+def test_windows_portable_build_copies_dist_info_licenses_when_present(repo_root: Path) -> None:
+    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
+    build_script = _read_text_or_fail(build_path)
+    assert (
+        re.search(r"dist-info\\\\licenses", build_script) or "dist-info\\licenses" in build_script
+    )

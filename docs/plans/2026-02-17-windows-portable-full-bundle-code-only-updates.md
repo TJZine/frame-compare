@@ -261,7 +261,7 @@ Add a placeholder with clear instructions:
 **Step 3: Create a signing script `sign_update.ps1`**
 
 Script behavior:
-- Inputs: `-UpdateZip <path> -PrivateKeyXml <path>`
+- Inputs: `-UpdateZip <path>` and a private key path provided via `SIGNING_KEY_XML_PATH` (or interactive prompt).
 - Extract `update-manifest.json` bytes from the zip
 - Compute signature over the exact UTF-8 bytes of `update-manifest.json` as stored in the zip
 - Write signature as base64 to `update-manifest.sig` inside the zip (replace if present)

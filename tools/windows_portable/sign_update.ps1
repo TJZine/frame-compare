@@ -1,9 +1,6 @@
 Param(
   [Parameter(Mandatory = $true)]
-  [string]$UpdateZip,
-
-  [Parameter(Mandatory = $true)]
-  [string]$PrivateKeyXml
+  [string]$UpdateZip
 )
 
 $ErrorActionPreference = "Stop"
@@ -80,8 +77,27 @@ function Get-Sha256Hex([byte[]]$Bytes) {
 }
 
 $resolvedUpdateZip = (Resolve-Path -LiteralPath $UpdateZip).Path
-$resolvedPrivateKeyXml = (Resolve-Path -LiteralPath $PrivateKeyXml).Path
-$privateKeyText = Get-Content -LiteralPath $resolvedPrivateKeyXml -Raw
+
+$keyPath = $env:SIGNING_KEY_XML_PATH
+if ([string]::IsNullOrWhiteSpace($keyPath)) {
+  if (-not [Environment]::UserInteractive) {
+    throw "Missing SIGNING_KEY_XML_PATH and no interactive console available."
+  }
+  try {
+    if ([System.Console]::IsInputRedirected) {
+      throw "Missing SIGNING_KEY_XML_PATH and input is redirected."
+    }
+  } catch {
+    throw "Missing SIGNING_KEY_XML_PATH and input cannot be read interactively."
+  }
+  $keyPath = (Read-Host "Path to private signing key XML (SIGNING_KEY_XML_PATH)")
+}
+if ([string]::IsNullOrWhiteSpace($keyPath)) {
+  throw "Missing signing key path. Set SIGNING_KEY_XML_PATH or provide it interactively."
+}
+
+$resolvedKeyXml = (Resolve-Path -LiteralPath $keyPath).Path
+$privateKeyText = Get-Content -LiteralPath $resolvedKeyXml -Raw
 
 $rsa = $null
 $zip = $null

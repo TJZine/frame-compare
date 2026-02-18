@@ -435,12 +435,19 @@ function Copy-PythonDistLicenses([string]$SitePackages, [string]$LicensesPythonD
   $licensePatterns = @("LICENSE*", "COPYING*")
   $distInfoDirs = @(Get-ChildItem -LiteralPath $SitePackages -Directory -Filter "*.dist-info" -ErrorAction SilentlyContinue)
   foreach ($distInfo in $distInfoDirs) {
+    # Some wheels ship license texts under *.dist-info\licenses (not just LICENSE* at dist-info root).
     foreach ($pattern in $licensePatterns) {
       $licenseFiles = @(Get-ChildItem -LiteralPath $distInfo.FullName -File -Filter $pattern -ErrorAction SilentlyContinue)
       foreach ($match in $licenseFiles) {
         $destName = "{0}__{1}" -f $distInfo.Name, $match.Name
         Copy-Item -Force -LiteralPath $match.FullName -Destination (Join-Path $LicensesPythonDir $destName)
       }
+    }
+
+    $distInfoLicenses = Join-Path $distInfo.FullName "licenses"
+    if (Test-Path -LiteralPath $distInfoLicenses -PathType Container) {
+      $destDir = Join-Path $LicensesPythonDir ("{0}__licenses" -f $distInfo.Name)
+      Copy-Item -Recurse -Force -LiteralPath $distInfoLicenses -Destination $destDir
     }
   }
 
