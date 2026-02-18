@@ -145,13 +145,29 @@ Advanced/legacy:
 ```
 
 > [!NOTE]
-> **VSPreview (interactive audio alignment) is not bundled** in the Windows portable package.
-> If you enable `audio_alignment.use_vspreview=true` (or pass `--force-interactive-alignment`), you must install
-> VSPreview separately (and a Qt backend) so `vspreview` is available on your system `PATH`, or importable in the
-> Python environment running Frame Compare.
->
-> - Recommended install: `pip install vspreview PySide6` (or `pip install vspreview PyQt5`)
-> - Then run: `frame-compare doctor` to confirm detection.
+> The Windows portable **full bundle includes VSPreview + PySide6**.
+> For source-based installs, install optional dependencies with:
+> - `uv sync --group dev --extra vspreview`
+> - or `pip install -e ".[vspreview]"`
+> Then run `frame-compare doctor` to confirm interactive alignment dependencies are available.
+
+#### Updating a Portable Install
+
+Apply a code-only update zip:
+
+```powershell
+frame-compare-update apply .\frame-compare-update-win-x64-0.1.1.zip
+```
+
+The updater is offline-first and verifies signature + file hashes before applying changes.
+If dependency fingerprints do not match, the default action is cancel; unsafe apply requires explicit confirmation.
+You can inspect/update backups with:
+
+```powershell
+frame-compare-update list-backups
+frame-compare-update rollback <backup-id>
+frame-compare-update purge-backups --keep 5
+```
 
 ---
 

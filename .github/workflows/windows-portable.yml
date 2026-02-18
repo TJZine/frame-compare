@@ -139,7 +139,11 @@ jobs:
             "frame-compare-portable-win-x64/install.cmd",
             "frame-compare-portable-win-x64/install.ps1",
             "frame-compare-portable-win-x64/frame-compare.ps1",
-            "frame-compare-portable-win-x64/shim/frame-compare.cmd"
+            "frame-compare-portable-win-x64/frame-compare-update.cmd",
+            "frame-compare-portable-win-x64/frame-compare-update.ps1",
+            "frame-compare-portable-win-x64/shim/frame-compare.cmd",
+            "frame-compare-portable-win-x64/shim/frame-compare-update.cmd",
+            "frame-compare-portable-win-x64/shim/frame-compare-update.ps1"
           )
           foreach ($r in $required) {
             if ($entries -notcontains $r) {

@@ -1,0 +1,9 @@
+<!--
+  key_id: REPLACE_WITH_RELEASE_KEY_ID
+  generated_at: REPLACE_WITH_UTC_DATE
+  NOTE: Replace this placeholder with the real release public key.
+-->
+<RSAKeyValue>
+  <Modulus>AQAB</Modulus>
+  <Exponent>AQAB</Exponent>
+</RSAKeyValue>

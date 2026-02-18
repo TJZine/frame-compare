@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frame-compare.dev/schemas/windows-portable/update-manifest.schema.json",
+  "title": "Frame Compare Code-Only Update Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "target_platform",
+    "to_app_version",
+    "from_app_version_min",
+    "from_app_version_max",
+    "expected_requirements_lock_sha256",
+    "signature_algorithm",
+    "signature_file",
+    "payload_root",
+    "files"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "target_platform": {
+      "type": "string",
+      "const": "windows-x64"
+    },
+    "to_app_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "from_app_version_min": {
+      "type": "string",
+      "minLength": 1
+    },
+    "from_app_version_max": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "expected_requirements_lock_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "signature_algorithm": {
+      "type": "string",
+      "const": "rsa-sha256-pkcs1"
+    },
+    "signature_file": {
+      "type": "string",
+      "pattern": "^(?![A-Za-z]:)(?![\\\\/])(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$))[A-Za-z0-9._/-]+$"
+    },
+    "payload_root": {
+      "type": "string",
+      "const": "payload"
+    },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "sha256",
+          "bytes"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "pattern": "^app/src/frame_compare/(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frame-compare.dev/schemas/windows-portable/bundle-info.schema.json",
+  "title": "Frame Compare Bundle Info",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "bundle_kind",
+    "app_version",
+    "requirements_lock_sha256",
+    "manifest_version",
+    "platform"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "bundle_kind": {
+      "type": "string",
+      "const": "full"
+    },
+    "app_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requirements_lock_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "manifest_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "platform": {
+      "type": "string",
+      "const": "windows-x64"
+    }
+  }
+}

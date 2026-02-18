@@ -100,7 +100,11 @@ def test_windows_portable_workflow_verifies_zip_required_entries(repo_root: Path
         "frame-compare-portable-win-x64/install.cmd",
         "frame-compare-portable-win-x64/install.ps1",
         "frame-compare-portable-win-x64/frame-compare.ps1",
+        "frame-compare-portable-win-x64/frame-compare-update.cmd",
         "frame-compare-portable-win-x64/shim/frame-compare.cmd",
+        "frame-compare-portable-win-x64/shim/frame-compare-update.cmd",
+        "frame-compare-portable-win-x64/frame-compare-update.ps1",
+        "frame-compare-portable-win-x64/shim/frame-compare-update.ps1",
     ]
     for entry in required:
         assert entry in wf
@@ -189,6 +193,60 @@ def test_windows_portable_docs_describe_default_workspace_directories(repo_root:
     assert "comparison_videos" in portable_readme
 
 
+def test_pyproject_defines_vspreview_optional_dependency(repo_root: Path) -> None:
+    pyproject_path = repo_root / "pyproject.toml"
+    pyproject = _read_text_or_fail(pyproject_path)
+    assert "[project.optional-dependencies]" in pyproject
+    assert re.search(r"vspreview\s*=\s*\[", pyproject)
+    assert re.search(r'"vspreview"', pyproject)
+    assert re.search(r'"PySide6"', pyproject)
+
+
+def test_windows_portable_build_exports_vspreview_extra(repo_root: Path) -> None:
+    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
+    build_script = _read_text_or_fail(build_path)
+    assert "--extra vspreview" in build_script
+    assert "requirements.lock.txt" in build_script
+
+
+def test_windows_portable_build_runtime_validation_checks_qt_stack(repo_root: Path) -> None:
+    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
+    build_script = _read_text_or_fail(build_path)
+    assert "import vspreview" in build_script
+    assert "import PySide6" in build_script
+
+
+def test_windows_portable_build_writes_bundle_info_file(repo_root: Path) -> None:
+    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
+    build_script = _read_text_or_fail(build_path)
+    assert "bundle_info.json" in build_script
+    assert "requirements_lock_sha256" in build_script
+    assert "bundle_kind" in build_script
+    assert "platform" in build_script
+
+
+def test_windows_portable_update_artifacts_exist(repo_root: Path) -> None:
+    paths = [
+        repo_root / "tools" / "windows_portable" / "update_manifest.schema.json",
+        repo_root / "tools" / "windows_portable" / "bundle_info.schema.json",
+        repo_root / "tools" / "windows_portable" / "update_public_key.xml",
+        repo_root / "tools" / "windows_portable" / "build_update.ps1",
+        repo_root / "tools" / "windows_portable" / "sign_update.ps1",
+        repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1",
+        repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.cmd",
+    ]
+    for path in paths:
+        assert path.exists(), f"Required file not found: {path}"
+
+
+def test_windows_portable_installer_copies_update_shims(repo_root: Path) -> None:
+    installer_path = repo_root / "tools" / "windows_portable" / "install.ps1"
+    installer = _read_text_or_fail(installer_path)
+    assert "frame-compare-update.ps1" in installer
+    assert "frame-compare-update.cmd" in installer
+    assert "update_public_key.xml" in installer
+
+
 def test_windows_portable_workflow_verifies_workspace_directories(repo_root: Path) -> None:
     workflow_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
     workflow = _read_text_or_fail(workflow_path)
@@ -201,6 +259,11 @@ def test_windows_portable_workflow_verifies_workspace_directories(repo_root: Pat
 
 def test_windows_portable_docs_disambiguate_source_bundle_root(repo_root: Path) -> None:
     readme_path = repo_root / "README.md"
+    portable_readme_path = repo_root / "tools" / "windows_portable" / "README.txt"
     readme = _read_text_or_fail(readme_path)
+    portable_readme = _read_text_or_fail(portable_readme_path)
     assert "dist/frame-compare-portable-win-x64" in readme
     assert "not the repository root" in readme
+    assert "includes VSPreview + PySide6" in readme
+    assert "frame-compare-update apply" in readme
+    assert "frame-compare-update apply" in portable_readme
