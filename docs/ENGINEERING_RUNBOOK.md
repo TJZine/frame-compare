@@ -7,7 +7,8 @@ This is the canonical operating runbook for Frame Compare.
 `AGENTS.md` owns the repo entrypoint map.
 
 If you land in this document directly, use it as the operating policy, then consult
-`docs/current-architecture.md`, `importlinter.ini`, and `pyproject.toml` as needed.
+`docs/current-architecture.md`, `docs/current-cli-contract.md`, `importlinter.ini`, and
+`pyproject.toml` as needed.
 Use `docs/DECISIONS.md` only for historical context.
 
 ## Repo Stance
@@ -27,6 +28,7 @@ If a task needs a broader compatibility promise, the maintainer must confirm it 
 - `AGENTS.md`: short entrypoint map only
 - `docs/ENGINEERING_RUNBOOK.md`: workflow, verification, planning, review, handoff
 - `docs/current-architecture.md`: present-day architecture truth
+- `docs/current-cli-contract.md`: present-day CLI command, flag, and persistence contract
 - `docs/DECISIONS.md`: decision log and historical exceptions
 - `docs/api.md`: generated reference, not a stability promise by itself
 - `README.md`: product overview, install, quickstart
@@ -35,7 +37,7 @@ If a task needs a broader compatibility promise, the maintainer must confirm it 
 - `docs/archive/**`: historical reference only, never current authority
 - `.codex/cache/**`: local cache material only, never current authority
 
-Do not create a second runbook or second architecture summary.
+Do not create a second runbook, second architecture summary, or second current CLI contract.
 
 ## Command Canon
 
@@ -103,7 +105,7 @@ Required for:
 - config loading or env-var behavior changes
 - changes in `orchestration/`, `render/`, `vs/`, `services/`
 - changes to hot spots listed in the architecture doc
-- changes to docs that redefine workflow or architecture authority
+- changes to docs that redefine workflow, architecture, or CLI/config contract authority
 
 Run:
 
@@ -183,13 +185,31 @@ Use a lightweight task plan in the current task or PR. Use logic verification.
 - Windows portable/release-path changes
 - changes to hotspots
 - changes to external integrations
-- changes to architecture or workflow authority docs
+- changes to architecture, workflow, or CLI/config contract authority docs
 
 Require:
 
 - explicit task plan before editing
 - same-pass updates to the relevant authority docs
 - full verification, plus Docker or Windows verification if those surfaces changed
+
+For single-session work, including single-session high-risk work, the default plan can
+live inline in the current task, review, or PR. Activate `docs/plans/` only when the
+work needs a durable cross-session handoff or the maintainer explicitly asks for a
+tracked plan file.
+
+## Task Routing Matrix
+
+Use this as the default routing shortcut before exploring deeper:
+
+| Task family | Primary authority | Typical owner files | Default tier | Default verification |
+| --- | --- | --- | --- | --- |
+| CLI/config contract change | `docs/current-cli-contract.md` | `src/frame_compare/cli_entry.py`, `src/frame_compare/config/overrides.py`, `tests/cli/test_cli_commands.py`, `tests/config/test_overrides.py`, `tests/test_cli_contract_docs.py` | High | Full verification |
+| Internal logic change outside hotspots/public CLI | `docs/current-architecture.md` | Existing owner module plus nearby tests | Medium | Logic verification |
+| Hotspot or runtime pipeline change | `docs/current-architecture.md` | `orchestration/`, `render/`, `vs/`, hotspot files, adjacent tests | High | Full verification, plus Docker when listed under Docker/runtime verification |
+| Docker/runtime environment change | this runbook + `docs/current-architecture.md` | `Dockerfile`, `docker-compose.yml`, `tools/verify_docker_integration.sh`, runtime integration tests | High | Full verification plus Docker/runtime verification |
+| Windows portable or release-path change | this runbook | `tools/windows_portable/**`, `.github/workflows/windows-portable.yml`, release-path docs | High | Full verification plus Windows portable/release-path verification |
+| Workflow/authority doc change | this runbook or the affected authority doc | `AGENTS.md`, `docs/ENGINEERING_RUNBOOK.md`, `docs/current-architecture.md`, `docs/current-cli-contract.md` | High | Full verification |
 
 ### Stop And Ask
 
@@ -205,8 +225,8 @@ Stop and get maintainer confirmation if any of these are unclear:
 
 - `AGENTS.md` controls entrypoint order.
 - Observed code, config, and successfully executed commands outrank stale prose in
-  `docs/current-architecture.md`, `README.md`, `CONTRIBUTING.md`, `docs/DECISIONS.md`,
-  historical plans, and cached review material.
+  `docs/current-architecture.md`, `docs/current-cli-contract.md`, `README.md`,
+  `CONTRIBUTING.md`, `docs/DECISIONS.md`, historical plans, and cached review material.
 - When a doc/code mismatch looks intentional, risky, or not safely resolvable in the
   same pass, stop and ask the maintainer instead of guessing.
 - Correct stale active docs in the same pass once the current-state behavior is clear.
@@ -217,7 +237,7 @@ Stop and get maintainer confirmation if any of these are unclear:
 
 It becomes authoritative only when all of these are true:
 
-1. The work is multi-session or high-risk.
+1. The work needs a durable cross-session handoff, or the maintainer explicitly asks for a tracked plan file.
 2. A dated plan file is created or updated under `docs/plans/`.
 3. The plan starts with a metadata block containing `Status: Active`.
 
@@ -232,6 +252,7 @@ Owner: <person or session>
 Rules:
 
 - If no active-plan marker exists, treat `docs/plans/` as reference-only.
+- For single-session work, keep the plan inline unless a durable handoff is needed.
 - Only one active plan should exist per workstream.
 - When the work closes, change the marker to `Status: Historical` or move the document to historical/reference context in the same pass.
 
