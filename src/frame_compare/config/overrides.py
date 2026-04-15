@@ -22,7 +22,6 @@ CLI_OVERRIDE_MAP: dict[str, str] = {
     "no_upload": "slowpics.auto_upload",
     "force_interactive_alignment": "audio_alignment.force_interactive",
     "input": "paths.input_dir",
-    "output": "report.output_dir",
 }
 
 _INVERTED_FLAGS: frozenset[str] = frozenset({"no_upload"})

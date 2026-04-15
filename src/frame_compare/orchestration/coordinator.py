@@ -77,7 +77,7 @@ class RunRequest:
     """Complete configuration for a comparison run.
 
     All fields map to CLI flags or config file sections.
-    See cli-module.md for CLI flag → config mappings.
+    See docs/current-cli-contract.md for CLI flag → config mappings and persistence rules.
     """
 
     # Core paths

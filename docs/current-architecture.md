@@ -80,6 +80,8 @@ Keep these integrations at their current owners:
 
 - metadata lookups: `frame_compare.services.metadata`
 - publishing: `frame_compare.services.publishers`
+- browser auto-open for generated reports: `frame_compare.cli_entry`
+- HTML report generation: `frame_compare.services.report`
 - VS loading and HDR/tonemap logic: `frame_compare.vs.*`
 - packaging/install/update flow: `tools/windows_portable/**`
 
