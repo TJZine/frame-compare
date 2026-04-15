@@ -98,6 +98,9 @@ git checkout -b feat/your-feature-name
 UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini
 ```
 
+Use the [Engineering Runbook](docs/ENGINEERING_RUNBOOK.md) to choose the required verification class for Docker,
+Windows portable, release-path, and high-risk changes.
+
 ---
 
 ## Pull Request Workflow
@@ -231,10 +234,13 @@ open PRs and create releases). The workflow falls back to `GITHUB_TOKEN` if the 
 
 ## Project Guardrails
 
-For detailed coding standards and approval requirements, see:
+Repo-wide workflow policy lives in the [Engineering Runbook](docs/ENGINEERING_RUNBOOK.md).
 
-- [CODEX.md](CODEX.md) — Project guardrails and approval requirements
-- [AGENTS.md](AGENTS.md) — Agent-specific guidelines (for AI assistants)
+Supporting pointers:
+
+- [AGENTS.md](AGENTS.md) — short agent entrypoint map
+- [Current Architecture](docs/current-architecture.md) — present-day runtime and boundary map
+- [CODEX.md](CODEX.md) — thin Codex pointer only
 
 ---
 

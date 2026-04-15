@@ -66,18 +66,14 @@ Frame Compare is designed so the same inputs produce the same outputs:
 - "No guessing" contracts for CLI/config where ambiguity would cause churn
 - Reproducible verification gates
 
-### 📋 Contract-First Documentation
+### 📋 Repo Authority
 
-Canonical truth is stored as YAML/JSON contracts:
+Use the repo docs in this order:
 
-- **Derived views generator**: [`scripts/generate_contract_views.py`](scripts/generate_contract_views.py)
-
-### 🔄 Workflow Discipline (Optional)
-
-This repo includes an operator-minimal, file-based run system for phased implementation:
-
-- Run artifacts live under `.agent-workflow/runs/<RUN_ID>/`
-- Each artifact ends with a `## NEXT AGENT PROMPT (COPY/PASTE)` block for deterministic handoffs
+- [Engineering Runbook](docs/ENGINEERING_RUNBOOK.md) — workflow, verification, planning, handoff
+- [Current Architecture](docs/current-architecture.md) — present-day codebase truth
+- [Decisions](docs/DECISIONS.md) — historical decisions and exceptions
+- [API Reference](docs/api.md) — generated symbol reference
 
 ---
 
@@ -239,26 +235,16 @@ bash tools/verify_docker_integration.sh
 - `screenshots.overlay_mode`: `none|minimal|standard|diagnostic`
 - Overlay font rendering uses system/default fonts today; appearance can vary by OS.
 
-### Readiness Gates
-
-```bash
-# One-command check
-./scripts/check-all-gates.sh
-
-# Or individual gates
-bash scripts/reverify_ai_readiness.sh --update-roadmap
-```
-
----
-
 ## Documentation
 
 ### 📚 Core Documentation
 
 | Document | Description |
 | -------- | ----------- |
+| [Engineering Runbook](docs/ENGINEERING_RUNBOOK.md) | Canonical workflow, verification, and planning policy |
+| [Current Architecture](docs/current-architecture.md) | Present-day runtime flow, boundaries, and hotspots |
+| [Decisions](docs/DECISIONS.md) | Architectural and process decision log |
 | [API Reference](docs/api.md) | Generated API documentation |
-| [Decisions](docs/DECISIONS.md) | Architectural and design decisions |
 
 ---
 
@@ -266,21 +252,13 @@ bash scripts/reverify_ai_readiness.sh --update-roadmap
 
 ### Command Canon
 
-This repo uses a two-lane approach for deterministic commands:
-
-**1. Repo scripts/validators** — use `uv run --no-sync`:
-
-```bash
-UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_contract_views.py --check
-UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/validate_traceability.py --check
-```
-
-**2. Tooling** — prefer `.venv/bin/*`:
+Prefer the repo-local toolchain:
 
 ```bash
 .venv/bin/pyright --warnings
 .venv/bin/ruff check .
 .venv/bin/pytest -q
+UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini
 ```
 
 ### Docker Integration
@@ -290,6 +268,8 @@ For "real external deps work" verification (VapourSynth + FFmpeg):
 ```bash
 bash tools/verify_docker_integration.sh
 ```
+
+For release-path and packaging verification, see the [Engineering Runbook](docs/ENGINEERING_RUNBOOK.md).
 
 ---
 

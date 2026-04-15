@@ -1,3 +1,19 @@
+> Decision log only. Current workflow authority lives in [Engineering Runbook](ENGINEERING_RUNBOOK.md). Current architecture authority lives in [Current Architecture](current-architecture.md).
+
+## 2026-04-15 — Harness Authority Surfaces
+
+### Scope
+
+**Context:** Active docs had drifted into multiple partially-overlapping control-plane surfaces, including stale references to removed FC2 workflow assets and scripts.
+
+**Decision:** Make `docs/ENGINEERING_RUNBOOK.md` the single operating runbook, `docs/current-architecture.md` the single present-state architecture surface, and reduce `CODEX.md` and `AGENTS.md` to thin pointers.
+
+**Rationale:**
+
+- Removes tool-specific naming from the canonical runbook path.
+- Eliminates the `agents.md` versus `AGENTS.md` ambiguity by standardizing on `AGENTS.md`.
+- Keeps stale FC2 workflow references out of active docs while preserving historical decisions in this file.
+
 ## 2025-12-30 — Phase 3.6 VapourSynth Integration
 
 ### Tonemap Alias
