@@ -1,5 +1,9 @@
 # Windows Portable Full Bundle + Code-Only Updates Implementation Plan
 
+Status: Historical
+Scope: Historical implementation record for the February 2026 Windows portable/update work
+Owner: Historical session archive
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Ship a Windows portable **full** bundle that includes VSPreview (+ Qt backend) out-of-the-box, and a small, offline, code-only update package + updater command that avoids re-downloading heavy dependencies every release.

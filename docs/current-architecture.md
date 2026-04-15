@@ -36,6 +36,7 @@ Import boundaries are enforced by `importlinter.ini`.
 High-level layering:
 
 - `frame_compare.cli_entry`
+- `frame_compare.cli_output`
 - `frame_compare.runner`
 - `frame_compare.orchestration`
 - sibling domain modules: `frame_compare.analysis`, `frame_compare.render`, `frame_compare.services`
@@ -54,7 +55,7 @@ The repo uses filesystem persistence, not a database.
 Primary owned paths:
 
 - `config/config.toml` and `config/presets/*.toml`: config owners
-- `generated/cache.compframes`: analysis metrics cache
+- `generated/cache/cache.compframes`: analysis metrics cache
 - `generated/clip_probe.toml`: clip probe cache
 - `generated/audio_offsets.toml`: alignment cache
 - generated VSPreview session and override files under the generated/run area

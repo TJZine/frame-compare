@@ -57,11 +57,8 @@ pip install pytest pytest-cov ruff pyright
 
 ### 3. Verify your setup
 
-```bash
-.venv/bin/pyright --warnings
-.venv/bin/ruff check .
-.venv/bin/pytest -q
-```
+Use the [Engineering Runbook](docs/ENGINEERING_RUNBOOK.md) command canon to verify that
+the local environment is healthy.
 
 ---
 
@@ -81,25 +78,8 @@ git checkout -b feat/your-feature-name
 
 ### 3. Run local checks
 
-```bash
-# Type checking
-.venv/bin/pyright --warnings
-
-# Linting
-.venv/bin/ruff check .
-
-# Auto-format
-.venv/bin/ruff format .
-
-# Tests
-.venv/bin/pytest -q
-
-# Import contracts
-UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini
-```
-
-Use the [Engineering Runbook](docs/ENGINEERING_RUNBOOK.md) to choose the required verification class for Docker,
-Windows portable, release-path, and high-risk changes.
+Use the [Engineering Runbook](docs/ENGINEERING_RUNBOOK.md) to choose and run the
+required verification for the current change.
 
 ---
 
@@ -134,12 +114,9 @@ docs: update installation guide
 
 ### 3. Ensure CI passes
 
-All checks must pass before merge:
-
-- ✅ Ruff linting
-- ✅ Pyright type checking
-- ✅ Pytest test suite
-- ✅ Import contracts
+Ensure the required GitHub Actions checks pass before merge. Treat the
+[Engineering Runbook](docs/ENGINEERING_RUNBOOK.md) and the workflow files under
+`.github/workflows/` as the current source of truth for required verification.
 
 ---
 
@@ -192,6 +169,9 @@ We use [Pyright](https://microsoft.github.io/pyright/) in strict mode:
 
 ### Running Tests
 
+Examples only. Merge and release gates still come from the
+[Engineering Runbook](docs/ENGINEERING_RUNBOOK.md).
+
 ```bash
 # All unit tests
 .venv/bin/pytest -q
@@ -206,11 +186,8 @@ We use [Pyright](https://microsoft.github.io/pyright/) in strict mode:
 
 ### Docker Integration Tests
 
-For full integration with VapourSynth + FFmpeg:
-
-```bash
-bash tools/verify_docker_integration.sh
-```
+For Docker-based verification requirements, use the
+[Engineering Runbook](docs/ENGINEERING_RUNBOOK.md).
 
 ---
 

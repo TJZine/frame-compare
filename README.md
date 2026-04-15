@@ -66,9 +66,7 @@ Frame Compare is designed so the same inputs produce the same outputs:
 - "No guessing" contracts for CLI/config where ambiguity would cause churn
 - Reproducible verification gates
 
-### 📋 Repo Authority
-
-Use the repo docs in this order:
+### 📋 Core Docs
 
 - [Engineering Runbook](docs/ENGINEERING_RUNBOOK.md) — workflow, verification, planning, handoff
 - [Current Architecture](docs/current-architecture.md) — present-day codebase truth
@@ -250,26 +248,11 @@ bash tools/verify_docker_integration.sh
 
 ## Quality & Verification
 
-### Command Canon
+The canonical command set and verification policy live in the
+[Engineering Runbook](docs/ENGINEERING_RUNBOOK.md).
 
-Prefer the repo-local toolchain:
-
-```bash
-.venv/bin/pyright --warnings
-.venv/bin/ruff check .
-.venv/bin/pytest -q
-UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini
-```
-
-### Docker Integration
-
-For "real external deps work" verification (VapourSynth + FFmpeg):
-
-```bash
-bash tools/verify_docker_integration.sh
-```
-
-For release-path and packaging verification, see the [Engineering Runbook](docs/ENGINEERING_RUNBOOK.md).
+Use the runbook to choose the right local, Docker, Windows portable, and release-path
+verification for the current change.
 
 ---
 

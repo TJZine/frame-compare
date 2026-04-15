@@ -2,14 +2,13 @@
 
 This is the canonical operating runbook for Frame Compare.
 
-## Read Order
+## Entrypoint
 
-1. This runbook
-2. [Current Architecture](current-architecture.md)
-3. [AGENTS.md](../AGENTS.md)
-4. [importlinter.ini](../importlinter.ini)
-5. [pyproject.toml](../pyproject.toml)
-6. [DECISIONS.md](DECISIONS.md) for historical context only
+`AGENTS.md` owns the repo entrypoint map.
+
+If you land in this document directly, use it as the operating policy, then consult
+`docs/current-architecture.md`, `importlinter.ini`, and `pyproject.toml` as needed.
+Use `docs/DECISIONS.md` only for historical context.
 
 ## Repo Stance
 
@@ -32,6 +31,9 @@ If a task needs a broader compatibility promise, the maintainer must confirm it 
 - `docs/api.md`: generated reference, not a stability promise by itself
 - `README.md`: product overview, install, quickstart
 - `CONTRIBUTING.md`: contributor onboarding and PR mechanics
+- `docs/plans/**`: reference-only unless the file starts with `Status: Active`
+- `docs/archive/**`: historical reference only, never current authority
+- `.codex/cache/**`: local cache material only, never current authority
 
 Do not create a second runbook or second architecture summary.
 
@@ -198,6 +200,16 @@ Stop and get maintainer confirmation if any of these are unclear:
 - security-sensitive boundaries
 - conflicting workflow docs
 - whether an import-level API should be treated as stable
+
+## Discrepancy Handling
+
+- `AGENTS.md` controls entrypoint order.
+- Observed code, config, and successfully executed commands outrank stale prose in
+  `docs/current-architecture.md`, `README.md`, `CONTRIBUTING.md`, `docs/DECISIONS.md`,
+  historical plans, and cached review material.
+- When a doc/code mismatch looks intentional, risky, or not safely resolvable in the
+  same pass, stop and ask the maintainer instead of guessing.
+- Correct stale active docs in the same pass once the current-state behavior is clear.
 
 ## Planning And Handoff
 
