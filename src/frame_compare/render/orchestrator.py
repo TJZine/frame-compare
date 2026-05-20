@@ -22,6 +22,7 @@ from frame_compare.utils.progress_protocol import ProgressReporter
 if TYPE_CHECKING:
     import vapoursynth as vs  # type: ignore[import-untyped]
 
+    from frame_compare.config.overrides import TonemapCliOverrides
     from frame_compare.config.schema import ConfigSchema
     from frame_compare.render.ffmpeg import FFmpegRunner
     from frame_compare.vs.types import SourceInfo, TonemapSettings
@@ -46,7 +47,7 @@ def should_tonemap(source_info: SourceInfo, config: ConfigSchema) -> bool:
 
 
 def resolve_tonemap_settings(
-    config: ConfigSchema, cli_overrides: dict[str, object] | None = None
+    config: ConfigSchema, cli_overrides: TonemapCliOverrides | None = None
 ) -> TonemapSettings:
     """Resolve tonemap settings from config and CLI overrides.
 
@@ -61,9 +62,7 @@ def resolve_tonemap_settings(
 
     # Start with preset
     preset_name = (cli_overrides or {}).get("tm_preset") or config.color.preset.value
-    if preset_name is None:
-        preset_name = "reference"
-    settings = get_preset_settings(str(preset_name))
+    settings = get_preset_settings(preset_name)
 
     # Apply config overrides (config values always have defaults; direct access)
     settings = replace(settings, target_nits=config.color.target_nits)
@@ -73,10 +72,12 @@ def resolve_tonemap_settings(
 
     # Apply CLI overrides (highest priority)
     if cli_overrides:
-        if cli_overrides.get("tm_target") is not None:
-            settings = replace(settings, target_nits=int(cli_overrides["tm_target"]))  # type: ignore[arg-type]
-        if cli_overrides.get("tm_curve") is not None:
-            settings = replace(settings, tone_curve=str(cli_overrides["tm_curve"]))
+        target_val = cli_overrides.get("tm_target")
+        if target_val is not None:
+            settings = replace(settings, target_nits=target_val)
+        curve_val = cli_overrides.get("tm_curve")
+        if curve_val is not None:
+            settings = replace(settings, tone_curve=str(curve_val))
 
     return settings
 

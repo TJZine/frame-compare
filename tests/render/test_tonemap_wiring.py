@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from frame_compare.config.overrides import TonemapCliOverrides
 from frame_compare.config.schema import ColorConfig, ConfigSchema
 from frame_compare.errors import (
     SourceLoadError,
@@ -85,6 +86,41 @@ def test_resolve_tonemap_settings_applies_config_overrides() -> None:
         assert settings.tone_curve == "spline"
         assert settings.gamma_lift is True
         assert settings.contrast_recovery == 0.25
+
+
+def test_resolve_tonemap_settings_applies_cli_overrides() -> None:
+    """Verify resolve_tonemap_settings applies CLI overrides with highest priority."""
+    config = ConfigSchema(
+        color=ColorConfig(
+            enable_tonemap=True,
+            preset="filmic",
+            target_nits=250,
+            tone_curve="spline",
+        )
+    )
+
+    cli_overrides: TonemapCliOverrides = {
+        "tm_preset": "reference",
+        "tm_target": 400,
+        "tm_curve": "mobius",
+    }
+
+    with patch("frame_compare.vs.tonemap.get_preset_settings") as mock_get_preset:
+        mock_get_preset.return_value = TonemapSettings(
+            enabled=True,
+            preset="reference",
+            tone_curve="bt2390",
+            target_nits=203,
+        )
+
+        settings = resolve_tonemap_settings(config, cli_overrides)
+
+        # Verify preset requested was reference, not filmic
+        mock_get_preset.assert_called_once_with("reference")
+
+        # Verify CLI overrides overrode both the preset default and the config values
+        assert settings.target_nits == 400
+        assert settings.tone_curve == "mobius"
 
 
 # ─── Probe Failure Determinism Tests ───────────────────────────────────────────

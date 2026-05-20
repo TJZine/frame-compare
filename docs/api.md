@@ -528,7 +528,7 @@ Single frame render job
 
 ### resolve_tonemap_settings
 
-`resolve_tonemap_settings(config: ConfigSchema, cli_overrides: dict[str, object] | None = None) -> TonemapSettings`
+`resolve_tonemap_settings(config: ConfigSchema, cli_overrides: TonemapCliOverrides | None = None) -> TonemapSettings`
 
 Resolve tonemap settings from config and CLI overrides.
 
