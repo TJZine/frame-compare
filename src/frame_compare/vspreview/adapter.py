@@ -220,17 +220,38 @@ def _generate_vspreview_script(
     sessions_dir = cache_dir / "vspreview_sessions"
     sessions_dir.mkdir(parents=True, exist_ok=True)
 
-    # Generate UTC timestamp for filename only
-    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    script_name = f"vspreview_{reference.stem}_{timestamp}.py"
-    script_path = sessions_dir / script_name
-
     # Build script content
     script_content = _build_script_content(
         reference=reference,
         comparisons=comparisons,
         suggested_offsets_by_key=suggested_offsets_by_key,
     )
+
+    # Generate UTC timestamp for filename only
+    base_timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+
+    script_path = None
+    for attempt in range(100):
+        suffix = f"_{attempt}" if attempt > 0 else ""
+        script_name = f"vspreview_{reference.stem}_{base_timestamp}{suffix}.py"
+        candidate_path = sessions_dir / script_name
+        try:
+            # Atomically reserve path by exclusively creating it
+            with open(candidate_path, "x", encoding="utf-8"):
+                pass
+            script_path = candidate_path
+            break
+        except FileExistsError:
+            continue
+
+    if script_path is None:
+        import uuid
+
+        random_suffix = uuid.uuid4().hex[:8]
+        script_name = f"vspreview_{reference.stem}_{base_timestamp}_{random_suffix}.py"
+        script_path = sessions_dir / script_name
+        with open(script_path, "x", encoding="utf-8"):
+            pass
 
     write_text_atomic(script_path, script_content, encoding="utf-8")
     return script_path

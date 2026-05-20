@@ -8,6 +8,7 @@ from frame_compare.services.run_folder import (
     derive_run_folder_name,
     find_common_metadata,
     get_existing_run_folders,
+    reserve_run_folder,
     sanitize_folder_name,
 )
 from frame_compare.services.types import ParsedMetadata, TmdbMetadata
@@ -249,3 +250,50 @@ def test_get_existing_run_folders_existing_file_returns_empty(tmp_path: Path) ->
     path.write_text("x", encoding="utf-8")
     result = get_existing_run_folders(path)
     assert result == []
+
+
+# ─── reserve_run_folder Tests ───────────────────────────────────────────
+
+
+def test_reserve_run_folder_creates_non_colliding_dir(tmp_path: Path) -> None:
+    tmdb = TmdbMetadata(
+        tmdb_id=550,
+        title="Fight Club",
+        original_title="Fight Club",
+        year=1999,
+        media_type="movie",
+    )
+    result_path = reserve_run_folder(
+        input_dir=tmp_path,
+        filenames=["random.filename.mkv"],
+        tmdb_metadata=tmdb,
+    )
+    assert result_path == tmp_path / "Fight Club (1999)"
+    assert result_path.exists()
+    assert result_path.is_dir()
+
+
+def test_reserve_run_folder_handles_collisions_atomically(tmp_path: Path) -> None:
+    # Pre-create the directory to simulate a collision
+    (tmp_path / "Fight Club (1999)").mkdir()
+
+    tmdb = TmdbMetadata(
+        tmdb_id=550,
+        title="Fight Club",
+        original_title="Fight Club",
+        year=1999,
+        media_type="movie",
+    )
+
+    with patch(
+        "frame_compare.services.run_folder._format_timestamp", return_value="20260208-020749"
+    ):
+        result_path = reserve_run_folder(
+            input_dir=tmp_path,
+            filenames=["random.filename.mkv"],
+            tmdb_metadata=tmdb,
+        )
+
+    assert result_path == tmp_path / "Fight Club (1999)_20260208-020749"
+    assert result_path.exists()
+    assert result_path.is_dir()

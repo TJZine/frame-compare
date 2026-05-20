@@ -361,7 +361,9 @@ def test_execute_run_no_cache_deletes_run_folder_cache_when_enabled(
     _create_video_files(input_dir, "source.mkv", "comp.mkv")
 
     run_name = "Movie (2024)"
-    monkeypatch.setattr(coordinator, "derive_run_folder_name", lambda **_kwargs: run_name)
+    monkeypatch.setattr(
+        coordinator, "reserve_run_folder", lambda input_dir, **_kwargs: input_dir / run_name
+    )
     run_generated_dir = input_dir / run_name / "generated"
 
     analysis_cache_dir = run_generated_dir / "cache"
@@ -491,7 +493,9 @@ def test_execute_run_from_cache_only_uses_run_folder_cache_when_enabled(
     _create_video_files(input_dir, "source.mkv")
 
     run_name = "Movie (2024)"
-    monkeypatch.setattr(coordinator, "derive_run_folder_name", lambda **_kwargs: run_name)
+    monkeypatch.setattr(
+        coordinator, "reserve_run_folder", lambda input_dir, **_kwargs: input_dir / run_name
+    )
     run_generated_dir = input_dir / run_name / "generated"
     cache_dir = run_generated_dir / "cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -559,12 +563,12 @@ def test_execute_run_passes_prefetched_tmdb_metadata_to_run_folder_derivation(
     captured_tmdb_metadata: list[TmdbMetadata | None] = []
     resolve_calls: list[list[str]] = []
 
-    def _capture_run_folder_name(
-        *, filenames: list[str], tmdb_metadata: TmdbMetadata | None, existing_folders: list[str]
-    ) -> str:
-        del filenames, existing_folders
+    def _capture_reserve_run_folder(
+        input_dir: Path, filenames: list[str], tmdb_metadata: TmdbMetadata | None
+    ) -> Path:
+        del filenames
         captured_tmdb_metadata.append(tmdb_metadata)
-        return "Fight Club (1999)"
+        return input_dir / "Fight Club (1999)"
 
     async def _fake_resolve_metadata(
         *,
@@ -576,7 +580,7 @@ def test_execute_run_passes_prefetched_tmdb_metadata_to_run_folder_derivation(
         resolve_calls.append(filenames)
         return expected_metadata
 
-    monkeypatch.setattr(coordinator, "derive_run_folder_name", _capture_run_folder_name)
+    monkeypatch.setattr(coordinator, "reserve_run_folder", _capture_reserve_run_folder)
     monkeypatch.setattr(coordinator, "resolve_metadata", _fake_resolve_metadata)
 
     request = RunRequest(

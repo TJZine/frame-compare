@@ -213,3 +213,81 @@ def get_existing_run_folders(input_dir: Path) -> list[str]:
         return []
 
     return [p.name for p in input_dir.iterdir() if p.is_dir()]
+
+
+def reserve_run_folder(
+    input_dir: Path,
+    filenames: list[str],
+    tmdb_metadata: TmdbMetadata | None = None,
+) -> Path:
+    """Derive and atomically reserve a unique run folder name by creating it.
+
+    It derives the base folder name, then claims input_dir / candidate
+    with mkdir(parents=True, exist_ok=False), retrying with timestamp suffixes on collision.
+
+    Args:
+        input_dir: Directory where the run folder should be created
+        filenames: List of video filenames (not full paths)
+        tmdb_metadata: Optional TMDB metadata from lookup
+
+    Returns:
+        Path to the reserved run folder
+    """
+    import time
+    import uuid
+
+    if not filenames:
+        base_name = "unnamed_run"
+    else:
+        base_name = None
+
+        # Priority 1: TMDB metadata
+        if tmdb_metadata is not None:
+            title = tmdb_metadata.title
+            year = tmdb_metadata.year
+            if title:
+                base_name = f"{title} ({year})" if year and year > 0 else title
+
+        # Priority 2: Common metadata from guessit
+        if base_name is None:
+            common_title, common_year = find_common_metadata(filenames)
+            if common_title:
+                base_name = f"{common_title} ({common_year})" if common_year else common_title
+
+        # Priority 3: Fallback to combined stems
+        if base_name is None:
+            base_name = _combine_filename_stems(filenames)
+
+    folder_name = sanitize_folder_name(base_name)
+    candidate_path = input_dir / folder_name
+
+    # Try creating base folder name
+    try:
+        candidate_path.mkdir(parents=True, exist_ok=False)
+        return candidate_path
+    except FileExistsError:
+        pass
+
+    # Loop over suffix candidates with timestamp + sequence index to resolve collisions
+    for attempt in range(10):
+        ts = _format_timestamp()
+        if attempt > 0:
+            ts += f"-{attempt}"
+        max_len = 100
+        allowed = max_len - (len(ts) + 1)
+        if allowed < 1:
+            allowed = 1
+        suffix_name = f"{folder_name[:allowed]}_{ts}"
+        suffix_path = input_dir / suffix_name
+        try:
+            suffix_path.mkdir(parents=True, exist_ok=False)
+            return suffix_path
+        except FileExistsError:
+            time.sleep(0.1)
+
+    # Ultimate fallback with uuid
+    random_suffix = uuid.uuid4().hex[:8]
+    fallback_name = f"{folder_name[:80]}_{random_suffix}"
+    fallback_path = input_dir / fallback_name
+    fallback_path.mkdir(parents=True, exist_ok=False)
+    return fallback_path
