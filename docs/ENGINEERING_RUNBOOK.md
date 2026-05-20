@@ -26,6 +26,7 @@ If a task needs a broader compatibility promise, the maintainer must confirm it 
 ## Authority Surfaces
 
 - `AGENTS.md`: short entrypoint map only
+- `.agents/rules/general-guidelines.md`: Antigravity-specific entrypoint shim only
 - `docs/ENGINEERING_RUNBOOK.md`: workflow, verification, planning, review, handoff
 - `docs/current-architecture.md`: present-day architecture truth
 - `docs/current-cli-contract.md`: present-day CLI command, flag, and persistence contract
@@ -252,7 +253,7 @@ Use this as the default routing shortcut before exploring deeper:
 | Hotspot or runtime pipeline change | `docs/current-architecture.md` | `orchestration/`, `render/`, `vs/`, hotspot files, adjacent tests | High | Full verification, plus Docker when listed under Docker/runtime verification |
 | Docker/runtime environment change | this runbook + `docs/current-architecture.md` | `Dockerfile`, `docker-compose.yml`, `tools/verify_docker_integration.sh`, runtime integration tests | High | Full verification plus Docker/runtime verification |
 | Windows portable or release-path change | this runbook | `tools/windows_portable/**`, `.github/workflows/windows-portable.yml`, release-path docs | High | Full verification plus Windows portable/release-path verification |
-| Workflow/authority doc change | this runbook or the affected authority doc | `AGENTS.md`, `docs/ENGINEERING_RUNBOOK.md`, `docs/current-architecture.md`, `docs/current-cli-contract.md` | High | Full verification |
+| Workflow/authority doc change | this runbook or the affected authority doc | `AGENTS.md`, `.agents/rules/general-guidelines.md`, `.coderabbit.yaml`, `docs/ENGINEERING_RUNBOOK.md`, `docs/current-architecture.md`, `docs/current-cli-contract.md` | High | Full verification |
 
 ### Stop And Ask
 
@@ -267,6 +268,8 @@ Stop and get maintainer confirmation if any of these are unclear:
 ## Discrepancy Handling
 
 - `AGENTS.md` controls entrypoint order.
+- `.agents/rules/general-guidelines.md` is an Antigravity shim and must defer to
+  `AGENTS.md` plus this runbook when instructions conflict.
 - Observed code, config, and successfully executed commands outrank stale prose in
   `docs/current-architecture.md`, `docs/current-cli-contract.md`, `README.md`,
   `CONTRIBUTING.md`, `docs/DECISIONS.md`, historical plans, and cached review material.

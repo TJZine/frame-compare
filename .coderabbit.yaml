@@ -30,7 +30,10 @@ reviews:
   path_instructions:
     - path: "AGENTS.md"
       instructions: |
-        Review as the short agent entrypoint only. Flag contradictions with docs/ENGINEERING_RUNBOOK.md, docs/current-architecture.md, docs/current-cli-contract.md, importlinter.ini, pyproject.toml, .codex/config.toml, or repo-local skill routing. Do not request that AGENTS.md become a second runbook.
+        Review as the short agent entrypoint only. Flag contradictions with docs/ENGINEERING_RUNBOOK.md, docs/current-architecture.md, docs/current-cli-contract.md, importlinter.ini, pyproject.toml, .codex/config.toml, .agents/rules/general-guidelines.md, or repo-local skill routing. Do not request that AGENTS.md become a second runbook.
+    - path: ".agents/rules/**/*.md"
+      instructions: |
+        Review Antigravity rules as thin shims over AGENTS.md and the runbook. Flag stale workflow systems, obsolete generated-contract commands, duplicated runbook policy, conflicts with docs/ENGINEERING_RUNBOOK.md, and instructions that make .agents/rules a competing authority.
     - path: "docs/ENGINEERING_RUNBOOK.md"
       instructions: |
         Review as the canonical workflow, verification, planning, review, and production-quality authority. Check risk tiers, command canon, production guardrails, public-surface policy, Docker/Windows verification, and plan activation rules. Flag process gaps that would let agents claim unverified work or weaken code quality.
@@ -43,7 +46,7 @@ reviews:
     - path: "docs/plans/**/*.md"
       instructions: |
         Review tracked plans as scoped handoff memory, not global policy. Flag plans that lack explicit status, treat inactive or closed plans as current authority, duplicate runbook policy, or omit verification and rollback notes for active implementation work.
-    - path: ".codex/skills/**/*.md"
+    - path: ".agents/skills/**/*.md"
       instructions: |
         These are repo-local Frame Compare skills. Review for stale source-repo residue, trigger descriptions that are too broad or too narrow, conflicts with the runbook, weak verification routing, missing Python/CLI/test guidance, and rules that are overly restrictive compared with repo policy.
     - path: ".codex/config.toml"
@@ -136,6 +139,7 @@ knowledge_base:
     enabled: true
     filePatterns:
       - "AGENTS.md"
+      - ".agents/rules/general-guidelines.md"
       - "docs/ENGINEERING_RUNBOOK.md"
       - "docs/current-architecture.md"
       - "docs/current-cli-contract.md"
@@ -143,4 +147,28 @@ knowledge_base:
       - "pyproject.toml"
       - ".codex/config.toml"
       - ".codex/agents/*.toml"
-      - ".codex/skills/*/SKILL.md"
+      - ".agents/skills/architecture-boundaries/SKILL.md"
+      - ".agents/skills/bounded-worker-execution/SKILL.md"
+      - ".agents/skills/cli-contract-boundaries/SKILL.md"
+      - ".agents/skills/closeout-verification/SKILL.md"
+      - ".agents/skills/debugging-remediation/SKILL.md"
+      - ".agents/skills/execution-plan-authoring/SKILL.md"
+      - ".agents/skills/frame-compare-cleanup-implement/SKILL.md"
+      - ".agents/skills/frame-compare-cleanup-loop/SKILL.md"
+      - ".agents/skills/frame-compare-cleanup-plan/SKILL.md"
+      - ".agents/skills/frame-compare-cleanup-review/SKILL.md"
+      - ".agents/skills/frame-compare-feature-implement/SKILL.md"
+      - ".agents/skills/frame-compare-feature-plan/SKILL.md"
+      - ".agents/skills/frame-compare-feature-review/SKILL.md"
+      - ".agents/skills/frame-compare-workflow-harness-review/SKILL.md"
+      - ".agents/skills/model-selection/SKILL.md"
+      - ".agents/skills/parallel-sidecars/SKILL.md"
+      - ".agents/skills/persistence-boundaries/SKILL.md"
+      - ".agents/skills/python-quality-boundaries/SKILL.md"
+      - ".agents/skills/python-test-design/SKILL.md"
+      - ".agents/skills/repo-production-review/SKILL.md"
+      - ".agents/skills/report-output-patterns/SKILL.md"
+      - ".agents/skills/review-adjudication/SKILL.md"
+      - ".agents/skills/review-request/SKILL.md"
+      - ".agents/skills/runtime-integration-boundaries/SKILL.md"
+      - ".agents/skills/verification-strategy/SKILL.md"

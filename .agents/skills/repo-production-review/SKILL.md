@@ -17,7 +17,7 @@ Before running the universal review, read and honor:
 - `docs/current-cli-contract.md`
 - `importlinter.ini`
 - `pyproject.toml`
-- `.codex/skills/*/SKILL.md`
+- `.agents/skills/*/SKILL.md`
 
 Also open and follow the global orchestrator at:
 
