@@ -21,6 +21,7 @@ from frame_compare.errors import (
     RenderError,
     SourceLoadError,
 )
+from frame_compare.render._ffmpeg_frame import build_extract_frame_argv, frame_seek_time_seconds
 from frame_compare.render.overlay import apply_overlay
 from frame_compare.render.types import EncoderSettings, OverlayMode, Renderer, RenderRequest
 from frame_compare.utils.subproc import run_subprocess
@@ -280,22 +281,13 @@ def _render_ffmpeg(
 ) -> None:
     """Render frame via FFmpeg."""
     fps = _probe_fps(video_path)
-
-    # Deterministic seek time: floor((frame / fps) * 1000) / 1000
-    seek_time = f"{math.floor((frame / fps) * 1000) / 1000:.3f}"
-
-    cmd = [
-        "ffmpeg",
-        "-ss",
-        seek_time,
-        "-i",
-        str(video_path),
-        "-vframes",
-        "1",
-        "-q:v",
-        "1",
-        str(output),
-    ]
+    seek_time = frame_seek_time_seconds(frame, fps)
+    cmd = build_extract_frame_argv(
+        video=video_path,
+        seek_time=seek_time,
+        output=output,
+        overwrite=False,
+    )
 
     try:
         run_subprocess(cmd, timeout_seconds=timeout)

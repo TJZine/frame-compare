@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Protocol, cast
 
 from frame_compare.errors import FFmpegError, FFmpegNotFoundError
+from frame_compare.render._ffmpeg_frame import build_extract_frame_argv, frame_seek_time_seconds
 from frame_compare.utils.subproc import run_subprocess
 from frame_compare.vs.types import HDRMetadata
 
@@ -76,21 +77,14 @@ class DefaultFFmpegRunner:
 
     def extract_frame(self, video: Path, frame_num: int, output: Path) -> None:
         fps = self._probe_fps(video)
-        seek_time = f"{math.floor((frame_num / fps) * 1000) / 1000:.3f}"
+        seek_time = frame_seek_time_seconds(frame_num, fps)
         output.parent.mkdir(parents=True, exist_ok=True)
-        argv = [
-            "ffmpeg",
-            "-y",
-            "-ss",
-            seek_time,
-            "-i",
-            str(video),
-            "-vframes",
-            "1",
-            "-q:v",
-            "1",
-            str(output),
-        ]
+        argv = build_extract_frame_argv(
+            video=video,
+            seek_time=seek_time,
+            output=output,
+            overwrite=True,
+        )
         try:
             run_subprocess(argv, timeout_seconds=self._FFMPEG_TIMEOUT_SECONDS)
         except FileNotFoundError as exc:
