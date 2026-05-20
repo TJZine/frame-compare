@@ -13,12 +13,14 @@ Read these files in order:
 
 1. `AGENTS.md`
 2. `docs/ENGINEERING_RUNBOOK.md`
-3. `.codex/skills/*/SKILL.md`
-4. `.codex/skills/*/agents/openai.yaml` when present
-5. `.codex/config.toml` and `.codex/agents/*.toml` when delegated roles are in scope
-6. `.agents/skills/desloppify/SKILL.md` when code-health workflow policy is in scope
-7. `docs/current-architecture.md`
-8. `docs/current-cli-contract.md`
+3. `docs/current-architecture.md`
+4. `docs/current-cli-contract.md`
+5. `importlinter.ini`
+6. `pyproject.toml`
+7. `.codex/skills/*/SKILL.md`
+8. `.codex/skills/*/agents/openai.yaml` when present
+9. `.codex/config.toml` and `.codex/agents/*.toml` when delegated roles are in scope
+10. `.agents/skills/desloppify/SKILL.md` when code-health workflow policy is in scope
 
 ## Review Focus
 
@@ -31,6 +33,7 @@ Lead with findings ordered by severity. Prioritize:
 - public-surface workflow gaps
 - stale paths or source-repo residue
 - missing or undefined delegated roles
+- missing language-specific workflow coverage for Python, Typer CLI, or pytest changes
 - instructions that would make agents overwrite user changes or claim unverified work
 
 ## Output

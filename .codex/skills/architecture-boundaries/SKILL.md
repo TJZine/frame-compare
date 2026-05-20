@@ -18,6 +18,7 @@ The default move is extraction into the existing owner, not accretion in hotspot
 - Changes to `importlinter.ini` or top-level package boundaries
 - New coordinators, services, repositories, adapters, or output owners
 - Refactors that move logic between CLI, config, orchestration, analysis, render, services, VapourSynth, or filesystem owners
+- Type-heavy Python refactors where owner boundaries, DTO shapes, or import-time behavior may change
 
 ## Core Rules
 
@@ -43,6 +44,9 @@ The default move is extraction into the existing owner, not accretion in hotspot
 - If the change touches config, generated caches, run folders, presets, reports, or filesystem persistence, also load `persistence-boundaries`.
 - If the change touches FFmpeg, VapourSynth, TMDB, slow.pics, Docker, or Windows portable/release behavior, also load `runtime-integration-boundaries`.
 - If the change touches generated HTML reports, overlay text, screenshot naming, or user-visible output formatting, also load `report-output-patterns`.
+- If the change touches Python typing, Pydantic schemas, HTTPX clients, Typer/Rich wiring, or typed internal seams, also load `python-quality-boundaries`.
+- If the change touches CLI commands, options, streams, JSON mode, help text, exit codes, or config-persistence flags, also load `cli-contract-boundaries`.
+- If the change adds or reshapes tests, fixtures, markers, subprocess checks, HTTP mocks, or property-based tests, also load `python-test-design`.
 
 ## Discovery Pattern
 

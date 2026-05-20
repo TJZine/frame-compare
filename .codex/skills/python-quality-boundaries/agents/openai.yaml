@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python Quality Boundaries"
+  short_description: "Guide strict Python typing, validation, and maintainability"
+  default_prompt: "Use the python-quality-boundaries skill for this task."
