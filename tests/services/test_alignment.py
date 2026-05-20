@@ -274,6 +274,28 @@ def test_load_cached_offsets_valid_returns_dict(tmp_path: Path):
     assert res["ref:comp_a"].algorithm == "cross_correlation"
 
 
+def test_load_cached_offsets_legacy_method_key_returns_dict(tmp_path: Path) -> None:
+    cache_file = tmp_path / "audio_offsets.toml"
+    data = {
+        "version": "1",
+        "ref:comp_a": {
+            "reference_clip": "ref.mkv",
+            "comparison_clip": "comp_a.mkv",
+            "frame_offset": 42,
+            "time_offset_seconds": 1.751,
+            "correlation_score": 0.987,
+            "method": "cross_correlation",
+        },
+    }
+    with cache_file.open("wb") as f:
+        f.write(tomli_w.dumps(data).encode("utf-8"))
+
+    res = load_cached_offsets(tmp_path, [Path("ref.mkv"), Path("comp_a.mkv")])
+    assert res is not None
+    assert res["ref:comp_a"].algorithm == "cross_correlation"
+    assert res["ref:comp_a"].source == "cached"
+
+
 def test_load_cached_offsets_valid_no_match_returns_empty(tmp_path: Path):
     """Test cache loading when requested keys are not in valid file."""
     cache_file = tmp_path / "audio_offsets.toml"
@@ -366,6 +388,41 @@ def test_save_offsets_cache_writes_toml(tmp_path: Path):
     content = cache_file.read_text()
     assert 'version = "1"' in content
     assert '["ref:comp"]' in content
+
+
+def test_save_offsets_cache_normalizes_legacy_method_keys(tmp_path: Path) -> None:
+    cache_file = tmp_path / "audio_offsets.toml"
+    existing = {
+        "version": "1",
+        "ref:comp_a": {
+            "reference_clip": "ref.mkv",
+            "comparison_clip": "comp_a.mkv",
+            "frame_offset": 42,
+            "time_offset_seconds": 1.751,
+            "correlation_score": 0.987,
+            "method": "cross_correlation",
+        },
+    }
+    cache_file.write_text(tomli_w.dumps(existing), encoding="utf-8")
+
+    save_offsets_cache(
+        tmp_path,
+        [
+            AlignmentResult(
+                reference_clip="ref.mkv",
+                comparison_clip="comp_b.mkv",
+                frame_offset=10,
+                time_offset_seconds=0.4,
+                correlation_score=0.9,
+                algorithm="cross_correlation",
+                source="computed",
+            )
+        ],
+    )
+
+    content = cache_file.read_text(encoding="utf-8")
+    assert 'method = "cross_correlation"' not in content
+    assert content.count('algorithm = "cross_correlation"') == 2
 
 
 def test_save_offsets_cache_logs_corrupt_existing_cache(

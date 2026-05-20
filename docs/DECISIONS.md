@@ -635,7 +635,7 @@ Placed `frame_compare.vspreview` on a dedicated layer BELOW `frame_compare.servi
 
 **Manual Override Precedence:**
 
-Implemented deterministic precedence in `align_clips`: manual override > cached > computed. Manual overrides produce `AlignmentResult` with `method="manual"` and `correlation_score=1.0`, and are NOT written to `audio_offsets.toml` (cache separation).
+Implemented deterministic precedence in `align_clips`: manual override > cached > computed. Manual overrides produce `AlignmentResult` with `algorithm=None`, `source="manual"`, and `correlation_score=1.0`, and are NOT written to `audio_offsets.toml` (cache separation).
 
 **Out-of-scope:**
 

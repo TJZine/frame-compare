@@ -297,3 +297,15 @@ def test_reserve_run_folder_handles_collisions_atomically(tmp_path: Path) -> Non
     assert result_path == tmp_path / "Fight Club (1999)_20260208-020749"
     assert result_path.exists()
     assert result_path.is_dir()
+
+
+def test_reserve_run_folder_empty_filenames_uses_canonical_fallback(tmp_path: Path) -> None:
+    result_path = reserve_run_folder(
+        input_dir=tmp_path,
+        filenames=[],
+        tmdb_metadata=None,
+    )
+
+    assert result_path == tmp_path / "unnamed_run"
+    assert result_path.exists()
+    assert result_path.is_dir()

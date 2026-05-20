@@ -271,6 +271,30 @@ def align_clips(
     return [results_map[f"{reference.stem}:{c.stem}"] for c in comparisons]
 
 
+def _resolve_cached_algorithm(entry_dict: dict[str, object]) -> str:
+    """Resolve the canonical cache algorithm field, accepting legacy key names."""
+    algorithm = entry_dict.get("algorithm")
+    if algorithm is None and "method" in entry_dict:
+        algorithm = entry_dict["method"]
+
+    if not isinstance(algorithm, str):
+        raise TypeError("algorithm must be str")
+    if algorithm != "cross_correlation":
+        raise ValueError("unsupported algorithm value")
+    return algorithm
+
+
+def _normalize_legacy_cache_entries(data: dict[str, object]) -> None:
+    """Rewrite legacy cache keys to the current schema before saving."""
+    for key, entry in data.items():
+        if key == "version" or not isinstance(entry, dict):
+            continue
+        entry_dict = cast(dict[str, object], entry)
+        if "algorithm" not in entry_dict and "method" in entry_dict:
+            entry_dict["algorithm"] = entry_dict["method"]
+        entry_dict.pop("method", None)
+
+
 def load_cached_offsets(
     cache_dir: Path,
     clips: list[Path],
@@ -306,7 +330,7 @@ def load_cached_offsets(
                 frame_offset = entry_dict["frame_offset"]
                 time_offset_seconds = entry_dict["time_offset_seconds"]
                 correlation_score = entry_dict["correlation_score"]
-                algorithm = entry_dict["algorithm"]
+                _resolve_cached_algorithm(entry_dict)
 
                 if not isinstance(reference_clip, str):
                     raise TypeError("reference_clip must be str")
@@ -318,8 +342,6 @@ def load_cached_offsets(
                     raise TypeError("time_offset_seconds must be number")
                 if not isinstance(correlation_score, int | float):
                     raise TypeError("correlation_score must be number")
-                if algorithm != "cross_correlation":
-                    raise ValueError("unsupported algorithm value")
 
                 results[key] = AlignmentResult(
                     reference_clip=reference_clip,
@@ -349,6 +371,7 @@ def save_offsets_cache(
         try:
             with cache_path.open("rb") as f:
                 data.update(tomllib.load(f))
+            _normalize_legacy_cache_entries(data)
         except tomllib.TOMLDecodeError as exc:
             log.warning(
                 "audio_offsets_cache_corrupt_on_write",
