@@ -452,7 +452,35 @@ function Test-StringInRange([string]$Value, [string]$Min, [string]$Max) {
   return $true
 }
 
+function Get-VersionFromCommandOutput([object[]]$OutputLines) {
+  foreach ($line in $OutputLines) {
+    $text = [string]$line
+    if ([string]::IsNullOrWhiteSpace($text)) {
+      continue
+    }
+    $trimmed = $text.Trim()
+    if ($trimmed -match '^frame-compare\s+([0-9]+(?:\.[0-9]+){1,3})$') {
+      return $Matches[1]
+    }
+    if ($trimmed -match '^([0-9]+(?:\.[0-9]+){1,3})$') {
+      return $Matches[1]
+    }
+  }
+  return ""
+}
+
 function Get-BundleAppVersion([string]$BundlePath) {
+  $bundleLauncher = Join-Path $BundlePath "frame-compare.ps1"
+  if (Test-Path -LiteralPath $bundleLauncher) {
+    $launcherResult = & $bundleLauncher version 2>&1
+    if ($LASTEXITCODE -eq 0) {
+      $launcherVersion = Get-VersionFromCommandOutput -OutputLines $launcherResult
+      if (-not [string]::IsNullOrWhiteSpace($launcherVersion)) {
+        return $launcherVersion
+      }
+    }
+  }
+
   $pythonExe = Join-PathParts -Root $BundlePath -Parts @("python", "python.exe")
   if (!(Test-Path -LiteralPath $pythonExe)) {
     return ""

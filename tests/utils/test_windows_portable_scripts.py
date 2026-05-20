@@ -513,6 +513,17 @@ def test_windows_portable_updater_warns_when_installed_version_missing(repo_root
     assert "skipping version range check" in updater.lower()
 
 
+def test_windows_portable_updater_prefers_bundle_launcher_for_installed_version(
+    repo_root: Path,
+) -> None:
+    updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
+    updater = _read_text_or_fail(updater_path)
+    assert "function Get-VersionFromCommandOutput" in updater
+    assert '$bundleLauncher = Join-Path $BundlePath "frame-compare.ps1"' in updater
+    assert "& $bundleLauncher version 2>&1" in updater
+    assert 'Get-VersionFromCommandOutput -OutputLines $launcherResult' in updater
+
+
 def test_windows_portable_updater_finally_does_not_mask_exception(repo_root: Path) -> None:
     updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
     updater = _read_text_or_fail(updater_path)
