@@ -11,8 +11,13 @@ from frame_compare.errors import (
     SourceLoadError,
     VapourSynthNotFoundError,
 )
-from frame_compare.render.orchestrator import ProgressReporter, render_batch, render_screenshots
-from frame_compare.render.types import EncoderSettings, RenderRequest
+from frame_compare.render.orchestrator import (
+    ProgressReporter,
+    render_batch,
+    render_screenshots,
+    render_screenshots_from_batch,
+)
+from frame_compare.render.types import EncoderSettings, RenderRequest, ScreenshotBatchRequest
 
 
 @pytest.fixture
@@ -252,3 +257,30 @@ def test_render_screenshots_output_path(tmp_path, default_config):
 
         expected = generate_screenshot_path(tmp_path, "vid1", 42)
         assert req.output_path == expected
+
+
+def test_render_screenshots_from_batch_rejects_mismatched_frame_metadata(tmp_path) -> None:
+    config = ConfigSchema(color=ColorConfig(enable_tonemap=False), screenshots={"use_ffmpeg": True})
+    ffmpeg_runner = MagicMock()
+    request = ScreenshotBatchRequest(
+        clip_path=Path("vid1.mkv"),
+        label="vid1",
+        source_frames=[42],
+        display_frames=[42, 43],
+        selection_labels=[None, None],
+        probe_width=1920,
+        probe_height=1080,
+        probe_num_frames=240,
+        probe_is_hdr=False,
+    )
+
+    with pytest.raises(ValueError, match="ScreenshotBatchRequest 'vid1' has mismatched lengths"):
+        render_screenshots_from_batch(
+            batch_requests=[request],
+            output_dir=tmp_path,
+            config=config,
+            overlay_mode=config.screenshots.overlay_mode,
+            ffmpeg_runner=ffmpeg_runner,
+        )
+
+    ffmpeg_runner.extract_frame.assert_not_called()

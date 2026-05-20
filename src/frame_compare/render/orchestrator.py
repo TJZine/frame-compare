@@ -472,6 +472,19 @@ def render_screenshots(
     return results
 
 
+def _validate_batch_request_lengths(request: ScreenshotBatchRequest) -> None:
+    """Fail fast when a batch request carries mismatched frame metadata lists."""
+    display_len = len(request.display_frames)
+    source_len = len(request.source_frames)
+    selection_len = len(request.selection_labels)
+    if display_len != source_len or display_len != selection_len:
+        raise ValueError(
+            f"ScreenshotBatchRequest {request.label!r} has mismatched lengths: "
+            f"display_frames={display_len}, source_frames={source_len}, "
+            f"selection_labels={selection_len}"
+        )
+
+
 def render_screenshots_from_batch(
     batch_requests: list[ScreenshotBatchRequest],
     output_dir: Path,
@@ -509,6 +522,9 @@ def render_screenshots_from_batch(
         from frame_compare.errors import TonemapRequiresVapourSynthError
 
         raise TonemapRequiresVapourSynthError()
+
+    for req in batch_requests:
+        _validate_batch_request_lengths(req)
 
     rendered: dict[str, list[Path]] = {}
 

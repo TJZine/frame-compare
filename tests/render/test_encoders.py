@@ -167,7 +167,7 @@ def test_ffmpeg_seek_calculation(mock_run_subprocess):
     )
 
     # 100 / (24000/1001) = 4.17083...
-    # floor(4170.83) = 4170 -> 4.170
+    # Keep sub-millisecond precision in the shared seek timestamp.
 
     # Check calls
     # Call 1: probe
@@ -185,7 +185,7 @@ def test_ffmpeg_seek_calculation(mock_run_subprocess):
 
     assert "-ss" in cmd
     idx = cmd.index("-ss")
-    assert cmd[idx + 1] == "4.170"
+    assert cmd[idx + 1] == "4.170833"
 
     # Check SSOT compliance (-q:v 1)
     assert "-q:v" in cmd

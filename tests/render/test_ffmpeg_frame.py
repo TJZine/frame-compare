@@ -4,13 +4,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from frame_compare.errors import FFmpegNotFoundError
+from frame_compare.errors import FFmpegError, FFmpegNotFoundError
 from frame_compare.render._ffmpeg_frame import build_extract_frame_argv, frame_seek_time_seconds
 from frame_compare.render.ffmpeg import DefaultFFmpegRunner
 
 
 def test_frame_seek_time_seconds_matches_repo_contract() -> None:
-    assert frame_seek_time_seconds(100, 24000 / 1001) == "4.170"
+    assert frame_seek_time_seconds(100, 24000 / 1001) == "4.170833"
 
 
 @pytest.mark.parametrize(
@@ -73,7 +73,7 @@ def test_default_ffmpeg_runner_extract_frame_uses_shared_command_policy(
         "ffmpeg",
         "-y",
         "-ss",
-        "4.170",
+        "4.170833",
         "-i",
         "clip.mkv",
         "-vframes",
@@ -97,3 +97,29 @@ def test_default_ffmpeg_runner_extract_frame_wraps_missing_binary(
 
     with pytest.raises(FFmpegNotFoundError):
         runner.extract_frame(Path("clip.mkv"), 1, tmp_path / "frame.png")
+
+
+def test_default_ffmpeg_runner_extract_frame_wraps_missing_input_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    run_subprocess = MagicMock(
+        side_effect=[
+            subprocess.CompletedProcess(args=[], returncode=0, stdout=b"24\n", stderr=b""),
+            subprocess.CalledProcessError(
+                1,
+                ["ffmpeg"],
+                stderr=b"No such file or directory",
+            ),
+        ]
+    )
+    monkeypatch.setattr("frame_compare.render.ffmpeg.run_subprocess", run_subprocess)
+
+    runner = DefaultFFmpegRunner()
+
+    with pytest.raises(FFmpegError) as exc_info:
+        runner.extract_frame(Path("nonexistent.mkv"), 1, tmp_path / "frame.png")
+
+    details = exc_info.value.context.details
+    assert details is not None
+    assert details["returncode"] == 1
+    assert "No such file or directory" in str(details["stderr"])
