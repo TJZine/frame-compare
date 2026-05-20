@@ -26,7 +26,8 @@ def test_current_cli_contract_is_wired_into_repo_authority_surfaces() -> None:
     architecture_pos = agents.index("[docs/current-architecture.md]")
     cli_contract_pos = agents.index("[docs/current-cli-contract.md]")
     importlinter_pos = agents.index("[importlinter.ini]")
-    assert runbook_pos < architecture_pos < cli_contract_pos < importlinter_pos
+    pyproject_pos = agents.index("[pyproject.toml]")
+    assert runbook_pos < architecture_pos < cli_contract_pos < importlinter_pos < pyproject_pos
 
 
 def test_current_cli_contract_covers_all_public_command_families() -> None:
