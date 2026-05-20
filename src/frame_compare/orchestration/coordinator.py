@@ -577,6 +577,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
                 execute=_execute,
                 skip_condition=skip_condition,
                 progress_total=progress_total,
+                warn_only=warn_only,
             )
 
         phases_before_align = [
