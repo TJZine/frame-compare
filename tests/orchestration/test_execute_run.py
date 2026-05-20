@@ -614,7 +614,7 @@ enable = false
     input_dir = tmp_path / "comparison_videos"
     _create_video_files(input_dir, "a_ref.mkv", "b_comp1.mkv", "c_comp2.mkv")
 
-    async def _fake_align_clips(reference, comparisons, config, cache_dir, progress=None):
+    def _fake_align_clips(reference, comparisons, config, cache_dir, progress=None):
         del config, cache_dir, progress
         return [
             AlignmentResult(

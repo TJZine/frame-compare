@@ -771,7 +771,7 @@ def selection_label_for_frame(frame: int, breakdown: SelectionBreakdown | None) 
     return None
 
 
-async def _run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> None:
+def _run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> None:
     if not ctx.comparisons:
         return
     alignment_config = AlignmentConfig(
@@ -782,7 +782,7 @@ async def _run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> No
         force_interactive=ctx.config.audio_alignment.force_interactive,
         cache_results=ctx.config.audio_alignment.cache_results,
     )
-    results = await align_clips(
+    results = align_clips(
         reference=ctx.reference.path,
         comparisons=[comp.path for comp in ctx.comparisons],
         config=alignment_config,

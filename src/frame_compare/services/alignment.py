@@ -114,7 +114,7 @@ def _maybe_launch_vspreview(
             progress.complete_phase()
 
 
-async def align_clips(
+def align_clips(
     reference: Path,
     comparisons: list[Path],
     config: AlignmentConfig,

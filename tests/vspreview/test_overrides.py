@@ -9,8 +9,6 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from frame_compare.vspreview import (
     ManualOverride,
     is_vspreview_available,
@@ -286,8 +284,7 @@ class TestSaveManualOverride:
 class TestManualOverridePrecedence:
     """Tests for manual override precedence over computed/cached results."""
 
-    @pytest.mark.anyio
-    async def test_manual_override_takes_precedence_over_computed(self, tmp_path: Path) -> None:
+    def test_manual_override_takes_precedence_over_computed(self, tmp_path: Path) -> None:
         """Manual overrides take precedence and skip FFmpeg extraction."""
         from fractions import Fraction
 
@@ -335,7 +332,7 @@ class TestManualOverridePrecedence:
                 cache_results=False,  # Disable cache to focus on override test
             )
 
-            results = await align_clips(
+            results = align_clips(
                 reference=reference,
                 comparisons=[comparison],
                 config=config,
