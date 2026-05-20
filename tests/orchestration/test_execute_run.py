@@ -159,6 +159,9 @@ def test_execute_run_returns_success_and_records_preflight_timing(
     assert result.frame_count == 10
     assert result.clips_processed == 1
     assert result.duration_seconds >= 0.0
+    assert result.cache_hit is False
+    assert result.slowpics_url is None
+    assert result.report_path is None
     expected_keys = {
         "preflight",
         "load_sources",
@@ -532,6 +535,9 @@ def test_execute_run_from_cache_only_uses_run_folder_cache_when_enabled(
 
     assert result.success is True
     assert result.cache_hit is True
+    assert result.warnings == []
+    assert result.screenshot_dir == (run_generated_dir.parent / "screenshots").resolve()
+    assert result.slowpics_url is None
 
 
 def test_execute_run_passes_prefetched_tmdb_metadata_to_run_folder_derivation(

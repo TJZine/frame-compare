@@ -175,6 +175,47 @@ class RunResult:
     phase_timings: dict[str, float] = field(default_factory=_empty_phase_timings)
 
 
+def _empty_screenshots() -> dict[str, list[Path]]:
+    return {}
+
+
+@dataclass
+class _RunArtifacts:
+    """Internal carrier for artifacts accumulated during the run."""
+
+    metrics_cache_hit: bool = False
+    screenshots_by_label: dict[str, list[Path]] = field(default_factory=_empty_screenshots)
+    slowpics_url: str | None = None
+    report_path: Path | None = None
+    screenshot_dir: Path | None = None
+    resolved_metadata: TmdbMetadata | None = None
+    warnings: list[str] = field(default_factory=_empty_str_list)
+
+
+def _assemble_run_result(
+    *,
+    artifacts: _RunArtifacts,
+    selected_frames: list[int],
+    context: RunContext,
+    preflight_warnings: list[str],
+    phase_timings: dict[str, float],
+    duration_seconds: float,
+) -> RunResult:
+    """Helper to assemble a RunResult from collected state."""
+    return RunResult(
+        success=True,
+        screenshot_dir=artifacts.screenshot_dir,
+        slowpics_url=artifacts.slowpics_url,
+        report_path=artifacts.report_path,
+        frame_count=len(selected_frames),
+        clips_processed=1 + len(context.comparisons),
+        duration_seconds=duration_seconds,
+        cache_hit=artifacts.metrics_cache_hit,
+        phase_timings=phase_timings,
+        warnings=[*preflight_warnings, *sorted(artifacts.warnings)],
+    )
+
+
 @dataclass
 class RunDependencies:
     """Dependency injection container for run orchestration."""
@@ -251,8 +292,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         }
         config = apply_cli_overrides(preflight.config, cli_args=cli_args)
         input_videos = discover_inputs(workspace.input_dir)
-        phase_warnings: set[str] = set()
-        resolved_metadata: TmdbMetadata | None = None
+        artifacts = _RunArtifacts()
         metadata_prefetched = False
 
         # Resolve run folder before any cache/probe path access so all phases use the same workspace.
@@ -262,21 +302,21 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
                 # folder naming path resilient and skip a second metadata-phase retry.
                 metadata_prefetched = True
                 try:
-                    resolved_metadata = await resolve_metadata(
+                    artifacts.resolved_metadata = await resolve_metadata(
                         filenames=[input_videos[0].name],
                         config=_build_metadata_config(config),
                         client=deps.http_client,
                     )
                 except Exception as exc:
                     # Metadata lookup is optional; keep run folder naming resilient.
-                    phase_warnings.add(f"metadata: {exc}")
-                    resolved_metadata = None
+                    artifacts.warnings.append(f"metadata: {exc}")
+                    artifacts.resolved_metadata = None
 
             filenames = [video.name for video in input_videos]
             existing = get_existing_run_folders(workspace.input_dir)
             run_folder_name = derive_run_folder_name(
                 filenames=filenames,
-                tmdb_metadata=resolved_metadata,
+                tmdb_metadata=artifacts.resolved_metadata,
                 existing_folders=existing,
             )
             run_dir = workspace.input_dir / run_folder_name
@@ -391,11 +431,6 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             }
         )
         selected_frames: list[int] = []
-        metrics_cache_hit = False
-        screenshots_by_label: dict[str, list[Path]] = {}
-        slowpics_url: str | None = None
-        report_path: Path | None = None
-        screenshot_dir: Path | None = None
 
         def _timed_phase(
             name: str,
@@ -414,7 +449,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
                         await maybe_awaitable
                 except Exception as exc:
                     if warn_only:
-                        phase_warnings.add(f"{name}: {exc}")
+                        artifacts.warnings.append(f"{name}: {exc}")
                         raise
                     raise
                 finally:
@@ -451,7 +486,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
                     input_videos=input_videos,
                     workspace=workspace,
                     selected_frames=selected_frames,
-                    metrics_cache_hit_out=lambda hit: _set_metrics_cache_hit(hit),
+                    artifacts=artifacts,
                 ),
                 warn_only=True,
                 progress_total=ANALYZE_PROGRESS_TOTAL,
@@ -474,8 +509,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
                     ctx=ctx,
                     frames=selected_frames,
                     runner=deps.get_ffmpeg_runner(),
-                    screenshots_out=lambda value: _set_screenshots(value),
-                    screenshot_dir_out=lambda value: _set_screenshot_dir(value),
+                    artifacts=artifacts,
                 ),
             ),
             _timed_phase(
@@ -485,9 +519,9 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
                 lambda ctx: _run_metadata_phase(
                     ctx=ctx,
                     client=deps.http_client,
-                    prefetched_metadata=resolved_metadata,
+                    prefetched_metadata=artifacts.resolved_metadata,
                     metadata_prefetched=metadata_prefetched,
-                    metadata_out=lambda value: _set_metadata(value),
+                    artifacts=artifacts,
                 ),
                 warn_only=True,
             ),
@@ -495,7 +529,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
                 "dovi",
                 "dovi",
                 lambda config: request.skip_dovi,
-                lambda _ctx: phase_warnings.add(
+                lambda _ctx: artifacts.warnings.append(
                     "dovi: DOVI processing is not implemented yet; continuing without Dolby Vision extraction."
                 ),
                 warn_only=True,
@@ -507,8 +541,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
                 lambda ctx: _run_publish_phase(
                     ctx=ctx,
                     client=deps.http_client,
-                    metadata=resolved_metadata,
-                    slowpics_url_out=lambda value: _set_slowpics_url(value),
+                    artifacts=artifacts,
                 ),
                 warn_only=True,
             ),
@@ -519,38 +552,11 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
                 lambda ctx: _run_report_phase(
                     ctx=ctx,
                     frames=selected_frames,
-                    screenshots=screenshots_by_label,
-                    metadata=resolved_metadata,
-                    slowpics_url=slowpics_url,
-                    report_path_out=lambda value: _set_report_path(value),
+                    artifacts=artifacts,
                 ),
                 warn_only=True,
             ),
         ]
-
-        def _set_metrics_cache_hit(value: bool) -> None:
-            nonlocal metrics_cache_hit
-            metrics_cache_hit = value
-
-        def _set_metadata(value: TmdbMetadata | None) -> None:
-            nonlocal resolved_metadata
-            resolved_metadata = value
-
-        def _set_screenshots(value: dict[str, list[Path]]) -> None:
-            nonlocal screenshots_by_label
-            screenshots_by_label = value
-
-        def _set_slowpics_url(value: str | None) -> None:
-            nonlocal slowpics_url
-            slowpics_url = value
-
-        def _set_report_path(value: Path | None) -> None:
-            nonlocal report_path
-            report_path = value
-
-        def _set_screenshot_dir(value: Path | None) -> None:
-            nonlocal screenshot_dir
-            screenshot_dir = value
 
         await execute_phases(phases_before_align, context, reporter)
         emit_consolidated_fps_report(
@@ -563,17 +569,13 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         run_end = deps.clock()
         duration_seconds = (run_end - run_start).total_seconds()
 
-        return RunResult(
-            success=True,
-            screenshot_dir=screenshot_dir,
-            slowpics_url=slowpics_url,
-            report_path=report_path,
-            frame_count=len(selected_frames),
-            clips_processed=1 + len(context.comparisons),
-            duration_seconds=duration_seconds,
-            cache_hit=metrics_cache_hit,
+        return _assemble_run_result(
+            artifacts=artifacts,
+            selected_frames=selected_frames,
+            context=context,
+            preflight_warnings=preflight.warnings,
             phase_timings=phase_timings,
-            warnings=[*preflight.warnings, *sorted(phase_warnings)],
+            duration_seconds=duration_seconds,
         )
 
     if deps.http_client is not None:
@@ -590,11 +592,11 @@ def _run_analyze_phase(
     input_videos: list[Path],
     workspace: WorkspacePaths,
     selected_frames: list[int],
-    metrics_cache_hit_out: Callable[[bool], None],
+    artifacts: _RunArtifacts,
 ) -> None:
     fingerprint = cache_io.compute_cache_key(input_videos, ctx.config.analysis)
     cache_result = cache_io.load_cached_metrics(workspace.cache_dir, fingerprint, clips=[])
-    metrics_cache_hit_out(cache_result.success and cache_result.metrics is not None)
+    artifacts.metrics_cache_hit = cache_result.success and cache_result.metrics is not None
     metrics = calculate_metrics(
         video_paths=input_videos,
         config=ctx.config.analysis,
@@ -677,8 +679,7 @@ def _run_render_phase(
     ctx: RunContext,
     frames: list[int],
     runner: FFmpegRunner,
-    screenshots_out: Callable[[dict[str, list[Path]]], None],
-    screenshot_dir_out: Callable[[Path | None], None],
+    artifacts: _RunArtifacts,
 ) -> None:
     from frame_compare.render.encoders import apply_overlay_to_file
     from frame_compare.render.types import OverlayConfig
@@ -728,8 +729,8 @@ def _run_render_phase(
                     apply_overlay_to_file(output, overlay)
                 paths.append(output)
             rendered[clip.label] = paths
-        screenshots_out(rendered)
-        screenshot_dir_out(output_dir)
+        artifacts.screenshots_by_label = rendered
+        artifacts.screenshot_dir = output_dir
         return
 
     overlay_mode = ctx.config.screenshots.overlay_mode
@@ -759,8 +760,8 @@ def _run_render_phase(
             reporter=ctx.reporter,
         )
         rendered[clip.label] = rendered_for_clip[clip.label]
-    screenshots_out(rendered)
-    screenshot_dir_out(output_dir)
+    artifacts.screenshots_by_label = rendered
+    artifacts.screenshot_dir = output_dir
 
 
 async def _run_metadata_phase(
@@ -769,54 +770,50 @@ async def _run_metadata_phase(
     client: httpx.AsyncClient | None,
     prefetched_metadata: TmdbMetadata | None,
     metadata_prefetched: bool,
-    metadata_out: Callable[[TmdbMetadata | None], None],
+    artifacts: _RunArtifacts,
 ) -> None:
     if metadata_prefetched:
-        metadata_out(prefetched_metadata)
+        artifacts.resolved_metadata = prefetched_metadata
         return
 
     if client is None or not ctx.config.tmdb.enabled:
-        metadata_out(None)
+        artifacts.resolved_metadata = None
         return
     metadata = await resolve_metadata(
         filenames=[ctx.reference.path.name],
         config=_build_metadata_config(ctx.config),
         client=client,
     )
-    metadata_out(metadata)
+    artifacts.resolved_metadata = metadata
 
 
 async def _run_publish_phase(
     *,
     ctx: RunContext,
     client: httpx.AsyncClient | None,
-    metadata: TmdbMetadata | None,
-    slowpics_url_out: Callable[[str | None], None],
+    artifacts: _RunArtifacts,
 ) -> None:
     if client is None:
-        slowpics_url_out(None)
+        artifacts.slowpics_url = None
         return
     result = await publish_to_slowpics(
         screenshot_dir=ctx.workspace.screenshots_dir,
         config=ctx.config.slowpics,
         client=client,
-        metadata=metadata,
+        metadata=artifacts.resolved_metadata,
         progress=ctx.reporter,
     )
-    slowpics_url_out(result.url)
+    artifacts.slowpics_url = result.url
 
 
 def _run_report_phase(
     *,
     ctx: RunContext,
     frames: list[int],
-    screenshots: dict[str, list[Path]],
-    metadata: TmdbMetadata | None,
-    slowpics_url: str | None,
-    report_path_out: Callable[[Path | None], None],
+    artifacts: _RunArtifacts,
 ) -> None:
-    if not screenshots:
-        report_path_out(None)
+    if not artifacts.screenshots_by_label:
+        artifacts.report_path = None
         return
 
     clips = [ctx.reference, *ctx.comparisons]
@@ -835,12 +832,12 @@ def _run_report_phase(
     report_data = ReportData(
         clips=clip_info,
         frames=frames,
-        screenshots=screenshots,
-        metadata=metadata,
-        slowpics_url=slowpics_url,
+        screenshots=artifacts.screenshots_by_label,
+        metadata=artifacts.resolved_metadata,
+        slowpics_url=artifacts.slowpics_url,
     )
     report_path = generate_report(report_data, ctx.config.report)
-    report_path_out(report_path)
+    artifacts.report_path = report_path
 
 
 def _apply_alignment_trims(

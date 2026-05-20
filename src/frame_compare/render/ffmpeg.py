@@ -141,8 +141,9 @@ class DefaultFFmpegRunner:
         transfer_raw = str(stream.get("color_transfer", "")).lower().strip()
         primaries_raw = str(stream.get("color_primaries", "")).lower().strip()
         matrix_raw = str(stream.get("color_space", "")).lower().strip()
+        is_missing = not transfer_raw or not primaries_raw
         is_hdr = transfer_raw in {"smpte2084", "arib-std-b67"} and primaries_raw == "bt2020"
-        if not is_hdr:
+        if not is_hdr and not is_missing:
             return None
 
         primaries_map = {"bt709": 1, "bt2020": 9}

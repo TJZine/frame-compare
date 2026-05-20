@@ -230,10 +230,7 @@ def test_render_screenshots_overlay_resolution(tmp_path, default_config):
 def test_render_screenshots_dict_order(tmp_path, default_config):
     clips = [Path("b.mkv"), Path("a.mkv")]
     frames = [1, 2]
-    with (
-        patch("frame_compare.render.orchestrator.render_batch") as mock_batch,
-        patch("frame_compare.render.orchestrator.probe_is_hdr_ffprobe", return_value=False),
-    ):
+    with patch("frame_compare.render.orchestrator.render_batch") as mock_batch:
         mock_batch.return_value = [Path(f"{i}.png") for i in range(4)]
         results = render_screenshots(clips, frames, tmp_path, default_config, renderer="ffmpeg")
 
@@ -246,10 +243,7 @@ def test_render_screenshots_dict_order(tmp_path, default_config):
 def test_render_screenshots_output_path(tmp_path, default_config):
     clips = [Path("vid1.mkv")]
     frames = [42]
-    with (
-        patch("frame_compare.render.orchestrator.render_batch") as mock_batch,
-        patch("frame_compare.render.orchestrator.probe_is_hdr_ffprobe", return_value=False),
-    ):
+    with patch("frame_compare.render.orchestrator.render_batch") as mock_batch:
         mock_batch.return_value = [tmp_path / "vid1_000042.png"]
         render_screenshots(clips, frames, tmp_path, default_config, renderer="ffmpeg")
 

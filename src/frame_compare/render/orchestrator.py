@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-import subprocess
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import replace
 from pathlib import Path
@@ -24,6 +22,7 @@ if TYPE_CHECKING:
     import vapoursynth as vs  # type: ignore[import-untyped]
 
     from frame_compare.config.schema import ConfigSchema
+    from frame_compare.render.ffmpeg import FFmpegRunner
     from frame_compare.vs.types import SourceInfo, TonemapSettings
 
 log = structlog.get_logger()
@@ -81,84 +80,37 @@ def resolve_tonemap_settings(
     return settings
 
 
-def probe_is_hdr_ffprobe(path: Path) -> bool:
-    """Determine HDR using ffprobe stream metadata (no VS required).
+def _is_hdr_via_runner(path: Path, runner: FFmpegRunner) -> bool:
+    """Determine HDR using the provided FFmpegRunner.
 
-    SSOT: render-module.md §1.4.1 — HDR detection when VS is unavailable.
-
-    HDR detection rule (deterministic):
-    - Treat as HDR if and only if BOTH:
-      - color_transfer in {"smpte2084", "arib-std-b67"} (PQ or HLG)
-      - color_primaries == "bt2020"
-
-    Returns:
-        True if source appears to be HDR, False otherwise.
-        Conservative: returns True on missing/unknown metadata.
+    Preserves the existing conservative fallback behavior:
+    - If probe_hdr returns None, check if it was because of missing/unknown metadata.
+    - Treat as HDR if transfer is smpte2084 or arib-std-b67 and color_primaries is bt2020.
+    - Treat as HDR (returns True) on missing/unknown metadata (transfer or primaries == 2).
 
     Raises:
-        FFmpegNotFoundError: If ffprobe is not found
-        SourceLoadError: If ffprobe fails or output is invalid
+        FFmpegNotFoundError: If ffprobe is missing.
+        SourceLoadError: If probing fails or times out.
     """
-    from frame_compare.errors import FFmpegNotFoundError, SourceLoadError
-
-    cmd = [
-        "ffprobe",
-        "-v",
-        "error",
-        "-select_streams",
-        "v:0",
-        "-show_entries",
-        "stream=color_transfer,color_primaries",
-        "-of",
-        "json",
-        str(path),
-    ]
+    from frame_compare.errors import FFmpegError, FFmpegNotFoundError, SourceLoadError
 
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            timeout=30,
-            check=False,
-        )
-    except FileNotFoundError as exc:
-        raise FFmpegNotFoundError() from exc
-    except subprocess.TimeoutExpired as exc:
-        raise SourceLoadError(path, "ffprobe timed out") from exc
+        metadata = runner.probe_hdr(path)
+    except FFmpegNotFoundError:
+        raise
+    except FFmpegError as exc:
+        msg = exc.context.message
+        if exc.context.details and "stderr" in exc.context.details:
+            stderr = str(exc.context.details["stderr"])
+            msg = f"{msg}: {stderr}"
+        raise SourceLoadError(path, msg) from exc
+    except Exception as exc:
+        raise SourceLoadError(path, f"ffprobe failed: {exc}") from exc
 
-    if result.returncode != 0:
-        stderr = result.stderr.decode("utf-8", errors="replace")
-        raise SourceLoadError(path, f"ffprobe failed: {stderr[:200]}")
+    if metadata is None:
+        return False
 
-    try:
-        output = result.stdout.decode("utf-8")
-        data = json.loads(output)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise SourceLoadError(path, f"ffprobe output invalid: {exc}") from exc
-
-    # Parse streams — conservative policy: missing/empty → HDR
-    streams: list[dict[str, object]] | None = data.get("streams")
-    if not isinstance(streams, list) or len(streams) == 0:
-        return True  # Conservative: treat as HDR
-
-    stream: dict[str, object] = streams[0]
-    color_transfer: object = stream.get("color_transfer", "")
-    color_primaries: object = stream.get("color_primaries", "")
-
-    # Normalize
-    if not isinstance(color_transfer, str) or not color_transfer.strip():
-        return True  # Conservative: treat as HDR
-    if not isinstance(color_primaries, str) or not color_primaries.strip():
-        return True  # Conservative: treat as HDR
-
-    color_transfer_norm = color_transfer.lower().strip()
-    color_primaries_norm = color_primaries.lower().strip()
-
-    # HDR detection: PQ/HLG + BT.2020
-    is_hdr_transfer = color_transfer_norm in {"smpte2084", "arib-std-b67"}
-    is_bt2020_primaries = color_primaries_norm == "bt2020"
-
-    return is_hdr_transfer and is_bt2020_primaries
+    return metadata.transfer in {16, 18, 2} and metadata.color_primaries in {9, 2}
 
 
 def _render_description(request: RenderRequest) -> str:
@@ -253,6 +205,7 @@ def _prepare_clip_for_render(
     clip_path: Path,
     renderer: Renderer,
     config: ConfigSchema,
+    ffmpeg_runner: FFmpegRunner | None = None,
 ) -> tuple[vs.VideoNode | Path, tuple[int, int], str | None, SourceInfo | None]:
     """Prepare a source clip for rendering, applying tonemap and fallback policies.
 
@@ -260,6 +213,7 @@ def _prepare_clip_for_render(
         clip_path: Path to the video file
         renderer: Renderer to use ("vapoursynth", "ffmpeg", or "auto")
         config: Resolved configuration
+        ffmpeg_runner: Optional FFmpegRunner for probing/extraction
 
     Returns:
         tuple containing (loaded_clip, resolution, hdr_info, source_info)
@@ -278,6 +232,11 @@ def _prepare_clip_for_render(
         TonemapRequiresVapourSynthError,
         VapourSynthNotFoundError,
     )
+
+    if ffmpeg_runner is None:
+        from frame_compare.render.ffmpeg import DefaultFFmpegRunner
+
+        ffmpeg_runner = DefaultFFmpegRunner()
 
     loaded_clip: vs.VideoNode | Path = clip_path
     resolution = (0, 0)
@@ -325,7 +284,7 @@ def _prepare_clip_for_render(
         if config.color.enable_tonemap:
             # Must probe HDR status before deciding
             try:
-                is_hdr = probe_is_hdr_ffprobe(clip_path)
+                is_hdr = _is_hdr_via_runner(clip_path, ffmpeg_runner)
             except Exception:
                 # Probe failed — propagate (no fallback)
                 log.debug(
@@ -362,7 +321,7 @@ def _prepare_clip_for_render(
     # === RENDERER=FFMPEG WITH TONEMAP GATING (§1.4.4) ===
     if renderer == "ffmpeg" and config.color.enable_tonemap:
         try:
-            is_hdr = probe_is_hdr_ffprobe(clip_path)
+            is_hdr = _is_hdr_via_runner(clip_path, ffmpeg_runner)
         except Exception:
             # Probe failed — propagate (no FFmpeg path)
             log.debug(
@@ -391,6 +350,7 @@ def render_screenshots(
     *,
     output_frames: list[int] | None = None,
     selection_labels: list[str | None] | None = None,
+    ffmpeg_runner: FFmpegRunner | None = None,
 ) -> dict[str, list[Path]]:
     """Render multiple frames from multiple clips.
 
@@ -404,6 +364,7 @@ def render_screenshots(
         renderer: "vapoursynth", "ffmpeg", or "auto"
         overlay_mode: Overlay verbosity
         reporter: Optional progress reporter
+        ffmpeg_runner: Optional FFmpegRunner for probing/extraction
 
     Returns:
         Dict mapping label -> list of rendered screenshot paths
@@ -431,7 +392,7 @@ def render_screenshots(
         ordered_labels.append(label)
 
         loaded_clip, resolution, hdr_info, source_info = _prepare_clip_for_render(
-            clip_path, renderer, config
+            clip_path, renderer, config, ffmpeg_runner=ffmpeg_runner
         )
 
         for idx, frame in enumerate(frames):
