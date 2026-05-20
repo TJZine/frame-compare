@@ -466,6 +466,7 @@ def test_execute_run_from_cache_only_fails_when_metrics_cache_version_mismatch(
                     "sha1": None,
                 }
             ],
+            "version": cache_io.CACHE_VERSION,
         },
     }
     cache_path.write_text(json.dumps(cache_payload), encoding="utf-8")
@@ -521,6 +522,7 @@ def test_execute_run_from_cache_only_uses_run_folder_cache_when_enabled(
                     "sha1": None,
                 }
             ],
+            "version": cache_io.CACHE_VERSION,
         },
     }
     cache_path.write_text(json.dumps(cache_payload), encoding="utf-8")

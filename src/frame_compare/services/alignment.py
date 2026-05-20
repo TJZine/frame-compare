@@ -114,6 +114,95 @@ def _maybe_launch_vspreview(
             progress.complete_phase()
 
 
+def _check_duplicate_stems(comparisons: list[Path]) -> None:
+    """Validate that comparison filenames have unique stems."""
+    stems_to_paths: dict[str, list[Path]] = {}
+    for comp in comparisons:
+        stems_to_paths.setdefault(comp.stem, []).append(comp)
+    duplicate_stems = {stem: paths for stem, paths in stems_to_paths.items() if len(paths) > 1}
+    if duplicate_stems:
+        formatted = ", ".join(
+            f"{stem}: {[p.name for p in paths]}"
+            for stem, paths in sorted(duplicate_stems.items(), key=lambda item: item[0])
+        )
+        raise AudioAlignmentError(
+            "Duplicate comparison clip stems detected (alignment keys use filename stems). "
+            f"Rename clips to be unique. Duplicates: {formatted}"
+        )
+
+
+def _apply_manual_overrides(
+    reference: Path,
+    comparisons: list[Path],
+    cache_dir: Path,
+    results_map: dict[str, AlignmentResult],
+) -> Fraction | None:
+    """Apply manual offsets from overrides config, returning reference FPS if probed."""
+    from frame_compare.vspreview import load_manual_overrides
+
+    manual_overrides = load_manual_overrides(cache_dir)
+    fps_reference: Fraction | None = None
+
+    for comp in comparisons:
+        key = f"{reference.stem}:{comp.stem}"
+        if key in manual_overrides:
+            override = manual_overrides[key]
+            if fps_reference is None:
+                fps_reference = _probe_fps(reference)
+            results_map[key] = AlignmentResult(
+                reference_clip=reference.name,
+                comparison_clip=comp.name,
+                frame_offset=override.frame_offset,
+                time_offset_seconds=override.frame_offset / float(fps_reference),
+                correlation_score=1.0,
+                algorithm=None,
+                source="manual",
+            )
+    return fps_reference
+
+
+def _compute_missing_alignments(
+    *,
+    reference: Path,
+    requested_comparisons: list[Path],
+    config: AlignmentConfig,
+    results_map: dict[str, AlignmentResult],
+    fps_reference: Fraction,
+    progress: ProgressReporter | None,
+) -> None:
+    """Extract audio, perform cross-correlation, and populate results map."""
+    ref_audio = _extract_audio(reference, config.sample_rate)
+
+    for comp in requested_comparisons:
+        if progress:
+            progress.set_description(f"Aligning {comp.name}")
+
+        comp_audio = _extract_audio(comp, config.sample_rate)
+        max_offset_samples = int(config.max_offset_seconds * config.sample_rate)
+        sample_offset, score = _cross_correlate(
+            ref_audio,
+            comp_audio,
+            max_offset_samples=max_offset_samples,
+        )
+
+        frame_offset = _samples_to_frames(sample_offset, config.sample_rate, fps_reference)
+        time_offset = sample_offset / config.sample_rate
+
+        res = AlignmentResult(
+            reference_clip=reference.name,
+            comparison_clip=comp.name,
+            frame_offset=frame_offset,
+            time_offset_seconds=time_offset,
+            correlation_score=float(score),
+            algorithm="cross_correlation",
+            source="computed",
+        )
+        results_map[f"{reference.stem}:{comp.stem}"] = res
+
+        if progress:
+            progress.advance()
+
+
 def align_clips(
     reference: Path,
     comparisons: list[Path],
@@ -133,42 +222,10 @@ def align_clips(
 
     results_map: dict[str, AlignmentResult] = {}
 
-    stems_to_paths: dict[str, list[Path]] = {}
-    for comp in comparisons:
-        stems_to_paths.setdefault(comp.stem, []).append(comp)
-    duplicate_stems = {stem: paths for stem, paths in stems_to_paths.items() if len(paths) > 1}
-    if duplicate_stems:
-        formatted = ", ".join(
-            f"{stem}: {[p.name for p in paths]}"
-            for stem, paths in sorted(duplicate_stems.items(), key=lambda item: item[0])
-        )
-        raise AudioAlignmentError(
-            "Duplicate comparison clip stems detected (alignment keys use filename stems). "
-            f"Rename clips to be unique. Duplicates: {formatted}"
-        )
+    _check_duplicate_stems(comparisons)
 
     # 0. Load manual overrides (highest precedence per §2.4)
-    from frame_compare.vspreview import load_manual_overrides
-
-    manual_overrides = load_manual_overrides(cache_dir)
-    fps_reference: Fraction | None = None  # Lazy probe, only when needed
-
-    for comp in comparisons:
-        key = f"{reference.stem}:{comp.stem}"
-        if key in manual_overrides:
-            override = manual_overrides[key]
-            # Need FPS for time_offset_seconds calculation
-            if fps_reference is None:
-                fps_reference = _probe_fps(reference)
-            results_map[key] = AlignmentResult(
-                reference_clip=reference.name,
-                comparison_clip=comp.name,
-                frame_offset=override.frame_offset,
-                time_offset_seconds=override.frame_offset / float(fps_reference),
-                correlation_score=1.0,  # Explicit constant per §2.4
-                algorithm=None,
-                source="manual",
-            )
+    fps_reference = _apply_manual_overrides(reference, comparisons, cache_dir, results_map)
 
     # 1. Check cache for non-manual entries
     requested_comparisons = [
@@ -207,36 +264,14 @@ def align_clips(
     try:
         if fps_reference is None:
             fps_reference = _probe_fps(reference)
-        ref_audio = _extract_audio(reference, config.sample_rate)
-
-        for comp in requested_comparisons:
-            if progress:
-                progress.set_description(f"Aligning {comp.name}")
-
-            comp_audio = _extract_audio(comp, config.sample_rate)
-            max_offset_samples = int(config.max_offset_seconds * config.sample_rate)
-            sample_offset, score = _cross_correlate(
-                ref_audio,
-                comp_audio,
-                max_offset_samples=max_offset_samples,
-            )
-
-            frame_offset = _samples_to_frames(sample_offset, config.sample_rate, fps_reference)
-            time_offset = sample_offset / config.sample_rate
-
-            res = AlignmentResult(
-                reference_clip=reference.name,
-                comparison_clip=comp.name,
-                frame_offset=frame_offset,
-                time_offset_seconds=time_offset,
-                correlation_score=float(score),
-                algorithm="cross_correlation",
-                source="computed",
-            )
-            results_map[f"{reference.stem}:{comp.stem}"] = res
-
-            if progress:
-                progress.advance()
+        _compute_missing_alignments(
+            reference=reference,
+            requested_comparisons=requested_comparisons,
+            config=config,
+            results_map=results_map,
+            fps_reference=fps_reference,
+            progress=progress,
+        )
 
         # 3. Save cache if needed (only computed results, not manual)
         if config.cache_results:

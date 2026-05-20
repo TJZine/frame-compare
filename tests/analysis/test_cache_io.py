@@ -198,6 +198,7 @@ def test_load_mismatched_inputs(tmp_path: Path) -> None:
                     "fps": "24/1",
                     "config_fingerprint": "fp1",
                     "clips": [],
+                    "version": CACHE_VERSION,
                 },
             }
         )
@@ -260,6 +261,7 @@ def test_load_missing_key_returns_corrupted(tmp_path: Path) -> None:
                     "fps": "24/1",
                     "config_fingerprint": "fp",
                     "clips": [],
+                    "version": CACHE_VERSION,
                 },
             }
         )

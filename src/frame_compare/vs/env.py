@@ -52,7 +52,14 @@ def register_windows_dll_dirs() -> None:
             continue
         try:
             handle = os.add_dll_directory(candidate)
-        except (OSError, FileNotFoundError):
+        except (OSError, FileNotFoundError) as e:
+            import logging
+
+            logging.getLogger("frame_compare.vs.env").debug(
+                "Skipping DLL directory candidate %s due to error: %s",
+                candidate,
+                e,
+            )
             continue
         _WINDOWS_DLL_HANDLES.append(handle)
         _REGISTERED_WINDOWS_DLL_DIRS.add(normalized)

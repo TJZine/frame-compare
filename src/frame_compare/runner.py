@@ -31,7 +31,11 @@ def run(request: RunRequest, dependencies: RunDependencies | None = None) -> Run
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        pass
+        import logging
+
+        logging.getLogger("frame_compare.runner").debug(
+            "No running event loop detected; running via asyncio.run is safe."
+        )
     else:
         raise RuntimeError(
             "Do not call frame_compare.runner.run from an async context; "

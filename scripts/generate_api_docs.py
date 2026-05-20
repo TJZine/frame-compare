@@ -124,6 +124,28 @@ def _is_type_checking_guard(node: ast.If) -> bool:
     return False
 
 
+def _process_symbol_node(node: ast.AST, symbols: dict[str, ast.AST]) -> None:
+    """Process a single AST node and populate symbols dictionary."""
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        symbols[node.name] = node
+    elif isinstance(node, ast.ImportFrom) and node.module is not None:
+        for alias in node.names:
+            local_name = alias.asname or alias.name
+            symbols[local_name] = ast.ImportFrom(
+                module=node.module,
+                names=[ast.alias(name=alias.name, asname=alias.asname)],
+                level=node.level,
+            )
+    elif (
+        isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+    ):
+        symbols[node.targets[0].id] = node
+    elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+        symbols[node.target.id] = node
+
+
 def _build_symbol_table(tree: ast.Module) -> dict[str, ast.AST]:
     symbols: dict[str, ast.AST] = {}
     nodes: list[ast.stmt] = list(tree.body)
@@ -135,34 +157,7 @@ def _build_symbol_table(tree: ast.Module) -> dict[str, ast.AST]:
             nodes.extend(node.body)
 
     for node in nodes:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            symbols[node.name] = node
-            continue
-
-        if isinstance(node, ast.ImportFrom) and node.module is not None:
-            for alias in node.names:
-                local_name = alias.asname or alias.name
-                # Store the ImportFrom node; resolution needs alias.name + node.module.
-                symbols[local_name] = ast.ImportFrom(
-                    module=node.module,
-                    names=[ast.alias(name=alias.name, asname=alias.asname)],
-                    level=node.level,
-                )
-            continue
-
-        if (
-            isinstance(node, ast.Assign)
-            and len(node.targets) == 1
-            and isinstance(node.targets[0], ast.Name)
-        ):
-            # Keep all single-target assignments addressable so type aliases and constants can be documented
-            # deterministically without importing code.
-            symbols[node.targets[0].id] = node
-            continue
-
-        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            symbols[node.target.id] = node
-            continue
+        _process_symbol_node(node, symbols)
 
     return symbols
 
@@ -199,6 +194,65 @@ def _module_path_from_import(project_root: Path, module: str, level: int) -> Pat
     raise ValueError(f"import target not found: {module}")
 
 
+def _resolve_assign_symbol(
+    *,
+    project_root: Path,
+    module: _ModuleInfo,
+    name: str,
+    node: ast.Assign | ast.AnnAssign,
+    module_cache: dict[Path, _ModuleInfo],
+    visited: set[tuple[Path, str]],
+) -> _ResolvedSymbol:
+    """Resolve an Assign or AnnAssign node to a symbol."""
+    value = getattr(node, "value", None)
+    if value is None or isinstance(value, (ast.Constant, ast.Dict, ast.List, ast.Tuple, ast.Set)):
+        return _ResolvedSymbol(kind="constant", name=name, file_path=module.file_path, node=node)
+    if isinstance(value, ast.Name):
+        return _resolve_symbol(
+            project_root=project_root,
+            module=module,
+            name=value.id,
+            module_cache=module_cache,
+            visited=visited,
+        )
+    return _ResolvedSymbol(kind="constant", name=name, file_path=module.file_path, node=node)
+
+
+def _resolve_import_symbol(
+    *,
+    project_root: Path,
+    module: _ModuleInfo,
+    name: str,
+    node: ast.ImportFrom,
+    module_cache: dict[Path, _ModuleInfo],
+    visited: set[tuple[Path, str]],
+) -> _ResolvedSymbol:
+    """Resolve an ImportFrom node to a symbol."""
+    if len(node.names) != 1:
+        raise ValueError(f"unexpected import shape for {module.module_name}.{name}")
+    alias = node.names[0]
+    target_module_name = node.module
+    if target_module_name is None:
+        raise ValueError(f"missing module in import for {module.module_name}.{name}")
+    target_name = alias.name
+    target_path = _module_path_from_import(project_root, target_module_name, node.level)
+    target_module = module_cache.get(target_path)
+    if target_module is None:
+        target_module = _load_module_info(
+            target_module_name,
+            target_path,
+            require_dunder_all=False,
+        )
+        module_cache[target_path] = target_module
+    return _resolve_symbol(
+        project_root=project_root,
+        module=target_module,
+        name=target_name,
+        module_cache=module_cache,
+        visited=visited,
+    )
+
+
 def _resolve_symbol(
     *,
     project_root: Path,
@@ -221,50 +275,20 @@ def _resolve_symbol(
     if isinstance(node, ast.ClassDef):
         return _ResolvedSymbol(kind="class", name=name, file_path=module.file_path, node=node)
     if isinstance(node, (ast.Assign, ast.AnnAssign)):
-        # Constant or alias.
-        value = node.value  # type: ignore[attr-defined]
-        if value is None:
-            return _ResolvedSymbol(
-                kind="constant", name=name, file_path=module.file_path, node=node
-            )
-        if isinstance(value, ast.Constant):
-            return _ResolvedSymbol(
-                kind="constant", name=name, file_path=module.file_path, node=node
-            )
-        if isinstance(value, (ast.Dict, ast.List, ast.Tuple, ast.Set)):
-            return _ResolvedSymbol(
-                kind="constant", name=name, file_path=module.file_path, node=node
-            )
-        if isinstance(value, ast.Name):
-            return _resolve_symbol(
-                project_root=project_root,
-                module=module,
-                name=value.id,
-                module_cache=module_cache,
-                visited=visited,
-            )
-        # Treat complex assignments (e.g., type aliases) as constants for documentation purposes.
-        return _ResolvedSymbol(kind="constant", name=name, file_path=module.file_path, node=node)
-
-    if isinstance(node, ast.ImportFrom) and node.module is not None:
-        if len(node.names) != 1:
-            raise ValueError(f"unexpected import shape for {module.module_name}.{name}")
-        alias = node.names[0]
-        target_module_name = node.module
-        target_name = alias.name
-        target_path = _module_path_from_import(project_root, target_module_name, node.level)
-        target_module = module_cache.get(target_path)
-        if target_module is None:
-            target_module = _load_module_info(
-                target_module_name,
-                target_path,
-                require_dunder_all=False,
-            )
-            module_cache[target_path] = target_module
-        return _resolve_symbol(
+        return _resolve_assign_symbol(
             project_root=project_root,
-            module=target_module,
-            name=target_name,
+            module=module,
+            name=name,
+            node=node,
+            module_cache=module_cache,
+            visited=visited,
+        )
+    if isinstance(node, ast.ImportFrom):
+        return _resolve_import_symbol(
+            project_root=project_root,
+            module=module,
+            name=name,
+            node=node,
             module_cache=module_cache,
             visited=visited,
         )
