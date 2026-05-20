@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import structlog
-import vapoursynth as vs
 
 from frame_compare.errors import TonemapError
 from frame_compare.vs.env import detect_plugins
 from frame_compare.vs.source import _detect_hdr  # pyright: ignore[reportPrivateUsage]
 from frame_compare.vs.types import HDRMetadata, TonemapSettings
+
+if TYPE_CHECKING:
+    import vapoursynth as vs
 
 log = structlog.get_logger()
 
@@ -111,6 +113,8 @@ def _convert_non_rgb_with_matrix_hint(
 
 def _to_rgbs(clip: vs.VideoNode) -> vs.VideoNode:
     """Convert clip to RGBS if needed."""
+    import vapoursynth as vs
+
     try:
         if clip.format.id != vs.RGBS:  # type: ignore
             if clip.format.color_family == vs.RGB:  # type: ignore
@@ -151,6 +155,8 @@ def _apply_libplacebo(
     hdr_metadata: HDRMetadata | None = None,
 ) -> vs.VideoNode | None:
     """Apply tonemapping using libplacebo."""
+    import vapoursynth as vs
+
     target_nits = _validate_target_nits(settings)
 
     if settings.tone_curve not in _TONE_CURVE_MAP:
@@ -331,6 +337,8 @@ def apply_tonemap(
     if not settings.enabled:
         return clip
     _validate_target_nits(settings)
+
+    import vapoursynth as vs
 
     core = vs.core
 
