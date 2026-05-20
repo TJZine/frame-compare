@@ -1,0 +1,4 @@
+interface:
+  display_name: "Frame Compare Cleanup Review"
+  short_description: "Launch the cleanup/refactor review workflow"
+  default_prompt: "Use the frame-compare-cleanup-review skill for this task."

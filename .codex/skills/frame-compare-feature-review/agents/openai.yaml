@@ -1,0 +1,4 @@
+interface:
+  display_name: "Frame Compare Feature Review"
+  short_description: "Launch the feature/change review workflow"
+  default_prompt: "Use the frame-compare-feature-review skill for this task."

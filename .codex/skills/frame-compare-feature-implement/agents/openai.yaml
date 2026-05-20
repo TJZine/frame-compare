@@ -1,0 +1,4 @@
+interface:
+  display_name: "Frame Compare Feature Implement"
+  short_description: "Launch the approved feature/change implementer workflow"
+  default_prompt: "Use the frame-compare-feature-implement skill for this task."

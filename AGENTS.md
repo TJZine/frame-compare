@@ -13,6 +13,8 @@ Read in this order:
 Always-on defaults:
 
 - Bootstrap with `uv sync --group dev --frozen` if `.venv/bin/*` is missing.
+- Use repo-local skills under `.codex/skills/` when their trigger descriptions match the task.
+- Keep the existing code-health skill at `.agents/skills/desloppify/SKILL.md` discoverable, but do not mirror or modify it unless the task explicitly targets desloppify workflow.
 - Use the repo command canon from the runbook.
 - Let the runbook own public-surface and `docs/plans/` activation policy.
 
@@ -21,4 +23,6 @@ Where to look next:
 - Workflow, risk tiers, verification, handoff: [docs/ENGINEERING_RUNBOOK.md](docs/ENGINEERING_RUNBOOK.md)
 - Runtime flow, boundaries, hotspots: [docs/current-architecture.md](docs/current-architecture.md)
 - CLI command, flag, and persistence contract: [docs/current-cli-contract.md](docs/current-cli-contract.md)
+- Repo-local workflow and boundary skills: [.codex/skills/](.codex/skills/)
+- Code-health workflow skill: [.agents/skills/desloppify/SKILL.md](.agents/skills/desloppify/SKILL.md)
 - Historical exceptions and decisions: [docs/DECISIONS.md](docs/DECISIONS.md)
