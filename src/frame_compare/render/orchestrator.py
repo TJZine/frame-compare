@@ -15,6 +15,7 @@ from frame_compare.render.types import (
     OverlayMode,
     Renderer,
     RenderRequest,
+    ScreenshotBatchRequest,
 )
 from frame_compare.utils.progress_protocol import ProgressReporter
 
@@ -201,6 +202,100 @@ def render_batch(
     return cast(list[Path], results)
 
 
+def _apply_vs_tonemap_and_labeling(
+    loaded_clip: vs.VideoNode,
+    source_info: SourceInfo,
+    config: ConfigSchema,
+) -> tuple[vs.VideoNode, str | None]:
+    """Handles VapourSynth tonemap settings resolution and application."""
+    if should_tonemap(source_info, config):
+        from frame_compare.vs.tonemap import apply_tonemap
+
+        settings = resolve_tonemap_settings(config)
+        loaded_clip = apply_tonemap(loaded_clip, settings, source_info.hdr_metadata)
+        # Mark that tonemap was applied for overlay (§1.4.6)
+        hdr_info = f"HDR (tonemapped: {settings.preset}, {settings.target_nits} nits)"
+    elif source_info.is_hdr:
+        # HDR source, tonemap disabled (§1.4.6)
+        hdr_info = "HDR (native, no tonemap)"
+    else:
+        # SDR source
+        hdr_info = None  # or "SDR" in DIAGNOSTIC mode
+    return loaded_clip, hdr_info
+
+
+def _resolve_auto_mode_fallback(
+    clip_path: Path,
+    vs_load_failure: Exception,
+    config: ConfigSchema,
+    renderer: Renderer,
+    ffmpeg_runner: FFmpegRunner,
+) -> None:
+    """Probes HDR and resolves fallback policy when VapourSynth load fails in auto mode."""
+    from frame_compare.errors import TonemapRequiresVapourSynthError
+
+    if config.color.enable_tonemap:
+        # Must probe HDR status before deciding
+        try:
+            is_hdr = _is_hdr_via_runner(clip_path, ffmpeg_runner)
+        except Exception:
+            # Probe failed — propagate (no fallback)
+            log.debug(
+                "probe_failed_no_fallback",
+                path=str(clip_path),
+                exc_info=True,
+            )
+            raise  # Propagate probe exception
+
+        if is_hdr:
+            # HDR + tonemap required in auto mode + VS unavailable → raise TonemapRequiresVapourSynthError from original VS failure.
+            log.debug(
+                "hdr_tonemap_required_no_fallback",
+                path=str(clip_path),
+            )
+            raise TonemapRequiresVapourSynthError() from vs_load_failure
+        else:
+            # SDR — fallback allowed
+            log.warning(
+                "vs_load_failed_falling_back",
+                path=str(clip_path),
+                renderer=renderer,
+                exc_info=True,
+            )
+    else:
+        # enable_tonemap=False — fallback allowed
+        log.warning(
+            "vs_load_failed_falling_back",
+            path=str(clip_path),
+            renderer=renderer,
+            exc_info=True,
+        )
+
+
+def _validate_ffmpeg_tonemap_gate(
+    clip_path: Path,
+    config: ConfigSchema,
+    ffmpeg_runner: FFmpegRunner,
+) -> None:
+    """Validates whether the tonemap gate is violated for FFmpeg renderer."""
+    from frame_compare.errors import TonemapRequiresVapourSynthError
+
+    try:
+        is_hdr = _is_hdr_via_runner(clip_path, ffmpeg_runner)
+    except Exception:
+        # Probe failed — propagate (no FFmpeg path)
+        log.debug(
+            "probe_failed_no_ffmpeg",
+            path=str(clip_path),
+            exc_info=True,
+        )
+        raise  # Propagate probe exception
+
+    if is_hdr:
+        # HDR + tonemap required → FFmpeg-only path is invalid.
+        raise TonemapRequiresVapourSynthError()
+
+
 def _prepare_clip_for_render(
     clip_path: Path,
     renderer: Renderer,
@@ -229,7 +324,6 @@ def _prepare_clip_for_render(
         PluginNotFoundError,
         RenderError,
         SourceLoadError,
-        TonemapRequiresVapourSynthError,
         VapourSynthNotFoundError,
     )
 
@@ -253,20 +347,7 @@ def _prepare_clip_for_render(
             loaded_clip = source_info.clip
             resolution = (source_info.width, source_info.height)
 
-            # === TONEMAP INTEGRATION POINT (§1.4.3) ===
-            if should_tonemap(source_info, config):
-                from frame_compare.vs.tonemap import apply_tonemap
-
-                settings = resolve_tonemap_settings(config)
-                loaded_clip = apply_tonemap(loaded_clip, settings, source_info.hdr_metadata)
-                # Mark that tonemap was applied for overlay (§1.4.6)
-                hdr_info = f"HDR (tonemapped: {settings.preset}, {settings.target_nits} nits)"
-            elif source_info.is_hdr:
-                # HDR source, tonemap disabled (§1.4.6)
-                hdr_info = "HDR (native, no tonemap)"
-            else:
-                # SDR source
-                hdr_info = None  # or "SDR" in DIAGNOSTIC mode
+            loaded_clip, hdr_info = _apply_vs_tonemap_and_labeling(loaded_clip, source_info, config)
 
         except (VapourSynthNotFoundError, PluginNotFoundError, SourceLoadError) as exc:
             if renderer == "vapoursynth":
@@ -280,60 +361,11 @@ def _prepare_clip_for_render(
 
     # === DETERMINISTIC FALLBACK LOGIC (§1.4.1, §1.4.4) ===
     if vs_load_failure is not None and renderer == "auto":
-        # VS load failed, check if we can fall back to FFmpeg
-        if config.color.enable_tonemap:
-            # Must probe HDR status before deciding
-            try:
-                is_hdr = _is_hdr_via_runner(clip_path, ffmpeg_runner)
-            except Exception:
-                # Probe failed — propagate (no fallback)
-                log.debug(
-                    "probe_failed_no_fallback",
-                    path=str(clip_path),
-                    exc_info=True,
-                )
-                raise  # Propagate probe exception
-
-            if is_hdr:
-                # HDR + tonemap required in auto mode + VS unavailable → raise TonemapRequiresVapourSynthError from original VS failure.
-                log.debug(
-                    "hdr_tonemap_required_no_fallback",
-                    path=str(clip_path),
-                )
-                raise TonemapRequiresVapourSynthError() from vs_load_failure
-            else:
-                # SDR — fallback allowed
-                log.warning(
-                    "vs_load_failed_falling_back",
-                    path=str(clip_path),
-                    renderer=renderer,
-                    exc_info=True,
-                )
-        else:
-            # enable_tonemap=False — fallback allowed
-            log.warning(
-                "vs_load_failed_falling_back",
-                path=str(clip_path),
-                renderer=renderer,
-                exc_info=True,
-            )
+        _resolve_auto_mode_fallback(clip_path, vs_load_failure, config, renderer, ffmpeg_runner)
 
     # === RENDERER=FFMPEG WITH TONEMAP GATING (§1.4.4) ===
     if renderer == "ffmpeg" and config.color.enable_tonemap:
-        try:
-            is_hdr = _is_hdr_via_runner(clip_path, ffmpeg_runner)
-        except Exception:
-            # Probe failed — propagate (no FFmpeg path)
-            log.debug(
-                "probe_failed_no_ffmpeg",
-                path=str(clip_path),
-                exc_info=True,
-            )
-            raise  # Propagate probe exception
-
-        if is_hdr:
-            # HDR + tonemap required → FFmpeg-only path is invalid.
-            raise TonemapRequiresVapourSynthError()
+        _validate_ffmpeg_tonemap_gate(clip_path, config, ffmpeg_runner)
 
     return loaded_clip, resolution, hdr_info, source_info
 
@@ -437,3 +469,85 @@ def render_screenshots(
             path_idx += 1
 
     return results
+
+
+def render_screenshots_from_batch(
+    batch_requests: list[ScreenshotBatchRequest],
+    output_dir: Path,
+    config: ConfigSchema,
+    overlay_mode: OverlayMode,
+    ffmpeg_runner: FFmpegRunner | None = None,
+    reporter: ProgressReporter | None = None,
+) -> dict[str, list[Path]]:
+    """Render screenshots from batch requests, choosing FFmpeg or VapourSynth path accordingly.
+
+    Args:
+        batch_requests: List of ScreenshotBatchRequest
+        output_dir: Output directory
+        config: Configuration
+        overlay_mode: Overlay mode
+        ffmpeg_runner: Optional FFmpegRunner
+        reporter: Optional progress reporter
+
+    Returns:
+        Dict mapping label -> list of rendered screenshot paths
+    """
+    from frame_compare.render.encoders import apply_overlay_to_file
+
+    if ffmpeg_runner is None:
+        from frame_compare.render.ffmpeg import DefaultFFmpegRunner
+
+        ffmpeg_runner = DefaultFFmpegRunner()
+
+    # Tonemap validation gate check if FFmpeg renderer is requested via config
+    if (
+        config.screenshots.use_ffmpeg
+        and config.color.enable_tonemap
+        and any(req.probe_is_hdr for req in batch_requests)
+    ):
+        from frame_compare.errors import TonemapRequiresVapourSynthError
+
+        raise TonemapRequiresVapourSynthError()
+
+    rendered: dict[str, list[Path]] = {}
+
+    if config.screenshots.use_ffmpeg:
+        for req in batch_requests:
+            paths: list[Path] = []
+            for idx, aligned_frame in enumerate(req.display_frames):
+                source_frame = req.source_frames[idx]
+                output = generate_screenshot_path(output_dir, req.label, aligned_frame)
+                ffmpeg_runner.extract_frame(req.clip_path, source_frame, output)
+                if overlay_mode != OverlayMode.NONE:
+                    overlay = OverlayConfig(
+                        mode=overlay_mode,
+                        label=req.label,
+                        frame_number=source_frame,
+                        resolution=(req.probe_width, req.probe_height),
+                        hdr_info="HDR" if req.probe_is_hdr else None,
+                        font_path=None,
+                        display_frame_number=aligned_frame,
+                        num_frames=req.probe_num_frames,
+                        selection_label=req.selection_labels[idx],
+                    )
+                    apply_overlay_to_file(output, overlay)
+                paths.append(output)
+            rendered[req.label] = paths
+    else:
+        for req in batch_requests:
+            rendered_for_clip = render_screenshots(
+                clips=[req.clip_path],
+                frames=req.source_frames,
+                output_frames=req.display_frames,
+                selection_labels=req.selection_labels,
+                output_dir=output_dir,
+                config=config,
+                label_map={req.clip_path: req.label},
+                renderer="auto",
+                overlay_mode=overlay_mode,
+                reporter=reporter,
+                ffmpeg_runner=ffmpeg_runner,
+            )
+            rendered[req.label] = rendered_for_clip[req.label]
+
+    return rendered

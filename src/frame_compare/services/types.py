@@ -1,6 +1,5 @@
-"""Types for services module."""
-
 from dataclasses import dataclass
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -12,7 +11,8 @@ class AlignmentResult:
     frame_offset: int
     time_offset_seconds: float
     correlation_score: float
-    method: str
+    algorithm: Literal["cross_correlation"] | None
+    source: Literal["manual", "computed", "cached"]
 
 
 @dataclass(frozen=True)

@@ -48,6 +48,21 @@ class RenderRequest:
     encoder_settings: EncoderSettings
 
 
+@dataclass(frozen=True)
+class ScreenshotBatchRequest:
+    """Batch request representing a single clip's screenshot render task."""
+
+    clip_path: Path
+    label: str
+    source_frames: list[int]
+    display_frames: list[int]
+    selection_labels: list[str | None]
+    probe_width: int
+    probe_height: int
+    probe_num_frames: int
+    probe_is_hdr: bool
+
+
 Renderer = Literal["vapoursynth", "ffmpeg", "auto"]
 
 

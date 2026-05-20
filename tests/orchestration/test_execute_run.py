@@ -621,7 +621,6 @@ enable = false
     _create_video_files(input_dir, "a_ref.mkv", "b_comp1.mkv", "c_comp2.mkv")
 
     def _fake_align_clips(reference, comparisons, config, cache_dir, progress=None):
-        del config, cache_dir, progress
         return [
             AlignmentResult(
                 reference_clip=reference.name,
@@ -629,7 +628,8 @@ enable = false
                 frame_offset=1,
                 time_offset_seconds=0.041,
                 correlation_score=0.9,
-                method="cross_correlation",
+                algorithm="cross_correlation",
+                source="computed",
             ),
             AlignmentResult(
                 reference_clip=reference.name,
@@ -637,7 +637,8 @@ enable = false
                 frame_offset=-1,
                 time_offset_seconds=-0.041,
                 correlation_score=0.9,
-                method="cross_correlation",
+                algorithm="cross_correlation",
+                source="computed",
             ),
         ]
 

@@ -166,7 +166,8 @@ def align_clips(
                 frame_offset=override.frame_offset,
                 time_offset_seconds=override.frame_offset / float(fps_reference),
                 correlation_score=1.0,  # Explicit constant per §2.4
-                method="manual",
+                algorithm=None,
+                source="manual",
             )
 
     # 1. Check cache for non-manual entries
@@ -229,7 +230,8 @@ def align_clips(
                 frame_offset=frame_offset,
                 time_offset_seconds=time_offset,
                 correlation_score=float(score),
-                method="cross_correlation",
+                algorithm="cross_correlation",
+                source="computed",
             )
             results_map[f"{reference.stem}:{comp.stem}"] = res
 
@@ -238,11 +240,11 @@ def align_clips(
 
         # 3. Save cache if needed (only computed results, not manual)
         if config.cache_results:
-            # Save only the computed results (method != "manual")
+            # Save only the computed results (source != "manual")
             computed_results = [
                 results_map[f"{reference.stem}:{c.stem}"]
                 for c in comparisons
-                if results_map[f"{reference.stem}:{c.stem}"].method != "manual"
+                if results_map[f"{reference.stem}:{c.stem}"].source != "manual"
             ]
             if computed_results:
                 save_offsets_cache(cache_dir, computed_results)
@@ -304,7 +306,7 @@ def load_cached_offsets(
                 frame_offset = entry_dict["frame_offset"]
                 time_offset_seconds = entry_dict["time_offset_seconds"]
                 correlation_score = entry_dict["correlation_score"]
-                method = entry_dict["method"]
+                algorithm = entry_dict["algorithm"]
 
                 if not isinstance(reference_clip, str):
                     raise TypeError("reference_clip must be str")
@@ -316,8 +318,8 @@ def load_cached_offsets(
                     raise TypeError("time_offset_seconds must be number")
                 if not isinstance(correlation_score, int | float):
                     raise TypeError("correlation_score must be number")
-                if not isinstance(method, str):
-                    raise TypeError("method must be str")
+                if algorithm != "cross_correlation":
+                    raise ValueError("unsupported algorithm value")
 
                 results[key] = AlignmentResult(
                     reference_clip=reference_clip,
@@ -325,7 +327,8 @@ def load_cached_offsets(
                     frame_offset=frame_offset,
                     time_offset_seconds=float(time_offset_seconds),
                     correlation_score=float(correlation_score),
-                    method=method,
+                    algorithm="cross_correlation",
+                    source="cached",
                 )
             except (KeyError, TypeError, ValueError) as e:
                 raise CacheCorruptionError(cache_path) from e
@@ -365,7 +368,7 @@ def save_offsets_cache(
             "frame_offset": res.frame_offset,
             "time_offset_seconds": res.time_offset_seconds,
             "correlation_score": res.correlation_score,
-            "method": res.method,
+            "algorithm": res.algorithm,
         }
 
     write_bytes_atomic(cache_path, tomli_w.dumps(data).encode("utf-8"))

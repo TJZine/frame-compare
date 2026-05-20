@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from fractions import Fraction
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from frame_compare.vs.types import HDRMetadata
 
@@ -75,7 +75,7 @@ class ClipAlignmentState:
     reference_stem: str
     comparison_stem: str
     relative_offset_frames: int
-    source: str  # "manual" | "cached" | "computed"
+    source: Literal["manual", "cached", "computed"]  # "manual" | "cached" | "computed"
 
 
 @dataclass(frozen=True)

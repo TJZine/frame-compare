@@ -14,6 +14,10 @@ Frame Compare — Video frame comparison tool.
 
 Analysis module for frame-compare.
 
+### ANALYZE_PROGRESS_TOTAL
+
+`ANALYZE_PROGRESS_TOTAL` — constant (int)
+
 ### CacheLoadResult
 
 `CacheLoadResult`
@@ -280,7 +284,7 @@ slow.pics gallery visibility setting.
 
 ## frame_compare.orchestration
 
-Orchestration module for Frame Compare 2.0.
+Orchestration public API.
 
 ### CheckResult
 
@@ -480,13 +484,13 @@ Overlay rendering configuration for a single output frame.
 
 `OverlayMode`
 
-Overlay verbosity level.
+Overlay verbosity level for rendered screenshots.
 
 ### ProgressReporter
 
 `ProgressReporter`
 
-Protocol for reporting rendering progress.
+Protocol for reporting progress of long-running operations.
 
 ### render_batch
 
@@ -502,9 +506,15 @@ Render a single frame to image file.
 
 ### render_screenshots
 
-`render_screenshots(clips: list[Path], frames: list[int], output_dir: Path, config: ConfigSchema, label_map: dict[Path, str] | None = None, renderer: Renderer = 'auto', overlay_mode: OverlayMode = OverlayMode.STANDARD, reporter: ProgressReporter | None = None) -> dict[str, list[Path]]`
+`render_screenshots(clips: list[Path], frames: list[int], output_dir: Path, config: ConfigSchema, label_map: dict[Path, str] | None = None, renderer: Renderer = 'auto', overlay_mode: OverlayMode = OverlayMode.STANDARD, reporter: ProgressReporter | None = None, *, output_frames: list[int] | None = None, selection_labels: list[str | None] | None = None, ffmpeg_runner: FFmpegRunner | None = None) -> dict[str, list[Path]]`
 
 Render multiple frames from multiple clips.
+
+### render_screenshots_from_batch
+
+`render_screenshots_from_batch(batch_requests: list[ScreenshotBatchRequest], output_dir: Path, config: ConfigSchema, overlay_mode: OverlayMode, ffmpeg_runner: FFmpegRunner | None = None, reporter: ProgressReporter | None = None) -> dict[str, list[Path]]`
+
+Render screenshots from batch requests, choosing FFmpeg or VapourSynth path accordingly.
 
 ### Renderer
 
@@ -521,6 +531,12 @@ Single frame render job
 `resolve_tonemap_settings(config: ConfigSchema, cli_overrides: dict[str, object] | None = None) -> TonemapSettings`
 
 Resolve tonemap settings from config and CLI overrides.
+
+### ScreenshotBatchRequest
+
+`ScreenshotBatchRequest`
+
+Batch request representing a single clip's screenshot render task.
 
 ### ScreenshotResult
 
@@ -646,7 +662,7 @@ Utilities for Frame Compare 2.0.
 
 ### configure_logging
 
-`configure_logging(level: str = 'INFO', format: str = 'console', log_file: Path | None = None) -> None`
+`configure_logging(level: str = 'INFO', log_format: str = 'console', **kwargs) -> None`
 
 Configure structlog with either console or JSON output.
 
@@ -703,6 +719,18 @@ Progress reporter using the rich library for CLI display.
 `WorkspacePaths`
 
 Resolved absolute paths for a workspace.
+
+### write_bytes_atomic
+
+`write_bytes_atomic(path: Path, content: bytes) -> None`
+
+Atomically write byte content to a file path.
+
+### write_text_atomic
+
+`write_text_atomic(path: Path, content: str, *, encoding: str = 'utf-8') -> None`
+
+Atomically write text content to a file path.
 
 ## frame_compare.vs
 
@@ -820,7 +848,7 @@ Convert clip to RGB24 for screenshot rendering.
 
 `tonemap(clip: vs.VideoNode, settings: TonemapSettings, hdr_metadata: HDRMetadata | None = None) -> vs.VideoNode`
 
-Alias of `apply_tonemap`.
+Apply HDR to SDR tonemapping.
 
 ### TonemapSettings
 

@@ -56,6 +56,16 @@ Core local gates:
 UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini
 ```
 
+API documentation regeneration and drift check:
+
+```bash
+# Regenerate docs/api.md
+UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_api_docs.py
+
+# Check docs/api.md for drift (also run automatically as part of the pytest suite)
+UV_CACHE_DIR=./.uv_cache uv run --no-sync python scripts/generate_api_docs.py --check
+```
+
 Docker integration gate:
 
 ```bash

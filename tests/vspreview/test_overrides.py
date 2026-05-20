@@ -192,6 +192,49 @@ timestamp = "2026-01-03T12:00:00Z"
 
         assert result == {}
 
+    def test_load_manual_overrides_skips_invalid_types(self, tmp_path: Path) -> None:
+        """Skip entries with invalid field types."""
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        overrides_file = cache_dir / "manual_overrides.toml"
+        overrides_file.write_text(
+            """\
+version = "1"
+
+["ref:invalid_frame_offset_type"]
+reference_clip = "reference"
+comparison_clip = "comparison"
+frame_offset = "not-an-int"
+timestamp = "2026-01-03T12:00:00Z"
+confirmed = true
+
+["ref:invalid_frame_offset_bool"]
+reference_clip = "reference"
+comparison_clip = "comparison"
+frame_offset = true
+timestamp = "2026-01-03T12:00:00Z"
+confirmed = true
+
+["ref:missing_required_field"]
+reference_clip = "reference"
+comparison_clip = "comparison"
+frame_offset = 42
+confirmed = true
+
+["ref:valid_entry"]
+reference_clip = "reference"
+comparison_clip = "comparison"
+frame_offset = 42
+timestamp = "2026-01-03T12:00:00Z"
+confirmed = true
+""",
+            encoding="utf-8",
+        )
+
+        result = load_manual_overrides(cache_dir)
+        assert len(result) == 1
+        assert "ref:valid_entry" in result
+
 
 class TestSaveManualOverride:
     """Tests for save_manual_override() function."""
@@ -342,7 +385,8 @@ class TestManualOverridePrecedence:
             # Verify result
             assert len(results) == 1
             result = results[0]
-            assert result.method == "manual"
+            assert result.source == "manual"
+            assert result.algorithm is None
             assert result.frame_offset == 42
             assert result.correlation_score == 1.0
             assert result.reference_clip == "reference.mkv"

@@ -173,3 +173,15 @@ def test_check_exits_2_when_output_missing(tmp_path: Path, capsys) -> None:
 
     captured = capsys.readouterr()
     assert f"MISSING: {output}" in captured.err
+
+
+def test_repo_api_docs_drift() -> None:
+    """Verify that checked-in docs/api.md does not drift from current codebase."""
+    repo_root = Path(__file__).resolve().parents[1]
+    gen = _load_generator_module(repo_root)
+
+    exit_code = gen.main(["--project-root", str(repo_root), "--check"])
+    assert exit_code == 0, (
+        "docs/api.md is stale or has missing docstrings. "
+        "Run 'python scripts/generate_api_docs.py' to regenerate it."
+    )

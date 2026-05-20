@@ -25,7 +25,6 @@ from frame_compare.errors import (
     CacheCorruptionError,
     CacheVersionMismatchError,
     MetricsCalculationError,
-    TonemapRequiresVapourSynthError,
 )
 from frame_compare.orchestration.context import (
     ClipAlignmentState,
@@ -51,9 +50,6 @@ from frame_compare.orchestration.probe_props import (
 )
 from frame_compare.orchestration.progress import select_reporter
 from frame_compare.render.ffmpeg import DefaultFFmpegRunner, FFmpegRunner
-from frame_compare.render.naming import generate_screenshot_path
-from frame_compare.render.orchestrator import render_screenshots
-from frame_compare.render.types import OverlayMode
 from frame_compare.services.alignment import CACHE_FILE_NAME, align_clips, load_cached_offsets
 from frame_compare.services.metadata import resolve_metadata
 from frame_compare.services.publishers import publish_to_slowpics
@@ -641,13 +637,6 @@ def _run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> None:
         progress=ctx.reporter,
     )
 
-    def _source_from_method(method: str) -> str:
-        if method == "manual":
-            return "manual"
-        if method == "cross_correlation":
-            return "computed"
-        return "cached"
-
     updated_comparisons: list[ClipState] = []
     for comparison, result in zip(ctx.comparisons, results, strict=True):
         updated_comparisons.append(
@@ -657,7 +646,7 @@ def _run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> None:
                     reference_stem=Path(result.reference_clip).stem,
                     comparison_stem=Path(result.comparison_clip).stem,
                     relative_offset_frames=result.frame_offset,
-                    source=_source_from_method(result.method),
+                    source=result.source,
                 ),
             )
         )
@@ -681,60 +670,13 @@ def _run_render_phase(
     runner: FFmpegRunner,
     artifacts: _RunArtifacts,
 ) -> None:
-    from frame_compare.render.encoders import apply_overlay_to_file
-    from frame_compare.render.types import OverlayConfig
+    from frame_compare.render import ScreenshotBatchRequest, render_screenshots_from_batch
 
     clips_state = [ctx.reference, *ctx.comparisons]
-    label_map = {clip.path: clip.label for clip in clips_state}
     output_dir = ctx.workspace.screenshots_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Keep FFmpeg-only extraction aligned with render.orchestrator tonemap gating:
-    # HDR + tonemap enabled cannot use the FFmpeg-only path.
-    if (
-        ctx.config.screenshots.use_ffmpeg
-        and ctx.config.color.enable_tonemap
-        and any(clip.probe.is_hdr for clip in clips_state)
-    ):
-        raise TonemapRequiresVapourSynthError()
-
-    if ctx.config.screenshots.use_ffmpeg:
-        overlay_mode = ctx.config.screenshots.overlay_mode
-        selection_labels = [
-            selection_label_for_frame(
-                _map_aligned_to_source_frame(clip=ctx.reference, aligned_frame=aligned_frame),
-                ctx.selection_breakdown,
-            )
-            for aligned_frame in frames
-        ]
-        rendered: dict[str, list[Path]] = {}
-        for clip in clips_state:
-            paths: list[Path] = []
-            for idx, aligned_frame in enumerate(frames):
-                source_frame = _map_aligned_to_source_frame(clip=clip, aligned_frame=aligned_frame)
-                output = generate_screenshot_path(output_dir, clip.label, aligned_frame)
-                runner.extract_frame(clip.path, source_frame, output)
-                if overlay_mode != OverlayMode.NONE:
-                    overlay = OverlayConfig(
-                        mode=overlay_mode,
-                        label=clip.label,
-                        frame_number=source_frame,
-                        resolution=(clip.probe.width, clip.probe.height),
-                        hdr_info="HDR" if clip.probe.is_hdr else None,
-                        font_path=None,
-                        display_frame_number=aligned_frame,
-                        num_frames=clip.probe.num_frames,
-                        selection_label=selection_labels[idx],
-                    )
-                    apply_overlay_to_file(output, overlay)
-                paths.append(output)
-            rendered[clip.label] = paths
-        artifacts.screenshots_by_label = rendered
-        artifacts.screenshot_dir = output_dir
-        return
-
     overlay_mode = ctx.config.screenshots.overlay_mode
-    rendered: dict[str, list[Path]] = {}
     selection_labels = [
         selection_label_for_frame(
             _map_aligned_to_source_frame(clip=ctx.reference, aligned_frame=aligned_frame),
@@ -742,24 +684,36 @@ def _run_render_phase(
         )
         for aligned_frame in frames
     ]
+
+    batch_requests: list[ScreenshotBatchRequest] = []
     for clip in clips_state:
         source_frames = [
             _map_aligned_to_source_frame(clip=clip, aligned_frame=aligned_frame)
             for aligned_frame in frames
         ]
-        rendered_for_clip = render_screenshots(
-            clips=[clip.path],
-            frames=source_frames,
-            output_frames=frames,
-            selection_labels=selection_labels,
-            output_dir=output_dir,
-            config=ctx.config,
-            label_map=label_map,
-            renderer="auto",
-            overlay_mode=overlay_mode,
-            reporter=ctx.reporter,
+        batch_requests.append(
+            ScreenshotBatchRequest(
+                clip_path=clip.path,
+                label=clip.label,
+                source_frames=source_frames,
+                display_frames=frames,
+                selection_labels=selection_labels,
+                probe_width=clip.probe.width,
+                probe_height=clip.probe.height,
+                probe_num_frames=clip.probe.num_frames,
+                probe_is_hdr=clip.probe.is_hdr,
+            )
         )
-        rendered[clip.label] = rendered_for_clip[clip.label]
+
+    rendered = render_screenshots_from_batch(
+        batch_requests=batch_requests,
+        output_dir=output_dir,
+        config=ctx.config,
+        overlay_mode=overlay_mode,
+        ffmpeg_runner=runner,
+        reporter=ctx.reporter,
+    )
+
     artifacts.screenshots_by_label = rendered
     artifacts.screenshot_dir = output_dir
 

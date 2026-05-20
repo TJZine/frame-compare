@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from fractions import Fraction
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from frame_compare.config import SelectionMode
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+
+CacheLoadReason = Literal["not_found", "corrupted", "version_mismatch", "mismatched_inputs"]
 
 
 def _empty_int_list() -> list[int]:
@@ -113,4 +116,4 @@ class CacheLoadResult:
 
     success: bool
     metrics: FrameMetrics | None = None
-    reason: str | None = None
+    reason: CacheLoadReason | None = None
