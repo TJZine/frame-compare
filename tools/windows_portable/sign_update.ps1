@@ -28,21 +28,12 @@ function Assert-SafeRelativePath([string]$PathValue, [string]$FieldName) {
 
 function Read-ZipEntryBytes([System.IO.Compression.ZipArchiveEntry]$Entry) {
   $stream = $Entry.Open()
+  $buffer = [System.IO.MemoryStream]::new()
   try {
-    $buffer = New-Object byte[] $Entry.Length
-    $offset = 0
-    while ($offset -lt $buffer.Length) {
-      $read = $stream.Read($buffer, $offset, $buffer.Length - $offset)
-      if ($read -le 0) {
-        break
-      }
-      $offset += $read
-    }
-    if ($offset -ne $buffer.Length) {
-      throw "Failed to read complete zip entry bytes for $($Entry.FullName)"
-    }
-    return $buffer
+    $stream.CopyTo($buffer)
+    return $buffer.ToArray()
   } finally {
+    $buffer.Dispose()
     $stream.Dispose()
   }
 }

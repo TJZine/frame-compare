@@ -53,7 +53,6 @@ def _setup_install_layout(*, tmp_path: Path, repo_root: Path) -> tuple[Path, Pat
     shim_dir.mkdir(parents=True)
     state_dir.mkdir(parents=True)
     bundle_dir.mkdir(parents=True)
-    _write_valid_config_json(state_dir=state_dir, bundle_dir=bundle_dir, schema_version=1)
 
     shim_path = shim_dir / "frame-compare.ps1"
     shim_path.write_text(repo_shim.read_text(encoding="utf-8"), encoding="utf-8")
@@ -325,6 +324,7 @@ def test_windows_portable_update_apply_e2e(tmp_path: Path, repo_root: Path) -> N
     shim_dir.mkdir(parents=True)
     state_dir.mkdir(parents=True)
     bundle_dir.mkdir(parents=True)
+    _write_valid_config_json(state_dir=state_dir, bundle_dir=bundle_dir, schema_version=1)
 
     # 3. Write public key and copy updater script
     repo_update_script = (
@@ -401,9 +401,7 @@ def test_windows_portable_update_apply_e2e(tmp_path: Path, repo_root: Path) -> N
     payload_version_py.write_text(new_version_content, encoding="utf-8")
 
     # Compute hash of the updated file
-    sha256_hasher = hashlib.sha256()
-    sha256_hasher.update(new_version_content.encode("utf-8"))
-    file_sha256 = sha256_hasher.hexdigest()
+    file_sha256 = hashlib.sha256(payload_version_py.read_bytes()).hexdigest()
 
     manifest_data = {
         "schema_version": 1,
