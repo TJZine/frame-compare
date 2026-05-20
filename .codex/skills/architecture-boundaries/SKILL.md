@@ -68,6 +68,16 @@ The default move is extraction into the existing owner, not accretion in hotspot
 UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini
 ```
 
+On Windows or when direct venv script paths are unavailable, use equivalent `uv`
+invocations while preserving the same proof surface:
+
+```powershell
+uv run --no-sync pyright --warnings
+uv run --no-sync ruff check .
+uv run --no-sync pytest -q
+$env:UV_CACHE_DIR = ".uv_cache"; uv run --no-sync lint-imports --config importlinter.ini
+```
+
 ## Common Mistakes
 
 - Adding one more branch to a hotspot instead of extracting a real owner

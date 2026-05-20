@@ -21,7 +21,7 @@ Read these files in order:
 ## Workflow
 
 1. Confirm product behavior, public surfaces, and verification are decided.
-2. Keep `update_plan` current.
+2. Keep `update_plan` current as the session's live task state. It is not a durable plan document; use an execution brief or an active `docs/plans/` file only when the runbook requires durable handoff memory or the maintainer asks for it.
 3. Implement the smallest coherent approved unit.
 4. Update authority docs in the same pass when CLI/config/release/workflow/architecture behavior changes.
 5. Stop and re-plan if public behavior, owner seams, or verification diverge.
