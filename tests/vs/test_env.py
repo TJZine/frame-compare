@@ -1,5 +1,6 @@
 """Tests for VapourSynth environment detection."""
 
+import runpy
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -12,6 +13,14 @@ from frame_compare.vs.env import (
     is_vapoursynth_available,
     require_plugin,
 )
+
+
+def test_env_module_annotations_do_not_require_runtime_vapoursynth(repo_root) -> None:
+    """Import-time annotations must not require the optional VS runtime."""
+    env_path = repo_root / "src" / "frame_compare" / "vs" / "env.py"
+    namespace = runpy.run_path(str(env_path))
+
+    assert namespace["ensure_vs_environment"].__annotations__["return"] == "vs.Core"
 
 
 def make_mock_core(*, lsmas: bool = False, libplacebo: bool = False) -> SimpleNamespace:
