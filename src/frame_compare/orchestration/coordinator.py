@@ -4,13 +4,10 @@ from __future__ import annotations
 
 import inspect
 import json
-import math
-import subprocess
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Protocol, cast
 
 import httpx
 
@@ -27,8 +24,6 @@ from frame_compare.errors import (
     AudioAlignmentError,
     CacheCorruptionError,
     CacheVersionMismatchError,
-    FFmpegError,
-    FFmpegNotFoundError,
     MetricsCalculationError,
     TonemapRequiresVapourSynthError,
 )
@@ -55,9 +50,10 @@ from frame_compare.orchestration.probe_props import (
     compute_tonemap_prop_keys,
 )
 from frame_compare.orchestration.progress import select_reporter
+from frame_compare.render.ffmpeg import DefaultFFmpegRunner, FFmpegRunner
 from frame_compare.render.naming import generate_screenshot_path
 from frame_compare.render.orchestrator import render_screenshots
-from frame_compare.render.types import OverlayMode as RenderOverlayMode
+from frame_compare.render.types import OverlayMode
 from frame_compare.services.alignment import CACHE_FILE_NAME, align_clips, load_cached_offsets
 from frame_compare.services.metadata import resolve_metadata
 from frame_compare.services.publishers import publish_to_slowpics
@@ -65,10 +61,8 @@ from frame_compare.services.report import ClipInfo, ReportData, generate_report
 from frame_compare.services.run_folder import derive_run_folder_name, get_existing_run_folders
 from frame_compare.services.types import AlignmentConfig, MetadataConfig, TmdbMetadata
 from frame_compare.utils.progress import ProgressReporter
-from frame_compare.utils.subproc import run_subprocess
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.loader import DefaultVSLoader, VSLoader
-from frame_compare.vs.types import HDRMetadata
 from frame_compare.vspreview import load_manual_overrides
 
 
@@ -179,151 +173,6 @@ class RunResult:
     errors: list[str] = field(default_factory=_empty_str_list)
     warnings: list[str] = field(default_factory=_empty_str_list)
     phase_timings: dict[str, float] = field(default_factory=_empty_phase_timings)
-
-
-class FFmpegRunner(Protocol):
-    """Protocol for FFmpeg-based frame extraction and probing."""
-
-    def extract_frame(self, video: Path, frame_num: int, output: Path) -> None:
-        """Extract a single frame from the given video into the output path."""
-        ...
-
-    def probe_hdr(self, video: Path) -> HDRMetadata | None:
-        """Probe HDR metadata for a video, returning None if unavailable."""
-        ...
-
-
-class DefaultFFmpegRunner:
-    """Default FFmpeg runner for dependency injection in orchestration."""
-
-    _FFPROBE_TIMEOUT_SECONDS = 15.0
-    _FFMPEG_TIMEOUT_SECONDS = 30.0
-
-    def _probe_fps(self, video: Path) -> float:
-        argv = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-select_streams",
-            "v:0",
-            "-show_entries",
-            "stream=avg_frame_rate",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            str(video),
-        ]
-        try:
-            proc = run_subprocess(argv, timeout_seconds=self._FFPROBE_TIMEOUT_SECONDS)
-        except FileNotFoundError as exc:
-            raise FFmpegNotFoundError() from exc
-        except subprocess.TimeoutExpired as exc:
-            raise FFmpegError("ffprobe timed out while probing fps", 124) from exc
-        except subprocess.CalledProcessError as exc:
-            raise FFmpegError(exc.stderr.decode(errors="replace"), exc.returncode) from exc
-
-        raw = proc.stdout.decode("utf-8", errors="replace").strip()
-        if not raw:
-            raise FFmpegError("ffprobe returned empty avg_frame_rate", proc.returncode)
-
-        try:
-            if "/" in raw:
-                num, den = raw.split("/", maxsplit=1)
-                num_f = float(num)
-                den_f = float(den)
-                if den_f == 0.0:
-                    raise ValueError("zero denominator")
-                fps = num_f / den_f
-            else:
-                fps = float(raw)
-        except ValueError as exc:
-            raise FFmpegError(f"invalid avg_frame_rate value: {raw!r}", proc.returncode) from exc
-
-        if not math.isfinite(fps) or fps <= 0.0:
-            raise FFmpegError(f"invalid probed fps value: {raw!r}", proc.returncode)
-        return fps
-
-    def extract_frame(self, video: Path, frame_num: int, output: Path) -> None:
-        fps = self._probe_fps(video)
-        seek_time = f"{math.floor((frame_num / fps) * 1000) / 1000:.3f}"
-        output.parent.mkdir(parents=True, exist_ok=True)
-        argv = [
-            "ffmpeg",
-            "-y",
-            "-ss",
-            seek_time,
-            "-i",
-            str(video),
-            "-vframes",
-            "1",
-            "-q:v",
-            "1",
-            str(output),
-        ]
-        try:
-            run_subprocess(argv, timeout_seconds=self._FFMPEG_TIMEOUT_SECONDS)
-        except FileNotFoundError as exc:
-            raise FFmpegNotFoundError() from exc
-        except subprocess.TimeoutExpired as exc:
-            raise FFmpegError("ffmpeg timed out while extracting frame", 124) from exc
-        except subprocess.CalledProcessError as exc:
-            raise FFmpegError(exc.stderr.decode(errors="replace"), exc.returncode) from exc
-
-    def probe_hdr(self, video: Path) -> HDRMetadata | None:
-        argv = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-select_streams",
-            "v:0",
-            "-show_entries",
-            "stream=color_transfer,color_primaries,color_space",
-            "-of",
-            "json",
-            str(video),
-        ]
-        try:
-            proc = run_subprocess(argv, timeout_seconds=self._FFPROBE_TIMEOUT_SECONDS)
-        except FileNotFoundError as exc:
-            raise FFmpegNotFoundError() from exc
-        except subprocess.TimeoutExpired as exc:
-            raise FFmpegError("ffprobe timed out while probing hdr", 124) from exc
-        except subprocess.CalledProcessError as exc:
-            raise FFmpegError(exc.stderr.decode(errors="replace"), exc.returncode) from exc
-
-        try:
-            payload = cast(
-                dict[str, object], json.loads(proc.stdout.decode("utf-8", errors="replace"))
-            )
-        except json.JSONDecodeError as exc:
-            raise FFmpegError("ffprobe returned invalid json", proc.returncode) from exc
-
-        streams_obj = payload.get("streams")
-        if not isinstance(streams_obj, list) or not streams_obj:
-            return None
-        streams = cast(list[object], streams_obj)
-        stream_obj = streams[0]
-        if not isinstance(stream_obj, dict):
-            return None
-        stream = cast(dict[str, object], stream_obj)
-
-        transfer_raw = str(stream.get("color_transfer", "")).lower().strip()
-        primaries_raw = str(stream.get("color_primaries", "")).lower().strip()
-        matrix_raw = str(stream.get("color_space", "")).lower().strip()
-        is_hdr = transfer_raw in {"smpte2084", "arib-std-b67"} and primaries_raw == "bt2020"
-        if not is_hdr:
-            return None
-
-        primaries_map = {"bt709": 1, "bt2020": 9}
-        transfer_map = {"bt709": 1, "smpte2084": 16, "arib-std-b67": 18}
-        matrix_map = {"bt709": 1, "bt2020nc": 9, "bt2020c": 10}
-        return HDRMetadata(
-            mastering_display=None,
-            max_cll=None,
-            max_fall=None,
-            color_primaries=primaries_map.get(primaries_raw, 2),
-            transfer=transfer_map.get(transfer_raw, 2),
-            matrix=matrix_map.get(matrix_raw, 2),
-        )
 
 
 @dataclass
@@ -849,7 +698,7 @@ def _run_render_phase(
         raise TonemapRequiresVapourSynthError()
 
     if ctx.config.screenshots.use_ffmpeg:
-        overlay_mode = RenderOverlayMode(ctx.config.screenshots.overlay_mode.value)
+        overlay_mode = ctx.config.screenshots.overlay_mode
         selection_labels = [
             selection_label_for_frame(
                 _map_aligned_to_source_frame(clip=ctx.reference, aligned_frame=aligned_frame),
@@ -864,7 +713,7 @@ def _run_render_phase(
                 source_frame = _map_aligned_to_source_frame(clip=clip, aligned_frame=aligned_frame)
                 output = generate_screenshot_path(output_dir, clip.label, aligned_frame)
                 runner.extract_frame(clip.path, source_frame, output)
-                if overlay_mode != RenderOverlayMode.NONE:
+                if overlay_mode != OverlayMode.NONE:
                     overlay = OverlayConfig(
                         mode=overlay_mode,
                         label=clip.label,
@@ -883,7 +732,7 @@ def _run_render_phase(
         screenshot_dir_out(output_dir)
         return
 
-    overlay_mode = RenderOverlayMode(ctx.config.screenshots.overlay_mode.value)
+    overlay_mode = ctx.config.screenshots.overlay_mode
     rendered: dict[str, list[Path]] = {}
     selection_labels = [
         selection_label_for_frame(

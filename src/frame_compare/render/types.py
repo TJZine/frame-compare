@@ -1,21 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from frame_compare.config.schema import OverlayMode
+
 if TYPE_CHECKING:
     import vapoursynth as vs  # type: ignore
-
-
-class OverlayMode(str, Enum):
-    """Overlay verbosity level."""
-
-    MINIMAL = "minimal"  # Label only
-    STANDARD = "standard"  # Label + frame + resolution
-    DIAGNOSTIC = "diagnostic"  # Standard + HDR info
-    NONE = "none"  # No overlay drawn
 
 
 @dataclass

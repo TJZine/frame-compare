@@ -70,6 +70,7 @@ Frame Compare is designed so the same inputs produce the same outputs:
 
 - [Engineering Runbook](docs/ENGINEERING_RUNBOOK.md) — workflow, verification, planning, handoff
 - [Current Architecture](docs/current-architecture.md) — present-day codebase truth
+- [CLI Contract](docs/current-cli-contract.md) — canonical CLI command, flag, and persistence contract
 - [Decisions](docs/DECISIONS.md) — historical decisions and exceptions
 - [API Reference](docs/api.md) — generated symbol reference
 
@@ -241,6 +242,7 @@ bash tools/verify_docker_integration.sh
 | -------- | ----------- |
 | [Engineering Runbook](docs/ENGINEERING_RUNBOOK.md) | Canonical workflow, verification, and planning policy |
 | [Current Architecture](docs/current-architecture.md) | Present-day runtime flow, boundaries, and hotspots |
+| [CLI Contract](docs/current-cli-contract.md) | Canonical CLI command, flag, and persistence contract |
 | [Decisions](docs/DECISIONS.md) | Architectural and process decision log |
 | [API Reference](docs/api.md) | Generated API documentation |
 

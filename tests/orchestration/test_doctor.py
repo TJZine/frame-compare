@@ -87,7 +87,7 @@ class TestCheckVapoursynth:
             return original_import(name, *args, **kwargs)
 
         with (
-            patch("frame_compare.orchestration.doctor._register_windows_dll_dirs") as register_dirs,
+            patch("frame_compare.orchestration.doctor.register_windows_dll_dirs") as register_dirs,
             patch("builtins.__import__", side_effect=_fake_import),
         ):
             result = vs_check.check_fn()

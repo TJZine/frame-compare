@@ -66,9 +66,9 @@ def test_libplacebo_tonemap_succeeds_in_docker():
 
     libplacebo_available = bool(detect_plugins(core).get("libplacebo"))
     if require_libplacebo:
-        assert (
-            libplacebo_available
-        ), "FRAME_COMPARE_REQUIRE_LIBPLACEBO=1 but libplacebo is unavailable"
+        assert libplacebo_available, (
+            "FRAME_COMPARE_REQUIRE_LIBPLACEBO=1 but libplacebo is unavailable"
+        )
     else:
         assert libplacebo_available, "libplacebo plugin missing in Docker image (unexpected)"
 

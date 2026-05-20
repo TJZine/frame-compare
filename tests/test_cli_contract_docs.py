@@ -21,7 +21,12 @@ def test_current_cli_contract_is_wired_into_repo_authority_surfaces() -> None:
     assert "docs/current-cli-contract.md" in agents
     assert "docs/current-cli-contract.md" in coordinator
     assert "cli-module.md" not in coordinator
-    assert "3. [docs/current-cli-contract.md]" in agents
+
+    runbook_pos = agents.index("[docs/ENGINEERING_RUNBOOK.md]")
+    architecture_pos = agents.index("[docs/current-architecture.md]")
+    cli_contract_pos = agents.index("[docs/current-cli-contract.md]")
+    importlinter_pos = agents.index("[importlinter.ini]")
+    assert runbook_pos < architecture_pos < cli_contract_pos < importlinter_pos
 
 
 def test_current_cli_contract_covers_all_public_command_families() -> None:
@@ -48,8 +53,13 @@ def test_current_cli_contract_matches_live_override_map() -> None:
 def test_current_cli_contract_names_primary_executable_contract_checks() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")
-    authority_section = cli_contract.split("## Authority And Update Rules", maxsplit=1)[1].split(
-        "## Command Surface",
+    authority_heading = "## Authority And Update Rules"
+    command_surface_heading = "## Command Surface"
+    assert authority_heading in cli_contract, f"Missing heading: {authority_heading}"
+    assert command_surface_heading in cli_contract, f"Missing heading: {command_surface_heading}"
+
+    authority_section = cli_contract.split(authority_heading, maxsplit=1)[1].split(
+        command_surface_heading,
         maxsplit=1,
     )[0]
 
