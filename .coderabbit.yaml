@@ -1,0 +1,146 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+reviews:
+  profile: "assertive"
+  review_details: true
+  collapse_walkthrough: true
+  in_progress_fortune: false
+  poem: false
+  auto_review:
+    enabled: false
+  path_filters:
+    - "!**/.worktrees/**"
+    - "!**/worktrees/**"
+    - "!**/.venv/**"
+    - "!**/.uv_cache/**"
+    - "!**/.pytest_cache/**"
+    - "!**/.ruff_cache/**"
+    - "!**/.hypothesis/**"
+    - "!**/.import_linter_cache/**"
+    - "!**/.codanna/**"
+    - "!**/.mcp_sequential_thinking/**"
+    - "!**/.desloppify/**"
+    - "!**/__pycache__/**"
+    - "!**/*.pyc"
+    - "!dist/**"
+    - "!build/**"
+    - "!generated/**"
+    - "!comparison_videos/**"
+    - "!**/.DS_Store"
+  path_instructions:
+    - path: "AGENTS.md"
+      instructions: |
+        Review as the short agent entrypoint only. Flag contradictions with docs/ENGINEERING_RUNBOOK.md, docs/current-architecture.md, docs/current-cli-contract.md, importlinter.ini, pyproject.toml, .codex/config.toml, or repo-local skill routing. Do not request that AGENTS.md become a second runbook.
+    - path: "docs/ENGINEERING_RUNBOOK.md"
+      instructions: |
+        Review as the canonical workflow, verification, planning, review, and production-quality authority. Check risk tiers, command canon, production guardrails, public-surface policy, Docker/Windows verification, and plan activation rules. Flag process gaps that would let agents claim unverified work or weaken code quality.
+    - path: "docs/current-architecture.md"
+      instructions: |
+        Review as present-day architecture truth. Check composition roots, import layers, persistence owners, external integration owners, runtime phase ordering, and hotspot lists. Flag stale ownership claims, missing same-pass doc updates, or changes that would let hotspots absorb new responsibilities.
+    - path: "docs/current-cli-contract.md"
+      instructions: |
+        Review as the public CLI/config contract. Flag drift in command names, option semantics, stdout/stderr behavior, JSON payloads, exit codes, path resolution, config persistence, or report auto-open rules. Ensure tests and docs stay in lockstep.
+    - path: "docs/plans/**/*.md"
+      instructions: |
+        Review tracked plans as scoped handoff memory, not global policy. Flag plans that lack explicit status, treat inactive or closed plans as current authority, duplicate runbook policy, or omit verification and rollback notes for active implementation work.
+    - path: ".codex/skills/**/*.md"
+      instructions: |
+        These are repo-local Frame Compare skills. Review for stale source-repo residue, trigger descriptions that are too broad or too narrow, conflicts with the runbook, weak verification routing, missing Python/CLI/test guidance, and rules that are overly restrictive compared with repo policy.
+    - path: ".codex/config.toml"
+      instructions: |
+        Review delegated role definitions for clear read/write boundaries. Read-only roles must stay read-only; worker/planner roles must remain bounded and production-quality focused.
+    - path: ".codex/agents/*.toml"
+      instructions: |
+        Review agent role prompts for production-quality review and implementation behavior: correctness, architecture fit, maintainability, public-contract safety, no speculative abstractions, no unrelated edits, and no edits through read-only roles.
+    - path: ".coderabbit.yaml"
+      instructions: |
+        Review this configuration for valid CodeRabbit schema usage, focused path filters, non-duplicative path instructions, and alignment with Frame Compare's Python CLI/runtime workflow. Flag TypeScript/Lineup residue.
+    - path: "pyproject.toml"
+      instructions: |
+        Review as Python tooling and packaging policy. Check Pyright strictness, Ruff selection, pytest markers and warning policy, project scripts, dependency groups, Python version, and package metadata. Flag changes that weaken strict typing, introduce undeclared markers, or drift from release/runtime expectations.
+    - path: "importlinter.ini"
+      instructions: |
+        Review as the import-layer contract. Flag dependency direction changes that bypass the documented layer model or sibling-domain independence. Expect same-pass architecture docs and full verification when boundaries change.
+    - path: "src/frame_compare/cli_entry.py"
+      instructions: |
+        Treat as a CLI composition hotspot. Flag eager imports of heavy runtime/VapourSynth paths, command bodies absorbing domain policy, stdout/stderr or JSON contract drift, report auto-open ownership changes, and missing CLI contract tests.
+    - path: "src/frame_compare/cli_output.py"
+      instructions: |
+        Review output formatting for stable CLI behavior. Preserve machine-readable modes, useful diagnostics, and stream placement. Do not request cosmetic churn unless it fixes a contract, accessibility, or troubleshooting defect.
+    - path: "src/frame_compare/runner.py"
+      instructions: |
+        Treat as the runtime entrypoint between CLI/config resolution and orchestration. Review HTTPX client lifetime, no-network default-test assumptions, root/path resolution, dependency handoff into orchestration, error mapping, cancellation/cleanup, and avoidance of render/service policy accumulating in runner.
+    - path: "src/frame_compare/analysis/**/*.py"
+      instructions: |
+        Review analysis changes for deterministic frame selection, metric correctness, cache schema compatibility, atomic cache writes, probe/metadata handling, typed data flow, and focused tests that cover public behavior instead of private implementation details.
+    - path: "src/frame_compare/config/**/*.py"
+      instructions: |
+        Review config changes for Pydantic v2 correctness, documented persistence behavior, CLI override mapping, path resolution, env handling, and schema compatibility. Do not tighten ConfigSchema unknown-field behavior without an explicit contract decision, docs update, and tests.
+    - path: "src/frame_compare/orchestration/**/*.py"
+      instructions: |
+        Review orchestration for phase ordering, cancellation/error behavior, run-folder/cache handling, typed RunContext use, and hotspot growth. Flag raw integration details or config/env policy leaking into orchestration when a lower owner should handle it.
+    - path: "src/frame_compare/render/**/*.py"
+      instructions: |
+        Review render changes for deterministic filenames/output, FFmpeg/VapourSynth boundary behavior, overlay correctness, resource cleanup, and runtime verification requirements. Flag tests that mock away the behavior being changed.
+    - path: "src/frame_compare/vs/**/*.py"
+      instructions: |
+        Review VapourSynth code for lazy import expectations, plugin/runtime assumptions, HDR/tonemap correctness, typed source/props handling, and honest skip/verification behavior when VS is unavailable locally.
+    - path: "src/frame_compare/services/**/*.py"
+      instructions: |
+        Review services for HTTPX client ownership, timeout/status handling, no live-network assumptions in default tests, report generation ownership, slow.pics/TMDB policy, and deterministic filesystem output.
+    - path: "src/frame_compare/vspreview/**/*.py"
+      instructions: |
+        Review VSPreview integration for script/session output, subprocess/launch command clarity, path diagnostics, optional dependency handling, and cleanup. Preserve copy/paste-friendly diagnostics while redacting secrets.
+    - path: "src/frame_compare/errors.py"
+      instructions: |
+        Treat as an error-contract hotspot. Flag exit-code drift, lost sanitized causes, overbroad exception swallowing, and user-facing messages that break JSON or CLI expectations.
+    - path: "src/frame_compare/utils/**/*.py"
+      instructions: |
+        Review utilities for narrow ownership, typed contracts, deterministic filesystem/subprocess behavior, atomic writes, and avoiding broad helper dumping grounds.
+    - path: "src/**/*.py"
+      instructions: |
+        Apply strict Python production review: avoid new Any, untyped callbacks/decorators, unjustified casts or ignores, broad dicts, broad exceptions, speculative abstractions, dead code, debug leftovers, and private implementation coupling. Prefer typed boundaries, dataclasses/protocols/aliases, and public-seam behavior.
+    - path: "tests/**/*.py"
+      instructions: |
+        Review tests for behavior-focused coverage, tmp_path isolation, declared markers, no real network in default tests, honest runtime skips, deterministic subprocess usage, and public-seam assertions. Flag brittle Rich/help snapshots, private probes, or tests that only mirror implementation.
+    - path: "tests/cli/**/*.py"
+      instructions: |
+        Review CLI tests for exit codes, stdout/stderr placement, JSON parsing, help semantics, config persistence, report auto-open gating, and docs lockstep with docs/current-cli-contract.md. Prefer result.stdout/result.stderr over mixed result.output when stream placement matters.
+    - path: "tests/test_cli_contract_docs.py"
+      instructions: |
+        Review as the CLI docs lockstep guard. Ensure new public CLI/config behavior is represented here when the contract doc, override map, command surface, or canonical test file list changes.
+    - path: "tests/config/**/*.py"
+      instructions: |
+        Review config tests for schema validation, persistence behavior, override mapping, invalid/missing values, atomic writes, and public compatibility decisions.
+    - path: "tests/integration/**/*.py"
+      instructions: |
+        Review integration tests for honest runtime requirements, markers, skips, fixture isolation, and real FFmpeg/VapourSynth behavior where the changed surface requires it.
+    - path: "tools/windows_portable/**"
+      instructions: |
+        Review Windows portable/update changes as release-path code. Flag signing/key handling risks, path quoting issues, partial update failure modes, missing PowerShell verification, and docs/CI drift.
+    - path: ".github/workflows/**"
+      instructions: |
+        Review CI changes for parity with documented local verification, Python/uv cache safety, Docker/runtime gates, Windows portable paths, and release artifact integrity.
+    - path: "Dockerfile"
+      instructions: |
+        Review Docker changes for reproducibility, runtime dependency correctness, FFmpeg/VapourSynth availability, cache behavior, and parity with tools/verify_docker_integration.sh.
+    - path: "docker-compose.yml"
+      instructions: |
+        Review Docker Compose changes for runtime parity, mounted paths, generated output safety, and integration-test expectations.
+    - path: "docs/TODO.md"
+      instructions: |
+        Treat as non-authoritative backlog. Flag stale or vague items only when they could mislead current workflow or conflict with authority docs.
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "AGENTS.md"
+      - "docs/ENGINEERING_RUNBOOK.md"
+      - "docs/current-architecture.md"
+      - "docs/current-cli-contract.md"
+      - "importlinter.ini"
+      - "pyproject.toml"
+      - ".codex/config.toml"
+      - ".codex/agents/*.toml"
+      - ".codex/skills/*/SKILL.md"
