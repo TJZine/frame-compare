@@ -356,6 +356,21 @@ def test_windows_portable_updater_uses_native_path_helpers_for_pwsh_e2e(
     assert 'Join-Path $BundlePath "app\\\\.update_lock"' not in updater
 
 
+def test_windows_portable_updater_validates_rollback_backup_id_format_and_containment(
+    repo_root: Path,
+) -> None:
+    updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
+    updater = _read_text_or_fail(updater_path)
+    invoke_rollback = re.search(
+        r"function\s+Invoke-Rollback\b[\s\S]*?\n\}", updater, flags=re.DOTALL
+    )
+    assert invoke_rollback is not None
+    body = invoke_rollback.group(0)
+    assert r"^\d{14}$" in body
+    assert "Get-SafeChildPath" in body
+    assert "backup id" in body.lower()
+
+
 def test_windows_portable_updater_always_clears_rsa_in_signature_verification(
     repo_root: Path,
 ) -> None:
@@ -521,7 +536,7 @@ def test_windows_portable_updater_prefers_bundle_launcher_for_installed_version(
     assert "function Get-VersionFromCommandOutput" in updater
     assert '$bundleLauncher = Join-Path $BundlePath "frame-compare.ps1"' in updater
     assert "& $bundleLauncher version 2>&1" in updater
-    assert 'Get-VersionFromCommandOutput -OutputLines $launcherResult' in updater
+    assert "Get-VersionFromCommandOutput -OutputLines $launcherResult" in updater
 
 
 def test_windows_portable_updater_finally_does_not_mask_exception(repo_root: Path) -> None:

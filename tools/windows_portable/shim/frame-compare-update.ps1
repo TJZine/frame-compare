@@ -511,7 +511,11 @@ function Invoke-Rollback([string]$BundlePath, [string]$BackupId) {
   try {
     $lockInfo = Acquire-UpdateLock -BundlePath $BundlePath
     $backupRoot = Get-BackupRoot -BundlePath $BundlePath
-    $backupDir = Join-Path (Join-Path $backupRoot $BackupId) "frame_compare"
+    if ($BackupId -notmatch '^\d{14}$') {
+      throw "Invalid backup id format: $BackupId (expected yyyyMMddHHmmss)"
+    }
+    $backupParent = Get-SafeChildPath -Root $backupRoot -RelativePath $BackupId -Context "backup id"
+    $backupDir = Join-Path $backupParent "frame_compare"
     if (!(Test-Path -LiteralPath $backupDir)) {
       throw "Backup id not found: $BackupId"
     }
