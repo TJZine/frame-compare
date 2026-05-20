@@ -35,9 +35,9 @@ entrypoint shim only; it must not become a second runbook.
 
 - Use repo-local workflow and boundary skills under `.agents/skills/` when their
   trigger descriptions match the task.
-- Keep `.agents/skills/desloppify/SKILL.md` discoverable as the code-health skill,
-  but do not mirror, modify, or treat it as always-on policy unless the task
-  explicitly targets desloppify workflow.
+- Keep code-health scanner state and optional local code-health skills untracked;
+  do not add a repo-local `desloppify` skill unless the task explicitly targets
+  desloppify workflow and the maintainer approves tracking it.
 - Do not use `.agent/skills/` for Frame Compare workflow skills. If Antigravity
   discovers a local `.agent/skills/` folder, treat it as stale local state and do
   not copy it into the repo without an explicit maintainer decision.

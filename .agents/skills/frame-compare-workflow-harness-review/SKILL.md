@@ -20,7 +20,6 @@ Read these files in order:
 7. `.agents/skills/*/SKILL.md`
 8. `.agents/skills/*/agents/openai.yaml` when present
 9. `.codex/config.toml` and `.codex/agents/*.toml` when delegated roles are in scope
-10. `.agents/skills/desloppify/SKILL.md` when code-health workflow policy is in scope
 
 ## Review Focus
 
