@@ -30,11 +30,37 @@ except (VapourSynthNotFoundError, VapourSynthError) as exc:
 if not detect_plugins(_core).get("lsmas", False):
     pytest.skip("lsmas plugin not available", allow_module_level=True)
 
+_PROBE_CACHE_CONFIG = """\
+[paths]
+use_run_folders = false
+
+[analysis]
+frame_count = 1
+
+[audio_alignment]
+enable = false
+
+[screenshots]
+use_ffmpeg = true
+
+[slowpics]
+auto_upload = false
+
+[tmdb]
+enabled = false
+
+[report]
+enable = false
+
+[dovi]
+enable = false
+"""
+
 
 def _write_minimal_config(root: Path) -> None:
     config_dir = root / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
-    (config_dir / "config.toml").write_text("", encoding="utf-8")
+    (config_dir / "config.toml").write_text(_PROBE_CACHE_CONFIG, encoding="utf-8")
 
 
 def _prepare_workspace(root: Path, template_video: Path) -> list[Path]:
@@ -60,7 +86,14 @@ async def test_loadsources_writes_clip_probe_cache_file(
     _write_minimal_config(workspace_root)
     input_videos = _prepare_workspace(workspace_root, mock_video_path)
 
-    request = RunRequest(root=workspace_root, quiet=True)
+    request = RunRequest(
+        root=workspace_root,
+        quiet=True,
+        skip_analysis=True,
+        skip_metadata=True,
+        skip_dovi=True,
+        no_upload=True,
+    )
     deps = RunDependencies(vs_loader=DefaultVSLoader())
     result = await execute_run(request, deps=deps)
 
@@ -95,7 +128,14 @@ async def test_loadsources_reuses_clip_probe_cache_file(
     _write_minimal_config(workspace_root)
     _prepare_workspace(workspace_root, mock_video_path)
 
-    request = RunRequest(root=workspace_root, quiet=True)
+    request = RunRequest(
+        root=workspace_root,
+        quiet=True,
+        skip_analysis=True,
+        skip_metadata=True,
+        skip_dovi=True,
+        no_upload=True,
+    )
     deps = RunDependencies(vs_loader=DefaultVSLoader())
     result = await execute_run(request, deps=deps)
     assert result.success is True
