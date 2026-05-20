@@ -53,6 +53,7 @@ def _setup_install_layout(*, tmp_path: Path, repo_root: Path) -> tuple[Path, Pat
     shim_dir.mkdir(parents=True)
     state_dir.mkdir(parents=True)
     bundle_dir.mkdir(parents=True)
+    _write_valid_config_json(state_dir=state_dir, bundle_dir=bundle_dir, schema_version=1)
 
     shim_path = shim_dir / "frame-compare.ps1"
     shim_path.write_text(repo_shim.read_text(encoding="utf-8"), encoding="utf-8")
@@ -277,11 +278,30 @@ def test_windows_portable_update_apply_e2e(tmp_path: Path, repo_root: Path) -> N
 
     # 1. Generate RSA keypair using PowerShell to ensure .NET compatibility
     key_gen_cmd = (
-        "$rsa = New-Object System.Security.Cryptography.RSACryptoServiceProvider; "
+        "function B64([byte[]]$Bytes) { [Convert]::ToBase64String($Bytes) }; "
+        "$rsa = [System.Security.Cryptography.RSA]::Create(); "
+        "$rsa.KeySize = 2048; "
+        "$private = $rsa.ExportParameters($true); "
+        "$public = $rsa.ExportParameters($false); "
+        "$privateXml = '<RSAKeyValue>' + "
+        "'<Modulus>' + (B64 $private.Modulus) + '</Modulus>' + "
+        "'<Exponent>' + (B64 $private.Exponent) + '</Exponent>' + "
+        "'<P>' + (B64 $private.P) + '</P>' + "
+        "'<Q>' + (B64 $private.Q) + '</Q>' + "
+        "'<DP>' + (B64 $private.DP) + '</DP>' + "
+        "'<DQ>' + (B64 $private.DQ) + '</DQ>' + "
+        "'<InverseQ>' + (B64 $private.InverseQ) + '</InverseQ>' + "
+        "'<D>' + (B64 $private.D) + '</D>' + "
+        "'</RSAKeyValue>'; "
+        "$publicXml = '<RSAKeyValue>' + "
+        "'<Modulus>' + (B64 $public.Modulus) + '</Modulus>' + "
+        "'<Exponent>' + (B64 $public.Exponent) + '</Exponent>' + "
+        "'</RSAKeyValue>'; "
+        "$rsa.Dispose(); "
         "Write-Output '---PRIVATE---'; "
-        "Write-Output $rsa.ToXmlString($true); "
+        "Write-Output $privateXml; "
         "Write-Output '---PUBLIC---'; "
-        "Write-Output $rsa.ToXmlString($false);"
+        "Write-Output $publicXml;"
     )
     proc = subprocess.run(
         [exe, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", key_gen_cmd],

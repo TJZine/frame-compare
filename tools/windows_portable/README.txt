@@ -65,8 +65,9 @@ RELEASE SIGNING (Maintainers):
     - Record key_id and generation date in release notes.
 
   Build + sign update zip:
-    Run with pwsh (PowerShell 7+) on CI / modern Windows. The committed public key uses the
-    legacy RSA XML format (PKCS#1/SHA256 compatible with Windows PowerShell 5.1) for updater compatibility.
+    Run with pwsh (PowerShell 7+) on CI / modern Windows. Signing and verification use
+    PKCS#1/SHA256 with RSA XML keys; the scripts import XML keys through cross-platform
+    RSA parameters and keep a Windows PowerShell 5.1-compatible legacy fallback.
     pwsh -File .\tools\windows_portable\build_update.ps1 -BundleDir .\dist\frame-compare-portable-win-x64 -OutFile .\dist\frame-compare-update-win-x64-0.1.1.zip
     $env:SIGNING_KEY_XML_PATH = "<secure-private-key.xml>"
     pwsh -File .\tools\windows_portable\sign_update.ps1 -UpdateZip .\dist\frame-compare-update-win-x64-0.1.1.zip

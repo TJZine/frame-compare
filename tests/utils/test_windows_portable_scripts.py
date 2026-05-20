@@ -344,6 +344,18 @@ def test_windows_portable_updater_handles_stale_update_locks(repo_root: Path) ->
     assert "FromHours" in updater or "FromMinutes" in updater
 
 
+def test_windows_portable_updater_uses_native_path_helpers_for_pwsh_e2e(
+    repo_root: Path,
+) -> None:
+    updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
+    updater = _read_text_or_fail(updater_path)
+    assert "function Join-PathParts" in updater
+    assert "function Convert-RelativePathToNative" in updater
+    assert 'Join-Path $BundlePath "app\\\\src\\\\frame_compare"' not in updater
+    assert 'Join-Path $BundlePath "python\\\\python.exe"' not in updater
+    assert 'Join-Path $BundlePath "app\\\\.update_lock"' not in updater
+
+
 def test_windows_portable_updater_always_clears_rsa_in_signature_verification(
     repo_root: Path,
 ) -> None:
@@ -443,6 +455,29 @@ def test_windows_portable_sign_update_avoids_private_key_path_cli_argument(repo_
     assert "Read-Host" in sign_script
     assert "UserInteractive" in sign_script
     assert "IsInputRedirected" in sign_script
+
+
+def test_windows_portable_update_signing_uses_cross_platform_rsa_import(
+    repo_root: Path,
+) -> None:
+    sign_path = repo_root / "tools" / "windows_portable" / "sign_update.ps1"
+    updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
+    sign_script = _read_text_or_fail(sign_path)
+    updater = _read_text_or_fail(updater_path)
+
+    for script in (sign_script, updater):
+        assert "function New-RsaFromXml" in script
+        assert "[System.Security.Cryptography.RSA]::Create()" in script
+        assert "$rsa.ImportParameters($parameters)" in script
+        assert "System.Security.Cryptography.RSACryptoServiceProvider" in script
+
+
+def test_windows_portable_sign_update_fingerprints_public_key_only(repo_root: Path) -> None:
+    sign_path = repo_root / "tools" / "windows_portable" / "sign_update.ps1"
+    sign_script = _read_text_or_fail(sign_path)
+    assert "function Get-PublicRsaXml" in sign_script
+    assert "$publicKeyText = Get-PublicRsaXml -KeyXmlText $privateKeyText" in sign_script
+    assert "P>[" not in sign_script
 
 
 def test_windows_portable_docs_do_not_show_private_key_path_on_command_line(
@@ -564,14 +599,27 @@ def test_windows_portable_sign_update_write_string_entry_disposes_writer(
 def test_windows_portable_sign_update_disposes_rsa_in_finally(repo_root: Path) -> None:
     sign_path = repo_root / "tools" / "windows_portable" / "sign_update.ps1"
     sign_script = _read_text_or_fail(sign_path)
-    rsa_cleanup = re.search(
-        r"if\s*\(\$null -ne \$rsa\)\s*\{[\s\S]*?\}",
+    assert re.search(
+        r"finally\s*\{[\s\S]*?if\s*\(\$null -ne \$rsa\)\s*\{[\s\S]*?\$rsa\.Clear\(\)[\s\S]*?\$rsa\.Dispose\(\)",
         sign_script,
         flags=re.DOTALL,
     )
-    assert rsa_cleanup is not None
-    assert re.search(r"\$rsa\.Clear\(\)", rsa_cleanup.group(0))
-    assert re.search(r"\$rsa\.Dispose\(\)", rsa_cleanup.group(0))
+
+
+def test_windows_portable_update_signature_uses_explicit_pkcs1_sha256(
+    repo_root: Path,
+) -> None:
+    sign_path = repo_root / "tools" / "windows_portable" / "sign_update.ps1"
+    updater_path = repo_root / "tools" / "windows_portable" / "shim" / "frame-compare-update.ps1"
+    sign_script = _read_text_or_fail(sign_path)
+    updater = _read_text_or_fail(updater_path)
+
+    assert "function Sign-ManifestBytes" in sign_script
+    assert "[System.Security.Cryptography.HashAlgorithmName]::SHA256" in sign_script
+    assert "[System.Security.Cryptography.RSASignaturePadding]::Pkcs1" in sign_script
+    assert "function Test-ManifestSignature" in updater
+    assert "[System.Security.Cryptography.HashAlgorithmName]::SHA256" in updater
+    assert "[System.Security.Cryptography.RSASignaturePadding]::Pkcs1" in updater
 
 
 def test_windows_portable_sign_update_preserves_console_detection_error_context(
