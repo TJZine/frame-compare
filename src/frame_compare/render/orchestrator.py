@@ -249,6 +249,136 @@ def render_batch(
     return cast(list[Path], results)
 
 
+def _prepare_clip_for_render(
+    clip_path: Path,
+    renderer: Renderer,
+    config: ConfigSchema,
+) -> tuple[vs.VideoNode | Path, tuple[int, int], str | None, SourceInfo | None]:
+    """Prepare a source clip for rendering, applying tonemap and fallback policies.
+
+    Args:
+        clip_path: Path to the video file
+        renderer: Renderer to use ("vapoursynth", "ffmpeg", or "auto")
+        config: Resolved configuration
+
+    Returns:
+        tuple containing (loaded_clip, resolution, hdr_info, source_info)
+
+    Raises:
+        PluginNotFoundError: If required VS plugin is missing
+        SourceLoadError: If source loading fails
+        TonemapRequiresVapourSynthError: If HDR + enable_tonemap=True on FFmpeg-only path
+        FFmpegNotFoundError: If ffprobe is missing for HDR probe
+        RenderError: For other rendering failures
+    """
+    from frame_compare.errors import (
+        PluginNotFoundError,
+        RenderError,
+        SourceLoadError,
+        TonemapRequiresVapourSynthError,
+        VapourSynthNotFoundError,
+    )
+
+    loaded_clip: vs.VideoNode | Path = clip_path
+    resolution = (0, 0)
+    hdr_info: str | None = None
+    source_info: SourceInfo | None = None
+    vs_load_failure: Exception | None = None
+
+    if renderer in ("vapoursynth", "auto"):
+        try:
+            from frame_compare.vs.loader import DefaultVSLoader
+
+            loader = DefaultVSLoader()
+            source_info = loader.load(clip_path)
+            loaded_clip = source_info.clip
+            resolution = (source_info.width, source_info.height)
+
+            # === TONEMAP INTEGRATION POINT (§1.4.3) ===
+            if should_tonemap(source_info, config):
+                from frame_compare.vs.tonemap import apply_tonemap
+
+                settings = resolve_tonemap_settings(config)
+                loaded_clip = apply_tonemap(loaded_clip, settings, source_info.hdr_metadata)
+                # Mark that tonemap was applied for overlay (§1.4.6)
+                hdr_info = f"HDR (tonemapped: {settings.preset}, {settings.target_nits} nits)"
+            elif source_info.is_hdr:
+                # HDR source, tonemap disabled (§1.4.6)
+                hdr_info = "HDR (native, no tonemap)"
+            else:
+                # SDR source
+                hdr_info = None  # or "SDR" in DIAGNOSTIC mode
+
+        except (VapourSynthNotFoundError, PluginNotFoundError, SourceLoadError) as exc:
+            if renderer == "vapoursynth":
+                raise
+            # Store failure for fallback logic
+            vs_load_failure = exc
+        except Exception as e:
+            if renderer == "vapoursynth":
+                raise RenderError(reason=f"{type(e).__name__}: {e}") from e
+            vs_load_failure = e
+
+    # === DETERMINISTIC FALLBACK LOGIC (§1.4.1, §1.4.4) ===
+    if vs_load_failure is not None and renderer == "auto":
+        # VS load failed, check if we can fall back to FFmpeg
+        if config.color.enable_tonemap:
+            # Must probe HDR status before deciding
+            try:
+                is_hdr = probe_is_hdr_ffprobe(clip_path)
+            except Exception:
+                # Probe failed — propagate (no fallback)
+                log.debug(
+                    "probe_failed_no_fallback",
+                    path=str(clip_path),
+                    exc_info=True,
+                )
+                raise  # Propagate probe exception
+
+            if is_hdr:
+                # HDR + tonemap required in auto mode + VS unavailable → raise TonemapRequiresVapourSynthError from original VS failure.
+                log.debug(
+                    "hdr_tonemap_required_no_fallback",
+                    path=str(clip_path),
+                )
+                raise TonemapRequiresVapourSynthError() from vs_load_failure
+            else:
+                # SDR — fallback allowed
+                log.warning(
+                    "vs_load_failed_falling_back",
+                    path=str(clip_path),
+                    renderer=renderer,
+                    exc_info=True,
+                )
+        else:
+            # enable_tonemap=False — fallback allowed
+            log.warning(
+                "vs_load_failed_falling_back",
+                path=str(clip_path),
+                renderer=renderer,
+                exc_info=True,
+            )
+
+    # === RENDERER=FFMPEG WITH TONEMAP GATING (§1.4.4) ===
+    if renderer == "ffmpeg" and config.color.enable_tonemap:
+        try:
+            is_hdr = probe_is_hdr_ffprobe(clip_path)
+        except Exception:
+            # Probe failed — propagate (no FFmpeg path)
+            log.debug(
+                "probe_failed_no_ffmpeg",
+                path=str(clip_path),
+                exc_info=True,
+            )
+            raise  # Propagate probe exception
+
+        if is_hdr:
+            # HDR + tonemap required → FFmpeg-only path is invalid.
+            raise TonemapRequiresVapourSynthError()
+
+    return loaded_clip, resolution, hdr_info, source_info
+
+
 def render_screenshots(
     clips: list[Path],
     frames: list[int],
@@ -285,14 +415,6 @@ def render_screenshots(
         FFmpegNotFoundError: If ffprobe is missing for HDR probe
         RenderError: For other rendering failures
     """
-    from frame_compare.errors import (
-        PluginNotFoundError,
-        RenderError,
-        SourceLoadError,
-        TonemapRequiresVapourSynthError,
-        VapourSynthNotFoundError,
-    )
-
     label_map = label_map or {}
     all_requests: list[RenderRequest] = []
 
@@ -308,103 +430,9 @@ def render_screenshots(
         label = label_map.get(clip_path, clip_path.stem)
         ordered_labels.append(label)
 
-        # Load clip
-        loaded_clip: vs.VideoNode | Path = clip_path
-        resolution = (0, 0)
-        hdr_info: str | None = None
-        source_info = None
-        vs_load_failure: Exception | None = None
-
-        if renderer in ("vapoursynth", "auto"):
-            try:
-                from frame_compare.vs.loader import DefaultVSLoader
-
-                loader = DefaultVSLoader()
-                source_info = loader.load(clip_path)
-                loaded_clip = source_info.clip
-                resolution = (source_info.width, source_info.height)
-
-                # === TONEMAP INTEGRATION POINT (§1.4.3) ===
-                if should_tonemap(source_info, config):
-                    from frame_compare.vs.tonemap import apply_tonemap
-
-                    settings = resolve_tonemap_settings(config)
-                    loaded_clip = apply_tonemap(loaded_clip, settings, source_info.hdr_metadata)
-                    # Mark that tonemap was applied for overlay (§1.4.6)
-                    hdr_info = f"HDR (tonemapped: {settings.preset}, {settings.target_nits} nits)"
-                elif source_info.is_hdr:
-                    # HDR source, tonemap disabled (§1.4.6)
-                    hdr_info = "HDR (native, no tonemap)"
-                else:
-                    # SDR source
-                    hdr_info = None  # or "SDR" in DIAGNOSTIC mode
-
-            except (VapourSynthNotFoundError, PluginNotFoundError, SourceLoadError) as exc:
-                if renderer == "vapoursynth":
-                    raise
-                # Store failure for fallback logic
-                vs_load_failure = exc
-            except Exception as e:
-                if renderer == "vapoursynth":
-                    raise RenderError(reason=f"{type(e).__name__}: {e}") from e
-                vs_load_failure = e
-
-        # === DETERMINISTIC FALLBACK LOGIC (§1.4.1, §1.4.4) ===
-        if vs_load_failure is not None and renderer == "auto":
-            # VS load failed, check if we can fall back to FFmpeg
-            if config.color.enable_tonemap:
-                # Must probe HDR status before deciding
-                try:
-                    is_hdr = probe_is_hdr_ffprobe(clip_path)
-                except Exception:
-                    # Probe failed — propagate (no fallback)
-                    log.debug(
-                        "probe_failed_no_fallback",
-                        path=str(clip_path),
-                        exc_info=True,
-                    )
-                    raise  # Propagate probe exception
-
-                if is_hdr:
-                    # HDR + tonemap required in auto mode + VS unavailable → re-raise original VS failure.
-                    log.debug(
-                        "hdr_tonemap_required_no_fallback",
-                        path=str(clip_path),
-                    )
-                    raise vs_load_failure  # Re-raise VS failure
-                else:
-                    # SDR — fallback allowed
-                    log.warning(
-                        "vs_load_failed_falling_back",
-                        path=str(clip_path),
-                        renderer=renderer,
-                        exc_info=True,
-                    )
-            else:
-                # enable_tonemap=False — fallback allowed
-                log.warning(
-                    "vs_load_failed_falling_back",
-                    path=str(clip_path),
-                    renderer=renderer,
-                    exc_info=True,
-                )
-
-        # === RENDERER=FFMPEG WITH TONEMAP GATING (§1.4.4) ===
-        if renderer == "ffmpeg" and config.color.enable_tonemap:
-            try:
-                is_hdr = probe_is_hdr_ffprobe(clip_path)
-            except Exception:
-                # Probe failed — propagate (no FFmpeg path)
-                log.debug(
-                    "probe_failed_no_ffmpeg",
-                    path=str(clip_path),
-                    exc_info=True,
-                )
-                raise  # Propagate probe exception
-
-            if is_hdr:
-                # HDR + tonemap required → FFmpeg-only path is invalid.
-                raise TonemapRequiresVapourSynthError()
+        loaded_clip, resolution, hdr_info, source_info = _prepare_clip_for_render(
+            clip_path, renderer, config
+        )
 
         for idx, frame in enumerate(frames):
             output_frame = output_frames[idx] if output_frames is not None else frame

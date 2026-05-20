@@ -122,7 +122,7 @@ def test_probe_failure_disallows_fallback_when_tonemap_enabled(tmp_path: Path) -
 
 @pytest.mark.integration
 def test_hdr_enable_tonemap_requires_vs_when_renderer_auto(tmp_path: Path) -> None:
-    """HDR + enable_tonemap=True + VS missing → raises original VS failure."""
+    """HDR + enable_tonemap=True + VS missing → raises TonemapRequiresVapourSynthError from original VS failure."""
     clips = [Path("hdr_video.mkv")]
     frames = [0]
     enable_tonemap_config = ConfigSchema(color=ColorConfig(enable_tonemap=True))
@@ -134,9 +134,10 @@ def test_hdr_enable_tonemap_requires_vs_when_renderer_auto(tmp_path: Path) -> No
         mock_loader = mock_loader_cls.return_value
         mock_loader.load.side_effect = VapourSynthNotFoundError()
 
-        # Should re-raise VS failure (not fall back to FFmpeg)
-        with pytest.raises(VapourSynthNotFoundError):
+        # Should raise TonemapRequiresVapourSynthError with the original VS failure as cause
+        with pytest.raises(TonemapRequiresVapourSynthError) as exc_info:
             render_screenshots(clips, frames, tmp_path, enable_tonemap_config, renderer="auto")
+        assert isinstance(exc_info.value.__cause__, VapourSynthNotFoundError)
 
 
 @pytest.mark.integration
@@ -199,3 +200,8 @@ def test_sdr_allows_ffmpeg_fallback_when_vs_missing(tmp_path: Path) -> None:
         )
 
         assert "sdr_video" in results
+        mock_batch.assert_called_once()
+        called_args, _ = mock_batch.call_args
+        requests_passed = called_args[0]
+        assert len(requests_passed) == 1
+        assert requests_passed[0].clip == Path("sdr_video.mkv")
