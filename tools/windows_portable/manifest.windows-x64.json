@@ -77,12 +77,12 @@
       }
     },
     {
-      "id": "ffmpeg-btbn-win64-lgpl-7.1-2026-02-04",
+      "id": "ffmpeg-btbn-win64-lgpl-7.1-2026-05-19",
       "name": "FFmpeg (BtbN build, win64, LGPL-only)",
-      "version": "n7.1.3-39-g1a501728ed (autobuild-2026-02-04-14-23)",
-      "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-02-04-14-23/ffmpeg-n7.1.3-39-g1a501728ed-win64-lgpl-7.1.zip",
-      "sha256": "6dcf7e7126eec312213dd26b8a02f40a53f42dbe477236275df4f854c576cc35",
-      "bytes": 137350575,
+      "version": "n7.1.4-5-ged860ef7d9 (autobuild-2026-05-19-14-39)",
+      "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-05-19-14-39/ffmpeg-n7.1.4-5-ged860ef7d9-win64-lgpl-7.1.zip",
+      "sha256": "700f5f964eac9f838dc606581cd09685fa4a29b1e526d037d61d9a24f823ac91",
+      "bytes": 137951785,
       "license": {
         "spdx": "LGPL-2.1-or-later",
         "url": "https://ffmpeg.org/legal.html",
@@ -91,7 +91,7 @@
       "install": {
         "type": "extract",
         "destination": "ffmpeg",
-        "strip_prefix": "ffmpeg-n7.1.3-39-g1a501728ed-win64-lgpl-7.1/"
+        "strip_prefix": "ffmpeg-n7.1.4-5-ged860ef7d9-win64-lgpl-7.1/"
       }
     }
   ],

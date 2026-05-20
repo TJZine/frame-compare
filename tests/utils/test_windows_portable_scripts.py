@@ -185,6 +185,29 @@ def test_windows_portable_build_creates_default_workspace_directories(repo_root:
     assert "Ensure-Directory -Path $bundleInputDir" in build_script
 
 
+def test_windows_portable_build_download_errors_name_manifest_remediation(repo_root: Path) -> None:
+    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
+    build_script = _read_text_or_fail(build_path)
+    assert "Failed to download artifact '$id' from $url" in build_script
+    assert "update $ManifestPath with a reachable URL and matching sha256" in build_script
+
+
+def test_windows_portable_ffmpeg_manifest_uses_reachable_pinned_asset_shape(
+    repo_root: Path,
+) -> None:
+    manifest_path = repo_root / "tools" / "windows_portable" / "manifest.windows-x64.json"
+    manifest = json.loads(_read_text_or_fail(manifest_path))
+    ffmpeg = next(
+        artifact for artifact in manifest["artifacts"] if artifact["id"].startswith("ffmpeg-")
+    )
+
+    assert "autobuild-2026-02-04-14-23" not in ffmpeg["url"]
+    assert "/releases/download/autobuild-" in ffmpeg["url"]
+    assert ffmpeg["url"].endswith(".zip")
+    assert len(ffmpeg["sha256"]) == 64
+    assert ffmpeg["install"]["strip_prefix"].rstrip("/") in ffmpeg["url"]
+
+
 def test_windows_portable_docs_describe_default_workspace_directories(repo_root: Path) -> None:
     readme_path = repo_root / "README.md"
     portable_readme_path = repo_root / "tools" / "windows_portable" / "README.txt"
