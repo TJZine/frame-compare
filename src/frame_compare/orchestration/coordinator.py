@@ -235,6 +235,173 @@ class RunDependencies:
         return self.ffmpeg_runner
 
 
+@dataclass(frozen=True)
+class _PrepState:
+    workspace: WorkspacePaths
+    config: ConfigSchema
+    input_videos: list[Path]
+    clips: list[ClipState]
+    artifacts: _RunArtifacts
+    metadata_prefetched: bool
+    preflight_warnings: list[str]
+    preflight_duration: float
+    load_sources_start: datetime
+
+
+async def _execute_prep(
+    request: RunRequest,
+    deps: RunDependencies,
+) -> _PrepState:
+    preflight_start = deps.clock()
+    if request.no_cache and request.from_cache_only:
+        raise MetricsCalculationError(
+            "Flags --no-cache and --from-cache-only are mutually exclusive."
+        )
+
+    preflight = prepare_preflight(
+        root=request.root,
+        config_path=request.config_path,
+        overrides=_build_preflight_overrides(request),
+    )
+    preflight_end = deps.clock()
+    preflight_duration = (preflight_end - preflight_start).total_seconds()
+
+    load_sources_start = deps.clock()
+    workspace = preflight.workspace
+    cli_args: dict[str, object] = {
+        "tm_preset": request.tm_preset,
+        "tm_target": request.tm_target_nits,
+        "tm_curve": request.tm_curve,
+        "frame_count": request.frame_count,
+        "seed": request.seed,
+        "overlay": request.overlay_mode,
+        "no_upload": request.no_upload,
+        "force_interactive_alignment": request.force_interactive_alignment,
+        "input": str(request.input_dir) if request.input_dir is not None else None,
+    }
+    config = apply_cli_overrides(preflight.config, cli_args=cli_args)
+    input_videos = discover_inputs(workspace.input_dir)
+    artifacts = _RunArtifacts()
+    metadata_prefetched = False
+
+    # Resolve run folder before any cache/probe path access so all phases use the same workspace.
+    if config.paths.use_run_folders:
+        if deps.http_client is not None and config.tmdb.enabled and not request.skip_metadata:
+            # Mark prefetch attempt as final for this run. If lookup fails, we keep the
+            # folder naming path resilient and skip a second metadata-phase retry.
+            metadata_prefetched = True
+            try:
+                artifacts.resolved_metadata = await resolve_metadata(
+                    filenames=[input_videos[0].name],
+                    config=_build_metadata_config(config),
+                    client=deps.http_client,
+                )
+            except Exception as exc:
+                # Metadata lookup is optional; keep run folder naming resilient.
+                artifacts.warnings.append(f"metadata: {exc}")
+                artifacts.resolved_metadata = None
+
+        filenames = [video.name for video in input_videos]
+        existing = get_existing_run_folders(workspace.input_dir)
+        run_folder_name = derive_run_folder_name(
+            filenames=filenames,
+            tmdb_metadata=artifacts.resolved_metadata,
+            existing_folders=existing,
+        )
+        run_dir = workspace.input_dir / run_folder_name
+        workspace = workspace.with_run_dir(run_dir)
+
+    if request.no_cache:
+        _remove_cached_metrics(workspace)
+
+    if request.from_cache_only and not request.skip_analysis:
+        fingerprint = cache_io.compute_cache_key(input_videos, config.analysis)
+        cache_result = cache_io.load_cached_metrics(workspace.cache_dir, fingerprint, clips=[])
+        if not cache_result.success:
+            cache_path = workspace.cache_dir / cache_io.CACHE_FILENAME
+            if cache_result.reason == "corrupted":
+                raise CacheCorruptionError(cache_path)
+            if cache_result.reason == "version_mismatch":
+                found = _resolve_cache_version(cache_path) or "unknown"
+                raise CacheVersionMismatchError(found, str(cache_io.CACHE_VERSION))
+            raise MetricsCalculationError(
+                f"Cached metrics missing or mismatched ({cache_result.reason})."
+            )
+
+    if request.from_cache_only and config.audio_alignment.enable and len(input_videos) > 1:
+        reference = input_videos[0]
+        comparisons = input_videos[1:]
+        manual_overrides = load_manual_overrides(workspace.generated_dir)
+        cached_offsets = (
+            load_cached_offsets(workspace.generated_dir, [reference] + comparisons) or {}
+        )
+        missing: list[str] = []
+        for comp in comparisons:
+            key = f"{reference.stem}:{comp.stem}"
+            if key in manual_overrides or key in cached_offsets:
+                continue
+            missing.append(key)
+        if missing:
+            message = "Missing cached audio alignment offsets for: " + ", ".join(missing)
+            raise AudioAlignmentError(message)
+
+    cache_path = workspace.generated_dir / "clip_probe.toml"
+    cached_entries = load_clip_probe_cache(cache_path)
+    entries_by_key: dict[str, ClipProbeSnapshot] = dict(cached_entries)
+    clips: list[ClipState] = []
+
+    for index, path in enumerate(input_videos):
+        stats = path.stat()
+        fingerprint = ClipFingerprint(
+            path=path,
+            size_bytes=stats.st_size,
+            mtime_ns=stats.st_mtime_ns,
+        )
+        cache_key = compute_probe_cache_key(fingerprint)
+        snapshot = entries_by_key.get(cache_key)
+        if snapshot is None:
+            source_info = deps.get_vs_loader().load(path)
+            tonemap_prop_keys = compute_tonemap_prop_keys(source_info.frame_props)
+            preserved_props = compute_preserved_frame_props(source_info.frame_props)
+            snapshot = ClipProbeSnapshot(
+                fingerprint=fingerprint,
+                width=source_info.width,
+                height=source_info.height,
+                num_frames=source_info.num_frames,
+                fps=source_info.fps,
+                is_hdr=source_info.is_hdr,
+                hdr_metadata=source_info.hdr_metadata,
+                preserved_frame_props=preserved_props,
+                tonemap_prop_keys=tonemap_prop_keys,
+            )
+            entries_by_key[cache_key] = snapshot
+
+        label = "Reference" if index == 0 else f"Encode {index}"
+        clips.append(
+            ClipState(
+                path=path,
+                label=label,
+                probe=snapshot,
+                source_fps=snapshot.fps,
+                effective_fps=snapshot.fps,
+            )
+        )
+
+    save_clip_probe_cache(cache_path, entries_by_key)
+
+    return _PrepState(
+        workspace=workspace,
+        config=config,
+        input_videos=input_videos,
+        clips=clips,
+        artifacts=artifacts,
+        metadata_prefetched=metadata_prefetched,
+        preflight_warnings=preflight.warnings,
+        preflight_duration=preflight_duration,
+        load_sources_start=load_sources_start,
+    )
+
+
 async def execute_run(request: RunRequest, deps: RunDependencies | None = None) -> RunResult:
     """Execute a run request asynchronously.
 
@@ -258,149 +425,16 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         if reporter is None:
             raise RuntimeError("Progress reporter must be initialized before execution.")
 
-        preflight_start = deps.clock()
-        if request.no_cache and request.from_cache_only:
-            raise MetricsCalculationError(
-                "Flags --no-cache and --from-cache-only are mutually exclusive."
-            )
+        prep = await _execute_prep(request, deps)
 
-        preflight = prepare_preflight(
-            root=request.root,
-            config_path=request.config_path,
-            overrides=_build_preflight_overrides(request),
-        )
-        preflight_end = deps.clock()
+        phase_timings["preflight"] = prep.preflight_duration
 
-        phase_timings["preflight"] = (preflight_end - preflight_start).total_seconds()
-
-        load_sources_start = deps.clock()
-        workspace = preflight.workspace
-        cli_args: dict[str, object] = {
-            "tm_preset": request.tm_preset,
-            "tm_target": request.tm_target_nits,
-            "tm_curve": request.tm_curve,
-            "frame_count": request.frame_count,
-            "seed": request.seed,
-            "overlay": request.overlay_mode,
-            "no_upload": request.no_upload,
-            "force_interactive_alignment": request.force_interactive_alignment,
-            "input": str(request.input_dir) if request.input_dir is not None else None,
-        }
-        config = apply_cli_overrides(preflight.config, cli_args=cli_args)
-        input_videos = discover_inputs(workspace.input_dir)
-        artifacts = _RunArtifacts()
-        metadata_prefetched = False
-
-        # Resolve run folder before any cache/probe path access so all phases use the same workspace.
-        if config.paths.use_run_folders:
-            if deps.http_client is not None and config.tmdb.enabled and not request.skip_metadata:
-                # Mark prefetch attempt as final for this run. If lookup fails, we keep the
-                # folder naming path resilient and skip a second metadata-phase retry.
-                metadata_prefetched = True
-                try:
-                    artifacts.resolved_metadata = await resolve_metadata(
-                        filenames=[input_videos[0].name],
-                        config=_build_metadata_config(config),
-                        client=deps.http_client,
-                    )
-                except Exception as exc:
-                    # Metadata lookup is optional; keep run folder naming resilient.
-                    artifacts.warnings.append(f"metadata: {exc}")
-                    artifacts.resolved_metadata = None
-
-            filenames = [video.name for video in input_videos]
-            existing = get_existing_run_folders(workspace.input_dir)
-            run_folder_name = derive_run_folder_name(
-                filenames=filenames,
-                tmdb_metadata=artifacts.resolved_metadata,
-                existing_folders=existing,
-            )
-            run_dir = workspace.input_dir / run_folder_name
-            workspace = workspace.with_run_dir(run_dir)
-
-        if request.no_cache:
-            _remove_cached_metrics(workspace)
-
-        if request.from_cache_only and not request.skip_analysis:
-            fingerprint = cache_io.compute_cache_key(input_videos, config.analysis)
-            cache_result = cache_io.load_cached_metrics(workspace.cache_dir, fingerprint, clips=[])
-            if not cache_result.success:
-                cache_path = workspace.cache_dir / cache_io.CACHE_FILENAME
-                if cache_result.reason == "corrupted":
-                    raise CacheCorruptionError(cache_path)
-                if cache_result.reason == "version_mismatch":
-                    found = _resolve_cache_version(cache_path) or "unknown"
-                    raise CacheVersionMismatchError(found, str(cache_io.CACHE_VERSION))
-                raise MetricsCalculationError(
-                    f"Cached metrics missing or mismatched ({cache_result.reason})."
-                )
-
-        if request.from_cache_only and config.audio_alignment.enable and len(input_videos) > 1:
-            reference = input_videos[0]
-            comparisons = input_videos[1:]
-            manual_overrides = load_manual_overrides(workspace.generated_dir)
-            cached_offsets = (
-                load_cached_offsets(workspace.generated_dir, [reference] + comparisons) or {}
-            )
-            missing: list[str] = []
-            for comp in comparisons:
-                key = f"{reference.stem}:{comp.stem}"
-                if key in manual_overrides or key in cached_offsets:
-                    continue
-                missing.append(key)
-            if missing:
-                message = "Missing cached audio alignment offsets for: " + ", ".join(missing)
-                raise AudioAlignmentError(message)
-        cache_path = workspace.generated_dir / "clip_probe.toml"
-        cached_entries = load_clip_probe_cache(cache_path)
-        entries_by_key: dict[str, ClipProbeSnapshot] = dict(cached_entries)
-        clips: list[ClipState] = []
-
-        for index, path in enumerate(input_videos):
-            stats = path.stat()
-            fingerprint = ClipFingerprint(
-                path=path,
-                size_bytes=stats.st_size,
-                mtime_ns=stats.st_mtime_ns,
-            )
-            cache_key = compute_probe_cache_key(fingerprint)
-            snapshot = entries_by_key.get(cache_key)
-            if snapshot is None:
-                source_info = deps.get_vs_loader().load(path)
-                tonemap_prop_keys = compute_tonemap_prop_keys(source_info.frame_props)
-                preserved_props = compute_preserved_frame_props(source_info.frame_props)
-                snapshot = ClipProbeSnapshot(
-                    fingerprint=fingerprint,
-                    width=source_info.width,
-                    height=source_info.height,
-                    num_frames=source_info.num_frames,
-                    fps=source_info.fps,
-                    is_hdr=source_info.is_hdr,
-                    hdr_metadata=source_info.hdr_metadata,
-                    preserved_frame_props=preserved_props,
-                    tonemap_prop_keys=tonemap_prop_keys,
-                )
-                entries_by_key[cache_key] = snapshot
-
-            label = "Reference" if index == 0 else f"Encode {index}"
-            clips.append(
-                ClipState(
-                    path=path,
-                    label=label,
-                    probe=snapshot,
-                    source_fps=snapshot.fps,
-                    effective_fps=snapshot.fps,
-                )
-            )
-
-        save_clip_probe_cache(cache_path, entries_by_key)
-
-        reference = clips[0]
-        comparisons = clips[1:]
+        reference = prep.clips[0]
+        comparisons = prep.clips[1:]
 
         context = RunContext(
-            config=config,
-            workspace=workspace,
+            config=prep.config,
+            workspace=prep.workspace,
             reference=reference,
             comparisons=comparisons,
             reporter=reporter,
@@ -412,7 +446,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             quiet=request.quiet,
         )
         load_sources_end = deps.clock()
-        phase_timings["load_sources"] = (load_sources_end - load_sources_start).total_seconds()
+        phase_timings["load_sources"] = (load_sources_end - prep.load_sources_start).total_seconds()
 
         phase_timings.update(
             {
@@ -428,131 +462,28 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         )
         selected_frames: list[int] = []
 
-        def _timed_phase(
-            name: str,
-            timing_key: str,
-            skip_condition: Callable[[ConfigSchema], bool] | None,
-            executor: Callable[[RunContext], None | Awaitable[None]],
-            *,
-            warn_only: bool = False,
-            progress_total: int = 1,
-        ) -> Phase:
-            async def _execute(ctx: RunContext) -> None:
-                start = deps.clock()
-                try:
-                    maybe_awaitable = executor(ctx)
-                    if inspect.isawaitable(maybe_awaitable):
-                        await maybe_awaitable
-                except Exception as exc:
-                    if warn_only:
-                        artifacts.warnings.append(f"{name}: {exc}")
-                        raise
-                    raise
-                finally:
-                    end = deps.clock()
-                    phase_timings[timing_key] = (end - start).total_seconds()
+        phases_before_align = _build_phases_before_align(
+            request=request,
+            clock=deps.clock,
+            phase_timings=phase_timings,
+            warnings=prep.artifacts.warnings,
+            selected_frames=selected_frames,
+            input_videos=prep.input_videos,
+            workspace=prep.workspace,
+            artifacts=prep.artifacts,
+        )
 
-            return Phase(
-                name=name,
-                execute=_execute,
-                skip_condition=skip_condition,
-                progress_total=progress_total,
-                warn_only=warn_only,
-            )
-
-        phases_before_align = [
-            _timed_phase(
-                "frame_plan",
-                "frame_plan",
-                None,
-                lambda ctx: selected_frames.extend(
-                    create_frame_plan(
-                        num_frames=ctx.reference.effective_num_frames(),
-                        count=ctx.config.analysis.frame_count,
-                        seed=ctx.config.analysis.random_seed,
-                    ).frames
-                ),
-            ),
-            _timed_phase(
-                "analyze",
-                "analyze",
-                lambda config: request.skip_analysis,
-                lambda ctx: _run_analyze_phase(
-                    ctx=ctx,
-                    input_videos=input_videos,
-                    workspace=workspace,
-                    selected_frames=selected_frames,
-                    artifacts=artifacts,
-                ),
-                warn_only=True,
-                progress_total=ANALYZE_PROGRESS_TOTAL,
-            ),
-            _timed_phase(
-                "align",
-                "align",
-                lambda config: not config.audio_alignment.enable,
-                lambda ctx: _run_align_phase(ctx, selected_frames=selected_frames),
-                warn_only=True,
-            ),
-        ]
-
-        phases_after_align = [
-            _timed_phase(
-                "render",
-                "render",
-                None,
-                lambda ctx: _run_render_phase(
-                    ctx=ctx,
-                    frames=selected_frames,
-                    runner=deps.get_ffmpeg_runner(),
-                    artifacts=artifacts,
-                ),
-            ),
-            _timed_phase(
-                "metadata",
-                "metadata",
-                lambda config: request.skip_metadata,
-                lambda ctx: _run_metadata_phase(
-                    ctx=ctx,
-                    client=deps.http_client,
-                    prefetched_metadata=artifacts.resolved_metadata,
-                    metadata_prefetched=metadata_prefetched,
-                    artifacts=artifacts,
-                ),
-                warn_only=True,
-            ),
-            _timed_phase(
-                "dovi",
-                "dovi",
-                lambda config: request.skip_dovi,
-                lambda _ctx: artifacts.warnings.append(
-                    "dovi: DOVI processing is not implemented yet; continuing without Dolby Vision extraction."
-                ),
-                warn_only=True,
-            ),
-            _timed_phase(
-                "publish",
-                "publish",
-                lambda config: request.no_upload,
-                lambda ctx: _run_publish_phase(
-                    ctx=ctx,
-                    client=deps.http_client,
-                    artifacts=artifacts,
-                ),
-                warn_only=True,
-            ),
-            _timed_phase(
-                "report",
-                "report",
-                lambda config: not config.report.enable,
-                lambda ctx: _run_report_phase(
-                    ctx=ctx,
-                    frames=selected_frames,
-                    artifacts=artifacts,
-                ),
-                warn_only=True,
-            ),
-        ]
+        phases_after_align = _build_phases_after_align(
+            request=request,
+            clock=deps.clock,
+            ffmpeg_runner=deps.get_ffmpeg_runner(),
+            http_client=deps.http_client,
+            phase_timings=phase_timings,
+            warnings=prep.artifacts.warnings,
+            selected_frames=selected_frames,
+            artifacts=prep.artifacts,
+            metadata_prefetched=prep.metadata_prefetched,
+        )
 
         await execute_phases(phases_before_align, context, reporter)
         emit_consolidated_fps_report(
@@ -566,10 +497,10 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         duration_seconds = (run_end - run_start).total_seconds()
 
         return _assemble_run_result(
-            artifacts=artifacts,
+            artifacts=prep.artifacts,
             selected_frames=selected_frames,
             context=context,
-            preflight_warnings=preflight.warnings,
+            preflight_warnings=prep.preflight_warnings,
             phase_timings=phase_timings,
             duration_seconds=duration_seconds,
         )
@@ -580,6 +511,185 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
     async with httpx.AsyncClient() as http_client:
         deps.http_client = http_client
         return await _execute_with_deps()
+
+
+def _create_timed_phase(
+    name: str,
+    timing_key: str,
+    skip_condition: Callable[[ConfigSchema], bool] | None,
+    executor: Callable[[RunContext], None | Awaitable[None]],
+    clock: Callable[[], datetime],
+    phase_timings: dict[str, float],
+    warnings: list[str],
+    *,
+    warn_only: bool = False,
+    progress_total: int = 1,
+) -> Phase:
+    async def _execute(ctx: RunContext) -> None:
+        start = clock()
+        try:
+            maybe_awaitable = executor(ctx)
+            if inspect.isawaitable(maybe_awaitable):
+                await maybe_awaitable
+        except Exception as exc:
+            if warn_only:
+                warnings.append(f"{name}: {exc}")
+                raise
+            raise
+        finally:
+            end = clock()
+            phase_timings[timing_key] = (end - start).total_seconds()
+
+    return Phase(
+        name=name,
+        execute=_execute,
+        skip_condition=skip_condition,
+        progress_total=progress_total,
+        warn_only=warn_only,
+    )
+
+
+def _build_phases_before_align(
+    *,
+    request: RunRequest,
+    clock: Callable[[], datetime],
+    phase_timings: dict[str, float],
+    warnings: list[str],
+    selected_frames: list[int],
+    input_videos: list[Path],
+    workspace: WorkspacePaths,
+    artifacts: _RunArtifacts,
+) -> list[Phase]:
+    return [
+        _create_timed_phase(
+            "frame_plan",
+            "frame_plan",
+            None,
+            lambda ctx: selected_frames.extend(
+                create_frame_plan(
+                    num_frames=ctx.reference.effective_num_frames(),
+                    count=ctx.config.analysis.frame_count,
+                    seed=ctx.config.analysis.random_seed,
+                ).frames
+            ),
+            clock=clock,
+            phase_timings=phase_timings,
+            warnings=warnings,
+        ),
+        _create_timed_phase(
+            "analyze",
+            "analyze",
+            lambda config: request.skip_analysis,
+            lambda ctx: _run_analyze_phase(
+                ctx=ctx,
+                input_videos=input_videos,
+                workspace=workspace,
+                selected_frames=selected_frames,
+                artifacts=artifacts,
+            ),
+            clock=clock,
+            phase_timings=phase_timings,
+            warnings=warnings,
+            warn_only=True,
+            progress_total=ANALYZE_PROGRESS_TOTAL,
+        ),
+        _create_timed_phase(
+            "align",
+            "align",
+            lambda config: not config.audio_alignment.enable,
+            lambda ctx: _run_align_phase(ctx, selected_frames=selected_frames),
+            clock=clock,
+            phase_timings=phase_timings,
+            warnings=warnings,
+            warn_only=True,
+        ),
+    ]
+
+
+def _build_phases_after_align(
+    *,
+    request: RunRequest,
+    clock: Callable[[], datetime],
+    ffmpeg_runner: FFmpegRunner,
+    http_client: httpx.AsyncClient | None,
+    phase_timings: dict[str, float],
+    warnings: list[str],
+    selected_frames: list[int],
+    artifacts: _RunArtifacts,
+    metadata_prefetched: bool,
+) -> list[Phase]:
+    return [
+        _create_timed_phase(
+            "render",
+            "render",
+            None,
+            lambda ctx: _run_render_phase(
+                ctx=ctx,
+                frames=selected_frames,
+                runner=ffmpeg_runner,
+                artifacts=artifacts,
+            ),
+            clock=clock,
+            phase_timings=phase_timings,
+            warnings=warnings,
+        ),
+        _create_timed_phase(
+            "metadata",
+            "metadata",
+            lambda config: request.skip_metadata,
+            lambda ctx: _run_metadata_phase(
+                ctx=ctx,
+                client=http_client,
+                prefetched_metadata=artifacts.resolved_metadata,
+                metadata_prefetched=metadata_prefetched,
+                artifacts=artifacts,
+            ),
+            clock=clock,
+            phase_timings=phase_timings,
+            warnings=warnings,
+            warn_only=True,
+        ),
+        _create_timed_phase(
+            "dovi",
+            "dovi",
+            lambda config: request.skip_dovi,
+            lambda _ctx: warnings.append(
+                "dovi: DOVI processing is not implemented yet; continuing without Dolby Vision extraction."
+            ),
+            clock=clock,
+            phase_timings=phase_timings,
+            warnings=warnings,
+            warn_only=True,
+        ),
+        _create_timed_phase(
+            "publish",
+            "publish",
+            lambda config: request.no_upload,
+            lambda ctx: _run_publish_phase(
+                ctx=ctx,
+                client=http_client,
+                artifacts=artifacts,
+            ),
+            clock=clock,
+            phase_timings=phase_timings,
+            warnings=warnings,
+            warn_only=True,
+        ),
+        _create_timed_phase(
+            "report",
+            "report",
+            lambda config: not config.report.enable,
+            lambda ctx: _run_report_phase(
+                ctx=ctx,
+                frames=selected_frames,
+                artifacts=artifacts,
+            ),
+            clock=clock,
+            phase_timings=phase_timings,
+            warnings=warnings,
+            warn_only=True,
+        ),
+    ]
 
 
 def _run_analyze_phase(
