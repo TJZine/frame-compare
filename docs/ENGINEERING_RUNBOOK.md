@@ -198,6 +198,39 @@ live inline in the current task, review, or PR. Activate `docs/plans/` only when
 work needs a durable cross-session handoff or the maintainer explicitly asks for a
 tracked plan file.
 
+## Production Quality Guardrails
+
+Every non-trivial code change should be checked against these criteria before
+closeout. Passing tests are required evidence, not the full definition of done.
+
+- Correctness first: preserve documented CLI/config behavior, exit codes, generated
+  output contracts, filesystem effects, and release/runtime behavior unless the task
+  explicitly changes them.
+- Architecture fit: keep behavior in the current owner module when possible, respect
+  `importlinter.ini`, and avoid growing hotspots when a smaller adjacent owner can
+  carry the responsibility.
+- Boundary hygiene: keep config/env interpretation, filesystem persistence, HTTP
+  integrations, subprocess/runtime details, report generation, and packaging policy
+  behind their documented owners.
+- Contract discipline: one public shape per operation, deterministic JSON/TOML/report
+  output, no silent public-surface drift, and same-pass updates to authority docs when
+  public behavior changes.
+- Maintainability: prefer the simplest correct design that matches existing patterns;
+  apply DRY where duplication is harmful, avoid premature abstractions, speculative
+  options, dead code, debug leftovers, commented-out code, misleading names, and
+  unnecessary indirection.
+- Compatibility restraint: do not add legacy bridges, compatibility shims, fallback API
+  variants, or broad migration paths unless the maintainer explicitly approves them.
+- Test quality: prove behavior through public seams where practical, avoid brittle
+  snapshots and private implementation probes, and add focused regression or contract
+  coverage when existing tests do not protect the changed surface.
+- Runtime and release honesty: Docker, FFmpeg/VapourSynth, browser-open, Windows
+  portable, and updater/signing paths must be verified through the runbook commands
+  when touched; if the local environment cannot run a required path, record it as
+  documented-only and do not claim full verification.
+- Exception records: intentional departures from these guardrails need an owner, a
+  reason, verification evidence, and a removal or revisit trigger.
+
 ## Task Routing Matrix
 
 Use this as the default routing shortcut before exploring deeper:
