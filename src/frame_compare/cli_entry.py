@@ -1,6 +1,6 @@
 """CLI entry point for frame-compare."""
 
-# ruff: noqa: B008
+# ruff: noqa: B008, E402
 from __future__ import annotations
 
 import contextlib
@@ -13,12 +13,15 @@ from typing import TYPE_CHECKING, cast
 
 import tomli_w
 
+_DEFAULT_HELP_WIDTH = 200
+
 # Typer's Rich help renderer reads TERMINAL_WIDTH only at import-time.
 # Defaulting it prevents long option names from being ellipsized in help output
 # (and keeps CLI help stable under Click's test runner).
-os.environ.setdefault("TERMINAL_WIDTH", "200")
+os.environ.setdefault("TERMINAL_WIDTH", str(_DEFAULT_HELP_WIDTH))
 
 import typer
+import typer.rich_utils as typer_rich_utils
 from rich.console import Console
 
 from frame_compare.cli_output import print_at_a_glance, print_result_summary
@@ -51,6 +54,17 @@ if TYPE_CHECKING:
     from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, RunResult
     from frame_compare.orchestration.doctor import DoctorCheck, DoctorReport
     from frame_compare.utils.progress import ProgressReporter
+
+
+def _stabilize_typer_help_width() -> None:
+    """Backfill Typer's cached Rich help width when it was imported too early."""
+    if typer_rich_utils.MAX_WIDTH is not None:
+        return
+    with contextlib.suppress(ValueError):
+        typer_rich_utils.MAX_WIDTH = int(os.environ["TERMINAL_WIDTH"])
+
+
+_stabilize_typer_help_width()
 
 
 class _RunnerProxy:

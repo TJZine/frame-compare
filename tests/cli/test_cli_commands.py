@@ -6,10 +6,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import typer
+import typer.rich_utils as typer_rich_utils
 from _pytest.monkeypatch import MonkeyPatch
 from typer.testing import CliRunner
 
-from frame_compare.cli_entry import _maybe_open_report, app
+from frame_compare.cli_entry import _maybe_open_report, _stabilize_typer_help_width, app
 from frame_compare.config import OverlayMode
 from frame_compare.config.loader import get_default_config
 from frame_compare.errors import (
@@ -128,6 +129,13 @@ def test_run_help_shows_all_options():
     assert result.exit_code == 0
     for opt in REQUIRED_RUN_OPTIONS:
         assert opt in output
+
+
+def test_stabilize_typer_help_width_backfills_import_order_gap(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("TERMINAL_WIDTH", "200")
+    monkeypatch.setattr(typer_rich_utils, "MAX_WIDTH", None)
+    _stabilize_typer_help_width()
+    assert typer_rich_utils.MAX_WIDTH == 200
 
 
 def test_run_respects_no_color_env_var_presence_even_if_empty(monkeypatch: MonkeyPatch) -> None:
