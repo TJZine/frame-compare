@@ -18,6 +18,7 @@ from frame_compare.orchestration.context import (
     ClipProbeSnapshot,
     ClipState,
 )
+from frame_compare.orchestration.phase_tasks import resolve_run_metadata
 from frame_compare.orchestration.preflight import discover_inputs, prepare_preflight
 from frame_compare.orchestration.probe_cache import (
     compute_probe_cache_key,
@@ -35,9 +36,7 @@ from frame_compare.orchestration.types import (
     RunRequest,
 )
 from frame_compare.services.alignment import CACHE_FILE_NAME, load_cached_offsets
-from frame_compare.services.metadata import resolve_metadata
 from frame_compare.services.run_folder import derive_run_folder_name, reserve_run_folder
-from frame_compare.services.types import MetadataConfig
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vspreview.overrides import load_manual_overrides
 
@@ -71,15 +70,6 @@ def _resolve_cache_version(cache_path: Path) -> str | None:
     return str(version) if version is not None else None
 
 
-def _build_metadata_config(config: ConfigSchema) -> MetadataConfig:
-    """Build metadata service config from run config."""
-    return MetadataConfig(
-        api_key=config.tmdb.api_key,
-        unattended=config.tmdb.unattended,
-        timeout_seconds=config.tmdb.timeout_seconds,
-    )
-
-
 async def _resolve_run_directory(
     *,
     request: RunRequest,
@@ -93,9 +83,9 @@ async def _resolve_run_directory(
     if config.paths.use_run_folders:
         if deps.http_client is not None and config.tmdb.enabled and not request.skip_metadata:
             try:
-                artifacts.resolved_metadata = await resolve_metadata(
+                artifacts.resolved_metadata = await resolve_run_metadata(
                     filenames=[input_videos[0].name],
-                    config=_build_metadata_config(config),
+                    config=config,
                     client=deps.http_client,
                 )
                 metadata_prefetched = True

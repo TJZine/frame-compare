@@ -7,6 +7,7 @@ Error Codes:
     FC-1004: PRESET_NOT_FOUND
     FC-1005: PRESET_INVALID
     FC-1006: PRESET_NAME_INVALID
+    FC-1007: CONFIG_WRITE_ERROR
 """
 
 from __future__ import annotations
@@ -215,6 +216,23 @@ class PresetNameInvalidError(ConfigError):
             )
         )
         self.preset_name = name
+
+
+class ConfigWriteError(ConfigError):
+    """Configuration or preset write failed (FC-1007)."""
+
+    def __init__(self, path: Path, *, label: str, cause: OSError) -> None:
+        super().__init__(
+            ErrorContext(
+                code="FC-1007",
+                name="CONFIG_WRITE_ERROR",
+                message=f"Failed to write {label}: {path}",
+                hint="Check that the destination path is writable",
+                details={"path": str(path), "error": str(cause)},
+                cause=cause,
+            )
+        )
+        self.path = path
 
 
 # ─── 3.2 Dependency Errors (FC-2xxx) ───────────────────────────────────────────

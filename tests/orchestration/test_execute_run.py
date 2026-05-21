@@ -21,7 +21,7 @@ from frame_compare.errors import (
     MetricsCalculationError,
     TonemapRequiresVapourSynthError,
 )
-from frame_compare.orchestration import coordinator, execution, preparation
+from frame_compare.orchestration import coordinator, phase_tasks, preparation
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.services.alignment import CACHE_FILE_NAME
 from frame_compare.services.run_folder import derive_run_folder_name
@@ -605,7 +605,7 @@ def test_execute_run_passes_prefetched_tmdb_metadata_to_run_folder_derivation(
         return expected_metadata
 
     monkeypatch.setattr(preparation, "reserve_run_folder", _capture_reserve_run_folder)
-    monkeypatch.setattr(preparation, "resolve_metadata", _fake_resolve_metadata)
+    monkeypatch.setattr(phase_tasks, "resolve_metadata", _fake_resolve_metadata)
 
     request = RunRequest(
         root=tmp_path,
@@ -629,7 +629,30 @@ def test_execute_run_retries_metadata_phase_when_run_folder_prefetch_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    config_content = """\
+[paths]
+input_dir = "comparison_videos"
+screenshots_dir = "screenshots"
+generated_dir = "generated"
+config_dir = "config"
+use_run_folders = true
+
+[audio_alignment]
+enable = false
+
+[screenshots]
+use_ffmpeg = true
+
+[report]
+enable = false
+
+[tmdb]
+enabled = true
+api_key = "test-key"
+unattended = true
+timeout_seconds = 7.5
+"""
+    _create_config(tmp_path, content=config_content)
     input_dir = tmp_path / "comparison_videos"
     _create_video_files(input_dir, "source.mkv")
 
@@ -643,29 +666,23 @@ def test_execute_run_retries_metadata_phase_when_run_folder_prefetch_fails(
 
     prefetch_calls: list[list[str]] = []
     phase_calls: list[list[str]] = []
+    captured_configs: list[MetadataConfig] = []
 
-    async def _failing_prefetch(
+    async def _resolve_metadata(
         *,
         filenames: list[str],
         config: MetadataConfig,
         client: httpx.AsyncClient,
     ) -> TmdbMetadata | None:
-        del config, client
-        prefetch_calls.append(filenames)
-        raise RuntimeError("temporary metadata failure")
-
-    async def _successful_phase_lookup(
-        *,
-        filenames: list[str],
-        config: MetadataConfig,
-        client: httpx.AsyncClient,
-    ) -> TmdbMetadata | None:
-        del config, client
+        del client
+        captured_configs.append(config)
+        if not prefetch_calls:
+            prefetch_calls.append(filenames)
+            raise RuntimeError("temporary metadata failure")
         phase_calls.append(filenames)
         return expected_metadata
 
-    monkeypatch.setattr(preparation, "resolve_metadata", _failing_prefetch)
-    monkeypatch.setattr(execution, "resolve_metadata", _successful_phase_lookup)
+    monkeypatch.setattr(phase_tasks, "resolve_metadata", _resolve_metadata)
 
     request = RunRequest(
         root=tmp_path,
@@ -682,6 +699,58 @@ def test_execute_run_retries_metadata_phase_when_run_folder_prefetch_fails(
     assert result.warnings == ["metadata: temporary metadata failure"]
     assert prefetch_calls == [["source.mkv"]]
     assert phase_calls == [["source.mkv"]]
+    assert captured_configs == [
+        MetadataConfig(api_key="test-key", unattended=True, timeout_seconds=7.5),
+        MetadataConfig(api_key="test-key", unattended=True, timeout_seconds=7.5),
+    ]
+
+
+def test_execute_run_publish_skip_follows_effective_slowpics_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_content = """\
+[paths]
+input_dir = "comparison_videos"
+screenshots_dir = "screenshots"
+generated_dir = "generated"
+config_dir = "config"
+
+[audio_alignment]
+enable = false
+
+[screenshots]
+use_ffmpeg = true
+
+[slowpics]
+auto_upload = false
+
+[report]
+enable = false
+"""
+    _create_config(tmp_path, content=config_content)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "source.mkv")
+
+    async def _unexpected_publish(**_kwargs: object) -> object:
+        raise AssertionError("publish should be skipped by effective slowpics config")
+
+    monkeypatch.setattr(phase_tasks, "publish_to_slowpics", _unexpected_publish)
+
+    request = RunRequest(
+        root=tmp_path,
+        skip_analysis=True,
+        skip_metadata=True,
+        skip_dovi=True,
+        no_upload=False,
+    )
+    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+
+    result = asyncio.run(execute_run(request, deps=deps))
+
+    assert result.success is True
+    assert result.slowpics_url is None
+    assert result.phase_timings["publish"] == 0.0
 
 
 def test_execute_run_align_applies_trim_first_frame_mapping(
@@ -729,7 +798,7 @@ enable = false
             ),
         ]
 
-    monkeypatch.setattr(execution, "align_clips", _fake_align_clips)
+    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
 
     ffmpeg = FakeFFmpegRunner()
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=ffmpeg)

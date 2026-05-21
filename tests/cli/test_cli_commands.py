@@ -1006,6 +1006,32 @@ def test_preset_save_respects_root_and_config_writes_preset_file() -> None:
         assert preset_path.exists()
 
 
+def test_preset_save_write_error_uses_cli_error_contract(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _write_text_atomic(_path: Path, _content: str, *, encoding: str = "utf-8") -> None:
+        raise PermissionError("permission denied")
+
+    monkeypatch.setattr("frame_compare.config.presets.write_text_atomic", _write_text_atomic)
+
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        config_path = root / "config" / "config.toml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(MINIMAL_CONFIG)
+
+        result = runner.invoke(
+            app,
+            ["preset", "save", "demo", "--root", str(root), "--config", "config/config.toml"],
+        )
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stdout == ""
+    assert "FC-1007" in result.stderr
+    assert "Failed to write preset file" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
 def test_preset_apply_respects_root_and_config_updates_config_file() -> None:
     with runner.isolated_filesystem():
         root = Path("workspace")
@@ -1058,6 +1084,44 @@ def test_run_write_config_respects_root_and_config_and_does_not_invoke_runner(
         assert result.exit_code == 0
         data = tomllib.loads(config_path.read_text(encoding="utf-8"))
         assert data["analysis"]["frame_count"] == 17
+
+
+def test_run_write_config_write_error_uses_cli_error_contract(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _write_text_atomic(_path: Path, _content: str, *, encoding: str = "utf-8") -> None:
+        raise PermissionError("permission denied")
+
+    monkeypatch.setattr("frame_compare.cli_entry.write_text_atomic", _write_text_atomic)
+
+    result = _invoke_run_with_minimal_workspace(["--write-config"])
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stdout == ""
+    assert "FC-1007" in result.stderr
+    assert "Failed to write configuration file" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_run_write_config_json_write_error_outputs_error_schema(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _write_text_atomic(_path: Path, _content: str, *, encoding: str = "utf-8") -> None:
+        raise PermissionError("permission denied")
+
+    monkeypatch.setattr("frame_compare.cli_entry.write_text_atomic", _write_text_atomic)
+
+    result = _invoke_run_with_minimal_workspace(["--write-config", "--json"])
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stderr == ""
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False
+    assert payload["error"]["code"] == "FC-1007"
+    assert payload["error"]["name"] == "CONFIG_WRITE_ERROR"
+    assert "Failed to write configuration file" in payload["error"]["message"]
+    assert "path" in payload["error"]["details"]
+    assert payload["error"]["details"]["error"] == "permission denied"
 
 
 def test_run_diagnose_paths_outputs_pinned_json_schema_and_does_not_invoke_runner(

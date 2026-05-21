@@ -458,7 +458,7 @@ def main():
                 overlay_text += "\\n(-N = comparison starts BEFORE reference)"
             comp_clip = core.text.Text(comp_clip, overlay_text, alignment=7)
         except Exception:
-            pass  # Overlay is best-effort
+            safe_print("Warning: Could not apply text overlay (plugin missing?)")
 
         # Slot layout: ref on even, comparison on odd
         # We duplicate reference before each comparison

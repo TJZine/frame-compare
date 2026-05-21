@@ -36,6 +36,7 @@ from frame_compare.config import (
     save_preset,
 )
 from frame_compare.errors import (
+    ConfigWriteError,
     ExitCode,
     FrameCompareError,
     JSONValue,
@@ -497,9 +498,12 @@ def _resolve_root_and_config(root: Path, config: Path | None) -> tuple[Path, Pat
 
 def _write_config_to(path: Path, config: ConfigSchema) -> None:
     data = config.model_dump(mode="json", exclude_none=True)
-    path.parent.mkdir(parents=True, exist_ok=True)
     toml_text = tomli_w.dumps(data)
-    write_text_atomic(path, toml_text, encoding="utf-8")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_text_atomic(path, toml_text, encoding="utf-8")
+    except OSError as exc:
+        raise ConfigWriteError(path, label="configuration file", cause=exc) from exc
 
 
 def _prepare_toml_payload(data: dict[str, object]) -> dict[str, object]:

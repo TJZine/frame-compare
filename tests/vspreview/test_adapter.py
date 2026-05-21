@@ -66,6 +66,21 @@ def test_build_script_content_escapes_path_literals() -> None:
     assert "\\nprint(123)\\n" in script
 
 
+def test_build_script_content_warns_when_comparison_overlay_fails() -> None:
+    script = _build_script_content(
+        reference=Path("ref.mkv"),
+        comparisons=[Path("a.mkv")],
+        suggested_offsets_by_key={},
+        bootstrap_paths=[Path("/workspace"), Path("/workspace/src")],
+    )
+
+    warning = 'safe_print("Warning: Could not apply text overlay (plugin missing?)")'
+
+    assert warning in script
+    assert "pass  # Overlay is best-effort" not in script
+    assert script.count(warning) == 2
+
+
 def test_generate_vspreview_script_bootstraps_nested_legacy_workspace(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     workspace_root = repo_root / "workspace"
