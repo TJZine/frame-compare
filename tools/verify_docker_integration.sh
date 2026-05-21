@@ -140,9 +140,11 @@ if [[ -n "$icd" ]]; then
   export VK_ICD_FILENAMES="$icd"
 fi
 python -c "import pytest" >/dev/null 2>&1 || python -m pip install --user -q pytest &&
+pytest_cache_dir="$(mktemp -d /tmp/frame-compare-pytest-cache.XXXXXX)"
+trap 'rm -rf "$pytest_cache_dir"' EXIT
 EOF
 )
-container_cmd+=$'\n'"python -m pytest -v${pytest_args}"
+container_cmd+=$'\n'"python -m pytest -v -o cache_dir=\"\$pytest_cache_dir\"${pytest_args}"
 
 set +e
 "${docker_cmd[@]}" "$container_cmd" 2>&1 | tee "$tmp_log"
