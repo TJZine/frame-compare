@@ -115,86 +115,8 @@ def generate_report(
                 f"expected {len(data.frames)}, got {len(data.screenshots[clip.name])}"
             )
 
-    # 2. DETERMINE OUTPUT PATH
-    final_output_path: Path
-    if output_path is not None:
-        final_output_path = output_path
-    elif config.output_dir:
-        final_output_path = Path(config.output_dir) / "report.html"
-    else:
-        # Fallback: first clip, first frame's parent dir
-        first_clip_name = data.clips[0].name
-        first_screenshot = data.screenshots[first_clip_name][0]
-        final_output_path = first_screenshot.parent / "report.html"
-
-    # 3. PREPARE IMAGES & 4. BUILD JSON DATA
-    # Structure defined in spec Section 2.2
-    json_clips: list[_ReportClipPayload] = []
-    for clip in data.clips:
-        json_clips.append(
-            {
-                "name": clip.name,
-                "label": clip.label or clip.name,
-                "resolution": clip.resolution,
-                "fps": clip.fps,
-                "hdr": clip.hdr,
-            }
-        )
-
-    json_frames: list[_ReportFramePayload] = []
-    for i, frame_num in enumerate(data.frames):
-        frame_images: list[_ReportImagePayload] = []
-        for clip in data.clips:
-            screenshot_path = data.screenshots[clip.name][i]
-
-            if not screenshot_path.exists():
-                raise ReportError(f"screenshot not found: {screenshot_path}")
-
-            image_src: str
-            if config.embed_images:
-                try:
-                    image_bytes = screenshot_path.read_bytes()
-                    b64_str = base64.b64encode(image_bytes).decode("ascii")
-                    image_src = f"data:image/png;base64,{b64_str}"
-                except OSError as e:
-                    raise ReportError(f"failed to encode image: {screenshot_path}") from e
-            else:
-                try:
-                    # Use relative path for portability if possible
-                    image_src = str(
-                        Path(os_path_relpath(screenshot_path, final_output_path.parent)).as_posix()
-                    )
-                except ValueError:
-                    # Fallback to absolute if on different drives (Windows)
-                    image_src = str(screenshot_path.as_posix())
-
-            frame_images.append(
-                {
-                    "clip": clip.name,
-                    "src": image_src,
-                }
-            )
-
-        json_frames.append(
-            {
-                "number": frame_num,
-                "images": frame_images,
-            }
-        )
-
-    embedded_data: _ReportPayload = {
-        "version": REPORT_VERSION,
-        "generated_at": datetime.now(UTC).isoformat(),
-        "title": data.metadata.title if data.metadata else data.clips[0].name,
-        "slowpics_url": data.slowpics_url,
-        "default_mode": config.default_mode.value,
-        "stats": {
-            "frame_count": len(data.frames),
-            "clip_count": len(data.clips),
-        },
-        "clips": json_clips,
-        "frames": json_frames,
-    }
+    final_output_path = _resolve_output_path(data, config, output_path)
+    embedded_data = _build_report_payload(data, config, report_dir=final_output_path.parent)
 
     # 5. GENERATE HTML
     html_content = _build_html(embedded_data, include_filmstrip=config.include_filmstrip)
@@ -207,6 +129,106 @@ def generate_report(
         raise ReportError(f"failed to write report: {e}") from e
 
     return final_output_path
+
+
+def _resolve_output_path(data: ReportData, config: ReportConfig, output_path: Path | None) -> Path:
+    """Resolve the final report path after generate_report validation."""
+    if output_path is not None:
+        return output_path
+    if config.output_dir:
+        return Path(config.output_dir) / "report.html"
+
+    # Fallback: first clip, first frame's parent dir.
+    first_clip_name = data.clips[0].name
+    first_screenshot = data.screenshots[first_clip_name][0]
+    return first_screenshot.parent / "report.html"
+
+
+def _build_report_payload(
+    data: ReportData, config: ReportConfig, *, report_dir: Path
+) -> _ReportPayload:
+    """Shape validated report data into the embedded JSON payload."""
+    return {
+        "version": REPORT_VERSION,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "title": data.metadata.title if data.metadata else data.clips[0].name,
+        "slowpics_url": data.slowpics_url,
+        "default_mode": config.default_mode.value,
+        "stats": {
+            "frame_count": len(data.frames),
+            "clip_count": len(data.clips),
+        },
+        "clips": _build_clip_payloads(data.clips),
+        "frames": _build_frame_payloads(data, config, report_dir=report_dir),
+    }
+
+
+def _build_clip_payloads(clips: list[ClipInfo]) -> list[_ReportClipPayload]:
+    """Build stable clip payload entries."""
+    json_clips: list[_ReportClipPayload] = []
+    for clip in clips:
+        json_clips.append(
+            {
+                "name": clip.name,
+                "label": clip.label or clip.name,
+                "resolution": clip.resolution,
+                "fps": clip.fps,
+                "hdr": clip.hdr,
+            }
+        )
+    return json_clips
+
+
+def _build_frame_payloads(
+    data: ReportData, config: ReportConfig, *, report_dir: Path
+) -> list[_ReportFramePayload]:
+    """Build stable frame payload entries and resolve each image source."""
+    json_frames: list[_ReportFramePayload] = []
+    for i, frame_num in enumerate(data.frames):
+        frame_images: list[_ReportImagePayload] = []
+        for clip in data.clips:
+            screenshot_path = data.screenshots[clip.name][i]
+
+            if not screenshot_path.exists():
+                raise ReportError(f"screenshot not found: {screenshot_path}")
+
+            frame_images.append(
+                {
+                    "clip": clip.name,
+                    "src": _image_src_for_report(
+                        screenshot_path,
+                        report_dir=report_dir,
+                        embed_images=config.embed_images,
+                    ),
+                }
+            )
+
+        json_frames.append(
+            {
+                "number": frame_num,
+                "images": frame_images,
+            }
+        )
+
+    return json_frames
+
+
+def _image_src_for_report(screenshot_path: Path, *, report_dir: Path, embed_images: bool) -> str:
+    """Resolve an image src for the report payload."""
+    if embed_images:
+        try:
+            image_bytes = screenshot_path.read_bytes()
+            b64_str = base64.b64encode(image_bytes).decode("ascii")
+            return f"data:image/png;base64,{b64_str}"
+        except OSError as e:
+            raise ReportError(f"failed to encode image: {screenshot_path}") from e
+
+    try:
+        # Use relative path for portability if possible.
+        return str(Path(os_path_relpath(screenshot_path, report_dir)).as_posix())
+    except ValueError:
+        # Fallback to absolute if on different drives (Windows).
+        return str(screenshot_path.as_posix())
 
 
 def os_path_relpath(path: Path, start: Path) -> str:
@@ -242,6 +264,64 @@ def _json_for_script_tag(data: _ReportPayload) -> str:
     raw = json.dumps(data)
     # Prevent </script> and other HTML parsing hazards inside the script element.
     return raw.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+
+
+def _render_frame_options(frames: list[_ReportFramePayload]) -> str:
+    """Render frame selector options."""
+    return "".join(
+        f'<option value="{_esc_attr(i)}">Frame {_esc_text(frame["number"])}</option>'
+        for i, frame in enumerate(frames)
+    )
+
+
+def _render_clip_options(clips: list[_ReportClipPayload], *, selected_index: int | None) -> str:
+    """Render clip selector options."""
+    if selected_index is None:
+        return "".join(
+            f'<option value="{_esc_attr(i)}">{_esc_text(clip["label"])}</option>'
+            for i, clip in enumerate(clips)
+        )
+    return "".join(
+        f'<option value="{_esc_attr(i)}" {"selected" if i == selected_index else ""}>'
+        f"{_esc_text(clip['label'])}</option>"
+        for i, clip in enumerate(clips)
+    )
+
+
+def _render_slowpics_link(slowpics_url: str | None) -> str:
+    """Render the slow.pics link when the URL is safe to expose as href."""
+    safe_href = _safe_http_href(slowpics_url)
+    if not safe_href:
+        return ""
+    return (
+        f'<a href="{safe_href}" target="_blank" rel="noopener noreferrer" '
+        'class="rv-link">View on slow.pics ↗</a>'
+    )
+
+
+def _render_filmstrip(
+    frames: list[_ReportFramePayload],
+    clips: list[_ReportClipPayload],
+    *,
+    include_filmstrip: bool,
+) -> str:
+    """Render the optional frame thumbnail filmstrip."""
+    if not include_filmstrip:
+        return ""
+    items = "".join(
+        f"""
+            <button class="rv-filmstrip-item" data-idx="{_esc_attr(i)}" aria-label="Frame {_esc_attr(frame["number"])}">
+                <img src="{_esc_attr(frame["images"][0]["src"])}" loading="lazy" alt="{_esc_attr(clips[0]["label"])} - Frame {_esc_attr(frame["number"])}">
+                <span class="rv-filmstrip-label">{_esc_text(frame["number"])}</span>
+            </button>
+            """
+        for i, frame in enumerate(frames)
+    )
+    return f"""
+        <nav class="rv-filmstrip" role="navigation" aria-label="Frame thumbnails">
+            {items}
+        </nav>
+        """
 
 
 def _build_html(data: _ReportPayload, include_filmstrip: bool = True) -> str:
@@ -911,7 +991,11 @@ def _build_html(data: _ReportPayload, include_filmstrip: bool = True) -> str:
     slowpics_url = data["slowpics_url"]
     frames = data["frames"]
     clips = data["clips"]
-    safe_href = _safe_http_href(slowpics_url)
+    slowpics_link = _render_slowpics_link(slowpics_url)
+    frame_options = _render_frame_options(frames)
+    left_clip_options = _render_clip_options(clips, selected_index=None)
+    right_clip_options = _render_clip_options(clips, selected_index=1)
+    filmstrip = _render_filmstrip(frames, clips, include_filmstrip=include_filmstrip)
 
     return f"""<!DOCTYPE html>
     <html lang="en">
@@ -930,11 +1014,7 @@ def _build_html(data: _ReportPayload, include_filmstrip: bool = True) -> str:
     } frames • {stats["clip_count"]} clips</div>
             </div>
             <div>
-                {
-        f'<a href="{safe_href}" target="_blank" rel="noopener noreferrer" class="rv-link">View on slow.pics ↗</a>'
-        if safe_href
-        else ""
-    }
+                {slowpics_link}
             </div>
         </header>
 
@@ -942,32 +1022,17 @@ def _build_html(data: _ReportPayload, include_filmstrip: bool = True) -> str:
         <div class="rv-control-group">
                 <button id="btn-prev" aria-label="Previous frame">←</button>
                 <select id="frame-select" aria-label="Select frame">
-                    {
-        "".join(
-            f'<option value="{_esc_attr(i)}">Frame {_esc_text(f["number"])}</option>'
-            for i, f in enumerate(frames)
-        )
-    }
+                    {frame_options}
                 </select>
                 <button id="btn-next" aria-label="Next frame">→</button>
             </div>
 
             <div class="rv-control-group">
                 <select id="left-select" aria-label="Left clip">
-                    {
-        "".join(
-            f'<option value="{_esc_attr(i)}">{_esc_text(c["label"])}</option>'
-            for i, c in enumerate(clips)
-        )
-    }
+                    {left_clip_options}
                 </select>
                 <select id="right-select" aria-label="Right clip">
-                    {
-        "".join(
-            f'<option value="{_esc_attr(i)}" {"selected" if i == 1 else ""}>{_esc_text(c["label"])}</option>'
-            for i, c in enumerate(clips)
-        )
-    }
+                    {right_clip_options}
                 </select>
             </div>
 
@@ -1026,25 +1091,7 @@ def _build_html(data: _ReportPayload, include_filmstrip: bool = True) -> str:
         </div>
     </div>
 
-        {
-        f'''
-        <nav class="rv-filmstrip" role="navigation" aria-label="Frame thumbnails">
-            {
-            "".join(
-                f"""
-            <button class="rv-filmstrip-item" data-idx="{_esc_attr(i)}" aria-label="Frame {_esc_attr(f["number"])}">
-                <img src="{_esc_attr(f["images"][0]["src"])}" loading="lazy" alt="{_esc_attr(clips[0]["label"])} - Frame {_esc_attr(f["number"])}">
-                <span class="rv-filmstrip-label">{_esc_text(f["number"])}</span>
-            </button>
-            """
-                for i, f in enumerate(frames)
-            )
-        }
-        </nav>
-        '''
-        if include_filmstrip
-        else ""
-    }
+        {filmstrip}
 
     <footer class="rv-footer">
         <div>Frame Compare v{REPORT_VERSION}</div>
