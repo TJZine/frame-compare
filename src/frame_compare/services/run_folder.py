@@ -147,6 +147,32 @@ def _append_collision_suffix(folder_name: str, suffix: str) -> str:
     return f"{folder_name[:allowed]}_{suffix}"
 
 
+def _resolve_existing_folder_collision(
+    base_name: str,
+    existing_folders: list[str] | None,
+    *,
+    initial_candidate: str | None = None,
+    collision_timestamp: str | None = None,
+) -> str:
+    """Resolve a unique folder name against a caller-provided existing-folder snapshot."""
+    candidate = base_name if initial_candidate is None else initial_candidate
+    if not existing_folders:
+        return candidate
+
+    existing_lower = {folder.lower() for folder in existing_folders}
+    if candidate.lower() not in existing_lower:
+        return candidate
+
+    timestamp = _format_timestamp() if collision_timestamp is None else collision_timestamp
+    attempt = 0
+    while True:
+        suffix = timestamp if attempt == 0 else f"{timestamp}-{attempt}"
+        candidate = _append_collision_suffix(base_name, suffix)
+        if candidate.lower() not in existing_lower:
+            return candidate
+        attempt += 1
+
+
 def _derive_base_folder_name(
     filenames: list[str],
     tmdb_metadata: TmdbMetadata | None = None,
@@ -190,7 +216,7 @@ def derive_run_folder_name(
     3. Fallback: combine sanitized filename stems
 
     Collision handling:
-    - If name exists in existing_folders, append timestamp
+    - If name exists in existing_folders, append timestamp and a sequence suffix if needed
 
     Args:
         filenames: List of video filenames (not full paths)
@@ -201,17 +227,17 @@ def derive_run_folder_name(
         Filesystem-safe folder name
     """
     if not filenames:
-        return _append_collision_suffix(_UNNAMED_RUN_BASE, _format_timestamp())
+        timestamp = _format_timestamp()
+        unnamed_candidate = _append_collision_suffix(_UNNAMED_RUN_BASE, timestamp)
+        return _resolve_existing_folder_collision(
+            _UNNAMED_RUN_BASE,
+            existing_folders,
+            initial_candidate=unnamed_candidate,
+            collision_timestamp=timestamp,
+        )
 
     folder_name = _derive_base_folder_name(filenames, tmdb_metadata)
-
-    # Check for collisions
-    if existing_folders:
-        existing_lower = {f.lower() for f in existing_folders}
-        if folder_name.lower() in existing_lower:
-            folder_name = _append_collision_suffix(folder_name, _format_timestamp())
-
-    return folder_name
+    return _resolve_existing_folder_collision(folder_name, existing_folders)
 
 
 def get_existing_run_folders(input_dir: Path) -> list[str]:

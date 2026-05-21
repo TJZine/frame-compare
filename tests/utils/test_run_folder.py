@@ -206,6 +206,22 @@ def test_derive_run_folder_name_collision_respects_max_length() -> None:
     assert result.endswith("_20260208-020749")
 
 
+def test_derive_run_folder_name_retries_when_timestamped_name_exists() -> None:
+    with patch(
+        "frame_compare.services.run_folder._format_timestamp", return_value="20260208-020749"
+    ):
+        result = derive_run_folder_name(
+            filenames=["Fight.Club.1999.mkv"],
+            tmdb_metadata=None,
+            existing_folders=[
+                "Fight Club (1999)",
+                "Fight Club (1999)_20260208-020749",
+            ],
+        )
+
+    assert result == "Fight Club (1999)_20260208-020749-1"
+
+
 def test_derive_run_folder_name_no_collision() -> None:
     result = derive_run_folder_name(
         filenames=["Fight.Club.1999.mkv"],
@@ -220,8 +236,20 @@ def test_derive_run_folder_name_empty_filenames() -> None:
     with patch(
         "frame_compare.services.run_folder._format_timestamp", return_value="20260208-020749"
     ):
-        result = derive_run_folder_name(filenames=[])
+        result = derive_run_folder_name(filenames=[], existing_folders=["unnamed_run"])
     assert result == "unnamed_run_20260208-020749"
+
+
+def test_derive_run_folder_name_empty_filenames_retries_when_generated_name_exists() -> None:
+    with patch(
+        "frame_compare.services.run_folder._format_timestamp", return_value="20260208-020749"
+    ):
+        result = derive_run_folder_name(
+            filenames=[],
+            existing_folders=["unnamed_run_20260208-020749"],
+        )
+
+    assert result == "unnamed_run_20260208-020749-1"
 
 
 # ─── get_existing_run_folders Tests ───────────────────────────────────────────
