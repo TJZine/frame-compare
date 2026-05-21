@@ -92,13 +92,13 @@ async def _resolve_run_directory(
     metadata_prefetched = False
     if config.paths.use_run_folders:
         if deps.http_client is not None and config.tmdb.enabled and not request.skip_metadata:
-            metadata_prefetched = True
             try:
                 artifacts.resolved_metadata = await resolve_metadata(
                     filenames=[input_videos[0].name],
                     config=_build_metadata_config(config),
                     client=deps.http_client,
                 )
+                metadata_prefetched = True
             except Exception as exc:
                 artifacts.warnings.append(f"metadata: {exc}")
                 artifacts.resolved_metadata = None

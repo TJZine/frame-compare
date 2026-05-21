@@ -244,21 +244,33 @@ def _check_vspreview() -> CheckResult:
 
     Uses frame_compare.vspreview.is_vspreview_available() for consistent detection.
     Per vspreview spec §6.1, this is an optional check that reports passed=True
-    even when VSPreview is missing (non-failing).
+    even when VSPreview is missing or the availability probe itself fails.
     """
-    from frame_compare.vspreview.adapter import is_vspreview_available
+    try:
+        from frame_compare.vspreview.adapter import is_vspreview_available
 
-    if is_vspreview_available():
+        available = is_vspreview_available()
+    except Exception as exc:
+        return CheckResult(
+            passed=True,
+            message="VSPreview availability probe failed (optional for manual alignment)",
+            hint="Check the VSPreview/PySide6 installation if interactive alignment is needed",
+            details={
+                "exception_type": type(exc).__name__,
+                "exception": str(exc),
+            },
+        )
+
+    if available:
         return CheckResult(
             passed=True,
             message="VSPreview is available for interactive alignment",
         )
-    else:
-        return CheckResult(
-            passed=True,  # Not a failure, just optional per spec §6.1
-            message="VSPreview not installed (optional for manual alignment)",
-            hint="Install with: pip install vspreview PySide6 (or: pip install vspreview PyQt5)",
-        )
+    return CheckResult(
+        passed=True,  # Not a failure, just optional per spec §6.1
+        message="VSPreview not installed (optional for manual alignment)",
+        hint="Install with: pip install vspreview PySide6 (or: pip install vspreview PyQt5)",
+    )
 
 
 def _check_slowpics() -> CheckResult:

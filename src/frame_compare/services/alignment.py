@@ -73,8 +73,26 @@ def _maybe_launch_vspreview(
     if not (config.use_vspreview or config.force_interactive):
         return
 
-    available = is_vspreview_available()
-    if config.use_vspreview and not available and not config.force_interactive:
+    probe_failed = False
+    try:
+        available = is_vspreview_available()
+    except Exception as exc:
+        probe_failed = True
+        available = False
+        if config.force_interactive:
+            raise AudioAlignmentError(
+                "Interactive alignment requested but VSPreview availability check failed."
+            ) from exc
+        log.warning(
+            "vspreview_availability_probe_failed",
+            error=str(exc),
+            exception_type=type(exc).__name__,
+            hint="Check the VSPreview/PySide6 installation to enable interactive alignment verification",
+            use_vspreview=config.use_vspreview,
+            force_interactive=config.force_interactive,
+        )
+
+    if config.use_vspreview and not available and not config.force_interactive and not probe_failed:
         log.warning(
             "vspreview_unavailable",
             hint="Install vspreview (and a Qt backend) to enable interactive alignment verification",

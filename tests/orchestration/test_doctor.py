@@ -221,6 +221,25 @@ def test_run_doctor_survives_raising_check() -> None:
     assert result.details["exception_type"] == "RuntimeError"
 
 
+class TestCheckVSPreview:
+    """Tests for the optional VSPreview diagnostic check."""
+
+    def test_check_vspreview_probe_failure_is_optional_status(self) -> None:
+        checks = collect_checks()
+        vspreview_check = next(c for c in checks if c.name == "vspreview")
+
+        with patch(
+            "frame_compare.vspreview.adapter.is_vspreview_available",
+            side_effect=RuntimeError("broken import metadata"),
+        ):
+            result = vspreview_check.check_fn()
+
+        assert result.passed is True
+        assert "probe failed" in result.message
+        assert result.details["exception_type"] == "RuntimeError"
+        assert result.details["exception"] == "broken import metadata"
+
+
 class TestCheckSlowpics:
     """Tests for slow.pics reachability check via run_doctor."""
 

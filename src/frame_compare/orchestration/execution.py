@@ -6,6 +6,7 @@ import inspect
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 
 import httpx
@@ -100,13 +101,7 @@ def build_phases_before_align(
             "frame_plan",
             "frame_plan",
             None,
-            lambda ctx: selected_frames.extend(
-                create_frame_plan(
-                    num_frames=ctx.reference.effective_num_frames(),
-                    count=ctx.config.analysis.frame_count,
-                    seed=ctx.config.analysis.random_seed,
-                ).frames
-            ),
+            partial(_select_initial_frame_plan, selected_frames=selected_frames),
             clock=clock,
             phase_timings=phase_timings,
             warnings=warnings,
@@ -115,8 +110,8 @@ def build_phases_before_align(
             "analyze",
             "analyze",
             lambda config: request.skip_analysis,
-            lambda ctx: run_analyze_phase(
-                ctx=ctx,
+            partial(
+                _calculate_metrics_and_replace_selected_frames,
                 input_videos=input_videos,
                 workspace=workspace,
                 selected_frames=selected_frames,
@@ -132,7 +127,7 @@ def build_phases_before_align(
             "align",
             "align",
             lambda config: not config.audio_alignment.enable,
-            lambda ctx: run_align_phase(ctx, selected_frames=selected_frames),
+            partial(_align_clips_and_normalize_selected_frames, selected_frames=selected_frames),
             clock=clock,
             phase_timings=phase_timings,
             warnings=warnings,
@@ -158,8 +153,8 @@ def build_phases_after_align(
             "render",
             "render",
             None,
-            lambda ctx: run_render_phase(
-                ctx=ctx,
+            partial(
+                _render_frames_and_record_outputs,
                 frames=selected_frames,
                 runner=ffmpeg_runner,
                 artifacts=artifacts,
@@ -172,8 +167,8 @@ def build_phases_after_align(
             "metadata",
             "metadata",
             lambda config: request.skip_metadata,
-            lambda ctx: run_metadata_phase(
-                ctx=ctx,
+            partial(
+                _resolve_or_reuse_metadata,
                 client=http_client,
                 prefetched_metadata=artifacts.resolved_metadata,
                 metadata_prefetched=metadata_prefetched,
@@ -188,9 +183,7 @@ def build_phases_after_align(
             "dovi",
             "dovi",
             lambda config: request.skip_dovi,
-            lambda _ctx: warnings.append(
-                "dovi: DOVI processing is not implemented yet; continuing without Dolby Vision extraction."
-            ),
+            partial(_record_dovi_not_implemented_warning, warnings=warnings),
             clock=clock,
             phase_timings=phase_timings,
             warnings=warnings,
@@ -200,8 +193,8 @@ def build_phases_after_align(
             "publish",
             "publish",
             lambda config: request.no_upload,
-            lambda ctx: run_publish_phase(
-                ctx=ctx,
+            partial(
+                _publish_screenshots_and_record_url,
                 client=http_client,
                 artifacts=artifacts,
             ),
@@ -214,8 +207,8 @@ def build_phases_after_align(
             "report",
             "report",
             lambda config: not config.report.enable,
-            lambda ctx: run_report_phase(
-                ctx=ctx,
+            partial(
+                _generate_report_and_record_path,
                 frames=selected_frames,
                 artifacts=artifacts,
             ),
@@ -225,6 +218,103 @@ def build_phases_after_align(
             warn_only=True,
         ),
     ]
+
+
+def _select_initial_frame_plan(ctx: RunContext, *, selected_frames: list[int]) -> None:
+    selected_frames.extend(
+        create_frame_plan(
+            num_frames=ctx.reference.effective_num_frames(),
+            count=ctx.config.analysis.frame_count,
+            seed=ctx.config.analysis.random_seed,
+        ).frames
+    )
+
+
+def _calculate_metrics_and_replace_selected_frames(
+    ctx: RunContext,
+    *,
+    input_videos: list[Path],
+    workspace: WorkspacePaths,
+    selected_frames: list[int],
+    artifacts: RunArtifacts,
+) -> None:
+    run_analyze_phase(
+        ctx=ctx,
+        input_videos=input_videos,
+        workspace=workspace,
+        selected_frames=selected_frames,
+        artifacts=artifacts,
+    )
+
+
+def _align_clips_and_normalize_selected_frames(
+    ctx: RunContext, *, selected_frames: list[int]
+) -> None:
+    run_align_phase(ctx, selected_frames=selected_frames)
+
+
+def _render_frames_and_record_outputs(
+    ctx: RunContext,
+    *,
+    frames: list[int],
+    runner: FFmpegRunner,
+    artifacts: RunArtifacts,
+) -> None:
+    run_render_phase(
+        ctx=ctx,
+        frames=frames,
+        runner=runner,
+        artifacts=artifacts,
+    )
+
+
+async def _resolve_or_reuse_metadata(
+    ctx: RunContext,
+    *,
+    client: httpx.AsyncClient | None,
+    prefetched_metadata: TmdbMetadata | None,
+    metadata_prefetched: bool,
+    artifacts: RunArtifacts,
+) -> None:
+    await run_metadata_phase(
+        ctx=ctx,
+        client=client,
+        prefetched_metadata=prefetched_metadata,
+        metadata_prefetched=metadata_prefetched,
+        artifacts=artifacts,
+    )
+
+
+def _record_dovi_not_implemented_warning(_ctx: RunContext, *, warnings: list[str]) -> None:
+    warnings.append(
+        "dovi: DOVI processing is not implemented yet; continuing without Dolby Vision extraction."
+    )
+
+
+async def _publish_screenshots_and_record_url(
+    ctx: RunContext,
+    *,
+    client: httpx.AsyncClient | None,
+    artifacts: RunArtifacts,
+) -> None:
+    await run_publish_phase(
+        ctx=ctx,
+        client=client,
+        artifacts=artifacts,
+    )
+
+
+def _generate_report_and_record_path(
+    ctx: RunContext,
+    *,
+    frames: list[int],
+    artifacts: RunArtifacts,
+) -> None:
+    run_report_phase(
+        ctx=ctx,
+        frames=frames,
+        artifacts=artifacts,
+    )
 
 
 def run_analyze_phase(

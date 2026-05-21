@@ -625,6 +625,65 @@ def test_execute_run_passes_prefetched_tmdb_metadata_to_run_folder_derivation(
     assert result.screenshot_dir == (input_dir / "Fight Club (1999)" / "screenshots").resolve()
 
 
+def test_execute_run_retries_metadata_phase_when_run_folder_prefetch_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "source.mkv")
+
+    expected_metadata = TmdbMetadata(
+        tmdb_id=456,
+        title="Heat",
+        original_title="Heat",
+        year=1995,
+        media_type="movie",
+    )
+
+    prefetch_calls: list[list[str]] = []
+    phase_calls: list[list[str]] = []
+
+    async def _failing_prefetch(
+        *,
+        filenames: list[str],
+        config: MetadataConfig,
+        client: httpx.AsyncClient,
+    ) -> TmdbMetadata | None:
+        del config, client
+        prefetch_calls.append(filenames)
+        raise RuntimeError("temporary metadata failure")
+
+    async def _successful_phase_lookup(
+        *,
+        filenames: list[str],
+        config: MetadataConfig,
+        client: httpx.AsyncClient,
+    ) -> TmdbMetadata | None:
+        del config, client
+        phase_calls.append(filenames)
+        return expected_metadata
+
+    monkeypatch.setattr(preparation, "resolve_metadata", _failing_prefetch)
+    monkeypatch.setattr(execution, "resolve_metadata", _successful_phase_lookup)
+
+    request = RunRequest(
+        root=tmp_path,
+        skip_analysis=True,
+        skip_metadata=False,
+        skip_dovi=True,
+        no_upload=True,
+    )
+    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+
+    result = asyncio.run(execute_run(request, deps=deps))
+
+    assert result.success is True
+    assert result.warnings == ["metadata: temporary metadata failure"]
+    assert prefetch_calls == [["source.mkv"]]
+    assert phase_calls == [["source.mkv"]]
+
+
 def test_execute_run_align_applies_trim_first_frame_mapping(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
