@@ -2,101 +2,126 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
-from frame_compare.vs.props import get_color_props, is_hdr
-
-
-def test_get_color_props_returns_colorprops_with_defaults():
-    """Verify defaults (2, 2, 2, 1) when props missing."""
-    clip = MagicMock()
-    # Mock frame 0 props as empty dict
-    clip.get_frame.return_value.props = {}
-
-    props = get_color_props(clip)
-    assert props.primaries == 2
-    assert props.transfer == 2
-    assert props.matrix == 2
-    assert props.color_range == 1
+from frame_compare.vs.props import (
+    detect_hdr,
+    get_int_prop,
+    get_optional_int_prop,
+    get_str_prop,
+)
 
 
-def test_get_color_props_extracts_all_fields():
-    """Verify all fields extracted when present."""
-    clip = MagicMock()
-    clip.get_frame.return_value.props = {
-        "_Primaries": 1,
-        "_Transfer": 1,
-        "_Matrix": 1,
-        "_ColorRange": 1,
+def test_get_int_prop():
+    """Verify get_int_prop behaves correctly with different types."""
+    props = {
+        "int_val": 42,
+        "float_val": 42.6,
+        "str_val": "100",
+        "bytes_val": b"200",
+        "invalid_str": "not_an_int",
     }
 
-    props = get_color_props(clip)
-    assert props.primaries == 1
-    assert props.transfer == 1
-    assert props.matrix == 1
-    assert props.color_range == 1
+    assert get_int_prop(props, "int_val", 0) == 42
+    assert get_int_prop(props, "float_val", 0) == 42
+    assert get_int_prop(props, "str_val", 0) == 100
+    assert get_int_prop(props, "bytes_val", 0) == 200
+    assert get_int_prop(props, "invalid_str", 5) == 5
+    assert get_int_prop(props, "missing", 10) == 10
 
 
-def test_get_color_props_partial_props_uses_defaults():
-    """Verify partial props missing uses defaults."""
-    clip = MagicMock()
-    clip.get_frame.return_value.props = {
-        "_Primaries": 9,
-        "_Transfer": 16,
+def test_get_optional_int_prop():
+    """Verify get_optional_int_prop behaves correctly with different types."""
+    props = {
+        "int_val": 42,
+        "float_val": 42.6,
+        "str_val": "100",
+        "bytes_val": b"200",
+        "invalid_str": "not_an_int",
     }
 
-    props = get_color_props(clip)
-    assert props.primaries == 9
-    assert props.transfer == 16
-    assert props.matrix == 2
-    assert props.color_range == 1
+    assert get_optional_int_prop(props, "int_val") == 42
+    assert get_optional_int_prop(props, "float_val") == 42
+    assert get_optional_int_prop(props, "str_val") == 100
+    assert get_optional_int_prop(props, "bytes_val") == 200
+    assert get_optional_int_prop(props, "invalid_str") is None
+    assert get_optional_int_prop(props, "missing") is None
 
 
-def test_is_hdr_pq_bt2020_returns_true():
+def test_get_str_prop():
+    """Verify get_str_prop behaves correctly with different types."""
+    props = {
+        "str_val": "hello",
+        "bytes_val": b"world",
+        "int_val": 123,
+    }
+
+    assert get_str_prop(props, "str_val") == "hello"
+    assert get_str_prop(props, "bytes_val") == "world"
+    assert get_str_prop(props, "int_val") == "123"
+    assert get_str_prop(props, "missing") is None
+
+
+def test_detect_hdr_pq_bt2020():
     """PQ (16) + BT.2020 (9) is HDR."""
-    clip = MagicMock()
-    clip.get_frame.return_value.props = {
+    props = {
         "_Transfer": 16,
         "_Primaries": 9,
+        "_Matrix": 9,
+        "MasteringDisplayPrimaries": b"G(0.265,0.690)B(0.150,0.060)R(0.680,0.320)WP(0.3127,0.3290)L(1000.0,0.0050)",
+        "ContentLightLevelMax": 1000,
+        "ContentLightLevelAverage": 400,
     }
-    assert is_hdr(clip) is True
+    is_hdr_detected, metadata = detect_hdr(props)
+
+    assert is_hdr_detected is True
+    assert metadata is not None
+    assert metadata.transfer == 16
+    assert metadata.color_primaries == 9
+    assert metadata.matrix == 9
+    assert (
+        metadata.mastering_display
+        == "G(0.265,0.690)B(0.150,0.060)R(0.680,0.320)WP(0.3127,0.3290)L(1000.0,0.0050)"
+    )
+    assert metadata.max_cll == 1000
+    assert metadata.max_fall == 400
 
 
-def test_is_hdr_hlg_bt2020_returns_true():
+def test_detect_hdr_hlg_bt2020():
     """HLG (18) + BT.2020 (9) is HDR."""
-    clip = MagicMock()
-    clip.get_frame.return_value.props = {
+    props = {
         "_Transfer": 18,
         "_Primaries": 9,
     }
-    assert is_hdr(clip) is True
+    is_hdr_detected, metadata = detect_hdr(props)
+
+    assert is_hdr_detected is True
+    assert metadata is not None
+    assert metadata.transfer == 18
+    assert metadata.color_primaries == 9
+    assert metadata.matrix == 2  # Default unspecified
+    assert metadata.mastering_display is None
+    assert metadata.max_cll is None
+    assert metadata.max_fall is None
 
 
-def test_is_hdr_sdr_returns_false():
+def test_detect_hdr_sdr():
     """BT.709 (1) + BT.709 (1) is SDR."""
-    clip = MagicMock()
-    clip.get_frame.return_value.props = {
+    props = {
         "_Transfer": 1,
         "_Primaries": 1,
     }
-    assert is_hdr(clip) is False
+    is_hdr_detected, metadata = detect_hdr(props)
+
+    assert is_hdr_detected is False
+    assert metadata is None
 
 
-def test_is_hdr_pq_without_bt2020_returns_false():
+def test_detect_hdr_pq_without_bt2020():
     """PQ (16) without BT.2020 (e.g. BT.709=1) is False by rule."""
-    clip = MagicMock()
-    clip.get_frame.return_value.props = {
+    props = {
         "_Transfer": 16,
         "_Primaries": 1,
     }
-    assert is_hdr(clip) is False
+    is_hdr_detected, metadata = detect_hdr(props)
 
-
-def test_is_hdr_bt2020_without_pq_hlg_returns_false():
-    """BT.2020 (9) with BT.709 transfer (1) is False."""
-    clip = MagicMock()
-    clip.get_frame.return_value.props = {
-        "_Transfer": 1,
-        "_Primaries": 9,
-    }
-    assert is_hdr(clip) is False
+    assert is_hdr_detected is False
+    assert metadata is None

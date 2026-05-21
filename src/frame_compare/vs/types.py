@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from fractions import Fraction
 from typing import TYPE_CHECKING
 
+from frame_compare.config.schema import ToneCurve, TonemapPreset
+
 if TYPE_CHECKING:
     import vapoursynth as vs  # type: ignore
 
@@ -43,8 +45,8 @@ class TonemapSettings:
     """Resolved tonemap settings for VS operations."""
 
     enabled: bool = True
-    preset: str = "reference"
-    tone_curve: str = "bt2390"
+    preset: TonemapPreset = TonemapPreset.REFERENCE
+    tone_curve: ToneCurve = ToneCurve.BT2390
     target_nits: int = 203
     source_peak: int | None = None
     contrast_recovery: float = 0.0

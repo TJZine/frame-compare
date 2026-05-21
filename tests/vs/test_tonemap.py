@@ -31,14 +31,15 @@ import vapoursynth as vs  # noqa: E402, I001
 from frame_compare.errors import TonemapError  # noqa: E402, I001
 from frame_compare.vs.tonemap import apply_tonemap, get_preset_settings  # noqa: E402, I001
 from frame_compare.vs.types import HDRMetadata, TonemapSettings  # noqa: E402, I001
+from frame_compare.config.schema import ToneCurve, TonemapPreset  # noqa: E402, I001
 
 
 def test_get_preset_settings_returns_valid_settings():
     """Verify default preset settings."""
-    result = get_preset_settings("reference")
+    result = get_preset_settings(TonemapPreset.REFERENCE)
     assert isinstance(result, TonemapSettings)
-    assert result.preset == "reference"
-    assert result.tone_curve == "bt2390"
+    assert result.preset == TonemapPreset.REFERENCE
+    assert result.tone_curve == ToneCurve.BT2390
     assert result.target_nits == 203
 
 
@@ -146,7 +147,7 @@ def test_apply_tonemap_unsupported_tone_curve_raises_error(mock_runtime_usable, 
     """Verify unsupported tone curve raises error in libplacebo path."""
     mock_detect.return_value = {"libplacebo": True}
     mock_clip = MagicMock()
-    settings = TonemapSettings(enabled=True, tone_curve="invalid")
+    settings = TonemapSettings(enabled=True, tone_curve="invalid")  # type: ignore[arg-type]
 
     with pytest.raises(TonemapError) as exc:
         apply_tonemap(mock_clip, settings)
@@ -229,7 +230,7 @@ def test_to_rgbs_converts_non_rgbs():
     mock_clip.resize.Bicubic.assert_called_once_with(format=vs.RGBS, matrix_in_s="709")
 
 
-@patch("frame_compare.vs.tonemap._detect_hdr")
+@patch("frame_compare.vs.tonemap.detect_hdr")
 @patch("frame_compare.vs.tonemap.detect_plugins")
 @patch("frame_compare.vs.tonemap._libplacebo_runtime_usable", return_value=True)
 def test_apply_tonemap_detects_metadata_when_missing_libplacebo(
@@ -241,12 +242,12 @@ def test_apply_tonemap_detects_metadata_when_missing_libplacebo(
     mock_clip = MagicMock()
     mock_clip.format.id = vs.RGBS
 
-    # Mock _detect_hdr return
+    # Mock detect_hdr return
     mock_metadata = MagicMock()
     mock_metadata.max_cll = 1234
     mock_detect_hdr.return_value = (True, mock_metadata)
 
-    settings = TonemapSettings(enabled=True, tone_curve="bt2390")
+    settings = TonemapSettings(enabled=True, tone_curve=ToneCurve.BT2390)
 
     with patch("vapoursynth.core", MagicMock()) as mock_core:
         apply_tonemap(mock_clip, settings, hdr_metadata=None)
@@ -282,7 +283,7 @@ def test_apply_tonemap_passes_src_csp_hint_for_hdr10(mock_runtime_usable, mock_d
         matrix=9,
     )
 
-    settings = TonemapSettings(enabled=True, tone_curve="bt2390", target_nits=203)
+    settings = TonemapSettings(enabled=True, tone_curve=ToneCurve.BT2390, target_nits=203)
 
     with patch("vapoursynth.core", MagicMock()) as mock_core:
         apply_tonemap(mock_clip, settings, hdr_metadata=hdr_metadata)
@@ -302,7 +303,7 @@ def test_apply_tonemap_rejects_non_positive_target_nits_before_processing(
     """Invalid target_nits should fail early with explicit validation error."""
     mock_detect.return_value = {"libplacebo": True}
     mock_clip = MagicMock()
-    settings = TonemapSettings(enabled=True, tone_curve="bt2390", target_nits=0)
+    settings = TonemapSettings(enabled=True, tone_curve=ToneCurve.BT2390, target_nits=0)
 
     with pytest.raises(TonemapError, match="target_nits must be > 0"):
         apply_tonemap(mock_clip, settings)
@@ -315,7 +316,7 @@ def test_apply_tonemap_rejects_non_positive_target_nits_for_fallback_path(mock_d
     """Validation should run before selecting libplacebo/fallback path."""
     mock_detect.return_value = {"libplacebo": False}
     mock_clip = MagicMock()
-    settings = TonemapSettings(enabled=True, tone_curve="reinhard", target_nits=-5)
+    settings = TonemapSettings(enabled=True, tone_curve=ToneCurve.REINHARD, target_nits=-5)
 
     with pytest.raises(TonemapError, match="target_nits must be > 0"):
         apply_tonemap(mock_clip, settings)
@@ -332,7 +333,7 @@ def test_apply_tonemap_retries_minimal_kwargs_on_any_typeerror(mock_runtime_usab
     mock_clip.std.SetFrameProps = MagicMock(return_value=mock_clip)
     mock_clip.resize.Point = MagicMock(return_value=mock_clip)
 
-    settings = TonemapSettings(enabled=True, tone_curve="bt2390", target_nits=203)
+    settings = TonemapSettings(enabled=True, tone_curve=ToneCurve.BT2390, target_nits=203)
     with patch("vapoursynth.core", MagicMock()) as mock_core:
         mock_core.placebo.Tonemap.side_effect = [
             TypeError("libplacebo signature mismatch"),
@@ -351,7 +352,7 @@ def test_apply_tonemap_retries_minimal_kwargs_on_any_typeerror(mock_runtime_usab
         assert "dst_prim" not in second_call.kwargs
 
 
-@patch("frame_compare.vs.tonemap._detect_hdr")
+@patch("frame_compare.vs.tonemap.detect_hdr")
 @patch("frame_compare.vs.tonemap.detect_plugins")
 def test_apply_tonemap_detects_metadata_when_missing_fallback(mock_detect, mock_detect_hdr):
     """Verify metadata extraction is attempted in fallback path if missing."""
@@ -362,12 +363,12 @@ def test_apply_tonemap_detects_metadata_when_missing_fallback(mock_detect, mock_
     mock_clip.std.Expr = MagicMock()
     mock_clip.format.id = vs.RGBS
 
-    # Mock _detect_hdr return
+    # Mock detect_hdr return
     mock_metadata = MagicMock()
     mock_metadata.max_cll = 5678
     mock_detect_hdr.return_value = (True, mock_metadata)
 
-    settings = TonemapSettings(enabled=True, tone_curve="reinhard")
+    settings = TonemapSettings(enabled=True, tone_curve=ToneCurve.REINHARD)
 
     apply_tonemap(mock_clip, settings, hdr_metadata=None)
 

@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from frame_compare.config.overrides import TonemapCliOverrides
-from frame_compare.config.schema import ColorConfig, ConfigSchema
+from frame_compare.config.schema import ColorConfig, ConfigSchema, ToneCurve, TonemapPreset
 from frame_compare.errors import (
     SourceLoadError,
     TonemapRequiresVapourSynthError,
@@ -59,9 +59,9 @@ def test_resolve_tonemap_settings_applies_config_overrides() -> None:
     config = ConfigSchema(
         color=ColorConfig(
             enable_tonemap=True,
-            preset="filmic",
+            preset=TonemapPreset.FILMIC,
             target_nits=250,
-            tone_curve="spline",
+            tone_curve=ToneCurve.SPLINE,
             gamma_lift=True,
             contrast_recovery=0.25,
         )
@@ -71,19 +71,19 @@ def test_resolve_tonemap_settings_applies_config_overrides() -> None:
         # Return a base settings object
         mock_get_preset.return_value = TonemapSettings(
             enabled=True,
-            preset="filmic",
-            tone_curve="bt2390",  # Will be overridden
+            preset=TonemapPreset.FILMIC,
+            tone_curve=ToneCurve.BT2390,  # Will be overridden
             target_nits=203,  # Will be overridden
         )
 
         settings = resolve_tonemap_settings(config)
 
         # Verify preset was requested
-        mock_get_preset.assert_called_once_with("filmic")
+        mock_get_preset.assert_called_once_with(TonemapPreset.FILMIC)
 
         # Verify config overrides were applied
         assert settings.target_nits == 250
-        assert settings.tone_curve == "spline"
+        assert settings.tone_curve == ToneCurve.SPLINE
         assert settings.gamma_lift is True
         assert settings.contrast_recovery == 0.25
 
@@ -93,34 +93,34 @@ def test_resolve_tonemap_settings_applies_cli_overrides() -> None:
     config = ConfigSchema(
         color=ColorConfig(
             enable_tonemap=True,
-            preset="filmic",
+            preset=TonemapPreset.FILMIC,
             target_nits=250,
-            tone_curve="spline",
+            tone_curve=ToneCurve.SPLINE,
         )
     )
 
     cli_overrides: TonemapCliOverrides = {
-        "tm_preset": "reference",
+        "tm_preset": TonemapPreset.REFERENCE,
         "tm_target": 400,
-        "tm_curve": "mobius",
+        "tm_curve": ToneCurve.REINHARD,
     }
 
     with patch("frame_compare.vs.tonemap.get_preset_settings") as mock_get_preset:
         mock_get_preset.return_value = TonemapSettings(
             enabled=True,
-            preset="reference",
-            tone_curve="bt2390",
+            preset=TonemapPreset.REFERENCE,
+            tone_curve=ToneCurve.BT2390,
             target_nits=203,
         )
 
         settings = resolve_tonemap_settings(config, cli_overrides)
 
         # Verify preset requested was reference, not filmic
-        mock_get_preset.assert_called_once_with("reference")
+        mock_get_preset.assert_called_once_with(TonemapPreset.REFERENCE)
 
         # Verify CLI overrides overrode both the preset default and the config values
         assert settings.target_nits == 400
-        assert settings.tone_curve == "mobius"
+        assert settings.tone_curve == ToneCurve.REINHARD
 
 
 # ─── Probe Failure Determinism Tests ───────────────────────────────────────────

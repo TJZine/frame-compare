@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING
 
 from frame_compare.errors import SourceLoadError
 from frame_compare.vs.env import ensure_vs_environment, require_plugin
-from frame_compare.vs.types import HDRMetadata, SourceInfo
+from frame_compare.vs.props import detect_hdr
+from frame_compare.vs.types import SourceInfo
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
     from pathlib import Path
 
     import vapoursynth as vs  # type: ignore
@@ -41,7 +41,7 @@ def load_source(path: Path, core: vs.Core | None = None) -> SourceInfo:
         clip = loader.LWLibavSource(str(path))
         frame = clip.get_frame(0)
         fps = Fraction(clip.fps.numerator, clip.fps.denominator)
-        is_hdr, hdr_metadata = _detect_hdr(dict(frame.props))
+        is_hdr, hdr_metadata = detect_hdr(dict(frame.props))
     except Exception as e:
         raise SourceLoadError(path, str(e)) from e
 
@@ -72,36 +72,3 @@ def apply_trim(source: SourceInfo, start: int, end: int | None = None) -> vs.Vid
     if end is None:
         return source.clip[start:]
     return source.clip[start : end + 1]  # end+1 because VS slice is exclusive on right
-
-
-def _detect_hdr(frame_props: Mapping[str, object]) -> tuple[bool, HDRMetadata | None]:
-    """Detect HDR from frame properties per SSOT 5.1 mapping.
-
-    HDR Detection: is_hdr = _Transfer in (16, 18) AND _Primaries == 9
-    """
-    # Defaults to 2 (unspecified) if missing
-    transfer = int(frame_props.get("_Transfer", 2))  # type: ignore
-    primaries = int(frame_props.get("_Primaries", 2))  # type: ignore
-
-    is_hdr = transfer in (16, 18) and primaries == 9
-
-    if not is_hdr:
-        return (False, None)
-
-    return (
-        True,
-        HDRMetadata(
-            mastering_display=str(frame_props["MasteringDisplayPrimaries"])
-            if "MasteringDisplayPrimaries" in frame_props
-            else None,
-            max_cll=int(frame_props["ContentLightLevelMax"])  # type: ignore
-            if "ContentLightLevelMax" in frame_props
-            else None,
-            max_fall=int(frame_props["ContentLightLevelAverage"])  # type: ignore
-            if "ContentLightLevelAverage" in frame_props
-            else None,
-            color_primaries=primaries,
-            transfer=transfer,
-            matrix=int(frame_props.get("_Matrix", 2)),  # type: ignore
-        ),
-    )

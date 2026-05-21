@@ -19,7 +19,7 @@ if TYPE_CHECKING:
         require_plugin,
     )
     from frame_compare.vs.loader import DefaultVSLoader, VSLoader
-    from frame_compare.vs.props import get_color_props, is_hdr
+    from frame_compare.vs.props import detect_hdr
     from frame_compare.vs.source import apply_trim, load_source
     from frame_compare.vs.tonemap import apply_tonemap, get_preset_settings
     from frame_compare.vs.types import ColorProps, HDRMetadata, SourceInfo, TonemapSettings
@@ -41,8 +41,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "DefaultVSLoader": ("frame_compare.vs.loader", "DefaultVSLoader"),
     "VSLoader": ("frame_compare.vs.loader", "VSLoader"),
     # props
-    "get_color_props": ("frame_compare.vs.props", "get_color_props"),
-    "is_hdr": ("frame_compare.vs.props", "is_hdr"),
+    "detect_hdr": ("frame_compare.vs.props", "detect_hdr"),
     # source
     "apply_trim": ("frame_compare.vs.source", "apply_trim"),
     "load_source": ("frame_compare.vs.source", "load_source"),
@@ -70,8 +69,7 @@ __all__ = [
     "require_plugin",
     "load_source",
     "apply_trim",
-    "get_color_props",
-    "is_hdr",
+    "detect_hdr",
     "infer_color_props",
     "apply_color_props",
     "expand_limited_rgb_to_full",

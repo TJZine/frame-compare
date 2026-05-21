@@ -61,12 +61,12 @@ def resolve_tonemap_settings(
     from frame_compare.vs.tonemap import get_preset_settings
 
     # Start with preset
-    preset_name = (cli_overrides or {}).get("tm_preset") or config.color.preset.value
-    settings = get_preset_settings(preset_name)
+    preset = (cli_overrides or {}).get("tm_preset") or config.color.preset
+    settings = get_preset_settings(preset)
 
     # Apply config overrides (config values always have defaults; direct access)
     settings = replace(settings, target_nits=config.color.target_nits)
-    settings = replace(settings, tone_curve=config.color.tone_curve.value)
+    settings = replace(settings, tone_curve=config.color.tone_curve)
     settings = replace(settings, gamma_lift=config.color.gamma_lift)
     settings = replace(settings, contrast_recovery=config.color.contrast_recovery)
 
@@ -77,7 +77,7 @@ def resolve_tonemap_settings(
             settings = replace(settings, target_nits=target_val)
         curve_val = cli_overrides.get("tm_curve")
         if curve_val is not None:
-            settings = replace(settings, tone_curve=str(curve_val))
+            settings = replace(settings, tone_curve=curve_val)
 
     return settings
 

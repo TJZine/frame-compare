@@ -11,9 +11,10 @@ from typing import TYPE_CHECKING, cast
 
 import structlog
 
+from frame_compare.config.schema import ToneCurve, TonemapPreset
 from frame_compare.errors import TonemapError
 from frame_compare.vs.env import detect_plugins
-from frame_compare.vs.source import _detect_hdr  # pyright: ignore[reportPrivateUsage]
+from frame_compare.vs.props import detect_hdr
 from frame_compare.vs.types import HDRMetadata, TonemapSettings
 
 if TYPE_CHECKING:
@@ -27,30 +28,49 @@ _LIBPLACEBO_PROBE_ENV = "FRAME_COMPARE_LIBPLACEBO_PROBE"
 _LIBPLACEBO_PROBE_TIMEOUT_SECONDS = 5.0
 
 # Private constants
-_TONE_CURVE_MAP = {"bt2390": 2, "spline": 1, "reinhard": 4}
+_TONE_CURVE_MAP = {
+    ToneCurve.BT2390: 2,
+    ToneCurve.SPLINE: 1,
+    ToneCurve.REINHARD: 4,
+    "bt2390": 2,
+    "spline": 1,
+    "reinhard": 4,
+}
 
 _TONEMAP_PRESETS: dict[str, TonemapSettings] = {
     "reference": TonemapSettings(
-        preset="reference", tone_curve="bt2390", target_nits=203, gamma_lift=False
+        preset=TonemapPreset.REFERENCE,
+        tone_curve=ToneCurve.BT2390,
+        target_nits=203,
+        gamma_lift=False,
     ),
     "filmic": TonemapSettings(
-        preset="filmic", tone_curve="spline", target_nits=203, gamma_lift=False
+        preset=TonemapPreset.FILMIC, tone_curve=ToneCurve.SPLINE, target_nits=203, gamma_lift=False
     ),
     "contrast": TonemapSettings(
-        preset="contrast", tone_curve="reinhard", target_nits=203, gamma_lift=False
+        preset=TonemapPreset.CONTRAST,
+        tone_curve=ToneCurve.REINHARD,
+        target_nits=203,
+        gamma_lift=False,
     ),
     "bt2390_spec": TonemapSettings(
-        preset="bt2390_spec", tone_curve="bt2390", target_nits=100, gamma_lift=False
+        preset=TonemapPreset.BT2390_SPEC,
+        tone_curve=ToneCurve.BT2390,
+        target_nits=100,
+        gamma_lift=False,
     ),
     "spline": TonemapSettings(
-        preset="spline", tone_curve="spline", target_nits=203, gamma_lift=False
+        preset=TonemapPreset.SPLINE, tone_curve=ToneCurve.SPLINE, target_nits=203, gamma_lift=False
     ),
     "bright_lift": TonemapSettings(
-        preset="bright_lift", tone_curve="bt2390", target_nits=250, gamma_lift=True
+        preset=TonemapPreset.BRIGHT_LIFT,
+        tone_curve=ToneCurve.BT2390,
+        target_nits=250,
+        gamma_lift=True,
     ),
     "highlight_guard": TonemapSettings(
-        preset="highlight_guard",
-        tone_curve="spline",
+        preset=TonemapPreset.HIGHLIGHT_GUARD,
+        tone_curve=ToneCurve.SPLINE,
         target_nits=180,
         gamma_lift=False,
     ),
@@ -196,7 +216,7 @@ def _convert_non_rgb_with_matrix_hint(
     matrix_in_s: str | None = None
     if matrix_prop is None:
         if detected_is_hdr is None:
-            detected_is_hdr, _ = _detect_hdr(props)
+            detected_is_hdr, _ = detect_hdr(props)
         matrix_in_s = "2020ncl" if detected_is_hdr else "709"
 
     if matrix_in_s is None:
@@ -268,7 +288,7 @@ def _apply_libplacebo(
             return
         if props is None:
             props = dict(clip.get_frame(0).props)
-        detected_is_hdr, detected_hdr_metadata = _detect_hdr(props)
+        detected_is_hdr, detected_hdr_metadata = detect_hdr(props)
 
     if hdr_metadata is None:
         _ensure_hdr_detection()
@@ -380,7 +400,7 @@ def _fallback_tonemap(
 
     if hdr_metadata is None:
         props = dict(clip.get_frame(0).props)
-        _, hdr_metadata = _detect_hdr(props)
+        _, hdr_metadata = detect_hdr(props)
 
     peak = settings.source_peak
     if peak is None:
@@ -411,14 +431,15 @@ def _fallback_tonemap(
     return _apply_post_processing(clip, settings)
 
 
-def get_preset_settings(preset: str) -> TonemapSettings:
+def get_preset_settings(preset: TonemapPreset | str) -> TonemapSettings:
     """Get settings for named preset."""
-    if preset not in _TONEMAP_PRESETS:
+    preset_key = preset.value if isinstance(preset, TonemapPreset) else preset
+    if preset_key not in _TONEMAP_PRESETS:
         raise TonemapError(
             reason=f"Unknown preset '{preset}'",
             hint=f"Available: {', '.join(_TONEMAP_PRESETS.keys())}",
         )
-    return _TONEMAP_PRESETS[preset]
+    return _TONEMAP_PRESETS[preset_key]
 
 
 def apply_tonemap(

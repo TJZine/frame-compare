@@ -482,6 +482,12 @@ Color space properties extracted from frame.
 
 Default VapourSynth loader implementation using LWLibavSource.
 
+### detect_hdr
+
+`detect_hdr(frame_props: Mapping[str, object]) -> tuple[bool, HDRMetadata | None]`
+
+Detect HDR from frame properties per SSOT 5.1 mapping.
+
 ### detect_plugins
 
 `detect_plugins(core: vs.Core) -> dict[str, bool]`
@@ -500,15 +506,9 @@ Initialize VapourSynth core with plugins.
 
 Expand limited-range integer RGB to full range.
 
-### get_color_props
-
-`get_color_props(clip: vs.VideoNode) -> ColorProps`
-
-Extract color space properties from frame 0.
-
 ### get_preset_settings
 
-`get_preset_settings(preset: str) -> TonemapSettings`
+`get_preset_settings(preset: TonemapPreset | str) -> TonemapSettings`
 
 Get settings for named preset.
 
@@ -523,12 +523,6 @@ HDR metadata extracted from source.
 `infer_color_props(clip: vs.VideoNode, props: ColorProps) -> ColorProps`
 
 Resolve missing/unspecified color properties for downstream conversions.
-
-### is_hdr
-
-`is_hdr(clip: vs.VideoNode) -> bool`
-
-Determine if clip is HDR based on frame 0 properties.
 
 ### is_vapoursynth_available
 
