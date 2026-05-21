@@ -193,14 +193,10 @@ def test_render_screenshots_fallback_unknown(tmp_path, default_config):
         with patch("frame_compare.render.orchestrator.render_batch") as mock_batch:
             mock_batch.return_value = [tmp_path / "1.png"]
 
-            with capture_logs() as captured:
-                results = render_screenshots(
-                    clips, frames, tmp_path, default_config, renderer="auto"
-                )
-
-            assert "vid1" in results
-            # With enable_tonemap=False, fallback is allowed
-            assert any(log["event"] == "vs_load_failed_falling_back" for log in captured)
+            with pytest.raises(RenderError) as exc_info:
+                render_screenshots(clips, frames, tmp_path, default_config, renderer="auto")
+            assert exc_info.type is RenderError
+            assert isinstance(exc_info.value.__cause__, RuntimeError)
 
 
 def test_render_screenshots_overlay_resolution(tmp_path, default_config):

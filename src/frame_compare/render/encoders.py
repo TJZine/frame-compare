@@ -95,9 +95,12 @@ def render_frame(request: RenderRequest, renderer: Renderer = "auto") -> Path:
             )
         else:
             path = cast(Path, clip)
-            _render_ffmpeg(
-                path, request.frame_number, request.output_path, request.encoder_settings
-            )
+            if request.ffmpeg_runner is not None:
+                request.ffmpeg_runner.extract_frame(path, request.frame_number, request.output_path)
+            else:
+                _render_ffmpeg(
+                    path, request.frame_number, request.output_path, request.encoder_settings
+                )
 
             # Overlay Integration for FFmpeg
             if request.overlay is not None and request.overlay.mode != OverlayMode.NONE:

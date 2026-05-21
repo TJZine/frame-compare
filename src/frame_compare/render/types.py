@@ -9,6 +9,8 @@ from frame_compare.config.schema import OverlayMode
 if TYPE_CHECKING:
     import vapoursynth as vs  # type: ignore
 
+    from frame_compare.render.ffmpeg import FFmpegRunner
+
 
 @dataclass
 class EncoderSettings:
@@ -46,6 +48,7 @@ class RenderRequest:
     output_path: Path
     overlay: OverlayConfig | None
     encoder_settings: EncoderSettings
+    ffmpeg_runner: FFmpegRunner | None = None
 
 
 @dataclass(frozen=True)

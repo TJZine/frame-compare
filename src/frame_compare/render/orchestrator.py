@@ -356,9 +356,7 @@ def _prepare_clip_for_render(
             # Store failure for fallback logic
             vs_load_failure = exc
         except Exception as e:
-            if renderer == "vapoursynth":
-                raise RenderError(reason=f"{type(e).__name__}: {e}") from e
-            vs_load_failure = e
+            raise RenderError(reason=f"{type(e).__name__}: {e}") from e
 
     # === DETERMINISTIC FALLBACK LOGIC (§1.4.1, §1.4.4) ===
     if vs_load_failure is not None and renderer == "auto":
@@ -369,6 +367,32 @@ def _prepare_clip_for_render(
         _validate_ffmpeg_tonemap_gate(clip_path, config, ffmpeg_runner)
 
     return loaded_clip, resolution, hdr_info, source_info
+
+
+def _assemble_overlay(
+    overlay_mode: OverlayMode,
+    label: str,
+    frame_number: int,
+    display_frame_number: int,
+    num_frames: int | None,
+    selection_label: str | None,
+    resolution: tuple[int, int],
+    hdr_info: str | None,
+) -> OverlayConfig | None:
+    """Construct an OverlayConfig if overlay mode is not NONE."""
+    if overlay_mode == OverlayMode.NONE:
+        return None
+    return OverlayConfig(
+        mode=overlay_mode,
+        label=label,
+        frame_number=frame_number,
+        display_frame_number=display_frame_number,
+        num_frames=num_frames,
+        selection_label=selection_label,
+        resolution=resolution,
+        hdr_info=hdr_info,
+        font_path=None,
+    )
 
 
 def render_screenshots(
@@ -410,66 +434,42 @@ def render_screenshots(
         RenderError: For other rendering failures
     """
     label_map = label_map or {}
-    all_requests: list[RenderRequest] = []
 
     if output_frames is not None and len(output_frames) != len(frames):
         raise ValueError("output_frames must have the same length as frames")
     if selection_labels is not None and len(selection_labels) != len(frames):
         raise ValueError("selection_labels must have the same length as frames")
 
-    # Store labels in order to preserve clip ordering in result dict
-    ordered_labels: list[str] = []
-
+    batch_requests: list[ScreenshotBatchRequest] = []
     for clip_path in clips:
         label = label_map.get(clip_path, clip_path.stem)
-        ordered_labels.append(label)
-
-        loaded_clip, resolution, hdr_info, source_info = _prepare_clip_for_render(
-            clip_path, renderer, config, ffmpeg_runner=ffmpeg_runner
+        display_frames = output_frames if output_frames is not None else frames
+        sel_labels: list[str | None] = (
+            selection_labels if selection_labels is not None else [None] * len(frames)
         )
 
-        for idx, frame in enumerate(frames):
-            output_frame = output_frames[idx] if output_frames is not None else frame
-            output_path = generate_screenshot_path(output_dir, label, output_frame)
-            selection_label = selection_labels[idx] if selection_labels is not None else None
+        req = ScreenshotBatchRequest(
+            clip_path=clip_path,
+            label=label,
+            source_frames=frames,
+            display_frames=display_frames,
+            selection_labels=sel_labels,
+            probe_width=0,
+            probe_height=0,
+            probe_num_frames=0,
+            probe_is_hdr=False,
+        )
+        batch_requests.append(req)
 
-            overlay: OverlayConfig | None = None
-            if overlay_mode != OverlayMode.NONE:
-                overlay = OverlayConfig(
-                    mode=overlay_mode,
-                    label=label,
-                    frame_number=frame,
-                    display_frame_number=output_frame,
-                    num_frames=source_info.num_frames if source_info is not None else None,
-                    selection_label=selection_label,
-                    resolution=resolution,
-                    hdr_info=hdr_info,
-                    font_path=None,
-                )
-
-            req = RenderRequest(
-                clip=loaded_clip,
-                frame_number=frame,
-                output_path=output_path,
-                overlay=overlay,
-                encoder_settings=EncoderSettings(),
-            )
-            all_requests.append(req)
-
-    # Execute batch
-    # Plan says: "Delegate execution to render_batch". Default parallelism=1.
-    rendered_paths = render_batch(all_requests, parallelism=1, reporter=reporter)
-
-    # Reconstruct results dict
-    results: dict[str, list[Path]] = {}
-    path_idx = 0
-    for label in ordered_labels:
-        results[label] = []
-        for _ in frames:
-            results[label].append(rendered_paths[path_idx])
-            path_idx += 1
-
-    return results
+    return render_screenshots_from_batch(
+        batch_requests=batch_requests,
+        output_dir=output_dir,
+        config=config,
+        overlay_mode=overlay_mode,
+        renderer=renderer,
+        ffmpeg_runner=ffmpeg_runner,
+        reporter=reporter,
+    )
 
 
 def _validate_batch_request_lengths(request: ScreenshotBatchRequest) -> None:
@@ -490,6 +490,7 @@ def render_screenshots_from_batch(
     output_dir: Path,
     config: ConfigSchema,
     overlay_mode: OverlayMode,
+    renderer: Renderer = "auto",
     ffmpeg_runner: FFmpegRunner | None = None,
     reporter: ProgressReporter | None = None,
 ) -> dict[str, list[Path]]:
@@ -500,22 +501,25 @@ def render_screenshots_from_batch(
         output_dir: Output directory
         config: Configuration
         overlay_mode: Overlay mode
+        renderer: Renderer choice ("vapoursynth", "ffmpeg", or "auto")
         ffmpeg_runner: Optional FFmpegRunner
         reporter: Optional progress reporter
 
     Returns:
         Dict mapping label -> list of rendered screenshot paths
     """
-    from frame_compare.render.encoders import apply_overlay_to_file
-
     if ffmpeg_runner is None:
         from frame_compare.render.ffmpeg import DefaultFFmpegRunner
 
         ffmpeg_runner = DefaultFFmpegRunner()
 
-    # Tonemap validation gate check if FFmpeg renderer is requested via config
+    target_renderer = renderer
+    if target_renderer == "auto" and config.screenshots.use_ffmpeg:
+        target_renderer = "ffmpeg"
+
+    # Fast preflight check if FFmpeg is requested
     if (
-        config.screenshots.use_ffmpeg
+        target_renderer == "ffmpeg"
         and config.color.enable_tonemap
         and any(req.probe_is_hdr for req in batch_requests)
     ):
@@ -526,45 +530,60 @@ def render_screenshots_from_batch(
     for req in batch_requests:
         _validate_batch_request_lengths(req)
 
-    rendered: dict[str, list[Path]] = {}
+    all_requests: list[RenderRequest] = []
+    label_to_range: dict[str, range] = {}
+    start_idx = 0
 
-    if config.screenshots.use_ffmpeg:
-        for req in batch_requests:
-            paths: list[Path] = []
-            for idx, aligned_frame in enumerate(req.display_frames):
-                source_frame = req.source_frames[idx]
-                output = generate_screenshot_path(output_dir, req.label, aligned_frame)
-                ffmpeg_runner.extract_frame(req.clip_path, source_frame, output)
-                if overlay_mode != OverlayMode.NONE:
-                    overlay = OverlayConfig(
-                        mode=overlay_mode,
-                        label=req.label,
-                        frame_number=source_frame,
-                        resolution=(req.probe_width, req.probe_height),
-                        hdr_info="HDR" if req.probe_is_hdr else None,
-                        font_path=None,
-                        display_frame_number=aligned_frame,
-                        num_frames=req.probe_num_frames,
-                        selection_label=req.selection_labels[idx],
-                    )
-                    apply_overlay_to_file(output, overlay)
-                paths.append(output)
-            rendered[req.label] = paths
-    else:
-        for req in batch_requests:
-            rendered_for_clip = render_screenshots(
-                clips=[req.clip_path],
-                frames=req.source_frames,
-                output_frames=req.display_frames,
-                selection_labels=req.selection_labels,
-                output_dir=output_dir,
-                config=config,
-                label_map={req.clip_path: req.label},
-                renderer="auto",
+    for req in batch_requests:
+        loaded_clip, _, hdr_info, source_info = _prepare_clip_for_render(
+            req.clip_path, target_renderer, config, ffmpeg_runner=ffmpeg_runner
+        )
+
+        width = source_info.width if source_info is not None else req.probe_width
+        height = source_info.height if source_info is not None else req.probe_height
+        num_frames = source_info.num_frames if source_info is not None else req.probe_num_frames
+        resolved_hdr_info = (
+            hdr_info if source_info is not None else ("HDR" if req.probe_is_hdr else None)
+        )
+
+        num_frames_for_req = len(req.source_frames)
+        label_to_range[req.label] = range(start_idx, start_idx + num_frames_for_req)
+        start_idx += num_frames_for_req
+
+        for idx, source_frame in enumerate(req.source_frames):
+            aligned_frame = req.display_frames[idx]
+            selection_label = req.selection_labels[idx]
+
+            output_path = generate_screenshot_path(output_dir, req.label, aligned_frame)
+
+            overlay = _assemble_overlay(
                 overlay_mode=overlay_mode,
-                reporter=reporter,
+                label=req.label,
+                frame_number=source_frame,
+                display_frame_number=aligned_frame,
+                num_frames=num_frames,
+                selection_label=selection_label,
+                resolution=(width, height),
+                hdr_info=resolved_hdr_info,
+            )
+
+            render_req = RenderRequest(
+                clip=loaded_clip,
+                frame_number=source_frame,
+                output_path=output_path,
+                overlay=overlay,
+                encoder_settings=EncoderSettings(),
                 ffmpeg_runner=ffmpeg_runner,
             )
-            rendered[req.label] = rendered_for_clip[req.label]
+            all_requests.append(render_req)
 
-    return rendered
+    # Execute all requests in a single batch
+    rendered_paths = render_batch(all_requests, parallelism=1, reporter=reporter)
+
+    # Reconstruct results dict maintaining the order of batch requests
+    results: dict[str, list[Path]] = {}
+    for req in batch_requests:
+        r = label_to_range[req.label]
+        results[req.label] = rendered_paths[r.start : r.stop]
+
+    return results
