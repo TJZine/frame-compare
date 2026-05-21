@@ -22,7 +22,14 @@ class FFmpegRunner(Protocol):
         ...
 
     def probe_hdr(self, video: Path) -> HDRMetadata | None:
-        """Probe HDR metadata for a video, returning None if unavailable."""
+        """Probe HDR metadata for a video.
+
+        Returns:
+            HDRMetadata if valid color primaries and transfer characteristics are present,
+            or None if they are missing or unspecified (mapped to 2).
+            Returns an HDRMetadata object even for SDR streams (e.g., BT.709) if the
+            metadata is explicitly available.
+        """
         ...
 
 
@@ -135,19 +142,22 @@ class DefaultFFmpegRunner:
         transfer_raw = str(stream.get("color_transfer", "")).lower().strip()
         primaries_raw = str(stream.get("color_primaries", "")).lower().strip()
         matrix_raw = str(stream.get("color_space", "")).lower().strip()
-        is_missing = not transfer_raw or not primaries_raw
-        is_hdr = transfer_raw in {"smpte2084", "arib-std-b67"} and primaries_raw == "bt2020"
-        if not is_hdr and not is_missing:
-            return None
-
         primaries_map = {"bt709": 1, "bt2020": 9}
         transfer_map = {"bt709": 1, "smpte2084": 16, "arib-std-b67": 18}
         matrix_map = {"bt709": 1, "bt2020nc": 9, "bt2020c": 10}
+
+        color_primaries = primaries_map.get(primaries_raw, 2)
+        transfer = transfer_map.get(transfer_raw, 2)
+        matrix = matrix_map.get(matrix_raw, 2)
+
+        if not transfer_raw or not primaries_raw or color_primaries == 2 or transfer == 2:
+            return None
+
         return HDRMetadata(
             mastering_display=None,
             max_cll=None,
             max_fall=None,
-            color_primaries=primaries_map.get(primaries_raw, 2),
-            transfer=transfer_map.get(transfer_raw, 2),
-            matrix=matrix_map.get(matrix_raw, 2),
+            color_primaries=color_primaries,
+            transfer=transfer,
+            matrix=matrix,
         )

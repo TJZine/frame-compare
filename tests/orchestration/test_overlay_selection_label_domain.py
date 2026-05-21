@@ -25,7 +25,16 @@ class FakeFFmpegRunner:
         Image.new("RGB", (10, 10), color=(0, 0, 0)).save(output, format="PNG")
 
     def probe_hdr(self, _video: Path):  # type: ignore[override]
-        return None
+        from frame_compare.vs.types import HDRMetadata
+
+        return HDRMetadata(
+            mastering_display=None,
+            max_cll=None,
+            max_fall=None,
+            color_primaries=1,
+            transfer=1,
+            matrix=1,
+        )
 
 
 def test_selection_labels_are_looked_up_in_reference_source_frame_domain_after_trim(

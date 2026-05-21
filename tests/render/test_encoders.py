@@ -14,8 +14,6 @@ from frame_compare.errors import (
 )
 from frame_compare.render.encoders import (
     _clip_to_rgb24_for_pillow,
-    _probe_fps,
-    _render_ffmpeg,
     apply_overlay_to_file,
     render_frame,
 )
@@ -39,9 +37,9 @@ def mock_render_vs(monkeypatch):
 
 
 @pytest.fixture
-def mock_render_ffmpeg(monkeypatch):
+def mock_ffmpeg_runner(monkeypatch):
     mock = MagicMock()
-    monkeypatch.setattr("frame_compare.render.encoders._render_ffmpeg", mock)
+    monkeypatch.setattr("frame_compare.render.ffmpeg.DefaultFFmpegRunner.extract_frame", mock)
     return mock
 
 
@@ -71,7 +69,7 @@ def test_render_frame_vs_dispatch(mock_render_vs):
     mock_render_vs.assert_called_once()
 
 
-def test_render_frame_ffmpeg_dispatch(mock_render_ffmpeg):
+def test_render_frame_ffmpeg_dispatch(mock_ffmpeg_runner):
     request = RenderRequest(
         clip=Path("test.mp4"),
         frame_number=100,
@@ -80,7 +78,7 @@ def test_render_frame_ffmpeg_dispatch(mock_render_ffmpeg):
         encoder_settings=EncoderSettings(),
     )
     render_frame(request, renderer="auto")
-    mock_render_ffmpeg.assert_called_once()
+    mock_ffmpeg_runner.assert_called_once()
 
 
 def test_render_frame_mismatch_error():
@@ -116,7 +114,7 @@ def test_render_frame_overlay_integration(mock_render_vs):
     assert call_args[1]["overlay"] == overlay
 
 
-def test_render_frame_overlay_integration_ffmpeg(mock_render_ffmpeg, mock_apply_overlay_file):
+def test_render_frame_overlay_integration_ffmpeg(mock_ffmpeg_runner, mock_apply_overlay_file):
     # FFmpeg Path
     request = RenderRequest(
         clip=Path("test.mp4"),
@@ -126,7 +124,7 @@ def test_render_frame_overlay_integration_ffmpeg(mock_render_ffmpeg, mock_apply_
         encoder_settings=EncoderSettings(),
     )
     render_frame(request, renderer="ffmpeg")
-    mock_render_ffmpeg.assert_called_once()
+    mock_ffmpeg_runner.assert_called_once()
     mock_apply_overlay_file.assert_called_once()
 
 
@@ -141,7 +139,7 @@ def test_apply_overlay_to_file_none_mode_is_noop(monkeypatch) -> None:
 
 
 def test_render_frame_overlay_none_mode_is_strict_noop_on_ffmpeg(
-    mock_render_ffmpeg, mock_apply_overlay_file
+    mock_ffmpeg_runner, mock_apply_overlay_file
 ):
     request = RenderRequest(
         clip=Path("test.mp4"),
@@ -151,50 +149,12 @@ def test_render_frame_overlay_none_mode_is_strict_noop_on_ffmpeg(
         encoder_settings=EncoderSettings(),
     )
     render_frame(request, renderer="ffmpeg")
-    mock_render_ffmpeg.assert_called_once()
+    mock_ffmpeg_runner.assert_called_once()
     mock_apply_overlay_file.assert_not_called()
 
 
-def test_ffmpeg_seek_calculation(mock_run_subprocess):
-    # Setup probe response: 24000/1001 fps
-    mock_run_subprocess.return_value.stdout = b"24000/1001\n"
-
-    _render_ffmpeg(
-        video_path=Path("test.mp4"),
-        frame=100,
-        output=Path("out.png"),
-        settings=EncoderSettings(),
-    )
-
-    # 100 / (24000/1001) = 4.17083...
-    # Keep sub-millisecond precision in the shared seek timestamp.
-
-    # Check calls
-    # Call 1: probe
-    # Call 2: ffmpeg
-    assert mock_run_subprocess.call_count == 2
-
-    # Check probe call
-    probe_call = mock_run_subprocess.call_args_list[0]
-    probe_cmd = probe_call[0][0]
-    assert "stream=avg_frame_rate" in probe_cmd
-
-    # Check ffmpeg call
-    ffmpeg_call = mock_run_subprocess.call_args_list[1]
-    cmd = ffmpeg_call[0][0]
-
-    assert "-ss" in cmd
-    idx = cmd.index("-ss")
-    assert cmd[idx + 1] == "4.170833"
-
-    # Check SSOT compliance (-q:v 1)
-    assert "-q:v" in cmd
-    idx_q = cmd.index("-q:v")
-    assert cmd[idx_q + 1] == "1"
-
-
-def test_error_wrapping(mock_render_ffmpeg):
-    mock_render_ffmpeg.side_effect = FFmpegNotFoundError()
+def test_error_wrapping(mock_ffmpeg_runner):
+    mock_ffmpeg_runner.side_effect = FFmpegNotFoundError()
 
     request = RenderRequest(
         clip=Path("test.mp4"),
@@ -210,8 +170,8 @@ def test_error_wrapping(mock_render_ffmpeg):
     assert isinstance(excinfo.value.__cause__, FFmpegNotFoundError)
 
 
-def test_render_frame_reraises_source_load_error(mock_render_ffmpeg):
-    mock_render_ffmpeg.side_effect = SourceLoadError(Path("test.mp4"), "ffprobe failed")
+def test_render_frame_reraises_source_load_error(mock_ffmpeg_runner):
+    mock_ffmpeg_runner.side_effect = SourceLoadError(Path("test.mp4"), "ffprobe failed")
 
     request = RenderRequest(
         clip=Path("test.mp4"),
@@ -223,28 +183,6 @@ def test_render_frame_reraises_source_load_error(mock_render_ffmpeg):
 
     with pytest.raises(SourceLoadError, match="ffprobe failed"):
         render_frame(request, renderer="ffmpeg")
-
-
-def test_probe_fps_logic(mock_run_subprocess):
-    mock_run_subprocess.return_value.stdout = b"24000/1001\n"
-    fps = _probe_fps(Path("test.mp4"))
-    assert fps == pytest.approx(23.976023, rel=1e-6)
-
-    mock_run_subprocess.return_value.stdout = b"30\n"
-    fps = _probe_fps(Path("test.mp4"))
-    assert fps == 30.0
-
-
-def test_probe_fps_failure(mock_run_subprocess):
-    mock_run_subprocess.return_value.stdout = b"invalid"
-    with pytest.raises(SourceLoadError):
-        _probe_fps(Path("test.mp4"))
-
-
-def test_probe_fps_zero_denominator_raises_source_load_error(mock_run_subprocess):
-    mock_run_subprocess.return_value.stdout = b"0/0\n"
-    with pytest.raises(SourceLoadError, match="Invalid avg_frame_rate"):
-        _probe_fps(Path("test.mp4"))
 
 
 class _FakeResize:

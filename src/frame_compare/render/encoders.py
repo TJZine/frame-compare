@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
-from subprocess import CalledProcessError
 from typing import TYPE_CHECKING, cast
 
 import numpy as np
@@ -13,18 +11,15 @@ from PIL import Image
 from frame_compare.errors import (
     EncodingError,
     ErrorDetails,
-    FFmpegError,
-    FFmpegNotFoundError,
     FrameCompareError,
     FrameExtractionError,
     OverlayError,
     RenderError,
     SourceLoadError,
 )
-from frame_compare.render._ffmpeg_frame import build_extract_frame_argv, frame_seek_time_seconds
+from frame_compare.render.ffmpeg import DefaultFFmpegRunner
 from frame_compare.render.overlay import apply_overlay
 from frame_compare.render.types import EncoderSettings, OverlayMode, Renderer, RenderRequest
-from frame_compare.utils.subproc import run_subprocess
 
 if TYPE_CHECKING:
     import vapoursynth as vs  # type: ignore[import-untyped]
@@ -116,10 +111,8 @@ def _execute_vapoursynth_render(request: RenderRequest) -> None:
 
 def _execute_ffmpeg_render(request: RenderRequest) -> None:
     path = cast(Path, request.clip)
-    if request.ffmpeg_runner is not None:
-        request.ffmpeg_runner.extract_frame(path, request.frame_number, request.output_path)
-    else:
-        _render_ffmpeg(path, request.frame_number, request.output_path, request.encoder_settings)
+    runner = request.ffmpeg_runner or DefaultFFmpegRunner()
+    runner.extract_frame(path, request.frame_number, request.output_path)
 
     if request.overlay is not None and request.overlay.mode != OverlayMode.NONE:
         apply_overlay_to_file(request.output_path, request.overlay)
@@ -250,75 +243,6 @@ def _render_vs(
         raise
     except Exception as e:
         raise EncodingError(output, f"VapourSynth render failed: {type(e).__name__}: {e}") from e
-
-
-def _probe_fps(video_path: Path) -> float:
-    """Probe video FPS using ffprobe."""
-    cmd = [
-        "ffprobe",
-        "-v",
-        "error",
-        "-select_streams",
-        "v:0",
-        "-show_entries",
-        "stream=avg_frame_rate",
-        "-of",
-        "default=noprint_wrappers=1:nokey=1",
-        str(video_path),
-    ]
-
-    try:
-        result = run_subprocess(cmd, timeout_seconds=10)
-        fps_str = result.stdout.decode().strip()
-        if not fps_str:
-            raise SourceLoadError(video_path, "Empty output from ffprobe")
-
-        fps: float
-        if "/" in fps_str:
-            parts = fps_str.split("/", maxsplit=1)
-            if len(parts) != 2:
-                raise SourceLoadError(video_path, f"Invalid avg_frame_rate: {fps_str!r}")
-            num_str, den_str = parts
-            num = float(num_str)
-            den = float(den_str)
-            if den == 0.0:
-                raise SourceLoadError(video_path, f"Invalid avg_frame_rate: {fps_str!r}")
-            fps = num / den
-        else:
-            fps = float(fps_str)
-
-        if not math.isfinite(fps) or fps <= 0.0:
-            raise SourceLoadError(video_path, f"Invalid FPS from ffprobe: {fps_str!r}")
-        return fps
-    except FileNotFoundError as e:
-        raise FFmpegNotFoundError() from e
-    except (ValueError, CalledProcessError, ZeroDivisionError) as e:
-        raise SourceLoadError(video_path, f"Failed to probe FPS: {e}") from e
-
-
-def _render_ffmpeg(
-    video_path: Path,
-    frame: int,
-    output: Path,
-    settings: EncoderSettings,
-    timeout: int = 30,
-) -> None:
-    """Render frame via FFmpeg."""
-    fps = _probe_fps(video_path)
-    seek_time = frame_seek_time_seconds(frame, fps)
-    cmd = build_extract_frame_argv(
-        video=video_path,
-        seek_time=seek_time,
-        output=output,
-        overwrite=False,
-    )
-
-    try:
-        run_subprocess(cmd, timeout_seconds=timeout)
-    except FileNotFoundError as e:
-        raise FFmpegNotFoundError() from e
-    except CalledProcessError as e:
-        raise FFmpegError(e.stderr.decode(), e.returncode) from e
 
 
 def _apply_overlay_to_file(path: Path, config: OverlayConfig) -> None:

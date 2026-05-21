@@ -87,9 +87,8 @@ def _is_hdr_via_runner(path: Path, runner: FFmpegRunner) -> bool:
     """Determine HDR using the provided FFmpegRunner.
 
     Preserves the existing conservative fallback behavior:
-    - If probe_hdr returns None, check if it was because of missing/unknown metadata.
-    - Treat as HDR if transfer is smpte2084 or arib-std-b67 and color_primaries is bt2020.
-    - Treat as HDR (returns True) on missing/unknown metadata (transfer or primaries == 2).
+    - Treat as HDR (returns True) if metadata is None (indicates missing/unspecified/unknown metadata).
+    - Otherwise, treat as HDR if transfer characteristics are PQ (16) or HLG (18) and color primaries are BT.2020 (9).
 
     Raises:
         FFmpegNotFoundError: If ffprobe is missing.
@@ -111,9 +110,9 @@ def _is_hdr_via_runner(path: Path, runner: FFmpegRunner) -> bool:
         raise SourceLoadError(path, f"ffprobe failed: {exc}") from exc
 
     if metadata is None:
-        return False
+        return True
 
-    return metadata.transfer in {16, 18, 2} and metadata.color_primaries in {9, 2}
+    return metadata.transfer in {16, 18} and metadata.color_primaries == 9
 
 
 def _render_description(request: RenderRequest) -> str:

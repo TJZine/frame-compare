@@ -28,7 +28,16 @@ class FakeFFmpegRunner:
         self.calls.append((_video, _frame_num, output))
 
     def probe_hdr(self, _video: Path):  # type: ignore[override]
-        return None
+        from frame_compare.vs.types import HDRMetadata
+
+        return HDRMetadata(
+            mastering_display=None,
+            max_cll=None,
+            max_fall=None,
+            color_primaries=1,
+            transfer=1,
+            matrix=1,
+        )
 
 
 def test_ffmpeg_extraction_applies_overlay_post_process(

@@ -259,8 +259,17 @@ def test_sdr_allows_ffmpeg_fallback_when_vs_missing(tmp_path: Path) -> None:
     frames = [0]
     enable_tonemap_config = ConfigSchema(color=ColorConfig(enable_tonemap=True))
 
+    from frame_compare.vs.types import HDRMetadata
+
     mock_runner = MagicMock()
-    mock_runner.probe_hdr.return_value = None
+    mock_runner.probe_hdr.return_value = HDRMetadata(
+        mastering_display=None,
+        max_cll=None,
+        max_fall=None,
+        color_primaries=1,
+        transfer=1,
+        matrix=1,
+    )
 
     with (
         patch("frame_compare.vs.loader.DefaultVSLoader") as mock_loader_cls,

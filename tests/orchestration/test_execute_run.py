@@ -132,7 +132,14 @@ class FakeFFmpegRunner:
         self.calls.append((video.name, frame_num, output.name))
 
     def probe_hdr(self, video: Path):  # type: ignore[override]
-        return None
+        return HDRMetadata(
+            mastering_display=None,
+            max_cll=None,
+            max_fall=None,
+            color_primaries=1,
+            transfer=1,
+            matrix=1,
+        )
 
 
 def test_execute_run_returns_success_and_records_preflight_timing(
