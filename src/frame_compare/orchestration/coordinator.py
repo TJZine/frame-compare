@@ -54,7 +54,7 @@ from frame_compare.services.alignment import CACHE_FILE_NAME, align_clips, load_
 from frame_compare.services.metadata import resolve_metadata
 from frame_compare.services.publishers import publish_to_slowpics
 from frame_compare.services.report import ClipInfo, ReportData, generate_report
-from frame_compare.services.run_folder import reserve_run_folder
+from frame_compare.services.run_folder import derive_run_folder_name, reserve_run_folder
 from frame_compare.services.types import AlignmentConfig, MetadataConfig, TmdbMetadata
 from frame_compare.utils.progress import ProgressReporter
 from frame_compare.utils.types import WorkspacePaths
@@ -302,11 +302,19 @@ async def _execute_prep(
                 artifacts.resolved_metadata = None
 
         filenames = [video.name for video in input_videos]
-        run_dir = reserve_run_folder(
-            input_dir=workspace.input_dir,
-            filenames=filenames,
-            tmdb_metadata=artifacts.resolved_metadata,
-        )
+        if request.from_cache_only:
+            run_folder_name = derive_run_folder_name(
+                filenames=filenames,
+                tmdb_metadata=artifacts.resolved_metadata,
+                existing_folders=None,
+            )
+            run_dir = workspace.input_dir / run_folder_name
+        else:
+            run_dir = reserve_run_folder(
+                input_dir=workspace.input_dir,
+                filenames=filenames,
+                tmdb_metadata=artifacts.resolved_metadata,
+            )
         workspace = workspace.with_run_dir(run_dir)
 
     if request.no_cache:

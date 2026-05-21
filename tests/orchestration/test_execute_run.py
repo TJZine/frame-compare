@@ -24,6 +24,7 @@ from frame_compare.errors import (
 from frame_compare.orchestration import coordinator
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.services.alignment import CACHE_FILE_NAME
+from frame_compare.services.run_folder import derive_run_folder_name
 from frame_compare.services.types import AlignmentResult, MetadataConfig, TmdbMetadata
 from frame_compare.vs.types import HDRMetadata, SourceInfo
 
@@ -411,6 +412,31 @@ def test_execute_run_from_cache_only_fails_when_metrics_cache_missing(
         asyncio.run(execute_run(request, deps=deps))
 
 
+def test_execute_run_from_cache_only_does_not_reserve_run_folder_when_metrics_cache_missing(
+    tmp_path: Path,
+) -> None:
+    _create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "source.mkv")
+    run_name = derive_run_folder_name(filenames=["source.mkv"])
+    run_dir = input_dir / run_name
+
+    request = RunRequest(
+        root=tmp_path,
+        from_cache_only=True,
+        skip_analysis=False,
+        skip_metadata=True,
+        skip_dovi=True,
+        no_upload=True,
+    )
+    deps = RunDependencies(vs_loader=FakeVSLoader())
+
+    with pytest.raises(MetricsCalculationError):
+        asyncio.run(execute_run(request, deps=deps))
+
+    assert not run_dir.exists()
+
+
 def test_execute_run_from_cache_only_fails_when_metrics_cache_invalid(
     tmp_path: Path,
 ) -> None:
@@ -487,16 +513,12 @@ def test_execute_run_from_cache_only_fails_when_metrics_cache_version_mismatch(
 
 def test_execute_run_from_cache_only_uses_run_folder_cache_when_enabled(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     _create_video_files(input_dir, "source.mkv")
 
-    run_name = "Movie (2024)"
-    monkeypatch.setattr(
-        coordinator, "reserve_run_folder", lambda input_dir, **_kwargs: input_dir / run_name
-    )
+    run_name = derive_run_folder_name(filenames=["source.mkv"])
     run_generated_dir = input_dir / run_name / "generated"
     cache_dir = run_generated_dir / "cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
