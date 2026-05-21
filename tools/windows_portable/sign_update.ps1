@@ -28,21 +28,12 @@ function Assert-SafeRelativePath([string]$PathValue, [string]$FieldName) {
 
 function Read-ZipEntryBytes([System.IO.Compression.ZipArchiveEntry]$Entry) {
   $stream = $Entry.Open()
+  $buffer = [System.IO.MemoryStream]::new()
   try {
-    $buffer = New-Object byte[] $Entry.Length
-    $offset = 0
-    while ($offset -lt $buffer.Length) {
-      $read = $stream.Read($buffer, $offset, $buffer.Length - $offset)
-      if ($read -le 0) {
-        break
-      }
-      $offset += $read
-    }
-    if ($offset -ne $buffer.Length) {
-      throw "Failed to read complete zip entry bytes for $($Entry.FullName)"
-    }
-    return $buffer
+    $stream.CopyTo($buffer)
+    return $buffer.ToArray()
   } finally {
+    $buffer.Dispose()
     $stream.Dispose()
   }
 }
@@ -76,6 +67,81 @@ function Get-Sha256Hex([byte[]]$Bytes) {
   return ([System.BitConverter]::ToString($hashBytes).Replace("-", "").ToLowerInvariant())
 }
 
+function Get-RsaParameterBytes([xml]$KeyXml, [string]$Name, [bool]$Required) {
+  $node = $KeyXml.RSAKeyValue.$Name
+  if ($null -eq $node -or [string]::IsNullOrWhiteSpace([string]$node)) {
+    if ($Required) {
+      throw "RSA key XML is missing required '$Name' value."
+    }
+    return $null
+  }
+  return [System.Convert]::FromBase64String([string]$node)
+}
+
+function New-RsaFromXml([string]$KeyXmlText) {
+  $rsa = $null
+  try {
+    [xml]$keyXml = $KeyXmlText
+    if ($null -eq $keyXml.RSAKeyValue) {
+      throw "RSA key XML must have an RSAKeyValue root."
+    }
+    $parameters = New-Object System.Security.Cryptography.RSAParameters
+    $parameters.Modulus = Get-RsaParameterBytes -KeyXml $keyXml -Name "Modulus" -Required $true
+    $parameters.Exponent = Get-RsaParameterBytes -KeyXml $keyXml -Name "Exponent" -Required $true
+    $parameters.P = Get-RsaParameterBytes -KeyXml $keyXml -Name "P" -Required $false
+    $parameters.Q = Get-RsaParameterBytes -KeyXml $keyXml -Name "Q" -Required $false
+    $parameters.DP = Get-RsaParameterBytes -KeyXml $keyXml -Name "DP" -Required $false
+    $parameters.DQ = Get-RsaParameterBytes -KeyXml $keyXml -Name "DQ" -Required $false
+    $parameters.InverseQ = Get-RsaParameterBytes -KeyXml $keyXml -Name "InverseQ" -Required $false
+    $parameters.D = Get-RsaParameterBytes -KeyXml $keyXml -Name "D" -Required $false
+
+    $rsa = [System.Security.Cryptography.RSA]::Create()
+    $rsa.ImportParameters($parameters)
+    return $rsa
+  } catch {
+    if ($null -ne $rsa) {
+      $rsa.Dispose()
+    }
+    $rsa = New-Object System.Security.Cryptography.RSACryptoServiceProvider
+    $rsa.PersistKeyInCsp = $false
+    try {
+      $rsa.FromXmlString($KeyXmlText)
+      return $rsa
+    } catch {
+      $rsa.Clear()
+      $rsa.Dispose()
+      throw
+    }
+  }
+}
+
+function Get-PublicRsaXml([string]$KeyXmlText) {
+  [xml]$keyXml = $KeyXmlText
+  if ($null -eq $keyXml.RSAKeyValue) {
+    throw "RSA key XML must have an RSAKeyValue root."
+  }
+  $modulus = [string]$keyXml.RSAKeyValue.Modulus
+  $exponent = [string]$keyXml.RSAKeyValue.Exponent
+  if ([string]::IsNullOrWhiteSpace($modulus) -or [string]::IsNullOrWhiteSpace($exponent)) {
+    throw "RSA key XML is missing public key values."
+  }
+  return "<RSAKeyValue><Modulus>$modulus</Modulus><Exponent>$exponent</Exponent></RSAKeyValue>"
+}
+
+function Sign-ManifestBytes([System.Security.Cryptography.RSA]$Rsa, [byte[]]$Bytes) {
+  try {
+    return $Rsa.SignData(
+      $Bytes,
+      [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+      [System.Security.Cryptography.RSASignaturePadding]::Pkcs1
+    )
+  } catch [System.Management.Automation.MethodException] {
+    return $Rsa.SignData($Bytes, "SHA256")
+  } catch [System.MissingMethodException] {
+    return $Rsa.SignData($Bytes, "SHA256")
+  }
+}
+
 $resolvedUpdateZip = (Resolve-Path -LiteralPath $UpdateZip).Path
 
 $keyPath = $env:SIGNING_KEY_XML_PATH
@@ -102,9 +168,7 @@ $privateKeyText = Get-Content -LiteralPath $resolvedKeyXml -Raw
 $rsa = $null
 $zip = $null
 try {
-  $rsa = New-Object System.Security.Cryptography.RSACryptoServiceProvider
-  $rsa.PersistKeyInCsp = $false
-  $rsa.FromXmlString($privateKeyText)
+  $rsa = New-RsaFromXml -KeyXmlText $privateKeyText
 
   $zip = [System.IO.Compression.ZipFile]::Open($resolvedUpdateZip, [System.IO.Compression.ZipArchiveMode]::Update)
   $manifestEntry = $zip.GetEntry("update-manifest.json")
@@ -123,25 +187,25 @@ try {
   }
   Assert-SafeRelativePath -PathValue $signatureFile -FieldName "signature_file"
 
-  $signatureBytes = $rsa.SignData($manifestBytes, "SHA256")
+  $signatureBytes = Sign-ManifestBytes -Rsa $rsa -Bytes $manifestBytes
   $signatureBase64 = [System.Convert]::ToBase64String($signatureBytes)
   Write-StringEntry -Zip $zip -EntryPath $signatureFile -Content $signatureBase64
 
-  $publicXml = $rsa.ToXmlString($false)
-  $fingerprintHex = Get-Sha256Hex -Bytes ([System.Text.Encoding]::UTF8.GetBytes($publicXml))
   Write-Host "Signed: $resolvedUpdateZip"
   Write-Host "Signature file: $signatureFile"
   $versionProp = $manifest.PSObject.Properties["to_app_version"]
   if ($null -ne $versionProp -and $null -ne $versionProp.Value) {
     Write-Host "Target app version: $([string]$versionProp.Value)"
   }
+  $publicKeyText = Get-PublicRsaXml -KeyXmlText $privateKeyText
+  $fingerprintHex = Get-Sha256Hex -Bytes ([System.Text.Encoding]::UTF8.GetBytes($publicKeyText))
   Write-Host "Public key fingerprint (SHA256 over XML): $fingerprintHex"
 } finally {
   if ($null -ne $zip) {
     $zip.Dispose()
   }
   if ($null -ne $rsa) {
-    $rsa.Clear()
+    try { $rsa.Clear() } catch { }
     $rsa.Dispose()
   }
 }

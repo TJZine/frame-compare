@@ -1,4 +1,8 @@
-# LEGACY Frame Compare — Overlay + CLI UX Reference (Spec)
+# LEGACY Frame Compare — Overlay + CLI UX Reference (Archived Reference)
+
+> Historical reference only. This file is not current repo authority.
+> Current workflow authority lives in `docs/ENGINEERING_RUNBOOK.md`.
+> Current architecture authority lives in `docs/current-architecture.md`.
 
 This document captures the **legacy** Frame Compare overlay and CLI “look & feel” from **static code + config + layout specs** in this repo.
 

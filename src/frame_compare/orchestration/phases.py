@@ -43,6 +43,7 @@ class Phase:
     skip_condition: PhaseSkipCondition | None = None
     progress_total: int = 1
     status: PhaseStatus = PhaseStatus.PENDING
+    warn_only: bool = False
 
 
 async def execute_phases(
@@ -68,7 +69,7 @@ async def execute_phases(
         try:
             await phase.execute(context)
         except Exception as exc:
-            if phase.skip_condition is None:
+            if not phase.warn_only:
                 phase.status = PhaseStatus.FAILED
                 raise
             phase.status = PhaseStatus.WARNED

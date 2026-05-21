@@ -84,3 +84,39 @@ def test_generate_vspreview_script_uses_atomic_write(
 
     assert calls == [script_path]
     assert script_path.exists()
+
+
+def test_generate_vspreview_script_handles_collision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import datetime
+
+    # Freeze the time to ensure the timestamp is predictable in the test
+    class MockDatetime:
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 5, 20, 19, 45, 0, tzinfo=tz)
+
+    monkeypatch.setattr("frame_compare.vspreview.adapter.datetime", MockDatetime)
+
+    timestamp = "20260520T194500Z"
+    sessions_dir = tmp_path / "vspreview_sessions"
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+
+    # Pre-create the first two candidates
+    first_path = sessions_dir / f"vspreview_ref_{timestamp}.py"
+    first_path.touch()
+    second_path = sessions_dir / f"vspreview_ref_{timestamp}_1.py"
+    second_path.touch()
+
+    # Call the generator
+    script_path = _generate_vspreview_script(
+        reference=Path("ref.mkv"),
+        comparisons=[Path("a.mkv")],
+        suggested_offsets_by_key={},
+        cache_dir=tmp_path,
+    )
+
+    # Verify it used the next suffix (_2)
+    assert script_path == sessions_dir / f"vspreview_ref_{timestamp}_2.py"
+    assert script_path.exists()

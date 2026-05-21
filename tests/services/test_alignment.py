@@ -29,11 +29,12 @@ from frame_compare.services.alignment import (
     save_offsets_cache,
 )
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
+from frame_compare.utils.progress_protocol import ProgressReporter
 
 
 def test_alignment_result_is_frozen():
     """Test that AlignmentResult is immutable."""
-    res = AlignmentResult("ref", "comp", 0, 0.0, 1.0, "test")
+    res = AlignmentResult("ref", "comp", 0, 0.0, 1.0, "cross_correlation", "computed")
     with pytest.raises(FrozenInstanceError):
         res.frame_offset = 10  # type: ignore
 
@@ -260,7 +261,7 @@ def test_load_cached_offsets_valid_returns_dict(tmp_path: Path):
             "frame_offset": 42,
             "time_offset_seconds": 1.751,
             "correlation_score": 0.987,
-            "method": "cross_correlation",
+            "algorithm": "cross_correlation",
         },
     }
     with cache_file.open("wb") as f:
@@ -270,6 +271,30 @@ def test_load_cached_offsets_valid_returns_dict(tmp_path: Path):
     assert res is not None
     assert "ref:comp_a" in res
     assert res["ref:comp_a"].frame_offset == 42
+    assert res["ref:comp_a"].source == "cached"
+    assert res["ref:comp_a"].algorithm == "cross_correlation"
+
+
+def test_load_cached_offsets_legacy_method_key_returns_dict(tmp_path: Path) -> None:
+    cache_file = tmp_path / "audio_offsets.toml"
+    data = {
+        "version": "1",
+        "ref:comp_a": {
+            "reference_clip": "ref.mkv",
+            "comparison_clip": "comp_a.mkv",
+            "frame_offset": 42,
+            "time_offset_seconds": 1.751,
+            "correlation_score": 0.987,
+            "method": "cross_correlation",
+        },
+    }
+    with cache_file.open("wb") as f:
+        f.write(tomli_w.dumps(data).encode("utf-8"))
+
+    res = load_cached_offsets(tmp_path, [Path("ref.mkv"), Path("comp_a.mkv")])
+    assert res is not None
+    assert res["ref:comp_a"].algorithm == "cross_correlation"
+    assert res["ref:comp_a"].source == "cached"
 
 
 def test_load_cached_offsets_valid_no_match_returns_empty(tmp_path: Path):
@@ -283,7 +308,7 @@ def test_load_cached_offsets_valid_no_match_returns_empty(tmp_path: Path):
             "frame_offset": 0,
             "time_offset_seconds": 0.0,
             "correlation_score": 1.0,
-            "method": "manual",
+            "algorithm": "cross_correlation",
         },
     }
     with cache_file.open("wb") as f:
@@ -325,6 +350,26 @@ def test_load_cached_offsets_malformed_entry_raises_cache_corruption(tmp_path: P
         load_cached_offsets(tmp_path, [Path("ref.mkv"), Path("comp_a.mkv")])
 
 
+def test_load_cached_offsets_invalid_algorithm_raises_cache_corruption(tmp_path: Path):
+    cache_file = tmp_path / "audio_offsets.toml"
+    data = {
+        "version": "1",
+        "ref:comp_a": {
+            "reference_clip": "ref.mkv",
+            "comparison_clip": "comp_a.mkv",
+            "frame_offset": 42,
+            "time_offset_seconds": 1.751,
+            "correlation_score": 0.987,
+            "algorithm": "unsupported_alg_name",
+        },
+    }
+    with cache_file.open("wb") as f:
+        f.write(tomli_w.dumps(data).encode("utf-8"))
+
+    with pytest.raises(CacheCorruptionError):
+        load_cached_offsets(tmp_path, [Path("ref.mkv"), Path("comp_a.mkv")])
+
+
 def test_save_offsets_cache_writes_toml(tmp_path: Path):
     """Test saving offsets to cache."""
     res = [
@@ -334,7 +379,8 @@ def test_save_offsets_cache_writes_toml(tmp_path: Path):
             frame_offset=10,
             time_offset_seconds=0.4,
             correlation_score=0.9,
-            method="cross_correlation",
+            algorithm="cross_correlation",
+            source="computed",
         )
     ]
     save_offsets_cache(tmp_path, res)
@@ -343,6 +389,41 @@ def test_save_offsets_cache_writes_toml(tmp_path: Path):
     content = cache_file.read_text()
     assert 'version = "1"' in content
     assert '["ref:comp"]' in content
+
+
+def test_save_offsets_cache_normalizes_legacy_method_keys(tmp_path: Path) -> None:
+    cache_file = tmp_path / "audio_offsets.toml"
+    existing = {
+        "version": "1",
+        "ref:comp_a": {
+            "reference_clip": "ref.mkv",
+            "comparison_clip": "comp_a.mkv",
+            "frame_offset": 42,
+            "time_offset_seconds": 1.751,
+            "correlation_score": 0.987,
+            "method": "cross_correlation",
+        },
+    }
+    cache_file.write_text(tomli_w.dumps(existing), encoding="utf-8")
+
+    save_offsets_cache(
+        tmp_path,
+        [
+            AlignmentResult(
+                reference_clip="ref.mkv",
+                comparison_clip="comp_b.mkv",
+                frame_offset=10,
+                time_offset_seconds=0.4,
+                correlation_score=0.9,
+                algorithm="cross_correlation",
+                source="computed",
+            )
+        ],
+    )
+
+    content = cache_file.read_text(encoding="utf-8")
+    assert 'method = "cross_correlation"' not in content
+    assert content.count('algorithm = "cross_correlation"') == 2
 
 
 def test_save_offsets_cache_logs_corrupt_existing_cache(
@@ -367,7 +448,8 @@ def test_save_offsets_cache_logs_corrupt_existing_cache(
                 frame_offset=1,
                 time_offset_seconds=0.04,
                 correlation_score=0.9,
-                method="cross_correlation",
+                algorithm="cross_correlation",
+                source="computed",
             )
         ],
     )
@@ -385,7 +467,8 @@ def test_save_offsets_cache_uses_atomic_bytes_write(
             frame_offset=10,
             time_offset_seconds=0.4,
             correlation_score=0.9,
-            method="cross_correlation",
+            algorithm="cross_correlation",
+            source="computed",
         )
     ]
 
@@ -401,10 +484,9 @@ def test_save_offsets_cache_uses_atomic_bytes_write(
     assert calls == [tmp_path / "audio_offsets.toml"]
 
 
-@pytest.mark.anyio
 @patch("frame_compare.services.alignment._probe_fps")
 @patch("frame_compare.services.alignment._extract_audio")
-async def test_align_clips_full_cache_hit_skips_probe_and_extract(
+def test_align_clips_full_cache_hit_skips_probe_and_extract(
     mock_extract: MagicMock, mock_probe: MagicMock, tmp_path: Path
 ):
     """Test that full cache hit skips FFmpeg/FFprobe calls."""
@@ -424,7 +506,7 @@ async def test_align_clips_full_cache_hit_skips_probe_and_extract(
             "frame_offset": 10,
             "time_offset_seconds": 0.417,
             "correlation_score": 0.95,
-            "method": "cross_correlation",
+            "algorithm": "cross_correlation",
         },
         "ref:comp_b": {
             "reference_clip": "ref.mkv",
@@ -432,7 +514,7 @@ async def test_align_clips_full_cache_hit_skips_probe_and_extract(
             "frame_offset": 20,
             "time_offset_seconds": 0.834,
             "correlation_score": 0.92,
-            "method": "cross_correlation",
+            "algorithm": "cross_correlation",
         },
     }
     with cache_file.open("wb") as f:
@@ -442,7 +524,7 @@ async def test_align_clips_full_cache_hit_skips_probe_and_extract(
     mock_extract.side_effect = AssertionError("should not be called")
 
     config = AlignmentConfig()
-    results = await align_clips(ref, [comp_a, comp_b], config, tmp_path)
+    results = align_clips(ref, [comp_a, comp_b], config, tmp_path)
 
     assert len(results) == 2
     assert results[0].comparison_clip == "comp_a.mkv"
@@ -451,11 +533,43 @@ async def test_align_clips_full_cache_hit_skips_probe_and_extract(
     assert results[1].frame_offset == 20
 
 
-@pytest.mark.anyio
+def test_align_clips_duplicate_stems_fail_before_starting_progress(tmp_path: Path) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp_a = tmp_path / "dup.mkv"
+    comp_b = tmp_path / "dup.mp4"
+    ref.touch()
+    comp_a.touch()
+    comp_b.touch()
+
+    reporter = MagicMock(spec=ProgressReporter)
+
+    with pytest.raises(AudioAlignmentError, match="Duplicate comparison clip stems detected"):
+        align_clips(ref, [comp_a, comp_b], AlignmentConfig(), tmp_path, progress=reporter)
+
+    reporter.start_phase.assert_not_called()
+    reporter.complete_phase.assert_not_called()
+
+
+def test_align_clips_completes_progress_when_cache_load_raises(tmp_path: Path) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    ref.touch()
+    comp.touch()
+    (tmp_path / "audio_offsets.toml").write_text("not valid toml {{{ ", encoding="utf-8")
+
+    reporter = MagicMock(spec=ProgressReporter)
+
+    with pytest.raises(CacheCorruptionError):
+        align_clips(ref, [comp], AlignmentConfig(), tmp_path, progress=reporter)
+
+    reporter.start_phase.assert_called_once_with("Audio Alignment", total=1)
+    reporter.complete_phase.assert_called_once_with()
+
+
 @patch("frame_compare.services.alignment._probe_fps")
 @patch("frame_compare.services.alignment._extract_audio")
 @patch("frame_compare.services.alignment._cross_correlate")
-async def test_align_clips_partial_cache_hit_computes_only_missing_and_preserves_order(
+def test_align_clips_partial_cache_hit_computes_only_missing_and_preserves_order(
     mock_corr: MagicMock, mock_extract: MagicMock, mock_probe: MagicMock, tmp_path: Path
 ):
     """Test partial cache hit behavior and result ordering."""
@@ -476,7 +590,7 @@ async def test_align_clips_partial_cache_hit_computes_only_missing_and_preserves
             "frame_offset": 10,
             "time_offset_seconds": 0.417,
             "correlation_score": 0.95,
-            "method": "cross_correlation",
+            "algorithm": "cross_correlation",
         },
     }
     with cache_file.open("wb") as f:
@@ -493,7 +607,7 @@ async def test_align_clips_partial_cache_hit_computes_only_missing_and_preserves
 
     config = AlignmentConfig()
     # Request comp_a and comp_b
-    results = await align_clips(ref, [comp_a, comp_b], config, tmp_path)
+    results = align_clips(ref, [comp_a, comp_b], config, tmp_path)
 
     assert len(results) == 2
     assert results[0].comparison_clip == "comp_a.mkv"
@@ -508,13 +622,12 @@ async def test_align_clips_partial_cache_hit_computes_only_missing_and_preserves
     assert comp_a not in called_paths
 
 
-@pytest.mark.anyio
 @patch("frame_compare.services.alignment.launch_alignment_verification_session")
 @patch("frame_compare.services.alignment.is_vspreview_available")
 @patch("frame_compare.services.alignment._probe_fps")
 @patch("frame_compare.services.alignment._extract_audio")
 @patch("frame_compare.services.alignment._cross_correlate")
-async def test_align_clips_launches_vspreview_when_enabled(
+def test_align_clips_launches_vspreview_when_enabled(
     mock_corr: MagicMock,
     mock_extract: MagicMock,
     mock_probe: MagicMock,
@@ -541,7 +654,7 @@ async def test_align_clips_launches_vspreview_when_enabled(
     mock_launch.return_value = tmp_path / "vspreview_script.py"
 
     config = AlignmentConfig(enable=True, use_vspreview=True, cache_results=False)
-    await align_clips(ref, [comp_a, comp_b], config, tmp_path)
+    align_clips(ref, [comp_a, comp_b], config, tmp_path)
 
     assert mock_launch.call_count == 1
     _, kwargs = mock_launch.call_args
@@ -551,12 +664,11 @@ async def test_align_clips_launches_vspreview_when_enabled(
     assert suggested == {"ref:comp_a": 0, "ref:comp_b": 0}
 
 
-@pytest.mark.anyio
 @patch("frame_compare.services.alignment.launch_alignment_verification_session")
 @patch("frame_compare.services.alignment.is_vspreview_available")
 @patch("frame_compare.services.alignment._probe_fps")
 @patch("frame_compare.services.alignment._extract_audio")
-async def test_align_clips_full_cache_hit_still_launches_vspreview_when_enabled(
+def test_align_clips_full_cache_hit_still_launches_vspreview_when_enabled(
     mock_extract: MagicMock,
     mock_probe: MagicMock,
     mock_is_available: MagicMock,
@@ -578,7 +690,7 @@ async def test_align_clips_full_cache_hit_still_launches_vspreview_when_enabled(
             "frame_offset": 12,
             "time_offset_seconds": 0.5,
             "correlation_score": 0.95,
-            "method": "cross_correlation",
+            "algorithm": "cross_correlation",
         },
     }
     with cache_file.open("wb") as f:
@@ -590,7 +702,7 @@ async def test_align_clips_full_cache_hit_still_launches_vspreview_when_enabled(
     mock_launch.return_value = tmp_path / "vspreview_script.py"
 
     config = AlignmentConfig(enable=True, use_vspreview=True, cache_results=True)
-    results = await align_clips(ref, [comp], config, tmp_path)
+    results = align_clips(ref, [comp], config, tmp_path)
 
     assert len(results) == 1
     assert results[0].frame_offset == 12
@@ -600,10 +712,9 @@ async def test_align_clips_full_cache_hit_still_launches_vspreview_when_enabled(
     assert kwargs["config"].enabled is True
 
 
-@pytest.mark.anyio
 @patch("frame_compare.services.alignment.launch_alignment_verification_session")
 @patch("frame_compare.services.alignment.is_vspreview_available")
-async def test_align_clips_force_interactive_raises_when_vspreview_unavailable(
+def test_align_clips_force_interactive_raises_when_vspreview_unavailable(
     mock_is_available: MagicMock,
     mock_launch: MagicMock,
     tmp_path: Path,
@@ -623,7 +734,7 @@ async def test_align_clips_force_interactive_raises_when_vspreview_unavailable(
             "frame_offset": 2,
             "time_offset_seconds": 0.083,
             "correlation_score": 0.98,
-            "method": "cross_correlation",
+            "algorithm": "cross_correlation",
         },
     }
     with cache_file.open("wb") as f:
@@ -638,15 +749,14 @@ async def test_align_clips_force_interactive_raises_when_vspreview_unavailable(
         cache_results=True,
     )
     with pytest.raises(AudioAlignmentError, match="Interactive alignment requested"):
-        await align_clips(ref, [comp], config, tmp_path)
+        align_clips(ref, [comp], config, tmp_path)
 
     mock_launch.assert_not_called()
 
 
-@pytest.mark.anyio
 @patch("frame_compare.services.alignment.launch_alignment_verification_session")
 @patch("frame_compare.services.alignment.is_vspreview_available")
-async def test_align_clips_vspreview_unavailable_generates_script_without_launch(
+def test_align_clips_vspreview_unavailable_generates_script_without_launch(
     mock_is_available: MagicMock,
     mock_launch: MagicMock,
     tmp_path: Path,
@@ -666,7 +776,7 @@ async def test_align_clips_vspreview_unavailable_generates_script_without_launch
             "frame_offset": 7,
             "time_offset_seconds": 0.292,
             "correlation_score": 0.96,
-            "method": "cross_correlation",
+            "algorithm": "cross_correlation",
         },
     }
     with cache_file.open("wb") as f:
@@ -676,17 +786,16 @@ async def test_align_clips_vspreview_unavailable_generates_script_without_launch
     mock_launch.return_value = tmp_path / "vspreview_script.py"
 
     config = AlignmentConfig(enable=True, use_vspreview=True, cache_results=True)
-    await align_clips(ref, [comp], config, tmp_path)
+    align_clips(ref, [comp], config, tmp_path)
 
     assert mock_launch.call_count == 1
     _, kwargs = mock_launch.call_args
     assert kwargs["config"].enabled is False
 
 
-@pytest.mark.anyio
 @patch("frame_compare.services.alignment.launch_alignment_verification_session")
 @patch("frame_compare.services.alignment.is_vspreview_available")
-async def test_align_clips_force_interactive_launches_when_vspreview_available(
+def test_align_clips_force_interactive_launches_when_vspreview_available(
     mock_is_available: MagicMock,
     mock_launch: MagicMock,
     tmp_path: Path,
@@ -706,7 +815,7 @@ async def test_align_clips_force_interactive_launches_when_vspreview_available(
             "frame_offset": 3,
             "time_offset_seconds": 0.125,
             "correlation_score": 0.99,
-            "method": "cross_correlation",
+            "algorithm": "cross_correlation",
         },
     }
     with cache_file.open("wb") as f:
@@ -721,7 +830,7 @@ async def test_align_clips_force_interactive_launches_when_vspreview_available(
         force_interactive=True,
         cache_results=True,
     )
-    results = await align_clips(ref, [comp], config, tmp_path)
+    results = align_clips(ref, [comp], config, tmp_path)
 
     assert len(results) == 1
     assert results[0].frame_offset == 3
@@ -730,11 +839,10 @@ async def test_align_clips_force_interactive_launches_when_vspreview_available(
     assert kwargs["config"].enabled is True
 
 
-@pytest.mark.anyio
 @patch("frame_compare.services.alignment.log.warning")
 @patch("frame_compare.services.alignment.launch_alignment_verification_session")
 @patch("frame_compare.services.alignment.is_vspreview_available")
-async def test_align_clips_vspreview_errors_are_warning_only_when_not_forced(
+def test_align_clips_vspreview_errors_are_warning_only_when_not_forced(
     mock_is_available: MagicMock,
     mock_launch: MagicMock,
     mock_warn: MagicMock,
@@ -755,7 +863,7 @@ async def test_align_clips_vspreview_errors_are_warning_only_when_not_forced(
             "frame_offset": 1,
             "time_offset_seconds": 0.042,
             "correlation_score": 0.91,
-            "method": "cross_correlation",
+            "algorithm": "cross_correlation",
         },
     }
     with cache_file.open("wb") as f:
@@ -765,7 +873,7 @@ async def test_align_clips_vspreview_errors_are_warning_only_when_not_forced(
     mock_launch.side_effect = VSPreviewError("adapter failure")
 
     config = AlignmentConfig(enable=True, use_vspreview=True, cache_results=True)
-    results = await align_clips(ref, [comp], config, tmp_path)
+    results = align_clips(ref, [comp], config, tmp_path)
 
     assert len(results) == 1
     assert results[0].frame_offset == 1
@@ -775,10 +883,9 @@ async def test_align_clips_vspreview_errors_are_warning_only_when_not_forced(
     assert kwargs["force_interactive"] is False
 
 
-@pytest.mark.anyio
 @patch("frame_compare.services.alignment.launch_alignment_verification_session")
 @patch("frame_compare.services.alignment.is_vspreview_available")
-async def test_align_clips_vspreview_errors_raise_when_force_interactive(
+def test_align_clips_vspreview_errors_raise_when_force_interactive(
     mock_is_available: MagicMock,
     mock_launch: MagicMock,
     tmp_path: Path,
@@ -798,7 +905,7 @@ async def test_align_clips_vspreview_errors_raise_when_force_interactive(
             "frame_offset": 1,
             "time_offset_seconds": 0.042,
             "correlation_score": 0.91,
-            "method": "cross_correlation",
+            "algorithm": "cross_correlation",
         },
     }
     with cache_file.open("wb") as f:
@@ -814,4 +921,4 @@ async def test_align_clips_vspreview_errors_raise_when_force_interactive(
         cache_results=True,
     )
     with pytest.raises(VSPreviewError, match="adapter failure"):
-        await align_clips(ref, [comp], config, tmp_path)
+        align_clips(ref, [comp], config, tmp_path)

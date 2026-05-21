@@ -2,17 +2,29 @@
 
 from __future__ import annotations
 
-from typing import cast
+import os
+import subprocess
+import sys
+import textwrap
+from functools import lru_cache
+from typing import TYPE_CHECKING, cast
 
 import structlog
-import vapoursynth as vs
 
 from frame_compare.errors import TonemapError
 from frame_compare.vs.env import detect_plugins
 from frame_compare.vs.source import _detect_hdr  # pyright: ignore[reportPrivateUsage]
 from frame_compare.vs.types import HDRMetadata, TonemapSettings
 
+if TYPE_CHECKING:
+    import vapoursynth as vs
+
 log = structlog.get_logger()
+
+_REQUIRE_LIBPLACEBO_ENV = "FRAME_COMPARE_REQUIRE_LIBPLACEBO"
+_DISABLE_LIBPLACEBO_ENV = "FRAME_COMPARE_DISABLE_LIBPLACEBO"
+_LIBPLACEBO_PROBE_ENV = "FRAME_COMPARE_LIBPLACEBO_PROBE"
+_LIBPLACEBO_PROBE_TIMEOUT_SECONDS = 5.0
 
 # Private constants
 _TONE_CURVE_MAP = {"bt2390": 2, "spline": 1, "reinhard": 4}
@@ -43,6 +55,87 @@ _TONEMAP_PRESETS: dict[str, TonemapSettings] = {
         gamma_lift=False,
     ),
 }
+
+
+@lru_cache(maxsize=1)
+def _libplacebo_runtime_usable() -> bool:
+    """Return whether libplacebo is safe to call in this process.
+
+    Plugin presence is not sufficient on all Docker/Vulkan setups: some
+    environments expose `core.placebo.Tonemap` but crash the process when it is
+    invoked. We probe that path in a child Python process once, cache the
+    result, and keep the main process on the deterministic fallback path when
+    the probe fails.
+    """
+    if os.environ.get(_REQUIRE_LIBPLACEBO_ENV) == "1":
+        return True
+    if os.environ.get(_DISABLE_LIBPLACEBO_ENV) == "1":
+        return False
+    if os.environ.get(_LIBPLACEBO_PROBE_ENV) == "1":
+        return True
+
+    probe_script = textwrap.dedent(
+        """
+        import vapoursynth as vs
+
+        core = vs.core
+        if not hasattr(core, "placebo") or not hasattr(core.placebo, "Tonemap"):
+            raise SystemExit(2)
+
+        clip = core.std.BlankClip(
+            width=16,
+            height=16,
+            format=vs.RGB48,
+            length=1,
+            color=[32768, 32768, 32768],
+        )
+        clip = clip.std.SetFrameProps(
+            _Matrix=0,
+            _ColorRange=0,
+            _Transfer=16,
+            _Primaries=9,
+        )
+        out = core.placebo.Tonemap(
+            clip,
+            src_max=1000,
+            dst_max=203,
+            tone_mapping_function=2,
+            dst_csp=0,
+            dst_prim=1,
+            src_csp=1,
+        )
+        _ = out.get_frame(0)
+        """
+    )
+    env = os.environ.copy()
+    env[_LIBPLACEBO_PROBE_ENV] = "1"
+
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", probe_script],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=_LIBPLACEBO_PROBE_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.warning(
+            "libplacebo_probe_failed_disabling",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        return False
+
+    if result.returncode == 0:
+        return True
+
+    log.warning(
+        "libplacebo_probe_unusable_disabling",
+        returncode=result.returncode,
+        stdout=result.stdout.strip()[-400:],
+        stderr=result.stderr.strip()[-400:],
+    )
+    return False
 
 
 def _deduce_src_csp_hint(transfer: int | None, primaries: int | None) -> int | None:
@@ -111,6 +204,8 @@ def _convert_non_rgb_with_matrix_hint(
 
 def _to_rgbs(clip: vs.VideoNode) -> vs.VideoNode:
     """Convert clip to RGBS if needed."""
+    import vapoursynth as vs
+
     try:
         if clip.format.id != vs.RGBS:  # type: ignore
             if clip.format.color_family == vs.RGB:  # type: ignore
@@ -151,6 +246,8 @@ def _apply_libplacebo(
     hdr_metadata: HDRMetadata | None = None,
 ) -> vs.VideoNode | None:
     """Apply tonemapping using libplacebo."""
+    import vapoursynth as vs
+
     target_nits = _validate_target_nits(settings)
 
     if settings.tone_curve not in _TONE_CURVE_MAP:
@@ -332,11 +429,13 @@ def apply_tonemap(
         return clip
     _validate_target_nits(settings)
 
+    import vapoursynth as vs
+
     core = vs.core
 
     plugins = detect_plugins(core)
 
-    if plugins.get("libplacebo", False):
+    if plugins.get("libplacebo", False) and _libplacebo_runtime_usable():
         result = _apply_libplacebo(clip, settings, core, hdr_metadata)
         if result is not None:
             return result

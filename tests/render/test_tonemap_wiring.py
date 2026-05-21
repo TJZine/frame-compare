@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from frame_compare.config.overrides import TonemapCliOverrides
 from frame_compare.config.schema import ColorConfig, ConfigSchema
 from frame_compare.errors import (
     SourceLoadError,
@@ -87,6 +88,41 @@ def test_resolve_tonemap_settings_applies_config_overrides() -> None:
         assert settings.contrast_recovery == 0.25
 
 
+def test_resolve_tonemap_settings_applies_cli_overrides() -> None:
+    """Verify resolve_tonemap_settings applies CLI overrides with highest priority."""
+    config = ConfigSchema(
+        color=ColorConfig(
+            enable_tonemap=True,
+            preset="filmic",
+            target_nits=250,
+            tone_curve="spline",
+        )
+    )
+
+    cli_overrides: TonemapCliOverrides = {
+        "tm_preset": "reference",
+        "tm_target": 400,
+        "tm_curve": "mobius",
+    }
+
+    with patch("frame_compare.vs.tonemap.get_preset_settings") as mock_get_preset:
+        mock_get_preset.return_value = TonemapSettings(
+            enabled=True,
+            preset="reference",
+            tone_curve="bt2390",
+            target_nits=203,
+        )
+
+        settings = resolve_tonemap_settings(config, cli_overrides)
+
+        # Verify preset requested was reference, not filmic
+        mock_get_preset.assert_called_once_with("reference")
+
+        # Verify CLI overrides overrode both the preset default and the config values
+        assert settings.target_nits == 400
+        assert settings.tone_curve == "mobius"
+
+
 # ─── Probe Failure Determinism Tests ───────────────────────────────────────────
 
 
@@ -95,26 +131,30 @@ def test_probe_failure_disallows_fallback_when_tonemap_enabled(tmp_path: Path) -
     """Verify probe failures propagate when tonemap is enabled (no FFmpeg fallback).
 
     Scenario: VS load fails, config.color.enable_tonemap=True, renderer="auto".
-    Setup: patch probe_is_hdr_ffprobe to raise SourceLoadError (FC-4015).
+    Setup: mock ffmpeg_runner to raise SourceLoadError (FC-4015).
     Assert: render_screenshots(...) propagates the probe exception.
     """
     clips = [Path("hdr_video.mkv")]
     frames = [0]
     enable_tonemap_config = ConfigSchema(color=ColorConfig(enable_tonemap=True))
 
-    with (
-        patch("frame_compare.vs.loader.DefaultVSLoader") as mock_loader_cls,
-        patch(
-            "frame_compare.render.orchestrator.probe_is_hdr_ffprobe",
-            side_effect=SourceLoadError(Path("hdr_video.mkv"), "ffprobe failed"),
-        ),
-    ):
+    mock_runner = MagicMock()
+    mock_runner.probe_hdr.side_effect = SourceLoadError(Path("hdr_video.mkv"), "ffprobe failed")
+
+    with patch("frame_compare.vs.loader.DefaultVSLoader") as mock_loader_cls:
         mock_loader = mock_loader_cls.return_value
         mock_loader.load.side_effect = VapourSynthNotFoundError()
 
         # Should propagate probe exception, NOT raise VapourSynthNotFoundError
         with pytest.raises(SourceLoadError, match="ffprobe failed"):
-            render_screenshots(clips, frames, tmp_path, enable_tonemap_config, renderer="auto")
+            render_screenshots(
+                clips,
+                frames,
+                tmp_path,
+                enable_tonemap_config,
+                renderer="auto",
+                ffmpeg_runner=mock_runner,
+            )
 
 
 # ─── HDR Tonemap Gating Integration Tests ──────────────────────────────────────
@@ -122,21 +162,38 @@ def test_probe_failure_disallows_fallback_when_tonemap_enabled(tmp_path: Path) -
 
 @pytest.mark.integration
 def test_hdr_enable_tonemap_requires_vs_when_renderer_auto(tmp_path: Path) -> None:
-    """HDR + enable_tonemap=True + VS missing → raises original VS failure."""
+    """HDR + enable_tonemap=True + VS missing → raises TonemapRequiresVapourSynthError from original VS failure."""
     clips = [Path("hdr_video.mkv")]
     frames = [0]
     enable_tonemap_config = ConfigSchema(color=ColorConfig(enable_tonemap=True))
 
-    with (
-        patch("frame_compare.vs.loader.DefaultVSLoader") as mock_loader_cls,
-        patch("frame_compare.render.orchestrator.probe_is_hdr_ffprobe", return_value=True),
-    ):
+    from frame_compare.vs.types import HDRMetadata
+
+    mock_runner = MagicMock()
+    mock_runner.probe_hdr.return_value = HDRMetadata(
+        mastering_display=None,
+        max_cll=None,
+        max_fall=None,
+        color_primaries=9,
+        transfer=16,
+        matrix=9,
+    )
+
+    with patch("frame_compare.vs.loader.DefaultVSLoader") as mock_loader_cls:
         mock_loader = mock_loader_cls.return_value
         mock_loader.load.side_effect = VapourSynthNotFoundError()
 
-        # Should re-raise VS failure (not fall back to FFmpeg)
-        with pytest.raises(VapourSynthNotFoundError):
-            render_screenshots(clips, frames, tmp_path, enable_tonemap_config, renderer="auto")
+        # Should raise TonemapRequiresVapourSynthError with the original VS failure as cause
+        with pytest.raises(TonemapRequiresVapourSynthError) as exc_info:
+            render_screenshots(
+                clips,
+                frames,
+                tmp_path,
+                enable_tonemap_config,
+                renderer="auto",
+                ffmpeg_runner=mock_runner,
+            )
+        assert isinstance(exc_info.value.__cause__, VapourSynthNotFoundError)
 
 
 @pytest.mark.integration
@@ -146,12 +203,28 @@ def test_hdr_enable_tonemap_requires_vs_when_renderer_ffmpeg(tmp_path: Path) -> 
     frames = [0]
     enable_tonemap_config = ConfigSchema(color=ColorConfig(enable_tonemap=True))
 
-    with (
-        patch("frame_compare.render.orchestrator.probe_is_hdr_ffprobe", return_value=True),
-        pytest.raises(TonemapRequiresVapourSynthError),
-    ):
+    from frame_compare.vs.types import HDRMetadata
+
+    mock_runner = MagicMock()
+    mock_runner.probe_hdr.return_value = HDRMetadata(
+        mastering_display=None,
+        max_cll=None,
+        max_fall=None,
+        color_primaries=9,
+        transfer=16,
+        matrix=9,
+    )
+
+    with pytest.raises(TonemapRequiresVapourSynthError):
         # Should raise explicit tonemap-gating error (no FFmpeg path for HDR+tonemap).
-        render_screenshots(clips, frames, tmp_path, enable_tonemap_config, renderer="ffmpeg")
+        render_screenshots(
+            clips,
+            frames,
+            tmp_path,
+            enable_tonemap_config,
+            renderer="ffmpeg",
+            ffmpeg_runner=mock_runner,
+        )
 
 
 @pytest.mark.integration
@@ -184,9 +257,11 @@ def test_sdr_allows_ffmpeg_fallback_when_vs_missing(tmp_path: Path) -> None:
     frames = [0]
     enable_tonemap_config = ConfigSchema(color=ColorConfig(enable_tonemap=True))
 
+    mock_runner = MagicMock()
+    mock_runner.probe_hdr.return_value = None
+
     with (
         patch("frame_compare.vs.loader.DefaultVSLoader") as mock_loader_cls,
-        patch("frame_compare.render.orchestrator.probe_is_hdr_ffprobe", return_value=False),
         patch("frame_compare.render.orchestrator.render_batch") as mock_batch,
     ):
         mock_loader = mock_loader_cls.return_value
@@ -195,7 +270,17 @@ def test_sdr_allows_ffmpeg_fallback_when_vs_missing(tmp_path: Path) -> None:
 
         # Should NOT raise — SDR content can use FFmpeg
         results = render_screenshots(
-            clips, frames, tmp_path, enable_tonemap_config, renderer="auto"
+            clips,
+            frames,
+            tmp_path,
+            enable_tonemap_config,
+            renderer="auto",
+            ffmpeg_runner=mock_runner,
         )
 
         assert "sdr_video" in results
+        mock_batch.assert_called_once()
+        called_args, _ = mock_batch.call_args
+        requests_passed = called_args[0]
+        assert len(requests_passed) == 1
+        assert requests_passed[0].clip == Path("sdr_video.mkv")

@@ -1,21 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from frame_compare.config.schema import OverlayMode
+
 if TYPE_CHECKING:
     import vapoursynth as vs  # type: ignore
-
-
-class OverlayMode(str, Enum):
-    """Overlay verbosity level."""
-
-    MINIMAL = "minimal"  # Label only
-    STANDARD = "standard"  # Label + frame + resolution
-    DIAGNOSTIC = "diagnostic"  # Standard + HDR info
-    NONE = "none"  # No overlay drawn
 
 
 @dataclass
@@ -54,6 +46,21 @@ class RenderRequest:
     output_path: Path
     overlay: OverlayConfig | None
     encoder_settings: EncoderSettings
+
+
+@dataclass(frozen=True)
+class ScreenshotBatchRequest:
+    """Batch request representing a single clip's screenshot render task."""
+
+    clip_path: Path
+    label: str
+    source_frames: list[int]
+    display_frames: list[int]
+    selection_labels: list[str | None]
+    probe_width: int
+    probe_height: int
+    probe_num_frames: int
+    probe_is_hdr: bool
 
 
 Renderer = Literal["vapoursynth", "ffmpeg", "auto"]

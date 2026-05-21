@@ -13,7 +13,7 @@ from frame_compare.orchestration.context import (
     ClipState,
     RunContext,
 )
-from frame_compare.orchestration.coordinator import _run_render_phase
+from frame_compare.orchestration.coordinator import _run_render_phase, _RunArtifacts
 from frame_compare.utils.types import WorkspacePaths
 
 
@@ -77,19 +77,17 @@ def test_ffmpeg_extraction_applies_overlay_post_process(
         reporter=None,
     )
 
-    screenshots: dict[str, list[Path]] = {}
-    screenshot_dir_box: list[Path | None] = [None]
+    artifacts = _RunArtifacts()
     runner = FakeFFmpegRunner()
 
     _run_render_phase(
         ctx=ctx,
         frames=[0, 1],
         runner=runner,
-        screenshots_out=lambda value: screenshots.update(value),
-        screenshot_dir_out=lambda value: screenshot_dir_box.__setitem__(0, value),
+        artifacts=artifacts,
     )
 
-    assert screenshot_dir_box[0] == workspace.screenshots_dir
-    assert "Reference" in screenshots
-    assert len(screenshots["Reference"]) == 2
-    assert applied == screenshots["Reference"]
+    assert artifacts.screenshot_dir == workspace.screenshots_dir
+    assert "Reference" in artifacts.screenshots_by_label
+    assert len(artifacts.screenshots_by_label["Reference"]) == 2
+    assert applied == artifacts.screenshots_by_label["Reference"]

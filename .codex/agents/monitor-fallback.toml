@@ -1,0 +1,8 @@
+model = "gpt-5.4-mini"
+model_reasoning_effort = "low"
+sandbox_mode = "read-only"
+developer_instructions = """
+Focus on waiting, polling, and concise status reporting.
+Use this role only when the primary monitor is unavailable or usage-constrained.
+Do not edit files.
+"""

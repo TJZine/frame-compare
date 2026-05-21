@@ -78,7 +78,7 @@ def load_cached_metrics(
         return CacheLoadResult(success=False, reason="version_mismatch")
 
     if data["fingerprint"] != fingerprint:
-        return CacheLoadResult(success=False, reason="fingerprint_mismatch")
+        return CacheLoadResult(success=False, reason="mismatched_inputs")
 
     metadata_dict = data["metadata"]
     # Required metadata keys

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 from pydantic import ValidationError
 
@@ -11,6 +11,13 @@ from frame_compare.errors import ConfigValidationError, normalize_pydantic_error
 
 if TYPE_CHECKING:
     from frame_compare.config.schema import ConfigSchema
+
+
+class TonemapCliOverrides(TypedDict, total=False):
+    tm_preset: str | None
+    tm_target: int | None
+    tm_curve: str | None
+
 
 CLI_OVERRIDE_MAP: dict[str, str] = {
     "tm_preset": "color.preset",
@@ -22,7 +29,6 @@ CLI_OVERRIDE_MAP: dict[str, str] = {
     "no_upload": "slowpics.auto_upload",
     "force_interactive_alignment": "audio_alignment.force_interactive",
     "input": "paths.input_dir",
-    "output": "report.output_dir",
 }
 
 _INVERTED_FLAGS: frozenset[str] = frozenset({"no_upload"})

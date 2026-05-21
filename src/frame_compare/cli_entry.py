@@ -160,10 +160,13 @@ def run(
     }
     resolved_config: ConfigSchema | None = None
 
+    def _resolve_effective_config() -> ConfigSchema:
+        return apply_cli_overrides(load_config(config_path), cli_args=cli_args)
+
     def _load_effective_config() -> ConfigSchema:
         nonlocal resolved_config
         if resolved_config is None:
-            resolved_config = apply_cli_overrides(load_config(config_path), cli_args=cli_args)
+            resolved_config = _resolve_effective_config()
         return resolved_config
 
     try:
@@ -253,7 +256,7 @@ def run(
 
     if result.report_path is not None and not json_output and not quiet and sys.stdout.isatty():
         try:
-            cfg = _load_effective_config()
+            cfg = _resolve_effective_config()
         except FrameCompareError:
             # Default to opening when config cannot be reloaded so successful runs
             # still surface the generated report in interactive sessions.

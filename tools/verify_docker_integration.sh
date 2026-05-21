@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: bash tools/verify_docker_integration.sh [--service NAME] [--no-build] [--no-cache]
+Usage: bash tools/verify_docker_integration.sh [--service NAME] [--no-build] [--no-cache] [--pytest-path PATH]
 
 Runs integration tests inside the Docker image where VapourSynth + FFmpeg are installed.
 Fails if any tests are skipped (the “real deps work” gate).
@@ -19,16 +19,24 @@ Options:
   --service NAME   Docker Compose service to run (default: frame-compare-test)
   --no-build       Do not run "docker compose build" before tests
   --no-cache       Add "--no-cache" to "docker compose build"
+  --pytest-path    Repeat to override default pytest paths with a focused subset
 EOF
 }
 
 service="frame-compare-test"
 run_build="1"
 no_cache="0"
+use_custom_pytest_paths="0"
+pytest_paths=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --service)
+      if [[ $# -lt 2 || -z "${2:-}" ]]; then
+        echo "ERROR: --service requires a value" >&2
+        usage >&2
+        exit 2
+      fi
       service="${2:-}"
       shift 2
       ;;
@@ -39,6 +47,19 @@ while [[ $# -gt 0 ]]; do
     --no-cache)
       no_cache="1"
       shift
+      ;;
+    --pytest-path)
+      if [[ $# -lt 2 || -z "${2:-}" ]]; then
+        echo "ERROR: --pytest-path requires a value" >&2
+        usage >&2
+        exit 2
+      fi
+      if [[ "$use_custom_pytest_paths" == "0" ]]; then
+        pytest_paths=()
+        use_custom_pytest_paths="1"
+      fi
+      pytest_paths+=("${2:-}")
+      shift 2
       ;;
     -h|--help)
       usage
@@ -59,6 +80,11 @@ fi
 
 if ! docker compose version >/dev/null 2>&1; then
   echo "ERROR: docker compose is not available (need Docker Desktop or compose plugin)" >&2
+  exit 127
+fi
+
+if ! docker info >/dev/null 2>&1; then
+  echo "ERROR: docker daemon is not running; start Docker Desktop or your Docker daemon and retry" >&2
   exit 127
 fi
 
@@ -94,6 +120,12 @@ if [[ "${#docker_env_args[@]}" -gt 0 ]]; then
   docker_cmd+=("${docker_env_args[@]}")
 fi
 
+if [[ "${#pytest_paths[@]}" -eq 0 ]]; then
+  pytest_paths=(tests/integration/ tests/vs/)
+fi
+
+printf -v pytest_args ' %q' "${pytest_paths[@]}"
+
 docker_cmd+=(
   "$service"
   -c
@@ -108,9 +140,11 @@ if [[ -n "$icd" ]]; then
   export VK_ICD_FILENAMES="$icd"
 fi
 python -c "import pytest" >/dev/null 2>&1 || python -m pip install --user -q pytest &&
-python -m pytest -v tests/integration/ tests/vs/
+pytest_cache_dir="$(mktemp -d /tmp/frame-compare-pytest-cache.XXXXXX)"
+trap 'rm -rf "$pytest_cache_dir"' EXIT
 EOF
 )
+container_cmd+=$'\n'"python -m pytest -v -o cache_dir=\"\$pytest_cache_dir\"${pytest_args}"
 
 set +e
 "${docker_cmd[@]}" "$container_cmd" 2>&1 | tee "$tmp_log"

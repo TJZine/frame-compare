@@ -1,0 +1,4 @@
+interface:
+  display_name: "Frame Compare Cleanup Implement"
+  short_description: "Launch the approved cleanup/refactor implementer workflow"
+  default_prompt: "Use the frame-compare-cleanup-implement skill for this task."

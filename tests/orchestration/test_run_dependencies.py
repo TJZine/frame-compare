@@ -5,9 +5,9 @@ from pathlib import Path
 
 from frame_compare.orchestration import RunDependencies as PublicRunDependencies
 from frame_compare.orchestration.coordinator import (
-    DefaultFFmpegRunner,
     RunDependencies,
 )
+from frame_compare.render.ffmpeg import DefaultFFmpegRunner
 from frame_compare.vs.loader import DefaultVSLoader, VSLoader
 from frame_compare.vs.types import HDRMetadata
 

@@ -183,8 +183,8 @@ def test_load_version_mismatch(tmp_path: Path) -> None:
     assert result.reason == "version_mismatch"
 
 
-def test_load_fingerprint_mismatch(tmp_path: Path) -> None:
-    """Wrong fingerprint → reason="fingerprint_mismatch"."""
+def test_load_mismatched_inputs(tmp_path: Path) -> None:
+    """Wrong fingerprint → reason="mismatched_inputs"."""
     cache_file = tmp_path / "cache.compframes"
     cache_file.write_text(
         json.dumps(
@@ -198,13 +198,14 @@ def test_load_fingerprint_mismatch(tmp_path: Path) -> None:
                     "fps": "24/1",
                     "config_fingerprint": "fp1",
                     "clips": [],
+                    "version": CACHE_VERSION,
                 },
             }
         )
     )
     result = load_cached_metrics(tmp_path, "fp2", [])
     assert result.success is False
-    assert result.reason == "fingerprint_mismatch"
+    assert result.reason == "mismatched_inputs"
 
 
 def test_save_creates_directory(tmp_path: Path) -> None:
@@ -260,6 +261,7 @@ def test_load_missing_key_returns_corrupted(tmp_path: Path) -> None:
                     "fps": "24/1",
                     "config_fingerprint": "fp",
                     "clips": [],
+                    "version": CACHE_VERSION,
                 },
             }
         )

@@ -114,25 +114,8 @@ def _maybe_launch_vspreview(
             progress.complete_phase()
 
 
-async def align_clips(
-    reference: Path,
-    comparisons: list[Path],
-    config: AlignmentConfig,
-    cache_dir: Path,
-    progress: ProgressReporter | None = None,
-) -> list[AlignmentResult]:
-    """
-    Align comparison clips to reference using audio cross-correlation.
-
-    Returns:
-        List of AlignmentResult for each comparison, in the same order
-        as the input `comparisons` list.
-    """
-    if progress:
-        progress.start_phase("Audio Alignment", total=len(comparisons))
-
-    results_map: dict[str, AlignmentResult] = {}
-
+def _check_duplicate_stems(comparisons: list[Path]) -> None:
+    """Validate that comparison filenames have unique stems."""
     stems_to_paths: dict[str, list[Path]] = {}
     for comp in comparisons:
         stems_to_paths.setdefault(comp.stem, []).append(comp)
@@ -147,17 +130,23 @@ async def align_clips(
             f"Rename clips to be unique. Duplicates: {formatted}"
         )
 
-    # 0. Load manual overrides (highest precedence per §2.4)
+
+def _apply_manual_overrides(
+    reference: Path,
+    comparisons: list[Path],
+    cache_dir: Path,
+    results_map: dict[str, AlignmentResult],
+) -> Fraction | None:
+    """Apply manual offsets from overrides config, returning reference FPS if probed."""
     from frame_compare.vspreview import load_manual_overrides
 
     manual_overrides = load_manual_overrides(cache_dir)
-    fps_reference: Fraction | None = None  # Lazy probe, only when needed
+    fps_reference: Fraction | None = None
 
     for comp in comparisons:
         key = f"{reference.stem}:{comp.stem}"
         if key in manual_overrides:
             override = manual_overrides[key]
-            # Need FPS for time_offset_seconds calculation
             if fps_reference is None:
                 fps_reference = _probe_fps(reference)
             results_map[key] = AlignmentResult(
@@ -165,87 +154,113 @@ async def align_clips(
                 comparison_clip=comp.name,
                 frame_offset=override.frame_offset,
                 time_offset_seconds=override.frame_offset / float(fps_reference),
-                correlation_score=1.0,  # Explicit constant per §2.4
-                method="manual",
+                correlation_score=1.0,
+                algorithm=None,
+                source="manual",
             )
+    return fps_reference
 
-    # 1. Check cache for non-manual entries
-    requested_comparisons = [
-        c for c in comparisons if f"{reference.stem}:{c.stem}" not in results_map
-    ]
-    if config.cache_results and requested_comparisons:
-        cached = load_cached_offsets(cache_dir, [reference] + requested_comparisons)
-        if cached is not None:
-            results_map.update(cached)
-            # Find what is still missing
-            requested_comparisons = [
-                c for c in comparisons if f"{reference.stem}:{c.stem}" not in results_map
-            ]
 
-    offsets_by_key = _build_offsets_map(
-        reference=reference,
-        comparisons=comparisons,
-        results_map=results_map,
-    )
+def _compute_missing_alignments(
+    *,
+    reference: Path,
+    requested_comparisons: list[Path],
+    config: AlignmentConfig,
+    results_map: dict[str, AlignmentResult],
+    fps_reference: Fraction,
+    progress: ProgressReporter | None,
+) -> None:
+    """Extract audio, perform cross-correlation, and populate results map."""
+    ref_audio = _extract_audio(reference, config.sample_rate)
 
-    # If everything is resolved (manual + cached), return early
-    if not requested_comparisons:
+    for comp in requested_comparisons:
         if progress:
-            progress.complete_phase()
-        _maybe_launch_vspreview(
-            reference=reference,
-            comparisons=comparisons,
-            offsets_by_key=offsets_by_key,
-            cache_dir=cache_dir,
-            config=config,
-            progress=progress,
+            progress.set_description(f"Aligning {comp.name}")
+
+        comp_audio = _extract_audio(comp, config.sample_rate)
+        max_offset_samples = int(config.max_offset_seconds * config.sample_rate)
+        sample_offset, score = _cross_correlate(
+            ref_audio,
+            comp_audio,
+            max_offset_samples=max_offset_samples,
         )
-        return [results_map[f"{reference.stem}:{c.stem}"] for c in comparisons]
 
-    # 2. Compute missing
+        frame_offset = _samples_to_frames(sample_offset, config.sample_rate, fps_reference)
+        time_offset = sample_offset / config.sample_rate
+
+        res = AlignmentResult(
+            reference_clip=reference.name,
+            comparison_clip=comp.name,
+            frame_offset=frame_offset,
+            time_offset_seconds=time_offset,
+            correlation_score=float(score),
+            algorithm="cross_correlation",
+            source="computed",
+        )
+        results_map[f"{reference.stem}:{comp.stem}"] = res
+
+        if progress:
+            progress.advance()
+
+
+def align_clips(
+    reference: Path,
+    comparisons: list[Path],
+    config: AlignmentConfig,
+    cache_dir: Path,
+    progress: ProgressReporter | None = None,
+) -> list[AlignmentResult]:
+    """
+    Align comparison clips to reference using audio cross-correlation.
+
+    Returns:
+        List of AlignmentResult for each comparison, in the same order
+        as the input `comparisons` list.
+    """
+    _check_duplicate_stems(comparisons)
+
+    if progress:
+        progress.start_phase("Audio Alignment", total=len(comparisons))
+
+    results_map: dict[str, AlignmentResult] = {}
     try:
-        if fps_reference is None:
-            fps_reference = _probe_fps(reference)
-        ref_audio = _extract_audio(reference, config.sample_rate)
+        # 0. Load manual overrides (highest precedence per §2.4)
+        fps_reference = _apply_manual_overrides(reference, comparisons, cache_dir, results_map)
 
-        for comp in requested_comparisons:
-            if progress:
-                progress.set_description(f"Aligning {comp.name}")
+        # 1. Check cache for non-manual entries
+        requested_comparisons = [
+            c for c in comparisons if f"{reference.stem}:{c.stem}" not in results_map
+        ]
+        if config.cache_results and requested_comparisons:
+            cached = load_cached_offsets(cache_dir, [reference] + requested_comparisons)
+            if cached is not None:
+                results_map.update(cached)
+                requested_comparisons = [
+                    c for c in comparisons if f"{reference.stem}:{c.stem}" not in results_map
+                ]
 
-            comp_audio = _extract_audio(comp, config.sample_rate)
-            max_offset_samples = int(config.max_offset_seconds * config.sample_rate)
-            sample_offset, score = _cross_correlate(
-                ref_audio,
-                comp_audio,
-                max_offset_samples=max_offset_samples,
+        # 2. Compute missing
+        if requested_comparisons:
+            if fps_reference is None:
+                fps_reference = _probe_fps(reference)
+            _compute_missing_alignments(
+                reference=reference,
+                requested_comparisons=requested_comparisons,
+                config=config,
+                results_map=results_map,
+                fps_reference=fps_reference,
+                progress=progress,
             )
 
-            frame_offset = _samples_to_frames(sample_offset, config.sample_rate, fps_reference)
-            time_offset = sample_offset / config.sample_rate
-
-            res = AlignmentResult(
-                reference_clip=reference.name,
-                comparison_clip=comp.name,
-                frame_offset=frame_offset,
-                time_offset_seconds=time_offset,
-                correlation_score=float(score),
-                method="cross_correlation",
-            )
-            results_map[f"{reference.stem}:{comp.stem}"] = res
-
-            if progress:
-                progress.advance()
-
-        # 3. Save cache if needed (only computed results, not manual)
-        if config.cache_results:
-            # Save only the computed results (method != "manual")
-            computed_results = [
-                results_map[f"{reference.stem}:{c.stem}"]
-                for c in comparisons
-                if results_map[f"{reference.stem}:{c.stem}"].method != "manual"
-            ]
-            if computed_results:
-                save_offsets_cache(cache_dir, computed_results)
+            # 3. Save cache if needed (only computed results, not manual)
+            if config.cache_results:
+                computed_results = [
+                    results_map[f"{reference.stem}:{c.stem}"]
+                    for c in comparisons
+                    if results_map[f"{reference.stem}:{c.stem}"].source != "manual"
+                ]
+                if computed_results:
+                    save_offsets_cache(cache_dir, computed_results)
 
     finally:
         if progress:
@@ -267,6 +282,30 @@ async def align_clips(
 
     # Return results in the same order as input comparisons
     return [results_map[f"{reference.stem}:{c.stem}"] for c in comparisons]
+
+
+def _resolve_cached_algorithm(entry_dict: dict[str, object]) -> str:
+    """Resolve the canonical cache algorithm field, accepting legacy key names."""
+    algorithm = entry_dict.get("algorithm")
+    if algorithm is None and "method" in entry_dict:
+        algorithm = entry_dict["method"]
+
+    if not isinstance(algorithm, str):
+        raise TypeError("algorithm must be str")
+    if algorithm != "cross_correlation":
+        raise ValueError("unsupported algorithm value")
+    return algorithm
+
+
+def _normalize_legacy_cache_entries(data: dict[str, object]) -> None:
+    """Rewrite legacy cache keys to the current schema before saving."""
+    for key, entry in data.items():
+        if key == "version" or not isinstance(entry, dict):
+            continue
+        entry_dict = cast(dict[str, object], entry)
+        if "algorithm" not in entry_dict and "method" in entry_dict:
+            entry_dict["algorithm"] = entry_dict["method"]
+        entry_dict.pop("method", None)
 
 
 def load_cached_offsets(
@@ -304,7 +343,7 @@ def load_cached_offsets(
                 frame_offset = entry_dict["frame_offset"]
                 time_offset_seconds = entry_dict["time_offset_seconds"]
                 correlation_score = entry_dict["correlation_score"]
-                method = entry_dict["method"]
+                _resolve_cached_algorithm(entry_dict)
 
                 if not isinstance(reference_clip, str):
                     raise TypeError("reference_clip must be str")
@@ -316,8 +355,6 @@ def load_cached_offsets(
                     raise TypeError("time_offset_seconds must be number")
                 if not isinstance(correlation_score, int | float):
                     raise TypeError("correlation_score must be number")
-                if not isinstance(method, str):
-                    raise TypeError("method must be str")
 
                 results[key] = AlignmentResult(
                     reference_clip=reference_clip,
@@ -325,7 +362,8 @@ def load_cached_offsets(
                     frame_offset=frame_offset,
                     time_offset_seconds=float(time_offset_seconds),
                     correlation_score=float(correlation_score),
-                    method=method,
+                    algorithm="cross_correlation",
+                    source="cached",
                 )
             except (KeyError, TypeError, ValueError) as e:
                 raise CacheCorruptionError(cache_path) from e
@@ -346,6 +384,7 @@ def save_offsets_cache(
         try:
             with cache_path.open("rb") as f:
                 data.update(tomllib.load(f))
+            _normalize_legacy_cache_entries(data)
         except tomllib.TOMLDecodeError as exc:
             log.warning(
                 "audio_offsets_cache_corrupt_on_write",
@@ -365,7 +404,7 @@ def save_offsets_cache(
             "frame_offset": res.frame_offset,
             "time_offset_seconds": res.time_offset_seconds,
             "correlation_score": res.correlation_score,
-            "method": res.method,
+            "algorithm": res.algorithm,
         }
 
     write_bytes_atomic(cache_path, tomli_w.dumps(data).encode("utf-8"))

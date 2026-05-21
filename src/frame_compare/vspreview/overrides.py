@@ -9,6 +9,7 @@ from __future__ import annotations
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import structlog
 import tomli_w
@@ -82,27 +83,36 @@ def load_manual_overrides(cache_dir: Path) -> dict[str, ManualOverride]:
         if not isinstance(entry, dict):
             continue
 
+        typed_entry = cast(dict[str, object], entry)
         try:
-            # Cast the entry to a dict[str, object] for type-safe access
-            typed_entry: dict[str, object] = entry  # type: ignore[assignment]
             ref_clip = typed_entry.get("reference_clip")
             comp_clip = typed_entry.get("comparison_clip")
             frame_off = typed_entry.get("frame_offset")
             ts = typed_entry.get("timestamp")
             conf = typed_entry.get("confirmed", True)
 
-            if ref_clip is None or comp_clip is None or frame_off is None or ts is None:
-                raise KeyError("Missing required field")
+            # Strict isinstance checks
+            if not isinstance(ref_clip, str):
+                raise TypeError("reference_clip must be str")
+            if not isinstance(comp_clip, str):
+                raise TypeError("comparison_clip must be str")
+            # frame_offset must be int and not a boolean (isinstance(True, int) is True in Python)
+            if not isinstance(frame_off, int) or isinstance(frame_off, bool):
+                raise TypeError("frame_offset must be int")
+            if not isinstance(ts, str):
+                raise TypeError("timestamp must be str")
+            if not isinstance(conf, bool):
+                raise TypeError("confirmed must be bool")
 
             override = ManualOverride(
-                reference_clip=str(ref_clip),
-                comparison_clip=str(comp_clip),
-                frame_offset=int(frame_off),  # type: ignore[arg-type]
-                timestamp=str(ts),
-                confirmed=bool(conf),
+                reference_clip=ref_clip,
+                comparison_clip=comp_clip,
+                frame_offset=frame_off,
+                timestamp=ts,
+                confirmed=conf,
             )
             result[key] = override
-        except (KeyError, TypeError, ValueError) as e:
+        except (TypeError, KeyError) as e:
             log.warning(
                 "manual_overrides_entry_invalid",
                 key=key,

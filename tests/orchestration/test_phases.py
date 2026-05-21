@@ -184,6 +184,7 @@ def test_execute_phases_warn_only_failure_marks_warned_and_continues(
             name="warn",
             execute=phase_warn,
             skip_condition=lambda config: False,
+            warn_only=True,
         ),
         Phase(name="after", execute=phase_after),
     ]
@@ -193,6 +194,41 @@ def test_execute_phases_warn_only_failure_marks_warned_and_continues(
     assert executed == ["warn", "after"]
     assert phases[0].status is PhaseStatus.WARNED
     assert phases[1].status is PhaseStatus.COMPLETED
+
+
+def test_execute_phases_fail_fast_failure_with_skip_condition_marks_failed_and_raises(
+    tmp_path: Path,
+) -> None:
+    context = _make_context(tmp_path)
+    reporter = NullProgressReporter()
+    executed: list[str] = []
+
+    async def phase_fail(_: RunContext) -> None:
+        executed.append("fail")
+        raise RuntimeError("boom")
+
+    async def phase_after(_: RunContext) -> None:
+        executed.append("after")
+
+    phases = [
+        Phase(
+            name="fail",
+            execute=phase_fail,
+            skip_condition=lambda config: False,
+        ),
+        Phase(name="after", execute=phase_after),
+    ]
+
+    try:
+        asyncio.run(execute_phases(phases, context, reporter))
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("Expected RuntimeError from required phase")
+
+    assert executed == ["fail"]
+    assert phases[0].status is PhaseStatus.FAILED
+    assert phases[1].status is PhaseStatus.PENDING
 
 
 def test_execute_phases_fail_fast_failure_marks_failed_and_raises(

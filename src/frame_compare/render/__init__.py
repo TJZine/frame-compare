@@ -12,6 +12,7 @@ from frame_compare.render.orchestrator import (
     ProgressReporter,
     render_batch,
     render_screenshots,
+    render_screenshots_from_batch,
     resolve_tonemap_settings,
     should_tonemap,
 )
@@ -22,6 +23,7 @@ from frame_compare.render.types import (
     OverlayMode,
     Renderer,
     RenderRequest,
+    ScreenshotBatchRequest,
     ScreenshotResult,
 )
 
@@ -31,6 +33,7 @@ __all__ = [
     "OverlayMode",
     "Renderer",
     "RenderRequest",
+    "ScreenshotBatchRequest",
     "ScreenshotResult",
     "calculate_dimensions",
     "calculate_overlay_position",
@@ -41,6 +44,7 @@ __all__ = [
     "render_frame",
     "render_batch",
     "render_screenshots",
+    "render_screenshots_from_batch",
     "ProgressReporter",
     "should_tonemap",
     "resolve_tonemap_settings",

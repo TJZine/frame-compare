@@ -113,10 +113,12 @@ RUN git clone --depth 1 --branch "${LIBPLACEBO_REF}" \
     ldconfig
 
 # Build vs-placebo plugin (pinned to commit SHA)
-RUN git clone --recurse-submodules --shallow-submodules \
-    https://github.com/Lypheo/vs-placebo.git && \
+# Initialize submodules after checkout so libp2p matches the pinned tree.
+RUN git clone https://github.com/Lypheo/vs-placebo.git && \
     cd vs-placebo && \
     git checkout "${VS_PLACEBO_REF}" && \
+    git submodule sync --recursive && \
+    git submodule update --init --recursive --depth 1 && \
     meson setup build && \
     ninja -C build && \
     cp build/libvs_placebo.so /usr/local/lib/vapoursynth/

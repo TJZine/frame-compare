@@ -96,7 +96,14 @@ function Download-Artifact([pscustomobject]$Artifact) {
   }
 
   Write-Host "Downloading $id -> $fileName"
-  Invoke-WebRequest -Uri $url -OutFile $dest | Out-Null
+  try {
+    Invoke-WebRequest -Uri $url -OutFile $dest | Out-Null
+  } catch {
+    if (Test-Path -LiteralPath $dest) {
+      Remove-Item -Force -LiteralPath $dest
+    }
+    throw "Failed to download artifact '$id' from $url. The upstream artifact may have moved or expired; update $ManifestPath with a reachable URL and matching sha256. Original error: $($_.Exception.Message)"
+  }
   Assert-Sha256 -FilePath $dest -ExpectedHex $sha256
   return $dest
 }

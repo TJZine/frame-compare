@@ -46,7 +46,7 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> typing.Any:
     if name == "ANALYZE_PROGRESS_TOTAL":
         from frame_compare.analysis.metrics import ANALYZE_PROGRESS_TOTAL
 

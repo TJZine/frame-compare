@@ -47,12 +47,27 @@ function Assert-SafeRelativePath([string]$PathValue, [string]$Context) {
   }
 }
 
+function Join-PathParts([string]$Root, [string[]]$Parts) {
+  $result = $Root
+  foreach ($part in $Parts) {
+    $result = Join-Path $result $part
+  }
+  return $result
+}
+
+function Convert-RelativePathToNative([string]$RelativePath) {
+  $separator = [string][System.IO.Path]::DirectorySeparatorChar
+  $normalized = ($RelativePath -replace "\\", "/")
+  return (($normalized -split "/") -join $separator)
+}
+
 function Get-SafeChildPath([string]$Root, [string]$RelativePath, [string]$Context) {
   Assert-SafeRelativePath -PathValue $RelativePath -Context $Context
-  $candidate = Join-Path $Root ($RelativePath -replace "/", "\\")
+  $candidate = Join-Path $Root (Convert-RelativePathToNative -RelativePath $RelativePath)
   $fullRoot = [System.IO.Path]::GetFullPath($Root)
   $fullCandidate = [System.IO.Path]::GetFullPath($candidate)
-  $fullRootPrefix = $fullRoot.TrimEnd("\") + "\"
+  $separator = [string][System.IO.Path]::DirectorySeparatorChar
+  $fullRootPrefix = $fullRoot.TrimEnd([char[]]@([System.IO.Path]::DirectorySeparatorChar)) + $separator
   if (!$fullCandidate.StartsWith($fullRootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
     throw "$Context resolved outside root: $RelativePath"
   }
@@ -98,6 +113,73 @@ function Get-Sha256HexForBytes([byte[]]$Bytes) {
     $sha.Dispose()
   }
   return ([System.BitConverter]::ToString($hash).Replace("-", "").ToLowerInvariant())
+}
+
+function Get-RsaParameterBytes([xml]$KeyXml, [string]$Name, [bool]$Required) {
+  $node = $KeyXml.RSAKeyValue.$Name
+  if ($null -eq $node -or [string]::IsNullOrWhiteSpace([string]$node)) {
+    if ($Required) {
+      throw "RSA key XML is missing required '$Name' value."
+    }
+    return $null
+  }
+  return [System.Convert]::FromBase64String([string]$node)
+}
+
+function New-RsaFromXml([string]$KeyXmlText) {
+  $rsa = $null
+  try {
+    [xml]$keyXml = $KeyXmlText
+    if ($null -eq $keyXml.RSAKeyValue) {
+      throw "RSA key XML must have an RSAKeyValue root."
+    }
+    $parameters = New-Object System.Security.Cryptography.RSAParameters
+    $parameters.Modulus = Get-RsaParameterBytes -KeyXml $keyXml -Name "Modulus" -Required $true
+    $parameters.Exponent = Get-RsaParameterBytes -KeyXml $keyXml -Name "Exponent" -Required $true
+    $parameters.P = Get-RsaParameterBytes -KeyXml $keyXml -Name "P" -Required $false
+    $parameters.Q = Get-RsaParameterBytes -KeyXml $keyXml -Name "Q" -Required $false
+    $parameters.DP = Get-RsaParameterBytes -KeyXml $keyXml -Name "DP" -Required $false
+    $parameters.DQ = Get-RsaParameterBytes -KeyXml $keyXml -Name "DQ" -Required $false
+    $parameters.InverseQ = Get-RsaParameterBytes -KeyXml $keyXml -Name "InverseQ" -Required $false
+    $parameters.D = Get-RsaParameterBytes -KeyXml $keyXml -Name "D" -Required $false
+
+    $rsa = [System.Security.Cryptography.RSA]::Create()
+    $rsa.ImportParameters($parameters)
+    return $rsa
+  } catch {
+    if ($null -ne $rsa) {
+      $rsa.Dispose()
+    }
+    $rsa = New-Object System.Security.Cryptography.RSACryptoServiceProvider
+    $rsa.PersistKeyInCsp = $false
+    try {
+      $rsa.FromXmlString($KeyXmlText)
+      return $rsa
+    } catch {
+      $rsa.Clear()
+      $rsa.Dispose()
+      throw
+    }
+  }
+}
+
+function Test-ManifestSignature(
+  [System.Security.Cryptography.RSA]$Rsa,
+  [byte[]]$ManifestBytes,
+  [byte[]]$SignatureBytes
+) {
+  try {
+    return $Rsa.VerifyData(
+      $ManifestBytes,
+      $SignatureBytes,
+      [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+      [System.Security.Cryptography.RSASignaturePadding]::Pkcs1
+    )
+  } catch [System.Management.Automation.MethodException] {
+    return $Rsa.VerifyData($ManifestBytes, "SHA256", $SignatureBytes)
+  } catch [System.MissingMethodException] {
+    return $Rsa.VerifyData($ManifestBytes, "SHA256", $SignatureBytes)
+  }
 }
 
 function Get-InstallConfig() {
@@ -160,7 +242,7 @@ function Invoke-WithRetry([scriptblock]$Action, [string]$Label) {
 }
 
 function Acquire-UpdateLock([string]$BundlePath) {
-  $lockPath = Join-Path $BundlePath "app\\.update_lock"
+  $lockPath = Join-PathParts -Root $BundlePath -Parts @("app", ".update_lock")
   Ensure-Directory -Path (Split-Path -Parent $lockPath)
   $staleAfter = [TimeSpan]::FromHours(1)
   for ($attempt = 1; $attempt -le 2; $attempt++) {
@@ -231,7 +313,7 @@ function Get-InstalledRequirementsFingerprint([string]$BundlePath) {
 }
 
 function Get-BackupRoot([string]$BundlePath) {
-  return Join-Path $BundlePath "app\\.update_backups"
+  return Join-PathParts -Root $BundlePath -Parts @("app", ".update_backups")
 }
 
 function Get-PayloadVersionFromManifest([object]$Manifest) {
@@ -254,7 +336,7 @@ function Invoke-SmokeCheck([string]$BundlePath, [string]$ExpectedVersion) {
     return
   }
 
-  $pythonExe = Join-Path $BundlePath "python\\python.exe"
+  $pythonExe = Join-PathParts -Root $BundlePath -Parts @("python", "python.exe")
   if (!(Test-Path -LiteralPath $pythonExe)) {
     throw "Smoke check failed: expected version '$ExpectedVersion' not found in output."
   }
@@ -338,10 +420,8 @@ function Verify-ManifestSignature(
   $rsa = $null
   try {
     $keyXml = Get-Content -LiteralPath $PublicKeyPath -Raw
-    $rsa = New-Object System.Security.Cryptography.RSACryptoServiceProvider
-    $rsa.PersistKeyInCsp = $false
-    $rsa.FromXmlString($keyXml)
-    return $rsa.VerifyData($ManifestBytes, "SHA256", $signatureBytes)
+    $rsa = New-RsaFromXml -KeyXmlText $keyXml
+    return Test-ManifestSignature -Rsa $rsa -ManifestBytes $ManifestBytes -SignatureBytes $signatureBytes
   } catch {
     return $false
   } finally {
@@ -372,8 +452,36 @@ function Test-StringInRange([string]$Value, [string]$Min, [string]$Max) {
   return $true
 }
 
+function Get-VersionFromCommandOutput([object[]]$OutputLines) {
+  foreach ($line in $OutputLines) {
+    $text = [string]$line
+    if ([string]::IsNullOrWhiteSpace($text)) {
+      continue
+    }
+    $trimmed = $text.Trim()
+    if ($trimmed -match '^frame-compare\s+([0-9]+(?:\.[0-9]+){1,3})$') {
+      return $Matches[1]
+    }
+    if ($trimmed -match '^([0-9]+(?:\.[0-9]+){1,3})$') {
+      return $Matches[1]
+    }
+  }
+  return ""
+}
+
 function Get-BundleAppVersion([string]$BundlePath) {
-  $pythonExe = Join-Path $BundlePath "python\\python.exe"
+  $bundleLauncher = Join-Path $BundlePath "frame-compare.ps1"
+  if (Test-Path -LiteralPath $bundleLauncher) {
+    $launcherResult = & $bundleLauncher version 2>&1
+    if ($LASTEXITCODE -eq 0) {
+      $launcherVersion = Get-VersionFromCommandOutput -OutputLines $launcherResult
+      if (-not [string]::IsNullOrWhiteSpace($launcherVersion)) {
+        return $launcherVersion
+      }
+    }
+  }
+
+  $pythonExe = Join-PathParts -Root $BundlePath -Parts @("python", "python.exe")
   if (!(Test-Path -LiteralPath $pythonExe)) {
     return ""
   }
@@ -403,11 +511,15 @@ function Invoke-Rollback([string]$BundlePath, [string]$BackupId) {
   try {
     $lockInfo = Acquire-UpdateLock -BundlePath $BundlePath
     $backupRoot = Get-BackupRoot -BundlePath $BundlePath
-    $backupDir = Join-Path (Join-Path $backupRoot $BackupId) "frame_compare"
+    if ($BackupId -notmatch '^\d{14}$') {
+      throw "Invalid backup id format: $BackupId (expected yyyyMMddHHmmss)"
+    }
+    $backupParent = Get-SafeChildPath -Root $backupRoot -RelativePath $BackupId -Context "backup id"
+    $backupDir = Join-Path $backupParent "frame_compare"
     if (!(Test-Path -LiteralPath $backupDir)) {
       throw "Backup id not found: $BackupId"
     }
-    $targetDir = Join-Path $BundlePath "app\\src\\frame_compare"
+    $targetDir = Join-PathParts -Root $BundlePath -Parts @("app", "src", "frame_compare")
     Restore-FromBackup -BackupDir $backupDir -TargetDir $targetDir
     Write-Host "Rollback applied from backup: $BackupId"
     return 0
@@ -424,10 +536,13 @@ function Invoke-ApplyUpdate([string]$BundlePath, [string]$UpdateZipPath) {
   $interactive = Test-IsInteractiveSession
   $lockInfo = $null
   $zip = $null
-  $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("FrameCompareUpdate\\" + [guid]::NewGuid().ToString("N"))
+  $tempRoot = Join-PathParts -Root ([System.IO.Path]::GetTempPath()) -Parts @(
+    "FrameCompareUpdate",
+    [guid]::NewGuid().ToString("N")
+  )
   $backupId = ""
   $backupDir = ""
-  $targetDir = Join-Path $BundlePath "app\\src\\frame_compare"
+  $targetDir = Join-PathParts -Root $BundlePath -Parts @("app", "src", "frame_compare")
   $oldDir = "$targetDir.old"
   $newDir = "$targetDir.new"
 
@@ -535,7 +650,9 @@ function Invoke-ApplyUpdate([string]$BundlePath, [string]$UpdateZipPath) {
       }
     }
 
-    $signaturePath = Join-Path $tempRoot ($signatureFile -replace "/", "\\")
+    $signaturePath = Join-Path $tempRoot (
+      Convert-RelativePathToNative -RelativePath $signatureFile
+    )
     $publicKeyPath = Join-Path $PSScriptRoot "update_public_key.xml"
     $signatureValid = Verify-ManifestSignature -ManifestBytes $manifestBytes -SignaturePath $signaturePath -PublicKeyPath $publicKeyPath
     $unsignedAllowed = $false
@@ -553,7 +670,11 @@ function Invoke-ApplyUpdate([string]$BundlePath, [string]$UpdateZipPath) {
     foreach ($file in $manifestFiles) {
       $manifestPath = Get-RequiredStringProperty -Object $file -Name "path" -Context "manifest.files[]"
       $expectedHash = Get-RequiredStringProperty -Object $file -Name "sha256" -Context "manifest.files[]"
-      $payloadPath = Join-Path $tempRoot (($payloadRoot + "/" + ($manifestPath -replace "\\", "/")) -replace "/", "\\")
+      $payloadPath = Join-Path $tempRoot (
+        Convert-RelativePathToNative -RelativePath (
+          $payloadRoot + "/" + ($manifestPath -replace "\\", "/")
+        )
+      )
       if (!(Test-Path -LiteralPath $payloadPath -PathType Leaf)) {
         throw "Extracted payload file missing: $manifestPath"
       }
@@ -605,7 +726,7 @@ function Invoke-ApplyUpdate([string]$BundlePath, [string]$UpdateZipPath) {
       }
     }
 
-    $payloadDir = Join-Path $tempRoot "payload\\app\\src\\frame_compare"
+    $payloadDir = Join-PathParts -Root $tempRoot -Parts @("payload", "app", "src", "frame_compare")
     if (!(Test-Path -LiteralPath $payloadDir -PathType Container)) {
       throw "Extracted payload root missing: $payloadDir"
     }

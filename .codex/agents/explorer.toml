@@ -1,0 +1,9 @@
+model = "gpt-5.3-codex-spark"
+model_reasoning_effort = "xhigh"
+sandbox_mode = "read-only"
+developer_instructions = """
+Stay in exploration mode.
+Trace real Frame Compare execution paths, cite files and symbols, and avoid proposing edits unless the parent asks.
+Prefer targeted reads and Codanna evidence when available; if Codanna is indexed to another repo or insufficient, fall back to rg/direct reads and say so.
+Prioritize CLI/config contracts, import layers, filesystem persistence, runtime integrations, and release surfaces when relevant.
+"""

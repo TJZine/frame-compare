@@ -5,6 +5,7 @@
 .mcp_sequential_thinking/
 .fastembed_cache
 .codex/schemas/
+.codex/skills/
 .uv_cache/
 .venv/
 .agent/
@@ -15,8 +16,8 @@ CODEX.md
 report/
 screens/
 screenshots/
-CODE_REVIEW_CONTEXT.md
 .desloppify/
+.agents/skills/desloppify/
 
 
 # FC2 app-server runtime (ephemeral)

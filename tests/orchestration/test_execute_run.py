@@ -24,6 +24,7 @@ from frame_compare.errors import (
 from frame_compare.orchestration import coordinator
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.services.alignment import CACHE_FILE_NAME
+from frame_compare.services.run_folder import derive_run_folder_name
 from frame_compare.services.types import AlignmentResult, MetadataConfig, TmdbMetadata
 from frame_compare.vs.types import HDRMetadata, SourceInfo
 
@@ -159,6 +160,9 @@ def test_execute_run_returns_success_and_records_preflight_timing(
     assert result.frame_count == 10
     assert result.clips_processed == 1
     assert result.duration_seconds >= 0.0
+    assert result.cache_hit is False
+    assert result.slowpics_url is None
+    assert result.report_path is None
     expected_keys = {
         "preflight",
         "load_sources",
@@ -358,7 +362,9 @@ def test_execute_run_no_cache_deletes_run_folder_cache_when_enabled(
     _create_video_files(input_dir, "source.mkv", "comp.mkv")
 
     run_name = "Movie (2024)"
-    monkeypatch.setattr(coordinator, "derive_run_folder_name", lambda **_kwargs: run_name)
+    monkeypatch.setattr(
+        coordinator, "reserve_run_folder", lambda input_dir, **_kwargs: input_dir / run_name
+    )
     run_generated_dir = input_dir / run_name / "generated"
 
     analysis_cache_dir = run_generated_dir / "cache"
@@ -404,6 +410,31 @@ def test_execute_run_from_cache_only_fails_when_metrics_cache_missing(
 
     with pytest.raises(MetricsCalculationError):
         asyncio.run(execute_run(request, deps=deps))
+
+
+def test_execute_run_from_cache_only_does_not_reserve_run_folder_when_metrics_cache_missing(
+    tmp_path: Path,
+) -> None:
+    _create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "source.mkv")
+    run_name = derive_run_folder_name(filenames=["source.mkv"])
+    run_dir = input_dir / run_name
+
+    request = RunRequest(
+        root=tmp_path,
+        from_cache_only=True,
+        skip_analysis=False,
+        skip_metadata=True,
+        skip_dovi=True,
+        no_upload=True,
+    )
+    deps = RunDependencies(vs_loader=FakeVSLoader())
+
+    with pytest.raises(MetricsCalculationError):
+        asyncio.run(execute_run(request, deps=deps))
+
+    assert not run_dir.exists()
 
 
 def test_execute_run_from_cache_only_fails_when_metrics_cache_invalid(
@@ -461,6 +492,7 @@ def test_execute_run_from_cache_only_fails_when_metrics_cache_version_mismatch(
                     "sha1": None,
                 }
             ],
+            "version": cache_io.CACHE_VERSION,
         },
     }
     cache_path.write_text(json.dumps(cache_payload), encoding="utf-8")
@@ -481,14 +513,12 @@ def test_execute_run_from_cache_only_fails_when_metrics_cache_version_mismatch(
 
 def test_execute_run_from_cache_only_uses_run_folder_cache_when_enabled(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     _create_video_files(input_dir, "source.mkv")
 
-    run_name = "Movie (2024)"
-    monkeypatch.setattr(coordinator, "derive_run_folder_name", lambda **_kwargs: run_name)
+    run_name = derive_run_folder_name(filenames=["source.mkv"])
     run_generated_dir = input_dir / run_name / "generated"
     cache_dir = run_generated_dir / "cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -514,6 +544,7 @@ def test_execute_run_from_cache_only_uses_run_folder_cache_when_enabled(
                     "sha1": None,
                 }
             ],
+            "version": cache_io.CACHE_VERSION,
         },
     }
     cache_path.write_text(json.dumps(cache_payload), encoding="utf-8")
@@ -532,6 +563,9 @@ def test_execute_run_from_cache_only_uses_run_folder_cache_when_enabled(
 
     assert result.success is True
     assert result.cache_hit is True
+    assert result.warnings == []
+    assert result.screenshot_dir == (run_generated_dir.parent / "screenshots").resolve()
+    assert result.slowpics_url is None
 
 
 def test_execute_run_passes_prefetched_tmdb_metadata_to_run_folder_derivation(
@@ -553,12 +587,12 @@ def test_execute_run_passes_prefetched_tmdb_metadata_to_run_folder_derivation(
     captured_tmdb_metadata: list[TmdbMetadata | None] = []
     resolve_calls: list[list[str]] = []
 
-    def _capture_run_folder_name(
-        *, filenames: list[str], tmdb_metadata: TmdbMetadata | None, existing_folders: list[str]
-    ) -> str:
-        del filenames, existing_folders
+    def _capture_reserve_run_folder(
+        input_dir: Path, filenames: list[str], tmdb_metadata: TmdbMetadata | None
+    ) -> Path:
+        del filenames
         captured_tmdb_metadata.append(tmdb_metadata)
-        return "Fight Club (1999)"
+        return input_dir / "Fight Club (1999)"
 
     async def _fake_resolve_metadata(
         *,
@@ -570,7 +604,7 @@ def test_execute_run_passes_prefetched_tmdb_metadata_to_run_folder_derivation(
         resolve_calls.append(filenames)
         return expected_metadata
 
-    monkeypatch.setattr(coordinator, "derive_run_folder_name", _capture_run_folder_name)
+    monkeypatch.setattr(coordinator, "reserve_run_folder", _capture_reserve_run_folder)
     monkeypatch.setattr(coordinator, "resolve_metadata", _fake_resolve_metadata)
 
     request = RunRequest(
@@ -614,8 +648,7 @@ enable = false
     input_dir = tmp_path / "comparison_videos"
     _create_video_files(input_dir, "a_ref.mkv", "b_comp1.mkv", "c_comp2.mkv")
 
-    async def _fake_align_clips(reference, comparisons, config, cache_dir, progress=None):
-        del config, cache_dir, progress
+    def _fake_align_clips(reference, comparisons, config, cache_dir, progress=None):
         return [
             AlignmentResult(
                 reference_clip=reference.name,
@@ -623,7 +656,8 @@ enable = false
                 frame_offset=1,
                 time_offset_seconds=0.041,
                 correlation_score=0.9,
-                method="cross_correlation",
+                algorithm="cross_correlation",
+                source="computed",
             ),
             AlignmentResult(
                 reference_clip=reference.name,
@@ -631,7 +665,8 @@ enable = false
                 frame_offset=-1,
                 time_offset_seconds=-0.041,
                 correlation_score=0.9,
-                method="cross_correlation",
+                algorithm="cross_correlation",
+                source="computed",
             ),
         ]
 

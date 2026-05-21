@@ -13,7 +13,7 @@ from frame_compare.orchestration.context import (
     ClipState,
     RunContext,
 )
-from frame_compare.orchestration.coordinator import _run_render_phase
+from frame_compare.orchestration.coordinator import _run_render_phase, _RunArtifacts
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.types import SourceInfo
 
@@ -48,7 +48,6 @@ def test_overlay_display_frame_number_matches_aligned_output_filename(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     captured: list[object] = []
-    screenshot_dir_box: list[Path | None] = [None]
 
     def _fake_render_frame(request: object) -> Path:
         captured.append(request)
@@ -94,19 +93,18 @@ def test_overlay_display_frame_number_matches_aligned_output_filename(
         reporter=None,
     )
 
-    screenshots: dict[str, list[Path]] = {}
+    artifacts = _RunArtifacts()
 
     _run_render_phase(
         ctx=ctx,
         frames=[10],
         runner=FakeFFmpegRunner(),
-        screenshots_out=lambda value: screenshots.update(value),
-        screenshot_dir_out=lambda value: screenshot_dir_box.__setitem__(0, value),
+        artifacts=artifacts,
     )
 
-    assert screenshot_dir_box[0] == workspace.screenshots_dir
-    assert "Reference" in screenshots
-    assert screenshots["Reference"][0].name.endswith("_00010.png")
+    assert artifacts.screenshot_dir == workspace.screenshots_dir
+    assert "Reference" in artifacts.screenshots_by_label
+    assert artifacts.screenshots_by_label["Reference"][0].name.endswith("_00010.png")
 
     req = cast(Any, captured[0])
     assert req.frame_number == 20
