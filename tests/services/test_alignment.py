@@ -29,6 +29,7 @@ from frame_compare.services.alignment import (
     save_offsets_cache,
 )
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
+from frame_compare.utils.progress_protocol import ProgressReporter
 
 
 def test_alignment_result_is_frozen():
@@ -530,6 +531,39 @@ def test_align_clips_full_cache_hit_skips_probe_and_extract(
     assert results[0].frame_offset == 10
     assert results[1].comparison_clip == "comp_b.mkv"
     assert results[1].frame_offset == 20
+
+
+def test_align_clips_duplicate_stems_fail_before_starting_progress(tmp_path: Path) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp_a = tmp_path / "dup.mkv"
+    comp_b = tmp_path / "dup.mp4"
+    ref.touch()
+    comp_a.touch()
+    comp_b.touch()
+
+    reporter = MagicMock(spec=ProgressReporter)
+
+    with pytest.raises(AudioAlignmentError, match="Duplicate comparison clip stems detected"):
+        align_clips(ref, [comp_a, comp_b], AlignmentConfig(), tmp_path, progress=reporter)
+
+    reporter.start_phase.assert_not_called()
+    reporter.complete_phase.assert_not_called()
+
+
+def test_align_clips_completes_progress_when_cache_load_raises(tmp_path: Path) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    ref.touch()
+    comp.touch()
+    (tmp_path / "audio_offsets.toml").write_text("not valid toml {{{ ", encoding="utf-8")
+
+    reporter = MagicMock(spec=ProgressReporter)
+
+    with pytest.raises(CacheCorruptionError):
+        align_clips(ref, [comp], AlignmentConfig(), tmp_path, progress=reporter)
+
+    reporter.start_phase.assert_called_once_with("Audio Alignment", total=1)
+    reporter.complete_phase.assert_called_once_with()
 
 
 @patch("frame_compare.services.alignment._probe_fps")

@@ -217,72 +217,50 @@ def align_clips(
         List of AlignmentResult for each comparison, in the same order
         as the input `comparisons` list.
     """
+    _check_duplicate_stems(comparisons)
+
     if progress:
         progress.start_phase("Audio Alignment", total=len(comparisons))
 
     results_map: dict[str, AlignmentResult] = {}
-
-    _check_duplicate_stems(comparisons)
-
-    # 0. Load manual overrides (highest precedence per §2.4)
-    fps_reference = _apply_manual_overrides(reference, comparisons, cache_dir, results_map)
-
-    # 1. Check cache for non-manual entries
-    requested_comparisons = [
-        c for c in comparisons if f"{reference.stem}:{c.stem}" not in results_map
-    ]
-    if config.cache_results and requested_comparisons:
-        cached = load_cached_offsets(cache_dir, [reference] + requested_comparisons)
-        if cached is not None:
-            results_map.update(cached)
-            # Find what is still missing
-            requested_comparisons = [
-                c for c in comparisons if f"{reference.stem}:{c.stem}" not in results_map
-            ]
-
-    offsets_by_key = _build_offsets_map(
-        reference=reference,
-        comparisons=comparisons,
-        results_map=results_map,
-    )
-
-    # If everything is resolved (manual + cached), return early
-    if not requested_comparisons:
-        if progress:
-            progress.complete_phase()
-        _maybe_launch_vspreview(
-            reference=reference,
-            comparisons=comparisons,
-            offsets_by_key=offsets_by_key,
-            cache_dir=cache_dir,
-            config=config,
-            progress=progress,
-        )
-        return [results_map[f"{reference.stem}:{c.stem}"] for c in comparisons]
-
-    # 2. Compute missing
     try:
-        if fps_reference is None:
-            fps_reference = _probe_fps(reference)
-        _compute_missing_alignments(
-            reference=reference,
-            requested_comparisons=requested_comparisons,
-            config=config,
-            results_map=results_map,
-            fps_reference=fps_reference,
-            progress=progress,
-        )
+        # 0. Load manual overrides (highest precedence per §2.4)
+        fps_reference = _apply_manual_overrides(reference, comparisons, cache_dir, results_map)
 
-        # 3. Save cache if needed (only computed results, not manual)
-        if config.cache_results:
-            # Save only the computed results (source != "manual")
-            computed_results = [
-                results_map[f"{reference.stem}:{c.stem}"]
-                for c in comparisons
-                if results_map[f"{reference.stem}:{c.stem}"].source != "manual"
-            ]
-            if computed_results:
-                save_offsets_cache(cache_dir, computed_results)
+        # 1. Check cache for non-manual entries
+        requested_comparisons = [
+            c for c in comparisons if f"{reference.stem}:{c.stem}" not in results_map
+        ]
+        if config.cache_results and requested_comparisons:
+            cached = load_cached_offsets(cache_dir, [reference] + requested_comparisons)
+            if cached is not None:
+                results_map.update(cached)
+                requested_comparisons = [
+                    c for c in comparisons if f"{reference.stem}:{c.stem}" not in results_map
+                ]
+
+        # 2. Compute missing
+        if requested_comparisons:
+            if fps_reference is None:
+                fps_reference = _probe_fps(reference)
+            _compute_missing_alignments(
+                reference=reference,
+                requested_comparisons=requested_comparisons,
+                config=config,
+                results_map=results_map,
+                fps_reference=fps_reference,
+                progress=progress,
+            )
+
+            # 3. Save cache if needed (only computed results, not manual)
+            if config.cache_results:
+                computed_results = [
+                    results_map[f"{reference.stem}:{c.stem}"]
+                    for c in comparisons
+                    if results_map[f"{reference.stem}:{c.stem}"].source != "manual"
+                ]
+                if computed_results:
+                    save_offsets_cache(cache_dir, computed_results)
 
     finally:
         if progress:
