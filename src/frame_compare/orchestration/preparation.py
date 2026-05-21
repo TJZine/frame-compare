@@ -176,7 +176,8 @@ def _probe_input_videos(
         cache_key = compute_probe_cache_key(fingerprint)
         snapshot = entries_by_key.get(cache_key)
         if snapshot is None:
-            source_info = deps.get_vs_loader().load(path)
+            assert deps.vs_loader is not None
+            source_info = deps.vs_loader.load(path)
             tonemap_prop_keys = compute_tonemap_prop_keys(source_info.frame_props)
             preserved_props = compute_preserved_frame_props(source_info.frame_props)
             snapshot = ClipProbeSnapshot(

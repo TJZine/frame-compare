@@ -11,11 +11,11 @@ import httpx
 
 from frame_compare.config import ConfigSchema, OverlayMode, ToneCurve, TonemapPreset
 from frame_compare.orchestration.context import ClipState
-from frame_compare.render.ffmpeg import DefaultFFmpegRunner, FFmpegRunner
+from frame_compare.render.ffmpeg import FFmpegRunner
 from frame_compare.services.types import TmdbMetadata
 from frame_compare.utils.progress import ProgressReporter
 from frame_compare.utils.types import WorkspacePaths
-from frame_compare.vs.loader import DefaultVSLoader, VSLoader
+from frame_compare.vs.loader import VSLoader
 
 
 @dataclass(frozen=True)
@@ -98,18 +98,6 @@ class RunDependencies:
     http_client: httpx.AsyncClient | None = None
     progress: ProgressReporter | None = None
     clock: Callable[[], datetime] = field(default=datetime.now)
-
-    def get_vs_loader(self) -> VSLoader:
-        """Return the injected VS loader or create the default lazily."""
-        if self.vs_loader is None:
-            self.vs_loader = DefaultVSLoader()
-        return self.vs_loader
-
-    def get_ffmpeg_runner(self) -> FFmpegRunner:
-        """Return the injected FFmpeg runner or create the default lazily."""
-        if self.ffmpeg_runner is None:
-            self.ffmpeg_runner = DefaultFFmpegRunner()
-        return self.ffmpeg_runner
 
 
 def _empty_screenshots() -> dict[str, list[Path]]:

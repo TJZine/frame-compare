@@ -105,7 +105,6 @@ def _maybe_launch_vspreview(
     should_launch = bool((config.use_vspreview or config.force_interactive) and available)
 
     if progress:
-        progress.start_phase("VSPreview", total=1)
         progress.set_description("Alignment verification")
 
     try:
@@ -127,9 +126,7 @@ def _maybe_launch_vspreview(
                 use_vspreview=config.use_vspreview,
             )
     finally:
-        if progress:
-            progress.advance(1)
-            progress.complete_phase()
+        pass
 
 
 def _check_duplicate_stems(comparisons: list[Path]) -> None:
@@ -238,7 +235,7 @@ def align_clips(
     _check_duplicate_stems(comparisons)
 
     if progress:
-        progress.start_phase("Audio Alignment", total=len(comparisons))
+        progress.set_description("Audio Alignment")
 
     results_map: dict[str, AlignmentResult] = {}
     try:
@@ -281,8 +278,7 @@ def align_clips(
                     save_offsets_cache(cache_dir, computed_results)
 
     finally:
-        if progress:
-            progress.complete_phase()
+        pass
 
     offsets_by_key = _build_offsets_map(
         reference=reference,

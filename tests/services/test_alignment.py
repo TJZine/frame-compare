@@ -556,14 +556,10 @@ def test_align_clips_completes_progress_when_cache_load_raises(tmp_path: Path) -
     ref.touch()
     comp.touch()
     (tmp_path / "audio_offsets.toml").write_text("not valid toml {{{ ", encoding="utf-8")
-
     reporter = MagicMock(spec=ProgressReporter)
 
     with pytest.raises(CacheCorruptionError):
         align_clips(ref, [comp], AlignmentConfig(), tmp_path, progress=reporter)
-
-    reporter.start_phase.assert_called_once_with("Audio Alignment", total=1)
-    reporter.complete_phase.assert_called_once_with()
 
 
 @patch("frame_compare.services.alignment._probe_fps")

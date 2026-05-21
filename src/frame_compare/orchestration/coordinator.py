@@ -17,16 +17,13 @@ from frame_compare.orchestration.phases import execute_phases
 from frame_compare.orchestration.preparation import execute_prep
 from frame_compare.orchestration.progress import select_reporter
 from frame_compare.orchestration.types import (
-    PrepState,
     RunArtifacts,
     RunDependencies,
     RunRequest,
     RunResult,
 )
-
-# For backwards compatibility with internal imports (e.g. tests)
-_RunArtifacts = RunArtifacts
-_PrepState = PrepState
+from frame_compare.render.ffmpeg import DefaultFFmpegRunner
+from frame_compare.vs.loader import DefaultVSLoader
 
 __all__ = ["RunDependencies", "RunRequest", "RunResult", "execute_run"]
 
@@ -63,6 +60,12 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
     """
     if deps is None:
         deps = RunDependencies()
+
+    if deps.vs_loader is None:
+        deps.vs_loader = DefaultVSLoader()
+
+    if deps.ffmpeg_runner is None:
+        deps.ffmpeg_runner = DefaultFFmpegRunner()
 
     if deps.progress is None:
         deps.progress = select_reporter(
@@ -126,10 +129,11 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             artifacts=prep.artifacts,
         )
 
+        assert deps.ffmpeg_runner is not None
         phases_after_align = build_phases_after_align(
             request=request,
             clock=deps.clock,
-            ffmpeg_runner=deps.get_ffmpeg_runner(),
+            ffmpeg_runner=deps.ffmpeg_runner,
             http_client=deps.http_client,
             phase_timings=phase_timings,
             warnings=prep.artifacts.warnings,
