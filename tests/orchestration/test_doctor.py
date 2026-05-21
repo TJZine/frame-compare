@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -304,23 +305,67 @@ class TestCollectChecks:
         assert checks[-1].category == "network"
 
 
-def test_check_tmdb_api_key_requires_canonical(monkeypatch: pytest.MonkeyPatch) -> None:
-    """TMDB check should only pass when canonical env var is set."""
+def test_check_tmdb_api_key_passes_with_workspace_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """TMDB check should honor config/config.toml discovered from the workspace cwd."""
     tmdb_check = next(c for c in collect_checks() if c.name == "tmdb_api_key")
 
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        """
+        [tmdb]
+        api_key = "config_key"
+        """,
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("TMDB_API_KEY", raising=False)
     monkeypatch.delenv("FRAME_COMPARE_TMDB__API_KEY", raising=False)
-    assert tmdb_check.check_fn().passed is False
+
+    result = tmdb_check.check_fn()
+
+    assert result.passed is True
+    assert result.message == "TMDB API key configured"
+
+
+def test_check_tmdb_api_key_legacy_alias_remains_warning_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Legacy TMDB_API_KEY alone should fail with guidance to use the canonical path."""
+    tmdb_check = next(c for c in collect_checks() if c.name == "tmdb_api_key")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("FRAME_COMPARE_TMDB__API_KEY", raising=False)
 
     monkeypatch.setenv("TMDB_API_KEY", "legacy_key")
     legacy_result = tmdb_check.check_fn()
+
     assert legacy_result.passed is False
+    assert legacy_result.message == "TMDB API key configured via legacy variable"
     assert legacy_result.hint is not None
     assert "FRAME_COMPARE_TMDB__API_KEY" in legacy_result.hint
     assert "legacy" in legacy_result.hint.lower()
 
-    monkeypatch.setenv("FRAME_COMPARE_TMDB__API_KEY", "new_key")
-    assert tmdb_check.check_fn().passed is True
+
+def test_check_tmdb_api_key_missing_mentions_workspace_config_hint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Missing TMDB config should point users at config/config.toml."""
+    tmdb_check = next(c for c in collect_checks() if c.name == "tmdb_api_key")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TMDB_API_KEY", raising=False)
+    monkeypatch.delenv("FRAME_COMPARE_TMDB__API_KEY", raising=False)
+
+    result = tmdb_check.check_fn()
+
+    assert result.passed is False
+    assert result.message == "TMDB API key not configured"
+    assert result.hint is not None
+    assert "tmdb.api_key in config/config.toml" in result.hint
 
 
 class TestRunDoctor:

@@ -12,7 +12,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from types import ModuleType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import httpx
 
@@ -315,13 +315,16 @@ def _check_slowpics() -> CheckResult:
 
 
 def _check_tmdb_api_key() -> CheckResult:
-    """Check TMDB API key is configured (env var check only)."""
-    if os.environ.get("FRAME_COMPARE_TMDB__API_KEY"):
+    """Check TMDB API key is configured through the normal runtime config chain."""
+    legacy_tmdb_env_var = "_".join(("TMDB", "API", "KEY"))
+    resolved_api_key, config_error = _resolve_tmdb_api_key()
+
+    if resolved_api_key:
         return CheckResult(
             passed=True,
             message="TMDB API key configured",
         )
-    legacy_tmdb_env_var = "_".join(("TMDB", "API", "KEY"))
+
     if os.environ.get(legacy_tmdb_env_var):
         return CheckResult(
             passed=False,
@@ -330,11 +333,53 @@ def _check_tmdb_api_key() -> CheckResult:
                 "Set FRAME_COMPARE_TMDB__API_KEY; legacy TMDB API key alias is no longer supported"
             ),
         )
+
+    if config_error is not None:
+        return CheckResult(
+            passed=False,
+            message="TMDB configuration could not be loaded",
+            hint="Fix config/config.toml or set FRAME_COMPARE_TMDB__API_KEY",
+            details=config_error,
+        )
+
     return CheckResult(
         passed=False,
         message="TMDB API key not configured",
-        hint="Set FRAME_COMPARE_TMDB__API_KEY environment variable",
+        hint="Set FRAME_COMPARE_TMDB__API_KEY or tmdb.api_key in config/config.toml",
     )
+
+
+def _resolve_tmdb_api_key() -> tuple[str | None, dict[str, JSONValue] | None]:
+    """Resolve TMDB credentials through the same config path used at runtime."""
+    from frame_compare.config.loader import load_config
+    from frame_compare.errors import ConfigParseError, ConfigValidationError
+    from frame_compare.orchestration.preflight import resolve_workspace
+
+    root = resolve_workspace(None)
+    config_path = root / "config" / "config.toml"
+    effective_config_path = config_path if config_path.exists() else None
+
+    try:
+        config = load_config(effective_config_path)
+    except ConfigParseError as exc:
+        details: dict[str, JSONValue] = {
+            "config_file": str(config_path),
+            "exception_type": type(exc).__name__,
+            "exception": str(exc),
+        }
+        return None, details
+    except ConfigValidationError as exc:
+        details: dict[str, JSONValue] = {
+            "config_file": str(config_path),
+            "exception_type": type(exc).__name__,
+            "validation_errors": cast(JSONValue, exc.validation_errors),
+        }
+        return None, details
+
+    api_key = config.tmdb.api_key
+    if api_key:
+        return api_key, None
+    return None, None
 
 
 # ─── Public API ───────────────────────────────────────────────────────────────
