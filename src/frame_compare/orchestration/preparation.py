@@ -5,13 +5,18 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import structlog
+
 from frame_compare.analysis import cache_io
 from frame_compare.config import ConfigSchema, apply_cli_overrides
 from frame_compare.errors import (
     AudioAlignmentError,
     CacheCorruptionError,
     CacheVersionMismatchError,
+    MetadataError,
     MetricsCalculationError,
+    TmdbError,
+    TmdbRateLimitedError,
 )
 from frame_compare.orchestration.context import (
     ClipFingerprint,
@@ -39,6 +44,8 @@ from frame_compare.services.alignment import CACHE_FILE_NAME, load_cached_offset
 from frame_compare.services.run_folder import derive_run_folder_name, reserve_run_folder
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vspreview.overrides import load_manual_overrides
+
+log = structlog.get_logger()
 
 
 def _build_preflight_overrides(request: RunRequest) -> dict[str, object] | None:
@@ -89,8 +96,14 @@ async def _resolve_run_directory(
                     client=deps.http_client,
                 )
                 metadata_prefetched = True
-            except Exception as exc:
-                artifacts.warnings.append(f"metadata: {exc}")
+            except (MetadataError, TmdbError, TmdbRateLimitedError) as exc:
+                log.warning(
+                    "metadata_prefetch_degraded",
+                    filenames=[input_videos[0].name],
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                    exc_info=exc,
+                )
                 artifacts.resolved_metadata = None
 
         filenames = [video.name for video in input_videos]

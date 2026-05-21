@@ -19,6 +19,7 @@ from frame_compare.errors import (
     CacheVersionMismatchError,
     ConfigNotFoundError,
     MetricsCalculationError,
+    TmdbError,
     TonemapRequiresVapourSynthError,
 )
 from frame_compare.orchestration import coordinator, phase_tasks, preparation
@@ -685,7 +686,7 @@ timeout_seconds = 7.5
         captured_configs.append(config)
         if not prefetch_calls:
             prefetch_calls.append(filenames)
-            raise RuntimeError("temporary metadata failure")
+            raise TmdbError("temporary metadata failure")
         phase_calls.append(filenames)
         return expected_metadata
 
@@ -703,13 +704,68 @@ timeout_seconds = 7.5
     result = asyncio.run(execute_run(request, deps=deps))
 
     assert result.success is True
-    assert result.warnings == ["metadata: temporary metadata failure"]
+    assert result.warnings == []
     assert prefetch_calls == [["source.mkv"]]
     assert phase_calls == [["source.mkv"]]
     assert captured_configs == [
         MetadataConfig(api_key="test-key", unattended=True, timeout_seconds=7.5),
         MetadataConfig(api_key="test-key", unattended=True, timeout_seconds=7.5),
     ]
+
+
+def test_execute_run_propagates_unexpected_run_folder_metadata_prefetch_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_content = """\
+[paths]
+input_dir = "comparison_videos"
+screenshots_dir = "screenshots"
+generated_dir = "generated"
+config_dir = "config"
+use_run_folders = true
+
+[audio_alignment]
+enable = false
+
+[screenshots]
+use_ffmpeg = true
+
+[report]
+enable = false
+
+[tmdb]
+enabled = true
+api_key = "test-key"
+unattended = true
+timeout_seconds = 7.5
+"""
+    _create_config(tmp_path, content=config_content)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "source.mkv")
+
+    async def _resolve_metadata(
+        *,
+        filenames: list[str],
+        config: MetadataConfig,
+        client: httpx.AsyncClient,
+    ) -> TmdbMetadata | None:
+        del filenames, config, client
+        raise RuntimeError("unexpected metadata failure")
+
+    monkeypatch.setattr(phase_tasks, "resolve_metadata", _resolve_metadata)
+
+    request = RunRequest(
+        root=tmp_path,
+        skip_analysis=True,
+        skip_metadata=False,
+        skip_dovi=True,
+        no_upload=True,
+    )
+    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+
+    with pytest.raises(RuntimeError, match="unexpected metadata failure"):
+        asyncio.run(execute_run(request, deps=deps))
 
 
 def test_execute_run_publish_skip_follows_effective_slowpics_config(
