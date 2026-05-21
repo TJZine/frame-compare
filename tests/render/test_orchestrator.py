@@ -424,3 +424,96 @@ def test_render_batch_parallel_fail_fast_no_wait() -> None:
         elapsed = time.time() - start_time
         # It should raise the exception immediately without waiting for the 1.0s task to finish.
         assert elapsed < 0.5
+
+
+def test_render_screenshots_from_batch_happy_path(tmp_path) -> None:
+    config = ConfigSchema(color=ColorConfig(enable_tonemap=False), screenshots={"use_ffmpeg": True})
+    ffmpeg_runner = MagicMock()
+
+    req1 = ScreenshotBatchRequest(
+        clip_path=Path("vid1.mkv"),
+        label="label1",
+        source_frames=[10, 20],
+        display_frames=[10, 20],
+        selection_labels=[None, None],
+        probe_width=1920,
+        probe_height=1080,
+        probe_num_frames=240,
+        probe_is_hdr=False,
+    )
+    req2 = ScreenshotBatchRequest(
+        clip_path=Path("vid2.mkv"),
+        label="label2",
+        source_frames=[30],
+        display_frames=[30],
+        selection_labels=[None],
+        probe_width=1280,
+        probe_height=720,
+        probe_num_frames=300,
+        probe_is_hdr=False,
+    )
+
+    with patch("frame_compare.render.orchestrator.render_batch") as mock_batch:
+        mock_batch.return_value = [
+            tmp_path / "label1_00010.png",
+            tmp_path / "label1_00020.png",
+            tmp_path / "label2_00030.png",
+        ]
+
+        results = render_screenshots_from_batch(
+            batch_requests=[req1, req2],
+            output_dir=tmp_path,
+            config=config,
+            overlay_mode=config.screenshots.overlay_mode,
+            renderer="ffmpeg",
+            ffmpeg_runner=ffmpeg_runner,
+        )
+
+        assert "label1" in results
+        assert "label2" in results
+        assert results["label1"] == [tmp_path / "label1_00010.png", tmp_path / "label1_00020.png"]
+        assert results["label2"] == [tmp_path / "label2_00030.png"]
+        mock_batch.assert_called_once()
+
+
+def test_render_screenshots_from_batch_renderer_auto_path(tmp_path) -> None:
+    config = ConfigSchema(
+        color=ColorConfig(enable_tonemap=False), screenshots={"use_ffmpeg": False}
+    )
+    ffmpeg_runner = MagicMock()
+
+    req = ScreenshotBatchRequest(
+        clip_path=Path("vid1.mkv"),
+        label="label1",
+        source_frames=[10],
+        display_frames=[10],
+        selection_labels=[None],
+        probe_width=1920,
+        probe_height=1080,
+        probe_num_frames=240,
+        probe_is_hdr=False,
+    )
+
+    with patch("frame_compare.vs.loader.DefaultVSLoader") as mock_loader_cls:
+        mock_loader = mock_loader_cls.return_value
+        mock_source = MagicMock()
+        mock_source.clip = MagicMock()
+        mock_source.width = 1920
+        mock_source.height = 1080
+        mock_source.is_hdr = False
+        mock_loader.load.return_value = mock_source
+
+        with patch("frame_compare.render.orchestrator.render_batch") as mock_batch:
+            mock_batch.return_value = [tmp_path / "label1_00010.png"]
+
+            results = render_screenshots_from_batch(
+                batch_requests=[req],
+                output_dir=tmp_path,
+                config=config,
+                overlay_mode=config.screenshots.overlay_mode,
+                renderer="auto",
+                ffmpeg_runner=ffmpeg_runner,
+            )
+
+            assert results["label1"] == [tmp_path / "label1_00010.png"]
+            mock_loader.load.assert_called_once_with(Path("vid1.mkv"))

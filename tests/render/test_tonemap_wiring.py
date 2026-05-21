@@ -18,8 +18,8 @@ from frame_compare.errors import (
     TonemapRequiresVapourSynthError,
     VapourSynthNotFoundError,
 )
-from frame_compare.render.orchestrator import (
-    render_screenshots,
+from frame_compare.render.orchestrator import render_screenshots
+from frame_compare.render.prepare import (
     resolve_tonemap_settings,
     should_tonemap,
 )
