@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tomllib
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -20,6 +21,59 @@ from frame_compare.errors import (
     ConfigValidationError,
     normalize_pydantic_errors,
 )
+
+type _SettingsSourcesCustomizer = Callable[
+    [
+        type[BaseSettings],
+        type[BaseSettings],
+        PydanticBaseSettingsSource,
+        PydanticBaseSettingsSource,
+        PydanticBaseSettingsSource,
+        PydanticBaseSettingsSource,
+    ],
+    tuple[PydanticBaseSettingsSource, ...],
+]
+
+
+def _env_only_settings_sources(
+    cls: type[BaseSettings],
+    settings_cls: type[BaseSettings],
+    init_settings: PydanticBaseSettingsSource,
+    env_settings: PydanticBaseSettingsSource,
+    dotenv_settings: PydanticBaseSettingsSource,
+    file_secret_settings: PydanticBaseSettingsSource,
+) -> tuple[PydanticBaseSettingsSource, ...]:
+    return (init_settings, env_settings)
+
+
+def _defaults_only_settings_sources(
+    cls: type[BaseSettings],
+    settings_cls: type[BaseSettings],
+    init_settings: PydanticBaseSettingsSource,
+    env_settings: PydanticBaseSettingsSource,
+    dotenv_settings: PydanticBaseSettingsSource,
+    file_secret_settings: PydanticBaseSettingsSource,
+) -> tuple[PydanticBaseSettingsSource, ...]:
+    return (init_settings,)
+
+
+def _toml_suppressed_settings_schema(
+    name: str,
+    settings_customise_sources: _SettingsSourcesCustomizer,
+) -> type[ConfigSchema]:
+    # Explicitly set toml_file to None to suppress UserWarning from pydantic-settings.
+    config_dict = cast(dict[str, Any], ConfigSchema.model_config)
+    new_config_dict = config_dict.copy()
+    new_config_dict["toml_file"] = None
+
+    return type(
+        name,
+        (ConfigSchema,),
+        {
+            "model_config": SettingsConfigDict(**new_config_dict),
+            "settings_customise_sources": classmethod(settings_customise_sources),
+        },
+    )
 
 
 def load_config(
@@ -63,27 +117,12 @@ def load_config(
 
 def load_config_from_env() -> ConfigSchema:
     """Load config from environment variables only (no TOML file)."""
-    # Explicitly set toml_file to None to suppress UserWarning
-    config_dict = cast(dict[str, Any], ConfigSchema.model_config)
-    new_config_dict = config_dict.copy()
-    new_config_dict["toml_file"] = None
-
-    class _EnvOnlySchema(ConfigSchema):
-        model_config = SettingsConfigDict(**new_config_dict)
-
-        @classmethod
-        def settings_customise_sources(
-            cls,
-            settings_cls: type[BaseSettings],
-            init_settings: PydanticBaseSettingsSource,
-            env_settings: PydanticBaseSettingsSource,
-            dotenv_settings: PydanticBaseSettingsSource,
-            file_secret_settings: PydanticBaseSettingsSource,
-        ) -> tuple[PydanticBaseSettingsSource, ...]:
-            return (init_settings, env_settings)
-
+    env_only_schema = _toml_suppressed_settings_schema(
+        "EnvOnlySchema",
+        _env_only_settings_sources,
+    )
     try:
-        return _EnvOnlySchema()
+        return env_only_schema()
     except ValidationError as exc:
         normalized = normalize_pydantic_errors(cast(Any, exc.errors()))
         raise ConfigValidationError(normalized) from exc
@@ -91,23 +130,8 @@ def load_config_from_env() -> ConfigSchema:
 
 def get_default_config() -> ConfigSchema:
     """Get config with all default values (no TOML, no env)."""
-    # Explicitly set toml_file to None to suppress UserWarning
-    config_dict = cast(dict[str, Any], ConfigSchema.model_config)
-    new_config_dict = config_dict.copy()
-    new_config_dict["toml_file"] = None
-
-    class _DefaultsOnlySchema(ConfigSchema):
-        model_config = SettingsConfigDict(**new_config_dict)
-
-        @classmethod
-        def settings_customise_sources(
-            cls,
-            settings_cls: type[BaseSettings],
-            init_settings: PydanticBaseSettingsSource,
-            env_settings: PydanticBaseSettingsSource,
-            dotenv_settings: PydanticBaseSettingsSource,
-            file_secret_settings: PydanticBaseSettingsSource,
-        ) -> tuple[PydanticBaseSettingsSource, ...]:
-            return (init_settings,)
-
-    return _DefaultsOnlySchema()
+    defaults_only_schema = _toml_suppressed_settings_schema(
+        "DefaultsOnlySchema",
+        _defaults_only_settings_sources,
+    )
+    return defaults_only_schema()
