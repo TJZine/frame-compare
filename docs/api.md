@@ -508,7 +508,7 @@ Expand limited-range integer RGB to full range.
 
 ### get_preset_settings
 
-`get_preset_settings(preset: TonemapPreset | str) -> TonemapSettings`
+`get_preset_settings(preset: TonemapPreset) -> TonemapSettings`
 
 Get settings for named preset.
 

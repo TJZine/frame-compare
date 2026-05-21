@@ -10,6 +10,7 @@ from _pytest.monkeypatch import MonkeyPatch
 from typer.testing import CliRunner
 
 from frame_compare.cli_entry import _maybe_open_report, app
+from frame_compare.config import OverlayMode
 from frame_compare.config.loader import get_default_config
 from frame_compare.errors import (
     ConfigNotFoundError,
@@ -625,7 +626,7 @@ def test_run_builds_run_request_from_cli_args(monkeypatch: MonkeyPatch) -> None:
 
     request = captured["request"]
     assert request.tm_target_nits == 203
-    assert request.overlay_mode == "diagnostic"
+    assert request.overlay_mode == OverlayMode.DIAGNOSTIC
     assert request.force_interactive_alignment is True
 
 

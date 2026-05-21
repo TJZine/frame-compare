@@ -9,7 +9,7 @@ from pathlib import Path
 
 import httpx
 
-from frame_compare.config import ConfigSchema
+from frame_compare.config import ConfigSchema, OverlayMode, ToneCurve, TonemapPreset
 from frame_compare.orchestration.context import ClipState
 from frame_compare.render.ffmpeg import DefaultFFmpegRunner, FFmpegRunner
 from frame_compare.services.types import TmdbMetadata
@@ -43,16 +43,16 @@ class RunRequest:
     force_interactive_alignment: bool = False
 
     # Tonemap overrides (highest priority)
-    tm_preset: str | None = None
+    tm_preset: TonemapPreset | None = None
     tm_target_nits: int | None = None
-    tm_curve: str | None = None
+    tm_curve: ToneCurve | None = None
 
     # Frame selection overrides
     frame_count: int | None = None
     seed: int | None = None
 
     # Output behavior
-    overlay_mode: str | None = None
+    overlay_mode: OverlayMode | None = None
     no_color: bool = False
     quiet: bool = False
     verbose: bool = False

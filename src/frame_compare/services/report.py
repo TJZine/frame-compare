@@ -10,7 +10,7 @@ import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import TypedDict
 from urllib.parse import urlparse
 
 from frame_compare.config.schema import ReportConfig
@@ -18,6 +18,40 @@ from frame_compare.errors import ReportError
 from frame_compare.services.types import TmdbMetadata
 
 REPORT_VERSION = "1.0"
+
+
+class _ReportClipPayload(TypedDict):
+    name: str
+    label: str
+    resolution: tuple[int, int]
+    fps: float
+    hdr: bool
+
+
+class _ReportImagePayload(TypedDict):
+    clip: str
+    src: str
+
+
+class _ReportFramePayload(TypedDict):
+    number: int
+    images: list[_ReportImagePayload]
+
+
+class _ReportStatsPayload(TypedDict):
+    frame_count: int
+    clip_count: int
+
+
+class _ReportPayload(TypedDict):
+    version: str
+    generated_at: str
+    title: str
+    slowpics_url: str | None
+    default_mode: str
+    stats: _ReportStatsPayload
+    clips: list[_ReportClipPayload]
+    frames: list[_ReportFramePayload]
 
 
 @dataclass(frozen=True)
@@ -95,7 +129,7 @@ def generate_report(
 
     # 3. PREPARE IMAGES & 4. BUILD JSON DATA
     # Structure defined in spec Section 2.2
-    json_clips: list[dict[str, object]] = []
+    json_clips: list[_ReportClipPayload] = []
     for clip in data.clips:
         json_clips.append(
             {
@@ -107,9 +141,9 @@ def generate_report(
             }
         )
 
-    json_frames: list[dict[str, object]] = []
+    json_frames: list[_ReportFramePayload] = []
     for i, frame_num in enumerate(data.frames):
-        frame_images: list[dict[str, str]] = []
+        frame_images: list[_ReportImagePayload] = []
         for clip in data.clips:
             screenshot_path = data.screenshots[clip.name][i]
 
@@ -148,7 +182,7 @@ def generate_report(
             }
         )
 
-    embedded_data: dict[str, object] = {
+    embedded_data: _ReportPayload = {
         "version": REPORT_VERSION,
         "generated_at": datetime.now(UTC).isoformat(),
         "title": data.metadata.title if data.metadata else data.clips[0].name,
@@ -200,7 +234,7 @@ def _safe_http_href(url: str | None) -> str | None:
     return _esc_attr(url)
 
 
-def _json_for_script_tag(data: dict[str, object]) -> str:
+def _json_for_script_tag(data: _ReportPayload) -> str:
     """Serialize JSON safely for embedding inside a <script> tag.
 
     Escapes characters that can terminate the script tag or trigger HTML parsing.
@@ -210,7 +244,7 @@ def _json_for_script_tag(data: dict[str, object]) -> str:
     return raw.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
 
 
-def _build_html(data: dict[str, object], include_filmstrip: bool = True) -> str:
+def _build_html(data: _ReportPayload, include_filmstrip: bool = True) -> str:
     """Construct the full HTML string."""
     json_str = _json_for_script_tag(data)
 
@@ -871,15 +905,12 @@ def _build_html(data: dict[str, object], include_filmstrip: bool = True) -> str:
     """
 
     # Assemble HTML
-    # Note: We trust the data structure matches spec, but for Pyright strictness
-    # we would need deeper typing. For now, we assume the dict structure is correct.
-    # To satisfy strict mode without massive TypedDict definitions, we cast where needed.
-    title = cast(str, data["title"])
-    generated_at = cast(str, data["generated_at"])
-    stats = cast(dict[str, int], data["stats"])
-    slowpics_url = cast(str | None, data.get("slowpics_url"))
-    frames = cast(list[dict[str, object]], data["frames"])
-    clips = cast(list[dict[str, object]], data["clips"])
+    title = data["title"]
+    generated_at = data["generated_at"]
+    stats = data["stats"]
+    slowpics_url = data["slowpics_url"]
+    frames = data["frames"]
+    clips = data["clips"]
     safe_href = _safe_http_href(slowpics_url)
 
     return f"""<!DOCTYPE html>
@@ -1002,7 +1033,7 @@ def _build_html(data: dict[str, object], include_filmstrip: bool = True) -> str:
             "".join(
                 f"""
             <button class="rv-filmstrip-item" data-idx="{_esc_attr(i)}" aria-label="Frame {_esc_attr(f["number"])}">
-                <img src="{_esc_attr(cast(list[dict[str, object]], f["images"])[0]["src"])}" loading="lazy" alt="{_esc_attr(cast(str, clips[0]["label"]))} - Frame {_esc_attr(f["number"])}">
+                <img src="{_esc_attr(f["images"][0]["src"])}" loading="lazy" alt="{_esc_attr(clips[0]["label"])} - Frame {_esc_attr(f["number"])}">
                 <span class="rv-filmstrip-label">{_esc_text(f["number"])}</span>
             </button>
             """

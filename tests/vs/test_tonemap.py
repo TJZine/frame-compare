@@ -2,6 +2,7 @@
 
 import importlib.util
 import sys
+from typing import cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -44,27 +45,27 @@ def test_get_preset_settings_returns_valid_settings():
 
 
 @pytest.mark.parametrize(
-    "preset_name",
+    "preset",
     [
-        "reference",
-        "filmic",
-        "contrast",
-        "bt2390_spec",
-        "spline",
-        "bright_lift",
-        "highlight_guard",
+        TonemapPreset.REFERENCE,
+        TonemapPreset.FILMIC,
+        TonemapPreset.CONTRAST,
+        TonemapPreset.BT2390_SPEC,
+        TonemapPreset.SPLINE,
+        TonemapPreset.BRIGHT_LIFT,
+        TonemapPreset.HIGHLIGHT_GUARD,
     ],
 )
-def test_get_preset_settings_all_presets_exist(preset_name):
+def test_get_preset_settings_all_presets_exist(preset: TonemapPreset):
     """Verify all defined presets can be retrieved."""
-    result = get_preset_settings(preset_name)
+    result = get_preset_settings(preset)
     assert result.enabled is True
 
 
 def test_get_preset_settings_unknown_raises_tonemap_error():
     """Verify unknown preset raises correct error."""
     with pytest.raises(TonemapError) as exc:
-        get_preset_settings("invalid")
+        get_preset_settings(cast(TonemapPreset, "invalid"))
     assert exc.value.context.code == "FC-4003"
     assert "reference, filmic" in exc.value.context.hint
 
@@ -182,16 +183,21 @@ def test_apply_tonemap_uses_fallback_when_libplacebo_unusable(
 @pytest.mark.parametrize(
     "preset, expected_curve, expected_nits, expected_gamma",
     [
-        ("reference", "bt2390", 203, False),
-        ("filmic", "spline", 203, False),
-        ("contrast", "reinhard", 203, False),
-        ("bt2390_spec", "bt2390", 100, False),
-        ("spline", "spline", 203, False),
-        ("bright_lift", "bt2390", 250, True),
-        ("highlight_guard", "spline", 180, False),
+        (TonemapPreset.REFERENCE, ToneCurve.BT2390, 203, False),
+        (TonemapPreset.FILMIC, ToneCurve.SPLINE, 203, False),
+        (TonemapPreset.CONTRAST, ToneCurve.REINHARD, 203, False),
+        (TonemapPreset.BT2390_SPEC, ToneCurve.BT2390, 100, False),
+        (TonemapPreset.SPLINE, ToneCurve.SPLINE, 203, False),
+        (TonemapPreset.BRIGHT_LIFT, ToneCurve.BT2390, 250, True),
+        (TonemapPreset.HIGHLIGHT_GUARD, ToneCurve.SPLINE, 180, False),
     ],
 )
-def test_tonemap_presets_have_correct_values(preset, expected_curve, expected_nits, expected_gamma):
+def test_tonemap_presets_have_correct_values(
+    preset: TonemapPreset,
+    expected_curve: ToneCurve,
+    expected_nits: int,
+    expected_gamma: bool,
+):
     """Verify all presets match SSOT values."""
     settings = get_preset_settings(preset)
     assert settings.tone_curve == expected_curve

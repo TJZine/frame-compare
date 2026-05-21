@@ -28,47 +28,44 @@ _LIBPLACEBO_PROBE_ENV = "FRAME_COMPARE_LIBPLACEBO_PROBE"
 _LIBPLACEBO_PROBE_TIMEOUT_SECONDS = 5.0
 
 # Private constants
-_TONE_CURVE_MAP = {
+_TONE_CURVE_MAP: dict[ToneCurve, int] = {
     ToneCurve.BT2390: 2,
     ToneCurve.SPLINE: 1,
     ToneCurve.REINHARD: 4,
-    "bt2390": 2,
-    "spline": 1,
-    "reinhard": 4,
 }
 
-_TONEMAP_PRESETS: dict[str, TonemapSettings] = {
-    "reference": TonemapSettings(
+_TONEMAP_PRESETS: dict[TonemapPreset, TonemapSettings] = {
+    TonemapPreset.REFERENCE: TonemapSettings(
         preset=TonemapPreset.REFERENCE,
         tone_curve=ToneCurve.BT2390,
         target_nits=203,
         gamma_lift=False,
     ),
-    "filmic": TonemapSettings(
+    TonemapPreset.FILMIC: TonemapSettings(
         preset=TonemapPreset.FILMIC, tone_curve=ToneCurve.SPLINE, target_nits=203, gamma_lift=False
     ),
-    "contrast": TonemapSettings(
+    TonemapPreset.CONTRAST: TonemapSettings(
         preset=TonemapPreset.CONTRAST,
         tone_curve=ToneCurve.REINHARD,
         target_nits=203,
         gamma_lift=False,
     ),
-    "bt2390_spec": TonemapSettings(
+    TonemapPreset.BT2390_SPEC: TonemapSettings(
         preset=TonemapPreset.BT2390_SPEC,
         tone_curve=ToneCurve.BT2390,
         target_nits=100,
         gamma_lift=False,
     ),
-    "spline": TonemapSettings(
+    TonemapPreset.SPLINE: TonemapSettings(
         preset=TonemapPreset.SPLINE, tone_curve=ToneCurve.SPLINE, target_nits=203, gamma_lift=False
     ),
-    "bright_lift": TonemapSettings(
+    TonemapPreset.BRIGHT_LIFT: TonemapSettings(
         preset=TonemapPreset.BRIGHT_LIFT,
         tone_curve=ToneCurve.BT2390,
         target_nits=250,
         gamma_lift=True,
     ),
-    "highlight_guard": TonemapSettings(
+    TonemapPreset.HIGHLIGHT_GUARD: TonemapSettings(
         preset=TonemapPreset.HIGHLIGHT_GUARD,
         tone_curve=ToneCurve.SPLINE,
         target_nits=180,
@@ -431,15 +428,14 @@ def _fallback_tonemap(
     return _apply_post_processing(clip, settings)
 
 
-def get_preset_settings(preset: TonemapPreset | str) -> TonemapSettings:
+def get_preset_settings(preset: TonemapPreset) -> TonemapSettings:
     """Get settings for named preset."""
-    preset_key = preset.value if isinstance(preset, TonemapPreset) else preset
-    if preset_key not in _TONEMAP_PRESETS:
+    if preset not in _TONEMAP_PRESETS:
         raise TonemapError(
             reason=f"Unknown preset '{preset}'",
-            hint=f"Available: {', '.join(_TONEMAP_PRESETS.keys())}",
+            hint=f"Available: {', '.join(candidate.value for candidate in _TONEMAP_PRESETS)}",
         )
-    return _TONEMAP_PRESETS[preset_key]
+    return _TONEMAP_PRESETS[preset]
 
 
 def apply_tonemap(

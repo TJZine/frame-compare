@@ -13,7 +13,7 @@ import pytest
 from PIL import Image
 
 from frame_compare.analysis import cache_io
-from frame_compare.config import ConfigSchema, load_config
+from frame_compare.config import ConfigSchema, OverlayMode, TonemapPreset, load_config
 from frame_compare.errors import (
     CacheCorruptionError,
     CacheVersionMismatchError,
@@ -289,9 +289,9 @@ enable = false
 
     request = RunRequest(
         root=tmp_path,
-        tm_preset="filmic",
+        tm_preset=TonemapPreset.FILMIC,
         tm_target_nits=203,
-        overlay_mode="diagnostic",
+        overlay_mode=OverlayMode.DIAGNOSTIC,
         seed=123,
         no_upload=True,
         force_interactive_alignment=True,
@@ -312,9 +312,9 @@ enable = false
     asyncio.run(execute_run(request, deps=deps))
 
     config = cast(ConfigSchema, captured["config"])
-    assert config.color.preset == "filmic"
+    assert config.color.preset == TonemapPreset.FILMIC
     assert config.color.target_nits == 203
-    assert config.screenshots.overlay_mode == "diagnostic"
+    assert config.screenshots.overlay_mode == OverlayMode.DIAGNOSTIC
     assert config.analysis.random_seed == 123
     assert config.slowpics.auto_upload is False
     assert config.audio_alignment.force_interactive is True
