@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import math
-import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from subprocess import CalledProcessError
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 from PIL import Image
@@ -58,11 +58,23 @@ def render_frame(request: RenderRequest, renderer: Renderer = "auto") -> Path:
         RenderError: If rendering fails
         FrameExtractionError: If renderer requires vs.VideoNode but Path usage detected (or vice versa)
     """
+    use_vs = _use_vapoursynth_renderer(request, renderer)
+
+    try:
+        _execute_frame_render(request, use_vs)
+
+    except (FrameExtractionError, RenderError, SourceLoadError):
+        raise
+    except Exception as e:
+        details = _render_error_details(request, renderer, use_vs)
+        raise RenderError(reason=_render_error_reason(e), details=details) from e
+
+    return request.output_path
+
+
+def _use_vapoursynth_renderer(request: RenderRequest, renderer: Renderer) -> bool:
     clip = request.clip
     is_path = isinstance(clip, Path)
-
-    # Dispatch logic
-    use_vs = False
 
     if renderer == "vapoursynth":
         if is_path:
@@ -70,73 +82,82 @@ def render_frame(request: RenderRequest, renderer: Renderer = "auto") -> Path:
                 frame_number=request.frame_number,
                 clip_name=str(clip),
             )
-        use_vs = True
-    elif renderer == "ffmpeg":
+        return True
+
+    if renderer == "ffmpeg":
         if not is_path:
             raise FrameExtractionError(
                 frame_number=request.frame_number,
                 clip_name=repr(clip),
             )
-        use_vs = False
-    else:  # auto
-        use_vs = not is_path
+        return False
 
-    try:
-        if use_vs:
-            # We know clip is not Path, so it must be vs.VideoNode (if types are correct)
-            # but at runtime we cast it.
-            node = cast("vs.VideoNode", clip)
-            _render_vs(
-                node,
-                request.frame_number,
-                request.output_path,
-                request.encoder_settings,
-                overlay=request.overlay,
-            )
-        else:
-            path = cast(Path, clip)
-            if request.ffmpeg_runner is not None:
-                request.ffmpeg_runner.extract_frame(path, request.frame_number, request.output_path)
-            else:
-                _render_ffmpeg(
-                    path, request.frame_number, request.output_path, request.encoder_settings
-                )
+    return not is_path
 
-            # Overlay Integration for FFmpeg
-            if request.overlay is not None and request.overlay.mode != OverlayMode.NONE:
-                apply_overlay_to_file(request.output_path, request.overlay)
 
-    except (FrameExtractionError, RenderError, SourceLoadError):
-        raise
-    except Exception as e:
-        reason: str
-        if isinstance(e, FrameCompareError):
-            reason = e.context.message
-        else:
-            reason = f"{type(e).__name__}: {e}"
+def _execute_frame_render(request: RenderRequest, use_vapoursynth: bool) -> None:
+    if use_vapoursynth:
+        _execute_vapoursynth_render(request)
+        return
 
-        details: ErrorDetails = {
-            "renderer": renderer,
-            "frame": request.frame_number,
-            "output_path": str(request.output_path),
-        }
-        if use_vs:
-            node = cast("vs.VideoNode", clip)
-            fmt = cast(Any, getattr(node, "format", None))
-            if fmt is not None:
-                details |= {
-                    "clip_format": str(getattr(fmt, "name", "")),
-                    "color_family": int(getattr(fmt, "color_family", 0)),
-                    "sample_type": int(getattr(fmt, "sample_type", 0)),
-                    "bits_per_sample": int(getattr(fmt, "bits_per_sample", 0)),
-                    "num_planes": int(getattr(fmt, "num_planes", 0)),
-                }
-        else:
-            details["clip"] = str(clip)
+    _execute_ffmpeg_render(request)
 
-        raise RenderError(reason=reason, details=details) from e
 
-    return request.output_path
+def _execute_vapoursynth_render(request: RenderRequest) -> None:
+    node = cast("vs.VideoNode", request.clip)
+    _render_vs(
+        node,
+        request.frame_number,
+        request.output_path,
+        request.encoder_settings,
+        overlay=request.overlay,
+    )
+
+
+def _execute_ffmpeg_render(request: RenderRequest) -> None:
+    path = cast(Path, request.clip)
+    if request.ffmpeg_runner is not None:
+        request.ffmpeg_runner.extract_frame(path, request.frame_number, request.output_path)
+    else:
+        _render_ffmpeg(path, request.frame_number, request.output_path, request.encoder_settings)
+
+    if request.overlay is not None and request.overlay.mode != OverlayMode.NONE:
+        apply_overlay_to_file(request.output_path, request.overlay)
+
+
+def _render_error_reason(exc: Exception) -> str:
+    if isinstance(exc, FrameCompareError):
+        return exc.context.message
+    return f"{type(exc).__name__}: {exc}"
+
+
+def _render_error_details(
+    request: RenderRequest, renderer: Renderer, use_vapoursynth: bool
+) -> ErrorDetails:
+    details: ErrorDetails = {
+        "renderer": renderer,
+        "frame": request.frame_number,
+        "output_path": str(request.output_path),
+    }
+    if use_vapoursynth:
+        return details | _vapoursynth_format_details(cast("vs.VideoNode", request.clip))
+
+    details["clip"] = str(request.clip)
+    return details
+
+
+def _vapoursynth_format_details(clip: vs.VideoNode) -> ErrorDetails:
+    fmt = getattr(clip, "format", None)
+    if fmt is None:
+        return {}
+
+    return {
+        "clip_format": str(getattr(fmt, "name", "")),
+        "color_family": int(getattr(fmt, "color_family", 0)),
+        "sample_type": int(getattr(fmt, "sample_type", 0)),
+        "bits_per_sample": int(getattr(fmt, "bits_per_sample", 0)),
+        "num_planes": int(getattr(fmt, "num_planes", 0)),
+    }
 
 
 def _resolve_matrix_in_s(clip: vs.VideoNode) -> str:
@@ -176,7 +197,7 @@ def _clip_to_rgb24_for_pillow(clip: vs.VideoNode) -> vs.VideoNode:
     """
     import vapoursynth as vs  # type: ignore[import-untyped]
 
-    fmt = cast(Any, getattr(clip, "format", None))
+    fmt = getattr(clip, "format", None)
     if fmt is None:
         matrix_in_s = _resolve_matrix_in_s(clip)
         # Variable format clip: best-effort conversion via resize (will fail if unsupported).
@@ -271,7 +292,7 @@ def _probe_fps(video_path: Path) -> float:
         return fps
     except FileNotFoundError as e:
         raise FFmpegNotFoundError() from e
-    except (ValueError, subprocess.CalledProcessError, ZeroDivisionError) as e:
+    except (ValueError, CalledProcessError, ZeroDivisionError) as e:
         raise SourceLoadError(video_path, f"Failed to probe FPS: {e}") from e
 
 
@@ -296,7 +317,7 @@ def _render_ffmpeg(
         run_subprocess(cmd, timeout_seconds=timeout)
     except FileNotFoundError as e:
         raise FFmpegNotFoundError() from e
-    except subprocess.CalledProcessError as e:
+    except CalledProcessError as e:
         raise FFmpegError(e.stderr.decode(), e.returncode) from e
 
 

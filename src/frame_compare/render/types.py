@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     import vapoursynth as vs  # type: ignore
 
     from frame_compare.render.ffmpeg import FFmpegRunner
+    from frame_compare.utils.progress_protocol import ProgressReporter
 
 
 @dataclass
@@ -67,6 +68,19 @@ class ScreenshotBatchRequest:
 
 
 Renderer = Literal["vapoursynth", "ffmpeg", "auto"]
+
+
+@dataclass(frozen=True)
+class ScreenshotRenderOptions:
+    """Convenience options for render_screenshots."""
+
+    label_map: dict[Path, str] | None = None
+    renderer: Renderer = "auto"
+    overlay_mode: OverlayMode = OverlayMode.STANDARD
+    reporter: ProgressReporter | None = None
+    output_frames: list[int] | None = None
+    selection_labels: list[str | None] | None = None
+    ffmpeg_runner: FFmpegRunner | None = None
 
 
 @dataclass(frozen=True)

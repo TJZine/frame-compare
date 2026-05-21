@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 import math
-import subprocess
 from pathlib import Path
+from subprocess import CalledProcessError, TimeoutExpired
 from typing import Protocol, cast
 
 from frame_compare.errors import FFmpegError, FFmpegNotFoundError
@@ -49,9 +49,9 @@ class DefaultFFmpegRunner:
             proc = run_subprocess(argv, timeout_seconds=self._FFPROBE_TIMEOUT_SECONDS)
         except FileNotFoundError as exc:
             raise FFmpegNotFoundError() from exc
-        except subprocess.TimeoutExpired as exc:
+        except TimeoutExpired as exc:
             raise FFmpegError("ffprobe timed out while probing fps", 124) from exc
-        except subprocess.CalledProcessError as exc:
+        except CalledProcessError as exc:
             raise FFmpegError(exc.stderr.decode(errors="replace"), exc.returncode) from exc
 
         raw = proc.stdout.decode("utf-8", errors="replace").strip()
@@ -89,9 +89,9 @@ class DefaultFFmpegRunner:
             run_subprocess(argv, timeout_seconds=self._FFMPEG_TIMEOUT_SECONDS)
         except FileNotFoundError as exc:
             raise FFmpegNotFoundError() from exc
-        except subprocess.TimeoutExpired as exc:
+        except TimeoutExpired as exc:
             raise FFmpegError("ffmpeg timed out while extracting frame", 124) from exc
-        except subprocess.CalledProcessError as exc:
+        except CalledProcessError as exc:
             raise FFmpegError(exc.stderr.decode(errors="replace"), exc.returncode) from exc
 
     def probe_hdr(self, video: Path) -> HDRMetadata | None:
@@ -111,9 +111,9 @@ class DefaultFFmpegRunner:
             proc = run_subprocess(argv, timeout_seconds=self._FFPROBE_TIMEOUT_SECONDS)
         except FileNotFoundError as exc:
             raise FFmpegNotFoundError() from exc
-        except subprocess.TimeoutExpired as exc:
+        except TimeoutExpired as exc:
             raise FFmpegError("ffprobe timed out while probing hdr", 124) from exc
-        except subprocess.CalledProcessError as exc:
+        except CalledProcessError as exc:
             raise FFmpegError(exc.stderr.decode(errors="replace"), exc.returncode) from exc
 
         try:

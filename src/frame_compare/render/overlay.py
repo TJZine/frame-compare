@@ -9,9 +9,116 @@ from frame_compare.render.overlay_text import (
 )
 from frame_compare.render.types import OverlayConfig, OverlayMode
 
+type Font = ImageFont.ImageFont | ImageFont.FreeTypeFont
+type ImageInput = Image.Image | np.ndarray | None
+
+_LABEL_POSITION = (10, 10)
+_BLOCK_GAP_PX = 10
+_DEFAULT_DETAILS_Y = 140
+_FILL = (255, 255, 255, 255)
+_STROKE_FILL = (0, 0, 0, 255)
+_STROKE_WIDTH = 2
+
+
+def _resolve_mode(mode: object) -> OverlayMode:
+    if isinstance(mode, OverlayMode):
+        return mode
+    raise ValueError("invalid overlay mode")
+
+
+def _normalize_image(image: ImageInput) -> Image.Image | np.ndarray:
+    if image is None:
+        raise ValueError("image must not be None")
+    return image
+
+
+def _to_pil_image(image: Image.Image | np.ndarray) -> Image.Image:
+    return Image.fromarray(image) if isinstance(image, np.ndarray) else image
+
+
+def _load_font(config: OverlayConfig) -> Font:
+    if config.font_path:
+        return ImageFont.truetype(str(config.font_path), size=config.font_size)
+    return ImageFont.load_default(size=config.font_size)
+
+
+def _draw_text_block(
+    draw: ImageDraw.ImageDraw,
+    position: tuple[int, int],
+    text: str,
+    font: Font,
+) -> None:
+    draw.multiline_text(
+        position,
+        text,
+        font=font,
+        fill=_FILL,
+        stroke_width=_STROKE_WIDTH,
+        stroke_fill=_STROKE_FILL,
+    )
+
+
+def _resolve_details_y(
+    draw: ImageDraw.ImageDraw,
+    position: tuple[int, int],
+    text: str,
+    font: Font,
+) -> int:
+    try:
+        bbox = draw.multiline_textbbox(
+            position,
+            text,
+            font=font,
+            stroke_width=_STROKE_WIDTH,
+        )
+    except Exception:
+        return _DEFAULT_DETAILS_Y
+    return int(bbox[3]) + _BLOCK_GAP_PX
+
+
+def _resolve_display_frame_number(config: OverlayConfig) -> int:
+    if config.display_frame_number is not None:
+        return config.display_frame_number
+    return config.frame_number
+
+
+def _compose_frame_info_text(config: OverlayConfig, mode: OverlayMode) -> str | None:
+    frame_info_lines = compose_frame_info_lines(
+        mode=mode,
+        label=config.label,
+        display_frame_number=_resolve_display_frame_number(config),
+        num_frames=config.num_frames,
+        picture_type=config.picture_type,
+        selection_label=config.selection_label,
+    )
+    if not frame_info_lines:
+        return None
+    return "\n".join(frame_info_lines)
+
+
+def _diagnostic_lines(config: OverlayConfig, mode: OverlayMode) -> list[str]:
+    if mode == OverlayMode.DIAGNOSTIC and config.hdr_info:
+        return [config.hdr_info]
+    return []
+
+
+def _compose_overlay_text(config: OverlayConfig, mode: OverlayMode) -> str | None:
+    width, height = config.resolution
+    overlay_lines = compose_overlay_text_lines(
+        mode=mode,
+        base_text=None,
+        width=width,
+        height=height,
+        selection_type=config.selection_label,
+        diagnostic_lines=_diagnostic_lines(config, mode),
+    )
+    if not overlay_lines:
+        return None
+    return "\n".join(overlay_lines)
+
 
 def apply_overlay(
-    image: Image.Image | np.ndarray,
+    image: Image.Image | np.ndarray | None,
     config: OverlayConfig,
 ) -> Image.Image:
     """
@@ -27,101 +134,31 @@ def apply_overlay(
     - NONE preserves the input image mode (true no-op).
     - Other modes return an RGBA image.
     """
-    # Runtime check for None, even if types say no
-    if image is None:  # type: ignore
-        raise ValueError("image must not be None")
-
-    # Runtime check for enum
-    if not isinstance(config.mode, OverlayMode):  # type: ignore
-        raise ValueError("invalid overlay mode")
+    normalized_image = _normalize_image(image)
+    mode = _resolve_mode(config.mode)
 
     # No overlay drawn.
-    if config.mode == OverlayMode.NONE:
-        return Image.fromarray(image) if isinstance(image, np.ndarray) else image
+    if mode == OverlayMode.NONE:
+        return _to_pil_image(normalized_image)
 
-    # 1. Convert input to PIL.Image.Image if numpy array
-    pil_image = Image.fromarray(image) if isinstance(image, np.ndarray) else image
+    pil_image = _to_pil_image(normalized_image)
 
     # Work on a copy and normalize to RGBA to support stroke/alpha consistently.
     canvas = pil_image.convert("RGBA")
     draw = ImageDraw.Draw(canvas)
+    font = _load_font(config)
 
-    # 2. Load font
-    font_size = config.font_size
-    if config.font_path:
-        font = ImageFont.truetype(str(config.font_path), size=font_size)
-    else:
-        font = ImageFont.load_default(size=font_size)
+    frame_info_text = _compose_frame_info_text(config, mode)
+    details_y = _DEFAULT_DETAILS_Y
+    if frame_info_text is not None:
+        _draw_text_block(draw, _LABEL_POSITION, frame_info_text, font)
+        details_y = _resolve_details_y(draw, _LABEL_POSITION, frame_info_text, font)
 
-    # 3. Draw legacy-style overlay blocks (outlined text, no background box).
-    label_pos = (10, 10)
-    block_gap_px = 10
-
-    fill = (255, 255, 255, 255)
-    stroke_fill = (0, 0, 0, 255)
-    stroke_width = 2
-
-    display_frame_number = (
-        config.display_frame_number
-        if config.display_frame_number is not None
-        else config.frame_number
-    )
-    w, h = config.resolution
-
-    frame_info_lines = compose_frame_info_lines(
-        mode=config.mode,
-        label=config.label,
-        display_frame_number=display_frame_number,
-        num_frames=config.num_frames,
-        picture_type=config.picture_type,
-        selection_label=config.selection_label,
-    )
-    details_y = 140
-    if frame_info_lines:
-        frame_text = "\n".join(frame_info_lines)
-        draw.multiline_text(
-            label_pos,
-            frame_text,
-            font=font,
-            fill=fill,
-            stroke_width=stroke_width,
-            stroke_fill=stroke_fill,
-        )
-        try:
-            bbox = draw.multiline_textbbox(
-                label_pos,
-                frame_text,
-                font=font,
-                stroke_width=stroke_width,
-            )
-        except Exception:
-            bbox = None
-        if bbox is not None:
-            details_y = int(bbox[3]) + block_gap_px
-    if config.mode == OverlayMode.MINIMAL:
+    if mode == OverlayMode.MINIMAL:
         return canvas
 
-    diagnostic_lines: list[str] = []
-    if config.mode == OverlayMode.DIAGNOSTIC and config.hdr_info:
-        diagnostic_lines = [config.hdr_info]
-
-    overlay_lines = compose_overlay_text_lines(
-        mode=config.mode,
-        base_text=None,
-        width=w,
-        height=h,
-        selection_type=config.selection_label,
-        diagnostic_lines=diagnostic_lines,
-    )
-
-    details_pos = (10, details_y)
-    draw.multiline_text(
-        details_pos,
-        "\n".join(overlay_lines),
-        font=font,
-        fill=fill,
-        stroke_width=stroke_width,
-        stroke_fill=stroke_fill,
-    )
+    overlay_text = _compose_overlay_text(config, mode)
+    if overlay_text is not None:
+        _draw_text_block(draw, (_LABEL_POSITION[0], details_y), overlay_text, font)
 
     return canvas

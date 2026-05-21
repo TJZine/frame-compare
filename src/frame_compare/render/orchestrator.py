@@ -3,7 +3,7 @@ from __future__ import annotations
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import structlog
 
@@ -16,6 +16,7 @@ from frame_compare.render.types import (
     Renderer,
     RenderRequest,
     ScreenshotBatchRequest,
+    ScreenshotRenderOptions,
 )
 from frame_compare.utils.progress_protocol import ProgressReporter
 
@@ -121,6 +122,81 @@ def _render_description(request: RenderRequest) -> str:
     return f"{label} — Frame {request.frame_number}" if label else f"Frame {request.frame_number}"
 
 
+def _record_render_progress(
+    reporter: ProgressReporter | None,
+    request: RenderRequest,
+) -> None:
+    if reporter is None:
+        return
+    reporter.set_description(_render_description(request))
+    reporter.advance(1)
+
+
+def _submit_render_request(
+    executor: ThreadPoolExecutor,
+    requests: list[RenderRequest],
+    futures: dict[Future[Path], int],
+    index: int,
+) -> None:
+    futures[executor.submit(render_frame, requests[index])] = index
+
+
+def _render_batch_sequential(
+    requests: list[RenderRequest],
+    results: list[Path | None],
+    reporter: ProgressReporter | None,
+) -> None:
+    for index, request in enumerate(requests):
+        results[index] = render_frame(request)
+        _record_render_progress(reporter, request)
+
+
+def _render_batch_parallel(
+    requests: list[RenderRequest],
+    results: list[Path | None],
+    parallelism: int,
+    reporter: ProgressReporter | None,
+) -> None:
+    with ThreadPoolExecutor(max_workers=parallelism) as executor:
+        futures: dict[Future[Path], int] = {}
+        next_index = 0
+        first_exception: Exception | None = None
+
+        while next_index < min(parallelism, len(requests)):
+            _submit_render_request(executor, requests, futures, next_index)
+            next_index += 1
+
+        while futures:
+            done, _ = wait(futures.keys(), return_when=FIRST_COMPLETED)
+            for future in done:
+                index = futures.pop(future)
+                try:
+                    results[index] = future.result()
+                    _record_render_progress(reporter, requests[index])
+                except Exception as exc:
+                    if first_exception is None:
+                        first_exception = exc
+                        for pending_future in futures:
+                            pending_future.cancel()
+                    continue
+
+                if first_exception is None and next_index < len(requests):
+                    _submit_render_request(executor, requests, futures, next_index)
+                    next_index += 1
+
+        if first_exception is not None:
+            raise first_exception
+
+
+def _completed_render_results(results: list[Path | None]) -> list[Path]:
+    completed: list[Path] = []
+    for result in results:
+        if result is None:
+            raise RuntimeError("render batch completed without a rendered path")
+        completed.append(result)
+    return completed
+
+
 def render_batch(
     requests: list[RenderRequest], parallelism: int = 1, reporter: ProgressReporter | None = None
 ) -> list[Path]:
@@ -148,59 +224,14 @@ def render_batch(
 
     try:
         if parallelism <= 1:
-            for i, req in enumerate(requests):
-                if reporter:
-                    reporter.set_description(_render_description(req))
-                results[i] = render_frame(req)
-                if reporter:
-                    reporter.advance(1)
+            _render_batch_sequential(requests, results, reporter)
         else:
-            with ThreadPoolExecutor(max_workers=parallelism) as executor:
-                futures: dict[Future[Path], int] = {}
-                next_idx = 0
-                first_exc: Exception | None = None
-
-                # Initial fill
-                while next_idx < min(parallelism, len(requests)):
-                    futures[executor.submit(render_frame, requests[next_idx])] = next_idx
-                    next_idx += 1
-
-                while futures:
-                    done, _ = wait(futures.keys(), return_when=FIRST_COMPLETED)
-                    for f in done:
-                        idx = futures.pop(f)
-                        try:
-                            results[idx] = f.result()
-                            if reporter:
-                                reporter.set_description(_render_description(requests[idx]))
-                                reporter.advance(1)
-
-                            # Submit next if no exception yet
-                            if first_exc is None and next_idx < len(requests):
-                                futures[executor.submit(render_frame, requests[next_idx])] = (
-                                    next_idx
-                                )
-                                next_idx += 1
-                        except Exception as e:
-                            if first_exc is None:
-                                first_exc = e
-                                # Cancel remaining pending tasks
-                                for pending_f in futures:
-                                    pending_f.cancel()
-
-                    if first_exc:
-                        # We continue to wait for already running tasks to finish
-                        # but we won't submit more.
-                        pass
-
-                if first_exc:
-                    raise first_exc
-
+            _render_batch_parallel(requests, results, parallelism, reporter)
     finally:
         if reporter:
             reporter.complete_phase()
 
-    return cast(list[Path], results)
+    return _completed_render_results(results)
 
 
 def _apply_vs_tonemap_and_labeling(
@@ -374,28 +405,16 @@ def render_screenshots(
     frames: list[int],
     output_dir: Path,
     config: ConfigSchema,
-    label_map: dict[Path, str] | None = None,
-    renderer: Renderer = "auto",
-    overlay_mode: OverlayMode = OverlayMode.STANDARD,
-    reporter: ProgressReporter | None = None,
-    *,
-    output_frames: list[int] | None = None,
-    selection_labels: list[str | None] | None = None,
-    ffmpeg_runner: FFmpegRunner | None = None,
+    options: ScreenshotRenderOptions | None = None,
 ) -> dict[str, list[Path]]:
     """Render multiple frames from multiple clips.
 
     Args:
         clips: List of video paths
         frames: List of frame indices to render
-        output_frames: Optional list of frame indices used for output filenames and overlay display.
         output_dir: Base output directory
         config: Resolved configuration (required for tonemap gating)
-        label_map: Optional mapping of Path -> label string
-        renderer: "vapoursynth", "ffmpeg", or "auto"
-        overlay_mode: Overlay verbosity
-        reporter: Optional progress reporter
-        ffmpeg_runner: Optional FFmpegRunner for probing/extraction
+        options: Render options for labels, renderer, overlay, progress, and FFmpeg probing
 
     Returns:
         Dict mapping label -> list of rendered screenshot paths
@@ -407,19 +426,28 @@ def render_screenshots(
         FFmpegNotFoundError: If ffprobe is missing for HDR probe
         RenderError: For other rendering failures
     """
-    label_map = label_map or {}
+    resolved_options = options or ScreenshotRenderOptions()
+    label_map = resolved_options.label_map or {}
 
-    if output_frames is not None and len(output_frames) != len(frames):
+    if resolved_options.output_frames is not None and len(resolved_options.output_frames) != len(
+        frames
+    ):
         raise ValueError("output_frames must have the same length as frames")
-    if selection_labels is not None and len(selection_labels) != len(frames):
+    if resolved_options.selection_labels is not None and len(
+        resolved_options.selection_labels
+    ) != len(frames):
         raise ValueError("selection_labels must have the same length as frames")
 
     batch_requests: list[ScreenshotBatchRequest] = []
     for clip_path in clips:
         label = label_map.get(clip_path, clip_path.stem)
-        display_frames = output_frames if output_frames is not None else frames
+        display_frames = (
+            resolved_options.output_frames if resolved_options.output_frames is not None else frames
+        )
         sel_labels: list[str | None] = (
-            selection_labels if selection_labels is not None else [None] * len(frames)
+            resolved_options.selection_labels
+            if resolved_options.selection_labels is not None
+            else [None] * len(frames)
         )
 
         req = ScreenshotBatchRequest(
@@ -439,10 +467,10 @@ def render_screenshots(
         batch_requests=batch_requests,
         output_dir=output_dir,
         config=config,
-        overlay_mode=overlay_mode,
-        renderer=renderer,
-        ffmpeg_runner=ffmpeg_runner,
-        reporter=reporter,
+        overlay_mode=resolved_options.overlay_mode,
+        renderer=resolved_options.renderer,
+        ffmpeg_runner=resolved_options.ffmpeg_runner,
+        reporter=resolved_options.reporter,
     )
 
 
@@ -457,6 +485,137 @@ def _validate_batch_request_lengths(request: ScreenshotBatchRequest) -> None:
             f"display_frames={display_len}, source_frames={source_len}, "
             f"selection_labels={selection_len}"
         )
+
+
+def _resolve_target_renderer(config: ConfigSchema, renderer: Renderer) -> Renderer:
+    if renderer == "auto" and config.screenshots.use_ffmpeg:
+        return "ffmpeg"
+    return renderer
+
+
+def _validate_ffmpeg_batch_tonemap_gate(
+    batch_requests: list[ScreenshotBatchRequest],
+    config: ConfigSchema,
+    renderer: Renderer,
+) -> None:
+    if (
+        renderer == "ffmpeg"
+        and config.color.enable_tonemap
+        and any(req.probe_is_hdr for req in batch_requests)
+    ):
+        from frame_compare.errors import TonemapRequiresVapourSynthError
+
+        raise TonemapRequiresVapourSynthError()
+
+
+def _resolve_batch_ffmpeg_runner(ffmpeg_runner: FFmpegRunner | None) -> FFmpegRunner:
+    if ffmpeg_runner is not None:
+        return ffmpeg_runner
+
+    from frame_compare.render.ffmpeg import DefaultFFmpegRunner
+
+    return DefaultFFmpegRunner()
+
+
+def _validate_batch_requests(batch_requests: list[ScreenshotBatchRequest]) -> None:
+    for req in batch_requests:
+        _validate_batch_request_lengths(req)
+
+
+def _build_overlay_config(
+    request: ScreenshotBatchRequest,
+    *,
+    overlay_mode: OverlayMode,
+    source_frame: int,
+    display_frame: int,
+    selection_label: str | None,
+    resolution: tuple[int, int],
+    hdr_info: str | None,
+    num_frames: int,
+) -> OverlayConfig | None:
+    if overlay_mode == OverlayMode.NONE:
+        return None
+    return OverlayConfig(
+        mode=overlay_mode,
+        label=request.label,
+        frame_number=source_frame,
+        display_frame_number=display_frame,
+        num_frames=num_frames,
+        selection_label=selection_label,
+        resolution=resolution,
+        hdr_info=hdr_info,
+        font_path=None,
+    )
+
+
+def _expand_batch_render_requests(
+    batch_requests: list[ScreenshotBatchRequest],
+    *,
+    output_dir: Path,
+    config: ConfigSchema,
+    overlay_mode: OverlayMode,
+    renderer: Renderer,
+    ffmpeg_runner: FFmpegRunner,
+) -> tuple[list[RenderRequest], dict[str, range]]:
+    all_requests: list[RenderRequest] = []
+    label_to_range: dict[str, range] = {}
+    start_idx = 0
+
+    for req in batch_requests:
+        loaded_clip, _, hdr_info, source_info = _prepare_clip_for_render(
+            req.clip_path, renderer, config, ffmpeg_runner=ffmpeg_runner
+        )
+
+        width = source_info.width if source_info is not None else req.probe_width
+        height = source_info.height if source_info is not None else req.probe_height
+        num_frames = source_info.num_frames if source_info is not None else req.probe_num_frames
+        resolved_hdr_info = (
+            hdr_info if source_info is not None else ("HDR" if req.probe_is_hdr else None)
+        )
+
+        num_frames_for_req = len(req.source_frames)
+        label_to_range[req.label] = range(start_idx, start_idx + num_frames_for_req)
+        start_idx += num_frames_for_req
+
+        for idx, source_frame in enumerate(req.source_frames):
+            aligned_frame = req.display_frames[idx]
+            selection_label = req.selection_labels[idx]
+
+            output_path = generate_screenshot_path(output_dir, req.label, aligned_frame)
+            overlay = _build_overlay_config(
+                req,
+                overlay_mode=overlay_mode,
+                source_frame=source_frame,
+                display_frame=aligned_frame,
+                selection_label=selection_label,
+                resolution=(width, height),
+                hdr_info=resolved_hdr_info,
+                num_frames=num_frames,
+            )
+
+            render_req = RenderRequest(
+                clip=loaded_clip,
+                frame_number=source_frame,
+                output_path=output_path,
+                overlay=overlay,
+                encoder_settings=EncoderSettings(),
+                ffmpeg_runner=ffmpeg_runner,
+            )
+            all_requests.append(render_req)
+
+    return all_requests, label_to_range
+
+
+def _render_batch_results_by_label(
+    batch_requests: list[ScreenshotBatchRequest],
+    rendered_paths: list[Path],
+    label_to_range: dict[str, range],
+) -> dict[str, list[Path]]:
+    results: dict[str, list[Path]] = {}
+    for req in batch_requests:
+        result_range = label_to_range[req.label]
+        results[req.label] = rendered_paths[result_range.start : result_range.stop]
+    return results
 
 
 def render_screenshots_from_batch(
@@ -482,87 +641,21 @@ def render_screenshots_from_batch(
     Returns:
         Dict mapping label -> list of rendered screenshot paths
     """
-    if ffmpeg_runner is None:
-        from frame_compare.render.ffmpeg import DefaultFFmpegRunner
+    resolved_ffmpeg_runner = _resolve_batch_ffmpeg_runner(ffmpeg_runner)
+    target_renderer = _resolve_target_renderer(config, renderer)
 
-        ffmpeg_runner = DefaultFFmpegRunner()
+    _validate_ffmpeg_batch_tonemap_gate(batch_requests, config, target_renderer)
+    _validate_batch_requests(batch_requests)
 
-    target_renderer = renderer
-    if target_renderer == "auto" and config.screenshots.use_ffmpeg:
-        target_renderer = "ffmpeg"
-
-    # Fast preflight check if FFmpeg is requested
-    if (
-        target_renderer == "ffmpeg"
-        and config.color.enable_tonemap
-        and any(req.probe_is_hdr for req in batch_requests)
-    ):
-        from frame_compare.errors import TonemapRequiresVapourSynthError
-
-        raise TonemapRequiresVapourSynthError()
-
-    for req in batch_requests:
-        _validate_batch_request_lengths(req)
-
-    all_requests: list[RenderRequest] = []
-    label_to_range: dict[str, range] = {}
-    start_idx = 0
-
-    for req in batch_requests:
-        loaded_clip, _, hdr_info, source_info = _prepare_clip_for_render(
-            req.clip_path, target_renderer, config, ffmpeg_runner=ffmpeg_runner
-        )
-
-        width = source_info.width if source_info is not None else req.probe_width
-        height = source_info.height if source_info is not None else req.probe_height
-        num_frames = source_info.num_frames if source_info is not None else req.probe_num_frames
-        resolved_hdr_info = (
-            hdr_info if source_info is not None else ("HDR" if req.probe_is_hdr else None)
-        )
-
-        num_frames_for_req = len(req.source_frames)
-        label_to_range[req.label] = range(start_idx, start_idx + num_frames_for_req)
-        start_idx += num_frames_for_req
-
-        for idx, source_frame in enumerate(req.source_frames):
-            aligned_frame = req.display_frames[idx]
-            selection_label = req.selection_labels[idx]
-
-            output_path = generate_screenshot_path(output_dir, req.label, aligned_frame)
-
-            overlay = (
-                None
-                if overlay_mode == OverlayMode.NONE
-                else OverlayConfig(
-                    mode=overlay_mode,
-                    label=req.label,
-                    frame_number=source_frame,
-                    display_frame_number=aligned_frame,
-                    num_frames=num_frames,
-                    selection_label=selection_label,
-                    resolution=(width, height),
-                    hdr_info=resolved_hdr_info,
-                    font_path=None,
-                )
-            )
-
-            render_req = RenderRequest(
-                clip=loaded_clip,
-                frame_number=source_frame,
-                output_path=output_path,
-                overlay=overlay,
-                encoder_settings=EncoderSettings(),
-                ffmpeg_runner=ffmpeg_runner,
-            )
-            all_requests.append(render_req)
+    all_requests, label_to_range = _expand_batch_render_requests(
+        batch_requests,
+        output_dir=output_dir,
+        config=config,
+        overlay_mode=overlay_mode,
+        renderer=target_renderer,
+        ffmpeg_runner=resolved_ffmpeg_runner,
+    )
 
     # Execute all requests in a single batch
     rendered_paths = render_batch(all_requests, parallelism=1, reporter=reporter)
-
-    # Reconstruct results dict maintaining the order of batch requests
-    results: dict[str, list[Path]] = {}
-    for req in batch_requests:
-        r = label_to_range[req.label]
-        results[req.label] = rendered_paths[r.start : r.stop]
-
-    return results
+    return _render_batch_results_by_label(batch_requests, rendered_paths, label_to_range)

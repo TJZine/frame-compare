@@ -140,6 +140,38 @@ def test_apply_overlay_standard_mode(captured_draw_calls):
     assert kwargs2["stroke_fill"] == (0, 0, 0, 255)
 
 
+def test_apply_overlay_standard_uses_fallback_details_y_when_bbox_fails(monkeypatch):
+    calls: list[tuple[tuple[int, int], str]] = []
+
+    def mock_multiline_text(self, xy, text, *args, **kwargs):
+        calls.append((xy, text))
+        return None
+
+    def mock_multiline_textbbox(self, xy, text, *args, **kwargs):
+        raise RuntimeError("bbox unavailable")
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "multiline_text", mock_multiline_text)
+    monkeypatch.setattr(ImageDraw.ImageDraw, "multiline_textbbox", mock_multiline_textbbox)
+
+    config = OverlayConfig(
+        mode=OverlayMode.STANDARD,
+        label="Ref",
+        frame_number=100,
+        display_frame_number=12,
+        num_frames=100,
+        resolution=(1920, 1080),
+        hdr_info=None,
+        font_path=None,
+    )
+    img = Image.new("RGB", (100, 100))
+
+    apply_overlay(img, config)
+
+    assert len(calls) == 2
+    assert calls[0][0] == (10, 10)
+    assert calls[1][0] == (10, 140)
+
+
 def test_apply_overlay_standard_includes_selection_label_when_present(captured_draw_calls):
     config = OverlayConfig(
         mode=OverlayMode.STANDARD,

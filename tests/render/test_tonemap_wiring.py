@@ -23,6 +23,7 @@ from frame_compare.render.orchestrator import (
     resolve_tonemap_settings,
     should_tonemap,
 )
+from frame_compare.render.types import ScreenshotRenderOptions
 from frame_compare.vs.types import SourceInfo, TonemapSettings
 
 # ─── Helper Truth Table Tests ──────────────────────────────────────────────────
@@ -152,8 +153,7 @@ def test_probe_failure_disallows_fallback_when_tonemap_enabled(tmp_path: Path) -
                 frames,
                 tmp_path,
                 enable_tonemap_config,
-                renderer="auto",
-                ffmpeg_runner=mock_runner,
+                ScreenshotRenderOptions(renderer="auto", ffmpeg_runner=mock_runner),
             )
 
 
@@ -190,8 +190,7 @@ def test_hdr_enable_tonemap_requires_vs_when_renderer_auto(tmp_path: Path) -> No
                 frames,
                 tmp_path,
                 enable_tonemap_config,
-                renderer="auto",
-                ffmpeg_runner=mock_runner,
+                ScreenshotRenderOptions(renderer="auto", ffmpeg_runner=mock_runner),
             )
         assert isinstance(exc_info.value.__cause__, VapourSynthNotFoundError)
 
@@ -222,8 +221,7 @@ def test_hdr_enable_tonemap_requires_vs_when_renderer_ffmpeg(tmp_path: Path) -> 
             frames,
             tmp_path,
             enable_tonemap_config,
-            renderer="ffmpeg",
-            ffmpeg_runner=mock_runner,
+            ScreenshotRenderOptions(renderer="ffmpeg", ffmpeg_runner=mock_runner),
         )
 
 
@@ -244,7 +242,11 @@ def test_hdr_disable_tonemap_allows_ffmpeg_when_vs_missing(tmp_path: Path) -> No
 
         # Should NOT raise — fallback allowed because tonemap is disabled
         results = render_screenshots(
-            clips, frames, tmp_path, disable_tonemap_config, renderer="auto"
+            clips,
+            frames,
+            tmp_path,
+            disable_tonemap_config,
+            ScreenshotRenderOptions(renderer="auto"),
         )
 
         assert "hdr_video" in results
@@ -274,8 +276,7 @@ def test_sdr_allows_ffmpeg_fallback_when_vs_missing(tmp_path: Path) -> None:
             frames,
             tmp_path,
             enable_tonemap_config,
-            renderer="auto",
-            ffmpeg_runner=mock_runner,
+            ScreenshotRenderOptions(renderer="auto", ffmpeg_runner=mock_runner),
         )
 
         assert "sdr_video" in results

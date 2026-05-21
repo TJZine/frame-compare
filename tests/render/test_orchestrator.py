@@ -17,7 +17,12 @@ from frame_compare.render.orchestrator import (
     render_screenshots,
     render_screenshots_from_batch,
 )
-from frame_compare.render.types import EncoderSettings, RenderRequest, ScreenshotBatchRequest
+from frame_compare.render.types import (
+    EncoderSettings,
+    RenderRequest,
+    ScreenshotBatchRequest,
+    ScreenshotRenderOptions,
+)
 
 
 @pytest.fixture
@@ -111,7 +116,11 @@ def test_render_screenshots_vs_loading(tmp_path, default_config):
             mock_batch.return_value = [tmp_path / "1.png", tmp_path / "2.png"]
 
             results = render_screenshots(
-                clips, frames, tmp_path, default_config, renderer="vapoursynth"
+                clips,
+                frames,
+                tmp_path,
+                default_config,
+                ScreenshotRenderOptions(renderer="vapoursynth"),
             )
 
             assert "vid1" in results
@@ -133,7 +142,11 @@ def test_render_screenshots_fallback(tmp_path, default_config):
             # Should NOT raise, but log warning (enable_tonemap=False → fallback allowed)
             with capture_logs() as captured:
                 results = render_screenshots(
-                    clips, frames, tmp_path, default_config, renderer="auto"
+                    clips,
+                    frames,
+                    tmp_path,
+                    default_config,
+                    ScreenshotRenderOptions(renderer="auto"),
                 )
 
             assert "vid1" in results
@@ -147,7 +160,13 @@ def test_render_screenshots_vs_forced_fail_vs_not_found(tmp_path, default_config
         mock_loader.load.side_effect = VapourSynthNotFoundError()
 
         with pytest.raises(VapourSynthNotFoundError):
-            render_screenshots(clips, [1], tmp_path, default_config, renderer="vapoursynth")
+            render_screenshots(
+                clips,
+                [1],
+                tmp_path,
+                default_config,
+                ScreenshotRenderOptions(renderer="vapoursynth"),
+            )
 
 
 def test_render_screenshots_vs_forced_fail_plugin(tmp_path, default_config):
@@ -157,7 +176,13 @@ def test_render_screenshots_vs_forced_fail_plugin(tmp_path, default_config):
         mock_loader.load.side_effect = PluginNotFoundError("lsmas")
 
         with pytest.raises(PluginNotFoundError):
-            render_screenshots(clips, [1], tmp_path, default_config, renderer="vapoursynth")
+            render_screenshots(
+                clips,
+                [1],
+                tmp_path,
+                default_config,
+                ScreenshotRenderOptions(renderer="vapoursynth"),
+            )
 
 
 def test_render_screenshots_vs_forced_fail_source(tmp_path, default_config):
@@ -167,7 +192,13 @@ def test_render_screenshots_vs_forced_fail_source(tmp_path, default_config):
         mock_loader.load.side_effect = SourceLoadError(Path("vid1.mkv"), "Failed")
 
         with pytest.raises(SourceLoadError):
-            render_screenshots(clips, [1], tmp_path, default_config, renderer="vapoursynth")
+            render_screenshots(
+                clips,
+                [1],
+                tmp_path,
+                default_config,
+                ScreenshotRenderOptions(renderer="vapoursynth"),
+            )
 
 
 def test_render_screenshots_vs_forced_fail_unknown(tmp_path, default_config):
@@ -177,7 +208,13 @@ def test_render_screenshots_vs_forced_fail_unknown(tmp_path, default_config):
         mock_loader.load.side_effect = RuntimeError("Unknown")
 
         with pytest.raises(RenderError) as exc_info:
-            render_screenshots(clips, [1], tmp_path, default_config, renderer="vapoursynth")
+            render_screenshots(
+                clips,
+                [1],
+                tmp_path,
+                default_config,
+                ScreenshotRenderOptions(renderer="vapoursynth"),
+            )
         assert exc_info.type is RenderError
         assert isinstance(exc_info.value.__cause__, RuntimeError)
 
@@ -194,7 +231,13 @@ def test_render_screenshots_fallback_unknown(tmp_path, default_config):
             mock_batch.return_value = [tmp_path / "1.png"]
 
             with pytest.raises(RenderError) as exc_info:
-                render_screenshots(clips, frames, tmp_path, default_config, renderer="auto")
+                render_screenshots(
+                    clips,
+                    frames,
+                    tmp_path,
+                    default_config,
+                    ScreenshotRenderOptions(renderer="auto"),
+                )
             assert exc_info.type is RenderError
             assert isinstance(exc_info.value.__cause__, RuntimeError)
 
@@ -211,7 +254,13 @@ def test_render_screenshots_overlay_resolution(tmp_path, default_config):
 
         with patch("frame_compare.render.orchestrator.render_batch") as mock_batch:
             mock_batch.return_value = [tmp_path / "1.png"]
-            render_screenshots(clips, [1], tmp_path, default_config, renderer="vapoursynth")
+            render_screenshots(
+                clips,
+                [1],
+                tmp_path,
+                default_config,
+                ScreenshotRenderOptions(renderer="vapoursynth"),
+            )
 
             # Verify resolution in request
             req = mock_batch.call_args[0][0][0]
@@ -223,7 +272,13 @@ def test_render_screenshots_overlay_resolution(tmp_path, default_config):
         mock_loader.load.side_effect = SourceLoadError(Path("vid1.mkv"), "Failed")
         with patch("frame_compare.render.orchestrator.render_batch") as mock_batch:
             mock_batch.return_value = [tmp_path / "1.png"]
-            render_screenshots(clips, [1], tmp_path, default_config, renderer="auto")
+            render_screenshots(
+                clips,
+                [1],
+                tmp_path,
+                default_config,
+                ScreenshotRenderOptions(renderer="auto"),
+            )
             req = mock_batch.call_args[0][0][0]
             assert req.overlay.resolution == (0, 0)
 
@@ -233,7 +288,13 @@ def test_render_screenshots_dict_order(tmp_path, default_config):
     frames = [1, 2]
     with patch("frame_compare.render.orchestrator.render_batch") as mock_batch:
         mock_batch.return_value = [Path(f"{i}.png") for i in range(4)]
-        results = render_screenshots(clips, frames, tmp_path, default_config, renderer="ffmpeg")
+        results = render_screenshots(
+            clips,
+            frames,
+            tmp_path,
+            default_config,
+            ScreenshotRenderOptions(renderer="ffmpeg"),
+        )
 
         # Dict keys should preserve clip order
         assert list(results.keys()) == ["b", "a"]
@@ -246,7 +307,13 @@ def test_render_screenshots_output_path(tmp_path, default_config):
     frames = [42]
     with patch("frame_compare.render.orchestrator.render_batch") as mock_batch:
         mock_batch.return_value = [tmp_path / "vid1_000042.png"]
-        render_screenshots(clips, frames, tmp_path, default_config, renderer="ffmpeg")
+        render_screenshots(
+            clips,
+            frames,
+            tmp_path,
+            default_config,
+            ScreenshotRenderOptions(renderer="ffmpeg"),
+        )
 
         req = mock_batch.call_args[0][0][0]
         from frame_compare.render.naming import generate_screenshot_path
