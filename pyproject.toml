@@ -149,3 +149,11 @@ exclude_lines = [
 ]
 fail_under = 80
 show_missing = true
+
+[tool.bandit]
+exclude_dirs = [
+    ".venv",
+    ".uv_cache",
+    ".desloppify",
+    "tests"
+]

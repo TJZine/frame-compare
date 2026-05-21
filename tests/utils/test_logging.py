@@ -5,7 +5,7 @@ import pytest
 import structlog
 from structlog.testing import ReturnLogger
 
-from frame_compare.utils import logging as logging_module
+import frame_compare.utils.logging as logging_module
 from frame_compare.utils.logging import configure_logging, get_run_id, new_run_id
 
 

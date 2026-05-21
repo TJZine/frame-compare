@@ -175,18 +175,7 @@ def run(
             return
 
         if diagnose_paths:
-            from frame_compare.orchestration.preflight import resolve_paths
-
-            config_override = _load_effective_config()
-            workspace = resolve_paths(config_override, resolved_root)
-            payload = {
-                "root": str(resolved_root),
-                "config": str(config_path),
-                "input": str(workspace.input_dir),
-                "output": str(workspace.screenshots_dir),
-                "cache": str(workspace.generated_dir),
-            }
-            typer.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+            _handle_diagnose_paths(resolved_root, config_path, _load_effective_config())
             return
 
         request = RunRequest(
@@ -233,20 +222,7 @@ def run(
         raise typer.Exit(code=int(ExitCode.INTERRUPTED)) from None
 
     if json_output:
-        payload = {
-            "success": result.success,
-            "screenshots_dir": str(result.screenshot_dir) if result.screenshot_dir else None,
-            "slowpics_url": result.slowpics_url,
-            "report_path": str(result.report_path) if result.report_path else None,
-            "frame_count": result.frame_count,
-            "clips_processed": result.clips_processed,
-            "duration_seconds": result.duration_seconds,
-            "cache_hit": result.cache_hit,
-            "errors": list(result.errors),
-        }
-        typer.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
-        if not result.success:
-            raise typer.Exit(code=int(ExitCode.PROCESSING_ERROR))
+        _handle_json_output(result)
         return
 
     if not result.success:
@@ -264,6 +240,37 @@ def run(
 
         if cfg is None or cfg.report.auto_open:
             _maybe_open_report(result.report_path)
+
+
+def _handle_diagnose_paths(resolved_root: Path, config_path: Path, config: ConfigSchema) -> None:
+    from frame_compare.orchestration.preflight import resolve_paths
+
+    workspace = resolve_paths(config, resolved_root)
+    payload = {
+        "root": str(resolved_root),
+        "config": str(config_path),
+        "input": str(workspace.input_dir),
+        "output": str(workspace.screenshots_dir),
+        "cache": str(workspace.generated_dir),
+    }
+    typer.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+
+
+def _handle_json_output(result: RunResult) -> None:
+    payload = {
+        "success": result.success,
+        "screenshots_dir": str(result.screenshot_dir) if result.screenshot_dir else None,
+        "slowpics_url": result.slowpics_url,
+        "report_path": str(result.report_path) if result.report_path else None,
+        "frame_count": result.frame_count,
+        "clips_processed": result.clips_processed,
+        "duration_seconds": result.duration_seconds,
+        "cache_hit": result.cache_hit,
+        "errors": list(result.errors),
+    }
+    typer.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    if not result.success:
+        raise typer.Exit(code=int(ExitCode.PROCESSING_ERROR))
 
 
 @app.command()
@@ -497,10 +504,12 @@ def _prepare_toml_payload(data: dict[str, object]) -> dict[str, object]:
     tmdb_section_raw = data.get("tmdb")
     tmdb_section: dict[str, object] = {}
     if isinstance(tmdb_section_raw, dict):
-        tmdb_section = dict(cast(dict[str, object], tmdb_section_raw))
-    api_key = tmdb_section.get("api_key")
-    if api_key is None or api_key == "":
-        tmdb_section.pop("api_key", None)
+        for k, v in cast(dict[str, object], tmdb_section_raw).items():
+            if k == "api_key":
+                if v is not None and v != "":
+                    tmdb_section["api_key"] = v
+            else:
+                tmdb_section[k] = v
     paths_section: dict[str, object] = {}
     slowpics_section: dict[str, object] = {}
     paths_raw = data.get("paths")

@@ -246,7 +246,7 @@ def _check_vspreview() -> CheckResult:
     Per vspreview spec §6.1, this is an optional check that reports passed=True
     even when VSPreview is missing (non-failing).
     """
-    from frame_compare.vspreview import is_vspreview_available
+    from frame_compare.vspreview.adapter import is_vspreview_available
 
     if is_vspreview_available():
         return CheckResult(

@@ -39,7 +39,7 @@ def run(request: RunRequest, dependencies: RunDependencies | None = None) -> Run
     else:
         raise RuntimeError(
             "Do not call frame_compare.runner.run from an async context; "
-            "await frame_compare.orchestration.coordinator.execute_run instead."
+            "await frame_compare.orchestration.execute_run instead."
         )
 
     if dependencies is None:

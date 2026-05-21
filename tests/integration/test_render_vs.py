@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 import pytest
 from PIL import Image
 
-from frame_compare.render import render_frame
+from frame_compare.render.encoders import render_frame
 from frame_compare.render.types import EncoderSettings, RenderRequest
 
 # Skip policy at module level

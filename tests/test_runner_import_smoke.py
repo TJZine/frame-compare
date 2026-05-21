@@ -107,7 +107,7 @@ def test_runner_run_raises_when_event_loop_running(
             RuntimeError,
             match=(
                 r"^Do not call frame_compare\.runner\.run from an async context; "
-                r"await frame_compare\.orchestration\.coordinator\.execute_run instead\.$"
+                r"await frame_compare\.orchestration\.execute_run instead\.$"
             ),
         ):
             runner.run(request)

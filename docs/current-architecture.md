@@ -10,7 +10,7 @@ Frame Compare is a CLI-first packaged Python app with importable internal module
 
 - CLI entrypoint: `frame_compare.cli_entry:app`
 - Runtime entry surface: `frame_compare.runner.run(...)`
-- Async orchestration root: `frame_compare.orchestration.coordinator.execute_run(...)`
+- Async orchestration root: `frame_compare.orchestration.execute_run(...)`
 - Diagnostic entry surface: `frame_compare.orchestration.doctor.run_doctor(...)`
 
 The CLI keeps VS-heavy imports lazy through proxy functions so help text and simple commands do not import the full runtime stack at module import time.
@@ -98,7 +98,7 @@ Compatibility policy for those surfaces is defined in the runbook rather than in
 
 These files currently carry disproportionate change risk:
 
-- `src/frame_compare/orchestration/coordinator.py`
+- `src/frame_compare/orchestration/coordinator.py` (and neighboring `types.py`, `preparation.py`, `execution.py`)
 - `src/frame_compare/errors.py`
 - `src/frame_compare/services/report.py`
 - `src/frame_compare/cli_entry.py`

@@ -138,7 +138,7 @@ def _apply_manual_overrides(
     results_map: dict[str, AlignmentResult],
 ) -> Fraction | None:
     """Apply manual offsets from overrides config, returning reference FPS if probed."""
-    from frame_compare.vspreview import load_manual_overrides
+    from frame_compare.vspreview.overrides import load_manual_overrides
 
     manual_overrides = load_manual_overrides(cache_dir)
     fps_reference: Fraction | None = None

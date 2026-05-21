@@ -190,6 +190,8 @@ def _convert_non_rgb_with_matrix_hint(
     if props is None:
         props = dict(clip.get_frame(0).props)
 
+    # VapourSynth frame properties are dynamic and populated by the VapourSynth runtime.
+    # We read '_Matrix' directly from the clip's frame properties.
     matrix_prop = props.get("_Matrix")
     matrix_in_s: str | None = None
     if matrix_prop is None:

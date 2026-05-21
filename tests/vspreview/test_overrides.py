@@ -9,9 +9,9 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from frame_compare.vspreview import (
+from frame_compare.vspreview.adapter import is_vspreview_available
+from frame_compare.vspreview.overrides import (
     ManualOverride,
-    is_vspreview_available,
     load_manual_overrides,
     save_manual_override,
 )

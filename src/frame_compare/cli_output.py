@@ -37,7 +37,7 @@ def print_at_a_glance(
     vspreview_available: bool | None = None
     if config.audio_alignment.use_vspreview or config.audio_alignment.force_interactive:
         try:
-            from frame_compare.vspreview import is_vspreview_available
+            from frame_compare.vspreview.adapter import is_vspreview_available
 
             vspreview_available = is_vspreview_available()
         except Exception:

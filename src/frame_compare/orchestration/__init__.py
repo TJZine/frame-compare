@@ -18,7 +18,12 @@ if TYPE_CHECKING:
         ClipTrimState,
         RunContext,
     )
-    from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, RunResult
+    from frame_compare.orchestration.coordinator import (
+        RunDependencies,
+        RunRequest,
+        RunResult,
+        execute_run,
+    )
     from frame_compare.orchestration.doctor import (
         CheckResult,
         DoctorCheck,
@@ -53,6 +58,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "RunDependencies": ("frame_compare.orchestration.coordinator", "RunDependencies"),
     "RunRequest": ("frame_compare.orchestration.coordinator", "RunRequest"),
     "RunResult": ("frame_compare.orchestration.coordinator", "RunResult"),
+    "execute_run": ("frame_compare.orchestration.coordinator", "execute_run"),
     # Preflight
     "PreflightResult": ("frame_compare.orchestration.preflight", "PreflightResult"),
     "prepare_preflight": ("frame_compare.orchestration.preflight", "prepare_preflight"),
@@ -97,6 +103,7 @@ __all__ = (
     "RunDependencies",
     "RunRequest",
     "RunResult",
+    "execute_run",
     "PreflightResult",
     "prepare_preflight",
     "resolve_workspace",

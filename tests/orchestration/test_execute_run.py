@@ -21,7 +21,7 @@ from frame_compare.errors import (
     MetricsCalculationError,
     TonemapRequiresVapourSynthError,
 )
-from frame_compare.orchestration import coordinator
+from frame_compare.orchestration import coordinator, execution, preparation
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.services.alignment import CACHE_FILE_NAME
 from frame_compare.services.run_folder import derive_run_folder_name
@@ -363,7 +363,7 @@ def test_execute_run_no_cache_deletes_run_folder_cache_when_enabled(
 
     run_name = "Movie (2024)"
     monkeypatch.setattr(
-        coordinator, "reserve_run_folder", lambda input_dir, **_kwargs: input_dir / run_name
+        preparation, "reserve_run_folder", lambda input_dir, **_kwargs: input_dir / run_name
     )
     run_generated_dir = input_dir / run_name / "generated"
 
@@ -604,8 +604,8 @@ def test_execute_run_passes_prefetched_tmdb_metadata_to_run_folder_derivation(
         resolve_calls.append(filenames)
         return expected_metadata
 
-    monkeypatch.setattr(coordinator, "reserve_run_folder", _capture_reserve_run_folder)
-    monkeypatch.setattr(coordinator, "resolve_metadata", _fake_resolve_metadata)
+    monkeypatch.setattr(preparation, "reserve_run_folder", _capture_reserve_run_folder)
+    monkeypatch.setattr(preparation, "resolve_metadata", _fake_resolve_metadata)
 
     request = RunRequest(
         root=tmp_path,
@@ -670,7 +670,7 @@ enable = false
             ),
         ]
 
-    monkeypatch.setattr(coordinator, "align_clips", _fake_align_clips)
+    monkeypatch.setattr(execution, "align_clips", _fake_align_clips)
 
     ffmpeg = FakeFFmpegRunner()
     deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=ffmpeg)

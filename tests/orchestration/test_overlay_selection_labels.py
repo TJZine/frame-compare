@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from frame_compare.analysis.types import SelectionBreakdown
-from frame_compare.orchestration.coordinator import selection_label_for_frame
+from frame_compare.orchestration.execution import selection_label_for_frame
 
 
 def test_selection_label_for_frame_maps_breakdown_categories() -> None:

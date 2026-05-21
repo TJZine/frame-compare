@@ -13,7 +13,8 @@ from frame_compare.orchestration.context import (
     ClipState,
     RunContext,
 )
-from frame_compare.orchestration.coordinator import _run_render_phase, _RunArtifacts
+from frame_compare.orchestration.execution import run_render_phase
+from frame_compare.orchestration.types import RunArtifacts
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.types import SourceInfo
 
@@ -93,9 +94,9 @@ def test_overlay_display_frame_number_matches_aligned_output_filename(
         reporter=None,
     )
 
-    artifacts = _RunArtifacts()
+    artifacts = RunArtifacts()
 
-    _run_render_phase(
+    run_render_phase(
         ctx=ctx,
         frames=[10],
         runner=FakeFFmpegRunner(),
