@@ -369,32 +369,6 @@ def _prepare_clip_for_render(
     return loaded_clip, resolution, hdr_info, source_info
 
 
-def _assemble_overlay(
-    overlay_mode: OverlayMode,
-    label: str,
-    frame_number: int,
-    display_frame_number: int,
-    num_frames: int | None,
-    selection_label: str | None,
-    resolution: tuple[int, int],
-    hdr_info: str | None,
-) -> OverlayConfig | None:
-    """Construct an OverlayConfig if overlay mode is not NONE."""
-    if overlay_mode == OverlayMode.NONE:
-        return None
-    return OverlayConfig(
-        mode=overlay_mode,
-        label=label,
-        frame_number=frame_number,
-        display_frame_number=display_frame_number,
-        num_frames=num_frames,
-        selection_label=selection_label,
-        resolution=resolution,
-        hdr_info=hdr_info,
-        font_path=None,
-    )
-
-
 def render_screenshots(
     clips: list[Path],
     frames: list[int],
@@ -556,15 +530,20 @@ def render_screenshots_from_batch(
 
             output_path = generate_screenshot_path(output_dir, req.label, aligned_frame)
 
-            overlay = _assemble_overlay(
-                overlay_mode=overlay_mode,
-                label=req.label,
-                frame_number=source_frame,
-                display_frame_number=aligned_frame,
-                num_frames=num_frames,
-                selection_label=selection_label,
-                resolution=(width, height),
-                hdr_info=resolved_hdr_info,
+            overlay = (
+                None
+                if overlay_mode == OverlayMode.NONE
+                else OverlayConfig(
+                    mode=overlay_mode,
+                    label=req.label,
+                    frame_number=source_frame,
+                    display_frame_number=aligned_frame,
+                    num_frames=num_frames,
+                    selection_label=selection_label,
+                    resolution=(width, height),
+                    hdr_info=resolved_hdr_info,
+                    font_path=None,
+                )
             )
 
             render_req = RenderRequest(

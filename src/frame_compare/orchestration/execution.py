@@ -111,7 +111,7 @@ def build_phases_before_align(
             "analyze",
             lambda config: request.skip_analysis,
             partial(
-                _calculate_metrics_and_replace_selected_frames,
+                run_analyze_phase,
                 input_videos=input_videos,
                 workspace=workspace,
                 selected_frames=selected_frames,
@@ -154,7 +154,7 @@ def build_phases_after_align(
             "render",
             None,
             partial(
-                _render_frames_and_record_outputs,
+                run_render_phase,
                 frames=selected_frames,
                 runner=ffmpeg_runner,
                 artifacts=artifacts,
@@ -230,42 +230,10 @@ def _select_initial_frame_plan(ctx: RunContext, *, selected_frames: list[int]) -
     )
 
 
-def _calculate_metrics_and_replace_selected_frames(
-    ctx: RunContext,
-    *,
-    input_videos: list[Path],
-    workspace: WorkspacePaths,
-    selected_frames: list[int],
-    artifacts: RunArtifacts,
-) -> None:
-    run_analyze_phase(
-        ctx=ctx,
-        input_videos=input_videos,
-        workspace=workspace,
-        selected_frames=selected_frames,
-        artifacts=artifacts,
-    )
-
-
 def _align_clips_and_normalize_selected_frames(
     ctx: RunContext, *, selected_frames: list[int]
 ) -> None:
     run_align_phase(ctx, selected_frames=selected_frames)
-
-
-def _render_frames_and_record_outputs(
-    ctx: RunContext,
-    *,
-    frames: list[int],
-    runner: FFmpegRunner,
-    artifacts: RunArtifacts,
-) -> None:
-    run_render_phase(
-        ctx=ctx,
-        frames=frames,
-        runner=runner,
-        artifacts=artifacts,
-    )
 
 
 async def _resolve_or_reuse_metadata(
@@ -318,8 +286,8 @@ def _generate_report_and_record_path(
 
 
 def run_analyze_phase(
-    *,
     ctx: RunContext,
+    *,
     input_videos: list[Path],
     workspace: WorkspacePaths,
     selected_frames: list[int],
@@ -399,8 +367,8 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> None:
 
 
 def run_render_phase(
-    *,
     ctx: RunContext,
+    *,
     frames: list[int],
     runner: FFmpegRunner,
     artifacts: RunArtifacts,
