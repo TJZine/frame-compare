@@ -28,6 +28,7 @@ if not _vs_spec_available() and "vapoursynth" not in sys.modules:
     sys.modules["vapoursynth"] = mock_vs
 
 # Now import module under test
+import frame_compare.vs.tonemap as tonemap_module  # noqa: E402, I001
 import vapoursynth as vs  # noqa: E402, I001
 from frame_compare.errors import TonemapError  # noqa: E402, I001
 from frame_compare.vs.tonemap import apply_tonemap, get_preset_settings  # noqa: E402, I001
@@ -78,6 +79,52 @@ def test_apply_tonemap_enabled_false_returns_clip_unchanged():
     result = apply_tonemap(mock_clip, settings)
 
     assert result is mock_clip
+
+
+def test_libplacebo_runtime_usable_require_env_forces_true_without_probe(monkeypatch) -> None:
+    """Require override should bypass the cached subprocess probe."""
+    tonemap_module._probe_libplacebo_runtime.cache_clear()
+    monkeypatch.setenv("FRAME_COMPARE_REQUIRE_LIBPLACEBO", "1")
+    monkeypatch.delenv("FRAME_COMPARE_DISABLE_LIBPLACEBO", raising=False)
+    monkeypatch.delenv("FRAME_COMPARE_LIBPLACEBO_PROBE", raising=False)
+
+    with patch.object(tonemap_module, "_probe_libplacebo_runtime") as mock_probe:
+        assert tonemap_module._libplacebo_runtime_usable() is True
+
+    mock_probe.assert_not_called()
+
+
+def test_libplacebo_runtime_usable_disable_env_forces_false_without_probe(monkeypatch) -> None:
+    """Disable override should bypass the cached subprocess probe."""
+    tonemap_module._probe_libplacebo_runtime.cache_clear()
+    monkeypatch.setenv("FRAME_COMPARE_DISABLE_LIBPLACEBO", "1")
+    monkeypatch.delenv("FRAME_COMPARE_REQUIRE_LIBPLACEBO", raising=False)
+    monkeypatch.delenv("FRAME_COMPARE_LIBPLACEBO_PROBE", raising=False)
+
+    with patch.object(tonemap_module, "_probe_libplacebo_runtime") as mock_probe:
+        assert tonemap_module._libplacebo_runtime_usable() is False
+
+    mock_probe.assert_not_called()
+
+
+@pytest.mark.parametrize("probe_result", [True, False])
+def test_libplacebo_runtime_usable_delegates_to_probe_without_overrides(
+    monkeypatch, probe_result: bool
+) -> None:
+    """Without overrides, the wrapper should return the probe result."""
+    tonemap_module._probe_libplacebo_runtime.cache_clear()
+    monkeypatch.delenv("FRAME_COMPARE_REQUIRE_LIBPLACEBO", raising=False)
+    monkeypatch.delenv("FRAME_COMPARE_DISABLE_LIBPLACEBO", raising=False)
+    monkeypatch.delenv("FRAME_COMPARE_LIBPLACEBO_PROBE", raising=False)
+
+    with patch.object(
+        tonemap_module,
+        "_probe_libplacebo_runtime",
+        return_value=probe_result,
+    ) as mock_probe:
+        assert tonemap_module._libplacebo_runtime_usable() is probe_result
+
+    mock_probe.assert_called_once_with()
 
 
 @patch("frame_compare.vs.tonemap.detect_plugins")

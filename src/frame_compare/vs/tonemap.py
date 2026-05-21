@@ -75,22 +75,8 @@ _TONEMAP_PRESETS: dict[TonemapPreset, TonemapSettings] = {
 
 
 @lru_cache(maxsize=1)
-def _libplacebo_runtime_usable() -> bool:
-    """Return whether libplacebo is safe to call in this process.
-
-    Plugin presence is not sufficient on all Docker/Vulkan setups: some
-    environments expose `core.placebo.Tonemap` but crash the process when it is
-    invoked. We probe that path in a child Python process once, cache the
-    result, and keep the main process on the deterministic fallback path when
-    the probe fails.
-    """
-    if os.environ.get(_REQUIRE_LIBPLACEBO_ENV) == "1":
-        return True
-    if os.environ.get(_DISABLE_LIBPLACEBO_ENV) == "1":
-        return False
-    if os.environ.get(_LIBPLACEBO_PROBE_ENV) == "1":
-        return True
-
+def _probe_libplacebo_runtime() -> bool:
+    """Run the subprocess probe to check if libplacebo is usable."""
     probe_script = textwrap.dedent(
         """
         import vapoursynth as vs
@@ -153,6 +139,28 @@ def _libplacebo_runtime_usable() -> bool:
         stderr=result.stderr.strip()[-400:],
     )
     return False
+
+
+def _libplacebo_runtime_usable() -> bool:
+    """Return whether libplacebo is safe to call in this process.
+
+    Plugin presence is not sufficient on all Docker/Vulkan setups: some
+    environments expose `core.placebo.Tonemap` but crash the process when it is
+    invoked. We probe that path in a child Python process once, cache the
+    result, and keep the main process on the deterministic fallback path when
+    the probe fails.
+
+    This wrapper evaluates env overrides dynamically before falling back to
+    the cached subprocess probe.
+    """
+    if os.environ.get(_REQUIRE_LIBPLACEBO_ENV) == "1":
+        return True
+    if os.environ.get(_DISABLE_LIBPLACEBO_ENV) == "1":
+        return False
+    if os.environ.get(_LIBPLACEBO_PROBE_ENV) == "1":
+        return True
+
+    return _probe_libplacebo_runtime()
 
 
 def _deduce_src_csp_hint(transfer: int | None, primaries: int | None) -> int | None:
