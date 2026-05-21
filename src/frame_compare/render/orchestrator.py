@@ -156,11 +156,12 @@ def _render_batch_parallel(
     parallelism: int,
     reporter: ProgressReporter | None,
 ) -> None:
-    with ThreadPoolExecutor(max_workers=parallelism) as executor:
-        futures: dict[Future[Path], int] = {}
-        next_index = 0
-        first_exception: Exception | None = None
+    executor = ThreadPoolExecutor(max_workers=parallelism)
+    futures: dict[Future[Path], int] = {}
+    next_index = 0
+    first_exception: Exception | None = None
 
+    try:
         while next_index < min(parallelism, len(requests)):
             _submit_render_request(executor, requests, futures, next_index)
             next_index += 1
@@ -175,16 +176,21 @@ def _render_batch_parallel(
                 except Exception as exc:
                     if first_exception is None:
                         first_exception = exc
-                        for pending_future in futures:
-                            pending_future.cancel()
+                        executor.shutdown(wait=False, cancel_futures=True)
+                        break
                     continue
 
                 if first_exception is None and next_index < len(requests):
                     _submit_render_request(executor, requests, futures, next_index)
                     next_index += 1
 
-        if first_exception is not None:
-            raise first_exception
+            if first_exception is not None:
+                break
+    finally:
+        executor.shutdown(wait=first_exception is None, cancel_futures=True)
+
+    if first_exception is not None:
+        raise first_exception
 
 
 def _completed_render_results(results: list[Path | None]) -> list[Path]:
@@ -211,7 +217,11 @@ def render_batch(
         List of paths to rendered files in input order
 
     Raises:
-        Exception: The first exception encountered during rendering (fail-fast)
+        Exception: The first exception encountered during rendering (fail-fast).
+            Note that when executing in parallel, already-running tasks on other
+            threads will continue executing in the background after the exception
+            is raised, but no new tasks will be scheduled and the function returns
+            immediately.
     """
     if not requests:
         return []
@@ -517,8 +527,12 @@ def _resolve_batch_ffmpeg_runner(ffmpeg_runner: FFmpegRunner | None) -> FFmpegRu
 
 
 def _validate_batch_requests(batch_requests: list[ScreenshotBatchRequest]) -> None:
+    seen_labels: set[str] = set()
     for req in batch_requests:
         _validate_batch_request_lengths(req)
+        if req.label in seen_labels:
+            raise ValueError(f"Duplicate label {req.label!r} detected in batch requests")
+        seen_labels.add(req.label)
 
 
 def _build_overlay_config(

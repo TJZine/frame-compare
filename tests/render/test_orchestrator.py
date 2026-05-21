@@ -347,3 +347,80 @@ def test_render_screenshots_from_batch_rejects_mismatched_frame_metadata(tmp_pat
         )
 
     ffmpeg_runner.extract_frame.assert_not_called()
+
+
+def test_render_screenshots_from_batch_rejects_duplicate_labels(tmp_path) -> None:
+    config = ConfigSchema(color=ColorConfig(enable_tonemap=False), screenshots={"use_ffmpeg": True})
+    ffmpeg_runner = MagicMock()
+    req1 = ScreenshotBatchRequest(
+        clip_path=Path("vid1.mkv"),
+        label="duplicate_label",
+        source_frames=[42],
+        display_frames=[42],
+        selection_labels=[None],
+        probe_width=1920,
+        probe_height=1080,
+        probe_num_frames=240,
+        probe_is_hdr=False,
+    )
+    req2 = ScreenshotBatchRequest(
+        clip_path=Path("vid2.mkv"),
+        label="duplicate_label",
+        source_frames=[42],
+        display_frames=[42],
+        selection_labels=[None],
+        probe_width=1920,
+        probe_height=1080,
+        probe_num_frames=240,
+        probe_is_hdr=False,
+    )
+
+    with pytest.raises(
+        ValueError, match="Duplicate label 'duplicate_label' detected in batch requests"
+    ):
+        render_screenshots_from_batch(
+            batch_requests=[req1, req2],
+            output_dir=tmp_path,
+            config=config,
+            overlay_mode=config.screenshots.overlay_mode,
+            ffmpeg_runner=ffmpeg_runner,
+        )
+
+    ffmpeg_runner.extract_frame.assert_not_called()
+
+
+def test_render_batch_parallel_fail_fast_no_wait() -> None:
+    import time
+
+    requests = [
+        RenderRequest(
+            clip=Path("video.mkv"),
+            frame_number=0,
+            output_path=Path("out_0.png"),
+            overlay=None,
+            encoder_settings=EncoderSettings(),
+        ),
+        RenderRequest(
+            clip=Path("video.mkv"),
+            frame_number=1,
+            output_path=Path("out_1.png"),
+            overlay=None,
+            encoder_settings=EncoderSettings(),
+        ),
+    ]
+
+    # Let the first task sleep for 1 second, and the second task fail immediately
+    def side_effect(r):
+        if r.frame_number == 0:
+            time.sleep(1.0)
+            return r.output_path
+        else:
+            raise RuntimeError("Failed immediately")
+
+    with patch("frame_compare.render.orchestrator.render_frame", side_effect=side_effect):
+        start_time = time.time()
+        with pytest.raises(RuntimeError, match="Failed immediately"):
+            render_batch(requests, parallelism=2)
+        elapsed = time.time() - start_time
+        # It should raise the exception immediately without waiting for the 1.0s task to finish.
+        assert elapsed < 0.5
