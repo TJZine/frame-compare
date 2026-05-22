@@ -246,6 +246,25 @@ def test_generate_report_includes_slowpics_url(report_data: ReportData, tmp_path
     assert "https://slow.pics/c/12345" in content
 
 
+def test_generate_report_without_slowpics_url_omits_external_link(
+    report_data: ReportData, tmp_path: Path
+) -> None:
+    data_without_upload = ReportData(
+        clips=report_data.clips,
+        frames=report_data.frames,
+        screenshots=report_data.screenshots,
+        metadata=report_data.metadata,
+        slowpics_url=None,
+    )
+
+    out_path = generate_report(data_without_upload, ReportConfig(output_dir=str(tmp_path)))
+    content = out_path.read_text(encoding="utf-8")
+
+    assert "View on slow.pics" not in content
+    assert 'class="rv-link"' not in content
+    assert '"slowpics_url": null' in content
+
+
 def test_generate_report_filmstrip_included(report_data: ReportData, tmp_path: Path) -> None:
     config = ReportConfig(include_filmstrip=True, output_dir=str(tmp_path))
     out_path = generate_report(report_data, config)
