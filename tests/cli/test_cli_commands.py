@@ -1412,3 +1412,23 @@ def test_run_verbose_calls_configure_logging_debug(monkeypatch: MonkeyPatch) -> 
     result = _invoke_run_with_minimal_workspace(["--quiet"])
     assert result.exit_code == 0
     assert captured["level"] == "WARNING"
+
+
+def test_import_does_not_mutate_terminal_width():
+    import os
+    import subprocess
+    import sys
+
+    env = os.environ.copy()
+    env.pop("TERMINAL_WIDTH", None)
+    cmd = [
+        sys.executable,
+        "-c",
+        "import os; "
+        "import frame_compare.cli_entry; "
+        "assert 'TERMINAL_WIDTH' not in os.environ, 'should not set env on import'; "
+        "import typer.rich_utils as tru; "
+        "assert tru.MAX_WIDTH is None, 'should not set MAX_WIDTH on import'; ",
+    ]
+    res = subprocess.run(cmd, env=env, capture_output=True, text=True)
+    assert res.returncode == 0, res.stderr

@@ -10,16 +10,11 @@ import sys
 import webbrowser
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import tomli_w
 
 _DEFAULT_HELP_WIDTH = 200
-
-# Typer's Rich help renderer reads TERMINAL_WIDTH only at import-time.
-# Defaulting it prevents long option names from being ellipsized in help output
-# (and keeps CLI help stable under Click's test runner).
-os.environ.setdefault("TERMINAL_WIDTH", str(_DEFAULT_HELP_WIDTH))
 
 import typer
 import typer.rich_utils as typer_rich_utils
@@ -60,13 +55,11 @@ if TYPE_CHECKING:
 
 def _stabilize_typer_help_width() -> None:
     """Backfill Typer's cached Rich help width when it was imported too early."""
+    os.environ.setdefault("TERMINAL_WIDTH", str(_DEFAULT_HELP_WIDTH))
     if typer_rich_utils.MAX_WIDTH is not None:
         return
     with contextlib.suppress(ValueError):
         typer_rich_utils.MAX_WIDTH = int(os.environ["TERMINAL_WIDTH"])
-
-
-_stabilize_typer_help_width()
 
 
 class _RunnerProxy:
@@ -90,10 +83,20 @@ def run_doctor(
     return runtime_run_doctor(checks=checks, reporter=reporter)
 
 
+from typer.core import TyperGroup
+
+
+class FrameCompareTyperGroup(TyperGroup):
+    def main(self, *args: Any, **kwargs: Any) -> Any:
+        _stabilize_typer_help_width()
+        return super().main(*args, **kwargs)
+
+
 app = typer.Typer(
     name="frame-compare",
     help="Video frame comparison tool with tonemapping and slow.pics integration.",
     no_args_is_help=False,
+    cls=FrameCompareTyperGroup,
 )
 
 
