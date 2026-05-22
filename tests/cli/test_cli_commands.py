@@ -751,6 +751,36 @@ def test_wizard_cancel_exits_130_and_writes_nothing(monkeypatch: MonkeyPatch) ->
         assert not (Path("config") / "config.toml").exists()
 
 
+def test_wizard_write_error_uses_cli_error_contract(monkeypatch: MonkeyPatch) -> None:
+    def _write_text_atomic(_path: Path, _content: str, *, encoding: str = "utf-8") -> None:
+        raise PermissionError("permission denied")
+
+    monkeypatch.setattr(
+        "frame_compare.cli_entry._prompt_input_dir",
+        lambda *_args, **_kwargs: "inputs",
+    )
+    monkeypatch.setattr("frame_compare.cli_entry.typer.confirm", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        "frame_compare.cli_entry._prompt_visibility",
+        lambda _default: "unlisted",
+    )
+    monkeypatch.setattr("frame_compare.cli_entry.typer.prompt", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr("frame_compare.cli_entry.write_text_atomic", _write_text_atomic)
+
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        (root / "inputs").mkdir(parents=True)
+
+        result = runner.invoke(app, ["wizard", "--root", str(root)])
+
+        assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+        assert result.stdout == ""
+        assert "FC-1007" in result.stderr
+        assert "Failed to write configuration file" in result.stderr
+        assert "Traceback" not in result.stderr
+        assert not (root / "config" / "config.toml").exists()
+
+
 def test_wizard_root_validates_relative_input_dir_against_root() -> None:
     with runner.isolated_filesystem():
         root = Path("workspace")

@@ -51,12 +51,18 @@ def load_manual_overrides(cache_dir: Path) -> dict[str, ManualOverride]:
     """
     cache_path = cache_dir / MANUAL_OVERRIDES_FILE
 
-    if not cache_path.exists():
-        return {}
-
     try:
+        if not cache_path.exists():
+            return {}
         with cache_path.open("rb") as f:
             data = tomllib.load(f)
+    except OSError as e:
+        log.warning(
+            "manual_overrides_read_error",
+            path=str(cache_path),
+            error=str(e),
+        )
+        return {}
     except tomllib.TOMLDecodeError as e:
         log.warning(
             "manual_overrides_parse_error",
@@ -136,18 +142,42 @@ def save_manual_override(cache_dir: Path, override: ManualOverride) -> None:
         - Overwrites existing entry for same key
         - Writes with stable ordering (version first, then sorted keys)
     """
-    cache_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        log.warning(
+            "manual_overrides_write_error",
+            path=str(cache_dir / MANUAL_OVERRIDES_FILE),
+            error=str(e),
+        )
+        return
+
     cache_path = cache_dir / MANUAL_OVERRIDES_FILE
 
     # Load existing data
     data: dict[str, object] = {"version": MANUAL_OVERRIDES_VERSION}
-    if cache_path.exists():
+    try:
+        cache_exists = cache_path.exists()
+    except OSError as e:
+        log.warning(
+            "manual_overrides_read_existing_error",
+            path=str(cache_path),
+            error=str(e),
+        )
+        cache_exists = False
+    if cache_exists:
         try:
             with cache_path.open("rb") as f:
                 existing = tomllib.load(f)
                 # Only merge if version matches
                 if existing.get("version") == MANUAL_OVERRIDES_VERSION:
                     data.update(existing)
+        except OSError as e:
+            log.warning(
+                "manual_overrides_read_existing_error",
+                path=str(cache_path),
+                error=str(e),
+            )
         except tomllib.TOMLDecodeError:
             # If corrupt, we'll just overwrite
             log.warning(
@@ -171,5 +201,12 @@ def save_manual_override(cache_dir: Path, override: ManualOverride) -> None:
     for k in sorted(key for key in data if key != "version"):
         ordered[k] = data[k]
 
-    with cache_path.open("wb") as f:
-        f.write(tomli_w.dumps(ordered).encode("utf-8"))
+    try:
+        with cache_path.open("wb") as f:
+            f.write(tomli_w.dumps(ordered).encode("utf-8"))
+    except OSError as e:
+        log.warning(
+            "manual_overrides_write_error",
+            path=str(cache_path),
+            error=str(e),
+        )

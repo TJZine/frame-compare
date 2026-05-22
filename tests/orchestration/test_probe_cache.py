@@ -4,6 +4,7 @@ import tomllib
 from fractions import Fraction
 from pathlib import Path
 from typing import Any, cast
+from unittest.mock import patch
 
 import pytest
 import tomli_w
@@ -117,6 +118,22 @@ def test_load_clip_probe_cache_returns_empty_dict_on_parse_error(tmp_path: Path)
     f.write_text("invalid [ toml", encoding="utf-8")
     cache = load_clip_probe_cache(f)
     assert cache == {}
+
+
+def test_load_clip_probe_cache_returns_empty_dict_on_read_os_error(tmp_path: Path):
+    """Plain filesystem read failures degrade like corrupt generated state."""
+    f = tmp_path / "unreadable.toml"
+    f.write_text('version = "1"', encoding="utf-8")
+
+    with (
+        patch("pathlib.Path.open", side_effect=OSError("permission denied")),
+        patch("frame_compare.orchestration.probe_cache.log.warning") as warning,
+    ):
+        cache = load_clip_probe_cache(f)
+
+    assert cache == {}
+    warning.assert_called_once()
+    assert warning.call_args.args[0] == "probe_cache_read_error"
 
 
 def test_load_clip_probe_cache_returns_empty_dict_on_version_mismatch(tmp_path: Path):
@@ -384,6 +401,22 @@ def test_save_clip_probe_cache_writes_version_first_and_keys_sorted(
 
     assert lines[0].startswith('version = "1"')
     assert contents.index(f"[{key_a}]") < contents.index(f"[{key_b}]")
+
+
+def test_save_clip_probe_cache_logs_and_continues_on_write_os_error(
+    tmp_path: Path, sample_snapshot: ClipProbeSnapshot
+) -> None:
+    """Probe cache writes are best-effort generated-state acceleration."""
+    f = tmp_path / "unwritable" / "cache.toml"
+    key = compute_probe_cache_key(sample_snapshot.fingerprint)
+
+    with (
+        patch("pathlib.Path.open", side_effect=OSError("disk full")),
+        patch("frame_compare.orchestration.probe_cache.log.warning") as warning,
+    ):
+        save_clip_probe_cache(f, {key: sample_snapshot})
+
+    assert warning.call_args.args[0] == "probe_cache_write_error"
 
 
 # ============================================================================

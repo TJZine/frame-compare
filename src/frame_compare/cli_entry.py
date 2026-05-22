@@ -362,8 +362,11 @@ def wizard(
         delete_after_upload=delete_after_upload,
         tmdb_api_key=tmdb_value,
     )
-    _validate_config(config_data)
-    _write_wizard_config_payload(config_path, config_data)
+    try:
+        _validate_config(config_data)
+        _write_wizard_config_payload(config_path, config_data)
+    except FrameCompareError as error:
+        raise typer.Exit(code=handle_error(error, no_color=True, verbose=False)) from error
 
 
 @app.command()
@@ -500,9 +503,12 @@ def _validate_config(data: dict[str, object]) -> None:
 
 def _write_wizard_config_payload(config_path: Path, data: dict[str, object]) -> None:
     """Write wizard config payload to the provided destination."""
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    toml_text = tomli_w.dumps(_prepare_toml_payload(data))
-    write_text_atomic(config_path, toml_text, encoding="utf-8")
+    try:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        toml_text = tomli_w.dumps(_prepare_toml_payload(data))
+        write_text_atomic(config_path, toml_text, encoding="utf-8")
+    except OSError as exc:
+        raise ConfigWriteError(config_path, label="configuration file", cause=exc) from exc
 
 
 def _doctor_report_json(report: DoctorReport) -> dict[str, JSONValue]:

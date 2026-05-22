@@ -135,12 +135,14 @@ def load_clip_probe_cache(cache_path: Path) -> dict[str, ClipProbeSnapshot]:
     Returns empty dict on missing file, parse error, or version mismatch (warn-only).
     Skips invalid entries (warn-only).
     """
-    if not cache_path.exists():
-        return {}
-
     try:
+        if not cache_path.exists():
+            return {}
         with cache_path.open("rb") as f:
             data: dict[str, object] = tomllib.load(f)
+    except OSError as e:
+        log.warning("probe_cache_read_error", path=str(cache_path), error=str(e))
+        return {}
     except tomllib.TOMLDecodeError as e:
         log.warning("probe_cache_parse_error", path=str(cache_path), error=str(e))
         return {}
@@ -282,8 +284,11 @@ def save_clip_probe_cache(
 
         output[key] = entry
 
-    # SSOT §3.5.1: This helper MUST create parent directories if missing
-    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        # SSOT §3.5.1: This helper MUST create parent directories if missing
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with cache_path.open("wb") as f:
-        tomli_w.dump(output, f)
+        with cache_path.open("wb") as f:
+            tomli_w.dump(output, f)
+    except OSError as e:
+        log.warning("probe_cache_write_error", path=str(cache_path), error=str(e))

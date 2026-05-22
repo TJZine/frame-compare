@@ -168,6 +168,25 @@ confirmed = false
 
         assert result == {}
 
+    def test_load_manual_overrides_returns_empty_dict_on_read_os_error(
+        self, tmp_path: Path
+    ) -> None:
+        """Plain filesystem read failures degrade like invalid generated state."""
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        overrides_file = cache_dir / "manual_overrides.toml"
+        overrides_file.write_text('version = "1"', encoding="utf-8")
+
+        with (
+            patch("pathlib.Path.open", side_effect=OSError("permission denied")),
+            patch("frame_compare.vspreview.overrides.log.warning") as warning,
+        ):
+            result = load_manual_overrides(cache_dir)
+
+        assert result == {}
+        warning.assert_called_once()
+        assert warning.call_args.args[0] == "manual_overrides_read_error"
+
     def test_load_manual_overrides_returns_empty_dict_on_version_mismatch(
         self, tmp_path: Path
     ) -> None:
@@ -322,6 +341,70 @@ class TestSaveManualOverride:
         assert len(result) == 1
         assert result["ref:comp"].frame_offset == 99
         assert result["ref:comp"].confirmed is False
+
+    def test_save_manual_override_logs_and_continues_on_existing_read_os_error(
+        self, tmp_path: Path
+    ) -> None:
+        """Existing manual override read failures do not block saving a new override."""
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        overrides_file = cache_dir / "manual_overrides.toml"
+        overrides_file.write_text(
+            """\
+version = "1"
+
+["old:entry"]
+reference_clip = "old"
+comparison_clip = "entry"
+frame_offset = 1
+timestamp = "2026-01-03T12:00:00Z"
+""",
+            encoding="utf-8",
+        )
+        override = ManualOverride(
+            reference_clip="ref",
+            comparison_clip="comp",
+            frame_offset=99,
+            timestamp="2026-01-03T12:30:00Z",
+            confirmed=False,
+        )
+        original_open = Path.open
+
+        def open_with_read_failure(path: Path, mode: str = "r", *args, **kwargs):
+            if path == overrides_file and "r" in mode:
+                raise OSError("stale handle")
+            return original_open(path, mode, *args, **kwargs)
+
+        with (
+            patch("pathlib.Path.open", open_with_read_failure),
+            patch("frame_compare.vspreview.overrides.log.warning") as warning,
+        ):
+            save_manual_override(cache_dir, override)
+
+        assert warning.call_args.args[0] == "manual_overrides_read_existing_error"
+        result = load_manual_overrides(cache_dir)
+        assert result == {"ref:comp": override}
+
+    def test_save_manual_override_logs_and_continues_on_write_os_error(
+        self, tmp_path: Path
+    ) -> None:
+        """Manual override writes are best-effort generated-state acceleration."""
+        cache_dir = tmp_path / "cache"
+        override = ManualOverride(
+            reference_clip="ref",
+            comparison_clip="comp",
+            frame_offset=10,
+            timestamp="2026-01-03T12:00:00Z",
+        )
+
+        with (
+            patch("pathlib.Path.open", side_effect=OSError("disk full")),
+            patch("frame_compare.vspreview.overrides.log.warning") as warning,
+        ):
+            save_manual_override(cache_dir, override)
+
+        warning.assert_called_once()
+        assert warning.call_args.args[0] == "manual_overrides_write_error"
 
 
 class TestManualOverridePrecedence:
