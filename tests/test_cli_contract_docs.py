@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from frame_compare.config import Visibility
 from frame_compare.config.overrides import CLI_OVERRIDE_MAP
 
 
@@ -74,3 +75,26 @@ def test_current_cli_contract_names_primary_executable_contract_checks() -> None
 
     for expected in expected_checks:
         assert expected in authority_section
+
+
+def test_current_cli_contract_matches_wizard_visibility_choices() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    cli_contract = (repo_root / "docs" / "current-cli-contract.md").read_text(encoding="utf-8")
+    wizard_heading = "## `wizard` Command Contract"
+    doctor_heading = "## `doctor` Command Contract"
+    assert wizard_heading in cli_contract, f"Missing heading: {wizard_heading}"
+    assert doctor_heading in cli_contract, f"Missing heading: {doctor_heading}"
+
+    wizard_section = cli_contract.split(wizard_heading, maxsplit=1)[1].split(
+        doctor_heading,
+        maxsplit=1,
+    )[0]
+
+    for visibility in Visibility:
+        assert visibility.value in wizard_section
+    for unsupported_token in (
+        "--visibility private",
+        "--visibility=private",
+        "visibility: private",
+    ):
+        assert unsupported_token not in wizard_section

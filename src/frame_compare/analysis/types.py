@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from fractions import Fraction
 from typing import TYPE_CHECKING, Literal
 
-from frame_compare.config import SelectionMode
+from frame_compare.config.schema import SelectionMode
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

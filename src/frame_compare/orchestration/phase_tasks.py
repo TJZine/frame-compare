@@ -13,7 +13,7 @@ import httpx
 
 from frame_compare.analysis import cache_io, calculate_metrics, create_frame_plan, select_frames
 from frame_compare.analysis.types import SelectionBreakdown
-from frame_compare.config import ConfigSchema
+from frame_compare.config.schema import ConfigSchema
 from frame_compare.errors import AudioAlignmentError
 from frame_compare.orchestration.context import (
     ClipAlignmentState,
@@ -25,7 +25,8 @@ from frame_compare.render.ffmpeg import FFmpegRunner
 from frame_compare.services.alignment import align_clips
 from frame_compare.services.metadata import resolve_metadata
 from frame_compare.services.publishers import publish_to_slowpics
-from frame_compare.services.report import ClipInfo, ReportData, generate_report
+from frame_compare.services.report.entry import generate_report
+from frame_compare.services.report.payload import ClipInfo, ReportData
 from frame_compare.services.types import AlignmentConfig, MetadataConfig, TmdbMetadata
 from frame_compare.utils.types import WorkspacePaths
 

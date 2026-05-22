@@ -16,6 +16,7 @@ from PIL import Image
 from frame_compare.analysis import cache_io
 from frame_compare.config import ConfigSchema, OverlayMode, TonemapPreset, load_config
 from frame_compare.errors import (
+    AudioAlignmentError,
     CacheCorruptionError,
     CacheVersionMismatchError,
     ConfigNotFoundError,
@@ -24,9 +25,15 @@ from frame_compare.errors import (
     TonemapRequiresVapourSynthError,
 )
 from frame_compare.orchestration import coordinator, phase_tasks, preparation
+from frame_compare.orchestration.context import (
+    ClipFingerprint,
+    ClipProbeSnapshot,
+    ClipState,
+    RunContext,
+)
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
-from frame_compare.orchestration.execution import build_phases_before_align
-from frame_compare.orchestration.types import RunArtifacts
+from frame_compare.orchestration.execution import build_execution_phase_plan
+from frame_compare.orchestration.types import PrepState, RunArtifacts
 from frame_compare.services.alignment import CACHE_FILE_NAME
 from frame_compare.services.run_folder import derive_run_folder_name
 from frame_compare.services.types import AlignmentResult, MetadataConfig, TmdbMetadata
@@ -87,7 +94,65 @@ def _create_video_files(input_dir: Path, *filenames: str) -> None:
         (input_dir / name).touch()
 
 
-def test_build_phases_before_align_counts_align_as_single_phase_unit(tmp_path: Path) -> None:
+def _write_metrics_cache(cache_dir: Path, *, source_path: Path, config: ConfigSchema) -> None:
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    fingerprint = cache_io.compute_cache_key([source_path], config.analysis)
+    cache_payload = {
+        "version": cache_io.CACHE_VERSION,
+        "fingerprint": fingerprint,
+        "luminance": [0.1] * 100,
+        "motion": [0.2] * 100,
+        "metadata": {
+            "frame_count": 100,
+            "fps": "24",
+            "config_fingerprint": fingerprint,
+            "clips": [
+                {
+                    "path": str(source_path),
+                    "size": 0,
+                    "mtime": 0.0,
+                    "sha1": None,
+                }
+            ],
+            "version": cache_io.CACHE_VERSION,
+        },
+    }
+    (cache_dir / cache_io.CACHE_FILENAME).write_text(json.dumps(cache_payload), encoding="utf-8")
+
+
+def _clip_state(path: Path, *, label: str, num_frames: int = 100) -> ClipState:
+    probe = ClipProbeSnapshot(
+        fingerprint=ClipFingerprint(path=path, size_bytes=0, mtime_ns=0),
+        width=1920,
+        height=1080,
+        num_frames=num_frames,
+        fps=Fraction(24, 1),
+        is_hdr=False,
+    )
+    return ClipState(
+        path=path,
+        label=label,
+        probe=probe,
+        source_fps=probe.fps,
+        effective_fps=probe.fps,
+    )
+
+
+def _workspace(tmp_path: Path) -> WorkspacePaths:
+    return WorkspacePaths(
+        root=tmp_path,
+        input_dir=tmp_path / "comparison_videos",
+        run_dir=None,
+        screenshots_dir=tmp_path / "screenshots",
+        generated_dir=tmp_path / "generated",
+        config_dir=tmp_path / "config",
+        config_file=tmp_path / "config" / "config.toml",
+    )
+
+
+def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
+    tmp_path: Path,
+) -> None:
     workspace = WorkspacePaths(
         root=tmp_path,
         input_dir=tmp_path / "comparison_videos",
@@ -98,23 +163,71 @@ def test_build_phases_before_align_counts_align_as_single_phase_unit(tmp_path: P
         config_file=tmp_path / "config" / "config.toml",
     )
 
-    phases = build_phases_before_align(
-        request=RunRequest(root=tmp_path),
-        clock=datetime.now,
-        phase_timings={},
-        warnings=[],
-        selected_frames=[],
+    prep = PrepState(
+        workspace=workspace,
+        config=ConfigSchema(),
         input_videos=[
             tmp_path / "ref.mkv",
             tmp_path / "comp_a.mkv",
             tmp_path / "comp_b.mkv",
         ],
-        workspace=workspace,
+        clips=[
+            _clip_state(tmp_path / "ref.mkv", label="Reference"),
+            _clip_state(tmp_path / "comp_a.mkv", label="Encode 1"),
+            _clip_state(tmp_path / "comp_b.mkv", label="Encode 2"),
+        ],
         artifacts=RunArtifacts(),
+        metadata_prefetched=False,
+        preflight_warnings=[],
+        preflight_duration=0.0,
+        load_sources_start=datetime.now(),
     )
 
-    align_phase = next(phase for phase in phases if phase.name == "align")
+    plan = build_execution_phase_plan(
+        request=RunRequest(root=tmp_path),
+        deps=RunDependencies(ffmpeg_runner=FakeFFmpegRunner()),
+        prep=prep,
+        phase_timings={},
+        selected_frames=[],
+    )
+
+    assert [phase.name for phase in plan.before_align] == ["frame_plan", "analyze", "align"]
+    assert [phase.name for phase in plan.after_align] == [
+        "render",
+        "metadata",
+        "dovi",
+        "publish",
+        "report",
+    ]
+
+    align_phase = next(phase for phase in plan.before_align if phase.name == "align")
     assert align_phase.progress_total == 1
+
+
+def test_run_request_cli_override_args_capture_runtime_override_contract(tmp_path: Path) -> None:
+    request = RunRequest(
+        root=tmp_path,
+        input_dir=tmp_path / "comparison_videos",
+        tm_preset=TonemapPreset.FILMIC,
+        tm_target_nits=203,
+        overlay_mode=OverlayMode.DIAGNOSTIC,
+        frame_count=12,
+        seed=123,
+        no_upload=True,
+        force_interactive_alignment=True,
+    )
+
+    assert request.cli_override_args() == {
+        "tm_preset": TonemapPreset.FILMIC,
+        "tm_target": 203,
+        "tm_curve": None,
+        "frame_count": 12,
+        "seed": 123,
+        "overlay": OverlayMode.DIAGNOSTIC,
+        "no_upload": True,
+        "force_interactive_alignment": True,
+        "input": str(tmp_path / "comparison_videos"),
+    }
 
 
 class FakeVSLoader:
@@ -609,6 +722,74 @@ def test_execute_run_from_cache_only_uses_run_folder_cache_when_enabled(
     assert result.slowpics_url is None
 
 
+def test_execute_run_from_cache_only_preserves_existing_run_folder_casing(
+    tmp_path: Path,
+) -> None:
+    _create_config(tmp_path, content=RUN_FOLDERS_CONFIG)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "source.mkv")
+
+    run_name = derive_run_folder_name(filenames=["source.mkv"])
+    existing_run_name = run_name.upper()
+    run_generated_dir = input_dir / existing_run_name / "generated"
+    source_path = input_dir / "source.mkv"
+    config = load_config(tmp_path / "config" / "config.toml")
+    _write_metrics_cache(run_generated_dir / "cache", source_path=source_path, config=config)
+
+    request = RunRequest(
+        root=tmp_path,
+        from_cache_only=True,
+        skip_analysis=False,
+        skip_metadata=True,
+        skip_dovi=True,
+        no_upload=True,
+    )
+    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+
+    result = asyncio.run(execute_run(request, deps=deps))
+
+    assert result.success is True
+    assert result.cache_hit is True
+    assert result.screenshot_dir == (input_dir / existing_run_name / "screenshots").resolve()
+
+
+def test_execute_run_from_cache_only_requires_cached_audio_offsets_when_alignment_enabled(
+    tmp_path: Path,
+) -> None:
+    config_content = """\
+[paths]
+input_dir = "comparison_videos"
+screenshots_dir = "screenshots"
+generated_dir = "generated"
+config_dir = "config"
+
+[audio_alignment]
+enable = true
+
+[screenshots]
+use_ffmpeg = true
+
+[report]
+enable = false
+"""
+    _create_config(tmp_path, content=config_content)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "a_source.mkv", "b_comp.mkv")
+
+    request = RunRequest(
+        root=tmp_path,
+        from_cache_only=True,
+        skip_analysis=True,
+        skip_metadata=True,
+        skip_dovi=True,
+        no_upload=True,
+    )
+    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+
+    with pytest.raises(AudioAlignmentError, match="a_source:b_comp"):
+        asyncio.run(execute_run(request, deps=deps))
+
+
 def test_execute_run_from_cache_only_ignores_prefetched_tmdb_run_folder_name(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1012,3 +1193,156 @@ enable = false
     assert by_video["a_ref.mkv"] == [5, 50, 97]
     assert by_video["b_comp1.mkv"] == [4, 49, 96]
     assert by_video["c_comp2.mkv"] == [6, 51, 98]
+
+
+def test_execute_run_uses_and_populates_probe_cache_without_reprobing(tmp_path: Path) -> None:
+    """Prove that probe cache is populated on first run and reused on second run without reprobe calls."""
+    _create_config(tmp_path)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "source.mkv")
+
+    request = RunRequest(
+        root=tmp_path,
+        skip_analysis=True,
+        skip_metadata=True,
+        skip_dovi=True,
+        no_upload=True,
+    )
+
+    # 1. First run populates the cache
+    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    result = asyncio.run(execute_run(request, deps=deps))
+    assert result.success is True
+
+    cache_path = tmp_path / "generated" / "clip_probe.toml"
+    assert cache_path.exists()
+    cache_before = cache_path.read_text(encoding="utf-8")
+
+    # 2. Second run with RaisingFakeVSLoader uses the cache
+    class RaisingFakeVSLoader:
+        def load(self, path: Path) -> SourceInfo:
+            raise AssertionError(f"Fake VS loader should not be called: {path}")
+
+        def ensure_core(self):
+            raise AssertionError("Fake VS core should not be requested when cache is warm")
+
+    reuse_deps = RunDependencies(vs_loader=RaisingFakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    reuse_result = asyncio.run(execute_run(request, deps=reuse_deps))
+    assert reuse_result.success is True
+
+    cache_after = cache_path.read_text(encoding="utf-8")
+    assert cache_after == cache_before
+
+
+def test_run_metadata_phase_uses_prefetched_metadata_without_client(tmp_path: Path) -> None:
+    _create_config(tmp_path)
+    config = load_config(tmp_path / "config" / "config.toml")
+    reference = _clip_state(tmp_path / "comparison_videos" / "source.mkv", label="Reference")
+    ctx = RunContext(
+        config=config, workspace=_workspace(tmp_path), reference=reference, comparisons=[]
+    )
+    expected_metadata = TmdbMetadata(
+        tmdb_id=789,
+        title="Thief",
+        original_title="Thief",
+        year=1981,
+        media_type="movie",
+    )
+    artifacts = RunArtifacts(resolved_metadata=expected_metadata)
+
+    asyncio.run(
+        phase_tasks.run_metadata_phase(
+            ctx,
+            client=None,
+            prefetched_metadata=expected_metadata,
+            metadata_prefetched=True,
+            artifacts=artifacts,
+        )
+    )
+
+    assert artifacts.resolved_metadata == expected_metadata
+
+
+def test_run_publish_phase_without_client_clears_slowpics_url(tmp_path: Path) -> None:
+    _create_config(tmp_path)
+    config = load_config(tmp_path / "config" / "config.toml")
+    reference = _clip_state(tmp_path / "comparison_videos" / "source.mkv", label="Reference")
+    ctx = RunContext(
+        config=config, workspace=_workspace(tmp_path), reference=reference, comparisons=[]
+    )
+    artifacts = RunArtifacts(slowpics_url="https://slow.pics/c/example")
+
+    asyncio.run(phase_tasks.run_publish_phase(ctx, client=None, artifacts=artifacts))
+
+    assert artifacts.slowpics_url is None
+
+
+def test_run_report_phase_clears_report_path_when_no_screenshots(tmp_path: Path) -> None:
+    _create_config(tmp_path)
+    config = load_config(tmp_path / "config" / "config.toml")
+    reference = _clip_state(tmp_path / "comparison_videos" / "source.mkv", label="Reference")
+    ctx = RunContext(
+        config=config, workspace=_workspace(tmp_path), reference=reference, comparisons=[]
+    )
+    artifacts = RunArtifacts(report_path=tmp_path / "stale.html")
+
+    phase_tasks.run_report_phase(ctx, frames=[1, 2], artifacts=artifacts)
+
+    assert artifacts.report_path is None
+
+
+def test_run_report_phase_builds_report_from_current_clip_artifacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _create_config(tmp_path)
+    config = load_config(tmp_path / "config" / "config.toml")
+    reference = _clip_state(tmp_path / "comparison_videos" / "source.mkv", label="Reference")
+    comparison = _clip_state(
+        tmp_path / "comparison_videos" / "encode.mkv",
+        label="Encode 1",
+        num_frames=80,
+    )
+    ctx = RunContext(
+        config=config,
+        workspace=_workspace(tmp_path),
+        reference=reference,
+        comparisons=[comparison],
+    )
+    metadata = TmdbMetadata(
+        tmdb_id=321,
+        title="Collateral",
+        original_title="Collateral",
+        year=2004,
+        media_type="movie",
+    )
+    artifacts = RunArtifacts(
+        screenshots_by_label={
+            "Reference": [tmp_path / "screenshots" / "Reference_000001.png"],
+            "Encode 1": [tmp_path / "screenshots" / "Encode_1_000001.png"],
+        },
+        resolved_metadata=metadata,
+        slowpics_url="https://slow.pics/c/collateral",
+    )
+    captured: dict[str, Any] = {}
+    expected_report_path = tmp_path / "report.html"
+
+    def _fake_generate_report(report_data, report_config):
+        captured["report_data"] = report_data
+        captured["report_config"] = report_config
+        return expected_report_path
+
+    monkeypatch.setattr(phase_tasks, "generate_report", _fake_generate_report)
+
+    phase_tasks.run_report_phase(ctx, frames=[7, 11], artifacts=artifacts)
+
+    report_data = captured["report_data"]
+    assert artifacts.report_path == expected_report_path
+    assert report_data.frames == [7, 11]
+    assert report_data.screenshots == artifacts.screenshots_by_label
+    assert report_data.metadata == metadata
+    assert report_data.slowpics_url == "https://slow.pics/c/collateral"
+    assert [(clip.name, clip.frame_count) for clip in report_data.clips] == [
+        ("Reference", 100),
+        ("Encode 1", 80),
+    ]
+    assert captured["report_config"] == config.report

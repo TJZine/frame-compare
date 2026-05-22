@@ -8,6 +8,8 @@ from types import SimpleNamespace
 import typer
 import typer.rich_utils as typer_rich_utils
 from _pytest.monkeypatch import MonkeyPatch
+from click import Group
+from click.testing import Result
 from typer.main import get_command
 from typer.testing import CliRunner
 
@@ -55,10 +57,10 @@ def _write_minimal_config(root: Path) -> Path:
 def _invoke_run_with_minimal_workspace(
     args: list[str],
     *,
-    color: bool | None = None,
+    color: bool = False,
     terminal_width: int | None = None,
     env: dict[str, str] | None = None,
-) -> typer.testing.Result:
+) -> Result:
     with runner.isolated_filesystem():
         root = Path("workspace")
         config_path = _write_minimal_config(root)
@@ -119,7 +121,9 @@ def test_run_help_shows_all_options():
         "--verbose",
         "-v",
     ]
-    run_command = get_command(app).commands["run"]
+    command = get_command(app)
+    assert isinstance(command, Group)
+    run_command = command.commands["run"]
     declared_options = {
         opt
         for param in run_command.params
@@ -232,6 +236,124 @@ def test_run_default_prints_at_a_glance_and_result_summary(monkeypatch: MonkeyPa
         assert "unlisted" in output
         assert "report.enabled" in output
         assert "report.auto_open" in output
+
+
+def test_run_at_a_glance_prints_vspreview_availability_when_enabled(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    from frame_compare.vspreview.adapter import VSPreviewAvailability, VSPreviewAvailabilityStatus
+
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        return RunResult(success=True)
+
+    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.check_vspreview_availability",
+        lambda: VSPreviewAvailability(
+            status=VSPreviewAvailabilityStatus.AVAILABLE,
+            message="VSPreview is available for interactive alignment",
+        ),
+    )
+
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        config_path = _write_minimal_config(root)
+        config_path.write_text(
+            MINIMAL_CONFIG + "\n[audio_alignment]\nuse_vspreview = true\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            app,
+            ["run", "--root", str(root), "--config", str(config_path.relative_to(root))],
+            color=False,
+            terminal_width=200,
+            env={"NO_COLOR": "1", "TERM": "dumb"},
+        )
+
+    assert result.exit_code == 0
+    output = _normalize_cli_output(result.stdout)
+    assert "audio_alignment.use_vspreview" in output
+    assert "vspreview.available" in output
+    assert "true" in output
+
+
+def test_run_at_a_glance_prints_vspreview_probe_failure(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    from frame_compare.vspreview.adapter import VSPreviewAvailability, VSPreviewAvailabilityStatus
+
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        return RunResult(success=True)
+
+    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.check_vspreview_availability",
+        lambda: VSPreviewAvailability(
+            status=VSPreviewAvailabilityStatus.PROBE_FAILED,
+            message="VSPreview availability probe failed",
+            error_details={
+                "exception_type": "RuntimeError",
+                "exception": "no display",
+            },
+        ),
+    )
+
+    result = _invoke_run_with_minimal_workspace(["--force-interactive-alignment"])
+
+    assert result.exit_code == 0
+    output = _normalize_cli_output(result.stdout)
+    assert "audio_alignment.force_interactive" in output
+    assert "vspreview.available" in output
+    assert "probe failed (RuntimeError: no display)" in output
+
+
+def test_run_result_summary_prints_status_and_truncated_warnings(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        return RunResult(
+            success=True,
+            warnings=[f"warning {index}" for index in range(1, 11)],
+        )
+
+    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace([])
+
+    assert result.exit_code == 0
+    output = _normalize_cli_output(result.stdout)
+    assert "Result" in output
+    assert "status" in output
+    assert "success" in output
+    assert "Warnings" in output
+    assert "- warning 1" in output
+    assert "- warning 8" in output
+    assert "- ... (2 more)" in output
+    assert "warning 9" not in output
+
+
+def test_run_result_summary_prints_slowpics_url_and_untruncated_warnings(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        return RunResult(
+            success=True,
+            slowpics_url="https://slow.pics/c/example",
+            warnings=["metadata skipped", "upload reused"],
+        )
+
+    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace([])
+
+    assert result.exit_code == 0
+    output = _normalize_cli_output(result.stdout)
+    assert "slow.pics" in output
+    assert "https://slow.pics/c/example" in output
+    assert "- metadata skipped" in output
+    assert "- upload reused" in output
+    assert "more)" not in output
 
 
 def test_run_quiet_suppresses_at_a_glance_but_keeps_minimal_summary(
@@ -697,9 +819,11 @@ def _run_wizard_and_assert_config() -> None:
         result = runner.invoke(
             app,
             ["wizard"],
-            input="inputs\ny\nprivate\ny\nabc123\n",
+            input="inputs\ny\npublic\ny\nabc123\n",
         )
         assert result.exit_code == 0
+        assert "slow.pics visibility (public|unlisted)" in result.stdout
+        assert "private" not in result.stdout
 
         config_path = Path("config") / "config.toml"
         assert config_path.exists()
@@ -708,7 +832,7 @@ def _run_wizard_and_assert_config() -> None:
         assert set(data.keys()) == {"paths", "slowpics", "tmdb"}
         assert data["paths"]["input_dir"] == "inputs"
         assert data["slowpics"]["auto_upload"] is True
-        assert data["slowpics"]["visibility"] == "private"
+        assert data["slowpics"]["visibility"] == "public"
         assert data["slowpics"]["delete_after_upload"] is True
         assert data["tmdb"]["api_key"] == "abc123"
 
@@ -721,7 +845,7 @@ def test_wizard_writer_writes_to_explicit_config_path(tmp_path: Path) -> None:
     from frame_compare.cli_entry import _write_wizard_config_payload
 
     destination = tmp_path / "custom" / "config.toml"
-    payload = {
+    payload: dict[str, object] = {
         "paths": {"input_dir": "comparison_videos"},
         "slowpics": {"auto_upload": False},
         "tmdb": {"api_key": None},
@@ -749,6 +873,36 @@ def test_wizard_cancel_exits_130_and_writes_nothing(monkeypatch: MonkeyPatch) ->
         assert not (Path("config") / "config.toml").exists()
 
 
+def test_wizard_write_error_uses_cli_error_contract(monkeypatch: MonkeyPatch) -> None:
+    def _write_text_atomic(_path: Path, _content: str, *, encoding: str = "utf-8") -> None:
+        raise PermissionError("permission denied")
+
+    monkeypatch.setattr(
+        "frame_compare.cli_entry._prompt_input_dir",
+        lambda *_args, **_kwargs: "inputs",
+    )
+    monkeypatch.setattr("frame_compare.cli_entry.typer.confirm", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        "frame_compare.cli_entry._prompt_visibility",
+        lambda _default: "unlisted",
+    )
+    monkeypatch.setattr("frame_compare.cli_entry.typer.prompt", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr("frame_compare.cli_entry.write_text_atomic", _write_text_atomic)
+
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        (root / "inputs").mkdir(parents=True)
+
+        result = runner.invoke(app, ["wizard", "--root", str(root)])
+
+        assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+        assert result.stdout == ""
+        assert "FC-1007" in result.stderr
+        assert "Failed to write configuration file" in result.stderr
+        assert "Traceback" not in result.stderr
+        assert not (root / "config" / "config.toml").exists()
+
+
 def test_wizard_root_validates_relative_input_dir_against_root() -> None:
     with runner.isolated_filesystem():
         root = Path("workspace")
@@ -757,7 +911,7 @@ def test_wizard_root_validates_relative_input_dir_against_root() -> None:
         result = runner.invoke(
             app,
             ["wizard", "--root", str(root)],
-            input="inputs\ny\nprivate\ny\nabc123\n",
+            input="inputs\ny\nunlisted\ny\nabc123\n",
         )
         assert result.exit_code == 0
 
@@ -765,6 +919,7 @@ def test_wizard_root_validates_relative_input_dir_against_root() -> None:
         assert config_path.exists()
         data = tomllib.loads(config_path.read_text(encoding="utf-8"))
         assert data["paths"]["input_dir"] == "inputs"
+        assert data["slowpics"]["visibility"] == "unlisted"
 
 
 def test_wizard_root_reprompts_on_missing_input_dir() -> None:
@@ -776,14 +931,16 @@ def test_wizard_root_reprompts_on_missing_input_dir() -> None:
         result = runner.invoke(
             app,
             ["wizard", "--root", str(root)],
-            input="missing\ninputs\ny\nprivate\ny\nabc123\n",
+            input="missing\ninputs\ny\nprivate\nunlisted\ny\nabc123\n",
         )
         assert result.exit_code == 0
+        assert "Invalid visibility. Choose public or unlisted." in result.stdout
 
         config_path = root / "config" / "config.toml"
         assert config_path.exists()
         data = tomllib.loads(config_path.read_text(encoding="utf-8"))
         assert data["paths"]["input_dir"] == "inputs"
+        assert data["slowpics"]["visibility"] == "unlisted"
 
 
 def test_prepare_toml_payload_copies_paths_and_slowpics_sections() -> None:
@@ -1377,3 +1534,23 @@ def test_run_verbose_calls_configure_logging_debug(monkeypatch: MonkeyPatch) -> 
     result = _invoke_run_with_minimal_workspace(["--quiet"])
     assert result.exit_code == 0
     assert captured["level"] == "WARNING"
+
+
+def test_import_does_not_mutate_terminal_width():
+    import os
+    import subprocess
+    import sys
+
+    env = os.environ.copy()
+    env.pop("TERMINAL_WIDTH", None)
+    cmd = [
+        sys.executable,
+        "-c",
+        "import os; "
+        "import frame_compare.cli_entry; "
+        "assert 'TERMINAL_WIDTH' not in os.environ, 'should not set env on import'; "
+        "import typer.rich_utils as tru; "
+        "assert tru.MAX_WIDTH is None, 'should not set MAX_WIDTH on import'; ",
+    ]
+    res = subprocess.run(cmd, env=env, capture_output=True, text=True)
+    assert res.returncode == 0, res.stderr

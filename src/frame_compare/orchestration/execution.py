@@ -11,7 +11,7 @@ from pathlib import Path
 import httpx
 
 from frame_compare.analysis import ANALYZE_PROGRESS_TOTAL
-from frame_compare.config import ConfigSchema
+from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.phase_tasks import (
     record_dovi_not_implemented_warning,
@@ -26,13 +26,17 @@ from frame_compare.orchestration.phase_tasks import (
 )
 from frame_compare.orchestration.phases import Phase
 from frame_compare.orchestration.types import (
+    ExecutionPhasePlan,
+    PrepState,
     RunArtifacts,
+    RunDependencies,
     RunRequest,
 )
 from frame_compare.render.ffmpeg import FFmpegRunner
 from frame_compare.utils.types import WorkspacePaths
 
 __all__ = [
+    "build_execution_phase_plan",
     "build_phases_after_align",
     "build_phases_before_align",
     "run_render_phase",
@@ -209,3 +213,48 @@ def build_phases_after_align(
             warn_only=True,
         ),
     ]
+
+
+def build_execution_phase_plan(
+    *,
+    request: RunRequest,
+    deps: RunDependencies,
+    prep: PrepState,
+    phase_timings: dict[str, float],
+    selected_frames: list[int],
+) -> ExecutionPhasePlan:
+    """Build the split execution plan around the post-align reporting boundary.
+
+    The before/after align split is intentional: coordinator emits the
+    consolidated FPS report after align completes and before render starts.
+    """
+    before_align = build_phases_before_align(
+        request=request,
+        clock=deps.clock,
+        phase_timings=phase_timings,
+        warnings=prep.artifacts.warnings,
+        selected_frames=selected_frames,
+        input_videos=prep.input_videos,
+        workspace=prep.workspace,
+        artifacts=prep.artifacts,
+    )
+
+    ffmpeg_runner = deps.ffmpeg_runner
+    if ffmpeg_runner is None:
+        raise RuntimeError("FFmpeg runner must be initialized before execution.")
+
+    after_align = build_phases_after_align(
+        request=request,
+        clock=deps.clock,
+        ffmpeg_runner=ffmpeg_runner,
+        http_client=deps.http_client,
+        phase_timings=phase_timings,
+        warnings=prep.artifacts.warnings,
+        selected_frames=selected_frames,
+        artifacts=prep.artifacts,
+        metadata_prefetched=prep.metadata_prefetched,
+    )
+    return ExecutionPhasePlan(
+        before_align=before_align,
+        after_align=after_align,
+    )

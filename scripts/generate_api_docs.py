@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import argparse
 import ast
-import os
 import sys
-import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
+
+from frame_compare.utils.atomic_write import write_text_atomic as _write_text_atomic
 
 ExitCode = Literal[0, 1, 2, 3, 4]
 
@@ -90,20 +90,6 @@ def _first_paragraph(doc: str) -> str:
 
 def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
-
-
-def _write_text_atomic(path: Path, content: str, *, encoding: str = "utf-8") -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w", encoding=encoding) as handle:
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp_name, path)
-    except Exception:
-        Path(tmp_name).unlink(missing_ok=True)
-        raise
 
 
 def _module_ast(path: Path) -> ast.Module:

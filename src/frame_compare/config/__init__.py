@@ -1,4 +1,9 @@
-"""Configuration module for Frame Compare."""
+"""Convenience config re-export surface for Frame Compare.
+
+Internal owners should prefer direct imports from the concrete config modules
+(`loader`, `overrides`, `presets`, and `schema`) when that keeps dependency
+ownership clearer.
+"""
 
 from frame_compare.config.defaults import DEFAULT_CONFIG_TOML
 from frame_compare.config.loader import (

@@ -1,4 +1,4 @@
-"""VSPreview integration module for Frame Compare 2.0.
+"""VSPreview integration module for Frame Compare.
 
 This module provides optional interactive alignment verification and override
 capabilities using the VSPreview application.

@@ -25,11 +25,13 @@ from frame_compare.services.alignment import (
     _probe_fps,
     _samples_to_frames,
     align_clips,
+    check_alignment_cached,
     load_cached_offsets,
     save_offsets_cache,
 )
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.utils.progress_protocol import ProgressReporter
+from frame_compare.vspreview.adapter import VSPreviewAvailability, VSPreviewAvailabilityStatus
 
 
 def test_alignment_result_is_frozen():
@@ -550,6 +552,18 @@ def test_align_clips_duplicate_stems_fail_before_starting_progress(tmp_path: Pat
     reporter.complete_phase.assert_not_called()
 
 
+def test_check_alignment_cached_rejects_duplicate_comparison_stems(tmp_path: Path) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp_a = tmp_path / "dup.mkv"
+    comp_b = tmp_path / "dup.mp4"
+    ref.touch()
+    comp_a.touch()
+    comp_b.touch()
+
+    with pytest.raises(AudioAlignmentError, match="Duplicate comparison clip stems detected"):
+        check_alignment_cached(ref, [comp_a, comp_b], tmp_path)
+
+
 def test_align_clips_completes_progress_when_cache_load_raises(tmp_path: Path) -> None:
     ref = tmp_path / "ref.mkv"
     comp = tmp_path / "comp.mkv"
@@ -709,7 +723,7 @@ def test_align_clips_partial_cache_hit_computes_only_missing_and_preserves_order
 
 
 @patch("frame_compare.services.alignment.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment.is_vspreview_available")
+@patch("frame_compare.services.alignment.check_vspreview_availability")
 @patch("frame_compare.services.alignment._probe_fps")
 @patch("frame_compare.services.alignment._extract_audio")
 @patch("frame_compare.services.alignment._cross_correlate")
@@ -717,7 +731,7 @@ def test_align_clips_launches_vspreview_when_enabled(
     mock_corr: MagicMock,
     mock_extract: MagicMock,
     mock_probe: MagicMock,
-    mock_is_available: MagicMock,
+    mock_check_availability: MagicMock,
     mock_launch: MagicMock,
     tmp_path: Path,
 ):
@@ -736,7 +750,10 @@ def test_align_clips_launches_vspreview_when_enabled(
 
     mock_extract.side_effect = extract_side_effect
     mock_corr.return_value = (0, 0.99)
-    mock_is_available.return_value = True
+    mock_check_availability.return_value = VSPreviewAvailability(
+        status=VSPreviewAvailabilityStatus.AVAILABLE,
+        message="available",
+    )
     mock_launch.return_value = tmp_path / "vspreview_script.py"
 
     config = AlignmentConfig(enable=True, use_vspreview=True, cache_results=False)
@@ -751,13 +768,13 @@ def test_align_clips_launches_vspreview_when_enabled(
 
 
 @patch("frame_compare.services.alignment.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment.is_vspreview_available")
+@patch("frame_compare.services.alignment.check_vspreview_availability")
 @patch("frame_compare.services.alignment._probe_fps")
 @patch("frame_compare.services.alignment._extract_audio")
 def test_align_clips_full_cache_hit_still_launches_vspreview_when_enabled(
     mock_extract: MagicMock,
     mock_probe: MagicMock,
-    mock_is_available: MagicMock,
+    mock_check_availability: MagicMock,
     mock_launch: MagicMock,
     tmp_path: Path,
 ) -> None:
@@ -784,7 +801,10 @@ def test_align_clips_full_cache_hit_still_launches_vspreview_when_enabled(
 
     mock_probe.side_effect = AssertionError("should not be called")
     mock_extract.side_effect = AssertionError("should not be called")
-    mock_is_available.return_value = True
+    mock_check_availability.return_value = VSPreviewAvailability(
+        status=VSPreviewAvailabilityStatus.AVAILABLE,
+        message="available",
+    )
     mock_launch.return_value = tmp_path / "vspreview_script.py"
 
     config = AlignmentConfig(enable=True, use_vspreview=True, cache_results=True)
@@ -799,9 +819,9 @@ def test_align_clips_full_cache_hit_still_launches_vspreview_when_enabled(
 
 
 @patch("frame_compare.services.alignment.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment.is_vspreview_available")
+@patch("frame_compare.services.alignment.check_vspreview_availability")
 def test_align_clips_force_interactive_raises_when_vspreview_unavailable(
-    mock_is_available: MagicMock,
+    mock_check_availability: MagicMock,
     mock_launch: MagicMock,
     tmp_path: Path,
 ) -> None:
@@ -826,7 +846,10 @@ def test_align_clips_force_interactive_raises_when_vspreview_unavailable(
     with cache_file.open("wb") as f:
         f.write(tomli_w.dumps(data).encode("utf-8"))
 
-    mock_is_available.return_value = False
+    mock_check_availability.return_value = VSPreviewAvailability(
+        status=VSPreviewAvailabilityStatus.MISSING_EXEC_AND_MODULE,
+        message="missing",
+    )
 
     config = AlignmentConfig(
         enable=True,
@@ -841,9 +864,9 @@ def test_align_clips_force_interactive_raises_when_vspreview_unavailable(
 
 
 @patch("frame_compare.services.alignment.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment.is_vspreview_available")
+@patch("frame_compare.services.alignment.check_vspreview_availability")
 def test_align_clips_vspreview_unavailable_generates_script_without_launch(
-    mock_is_available: MagicMock,
+    mock_check_availability: MagicMock,
     mock_launch: MagicMock,
     tmp_path: Path,
 ) -> None:
@@ -868,7 +891,10 @@ def test_align_clips_vspreview_unavailable_generates_script_without_launch(
     with cache_file.open("wb") as f:
         f.write(tomli_w.dumps(data).encode("utf-8"))
 
-    mock_is_available.return_value = False
+    mock_check_availability.return_value = VSPreviewAvailability(
+        status=VSPreviewAvailabilityStatus.MISSING_EXEC_AND_MODULE,
+        message="missing",
+    )
     mock_launch.return_value = tmp_path / "vspreview_script.py"
 
     config = AlignmentConfig(enable=True, use_vspreview=True, cache_results=True)
@@ -881,9 +907,9 @@ def test_align_clips_vspreview_unavailable_generates_script_without_launch(
 
 @patch("frame_compare.services.alignment.log.warning")
 @patch("frame_compare.services.alignment.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment.is_vspreview_available")
+@patch("frame_compare.services.alignment.check_vspreview_availability")
 def test_align_clips_optional_vspreview_probe_failure_generates_script_without_launch(
-    mock_is_available: MagicMock,
+    mock_check_availability: MagicMock,
     mock_launch: MagicMock,
     mock_warn: MagicMock,
     tmp_path: Path,
@@ -909,7 +935,11 @@ def test_align_clips_optional_vspreview_probe_failure_generates_script_without_l
     with cache_file.open("wb") as f:
         f.write(tomli_w.dumps(data).encode("utf-8"))
 
-    mock_is_available.side_effect = RuntimeError("broken import metadata")
+    mock_check_availability.return_value = VSPreviewAvailability(
+        status=VSPreviewAvailabilityStatus.PROBE_FAILED,
+        message="VSPreview availability probe failed",
+        error_details={"exception_type": "RuntimeError", "exception": "broken import metadata"},
+    )
     mock_launch.return_value = tmp_path / "vspreview_script.py"
 
     config = AlignmentConfig(enable=True, use_vspreview=True, cache_results=True)
@@ -928,9 +958,9 @@ def test_align_clips_optional_vspreview_probe_failure_generates_script_without_l
 
 
 @patch("frame_compare.services.alignment.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment.is_vspreview_available")
+@patch("frame_compare.services.alignment.check_vspreview_availability")
 def test_align_clips_force_interactive_launches_when_vspreview_available(
-    mock_is_available: MagicMock,
+    mock_check_availability: MagicMock,
     mock_launch: MagicMock,
     tmp_path: Path,
 ) -> None:
@@ -955,7 +985,10 @@ def test_align_clips_force_interactive_launches_when_vspreview_available(
     with cache_file.open("wb") as f:
         f.write(tomli_w.dumps(data).encode("utf-8"))
 
-    mock_is_available.return_value = True
+    mock_check_availability.return_value = VSPreviewAvailability(
+        status=VSPreviewAvailabilityStatus.AVAILABLE,
+        message="available",
+    )
     mock_launch.return_value = tmp_path / "vspreview_script.py"
 
     config = AlignmentConfig(
@@ -974,9 +1007,9 @@ def test_align_clips_force_interactive_launches_when_vspreview_available(
 
 
 @patch("frame_compare.services.alignment.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment.is_vspreview_available")
+@patch("frame_compare.services.alignment.check_vspreview_availability")
 def test_align_clips_force_interactive_probe_failure_raises_alignment_error(
-    mock_is_available: MagicMock,
+    mock_check_availability: MagicMock,
     mock_launch: MagicMock,
     tmp_path: Path,
 ) -> None:
@@ -1001,7 +1034,11 @@ def test_align_clips_force_interactive_probe_failure_raises_alignment_error(
     with cache_file.open("wb") as f:
         f.write(tomli_w.dumps(data).encode("utf-8"))
 
-    mock_is_available.side_effect = RuntimeError("broken import metadata")
+    mock_check_availability.return_value = VSPreviewAvailability(
+        status=VSPreviewAvailabilityStatus.PROBE_FAILED,
+        message="VSPreview availability probe failed",
+        error_details={"exception_type": "RuntimeError", "exception": "broken import metadata"},
+    )
 
     config = AlignmentConfig(
         enable=True,
@@ -1009,18 +1046,17 @@ def test_align_clips_force_interactive_probe_failure_raises_alignment_error(
         force_interactive=True,
         cache_results=True,
     )
-    with pytest.raises(AudioAlignmentError, match="availability check failed") as exc_info:
+    with pytest.raises(AudioAlignmentError, match="availability check failed"):
         align_clips(ref, [comp], config, tmp_path)
 
-    assert isinstance(exc_info.value.__cause__, RuntimeError)
     mock_launch.assert_not_called()
 
 
 @patch("frame_compare.services.alignment.log.warning")
 @patch("frame_compare.services.alignment.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment.is_vspreview_available")
+@patch("frame_compare.services.alignment.check_vspreview_availability")
 def test_align_clips_vspreview_errors_are_warning_only_when_not_forced(
-    mock_is_available: MagicMock,
+    mock_check_availability: MagicMock,
     mock_launch: MagicMock,
     mock_warn: MagicMock,
     tmp_path: Path,
@@ -1046,7 +1082,10 @@ def test_align_clips_vspreview_errors_are_warning_only_when_not_forced(
     with cache_file.open("wb") as f:
         f.write(tomli_w.dumps(data).encode("utf-8"))
 
-    mock_is_available.return_value = True
+    mock_check_availability.return_value = VSPreviewAvailability(
+        status=VSPreviewAvailabilityStatus.AVAILABLE,
+        message="available",
+    )
     mock_launch.side_effect = VSPreviewError("adapter failure")
 
     config = AlignmentConfig(enable=True, use_vspreview=True, cache_results=True)
@@ -1056,14 +1095,14 @@ def test_align_clips_vspreview_errors_are_warning_only_when_not_forced(
     assert results[0].frame_offset == 1
     mock_warn.assert_called_once()
     _, kwargs = mock_warn.call_args
-    assert "VSPreview error: adapter failure" in kwargs["error"]
+    assert "adapter failure" in kwargs["error"]
     assert kwargs["force_interactive"] is False
 
 
 @patch("frame_compare.services.alignment.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment.is_vspreview_available")
+@patch("frame_compare.services.alignment.check_vspreview_availability")
 def test_align_clips_vspreview_errors_raise_when_force_interactive(
-    mock_is_available: MagicMock,
+    mock_check_availability: MagicMock,
     mock_launch: MagicMock,
     tmp_path: Path,
 ) -> None:
@@ -1088,7 +1127,10 @@ def test_align_clips_vspreview_errors_raise_when_force_interactive(
     with cache_file.open("wb") as f:
         f.write(tomli_w.dumps(data).encode("utf-8"))
 
-    mock_is_available.return_value = True
+    mock_check_availability.return_value = VSPreviewAvailability(
+        status=VSPreviewAvailabilityStatus.AVAILABLE,
+        message="available",
+    )
     mock_launch.side_effect = VSPreviewError("adapter failure")
 
     config = AlignmentConfig(

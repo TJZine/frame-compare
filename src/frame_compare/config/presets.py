@@ -97,10 +97,10 @@ def apply_preset(
 ) -> ConfigSchema:
     """Apply preset overrides to config.
 
-    Loads preset from DEFAULT_PRESETS_DIR (config/presets relative to CWD).
-    Loaded preset data is merged with the config. Missing optional
-    keys (excluded due to None) are filled with schema defaults
-    during validation.
+    Loads preset data from presets_dir when provided; otherwise uses
+    DEFAULT_PRESETS_DIR (config/presets relative to CWD). Loaded preset data is
+    merged with the config. Missing optional keys (excluded due to None) are
+    filled with schema defaults during validation.
     """
     from frame_compare.config.schema import ConfigSchema
 

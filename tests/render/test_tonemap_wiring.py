@@ -226,6 +226,41 @@ def test_hdr_enable_tonemap_requires_vs_when_renderer_ffmpeg(tmp_path: Path) -> 
 
 
 @pytest.mark.integration
+def test_render_screenshots_prefills_hdr_probe_for_ffmpeg_tonemap_gate(tmp_path: Path) -> None:
+    """The convenience render path must feed concrete HDR facts into the batch gate."""
+    clips = [Path("hdr_video.mkv")]
+    frames = [0]
+    enable_tonemap_config = ConfigSchema(color=ColorConfig(enable_tonemap=True))
+
+    from frame_compare.vs.types import HDRMetadata
+
+    mock_runner = MagicMock()
+    mock_runner.probe_hdr.return_value = HDRMetadata(
+        mastering_display=None,
+        max_cll=None,
+        max_fall=None,
+        color_primaries=9,
+        transfer=16,
+        matrix=9,
+    )
+
+    with (
+        patch("frame_compare.render.expansion.prepare_clip_for_render") as prepare_clip,
+        pytest.raises(TonemapRequiresVapourSynthError),
+    ):
+        render_screenshots(
+            clips,
+            frames,
+            tmp_path,
+            enable_tonemap_config,
+            ScreenshotRenderOptions(renderer="ffmpeg", ffmpeg_runner=mock_runner),
+        )
+
+    mock_runner.probe_hdr.assert_called_once_with(Path("hdr_video.mkv"))
+    prepare_clip.assert_not_called()
+
+
+@pytest.mark.integration
 def test_hdr_disable_tonemap_allows_ffmpeg_when_vs_missing(tmp_path: Path) -> None:
     """HDR + enable_tonemap=False + VS missing → fallback to FFmpeg allowed."""
     clips = [Path("hdr_video.mkv")]

@@ -13,6 +13,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -25,6 +26,90 @@ if TYPE_CHECKING:
     pass
 
 log = structlog.get_logger()
+
+
+class VSPreviewAvailabilityStatus(Enum):
+    """Status enum for VSPreview availability."""
+
+    AVAILABLE = "available"
+    MISSING_EXEC_AND_MODULE = "missing_exec_and_module"
+    MISSING_QT_BACKEND = "missing_qt_backend"
+    PROBE_FAILED = "probe_failed"
+
+
+@dataclass(frozen=True)
+class VSPreviewAvailability:
+    """Detailed report of VSPreview availability."""
+
+    status: VSPreviewAvailabilityStatus
+    message: str
+    hint: str | None = None
+    error_details: dict[str, str] | None = None
+
+    @property
+    def is_available(self) -> bool:
+        return self.status == VSPreviewAvailabilityStatus.AVAILABLE
+
+
+def check_vspreview_availability() -> VSPreviewAvailability:
+    """Check if VSPreview is available, returning a structured availability report.
+
+    Availability rules:
+        - Return AVAILABLE if `shutil.which("vspreview")` is non-None, OR
+        - `importlib.util.find_spec("vspreview")` is non-None AND
+          (`find_spec("PySide6")` OR `find_spec("PyQt5")`) is non-None.
+    """
+    try:
+        # Priority 1: Check if vspreview executable exists in PATH
+        if shutil.which("vspreview") is not None:
+            return VSPreviewAvailability(
+                status=VSPreviewAvailabilityStatus.AVAILABLE,
+                message="VSPreview is available for interactive alignment",
+            )
+
+        # Priority 2: Check if vspreview module is importable + Qt backend
+        vspreview_spec = importlib.util.find_spec("vspreview")
+        if vspreview_spec is None:
+            return VSPreviewAvailability(
+                status=VSPreviewAvailabilityStatus.MISSING_EXEC_AND_MODULE,
+                message="VSPreview not installed (optional for manual alignment)",
+                hint="Install with: pip install vspreview PySide6 (or: pip install vspreview PyQt5)",
+            )
+
+        # Need at least one Qt backend
+        pyside6_spec = importlib.util.find_spec("PySide6")
+        pyqt5_spec = importlib.util.find_spec("PyQt5")
+
+        if pyside6_spec is not None or pyqt5_spec is not None:
+            return VSPreviewAvailability(
+                status=VSPreviewAvailabilityStatus.AVAILABLE,
+                message="VSPreview is available for interactive alignment",
+            )
+
+        return VSPreviewAvailability(
+            status=VSPreviewAvailabilityStatus.MISSING_QT_BACKEND,
+            message="Qt backend missing for VSPreview (optional for manual alignment)",
+            hint="Install with: pip install PySide6 (or: pip install PyQt5)",
+        )
+    except Exception as exc:
+        return VSPreviewAvailability(
+            status=VSPreviewAvailabilityStatus.PROBE_FAILED,
+            message="VSPreview availability probe failed (optional for manual alignment)",
+            hint="Check the VSPreview/PySide6 installation if interactive alignment is needed",
+            error_details={
+                "exception_type": type(exc).__name__,
+                "exception": str(exc),
+            },
+        )
+
+
+def is_vspreview_available() -> bool:
+    """Check if VSPreview is installed and can be launched (compatibility wrapper).
+
+    Returns:
+        True if vspreview is importable and functional
+    """
+    return check_vspreview_availability().is_available
 
 
 @dataclass(frozen=True)
@@ -40,37 +125,6 @@ class VSPreviewConfig:
     enabled: bool = False
     timeout_seconds: float = 300.0  # 5 minutes
     auto_close: bool = True
-
-
-def is_vspreview_available() -> bool:
-    """Check if VSPreview is installed and can be launched.
-
-    Returns:
-        True if vspreview is importable and functional
-
-    Availability rules per vspreview spec §3.1 / §6.3:
-        - Return True if `shutil.which("vspreview")` is non-None, OR
-        - `importlib.util.find_spec("vspreview")` is non-None AND
-          (`find_spec("PySide6")` OR `find_spec("PyQt5")`) is non-None.
-
-    Note:
-        Does not require a running X server/display.
-        Full launch capability is checked separately.
-    """
-    # Priority 1: Check if vspreview executable exists in PATH
-    if shutil.which("vspreview") is not None:
-        return True
-
-    # Priority 2: Check if vspreview module is importable + Qt backend
-    vspreview_spec = importlib.util.find_spec("vspreview")
-    if vspreview_spec is None:
-        return False
-
-    # Need at least one Qt backend
-    pyside6_spec = importlib.util.find_spec("PySide6")
-    pyqt5_spec = importlib.util.find_spec("PyQt5")
-
-    return pyside6_spec is not None or pyqt5_spec is not None
 
 
 def launch_alignment_verification_session(
@@ -142,8 +196,15 @@ def launch_alignment_verification_session(
         return script_path
 
     # Check availability
-    if not is_vspreview_available():
-        raise VSPreviewNotFoundError()
+    availability = check_vspreview_availability()
+    if not availability.is_available:
+        if availability.status == VSPreviewAvailabilityStatus.PROBE_FAILED:
+            err_msg = availability.message
+            if availability.error_details:
+                err_msg += f" ({availability.error_details.get('exception_type')}: {availability.error_details.get('exception')})"
+            raise VSPreviewError(err_msg)
+        else:
+            raise VSPreviewNotFoundError()
 
     # Resolve the launch command
     command = _resolve_launch_command(script_path)
@@ -292,37 +353,9 @@ def _find_project_root(cache_dir: Path, workspace_root: Path) -> Path:
     return workspace_root
 
 
-def _build_script_content(
-    reference: Path,
-    comparisons: list[Path],
-    suggested_offsets_by_key: dict[str, int],
-    bootstrap_paths: list[Path],
-) -> str:
-    """Build the script content for VSPreview.
-
-    This content is deterministic for the same inputs (no timestamp in body).
-    """
-    # Build targets dict with stable ordering (sorted by comparison path stem)
-    targets_lines: list[str] = []
-    for comp in sorted(comparisons, key=lambda p: p.stem):
-        targets_lines.append(f"    {json.dumps(comp.stem)}: {json.dumps(str(comp))},")
-
-    # Build suggested offsets with stable ordering
-    offset_lines: list[str] = []
-    for key in sorted(suggested_offsets_by_key.keys()):
-        offset = suggested_offsets_by_key[key]
-        offset_lines.append(f"    {json.dumps(key)}: {int(offset)},")
-
-    # Build per-label offset map for operator convenience
-    offset_map_lines: list[str] = []
-    for comp in sorted(comparisons, key=lambda p: p.stem):
-        key = f"{reference.stem}:{comp.stem}"
-        offset = suggested_offsets_by_key.get(key, 0)
-        offset_map_lines.append(f"    {json.dumps(comp.stem)}: {int(offset)},")
-
-    bootstrap_path_lines = ",\n".join(f"    {json.dumps(str(path))}" for path in bootstrap_paths)
-
-    script = f'''\
+def _build_script_header() -> str:
+    """Build the script header with docstring and imports."""
+    return '''\
 #!/usr/bin/env python3
 """VSPreview alignment verification session.
 
@@ -337,7 +370,13 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+'''
 
+
+def _build_bootstrap_section(bootstrap_paths: list[Path]) -> str:
+    """Build the sys.path bootstrap section of the script."""
+    bootstrap_path_lines = ",\n".join(f"    {json.dumps(str(path))}" for path in bootstrap_paths)
+    return f"""\
 # ─── sys.path Bootstrap ───────────────────────────────────────────────────────
 # Make imports work in "run from repo" mode without deriving roots from __file__
 _BOOTSTRAP_PATHS = [
@@ -348,7 +387,12 @@ for _raw_path in _BOOTSTRAP_PATHS:
     _p = Path(_raw_path)
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
+"""
 
+
+def _build_helpers_section() -> str:
+    """Build the static printing and loader helper functions."""
+    return '''\
 # ─── Safe Print Helper ────────────────────────────────────────────────────────
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -367,6 +411,45 @@ def safe_print(*args, **kwargs):
         print(text.encode("ascii", errors="replace").decode("ascii"), **kwargs)
 
 
+def resolve_lwlibavsource(core):
+    """Resolve LWLibavSource using Frame Compare's lsmas-then-lw contract."""
+    if hasattr(core, "lsmas") and hasattr(core.lsmas, "LWLibavSource"):
+        return core.lsmas.LWLibavSource
+    if hasattr(core, "lw") and hasattr(core.lw, "LWLibavSource"):
+        return core.lw.LWLibavSource
+    raise RuntimeError("LWLibavSource not found on core.lsmas or core.lw")
+'''
+
+
+def _build_clip_data_section(
+    reference: Path,
+    comparisons: list[Path],
+    suggested_offsets_by_key: dict[str, int],
+) -> str:
+    """Build the dynamic clip data payload variables."""
+    # Build targets dict with stable ordering (sorted by comparison path stem)
+    targets_lines: list[str] = []
+    for comp in sorted(comparisons, key=lambda p: p.stem):
+        targets_lines.append(f"    {json.dumps(comp.stem)}: {json.dumps(str(comp))},")
+
+    # Build suggested offsets with stable ordering
+    offset_lines: list[str] = []
+    for key in sorted(suggested_offsets_by_key.keys()):
+        offset = suggested_offsets_by_key[key]
+        offset_lines.append(f"    {json.dumps(key)}: {int(offset)},")
+
+    # Build per-label offset map for operator convenience
+    offset_map_lines: list[str] = []
+    for comp in sorted(comparisons, key=lambda p: p.stem):
+        key = f"{reference.stem}:{comp.stem}"
+        offset = suggested_offsets_by_key.get(key, 0)
+        offset_map_lines.append(f"    {json.dumps(comp.stem)}: {int(offset)},")
+
+    targets_content = "\n".join(targets_lines)
+    offset_content = "\n".join(offset_lines)
+    offset_map_content = "\n".join(offset_map_lines)
+
+    return f"""\
 # ─── Clip Data ────────────────────────────────────────────────────────────────
 REFERENCE = {{
     "label": {json.dumps(reference.stem)},
@@ -374,20 +457,24 @@ REFERENCE = {{
 }}
 
 TARGETS = {{
-{chr(10).join(targets_lines)}
+{targets_content}
 }}
 
 # Suggested offsets keyed by "{{ref_stem}}:{{comp_stem}}"
 suggested_offsets_by_key = {{
-{chr(10).join(offset_lines)}
+{offset_content}
 }}
 
 # Per-label offset map (operator convenience, edit here to test manually)
 OFFSET_MAP = {{
-{chr(10).join(offset_map_lines)}
+{offset_map_content}
 }}
+"""
 
 
+def _build_main_execution_section() -> str:
+    """Build the main execution loop template."""
+    return '''\
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main():
     """Load clips into VSPreview with overlays and suggested offsets."""
@@ -398,29 +485,34 @@ def main():
         sys.exit(1)
 
     core = vs.core
+    try:
+        load_source = resolve_lwlibavsource(core)
+    except RuntimeError as e:
+        safe_print(f"ERROR: Failed to resolve LWLibavSource loader: {e}")
+        sys.exit(1)
 
     # Load reference clip
     ref_path = Path(REFERENCE["path"])
     if not ref_path.exists():
-        safe_print(f"ERROR: Reference not found: {{ref_path}}")
+        safe_print(f"ERROR: Reference not found: {ref_path}")
         sys.exit(1)
 
     try:
-        ref_clip = core.lsmas.LWLibavSource(str(ref_path))
+        ref_clip = load_source(str(ref_path))
     except Exception as e:
-        safe_print(f"ERROR: Failed to load reference: {{e}}")
+        safe_print(f"ERROR: Failed to load reference: {e}")
         sys.exit(1)
 
     ref_fps_num = ref_clip.fps.numerator
     ref_fps_den = ref_clip.fps.denominator
 
-    safe_print(f"Reference: {{REFERENCE['label']}} @ {{ref_fps_num}}/{{ref_fps_den}} fps")
+    safe_print(f"Reference: {REFERENCE['label']} @ {ref_fps_num}/{ref_fps_den} fps")
 
     # Apply overlay to reference (best-effort)
     try:
         ref_clip = core.text.Text(
             ref_clip,
-            f"REF: {{REFERENCE['label']}}",
+            f"REF: {REFERENCE['label']}",
             alignment=7,
         )
     except Exception:
@@ -433,25 +525,25 @@ def main():
     for label, path_str in sorted(TARGETS.items()):
         comp_path = Path(path_str)
         if not comp_path.exists():
-            safe_print(f"WARNING: Comparison not found: {{comp_path}}")
+            safe_print(f"WARNING: Comparison not found: {comp_path}")
             continue
 
         try:
-            comp_clip = core.lsmas.LWLibavSource(str(comp_path))
+            comp_clip = load_source(str(comp_path))
         except Exception as e:
-            safe_print(f"WARNING: Failed to load {{label}}: {{e}}")
+            safe_print(f"WARNING: Failed to load {label}: {e}")
             continue
 
         # FPS harmonization: apply AssumeFPS to match reference
         comp_clip = core.std.AssumeFPS(comp_clip, fpsnum=ref_fps_num, fpsden=ref_fps_den)
 
         # Get suggested offset
-        key = f"{{REFERENCE['label']}}:{{label}}"
+        key = f"{REFERENCE['label']}:{label}"
         offset = suggested_offsets_by_key.get(key, OFFSET_MAP.get(label, 0))
 
         # Apply overlay with suggested offset (best-effort)
         try:
-            overlay_text = f"CMP: {{label}}\\nSuggested offset: {{offset}} frames"
+            overlay_text = f"CMP: {label}\\nSuggested offset: {offset} frames"
             if offset > 0:
                 overlay_text += "\\n(+N = comparison starts AFTER reference)"
             elif offset < 0:
@@ -463,11 +555,11 @@ def main():
         # Slot layout: ref on even, comparison on odd
         # We duplicate reference before each comparison
         clips.append(ref_clip)  # Even slot (duplicate ref)
-        labels.append(f"{{REFERENCE['label']}} (ref)")
+        labels.append(f"{REFERENCE['label']} (ref)")
         clips.append(comp_clip)  # Odd slot (comparison)
         labels.append(label)
 
-        safe_print(f"Loaded: {{label}} (offset: {{offset}})")
+        safe_print(f"Loaded: {label} (offset: {offset})")
 
     if len(clips) < 2:
         safe_print("ERROR: No comparison clips loaded successfully.")
@@ -476,7 +568,7 @@ def main():
     # Output clips for VSPreview
     for i, (clip, label) in enumerate(zip(clips, labels)):
         clip.set_output(i)
-        safe_print(f"Output {{i}}: {{label}}")
+        safe_print(f"Output {i}: {label}")
 
     safe_print("\\nReady for VSPreview. Adjust offsets visually, then confirm in terminal.")
 
@@ -484,4 +576,22 @@ def main():
 if __name__ == "__main__":
     main()
 '''
-    return script
+
+
+def _build_script_content(
+    reference: Path,
+    comparisons: list[Path],
+    suggested_offsets_by_key: dict[str, int],
+    bootstrap_paths: list[Path],
+) -> str:
+    """Build the script content for VSPreview.
+
+    This content is deterministic for the same inputs (no timestamp in body).
+    """
+    header = _build_script_header()
+    bootstrap = _build_bootstrap_section(bootstrap_paths)
+    helpers = _build_helpers_section()
+    clip_data = _build_clip_data_section(reference, comparisons, suggested_offsets_by_key)
+    main_execution = _build_main_execution_section()
+
+    return f"{header}\n\n{bootstrap}\n\n{helpers}\n\n\n{clip_data}\n\n{main_execution}"

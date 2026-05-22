@@ -1,4 +1,4 @@
-"""Preflight validation for Frame Compare 2.0.
+"""Preflight validation for Frame Compare.
 
 This module handles pre-run validation including configuration loading,
 workspace path resolution, and input verification.
@@ -10,7 +10,8 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from frame_compare.config import ConfigSchema, load_config
+from frame_compare.config.loader import load_config
+from frame_compare.config.schema import ConfigSchema
 from frame_compare.errors import (
     ConfigNotFoundError,
     DirectoryNotFoundError,
@@ -24,13 +25,7 @@ _VIDEO_PATTERNS: list[str] = ["*.mkv", "*.mp4", "*.avi", "*.m2ts", "*.ts"]
 
 @dataclass(frozen=True, slots=True)
 class PreflightResult:
-    """Result of preflight validation.
-
-    Attributes:
-        config: Loaded and validated configuration
-        workspace: Resolved absolute workspace paths
-        warnings: Non-fatal warnings collected during preflight
-    """
+    """Result of preflight validation."""
 
     config: ConfigSchema
     workspace: WorkspacePaths
@@ -38,20 +33,7 @@ class PreflightResult:
 
 
 def resolve_workspace(root: Path | None) -> Path:
-    """Resolve workspace root directory.
-
-    Priority:
-    1. Explicit root parameter
-    2. Current working directory if config/config.toml exists
-    3. Search upward from cwd for config/config.toml
-    4. Current working directory (fallback)
-
-    Args:
-        root: Optional explicit root path
-
-    Returns:
-        Resolved absolute workspace root path
-    """
+    """Resolve workspace root directory."""
     # Priority 1: explicit root
     if root is not None:
         return root.resolve()
@@ -84,21 +66,7 @@ def _resolve_path(path_str: str, root: Path) -> Path:
 
 
 def resolve_paths(config: ConfigSchema, root: Path) -> WorkspacePaths:
-    """Resolve all workspace paths from config.
-
-    Applies:
-    - Environment variable expansion
-    - Relative path resolution from root
-
-    Note: config_file is derived as root / config_dir / "config.toml" per SSOT.
-
-    Args:
-        config: Loaded configuration schema
-        root: Workspace root directory
-
-    Returns:
-        WorkspacePaths with all paths resolved to absolute
-    """
+    """Resolve all workspace paths from config."""
     paths = config.paths
     resolved_root = root.resolve()
     config_dir = _resolve_path(paths.config_dir, resolved_root)
@@ -133,15 +101,7 @@ def _resolve_paths_with_config_file(
 
 
 def discover_inputs(input_dir: Path, patterns: list[str] | None = None) -> list[Path]:
-    """Discover video files in input directory.
-
-    Args:
-        input_dir: Directory to search
-        patterns: Glob patterns to match (defaults to module patterns if None)
-
-    Returns:
-        Sorted list of video file paths (case-insensitive lexicographic by filename)
-    """
+    """Discover video files in input directory."""
     import fnmatch
 
     effective_patterns = _VIDEO_PATTERNS if patterns is None else patterns
@@ -172,51 +132,24 @@ def prepare_preflight(
     config_path: Path | None = None,
     overrides: dict[str, object] | None = None,
 ) -> PreflightResult:
-    """Validate configuration and resolve workspace paths.
-
-    Steps:
-    1. Resolve workspace root (explicit, cwd, or search upward)
-    2. Load configuration file (explicit path or discovery)
-    3. Validate configuration schema
-    4. Resolve all workspace paths declared in ConfigSchema.paths
-    5. Verify input directory exists and contains videos
-
-    Args:
-        root: Optional explicit workspace root
-        config_path: Optional explicit config file path
-        overrides: Optional config overrides applied before path resolution
-
-    Returns:
-        PreflightResult with config and workspace
-
-    Raises:
-        ConfigNotFoundError: Configuration file not found
-        DirectoryNotFoundError: Input directory missing
-        NoVideosFoundError: No video files match patterns
-    """
+    """Validate configuration and resolve workspace paths."""
     warnings: list[str] = []
 
-    # Step 1-2: Resolve config path
     if config_path is not None:
-        # Explicit config path provided
         if not config_path.exists():
             raise ConfigNotFoundError(config_path)
         resolved_config_path = config_path.resolve()
         resolved_root = root.resolve() if root else resolved_config_path.parent.parent
     else:
-        # Discover config from workspace
         resolved_root = resolve_workspace(root)
         resolved_config_path = resolved_root / "config" / "config.toml"
         if not resolved_config_path.exists():
             raise ConfigNotFoundError(resolved_config_path)
 
-    # Step 3: Load and validate config
     config = load_config(resolved_config_path, overrides=overrides)
 
-    # Step 4: Resolve all paths (use internal helper preserving exact config_file)
     workspace = _resolve_paths_with_config_file(config, resolved_root, resolved_config_path)
 
-    # Step 5: Verify input directory and discover videos
     if not workspace.input_dir.exists():
         raise DirectoryNotFoundError(workspace.input_dir)
 

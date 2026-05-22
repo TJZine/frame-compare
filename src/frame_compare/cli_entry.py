@@ -10,34 +10,30 @@ import sys
 import webbrowser
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import tomli_w
 
 _DEFAULT_HELP_WIDTH = 200
-
-# Typer's Rich help renderer reads TERMINAL_WIDTH only at import-time.
-# Defaulting it prevents long option names from being ellipsized in help output
-# (and keeps CLI help stable under Click's test runner).
-os.environ.setdefault("TERMINAL_WIDTH", str(_DEFAULT_HELP_WIDTH))
 
 import typer
 import typer.rich_utils as typer_rich_utils
 from rich.console import Console
 
 from frame_compare.cli_output import print_at_a_glance, print_result_summary
-from frame_compare.config import (
+from frame_compare.config.loader import get_default_config, load_config
+from frame_compare.config.overrides import apply_cli_overrides
+from frame_compare.config.presets import (
+    apply_preset,
+    list_presets,
+    save_preset,
+)
+from frame_compare.config.schema import (
     ConfigSchema,
     OverlayMode,
     ToneCurve,
     TonemapPreset,
     Visibility,
-    apply_cli_overrides,
-    apply_preset,
-    get_default_config,
-    list_presets,
-    load_config,
-    save_preset,
 )
 from frame_compare.errors import (
     ConfigValidationError,
@@ -60,13 +56,11 @@ if TYPE_CHECKING:
 
 def _stabilize_typer_help_width() -> None:
     """Backfill Typer's cached Rich help width when it was imported too early."""
+    os.environ.setdefault("TERMINAL_WIDTH", str(_DEFAULT_HELP_WIDTH))
     if typer_rich_utils.MAX_WIDTH is not None:
         return
     with contextlib.suppress(ValueError):
         typer_rich_utils.MAX_WIDTH = int(os.environ["TERMINAL_WIDTH"])
-
-
-_stabilize_typer_help_width()
 
 
 class _RunnerProxy:
@@ -90,10 +84,20 @@ def run_doctor(
     return runtime_run_doctor(checks=checks, reporter=reporter)
 
 
+from typer.core import TyperGroup
+
+
+class FrameCompareTyperGroup(TyperGroup):
+    def main(self, *args: Any, **kwargs: Any) -> Any:
+        _stabilize_typer_help_width()
+        return super().main(*args, **kwargs)
+
+
 app = typer.Typer(
     name="frame-compare",
     help="Video frame comparison tool with tonemapping and slow.pics integration.",
     no_args_is_help=False,
+    cls=FrameCompareTyperGroup,
 )
 
 
@@ -159,6 +163,56 @@ def _coerce_cli_choice[CliChoiceT: Enum](
         ) from exc
 
 
+def _build_run_request_from_cli(
+    *,
+    resolved_root: Path,
+    config_path: Path,
+    input_dir: Path | None,
+    no_cache: bool,
+    from_cache_only: bool,
+    no_upload: bool,
+    parsed_tm_preset: TonemapPreset | None,
+    tm_target: int | None,
+    parsed_tm_curve: ToneCurve | None,
+    frame_count: int | None,
+    seed: int | None,
+    parsed_overlay: OverlayMode | None,
+    skip_analysis: bool,
+    skip_metadata: bool,
+    skip_dovi: bool,
+    force_interactive_alignment: bool,
+    json_output: bool,
+    effective_no_color: bool,
+    quiet: bool,
+    verbose: bool,
+) -> RunRequest:
+    """Build the single CLI-to-runtime request mapping used by run branches."""
+    from frame_compare.orchestration.coordinator import RunRequest
+
+    return RunRequest(
+        root=resolved_root,
+        config_path=config_path,
+        input_dir=input_dir,
+        no_cache=no_cache,
+        from_cache_only=from_cache_only,
+        no_upload=no_upload,
+        tm_preset=parsed_tm_preset,
+        tm_target_nits=tm_target,
+        tm_curve=parsed_tm_curve,
+        frame_count=frame_count,
+        seed=seed,
+        overlay_mode=parsed_overlay,
+        skip_analysis=skip_analysis,
+        skip_metadata=skip_metadata,
+        skip_dovi=skip_dovi,
+        force_interactive_alignment=force_interactive_alignment,
+        json_output=json_output,
+        no_color=effective_no_color,
+        quiet=quiet,
+        verbose=verbose,
+    )
+
+
 @app.command()
 def run(
     root: Path = typer.Option(".", "--root", "-r"),
@@ -184,8 +238,6 @@ def run(
     quiet: bool = typer.Option(False, "--quiet", "-q"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
-    from frame_compare.orchestration.coordinator import RunRequest
-
     resolved_root, config_path = _resolve_root_and_config(root, config)
     effective_no_color = no_color or ("NO_COLOR" in os.environ)
     console = Console(
@@ -196,63 +248,67 @@ def run(
     log_format = "json" if json_output else "console"
     configure_logging(level=log_level, format=log_format)
 
-    cli_args: dict[str, object] = {
-        "tm_preset": tm_preset,
-        "tm_target": tm_target,
-        "tm_curve": tm_curve,
-        "frame_count": frame_count,
-        "seed": seed,
-        "overlay": overlay,
-        "no_upload": no_upload,
-        "force_interactive_alignment": force_interactive_alignment,
-        "input": str(input_dir) if input_dir is not None else None,
-    }
-    resolved_config: ConfigSchema | None = None
-
-    def _resolve_effective_config() -> ConfigSchema:
-        return apply_cli_overrides(load_config(config_path), cli_args=cli_args)
-
-    def _load_effective_config() -> ConfigSchema:
-        nonlocal resolved_config
-        if resolved_config is None:
-            resolved_config = _resolve_effective_config()
-        return resolved_config
-
     try:
         parsed_tm_preset = _coerce_cli_choice(tm_preset, TonemapPreset, ("color", "preset"))
         parsed_tm_curve = _coerce_cli_choice(tm_curve, ToneCurve, ("color", "tone_curve"))
         parsed_overlay = _coerce_cli_choice(overlay, OverlayMode, ("screenshots", "overlay_mode"))
 
-        if write_config:
-            _write_config_to(config_path, _load_effective_config())
-            return
-
-        if diagnose_paths:
-            _handle_diagnose_paths(resolved_root, config_path, _load_effective_config())
-            return
-
-        request = RunRequest(
-            root=resolved_root,
+        request = _build_run_request_from_cli(
+            resolved_root=resolved_root,
             config_path=config_path,
             input_dir=input_dir,
             no_cache=no_cache,
             from_cache_only=from_cache_only,
             no_upload=no_upload,
-            tm_preset=parsed_tm_preset,
-            tm_target_nits=tm_target,
-            tm_curve=parsed_tm_curve,
+            parsed_tm_preset=parsed_tm_preset,
+            tm_target=tm_target,
+            parsed_tm_curve=parsed_tm_curve,
             frame_count=frame_count,
             seed=seed,
-            overlay_mode=parsed_overlay,
+            parsed_overlay=parsed_overlay,
             skip_analysis=skip_analysis,
             skip_metadata=skip_metadata,
             skip_dovi=skip_dovi,
             force_interactive_alignment=force_interactive_alignment,
             json_output=json_output,
-            no_color=effective_no_color,
+            effective_no_color=effective_no_color,
             quiet=quiet,
             verbose=verbose,
         )
+
+        resolved_config: ConfigSchema | None = None
+        if write_config:
+
+            def _resolve_effective_config() -> ConfigSchema:
+                return apply_cli_overrides(
+                    load_config(config_path),
+                    cli_args=request.cli_override_args(),
+                )
+
+            def _load_effective_config() -> ConfigSchema:
+                nonlocal resolved_config
+                if resolved_config is None:
+                    resolved_config = _resolve_effective_config()
+                return resolved_config
+
+            _write_config_to(config_path, _load_effective_config())
+            return
+
+        def _resolve_effective_config() -> ConfigSchema:
+            return apply_cli_overrides(
+                load_config(config_path),
+                cli_args=request.cli_override_args(),
+            )
+
+        def _load_effective_config() -> ConfigSchema:
+            nonlocal resolved_config
+            if resolved_config is None:
+                resolved_config = _resolve_effective_config()
+            return resolved_config
+
+        if diagnose_paths:
+            _handle_diagnose_paths(resolved_root, config_path, _load_effective_config())
+            return
 
         if not json_output and not quiet:
             print_at_a_glance(
@@ -362,8 +418,11 @@ def wizard(
         delete_after_upload=delete_after_upload,
         tmdb_api_key=tmdb_value,
     )
-    _validate_config(config_data)
-    _write_wizard_config_payload(config_path, config_data)
+    try:
+        _validate_config(config_data)
+        _write_wizard_config_payload(config_path, config_data)
+    except FrameCompareError as error:
+        raise typer.Exit(code=handle_error(error, no_color=True, verbose=False)) from error
 
 
 @app.command()
@@ -465,12 +524,12 @@ def _prompt_visibility(default: Visibility) -> str:
     default_value = default.value
     while True:
         value = typer.prompt(
-            "slow.pics visibility (public|unlisted|private)",
+            "slow.pics visibility (public|unlisted)",
             default=default_value,
         ).strip()
         if value in allowed:
             return value
-        typer.echo("Invalid visibility. Choose public, unlisted, or private.")
+        typer.echo("Invalid visibility. Choose public or unlisted.")
 
 
 def _build_minimal_config(
@@ -500,9 +559,12 @@ def _validate_config(data: dict[str, object]) -> None:
 
 def _write_wizard_config_payload(config_path: Path, data: dict[str, object]) -> None:
     """Write wizard config payload to the provided destination."""
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    toml_text = tomli_w.dumps(_prepare_toml_payload(data))
-    write_text_atomic(config_path, toml_text, encoding="utf-8")
+    try:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        toml_text = tomli_w.dumps(_prepare_toml_payload(data))
+        write_text_atomic(config_path, toml_text, encoding="utf-8")
+    except OSError as exc:
+        raise ConfigWriteError(config_path, label="configuration file", cause=exc) from exc
 
 
 def _doctor_report_json(report: DoctorReport) -> dict[str, JSONValue]:

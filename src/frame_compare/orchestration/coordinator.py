@@ -1,4 +1,4 @@
-"""Run coordination composition root for Frame Compare 2.0."""
+"""Run coordination composition root for Frame Compare."""
 
 from __future__ import annotations
 
@@ -6,8 +6,7 @@ import httpx
 
 from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.execution import (
-    build_phases_after_align,
-    build_phases_before_align,
+    build_execution_phase_plan,
 )
 from frame_compare.orchestration.fps_report import (
     build_consolidated_fps_report,
@@ -118,39 +117,22 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         )
         selected_frames: list[int] = []
 
-        phases_before_align = build_phases_before_align(
+        phase_plan = build_execution_phase_plan(
             request=request,
-            clock=deps.clock,
+            deps=deps,
+            prep=prep,
             phase_timings=phase_timings,
-            warnings=prep.artifacts.warnings,
             selected_frames=selected_frames,
-            input_videos=prep.input_videos,
-            workspace=prep.workspace,
-            artifacts=prep.artifacts,
         )
 
-        if deps.ffmpeg_runner is None:
-            raise RuntimeError("FFmpeg runner must be initialized before execution.")
-        phases_after_align = build_phases_after_align(
-            request=request,
-            clock=deps.clock,
-            ffmpeg_runner=deps.ffmpeg_runner,
-            http_client=deps.http_client,
-            phase_timings=phase_timings,
-            warnings=prep.artifacts.warnings,
-            selected_frames=selected_frames,
-            artifacts=prep.artifacts,
-            metadata_prefetched=prep.metadata_prefetched,
-        )
-
-        await execute_phases(phases_before_align, context, reporter)
+        await execute_phases(phase_plan.before_align, context, reporter)
         emit_consolidated_fps_report(
             stage="after_align",
             clips=build_consolidated_fps_report(context.reference, context.comparisons),
             json_output=request.json_output,
             quiet=request.quiet,
         )
-        await execute_phases(phases_after_align, context, reporter)
+        await execute_phases(phase_plan.after_align, context, reporter)
         run_end = deps.clock()
         duration_seconds = (run_end - run_start).total_seconds()
 

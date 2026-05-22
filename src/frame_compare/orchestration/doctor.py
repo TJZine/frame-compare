@@ -1,4 +1,4 @@
-"""Diagnostic checks for Frame Compare 2.0.
+"""Diagnostic checks for Frame Compare.
 
 This module provides diagnostic checks for validating the runtime environment,
 including dependency availability, network connectivity, and system requirements.
@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, cast
 import httpx
 
 from frame_compare.errors import JSONValue
+from frame_compare.services.metadata import is_valid_tmdb_api_key
 from frame_compare.vs.env import register_windows_dll_dirs
 
 if TYPE_CHECKING:
@@ -38,14 +39,7 @@ _CHECK_ORDER: list[tuple[str, str]] = [
 
 @dataclass(frozen=True, slots=True)
 class CheckResult:
-    """Result of a diagnostic check.
-
-    Attributes:
-        passed: Whether the check passed
-        message: Human-readable result message
-        hint: Optional hint for failed checks
-        details: Optional structured details
-    """
+    """Result of a diagnostic check."""
 
     passed: bool
     message: str
@@ -55,13 +49,7 @@ class CheckResult:
 
 @dataclass(frozen=True, slots=True)
 class DoctorCheck:
-    """Single diagnostic check.
-
-    Attributes:
-        name: Unique identifier for this check
-        category: Check category ("core", "optional", "network")
-        check_fn: Zero-argument callable returning CheckResult
-    """
+    """Single diagnostic check."""
 
     name: str
     category: str
@@ -70,13 +58,7 @@ class DoctorCheck:
 
 @dataclass(frozen=True, slots=True)
 class DoctorReport:
-    """Complete diagnostic report.
-
-    Attributes:
-        checks: List of (check, result) tuples in execution order
-        all_passed: True if ALL checks passed, regardless of category
-        critical_failures: Names of failed core-category checks only
-    """
+    """Complete diagnostic report."""
 
     checks: list[tuple[DoctorCheck, CheckResult]]
     all_passed: bool
@@ -242,34 +224,37 @@ def _check_dovi_tool() -> CheckResult:
 def _check_vspreview() -> CheckResult:
     """Check VSPreview is available.
 
-    Uses frame_compare.vspreview.is_vspreview_available() for consistent detection.
+    Uses frame_compare.vspreview.check_vspreview_availability() for consistent detection.
     Per vspreview spec §6.1, this is an optional check that reports passed=True
     even when VSPreview is missing or the availability probe itself fails.
     """
-    try:
-        from frame_compare.vspreview.adapter import is_vspreview_available
+    from frame_compare.vspreview.adapter import (
+        VSPreviewAvailabilityStatus,
+        check_vspreview_availability,
+    )
 
-        available = is_vspreview_available()
-    except Exception as exc:
-        return CheckResult(
-            passed=True,
-            message="VSPreview availability probe failed (optional for manual alignment)",
-            hint="Check the VSPreview/PySide6 installation if interactive alignment is needed",
-            details={
-                "exception_type": type(exc).__name__,
-                "exception": str(exc),
-            },
-        )
+    availability = check_vspreview_availability()
 
-    if available:
+    if availability.is_available:
         return CheckResult(
             passed=True,
             message="VSPreview is available for interactive alignment",
         )
+
+    if availability.status == VSPreviewAvailabilityStatus.PROBE_FAILED:
+        return CheckResult(
+            passed=True,
+            message=availability.message,
+            hint=availability.hint,
+            details=cast(dict[str, JSONValue], availability.error_details)
+            if availability.error_details
+            else {},
+        )
+
     return CheckResult(
         passed=True,  # Not a failure, just optional per spec §6.1
-        message="VSPreview not installed (optional for manual alignment)",
-        hint="Install with: pip install vspreview PySide6 (or: pip install vspreview PyQt5)",
+        message=availability.message,
+        hint=availability.hint,
     )
 
 
@@ -317,9 +302,30 @@ def _check_slowpics() -> CheckResult:
 def _check_tmdb_api_key() -> CheckResult:
     """Check TMDB API key is configured through the normal runtime config chain."""
     legacy_tmdb_env_var = "_".join(("TMDB", "API", "KEY"))
-    resolved_api_key, config_error = _resolve_tmdb_api_key()
+    tmdb_enabled, resolved_api_key, config_error = _resolve_tmdb_config()
+
+    if config_error is not None:
+        return CheckResult(
+            passed=False,
+            message="TMDB configuration could not be loaded",
+            hint="Fix config/config.toml or set FRAME_COMPARE_TMDB__API_KEY",
+            details=config_error,
+        )
+
+    if tmdb_enabled is False:
+        return CheckResult(
+            passed=True,
+            message="TMDB metadata lookup disabled",
+            details={"enabled": False},
+        )
 
     if resolved_api_key:
+        if not is_valid_tmdb_api_key(resolved_api_key):
+            return CheckResult(
+                passed=False,
+                message="TMDB API key has invalid format",
+                hint="Set a 32-character hexadecimal TMDB API key",
+            )
         return CheckResult(
             passed=True,
             message="TMDB API key configured",
@@ -334,14 +340,6 @@ def _check_tmdb_api_key() -> CheckResult:
             ),
         )
 
-    if config_error is not None:
-        return CheckResult(
-            passed=False,
-            message="TMDB configuration could not be loaded",
-            hint="Fix config/config.toml or set FRAME_COMPARE_TMDB__API_KEY",
-            details=config_error,
-        )
-
     return CheckResult(
         passed=False,
         message="TMDB API key not configured",
@@ -349,8 +347,8 @@ def _check_tmdb_api_key() -> CheckResult:
     )
 
 
-def _resolve_tmdb_api_key() -> tuple[str | None, dict[str, JSONValue] | None]:
-    """Resolve TMDB credentials through the same config path used at runtime."""
+def _resolve_tmdb_config() -> tuple[bool | None, str | None, dict[str, JSONValue] | None]:
+    """Resolve TMDB enablement and credentials through the runtime config path."""
     from frame_compare.config.loader import load_config
     from frame_compare.errors import ConfigParseError, ConfigValidationError
     from frame_compare.orchestration.preflight import resolve_workspace
@@ -367,19 +365,16 @@ def _resolve_tmdb_api_key() -> tuple[str | None, dict[str, JSONValue] | None]:
             "exception_type": type(exc).__name__,
             "exception": str(exc),
         }
-        return None, details
+        return None, None, details
     except ConfigValidationError as exc:
         details: dict[str, JSONValue] = {
             "config_file": str(config_path),
             "exception_type": type(exc).__name__,
             "validation_errors": cast(JSONValue, exc.validation_errors),
         }
-        return None, details
+        return None, None, details
 
-    api_key = config.tmdb.api_key
-    if api_key:
-        return api_key, None
-    return None, None
+    return config.tmdb.enabled, config.tmdb.api_key, None
 
 
 # ─── Public API ───────────────────────────────────────────────────────────────

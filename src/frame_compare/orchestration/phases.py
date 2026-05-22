@@ -1,4 +1,4 @@
-"""Phase definitions and execution wiring for Frame Compare 2.0.
+"""Phase definitions and execution wiring for Frame Compare.
 
 This module defines the comparison pipeline phases and their execution behavior.
 See orchestration-module.md §4.4.4 for the canonical phase ordering semantics.
@@ -12,7 +12,7 @@ from enum import Enum
 
 import structlog
 
-from frame_compare.config import ConfigSchema
+from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import RunContext
 from frame_compare.utils.progress import ProgressReporter
 

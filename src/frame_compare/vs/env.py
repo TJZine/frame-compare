@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import importlib
+import logging
 import os
 import sys
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from frame_compare.errors import PluginNotFoundError, VapourSynthError, VapourSynthNotFoundError
@@ -10,20 +12,30 @@ from frame_compare.errors import PluginNotFoundError, VapourSynthError, VapourSy
 if TYPE_CHECKING:
     import vapoursynth as vs  # type: ignore
 
-_REGISTERED_WINDOWS_DLL_DIRS: set[str] = set()
-_WINDOWS_DLL_HANDLES: list[object] = []
+log = logging.getLogger(__name__)
 
 
-def register_windows_dll_dirs() -> None:
-    """Register candidate DLL directories for bundled Windows runtime imports.
+def _new_registered_dirs() -> set[str]:
+    return set()
 
-    Python 3.8+ on Windows can require explicit DLL directory registration for
-    extension-module dependencies. This keeps VapourSynth imports working in the
-    portable bundle layout where runtime DLLs live under ``vs/core``.
-    """
-    if os.name != "nt" or not hasattr(os, "add_dll_directory"):
-        return
 
+def _new_dll_handles() -> list[object]:
+    return []
+
+
+@dataclass(slots=True)
+class _WindowsDllRegistrationState:
+    """Process-owned state for Windows DLL directory registration."""
+
+    registered_dirs: set[str] = field(default_factory=_new_registered_dirs)
+    handles: list[object] = field(default_factory=_new_dll_handles)
+
+
+_WINDOWS_DLL_REGISTRATION = _WindowsDllRegistrationState()
+
+
+def _iter_windows_dll_candidates() -> list[str]:
+    """Return candidate DLL directories in bundle-search order."""
     candidates: list[str] = []
     env_home = os.environ.get("VAPOURSYNTH_HOME")
     if env_home:
@@ -44,25 +56,44 @@ def register_windows_dll_dirs() -> None:
         if os.path.isdir(site_dir):
             candidates.append(site_dir)
 
-    for candidate in candidates:
-        if not candidate or not os.path.isdir(candidate):
-            continue
-        normalized = os.path.normcase(os.path.normpath(candidate))
-        if normalized in _REGISTERED_WINDOWS_DLL_DIRS:
-            continue
-        try:
-            handle = os.add_dll_directory(candidate)
-        except (OSError, FileNotFoundError) as e:
-            import logging
+    return candidates
 
-            logging.getLogger("frame_compare.vs.env").debug(
-                "Skipping DLL directory candidate %s due to error: %s",
-                candidate,
-                e,
-            )
-            continue
-        _WINDOWS_DLL_HANDLES.append(handle)
-        _REGISTERED_WINDOWS_DLL_DIRS.add(normalized)
+
+def _register_windows_dll_candidate(candidate: str) -> None:
+    """Register a Windows DLL directory once per process."""
+    if not candidate or not os.path.isdir(candidate):
+        return
+
+    normalized = os.path.normcase(os.path.normpath(candidate))
+    if normalized in _WINDOWS_DLL_REGISTRATION.registered_dirs:
+        return
+
+    try:
+        handle = os.add_dll_directory(candidate)
+    except (OSError, FileNotFoundError) as error:
+        log.debug(
+            "Skipping DLL directory candidate %s due to error: %s",
+            candidate,
+            error,
+        )
+        return
+
+    _WINDOWS_DLL_REGISTRATION.handles.append(handle)
+    _WINDOWS_DLL_REGISTRATION.registered_dirs.add(normalized)
+
+
+def register_windows_dll_dirs() -> None:
+    """Register candidate DLL directories for bundled Windows runtime imports.
+
+    Python 3.8+ on Windows can require explicit DLL directory registration for
+    extension-module dependencies. This keeps VapourSynth imports working in the
+    portable bundle layout where runtime DLLs live under ``vs/core``.
+    """
+    if os.name != "nt" or not hasattr(os, "add_dll_directory"):
+        return
+
+    for candidate in _iter_windows_dll_candidates():
+        _register_windows_dll_candidate(candidate)
 
 
 def is_vapoursynth_available() -> bool:

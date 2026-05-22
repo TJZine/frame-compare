@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 import textwrap
-from functools import lru_cache
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 import structlog
@@ -74,7 +74,16 @@ _TONEMAP_PRESETS: dict[TonemapPreset, TonemapSettings] = {
 }
 
 
-@lru_cache(maxsize=1)
+@dataclass(slots=True)
+class _LibplaceboRuntimeState:
+    """Process-owned state for the libplacebo runtime probe."""
+
+    probe_result: bool | None = None
+
+
+_LIBPLACEBO_RUNTIME_STATE = _LibplaceboRuntimeState()
+
+
 def _probe_libplacebo_runtime() -> bool:
     """Run the subprocess probe to check if libplacebo is usable."""
     probe_script = textwrap.dedent(
@@ -141,6 +150,28 @@ def _probe_libplacebo_runtime() -> bool:
     return False
 
 
+def _libplacebo_runtime_override() -> bool | None:
+    """Return a per-call runtime override, if one is set."""
+    if os.environ.get(_REQUIRE_LIBPLACEBO_ENV) == "1":
+        return True
+    if os.environ.get(_DISABLE_LIBPLACEBO_ENV) == "1":
+        return False
+    if os.environ.get(_LIBPLACEBO_PROBE_ENV) == "1":
+        return True
+    return None
+
+
+def _cached_libplacebo_runtime_probe() -> bool:
+    """Return the cached subprocess probe result for this process lifetime."""
+    cached_result = _LIBPLACEBO_RUNTIME_STATE.probe_result
+    if cached_result is not None:
+        return cached_result
+
+    probe_result = _probe_libplacebo_runtime()
+    _LIBPLACEBO_RUNTIME_STATE.probe_result = probe_result
+    return probe_result
+
+
 def _libplacebo_runtime_usable() -> bool:
     """Return whether libplacebo is safe to call in this process.
 
@@ -150,17 +181,16 @@ def _libplacebo_runtime_usable() -> bool:
     result, and keep the main process on the deterministic fallback path when
     the probe fails.
 
-    This wrapper evaluates env overrides dynamically before falling back to
-    the cached subprocess probe.
+    Env overrides are re-evaluated on every call and do not mutate the cached
+    subprocess probe result. The probe result itself is cached for the process
+    lifetime so repeated tonemap decisions stay deterministic after the first
+    probe.
     """
-    if os.environ.get(_REQUIRE_LIBPLACEBO_ENV) == "1":
-        return True
-    if os.environ.get(_DISABLE_LIBPLACEBO_ENV) == "1":
-        return False
-    if os.environ.get(_LIBPLACEBO_PROBE_ENV) == "1":
-        return True
+    override = _libplacebo_runtime_override()
+    if override is not None:
+        return override
 
-    return _probe_libplacebo_runtime()
+    return _cached_libplacebo_runtime_probe()
 
 
 def _deduce_src_csp_hint(transfer: int | None, primaries: int | None) -> int | None:

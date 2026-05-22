@@ -3,7 +3,6 @@ from pathlib import Path
 import pytest
 
 from frame_compare.errors import (
-    AssertionError_,
     AudioAlignmentError,
     CacheCorruptionError,
     CacheVersionMismatchError,
@@ -28,8 +27,8 @@ from frame_compare.errors import (
     IncompatibleVideosError,
     # Input Errors
     InsufficientFramesError,
+    InvariantViolationError,
     LibplaceboError,
-    MemoryError_,
     MetadataError,
     MetricsCalculationError,
     # Network Errors
@@ -39,6 +38,8 @@ from frame_compare.errors import (
     OverlayError,
     PathEscapesRootError,
     PluginNotFoundError,
+    ProcessingOutOfMemoryError,
+    ProcessingTimeoutError,
     # Processing Errors
     PythonVersionError,
     RenderError,
@@ -49,7 +50,6 @@ from frame_compare.errors import (
     SlowpicsUnavailableError,
     SourceLoadError,
     SSLError,
-    TimeoutError_,
     TmdbError,
     TmdbRateLimitedError,
     TonemapError,
@@ -96,8 +96,8 @@ from frame_compare.errors import (
         (AudioAlignmentError, ("test",), "FC-4005"),
         (CacheCorruptionError, (Path("/cache"),), "FC-4006"),
         (CacheVersionMismatchError, ("1.0", "2.0"), "FC-4007"),
-        (MemoryError_, (), "FC-4010"),
-        (TimeoutError_, ("op", 30.0), "FC-4011"),
+        (ProcessingOutOfMemoryError, (), "FC-4010"),
+        (ProcessingTimeoutError, ("op", 30.0), "FC-4011"),
         (SelectionError, ("reason", 10, 5), "FC-4012"),
         (EncodingError, (Path("/out.png"), "test"), "FC-4013"),
         (OverlayError, ("test",), "FC-4014"),
@@ -116,7 +116,7 @@ from frame_compare.errors import (
         (SSLError, ("test",), "FC-5008"),
         # InternalError (FC-9xxx)
         (GenericInternalError, ("test",), "FC-9001"),
-        (AssertionError_, ("test",), "FC-9002"),
+        (InvariantViolationError, ("test",), "FC-9002"),
         (UnexpectedStateError, ("test",), "FC-9003"),
     ],
 )

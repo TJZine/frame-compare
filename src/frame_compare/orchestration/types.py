@@ -6,16 +6,24 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 
-from frame_compare.config import ConfigSchema, OverlayMode, ToneCurve, TonemapPreset
+from frame_compare.config.schema import ConfigSchema, OverlayMode, ToneCurve, TonemapPreset
 from frame_compare.orchestration.context import ClipState
 from frame_compare.render.ffmpeg import FFmpegRunner
 from frame_compare.services.types import TmdbMetadata
 from frame_compare.utils.progress import ProgressReporter
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.loader import VSLoader
+
+if TYPE_CHECKING:
+    from frame_compare.orchestration.phases import Phase
+
+
+type CLIOverrideValue = TonemapPreset | ToneCurve | OverlayMode | int | bool | str | None
+type CLIOverrideArgs = dict[str, CLIOverrideValue]
 
 
 @dataclass(frozen=True)
@@ -57,6 +65,20 @@ class RunRequest:
     quiet: bool = False
     verbose: bool = False
     json_output: bool = False
+
+    def cli_override_args(self) -> CLIOverrideArgs:
+        """Translate the request into the config-override payload shape."""
+        return {
+            "tm_preset": self.tm_preset,
+            "tm_target": self.tm_target_nits,
+            "tm_curve": self.tm_curve,
+            "frame_count": self.frame_count,
+            "seed": self.seed,
+            "overlay": self.overlay_mode,
+            "no_upload": self.no_upload,
+            "force_interactive_alignment": self.force_interactive_alignment,
+            "input": str(self.input_dir) if self.input_dir is not None else None,
+        }
 
 
 def _empty_str_list() -> list[str]:
@@ -128,3 +150,11 @@ class PrepState:
     preflight_warnings: list[str]
     preflight_duration: float
     load_sources_start: datetime
+
+
+@dataclass(frozen=True)
+class ExecutionPhasePlan:
+    """Execution phases split around the post-align reporting boundary."""
+
+    before_align: list[Phase]
+    after_align: list[Phase]

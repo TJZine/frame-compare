@@ -16,6 +16,12 @@ from frame_compare.orchestration.doctor import (
 )
 
 
+def _clear_tmdb_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("TMDB_API_KEY", raising=False)
+    monkeypatch.delenv("FRAME_COMPARE_TMDB__API_KEY", raising=False)
+    monkeypatch.delenv("FRAME_COMPARE_TMDB__ENABLED", raising=False)
+
+
 class TestCheckPythonVersion:
     """Tests for python_version check via run_doctor."""
 
@@ -226,12 +232,24 @@ class TestCheckVSPreview:
     """Tests for the optional VSPreview diagnostic check."""
 
     def test_check_vspreview_probe_failure_is_optional_status(self) -> None:
+        from frame_compare.vspreview.adapter import (
+            VSPreviewAvailability,
+            VSPreviewAvailabilityStatus,
+        )
+
         checks = collect_checks()
         vspreview_check = next(c for c in checks if c.name == "vspreview")
 
         with patch(
-            "frame_compare.vspreview.adapter.is_vspreview_available",
-            side_effect=RuntimeError("broken import metadata"),
+            "frame_compare.vspreview.adapter.check_vspreview_availability",
+            return_value=VSPreviewAvailability(
+                status=VSPreviewAvailabilityStatus.PROBE_FAILED,
+                message="VSPreview availability probe failed",
+                error_details={
+                    "exception_type": "RuntimeError",
+                    "exception": "broken import metadata",
+                },
+            ),
         ):
             result = vspreview_check.check_fn()
 
@@ -316,19 +334,63 @@ def test_check_tmdb_api_key_passes_with_workspace_config(
     (config_dir / "config.toml").write_text(
         """
         [tmdb]
+        api_key = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        """,
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    _clear_tmdb_env(monkeypatch)
+
+    result = tmdb_check.check_fn()
+
+    assert result.passed is True
+    assert result.message == "TMDB API key configured"
+
+
+def test_check_tmdb_api_key_fails_with_malformed_workspace_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """File-backed TMDB keys should use the same format rule as runtime lookup."""
+    tmdb_check = next(c for c in collect_checks() if c.name == "tmdb_api_key")
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        """
+        [tmdb]
         api_key = "config_key"
         """,
         encoding="utf-8",
     )
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("TMDB_API_KEY", raising=False)
-    monkeypatch.delenv("FRAME_COMPARE_TMDB__API_KEY", raising=False)
+    _clear_tmdb_env(monkeypatch)
 
     result = tmdb_check.check_fn()
 
-    assert result.passed is True
-    assert result.message == "TMDB API key configured"
+    assert result.passed is False
+    assert result.message == "TMDB API key has invalid format"
+    assert result.hint is not None
+    assert "32-character hexadecimal" in result.hint
+
+
+def test_check_tmdb_api_key_fails_with_malformed_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Env-backed TMDB keys should use the same format rule as runtime lookup."""
+    tmdb_check = next(c for c in collect_checks() if c.name == "tmdb_api_key")
+
+    monkeypatch.chdir(tmp_path)
+    _clear_tmdb_env(monkeypatch)
+    monkeypatch.setenv("FRAME_COMPARE_TMDB__API_KEY", "not-a-valid-key")
+
+    result = tmdb_check.check_fn()
+
+    assert result.passed is False
+    assert result.message == "TMDB API key has invalid format"
+    assert result.hint is not None
+    assert "32-character hexadecimal" in result.hint
 
 
 def test_check_tmdb_api_key_legacy_alias_remains_warning_only(
@@ -338,7 +400,7 @@ def test_check_tmdb_api_key_legacy_alias_remains_warning_only(
     tmdb_check = next(c for c in collect_checks() if c.name == "tmdb_api_key")
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("FRAME_COMPARE_TMDB__API_KEY", raising=False)
+    _clear_tmdb_env(monkeypatch)
 
     monkeypatch.setenv("TMDB_API_KEY", "legacy_key")
     legacy_result = tmdb_check.check_fn()
@@ -357,8 +419,7 @@ def test_check_tmdb_api_key_missing_mentions_workspace_config_hint(
     tmdb_check = next(c for c in collect_checks() if c.name == "tmdb_api_key")
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("TMDB_API_KEY", raising=False)
-    monkeypatch.delenv("FRAME_COMPARE_TMDB__API_KEY", raising=False)
+    _clear_tmdb_env(monkeypatch)
 
     result = tmdb_check.check_fn()
 
@@ -366,6 +427,60 @@ def test_check_tmdb_api_key_missing_mentions_workspace_config_hint(
     assert result.message == "TMDB API key not configured"
     assert result.hint is not None
     assert "tmdb.api_key in config/config.toml" in result.hint
+
+
+def test_check_tmdb_api_key_enabled_without_key_still_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Explicitly enabled TMDB still requires credentials."""
+    tmdb_check = next(c for c in collect_checks() if c.name == "tmdb_api_key")
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        """
+        [tmdb]
+        enabled = true
+        """,
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    _clear_tmdb_env(monkeypatch)
+
+    result = tmdb_check.check_fn()
+
+    assert result.passed is False
+    assert result.message == "TMDB API key not configured"
+    assert result.hint is not None
+    assert "FRAME_COMPARE_TMDB__API_KEY" in result.hint
+
+
+def test_check_tmdb_api_key_disabled_without_key_is_non_failing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Disabled TMDB should not require credentials."""
+    tmdb_check = next(c for c in collect_checks() if c.name == "tmdb_api_key")
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        """
+        [tmdb]
+        enabled = false
+        """,
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    _clear_tmdb_env(monkeypatch)
+
+    result = tmdb_check.check_fn()
+
+    assert result.passed is True
+    assert result.message == "TMDB metadata lookup disabled"
+    assert result.hint is None
+    assert result.details == {"enabled": False}
 
 
 class TestRunDoctor:

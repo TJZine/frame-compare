@@ -1,4 +1,4 @@
-"""Canonical orchestration context types for Frame Compare 2.0.
+"""Canonical orchestration context types for Frame Compare.
 
 This module defines the immutable per-clip state (ClipState) and the shared
 execution context (RunContext) used across all orchestration phases.

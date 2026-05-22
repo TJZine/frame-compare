@@ -8,7 +8,8 @@ from pathlib import Path
 import structlog
 
 from frame_compare.analysis import cache_io
-from frame_compare.config import ConfigSchema, apply_cli_overrides
+from frame_compare.config.overrides import apply_cli_overrides
+from frame_compare.config.schema import ConfigSchema
 from frame_compare.errors import (
     AudioAlignmentError,
     CacheCorruptionError,
@@ -40,14 +41,13 @@ from frame_compare.orchestration.types import (
     RunDependencies,
     RunRequest,
 )
-from frame_compare.services.alignment import CACHE_FILE_NAME, load_cached_offsets
+from frame_compare.services.alignment import CACHE_FILE_NAME, check_alignment_cached
 from frame_compare.services.run_folder import (
     derive_run_folder_name,
     get_existing_run_folders,
     reserve_run_folder,
 )
 from frame_compare.utils.types import WorkspacePaths
-from frame_compare.vspreview.overrides import load_manual_overrides
 
 log = structlog.get_logger()
 
@@ -168,18 +168,11 @@ def _validate_cache_state(
             )
 
     if request.from_cache_only and config.audio_alignment.enable and len(input_videos) > 1:
-        reference = input_videos[0]
-        comparisons = input_videos[1:]
-        manual_overrides = load_manual_overrides(workspace.generated_dir)
-        cached_offsets = (
-            load_cached_offsets(workspace.generated_dir, [reference] + comparisons) or {}
+        missing = check_alignment_cached(
+            reference=input_videos[0],
+            comparisons=input_videos[1:],
+            cache_dir=workspace.generated_dir,
         )
-        missing: list[str] = []
-        for comp in comparisons:
-            key = f"{reference.stem}:{comp.stem}"
-            if key in manual_overrides or key in cached_offsets:
-                continue
-            missing.append(key)
         if missing:
             message = "Missing cached audio alignment offsets for: " + ", ".join(missing)
             raise AudioAlignmentError(message)
@@ -259,18 +252,10 @@ async def execute_prep(
 
     load_sources_start = deps.clock()
     workspace = preflight.workspace
-    cli_args: dict[str, object] = {
-        "tm_preset": request.tm_preset,
-        "tm_target": request.tm_target_nits,
-        "tm_curve": request.tm_curve,
-        "frame_count": request.frame_count,
-        "seed": request.seed,
-        "overlay": request.overlay_mode,
-        "no_upload": request.no_upload,
-        "force_interactive_alignment": request.force_interactive_alignment,
-        "input": str(request.input_dir) if request.input_dir is not None else None,
-    }
-    config = apply_cli_overrides(preflight.config, cli_args=cli_args)
+    config = apply_cli_overrides(
+        preflight.config,
+        cli_args=request.cli_override_args(),
+    )
     input_videos = discover_inputs(workspace.input_dir)
     artifacts = RunArtifacts()
 

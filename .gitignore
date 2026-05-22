@@ -13,9 +13,26 @@
 AGENTS.md
 CODEX.md
 .codannaignore
-report/
-screens/
-screenshots/
+
+# Generated comparison outputs
+/report/
+/screens/
+/screenshots/
+/report.html
+/generated/
+**/screens/*.png
+**/screens/**/*.png
+**/screens/report.html
+**/screens/**/report.html
+**/screenshots/*.png
+**/screenshots/**/*.png
+**/screenshots/report.html
+**/screenshots/**/report.html
+**/generated/audio_offsets.toml
+**/generated/clip_probe.toml
+**/generated/manual_overrides.toml
+**/generated/cache/
+**/generated/vspreview_sessions/
 .desloppify/
 .agents/skills/desloppify/
 
@@ -79,4 +96,3 @@ htmlcov/
 Thumbs.db
 .portable_cache/
 comparison_videos/**
-generated/

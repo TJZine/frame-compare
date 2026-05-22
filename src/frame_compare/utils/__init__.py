@@ -1,3 +1,3 @@
-"""Utilities for Frame Compare 2.0."""
+"""Utilities for Frame Compare."""
 
 __all__ = []

@@ -10,8 +10,8 @@ from pytest_mock import MockerFixture
 
 from frame_compare.config.schema import ReportConfig, ViewerMode
 from frame_compare.errors import ReportError
-from frame_compare.services import report as report_module
-from frame_compare.services.report import ClipInfo, ReportData, generate_report
+from frame_compare.services.report.entry import generate_report
+from frame_compare.services.report.payload import ClipInfo, ReportData, image_src_for_report
 from frame_compare.services.types import TmdbMetadata
 
 
@@ -172,9 +172,43 @@ def test_generate_report_encode_failure_raises(
 def test_generate_report_write_failure_raises(
     report_data: ReportData, mocker: MockerFixture, tmp_path: Path
 ) -> None:
-    mocker.patch.object(Path, "write_text", side_effect=OSError("Disk full"))
+    mocker.patch(
+        "frame_compare.services.report.entry.write_text_atomic",
+        side_effect=OSError("Disk full"),
+    )
     with pytest.raises(ReportError, match="failed to write report"):
         generate_report(report_data, ReportConfig(output_dir=str(tmp_path)))
+
+
+def test_generate_report_keeps_existing_output_when_atomic_replace_fails(
+    report_data: ReportData, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    report_path = tmp_path / "report.html"
+    report_path.write_text("old report", encoding="utf-8")
+
+    def _boom(_src: str, _dst: Path) -> None:
+        raise OSError("replace failed")
+
+    monkeypatch.setattr("frame_compare.utils.atomic_write.os.replace", _boom)
+
+    with pytest.raises(ReportError, match="failed to write report"):
+        generate_report(report_data, ReportConfig(output_dir=str(tmp_path)))
+
+    assert report_path.read_text(encoding="utf-8") == "old report"
+    assert list(tmp_path.glob(".report.html.*")) == []
+
+
+def test_generate_report_preserves_existing_report_permissions(
+    report_data: ReportData, tmp_path: Path
+) -> None:
+    report_path = tmp_path / "report.html"
+    report_path.write_text("old report", encoding="utf-8")
+    report_path.chmod(0o640)
+    expected_mode = report_path.stat().st_mode & 0o777
+
+    generate_report(report_data, ReportConfig(output_dir=str(tmp_path)))
+
+    assert (report_path.stat().st_mode & 0o777) == expected_mode
 
 
 def test_generate_report_embed_images_base64(report_data: ReportData, tmp_path: Path) -> None:
@@ -211,6 +245,25 @@ def test_generate_report_includes_slowpics_url(report_data: ReportData, tmp_path
     out_path = generate_report(report_data, ReportConfig(output_dir=str(tmp_path)))
     content = out_path.read_text(encoding="utf-8")
     assert "https://slow.pics/c/12345" in content
+
+
+def test_generate_report_without_slowpics_url_omits_external_link(
+    report_data: ReportData, tmp_path: Path
+) -> None:
+    data_without_upload = ReportData(
+        clips=report_data.clips,
+        frames=report_data.frames,
+        screenshots=report_data.screenshots,
+        metadata=report_data.metadata,
+        slowpics_url=None,
+    )
+
+    out_path = generate_report(data_without_upload, ReportConfig(output_dir=str(tmp_path)))
+    content = out_path.read_text(encoding="utf-8")
+
+    assert "View on slow.pics" not in content
+    assert 'class="rv-link"' not in content
+    assert '"slowpics_url": null' in content
 
 
 def test_generate_report_filmstrip_included(report_data: ReportData, tmp_path: Path) -> None:
@@ -291,9 +344,9 @@ def test_image_src_for_report_uses_file_uri_for_cross_drive_fallback(
 ) -> None:
     screenshot_path = tmp_path / "shot.png"
     screenshot_path.write_bytes(b"fake_png_data")
-    mocker.patch.object(report_module, "os_path_relpath", side_effect=ValueError)
+    mocker.patch("frame_compare.services.report.payload.os_path_relpath", side_effect=ValueError)
 
-    src = report_module._image_src_for_report(
+    src = image_src_for_report(
         screenshot_path,
         report_dir=tmp_path / "report",
         embed_images=False,
@@ -396,3 +449,43 @@ def test_clip_info_frozen() -> None:
 def test_report_data_frozen(report_data: ReportData) -> None:
     with pytest.raises(FrozenInstanceError):
         report_data.frames = []  # type: ignore
+
+
+def test_generate_report_slowpics_url_sanitization(report_data: ReportData, tmp_path: Path) -> None:
+    # Test valid https scheme
+    report_data_valid = ReportData(
+        clips=report_data.clips,
+        frames=report_data.frames,
+        screenshots=report_data.screenshots,
+        slowpics_url="https://slow.pics/c/123",
+    )
+    out_path = generate_report(report_data_valid, ReportConfig(output_dir=str(tmp_path)))
+    content = out_path.read_text(encoding="utf-8")
+    assert "https://slow.pics/c/123" in content
+    assert "View on slow.pics" in content
+
+    # Test invalid scheme (e.g., javascript or ftp)
+    report_data_invalid = ReportData(
+        clips=report_data.clips,
+        frames=report_data.frames,
+        screenshots=report_data.screenshots,
+        slowpics_url="javascript:alert(1)",
+    )
+    out_path = generate_report(report_data_invalid, ReportConfig(output_dir=str(tmp_path)))
+    content = out_path.read_text(encoding="utf-8")
+    assert "View on slow.pics" not in content
+
+
+def test_renderer_clip_options_rendering(report_data: ReportData, tmp_path: Path) -> None:
+    # Verify that left and right clip options are rendered with correct values/labels
+    # and selected index is respected
+    out_path = generate_report(report_data, ReportConfig(output_dir=str(tmp_path)))
+    content = out_path.read_text(encoding="utf-8")
+    # Left clip select shouldn't have selected index set in option
+    assert '<select id="left-select" aria-label="Left clip">' in content
+    assert '<option value="0">REF</option>' in content
+    assert '<option value="1">ENC</option>' in content
+
+    # Right clip select should have option index 1 marked as "selected"
+    assert '<select id="right-select" aria-label="Right clip">' in content
+    assert '<option value="1" selected>ENC</option>' in content
