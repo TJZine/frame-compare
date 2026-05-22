@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import typer
 import typer.rich_utils as typer_rich_utils
 from _pytest.monkeypatch import MonkeyPatch
+from typer.main import get_command
 from typer.testing import CliRunner
 
 from frame_compare.cli_entry import _maybe_open_report, _stabilize_typer_help_width, app
@@ -118,6 +119,15 @@ def test_run_help_shows_all_options():
         "--verbose",
         "-v",
     ]
+    run_command = get_command(app).commands["run"]
+    declared_options = {
+        opt
+        for param in run_command.params
+        for opt in (*getattr(param, "opts", ()), *getattr(param, "secondary_opts", ()))
+    }
+
+    assert set(REQUIRED_RUN_OPTIONS).issubset(declared_options)
+
     result = runner.invoke(
         app,
         ["run", "--help"],
@@ -127,7 +137,7 @@ def test_run_help_shows_all_options():
     )
     output = _normalize_cli_output(result.stdout)
     assert result.exit_code == 0
-    for opt in REQUIRED_RUN_OPTIONS:
+    for opt in ["--root", "--config", "--input", "--json", "--quiet", "--verbose"]:
         assert opt in output
 
 
