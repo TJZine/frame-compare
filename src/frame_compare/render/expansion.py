@@ -80,7 +80,7 @@ def _build_overlay_config(
     selection_label: str | None,
     resolution: tuple[int, int],
     hdr_info: str | None,
-    num_frames: int,
+    num_frames: int | None,
 ) -> OverlayConfig | None:
     if overlay_mode == OverlayMode.NONE:
         return None
@@ -115,8 +115,8 @@ def expand_batch_render_requests(
             req.clip_path, renderer, config, ffmpeg_runner=ffmpeg_runner
         )
 
-        width = source_info.width if source_info is not None else req.probe_width
-        height = source_info.height if source_info is not None else req.probe_height
+        width = source_info.width if source_info is not None else (req.probe_width or 0)
+        height = source_info.height if source_info is not None else (req.probe_height or 0)
         num_frames = source_info.num_frames if source_info is not None else req.probe_num_frames
         resolved_hdr_info = (
             hdr_info if source_info is not None else ("HDR" if req.probe_is_hdr else None)

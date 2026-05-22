@@ -41,7 +41,11 @@ from frame_compare.orchestration.types import (
     RunRequest,
 )
 from frame_compare.services.alignment import CACHE_FILE_NAME, load_cached_offsets
-from frame_compare.services.run_folder import derive_run_folder_name, reserve_run_folder
+from frame_compare.services.run_folder import (
+    derive_run_folder_name,
+    get_existing_run_folders,
+    reserve_run_folder,
+)
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vspreview.overrides import load_manual_overrides
 
@@ -62,6 +66,24 @@ def _remove_cached_metrics(workspace: WorkspacePaths) -> None:
     audio_cache_path = workspace.generated_dir / CACHE_FILE_NAME
     if audio_cache_path.exists():
         audio_cache_path.unlink()
+
+
+def _resolve_cache_only_run_dir(workspace: WorkspacePaths, filenames: list[str]) -> Path:
+    """Resolve the deterministic run folder used for cache-only reads.
+
+    Cache-only runs must not depend on live TMDB metadata or reserve a new folder. If the
+    expected folder already exists with different casing, keep the on-disk spelling.
+    """
+    run_folder_name = derive_run_folder_name(
+        filenames=filenames,
+        tmdb_metadata=None,
+    )
+    existing_folders = get_existing_run_folders(workspace.input_dir)
+    expected = run_folder_name.casefold()
+    for folder_name in existing_folders:
+        if folder_name.casefold() == expected:
+            return workspace.input_dir / folder_name
+    return workspace.input_dir / run_folder_name
 
 
 def _resolve_cache_version(cache_path: Path) -> str | None:
@@ -108,12 +130,7 @@ async def _resolve_run_directory(
 
         filenames = [video.name for video in input_videos]
         if request.from_cache_only:
-            run_folder_name = derive_run_folder_name(
-                filenames=filenames,
-                tmdb_metadata=artifacts.resolved_metadata,
-                existing_folders=None,
-            )
-            run_dir = workspace.input_dir / run_folder_name
+            run_dir = _resolve_cache_only_run_dir(workspace, filenames)
             new_workspace = workspace.with_run_dir(run_dir)
         else:
             run_dir = reserve_run_folder(
@@ -189,7 +206,8 @@ def _probe_input_videos(
         cache_key = compute_probe_cache_key(fingerprint)
         snapshot = entries_by_key.get(cache_key)
         if snapshot is None:
-            assert deps.vs_loader is not None
+            if deps.vs_loader is None:
+                raise RuntimeError("VS loader must be initialized before probing clips.")
             source_info = deps.vs_loader.load(path)
             tonemap_prop_keys = compute_tonemap_prop_keys(source_info.frame_props)
             preserved_props = compute_preserved_frame_props(source_info.frame_props)

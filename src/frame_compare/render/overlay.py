@@ -71,7 +71,7 @@ def _resolve_details_y(
             font=font,
             stroke_width=_STROKE_WIDTH,
         )
-    except Exception:
+    except (OSError, ValueError, RuntimeError):
         return _DEFAULT_DETAILS_Y
     return int(bbox[3]) + _BLOCK_GAP_PX
 

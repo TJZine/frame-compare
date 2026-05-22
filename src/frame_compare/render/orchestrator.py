@@ -215,10 +215,10 @@ def render_screenshots(
             source_frames=frames,
             display_frames=display_frames,
             selection_labels=sel_labels,
-            probe_width=0,
-            probe_height=0,
-            probe_num_frames=0,
-            probe_is_hdr=False,
+            probe_width=None,
+            probe_height=None,
+            probe_num_frames=None,
+            probe_is_hdr=None,
         )
         batch_requests.append(req)
 

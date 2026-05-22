@@ -242,8 +242,12 @@ def save_clip_probe_cache(
         dropped_props: dict[str, str] = {}
         dropped_count = 0
         for k, v in snapshot.preserved_frame_props.items():
-            # Use cast to Any to avoid "Unnecessary isinstance" warning while being defensive
-            if isinstance(cast(Any, v), str | int | float):
+            raw_value = cast(Any, v)
+            # Use cast to Any to avoid "Unnecessary isinstance" warning while being defensive.
+            # bool is an int subclass, but frame-prop persistence treats booleans as non-numeric.
+            if isinstance(raw_value, str | float) or (
+                isinstance(raw_value, int) and not isinstance(raw_value, bool)
+            ):
                 safe_props[k] = v
             else:
                 dropped_count += 1

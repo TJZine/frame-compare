@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from datetime import datetime
 from pathlib import Path
 
@@ -16,6 +15,10 @@ from frame_compare.orchestration.types import RunRequest
 from frame_compare.render.ffmpeg import DefaultFFmpegRunner
 from frame_compare.vs.loader import DefaultVSLoader, VSLoader
 from frame_compare.vs.types import HDRMetadata
+
+
+class StopAfterDependencyInit(RuntimeError):
+    pass
 
 
 class DummyVSLoader:
@@ -71,13 +74,7 @@ def test_execute_run_populates_missing_dependencies(
     from frame_compare.orchestration import coordinator
 
     async def fake_execute_prep(*args, **kwargs):
-        from unittest.mock import MagicMock
-
-        mock_prep = MagicMock()
-        mock_prep.preflight_duration = 0.0
-        mock_prep.clips = [MagicMock(), MagicMock()]
-        mock_prep.input_videos = []
-        return mock_prep
+        raise StopAfterDependencyInit
 
     async def fake_execute_phases(*args, **kwargs):
         pass
@@ -93,9 +90,10 @@ def test_execute_run_populates_missing_dependencies(
     assert deps.ffmpeg_runner is None
     assert deps.progress is None
 
-    with contextlib.suppress(Exception):
+    with pytest.raises(StopAfterDependencyInit):
         asyncio.run(execute_run(request, deps=deps))
 
     assert isinstance(deps.vs_loader, DefaultVSLoader)
     assert isinstance(deps.ffmpeg_runner, DefaultFFmpegRunner)
     assert deps.progress is not None
+    assert deps.http_client is None

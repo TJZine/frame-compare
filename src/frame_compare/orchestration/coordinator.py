@@ -129,7 +129,8 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             artifacts=prep.artifacts,
         )
 
-        assert deps.ffmpeg_runner is not None
+        if deps.ffmpeg_runner is None:
+            raise RuntimeError("FFmpeg runner must be initialized before execution.")
         phases_after_align = build_phases_after_align(
             request=request,
             clock=deps.clock,
@@ -167,4 +168,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
 
     async with httpx.AsyncClient() as http_client:
         deps.http_client = http_client
-        return await _execute_with_deps()
+        try:
+            return await _execute_with_deps()
+        finally:
+            deps.http_client = None

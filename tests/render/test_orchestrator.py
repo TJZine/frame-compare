@@ -1,4 +1,5 @@
 from pathlib import Path
+from threading import Event
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -151,6 +152,10 @@ def test_render_screenshots_fallback(tmp_path, default_config):
 
             assert "vid1" in results
             assert any(log["event"] == "vs_load_failed_falling_back" for log in captured)
+            request = mock_batch.call_args.args[0][0]
+            assert request.overlay is not None
+            assert request.overlay.resolution == (0, 0)
+            assert request.overlay.num_frames is None
 
 
 def test_render_screenshots_vs_forced_fail_vs_not_found(tmp_path, default_config):
@@ -392,6 +397,9 @@ def test_render_screenshots_from_batch_rejects_duplicate_labels(tmp_path) -> Non
 def test_render_batch_parallel_fail_fast_no_wait() -> None:
     import time
 
+    slow_started = Event()
+    slow_finished = Event()
+
     requests = [
         RenderRequest(
             clip=Path("video.mkv"),
@@ -409,21 +417,21 @@ def test_render_batch_parallel_fail_fast_no_wait() -> None:
         ),
     ]
 
-    # Let the first task sleep for 1 second, and the second task fail immediately
+    # Let one task block after it starts, then fail from the other worker.
     def side_effect(r):
         if r.frame_number == 0:
-            time.sleep(1.0)
+            slow_started.set()
+            time.sleep(0.5)
+            slow_finished.set()
             return r.output_path
-        else:
-            raise RuntimeError("Failed immediately")
+        assert slow_started.wait(timeout=1.0)
+        raise RuntimeError("Failed immediately")
 
     with patch("frame_compare.render.orchestrator.render_frame", side_effect=side_effect):
-        start_time = time.time()
         with pytest.raises(RuntimeError, match="Failed immediately"):
             render_batch(requests, parallelism=2)
-        elapsed = time.time() - start_time
-        # It should raise the exception immediately without waiting for the 1.0s task to finish.
-        assert elapsed < 0.5
+        assert slow_started.is_set()
+        assert not slow_finished.is_set()
 
 
 def test_render_screenshots_from_batch_happy_path(tmp_path) -> None:

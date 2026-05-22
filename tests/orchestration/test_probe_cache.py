@@ -439,6 +439,27 @@ def test_preserved_frame_props_are_toml_safe_primitives_only(
     assert "bad_prop" not in props  # list is unsafe
 
 
+def test_save_clip_probe_cache_drops_bool_preserved_frame_props(tmp_path: Path) -> None:
+    """bool is an int subclass, but persisted frame props treat booleans as unsafe."""
+    f = tmp_path / "bool_props.toml"
+    snapshot = ClipProbeSnapshot(
+        fingerprint=ClipFingerprint(Path("video.mkv"), 1024, 5000),
+        width=1920,
+        height=1080,
+        num_frames=100,
+        fps=Fraction(24000, 1001),
+        is_hdr=False,
+        preserved_frame_props=cast(Any, {"keep_int": 1, "drop_bool": True}),
+        tonemap_prop_keys=(),
+    )
+    key = compute_probe_cache_key(snapshot.fingerprint)
+
+    save_clip_probe_cache(f, {key: snapshot})
+    loaded = load_clip_probe_cache(f)
+
+    assert loaded[key].preserved_frame_props == {"keep_int": 1}
+
+
 def test_hdr_metadata_persisted_as_nested_table(tmp_path: Path, hdr_snapshot: ClipProbeSnapshot):
     """SSOT §3.5.1: hdr_metadata MUST be a nested table, not flattened fields."""
     f = tmp_path / "hdr_nested.toml"

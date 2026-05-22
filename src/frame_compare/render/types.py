@@ -61,10 +61,10 @@ class ScreenshotBatchRequest:
     source_frames: list[int]
     display_frames: list[int]
     selection_labels: list[str | None]
-    probe_width: int
-    probe_height: int
-    probe_num_frames: int
-    probe_is_hdr: bool
+    probe_width: int | None
+    probe_height: int | None
+    probe_num_frames: int | None
+    probe_is_hdr: bool | None
 
 
 Renderer = Literal["vapoursynth", "ffmpeg", "auto"]

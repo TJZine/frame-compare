@@ -222,10 +222,10 @@ def test_execute_run_propagates_config_not_found_error(tmp_path: Path) -> None:
         asyncio.run(execute_run(request))
 
 
-def test_execute_run_creates_and_closes_http_client_when_missing(
+def test_execute_run_creates_and_discards_http_client_when_missing(
     tmp_path: Path,
 ) -> None:
-    """Given no injected http client → execute_run creates and closes it."""
+    """Given no injected http client, execute_run must not leak the temporary client."""
     _create_config(tmp_path)
     input_dir = tmp_path / "comparison_videos"
     _create_video_files(input_dir, "source.mkv")
@@ -239,8 +239,7 @@ def test_execute_run_creates_and_closes_http_client_when_missing(
 
     asyncio.run(execute_run(request, deps=deps))
 
-    assert isinstance(deps.http_client, httpx.AsyncClient)
-    assert deps.http_client.is_closed is True
+    assert deps.http_client is None
 
 
 def test_execute_run_emits_fps_report_after_load_sources_and_after_align(
@@ -574,6 +573,100 @@ def test_execute_run_from_cache_only_uses_run_folder_cache_when_enabled(
     assert result.warnings == []
     assert result.screenshot_dir == (run_generated_dir.parent / "screenshots").resolve()
     assert result.slowpics_url is None
+
+
+def test_execute_run_from_cache_only_ignores_prefetched_tmdb_run_folder_name(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_content = """\
+[paths]
+input_dir = "comparison_videos"
+screenshots_dir = "screenshots"
+generated_dir = "generated"
+config_dir = "config"
+use_run_folders = true
+
+[audio_alignment]
+enable = false
+
+[screenshots]
+use_ffmpeg = true
+
+[report]
+enable = false
+
+[tmdb]
+enabled = true
+api_key = "test-key"
+unattended = true
+"""
+    _create_config(tmp_path, content=config_content)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "source.mkv")
+
+    run_name = derive_run_folder_name(filenames=["source.mkv"])
+    run_generated_dir = input_dir / run_name / "generated"
+    cache_dir = run_generated_dir / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    config = load_config(tmp_path / "config" / "config.toml")
+    source_path = input_dir / "source.mkv"
+    fingerprint = cache_io.compute_cache_key([source_path], config.analysis)
+    cache_payload = {
+        "version": cache_io.CACHE_VERSION,
+        "fingerprint": fingerprint,
+        "luminance": [0.1] * 100,
+        "motion": [0.2] * 100,
+        "metadata": {
+            "frame_count": 100,
+            "fps": "24",
+            "config_fingerprint": fingerprint,
+            "clips": [
+                {
+                    "path": str(source_path),
+                    "size": 0,
+                    "mtime": 0.0,
+                    "sha1": None,
+                }
+            ],
+            "version": cache_io.CACHE_VERSION,
+        },
+    }
+    (cache_dir / cache_io.CACHE_FILENAME).write_text(json.dumps(cache_payload), encoding="utf-8")
+
+    async def _resolve_metadata(
+        *,
+        filenames: list[str],
+        config: MetadataConfig,
+        client: httpx.AsyncClient,
+    ) -> TmdbMetadata:
+        del filenames, config, client
+        return TmdbMetadata(
+            tmdb_id=123,
+            title="Fight Club",
+            original_title="Fight Club",
+            year=1999,
+            media_type="movie",
+        )
+
+    monkeypatch.setattr(phase_tasks, "resolve_metadata", _resolve_metadata)
+
+    request = RunRequest(
+        root=tmp_path,
+        from_cache_only=True,
+        skip_analysis=False,
+        skip_metadata=False,
+        skip_dovi=True,
+        no_upload=True,
+    )
+    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+
+    result = asyncio.run(execute_run(request, deps=deps))
+
+    assert result.success is True
+    assert result.cache_hit is True
+    assert result.screenshot_dir == (input_dir / run_name / "screenshots").resolve()
 
 
 def test_execute_run_passes_prefetched_tmdb_metadata_to_run_folder_derivation(

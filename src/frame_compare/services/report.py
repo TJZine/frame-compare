@@ -227,8 +227,8 @@ def _image_src_for_report(screenshot_path: Path, *, report_dir: Path, embed_imag
         # Use relative path for portability if possible.
         return str(Path(os_path_relpath(screenshot_path, report_dir)).as_posix())
     except ValueError:
-        # Fallback to absolute if on different drives (Windows).
-        return str(screenshot_path.as_posix())
+        # Use a browser-safe URI when Windows drives prevent a relative path.
+        return screenshot_path.resolve().as_uri()
 
 
 def os_path_relpath(path: Path, start: Path) -> str:
@@ -306,19 +306,24 @@ def _render_filmstrip(
     include_filmstrip: bool,
 ) -> str:
     """Render the optional frame thumbnail filmstrip."""
-    if not include_filmstrip:
-        return ""
-    items = "".join(
-        f"""
-            <button class="rv-filmstrip-item" data-idx="{_esc_attr(i)}" aria-label="Frame {_esc_attr(frame["number"])}">
-                <img src="{_esc_attr(frame["images"][0]["src"])}" loading="lazy" alt="{_esc_attr(clips[0]["label"])} - Frame {_esc_attr(frame["number"])}">
-                <span class="rv-filmstrip-label">{_esc_text(frame["number"])}</span>
-            </button>
-            """
-        for i, frame in enumerate(frames)
+    items = (
+        "".join(
+            f"""
+                <button class="rv-filmstrip-item" data-idx="{_esc_attr(i)}" aria-label="Frame {_esc_attr(frame["number"])}">
+                    <img src="{_esc_attr(frame["images"][0]["src"])}" loading="lazy" alt="{_esc_attr(clips[0]["label"])} - Frame {_esc_attr(frame["number"])}">
+                    <span class="rv-filmstrip-label">{_esc_text(frame["number"])}</span>
+                </button>
+                """
+            for i, frame in enumerate(frames)
+        )
+        if include_filmstrip
+        else ""
     )
+    classes = "rv-filmstrip" if include_filmstrip else "rv-filmstrip rv-filmstrip--hidden"
+    aria_hidden = "false" if include_filmstrip else "true"
+    aria_label = "Frame thumbnails" if include_filmstrip else "Frame thumbnails disabled"
     return f"""
-        <nav class="rv-filmstrip" role="navigation" aria-label="Frame thumbnails">
+        <nav class="{classes}" role="navigation" aria-label="{aria_label}" aria-hidden="{aria_hidden}">
             {items}
         </nav>
         """
@@ -560,6 +565,10 @@ def _build_html(data: _ReportPayload, include_filmstrip: bool = True) -> str:
         overflow-x: auto;
         padding: 10px;
         gap: 10px;
+    }
+
+    .rv-filmstrip--hidden {
+        display: none;
     }
 
     .rv-filmstrip-item {
