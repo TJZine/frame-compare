@@ -108,25 +108,22 @@ def _maybe_launch_vspreview(
         progress.set_description("Alignment verification")
 
     try:
-        try:
-            launch_alignment_verification_session(
-                reference=reference,
-                comparisons=comparisons,
-                suggested_offsets_by_key=offsets_by_key,
-                cache_dir=cache_dir,
-                config=VSPreviewConfig(enabled=should_launch),
-            )
-        except VSPreviewError as exc:
-            if config.force_interactive:
-                raise
-            log.warning(
-                "vspreview_optional_launch_failed",
-                error=str(exc),
-                force_interactive=config.force_interactive,
-                use_vspreview=config.use_vspreview,
-            )
-    finally:
-        pass
+        launch_alignment_verification_session(
+            reference=reference,
+            comparisons=comparisons,
+            suggested_offsets_by_key=offsets_by_key,
+            cache_dir=cache_dir,
+            config=VSPreviewConfig(enabled=should_launch),
+        )
+    except VSPreviewError as exc:
+        if config.force_interactive:
+            raise
+        log.warning(
+            "vspreview_optional_launch_failed",
+            error=str(exc),
+            force_interactive=config.force_interactive,
+            use_vspreview=config.use_vspreview,
+        )
 
 
 def _check_duplicate_stems(comparisons: list[Path]) -> None:
@@ -235,47 +232,43 @@ def align_clips(
         progress.set_description("Audio Alignment")
 
     results_map: dict[str, AlignmentResult] = {}
-    try:
-        # 0. Load manual overrides (highest precedence per §2.4)
-        fps_reference = _apply_manual_overrides(reference, comparisons, cache_dir, results_map)
+    # 0. Load manual overrides (highest precedence per §2.4)
+    fps_reference = _apply_manual_overrides(reference, comparisons, cache_dir, results_map)
 
-        # 1. Check cache for non-manual entries
-        requested_comparisons = [
-            c for c in comparisons if f"{reference.stem}:{c.stem}" not in results_map
-        ]
-        if config.cache_results and requested_comparisons:
-            cached = load_cached_offsets(cache_dir, [reference] + requested_comparisons)
-            if cached is not None:
-                results_map.update(cached)
-                requested_comparisons = [
-                    c for c in comparisons if f"{reference.stem}:{c.stem}" not in results_map
-                ]
+    # 1. Check cache for non-manual entries
+    requested_comparisons = [
+        c for c in comparisons if f"{reference.stem}:{c.stem}" not in results_map
+    ]
+    if config.cache_results and requested_comparisons:
+        cached = load_cached_offsets(cache_dir, [reference] + requested_comparisons)
+        if cached is not None:
+            results_map.update(cached)
+            requested_comparisons = [
+                c for c in comparisons if f"{reference.stem}:{c.stem}" not in results_map
+            ]
 
-        # 2. Compute missing
-        if requested_comparisons:
-            if fps_reference is None:
-                fps_reference = _probe_fps(reference)
-            _compute_missing_alignments(
-                reference=reference,
-                requested_comparisons=requested_comparisons,
-                config=config,
-                results_map=results_map,
-                fps_reference=fps_reference,
-                progress=progress,
-            )
+    # 2. Compute missing
+    if requested_comparisons:
+        if fps_reference is None:
+            fps_reference = _probe_fps(reference)
+        _compute_missing_alignments(
+            reference=reference,
+            requested_comparisons=requested_comparisons,
+            config=config,
+            results_map=results_map,
+            fps_reference=fps_reference,
+            progress=progress,
+        )
 
-            # 3. Save cache if needed (only computed results, not manual)
-            if config.cache_results:
-                computed_results = [
-                    results_map[f"{reference.stem}:{c.stem}"]
-                    for c in comparisons
-                    if results_map[f"{reference.stem}:{c.stem}"].source != "manual"
-                ]
-                if computed_results:
-                    save_offsets_cache(cache_dir, computed_results)
-
-    finally:
-        pass
+        # 3. Save cache if needed (only computed results, not manual)
+        if config.cache_results:
+            computed_results = [
+                results_map[f"{reference.stem}:{c.stem}"]
+                for c in comparisons
+                if results_map[f"{reference.stem}:{c.stem}"].source != "manual"
+            ]
+            if computed_results:
+                save_offsets_cache(cache_dir, computed_results)
 
     offsets_by_key = _build_offsets_map(
         reference=reference,
@@ -293,6 +286,26 @@ def align_clips(
 
     # Return results in the same order as input comparisons
     return [results_map[f"{reference.stem}:{c.stem}"] for c in comparisons]
+
+
+def check_alignment_cached(
+    reference: Path,
+    comparisons: list[Path],
+    cache_dir: Path,
+) -> list[str]:
+    """Check if all comparison offsets are cached/overridden, returning missing keys."""
+    from frame_compare.vspreview.overrides import load_manual_overrides
+
+    manual_overrides = load_manual_overrides(cache_dir)
+    cached_offsets = load_cached_offsets(cache_dir, [reference] + comparisons) or {}
+
+    missing: list[str] = []
+    for comp in comparisons:
+        key = f"{reference.stem}:{comp.stem}"
+        if key in manual_overrides or key in cached_offsets:
+            continue
+        missing.append(key)
+    return missing
 
 
 def _resolve_cached_algorithm(entry_dict: dict[str, object]) -> str:

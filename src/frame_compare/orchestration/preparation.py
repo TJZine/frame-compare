@@ -40,14 +40,13 @@ from frame_compare.orchestration.types import (
     RunDependencies,
     RunRequest,
 )
-from frame_compare.services.alignment import CACHE_FILE_NAME, load_cached_offsets
+from frame_compare.services.alignment import CACHE_FILE_NAME, check_alignment_cached
 from frame_compare.services.run_folder import (
     derive_run_folder_name,
     get_existing_run_folders,
     reserve_run_folder,
 )
 from frame_compare.utils.types import WorkspacePaths
-from frame_compare.vspreview.overrides import load_manual_overrides
 
 log = structlog.get_logger()
 
@@ -168,18 +167,11 @@ def _validate_cache_state(
             )
 
     if request.from_cache_only and config.audio_alignment.enable and len(input_videos) > 1:
-        reference = input_videos[0]
-        comparisons = input_videos[1:]
-        manual_overrides = load_manual_overrides(workspace.generated_dir)
-        cached_offsets = (
-            load_cached_offsets(workspace.generated_dir, [reference] + comparisons) or {}
+        missing = check_alignment_cached(
+            reference=input_videos[0],
+            comparisons=input_videos[1:],
+            cache_dir=workspace.generated_dir,
         )
-        missing: list[str] = []
-        for comp in comparisons:
-            key = f"{reference.stem}:{comp.stem}"
-            if key in manual_overrides or key in cached_offsets:
-                continue
-            missing.append(key)
         if missing:
             message = "Missing cached audio alignment offsets for: " + ", ".join(missing)
             raise AudioAlignmentError(message)
