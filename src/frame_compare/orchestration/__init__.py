@@ -17,6 +17,9 @@ if TYPE_CHECKING:
         execute_run,
     )
     from frame_compare.orchestration.doctor import (
+        CheckResult,
+        DoctorCheck,
+        DoctorReport,
         run_doctor,
     )
 
@@ -27,10 +30,16 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "RunResult": ("frame_compare.orchestration.coordinator", "RunResult"),
     "execute_run": ("frame_compare.orchestration.coordinator", "execute_run"),
     # Doctor
+    "CheckResult": ("frame_compare.orchestration.doctor", "CheckResult"),
+    "DoctorCheck": ("frame_compare.orchestration.doctor", "DoctorCheck"),
+    "DoctorReport": ("frame_compare.orchestration.doctor", "DoctorReport"),
     "run_doctor": ("frame_compare.orchestration.doctor", "run_doctor"),
 }
 
 __all__ = (
+    "CheckResult",
+    "DoctorCheck",
+    "DoctorReport",
     "RunDependencies",
     "RunRequest",
     "RunResult",

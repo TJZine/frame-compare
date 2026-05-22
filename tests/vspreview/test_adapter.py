@@ -247,63 +247,29 @@ def test_generate_vspreview_script_handles_collision(
 
 
 def test_build_script_content_assert_by_section() -> None:
-    """Verify that script content is correctly split into sections and assembled."""
+    """Verify that the generated script contains the expected major sections."""
     reference = Path("ref.mkv")
     comparisons = [Path("comp_a.mkv"), Path("comp_b.mkv")]
     suggested_offsets = {"ref:comp_a": 10, "ref:comp_b": -5}
     bootstrap_paths = [Path("/w"), Path("/w/src")]
 
-    # Direct validation of section content/structure
-    from frame_compare.vspreview.adapter import (
-        _build_bootstrap_section,
-        _build_clip_data_section,
-        _build_helpers_section,
-        _build_main_execution_section,
-        _build_script_header,
-    )
-
-    header = _build_script_header()
-    assert "#!/usr/bin/env python3" in header
-    assert '"""VSPreview alignment verification session.' in header
-
-    bootstrap = _build_bootstrap_section(bootstrap_paths)
-    assert (
-        "# ─── sys.path Bootstrap ───────────────────────────────────────────────────────"
-        in bootstrap
-    )
-    assert '"/w"' in bootstrap
-    assert '"/w/src"' in bootstrap
-
-    helpers = _build_helpers_section()
-    assert (
-        "# ─── Safe Print Helper ────────────────────────────────────────────────────────"
-        in helpers
-    )
-    assert "def safe_print(*args, **kwargs):" in helpers
-    assert "def resolve_lwlibavsource(core):" in helpers
-
-    clip_data = _build_clip_data_section(reference, comparisons, suggested_offsets)
-    assert (
-        "# ─── Clip Data ────────────────────────────────────────────────────────────────"
-        in clip_data
-    )
-    assert '"label": "ref"' in clip_data
-    assert '"comp_a": "comp_a.mkv"' in clip_data
-    assert '"ref:comp_a": 10' in clip_data
-    assert '"comp_a": 10' in clip_data
-
-    main_section = _build_main_execution_section()
-    assert (
-        "# ─── Main ─────────────────────────────────────────────────────────────────────"
-        in main_section
-    )
-    assert "def main():" in main_section
-    assert "if __name__ == '__main__':" not in main_section  # it should be "__main__"
-
-    # Assemble and verify complete script matches the output of _build_script_content
     script = _build_script_content(reference, comparisons, suggested_offsets, bootstrap_paths)
-    assert script.startswith(header)
-    assert bootstrap in script
-    assert helpers in script
-    assert clip_data in script
-    assert script.endswith(main_section)
+    assert script.startswith("#!/usr/bin/env python3\n")
+    assert '"""VSPreview alignment verification session.' in script
+    assert "# ─── sys.path Bootstrap " in script
+    assert "# ─── Safe Print Helper " in script
+    assert "# ─── Clip Data " in script
+    assert "# ─── Main " in script
+    assert script.index("# ─── sys.path Bootstrap ") < script.index("# ─── Safe Print Helper ")
+    assert script.index("# ─── Safe Print Helper ") < script.index("# ─── Clip Data ")
+    assert script.index("# ─── Clip Data ") < script.index("# ─── Main ")
+    assert '"/w"' in script
+    assert '"/w/src"' in script
+    assert "def safe_print(*args, **kwargs):" in script
+    assert "def resolve_lwlibavsource(core):" in script
+    assert '"label": "ref"' in script
+    assert '"comp_a": "comp_a.mkv"' in script
+    assert '"ref:comp_a": 10' in script
+    assert '"comp_a": 10' in script
+    assert "def main():" in script
+    assert script.rstrip().endswith("main()")

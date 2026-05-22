@@ -1014,8 +1014,8 @@ enable = false
     assert by_video["c_comp2.mkv"] == [6, 51, 98]
 
 
-def test_execute_run_uses_and_populates_probe_cache_without_vs_loader(tmp_path: Path) -> None:
-    """Prove that probe cache is populated on first run and reused on second run without loading video again."""
+def test_execute_run_uses_and_populates_probe_cache_without_reprobing(tmp_path: Path) -> None:
+    """Prove that probe cache is populated on first run and reused on second run without reprobe calls."""
     _create_config(tmp_path)
     input_dir = tmp_path / "comparison_videos"
     _create_video_files(input_dir, "source.mkv")

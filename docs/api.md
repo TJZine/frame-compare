@@ -286,6 +286,24 @@ slow.pics gallery visibility setting.
 
 Orchestration public API.
 
+### CheckResult
+
+`CheckResult`
+
+Result of a diagnostic check.
+
+### DoctorCheck
+
+`DoctorCheck`
+
+Single diagnostic check.
+
+### DoctorReport
+
+`DoctorReport`
+
+Complete diagnostic report.
+
 ### execute_run
 
 `execute_run(request: RunRequest, deps: RunDependencies | None = None) -> RunResult`
