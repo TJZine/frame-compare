@@ -316,7 +316,7 @@ def test_check_tmdb_api_key_passes_with_workspace_config(
     (config_dir / "config.toml").write_text(
         """
         [tmdb]
-        api_key = "config_key"
+        api_key = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         """,
         encoding="utf-8",
     )
@@ -329,6 +329,52 @@ def test_check_tmdb_api_key_passes_with_workspace_config(
 
     assert result.passed is True
     assert result.message == "TMDB API key configured"
+
+
+def test_check_tmdb_api_key_fails_with_malformed_workspace_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """File-backed TMDB keys should use the same format rule as runtime lookup."""
+    tmdb_check = next(c for c in collect_checks() if c.name == "tmdb_api_key")
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        """
+        [tmdb]
+        api_key = "config_key"
+        """,
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TMDB_API_KEY", raising=False)
+    monkeypatch.delenv("FRAME_COMPARE_TMDB__API_KEY", raising=False)
+
+    result = tmdb_check.check_fn()
+
+    assert result.passed is False
+    assert result.message == "TMDB API key has invalid format"
+    assert result.hint is not None
+    assert "32-character hexadecimal" in result.hint
+
+
+def test_check_tmdb_api_key_fails_with_malformed_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Env-backed TMDB keys should use the same format rule as runtime lookup."""
+    tmdb_check = next(c for c in collect_checks() if c.name == "tmdb_api_key")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TMDB_API_KEY", raising=False)
+    monkeypatch.setenv("FRAME_COMPARE_TMDB__API_KEY", "not-a-valid-key")
+
+    result = tmdb_check.check_fn()
+
+    assert result.passed is False
+    assert result.message == "TMDB API key has invalid format"
+    assert result.hint is not None
+    assert "32-character hexadecimal" in result.hint
 
 
 def test_check_tmdb_api_key_legacy_alias_remains_warning_only(

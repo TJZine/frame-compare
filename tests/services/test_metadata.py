@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from typing import get_args
 
 import httpx
 import pytest
@@ -144,6 +145,10 @@ def test_parse_filename_parsers_raise_falls_back_to_stem(mocker) -> None:
 # ─── TMDB Lookup Tests ────────────────────────────────────────────────────────
 
 
+def test_tmdb_metadata_media_type_is_closed_domain() -> None:
+    assert set(get_args(TmdbMetadata.__dataclass_fields__["media_type"].type)) == {"movie", "tv"}
+
+
 @pytest.mark.anyio
 async def test_lookup_tmdb_returns_metadata(
     respx_mock: respx.MockRouter, async_client: httpx.AsyncClient
@@ -231,6 +236,15 @@ async def test_lookup_tmdb_api_key_none(
 async def test_lookup_tmdb_invalid_api_key_format(async_client: httpx.AsyncClient) -> None:
     parsed = ParsedMetadata(title="Fight Club")
     config = MetadataConfig(api_key="short")
+
+    with pytest.raises(TmdbError, match="Invalid API key format"):
+        await lookup_tmdb(parsed, config, async_client)
+
+
+@pytest.mark.anyio
+async def test_lookup_tmdb_rejects_non_hex_api_key(async_client: httpx.AsyncClient) -> None:
+    parsed = ParsedMetadata(title="Fight Club")
+    config = MetadataConfig(api_key="g" * 32)
 
     with pytest.raises(TmdbError, match="Invalid API key format"):
         await lookup_tmdb(parsed, config, async_client)

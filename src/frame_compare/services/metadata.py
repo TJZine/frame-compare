@@ -16,6 +16,11 @@ TMDB_API_URL = "https://api.themoviedb.org/3/search/multi"
 TMDB_KEY_REGEX = re.compile(r"^[0-9a-fA-F]{32}$")
 
 
+def is_valid_tmdb_api_key(api_key: str) -> bool:
+    """Return whether a TMDB API key matches the API v3 key format."""
+    return TMDB_KEY_REGEX.fullmatch(api_key) is not None
+
+
 def parse_filename(filename: str) -> ParsedMetadata:
     """
     Extract metadata from filename using GuessIt + Anitopy.
@@ -151,7 +156,7 @@ async def _search_tmdb(
     if config.api_key is None:
         return []
 
-    if not TMDB_KEY_REGEX.fullmatch(config.api_key):
+    if not is_valid_tmdb_api_key(config.api_key):
         raise TmdbError("Invalid API key format")
 
     params: dict[str, str | int] = {
@@ -198,8 +203,12 @@ async def _search_tmdb(
     mapped_results: list[TmdbMetadata] = []
 
     for item in results_raw:
-        media_type = str(item.get("media_type", "movie"))
-        if media_type not in {"movie", "tv"}:
+        media_type_raw = item.get("media_type", "movie")
+        if media_type_raw == "movie":
+            media_type = "movie"
+        elif media_type_raw == "tv":
+            media_type = "tv"
+        else:
             continue
 
         # Year extraction

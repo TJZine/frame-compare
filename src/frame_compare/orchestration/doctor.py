@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, cast
 import httpx
 
 from frame_compare.errors import JSONValue
+from frame_compare.services.metadata import is_valid_tmdb_api_key
 from frame_compare.vs.env import register_windows_dll_dirs
 
 if TYPE_CHECKING:
@@ -320,6 +321,12 @@ def _check_tmdb_api_key() -> CheckResult:
     resolved_api_key, config_error = _resolve_tmdb_api_key()
 
     if resolved_api_key:
+        if not is_valid_tmdb_api_key(resolved_api_key):
+            return CheckResult(
+                passed=False,
+                message="TMDB API key has invalid format",
+                hint="Set a 32-character hexadecimal TMDB API key",
+            )
         return CheckResult(
             passed=True,
             message="TMDB API key configured",

@@ -48,7 +48,7 @@ class TmdbMetadata:
     title: str
     original_title: str
     year: int
-    media_type: str  # "movie" | "tv"
+    media_type: Literal["movie", "tv"]
     poster_url: str | None = None
     backdrop_url: str | None = None
 
