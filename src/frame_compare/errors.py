@@ -653,7 +653,7 @@ class CacheVersionMismatchError(ProcessingError):
         )
 
 
-class MemoryError_(ProcessingError):
+class ProcessingOutOfMemoryError(ProcessingError):
     """OOM during processing (FC-4010)."""
 
     def __init__(self) -> None:
@@ -667,7 +667,7 @@ class MemoryError_(ProcessingError):
         )
 
 
-class TimeoutError_(ProcessingError):
+class ProcessingTimeoutError(ProcessingError):
     """Operation timed out (FC-4011)."""
 
     def __init__(self, operation: str, timeout: float) -> None:
@@ -959,7 +959,7 @@ class GenericInternalError(InternalError):
         )
 
 
-class AssertionError_(InternalError):
+class InvariantViolationError(InternalError):
     """Invariant violation (FC-9002)."""
 
     def __init__(self, details: str) -> None:
