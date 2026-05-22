@@ -4,7 +4,6 @@ from typing import Any
 
 import pytest
 
-import frame_compare.orchestration.coordinator as coordinator
 import frame_compare.runner as runner
 
 
@@ -28,7 +27,7 @@ def test_runner_run_propagates_result(
         captured["deps"] = deps
         return expected
 
-    monkeypatch.setattr(coordinator, "execute_run", fake_execute_run, raising=False)
+    monkeypatch.setattr(runner, "execute_run", fake_execute_run, raising=False)
 
     request = runner.RunRequest(root=Path("."))
     deps = runner.RunDependencies()
@@ -48,7 +47,7 @@ def test_runner_run_raises_when_event_loop_running(
     ) -> runner.RunResult:
         return runner.RunResult(success=True)
 
-    monkeypatch.setattr(coordinator, "execute_run", fake_execute_run, raising=False)
+    monkeypatch.setattr(runner, "execute_run", fake_execute_run, raising=False)
 
     async def _call_run() -> None:
         request = runner.RunRequest(root=Path("."))
@@ -62,19 +61,3 @@ def test_runner_run_raises_when_event_loop_running(
             runner.run(request)
 
     asyncio.run(_call_run())
-
-
-def test_runner_run_raises_when_execute_run_missing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delattr(coordinator, "execute_run", raising=False)
-
-    request = runner.RunRequest(root=Path("."))
-    with pytest.raises(
-        NotImplementedError,
-        match=(
-            r"^Missing required entry point: "
-            r"frame_compare\.orchestration\.coordinator\.execute_run$"
-        ),
-    ):
-        runner.run(request)

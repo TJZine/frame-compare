@@ -277,22 +277,6 @@ def run(
         )
 
         resolved_config: ConfigSchema | None = None
-        if write_config:
-
-            def _resolve_effective_config() -> ConfigSchema:
-                return apply_cli_overrides(
-                    load_config(config_path),
-                    cli_args=request.cli_override_args(),
-                )
-
-            def _load_effective_config() -> ConfigSchema:
-                nonlocal resolved_config
-                if resolved_config is None:
-                    resolved_config = _resolve_effective_config()
-                return resolved_config
-
-            _write_config_to(config_path, _load_effective_config())
-            return
 
         def _resolve_effective_config() -> ConfigSchema:
             return apply_cli_overrides(
@@ -305,6 +289,10 @@ def run(
             if resolved_config is None:
                 resolved_config = _resolve_effective_config()
             return resolved_config
+
+        if write_config:
+            _write_config_to(config_path, _load_effective_config())
+            return
 
         if diagnose_paths:
             _handle_diagnose_paths(resolved_root, config_path, _load_effective_config())

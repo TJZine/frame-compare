@@ -209,7 +209,7 @@ def prepare_clip_for_render(
         ffmpeg_runner: Optional FFmpegRunner for probing/extraction
 
     Returns:
-        tuple containing (loaded_clip, resolution, hdr_info, source_info)
+        tuple containing (prepared_clip, resolution, hdr_info, source_info)
 
     Raises:
         PluginNotFoundError: If required VS plugin is missing
@@ -230,7 +230,7 @@ def prepare_clip_for_render(
 
         ffmpeg_runner = DefaultFFmpegRunner()
 
-    loaded_clip: vs.VideoNode | Path = clip_path
+    prepared_clip: vs.VideoNode | Path = clip_path
     resolution = (0, 0)
     hdr_info: str | None = None
     source_info: SourceInfo | None = None
@@ -242,10 +242,12 @@ def prepare_clip_for_render(
 
             loader = DefaultVSLoader()
             source_info = loader.load(clip_path)
-            loaded_clip = source_info.clip
+            prepared_clip = source_info.clip
             resolution = (source_info.width, source_info.height)
 
-            loaded_clip, hdr_info = _apply_vs_tonemap_and_labeling(loaded_clip, source_info, config)
+            prepared_clip, hdr_info = _apply_vs_tonemap_and_labeling(
+                prepared_clip, source_info, config
+            )
 
         except (VapourSynthNotFoundError, PluginNotFoundError, SourceLoadError) as exc:
             if renderer == "vapoursynth":
@@ -263,4 +265,4 @@ def prepare_clip_for_render(
     if renderer == "ffmpeg" and config.color.enable_tonemap:
         _validate_ffmpeg_tonemap_gate(clip_path, config, ffmpeg_runner)
 
-    return loaded_clip, resolution, hdr_info, source_info
+    return prepared_clip, resolution, hdr_info, source_info

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import asyncio
 
-from frame_compare.orchestration import coordinator
 from frame_compare.orchestration.coordinator import (
     RunDependencies,
     RunRequest,
     RunResult,
+    execute_run,
 )
 
 __all__ = ["RunDependencies", "RunRequest", "RunResult", "run"]
@@ -34,9 +34,4 @@ def run(request: RunRequest, dependencies: RunDependencies | None = None) -> Run
             "await frame_compare.orchestration.execute_run instead."
         )
 
-    execute_run = getattr(coordinator, "execute_run", None)
-    if execute_run is None:
-        raise NotImplementedError(
-            "Missing required entry point: frame_compare.orchestration.coordinator.execute_run"
-        )
     return asyncio.run(execute_run(request, dependencies))
