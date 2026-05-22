@@ -1,4 +1,4 @@
-"""Package-root runner surface for Frame Compare 2.0."""
+"""Package-root runner surface for Frame Compare."""
 
 from __future__ import annotations
 

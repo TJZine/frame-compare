@@ -1,4 +1,4 @@
-"""Shared utility types for Frame Compare 2.0.
+"""Shared utility types for Frame Compare.
 
 This module contains cross-cutting type definitions used by multiple layers.
 """

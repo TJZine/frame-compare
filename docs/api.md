@@ -326,7 +326,7 @@ Services module.
 
 ## frame_compare.utils
 
-Utilities for Frame Compare 2.0.
+Utilities for Frame Compare.
 
 ## frame_compare.vs
 
@@ -454,11 +454,11 @@ Protocol for loading VapourSynth clips.
 
 ## frame_compare.vspreview
 
-VSPreview integration module for Frame Compare 2.0.
+VSPreview integration module for Frame Compare.
 
 ## frame_compare.runner
 
-Package-root runner surface for Frame Compare 2.0.
+Package-root runner surface for Frame Compare.
 
 ### run
 

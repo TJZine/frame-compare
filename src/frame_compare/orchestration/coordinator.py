@@ -1,4 +1,4 @@
-"""Run coordination composition root for Frame Compare 2.0."""
+"""Run coordination composition root for Frame Compare."""
 
 from __future__ import annotations
 

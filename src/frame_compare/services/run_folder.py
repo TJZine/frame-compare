@@ -26,22 +26,12 @@ log = logging.getLogger(__name__)
 
 
 def sanitize_folder_name(name: str) -> str:
-    """Remove/replace characters illegal in Windows/Unix paths.
-
-    Args:
-        name: Raw folder name
-
-    Returns:
-        Filesystem-safe folder name
-    """
+    """Remove/replace characters illegal in Windows/Unix paths."""
     if not name:
         return _UNNAMED_RUN_BASE
 
-    # Replace illegal characters with space
     sanitized = _ILLEGAL_CHARS.sub(" ", name)
-    # Collapse multiple spaces
     sanitized = _MULTI_SPACE.sub(" ", sanitized).strip()
-    # Remove trailing periods/spaces (Windows restriction)
     sanitized = sanitized.rstrip(". ")
 
     if not sanitized:
@@ -59,18 +49,7 @@ def sanitize_folder_name(name: str) -> str:
 
 
 def find_common_metadata(filenames: list[str]) -> tuple[str | None, int | None]:
-    """Find title/year shared by all non-empty parsed values.
-
-    Parses each filename and finds metadata values that match across available
-    parsed fields. Missing/empty fields are ignored to keep graceful fallback
-    behavior for partially parseable filenames.
-
-    Args:
-        filenames: List of video filenames to compare
-
-    Returns:
-        Tuple of (common_title, common_year). Either may be None if no match found.
-    """
+    """Find title/year shared by all non-empty parsed values."""
     if not filenames:
         return None, None
 
@@ -82,11 +61,9 @@ def find_common_metadata(filenames: list[str]) -> tuple[str | None, int | None]:
         pm = parsed_results[0]
         return pm.title if pm.title else None, pm.year
 
-    # Find common title (case-insensitive comparison across non-empty titles)
     titles = [p.title.lower().strip() for p in parsed_results if p.title]
     common_title: str | None = None
     if titles and len(set(titles)) == 1:
-        # All non-empty titles match - preserve original casing from first contributor.
         common_title = next(p.title for p in parsed_results if p.title)
 
     # Find common year
@@ -183,20 +160,17 @@ def _derive_base_folder_name(
 
     base_name: str | None = None
 
-    # Priority 1: TMDB metadata
     if tmdb_metadata is not None:
         title = tmdb_metadata.title
         year = tmdb_metadata.year
         if title:
             base_name = f"{title} ({year})" if year and year > 0 else title
 
-    # Priority 2: Common metadata from guessit
     if base_name is None:
         common_title, common_year = find_common_metadata(filenames)
         if common_title:
             base_name = f"{common_title} ({common_year})" if common_year else common_title
 
-    # Priority 3: Fallback to combined stems
     if base_name is None:
         return _combine_filename_stems(filenames)
 
@@ -208,24 +182,7 @@ def derive_run_folder_name(
     tmdb_metadata: TmdbMetadata | None = None,
     existing_folders: list[str] | None = None,
 ) -> str:
-    """Derive a filesystem-safe run folder name from video metadata.
-
-    Priority:
-    1. TMDB metadata: "{title} ({year})"
-    2. Guessit: find common title/year across filenames
-    3. Fallback: combine sanitized filename stems
-
-    Collision handling:
-    - If name exists in existing_folders, append timestamp and a sequence suffix if needed
-
-    Args:
-        filenames: List of video filenames (not full paths)
-        tmdb_metadata: Optional TMDB metadata from lookup
-        existing_folders: Optional list of existing folder names for collision check
-
-    Returns:
-        Filesystem-safe folder name
-    """
+    """Derive a filesystem-safe run folder name from video metadata."""
     if not filenames:
         timestamp = _format_timestamp()
         unnamed_candidate = _append_collision_suffix(_UNNAMED_RUN_BASE, timestamp)

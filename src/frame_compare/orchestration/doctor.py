@@ -1,4 +1,4 @@
-"""Diagnostic checks for Frame Compare 2.0.
+"""Diagnostic checks for Frame Compare.
 
 This module provides diagnostic checks for validating the runtime environment,
 including dependency availability, network connectivity, and system requirements.
@@ -39,14 +39,7 @@ _CHECK_ORDER: list[tuple[str, str]] = [
 
 @dataclass(frozen=True, slots=True)
 class CheckResult:
-    """Result of a diagnostic check.
-
-    Attributes:
-        passed: Whether the check passed
-        message: Human-readable result message
-        hint: Optional hint for failed checks
-        details: Optional structured details
-    """
+    """Result of a diagnostic check."""
 
     passed: bool
     message: str
@@ -56,13 +49,7 @@ class CheckResult:
 
 @dataclass(frozen=True, slots=True)
 class DoctorCheck:
-    """Single diagnostic check.
-
-    Attributes:
-        name: Unique identifier for this check
-        category: Check category ("core", "optional", "network")
-        check_fn: Zero-argument callable returning CheckResult
-    """
+    """Single diagnostic check."""
 
     name: str
     category: str
@@ -71,13 +58,7 @@ class DoctorCheck:
 
 @dataclass(frozen=True, slots=True)
 class DoctorReport:
-    """Complete diagnostic report.
-
-    Attributes:
-        checks: List of (check, result) tuples in execution order
-        all_passed: True if ALL checks passed, regardless of category
-        critical_failures: Names of failed core-category checks only
-    """
+    """Complete diagnostic report."""
 
     checks: list[tuple[DoctorCheck, CheckResult]]
     all_passed: bool

@@ -81,20 +81,7 @@ class ReportData:
 def generate_report(
     data: ReportData, config: ReportConfig, output_path: Path | None = None
 ) -> Path:
-    """Generate HTML comparison report.
-
-    Args:
-        data: The report data containing clips, frames, and screenshot paths.
-        config: Report configuration.
-        output_path: Optional custom output path. If None, derived from config or data.
-
-    Returns:
-        Path to the generated HTML file.
-
-    Raises:
-        ReportError: If validation fails or IO operations fail.
-    """
-    # 1. VALIDATE INPUT
+    """Generate HTML comparison report."""
     if len(data.clips) == 0:
         raise ReportError("no clips provided")
     if len(data.clips) < 2:
@@ -118,10 +105,8 @@ def generate_report(
     final_output_path = _resolve_output_path(data, config, output_path)
     embedded_data = _build_report_payload(data, config, report_dir=final_output_path.parent)
 
-    # 5. GENERATE HTML
     html_content = _build_html(embedded_data, include_filmstrip=config.include_filmstrip)
 
-    # 6. WRITE FILE
     try:
         final_output_path.parent.mkdir(parents=True, exist_ok=True)
         final_output_path.write_text(html_content, encoding="utf-8")

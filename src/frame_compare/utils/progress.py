@@ -1,4 +1,4 @@
-"""Progress reporting utilities for Frame Compare 2.0."""
+"""Progress reporting utilities for Frame Compare."""
 
 import structlog
 from rich.progress import (
@@ -27,19 +27,15 @@ class NullProgressReporter:
     """No-op progress reporter."""
 
     def start_phase(self, name: str, total: int) -> None:
-        """No-op."""
         pass
 
     def advance(self, amount: int = 1) -> None:
-        """No-op."""
         pass
 
     def set_description(self, desc: str) -> None:
-        """No-op."""
         pass
 
     def complete_phase(self) -> None:
-        """No-op."""
         pass
 
 
