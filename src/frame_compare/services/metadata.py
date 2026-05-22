@@ -283,7 +283,8 @@ async def resolve_metadata(
     Steps:
     1. Parse first filename
     2. Search TMDB
-    3. If multiple results and not unattended, call prompt_callback
+    3. If multiple results, config.unattended is false, and prompt_callback is
+       provided, call prompt_callback; otherwise fall back to the first result
     4. Return selected metadata
 
     Selection behavior:
