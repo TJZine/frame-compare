@@ -414,6 +414,62 @@ def test_check_tmdb_api_key_missing_mentions_workspace_config_hint(
     assert "tmdb.api_key in config/config.toml" in result.hint
 
 
+def test_check_tmdb_api_key_enabled_without_key_still_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Explicitly enabled TMDB still requires credentials."""
+    tmdb_check = next(c for c in collect_checks() if c.name == "tmdb_api_key")
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        """
+        [tmdb]
+        enabled = true
+        """,
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TMDB_API_KEY", raising=False)
+    monkeypatch.delenv("FRAME_COMPARE_TMDB__API_KEY", raising=False)
+
+    result = tmdb_check.check_fn()
+
+    assert result.passed is False
+    assert result.message == "TMDB API key not configured"
+    assert result.hint is not None
+    assert "FRAME_COMPARE_TMDB__API_KEY" in result.hint
+
+
+def test_check_tmdb_api_key_disabled_without_key_is_non_failing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Disabled TMDB should not require credentials."""
+    tmdb_check = next(c for c in collect_checks() if c.name == "tmdb_api_key")
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        """
+        [tmdb]
+        enabled = false
+        """,
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TMDB_API_KEY", raising=False)
+    monkeypatch.delenv("FRAME_COMPARE_TMDB__API_KEY", raising=False)
+
+    result = tmdb_check.check_fn()
+
+    assert result.passed is True
+    assert result.message == "TMDB metadata lookup disabled"
+    assert result.hint is None
+    assert result.details == {"enabled": False}
+
+
 class TestRunDoctor:
     """Tests for run_doctor function."""
 

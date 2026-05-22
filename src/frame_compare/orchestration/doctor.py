@@ -318,7 +318,22 @@ def _check_slowpics() -> CheckResult:
 def _check_tmdb_api_key() -> CheckResult:
     """Check TMDB API key is configured through the normal runtime config chain."""
     legacy_tmdb_env_var = "_".join(("TMDB", "API", "KEY"))
-    resolved_api_key, config_error = _resolve_tmdb_api_key()
+    tmdb_enabled, resolved_api_key, config_error = _resolve_tmdb_config()
+
+    if config_error is not None:
+        return CheckResult(
+            passed=False,
+            message="TMDB configuration could not be loaded",
+            hint="Fix config/config.toml or set FRAME_COMPARE_TMDB__API_KEY",
+            details=config_error,
+        )
+
+    if tmdb_enabled is False:
+        return CheckResult(
+            passed=True,
+            message="TMDB metadata lookup disabled",
+            details={"enabled": False},
+        )
 
     if resolved_api_key:
         if not is_valid_tmdb_api_key(resolved_api_key):
@@ -341,14 +356,6 @@ def _check_tmdb_api_key() -> CheckResult:
             ),
         )
 
-    if config_error is not None:
-        return CheckResult(
-            passed=False,
-            message="TMDB configuration could not be loaded",
-            hint="Fix config/config.toml or set FRAME_COMPARE_TMDB__API_KEY",
-            details=config_error,
-        )
-
     return CheckResult(
         passed=False,
         message="TMDB API key not configured",
@@ -356,8 +363,8 @@ def _check_tmdb_api_key() -> CheckResult:
     )
 
 
-def _resolve_tmdb_api_key() -> tuple[str | None, dict[str, JSONValue] | None]:
-    """Resolve TMDB credentials through the same config path used at runtime."""
+def _resolve_tmdb_config() -> tuple[bool | None, str | None, dict[str, JSONValue] | None]:
+    """Resolve TMDB enablement and credentials through the runtime config path."""
     from frame_compare.config.loader import load_config
     from frame_compare.errors import ConfigParseError, ConfigValidationError
     from frame_compare.orchestration.preflight import resolve_workspace
@@ -374,19 +381,16 @@ def _resolve_tmdb_api_key() -> tuple[str | None, dict[str, JSONValue] | None]:
             "exception_type": type(exc).__name__,
             "exception": str(exc),
         }
-        return None, details
+        return None, None, details
     except ConfigValidationError as exc:
         details: dict[str, JSONValue] = {
             "config_file": str(config_path),
             "exception_type": type(exc).__name__,
             "validation_errors": cast(JSONValue, exc.validation_errors),
         }
-        return None, details
+        return None, None, details
 
-    api_key = config.tmdb.api_key
-    if api_key:
-        return api_key, None
-    return None, None
+    return config.tmdb.enabled, config.tmdb.api_key, None
 
 
 # ─── Public API ───────────────────────────────────────────────────────────────
