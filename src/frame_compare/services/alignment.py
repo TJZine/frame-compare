@@ -249,12 +249,20 @@ def align_clips(
         c for c in comparisons if f"{reference.stem}:{c.stem}" not in results_map
     ]
     if config.cache_results and requested_comparisons:
-        cached = load_cached_offsets(cache_dir, [reference] + requested_comparisons)
-        if cached is not None:
-            results_map.update(cached)
-            requested_comparisons = [
-                c for c in comparisons if f"{reference.stem}:{c.stem}" not in results_map
-            ]
+        try:
+            cached = load_cached_offsets(cache_dir, [reference] + requested_comparisons)
+            if cached is not None:
+                results_map.update(cached)
+                requested_comparisons = [
+                    c for c in comparisons if f"{reference.stem}:{c.stem}" not in results_map
+                ]
+        except (CacheCorruptionError, CacheVersionMismatchError) as exc:
+            log.warning(
+                "audio_offsets_cache_load_failed",
+                path=str(cache_dir / CACHE_FILE_NAME),
+                error=str(exc),
+                action="degrade_to_computed_alignment",
+            )
 
     # 2. Compute missing
     if requested_comparisons:
@@ -355,8 +363,8 @@ def load_cached_offsets(
     try:
         with cache_path.open("rb") as f:
             data = cast(dict[str, object], tomllib.load(f))
-    except tomllib.TOMLDecodeError:
-        raise CacheCorruptionError(cache_path) from None
+    except (tomllib.TOMLDecodeError, OSError) as exc:
+        raise CacheCorruptionError(cache_path) from exc
 
     if data.get("version") != CACHE_VERSION:
         raise CacheVersionMismatchError(str(data.get("version")), CACHE_VERSION)
@@ -420,7 +428,7 @@ def save_offsets_cache(
             with cache_path.open("rb") as f:
                 data.update(tomllib.load(f))
             _normalize_legacy_cache_entries(data)
-        except tomllib.TOMLDecodeError as exc:
+        except (tomllib.TOMLDecodeError, OSError) as exc:
             log.warning(
                 "audio_offsets_cache_corrupt_on_write",
                 path=str(cache_path),
@@ -442,7 +450,16 @@ def save_offsets_cache(
             "algorithm": res.algorithm,
         }
 
-    write_bytes_atomic(cache_path, tomli_w.dumps(data).encode("utf-8"))
+    try:
+        write_bytes_atomic(cache_path, tomli_w.dumps(data).encode("utf-8"))
+    except OSError as exc:
+        log.warning(
+            "audio_offsets_cache_write_failed",
+            path=str(cache_path),
+            error=str(exc),
+            action="alignment_results_not_cached",
+            exc_info=exc,
+        )
 
 
 def _probe_fps(video_path: Path) -> Fraction:

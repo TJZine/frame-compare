@@ -564,16 +564,40 @@ def test_check_alignment_cached_rejects_duplicate_comparison_stems(tmp_path: Pat
         check_alignment_cached(ref, [comp_a, comp_b], tmp_path)
 
 
-def test_align_clips_completes_progress_when_cache_load_raises(tmp_path: Path) -> None:
+@patch("frame_compare.services.alignment._probe_fps")
+@patch("frame_compare.services.alignment._extract_audio")
+@patch("frame_compare.services.alignment._cross_correlate")
+def test_align_clips_completes_progress_when_cache_load_raises(
+    mock_corr: MagicMock,
+    mock_extract: MagicMock,
+    mock_probe: MagicMock,
+    tmp_path: Path,
+) -> None:
     ref = tmp_path / "ref.mkv"
     comp = tmp_path / "comp.mkv"
     ref.touch()
     comp.touch()
     (tmp_path / "audio_offsets.toml").write_text("not valid toml {{{ ", encoding="utf-8")
+
+    mock_probe.return_value = Fraction(24, 1)
+    mock_extract.return_value = np.ones(10, dtype=np.float32)
+    mock_corr.return_value = (0, 0.99)
     reporter = MagicMock(spec=ProgressReporter)
 
+    align_clips(ref, [comp], AlignmentConfig(), tmp_path, progress=reporter)
+
+    reporter.set_description.assert_any_call("Audio Alignment")
+
+
+def test_check_alignment_cached_corruption_raises(tmp_path: Path) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    ref.touch()
+    comp.touch()
+    (tmp_path / "audio_offsets.toml").write_text("not valid toml {{{ ", encoding="utf-8")
+
     with pytest.raises(CacheCorruptionError):
-        align_clips(ref, [comp], AlignmentConfig(), tmp_path, progress=reporter)
+        check_alignment_cached(ref, [comp], tmp_path)
 
 
 @patch("frame_compare.services.alignment._probe_fps")
