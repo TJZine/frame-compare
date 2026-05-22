@@ -324,6 +324,9 @@ def test_check_vspreview_availability(monkeypatch: pytest.MonkeyPatch) -> None:
     res = check_vspreview_availability()
     assert res.status == VSPreviewAvailabilityStatus.MISSING_QT_BACKEND
     assert res.is_available is False
+    assert "Qt backend missing" in res.message
+    assert res.hint == "Install with: pip install PySide6 (or: pip install PyQt5)"
+    assert "VSPreview not installed" not in res.message
 
     # 4. Nothing available
     monkeypatch.setattr("importlib.util.find_spec", lambda name: None)

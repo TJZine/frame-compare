@@ -88,8 +88,8 @@ def check_vspreview_availability() -> VSPreviewAvailability:
 
         return VSPreviewAvailability(
             status=VSPreviewAvailabilityStatus.MISSING_QT_BACKEND,
-            message="VSPreview not installed (optional for manual alignment)",
-            hint="Install with: pip install vspreview PySide6 (or: pip install vspreview PyQt5)",
+            message="Qt backend missing for VSPreview (optional for manual alignment)",
+            hint="Install with: pip install PySide6 (or: pip install PyQt5)",
         )
     except Exception as exc:
         return VSPreviewAvailability(
