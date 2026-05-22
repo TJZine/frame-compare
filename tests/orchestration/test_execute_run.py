@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime
 from fractions import Fraction
 from pathlib import Path
 from typing import Any, cast
@@ -24,9 +25,12 @@ from frame_compare.errors import (
 )
 from frame_compare.orchestration import coordinator, phase_tasks, preparation
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
+from frame_compare.orchestration.execution import build_phases_before_align
+from frame_compare.orchestration.types import RunArtifacts
 from frame_compare.services.alignment import CACHE_FILE_NAME
 from frame_compare.services.run_folder import derive_run_folder_name
 from frame_compare.services.types import AlignmentResult, MetadataConfig, TmdbMetadata
+from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.types import HDRMetadata, SourceInfo
 
 # Minimal valid TOML config content
@@ -81,6 +85,36 @@ def _create_video_files(input_dir: Path, *filenames: str) -> None:
     input_dir.mkdir(parents=True, exist_ok=True)
     for name in filenames:
         (input_dir / name).touch()
+
+
+def test_build_phases_before_align_counts_align_as_single_phase_unit(tmp_path: Path) -> None:
+    workspace = WorkspacePaths(
+        root=tmp_path,
+        input_dir=tmp_path / "comparison_videos",
+        run_dir=None,
+        screenshots_dir=tmp_path / "screenshots",
+        generated_dir=tmp_path / "generated",
+        config_dir=tmp_path / "config",
+        config_file=tmp_path / "config" / "config.toml",
+    )
+
+    phases = build_phases_before_align(
+        request=RunRequest(root=tmp_path),
+        clock=datetime.now,
+        phase_timings={},
+        warnings=[],
+        selected_frames=[],
+        input_videos=[
+            tmp_path / "ref.mkv",
+            tmp_path / "comp_a.mkv",
+            tmp_path / "comp_b.mkv",
+        ],
+        workspace=workspace,
+        artifacts=RunArtifacts(),
+    )
+
+    align_phase = next(phase for phase in phases if phase.name == "align")
+    assert align_phase.progress_total == 1
 
 
 class FakeVSLoader:

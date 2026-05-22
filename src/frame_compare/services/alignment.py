@@ -214,9 +214,6 @@ def _compute_missing_alignments(
         )
         results_map[f"{reference.stem}:{comp.stem}"] = res
 
-        if progress:
-            progress.advance()
-
 
 def align_clips(
     reference: Path,

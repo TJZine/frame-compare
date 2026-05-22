@@ -565,6 +565,96 @@ def test_align_clips_completes_progress_when_cache_load_raises(tmp_path: Path) -
 @patch("frame_compare.services.alignment._probe_fps")
 @patch("frame_compare.services.alignment._extract_audio")
 @patch("frame_compare.services.alignment._cross_correlate")
+def test_align_clips_computed_results_do_not_advance_phase_progress(
+    mock_corr: MagicMock,
+    mock_extract: MagicMock,
+    mock_probe: MagicMock,
+    tmp_path: Path,
+) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    ref.touch()
+    comp.touch()
+    mock_probe.return_value = Fraction(24, 1)
+    mock_extract.return_value = np.ones(10, dtype=np.float32)
+    mock_corr.return_value = (0, 0.99)
+    reporter = MagicMock(spec=ProgressReporter)
+
+    align_clips(
+        ref,
+        [comp],
+        AlignmentConfig(cache_results=False),
+        tmp_path,
+        progress=reporter,
+    )
+
+    reporter.advance.assert_not_called()
+    reporter.set_description.assert_any_call("Audio Alignment")
+    reporter.set_description.assert_any_call("Aligning comp.mkv")
+
+
+def test_align_clips_cached_results_do_not_advance_phase_progress(tmp_path: Path) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    ref.touch()
+    comp.touch()
+    cache_file = tmp_path / "audio_offsets.toml"
+    data = {
+        "version": "1",
+        "ref:comp": {
+            "reference_clip": "ref.mkv",
+            "comparison_clip": "comp.mkv",
+            "frame_offset": 12,
+            "time_offset_seconds": 0.5,
+            "correlation_score": 0.95,
+            "algorithm": "cross_correlation",
+        },
+    }
+    cache_file.write_text(tomli_w.dumps(data), encoding="utf-8")
+    reporter = MagicMock(spec=ProgressReporter)
+
+    align_clips(ref, [comp], AlignmentConfig(cache_results=True), tmp_path, progress=reporter)
+
+    reporter.advance.assert_not_called()
+
+
+@patch("frame_compare.services.alignment._probe_fps")
+@patch("frame_compare.services.alignment._extract_audio")
+def test_align_clips_manual_results_do_not_advance_phase_progress(
+    mock_extract: MagicMock,
+    mock_probe: MagicMock,
+    tmp_path: Path,
+) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    ref.touch()
+    comp.touch()
+    manual_overrides = {
+        "version": "1",
+        "ref:comp": {
+            "reference_clip": "ref",
+            "comparison_clip": "comp",
+            "frame_offset": 3,
+            "timestamp": "2026-05-21T00:00:00Z",
+            "confirmed": True,
+        },
+    }
+    (tmp_path / "manual_overrides.toml").write_text(
+        tomli_w.dumps(manual_overrides),
+        encoding="utf-8",
+    )
+    mock_probe.return_value = Fraction(24, 1)
+    mock_extract.side_effect = AssertionError("manual alignment should not extract audio")
+    reporter = MagicMock(spec=ProgressReporter)
+
+    align_clips(ref, [comp], AlignmentConfig(cache_results=True), tmp_path, progress=reporter)
+
+    reporter.advance.assert_not_called()
+
+
+@patch("frame_compare.services.alignment._probe_fps")
+@patch("frame_compare.services.alignment._extract_audio")
+@patch("frame_compare.services.alignment._cross_correlate")
 def test_align_clips_partial_cache_hit_computes_only_missing_and_preserves_order(
     mock_corr: MagicMock, mock_extract: MagicMock, mock_probe: MagicMock, tmp_path: Path
 ):
