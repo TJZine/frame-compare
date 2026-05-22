@@ -32,8 +32,8 @@ from frame_compare.orchestration.context import (
     RunContext,
 )
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
-from frame_compare.orchestration.execution import build_phases_before_align
-from frame_compare.orchestration.types import RunArtifacts
+from frame_compare.orchestration.execution import build_execution_phase_plan
+from frame_compare.orchestration.types import PrepState, RunArtifacts
 from frame_compare.services.alignment import CACHE_FILE_NAME
 from frame_compare.services.run_folder import derive_run_folder_name
 from frame_compare.services.types import AlignmentResult, MetadataConfig, TmdbMetadata
@@ -150,7 +150,9 @@ def _workspace(tmp_path: Path) -> WorkspacePaths:
     )
 
 
-def test_build_phases_before_align_counts_align_as_single_phase_unit(tmp_path: Path) -> None:
+def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
+    tmp_path: Path,
+) -> None:
     workspace = WorkspacePaths(
         root=tmp_path,
         input_dir=tmp_path / "comparison_videos",
@@ -161,23 +163,71 @@ def test_build_phases_before_align_counts_align_as_single_phase_unit(tmp_path: P
         config_file=tmp_path / "config" / "config.toml",
     )
 
-    phases = build_phases_before_align(
-        request=RunRequest(root=tmp_path),
-        clock=datetime.now,
-        phase_timings={},
-        warnings=[],
-        selected_frames=[],
+    prep = PrepState(
+        workspace=workspace,
+        config=ConfigSchema(),
         input_videos=[
             tmp_path / "ref.mkv",
             tmp_path / "comp_a.mkv",
             tmp_path / "comp_b.mkv",
         ],
-        workspace=workspace,
+        clips=[
+            _clip_state(tmp_path / "ref.mkv", label="Reference"),
+            _clip_state(tmp_path / "comp_a.mkv", label="Encode 1"),
+            _clip_state(tmp_path / "comp_b.mkv", label="Encode 2"),
+        ],
         artifacts=RunArtifacts(),
+        metadata_prefetched=False,
+        preflight_warnings=[],
+        preflight_duration=0.0,
+        load_sources_start=datetime.now(),
     )
 
-    align_phase = next(phase for phase in phases if phase.name == "align")
+    plan = build_execution_phase_plan(
+        request=RunRequest(root=tmp_path),
+        deps=RunDependencies(ffmpeg_runner=FakeFFmpegRunner()),
+        prep=prep,
+        phase_timings={},
+        selected_frames=[],
+    )
+
+    assert [phase.name for phase in plan.before_align] == ["frame_plan", "analyze", "align"]
+    assert [phase.name for phase in plan.after_align] == [
+        "render",
+        "metadata",
+        "dovi",
+        "publish",
+        "report",
+    ]
+
+    align_phase = next(phase for phase in plan.before_align if phase.name == "align")
     assert align_phase.progress_total == 1
+
+
+def test_run_request_cli_override_args_capture_runtime_override_contract(tmp_path: Path) -> None:
+    request = RunRequest(
+        root=tmp_path,
+        input_dir=tmp_path / "comparison_videos",
+        tm_preset=TonemapPreset.FILMIC,
+        tm_target_nits=203,
+        overlay_mode=OverlayMode.DIAGNOSTIC,
+        frame_count=12,
+        seed=123,
+        no_upload=True,
+        force_interactive_alignment=True,
+    )
+
+    assert request.cli_override_args() == {
+        "tm_preset": TonemapPreset.FILMIC,
+        "tm_target": 203,
+        "tm_curve": None,
+        "frame_count": 12,
+        "seed": 123,
+        "overlay": OverlayMode.DIAGNOSTIC,
+        "no_upload": True,
+        "force_interactive_alignment": True,
+        "input": str(tmp_path / "comparison_videos"),
+    }
 
 
 class FakeVSLoader:

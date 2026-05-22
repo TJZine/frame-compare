@@ -21,18 +21,19 @@ import typer.rich_utils as typer_rich_utils
 from rich.console import Console
 
 from frame_compare.cli_output import print_at_a_glance, print_result_summary
-from frame_compare.config import (
+from frame_compare.config.loader import get_default_config, load_config
+from frame_compare.config.overrides import apply_cli_overrides
+from frame_compare.config.presets import (
+    apply_preset,
+    list_presets,
+    save_preset,
+)
+from frame_compare.config.schema import (
     ConfigSchema,
     OverlayMode,
     ToneCurve,
     TonemapPreset,
     Visibility,
-    apply_cli_overrides,
-    apply_preset,
-    get_default_config,
-    list_presets,
-    load_config,
-    save_preset,
 )
 from frame_compare.errors import (
     ConfigValidationError,
@@ -199,39 +200,49 @@ def run(
     log_format = "json" if json_output else "console"
     configure_logging(level=log_level, format=log_format)
 
-    cli_args: dict[str, object] = {
-        "tm_preset": tm_preset,
-        "tm_target": tm_target,
-        "tm_curve": tm_curve,
-        "frame_count": frame_count,
-        "seed": seed,
-        "overlay": overlay,
-        "no_upload": no_upload,
-        "force_interactive_alignment": force_interactive_alignment,
-        "input": str(input_dir) if input_dir is not None else None,
-    }
-    resolved_config: ConfigSchema | None = None
-
-    def _resolve_effective_config() -> ConfigSchema:
-        return apply_cli_overrides(load_config(config_path), cli_args=cli_args)
-
-    def _load_effective_config() -> ConfigSchema:
-        nonlocal resolved_config
-        if resolved_config is None:
-            resolved_config = _resolve_effective_config()
-        return resolved_config
-
     try:
         parsed_tm_preset = _coerce_cli_choice(tm_preset, TonemapPreset, ("color", "preset"))
         parsed_tm_curve = _coerce_cli_choice(tm_curve, ToneCurve, ("color", "tone_curve"))
         parsed_overlay = _coerce_cli_choice(overlay, OverlayMode, ("screenshots", "overlay_mode"))
 
+        resolved_config: ConfigSchema | None = None
         if write_config:
-            _write_config_to(config_path, _load_effective_config())
-            return
+            request = RunRequest(
+                root=resolved_root,
+                config_path=config_path,
+                input_dir=input_dir,
+                no_cache=no_cache,
+                from_cache_only=from_cache_only,
+                no_upload=no_upload,
+                tm_preset=parsed_tm_preset,
+                tm_target_nits=tm_target,
+                tm_curve=parsed_tm_curve,
+                frame_count=frame_count,
+                seed=seed,
+                overlay_mode=parsed_overlay,
+                skip_analysis=skip_analysis,
+                skip_metadata=skip_metadata,
+                skip_dovi=skip_dovi,
+                force_interactive_alignment=force_interactive_alignment,
+                json_output=json_output,
+                no_color=effective_no_color,
+                quiet=quiet,
+                verbose=verbose,
+            )
 
-        if diagnose_paths:
-            _handle_diagnose_paths(resolved_root, config_path, _load_effective_config())
+            def _resolve_effective_config() -> ConfigSchema:
+                return apply_cli_overrides(
+                    load_config(config_path),
+                    cli_args=cast(dict[str, object], request.cli_override_args()),
+                )
+
+            def _load_effective_config() -> ConfigSchema:
+                nonlocal resolved_config
+                if resolved_config is None:
+                    resolved_config = _resolve_effective_config()
+                return resolved_config
+
+            _write_config_to(config_path, _load_effective_config())
             return
 
         request = RunRequest(
@@ -256,6 +267,22 @@ def run(
             quiet=quiet,
             verbose=verbose,
         )
+
+        def _resolve_effective_config() -> ConfigSchema:
+            return apply_cli_overrides(
+                load_config(config_path),
+                cli_args=cast(dict[str, object], request.cli_override_args()),
+            )
+
+        def _load_effective_config() -> ConfigSchema:
+            nonlocal resolved_config
+            if resolved_config is None:
+                resolved_config = _resolve_effective_config()
+            return resolved_config
+
+        if diagnose_paths:
+            _handle_diagnose_paths(resolved_root, config_path, _load_effective_config())
+            return
 
         if not json_output and not quiet:
             print_at_a_glance(

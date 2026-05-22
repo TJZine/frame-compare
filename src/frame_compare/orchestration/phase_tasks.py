@@ -13,7 +13,7 @@ import httpx
 
 from frame_compare.analysis import cache_io, calculate_metrics, create_frame_plan, select_frames
 from frame_compare.analysis.types import SelectionBreakdown
-from frame_compare.config import ConfigSchema
+from frame_compare.config.schema import ConfigSchema
 from frame_compare.errors import AudioAlignmentError
 from frame_compare.orchestration.context import (
     ClipAlignmentState,

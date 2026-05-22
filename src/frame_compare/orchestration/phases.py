@@ -12,7 +12,7 @@ from enum import Enum
 
 import structlog
 
-from frame_compare.config import ConfigSchema
+from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import RunContext
 from frame_compare.utils.progress import ProgressReporter
 

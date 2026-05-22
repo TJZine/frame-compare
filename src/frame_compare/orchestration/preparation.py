@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import cast
 
 import structlog
 
 from frame_compare.analysis import cache_io
-from frame_compare.config import ConfigSchema, apply_cli_overrides
+from frame_compare.config.overrides import apply_cli_overrides
+from frame_compare.config.schema import ConfigSchema
 from frame_compare.errors import (
     AudioAlignmentError,
     CacheCorruptionError,
@@ -251,18 +253,10 @@ async def execute_prep(
 
     load_sources_start = deps.clock()
     workspace = preflight.workspace
-    cli_args: dict[str, object] = {
-        "tm_preset": request.tm_preset,
-        "tm_target": request.tm_target_nits,
-        "tm_curve": request.tm_curve,
-        "frame_count": request.frame_count,
-        "seed": request.seed,
-        "overlay": request.overlay_mode,
-        "no_upload": request.no_upload,
-        "force_interactive_alignment": request.force_interactive_alignment,
-        "input": str(request.input_dir) if request.input_dir is not None else None,
-    }
-    config = apply_cli_overrides(preflight.config, cli_args=cli_args)
+    config = apply_cli_overrides(
+        preflight.config,
+        cli_args=cast(dict[str, object], request.cli_override_args()),
+    )
     input_videos = discover_inputs(workspace.input_dir)
     artifacts = RunArtifacts()
 

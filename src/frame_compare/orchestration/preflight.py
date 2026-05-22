@@ -10,7 +10,8 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from frame_compare.config import ConfigSchema, load_config
+from frame_compare.config.loader import load_config
+from frame_compare.config.schema import ConfigSchema
 from frame_compare.errors import (
     ConfigNotFoundError,
     DirectoryNotFoundError,
