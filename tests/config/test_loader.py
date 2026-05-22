@@ -140,13 +140,18 @@ def test_cli_override_takes_precedence(tmp_path: Path) -> None:
 
     assert config.analysis.frame_count == 50
 
-
-def test_load_config_none_path_with_empty_overrides_returns_config() -> None:
+def test_load_config_none_path_with_empty_overrides_returns_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
     config = load_config(config_path=None, overrides={})
     assert config.analysis.frame_count == 10
 
 
-def test_empty_overrides_leave_defaults_intact() -> None:
+def test_empty_overrides_leave_defaults_intact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
     config = load_config(overrides={})
     assert config.analysis.frame_count == 10
 
@@ -175,16 +180,22 @@ def test_precedence_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     assert config.analysis.frame_count == 30
 
 
-def test_tmdb_api_key_legacy_alias_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_tmdb_api_key_legacy_alias_env_var(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Legacy TMDB_API_KEY alias is no longer supported."""
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TMDB_API_KEY", "legacy_key")
 
     config = load_config()
     assert config.tmdb.api_key is None
 
 
-def test_tmdb_api_key_nested_var_takes_precedence(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_tmdb_api_key_nested_var_takes_precedence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Canonical TMDB nested var is used when both vars are set."""
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TMDB_API_KEY", "legacy_key")
     monkeypatch.setenv("FRAME_COMPARE_TMDB__API_KEY", "new_key")
 
@@ -192,8 +203,11 @@ def test_tmdb_api_key_nested_var_takes_precedence(monkeypatch: pytest.MonkeyPatc
     assert config.tmdb.api_key == "new_key"
 
 
-def test_log_level_legacy_alias_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_log_level_legacy_alias_env_var(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Legacy FRAME_COMPARE_LOG_LEVEL alias is no longer supported."""
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("FRAME_COMPARE_LOG_LEVEL", "DEBUG")
 
     config = load_config()
