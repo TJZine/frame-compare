@@ -418,7 +418,8 @@ def test_run_report_phase_builds_report_data_and_records_path(
     report_data = captured["report_data"]
     assert artifacts.report_path == expected_path
     assert report_data.frames == [5]
-    assert report_data.screenshots == artifacts.screenshots_by_label
+    assert report_data.clips[0].screenshots == artifacts.screenshots_by_label["Reference"]
+    assert report_data.clips[1].screenshots == artifacts.screenshots_by_label["Encode 1"]
     assert report_data.slowpics_url == "https://slow.pics/c/example"
     assert [(clip.name, clip.resolution, clip.fps) for clip in report_data.clips] == [
         ("Reference", (1920, 1080), 24.0),

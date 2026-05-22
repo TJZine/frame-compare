@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TypedDict
@@ -61,6 +61,7 @@ class ClipInfo:
     fps: float  # Frames per second
     hdr: bool  # True if HDR source
     label: str | None = None  # Short label for UI (e.g., "REF", "ENC")
+    screenshots: list[Path] = field(default_factory=list[Path])
 
 
 @dataclass(frozen=True)
@@ -69,7 +70,6 @@ class ReportData:
 
     clips: list[ClipInfo]  # At least 2 clips for comparison
     frames: list[int]  # Selected frame numbers
-    screenshots: dict[str, list[Path]]  # clip_name → [frame_paths] in order
     metadata: TmdbMetadata | None = None  # Optional TMDB info
     slowpics_url: str | None = None  # Link if uploaded
 
@@ -117,7 +117,7 @@ def build_frame_payloads(
     for i, frame_num in enumerate(data.frames):
         frame_images: list[ReportImagePayload] = []
         for clip in data.clips:
-            screenshot_path = data.screenshots[clip.name][i]
+            screenshot_path = clip.screenshots[i]
 
             if not screenshot_path.exists():
                 raise ReportError(f"screenshot not found: {screenshot_path}")

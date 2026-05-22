@@ -2,7 +2,7 @@
 
 import base64
 import json
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 
 import pytest
@@ -55,10 +55,10 @@ def mock_screenshots(tmp_path: Path, mock_clips: list[ClipInfo]) -> dict[str, li
 
 @pytest.fixture
 def report_data(mock_clips: list[ClipInfo], mock_screenshots: dict[str, list[Path]]) -> ReportData:
+    updated_clips = [replace(clip, screenshots=mock_screenshots[clip.name]) for clip in mock_clips]
     return ReportData(
-        clips=mock_clips,
+        clips=updated_clips,
         frames=[10, 20],
-        screenshots=mock_screenshots,
         metadata=TmdbMetadata(
             tmdb_id=123,
             title="Test Movie",
@@ -96,13 +96,13 @@ def test_generate_report_default_output_path(report_data: ReportData, tmp_path: 
     config = ReportConfig(output_dir=None)
     # Default is first clip's first screenshot's parent / report.html
     # In fixture: tmp_path / "screens" / "clip1" / "report.html"
-    expected = report_data.screenshots["clip1"][0].parent / "report.html"
+    expected = report_data.clips[0].screenshots[0].parent / "report.html"
     out_path = generate_report(report_data, config)
     assert out_path == expected
 
 
 def test_generate_report_no_clips_raises(report_data: ReportData) -> None:
-    empty_data = ReportData([], [], {})
+    empty_data = ReportData([], [])
     with pytest.raises(ReportError, match="no clips provided"):
         generate_report(empty_data, ReportConfig())
 
@@ -110,43 +110,50 @@ def test_generate_report_no_clips_raises(report_data: ReportData) -> None:
 def test_generate_report_single_clip_raises(
     report_data: ReportData, mock_clips: list[ClipInfo]
 ) -> None:
-    single_data = ReportData([mock_clips[0]], [], {})
+    single_data = ReportData([mock_clips[0]], [])
     with pytest.raises(ReportError, match="at least 2 clips required"):
         generate_report(single_data, ReportConfig())
 
 
 def test_generate_report_empty_frames_raises(report_data: ReportData) -> None:
-    data = ReportData(report_data.clips, [], report_data.screenshots)
+    data = ReportData(report_data.clips, [])
     with pytest.raises(ReportError, match="no frames provided"):
         generate_report(data, ReportConfig())
 
 
 def test_generate_report_empty_screenshots_dict_raises(report_data: ReportData) -> None:
-    data = ReportData(report_data.clips, report_data.frames, {})
+    clips_no_screenshots = [replace(clip, screenshots=[]) for clip in report_data.clips]
+    data = ReportData(clips_no_screenshots, report_data.frames)
     with pytest.raises(ReportError, match="no screenshots provided"):
         generate_report(data, ReportConfig())
 
 
 def test_generate_report_missing_clip_key_raises(report_data: ReportData) -> None:
-    bad_screens = report_data.screenshots.copy()
-    del bad_screens["clip1"]
-    data = ReportData(report_data.clips, report_data.frames, bad_screens)
-    with pytest.raises(ReportError, match="no screenshots for clip: clip1"):
+    clips_missing_screenshots = [
+        report_data.clips[0],
+        replace(report_data.clips[1], screenshots=[]),
+    ]
+    data = ReportData(clips_missing_screenshots, report_data.frames)
+    with pytest.raises(ReportError, match="no screenshots for clip: clip2"):
         generate_report(data, ReportConfig())
 
 
 def test_generate_report_empty_clip_list_raises(report_data: ReportData) -> None:
-    bad_screens = report_data.screenshots.copy()
-    bad_screens["clip1"] = []
-    data = ReportData(report_data.clips, report_data.frames, bad_screens)
+    clips = [
+        replace(report_data.clips[0], screenshots=[]),
+        report_data.clips[1],
+    ]
+    data = ReportData(clips, report_data.frames)
     with pytest.raises(ReportError, match="no screenshots for clip: clip1"):
         generate_report(data, ReportConfig())
 
 
 def test_generate_report_length_mismatch_raises(report_data: ReportData) -> None:
-    bad_screens = report_data.screenshots.copy()
-    bad_screens["clip1"] = bad_screens["clip1"][:-1]  # Remove one
-    data = ReportData(report_data.clips, report_data.frames, bad_screens)
+    clips = [
+        replace(report_data.clips[0], screenshots=report_data.clips[0].screenshots[:-1]),
+        report_data.clips[1],
+    ]
+    data = ReportData(clips, report_data.frames)
     with pytest.raises(ReportError, match="screenshot count mismatch for clip1"):
         generate_report(data, ReportConfig())
 
@@ -155,7 +162,7 @@ def test_generate_report_screenshot_not_found_raises(
     report_data: ReportData, tmp_path: Path
 ) -> None:
     # Delete a file
-    p = report_data.screenshots["clip1"][0]
+    p = report_data.clips[0].screenshots[0]
     p.unlink()
     with pytest.raises(ReportError, match="screenshot not found"):
         generate_report(report_data, ReportConfig(output_dir=str(tmp_path)))
@@ -253,7 +260,6 @@ def test_generate_report_without_slowpics_url_omits_external_link(
     data_without_upload = ReportData(
         clips=report_data.clips,
         frames=report_data.frames,
-        screenshots=report_data.screenshots,
         metadata=report_data.metadata,
         slowpics_url=None,
     )
@@ -274,39 +280,31 @@ def test_generate_report_filmstrip_included(report_data: ReportData, tmp_path: P
 
 
 def test_generate_report_escapes_dynamic_html_and_hardens_json_script_tag(tmp_path: Path) -> None:
-    clips = [
-        ClipInfo(
-            name="clip1",
-            path=tmp_path / "clip1.mkv",
-            frame_count=100,
-            resolution=(1920, 1080),
-            fps=24.0,
-            hdr=False,
-            label="<b>REF</b>",
-        ),
-        ClipInfo(
-            name="clip2",
-            path=tmp_path / "clip2.mkv",
-            frame_count=100,
-            resolution=(1920, 1080),
-            fps=24.0,
-            hdr=False,
-            label='ENC"></option><script>alert(2)</script>',
-        ),
-    ]
-
-    screenshots: dict[str, list[Path]] = {}
-    for clip in clips:
-        p = tmp_path / "screens" / clip.name / "0.png"
+    clips = []
+    for name, label in [
+        ("clip1", "<b>REF</b>"),
+        ("clip2", 'ENC"></option><script>alert(2)</script>'),
+    ]:
+        p = tmp_path / "screens" / name / "0.png"
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(b"fake_png_data")
-        screenshots[clip.name] = [p]
+        clips.append(
+            ClipInfo(
+                name=name,
+                path=tmp_path / f"{name}.mkv",
+                frame_count=100,
+                resolution=(1920, 1080),
+                fps=24.0,
+                hdr=False,
+                label=label,
+                screenshots=[p],
+            )
+        )
 
     title = "</script><script>alert(1)</script>"
     report_data = ReportData(
         clips=clips,
         frames=[10],
-        screenshots=screenshots,
         metadata=TmdbMetadata(
             tmdb_id=1,
             title=title,
@@ -456,7 +454,6 @@ def test_generate_report_slowpics_url_sanitization(report_data: ReportData, tmp_
     report_data_valid = ReportData(
         clips=report_data.clips,
         frames=report_data.frames,
-        screenshots=report_data.screenshots,
         slowpics_url="https://slow.pics/c/123",
     )
     out_path = generate_report(report_data_valid, ReportConfig(output_dir=str(tmp_path)))
@@ -468,7 +465,6 @@ def test_generate_report_slowpics_url_sanitization(report_data: ReportData, tmp_
     report_data_invalid = ReportData(
         clips=report_data.clips,
         frames=report_data.frames,
-        screenshots=report_data.screenshots,
         slowpics_url="javascript:alert(1)",
     )
     out_path = generate_report(report_data_invalid, ReportConfig(output_dir=str(tmp_path)))

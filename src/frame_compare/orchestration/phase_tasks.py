@@ -268,13 +268,13 @@ def run_report_phase(
             fps=float(clip.effective_fps),
             hdr=clip.probe.is_hdr,
             label=clip.label,
+            screenshots=artifacts.screenshots_by_label[clip.label],
         )
         for clip in clips
     ]
     report_data = ReportData(
         clips=clip_info,
         frames=frames,
-        screenshots=artifacts.screenshots_by_label,
         metadata=artifacts.resolved_metadata,
         slowpics_url=artifacts.slowpics_url,
     )

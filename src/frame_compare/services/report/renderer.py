@@ -111,44 +111,32 @@ def _render_filmstrip(
         """
 
 
-def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
-    """Construct the full HTML string."""
-    json_str = _json_for_script_tag(data)
-
-    title = data["title"]
-    generated_at = data["generated_at"]
-    stats = data["stats"]
-    slowpics_url = data["slowpics_url"]
-    frames = data["frames"]
-    clips = data["clips"]
-    slowpics_link = _render_slowpics_link(slowpics_url)
-    frame_options = _render_frame_options(frames)
-    left_clip_options = _render_clip_options(clips, selected_index=None)
-    right_clip_options = _render_clip_options(clips, selected_index=1)
-    filmstrip = _render_filmstrip(frames, clips, include_filmstrip=include_filmstrip)
-
-    return f"""<!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>{_esc_text(title)} - Frame Compare Report</title>
-        <style>{CSS}</style>
-    </head>
-    <body>
-        <header class="rv-header">
+def _render_header(
+    title: str,
+    generated_at: str,
+    frame_count: int,
+    clip_count: int,
+    slowpics_link: str,
+) -> str:
+    """Render report header section."""
+    return f"""        <header class="rv-header">
             <div>
                 <div class="rv-title">{_esc_text(title)}</div>
-                <div class="rv-meta">Generated {_esc_text(generated_at)} • {
-        stats["frame_count"]
-    } frames • {stats["clip_count"]} clips</div>
+                <div class="rv-meta">Generated {_esc_text(generated_at)} • {frame_count} frames • {clip_count} clips</div>
             </div>
             <div>
                 {slowpics_link}
             </div>
-        </header>
+        </header>"""
 
-    <div class="rv-controls" role="toolbar" aria-label="Viewer controls">
+
+def _render_controls(
+    frame_options: str,
+    left_clip_options: str,
+    right_clip_options: str,
+) -> str:
+    """Render interactive toolbar controls."""
+    return f"""    <div class="rv-controls" role="toolbar" aria-label="Viewer controls">
         <div class="rv-control-group">
                 <button id="btn-prev" aria-label="Previous frame">←</button>
                 <select id="frame-select" aria-label="Select frame">
@@ -184,9 +172,12 @@ def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
         <div class="rv-control-group">
              <button id="btn-help" aria-label="Keyboard shortcuts" title="Help (?)">?</button>
         </div>
-    </div>
+    </div>"""
 
-    <div class="rv-viewer-stage rv-mode-slider" role="img" aria-label="Comparison viewer">
+
+def _render_stage() -> str:
+    """Render comparison viewer canvas stage."""
+    return """    <div class="rv-viewer-stage rv-mode-slider" role="img" aria-label="Comparison viewer">
         <div class="rv-canvas">
             <img src="data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=" alt="" class="rv-sizer" aria-hidden="true">
             <div class="rv-layer rv-left">
@@ -199,9 +190,12 @@ def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
             </div>
             <div class="rv-divider"></div>
         </div>
-    </div>
+    </div>"""
 
-    <div id="help-modal" class="rv-modal" aria-hidden="true" role="dialog" aria-label="Keyboard Shortcuts">
+
+def _render_help_modal() -> str:
+    """Render modal listing keyboard shortcuts."""
+    return """    <div id="help-modal" class="rv-modal" aria-hidden="true" role="dialog" aria-label="Keyboard Shortcuts">
         <div class="rv-modal-content">
             <div class="rv-modal-title">Keyboard Shortcuts</div>
             <div class="rv-shortcuts-grid">
@@ -219,16 +213,62 @@ def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
                 <button id="btn-close-help">Close</button>
             </div>
         </div>
-    </div>
+    </div>"""
 
-        {filmstrip}
 
-    <footer class="rv-footer">
+def _render_footer(json_str: str) -> str:
+    """Render footer block and embed JSON state/JS bundle."""
+    return f"""    <footer class="rv-footer">
         <div>Frame Compare v{REPORT_VERSION}</div>
         <div>Use arrow keys to navigate • S/O/D/B to change mode</div>
     </footer>
 
     <script type="application/json" id="report-data">{json_str}</script>
-    <script>{JS}</script>
+    <script>{JS}</script>"""
+
+
+def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
+    """Construct the full HTML string."""
+    json_str = _json_for_script_tag(data)
+
+    title = data["title"]
+    generated_at = data["generated_at"]
+    stats = data["stats"]
+    slowpics_url = data["slowpics_url"]
+    frames = data["frames"]
+    clips = data["clips"]
+    slowpics_link = _render_slowpics_link(slowpics_url)
+    frame_options = _render_frame_options(frames)
+    left_clip_options = _render_clip_options(clips, selected_index=None)
+    right_clip_options = _render_clip_options(clips, selected_index=1)
+    filmstrip = _render_filmstrip(frames, clips, include_filmstrip=include_filmstrip)
+
+    header_html = _render_header(
+        title=title,
+        generated_at=generated_at,
+        frame_count=stats["frame_count"],
+        clip_count=stats["clip_count"],
+        slowpics_link=slowpics_link,
+    )
+    controls_html = _render_controls(frame_options, left_clip_options, right_clip_options)
+    stage_html = _render_stage()
+    modal_html = _render_help_modal()
+    footer_html = _render_footer(json_str)
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{_esc_text(title)} - Frame Compare Report</title>
+    <style>{CSS}</style>
+</head>
+<body>
+{header_html}
+{controls_html}
+{stage_html}
+{modal_html}
+{filmstrip}
+{footer_html}
 </body>
 </html>"""

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -45,10 +46,11 @@ def report_data(tmp_path: Path) -> ReportData:
             paths.append(path)
         screenshots[clip.name] = paths
 
+    updated_clips = [replace(clip, screenshots=screenshots[clip.name]) for clip in clips]
+
     return ReportData(
-        clips=clips,
+        clips=updated_clips,
         frames=[10, 20],
-        screenshots=screenshots,
         metadata=TmdbMetadata(
             tmdb_id=42,
             title="Entry Contract",
@@ -96,7 +98,7 @@ def test_generate_report_falls_back_to_first_clip_screenshot_directory(
 ) -> None:
     report_path = generate_report(report_data, ReportConfig(output_dir=None))
 
-    assert report_path == report_data.screenshots["reference"][0].parent / "report.html"
+    assert report_path == report_data.clips[0].screenshots[0].parent / "report.html"
     assert report_path.exists()
 
 
@@ -104,38 +106,31 @@ def test_generate_report_falls_back_to_first_clip_screenshot_directory(
     ("data_builder", "message"),
     [
         (
-            lambda data: ReportData([], data.frames, data.screenshots),
+            lambda data: ReportData([], data.frames),
             "no clips provided",
         ),
         (
             lambda data: ReportData(
                 data.clips[:1],
                 data.frames,
-                {"reference": data.screenshots["reference"]},
             ),
             "at least 2 clips required for comparison",
         ),
         (
-            lambda data: ReportData(data.clips, [], data.screenshots),
+            lambda data: ReportData(data.clips, []),
             "no frames provided",
         ),
         (
-            lambda data: ReportData(data.clips, data.frames, {}),
+            lambda data: ReportData(
+                [replace(c, screenshots=[]) for c in data.clips],
+                data.frames,
+            ),
             "no screenshots provided",
         ),
         (
             lambda data: ReportData(
-                data.clips,
+                [data.clips[0], replace(data.clips[1], screenshots=[])],
                 data.frames,
-                {"reference": data.screenshots["reference"]},
-            ),
-            "no screenshots for clip: encode",
-        ),
-        (
-            lambda data: ReportData(
-                data.clips,
-                data.frames,
-                {**data.screenshots, "encode": []},
             ),
             "no screenshots for clip: encode",
         ),
@@ -154,14 +149,13 @@ def test_generate_report_rejects_invalid_report_data_before_writing(
 
 
 def test_generate_report_rejects_mismatched_screenshot_counts(report_data: ReportData) -> None:
-    screenshots = {
-        **report_data.screenshots,
-        "reference": report_data.screenshots["reference"][:1],
-    }
+    clips = [
+        replace(report_data.clips[0], screenshots=report_data.clips[0].screenshots[:1]),
+        report_data.clips[1],
+    ]
     mismatched_data = ReportData(
-        clips=report_data.clips,
+        clips=clips,
         frames=report_data.frames,
-        screenshots=screenshots,
         metadata=report_data.metadata,
         slowpics_url=report_data.slowpics_url,
     )
