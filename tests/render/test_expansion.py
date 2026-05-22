@@ -201,13 +201,16 @@ def test_expand_batch_render_requests(mock_prepare: MagicMock) -> None:
     config = ConfigSchema()
     ffmpeg_runner = MagicMock()
 
-    # Mock prepare_clip_for_render
-    clip_mock = MagicMock()
-    source_info_mock = MagicMock()
-    source_info_mock.width = 1920
-    source_info_mock.height = 1080
-    source_info_mock.num_frames = 150
-    mock_prepare.return_value = (clip_mock, None, "HDR10", source_info_mock)
+    ref_clip = MagicMock(name="ref_clip")
+    ref_source_info = MagicMock()
+    ref_source_info.width = 1920
+    ref_source_info.height = 1080
+    ref_source_info.num_frames = 150
+    enc_clip = MagicMock(name="enc_clip")
+    mock_prepare.side_effect = [
+        (ref_clip, None, "HDR10", ref_source_info),
+        (enc_clip, None, None, None),
+    ]
 
     req1 = ScreenshotBatchRequest(
         clip_path=Path("video1.mkv"),
@@ -246,30 +249,43 @@ def test_expand_batch_render_requests(mock_prepare: MagicMock) -> None:
         "ref": range(0, 2),
         "enc": range(2, 3),
     }
+    assert mock_prepare.call_args_list == [
+        ((Path("video1.mkv"), "ffmpeg", config), {"ffmpeg_runner": ffmpeg_runner}),
+        ((Path("video2.mkv"), "ffmpeg", config), {"ffmpeg_runner": ffmpeg_runner}),
+    ]
 
     # Verify requests
-    assert requests[0].clip is clip_mock
+    assert requests[0].clip is ref_clip
     assert requests[0].frame_number == 10
     assert requests[0].output_path == Path("out/ref_00010.png")
-    assert requests[0].overlay.label == "ref"
-    assert requests[0].overlay.frame_number == 10
-    assert requests[0].overlay.display_frame_number == 10
-    assert requests[0].overlay.selection_label == "A"
-    assert requests[0].overlay.resolution == (1920, 1080)
-    assert requests[0].overlay.hdr_info == "HDR10"
-    assert requests[0].overlay.num_frames == 150
+    first_overlay = requests[0].overlay
+    assert first_overlay is not None
+    assert first_overlay.label == "ref"
+    assert first_overlay.frame_number == 10
+    assert first_overlay.display_frame_number == 10
+    assert first_overlay.selection_label == "A"
+    assert first_overlay.resolution == (1920, 1080)
+    assert first_overlay.hdr_info == "HDR10"
+    assert first_overlay.num_frames == 150
 
     assert requests[1].frame_number == 20
     assert requests[1].output_path == Path("out/ref_00020.png")
-    assert requests[1].overlay.selection_label == "B"
+    second_overlay = requests[1].overlay
+    assert second_overlay is not None
+    assert second_overlay.selection_label == "B"
 
-    assert requests[2].clip is clip_mock
+    assert requests[2].clip is enc_clip
     assert requests[2].frame_number == 30
     assert requests[2].output_path == Path("out/enc_00030.png")
-    assert requests[2].overlay.label == "enc"
-    assert requests[2].overlay.frame_number == 30
-    assert requests[2].overlay.display_frame_number == 30
-    assert requests[2].overlay.selection_label == "C"
+    third_overlay = requests[2].overlay
+    assert third_overlay is not None
+    assert third_overlay.label == "enc"
+    assert third_overlay.frame_number == 30
+    assert third_overlay.display_frame_number == 30
+    assert third_overlay.selection_label == "C"
+    assert third_overlay.resolution == (req2.probe_width, req2.probe_height)
+    assert third_overlay.hdr_info is None
+    assert third_overlay.num_frames == req2.probe_num_frames
 
 
 def test_render_batch_results_by_label() -> None:

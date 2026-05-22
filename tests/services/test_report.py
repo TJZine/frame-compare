@@ -180,6 +180,36 @@ def test_generate_report_write_failure_raises(
         generate_report(report_data, ReportConfig(output_dir=str(tmp_path)))
 
 
+def test_generate_report_keeps_existing_output_when_atomic_replace_fails(
+    report_data: ReportData, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    report_path = tmp_path / "report.html"
+    report_path.write_text("old report", encoding="utf-8")
+
+    def _boom(_src: str, _dst: Path) -> None:
+        raise OSError("replace failed")
+
+    monkeypatch.setattr("frame_compare.utils.atomic_write.os.replace", _boom)
+
+    with pytest.raises(ReportError, match="failed to write report"):
+        generate_report(report_data, ReportConfig(output_dir=str(tmp_path)))
+
+    assert report_path.read_text(encoding="utf-8") == "old report"
+    assert list(tmp_path.glob(".report.html.*")) == []
+
+
+def test_generate_report_preserves_existing_report_permissions(
+    report_data: ReportData, tmp_path: Path
+) -> None:
+    report_path = tmp_path / "report.html"
+    report_path.write_text("old report", encoding="utf-8")
+    report_path.chmod(0o640)
+
+    generate_report(report_data, ReportConfig(output_dir=str(tmp_path)))
+
+    assert (report_path.stat().st_mode & 0o777) == 0o640
+
+
 def test_generate_report_embed_images_base64(report_data: ReportData, tmp_path: Path) -> None:
     config = ReportConfig(embed_images=True, output_dir=str(tmp_path))
     out_path = generate_report(report_data, config)

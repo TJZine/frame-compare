@@ -22,6 +22,16 @@ def test_write_text_atomic_writes_empty(tmp_path: Path) -> None:
     assert target.read_text(encoding="utf-8") == ""
 
 
+def test_write_text_atomic_uses_normal_new_file_permissions(tmp_path: Path) -> None:
+    target = tmp_path / "out.txt"
+
+    write_text_atomic(target, "content", encoding="utf-8")
+
+    expected = tmp_path / "expected.txt"
+    expected.write_text("content", encoding="utf-8")
+    assert (target.stat().st_mode & 0o777) == (expected.stat().st_mode & 0o777)
+
+
 def test_write_text_atomic_rejects_none_and_cleans_up(tmp_path: Path) -> None:
     target = tmp_path / "out.txt"
 
@@ -56,6 +66,17 @@ def test_write_bytes_atomic_rejects_none_and_cleans_up(tmp_path: Path) -> None:
 
     assert not target.exists()
     assert list(tmp_path.glob(".out.bin.*")) == []
+
+
+def test_write_bytes_atomic_preserves_existing_file_permissions(tmp_path: Path) -> None:
+    target = tmp_path / "out.bin"
+    target.write_bytes(b"old")
+    target.chmod(0o640)
+
+    write_bytes_atomic(target, b"new")
+
+    assert target.read_bytes() == b"new"
+    assert (target.stat().st_mode & 0o777) == 0o640
 
 
 def test_write_text_atomic_does_not_replace_target_on_os_replace_failure(

@@ -6,15 +6,15 @@ from frame_compare.config.utils import deep_merge
 
 
 def test_deep_merge_basic_and_override() -> None:
-    base = {"a": 1, "b": 2, "c": 3}
-    updates = {"b": 20, "d": 4}
+    base: dict[str, object] = {"a": 1, "b": 2, "c": 3}
+    updates: dict[str, object] = {"b": 20, "d": 4}
 
     result = deep_merge(base, updates)
     assert result == {"a": 1, "b": 20, "c": 3, "d": 4}
 
 
 def test_deep_merge_recursive() -> None:
-    base = {
+    base: dict[str, object] = {
         "section1": {
             "key1": "value1",
             "key2": "value2",
@@ -23,7 +23,7 @@ def test_deep_merge_recursive() -> None:
             "key3": "value3",
         },
     }
-    updates = {
+    updates: dict[str, object] = {
         "section1": {
             "key2": "value2-updated",
             "key4": "value4",
@@ -42,14 +42,14 @@ def test_deep_merge_recursive() -> None:
     }
 
 
-def test_deep_merge_non_mutation() -> None:
-    base = {
+def test_deep_merge_does_not_mutate_input_mappings() -> None:
+    base: dict[str, object] = {
         "section1": {
             "key1": "value1",
         },
         "a": 1,
     }
-    updates = {
+    updates: dict[str, object] = {
         "section1": {
             "key1": "value1-updated",
         },
