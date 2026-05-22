@@ -103,15 +103,6 @@ def check_vspreview_availability() -> VSPreviewAvailability:
         )
 
 
-def is_vspreview_available() -> bool:
-    """Check if VSPreview is installed and can be launched (compatibility wrapper).
-
-    Returns:
-        True if vspreview is importable and functional
-    """
-    return check_vspreview_availability().is_available
-
-
 @dataclass(frozen=True)
 class VSPreviewConfig:
     """Configuration for VSPreview integration.
