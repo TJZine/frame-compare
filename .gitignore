@@ -13,9 +13,9 @@
 AGENTS.md
 CODEX.md
 .codannaignore
-report/
-screens/
-screenshots/
+/report/
+/screens/
+/screenshots/
 .desloppify/
 .agents/skills/desloppify/
 

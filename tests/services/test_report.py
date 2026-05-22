@@ -291,7 +291,7 @@ def test_image_src_for_report_uses_file_uri_for_cross_drive_fallback(
 ) -> None:
     screenshot_path = tmp_path / "shot.png"
     screenshot_path.write_bytes(b"fake_png_data")
-    mocker.patch.object(report_module, "os_path_relpath", side_effect=ValueError)
+    mocker.patch("frame_compare.services.report.payload.os_path_relpath", side_effect=ValueError)
 
     src = report_module._image_src_for_report(
         screenshot_path,
