@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import frame_compare.vs.env as env_module
 from frame_compare.errors import PluginNotFoundError, VapourSynthError, VapourSynthNotFoundError
 from frame_compare.vs.env import (
     detect_plugins,
@@ -61,6 +62,59 @@ def test_ensure_vs_environment_core_failure_raises_vs_error(mocker) -> None:
     with pytest.raises(VapourSynthError) as exc:
         ensure_vs_environment()
     assert exc.value.code == "FC-2002"
+
+
+def test_register_windows_dll_dirs_is_idempotent_per_process(monkeypatch, tmp_path) -> None:
+    """Windows DLL registration should be once-per-directory for the process lifetime."""
+    bundle_root = tmp_path / "bundle"
+    python_dir = bundle_root / "python"
+    python_dir.mkdir(parents=True)
+    executable = python_dir / "python.exe"
+    executable.write_text("")
+
+    env_home = tmp_path / "vapoursynth-home"
+    env_home.mkdir()
+    vs_core = bundle_root / "vs" / "core"
+    vs_core.mkdir(parents=True)
+    plugin_dir = vs_core / "plugins"
+    plugin_dir.mkdir()
+    app_site_packages = bundle_root / "app" / "site-packages"
+    app_site_packages.mkdir(parents=True)
+    nested_site_packages = app_site_packages / "Lib" / "site-packages"
+    nested_site_packages.mkdir(parents=True)
+
+    monkeypatch.setattr(env_module.os, "name", "nt", raising=False)
+    monkeypatch.setattr(env_module.sys, "executable", str(executable))
+    monkeypatch.setenv("VAPOURSYNTH_HOME", str(env_home))
+    monkeypatch.setattr(
+        env_module,
+        "_WINDOWS_DLL_REGISTRATION",
+        env_module._WindowsDllRegistrationState(),
+    )
+
+    calls: list[str] = []
+
+    def fake_add_dll_directory(path: str) -> object:
+        calls.append(path)
+        return object()
+
+    monkeypatch.setattr(env_module.os, "add_dll_directory", fake_add_dll_directory, raising=False)
+
+    env_module.register_windows_dll_dirs()
+    env_module.register_windows_dll_dirs()
+
+    expected_calls = [
+        str(env_home),
+        str(vs_core),
+        str(plugin_dir),
+        str(app_site_packages),
+        str(nested_site_packages),
+    ]
+    assert calls == expected_calls
+    assert env_module._WINDOWS_DLL_REGISTRATION.registered_dirs == {
+        env_module.os.path.normcase(env_module.os.path.normpath(path)) for path in expected_calls
+    }
+    assert len(env_module._WINDOWS_DLL_REGISTRATION.handles) == len(expected_calls)
 
 
 def test_detect_plugins_all_present() -> None:
