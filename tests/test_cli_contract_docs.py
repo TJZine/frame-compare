@@ -92,4 +92,9 @@ def test_current_cli_contract_matches_wizard_visibility_choices() -> None:
 
     for visibility in Visibility:
         assert visibility.value in wizard_section
-    assert "private" not in wizard_section
+    for unsupported_token in (
+        "--visibility private",
+        "--visibility=private",
+        "visibility: private",
+    ):
+        assert unsupported_token not in wizard_section

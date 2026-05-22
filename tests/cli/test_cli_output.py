@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from _pytest.monkeypatch import MonkeyPatch
@@ -22,8 +23,12 @@ def _config() -> ConfigSchema:
     return ConfigSchema()
 
 
+def _workspace_path(*parts: str) -> Path:
+    return Path(os.path.sep, "workspace", *parts)
+
+
 def _request(*, no_upload: bool = False) -> RunRequest:
-    return RunRequest(root=Path("/workspace"), no_upload=no_upload)
+    return RunRequest(root=_workspace_path(), no_upload=no_upload)
 
 
 def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: MonkeyPatch) -> None:
@@ -40,16 +45,16 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
         console,
         request=_request(no_upload=True),
         config=config,
-        root=Path("/workspace"),
-        config_path=Path("/workspace/config/config.toml"),
+        root=_workspace_path(),
+        config_path=_workspace_path("config", "config.toml"),
     )
 
     output = _render(console)
     assert "At-a-Glance" in output
     assert "root" in output
-    assert "/workspace" in output
+    assert str(_workspace_path()) in output
     assert "config" in output
-    assert "/workspace/config/config.toml" in output
+    assert str(_workspace_path("config", "config.toml")) in output
     assert "input" in output
     assert "comparison_videos" in output
     assert "selection" in output
@@ -91,8 +96,8 @@ def test_at_a_glance_prints_vspreview_availability_when_probe_succeeds(
         console,
         request=_request(),
         config=config,
-        root=Path("/workspace"),
-        config_path=Path("/workspace/config/config.toml"),
+        root=_workspace_path(),
+        config_path=_workspace_path("config", "config.toml"),
     )
 
     output = _render(console)
@@ -125,8 +130,8 @@ def test_at_a_glance_prints_vspreview_probe_failure(monkeypatch: MonkeyPatch) ->
         console,
         request=_request(),
         config=config,
-        root=Path("/workspace"),
-        config_path=Path("/workspace/config/config.toml"),
+        root=_workspace_path(),
+        config_path=_workspace_path("config", "config.toml"),
     )
 
     output = _render(console)
@@ -140,12 +145,12 @@ def test_result_summary_quiet_mode_prints_only_screenshot_path_when_available() 
 
     print_result_summary(
         console,
-        result=RunResult(success=True, screenshot_dir=Path("/workspace/screenshots")),
+        result=RunResult(success=True, screenshot_dir=_workspace_path("screenshots")),
         quiet=True,
     )
 
     output = _render(console)
-    assert output.strip() == "Screenshots: /workspace/screenshots"
+    assert output.strip() == f"Screenshots: {_workspace_path('screenshots')}"
 
     empty_console = _console()
     print_result_summary(empty_console, result=RunResult(success=True), quiet=True)
@@ -159,9 +164,9 @@ def test_result_summary_prints_artifact_rows_and_untruncated_warnings() -> None:
         console,
         result=RunResult(
             success=True,
-            screenshot_dir=Path("/workspace/screenshots"),
+            screenshot_dir=_workspace_path("screenshots"),
             slowpics_url="https://slow.pics/c/example",
-            report_path=Path("/workspace/report.html"),
+            report_path=_workspace_path("report.html"),
             warnings=["metadata skipped", "upload reused"],
         ),
         quiet=False,
@@ -170,11 +175,11 @@ def test_result_summary_prints_artifact_rows_and_untruncated_warnings() -> None:
     output = _render(console)
     assert "Result" in output
     assert "screenshots" in output
-    assert "/workspace/screenshots" in output
+    assert str(_workspace_path("screenshots")) in output
     assert "slow.pics" in output
     assert "https://slow.pics/c/example" in output
     assert "report" in output
-    assert "/workspace/report.html" in output
+    assert str(_workspace_path("report.html")) in output
     assert "Warnings" in output
     assert "- metadata skipped" in output
     assert "- upload reused" in output
@@ -188,9 +193,9 @@ def test_result_summary_omits_warnings_panel_when_no_warnings_exist() -> None:
         console,
         result=RunResult(
             success=True,
-            screenshot_dir=Path("/workspace/screenshots"),
+            screenshot_dir=_workspace_path("screenshots"),
             slowpics_url="https://slow.pics/c/example",
-            report_path=Path("/workspace/report.html"),
+            report_path=_workspace_path("report.html"),
         ),
         quiet=False,
     )

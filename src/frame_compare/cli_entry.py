@@ -163,6 +163,56 @@ def _coerce_cli_choice[CliChoiceT: Enum](
         ) from exc
 
 
+def _build_run_request_from_cli(
+    *,
+    resolved_root: Path,
+    config_path: Path,
+    input_dir: Path | None,
+    no_cache: bool,
+    from_cache_only: bool,
+    no_upload: bool,
+    parsed_tm_preset: TonemapPreset | None,
+    tm_target: int | None,
+    parsed_tm_curve: ToneCurve | None,
+    frame_count: int | None,
+    seed: int | None,
+    parsed_overlay: OverlayMode | None,
+    skip_analysis: bool,
+    skip_metadata: bool,
+    skip_dovi: bool,
+    force_interactive_alignment: bool,
+    json_output: bool,
+    effective_no_color: bool,
+    quiet: bool,
+    verbose: bool,
+) -> RunRequest:
+    """Build the single CLI-to-runtime request mapping used by run branches."""
+    from frame_compare.orchestration.coordinator import RunRequest
+
+    return RunRequest(
+        root=resolved_root,
+        config_path=config_path,
+        input_dir=input_dir,
+        no_cache=no_cache,
+        from_cache_only=from_cache_only,
+        no_upload=no_upload,
+        tm_preset=parsed_tm_preset,
+        tm_target_nits=tm_target,
+        tm_curve=parsed_tm_curve,
+        frame_count=frame_count,
+        seed=seed,
+        overlay_mode=parsed_overlay,
+        skip_analysis=skip_analysis,
+        skip_metadata=skip_metadata,
+        skip_dovi=skip_dovi,
+        force_interactive_alignment=force_interactive_alignment,
+        json_output=json_output,
+        no_color=effective_no_color,
+        quiet=quiet,
+        verbose=verbose,
+    )
+
+
 @app.command()
 def run(
     root: Path = typer.Option(".", "--root", "-r"),
@@ -188,8 +238,6 @@ def run(
     quiet: bool = typer.Option(False, "--quiet", "-q"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
-    from frame_compare.orchestration.coordinator import RunRequest
-
     resolved_root, config_path = _resolve_root_and_config(root, config)
     effective_no_color = no_color or ("NO_COLOR" in os.environ)
     console = Console(
@@ -205,35 +253,36 @@ def run(
         parsed_tm_curve = _coerce_cli_choice(tm_curve, ToneCurve, ("color", "tone_curve"))
         parsed_overlay = _coerce_cli_choice(overlay, OverlayMode, ("screenshots", "overlay_mode"))
 
+        request = _build_run_request_from_cli(
+            resolved_root=resolved_root,
+            config_path=config_path,
+            input_dir=input_dir,
+            no_cache=no_cache,
+            from_cache_only=from_cache_only,
+            no_upload=no_upload,
+            parsed_tm_preset=parsed_tm_preset,
+            tm_target=tm_target,
+            parsed_tm_curve=parsed_tm_curve,
+            frame_count=frame_count,
+            seed=seed,
+            parsed_overlay=parsed_overlay,
+            skip_analysis=skip_analysis,
+            skip_metadata=skip_metadata,
+            skip_dovi=skip_dovi,
+            force_interactive_alignment=force_interactive_alignment,
+            json_output=json_output,
+            effective_no_color=effective_no_color,
+            quiet=quiet,
+            verbose=verbose,
+        )
+
         resolved_config: ConfigSchema | None = None
         if write_config:
-            request = RunRequest(
-                root=resolved_root,
-                config_path=config_path,
-                input_dir=input_dir,
-                no_cache=no_cache,
-                from_cache_only=from_cache_only,
-                no_upload=no_upload,
-                tm_preset=parsed_tm_preset,
-                tm_target_nits=tm_target,
-                tm_curve=parsed_tm_curve,
-                frame_count=frame_count,
-                seed=seed,
-                overlay_mode=parsed_overlay,
-                skip_analysis=skip_analysis,
-                skip_metadata=skip_metadata,
-                skip_dovi=skip_dovi,
-                force_interactive_alignment=force_interactive_alignment,
-                json_output=json_output,
-                no_color=effective_no_color,
-                quiet=quiet,
-                verbose=verbose,
-            )
 
             def _resolve_effective_config() -> ConfigSchema:
                 return apply_cli_overrides(
                     load_config(config_path),
-                    cli_args=cast(dict[str, object], request.cli_override_args()),
+                    cli_args=request.cli_override_args(),
                 )
 
             def _load_effective_config() -> ConfigSchema:
@@ -245,33 +294,10 @@ def run(
             _write_config_to(config_path, _load_effective_config())
             return
 
-        request = RunRequest(
-            root=resolved_root,
-            config_path=config_path,
-            input_dir=input_dir,
-            no_cache=no_cache,
-            from_cache_only=from_cache_only,
-            no_upload=no_upload,
-            tm_preset=parsed_tm_preset,
-            tm_target_nits=tm_target,
-            tm_curve=parsed_tm_curve,
-            frame_count=frame_count,
-            seed=seed,
-            overlay_mode=parsed_overlay,
-            skip_analysis=skip_analysis,
-            skip_metadata=skip_metadata,
-            skip_dovi=skip_dovi,
-            force_interactive_alignment=force_interactive_alignment,
-            json_output=json_output,
-            no_color=effective_no_color,
-            quiet=quiet,
-            verbose=verbose,
-        )
-
         def _resolve_effective_config() -> ConfigSchema:
             return apply_cli_overrides(
                 load_config(config_path),
-                cli_args=cast(dict[str, object], request.cli_override_args()),
+                cli_args=request.cli_override_args(),
             )
 
         def _load_effective_config() -> ConfigSchema:

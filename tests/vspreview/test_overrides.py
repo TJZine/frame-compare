@@ -398,13 +398,37 @@ timestamp = "2026-01-03T12:00:00Z"
         )
 
         with (
-            patch("pathlib.Path.open", side_effect=OSError("disk full")),
+            patch(
+                "frame_compare.vspreview.overrides.write_bytes_atomic",
+                side_effect=OSError("disk full"),
+            ),
             patch("frame_compare.vspreview.overrides.log.warning") as warning,
         ):
             save_manual_override(cache_dir, override)
 
         warning.assert_called_once()
         assert warning.call_args.args[0] == "manual_overrides_write_error"
+
+    def test_save_manual_override_uses_atomic_bytes_write(self, tmp_path: Path) -> None:
+        cache_dir = tmp_path / "cache"
+        override = ManualOverride(
+            reference_clip="ref",
+            comparison_clip="comp",
+            frame_offset=10,
+            timestamp="2026-01-03T12:00:00Z",
+        )
+        calls: list[tuple[Path, bytes]] = []
+
+        def _fake_write(path: Path, content: bytes) -> None:
+            calls.append((path, content))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
+
+        with patch("frame_compare.vspreview.overrides.write_bytes_atomic", _fake_write):
+            save_manual_override(cache_dir, override)
+
+        assert [path for path, _ in calls] == [cache_dir / "manual_overrides.toml"]
+        assert load_manual_overrides(cache_dir) == {"ref:comp": override}
 
 
 class TestManualOverridePrecedence:

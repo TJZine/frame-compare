@@ -256,6 +256,7 @@ def test_render_screenshots_prefills_hdr_probe_for_ffmpeg_tonemap_gate(tmp_path:
             ScreenshotRenderOptions(renderer="ffmpeg", ffmpeg_runner=mock_runner),
         )
 
+    mock_runner.probe_hdr.assert_called_once_with(Path("hdr_video.mkv"))
     prepare_clip.assert_not_called()
 
 

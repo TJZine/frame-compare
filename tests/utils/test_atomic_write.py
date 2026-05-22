@@ -32,6 +32,21 @@ def test_write_text_atomic_uses_normal_new_file_permissions(tmp_path: Path) -> N
     assert (target.stat().st_mode & 0o777) == (expected.stat().st_mode & 0o777)
 
 
+def test_write_text_atomic_does_not_read_process_umask(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "out.txt"
+
+    def _fail_umask(_mask: int) -> int:
+        raise AssertionError("atomic writes must not mutate process umask")
+
+    monkeypatch.setattr("frame_compare.utils.atomic_write.os.umask", _fail_umask)
+
+    write_text_atomic(target, "content", encoding="utf-8")
+
+    assert target.read_text(encoding="utf-8") == "content"
+
+
 def test_write_text_atomic_rejects_none_and_cleans_up(tmp_path: Path) -> None:
     target = tmp_path / "out.txt"
 

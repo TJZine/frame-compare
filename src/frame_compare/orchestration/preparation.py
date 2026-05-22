@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import cast
 
 import structlog
 
@@ -255,7 +254,7 @@ async def execute_prep(
     workspace = preflight.workspace
     config = apply_cli_overrides(
         preflight.config,
-        cli_args=cast(dict[str, object], request.cli_override_args()),
+        cli_args=request.cli_override_args(),
     )
     input_videos = discover_inputs(workspace.input_dir)
     artifacts = RunArtifacts()

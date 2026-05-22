@@ -16,6 +16,12 @@ from frame_compare.orchestration.doctor import (
 )
 
 
+def _clear_tmdb_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("TMDB_API_KEY", raising=False)
+    monkeypatch.delenv("FRAME_COMPARE_TMDB__API_KEY", raising=False)
+    monkeypatch.delenv("FRAME_COMPARE_TMDB__ENABLED", raising=False)
+
+
 class TestCheckPythonVersion:
     """Tests for python_version check via run_doctor."""
 
@@ -334,8 +340,7 @@ def test_check_tmdb_api_key_passes_with_workspace_config(
     )
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("TMDB_API_KEY", raising=False)
-    monkeypatch.delenv("FRAME_COMPARE_TMDB__API_KEY", raising=False)
+    _clear_tmdb_env(monkeypatch)
 
     result = tmdb_check.check_fn()
 
@@ -360,8 +365,7 @@ def test_check_tmdb_api_key_fails_with_malformed_workspace_config(
     )
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("TMDB_API_KEY", raising=False)
-    monkeypatch.delenv("FRAME_COMPARE_TMDB__API_KEY", raising=False)
+    _clear_tmdb_env(monkeypatch)
 
     result = tmdb_check.check_fn()
 
@@ -378,7 +382,7 @@ def test_check_tmdb_api_key_fails_with_malformed_env(
     tmdb_check = next(c for c in collect_checks() if c.name == "tmdb_api_key")
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("TMDB_API_KEY", raising=False)
+    _clear_tmdb_env(monkeypatch)
     monkeypatch.setenv("FRAME_COMPARE_TMDB__API_KEY", "not-a-valid-key")
 
     result = tmdb_check.check_fn()
@@ -396,7 +400,7 @@ def test_check_tmdb_api_key_legacy_alias_remains_warning_only(
     tmdb_check = next(c for c in collect_checks() if c.name == "tmdb_api_key")
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("FRAME_COMPARE_TMDB__API_KEY", raising=False)
+    _clear_tmdb_env(monkeypatch)
 
     monkeypatch.setenv("TMDB_API_KEY", "legacy_key")
     legacy_result = tmdb_check.check_fn()
@@ -415,8 +419,7 @@ def test_check_tmdb_api_key_missing_mentions_workspace_config_hint(
     tmdb_check = next(c for c in collect_checks() if c.name == "tmdb_api_key")
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("TMDB_API_KEY", raising=False)
-    monkeypatch.delenv("FRAME_COMPARE_TMDB__API_KEY", raising=False)
+    _clear_tmdb_env(monkeypatch)
 
     result = tmdb_check.check_fn()
 
@@ -443,8 +446,7 @@ def test_check_tmdb_api_key_enabled_without_key_still_fails(
     )
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("TMDB_API_KEY", raising=False)
-    monkeypatch.delenv("FRAME_COMPARE_TMDB__API_KEY", raising=False)
+    _clear_tmdb_env(monkeypatch)
 
     result = tmdb_check.check_fn()
 
@@ -471,8 +473,7 @@ def test_check_tmdb_api_key_disabled_without_key_is_non_failing(
     )
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("TMDB_API_KEY", raising=False)
-    monkeypatch.delenv("FRAME_COMPARE_TMDB__API_KEY", raising=False)
+    _clear_tmdb_env(monkeypatch)
 
     result = tmdb_check.check_fn()
 

@@ -25,6 +25,7 @@ from frame_compare.services.alignment import (
     _probe_fps,
     _samples_to_frames,
     align_clips,
+    check_alignment_cached,
     load_cached_offsets,
     save_offsets_cache,
 )
@@ -549,6 +550,18 @@ def test_align_clips_duplicate_stems_fail_before_starting_progress(tmp_path: Pat
 
     reporter.start_phase.assert_not_called()
     reporter.complete_phase.assert_not_called()
+
+
+def test_check_alignment_cached_rejects_duplicate_comparison_stems(tmp_path: Path) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp_a = tmp_path / "dup.mkv"
+    comp_b = tmp_path / "dup.mp4"
+    ref.touch()
+    comp_a.touch()
+    comp_b.touch()
+
+    with pytest.raises(AudioAlignmentError, match="Duplicate comparison clip stems detected"):
+        check_alignment_cached(ref, [comp_a, comp_b], tmp_path)
 
 
 def test_align_clips_completes_progress_when_cache_load_raises(tmp_path: Path) -> None:

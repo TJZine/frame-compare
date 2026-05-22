@@ -3,11 +3,63 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
+from html.parser import HTMLParser
 
 import pytest
 
 from frame_compare.services.report.payload import ReportPayload
 from frame_compare.services.report.renderer import build_html
+
+
+@dataclass
+class _ParsedOption:
+    text: str
+    attrs: dict[str, str | None]
+
+
+@dataclass
+class _ParsedSelect:
+    attrs: dict[str, str | None]
+    options: list[_ParsedOption] = field(default_factory=list)
+
+
+class _SelectParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.selects: dict[str, _ParsedSelect] = {}
+        self._current_select_id: str | None = None
+        self._current_option_attrs: dict[str, str | None] | None = None
+        self._current_option_text: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attr_map = dict(attrs)
+        if tag == "select":
+            select_id = attr_map.get("id")
+            if select_id is not None:
+                self.selects[select_id] = _ParsedSelect(attrs=attr_map)
+                self._current_select_id = select_id
+        elif tag == "option" and self._current_select_id is not None:
+            self._current_option_attrs = attr_map
+            self._current_option_text = []
+
+    def handle_data(self, data: str) -> None:
+        if self._current_option_attrs is not None:
+            self._current_option_text.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "option" and self._current_option_attrs is not None:
+            if self._current_select_id is not None:
+                self.selects[self._current_select_id].options.append(
+                    _ParsedOption(
+                        text="".join(self._current_option_text),
+                        attrs=self._current_option_attrs,
+                    )
+                )
+            self._current_option_attrs = None
+            self._current_option_text = []
+        elif tag == "select":
+            self._current_select_id = None
 
 
 @pytest.fixture
@@ -88,14 +140,23 @@ def test_build_html_renders_only_safe_slowpics_links(report_payload: ReportPaylo
 
 def test_build_html_renders_frame_and_clip_selectors(report_payload: ReportPayload) -> None:
     html = build_html(report_payload)
+    parser = _SelectParser()
+    parser.feed(html)
 
-    assert '<select id="frame-select" aria-label="Select frame">' in html
-    assert '<option value="0">Frame 10</option>' in html
-    assert '<option value="1">Frame 20</option>' in html
-    assert '<select id="left-select" aria-label="Left clip">' in html
-    assert '<option value="0">REF &lt;main&gt;</option>' in html
-    assert '<select id="right-select" aria-label="Right clip">' in html
-    assert '<option value="1" selected>ENC "candidate"</option>' in html
+    assert parser.selects["frame-select"].attrs["aria-label"] == "Select frame"
+    assert [option.text for option in parser.selects["frame-select"].options] == [
+        "Frame 10",
+        "Frame 20",
+    ]
+    assert parser.selects["left-select"].attrs["aria-label"] == "Left clip"
+    assert any(option.text == "REF <main>" for option in parser.selects["left-select"].options)
+    assert parser.selects["right-select"].attrs["aria-label"] == "Right clip"
+    candidate = next(
+        option
+        for option in parser.selects["right-select"].options
+        if option.text == 'ENC "candidate"'
+    )
+    assert "selected" in candidate.attrs
 
 
 def test_build_html_embeds_json_without_raw_script_terminators(

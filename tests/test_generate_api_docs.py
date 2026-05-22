@@ -184,11 +184,12 @@ def test_generation_preserves_existing_output_mode(tmp_path: Path) -> None:
     output = tmp_path / "docs" / "api.md"
     _write_file(output, "old")
     output.chmod(0o640)
+    original_mode = output.stat().st_mode & 0o777
 
     exit_code = gen.main(["--project-root", str(tmp_path), "--output", str(output)])
 
     assert exit_code == 0
-    assert (output.stat().st_mode & 0o777) == 0o640
+    assert (output.stat().st_mode & 0o777) == original_mode
 
 
 def test_generation_does_not_replace_target_on_shared_replace_failure(

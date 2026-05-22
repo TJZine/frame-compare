@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, TypedDict, cast
 
 from pydantic import ValidationError
@@ -40,7 +41,7 @@ _FLAG_ONLY_OVERRIDES: frozenset[str] = frozenset(
 
 def apply_cli_overrides(
     config: ConfigSchema,
-    cli_args: dict[str, object],
+    cli_args: Mapping[str, object],
 ) -> ConfigSchema:
     """Apply CLI arguments as config overrides."""
     from frame_compare.config.schema import ConfigSchema

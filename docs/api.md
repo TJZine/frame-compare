@@ -114,7 +114,7 @@ Frame selection and analysis settings.
 
 ### apply_cli_overrides
 
-`apply_cli_overrides(config: ConfigSchema, cli_args: dict[str, object]) -> ConfigSchema`
+`apply_cli_overrides(config: ConfigSchema, cli_args: Mapping[str, object]) -> ConfigSchema`
 
 Apply CLI arguments as config overrides.
 

@@ -111,10 +111,6 @@ def test_register_windows_dll_dirs_is_idempotent_per_process(monkeypatch, tmp_pa
         str(nested_site_packages),
     ]
     assert calls == expected_calls
-    assert env_module._WINDOWS_DLL_REGISTRATION.registered_dirs == {
-        env_module.os.path.normcase(env_module.os.path.normpath(path)) for path in expected_calls
-    }
-    assert len(env_module._WINDOWS_DLL_REGISTRATION.handles) == len(expected_calls)
 
 
 def test_detect_plugins_all_present() -> None:

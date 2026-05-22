@@ -305,6 +305,8 @@ def check_alignment_cached(
     """Check if all comparison offsets are cached/overridden, returning missing keys."""
     from frame_compare.vspreview.overrides import load_manual_overrides
 
+    _check_duplicate_stems(comparisons)
+
     manual_overrides = load_manual_overrides(cache_dir)
     cached_offsets = load_cached_offsets(cache_dir, [reference] + comparisons) or {}
 
