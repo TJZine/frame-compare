@@ -11,6 +11,7 @@ from frame_compare.services.report.payload import (
     build_report_payload,
 )
 from frame_compare.services.report.renderer import build_html
+from frame_compare.utils.atomic_write import write_text_atomic
 
 
 def generate_report(
@@ -43,8 +44,7 @@ def generate_report(
     html_content = build_html(embedded_data, include_filmstrip=config.include_filmstrip)
 
     try:
-        final_output_path.parent.mkdir(parents=True, exist_ok=True)
-        final_output_path.write_text(html_content, encoding="utf-8")
+        write_text_atomic(final_output_path, html_content, encoding="utf-8")
     except OSError as e:
         raise ReportError(f"failed to write report: {e}") from e
 

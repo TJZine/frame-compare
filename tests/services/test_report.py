@@ -172,7 +172,10 @@ def test_generate_report_encode_failure_raises(
 def test_generate_report_write_failure_raises(
     report_data: ReportData, mocker: MockerFixture, tmp_path: Path
 ) -> None:
-    mocker.patch.object(Path, "write_text", side_effect=OSError("Disk full"))
+    mocker.patch(
+        "frame_compare.services.report.entry.write_text_atomic",
+        side_effect=OSError("Disk full"),
+    )
     with pytest.raises(ReportError, match="failed to write report"):
         generate_report(report_data, ReportConfig(output_dir=str(tmp_path)))
 
@@ -396,3 +399,43 @@ def test_clip_info_frozen() -> None:
 def test_report_data_frozen(report_data: ReportData) -> None:
     with pytest.raises(FrozenInstanceError):
         report_data.frames = []  # type: ignore
+
+
+def test_generate_report_slowpics_url_sanitization(report_data: ReportData, tmp_path: Path) -> None:
+    # Test valid https scheme
+    report_data_valid = ReportData(
+        clips=report_data.clips,
+        frames=report_data.frames,
+        screenshots=report_data.screenshots,
+        slowpics_url="https://slow.pics/c/123",
+    )
+    out_path = generate_report(report_data_valid, ReportConfig(output_dir=str(tmp_path)))
+    content = out_path.read_text(encoding="utf-8")
+    assert "https://slow.pics/c/123" in content
+    assert "View on slow.pics" in content
+
+    # Test invalid scheme (e.g., javascript or ftp)
+    report_data_invalid = ReportData(
+        clips=report_data.clips,
+        frames=report_data.frames,
+        screenshots=report_data.screenshots,
+        slowpics_url="javascript:alert(1)",
+    )
+    out_path = generate_report(report_data_invalid, ReportConfig(output_dir=str(tmp_path)))
+    content = out_path.read_text(encoding="utf-8")
+    assert "View on slow.pics" not in content
+
+
+def test_renderer_clip_options_rendering(report_data: ReportData, tmp_path: Path) -> None:
+    # Verify that left and right clip options are rendered with correct values/labels
+    # and selected index is respected
+    out_path = generate_report(report_data, ReportConfig(output_dir=str(tmp_path)))
+    content = out_path.read_text(encoding="utf-8")
+    # Left clip select shouldn't have selected index set in option
+    assert '<select id="left-select" aria-label="Left clip">' in content
+    assert '<option value="0">REF</option>' in content
+    assert '<option value="1">ENC</option>' in content
+
+    # Right clip select should have option index 1 marked as "selected"
+    assert '<select id="right-select" aria-label="Right clip">' in content
+    assert '<option value="1" selected>ENC</option>' in content
