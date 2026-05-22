@@ -15,6 +15,7 @@ from frame_compare.render.expansion import (
     validate_batch_requests,
     validate_ffmpeg_batch_tonemap_gate,
 )
+from frame_compare.render.prepare import is_hdr_via_runner
 from frame_compare.render.types import (
     Renderer,
     RenderRequest,
@@ -29,6 +30,20 @@ if TYPE_CHECKING:
     from frame_compare.render.types import OverlayMode
 
 log = structlog.get_logger()
+
+
+def _resolve_probe_is_hdr(
+    clip_path: Path,
+    *,
+    config: ConfigSchema,
+    renderer: Renderer,
+    ffmpeg_runner: FFmpegRunner | None,
+) -> bool | None:
+    target_renderer = resolve_target_renderer(config, renderer)
+    if target_renderer != "ffmpeg" or not config.color.enable_tonemap:
+        return None
+    resolved_ffmpeg_runner = resolve_batch_ffmpeg_runner(ffmpeg_runner)
+    return is_hdr_via_runner(clip_path, resolved_ffmpeg_runner)
 
 
 def _render_description(request: RenderRequest) -> str:
@@ -218,7 +233,12 @@ def render_screenshots(
             probe_width=None,
             probe_height=None,
             probe_num_frames=None,
-            probe_is_hdr=None,
+            probe_is_hdr=_resolve_probe_is_hdr(
+                clip_path,
+                config=config,
+                renderer=resolved_options.renderer,
+                ffmpeg_runner=resolved_options.ffmpeg_runner,
+            ),
         )
         batch_requests.append(req)
 

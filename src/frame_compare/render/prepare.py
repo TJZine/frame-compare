@@ -68,7 +68,7 @@ def resolve_tonemap_settings(
     return settings
 
 
-def _is_hdr_via_runner(path: Path, runner: FFmpegRunner) -> bool:
+def is_hdr_via_runner(path: Path, runner: FFmpegRunner) -> bool:
     """Determine HDR using the provided FFmpegRunner.
 
     Preserves the existing conservative fallback behavior:
@@ -135,7 +135,7 @@ def _resolve_auto_mode_fallback(
     if config.color.enable_tonemap:
         # Must probe HDR status before deciding
         try:
-            is_hdr = _is_hdr_via_runner(clip_path, ffmpeg_runner)
+            is_hdr = is_hdr_via_runner(clip_path, ffmpeg_runner)
         except Exception:
             # Probe failed — propagate (no fallback)
             log.debug(
@@ -179,7 +179,7 @@ def _validate_ffmpeg_tonemap_gate(
     from frame_compare.errors import TonemapRequiresVapourSynthError
 
     try:
-        is_hdr = _is_hdr_via_runner(clip_path, ffmpeg_runner)
+        is_hdr = is_hdr_via_runner(clip_path, ffmpeg_runner)
     except Exception:
         # Probe failed — propagate (no FFmpeg path)
         log.debug(
