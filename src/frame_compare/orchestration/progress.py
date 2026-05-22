@@ -1,4 +1,4 @@
-"""Progress reporter wiring for Frame Compare 2.0 orchestration.
+"""Progress reporter wiring for Frame Compare orchestration.
 
 Orchestration MUST use the canonical ProgressReporter protocol defined in
 frame_compare.utils.progress. This module provides orchestration-specific

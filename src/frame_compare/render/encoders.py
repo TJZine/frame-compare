@@ -217,10 +217,8 @@ def _render_vs(
     try:
         clip = _clip_to_rgb24_for_pillow(clip)
 
-        # 1. Get frame
         vs_frame = clip.get_frame(frame)
 
-        # 2. Extract planes -> numpy -> Pillow
         planes = [np.array(vs_frame[i]) for i in range(vs_frame.format.num_planes)]
         if len(planes) == 1:
             array = planes[0]
@@ -231,12 +229,9 @@ def _render_vs(
 
         image = Image.fromarray(array)
 
-        # 3. Apply Overlay
         if overlay:
             image = apply_overlay(image, overlay)
 
-        # 4. Save
-        # Pillow save parameters: compress_level (0-9) for PNG
         image.save(output, format="PNG", compress_level=settings.compression)
 
     except (EncodingError, OverlayError):
@@ -254,7 +249,6 @@ def _apply_overlay_to_file(path: Path, config: OverlayConfig) -> None:
 
         result = apply_overlay(base, config)
 
-        # Save back
         result.save(path, format="PNG")
 
     except Exception as e:

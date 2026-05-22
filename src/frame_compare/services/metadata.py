@@ -80,12 +80,10 @@ def parse_filename(filename: str) -> ParsedMetadata:
 
     for parser in parsers:
         res = parser(filename)
-        # title extraction
         t = res.get("anime_title") or res.get("title")
         if t and not title:
             title = str(t)
 
-        # year
         if year is None:
             y = res.get("year")
             if isinstance(y, int):
@@ -93,7 +91,6 @@ def parse_filename(filename: str) -> ParsedMetadata:
             elif isinstance(y, str) and y.isdigit():
                 year = int(y)
 
-        # season
         if season is None:
             s = res.get("season")
             if isinstance(s, int):
@@ -101,7 +98,6 @@ def parse_filename(filename: str) -> ParsedMetadata:
             elif isinstance(s, str) and s.isdigit():
                 season = int(s)
 
-        # episode
         if episode is None:
             e = res.get("anime_episode") or res.get("episode")
             if isinstance(e, int):
@@ -111,19 +107,16 @@ def parse_filename(filename: str) -> ParsedMetadata:
             elif isinstance(e, list) and e and isinstance(e[0], int):
                 episode = e[0]
 
-        # release_group
         if release_group is None:
             rg = res.get("release_group")
             if rg:
                 release_group = str(rg)
 
-        # source
         if source is None:
             src = res.get("source")
             if src:
                 source = str(src)
 
-        # resolution
         if resolution is None:
             res_val = res.get("screen_size") or res.get("video_resolution")
             if res_val:

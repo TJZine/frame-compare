@@ -62,6 +62,7 @@ def apply_trim(source: SourceInfo, start: int, end: int | None = None) -> vs.Vid
     """Apply frame trim to clip.
 
     Args:
+        source: Loaded source metadata whose clip will be trimmed.
         start: First frame to include (0-indexed, inclusive)
         end: Last frame to include (0-indexed, inclusive).
              If None, trims to end of clip.
