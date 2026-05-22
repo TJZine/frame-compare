@@ -100,7 +100,7 @@ These files currently carry disproportionate change risk:
 
 - `src/frame_compare/orchestration/coordinator.py` (and neighboring `types.py`, `preparation.py`, `execution.py`)
 - `src/frame_compare/errors.py`
-- `src/frame_compare/services/report.py`
+- `src/frame_compare/services/report/**`
 - `src/frame_compare/cli_entry.py`
 - `src/frame_compare/services/alignment.py`
 - `src/frame_compare/render/orchestrator.py`

@@ -102,6 +102,46 @@ def test_build_script_content_resolves_lwlibavsource_with_lsmas_then_lw_fallback
     assert "comp_clip = load_source(str(comp_path))" in script
 
 
+def test_generated_script_reports_missing_lwlibavsource_without_traceback(tmp_path: Path) -> None:
+    (tmp_path / "vapoursynth.py").write_text(
+        """\
+class _Core:
+    pass
+
+
+core = _Core()
+""",
+        encoding="utf-8",
+    )
+    reference = tmp_path / "ref.mkv"
+    comparison = tmp_path / "a.mkv"
+    reference.touch()
+    comparison.touch()
+    cache_dir = tmp_path / "generated" / "cache"
+    cache_dir.mkdir(parents=True)
+
+    script_path = _generate_vspreview_script(
+        reference=reference,
+        comparisons=[comparison],
+        suggested_offsets_by_key={},
+        cache_dir=cache_dir,
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(script_path)],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == 1
+    assert "ERROR: Failed to resolve LWLibavSource loader:" in result.stdout
+    assert "LWLibavSource not found on core.lsmas or core.lw" in result.stdout
+    assert "Traceback" not in result.stderr
+
+
 def test_generate_vspreview_script_bootstraps_nested_legacy_workspace(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     workspace_root = repo_root / "workspace"

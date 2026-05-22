@@ -424,7 +424,11 @@ def main():
         sys.exit(1)
 
     core = vs.core
-    load_source = resolve_lwlibavsource(core)
+    try:
+        load_source = resolve_lwlibavsource(core)
+    except RuntimeError as e:
+        safe_print(f"ERROR: Failed to resolve LWLibavSource loader: {e}")
+        sys.exit(1)
 
     # Load reference clip
     ref_path = Path(REFERENCE["path"])

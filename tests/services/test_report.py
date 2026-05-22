@@ -10,8 +10,8 @@ from pytest_mock import MockerFixture
 
 from frame_compare.config.schema import ReportConfig, ViewerMode
 from frame_compare.errors import ReportError
-from frame_compare.services import report as report_module
 from frame_compare.services.report import ClipInfo, ReportData, generate_report
+from frame_compare.services.report.payload import image_src_for_report
 from frame_compare.services.types import TmdbMetadata
 
 
@@ -293,7 +293,7 @@ def test_image_src_for_report_uses_file_uri_for_cross_drive_fallback(
     screenshot_path.write_bytes(b"fake_png_data")
     mocker.patch("frame_compare.services.report.payload.os_path_relpath", side_effect=ValueError)
 
-    src = report_module._image_src_for_report(
+    src = image_src_for_report(
         screenshot_path,
         report_dir=tmp_path / "report",
         embed_images=False,
