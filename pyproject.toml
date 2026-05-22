@@ -55,6 +55,7 @@ packages = ["src/frame_compare"]
 [dependency-groups]
 dev = [
     "anyio>=4.12.0",
+    "bandit[toml]>=1.8.0",
     "import-linter>=2.9",
     "pytest>=9.0.2",
     "pytest-mock>=3.15.1",
