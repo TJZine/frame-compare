@@ -25,7 +25,8 @@ from frame_compare.render.ffmpeg import FFmpegRunner
 from frame_compare.services.alignment import align_clips
 from frame_compare.services.metadata import resolve_metadata
 from frame_compare.services.publishers import publish_to_slowpics
-from frame_compare.services.report import ClipInfo, ReportData, generate_report
+from frame_compare.services.report.entry import generate_report
+from frame_compare.services.report.payload import ClipInfo, ReportData
 from frame_compare.services.types import AlignmentConfig, MetadataConfig, TmdbMetadata
 from frame_compare.utils.types import WorkspacePaths
 

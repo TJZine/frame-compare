@@ -10,8 +10,8 @@ from pytest_mock import MockerFixture
 
 from frame_compare.config.schema import ReportConfig, ViewerMode
 from frame_compare.errors import ReportError
-from frame_compare.services.report import ClipInfo, ReportData, generate_report
-from frame_compare.services.report.payload import image_src_for_report
+from frame_compare.services.report.entry import generate_report
+from frame_compare.services.report.payload import ClipInfo, ReportData, image_src_for_report
 from frame_compare.services.types import TmdbMetadata
 
 
