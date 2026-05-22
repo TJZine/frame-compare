@@ -271,8 +271,8 @@ def test_build_script_content_assert_by_section() -> None:
     assert script.index("# ─── sys.path Bootstrap ") < script.index("# ─── Safe Print Helper ")
     assert script.index("# ─── Safe Print Helper ") < script.index("# ─── Clip Data ")
     assert script.index("# ─── Clip Data ") < script.index("# ─── Main ")
-    assert '"/w"' in script
-    assert '"/w/src"' in script
+    assert json.dumps(str(bootstrap_paths[0])) in script
+    assert json.dumps(str(bootstrap_paths[1])) in script
     assert "def safe_print(*args, **kwargs):" in script
     assert "def resolve_lwlibavsource(core):" in script
     assert '"label": "ref"' in script

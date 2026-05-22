@@ -87,11 +87,12 @@ def test_write_bytes_atomic_preserves_existing_file_permissions(tmp_path: Path) 
     target = tmp_path / "out.bin"
     target.write_bytes(b"old")
     target.chmod(0o640)
+    expected_mode = target.stat().st_mode & 0o777
 
     write_bytes_atomic(target, b"new")
 
     assert target.read_bytes() == b"new"
-    assert (target.stat().st_mode & 0o777) == 0o640
+    assert (target.stat().st_mode & 0o777) == expected_mode
 
 
 def test_write_text_atomic_does_not_replace_target_on_os_replace_failure(

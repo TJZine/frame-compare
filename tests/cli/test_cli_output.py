@@ -7,7 +7,7 @@ from _pytest.monkeypatch import MonkeyPatch
 from rich.console import Console
 
 from frame_compare.cli_output import print_at_a_glance, print_result_summary
-from frame_compare.config import ConfigSchema
+from frame_compare.config import ConfigSchema, get_default_config
 from frame_compare.orchestration import RunRequest, RunResult
 
 
@@ -20,7 +20,7 @@ def _render(console: Console) -> str:
 
 
 def _config() -> ConfigSchema:
-    return ConfigSchema()
+    return get_default_config()
 
 
 def _workspace_path(*parts: str) -> Path:

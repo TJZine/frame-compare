@@ -204,10 +204,11 @@ def test_generate_report_preserves_existing_report_permissions(
     report_path = tmp_path / "report.html"
     report_path.write_text("old report", encoding="utf-8")
     report_path.chmod(0o640)
+    expected_mode = report_path.stat().st_mode & 0o777
 
     generate_report(report_data, ReportConfig(output_dir=str(tmp_path)))
 
-    assert (report_path.stat().st_mode & 0o777) == 0o640
+    assert (report_path.stat().st_mode & 0o777) == expected_mode
 
 
 def test_generate_report_embed_images_base64(report_data: ReportData, tmp_path: Path) -> None:
