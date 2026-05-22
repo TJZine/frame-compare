@@ -1012,3 +1012,42 @@ enable = false
     assert by_video["a_ref.mkv"] == [5, 50, 97]
     assert by_video["b_comp1.mkv"] == [4, 49, 96]
     assert by_video["c_comp2.mkv"] == [6, 51, 98]
+
+
+def test_execute_run_uses_and_populates_probe_cache_without_vs_loader(tmp_path: Path) -> None:
+    """Prove that probe cache is populated on first run and reused on second run without loading video again."""
+    _create_config(tmp_path)
+    input_dir = tmp_path / "comparison_videos"
+    _create_video_files(input_dir, "source.mkv")
+
+    request = RunRequest(
+        root=tmp_path,
+        skip_analysis=True,
+        skip_metadata=True,
+        skip_dovi=True,
+        no_upload=True,
+    )
+
+    # 1. First run populates the cache
+    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    result = asyncio.run(execute_run(request, deps=deps))
+    assert result.success is True
+
+    cache_path = tmp_path / "generated" / "clip_probe.toml"
+    assert cache_path.exists()
+    cache_before = cache_path.read_text(encoding="utf-8")
+
+    # 2. Second run with RaisingFakeVSLoader uses the cache
+    class RaisingFakeVSLoader:
+        def load(self, path: Path) -> SourceInfo:
+            raise AssertionError(f"Fake VS loader should not be called: {path}")
+
+        def ensure_core(self):
+            raise AssertionError("Fake VS core should not be requested when cache is warm")
+
+    reuse_deps = RunDependencies(vs_loader=RaisingFakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    reuse_result = asyncio.run(execute_run(request, deps=reuse_deps))
+    assert reuse_result.success is True
+
+    cache_after = cache_path.read_text(encoding="utf-8")
+    assert cache_after == cache_before
