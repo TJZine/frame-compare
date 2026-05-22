@@ -297,11 +297,11 @@ def test_check_vspreview_availability(monkeypatch: pytest.MonkeyPatch) -> None:
     assert res.status == VSPreviewAvailabilityStatus.AVAILABLE
     assert res.is_available is True
 
-    # 2. Executable missing, but module and PySide6 available
+    # 2. Executable missing, but module and PyQt6 available
     monkeypatch.setattr("shutil.which", lambda cmd: None)
 
     def mock_find_spec(name: str):
-        if name in ("vspreview", "PySide6"):
+        if name in ("vspreview", "PyQt6"):
             from importlib.machinery import ModuleSpec
 
             return ModuleSpec(name, None)
@@ -325,7 +325,7 @@ def test_check_vspreview_availability(monkeypatch: pytest.MonkeyPatch) -> None:
     assert res.status == VSPreviewAvailabilityStatus.MISSING_QT_BACKEND
     assert res.is_available is False
     assert "Qt backend missing" in res.message
-    assert res.hint == "Install with: pip install PySide6 (or: pip install PyQt5)"
+    assert res.hint == "Install with: pip install PyQt6 (or: pip install PySide6)"
     assert "VSPreview not installed" not in res.message
 
     # 4. Nothing available

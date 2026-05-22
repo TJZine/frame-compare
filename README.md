@@ -140,7 +140,7 @@ Advanced/legacy:
 ```
 
 > [!NOTE]
-> The Windows portable **full bundle includes VSPreview + PySide6**.
+> The Windows portable **full bundle includes VSPreview + PyQt6**.
 > For source-based installs, install optional dependencies with:
 > - `uv sync --group dev --extra vspreview --frozen`
 > - or `pip install -e ".[vspreview]"`

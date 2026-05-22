@@ -186,7 +186,7 @@ $env:VAPOURSYNTH_CONF_PATH = "$bundleRoot\\vs\\core\\portable.vs"
 $env:VAPOURSYNTH_PLUGIN_PATH = "$bundleRoot\\vs\\plugins"
 $vsCore = Join-Path $bundleRoot "vs\\core"
 $ffmpegRoot = Join-Path $bundleRoot "ffmpeg"
-$qtBin = Join-Path $bundleRoot "app\\site-packages\\PySide6\\Qt\\bin"
+$qtBin = Join-Path $bundleRoot "app\\site-packages\\PyQt6\\Qt6\\bin"
 $vsRuntimeCandidates = @()
 if (Test-Path -LiteralPath $vsCore) {
   $vsRuntimeCandidates = @(Get-ChildItem -LiteralPath $vsCore -Filter "VSScript.dll" -File -Recurse)
@@ -426,13 +426,13 @@ function Assert-BundleRuntime([string]$BundleRoot) {
     "$BundleRoot\\vs\\plugins",
     "$BundleRoot\\ffmpeg"
   )
-  $qtBin = Join-Path $BundleRoot "app\\site-packages\\PySide6\\Qt\\bin"
+  $qtBin = Join-Path $BundleRoot "app\\site-packages\\PyQt6\\Qt6\\bin"
   if (Test-Path -LiteralPath $qtBin) {
     $pathEntries = @($qtBin) + $pathEntries
   }
   $env:PATH = (($pathEntries -join ";") + ";" + $env:PATH)
 
-  & $python -c "import tomli_w; import typer; import rich; import vspreview; import PySide6; import frame_compare"
+  & $python -c "import tomli_w; import typer; import rich; import vspreview; import PyQt6; import frame_compare"
   Assert-LastExitCode -CommandLabel "bundle runtime import validation"
 }
 
@@ -457,9 +457,9 @@ function Copy-PythonDistLicenses([string]$SitePackages, [string]$LicensesPythonD
     }
   }
 
-  $qtLicenses = Join-Path $SitePackages "PySide6\\Qt\\licenses"
+  $qtLicenses = Join-Path $SitePackages "PyQt6\\Qt6\\licenses"
   if (Test-Path -LiteralPath $qtLicenses) {
-    Copy-Item -Recurse -Force -LiteralPath $qtLicenses -Destination (Join-Path $LicensesPythonDir "PySide6-Qt-licenses")
+    Copy-Item -Recurse -Force -LiteralPath $qtLicenses -Destination (Join-Path $LicensesPythonDir "PyQt6-Qt-licenses")
   }
 }
 

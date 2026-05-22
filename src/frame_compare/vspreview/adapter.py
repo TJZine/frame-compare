@@ -57,7 +57,7 @@ def check_vspreview_availability() -> VSPreviewAvailability:
     Availability rules:
         - Return AVAILABLE if `shutil.which("vspreview")` is non-None, OR
         - `importlib.util.find_spec("vspreview")` is non-None AND
-          (`find_spec("PySide6")` OR `find_spec("PyQt5")`) is non-None.
+          (`find_spec("PyQt6")` OR `find_spec("PySide6")` OR `find_spec("PyQt5")`) is non-None.
     """
     try:
         # Priority 1: Check if vspreview executable exists in PATH
@@ -73,14 +73,15 @@ def check_vspreview_availability() -> VSPreviewAvailability:
             return VSPreviewAvailability(
                 status=VSPreviewAvailabilityStatus.MISSING_EXEC_AND_MODULE,
                 message="VSPreview not installed (optional for manual alignment)",
-                hint="Install with: pip install vspreview PySide6 (or: pip install vspreview PyQt5)",
+                hint="Install with: pip install vspreview PyQt6 (or: pip install vspreview PySide6)",
             )
 
         # Need at least one Qt backend
+        pyqt6_spec = importlib.util.find_spec("PyQt6")
         pyside6_spec = importlib.util.find_spec("PySide6")
         pyqt5_spec = importlib.util.find_spec("PyQt5")
 
-        if pyside6_spec is not None or pyqt5_spec is not None:
+        if pyqt6_spec is not None or pyside6_spec is not None or pyqt5_spec is not None:
             return VSPreviewAvailability(
                 status=VSPreviewAvailabilityStatus.AVAILABLE,
                 message="VSPreview is available for interactive alignment",
@@ -89,13 +90,13 @@ def check_vspreview_availability() -> VSPreviewAvailability:
         return VSPreviewAvailability(
             status=VSPreviewAvailabilityStatus.MISSING_QT_BACKEND,
             message="Qt backend missing for VSPreview (optional for manual alignment)",
-            hint="Install with: pip install PySide6 (or: pip install PyQt5)",
+            hint="Install with: pip install PyQt6 (or: pip install PySide6)",
         )
     except Exception as exc:
         return VSPreviewAvailability(
             status=VSPreviewAvailabilityStatus.PROBE_FAILED,
             message="VSPreview availability probe failed (optional for manual alignment)",
-            hint="Check the VSPreview/PySide6 installation if interactive alignment is needed",
+            hint="Check the VSPreview/PyQt6/PySide6 installation if interactive alignment is needed",
             error_details={
                 "exception_type": type(exc).__name__,
                 "exception": str(exc),

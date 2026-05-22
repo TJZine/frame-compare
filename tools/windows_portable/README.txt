@@ -33,7 +33,7 @@ QUICK START:
   frame-compare run
 
 OPTIONAL (Interactive Audio Alignment / VSPreview):
-  The full portable bundle includes VSPreview + PySide6. If you set:
+  The full portable bundle includes VSPreview + PyQt6. If you set:
     [audio_alignment]
     use_vspreview = true
   interactive alignment can run out of the box.
@@ -84,9 +84,9 @@ THIRD-PARTY LICENSES / SOURCE AVAILABILITY:
       .\licenses\python\
   - Python wheel license files are copied from installed *.dist-info metadata.
   - Qt license/notice files (when present) are copied from:
-      app\site-packages\PySide6\Qt\licenses
-    Note: newer PySide6 wheels may ship additional license texts under individual
-    wheel *.dist-info\licenses directories (e.g., PySide6-Essentials, PySide6-Addons, shiboken6);
+      app\site-packages\PyQt6\Qt6\licenses
+    Note: newer PyQt6 wheels may ship additional license texts under individual
+    wheel *.dist-info\licenses directories;
     the build script copies dist-info license directories when present.
   - Source pointers are shipped in:
       .\licenses\SOURCE_URLS.txt

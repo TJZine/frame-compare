@@ -223,7 +223,6 @@ def test_pyproject_defines_vspreview_optional_dependency(repo_root: Path) -> Non
     assert "[project.optional-dependencies]" in pyproject
     assert re.search(r"vspreview\s*=\s*\[", pyproject)
     assert re.search(r'"vspreview([^"]*)"', pyproject)
-    assert re.search(r'"PySide6([^"]*)"', pyproject)
 
 
 def test_windows_portable_build_exports_vspreview_extra(repo_root: Path) -> None:
@@ -237,7 +236,7 @@ def test_windows_portable_build_runtime_validation_checks_qt_stack(repo_root: Pa
     build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
     build_script = _read_text_or_fail(build_path)
     assert "import vspreview" in build_script
-    assert "import PySide6" in build_script
+    assert "import PyQt6" in build_script
 
 
 def test_windows_portable_build_writes_bundle_info_file(repo_root: Path) -> None:
@@ -288,7 +287,7 @@ def test_windows_portable_docs_disambiguate_source_bundle_root(repo_root: Path) 
     portable_readme = _read_text_or_fail(portable_readme_path)
     assert "dist/frame-compare-portable-win-x64" in readme
     assert "not the repository root" in readme
-    assert "includes VSPreview + PySide6" in readme
+    assert "includes VSPreview + PyQt6" in readme
     assert "frame-compare-update apply" in readme
     assert "frame-compare-update apply" in portable_readme
 

@@ -41,9 +41,9 @@ class TestCheckVspreviewAvailability:
             patch("importlib.util.find_spec") as mock_find_spec,
         ):
             mock_which.return_value = None  # No executable
-            # Mock find_spec to return non-None for vspreview and PySide6
+            # Mock find_spec to return non-None for vspreview and PyQt6
             mock_find_spec.side_effect = (
-                lambda name: MagicMock() if name in ("vspreview", "PySide6") else None
+                lambda name: MagicMock() if name in ("vspreview", "PyQt6") else None
             )
 
             result = check_vspreview_availability()
@@ -59,7 +59,7 @@ class TestCheckVspreviewAvailability:
         ):
             mock_which.return_value = None
 
-            # vspreview importable, PySide6 missing, PyQt5 available
+            # vspreview importable, PyQt6/PySide6 missing, PyQt5 available
             def find_spec_side_effect(name: str) -> MagicMock | None:
                 if name == "vspreview":
                     return MagicMock()
