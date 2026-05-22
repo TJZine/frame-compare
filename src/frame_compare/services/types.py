@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 type AlignmentSource = Literal["manual", "computed", "cached"]
+type AlignmentAlgorithm = Literal["cross_correlation"]
 
 
 @dataclass(frozen=True)
@@ -13,7 +14,7 @@ class AlignmentResult:
     frame_offset: int
     time_offset_seconds: float
     correlation_score: float
-    algorithm: Literal["cross_correlation"] | None
+    algorithm: AlignmentAlgorithm | None
     source: AlignmentSource
 
 
