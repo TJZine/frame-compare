@@ -367,6 +367,15 @@ def safe_print(*args, **kwargs):
         print(text.encode("ascii", errors="replace").decode("ascii"), **kwargs)
 
 
+def resolve_lwlibavsource(core):
+    """Resolve LWLibavSource using Frame Compare's lsmas-then-lw contract."""
+    if hasattr(core, "lsmas") and hasattr(core.lsmas, "LWLibavSource"):
+        return core.lsmas.LWLibavSource
+    if hasattr(core, "lw") and hasattr(core.lw, "LWLibavSource"):
+        return core.lw.LWLibavSource
+    raise RuntimeError("LWLibavSource not found on core.lsmas or core.lw")
+
+
 # ─── Clip Data ────────────────────────────────────────────────────────────────
 REFERENCE = {{
     "label": {json.dumps(reference.stem)},
@@ -398,6 +407,7 @@ def main():
         sys.exit(1)
 
     core = vs.core
+    load_source = resolve_lwlibavsource(core)
 
     # Load reference clip
     ref_path = Path(REFERENCE["path"])
@@ -406,7 +416,7 @@ def main():
         sys.exit(1)
 
     try:
-        ref_clip = core.lsmas.LWLibavSource(str(ref_path))
+        ref_clip = load_source(str(ref_path))
     except Exception as e:
         safe_print(f"ERROR: Failed to load reference: {{e}}")
         sys.exit(1)
@@ -437,7 +447,7 @@ def main():
             continue
 
         try:
-            comp_clip = core.lsmas.LWLibavSource(str(comp_path))
+            comp_clip = load_source(str(comp_path))
         except Exception as e:
             safe_print(f"WARNING: Failed to load {{label}}: {{e}}")
             continue

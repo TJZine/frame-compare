@@ -81,6 +81,27 @@ def test_build_script_content_warns_when_comparison_overlay_fails() -> None:
     assert script.count(warning) == 2
 
 
+def test_build_script_content_resolves_lwlibavsource_with_lsmas_then_lw_fallback() -> None:
+    script = _build_script_content(
+        reference=Path("ref.mkv"),
+        comparisons=[Path("a.mkv")],
+        suggested_offsets_by_key={},
+        bootstrap_paths=[Path("/workspace"), Path("/workspace/src")],
+    )
+
+    assert "core.lsmas.LWLibavSource(str(" not in script
+    assert "load_source = resolve_lwlibavsource(core)" in script
+    assert 'if hasattr(core, "lsmas") and hasattr(core.lsmas, "LWLibavSource"):' in script
+    assert "return core.lsmas.LWLibavSource" in script
+    assert 'if hasattr(core, "lw") and hasattr(core.lw, "LWLibavSource"):' in script
+    assert "return core.lw.LWLibavSource" in script
+    assert script.index("return core.lsmas.LWLibavSource") < script.index(
+        "return core.lw.LWLibavSource"
+    )
+    assert "ref_clip = load_source(str(ref_path))" in script
+    assert "comp_clip = load_source(str(comp_path))" in script
+
+
 def test_generate_vspreview_script_bootstraps_nested_legacy_workspace(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     workspace_root = repo_root / "workspace"
