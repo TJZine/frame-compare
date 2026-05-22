@@ -11,7 +11,7 @@ from typing import BinaryIO
 import httpx
 import structlog
 
-from frame_compare.config.schema import SlowpicsConfig
+from frame_compare.config.schema import SlowpicsConfig, Visibility
 from frame_compare.errors import (
     SlowpicsError,
     SlowpicsRateLimitedError,
@@ -78,13 +78,13 @@ class SlowpicsPublisher:
             raise SlowpicsError("No PNG files found to upload")
 
         # Prepare payload
-        visibility = self.config.visibility.value  # "public", "unlisted", etc.
+        visibility = self.config.visibility
         request = self._prepare_upload(files, title, visibility)
         log.info(
             "slowpics_upload_start",
             file_count=len(files),
             title=title,
-            visibility=visibility,
+            visibility=visibility.value,
         )
 
         try:
@@ -116,7 +116,7 @@ class SlowpicsPublisher:
             raise SlowpicsError(f"Upload failed: {e}") from e
 
     def _prepare_upload(
-        self, files: list[Path], title: str | None, visibility: str
+        self, files: list[Path], title: str | None, visibility: Visibility
     ) -> _SlowpicsUploadRequest:
         """Prepare the slow.pics multipart payload for upload."""
         form_data: dict[str, str] = {
@@ -125,7 +125,7 @@ class SlowpicsPublisher:
             "lossy": "true",
         }
 
-        form_data["public"] = "true" if visibility == "public" else "false"
+        form_data["public"] = "true" if visibility is Visibility.PUBLIC else "false"
 
         return _SlowpicsUploadRequest(file_paths=list(files), data=form_data)
 

@@ -465,12 +465,12 @@ def _prompt_visibility(default: Visibility) -> str:
     default_value = default.value
     while True:
         value = typer.prompt(
-            "slow.pics visibility (public|unlisted|private)",
+            "slow.pics visibility (public|unlisted)",
             default=default_value,
         ).strip()
         if value in allowed:
             return value
-        typer.echo("Invalid visibility. Choose public, unlisted, or private.")
+        typer.echo("Invalid visibility. Choose public or unlisted.")
 
 
 def _build_minimal_config(

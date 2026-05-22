@@ -142,10 +142,11 @@ tests in the same pass.
 - It prompts for:
   - input directory
   - slow.pics auto-upload
-  - slow.pics visibility
+  - slow.pics visibility (`public` or `unlisted`)
   - slow.pics delete-after-upload
   - optional TMDB API key
 - It validates the generated payload against `ConfigSchema` before writing.
+- It does not advertise or accept unsupported slow.pics visibility values.
 - Interruptions during prompting exit with the interrupted exit code.
 
 ## `doctor` Command Contract

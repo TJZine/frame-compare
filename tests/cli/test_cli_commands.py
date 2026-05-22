@@ -697,9 +697,11 @@ def _run_wizard_and_assert_config() -> None:
         result = runner.invoke(
             app,
             ["wizard"],
-            input="inputs\ny\nprivate\ny\nabc123\n",
+            input="inputs\ny\npublic\ny\nabc123\n",
         )
         assert result.exit_code == 0
+        assert "slow.pics visibility (public|unlisted)" in result.stdout
+        assert "private" not in result.stdout
 
         config_path = Path("config") / "config.toml"
         assert config_path.exists()
@@ -708,7 +710,7 @@ def _run_wizard_and_assert_config() -> None:
         assert set(data.keys()) == {"paths", "slowpics", "tmdb"}
         assert data["paths"]["input_dir"] == "inputs"
         assert data["slowpics"]["auto_upload"] is True
-        assert data["slowpics"]["visibility"] == "private"
+        assert data["slowpics"]["visibility"] == "public"
         assert data["slowpics"]["delete_after_upload"] is True
         assert data["tmdb"]["api_key"] == "abc123"
 
@@ -757,7 +759,7 @@ def test_wizard_root_validates_relative_input_dir_against_root() -> None:
         result = runner.invoke(
             app,
             ["wizard", "--root", str(root)],
-            input="inputs\ny\nprivate\ny\nabc123\n",
+            input="inputs\ny\nunlisted\ny\nabc123\n",
         )
         assert result.exit_code == 0
 
@@ -765,6 +767,7 @@ def test_wizard_root_validates_relative_input_dir_against_root() -> None:
         assert config_path.exists()
         data = tomllib.loads(config_path.read_text(encoding="utf-8"))
         assert data["paths"]["input_dir"] == "inputs"
+        assert data["slowpics"]["visibility"] == "unlisted"
 
 
 def test_wizard_root_reprompts_on_missing_input_dir() -> None:
@@ -776,14 +779,16 @@ def test_wizard_root_reprompts_on_missing_input_dir() -> None:
         result = runner.invoke(
             app,
             ["wizard", "--root", str(root)],
-            input="missing\ninputs\ny\nprivate\ny\nabc123\n",
+            input="missing\ninputs\ny\nprivate\nunlisted\ny\nabc123\n",
         )
         assert result.exit_code == 0
+        assert "Invalid visibility. Choose public or unlisted." in result.stdout
 
         config_path = root / "config" / "config.toml"
         assert config_path.exists()
         data = tomllib.loads(config_path.read_text(encoding="utf-8"))
         assert data["paths"]["input_dir"] == "inputs"
+        assert data["slowpics"]["visibility"] == "unlisted"
 
 
 def test_prepare_toml_payload_copies_paths_and_slowpics_sections() -> None:

@@ -76,7 +76,6 @@ class Visibility(str, Enum):
 
     PUBLIC = "public"
     UNLISTED = "unlisted"
-    PRIVATE = "private"
 
 
 class ViewerMode(str, Enum):

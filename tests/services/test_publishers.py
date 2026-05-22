@@ -20,6 +20,15 @@ from frame_compare.services.publishers import (
 from frame_compare.services.types import TmdbMetadata
 
 
+def _multipart_field_value(request: httpx.Request, field_name: str) -> str:
+    body = request.content.decode("utf-8", errors="replace")
+    name_marker = f'name="{field_name}"'
+    field_start = body.index(name_marker)
+    value_start = body.index("\r\n\r\n", field_start) + len("\r\n\r\n")
+    value_end = body.index("\r\n--", value_start)
+    return body[value_start:value_end]
+
+
 @pytest.fixture
 def mock_sleep(mocker):
     return mocker.patch(
@@ -206,19 +215,36 @@ async def test_publish_to_slowpics_default_title_uses_directory_name(
 
 
 @pytest.mark.anyio
-async def test_publish_to_slowpics_uses_correct_visibility(
+@pytest.mark.parametrize(
+    ("visibility", "expected_public"),
+    [
+        (Visibility.PUBLIC, "true"),
+        (Visibility.UNLISTED, "false"),
+    ],
+)
+async def test_publish_to_slowpics_sends_supported_visibility_payload(
     screenshot_dir: Path,
     async_client: httpx.AsyncClient,
-    mock_slowpics_success,
-    mocker,
+    respx_mock,
+    visibility: Visibility,
+    expected_public: str,
 ):
-    spy = mocker.spy(SlowpicsPublisher, "_prepare_upload")
-    config = SlowpicsConfig(visibility=Visibility.PUBLIC)
+    requests: list[httpx.Request] = []
+
+    def capture_request(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"url": "https://slow.pics/c/abc123"})
+
+    respx_mock.post("https://slow.pics/api/comparison").mock(side_effect=capture_request)
+    config = SlowpicsConfig(visibility=visibility)
 
     await publish_to_slowpics(screenshot_dir, config, async_client)
 
-    # Check visibility argument
-    assert spy.call_args[0][3] == "public"
+    assert len(requests) == 1
+    assert _multipart_field_value(requests[0], "public") == expected_public
+    body = requests[0].content.decode("utf-8", errors="replace")
+    assert 'name="visibility"' not in body
+    assert 'name="private"' not in body
 
 
 @pytest.mark.anyio
