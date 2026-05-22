@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import webbrowser
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -39,6 +40,7 @@ from frame_compare.config import (
     save_preset,
 )
 from frame_compare.errors import (
+    ConfigValidationError,
     ConfigWriteError,
     ExitCode,
     FrameCompareError,
@@ -128,6 +130,35 @@ def version() -> None:
     typer.echo(f"frame-compare {__version__}")
 
 
+def _format_enum_expected(enum_type: type[Enum]) -> str:
+    return ", ".join(repr(member.value) for member in enum_type)
+
+
+def _coerce_cli_choice[CliChoiceT: Enum](
+    value: str | None,
+    enum_type: type[CliChoiceT],
+    loc: tuple[str, ...],
+) -> CliChoiceT | None:
+    """Convert a CLI string choice after Typer parsing so JSON errors stay structured."""
+    if value is None:
+        return None
+    try:
+        return enum_type(value)
+    except ValueError as exc:
+        expected = _format_enum_expected(enum_type)
+        raise ConfigValidationError(
+            [
+                {
+                    "type": "enum",
+                    "loc": list(loc),
+                    "msg": f"Input should be {expected}",
+                    "input": value,
+                    "ctx": {"expected": expected},
+                }
+            ]
+        ) from exc
+
+
 @app.command()
 def run(
     root: Path = typer.Option(".", "--root", "-r"),
@@ -136,12 +167,12 @@ def run(
     no_cache: bool = typer.Option(False, "--no-cache"),
     from_cache_only: bool = typer.Option(False, "--from-cache-only"),
     no_upload: bool = typer.Option(False, "--no-upload"),
-    tm_preset: TonemapPreset | None = typer.Option(None, "--tm-preset"),
+    tm_preset: str | None = typer.Option(None, "--tm-preset"),
     tm_target: int | None = typer.Option(None, "--tm-target"),
-    tm_curve: ToneCurve | None = typer.Option(None, "--tm-curve"),
+    tm_curve: str | None = typer.Option(None, "--tm-curve"),
     frame_count: int | None = typer.Option(None, "--frame-count", "-n"),
     seed: int | None = typer.Option(None, "--seed"),
-    overlay: OverlayMode | None = typer.Option(None, "--overlay"),
+    overlay: str | None = typer.Option(None, "--overlay"),
     skip_analysis: bool = typer.Option(False, "--skip-analysis"),
     skip_metadata: bool = typer.Option(False, "--skip-metadata"),
     skip_dovi: bool = typer.Option(False, "--skip-dovi"),
@@ -188,6 +219,10 @@ def run(
         return resolved_config
 
     try:
+        parsed_tm_preset = _coerce_cli_choice(tm_preset, TonemapPreset, ("color", "preset"))
+        parsed_tm_curve = _coerce_cli_choice(tm_curve, ToneCurve, ("color", "tone_curve"))
+        parsed_overlay = _coerce_cli_choice(overlay, OverlayMode, ("screenshots", "overlay_mode"))
+
         if write_config:
             _write_config_to(config_path, _load_effective_config())
             return
@@ -203,12 +238,12 @@ def run(
             no_cache=no_cache,
             from_cache_only=from_cache_only,
             no_upload=no_upload,
-            tm_preset=tm_preset,
+            tm_preset=parsed_tm_preset,
             tm_target_nits=tm_target,
-            tm_curve=tm_curve,
+            tm_curve=parsed_tm_curve,
             frame_count=frame_count,
             seed=seed,
-            overlay_mode=overlay,
+            overlay_mode=parsed_overlay,
             skip_analysis=skip_analysis,
             skip_metadata=skip_metadata,
             skip_dovi=skip_dovi,

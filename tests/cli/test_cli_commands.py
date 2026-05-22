@@ -12,7 +12,7 @@ from typer.main import get_command
 from typer.testing import CliRunner
 
 from frame_compare.cli_entry import _maybe_open_report, _stabilize_typer_help_width, app
-from frame_compare.config import OverlayMode
+from frame_compare.config import OverlayMode, ToneCurve, TonemapPreset
 from frame_compare.config.loader import get_default_config
 from frame_compare.errors import (
     ConfigNotFoundError,
@@ -648,6 +648,35 @@ def test_run_builds_run_request_from_cli_args(monkeypatch: MonkeyPatch) -> None:
     assert request.force_interactive_alignment is True
 
 
+def test_run_builds_run_request_with_typed_choice_overrides(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    captured: dict[str, RunRequest] = {}
+
+    def _run(request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        captured["request"] = request
+        return RunResult(success=True)
+
+    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace(
+        [
+            "--tm-preset",
+            "filmic",
+            "--tm-curve",
+            "spline",
+            "--overlay",
+            "diagnostic",
+        ]
+    )
+
+    assert result.exit_code == 0
+    request = captured["request"]
+    assert request.tm_preset == TonemapPreset.FILMIC
+    assert request.tm_curve == ToneCurve.SPLINE
+    assert request.overlay_mode == OverlayMode.DIAGNOSTIC
+
+
 def test_run_builds_run_request_with_input_dir(monkeypatch: MonkeyPatch) -> None:
     captured: dict[str, RunRequest] = {}
 
@@ -1244,6 +1273,47 @@ def test_run_exit_code_maps_by_error_category_prefix_in_json_mode(
     assert result.exit_code == int(ExitCode.INPUT_ERROR)
     payload = json.loads(result.stdout)
     assert payload == format_error_json(error)
+
+
+def test_run_json_invalid_tm_preset_outputs_config_error_schema(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise AssertionError("runner.run should not be invoked for invalid CLI choices")
+
+    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace(["--json", "--tm-preset", "invalid"])
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stderr == ""
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False
+    assert payload["error"]["code"] == "FC-1003"
+    assert payload["error"]["name"] == "CONFIG_VALIDATION_ERROR"
+    assert payload["error"]["details"]["validation_errors"][0]["loc"] == ["color", "preset"]
+
+
+def test_run_json_invalid_overlay_outputs_config_error_schema(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise AssertionError("runner.run should not be invoked for invalid CLI choices")
+
+    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace(["--json", "--overlay", "invalid"])
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stderr == ""
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False
+    assert payload["error"]["code"] == "FC-1003"
+    assert payload["error"]["name"] == "CONFIG_VALIDATION_ERROR"
+    assert payload["error"]["details"]["validation_errors"][0]["loc"] == [
+        "screenshots",
+        "overlay_mode",
+    ]
 
 
 def test_run_exit_code_is_130_on_keyboard_interrupt(monkeypatch: MonkeyPatch) -> None:
