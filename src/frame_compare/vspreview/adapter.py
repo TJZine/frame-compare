@@ -292,37 +292,9 @@ def _find_project_root(cache_dir: Path, workspace_root: Path) -> Path:
     return workspace_root
 
 
-def _build_script_content(
-    reference: Path,
-    comparisons: list[Path],
-    suggested_offsets_by_key: dict[str, int],
-    bootstrap_paths: list[Path],
-) -> str:
-    """Build the script content for VSPreview.
-
-    This content is deterministic for the same inputs (no timestamp in body).
-    """
-    # Build targets dict with stable ordering (sorted by comparison path stem)
-    targets_lines: list[str] = []
-    for comp in sorted(comparisons, key=lambda p: p.stem):
-        targets_lines.append(f"    {json.dumps(comp.stem)}: {json.dumps(str(comp))},")
-
-    # Build suggested offsets with stable ordering
-    offset_lines: list[str] = []
-    for key in sorted(suggested_offsets_by_key.keys()):
-        offset = suggested_offsets_by_key[key]
-        offset_lines.append(f"    {json.dumps(key)}: {int(offset)},")
-
-    # Build per-label offset map for operator convenience
-    offset_map_lines: list[str] = []
-    for comp in sorted(comparisons, key=lambda p: p.stem):
-        key = f"{reference.stem}:{comp.stem}"
-        offset = suggested_offsets_by_key.get(key, 0)
-        offset_map_lines.append(f"    {json.dumps(comp.stem)}: {int(offset)},")
-
-    bootstrap_path_lines = ",\n".join(f"    {json.dumps(str(path))}" for path in bootstrap_paths)
-
-    script = f'''\
+def _build_script_header() -> str:
+    """Build the script header with docstring and imports."""
+    return '''\
 #!/usr/bin/env python3
 """VSPreview alignment verification session.
 
@@ -337,7 +309,13 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+'''
 
+
+def _build_bootstrap_section(bootstrap_paths: list[Path]) -> str:
+    """Build the sys.path bootstrap section of the script."""
+    bootstrap_path_lines = ",\n".join(f"    {json.dumps(str(path))}" for path in bootstrap_paths)
+    return f"""\
 # ─── sys.path Bootstrap ───────────────────────────────────────────────────────
 # Make imports work in "run from repo" mode without deriving roots from __file__
 _BOOTSTRAP_PATHS = [
@@ -348,7 +326,12 @@ for _raw_path in _BOOTSTRAP_PATHS:
     _p = Path(_raw_path)
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
+"""
 
+
+def _build_helpers_section() -> str:
+    """Build the static printing and loader helper functions."""
+    return '''\
 # ─── Safe Print Helper ────────────────────────────────────────────────────────
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -374,8 +357,38 @@ def resolve_lwlibavsource(core):
     if hasattr(core, "lw") and hasattr(core.lw, "LWLibavSource"):
         return core.lw.LWLibavSource
     raise RuntimeError("LWLibavSource not found on core.lsmas or core.lw")
+'''
 
 
+def _build_clip_data_section(
+    reference: Path,
+    comparisons: list[Path],
+    suggested_offsets_by_key: dict[str, int],
+) -> str:
+    """Build the dynamic clip data payload variables."""
+    # Build targets dict with stable ordering (sorted by comparison path stem)
+    targets_lines: list[str] = []
+    for comp in sorted(comparisons, key=lambda p: p.stem):
+        targets_lines.append(f"    {json.dumps(comp.stem)}: {json.dumps(str(comp))},")
+
+    # Build suggested offsets with stable ordering
+    offset_lines: list[str] = []
+    for key in sorted(suggested_offsets_by_key.keys()):
+        offset = suggested_offsets_by_key[key]
+        offset_lines.append(f"    {json.dumps(key)}: {int(offset)},")
+
+    # Build per-label offset map for operator convenience
+    offset_map_lines: list[str] = []
+    for comp in sorted(comparisons, key=lambda p: p.stem):
+        key = f"{reference.stem}:{comp.stem}"
+        offset = suggested_offsets_by_key.get(key, 0)
+        offset_map_lines.append(f"    {json.dumps(comp.stem)}: {int(offset)},")
+
+    targets_content = "\n".join(targets_lines)
+    offset_content = "\n".join(offset_lines)
+    offset_map_content = "\n".join(offset_map_lines)
+
+    return f"""\
 # ─── Clip Data ────────────────────────────────────────────────────────────────
 REFERENCE = {{
     "label": {json.dumps(reference.stem)},
@@ -383,20 +396,24 @@ REFERENCE = {{
 }}
 
 TARGETS = {{
-{chr(10).join(targets_lines)}
+{targets_content}
 }}
 
 # Suggested offsets keyed by "{{ref_stem}}:{{comp_stem}}"
 suggested_offsets_by_key = {{
-{chr(10).join(offset_lines)}
+{offset_content}
 }}
 
 # Per-label offset map (operator convenience, edit here to test manually)
 OFFSET_MAP = {{
-{chr(10).join(offset_map_lines)}
+{offset_map_content}
 }}
+"""
 
 
+def _build_main_execution_section() -> str:
+    """Build the main execution loop template."""
+    return '''\
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main():
     """Load clips into VSPreview with overlays and suggested offsets."""
@@ -412,25 +429,25 @@ def main():
     # Load reference clip
     ref_path = Path(REFERENCE["path"])
     if not ref_path.exists():
-        safe_print(f"ERROR: Reference not found: {{ref_path}}")
+        safe_print(f"ERROR: Reference not found: {ref_path}")
         sys.exit(1)
 
     try:
         ref_clip = load_source(str(ref_path))
     except Exception as e:
-        safe_print(f"ERROR: Failed to load reference: {{e}}")
+        safe_print(f"ERROR: Failed to load reference: {e}")
         sys.exit(1)
 
     ref_fps_num = ref_clip.fps.numerator
     ref_fps_den = ref_clip.fps.denominator
 
-    safe_print(f"Reference: {{REFERENCE['label']}} @ {{ref_fps_num}}/{{ref_fps_den}} fps")
+    safe_print(f"Reference: {REFERENCE['label']} @ {ref_fps_num}/{ref_fps_den} fps")
 
     # Apply overlay to reference (best-effort)
     try:
         ref_clip = core.text.Text(
             ref_clip,
-            f"REF: {{REFERENCE['label']}}",
+            f"REF: {REFERENCE['label']}",
             alignment=7,
         )
     except Exception:
@@ -443,25 +460,25 @@ def main():
     for label, path_str in sorted(TARGETS.items()):
         comp_path = Path(path_str)
         if not comp_path.exists():
-            safe_print(f"WARNING: Comparison not found: {{comp_path}}")
+            safe_print(f"WARNING: Comparison not found: {comp_path}")
             continue
 
         try:
             comp_clip = load_source(str(comp_path))
         except Exception as e:
-            safe_print(f"WARNING: Failed to load {{label}}: {{e}}")
+            safe_print(f"WARNING: Failed to load {label}: {e}")
             continue
 
         # FPS harmonization: apply AssumeFPS to match reference
         comp_clip = core.std.AssumeFPS(comp_clip, fpsnum=ref_fps_num, fpsden=ref_fps_den)
 
         # Get suggested offset
-        key = f"{{REFERENCE['label']}}:{{label}}"
+        key = f"{REFERENCE['label']}:{label}"
         offset = suggested_offsets_by_key.get(key, OFFSET_MAP.get(label, 0))
 
         # Apply overlay with suggested offset (best-effort)
         try:
-            overlay_text = f"CMP: {{label}}\\nSuggested offset: {{offset}} frames"
+            overlay_text = f"CMP: {label}\\nSuggested offset: {offset} frames"
             if offset > 0:
                 overlay_text += "\\n(+N = comparison starts AFTER reference)"
             elif offset < 0:
@@ -473,11 +490,11 @@ def main():
         # Slot layout: ref on even, comparison on odd
         # We duplicate reference before each comparison
         clips.append(ref_clip)  # Even slot (duplicate ref)
-        labels.append(f"{{REFERENCE['label']}} (ref)")
+        labels.append(f"{REFERENCE['label']} (ref)")
         clips.append(comp_clip)  # Odd slot (comparison)
         labels.append(label)
 
-        safe_print(f"Loaded: {{label}} (offset: {{offset}})")
+        safe_print(f"Loaded: {label} (offset: {offset})")
 
     if len(clips) < 2:
         safe_print("ERROR: No comparison clips loaded successfully.")
@@ -486,7 +503,7 @@ def main():
     # Output clips for VSPreview
     for i, (clip, label) in enumerate(zip(clips, labels)):
         clip.set_output(i)
-        safe_print(f"Output {{i}}: {{label}}")
+        safe_print(f"Output {i}: {label}")
 
     safe_print("\\nReady for VSPreview. Adjust offsets visually, then confirm in terminal.")
 
@@ -494,4 +511,22 @@ def main():
 if __name__ == "__main__":
     main()
 '''
-    return script
+
+
+def _build_script_content(
+    reference: Path,
+    comparisons: list[Path],
+    suggested_offsets_by_key: dict[str, int],
+    bootstrap_paths: list[Path],
+) -> str:
+    """Build the script content for VSPreview.
+
+    This content is deterministic for the same inputs (no timestamp in body).
+    """
+    header = _build_script_header()
+    bootstrap = _build_bootstrap_section(bootstrap_paths)
+    helpers = _build_helpers_section()
+    clip_data = _build_clip_data_section(reference, comparisons, suggested_offsets_by_key)
+    main_execution = _build_main_execution_section()
+
+    return f"{header}\n\n{bootstrap}\n\n{helpers}\n\n\n{clip_data}\n\n{main_execution}"
