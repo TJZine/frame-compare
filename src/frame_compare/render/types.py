@@ -9,6 +9,9 @@ from frame_compare.config.schema import OverlayMode
 if TYPE_CHECKING:
     import vapoursynth as vs  # type: ignore
 
+    from frame_compare.render.ffmpeg import FFmpegRunner
+    from frame_compare.utils.progress_protocol import ProgressReporter
+
 
 @dataclass
 class EncoderSettings:
@@ -46,6 +49,7 @@ class RenderRequest:
     output_path: Path
     overlay: OverlayConfig | None
     encoder_settings: EncoderSettings
+    ffmpeg_runner: FFmpegRunner | None = None
 
 
 @dataclass(frozen=True)
@@ -57,13 +61,26 @@ class ScreenshotBatchRequest:
     source_frames: list[int]
     display_frames: list[int]
     selection_labels: list[str | None]
-    probe_width: int
-    probe_height: int
-    probe_num_frames: int
-    probe_is_hdr: bool
+    probe_width: int | None
+    probe_height: int | None
+    probe_num_frames: int | None
+    probe_is_hdr: bool | None
 
 
 Renderer = Literal["vapoursynth", "ffmpeg", "auto"]
+
+
+@dataclass(frozen=True)
+class ScreenshotRenderOptions:
+    """Convenience options for render_screenshots."""
+
+    label_map: dict[Path, str] | None = None
+    renderer: Renderer = "auto"
+    overlay_mode: OverlayMode = OverlayMode.STANDARD
+    reporter: ProgressReporter | None = None
+    output_frames: list[int] | None = None
+    selection_labels: list[str | None] | None = None
+    ffmpeg_runner: FFmpegRunner | None = None
 
 
 @dataclass(frozen=True)

@@ -13,7 +13,8 @@ from frame_compare.orchestration.context import (
     ClipState,
     RunContext,
 )
-from frame_compare.orchestration.coordinator import _run_render_phase, _RunArtifacts
+from frame_compare.orchestration.execution import run_render_phase
+from frame_compare.orchestration.types import RunArtifacts
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.types import SourceInfo
 
@@ -41,7 +42,16 @@ class FakeFFmpegRunner:
         raise AssertionError("FFmpeg extraction path is not exercised in this test")
 
     def probe_hdr(self, _video: Path):  # type: ignore[override]
-        return None
+        from frame_compare.vs.types import HDRMetadata
+
+        return HDRMetadata(
+            mastering_display=None,
+            max_cll=None,
+            max_fall=None,
+            color_primaries=1,
+            transfer=1,
+            matrix=1,
+        )
 
 
 def test_overlay_display_frame_number_matches_aligned_output_filename(
@@ -93,9 +103,9 @@ def test_overlay_display_frame_number_matches_aligned_output_filename(
         reporter=None,
     )
 
-    artifacts = _RunArtifacts()
+    artifacts = RunArtifacts()
 
-    _run_render_phase(
+    run_render_phase(
         ctx=ctx,
         frames=[10],
         runner=FakeFFmpegRunner(),

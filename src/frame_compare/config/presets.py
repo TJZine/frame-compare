@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from frame_compare.config.utils import deep_merge
 from frame_compare.errors import (
     ConfigValidationError,
+    ConfigWriteError,
     PresetInvalidError,
     PresetNameInvalidError,
     PresetNotFoundError,
@@ -74,14 +75,17 @@ def save_preset(
     """
     _validate_preset_name(name)
     directory = presets_dir or DEFAULT_PRESETS_DIR
-    directory.mkdir(parents=True, exist_ok=True)
 
     preset_path = directory / f"{name}.toml"
 
     # exclude_none=True: TOML has no null; omitted keys use defaults when loaded
     data = config.model_dump(mode="json", exclude_none=True)
     toml_text = tomli_w.dumps(data)
-    write_text_atomic(preset_path, toml_text, encoding="utf-8")
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        write_text_atomic(preset_path, toml_text, encoding="utf-8")
+    except OSError as exc:
+        raise ConfigWriteError(preset_path, label="preset file", cause=exc) from exc
 
     return preset_path
 

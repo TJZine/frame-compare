@@ -5,6 +5,7 @@ These tests do NOT require VSPreview, VapourSynth, FFmpeg, or any display.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -56,12 +57,74 @@ def test_build_script_content_escapes_path_literals() -> None:
         reference=reference,
         comparisons=comparisons,
         suggested_offsets_by_key={},
+        bootstrap_paths=[Path("/workspace"), Path("/workspace/src")],
     )
 
     compile(script, "<vspreview>", "exec")
     assert '"label": "ref"x"' not in script
     assert '"\nprint(123)\n#' not in script
     assert "\\nprint(123)\\n" in script
+
+
+def test_build_script_content_warns_when_comparison_overlay_fails() -> None:
+    script = _build_script_content(
+        reference=Path("ref.mkv"),
+        comparisons=[Path("a.mkv")],
+        suggested_offsets_by_key={},
+        bootstrap_paths=[Path("/workspace"), Path("/workspace/src")],
+    )
+
+    warning = 'safe_print("Warning: Could not apply text overlay (plugin missing?)")'
+
+    assert warning in script
+    assert "pass  # Overlay is best-effort" not in script
+    assert script.count(warning) == 2
+
+
+def test_generate_vspreview_script_bootstraps_nested_legacy_workspace(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    workspace_root = repo_root / "workspace"
+    cache_dir = workspace_root / "generated" / "cache"
+    (repo_root / "src" / "frame_compare").mkdir(parents=True)
+    (workspace_root / "config").mkdir(parents=True)
+    cache_dir.mkdir(parents=True)
+
+    script_path = _generate_vspreview_script(
+        reference=Path("ref.mkv"),
+        comparisons=[Path("a.mkv")],
+        suggested_offsets_by_key={},
+        cache_dir=cache_dir,
+    )
+
+    script = script_path.read_text(encoding="utf-8")
+
+    assert json.dumps(str(repo_root)) in script
+    assert json.dumps(str(repo_root / "src")) in script
+    assert json.dumps(str(workspace_root)) in script
+    assert "_THIS_FILE.parents[4]" not in script
+
+
+def test_generate_vspreview_script_bootstraps_run_folder_workspace(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    workspace_root = repo_root / "workspace"
+    cache_dir = workspace_root / "input" / "Movie (2024)" / "generated" / "cache"
+    (repo_root / "src" / "frame_compare").mkdir(parents=True)
+    (workspace_root / "config").mkdir(parents=True)
+    cache_dir.mkdir(parents=True)
+
+    script_path = _generate_vspreview_script(
+        reference=Path("ref.mkv"),
+        comparisons=[Path("a.mkv")],
+        suggested_offsets_by_key={},
+        cache_dir=cache_dir,
+    )
+
+    script = script_path.read_text(encoding="utf-8")
+
+    assert json.dumps(str(repo_root)) in script
+    assert json.dumps(str(repo_root / "src")) in script
+    assert json.dumps(str(workspace_root)) in script
+    assert str(cache_dir / "vspreview_sessions") not in script
 
 
 def test_generate_vspreview_script_uses_atomic_write(

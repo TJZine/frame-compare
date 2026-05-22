@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import argparse
 import ast
+import os
 import sys
+import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -88,6 +90,20 @@ def _first_paragraph(doc: str) -> str:
 
 def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def _write_text_atomic(path: Path, content: str, *, encoding: str = "utf-8") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding=encoding) as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_name, path)
+    except Exception:
+        Path(tmp_name).unlink(missing_ok=True)
+        raise
 
 
 def _module_ast(path: Path) -> ast.Module:
@@ -355,6 +371,115 @@ def _constant_type(assign: ast.Assign | ast.AnnAssign) -> str:
     return type(value).__name__
 
 
+def _alias_target_for_export(export: str, export_node: ast.AST | None) -> str | None:
+    if (
+        isinstance(export_node, ast.ImportFrom)
+        and export_node.module is not None
+        and len(export_node.names) == 1
+    ):
+        imported = export_node.names[0]
+        if imported.asname == export and imported.name != export:
+            # Example: from x import foo as bar  (export == "bar", target == "foo")
+            return imported.name
+    return None
+
+
+def _append_function_markdown(
+    *,
+    out_lines: list[str],
+    missing_docstrings: list[str],
+    export: str,
+    resolved: _ResolvedSymbol,
+    alias_target: str | None,
+) -> None:
+    if not isinstance(resolved.node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        raise ValueError(f"resolved function has unexpected node for {export}")
+
+    signature = _render_signature(resolved.node)
+    if signature.startswith(f"{resolved.node.name}(") and export != resolved.node.name:
+        signature = signature.replace(f"{resolved.node.name}(", f"{export}(", 1)
+    out_lines.append(f"`{signature}`")
+    out_lines.append("")
+    if alias_target is not None:
+        out_lines.append(f"Alias of `{alias_target}`.")
+        out_lines.append("")
+        return
+
+    doc = _first_paragraph(ast.get_docstring(resolved.node) or "")
+    if not doc:
+        missing_docstrings.append(export)
+        return
+    out_lines.append(doc)
+    out_lines.append("")
+
+
+def _append_class_markdown(
+    *,
+    out_lines: list[str],
+    missing_docstrings: list[str],
+    export: str,
+    resolved: _ResolvedSymbol,
+) -> None:
+    if not isinstance(resolved.node, ast.ClassDef):
+        raise ValueError(f"resolved class has unexpected node for {export}")
+
+    out_lines.append(f"`{export}`")
+    out_lines.append("")
+    doc = _first_paragraph(ast.get_docstring(resolved.node) or "")
+    if not doc:
+        missing_docstrings.append(export)
+        return
+    out_lines.append(doc)
+    out_lines.append("")
+
+
+def _append_constant_markdown(
+    *,
+    out_lines: list[str],
+    export: str,
+    resolved: _ResolvedSymbol,
+) -> None:
+    if not isinstance(resolved.node, (ast.Assign, ast.AnnAssign)):
+        raise ValueError(f"resolved constant has unexpected node for {export}")
+
+    out_lines.append(f"`{export}` — constant ({_constant_type(resolved.node)})")
+    out_lines.append("")
+
+
+def _append_export_markdown(
+    *,
+    out_lines: list[str],
+    missing_docstrings: list[str],
+    export: str,
+    resolved: _ResolvedSymbol,
+    alias_target: str | None,
+) -> None:
+    out_lines.append(f"### {export}")
+    out_lines.append("")
+
+    if resolved.kind == "function":
+        _append_function_markdown(
+            out_lines=out_lines,
+            missing_docstrings=missing_docstrings,
+            export=export,
+            resolved=resolved,
+            alias_target=alias_target,
+        )
+        return
+    if resolved.kind == "class":
+        _append_class_markdown(
+            out_lines=out_lines,
+            missing_docstrings=missing_docstrings,
+            export=export,
+            resolved=resolved,
+        )
+        return
+    if resolved.kind == "constant":
+        _append_constant_markdown(out_lines=out_lines, export=export, resolved=resolved)
+        return
+    raise ValueError(f"unsupported resolved kind for {export}: {resolved.kind}")
+
+
 def _generate_markdown(
     *,
     project_root: Path,
@@ -383,16 +508,7 @@ def _generate_markdown(
 
         for export in sorted(module.exports, key=lambda s: (s.lower(), s)):
             export_node = module.symbols.get(export)
-            alias_target: str | None = None
-            if (
-                isinstance(export_node, ast.ImportFrom)
-                and export_node.module is not None
-                and len(export_node.names) == 1
-            ):
-                imported = export_node.names[0]
-                if imported.asname == export and imported.name != export:
-                    # Example: from x import foo as bar  (export == "bar", target == "foo")
-                    alias_target = imported.name
+            alias_target = _alias_target_for_export(export, export_node)
 
             resolved = _resolve_symbol(
                 project_root=project_root,
@@ -402,41 +518,13 @@ def _generate_markdown(
                 visited=set(),
             )
 
-            out_lines.append(f"### {export}")
-            out_lines.append("")
-
-            if resolved.kind == "function":
-                assert isinstance(resolved.node, (ast.FunctionDef, ast.AsyncFunctionDef))
-                signature = _render_signature(resolved.node)
-                if signature.startswith(f"{resolved.node.name}(") and export != resolved.node.name:
-                    signature = signature.replace(f"{resolved.node.name}(", f"{export}(", 1)
-                out_lines.append(f"`{signature}`")
-                out_lines.append("")
-                if alias_target is not None:
-                    out_lines.append(f"Alias of `{alias_target}`.")
-                    out_lines.append("")
-                else:
-                    doc = _first_paragraph(ast.get_docstring(resolved.node) or "")
-                    if not doc:
-                        missing_docstrings.append(export)
-                    else:
-                        out_lines.append(doc)
-                        out_lines.append("")
-            elif resolved.kind == "class":
-                out_lines.append(f"`{export}`")
-                out_lines.append("")
-                assert isinstance(resolved.node, ast.ClassDef)
-                doc = _first_paragraph(ast.get_docstring(resolved.node) or "")
-                if not doc:
-                    missing_docstrings.append(export)
-                else:
-                    out_lines.append(doc)
-                    out_lines.append("")
-            else:
-                assert resolved.kind == "constant"
-                assert isinstance(resolved.node, (ast.Assign, ast.AnnAssign))
-                out_lines.append(f"`{export}` — constant ({_constant_type(resolved.node)})")
-                out_lines.append("")
+            _append_export_markdown(
+                out_lines=out_lines,
+                missing_docstrings=missing_docstrings,
+                export=export,
+                resolved=resolved,
+                alias_target=alias_target,
+            )
 
     return "\n".join(out_lines).rstrip() + "\n", missing_docstrings
 
@@ -486,8 +574,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
         return 0
 
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(markdown, encoding="utf-8")
+    _write_text_atomic(output, markdown, encoding="utf-8")
     return 0
 
 

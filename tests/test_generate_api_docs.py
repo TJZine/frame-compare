@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
 
 def _load_generator_module(repo_root: Path) -> ModuleType:
     script_path = repo_root / "scripts" / "generate_api_docs.py"
@@ -173,6 +175,26 @@ def test_check_exits_2_when_output_missing(tmp_path: Path, capsys) -> None:
 
     captured = capsys.readouterr()
     assert f"MISSING: {output}" in captured.err
+
+
+def test_write_text_atomic_does_not_replace_target_on_replace_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    gen = _load_generator_module(repo_root)
+    target = tmp_path / "docs" / "api.md"
+    _write_file(target, "old")
+
+    def _boom(_src: str, _dst: Path) -> None:
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(gen.os, "replace", _boom)
+
+    with pytest.raises(OSError, match="replace failed"):
+        gen._write_text_atomic(target, "new", encoding="utf-8")
+
+    assert target.read_text(encoding="utf-8") == "old"
+    assert list(target.parent.glob(".api.md.*")) == []
 
 
 def test_repo_api_docs_drift() -> None:

@@ -10,6 +10,7 @@ from pytest_mock import MockerFixture
 
 from frame_compare.config.schema import ReportConfig, ViewerMode
 from frame_compare.errors import ReportError
+from frame_compare.services import report as report_module
 from frame_compare.services.report import ClipInfo, ReportData, generate_report
 from frame_compare.services.types import TmdbMetadata
 
@@ -280,7 +281,25 @@ def test_generate_report_filmstrip_excluded(report_data: ReportData, tmp_path: P
     config = ReportConfig(include_filmstrip=False, output_dir=str(tmp_path))
     out_path = generate_report(report_data, config)
     content = out_path.read_text(encoding="utf-8")
-    assert 'class="rv-filmstrip"' not in content
+    assert 'class="rv-filmstrip rv-filmstrip--hidden"' in content
+    assert 'aria-hidden="true"' in content
+    assert 'class="rv-filmstrip-item"' not in content
+
+
+def test_image_src_for_report_uses_file_uri_for_cross_drive_fallback(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
+    screenshot_path = tmp_path / "shot.png"
+    screenshot_path.write_bytes(b"fake_png_data")
+    mocker.patch.object(report_module, "os_path_relpath", side_effect=ValueError)
+
+    src = report_module._image_src_for_report(
+        screenshot_path,
+        report_dir=tmp_path / "report",
+        embed_images=False,
+    )
+
+    assert src == screenshot_path.resolve().as_uri()
 
 
 def test_generate_report_mode_slider(report_data: ReportData, tmp_path: Path) -> None:

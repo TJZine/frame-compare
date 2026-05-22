@@ -1,6 +1,6 @@
 """CLI entry point for frame-compare."""
 
-# ruff: noqa: B008
+# ruff: noqa: B008, E402
 from __future__ import annotations
 
 import contextlib
@@ -8,22 +8,29 @@ import json
 import os
 import sys
 import webbrowser
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import tomli_w
 
+_DEFAULT_HELP_WIDTH = 200
+
 # Typer's Rich help renderer reads TERMINAL_WIDTH only at import-time.
 # Defaulting it prevents long option names from being ellipsized in help output
 # (and keeps CLI help stable under Click's test runner).
-os.environ.setdefault("TERMINAL_WIDTH", "200")
+os.environ.setdefault("TERMINAL_WIDTH", str(_DEFAULT_HELP_WIDTH))
 
 import typer
+import typer.rich_utils as typer_rich_utils
 from rich.console import Console
 
 from frame_compare.cli_output import print_at_a_glance, print_result_summary
 from frame_compare.config import (
     ConfigSchema,
+    OverlayMode,
+    ToneCurve,
+    TonemapPreset,
     Visibility,
     apply_cli_overrides,
     apply_preset,
@@ -33,6 +40,8 @@ from frame_compare.config import (
     save_preset,
 )
 from frame_compare.errors import (
+    ConfigValidationError,
+    ConfigWriteError,
     ExitCode,
     FrameCompareError,
     JSONValue,
@@ -47,6 +56,17 @@ if TYPE_CHECKING:
     from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, RunResult
     from frame_compare.orchestration.doctor import DoctorCheck, DoctorReport
     from frame_compare.utils.progress import ProgressReporter
+
+
+def _stabilize_typer_help_width() -> None:
+    """Backfill Typer's cached Rich help width when it was imported too early."""
+    if typer_rich_utils.MAX_WIDTH is not None:
+        return
+    with contextlib.suppress(ValueError):
+        typer_rich_utils.MAX_WIDTH = int(os.environ["TERMINAL_WIDTH"])
+
+
+_stabilize_typer_help_width()
 
 
 class _RunnerProxy:
@@ -110,6 +130,35 @@ def version() -> None:
     typer.echo(f"frame-compare {__version__}")
 
 
+def _format_enum_expected(enum_type: type[Enum]) -> str:
+    return ", ".join(repr(member.value) for member in enum_type)
+
+
+def _coerce_cli_choice[CliChoiceT: Enum](
+    value: str | None,
+    enum_type: type[CliChoiceT],
+    loc: tuple[str, ...],
+) -> CliChoiceT | None:
+    """Convert a CLI string choice after Typer parsing so JSON errors stay structured."""
+    if value is None:
+        return None
+    try:
+        return enum_type(value)
+    except ValueError as exc:
+        expected = _format_enum_expected(enum_type)
+        raise ConfigValidationError(
+            [
+                {
+                    "type": "enum",
+                    "loc": list(loc),
+                    "msg": f"Input should be {expected}",
+                    "input": value,
+                    "ctx": {"expected": expected},
+                }
+            ]
+        ) from exc
+
+
 @app.command()
 def run(
     root: Path = typer.Option(".", "--root", "-r"),
@@ -170,23 +219,16 @@ def run(
         return resolved_config
 
     try:
+        parsed_tm_preset = _coerce_cli_choice(tm_preset, TonemapPreset, ("color", "preset"))
+        parsed_tm_curve = _coerce_cli_choice(tm_curve, ToneCurve, ("color", "tone_curve"))
+        parsed_overlay = _coerce_cli_choice(overlay, OverlayMode, ("screenshots", "overlay_mode"))
+
         if write_config:
             _write_config_to(config_path, _load_effective_config())
             return
 
         if diagnose_paths:
-            from frame_compare.orchestration.preflight import resolve_paths
-
-            config_override = _load_effective_config()
-            workspace = resolve_paths(config_override, resolved_root)
-            payload = {
-                "root": str(resolved_root),
-                "config": str(config_path),
-                "input": str(workspace.input_dir),
-                "output": str(workspace.screenshots_dir),
-                "cache": str(workspace.generated_dir),
-            }
-            typer.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+            _handle_diagnose_paths(resolved_root, config_path, _load_effective_config())
             return
 
         request = RunRequest(
@@ -196,12 +238,12 @@ def run(
             no_cache=no_cache,
             from_cache_only=from_cache_only,
             no_upload=no_upload,
-            tm_preset=tm_preset,
+            tm_preset=parsed_tm_preset,
             tm_target_nits=tm_target,
-            tm_curve=tm_curve,
+            tm_curve=parsed_tm_curve,
             frame_count=frame_count,
             seed=seed,
-            overlay_mode=overlay,
+            overlay_mode=parsed_overlay,
             skip_analysis=skip_analysis,
             skip_metadata=skip_metadata,
             skip_dovi=skip_dovi,
@@ -233,20 +275,7 @@ def run(
         raise typer.Exit(code=int(ExitCode.INTERRUPTED)) from None
 
     if json_output:
-        payload = {
-            "success": result.success,
-            "screenshots_dir": str(result.screenshot_dir) if result.screenshot_dir else None,
-            "slowpics_url": result.slowpics_url,
-            "report_path": str(result.report_path) if result.report_path else None,
-            "frame_count": result.frame_count,
-            "clips_processed": result.clips_processed,
-            "duration_seconds": result.duration_seconds,
-            "cache_hit": result.cache_hit,
-            "errors": list(result.errors),
-        }
-        typer.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
-        if not result.success:
-            raise typer.Exit(code=int(ExitCode.PROCESSING_ERROR))
+        _handle_json_output(result)
         return
 
     if not result.success:
@@ -264,6 +293,37 @@ def run(
 
         if cfg is None or cfg.report.auto_open:
             _maybe_open_report(result.report_path)
+
+
+def _handle_diagnose_paths(resolved_root: Path, config_path: Path, config: ConfigSchema) -> None:
+    from frame_compare.orchestration.preflight import resolve_paths
+
+    workspace = resolve_paths(config, resolved_root)
+    payload = {
+        "root": str(resolved_root),
+        "config": str(config_path),
+        "input": str(workspace.input_dir),
+        "output": str(workspace.screenshots_dir),
+        "cache": str(workspace.generated_dir),
+    }
+    typer.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+
+
+def _handle_json_output(result: RunResult) -> None:
+    payload = {
+        "success": result.success,
+        "screenshots_dir": str(result.screenshot_dir) if result.screenshot_dir else None,
+        "slowpics_url": result.slowpics_url,
+        "report_path": str(result.report_path) if result.report_path else None,
+        "frame_count": result.frame_count,
+        "clips_processed": result.clips_processed,
+        "duration_seconds": result.duration_seconds,
+        "cache_hit": result.cache_hit,
+        "errors": list(result.errors),
+    }
+    typer.echo(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    if not result.success:
+        raise typer.Exit(code=int(ExitCode.PROCESSING_ERROR))
 
 
 @app.command()
@@ -487,9 +547,12 @@ def _resolve_root_and_config(root: Path, config: Path | None) -> tuple[Path, Pat
 
 def _write_config_to(path: Path, config: ConfigSchema) -> None:
     data = config.model_dump(mode="json", exclude_none=True)
-    path.parent.mkdir(parents=True, exist_ok=True)
     toml_text = tomli_w.dumps(data)
-    write_text_atomic(path, toml_text, encoding="utf-8")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_text_atomic(path, toml_text, encoding="utf-8")
+    except OSError as exc:
+        raise ConfigWriteError(path, label="configuration file", cause=exc) from exc
 
 
 def _prepare_toml_payload(data: dict[str, object]) -> dict[str, object]:
@@ -497,10 +560,12 @@ def _prepare_toml_payload(data: dict[str, object]) -> dict[str, object]:
     tmdb_section_raw = data.get("tmdb")
     tmdb_section: dict[str, object] = {}
     if isinstance(tmdb_section_raw, dict):
-        tmdb_section = dict(cast(dict[str, object], tmdb_section_raw))
-    api_key = tmdb_section.get("api_key")
-    if api_key is None or api_key == "":
-        tmdb_section.pop("api_key", None)
+        for k, v in cast(dict[str, object], tmdb_section_raw).items():
+            if k == "api_key":
+                if v is not None and v != "":
+                    tmdb_section["api_key"] = v
+            else:
+                tmdb_section[k] = v
     paths_section: dict[str, object] = {}
     slowpics_section: dict[str, object] = {}
     paths_raw = data.get("paths")

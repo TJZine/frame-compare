@@ -7,7 +7,6 @@ from frame_compare.config.loader import get_default_config
 from frame_compare.config.schema import (
     AnalysisConfig,
     ColorConfig,
-    ConfigSchema,
     DoviConfig,
     ReportConfig,
     SelectionMode,
@@ -83,7 +82,7 @@ def test_report_auto_open_default_true() -> None:
 
 def test_nested_model_defaults() -> None:
     """Test that root config initializes nested models with defaults."""
-    config = ConfigSchema()
+    config = get_default_config()
     assert config.paths.input_dir == "comparison_videos"
     assert config.analysis.random_seed == 42
     assert config.color.enable_tonemap is True

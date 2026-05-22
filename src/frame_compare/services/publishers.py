@@ -271,15 +271,13 @@ async def publish_to_slowpics(
     title = metadata.title if metadata else screenshot_dir.name
 
     if progress:
-        progress.start_phase("Uploading to slow.pics", total=1)
+        progress.set_description("Uploading screenshots to slow.pics")
 
     try:
         publisher = SlowpicsPublisher(config, client)
         url = await publisher.upload(files, title)
     finally:
-        if progress:
-            progress.advance(1)
-            progress.complete_phase()
+        pass
 
     # Deletion semantics
     if config.delete_after_upload:

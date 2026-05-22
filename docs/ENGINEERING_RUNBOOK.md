@@ -53,6 +53,7 @@ Core local gates:
 ```bash
 .venv/bin/pyright --warnings
 .venv/bin/ruff check .
+.venv/bin/bandit -c pyproject.toml -r src --severity-level medium
 .venv/bin/pytest -q
 UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini
 ```
@@ -106,6 +107,7 @@ Use for most code changes that do not affect packaging, Docker, Windows portable
 - Run the touched tests or a focused `pytest` selection.
 - Run `pyright --warnings`.
 - Run `ruff check .`.
+- Run `bandit -c pyproject.toml -r src --severity-level medium`.
 - Run `lint-imports` if imports or top-level module boundaries changed.
 
 ### Full Verification
@@ -123,6 +125,7 @@ Run:
 ```bash
 .venv/bin/pyright --warnings
 .venv/bin/ruff check .
+.venv/bin/bandit -c pyproject.toml -r src --severity-level medium
 .venv/bin/pytest -q
 UV_CACHE_DIR=./.uv_cache uv run --no-sync lint-imports --config importlinter.ini
 ```

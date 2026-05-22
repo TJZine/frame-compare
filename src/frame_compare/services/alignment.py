@@ -73,8 +73,26 @@ def _maybe_launch_vspreview(
     if not (config.use_vspreview or config.force_interactive):
         return
 
-    available = is_vspreview_available()
-    if config.use_vspreview and not available and not config.force_interactive:
+    probe_failed = False
+    try:
+        available = is_vspreview_available()
+    except Exception as exc:
+        probe_failed = True
+        available = False
+        if config.force_interactive:
+            raise AudioAlignmentError(
+                "Interactive alignment requested but VSPreview availability check failed."
+            ) from exc
+        log.warning(
+            "vspreview_availability_probe_failed",
+            error=str(exc),
+            exception_type=type(exc).__name__,
+            hint="Check the VSPreview/PySide6 installation to enable interactive alignment verification",
+            use_vspreview=config.use_vspreview,
+            force_interactive=config.force_interactive,
+        )
+
+    if config.use_vspreview and not available and not config.force_interactive and not probe_failed:
         log.warning(
             "vspreview_unavailable",
             hint="Install vspreview (and a Qt backend) to enable interactive alignment verification",
@@ -87,7 +105,6 @@ def _maybe_launch_vspreview(
     should_launch = bool((config.use_vspreview or config.force_interactive) and available)
 
     if progress:
-        progress.start_phase("VSPreview", total=1)
         progress.set_description("Alignment verification")
 
     try:
@@ -109,9 +126,7 @@ def _maybe_launch_vspreview(
                 use_vspreview=config.use_vspreview,
             )
     finally:
-        if progress:
-            progress.advance(1)
-            progress.complete_phase()
+        pass
 
 
 def _check_duplicate_stems(comparisons: list[Path]) -> None:
@@ -138,7 +153,7 @@ def _apply_manual_overrides(
     results_map: dict[str, AlignmentResult],
 ) -> Fraction | None:
     """Apply manual offsets from overrides config, returning reference FPS if probed."""
-    from frame_compare.vspreview import load_manual_overrides
+    from frame_compare.vspreview.overrides import load_manual_overrides
 
     manual_overrides = load_manual_overrides(cache_dir)
     fps_reference: Fraction | None = None
@@ -199,9 +214,6 @@ def _compute_missing_alignments(
         )
         results_map[f"{reference.stem}:{comp.stem}"] = res
 
-        if progress:
-            progress.advance()
-
 
 def align_clips(
     reference: Path,
@@ -220,7 +232,7 @@ def align_clips(
     _check_duplicate_stems(comparisons)
 
     if progress:
-        progress.start_phase("Audio Alignment", total=len(comparisons))
+        progress.set_description("Audio Alignment")
 
     results_map: dict[str, AlignmentResult] = {}
     try:
@@ -263,8 +275,7 @@ def align_clips(
                     save_offsets_cache(cache_dir, computed_results)
 
     finally:
-        if progress:
-            progress.complete_phase()
+        pass
 
     offsets_by_key = _build_offsets_map(
         reference=reference,

@@ -27,3 +27,14 @@ Where to look next:
 - Repo-local workflow and boundary skills: [.agents/skills/](.agents/skills/)
 - Antigravity rule shim: [.agents/rules/general-guidelines.md](.agents/rules/general-guidelines.md)
 - Historical exceptions and decisions: [docs/DECISIONS.md](docs/DECISIONS.md)
+
+<!-- desloppify-begin -->
+# desloppify
+
+Use the installed `desloppify` skill/tool only when explicitly requested to run a
+code-health scan, produce a health score, or create a cleanup plan. Keep scanner
+state untracked; do not add a repo-local `desloppify` skill unless the task
+explicitly targets that workflow and maintainer approval for tracking it is
+recorded. Follow the repo command canon and workflow policy in
+`docs/ENGINEERING_RUNBOOK.md`.
+<!-- desloppify-end -->

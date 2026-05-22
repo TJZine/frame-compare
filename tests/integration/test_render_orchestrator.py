@@ -4,8 +4,8 @@ import pytest
 from PIL import Image
 
 from frame_compare.config.schema import ColorConfig, ConfigSchema
-from frame_compare.render import render_screenshots
-from frame_compare.render.types import OverlayMode
+from frame_compare.render.orchestrator import render_screenshots
+from frame_compare.render.types import OverlayMode, ScreenshotRenderOptions
 
 
 @pytest.fixture
@@ -29,9 +29,11 @@ def test_render_screenshots_naming_and_output(
         frames,
         output_dir,
         integration_config,
-        label_map=label_map,
-        renderer="ffmpeg",
-        overlay_mode=OverlayMode.MINIMAL,
+        ScreenshotRenderOptions(
+            label_map=label_map,
+            renderer="ffmpeg",
+            overlay_mode=OverlayMode.MINIMAL,
+        ),
     )
 
     assert "TestLabel" in results
@@ -58,9 +60,11 @@ def test_render_screenshots_empty_frames_returns_label_with_empty_list(
         [],
         integration_output_dir,
         integration_config,
-        label_map={mock_video_path: "EmptyFrames"},
-        renderer="ffmpeg",
-        overlay_mode=OverlayMode.MINIMAL,
+        ScreenshotRenderOptions(
+            label_map={mock_video_path: "EmptyFrames"},
+            renderer="ffmpeg",
+            overlay_mode=OverlayMode.MINIMAL,
+        ),
     )
 
     assert results == {"EmptyFrames": []}
@@ -75,8 +79,7 @@ def test_render_screenshots_empty_clips_returns_empty_dict(
         [0],
         integration_output_dir,
         integration_config,
-        renderer="ffmpeg",
-        overlay_mode=OverlayMode.MINIMAL,
+        ScreenshotRenderOptions(renderer="ffmpeg", overlay_mode=OverlayMode.MINIMAL),
     )
 
     assert results == {}
@@ -91,9 +94,11 @@ def test_render_screenshots_defaults_label_to_clip_stem(
         [],
         integration_output_dir,
         integration_config,
-        label_map=None,
-        renderer="ffmpeg",
-        overlay_mode=OverlayMode.MINIMAL,
+        ScreenshotRenderOptions(
+            label_map=None,
+            renderer="ffmpeg",
+            overlay_mode=OverlayMode.MINIMAL,
+        ),
     )
 
     assert results == {mock_video_path.stem: []}

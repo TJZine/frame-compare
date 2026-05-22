@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from frame_compare.config import OverlayMode, ToneCurve, TonemapPreset
 from frame_compare.config.loader import get_default_config
 from frame_compare.config.overrides import apply_cli_overrides
 
@@ -71,6 +72,22 @@ def test_apply_cli_overrides_seed_maps_to_analysis_random_seed() -> None:
     new_config = apply_cli_overrides(config, cli_args)
 
     assert new_config.analysis.random_seed == 123
+
+
+def test_apply_cli_overrides_accepts_enum_cli_values() -> None:
+    """Enum-backed CLI choices should flow through override application unchanged."""
+    config = get_default_config()
+    cli_args: dict[str, Any] = {
+        "tm_preset": TonemapPreset.FILMIC,
+        "tm_curve": ToneCurve.REINHARD,
+        "overlay": OverlayMode.DIAGNOSTIC,
+    }
+
+    new_config = apply_cli_overrides(config, cli_args)
+
+    assert new_config.color.preset == TonemapPreset.FILMIC
+    assert new_config.color.tone_curve == ToneCurve.REINHARD
+    assert new_config.screenshots.overlay_mode == OverlayMode.DIAGNOSTIC
 
 
 def test_apply_cli_overrides_force_interactive_alignment_sets_force_and_use_vspreview() -> None:

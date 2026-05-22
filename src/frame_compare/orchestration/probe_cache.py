@@ -5,10 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard, cast
 
 import structlog
 import tomli_w
@@ -17,6 +17,93 @@ from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapsh
 from frame_compare.vs.types import HDRMetadata
 
 log = structlog.get_logger()
+
+type PrimitiveFrameProp = str | int | float
+
+
+def _mapping_has_only_str_keys(mapping: Mapping[object, object]) -> bool:
+    keys = list(mapping)
+    return all(isinstance(key, str) for key in keys)
+
+
+def _is_str_key_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
+    if not isinstance(value, Mapping):
+        return False
+    return _mapping_has_only_str_keys(cast(Mapping[object, object], value))
+
+
+def _is_non_bool_int(value: object) -> TypeGuard[int]:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _sanitize_hdr_metadata(entry: Mapping[str, object]) -> HDRMetadata:
+    mastering_display_raw = entry.get("mastering_display")
+    mastering_display = mastering_display_raw if isinstance(mastering_display_raw, str) else None
+
+    max_cll_raw = entry.get("max_cll")
+    max_cll = max_cll_raw if _is_non_bool_int(max_cll_raw) else None
+
+    max_fall_raw = entry.get("max_fall")
+    max_fall = max_fall_raw if _is_non_bool_int(max_fall_raw) else None
+
+    color_primaries_raw = entry.get("color_primaries")
+    color_primaries = color_primaries_raw if _is_non_bool_int(color_primaries_raw) else 2
+
+    transfer_raw = entry.get("transfer")
+    transfer = transfer_raw if _is_non_bool_int(transfer_raw) else 2
+
+    matrix_raw = entry.get("matrix")
+    matrix = matrix_raw if _is_non_bool_int(matrix_raw) else 2
+
+    return HDRMetadata(
+        mastering_display=mastering_display,
+        max_cll=max_cll,
+        max_fall=max_fall,
+        color_primaries=color_primaries,
+        transfer=transfer,
+        matrix=matrix,
+    )
+
+
+def _sanitize_preserved_frame_props(value: object) -> dict[str, PrimitiveFrameProp]:
+    if value is None:
+        return {}
+    if not _is_str_key_mapping(value):
+        raise TypeError("preserved_frame_props must be a table")
+
+    sanitized: dict[str, PrimitiveFrameProp] = {}
+    for key, prop_value in value.items():
+        if isinstance(prop_value, str | float) or _is_non_bool_int(prop_value):
+            sanitized[key] = prop_value
+    return sanitized
+
+
+def _sanitize_tonemap_prop_keys(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, Sequence) or isinstance(value, str | bytes):
+        raise TypeError("tonemap_prop_keys must be an array")
+
+    sanitized: list[str] = []
+    sequence = cast(Sequence[object], value)
+    for item in sequence:
+        if isinstance(item, str):
+            sanitized.append(item)
+    return tuple(sanitized)
+
+
+def _require_int(entry: Mapping[str, object], field: str) -> int:
+    value = entry[field]
+    if not _is_non_bool_int(value):
+        raise TypeError(f"{field} must be an integer")
+    return value
+
+
+def _require_bool(entry: Mapping[str, object], field: str) -> bool:
+    value = entry[field]
+    if not isinstance(value, bool):
+        raise TypeError(f"{field} must be a boolean")
+    return value
 
 
 def compute_probe_cache_key(fingerprint: ClipFingerprint) -> str:
@@ -53,7 +140,7 @@ def load_clip_probe_cache(cache_path: Path) -> dict[str, ClipProbeSnapshot]:
 
     try:
         with cache_path.open("rb") as f:
-            data = tomllib.load(f)
+            data: dict[str, object] = tomllib.load(f)
     except tomllib.TOMLDecodeError as e:
         log.warning("probe_cache_parse_error", path=str(cache_path), error=str(e))
         return {}
@@ -73,47 +160,42 @@ def load_clip_probe_cache(cache_path: Path) -> dict[str, ClipProbeSnapshot]:
         if key == "version":
             continue
 
-        if not isinstance(entry_raw, dict):
+        if not _is_str_key_mapping(entry_raw):
+            log.warning("probe_cache_invalid_entry", key=key, error="entry must be a table")
             continue
-
-        entry = cast(dict[str, Any], entry_raw)
+        entry = entry_raw
 
         try:
             # Reconstruct fingerprint (needed for snapshot)
             fingerprint = ClipFingerprint(
                 path=Path(str(entry["path"])),
-                size_bytes=int(entry["size_bytes"]),
-                mtime_ns=int(entry["mtime_ns"]),
+                size_bytes=_require_int(entry, "size_bytes"),
+                mtime_ns=_require_int(entry, "mtime_ns"),
             )
 
             # Reconstruct HDR metadata if present (from nested hdr_metadata table per SSOT)
+            is_hdr = _require_bool(entry, "is_hdr")
             hdr_metadata: HDRMetadata | None = None
-            if entry.get("is_hdr"):
+            if is_hdr:
                 hdr_table_raw = entry.get("hdr_metadata")
-                if isinstance(hdr_table_raw, dict):
-                    # Cast for type safety; load from nested table per SSOT §3.5.1
-                    hdr_table = cast(dict[str, Any], hdr_table_raw)
-                    hdr_metadata = HDRMetadata(
-                        mastering_display=cast(str | None, hdr_table.get("mastering_display")),
-                        max_cll=cast(int | None, hdr_table.get("max_cll")),
-                        max_fall=cast(int | None, hdr_table.get("max_fall")),
-                        color_primaries=int(hdr_table.get("color_primaries", 2)),
-                        transfer=int(hdr_table.get("transfer", 2)),
-                        matrix=int(hdr_table.get("matrix", 2)),
-                    )
+                if hdr_table_raw is None:
+                    raise TypeError("hdr_metadata must be a table when is_hdr is true")
+                if not _is_str_key_mapping(hdr_table_raw):
+                    raise TypeError("hdr_metadata must be a table")
+                hdr_metadata = _sanitize_hdr_metadata(hdr_table_raw)
 
             snapshots[key] = ClipProbeSnapshot(
                 fingerprint=fingerprint,
-                width=int(entry["width"]),
-                height=int(entry["height"]),
-                num_frames=int(entry["num_frames"]),
-                fps=Fraction(int(entry["fps_num"]), int(entry["fps_den"])),
-                is_hdr=bool(entry["is_hdr"]),
+                width=_require_int(entry, "width"),
+                height=_require_int(entry, "height"),
+                num_frames=_require_int(entry, "num_frames"),
+                fps=Fraction(_require_int(entry, "fps_num"), _require_int(entry, "fps_den")),
+                is_hdr=is_hdr,
                 hdr_metadata=hdr_metadata,
-                preserved_frame_props=cast(
-                    dict[str, str | int | float], entry.get("preserved_frame_props", {})
+                preserved_frame_props=_sanitize_preserved_frame_props(
+                    entry.get("preserved_frame_props")
                 ),
-                tonemap_prop_keys=tuple(cast(list[str], entry.get("tonemap_prop_keys", []))),
+                tonemap_prop_keys=_sanitize_tonemap_prop_keys(entry.get("tonemap_prop_keys")),
             )
         except (KeyError, TypeError, ValueError) as e:
             log.warning("probe_cache_invalid_entry", key=key, error=str(e))
@@ -160,8 +242,12 @@ def save_clip_probe_cache(
         dropped_props: dict[str, str] = {}
         dropped_count = 0
         for k, v in snapshot.preserved_frame_props.items():
-            # Use cast to Any to avoid "Unnecessary isinstance" warning while being defensive
-            if isinstance(cast(Any, v), str | int | float):
+            raw_value = cast(Any, v)
+            # Use cast to Any to avoid "Unnecessary isinstance" warning while being defensive.
+            # bool is an int subclass, but frame-prop persistence treats booleans as non-numeric.
+            if isinstance(raw_value, str | float) or (
+                isinstance(raw_value, int) and not isinstance(raw_value, bool)
+            ):
                 safe_props[k] = v
             else:
                 dropped_count += 1

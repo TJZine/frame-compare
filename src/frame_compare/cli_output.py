@@ -17,6 +17,10 @@ def _fmt_bool(value: bool) -> str:
     return "true" if value else "false"
 
 
+def _fmt_probe_failure(exc: Exception) -> str:
+    return f"probe failed ({type(exc).__name__}: {exc})"
+
+
 def _kv_table(*, rows: list[tuple[str, str]]) -> Table:
     table = Table(show_header=False, box=None, pad_edge=False)
     table.add_column("key", style="bold", no_wrap=True)
@@ -34,14 +38,14 @@ def print_at_a_glance(
     root: Path,
     config_path: Path,
 ) -> None:
-    vspreview_available: bool | None = None
+    vspreview_status: str | None = None
     if config.audio_alignment.use_vspreview or config.audio_alignment.force_interactive:
         try:
-            from frame_compare.vspreview import is_vspreview_available
+            from frame_compare.vspreview.adapter import is_vspreview_available
 
-            vspreview_available = is_vspreview_available()
-        except Exception:
-            vspreview_available = None
+            vspreview_status = _fmt_bool(is_vspreview_available())
+        except Exception as exc:
+            vspreview_status = _fmt_probe_failure(exc)
 
     ffmpeg_available = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
 
@@ -60,8 +64,8 @@ def print_at_a_glance(
         ("audio_alignment.use_vspreview", _fmt_bool(config.audio_alignment.use_vspreview)),
         ("audio_alignment.force_interactive", _fmt_bool(config.audio_alignment.force_interactive)),
     ]
-    if vspreview_available is not None:
-        rows.append(("vspreview.available", _fmt_bool(vspreview_available)))
+    if vspreview_status is not None:
+        rows.append(("vspreview.available", vspreview_status))
     rows.extend(
         [
             ("tonemap.enabled", _fmt_bool(config.color.enable_tonemap)),

@@ -2,21 +2,19 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import Any, TypedDict, cast
 
 from pydantic import ValidationError
 
+from frame_compare.config.schema import ConfigSchema, ToneCurve, TonemapPreset
 from frame_compare.config.utils import deep_merge
 from frame_compare.errors import ConfigValidationError, normalize_pydantic_errors
 
-if TYPE_CHECKING:
-    from frame_compare.config.schema import ConfigSchema
-
 
 class TonemapCliOverrides(TypedDict, total=False):
-    tm_preset: str | None
+    tm_preset: TonemapPreset | None
     tm_target: int | None
-    tm_curve: str | None
+    tm_curve: ToneCurve | None
 
 
 CLI_OVERRIDE_MAP: dict[str, str] = {

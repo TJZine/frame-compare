@@ -220,11 +220,14 @@ def _generate_vspreview_script(
     sessions_dir = cache_dir / "vspreview_sessions"
     sessions_dir.mkdir(parents=True, exist_ok=True)
 
+    bootstrap_paths = _resolve_bootstrap_paths(cache_dir)
+
     # Build script content
     script_content = _build_script_content(
         reference=reference,
         comparisons=comparisons,
         suggested_offsets_by_key=suggested_offsets_by_key,
+        bootstrap_paths=bootstrap_paths,
     )
 
     # Generate UTC timestamp for filename only
@@ -257,10 +260,43 @@ def _generate_vspreview_script(
     return script_path
 
 
+def _resolve_bootstrap_paths(cache_dir: Path) -> list[Path]:
+    """Resolve stable bootstrap import roots for generated VSPreview scripts."""
+    resolved_cache_dir = cache_dir.resolve()
+    workspace_root = _find_workspace_root(resolved_cache_dir)
+    project_root = _find_project_root(resolved_cache_dir, workspace_root)
+
+    bootstrap_paths: list[Path] = []
+    for candidate in (project_root, project_root / "src", workspace_root):
+        if candidate not in bootstrap_paths:
+            bootstrap_paths.append(candidate)
+    return bootstrap_paths
+
+
+def _find_workspace_root(cache_dir: Path) -> Path:
+    """Find the nearest ancestor that looks like a Frame Compare workspace root."""
+    for candidate in (cache_dir, *cache_dir.parents):
+        if (candidate / "config").is_dir():
+            return candidate
+
+    if cache_dir.name == "cache" and cache_dir.parent.name == "generated":
+        return cache_dir.parent.parent
+    return cache_dir.parent
+
+
+def _find_project_root(cache_dir: Path, workspace_root: Path) -> Path:
+    """Find the nearest ancestor that can import the local frame_compare package."""
+    for candidate in (cache_dir, *cache_dir.parents):
+        if (candidate / "src" / "frame_compare").is_dir():
+            return candidate
+    return workspace_root
+
+
 def _build_script_content(
     reference: Path,
     comparisons: list[Path],
     suggested_offsets_by_key: dict[str, int],
+    bootstrap_paths: list[Path],
 ) -> str:
     """Build the script content for VSPreview.
 
@@ -284,6 +320,8 @@ def _build_script_content(
         offset = suggested_offsets_by_key.get(key, 0)
         offset_map_lines.append(f"    {json.dumps(comp.stem)}: {int(offset)},")
 
+    bootstrap_path_lines = ",\n".join(f"    {json.dumps(str(path))}" for path in bootstrap_paths)
+
     script = f'''\
 #!/usr/bin/env python3
 """VSPreview alignment verification session.
@@ -301,12 +339,13 @@ import sys
 from pathlib import Path
 
 # ─── sys.path Bootstrap ───────────────────────────────────────────────────────
-# Make imports work in "run from repo" mode
-_THIS_FILE = Path(__file__).resolve()
-_PROJECT_ROOT = _THIS_FILE.parents[4]  # vspreview_sessions -> cache -> workspace -> project
-_WORKSPACE_ROOT = _PROJECT_ROOT.parent if (_PROJECT_ROOT / "config").exists() else _PROJECT_ROOT
+# Make imports work in "run from repo" mode without deriving roots from __file__
+_BOOTSTRAP_PATHS = [
+{bootstrap_path_lines}
+]
 
-for _p in [_PROJECT_ROOT, _PROJECT_ROOT / "src", _WORKSPACE_ROOT]:
+for _raw_path in _BOOTSTRAP_PATHS:
+    _p = Path(_raw_path)
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
@@ -419,7 +458,7 @@ def main():
                 overlay_text += "\\n(-N = comparison starts BEFORE reference)"
             comp_clip = core.text.Text(comp_clip, overlay_text, alignment=7)
         except Exception:
-            pass  # Overlay is best-effort
+            safe_print("Warning: Could not apply text overlay (plugin missing?)")
 
         # Slot layout: ref on even, comparison on odd
         # We duplicate reference before each comparison

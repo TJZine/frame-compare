@@ -556,14 +556,100 @@ def test_align_clips_completes_progress_when_cache_load_raises(tmp_path: Path) -
     ref.touch()
     comp.touch()
     (tmp_path / "audio_offsets.toml").write_text("not valid toml {{{ ", encoding="utf-8")
-
     reporter = MagicMock(spec=ProgressReporter)
 
     with pytest.raises(CacheCorruptionError):
         align_clips(ref, [comp], AlignmentConfig(), tmp_path, progress=reporter)
 
-    reporter.start_phase.assert_called_once_with("Audio Alignment", total=1)
-    reporter.complete_phase.assert_called_once_with()
+
+@patch("frame_compare.services.alignment._probe_fps")
+@patch("frame_compare.services.alignment._extract_audio")
+@patch("frame_compare.services.alignment._cross_correlate")
+def test_align_clips_computed_results_do_not_advance_phase_progress(
+    mock_corr: MagicMock,
+    mock_extract: MagicMock,
+    mock_probe: MagicMock,
+    tmp_path: Path,
+) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    ref.touch()
+    comp.touch()
+    mock_probe.return_value = Fraction(24, 1)
+    mock_extract.return_value = np.ones(10, dtype=np.float32)
+    mock_corr.return_value = (0, 0.99)
+    reporter = MagicMock(spec=ProgressReporter)
+
+    align_clips(
+        ref,
+        [comp],
+        AlignmentConfig(cache_results=False),
+        tmp_path,
+        progress=reporter,
+    )
+
+    reporter.advance.assert_not_called()
+    reporter.set_description.assert_any_call("Audio Alignment")
+    reporter.set_description.assert_any_call("Aligning comp.mkv")
+
+
+def test_align_clips_cached_results_do_not_advance_phase_progress(tmp_path: Path) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    ref.touch()
+    comp.touch()
+    cache_file = tmp_path / "audio_offsets.toml"
+    data = {
+        "version": "1",
+        "ref:comp": {
+            "reference_clip": "ref.mkv",
+            "comparison_clip": "comp.mkv",
+            "frame_offset": 12,
+            "time_offset_seconds": 0.5,
+            "correlation_score": 0.95,
+            "algorithm": "cross_correlation",
+        },
+    }
+    cache_file.write_text(tomli_w.dumps(data), encoding="utf-8")
+    reporter = MagicMock(spec=ProgressReporter)
+
+    align_clips(ref, [comp], AlignmentConfig(cache_results=True), tmp_path, progress=reporter)
+
+    reporter.advance.assert_not_called()
+
+
+@patch("frame_compare.services.alignment._probe_fps")
+@patch("frame_compare.services.alignment._extract_audio")
+def test_align_clips_manual_results_do_not_advance_phase_progress(
+    mock_extract: MagicMock,
+    mock_probe: MagicMock,
+    tmp_path: Path,
+) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    ref.touch()
+    comp.touch()
+    manual_overrides = {
+        "version": "1",
+        "ref:comp": {
+            "reference_clip": "ref",
+            "comparison_clip": "comp",
+            "frame_offset": 3,
+            "timestamp": "2026-05-21T00:00:00Z",
+            "confirmed": True,
+        },
+    }
+    (tmp_path / "manual_overrides.toml").write_text(
+        tomli_w.dumps(manual_overrides),
+        encoding="utf-8",
+    )
+    mock_probe.return_value = Fraction(24, 1)
+    mock_extract.side_effect = AssertionError("manual alignment should not extract audio")
+    reporter = MagicMock(spec=ProgressReporter)
+
+    align_clips(ref, [comp], AlignmentConfig(cache_results=True), tmp_path, progress=reporter)
+
+    reporter.advance.assert_not_called()
 
 
 @patch("frame_compare.services.alignment._probe_fps")
@@ -793,6 +879,54 @@ def test_align_clips_vspreview_unavailable_generates_script_without_launch(
     assert kwargs["config"].enabled is False
 
 
+@patch("frame_compare.services.alignment.log.warning")
+@patch("frame_compare.services.alignment.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment.is_vspreview_available")
+def test_align_clips_optional_vspreview_probe_failure_generates_script_without_launch(
+    mock_is_available: MagicMock,
+    mock_launch: MagicMock,
+    mock_warn: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """Optional VSPreview probe failures should be visible but non-fatal."""
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    ref.touch()
+    comp.touch()
+
+    cache_file = tmp_path / "audio_offsets.toml"
+    data = {
+        "version": "1",
+        "ref:comp": {
+            "reference_clip": "ref.mkv",
+            "comparison_clip": "comp.mkv",
+            "frame_offset": 7,
+            "time_offset_seconds": 0.292,
+            "correlation_score": 0.96,
+            "algorithm": "cross_correlation",
+        },
+    }
+    with cache_file.open("wb") as f:
+        f.write(tomli_w.dumps(data).encode("utf-8"))
+
+    mock_is_available.side_effect = RuntimeError("broken import metadata")
+    mock_launch.return_value = tmp_path / "vspreview_script.py"
+
+    config = AlignmentConfig(enable=True, use_vspreview=True, cache_results=True)
+    results = align_clips(ref, [comp], config, tmp_path)
+
+    assert len(results) == 1
+    assert results[0].frame_offset == 7
+    mock_warn.assert_called_once()
+    warn_args, warn_kwargs = mock_warn.call_args
+    assert warn_args == ("vspreview_availability_probe_failed",)
+    assert warn_kwargs["exception_type"] == "RuntimeError"
+    assert warn_kwargs["error"] == "broken import metadata"
+    mock_launch.assert_called_once()
+    _, launch_kwargs = mock_launch.call_args
+    assert launch_kwargs["config"].enabled is False
+
+
 @patch("frame_compare.services.alignment.launch_alignment_verification_session")
 @patch("frame_compare.services.alignment.is_vspreview_available")
 def test_align_clips_force_interactive_launches_when_vspreview_available(
@@ -837,6 +971,49 @@ def test_align_clips_force_interactive_launches_when_vspreview_available(
     assert mock_launch.call_count == 1
     _, kwargs = mock_launch.call_args
     assert kwargs["config"].enabled is True
+
+
+@patch("frame_compare.services.alignment.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment.is_vspreview_available")
+def test_align_clips_force_interactive_probe_failure_raises_alignment_error(
+    mock_is_available: MagicMock,
+    mock_launch: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """Forced interactive mode should fail deliberately when availability cannot be checked."""
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    ref.touch()
+    comp.touch()
+
+    cache_file = tmp_path / "audio_offsets.toml"
+    data = {
+        "version": "1",
+        "ref:comp": {
+            "reference_clip": "ref.mkv",
+            "comparison_clip": "comp.mkv",
+            "frame_offset": 3,
+            "time_offset_seconds": 0.125,
+            "correlation_score": 0.99,
+            "algorithm": "cross_correlation",
+        },
+    }
+    with cache_file.open("wb") as f:
+        f.write(tomli_w.dumps(data).encode("utf-8"))
+
+    mock_is_available.side_effect = RuntimeError("broken import metadata")
+
+    config = AlignmentConfig(
+        enable=True,
+        use_vspreview=False,
+        force_interactive=True,
+        cache_results=True,
+    )
+    with pytest.raises(AudioAlignmentError, match="availability check failed") as exc_info:
+        align_clips(ref, [comp], config, tmp_path)
+
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+    mock_launch.assert_not_called()
 
 
 @patch("frame_compare.services.alignment.log.warning")

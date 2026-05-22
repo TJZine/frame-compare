@@ -6,10 +6,13 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import typer
+import typer.rich_utils as typer_rich_utils
 from _pytest.monkeypatch import MonkeyPatch
+from typer.main import get_command
 from typer.testing import CliRunner
 
-from frame_compare.cli_entry import _maybe_open_report, app
+from frame_compare.cli_entry import _maybe_open_report, _stabilize_typer_help_width, app
+from frame_compare.config import OverlayMode, ToneCurve, TonemapPreset
 from frame_compare.config.loader import get_default_config
 from frame_compare.errors import (
     ConfigNotFoundError,
@@ -116,6 +119,15 @@ def test_run_help_shows_all_options():
         "--verbose",
         "-v",
     ]
+    run_command = get_command(app).commands["run"]
+    declared_options = {
+        opt
+        for param in run_command.params
+        for opt in (*getattr(param, "opts", ()), *getattr(param, "secondary_opts", ()))
+    }
+
+    assert set(REQUIRED_RUN_OPTIONS).issubset(declared_options)
+
     result = runner.invoke(
         app,
         ["run", "--help"],
@@ -125,8 +137,15 @@ def test_run_help_shows_all_options():
     )
     output = _normalize_cli_output(result.stdout)
     assert result.exit_code == 0
-    for opt in REQUIRED_RUN_OPTIONS:
+    for opt in ["--root", "--config", "--input", "--json", "--quiet", "--verbose"]:
         assert opt in output
+
+
+def test_stabilize_typer_help_width_backfills_import_order_gap(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("TERMINAL_WIDTH", "200")
+    monkeypatch.setattr(typer_rich_utils, "MAX_WIDTH", None)
+    _stabilize_typer_help_width()
+    assert typer_rich_utils.MAX_WIDTH == 200
 
 
 def test_run_respects_no_color_env_var_presence_even_if_empty(monkeypatch: MonkeyPatch) -> None:
@@ -625,8 +644,37 @@ def test_run_builds_run_request_from_cli_args(monkeypatch: MonkeyPatch) -> None:
 
     request = captured["request"]
     assert request.tm_target_nits == 203
-    assert request.overlay_mode == "diagnostic"
+    assert request.overlay_mode == OverlayMode.DIAGNOSTIC
     assert request.force_interactive_alignment is True
+
+
+def test_run_builds_run_request_with_typed_choice_overrides(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    captured: dict[str, RunRequest] = {}
+
+    def _run(request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        captured["request"] = request
+        return RunResult(success=True)
+
+    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace(
+        [
+            "--tm-preset",
+            "filmic",
+            "--tm-curve",
+            "spline",
+            "--overlay",
+            "diagnostic",
+        ]
+    )
+
+    assert result.exit_code == 0
+    request = captured["request"]
+    assert request.tm_preset == TonemapPreset.FILMIC
+    assert request.tm_curve == ToneCurve.SPLINE
+    assert request.overlay_mode == OverlayMode.DIAGNOSTIC
 
 
 def test_run_builds_run_request_with_input_dir(monkeypatch: MonkeyPatch) -> None:
@@ -1005,6 +1053,32 @@ def test_preset_save_respects_root_and_config_writes_preset_file() -> None:
         assert preset_path.exists()
 
 
+def test_preset_save_write_error_uses_cli_error_contract(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _write_text_atomic(_path: Path, _content: str, *, encoding: str = "utf-8") -> None:
+        raise PermissionError("permission denied")
+
+    monkeypatch.setattr("frame_compare.config.presets.write_text_atomic", _write_text_atomic)
+
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        config_path = root / "config" / "config.toml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(MINIMAL_CONFIG)
+
+        result = runner.invoke(
+            app,
+            ["preset", "save", "demo", "--root", str(root), "--config", "config/config.toml"],
+        )
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stdout == ""
+    assert "FC-1007" in result.stderr
+    assert "Failed to write preset file" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
 def test_preset_apply_respects_root_and_config_updates_config_file() -> None:
     with runner.isolated_filesystem():
         root = Path("workspace")
@@ -1057,6 +1131,44 @@ def test_run_write_config_respects_root_and_config_and_does_not_invoke_runner(
         assert result.exit_code == 0
         data = tomllib.loads(config_path.read_text(encoding="utf-8"))
         assert data["analysis"]["frame_count"] == 17
+
+
+def test_run_write_config_write_error_uses_cli_error_contract(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _write_text_atomic(_path: Path, _content: str, *, encoding: str = "utf-8") -> None:
+        raise PermissionError("permission denied")
+
+    monkeypatch.setattr("frame_compare.cli_entry.write_text_atomic", _write_text_atomic)
+
+    result = _invoke_run_with_minimal_workspace(["--write-config"])
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stdout == ""
+    assert "FC-1007" in result.stderr
+    assert "Failed to write configuration file" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_run_write_config_json_write_error_outputs_error_schema(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _write_text_atomic(_path: Path, _content: str, *, encoding: str = "utf-8") -> None:
+        raise PermissionError("permission denied")
+
+    monkeypatch.setattr("frame_compare.cli_entry.write_text_atomic", _write_text_atomic)
+
+    result = _invoke_run_with_minimal_workspace(["--write-config", "--json"])
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stderr == ""
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False
+    assert payload["error"]["code"] == "FC-1007"
+    assert payload["error"]["name"] == "CONFIG_WRITE_ERROR"
+    assert "Failed to write configuration file" in payload["error"]["message"]
+    assert "path" in payload["error"]["details"]
+    assert payload["error"]["details"]["error"] == "permission denied"
 
 
 def test_run_diagnose_paths_outputs_pinned_json_schema_and_does_not_invoke_runner(
@@ -1161,6 +1273,47 @@ def test_run_exit_code_maps_by_error_category_prefix_in_json_mode(
     assert result.exit_code == int(ExitCode.INPUT_ERROR)
     payload = json.loads(result.stdout)
     assert payload == format_error_json(error)
+
+
+def test_run_json_invalid_tm_preset_outputs_config_error_schema(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise AssertionError("runner.run should not be invoked for invalid CLI choices")
+
+    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace(["--json", "--tm-preset", "invalid"])
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stderr == ""
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False
+    assert payload["error"]["code"] == "FC-1003"
+    assert payload["error"]["name"] == "CONFIG_VALIDATION_ERROR"
+    assert payload["error"]["details"]["validation_errors"][0]["loc"] == ["color", "preset"]
+
+
+def test_run_json_invalid_overlay_outputs_config_error_schema(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise AssertionError("runner.run should not be invoked for invalid CLI choices")
+
+    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+
+    result = _invoke_run_with_minimal_workspace(["--json", "--overlay", "invalid"])
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stderr == ""
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False
+    assert payload["error"]["code"] == "FC-1003"
+    assert payload["error"]["name"] == "CONFIG_VALIDATION_ERROR"
+    assert payload["error"]["details"]["validation_errors"][0]["loc"] == [
+        "screenshots",
+        "overlay_mode",
+    ]
 
 
 def test_run_exit_code_is_130_on_keyboard_interrupt(monkeypatch: MonkeyPatch) -> None:

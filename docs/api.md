@@ -364,6 +364,12 @@ Single diagnostic check.
 
 Complete diagnostic report.
 
+### execute_run
+
+`execute_run(request: RunRequest, deps: RunDependencies | None = None) -> RunResult`
+
+Execute a run request asynchronously.
+
 ### normalize_probe_prop_key
 
 `normalize_probe_prop_key(key: str) -> str`
@@ -432,305 +438,15 @@ Select the appropriate progress reporter based on CLI flags and environment.
 
 ## frame_compare.render
 
-### apply_overlay
-
-`apply_overlay(image: Image.Image | np.ndarray, config: OverlayConfig) -> Image.Image`
-
-Apply text overlay to image.
-
-### calculate_dimensions
-
-`calculate_dimensions(source_width: int, source_height: int, max_width: int | None = None, max_height: int | None = None) -> tuple[int, int]`
-
-Calculate output dimensions preserving aspect ratio.
-
-### calculate_overlay_position
-
-`calculate_overlay_position(image_size: tuple[int, int], overlay_size: tuple[int, int], position: str, margin: int = 10) -> tuple[int, int]`
-
-Calculate overlay top-left corner.
-
-### EncoderSettings
-
-`EncoderSettings`
-
-Encoder settings for screenshot output files.
-
-### ensure_mod2
-
-`ensure_mod2(width: int, height: int) -> tuple[int, int]`
-
-Round dimensions up to nearest even values for video encoding compatibility.
-
-### generate_screenshot_name
-
-`generate_screenshot_name(label: str, frame_number: int, extension: str = 'png') -> str`
-
-Generate consistent screenshot filename.
-
-### generate_screenshot_path
-
-`generate_screenshot_path(output_dir: Path, label: str, frame_number: int) -> Path`
-
-Generate full output path for a screenshot.
-
-### OverlayConfig
-
-`OverlayConfig`
-
-Overlay rendering configuration for a single output frame.
-
-### OverlayMode
-
-`OverlayMode`
-
-Overlay verbosity level for rendered screenshots.
-
-### ProgressReporter
-
-`ProgressReporter`
-
-Protocol for reporting progress of long-running operations.
-
-### render_batch
-
-`render_batch(requests: list[RenderRequest], parallelism: int = 1, reporter: ProgressReporter | None = None) -> list[Path]`
-
-Execute a batch of render requests.
-
-### render_frame
-
-`render_frame(request: RenderRequest, renderer: Renderer = 'auto') -> Path`
-
-Render a single frame to image file.
-
-### render_screenshots
-
-`render_screenshots(clips: list[Path], frames: list[int], output_dir: Path, config: ConfigSchema, label_map: dict[Path, str] | None = None, renderer: Renderer = 'auto', overlay_mode: OverlayMode = OverlayMode.STANDARD, reporter: ProgressReporter | None = None, *, output_frames: list[int] | None = None, selection_labels: list[str | None] | None = None, ffmpeg_runner: FFmpegRunner | None = None) -> dict[str, list[Path]]`
-
-Render multiple frames from multiple clips.
-
-### render_screenshots_from_batch
-
-`render_screenshots_from_batch(batch_requests: list[ScreenshotBatchRequest], output_dir: Path, config: ConfigSchema, overlay_mode: OverlayMode, ffmpeg_runner: FFmpegRunner | None = None, reporter: ProgressReporter | None = None) -> dict[str, list[Path]]`
-
-Render screenshots from batch requests, choosing FFmpeg or VapourSynth path accordingly.
-
-### Renderer
-
-`Renderer` — constant (unknown)
-
-### RenderRequest
-
-`RenderRequest`
-
-Single frame render job
-
-### resolve_tonemap_settings
-
-`resolve_tonemap_settings(config: ConfigSchema, cli_overrides: TonemapCliOverrides | None = None) -> TonemapSettings`
-
-Resolve tonemap settings from config and CLI overrides.
-
-### ScreenshotBatchRequest
-
-`ScreenshotBatchRequest`
-
-Batch request representing a single clip's screenshot render task.
-
-### ScreenshotResult
-
-`ScreenshotResult`
-
-Result of a batch screenshot operation.
-
-### should_tonemap
-
-`should_tonemap(source_info: SourceInfo, config: ConfigSchema) -> bool`
-
-Determine if tonemap MUST be applied.
+Render module for Frame Compare.
 
 ## frame_compare.services
 
 Services module.
 
-### align_clips
-
-`align_clips(reference: Path, comparisons: list[Path], config: AlignmentConfig, cache_dir: Path, progress: ProgressReporter | None = None) -> list[AlignmentResult]`
-
-Align comparison clips to reference using audio cross-correlation.
-
-### AlignmentConfig
-
-`AlignmentConfig`
-
-Configuration for audio alignment.
-
-### AlignmentResult
-
-`AlignmentResult`
-
-Result of an audio alignment operation.
-
-### ClipInfo
-
-`ClipInfo`
-
-Information about a video clip for report generation.
-
-### generate_report
-
-`generate_report(data: ReportData, config: ReportConfig, output_path: Path | None = None) -> Path`
-
-Generate HTML comparison report.
-
-### load_cached_offsets
-
-`load_cached_offsets(cache_dir: Path, clips: list[Path]) -> dict[str, AlignmentResult] | None`
-
-Load previously calculated offsets from cache.
-
-### lookup_tmdb
-
-`lookup_tmdb(parsed: ParsedMetadata, config: MetadataConfig, client: httpx.AsyncClient) -> TmdbMetadata | None`
-
-Look up media on TMDB.
-
-### MetadataConfig
-
-`MetadataConfig`
-
-Configuration for metadata service.
-
-### parse_filename
-
-`parse_filename(filename: str) -> ParsedMetadata`
-
-Extract metadata from filename using GuessIt + Anitopy.
-
-### ParsedMetadata
-
-`ParsedMetadata`
-
-Metadata extracted from filename.
-
-### publish_to_slowpics
-
-`publish_to_slowpics(screenshot_dir: Path, config: SlowpicsConfig, client: httpx.AsyncClient, metadata: TmdbMetadata | None = None, progress: ProgressReporter | None = None) -> PublishResult`
-
-Convenience function to publish screenshots from a directory.
-
-### PublishResult
-
-`PublishResult`
-
-Result of a successful publication.
-
-### ReportData
-
-`ReportData`
-
-Data for report generation.
-
-### resolve_metadata
-
-`resolve_metadata(filenames: list[str], config: MetadataConfig, client: httpx.AsyncClient, prompt_callback: Callable[[list[TmdbMetadata]], int] | None = None) -> TmdbMetadata | None`
-
-Full metadata resolution workflow.
-
-### save_offsets_cache
-
-`save_offsets_cache(cache_dir: Path, results: list[AlignmentResult]) -> None`
-
-Persist alignment results to cache.
-
-### SlowpicsPublisher
-
-`SlowpicsPublisher`
-
-Handles uploading screenshots to slow.pics.
-
-### TmdbMetadata
-
-`TmdbMetadata`
-
-Metadata from TMDB API.
-
 ## frame_compare.utils
 
 Utilities for Frame Compare 2.0.
-
-### configure_logging
-
-`configure_logging(level: str = 'INFO', log_format: str = 'console', **kwargs) -> None`
-
-Configure structlog with either console or JSON output.
-
-### get_run_id
-
-`get_run_id() -> str`
-
-Get the current run's correlation ID.
-
-### is_perf_enabled
-
-`is_perf_enabled() -> bool`
-
-Return True when perf timing logs are enabled.
-
-### LogProgressReporter
-
-`LogProgressReporter`
-
-Progress reporter that logs milestones via structlog.
-
-### new_run_id
-
-`new_run_id() -> str`
-
-Generate and set a correlation ID for the current run.
-
-### NullProgressReporter
-
-`NullProgressReporter`
-
-No-op progress reporter.
-
-### perf_span
-
-`perf_span(name: str, **fields) -> Iterator[None]`
-
-Record a timing span if enabled.
-
-### ProgressReporter
-
-`ProgressReporter`
-
-Protocol for reporting progress of long-running operations.
-
-### RichProgressReporter
-
-`RichProgressReporter`
-
-Progress reporter using the rich library for CLI display.
-
-### WorkspacePaths
-
-`WorkspacePaths`
-
-Resolved absolute paths for a workspace.
-
-### write_bytes_atomic
-
-`write_bytes_atomic(path: Path, content: bytes) -> None`
-
-Atomically write byte content to a file path.
-
-### write_text_atomic
-
-`write_text_atomic(path: Path, content: str, *, encoding: str = 'utf-8') -> None`
-
-Atomically write text content to a file path.
 
 ## frame_compare.vs
 
@@ -766,6 +482,12 @@ Color space properties extracted from frame.
 
 Default VapourSynth loader implementation using LWLibavSource.
 
+### detect_hdr
+
+`detect_hdr(frame_props: Mapping[str, object]) -> tuple[bool, HDRMetadata | None]`
+
+Detect HDR from frame properties per SSOT 5.1 mapping.
+
 ### detect_plugins
 
 `detect_plugins(core: vs.Core) -> dict[str, bool]`
@@ -784,15 +506,9 @@ Initialize VapourSynth core with plugins.
 
 Expand limited-range integer RGB to full range.
 
-### get_color_props
-
-`get_color_props(clip: vs.VideoNode) -> ColorProps`
-
-Extract color space properties from frame 0.
-
 ### get_preset_settings
 
-`get_preset_settings(preset: str) -> TonemapSettings`
+`get_preset_settings(preset: TonemapPreset) -> TonemapSettings`
 
 Get settings for named preset.
 
@@ -807,12 +523,6 @@ HDR metadata extracted from source.
 `infer_color_props(clip: vs.VideoNode, props: ColorProps) -> ColorProps`
 
 Resolve missing/unspecified color properties for downstream conversions.
-
-### is_hdr
-
-`is_hdr(clip: vs.VideoNode) -> bool`
-
-Determine if clip is HDR based on frame 0 properties.
 
 ### is_vapoursynth_available
 
@@ -865,42 +575,6 @@ Protocol for loading VapourSynth clips.
 ## frame_compare.vspreview
 
 VSPreview integration module for Frame Compare 2.0.
-
-### is_vspreview_available
-
-`is_vspreview_available() -> bool`
-
-Check if VSPreview is installed and can be launched.
-
-### launch_alignment_verification_session
-
-`launch_alignment_verification_session(reference: Path, comparisons: list[Path], suggested_offsets_by_key: dict[str, int], cache_dir: Path, config: VSPreviewConfig) -> Path`
-
-Launch a single VSPreview session for the full comparison set.
-
-### load_manual_overrides
-
-`load_manual_overrides(cache_dir: Path) -> dict[str, ManualOverride]`
-
-Load persisted manual overrides from cache.
-
-### ManualOverride
-
-`ManualOverride`
-
-User-provided alignment override from VSPreview session.
-
-### save_manual_override
-
-`save_manual_override(cache_dir: Path, override: ManualOverride) -> None`
-
-Persist a manual override to cache.
-
-### VSPreviewConfig
-
-`VSPreviewConfig`
-
-Configuration for VSPreview integration.
 
 ## frame_compare.runner
 

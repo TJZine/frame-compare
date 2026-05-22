@@ -13,9 +13,9 @@ def test_current_cli_contract_is_wired_into_repo_authority_surfaces() -> None:
 
     runbook = (repo_root / "docs" / "ENGINEERING_RUNBOOK.md").read_text(encoding="utf-8")
     agents = (repo_root / "AGENTS.md").read_text(encoding="utf-8")
-    coordinator = (
-        repo_root / "src" / "frame_compare" / "orchestration" / "coordinator.py"
-    ).read_text(encoding="utf-8")
+    coordinator = (repo_root / "src" / "frame_compare" / "orchestration" / "types.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "docs/current-cli-contract.md" in runbook
     assert "docs/current-cli-contract.md" in agents

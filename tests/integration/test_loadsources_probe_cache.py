@@ -43,6 +43,9 @@ enable = false
 [screenshots]
 use_ffmpeg = true
 
+[color]
+enable_tonemap = false
+
 [slowpics]
 auto_upload = false
 
