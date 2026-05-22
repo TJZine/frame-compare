@@ -177,21 +177,36 @@ def test_check_exits_2_when_output_missing(tmp_path: Path, capsys) -> None:
     assert f"MISSING: {output}" in captured.err
 
 
-def test_write_text_atomic_does_not_replace_target_on_replace_failure(
+def test_generation_preserves_existing_output_mode(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    gen = _load_generator_module(repo_root)
+    _write_fixture_project(root=tmp_path, missing_docstring=False)
+    output = tmp_path / "docs" / "api.md"
+    _write_file(output, "old")
+    output.chmod(0o640)
+
+    exit_code = gen.main(["--project-root", str(tmp_path), "--output", str(output)])
+
+    assert exit_code == 0
+    assert (output.stat().st_mode & 0o777) == 0o640
+
+
+def test_generation_does_not_replace_target_on_shared_replace_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     gen = _load_generator_module(repo_root)
+    _write_fixture_project(root=tmp_path, missing_docstring=False)
     target = tmp_path / "docs" / "api.md"
     _write_file(target, "old")
 
     def _boom(_src: str, _dst: Path) -> None:
         raise OSError("replace failed")
 
-    monkeypatch.setattr(gen.os, "replace", _boom)
+    monkeypatch.setattr("frame_compare.utils.atomic_write.os.replace", _boom)
 
     with pytest.raises(OSError, match="replace failed"):
-        gen._write_text_atomic(target, "new", encoding="utf-8")
+        gen.main(["--project-root", str(tmp_path), "--output", str(target)])
 
     assert target.read_text(encoding="utf-8") == "old"
     assert list(target.parent.glob(".api.md.*")) == []
