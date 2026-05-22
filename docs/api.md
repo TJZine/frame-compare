@@ -286,131 +286,17 @@ slow.pics gallery visibility setting.
 
 Orchestration public API.
 
-### CheckResult
-
-`CheckResult`
-
-Result of a diagnostic check.
-
-### ClipAlignmentState
-
-`ClipAlignmentState`
-
-Alignment state expressed in signed, comparison-relative-to-reference offsets.
-
-### ClipFingerprint
-
-`ClipFingerprint`
-
-Stable fingerprint for cache invalidation.
-
-### ClipProbeSnapshot
-
-`ClipProbeSnapshot`
-
-Cached, expensive-to-derive metadata about a clip (pre-trim).
-
-### ClipState
-
-`ClipState`
-
-Canonical per-clip state across orchestration phases (legacy ClipPlan analogue).
-
-### ClipTrimState
-
-`ClipTrimState`
-
-Effective temporal window for a clip in frames (applied trims only).
-
-### collect_checks
-
-`collect_checks() -> list[DoctorCheck]`
-
-Collect all diagnostic checks in deterministic order per SSOT §4.2.1.
-
-### compute_preserved_frame_props
-
-`compute_preserved_frame_props(frame_props: Mapping[str, object]) -> dict[str, str | int | float]`
-
-Return TOML-safe, tonemap-relevant props extracted from a frame-props mapping.
-
-### compute_probe_cache_key
-
-`compute_probe_cache_key(fingerprint: ClipFingerprint) -> str`
-
-Return a stable key for clip probe cache entries.
-
-### compute_tonemap_prop_keys
-
-`compute_tonemap_prop_keys(frame_props: Mapping[str, object]) -> tuple[str, ...]`
-
-Return a deterministic, ordered tuple of tonemap-related original prop keys.
-
-### discover_inputs
-
-`discover_inputs(input_dir: Path, patterns: list[str] | None = None) -> list[Path]`
-
-Discover video files in input directory.
-
-### DoctorCheck
-
-`DoctorCheck`
-
-Single diagnostic check.
-
-### DoctorReport
-
-`DoctorReport`
-
-Complete diagnostic report.
-
 ### execute_run
 
 `execute_run(request: RunRequest, deps: RunDependencies | None = None) -> RunResult`
 
 Execute a run request asynchronously.
 
-### normalize_probe_prop_key
-
-`normalize_probe_prop_key(key: str) -> str`
-
-Normalize a VapourSynth prop key for matching.
-
-### PreflightResult
-
-`PreflightResult`
-
-Result of preflight validation.
-
-### prepare_preflight
-
-`prepare_preflight(root: Path | None = None, config_path: Path | None = None, overrides: dict[str, object] | None = None) -> PreflightResult`
-
-Validate configuration and resolve workspace paths.
-
-### resolve_paths
-
-`resolve_paths(config: ConfigSchema, root: Path) -> WorkspacePaths`
-
-Resolve all workspace paths from config.
-
-### resolve_workspace
-
-`resolve_workspace(root: Path | None) -> Path`
-
-Resolve workspace root directory.
-
 ### run_doctor
 
 `run_doctor(checks: list[DoctorCheck] | None = None, reporter: ProgressReporter | None = None) -> DoctorReport`
 
 Execute diagnostic checks and report results.
-
-### RunContext
-
-`RunContext`
-
-Runtime context shared across phases.
 
 ### RunDependencies
 
@@ -429,12 +315,6 @@ Complete configuration for a comparison run.
 `RunResult`
 
 Complete result from a comparison run.
-
-### select_reporter
-
-`select_reporter(quiet: bool = False, json_output: bool = False, no_color: bool = False, force_tty: bool | None = None) -> ProgressReporter`
-
-Select the appropriate progress reporter based on CLI flags and environment.
 
 ## frame_compare.render
 
