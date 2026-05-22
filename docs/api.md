@@ -104,7 +104,7 @@ Breakdown of which frames were selected by which criteria.
 
 ## frame_compare.config
 
-Configuration module for Frame Compare.
+Convenience config re-export surface for Frame Compare.
 
 ### AnalysisConfig
 

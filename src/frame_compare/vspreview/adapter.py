@@ -13,6 +13,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -25,6 +26,90 @@ if TYPE_CHECKING:
     pass
 
 log = structlog.get_logger()
+
+
+class VSPreviewAvailabilityStatus(Enum):
+    """Status enum for VSPreview availability."""
+
+    AVAILABLE = "available"
+    MISSING_EXEC_AND_MODULE = "missing_exec_and_module"
+    MISSING_QT_BACKEND = "missing_qt_backend"
+    PROBE_FAILED = "probe_failed"
+
+
+@dataclass(frozen=True)
+class VSPreviewAvailability:
+    """Detailed report of VSPreview availability."""
+
+    status: VSPreviewAvailabilityStatus
+    message: str
+    hint: str | None = None
+    error_details: dict[str, str] | None = None
+
+    @property
+    def is_available(self) -> bool:
+        return self.status == VSPreviewAvailabilityStatus.AVAILABLE
+
+
+def check_vspreview_availability() -> VSPreviewAvailability:
+    """Check if VSPreview is available, returning a structured availability report.
+
+    Availability rules:
+        - Return AVAILABLE if `shutil.which("vspreview")` is non-None, OR
+        - `importlib.util.find_spec("vspreview")` is non-None AND
+          (`find_spec("PySide6")` OR `find_spec("PyQt5")`) is non-None.
+    """
+    try:
+        # Priority 1: Check if vspreview executable exists in PATH
+        if shutil.which("vspreview") is not None:
+            return VSPreviewAvailability(
+                status=VSPreviewAvailabilityStatus.AVAILABLE,
+                message="VSPreview is available for interactive alignment",
+            )
+
+        # Priority 2: Check if vspreview module is importable + Qt backend
+        vspreview_spec = importlib.util.find_spec("vspreview")
+        if vspreview_spec is None:
+            return VSPreviewAvailability(
+                status=VSPreviewAvailabilityStatus.MISSING_EXEC_AND_MODULE,
+                message="VSPreview not installed (optional for manual alignment)",
+                hint="Install with: pip install vspreview PySide6 (or: pip install vspreview PyQt5)",
+            )
+
+        # Need at least one Qt backend
+        pyside6_spec = importlib.util.find_spec("PySide6")
+        pyqt5_spec = importlib.util.find_spec("PyQt5")
+
+        if pyside6_spec is not None or pyqt5_spec is not None:
+            return VSPreviewAvailability(
+                status=VSPreviewAvailabilityStatus.AVAILABLE,
+                message="VSPreview is available for interactive alignment",
+            )
+
+        return VSPreviewAvailability(
+            status=VSPreviewAvailabilityStatus.MISSING_QT_BACKEND,
+            message="VSPreview not installed (optional for manual alignment)",
+            hint="Install with: pip install vspreview PySide6 (or: pip install vspreview PyQt5)",
+        )
+    except Exception as exc:
+        return VSPreviewAvailability(
+            status=VSPreviewAvailabilityStatus.PROBE_FAILED,
+            message="VSPreview availability probe failed (optional for manual alignment)",
+            hint="Check the VSPreview/PySide6 installation if interactive alignment is needed",
+            error_details={
+                "exception_type": type(exc).__name__,
+                "exception": str(exc),
+            },
+        )
+
+
+def is_vspreview_available() -> bool:
+    """Check if VSPreview is installed and can be launched (compatibility wrapper).
+
+    Returns:
+        True if vspreview is importable and functional
+    """
+    return check_vspreview_availability().is_available
 
 
 @dataclass(frozen=True)
@@ -40,37 +125,6 @@ class VSPreviewConfig:
     enabled: bool = False
     timeout_seconds: float = 300.0  # 5 minutes
     auto_close: bool = True
-
-
-def is_vspreview_available() -> bool:
-    """Check if VSPreview is installed and can be launched.
-
-    Returns:
-        True if vspreview is importable and functional
-
-    Availability rules per vspreview spec §3.1 / §6.3:
-        - Return True if `shutil.which("vspreview")` is non-None, OR
-        - `importlib.util.find_spec("vspreview")` is non-None AND
-          (`find_spec("PySide6")` OR `find_spec("PyQt5")`) is non-None.
-
-    Note:
-        Does not require a running X server/display.
-        Full launch capability is checked separately.
-    """
-    # Priority 1: Check if vspreview executable exists in PATH
-    if shutil.which("vspreview") is not None:
-        return True
-
-    # Priority 2: Check if vspreview module is importable + Qt backend
-    vspreview_spec = importlib.util.find_spec("vspreview")
-    if vspreview_spec is None:
-        return False
-
-    # Need at least one Qt backend
-    pyside6_spec = importlib.util.find_spec("PySide6")
-    pyqt5_spec = importlib.util.find_spec("PyQt5")
-
-    return pyside6_spec is not None or pyqt5_spec is not None
 
 
 def launch_alignment_verification_session(
@@ -142,8 +196,15 @@ def launch_alignment_verification_session(
         return script_path
 
     # Check availability
-    if not is_vspreview_available():
-        raise VSPreviewNotFoundError()
+    availability = check_vspreview_availability()
+    if not availability.is_available:
+        if availability.status == VSPreviewAvailabilityStatus.PROBE_FAILED:
+            err_msg = availability.message
+            if availability.error_details:
+                err_msg += f" ({availability.error_details.get('exception_type')}: {availability.error_details.get('exception')})"
+            raise VSPreviewError(err_msg)
+        else:
+            raise VSPreviewNotFoundError()
 
     # Resolve the launch command
     command = _resolve_launch_command(script_path)

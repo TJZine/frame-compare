@@ -226,12 +226,24 @@ class TestCheckVSPreview:
     """Tests for the optional VSPreview diagnostic check."""
 
     def test_check_vspreview_probe_failure_is_optional_status(self) -> None:
+        from frame_compare.vspreview.adapter import (
+            VSPreviewAvailability,
+            VSPreviewAvailabilityStatus,
+        )
+
         checks = collect_checks()
         vspreview_check = next(c for c in checks if c.name == "vspreview")
 
         with patch(
-            "frame_compare.vspreview.adapter.is_vspreview_available",
-            side_effect=RuntimeError("broken import metadata"),
+            "frame_compare.vspreview.adapter.check_vspreview_availability",
+            return_value=VSPreviewAvailability(
+                status=VSPreviewAvailabilityStatus.PROBE_FAILED,
+                message="VSPreview availability probe failed",
+                error_details={
+                    "exception_type": "RuntimeError",
+                    "exception": "broken import metadata",
+                },
+            ),
         ):
             result = vspreview_check.check_fn()
 

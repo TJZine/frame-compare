@@ -25,8 +25,9 @@ from frame_compare.utils.atomic_write import write_bytes_atomic
 from frame_compare.utils.progress import ProgressReporter
 from frame_compare.utils.subproc import run_subprocess
 from frame_compare.vspreview.adapter import (
+    VSPreviewAvailabilityStatus,
     VSPreviewConfig,
-    is_vspreview_available,
+    check_vspreview_availability,
     launch_alignment_verification_session,
 )
 
@@ -73,36 +74,44 @@ def _maybe_launch_vspreview(
     if not (config.use_vspreview or config.force_interactive):
         return
 
-    probe_failed = False
-    try:
-        available = is_vspreview_available()
-    except Exception as exc:
-        probe_failed = True
-        available = False
-        if config.force_interactive:
+    availability = check_vspreview_availability()
+
+    if config.force_interactive and not availability.is_available:
+        if availability.status == VSPreviewAvailabilityStatus.PROBE_FAILED:
+            err_msg = "Interactive alignment requested but VSPreview availability check failed."
+            if availability.error_details:
+                err_msg += f" ({availability.error_details.get('exception_type')}: {availability.error_details.get('exception')})"
+            raise AudioAlignmentError(err_msg)
+        else:
             raise AudioAlignmentError(
-                "Interactive alignment requested but VSPreview availability check failed."
-            ) from exc
-        log.warning(
-            "vspreview_availability_probe_failed",
-            error=str(exc),
-            exception_type=type(exc).__name__,
-            hint="Check the VSPreview/PySide6 installation to enable interactive alignment verification",
-            use_vspreview=config.use_vspreview,
-            force_interactive=config.force_interactive,
-        )
+                "Interactive alignment requested but VSPreview is not available."
+            )
 
-    if config.use_vspreview and not available and not config.force_interactive and not probe_failed:
-        log.warning(
-            "vspreview_unavailable",
-            hint="Install vspreview (and a Qt backend) to enable interactive alignment verification",
-            use_vspreview=config.use_vspreview,
-            force_interactive=config.force_interactive,
-        )
-    if config.force_interactive and not available:
-        raise AudioAlignmentError("Interactive alignment requested but VSPreview is not available.")
+    if not availability.is_available:
+        if availability.status == VSPreviewAvailabilityStatus.PROBE_FAILED:
+            log.warning(
+                "vspreview_availability_probe_failed",
+                error=availability.error_details.get("exception")
+                if availability.error_details
+                else "unknown error",
+                exception_type=availability.error_details.get("exception_type")
+                if availability.error_details
+                else "Exception",
+                hint=availability.hint,
+                use_vspreview=config.use_vspreview,
+                force_interactive=config.force_interactive,
+            )
+        elif config.use_vspreview and not config.force_interactive:
+            log.warning(
+                "vspreview_unavailable",
+                hint=availability.hint,
+                use_vspreview=config.use_vspreview,
+                force_interactive=config.force_interactive,
+            )
 
-    should_launch = bool((config.use_vspreview or config.force_interactive) and available)
+    should_launch = bool(
+        (config.use_vspreview or config.force_interactive) and availability.is_available
+    )
 
     if progress:
         progress.set_description("Alignment verification")

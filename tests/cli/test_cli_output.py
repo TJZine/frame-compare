@@ -72,12 +72,20 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
 def test_at_a_glance_prints_vspreview_availability_when_probe_succeeds(
     monkeypatch: MonkeyPatch,
 ) -> None:
+    from frame_compare.vspreview.adapter import VSPreviewAvailability, VSPreviewAvailabilityStatus
+
     config = _config()
     config.audio_alignment.use_vspreview = True
     console = _console()
 
     monkeypatch.setattr("frame_compare.cli_output.shutil.which", lambda _command: None)
-    monkeypatch.setattr("frame_compare.vspreview.adapter.is_vspreview_available", lambda: True)
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.check_vspreview_availability",
+        lambda: VSPreviewAvailability(
+            status=VSPreviewAvailabilityStatus.AVAILABLE,
+            message="VSPreview is available for interactive alignment",
+        ),
+    )
 
     print_at_a_glance(
         console,
@@ -94,8 +102,7 @@ def test_at_a_glance_prints_vspreview_availability_when_probe_succeeds(
 
 
 def test_at_a_glance_prints_vspreview_probe_failure(monkeypatch: MonkeyPatch) -> None:
-    def _raise_probe_error() -> bool:
-        raise RuntimeError("display unavailable")
+    from frame_compare.vspreview.adapter import VSPreviewAvailability, VSPreviewAvailabilityStatus
 
     config = _config()
     config.audio_alignment.force_interactive = True
@@ -103,8 +110,15 @@ def test_at_a_glance_prints_vspreview_probe_failure(monkeypatch: MonkeyPatch) ->
 
     monkeypatch.setattr("frame_compare.cli_output.shutil.which", lambda _command: None)
     monkeypatch.setattr(
-        "frame_compare.vspreview.adapter.is_vspreview_available",
-        _raise_probe_error,
+        "frame_compare.vspreview.adapter.check_vspreview_availability",
+        lambda: VSPreviewAvailability(
+            status=VSPreviewAvailabilityStatus.PROBE_FAILED,
+            message="VSPreview availability probe failed",
+            error_details={
+                "exception_type": "RuntimeError",
+                "exception": "display unavailable",
+            },
+        ),
     )
 
     print_at_a_glance(

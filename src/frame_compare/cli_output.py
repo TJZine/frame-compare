@@ -17,10 +17,6 @@ def _fmt_bool(value: bool) -> str:
     return "true" if value else "false"
 
 
-def _fmt_probe_failure(exc: Exception) -> str:
-    return f"probe failed ({type(exc).__name__}: {exc})"
-
-
 def _kv_table(*, rows: list[tuple[str, str]]) -> Table:
     table = Table(show_header=False, box=None, pad_edge=False)
     table.add_column("key", style="bold", no_wrap=True)
@@ -40,12 +36,23 @@ def print_at_a_glance(
 ) -> None:
     vspreview_status: str | None = None
     if config.audio_alignment.use_vspreview or config.audio_alignment.force_interactive:
-        try:
-            from frame_compare.vspreview.adapter import is_vspreview_available
+        from frame_compare.vspreview.adapter import (
+            VSPreviewAvailabilityStatus,
+            check_vspreview_availability,
+        )
 
-            vspreview_status = _fmt_bool(is_vspreview_available())
-        except Exception as exc:
-            vspreview_status = _fmt_probe_failure(exc)
+        availability = check_vspreview_availability()
+        if availability.is_available:
+            vspreview_status = "true"
+        elif availability.status == VSPreviewAvailabilityStatus.PROBE_FAILED:
+            exc_type = "Exception"
+            exc_msg = "unknown error"
+            if availability.error_details:
+                exc_type = availability.error_details.get("exception_type", exc_type)
+                exc_msg = availability.error_details.get("exception", exc_msg)
+            vspreview_status = f"probe failed ({exc_type}: {exc_msg})"
+        else:
+            vspreview_status = "false"
 
     ffmpeg_available = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
 

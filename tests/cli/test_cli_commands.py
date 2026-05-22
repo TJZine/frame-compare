@@ -241,11 +241,19 @@ def test_run_default_prints_at_a_glance_and_result_summary(monkeypatch: MonkeyPa
 def test_run_at_a_glance_prints_vspreview_availability_when_enabled(
     monkeypatch: MonkeyPatch,
 ) -> None:
+    from frame_compare.vspreview.adapter import VSPreviewAvailability, VSPreviewAvailabilityStatus
+
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         return RunResult(success=True)
 
     monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
-    monkeypatch.setattr("frame_compare.vspreview.adapter.is_vspreview_available", lambda: True)
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.check_vspreview_availability",
+        lambda: VSPreviewAvailability(
+            status=VSPreviewAvailabilityStatus.AVAILABLE,
+            message="VSPreview is available for interactive alignment",
+        ),
+    )
 
     with runner.isolated_filesystem():
         root = Path("workspace")
@@ -273,16 +281,22 @@ def test_run_at_a_glance_prints_vspreview_availability_when_enabled(
 def test_run_at_a_glance_prints_vspreview_probe_failure(
     monkeypatch: MonkeyPatch,
 ) -> None:
+    from frame_compare.vspreview.adapter import VSPreviewAvailability, VSPreviewAvailabilityStatus
+
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         return RunResult(success=True)
 
-    def _raise_probe_error() -> bool:
-        raise RuntimeError("no display")
-
     monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
     monkeypatch.setattr(
-        "frame_compare.vspreview.adapter.is_vspreview_available",
-        _raise_probe_error,
+        "frame_compare.vspreview.adapter.check_vspreview_availability",
+        lambda: VSPreviewAvailability(
+            status=VSPreviewAvailabilityStatus.PROBE_FAILED,
+            message="VSPreview availability probe failed",
+            error_details={
+                "exception_type": "RuntimeError",
+                "exception": "no display",
+            },
+        ),
     )
 
     result = _invoke_run_with_minimal_workspace(["--force-interactive-alignment"])

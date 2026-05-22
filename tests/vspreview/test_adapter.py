@@ -14,6 +14,8 @@ import pytest
 
 from frame_compare.errors import VSPreviewError
 from frame_compare.vspreview.adapter import (
+    VSPreviewAvailability,
+    VSPreviewAvailabilityStatus,
     VSPreviewConfig,
     _build_script_content,
     _generate_vspreview_script,
@@ -26,7 +28,13 @@ def test_launch_alignment_verification_session_respects_timeout(
 ):
     # Force launch path
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
-    monkeypatch.setattr("frame_compare.vspreview.adapter.is_vspreview_available", lambda: True)
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.check_vspreview_availability",
+        lambda: VSPreviewAvailability(
+            status=VSPreviewAvailabilityStatus.AVAILABLE,
+            message="available",
+        ),
+    )
     monkeypatch.setattr(
         "frame_compare.vspreview.adapter._resolve_launch_command",
         lambda script_path: ["vspreview", str(script_path)],
@@ -273,3 +281,64 @@ def test_build_script_content_assert_by_section() -> None:
     assert '"comp_a": 10' in script
     assert "def main():" in script
     assert script.rstrip().endswith("main()")
+
+
+def test_check_vspreview_availability(monkeypatch: pytest.MonkeyPatch) -> None:
+    from frame_compare.vspreview.adapter import (
+        VSPreviewAvailabilityStatus,
+        check_vspreview_availability,
+    )
+
+    # 1. Executable available
+    monkeypatch.setattr(
+        "shutil.which", lambda cmd: "/usr/bin/vspreview" if cmd == "vspreview" else None
+    )
+    res = check_vspreview_availability()
+    assert res.status == VSPreviewAvailabilityStatus.AVAILABLE
+    assert res.is_available is True
+
+    # 2. Executable missing, but module and PySide6 available
+    monkeypatch.setattr("shutil.which", lambda cmd: None)
+
+    def mock_find_spec(name: str):
+        if name in ("vspreview", "PySide6"):
+            from importlib.machinery import ModuleSpec
+
+            return ModuleSpec(name, None)
+        return None
+
+    monkeypatch.setattr("importlib.util.find_spec", mock_find_spec)
+    res = check_vspreview_availability()
+    assert res.status == VSPreviewAvailabilityStatus.AVAILABLE
+    assert res.is_available is True
+
+    # 3. Executable missing, module present, but no Qt backend
+    def mock_find_spec_no_qt(name: str):
+        if name == "vspreview":
+            from importlib.machinery import ModuleSpec
+
+            return ModuleSpec(name, None)
+        return None
+
+    monkeypatch.setattr("importlib.util.find_spec", mock_find_spec_no_qt)
+    res = check_vspreview_availability()
+    assert res.status == VSPreviewAvailabilityStatus.MISSING_QT_BACKEND
+    assert res.is_available is False
+
+    # 4. Nothing available
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: None)
+    res = check_vspreview_availability()
+    assert res.status == VSPreviewAvailabilityStatus.MISSING_EXEC_AND_MODULE
+    assert res.is_available is False
+
+    # 5. Unexpected exception
+    def mock_find_spec_error(name: str):
+        raise ValueError("simulated import error")
+
+    monkeypatch.setattr("importlib.util.find_spec", mock_find_spec_error)
+    res = check_vspreview_availability()
+    assert res.status == VSPreviewAvailabilityStatus.PROBE_FAILED
+    assert res.is_available is False
+    assert res.error_details is not None
+    assert res.error_details["exception_type"] == "ValueError"
+    assert res.error_details["exception"] == "simulated import error"

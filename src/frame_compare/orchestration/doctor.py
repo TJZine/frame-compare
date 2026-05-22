@@ -224,34 +224,37 @@ def _check_dovi_tool() -> CheckResult:
 def _check_vspreview() -> CheckResult:
     """Check VSPreview is available.
 
-    Uses frame_compare.vspreview.is_vspreview_available() for consistent detection.
+    Uses frame_compare.vspreview.check_vspreview_availability() for consistent detection.
     Per vspreview spec §6.1, this is an optional check that reports passed=True
     even when VSPreview is missing or the availability probe itself fails.
     """
-    try:
-        from frame_compare.vspreview.adapter import is_vspreview_available
+    from frame_compare.vspreview.adapter import (
+        VSPreviewAvailabilityStatus,
+        check_vspreview_availability,
+    )
 
-        available = is_vspreview_available()
-    except Exception as exc:
-        return CheckResult(
-            passed=True,
-            message="VSPreview availability probe failed (optional for manual alignment)",
-            hint="Check the VSPreview/PySide6 installation if interactive alignment is needed",
-            details={
-                "exception_type": type(exc).__name__,
-                "exception": str(exc),
-            },
-        )
+    availability = check_vspreview_availability()
 
-    if available:
+    if availability.is_available:
         return CheckResult(
             passed=True,
             message="VSPreview is available for interactive alignment",
         )
+
+    if availability.status == VSPreviewAvailabilityStatus.PROBE_FAILED:
+        return CheckResult(
+            passed=True,
+            message=availability.message,
+            hint=availability.hint,
+            details=cast(dict[str, JSONValue], availability.error_details)
+            if availability.error_details
+            else {},
+        )
+
     return CheckResult(
         passed=True,  # Not a failure, just optional per spec §6.1
-        message="VSPreview not installed (optional for manual alignment)",
-        hint="Install with: pip install vspreview PySide6 (or: pip install vspreview PyQt5)",
+        message=availability.message,
+        hint=availability.hint,
     )
 
 
