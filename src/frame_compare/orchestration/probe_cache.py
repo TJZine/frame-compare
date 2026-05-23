@@ -122,10 +122,10 @@ def compute_probe_cache_key(fingerprint: ClipFingerprint) -> str:
         "schema_version": 1,
     }
 
-    # SSOT: json.dumps(..., sort_keys=True, separators=(",", ":"))
+    # Serialize canonically using json.dumps to ensure cross-platform determinism
     serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
-    # SSOT: blake2s hex digest of UTF-8 bytes
+    # Generate a stable hash using blake2s
     return hashlib.blake2s(serialized.encode("utf-8")).hexdigest()
 
 
@@ -175,7 +175,7 @@ def load_clip_probe_cache(cache_path: Path) -> dict[str, ClipProbeSnapshot]:
                 mtime_ns=_require_int(entry, "mtime_ns"),
             )
 
-            # Reconstruct HDR metadata if present (from nested hdr_metadata table per SSOT)
+            # Reconstruct HDR metadata if present (from nested hdr_metadata table)
             is_hdr = _require_bool(entry, "is_hdr")
             hdr_metadata: HDRMetadata | None = None
             if is_hdr:
@@ -264,7 +264,7 @@ def save_clip_probe_cache(
                 dropped_props=dropped_props,
             )
 
-        # Per SSOT §3.5.1: is_hdr=true → nested hdr_metadata table; is_hdr=false → omit
+        # If HDR, include nested hdr_metadata table; otherwise, omit
         # TOML doesn't support None values, so we only include non-None fields
         if snapshot.is_hdr and snapshot.hdr_metadata:
             md = snapshot.hdr_metadata
@@ -285,7 +285,7 @@ def save_clip_probe_cache(
         output[key] = entry
 
     try:
-        # SSOT §3.5.1: This helper MUST create parent directories if missing
+        # Ensure parent directories exist before writing
         cache_path.parent.mkdir(parents=True, exist_ok=True)
 
         with cache_path.open("wb") as f:

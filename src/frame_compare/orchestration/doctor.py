@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from frame_compare.utils.progress import ProgressReporter
 
 
-# Canonical check ordering per SSOT §4.2.1
+# Canonical check ordering
 _CHECK_ORDER: list[tuple[str, str]] = [
     ("python_version", "core"),
     ("vapoursynth", "core"),
@@ -259,7 +259,7 @@ def _check_vspreview() -> CheckResult:
 
 
 def _check_slowpics() -> CheckResult:
-    """Check slow.pics reachability per SSOT §4.2.2.
+    """Check slow.pics reachability per docs/current-architecture.md.
 
     URL: https://slow.pics/
     Method: HEAD
@@ -381,7 +381,7 @@ def _resolve_tmdb_config() -> tuple[bool | None, str | None, dict[str, JSONValue
 
 
 def collect_checks() -> list[DoctorCheck]:
-    """Collect all diagnostic checks in deterministic order per SSOT §4.2.1.
+    """Collect all diagnostic checks in deterministic order.
 
     Returns:
         List of DoctorCheck in canonical order:

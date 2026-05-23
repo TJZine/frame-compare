@@ -77,7 +77,6 @@ class SlowpicsPublisher:
         if not files:
             raise SlowpicsError("No PNG files found to upload")
 
-        # Prepare payload
         visibility = self.config.visibility
         request = self._prepare_upload(files, title, visibility)
         log.info(
@@ -88,7 +87,6 @@ class SlowpicsPublisher:
         )
 
         try:
-            # Upload with retry
             response = await self._upload_with_retry(
                 self._client,
                 request,
@@ -96,7 +94,6 @@ class SlowpicsPublisher:
                 self.config.timeout_seconds,
             )
 
-            # Parse result
             try:
                 result = response.json()
                 url = str(result["url"])
@@ -107,7 +104,6 @@ class SlowpicsPublisher:
             return url
 
         except Exception as e:
-            # Re-raise known errors, wrap others
             if isinstance(
                 e,
                 SlowpicsError | SlowpicsRateLimitedError | SlowpicsUnavailableError,
@@ -165,7 +161,6 @@ class SlowpicsPublisher:
                 if response.is_success:
                     return response
 
-                # Handle 429 Rate Limit
                 if response.status_code == 429:
                     if attempt >= max_retries:
                         raise SlowpicsRateLimitedError()
@@ -180,14 +175,11 @@ class SlowpicsPublisher:
                     await asyncio.sleep(delay)
                     continue
 
-                # Handle 5xx Server Errors
                 if 500 <= response.status_code < 600:
                     if attempt >= max_retries:
                         raise SlowpicsUnavailableError()
 
-                    # Exponential backoff
                     delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
-                    # Add jitter
                     jitter = delay * random.uniform(-jitter_factor, jitter_factor)
                     sleep_time = max(0, delay + jitter)
 
@@ -200,8 +192,6 @@ class SlowpicsPublisher:
                     await asyncio.sleep(sleep_time)
                     continue
 
-                # Handle 4xx Client Errors (Fail Fast)
-                # 429 was handled above
                 raise SlowpicsError(
                     f"Upload failed with status {response.status_code}: {response.text}"
                 )

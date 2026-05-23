@@ -296,7 +296,7 @@ Default VapourSynth loader implementation using LWLibavSource.
 
 `detect_hdr(frame_props: Mapping[str, object]) -> tuple[bool, HDRMetadata | None]`
 
-Detect HDR from frame properties per SSOT 5.1 mapping.
+Detect HDR from frame properties.
 
 ### detect_plugins
 

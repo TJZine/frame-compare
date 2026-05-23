@@ -19,7 +19,7 @@ from frame_compare.errors import (
 )
 from frame_compare.utils.types import WorkspacePaths
 
-# Canonical video patterns per SSOT §4.3.6
+# Canonical video patterns
 _VIDEO_PATTERNS: list[str] = ["*.mkv", "*.mp4", "*.avi", "*.m2ts", "*.ts"]
 
 

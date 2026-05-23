@@ -15,15 +15,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import structlog
 
 from frame_compare.errors import VSPreviewError, VSPreviewNotFoundError
 from frame_compare.utils.atomic_write import write_text_atomic
-
-if TYPE_CHECKING:
-    pass
 
 log = structlog.get_logger()
 
@@ -155,7 +151,6 @@ def launch_alignment_verification_session(
             is True and launch is attempted
         VSPreviewError: If launch fails after vspreview is available
     """
-    # Generate the script
     script_path = _generate_vspreview_script(
         reference=reference,
         comparisons=comparisons,
@@ -163,7 +158,6 @@ def launch_alignment_verification_session(
         cache_dir=cache_dir,
     )
 
-    # If not enabled, just return the script path without launching
     if not config.enabled:
         log.info(
             "vspreview_script_generated",
@@ -187,7 +181,6 @@ def launch_alignment_verification_session(
         )
         return script_path
 
-    # Check availability
     availability = check_vspreview_availability()
     if not availability.is_available:
         if availability.status == VSPreviewAvailabilityStatus.PROBE_FAILED:
@@ -198,14 +191,12 @@ def launch_alignment_verification_session(
         else:
             raise VSPreviewNotFoundError()
 
-    # Resolve the launch command
     command = _resolve_launch_command(script_path)
 
     # Print telemetry per vspreview spec §3.2.3
     print(f"VSPreview script: {script_path}")
     print(f"Launch command: {' '.join(command)}")
 
-    # Launch VSPreview
     try:
         result = subprocess.run(
             command,
@@ -483,7 +474,6 @@ def main():
         safe_print(f"ERROR: Failed to resolve LWLibavSource loader: {e}")
         sys.exit(1)
 
-    # Load reference clip
     ref_path = Path(REFERENCE["path"])
     if not ref_path.exists():
         safe_print(f"ERROR: Reference not found: {ref_path}")
@@ -513,7 +503,6 @@ def main():
     clips = [ref_clip]
     labels = [REFERENCE["label"]]
 
-    # Load comparison clips
     for label, path_str in sorted(TARGETS.items()):
         comp_path = Path(path_str)
         if not comp_path.exists():
@@ -529,7 +518,6 @@ def main():
         # FPS harmonization: apply AssumeFPS to match reference
         comp_clip = core.std.AssumeFPS(comp_clip, fpsnum=ref_fps_num, fpsden=ref_fps_den)
 
-        # Get suggested offset
         key = f"{REFERENCE['label']}:{label}"
         offset = suggested_offsets_by_key.get(key, OFFSET_MAP.get(label, 0))
 
@@ -557,7 +545,6 @@ def main():
         safe_print("ERROR: No comparison clips loaded successfully.")
         sys.exit(1)
 
-    # Output clips for VSPreview
     for i, (clip, label) in enumerate(zip(clips, labels)):
         clip.set_output(i)
         safe_print(f"Output {i}: {label}")

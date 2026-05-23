@@ -29,7 +29,7 @@ def load_source(path: Path, core: vs.Core | None = None) -> SourceInfo:
     # Propagates PluginNotFoundError (FC-2003) if lsmas missing
     require_plugin(core, "lsmas")
 
-    # Loader selection per SSOT 1.4 Plugin Detection:
+    # Loader selection:
     # Check for LWLibavSource on the namespace, not just namespace existence
     if hasattr(core, "lsmas") and hasattr(core.lsmas, "LWLibavSource"):
         loader = core.lsmas

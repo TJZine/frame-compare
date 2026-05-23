@@ -87,7 +87,7 @@ class ClipState:
     label: str
     probe: ClipProbeSnapshot
 
-    # FPS hierarchy (SSOT):
+    # FPS hierarchy:
     # - source_fps: from probe
     # - forced_fps: user override (optional; may be added later)
     # - effective_fps: forced if set else source_fps

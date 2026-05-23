@@ -1,7 +1,7 @@
 """Phase definitions and execution wiring for Frame Compare.
 
 This module defines the comparison pipeline phases and their execution behavior.
-See orchestration-module.md §4.4.4 for the canonical phase ordering semantics.
+See docs/current-architecture.md for the canonical phase ordering semantics.
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ async def execute_phases(
     context: RunContext,
     reporter: ProgressReporter,
 ) -> None:
-    """Execute phases in order with skip + failure semantics per SSOT.
+    """Execute phases in order with skip + failure semantics.
 
     Raises:
         Exception: Propagates any exception from a required phase.
