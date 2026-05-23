@@ -163,7 +163,7 @@ class ColorConfig(BaseModel):
 class SlowpicsConfig(BaseModel):
     """slow.pics upload configuration and retry policy."""
 
-    auto_upload: bool = True
+    auto_upload: bool = False
     visibility: Visibility = Visibility.UNLISTED
     delete_after_upload: bool = False
     timeout_seconds: float = Field(default=60.0, ge=10.0)

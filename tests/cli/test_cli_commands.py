@@ -840,6 +840,21 @@ def _run_wizard_and_assert_config() -> None:
         assert data["tmdb"]["api_key"] == "abc123"
 
 
+def test_wizard_defaults_slowpics_upload_to_disabled() -> None:
+    with runner.isolated_filesystem():
+        Path("inputs").mkdir()
+        result = runner.invoke(
+            app,
+            ["wizard"],
+            input="inputs\n\nunlisted\n\n\n",
+        )
+        assert result.exit_code == 0
+
+        config_path = Path("config") / "config.toml"
+        data = tomllib.loads(config_path.read_text(encoding="utf-8"))
+        assert data["slowpics"]["auto_upload"] is False
+
+
 def test_wizard_writes_valid_config_toml():
     _run_wizard_and_assert_config()
 

@@ -9,13 +9,13 @@ import numpy as np
 from PIL import Image
 
 from frame_compare.errors import ErrorDetails, FrameCompareError
+from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
 from frame_compare.render.errors import (
     EncodingError,
     FrameExtractionError,
     OverlayError,
     RenderError,
 )
-from frame_compare.render.ffmpeg import DefaultFFmpegRunner
 from frame_compare.render.overlay import apply_overlay
 from frame_compare.render.types import EncoderSettings, OverlayMode, Renderer, RenderRequest
 from frame_compare.vs.errors import SourceLoadError

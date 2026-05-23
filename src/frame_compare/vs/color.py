@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from frame_compare.vs.types import ColorProps
 
 if TYPE_CHECKING:
-    import vapoursynth as vs  # type: ignore
+    import vapoursynth as vs
 
 
 def infer_color_props(clip: vs.VideoNode, props: ColorProps) -> ColorProps:
@@ -52,7 +52,7 @@ def infer_color_props(clip: vs.VideoNode, props: ColorProps) -> ColorProps:
             # Prefer MATRIX_BT2020_CL, then MATRIX_BT2020_NCL, then 9
             import vapoursynth as vs
 
-            matrix = getattr(vs, "MATRIX_BT2020_CL", getattr(vs, "MATRIX_BT2020_NCL", 9))  # type: ignore
+            matrix = getattr(vs, "MATRIX_BT2020_CL", getattr(vs, "MATRIX_BT2020_NCL", 9))
 
     # 2) SDR backfill by height (if still unspecified)
     if primaries == 2 or transfer == 2 or matrix == 2:

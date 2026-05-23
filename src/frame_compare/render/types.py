@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING, Literal
 from frame_compare.config.schema import OverlayMode
 
 if TYPE_CHECKING:
-    import vapoursynth as vs  # type: ignore
+    import vapoursynth as vs
 
-    from frame_compare.render.ffmpeg import FFmpegRunner
+    from frame_compare.render.backend.ffmpeg import FFmpegRunner
     from frame_compare.utils.progress_protocol import ProgressReporter
 
 
@@ -88,7 +88,7 @@ class ScreenshotRenderOptions:
     renderer: Renderer = "auto"
     overlay_mode: OverlayMode = OverlayMode.STANDARD
     reporter: ProgressReporter | None = None
-    output_frames: list[int] | None = None
+    display_frames: list[int] | None = None
     selection_labels: list[str | None] | None = None
     ffmpeg_runner: FFmpegRunner | None = None
 

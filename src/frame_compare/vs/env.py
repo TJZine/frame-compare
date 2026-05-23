@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from frame_compare.vs.errors import PluginNotFoundError, VapourSynthError, VapourSynthNotFoundError
 
 if TYPE_CHECKING:
-    import vapoursynth as vs  # type: ignore
+    import vapoursynth as vs
 
 log = logging.getLogger(__name__)
 

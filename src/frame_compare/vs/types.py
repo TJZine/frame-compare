@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from frame_compare.config.schema import ToneCurve, TonemapPreset
 
 if TYPE_CHECKING:
-    import vapoursynth as vs  # type: ignore
+    import vapoursynth as vs
 
 
 @dataclass(frozen=True)

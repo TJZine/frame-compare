@@ -59,6 +59,8 @@ core: Core
 
 # Common constants used by the codebase (subset; not exhaustive)
 RGB24: int
+RGB48: int
+RGBS: int
 FLOAT: int
 INTEGER: int
 YUV: int

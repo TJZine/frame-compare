@@ -31,6 +31,7 @@ from frame_compare.orchestration.types import (
     ExecutionState,
     MetadataPrefetch,
     PrepState,
+    RenderArtifacts,
     RunArtifacts,
 )
 from frame_compare.services.alignment import CACHE_FILE_NAME
@@ -1280,18 +1281,15 @@ def test_run_metadata_phase_uses_prefetched_metadata_without_client(tmp_path: Pa
         year=1981,
         media_type="movie",
     )
-    artifacts = RunArtifacts(resolved_metadata=expected_metadata)
-
-    asyncio.run(
+    output = asyncio.run(
         phase_tasks.run_metadata_phase(
             ctx,
             client=None,
             metadata_prefetch=MetadataPrefetch(metadata=expected_metadata, was_attempted=True),
-            artifacts=artifacts,
         )
     )
 
-    assert artifacts.resolved_metadata == expected_metadata
+    assert output.resolved_metadata == expected_metadata
 
 
 def test_run_publish_phase_without_client_clears_slowpics_url(tmp_path: Path) -> None:
@@ -1303,9 +1301,16 @@ def test_run_publish_phase_without_client_clears_slowpics_url(tmp_path: Path) ->
     )
     artifacts = RunArtifacts(slowpics_url="https://slow.pics/c/example")
 
-    asyncio.run(phase_tasks.run_publish_phase(ctx, client=None, artifacts=artifacts))
+    output = asyncio.run(
+        phase_tasks.run_publish_phase(
+            ctx,
+            client=None,
+            metadata=artifacts.resolved_metadata,
+        )
+    )
 
-    assert artifacts.slowpics_url is None
+    assert output.slowpics_url is None
+    assert artifacts.slowpics_url == "https://slow.pics/c/example"
 
 
 def test_run_report_phase_clears_report_path_when_no_screenshots(tmp_path: Path) -> None:
@@ -1317,9 +1322,16 @@ def test_run_report_phase_clears_report_path_when_no_screenshots(tmp_path: Path)
     )
     artifacts = RunArtifacts(report_path=tmp_path / "stale.html")
 
-    phase_tasks.run_report_phase(ctx, frames=[1, 2], artifacts=artifacts)
+    output = phase_tasks.run_report_phase(
+        ctx,
+        frames=[1, 2],
+        render=artifacts.render,
+        metadata=artifacts.resolved_metadata,
+        slowpics_url=artifacts.slowpics_url,
+    )
 
-    assert artifacts.report_path is None
+    assert output.report_path is None
+    assert artifacts.report_path == tmp_path / "stale.html"
 
 
 def test_run_report_phase_builds_report_from_current_clip_artifacts(
@@ -1346,11 +1358,15 @@ def test_run_report_phase_builds_report_from_current_clip_artifacts(
         year=2004,
         media_type="movie",
     )
-    artifacts = RunArtifacts(
+    render = RenderArtifacts(
         screenshots_by_label={
             "Reference": [tmp_path / "screenshots" / "Reference_000001.png"],
             "Encode 1": [tmp_path / "screenshots" / "Encode_1_000001.png"],
         },
+        screenshot_dir=tmp_path / "screenshots",
+    )
+    artifacts = RunArtifacts(
+        render=render,
         resolved_metadata=metadata,
         slowpics_url="https://slow.pics/c/collateral",
     )
@@ -1364,13 +1380,20 @@ def test_run_report_phase_builds_report_from_current_clip_artifacts(
 
     monkeypatch.setattr(phase_tasks, "generate_report", _fake_generate_report)
 
-    phase_tasks.run_report_phase(ctx, frames=[7, 11], artifacts=artifacts)
+    output = phase_tasks.run_report_phase(
+        ctx,
+        frames=[7, 11],
+        render=artifacts.render,
+        metadata=artifacts.resolved_metadata,
+        slowpics_url=artifacts.slowpics_url,
+    )
 
     report_data = captured["report_data"]
-    assert artifacts.report_path == expected_report_path
+    assert output.report_path == expected_report_path
+    assert artifacts.report_path is None
     assert report_data.frames == [7, 11]
-    assert report_data.clips[0].screenshots == artifacts.screenshots_by_label["Reference"]
-    assert report_data.clips[1].screenshots == artifacts.screenshots_by_label["Encode 1"]
+    assert report_data.clips[0].screenshots == render.screenshots_by_label["Reference"]
+    assert report_data.clips[1].screenshots == render.screenshots_by_label["Encode 1"]
     assert report_data.metadata == metadata
     assert report_data.slowpics_url == "https://slow.pics/c/collateral"
     assert [(clip.name, clip.frame_count) for clip in report_data.clips] == [

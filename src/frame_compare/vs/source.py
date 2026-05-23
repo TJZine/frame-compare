@@ -13,7 +13,7 @@ from frame_compare.vs.types import SourceInfo
 if TYPE_CHECKING:
     from pathlib import Path
 
-    import vapoursynth as vs  # type: ignore
+    import vapoursynth as vs
 
 
 def load_source(path: Path, core: vs.Core | None = None) -> SourceInfo:

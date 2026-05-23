@@ -4,6 +4,8 @@ import asyncio
 import random
 from contextlib import ExitStack
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from time import monotonic
 from typing import BinaryIO
@@ -136,6 +138,24 @@ class SlowpicsPublisher:
         await asyncio.sleep(sleep_time)
         return sleep_time
 
+    def _retry_after_delay(self, retry_after: str | None, default_delay: float = 60.0) -> float:
+        if retry_after is None:
+            return default_delay
+
+        try:
+            return max(0.0, float(retry_after))
+        except ValueError:
+            pass
+
+        try:
+            retry_at = parsedate_to_datetime(retry_after)
+        except (TypeError, ValueError, IndexError, OverflowError):
+            return default_delay
+
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=UTC)
+        return max(0.0, (retry_at - datetime.now(UTC)).total_seconds())
+
     async def _upload_with_retry(
         self,
         client: httpx.AsyncClient,
@@ -173,11 +193,11 @@ class SlowpicsPublisher:
                     return response
 
                 if response.status_code == 429:
-                    if attempt >= max_retries:
+                    if attempt > max_retries:
                         raise SlowpicsRateLimitedError()
 
                     retry_after = response.headers.get("Retry-After")
-                    delay = float(retry_after) if retry_after else 60.0
+                    delay = self._retry_after_delay(retry_after)
                     log.warning(
                         "slowpics_rate_limited",
                         retry_after=delay,
@@ -187,7 +207,7 @@ class SlowpicsPublisher:
                     continue
 
                 if 500 <= response.status_code < 600:
-                    if attempt >= max_retries:
+                    if attempt > max_retries:
                         raise SlowpicsUnavailableError()
 
                     sleep_time = await self._sleep_with_backoff(
@@ -206,7 +226,7 @@ class SlowpicsPublisher:
                 )
 
             except httpx.TimeoutException as e:
-                if attempt >= max_retries:
+                if attempt > max_retries:
                     raise SlowpicsError(f"Upload timed out after {max_retries} retries") from e
 
                 sleep_time = await self._sleep_with_backoff(
@@ -220,8 +240,7 @@ class SlowpicsPublisher:
                 continue
 
             except httpx.RequestError as e:
-                # Connection errors etc.
-                if attempt >= max_retries:
+                if attempt > max_retries:
                     raise SlowpicsUnavailableError() from e
 
                 sleep_time = await self._sleep_with_backoff(
@@ -257,12 +276,10 @@ async def publish_to_slowpics(
     """
     start_time = monotonic()
 
-    # Collect files deterministically
     files = sorted(screenshot_dir.glob("*.png"))
     if not files:
         raise SlowpicsError(f"No PNG files found in {screenshot_dir}")
 
-    # Determine title
     title = metadata.title if metadata else screenshot_dir.name
 
     if progress:

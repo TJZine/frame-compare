@@ -127,7 +127,7 @@ def test_resolve_batch_ffmpeg_runner() -> None:
     custom_runner = MagicMock()
     assert resolve_batch_ffmpeg_runner(custom_runner) is custom_runner
 
-    from frame_compare.render.ffmpeg import DefaultFFmpegRunner
+    from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
 
     assert isinstance(resolve_batch_ffmpeg_runner(None), DefaultFFmpegRunner)
 

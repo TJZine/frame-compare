@@ -28,6 +28,8 @@ The main run path is:
    `frame_plan -> analyze -> align -> render -> metadata -> dovi -> publish -> report`
 
 `frame_compare.orchestration.context.RunContext` carries the shared run state across phases.
+Phase task functions return explicit phase-output DTOs, and `execution.py` applies those
+outputs back to `ExecutionState`, `RunContext`, or collected artifacts at phase boundaries.
 
 ## Module Boundaries
 
@@ -48,7 +50,32 @@ High-level layering:
 
 Working rule: keep new code inside the existing owner module unless there is a strong reason to create a new top-level boundary and update `importlinter.ini` in the same pass.
 
-Package-Root Export Policy: Top-level packages (`config`, `analysis`, `render`, `services`) act as namespace shells by default to keep module ownership explicit. Curated lazy facades are permitted only for selected integration layers (like `orchestration` and `vs`) where eager loading would trigger heavy optional dependencies (e.g. VapourSynth) during CLI import/startup.
+Package-root export policy:
+
+| Package root | Current policy |
+| --- | --- |
+| `frame_compare` | Root metadata only; exports only `__version__`. |
+| `frame_compare.analysis` | Namespace-only root with empty `__all__`; import concrete owner modules directly. |
+| `frame_compare.config` | Namespace-only root with empty `__all__`; import concrete owner modules directly. |
+| `frame_compare.render` | Namespace-only root with empty `__all__`; import concrete owner modules directly. |
+| `frame_compare.services` | Namespace-only root with empty `__all__`; import concrete owner modules directly. |
+| `frame_compare.utils` | Namespace-only root with empty `__all__`; import concrete owner modules directly. |
+| `frame_compare.vspreview` | Namespace-only root with empty `__all__`; import concrete VSPreview owner modules directly. |
+| `frame_compare.cli`, `frame_compare.services.report`, `frame_compare.render.batch`, `frame_compare.render.backend`, `frame_compare.orchestration.probing` | Nested namespace-only roots with empty `__all__`; import concrete owner modules directly. |
+| `frame_compare.orchestration` | Curated lazy facade for existing run and doctor entry DTOs/functions. |
+| `frame_compare.vs` | Curated lazy facade for selected VapourSynth integration symbols; preserve light imports when VapourSynth is absent. |
+| `frame_compare.runner` | Convenience runtime entry surface, not a broad public package facade. |
+
+Production code should import concrete owner modules unless a curated lazy facade is
+the explicit owner of the import-time contract. Owner-specific exceptions belong in
+`frame_compare.<owner>.errors`; shared base exceptions remain in
+`frame_compare.errors`. Dependency-light protocols that must avoid UI or runtime
+imports belong in focused protocol modules such as
+`frame_compare.utils.progress_protocol`.
+
+`docs/api.md` is generated reference material for importable conveniences. It does
+not promote package roots or module exports into supported stable APIs beyond the
+compatibility policy in the runbook.
 
 ## Persistence And Filesystem Owners
 
@@ -86,6 +113,16 @@ Keep these integrations at their current owners:
 - HTML report generation: `frame_compare.services.report`
 - VS loading and HDR/tonemap logic: `frame_compare.vs.*`
 - packaging/install/update flow: `tools/windows_portable/**`
+
+Runtime ownership matrix:
+
+| Runtime concern | Owner |
+| --- | --- |
+| Audio alignment policy, offset cache, FFmpeg/ffprobe audio extraction | `frame_compare.services.alignment` |
+| Alignment-specific VSPreview verification policy | `frame_compare.services.alignment_vspreview` |
+| VSPreview availability and launch adapter | `frame_compare.vspreview.adapter` |
+| VapourSynth import, Windows DLL registration, plugin detection/loading helpers | `frame_compare.vs.env` |
+| Doctor check ordering, categories, and diagnostic result mapping | `frame_compare.orchestration.doctor` |
 
 ## Public Boundaries
 

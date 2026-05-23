@@ -112,6 +112,9 @@ These `run` flags currently map into config values through `CLI_OVERRIDE_MAP`:
 | `--no-upload` | `slowpics.auto_upload` | Inverted flag: passing it persists `auto_upload = false`. |
 | `--force-interactive-alignment` | `audio_alignment.force_interactive` | Also forces `audio_alignment.use_vspreview = true`. |
 
+slow.pics publishing is disabled by default. Users must set `slowpics.auto_upload = true`
+in config or through the wizard before `run` uploads generated screenshots.
+
 ## Persistence Rules
 
 `run --write-config` persists the effective config after applying the mapped overrides
@@ -143,7 +146,7 @@ tests in the same pass.
 - `wizard` is interactive and writes a minimal config payload to the resolved config path.
 - It prompts for:
   - input directory
-  - slow.pics auto-upload
+  - slow.pics auto-upload, defaulting to disabled
   - slow.pics visibility (`public` or `unlisted`)
   - slow.pics delete-after-upload
   - optional TMDB API key

@@ -21,8 +21,7 @@ def test_apply_cli_overrides_basic() -> None:
 def test_apply_cli_overrides_inverts_no_upload() -> None:
     """Test that no_upload flag inverts auto_upload config."""
     config = get_default_config()
-    # Default auto_upload is True
-    assert config.slowpics.auto_upload is True
+    config.slowpics.auto_upload = True
 
     cli_args = CLIConfigOverrides(no_upload=True)
     new_config = apply_cli_overrides(config, cli_args)

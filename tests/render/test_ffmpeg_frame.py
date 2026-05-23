@@ -4,8 +4,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from frame_compare.render._ffmpeg_frame import build_extract_frame_argv, frame_seek_time_seconds
-from frame_compare.render.ffmpeg import DefaultFFmpegRunner
+from frame_compare.render.backend._ffmpeg_frame import (
+    build_extract_frame_argv,
+    frame_seek_time_seconds,
+)
+from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
 
 
@@ -60,7 +63,7 @@ def test_default_ffmpeg_runner_extract_frame_uses_shared_command_policy(
             subprocess.CompletedProcess(args=[], returncode=0, stdout=b"", stderr=b""),
         ]
     )
-    monkeypatch.setattr("frame_compare.render.ffmpeg.run_subprocess", run_subprocess)
+    monkeypatch.setattr("frame_compare.render.backend.ffmpeg.run_subprocess", run_subprocess)
 
     runner = DefaultFFmpegRunner()
     output = tmp_path / "shots" / "frame.png"
@@ -91,7 +94,7 @@ def test_default_ffmpeg_runner_extract_frame_wraps_missing_binary(
     run_subprocess = MagicMock(
         side_effect=[subprocess.CompletedProcess([], 0, b"24\n", b""), FileNotFoundError]
     )
-    monkeypatch.setattr("frame_compare.render.ffmpeg.run_subprocess", run_subprocess)
+    monkeypatch.setattr("frame_compare.render.backend.ffmpeg.run_subprocess", run_subprocess)
 
     runner = DefaultFFmpegRunner()
 
@@ -112,7 +115,7 @@ def test_default_ffmpeg_runner_extract_frame_wraps_missing_input_file(
             ),
         ]
     )
-    monkeypatch.setattr("frame_compare.render.ffmpeg.run_subprocess", run_subprocess)
+    monkeypatch.setattr("frame_compare.render.backend.ffmpeg.run_subprocess", run_subprocess)
 
     runner = DefaultFFmpegRunner()
 

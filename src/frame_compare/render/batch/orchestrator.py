@@ -27,7 +27,7 @@ from frame_compare.utils.progress_protocol import ProgressReporter
 
 if TYPE_CHECKING:
     from frame_compare.config.schema import ConfigSchema
-    from frame_compare.render.ffmpeg import FFmpegRunner
+    from frame_compare.render.backend.ffmpeg import FFmpegRunner
 
 log = structlog.get_logger()
 
@@ -201,10 +201,10 @@ def render_screenshots(
     resolved_options = options or ScreenshotRenderOptions()
     label_map = resolved_options.label_map or {}
 
-    if resolved_options.output_frames is not None and len(resolved_options.output_frames) != len(
+    if resolved_options.display_frames is not None and len(resolved_options.display_frames) != len(
         frames
     ):
-        raise ValueError("output_frames must have the same length as frames")
+        raise ValueError("display_frames must have the same length as frames")
     if resolved_options.selection_labels is not None and len(
         resolved_options.selection_labels
     ) != len(frames):
@@ -214,7 +214,9 @@ def render_screenshots(
     for clip_path in clips:
         label = label_map.get(clip_path, clip_path.stem)
         display_frames = (
-            resolved_options.output_frames if resolved_options.output_frames is not None else frames
+            resolved_options.display_frames
+            if resolved_options.display_frames is not None
+            else frames
         )
         sel_labels: list[str | None] = (
             resolved_options.selection_labels

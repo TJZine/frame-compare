@@ -16,7 +16,7 @@ from frame_compare.render.types import (
 
 if TYPE_CHECKING:
     from frame_compare.config.schema import ConfigSchema
-    from frame_compare.render.ffmpeg import FFmpegRunner
+    from frame_compare.render.backend.ffmpeg import FFmpegRunner
 
 
 def _validate_batch_request_lengths(request: ScreenshotBatchRequest) -> None:
@@ -56,7 +56,7 @@ def resolve_batch_ffmpeg_runner(ffmpeg_runner: FFmpegRunner | None) -> FFmpegRun
     if ffmpeg_runner is not None:
         return ffmpeg_runner
 
-    from frame_compare.render.ffmpeg import DefaultFFmpegRunner
+    from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
 
     return DefaultFFmpegRunner()
 
@@ -138,15 +138,15 @@ def expand_batch_render_requests(
         start_idx += num_frames_for_req
 
         for idx, source_frame in enumerate(req.source_frames):
-            aligned_frame = req.display_frames[idx]
+            display_frame = req.display_frames[idx]
             selection_label = req.selection_labels[idx]
 
-            output_path = generate_screenshot_path(output_dir, req.label, aligned_frame)
+            output_path = generate_screenshot_path(output_dir, req.label, display_frame)
             overlay = _build_overlay_config(
                 req,
                 overlay_mode=overlay_mode,
                 source_frame=source_frame,
-                display_frame=aligned_frame,
+                display_frame=display_frame,
                 selection_label=selection_label,
                 resolution=(width, height),
                 hdr_info=resolved_hdr_info,

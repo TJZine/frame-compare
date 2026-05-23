@@ -7,7 +7,7 @@ import subprocess
 import sys
 import textwrap
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import structlog
 
@@ -274,10 +274,10 @@ def _to_rgbs(clip: vs.VideoNode) -> vs.VideoNode:
     import vapoursynth as vs
 
     try:
-        if clip.format.id != vs.RGBS:  # type: ignore
-            if clip.format.color_family == vs.RGB:  # type: ignore
-                return clip.resize.Bicubic(format=vs.RGBS)  # type: ignore
-            rgbs_format = cast(int, vs.RGBS)  # type: ignore[attr-defined]
+        if clip.format.id != vs.RGBS:
+            if clip.format.color_family == vs.RGB:
+                return clip.resize.Bicubic(format=vs.RGBS)
+            rgbs_format = vs.RGBS
             return _convert_non_rgb_with_matrix_hint(clip, target_format=rgbs_format)
         return clip
     except Exception as e:
@@ -335,16 +335,16 @@ def _convert_for_libplacebo(clip: vs.VideoNode, inputs: _HdrTonemapInputs) -> vs
     import vapoursynth as vs
 
     try:
-        if clip.format.bits_per_sample == 16 and clip.format.color_family == vs.RGB:  # type: ignore
+        if clip.format.bits_per_sample == 16 and clip.format.color_family == vs.RGB:
             return clip
-        if clip.format.color_family == vs.RGB:  # type: ignore
-            return clip.resize.Bicubic(format=vs.RGB48)  # type: ignore
+        if clip.format.color_family == vs.RGB:
+            return clip.resize.Bicubic(format=vs.RGB48)
 
         props = inputs.props if inputs.props is not None else dict(clip.get_frame(0).props)
         detected_is_hdr = inputs.detected_is_hdr
         if detected_is_hdr is None:
             detected_is_hdr, _ = detect_hdr(props)
-        rgb48_format = cast(int, vs.RGB48)  # type: ignore[attr-defined]
+        rgb48_format = vs.RGB48
         return _convert_non_rgb_with_matrix_hint(
             clip,
             target_format=rgb48_format,
@@ -454,7 +454,7 @@ def _apply_libplacebo(
         return None
 
     # Convert libplacebo output back to RGBS for post-processing (runs on SUCCESS only)
-    clip = clip.resize.Point(format=vs.RGBS)  # type: ignore
+    clip = clip.resize.Point(format=vs.RGBS)
 
     return _apply_post_processing(clip, settings)
 

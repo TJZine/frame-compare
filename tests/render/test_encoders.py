@@ -36,7 +36,9 @@ def mock_render_vs(monkeypatch):
 @pytest.fixture
 def mock_ffmpeg_runner(monkeypatch):
     mock = MagicMock()
-    monkeypatch.setattr("frame_compare.render.ffmpeg.DefaultFFmpegRunner.extract_frame", mock)
+    monkeypatch.setattr(
+        "frame_compare.render.backend.ffmpeg.DefaultFFmpegRunner.extract_frame", mock
+    )
     return mock
 
 

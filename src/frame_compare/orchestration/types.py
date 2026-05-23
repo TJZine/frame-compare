@@ -10,10 +10,11 @@ from typing import TYPE_CHECKING
 
 import httpx
 
+from frame_compare.analysis.types import SelectionBreakdown
 from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.config.schema import ConfigSchema, OverlayMode, ToneCurve, TonemapPreset
 from frame_compare.orchestration.context import ClipState
-from frame_compare.render.ffmpeg import FFmpegRunner
+from frame_compare.render.backend.ffmpeg import FFmpegRunner
 from frame_compare.services.types import TmdbMetadata
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.types import WorkspacePaths
@@ -129,6 +130,62 @@ class RenderArtifacts:
     screenshot_dir: Path | None
 
 
+@dataclass(frozen=True)
+class FramePlanPhaseOutput:
+    selected_frames: list[int]
+
+
+@dataclass(frozen=True)
+class AnalyzePhaseOutput:
+    selected_frames: list[int]
+    selection_breakdown: SelectionBreakdown
+    metrics_cache_hit: bool
+
+
+@dataclass(frozen=True)
+class AlignPhaseOutput:
+    reference: ClipState
+    comparisons: list[ClipState]
+    selected_frames: list[int]
+
+
+@dataclass(frozen=True)
+class RenderPhaseOutput:
+    render: RenderArtifacts
+
+
+@dataclass(frozen=True)
+class MetadataPhaseOutput:
+    resolved_metadata: TmdbMetadata | None
+
+
+@dataclass(frozen=True)
+class DoviPhaseOutput:
+    warning: str
+
+
+@dataclass(frozen=True)
+class PublishPhaseOutput:
+    slowpics_url: str | None
+
+
+@dataclass(frozen=True)
+class ReportPhaseOutput:
+    report_path: Path | None
+
+
+type PhaseOutput = (
+    FramePlanPhaseOutput
+    | AnalyzePhaseOutput
+    | AlignPhaseOutput
+    | RenderPhaseOutput
+    | MetadataPhaseOutput
+    | DoviPhaseOutput
+    | PublishPhaseOutput
+    | ReportPhaseOutput
+)
+
+
 @dataclass(init=False)
 class RunArtifacts:
     """Internal carrier for artifacts accumulated during the run."""
@@ -144,50 +201,18 @@ class RunArtifacts:
         self,
         *,
         metrics_cache_hit: bool = False,
-        screenshots_by_label: dict[str, list[Path]] | None = None,
         slowpics_url: str | None = None,
         report_path: Path | None = None,
-        screenshot_dir: Path | None = None,
         resolved_metadata: TmdbMetadata | None = None,
         warnings: list[str] | None = None,
         render: RenderArtifacts | None = None,
     ) -> None:
         self.metrics_cache_hit = metrics_cache_hit
-        if render is not None:
-            self.render = render
-        elif screenshots_by_label is not None:
-            self.render = RenderArtifacts(screenshots_by_label, screenshot_dir)
-        elif screenshot_dir is not None:
-            self.render = RenderArtifacts({}, screenshot_dir)
-        else:
-            self.render = None
+        self.render = render
         self.slowpics_url = slowpics_url
         self.report_path = report_path
         self.resolved_metadata = resolved_metadata
         self.warnings = [] if warnings is None else warnings
-
-    @property
-    def screenshots_by_label(self) -> dict[str, list[Path]]:
-        if self.render is None:
-            return {}
-        return self.render.screenshots_by_label
-
-    @screenshots_by_label.setter
-    def screenshots_by_label(self, value: dict[str, list[Path]]) -> None:
-        screenshot_dir = self.render.screenshot_dir if self.render is not None else None
-        self.render = RenderArtifacts(value, screenshot_dir)
-
-    @property
-    def screenshot_dir(self) -> Path | None:
-        return None if self.render is None else self.render.screenshot_dir
-
-    @screenshot_dir.setter
-    def screenshot_dir(self, value: Path | None) -> None:
-        if value is None:
-            self.render = None
-            return
-        screenshots = {} if self.render is None else self.render.screenshots_by_label
-        self.render = RenderArtifacts(screenshots, value)
 
 
 @dataclass

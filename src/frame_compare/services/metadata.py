@@ -2,8 +2,9 @@
 
 import re
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 import anitopy
 import httpx
@@ -18,11 +19,78 @@ TMDB_KEY_REGEX = re.compile(r"^[0-9a-fA-F]{32}$")
 log = structlog.get_logger()
 
 type FilenameMetadataParser = Callable[[str], dict[str, object]]
+type _ParsedField = str | int
+_TParsedField = TypeVar("_TParsedField", bound=_ParsedField)
+
+
+@dataclass(frozen=True)
+class _ParsedFilenameFields:
+    title: str | None = None
+    year: int | None = None
+    season: int | None = None
+    episode: int | None = None
+    release_group: str | None = None
+    source: str | None = None
+    resolution: str | None = None
 
 
 def is_valid_tmdb_api_key(api_key: str) -> bool:
     """Return whether a TMDB API key matches the API v3 key format."""
     return TMDB_KEY_REGEX.fullmatch(api_key) is not None
+
+
+def _first_text(parser_result: dict[str, object], *keys: str) -> str | None:
+    for key in keys:
+        value = parser_result.get(key)
+        if value:
+            return str(value)
+    return None
+
+
+def _first_int(parser_result: dict[str, object], *keys: str) -> int | None:
+    for key in keys:
+        value = parser_result.get(key)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.isdigit():
+            return int(value)
+        if isinstance(value, list) and value and isinstance(value[0], int):
+            return value[0]
+    return None
+
+
+def _keep_existing(
+    existing: _TParsedField | None,
+    parsed: _TParsedField | None,
+) -> _TParsedField | None:
+    return existing if existing is not None else parsed
+
+
+def _merge_parser_metadata(
+    current: _ParsedFilenameFields,
+    parser_result: dict[str, object],
+) -> _ParsedFilenameFields:
+    return _ParsedFilenameFields(
+        title=_keep_existing(
+            current.title,
+            _first_text(parser_result, "anime_title", "title"),
+        ),
+        year=_keep_existing(current.year, _first_int(parser_result, "year")),
+        season=_keep_existing(current.season, _first_int(parser_result, "season")),
+        episode=_keep_existing(
+            current.episode,
+            _first_int(parser_result, "anime_episode", "episode"),
+        ),
+        release_group=_keep_existing(
+            current.release_group,
+            _first_text(parser_result, "release_group"),
+        ),
+        source=_keep_existing(current.source, _first_text(parser_result, "source")),
+        resolution=_keep_existing(
+            current.resolution,
+            _first_text(parser_result, "screen_size", "video_resolution"),
+        ),
+    )
 
 
 def parse_filename(filename: str) -> ParsedMetadata:
@@ -54,14 +122,6 @@ def parse_filename(filename: str) -> ParsedMetadata:
 
     # Determine primary parser
     use_anitopy_first = filename.startswith("[")
-
-    title: str | None = None
-    year: int | None = None
-    season: int | None = None
-    episode: int | None = None
-    release_group: str | None = None
-    source: str | None = None
-    resolution: str | None = None
 
     def _log_parser_exception(parser_name: str, name: str, exc: Exception) -> None:
         log.debug(
@@ -97,71 +157,24 @@ def parse_filename(filename: str) -> ParsedMetadata:
         (_apply_guessit if use_anitopy_first else _apply_anitopy),
     ]
 
+    fields = _ParsedFilenameFields()
+
     for parser in parsers:
-        parser_result = parser(filename)
-        parsed_title = parser_result.get("anime_title") or parser_result.get("title")
-        if parsed_title and not title:
-            title = str(parsed_title)
+        fields = _merge_parser_metadata(fields, parser(filename))
 
-        if year is None:
-            parsed_year = parser_result.get("year")
-            if isinstance(parsed_year, int):
-                year = parsed_year
-            elif isinstance(parsed_year, str) and parsed_year.isdigit():
-                year = int(parsed_year)
-
-        if season is None:
-            parsed_season = parser_result.get("season")
-            if isinstance(parsed_season, int):
-                season = parsed_season
-            elif isinstance(parsed_season, str) and parsed_season.isdigit():
-                season = int(parsed_season)
-
-        if episode is None:
-            parsed_episode = parser_result.get("anime_episode") or parser_result.get("episode")
-            if isinstance(parsed_episode, int):
-                episode = parsed_episode
-            elif isinstance(parsed_episode, str) and parsed_episode.isdigit():
-                episode = int(parsed_episode)
-            elif (
-                isinstance(parsed_episode, list)
-                and parsed_episode
-                and isinstance(parsed_episode[0], int)
-            ):
-                episode = parsed_episode[0]
-
-        if release_group is None:
-            parsed_release_group = parser_result.get("release_group")
-            if parsed_release_group:
-                release_group = str(parsed_release_group)
-
-        if source is None:
-            parsed_source = parser_result.get("source")
-            if parsed_source:
-                source = str(parsed_source)
-
-        if resolution is None:
-            parsed_resolution = parser_result.get("screen_size") or parser_result.get(
-                "video_resolution"
-            )
-            if parsed_resolution:
-                resolution = str(parsed_resolution)
-
-    # Fallback to stem if no title found
-    if not title:
-        title = Path(filename).stem
+    title = fields.title or Path(filename).stem
 
     # Normalization
     title = re.sub(r"[._\-]", " ", title).strip()
 
     return ParsedMetadata(
         title=title,
-        year=year,
-        season=season,
-        episode=episode,
-        release_group=release_group,
-        source=source,
-        resolution=resolution,
+        year=fields.year,
+        season=fields.season,
+        episode=fields.episode,
+        release_group=fields.release_group,
+        source=fields.source,
+        resolution=fields.resolution,
     )
 
 

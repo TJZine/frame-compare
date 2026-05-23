@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
     from frame_compare.config.overrides import TonemapCliOverrides
     from frame_compare.config.schema import ConfigSchema
-    from frame_compare.render.ffmpeg import FFmpegRunner
+    from frame_compare.render.backend.ffmpeg import FFmpegRunner
     from frame_compare.vs.types import SourceInfo, TonemapSettings
 
 log = structlog.get_logger()
@@ -227,7 +227,7 @@ def prepare_clip_for_render(
     )
 
     if ffmpeg_runner is None:
-        from frame_compare.render.ffmpeg import DefaultFFmpegRunner
+        from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
 
         ffmpeg_runner = DefaultFFmpegRunner()
 

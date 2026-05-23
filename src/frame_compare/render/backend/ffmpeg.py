@@ -8,7 +8,10 @@ from pathlib import Path
 from subprocess import CalledProcessError, TimeoutExpired
 from typing import Protocol, cast
 
-from frame_compare.render._ffmpeg_frame import build_extract_frame_argv, frame_seek_time_seconds
+from frame_compare.render.backend._ffmpeg_frame import (
+    build_extract_frame_argv,
+    frame_seek_time_seconds,
+)
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
 from frame_compare.utils.subproc import run_subprocess
 from frame_compare.vs.types import HDRMetadata

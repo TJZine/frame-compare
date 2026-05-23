@@ -44,7 +44,7 @@ gamma_lift = false
 contrast_recovery = 0.0
 
 [slowpics]
-auto_upload = true
+auto_upload = false
 visibility = "unlisted"
 delete_after_upload = false
 timeout_seconds = 60.0
