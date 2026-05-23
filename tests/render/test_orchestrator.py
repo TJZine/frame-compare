@@ -12,12 +12,13 @@ from frame_compare.errors import (
     SourceLoadError,
     VapourSynthNotFoundError,
 )
-from frame_compare.render.orchestrator import (
+from frame_compare.render.batch.orchestrator import (
     ProgressReporter,
     render_batch,
     render_screenshots,
     render_screenshots_from_batch,
 )
+from frame_compare.render.orchestrator import render_batch as legacy_render_batch
 from frame_compare.render.types import (
     EncoderSettings,
     RenderRequest,
@@ -45,11 +46,15 @@ def mock_render_request(tmp_path):
 
 def test_render_batch_sequential(mock_render_request):
     requests = [mock_render_request] * 3
-    with patch("frame_compare.render.orchestrator.render_frame") as mock_render:
+    with patch("frame_compare.render.batch.orchestrator.render_frame") as mock_render:
         mock_render.side_effect = lambda r: r.output_path
         results = render_batch(requests, parallelism=1)
         assert results == [r.output_path for r in requests]
         assert mock_render.call_count == 3
+
+
+def test_legacy_orchestrator_import_reexports_batch_owner() -> None:
+    assert legacy_render_batch is render_batch
 
 
 def test_render_batch_parallel_order(mock_render_request):
@@ -63,7 +68,7 @@ def test_render_batch_parallel_order(mock_render_request):
         )
         for i in range(5)
     ]
-    with patch("frame_compare.render.orchestrator.render_frame") as mock_render:
+    with patch("frame_compare.render.batch.orchestrator.render_frame") as mock_render:
         mock_render.side_effect = lambda r: r.output_path
         results = render_batch(requests, parallelism=2)
         assert results == [r.output_path for r in requests]
@@ -71,7 +76,7 @@ def test_render_batch_parallel_order(mock_render_request):
 
 def test_render_batch_fail_fast(mock_render_request):
     requests = [mock_render_request] * 10
-    with patch("frame_compare.render.orchestrator.render_frame") as mock_render:
+    with patch("frame_compare.render.batch.orchestrator.render_frame") as mock_render:
         # Fail on the 3rd request
         def side_effect(r):
             if r == requests[2]:
@@ -90,7 +95,7 @@ def test_render_batch_progress(mock_render_request):
     requests = [mock_render_request] * 3
     reporter = MagicMock(spec=ProgressReporter)
 
-    with patch("frame_compare.render.orchestrator.render_frame") as mock_render:
+    with patch("frame_compare.render.batch.orchestrator.render_frame") as mock_render:
         mock_render.side_effect = lambda r: r.output_path
         render_batch(requests, parallelism=1, reporter=reporter)
 
@@ -113,7 +118,7 @@ def test_render_screenshots_vs_loading(tmp_path, default_config):
         mock_source.is_hdr = False
         mock_loader.load.return_value = mock_source
 
-        with patch("frame_compare.render.orchestrator.render_batch") as mock_batch:
+        with patch("frame_compare.render.batch.orchestrator.render_batch") as mock_batch:
             mock_batch.return_value = [tmp_path / "1.png", tmp_path / "2.png"]
 
             results = render_screenshots(
@@ -137,7 +142,7 @@ def test_render_screenshots_fallback(tmp_path, default_config):
         mock_loader = mock_loader_cls.return_value
         mock_loader.load.side_effect = SourceLoadError(Path("vid1.mkv"), "Failed")
 
-        with patch("frame_compare.render.orchestrator.render_batch") as mock_batch:
+        with patch("frame_compare.render.batch.orchestrator.render_batch") as mock_batch:
             mock_batch.return_value = [tmp_path / "1.png"]
 
             # Should NOT raise, but log warning (enable_tonemap=False → fallback allowed)
@@ -232,7 +237,7 @@ def test_render_screenshots_fallback_unknown(tmp_path, default_config):
         mock_loader = mock_loader_cls.return_value
         mock_loader.load.side_effect = RuntimeError("Unknown")
 
-        with patch("frame_compare.render.orchestrator.render_batch") as mock_batch:
+        with patch("frame_compare.render.batch.orchestrator.render_batch") as mock_batch:
             mock_batch.return_value = [tmp_path / "1.png"]
 
             with pytest.raises(RenderError) as exc_info:
@@ -257,7 +262,7 @@ def test_render_screenshots_overlay_resolution(tmp_path, default_config):
         mock_source.is_hdr = False
         mock_loader.load.return_value = mock_source
 
-        with patch("frame_compare.render.orchestrator.render_batch") as mock_batch:
+        with patch("frame_compare.render.batch.orchestrator.render_batch") as mock_batch:
             mock_batch.return_value = [tmp_path / "1.png"]
             render_screenshots(
                 clips,
@@ -275,7 +280,7 @@ def test_render_screenshots_overlay_resolution(tmp_path, default_config):
     with patch("frame_compare.vs.loader.DefaultVSLoader") as mock_loader_cls:
         mock_loader = mock_loader_cls.return_value
         mock_loader.load.side_effect = SourceLoadError(Path("vid1.mkv"), "Failed")
-        with patch("frame_compare.render.orchestrator.render_batch") as mock_batch:
+        with patch("frame_compare.render.batch.orchestrator.render_batch") as mock_batch:
             mock_batch.return_value = [tmp_path / "1.png"]
             render_screenshots(
                 clips,
@@ -291,7 +296,7 @@ def test_render_screenshots_overlay_resolution(tmp_path, default_config):
 def test_render_screenshots_dict_order(tmp_path, default_config):
     clips = [Path("b.mkv"), Path("a.mkv")]
     frames = [1, 2]
-    with patch("frame_compare.render.orchestrator.render_batch") as mock_batch:
+    with patch("frame_compare.render.batch.orchestrator.render_batch") as mock_batch:
         mock_batch.return_value = [Path(f"{i}.png") for i in range(4)]
         results = render_screenshots(
             clips,
@@ -310,7 +315,7 @@ def test_render_screenshots_dict_order(tmp_path, default_config):
 def test_render_screenshots_output_path(tmp_path, default_config):
     clips = [Path("vid1.mkv")]
     frames = [42]
-    with patch("frame_compare.render.orchestrator.render_batch") as mock_batch:
+    with patch("frame_compare.render.batch.orchestrator.render_batch") as mock_batch:
         mock_batch.return_value = [tmp_path / "vid1_000042.png"]
         render_screenshots(
             clips,
@@ -427,7 +432,7 @@ def test_render_batch_parallel_fail_fast_no_wait() -> None:
         assert slow_started.wait(timeout=1.0)
         raise RuntimeError("Failed immediately")
 
-    with patch("frame_compare.render.orchestrator.render_frame", side_effect=side_effect):
+    with patch("frame_compare.render.batch.orchestrator.render_frame", side_effect=side_effect):
         with pytest.raises(RuntimeError, match="Failed immediately"):
             render_batch(requests, parallelism=2)
         assert slow_started.is_set()
@@ -461,7 +466,7 @@ def test_render_screenshots_from_batch_happy_path(tmp_path) -> None:
         probe_is_hdr=False,
     )
 
-    with patch("frame_compare.render.orchestrator.render_batch") as mock_batch:
+    with patch("frame_compare.render.batch.orchestrator.render_batch") as mock_batch:
         mock_batch.return_value = [
             tmp_path / "label1_00010.png",
             tmp_path / "label1_00020.png",
@@ -511,7 +516,7 @@ def test_render_screenshots_from_batch_renderer_auto_path(tmp_path) -> None:
         mock_source.is_hdr = False
         mock_loader.load.return_value = mock_source
 
-        with patch("frame_compare.render.orchestrator.render_batch") as mock_batch:
+        with patch("frame_compare.render.batch.orchestrator.render_batch") as mock_batch:
             mock_batch.return_value = [tmp_path / "label1_00010.png"]
 
             results = render_screenshots_from_batch(

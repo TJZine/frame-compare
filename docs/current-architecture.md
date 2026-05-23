@@ -103,7 +103,7 @@ These files currently carry disproportionate change risk:
 - `src/frame_compare/services/report/**`
 - `src/frame_compare/cli/entry.py`
 - `src/frame_compare/services/alignment.py`
-- `src/frame_compare/render/orchestrator.py`
+- `src/frame_compare/render/batch/orchestrator.py`
 - `src/frame_compare/orchestration/doctor.py`
 - `src/frame_compare/vspreview/adapter.py`
 

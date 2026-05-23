@@ -9,7 +9,7 @@ import pytest
 
 from frame_compare.config.schema import ColorConfig, ConfigSchema, OverlayMode, ScreenshotsConfig
 from frame_compare.errors import TonemapRequiresVapourSynthError
-from frame_compare.render.expansion import (
+from frame_compare.render.batch.expansion import (
     _build_overlay_config,
     _validate_batch_request_lengths,
     expand_batch_render_requests,
@@ -19,6 +19,7 @@ from frame_compare.render.expansion import (
     validate_batch_requests,
     validate_ffmpeg_batch_tonemap_gate,
 )
+from frame_compare.render.expansion import resolve_target_renderer as legacy_resolve_target_renderer
 from frame_compare.render.types import ScreenshotBatchRequest
 
 
@@ -36,6 +37,10 @@ def test_validate_batch_request_lengths_valid() -> None:
     )
     # Should not raise
     _validate_batch_request_lengths(req)
+
+
+def test_legacy_expansion_import_reexports_batch_owner() -> None:
+    assert legacy_resolve_target_renderer is resolve_target_renderer
 
 
 def test_validate_batch_request_lengths_invalid() -> None:
@@ -196,7 +201,7 @@ def test_build_overlay_config() -> None:
     assert overlay.num_frames == 100
 
 
-@patch("frame_compare.render.expansion.prepare_clip_for_render")
+@patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
 def test_expand_batch_render_requests(mock_prepare: MagicMock) -> None:
     config = ConfigSchema()
     ffmpeg_runner = MagicMock()

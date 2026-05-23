@@ -472,7 +472,7 @@ def test_run_render_phase_maps_aligned_frames_to_source_frames(
         return {"Reference": [tmp_path / "reference.png"]}
 
     monkeypatch.setattr(
-        "frame_compare.render.orchestrator.render_screenshots_from_batch",
+        "frame_compare.render.batch.orchestrator.render_screenshots_from_batch",
         _fake_render_screenshots_from_batch,
     )
 

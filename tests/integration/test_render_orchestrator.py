@@ -4,7 +4,7 @@ import pytest
 from PIL import Image
 
 from frame_compare.config.schema import ColorConfig, ConfigSchema
-from frame_compare.render.orchestrator import render_screenshots
+from frame_compare.render.batch.orchestrator import render_screenshots
 from frame_compare.render.types import OverlayMode, ScreenshotRenderOptions
 
 

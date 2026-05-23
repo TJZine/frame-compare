@@ -18,7 +18,7 @@ from frame_compare.errors import (
     TonemapRequiresVapourSynthError,
     VapourSynthNotFoundError,
 )
-from frame_compare.render.orchestrator import render_screenshots
+from frame_compare.render.batch.orchestrator import render_screenshots
 from frame_compare.render.prepare import (
     resolve_tonemap_settings,
     should_tonemap,
@@ -245,7 +245,7 @@ def test_render_screenshots_prefills_hdr_probe_for_ffmpeg_tonemap_gate(tmp_path:
     )
 
     with (
-        patch("frame_compare.render.expansion.prepare_clip_for_render") as prepare_clip,
+        patch("frame_compare.render.batch.expansion.prepare_clip_for_render") as prepare_clip,
         pytest.raises(TonemapRequiresVapourSynthError),
     ):
         render_screenshots(
@@ -269,7 +269,7 @@ def test_hdr_disable_tonemap_allows_ffmpeg_when_vs_missing(tmp_path: Path) -> No
 
     with (
         patch("frame_compare.vs.loader.DefaultVSLoader") as mock_loader_cls,
-        patch("frame_compare.render.orchestrator.render_batch") as mock_batch,
+        patch("frame_compare.render.batch.orchestrator.render_batch") as mock_batch,
     ):
         mock_loader = mock_loader_cls.return_value
         mock_loader.load.side_effect = VapourSynthNotFoundError()
@@ -308,7 +308,7 @@ def test_sdr_allows_ffmpeg_fallback_when_vs_missing(tmp_path: Path) -> None:
 
     with (
         patch("frame_compare.vs.loader.DefaultVSLoader") as mock_loader_cls,
-        patch("frame_compare.render.orchestrator.render_batch") as mock_batch,
+        patch("frame_compare.render.batch.orchestrator.render_batch") as mock_batch,
     ):
         mock_loader = mock_loader_cls.return_value
         mock_loader.load.side_effect = VapourSynthNotFoundError()

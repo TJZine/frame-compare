@@ -169,7 +169,7 @@ def run_render_phase(
     runner: FFmpegRunner,
     artifacts: RunArtifacts,
 ) -> None:
-    from frame_compare.render.orchestrator import render_screenshots_from_batch
+    from frame_compare.render.batch.orchestrator import render_screenshots_from_batch
     from frame_compare.render.types import ScreenshotBatchRequest
 
     clips_state = [ctx.reference, *ctx.comparisons]

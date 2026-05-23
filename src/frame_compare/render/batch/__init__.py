@@ -1,4 +1,4 @@
-"""Compatibility import path for batch render orchestration."""
+"""Batch render orchestration and request expansion."""
 
 from frame_compare.render.batch.orchestrator import (
     render_batch,

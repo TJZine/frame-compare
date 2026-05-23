@@ -3,8 +3,8 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+from frame_compare.render.batch.orchestrator import render_batch
 from frame_compare.render.encoders import render_frame
-from frame_compare.render.orchestrator import render_batch
 from frame_compare.render.overlay import apply_overlay
 from frame_compare.render.types import (
     EncoderSettings,
