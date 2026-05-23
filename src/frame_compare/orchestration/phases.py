@@ -14,7 +14,7 @@ import structlog
 
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import RunContext
-from frame_compare.utils.progress import ProgressReporter
+from frame_compare.utils.progress_protocol import ProgressReporter
 
 log = structlog.get_logger()
 

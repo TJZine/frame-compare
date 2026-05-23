@@ -14,7 +14,7 @@ from frame_compare.config.schema import ConfigSchema, OverlayMode, ToneCurve, To
 from frame_compare.orchestration.context import ClipState
 from frame_compare.render.ffmpeg import FFmpegRunner
 from frame_compare.services.types import TmdbMetadata
-from frame_compare.utils.progress import ProgressReporter
+from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.loader import VSLoader
 

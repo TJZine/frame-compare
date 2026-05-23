@@ -21,7 +21,7 @@ from frame_compare.services.metadata import is_valid_tmdb_api_key
 from frame_compare.vs.env import register_windows_dll_dirs
 
 if TYPE_CHECKING:
-    from frame_compare.utils.progress import ProgressReporter
+    from frame_compare.utils.progress_protocol import ProgressReporter
 
 
 # Canonical check ordering

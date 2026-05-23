@@ -28,7 +28,7 @@ from frame_compare.errors import (
 )
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
 from frame_compare.orchestration.doctor import CheckResult, DoctorCheck, DoctorReport
-from frame_compare.utils.progress import ProgressReporter
+from frame_compare.utils.progress_protocol import ProgressReporter
 
 runner = CliRunner()
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")

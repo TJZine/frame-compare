@@ -1,7 +1,7 @@
 """Progress reporter wiring for Frame Compare orchestration.
 
 Orchestration MUST use the canonical ProgressReporter protocol defined in
-frame_compare.utils.progress. This module provides orchestration-specific
+frame_compare.utils.progress_protocol. This module provides orchestration-specific
 progress reporter selection.
 """
 
@@ -10,9 +10,9 @@ import sys
 from frame_compare.utils.progress import (
     LogProgressReporter,
     NullProgressReporter,
-    ProgressReporter,
     RichProgressReporter,
 )
+from frame_compare.utils.progress_protocol import ProgressReporter
 
 
 def _stream_is_tty(stream: object) -> bool:

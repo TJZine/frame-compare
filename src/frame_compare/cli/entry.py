@@ -55,7 +55,7 @@ from frame_compare.utils.logging import configure_logging
 if TYPE_CHECKING:
     from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, RunResult
     from frame_compare.orchestration.doctor import DoctorCheck, DoctorReport
-    from frame_compare.utils.progress import ProgressReporter
+    from frame_compare.utils.progress_protocol import ProgressReporter
 
 
 def _stabilize_typer_help_width() -> None:

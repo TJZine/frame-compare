@@ -18,7 +18,7 @@ from frame_compare.services.errors import (
     SlowpicsUnavailableError,
 )
 from frame_compare.services.types import TmdbMetadata
-from frame_compare.utils.progress import ProgressReporter
+from frame_compare.utils.progress_protocol import ProgressReporter
 
 log = structlog.get_logger()
 

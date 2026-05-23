@@ -22,7 +22,7 @@ from frame_compare.errors import (
 )
 from frame_compare.services.types import AlignmentAlgorithm, AlignmentConfig, AlignmentResult
 from frame_compare.utils.atomic_write import write_bytes_atomic
-from frame_compare.utils.progress import ProgressReporter
+from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.subproc import run_subprocess
 from frame_compare.vspreview.adapter import (
     VSPreviewAvailabilityStatus,
