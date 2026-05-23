@@ -10,7 +10,7 @@ import pytest
 import tomli_w
 
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot
-from frame_compare.orchestration.probe_cache import (
+from frame_compare.orchestration.probing import (
     compute_probe_cache_key,
     load_clip_probe_cache,
     save_clip_probe_cache,
@@ -127,7 +127,7 @@ def test_load_clip_probe_cache_returns_empty_dict_on_read_os_error(tmp_path: Pat
 
     with (
         patch("pathlib.Path.open", side_effect=OSError("permission denied")),
-        patch("frame_compare.orchestration.probe_cache.log.warning") as warning,
+        patch("frame_compare.orchestration.probing.probe_cache.log.warning") as warning,
     ):
         cache = load_clip_probe_cache(f)
 
@@ -412,7 +412,7 @@ def test_save_clip_probe_cache_logs_and_continues_on_write_os_error(
 
     with (
         patch("pathlib.Path.open", side_effect=OSError("disk full")),
-        patch("frame_compare.orchestration.probe_cache.log.warning") as warning,
+        patch("frame_compare.orchestration.probing.probe_cache.log.warning") as warning,
     ):
         save_clip_probe_cache(f, {key: sample_snapshot})
 

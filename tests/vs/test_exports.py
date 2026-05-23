@@ -42,7 +42,6 @@ EXPECTED_EXPORTS = {
     "apply_color_props",
     "expand_limited_rgb_to_full",
     "to_rgb24",
-    "tonemap",
     "apply_tonemap",
     "get_preset_settings",
 }

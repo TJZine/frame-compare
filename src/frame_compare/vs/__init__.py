@@ -24,7 +24,6 @@ if TYPE_CHECKING:
     from frame_compare.vs.tonemap import apply_tonemap, get_preset_settings
     from frame_compare.vs.types import ColorProps, HDRMetadata, SourceInfo, TonemapSettings
 
-    tonemap = apply_tonemap
 
 _EXPORTS: dict[str, tuple[str, str]] = {
     # color
@@ -48,7 +47,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     # tonemap
     "apply_tonemap": ("frame_compare.vs.tonemap", "apply_tonemap"),
     "get_preset_settings": ("frame_compare.vs.tonemap", "get_preset_settings"),
-    "tonemap": ("frame_compare.vs.tonemap", "apply_tonemap"),
     # types
     "ColorProps": ("frame_compare.vs.types", "ColorProps"),
     "HDRMetadata": ("frame_compare.vs.types", "HDRMetadata"),
@@ -74,7 +72,6 @@ __all__ = [
     "apply_color_props",
     "expand_limited_rgb_to_full",
     "to_rgb24",
-    "tonemap",
     "apply_tonemap",
     "get_preset_settings",
 ]
