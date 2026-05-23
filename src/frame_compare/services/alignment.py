@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 import tomllib
 from fractions import Fraction
 from pathlib import Path
@@ -109,21 +110,34 @@ def _maybe_launch_vspreview(
                 force_interactive=config.force_interactive,
             )
 
-    should_launch = bool(
-        (config.use_vspreview or config.force_interactive) and availability.is_available
-    )
+    stdin_tty = sys.stdin.isatty()
+    stdout_tty = sys.stdout.isatty()
+    stderr_tty = sys.stderr.isatty()
+    has_tty = stdin_tty or stdout_tty or stderr_tty
+
+    launch_requested = bool(config.use_vspreview or config.force_interactive)
+    should_launch = bool(launch_requested and availability.is_available and has_tty)
 
     if progress:
         progress.set_description("Alignment verification")
 
     try:
-        launch_alignment_verification_session(
+        script_path = launch_alignment_verification_session(
             reference=reference,
             comparisons=comparisons,
             suggested_offsets_by_key=offsets_by_key,
             cache_dir=cache_dir,
             config=VSPreviewConfig(enabled=should_launch),
         )
+        if launch_requested and availability.is_available and not has_tty:
+            log.warning(
+                "vspreview_no_tty",
+                hint="Cannot launch VSPreview without an interactive terminal (TTY)",
+                script_path=str(script_path),
+                stdin_tty=stdin_tty,
+                stdout_tty=stdout_tty,
+                stderr_tty=stderr_tty,
+            )
     except VSPreviewError as exc:
         if config.force_interactive:
             raise

@@ -844,8 +844,13 @@ def test_align_clips_launches_vspreview_when_enabled(
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ):
     """When configured, align_clips should generate/launch a VSPreview verification session."""
+    import sys
+
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
     ref = tmp_path / "ref.mkv"
     comp_a = tmp_path / "comp_a.mkv"
     comp_b = tmp_path / "comp_b.mkv"
@@ -875,6 +880,7 @@ def test_align_clips_launches_vspreview_when_enabled(
     assert kwargs["comparisons"] == [comp_a, comp_b]
     suggested = kwargs["suggested_offsets_by_key"]
     assert suggested == {"ref:comp_a": 0, "ref:comp_b": 0}
+    assert kwargs["config"].enabled is True
 
 
 @patch("frame_compare.services.alignment.launch_alignment_verification_session")
@@ -887,8 +893,13 @@ def test_align_clips_full_cache_hit_still_launches_vspreview_when_enabled(
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Cached/manual-only runs should still build/launch VSPreview verification."""
+    import sys
+
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
     ref = tmp_path / "ref.mkv"
     comp = tmp_path / "comp.mkv"
     ref.touch()
@@ -1073,8 +1084,13 @@ def test_align_clips_force_interactive_launches_when_vspreview_available(
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Force-interactive mode should launch VSPreview when available."""
+    import sys
+
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
     ref = tmp_path / "ref.mkv"
     comp = tmp_path / "comp.mkv"
     ref.touch()
