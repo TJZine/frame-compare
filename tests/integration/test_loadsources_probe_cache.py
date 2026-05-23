@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
-from frame_compare.orchestration.probing import load_clip_probe_cache
+from frame_compare.orchestration.probing.probe_cache import load_clip_probe_cache
 from frame_compare.vs.env import detect_plugins, ensure_vs_environment
 from frame_compare.vs.errors import VapourSynthError, VapourSynthNotFoundError
 from frame_compare.vs.loader import DefaultVSLoader, VSLoader

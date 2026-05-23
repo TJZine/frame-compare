@@ -22,12 +22,14 @@ from frame_compare.orchestration.context import (
 )
 from frame_compare.orchestration.phase_tasks import resolve_run_metadata
 from frame_compare.orchestration.preflight import discover_inputs, prepare_preflight
-from frame_compare.orchestration.probing import (
-    compute_preserved_frame_props,
+from frame_compare.orchestration.probing.probe_cache import (
     compute_probe_cache_key,
-    compute_tonemap_prop_keys,
     load_clip_probe_cache,
     save_clip_probe_cache,
+)
+from frame_compare.orchestration.probing.probe_props import (
+    compute_preserved_frame_props,
+    compute_tonemap_prop_keys,
 )
 from frame_compare.orchestration.types import (
     MetadataPrefetch,

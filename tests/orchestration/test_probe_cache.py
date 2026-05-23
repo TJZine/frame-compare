@@ -10,7 +10,7 @@ import pytest
 import tomli_w
 
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot
-from frame_compare.orchestration.probing import (
+from frame_compare.orchestration.probing.probe_cache import (
     compute_probe_cache_key,
     load_clip_probe_cache,
     save_clip_probe_cache,
