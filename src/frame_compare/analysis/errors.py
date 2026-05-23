@@ -38,3 +38,22 @@ class SelectionError(ProcessingError):
                 details={"reason": reason, "requested": requested, "found": found},
             )
         )
+
+
+class AnalysisError(ProcessingError):
+    """Marker base for analysis failures."""
+
+
+class MetricsCalculationError(ProcessingError):
+    """Failed to calculate metrics (FC-4002)."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(
+            ErrorContext(
+                code="FC-4002",
+                name="METRICS_CALCULATION_ERROR",
+                message=f"Metrics calculation failed: {reason}",
+                hint="Check input format compatibility",
+                details={"reason": reason},
+            )
+        )

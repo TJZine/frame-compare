@@ -285,7 +285,7 @@ def run(
         def _resolve_effective_config() -> ConfigSchema:
             return apply_cli_overrides(
                 load_config(config_path),
-                cli_args=request.cli_override_args(),
+                cli_args=request.cli_config_overrides(),
             )
 
         def _load_effective_config() -> ConfigSchema:

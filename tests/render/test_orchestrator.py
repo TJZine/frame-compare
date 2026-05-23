@@ -6,15 +6,13 @@ import pytest
 from structlog.testing import capture_logs
 
 from frame_compare.config.schema import ColorConfig, ConfigSchema
-from frame_compare.errors import (
-    RenderError,
-)
 from frame_compare.render.batch.orchestrator import (
     ProgressReporter,
     render_batch,
     render_screenshots,
     render_screenshots_from_batch,
 )
+from frame_compare.render.errors import RenderError
 from frame_compare.render.types import (
     BatchRenderOptions,
     EncoderSettings,

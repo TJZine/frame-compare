@@ -13,7 +13,7 @@ from pathlib import Path
 from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.config.loader import load_config
 from frame_compare.config.schema import ConfigSchema
-from frame_compare.errors import (
+from frame_compare.orchestration.errors import (
     DirectoryNotFoundError,
     InputDiscoveryError,
     NoVideosFoundError,

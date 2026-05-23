@@ -14,10 +14,8 @@ from frame_compare.analysis.cache_io import (
     load_cached_metrics,
     save_metrics_cache,
 )
+from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
-from frame_compare.errors import (
-    MetricsCalculationError,
-)
 from frame_compare.utils.perf import perf_span
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.vs.errors import PluginNotFoundError, SourceLoadError

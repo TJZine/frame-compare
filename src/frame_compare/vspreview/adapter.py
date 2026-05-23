@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import shutil
-import subprocess
+import subprocess  # nosec B404
 import sys
 from dataclasses import dataclass
 from enum import Enum
@@ -179,7 +179,8 @@ def launch_alignment_verification_session(
     print(f"Launch command: {' '.join(command)}")
 
     try:
-        result = subprocess.run(
+        # command is a list from _resolve_launch_command; shell=True is never used.
+        result = subprocess.run(  # nosec B603
             command,
             check=False,
             capture_output=True,

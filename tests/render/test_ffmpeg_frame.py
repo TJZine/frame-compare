@@ -4,9 +4,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from frame_compare.errors import FFmpegError, FFmpegNotFoundError
 from frame_compare.render._ffmpeg_frame import build_extract_frame_argv, frame_seek_time_seconds
 from frame_compare.render.ffmpeg import DefaultFFmpegRunner
+from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
 
 
 def test_frame_seek_time_seconds_matches_repo_contract() -> None:

@@ -14,14 +14,10 @@ import pytest
 from PIL import Image
 
 import frame_compare.analysis.cache_io as cache_io
+from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.config.loader import load_config
 from frame_compare.config.schema import ConfigSchema, OverlayMode, TonemapPreset
-from frame_compare.errors import (
-    CacheCorruptionError,
-    CacheVersionMismatchError,
-    MetricsCalculationError,
-)
 from frame_compare.orchestration import coordinator, phase_tasks, preparation
 from frame_compare.orchestration.context import (
     ClipFingerprint,
@@ -41,6 +37,7 @@ from frame_compare.services.alignment import CACHE_FILE_NAME
 from frame_compare.services.errors import AudioAlignmentError, TmdbError
 from frame_compare.services.run_folder import derive_run_folder_name
 from frame_compare.services.types import AlignmentResult, MetadataConfig, TmdbMetadata
+from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 from frame_compare.vs.types import HDRMetadata, SourceInfo
@@ -208,7 +205,7 @@ def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
     assert align_phase.progress_total == 1
 
 
-def test_run_request_cli_override_args_capture_runtime_override_contract(tmp_path: Path) -> None:
+def test_run_request_cli_config_overrides_capture_runtime_override_contract(tmp_path: Path) -> None:
     request = RunRequest(
         root=tmp_path,
         input_dir=tmp_path / "comparison_videos",
@@ -221,17 +218,17 @@ def test_run_request_cli_override_args_capture_runtime_override_contract(tmp_pat
         force_interactive_alignment=True,
     )
 
-    assert request.cli_override_args() == {
-        "tm_preset": TonemapPreset.FILMIC,
-        "tm_target": 203,
-        "tm_curve": None,
-        "frame_count": 12,
-        "seed": 123,
-        "overlay": OverlayMode.DIAGNOSTIC,
-        "no_upload": True,
-        "force_interactive_alignment": True,
-        "input": str(tmp_path / "comparison_videos"),
-    }
+    overrides = request.cli_config_overrides()
+
+    assert overrides.input_dir == tmp_path / "comparison_videos"
+    assert overrides.tm_preset == TonemapPreset.FILMIC
+    assert overrides.tm_target_nits == 203
+    assert overrides.tm_curve is None
+    assert overrides.frame_count == 12
+    assert overrides.seed == 123
+    assert overrides.overlay_mode == OverlayMode.DIAGNOSTIC
+    assert overrides.no_upload is True
+    assert overrides.force_interactive_alignment is True
 
 
 class FakeVSLoader:

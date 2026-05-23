@@ -33,6 +33,7 @@ else:
 
     vs_mock = vs_module
 
+from frame_compare.analysis.errors import MetricsCalculationError  # noqa: E402
 from frame_compare.analysis.metrics import (  # noqa: E402
     ProgressReporter,
     _calculate_luminance,
@@ -41,9 +42,6 @@ from frame_compare.analysis.metrics import (  # noqa: E402
 )
 from frame_compare.analysis.types import FrameMetrics  # noqa: E402
 from frame_compare.config.schema import AnalysisConfig  # noqa: E402
-from frame_compare.errors import (  # noqa: E402
-    MetricsCalculationError,
-)
 from frame_compare.vs.errors import PluginNotFoundError, SourceLoadError  # noqa: E402
 
 
@@ -216,8 +214,8 @@ def test_calculate_metrics_uses_cache_on_hit(mock_key, mock_load, tmp_path):
 
 
 def test_calculate_metrics_empty_video_paths_raises_fc4002(tmp_path: Path) -> None:
+    from frame_compare.analysis.errors import MetricsCalculationError
     from frame_compare.config.schema import AnalysisConfig
-    from frame_compare.errors import MetricsCalculationError
 
     with pytest.raises(MetricsCalculationError, match="No input video paths provided"):
         calculate_metrics([], AnalysisConfig(), tmp_path)

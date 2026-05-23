@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
+from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -21,6 +22,17 @@ if TYPE_CHECKING:
 
 CACHE_FILENAME: str = "cache.compframes"
 CACHE_VERSION: int = 3
+
+
+class _CacheParseError(ValueError):
+    """Raised when a cache file matches the key but not the schema."""
+
+
+@dataclass(frozen=True, slots=True)
+class _ValidatedCachePayload:
+    luminance: list[float]
+    motion: list[float]
+    metadata: MetricsMetadata
 
 
 def compute_cache_key(video_paths: list[Path], config: AnalysisConfig) -> str:
@@ -56,100 +68,133 @@ def load_cached_metrics(
     except (json.JSONDecodeError, OSError):
         return CacheLoadResult(success=False, reason="corrupted")
 
-    if not isinstance(raw_data, Mapping):
+    try:
+        data = _as_mapping(raw_data)
+        _validate_cache_identity(data, fingerprint)
+        payload = _parse_cache_payload(data)
+    except _CacheVersionMismatch:
+        return CacheLoadResult(success=False, reason="version_mismatch")
+    except _CacheFingerprintMismatch:
+        return CacheLoadResult(success=False, reason="mismatched_inputs")
+    except _CacheParseError:
         return CacheLoadResult(success=False, reason="corrupted")
 
-    data = cast(Mapping[str, object], raw_data)
+    metrics = FrameMetrics(
+        luminance=payload.luminance,
+        motion=payload.motion,
+        metadata=payload.metadata,
+    )
+    return CacheLoadResult(success=True, metrics=metrics)
 
-    required_keys = {"version", "fingerprint", "luminance", "motion", "metadata"}
-    if not all(k in data for k in required_keys):
-        return CacheLoadResult(success=False, reason="corrupted")
+
+class _CacheVersionMismatch(_CacheParseError):
+    pass
+
+
+class _CacheFingerprintMismatch(_CacheParseError):
+    pass
+
+
+def _as_mapping(value: object) -> Mapping[str, object]:
+    if not isinstance(value, Mapping):
+        raise _CacheParseError
+    return cast(Mapping[str, object], value)
+
+
+def _require_keys(data: Mapping[str, object], keys: set[str]) -> None:
+    if not all(key in data for key in keys):
+        raise _CacheParseError
+
+
+def _validate_cache_identity(data: Mapping[str, object], fingerprint: str) -> None:
+    _require_keys(data, {"version", "fingerprint", "luminance", "motion", "metadata"})
 
     if data["version"] != CACHE_VERSION:
-        return CacheLoadResult(success=False, reason="version_mismatch")
-
+        raise _CacheVersionMismatch
     if data["fingerprint"] != fingerprint:
-        return CacheLoadResult(success=False, reason="mismatched_inputs")
+        raise _CacheFingerprintMismatch
 
-    lum_raw = data["luminance"]
-    mot_raw = data["motion"]
-    if not isinstance(lum_raw, list) or not isinstance(mot_raw, list):
-        return CacheLoadResult(success=False, reason="corrupted")
-    lum_list = cast(list[object], lum_raw)
-    mot_list = cast(list[object], mot_raw)
-    if not all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in lum_list):
-        return CacheLoadResult(success=False, reason="corrupted")
-    if not all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in mot_list):
-        return CacheLoadResult(success=False, reason="corrupted")
 
-    metadata_raw = data["metadata"]
-    if not isinstance(metadata_raw, Mapping):
-        return CacheLoadResult(success=False, reason="corrupted")
-    metadata_dict = cast(Mapping[str, object], metadata_raw)
+def _parse_cache_payload(data: Mapping[str, object]) -> _ValidatedCachePayload:
+    metadata = _parse_metrics_metadata(_as_mapping(data["metadata"]))
+    return _ValidatedCachePayload(
+        luminance=_parse_numeric_series(data["luminance"]),
+        motion=_parse_numeric_series(data["motion"]),
+        metadata=metadata,
+    )
 
-    required_metadata_keys = {"frame_count", "fps", "config_fingerprint", "clips"}
-    if not all(k in metadata_dict for k in required_metadata_keys):
-        return CacheLoadResult(success=False, reason="corrupted")
 
-    frame_count = metadata_dict["frame_count"]
+def _parse_numeric_series(value: object) -> list[float]:
+    if not isinstance(value, list):
+        raise _CacheParseError
+
+    series: list[float] = []
+    for item in cast(list[object], value):
+        if not isinstance(item, (int, float)) or isinstance(item, bool):
+            raise _CacheParseError
+        series.append(float(item))
+    return series
+
+
+def _parse_metrics_metadata(data: Mapping[str, object]) -> MetricsMetadata:
+    _require_keys(data, {"frame_count", "fps", "config_fingerprint", "clips"})
+
+    frame_count = data["frame_count"]
     if not isinstance(frame_count, int) or isinstance(frame_count, bool) or frame_count < 0:
-        return CacheLoadResult(success=False, reason="corrupted")
-    fps = metadata_dict["fps"]
+        raise _CacheParseError
+
+    fps = data["fps"]
     if not isinstance(fps, str):
-        return CacheLoadResult(success=False, reason="corrupted")
-    config_fingerprint = metadata_dict["config_fingerprint"]
+        raise _CacheParseError
+
+    config_fingerprint = data["config_fingerprint"]
     if not isinstance(config_fingerprint, str):
-        return CacheLoadResult(success=False, reason="corrupted")
-
-    clips_raw = metadata_dict["clips"]
-    if not isinstance(clips_raw, list):
-        return CacheLoadResult(success=False, reason="corrupted")
-    clips_list = cast(list[object], clips_raw)
-    validated_clips: list[Mapping[str, object]] = []
-
-    for clip_entry in clips_list:
-        if not isinstance(clip_entry, Mapping):
-            return CacheLoadResult(success=False, reason="corrupted")
-        c = cast(Mapping[str, object], clip_entry)
-        required_clip_keys = {"path", "size", "mtime"}
-        if not all(k in c for k in required_clip_keys):
-            return CacheLoadResult(success=False, reason="corrupted")
-        if not isinstance(c["path"], str):
-            return CacheLoadResult(success=False, reason="corrupted")
-        if not isinstance(c["size"], int) or isinstance(c["size"], bool):
-            return CacheLoadResult(success=False, reason="corrupted")
-        if not isinstance(c["mtime"], (int, float)) or isinstance(c["mtime"], bool):
-            return CacheLoadResult(success=False, reason="corrupted")
-        if "sha1" in c and c["sha1"] is not None and not isinstance(c["sha1"], str):
-            return CacheLoadResult(success=False, reason="corrupted")
-        validated_clips.append(c)
+        raise _CacheParseError
 
     try:
-        metadata = MetricsMetadata(
+        return MetricsMetadata(
             frame_count=frame_count,
             fps=Fraction(fps),
             config_fingerprint=config_fingerprint,
-            clips=[
-                ClipIdentity(
-                    path=cast(str, c["path"]),
-                    size=cast(int, c["size"]),
-                    mtime=cast(float, c["mtime"]),
-                    sha1=cast(str | None, c.get("sha1")),
-                )
-                for c in validated_clips
-            ],
-            version=cast(int, metadata_dict.get("version", CACHE_VERSION)),
+            clips=_parse_clip_identities(data["clips"]),
+            version=_parse_cache_version(data.get("version", CACHE_VERSION)),
         )
+    except (ValueError, TypeError) as exc:
+        raise _CacheParseError from exc
 
-        metrics = FrameMetrics(
-            luminance=cast(list[float], data["luminance"]),
-            motion=cast(list[float], data["motion"]),
-            metadata=metadata,
-        )
-    except (KeyError, ValueError, TypeError):
-        return CacheLoadResult(success=False, reason="corrupted")
 
-    return CacheLoadResult(success=True, metrics=metrics)
+def _parse_clip_identities(value: object) -> list[ClipIdentity]:
+    if not isinstance(value, list):
+        raise _CacheParseError
+    return [_parse_clip_identity(_as_mapping(entry)) for entry in cast(list[object], value)]
+
+
+def _parse_clip_identity(data: Mapping[str, object]) -> ClipIdentity:
+    _require_keys(data, {"path", "size", "mtime"})
+
+    path = data["path"]
+    if not isinstance(path, str):
+        raise _CacheParseError
+
+    size = data["size"]
+    if not isinstance(size, int) or isinstance(size, bool):
+        raise _CacheParseError
+
+    mtime = data["mtime"]
+    if not isinstance(mtime, (int, float)) or isinstance(mtime, bool):
+        raise _CacheParseError
+
+    sha1 = data.get("sha1")
+    if sha1 is not None and not isinstance(sha1, str):
+        raise _CacheParseError
+
+    return ClipIdentity(path=path, size=size, mtime=float(mtime), sha1=sha1)
+
+
+def _parse_cache_version(value: object) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise _CacheParseError
+    return value
 
 
 def save_metrics_cache(metrics: FrameMetrics, cache_dir: Path) -> None:

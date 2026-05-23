@@ -132,7 +132,8 @@ def _probe_libplacebo_runtime() -> bool:
     env[_LIBPLACEBO_PROBE_ENV] = "1"
 
     try:
-        result = subprocess.run(
+        # argv uses sys.executable and a static probe script; shell=True is never used.
+        result = subprocess.run(  # nosec B603
             [sys.executable, "-c", probe_script],
             env=env,
             capture_output=True,

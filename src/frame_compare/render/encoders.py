@@ -8,10 +8,9 @@ from typing import TYPE_CHECKING, cast
 import numpy as np
 from PIL import Image
 
-from frame_compare.errors import (
+from frame_compare.errors import ErrorDetails, FrameCompareError
+from frame_compare.render.errors import (
     EncodingError,
-    ErrorDetails,
-    FrameCompareError,
     FrameExtractionError,
     OverlayError,
     RenderError,

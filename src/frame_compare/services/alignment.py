@@ -13,15 +13,11 @@ import numpy as np
 import structlog
 import tomli_w
 
-from frame_compare.errors import (
-    CacheCorruptionError,
-    CacheVersionMismatchError,
-    FFmpegError,
-    FFmpegNotFoundError,
-)
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentAlgorithm, AlignmentConfig, AlignmentResult
 from frame_compare.utils.atomic_write import write_bytes_atomic
+from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
+from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.subproc import run_subprocess
 from frame_compare.vspreview.adapter import (

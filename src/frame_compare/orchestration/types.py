@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 
+from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.config.schema import ConfigSchema, OverlayMode, ToneCurve, TonemapPreset
 from frame_compare.orchestration.context import ClipState
 from frame_compare.render.ffmpeg import FFmpegRunner
@@ -20,10 +21,6 @@ from frame_compare.vs.loader import VSLoader
 
 if TYPE_CHECKING:
     from frame_compare.orchestration.phases import Phase
-
-
-type CLIOverrideValue = TonemapPreset | ToneCurve | OverlayMode | int | bool | str | None
-type CLIOverrideArgs = dict[str, CLIOverrideValue]
 
 
 @dataclass(frozen=True)
@@ -66,19 +63,19 @@ class RunRequest:
     verbose: bool = False
     json_output: bool = False
 
-    def cli_override_args(self) -> CLIOverrideArgs:
-        """Translate the request into the config-override payload shape."""
-        return {
-            "tm_preset": self.tm_preset,
-            "tm_target": self.tm_target_nits,
-            "tm_curve": self.tm_curve,
-            "frame_count": self.frame_count,
-            "seed": self.seed,
-            "overlay": self.overlay_mode,
-            "no_upload": self.no_upload,
-            "force_interactive_alignment": self.force_interactive_alignment,
-            "input": str(self.input_dir) if self.input_dir is not None else None,
-        }
+    def cli_config_overrides(self) -> CLIConfigOverrides:
+        """Project runtime CLI values into the config override DTO."""
+        return CLIConfigOverrides(
+            input_dir=self.input_dir,
+            tm_preset=self.tm_preset,
+            tm_target_nits=self.tm_target_nits,
+            tm_curve=self.tm_curve,
+            frame_count=self.frame_count,
+            seed=self.seed,
+            overlay_mode=self.overlay_mode,
+            no_upload=self.no_upload,
+            force_interactive_alignment=self.force_interactive_alignment,
+        )
 
 
 def _empty_str_list() -> list[str]:

@@ -130,7 +130,8 @@ class SlowpicsPublisher:
     ) -> float:
         """Calculate exponential backoff with jitter and sleep, returning sleep duration."""
         delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
-        jitter = delay * random.uniform(-jitter_factor, jitter_factor)
+        # Retry jitter does not protect secrets or authorization decisions.
+        jitter = delay * random.uniform(-jitter_factor, jitter_factor)  # nosec B311
         sleep_time = max(0.0, delay + jitter)
         await asyncio.sleep(sleep_time)
         return sleep_time

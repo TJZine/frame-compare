@@ -10,7 +10,7 @@ from typing import Any, cast
 import pytest
 
 import frame_compare.analysis.cache_io as cache_io
-from frame_compare.errors import MetricsCalculationError
+from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.orchestration import preparation
 from frame_compare.orchestration.probing.probe_cache import load_clip_probe_cache
 from frame_compare.orchestration.types import RunDependencies, RunRequest

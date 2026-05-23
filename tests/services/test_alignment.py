@@ -11,12 +11,6 @@ import numpy as np
 import pytest
 import tomli_w
 
-from frame_compare.errors import (
-    CacheCorruptionError,
-    CacheVersionMismatchError,
-    FFmpegError,
-    FFmpegNotFoundError,
-)
 from frame_compare.services.alignment import (
     _cross_correlate,
     _extract_audio,
@@ -30,6 +24,8 @@ from frame_compare.services.alignment import (
 )
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
+from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
+from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.vspreview.adapter import VSPreviewAvailability, VSPreviewAvailabilityStatus
 from frame_compare.vspreview.errors import VSPreviewError

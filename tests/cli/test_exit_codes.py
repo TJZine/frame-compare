@@ -3,10 +3,10 @@ from pathlib import Path
 from frame_compare.cli.entry import handle_error
 from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.errors import (
-    FrameExtractionError,
     GenericInternalError,
-    NoVideosFoundError,
 )
+from frame_compare.orchestration.errors import NoVideosFoundError
+from frame_compare.render.errors import FrameExtractionError
 from frame_compare.services.errors import SlowpicsError
 from frame_compare.vs.errors import (
     TonemapRequiresVapourSynthError,

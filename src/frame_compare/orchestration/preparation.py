@@ -8,13 +8,9 @@ from pathlib import Path
 import structlog
 
 import frame_compare.analysis.cache_io as cache_io
+from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.config.overrides import apply_cli_overrides
 from frame_compare.config.schema import ConfigSchema
-from frame_compare.errors import (
-    CacheCorruptionError,
-    CacheVersionMismatchError,
-    MetricsCalculationError,
-)
 from frame_compare.orchestration.context import (
     ClipFingerprint,
     ClipProbeSnapshot,
@@ -50,6 +46,7 @@ from frame_compare.services.run_folder import (
     get_existing_run_folders,
     reserve_run_folder,
 )
+from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 from frame_compare.utils.types import WorkspacePaths
 
 log = structlog.get_logger()
@@ -256,7 +253,7 @@ async def execute_prep(
     workspace = preflight.workspace
     config = apply_cli_overrides(
         preflight.config,
-        cli_args=request.cli_override_args(),
+        cli_args=request.cli_config_overrides(),
     )
     input_videos = discover_inputs(workspace.input_dir)
     artifacts = RunArtifacts()

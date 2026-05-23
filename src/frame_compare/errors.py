@@ -118,35 +118,6 @@ class DependencyError(FrameCompareError):
     """Base class for dependency failures (VapourSynth, FFmpeg, plugins)."""
 
 
-class FFmpegNotFoundError(DependencyError):
-    """FFmpeg binary not found (FC-2005)."""
-
-    def __init__(self) -> None:
-        super().__init__(
-            ErrorContext(
-                code="FC-2005",
-                name="FFMPEG_NOT_FOUND",
-                message="FFmpeg binary not found in PATH",
-                hint="Install FFmpeg and add to system PATH",
-            )
-        )
-
-
-class FFmpegError(DependencyError):
-    """FFmpeg execution failed (FC-2006)."""
-
-    def __init__(self, stderr: str, returncode: int) -> None:
-        super().__init__(
-            ErrorContext(
-                code="FC-2006",
-                name="FFMPEG_ERROR",
-                message=f"FFmpeg failed with exit code {returncode}",
-                hint="Check input file validity or codec support",
-                details={"returncode": returncode, "stderr": stderr},
-            )
-        )
-
-
 class DoviToolNotFoundError(DependencyError):
     """dovi_tool binary not found (FC-2007)."""
 
@@ -181,23 +152,6 @@ class PythonVersionError(DependencyError):
 
 class InputError(FrameCompareError):
     """Base class for invalid input/arguments."""
-
-
-class NoVideosFoundError(InputError):
-    """No video files found in directory (FC-3001)."""
-
-    def __init__(self, path: Path, patterns: list[str] | None = None) -> None:
-        self.path = path
-        self.patterns: list[str] = patterns or []
-        super().__init__(
-            ErrorContext(
-                code="FC-3001",
-                name="NO_VIDEOS_FOUND",
-                message=f"No video files found in: {path}",
-                hint="Check directory path or file extensions",
-                details={"path": str(path), "patterns": cast(JSONValue, self.patterns)},
-            )
-        )
 
 
 class VideoOpenError(InputError):
@@ -241,21 +195,6 @@ class IncompatibleVideosError(InputError):
                 message=f"Videos incompatible: {reason}",
                 hint="Ensure all videos match dimensions/colorspace",
                 details={"reason": reason},
-            )
-        )
-
-
-class DirectoryNotFoundError(InputError):
-    """Output/cache directory missing (FC-3006)."""
-
-    def __init__(self, path: Path) -> None:
-        super().__init__(
-            ErrorContext(
-                code="FC-3006",
-                name="DIRECTORY_NOT_FOUND",
-                message=f"Directory not found: {path}",
-                hint="Create directory or check path",
-                details={"path": str(path)},
             )
         )
 
@@ -305,109 +244,11 @@ class PathEscapesRootError(InputError):
         )
 
 
-class InputDiscoveryError(InputError):
-    """Failed to discover inputs due to filesystem error (FC-3010)."""
-
-    def __init__(self, path: Path, cause: OSError) -> None:
-        super().__init__(
-            ErrorContext(
-                code="FC-3010",
-                name="INPUT_DISCOVERY_ERROR",
-                message=f"Failed to discover inputs in {path}: {cause}",
-                hint="Check directory permissions and path existence",
-                details={"path": str(path), "error": str(cause)},
-                cause=cause,
-            )
-        )
-        self.path = path
-
-
 # ─── 3.4 Processing Errors (FC-4xxx) ───────────────────────────────────────────
 
 
 class ProcessingError(FrameCompareError):
     """Base class for pipeline failures."""
-
-
-class FrameExtractionError(ProcessingError):
-    """Failed to extract specific frame (FC-4001)."""
-
-    def __init__(self, frame_number: int, clip_name: str) -> None:
-        super().__init__(
-            ErrorContext(
-                code="FC-4001",
-                name="FRAME_EXTRACTION_ERROR",
-                message=f"Failed to extract frame {frame_number} from {clip_name}",
-                hint="Check source reliability/seekability",
-                details={"frame": frame_number, "clip": clip_name},
-            )
-        )
-
-
-class MetricsCalculationError(ProcessingError):
-    """Failed to calculate metrics (FC-4002)."""
-
-    def __init__(self, reason: str) -> None:
-        super().__init__(
-            ErrorContext(
-                code="FC-4002",
-                name="METRICS_CALCULATION_ERROR",
-                message=f"Metrics calculation failed: {reason}",
-                hint="Check input format compatibility",
-                details={"reason": reason},
-            )
-        )
-
-
-class RenderError(ProcessingError):
-    """Composition/image encoding failure (FC-4004)."""
-
-    def __init__(self, reason: str | None = None, details: ErrorDetails | None = None) -> None:
-        message = "Final render composition failed"
-        if reason:
-            message = f"{message}: {reason}"
-        super().__init__(
-            ErrorContext(
-                code="FC-4004",
-                name="RENDER_ERROR",
-                message=message,
-                hint=(
-                    "Check clip pixel format/bit depth compatibility (screenshots require RGB24/RGBA8) "
-                    "and verify the output path is writable"
-                ),
-                details=details,
-            )
-        )
-
-
-class CacheCorruptionError(ProcessingError):
-    """Cache file invalid/unreadable (FC-4006)."""
-
-    def __init__(self, path: Path) -> None:
-        super().__init__(
-            ErrorContext(
-                code="FC-4006",
-                name="CACHE_CORRUPTION",
-                message=f"Cache file corrupted: {path}",
-                hint="Clear cache directory",
-                details={"path": str(path)},
-            )
-        )
-
-
-class CacheVersionMismatchError(ProcessingError):
-    """Cache schema version mismatch (FC-4007)."""
-
-    def __init__(self, found: str, expected: str) -> None:
-        super().__init__(
-            ErrorContext(
-                code="FC-4007",
-                name="CACHE_VERSION_MISMATCH",
-                message=f"Cache version mismatch (found {found}, expected {expected})",
-                hint="Clear cache directory",
-                details={"found": found, "expected": expected},
-            )
-        )
 
 
 class ProcessingOutOfMemoryError(ProcessingError):
@@ -439,36 +280,6 @@ class ProcessingTimeoutError(ProcessingError):
         )
 
 
-class EncodingError(ProcessingError):
-    """Output file encoding failed (FC-4013)."""
-
-    def __init__(self, path: Path, reason: str) -> None:
-        super().__init__(
-            ErrorContext(
-                code="FC-4013",
-                name="ENCODING_ERROR",
-                message=f"Failed to encode output {path}: {reason}",
-                hint="Check disk space or write permissions",
-                details={"path": str(path), "reason": reason},
-            )
-        )
-
-
-class OverlayError(ProcessingError):
-    """Failed to render text overlay (FC-4014)."""
-
-    def __init__(self, reason: str) -> None:
-        super().__init__(
-            ErrorContext(
-                code="FC-4014",
-                name="OVERLAY_ERROR",
-                message=f"Overlay rendering failed: {reason}",
-                hint="Check font availability",
-                details={"reason": reason},
-            )
-        )
-
-
 class DoviError(ProcessingError):
     """Dolby Vision processing error (FC-4018)."""
 
@@ -482,10 +293,6 @@ class DoviError(ProcessingError):
                 details={"path": str(path), "reason": reason},
             )
         )
-
-
-class AnalysisError(ProcessingError):
-    """Marker base for analysis failures."""
 
 
 # ─── 3.5 Network Errors (FC-5xxx) ──────────────────────────────────────────────
