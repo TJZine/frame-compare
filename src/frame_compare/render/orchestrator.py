@@ -105,11 +105,9 @@ def _render_batch_parallel(
                     results[index] = future.result()
                     _record_render_progress(reporter, requests[index])
                 except Exception as exc:
-                    if first_exception is None:
-                        first_exception = exc
-                        executor.shutdown(wait=False, cancel_futures=True)
-                        break
-                    continue
+                    first_exception = exc
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    break
 
                 if first_exception is None and next_index < len(requests):
                     _submit_render_request(executor, requests, futures, next_index)

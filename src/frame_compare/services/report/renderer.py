@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from frame_compare.services.report.payload import REPORT_VERSION
-from frame_compare.services.report.viewer import CSS, JS
+from frame_compare.services.report.viewer import get_css, get_js
 
 if TYPE_CHECKING:
     from frame_compare.services.report.payload import (
@@ -224,7 +224,7 @@ def _render_footer(json_str: str) -> str:
     </footer>
 
     <script type="application/json" id="report-data">{json_str}</script>
-    <script>{JS}</script>"""
+    <script>{get_js()}</script>"""
 
 
 def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
@@ -261,7 +261,7 @@ def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{_esc_text(title)} - Frame Compare Report</title>
-    <style>{CSS}</style>
+    <style>{get_css()}</style>
 </head>
 <body>
 {header_html}
