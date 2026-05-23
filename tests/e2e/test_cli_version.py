@@ -6,7 +6,7 @@ import pytest
 from typer.testing import CliRunner
 
 from frame_compare import __version__
-from frame_compare.cli_entry import app
+from frame_compare.cli.entry import app
 
 
 @pytest.mark.e2e

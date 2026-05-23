@@ -13,7 +13,7 @@ import httpx
 import pytest
 from PIL import Image
 
-from frame_compare.analysis import cache_io
+import frame_compare.analysis.cache_io as cache_io
 from frame_compare.config import ConfigSchema, OverlayMode, TonemapPreset, load_config
 from frame_compare.errors import (
     AudioAlignmentError,

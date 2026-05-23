@@ -11,7 +11,10 @@ from pathlib import Path
 
 import httpx
 
-from frame_compare.analysis import cache_io, calculate_metrics, create_frame_plan, select_frames
+import frame_compare.analysis.cache_io as cache_io
+from frame_compare.analysis.frame_plan import create_frame_plan
+from frame_compare.analysis.metrics import calculate_metrics
+from frame_compare.analysis.selection import select_frames
 from frame_compare.analysis.types import SelectionBreakdown
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.errors import AudioAlignmentError

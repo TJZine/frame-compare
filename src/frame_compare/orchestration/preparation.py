@@ -7,7 +7,7 @@ from pathlib import Path
 
 import structlog
 
-from frame_compare.analysis import cache_io
+import frame_compare.analysis.cache_io as cache_io
 from frame_compare.config.overrides import apply_cli_overrides
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.errors import (

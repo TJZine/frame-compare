@@ -13,7 +13,7 @@ from click.testing import Result
 from typer.main import get_command
 from typer.testing import CliRunner
 
-from frame_compare.cli_entry import _maybe_open_report, _stabilize_typer_help_width, app
+from frame_compare.cli.entry import _maybe_open_report, _stabilize_typer_help_width, app
 from frame_compare.config import OverlayMode, ToneCurve, TonemapPreset
 from frame_compare.config.loader import get_default_config
 from frame_compare.errors import (
@@ -166,8 +166,8 @@ def test_run_respects_no_color_env_var_presence_even_if_empty(monkeypatch: Monke
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         return RunResult(success=True, screenshot_dir=Path("screenshots").resolve())
 
-    monkeypatch.setattr("frame_compare.cli_entry.Console", FakeConsole)
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.Console", FakeConsole)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
     result = _invoke_run_with_minimal_workspace(
         ["--quiet"],
@@ -183,7 +183,7 @@ def test_run_exits_zero_when_runner_returns_success(monkeypatch: MonkeyPatch) ->
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         return RunResult(success=True)
 
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
     result = _invoke_run_with_minimal_workspace([])
     assert result.exit_code == 0
@@ -198,7 +198,7 @@ def test_run_default_prints_at_a_glance_and_result_summary(monkeypatch: MonkeyPa
             report_path=None,
         )
 
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
     with runner.isolated_filesystem():
         root = Path("workspace")
@@ -246,7 +246,7 @@ def test_run_at_a_glance_prints_vspreview_availability_when_enabled(
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         return RunResult(success=True)
 
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
     monkeypatch.setattr(
         "frame_compare.vspreview.adapter.check_vspreview_availability",
         lambda: VSPreviewAvailability(
@@ -286,7 +286,7 @@ def test_run_at_a_glance_prints_vspreview_probe_failure(
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         return RunResult(success=True)
 
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
     monkeypatch.setattr(
         "frame_compare.vspreview.adapter.check_vspreview_availability",
         lambda: VSPreviewAvailability(
@@ -317,7 +317,7 @@ def test_run_result_summary_prints_status_and_truncated_warnings(
             warnings=[f"warning {index}" for index in range(1, 11)],
         )
 
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
     result = _invoke_run_with_minimal_workspace([])
 
@@ -343,7 +343,7 @@ def test_run_result_summary_prints_slowpics_url_and_untruncated_warnings(
             warnings=["metadata skipped", "upload reused"],
         )
 
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
     result = _invoke_run_with_minimal_workspace([])
 
@@ -362,7 +362,7 @@ def test_run_quiet_suppresses_at_a_glance_but_keeps_minimal_summary(
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         return RunResult(success=True, screenshot_dir=Path("screenshots").resolve())
 
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
     with runner.isolated_filesystem():
         root = Path("workspace")
@@ -400,13 +400,13 @@ def test_run_opens_report_for_interactive_tty_when_auto_open_enabled(
             report_path=Path("report.html"),
         )
 
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
     monkeypatch.setattr(
-        "frame_compare.cli_entry.sys",
+        "frame_compare.cli.entry.sys",
         SimpleNamespace(stdout=SimpleNamespace(isatty=lambda: True)),
     )
     monkeypatch.setattr(
-        "frame_compare.cli_entry._maybe_open_report",
+        "frame_compare.cli.entry._maybe_open_report",
         lambda report_path: opened.setdefault("path", report_path),
     )
 
@@ -428,13 +428,13 @@ def test_run_does_not_open_report_when_auto_open_disabled_in_config(
             report_path=Path("report.html"),
         )
 
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
     monkeypatch.setattr(
-        "frame_compare.cli_entry.sys",
+        "frame_compare.cli.entry.sys",
         SimpleNamespace(stdout=SimpleNamespace(isatty=lambda: True)),
     )
     monkeypatch.setattr(
-        "frame_compare.cli_entry._maybe_open_report",
+        "frame_compare.cli.entry._maybe_open_report",
         lambda report_path: opened.setdefault("path", report_path),
     )
 
@@ -468,13 +468,13 @@ def test_run_does_not_open_report_when_stdout_is_not_a_tty(monkeypatch: MonkeyPa
             report_path=Path("report.html"),
         )
 
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
     monkeypatch.setattr(
-        "frame_compare.cli_entry.sys",
+        "frame_compare.cli.entry.sys",
         SimpleNamespace(stdout=SimpleNamespace(isatty=lambda: False)),
     )
     monkeypatch.setattr(
-        "frame_compare.cli_entry._maybe_open_report",
+        "frame_compare.cli.entry._maybe_open_report",
         lambda report_path: opened.setdefault("path", report_path),
     )
 
@@ -494,13 +494,13 @@ def test_run_does_not_open_report_when_quiet(monkeypatch: MonkeyPatch) -> None:
             report_path=Path("report.html"),
         )
 
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
     monkeypatch.setattr(
-        "frame_compare.cli_entry.sys",
+        "frame_compare.cli.entry.sys",
         SimpleNamespace(stdout=SimpleNamespace(isatty=lambda: True)),
     )
     monkeypatch.setattr(
-        "frame_compare.cli_entry._maybe_open_report",
+        "frame_compare.cli.entry._maybe_open_report",
         lambda report_path: opened.setdefault("path", report_path),
     )
 
@@ -520,13 +520,13 @@ def test_run_does_not_open_report_when_json_output_requested(monkeypatch: Monkey
             report_path=Path("report.html"),
         )
 
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
     monkeypatch.setattr(
-        "frame_compare.cli_entry.sys",
+        "frame_compare.cli.entry.sys",
         SimpleNamespace(stdout=SimpleNamespace(isatty=lambda: True)),
     )
     monkeypatch.setattr(
-        "frame_compare.cli_entry._maybe_open_report",
+        "frame_compare.cli.entry._maybe_open_report",
         lambda report_path: opened.setdefault("path", report_path),
     )
 
@@ -554,14 +554,14 @@ def test_run_opens_report_when_post_run_config_reload_fails(monkeypatch: MonkeyP
             return get_default_config()
         raise ConfigNotFoundError(Path("missing.toml"))
 
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
-    monkeypatch.setattr("frame_compare.cli_entry.load_config", _load_config)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.load_config", _load_config)
     monkeypatch.setattr(
-        "frame_compare.cli_entry.sys",
+        "frame_compare.cli.entry.sys",
         SimpleNamespace(stdout=SimpleNamespace(isatty=lambda: True)),
     )
     monkeypatch.setattr(
-        "frame_compare.cli_entry._maybe_open_report",
+        "frame_compare.cli.entry._maybe_open_report",
         lambda report_path: opened.setdefault("path", report_path),
     )
 
@@ -592,13 +592,13 @@ def test_run_reloads_config_after_runner_and_respects_mid_run_auto_open_change(
                 report_path=Path("report.html"),
             )
 
-        monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+        monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
         monkeypatch.setattr(
-            "frame_compare.cli_entry.sys",
+            "frame_compare.cli.entry.sys",
             SimpleNamespace(stdout=SimpleNamespace(isatty=lambda: True)),
         )
         monkeypatch.setattr(
-            "frame_compare.cli_entry._maybe_open_report",
+            "frame_compare.cli.entry._maybe_open_report",
             lambda report_path: opened.setdefault("path", report_path),
         )
 
@@ -618,7 +618,7 @@ def test_run_json_outputs_json_only(monkeypatch: MonkeyPatch) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         return RunResult(success=True, screenshot_dir=Path("screenshots").resolve())
 
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
     with runner.isolated_filesystem():
         root = Path("workspace")
@@ -649,7 +649,7 @@ def test_run_stub_executes(monkeypatch: MonkeyPatch) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         return RunResult(success=True)
 
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
     result = _invoke_run_with_minimal_workspace([])
     assert result.exit_code == 0
@@ -662,7 +662,7 @@ def test_run_env_no_color_sets_request_no_color(monkeypatch: MonkeyPatch) -> Non
         captured["request"] = request
         return RunResult(success=True)
 
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
     result = _invoke_run_with_minimal_workspace([], env={"NO_COLOR": "1", "TERM": "dumb"})
     assert result.exit_code == 0
@@ -670,9 +670,9 @@ def test_run_env_no_color_sets_request_no_color(monkeypatch: MonkeyPatch) -> Non
 
 
 def test_maybe_open_report_swallows_webbrowser_error(monkeypatch: MonkeyPatch) -> None:
-    monkeypatch.setattr("frame_compare.cli_entry.os", SimpleNamespace(name="posix"))
+    monkeypatch.setattr("frame_compare.cli.entry.os", SimpleNamespace(name="posix"))
     monkeypatch.setattr(
-        "frame_compare.cli_entry.webbrowser.open",
+        "frame_compare.cli.entry.webbrowser.open",
         lambda _uri: (_ for _ in ()).throw(webbrowser.Error("no browser")),
     )
 
@@ -685,9 +685,9 @@ def test_maybe_open_report_keeps_startfile_path_on_windows(monkeypatch: MonkeyPa
         name="nt",
         startfile=lambda value: called.setdefault("path", value),
     )
-    monkeypatch.setattr("frame_compare.cli_entry.os", fake_os)
+    monkeypatch.setattr("frame_compare.cli.entry.os", fake_os)
     monkeypatch.setattr(
-        "frame_compare.cli_entry.webbrowser.open",
+        "frame_compare.cli.entry.webbrowser.open",
         lambda _uri: (_ for _ in ()).throw(AssertionError("webbrowser.open should not be called")),
     )
 
@@ -704,9 +704,9 @@ def test_maybe_open_report_falls_back_to_webbrowser_when_startfile_fails(
         raise OSError("boom")
 
     fake_os = SimpleNamespace(name="nt", startfile=_raise_startfile)
-    monkeypatch.setattr("frame_compare.cli_entry.os", fake_os)
+    monkeypatch.setattr("frame_compare.cli.entry.os", fake_os)
     monkeypatch.setattr(
-        "frame_compare.cli_entry.webbrowser.open",
+        "frame_compare.cli.entry.webbrowser.open",
         lambda uri: called.setdefault("uri", uri),
     )
 
@@ -716,7 +716,7 @@ def test_maybe_open_report_falls_back_to_webbrowser_when_startfile_fails(
 
 
 def test_wizard_writer_uses_atomic_write(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
-    from frame_compare.cli_entry import _write_wizard_config_payload
+    from frame_compare.cli.entry import _write_wizard_config_payload
 
     calls: list[Path] = []
 
@@ -724,7 +724,7 @@ def test_wizard_writer_uses_atomic_write(monkeypatch: MonkeyPatch, tmp_path: Pat
         calls.append(path)
         path.write_text(content, encoding=encoding)
 
-    monkeypatch.setattr("frame_compare.cli_entry.write_text_atomic", _fake_write)
+    monkeypatch.setattr("frame_compare.cli.entry.write_text_atomic", _fake_write)
 
     destination = tmp_path / "config" / "config.toml"
     _write_wizard_config_payload(destination, {"paths": {}, "slowpics": {}})
@@ -738,7 +738,7 @@ def test_run_exits_processing_error_when_runner_returns_unsuccessful(
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         return RunResult(success=False)
 
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
     result = _invoke_run_with_minimal_workspace([])
     assert result.exit_code == 5
@@ -751,7 +751,7 @@ def test_run_builds_run_request_from_cli_args(monkeypatch: MonkeyPatch) -> None:
         captured["request"] = request
         return RunResult(success=True)
 
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
     result = _invoke_run_with_minimal_workspace(
         [
@@ -779,7 +779,7 @@ def test_run_builds_run_request_with_typed_choice_overrides(
         captured["request"] = request
         return RunResult(success=True)
 
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
     result = _invoke_run_with_minimal_workspace(
         [
@@ -806,7 +806,7 @@ def test_run_builds_run_request_with_input_dir(monkeypatch: MonkeyPatch) -> None
         captured["request"] = request
         return RunResult(success=True)
 
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
     result = _invoke_run_with_minimal_workspace(["--input", "custom_inputs"])
     assert result.exit_code == 0
@@ -842,7 +842,7 @@ def test_wizard_writes_valid_config_toml():
 
 
 def test_wizard_writer_writes_to_explicit_config_path(tmp_path: Path) -> None:
-    from frame_compare.cli_entry import _write_wizard_config_payload
+    from frame_compare.cli.entry import _write_wizard_config_payload
 
     destination = tmp_path / "custom" / "config.toml"
     payload: dict[str, object] = {
@@ -865,7 +865,7 @@ def test_wizard_cancel_exits_130_and_writes_nothing(monkeypatch: MonkeyPatch) ->
     def _abort(*_args: object, **_kwargs: object) -> None:
         raise typer.Abort()
 
-    monkeypatch.setattr("frame_compare.cli_entry.typer.prompt", _abort)
+    monkeypatch.setattr("frame_compare.cli.entry.typer.prompt", _abort)
 
     with runner.isolated_filesystem():
         result = runner.invoke(app, ["wizard"])
@@ -878,16 +878,16 @@ def test_wizard_write_error_uses_cli_error_contract(monkeypatch: MonkeyPatch) ->
         raise PermissionError("permission denied")
 
     monkeypatch.setattr(
-        "frame_compare.cli_entry._prompt_input_dir",
+        "frame_compare.cli.entry._prompt_input_dir",
         lambda *_args, **_kwargs: "inputs",
     )
-    monkeypatch.setattr("frame_compare.cli_entry.typer.confirm", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr("frame_compare.cli.entry.typer.confirm", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(
-        "frame_compare.cli_entry._prompt_visibility",
+        "frame_compare.cli.entry._prompt_visibility",
         lambda _default: "unlisted",
     )
-    monkeypatch.setattr("frame_compare.cli_entry.typer.prompt", lambda *_args, **_kwargs: "")
-    monkeypatch.setattr("frame_compare.cli_entry.write_text_atomic", _write_text_atomic)
+    monkeypatch.setattr("frame_compare.cli.entry.typer.prompt", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr("frame_compare.cli.entry.write_text_atomic", _write_text_atomic)
 
     with runner.isolated_filesystem():
         root = Path("workspace")
@@ -944,7 +944,7 @@ def test_wizard_root_reprompts_on_missing_input_dir() -> None:
 
 
 def test_prepare_toml_payload_copies_paths_and_slowpics_sections() -> None:
-    from frame_compare.cli_entry import _prepare_toml_payload
+    from frame_compare.cli.entry import _prepare_toml_payload
 
     paths = {"input_dir": "inputs"}
     slowpics = {"auto_upload": True}
@@ -992,7 +992,7 @@ def test_doctor_json_conforms_to_schema_shape(monkeypatch: MonkeyPatch) -> None:
     ) -> DoctorReport:
         return report
 
-    monkeypatch.setattr("frame_compare.cli_entry.run_doctor", _run_doctor)
+    monkeypatch.setattr("frame_compare.cli.entry.run_doctor", _run_doctor)
 
     result = runner.invoke(app, ["doctor", "--json"])
     assert result.exit_code == 0
@@ -1072,7 +1072,7 @@ def test_doctor_exit_code_is_3_on_core_failure(monkeypatch: MonkeyPatch) -> None
     ) -> DoctorReport:
         return report
 
-    monkeypatch.setattr("frame_compare.cli_entry.run_doctor", _run_doctor)
+    monkeypatch.setattr("frame_compare.cli.entry.run_doctor", _run_doctor)
 
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 3
@@ -1096,7 +1096,7 @@ def _run_doctor_optional_failure_and_assert(monkeypatch: MonkeyPatch) -> None:
     ) -> DoctorReport:
         return report
 
-    monkeypatch.setattr("frame_compare.cli_entry.run_doctor", _run_doctor)
+    monkeypatch.setattr("frame_compare.cli.entry.run_doctor", _run_doctor)
 
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 0
@@ -1264,7 +1264,7 @@ def test_run_write_config_respects_root_and_config_and_does_not_invoke_runner(
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         raise AssertionError("runner.run should not be invoked for --write-config")
 
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
     with runner.isolated_filesystem():
         root = Path("workspace")
@@ -1296,7 +1296,7 @@ def test_run_write_config_write_error_uses_cli_error_contract(
     def _write_text_atomic(_path: Path, _content: str, *, encoding: str = "utf-8") -> None:
         raise PermissionError("permission denied")
 
-    monkeypatch.setattr("frame_compare.cli_entry.write_text_atomic", _write_text_atomic)
+    monkeypatch.setattr("frame_compare.cli.entry.write_text_atomic", _write_text_atomic)
 
     result = _invoke_run_with_minimal_workspace(["--write-config"])
 
@@ -1313,7 +1313,7 @@ def test_run_write_config_json_write_error_outputs_error_schema(
     def _write_text_atomic(_path: Path, _content: str, *, encoding: str = "utf-8") -> None:
         raise PermissionError("permission denied")
 
-    monkeypatch.setattr("frame_compare.cli_entry.write_text_atomic", _write_text_atomic)
+    monkeypatch.setattr("frame_compare.cli.entry.write_text_atomic", _write_text_atomic)
 
     result = _invoke_run_with_minimal_workspace(["--write-config", "--json"])
 
@@ -1334,7 +1334,7 @@ def test_run_diagnose_paths_outputs_pinned_json_schema_and_does_not_invoke_runne
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         raise AssertionError("runner.run should not be invoked for --diagnose-paths")
 
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
     with runner.isolated_filesystem():
         root = Path("workspace")
@@ -1381,7 +1381,7 @@ def test_run_json_outputs_pinned_success_schema_and_stdout_is_pure_json(
             errors=[],
         )
 
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
     result = runner.invoke(app, ["run", "--json"])
     assert result.exit_code == 0
@@ -1405,7 +1405,7 @@ def test_run_json_outputs_error_schema_and_exit_code(
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         raise ConfigNotFoundError(Path("missing.toml"))
 
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
     result = runner.invoke(app, ["run", "--json"])
     assert result.exit_code == int(get_exit_code(ConfigNotFoundError(Path("missing.toml"))))
@@ -1424,7 +1424,7 @@ def test_run_exit_code_maps_by_error_category_prefix_in_json_mode(
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         raise error
 
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
     result = runner.invoke(app, ["run", "--json"])
     assert result.exit_code == int(ExitCode.INPUT_ERROR)
@@ -1438,7 +1438,7 @@ def test_run_json_invalid_tm_preset_outputs_config_error_schema(
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         raise AssertionError("runner.run should not be invoked for invalid CLI choices")
 
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
     result = _invoke_run_with_minimal_workspace(["--json", "--tm-preset", "invalid"])
 
@@ -1457,7 +1457,7 @@ def test_run_json_invalid_overlay_outputs_config_error_schema(
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         raise AssertionError("runner.run should not be invoked for invalid CLI choices")
 
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
     result = _invoke_run_with_minimal_workspace(["--json", "--overlay", "invalid"])
 
@@ -1477,7 +1477,7 @@ def test_run_exit_code_is_130_on_keyboard_interrupt(monkeypatch: MonkeyPatch) ->
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         raise KeyboardInterrupt()
 
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
     result = _invoke_run_with_minimal_workspace([])
     assert result.exit_code == int(ExitCode.INTERRUPTED)
@@ -1489,7 +1489,7 @@ def test_run_no_color_error_output_has_no_rich_markup(
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         raise ConfigNotFoundError(Path("missing.toml"))
 
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
     result = _invoke_run_with_minimal_workspace(["--no-color"])
     assert result.exit_code == int(get_exit_code(ConfigNotFoundError(Path("missing.toml"))))
@@ -1503,7 +1503,7 @@ def test_run_env_no_color_error_output_has_no_rich_markup(
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         raise ConfigNotFoundError(Path("missing.toml"))
 
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
     result = _invoke_run_with_minimal_workspace(
         [],
@@ -1524,8 +1524,8 @@ def test_run_verbose_calls_configure_logging_debug(monkeypatch: MonkeyPatch) -> 
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         return RunResult(success=True)
 
-    monkeypatch.setattr("frame_compare.cli_entry.configure_logging", _configure_logging)
-    monkeypatch.setattr("frame_compare.cli_entry.runner.run", _run)
+    monkeypatch.setattr("frame_compare.cli.entry.configure_logging", _configure_logging)
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
     result = _invoke_run_with_minimal_workspace(["--verbose"])
     assert result.exit_code == 0
@@ -1547,7 +1547,7 @@ def test_import_does_not_mutate_terminal_width():
         sys.executable,
         "-c",
         "import os; "
-        "import frame_compare.cli_entry; "
+        "import frame_compare.cli.entry; "
         "assert 'TERMINAL_WIDTH' not in os.environ, 'should not set env on import'; "
         "import typer.rich_utils as tru; "
         "assert tru.MAX_WIDTH is None, 'should not set MAX_WIDTH on import'; ",

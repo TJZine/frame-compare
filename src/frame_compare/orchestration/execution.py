@@ -10,7 +10,7 @@ from pathlib import Path
 
 import httpx
 
-from frame_compare.analysis import ANALYZE_PROGRESS_TOTAL
+from frame_compare.analysis.metrics import ANALYZE_PROGRESS_TOTAL
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.phase_tasks import (

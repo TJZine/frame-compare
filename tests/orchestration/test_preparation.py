@@ -9,7 +9,7 @@ from typing import Any, cast
 
 import pytest
 
-from frame_compare.analysis import cache_io
+import frame_compare.analysis.cache_io as cache_io
 from frame_compare.errors import AudioAlignmentError, MetricsCalculationError
 from frame_compare.orchestration import preparation
 from frame_compare.orchestration.probe_cache import load_clip_probe_cache

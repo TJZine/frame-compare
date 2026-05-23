@@ -41,7 +41,7 @@ vspreview = [
 ]
 
 [project.scripts]
-frame-compare = "frame_compare.cli_entry:app"
+frame-compare = "frame_compare.cli.entry:app"
 
 [build-system]
 requires = ["hatchling"]

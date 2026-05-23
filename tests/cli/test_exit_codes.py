@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from frame_compare.cli_entry import handle_error
+from frame_compare.cli.entry import handle_error
 from frame_compare.errors import (
     ConfigNotFoundError,
     FrameExtractionError,
