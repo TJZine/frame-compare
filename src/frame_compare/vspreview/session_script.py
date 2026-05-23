@@ -71,10 +71,6 @@ def write_vspreview_session_script(
     return script_path
 
 
-# Keep legacy private alias for tests
-_generate_vspreview_script = write_vspreview_session_script
-
-
 def _resolve_bootstrap_paths(cache_dir: Path) -> list[Path]:
     """Resolve stable bootstrap import roots for generated VSPreview scripts."""
     resolved_cache_dir = cache_dir.resolve()

@@ -21,7 +21,7 @@ from frame_compare.vspreview.adapter import (
 from frame_compare.vspreview.errors import VSPreviewError
 from frame_compare.vspreview.session_script import (
     _build_script_content,
-    _generate_vspreview_script,
+    write_vspreview_session_script,
 )
 
 
@@ -201,7 +201,7 @@ core = _Core()
     cache_dir = tmp_path / "generated" / "cache"
     cache_dir.mkdir(parents=True)
 
-    script_path = _generate_vspreview_script(
+    script_path = write_vspreview_session_script(
         reference=reference,
         comparisons=[comparison],
         suggested_offsets_by_key={},
@@ -231,7 +231,7 @@ def test_generate_vspreview_script_bootstraps_nested_legacy_workspace(tmp_path: 
     (workspace_root / "config").mkdir(parents=True)
     cache_dir.mkdir(parents=True)
 
-    script_path = _generate_vspreview_script(
+    script_path = write_vspreview_session_script(
         reference=Path("ref.mkv"),
         comparisons=[Path("a.mkv")],
         suggested_offsets_by_key={},
@@ -254,7 +254,7 @@ def test_generate_vspreview_script_bootstraps_run_folder_workspace(tmp_path: Pat
     (workspace_root / "config").mkdir(parents=True)
     cache_dir.mkdir(parents=True)
 
-    script_path = _generate_vspreview_script(
+    script_path = write_vspreview_session_script(
         reference=Path("ref.mkv"),
         comparisons=[Path("a.mkv")],
         suggested_offsets_by_key={},
@@ -280,7 +280,7 @@ def test_generate_vspreview_script_uses_atomic_write(
 
     monkeypatch.setattr("frame_compare.vspreview.session_script.write_text_atomic", _fake_write)
 
-    script_path = _generate_vspreview_script(
+    script_path = write_vspreview_session_script(
         reference=Path("ref.mkv"),
         comparisons=[Path("a.mkv")],
         suggested_offsets_by_key={},
@@ -315,7 +315,7 @@ def test_generate_vspreview_script_handles_collision(
     second_path.touch()
 
     # Call the generator
-    script_path = _generate_vspreview_script(
+    script_path = write_vspreview_session_script(
         reference=Path("ref.mkv"),
         comparisons=[Path("a.mkv")],
         suggested_offsets_by_key={},
