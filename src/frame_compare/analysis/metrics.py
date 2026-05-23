@@ -16,11 +16,11 @@ from frame_compare.analysis.cache_io import (
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
 from frame_compare.errors import (
     MetricsCalculationError,
-    PluginNotFoundError,
     SourceLoadError,
 )
 from frame_compare.utils.perf import perf_span
 from frame_compare.utils.progress_protocol import ProgressReporter
+from frame_compare.vs.errors import PluginNotFoundError
 from frame_compare.vs.loader import DefaultVSLoader
 
 if TYPE_CHECKING:

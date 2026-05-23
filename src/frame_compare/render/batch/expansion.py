@@ -46,7 +46,7 @@ def validate_ffmpeg_batch_tonemap_gate(
     if renderer != "ffmpeg" or not config.color.enable_tonemap:
         return
 
-    from frame_compare.errors import TonemapRequiresVapourSynthError
+    from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 
     if any(req.probe_is_hdr is not False for req in batch_requests):
         raise TonemapRequiresVapourSynthError()

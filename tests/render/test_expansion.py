@@ -8,7 +8,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from frame_compare.config.schema import ColorConfig, ConfigSchema, OverlayMode, ScreenshotsConfig
-from frame_compare.errors import TonemapRequiresVapourSynthError
 from frame_compare.render.batch.expansion import (
     _build_overlay_config,
     _validate_batch_request_lengths,
@@ -20,6 +19,7 @@ from frame_compare.render.batch.expansion import (
     validate_ffmpeg_batch_tonemap_gate,
 )
 from frame_compare.render.types import ScreenshotBatchRequest
+from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 
 
 def test_validate_batch_request_lengths_valid() -> None:

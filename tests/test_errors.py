@@ -2,66 +2,65 @@ from pathlib import Path
 
 import pytest
 
+from frame_compare.cli.errors import (
+    ExitCode,
+    format_error_console,
+    format_error_json,
+    get_exit_code,
+)
+from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.errors import (
     AudioAlignmentError,
     CacheCorruptionError,
     CacheVersionMismatchError,
-    # Config Errors (for exit code test)
-    ConfigNotFoundError,
-    # Dependency Errors
     DirectoryNotFoundError,
     DirectoryNotWritableError,
     DoviError,
     DoviToolNotFoundError,
     EncodingError,
     ErrorContext,
-    # Helpers
-    ExitCode,
     FFmpegError,
     FFmpegNotFoundError,
     FileTooLargeError,
     FrameCompareError,
     FrameExtractionError,
-    # Internal Errors
     GenericInternalError,
     IncompatibleVideosError,
-    # Input Errors
     InsufficientFramesError,
     InvariantViolationError,
-    LibplaceboError,
     MetadataError,
     MetricsCalculationError,
-    # Network Errors
-    NetworkTimeoutError,
-    NetworkUnreachableError,
     NoVideosFoundError,
     OverlayError,
     PathEscapesRootError,
-    PluginNotFoundError,
     ProcessingOutOfMemoryError,
     ProcessingTimeoutError,
-    # Processing Errors
     PythonVersionError,
     RenderError,
     ReportError,
     SelectionError,
+    SourceLoadError,
+    TonemapError,
+    UnexpectedStateError,
+    VideoCorruptError,
+    VideoOpenError,
+)
+from frame_compare.services.errors import (
+    NetworkTimeoutError,
+    NetworkUnreachableError,
     SlowpicsError,
     SlowpicsRateLimitedError,
     SlowpicsUnavailableError,
-    SourceLoadError,
     SSLError,
     TmdbError,
     TmdbRateLimitedError,
-    TonemapError,
+)
+from frame_compare.vs.errors import (
+    LibplaceboError,
+    PluginNotFoundError,
     TonemapRequiresVapourSynthError,
-    UnexpectedStateError,
     VapourSynthError,
     VapourSynthNotFoundError,
-    VideoCorruptError,
-    VideoOpenError,
-    format_error_console,
-    format_error_json,
-    get_exit_code,
 )
 
 

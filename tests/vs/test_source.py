@@ -4,7 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from frame_compare.errors import PluginNotFoundError, SourceLoadError
+from frame_compare.errors import SourceLoadError
+from frame_compare.vs.errors import PluginNotFoundError
 from frame_compare.vs.source import apply_trim, load_source
 from frame_compare.vs.types import SourceInfo
 

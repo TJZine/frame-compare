@@ -14,15 +14,17 @@ from typer.main import get_command
 from typer.testing import CliRunner
 
 from frame_compare.cli.entry import _maybe_open_report, _stabilize_typer_help_width, app
+from frame_compare.cli.errors import (
+    ExitCode,
+    format_error_json,
+    get_exit_code,
+)
+from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.config.loader import get_default_config
 from frame_compare.config.schema import OverlayMode, ToneCurve, TonemapPreset
 from frame_compare.errors import (
-    ConfigNotFoundError,
     ErrorContext,
-    ExitCode,
     FrameCompareError,
-    format_error_json,
-    get_exit_code,
 )
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
 from frame_compare.orchestration.doctor import CheckResult, DoctorCheck, DoctorReport

@@ -20,7 +20,17 @@ import typer
 import typer.rich_utils as typer_rich_utils
 from rich.console import Console
 
+from frame_compare.cli.errors import (
+    ExitCode,
+    format_error_console,
+    format_error_json,
+    get_exit_code,
+)
 from frame_compare.cli.output import print_at_a_glance, print_result_summary
+from frame_compare.config.errors import (
+    ConfigValidationError,
+    ConfigWriteError,
+)
 from frame_compare.config.loader import get_default_config, load_config
 from frame_compare.config.overrides import apply_cli_overrides
 from frame_compare.config.presets import (
@@ -36,14 +46,8 @@ from frame_compare.config.schema import (
     Visibility,
 )
 from frame_compare.errors import (
-    ConfigValidationError,
-    ConfigWriteError,
-    ExitCode,
     FrameCompareError,
     JSONValue,
-    format_error_console,
-    format_error_json,
-    get_exit_code,
 )
 from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.utils.logging import configure_logging

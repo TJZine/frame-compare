@@ -16,8 +16,6 @@ from frame_compare.errors import (
     CacheVersionMismatchError,
     MetadataError,
     MetricsCalculationError,
-    TmdbError,
-    TmdbRateLimitedError,
 )
 from frame_compare.orchestration.context import (
     ClipFingerprint,
@@ -40,6 +38,10 @@ from frame_compare.orchestration.types import (
     RunRequest,
 )
 from frame_compare.services.alignment import CACHE_FILE_NAME, check_alignment_cached
+from frame_compare.services.errors import (
+    TmdbError,
+    TmdbRateLimitedError,
+)
 from frame_compare.services.run_folder import (
     derive_run_folder_name,
     get_existing_run_folders,

@@ -12,7 +12,7 @@ import httpx
 import structlog
 
 from frame_compare.config.schema import SlowpicsConfig, Visibility
-from frame_compare.errors import (
+from frame_compare.services.errors import (
     SlowpicsError,
     SlowpicsRateLimitedError,
     SlowpicsUnavailableError,

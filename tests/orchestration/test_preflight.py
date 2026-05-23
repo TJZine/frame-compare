@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.errors import (
-    ConfigNotFoundError,
     DirectoryNotFoundError,
     NoVideosFoundError,
 )

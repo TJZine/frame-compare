@@ -349,8 +349,8 @@ def _check_tmdb_api_key() -> CheckResult:
 
 def _resolve_tmdb_config() -> tuple[bool | None, str | None, dict[str, JSONValue] | None]:
     """Resolve TMDB enablement and credentials through the runtime config path."""
+    from frame_compare.config.errors import ConfigParseError, ConfigValidationError
     from frame_compare.config.loader import load_config
-    from frame_compare.errors import ConfigParseError, ConfigValidationError
     from frame_compare.orchestration.preflight import resolve_workspace
 
     root = resolve_workspace(None)

@@ -7,13 +7,13 @@ from unittest.mock import MagicMock
 import pytest
 
 import frame_compare.vs.env as env_module
-from frame_compare.errors import PluginNotFoundError, VapourSynthError, VapourSynthNotFoundError
 from frame_compare.vs.env import (
     detect_plugins,
     ensure_vs_environment,
     is_vapoursynth_available,
     require_plugin,
 )
+from frame_compare.vs.errors import PluginNotFoundError, VapourSynthError, VapourSynthNotFoundError
 
 
 def test_env_module_annotations_do_not_require_runtime_vapoursynth(repo_root) -> None:

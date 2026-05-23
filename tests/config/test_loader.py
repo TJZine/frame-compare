@@ -5,15 +5,15 @@ from typing import Any
 
 import pytest
 
+from frame_compare.config.errors import (
+    ConfigNotFoundError,
+    ConfigParseError,
+    ConfigValidationError,
+)
 from frame_compare.config.loader import (
     get_default_config,
     load_config,
     load_config_from_env,
-)
-from frame_compare.errors import (
-    ConfigNotFoundError,
-    ConfigParseError,
-    ConfigValidationError,
 )
 
 
@@ -140,6 +140,7 @@ def test_cli_override_takes_precedence(tmp_path: Path) -> None:
 
     assert config.analysis.frame_count == 50
 
+
 def test_load_config_none_path_with_empty_overrides_returns_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -180,9 +181,7 @@ def test_precedence_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     assert config.analysis.frame_count == 30
 
 
-def test_tmdb_api_key_legacy_alias_env_var(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_tmdb_api_key_legacy_alias_env_var(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Legacy TMDB_API_KEY alias is no longer supported."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TMDB_API_KEY", "legacy_key")
@@ -203,9 +202,7 @@ def test_tmdb_api_key_nested_var_takes_precedence(
     assert config.tmdb.api_key == "new_key"
 
 
-def test_log_level_legacy_alias_env_var(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_log_level_legacy_alias_env_var(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Legacy FRAME_COMPARE_LOG_LEVEL alias is no longer supported."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("FRAME_COMPARE_LOG_LEVEL", "DEBUG")

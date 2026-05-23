@@ -5,7 +5,8 @@ import httpx
 import pytest
 import respx
 
-from frame_compare.errors import MetadataError, TmdbError, TmdbRateLimitedError
+from frame_compare.errors import MetadataError
+from frame_compare.services.errors import TmdbError, TmdbRateLimitedError
 from frame_compare.services.metadata import lookup_tmdb, parse_filename, resolve_metadata
 from frame_compare.services.types import MetadataConfig, ParsedMetadata, TmdbMetadata
 

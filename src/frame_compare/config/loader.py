@@ -14,13 +14,13 @@ from pydantic_settings import (
     SettingsConfigDict,
 )
 
-from frame_compare.config.schema import ConfigSchema
-from frame_compare.errors import (
+from frame_compare.config.errors import (
     ConfigNotFoundError,
     ConfigParseError,
     ConfigValidationError,
-    normalize_pydantic_errors,
 )
+from frame_compare.config.schema import ConfigSchema
+from frame_compare.errors import normalize_pydantic_errors
 
 type _SettingsSourcesCustomizer = Callable[
     [

@@ -130,7 +130,7 @@ def _resolve_auto_mode_fallback(
     ffmpeg_runner: FFmpegRunner,
 ) -> None:
     """Probes HDR and resolves fallback policy when VapourSynth load fails in auto mode."""
-    from frame_compare.errors import TonemapRequiresVapourSynthError
+    from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 
     if config.color.enable_tonemap:
         # Must probe HDR status before deciding
@@ -176,7 +176,7 @@ def _validate_ffmpeg_tonemap_gate(
     ffmpeg_runner: FFmpegRunner,
 ) -> None:
     """Validates whether the tonemap gate is violated for FFmpeg renderer."""
-    from frame_compare.errors import TonemapRequiresVapourSynthError
+    from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 
     try:
         is_hdr = is_hdr_via_runner(clip_path, ffmpeg_runner)
@@ -219,9 +219,11 @@ def prepare_clip_for_render(
         RenderError: For other rendering failures
     """
     from frame_compare.errors import (
-        PluginNotFoundError,
         RenderError,
         SourceLoadError,
+    )
+    from frame_compare.vs.errors import (
+        PluginNotFoundError,
         VapourSynthNotFoundError,
     )
 
