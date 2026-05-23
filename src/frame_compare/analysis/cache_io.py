@@ -24,15 +24,7 @@ CACHE_VERSION: int = 3
 
 
 def compute_cache_key(video_paths: list[Path], config: AnalysisConfig) -> str:
-    """Generate deterministic cache key from video files and analysis config.
-
-    Args:
-        video_paths: List of paths to video files involved in comparison.
-        config: Analysis configuration settings.
-
-    Returns:
-        64-character SHA256 hex digest.
-    """
+    """Generate deterministic cache key from video files and analysis config."""
     h = hashlib.sha256()
     for p in sorted(video_paths, key=str):
         stat = p.stat()
@@ -50,15 +42,9 @@ def load_cached_metrics(
     fingerprint: str,
     clips: list[ClipIdentity],
 ) -> CacheLoadResult:
-    """Attempt to load analysis metrics from cache file.
+    """Load analysis metrics when the cache file matches the expected schema.
 
-    Args:
-        cache_dir: Directory containing the cache file.
-        fingerprint: Expected cache key fingerprint.
-        clips: Reserved for future validation; currently ignored.
-
-    Returns:
-        CacheLoadResult indicating success or failure reason.
+    The `clips` parameter is reserved for future validation; currently ignored.
     """
     cache_path = cache_dir / CACHE_FILENAME
     if not cache_path.exists():
@@ -75,7 +61,6 @@ def load_cached_metrics(
 
     data = cast(Mapping[str, object], raw_data)
 
-    # Required top-level keys
     required_keys = {"version", "fingerprint", "luminance", "motion", "metadata"}
     if not all(k in data for k in required_keys):
         return CacheLoadResult(success=False, reason="corrupted")
@@ -86,7 +71,6 @@ def load_cached_metrics(
     if data["fingerprint"] != fingerprint:
         return CacheLoadResult(success=False, reason="mismatched_inputs")
 
-    # Validate types of top-level fields
     lum_raw = data["luminance"]
     mot_raw = data["motion"]
     if not isinstance(lum_raw, list) or not isinstance(mot_raw, list):
@@ -103,12 +87,10 @@ def load_cached_metrics(
         return CacheLoadResult(success=False, reason="corrupted")
     metadata_dict = cast(Mapping[str, object], metadata_raw)
 
-    # Required metadata keys
     required_metadata_keys = {"frame_count", "fps", "config_fingerprint", "clips"}
     if not all(k in metadata_dict for k in required_metadata_keys):
         return CacheLoadResult(success=False, reason="corrupted")
 
-    # Validate types in metadata
     frame_count = metadata_dict["frame_count"]
     if not isinstance(frame_count, int) or isinstance(frame_count, bool) or frame_count < 0:
         return CacheLoadResult(success=False, reason="corrupted")
@@ -171,12 +153,7 @@ def load_cached_metrics(
 
 
 def save_metrics_cache(metrics: FrameMetrics, cache_dir: Path) -> None:
-    """Persist analysis metrics to cache file.
-
-    Args:
-        metrics: Metrics to save.
-        cache_dir: Directory to save the cache file in.
-    """
+    """Persist analysis metrics to cache file."""
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_path = cache_dir / CACHE_FILENAME
 

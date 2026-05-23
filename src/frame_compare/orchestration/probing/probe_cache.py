@@ -122,10 +122,8 @@ def compute_probe_cache_key(fingerprint: ClipFingerprint) -> str:
         "schema_version": 1,
     }
 
-    # Serialize canonically using json.dumps to ensure cross-platform determinism
     serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
-    # Generate a stable hash using blake2s
     return hashlib.blake2s(serialized.encode("utf-8")).hexdigest()
 
 
@@ -168,14 +166,12 @@ def load_clip_probe_cache(cache_path: Path) -> dict[str, ClipProbeSnapshot]:
         entry = entry_raw
 
         try:
-            # Reconstruct fingerprint (needed for snapshot)
             fingerprint = ClipFingerprint(
                 path=Path(str(entry["path"])),
                 size_bytes=_require_int(entry, "size_bytes"),
                 mtime_ns=_require_int(entry, "mtime_ns"),
             )
 
-            # Reconstruct HDR metadata if present (from nested hdr_metadata table)
             is_hdr = _require_bool(entry, "is_hdr")
             hdr_metadata: HDRMetadata | None = None
             if is_hdr:
@@ -215,12 +211,10 @@ def save_clip_probe_cache(
     """
     output: dict[str, Any] = {"version": "1"}
 
-    # Sort keys for deterministic output
     for key in sorted(entries_by_key.keys()):
         snapshot = entries_by_key[key]
         fp = snapshot.fingerprint
 
-        # Invariant check
         if snapshot.is_hdr and snapshot.hdr_metadata is None:
             raise ValueError(f"Snapshot {key} is_hdr=True but hdr_metadata is None")
 
@@ -237,7 +231,6 @@ def save_clip_probe_cache(
             "tonemap_prop_keys": list(snapshot.tonemap_prop_keys),
         }
 
-        # Sanitize preserved_frame_props (str|int|float only)
         # We perform runtime validation to ensure only TOML-safe primitives are persisted,
         # even if the in-memory type hint was bypassed.
         safe_props: dict[str, str | int | float] = {}
@@ -264,7 +257,6 @@ def save_clip_probe_cache(
                 dropped_props=dropped_props,
             )
 
-        # If HDR, include nested hdr_metadata table; otherwise, omit
         # TOML doesn't support None values, so we only include non-None fields
         if snapshot.is_hdr and snapshot.hdr_metadata:
             md = snapshot.hdr_metadata
@@ -273,7 +265,6 @@ def save_clip_probe_cache(
                 "transfer": md.transfer,
                 "matrix": md.matrix,
             }
-            # Only add optional fields if they are not None
             if md.mastering_display is not None:
                 hdr_dict["mastering_display"] = md.mastering_display
             if md.max_cll is not None:
@@ -285,7 +276,6 @@ def save_clip_probe_cache(
         output[key] = entry
 
     try:
-        # Ensure parent directories exist before writing
         cache_path.parent.mkdir(parents=True, exist_ok=True)
 
         with cache_path.open("wb") as f:

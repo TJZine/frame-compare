@@ -34,43 +34,21 @@ def create_frame_plan(
     count: int,
     seed: int | None = None,
 ) -> FramePlan:
-    """
-    Create a FramePlan with optional auto-generated seed.
-
-    Args:
-        num_frames: Total frames in video
-        count: Number of frames to select
-        seed: Optional seed; if None, uses the default seed (42)
-
-    Returns:
-        FramePlan from select_uniform_seeded_frames()
-    """
+    """Create a FramePlan with the default seed when none is provided."""
     if seed is None:
         seed = 42
     return select_uniform_seeded_frames(num_frames, count, seed)
 
 
 def _select_from_bin(bin_start: int, bin_end: int, seed: int, bin_index: int) -> int:
-    """Select one frame from a bin using blake2s hash.
-
-    Args:
-        bin_start: Inclusive start of bin
-        bin_end: Exclusive end of bin
-        seed: User-provided seed integer
-        bin_index: Index of this bin (0-based)
-
-    Returns:
-        Frame index in [bin_start, bin_end)
-    """
+    """Select one frame from a bin using blake2s hash."""
     bin_size = bin_end - bin_start
     if bin_size <= 0:
         raise ValueError("Empty bin")
 
-    # Create deterministic hash from seed + bin index
     hash_input = f"{seed}:{bin_index}".encode()
     digest = hashlib.blake2s(hash_input, digest_size=8).digest()
 
-    # Convert to integer and map to bin range
     hash_int = int.from_bytes(digest, "little")
     offset = hash_int % bin_size
 
@@ -83,7 +61,6 @@ def select_uniform_seeded_frames(
     seed: int,
 ) -> FramePlan:
     """Select frames using deterministic uniform distribution."""
-    # Validate
     if num_frames < 0:
         raise ValueError("num_frames must be >= 0")
     if count < 0:
@@ -103,7 +80,6 @@ def select_uniform_seeded_frames(
             seed=seed,
         )
 
-    # Calculate bins
     bin_size = num_frames / count
     frames: list[int] = []
 

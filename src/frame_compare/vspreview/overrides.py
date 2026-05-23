@@ -42,15 +42,7 @@ class ManualOverride:
 
 
 def load_manual_overrides(cache_dir: Path) -> dict[str, ManualOverride]:
-    """Load persisted manual overrides from cache.
-
-    Args:
-        cache_dir: Directory containing manual_overrides.toml
-
-    Returns:
-        Dict mapping "{ref_stem}:{comp_stem}" -> ManualOverride
-        Empty dict if file does not exist, has parse errors, or version mismatch
-    """
+    """Load valid persisted manual overrides from cache."""
     cache_path = cache_dir / MANUAL_OVERRIDES_FILE
 
     try:
@@ -73,7 +65,6 @@ def load_manual_overrides(cache_dir: Path) -> dict[str, ManualOverride]:
         )
         return {}
 
-    # Check version
     version = data.get("version")
     if version != MANUAL_OVERRIDES_VERSION:
         log.warning(
@@ -99,7 +90,6 @@ def load_manual_overrides(cache_dir: Path) -> dict[str, ManualOverride]:
             ts = typed_entry.get("timestamp")
             conf = typed_entry.get("confirmed", True)
 
-            # Strict isinstance checks
             if not isinstance(ref_clip, str):
                 raise TypeError("reference_clip must be str")
             if not isinstance(comp_clip, str):
@@ -126,24 +116,12 @@ def load_manual_overrides(cache_dir: Path) -> dict[str, ManualOverride]:
                 key=key,
                 error=str(e),
             )
-            # Skip invalid entries, continue with others
 
     return result
 
 
 def save_manual_override(cache_dir: Path, override: ManualOverride) -> None:
-    """Persist a manual override to cache.
-
-    Args:
-        cache_dir: Directory for manual_overrides.toml
-        override: Override to save
-
-    Behavior:
-        - Creates file if not exists
-        - Merges with existing overrides
-        - Overwrites existing entry for same key
-        - Writes with stable ordering (version first, then sorted keys)
-    """
+    """Persist one manual override, merging with valid existing entries."""
     try:
         cache_dir.mkdir(parents=True, exist_ok=True)
     except OSError as e:
@@ -156,7 +134,6 @@ def save_manual_override(cache_dir: Path, override: ManualOverride) -> None:
 
     cache_path = cache_dir / MANUAL_OVERRIDES_FILE
 
-    # Load existing data
     data: dict[str, object] = {"version": MANUAL_OVERRIDES_VERSION}
     try:
         cache_exists = cache_path.exists()
@@ -171,7 +148,6 @@ def save_manual_override(cache_dir: Path, override: ManualOverride) -> None:
         try:
             with cache_path.open("rb") as f:
                 existing = tomllib.load(f)
-                # Only merge if version matches
                 if existing.get("version") == MANUAL_OVERRIDES_VERSION:
                     data.update(existing)
         except OSError as e:
@@ -181,13 +157,11 @@ def save_manual_override(cache_dir: Path, override: ManualOverride) -> None:
                 error=str(e),
             )
         except tomllib.TOMLDecodeError:
-            # If corrupt, we'll just overwrite
             log.warning(
                 "manual_overrides_corrupt_on_write",
                 path=str(cache_path),
             )
 
-    # Build key and entry
     key = f"{override.reference_clip}:{override.comparison_clip}"
     entry = {
         "reference_clip": override.reference_clip,
@@ -198,7 +172,6 @@ def save_manual_override(cache_dir: Path, override: ManualOverride) -> None:
     }
     data[key] = entry
 
-    # Write with stable ordering: version first, then sorted entry keys
     ordered: dict[str, object] = {"version": MANUAL_OVERRIDES_VERSION}
     for k in sorted(key for key in data if key != "version"):
         ordered[k] = data[k]
