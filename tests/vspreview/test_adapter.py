@@ -17,9 +17,11 @@ from frame_compare.vspreview.adapter import (
     VSPreviewAvailability,
     VSPreviewAvailabilityStatus,
     VSPreviewConfig,
+    launch_alignment_verification_session,
+)
+from frame_compare.vspreview.session_script import (
     _build_script_content,
     _generate_vspreview_script,
-    launch_alignment_verification_session,
 )
 
 
@@ -205,7 +207,7 @@ def test_generate_vspreview_script_uses_atomic_write(
         calls.append(path)
         path.write_text(content, encoding=encoding)
 
-    monkeypatch.setattr("frame_compare.vspreview.adapter.write_text_atomic", _fake_write)
+    monkeypatch.setattr("frame_compare.vspreview.session_script.write_text_atomic", _fake_write)
 
     script_path = _generate_vspreview_script(
         reference=Path("ref.mkv"),
@@ -229,7 +231,7 @@ def test_generate_vspreview_script_handles_collision(
         def now(cls, tz=None):
             return datetime(2026, 5, 20, 19, 45, 0, tzinfo=tz)
 
-    monkeypatch.setattr("frame_compare.vspreview.adapter.datetime", MockDatetime)
+    monkeypatch.setattr("frame_compare.vspreview.session_script.datetime", MockDatetime)
 
     timestamp = "20260520T194500Z"
     sessions_dir = tmp_path / "vspreview_sessions"
