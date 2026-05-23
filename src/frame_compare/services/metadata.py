@@ -1,14 +1,14 @@
 """Filename parsing and TMDB lookup service."""
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, cast
 
 import anitopy
 import httpx
 import structlog
-from guessit import guessit  # type: ignore
+from guessit import guessit
 
 from frame_compare.services.errors import MetadataError, TmdbError, TmdbRateLimitedError
 from frame_compare.services.types import MetadataConfig, ParsedMetadata, TmdbMetadata
@@ -16,6 +16,8 @@ from frame_compare.services.types import MetadataConfig, ParsedMetadata, TmdbMet
 TMDB_API_URL = "https://api.themoviedb.org/3/search/multi"
 TMDB_KEY_REGEX = re.compile(r"^[0-9a-fA-F]{32}$")
 log = structlog.get_logger()
+
+type FilenameMetadataParser = Callable[[str], dict[str, object]]
 
 
 def is_valid_tmdb_api_key(api_key: str) -> bool:
@@ -70,23 +72,27 @@ def parse_filename(filename: str) -> ParsedMetadata:
             error=str(exc),
         )
 
+    def _normalize_parser_result(result: object) -> dict[str, object]:
+        if not isinstance(result, Mapping):
+            return {}
+        parser_mapping = cast(Mapping[object, object], result)
+        return {key: value for key, value in parser_mapping.items() if isinstance(key, str)}
+
     def _apply_anitopy(name: str) -> dict[str, object]:
         try:
-            result = anitopy.parse(name)  # type: ignore
-            return cast(dict[str, object], result) if isinstance(result, dict) else {}
+            return _normalize_parser_result(anitopy.parse(name))
         except Exception as exc:
             _log_parser_exception("anitopy", name, exc)
             return {}
 
     def _apply_guessit(name: str) -> dict[str, object]:
         try:
-            result = guessit(name)  # type: ignore
-            return dict(cast(dict[str, object], result)) if result else {}
+            return _normalize_parser_result(guessit(name))
         except Exception as exc:
             _log_parser_exception("guessit", name, exc)
             return {}
 
-    parsers = [
+    parsers: list[FilenameMetadataParser] = [
         (_apply_anitopy if use_anitopy_first else _apply_guessit),
         (_apply_guessit if use_anitopy_first else _apply_anitopy),
     ]

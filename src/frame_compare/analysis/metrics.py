@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import numpy as np
+import numpy.typing as npt
 import structlog
 
 from frame_compare.analysis.cache_io import (
@@ -25,7 +26,7 @@ from frame_compare.vs.loader import DefaultVSLoader
 if TYPE_CHECKING:
     from pathlib import Path
 
-    import vapoursynth as vs  # type: ignore
+    import vapoursynth as vs
 
     from frame_compare.config.schema import AnalysisConfig
     from frame_compare.vs.loader import VSLoader
@@ -39,6 +40,10 @@ log = structlog.get_logger()
 # - `calculate_metrics()` advances the remaining steps (total - 1) on cache hit,
 #   and advances twice (after luminance + after cache-save attempt) on cache miss.
 ANALYZE_PROGRESS_TOTAL = 3
+
+
+def _y_plane_array(frame: vs.VideoFrame) -> npt.NDArray[np.generic]:
+    return np.asarray(frame[0])
 
 
 def calculate_metrics(
@@ -106,7 +111,7 @@ def calculate_metrics(
     if clip.num_frames == 0:
         raise MetricsCalculationError("Reference clip has 0 frames")
 
-    total_frames = int(clip.num_frames)  # type: ignore[arg-type]
+    total_frames = clip.num_frames
     with perf_span("analysis.calculate_metrics", frames=total_frames):
         luminance = _calculate_luminance(clip, reporter)
         if reporter:
@@ -157,32 +162,32 @@ def _calculate_luminance(
     Returns:
         List of per-frame luminance values (0.0-1.0)
     """
-    import vapoursynth as vs  # type: ignore
+    import vapoursynth as vs
 
     if clip.num_frames == 0:
         raise MetricsCalculationError("Empty clip")
 
-    total_frames = int(clip.num_frames)  # type: ignore[arg-type]
+    total_frames = clip.num_frames
     with perf_span("analysis.luminance", frames=total_frames):
         # Format handling: convert to YUV if needed
-        if clip.format.color_family != vs.YUV:  # type: ignore
-            clip = clip.resize.Bicubic(format=vs.YUV420P8)  # type: ignore
+        if clip.format.color_family != vs.YUV:
+            clip = clip.resize.Bicubic(format=vs.YUV420P8)
 
         max_value: float = (
             1.0
-            if clip.format.sample_type == vs.FLOAT  # type: ignore
-            else float((1 << clip.format.bits_per_sample) - 1)  # type: ignore
+            if clip.format.sample_type == vs.FLOAT
+            else float((1 << clip.format.bits_per_sample) - 1)
         )
 
         if reporter:
-            reporter.start_phase("Calculating luminance", clip.num_frames)  # type: ignore
+            reporter.start_phase("Calculating luminance", clip.num_frames)
 
         luminance: list[float] = []
         try:
-            for n in range(clip.num_frames):  # type: ignore
-                frame = clip.get_frame(n)  # type: ignore
-                arr = np.asarray(frame[0])  # type: ignore
-                mean_val = float(np.mean(arr))  # type: ignore
+            for n in range(clip.num_frames):
+                frame = clip.get_frame(n)
+                arr = _y_plane_array(frame)
+                mean_val = float(arr.mean())
                 luminance.append(mean_val / max_value)
                 if reporter:
                     reporter.advance(1)
@@ -212,37 +217,37 @@ def _calculate_motion(
     Returns:
         List of per-frame motion scores (0.0-1.0)
     """
-    import vapoursynth as vs  # type: ignore
+    import vapoursynth as vs
 
     if clip.num_frames == 0:
         raise MetricsCalculationError("Empty clip")
 
-    total_frames = int(clip.num_frames)  # type: ignore[arg-type]
+    total_frames = clip.num_frames
     with perf_span("analysis.motion", frames=total_frames):
         # Format handling: convert to YUV if needed
-        if clip.format.color_family != vs.YUV:  # type: ignore
-            clip = clip.resize.Bicubic(format=vs.YUV420P8)  # type: ignore
+        if clip.format.color_family != vs.YUV:
+            clip = clip.resize.Bicubic(format=vs.YUV420P8)
 
-        width, height = clip.width, clip.height  # type: ignore
+        width, height = clip.width, clip.height
         max_value: float = (
             1.0
-            if clip.format.sample_type == vs.FLOAT  # type: ignore
-            else float((1 << clip.format.bits_per_sample) - 1)  # type: ignore
+            if clip.format.sample_type == vs.FLOAT
+            else float((1 << clip.format.bits_per_sample) - 1)
         )
-        norm_factor = float(width * height) * max_value  # type: ignore
+        norm_factor = float(width * height) * max_value
 
         if reporter:
             reporter.start_phase("Calculating motion", max(1, total_frames - 1))
 
-        motion = [0.0] * clip.num_frames  # type: ignore
+        motion = [0.0] * clip.num_frames
         try:
-            for n in range(1, clip.num_frames):  # type: ignore
-                prev_frame = clip.get_frame(n - 1)  # type: ignore
-                curr_frame = clip.get_frame(n)  # type: ignore
-                prev_arr = np.asarray(prev_frame[0]).astype(np.float32)  # type: ignore
-                curr_arr = np.asarray(curr_frame[0]).astype(np.float32)  # type: ignore
+            for n in range(1, clip.num_frames):
+                prev_frame = clip.get_frame(n - 1)
+                curr_frame = clip.get_frame(n)
+                prev_arr = _y_plane_array(prev_frame).astype(np.float32)
+                curr_arr = _y_plane_array(curr_frame).astype(np.float32)
                 diff = np.abs(curr_arr - prev_arr)
-                motion[n] = float(np.sum(diff)) / norm_factor  # type: ignore
+                motion[n] = float(np.sum(diff)) / norm_factor
                 if reporter:
                     reporter.advance(1)
         except Exception as e:
@@ -252,4 +257,4 @@ def _calculate_motion(
             if reporter:
                 reporter.complete_phase()
 
-        return motion  # type: ignore
+        return motion

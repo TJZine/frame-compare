@@ -1,0 +1,3 @@
+from collections.abc import Mapping
+
+def parse(filename: str, options: object = ...) -> Mapping[str, object] | None: ...

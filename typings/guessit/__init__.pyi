@@ -1,0 +1,3 @@
+from collections.abc import Mapping
+
+def guessit(string: str, options: object = ...) -> Mapping[str, object]: ...

@@ -163,7 +163,7 @@ def _resolve_matrix_in_s(clip: vs.VideoNode) -> str:
     """
     # Read canonical color props from frame 0. VapourSynth usually caches hot frames,
     # so this metadata probe is typically low overhead relative to full rendering.
-    props = cast(dict[str, object], dict(clip.get_frame(0).props))
+    props = dict(clip.get_frame(0).props)
     matrix_prop = props.get("_Matrix")
     if isinstance(matrix_prop, int):
         mapped = _MATRIX_TO_ZIMG.get(matrix_prop)
