@@ -125,6 +125,13 @@ def test_windows_portable_bundle_launcher_sets_cwd_to_bundle_root(repo_root: Pat
     assert "Pop-Location" in build_script
 
 
+def test_windows_portable_bundle_launcher_uses_cli_package_entry(repo_root: Path) -> None:
+    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
+    build_script = _read_text_or_fail(build_path)
+    assert "& $python -m frame_compare.cli.entry @args" in build_script
+    assert "frame_compare.cli_entry" not in build_script
+
+
 def test_windows_portable_shim_injects_state_config_when_missing_explicit_config(
     repo_root: Path,
 ) -> None:
