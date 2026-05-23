@@ -255,8 +255,7 @@ class TestCheckVSPreview:
 
         assert result.passed is True
         assert "probe failed" in result.message
-        assert result.details["exception_type"] == "RuntimeError"
-        assert result.details["exception"] == "broken import metadata"
+        assert result.details == {"exception_type": "RuntimeError"}
 
 
 class TestCheckSlowpics:

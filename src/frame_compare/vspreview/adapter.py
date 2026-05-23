@@ -46,6 +46,33 @@ class VSPreviewAvailability:
     def is_available(self) -> bool:
         return self.status == VSPreviewAvailabilityStatus.AVAILABLE
 
+    def public_probe_failure_details(self) -> dict[str, str]:
+        """Return a redacted probe-failure payload safe for public diagnostics."""
+        if self.status != VSPreviewAvailabilityStatus.PROBE_FAILED or not self.error_details:
+            return {}
+
+        exception_type = self.error_details.get("exception_type")
+        if not exception_type:
+            return {}
+
+        return {"exception_type": exception_type}
+
+    def public_probe_failure_status(self) -> str:
+        """Return a short probe-failure status string safe for CLI summaries."""
+        details = self.public_probe_failure_details()
+        exception_type = details.get("exception_type")
+        if exception_type is None:
+            return "probe failed"
+        return f"probe failed ({exception_type})"
+
+    def public_probe_failure_reason(self) -> str:
+        """Return a probe-failure reason suitable for user-facing errors."""
+        details = self.public_probe_failure_details()
+        exception_type = details.get("exception_type")
+        if exception_type is None:
+            return "availability probe failed"
+        return f"availability probe failed ({exception_type})"
+
 
 def check_vspreview_availability() -> VSPreviewAvailability:
     """Check if VSPreview is available, returning a structured availability report.
@@ -141,10 +168,7 @@ def launch_alignment_verification_session(
     availability = check_vspreview_availability()
     if not availability.is_available:
         if availability.status == VSPreviewAvailabilityStatus.PROBE_FAILED:
-            err_msg = availability.message
-            if availability.error_details:
-                err_msg += f" ({availability.error_details.get('exception_type')}: {availability.error_details.get('exception')})"
-            raise VSPreviewError(err_msg)
+            raise VSPreviewError(availability.public_probe_failure_reason())
         else:
             raise VSPreviewNotFoundError()
 
@@ -164,27 +188,34 @@ def launch_alignment_verification_session(
         )
 
         if result.returncode != 0:
-            # Emit warning telemetry before surfacing a launch failure.
+            public_reason = f"launch exited with code {result.returncode}"
             log.warning(
-                "vspreview_non_zero_exit",
+                "vspreview_launch_failed",
+                reason=public_reason,
+                returncode=result.returncode,
+                hint="Re-run with verbose mode to capture full output",
+            )
+            log.debug(
+                "vspreview_launch_failed_debug",
                 returncode=result.returncode,
                 stderr=result.stderr[:500] if result.stderr else None,
                 stdout=result.stdout[:500] if result.stdout else None,
-                hint="Re-run with verbose mode to capture full output",
             )
-            raise VSPreviewError(
-                f"VSPreview exited with code {result.returncode}: "
-                f"{result.stderr[:200] if result.stderr else 'no stderr'}"
-            )
+            raise VSPreviewError(public_reason)
 
     except subprocess.TimeoutExpired as e:
-        raise VSPreviewError(f"VSPreview timed out after {config.timeout_seconds}s") from e
+        raise VSPreviewError(f"launch timed out after {config.timeout_seconds}s") from e
     except FileNotFoundError as e:
-        raise VSPreviewError(f"Failed to launch VSPreview: {e}") from e
+        raise VSPreviewError("launcher command was not found") from e
     except Exception as e:
         if isinstance(e, (VSPreviewError, VSPreviewNotFoundError)):
             raise
-        raise VSPreviewError(f"Unexpected error launching VSPreview: {e}") from e
+        log.debug(
+            "vspreview_launch_unexpected_debug",
+            exception_type=type(e).__name__,
+            error=str(e),
+        )
+        raise VSPreviewError(f"unexpected launch error ({type(e).__name__})") from e
 
     return script_path
 

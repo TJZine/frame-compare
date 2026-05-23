@@ -138,7 +138,8 @@ def test_at_a_glance_prints_vspreview_probe_failure(monkeypatch: MonkeyPatch) ->
     output = _render(console)
     assert "audio_alignment.force_interactive" in output
     assert "vspreview.available" in output
-    assert "probe failed (RuntimeError: display unavailable)" in output
+    assert "probe failed (RuntimeError)" in output
+    assert "display unavailable" not in output
 
 
 def test_result_summary_quiet_mode_prints_only_screenshot_path_when_available() -> None:

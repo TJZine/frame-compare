@@ -246,9 +246,7 @@ def _check_vspreview() -> CheckResult:
             passed=True,
             message=availability.message,
             hint=availability.hint,
-            details=cast(dict[str, JSONValue], availability.error_details)
-            if availability.error_details
-            else {},
+            details=cast(dict[str, JSONValue], availability.public_probe_failure_details()),
         )
 
     return CheckResult(

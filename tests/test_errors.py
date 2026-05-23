@@ -155,6 +155,31 @@ def test_insufficient_frames_error_details_shape():
     assert details["required"] == required
 
 
+def test_network_timeout_error_redacts_sensitive_url_components() -> None:
+    error = NetworkTimeoutError(
+        "https://user:secret@example.com/path/to/api?token=abc123#fragment",
+        7.5,
+    )
+
+    assert "secret" not in error.context.message
+    assert "abc123" not in error.context.message
+    assert "fragment" not in error.context.message
+    assert "https://example.com/path/to/api" in error.context.message
+
+    details = error.context.details
+    assert details == {
+        "url": "https://example.com/path/to/api",
+        "timeout": 7.5,
+    }
+
+
+def test_vspreview_error_omits_public_details() -> None:
+    error = VSPreviewError("launch exited with code 3")
+
+    assert error.context.message == "VSPreview failed: launch exited with code 3"
+    assert error.context.details is None
+
+
 def test_exit_code_enum_values():
     assert ExitCode.SUCCESS == 0
     assert ExitCode.GENERAL_ERROR == 1

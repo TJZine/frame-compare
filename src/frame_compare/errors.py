@@ -5,12 +5,27 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
+from urllib.parse import urlsplit, urlunsplit
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
 type JSONValue = str | int | float | bool | None | list["JSONValue"] | dict[str, "JSONValue"]
 type ErrorDetails = dict[str, JSONValue]
+
+
+def redact_url_for_error(url: str) -> str:
+    """Remove sensitive URL components before exposing them in public errors."""
+    parts = urlsplit(url)
+    host = parts.hostname
+    if host is None:
+        return urlunsplit((parts.scheme, "", parts.path, "", ""))
+
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+
+    netloc = host if parts.port is None else f"{host}:{parts.port}"
+    return urlunsplit((parts.scheme, netloc, parts.path, "", ""))
 
 
 def normalize_pydantic_errors(

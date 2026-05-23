@@ -307,7 +307,8 @@ def test_run_at_a_glance_prints_vspreview_probe_failure(
     output = _normalize_cli_output(result.stdout)
     assert "audio_alignment.force_interactive" in output
     assert "vspreview.available" in output
-    assert "probe failed (RuntimeError: no display)" in output
+    assert "probe failed (RuntimeError)" in output
+    assert "no display" not in output
 
 
 def test_run_result_summary_prints_status_and_truncated_warnings(

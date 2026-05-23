@@ -1071,8 +1071,8 @@ def test_align_clips_optional_vspreview_probe_failure_generates_script_without_l
     mock_warn.assert_called_once()
     warn_args, warn_kwargs = mock_warn.call_args
     assert warn_args == ("vspreview_availability_probe_failed",)
+    assert warn_kwargs["reason"] == "availability probe failed (RuntimeError)"
     assert warn_kwargs["exception_type"] == "RuntimeError"
-    assert warn_kwargs["error"] == "broken import metadata"
     mock_launch.assert_called_once()
     _, launch_kwargs = mock_launch.call_args
     assert launch_kwargs["config"].enabled is False
@@ -1172,7 +1172,7 @@ def test_align_clips_force_interactive_probe_failure_raises_alignment_error(
         force_interactive=True,
         cache_results=True,
     )
-    with pytest.raises(AudioAlignmentError, match="availability check failed"):
+    with pytest.raises(AudioAlignmentError, match=r"availability probe failed \(RuntimeError\)"):
         align_clips(ref, [comp], config, tmp_path)
 
     mock_launch.assert_not_called()
@@ -1212,7 +1212,7 @@ def test_align_clips_vspreview_errors_are_warning_only_when_not_forced(
         status=VSPreviewAvailabilityStatus.AVAILABLE,
         message="available",
     )
-    mock_launch.side_effect = VSPreviewError("adapter failure")
+    mock_launch.side_effect = VSPreviewError("launch exited with code 7")
 
     config = AlignmentConfig(enable=True, use_vspreview=True, cache_results=True)
     results = align_clips(ref, [comp], config, tmp_path)
@@ -1221,7 +1221,8 @@ def test_align_clips_vspreview_errors_are_warning_only_when_not_forced(
     assert results[0].frame_offset == 1
     mock_warn.assert_called_once()
     _, kwargs = mock_warn.call_args
-    assert "adapter failure" in kwargs["error"]
+    assert kwargs["reason"] == "VSPreview failed: launch exited with code 7"
+    assert kwargs["code"] == "FC-4019"
     assert kwargs["force_interactive"] is False
 
 
@@ -1257,7 +1258,7 @@ def test_align_clips_vspreview_errors_raise_when_force_interactive(
         status=VSPreviewAvailabilityStatus.AVAILABLE,
         message="available",
     )
-    mock_launch.side_effect = VSPreviewError("adapter failure")
+    mock_launch.side_effect = VSPreviewError("launch exited with code 7")
 
     config = AlignmentConfig(
         enable=True,
@@ -1265,5 +1266,5 @@ def test_align_clips_vspreview_errors_raise_when_force_interactive(
         force_interactive=True,
         cache_results=True,
     )
-    with pytest.raises(VSPreviewError, match="adapter failure"):
+    with pytest.raises(VSPreviewError, match="launch exited with code 7"):
         align_clips(ref, [comp], config, tmp_path)

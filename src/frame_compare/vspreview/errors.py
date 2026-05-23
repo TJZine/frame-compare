@@ -20,13 +20,12 @@ class VSPreviewNotFoundError(DependencyError):
 class VSPreviewError(ProcessingError):
     """VSPreview failed to launch or run (FC-4019)."""
 
-    def __init__(self, details: str) -> None:
+    def __init__(self, reason: str) -> None:
         super().__init__(
             ErrorContext(
                 code="FC-4019",
                 name="VSPREVIEW_ERROR",
-                message=f"VSPreview error: {details}",
+                message=f"VSPreview failed: {reason}",
                 hint="Install a Qt backend (PySide6/PyQt5) and ensure a GUI backend is available",
-                details={"error": details},
             )
         )

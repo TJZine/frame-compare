@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from frame_compare.errors import ErrorContext, NetworkError, ProcessingError
+from frame_compare.errors import (
+    ErrorContext,
+    NetworkError,
+    ProcessingError,
+    redact_url_for_error,
+)
 
 
 class MetadataError(ProcessingError):
@@ -140,13 +145,14 @@ class NetworkTimeoutError(NetworkError):
     """Request timed out (FC-5007)."""
 
     def __init__(self, url: str, timeout: float) -> None:
+        redacted_url = redact_url_for_error(url)
         super().__init__(
             ErrorContext(
                 code="FC-5007",
                 name="NETWORK_TIMEOUT",
-                message=f"Request to {url} timed out after {timeout}s",
+                message=f"Request to {redacted_url} timed out after {timeout}s",
                 hint="Check connection speed",
-                details={"url": url, "timeout": timeout},
+                details={"url": redacted_url, "timeout": timeout},
             )
         )
 

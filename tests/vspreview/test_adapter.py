@@ -58,6 +58,77 @@ def test_launch_alignment_verification_session_respects_timeout(
         )
 
 
+def test_launch_alignment_verification_session_redacts_probe_failure_details(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.check_vspreview_availability",
+        lambda: VSPreviewAvailability(
+            status=VSPreviewAvailabilityStatus.PROBE_FAILED,
+            message="VSPreview availability probe failed",
+            error_details={
+                "exception_type": "RuntimeError",
+                "exception": "secret token at /tmp/private.log",
+            },
+        ),
+    )
+
+    cfg = VSPreviewConfig(enabled=True)
+
+    with pytest.raises(VSPreviewError) as excinfo:
+        launch_alignment_verification_session(
+            reference=Path("ref.mkv"),
+            comparisons=[Path("a.mkv")],
+            suggested_offsets_by_key={},
+            cache_dir=tmp_path,
+            config=cfg,
+        )
+
+    assert "availability probe failed (RuntimeError)" in str(excinfo.value)
+    assert "secret token" not in str(excinfo.value)
+    assert "/tmp/private.log" not in str(excinfo.value)
+
+
+def test_launch_alignment_verification_session_redacts_non_zero_exit_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.check_vspreview_availability",
+        lambda: VSPreviewAvailability(
+            status=VSPreviewAvailabilityStatus.AVAILABLE,
+            message="available",
+        ),
+    )
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter._resolve_launch_command",
+        lambda script_path: ["vspreview", str(script_path)],
+    )
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.subprocess.run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            ["vspreview"],
+            7,
+            stdout="stdout secret",
+            stderr="stderr secret at /tmp/private.log",
+        ),
+    )
+
+    cfg = VSPreviewConfig(enabled=True, timeout_seconds=1.0)
+
+    with pytest.raises(VSPreviewError) as excinfo:
+        launch_alignment_verification_session(
+            reference=Path("ref.mkv"),
+            comparisons=[Path("a.mkv")],
+            suggested_offsets_by_key={},
+            cache_dir=tmp_path,
+            config=cfg,
+        )
+
+    assert "launch exited with code 7" in str(excinfo.value)
+    assert "stderr secret" not in str(excinfo.value)
+    assert "/tmp/private.log" not in str(excinfo.value)
+
+
 def test_build_script_content_escapes_path_literals() -> None:
     """Generated script should remain valid Python for hostile filenames."""
     reference = Path('/tmp/ref"x.mkv')

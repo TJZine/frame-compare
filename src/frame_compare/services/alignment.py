@@ -79,10 +79,10 @@ def _maybe_launch_vspreview(
 
     if config.force_interactive and not availability.is_available:
         if availability.status == VSPreviewAvailabilityStatus.PROBE_FAILED:
-            err_msg = "Interactive alignment requested but VSPreview availability check failed."
-            if availability.error_details:
-                err_msg += f" ({availability.error_details.get('exception_type')}: {availability.error_details.get('exception')})"
-            raise AudioAlignmentError(err_msg)
+            raise AudioAlignmentError(
+                "Interactive alignment requested but "
+                f"VSPreview {availability.public_probe_failure_reason()}."
+            )
         else:
             raise AudioAlignmentError(
                 "Interactive alignment requested but VSPreview is not available."
@@ -90,18 +90,20 @@ def _maybe_launch_vspreview(
 
     if not availability.is_available:
         if availability.status == VSPreviewAvailabilityStatus.PROBE_FAILED:
+            public_details = availability.public_probe_failure_details()
             log.warning(
                 "vspreview_availability_probe_failed",
-                error=availability.error_details.get("exception")
-                if availability.error_details
-                else "unknown error",
-                exception_type=availability.error_details.get("exception_type")
-                if availability.error_details
-                else "Exception",
+                reason=availability.public_probe_failure_reason(),
+                exception_type=public_details.get("exception_type"),
                 hint=availability.hint,
                 use_vspreview=config.use_vspreview,
                 force_interactive=config.force_interactive,
             )
+            if availability.error_details:
+                log.debug(
+                    "vspreview_availability_probe_failed_debug",
+                    error_details=availability.error_details,
+                )
         elif config.use_vspreview and not config.force_interactive:
             log.warning(
                 "vspreview_unavailable",
@@ -143,7 +145,8 @@ def _maybe_launch_vspreview(
             raise
         log.warning(
             "vspreview_optional_launch_failed",
-            error=str(exc),
+            reason=exc.context.message,
+            code=exc.code,
             force_interactive=config.force_interactive,
             use_vspreview=config.use_vspreview,
         )
