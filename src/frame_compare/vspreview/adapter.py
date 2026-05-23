@@ -122,35 +122,7 @@ def launch_alignment_verification_session(
     cache_dir: Path,
     config: VSPreviewConfig,
 ) -> Path:
-    """Launch a single VSPreview session for the full comparison set.
-
-    Behavior:
-    1. Generate a self-contained Python script that loads the reference clip
-       and all comparisons.
-    2. Apply FPS harmonization so that all clips scrub at the reference FPS.
-    3. Overlay labels + suggested offsets per clip.
-    4. Launch VSPreview via `vspreview {script}` or
-       `{sys.executable} -m vspreview {script}`.
-    5. Return the on-disk script path for debugging/replay.
-    6. If `config.enabled` is False, generate and persist the script but do NOT
-       launch VSPreview and do NOT raise any errors.
-
-    Args:
-        reference: Path to reference video
-        comparisons: Paths to comparison videos
-        suggested_offsets_by_key: Signed relative offsets keyed by
-            "{ref_stem}:{comp_stem}"
-        cache_dir: Directory used for generated artifacts
-        config: VSPreview configuration
-
-    Returns:
-        Path to the generated script on disk
-
-    Raises:
-        VSPreviewNotFoundError: If vspreview is not available when config.enabled
-            is True and launch is attempted
-        VSPreviewError: If launch fails after vspreview is available
-    """
+    """Generate and optionally launch a VSPreview session script."""
     script_path = _generate_vspreview_script(
         reference=reference,
         comparisons=comparisons,
@@ -266,7 +238,6 @@ def _generate_vspreview_script(
 
     bootstrap_paths = _resolve_bootstrap_paths(cache_dir)
 
-    # Build script content
     script_content = _build_script_content(
         reference=reference,
         comparisons=comparisons,
@@ -274,7 +245,6 @@ def _generate_vspreview_script(
         bootstrap_paths=bootstrap_paths,
     )
 
-    # Generate UTC timestamp for filename only
     base_timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
     script_path = None
@@ -337,7 +307,6 @@ def _find_project_root(cache_dir: Path, workspace_root: Path) -> Path:
 
 
 def _build_script_header() -> str:
-    """Build the script header with docstring and imports."""
     return '''\
 #!/usr/bin/env python3
 """VSPreview alignment verification session.
@@ -357,7 +326,6 @@ from pathlib import Path
 
 
 def _build_bootstrap_section(bootstrap_paths: list[Path]) -> str:
-    """Build the sys.path bootstrap section of the script."""
     bootstrap_path_lines = ",\n".join(f"    {json.dumps(str(path))}" for path in bootstrap_paths)
     return f"""\
 # ─── sys.path Bootstrap ───────────────────────────────────────────────────────
@@ -374,7 +342,6 @@ for _raw_path in _BOOTSTRAP_PATHS:
 
 
 def _build_helpers_section() -> str:
-    """Build the static printing and loader helper functions."""
     return '''\
 # ─── Safe Print Helper ────────────────────────────────────────────────────────
 try:
@@ -385,7 +352,6 @@ except Exception:
 
 
 def safe_print(*args, **kwargs):
-    """Print with unicode safety."""
     try:
         print(*args, **kwargs)
     except UnicodeEncodeError:
@@ -409,19 +375,15 @@ def _build_clip_data_section(
     comparisons: list[Path],
     suggested_offsets_by_key: dict[str, int],
 ) -> str:
-    """Build the dynamic clip data payload variables."""
-    # Build targets dict with stable ordering (sorted by comparison path stem)
     targets_lines: list[str] = []
     for comp in sorted(comparisons, key=lambda p: p.stem):
         targets_lines.append(f"    {json.dumps(comp.stem)}: {json.dumps(str(comp))},")
 
-    # Build suggested offsets with stable ordering
     offset_lines: list[str] = []
     for key in sorted(suggested_offsets_by_key.keys()):
         offset = suggested_offsets_by_key[key]
         offset_lines.append(f"    {json.dumps(key)}: {int(offset)},")
 
-    # Build per-label offset map for operator convenience
     offset_map_lines: list[str] = []
     for comp in sorted(comparisons, key=lambda p: p.stem):
         key = f"{reference.stem}:{comp.stem}"
@@ -456,11 +418,9 @@ OFFSET_MAP = {{
 
 
 def _build_main_execution_section() -> str:
-    """Build the main execution loop template."""
-    return '''\
+    return """\
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main():
-    """Load clips into VSPreview with overlays and suggested offsets."""
     try:
         import vapoursynth as vs
     except ImportError:
@@ -554,7 +514,7 @@ def main():
 
 if __name__ == "__main__":
     main()
-'''
+"""
 
 
 def _build_script_content(

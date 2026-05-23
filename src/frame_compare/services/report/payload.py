@@ -193,12 +193,7 @@ def image_src_for_report(screenshot_path: Path, *, report_dir: Path, embed_image
 
     try:
         # Use relative path for portability if possible.
-        return str(Path(os_path_relpath(screenshot_path, report_dir)).as_posix())
+        return str(Path(os.path.relpath(screenshot_path, report_dir)).as_posix())
     except ValueError:
         # Use a browser-safe URI when Windows drives prevent a relative path.
         return screenshot_path.resolve().as_uri()
-
-
-def os_path_relpath(path: Path, start: Path) -> str:
-    """Wrapper for os.path.relpath to handle Path objects."""
-    return os.path.relpath(path, start)
