@@ -33,7 +33,7 @@ from frame_compare.orchestration.context import (
 )
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.orchestration.execution import build_execution_phase_plan
-from frame_compare.orchestration.types import PrepState, RunArtifacts
+from frame_compare.orchestration.types import ExecutionState, PrepState, RunArtifacts
 from frame_compare.services.alignment import CACHE_FILE_NAME
 from frame_compare.services.run_folder import derive_run_folder_name
 from frame_compare.services.types import AlignmentResult, MetadataConfig, TmdbMetadata
@@ -187,8 +187,7 @@ def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
         request=RunRequest(root=tmp_path),
         deps=RunDependencies(ffmpeg_runner=FakeFFmpegRunner()),
         prep=prep,
-        phase_timings={},
-        selected_frames=[],
+        state=ExecutionState(artifacts=prep.artifacts),
     )
 
     assert [phase.name for phase in plan.before_align] == ["frame_plan", "analyze", "align"]

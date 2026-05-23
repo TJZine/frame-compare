@@ -27,8 +27,8 @@ from frame_compare.orchestration.phase_tasks import (
 from frame_compare.orchestration.phases import Phase
 from frame_compare.orchestration.types import (
     ExecutionPhasePlan,
+    ExecutionState,
     PrepState,
-    RunArtifacts,
     RunDependencies,
     RunRequest,
 )
@@ -84,22 +84,19 @@ def build_phases_before_align(
     *,
     request: RunRequest,
     clock: Callable[[], datetime],
-    phase_timings: dict[str, float],
-    warnings: list[str],
-    selected_frames: list[int],
+    state: ExecutionState,
     input_videos: list[Path],
     workspace: WorkspacePaths,
-    artifacts: RunArtifacts,
 ) -> list[Phase]:
     return [
         _create_timed_phase(
             "frame_plan",
             "frame_plan",
             None,
-            partial(select_initial_frame_plan, selected_frames=selected_frames),
+            partial(select_initial_frame_plan, selected_frames=state.selected_frames),
             clock=clock,
-            phase_timings=phase_timings,
-            warnings=warnings,
+            phase_timings=state.phase_timings,
+            warnings=state.warnings,
         ),
         _create_timed_phase(
             "analyze",
@@ -109,12 +106,12 @@ def build_phases_before_align(
                 run_analyze_phase,
                 input_videos=input_videos,
                 workspace=workspace,
-                selected_frames=selected_frames,
-                artifacts=artifacts,
+                selected_frames=state.selected_frames,
+                artifacts=state.artifacts,
             ),
             clock=clock,
-            phase_timings=phase_timings,
-            warnings=warnings,
+            phase_timings=state.phase_timings,
+            warnings=state.warnings,
             warn_only=True,
             progress_total=ANALYZE_PROGRESS_TOTAL,
         ),
@@ -122,10 +119,10 @@ def build_phases_before_align(
             "align",
             "align",
             lambda config: not config.audio_alignment.enable,
-            partial(run_align_phase, selected_frames=selected_frames),
+            partial(run_align_phase, selected_frames=state.selected_frames),
             clock=clock,
-            phase_timings=phase_timings,
-            warnings=warnings,
+            phase_timings=state.phase_timings,
+            warnings=state.warnings,
             warn_only=True,
         ),
     ]
@@ -137,10 +134,7 @@ def build_phases_after_align(
     clock: Callable[[], datetime],
     ffmpeg_runner: FFmpegRunner,
     http_client: httpx.AsyncClient | None,
-    phase_timings: dict[str, float],
-    warnings: list[str],
-    selected_frames: list[int],
-    artifacts: RunArtifacts,
+    state: ExecutionState,
     metadata_prefetched: bool,
 ) -> list[Phase]:
     return [
@@ -150,13 +144,13 @@ def build_phases_after_align(
             None,
             partial(
                 run_render_phase,
-                frames=selected_frames,
+                frames=state.selected_frames,
                 runner=ffmpeg_runner,
-                artifacts=artifacts,
+                artifacts=state.artifacts,
             ),
             clock=clock,
-            phase_timings=phase_timings,
-            warnings=warnings,
+            phase_timings=state.phase_timings,
+            warnings=state.warnings,
         ),
         _create_timed_phase(
             "metadata",
@@ -165,23 +159,23 @@ def build_phases_after_align(
             partial(
                 run_metadata_phase,
                 client=http_client,
-                prefetched_metadata=artifacts.resolved_metadata,
+                prefetched_metadata=state.artifacts.resolved_metadata,
                 metadata_prefetched=metadata_prefetched,
-                artifacts=artifacts,
+                artifacts=state.artifacts,
             ),
             clock=clock,
-            phase_timings=phase_timings,
-            warnings=warnings,
+            phase_timings=state.phase_timings,
+            warnings=state.warnings,
             warn_only=True,
         ),
         _create_timed_phase(
             "dovi",
             "dovi",
             lambda config: request.skip_dovi,
-            partial(record_dovi_not_implemented_warning, warnings=warnings),
+            partial(record_dovi_not_implemented_warning, warnings=state.warnings),
             clock=clock,
-            phase_timings=phase_timings,
-            warnings=warnings,
+            phase_timings=state.phase_timings,
+            warnings=state.warnings,
             warn_only=True,
         ),
         _create_timed_phase(
@@ -191,11 +185,11 @@ def build_phases_after_align(
             partial(
                 run_publish_phase,
                 client=http_client,
-                artifacts=artifacts,
+                artifacts=state.artifacts,
             ),
             clock=clock,
-            phase_timings=phase_timings,
-            warnings=warnings,
+            phase_timings=state.phase_timings,
+            warnings=state.warnings,
             warn_only=True,
         ),
         _create_timed_phase(
@@ -204,12 +198,12 @@ def build_phases_after_align(
             lambda config: not config.report.enable,
             partial(
                 run_report_phase,
-                frames=selected_frames,
-                artifacts=artifacts,
+                frames=state.selected_frames,
+                artifacts=state.artifacts,
             ),
             clock=clock,
-            phase_timings=phase_timings,
-            warnings=warnings,
+            phase_timings=state.phase_timings,
+            warnings=state.warnings,
             warn_only=True,
         ),
     ]
@@ -220,8 +214,7 @@ def build_execution_phase_plan(
     request: RunRequest,
     deps: RunDependencies,
     prep: PrepState,
-    phase_timings: dict[str, float],
-    selected_frames: list[int],
+    state: ExecutionState,
 ) -> ExecutionPhasePlan:
     """Build the split execution plan around the post-align reporting boundary.
 
@@ -231,12 +224,9 @@ def build_execution_phase_plan(
     before_align = build_phases_before_align(
         request=request,
         clock=deps.clock,
-        phase_timings=phase_timings,
-        warnings=prep.artifacts.warnings,
-        selected_frames=selected_frames,
+        state=state,
         input_videos=prep.input_videos,
         workspace=prep.workspace,
-        artifacts=prep.artifacts,
     )
 
     ffmpeg_runner = deps.ffmpeg_runner
@@ -248,10 +238,7 @@ def build_execution_phase_plan(
         clock=deps.clock,
         ffmpeg_runner=ffmpeg_runner,
         http_client=deps.http_client,
-        phase_timings=phase_timings,
-        warnings=prep.artifacts.warnings,
-        selected_frames=selected_frames,
-        artifacts=prep.artifacts,
+        state=state,
         metadata_prefetched=prep.metadata_prefetched,
     )
     return ExecutionPhasePlan(

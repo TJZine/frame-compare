@@ -89,6 +89,10 @@ def _empty_phase_timings() -> dict[str, float]:
     return {}
 
 
+def _empty_frame_list() -> list[int]:
+    return []
+
+
 @dataclass(frozen=True)
 class RunResult:
     """Complete result from a comparison run."""
@@ -122,21 +126,84 @@ class RunDependencies:
     clock: Callable[[], datetime] = field(default=datetime.now)
 
 
-def _empty_screenshots() -> dict[str, list[Path]]:
-    return {}
-
-
 @dataclass
+class RenderArtifacts:
+    screenshots_by_label: dict[str, list[Path]]
+    screenshot_dir: Path | None
+
+
+@dataclass(init=False)
 class RunArtifacts:
     """Internal carrier for artifacts accumulated during the run."""
 
-    metrics_cache_hit: bool = False
-    screenshots_by_label: dict[str, list[Path]] = field(default_factory=_empty_screenshots)
-    slowpics_url: str | None = None
-    report_path: Path | None = None
-    screenshot_dir: Path | None = None
-    resolved_metadata: TmdbMetadata | None = None
-    warnings: list[str] = field(default_factory=_empty_str_list)
+    metrics_cache_hit: bool
+    render: RenderArtifacts | None
+    slowpics_url: str | None
+    report_path: Path | None
+    resolved_metadata: TmdbMetadata | None
+    warnings: list[str]
+
+    def __init__(
+        self,
+        *,
+        metrics_cache_hit: bool = False,
+        screenshots_by_label: dict[str, list[Path]] | None = None,
+        slowpics_url: str | None = None,
+        report_path: Path | None = None,
+        screenshot_dir: Path | None = None,
+        resolved_metadata: TmdbMetadata | None = None,
+        warnings: list[str] | None = None,
+        render: RenderArtifacts | None = None,
+    ) -> None:
+        self.metrics_cache_hit = metrics_cache_hit
+        if render is not None:
+            self.render = render
+        elif screenshots_by_label is not None:
+            self.render = RenderArtifacts(screenshots_by_label, screenshot_dir)
+        elif screenshot_dir is not None:
+            self.render = RenderArtifacts({}, screenshot_dir)
+        else:
+            self.render = None
+        self.slowpics_url = slowpics_url
+        self.report_path = report_path
+        self.resolved_metadata = resolved_metadata
+        self.warnings = [] if warnings is None else warnings
+
+    @property
+    def screenshots_by_label(self) -> dict[str, list[Path]]:
+        if self.render is None:
+            self.render = RenderArtifacts({}, None)
+        return self.render.screenshots_by_label
+
+    @screenshots_by_label.setter
+    def screenshots_by_label(self, value: dict[str, list[Path]]) -> None:
+        screenshot_dir = self.render.screenshot_dir if self.render is not None else None
+        self.render = RenderArtifacts(value, screenshot_dir)
+
+    @property
+    def screenshot_dir(self) -> Path | None:
+        return None if self.render is None else self.render.screenshot_dir
+
+    @screenshot_dir.setter
+    def screenshot_dir(self, value: Path | None) -> None:
+        if value is None:
+            self.render = None
+            return
+        screenshots = {} if self.render is None else self.render.screenshots_by_label
+        self.render = RenderArtifacts(screenshots, value)
+
+
+@dataclass
+class ExecutionState:
+    """Mutable execution state shared explicitly by phase construction."""
+
+    artifacts: RunArtifacts = field(default_factory=RunArtifacts)
+    selected_frames: list[int] = field(default_factory=_empty_frame_list)
+    phase_timings: dict[str, float] = field(default_factory=_empty_phase_timings)
+
+    @property
+    def warnings(self) -> list[str]:
+        return self.artifacts.warnings
 
 
 @dataclass(frozen=True)

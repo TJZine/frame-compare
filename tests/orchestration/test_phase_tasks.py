@@ -235,6 +235,20 @@ def test_run_analyze_phase_records_cache_hit_and_selection_breakdown(
     assert calls["select"] == {"metrics": metrics, "config": ctx.config.analysis}
 
 
+def test_run_artifacts_legacy_render_accessors_keep_mutations() -> None:
+    artifacts = RunArtifacts()
+    screenshot = Path("screenshots/reference_1.png")
+
+    artifacts.screenshots_by_label["Reference"] = [screenshot]
+    artifacts.screenshot_dir = Path("screenshots")
+
+    assert artifacts.screenshots_by_label == {"Reference": [screenshot]}
+    assert artifacts.screenshot_dir == Path("screenshots")
+    assert artifacts.render is not None
+    assert artifacts.render.screenshots_by_label == {"Reference": [screenshot]}
+    assert artifacts.render.screenshot_dir == Path("screenshots")
+
+
 def test_run_align_phase_no_comparisons_is_noop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

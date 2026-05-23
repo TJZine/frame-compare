@@ -16,6 +16,7 @@ from frame_compare.orchestration.phases import execute_phases
 from frame_compare.orchestration.preparation import execute_prep
 from frame_compare.orchestration.progress import select_reporter
 from frame_compare.orchestration.types import (
+    ExecutionState,
     RunArtifacts,
     RunDependencies,
     RunRequest,
@@ -83,14 +84,14 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
 
     async def _execute_with_deps() -> RunResult:
         run_start = local_deps.clock()
-        phase_timings: dict[str, float] = {}
         reporter = local_deps.progress
         if reporter is None:
             raise RuntimeError("Progress reporter must be initialized before execution.")
 
         prep = await execute_prep(request, local_deps)
+        state = ExecutionState(artifacts=prep.artifacts)
 
-        phase_timings["preflight"] = prep.preflight_duration
+        state.phase_timings["preflight"] = prep.preflight_duration
 
         reference = prep.clips[0]
         comparisons = prep.clips[1:]
@@ -109,9 +110,11 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             quiet=request.quiet,
         )
         load_sources_end = local_deps.clock()
-        phase_timings["load_sources"] = (load_sources_end - prep.load_sources_start).total_seconds()
+        state.phase_timings["load_sources"] = (
+            load_sources_end - prep.load_sources_start
+        ).total_seconds()
 
-        phase_timings.update(
+        state.phase_timings.update(
             {
                 "frame_plan": 0.0,
                 "analyze": 0.0,
@@ -123,14 +126,12 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
                 "report": 0.0,
             }
         )
-        selected_frames: list[int] = []
 
         phase_plan = build_execution_phase_plan(
             request=request,
             deps=local_deps,
             prep=prep,
-            phase_timings=phase_timings,
-            selected_frames=selected_frames,
+            state=state,
         )
 
         await execute_phases(phase_plan.before_align, context, reporter)
@@ -146,10 +147,10 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
 
         return _assemble_run_result(
             artifacts=prep.artifacts,
-            selected_frames=selected_frames,
+            selected_frames=state.selected_frames,
             context=context,
             preflight_warnings=prep.preflight_warnings,
-            phase_timings=phase_timings,
+            phase_timings=state.phase_timings,
             duration_seconds=duration_seconds,
         )
 

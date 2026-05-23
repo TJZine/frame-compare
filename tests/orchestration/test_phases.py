@@ -16,7 +16,7 @@ from frame_compare.orchestration.context import (
 )
 from frame_compare.orchestration.execution import build_phases_after_align
 from frame_compare.orchestration.phases import Phase, PhaseStatus, execute_phases
-from frame_compare.orchestration.types import RunArtifacts, RunRequest
+from frame_compare.orchestration.types import ExecutionState, RunArtifacts, RunRequest
 from frame_compare.utils.progress import NullProgressReporter
 from frame_compare.utils.types import WorkspacePaths
 
@@ -273,19 +273,15 @@ def test_execute_phases_empty_list_noop(tmp_path: Path) -> None:
 
 
 def test_publish_phase_skip_condition_uses_effective_slowpics_config() -> None:
-    phase_timings: dict[str, float] = {}
-    warnings: list[str] = []
     artifacts = RunArtifacts()
+    state = ExecutionState(artifacts=artifacts)
 
     phases = build_phases_after_align(
         request=RunRequest(root=Path("."), no_upload=False),
         clock=lambda: datetime(2026, 5, 21, tzinfo=UTC),
         ffmpeg_runner=object(),
         http_client=None,
-        phase_timings=phase_timings,
-        warnings=warnings,
-        selected_frames=[],
-        artifacts=artifacts,
+        state=state,
         metadata_prefetched=False,
     )
 
