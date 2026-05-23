@@ -828,8 +828,8 @@ def test_align_clips_partial_cache_hit_computes_only_missing_and_preserves_order
     assert comp_a not in called_paths
 
 
-@patch("frame_compare.services.alignment.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment.check_vspreview_availability")
+@patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
 @patch("frame_compare.services.alignment._probe_fps")
 @patch("frame_compare.services.alignment._extract_audio")
 @patch("frame_compare.services.alignment._cross_correlate")
@@ -879,8 +879,8 @@ def test_align_clips_launches_vspreview_when_enabled(
     assert kwargs["config"].enabled is True
 
 
-@patch("frame_compare.services.alignment.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment.check_vspreview_availability")
+@patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
 @patch("frame_compare.services.alignment._probe_fps")
 @patch("frame_compare.services.alignment._extract_audio")
 def test_align_clips_full_cache_hit_still_launches_vspreview_when_enabled(
@@ -935,8 +935,8 @@ def test_align_clips_full_cache_hit_still_launches_vspreview_when_enabled(
     assert kwargs["config"].enabled is True
 
 
-@patch("frame_compare.services.alignment.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment.check_vspreview_availability")
+@patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
 def test_align_clips_force_interactive_raises_when_vspreview_unavailable(
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
@@ -980,8 +980,8 @@ def test_align_clips_force_interactive_raises_when_vspreview_unavailable(
     mock_launch.assert_not_called()
 
 
-@patch("frame_compare.services.alignment.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment.check_vspreview_availability")
+@patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
 def test_align_clips_vspreview_unavailable_generates_script_without_launch(
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
@@ -1022,9 +1022,9 @@ def test_align_clips_vspreview_unavailable_generates_script_without_launch(
     assert kwargs["config"].enabled is False
 
 
-@patch("frame_compare.services.alignment.log.warning")
-@patch("frame_compare.services.alignment.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment.check_vspreview_availability")
+@patch("frame_compare.services.alignment_vspreview.log.warning")
+@patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
 def test_align_clips_optional_vspreview_probe_failure_generates_script_without_launch(
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
@@ -1074,8 +1074,8 @@ def test_align_clips_optional_vspreview_probe_failure_generates_script_without_l
     assert launch_kwargs["config"].enabled is False
 
 
-@patch("frame_compare.services.alignment.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment.check_vspreview_availability")
+@patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
 def test_align_clips_force_interactive_launches_when_vspreview_available(
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
@@ -1128,8 +1128,8 @@ def test_align_clips_force_interactive_launches_when_vspreview_available(
     assert kwargs["config"].enabled is True
 
 
-@patch("frame_compare.services.alignment.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment.check_vspreview_availability")
+@patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
 def test_align_clips_force_interactive_probe_failure_raises_alignment_error(
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
@@ -1174,9 +1174,9 @@ def test_align_clips_force_interactive_probe_failure_raises_alignment_error(
     mock_launch.assert_not_called()
 
 
-@patch("frame_compare.services.alignment.log.warning")
-@patch("frame_compare.services.alignment.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment.check_vspreview_availability")
+@patch("frame_compare.services.alignment_vspreview.log.warning")
+@patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
 def test_align_clips_vspreview_errors_are_warning_only_when_not_forced(
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
@@ -1222,8 +1222,8 @@ def test_align_clips_vspreview_errors_are_warning_only_when_not_forced(
     assert kwargs["force_interactive"] is False
 
 
-@patch("frame_compare.services.alignment.launch_alignment_verification_session")
-@patch("frame_compare.services.alignment.check_vspreview_availability")
+@patch("frame_compare.services.alignment_vspreview.launch_alignment_verification_session")
+@patch("frame_compare.services.alignment_vspreview.check_vspreview_availability")
 def test_align_clips_vspreview_errors_raise_when_force_interactive(
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,

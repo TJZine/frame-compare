@@ -11,14 +11,13 @@ import shutil
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from types import ModuleType
 from typing import TYPE_CHECKING, cast
 
 import httpx
 
 from frame_compare.errors import JSONValue
 from frame_compare.services.metadata import is_valid_tmdb_api_key
-from frame_compare.vs.env import register_windows_dll_dirs
+from frame_compare.vs.env import import_vapoursynth_module, try_load_lsmas_plugin
 
 if TYPE_CHECKING:
     from frame_compare.utils.progress_protocol import ProgressReporter
@@ -68,56 +67,6 @@ class DoctorReport:
 # ─── Check Implementations ────────────────────────────────────────────────────
 
 
-def _import_vapoursynth() -> ModuleType:
-    """Import VapourSynth, falling back to runtime-path registration on failure."""
-    try:
-        return __import__("vapoursynth")
-    except ImportError:
-        register_windows_dll_dirs()
-        return __import__("vapoursynth")
-
-
-def _candidate_lsmas_plugin_paths() -> list[str]:
-    """Return candidate absolute paths for libvslsmashsource.dll."""
-    candidates: list[str] = []
-    plugin_env = os.environ.get("VAPOURSYNTH_PLUGIN_PATH", "")
-    if plugin_env:
-        for plugin_dir in plugin_env.split(os.pathsep):
-            if plugin_dir:
-                candidates.append(os.path.join(plugin_dir, "libvslsmashsource.dll"))
-
-    python_dir = os.path.dirname(sys.executable)
-    bundle_root = os.path.dirname(python_dir)
-    candidates.append(os.path.join(bundle_root, "vs", "plugins", "libvslsmashsource.dll"))
-
-    seen: set[str] = set()
-    unique_candidates: list[str] = []
-    for candidate in candidates:
-        normalized = os.path.normcase(os.path.normpath(candidate))
-        if normalized in seen:
-            continue
-        seen.add(normalized)
-        unique_candidates.append(candidate)
-    return unique_candidates
-
-
-def _try_load_lsmas_plugin(core: object) -> str | None:
-    """Try loading the bundled lsmas plugin and return loaded path, if any."""
-    std_ns = getattr(core, "std", None)
-    if std_ns is None:
-        return None
-    load_plugin = getattr(std_ns, "LoadPlugin", None)
-    if not callable(load_plugin):
-        return None
-
-    for plugin_path in _candidate_lsmas_plugin_paths():
-        if not os.path.isfile(plugin_path):
-            continue
-        load_plugin(path=plugin_path)
-        return plugin_path
-    return None
-
-
 def _check_python_version() -> CheckResult:
     """Check Python version is >= 3.13 per ADR-001."""
     version = sys.version_info
@@ -138,7 +87,7 @@ def _check_python_version() -> CheckResult:
 def _check_vapoursynth() -> CheckResult:
     """Check VapourSynth is available."""
     try:
-        _import_vapoursynth()
+        import_vapoursynth_module()
         return CheckResult(passed=True, message="VapourSynth available")
     except ImportError:
         return CheckResult(
@@ -151,7 +100,7 @@ def _check_vapoursynth() -> CheckResult:
 def _check_lsmas() -> CheckResult:
     """Check L-SMASH-Works plugin is available."""
     try:
-        vs = _import_vapoursynth()
+        vs = import_vapoursynth_module()
         core = vs.core
         # Check for lsmas namespace (preferred) or lw (legacy)
         if hasattr(core, "lsmas") or hasattr(core, "lw"):
@@ -162,7 +111,7 @@ def _check_lsmas() -> CheckResult:
                 details={"namespace": namespace},
             )
 
-        loaded_path = _try_load_lsmas_plugin(core)
+        loaded_path = try_load_lsmas_plugin(core)
         if loaded_path and (hasattr(core, "lsmas") or hasattr(core, "lw")):
             namespace = "lsmas" if hasattr(core, "lsmas") else "lw"
             return CheckResult(

@@ -14,7 +14,6 @@ from frame_compare.orchestration.context import (
     RunContext,
 )
 from frame_compare.orchestration.execution import run_render_phase
-from frame_compare.orchestration.types import RunArtifacts
 from frame_compare.utils.types import WorkspacePaths
 from frame_compare.vs.types import SourceInfo
 
@@ -103,18 +102,15 @@ def test_overlay_display_frame_number_matches_aligned_output_filename(
         reporter=None,
     )
 
-    artifacts = RunArtifacts()
-
-    run_render_phase(
+    output = run_render_phase(
         ctx=ctx,
         frames=[10],
         runner=FakeFFmpegRunner(),
-        artifacts=artifacts,
     )
 
-    assert artifacts.screenshot_dir == workspace.screenshots_dir
-    assert "Reference" in artifacts.screenshots_by_label
-    assert artifacts.screenshots_by_label["Reference"][0].name.endswith("_00010.png")
+    assert output.render.screenshot_dir == workspace.screenshots_dir
+    assert "Reference" in output.render.screenshots_by_label
+    assert output.render.screenshots_by_label["Reference"][0].name.endswith("_00010.png")
 
     req = cast(Any, captured[0])
     assert req.frame_number == 20

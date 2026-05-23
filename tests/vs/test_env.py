@@ -8,10 +8,13 @@ import pytest
 
 import frame_compare.vs.env as env_module
 from frame_compare.vs.env import (
+    candidate_lsmas_plugin_paths,
     detect_plugins,
     ensure_vs_environment,
+    import_vapoursynth_module,
     is_vapoursynth_available,
     require_plugin,
+    try_load_lsmas_plugin,
 )
 from frame_compare.vs.errors import PluginNotFoundError, VapourSynthError, VapourSynthNotFoundError
 
@@ -111,6 +114,83 @@ def test_register_windows_dll_dirs_is_idempotent_per_process(monkeypatch, tmp_pa
         str(nested_site_packages),
     ]
     assert calls == expected_calls
+
+
+def test_import_vapoursynth_module_registers_runtime_dirs_before_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_import = __import__
+    mock_vs = MagicMock()
+    vs_attempts = {"count": 0}
+
+    def _fake_import(name: str, *args: object, **kwargs: object) -> object:
+        if name == "vapoursynth":
+            vs_attempts["count"] += 1
+            if vs_attempts["count"] == 1:
+                raise ImportError("missing runtime DLL")
+            return mock_vs
+        return original_import(name, *args, **kwargs)
+
+    register_dirs = MagicMock()
+    monkeypatch.setattr(env_module, "register_windows_dll_dirs", register_dirs)
+    monkeypatch.setattr("builtins.__import__", _fake_import)
+
+    result = import_vapoursynth_module()
+
+    assert result is mock_vs
+    register_dirs.assert_called_once()
+    assert vs_attempts["count"] == 2
+
+
+def test_candidate_lsmas_plugin_paths_preserves_order_and_deduplicates(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    bundle_root = tmp_path / "bundle"
+    python_dir = bundle_root / "python"
+    python_dir.mkdir(parents=True)
+    executable = python_dir / "python.exe"
+    executable.write_text("")
+    plugin_dir = tmp_path / "plugins"
+    plugin_dir.mkdir()
+
+    monkeypatch.setattr(env_module.sys, "executable", str(executable))
+    monkeypatch.setenv(
+        "VAPOURSYNTH_PLUGIN_PATH",
+        os_pathsep_join([str(plugin_dir), str(plugin_dir), ""]),
+    )
+
+    result = candidate_lsmas_plugin_paths()
+
+    assert result == [
+        str(plugin_dir / "libvslsmashsource.dll"),
+        str(bundle_root / "vs" / "plugins" / "libvslsmashsource.dll"),
+    ]
+
+
+def os_pathsep_join(parts: list[str]) -> str:
+    return env_module.os.pathsep.join(parts)
+
+
+def test_try_load_lsmas_plugin_loads_first_existing_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    first = tmp_path / "missing" / "libvslsmashsource.dll"
+    second = tmp_path / "present" / "libvslsmashsource.dll"
+    second.parent.mkdir()
+    second.write_text("")
+    load_calls: list[str] = []
+    core = SimpleNamespace(std=SimpleNamespace(LoadPlugin=lambda *, path: load_calls.append(path)))
+
+    monkeypatch.setattr(
+        env_module,
+        "candidate_lsmas_plugin_paths",
+        lambda: [str(first), str(second)],
+    )
+
+    assert try_load_lsmas_plugin(core) == str(second)
+    assert load_calls == [str(second)]
 
 
 def test_detect_plugins_all_present() -> None:
