@@ -1,4 +1,9 @@
 # ─────────────────────────────────────────────────────────────────────────────
+# Stage 0: Pinned Python dependency tooling
+# ─────────────────────────────────────────────────────────────────────────────
+FROM ghcr.io/astral-sh/uv:0.8.22 AS uv
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Stage 1: Build VapourSynth + plugins
 # ─────────────────────────────────────────────────────────────────────────────
 FROM python:3.13.1-slim-bookworm AS builder
@@ -139,6 +144,8 @@ RUN git clone https://github.com/FFMS/ffms2.git && \
 # ─────────────────────────────────────────────────────────────────────────────
 FROM python:3.13.1-slim-bookworm AS runtime
 
+COPY --from=uv /uv /uvx /usr/local/bin/
+
 # Runtime dependencies for Debian Bookworm (do NOT add build tools here)
 # Use ffmpeg meta-package for AV libs to avoid version-specific package names
 RUN apt-get update && \
@@ -183,12 +190,17 @@ RUN useradd --create-home --shell /bin/bash framecompare
 USER framecompare
 WORKDIR /home/framecompare
 
+# Export and install lock-derived Python runtime dependencies before copying full source.
+COPY --chown=framecompare:framecompare pyproject.toml uv.lock /home/framecompare/frame-compare/
+WORKDIR /home/framecompare/frame-compare
+RUN uv export --frozen --no-dev --no-emit-project --format requirements.txt --output-file /tmp/requirements.lock.txt && \
+    python -m pip install --no-cache-dir --user --require-hashes -r /tmp/requirements.lock.txt
+
 # Copy application source
 COPY --chown=framecompare:framecompare . /home/framecompare/frame-compare/
-WORKDIR /home/framecompare/frame-compare
 
-# Install Python runtime dependencies
-RUN pip install --no-cache-dir --user -e .
+# Install the project itself without dependency resolution.
+RUN python -m pip install --no-cache-dir --user --no-deps -e .
 
 # Add user bin to PATH
 ENV PATH="/home/framecompare/.local/bin:${PATH}"

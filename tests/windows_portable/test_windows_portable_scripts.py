@@ -239,6 +239,35 @@ def test_windows_portable_build_exports_vspreview_extra(repo_root: Path) -> None
     assert "requirements.lock.txt" in build_script
 
 
+def test_windows_portable_build_has_release_public_key_gate(repo_root: Path) -> None:
+    build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
+    build_script = _read_text_or_fail(build_path)
+    assert "[switch]$RequireReleasePublicKey" in build_script
+    assert "function Assert-ReleasePublicKey()" in build_script
+    assert 'Join-Path $PSScriptRoot "validate_update_public_key.ps1"' in build_script
+    assert 'Join-Path $PSScriptRoot "update_public_key.xml"' in build_script
+    assert "& $validator -PublicKeyPath $publicKey" in build_script
+    assert re.search(
+        r"function Main\(\) \{\s*if \(\$RequireReleasePublicKey\) \{\s*Assert-ReleasePublicKey",
+        build_script,
+    )
+
+
+def test_windows_portable_workflow_enables_release_public_key_gate_only_for_release_events(
+    repo_root: Path,
+) -> None:
+    workflow_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
+    workflow = _read_text_or_fail(workflow_path)
+    assert '$buildArgs += "-RequireReleasePublicKey"' in workflow
+    assert (
+        'if ("${{ github.event_name }}" -eq "release" -or '
+        '"${{ github.event_name }}" -eq "workflow_dispatch")'
+    ) in workflow
+    assert not re.search(
+        r"github\.event_name[^\n]+pull_request[^\n]+RequireReleasePublicKey", workflow
+    )
+
+
 def test_windows_portable_build_runtime_validation_checks_qt_stack(repo_root: Path) -> None:
     build_path = repo_root / "tools" / "windows_portable" / "build_portable.ps1"
     build_script = _read_text_or_fail(build_path)
