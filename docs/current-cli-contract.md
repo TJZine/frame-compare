@@ -14,7 +14,7 @@ documents that promise elsewhere.
 
 ## Authority And Update Rules
 
-- `src/frame_compare/cli_entry.py` is the implementation owner for CLI command routing,
+- `src/frame_compare/cli/entry.py` is the implementation owner for CLI command routing,
   argument parsing, stdout/stderr behavior, and interactive post-run behavior.
 - `src/frame_compare/config/overrides.py` owns CLI flag to config override mappings.
 - Primary executable contract checks include:
@@ -82,7 +82,7 @@ For those commands:
 ### Report Auto-Open Ownership
 
 - HTML report generation is owned by `frame_compare.services.report`.
-- Browser auto-open for a generated report is owned by `frame_compare.cli_entry`.
+- Browser auto-open for a generated report is owned by `frame_compare.cli.entry`.
 - The CLI only attempts to open a report when all of these are true:
   - the run succeeded and produced `report_path`
   - `--json` was not used

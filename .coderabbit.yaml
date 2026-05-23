@@ -64,10 +64,10 @@ reviews:
     - path: "importlinter.ini"
       instructions: |
         Review as the import-layer contract. Flag dependency direction changes that bypass the documented layer model or sibling-domain independence. Expect same-pass architecture docs and full verification when boundaries change.
-    - path: "src/frame_compare/cli_entry.py"
+    - path: "src/frame_compare/cli/entry.py"
       instructions: |
         Treat as a CLI composition hotspot. Flag eager imports of heavy runtime/VapourSynth paths, command bodies absorbing domain policy, stdout/stderr or JSON contract drift, report auto-open ownership changes, and missing CLI contract tests.
-    - path: "src/frame_compare/cli_output.py"
+    - path: "src/frame_compare/cli/output.py"
       instructions: |
         Review output formatting for stable CLI behavior. Preserve machine-readable modes, useful diagnostics, and stream placement. Do not request cosmetic churn unless it fixes a contract, accessibility, or troubleshooting defect.
     - path: "src/frame_compare/runner.py"

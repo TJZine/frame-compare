@@ -20,8 +20,8 @@ Frame Compare is CLI-first, so CLI text, JSON payloads, generated reports, scree
 
 ## Current Owners
 
-- CLI command routing, human summaries, JSON modes, and browser auto-open: [`src/frame_compare/cli_entry.py`](../../../src/frame_compare/cli_entry.py)
-- CLI formatting helpers: [`src/frame_compare/cli_output.py`](../../../src/frame_compare/cli_output.py)
+- CLI command routing, human summaries, JSON modes, and browser auto-open: [`src/frame_compare/cli/entry.py`](../../../src/frame_compare/cli/entry.py)
+- CLI formatting helpers: [`src/frame_compare/cli/output.py`](../../../src/frame_compare/cli/output.py)
 - HTML report generation: [`src/frame_compare/services/report.py`](../../../src/frame_compare/services/report.py)
 - Screenshot naming and render outputs: [`src/frame_compare/render/`](../../../src/frame_compare/render/)
 - Overlay text composition: [`src/frame_compare/render/overlay_text.py`](../../../src/frame_compare/render/overlay_text.py)

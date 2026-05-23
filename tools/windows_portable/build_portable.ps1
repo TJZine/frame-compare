@@ -223,7 +223,7 @@ $env:PATH = (($pathEntries -join ";") + ";" + $env:PATH)
 $exitCode = 0
 Push-Location $bundleRoot
 try {
-  & $python -m frame_compare.cli_entry @args
+  & $python -m frame_compare.cli.entry @args
   if ($null -eq $LASTEXITCODE) {
     $exitCode = 1
   } else {

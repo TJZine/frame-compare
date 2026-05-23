@@ -8,7 +8,7 @@ Frame Compare is a CLI-first packaged Python app with importable internal module
 
 ## Composition Roots
 
-- CLI entrypoint: `frame_compare.cli_entry:app`
+- CLI entrypoint: `frame_compare.cli.entry:app`
 - Runtime entry surface: `frame_compare.runner.run(...)`
 - Async orchestration root: `frame_compare.orchestration.execute_run(...)`
 - Diagnostic entry surface: `frame_compare.orchestration.doctor.run_doctor(...)`
@@ -35,8 +35,8 @@ Import boundaries are enforced by `importlinter.ini`.
 
 High-level layering:
 
-- `frame_compare.cli_entry`
-- `frame_compare.cli_output`
+- `frame_compare.cli.entry`
+- `frame_compare.cli.output`
 - `frame_compare.runner`
 - `frame_compare.orchestration`
 - sibling domain modules: `frame_compare.analysis`, `frame_compare.render`, `frame_compare.services`
@@ -80,7 +80,7 @@ Keep these integrations at their current owners:
 
 - metadata lookups: `frame_compare.services.metadata`
 - publishing: `frame_compare.services.publishers`
-- browser auto-open for generated reports: `frame_compare.cli_entry`
+- browser auto-open for generated reports: `frame_compare.cli.entry`
 - HTML report generation: `frame_compare.services.report`
 - VS loading and HDR/tonemap logic: `frame_compare.vs.*`
 - packaging/install/update flow: `tools/windows_portable/**`
@@ -101,7 +101,7 @@ These files currently carry disproportionate change risk:
 - `src/frame_compare/orchestration/coordinator.py` (and neighboring `types.py`, `preparation.py`, `execution.py`)
 - `src/frame_compare/errors.py`
 - `src/frame_compare/services/report/**`
-- `src/frame_compare/cli_entry.py`
+- `src/frame_compare/cli/entry.py`
 - `src/frame_compare/services/alignment.py`
 - `src/frame_compare/render/orchestrator.py`
 - `src/frame_compare/orchestration/doctor.py`
@@ -111,7 +111,7 @@ Working rule: changes to these files should usually trigger full verification an
 
 ## Working Rules That Follow From The Codebase
 
-- Keep CLI import time light; do not eagerly import VS-dependent runtime code in `cli_entry.py`.
+- Keep CLI import time light; do not eagerly import VS-dependent runtime code in `cli/entry.py`.
 - Keep config/env loading centralized; do not add ad hoc env reads deep in domain logic.
 - The main pipeline passes HTTP clients from `runner` into orchestration, while diagnostics still create their own short-lived client for reachability checks.
 - Keep persistence deterministic: stable ordering, stable JSON/TOML output, atomic writes where owners already use them.

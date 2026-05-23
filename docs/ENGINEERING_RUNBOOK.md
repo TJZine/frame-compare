@@ -251,7 +251,7 @@ Use this as the default routing shortcut before exploring deeper:
 
 | Task family | Primary authority | Typical owner files | Default tier | Default verification |
 | --- | --- | --- | --- | --- |
-| CLI/config contract change | `docs/current-cli-contract.md` | `src/frame_compare/cli_entry.py`, `src/frame_compare/config/overrides.py`, `tests/cli/test_cli_commands.py`, `tests/config/test_overrides.py`, `tests/test_cli_contract_docs.py` | High | Full verification |
+| CLI/config contract change | `docs/current-cli-contract.md` | `src/frame_compare/cli/entry.py`, `src/frame_compare/config/overrides.py`, `tests/cli/test_cli_commands.py`, `tests/config/test_overrides.py`, `tests/test_cli_contract_docs.py` | High | Full verification |
 | Internal logic change outside hotspots/public CLI | `docs/current-architecture.md` | Existing owner module plus nearby tests | Medium | Logic verification |
 | Hotspot or runtime pipeline change | `docs/current-architecture.md` | `orchestration/`, `render/`, `vs/`, hotspot files, adjacent tests | High | Full verification, plus Docker when listed under Docker/runtime verification |
 | Docker/runtime environment change | this runbook + `docs/current-architecture.md` | `Dockerfile`, `docker-compose.yml`, `tools/verify_docker_integration.sh`, runtime integration tests | High | Full verification plus Docker/runtime verification |
@@ -340,7 +340,7 @@ Update or remove stale references immediately. Do not leave half-live commands i
 
 ## Repo-Specific Anti-Debt Rules
 
-- Keep config and env-var interpretation inside `config/*`, `cli_entry.py`, and preflight/bootstrap owners.
+- Keep config and env-var interpretation inside `config/*`, `cli/entry.py`, and preflight/bootstrap owners.
 - Keep HTTP integrations inside `services.metadata`, `services.publishers`, or explicit diagnostics code.
 - Use existing atomic-write owners for config and cache persistence paths.
 - Preserve lazy CLI import boundaries that avoid importing VS-heavy modules at CLI import time.
