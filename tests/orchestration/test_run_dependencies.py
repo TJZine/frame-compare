@@ -12,8 +12,7 @@ from frame_compare.orchestration.coordinator import (
     execute_run,
 )
 from frame_compare.orchestration.types import RunRequest
-from frame_compare.render.ffmpeg import DefaultFFmpegRunner
-from frame_compare.vs.loader import DefaultVSLoader, VSLoader
+from frame_compare.vs.loader import VSLoader
 from frame_compare.vs.types import HDRMetadata
 
 
@@ -93,7 +92,7 @@ def test_execute_run_populates_missing_dependencies(
     with pytest.raises(StopAfterDependencyInit):
         asyncio.run(execute_run(request, deps=deps))
 
-    assert isinstance(deps.vs_loader, DefaultVSLoader)
-    assert isinstance(deps.ffmpeg_runner, DefaultFFmpegRunner)
-    assert deps.progress is not None
+    assert deps.vs_loader is None
+    assert deps.ffmpeg_runner is None
+    assert deps.progress is None
     assert deps.http_client is None

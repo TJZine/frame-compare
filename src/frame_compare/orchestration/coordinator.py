@@ -58,29 +58,37 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
         FrameCompareError: Any preflight validation errors are propagated.
     """
     if deps is None:
-        deps = RunDependencies()
+        local_deps = RunDependencies()
+    else:
+        local_deps = RunDependencies(
+            vs_loader=deps.vs_loader,
+            ffmpeg_runner=deps.ffmpeg_runner,
+            http_client=deps.http_client,
+            progress=deps.progress,
+            clock=deps.clock,
+        )
 
-    if deps.vs_loader is None:
-        deps.vs_loader = DefaultVSLoader()
+    if local_deps.vs_loader is None:
+        local_deps.vs_loader = DefaultVSLoader()
 
-    if deps.ffmpeg_runner is None:
-        deps.ffmpeg_runner = DefaultFFmpegRunner()
+    if local_deps.ffmpeg_runner is None:
+        local_deps.ffmpeg_runner = DefaultFFmpegRunner()
 
-    if deps.progress is None:
-        deps.progress = select_reporter(
+    if local_deps.progress is None:
+        local_deps.progress = select_reporter(
             quiet=request.quiet,
             json_output=request.json_output,
             no_color=request.no_color,
         )
 
     async def _execute_with_deps() -> RunResult:
-        run_start = deps.clock()
+        run_start = local_deps.clock()
         phase_timings: dict[str, float] = {}
-        reporter = deps.progress
+        reporter = local_deps.progress
         if reporter is None:
             raise RuntimeError("Progress reporter must be initialized before execution.")
 
-        prep = await execute_prep(request, deps)
+        prep = await execute_prep(request, local_deps)
 
         phase_timings["preflight"] = prep.preflight_duration
 
@@ -100,7 +108,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             json_output=request.json_output,
             quiet=request.quiet,
         )
-        load_sources_end = deps.clock()
+        load_sources_end = local_deps.clock()
         phase_timings["load_sources"] = (load_sources_end - prep.load_sources_start).total_seconds()
 
         phase_timings.update(
@@ -119,7 +127,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
 
         phase_plan = build_execution_phase_plan(
             request=request,
-            deps=deps,
+            deps=local_deps,
             prep=prep,
             phase_timings=phase_timings,
             selected_frames=selected_frames,
@@ -133,7 +141,7 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             quiet=request.quiet,
         )
         await execute_phases(phase_plan.after_align, context, reporter)
-        run_end = deps.clock()
+        run_end = local_deps.clock()
         duration_seconds = (run_end - run_start).total_seconds()
 
         return _assemble_run_result(
@@ -145,12 +153,12 @@ async def execute_run(request: RunRequest, deps: RunDependencies | None = None) 
             duration_seconds=duration_seconds,
         )
 
-    if deps.http_client is not None:
+    if local_deps.http_client is not None:
         return await _execute_with_deps()
 
     async with httpx.AsyncClient() as http_client:
-        deps.http_client = http_client
+        local_deps.http_client = http_client
         try:
             return await _execute_with_deps()
         finally:
-            deps.http_client = None
+            local_deps.http_client = None
