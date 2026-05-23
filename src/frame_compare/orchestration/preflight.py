@@ -15,6 +15,7 @@ from frame_compare.config.schema import ConfigSchema
 from frame_compare.errors import (
     ConfigNotFoundError,
     DirectoryNotFoundError,
+    InputDiscoveryError,
     NoVideosFoundError,
 )
 from frame_compare.utils.types import WorkspacePaths
@@ -108,17 +109,23 @@ def discover_inputs(input_dir: Path, patterns: list[str] | None = None) -> list[
     normalized_patterns = [pattern.lower() for pattern in effective_patterns]
     recursive = any("/" in pattern or "**" in pattern for pattern in effective_patterns)
 
-    candidates = input_dir.rglob("*") if recursive else input_dir.iterdir()
-    videos: list[Path] = []
-    for path in candidates:
-        if not path.is_file():
-            continue
-        if recursive:
-            candidate = path.relative_to(input_dir).as_posix().lower()
-        else:
-            candidate = path.name.lower()
-        if any(fnmatch.fnmatch(candidate, pattern) for pattern in normalized_patterns):
-            videos.append(path)
+    try:
+        candidates = input_dir.rglob("*") if recursive else input_dir.iterdir()
+        videos: list[Path] = []
+        for path in candidates:
+            try:
+                if not path.is_file():
+                    continue
+                if recursive:
+                    candidate = path.relative_to(input_dir).as_posix().lower()
+                else:
+                    candidate = path.name.lower()
+                if any(fnmatch.fnmatch(candidate, pattern) for pattern in normalized_patterns):
+                    videos.append(path)
+            except OSError as exc:
+                raise InputDiscoveryError(input_dir, exc) from exc
+    except OSError as exc:
+        raise InputDiscoveryError(input_dir, exc) from exc
 
     # Stable ordering: case-insensitive lexicographic sort by filename
     ordered = sorted(videos, key=lambda p: p.name.lower())

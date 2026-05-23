@@ -166,6 +166,21 @@ class TestDiscoverInputs:
         assert error.path == tmp_path.resolve()
         assert error.patterns == ["*.mkv", "*.mp4", "*.avi", "*.m2ts", "*.ts"]
 
+    def test_discover_inputs_oserror_raises_input_discovery_error(self, tmp_path: Path) -> None:
+        """Given a path that raises OSError on listdir/iterdir → raises InputDiscoveryError."""
+        from unittest.mock import patch
+
+        from frame_compare.errors import InputDiscoveryError
+
+        with (
+            patch.object(Path, "iterdir", side_effect=OSError("Permission denied")),
+            pytest.raises(InputDiscoveryError) as exc_info,
+        ):
+            discover_inputs(tmp_path)
+
+        assert exc_info.value.code == "FC-3010"
+        assert exc_info.value.path == tmp_path
+
 
 class TestPreparePreflight:
     """Tests for prepare_preflight function."""

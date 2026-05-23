@@ -535,6 +535,23 @@ class PathEscapesRootError(InputError):
         )
 
 
+class InputDiscoveryError(InputError):
+    """Failed to discover inputs due to filesystem error (FC-3010)."""
+
+    def __init__(self, path: Path, cause: OSError) -> None:
+        super().__init__(
+            ErrorContext(
+                code="FC-3010",
+                name="INPUT_DISCOVERY_ERROR",
+                message=f"Failed to discover inputs in {path}: {cause}",
+                hint="Check directory permissions and path existence",
+                details={"path": str(path), "error": str(cause)},
+                cause=cause,
+            )
+        )
+        self.path = path
+
+
 # ─── 3.4 Processing Errors (FC-4xxx) ───────────────────────────────────────────
 
 
