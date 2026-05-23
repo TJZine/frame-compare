@@ -10,6 +10,7 @@ from frame_compare.errors import (
     PluginNotFoundError,
     RenderError,
     SourceLoadError,
+    TonemapRequiresVapourSynthError,
     VapourSynthNotFoundError,
 )
 from frame_compare.render.batch.orchestrator import (
@@ -18,7 +19,6 @@ from frame_compare.render.batch.orchestrator import (
     render_screenshots,
     render_screenshots_from_batch,
 )
-from frame_compare.render.orchestrator import render_batch as legacy_render_batch
 from frame_compare.render.types import (
     EncoderSettings,
     RenderRequest,
@@ -51,10 +51,6 @@ def test_render_batch_sequential(mock_render_request):
         results = render_batch(requests, parallelism=1)
         assert results == [r.output_path for r in requests]
         assert mock_render.call_count == 3
-
-
-def test_legacy_orchestrator_import_reexports_batch_owner() -> None:
-    assert legacy_render_batch is render_batch
 
 
 def test_render_batch_parallel_order(mock_render_request):
@@ -399,7 +395,77 @@ def test_render_screenshots_from_batch_rejects_duplicate_labels(tmp_path) -> Non
     ffmpeg_runner.extract_frame.assert_not_called()
 
 
-def test_render_batch_parallel_fail_fast_no_wait() -> None:
+def test_render_screenshots_from_batch_rejects_duplicate_output_names_after_sanitization(
+    tmp_path: Path,
+) -> None:
+    config = ConfigSchema(color=ColorConfig(enable_tonemap=False), screenshots={"use_ffmpeg": True})
+    ffmpeg_runner = MagicMock()
+    req1 = ScreenshotBatchRequest(
+        clip_path=Path("vid1.mkv"),
+        label="A B",
+        source_frames=[42],
+        display_frames=[42],
+        selection_labels=[None],
+        probe_width=1920,
+        probe_height=1080,
+        probe_num_frames=240,
+        probe_is_hdr=False,
+    )
+    req2 = ScreenshotBatchRequest(
+        clip_path=Path("vid2.mkv"),
+        label="A_B",
+        source_frames=[42],
+        display_frames=[42],
+        selection_labels=[None],
+        probe_width=1920,
+        probe_height=1080,
+        probe_num_frames=240,
+        probe_is_hdr=False,
+    )
+
+    with pytest.raises(ValueError, match="Duplicate screenshot output 'A_B_00042.png'"):
+        render_screenshots_from_batch(
+            batch_requests=[req1, req2],
+            output_dir=tmp_path,
+            config=config,
+            overlay_mode=config.screenshots.overlay_mode,
+            ffmpeg_runner=ffmpeg_runner,
+        )
+
+    ffmpeg_runner.extract_frame.assert_not_called()
+
+
+def test_render_screenshots_from_batch_rejects_unknown_hdr_for_ffmpeg_tonemap(
+    tmp_path: Path,
+) -> None:
+    config = ConfigSchema(color=ColorConfig(enable_tonemap=True), screenshots={"use_ffmpeg": True})
+    ffmpeg_runner = MagicMock()
+    request = ScreenshotBatchRequest(
+        clip_path=Path("vid1.mkv"),
+        label="vid1",
+        source_frames=[42],
+        display_frames=[42],
+        selection_labels=[None],
+        probe_width=1920,
+        probe_height=1080,
+        probe_num_frames=240,
+        probe_is_hdr=None,
+    )
+
+    with pytest.raises(TonemapRequiresVapourSynthError):
+        render_screenshots_from_batch(
+            batch_requests=[request],
+            output_dir=tmp_path,
+            config=config,
+            overlay_mode=config.screenshots.overlay_mode,
+            renderer="ffmpeg",
+            ffmpeg_runner=ffmpeg_runner,
+        )
+
+    ffmpeg_runner.extract_frame.assert_not_called()
+
+
+def test_render_batch_parallel_waits_for_in_flight_work_before_raising() -> None:
     import time
 
     slow_started = Event()
@@ -436,7 +502,7 @@ def test_render_batch_parallel_fail_fast_no_wait() -> None:
         with pytest.raises(RuntimeError, match="Failed immediately"):
             render_batch(requests, parallelism=2)
         assert slow_started.is_set()
-        assert not slow_finished.is_set()
+        assert slow_finished.is_set()
 
 
 def test_render_screenshots_from_batch_happy_path(tmp_path) -> None:

@@ -87,36 +87,37 @@ def _render_batch_parallel(
     parallelism: int,
     reporter: ProgressReporter | None,
 ) -> None:
-    executor = ThreadPoolExecutor(max_workers=parallelism)
     futures: dict[Future[Path], int] = {}
     next_index = 0
     first_exception: Exception | None = None
 
-    try:
+    with ThreadPoolExecutor(max_workers=parallelism) as executor:
         while next_index < min(parallelism, len(requests)):
             _submit_render_request(executor, requests, futures, next_index)
             next_index += 1
 
         while futures:
             done, _ = wait(futures.keys(), return_when=FIRST_COMPLETED)
+            completed: list[tuple[int, Path]] = []
             for future in done:
                 index = futures.pop(future)
                 try:
-                    results[index] = future.result()
-                    _record_render_progress(reporter, requests[index])
+                    completed.append((index, future.result()))
                 except Exception as exc:
-                    first_exception = exc
-                    executor.shutdown(wait=False, cancel_futures=True)
-                    break
+                    if first_exception is None:
+                        first_exception = exc
 
-                if first_exception is None and next_index < len(requests):
-                    _submit_render_request(executor, requests, futures, next_index)
-                    next_index += 1
+            for index, rendered_path in completed:
+                results[index] = rendered_path
+                _record_render_progress(reporter, requests[index])
 
-            if first_exception is not None:
-                break
-    finally:
-        executor.shutdown(wait=first_exception is None, cancel_futures=True)
+            while (
+                first_exception is None
+                and next_index < len(requests)
+                and len(futures) < parallelism
+            ):
+                _submit_render_request(executor, requests, futures, next_index)
+                next_index += 1
 
     if first_exception is not None:
         raise first_exception
@@ -147,10 +148,9 @@ def render_batch(
 
     Raises:
         Exception: The first exception encountered during rendering (fail-fast).
-            Note that when executing in parallel, already-running tasks on other
-            threads will continue executing in the background after the exception
-            is raised, but no new tasks will be scheduled and the function returns
-            immediately.
+            Once a failure occurs, no new tasks are scheduled. Any work already
+            submitted to the executor is allowed to finish before the first
+            exception is re-raised.
     """
     if not requests:
         return []

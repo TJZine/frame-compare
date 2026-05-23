@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from frame_compare.render.naming import generate_screenshot_path
+from frame_compare.render.naming import generate_screenshot_name, generate_screenshot_path
 from frame_compare.render.prepare import prepare_clip_for_render
 from frame_compare.render.types import (
     EncoderSettings,
@@ -43,13 +43,12 @@ def validate_ffmpeg_batch_tonemap_gate(
     config: ConfigSchema,
     renderer: Renderer,
 ) -> None:
-    if (
-        renderer == "ffmpeg"
-        and config.color.enable_tonemap
-        and any(req.probe_is_hdr for req in batch_requests)
-    ):
-        from frame_compare.errors import TonemapRequiresVapourSynthError
+    if renderer != "ffmpeg" or not config.color.enable_tonemap:
+        return
 
+    from frame_compare.errors import TonemapRequiresVapourSynthError
+
+    if any(req.probe_is_hdr is not False for req in batch_requests):
         raise TonemapRequiresVapourSynthError()
 
 
@@ -64,11 +63,23 @@ def resolve_batch_ffmpeg_runner(ffmpeg_runner: FFmpegRunner | None) -> FFmpegRun
 
 def validate_batch_requests(batch_requests: list[ScreenshotBatchRequest]) -> None:
     seen_labels: set[str] = set()
+    seen_output_names: dict[str, tuple[str, int]] = {}
     for req in batch_requests:
         _validate_batch_request_lengths(req)
         if req.label in seen_labels:
             raise ValueError(f"Duplicate label {req.label!r} detected in batch requests")
         seen_labels.add(req.label)
+        for display_frame in req.display_frames:
+            output_name = generate_screenshot_name(req.label, display_frame)
+            prior = seen_output_names.get(output_name)
+            if prior is not None:
+                prior_label, prior_display_frame = prior
+                raise ValueError(
+                    f"Duplicate screenshot output {output_name!r} detected for "
+                    f"label={req.label!r}, display_frame={display_frame}; already produced by "
+                    f"label={prior_label!r}, display_frame={prior_display_frame}"
+                )
+            seen_output_names[output_name] = (req.label, display_frame)
 
 
 def _build_overlay_config(

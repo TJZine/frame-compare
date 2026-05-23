@@ -340,6 +340,37 @@ def test_execute_run_returns_success_and_records_preflight_timing(
     assert result.phase_timings["report"] == 0.0
 
 
+def test_execute_run_returns_preflight_and_runtime_warnings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prep = PrepState(
+        workspace=_workspace(tmp_path),
+        config=ConfigSchema(),
+        input_videos=[tmp_path / "reference.mkv"],
+        clips=[_clip_state(tmp_path / "reference.mkv", label="Reference")],
+        artifacts=RunArtifacts(warnings=["report: warned"]),
+        metadata_prefetched=False,
+        preflight_warnings=["preflight: warned"],
+        preflight_duration=0.0,
+        load_sources_start=datetime.now(),
+    )
+
+    async def fake_execute_prep(_request: RunRequest, _deps: RunDependencies) -> PrepState:
+        return prep
+
+    async def fake_execute_phases(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(coordinator, "execute_prep", fake_execute_prep)
+    monkeypatch.setattr(coordinator, "execute_phases", fake_execute_phases)
+    monkeypatch.setattr(coordinator, "emit_consolidated_fps_report", lambda *a, **kw: None)
+
+    result = asyncio.run(execute_run(RunRequest(root=tmp_path, quiet=True), deps=RunDependencies()))
+
+    assert result.success is True
+    assert result.warnings == ["preflight: warned", "report: warned"]
+
+
 def test_execute_run_ffmpeg_render_rejects_hdr_when_tonemap_enabled(
     tmp_path: Path,
 ) -> None:
