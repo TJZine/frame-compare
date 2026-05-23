@@ -23,7 +23,7 @@ from frame_compare.orchestration.context import (
     ClipState,
     RunContext,
 )
-from frame_compare.orchestration.types import RunArtifacts
+from frame_compare.orchestration.types import MetadataPrefetch, RenderArtifacts, RunArtifacts
 from frame_compare.render.ffmpeg import FFmpegRunner
 from frame_compare.services.alignment import align_clips, calculate_alignment_trims
 from frame_compare.services.errors import AudioAlignmentError
@@ -220,20 +220,18 @@ def run_render_phase(
         reporter=ctx.reporter,
     )
 
-    artifacts.screenshots_by_label = rendered
-    artifacts.screenshot_dir = output_dir
+    artifacts.render = RenderArtifacts(screenshots_by_label=rendered, screenshot_dir=output_dir)
 
 
 async def run_metadata_phase(
     ctx: RunContext,
     *,
     client: httpx.AsyncClient | None,
-    prefetched_metadata: TmdbMetadata | None,
-    metadata_prefetched: bool,
+    metadata_prefetch: MetadataPrefetch,
     artifacts: RunArtifacts,
 ) -> None:
-    if metadata_prefetched:
-        artifacts.resolved_metadata = prefetched_metadata
+    if metadata_prefetch.was_attempted:
+        artifacts.resolved_metadata = metadata_prefetch.metadata
         return
 
     if client is None or not ctx.config.tmdb.enabled:
@@ -278,13 +276,14 @@ def run_report_phase(
     frames: list[int],
     artifacts: RunArtifacts,
 ) -> None:
-    if not artifacts.screenshots_by_label:
+    if artifacts.render is None or not artifacts.render.screenshots_by_label:
         artifacts.report_path = None
         return
 
     clips = [ctx.reference, *ctx.comparisons]
     clip_info = [
-        clip_info_from_state(clip, artifacts.screenshots_by_label[clip.label]) for clip in clips
+        clip_info_from_state(clip, artifacts.render.screenshots_by_label[clip.label])
+        for clip in clips
     ]
     report_data = ReportData(
         clips=clip_info,

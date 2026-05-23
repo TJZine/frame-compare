@@ -30,6 +30,7 @@ from frame_compare.orchestration.probing import (
     save_clip_probe_cache,
 )
 from frame_compare.orchestration.types import (
+    MetadataPrefetch,
     PrepState,
     RunArtifacts,
     RunDependencies,
@@ -105,19 +106,19 @@ async def _resolve_run_directory(
     workspace: WorkspacePaths,
     config: ConfigSchema,
     input_videos: list[Path],
-    artifacts: RunArtifacts,
     deps: RunDependencies,
-) -> tuple[WorkspacePaths, bool]:
-    metadata_prefetched = False
+) -> tuple[WorkspacePaths, MetadataPrefetch]:
+    metadata = None
+    was_attempted = False
     if config.paths.use_run_folders:
         if deps.http_client is not None and config.tmdb.enabled and not request.skip_metadata:
             try:
-                artifacts.resolved_metadata = await resolve_run_metadata(
+                metadata = await resolve_run_metadata(
                     filenames=[input_videos[0].name],
                     config=config,
                     client=deps.http_client,
                 )
-                metadata_prefetched = True
+                was_attempted = True
             except (MetadataError, TmdbError, TmdbRateLimitedError) as exc:
                 log.warning(
                     "metadata_prefetch_degraded",
@@ -126,7 +127,6 @@ async def _resolve_run_directory(
                     error=str(exc),
                     exc_info=exc,
                 )
-                artifacts.resolved_metadata = None
 
         filenames = [video.name for video in input_videos]
         if request.from_cache_only:
@@ -136,11 +136,11 @@ async def _resolve_run_directory(
             run_dir = reserve_run_folder(
                 input_dir=workspace.input_dir,
                 filenames=filenames,
-                tmdb_metadata=artifacts.resolved_metadata,
+                tmdb_metadata=metadata,
             )
             new_workspace = workspace.with_run_dir(run_dir)
-        return new_workspace, metadata_prefetched
-    return workspace, metadata_prefetched
+        return new_workspace, MetadataPrefetch(metadata=metadata, was_attempted=was_attempted)
+    return workspace, MetadataPrefetch(metadata=None, was_attempted=False)
 
 
 def _validate_cache_state(
@@ -259,12 +259,11 @@ async def execute_prep(
     input_videos = discover_inputs(workspace.input_dir)
     artifacts = RunArtifacts()
 
-    workspace, metadata_prefetched = await _resolve_run_directory(
+    workspace, metadata_prefetch = await _resolve_run_directory(
         request=request,
         workspace=workspace,
         config=config,
         input_videos=input_videos,
-        artifacts=artifacts,
         deps=deps,
     )
 
@@ -287,7 +286,7 @@ async def execute_prep(
         input_videos=input_videos,
         clips=clips,
         artifacts=artifacts,
-        metadata_prefetched=metadata_prefetched,
+        metadata_prefetch=metadata_prefetch,
         preflight_warnings=preflight.warnings,
         preflight_duration=preflight_duration,
         load_sources_start=load_sources_start,

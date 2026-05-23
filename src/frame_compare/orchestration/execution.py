@@ -32,6 +32,7 @@ from frame_compare.orchestration.phases import Phase
 from frame_compare.orchestration.types import (
     ExecutionPhasePlan,
     ExecutionState,
+    MetadataPrefetch,
     PrepState,
     RunDependencies,
     RunRequest,
@@ -141,7 +142,7 @@ def build_phases_after_align(
     ffmpeg_runner: FFmpegRunner,
     http_client: httpx.AsyncClient | None,
     state: ExecutionState,
-    metadata_prefetched: bool,
+    metadata_prefetch: MetadataPrefetch,
 ) -> list[Phase]:
     return [
         _create_timed_phase(
@@ -165,8 +166,7 @@ def build_phases_after_align(
             partial(
                 run_metadata_phase,
                 client=http_client,
-                prefetched_metadata=state.artifacts.resolved_metadata,
-                metadata_prefetched=metadata_prefetched,
+                metadata_prefetch=metadata_prefetch,
                 artifacts=state.artifacts,
             ),
             clock=clock,
@@ -246,7 +246,7 @@ def build_execution_phase_plan(
         ffmpeg_runner=ffmpeg_runner,
         http_client=deps.http_client,
         state=state,
-        metadata_prefetched=prep.metadata_prefetched,
+        metadata_prefetch=prep.metadata_prefetch,
     )
     return ExecutionPhasePlan(
         before_align=before_align,

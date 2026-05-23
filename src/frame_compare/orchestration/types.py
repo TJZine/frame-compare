@@ -172,7 +172,7 @@ class RunArtifacts:
     @property
     def screenshots_by_label(self) -> dict[str, list[Path]]:
         if self.render is None:
-            self.render = RenderArtifacts({}, None)
+            return {}
         return self.render.screenshots_by_label
 
     @screenshots_by_label.setter
@@ -207,13 +207,19 @@ class ExecutionState:
 
 
 @dataclass(frozen=True)
+class MetadataPrefetch:
+    metadata: TmdbMetadata | None
+    was_attempted: bool
+
+
+@dataclass(frozen=True)
 class PrepState:
     workspace: WorkspacePaths
     config: ConfigSchema
     input_videos: list[Path]
     clips: list[ClipState]
     artifacts: RunArtifacts
-    metadata_prefetched: bool
+    metadata_prefetch: MetadataPrefetch
     preflight_warnings: list[str]
     preflight_duration: float
     load_sources_start: datetime

@@ -16,7 +16,12 @@ from frame_compare.orchestration.context import (
 )
 from frame_compare.orchestration.execution import build_phases_after_align
 from frame_compare.orchestration.phases import Phase, PhaseStatus, execute_phases
-from frame_compare.orchestration.types import ExecutionState, RunArtifacts, RunRequest
+from frame_compare.orchestration.types import (
+    ExecutionState,
+    MetadataPrefetch,
+    RunArtifacts,
+    RunRequest,
+)
 from frame_compare.utils.progress import NullProgressReporter
 from frame_compare.utils.types import WorkspacePaths
 
@@ -282,7 +287,7 @@ def test_publish_phase_skip_condition_uses_effective_slowpics_config() -> None:
         ffmpeg_runner=object(),
         http_client=None,
         state=state,
-        metadata_prefetched=False,
+        metadata_prefetch=MetadataPrefetch(None, False),
     )
 
     publish_phase = next(phase for phase in phases if phase.name == "publish")

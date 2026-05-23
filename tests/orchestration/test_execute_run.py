@@ -31,7 +31,12 @@ from frame_compare.orchestration.context import (
 )
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.orchestration.execution import build_execution_phase_plan
-from frame_compare.orchestration.types import ExecutionState, PrepState, RunArtifacts
+from frame_compare.orchestration.types import (
+    ExecutionState,
+    MetadataPrefetch,
+    PrepState,
+    RunArtifacts,
+)
 from frame_compare.services.alignment import CACHE_FILE_NAME
 from frame_compare.services.errors import AudioAlignmentError, TmdbError
 from frame_compare.services.run_folder import derive_run_folder_name
@@ -177,7 +182,7 @@ def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
             _clip_state(tmp_path / "comp_b.mkv", label="Encode 2"),
         ],
         artifacts=RunArtifacts(),
-        metadata_prefetched=False,
+        metadata_prefetch=MetadataPrefetch(None, False),
         preflight_warnings=[],
         preflight_duration=0.0,
         load_sources_start=datetime.now(),
@@ -349,7 +354,7 @@ def test_execute_run_returns_preflight_and_runtime_warnings(
         input_videos=[tmp_path / "reference.mkv"],
         clips=[_clip_state(tmp_path / "reference.mkv", label="Reference")],
         artifacts=RunArtifacts(warnings=["report: warned"]),
-        metadata_prefetched=False,
+        metadata_prefetch=MetadataPrefetch(None, False),
         preflight_warnings=["preflight: warned"],
         preflight_duration=0.0,
         load_sources_start=datetime.now(),
@@ -1284,8 +1289,7 @@ def test_run_metadata_phase_uses_prefetched_metadata_without_client(tmp_path: Pa
         phase_tasks.run_metadata_phase(
             ctx,
             client=None,
-            prefetched_metadata=expected_metadata,
-            metadata_prefetched=True,
+            metadata_prefetch=MetadataPrefetch(metadata=expected_metadata, was_attempted=True),
             artifacts=artifacts,
         )
     )

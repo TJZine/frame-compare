@@ -27,7 +27,7 @@ from frame_compare.orchestration.context import (
     ClipState,
     RunContext,
 )
-from frame_compare.orchestration.types import RunArtifacts
+from frame_compare.orchestration.types import MetadataPrefetch, RunArtifacts
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.publishers import PublishResult
 from frame_compare.services.types import AlignmentResult, MetadataConfig, TmdbMetadata
@@ -236,11 +236,15 @@ def test_run_analyze_phase_records_cache_hit_and_selection_breakdown(
     assert calls["select"] == {"metrics": metrics, "config": ctx.config.analysis}
 
 
-def test_run_artifacts_legacy_render_accessors_keep_mutations() -> None:
+def test_run_artifacts_legacy_render_accessors_do_not_mutate_on_read() -> None:
     artifacts = RunArtifacts()
-    screenshot = Path("screenshots/reference_1.png")
+    assert artifacts.screenshots_by_label == {}
+    assert artifacts.screenshot_dir is None
+    assert artifacts.render is None
 
-    artifacts.screenshots_by_label["Reference"] = [screenshot]
+    # Setting them still works and constructs RenderArtifacts
+    screenshot = Path("screenshots/reference_1.png")
+    artifacts.screenshots_by_label = {"Reference": [screenshot]}
     artifacts.screenshot_dir = Path("screenshots")
 
     assert artifacts.screenshots_by_label == {"Reference": [screenshot]}
@@ -361,8 +365,7 @@ async def test_run_metadata_phase_resolves_when_enabled_and_client_present(
         await phase_tasks.run_metadata_phase(
             ctx,
             client=client,
-            prefetched_metadata=None,
-            metadata_prefetched=False,
+            metadata_prefetch=MetadataPrefetch(None, False),
             artifacts=artifacts,
         )
         assert captured["client"] is client
