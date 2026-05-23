@@ -17,6 +17,7 @@ from frame_compare.render.batch.expansion import (
 from frame_compare.render.encoders import render_frame
 from frame_compare.render.prepare import is_hdr_via_runner
 from frame_compare.render.types import (
+    BatchRenderOptions,
     Renderer,
     RenderRequest,
     ScreenshotBatchRequest,
@@ -27,7 +28,6 @@ from frame_compare.utils.progress_protocol import ProgressReporter
 if TYPE_CHECKING:
     from frame_compare.config.schema import ConfigSchema
     from frame_compare.render.ffmpeg import FFmpegRunner
-    from frame_compare.render.types import OverlayMode
 
 log = structlog.get_logger()
 
@@ -244,10 +244,12 @@ def render_screenshots(
         batch_requests=batch_requests,
         output_dir=output_dir,
         config=config,
-        overlay_mode=resolved_options.overlay_mode,
-        renderer=resolved_options.renderer,
-        ffmpeg_runner=resolved_options.ffmpeg_runner,
-        reporter=resolved_options.reporter,
+        options=BatchRenderOptions(
+            renderer=resolved_options.renderer,
+            overlay_mode=resolved_options.overlay_mode,
+            reporter=resolved_options.reporter,
+            ffmpeg_runner=resolved_options.ffmpeg_runner,
+        ),
     )
 
 
@@ -255,10 +257,7 @@ def render_screenshots_from_batch(
     batch_requests: list[ScreenshotBatchRequest],
     output_dir: Path,
     config: ConfigSchema,
-    overlay_mode: OverlayMode,
-    renderer: Renderer = "auto",
-    ffmpeg_runner: FFmpegRunner | None = None,
-    reporter: ProgressReporter | None = None,
+    options: BatchRenderOptions | None = None,
 ) -> dict[str, list[Path]]:
     """Render screenshots from batch requests, choosing FFmpeg or VapourSynth path accordingly.
 
@@ -266,16 +265,14 @@ def render_screenshots_from_batch(
         batch_requests: List of ScreenshotBatchRequest
         output_dir: Output directory
         config: Configuration
-        overlay_mode: Overlay mode
-        renderer: Renderer choice ("vapoursynth", "ffmpeg", or "auto")
-        ffmpeg_runner: Optional FFmpegRunner
-        reporter: Optional progress reporter
+        options: Renderer, overlay, FFmpeg, and progress options
 
     Returns:
         Dict mapping label -> list of rendered screenshot paths
     """
-    resolved_ffmpeg_runner = resolve_batch_ffmpeg_runner(ffmpeg_runner)
-    target_renderer = resolve_target_renderer(config, renderer)
+    resolved_options = options or BatchRenderOptions()
+    resolved_ffmpeg_runner = resolve_batch_ffmpeg_runner(resolved_options.ffmpeg_runner)
+    target_renderer = resolve_target_renderer(config, resolved_options.renderer)
 
     validate_ffmpeg_batch_tonemap_gate(batch_requests, config, target_renderer)
     validate_batch_requests(batch_requests)
@@ -284,11 +281,10 @@ def render_screenshots_from_batch(
         batch_requests,
         output_dir=output_dir,
         config=config,
-        overlay_mode=overlay_mode,
+        overlay_mode=resolved_options.overlay_mode,
         renderer=target_renderer,
         ffmpeg_runner=resolved_ffmpeg_runner,
     )
 
-    # Execute all requests in a single batch
-    rendered_paths = render_batch(all_requests, parallelism=1, reporter=reporter)
+    rendered_paths = render_batch(all_requests, parallelism=1, reporter=resolved_options.reporter)
     return render_batch_results_by_label(batch_requests, rendered_paths, label_to_range)

@@ -71,6 +71,16 @@ Renderer = Literal["vapoursynth", "ffmpeg", "auto"]
 
 
 @dataclass(frozen=True)
+class BatchRenderOptions:
+    """Options for rendering pre-expanded screenshot batch requests."""
+
+    renderer: Renderer = "auto"
+    overlay_mode: OverlayMode = OverlayMode.STANDARD
+    reporter: ProgressReporter | None = None
+    ffmpeg_runner: FFmpegRunner | None = None
+
+
+@dataclass(frozen=True)
 class ScreenshotRenderOptions:
     """Convenience options for render_screenshots."""
 

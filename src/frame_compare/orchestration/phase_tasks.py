@@ -176,7 +176,7 @@ def run_render_phase(
     artifacts: RunArtifacts,
 ) -> None:
     from frame_compare.render.batch.orchestrator import render_screenshots_from_batch
-    from frame_compare.render.types import ScreenshotBatchRequest
+    from frame_compare.render.types import BatchRenderOptions, ScreenshotBatchRequest
 
     clips_state = [ctx.reference, *ctx.comparisons]
     output_dir = ctx.workspace.screenshots_dir
@@ -215,9 +215,11 @@ def run_render_phase(
         batch_requests=batch_requests,
         output_dir=output_dir,
         config=ctx.config,
-        overlay_mode=overlay_mode,
-        ffmpeg_runner=runner,
-        reporter=ctx.reporter,
+        options=BatchRenderOptions(
+            overlay_mode=overlay_mode,
+            ffmpeg_runner=runner,
+            reporter=ctx.reporter,
+        ),
     )
 
     artifacts.render = RenderArtifacts(screenshots_by_label=rendered, screenshot_dir=output_dir)

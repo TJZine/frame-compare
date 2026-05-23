@@ -480,10 +480,11 @@ def test_run_render_phase_maps_aligned_frames_to_source_frames(
         _fake_render_screenshots_from_batch,
     )
 
+    runner = cast(Any, _RenderRunner())
     phase_tasks.run_render_phase(
         ctx,
         frames=[1],
-        runner=cast(Any, _RenderRunner()),
+        runner=runner,
         artifacts=artifacts,
     )
 
@@ -494,4 +495,8 @@ def test_run_render_phase_maps_aligned_frames_to_source_frames(
     assert requests[1].source_frames == [2]
     assert captured["output_dir"] == ctx.workspace.screenshots_dir
     assert artifacts.screenshots_by_label == {"Reference": [tmp_path / "reference.png"]}
+    options = captured["options"]
+    assert options.overlay_mode == ctx.config.screenshots.overlay_mode
+    assert options.ffmpeg_runner is runner
+    assert options.reporter is ctx.reporter
     assert artifacts.screenshot_dir == ctx.workspace.screenshots_dir
