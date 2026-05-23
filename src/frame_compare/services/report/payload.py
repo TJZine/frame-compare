@@ -6,12 +6,50 @@ import base64
 import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from fractions import Fraction
 from pathlib import Path
-from typing import TypedDict
+from typing import Protocol, TypedDict
 
 from frame_compare.config.schema import ReportConfig
 from frame_compare.errors import ReportError
 from frame_compare.services.types import TmdbMetadata
+
+
+class ClipProbeProtocol(Protocol):
+    @property
+    def num_frames(self) -> int: ...
+    @property
+    def width(self) -> int: ...
+    @property
+    def height(self) -> int: ...
+    @property
+    def is_hdr(self) -> bool: ...
+
+
+class ClipStateProtocol(Protocol):
+    @property
+    def label(self) -> str: ...
+    @property
+    def path(self) -> Path: ...
+    @property
+    def probe(self) -> ClipProbeProtocol: ...
+    @property
+    def effective_fps(self) -> Fraction: ...
+
+
+def clip_info_from_state(clip: ClipStateProtocol, screenshots: list[Path]) -> ClipInfo:
+    """Map clip state protocol to ClipInfo DTO."""
+    return ClipInfo(
+        name=clip.label,
+        path=clip.path,
+        frame_count=clip.probe.num_frames,
+        resolution=(clip.probe.width, clip.probe.height),
+        fps=float(clip.effective_fps),
+        hdr=clip.probe.is_hdr,
+        label=clip.label,
+        screenshots=screenshots,
+    )
+
 
 REPORT_VERSION = "1.0"
 
