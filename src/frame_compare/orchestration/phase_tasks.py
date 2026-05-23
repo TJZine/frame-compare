@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 
@@ -32,6 +33,9 @@ from frame_compare.services.report.entry import generate_report
 from frame_compare.services.report.payload import ReportData, clip_info_from_state
 from frame_compare.services.types import AlignmentConfig, MetadataConfig, TmdbMetadata
 from frame_compare.utils.types import WorkspacePaths
+
+if TYPE_CHECKING:
+    from frame_compare.vs.loader import VSLoader
 
 
 def build_metadata_config(config: ConfigSchema) -> MetadataConfig:
@@ -73,6 +77,7 @@ def run_analyze_phase(
     workspace: WorkspacePaths,
     selected_frames: list[int],
     artifacts: RunArtifacts,
+    vs_loader: VSLoader | None = None,
 ) -> None:
     fingerprint = cache_io.compute_cache_key(input_videos, ctx.config.analysis)
     cache_result = cache_io.load_cached_metrics(workspace.cache_dir, fingerprint, clips=[])
@@ -82,6 +87,7 @@ def run_analyze_phase(
         config=ctx.config.analysis,
         cache_dir=workspace.cache_dir,
         reporter=ctx.reporter,
+        vs_loader=vs_loader,
     )
     selection = select_frames(metrics=metrics, config=ctx.config.analysis)
     selected_frames[:] = selection.frames

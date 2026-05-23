@@ -7,6 +7,10 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 from functools import partial
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from frame_compare.vs.loader import VSLoader
 
 import httpx
 
@@ -87,6 +91,7 @@ def build_phases_before_align(
     state: ExecutionState,
     input_videos: list[Path],
     workspace: WorkspacePaths,
+    vs_loader: VSLoader | None = None,
 ) -> list[Phase]:
     return [
         _create_timed_phase(
@@ -108,6 +113,7 @@ def build_phases_before_align(
                 workspace=workspace,
                 selected_frames=state.selected_frames,
                 artifacts=state.artifacts,
+                vs_loader=vs_loader,
             ),
             clock=clock,
             phase_timings=state.phase_timings,
@@ -227,6 +233,7 @@ def build_execution_phase_plan(
         state=state,
         input_videos=prep.input_videos,
         workspace=prep.workspace,
+        vs_loader=deps.vs_loader,
     )
 
     ffmpeg_runner = deps.ffmpeg_runner

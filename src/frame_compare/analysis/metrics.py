@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     import vapoursynth as vs  # type: ignore
 
     from frame_compare.config.schema import AnalysisConfig
+    from frame_compare.vs.loader import VSLoader
 
 
 log = structlog.get_logger()
@@ -45,6 +46,7 @@ def calculate_metrics(
     config: AnalysisConfig,
     cache_dir: Path,
     reporter: ProgressReporter | None = None,
+    vs_loader: VSLoader | None = None,
 ) -> FrameMetrics:
     """
     Calculate frame metrics for the given clips.
@@ -57,6 +59,7 @@ def calculate_metrics(
         config: Analysis configuration
         cache_dir: Directory for cache files
         reporter: Optional progress reporter
+        vs_loader: Optional VapourSynth clip loader seam
 
     Returns:
         FrameMetrics with luminance and motion arrays
@@ -91,7 +94,7 @@ def calculate_metrics(
 
     # Cache miss or invalid - compute metrics for reference clip only
     reference_path = video_paths[0]
-    loader = DefaultVSLoader()
+    loader = vs_loader or DefaultVSLoader()
     try:
         source = loader.load(reference_path)
     except (PluginNotFoundError, SourceLoadError):
