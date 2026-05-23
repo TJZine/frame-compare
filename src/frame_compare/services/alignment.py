@@ -441,6 +441,7 @@ def save_offsets_cache(
             with cache_path.open("rb") as f:
                 existing_data = cast(dict[str, object], tomllib.load(f))
             _normalize_legacy_cache_entries(existing_data)
+            existing_data.pop("version", None)
             data.update(existing_data)
         except (tomllib.TOMLDecodeError, OSError, KeyError, TypeError, ValueError) as exc:
             log.warning(
@@ -611,6 +612,12 @@ def calculate_alignment_trims(
         A tuple where the first element is (ref_trim_start, ref_trim_end)
         and the second element is a list of (comp_trim_start, comp_trim_end) for each comparison.
     """
+    if len(comp_offsets) != len(comp_num_frames):
+        raise ValueError(
+            "comp_offsets and comp_num_frames must have matching lengths "
+            f"({len(comp_offsets)} != {len(comp_num_frames)})"
+        )
+
     offsets = [offset for offset in comp_offsets if offset is not None]
     if not offsets:
         return (0, ref_num_frames - 1), [(0, num - 1) for num in comp_num_frames]

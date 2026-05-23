@@ -15,7 +15,7 @@
     --success: #4caf50;
     --divider: #5ba4e6;
 
-    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, sans-serif;
+    --font-sans: -apple-system, "BlinkMacSystemFont", "Segoe UI", Roboto, Oxygen, Ubuntu, sans-serif;
     --font-mono: "SF Mono", Monaco, "Cascadia Code", Consolas, monospace;
     --text-xs: 0.75rem;
     --text-sm: 0.875rem;
@@ -96,6 +96,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     align-items: center;
     justify-content: center;
     user-select: none;
+    touch-action: none;
 }
 
 .rv-canvas {
@@ -135,6 +136,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .rv-mode-slider .rv-right { z-index: 1; }
 
 .rv-divider {
+    display: none;
     position: absolute;
     top: 0; bottom: 0;
     left: calc(100% - var(--reveal-percent, 50%));

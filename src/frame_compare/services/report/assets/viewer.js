@@ -114,44 +114,56 @@ const ReportViewer = {
             }
         });
 
-        // Slider Drag
+        // Pointer interactions
         let isDragging = false;
-        const handleMove = (e) => {
-            if (!isDragging && this.state.mode !== 'slider') return;
-
-            // Allow click-to-set for slider even if not dragging divider
-            if (!isDragging && e.type === 'mousemove') return;
-
+        let activePointerId = null;
+        const captureStagePointer = (e) => {
+            activePointerId = e.pointerId;
+            this.dom.stage.setPointerCapture?.(e.pointerId);
+        };
+        const updateSliderFromPointer = (e) => {
             const rect = this.dom.stage.getBoundingClientRect();
-            const x = (e.clientX || e.touches[0].clientX) - rect.left;
+            if (rect.width <= 0) return;
+            const x = e.clientX - rect.left;
             let percent = (1 - (x / rect.width)) * 100;
             percent = Math.max(0, Math.min(100, percent));
 
             this.state.revealPercent = percent;
             this.updateSlider();
         };
+        const stopPointerInteraction = (e) => {
+            if (activePointerId !== null && e.pointerId !== activePointerId) return;
+            if (this.dom.stage.hasPointerCapture?.(e.pointerId)) {
+                this.dom.stage.releasePointerCapture(e.pointerId);
+            }
+            isDragging = false;
+            activePointerId = null;
+            if (this.state.mode === 'blink') this.state.blinkPaused = false;
+        };
 
-        this.dom.divider.addEventListener('mousedown', () => isDragging = true);
-        this.dom.stage.addEventListener('mousedown', (e) => {
+        this.dom.stage.addEventListener('pointerdown', (e) => {
             if (this.state.mode === 'slider') {
                 isDragging = true;
-                handleMove(e);
+                captureStagePointer(e);
+                updateSliderFromPointer(e);
+                e.preventDefault();
             } else if (this.state.mode === 'overlay' || this.state.mode === 'diff') {
                  // Click to swap/cycle in overlay/diff
                  this.cycleClip();
             } else if (this.state.mode === 'blink') {
                  // Pause blink on hold
+                 captureStagePointer(e);
                  this.state.blinkPaused = true;
             }
         });
 
-        window.addEventListener('mouseup', () => {
-            isDragging = false;
-            if (this.state.mode === 'blink') this.state.blinkPaused = false;
+        this.dom.stage.addEventListener('pointermove', (e) => {
+            if (!isDragging || e.pointerId !== activePointerId) return;
+            updateSliderFromPointer(e);
+            e.preventDefault();
         });
-        window.addEventListener('mousemove', (e) => {
-            if (isDragging) handleMove(e);
-        });
+        this.dom.stage.addEventListener('pointerup', stopPointerInteraction);
+        this.dom.stage.addEventListener('pointercancel', stopPointerInteraction);
 
         // Filmstrip
         this.dom.filmstrip.addEventListener('click', (e) => {

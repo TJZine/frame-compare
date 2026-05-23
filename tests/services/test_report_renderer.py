@@ -10,6 +10,7 @@ import pytest
 
 from frame_compare.services.report.payload import ReportPayload
 from frame_compare.services.report.renderer import build_html
+from frame_compare.services.report.viewer import get_css, get_js
 
 
 @dataclass
@@ -195,3 +196,20 @@ def test_build_html_toggles_filmstrip_visibility(report_payload: ReportPayload) 
     assert 'aria-label="Frame thumbnails disabled"' in hidden_html
     assert 'aria-hidden="true"' in hidden_html
     assert 'class="rv-filmstrip-item"' not in hidden_html
+
+
+def test_viewer_assets_keep_divider_slider_only_and_pointer_safe() -> None:
+    css = get_css()
+    js = get_js()
+
+    assert '--font-sans: -apple-system, "BlinkMacSystemFont", "Segoe UI"' in css
+    assert ".rv-viewer-stage" in css
+    assert "touch-action: none;" in css
+    assert ".rv-divider {\n    display: none;" in css
+    assert ".rv-mode-slider .rv-divider { display: block; }" in css
+
+    assert "addEventListener('pointerdown'" in js
+    assert "addEventListener('pointermove'" in js
+    assert "addEventListener('pointercancel'" in js
+    assert "e.touches[0]" not in js
+    assert "e.clientX ||" not in js
