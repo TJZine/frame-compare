@@ -90,7 +90,7 @@ class TestResolvePaths:
 
     def test_resolve_paths_relative_to_root(self, tmp_path: Path) -> None:
         """Given config with relative paths → resolves relative to root."""
-        from frame_compare.config import ConfigSchema, PathsConfig
+        from frame_compare.config.schema import ConfigSchema, PathsConfig
 
         config = ConfigSchema(
             paths=PathsConfig(
@@ -115,7 +115,7 @@ class TestResolvePaths:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Given config with env var input_dir → resolved path expands env var."""
-        from frame_compare.config import ConfigSchema, PathsConfig
+        from frame_compare.config.schema import ConfigSchema, PathsConfig
 
         test_root = str(tmp_path)
         monkeypatch.setenv("TEST_ROOT", test_root)

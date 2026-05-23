@@ -6,7 +6,7 @@ from typing import Any, cast
 
 import pytest
 
-from frame_compare.config import ConfigSchema
+from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import (
     ClipFingerprint,
     ClipProbeSnapshot,

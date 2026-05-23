@@ -48,6 +48,8 @@ High-level layering:
 
 Working rule: keep new code inside the existing owner module unless there is a strong reason to create a new top-level boundary and update `importlinter.ini` in the same pass.
 
+Package-Root Export Policy: Top-level packages (`config`, `analysis`, `render`, `services`) act as namespace shells by default to keep module ownership explicit. Curated lazy facades are permitted only for selected integration layers (like `orchestration` and `vs`) where eager loading would trigger heavy optional dependencies (e.g. VapourSynth) during CLI import/startup.
+
 ## Persistence And Filesystem Owners
 
 The repo uses filesystem persistence, not a database.

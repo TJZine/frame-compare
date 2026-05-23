@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from fractions import Fraction
 from pathlib import Path
 
-from frame_compare.config import ConfigSchema
+from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import (
     ClipFingerprint,
     ClipProbeSnapshot,

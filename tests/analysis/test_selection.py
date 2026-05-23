@@ -4,7 +4,7 @@ import pytest
 
 from frame_compare.analysis.selection import MIN_GAP, select_frames
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
-from frame_compare.config import AnalysisConfig, SelectionMode
+from frame_compare.config.schema import AnalysisConfig, SelectionMode
 from frame_compare.errors import SelectionError
 
 

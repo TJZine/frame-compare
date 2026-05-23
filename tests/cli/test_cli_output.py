@@ -7,7 +7,8 @@ from _pytest.monkeypatch import MonkeyPatch
 from rich.console import Console
 
 from frame_compare.cli.output import print_at_a_glance, print_result_summary
-from frame_compare.config import ConfigSchema, get_default_config
+from frame_compare.config.loader import get_default_config
+from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration import RunRequest, RunResult
 
 

@@ -11,7 +11,7 @@ from frame_compare.analysis.types import (
     MetricsMetadata,
     SelectionBreakdown,
 )
-from frame_compare.config import SelectionMode
+from frame_compare.config.schema import SelectionMode
 
 
 def test_clip_identity_creation():

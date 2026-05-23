@@ -7,7 +7,7 @@ import pytest
 from PIL import Image
 
 from frame_compare.analysis.types import SelectionBreakdown
-from frame_compare.config import ConfigSchema
+from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import (
     ClipFingerprint,
     ClipProbeSnapshot,

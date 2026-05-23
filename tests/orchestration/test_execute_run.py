@@ -14,7 +14,8 @@ import pytest
 from PIL import Image
 
 import frame_compare.analysis.cache_io as cache_io
-from frame_compare.config import ConfigSchema, OverlayMode, TonemapPreset, load_config
+from frame_compare.config.loader import load_config
+from frame_compare.config.schema import ConfigSchema, OverlayMode, TonemapPreset
 from frame_compare.errors import (
     AudioAlignmentError,
     CacheCorruptionError,

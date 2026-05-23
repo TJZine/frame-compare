@@ -18,7 +18,8 @@ from frame_compare.analysis.types import (
     MetricsMetadata,
     SelectionBreakdown,
 )
-from frame_compare.config import ConfigSchema, SelectionMode, load_config
+from frame_compare.config.loader import load_config
+from frame_compare.config.schema import ConfigSchema, SelectionMode
 from frame_compare.errors import AudioAlignmentError
 from frame_compare.orchestration import phase_tasks
 from frame_compare.orchestration.context import (
