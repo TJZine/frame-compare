@@ -428,6 +428,42 @@ def test_save_offsets_cache_normalizes_legacy_method_keys(tmp_path: Path) -> Non
     assert content.count('algorithm = "cross_correlation"') == 2
 
 
+def test_save_offsets_cache_discards_invalid_existing_cache(tmp_path: Path) -> None:
+    cache_file = tmp_path / "audio_offsets.toml"
+    existing = {
+        "version": "1",
+        "ref:stale": {
+            "reference_clip": "ref.mkv",
+            "comparison_clip": "stale.mkv",
+            "frame_offset": 42,
+            "time_offset_seconds": 1.751,
+            "correlation_score": 0.987,
+            "algorithm": "unsupported_alg_name",
+        },
+    }
+    cache_file.write_text(tomli_w.dumps(existing), encoding="utf-8")
+
+    save_offsets_cache(
+        tmp_path,
+        [
+            AlignmentResult(
+                reference_clip="ref.mkv",
+                comparison_clip="comp.mkv",
+                frame_offset=10,
+                time_offset_seconds=0.4,
+                correlation_score=0.9,
+                algorithm="cross_correlation",
+                source="computed",
+            )
+        ],
+    )
+
+    content = cache_file.read_text(encoding="utf-8")
+    assert '["ref:stale"]' not in content
+    assert '["ref:comp"]' in content
+    assert 'algorithm = "cross_correlation"' in content
+
+
 def test_save_offsets_cache_logs_corrupt_existing_cache(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
