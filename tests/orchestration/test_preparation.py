@@ -9,12 +9,13 @@ from typing import Any, cast
 
 import pytest
 
-from frame_compare.analysis import cache_io
-from frame_compare.errors import AudioAlignmentError, MetricsCalculationError
+import frame_compare.analysis.cache_io as cache_io
+from frame_compare.errors import MetricsCalculationError
 from frame_compare.orchestration import preparation
-from frame_compare.orchestration.probe_cache import load_clip_probe_cache
+from frame_compare.orchestration.probing import load_clip_probe_cache
 from frame_compare.orchestration.types import RunDependencies, RunRequest
 from frame_compare.services.alignment import CACHE_FILE_NAME
+from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.vs.types import SourceInfo
 
 MINIMAL_CONFIG = """\

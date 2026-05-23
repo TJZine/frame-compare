@@ -76,14 +76,7 @@ def find_common_metadata(filenames: list[str]) -> tuple[str | None, int | None]:
 
 
 def _combine_filename_stems(filenames: list[str]) -> str:
-    """Create a combined name from filename stems.
-
-    Args:
-        filenames: List of video filenames
-
-    Returns:
-        Combined folder name from sanitized stems
-    """
+    """Create a combined name from filename stems."""
     if not filenames:
         return _UNNAMED_RUN_BASE
 
@@ -198,16 +191,7 @@ def derive_run_folder_name(
 
 
 def get_existing_run_folders(input_dir: Path) -> list[str]:
-    """Get list of existing run folder names in input directory.
-
-    Filters to only include directories (not files).
-
-    Args:
-        input_dir: Path to input directory (e.g., comparison_videos/)
-
-    Returns:
-        List of existing folder names
-    """
+    """Get list of existing run folder names in input directory, filtering to only include directories."""
     if not input_dir.exists():
         return []
     if not input_dir.is_dir():

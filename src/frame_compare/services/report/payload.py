@@ -4,14 +4,52 @@ from __future__ import annotations
 
 import base64
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from fractions import Fraction
 from pathlib import Path
-from typing import TypedDict
+from typing import Protocol, TypedDict
 
 from frame_compare.config.schema import ReportConfig
-from frame_compare.errors import ReportError
+from frame_compare.services.errors import ReportError
 from frame_compare.services.types import TmdbMetadata
+
+
+class ClipProbeProtocol(Protocol):
+    @property
+    def num_frames(self) -> int: ...
+    @property
+    def width(self) -> int: ...
+    @property
+    def height(self) -> int: ...
+    @property
+    def is_hdr(self) -> bool: ...
+
+
+class ClipStateProtocol(Protocol):
+    @property
+    def label(self) -> str: ...
+    @property
+    def path(self) -> Path: ...
+    @property
+    def probe(self) -> ClipProbeProtocol: ...
+    @property
+    def effective_fps(self) -> Fraction: ...
+
+
+def clip_info_from_state(clip: ClipStateProtocol, screenshots: list[Path]) -> ClipInfo:
+    """Map clip state protocol to ClipInfo DTO."""
+    return ClipInfo(
+        name=clip.label,
+        path=clip.path,
+        frame_count=clip.probe.num_frames,
+        resolution=(clip.probe.width, clip.probe.height),
+        fps=float(clip.effective_fps),
+        hdr=clip.probe.is_hdr,
+        label=clip.label,
+        screenshots=screenshots,
+    )
+
 
 REPORT_VERSION = "1.0"
 
@@ -61,6 +99,7 @@ class ClipInfo:
     fps: float  # Frames per second
     hdr: bool  # True if HDR source
     label: str | None = None  # Short label for UI (e.g., "REF", "ENC")
+    screenshots: list[Path] = field(default_factory=list[Path])
 
 
 @dataclass(frozen=True)
@@ -69,7 +108,6 @@ class ReportData:
 
     clips: list[ClipInfo]  # At least 2 clips for comparison
     frames: list[int]  # Selected frame numbers
-    screenshots: dict[str, list[Path]]  # clip_name → [frame_paths] in order
     metadata: TmdbMetadata | None = None  # Optional TMDB info
     slowpics_url: str | None = None  # Link if uploaded
 
@@ -117,7 +155,7 @@ def build_frame_payloads(
     for i, frame_num in enumerate(data.frames):
         frame_images: list[ReportImagePayload] = []
         for clip in data.clips:
-            screenshot_path = data.screenshots[clip.name][i]
+            screenshot_path = clip.screenshots[i]
 
             if not screenshot_path.exists():
                 raise ReportError(f"screenshot not found: {screenshot_path}")
@@ -155,12 +193,7 @@ def image_src_for_report(screenshot_path: Path, *, report_dir: Path, embed_image
 
     try:
         # Use relative path for portability if possible.
-        return str(Path(os_path_relpath(screenshot_path, report_dir)).as_posix())
+        return str(Path(os.path.relpath(screenshot_path, report_dir)).as_posix())
     except ValueError:
         # Use a browser-safe URI when Windows drives prevent a relative path.
         return screenshot_path.resolve().as_uri()
-
-
-def os_path_relpath(path: Path, start: Path) -> str:
-    """Wrapper for os.path.relpath to handle Path objects."""
-    return os.path.relpath(path, start)

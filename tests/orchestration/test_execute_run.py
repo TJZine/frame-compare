@@ -13,16 +13,14 @@ import httpx
 import pytest
 from PIL import Image
 
-from frame_compare.analysis import cache_io
-from frame_compare.config import ConfigSchema, OverlayMode, TonemapPreset, load_config
+import frame_compare.analysis.cache_io as cache_io
+from frame_compare.config.errors import ConfigNotFoundError
+from frame_compare.config.loader import load_config
+from frame_compare.config.schema import ConfigSchema, OverlayMode, TonemapPreset
 from frame_compare.errors import (
-    AudioAlignmentError,
     CacheCorruptionError,
     CacheVersionMismatchError,
-    ConfigNotFoundError,
     MetricsCalculationError,
-    TmdbError,
-    TonemapRequiresVapourSynthError,
 )
 from frame_compare.orchestration import coordinator, phase_tasks, preparation
 from frame_compare.orchestration.context import (
@@ -33,11 +31,13 @@ from frame_compare.orchestration.context import (
 )
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
 from frame_compare.orchestration.execution import build_execution_phase_plan
-from frame_compare.orchestration.types import PrepState, RunArtifacts
+from frame_compare.orchestration.types import ExecutionState, PrepState, RunArtifacts
 from frame_compare.services.alignment import CACHE_FILE_NAME
+from frame_compare.services.errors import AudioAlignmentError, TmdbError
 from frame_compare.services.run_folder import derive_run_folder_name
 from frame_compare.services.types import AlignmentResult, MetadataConfig, TmdbMetadata
 from frame_compare.utils.types import WorkspacePaths
+from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 from frame_compare.vs.types import HDRMetadata, SourceInfo
 
 # Minimal valid TOML config content
@@ -187,8 +187,7 @@ def test_build_execution_phase_plan_preserves_align_boundary_and_progress_total(
         request=RunRequest(root=tmp_path),
         deps=RunDependencies(ffmpeg_runner=FakeFFmpegRunner()),
         prep=prep,
-        phase_timings={},
-        selected_frames=[],
+        state=ExecutionState(artifacts=prep.artifacts),
     )
 
     assert [phase.name for phase in plan.before_align] == ["frame_plan", "analyze", "align"]
@@ -339,6 +338,37 @@ def test_execute_run_returns_success_and_records_preflight_timing(
     assert result.phase_timings["dovi"] == 0.0
     assert result.phase_timings["publish"] == 0.0
     assert result.phase_timings["report"] == 0.0
+
+
+def test_execute_run_returns_preflight_and_runtime_warnings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prep = PrepState(
+        workspace=_workspace(tmp_path),
+        config=ConfigSchema(),
+        input_videos=[tmp_path / "reference.mkv"],
+        clips=[_clip_state(tmp_path / "reference.mkv", label="Reference")],
+        artifacts=RunArtifacts(warnings=["report: warned"]),
+        metadata_prefetched=False,
+        preflight_warnings=["preflight: warned"],
+        preflight_duration=0.0,
+        load_sources_start=datetime.now(),
+    )
+
+    async def fake_execute_prep(_request: RunRequest, _deps: RunDependencies) -> PrepState:
+        return prep
+
+    async def fake_execute_phases(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(coordinator, "execute_prep", fake_execute_prep)
+    monkeypatch.setattr(coordinator, "execute_phases", fake_execute_phases)
+    monkeypatch.setattr(coordinator, "emit_consolidated_fps_report", lambda *a, **kw: None)
+
+    result = asyncio.run(execute_run(RunRequest(root=tmp_path, quiet=True), deps=RunDependencies()))
+
+    assert result.success is True
+    assert result.warnings == ["preflight: warned", "report: warned"]
 
 
 def test_execute_run_ffmpeg_render_rejects_hdr_when_tonemap_enabled(
@@ -1338,7 +1368,8 @@ def test_run_report_phase_builds_report_from_current_clip_artifacts(
     report_data = captured["report_data"]
     assert artifacts.report_path == expected_report_path
     assert report_data.frames == [7, 11]
-    assert report_data.screenshots == artifacts.screenshots_by_label
+    assert report_data.clips[0].screenshots == artifacts.screenshots_by_label["Reference"]
+    assert report_data.clips[1].screenshots == artifacts.screenshots_by_label["Encode 1"]
     assert report_data.metadata == metadata
     assert report_data.slowpics_url == "https://slow.pics/c/collateral"
     assert [(clip.name, clip.frame_count) for clip in report_data.clips] == [

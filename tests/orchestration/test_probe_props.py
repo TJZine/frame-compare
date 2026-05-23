@@ -1,6 +1,6 @@
 """Tests for probe prop key selection and preservation helpers."""
 
-from frame_compare.orchestration.probe_props import (
+from frame_compare.orchestration.probing import (
     compute_preserved_frame_props,
     compute_tonemap_prop_keys,
     normalize_probe_prop_key,

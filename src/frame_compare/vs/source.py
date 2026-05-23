@@ -5,8 +5,8 @@ from __future__ import annotations
 from fractions import Fraction
 from typing import TYPE_CHECKING
 
-from frame_compare.errors import SourceLoadError
 from frame_compare.vs.env import ensure_vs_environment, require_plugin
+from frame_compare.vs.errors import SourceLoadError
 from frame_compare.vs.props import detect_hdr
 from frame_compare.vs.types import SourceInfo
 
@@ -29,7 +29,7 @@ def load_source(path: Path, core: vs.Core | None = None) -> SourceInfo:
     # Propagates PluginNotFoundError (FC-2003) if lsmas missing
     require_plugin(core, "lsmas")
 
-    # Loader selection per SSOT 1.4 Plugin Detection:
+    # Loader selection:
     # Check for LWLibavSource on the namespace, not just namespace existence
     if hasattr(core, "lsmas") and hasattr(core.lsmas, "LWLibavSource"):
         loader = core.lsmas
@@ -62,6 +62,7 @@ def apply_trim(source: SourceInfo, start: int, end: int | None = None) -> vs.Vid
     """Apply frame trim to clip.
 
     Args:
+        source: Loaded source metadata whose clip will be trimmed.
         start: First frame to include (0-indexed, inclusive)
         end: Last frame to include (0-indexed, inclusive).
              If None, trims to end of clip.

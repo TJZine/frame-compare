@@ -7,7 +7,7 @@ import sys
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from frame_compare.errors import PluginNotFoundError, VapourSynthError, VapourSynthNotFoundError
+from frame_compare.vs.errors import PluginNotFoundError, VapourSynthError, VapourSynthNotFoundError
 
 if TYPE_CHECKING:
     import vapoursynth as vs  # type: ignore

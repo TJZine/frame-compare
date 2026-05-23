@@ -139,7 +139,7 @@ icd="$(ls /usr/share/vulkan/icd.d/lvp_icd.*.json 2>/dev/null | head -n 1 || true
 if [[ -n "$icd" ]]; then
   export VK_ICD_FILENAMES="$icd"
 fi
-python -c "import pytest" >/dev/null 2>&1 || python -m pip install --user -q pytest &&
+python -c "import pytest, pytest_mock" >/dev/null 2>&1 || python -m pip install --user -q pytest pytest-mock &&
 pytest_cache_dir="$(mktemp -d /tmp/frame-compare-pytest-cache.XXXXXX)"
 trap 'rm -rf "$pytest_cache_dir"' EXIT
 EOF

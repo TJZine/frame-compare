@@ -28,7 +28,7 @@ This skill is based on official Typer, Click, and Rich documentation plus Frame 
 
 1. [`docs/current-cli-contract.md`](../../../docs/current-cli-contract.md)
 2. [`docs/ENGINEERING_RUNBOOK.md`](../../../docs/ENGINEERING_RUNBOOK.md)
-3. [`src/frame_compare/cli_entry.py`](../../../src/frame_compare/cli_entry.py)
+3. [`src/frame_compare/cli/entry.py`](../../../src/frame_compare/cli/entry.py)
 4. [`src/frame_compare/config/overrides.py`](../../../src/frame_compare/config/overrides.py) when flags map to config
 5. Existing tests in `tests/cli/`, `tests/config/`, `tests/e2e/`, and [`tests/test_cli_contract_docs.py`](../../../tests/test_cli_contract_docs.py)
 

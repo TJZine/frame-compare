@@ -11,10 +11,12 @@ from pathlib import Path
 
 import httpx
 
-from frame_compare.analysis import cache_io, calculate_metrics, create_frame_plan, select_frames
+import frame_compare.analysis.cache_io as cache_io
+from frame_compare.analysis.frame_plan import create_frame_plan
+from frame_compare.analysis.metrics import calculate_metrics
+from frame_compare.analysis.selection import select_frames
 from frame_compare.analysis.types import SelectionBreakdown
 from frame_compare.config.schema import ConfigSchema
-from frame_compare.errors import AudioAlignmentError
 from frame_compare.orchestration.context import (
     ClipAlignmentState,
     ClipState,
@@ -22,11 +24,12 @@ from frame_compare.orchestration.context import (
 )
 from frame_compare.orchestration.types import RunArtifacts
 from frame_compare.render.ffmpeg import FFmpegRunner
-from frame_compare.services.alignment import align_clips
+from frame_compare.services.alignment import align_clips, calculate_alignment_trims
+from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.metadata import resolve_metadata
 from frame_compare.services.publishers import publish_to_slowpics
 from frame_compare.services.report.entry import generate_report
-from frame_compare.services.report.payload import ClipInfo, ReportData
+from frame_compare.services.report.payload import ReportData, clip_info_from_state
 from frame_compare.services.types import AlignmentConfig, MetadataConfig, TmdbMetadata
 from frame_compare.utils.types import WorkspacePaths
 
@@ -131,10 +134,25 @@ def run_align_phase(ctx: RunContext, *, selected_frames: list[int]) -> None:
                 ),
             )
         )
-    ctx.reference, ctx.comparisons = _apply_alignment_trims(
-        reference=ctx.reference,
-        comparisons=updated_comparisons,
+    ref_trim, comp_trims = calculate_alignment_trims(
+        ref_num_frames=ctx.reference.probe.num_frames,
+        comp_offsets=[
+            comp.alignment.relative_offset_frames if comp.alignment is not None else None
+            for comp in updated_comparisons
+        ],
+        comp_num_frames=[comp.probe.num_frames for comp in updated_comparisons],
     )
+    ctx.reference = ctx.reference.with_trim(
+        trim_start_frames=ref_trim[0],
+        trim_end_frame_inclusive=ref_trim[1],
+    )
+    ctx.comparisons = [
+        comp.with_trim(
+            trim_start_frames=comp_trim[0],
+            trim_end_frame_inclusive=comp_trim[1],
+        )
+        for comp, comp_trim in zip(updated_comparisons, comp_trims, strict=True)
+    ]
     selected_frames[:] = _normalize_selected_frames_for_trimmed_domain(
         selected_frames=selected_frames,
         reference=ctx.reference,
@@ -151,7 +169,7 @@ def run_render_phase(
     runner: FFmpegRunner,
     artifacts: RunArtifacts,
 ) -> None:
-    from frame_compare.render.orchestrator import render_screenshots_from_batch
+    from frame_compare.render.batch.orchestrator import render_screenshots_from_batch
     from frame_compare.render.types import ScreenshotBatchRequest
 
     clips_state = [ctx.reference, *ctx.comparisons]
@@ -260,83 +278,16 @@ def run_report_phase(
 
     clips = [ctx.reference, *ctx.comparisons]
     clip_info = [
-        ClipInfo(
-            name=clip.label,
-            path=clip.path,
-            frame_count=clip.probe.num_frames,
-            resolution=(clip.probe.width, clip.probe.height),
-            fps=float(clip.effective_fps),
-            hdr=clip.probe.is_hdr,
-            label=clip.label,
-        )
-        for clip in clips
+        clip_info_from_state(clip, artifacts.screenshots_by_label[clip.label]) for clip in clips
     ]
     report_data = ReportData(
         clips=clip_info,
         frames=frames,
-        screenshots=artifacts.screenshots_by_label,
         metadata=artifacts.resolved_metadata,
         slowpics_url=artifacts.slowpics_url,
     )
     report_path = generate_report(report_data, ctx.config.report)
     artifacts.report_path = report_path
-
-
-def _apply_alignment_trims(
-    *,
-    reference: ClipState,
-    comparisons: list[ClipState],
-) -> tuple[ClipState, list[ClipState]]:
-    offsets = [
-        comparison.alignment.relative_offset_frames
-        for comparison in comparisons
-        if comparison.alignment is not None
-    ]
-    if not offsets:
-        return reference, comparisons
-
-    baseline = max(0, max(offsets))
-    trimmed_reference = reference.with_trim(
-        trim_start_frames=baseline,
-        trim_end_frame_inclusive=None,
-    )
-    trimmed_comparisons: list[ClipState] = []
-    for comparison in comparisons:
-        if comparison.alignment is None:
-            relative_offset = 0
-        else:
-            relative_offset = comparison.alignment.relative_offset_frames
-        trim_start = baseline - relative_offset
-        trimmed_comparisons.append(
-            comparison.with_trim(
-                trim_start_frames=trim_start,
-                trim_end_frame_inclusive=None,
-            )
-        )
-
-    common_length = min(
-        [
-            trimmed_reference.effective_num_frames(),
-            *[c.effective_num_frames() for c in trimmed_comparisons],
-        ]
-    )
-    if common_length <= 0:
-        raise AudioAlignmentError("No overlapping frames after alignment normalization.")
-
-    trimmed_reference = trimmed_reference.with_trim(
-        trim_start_frames=trimmed_reference.trim.trim_start_frames,
-        trim_end_frame_inclusive=trimmed_reference.trim.trim_start_frames + common_length - 1,
-    )
-    equalized_comparisons: list[ClipState] = []
-    for comparison in trimmed_comparisons:
-        equalized_comparisons.append(
-            comparison.with_trim(
-                trim_start_frames=comparison.trim.trim_start_frames,
-                trim_end_frame_inclusive=comparison.trim.trim_start_frames + common_length - 1,
-            )
-        )
-
-    return trimmed_reference, equalized_comparisons
 
 
 def _normalize_selected_frames_for_trimmed_domain(

@@ -48,7 +48,7 @@ def get_str_prop(props: Mapping[str, object], key: str) -> str | None:
 
 
 def detect_hdr(frame_props: Mapping[str, object]) -> tuple[bool, HDRMetadata | None]:
-    """Detect HDR from frame properties per SSOT 5.1 mapping.
+    """Detect HDR from frame properties.
 
     HDR Detection:
         is_hdr = _Transfer in (16, 18) AND _Primaries == 9

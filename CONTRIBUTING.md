@@ -164,13 +164,20 @@ We use [Pyright](https://microsoft.github.io/pyright/) in strict mode:
 | ------ | ----------- | ------------ |
 | `unit` | Fast isolated tests | None |
 | `integration` | Module interaction tests | None |
+| `e2e` | End-to-end CLI tests | None |
 | `vs_required` | VapourSynth tests | VapourSynth runtime |
+| `slow` | Long-running tests | Extra runtime |
 | `network` | Network tests | Internet access |
+| `tier_a` | Contract/security tests | No VS, no network |
 
 ### Running Tests
 
 Examples only. Merge and release gates still come from the
 [Engineering Runbook](docs/ENGINEERING_RUNBOOK.md).
+
+Fast isolated tests default into the `unit` bucket during collection. Use explicit
+markers for heavier routes such as `integration`, `e2e`, `vs_required`, `slow`, or
+`network`.
 
 ```bash
 # All unit tests

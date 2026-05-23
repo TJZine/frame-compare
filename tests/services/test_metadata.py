@@ -5,7 +5,7 @@ import httpx
 import pytest
 import respx
 
-from frame_compare.errors import MetadataError, TmdbError, TmdbRateLimitedError
+from frame_compare.services.errors import MetadataError, TmdbError, TmdbRateLimitedError
 from frame_compare.services.metadata import lookup_tmdb, parse_filename, resolve_metadata
 from frame_compare.services.types import MetadataConfig, ParsedMetadata, TmdbMetadata
 
@@ -119,7 +119,6 @@ def test_parse_filename_empty() -> None:
 
 def test_parse_filename_parsers_raise_falls_back_to_stem(mocker) -> None:
     """When both parsers raise, fall back to filename stem."""
-    # Arrange
     mocker.patch(
         "frame_compare.services.metadata.guessit",
         side_effect=Exception("guessit error"),
@@ -128,11 +127,10 @@ def test_parse_filename_parsers_raise_falls_back_to_stem(mocker) -> None:
         "frame_compare.services.metadata.anitopy.parse",
         side_effect=Exception("anitopy error"),
     )
+    debug_log = mocker.patch("frame_compare.services.metadata.log.debug")
 
-    # Act
     result = parse_filename("Movie.Name.2024.BluRay.1080p.mkv")
 
-    # Assert - no exception raised, falls back to stem with normalized separators
     assert result.title == "Movie Name 2024 BluRay 1080p"
     assert result.year is None
     assert result.season is None
@@ -140,6 +138,21 @@ def test_parse_filename_parsers_raise_falls_back_to_stem(mocker) -> None:
     assert result.release_group is None
     assert result.source is None
     assert result.resolution is None
+    assert debug_log.call_count == 2
+    debug_log.assert_any_call(
+        "filename_metadata_parser_failed",
+        parser="guessit",
+        filename_stem="Movie.Name.2024.BluRay.1080p",
+        exception_type="Exception",
+        error="guessit error",
+    )
+    debug_log.assert_any_call(
+        "filename_metadata_parser_failed",
+        parser="anitopy",
+        filename_stem="Movie.Name.2024.BluRay.1080p",
+        exception_type="Exception",
+        error="anitopy error",
+    )
 
 
 # ─── TMDB Lookup Tests ────────────────────────────────────────────────────────

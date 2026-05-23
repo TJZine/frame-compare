@@ -4,13 +4,17 @@ from pathlib import Path
 
 import pytest
 
+from frame_compare.config.errors import (
+    PresetInvalidError,
+    PresetNameInvalidError,
+    PresetNotFoundError,
+)
 from frame_compare.config.presets import (
     apply_preset,
     list_presets,
     load_preset,
     save_preset,
 )
-from frame_compare.errors import PresetInvalidError, PresetNameInvalidError, PresetNotFoundError
 
 
 def test_list_presets_empty_dir(tmp_path: Path) -> None:

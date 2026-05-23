@@ -45,12 +45,7 @@ def print_at_a_glance(
         if availability.is_available:
             vspreview_status = "true"
         elif availability.status == VSPreviewAvailabilityStatus.PROBE_FAILED:
-            exc_type = "Exception"
-            exc_msg = "unknown error"
-            if availability.error_details:
-                exc_type = availability.error_details.get("exception_type", exc_type)
-                exc_msg = availability.error_details.get("exception", exc_msg)
-            vspreview_status = f"probe failed ({exc_type}: {exc_msg})"
+            vspreview_status = availability.public_probe_failure_status()
         else:
             vspreview_status = "false"
 

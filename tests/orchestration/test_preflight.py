@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.errors import (
-    ConfigNotFoundError,
     DirectoryNotFoundError,
     NoVideosFoundError,
 )
@@ -90,7 +90,7 @@ class TestResolvePaths:
 
     def test_resolve_paths_relative_to_root(self, tmp_path: Path) -> None:
         """Given config with relative paths → resolves relative to root."""
-        from frame_compare.config import ConfigSchema, PathsConfig
+        from frame_compare.config.schema import ConfigSchema, PathsConfig
 
         config = ConfigSchema(
             paths=PathsConfig(
@@ -115,7 +115,7 @@ class TestResolvePaths:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Given config with env var input_dir → resolved path expands env var."""
-        from frame_compare.config import ConfigSchema, PathsConfig
+        from frame_compare.config.schema import ConfigSchema, PathsConfig
 
         test_root = str(tmp_path)
         monkeypatch.setenv("TEST_ROOT", test_root)
@@ -165,6 +165,21 @@ class TestDiscoverInputs:
         assert error.code == "FC-3001"
         assert error.path == tmp_path.resolve()
         assert error.patterns == ["*.mkv", "*.mp4", "*.avi", "*.m2ts", "*.ts"]
+
+    def test_discover_inputs_oserror_raises_input_discovery_error(self, tmp_path: Path) -> None:
+        """Given a path that raises OSError on listdir/iterdir → raises InputDiscoveryError."""
+        from unittest.mock import patch
+
+        from frame_compare.errors import InputDiscoveryError
+
+        with (
+            patch.object(Path, "iterdir", side_effect=OSError("Permission denied")),
+            pytest.raises(InputDiscoveryError) as exc_info,
+        ):
+            discover_inputs(tmp_path)
+
+        assert exc_info.value.code == "FC-3010"
+        assert exc_info.value.path == tmp_path
 
 
 class TestPreparePreflight:

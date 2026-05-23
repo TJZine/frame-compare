@@ -12,13 +12,13 @@ import httpx
 import structlog
 
 from frame_compare.config.schema import SlowpicsConfig, Visibility
-from frame_compare.errors import (
+from frame_compare.services.errors import (
     SlowpicsError,
     SlowpicsRateLimitedError,
     SlowpicsUnavailableError,
 )
 from frame_compare.services.types import TmdbMetadata
-from frame_compare.utils.progress import ProgressReporter
+from frame_compare.utils.progress_protocol import ProgressReporter
 
 log = structlog.get_logger()
 
@@ -77,7 +77,6 @@ class SlowpicsPublisher:
         if not files:
             raise SlowpicsError("No PNG files found to upload")
 
-        # Prepare payload
         visibility = self.config.visibility
         request = self._prepare_upload(files, title, visibility)
         log.info(
@@ -88,7 +87,6 @@ class SlowpicsPublisher:
         )
 
         try:
-            # Upload with retry
             response = await self._upload_with_retry(
                 self._client,
                 request,
@@ -96,7 +94,6 @@ class SlowpicsPublisher:
                 self.config.timeout_seconds,
             )
 
-            # Parse result
             try:
                 result = response.json()
                 url = str(result["url"])
@@ -107,7 +104,6 @@ class SlowpicsPublisher:
             return url
 
         except Exception as e:
-            # Re-raise known errors, wrap others
             if isinstance(
                 e,
                 SlowpicsError | SlowpicsRateLimitedError | SlowpicsUnavailableError,
@@ -128,6 +124,16 @@ class SlowpicsPublisher:
         form_data["public"] = "true" if visibility is Visibility.PUBLIC else "false"
 
         return _SlowpicsUploadRequest(file_paths=list(files), data=form_data)
+
+    async def _sleep_with_backoff(
+        self, attempt: int, base_delay: float, max_delay: float, jitter_factor: float
+    ) -> float:
+        """Calculate exponential backoff with jitter and sleep, returning sleep duration."""
+        delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
+        jitter = delay * random.uniform(-jitter_factor, jitter_factor)
+        sleep_time = max(0.0, delay + jitter)
+        await asyncio.sleep(sleep_time)
+        return sleep_time
 
     async def _upload_with_retry(
         self,
@@ -165,7 +171,6 @@ class SlowpicsPublisher:
                 if response.is_success:
                     return response
 
-                # Handle 429 Rate Limit
                 if response.status_code == 429:
                     if attempt >= max_retries:
                         raise SlowpicsRateLimitedError()
@@ -180,28 +185,21 @@ class SlowpicsPublisher:
                     await asyncio.sleep(delay)
                     continue
 
-                # Handle 5xx Server Errors
                 if 500 <= response.status_code < 600:
                     if attempt >= max_retries:
                         raise SlowpicsUnavailableError()
 
-                    # Exponential backoff
-                    delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
-                    # Add jitter
-                    jitter = delay * random.uniform(-jitter_factor, jitter_factor)
-                    sleep_time = max(0, delay + jitter)
-
+                    sleep_time = await self._sleep_with_backoff(
+                        attempt, base_delay, max_delay, jitter_factor
+                    )
                     log.warning(
                         "slowpics_server_error",
                         status=response.status_code,
                         attempt=attempt,
                         retry_in=sleep_time,
                     )
-                    await asyncio.sleep(sleep_time)
                     continue
 
-                # Handle 4xx Client Errors (Fail Fast)
-                # 429 was handled above
                 raise SlowpicsError(
                     f"Upload failed with status {response.status_code}: {response.text}"
                 )
@@ -210,16 +208,14 @@ class SlowpicsPublisher:
                 if attempt >= max_retries:
                     raise SlowpicsError(f"Upload timed out after {max_retries} retries") from e
 
-                delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
-                jitter = delay * random.uniform(-jitter_factor, jitter_factor)
-                sleep_time = max(0, delay + jitter)
-
+                sleep_time = await self._sleep_with_backoff(
+                    attempt, base_delay, max_delay, jitter_factor
+                )
                 log.warning(
                     "slowpics_timeout",
                     attempt=attempt,
                     retry_in=sleep_time,
                 )
-                await asyncio.sleep(sleep_time)
                 continue
 
             except httpx.RequestError as e:
@@ -227,17 +223,15 @@ class SlowpicsPublisher:
                 if attempt >= max_retries:
                     raise SlowpicsUnavailableError() from e
 
-                delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
-                jitter = delay * random.uniform(-jitter_factor, jitter_factor)
-                sleep_time = max(0, delay + jitter)
-
+                sleep_time = await self._sleep_with_backoff(
+                    attempt, base_delay, max_delay, jitter_factor
+                )
                 log.warning(
                     "slowpics_connection_error",
                     error=str(e),
                     attempt=attempt,
                     retry_in=sleep_time,
                 )
-                await asyncio.sleep(sleep_time)
                 continue
 
 
@@ -273,11 +267,8 @@ async def publish_to_slowpics(
     if progress:
         progress.set_description("Uploading screenshots to slow.pics")
 
-    try:
-        publisher = SlowpicsPublisher(config, client)
-        url = await publisher.upload(files, title)
-    finally:
-        pass
+    publisher = SlowpicsPublisher(config, client)
+    url = await publisher.upload(files, title)
 
     # Deletion semantics
     if config.delete_after_upload:

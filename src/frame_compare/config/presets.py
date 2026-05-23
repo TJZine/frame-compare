@@ -10,15 +10,15 @@ from typing import TYPE_CHECKING, Any, cast
 import tomli_w
 from pydantic import ValidationError
 
-from frame_compare.config.utils import deep_merge
-from frame_compare.errors import (
+from frame_compare.config.errors import (
     ConfigValidationError,
     ConfigWriteError,
     PresetInvalidError,
     PresetNameInvalidError,
     PresetNotFoundError,
-    normalize_pydantic_errors,
 )
+from frame_compare.config.utils import deep_merge
+from frame_compare.errors import normalize_pydantic_errors
 from frame_compare.utils.atomic_write import write_text_atomic
 
 if TYPE_CHECKING:

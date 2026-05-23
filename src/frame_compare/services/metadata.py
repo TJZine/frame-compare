@@ -7,13 +7,15 @@ from typing import Any, cast
 
 import anitopy
 import httpx
+import structlog
 from guessit import guessit  # type: ignore
 
-from frame_compare.errors import MetadataError, TmdbError, TmdbRateLimitedError
+from frame_compare.services.errors import MetadataError, TmdbError, TmdbRateLimitedError
 from frame_compare.services.types import MetadataConfig, ParsedMetadata, TmdbMetadata
 
 TMDB_API_URL = "https://api.themoviedb.org/3/search/multi"
 TMDB_KEY_REGEX = re.compile(r"^[0-9a-fA-F]{32}$")
+log = structlog.get_logger()
 
 
 def is_valid_tmdb_api_key(api_key: str) -> bool:
@@ -59,18 +61,29 @@ def parse_filename(filename: str) -> ParsedMetadata:
     source: str | None = None
     resolution: str | None = None
 
-    def _apply_anitopy(name: str) -> dict[str, Any]:
+    def _log_parser_exception(parser_name: str, name: str, exc: Exception) -> None:
+        log.debug(
+            "filename_metadata_parser_failed",
+            parser=parser_name,
+            filename_stem=Path(name).stem,
+            exception_type=type(exc).__name__,
+            error=str(exc),
+        )
+
+    def _apply_anitopy(name: str) -> dict[str, object]:
         try:
             result = anitopy.parse(name)  # type: ignore
-            return cast(dict[str, Any], result) if isinstance(result, dict) else {}
-        except Exception:
+            return cast(dict[str, object], result) if isinstance(result, dict) else {}
+        except Exception as exc:
+            _log_parser_exception("anitopy", name, exc)
             return {}
 
-    def _apply_guessit(name: str) -> dict[str, Any]:
+    def _apply_guessit(name: str) -> dict[str, object]:
         try:
             result = guessit(name)  # type: ignore
-            return dict(cast(dict[Any, Any], result)) if result else {}
-        except Exception:
+            return dict(cast(dict[str, object], result)) if result else {}
+        except Exception as exc:
+            _log_parser_exception("guessit", name, exc)
             return {}
 
     parsers = [
@@ -79,55 +92,54 @@ def parse_filename(filename: str) -> ParsedMetadata:
     ]
 
     for parser in parsers:
-        res = parser(filename)
-        # title extraction
-        t = res.get("anime_title") or res.get("title")
-        if t and not title:
-            title = str(t)
+        parser_result = parser(filename)
+        parsed_title = parser_result.get("anime_title") or parser_result.get("title")
+        if parsed_title and not title:
+            title = str(parsed_title)
 
-        # year
         if year is None:
-            y = res.get("year")
-            if isinstance(y, int):
-                year = y
-            elif isinstance(y, str) and y.isdigit():
-                year = int(y)
+            parsed_year = parser_result.get("year")
+            if isinstance(parsed_year, int):
+                year = parsed_year
+            elif isinstance(parsed_year, str) and parsed_year.isdigit():
+                year = int(parsed_year)
 
-        # season
         if season is None:
-            s = res.get("season")
-            if isinstance(s, int):
-                season = s
-            elif isinstance(s, str) and s.isdigit():
-                season = int(s)
+            parsed_season = parser_result.get("season")
+            if isinstance(parsed_season, int):
+                season = parsed_season
+            elif isinstance(parsed_season, str) and parsed_season.isdigit():
+                season = int(parsed_season)
 
-        # episode
         if episode is None:
-            e = res.get("anime_episode") or res.get("episode")
-            if isinstance(e, int):
-                episode = e
-            elif isinstance(e, str) and e.isdigit():
-                episode = int(e)
-            elif isinstance(e, list) and e and isinstance(e[0], int):
-                episode = e[0]
+            parsed_episode = parser_result.get("anime_episode") or parser_result.get("episode")
+            if isinstance(parsed_episode, int):
+                episode = parsed_episode
+            elif isinstance(parsed_episode, str) and parsed_episode.isdigit():
+                episode = int(parsed_episode)
+            elif (
+                isinstance(parsed_episode, list)
+                and parsed_episode
+                and isinstance(parsed_episode[0], int)
+            ):
+                episode = parsed_episode[0]
 
-        # release_group
         if release_group is None:
-            rg = res.get("release_group")
-            if rg:
-                release_group = str(rg)
+            parsed_release_group = parser_result.get("release_group")
+            if parsed_release_group:
+                release_group = str(parsed_release_group)
 
-        # source
         if source is None:
-            src = res.get("source")
-            if src:
-                source = str(src)
+            parsed_source = parser_result.get("source")
+            if parsed_source:
+                source = str(parsed_source)
 
-        # resolution
         if resolution is None:
-            res_val = res.get("screen_size") or res.get("video_resolution")
-            if res_val:
-                resolution = str(res_val)
+            parsed_resolution = parser_result.get("screen_size") or parser_result.get(
+                "video_resolution"
+            )
+            if parsed_resolution:
+                resolution = str(parsed_resolution)
 
     # Fallback to stem if no title found
     if not title:

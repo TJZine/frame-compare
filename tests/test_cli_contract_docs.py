@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from frame_compare.config import Visibility
 from frame_compare.config.overrides import CLI_OVERRIDE_MAP
+from frame_compare.config.schema import Visibility
 
 
 def test_current_cli_contract_is_wired_into_repo_authority_surfaces() -> None:

@@ -2,9 +2,9 @@
 
 from typing import Any
 
-from frame_compare.config import OverlayMode, ToneCurve, TonemapPreset
 from frame_compare.config.loader import get_default_config
 from frame_compare.config.overrides import apply_cli_overrides
+from frame_compare.config.schema import OverlayMode, ToneCurve, TonemapPreset
 
 
 def test_apply_cli_overrides_basic() -> None:

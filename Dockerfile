@@ -187,9 +187,8 @@ WORKDIR /home/framecompare
 COPY --chown=framecompare:framecompare . /home/framecompare/frame-compare/
 WORKDIR /home/framecompare/frame-compare
 
-# Install Python dependencies
-RUN pip install --no-cache-dir --user -e . && \
-    pip install --no-cache-dir --user "pytest>=8.3.0" "pytest-mock>=3.14.0"
+# Install Python runtime dependencies
+RUN pip install --no-cache-dir --user -e .
 
 # Add user bin to PATH
 ENV PATH="/home/framecompare/.local/bin:${PATH}"

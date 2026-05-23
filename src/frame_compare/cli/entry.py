@@ -20,7 +20,17 @@ import typer
 import typer.rich_utils as typer_rich_utils
 from rich.console import Console
 
-from frame_compare.cli_output import print_at_a_glance, print_result_summary
+from frame_compare.cli.errors import (
+    ExitCode,
+    format_error_console,
+    format_error_json,
+    get_exit_code,
+)
+from frame_compare.cli.output import print_at_a_glance, print_result_summary
+from frame_compare.config.errors import (
+    ConfigValidationError,
+    ConfigWriteError,
+)
 from frame_compare.config.loader import get_default_config, load_config
 from frame_compare.config.overrides import apply_cli_overrides
 from frame_compare.config.presets import (
@@ -36,14 +46,8 @@ from frame_compare.config.schema import (
     Visibility,
 )
 from frame_compare.errors import (
-    ConfigValidationError,
-    ConfigWriteError,
-    ExitCode,
     FrameCompareError,
     JSONValue,
-    format_error_console,
-    format_error_json,
-    get_exit_code,
 )
 from frame_compare.utils.atomic_write import write_text_atomic
 from frame_compare.utils.logging import configure_logging
@@ -51,7 +55,7 @@ from frame_compare.utils.logging import configure_logging
 if TYPE_CHECKING:
     from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, RunResult
     from frame_compare.orchestration.doctor import DoctorCheck, DoctorReport
-    from frame_compare.utils.progress import ProgressReporter
+    from frame_compare.utils.progress_protocol import ProgressReporter
 
 
 def _stabilize_typer_help_width() -> None:
@@ -277,22 +281,6 @@ def run(
         )
 
         resolved_config: ConfigSchema | None = None
-        if write_config:
-
-            def _resolve_effective_config() -> ConfigSchema:
-                return apply_cli_overrides(
-                    load_config(config_path),
-                    cli_args=request.cli_override_args(),
-                )
-
-            def _load_effective_config() -> ConfigSchema:
-                nonlocal resolved_config
-                if resolved_config is None:
-                    resolved_config = _resolve_effective_config()
-                return resolved_config
-
-            _write_config_to(config_path, _load_effective_config())
-            return
 
         def _resolve_effective_config() -> ConfigSchema:
             return apply_cli_overrides(
@@ -305,6 +293,10 @@ def run(
             if resolved_config is None:
                 resolved_config = _resolve_effective_config()
             return resolved_config
+
+        if write_config:
+            _write_config_to(config_path, _load_effective_config())
+            return
 
         if diagnose_paths:
             _handle_diagnose_paths(resolved_root, config_path, _load_effective_config())

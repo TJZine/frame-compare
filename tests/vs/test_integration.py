@@ -63,11 +63,11 @@ def test_vs_integration_smoke():
         """
         import vapoursynth as vs
 
-        from frame_compare.vs import TonemapSettings, ensure_vs_environment, tonemap
+        from frame_compare.vs import TonemapSettings, ensure_vs_environment, apply_tonemap
 
         core = ensure_vs_environment()
         clip = core.std.BlankClip(width=16, height=16, format=vs.RGBS, length=1)
-        out = tonemap(clip, TonemapSettings(enabled=True), hdr_metadata=None)
+        out = apply_tonemap(clip, TonemapSettings(enabled=True), hdr_metadata=None)
         frame = out.get_frame(0)
 
         assert out.width == 16
@@ -97,7 +97,7 @@ def test_libplacebo_tonemap_succeeds_in_docker():
 
         import vapoursynth as vs
 
-        from frame_compare.vs import HDRMetadata, TonemapSettings, tonemap
+        from frame_compare.vs import HDRMetadata, TonemapSettings, apply_tonemap
         from frame_compare.vs.tonemap import _apply_libplacebo, detect_plugins
 
         core = vs.core
@@ -141,7 +141,7 @@ def test_libplacebo_tonemap_succeeds_in_docker():
             )
             _ = libplacebo_out.get_frame(0)
 
-        out = tonemap(clip, settings, hdr_metadata)
+        out = apply_tonemap(clip, settings, hdr_metadata)
         frame = out.get_frame(0)
 
         assert out.format.id == vs.RGBS

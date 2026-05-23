@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from fractions import Fraction
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, cast
 
 from frame_compare.analysis.types import (
     CacheLoadResult,
@@ -65,9 +66,14 @@ def load_cached_metrics(
 
     try:
         with cache_path.open("r", encoding="utf-8") as f:
-            data = json.load(f)
+            raw_data: object = json.load(f)
     except (json.JSONDecodeError, OSError):
         return CacheLoadResult(success=False, reason="corrupted")
+
+    if not isinstance(raw_data, Mapping):
+        return CacheLoadResult(success=False, reason="corrupted")
+
+    data = cast(Mapping[str, object], raw_data)
 
     # Required top-level keys
     required_keys = {"version", "fingerprint", "luminance", "motion", "metadata"}
@@ -80,32 +86,82 @@ def load_cached_metrics(
     if data["fingerprint"] != fingerprint:
         return CacheLoadResult(success=False, reason="mismatched_inputs")
 
-    metadata_dict = data["metadata"]
+    # Validate types of top-level fields
+    lum_raw = data["luminance"]
+    mot_raw = data["motion"]
+    if not isinstance(lum_raw, list) or not isinstance(mot_raw, list):
+        return CacheLoadResult(success=False, reason="corrupted")
+    lum_list = cast(list[object], lum_raw)
+    mot_list = cast(list[object], mot_raw)
+    if not all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in lum_list):
+        return CacheLoadResult(success=False, reason="corrupted")
+    if not all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in mot_list):
+        return CacheLoadResult(success=False, reason="corrupted")
+
+    metadata_raw = data["metadata"]
+    if not isinstance(metadata_raw, Mapping):
+        return CacheLoadResult(success=False, reason="corrupted")
+    metadata_dict = cast(Mapping[str, object], metadata_raw)
+
     # Required metadata keys
     required_metadata_keys = {"frame_count", "fps", "config_fingerprint", "clips"}
     if not all(k in metadata_dict for k in required_metadata_keys):
         return CacheLoadResult(success=False, reason="corrupted")
 
+    # Validate types in metadata
+    frame_count = metadata_dict["frame_count"]
+    if not isinstance(frame_count, int) or isinstance(frame_count, bool) or frame_count < 0:
+        return CacheLoadResult(success=False, reason="corrupted")
+    fps = metadata_dict["fps"]
+    if not isinstance(fps, str):
+        return CacheLoadResult(success=False, reason="corrupted")
+    config_fingerprint = metadata_dict["config_fingerprint"]
+    if not isinstance(config_fingerprint, str):
+        return CacheLoadResult(success=False, reason="corrupted")
+
+    clips_raw = metadata_dict["clips"]
+    if not isinstance(clips_raw, list):
+        return CacheLoadResult(success=False, reason="corrupted")
+    clips_list = cast(list[object], clips_raw)
+    validated_clips: list[Mapping[str, object]] = []
+
+    for clip_entry in clips_list:
+        if not isinstance(clip_entry, Mapping):
+            return CacheLoadResult(success=False, reason="corrupted")
+        c = cast(Mapping[str, object], clip_entry)
+        required_clip_keys = {"path", "size", "mtime"}
+        if not all(k in c for k in required_clip_keys):
+            return CacheLoadResult(success=False, reason="corrupted")
+        if not isinstance(c["path"], str):
+            return CacheLoadResult(success=False, reason="corrupted")
+        if not isinstance(c["size"], int) or isinstance(c["size"], bool):
+            return CacheLoadResult(success=False, reason="corrupted")
+        if not isinstance(c["mtime"], (int, float)) or isinstance(c["mtime"], bool):
+            return CacheLoadResult(success=False, reason="corrupted")
+        if "sha1" in c and c["sha1"] is not None and not isinstance(c["sha1"], str):
+            return CacheLoadResult(success=False, reason="corrupted")
+        validated_clips.append(c)
+
     try:
         metadata = MetricsMetadata(
-            frame_count=metadata_dict["frame_count"],
-            fps=Fraction(metadata_dict["fps"]),
-            config_fingerprint=metadata_dict["config_fingerprint"],
+            frame_count=frame_count,
+            fps=Fraction(fps),
+            config_fingerprint=config_fingerprint,
             clips=[
                 ClipIdentity(
-                    path=c["path"],
-                    size=c["size"],
-                    mtime=c["mtime"],
-                    sha1=c.get("sha1"),
+                    path=cast(str, c["path"]),
+                    size=cast(int, c["size"]),
+                    mtime=cast(float, c["mtime"]),
+                    sha1=cast(str | None, c.get("sha1")),
                 )
-                for c in metadata_dict["clips"]
+                for c in validated_clips
             ],
-            version=metadata_dict.get("version", CACHE_VERSION),
+            version=cast(int, metadata_dict.get("version", CACHE_VERSION)),
         )
 
         metrics = FrameMetrics(
-            luminance=data["luminance"],
-            motion=data["motion"],
+            luminance=cast(list[float], data["luminance"]),
+            motion=cast(list[float], data["motion"]),
             metadata=metadata,
         )
     except (KeyError, ValueError, TypeError):
@@ -124,7 +180,7 @@ def save_metrics_cache(metrics: FrameMetrics, cache_dir: Path) -> None:
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_path = cache_dir / CACHE_FILENAME
 
-    data: dict[str, Any] = {
+    data: dict[str, object] = {
         "version": CACHE_VERSION,
         "fingerprint": metrics.metadata.config_fingerprint,
         "luminance": list(metrics.luminance),

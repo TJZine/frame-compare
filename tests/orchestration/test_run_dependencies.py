@@ -12,8 +12,7 @@ from frame_compare.orchestration.coordinator import (
     execute_run,
 )
 from frame_compare.orchestration.types import RunRequest
-from frame_compare.render.ffmpeg import DefaultFFmpegRunner
-from frame_compare.vs.loader import DefaultVSLoader, VSLoader
+from frame_compare.vs.loader import VSLoader
 from frame_compare.vs.types import HDRMetadata
 
 
@@ -66,22 +65,24 @@ def test_run_dependencies_accepts_vs_loader_protocol() -> None:
     assert deps.vs_loader is loader
 
 
-def test_execute_run_populates_missing_dependencies(
+def test_execute_run_initializes_local_dependencies_without_mutating_injected_deps(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # We will use monkeypatch to avoid actually running execute_prep which tries to load configuration
-    # from the filesystem, but still let execute_run initialize default dependencies.
     from frame_compare.orchestration import coordinator
 
-    async def fake_execute_prep(*args, **kwargs):
+    captured_local_deps: RunDependencies | None = None
+
+    async def fake_execute_prep(_request: RunRequest, local_deps: RunDependencies):
+        nonlocal captured_local_deps
+        captured_local_deps = local_deps
+        assert local_deps is not deps
+        assert local_deps.vs_loader is not None
+        assert local_deps.ffmpeg_runner is not None
+        assert local_deps.progress is not None
+        assert local_deps.http_client is not None
         raise StopAfterDependencyInit
 
-    async def fake_execute_phases(*args, **kwargs):
-        pass
-
     monkeypatch.setattr(coordinator, "execute_prep", fake_execute_prep)
-    monkeypatch.setattr(coordinator, "execute_phases", fake_execute_phases)
-    monkeypatch.setattr(coordinator, "emit_consolidated_fps_report", lambda *a, **kw: None)
 
     request = RunRequest(root=tmp_path, quiet=True)
     deps = RunDependencies()
@@ -93,7 +94,8 @@ def test_execute_run_populates_missing_dependencies(
     with pytest.raises(StopAfterDependencyInit):
         asyncio.run(execute_run(request, deps=deps))
 
-    assert isinstance(deps.vs_loader, DefaultVSLoader)
-    assert isinstance(deps.ffmpeg_runner, DefaultFFmpegRunner)
-    assert deps.progress is not None
+    assert captured_local_deps is not None
+    assert deps.vs_loader is None
+    assert deps.ffmpeg_runner is None
+    assert deps.progress is None
     assert deps.http_client is None

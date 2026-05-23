@@ -5,11 +5,11 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+from frame_compare.analysis.errors import InsufficientFramesError
 from frame_compare.analysis.frame_plan import (
     create_frame_plan,
     select_uniform_seeded_frames,
 )
-from frame_compare.errors import InsufficientFramesError
 
 
 def test_select_uniform_seeded_frames_deterministic() -> None:

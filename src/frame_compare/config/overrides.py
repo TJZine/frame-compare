@@ -7,9 +7,10 @@ from typing import Any, TypedDict, cast
 
 from pydantic import ValidationError
 
+from frame_compare.config.errors import ConfigValidationError
 from frame_compare.config.schema import ConfigSchema, ToneCurve, TonemapPreset
 from frame_compare.config.utils import deep_merge
-from frame_compare.errors import ConfigValidationError, normalize_pydantic_errors
+from frame_compare.errors import normalize_pydantic_errors
 
 
 class TonemapCliOverrides(TypedDict, total=False):

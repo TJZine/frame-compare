@@ -2,66 +2,71 @@ from pathlib import Path
 
 import pytest
 
+from frame_compare.analysis.errors import (
+    InsufficientFramesError,
+    SelectionError,
+)
+from frame_compare.cli.errors import (
+    ExitCode,
+    format_error_console,
+    format_error_json,
+    get_exit_code,
+)
+from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.errors import (
-    AudioAlignmentError,
     CacheCorruptionError,
     CacheVersionMismatchError,
-    # Config Errors (for exit code test)
-    ConfigNotFoundError,
-    # Dependency Errors
     DirectoryNotFoundError,
     DirectoryNotWritableError,
     DoviError,
     DoviToolNotFoundError,
     EncodingError,
     ErrorContext,
-    # Helpers
-    ExitCode,
     FFmpegError,
     FFmpegNotFoundError,
     FileTooLargeError,
     FrameCompareError,
     FrameExtractionError,
-    # Internal Errors
     GenericInternalError,
     IncompatibleVideosError,
-    # Input Errors
-    InsufficientFramesError,
     InvariantViolationError,
-    LibplaceboError,
-    MetadataError,
     MetricsCalculationError,
-    # Network Errors
-    NetworkTimeoutError,
-    NetworkUnreachableError,
     NoVideosFoundError,
     OverlayError,
     PathEscapesRootError,
-    PluginNotFoundError,
     ProcessingOutOfMemoryError,
     ProcessingTimeoutError,
-    # Processing Errors
     PythonVersionError,
     RenderError,
+    UnexpectedStateError,
+    VideoCorruptError,
+    VideoOpenError,
+)
+from frame_compare.services.errors import (
+    AudioAlignmentError,
+    MetadataError,
+    NetworkTimeoutError,
+    NetworkUnreachableError,
     ReportError,
-    SelectionError,
     SlowpicsError,
     SlowpicsRateLimitedError,
     SlowpicsUnavailableError,
-    SourceLoadError,
     SSLError,
     TmdbError,
     TmdbRateLimitedError,
+)
+from frame_compare.vs.errors import (
+    LibplaceboError,
+    PluginNotFoundError,
+    SourceLoadError,
     TonemapError,
     TonemapRequiresVapourSynthError,
-    UnexpectedStateError,
     VapourSynthError,
     VapourSynthNotFoundError,
-    VideoCorruptError,
-    VideoOpenError,
-    format_error_console,
-    format_error_json,
-    get_exit_code,
+)
+from frame_compare.vspreview.errors import (
+    VSPreviewError,
+    VSPreviewNotFoundError,
 )
 
 
@@ -76,6 +81,7 @@ from frame_compare.errors import (
         (FFmpegNotFoundError, (), "FC-2005"),
         (FFmpegError, ("test", 1), "FC-2006"),
         (DoviToolNotFoundError, (), "FC-2007"),
+        (VSPreviewNotFoundError, (), "FC-2008"),
         (TonemapRequiresVapourSynthError, (), "FC-2009"),
         (PythonVersionError, ("3.11",), "FC-2010"),
         # InputError (FC-3xxx)
@@ -105,6 +111,7 @@ from frame_compare.errors import (
         (MetadataError, ("test",), "FC-4016"),
         (ReportError, ("test",), "FC-4017"),
         (DoviError, (Path("/dv"), "test"), "FC-4018"),
+        (VSPreviewError, ("test",), "FC-4019"),
         # NetworkError (FC-5xxx)
         (NetworkUnreachableError, (), "FC-5001"),
         (SlowpicsError, ("test",), "FC-5002"),
@@ -146,6 +153,31 @@ def test_insufficient_frames_error_details_shape():
     assert details["path"] == str(path)
     assert details["count"] == count
     assert details["required"] == required
+
+
+def test_network_timeout_error_redacts_sensitive_url_components() -> None:
+    error = NetworkTimeoutError(
+        "https://user:secret@example.com/path/to/api?token=abc123#fragment",
+        7.5,
+    )
+
+    assert "secret" not in error.context.message
+    assert "abc123" not in error.context.message
+    assert "fragment" not in error.context.message
+    assert "https://example.com/path/to/api" in error.context.message
+
+    details = error.context.details
+    assert details == {
+        "url": "https://example.com/path/to/api",
+        "timeout": 7.5,
+    }
+
+
+def test_vspreview_error_omits_public_details() -> None:
+    error = VSPreviewError("launch exited with code 3")
+
+    assert error.context.message == "VSPreview failed: launch exited with code 3"
+    assert error.context.details is None
 
 
 def test_exit_code_enum_values():

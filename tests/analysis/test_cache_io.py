@@ -5,6 +5,8 @@ import os
 from fractions import Fraction
 from pathlib import Path
 
+import pytest
+
 from frame_compare.analysis.cache_io import (
     CACHE_VERSION,
     compute_cache_key,
@@ -160,6 +162,17 @@ def test_load_corrupted(tmp_path: Path) -> None:
     cache_file = tmp_path / "cache.compframes"
     cache_file.write_text("invalid json")
     result = load_cached_metrics(tmp_path, "some-fingerprint", [])
+    assert result.success is False
+    assert result.reason == "corrupted"
+
+
+@pytest.mark.parametrize("payload", ["null", "42"])
+def test_load_non_mapping_root_returns_corrupted(tmp_path: Path, payload: str) -> None:
+    cache_file = tmp_path / "cache.compframes"
+    cache_file.write_text(payload, encoding="utf-8")
+
+    result = load_cached_metrics(tmp_path, "some-fingerprint", [])
+
     assert result.success is False
     assert result.reason == "corrupted"
 

@@ -7,17 +7,13 @@ from pathlib import Path
 
 import structlog
 
-from frame_compare.analysis import cache_io
+import frame_compare.analysis.cache_io as cache_io
 from frame_compare.config.overrides import apply_cli_overrides
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.errors import (
-    AudioAlignmentError,
     CacheCorruptionError,
     CacheVersionMismatchError,
-    MetadataError,
     MetricsCalculationError,
-    TmdbError,
-    TmdbRateLimitedError,
 )
 from frame_compare.orchestration.context import (
     ClipFingerprint,
@@ -26,14 +22,12 @@ from frame_compare.orchestration.context import (
 )
 from frame_compare.orchestration.phase_tasks import resolve_run_metadata
 from frame_compare.orchestration.preflight import discover_inputs, prepare_preflight
-from frame_compare.orchestration.probe_cache import (
+from frame_compare.orchestration.probing import (
+    compute_preserved_frame_props,
     compute_probe_cache_key,
+    compute_tonemap_prop_keys,
     load_clip_probe_cache,
     save_clip_probe_cache,
-)
-from frame_compare.orchestration.probe_props import (
-    compute_preserved_frame_props,
-    compute_tonemap_prop_keys,
 )
 from frame_compare.orchestration.types import (
     PrepState,
@@ -42,6 +36,12 @@ from frame_compare.orchestration.types import (
     RunRequest,
 )
 from frame_compare.services.alignment import CACHE_FILE_NAME, check_alignment_cached
+from frame_compare.services.errors import (
+    AudioAlignmentError,
+    MetadataError,
+    TmdbError,
+    TmdbRateLimitedError,
+)
 from frame_compare.services.run_folder import (
     derive_run_folder_name,
     get_existing_run_folders,

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from frame_compare.config.schema import ReportConfig
-from frame_compare.errors import ReportError
+from frame_compare.services.errors import ReportError
 from frame_compare.services.report.payload import (
     ReportData,
     build_report_payload,
@@ -24,18 +24,18 @@ def generate_report(
         raise ReportError("at least 2 clips required for comparison")
     if len(data.frames) == 0:
         raise ReportError("no frames provided")
-    if len(data.screenshots) == 0:
+
+    has_any_screenshot = any(len(clip.screenshots) > 0 for clip in data.clips)
+    if not has_any_screenshot:
         raise ReportError("no screenshots provided")
 
     for clip in data.clips:
-        if clip.name not in data.screenshots:
+        if not clip.screenshots:
             raise ReportError(f"no screenshots for clip: {clip.name}")
-        if len(data.screenshots[clip.name]) == 0:
-            raise ReportError(f"no screenshots for clip: {clip.name}")
-        if len(data.screenshots[clip.name]) != len(data.frames):
+        if len(clip.screenshots) != len(data.frames):
             raise ReportError(
                 f"screenshot count mismatch for {clip.name}: "
-                f"expected {len(data.frames)}, got {len(data.screenshots[clip.name])}"
+                f"expected {len(data.frames)}, got {len(clip.screenshots)}"
             )
 
     final_output_path = _resolve_output_path(data, config, output_path)
@@ -59,6 +59,6 @@ def _resolve_output_path(data: ReportData, config: ReportConfig, output_path: Pa
         return Path(config.output_dir) / "report.html"
 
     # Fallback: first clip, first frame's parent dir.
-    first_clip_name = data.clips[0].name
-    first_screenshot = data.screenshots[first_clip_name][0]
+    first_clip = data.clips[0]
+    first_screenshot = first_clip.screenshots[0]
     return first_screenshot.parent / "report.html"

@@ -14,7 +14,7 @@ documents that promise elsewhere.
 
 ## Authority And Update Rules
 
-- `src/frame_compare/cli_entry.py` is the implementation owner for CLI command routing,
+- `src/frame_compare/cli/entry.py` is the implementation owner for CLI command routing,
   argument parsing, stdout/stderr behavior, and interactive post-run behavior.
 - `src/frame_compare/config/overrides.py` owns CLI flag to config override mappings.
 - Primary executable contract checks include:
@@ -74,6 +74,8 @@ For those commands:
 
 - `--json` writes a single JSON object to stdout and suppresses human-readable summaries.
 - `--quiet` suppresses the at-a-glance summary but still allows a minimal success summary.
+- When the at-a-glance summary reports optional VSPreview probe failures, it uses a
+  sanitized summary rather than raw probe exception text.
 - `--diagnose-paths` emits a pinned JSON object with keys `cache`, `config`, `input`,
   `output`, and `root`, then exits without invoking the runtime pipeline.
 - `--write-config` writes the effective config to disk, then exits without invoking the
@@ -82,7 +84,7 @@ For those commands:
 ### Report Auto-Open Ownership
 
 - HTML report generation is owned by `frame_compare.services.report`.
-- Browser auto-open for a generated report is owned by `frame_compare.cli_entry`.
+- Browser auto-open for a generated report is owned by `frame_compare.cli.entry`.
 - The CLI only attempts to open a report when all of these are true:
   - the run succeeded and produced `report_path`
   - `--json` was not used
@@ -155,6 +157,8 @@ tests in the same pass.
 - `doctor --json` writes a single JSON object to stdout using `_doctor_report_json`.
 - Without `--json`, `doctor` writes a human-readable report to stdout.
 - If any critical failures are present, `doctor` exits with the dependency error exit code.
+- Optional VSPreview probe diagnostics may include exception type metadata, but do not
+  expose raw probe exception messages.
 
 ## `preset` Command Contract
 

@@ -52,6 +52,3 @@ def test_lazy_attribute_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
     settings_cls = vs_mod.TonemapSettings
     assert settings_cls is not None
     assert "frame_compare.vs.types" in sys.modules
-
-    # Access an alias
-    assert vs_mod.tonemap is vs_mod.apply_tonemap

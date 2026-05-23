@@ -18,8 +18,8 @@ from frame_compare.analysis.types import (
     MetricsMetadata,
     SelectionBreakdown,
 )
-from frame_compare.config import ConfigSchema, SelectionMode, load_config
-from frame_compare.errors import AudioAlignmentError
+from frame_compare.config.loader import load_config
+from frame_compare.config.schema import ConfigSchema, SelectionMode
 from frame_compare.orchestration import phase_tasks
 from frame_compare.orchestration.context import (
     ClipFingerprint,
@@ -28,6 +28,7 @@ from frame_compare.orchestration.context import (
     RunContext,
 )
 from frame_compare.orchestration.types import RunArtifacts
+from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.publishers import PublishResult
 from frame_compare.services.types import AlignmentResult, MetadataConfig, TmdbMetadata
 from frame_compare.utils.types import WorkspacePaths
@@ -235,6 +236,20 @@ def test_run_analyze_phase_records_cache_hit_and_selection_breakdown(
     assert calls["select"] == {"metrics": metrics, "config": ctx.config.analysis}
 
 
+def test_run_artifacts_legacy_render_accessors_keep_mutations() -> None:
+    artifacts = RunArtifacts()
+    screenshot = Path("screenshots/reference_1.png")
+
+    artifacts.screenshots_by_label["Reference"] = [screenshot]
+    artifacts.screenshot_dir = Path("screenshots")
+
+    assert artifacts.screenshots_by_label == {"Reference": [screenshot]}
+    assert artifacts.screenshot_dir == Path("screenshots")
+    assert artifacts.render is not None
+    assert artifacts.render.screenshots_by_label == {"Reference": [screenshot]}
+    assert artifacts.render.screenshot_dir == Path("screenshots")
+
+
 def test_run_align_phase_no_comparisons_is_noop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -418,7 +433,8 @@ def test_run_report_phase_builds_report_data_and_records_path(
     report_data = captured["report_data"]
     assert artifacts.report_path == expected_path
     assert report_data.frames == [5]
-    assert report_data.screenshots == artifacts.screenshots_by_label
+    assert report_data.clips[0].screenshots == artifacts.screenshots_by_label["Reference"]
+    assert report_data.clips[1].screenshots == artifacts.screenshots_by_label["Encode 1"]
     assert report_data.slowpics_url == "https://slow.pics/c/example"
     assert [(clip.name, clip.resolution, clip.fps) for clip in report_data.clips] == [
         ("Reference", (1920, 1080), 24.0),
@@ -457,7 +473,7 @@ def test_run_render_phase_maps_aligned_frames_to_source_frames(
         return {"Reference": [tmp_path / "reference.png"]}
 
     monkeypatch.setattr(
-        "frame_compare.render.orchestrator.render_screenshots_from_batch",
+        "frame_compare.render.batch.orchestrator.render_screenshots_from_batch",
         _fake_render_screenshots_from_batch,
     )
 

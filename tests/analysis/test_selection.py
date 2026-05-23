@@ -2,10 +2,10 @@ from fractions import Fraction
 
 import pytest
 
+from frame_compare.analysis.errors import SelectionError
 from frame_compare.analysis.selection import MIN_GAP, select_frames
 from frame_compare.analysis.types import ClipIdentity, FrameMetrics, MetricsMetadata
-from frame_compare.config import AnalysisConfig, SelectionMode
-from frame_compare.errors import SelectionError
+from frame_compare.config.schema import AnalysisConfig, SelectionMode
 
 
 def make_metrics(luminance: list[float], motion: list[float]) -> FrameMetrics:

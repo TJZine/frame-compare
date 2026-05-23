@@ -14,6 +14,24 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
 
+_NON_UNIT_MARKERS = frozenset({"integration", "e2e", "vs_required", "slow", "network"})
+_NON_UNIT_NODEID_PREFIXES = ("tests/integration/", "tests/e2e/")
+_NON_UNIT_NODEID_SUFFIXES = ("_e2e.py", "test_integration.py")
+
+
+def _should_default_to_unit(item: pytest.Item) -> bool:
+    """Classify fast isolated tests as unit tests unless a heavier route is explicit."""
+    if item.get_closest_marker("unit") is not None:
+        return False
+    if any(item.get_closest_marker(name) is not None for name in _NON_UNIT_MARKERS):
+        return False
+
+    nodeid = item.nodeid.split("::", 1)[0]
+    return not nodeid.startswith(_NON_UNIT_NODEID_PREFIXES) and not nodeid.endswith(
+        _NON_UNIT_NODEID_SUFFIXES
+    )
+
+
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     """Best-effort cleanup of pytest temp cache dirs in the repo root.
 
@@ -31,6 +49,13 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
         except Exception:
             # Never fail the test session because cleanup couldn't run.
             pass
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Route unmarked fast tests into the unit bucket for marker-based selection."""
+    for item in items:
+        if _should_default_to_unit(item):
+            item.add_marker(pytest.mark.unit)
 
 
 # ─── Global Mocks (Run at import time for collection) ──────────────────────────

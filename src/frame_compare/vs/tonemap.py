@@ -12,8 +12,8 @@ from typing import TYPE_CHECKING, cast
 import structlog
 
 from frame_compare.config.schema import ToneCurve, TonemapPreset
-from frame_compare.errors import TonemapError
 from frame_compare.vs.env import detect_plugins
+from frame_compare.vs.errors import TonemapError
 from frame_compare.vs.props import detect_hdr
 from frame_compare.vs.types import HDRMetadata, TonemapSettings
 
@@ -82,6 +82,15 @@ class _LibplaceboRuntimeState:
 
 
 _LIBPLACEBO_RUNTIME_STATE = _LibplaceboRuntimeState()
+
+
+@dataclass(frozen=True, slots=True)
+class _HdrTonemapInputs:
+    hdr_metadata: HDRMetadata | None
+    transfer: int | None
+    primaries: int | None
+    props: dict[str, object] | None
+    detected_is_hdr: bool | None
 
 
 def _probe_libplacebo_runtime() -> bool:
@@ -296,6 +305,111 @@ def _apply_post_processing(clip: vs.VideoNode, settings: TonemapSettings) -> vs.
         ) from e
 
 
+def _resolve_hdr_tonemap_inputs(
+    clip: vs.VideoNode,
+    hdr_metadata: HDRMetadata | None,
+) -> _HdrTonemapInputs:
+    props: dict[str, object] | None = None
+    detected_is_hdr: bool | None = None
+    if hdr_metadata is None:
+        props = dict(clip.get_frame(0).props)
+        detected_is_hdr, hdr_metadata = detect_hdr(props)
+
+    transfer_raw: object | None = (
+        getattr(hdr_metadata, "transfer", None) if hdr_metadata is not None else None
+    )
+    primaries_raw: object | None = (
+        getattr(hdr_metadata, "color_primaries", None) if hdr_metadata is not None else None
+    )
+    return _HdrTonemapInputs(
+        hdr_metadata=hdr_metadata,
+        transfer=transfer_raw if isinstance(transfer_raw, int) else None,
+        primaries=primaries_raw if isinstance(primaries_raw, int) else None,
+        props=props,
+        detected_is_hdr=detected_is_hdr,
+    )
+
+
+def _convert_for_libplacebo(clip: vs.VideoNode, inputs: _HdrTonemapInputs) -> vs.VideoNode:
+    import vapoursynth as vs
+
+    try:
+        if clip.format.bits_per_sample == 16 and clip.format.color_family == vs.RGB:  # type: ignore
+            return clip
+        if clip.format.color_family == vs.RGB:  # type: ignore
+            return clip.resize.Bicubic(format=vs.RGB48)  # type: ignore
+
+        props = inputs.props if inputs.props is not None else dict(clip.get_frame(0).props)
+        detected_is_hdr = inputs.detected_is_hdr
+        if detected_is_hdr is None:
+            detected_is_hdr, _ = detect_hdr(props)
+        rgb48_format = cast(int, vs.RGB48)  # type: ignore[attr-defined]
+        return _convert_non_rgb_with_matrix_hint(
+            clip,
+            target_format=rgb48_format,
+            props=props,
+            detected_is_hdr=detected_is_hdr,
+        )
+    except Exception as e:
+        raise TonemapError(reason=f"Failed to convert to RGB48: {e}") from e
+
+
+def _build_libplacebo_tonemap_kwargs(
+    *,
+    settings: TonemapSettings,
+    target_nits: int,
+    inputs: _HdrTonemapInputs,
+) -> dict[str, object]:
+    src_max = settings.source_peak
+    if src_max is None:
+        metadata = inputs.hdr_metadata
+        src_max = metadata.max_cll if metadata and metadata.max_cll else 1000
+
+    src_csp = _deduce_src_csp_hint(inputs.transfer, inputs.primaries)
+    tm_kwargs: dict[str, object] = {
+        "src_max": src_max,
+        "dst_max": target_nits,
+        "tone_mapping_function": _TONE_CURVE_MAP[settings.tone_curve],
+        # SDR output targeting BT.709 (legacy default).
+        "dst_csp": 0,
+        "dst_prim": 1,
+    }
+    if src_csp is not None:
+        tm_kwargs["src_csp"] = src_csp
+
+    log.debug(
+        "libplacebo_tonemap_call",
+        transfer=inputs.transfer,
+        primaries=inputs.primaries,
+        src_csp=src_csp,
+        src_max=src_max,
+        dst_max=target_nits,
+        tone_curve=settings.tone_curve,
+    )
+    return tm_kwargs
+
+
+def _call_libplacebo_with_compat_retry(
+    core: vs.Core,
+    clip: vs.VideoNode,
+    tm_kwargs: dict[str, object],
+) -> vs.VideoNode:
+    try:
+        return core.placebo.Tonemap(clip, **tm_kwargs)  # type: ignore[misc]
+    except TypeError as e:
+        minimal_kwargs: dict[str, object] = {
+            "src_max": tm_kwargs["src_max"],
+            "dst_max": tm_kwargs["dst_max"],
+            "tone_mapping_function": tm_kwargs["tone_mapping_function"],
+        }
+        log.debug(
+            "libplacebo_tonemap_retry_dropped_kwargs",
+            error=str(e),
+            dropped=sorted(set(tm_kwargs.keys()) - set(minimal_kwargs.keys())),
+        )
+        return core.placebo.Tonemap(clip, **minimal_kwargs)  # type: ignore[misc]
+
+
 def _apply_libplacebo(
     clip: vs.VideoNode,
     settings: TonemapSettings,
@@ -313,101 +427,21 @@ def _apply_libplacebo(
             hint="Supported: bt2390, spline, reinhard",
         )
 
-    props: dict[str, object] | None = None
-    detected_is_hdr: bool | None = None
-    detected_hdr_metadata: HDRMetadata | None = None
-
-    def _ensure_hdr_detection() -> None:
-        nonlocal props, detected_is_hdr, detected_hdr_metadata
-        if detected_is_hdr is not None:
-            return
-        if props is None:
-            props = dict(clip.get_frame(0).props)
-        detected_is_hdr, detected_hdr_metadata = detect_hdr(props)
-
-    if hdr_metadata is None:
-        _ensure_hdr_detection()
-        hdr_metadata = detected_hdr_metadata
-    transfer_raw: object | None = (
-        getattr(hdr_metadata, "transfer", None) if hdr_metadata is not None else None
-    )
-    primaries_raw: object | None = (
-        getattr(hdr_metadata, "color_primaries", None) if hdr_metadata is not None else None
-    )
-    transfer: int | None = transfer_raw if isinstance(transfer_raw, int) else None
-    primaries: int | None = primaries_raw if isinstance(primaries_raw, int) else None
-
-    # Exact conversion call for libplacebo path
-    try:
-        if clip.format.bits_per_sample != 16 or clip.format.color_family != vs.RGB:  # type: ignore
-            if clip.format.color_family == vs.RGB:  # type: ignore
-                clip = clip.resize.Bicubic(format=vs.RGB48)  # type: ignore
-            else:
-                if props is None:
-                    props = dict(clip.get_frame(0).props)
-                if detected_is_hdr is None:
-                    _ensure_hdr_detection()
-                rgb48_format = cast(int, vs.RGB48)  # type: ignore[attr-defined]
-                clip = _convert_non_rgb_with_matrix_hint(
-                    clip,
-                    target_format=rgb48_format,
-                    props=props,
-                    detected_is_hdr=detected_is_hdr,
-                )
-    except Exception as e:
-        raise TonemapError(reason=f"Failed to convert to RGB48: {e}") from e
+    inputs = _resolve_hdr_tonemap_inputs(clip, hdr_metadata)
+    clip = _convert_for_libplacebo(clip, inputs)
 
     try:
-        clip = _normalize_rgb_props(clip, transfer=transfer, primaries=primaries)
+        clip = _normalize_rgb_props(clip, transfer=inputs.transfer, primaries=inputs.primaries)
     except Exception as e:
         raise TonemapError(reason=f"Failed to normalize RGB props for tonemap: {e}") from e
 
-    src_max = settings.source_peak
-    if src_max is None:
-        src_max = hdr_metadata.max_cll if hdr_metadata and hdr_metadata.max_cll else 1000
-
     try:
-        src_csp = _deduce_src_csp_hint(transfer, primaries)
-        tm_kwargs: dict[str, object] = {
-            "src_max": src_max,
-            "dst_max": target_nits,
-            "tone_mapping_function": _TONE_CURVE_MAP[settings.tone_curve],
-            # SDR output targeting BT.709 (legacy default).
-            "dst_csp": 0,
-            "dst_prim": 1,
-        }
-        if src_csp is not None:
-            tm_kwargs["src_csp"] = src_csp
-
-        log.debug(
-            "libplacebo_tonemap_call",
-            transfer=transfer,
-            primaries=primaries,
-            src_csp=src_csp,
-            src_max=src_max,
-            dst_max=target_nits,
-            tone_curve=settings.tone_curve,
+        tm_kwargs = _build_libplacebo_tonemap_kwargs(
+            settings=settings,
+            target_nits=target_nits,
+            inputs=inputs,
         )
-
-        # We need to type ignore because VS plugin properties are dynamic.
-        try:
-            clip = core.placebo.Tonemap(clip, **tm_kwargs)  # type: ignore[misc]
-        except TypeError as e:
-            # Compatibility retry: some vs-placebo builds may not support extra kwargs.
-            minimal_kwargs: dict[str, object] = {
-                "src_max": tm_kwargs["src_max"],
-                "dst_max": tm_kwargs["dst_max"],
-                "tone_mapping_function": tm_kwargs["tone_mapping_function"],
-            }
-            # Keep the retry minimal for broad compatibility across placebo builds.
-            # In practice `src_csp` is the most likely optional kwarg to be unsupported.
-
-            log.debug(
-                "libplacebo_tonemap_retry_dropped_kwargs",
-                error=str(e),
-                dropped=sorted(set(tm_kwargs.keys()) - set(minimal_kwargs.keys())),
-            )
-            clip = core.placebo.Tonemap(clip, **minimal_kwargs)  # type: ignore[misc]
+        clip = _call_libplacebo_with_compat_retry(core, clip, tm_kwargs)
     except Exception as e:
         if isinstance(e, TonemapError | AttributeError | KeyError | AssertionError):
             raise

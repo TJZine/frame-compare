@@ -6,7 +6,7 @@ import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
-from frame_compare.errors import InsufficientFramesError
+from frame_compare.analysis.errors import InsufficientFramesError
 
 __all__ = ["FramePlan", "select_uniform_seeded_frames", "create_frame_plan"]
 
@@ -40,7 +40,7 @@ def create_frame_plan(
     Args:
         num_frames: Total frames in video
         count: Number of frames to select
-        seed: Optional seed; if None, uses the SSOT default seed (42)
+        seed: Optional seed; if None, uses the default seed (42)
 
     Returns:
         FramePlan from select_uniform_seeded_frames()

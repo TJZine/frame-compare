@@ -1,12 +1,14 @@
 from pathlib import Path
 
-from frame_compare.cli_entry import handle_error
+from frame_compare.cli.entry import handle_error
+from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.errors import (
-    ConfigNotFoundError,
     FrameExtractionError,
     GenericInternalError,
     NoVideosFoundError,
-    SlowpicsError,
+)
+from frame_compare.services.errors import SlowpicsError
+from frame_compare.vs.errors import (
     TonemapRequiresVapourSynthError,
     VapourSynthNotFoundError,
 )

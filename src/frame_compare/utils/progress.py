@@ -135,7 +135,7 @@ class LogProgressReporter:
                 self._last_logged_milestone = m
 
     def set_description(self, desc: str) -> None:
-        """No-op for log reporter (per SSOT)."""
+        """No-op for log reporter."""
         pass
 
     def complete_phase(self) -> None:

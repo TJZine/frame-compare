@@ -6,7 +6,7 @@ from typing import Any, cast
 
 import pytest
 
-from frame_compare.config import ConfigSchema
+from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration.context import (
     ClipFingerprint,
     ClipProbeSnapshot,
@@ -63,7 +63,7 @@ def test_overlay_display_frame_number_matches_aligned_output_filename(
         captured.append(request)
         return cast(Any, request).output_path
 
-    monkeypatch.setattr("frame_compare.render.orchestrator.render_frame", _fake_render_frame)
+    monkeypatch.setattr("frame_compare.render.batch.orchestrator.render_frame", _fake_render_frame)
     monkeypatch.setattr("frame_compare.vs.loader.DefaultVSLoader", FakeVSLoader)
 
     config = ConfigSchema()

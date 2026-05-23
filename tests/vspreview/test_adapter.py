@@ -12,14 +12,16 @@ from pathlib import Path
 
 import pytest
 
-from frame_compare.errors import VSPreviewError
 from frame_compare.vspreview.adapter import (
     VSPreviewAvailability,
     VSPreviewAvailabilityStatus,
     VSPreviewConfig,
+    launch_alignment_verification_session,
+)
+from frame_compare.vspreview.errors import VSPreviewError
+from frame_compare.vspreview.session_script import (
     _build_script_content,
     _generate_vspreview_script,
-    launch_alignment_verification_session,
 )
 
 
@@ -54,6 +56,77 @@ def test_launch_alignment_verification_session_respects_timeout(
             cache_dir=tmp_path,
             config=cfg,
         )
+
+
+def test_launch_alignment_verification_session_redacts_probe_failure_details(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.check_vspreview_availability",
+        lambda: VSPreviewAvailability(
+            status=VSPreviewAvailabilityStatus.PROBE_FAILED,
+            message="VSPreview availability probe failed",
+            error_details={
+                "exception_type": "RuntimeError",
+                "exception": "secret token at /tmp/private.log",
+            },
+        ),
+    )
+
+    cfg = VSPreviewConfig(enabled=True)
+
+    with pytest.raises(VSPreviewError) as excinfo:
+        launch_alignment_verification_session(
+            reference=Path("ref.mkv"),
+            comparisons=[Path("a.mkv")],
+            suggested_offsets_by_key={},
+            cache_dir=tmp_path,
+            config=cfg,
+        )
+
+    assert "availability probe failed (RuntimeError)" in str(excinfo.value)
+    assert "secret token" not in str(excinfo.value)
+    assert "/tmp/private.log" not in str(excinfo.value)
+
+
+def test_launch_alignment_verification_session_redacts_non_zero_exit_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.check_vspreview_availability",
+        lambda: VSPreviewAvailability(
+            status=VSPreviewAvailabilityStatus.AVAILABLE,
+            message="available",
+        ),
+    )
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter._resolve_launch_command",
+        lambda script_path: ["vspreview", str(script_path)],
+    )
+    monkeypatch.setattr(
+        "frame_compare.vspreview.adapter.subprocess.run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            ["vspreview"],
+            7,
+            stdout="stdout secret",
+            stderr="stderr secret at /tmp/private.log",
+        ),
+    )
+
+    cfg = VSPreviewConfig(enabled=True, timeout_seconds=1.0)
+
+    with pytest.raises(VSPreviewError) as excinfo:
+        launch_alignment_verification_session(
+            reference=Path("ref.mkv"),
+            comparisons=[Path("a.mkv")],
+            suggested_offsets_by_key={},
+            cache_dir=tmp_path,
+            config=cfg,
+        )
+
+    assert "launch exited with code 7" in str(excinfo.value)
+    assert "stderr secret" not in str(excinfo.value)
+    assert "/tmp/private.log" not in str(excinfo.value)
 
 
 def test_build_script_content_escapes_path_literals() -> None:
@@ -205,7 +278,7 @@ def test_generate_vspreview_script_uses_atomic_write(
         calls.append(path)
         path.write_text(content, encoding=encoding)
 
-    monkeypatch.setattr("frame_compare.vspreview.adapter.write_text_atomic", _fake_write)
+    monkeypatch.setattr("frame_compare.vspreview.session_script.write_text_atomic", _fake_write)
 
     script_path = _generate_vspreview_script(
         reference=Path("ref.mkv"),
@@ -229,7 +302,7 @@ def test_generate_vspreview_script_handles_collision(
         def now(cls, tz=None):
             return datetime(2026, 5, 20, 19, 45, 0, tzinfo=tz)
 
-    monkeypatch.setattr("frame_compare.vspreview.adapter.datetime", MockDatetime)
+    monkeypatch.setattr("frame_compare.vspreview.session_script.datetime", MockDatetime)
 
     timestamp = "20260520T194500Z"
     sessions_dir = tmp_path / "vspreview_sessions"
@@ -297,11 +370,11 @@ def test_check_vspreview_availability(monkeypatch: pytest.MonkeyPatch) -> None:
     assert res.status == VSPreviewAvailabilityStatus.AVAILABLE
     assert res.is_available is True
 
-    # 2. Executable missing, but module and PySide6 available
+    # 2. Executable missing, but module and PyQt6 available
     monkeypatch.setattr("shutil.which", lambda cmd: None)
 
     def mock_find_spec(name: str):
-        if name in ("vspreview", "PySide6"):
+        if name in ("vspreview", "PyQt6"):
             from importlib.machinery import ModuleSpec
 
             return ModuleSpec(name, None)
@@ -325,7 +398,7 @@ def test_check_vspreview_availability(monkeypatch: pytest.MonkeyPatch) -> None:
     assert res.status == VSPreviewAvailabilityStatus.MISSING_QT_BACKEND
     assert res.is_available is False
     assert "Qt backend missing" in res.message
-    assert res.hint == "Install with: pip install PySide6 (or: pip install PyQt5)"
+    assert res.hint == "Install with: pip install PyQt6 (or: pip install PySide6)"
     assert "VSPreview not installed" not in res.message
 
     # 4. Nothing available

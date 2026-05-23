@@ -57,9 +57,9 @@ def test_log_progress_reporter_supports_nested_phases():
 
 
 def test_progress_reporter_protocol_is_single_source() -> None:
+    import frame_compare.analysis.metrics as metrics_module
     import frame_compare.utils.progress as progress_module
     import frame_compare.utils.progress_protocol as progress_protocol
-    from frame_compare.analysis import metrics as metrics_module
 
     assert progress_module.ProgressReporter is progress_protocol.ProgressReporter
     assert metrics_module.ProgressReporter is progress_protocol.ProgressReporter

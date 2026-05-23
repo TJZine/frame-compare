@@ -13,7 +13,7 @@ The default move is extraction into the existing owner, not accretion in hotspot
 
 ## Use This Skill For
 
-- Changes touching composition roots: [`src/frame_compare/cli_entry.py`](../../../src/frame_compare/cli_entry.py), [`src/frame_compare/runner.py`](../../../src/frame_compare/runner.py), or [`src/frame_compare/orchestration/coordinator.py`](../../../src/frame_compare/orchestration/coordinator.py)
+- Changes touching composition roots: [`src/frame_compare/cli/entry.py`](../../../src/frame_compare/cli/entry.py), [`src/frame_compare/runner.py`](../../../src/frame_compare/runner.py), or [`src/frame_compare/orchestration/coordinator.py`](../../../src/frame_compare/orchestration/coordinator.py)
 - Work in current hotspots listed in [`docs/current-architecture.md`](../../../docs/current-architecture.md)
 - Changes to `importlinter.ini` or top-level package boundaries
 - New coordinators, services, repositories, adapters, or output owners
@@ -22,7 +22,7 @@ The default move is extraction into the existing owner, not accretion in hotspot
 
 ## Core Rules
 
-- Treat `cli_entry.py`, `runner.py`, and `orchestration/coordinator.py` as composition and routing surfaces. Keep feature policy and heavy runtime logic in focused owners.
+- Treat `cli/entry.py`, `runner.py`, and `orchestration/coordinator.py` as composition and routing surfaces. Keep feature policy and heavy runtime logic in focused owners.
 - Preserve lazy CLI import behavior. Help/version/simple CLI paths should not import the full VapourSynth/runtime stack.
 - Keep config and environment interpretation centralized in config, CLI, preflight, or bootstrap owners.
 - Respect `importlinter.ini`; update it in the same pass only when the architecture decision is intentional.

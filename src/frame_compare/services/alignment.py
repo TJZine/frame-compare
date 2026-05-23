@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 import tomllib
 from fractions import Fraction
 from pathlib import Path
@@ -13,16 +14,15 @@ import structlog
 import tomli_w
 
 from frame_compare.errors import (
-    AudioAlignmentError,
     CacheCorruptionError,
     CacheVersionMismatchError,
     FFmpegError,
     FFmpegNotFoundError,
-    VSPreviewError,
 )
-from frame_compare.services.types import AlignmentConfig, AlignmentResult
+from frame_compare.services.errors import AudioAlignmentError
+from frame_compare.services.types import AlignmentAlgorithm, AlignmentConfig, AlignmentResult
 from frame_compare.utils.atomic_write import write_bytes_atomic
-from frame_compare.utils.progress import ProgressReporter
+from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.subproc import run_subprocess
 from frame_compare.vspreview.adapter import (
     VSPreviewAvailabilityStatus,
@@ -30,6 +30,7 @@ from frame_compare.vspreview.adapter import (
     check_vspreview_availability,
     launch_alignment_verification_session,
 )
+from frame_compare.vspreview.errors import VSPreviewError
 
 CACHE_VERSION = "1"
 CACHE_FILE_NAME = "audio_offsets.toml"
@@ -78,10 +79,10 @@ def _maybe_launch_vspreview(
 
     if config.force_interactive and not availability.is_available:
         if availability.status == VSPreviewAvailabilityStatus.PROBE_FAILED:
-            err_msg = "Interactive alignment requested but VSPreview availability check failed."
-            if availability.error_details:
-                err_msg += f" ({availability.error_details.get('exception_type')}: {availability.error_details.get('exception')})"
-            raise AudioAlignmentError(err_msg)
+            raise AudioAlignmentError(
+                "Interactive alignment requested but "
+                f"VSPreview {availability.public_probe_failure_reason()}."
+            )
         else:
             raise AudioAlignmentError(
                 "Interactive alignment requested but VSPreview is not available."
@@ -89,18 +90,20 @@ def _maybe_launch_vspreview(
 
     if not availability.is_available:
         if availability.status == VSPreviewAvailabilityStatus.PROBE_FAILED:
+            public_details = availability.public_probe_failure_details()
             log.warning(
                 "vspreview_availability_probe_failed",
-                error=availability.error_details.get("exception")
-                if availability.error_details
-                else "unknown error",
-                exception_type=availability.error_details.get("exception_type")
-                if availability.error_details
-                else "Exception",
+                reason=availability.public_probe_failure_reason(),
+                exception_type=public_details.get("exception_type"),
                 hint=availability.hint,
                 use_vspreview=config.use_vspreview,
                 force_interactive=config.force_interactive,
             )
+            if availability.error_details:
+                log.debug(
+                    "vspreview_availability_probe_failed_debug",
+                    error_details=availability.error_details,
+                )
         elif config.use_vspreview and not config.force_interactive:
             log.warning(
                 "vspreview_unavailable",
@@ -109,27 +112,41 @@ def _maybe_launch_vspreview(
                 force_interactive=config.force_interactive,
             )
 
-    should_launch = bool(
-        (config.use_vspreview or config.force_interactive) and availability.is_available
-    )
+    stdin_tty = sys.stdin.isatty()
+    stdout_tty = sys.stdout.isatty()
+    stderr_tty = sys.stderr.isatty()
+    has_tty = stdin_tty or stdout_tty or stderr_tty
+
+    launch_requested = bool(config.use_vspreview or config.force_interactive)
+    should_launch = bool(launch_requested and availability.is_available and has_tty)
 
     if progress:
         progress.set_description("Alignment verification")
 
     try:
-        launch_alignment_verification_session(
+        script_path = launch_alignment_verification_session(
             reference=reference,
             comparisons=comparisons,
             suggested_offsets_by_key=offsets_by_key,
             cache_dir=cache_dir,
             config=VSPreviewConfig(enabled=should_launch),
         )
+        if launch_requested and availability.is_available and not has_tty:
+            log.warning(
+                "vspreview_no_tty",
+                hint="Cannot launch VSPreview without an interactive terminal (TTY)",
+                script_path=str(script_path),
+                stdin_tty=stdin_tty,
+                stdout_tty=stdout_tty,
+                stderr_tty=stderr_tty,
+            )
     except VSPreviewError as exc:
         if config.force_interactive:
             raise
         log.warning(
             "vspreview_optional_launch_failed",
-            error=str(exc),
+            reason=exc.context.message,
+            code=exc.code,
             force_interactive=config.force_interactive,
             use_vspreview=config.use_vspreview,
         )
@@ -249,12 +266,20 @@ def align_clips(
         c for c in comparisons if f"{reference.stem}:{c.stem}" not in results_map
     ]
     if config.cache_results and requested_comparisons:
-        cached = load_cached_offsets(cache_dir, [reference] + requested_comparisons)
-        if cached is not None:
-            results_map.update(cached)
-            requested_comparisons = [
-                c for c in comparisons if f"{reference.stem}:{c.stem}" not in results_map
-            ]
+        try:
+            cached = load_cached_offsets(cache_dir, [reference] + requested_comparisons)
+            if cached is not None:
+                results_map.update(cached)
+                requested_comparisons = [
+                    c for c in comparisons if f"{reference.stem}:{c.stem}" not in results_map
+                ]
+        except (CacheCorruptionError, CacheVersionMismatchError) as exc:
+            log.warning(
+                "audio_offsets_cache_load_failed",
+                path=str(cache_dir / CACHE_FILE_NAME),
+                error=str(exc),
+                action="degrade_to_computed_alignment",
+            )
 
     # 2. Compute missing
     if requested_comparisons:
@@ -319,8 +344,7 @@ def check_alignment_cached(
     return missing
 
 
-def _resolve_cached_algorithm(entry_dict: dict[str, object]) -> str:
-    """Resolve the canonical cache algorithm field, accepting legacy key names."""
+def _cached_entry_algorithm(entry_dict: dict[str, object]) -> AlignmentAlgorithm:
     algorithm = entry_dict.get("algorithm")
     if algorithm is None and "method" in entry_dict:
         algorithm = entry_dict["method"]
@@ -329,7 +353,48 @@ def _resolve_cached_algorithm(entry_dict: dict[str, object]) -> str:
         raise TypeError("algorithm must be str")
     if algorithm != "cross_correlation":
         raise ValueError("unsupported algorithm value")
-    return algorithm
+    return "cross_correlation"
+
+
+def _parse_cached_alignment_entry(entry_dict: dict[str, object]) -> AlignmentResult:
+    algorithm = _cached_entry_algorithm(entry_dict)
+    reference_clip = entry_dict["reference_clip"]
+    comparison_clip = entry_dict["comparison_clip"]
+    frame_offset = entry_dict["frame_offset"]
+    time_offset_seconds = entry_dict["time_offset_seconds"]
+    correlation_score = entry_dict["correlation_score"]
+
+    if not isinstance(reference_clip, str):
+        raise TypeError("reference_clip must be str")
+    if not isinstance(comparison_clip, str):
+        raise TypeError("comparison_clip must be str")
+    if not isinstance(frame_offset, int):
+        raise TypeError("frame_offset must be int")
+    if not isinstance(time_offset_seconds, int | float):
+        raise TypeError("time_offset_seconds must be number")
+    if not isinstance(correlation_score, int | float):
+        raise TypeError("correlation_score must be number")
+
+    return AlignmentResult(
+        reference_clip=reference_clip,
+        comparison_clip=comparison_clip,
+        frame_offset=frame_offset,
+        time_offset_seconds=float(time_offset_seconds),
+        correlation_score=float(correlation_score),
+        algorithm=algorithm,
+        source="cached",
+    )
+
+
+def _cache_entry_from_result(result: AlignmentResult) -> dict[str, object]:
+    return {
+        "reference_clip": result.reference_clip,
+        "comparison_clip": result.comparison_clip,
+        "frame_offset": result.frame_offset,
+        "time_offset_seconds": result.time_offset_seconds,
+        "correlation_score": result.correlation_score,
+        "algorithm": result.algorithm,
+    }
 
 
 def _normalize_legacy_cache_entries(data: dict[str, object]) -> None:
@@ -337,10 +402,9 @@ def _normalize_legacy_cache_entries(data: dict[str, object]) -> None:
     for key, entry in data.items():
         if key == "version" or not isinstance(entry, dict):
             continue
-        entry_dict = cast(dict[str, object], entry)
-        if "algorithm" not in entry_dict and "method" in entry_dict:
-            entry_dict["algorithm"] = entry_dict["method"]
-        entry_dict.pop("method", None)
+        data[key] = _cache_entry_from_result(
+            _parse_cached_alignment_entry(cast(dict[str, object], entry))
+        )
 
 
 def load_cached_offsets(
@@ -355,8 +419,8 @@ def load_cached_offsets(
     try:
         with cache_path.open("rb") as f:
             data = cast(dict[str, object], tomllib.load(f))
-    except tomllib.TOMLDecodeError:
-        raise CacheCorruptionError(cache_path) from None
+    except (tomllib.TOMLDecodeError, OSError) as exc:
+        raise CacheCorruptionError(cache_path) from exc
 
     if data.get("version") != CACHE_VERSION:
         raise CacheVersionMismatchError(str(data.get("version")), CACHE_VERSION)
@@ -373,33 +437,7 @@ def load_cached_offsets(
                 raise CacheCorruptionError(cache_path)
             entry_dict = cast(dict[str, object], entry)
             try:
-                reference_clip = entry_dict["reference_clip"]
-                comparison_clip = entry_dict["comparison_clip"]
-                frame_offset = entry_dict["frame_offset"]
-                time_offset_seconds = entry_dict["time_offset_seconds"]
-                correlation_score = entry_dict["correlation_score"]
-                _resolve_cached_algorithm(entry_dict)
-
-                if not isinstance(reference_clip, str):
-                    raise TypeError("reference_clip must be str")
-                if not isinstance(comparison_clip, str):
-                    raise TypeError("comparison_clip must be str")
-                if not isinstance(frame_offset, int):
-                    raise TypeError("frame_offset must be int")
-                if not isinstance(time_offset_seconds, int | float):
-                    raise TypeError("time_offset_seconds must be number")
-                if not isinstance(correlation_score, int | float):
-                    raise TypeError("correlation_score must be number")
-
-                results[key] = AlignmentResult(
-                    reference_clip=reference_clip,
-                    comparison_clip=comparison_clip,
-                    frame_offset=frame_offset,
-                    time_offset_seconds=float(time_offset_seconds),
-                    correlation_score=float(correlation_score),
-                    algorithm="cross_correlation",
-                    source="cached",
-                )
+                results[key] = _parse_cached_alignment_entry(entry_dict)
             except (KeyError, TypeError, ValueError) as e:
                 raise CacheCorruptionError(cache_path) from e
 
@@ -418,9 +456,11 @@ def save_offsets_cache(
     if cache_path.exists():
         try:
             with cache_path.open("rb") as f:
-                data.update(tomllib.load(f))
-            _normalize_legacy_cache_entries(data)
-        except tomllib.TOMLDecodeError as exc:
+                existing_data = cast(dict[str, object], tomllib.load(f))
+            _normalize_legacy_cache_entries(existing_data)
+            existing_data.pop("version", None)
+            data.update(existing_data)
+        except (tomllib.TOMLDecodeError, OSError, KeyError, TypeError, ValueError) as exc:
             log.warning(
                 "audio_offsets_cache_corrupt_on_write",
                 path=str(cache_path),
@@ -433,16 +473,18 @@ def save_offsets_cache(
     # Update with new results
     for res in results:
         key = f"{Path(res.reference_clip).stem}:{Path(res.comparison_clip).stem}"
-        data[key] = {
-            "reference_clip": res.reference_clip,
-            "comparison_clip": res.comparison_clip,
-            "frame_offset": res.frame_offset,
-            "time_offset_seconds": res.time_offset_seconds,
-            "correlation_score": res.correlation_score,
-            "algorithm": res.algorithm,
-        }
+        data[key] = _cache_entry_from_result(res)
 
-    write_bytes_atomic(cache_path, tomli_w.dumps(data).encode("utf-8"))
+    try:
+        write_bytes_atomic(cache_path, tomli_w.dumps(data).encode("utf-8"))
+    except OSError as exc:
+        log.warning(
+            "audio_offsets_cache_write_failed",
+            path=str(cache_path),
+            error=str(exc),
+            action="alignment_results_not_cached",
+            exc_info=exc,
+        )
 
 
 def _probe_fps(video_path: Path) -> Fraction:
@@ -574,3 +616,49 @@ def _samples_to_frames(
     """Convert sample offset to frame offset."""
     time_offset = sample_offset / sample_rate
     return int(round(time_offset * float(fps)))
+
+
+def calculate_alignment_trims(
+    ref_num_frames: int,
+    comp_offsets: list[int | None],
+    comp_num_frames: list[int],
+) -> tuple[tuple[int, int], list[tuple[int, int]]]:
+    """Calculate trim start and end (inclusive) frames for reference and comparisons.
+
+    Returns:
+        A tuple where the first element is (ref_trim_start, ref_trim_end)
+        and the second element is a list of (comp_trim_start, comp_trim_end) for each comparison.
+    """
+    if len(comp_offsets) != len(comp_num_frames):
+        raise ValueError(
+            "comp_offsets and comp_num_frames must have matching lengths "
+            f"({len(comp_offsets)} != {len(comp_num_frames)})"
+        )
+
+    offsets = [offset for offset in comp_offsets if offset is not None]
+    if not offsets:
+        return (0, ref_num_frames - 1), [(0, num - 1) for num in comp_num_frames]
+
+    baseline = max(0, max(offsets))
+    ref_len = ref_num_frames - baseline
+
+    trimmed_comp_lens: list[int] = []
+    trim_starts: list[int] = []
+    for offset, num_frames in zip(comp_offsets, comp_num_frames, strict=True):
+        relative_offset = offset if offset is not None else 0
+        trim_start = baseline - relative_offset
+        if trim_start < 0:
+            raise ValueError(f"trim_start_frames {trim_start} must be >= 0")
+        trim_starts.append(trim_start)
+        trimmed_comp_lens.append(num_frames - trim_start)
+
+    common_length = min([ref_len, *trimmed_comp_lens])
+    if common_length <= 0:
+        raise AudioAlignmentError("No overlapping frames after alignment normalization.")
+
+    ref_trim_start = baseline
+    ref_trim_end = baseline + common_length - 1
+
+    comp_trims = [(trim_start, trim_start + common_length - 1) for trim_start in trim_starts]
+
+    return (ref_trim_start, ref_trim_end), comp_trims

@@ -21,10 +21,10 @@ from frame_compare.services.metadata import is_valid_tmdb_api_key
 from frame_compare.vs.env import register_windows_dll_dirs
 
 if TYPE_CHECKING:
-    from frame_compare.utils.progress import ProgressReporter
+    from frame_compare.utils.progress_protocol import ProgressReporter
 
 
-# Canonical check ordering per SSOT §4.2.1
+# Canonical check ordering
 _CHECK_ORDER: list[tuple[str, str]] = [
     ("python_version", "core"),
     ("vapoursynth", "core"),
@@ -246,9 +246,7 @@ def _check_vspreview() -> CheckResult:
             passed=True,
             message=availability.message,
             hint=availability.hint,
-            details=cast(dict[str, JSONValue], availability.error_details)
-            if availability.error_details
-            else {},
+            details=cast(dict[str, JSONValue], availability.public_probe_failure_details()),
         )
 
     return CheckResult(
@@ -259,7 +257,7 @@ def _check_vspreview() -> CheckResult:
 
 
 def _check_slowpics() -> CheckResult:
-    """Check slow.pics reachability per SSOT §4.2.2.
+    """Check slow.pics reachability per docs/current-architecture.md.
 
     URL: https://slow.pics/
     Method: HEAD
@@ -349,8 +347,8 @@ def _check_tmdb_api_key() -> CheckResult:
 
 def _resolve_tmdb_config() -> tuple[bool | None, str | None, dict[str, JSONValue] | None]:
     """Resolve TMDB enablement and credentials through the runtime config path."""
+    from frame_compare.config.errors import ConfigParseError, ConfigValidationError
     from frame_compare.config.loader import load_config
-    from frame_compare.errors import ConfigParseError, ConfigValidationError
     from frame_compare.orchestration.preflight import resolve_workspace
 
     root = resolve_workspace(None)
@@ -381,7 +379,7 @@ def _resolve_tmdb_config() -> tuple[bool | None, str | None, dict[str, JSONValue
 
 
 def collect_checks() -> list[DoctorCheck]:
-    """Collect all diagnostic checks in deterministic order per SSOT §4.2.1.
+    """Collect all diagnostic checks in deterministic order.
 
     Returns:
         List of DoctorCheck in canonical order:

@@ -6,8 +6,9 @@ from pathlib import Path
 from _pytest.monkeypatch import MonkeyPatch
 from rich.console import Console
 
-from frame_compare.cli_output import print_at_a_glance, print_result_summary
-from frame_compare.config import ConfigSchema, get_default_config
+from frame_compare.cli.output import print_at_a_glance, print_result_summary
+from frame_compare.config.loader import get_default_config
+from frame_compare.config.schema import ConfigSchema
 from frame_compare.orchestration import RunRequest, RunResult
 
 
@@ -39,7 +40,7 @@ def test_at_a_glance_prints_key_rows_without_vspreview_probe(monkeypatch: Monkey
     config.screenshots.use_ffmpeg = True
     console = _console()
 
-    monkeypatch.setattr("frame_compare.cli_output.shutil.which", _which)
+    monkeypatch.setattr("frame_compare.cli.output.shutil.which", _which)
 
     print_at_a_glance(
         console,
@@ -83,7 +84,7 @@ def test_at_a_glance_prints_vspreview_availability_when_probe_succeeds(
     config.audio_alignment.use_vspreview = True
     console = _console()
 
-    monkeypatch.setattr("frame_compare.cli_output.shutil.which", lambda _command: None)
+    monkeypatch.setattr("frame_compare.cli.output.shutil.which", lambda _command: None)
     monkeypatch.setattr(
         "frame_compare.vspreview.adapter.check_vspreview_availability",
         lambda: VSPreviewAvailability(
@@ -113,7 +114,7 @@ def test_at_a_glance_prints_vspreview_probe_failure(monkeypatch: MonkeyPatch) ->
     config.audio_alignment.force_interactive = True
     console = _console()
 
-    monkeypatch.setattr("frame_compare.cli_output.shutil.which", lambda _command: None)
+    monkeypatch.setattr("frame_compare.cli.output.shutil.which", lambda _command: None)
     monkeypatch.setattr(
         "frame_compare.vspreview.adapter.check_vspreview_availability",
         lambda: VSPreviewAvailability(
@@ -137,7 +138,8 @@ def test_at_a_glance_prints_vspreview_probe_failure(monkeypatch: MonkeyPatch) ->
     output = _render(console)
     assert "audio_alignment.force_interactive" in output
     assert "vspreview.available" in output
-    assert "probe failed (RuntimeError: display unavailable)" in output
+    assert "probe failed (RuntimeError)" in output
+    assert "display unavailable" not in output
 
 
 def test_result_summary_quiet_mode_prints_only_screenshot_path_when_available() -> None:

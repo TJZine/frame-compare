@@ -25,7 +25,7 @@ The main anti-pattern is mixing subprocess, HTTP, VapourSynth, browser, packagin
 - Render orchestration and overlays: [`src/frame_compare/render/`](../../../src/frame_compare/render/)
 - TMDB metadata: [`src/frame_compare/services/metadata.py`](../../../src/frame_compare/services/metadata.py)
 - slow.pics publishing: [`src/frame_compare/services/publishers.py`](../../../src/frame_compare/services/publishers.py)
-- Browser auto-open: [`src/frame_compare/cli_entry.py`](../../../src/frame_compare/cli_entry.py)
+- Browser auto-open: [`src/frame_compare/cli/entry.py`](../../../src/frame_compare/cli/entry.py)
 - Docker runtime: [`Dockerfile`](../../../Dockerfile), [`docker-compose.yml`](../../../docker-compose.yml), [`tools/verify_docker_integration.sh`](../../../tools/verify_docker_integration.sh)
 - Windows portable and updater flow: [`tools/windows_portable/`](../../../tools/windows_portable/)
 

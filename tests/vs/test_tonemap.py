@@ -30,7 +30,7 @@ if not _vs_spec_available() and "vapoursynth" not in sys.modules:
 # Now import module under test
 import frame_compare.vs.tonemap as tonemap_module  # noqa: E402, I001
 import vapoursynth as vs  # noqa: E402, I001
-from frame_compare.errors import TonemapError  # noqa: E402, I001
+from frame_compare.vs.errors import TonemapError  # noqa: E402, I001
 from frame_compare.vs.tonemap import apply_tonemap, get_preset_settings  # noqa: E402, I001
 from frame_compare.vs.types import HDRMetadata, TonemapSettings  # noqa: E402, I001
 from frame_compare.config.schema import ToneCurve, TonemapPreset  # noqa: E402, I001

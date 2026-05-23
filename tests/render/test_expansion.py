@@ -8,8 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from frame_compare.config.schema import ColorConfig, ConfigSchema, OverlayMode, ScreenshotsConfig
-from frame_compare.errors import TonemapRequiresVapourSynthError
-from frame_compare.render.expansion import (
+from frame_compare.render.batch.expansion import (
     _build_overlay_config,
     _validate_batch_request_lengths,
     expand_batch_render_requests,
@@ -20,6 +19,7 @@ from frame_compare.render.expansion import (
     validate_ffmpeg_batch_tonemap_gate,
 )
 from frame_compare.render.types import ScreenshotBatchRequest
+from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 
 
 def test_validate_batch_request_lengths_valid() -> None:
@@ -92,6 +92,17 @@ def test_validate_ffmpeg_batch_tonemap_gate() -> None:
         probe_num_frames=100,
         probe_is_hdr=False,
     )
+    unknown_hdr_req = ScreenshotBatchRequest(
+        clip_path=Path("video.mkv"),
+        label="ref",
+        source_frames=[10],
+        display_frames=[10],
+        selection_labels=["A"],
+        probe_width=1920,
+        probe_height=1080,
+        probe_num_frames=100,
+        probe_is_hdr=None,
+    )
 
     # Should raise TonemapRequiresVapourSynthError when renderer is ffmpeg, tonemap is enabled, and any batch is HDR
     with pytest.raises(TonemapRequiresVapourSynthError):
@@ -107,6 +118,10 @@ def test_validate_ffmpeg_batch_tonemap_gate() -> None:
     # Should not raise if no HDR requests
     validate_ffmpeg_batch_tonemap_gate([sdr_req], config, "ffmpeg")
 
+    # Unknown HDR state must fail closed on the FFmpeg + tonemap path.
+    with pytest.raises(TonemapRequiresVapourSynthError):
+        validate_ffmpeg_batch_tonemap_gate([unknown_hdr_req], config, "ffmpeg")
+
 
 def test_resolve_batch_ffmpeg_runner() -> None:
     custom_runner = MagicMock()
@@ -117,7 +132,7 @@ def test_resolve_batch_ffmpeg_runner() -> None:
     assert isinstance(resolve_batch_ffmpeg_runner(None), DefaultFFmpegRunner)
 
 
-def test_validate_batch_requests() -> None:
+def test_validate_batch_requests_rejects_duplicate_labels() -> None:
     req1 = ScreenshotBatchRequest(
         clip_path=Path("video1.mkv"),
         label="ref",
@@ -143,6 +158,51 @@ def test_validate_batch_requests() -> None:
 
     # Should raise on duplicate labels
     with pytest.raises(ValueError, match="Duplicate label 'ref' detected"):
+        validate_batch_requests([req1, req2])
+
+
+def test_validate_batch_requests_rejects_duplicate_output_name_within_request() -> None:
+    req = ScreenshotBatchRequest(
+        clip_path=Path("video1.mkv"),
+        label="ref",
+        source_frames=[10, 11],
+        display_frames=[42, 42],
+        selection_labels=["A", "B"],
+        probe_width=1920,
+        probe_height=1080,
+        probe_num_frames=100,
+        probe_is_hdr=False,
+    )
+
+    with pytest.raises(ValueError, match="Duplicate screenshot output 'ref_00042.png'"):
+        validate_batch_requests([req])
+
+
+def test_validate_batch_requests_rejects_sanitized_output_name_collisions() -> None:
+    req1 = ScreenshotBatchRequest(
+        clip_path=Path("video1.mkv"),
+        label="A B",
+        source_frames=[10],
+        display_frames=[42],
+        selection_labels=["A"],
+        probe_width=1920,
+        probe_height=1080,
+        probe_num_frames=100,
+        probe_is_hdr=False,
+    )
+    req2 = ScreenshotBatchRequest(
+        clip_path=Path("video2.mkv"),
+        label="A_B",
+        source_frames=[10],
+        display_frames=[42],
+        selection_labels=["B"],
+        probe_width=1920,
+        probe_height=1080,
+        probe_num_frames=100,
+        probe_is_hdr=False,
+    )
+
+    with pytest.raises(ValueError, match="Duplicate screenshot output 'A_B_00042.png'"):
         validate_batch_requests([req1, req2])
 
 
@@ -196,7 +256,7 @@ def test_build_overlay_config() -> None:
     assert overlay.num_frames == 100
 
 
-@patch("frame_compare.render.expansion.prepare_clip_for_render")
+@patch("frame_compare.render.batch.expansion.prepare_clip_for_render")
 def test_expand_batch_render_requests(mock_prepare: MagicMock) -> None:
     config = ConfigSchema()
     ffmpeg_runner = MagicMock()

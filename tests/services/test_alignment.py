@@ -12,12 +12,10 @@ import pytest
 import tomli_w
 
 from frame_compare.errors import (
-    AudioAlignmentError,
     CacheCorruptionError,
     CacheVersionMismatchError,
     FFmpegError,
     FFmpegNotFoundError,
-    VSPreviewError,
 )
 from frame_compare.services.alignment import (
     _cross_correlate,
@@ -25,13 +23,16 @@ from frame_compare.services.alignment import (
     _probe_fps,
     _samples_to_frames,
     align_clips,
+    calculate_alignment_trims,
     check_alignment_cached,
     load_cached_offsets,
     save_offsets_cache,
 )
+from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.vspreview.adapter import VSPreviewAvailability, VSPreviewAvailabilityStatus
+from frame_compare.vspreview.errors import VSPreviewError
 
 
 def test_alignment_result_is_frozen():
@@ -247,6 +248,16 @@ def test_cross_correlate_empty_signal_raises() -> None:
         _cross_correlate(ref, comp)
 
 
+def test_calculate_alignment_trims_rejects_mismatched_lengths_when_offsets_are_unknown() -> None:
+    """Default trim path must preserve the same length invariant as aligned offsets."""
+    with pytest.raises(ValueError, match=r"comp_offsets and comp_num_frames.*1 != 2"):
+        calculate_alignment_trims(
+            ref_num_frames=100,
+            comp_offsets=[None],
+            comp_num_frames=[100, 100],
+        )
+
+
 def test_load_cached_offsets_missing_returns_none(tmp_path: Path):
     """Test cache loading when file is missing."""
     assert load_cached_offsets(tmp_path, [Path("ref.mkv")]) is None
@@ -428,6 +439,81 @@ def test_save_offsets_cache_normalizes_legacy_method_keys(tmp_path: Path) -> Non
     assert content.count('algorithm = "cross_correlation"') == 2
 
 
+def test_save_offsets_cache_preserves_current_schema_version_when_merging_existing_cache(
+    tmp_path: Path,
+) -> None:
+    cache_file = tmp_path / "audio_offsets.toml"
+    existing = {
+        "version": "0",
+        "ref:comp_a": {
+            "reference_clip": "ref.mkv",
+            "comparison_clip": "comp_a.mkv",
+            "frame_offset": 42,
+            "time_offset_seconds": 1.751,
+            "correlation_score": 0.987,
+            "algorithm": "cross_correlation",
+        },
+    }
+    cache_file.write_text(tomli_w.dumps(existing), encoding="utf-8")
+
+    save_offsets_cache(
+        tmp_path,
+        [
+            AlignmentResult(
+                reference_clip="ref.mkv",
+                comparison_clip="comp_b.mkv",
+                frame_offset=10,
+                time_offset_seconds=0.4,
+                correlation_score=0.9,
+                algorithm="cross_correlation",
+                source="computed",
+            )
+        ],
+    )
+
+    content = cache_file.read_text(encoding="utf-8")
+    assert 'version = "1"' in content
+    assert 'version = "0"' not in content
+    assert '["ref:comp_a"]' in content
+    assert '["ref:comp_b"]' in content
+
+
+def test_save_offsets_cache_discards_invalid_existing_cache(tmp_path: Path) -> None:
+    cache_file = tmp_path / "audio_offsets.toml"
+    existing = {
+        "version": "1",
+        "ref:stale": {
+            "reference_clip": "ref.mkv",
+            "comparison_clip": "stale.mkv",
+            "frame_offset": 42,
+            "time_offset_seconds": 1.751,
+            "correlation_score": 0.987,
+            "algorithm": "unsupported_alg_name",
+        },
+    }
+    cache_file.write_text(tomli_w.dumps(existing), encoding="utf-8")
+
+    save_offsets_cache(
+        tmp_path,
+        [
+            AlignmentResult(
+                reference_clip="ref.mkv",
+                comparison_clip="comp.mkv",
+                frame_offset=10,
+                time_offset_seconds=0.4,
+                correlation_score=0.9,
+                algorithm="cross_correlation",
+                source="computed",
+            )
+        ],
+    )
+
+    content = cache_file.read_text(encoding="utf-8")
+    assert '["ref:stale"]' not in content
+    assert '["ref:comp"]' in content
+    assert 'algorithm = "cross_correlation"' in content
+
+
 def test_save_offsets_cache_logs_corrupt_existing_cache(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -564,16 +650,40 @@ def test_check_alignment_cached_rejects_duplicate_comparison_stems(tmp_path: Pat
         check_alignment_cached(ref, [comp_a, comp_b], tmp_path)
 
 
-def test_align_clips_completes_progress_when_cache_load_raises(tmp_path: Path) -> None:
+@patch("frame_compare.services.alignment._probe_fps")
+@patch("frame_compare.services.alignment._extract_audio")
+@patch("frame_compare.services.alignment._cross_correlate")
+def test_align_clips_completes_progress_when_cache_load_raises(
+    mock_corr: MagicMock,
+    mock_extract: MagicMock,
+    mock_probe: MagicMock,
+    tmp_path: Path,
+) -> None:
     ref = tmp_path / "ref.mkv"
     comp = tmp_path / "comp.mkv"
     ref.touch()
     comp.touch()
     (tmp_path / "audio_offsets.toml").write_text("not valid toml {{{ ", encoding="utf-8")
+
+    mock_probe.return_value = Fraction(24, 1)
+    mock_extract.return_value = np.ones(10, dtype=np.float32)
+    mock_corr.return_value = (0, 0.99)
     reporter = MagicMock(spec=ProgressReporter)
 
+    align_clips(ref, [comp], AlignmentConfig(), tmp_path, progress=reporter)
+
+    reporter.set_description.assert_any_call("Audio Alignment")
+
+
+def test_check_alignment_cached_corruption_raises(tmp_path: Path) -> None:
+    ref = tmp_path / "ref.mkv"
+    comp = tmp_path / "comp.mkv"
+    ref.touch()
+    comp.touch()
+    (tmp_path / "audio_offsets.toml").write_text("not valid toml {{{ ", encoding="utf-8")
+
     with pytest.raises(CacheCorruptionError):
-        align_clips(ref, [comp], AlignmentConfig(), tmp_path, progress=reporter)
+        check_alignment_cached(ref, [comp], tmp_path)
 
 
 @patch("frame_compare.services.alignment._probe_fps")
@@ -734,8 +844,13 @@ def test_align_clips_launches_vspreview_when_enabled(
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ):
     """When configured, align_clips should generate/launch a VSPreview verification session."""
+    import sys
+
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
     ref = tmp_path / "ref.mkv"
     comp_a = tmp_path / "comp_a.mkv"
     comp_b = tmp_path / "comp_b.mkv"
@@ -765,6 +880,7 @@ def test_align_clips_launches_vspreview_when_enabled(
     assert kwargs["comparisons"] == [comp_a, comp_b]
     suggested = kwargs["suggested_offsets_by_key"]
     assert suggested == {"ref:comp_a": 0, "ref:comp_b": 0}
+    assert kwargs["config"].enabled is True
 
 
 @patch("frame_compare.services.alignment.launch_alignment_verification_session")
@@ -777,8 +893,13 @@ def test_align_clips_full_cache_hit_still_launches_vspreview_when_enabled(
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Cached/manual-only runs should still build/launch VSPreview verification."""
+    import sys
+
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
     ref = tmp_path / "ref.mkv"
     comp = tmp_path / "comp.mkv"
     ref.touch()
@@ -950,8 +1071,8 @@ def test_align_clips_optional_vspreview_probe_failure_generates_script_without_l
     mock_warn.assert_called_once()
     warn_args, warn_kwargs = mock_warn.call_args
     assert warn_args == ("vspreview_availability_probe_failed",)
+    assert warn_kwargs["reason"] == "availability probe failed (RuntimeError)"
     assert warn_kwargs["exception_type"] == "RuntimeError"
-    assert warn_kwargs["error"] == "broken import metadata"
     mock_launch.assert_called_once()
     _, launch_kwargs = mock_launch.call_args
     assert launch_kwargs["config"].enabled is False
@@ -963,8 +1084,13 @@ def test_align_clips_force_interactive_launches_when_vspreview_available(
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Force-interactive mode should launch VSPreview when available."""
+    import sys
+
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
     ref = tmp_path / "ref.mkv"
     comp = tmp_path / "comp.mkv"
     ref.touch()
@@ -1046,7 +1172,7 @@ def test_align_clips_force_interactive_probe_failure_raises_alignment_error(
         force_interactive=True,
         cache_results=True,
     )
-    with pytest.raises(AudioAlignmentError, match="availability check failed"):
+    with pytest.raises(AudioAlignmentError, match=r"availability probe failed \(RuntimeError\)"):
         align_clips(ref, [comp], config, tmp_path)
 
     mock_launch.assert_not_called()
@@ -1086,7 +1212,7 @@ def test_align_clips_vspreview_errors_are_warning_only_when_not_forced(
         status=VSPreviewAvailabilityStatus.AVAILABLE,
         message="available",
     )
-    mock_launch.side_effect = VSPreviewError("adapter failure")
+    mock_launch.side_effect = VSPreviewError("launch exited with code 7")
 
     config = AlignmentConfig(enable=True, use_vspreview=True, cache_results=True)
     results = align_clips(ref, [comp], config, tmp_path)
@@ -1095,7 +1221,8 @@ def test_align_clips_vspreview_errors_are_warning_only_when_not_forced(
     assert results[0].frame_offset == 1
     mock_warn.assert_called_once()
     _, kwargs = mock_warn.call_args
-    assert "adapter failure" in kwargs["error"]
+    assert kwargs["reason"] == "VSPreview failed: launch exited with code 7"
+    assert kwargs["code"] == "FC-4019"
     assert kwargs["force_interactive"] is False
 
 
@@ -1131,7 +1258,7 @@ def test_align_clips_vspreview_errors_raise_when_force_interactive(
         status=VSPreviewAvailabilityStatus.AVAILABLE,
         message="available",
     )
-    mock_launch.side_effect = VSPreviewError("adapter failure")
+    mock_launch.side_effect = VSPreviewError("launch exited with code 7")
 
     config = AlignmentConfig(
         enable=True,
@@ -1139,5 +1266,5 @@ def test_align_clips_vspreview_errors_raise_when_force_interactive(
         force_interactive=True,
         cache_results=True,
     )
-    with pytest.raises(VSPreviewError, match="adapter failure"):
+    with pytest.raises(VSPreviewError, match="launch exited with code 7"):
         align_clips(ref, [comp], config, tmp_path)

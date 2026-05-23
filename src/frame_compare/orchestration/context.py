@@ -9,14 +9,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from fractions import Fraction
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
+from frame_compare.services.types import AlignmentSource
 from frame_compare.vs.types import HDRMetadata
 
 if TYPE_CHECKING:
     from frame_compare.analysis.types import SelectionBreakdown
     from frame_compare.config.schema import ConfigSchema
-    from frame_compare.utils.progress import ProgressReporter
+    from frame_compare.utils.progress_protocol import ProgressReporter
     from frame_compare.utils.types import WorkspacePaths
 
 
@@ -75,7 +76,7 @@ class ClipAlignmentState:
     reference_stem: str
     comparison_stem: str
     relative_offset_frames: int
-    source: Literal["manual", "cached", "computed"]  # "manual" | "cached" | "computed"
+    source: AlignmentSource
 
 
 @dataclass(frozen=True)
@@ -86,7 +87,7 @@ class ClipState:
     label: str
     probe: ClipProbeSnapshot
 
-    # FPS hierarchy (SSOT):
+    # FPS hierarchy:
     # - source_fps: from probe
     # - forced_fps: user override (optional; may be added later)
     # - effective_fps: forced if set else source_fps

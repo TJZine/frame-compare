@@ -79,7 +79,7 @@ Do not treat these as pure docs/assets:
 ## High-Risk Paths
 
 Trigger architecture/deep review:
-- `src/frame_compare/cli_entry.py`
+- `src/frame_compare/cli/entry.py`
 - `src/frame_compare/config/**`
 - `src/frame_compare/orchestration/**`
 - `src/frame_compare/orchestration/coordinator.py`
