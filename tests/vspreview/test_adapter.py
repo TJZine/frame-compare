@@ -12,13 +12,13 @@ from pathlib import Path
 
 import pytest
 
-from frame_compare.errors import VSPreviewError
 from frame_compare.vspreview.adapter import (
     VSPreviewAvailability,
     VSPreviewAvailabilityStatus,
     VSPreviewConfig,
     launch_alignment_verification_session,
 )
+from frame_compare.vspreview.errors import VSPreviewError
 from frame_compare.vspreview.session_script import (
     _build_script_content,
     _generate_vspreview_script,

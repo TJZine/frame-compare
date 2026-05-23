@@ -20,7 +20,6 @@ from frame_compare.analysis.types import (
 )
 from frame_compare.config.loader import load_config
 from frame_compare.config.schema import ConfigSchema, SelectionMode
-from frame_compare.errors import AudioAlignmentError
 from frame_compare.orchestration import phase_tasks
 from frame_compare.orchestration.context import (
     ClipFingerprint,
@@ -29,6 +28,7 @@ from frame_compare.orchestration.context import (
     RunContext,
 )
 from frame_compare.orchestration.types import RunArtifacts
+from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.publishers import PublishResult
 from frame_compare.services.types import AlignmentResult, MetadataConfig, TmdbMetadata
 from frame_compare.utils.types import WorkspacePaths

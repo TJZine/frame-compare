@@ -10,8 +10,7 @@ import httpx
 import structlog
 from guessit import guessit  # type: ignore
 
-from frame_compare.errors import MetadataError
-from frame_compare.services.errors import TmdbError, TmdbRateLimitedError
+from frame_compare.services.errors import MetadataError, TmdbError, TmdbRateLimitedError
 from frame_compare.services.types import MetadataConfig, ParsedMetadata, TmdbMetadata
 
 TMDB_API_URL = "https://api.themoviedb.org/3/search/multi"

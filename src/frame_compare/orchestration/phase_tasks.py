@@ -17,7 +17,6 @@ from frame_compare.analysis.metrics import calculate_metrics
 from frame_compare.analysis.selection import select_frames
 from frame_compare.analysis.types import SelectionBreakdown
 from frame_compare.config.schema import ConfigSchema
-from frame_compare.errors import AudioAlignmentError
 from frame_compare.orchestration.context import (
     ClipAlignmentState,
     ClipState,
@@ -26,6 +25,7 @@ from frame_compare.orchestration.context import (
 from frame_compare.orchestration.types import RunArtifacts
 from frame_compare.render.ffmpeg import FFmpegRunner
 from frame_compare.services.alignment import align_clips, calculate_alignment_trims
+from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.metadata import resolve_metadata
 from frame_compare.services.publishers import publish_to_slowpics
 from frame_compare.services.report.entry import generate_report

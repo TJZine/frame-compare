@@ -18,7 +18,7 @@ from pathlib import Path
 
 import structlog
 
-from frame_compare.errors import VSPreviewError, VSPreviewNotFoundError
+from frame_compare.vspreview.errors import VSPreviewError, VSPreviewNotFoundError
 from frame_compare.vspreview.session_script import write_vspreview_session_script
 
 log = structlog.get_logger()

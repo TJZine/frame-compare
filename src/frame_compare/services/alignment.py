@@ -14,13 +14,12 @@ import structlog
 import tomli_w
 
 from frame_compare.errors import (
-    AudioAlignmentError,
     CacheCorruptionError,
     CacheVersionMismatchError,
     FFmpegError,
     FFmpegNotFoundError,
-    VSPreviewError,
 )
+from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentAlgorithm, AlignmentConfig, AlignmentResult
 from frame_compare.utils.atomic_write import write_bytes_atomic
 from frame_compare.utils.progress_protocol import ProgressReporter
@@ -31,6 +30,7 @@ from frame_compare.vspreview.adapter import (
     check_vspreview_availability,
     launch_alignment_verification_session,
 )
+from frame_compare.vspreview.errors import VSPreviewError
 
 CACHE_VERSION = "1"
 CACHE_FILE_NAME = "audio_offsets.toml"

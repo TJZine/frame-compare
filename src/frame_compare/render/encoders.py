@@ -15,11 +15,11 @@ from frame_compare.errors import (
     FrameExtractionError,
     OverlayError,
     RenderError,
-    SourceLoadError,
 )
 from frame_compare.render.ffmpeg import DefaultFFmpegRunner
 from frame_compare.render.overlay import apply_overlay
 from frame_compare.render.types import EncoderSettings, OverlayMode, Renderer, RenderRequest
+from frame_compare.vs.errors import SourceLoadError
 
 if TYPE_CHECKING:
     import vapoursynth as vs  # type: ignore[import-untyped]

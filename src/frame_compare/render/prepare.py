@@ -79,7 +79,8 @@ def is_hdr_via_runner(path: Path, runner: FFmpegRunner) -> bool:
         FFmpegNotFoundError: If ffprobe is missing.
         SourceLoadError: If probing fails or times out.
     """
-    from frame_compare.errors import FFmpegError, FFmpegNotFoundError, SourceLoadError
+    from frame_compare.errors import FFmpegError, FFmpegNotFoundError
+    from frame_compare.vs.errors import SourceLoadError
 
     try:
         metadata = runner.probe_hdr(path)
@@ -220,10 +221,10 @@ def prepare_clip_for_render(
     """
     from frame_compare.errors import (
         RenderError,
-        SourceLoadError,
     )
     from frame_compare.vs.errors import (
         PluginNotFoundError,
+        SourceLoadError,
         VapourSynthNotFoundError,
     )
 

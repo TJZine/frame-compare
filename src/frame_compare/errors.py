@@ -146,20 +146,6 @@ class DoviToolNotFoundError(DependencyError):
         )
 
 
-class VSPreviewNotFoundError(DependencyError):
-    """VSPreview not found (FC-2008)."""
-
-    def __init__(self) -> None:
-        super().__init__(
-            ErrorContext(
-                code="FC-2008",
-                name="VSPREVIEW_NOT_FOUND",
-                message="VSPreview not installed",
-                hint="Install vspreview (and a Qt backend) for interactive alignment verification",
-            )
-        )
-
-
 class PythonVersionError(DependencyError):
     """Unsupported Python version (FC-2010)."""
 
@@ -225,25 +211,6 @@ class VideoCorruptError(InputError):
                 message=f"Video file corrupt: {path}",
                 hint="Re-encode or check source integrity",
                 details={"path": str(path)},
-            )
-        )
-
-
-class InsufficientFramesError(InputError):
-    """Video too short for requested frames (FC-3004)."""
-
-    def __init__(self, path: Path, count: int, required: int) -> None:
-        super().__init__(
-            ErrorContext(
-                code="FC-3004",
-                name="INSUFFICIENT_FRAMES",
-                message=f"Video has {count} frames, need at least {required}",
-                hint="Use a longer video or reduce frame_count",
-                details={
-                    "path": str(path),
-                    "count": count,
-                    "required": required,
-                },
             )
         )
 
@@ -377,21 +344,6 @@ class MetricsCalculationError(ProcessingError):
         )
 
 
-class TonemapError(ProcessingError):
-    """Tonemapping failure (FC-4003)."""
-
-    def __init__(self, reason: str, hint: str | None = None) -> None:
-        super().__init__(
-            ErrorContext(
-                code="FC-4003",
-                name="TONEMAP_ERROR",
-                message=f"Tonemapping failed: {reason}",
-                hint=hint or "Check libplacebo support or config",
-                details={"reason": reason},
-            )
-        )
-
-
 class RenderError(ProcessingError):
     """Composition/image encoding failure (FC-4004)."""
 
@@ -409,21 +361,6 @@ class RenderError(ProcessingError):
                     "and verify the output path is writable"
                 ),
                 details=details,
-            )
-        )
-
-
-class AudioAlignmentError(ProcessingError):
-    """Audio sync calculation failure (FC-4005)."""
-
-    def __init__(self, reason: str) -> None:
-        super().__init__(
-            ErrorContext(
-                code="FC-4005",
-                name="AUDIO_ALIGNMENT_ERROR",
-                message=f"Audio alignment failed: {reason}",
-                hint="Ensure audio tracks exist and are similar",
-                details={"reason": reason},
             )
         )
 
@@ -487,21 +424,6 @@ class ProcessingTimeoutError(ProcessingError):
         )
 
 
-class SelectionError(ProcessingError):
-    """Frame selection algorithm failure (FC-4012)."""
-
-    def __init__(self, reason: str, requested: int, found: int) -> None:
-        super().__init__(
-            ErrorContext(
-                code="FC-4012",
-                name="SELECTION_ERROR",
-                message=f"Frame selection failed: {reason}",
-                hint="Adjust selection criteria",
-                details={"reason": reason, "requested": requested, "found": found},
-            )
-        )
-
-
 class EncodingError(ProcessingError):
     """Output file encoding failed (FC-4013)."""
 
@@ -532,51 +454,6 @@ class OverlayError(ProcessingError):
         )
 
 
-class SourceLoadError(ProcessingError):
-    """Failed to initialize source engine (FC-4015)."""
-
-    def __init__(self, path: Path, engine_error: str) -> None:
-        super().__init__(
-            ErrorContext(
-                code="FC-4015",
-                name="SOURCE_LOAD_ERROR",
-                message=f"Failed to load source {path}: {engine_error}",
-                hint="Check file integrity or engine support",
-                details={"path": str(path), "engine_error": engine_error},
-            )
-        )
-
-
-class MetadataError(ProcessingError):
-    """Failed to parse video metadata (FC-4016)."""
-
-    def __init__(self, reason: str) -> None:
-        super().__init__(
-            ErrorContext(
-                code="FC-4016",
-                name="METADATA_ERROR",
-                message=f"Metadata parsing failed: {reason}",
-                hint="Check file format specs",
-                details={"reason": reason},
-            )
-        )
-
-
-class ReportError(ProcessingError):
-    """Failed to generate report (FC-4017)."""
-
-    def __init__(self, reason: str) -> None:
-        super().__init__(
-            ErrorContext(
-                code="FC-4017",
-                name="REPORT_ERROR",
-                message=f"Report generation failed: {reason}",
-                hint="Check template validity",
-                details={"reason": reason},
-            )
-        )
-
-
 class DoviError(ProcessingError):
     """Dolby Vision processing error (FC-4018)."""
 
@@ -588,21 +465,6 @@ class DoviError(ProcessingError):
                 message=f"Dolby Vision error for {path}: {reason}",
                 hint="Check RPU validity or dovi_tool version",
                 details={"path": str(path), "reason": reason},
-            )
-        )
-
-
-class VSPreviewError(ProcessingError):
-    """VSPreview failed to launch or run (FC-4019)."""
-
-    def __init__(self, details: str) -> None:
-        super().__init__(
-            ErrorContext(
-                code="FC-4019",
-                name="VSPREVIEW_ERROR",
-                message=f"VSPreview error: {details}",
-                hint="Install a Qt backend (PySide6/PyQt5) and ensure a GUI backend is available",
-                details={"error": details},
             )
         )
 

@@ -13,9 +13,6 @@ import pytest
 
 from frame_compare.config.overrides import TonemapCliOverrides
 from frame_compare.config.schema import ColorConfig, ConfigSchema, ToneCurve, TonemapPreset
-from frame_compare.errors import (
-    SourceLoadError,
-)
 from frame_compare.render.batch.orchestrator import render_screenshots
 from frame_compare.render.prepare import (
     resolve_tonemap_settings,
@@ -23,6 +20,7 @@ from frame_compare.render.prepare import (
 )
 from frame_compare.render.types import ScreenshotRenderOptions
 from frame_compare.vs.errors import (
+    SourceLoadError,
     TonemapRequiresVapourSynthError,
     VapourSynthNotFoundError,
 )

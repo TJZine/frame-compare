@@ -2,6 +2,10 @@ from pathlib import Path
 
 import pytest
 
+from frame_compare.analysis.errors import (
+    InsufficientFramesError,
+    SelectionError,
+)
 from frame_compare.cli.errors import (
     ExitCode,
     format_error_console,
@@ -10,7 +14,6 @@ from frame_compare.cli.errors import (
 )
 from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.errors import (
-    AudioAlignmentError,
     CacheCorruptionError,
     CacheVersionMismatchError,
     DirectoryNotFoundError,
@@ -26,9 +29,7 @@ from frame_compare.errors import (
     FrameExtractionError,
     GenericInternalError,
     IncompatibleVideosError,
-    InsufficientFramesError,
     InvariantViolationError,
-    MetadataError,
     MetricsCalculationError,
     NoVideosFoundError,
     OverlayError,
@@ -37,17 +38,16 @@ from frame_compare.errors import (
     ProcessingTimeoutError,
     PythonVersionError,
     RenderError,
-    ReportError,
-    SelectionError,
-    SourceLoadError,
-    TonemapError,
     UnexpectedStateError,
     VideoCorruptError,
     VideoOpenError,
 )
 from frame_compare.services.errors import (
+    AudioAlignmentError,
+    MetadataError,
     NetworkTimeoutError,
     NetworkUnreachableError,
+    ReportError,
     SlowpicsError,
     SlowpicsRateLimitedError,
     SlowpicsUnavailableError,
@@ -58,9 +58,15 @@ from frame_compare.services.errors import (
 from frame_compare.vs.errors import (
     LibplaceboError,
     PluginNotFoundError,
+    SourceLoadError,
+    TonemapError,
     TonemapRequiresVapourSynthError,
     VapourSynthError,
     VapourSynthNotFoundError,
+)
+from frame_compare.vspreview.errors import (
+    VSPreviewError,
+    VSPreviewNotFoundError,
 )
 
 
@@ -75,6 +81,7 @@ from frame_compare.vs.errors import (
         (FFmpegNotFoundError, (), "FC-2005"),
         (FFmpegError, ("test", 1), "FC-2006"),
         (DoviToolNotFoundError, (), "FC-2007"),
+        (VSPreviewNotFoundError, (), "FC-2008"),
         (TonemapRequiresVapourSynthError, (), "FC-2009"),
         (PythonVersionError, ("3.11",), "FC-2010"),
         # InputError (FC-3xxx)
@@ -104,6 +111,7 @@ from frame_compare.vs.errors import (
         (MetadataError, ("test",), "FC-4016"),
         (ReportError, ("test",), "FC-4017"),
         (DoviError, (Path("/dv"), "test"), "FC-4018"),
+        (VSPreviewError, ("test",), "FC-4019"),
         # NetworkError (FC-5xxx)
         (NetworkUnreachableError, (), "FC-5001"),
         (SlowpicsError, ("test",), "FC-5002"),

@@ -8,7 +8,6 @@ from structlog.testing import capture_logs
 from frame_compare.config.schema import ColorConfig, ConfigSchema
 from frame_compare.errors import (
     RenderError,
-    SourceLoadError,
 )
 from frame_compare.render.batch.orchestrator import (
     ProgressReporter,
@@ -24,6 +23,7 @@ from frame_compare.render.types import (
 )
 from frame_compare.vs.errors import (
     PluginNotFoundError,
+    SourceLoadError,
     TonemapRequiresVapourSynthError,
     VapourSynthNotFoundError,
 )

@@ -43,9 +43,8 @@ from frame_compare.analysis.types import FrameMetrics  # noqa: E402
 from frame_compare.config.schema import AnalysisConfig  # noqa: E402
 from frame_compare.errors import (  # noqa: E402
     MetricsCalculationError,
-    SourceLoadError,
 )
-from frame_compare.vs.errors import PluginNotFoundError  # noqa: E402
+from frame_compare.vs.errors import PluginNotFoundError, SourceLoadError  # noqa: E402
 
 
 class MockFrame:

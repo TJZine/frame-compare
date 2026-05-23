@@ -12,8 +12,8 @@ from typing import TYPE_CHECKING, cast
 import structlog
 
 from frame_compare.config.schema import ToneCurve, TonemapPreset
-from frame_compare.errors import TonemapError
 from frame_compare.vs.env import detect_plugins
+from frame_compare.vs.errors import TonemapError
 from frame_compare.vs.props import detect_hdr
 from frame_compare.vs.types import HDRMetadata, TonemapSettings
 

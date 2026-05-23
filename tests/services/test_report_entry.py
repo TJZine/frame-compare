@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from frame_compare.config.schema import ReportConfig
-from frame_compare.errors import ReportError
+from frame_compare.services.errors import ReportError
 from frame_compare.services.report.entry import generate_report
 from frame_compare.services.report.payload import ClipInfo, ReportData
 from frame_compare.services.types import TmdbMetadata

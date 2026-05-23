@@ -6,9 +6,9 @@ import math
 import random
 from collections.abc import Sequence
 
+from frame_compare.analysis.errors import SelectionError
 from frame_compare.analysis.types import FrameMetrics, FrameSelection, SelectionBreakdown
 from frame_compare.config.schema import AnalysisConfig, SelectionMode
-from frame_compare.errors import SelectionError
 
 MIN_GAP: int = 5
 

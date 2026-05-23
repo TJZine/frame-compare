@@ -5,8 +5,8 @@ from __future__ import annotations
 from fractions import Fraction
 from typing import TYPE_CHECKING
 
-from frame_compare.errors import SourceLoadError
 from frame_compare.vs.env import ensure_vs_environment, require_plugin
+from frame_compare.vs.errors import SourceLoadError
 from frame_compare.vs.props import detect_hdr
 from frame_compare.vs.types import SourceInfo
 

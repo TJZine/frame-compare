@@ -1,8 +1,53 @@
-"""Network and publisher service error classes."""
+"""Service-specific exception types for Frame Compare."""
 
 from __future__ import annotations
 
-from frame_compare.errors import ErrorContext, NetworkError
+from frame_compare.errors import ErrorContext, NetworkError, ProcessingError
+
+
+class MetadataError(ProcessingError):
+    """Failed to parse video metadata (FC-4016)."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(
+            ErrorContext(
+                code="FC-4016",
+                name="METADATA_ERROR",
+                message=f"Metadata parsing failed: {reason}",
+                hint="Check file format specs",
+                details={"reason": reason},
+            )
+        )
+
+
+class AudioAlignmentError(ProcessingError):
+    """Audio sync calculation failure (FC-4005)."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(
+            ErrorContext(
+                code="FC-4005",
+                name="AUDIO_ALIGNMENT_ERROR",
+                message=f"Audio alignment failed: {reason}",
+                hint="Ensure audio tracks exist and are similar",
+                details={"reason": reason},
+            )
+        )
+
+
+class ReportError(ProcessingError):
+    """Failed to generate report (FC-4017)."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(
+            ErrorContext(
+                code="FC-4017",
+                name="REPORT_ERROR",
+                message=f"Report generation failed: {reason}",
+                hint="Check template validity",
+                details={"reason": reason},
+            )
+        )
 
 
 class NetworkUnreachableError(NetworkError):

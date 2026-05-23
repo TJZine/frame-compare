@@ -12,12 +12,10 @@ import pytest
 import tomli_w
 
 from frame_compare.errors import (
-    AudioAlignmentError,
     CacheCorruptionError,
     CacheVersionMismatchError,
     FFmpegError,
     FFmpegNotFoundError,
-    VSPreviewError,
 )
 from frame_compare.services.alignment import (
     _cross_correlate,
@@ -30,9 +28,11 @@ from frame_compare.services.alignment import (
     load_cached_offsets,
     save_offsets_cache,
 )
+from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.vspreview.adapter import VSPreviewAvailability, VSPreviewAvailabilityStatus
+from frame_compare.vspreview.errors import VSPreviewError
 
 
 def test_alignment_result_is_frozen():

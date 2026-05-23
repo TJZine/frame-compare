@@ -10,7 +10,6 @@ from frame_compare.errors import (
     FFmpegNotFoundError,
     FrameExtractionError,
     RenderError,
-    SourceLoadError,
 )
 from frame_compare.render.encoders import (
     _clip_to_rgb24_for_pillow,
@@ -18,6 +17,7 @@ from frame_compare.render.encoders import (
     render_frame,
 )
 from frame_compare.render.types import EncoderSettings, OverlayConfig, OverlayMode, RenderRequest
+from frame_compare.vs.errors import SourceLoadError
 
 
 @pytest.fixture

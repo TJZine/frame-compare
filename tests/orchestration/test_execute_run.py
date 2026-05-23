@@ -18,7 +18,6 @@ from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.config.loader import load_config
 from frame_compare.config.schema import ConfigSchema, OverlayMode, TonemapPreset
 from frame_compare.errors import (
-    AudioAlignmentError,
     CacheCorruptionError,
     CacheVersionMismatchError,
     MetricsCalculationError,
@@ -34,7 +33,7 @@ from frame_compare.orchestration.coordinator import RunDependencies, RunRequest,
 from frame_compare.orchestration.execution import build_execution_phase_plan
 from frame_compare.orchestration.types import ExecutionState, PrepState, RunArtifacts
 from frame_compare.services.alignment import CACHE_FILE_NAME
-from frame_compare.services.errors import TmdbError
+from frame_compare.services.errors import AudioAlignmentError, TmdbError
 from frame_compare.services.run_folder import derive_run_folder_name
 from frame_compare.services.types import AlignmentResult, MetadataConfig, TmdbMetadata
 from frame_compare.utils.types import WorkspacePaths

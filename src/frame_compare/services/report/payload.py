@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Protocol, TypedDict
 
 from frame_compare.config.schema import ReportConfig
-from frame_compare.errors import ReportError
+from frame_compare.services.errors import ReportError
 from frame_compare.services.types import TmdbMetadata
 
 

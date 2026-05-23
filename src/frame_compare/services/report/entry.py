@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from frame_compare.config.schema import ReportConfig
-from frame_compare.errors import ReportError
+from frame_compare.services.errors import ReportError
 from frame_compare.services.report.payload import (
     ReportData,
     build_report_payload,
