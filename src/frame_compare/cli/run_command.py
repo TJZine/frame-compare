@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -22,6 +23,8 @@ from .cli_helpers import format_enum_expected
 
 if TYPE_CHECKING:
     from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, RunResult
+
+type EffectiveConfigLoader = Callable[[], ConfigSchema]
 
 
 class RunnerLike(Protocol):
@@ -187,74 +190,32 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
     deps.configure_logging(level=log_level, format=log_format)
 
     try:
-        parsed_tm_preset = coerce_cli_choice(args.tm_preset, TonemapPreset, ("color", "preset"))
-        parsed_tm_curve = coerce_cli_choice(args.tm_curve, ToneCurve, ("color", "tone_curve"))
-        parsed_overlay = coerce_cli_choice(
-            args.overlay, OverlayMode, ("screenshots", "overlay_mode")
-        )
-
-        run_options = RunCliOptions(
-            root=args.resolved_root,
-            config_path=args.config_path,
-            input_dir=args.input_dir,
-            no_cache=args.no_cache,
-            from_cache_only=args.from_cache_only,
-            no_upload=args.no_upload,
-            tm_preset=parsed_tm_preset,
-            tm_target_nits=args.tm_target,
-            tm_curve=parsed_tm_curve,
-            frame_count=args.frame_count,
-            seed=args.seed,
-            overlay_mode=parsed_overlay,
-            skip_analysis=args.skip_analysis,
-            skip_metadata=args.skip_metadata,
-            skip_dovi=args.skip_dovi,
-            force_interactive_alignment=args.force_interactive_alignment,
-            json_output=args.json_output,
-            no_color=effective_no_color,
-            quiet=args.quiet,
-            verbose=args.verbose,
-        )
+        run_options = parse_run_options(args, no_color=effective_no_color)
         request = build_run_request_from_cli(run_options)
-
-        resolved_config: ConfigSchema | None = None
-
-        def _resolve_effective_config() -> ConfigSchema:
-            return apply_cli_overrides(
-                deps.load_config(args.config_path),
-                cli_args=request.cli_config_overrides(),
-            )
-
-        def _load_effective_config() -> ConfigSchema:
-            nonlocal resolved_config
-            if resolved_config is None:
-                resolved_config = _resolve_effective_config()
-            return resolved_config
+        resolve_effective_config, load_effective_config = build_effective_config_loaders(
+            args,
+            deps,
+            request,
+        )
 
         if args.write_config:
-            deps.write_config_to(args.config_path, _load_effective_config())
+            deps.write_config_to(args.config_path, load_effective_config())
             return
 
         if args.diagnose_paths:
-            handle_diagnose_paths(args.resolved_root, args.config_path, _load_effective_config())
+            handle_diagnose_paths(args.resolved_root, args.config_path, load_effective_config())
             return
 
         if not args.json_output and not args.quiet:
-            print_at_a_glance(
-                console,
-                request=request,
-                config=_load_effective_config(),
-                root=args.resolved_root,
-                config_path=args.config_path,
-            )
+            print_run_preview(console, args, request, load_effective_config)
 
         result = deps.runner.run(request, dependencies=None)
     except FrameCompareError as error:
-        if args.json_output:
-            typer.echo(json.dumps(format_error_json(error), sort_keys=True, separators=(",", ":")))
-            raise typer.Exit(code=int(get_exit_code(error))) from error
-        raise typer.Exit(
-            code=deps.handle_error(error, no_color=effective_no_color, verbose=args.verbose)
+        raise run_error_exit(
+            error,
+            args=args,
+            deps=deps,
+            no_color=effective_no_color,
         ) from error
     except KeyboardInterrupt:
         raise typer.Exit(code=int(ExitCode.INTERRUPTED)) from None
@@ -267,22 +228,112 @@ def handle_run(args: RunCliRawArgs, deps: RunCommandDeps) -> None:
         raise typer.Exit(code=int(ExitCode.PROCESSING_ERROR))
 
     print_result_summary(console, result=result, quiet=args.quiet)
+    maybe_open_run_report(
+        result,
+        args=args,
+        deps=deps,
+        resolve_effective_config=resolve_effective_config,
+    )
 
-    if (
-        result.report_path is not None
-        and not args.json_output
-        and not args.quiet
-        and deps.stdout_is_tty
-    ):
-        try:
-            cfg = _resolve_effective_config()
-        except FrameCompareError:
-            # Default to opening when config cannot be reloaded so successful runs
-            # still surface the generated report in interactive sessions.
-            cfg = None
 
-        if cfg is None or cfg.report.auto_open:
-            deps.open_report(result.report_path)
+def parse_run_options(args: RunCliRawArgs, *, no_color: bool) -> RunCliOptions:
+    parsed_tm_preset = coerce_cli_choice(args.tm_preset, TonemapPreset, ("color", "preset"))
+    parsed_tm_curve = coerce_cli_choice(args.tm_curve, ToneCurve, ("color", "tone_curve"))
+    parsed_overlay = coerce_cli_choice(args.overlay, OverlayMode, ("screenshots", "overlay_mode"))
+
+    return RunCliOptions(
+        root=args.resolved_root,
+        config_path=args.config_path,
+        input_dir=args.input_dir,
+        no_cache=args.no_cache,
+        from_cache_only=args.from_cache_only,
+        no_upload=args.no_upload,
+        tm_preset=parsed_tm_preset,
+        tm_target_nits=args.tm_target,
+        tm_curve=parsed_tm_curve,
+        frame_count=args.frame_count,
+        seed=args.seed,
+        overlay_mode=parsed_overlay,
+        skip_analysis=args.skip_analysis,
+        skip_metadata=args.skip_metadata,
+        skip_dovi=args.skip_dovi,
+        force_interactive_alignment=args.force_interactive_alignment,
+        json_output=args.json_output,
+        no_color=no_color,
+        quiet=args.quiet,
+        verbose=args.verbose,
+    )
+
+
+def build_effective_config_loaders(
+    args: RunCliRawArgs,
+    deps: RunCommandDeps,
+    request: RunRequest,
+) -> tuple[EffectiveConfigLoader, EffectiveConfigLoader]:
+    resolved_config: ConfigSchema | None = None
+
+    def _resolve_effective_config() -> ConfigSchema:
+        return apply_cli_overrides(
+            deps.load_config(args.config_path),
+            cli_args=request.cli_config_overrides(),
+        )
+
+    def _load_effective_config() -> ConfigSchema:
+        nonlocal resolved_config
+        if resolved_config is None:
+            resolved_config = _resolve_effective_config()
+        return resolved_config
+
+    return _resolve_effective_config, _load_effective_config
+
+
+def print_run_preview(
+    console: Console,
+    args: RunCliRawArgs,
+    request: RunRequest,
+    load_effective_config: EffectiveConfigLoader,
+) -> None:
+    print_at_a_glance(
+        console,
+        request=request,
+        config=load_effective_config(),
+        root=args.resolved_root,
+        config_path=args.config_path,
+    )
+
+
+def run_error_exit(
+    error: FrameCompareError,
+    *,
+    args: RunCliRawArgs,
+    deps: RunCommandDeps,
+    no_color: bool,
+) -> typer.Exit:
+    if args.json_output:
+        typer.echo(json.dumps(format_error_json(error), sort_keys=True, separators=(",", ":")))
+        return typer.Exit(code=int(get_exit_code(error)))
+    return typer.Exit(code=deps.handle_error(error, no_color=no_color, verbose=args.verbose))
+
+
+def maybe_open_run_report(
+    result: RunResult,
+    *,
+    args: RunCliRawArgs,
+    deps: RunCommandDeps,
+    resolve_effective_config: EffectiveConfigLoader,
+) -> None:
+    if result.report_path is None or args.json_output or args.quiet or not deps.stdout_is_tty:
+        return
+
+    try:
+        cfg = resolve_effective_config()
+    except FrameCompareError:
+        # Default to opening when config cannot be reloaded so successful runs
+        # still surface the generated report in interactive sessions.
+        cfg = None
+
+    if cfg is None or cfg.report.auto_open:
+        deps.open_report(result.report_path)
 
 
 def handle_diagnose_paths(resolved_root: Path, config_path: Path, config: ConfigSchema) -> None:
