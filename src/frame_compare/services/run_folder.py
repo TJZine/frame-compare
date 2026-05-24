@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import logging
 import re
+import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -218,9 +220,6 @@ def reserve_run_folder(
     Returns:
         Path to the reserved run folder
     """
-    import time
-    import uuid
-
     folder_name = _derive_base_folder_name(filenames, tmdb_metadata)
     candidate_path = input_dir / folder_name
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner, FFmpegRunner
 from frame_compare.render.naming import generate_screenshot_name, generate_screenshot_path
 from frame_compare.render.prepare import prepare_clip_for_render
 from frame_compare.render.types import (
@@ -13,10 +14,10 @@ from frame_compare.render.types import (
     RenderRequest,
     ScreenshotBatchRequest,
 )
+from frame_compare.vs.errors import TonemapRequiresVapourSynthError
 
 if TYPE_CHECKING:
     from frame_compare.config.schema import ConfigSchema
-    from frame_compare.render.backend.ffmpeg import FFmpegRunner
 
 
 def _validate_batch_request_lengths(request: ScreenshotBatchRequest) -> None:
@@ -46,8 +47,6 @@ def validate_ffmpeg_batch_tonemap_gate(
     if renderer != "ffmpeg" or not config.color.enable_tonemap:
         return
 
-    from frame_compare.vs.errors import TonemapRequiresVapourSynthError
-
     if any(req.probe_is_hdr is not False for req in batch_requests):
         raise TonemapRequiresVapourSynthError()
 
@@ -55,8 +54,6 @@ def validate_ffmpeg_batch_tonemap_gate(
 def resolve_batch_ffmpeg_runner(ffmpeg_runner: FFmpegRunner | None) -> FFmpegRunner:
     if ffmpeg_runner is not None:
         return ffmpeg_runner
-
-    from frame_compare.render.backend.ffmpeg import DefaultFFmpegRunner
 
     return DefaultFFmpegRunner()
 

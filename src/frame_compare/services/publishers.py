@@ -2,6 +2,7 @@
 
 import asyncio
 import random
+import warnings
 from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -323,8 +324,6 @@ async def publish_to_slowpics(
                 f.unlink()
             log.info("slowpics_files_deleted", count=len(files))
         except OSError as e:
-            import warnings
-
             warnings.warn(
                 f"Failed to delete files after upload: {e}",
                 RuntimeWarning,

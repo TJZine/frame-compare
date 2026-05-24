@@ -8,6 +8,7 @@ and path bootstrapping.
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -54,8 +55,6 @@ def write_vspreview_session_script(
             break
 
     if script_path is None:
-        import uuid
-
         random_suffix = uuid.uuid4().hex[:8]
         script_name = f"vspreview_{reference.stem}_{base_timestamp}_{random_suffix}.py"
         script_path = sessions_dir / script_name

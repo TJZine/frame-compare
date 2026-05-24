@@ -12,7 +12,7 @@ def test_default_vs_loader_load_calls_load_source(tmp_path: Path) -> None:
     path = tmp_path / "video.mkv"
 
     with (
-        patch("frame_compare.vs.source.load_source") as mock_load,
+        patch("frame_compare.vs.loader.load_source") as mock_load,
         patch.object(loader, "ensure_core") as mock_ensure,
     ):
         mock_core = MagicMock()

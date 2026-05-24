@@ -61,8 +61,6 @@ def apply_cli_overrides(
     cli_args: CLIConfigOverrides,
 ) -> ConfigSchema:
     """Apply CLI arguments as config overrides."""
-    from frame_compare.config.schema import ConfigSchema
-
     overrides: dict[str, object] = {}
     cli_values = _cli_override_values(cli_args)
     for cli_name, value in cli_values.items():

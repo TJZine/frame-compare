@@ -6,6 +6,7 @@ workspace path resolution, and input verification.
 
 from __future__ import annotations
 
+import fnmatch
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -103,8 +104,6 @@ def _resolve_paths_with_config_file(
 
 def discover_inputs(input_dir: Path, patterns: list[str] | None = None) -> list[Path]:
     """Discover video files in input directory."""
-    import fnmatch
-
     effective_patterns = _VIDEO_PATTERNS if patterns is None else patterns
     normalized_patterns = [pattern.lower() for pattern in effective_patterns]
     recursive = any("/" in pattern or "**" in pattern for pattern in effective_patterns)

@@ -20,6 +20,7 @@ from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionM
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.subproc import run_subprocess
+from frame_compare.vspreview.overrides import load_manual_overrides
 
 CACHE_VERSION = "1"
 CACHE_FILE_NAME = "audio_offsets.toml"
@@ -68,8 +69,6 @@ def _apply_manual_overrides(
     results_map: dict[str, AlignmentResult],
 ) -> Fraction | None:
     """Apply manual offsets from overrides config, returning reference FPS if probed."""
-    from frame_compare.vspreview.overrides import load_manual_overrides
-
     manual_overrides = load_manual_overrides(cache_dir)
     fps_reference: Fraction | None = None
 
@@ -220,8 +219,6 @@ def check_alignment_cached(
     cache_dir: Path,
 ) -> list[str]:
     """Check if all comparison offsets are cached/overridden, returning missing keys."""
-    from frame_compare.vspreview.overrides import load_manual_overrides
-
     _check_duplicate_stems(comparisons)
 
     manual_overrides = load_manual_overrides(cache_dir)
