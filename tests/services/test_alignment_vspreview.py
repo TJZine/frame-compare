@@ -9,7 +9,11 @@ import frame_compare.services.alignment_vspreview as alignment_vspreview
 from frame_compare.services.alignment_vspreview import maybe_launch_alignment_vspreview
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentConfig
-from frame_compare.vspreview.adapter import VSPreviewAvailability, VSPreviewAvailabilityStatus
+from frame_compare.vspreview.adapter import (
+    VSPreviewAvailability,
+    VSPreviewAvailabilityStatus,
+    VSPreviewSessionRequest,
+)
 from frame_compare.vspreview.errors import VSPreviewError
 
 
@@ -124,6 +128,7 @@ def test_optional_unavailable_generates_script_without_launch_and_logs_warning(
 
     mock_launch.assert_called_once()
     _, launch_kwargs = mock_launch.call_args
+    assert isinstance(launch_kwargs["request"], VSPreviewSessionRequest)
     assert launch_kwargs["config"].enabled is False
     warning_args, warning_kwargs = mock_warning.call_args_list[0]
     assert warning_args == (expected_warning,)
@@ -152,6 +157,7 @@ def test_available_without_tty_generates_script_disabled_and_logs_no_tty(
 
     mock_launch.assert_called_once()
     _, launch_kwargs = mock_launch.call_args
+    assert isinstance(launch_kwargs["request"], VSPreviewSessionRequest)
     assert launch_kwargs["config"].enabled is False
     mock_warning.assert_called_once()
     warning_args, warning_kwargs = mock_warning.call_args

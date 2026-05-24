@@ -27,7 +27,11 @@ from frame_compare.services.types import AlignmentConfig, AlignmentResult
 from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
 from frame_compare.utils.ffmpeg_errors import FFmpegError, FFmpegNotFoundError
 from frame_compare.utils.progress_protocol import ProgressReporter
-from frame_compare.vspreview.adapter import VSPreviewAvailability, VSPreviewAvailabilityStatus
+from frame_compare.vspreview.adapter import (
+    VSPreviewAvailability,
+    VSPreviewAvailabilityStatus,
+    VSPreviewSessionRequest,
+)
 from frame_compare.vspreview.errors import VSPreviewError
 
 
@@ -872,9 +876,11 @@ def test_align_clips_launches_vspreview_when_enabled(
 
     assert mock_launch.call_count == 1
     _, kwargs = mock_launch.call_args
-    assert kwargs["reference"] == ref
-    assert kwargs["comparisons"] == [comp_a, comp_b]
-    suggested = kwargs["suggested_offsets_by_key"]
+    request = kwargs["request"]
+    assert isinstance(request, VSPreviewSessionRequest)
+    assert request.reference == ref
+    assert request.comparisons == [comp_a, comp_b]
+    suggested = request.suggested_offsets_by_key
     assert suggested == {"ref:comp_a": 0, "ref:comp_b": 0}
     assert kwargs["config"].enabled is True
 
@@ -931,7 +937,9 @@ def test_align_clips_full_cache_hit_still_launches_vspreview_when_enabled(
     assert results[0].frame_offset == 12
     assert mock_launch.call_count == 1
     _, kwargs = mock_launch.call_args
-    assert kwargs["suggested_offsets_by_key"] == {"ref:comp": 12}
+    request = kwargs["request"]
+    assert isinstance(request, VSPreviewSessionRequest)
+    assert request.suggested_offsets_by_key == {"ref:comp": 12}
     assert kwargs["config"].enabled is True
 
 

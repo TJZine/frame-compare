@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import webbrowser
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -167,53 +168,57 @@ def _coerce_cli_choice[CliChoiceT: Enum](
         ) from exc
 
 
-def _build_run_request_from_cli(
-    *,
-    resolved_root: Path,
-    config_path: Path,
-    input_dir: Path | None,
-    no_cache: bool,
-    from_cache_only: bool,
-    no_upload: bool,
-    parsed_tm_preset: TonemapPreset | None,
-    tm_target: int | None,
-    parsed_tm_curve: ToneCurve | None,
-    frame_count: int | None,
-    seed: int | None,
-    parsed_overlay: OverlayMode | None,
-    skip_analysis: bool,
-    skip_metadata: bool,
-    skip_dovi: bool,
-    force_interactive_alignment: bool,
-    json_output: bool,
-    effective_no_color: bool,
-    quiet: bool,
-    verbose: bool,
-) -> RunRequest:
+@dataclass(frozen=True)
+class _RunCliOptions:
+    """Typed, parsed CLI options for the run command."""
+
+    root: Path
+    config_path: Path
+    input_dir: Path | None
+    no_cache: bool
+    from_cache_only: bool
+    no_upload: bool
+    tm_preset: TonemapPreset | None
+    tm_target_nits: int | None
+    tm_curve: ToneCurve | None
+    frame_count: int | None
+    seed: int | None
+    overlay_mode: OverlayMode | None
+    skip_analysis: bool
+    skip_metadata: bool
+    skip_dovi: bool
+    force_interactive_alignment: bool
+    json_output: bool
+    no_color: bool
+    quiet: bool
+    verbose: bool
+
+
+def _build_run_request_from_cli(options: _RunCliOptions) -> RunRequest:
     """Build the single CLI-to-runtime request mapping used by run branches."""
     from frame_compare.orchestration.coordinator import RunRequest
 
     return RunRequest(
-        root=resolved_root,
-        config_path=config_path,
-        input_dir=input_dir,
-        no_cache=no_cache,
-        from_cache_only=from_cache_only,
-        no_upload=no_upload,
-        tm_preset=parsed_tm_preset,
-        tm_target_nits=tm_target,
-        tm_curve=parsed_tm_curve,
-        frame_count=frame_count,
-        seed=seed,
-        overlay_mode=parsed_overlay,
-        skip_analysis=skip_analysis,
-        skip_metadata=skip_metadata,
-        skip_dovi=skip_dovi,
-        force_interactive_alignment=force_interactive_alignment,
-        json_output=json_output,
-        no_color=effective_no_color,
-        quiet=quiet,
-        verbose=verbose,
+        root=options.root,
+        config_path=options.config_path,
+        input_dir=options.input_dir,
+        no_cache=options.no_cache,
+        from_cache_only=options.from_cache_only,
+        no_upload=options.no_upload,
+        tm_preset=options.tm_preset,
+        tm_target_nits=options.tm_target_nits,
+        tm_curve=options.tm_curve,
+        frame_count=options.frame_count,
+        seed=options.seed,
+        overlay_mode=options.overlay_mode,
+        skip_analysis=options.skip_analysis,
+        skip_metadata=options.skip_metadata,
+        skip_dovi=options.skip_dovi,
+        force_interactive_alignment=options.force_interactive_alignment,
+        json_output=options.json_output,
+        no_color=options.no_color,
+        quiet=options.quiet,
+        verbose=options.verbose,
     )
 
 
@@ -257,28 +262,29 @@ def run(
         parsed_tm_curve = _coerce_cli_choice(tm_curve, ToneCurve, ("color", "tone_curve"))
         parsed_overlay = _coerce_cli_choice(overlay, OverlayMode, ("screenshots", "overlay_mode"))
 
-        request = _build_run_request_from_cli(
-            resolved_root=resolved_root,
+        run_options = _RunCliOptions(
+            root=resolved_root,
             config_path=config_path,
             input_dir=input_dir,
             no_cache=no_cache,
             from_cache_only=from_cache_only,
             no_upload=no_upload,
-            parsed_tm_preset=parsed_tm_preset,
-            tm_target=tm_target,
-            parsed_tm_curve=parsed_tm_curve,
+            tm_preset=parsed_tm_preset,
+            tm_target_nits=tm_target,
+            tm_curve=parsed_tm_curve,
             frame_count=frame_count,
             seed=seed,
-            parsed_overlay=parsed_overlay,
+            overlay_mode=parsed_overlay,
             skip_analysis=skip_analysis,
             skip_metadata=skip_metadata,
             skip_dovi=skip_dovi,
             force_interactive_alignment=force_interactive_alignment,
             json_output=json_output,
-            effective_no_color=effective_no_color,
+            no_color=effective_no_color,
             quiet=quiet,
             verbose=verbose,
         )
+        request = _build_run_request_from_cli(run_options)
 
         resolved_config: ConfigSchema | None = None
 

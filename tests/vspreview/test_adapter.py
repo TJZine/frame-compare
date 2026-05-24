@@ -17,6 +17,7 @@ from frame_compare.vspreview.adapter import (
     VSPreviewAvailability,
     VSPreviewAvailabilityStatus,
     VSPreviewConfig,
+    VSPreviewSessionRequest,
     launch_alignment_verification_session,
 )
 from frame_compare.vspreview.errors import VSPreviewError
@@ -52,10 +53,12 @@ def test_launch_alignment_verification_session_respects_timeout(
     cfg = VSPreviewConfig(enabled=True, timeout_seconds=1.0)
     with pytest.raises(VSPreviewError, match="timed out"):
         launch_alignment_verification_session(
-            reference=Path("ref.mkv"),
-            comparisons=[Path("a.mkv")],
-            suggested_offsets_by_key={},
-            cache_dir=tmp_path,
+            request=VSPreviewSessionRequest(
+                reference=Path("ref.mkv"),
+                comparisons=[Path("a.mkv")],
+                suggested_offsets_by_key={},
+                cache_dir=tmp_path,
+            ),
             config=cfg,
         )
 
@@ -79,10 +82,12 @@ def test_launch_alignment_verification_session_redacts_probe_failure_details(
 
     with pytest.raises(VSPreviewError) as excinfo:
         launch_alignment_verification_session(
-            reference=Path("ref.mkv"),
-            comparisons=[Path("a.mkv")],
-            suggested_offsets_by_key={},
-            cache_dir=tmp_path,
+            request=VSPreviewSessionRequest(
+                reference=Path("ref.mkv"),
+                comparisons=[Path("a.mkv")],
+                suggested_offsets_by_key={},
+                cache_dir=tmp_path,
+            ),
             config=cfg,
         )
 
@@ -119,10 +124,12 @@ def test_launch_alignment_verification_session_redacts_non_zero_exit_output(
 
     with pytest.raises(VSPreviewError) as excinfo:
         launch_alignment_verification_session(
-            reference=Path("ref.mkv"),
-            comparisons=[Path("a.mkv")],
-            suggested_offsets_by_key={},
-            cache_dir=tmp_path,
+            request=VSPreviewSessionRequest(
+                reference=Path("ref.mkv"),
+                comparisons=[Path("a.mkv")],
+                suggested_offsets_by_key={},
+                cache_dir=tmp_path,
+            ),
             config=cfg,
         )
 

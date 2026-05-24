@@ -14,6 +14,7 @@ from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.vspreview.adapter import (
     VSPreviewAvailabilityStatus,
     VSPreviewConfig,
+    VSPreviewSessionRequest,
     check_vspreview_availability,
     launch_alignment_verification_session,
 )
@@ -194,10 +195,12 @@ def maybe_launch_alignment_vspreview(
 
     try:
         script_path = launch_alignment_verification_session(
-            reference=reference,
-            comparisons=comparisons,
-            suggested_offsets_by_key=offsets_by_key,
-            cache_dir=cache_dir,
+            request=VSPreviewSessionRequest(
+                reference=reference,
+                comparisons=comparisons,
+                suggested_offsets_by_key=offsets_by_key,
+                cache_dir=cache_dir,
+            ),
             config=VSPreviewConfig(enabled=launch_decision.enabled),
         )
         if launch_decision.no_tty:
