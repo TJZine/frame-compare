@@ -1,3 +1,5 @@
+# pyright: reportUnusedFunction=false
+
 import re
 from pathlib import Path
 

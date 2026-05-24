@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import httpx
 import pytest
@@ -18,166 +17,15 @@ from frame_compare.analysis.types import (
     MetricsMetadata,
     SelectionBreakdown,
 )
-from frame_compare.config.loader import load_config
-from frame_compare.config.schema import ConfigSchema, SelectionMode
+from frame_compare.config.schema import SelectionMode
 from frame_compare.orchestration import phase_tasks
-from frame_compare.orchestration.context import (
-    ClipFingerprint,
-    ClipProbeSnapshot,
-    ClipState,
-    RunContext,
+from frame_compare.orchestration.types import RenderArtifacts, RunArtifacts
+from frame_compare.services.types import MetadataConfig, TmdbMetadata
+from tests.orchestration.phase_task_helpers import (
+    MINIMAL_CONFIG,
+    _context,
+    _create_config,
 )
-from frame_compare.orchestration.types import MetadataPrefetch, RenderArtifacts, RunArtifacts
-from frame_compare.services.errors import AudioAlignmentError
-from frame_compare.services.publishers import PublishResult
-from frame_compare.services.types import AlignmentResult, MetadataConfig, TmdbMetadata
-from frame_compare.utils.types import WorkspacePaths
-
-MINIMAL_CONFIG = """\
-[paths]
-input_dir = "comparison_videos"
-screenshots_dir = "screenshots"
-generated_dir = "generated"
-config_dir = "config"
-
-[analysis]
-frame_count = 3
-random_seed = 7
-
-[audio_alignment]
-enable = true
-sample_rate = 12000
-max_offset_seconds = 4.5
-use_vspreview = true
-force_interactive = false
-cache_results = false
-
-[screenshots]
-use_ffmpeg = true
-
-[report]
-enable = false
-"""
-
-
-def _create_config(tmp_path: Path, content: str = MINIMAL_CONFIG) -> ConfigSchema:
-    config_dir = tmp_path / "config"
-    config_dir.mkdir(parents=True, exist_ok=True)
-    config_path = config_dir / "config.toml"
-    config_path.write_text(content, encoding="utf-8")
-    return load_config(config_path)
-
-
-def _workspace(tmp_path: Path) -> WorkspacePaths:
-    return WorkspacePaths(
-        root=tmp_path,
-        input_dir=tmp_path / "comparison_videos",
-        run_dir=None,
-        screenshots_dir=tmp_path / "screenshots",
-        generated_dir=tmp_path / "generated",
-        config_dir=tmp_path / "config",
-        config_file=tmp_path / "config" / "config.toml",
-    )
-
-
-def _clip(path: Path, *, label: str, num_frames: int = 100) -> ClipState:
-    probe = ClipProbeSnapshot(
-        fingerprint=ClipFingerprint(path=path, size_bytes=0, mtime_ns=0),
-        width=1920,
-        height=1080,
-        num_frames=num_frames,
-        fps=Fraction(24, 1),
-        is_hdr=False,
-    )
-    return ClipState(
-        path=path,
-        label=label,
-        probe=probe,
-        source_fps=probe.fps,
-        effective_fps=probe.fps,
-    )
-
-
-def _context(tmp_path: Path, *, comparisons: list[ClipState] | None = None) -> RunContext:
-    config = _create_config(tmp_path)
-    reference_path = tmp_path / "comparison_videos" / "reference.mkv"
-    reference_path.parent.mkdir(parents=True, exist_ok=True)
-    reference_path.write_bytes(b"reference")
-    reference = _clip(reference_path, label="Reference")
-    return RunContext(
-        config=config,
-        workspace=_workspace(tmp_path),
-        reference=reference,
-        comparisons=[] if comparisons is None else comparisons,
-    )
-
-
-def test_resolve_run_metadata_builds_metadata_config_and_delegates(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    config_content = (
-        MINIMAL_CONFIG
-        + """\
-
-[tmdb]
-api_key = "test-key"
-enabled = true
-unattended = true
-timeout_seconds = 3.5
-"""
-    )
-    config = _create_config(tmp_path, content=config_content)
-    expected = TmdbMetadata(
-        tmdb_id=1,
-        title="Heat",
-        original_title="Heat",
-        year=1995,
-        media_type="movie",
-    )
-    captured: dict[str, Any] = {}
-
-    async def _fake_resolve_metadata(
-        *,
-        filenames: list[str],
-        config: MetadataConfig,
-        client: httpx.AsyncClient,
-    ) -> TmdbMetadata:
-        captured["filenames"] = filenames
-        captured["config"] = config
-        captured["client"] = client
-        return expected
-
-    monkeypatch.setattr(phase_tasks, "resolve_metadata", _fake_resolve_metadata)
-
-    async def _run() -> TmdbMetadata | None:
-        async with httpx.AsyncClient() as client:
-            result = await phase_tasks.resolve_run_metadata(
-                filenames=["Heat.1995.mkv"],
-                config=config,
-                client=client,
-            )
-            assert captured["client"] is client
-            return result
-
-    assert asyncio.run(_run()) == expected
-    assert captured["filenames"] == ["Heat.1995.mkv"]
-    assert captured["config"] == MetadataConfig(
-        api_key="test-key",
-        unattended=True,
-        timeout_seconds=3.5,
-    )
-
-
-def test_select_initial_frame_plan_uses_effective_reference_domain(tmp_path: Path) -> None:
-    ctx = _context(tmp_path)
-    ctx.reference = ctx.reference.with_trim(trim_start_frames=10, trim_end_frame_inclusive=19)
-    selected_frames: list[int] = []
-
-    output = phase_tasks.select_initial_frame_plan(ctx)
-
-    assert selected_frames == []
-    assert len(output.selected_frames) == 3
-    assert all(0 <= frame < 10 for frame in output.selected_frames)
 
 
 def test_run_analyze_phase_records_cache_hit_and_selection_breakdown(
@@ -236,6 +84,18 @@ def test_run_analyze_phase_records_cache_hit_and_selection_breakdown(
     assert calls["select"] == {"metrics": metrics, "config": ctx.config.analysis}
 
 
+def test_select_initial_frame_plan_uses_effective_reference_domain(tmp_path: Path) -> None:
+    ctx = _context(tmp_path)
+    ctx.reference = ctx.reference.with_trim(trim_start_frames=10, trim_end_frame_inclusive=19)
+    selected_frames: list[int] = []
+
+    output = phase_tasks.select_initial_frame_plan(ctx)
+
+    assert selected_frames == []
+    assert len(output.selected_frames) == 3
+    assert all(0 <= frame < 10 for frame in output.selected_frames)
+
+
 def test_run_artifacts_uses_render_artifacts_carrier() -> None:
     artifacts = RunArtifacts()
     assert artifacts.render is None
@@ -250,269 +110,57 @@ def test_run_artifacts_uses_render_artifacts_carrier() -> None:
     assert artifacts.render.screenshot_dir == Path("screenshots")
 
 
-def test_run_align_phase_no_comparisons_is_noop(
+def test_resolve_run_metadata_builds_metadata_config_and_delegates(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    ctx = _context(tmp_path)
-    selected_frames = [2, 4]
+    config_content = (
+        MINIMAL_CONFIG
+        + """\
 
-    def _unexpected_align(**_kwargs: object) -> list[AlignmentResult]:
-        raise AssertionError("No comparisons should skip alignment work")
-
-    monkeypatch.setattr(phase_tasks, "align_clips", _unexpected_align)
-
-    output = phase_tasks.run_align_phase(ctx, selected_frames=selected_frames)
-
-    assert output.selected_frames == [2, 4]
-    assert output.comparisons == []
-    assert selected_frames == [2, 4]
-    assert ctx.comparisons == []
-
-
-def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
-    ctx = _context(tmp_path, comparisons=[comparison])
-    selected_frames = [0, 2, 50, 99]
-    captured: dict[str, Any] = {}
-
-    def _fake_align_clips(**kwargs: object) -> list[AlignmentResult]:
-        captured.update(kwargs)
-        return [
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode.mkv",
-                frame_offset=2,
-                time_offset_seconds=0.08,
-                correlation_score=0.9,
-                algorithm="cross_correlation",
-                source="computed",
-            )
-        ]
-
-    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
-
-    output = phase_tasks.run_align_phase(ctx, selected_frames=selected_frames)
-
-    assert captured["reference"] == ctx.reference.path
-    assert captured["comparisons"] == [comparison.path]
-    assert captured["cache_dir"] == ctx.workspace.generated_dir
-    assert captured["config"].sample_rate == 12000
-    assert captured["config"].max_offset_seconds == 4.5
-    assert captured["config"].use_vspreview is True
-    assert captured["config"].cache_results is False
-    assert output.reference.trim.trim_start_frames == 2
-    assert output.comparisons[0].trim.trim_start_frames == 0
-    assert output.comparisons[0].alignment is not None
-    assert output.comparisons[0].alignment.relative_offset_frames == 2
-    assert output.selected_frames == [0, 48, 97]
-    assert ctx.reference.trim.trim_start_frames == 0
-    assert ctx.comparisons[0].alignment is None
-    assert selected_frames == [0, 2, 50, 99]
-
-
-def test_run_align_phase_raises_when_alignment_leaves_no_overlap(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    comparison = _clip(
-        tmp_path / "comparison_videos" / "encode.mkv",
-        label="Encode 1",
-        num_frames=2,
+[tmdb]
+api_key = "test-key"
+enabled = true
+unattended = true
+timeout_seconds = 3.5
+"""
     )
-    ctx = _context(tmp_path, comparisons=[comparison])
-    selected_frames = [0, 1]
-
-    def _fake_align_clips(**_kwargs: object) -> list[AlignmentResult]:
-        return [
-            AlignmentResult(
-                reference_clip="reference.mkv",
-                comparison_clip="encode.mkv",
-                frame_offset=100,
-                time_offset_seconds=4.0,
-                correlation_score=0.9,
-                algorithm="cross_correlation",
-                source="computed",
-            )
-        ]
-
-    monkeypatch.setattr(phase_tasks, "align_clips", _fake_align_clips)
-
-    with pytest.raises(AudioAlignmentError, match="No overlapping frames"):
-        phase_tasks.run_align_phase(ctx, selected_frames=selected_frames)
-
-
-async def test_run_metadata_phase_resolves_when_enabled_and_client_present(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    ctx = _context(tmp_path)
+    config = _create_config(tmp_path, content=config_content)
     expected = TmdbMetadata(
-        tmdb_id=2,
-        title="Thief",
-        original_title="Thief",
-        year=1981,
+        tmdb_id=1,
+        title="Heat",
+        original_title="Heat",
+        year=1995,
         media_type="movie",
     )
     captured: dict[str, Any] = {}
 
-    async def _fake_resolve_run_metadata(**kwargs: object) -> TmdbMetadata:
-        captured.update(kwargs)
+    async def _fake_resolve_metadata(
+        *,
+        filenames: list[str],
+        config: MetadataConfig,
+        client: httpx.AsyncClient,
+    ) -> TmdbMetadata:
+        captured["filenames"] = filenames
+        captured["config"] = config
+        captured["client"] = client
         return expected
 
-    monkeypatch.setattr(phase_tasks, "resolve_run_metadata", _fake_resolve_run_metadata)
+    monkeypatch.setattr(phase_tasks, "resolve_metadata", _fake_resolve_metadata)
 
-    async with httpx.AsyncClient() as client:
-        output = await phase_tasks.run_metadata_phase(
-            ctx,
-            client=client,
-            metadata_prefetch=MetadataPrefetch(None, False),
-        )
-        assert captured["client"] is client
+    async def _run() -> TmdbMetadata | None:
+        async with httpx.AsyncClient() as client:
+            result = await phase_tasks.resolve_run_metadata(
+                filenames=["Heat.1995.mkv"],
+                config=config,
+                client=client,
+            )
+            assert captured["client"] is client
+            return result
 
-    assert captured["filenames"] == ["reference.mkv"]
-    assert captured["config"] == ctx.config
-    assert output.resolved_metadata == expected
-
-
-async def test_run_publish_phase_sets_url_from_publish_result(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    ctx = _context(tmp_path)
-    metadata = TmdbMetadata(
-        tmdb_id=3,
-        title="Collateral",
-        original_title="Collateral",
-        year=2004,
-        media_type="movie",
-    )
-    captured: dict[str, Any] = {}
-
-    async def _fake_publish_to_slowpics(**kwargs: object) -> PublishResult:
-        captured.update(kwargs)
-        return PublishResult(
-            url="https://slow.pics/c/collateral",
-            screenshot_count=2,
-            upload_duration_seconds=0.1,
-        )
-
-    monkeypatch.setattr(phase_tasks, "publish_to_slowpics", _fake_publish_to_slowpics)
-
-    async with httpx.AsyncClient() as client:
-        output = await phase_tasks.run_publish_phase(ctx, client=client, metadata=metadata)
-        assert captured["client"] is client
-
-    assert captured["screenshot_dir"] == ctx.workspace.screenshots_dir
-    assert captured["config"] == ctx.config.slowpics
-    assert captured["metadata"] == metadata
-    assert output.slowpics_url == "https://slow.pics/c/collateral"
-
-
-def test_run_report_phase_builds_report_data_and_records_path(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
-    ctx = _context(tmp_path, comparisons=[comparison])
-    render = RenderArtifacts(
-        screenshots_by_label={
-            "Reference": [tmp_path / "screenshots" / "reference_1.png"],
-            "Encode 1": [tmp_path / "screenshots" / "encode_1.png"],
-        },
-        screenshot_dir=tmp_path / "screenshots",
-    )
-    artifacts = RunArtifacts(
-        render=render,
-        slowpics_url="https://slow.pics/c/example",
-    )
-    captured: dict[str, Any] = {}
-    expected_path = tmp_path / "report.html"
-
-    def _fake_generate_report(report_data: object, report_config: object) -> Path:
-        captured["report_data"] = report_data
-        captured["report_config"] = report_config
-        return expected_path
-
-    monkeypatch.setattr(phase_tasks, "generate_report", _fake_generate_report)
-
-    output = phase_tasks.run_report_phase(
-        ctx,
-        frames=[5],
-        render=artifacts.render,
-        metadata=artifacts.resolved_metadata,
-        slowpics_url=artifacts.slowpics_url,
-    )
-
-    report_data = captured["report_data"]
-    assert output.report_path == expected_path
-    assert artifacts.report_path is None
-    assert report_data.frames == [5]
-    assert report_data.clips[0].screenshots == render.screenshots_by_label["Reference"]
-    assert report_data.clips[1].screenshots == render.screenshots_by_label["Encode 1"]
-    assert report_data.slowpics_url == "https://slow.pics/c/example"
-    assert [(clip.name, clip.resolution, clip.fps) for clip in report_data.clips] == [
-        ("Reference", (1920, 1080), 24.0),
-        ("Encode 1", (1920, 1080), 24.0),
-    ]
-    assert captured["report_config"] == ctx.config.report
-
-
-def test_run_report_phase_without_screenshots_clears_existing_report_path(tmp_path: Path) -> None:
-    ctx = _context(tmp_path)
-    artifacts = RunArtifacts(report_path=tmp_path / "stale.html")
-
-    output = phase_tasks.run_report_phase(
-        ctx,
-        frames=[1],
-        render=artifacts.render,
-        metadata=artifacts.resolved_metadata,
-        slowpics_url=artifacts.slowpics_url,
-    )
-
-    assert output.report_path is None
-    assert artifacts.report_path == tmp_path / "stale.html"
-
-
-@dataclass(frozen=True)
-class _RenderRunner:
-    pass
-
-
-def test_run_render_phase_maps_aligned_frames_to_source_frames(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    comparison = _clip(tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1")
-    ctx = _context(tmp_path, comparisons=[comparison])
-    ctx.reference = ctx.reference.with_trim(trim_start_frames=3, trim_end_frame_inclusive=20)
-    ctx.comparisons = [comparison.with_trim(trim_start_frames=1, trim_end_frame_inclusive=18)]
-    ctx.selection_breakdown = SelectionBreakdown(quantile_dark=[4])
-    captured: dict[str, Any] = {}
-
-    def _fake_render_screenshots_from_batch(**kwargs: object) -> dict[str, list[Path]]:
-        captured.update(kwargs)
-        return {"Reference": [tmp_path / "reference.png"]}
-
-    monkeypatch.setattr(
-        "frame_compare.render.batch.orchestrator.render_screenshots_from_batch",
-        _fake_render_screenshots_from_batch,
-    )
-
-    runner = cast(Any, _RenderRunner())
-    output = phase_tasks.run_render_phase(
-        ctx,
-        frames=[1],
-        runner=runner,
-    )
-
-    requests = captured["batch_requests"]
-    assert requests[0].source_frames == [4]
-    assert requests[0].display_frames == [1]
-    assert requests[0].selection_labels == ["Dark"]
-    assert requests[1].source_frames == [2]
-    assert captured["output_dir"] == ctx.workspace.screenshots_dir
-    options = captured["options"]
-    assert options.overlay_mode == ctx.config.screenshots.overlay_mode
-    assert options.ffmpeg_runner is runner
-    assert options.reporter is ctx.reporter
-    assert output.render == RenderArtifacts(
-        screenshots_by_label={"Reference": [tmp_path / "reference.png"]},
-        screenshot_dir=ctx.workspace.screenshots_dir,
+    assert asyncio.run(_run()) == expected
+    assert captured["filenames"] == ["Heat.1995.mkv"]
+    assert captured["config"] == MetadataConfig(
+        api_key="test-key",
+        unattended=True,
+        timeout_seconds=3.5,
     )
