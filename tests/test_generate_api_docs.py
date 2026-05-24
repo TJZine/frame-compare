@@ -192,6 +192,38 @@ def test_generation_preserves_existing_output_mode(tmp_path: Path) -> None:
     assert (output.stat().st_mode & 0o777) == original_mode
 
 
+def test_file_path_import_uses_repo_local_api_docs_when_foreign_package_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    foreign_root = tmp_path / "foreign"
+    fixture_root = tmp_path / "fixture"
+
+    _write_file(foreign_root / "api_docs" / "__init__.py", "")
+    _write_file(
+        foreign_root / "api_docs" / "cli.py",
+        "def main(argv=None):\n    return 99\n",
+    )
+    monkeypatch.syspath_prepend(str(foreign_root))
+    for module_name in list(sys.modules):
+        if module_name == "api_docs" or module_name.startswith("api_docs."):
+            monkeypatch.delitem(sys.modules, module_name, raising=False)
+
+    gen = _load_generator_module(repo_root)
+    _write_fixture_project(root=fixture_root, missing_docstring=False)
+    output = fixture_root / "docs" / "api.md"
+
+    exit_code = gen.main(["--project-root", str(fixture_root), "--output", str(output), "--check"])
+
+    assert exit_code == 2
+    api_docs_cli = sys.modules["api_docs.cli"]
+    assert (
+        Path(str(api_docs_cli.__file__))
+        .resolve()
+        .is_relative_to(repo_root / "scripts" / "api_docs")
+    )
+
+
 def test_generation_does_not_replace_target_on_shared_replace_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

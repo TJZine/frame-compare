@@ -4,20 +4,19 @@
 from __future__ import annotations
 
 import ast
-import sys
+import importlib
 from pathlib import Path
 
 import pytest
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-
-import scripts.api_docs.model as api_docs_model  # noqa: E402
-import scripts.api_docs.render as api_docs_render  # noqa: E402
 
 
 def test_render_markdown_for_small_module_doc(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
+    api_docs_model = importlib.import_module("api_docs.model")
+    api_docs_render = importlib.import_module("api_docs.render")
+
     module_path = tmp_path / "src" / "frame_compare" / "utils" / "__init__.py"
     tree = ast.parse(
         '''"""Utility facade."""

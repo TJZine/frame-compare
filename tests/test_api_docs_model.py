@@ -3,12 +3,8 @@
 
 from __future__ import annotations
 
-import sys
+import importlib
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-
-import scripts.api_docs.model as api_docs_model  # noqa: E402
 
 
 def _write_file(path: Path, text: str) -> None:
@@ -16,7 +12,10 @@ def _write_file(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def test_model_resolves_locked_module_reexport(tmp_path: Path) -> None:
+def test_model_resolves_locked_module_reexport(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
+    api_docs_model = importlib.import_module("api_docs.model")
+
     package_init = tmp_path / "src" / "frame_compare" / "utils" / "__init__.py"
     _write_file(
         package_init,

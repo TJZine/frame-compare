@@ -16,10 +16,29 @@ API_DOCS_PACKAGE = "api_docs"
 API_DOCS_DIR = Path(__file__).resolve().parent / API_DOCS_PACKAGE
 
 
+def _module_is_from_local_api_docs(module_name: str) -> bool:
+    module = sys.modules.get(module_name)
+    if module is None:
+        return False
+    module_file = getattr(module, "__file__", None)
+    if not module_file:
+        return False
+    try:
+        return Path(str(module_file)).resolve().is_relative_to(API_DOCS_DIR.resolve())
+    except OSError:
+        return False
+
+
 def _ensure_api_docs_package() -> None:
     # Tests import this wrapper by file path, where Python does not add scripts/ to sys.path.
-    if importlib.util.find_spec(API_DOCS_PACKAGE) is not None:
+    if _module_is_from_local_api_docs(API_DOCS_PACKAGE):
         return
+
+    for module_name in list(sys.modules):
+        if (
+            module_name == API_DOCS_PACKAGE or module_name.startswith(f"{API_DOCS_PACKAGE}.")
+        ) and not _module_is_from_local_api_docs(module_name):
+            sys.modules.pop(module_name, None)
 
     spec = importlib.util.spec_from_file_location(
         API_DOCS_PACKAGE,

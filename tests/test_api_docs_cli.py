@@ -3,14 +3,10 @@
 
 from __future__ import annotations
 
-import sys
+import importlib
 from pathlib import Path
 
 import pytest
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-
-import scripts.api_docs.cli as api_docs_cli  # noqa: E402
 
 
 def test_cli_check_reports_success_and_mismatch(
@@ -18,6 +14,9 @@ def test_cli_check_reports_success_and_mismatch(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "scripts"))
+    api_docs_cli = importlib.import_module("api_docs.cli")
+
     generated = "# API Reference\n\nstable\n"
     output = tmp_path / "api.md"
     output.write_text(generated, encoding="utf-8")
