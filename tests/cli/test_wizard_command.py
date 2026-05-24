@@ -95,6 +95,54 @@ def test_wizard_writer_writes_to_explicit_config_path(tmp_path: Path) -> None:
     assert "tmdb" not in data
 
 
+def test_wizard_writer_preserves_unrelated_sections_and_strips_nested_none(
+    tmp_path: Path,
+) -> None:
+    from frame_compare.cli.entry import _write_wizard_config_payload
+
+    destination = tmp_path / "custom" / "config.toml"
+    payload: dict[str, object] = {
+        "paths": {"input_dir": "comparison_videos"},
+        "report": {"output_dir": None, "auto_open": False},
+        "diagnostics": {"nested": {"drop": None, "keep": "value"}},
+        "tmdb": {"api_key": "", "enabled": True, "timeout_seconds": None},
+    }
+
+    _write_wizard_config_payload(destination, payload)
+
+    data = tomllib.loads(destination.read_text(encoding="utf-8"))
+    assert data["report"] == {"auto_open": False}
+    assert data["diagnostics"] == {"nested": {"keep": "value"}}
+    assert data["tmdb"] == {"enabled": True}
+
+
+def test_wizard_writer_omits_unsupported_preserved_values(tmp_path: Path) -> None:
+    from frame_compare.cli.entry import _write_wizard_config_payload
+
+    destination = tmp_path / "custom" / "config.toml"
+    unsupported = object()
+    payload: dict[str, object] = {
+        "paths": {"input_dir": "comparison_videos"},
+        "report": {
+            "auto_open": True,
+            "unsupported": unsupported,
+            "nested": {"drop": unsupported, "keep": "value"},
+            "list_values": ["keep", None, unsupported],
+        },
+        "top_level_unsupported": unsupported,
+    }
+
+    _write_wizard_config_payload(destination, payload)
+
+    data = tomllib.loads(destination.read_text(encoding="utf-8"))
+    assert "top_level_unsupported" not in data
+    assert data["report"] == {
+        "auto_open": True,
+        "nested": {"keep": "value"},
+        "list_values": ["keep"],
+    }
+
+
 def test_wizard_cancel_exits_130_and_writes_nothing(monkeypatch: MonkeyPatch) -> None:
     def _abort(*_args: object, **_kwargs: object) -> None:
         raise typer.Abort()
@@ -133,6 +181,38 @@ def test_wizard_write_error_uses_cli_error_contract(monkeypatch: MonkeyPatch) ->
         assert result.stdout == ""
         assert "FC-1007" in result.stderr
         assert "Failed to write configuration file" in result.stderr
+        assert "Traceback" not in result.stderr
+        assert not (root / "config" / "config.toml").exists()
+
+
+def test_wizard_validation_error_uses_cli_error_contract(monkeypatch: MonkeyPatch) -> None:
+    from frame_compare.config.schema import ConfigSchema
+
+    def _raise_validation_error(_data: dict[str, object]) -> None:
+        ConfigSchema.model_validate({"analysis": {"frame_count": 0}})
+
+    monkeypatch.setattr(
+        "frame_compare.cli.entry._prompt_input_dir",
+        lambda *_args, **_kwargs: "inputs",
+    )
+    monkeypatch.setattr("frame_compare.cli.entry.typer.confirm", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        "frame_compare.cli.entry._prompt_visibility",
+        lambda _default: "unlisted",
+    )
+    monkeypatch.setattr("frame_compare.cli.entry.typer.prompt", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr("frame_compare.cli.wizard_command.validate_config", _raise_validation_error)
+
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        (root / "inputs").mkdir(parents=True)
+
+        result = runner.invoke(app, ["wizard", "--root", str(root)])
+
+        assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+        assert result.stdout == ""
+        assert "FC-1003" in result.stderr
+        assert "Invalid configuration: frame_count" in result.stderr
         assert "Traceback" not in result.stderr
         assert not (root / "config" / "config.toml").exists()
 
@@ -177,20 +257,33 @@ def test_wizard_root_reprompts_on_missing_input_dir() -> None:
         assert data["slowpics"]["visibility"] == "unlisted"
 
 
-def test_prepare_toml_payload_copies_paths_and_slowpics_sections() -> None:
+def test_prepare_toml_payload_preserves_sections_strips_none_and_copies() -> None:
     from frame_compare.cli.entry import _prepare_toml_payload
 
     paths = {"input_dir": "inputs"}
     slowpics = {"auto_upload": True}
+    report = {"output_dir": None, "auto_open": True}
     payload: dict[str, object] = {
         "paths": paths,
         "slowpics": slowpics,
+        "report": report,
+        "diagnostics": {"nested": {"drop": None, "keep": "value"}},
         "tmdb": {"api_key": ""},
     }
 
     prepared = _prepare_toml_payload(payload)
     assert prepared["paths"] == paths
     assert prepared["slowpics"] == slowpics
+    assert prepared["report"] == {"auto_open": True}
+    assert prepared["diagnostics"] == {"nested": {"keep": "value"}}
     assert prepared["paths"] is not paths
     assert prepared["slowpics"] is not slowpics
+    assert "tmdb" not in prepared
+
+
+def test_prepare_toml_payload_omits_tmdb_when_api_key_is_none() -> None:
+    from frame_compare.cli.entry import _prepare_toml_payload
+
+    prepared = _prepare_toml_payload({"tmdb": {"api_key": None}})
+
     assert "tmdb" not in prepared

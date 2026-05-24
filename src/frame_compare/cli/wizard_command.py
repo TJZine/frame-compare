@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
 import tomli_w
 import typer
+from pydantic import ValidationError
 
 from frame_compare.cli.errors import ExitCode
-from frame_compare.config.errors import ConfigWriteError
+from frame_compare.config.errors import ConfigValidationError, ConfigWriteError
 from frame_compare.config.loader import get_default_config
 from frame_compare.config.schema import ConfigSchema, Visibility
-from frame_compare.errors import FrameCompareError
+from frame_compare.errors import FrameCompareError, normalize_pydantic_errors
 
 from .cli_helpers import TextWriter, prepare_toml_payload
 
@@ -85,6 +87,10 @@ def handle_wizard(
     try:
         validate_config(config_data)
         write_payload(config_path, config_data)
+    except ValidationError as error:
+        normalized = normalize_pydantic_errors(cast(Sequence[dict[str, object]], error.errors()))
+        config_error = ConfigValidationError(normalized)
+        raise typer.Exit(code=handle_error(config_error, no_color=True, verbose=False)) from error
     except FrameCompareError as error:
         raise typer.Exit(code=handle_error(error, no_color=True, verbose=False)) from error
 

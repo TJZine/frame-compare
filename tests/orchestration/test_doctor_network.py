@@ -195,12 +195,6 @@ def test_check_tmdb_api_key_legacy_alias_remains_warning_only(
     assert "legacy" in legacy_result.hint.lower()
 
 
-def _clear_tmdb_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("TMDB_API_KEY", raising=False)
-    monkeypatch.delenv("FRAME_COMPARE_TMDB__API_KEY", raising=False)
-    monkeypatch.delenv("FRAME_COMPARE_TMDB__ENABLED", raising=False)
-
-
 def test_check_tmdb_api_key_disabled_without_key_is_non_failing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

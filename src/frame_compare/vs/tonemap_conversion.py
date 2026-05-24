@@ -70,9 +70,7 @@ def validate_target_nits(settings: TonemapSettings) -> int:
 def _matrix_prop_is_specified(props: Mapping[str, object]) -> bool:
     """Return whether frame props carry a usable VapourSynth matrix prop."""
     matrix = get_optional_int_prop(props, _FRAME_PROP_MATRIX)
-    if matrix is not None:
-        return matrix != _UNSPECIFIED_MATRIX
-    return _FRAME_PROP_MATRIX in props
+    return matrix is not None and matrix != _UNSPECIFIED_MATRIX
 
 
 def convert_non_rgb_with_matrix_hint(

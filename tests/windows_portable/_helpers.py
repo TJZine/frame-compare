@@ -32,6 +32,7 @@ def run_shim(
     shim_path: Path,
     env: dict[str, str],
     args: list[str],
+    timeout: float = 30.0,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [exe, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(shim_path), *args],
@@ -39,6 +40,7 @@ def run_shim(
         check=False,
         capture_output=True,
         text=True,
+        timeout=timeout,
     )
 
 

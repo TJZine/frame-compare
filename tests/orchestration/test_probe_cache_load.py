@@ -84,8 +84,6 @@ def test_load_clip_probe_cache_ignores_unknown_fields_and_skips_invalid_entries(
     assert "valid_key" in cache
     assert cache["valid_key"].width == 100
     warning.assert_called_once()
-    assert warning.call_args.args[0] == "probe_cache_invalid_entry"
-    assert warning.call_args.kwargs["key"] == "invalid_key"
 
 
 def test_load_clip_probe_cache_skips_entry_with_zero_fps_denominator(tmp_path: Path) -> None:

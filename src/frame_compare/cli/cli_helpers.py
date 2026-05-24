@@ -5,6 +5,8 @@ from __future__ import annotations
 import contextlib
 import os
 import webbrowser
+from collections.abc import Mapping
+from datetime import date, datetime, time
 from enum import Enum
 from pathlib import Path
 from typing import Any, Protocol, cast
@@ -100,31 +102,51 @@ def write_config_to(path: Path, config: ConfigSchema, *, text_writer: TextWriter
         raise ConfigWriteError(path, label="configuration file", cause=exc) from exc
 
 
+def _is_toml_scalar(value: object) -> bool:
+    return isinstance(value, str | int | float | bool | datetime | date | time)
+
+
+def _to_toml_safe_value(value: object) -> object | None:
+    if value is None:
+        return None
+    if isinstance(value, Mapping):
+        cleaned: dict[str, object] = {}
+        mapping = cast(Mapping[object, object], value)
+        for key, nested_value in mapping.items():
+            cleaned_value = _to_toml_safe_value(nested_value)
+            if cleaned_value is not None:
+                cleaned[str(key)] = cleaned_value
+        return cleaned
+    if isinstance(value, list | tuple):
+        cleaned_list: list[object] = []
+        value_list = cast(list[object] | tuple[object, ...], value)
+        for nested_value in value_list:
+            cleaned_value = _to_toml_safe_value(nested_value)
+            if cleaned_value is not None:
+                cleaned_list.append(cleaned_value)
+        return cleaned_list
+    if _is_toml_scalar(value):
+        return value
+    return None
+
+
 def prepare_toml_payload(data: dict[str, object]) -> dict[str, object]:
-    """Prepare TOML-safe payload (TOML has no null)."""
-    tmdb_section_raw = data.get("tmdb")
-    tmdb_section: dict[str, object] = {}
-    if isinstance(tmdb_section_raw, dict):
-        for k, v in cast(dict[str, object], tmdb_section_raw).items():
-            if k == "api_key":
-                if v is not None and v != "":
-                    tmdb_section["api_key"] = v
-            else:
-                tmdb_section[k] = v
-    paths_section: dict[str, object] = {}
-    slowpics_section: dict[str, object] = {}
-    paths_raw = data.get("paths")
-    slowpics_raw = data.get("slowpics")
-    if isinstance(paths_raw, dict):
-        paths_section = dict(cast(dict[str, object], paths_raw))
-    if isinstance(slowpics_raw, dict):
-        slowpics_section = dict(cast(dict[str, object], slowpics_raw))
-    payload: dict[str, object] = {
-        "paths": paths_section,
-        "slowpics": slowpics_section,
-    }
-    if tmdb_section:
-        payload["tmdb"] = tmdb_section
+    """Prepare a TOML-safe payload while preserving unrelated sections."""
+    payload: dict[str, object] = {}
+    for key, value in data.items():
+        cleaned_value = _to_toml_safe_value(value)
+        if cleaned_value is None:
+            continue
+        if key == "tmdb":
+            if not isinstance(cleaned_value, dict):
+                continue
+            tmdb_section = dict(cast(dict[str, object], cleaned_value))
+            if tmdb_section.get("api_key") == "":
+                del tmdb_section["api_key"]
+            if tmdb_section:
+                payload[key] = tmdb_section
+            continue
+        payload[key] = cleaned_value
     return payload
 
 

@@ -57,6 +57,21 @@ __all__ = [
     "selection_label_for_frame",
 ]
 
+_PHASE_OUTPUT_TYPES: tuple[type[object], ...] = (
+    FramePlanPhaseOutput,
+    AnalyzePhaseOutput,
+    AlignPhaseOutput,
+    RenderPhaseOutput,
+    MetadataPhaseOutput,
+    DoviPhaseOutput,
+    PublishPhaseOutput,
+    ReportPhaseOutput,
+)
+
+
+def _phase_output_as_object(output: PhaseOutput) -> object:
+    return output
+
 
 def _create_timed_phase(
     name: str,
@@ -98,29 +113,30 @@ def _create_timed_phase(
     )
 
 
-def _apply_phase_output(*, ctx: RunContext, state: ExecutionState, output: object) -> None:
-    if isinstance(output, FramePlanPhaseOutput):
-        state.selected_frames[:] = output.selected_frames
-    elif isinstance(output, AnalyzePhaseOutput):
-        state.selected_frames[:] = output.selected_frames
-        state.artifacts.metrics_cache_hit = output.metrics_cache_hit
-        ctx.selection_breakdown = output.selection_breakdown
-    elif isinstance(output, AlignPhaseOutput):
-        ctx.reference = output.reference
-        ctx.comparisons = output.comparisons
-        state.selected_frames[:] = output.selected_frames
-    elif isinstance(output, RenderPhaseOutput):
-        state.artifacts.render = output.render
-    elif isinstance(output, MetadataPhaseOutput):
-        state.artifacts.resolved_metadata = output.resolved_metadata
-    elif isinstance(output, DoviPhaseOutput):
-        state.warnings.append(output.warning)
-    elif isinstance(output, PublishPhaseOutput):
-        state.artifacts.slowpics_url = output.slowpics_url
-    elif isinstance(output, ReportPhaseOutput):
-        state.artifacts.report_path = output.report_path
+def _apply_phase_output(*, ctx: RunContext, state: ExecutionState, output: PhaseOutput) -> None:
+    output_obj = _phase_output_as_object(output)
+    if isinstance(output_obj, FramePlanPhaseOutput):
+        state.selected_frames[:] = output_obj.selected_frames
+    elif isinstance(output_obj, AnalyzePhaseOutput):
+        state.selected_frames[:] = output_obj.selected_frames
+        state.artifacts.metrics_cache_hit = output_obj.metrics_cache_hit
+        ctx.selection_breakdown = output_obj.selection_breakdown
+    elif isinstance(output_obj, AlignPhaseOutput):
+        ctx.reference = output_obj.reference
+        ctx.comparisons = output_obj.comparisons
+        state.selected_frames[:] = output_obj.selected_frames
+    elif isinstance(output_obj, RenderPhaseOutput):
+        state.artifacts.render = output_obj.render
+    elif isinstance(output_obj, MetadataPhaseOutput):
+        state.artifacts.resolved_metadata = output_obj.resolved_metadata
+    elif isinstance(output_obj, DoviPhaseOutput):
+        state.warnings.append(output_obj.warning)
+    elif isinstance(output_obj, PublishPhaseOutput):
+        state.artifacts.slowpics_url = output_obj.slowpics_url
+    elif isinstance(output_obj, ReportPhaseOutput):
+        state.artifacts.report_path = output_obj.report_path
     else:
-        raise TypeError(f"Unsupported phase output type: {output.__class__.__qualname__}")
+        raise TypeError(f"Unsupported phase output type: {output_obj.__class__.__qualname__}")
 
 
 def build_phases_before_align(

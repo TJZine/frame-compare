@@ -9,13 +9,13 @@ from ._helpers import read_text_or_fail as _read_text_or_fail
 def test_windows_portable_workflow_does_not_flatten_zip_contents(repo_root: Path) -> None:
     wf_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
     wf = _read_text_or_fail(wf_path)
-    assert 'Compress-Archive -Path "$bundle/*"' not in wf
+    assert not re.search(r"Compress-Archive\s+-Path\s+['\"]?\$bundle/\*['\"]?", wf)
 
 
 def test_windows_portable_workflow_zips_bundle_folder(repo_root: Path) -> None:
     wf_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
     wf = _read_text_or_fail(wf_path)
-    assert "Compress-Archive -Path $bundle -DestinationPath $zip" in wf
+    assert re.search(r"Compress-Archive\s+-Path\s+\$bundle\b\s+-DestinationPath\s+\$zip\b", wf)
 
 
 def test_windows_portable_workflow_verifies_zip_required_entries(repo_root: Path) -> None:
@@ -40,11 +40,13 @@ def test_windows_portable_workflow_enables_release_public_key_gate_only_for_rele
 ) -> None:
     workflow_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
     workflow = _read_text_or_fail(workflow_path)
-    assert '$buildArgs += "-RequireReleasePublicKey"' in workflow
-    assert (
-        'if ("${{ github.event_name }}" -eq "release" -or '
-        '"${{ github.event_name }}" -eq "workflow_dispatch")'
-    ) in workflow
+    release_gate = re.search(
+        r'if\s*\(\s*"\$\{\{\s*github\.event_name\s*\}\}"\s*-eq\s*"release"\s*-or\s*'
+        r'"\$\{\{\s*github\.event_name\s*\}\}"\s*-eq\s*"workflow_dispatch"\s*\)'
+        r"\s*\{[\s\S]*?\$buildArgs\s*\+=\s*\"-RequireReleasePublicKey\"",
+        workflow,
+    )
+    assert release_gate is not None
     assert not re.search(
         r"github\.event_name[^\n]+pull_request[^\n]+RequireReleasePublicKey", workflow
     )
@@ -53,10 +55,19 @@ def test_windows_portable_workflow_enables_release_public_key_gate_only_for_rele
 def test_windows_portable_workflow_verifies_workspace_directories(repo_root: Path) -> None:
     workflow_path = repo_root / ".github" / "workflows" / "windows-portable.yml"
     workflow = _read_text_or_fail(workflow_path)
-    assert '$bundleConfigDir = Join-Path $bundle "config"' in workflow
-    assert '$bundleInputDir = Join-Path $bundle "comparison_videos"' in workflow
-    assert "Test-Path -LiteralPath $bundleConfigDir -PathType Container" in workflow
-    assert "Test-Path -LiteralPath $bundleInputDir -PathType Container" in workflow
+    assert re.search(r'\$bundleConfigDir\s*=\s*Join-Path\s+\$bundle\s+"config"', workflow)
+    assert re.search(
+        r'\$bundleInputDir\s*=\s*Join-Path\s+\$bundle\s+"comparison_videos"',
+        workflow,
+    )
+    assert re.search(
+        r"Test-Path\s+-LiteralPath\s+\$bundleConfigDir\s+-PathType\s+Container",
+        workflow,
+    )
+    assert re.search(
+        r"Test-Path\s+-LiteralPath\s+\$bundleInputDir\s+-PathType\s+Container",
+        workflow,
+    )
     assert 'throw "Missing default workspace directory in bundle:' in workflow
 
 
@@ -65,6 +76,8 @@ def test_windows_portable_workflow_validates_update_public_key_on_release(repo_r
     workflow = _read_text_or_fail(workflow_path)
     assert "Validate update public key" in workflow
     assert "tools/windows_portable/update_public_key.xml" in workflow.replace("\\", "/")
-    assert (
-        "if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'" in workflow
+    assert re.search(
+        r"if:\s*github\.event_name\s*==\s*'release'\s*\|\|\s*"
+        r"github\.event_name\s*==\s*'workflow_dispatch'",
+        workflow,
     )

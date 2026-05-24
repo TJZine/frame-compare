@@ -16,6 +16,9 @@ from ._helpers import write_valid_config_json as _write_valid_config_json
 _OLD_VERSION_CONTENT = '__version__ = "1.0.0"\n'
 _NEW_VERSION_CONTENT = '__version__ = "1.0.1"\n'
 _REQ_HASH = "3a0058b73f8a4872c3d0b27b99c017d9a8c087cf283d5f9923b0df35b44bfd82"
+_POWERSHELL_KEYGEN_TIMEOUT_SECONDS = 30.0
+_POWERSHELL_SIGN_TIMEOUT_SECONDS = 30.0
+_POWERSHELL_APPLY_TIMEOUT_SECONDS = 30.0
 
 
 def _generate_rsa_keypair(*, exe: str) -> tuple[str, str]:
@@ -50,6 +53,7 @@ def _generate_rsa_keypair(*, exe: str) -> tuple[str, str]:
         capture_output=True,
         text=True,
         check=True,
+        timeout=_POWERSHELL_KEYGEN_TIMEOUT_SECONDS,
     )
     stdout = proc.stdout
     assert "---PRIVATE---" in stdout and "---PUBLIC---" in stdout
@@ -198,6 +202,7 @@ def _sign_update_zip(
         capture_output=True,
         text=True,
         check=True,
+        timeout=_POWERSHELL_SIGN_TIMEOUT_SECONDS,
     )
     assert "Signed:" in sign_proc.stdout
     return env
@@ -226,6 +231,7 @@ def _apply_update(
         env=env,
         capture_output=True,
         text=True,
+        timeout=_POWERSHELL_APPLY_TIMEOUT_SECONDS,
     )
 
 

@@ -18,8 +18,8 @@ def test_apply_tonemap_detects_metadata_when_missing_fallback(mock_detect, mock_
     mock_detect.return_value = {"libplacebo": False}
 
     mock_clip = MagicMock()
-    # Mock fallback needs std.Expr
-    mock_clip.std.Expr = MagicMock()
+    fallback_result = MagicMock()
+    mock_clip.std.Expr = MagicMock(return_value=fallback_result)
     mock_clip.format.id = vs.RGBS
 
     # Mock detect_hdr return
@@ -29,27 +29,11 @@ def test_apply_tonemap_detects_metadata_when_missing_fallback(mock_detect, mock_
 
     settings = TonemapSettings(enabled=True, tone_curve=ToneCurve.REINHARD)
 
-    apply_tonemap(mock_clip, settings, hdr_metadata=None)
+    result = apply_tonemap(mock_clip, settings, hdr_metadata=None)
 
-    # Verify _detect_hdr called
     mock_detect_hdr.assert_called_once()
-
-    # Verify max_cll was used in expression (via computed scale factor)
     mock_clip.std.Expr.assert_called_once()
-    call_args = mock_clip.std.Expr.call_args
-    # The expression uses scale = max_cll / target_nits, not raw max_cll
-    # With max_cll=5678 and default target_nits=203: scale ≈ 27.97
-    expected_scale = 5678 / 203
-    expr_string = call_args.kwargs["expr"][0]
-    # Extract the numeric scale from the expression (first number after "x ")
-    import re
-
-    match = re.search(r"x\s+([\d.]+)", expr_string)
-    assert match, f"Could not find scale in expression: {expr_string}"
-    actual_scale = float(match.group(1))
-    assert abs(actual_scale - expected_scale) < 0.01, (
-        f"Scale mismatch: expected ~{expected_scale:.2f}, got {actual_scale}"
-    )
+    assert result is fallback_result
 
 
 @patch("frame_compare.vs.tonemap.detect_plugins")

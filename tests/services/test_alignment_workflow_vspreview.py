@@ -1,7 +1,5 @@
 """Audio alignment workflow VSPreview orchestration tests."""
 
-# pyright: reportPrivateUsage=false
-
 from fractions import Fraction
 from pathlib import Path
 from unittest.mock import MagicMock, patch
