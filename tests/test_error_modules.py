@@ -45,9 +45,9 @@ import frame_compare.errors as error_facade
             {
                 "code": "FC-3002",
                 "name": "VIDEO_OPEN_ERROR",
-                "message": "Failed to open video: /media/source.mkv",
+                "message": f"Failed to open video: {Path('/media/source.mkv')}",
                 "hint": "Check file permissions and format",
-                "details": {"path": "/media/source.mkv"},
+                "details": {"path": str(Path("/media/source.mkv"))},
             },
         ),
         (
@@ -57,9 +57,9 @@ import frame_compare.errors as error_facade
             {
                 "code": "FC-3003",
                 "name": "VIDEO_CORRUPT",
-                "message": "Video file corrupt: /media/bad.mkv",
+                "message": f"Video file corrupt: {Path('/media/bad.mkv')}",
                 "hint": "Re-encode or check source integrity",
-                "details": {"path": "/media/bad.mkv"},
+                "details": {"path": str(Path("/media/bad.mkv"))},
             },
         ),
         (
@@ -81,9 +81,9 @@ import frame_compare.errors as error_facade
             {
                 "code": "FC-3007",
                 "name": "DIRECTORY_NOT_WRITABLE",
-                "message": "Directory not writable: /readonly",
+                "message": f"Directory not writable: {Path('/readonly')}",
                 "hint": "Check filesystem permissions",
-                "details": {"path": "/readonly"},
+                "details": {"path": str(Path("/readonly"))},
             },
         ),
         (
@@ -93,9 +93,9 @@ import frame_compare.errors as error_facade
             {
                 "code": "FC-3008",
                 "name": "FILE_TOO_LARGE",
-                "message": "File /media/huge.mkv too large (2048 > 1024)",
+                "message": f"File {Path('/media/huge.mkv')} too large (2048 > 1024)",
                 "hint": "Use smaller file or increase limit",
-                "details": {"path": "/media/huge.mkv", "size": 2048, "limit": 1024},
+                "details": {"path": str(Path("/media/huge.mkv")), "size": 2048, "limit": 1024},
             },
         ),
         (
@@ -105,9 +105,9 @@ import frame_compare.errors as error_facade
             {
                 "code": "FC-3009",
                 "name": "PATH_ESCAPES_ROOT",
-                "message": "Path ../escape escapes root /workspace",
+                "message": f"Path {Path('../escape')} escapes root {Path('/workspace')}",
                 "hint": "Do not use .. in paths",
-                "details": {"path": "../escape", "root": "/workspace"},
+                "details": {"path": str(Path("../escape")), "root": str(Path("/workspace"))},
             },
         ),
         (
@@ -141,9 +141,9 @@ import frame_compare.errors as error_facade
             {
                 "code": "FC-4018",
                 "name": "DOVI_ERROR",
-                "message": "Dolby Vision error for /media/dv.mkv: missing RPU",
+                "message": f"Dolby Vision error for {Path('/media/dv.mkv')}: missing RPU",
                 "hint": "Check RPU validity or dovi_tool version",
-                "details": {"path": "/media/dv.mkv", "reason": "missing RPU"},
+                "details": {"path": str(Path("/media/dv.mkv")), "reason": "missing RPU"},
             },
         ),
         (
@@ -242,7 +242,7 @@ def test_error_formatting_helpers_are_exported_and_json_safe() -> None:
         {
             "loc": ["analysis", "frame_count"],
             "msg": "bad input",
-            "ctx": {"limit": 100, "path": "/config.toml"},
+            "ctx": {"limit": 100, "path": str(Path("/config.toml"))},
         }
     ]
     assert error_facade.normalize_pydantic_errors(raw_errors) == normalized

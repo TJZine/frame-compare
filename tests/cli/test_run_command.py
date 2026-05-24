@@ -189,11 +189,11 @@ def test_handle_diagnose_paths_outputs_pinned_json(capsys: pytest.CaptureFixture
     handle_diagnose_paths(Path("/workspace"), Path("/workspace/config/config.toml"), config)
 
     assert json.loads(capsys.readouterr().out) == {
-        "cache": "/workspace/cache",
-        "config": "/workspace/config/config.toml",
-        "input": "/workspace/inputs",
-        "output": "/workspace/shots",
-        "root": "/workspace",
+        "cache": str((Path("/workspace") / "cache").resolve()),
+        "config": str(Path("/workspace/config/config.toml")),
+        "input": str((Path("/workspace") / "inputs").resolve()),
+        "output": str((Path("/workspace") / "shots").resolve()),
+        "root": str(Path("/workspace")),
     }
 
 

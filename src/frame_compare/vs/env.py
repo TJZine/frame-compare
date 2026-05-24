@@ -122,11 +122,12 @@ def candidate_lsmas_plugin_paths() -> list[str]:
     seen: set[str] = set()
     unique_candidates: list[str] = []
     for candidate in candidates:
-        normalized = os.path.normcase(os.path.abspath(os.path.normpath(candidate)))
+        absolute = os.path.abspath(os.path.normpath(candidate))
+        normalized = os.path.normcase(absolute)
         if normalized in seen:
             continue
         seen.add(normalized)
-        unique_candidates.append(normalized)
+        unique_candidates.append(absolute)
     return unique_candidates
 
 
