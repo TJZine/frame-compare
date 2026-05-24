@@ -4,10 +4,16 @@ from pathlib import Path
 import typer
 from pytest import MonkeyPatch
 
+from frame_compare.cli.cli_helpers import prepare_toml_payload
 from frame_compare.cli.entry import app
 from frame_compare.cli.errors import ExitCode
+from frame_compare.cli.wizard_command import write_wizard_config_payload
 
 from .cli_helpers import runner
+
+
+def _write_text(path: Path, content: str, *, encoding: str = "utf-8") -> None:
+    path.write_text(content, encoding=encoding)
 
 
 def _run_wizard_and_assert_config() -> None:
@@ -76,8 +82,6 @@ def test_wizard_writes_valid_config_toml():
 
 
 def test_wizard_writer_writes_to_explicit_config_path(tmp_path: Path) -> None:
-    from frame_compare.cli.entry import _write_wizard_config_payload
-
     destination = tmp_path / "custom" / "config.toml"
     payload: dict[str, object] = {
         "paths": {"input_dir": "comparison_videos"},
@@ -85,7 +89,7 @@ def test_wizard_writer_writes_to_explicit_config_path(tmp_path: Path) -> None:
         "tmdb": {"api_key": None},
     }
 
-    _write_wizard_config_payload(destination, payload)
+    write_wizard_config_payload(destination, payload, text_writer=_write_text)
 
     assert destination.exists()
     text = destination.read_text(encoding="utf-8")
@@ -98,8 +102,6 @@ def test_wizard_writer_writes_to_explicit_config_path(tmp_path: Path) -> None:
 def test_wizard_writer_preserves_unrelated_sections_and_strips_nested_none(
     tmp_path: Path,
 ) -> None:
-    from frame_compare.cli.entry import _write_wizard_config_payload
-
     destination = tmp_path / "custom" / "config.toml"
     payload: dict[str, object] = {
         "paths": {"input_dir": "comparison_videos"},
@@ -108,7 +110,7 @@ def test_wizard_writer_preserves_unrelated_sections_and_strips_nested_none(
         "tmdb": {"api_key": "", "enabled": True, "timeout_seconds": None},
     }
 
-    _write_wizard_config_payload(destination, payload)
+    write_wizard_config_payload(destination, payload, text_writer=_write_text)
 
     data = tomllib.loads(destination.read_text(encoding="utf-8"))
     assert data["report"] == {"auto_open": False}
@@ -117,8 +119,6 @@ def test_wizard_writer_preserves_unrelated_sections_and_strips_nested_none(
 
 
 def test_wizard_writer_omits_unsupported_preserved_values(tmp_path: Path) -> None:
-    from frame_compare.cli.entry import _write_wizard_config_payload
-
     destination = tmp_path / "custom" / "config.toml"
     unsupported = object()
     payload: dict[str, object] = {
@@ -132,7 +132,7 @@ def test_wizard_writer_omits_unsupported_preserved_values(tmp_path: Path) -> Non
         "top_level_unsupported": unsupported,
     }
 
-    _write_wizard_config_payload(destination, payload)
+    write_wizard_config_payload(destination, payload, text_writer=_write_text)
 
     data = tomllib.loads(destination.read_text(encoding="utf-8"))
     assert "top_level_unsupported" not in data
@@ -258,8 +258,6 @@ def test_wizard_root_reprompts_on_missing_input_dir() -> None:
 
 
 def test_prepare_toml_payload_preserves_sections_strips_none_and_copies() -> None:
-    from frame_compare.cli.entry import _prepare_toml_payload
-
     paths = {"input_dir": "inputs"}
     slowpics = {"auto_upload": True}
     report = {"output_dir": None, "auto_open": True}
@@ -271,7 +269,7 @@ def test_prepare_toml_payload_preserves_sections_strips_none_and_copies() -> Non
         "tmdb": {"api_key": ""},
     }
 
-    prepared = _prepare_toml_payload(payload)
+    prepared = prepare_toml_payload(payload)
     assert prepared["paths"] == paths
     assert prepared["slowpics"] == slowpics
     assert prepared["report"] == {"auto_open": True}
@@ -282,8 +280,6 @@ def test_prepare_toml_payload_preserves_sections_strips_none_and_copies() -> Non
 
 
 def test_prepare_toml_payload_omits_tmdb_when_api_key_is_none() -> None:
-    from frame_compare.cli.entry import _prepare_toml_payload
-
-    prepared = _prepare_toml_payload({"tmdb": {"api_key": None}})
+    prepared = prepare_toml_payload({"tmdb": {"api_key": None}})
 
     assert "tmdb" not in prepared
