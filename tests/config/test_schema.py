@@ -1,5 +1,7 @@
 """Tests for configuration schema validation."""
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -11,6 +13,17 @@ from frame_compare.config.schema import (
     ReportConfig,
     SelectionMode,
 )
+from frame_compare.config.schema_enums import LogFormat, LogLevel, OverlayMode, Visibility
+from frame_compare.config.schema_models import (
+    AudioAlignmentConfig,
+    DiagnosticsConfig,
+    LoggingConfig,
+    PathsConfig,
+    ScreenshotsConfig,
+    SlowpicsConfig,
+    TmdbConfig,
+)
+from frame_compare.config.schema_sources import TomlConfigSettingsSourceNoBOM
 
 
 def test_default_config_values() -> None:
@@ -86,3 +99,87 @@ def test_nested_model_defaults() -> None:
     assert config.paths.input_dir == "comparison_videos"
     assert config.analysis.random_seed == 42
     assert config.color.enable_tonemap is True
+
+
+def test_schema_model_section_defaults_are_representative() -> None:
+    """Extracted section models keep the documented runtime defaults."""
+    paths = PathsConfig()
+    analysis = AnalysisConfig()
+    audio = AudioAlignmentConfig()
+    screenshots = ScreenshotsConfig()
+    color = ColorConfig()
+    slowpics = SlowpicsConfig()
+    tmdb = TmdbConfig()
+    report = ReportConfig()
+    dovi = DoviConfig()
+    diagnostics = DiagnosticsConfig()
+    logging = LoggingConfig()
+
+    assert paths.model_dump() == {
+        "input_dir": "comparison_videos",
+        "screenshots_dir": "screenshots",
+        "generated_dir": "generated",
+        "config_dir": "config",
+        "use_run_folders": True,
+    }
+    assert analysis.frame_count == 10
+    assert analysis.selection_mode == SelectionMode.MIXED
+    assert analysis.dark_quantile == 0.05
+    assert analysis.bright_quantile == 0.95
+    assert audio.sample_rate == 8000
+    assert audio.max_offset_seconds == 30.0
+    assert audio.force_interactive is False
+    assert screenshots.overlay_mode == OverlayMode.STANDARD
+    assert screenshots.png_compression == 6
+    assert screenshots.ffmpeg_timeout_seconds == 30.0
+    assert color.target_nits == 203
+    assert color.preset == "reference"
+    assert slowpics.visibility == Visibility.UNLISTED
+    assert slowpics.max_retries == 3
+    assert tmdb.enabled is True
+    assert tmdb.api_key is None
+    assert tmdb.timeout_seconds == 10.0
+    assert report.default_mode == "slider"
+    assert report.embed_images is False
+    assert dovi.dovi_tool_path is None
+    assert dovi.cache_results is True
+    assert diagnostics.model_dump() == {
+        "per_frame_nits": False,
+        "show_hdr_info": False,
+        "frame_timing": False,
+    }
+    assert logging.level == LogLevel.INFO
+    assert logging.format == LogFormat.CONSOLE
+    assert logging.file is None
+
+
+def test_schema_model_enums_accept_config_strings_and_reject_unknown_values() -> None:
+    screenshots = ScreenshotsConfig.model_validate({"overlay_mode": "minimal"})
+    slowpics = SlowpicsConfig.model_validate({"visibility": "public"})
+    logging = LoggingConfig.model_validate({"level": "DEBUG", "format": "json"})
+
+    assert screenshots.overlay_mode == OverlayMode.MINIMAL
+    assert slowpics.visibility == Visibility.PUBLIC
+    assert logging.level == LogLevel.DEBUG
+    assert logging.format == LogFormat.JSON
+
+    with pytest.raises(ValidationError):
+        ScreenshotsConfig.model_validate({"overlay_mode": "verbose"})
+
+    with pytest.raises(ValidationError):
+        LoggingConfig.model_validate({"level": "debug"})
+
+
+def test_toml_settings_source_accepts_utf8_bom_directly(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.toml"
+    config_file.write_bytes(
+        b'\xef\xbb\xbf[analysis]\nframe_count = 24\n[logging]\nlevel = "DEBUG"\n'
+    )
+    source = TomlConfigSettingsSourceNoBOM(get_default_config().__class__)
+
+    data = source._read_file(config_file)
+
+    assert data == {
+        "analysis": {"frame_count": 24},
+        "logging": {"level": "DEBUG"},
+    }

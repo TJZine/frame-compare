@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
-from subprocess import CalledProcessError, TimeoutExpired
+from subprocess import CalledProcessError, TimeoutExpired  # nosec B404
 from typing import Protocol, cast
 
 from frame_compare.render.backend._ffmpeg_frame import (

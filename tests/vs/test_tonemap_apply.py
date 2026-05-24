@@ -1,31 +1,14 @@
 """Tests for tonemapping module."""
 
-import importlib.util
 from unittest.mock import MagicMock, patch
 
 import pytest
 import vapoursynth as vs  # noqa: E402, I001
 
-import frame_compare.vs.tonemap as tonemap_module  # noqa: E402, I001
 from frame_compare.config.schema import ToneCurve  # noqa: E402, I001
 from frame_compare.vs.errors import TonemapError  # noqa: E402, I001
 from frame_compare.vs.tonemap import apply_tonemap  # noqa: E402, I001
 from frame_compare.vs.types import HDRMetadata, TonemapSettings  # noqa: E402, I001
-
-
-def _vs_spec_available() -> bool:
-    try:
-        return importlib.util.find_spec("vapoursynth") is not None
-    except ValueError:
-        return False
-
-
-def _reset_libplacebo_runtime_state(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        tonemap_module,
-        "_LIBPLACEBO_RUNTIME_STATE",
-        tonemap_module._LibplaceboRuntimeState(),
-    )
 
 
 @patch("frame_compare.vs.tonemap_fallback.detect_hdr")
@@ -126,6 +109,7 @@ def test_apply_tonemap_unsupported_tone_curve_raises_error(mock_runtime_usable, 
 
     mock_runtime_usable.assert_called_once_with()
     assert exc.value.context.code == "FC-4003"
+    assert exc.value.context.hint is not None
     assert "bt2390, spline, reinhard" in exc.value.context.hint
 
 

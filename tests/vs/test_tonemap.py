@@ -1,31 +1,14 @@
 """Tests for tonemapping module."""
 
-import importlib.util
 from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
 
-import frame_compare.vs.tonemap as tonemap_module  # noqa: E402, I001
 from frame_compare.config.schema import ToneCurve, TonemapPreset  # noqa: E402, I001
 from frame_compare.vs.errors import TonemapError  # noqa: E402, I001
 from frame_compare.vs.tonemap import apply_tonemap, get_preset_settings  # noqa: E402, I001
 from frame_compare.vs.types import TonemapSettings  # noqa: E402, I001
-
-
-def _vs_spec_available() -> bool:
-    try:
-        return importlib.util.find_spec("vapoursynth") is not None
-    except ValueError:
-        return False
-
-
-def _reset_libplacebo_runtime_state(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        tonemap_module,
-        "_LIBPLACEBO_RUNTIME_STATE",
-        tonemap_module._LibplaceboRuntimeState(),
-    )
 
 
 def test_get_preset_settings_unknown_raises_tonemap_error():
@@ -33,6 +16,7 @@ def test_get_preset_settings_unknown_raises_tonemap_error():
     with pytest.raises(TonemapError) as exc:
         get_preset_settings(cast(TonemapPreset, "invalid"))
     assert exc.value.context.code == "FC-4003"
+    assert exc.value.context.hint is not None
     assert "reference, filmic" in exc.value.context.hint
 
 

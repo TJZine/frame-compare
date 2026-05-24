@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from frame_compare.vs.errors import TonemapError
-from frame_compare.vs.props import detect_hdr
+from frame_compare.vs.props import detect_hdr, get_optional_int_prop
 from frame_compare.vs.types import HDRMetadata, TonemapSettings
 
 if TYPE_CHECKING:
     import vapoursynth as vs
+
+_FRAME_PROP_MATRIX = "_Matrix"
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +66,13 @@ def validate_target_nits(settings: TonemapSettings) -> int:
     return target_nits
 
 
+def _has_matrix_prop(props: Mapping[str, object]) -> bool:
+    """Return whether frame props carry an explicit VapourSynth matrix prop."""
+    return (
+        get_optional_int_prop(props, _FRAME_PROP_MATRIX) is not None or _FRAME_PROP_MATRIX in props
+    )
+
+
 def convert_non_rgb_with_matrix_hint(
     clip: vs.VideoNode,
     *,
@@ -74,9 +84,8 @@ def convert_non_rgb_with_matrix_hint(
     if props is None:
         props = dict(clip.get_frame(0).props)
 
-    matrix_prop = props.get("_Matrix")
     matrix_in_s: str | None = None
-    if matrix_prop is None:
+    if not _has_matrix_prop(props):
         if detected_is_hdr is None:
             detected_is_hdr, _ = detect_hdr(props)
         matrix_in_s = "2020ncl" if detected_is_hdr else "709"

@@ -1,27 +1,10 @@
 """Tests for tonemapping module."""
 
-import importlib.util
 from unittest.mock import MagicMock
 
-import pytest
 import vapoursynth as vs  # noqa: E402, I001
 
 import frame_compare.vs.tonemap as tonemap_module  # noqa: E402, I001
-
-
-def _vs_spec_available() -> bool:
-    try:
-        return importlib.util.find_spec("vapoursynth") is not None
-    except ValueError:
-        return False
-
-
-def _reset_libplacebo_runtime_state(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        tonemap_module,
-        "_LIBPLACEBO_RUNTIME_STATE",
-        tonemap_module._LibplaceboRuntimeState(),
-    )
 
 
 def test_convert_non_rgb_with_matrix_hint_preserves_existing_matrix_prop() -> None:

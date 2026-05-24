@@ -3,10 +3,8 @@
 # ruff: noqa: B008
 from __future__ import annotations
 
-import contextlib
 import os
 import sys
-import webbrowser
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -20,6 +18,9 @@ from frame_compare.cli.cli_helpers import (
     resolve_root_and_config,
     stabilize_typer_help_width,
     write_config_to,
+)
+from frame_compare.cli.cli_helpers import (
+    maybe_open_report as _maybe_open_report,
 )
 from frame_compare.cli.doctor_command import (
     doctor_report_json,
@@ -104,23 +105,6 @@ _handle_diagnose_paths = handle_diagnose_paths
 _handle_json_output = handle_json_output
 _build_minimal_config = build_minimal_config
 _validate_config = validate_config
-
-
-def _maybe_open_report(report_path: Path) -> None:
-    """Best-effort open of a generated HTML report in the default browser."""
-    if os.name == "nt" and hasattr(os, "startfile"):
-        try:
-            os.startfile(str(report_path))  # type: ignore[attr-defined]
-            return
-        except OSError:
-            with contextlib.suppress(OSError, webbrowser.Error):
-                webbrowser.open(report_path.resolve().as_uri())
-            return
-
-    try:
-        webbrowser.open(report_path.resolve().as_uri())
-    except (OSError, webbrowser.Error):
-        return
 
 
 def _write_config_to(path: Path, config: ConfigSchema) -> None:
