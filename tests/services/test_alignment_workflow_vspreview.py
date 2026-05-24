@@ -342,8 +342,15 @@ def test_align_clips_vspreview_errors_raise_when_force_interactive(
     mock_check_availability: MagicMock,
     mock_launch: MagicMock,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Adapter launch failures should fail-fast in force-interactive mode."""
+    import sys
+
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
+
     ref = tmp_path / "ref.mkv"
     comp = tmp_path / "comp.mkv"
     ref.touch()

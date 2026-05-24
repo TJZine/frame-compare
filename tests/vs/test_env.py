@@ -163,9 +163,32 @@ def test_candidate_lsmas_plugin_paths_preserves_order_and_deduplicates(
     result = candidate_lsmas_plugin_paths()
 
     assert result == [
-        str(plugin_dir / "libvslsmashsource.dll"),
-        str(bundle_root / "vs" / "plugins" / "libvslsmashsource.dll"),
+        env_module.os.path.abspath(str(plugin_dir / "libvslsmashsource.dll")),
+        env_module.os.path.abspath(str(bundle_root / "vs" / "plugins" / "libvslsmashsource.dll")),
     ]
+
+
+def test_candidate_lsmas_plugin_paths_normalizes_relative_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    bundle_root = tmp_path / "bundle"
+    python_dir = bundle_root / "python"
+    python_dir.mkdir(parents=True)
+    executable = python_dir / "python.exe"
+    executable.write_text("")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(env_module.sys, "executable", str(executable))
+    monkeypatch.setenv(
+        "VAPOURSYNTH_PLUGIN_PATH",
+        os_pathsep_join(["plugins", str(tmp_path / "plugins" / ".." / "plugins")]),
+    )
+
+    result = candidate_lsmas_plugin_paths()
+
+    assert result[0] == env_module.os.path.abspath("plugins/libvslsmashsource.dll")
+    assert len(result) == 2
 
 
 def os_pathsep_join(parts: list[str]) -> str:
@@ -191,6 +214,34 @@ def test_try_load_lsmas_plugin_loads_first_existing_candidate(
 
     assert try_load_lsmas_plugin(core) == str(second)
     assert load_calls == [str(second)]
+
+
+def test_try_load_lsmas_plugin_continues_after_load_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    first = tmp_path / "first" / "libvslsmashsource.dll"
+    second = tmp_path / "second" / "libvslsmashsource.dll"
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_text("")
+    second.write_text("")
+    load_calls: list[str] = []
+
+    def _load_plugin(*, path: str) -> None:
+        load_calls.append(path)
+        if path == str(first):
+            raise RuntimeError("bad plugin")
+
+    core = SimpleNamespace(std=SimpleNamespace(LoadPlugin=_load_plugin))
+    monkeypatch.setattr(
+        env_module,
+        "candidate_lsmas_plugin_paths",
+        lambda: [str(first), str(second)],
+    )
+
+    assert try_load_lsmas_plugin(core) == str(second)
+    assert load_calls == [str(first), str(second)]
 
 
 def test_detect_plugins_all_present() -> None:

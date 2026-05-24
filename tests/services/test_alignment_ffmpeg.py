@@ -148,3 +148,11 @@ def test_extract_audio_empty_raises(mock_run: MagicMock):
         ],
         timeout_seconds=120.0,
     )
+
+
+@patch("frame_compare.services.alignment_audio.run_subprocess")
+def test_extract_audio_invalid_float32_payload_raises(mock_run: MagicMock) -> None:
+    mock_run.return_value.stdout = b"abc"
+
+    with pytest.raises(AudioAlignmentError, match="test.mkv.*3 bytes"):
+        _extract_audio(Path("test.mkv"), 8000)

@@ -16,6 +16,7 @@ from frame_compare.analysis.types import (
     FrameMetrics,
     MetricsMetadata,
 )
+from frame_compare.utils.atomic_write import write_text_atomic
 
 if TYPE_CHECKING:
     from frame_compare.config.schema import AnalysisConfig
@@ -224,5 +225,4 @@ def save_metrics_cache(metrics: FrameMetrics, cache_dir: Path) -> None:
         },
     }
 
-    with cache_path.open("w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+    write_text_atomic(cache_path, json.dumps(data, indent=2), encoding="utf-8")

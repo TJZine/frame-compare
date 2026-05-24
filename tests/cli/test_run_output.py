@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from _pytest.monkeypatch import MonkeyPatch
+from pytest import MonkeyPatch
 
 from frame_compare.cli.entry import app
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult

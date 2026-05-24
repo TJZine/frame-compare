@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from fractions import Fraction
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import numpy as np
 import pytest
@@ -293,9 +293,9 @@ def test_calculate_metrics_cache_save_is_best_effort(
     assert isinstance(result, FrameMetrics)
     assert len(result.luminance) == 10
     assert len(result.motion) == 10
-    reporter.start_phase.assert_called_with("Saving analysis cache", total=1)
-    reporter.complete_phase.assert_called_once()
-    assert reporter.advance.call_count >= 1
+    reporter.start_phase.assert_not_called()
+    reporter.complete_phase.assert_not_called()
+    assert reporter.advance.call_args_list == [call(1), call(1)]
     reporter.set_description.assert_called()
 
 

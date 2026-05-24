@@ -131,9 +131,10 @@ def save_offsets_cache(
         try:
             with cache_path.open("rb") as f:
                 existing_data = cast(dict[str, object], tomllib.load(f))
-            _normalize_legacy_cache_entries(existing_data)
-            existing_data.pop("version", None)
-            data.update(existing_data)
+            if existing_data.get("version") == CACHE_VERSION:
+                _normalize_legacy_cache_entries(existing_data)
+                existing_data.pop("version", None)
+                data.update(existing_data)
         except (tomllib.TOMLDecodeError, OSError, KeyError, TypeError, ValueError) as exc:
             log.warning(
                 "audio_offsets_cache_corrupt_on_write",

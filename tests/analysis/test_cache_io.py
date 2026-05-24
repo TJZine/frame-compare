@@ -259,6 +259,32 @@ def test_save_writes_required_keys(tmp_path: Path) -> None:
     assert data["metadata"]["fps"] == "24000/1001"
 
 
+def test_save_metrics_cache_uses_atomic_text_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    metadata = MetricsMetadata(
+        frame_count=10,
+        fps=Fraction(24, 1),
+        config_fingerprint="fp",
+        clips=[],
+    )
+    metrics = FrameMetrics(luminance=[0.5], motion=[0.1], metadata=metadata)
+    calls: list[tuple[Path, str, str]] = []
+
+    def _fake_write(path: Path, content: str, *, encoding: str = "utf-8") -> None:
+        calls.append((path, content, encoding))
+        path.write_text(content, encoding=encoding)
+
+    monkeypatch.setattr("frame_compare.analysis.cache_io.write_text_atomic", _fake_write)
+
+    save_metrics_cache(metrics, tmp_path)
+
+    assert calls
+    assert calls[0][0] == tmp_path / "cache.compframes"
+    assert calls[0][2] == "utf-8"
+    assert json.loads(calls[0][1])["fingerprint"] == "fp"
+
+
 def test_load_missing_key_returns_corrupted(tmp_path: Path) -> None:
     """Missing luminance key → reason="corrupted"."""
     cache_file = tmp_path / "cache.compframes"

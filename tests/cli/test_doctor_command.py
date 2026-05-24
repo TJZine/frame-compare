@@ -1,6 +1,6 @@
 import json
 
-from _pytest.monkeypatch import MonkeyPatch
+from pytest import MonkeyPatch
 
 from frame_compare.cli.entry import app
 from frame_compare.orchestration.doctor import CheckResult, DoctorCheck, DoctorReport

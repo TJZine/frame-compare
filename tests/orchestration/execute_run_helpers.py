@@ -60,7 +60,7 @@ def create_config(tmp_path: Path, content: str = MINIMAL_CONFIG) -> Path:
     config_dir = tmp_path / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
     config_file = config_dir / "config.toml"
-    config_file.write_text(content)
+    config_file.write_text(content, encoding="utf-8")
     return config_file
 
 

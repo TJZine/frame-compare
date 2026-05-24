@@ -88,6 +88,36 @@ def test_load_clip_probe_cache_ignores_unknown_fields_and_skips_invalid_entries(
     assert warning.call_args.kwargs["key"] == "invalid_key"
 
 
+def test_load_clip_probe_cache_skips_entry_with_zero_fps_denominator(tmp_path: Path) -> None:
+    f = tmp_path / "zero_fps_den.toml"
+    f.write_text(
+        """
+version = "1"
+
+[bad_key]
+path = "video.mkv"
+size_bytes = 100
+mtime_ns = 100
+width = 1920
+height = 1080
+num_frames = 100
+fps_num = 24
+fps_den = 0
+is_hdr = false
+""",
+        encoding="utf-8",
+    )
+
+    with patch("frame_compare.orchestration.probing.probe_cache.log.warning") as warning:
+        cache = load_clip_probe_cache(f)
+
+    assert cache == {}
+    warning.assert_called_once()
+    assert warning.call_args.args[0] == "probe_cache_invalid_entry"
+    assert warning.call_args.kwargs["key"] == "bad_key"
+    assert "fps_den must be non-zero" in warning.call_args.kwargs["error"]
+
+
 def test_load_clip_probe_cache_skips_entry_with_non_table_preserved_frame_props(tmp_path: Path):
     """Malformed preserved props containers still trigger warn-and-skip handling."""
     f = tmp_path / "invalid_props_shape.toml"

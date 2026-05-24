@@ -2,7 +2,7 @@ import tomllib
 from pathlib import Path
 
 import typer
-from _pytest.monkeypatch import MonkeyPatch
+from pytest import MonkeyPatch
 
 from frame_compare.cli.entry import app
 from frame_compare.cli.errors import ExitCode
@@ -34,21 +34,26 @@ def _run_wizard_and_assert_config() -> None:
         assert data["tmdb"]["api_key"] == "abc123"
 
 
-def test_wizard_writer_uses_atomic_write(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
-    from frame_compare.cli.entry import _write_wizard_config_payload
+def test_wizard_writes_explicit_config_path_via_public_cli() -> None:
+    with runner.isolated_filesystem():
+        root = Path("workspace")
+        (root / "inputs").mkdir(parents=True)
+        config_path = root / "custom" / "config.toml"
 
-    calls: list[Path] = []
+        result = runner.invoke(
+            app,
+            ["wizard", "--root", str(root), "--config", "custom/config.toml"],
+            input="inputs\ny\npublic\ny\nabc123\n",
+        )
 
-    def _fake_write(path: Path, content: str, *, encoding: str = "utf-8") -> None:
-        calls.append(path)
-        path.write_text(content, encoding=encoding)
-
-    monkeypatch.setattr("frame_compare.cli.entry.write_text_atomic", _fake_write)
-
-    destination = tmp_path / "config" / "config.toml"
-    _write_wizard_config_payload(destination, {"paths": {}, "slowpics": {}})
-
-    assert calls == [destination]
+        assert result.exit_code == 0
+        assert config_path.exists()
+        data = tomllib.loads(config_path.read_text(encoding="utf-8"))
+        assert data["paths"]["input_dir"] == "inputs"
+        assert data["slowpics"]["auto_upload"] is True
+        assert data["slowpics"]["visibility"] == "public"
+        assert data["slowpics"]["delete_after_upload"] is True
+        assert data["tmdb"]["api_key"] == "abc123"
 
 
 def test_wizard_defaults_slowpics_upload_to_disabled() -> None:

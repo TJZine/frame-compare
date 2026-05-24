@@ -6,8 +6,9 @@ from datetime import datetime
 from pathlib import Path
 
 from frame_compare.config.schema import ConfigSchema, OverlayMode, TonemapPreset
+from frame_compare.orchestration.context import RunContext
 from frame_compare.orchestration.coordinator import RunDependencies, RunRequest
-from frame_compare.orchestration.execution import build_execution_phase_plan
+from frame_compare.orchestration.execution import _apply_phase_output, build_execution_phase_plan
 from frame_compare.orchestration.types import (
     ExecutionState,
     MetadataPrefetch,
@@ -96,3 +97,58 @@ def test_run_request_cli_config_overrides_capture_runtime_override_contract(tmp_
     assert overrides.overlay_mode == OverlayMode.DIAGNOSTIC
     assert overrides.no_upload is True
     assert overrides.force_interactive_alignment is True
+
+
+def test_apply_phase_output_handles_report_output_explicitly(tmp_path: Path) -> None:
+    from frame_compare.orchestration.types import ReportPhaseOutput
+
+    workspace = WorkspacePaths(
+        root=tmp_path,
+        input_dir=tmp_path / "comparison_videos",
+        run_dir=None,
+        screenshots_dir=tmp_path / "screenshots",
+        generated_dir=tmp_path / "generated",
+        config_dir=tmp_path / "config",
+        config_file=tmp_path / "config" / "config.toml",
+    )
+    reference = clip_state(tmp_path / "ref.mkv", label="Reference")
+    ctx = RunContext(
+        config=ConfigSchema(),
+        workspace=workspace,
+        reference=reference,
+        comparisons=[],
+    )
+    state = ExecutionState(artifacts=RunArtifacts())
+    report_path = tmp_path / "report.html"
+
+    _apply_phase_output(ctx=ctx, state=state, output=ReportPhaseOutput(report_path=report_path))
+
+    assert state.artifacts.report_path == report_path
+
+
+def test_apply_phase_output_rejects_unknown_output_type(tmp_path: Path) -> None:
+    import pytest
+
+    class UnknownPhaseOutput:
+        pass
+
+    workspace = WorkspacePaths(
+        root=tmp_path,
+        input_dir=tmp_path / "comparison_videos",
+        run_dir=None,
+        screenshots_dir=tmp_path / "screenshots",
+        generated_dir=tmp_path / "generated",
+        config_dir=tmp_path / "config",
+        config_file=tmp_path / "config" / "config.toml",
+    )
+    reference = clip_state(tmp_path / "ref.mkv", label="Reference")
+    ctx = RunContext(
+        config=ConfigSchema(),
+        workspace=workspace,
+        reference=reference,
+        comparisons=[],
+    )
+    state = ExecutionState(artifacts=RunArtifacts())
+
+    with pytest.raises(TypeError, match="UnknownPhaseOutput"):
+        _apply_phase_output(ctx=ctx, state=state, output=UnknownPhaseOutput())  # type: ignore[arg-type]

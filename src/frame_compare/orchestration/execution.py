@@ -98,7 +98,7 @@ def _create_timed_phase(
     )
 
 
-def _apply_phase_output(*, ctx: RunContext, state: ExecutionState, output: PhaseOutput) -> None:
+def _apply_phase_output(*, ctx: RunContext, state: ExecutionState, output: object) -> None:
     if isinstance(output, FramePlanPhaseOutput):
         state.selected_frames[:] = output.selected_frames
     elif isinstance(output, AnalyzePhaseOutput):
@@ -117,8 +117,10 @@ def _apply_phase_output(*, ctx: RunContext, state: ExecutionState, output: Phase
         state.warnings.append(output.warning)
     elif isinstance(output, PublishPhaseOutput):
         state.artifacts.slowpics_url = output.slowpics_url
-    else:
+    elif isinstance(output, ReportPhaseOutput):
         state.artifacts.report_path = output.report_path
+    else:
+        raise TypeError(f"Unsupported phase output type: {output.__class__.__qualname__}")
 
 
 def build_phases_before_align(

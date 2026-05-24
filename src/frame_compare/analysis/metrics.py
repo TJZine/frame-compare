@@ -125,18 +125,12 @@ def _save_metrics_cache_best_effort(
     cache_dir: Path,
     reporter: ProgressReporter | None,
 ) -> None:
-    if reporter:
-        reporter.start_phase("Saving analysis cache", total=1)
     try:
         save_metrics_cache(metrics, cache_dir)
     except Exception as e:
         if reporter:
             reporter.set_description(f"Cache save failed: {e}")
         log.warning("analysis_cache_save_failed", error=str(e), exc_info=True)
-    finally:
-        if reporter:
-            reporter.advance(1)
-            reporter.complete_phase()
 
 
 def calculate_metrics(

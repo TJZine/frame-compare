@@ -216,6 +216,7 @@ async def test_publish_to_slowpics_http_date_retry_after_sleeps_until_date(
     result = await publish_to_slowpics(screenshot_dir, config, async_client)
 
     assert result.url == "https://slow.pics/c/abc123"
+    mock_sleep.assert_awaited_once()
     delay = mock_sleep.await_args.args[0]
     assert isinstance(delay, float)
     assert 0.0 < delay <= 120.0

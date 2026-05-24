@@ -1,7 +1,8 @@
 """TMDB metadata lookup service."""
 
 import re
-from typing import Any, cast
+from collections.abc import Mapping
+from typing import cast
 
 import httpx
 
@@ -49,8 +50,8 @@ def _raise_for_tmdb_response(response: httpx.Response) -> None:
     response.raise_for_status()
 
 
-def _decode_tmdb_json(response: httpx.Response) -> dict[str, Any]:
-    return cast(dict[str, Any], response.json())
+def _decode_tmdb_json(response: httpx.Response) -> object:
+    return response.json()
 
 
 def _tmdb_image_url(path: str | None) -> str | None:
@@ -59,16 +60,22 @@ def _tmdb_image_url(path: str | None) -> str | None:
     return f"{TMDB_IMAGE_ORIGINAL_BASE_URL}{path}"
 
 
-def _tmdb_result_year(item: dict[str, Any], media_type: str) -> int:
+def _optional_str(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _tmdb_result_year(item: Mapping[str, object], media_type: str) -> int:
     if media_type == "movie":
-        year_str = str(item.get("release_date", ""))[:4]
+        date_value = _optional_str(item.get("release_date"))
     else:
-        year_str = str(item.get("first_air_date", ""))[:4]
+        date_value = _optional_str(item.get("first_air_date"))
+
+    year_str = "" if date_value is None else date_value[:4]
 
     return int(year_str) if year_str.isdigit() else 0
 
 
-def _map_tmdb_result(item: dict[str, Any]) -> TmdbMetadata | None:
+def _map_tmdb_result(item: Mapping[str, object]) -> TmdbMetadata | None:
     media_type_raw = item.get("media_type", "movie")
     if media_type_raw == "movie":
         media_type = "movie"
@@ -77,23 +84,49 @@ def _map_tmdb_result(item: dict[str, Any]) -> TmdbMetadata | None:
     else:
         return None
 
+    tmdb_id_raw = item.get("id")
+    if isinstance(tmdb_id_raw, bool):
+        return None
+    if isinstance(tmdb_id_raw, int):
+        tmdb_id = tmdb_id_raw
+    elif isinstance(tmdb_id_raw, str) and tmdb_id_raw.isdigit():
+        tmdb_id = int(tmdb_id_raw)
+    else:
+        return None
+
+    title = _optional_str(item.get("title")) or _optional_str(item.get("name")) or "Unknown"
+    original_title = (
+        _optional_str(item.get("original_title"))
+        or _optional_str(item.get("original_name"))
+        or "Unknown"
+    )
+
     return TmdbMetadata(
-        tmdb_id=int(item["id"]),
-        title=str(item.get("title") or item.get("name", "Unknown")),
-        original_title=str(item.get("original_title") or item.get("original_name", "Unknown")),
+        tmdb_id=tmdb_id,
+        title=title,
+        original_title=original_title,
         year=_tmdb_result_year(item, media_type),
         media_type=media_type,
-        poster_url=_tmdb_image_url(cast(str | None, item.get("poster_path"))),
-        backdrop_url=_tmdb_image_url(cast(str | None, item.get("backdrop_path"))),
+        poster_url=_tmdb_image_url(_optional_str(item.get("poster_path"))),
+        backdrop_url=_tmdb_image_url(_optional_str(item.get("backdrop_path"))),
     )
 
 
-def _map_tmdb_results(data: dict[str, Any]) -> list[TmdbMetadata]:
-    results_raw = cast(list[dict[str, Any]], data.get("results", []))
+def _map_tmdb_results(data: object) -> list[TmdbMetadata]:
+    if not isinstance(data, dict):
+        raise TmdbError("Malformed TMDB response")
+
+    data_dict = cast(dict[str, object], data)
+    results_raw = data_dict.get("results", [])
+    if not isinstance(results_raw, list):
+        raise TmdbError("Malformed TMDB response")
+
     mapped_results: list[TmdbMetadata] = []
 
-    for item in results_raw:
-        result = _map_tmdb_result(item)
+    for item in cast(list[object], results_raw):
+        if not isinstance(item, dict):
+            continue
+        result = _map_tmdb_result(cast(dict[str, object], item))
         if result is not None:
             mapped_results.append(result)
 
@@ -123,6 +156,7 @@ async def _search_tmdb(
         response = await _request_tmdb_search(params, config, client)
         _raise_for_tmdb_response(response)
         data = _decode_tmdb_json(response)
+        return _map_tmdb_results(data)
     except httpx.TimeoutException as e:
         raise TmdbError("Request timed out") from e
     except httpx.RequestError as e:
@@ -135,8 +169,6 @@ async def _search_tmdb(
             raise
         # Avoid leaking request details (e.g., query params) via exception stringification.
         raise TmdbError("Unexpected error during TMDB lookup") from e
-
-    return _map_tmdb_results(data)
 
 
 search_tmdb = _search_tmdb

@@ -124,3 +124,112 @@ async def test_tmdb_lookup_direct_module_classifies_rate_limit_and_timeout() -> 
 def test_tmdb_lookup_direct_module_validates_api_key_shape() -> None:
     assert tmdb_lookup.is_valid_tmdb_api_key("0123456789abcdefABCDEF0123456789")
     assert not tmdb_lookup.is_valid_tmdb_api_key("g" * 32)
+
+
+@pytest.mark.anyio
+async def test_tmdb_lookup_skips_malformed_result_items() -> None:
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                json={
+                    "results": [
+                        "not-a-dict",
+                        {"id": "bad", "title": "Bad", "media_type": "movie"},
+                        {"id": 42.9, "title": "Float ID", "media_type": "movie"},
+                        {"id": 1, "title": "Person", "media_type": "person"},
+                        {
+                            "id": "42",
+                            "name": "Valid Show",
+                            "original_name": "Valid Show Original",
+                            "first_air_date": 2020,
+                            "media_type": "tv",
+                            "poster_path": 123,
+                        },
+                    ]
+                },
+            )
+        )
+    ) as client:
+        result = await tmdb_lookup.lookup_tmdb(
+            ParsedMetadata(title="Valid Show"),
+            MetadataConfig(api_key="a" * 32),
+            client,
+        )
+
+    assert result == TmdbMetadata(
+        tmdb_id=42,
+        title="Valid Show",
+        original_title="Valid Show Original",
+        year=0,
+        media_type="tv",
+        poster_url=None,
+        backdrop_url=None,
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("payload", [[], {"results": {}}, {"results": "not-a-list"}])
+async def test_tmdb_lookup_malformed_top_level_payload_raises_domain_error(
+    payload: object,
+) -> None:
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json=payload))
+    ) as client:
+        with pytest.raises(TmdbError) as excinfo:
+            await tmdb_lookup.lookup_tmdb(
+                ParsedMetadata(title="No Results"),
+                MetadataConfig(api_key="a" * 32),
+                client,
+            )
+
+    assert excinfo.value.context.details == {"reason": "Malformed TMDB response"}
+
+
+@pytest.mark.anyio
+async def test_tmdb_lookup_skips_float_id_without_truncating_to_int() -> None:
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {"id": 42.9, "title": "Float ID", "media_type": "movie"},
+                        {"id": 43, "title": "Integer ID", "media_type": "movie"},
+                    ]
+                },
+            )
+        )
+    ) as client:
+        result = await tmdb_lookup.lookup_tmdb(
+            ParsedMetadata(title="Integer ID"),
+            MetadataConfig(api_key="a" * 32),
+            client,
+        )
+
+    assert result is not None
+    assert result.tmdb_id == 43
+    assert result.title == "Integer ID"
+
+
+@pytest.mark.anyio
+async def test_tmdb_lookup_wraps_unexpected_mapping_errors_without_leaking_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _raise_mapping_error(_data: object) -> list[TmdbMetadata]:
+        raise RuntimeError(f"leaked-key={'a' * 32}")
+
+    monkeypatch.setattr(tmdb_lookup, "_map_tmdb_results", _raise_mapping_error)
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json={"results": []}))
+    ) as client:
+        with pytest.raises(TmdbError) as excinfo:
+            await tmdb_lookup.lookup_tmdb(
+                ParsedMetadata(title="Arrival"),
+                MetadataConfig(api_key="a" * 32),
+                client,
+            )
+
+    assert excinfo.value.context.details == {"reason": "Unexpected error during TMDB lookup"}
+    assert "a" * 32 not in excinfo.value.context.message

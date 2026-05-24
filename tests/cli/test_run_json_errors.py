@@ -1,15 +1,14 @@
 import json
 from pathlib import Path
 
-from _pytest.monkeypatch import MonkeyPatch
+from pytest import MonkeyPatch
 
-from frame_compare.cli.entry import app
 from frame_compare.cli.errors import ExitCode, format_error_json, get_exit_code
 from frame_compare.config.errors import ConfigNotFoundError
 from frame_compare.errors import ErrorContext, FrameCompareError
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
 
-from .cli_helpers import _invoke_run_with_minimal_workspace, runner
+from .cli_helpers import _invoke_run_with_minimal_workspace
 
 
 def test_run_write_config_json_write_error_outputs_error_schema(
@@ -51,7 +50,7 @@ def test_run_json_outputs_pinned_success_schema_and_stdout_is_pure_json(
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
-    result = runner.invoke(app, ["run", "--json"])
+    result = _invoke_run_with_minimal_workspace(["--json"])
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload == {
@@ -75,7 +74,7 @@ def test_run_json_outputs_error_schema_and_exit_code(
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
-    result = runner.invoke(app, ["run", "--json"])
+    result = _invoke_run_with_minimal_workspace(["--json"])
     assert result.exit_code == int(get_exit_code(ConfigNotFoundError(Path("missing.toml"))))
     payload = json.loads(result.stdout)
     expected = format_error_json(ConfigNotFoundError(Path("missing.toml")))
@@ -94,7 +93,7 @@ def test_run_exit_code_maps_by_error_category_prefix_in_json_mode(
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
 
-    result = runner.invoke(app, ["run", "--json"])
+    result = _invoke_run_with_minimal_workspace(["--json"])
     assert result.exit_code == int(ExitCode.INPUT_ERROR)
     payload = json.loads(result.stdout)
     assert payload == format_error_json(error)
