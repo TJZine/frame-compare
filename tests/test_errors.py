@@ -300,4 +300,6 @@ def test_format_error_json():
     error = RenderError()
     data = format_error_json(error)
     assert data["success"] is False
-    assert data["error"]["code"] == "FC-4004"
+    payload = data["error"]
+    assert isinstance(payload, dict)
+    assert payload["code"] == "FC-4004"
